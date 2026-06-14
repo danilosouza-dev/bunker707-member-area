@@ -71,7 +71,7 @@ Use `docs/11-inventario-coleta-astron.md` as the detailed UX/functionality refer
 ## Repository Standards
 
 - This workspace uses one private GitHub repository for the member area and CMS.
-- Use `main` as the protected trunk branch.
+- Treat `main` as the trunk branch; enable GitHub branch protection when the account plan allows it.
 - Use Conventional Commits: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, `build`, `perf`, or `revert`.
 - Before opening or merging work, run `npm run verify`.
 - Keep repo workflow rules in `CONTRIBUTING.md` and `docs/13-padroes-engenharia.md`.

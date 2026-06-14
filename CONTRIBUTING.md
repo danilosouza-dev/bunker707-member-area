@@ -10,6 +10,8 @@ Este repositorio privado concentra a area de membros Bunker707 e o CMS. O padrao
 4. Abrir PR usando o template do repositorio.
 5. Atualizar `README.md`, `docs/` ou `AGENTS.md` quando uma regra, decisao ou fluxo mudar.
 
+GitHub branch protection deve ser habilitado para `main` quando o plano da conta permitir. Enquanto isso, trate PR + CI + `npm run verify` como regra operacional obrigatoria.
+
 ## Branches
 
 Use nomes curtos e descritivos:

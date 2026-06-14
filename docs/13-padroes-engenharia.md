@@ -9,6 +9,7 @@ O projeto deve viver em um unico repositorio privado no GitHub, contendo a area 
 - `main` e a branch principal.
 - Mudancas devem entrar por branches curtas e pull requests.
 - A branch `main` deve estar sempre em estado publicavel.
+- GitHub branch protection deve ser habilitado quando o plano da conta permitir; ate la, a protecao fica no processo operacional de PR, CI e verificacao local.
 
 ## Commits
 
