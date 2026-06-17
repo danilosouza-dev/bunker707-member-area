@@ -10,7 +10,8 @@ test("home locked vertical cards use a dark circular overlay with a white lock",
   assert.match(source, /bg-black\/65/);
   assert.match(source, /text-white/);
   assert.match(source, /backdrop-blur-\[2px\]/);
-  assert.match(source, /import \{ Bell, Bookmark, ChevronDown, Lock, Play, ShoppingCart \} from "lucide-react";/);
+  assert.match(source, /import \{ Bell, ChevronDown, Lock, Play, ShoppingCart \} from "lucide-react";/);
+  assert.match(source, /SavedItemButton/);
   assert.match(source, /Lock className="h-\[1\.15rem\] w-\[1\.15rem\] stroke-\[3\.1\]/);
   assert.doesNotMatch(source, /LockKeyhole/);
   assert.doesNotMatch(source, /fill-current stroke-\[2\.75\]/);

@@ -3,16 +3,21 @@
 import { ChevronLeft, ChevronRight, LockKeyhole, Play } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cardActionClassName } from "@/components/card-action-style";
+import { withAccessPreviewParam } from "@/lib/access-preview";
+import { getReleaseRuleNotice } from "@/lib/release-rules";
+import type { AccessPreviewMode } from "@/lib/access-preview";
 import type {
   ContentItem,
   CourseModule,
   FormationCourseOpenMode,
   InternalCardActionMode
-} from "@/lib/mock-data";
+} from "@/lib/platform-types";
 
 type ContentStructureSectionProps = {
+  accessPreviewMode?: AccessPreviewMode;
   formationCourseOpenMode: FormationCourseOpenMode;
   formationCourses: ContentItem[];
   internalCardActionMode: InternalCardActionMode;
@@ -26,6 +31,8 @@ type InternalPosterCardProps = {
   href: string;
   image: string;
   isLocked?: boolean;
+  lockedDetail?: string;
+  lockedTitle?: string;
   meta?: string;
   progress?: number;
   showAction?: boolean;
@@ -50,21 +57,39 @@ function InternalPosterCard({
   href,
   image,
   isLocked,
+  lockedDetail,
+  lockedTitle,
   meta,
   progress = 0,
   showAction = true,
   showProgress = true,
   title
 }: InternalPosterCardProps) {
+  const router = useRouter();
   const imageStateClass = isLocked
     ? "grayscale saturate-0 contrast-110 brightness-75 group-hover:grayscale-0 group-hover:saturate-100 group-hover:contrast-100 group-hover:brightness-100"
     : "";
+
+  function prefetchPosterDestination() {
+    if (!isLocked) {
+      router.prefetch(href);
+    }
+  }
 
   return (
     <Link
       aria-label={`Abrir ${title}`}
       className="home-cover-card internal-poster-card group relative aspect-[1000/1618] w-[11rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[13.75rem] md:w-[15.5rem] lg:w-[18.75rem] 2xl:w-[20rem]"
       href={href}
+      onClick={(event) => {
+        if (isLocked) {
+          event.preventDefault();
+        }
+      }}
+      onFocus={prefetchPosterDestination}
+      onMouseEnter={prefetchPosterDestination}
+      onTouchStart={prefetchPosterDestination}
+      prefetch
     >
       <div className="home-cover-card-surface absolute inset-0 z-0 w-full shadow-2xl shadow-black/35 group-hover:z-[120] group-hover:shadow-[0_42px_130px_rgba(0,0,0,0.82)]">
         <div className="relative h-full w-full">
@@ -73,8 +98,16 @@ function InternalPosterCard({
             style={{ backgroundImage: `url(${image})` }}
           />
           {isLocked ? (
-            <div className="absolute right-4 top-4 z-10 text-black drop-shadow-[0_1px_5px_rgba(255,255,255,0.78)]">
-              <LockKeyhole className="h-7 w-7 stroke-[3]" />
+            <div className="absolute inset-0 z-20 flex items-start justify-center bg-black/46 p-3 text-center backdrop-blur-[1px]">
+              <div className="mt-3 w-full rounded-[8px] border border-white/12 bg-black/72 px-3 py-3 shadow-2xl shadow-black/40">
+                <LockKeyhole className="mx-auto h-6 w-6 stroke-[2.8] text-white" />
+                <p className="mt-2 text-xs font-black leading-tight text-white">
+                  {lockedTitle ?? "Conteudo bloqueado"}
+                </p>
+                {lockedDetail ? (
+                  <p className="mt-1 text-[11px] font-semibold leading-4 text-zinc-300">{lockedDetail}</p>
+                ) : null}
+              </div>
               <span className="sr-only">Conteudo bloqueado</span>
             </div>
           ) : null}
@@ -138,6 +171,7 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
   const rowRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
 
   const updateScrollState = useCallback(() => {
     const row = rowRef.current;
@@ -146,10 +180,12 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
       return;
     }
 
-    const maxScrollLeft = row.scrollWidth - row.clientWidth;
+    const maxScrollLeft = Math.max(row.scrollWidth - row.clientWidth, 0);
+    const hasOverflow = maxScrollLeft > 4;
 
-    setCanScrollLeft(row.scrollLeft > 4);
-    setCanScrollRight(row.scrollLeft < maxScrollLeft - 4);
+    setHasHorizontalOverflow(maxScrollLeft > 4);
+    setCanScrollLeft(hasOverflow && row.scrollLeft > 4);
+    setCanScrollRight(hasOverflow && row.scrollLeft < maxScrollLeft - 4);
   }, []);
 
   useEffect(() => {
@@ -198,26 +234,28 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
             <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">{description}</p>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            aria-label={`Ver cards anteriores de ${title}`}
-            className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
-            disabled={!canScrollLeft}
-            onClick={() => scrollRow("left")}
-            type="button"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            aria-label={`Ver proximos cards de ${title}`}
-            className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
-            disabled={!canScrollRight}
-            onClick={() => scrollRow("right")}
-            type="button"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
+        {hasHorizontalOverflow ? (
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              aria-label={`Ver cards anteriores de ${title}`}
+              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
+              disabled={!canScrollLeft}
+              onClick={() => scrollRow("left")}
+              type="button"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              aria-label={`Ver proximos cards de ${title}`}
+              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
+              disabled={!canScrollRight}
+              onClick={() => scrollRow("right")}
+              type="button"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        ) : null}
       </div>
       <div
         className="scrollbar-hidden flex scroll-smooth gap-[0.75rem] overflow-x-auto overflow-y-hidden overscroll-x-contain px-5 py-4 sm:px-8 lg:px-12"
@@ -230,6 +268,7 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
 }
 
 export function ContentStructureSection({
+  accessPreviewMode,
   formationCourseOpenMode,
   formationCourses,
   internalCardActionMode,
@@ -237,10 +276,20 @@ export function ContentStructureSection({
   modules
 }: ContentStructureSectionProps) {
   const isFormation = item.kind === "Formacao";
-  const isCourseLike = item.kind === "Curso" || item.kind === "Bootcamp";
+  const isCourseLike = ["Curso", "Bootcamp", "Mentoria", "Webinario", "Produto"].includes(item.kind);
   const totalLessons = modules.reduce((total, module) => total + module.lessons.length, 0);
   const showInternalCardActions = internalCardActionMode === "button";
   const firstModule = modules[0];
+  const moduleRowTitle =
+    item.kind === "Bootcamp"
+      ? "Modulos do bootcamp"
+      : item.kind === "Mentoria"
+        ? "Modulos da mentoria"
+        : item.kind === "Webinario"
+          ? "Modulos do webinario"
+          : item.kind === "Produto"
+            ? "Modulos do produto"
+            : "Modulos do curso";
 
   if (isFormation) {
     return (
@@ -253,15 +302,22 @@ export function ContentStructureSection({
             const href = formationCourseOpenMode === "course_lesson_format" && firstModule
               ? `/conteudo/${course.id}/aulas/${firstModule.id}`
               : `/conteudo/${course.id}`;
+            const releaseNotice = getReleaseRuleNotice(course.releaseRule, "curso");
+            const isLocked = Boolean(item.isLocked || course.isLocked || releaseNotice?.isLocked);
+            const lockedDetail = item.isLocked
+              ? "Este curso faz parte de um conteudo que ainda nao esta liberado para este aluno."
+              : releaseNotice?.detail;
 
             return (
               <InternalPosterCard
                 actionLabel={formationCourseOpenMode === "course_lesson_format" ? "Ver aulas" : "Ver curso"}
                 description={course.description}
-                href={href}
+                href={withAccessPreviewParam(href, accessPreviewMode)}
                 image={course.image}
-                isLocked={course.isLocked}
+                isLocked={isLocked}
                 key={course.id}
+                lockedDetail={lockedDetail}
+                lockedTitle={item.isLocked ? "Acesso pendente" : releaseNotice?.title}
                 meta={course.durationLabel ?? course.lessons}
                 progress={course.progress}
                 showAction={showInternalCardActions}
@@ -280,21 +336,40 @@ export function ContentStructureSection({
       <div className="pb-24">
         <InternalPosterRow
           description={`${modules.length} modulos e ${totalLessons} aulas para seguir em ordem.`}
-          title={item.kind === "Bootcamp" ? "Modulos do bootcamp" : "Modulos do curso"}
+          title={moduleRowTitle}
         >
-          {modules.map((module) => (
-            <InternalPosterCard
-              actionLabel="Ver aulas"
-              description={module.description}
-              href={`/conteudo/${item.id}/aulas/${module.id}`}
-              image={module.image}
-              key={module.id}
-              meta={module.meta}
-              progress={module.progress}
-              showAction={showInternalCardActions}
-              title={module.title}
-            />
-          ))}
+          {modules.map((module) => {
+            const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo");
+            const hasLessons = module.lessons.length > 0;
+            const isLocked = Boolean(item.isLocked || releaseNotice?.isLocked || !hasLessons);
+            const lockedDetail = item.isLocked
+              ? "Este modulo fica disponivel quando o aluno tiver acesso ao conteudo."
+              : !hasLessons
+                ? "Este modulo ainda nao tem aulas publicadas."
+                : releaseNotice?.detail;
+            const lockedTitle = item.isLocked
+              ? "Acesso pendente"
+              : !hasLessons
+                ? "Aulas em preparação"
+                : releaseNotice?.title;
+
+            return (
+              <InternalPosterCard
+                actionLabel="Ver aulas"
+                description={module.description}
+                href={withAccessPreviewParam(`/conteudo/${item.id}/aulas/${module.id}`, accessPreviewMode)}
+                image={module.image}
+                isLocked={isLocked}
+                key={module.id}
+                lockedDetail={lockedDetail}
+                lockedTitle={lockedTitle}
+                meta={module.meta}
+                progress={module.progress}
+                showAction={showInternalCardActions && !isLocked && hasLessons}
+                title={module.title}
+              />
+            );
+          })}
         </InternalPosterRow>
       </div>
     );

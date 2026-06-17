@@ -2,28 +2,65 @@
 
 import {
   Bell,
+  Bookmark,
+  Compass,
+  FileText,
+  Home,
+  LibraryBig,
+  LifeBuoy,
   LogOut,
   Menu,
+  PlayCircle,
   Search,
   ShieldCheck,
   Trophy,
+  UserCircle,
   X
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { student, navigationItems } from "@/lib/mock-data";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
+import type { NavigationItem } from "@/lib/platform-types";
+import type { AccessPreviewMode } from "@/lib/access-preview";
+import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type AppShellProps = {
+  accessPreviewMode?: AccessPreviewMode;
+  canUseAccessPreview?: boolean;
   children: React.ReactNode;
+  student: {
+    fullName: string;
+    name: string;
+  };
 };
 
-export function AppShell({ children }: AppShellProps) {
+declare global {
+  interface Window {
+    __bunker707FlushLessonProgress?: () => Promise<void>;
+  }
+}
+
+const navigationItems = [
+  { label: "Home", href: "/", icon: Home },
+  { label: "Minha jornada", icon: Compass },
+  { label: "Minhas compras", href: "/minhas-compras", icon: LibraryBig },
+  { label: "Favoritos", href: "/favoritos", icon: Bookmark },
+  { label: "Continue assistindo", icon: PlayCircle },
+  { label: "Materiais", icon: FileText },
+  { label: "Suporte", icon: LifeBuoy },
+  { label: "Perfil", icon: UserCircle }
+] satisfies NavigationItem[];
+
+export function AppShell({ accessPreviewMode, canUseAccessPreview = false, children, student }: AppShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [headerSolidOpacity, setHeaderSolidOpacity] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -47,6 +84,74 @@ export function AppShell({ children }: AppShellProps) {
 
   const iconButtonChrome = "border-transparent bg-transparent hover:bg-white/10";
   const profileChrome = "border-transparent bg-black/10 hover:bg-white/10";
+  const showPreviewControl = canUseAccessPreview;
+  const homeHref = withAccessPreviewParam("/", accessPreviewMode);
+
+  function handleProgressAwareNavigation(event: MouseEvent<HTMLAnchorElement>, href: string, closeSidebar = false) {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (closeSidebar) {
+      setSidebarOpen(false);
+    }
+
+    void (async () => {
+      await window.__bunker707FlushLessonProgress?.();
+      router.push(href);
+      window.setTimeout(() => {
+        router.refresh();
+      }, 0);
+    })();
+  }
+
+  function handleAccessPreviewChange(value: string) {
+    if (!canUseAccessPreview) {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(searchParams.toString());
+
+    if (value === "current") {
+      nextSearchParams.delete(ACCESS_PREVIEW_PARAM);
+    } else {
+      nextSearchParams.set(ACCESS_PREVIEW_PARAM, value);
+    }
+
+    const queryString = nextSearchParams.toString();
+    router.replace(queryString ? `${pathname}?${queryString}` : pathname);
+    setSidebarOpen(false);
+    router.refresh();
+  }
+
+  async function handleSignOut() {
+    setSigningOut(true);
+
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST"
+      });
+
+      try {
+        const supabase = createBrowserSupabaseClient();
+        await supabase.auth.signOut();
+      } catch {
+        // In local development without Supabase, only the local cookie exists.
+      }
+    } finally {
+      router.replace("/login");
+      router.refresh();
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#141414] text-white">
@@ -78,7 +183,9 @@ export function AppShell({ children }: AppShellProps) {
           <Link
             aria-label="Voltar para a home"
             className="flex min-w-fit items-center rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-            href="/"
+            href={homeHref}
+            onClick={(event) => handleProgressAwareNavigation(event, homeHref)}
+            prefetch={false}
           >
             <Image
               alt="Bunker707"
@@ -91,6 +198,23 @@ export function AppShell({ children }: AppShellProps) {
           </Link>
 
           <div className={`ml-auto flex min-w-0 items-center gap-2 ${searchOpen ? "max-sm:flex-1" : ""}`}>
+            {showPreviewControl ? (
+              <label className={`hidden h-10 items-center gap-2 rounded-[6px] border border-white/10 bg-black/25 px-2 text-xs font-bold text-zinc-300 backdrop-blur transition focus-within:border-white/25 md:flex ${searchOpen ? "max-lg:hidden" : ""}`}>
+                <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                <span className="sr-only">Modo de visualizacao</span>
+                <select
+                  aria-label="Modo de visualizacao"
+                  className="h-8 border-0 bg-transparent text-xs font-bold text-white outline-none"
+                  onChange={(event) => handleAccessPreviewChange(event.target.value)}
+                  value={accessPreviewMode ?? "current"}
+                >
+                  <option className="bg-[#141414]" value="current">Sessao atual</option>
+                  <option className="bg-[#141414]" value="producer">Produtor/admin</option>
+                  <option className="bg-[#141414]" value="student_with_access">Aluno com acesso</option>
+                  <option className="bg-[#141414]" value="student_without_access">Aluno sem acesso</option>
+                </select>
+              </label>
+            ) : null}
             <div
               className={`flex h-10 shrink-0 items-center overflow-hidden rounded-[6px] border transition-[width,background-color,border-color] duration-300 ease-out ${
                 searchOpen
@@ -170,8 +294,9 @@ export function AppShell({ children }: AppShellProps) {
                 <Link
                   aria-label="Voltar para a home"
                   className="inline-flex rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-                  href="/"
-                  onClick={() => setSidebarOpen(false)}
+                  href={homeHref}
+                  onClick={(event) => handleProgressAwareNavigation(event, homeHref, true)}
+                  prefetch={false}
                 >
                   <Image
                     alt="Bunker707"
@@ -203,6 +328,36 @@ export function AppShell({ children }: AppShellProps) {
               </div>
             </div>
 
+            {showPreviewControl ? (
+              <div className="space-y-4 border-b border-white/10 p-5">
+                <Link
+                  className="flex items-center gap-3 rounded-[8px] border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-100 transition hover:border-red-400/40 hover:bg-red-500/15 hover:text-white"
+                  href="/admin"
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <ShieldCheck className="h-5 w-5" />
+                  Ir para o CRM
+                </Link>
+                <label className="grid gap-2 text-sm font-semibold text-zinc-300">
+                  <span className="flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                    Modo de visualizacao
+                  </span>
+                  <select
+                    aria-label="Modo de visualizacao no menu"
+                    className="h-11 rounded-[8px] border border-white/10 bg-black/30 px-3 text-sm font-bold text-white outline-none transition focus:border-white/25"
+                    onChange={(event) => handleAccessPreviewChange(event.target.value)}
+                    value={accessPreviewMode ?? "current"}
+                  >
+                    <option className="bg-[#141414]" value="current">Sessao atual</option>
+                    <option className="bg-[#141414]" value="producer">Produtor/admin</option>
+                    <option className="bg-[#141414]" value="student_with_access">Aluno com acesso</option>
+                    <option className="bg-[#141414]" value="student_without_access">Aluno sem acesso</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
             <nav className="flex-1 overflow-y-auto p-3">
               {navigationItems.map((item) => {
                 const Icon = item.icon;
@@ -220,12 +375,15 @@ export function AppShell({ children }: AppShellProps) {
                 }`;
 
                 if (item.href) {
+                  const itemHref = withAccessPreviewParam(item.href, accessPreviewMode);
+
                   return (
                     <Link
                       className={itemClassName}
-                      href={item.href}
+                      href={itemHref}
                       key={item.label}
-                      onClick={() => setSidebarOpen(false)}
+                      onClick={(event) => handleProgressAwareNavigation(event, itemHref, true)}
+                      prefetch={false}
                     >
                       <Icon className="h-5 w-5" />
                       {item.label}
@@ -259,10 +417,12 @@ export function AppShell({ children }: AppShellProps) {
               </div>
               <button
                 className="flex w-full items-center gap-3 rounded-[8px] px-4 py-3 text-sm font-semibold text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                disabled={signingOut}
+                onClick={() => void handleSignOut()}
                 type="button"
               >
                 <LogOut className="h-5 w-5" />
-                Sair
+                {signingOut ? "Saindo..." : "Sair"}
               </button>
             </div>
           </aside>

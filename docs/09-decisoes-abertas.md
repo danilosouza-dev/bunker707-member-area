@@ -4,17 +4,17 @@
 
 ### Auth
 
-Opcoes:
+Decisao atual:
 
-- Clerk;
-- Supabase Auth.
+- Supabase Auth no MVP.
 
-Recomendacao atual:
+Motivos:
 
-- Clerk se quiser login mais polido e recursos prontos;
-- Supabase Auth se quiser reduzir fornecedores.
+- reduzir fornecedores;
+- integrar sessao, banco e RLS;
+- manter o MVP enxuto.
 
-Decisao pendente.
+Clerk pode ser reavaliado no futuro se a prioridade virar recursos avancados de identidade, como passkeys, MFA mais polido ou gestao externa de organizacoes.
 
 ### ORM
 
@@ -107,20 +107,33 @@ Decisao tomada:
 - a tela de login sera configuravel pelo produtor no CMS futuro.
 - os modelos iniciais sao: dividido com visual a direita, dividido com visual a esquerda, formulario central translucido sobre imagem e formulario lateral translucido sobre imagem.
 - o formulario deve permitir superficie configuravel: transparente, borda sutil ou painel.
-- no MVP UI-first, a configuracao pode ficar mockada e tipada no frontend, sem criar dashboard administrativo.
+- a configuracao deve ser persistida no backend quando a tela de login entrar no escopo administrativo.
 - a tela de login nao deve virar vitrine publica nem checkout; suporte e links legais ficam discretos.
-- a autenticacao real continua dependente da decisao aberta entre Clerk e Supabase Auth.
+- a autenticacao real usa Supabase Auth, com email/senha, OAuth e recuperacao de senha.
 
 ### CMS/Admin
 
 Decisao tomada:
 
-- iniciar um prototipo UI-first do CMS em `/admin`, usando mock data e sem backend real nesta etapa.
+- conectar o CMS em `/admin` a uma camada server-side persistida em Supabase Postgres/RLS, com fallback local somente quando as variaveis Supabase nao existirem no ambiente de desenvolvimento.
 - o design do CMS segue a linha escura, densa e operacional da referencia Netflix-style Ad Manager enviada no Figma, sem copiar marca, textos ou assets proprietarios.
-- o CMS deve controlar catalogo, home, formacoes, cursos avulsos, cursos internos de formacoes, bootcamps, modulos, aulas, materiais, regras de liberacao e entitlements.
-- regras de liberacao precisam cobrir pelo menos: liberacao imediata, depois da compra/entitlement, depois de tantas horas ou dias, data e hora fixa, aula anterior concluida, percentual assistido, avaliacao enviada, comentario enviado e tarefa concluida.
+- o CMS deve controlar catalogo, home, formacoes, cursos avulsos, mentorias, webinarios, produtos genericos, cursos internos de formacoes, bootcamps, modulos, aulas, materiais, turmas e alunos.
+- a primeira etapa de criacao do CMS cria um item educacional/produto: formacao, curso, mentoria, webinario, produto ou bootcamp. Dentro dele, o produtor monta trilhas/modulos e aulas.
+- cada item educacional pode ter capa, descricao, modelo de acesso `closed` ou `free`, limite de estudantes ilimitado ou numerico, link externo de compra e comportamento do link em mesma aba ou nova aba.
+- o cadastro principal do Catalogo funciona como um construtor em passos: configuracao inicial, modulos e aulas. O produtor pode salvar apenas a configuracao inicial e completar a estrutura depois.
+- a capa vertical enviada pelo produtor para cards deve usar 720 x 1040 px nesta fase, alinhada ao formato do curso Clones Perfeito 2.0 e aos cards verticais atuais.
+- a hero opcional da pagina propria de curso/produto usa 1920 x 720 px e fica salva em `content_page_settings.hero`, separada da capa vertical do card.
+- itens bloqueados por compra aparecem na vitrine e, ao clicar no card, abrem o modal de detalhes. O modal mostra o CTA de compra externa configurado, sem checkout interno.
+- regras de liberacao pertencem ao item editado, podendo ser configuradas em formacao, curso, mentoria, webinario, produto, modulo, aula ou material. Elas precisam cobrir pelo menos: liberacao imediata, agendamento por data/hora, depois de tantas horas ou dias da inscricao/entitlement do aluno, depois da compra/entitlement, aula anterior concluida, percentual assistido, avaliacao enviada, comentario enviado e tarefa concluida.
+- quando uma regra de entrega bloqueia modulo ou aula, a area do aluno deve mostrar overlay com cadeado e mensagem de liberacao no card/thumbnail. A data deve ser calculada por aluno quando houver inscricao/entitlement real.
+- no localhost/admin, a area de membros tem modo de preview por query string: sessao atual, produtor/admin, aluno com acesso e aluno sem acesso. Aluno com acesso remove bloqueios de compra/entitlement, mas regras de data ou drip continuam bloqueando. Aluno sem acesso mostra a vitrine bloqueada e nao preenche `Minhas compras`.
+- aulas cadastradas pelo CMS precisam incluir descricao, duracao, thumbnail e configuracao de player. Os provedores iniciais sao YouTube, Vimeo, Bunny Stream, Mux, URL propria/player proprio e codigo embed. A plataforma armazena referencia/configuracao do video, nao o arquivo de video no servidor da aplicacao.
+- a sidebar principal do CMS deve ser enxuta: Visao geral, Alunos, Catalogo e Estrutura. Liberação e acessos nao sao areas soltas no menu principal.
 - entitlements continuam sendo a fonte de verdade de acesso; eventos de Hotmart, Ticto, TikTok ou outros provedores sao entradas externas auditaveis, nao autorizacao direta.
-- o acesso ao CMS devera ser protegido por papel/permissao administrativa quando Auth e banco forem conectados. O link no prototipo e apenas conveniencia de navegacao.
+- cadastro manual de aluno oferece convite por email como fluxo padrao e senha temporaria como alternativa; senha temporaria marca `must_change_password = true` no Supabase Auth e obriga troca em `/alterar-senha`.
+- o acesso ao CMS e protegido por papel/permissao administrativa em `admin_roles`.
+- a area de membros e o CRM/backoffice sao experiencias separadas: `/` e a home do produto final do aluno; `/admin` e a home do CRM. Logos dentro da area de membros voltam para `/`; logos dentro do CRM voltam para `/admin`.
+- usuarios admin/produtor devem ter um atalho da sidebar da area de membros para o CRM, e o CRM deve ter um atalho visivel para abrir a area de membros e conferir a experiencia final do aluno.
 
 ### Fundo
 
@@ -135,6 +148,15 @@ Decisao tomada:
 - `Continue assistindo` usa thumbnails horizontais com barra de progresso.
 - no hover de `Continue assistindo`, o card pode mostrar um play discreto no centro da thumbnail, mas nao deve esconder titulo, contexto, aula ou percentual assistido.
 - `Continue assistindo` nao deve ter CTA grande nem botao de detalhes/seta para baixo; a acao e continuar a aula.
+- `Continue assistindo` deve nascer de progresso real de aula, salvando segundos e percentual assistidos por usuario.
+- a thumbnail da playlist so mostra `Assistindo...` depois que o aluno clicar no player/botao de reproduzir na sessao atual.
+- retomada de aula deve posicionar no ponto salvo sem autoplay; avaliacao fica liberada permanentemente para a aula depois que o maior percentual assistido chega a 30%, mesmo que o aluno volte a posicao atual do video.
+- fileiras configuraveis da home nao aparecem para o aluno quando ficam sem itens depois de aplicar acesso, progresso e regras de liberacao. Isso vale para secoes futuras como `Em breve`.
+- o CMS deve oferecer uma opcao para exibir na home os modulos de um curso especifico. Essa secao usa uma capa vertical reduzida do curso à esquerda, mantendo proporcao da capa principal, e deixa à direita o rotulo pequeno como `Cursos Online`, titulo e botao abaixo do titulo.
+- quando o aluno tem acesso, o botao da capa reduzida e `Acessar` e leva para a pagina do curso. Quando nao tem acesso, o botao e `Comprar` e pode abrir modal ou link externo de compra, em mesma aba ou nova aba, conforme configuracao do CMS.
+- clicar diretamente em um card de modulo dessa secao leva para a pagina de aula/playlist do modulo, com os modulos listados na sidebar direita, quando o aluno tem acesso. O card de modulo nao exibe botao proprio; o hover mostra titulo, metadado curto e progresso sobre o overlay. Sem acesso ao curso, clicar em modulo abre o modal de detalhes do curso por padrao.
+- os cards dos modulos nessa secao usam tamanho intermediario: menores que cards principais de cursos/formacoes/bootcamps e maiores que os cards internos da pagina do curso.
+- a secao de modulos de curso escolhido continua respeitando entitlement como fonte de verdade; o dado de pagamento externo nao libera a secao diretamente.
 - demais fileiras usam cards verticais exibidos em 398 x 574.88 no desktop.
 - as imagens de capa enviadas para esses cards devem ter 720 x 1040 px, mantendo a mesma proporcao usada no card.
 - capas devem ser tratadas como posters premium: arte e titulo forte; informacoes detalhadas ficam em metadata, modal e pagina propria do conteudo.
@@ -158,6 +180,8 @@ Decisao tomada:
 - setas dos carrosseis fazem scroll horizontal suave e ficam desativadas quando nao houver mais conteudo para navegar naquela direcao.
 - carrosseis de cards verticais devem ter respiro vertical interno suficiente para o hover ampliado nao ser cortado pelo container de scroll horizontal.
 - cards internos de cursos e modulos podem usar acao explicita em botao ou acao implicita pelo clique no card, conforme configuracao futura do CMS.
+- cursos, bootcamps, mentorias, webinarios e produtos com aulas podem usar dois modos configuraveis no CMS: `module_cards`, em que o card do curso abre uma pagina com cards de modulos, e `lesson_playlist`, exibido para o produtor como `Card unico`, em que o card do curso abre direto a pagina de aula com os modulos na playlist lateral.
+- a escolha entre esses dois modos deve ser um switch explicito no CMS; falta de imagem em um modulo nao deve mudar a navegacao, porque alguns modulos podem ter capa e outros nao.
 - decisao atual Bunker707: cards de modulos de cursos avulsos ficam sem botao retangular `Acessar`; o card inteiro e clicavel, com hover, progresso e metadados dentro do poster.
 - decisao atual Bunker707: cards de cursos internos dentro de formacoes tambem usam acao implicita e levam direto para a pagina de aula/playlist, sem etapa intermediaria de cards de modulos.
 - decisao atual Bunker707: cursos internos dentro de formacoes usam o mesmo padrao de poster vertical dos cards de modulos, mas sem botao `Acessar` e sem barra de progresso no card.

@@ -51,7 +51,7 @@ Veja [CONTRIBUTING.md](CONTRIBUTING.md) para o fluxo completo.
 
 - A venda sera terceirizada; a plataforma controla somente acesso, conteudo e experiencia do aluno.
 - O core do backend deve ser orientado por acesso e eventos, nao por ecommerce.
-- A stack recomendada para o MVP e Next.js, TypeScript, Supabase Postgres/RLS, Clerk ou Supabase Auth, Mux/Bunny Stream, PostHog, Sentry e Trigger.dev/Inngest.
+- A stack do MVP usa Next.js, TypeScript, Supabase Postgres/RLS, Supabase Auth, Mux/Bunny Stream, PostHog, Sentry e Trigger.dev/Inngest.
 - O app pode comecar na Vercel e ser migrado para Hetzner depois se o projeto for construindo com Docker, variaveis de ambiente limpas e pouca dependencia especifica da Vercel.
 
 ## Estado atual
@@ -69,13 +69,28 @@ O repositorio ja possui a base inicial do app:
 - cards verticais;
 - pagina propria de formacao/curso com breadcrumb;
 - pagina `Minhas compras` em `/minhas-compras`;
-- hero de conteudo configuravel por mock data;
+- login real com Supabase Auth, middleware de sessao e callback OAuth;
+- modo local de desenvolvimento para navegar sem Supabase quando `NODE_ENV !== "production"`;
+- paginas autenticadas protegidas por sessao;
+- CMS/admin em `/admin` protegido por papel em `admin_roles`;
+- hero de conteudo configuravel por backend persistido;
 - cards internos de cursos e modulos;
-- pagina da aula com player mockado, playlist, materiais, comentarios e progresso local;
-- prototipo inicial do CMS/admin em `/admin`, com dashboard, catalogo, estrutura de conteudo, regras de liberacao e entitlements mockados;
-- dados mockados.
+- pagina da aula com player, playlist, materiais, comentarios e progresso persistido no backend;
+- favoritos/minha lista persistidos por aluno para produtos, conteudos e aulas;
+- pagina `Favoritos` em `/favoritos`, acessivel pela sidebar, reunindo tudo que o aluno salvou;
+- CMS/admin em `/admin`, com dashboard, catalogo, estrutura de conteudo, CRM de alunos e turmas; regras de liberacao sao configuradas dentro de formacoes, cursos, modulos e aulas;
+- separacao visual e de navegacao entre area de membros (`/`) e CRM/backoffice (`/admin`), com logos levando para a home correta e atalhos entre as duas experiencias para usuarios admin;
+- fluxo inicial de criacao no CMS para formacoes, cursos, mentorias, webinarios, produtos e bootcamps, com capa, acesso gratuito/fechado, limite de estudantes, link externo de compra e regras de entrega por data ou por dias apos inscricao;
+- construtor em passos dentro do Catalogo para salvar a configuracao inicial e, no mesmo local, cadastrar modulos e aulas;
+- opcao no CMS para exibir na home uma secao com capa pequena do curso e cards menores dos modulos de um curso especifico, util para produtores com catalogo curto;
+- upload local da capa vertical do card em 720 x 1040 px e hero opcional da pagina propria em 1920 x 720 px;
+- modo de preview na area de membros para navegar como sessao atual, produtor/admin, aluno com acesso ou aluno sem acesso, visivel somente para usuarios internos com papel em `admin_roles`;
+- Supabase Postgres/RLS como persistencia primaria, com fallback local em `.data/bunker707-platform.json` apenas quando as variaveis Supabase nao estao configuradas no ambiente de desenvolvimento.
+- quando Supabase esta configurado, a base real nao recebe seed/demo automaticamente; cursos, formacoes, modulos, turmas, alunos, aulas e progresso entram por cadastros persistidos e APIs server-side.
 
-O proximo passo natural e evoluir o CMS UI-first junto das telas auxiliares de busca, perfil/acessos e suporte, ainda com dados mockados, antes de conectar Supabase/Auth.
+Sem as variaveis Supabase em desenvolvimento, a tela de login mostra `Entrar em modo local` para permitir navegacao no MVP. Esse modo usa cookie local httpOnly, funciona apenas fora de producao e nao substitui Supabase Auth em ambiente real.
+
+O proximo passo natural e aplicar as migrations no projeto Supabase, popular `admin_roles` para os usuarios internos e evoluir a camada de entitlements/webhooks que libera acesso a partir das vendas externas.
 
 ## Skill Codex
 

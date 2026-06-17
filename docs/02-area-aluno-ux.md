@@ -14,11 +14,13 @@ Todas as telas autenticadas devem compartilhar uma estrutura consistente:
 - avatar/perfil;
 - sidebar aberta pelo menu hamburguer.
 
+Para usuarios internos com papel administrativo, a area de membros deve manter a experiencia de aluno como produto final, mas expor um atalho claro para o CRM/backoffice. O CRM e a area de membros sao experiencias separadas: a home da area do aluno e `/`, enquanto a home do CRM e `/admin`.
+
 ## Login
 
 A tela de login deve ser uma experiencia fechada de area de membros, nao uma vitrine publica nem checkout.
 
-O produtor podera escolher futuramente um modelo de login no CMS. No MVP UI-first, essa escolha pode ficar mockada em configuracao tipada no frontend.
+O produtor podera escolher futuramente um modelo de login no CMS. A configuracao deve ser persistida no backend quando a tela de login entrar no escopo administrativo.
 
 Modelos iniciais:
 
@@ -42,8 +44,8 @@ Regras:
 
 - nao exibir venda, carrinho ou checkout interno;
 - manter links discretos de suporte, privacidade e termos;
-- preparar o evento `user_signed_in` para analytics quando a autenticacao real for conectada;
-- manter a tela pronta para Clerk ou Supabase Auth, enquanto a decisao de auth estiver aberta.
+- registrar o evento `user_signed_in` quando o aluno entrar por email/senha ou OAuth;
+- usar Supabase Auth no MVP, mantendo a tela configuravel pelo CMS futuro.
 
 ## Header
 
@@ -78,11 +80,14 @@ Itens iniciais:
 - Home;
 - Minha jornada;
 - Minhas compras;
+- Favoritos;
 - Continue assistindo;
 - Materiais;
 - Suporte;
 - Perfil;
 - Sair.
+
+Quando o usuario autenticado tambem for admin/produtor, a sidebar pode exibir um item administrativo separado para ir ao CRM/backoffice. Esse item nao deve aparecer para alunos comuns.
 
 `Formacoes` nao deve aparecer como item principal da sidebar no MVP, porque formacoes sao apenas um tipo de produto dentro de `Minhas compras`. Quando o aluno quiser ver somente formacoes, isso deve acontecer por filtro dentro de `Minhas compras`.
 
@@ -110,6 +115,7 @@ Primeira fileira sobreposta ao final da hero
 
 Demais secoes
   Minhas compras
+  Modulos de curso escolhido pelo produtor
   Produtos a venda
   Em breve na Bunker707
   Recomendadas para voce
@@ -125,6 +131,18 @@ Footer
 O fundo base da area de membros deve usar `#141414`, alinhado ao fundo da Netflix, para que paineis escuros de hover, modais, fades da hero e secoes de cards mantenham contraste sem se misturar com preto absoluto.
 
 As fileiras depois de `Continue assistindo` devem ser configuraveis futuramente pela area administrativa: nome da fileira, ordem, tipo de conteudo, conteudos exibidos e publico-alvo. Exemplos: Minhas compras, Produtos a venda, Em breve na Bunker707, Bootcamps, Workshops, Aulas recentes ou Materiais.
+
+Fileiras configuradas, mas sem itens resolvidos para aquele aluno, nao devem aparecer na home. Exemplo: `Em breve na Bunker707` so aparece quando houver conteudo cadastrado para essa fileira.
+
+Para produtores com pouco catalogo, o CMS deve permitir ativar uma secao de modulos de um curso especifico na home. Essa secao mostra uma capa vertical reduzida do curso à esquerda, preservando a mesma proporcao da capa principal. À direita da thumbnail ficam o rotulo pequeno como `Cursos Online`, o titulo do curso e o botao de acao abaixo do titulo. O objetivo e evitar uma home vazia quando o produtor tem apenas um curso e reduzir o caminho do aluno: home > modulo > aula, sem exigir clique previo na capa do curso.
+
+Quando o aluno tem acesso, o botao da capa reduzida do curso deve ser `Acessar`, com hover premium no estilo dos demais cards, e leva para a pagina normal do curso, com os modulos listados. Quando o aluno nao tem acesso, o botao deve ser `Comprar`. O produtor configura no CMS se esse botao abre o modal de detalhes ou o link externo de compra; quando usar link externo, o CMS tambem define se abre na mesma aba ou em nova aba.
+
+Clicar diretamente em um card de modulo leva para a pagina de aula/playlist daquele modulo, com a sidebar de modulos à direita, quando o aluno tem acesso. O card de modulo dessa secao nao exibe botao proprio; o hover mostra titulo, metadado curto e progresso sobre o overlay. Quando o aluno nao tem acesso ao curso, clicar em qualquer modulo abre o modal de detalhes do curso por padrao.
+
+Na home, os cards dos modulos dessa secao devem ter tamanho intermediario: menores que os cards principais de cursos, formacoes e bootcamps para nao confundir hierarquia, mas maiores que os cards internos da pagina do curso. O tamanho menor e a variacao visual de cards de modulos ficam reservados para a pagina propria do curso.
+
+Essa secao de modulos nao deve virar uma explicacao longa sobre o que sao modulos. A propria capa, o rotulo pequeno, o titulo e os nomes cadastrados pelo produtor comunicam o conteudo. Modulos bloqueados por compra, entitlement ou regra de entrega devem manter overlay de bloqueio e levar o aluno ao modal de detalhes quando clicados.
 
 `Minhas compras` deve agrupar todos os produtos com entitlement ativo do aluno, independentemente do tipo: formacoes, bootcamps e cursos avulsos. Evitar separar cedo demais em `Minhas formacoes` e `Meus cursos avulsos`, porque isso deixa a home mais fragmentada e menos natural para o aluno.
 
@@ -189,9 +207,10 @@ Os cards da Bunker707 devem ser verticais nas fileiras de formacoes, bootcamps, 
 A excecao e a primeira fileira da home:
 
 - `Continue assistindo` usa thumbnails horizontais de video;
-- deve mostrar a barra de progresso no ponto em que o aluno parou;
+- deve mostrar a barra de progresso no ponto em que o aluno parou, derivada do progresso real da aula;
 - pode mostrar titulo, contexto, percentual assistido e aula abaixo da thumbnail;
 - pode ter um play discreto no centro da thumbnail durante o hover;
+- deve manter hover proprio de video, com superficie estavel, zoom interno minimo na imagem igual aos cards de modulo do modal e play aparente no centro; nao usar a expansao externa grande dos cards verticais;
 - nao deve usar botao grande de CTA nem botao de detalhes/seta para baixo; a acao esperada e clicar no card para continuar assistindo;
 - titulo, contexto e progresso nao devem sumir no hover.
 
@@ -208,6 +227,7 @@ Formato recomendado:
 - a capa deve aparecer limpa no estado normal;
 - cards verticais podem exibir a logo horizontal completa da Bunker707 no canto superior esquerdo apenas no hover, em tamanho discreto, preservando a capa como elemento principal;
 - no hover, o card vertical da home deve saltar para frente com escala maior que o estado inicial, leve elevacao para cima, sombra profunda, `z-index` acima dos vizinhos e transicao suave, aproximando o comportamento visual da Netflix sem parecer brusco;
+- nos cards verticais expansivos da home, o hover deve respeitar a borda visivel do carrossel: o card encostado à esquerda cresce para a direita, e o card encostado à direita cresce para a esquerda, sem invadir o alinhamento lateral da secao; os cards internos da fileira mantem a escala central normal;
 - o arredondamento deve permanecer em todos os cantos durante o hover;
 - o hover nao deve revelar filetes claros, bordas brancas acidentais ou linhas de subpixel na parte inferior dos cards;
 - as informacoes devem aparecer dentro do proprio card, sobre um degrade escuro de baixo para cima, sem criar painel externo abaixo da capa;
@@ -224,9 +244,9 @@ Formato recomendado:
 
 ## Carrosseis
 
-As setas laterais de cada fileira devem mover os cards com scroll horizontal suave, no estilo streaming. O movimento deve ser suficiente para revelar novos cards sem saltos bruscos.
+As setas laterais de cada fileira devem aparecer somente quando houver overflow horizontal real e mover os cards com scroll horizontal suave, no estilo streaming. O movimento deve ser suficiente para revelar novos cards sem saltos bruscos.
 
-Quando nao houver mais conteudo para navegar em uma direcao, a seta daquela direcao deve ficar visualmente desativada.
+Quando os cards cabem dentro da largura disponivel da fileira, nao exibir setas. Quando houver overflow, a seta da direcao sem mais conteudo para navegar deve ficar visualmente desativada.
 
 Carrosseis com cards verticais devem manter respiro vertical interno suficiente para que o hover ampliado nao seja cortado pelo proprio container de scroll horizontal, preservando o arredondamento superior e inferior dos cards.
 
@@ -251,12 +271,16 @@ O topo do modal deve concentrar:
 - botoes de acao logo abaixo do titulo, tambem sobrepostos a capa;
 - degrade inferior suficiente para manter titulo e botoes legiveis sobre a imagem.
 
+No estado atual, o topo do modal usa imagem/capa. Futuramente, o CMS deve permitir trocar essa imagem por video configurado para o modal, mantendo fallback de imagem quando o video nao estiver configurado ou nao puder reproduzir.
+
 Depois da imagem/capa, o modal deve exibir:
 
 - descricao;
 - professor, quando houver;
-- metadados como nivel, aulas/duracao e tipo;
+- metadados uteis para o aluno, como aulas/duracao e professor quando houver;
 - progresso e demais informacoes do curso.
+
+O modal da area do aluno nao deve exibir informacoes de CRM/backoffice, estrategia comercial ou classificacoes administrativas que nao ajudam o aluno a estudar. Evitar blocos como `comprado`, `conteudo: curso`, `nivel livre`, origem da compra, status operacional interno ou qualquer resumo que pareca dashboard do produtor. Esses dados podem existir no CRM, mas a experiencia do aluno deve priorizar entendimento da jornada, progresso e proximos passos.
 
 Abaixo do topo, o conteudo do modal muda conforme o tipo:
 
@@ -272,13 +296,14 @@ Abaixo do topo, o conteudo do modal muda conforme o tipo:
 - quando um modulo tiver muitas aulas, a listagem de aulas deve manter altura controlada e usar scroll interno discreto somente nessa lista, evitando que o card do modulo seja esticado verticalmente ou fique centralizado com grandes vazios;
 - todos os cards verticais internos do modal devem compartilhar o mesmo comportamento de hover, inclusive cards em formacoes bloqueadas: o card nao move, nao cresce, nao altera sua sombra e nao exibe filetes claros; apenas a imagem interna recebe zoom leve e escurecimento discreto, com transicao lenta e suave;
 - modulo: deve abrir/expandir uma lista de aulas com thumbnail, titulo, descricao e duracao, em formato mais detalhado, semelhante a uma lista de episodios;
+- a thumbnail da aula no modal deve vir da propria aula: primeiro thumbnail oficial do video quando disponivel, depois thumbnail cadastrada para a aula. Nao usar capa aleatoria, capa generica do modulo ou imagem inventada como se fosse da aula;
 - aula: deve priorizar dados da aula, materiais relacionados e proximos passos.
 
 A area de `Episodios` do modelo da Netflix nao deve ser copiada diretamente para formacoes e cursos. Ela so faz sentido quando o aluno estiver olhando aulas dentro de um modulo.
 
 No modal de uma formacao, os cards exibidos representam cursos internos da formacao, nao aulas diretamente. A lista de aulas aparece quando o aluno estiver olhando um curso/bootcamp e selecionar um modulo. Futuramente, clicar em um curso interno da formacao pode abrir a pagina/modal daquele curso.
 
-O modal tambem deve ter um bloco `Sobre`, com explicacao, tipo, acesso, professor e demais informacoes relevantes.
+O modal tambem deve ter um bloco `Sobre`, com explicacao, estrutura do conteudo, professor quando houver e demais informacoes relevantes para o aluno.
 
 Nos cards de cursos internos dentro de uma formacao, nao exibir tags extras como `Incluso na formacao`, `Curso pratico`, `Curso base` ou similares. O proprio titulo da secao `Cursos da formacao` ja comunica o contexto. Priorizar capa, titulo, quantidade de aulas e descricao.
 
@@ -317,6 +342,21 @@ Deve incluir:
 
 Nao deve mostrar cursos internos de formacao como produtos comprados separados. Cursos internos aparecem dentro da pagina/modal da propria formacao.
 
+## Favoritos
+
+Tela em `/favoritos` com tudo que o aluno salvou para voltar depois.
+
+Deve incluir:
+
+- cursos, formacoes, bootcamps, mentorias, webinarios e produtos salvos;
+- modulos salvos;
+- aulas salvas;
+- filtros por tipo;
+- busca textual nos itens favoritos;
+- acao para remover da lista sem sair da tela.
+
+Favoritar nao libera acesso. A tela continua respeitando entitlements e regras de liberacao.
+
 ## Pagina de formacao e curso
 
 Formacoes, cursos avulsos, bootcamps e cursos internos de uma formacao devem ter pagina propria dentro da area do aluno.
@@ -338,6 +378,13 @@ A pagina deve ter uma hero configuravel pelo dono do conteudo no dashboard/CRM:
 - intensidade de overlay/degrade e efeitos visuais em fase futura.
 
 Todos os textos da hero da pagina de formacao, curso, bootcamp ou modulo devem ser opcionais e configuraveis de forma independente no CMS. A hero pode ser apenas visual, usando somente imagem ou video de fundo, sem selo, titulo, descricao ou botao.
+
+Cursos, bootcamps, mentorias, webinarios e produtos com aulas devem ter uma configuracao explicita de apresentacao:
+
+- curso com cards de modulos: o card do curso leva para a pagina do conteudo e a pagina mostra cards verticais dos modulos; ao clicar em um modulo, o aluno entra na pagina de aula/playlist;
+- `Card unico`: o card do curso leva diretamente para a pagina de aula/playlist, mantendo os modulos listados na sidebar lateral da aula.
+
+Essa escolha deve ser feita por switch no CMS. A ausencia de imagem em modulos nao deve decidir o fluxo, porque um curso pode ter alguns modulos com capa e outros sem capa sem que isso mude a navegacao esperada.
 
 Abaixo da hero:
 
@@ -432,16 +479,24 @@ Desktop:
 - breadcrumb acima do player;
 - player grande a esquerda;
 - botao de voltar para a pagina do conteudo sobreposto no canto superior esquerdo do player, aparecendo no hover/foco e usando o mesmo hover circular escuro dos botoes secundarios; seu tooltip deve ficar acima do player e nao pode ser cortado pela area do video;
+- overlays do player, como voltar, reproduzir e mostrar playlist, devem ficar abaixo do header global quando houver sobreposicao durante o scroll;
+- nao exibir selo/tag do provedor de video sobre o player, como `YouTube`, `Vimeo` ou similares; essa informacao nao ajuda o aluno no consumo da aula;
 - controles de aula anterior/proxima nao ficam no topo da pagina; essa navegacao acontece pela playlist lateral e futuramente pelos controles internos do player;
 - botao principal abaixo do video marca/desmarca a aula como concluida, muda para estado verde `Concluida` e deve preservar esse estado quando o aluno voltar para a aula;
 - botoes secundarios como materiais, TV, salvar e avaliar devem ser circulares, iconograficos, com borda discreta no estado normal e feedback visual proprio no hover/foco, sem depender de tooltip nativo do navegador;
 - tooltips desses botoes devem usar caixa branca com seta, fonte media/regular e sem peso excessivo;
 - avaliacao da aula deve seguir o padrao de reacao da Netflix: um botao de curtida abre tres opcoes (`Nao gostei`, `Gostei`, `Amei`) em uma pilula escura, com tooltip branco individual; opcoes selecionadas usam apenas contorno colorido, incluindo o coracao de `Amei`;
 - depois da selecao da reacao, a pilula deve fechar para nao conflitar com outros tooltips;
+- depois que o aluno assistir pelo menos 30% uma vez, o botao de avaliacao permanece disponivel nessa aula mesmo se ele arrastar o video de volta para o inicio; o percentual atual continua podendo regredir para alimentar `Continue assistindo` e progresso do modulo.
+- `Continue assistindo` deve priorizar imagem do ponto de retomada quando o provider/adapter fornecer um frame salvo; quando isso nao existir, usar thumbnail oficial do video; somente depois usar thumbnail cadastrada da aula ou imagem do modulo como fallback;
 - playlist lateral fixa a direita, alinhada ao topo do player e nao ao breadcrumb;
 - playlist lateral deve ter scroll interno proprio, com cabecalho fixo e area de aulas rolavel, garantindo que o ultimo modulo e a ultima aula fiquem totalmente acessiveis;
 - abrir/fechar um modulo na playlist nao deve trocar a aula em reproducao; a aula ativa muda somente quando o aluno clica em uma aula;
 - tabs abaixo do player.
+- o estado `Assistindo...` na thumbnail da playlist deve aparecer somente depois que o aluno clicar no player/botao de reproduzir naquela sessao, nao apenas porque a aula esta selecionada.
+- o clique/play do player deve registrar `lesson_started`/progresso inicial e permitir que a aula apareca em `Continue assistindo`.
+- a plataforma deve salvar segundos e percentual assistidos por aula, independentemente do provedor de video. HTML5/player proprio envia tempo real por eventos nativos; YouTube usa a IFrame API para ler `currentTime`, `duration`, pausa e conclusao; Vimeo, Bunny, Mux e embeds externos devem passar por adaptadores equivalentes ou, enquanto a API especifica nao estiver integrada, por uma ponte de inicio + temporizador de sessao.
+- ao retornar para uma aula com progresso salvo, o player deve posicionar no ponto salvo quando o provedor permitir `seek`/parametro de inicio; YouTube deve usar `start` no embed e `seekTo` no adapter, mas sem autoplay. O aluno precisa dar play explicitamente. No YouTube, antes do clique de play, a UI deve mostrar a thumbnail oficial do video com a barra de progresso salva, evitando a tela preta que o embed pode renderizar antes da reproducao. Providers que renderizem frame pausado de forma confiavel podem usar esse frame no futuro.
 - comentarios da aula devem usar layout de thread leve, sem transformar cada comentario em card; avatar/foto, nome, tempo relativo, selo `Professor` quando aplicavel, reacoes por emoji/curtida e menu de denuncia ficam no proprio item;
 - respostas a um comentario devem aparecer indentadas dentro do comentario principal; respostas de professor mantem selo `Professor` no item indentado;
 - cada comentario e resposta deve ter acao `Responder`; ao clicar, o composer deve entrar em modo resposta e preencher automaticamente a mencao `@nickname` da pessoa respondida;

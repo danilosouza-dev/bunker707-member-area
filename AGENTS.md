@@ -48,7 +48,7 @@ Use `docs/11-inventario-coleta-astron.md` as the detailed UX/functionality refer
 - Tailwind CSS
 - shadcn/ui
 - Supabase Postgres with RLS
-- Clerk or Supabase Auth
+- Supabase Auth
 - Mux or Bunny Stream for video
 - PostHog for product analytics
 - Sentry for monitoring

@@ -13,7 +13,15 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-export type ContentKind = "Formacao" | "Curso" | "Bootcamp" | "Aula" | "Material";
+export type ContentKind =
+  | "Formacao"
+  | "Curso"
+  | "Mentoria"
+  | "Webinario"
+  | "Produto"
+  | "Bootcamp"
+  | "Aula"
+  | "Material";
 export type CommerceScope = "sellable_product" | "included_content" | "learning_content";
 export type ContentStatus = "Novo" | "Em andamento" | "Concluido" | "Liberado" | "Bloqueado" | "Em breve";
 export type RowVisibility = "students" | "non_students" | "all";

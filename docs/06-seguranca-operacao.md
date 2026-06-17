@@ -23,6 +23,23 @@ Politicas iniciais:
 - aluno nao altera entitlement;
 - admin/server altera conteudo, acesso e webhooks.
 
+Implementado no MVP atual:
+
+- Supabase Auth e usado como provedor de identidade;
+- o middleware do Next.js renova/valida sessao com `@supabase/ssr`;
+- `profiles`, `entitlements`, `student_events`, `lesson_progress` e `admin_roles` possuem RLS;
+- aluno pode ler/editar somente o proprio perfil, ler os proprios entitlements e gravar eventos proprios;
+- aluno nao possui policy para criar, alterar ou remover entitlements;
+- `/admin` e as APIs `/api/admin/*` exigem papel em `admin_roles`;
+- login, callback e reentrada em `/login` direcionam usuarios administrativos para `/admin` depois da autenticacao;
+- `/api/progress/lessons` grava progresso usando `auth.user.id`, nao um id vindo do cliente.
+
+Excecao de desenvolvimento:
+
+- sem variaveis Supabase e fora de producao, o login oferece modo local de desenvolvimento;
+- o modo local usa cookie httpOnly e usuario fixo de desenvolvimento;
+- esse modo nao deve existir como autorizacao de producao e e automaticamente indisponivel em `NODE_ENV=production`.
+
 ## Webhooks
 
 Regras:
@@ -69,6 +86,8 @@ Eventos criticos:
 
 - login;
 - alteracao de senha;
+- criacao ou reenvio de acesso por convite;
+- criacao de senha temporaria pelo admin;
 - liberacao/revogacao de acesso;
 - webhook processado;
 - falha de webhook;
@@ -106,6 +125,19 @@ Checklist de producao:
 - PostHog ativo;
 - backups conferidos;
 - RLS revisado;
+- Supabase Auth configurado;
+- primeiro usuario interno cadastrado em `admin_roles`;
 - webhooks com segredo;
 - pagina de erro amigavel;
 - suporte funcional.
+
+## Cadastro manual e senha temporaria
+
+Regras:
+
+- convite por email e o fluxo preferencial para novos alunos;
+- senha temporaria existe apenas para suporte/onboarding e deve exigir troca no primeiro login;
+- senha temporaria nao deve ser salva em banco, logs, historico do CRM ou metadata;
+- `service_role` so pode ser usado na rota server-side administrativa;
+- a tela `/alterar-senha` limpa `must_change_password` somente depois de atualizar a senha do usuario;
+- o admin deve enviar senha temporaria por canal de atendimento controlado, evitando expor senha permanente por email.

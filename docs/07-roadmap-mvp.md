@@ -26,7 +26,7 @@ Entregas:
 - header;
 - sidebar via menu hamburguer;
 - tema escuro;
-- dados mockados.
+- seed inicial de dados.
 
 ## Fase 2: Home do aluno
 
@@ -48,16 +48,17 @@ Objetivo: permitir consumo basico de aulas.
 Entregas:
 
 - Minhas compras;
+- Favoritos;
 - pagina de curso avulso, formacao ou bootcamp;
 - pagina da aula;
 - player integrado;
 - playlist lateral;
 - tabs de descricao/materiais/comentarios;
-- dados mockados ou seed inicial.
+- dados persistidos com seed inicial.
 
 ## Fase 3.5: CMS UI-first
 
-Objetivo: iniciar a area administrativa sem bloquear o backend real.
+Objetivo: iniciar a area administrativa sem bloquear a futura migracao para Supabase.
 
 Entregas:
 
@@ -65,9 +66,9 @@ Entregas:
 - dashboard escuro inspirado em Netflix/ad manager;
 - catalogo de produtos e conteudos;
 - construtor de formacoes, cursos internos, modulos e aulas;
-- regras mockadas de liberacao por compra, horas, dias, data fixa e atividade;
-- visao inicial de entitlements e webhooks externos;
-- dados mockados alinhados ao modelo futuro.
+- regras de liberacao por compra, horas, dias, data fixa e atividade dentro do editor de formacoes, cursos, modulos e aulas;
+- entitlements e webhooks externos como camada tecnica/auditavel, nao como item solto da sidebar principal;
+- Supabase Postgres/RLS com seeds alinhadas ao modelo futuro e fallback local apenas para desenvolvimento sem variaveis.
 
 ## Fase 4: Banco e acesso
 
@@ -78,10 +79,12 @@ Entregas:
 - Supabase Postgres;
 - schema inicial;
 - RLS;
-- auth;
-- entitlements;
+- auth com Supabase Auth;
+- entitlements internos;
 - cursos/modulos/aulas;
 - progresso real.
+
+Status atual: Auth, middleware de sessao, guards de API, `admin_roles`, `profiles`, `student_events` e tabela base de `entitlements` foram implementados. A proxima etapa e conectar as regras de exibicao/liberacao de conteudo diretamente aos entitlements reais.
 
 ## Fase 5: Webhooks externos
 
@@ -130,6 +133,7 @@ Para chegar rapido em algo utilizavel:
 2. Home.
 3. Cards verticais.
 4. Minhas compras.
-5. Pagina da aula.
-6. Progresso.
-7. Acesso por entitlement.
+5. Favoritos.
+6. Pagina da aula.
+7. Progresso.
+8. Acesso por entitlement.

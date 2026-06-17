@@ -87,16 +87,19 @@ Adaptar para:
 - primeira linha de cards sobrepondo o fim da hero;
 - primeira linha `Continue assistindo` com thumbnails horizontais e barra de progresso;
 - fileiras seguintes configuraveis com cards verticais exibidos em cerca de 300 x 485.4 no desktop, podendo chegar perto de 320 x 517.8 em telas muito largas;
+- setas de carrossel aparecem somente quando a fileira tiver overflow horizontal real; com poucos cards, a fileira fica limpa, sem botoes desativados;
 - capas dos cards verticais enviadas preferencialmente em proporcao proxima da regra aurea, por exemplo 1000 x 1618 px;
-- cards verticais limpos por padrao, com hover flutuante: escala centralizada, sombra forte, camada acima dos vizinhos, imagem escurecida com degrade inferior e informacoes dentro do proprio card;
+- cards verticais limpos por padrao, com hover flutuante: escala edge-aware nas bordas do carrossel, sombra forte, camada acima dos vizinhos, imagem escurecida com degrade inferior e informacoes dentro do proprio card;
 - seta de detalhes nos cards verticais abre modal com informacoes do conteudo;
 - `Minhas compras` agrupa tudo que o aluno comprou/tem entitlement ativo: formacoes, bootcamps e cursos avulsos;
 - `Produtos a venda`/`Vitrine` pode conter conteudos comprados e nao comprados conforme configuracao do dashboard;
 - conteudos sem entitlement ativo devem aparecer com badge circular escuro/translucido no canto superior direito e cadeado branco sobreposto, capa em preto e branco no estado normal e CTA verde solido `Comprar` em destaque no hover, sem botao de salvar/favoritar; status, duracao, tipo e quantidade de aulas ficam para modal/pagina propria;
 - secoes configuraveis podem aparecer para alunos/compradores, nao compradores/visitantes ou todos;
+- adaptacao Bunker707: produtores com catalogo curto podem ativar uma secao com capa vertical reduzida do curso à esquerda, rotulo pequeno, titulo e botao `Acessar`/`Comprar` à direita, alem de cards de modulos em tamanho intermediario sem botao proprio; sem acesso, os modulos abrem o modal de detalhes do curso;
 - secoes principais:
   - Continue assistindo;
   - Minhas compras;
+  - Modulos de curso escolhido pelo produtor;
   - Produtos a venda;
   - Em breve na Bunker707;
   - Recomendadas para voce;
@@ -191,6 +194,8 @@ Decisoes Bunker707 para a pagina de aula:
 - a playlist lateral deve manter progresso total do curso no topo; os modulos mostram apenas contagem, como `2/6 concluidas`, sem barra propria para nao conflitar visualmente;
 - o breadcrumb deve ficar acima do player, no topo da coluna principal;
 - o botao de voltar para a pagina do conteudo deve ficar sobreposto no canto superior esquerdo do player, aparecendo no hover/foco no desktop, usando o mesmo hover circular escuro dos botoes secundarios, com tooltip acima do player sem corte pela area do video, e permanecendo acessivel em telas touch;
+- overlays do player devem permanecer abaixo do header global quando houver sobreposicao durante o scroll;
+- nao exibir tag do provedor de video sobre o player, como `YouTube`, porque essa informacao e tecnica e nao melhora o consumo da aula;
 - controles de aula anterior/proxima nao devem ficar no topo da pagina; a navegacao entre aulas acontece pela playlist lateral e futuramente pelos controles internos do player;
 - o botao principal `Concluir` deve marcar/desmarcar a conclusao e preservar esse estado quando o aluno voltar para a aula; no prototipo UI-first isso pode ser feito localmente, e no produto final a fonte deve ser o backend de progresso;
 - botoes secundarios como materiais, TV, salvar e avaliar devem ser circulares, iconograficos, com borda discreta no estado normal e feedback visual proprio no hover/foco, sem depender de tooltip nativo do navegador;
@@ -198,7 +203,7 @@ Decisoes Bunker707 para a pagina de aula:
 - a playlist lateral deve alinhar seu topo ao player, nao ao breadcrumb;
 - a playlist lateral deve ter scroll interno proprio, mantendo o cabecalho de progresso fora da area rolavel e garantindo acesso completo ao ultimo modulo e a ultima aula;
 - abrir/fechar um modulo na playlist nao deve trocar a aula em reproducao; a aula ativa muda somente quando o aluno clica em uma aula;
-- a avaliacao da aula deve aparecer somente depois que o aluno assistir pelo menos 30% do video e usar tres reacoes no estilo Netflix (`Nao gostei`, `Gostei`, `Amei`), em vez de escala de cinco estrelas; opcoes selecionadas usam apenas contorno colorido, incluindo o coracao de `Amei`, e a pilula de opcoes fecha depois da selecao;
+- a avaliacao da aula deve aparecer depois que o aluno assistir pelo menos 30% do video e usar tres reacoes no estilo Netflix (`Nao gostei`, `Gostei`, `Amei`), em vez de escala de cinco estrelas; opcoes selecionadas usam apenas contorno colorido, incluindo o coracao de `Amei`, e a pilula de opcoes fecha depois da selecao. Depois de liberada uma vez, a avaliacao permanece disponivel mesmo se o aluno voltar o video para o inicio;
 - materiais podem ser liberados normalmente ou ter uma regra individual de desbloqueio, configurada pelo professor/produtor no CMS;
 - materiais bonus gerados por IA, como resumo estrategico, infografico ou detalhamento da aula, podem exigir avaliacao, comentario ou outra atividade para download;
 - se o aluno passar o mouse ou tentar acessar material bloqueado, a interface deve explicar a condicao de desbloqueio, por exemplo avaliar a aula depois de assistir pelo menos 30%;
@@ -601,7 +606,7 @@ Tomadas:
 
 Pendentes:
 
-- Clerk ou Supabase Auth;
+- Supabase Auth no MVP;
 - Bunny Stream ou Mux;
 - Drizzle ou Prisma;
 - nomenclatura final das secoes da home;

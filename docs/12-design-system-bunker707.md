@@ -189,6 +189,8 @@ Comportamento:
 - Cards de conteudo devem ser verticais na home.
 - Fileiras de cards verticais da home devem usar gap de 12px entre cards.
 - Hover pode ampliar e elevar o card, mantendo cantos arredondados. Na home, o card vertical deve ampliar por escala externa sem zoom interno adicional da imagem.
+- Cards verticais expansivos da home devem crescer para dentro somente quando estiverem nas bordas visíveis do carrossel: o primeiro da esquerda preserva a borda esquerda e expande para a direita; o último da direita preserva a borda direita e expande para a esquerda. Os cards internos mantem escala central normal.
+- `Continue assistindo` usa hover proprio de video: superficie estavel, zoom interno minimo na imagem igual aos cards de modulo do modal e play aparente no centro, sem a expansao externa grande dos cards verticais.
 - Overlay do hover deve priorizar legibilidade.
 - Cards bloqueados na home devem usar badge circular escuro/translucido no canto superior direito, com cadeado branco simples centralizado sobre a capa. O icone deve usar o `Lock` da Lucide, sem preenchimento (`fill`), para evitar efeito de massa branca.
 - Evitar mostrar metadados demais no hover; detalhes completos ficam em modal ou pagina propria.

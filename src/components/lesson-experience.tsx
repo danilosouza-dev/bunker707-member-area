@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  Bookmark,
   Check,
   ChevronDown,
   ChevronRight,
@@ -12,6 +12,7 @@ import {
   Flag,
   GalleryVerticalEnd,
   Heart,
+  LockKeyhole,
   Maximize2,
   MessageCircle,
   MonitorPlay,
@@ -26,12 +27,20 @@ import {
   Volume2,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent, type MouseEvent } from "react";
+import { SavedItemButton } from "@/components/saved-item-button";
+import { withAccessPreviewParam } from "@/lib/access-preview";
 import type { KeyboardEvent } from "react";
-import type { ContentItem, CourseModule, LessonPreview } from "@/lib/mock-data";
+import type { AccessPreviewMode } from "@/lib/access-preview";
+import type { ContentItem, CourseModule, LessonPreview, LessonReaction, LessonVideoConfig, LessonWatchState, LessonWatchStatus } from "@/lib/platform-types";
+import { getReleaseRuleNotice } from "@/lib/release-rules";
 
 type LessonExperienceProps = {
+  accessPreviewMode?: AccessPreviewMode;
   allModules: CourseModule[];
+  initialLessonId?: string;
+  initialLessonReactions?: Partial<Record<string, LessonReaction>>;
+  initialLessonWatchStates?: Record<string, LessonWatchState>;
   item: ContentItem;
   returnContent?: Pick<ContentItem, "id" | "title">;
   selectedModule: CourseModule;
@@ -78,7 +87,77 @@ type LessonTarget = {
   module: CourseModule;
 };
 
-type LessonReaction = "not-for-me" | "liked" | "loved";
+type LessonProgressPayload = {
+  completedLessonIds?: string[];
+  contentId: string;
+  durationSeconds?: number;
+  lessonId?: string;
+  lessonReactions?: Partial<Record<string, LessonReaction>>;
+  maxProgressPercent?: number;
+  progressPercent?: number;
+  progressSeconds?: number;
+  status?: LessonWatchStatus;
+};
+
+type PlayerRenderConfig =
+  | {
+      kind: "iframe";
+      src: string;
+    }
+  | {
+      kind: "srcdoc";
+      srcDoc: string;
+    }
+  | {
+      kind: "video";
+      src: string;
+    };
+
+type YouTubePlayer = {
+  destroy?: () => void;
+  getCurrentTime: () => number;
+  getDuration: () => number;
+  getPlayerState?: () => number;
+  pauseVideo?: () => void;
+  playVideo?: () => void;
+  seekTo: (seconds: number, allowSeekAhead: boolean) => void;
+};
+
+type YouTubePlayerEvent = {
+  target: YouTubePlayer;
+};
+
+type YouTubePlayerStateChangeEvent = YouTubePlayerEvent & {
+  data: number;
+};
+
+type YouTubeNamespace = {
+  Player: new (
+    iframe: HTMLIFrameElement,
+    options: {
+      events: {
+        onReady?: (event: YouTubePlayerEvent) => void;
+        onStateChange?: (event: YouTubePlayerStateChangeEvent) => void;
+      };
+    }
+  ) => YouTubePlayer;
+  PlayerState: {
+    BUFFERING: number;
+    ENDED: number;
+    PAUSED: number;
+    PLAYING: number;
+  };
+};
+
+declare global {
+  interface Window {
+    __bunker707FlushLessonProgress?: () => Promise<void>;
+    YT?: YouTubeNamespace;
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+let youTubeIframeApiPromise: Promise<void> | null = null;
 
 const lessonMaterials = [
   {
@@ -279,28 +358,12 @@ function getInitialCompletedLessonIds(modules: CourseModule[]) {
   ));
 }
 
-function getLessonProgressStorageKey(contentId: string) {
-  return `bunker707:lesson-progress:${contentId}`;
-}
-
-function saveCompletedLessonIds(storageKey: string, completedLessonIds: Set<string>, allLessonIds: Set<string>) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    const safeCompletedLessonIds = Array.from(completedLessonIds)
-      .filter((lessonId) => allLessonIds.has(lessonId))
-      .sort();
-
-    window.localStorage.setItem(storageKey, JSON.stringify(safeCompletedLessonIds));
-  } catch {
-    return;
-  }
-}
-
 function getFirstPlayableLessonId(courseModule: CourseModule, completedLessonIds: Set<string>) {
-  return courseModule.lessons.find((lesson) => !completedLessonIds.has(lesson.id))?.id ?? courseModule.lessons[0]?.id ?? "";
+  return courseModule.lessons.find((lesson) => (
+    !completedLessonIds.has(lesson.id) &&
+    !getReleaseRuleNotice(lesson.releaseRule, "aula")?.isLocked &&
+    !getReleaseRuleNotice(courseModule.releaseRule, "modulo")?.isLocked
+  ))?.id ?? courseModule.lessons[0]?.id ?? "";
 }
 
 function getLessonTarget(modules: CourseModule[], lessonId: string): LessonTarget | null {
@@ -313,6 +376,269 @@ function getLessonTarget(modules: CourseModule[], lessonId: string): LessonTarge
   }
 
   return null;
+}
+
+function EmptyLessonState({
+  accessPreviewMode,
+  item,
+  returnContent,
+  selectedModule
+}: Pick<LessonExperienceProps, "accessPreviewMode" | "item" | "returnContent" | "selectedModule">) {
+  const returnHref = withAccessPreviewParam(`/conteudo/${returnContent?.id ?? item.id}`, accessPreviewMode);
+  const returnLabel = returnContent?.title ?? item.title;
+
+  return (
+    <section className="relative mt-6">
+      <nav aria-label="Breadcrumb" className="mb-4 flex min-h-10 flex-wrap items-center gap-2 text-xs font-semibold text-zinc-500 sm:text-sm">
+        <Link className="transition hover:text-white" href={withAccessPreviewParam("/", accessPreviewMode)}>
+          Home
+        </Link>
+        <ChevronRight className="h-3.5 w-3.5" />
+        <Link className="transition hover:text-white" href={returnHref}>
+          {returnLabel}
+        </Link>
+        <ChevronRight className="h-3.5 w-3.5" />
+        {returnContent ? (
+          <>
+            <span className="text-zinc-300">{item.title}</span>
+            <ChevronRight className="h-3.5 w-3.5" />
+          </>
+        ) : null}
+        <span className="text-zinc-300">{selectedModule.title}</span>
+      </nav>
+
+      <div className="grid min-h-[62vh] place-items-center rounded-[8px] border border-white/10 bg-[#181818] p-6 text-center shadow-2xl shadow-black/35">
+        <div className="max-w-xl">
+          <span className="mx-auto grid h-16 w-16 place-items-center rounded-full border border-white/12 bg-black/35 text-zinc-200 shadow-xl shadow-black/30">
+            <MonitorPlay className="h-7 w-7 stroke-[2.4]" />
+          </span>
+          <p className="mt-5 text-2xl font-black leading-tight text-white sm:text-3xl">
+            Aulas em preparação
+          </p>
+          <p className="mt-3 text-sm font-semibold leading-6 text-zinc-400 sm:text-base sm:leading-7">
+            Este modulo ainda nao tem aulas publicadas. Assim que a primeira aula for cadastrada, ela aparece aqui automaticamente.
+          </p>
+          <Link
+            className="mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] bg-white px-5 py-2.5 text-sm font-extrabold text-black shadow-xl shadow-black/25 transition hover:bg-zinc-200"
+            href={returnHref}
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Voltar para {returnLabel}
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function extractYouTubeId(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  const trimmedValue = value.trim();
+
+  if (/^[\w-]{11}$/.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  try {
+    const url = new URL(trimmedValue);
+
+    if (url.hostname.includes("youtu.be")) {
+      return url.pathname.replace("/", "");
+    }
+
+    if (url.hostname.includes("youtube.com")) {
+      return url.searchParams.get("v") ?? url.pathname.split("/").filter(Boolean).pop() ?? "";
+    }
+  } catch {
+    return trimmedValue;
+  }
+
+  return "";
+}
+
+function getYouTubeThumbnailUrl(video?: LessonVideoConfig) {
+  if (video?.provider !== "youtube") {
+    return "";
+  }
+
+  const videoId = video.assetId || extractYouTubeId(video.url);
+
+  return videoId ? `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg` : "";
+}
+
+function extractVimeoId(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  const trimmedValue = value.trim();
+
+  if (/^\d+$/.test(trimmedValue)) {
+    return trimmedValue;
+  }
+
+  try {
+    const url = new URL(trimmedValue);
+    return url.pathname.split("/").filter(Boolean).pop() ?? "";
+  } catch {
+    return trimmedValue;
+  }
+}
+
+function getPlayerRenderConfig(video?: LessonVideoConfig): PlayerRenderConfig | null {
+  if (!video) {
+    return null;
+  }
+
+  if (video.provider === "embed_code" && video.embedCode) {
+    return {
+      kind: "srcdoc",
+      srcDoc: video.embedCode
+    };
+  }
+
+  if (video.provider === "youtube") {
+    const videoId = video.assetId || extractYouTubeId(video.url);
+
+    return videoId
+      ? {
+          kind: "iframe",
+          src: `https://www.youtube.com/embed/${videoId}?enablejsapi=1&rel=0&modestbranding=1&playsinline=1`
+        }
+      : null;
+  }
+
+  if (video.provider === "vimeo") {
+    const videoId = video.assetId || extractVimeoId(video.url);
+
+    return videoId
+      ? {
+          kind: "iframe",
+          src: `https://player.vimeo.com/video/${videoId}`
+        }
+      : null;
+  }
+
+  if (video.provider === "custom_url" && video.url) {
+    return {
+      kind: "video",
+      src: video.url
+    };
+  }
+
+  if (video.url) {
+    return {
+      kind: "iframe",
+      src: video.url
+    };
+  }
+
+  return null;
+}
+
+function getUrlWithPlaybackParams(
+  src: string,
+  {
+    autoplay = false,
+    startSeconds
+  }: {
+    autoplay?: boolean;
+    startSeconds?: number;
+  } = {}
+) {
+  try {
+    const url = new URL(src);
+
+    if (url.hostname.includes("youtube.com")) {
+      url.searchParams.set("enablejsapi", "1");
+      url.searchParams.set("autoplay", autoplay ? "1" : "0");
+    } else if (autoplay) {
+      url.searchParams.set("autoplay", "1");
+    }
+
+    if (url.hostname.includes("youtube.com")) {
+      if (startSeconds && startSeconds > 0) {
+        url.searchParams.set("start", String(Math.max(0, Math.floor(startSeconds))));
+      } else {
+        url.searchParams.delete("start");
+      }
+    }
+
+    return url.toString();
+  } catch {
+    return autoplay
+      ? src.includes("?") ? `${src}&autoplay=1` : `${src}?autoplay=1`
+      : src;
+  }
+}
+
+function loadYouTubeIframeApi() {
+  if (typeof window === "undefined") {
+    return Promise.resolve();
+  }
+
+  if (window.YT?.Player) {
+    return Promise.resolve();
+  }
+
+  if (youTubeIframeApiPromise) {
+    return youTubeIframeApiPromise;
+  }
+
+  youTubeIframeApiPromise = new Promise((resolve) => {
+    const previousReadyHandler = window.onYouTubeIframeAPIReady;
+
+    window.onYouTubeIframeAPIReady = () => {
+      previousReadyHandler?.();
+      resolve();
+    };
+
+    if (document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://www.youtube.com/iframe_api";
+    script.async = true;
+    document.head.appendChild(script);
+  });
+
+  return youTubeIframeApiPromise;
+}
+
+function readYouTubeMetric(readMetric: () => number) {
+  try {
+    const value = readMetric();
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseLessonDurationSeconds(duration: string) {
+  const trimmedDuration = duration.trim().toLowerCase();
+  const clockParts = trimmedDuration.split(":").map((part) => Number(part));
+
+  if (clockParts.length > 1 && clockParts.every((part) => Number.isFinite(part))) {
+    return clockParts.reduce((total, part) => (total * 60) + part, 0);
+  }
+
+  const hourMatch = trimmedDuration.match(/(\d+(?:[.,]\d+)?)\s*(h|hora|horas)/);
+  const minuteMatch = trimmedDuration.match(/(\d+(?:[.,]\d+)?)\s*(m|min|minuto|minutos)/);
+  const secondMatch = trimmedDuration.match(/(\d+(?:[.,]\d+)?)\s*(s|seg|segundo|segundos)/);
+  const hours = hourMatch ? Number(hourMatch[1].replace(",", ".")) : 0;
+  const minutes = minuteMatch ? Number(minuteMatch[1].replace(",", ".")) : 0;
+  const seconds = secondMatch ? Number(secondMatch[1].replace(",", ".")) : 0;
+  const total = (hours * 3600) + (minutes * 60) + seconds;
+
+  return Number.isFinite(total) && total > 0 ? Math.round(total) : undefined;
+}
+
+function clampProgressPercent(value: number) {
+  return Math.min(Math.max(Math.round(value), 0), 100);
 }
 
 function ActionTooltip({
@@ -429,10 +755,10 @@ function CommentBody({
 }
 
 function LessonReactionControl({
-  onSelect,
+  onToggle,
   value
 }: {
-  onSelect: (reaction: LessonReaction) => void;
+  onToggle: (reaction: LessonReaction) => void;
   value: LessonReaction | null;
 }) {
   const [isReactionMenuOpen, setIsReactionMenuOpen] = useState(false);
@@ -473,7 +799,7 @@ function LessonReactionControl({
             ? "pointer-events-auto translate-y-0 opacity-100"
             : "pointer-events-none translate-y-1 opacity-0"
         }`}
-        role="radiogroup"
+        role="group"
       >
         <span className="absolute -bottom-3 left-0 h-3 w-full" />
         {lessonReactionOptions.map((option) => {
@@ -482,18 +808,17 @@ function LessonReactionControl({
 
           return (
             <button
-              aria-checked={isSelected}
-              aria-label={option.label}
+              aria-label={isSelected ? `Remover avaliacao: ${option.label}` : option.label}
+              aria-pressed={isSelected}
               className={`group/reaction-option relative grid h-10 w-10 place-items-center rounded-full text-white transition duration-150 hover:bg-white/12 focus-visible:bg-white/12 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
                 isSelected ? "bg-white/14" : ""
               }`}
               key={option.id}
               onClick={(event) => {
-                onSelect(option.id);
+                onToggle(option.id);
                 setIsReactionMenuOpen(false);
                 event.currentTarget.blur();
               }}
-              role="radio"
               type="button"
             >
               <ReactionTooltip label={option.label} />
@@ -507,24 +832,34 @@ function LessonReactionControl({
 }
 
 export function LessonExperience({
+  accessPreviewMode,
   allModules,
+  initialLessonId: requestedInitialLessonId,
+  initialLessonReactions = {},
+  initialLessonWatchStates = {},
   item,
   returnContent,
   selectedModule
 }: LessonExperienceProps) {
+  const router = useRouter();
   const [completedLessonIds, setCompletedLessonIds] = useState<Set<string>>(
     () => new Set(getInitialCompletedLessonIds(allModules))
   );
-  const completedLessonStorageKey = useMemo(() => getLessonProgressStorageKey(item.id), [item.id]);
   const allLessonIds = useMemo(() => (
     new Set(allModules.flatMap((courseModule) => (
       courseModule.lessons.map((lesson) => lesson.id)
     )))
   ), [allModules]);
-  const initialLessonId = useMemo(() => (
+  const requestedLessonId = useMemo(() => (
+    requestedInitialLessonId && selectedModule.lessons.some((lesson) => lesson.id === requestedInitialLessonId)
+      ? requestedInitialLessonId
+      : ""
+  ), [requestedInitialLessonId, selectedModule]);
+  const fallbackInitialLessonId = useMemo(() => (
     getFirstPlayableLessonId(selectedModule, completedLessonIds)
   ), [completedLessonIds, selectedModule]);
-  const [activeLessonId, setActiveLessonId] = useState(initialLessonId);
+  const initialActiveLessonId = requestedLessonId || fallbackInitialLessonId;
+  const [activeLessonId, setActiveLessonId] = useState(initialActiveLessonId);
   const [activeModuleId, setActiveModuleId] = useState<string | null>(selectedModule.id);
   const [activeTab, setActiveTab] = useState<LessonTab>("comments");
   const [commentText, setCommentText] = useState("");
@@ -534,33 +869,357 @@ export function LessonExperience({
   const [commentMenuId, setCommentMenuId] = useState<string | null>(null);
   const [reportedCommentIds, setReportedCommentIds] = useState<Set<string>>(() => new Set());
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
-  const [lessonReactions, setLessonReactions] = useState<Partial<Record<string, LessonReaction>>>({});
+  const [lessonReactions, setLessonReactions] = useState<Partial<Record<string, LessonReaction>>>(initialLessonReactions);
+  const [lessonWatchStates, setLessonWatchStates] = useState<Record<string, LessonWatchState>>(initialLessonWatchStates);
+  const [startedLessonIds, setStartedLessonIds] = useState<Set<string>>(() => new Set());
+  const [canRenderEmbeddedPlayer, setCanRenderEmbeddedPlayer] = useState(false);
+  const [savedLessonOverrides, setSavedLessonOverrides] = useState<Record<string, boolean>>({});
   const [playlistOpen, setPlaylistOpen] = useState(true);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const youtubeIframeRef = useRef<HTMLIFrameElement>(null);
+  const youtubePlayerRef = useRef<YouTubePlayer | null>(null);
+  const initialResumeSecondsRef = useRef<Record<string, number>>({});
+  const lastProgressSyncRef = useRef<Record<string, number>>({});
+  const lessonWatchStatesRef = useRef(lessonWatchStates);
+  const pendingYouTubePlayLessonIdRef = useRef<string | null>(null);
+  const startedLessonIdsRef = useRef(startedLessonIds);
   const playlistScrollRef = useRef<HTMLDivElement>(null);
   const moduleRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const completedLessonIdsHydratedRef = useRef(false);
-
-  const fallbackTarget = getLessonTarget(allModules, activeLessonId) ?? {
-    lesson: selectedModule.lessons[0],
-    module: selectedModule
-  };
-  const activeLesson = fallbackTarget.lesson;
-  const activeModule = allModules.find((courseModule) => courseModule.id === activeModuleId) ?? fallbackTarget.module;
-  const totalCourseLessonsCount = allModules.reduce((total, courseModule) => total + courseModule.lessons.length, 0);
-  const completedCourseLessonsCount = allModules.reduce((total, courseModule) => (
-    total + courseModule.lessons.filter((lesson) => completedLessonIds.has(lesson.id)).length
-  ), 0);
-  const courseProgressPercent = totalCourseLessonsCount > 0
-    ? Math.round((completedCourseLessonsCount / totalCourseLessonsCount) * 100)
-    : 0;
-  const isActiveLessonCompleted = completedLessonIds.has(activeLesson.id);
-  const posterImage = activeLesson.image ?? activeModule.image;
-  const activeLessonWatchedPercent = 36;
-  const canRateLesson = activeLessonWatchedPercent >= 30;
-  const lessonReaction = lessonReactions[activeLesson.id] ?? null;
-  const hasRatedLesson = Boolean(lessonReaction);
   const totalCommentCount = useMemo(() => getTotalCommentCount(comments), [comments]);
+
+  const fallbackTarget =
+    getLessonTarget(allModules, activeLessonId) ??
+    (selectedModule.lessons[0]
+      ? {
+          lesson: selectedModule.lessons[0],
+          module: selectedModule
+        }
+      : null);
+  const activeLesson = fallbackTarget?.lesson ?? null;
+  const activeModule = allModules.find((courseModule) => courseModule.id === activeModuleId) ?? fallbackTarget?.module ?? selectedModule;
+  const activeLessonKey = activeLesson?.id ?? "";
+  const activeLessonDurationLabel = activeLesson?.duration;
+  const activeLessonVideoProvider = activeLesson?.video?.provider;
+  const activeReleaseNotice = activeLesson
+    ? (
+        item.isLocked
+          ? {
+              detail: "Esta aula fica disponivel quando o aluno tiver acesso ao conteudo.",
+              isLocked: true,
+              title: "Acesso pendente"
+            }
+          : (
+              getReleaseRuleNotice(activeLesson.releaseRule, "aula") ??
+              getReleaseRuleNotice(activeModule.releaseRule, "modulo")
+            )
+      )
+    : null;
+  const isActiveLessonLocked = Boolean(activeReleaseNotice?.isLocked);
+  const playerRenderConfig = activeLesson ? getPlayerRenderConfig(activeLesson.video) : null;
+  const activeLessonWatchState = activeLessonKey ? lessonWatchStates[activeLessonKey] : undefined;
+  if (activeLessonKey && initialResumeSecondsRef.current[activeLessonKey] === undefined) {
+    initialResumeSecondsRef.current[activeLessonKey] = activeLessonWatchState?.progressSeconds ?? 0;
+  }
+  const activeLessonDurationSeconds = activeLesson
+    ? activeLessonWatchState?.durationSeconds ?? parseLessonDurationSeconds(activeLesson.duration)
+    : undefined;
+  const activeLessonStarted = activeLessonKey ? startedLessonIds.has(activeLessonKey) : false;
+  const activeLessonWatchedPercent = activeLessonWatchState?.progressPercent ?? 0;
+  const activeLessonMaxWatchedPercent = Math.max(
+    activeLessonWatchState?.maxProgressPercent ?? 0,
+    activeLessonWatchedPercent
+  );
+  const activePlayerRenderConfig = playerRenderConfig?.kind === "iframe"
+    ? {
+        ...playerRenderConfig,
+        src: getUrlWithPlaybackParams(playerRenderConfig.src, {
+          startSeconds: initialResumeSecondsRef.current[activeLessonKey]
+        })
+      }
+    : playerRenderConfig;
+  const persistLessonProgress = useCallback(async (payload: LessonProgressPayload) => {
+    try {
+      const response = await fetch("/api/progress/lessons", {
+        body: JSON.stringify(payload),
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "PUT"
+      });
+
+      if (response.ok) {
+        return;
+      }
+
+      const detail = await response.text();
+      console.error("Erro ao salvar progresso da aula.", {
+        detail,
+        status: response.status
+      });
+    } catch (error: unknown) {
+      console.error("Erro de rede ao salvar progresso da aula.", error);
+    }
+  }, []);
+  const syncLessonWatchProgress = useCallback(async ({
+    durationSeconds,
+    force = false,
+    lessonId,
+    progressPercent,
+    progressSeconds,
+    status
+  }: {
+    durationSeconds?: number;
+    force?: boolean;
+    lessonId: string;
+    progressPercent: number;
+    progressSeconds: number;
+    status: LessonWatchStatus;
+  }) => {
+    if (!lessonId || isActiveLessonLocked) {
+      return;
+    }
+
+    const now = Date.now();
+    const lastSync = lastProgressSyncRef.current[lessonId] ?? 0;
+
+    if (!force && now - lastSync < 3000) {
+      return;
+    }
+
+    lastProgressSyncRef.current[lessonId] = now;
+
+    const safeProgressSeconds = Math.max(0, Math.round(progressSeconds));
+    const roundedProgressPercent = clampProgressPercent(progressPercent);
+    const safeProgressPercent = status === "completed"
+      ? 100
+      : Math.min(safeProgressSeconds > 0 ? Math.max(roundedProgressPercent, 1) : roundedProgressPercent, 99);
+    const existingWatchState = lessonWatchStatesRef.current[lessonId];
+    const safeMaxProgressPercent = status === "completed"
+      ? 100
+      : Math.max(
+          existingWatchState?.maxProgressPercent ?? existingWatchState?.progressPercent ?? 0,
+          safeProgressPercent
+        );
+    const nextState: LessonWatchState = {
+      ...(durationSeconds !== undefined ? { durationSeconds: Math.max(0, Math.round(durationSeconds)) } : {}),
+      lastWatchedAt: new Date().toISOString(),
+      maxProgressPercent: safeMaxProgressPercent,
+      progressPercent: safeProgressPercent,
+      progressSeconds: safeProgressSeconds,
+      status
+    };
+
+    lessonWatchStatesRef.current = {
+      ...lessonWatchStatesRef.current,
+      [lessonId]: nextState
+    };
+    setLessonWatchStates(lessonWatchStatesRef.current);
+
+    if (status === "completed") {
+      setCompletedLessonIds((current) => {
+        const nextCompletedLessonIds = new Set(current);
+        nextCompletedLessonIds.add(lessonId);
+        return nextCompletedLessonIds;
+      });
+    }
+
+    await persistLessonProgress({
+      contentId: item.id,
+      durationSeconds: nextState.durationSeconds,
+      lessonId,
+      maxProgressPercent: nextState.maxProgressPercent,
+      progressPercent: nextState.progressPercent,
+      progressSeconds: nextState.progressSeconds,
+      status
+    });
+  }, [isActiveLessonLocked, item.id, persistLessonProgress]);
+
+  const handlePlayerStart = useCallback(() => {
+    if (isActiveLessonLocked || !activeLessonKey) {
+      return;
+    }
+
+    setStartedLessonIds((current) => {
+      if (current.has(activeLessonKey)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.add(activeLessonKey);
+      return next;
+    });
+
+    const currentProgressSeconds = lessonWatchStates[activeLessonKey]?.progressSeconds ?? 0;
+    const nextProgressSeconds = Math.max(currentProgressSeconds, 1);
+    const nextProgressPercent = activeLessonDurationSeconds && activeLessonDurationSeconds > 0
+      ? clampProgressPercent((nextProgressSeconds / activeLessonDurationSeconds) * 100)
+      : Math.max(activeLessonWatchedPercent, 1);
+
+    void syncLessonWatchProgress({
+      durationSeconds: activeLessonDurationSeconds,
+      force: true,
+      lessonId: activeLessonKey,
+      progressPercent: Math.min(nextProgressPercent, 99),
+      progressSeconds: nextProgressSeconds,
+      status: "in_progress"
+    });
+
+    if (activeLessonVideoProvider === "youtube") {
+      pendingYouTubePlayLessonIdRef.current = activeLessonKey;
+      youtubePlayerRef.current?.playVideo?.();
+    }
+  }, [
+    activeLessonDurationSeconds,
+    activeLessonKey,
+    activeLessonVideoProvider,
+    activeLessonWatchedPercent,
+    isActiveLessonLocked,
+    lessonWatchStates,
+    syncLessonWatchProgress
+  ]);
+
+  const syncYouTubePlayerProgress = useCallback(async (
+    player: YouTubePlayer,
+    {
+      fallbackDurationSeconds,
+      force = false,
+      lessonId,
+      minimumProgressSeconds = 0,
+      status = "in_progress"
+    }: {
+      fallbackDurationSeconds?: number;
+      force?: boolean;
+      lessonId: string;
+      minimumProgressSeconds?: number;
+      status?: LessonWatchStatus;
+    }
+  ) => {
+    const playerCurrentTime = readYouTubeMetric(() => player.getCurrentTime());
+    const playerDuration = readYouTubeMetric(() => player.getDuration());
+    const durationSeconds = playerDuration && playerDuration > 0
+      ? playerDuration
+      : fallbackDurationSeconds;
+
+    if (playerCurrentTime === undefined && status !== "completed") {
+      return;
+    }
+
+    const progressSeconds = status === "completed" && durationSeconds
+      ? durationSeconds
+      : Math.max(playerCurrentTime ?? 0, minimumProgressSeconds);
+    const progressPercent = status === "completed"
+      ? 100
+      : durationSeconds && durationSeconds > 0
+        ? clampProgressPercent((progressSeconds / durationSeconds) * 100)
+        : progressSeconds > 0 ? 1 : 0;
+
+    await syncLessonWatchProgress({
+      durationSeconds,
+      force,
+      lessonId,
+      progressPercent,
+      progressSeconds,
+      status
+    });
+  }, [syncLessonWatchProgress]);
+
+  const flushActiveLessonProgress = useCallback(async () => {
+    if (!activeLessonKey || isActiveLessonLocked) {
+      return;
+    }
+
+    const status = activeLessonWatchState?.status === "completed" ? "completed" : "in_progress";
+    const fallbackDurationSeconds = activeLessonDurationLabel
+      ? parseLessonDurationSeconds(activeLessonDurationLabel)
+      : activeLessonDurationSeconds;
+
+    if (activeLessonVideoProvider === "youtube" && youtubePlayerRef.current) {
+      await syncYouTubePlayerProgress(youtubePlayerRef.current, {
+        fallbackDurationSeconds,
+        force: true,
+        lessonId: activeLessonKey,
+        status
+      });
+      return;
+    }
+
+    if (activePlayerRenderConfig?.kind === "video" && videoRef.current) {
+      const video = videoRef.current;
+      const durationSeconds = Number.isFinite(video.duration) && video.duration > 0
+        ? video.duration
+        : activeLessonDurationSeconds;
+      const progressSeconds = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      const progressPercent = durationSeconds && durationSeconds > 0
+        ? clampProgressPercent((progressSeconds / durationSeconds) * 100)
+        : activeLessonWatchedPercent;
+
+      await syncLessonWatchProgress({
+        durationSeconds,
+        force: true,
+        lessonId: activeLessonKey,
+        progressPercent,
+        progressSeconds,
+        status
+      });
+      return;
+    }
+
+    const currentState = lessonWatchStatesRef.current[activeLessonKey];
+
+    if (!currentState) {
+      return;
+    }
+
+    await syncLessonWatchProgress({
+      durationSeconds: currentState.durationSeconds ?? activeLessonDurationSeconds,
+      force: true,
+      lessonId: activeLessonKey,
+      progressPercent: currentState.progressPercent,
+      progressSeconds: currentState.progressSeconds,
+      status: currentState.status
+    });
+  }, [
+    activeLessonDurationLabel,
+    activeLessonDurationSeconds,
+    activeLessonKey,
+    activeLessonVideoProvider,
+    activeLessonWatchState?.status,
+    activeLessonWatchedPercent,
+    activePlayerRenderConfig?.kind,
+    isActiveLessonLocked,
+    syncLessonWatchProgress,
+    syncYouTubePlayerProgress
+  ]);
+
+  useEffect(() => {
+    lessonWatchStatesRef.current = lessonWatchStates;
+  }, [lessonWatchStates]);
+
+  useEffect(() => {
+    window.__bunker707FlushLessonProgress = flushActiveLessonProgress;
+
+    return () => {
+      if (window.__bunker707FlushLessonProgress === flushActiveLessonProgress) {
+        delete window.__bunker707FlushLessonProgress;
+      }
+    };
+  }, [flushActiveLessonProgress]);
+
+  useEffect(() => {
+    startedLessonIdsRef.current = startedLessonIds;
+  }, [startedLessonIds]);
+
+  useEffect(() => {
+    const animationFrame = window.requestAnimationFrame(() => {
+      setCanRenderEmbeddedPlayer(true);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, []);
 
   useEffect(() => {
     if (!commentMenuId && !commentReactionMenuId) {
@@ -588,57 +1247,6 @@ export function LessonExperience({
       document.removeEventListener("pointerdown", handleCommentPopoverPointerDown);
     };
   }, [commentMenuId, commentReactionMenuId]);
-
-  useEffect(() => {
-    completedLessonIdsHydratedRef.current = false;
-
-    const animationFrame = window.requestAnimationFrame(() => {
-      try {
-        const storedCompletedLessonIds = window.localStorage.getItem(completedLessonStorageKey);
-
-        if (!storedCompletedLessonIds) {
-          completedLessonIdsHydratedRef.current = true;
-          return;
-        }
-
-        const parsedCompletedLessonIds: unknown = JSON.parse(storedCompletedLessonIds);
-
-        if (!Array.isArray(parsedCompletedLessonIds)) {
-          completedLessonIdsHydratedRef.current = true;
-          return;
-        }
-
-        setCompletedLessonIds((current) => {
-          const next = new Set(current);
-
-          for (const lessonId of parsedCompletedLessonIds) {
-            if (typeof lessonId === "string" && allLessonIds.has(lessonId)) {
-              next.add(lessonId);
-            }
-          }
-
-          return next;
-        });
-      } catch {
-        completedLessonIdsHydratedRef.current = true;
-        return;
-      }
-
-      completedLessonIdsHydratedRef.current = true;
-    });
-
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-    };
-  }, [allLessonIds, completedLessonStorageKey]);
-
-  useEffect(() => {
-    if (!completedLessonIdsHydratedRef.current) {
-      return;
-    }
-
-    saveCompletedLessonIds(completedLessonStorageKey, completedLessonIds, allLessonIds);
-  }, [allLessonIds, completedLessonIds, completedLessonStorageKey]);
 
   useEffect(() => {
     if (!activeModuleId) {
@@ -676,35 +1284,406 @@ export function LessonExperience({
     };
   }, [activeModuleId]);
 
+  useEffect(() => {
+    if (
+      !canRenderEmbeddedPlayer ||
+      !activeLessonKey ||
+      activeLessonVideoProvider !== "youtube" ||
+      isActiveLessonLocked ||
+      activePlayerRenderConfig?.kind !== "iframe"
+    ) {
+      youtubePlayerRef.current = null;
+      return;
+    }
+
+    const iframe = youtubeIframeRef.current;
+
+    if (!iframe) {
+      return;
+    }
+
+    let cancelled = false;
+    let player: YouTubePlayer | null = null;
+    const lessonId = activeLessonKey;
+    const fallbackDurationSeconds = activeLessonDurationLabel
+      ? parseLessonDurationSeconds(activeLessonDurationLabel)
+      : undefined;
+
+    void loadYouTubeIframeApi().then(() => {
+      if (cancelled || !window.YT?.Player || youtubeIframeRef.current !== iframe) {
+        return;
+      }
+
+      const playerStates = window.YT.PlayerState;
+
+      player = new window.YT.Player(iframe, {
+        events: {
+          onReady: (event) => {
+            if (cancelled) {
+              return;
+            }
+
+            youtubePlayerRef.current = event.target;
+            const resumeSeconds = Math.max(0, Math.floor(initialResumeSecondsRef.current[lessonId] ?? 0));
+
+            if (resumeSeconds > 0) {
+              try {
+                event.target.seekTo(resumeSeconds, true);
+              } catch {
+                // The player can reject seek requests while its iframe is still warming up.
+              }
+            }
+
+            if (pendingYouTubePlayLessonIdRef.current === lessonId) {
+              pendingYouTubePlayLessonIdRef.current = null;
+              event.target.playVideo?.();
+            } else {
+              event.target.pauseVideo?.();
+            }
+          },
+          onStateChange: (event) => {
+            if (cancelled) {
+              return;
+            }
+
+            youtubePlayerRef.current = event.target;
+
+            if (event.data === playerStates.PLAYING) {
+              if (pendingYouTubePlayLessonIdRef.current === lessonId) {
+                pendingYouTubePlayLessonIdRef.current = null;
+              } else if (!startedLessonIdsRef.current.has(lessonId)) {
+                event.target.pauseVideo?.();
+                return;
+              }
+
+              setStartedLessonIds((current) => {
+                if (current.has(lessonId)) {
+                  return current;
+                }
+
+                const next = new Set(current);
+                next.add(lessonId);
+                return next;
+              });
+              void syncYouTubePlayerProgress(event.target, {
+                fallbackDurationSeconds,
+                force: true,
+                lessonId,
+                minimumProgressSeconds: 1,
+                status: "in_progress"
+              });
+              return;
+            }
+
+            if (event.data === playerStates.PAUSED) {
+              if (!startedLessonIdsRef.current.has(lessonId)) {
+                return;
+              }
+
+              void syncYouTubePlayerProgress(event.target, {
+                fallbackDurationSeconds,
+                force: true,
+                lessonId,
+                status: "in_progress"
+              });
+              return;
+            }
+
+            if (event.data === playerStates.ENDED) {
+              void syncYouTubePlayerProgress(event.target, {
+                fallbackDurationSeconds,
+                force: true,
+                lessonId,
+                status: "completed"
+              });
+            }
+          }
+        }
+      });
+      youtubePlayerRef.current = player;
+    });
+
+    return () => {
+      cancelled = true;
+
+      if (player) {
+        void syncYouTubePlayerProgress(player, {
+          fallbackDurationSeconds,
+          force: true,
+          lessonId,
+          status: "in_progress"
+        });
+
+        try {
+          player.destroy?.();
+        } catch {
+          // Some browser navigations detach the iframe before the YouTube player cleanup runs.
+        }
+      }
+
+      if (youtubePlayerRef.current === player) {
+        youtubePlayerRef.current = null;
+      }
+
+      if (pendingYouTubePlayLessonIdRef.current === lessonId) {
+        pendingYouTubePlayLessonIdRef.current = null;
+      }
+    };
+  }, [
+    activeLessonDurationLabel,
+    activeLessonKey,
+    activeLessonVideoProvider,
+    activePlayerRenderConfig?.kind,
+    canRenderEmbeddedPlayer,
+    isActiveLessonLocked,
+    syncYouTubePlayerProgress
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeLessonKey ||
+      activeLessonVideoProvider !== "youtube" ||
+      !activeLessonStarted ||
+      isActiveLessonLocked
+    ) {
+      return;
+    }
+
+    const lessonId = activeLessonKey;
+    const fallbackDurationSeconds = activeLessonDurationLabel
+      ? parseLessonDurationSeconds(activeLessonDurationLabel)
+      : undefined;
+    const interval = window.setInterval(() => {
+      const currentPlayer = youtubePlayerRef.current;
+
+      if (!currentPlayer) {
+        return;
+      }
+
+      const playerState = currentPlayer.getPlayerState?.();
+      const playingState = window.YT?.PlayerState.PLAYING ?? 1;
+      const bufferingState = window.YT?.PlayerState.BUFFERING ?? 3;
+
+      if (playerState !== undefined && playerState !== playingState && playerState !== bufferingState) {
+        return;
+      }
+
+      void syncYouTubePlayerProgress(currentPlayer, {
+        fallbackDurationSeconds,
+        force: true,
+        lessonId,
+        status: "in_progress"
+      });
+    }, 3000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [
+    activeLessonDurationLabel,
+    activeLessonKey,
+    activeLessonVideoProvider,
+    activeLessonStarted,
+    isActiveLessonLocked,
+    syncYouTubePlayerProgress
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeLesson ||
+      !activeLessonStarted ||
+      isActiveLessonLocked ||
+      playerRenderConfig?.kind === "video" ||
+      activeLesson.video?.provider === "youtube"
+    ) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      const currentState = lessonWatchStates[activeLesson.id];
+      const nextSeconds = (currentState?.progressSeconds ?? 0) + 10;
+      const nextPercent = activeLessonDurationSeconds && activeLessonDurationSeconds > 0
+        ? clampProgressPercent((nextSeconds / activeLessonDurationSeconds) * 100)
+        : Math.max(currentState?.progressPercent ?? 1, 1);
+
+      void syncLessonWatchProgress({
+        durationSeconds: activeLessonDurationSeconds,
+        force: true,
+        lessonId: activeLesson.id,
+        progressPercent: Math.min(nextPercent, 99),
+        progressSeconds: nextSeconds,
+        status: "in_progress"
+      });
+    }, 10000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [
+    activeLesson,
+    activeLessonDurationSeconds,
+    activeLessonStarted,
+    isActiveLessonLocked,
+    lessonWatchStates,
+    activeLesson?.video?.provider,
+    playerRenderConfig?.kind,
+    syncLessonWatchProgress
+  ]);
+
+  if (!activeLesson) {
+    return (
+      <EmptyLessonState
+        accessPreviewMode={accessPreviewMode}
+        item={item}
+        returnContent={returnContent}
+        selectedModule={selectedModule}
+      />
+    );
+  }
+
+  const totalCourseLessonsCount = allModules.reduce((total, courseModule) => total + courseModule.lessons.length, 0);
+  const completedCourseLessonsCount = allModules.reduce((total, courseModule) => (
+    total + courseModule.lessons.filter((lesson) => completedLessonIds.has(lesson.id)).length
+  ), 0);
+  const courseProgressPercent = totalCourseLessonsCount > 0
+    ? Math.round((completedCourseLessonsCount / totalCourseLessonsCount) * 100)
+    : 0;
+  const isActiveLessonCompleted = completedLessonIds.has(activeLessonKey);
+  const posterImage = activeLesson.image ?? activeModule.image;
+  const videoPosterImage = getYouTubeThumbnailUrl(activeLesson.video) || posterImage;
+  const lessonReaction = lessonReactions[activeLessonKey] ?? null;
+  const hasRatedLesson = Boolean(lessonReaction);
+  const canRateLesson = activeLessonMaxWatchedPercent >= 30 || hasRatedLesson;
+  const activeLessonSaved = savedLessonOverrides[activeLessonKey] ?? Boolean(activeLesson.isSaved);
+  const showPlayerClickOverlay =
+    !isActiveLessonLocked &&
+    Boolean(activePlayerRenderConfig) &&
+    activePlayerRenderConfig?.kind !== "video" &&
+    !activeLessonStarted;
+  const showPlayerPosterOverlay =
+    showPlayerClickOverlay &&
+    activeLessonVideoProvider === "youtube";
+
   function handlePrimaryLessonAction() {
-    handleLessonCompletionToggle(activeLesson.id);
+    if (isActiveLessonLocked) {
+      return;
+    }
+
+    handleLessonCompletionToggle(activeLessonKey);
   }
 
   function handleLessonCompletionToggle(lessonId: string) {
     const nextCompletedLessonIds = new Set(completedLessonIds);
+    const willCompleteLesson = !nextCompletedLessonIds.has(lessonId);
 
-    if (nextCompletedLessonIds.has(lessonId)) {
+    if (!willCompleteLesson) {
       nextCompletedLessonIds.delete(lessonId);
     } else {
       nextCompletedLessonIds.add(lessonId);
     }
 
-    saveCompletedLessonIds(completedLessonStorageKey, nextCompletedLessonIds, allLessonIds);
+    const safeCompletedLessonIds = Array.from(nextCompletedLessonIds)
+      .filter((completedLessonId) => allLessonIds.has(completedLessonId))
+      .sort();
+
+    void persistLessonProgress({
+      completedLessonIds: safeCompletedLessonIds,
+      contentId: item.id,
+      durationSeconds: activeLessonDurationSeconds,
+      lessonId,
+      maxProgressPercent: willCompleteLesson
+        ? 100
+        : Math.max(
+            lessonWatchStates[lessonId]?.maxProgressPercent ?? 0,
+            lessonWatchStates[lessonId]?.progressPercent ?? activeLessonWatchedPercent
+          ),
+      progressPercent: willCompleteLesson ? 100 : activeLessonWatchedPercent,
+      progressSeconds: willCompleteLesson
+        ? activeLessonDurationSeconds ?? lessonWatchStates[lessonId]?.progressSeconds ?? 0
+        : lessonWatchStates[lessonId]?.progressSeconds ?? 0,
+      status: willCompleteLesson ? "completed" : "in_progress"
+    });
     setCompletedLessonIds(nextCompletedLessonIds);
-  }
+    setLessonWatchStates((current) => {
+      const currentState = current[lessonId];
+      const nextState = {
+        ...(activeLessonDurationSeconds !== undefined ? { durationSeconds: activeLessonDurationSeconds } : {}),
+        lastWatchedAt: new Date().toISOString(),
+        maxProgressPercent: willCompleteLesson
+          ? 100
+          : Math.max(
+              currentState?.maxProgressPercent ?? 0,
+              currentState?.progressPercent ?? activeLessonWatchedPercent
+            ),
+        progressPercent: willCompleteLesson
+          ? 100
+          : Math.min(currentState?.progressPercent ?? activeLessonWatchedPercent, 99),
+        progressSeconds: willCompleteLesson
+          ? activeLessonDurationSeconds ?? currentState?.progressSeconds ?? 0
+          : currentState?.progressSeconds ?? 0,
+        status: willCompleteLesson ? "completed" : "in_progress"
+      } satisfies LessonWatchState;
+      const next = {
+        ...current,
+        [lessonId]: nextState
+      };
 
-  function handleLessonReactionSelect(reaction: LessonReaction) {
-    setLessonReactions((current) => {
-      const next = { ...current };
-
-      if (next[activeLesson.id] === reaction) {
-        delete next[activeLesson.id];
-        return next;
-      }
-
-      next[activeLesson.id] = reaction;
+      lessonWatchStatesRef.current = next;
       return next;
     });
+  }
+
+  function handleNativeVideoProgress(video: HTMLVideoElement, force = false, status: LessonWatchStatus = "in_progress") {
+    if (!activeLessonKey) {
+      return;
+    }
+
+    const durationSeconds = Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : activeLessonDurationSeconds;
+    const progressSeconds = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+    const progressPercent = durationSeconds && durationSeconds > 0
+      ? clampProgressPercent((progressSeconds / durationSeconds) * 100)
+      : activeLessonWatchedPercent;
+
+    void syncLessonWatchProgress({
+      durationSeconds,
+      force,
+      lessonId: activeLessonKey,
+      progressPercent,
+      progressSeconds,
+      status
+    });
+  }
+
+  function handleLessonReactionToggle(reaction: LessonReaction) {
+    const nextLessonReactions = { ...lessonReactions };
+
+    if (nextLessonReactions[activeLessonKey] === reaction) {
+      delete nextLessonReactions[activeLessonKey];
+    } else {
+      nextLessonReactions[activeLessonKey] = reaction;
+    }
+
+    setLessonReactions(nextLessonReactions);
+
+    void persistLessonProgress({
+      contentId: item.id,
+      durationSeconds: activeLessonWatchState?.durationSeconds ?? activeLessonDurationSeconds,
+      lessonId: activeLessonKey,
+      lessonReactions: nextLessonReactions,
+      maxProgressPercent: activeLessonMaxWatchedPercent,
+      progressPercent: activeLessonWatchedPercent,
+      progressSeconds: activeLessonWatchState?.progressSeconds ?? 0,
+      status: activeLessonWatchState?.status ?? "in_progress"
+    });
+  }
+
+  function handleActiveLessonSavedChange(saved: boolean) {
+    setSavedLessonOverrides((current) => ({
+      ...current,
+      [activeLessonKey]: saved
+    }));
   }
 
   function handleCommentReactionToggle(commentId: string, reactionId: CommentReaction) {
@@ -816,6 +1795,15 @@ export function LessonExperience({
   }
 
   function handleLessonSelect(courseModule: CourseModule, lesson: LessonPreview) {
+    const releaseNotice =
+      getReleaseRuleNotice(lesson.releaseRule, "aula") ??
+      getReleaseRuleNotice(courseModule.releaseRule, "modulo");
+
+    if (releaseNotice?.isLocked) {
+      setActiveModuleId(courseModule.id);
+      return;
+    }
+
     setActiveModuleId(courseModule.id);
     setActiveLessonId(lesson.id);
   }
@@ -883,19 +1871,52 @@ export function LessonExperience({
     setActiveTab("comments");
   }
 
-  const primaryActionLabel = isActiveLessonCompleted ? "Concluida" : "Concluir";
+  const primaryActionLabel = isActiveLessonLocked ? "Bloqueada" : isActiveLessonCompleted ? "Concluida" : "Concluir";
   const canSubmitComment = commentText.trim().length > 0;
-  const returnHref = `/conteudo/${returnContent?.id ?? item.id}`;
+  const returnHref = withAccessPreviewParam(`/conteudo/${returnContent?.id ?? item.id}`, accessPreviewMode);
   const returnLabel = returnContent?.title ?? item.title;
+
+  function handleProgressAwareNavigation(event: MouseEvent<HTMLAnchorElement>, href: string) {
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    void (async () => {
+      await flushActiveLessonProgress();
+      router.push(href);
+      window.setTimeout(() => {
+        router.refresh();
+      }, 0);
+    })();
+  }
 
   return (
     <section className="relative mt-6">
       <nav aria-label="Breadcrumb" className="mb-4 flex min-h-10 flex-wrap items-center gap-2 text-xs font-semibold text-zinc-500 sm:text-sm">
-        <Link className="transition hover:text-white" href="/">
+        <Link
+          className="transition hover:text-white"
+          href={withAccessPreviewParam("/", accessPreviewMode)}
+          onClick={(event) => handleProgressAwareNavigation(event, withAccessPreviewParam("/", accessPreviewMode))}
+          prefetch={false}
+        >
           Home
         </Link>
         <ChevronRight className="h-3.5 w-3.5" />
-        <Link className="transition hover:text-white" href={returnHref}>
+        <Link
+          className="transition hover:text-white"
+          href={returnHref}
+          onClick={(event) => handleProgressAwareNavigation(event, returnHref)}
+          prefetch={false}
+        >
           {returnLabel}
         </Link>
         <ChevronRight className="h-3.5 w-3.5" />
@@ -911,21 +1932,120 @@ export function LessonExperience({
       </nav>
 
       <div className={`lesson-experience-grid relative grid gap-6 ${playlistOpen ? "" : "lesson-experience-grid-collapsed"}`}>
-        <div className="min-w-0">
-        <div className="group/player relative aspect-video overflow-visible rounded-[8px] bg-black shadow-[0_32px_90px_rgba(0,0,0,0.58)]">
-          <div className="absolute inset-0 overflow-hidden rounded-[8px] bg-black">
-            <div
-              className="absolute inset-0 bg-cover bg-center opacity-78"
-              style={{ backgroundImage: `url(${posterImage})` }}
-            />
-            <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.72),rgba(0,0,0,0.18)_52%,rgba(0,0,0,0.58))]" />
-            <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black via-black/[0.72] to-transparent" />
-          </div>
+        <div className="lesson-main-content min-w-0">
+          <div className="lesson-player-frame group/player relative z-0 aspect-video overflow-visible rounded-[8px] bg-black shadow-[0_32px_90px_rgba(0,0,0,0.58)]">
+            <div className="absolute inset-0 overflow-hidden rounded-[8px] bg-black">
+              {!isActiveLessonLocked && activePlayerRenderConfig ? (
+                activePlayerRenderConfig.kind === "video" ? (
+                  <video
+                    className="h-full w-full bg-black object-contain"
+                    controls
+                    onEnded={(event) => handleNativeVideoProgress(event.currentTarget, true, "completed")}
+                    onLoadedMetadata={(event) => {
+                      const resumeSeconds = initialResumeSecondsRef.current[activeLessonKey] ?? 0;
+
+                      if (
+                        resumeSeconds > 0 &&
+                        Number.isFinite(event.currentTarget.duration) &&
+                        resumeSeconds < event.currentTarget.duration
+                      ) {
+                        event.currentTarget.currentTime = resumeSeconds;
+                      }
+                    }}
+                    onPause={(event) => handleNativeVideoProgress(event.currentTarget, true)}
+                    onPlay={(event) => {
+                      handlePlayerStart();
+                      handleNativeVideoProgress(event.currentTarget, true);
+                    }}
+                    onTimeUpdate={(event) => handleNativeVideoProgress(event.currentTarget)}
+                    poster={videoPosterImage}
+                    ref={videoRef}
+                    src={activePlayerRenderConfig.src}
+                  />
+                ) : canRenderEmbeddedPlayer ? (
+                  <iframe
+                    allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                    className="h-full w-full border-0"
+                    ref={
+                      activeLesson.video?.provider === "youtube" && activePlayerRenderConfig.kind === "iframe"
+                        ? youtubeIframeRef
+                        : undefined
+                    }
+                    referrerPolicy="strict-origin-when-cross-origin"
+                    sandbox="allow-same-origin allow-scripts allow-presentation allow-popups"
+                    src={activePlayerRenderConfig.kind === "iframe" ? activePlayerRenderConfig.src : undefined}
+                    srcDoc={activePlayerRenderConfig.kind === "srcdoc" ? activePlayerRenderConfig.srcDoc : undefined}
+                    title={activeLesson.title}
+                  />
+                ) : (
+                  <>
+                    <div
+                      className="absolute inset-0 bg-cover bg-center opacity-78"
+                      style={{ backgroundImage: `url(${videoPosterImage})` }}
+                    />
+                    <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.72),rgba(0,0,0,0.18)_52%,rgba(0,0,0,0.58))]" />
+                    <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black via-black/[0.72] to-transparent" />
+                  </>
+                )
+              ) : (
+                <>
+                  <div
+                    className="absolute inset-0 bg-cover bg-center opacity-78"
+                    style={{ backgroundImage: `url(${posterImage})` }}
+                  />
+                  <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.72),rgba(0,0,0,0.18)_52%,rgba(0,0,0,0.58))]" />
+                  <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black via-black/[0.72] to-transparent" />
+                </>
+              )}
+            </div>
+
+          {showPlayerClickOverlay ? (
+            <button
+              aria-label="Reproduzir aula"
+              className={`absolute inset-0 z-30 overflow-hidden rounded-[8px] text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
+                showPlayerPosterOverlay ? "bg-black" : "bg-transparent"
+              }`}
+              onClick={handlePlayerStart}
+              type="button"
+            >
+              {showPlayerPosterOverlay ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-0 bg-cover bg-center opacity-95 transition duration-500 group-hover/player:scale-[1.015]"
+                    style={{ backgroundImage: `url(${videoPosterImage})` }}
+                  />
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.64),rgba(0,0,0,0.12)_52%,rgba(0,0,0,0.52))]"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/85 via-black/35 to-transparent"
+                  />
+                </>
+              ) : null}
+              {showPlayerPosterOverlay && activeLessonWatchedPercent > 0 ? (
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-x-5 bottom-5 h-1 overflow-hidden rounded-full bg-white/24 sm:inset-x-6"
+                >
+                  <span
+                    className="block h-full rounded-full bg-[var(--accent)]"
+                    style={{ width: `${activeLessonWatchedPercent}%` }}
+                  />
+                </span>
+              ) : null}
+            </button>
+          ) : null}
 
           <Link
             aria-label={`Voltar para ${returnLabel}`}
-            className="group/action absolute left-3 top-3 z-50 grid h-11 w-11 place-items-center rounded-full text-white opacity-0 transition duration-200 hover:bg-black/35 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white group-hover/player:opacity-100 max-lg:opacity-100 sm:left-4 sm:top-4 sm:h-12 sm:w-12"
+            className="group/action absolute left-3 top-3 z-30 grid h-11 w-11 place-items-center rounded-full text-white opacity-0 transition duration-200 hover:bg-black/35 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white group-hover/player:opacity-100 max-lg:opacity-100 sm:left-4 sm:top-4 sm:h-12 sm:w-12"
             href={returnHref}
+            onClick={(event) => handleProgressAwareNavigation(event, returnHref)}
+            prefetch={false}
           >
             <ActionTooltip elevated label="Voltar" />
             <ArrowLeft className="h-7 w-7 stroke-[2.4] sm:h-8 sm:w-8" />
@@ -934,7 +2054,7 @@ export function LessonExperience({
           {!playlistOpen ? (
             <button
               aria-label="Mostrar listagem de aulas"
-              className="group/action absolute right-4 top-4 z-50 grid h-11 w-11 place-items-center rounded-full text-white transition duration-200 hover:bg-black/35 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white max-xl:hidden sm:h-12 sm:w-12"
+              className="group/action absolute right-4 top-4 z-30 grid h-11 w-11 place-items-center rounded-full text-white transition duration-200 hover:bg-black/35 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white max-xl:hidden sm:h-12 sm:w-12"
               onClick={() => setPlaylistOpen(true)}
               type="button"
             >
@@ -943,43 +2063,73 @@ export function LessonExperience({
             </button>
           ) : null}
 
-          <button
-            aria-label="Reproduzir aula"
-            className="absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-black shadow-2xl shadow-black/55 transition hover:scale-105 hover:bg-zinc-200 sm:h-20 sm:w-20"
-            type="button"
-          >
-            <Play className="ml-1 h-7 w-7 fill-current sm:h-9 sm:w-9" />
-          </button>
-
-          <div className="absolute inset-x-4 bottom-4 sm:inset-x-6 sm:bottom-5">
-            <div className="mb-3 h-1 overflow-hidden rounded-full bg-white/20">
-              <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${activeLessonWatchedPercent}%` }} />
+          {isActiveLessonLocked ? (
+            <div className="absolute left-1/2 top-1/2 z-40 w-[min(30rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[8px] border border-white/12 bg-black/76 p-5 text-center shadow-2xl shadow-black/60 backdrop-blur">
+              <LockKeyhole className="mx-auto h-9 w-9 stroke-[2.6] text-white" />
+              <p className="mt-3 text-lg font-black leading-tight text-white">
+                {activeReleaseNotice?.title ?? "Esta aula sera liberada"}
+              </p>
+              <p className="mt-2 text-sm font-semibold leading-6 text-zinc-300">
+                {activeReleaseNotice?.detail ?? "Disponivel de acordo com a regra de entrega."}
+              </p>
             </div>
-            <div className="flex items-center justify-between gap-4 text-xs font-semibold text-zinc-300">
-              <span className="truncate">12:48 / {activeLesson.duration}</span>
-              <div className="flex items-center gap-3">
-                <button
-                  aria-label="Volume"
-                  className="group/action relative grid h-8 w-8 place-items-center rounded-full text-zinc-300 transition hover:scale-105 hover:bg-white hover:text-black"
-                  type="button"
-                >
-                  <ActionTooltip label="Volume" />
-                  <Volume2 className="h-4 w-4" />
-                </button>
-                <button
-                  aria-label="Tela cheia"
-                  className="group/action relative grid h-8 w-8 place-items-center rounded-full text-zinc-300 transition hover:scale-105 hover:bg-white hover:text-black"
-                  type="button"
-                >
-                  <ActionTooltip label="Tela cheia" />
-                  <Maximize2 className="h-4 w-4" />
-                </button>
+          ) : activePlayerRenderConfig && !activeLessonStarted ? (
+            <button
+              aria-label="Reproduzir aula"
+              className="absolute left-1/2 top-1/2 z-40 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-black shadow-2xl shadow-black/55 transition hover:scale-105 hover:bg-zinc-200 sm:h-20 sm:w-20"
+              onClick={() => {
+                handlePlayerStart();
+
+                if (activePlayerRenderConfig.kind === "video") {
+                  void videoRef.current?.play();
+                }
+              }}
+              type="button"
+            >
+              <Play className="ml-1 h-7 w-7 fill-current sm:h-9 sm:w-9" />
+            </button>
+          ) : activePlayerRenderConfig ? null : (
+            <button
+              aria-label="Reproduzir aula"
+              className="absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-black shadow-2xl shadow-black/55 transition hover:scale-105 hover:bg-zinc-200 sm:h-20 sm:w-20"
+              onClick={handlePlayerStart}
+              type="button"
+            >
+              <Play className="ml-1 h-7 w-7 fill-current sm:h-9 sm:w-9" />
+            </button>
+          )}
+
+          {!activePlayerRenderConfig ? (
+            <div className="absolute inset-x-4 bottom-4 sm:inset-x-6 sm:bottom-5">
+              <div className="mb-3 h-1 overflow-hidden rounded-full bg-white/20">
+                <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${activeLessonWatchedPercent}%` }} />
+              </div>
+              <div className="flex items-center justify-between gap-4 text-xs font-semibold text-zinc-300">
+                <span className="truncate">12:48 / {activeLesson.duration}</span>
+                <div className="flex items-center gap-3">
+                  <button
+                    aria-label="Volume"
+                    className="group/action relative grid h-8 w-8 place-items-center rounded-full text-zinc-300 transition hover:scale-105 hover:bg-white hover:text-black"
+                    type="button"
+                  >
+                    <ActionTooltip label="Volume" />
+                    <Volume2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    aria-label="Tela cheia"
+                    className="group/action relative grid h-8 w-8 place-items-center rounded-full text-zinc-300 transition hover:scale-105 hover:bg-white hover:text-black"
+                    type="button"
+                  >
+                    <ActionTooltip label="Tela cheia" />
+                    <Maximize2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          ) : null}
         </div>
 
-        <div className="mt-6 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="lesson-details-header mt-6 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <h1 className="max-w-5xl text-2xl font-black leading-tight text-white sm:text-3xl lg:text-4xl">
               {activeLesson.title}
@@ -994,9 +2144,10 @@ export function LessonExperience({
               <button
                 aria-label={isActiveLessonCompleted ? "Desmarcar aula atual como concluida" : "Concluir aula atual"}
                 aria-pressed={isActiveLessonCompleted}
-                className={`lesson-primary-complete-button group/complete relative inline-flex min-h-12 min-w-[9rem] items-center justify-center gap-2 overflow-hidden rounded-[8px] px-5 py-3 text-sm font-extrabold shadow-2xl shadow-black/30 transition duration-200 hover:scale-[1.02] hover:brightness-105 active:scale-[0.98] sm:min-w-[10rem] ${
+                className={`lesson-primary-complete-button group/complete relative inline-flex min-h-12 min-w-[9rem] items-center justify-center gap-2 overflow-hidden rounded-[8px] px-5 py-3 text-sm font-extrabold shadow-2xl shadow-black/30 transition duration-200 hover:scale-[1.02] hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:scale-100 sm:min-w-[10rem] ${
                   isActiveLessonCompleted ? "lesson-primary-complete-button-done" : ""
                 }`}
+                disabled={isActiveLessonLocked}
                 onClick={handlePrimaryLessonAction}
                 style={isActiveLessonCompleted ? { backgroundColor: "#059669", color: "#ffffff" } : undefined}
                 type="button"
@@ -1033,17 +2184,22 @@ export function LessonExperience({
                 <ActionTooltip label="TV" />
                 <MonitorPlay className="h-5 w-5 stroke-[2.35]" />
               </button>
-              <button
-                aria-label="Salvar aula"
-                className={lessonIconButtonClassName}
-                type="button"
-              >
-                <ActionTooltip label="Adicionar a Minha lista" />
-                <Bookmark className="h-5 w-5 stroke-[2.35]" />
-              </button>
+              <span className="group/action relative inline-grid">
+                <ActionTooltip label={activeLessonSaved ? "Remover da Minha lista" : "Adicionar a Minha lista"} />
+                <SavedItemButton
+                  className={lessonIconButtonClassName}
+                  iconClassName="h-5 w-5 stroke-[2.35]"
+                  initialSaved={activeLessonSaved}
+                  key={activeLesson.id}
+                  onSavedChange={handleActiveLessonSavedChange}
+                  targetId={activeLesson.id}
+                  targetTitle={activeLesson.title}
+                  targetType="lesson"
+                />
+              </span>
               {canRateLesson ? (
                 <LessonReactionControl
-                  onSelect={handleLessonReactionSelect}
+                  onToggle={handleLessonReactionToggle}
                   value={lessonReaction}
                 />
               ) : null}
@@ -1060,7 +2216,7 @@ export function LessonExperience({
           </div>
         </div>
 
-        <div className="mt-8 overflow-visible rounded-[8px] border border-white/10 bg-[#181818]">
+        <div className="lesson-support-panel mt-8 overflow-visible rounded-[8px] border border-white/10 bg-[#181818]">
           <div className="flex border-b border-white/10">
             {[
               { id: "comments" as const, label: "Comentarios", count: totalCommentCount, icon: MessageCircle },
@@ -1553,10 +2709,7 @@ export function LessonExperience({
                     type="button"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="inline-flex rounded-[6px] border border-white/10 bg-black/25 px-2 py-1 text-[11px] font-black uppercase tracking-normal text-zinc-400">
-                        {courseModule.eyebrow}
-                      </span>
-                      <span className="mt-2 block line-clamp-2 text-base font-black leading-tight text-white">
+                      <span className="block line-clamp-2 text-base font-black leading-tight text-white">
                         {courseModule.title}
                       </span>
                       <span className="mt-2 block text-xs font-semibold text-zinc-400">
@@ -1576,13 +2729,25 @@ export function LessonExperience({
                       {courseModule.lessons.map((lesson) => {
                         const isActive = lesson.id === activeLesson.id;
                         const isCompleted = completedLessonIds.has(lesson.id);
+                        const releaseNotice =
+                          item.isLocked
+                            ? {
+                                detail: "Acesso pendente",
+                                isLocked: true,
+                                title: "Acesso pendente"
+                              }
+                            : (
+                                getReleaseRuleNotice(lesson.releaseRule, "aula") ??
+                                getReleaseRuleNotice(courseModule.releaseRule, "modulo")
+                              );
+                        const isLessonLocked = Boolean(releaseNotice?.isLocked);
 
                         return (
                           <li className="border-t border-white/10 first:border-t-0" key={lesson.id}>
                             <div
                               className={`group relative grid w-full gap-3 px-4 py-4 text-left transition hover:bg-white/[0.045] sm:grid-cols-[9rem_minmax(0,1fr)_auto] ${
                                 isActive ? "bg-white/[0.09]" : ""
-                              }`}
+                              } ${isLessonLocked ? "cursor-not-allowed" : "cursor-pointer"}`}
                               onClick={() => handleLessonSelect(courseModule, lesson)}
                               onKeyDown={(event) => handleLessonRowKeyDown(event, courseModule, lesson)}
                               role="button"
@@ -1597,9 +2762,16 @@ export function LessonExperience({
                                   style={{ backgroundImage: `url(${lesson.image ?? courseModule.image})` }}
                                 />
                                 <span className={`absolute inset-0 transition-colors ${
-                                  isActive ? "bg-black/70" : "bg-black/[0.2]"
+                                  isLessonLocked ? "bg-black/68" : isActive ? "bg-black/70" : "bg-black/[0.2]"
                                 }`} />
-                                {isActive ? (
+                                {isLessonLocked ? (
+                                  <span className="absolute inset-0 z-10 grid place-items-center p-2 text-center">
+                                    <span className="rounded-[6px] border border-white/10 bg-black/76 px-2 py-2 text-[10px] font-bold leading-4 text-white shadow-xl shadow-black/40">
+                                      <LockKeyhole className="mx-auto mb-1 h-4 w-4" />
+                                      {releaseNotice?.detail ?? "Aula bloqueada"}
+                                    </span>
+                                  </span>
+                                ) : isActive && startedLessonIds.has(lesson.id) ? (
                                   <span className="absolute inset-0 grid place-items-center px-2">
                                     <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
                                       <span className="lesson-watching-dot h-1.5 w-1.5 rounded-full bg-amber-400" />
@@ -1630,7 +2802,8 @@ export function LessonExperience({
                                     isCompleted
                                       ? "bg-emerald-600 text-white hover:bg-emerald-500"
                                       : "bg-black/50 text-zinc-300 ring-1 ring-white/25 hover:bg-white hover:text-black"
-                                  }`}
+                                  } disabled:cursor-not-allowed disabled:opacity-45`}
+                                  disabled={isLessonLocked}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     handleLessonCompletionToggle(lesson.id);

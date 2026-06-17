@@ -7,7 +7,7 @@
 - Definir paleta visual.
 - Definir capas iniciais de formacoes, cursos avulsos e bootcamps.
 - Definir categorias da home.
-- Definir nomenclatura: formacao, curso avulso, curso interno, bootcamp, modulo, aula.
+- Definir nomenclatura: formacao, curso avulso, mentoria, webinario, produto, curso interno, bootcamp, modulo, aula.
 
 ## UX/UI
 
@@ -30,25 +30,36 @@
 - Criar pagina de login com templates configuraveis.
 - Criar layout autenticado.
 - Criar componentes: Header, Sidebar, Hero, ContentRow, VerticalCard.
-- Criar acao visual de salvar/favoritar em cards e modais.
-- Criar paginas: Home, Minhas compras, Curso, Aula, Perfil, Suporte.
-- Criar mock data inicial.
+- Criar acao visual e persistida de salvar/favoritar em cards, modais e pagina de aula.
+- Criar paginas: Home, Minhas compras, Favoritos, Curso, Aula, Perfil, Suporte.
+- Criar seed inicial de dados.
 - Testar responsividade.
 - Criar rota `/admin` com CMS UI-first.
 - Criar dashboard administrativo com visao geral, catalogo, estrutura, liberacao e acessos.
-- Criar mocks do CMS para regras de drip, entitlements, webhooks e secoes da home.
+- Criar persistencia do CMS para criacao de formacoes, cursos, mentorias, webinarios, produtos, modulos e aulas.
+- Evoluir o cadastro do Catalogo para um construtor em passos: configuracao inicial, modulos e aulas no mesmo local.
+- Permitir que o produtor ative, no CMS, uma secao da home com capa pequena do curso e cards menores dos modulos de um curso especifico.
+- Permitir upload local da capa vertical do card em 720 x 1040 px e hero opcional em 1920 x 720 px para paginas de cursos/produtos.
+- Adicionar no cadastro de aula os campos de descricao, duracao, thumbnail e player: YouTube, Vimeo, Bunny Stream, Mux, URL propria ou codigo embed.
+- Criar configuracao de acesso por item: fechado, gratuito, limite de estudantes, link externo de compra e abertura em mesma/nova aba.
+- Criar persistencia do CMS para regras de drip/agendamento dentro de formacoes, cursos, mentorias, webinarios, produtos, modulos e aulas, alem de secoes da home e CRM.
+- Criar modo de preview local na area de membros para produtor/admin, aluno com acesso e aluno sem acesso.
+- Criar CRM UI-first de alunos com lista geral, filtros, detalhe do aluno, cadastro/edicao/remocao local e visao por curso.
+- Refinar CRM de alunos com listagem enxuta, engajamento por nivel, produtos alinhados na linha e modal sem scroll duplo.
+- Permitir abrir e fechar a sidebar do CMS pelo hamburger, seguindo o padrao da area do aluno.
+- Criar suporte a turmas/coortes com conteudos extras por segmento, visiveis apenas para a turma correspondente.
 
 ## Backend
 
-- Escolher Auth: Clerk ou Supabase Auth.
+- Escolher Auth: Supabase Auth definido para o MVP.
 - Criar schema inicial.
 - Configurar Supabase.
 - Criar policies RLS.
 - Criar camada de acesso/entitlements.
-- Criar APIs de progresso.
+- Criar APIs de progresso autenticadas.
 - Criar modelo de progresso contextual por produto.
 - Criar modelo de tarefas praticas: quizzes, desafios e projetos.
-- Criar modelo de itens salvos/favoritos.
+- Criar modelo e API autenticada de itens salvos/favoritos.
 - Criar APIs de busca.
 - Criar suporte simples.
 
@@ -64,6 +75,7 @@
 - Criar webhook manual de teste.
 - Criar webhook Hotmart.
 - Criar webhook Ticto.
+- Criar adaptador Kiwify quando essa plataforma entrar no fluxo comercial.
 - Criar tabela de eventos brutos.
 - Criar job de processamento.
 - Criar logs de falhas.
@@ -81,8 +93,8 @@
 - Criar formacao principal.
 - Criar curso avulso inicial.
 - Criar modulos.
-- Criar aulas mockadas.
-- Criar materiais mockados.
+- Criar aulas persistidas.
+- Criar materiais persistidos.
 
 ## Fase futura
 

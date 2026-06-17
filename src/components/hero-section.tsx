@@ -1,7 +1,7 @@
 import { Zap } from "lucide-react";
-import { hero } from "@/lib/mock-data";
+import type { HomeHeroConfig } from "@/lib/platform-types";
 
-export function HeroSection() {
+export function HeroSection({ hero }: { hero: HomeHeroConfig }) {
   const showBadge = (hero.visibility?.badge ?? Boolean(hero.badge)) && Boolean(hero.badge);
   const showTitle = (hero.visibility?.title ?? Boolean(hero.title)) && Boolean(hero.title);
   const showDescription =

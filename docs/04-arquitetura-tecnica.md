@@ -10,7 +10,7 @@ Stack principal:
 - shadcn/ui;
 - Supabase Postgres;
 - Row Level Security;
-- Clerk ou Supabase Auth;
+- Supabase Auth;
 - Mux ou Bunny Stream para video;
 - PostHog para analytics de produto;
 - Sentry para erros;
@@ -77,26 +77,42 @@ src/
 
 ## Autenticacao
 
-Duas opcoes:
+Decisao do MVP: Supabase Auth.
 
-### Clerk
+Motivos:
 
-Vantagens:
+- menos fornecedores no primeiro ciclo;
+- integrado ao banco e as policies RLS;
+- bom para MVP enxuto;
+- permite email/senha, OAuth e recuperacao de senha sem expor service role no browser.
 
-- experiencia pronta e polida;
-- MFA, passkeys e provedores sociais;
-- boa integracao com Next.js;
-- reduz tempo no login.
+Implementacao atual:
 
-### Supabase Auth
+- `@supabase/ssr` cria clientes de browser, servidor e middleware;
+- o middleware protege home, `Minhas compras`, `Favoritos`, paginas de conteudo/aula e `/admin`;
+- `/login` autentica por email/senha e provedores sociais habilitados no Supabase;
+- `/auth/callback` troca o codigo OAuth por sessao no servidor;
+- apos autenticar, usuarios com papel em `admin_roles` sao direcionados para `/admin`; alunos sem papel administrativo seguem para a area de membros;
+- `/alterar-senha` permite que aluno autenticado defina nova senha quando `must_change_password` estiver ativo;
+- o middleware redireciona usuarios com `must_change_password = true` para `/alterar-senha` antes de liberar a area de membros;
+- `/admin` exige papel em `admin_roles`;
+- APIs de progresso exigem usuario autenticado e APIs do CMS exigem permissao administrativa.
 
-Vantagens:
+Cadastro manual de aluno:
 
-- menos fornecedores;
-- integrado ao banco;
-- bom para MVP enxuto.
+- o CRM pode enviar convite para o aluno criar senha, que e o fluxo padrao;
+- alternativamente, o admin pode gerar ou definir uma senha temporaria;
+- a rota `/api/admin/students/access` roda apenas no servidor, exige admin e usa Supabase Admin com `service_role`;
+- convite usa Supabase Auth e direciona para `/auth/callback?next=/alterar-senha&provider=email`, para trocar o codigo do link em sessao server-side antes de levar o aluno para definir senha;
+- senha temporaria cria ou atualiza o usuario no Supabase Auth, marca `must_change_password = true` e nao salva a senha no CMS;
+- o mesmo fluxo sincroniza `profiles` e `entitlements` para os cursos/produtos selecionados no cadastro.
 
-Decisao inicial sugerida: Clerk se prioridade for velocidade e UX de login; Supabase Auth se prioridade for simplicidade de stack.
+Para desenvolvimento local sem variaveis Supabase, existe um fallback controlado:
+
+- aparece o CTA `Entrar em modo local` no login;
+- cria um cookie httpOnly local;
+- funciona somente quando `NODE_ENV !== "production"` e Supabase Auth nao esta configurado;
+- serve apenas para navegar o MVP em `localhost`, nao para autorizacao real.
 
 ## Acesso e entitlements
 
@@ -154,6 +170,15 @@ Requisitos:
 - metadados de duracao;
 - possibilidade futura de transcricao.
 
+Tracking de progresso:
+
+- o frontend deve registrar inicio, segundos assistidos, percentual atual, maior percentual ja alcancado, abandono/pausa e conclusao por aula;
+- players HTML5/proprios usam eventos nativos (`play`, `timeupdate`, `pause`, `ended`) para segundos reais;
+- YouTube usa a IFrame API como adapter inicial, lendo `currentTime`, `duration`, estados de play/pause/end e retomando com `seekTo` sem autoplay; enquanto o aluno nao aciona play, a UI cobre o iframe com a thumbnail oficial do YouTube e a barra de progresso salva, porque o frame pausado do embed pode aparecer preto antes da reproducao;
+- antes de navegar da aula para home, curso ou modulos, a UI deve forcar um ultimo flush de progresso do player para evitar que carrosseis e barras carreguem dados antigos vindos de prefetch/cache de rota;
+- Vimeo, Bunny, Mux e embeds externos devem ficar atras de adapters de player equivalentes, expondo uma interface comum de play, pause, currentTime, duration, seek e estado de conclusao;
+- enquanto um adapter especifico ainda nao estiver completo, o app pode registrar inicio por clique no player e um temporizador de sessao para alimentar `Continue assistindo`, deixando claro que esse fallback nao substitui a precisao de provedores com API integrada.
+
 ## Eventos do aluno
 
 Registrar eventos desde o MVP.
@@ -163,14 +188,30 @@ Eventos iniciais:
 - user_signed_in;
 - home_viewed;
 - course_opened;
+- saved_item_toggled;
 - lesson_started;
 - lesson_progress_updated;
+- lesson_retention_point_recorded;
 - lesson_completed;
 - material_downloaded;
 - search_performed;
 - support_requested.
 
 Esses eventos alimentarao dashboards, automacoes e IA no futuro.
+
+No MVP, a avaliacao da aula em formato de reacao (`Nao gostei`, `Gostei`, `Amei`) e persistida junto do progresso autenticado da aula em `lesson_progress.lesson_reactions`, para sobreviver a refresh e futuras telas de CRM. A elegibilidade da avaliacao usa o maior percentual ja alcancado na aula, nao apenas a posicao atual do player.
+
+## Favoritos e minha lista
+
+A acao de salvar/favoritar usa a rota server-side `/api/saved-items`, exige sessao autenticada e grava a relacao pessoal do aluno em `saved_items`.
+
+Regras:
+
+- salvar um item nao concede acesso;
+- itens salvos continuam respeitando entitlements e regras de liberacao;
+- no desenvolvimento local sem Supabase, a mesma lista fica no fallback `.data/bunker707-platform.json`;
+- quando Supabase esta configurado, a tabela `saved_items` usa RLS para que cada aluno leia e altere somente os proprios favoritos.
+- a sidebar expõe a rota `/favoritos`, que lista conteudos, modulos e aulas salvos pelo aluno autenticado.
 
 ## Deploy
 

@@ -38,7 +38,7 @@ support_tickets
 
 ### users
 
-Representa a identidade autenticada. Pode vir de Clerk ou Supabase Auth.
+Representa a identidade autenticada. No MVP atual vem de Supabase Auth.
 
 Campos conceituais:
 
@@ -54,7 +54,8 @@ Campos conceituais:
 Dados editaveis do aluno.
 
 - id;
-- user_id;
+- user_id/id do Supabase Auth;
+- email;
 - full_name;
 - avatar_url;
 - phone;
@@ -81,11 +82,11 @@ Relaciona um aluno a plataformas externas.
 Representa um produto/plano interno da Bunker707.
 
 - id;
-- type: formation, standalone_course, bootcamp, platform_access;
+- type: formation, standalone_course, mentorship, webinar, generic_product, bootcamp, platform_access;
 - name;
 - slug;
 - description;
-- target_type: formation, standalone_course, bootcamp, platform;
+- target_type: formation, standalone_course, mentorship, webinar, product, bootcamp, platform;
 - target_id;
 - active;
 - created_at.
@@ -99,7 +100,7 @@ Permissoes reais do aluno.
 - source_provider;
 - source_event_id;
 - product_id;
-- target_type: platform, formation, standalone_course, bootcamp;
+- target_type: platform, formation, standalone_course, mentorship, webinar, product, bootcamp;
 - target_id;
 - status: active, suspended, revoked, expired;
 - starts_at;
@@ -109,6 +110,16 @@ Permissoes reais do aluno.
 
 Regra: a interface nunca deve liberar conteudo apenas por dados de pagamento. Sempre consultar entitlement.
 
+Implementacao atual:
+
+- `entitlements` existe como tabela interna com RLS;
+- aluno autenticado pode ler somente seus proprios entitlements;
+- cliente nao pode criar, editar ou remover entitlement;
+- webhooks, CRM e operacoes manuais devem alterar entitlements apenas via servidor/admin.
+- a area do aluno aplica entitlements ativos por usuario autenticado para liberar cards, paginas e `Minhas compras`;
+- enquanto o CRM manual e a tabela de entitlements coexistirem, o backend tambem reconhece os cursos ativos vinculados ao aluno por email/id e sincroniza esses cursos para `entitlements` quando o usuario Auth ja existe;
+- o modo de preview de acesso e ferramenta administrativa: so aparece para usuarios com papel em `admin_roles` e nao altera a experiencia de alunos comuns.
+
 ## Home configuravel
 
 ### home_sections
@@ -117,9 +128,10 @@ Regra: a interface nunca deve liberar conteudo apenas por dados de pagamento. Se
 - title;
 - subtitle;
 - order_index;
-- section_type: continue_watching, purchases, showcase, upcoming, custom;
+- section_type: continue_watching, purchases, course_modules, showcase, upcoming, custom;
 - visibility: students, non_students, all;
-- content_source: manual, entitlement_products, sellable_products, upcoming_products, recent_lessons;
+- content_source: manual, entitlement_products, selected_course_modules, sellable_products, upcoming_products, recent_lessons;
+- source_content_id: curso/produto usado quando `section_type` for `course_modules`;
 - is_active;
 - created_at;
 - updated_at.
@@ -130,6 +142,10 @@ Regras:
 - `showcase`/`sellable_products` pode listar produtos comprados e nao comprados, conforme configuracao;
 - produtos sem entitlement aparecem bloqueados na UI;
 - `upcoming_products` pode listar produtos futuros, novidades e listas de espera;
+- `course_modules` mostra os modulos de um curso especifico escolhido pelo produtor, com capa vertical reduzida do curso à esquerda e, à direita, rotulo pequeno, titulo e botao de acao abaixo do titulo;
+- `course_modules` pode aparecer para alunos com ou sem entitlement ativo; os cards de modulos nao exibem botao proprio e usam clique no card; sem acesso, o curso mostra acao `Comprar` e os modulos abrem o modal de detalhes por padrao;
+- o botao `Comprar` pode abrir o modal de detalhes ou o link externo de compra, conforme configuracao do CMS;
+- modulos dentro de `course_modules` continuam respeitando regras de compra, entitlement, drip/agendamento e podem aparecer bloqueados;
 - a regra `visibility` define se a secao aparece apenas para alunos/compradores, apenas para nao compradores/visitantes ou para todos.
 
 ## Login configuravel
@@ -164,6 +180,7 @@ Regras:
 Regras de produto e acesso:
 
 - formacao e produto vendavel;
+- curso, mentoria, webinario, produto generico e bootcamp tambem podem ser itens vendaveis ou gratuitos;
 - bootcamp e produto vendavel;
 - curso avulso e produto vendavel;
 - curso interno de formacao nao e produto vendavel separado;
@@ -173,7 +190,45 @@ Regras de produto e acesso:
 
 ## CMS administrativo
 
-O prototipo inicial do CMS em `/admin` e UI-first e usa mock data. Quando conectado ao banco, o CMS deve gravar e versionar conteudo sem misturar autorizacao administrativa com a experiencia do aluno.
+O CMS em `/admin` grava dados por uma camada server-side persistida em Supabase Postgres/RLS. No desenvolvimento local sem variaveis Supabase, existe fallback em `.data/bunker707-platform.json` apenas para manter o `localhost:3000` navegavel; em ambientes reais, a fonte deve ser Supabase sem misturar autorizacao administrativa com a experiencia do aluno. Um Supabase vazio nao deve receber dados demo automaticamente: cadastros reais entram pelo CMS, APIs, webhooks ou migrations controladas.
+
+O menu principal do CMS deve ser enxuto: Visao geral, Alunos, Catalogo e Estrutura. Regras de liberacao nao ficam em uma tela solta; elas sao campos do proprio item editado, seja formacao, curso, mentoria, webinario, produto, modulo, aula ou material.
+
+O primeiro fluxo de criacao do CMS deve funcionar como um construtor LMS:
+
+1. criar o item educacional: formacao, curso, mentoria, webinario, produto ou bootcamp;
+2. definir capa, descricao, modelo de acesso, limite de estudantes e link externo de compra quando houver;
+3. no mesmo fluxo, avancar para a criacao de trilhas/modulos;
+4. no mesmo fluxo, adicionar aulas dentro dos modulos;
+5. em cada nivel, configurar regra de entrega/publicacao.
+
+O produtor pode salvar apenas o primeiro passo e voltar depois para completar modulos e aulas. A aba Estrutura continua existindo como visao operacional, mas o cadastro principal do Catalogo deve permitir montar o conteudo sem trocar de tela.
+
+Campos planejados/adicionados ao item educacional:
+
+- access_model: closed ou free;
+- max_students: numero maximo de estudantes ou nulo para ilimitado;
+- purchase_url: pagina de vendas ou checkout externo para itens bloqueados;
+- purchase_target: same_tab ou new_tab;
+- release_rule: regra de entrega/publicacao.
+- cover_url/image: capa vertical enviada pelo produtor, preferencialmente em 720 x 1040 px nesta fase;
+- hero media opcional via `content_page_settings.hero`, com tamanho definido de 1920 x 720 px para pagina propria do curso/produto.
+- coursePresentationMode em `content_page_settings`: `module_cards` para curso com cards de modulos ou `lesson_playlist` para `Card unico`.
+- homeModuleSection em `content_page_settings`: quando `enabled`, a home do aluno pode mostrar o nome do curso, capa pequena e os modulos desse curso como secao propria.
+- lockedActionMode em `content_page_settings`: `details_modal` para abrir modal em conteudo sem acesso ou `external_link` para abrir o link externo de compra configurado em `purchase_url`.
+
+Regras de entrega/publicacao:
+
+- immediate: disponivel imediatamente;
+- fixed_date: publicar/liberar em data e hora especificas;
+- after_enrollment: liberar X horas ou dias apos a inscricao/entitlement do aluno;
+- after_purchase: equivalente operacional para eventos externos de compra/entitlement;
+- after_previous_lesson: liberar apos aula anterior;
+- activity_required: liberar apos avaliacao, comentario, tarefa ou outra atividade.
+
+Na area do aluno, conteudos bloqueados por compra devem abrir o modal de detalhes e mostrar CTA de compra externa configurada. Conteudos bloqueados por regra de entrega devem mostrar overlay com cadeado no card, modulo ou thumbnail da aula, informando quando o conteudo sera liberado para aquele aluno.
+
+Para teste local/admin, a area de membros pode ser renderizada em modos de preview: sessao atual, produtor/admin, aluno com acesso e aluno sem acesso. O modo com acesso remove bloqueios de compra/entitlement, mas nao remove bloqueios de regra de entrega ou data. O modo sem acesso mostra a vitrine com produtos bloqueados e deixa `Minhas compras` sem produtos liberados.
 
 ### content_drafts
 
@@ -204,7 +259,7 @@ Historico de publicacao para auditoria e rollback.
 
 ### admin_roles
 
-Permissoes de usuarios administrativos quando Auth estiver conectada.
+Permissoes de usuarios administrativos com Supabase Auth.
 
 - id;
 - user_id;
@@ -227,10 +282,49 @@ Auditoria de acoes sensiveis do CMS.
 
 Regras:
 
-- somente usuarios com papel administrativo podem acessar `/admin`;
+- somente usuarios com papel administrativo em `admin_roles` podem acessar `/admin`;
+- APIs `/api/admin/*` tambem exigem papel administrativo;
 - edicoes de conteudo devem gerar log;
 - alteracoes de entitlement, regra de liberacao e webhook reprocessado devem ser auditaveis;
 - chaves de provedores, service role e segredos de webhook nunca ficam no browser.
+
+### CRM de alunos
+
+A tela administrativa de alunos deve ser uma visao operacional sobre `users`, `profiles`, `external_accounts`,
+`products`, `entitlements`, `product_progress`, `student_events` e `webhook_events`.
+
+Dados exibidos por aluno:
+
+- listagem operacional enxuta: foto/avatar, nome, email, ultimo acesso, status, engajamento e produtos;
+- detalhe do aluno: nome, email, foto/avatar, categoria, origem, primeiro acesso, ultimo acesso e quantidade de acessos;
+- telefone, documento, cidade/UF, tags e observacoes continuam editaveis quando forem necessarios para suporte, mas nao devem poluir a listagem padrao;
+- origem principal: hotmart, ticto, tiktok, kiwify ou manual;
+- identificador externo do comprador/aluno quando existir;
+- cursos, formacoes e bootcamps comprados, sempre representados por entitlements internos;
+- capas dos produtos comprados devem aparecer compactas na listagem, sem abrir uma linha extra que desalinhe a tabela;
+- clicar nos produtos da listagem deve levar ao detalhe do aluno, onde a lista completa de produtos fica organizada;
+- turma/coorte de cada produto comprado, com regras de conteudo por segmento e extras opcionais;
+- uma turma pode ter conteudo base igual ao produto principal e extras exclusivos que nao aparecem nas demais turmas;
+- turma e categoria ajudam a segmentar liberacao, suporte e campanhas dentro do mesmo produto;
+- status de acesso: active, suspended, revoked ou expired;
+- progresso por produto e ultima atividade;
+- engajamento derivado de acessos, progresso e atividade, exibido como nenhum, baixo, medio, alto ou altissimo;
+- tags operacionais para suporte, segmentacao e acompanhamento.
+
+Regras:
+
+- adicionar aluno manualmente deve criar ou vincular perfil e gerar entitlement de origem `manual`;
+- cadastro manual deve oferecer convite por email como padrao e senha temporaria como alternativa operacional;
+- senha temporaria pode ser gerada automaticamente ou definida pelo admin, mas nao deve ser persistida no CMS;
+- quando senha temporaria for usada, o usuario em Supabase Auth deve receber `must_change_password = true` em `user_metadata`;
+- no primeiro acesso, alunos com `must_change_password = true` sao enviados para `/alterar-senha` antes de acessar aulas;
+- compras de Hotmart, Ticto, TikTok, Kiwify ou plataformas similares entram por webhooks/adaptadores e atualizam entitlements;
+- remover um aluno pelo CRM nao deve apagar historico bruto de webhook nem eventos de auditoria;
+- a listagem por curso deve consultar alunos que possuem entitlement para o produto ou curso selecionado;
+- filtros de CRM podem combinar origem, status, produto/curso, texto livre, tags e atividade.
+- o modal de aluno deve bloquear o scroll da pagina de fundo e deixar a rolagem apenas na camada externa do modal;
+- turmas podem liberar conteudos extras exclusivos por produto, sem expor esses extras para outras turmas.
+- a navegacao lateral do CMS deve abrir e fechar pelo hamburger, seguindo o padrao de drawer da area do aluno.
 
 ## Conteudo
 
@@ -319,9 +413,11 @@ Bootcamps sao produtos vendaveis com estrutura propria de modulos/aulas ou relac
 ### modules
 
 - id;
-- course_id;
+- owner_id: id da formacao, curso, mentoria, webinario, produto ou bootcamp ao qual pertence;
+- owner_kind;
 - title;
 - description;
+- image/capa;
 - order_index;
 - status.
 
@@ -334,11 +430,17 @@ Bootcamps sao produtos vendaveis com estrutura propria de modulos/aulas ou relac
 - description;
 - video_provider;
 - video_asset_id;
+- video_url;
+- video_embed_code;
 - duration_seconds;
 - thumbnail_url;
 - status;
 - order_index;
 - published_at.
+
+No CMS, o cadastro de aula deve expor pelo menos: titulo, descricao, duracao, thumbnail, tipo de player/origem do video, URL ou ID do asset e codigo embed quando o player for externo/customizado. O app nao hospeda videos; ele referencia YouTube, Vimeo, Bunny Stream, Mux, URL propria segura ou codigo embed informado pelo produtor.
+
+Na area do aluno, listas de aulas devem usar somente imagem associada a aula: thumbnail oficial do video quando disponivel ou `thumbnail_url` cadastrada para a aula. A falta de thumbnail propria nao deve ser preenchida automaticamente com capa do modulo ou imagem generica.
 
 ### lesson_materials
 
@@ -361,7 +463,7 @@ Regra:
 
 ### content_release_rules
 
-Regras configuraveis no CMS para liberar formacoes, cursos, modulos, aulas ou materiais.
+Regras configuraveis no CMS para liberar formacoes, cursos, modulos, aulas ou materiais. No produto, essas regras sao editadas dentro do item correspondente, nao como uma area isolada da navegacao principal.
 
 - id;
 - owner_type: formation, course, bootcamp, module, lesson, material;
@@ -401,9 +503,20 @@ Opcionalmente materializa regras especificas de materiais para consultas rapidas
 - status: not_started, in_progress, completed;
 - progress_seconds;
 - progress_percent;
+- resume_frame_url: opcional, quando o provider/adapter conseguir salvar uma imagem do ponto em que o aluno parou;
 - completed_at;
 - last_watched_at;
+- lesson_reactions: mapa por aula com a avaliacao do aluno (`not-for-me`, `liked` ou `loved`) quando o progresso estiver agregado por conteudo no MVP;
+- lesson_watch_states: mapa por aula com `progress_seconds`, `progress_percent`, `max_progress_percent`, `duration_seconds`, `resume_frame_url`, `status` e `last_watched_at` quando o progresso estiver agregado por conteudo no MVP;
 - updated_at.
+
+Regra de MVP:
+
+- `Continue assistindo` deve ser derivado de aulas com `lesson_watch_states.status = in_progress` e percentual maior que 0;
+- `progress_percent` representa a posicao atual para retomada/home/modulo e pode regredir se o aluno voltar o video; `max_progress_percent` preserva regras como liberar avaliacao apos 30%;
+- a imagem de `Continue assistindo` deve priorizar `resume_frame_url` quando existir, depois thumbnail oficial do video, depois thumbnail cadastrada da aula ou imagem do modulo;
+- aulas concluidas nao entram em `Continue assistindo`;
+- a home nao renderiza fileiras sem itens depois de aplicar acesso, regras de liberacao e progresso do aluno.
 
 ### course_progress
 
@@ -488,7 +601,7 @@ Lista de itens salvos/favoritados pelo aluno.
 
 - id;
 - user_id;
-- target_type: formation, standalone_course, bootcamp, module, lesson, material;
+- target_type: formation, standalone_course, mentorship, webinar, product, bootcamp, module, lesson, material;
 - target_id;
 - collection_label: favoritos, assistir_depois, jornada;
 - created_at;
@@ -498,6 +611,13 @@ Regra:
 - o aluno pode salvar formacoes, cursos, bootcamps, modulos, aulas e materiais;
 - salvar um item nao concede acesso, apenas cria uma referencia pessoal;
 - itens bloqueados podem ser salvos como interesse/favorito, mas continuam dependendo de entitlement para consumo.
+
+Implementacao atual:
+
+- `saved_items` existe em migration Supabase com RLS por `user_id`;
+- a rota `/api/saved-items` alterna salvar/remover para o usuario autenticado;
+- em desenvolvimento local sem Supabase, os registros ficam em `.data/bunker707-platform.json`;
+- cards da home, modal de detalhes e pagina de aula consomem `isSaved` retornado pelo backend.
 
 ## Eventos
 
@@ -515,6 +635,12 @@ Tabela append-only para comportamento do aluno.
 - metadata jsonb;
 - session_id;
 - occurred_at.
+
+Politicas atuais:
+
+- aluno autenticado pode inserir somente evento com `user_id = auth.uid()`;
+- aluno pode ler somente os proprios eventos;
+- eventos de login ja usam `user_signed_in` no fluxo de email/senha e OAuth.
 
 Exemplos de event_type:
 

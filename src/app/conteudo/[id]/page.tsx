@@ -11,22 +11,27 @@ import {
 import { AppShell } from "@/components/app-shell";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { MemberFooter } from "@/components/member-footer";
+import { normalizeAccessPreviewMode, withAccessPreviewParam } from "@/lib/access-preview";
 import {
-  allContentItems,
-  contentPageSettings,
-  courseModules,
-  formationInternalCourses,
-  formations,
-  hero,
-  type ContentItem,
-  type ContentPageHeroConfig,
-  type CoursePresentationMode,
-  type InternalCardActionMode
-} from "@/lib/mock-data";
+  getAppShellData,
+  getContentPageData
+} from "@/server/db/platform-store";
+import { requirePageUser } from "@/server/auth/guards";
+import type {
+  ContentItem,
+  ContentPageHeroConfig,
+  ContentPageSettings,
+  CoursePresentationMode,
+  HomeHeroConfig,
+  InternalCardActionMode
+} from "@/lib/platform-types";
 
 type ContentPageProps = {
   params: Promise<{
     id: string;
+  }>;
+  searchParams?: Promise<{
+    accessPreview?: string | string[];
   }>;
 };
 
@@ -35,11 +40,7 @@ type BreadcrumbItem = {
   label: string;
 };
 
-export function generateStaticParams() {
-  return allContentItems.map((item) => ({
-    id: item.id
-  }));
-}
+export const dynamic = "force-dynamic";
 
 function getDefaultCtaLabel(item: ContentItem) {
   if (item.status === "Em breve") {
@@ -61,22 +62,26 @@ function getDefaultCtaLabel(item: ContentItem) {
   return "Acessar";
 }
 
-function getCoursePresentationMode(item: ContentItem): CoursePresentationMode {
-  const configuredMode = contentPageSettings[item.id]?.coursePresentationMode;
+function getCoursePresentationMode(settings?: ContentPageSettings): CoursePresentationMode {
+  const configuredMode = settings?.coursePresentationMode;
 
   if (configuredMode) {
     return configuredMode;
   }
 
-  return item.commerceScope === "included_content" ? "lesson_playlist" : "module_cards";
+  return "module_cards";
 }
 
-function getInternalCardActionMode(item: ContentItem): InternalCardActionMode {
-  return contentPageSettings[item.id]?.internalCardActionMode ?? "implicit";
+function supportsCoursePresentationMode(item: ContentItem) {
+  return ["Curso", "Bootcamp", "Mentoria", "Webinario", "Produto"].includes(item.kind);
 }
 
-function getHeroConfig(item: ContentItem): ContentPageHeroConfig {
-  const settings = contentPageSettings[item.id]?.hero;
+function getInternalCardActionMode(settings?: ContentPageSettings): InternalCardActionMode {
+  return settings?.internalCardActionMode ?? "implicit";
+}
+
+function getHeroConfig(item: ContentItem, settings: ContentPageSettings | undefined, homeHero: HomeHeroConfig): ContentPageHeroConfig {
+  const heroSettings = settings?.hero;
   const defaultVisibility = {
     badge: false,
     title: false,
@@ -85,24 +90,24 @@ function getHeroConfig(item: ContentItem): ContentPageHeroConfig {
   };
 
   return {
-    mediaType: settings?.mediaType ?? "image",
-    mediaSrc: settings?.mediaSrc ?? item.image ?? hero.image,
-    poster: settings?.poster,
-    badge: settings?.badge ?? item.accessLabel ?? item.kind,
-    title: settings?.title ?? item.title,
-    description: settings?.description ?? item.description,
-    ctaLabel: settings?.ctaLabel ?? getDefaultCtaLabel(item),
-    ctaHref: settings?.ctaHref ?? "#conteudos",
+    mediaType: heroSettings?.mediaType ?? "image",
+    mediaSrc: heroSettings?.mediaSrc ?? item.image ?? homeHero.image,
+    poster: heroSettings?.poster,
+    badge: heroSettings?.badge ?? item.accessLabel ?? item.kind,
+    title: heroSettings?.title ?? item.title,
+    description: heroSettings?.description ?? item.description,
+    ctaLabel: heroSettings?.ctaLabel ?? getDefaultCtaLabel(item),
+    ctaHref: heroSettings?.ctaHref ?? "#conteudos",
     visibility: {
-      badge: settings?.visibility?.badge ?? defaultVisibility.badge,
-      title: settings?.visibility?.title ?? defaultVisibility.title,
-      description: settings?.visibility?.description ?? defaultVisibility.description,
-      cta: settings?.visibility?.cta ?? defaultVisibility.cta
+      badge: heroSettings?.visibility?.badge ?? defaultVisibility.badge,
+      title: heroSettings?.visibility?.title ?? defaultVisibility.title,
+      description: heroSettings?.visibility?.description ?? defaultVisibility.description,
+      cta: heroSettings?.visibility?.cta ?? defaultVisibility.cta
     }
   };
 }
 
-function getBreadcrumbItems(item: ContentItem): BreadcrumbItem[] {
+function getBreadcrumbItems(item: ContentItem, formations: ContentItem[]): BreadcrumbItem[] {
   const parentFormation = item.commerceScope === "included_content" ? formations[0] : null;
   const sectionLabel = item.kind === "Formacao"
     ? "Formacoes"
@@ -156,25 +161,30 @@ function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
   );
 }
 
-export default async function ContentPage({ params }: ContentPageProps) {
+export default async function ContentPage({ params, searchParams }: ContentPageProps) {
   const { id } = await params;
-  const item = allContentItems.find((content) => content.id === id);
+  const resolvedSearchParams = await searchParams;
+  const requestedAccessPreviewMode = normalizeAccessPreviewMode(resolvedSearchParams?.accessPreview);
+  const user = await requirePageUser(`/conteudo/${id}`);
+  const shellData = await getAppShellData(user);
+  const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
+  const contentPageData = await getContentPageData(id, user, accessPreviewMode);
 
-  if (!item) {
+  if (!contentPageData) {
     notFound();
   }
 
-  const settings = contentPageSettings[item.id];
-  const coursePresentationMode = getCoursePresentationMode(item);
-  const isCourseLike = item.kind === "Curso" || item.kind === "Bootcamp";
+  const { courseModules, formationInternalCourses, formations, hero, item, settings } = contentPageData;
+  const coursePresentationMode = getCoursePresentationMode(settings);
+  const isCourseLike = supportsCoursePresentationMode(item);
   const firstModule = courseModules[0];
 
   if (isCourseLike && coursePresentationMode === "lesson_playlist" && firstModule) {
-    redirect(`/conteudo/${item.id}/aulas/${firstModule.id}`);
+    redirect(withAccessPreviewParam(`/conteudo/${item.id}/aulas/${firstModule.id}`, accessPreviewMode));
   }
 
-  const pageHero = getHeroConfig(item);
-  const breadcrumbs = getBreadcrumbItems(item);
+  const pageHero = getHeroConfig(item, settings, hero);
+  const breadcrumbs = getBreadcrumbItems(item, formations);
   const showBadge = (pageHero.visibility?.badge ?? Boolean(pageHero.badge)) && Boolean(pageHero.badge);
   const showTitle = (pageHero.visibility?.title ?? Boolean(pageHero.title)) && Boolean(pageHero.title);
   const showDescription =
@@ -187,10 +197,14 @@ export default async function ContentPage({ params }: ContentPageProps) {
     ? "bg-emerald-600 text-white hover:bg-emerald-500"
     : "bg-white text-black hover:bg-zinc-200";
   const formationCourseOpenMode = settings?.formationCourseOpenMode ?? "course_lesson_format";
-  const internalCardActionMode = getInternalCardActionMode(item);
+  const internalCardActionMode = getInternalCardActionMode(settings);
 
   return (
-    <AppShell>
+    <AppShell
+      accessPreviewMode={accessPreviewMode}
+      canUseAccessPreview={shellData.canUseAccessPreview}
+      student={shellData.student}
+    >
       <div className="min-h-screen bg-[#141414]">
         <section className="relative min-h-[640px] overflow-hidden">
           {pageHero.mediaType === "video" ? (
@@ -245,7 +259,7 @@ export default async function ContentPage({ params }: ContentPageProps) {
                   {pageHero.ctaHref ? (
                     <Link
                       className={`inline-flex min-h-12 items-center gap-2 rounded-[8px] px-6 py-3 text-sm font-extrabold transition ${ctaClass}`}
-                      href={pageHero.ctaHref}
+                      href={withAccessPreviewParam(pageHero.ctaHref, accessPreviewMode)}
                     >
                       <ActionIcon className="h-4 w-4 fill-current" />
                       {pageHero.ctaLabel}
@@ -274,6 +288,7 @@ export default async function ContentPage({ params }: ContentPageProps) {
 
         <div className="relative z-20 -mt-28 sm:-mt-32">
           <ContentStructureSection
+            accessPreviewMode={accessPreviewMode}
             formationCourseOpenMode={formationCourseOpenMode}
             formationCourses={formationInternalCourses}
             internalCardActionMode={internalCardActionMode}

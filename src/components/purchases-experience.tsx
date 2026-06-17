@@ -11,10 +11,13 @@ import {
   Search,
   Sparkles
 } from "lucide-react";
+import { withAccessPreviewParam } from "@/lib/access-preview";
 import type { LucideIcon } from "lucide-react";
-import type { ContentItem, ContentKind } from "@/lib/mock-data";
+import type { AccessPreviewMode } from "@/lib/access-preview";
+import type { ContentItem, ContentKind } from "@/lib/platform-types";
 
 type PurchasesExperienceProps = {
+  accessPreviewMode?: AccessPreviewMode;
   items: ContentItem[];
 };
 
@@ -33,8 +36,8 @@ const filterOptions = [
   label: string;
 }>;
 
-function getContentHref(item: ContentItem) {
-  return `/conteudo/${item.id}`;
+function getContentHref(item: ContentItem, accessPreviewMode?: AccessPreviewMode) {
+  return withAccessPreviewParam(`/conteudo/${item.id}`, accessPreviewMode);
 }
 
 function getActionLabel(item: ContentItem) {
@@ -121,7 +124,7 @@ function PurchaseStat({
   );
 }
 
-function PurchaseCard({ item }: { item: ContentItem }) {
+function PurchaseCard({ accessPreviewMode, item }: { accessPreviewMode?: AccessPreviewMode; item: ContentItem }) {
   const progress = Math.min(Math.max(item.progress, 0), 100);
   const actionLabel = getActionLabel(item);
 
@@ -129,7 +132,7 @@ function PurchaseCard({ item }: { item: ContentItem }) {
     <Link
       aria-label={`Abrir ${item.title}`}
       className="group block overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/30 outline-none transition hover:-translate-y-1 hover:shadow-[0_34px_90px_rgba(0,0,0,0.68)] focus-visible:ring-2 focus-visible:ring-white/70"
-      href={getContentHref(item)}
+      href={getContentHref(item, accessPreviewMode)}
     >
       <div className="relative aspect-[720/1040] overflow-hidden bg-[#101010]">
         <div
@@ -171,7 +174,7 @@ function PurchaseCard({ item }: { item: ContentItem }) {
   );
 }
 
-export function PurchasesExperience({ items }: PurchasesExperienceProps) {
+export function PurchasesExperience({ accessPreviewMode, items }: PurchasesExperienceProps) {
   const [activeFilter, setActiveFilter] = useState<PurchaseFilter>("all");
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
@@ -257,7 +260,7 @@ export function PurchasesExperience({ items }: PurchasesExperienceProps) {
         {filteredItems.length > 0 ? (
           <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {filteredItems.map((item) => (
-              <PurchaseCard item={item} key={item.id} />
+              <PurchaseCard accessPreviewMode={accessPreviewMode} item={item} key={item.id} />
             ))}
           </div>
         ) : (

@@ -225,7 +225,25 @@ button:disabled {
 }
 
 @media (min-width: 1280px) {
+  .lesson-main-content {
+    margin-inline: 0;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .lesson-player-frame {
+    margin-inline: 0;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .lesson-experience-grid-collapsed .lesson-main-content {
+    margin-inline: auto;
+    width: min(100%, calc((100vh - 12rem) * 16 / 9));
+  }
+
   .lesson-experience-grid {
+    column-gap: 1rem;
     grid-template-columns: minmax(0, 1fr) 430px;
     transition: grid-template-columns 520ms cubic-bezier(0.16, 1, 0.3, 1);
   }
@@ -296,6 +314,26 @@ button:disabled {
   background: rgba(0, 0, 0, 0.16);
 }
 
+.continue-watching-card-image {
+  backface-visibility: hidden;
+  transform: scale(1);
+  transition: transform 950ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+.continue-watching-card-overlay {
+  background: rgba(0, 0, 0, 0);
+  transition: background-color 850ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.group:hover .continue-watching-card-image {
+  transform: scale(1.012);
+}
+
+.group:hover .continue-watching-card-overlay {
+  background: rgba(0, 0, 0, 0.16);
+}
+
 .home-cover-card-surface {
   border-radius: 8px;
   background: #181818;
@@ -309,6 +347,14 @@ button:disabled {
     box-shadow 520ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 560ms cubic-bezier(0.16, 1, 0.3, 1);
   will-change: transform;
+}
+
+[data-home-row-card][data-hover-edge="left"] .home-cover-card-surface {
+  transform-origin: left center;
+}
+
+[data-home-row-card][data-hover-edge="right"] .home-cover-card-surface {
+  transform-origin: right center;
 }
 
 .group:hover .home-cover-card-surface {
@@ -381,15 +427,27 @@ button:disabled {
   transform: translate3d(-12px, -27px, 0);
 }
 
+.home-row-cover-card[data-hover-edge="left"].group:hover .home-cover-card-logo {
+  transform: translate3d(0, -27px, 0);
+}
+
 @media (min-width: 640px) {
   .group:hover .home-cover-card-logo {
     transform: translate3d(-16px, -32px, 0);
+  }
+
+  .home-row-cover-card[data-hover-edge="left"].group:hover .home-cover-card-logo {
+    transform: translate3d(0, -32px, 0);
   }
 }
 
 @media (min-width: 1024px) {
   .group:hover .home-cover-card-logo {
     transform: translate3d(-22px, -40px, 0);
+  }
+
+  .home-row-cover-card[data-hover-edge="left"].group:hover .home-cover-card-logo {
+    transform: translate3d(0, -40px, 0);
   }
 }
 
