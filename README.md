@@ -78,7 +78,8 @@ O repositorio ja possui a base inicial do app:
 - pagina da aula com player, playlist, materiais, comentarios e progresso persistido no backend;
 - favoritos/minha lista persistidos por aluno para produtos, conteudos e aulas;
 - pagina `Favoritos` em `/favoritos`, acessivel pela sidebar, reunindo tudo que o aluno salvou;
-- CMS/admin em `/admin`, com dashboard, catalogo, estrutura de conteudo, CRM de alunos e turmas; regras de liberacao sao configuradas dentro de formacoes, cursos, modulos e aulas;
+- CMS/admin em `/admin`, com dashboard, catalogo, estrutura de conteudo, personalizacao, CRM de alunos e turmas; regras de liberacao sao configuradas dentro de formacoes, cursos, modulos e aulas;
+- area de Personalizacao no CRM com lista inicial de vitrine, login, pagina de produtos e produtos/cursos; cada item abre um editor proprio com representacao fiel da pagina final e opcoes laterais de edicao;
 - separacao visual e de navegacao entre area de membros (`/`) e CRM/backoffice (`/admin`), com logos levando para a home correta e atalhos entre as duas experiencias para usuarios admin;
 - fluxo inicial de criacao no CMS para formacoes, cursos, mentorias, webinarios, produtos e bootcamps, com capa, acesso gratuito/fechado, limite de estudantes, link externo de compra e regras de entrega por data ou por dias apos inscricao;
 - construtor em passos dentro do Catalogo para salvar a configuracao inicial e, no mesmo local, cadastrar modulos e aulas;

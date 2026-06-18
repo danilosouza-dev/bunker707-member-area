@@ -211,7 +211,7 @@ export type ContentPageSettings = {
 };
 
 export type AdminContentAccess = "Liberado" | "Bloqueado" | "Drip" | "Em breve";
-export type AdminView = "overview" | "students" | "catalog" | "structure";
+export type AdminView = "overview" | "students" | "catalog" | "structure" | "personalization";
 export type ReleaseRuleMode =
   | "immediate"
   | "after_enrollment"
@@ -364,6 +364,8 @@ export type AdminDashboardData = {
   courseModules: CourseModule[];
   entitlements: AdminEntitlement[];
   formationCourses: ContentItem[];
+  hero: HomeHeroConfig;
+  homeRows: HomeRow[];
   homeSections: AdminHomeSection[];
   metrics: AdminMetric[];
   pipeline: AdminPipelineItem[];

@@ -117,7 +117,11 @@ Decisao tomada:
 
 - conectar o CMS em `/admin` a uma camada server-side persistida em Supabase Postgres/RLS, com fallback local somente quando as variaveis Supabase nao existirem no ambiente de desenvolvimento.
 - o design do CMS segue a linha escura, densa e operacional da referencia Netflix-style Ad Manager enviada no Figma, sem copiar marca, textos ou assets proprietarios.
-- o CMS deve controlar catalogo, home, formacoes, cursos avulsos, mentorias, webinarios, produtos genericos, cursos internos de formacoes, bootcamps, modulos, aulas, materiais, turmas e alunos.
+- o CMS deve controlar catalogo, personalizacao, home, formacoes, cursos avulsos, mentorias, webinarios, produtos genericos, cursos internos de formacoes, bootcamps, modulos, aulas, materiais, turmas e alunos.
+- a area `Personalizacao` aparece na sidebar principal do CRM, abre primeiro uma lista de destinos editaveis (`Vitrine`, `Pagina de login`, `Pagina de produtos` e produtos/cursos) e so depois abre o editor visual do item escolhido.
+- ao personalizar a vitrine/home, o produtor deve ver uma representacao fiel da home real do aluno em modo editor, com controles editaveis para banner, textos, cards/secoes, ordem, origem dos conteudos e visibilidade sobre a propria pagina.
+- a vitrine/home em modo editor deve consumir as mesmas linhas e componentes da home publicada, preservando card horizontal de `Continue assistindo`, thumbnails/resume frames de aulas, cards verticais e secoes de modulos sem inventar textos ou formatos que nao existem na pagina final.
+- a personalizacao altera apresentacao e composicao visual, mas a liberacao final continua dependendo de entitlements internos, regras de entrega e visibilidade por aluno.
 - a primeira etapa de criacao do CMS cria um item educacional/produto: formacao, curso, mentoria, webinario, produto ou bootcamp. Dentro dele, o produtor monta trilhas/modulos e aulas.
 - cada item educacional pode ter capa, descricao, modelo de acesso `closed` ou `free`, limite de estudantes ilimitado ou numerico, link externo de compra e comportamento do link em mesma aba ou nova aba.
 - o cadastro principal do Catalogo funciona como um construtor em passos: configuracao inicial, modulos e aulas. O produtor pode salvar apenas a configuracao inicial e completar a estrutura depois.
@@ -128,7 +132,7 @@ Decisao tomada:
 - quando uma regra de entrega bloqueia modulo ou aula, a area do aluno deve mostrar overlay com cadeado e mensagem de liberacao no card/thumbnail. A data deve ser calculada por aluno quando houver inscricao/entitlement real.
 - no localhost/admin, a area de membros tem modo de preview por query string: sessao atual, produtor/admin, aluno com acesso e aluno sem acesso. Aluno com acesso remove bloqueios de compra/entitlement, mas regras de data ou drip continuam bloqueando. Aluno sem acesso mostra a vitrine bloqueada e nao preenche `Minhas compras`.
 - aulas cadastradas pelo CMS precisam incluir descricao, duracao, thumbnail e configuracao de player. Os provedores iniciais sao YouTube, Vimeo, Bunny Stream, Mux, URL propria/player proprio e codigo embed. A plataforma armazena referencia/configuracao do video, nao o arquivo de video no servidor da aplicacao.
-- a sidebar principal do CMS deve ser enxuta: Visao geral, Alunos, Catalogo e Estrutura. Liberação e acessos nao sao areas soltas no menu principal.
+- a sidebar principal do CMS deve ser enxuta: Visao geral, Alunos, Catalogo, Estrutura e Personalizacao. Liberação e acessos nao sao areas soltas no menu principal.
 - entitlements continuam sendo a fonte de verdade de acesso; eventos de Hotmart, Ticto, TikTok ou outros provedores sao entradas externas auditaveis, nao autorizacao direta.
 - cadastro manual de aluno oferece convite por email como fluxo padrao e senha temporaria como alternativa; senha temporaria marca `must_change_password = true` no Supabase Auth e obriga troca em `/alterar-senha`.
 - o acesso ao CMS e protegido por papel/permissao administrativa em `admin_roles`.

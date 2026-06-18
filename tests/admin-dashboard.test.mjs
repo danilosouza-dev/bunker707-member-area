@@ -20,6 +20,10 @@ const authRedirectSource = await readFile(new URL("../src/server/auth/redirect.t
 const platformStoreSource = await readFile(new URL("../src/server/db/platform-store.ts", import.meta.url), "utf8");
 const adminContentRouteSource = await readFile(new URL("../src/app/api/admin/content/route.ts", import.meta.url), "utf8");
 const contentPageSource = await readFile(new URL("../src/app/conteudo/[id]/page.tsx", import.meta.url), "utf8");
+const contentStructureSectionSource = await readFile(
+  new URL("../src/components/content-structure-section.tsx", import.meta.url),
+  "utf8"
+);
 const adminStudentAccessRouteSource = await readFile(
   new URL("../src/app/api/admin/students/access/route.ts", import.meta.url),
   "utf8"
@@ -57,9 +61,25 @@ test("admin route renders the CMS dashboard", () => {
 });
 
 test("admin dashboard exposes the core CMS views", () => {
-  for (const label of ["Visao geral", "Alunos", "Catalogo", "Estrutura"]) {
+  for (const label of ["Visao geral", "Alunos", "Catalogo", "Estrutura", "Personalizacao"]) {
     assert.match(adminDashboardSource, new RegExp(label));
   }
+  assert.match(adminDashboardSource, /PersonalizationView/);
+  assert.match(adminDashboardSource, /activeView === "personalization"/);
+  assert.match(adminDashboardSource, /PersonalizationIndexRow/);
+  assert.match(adminDashboardSource, /useState<PersonalizationTarget>\(\{ kind: "index" \}\)/);
+  assert.match(adminDashboardSource, /Pagina de produtos/);
+  assert.match(adminDashboardSource, /formationCourses=\{dashboardData\.formationCourses\}/);
+  assert.match(adminDashboardSource, /ContentRow/);
+  assert.match(adminDashboardSource, /CourseModulesHomeSection/);
+  assert.match(adminDashboardSource, /ContentStructureSection/);
+  assert.match(adminDashboardSource, /showLockedStates=\{false\}/);
+  assert.match(contentStructureSectionSource, /showLockedStates = true/);
+  assert.match(adminDashboardSource, /HeroSection/);
+  assert.match(adminDashboardSource, /LoginExperience/);
+  assert.match(adminDashboardSource, /PurchasesExperience/);
+  assert.match(platformStoreSource, /homeRows/);
+  assert.doesNotMatch(adminDashboardSource, /PersonalizationModeBar/);
   assert.doesNotMatch(adminDashboardSource, /id: "release"/);
   assert.doesNotMatch(adminDashboardSource, /id: "access"/);
 });

@@ -1872,6 +1872,10 @@ function getAdminHomeSections(database: PlatformDatabase) {
 }
 
 function toAdminDashboardData(database: PlatformDatabase): AdminDashboardData {
+  const homeRows = getHomeRows(database).filter((row) => (
+    row.variant === "course_modules" ? (row.modules?.length ?? 0) > 0 : row.items.length > 0
+  ));
+
   return {
     chartPoints: database.chartPoints,
     cohorts: database.cohorts,
@@ -1879,6 +1883,8 @@ function toAdminDashboardData(database: PlatformDatabase): AdminDashboardData {
     courseModules: database.courseModules,
     entitlements: database.entitlements,
     formationCourses: database.formationInternalCourses,
+    hero: database.hero,
+    homeRows,
     homeSections: getAdminHomeSections(database),
     metrics: database.metrics,
     pipeline: database.pipeline,

@@ -35,7 +35,8 @@
 - Criar seed inicial de dados.
 - Testar responsividade.
 - Criar rota `/admin` com CMS UI-first.
-- Criar dashboard administrativo com visao geral, catalogo, estrutura, liberacao e acessos.
+- Criar dashboard administrativo com visao geral, catalogo, estrutura, personalizacao, alunos/turmas e acessos.
+- Criar area `Personalizacao` no CRM com lista inicial de destinos editaveis e, apos clique em `Personalizar`, previa fiel da experiencia do aluno para login, pagina de produtos, paginas dos cursos, estrutura interna e vitrine/home.
 - Criar persistencia do CMS para criacao de formacoes, cursos, mentorias, webinarios, produtos, modulos e aulas.
 - Evoluir o cadastro do Catalogo para um construtor em passos: configuracao inicial, modulos e aulas no mesmo local.
 - Permitir que o produtor ative, no CMS, uma secao da home com capa pequena do curso e cards menores dos modulos de um curso especifico.

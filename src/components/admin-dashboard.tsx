@@ -1,11 +1,13 @@
 "use client";
 
 import {
+  ArrowLeft,
   ArrowRightLeft,
   Ban,
   Bell,
   BookOpen,
   CalendarDays,
+  ChevronDown,
   CheckCircle2,
   Copy,
   Eye,
@@ -35,7 +37,15 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { ContentRow, CourseModulesHomeSection } from "@/components/content-row";
+import { ContentStructureSection } from "@/components/content-structure-section";
+import { HeroSection } from "@/components/hero-section";
+import { LoginExperience } from "@/components/login-experience";
+import { MemberFooter } from "@/components/member-footer";
+import { PurchasesExperience } from "@/components/purchases-experience";
+import { getLoginPageConfig, loginTemplateOptions } from "@/lib/login-config";
 import type { LucideIcon } from "lucide-react";
+import type { LoginPageConfig, LoginTemplateId } from "@/lib/login-config";
 import type {
   AdminContentAccess,
   AdminContentRecord,
@@ -56,6 +66,7 @@ import type {
   CoursePresentationMode,
   ContentStatus,
   CourseModule,
+  HomeRow,
   LessonPreview,
   LessonVideoProvider,
   LockedContentActionMode,
@@ -72,7 +83,8 @@ const adminNavItems = [
   { icon: Trophy, id: "overview", label: "Visao geral" },
   { icon: Users, id: "students", label: "Alunos" },
   { icon: LibraryBig, id: "catalog", label: "Catalogo" },
-  { icon: GalleryVerticalEnd, id: "structure", label: "Estrutura" }
+  { icon: GalleryVerticalEnd, id: "structure", label: "Estrutura" },
+  { icon: Pencil, id: "personalization", label: "Personalizacao" }
 ] satisfies AdminNavItem[];
 
 const panelClassName = "rounded-[8px] border border-white/10 bg-[#171717] shadow-2xl shadow-black/20";
@@ -2309,6 +2321,891 @@ function CatalogView({
         onEditRecord={openEditContentForm}
         selectedRecord={selectedRecord}
       />
+    </div>
+  );
+}
+
+type PersonalizationTarget =
+  | { kind: "index" }
+  | { kind: "showcase" }
+  | { kind: "login" }
+  | { kind: "products" }
+  | { kind: "content"; recordId: string };
+
+type ContentEditorPanel = "page" | "structure";
+type LoginEditorSection = "template" | "image" | "form" | "providers";
+type ProductsEditorSection = "header" | "filters" | "cards";
+
+type HomeSectionDraft = {
+  contentCount: number;
+  id: string;
+  order: number;
+  source: string;
+  title: string;
+  visibility: AdminHomeSection["visibility"];
+};
+
+type LoginDraft = {
+  backgroundImage: string;
+  subtitle: string;
+  template: LoginTemplateId;
+  title: string;
+};
+
+function getVisibilityLabel(visibility: AdminHomeSection["visibility"]) {
+  if (visibility === "students") {
+    return "Alunos com acesso";
+  }
+
+  if (visibility === "non_students") {
+    return "Sem compra ativa";
+  }
+
+  return "Todos";
+}
+
+function getSelectedRecordModules(records: AdminContentRecord[], modules: CourseModule[], selectedRecord?: AdminContentRecord) {
+  if (!selectedRecord) {
+    return [] as CourseModule[];
+  }
+
+  const scopedModules = modules.filter((module) => module.ownerId === selectedRecord.content.id);
+
+  if (scopedModules.length > 0) {
+    return scopedModules;
+  }
+
+  const hasScopedModules = modules.some((module) => module.ownerId);
+  const recordUsesSharedSeed = records.length <= 1 || !hasScopedModules;
+
+  return recordUsesSharedSeed ? modules : [];
+}
+
+function PersonalizationEditorHeader({
+  eyebrow,
+  onBack,
+  title
+}: {
+  eyebrow: string;
+  onBack: () => void;
+  title: string;
+}) {
+  return (
+    <div className="sticky top-[4.25rem] z-30 -mx-4 border-y border-white/10 bg-[#0b0b0b]/94 px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-xs font-black text-zinc-200 transition hover:bg-white/10 hover:text-white"
+            onClick={onBack}
+            type="button"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Voltar
+          </button>
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase text-zinc-500">{eyebrow}</p>
+            <h2 className="truncate text-xl font-black text-white">{title}</h2>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="inline-flex h-10 items-center rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-xs font-black text-zinc-300 transition hover:bg-white/10 hover:text-white" type="button">
+            Descartar
+          </button>
+          <button className="inline-flex h-10 items-center rounded-[8px] bg-white px-3 text-xs font-black text-black transition hover:bg-zinc-200" type="button">
+            Publicar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PersonalizationIndexRow({
+  disabledCustomize = false,
+  disabledPreview = false,
+  icon: Icon,
+  image,
+  onCustomize,
+  previewHref,
+  showChevron = false,
+  status,
+  statusClassName = "border-emerald-400/25 bg-emerald-500/10 text-emerald-300",
+  subtitle,
+  title,
+  urlLabel
+}: {
+  disabledCustomize?: boolean;
+  disabledPreview?: boolean;
+  icon?: LucideIcon;
+  image?: string;
+  onCustomize?: () => void;
+  previewHref?: string;
+  showChevron?: boolean;
+  status?: string;
+  statusClassName?: string;
+  subtitle: string;
+  title: string;
+  urlLabel: string;
+}) {
+  return (
+    <div className="grid gap-3 rounded-[8px] border border-white/10 bg-black/20 p-3 transition hover:border-white/18 hover:bg-white/[0.035] lg:grid-cols-[minmax(0,1.2fr)_minmax(14rem,0.9fr)_auto] lg:items-center">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-[8px] bg-white/[0.06] text-zinc-200">
+          {image ? (
+            <span
+              className="absolute inset-0 bg-cover bg-center"
+              style={{ backgroundImage: `url(${image})` }}
+            />
+          ) : Icon ? (
+            <Icon className="h-5 w-5" />
+          ) : null}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-black text-white">{title}</span>
+          <span className="mt-1 block truncate text-xs font-semibold text-zinc-500">{subtitle}</span>
+        </span>
+      </div>
+
+      <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-zinc-500">
+        <Copy className="h-4 w-4 shrink-0 text-zinc-600" />
+        <span className="truncate">{urlLabel}</span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+        {status ? <StatusPill className={statusClassName}>{status}</StatusPill> : null}
+        {previewHref && !disabledPreview ? (
+          <Link
+            aria-label={`Visualizar ${title}`}
+            className="grid h-10 w-10 place-items-center rounded-[8px] border border-white/10 bg-white/[0.055] text-zinc-200 transition hover:bg-white/10 hover:text-white"
+            href={previewHref}
+            target="_blank"
+          >
+            <Eye className="h-4 w-4" />
+          </Link>
+        ) : (
+          <button
+            aria-label={`Visualizar ${title}`}
+            className="grid h-10 w-10 cursor-not-allowed place-items-center rounded-[8px] border border-white/10 bg-white/[0.025] text-zinc-700"
+            disabled
+            type="button"
+          >
+            <Eye className="h-4 w-4" />
+          </button>
+        )}
+        <button
+          className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-xs font-black text-zinc-200 transition hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.025] disabled:text-zinc-700 disabled:hover:bg-white/[0.025] disabled:hover:text-zinc-700"
+          disabled={disabledCustomize}
+          onClick={onCustomize}
+          type="button"
+        >
+          <Pencil className="h-4 w-4" />
+          Personalizar
+          {showChevron ? <ChevronDown className="h-4 w-4" /> : null}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PersonalizationView({
+  courseModules,
+  formationCourses,
+  hero,
+  homeSections,
+  homeRows,
+  records
+}: {
+  courseModules: CourseModule[];
+  formationCourses: AdminDashboardData["formationCourses"];
+  hero: AdminDashboardData["hero"];
+  homeSections: AdminHomeSection[];
+  homeRows: HomeRow[];
+  records: AdminContentRecord[];
+}) {
+  const sellableRecords = records.filter((record) => record.commerceScope === "sellable_product");
+  const visiblePreviewRecords = sellableRecords.length > 0 ? sellableRecords : records;
+  const firstSellableRecord = visiblePreviewRecords[0];
+  const defaultLoginConfig = getLoginPageConfig();
+  const [activeTarget, setActiveTarget] = useState<PersonalizationTarget>({ kind: "index" });
+  const [contentEditorPanel, setContentEditorPanel] = useState<ContentEditorPanel>("page");
+  const [loginEditorSection, setLoginEditorSection] = useState<LoginEditorSection>("template");
+  const [productsEditorSection, setProductsEditorSection] = useState<ProductsEditorSection>("header");
+  const [selectedRecordId, setSelectedRecordId] = useState(firstSellableRecord?.content.id ?? "");
+  const activeRecordId = activeTarget.kind === "content" ? activeTarget.recordId : selectedRecordId;
+  const selectedRecord =
+    records.find((record) => record.content.id === activeRecordId) ??
+    firstSellableRecord;
+  const selectedModules = getSelectedRecordModules(records, courseModules, selectedRecord);
+  const [homeSectionDrafts] = useState<HomeSectionDraft[]>(() => (
+    homeRows.length > 0
+      ? homeRows.map((row, index) => ({
+          contentCount: row.variant === "course_modules" ? row.modules?.length ?? 0 : row.items.length,
+          id: row.id,
+          order: index + 1,
+          source:
+            row.variant === "continue"
+              ? "Progresso do aluno"
+              : row.variant === "course_modules"
+                ? "Modulos de curso escolhido"
+                : row.visibility === "students"
+                  ? "Entitlements ativos"
+                  : "Curadoria persistida",
+          title: row.title,
+          visibility: row.visibility
+        }))
+      : homeSections.length > 0
+        ? homeSections.map((section) => ({ ...section }))
+      : [
+          {
+            contentCount: visiblePreviewRecords.length,
+            id: "showcase",
+            order: 1,
+            source: "Produtos principais",
+            title: "Vitrine",
+            visibility: "all"
+          }
+        ]
+  ));
+  const [selectedSectionId, setSelectedSectionId] = useState(homeRows[0]?.id ?? homeSections[0]?.id ?? "showcase");
+  const [loginDraft, setLoginDraft] = useState<LoginDraft>({
+    backgroundImage: defaultLoginConfig.visual.imageSrc,
+    subtitle: defaultLoginConfig.form.subtitle,
+    template: defaultLoginConfig.template,
+    title: defaultLoginConfig.form.title
+  });
+  const loginPreviewConfig = useMemo<LoginPageConfig>(() => {
+    const baseConfig = getLoginPageConfig(loginDraft.template);
+
+    return {
+      ...baseConfig,
+      form: {
+        ...baseConfig.form,
+        subtitle: loginDraft.subtitle,
+        title: loginDraft.title
+      },
+      visual: {
+        ...baseConfig.visual,
+        imageSrc: loginDraft.backgroundImage
+      }
+    };
+  }, [loginDraft]);
+  const selectedSection =
+    homeSectionDrafts.find((section) => section.id === selectedSectionId) ??
+    homeSectionDrafts[0];
+  const personalizationItemsCount = visiblePreviewRecords.length + 3;
+
+  function openContentEditor(record: AdminContentRecord, panel: ContentEditorPanel = "page") {
+    setSelectedRecordId(record.content.id);
+    setContentEditorPanel(panel);
+    setActiveTarget({ kind: "content", recordId: record.content.id });
+  }
+
+  function selectContentRecord(recordId: string) {
+    setSelectedRecordId(recordId);
+    setActiveTarget({ kind: "content", recordId });
+  }
+
+  function getActiveEditorTitle() {
+    if (activeTarget.kind === "showcase") {
+      return "Vitrine";
+    }
+
+    if (activeTarget.kind === "login") {
+      return "Pagina de login";
+    }
+
+    if (activeTarget.kind === "products") {
+      return "Pagina de produtos";
+    }
+
+    if (activeTarget.kind === "content") {
+      return selectedRecord?.content.title ?? "Produto";
+    }
+
+    return "Personalizacao";
+  }
+
+  function renderPersonalizationIndex() {
+    return (
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold text-[var(--accent)]">CRM</p>
+            <h2 className="text-3xl font-black text-white">Personalizacao</h2>
+          </div>
+          <span className="inline-flex min-h-9 items-center rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-xs font-black text-zinc-300">
+            {personalizationItemsCount} itens
+          </span>
+        </div>
+
+        <section className={`${panelClassName} p-5`}>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-lg font-black text-white">Bunker707</h3>
+              <p className="mt-1 text-sm font-semibold text-zinc-500">
+                Link principal: <span className="text-zinc-300">/</span>
+              </p>
+            </div>
+            <button className="inline-flex min-h-10 w-fit items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white" type="button">
+              <Sparkles className="h-4 w-4 text-[var(--accent)]" />
+              Editar tema
+            </button>
+          </div>
+        </section>
+
+        <section className={`${panelClassName} space-y-3 p-3`}>
+          <PersonalizationIndexRow
+            icon={Home}
+            onCustomize={() => setActiveTarget({ kind: "showcase" })}
+            previewHref="/"
+            status="Publicada"
+            subtitle="Essa e a pagina inicial"
+            title="Vitrine"
+            urlLabel="/"
+          />
+          <PersonalizationIndexRow
+            icon={KeyRound}
+            onCustomize={() => setActiveTarget({ kind: "login" })}
+            previewHref="/login"
+            status="Publicada"
+            subtitle="Acesso fechado da area de membros"
+            title="Pagina de login"
+            urlLabel="/login"
+          />
+          <PersonalizationIndexRow
+            icon={LibraryBig}
+            onCustomize={() => setActiveTarget({ kind: "products" })}
+            previewHref="/minhas-compras"
+            status="Em edicao"
+            statusClassName="border-amber-400/25 bg-amber-500/10 text-amber-300"
+            subtitle="Lista dos produtos e compras do aluno"
+            title="Pagina de produtos"
+            urlLabel="/minhas-compras"
+          />
+
+          {visiblePreviewRecords.map((record) => (
+            <PersonalizationIndexRow
+              image={record.content.image}
+              key={record.content.id}
+              onCustomize={() => openContentEditor(record)}
+              previewHref={`/conteudo/${record.content.id}`}
+              showChevron
+              status={record.access}
+              statusClassName={getAccessClassName(record.access)}
+              subtitle={record.kind}
+              title={record.content.title}
+              urlLabel={`/conteudo/${record.content.id}`}
+            />
+          ))}
+        </section>
+      </div>
+    );
+  }
+
+  function renderShowcasePersonalization() {
+    return (
+      <section className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className={`${panelClassName} h-fit overflow-hidden`}>
+          <div className="border-b border-white/10 p-4">
+            <p className="text-sm font-black text-white">Vitrine</p>
+          </div>
+          <div className="space-y-3 p-3">
+            <button className="flex min-h-11 w-full items-center justify-between rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-left text-sm font-bold text-zinc-200 transition hover:bg-white/10 hover:text-white" type="button">
+              Banner
+              <Pencil className="h-4 w-4" />
+            </button>
+            <div className="rounded-[8px] border border-white/10 bg-black/20 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-bold text-white">Secoes</p>
+                <button className="inline-flex min-h-8 items-center gap-2 rounded-[7px] border border-white/10 bg-white/[0.055] px-2.5 text-xs font-black text-zinc-200 transition hover:bg-white/10 hover:text-white" type="button">
+                  <Plus className="h-4 w-4" />
+                  Criar
+                </button>
+              </div>
+              <div className="mt-3 space-y-2">
+                {homeSectionDrafts
+                  .slice()
+                  .sort((first, second) => first.order - second.order)
+                  .map((section) => {
+                    const isSelected = section.id === selectedSection?.id;
+
+                    return (
+                      <button
+                        className={`flex w-full items-center gap-2 rounded-[8px] border px-3 py-2 text-left transition ${
+                          isSelected
+                            ? "border-white/25 bg-white text-black"
+                            : "border-white/10 bg-white/[0.035] text-zinc-300 hover:bg-white/10 hover:text-white"
+                        }`}
+                        key={section.id}
+                        onClick={() => setSelectedSectionId(section.id)}
+                        type="button"
+                      >
+                        <Menu className="h-4 w-4 shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-black">{section.title}</span>
+                          <span className={`mt-1 block text-[11px] font-semibold ${isSelected ? "text-black/55" : "text-zinc-500"}`}>
+                            {section.contentCount} item{section.contentCount === 1 ? "" : "s"} / {getVisibilityLabel(section.visibility)}
+                          </span>
+                        </span>
+                        <MoreHorizontal className="h-4 w-4 shrink-0" />
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <div className="relative min-w-0 overflow-hidden rounded-[8px] border border-white/10 bg-[#141414] shadow-2xl shadow-black/20">
+          <div className="absolute left-0 right-0 top-0 z-30 flex h-16 items-center gap-4 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.72),rgba(0,0,0,0.08))] px-4 sm:px-6">
+            <button
+              aria-label="Abrir menu"
+              className="grid h-10 w-10 place-items-center rounded-[6px] text-white transition hover:bg-white/10"
+              type="button"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+            <Image alt="Bunker707" className="h-auto w-[150px] sm:w-[190px]" height={35} src="/brand/logo-bunker.png" width={306} />
+            <div className="ml-auto flex items-center gap-2">
+              <button aria-label="Buscar" className="grid h-10 w-10 place-items-center rounded-[6px] text-white transition hover:bg-white/10" type="button">
+                <Search className="h-5 w-5" />
+              </button>
+              <button aria-label="Notificacoes" className="grid h-10 w-10 place-items-center rounded-[6px] text-white transition hover:bg-white/10" type="button">
+                <Bell className="h-5 w-5" />
+              </button>
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-[var(--accent)] text-xs font-black text-white">
+                DS
+              </span>
+            </div>
+          </div>
+
+          <div className="group/banner relative">
+            <HeroSection hero={hero} />
+            <button className="absolute right-5 top-20 z-40 inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-white/15 bg-black/55 px-3 py-2 text-xs font-black text-white opacity-100 backdrop-blur transition hover:bg-white hover:text-black sm:opacity-0 sm:group-hover/banner:opacity-100" type="button">
+              <Pencil className="h-4 w-4" />
+              Editar banner
+            </button>
+          </div>
+
+          <div className="relative z-20 -mt-24 space-y-20 pb-24">
+            {homeRows.length > 0 ? (
+              homeRows.map((row) => (
+                <div
+                  className={`group/section relative rounded-[8px] transition ${
+                    row.id === selectedSection?.id ? "outline outline-1 outline-white/20" : "outline outline-1 outline-transparent"
+                  }`}
+                  key={row.id}
+                >
+                  <button
+                    className="absolute right-5 top-0 z-40 inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-white/10 bg-black/55 px-3 py-2 text-xs font-black text-zinc-100 opacity-100 backdrop-blur transition hover:bg-white hover:text-black sm:opacity-0 sm:group-hover/section:opacity-100"
+                    onClick={() => setSelectedSectionId(row.id)}
+                    type="button"
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Editar secao
+                  </button>
+                  {row.variant === "course_modules" && row.course && row.modules ? (
+                    <CourseModulesHomeSection
+                      course={row.course}
+                      lockedActionMode={row.lockedActionMode}
+                      modules={row.modules}
+                      subtitle={row.subtitle}
+                      title={row.title}
+                    />
+                  ) : (
+                    <ContentRow
+                      items={row.items}
+                      subtitle={row.subtitle}
+                      title={row.title}
+                      variant={row.variant === "continue" ? "continue" : "vertical"}
+                    />
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="group/section relative">
+                <button className="absolute right-5 top-0 z-40 inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-white/10 bg-black/55 px-3 py-2 text-xs font-black text-zinc-100 backdrop-blur transition hover:bg-white hover:text-black" type="button">
+                  <Pencil className="h-4 w-4" />
+                  Editar secao
+                </button>
+                <ContentRow
+                  items={visiblePreviewRecords.map((record) => record.content)}
+                  title="Vitrine"
+                  variant="vertical"
+                />
+              </div>
+            )}
+          </div>
+
+          <MemberFooter />
+        </div>
+      </section>
+    );
+  }
+
+  function renderLoginPersonalization() {
+    return (
+      <section className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className={`${panelClassName} h-fit overflow-hidden`}>
+          <div className="border-b border-white/10 p-4">
+            <p className="text-sm font-black text-white">Pagina de login</p>
+          </div>
+          <div className="space-y-3 p-3">
+            {[
+              ["template", "Template", "Modelo e posicao do formulario"],
+              ["image", "Imagem", "Visual lateral ou fundo"],
+              ["form", "Formulario", "Titulo, texto e CTA"],
+              ["providers", "Provedores", "Login social e links"]
+            ].map(([id, label, description]) => {
+              const isSelected = loginEditorSection === id;
+
+              return (
+                <button
+                  className={`w-full rounded-[8px] border px-3 py-2 text-left transition ${
+                    isSelected
+                      ? "border-white/25 bg-white text-black"
+                      : "border-white/10 bg-white/[0.035] text-zinc-300 hover:bg-white/10 hover:text-white"
+                  }`}
+                  key={id}
+                  onClick={() => setLoginEditorSection(id as LoginEditorSection)}
+                  type="button"
+                >
+                  <span className="block text-sm font-black">{label}</span>
+                  <span className={`mt-1 block text-[11px] font-semibold ${isSelected ? "text-black/55" : "text-zinc-500"}`}>
+                    {description}
+                  </span>
+                </button>
+              );
+            })}
+
+            {loginEditorSection === "template" ? (
+              <div className="rounded-[8px] border border-white/10 bg-black/20 p-3">
+                <p className="text-xs font-black uppercase text-zinc-500">Modelos</p>
+                <div className="mt-3 grid gap-2">
+                  {loginTemplateOptions.map((template) => (
+                    <button
+                      className={`rounded-[8px] border px-3 py-2 text-left text-xs font-black transition ${
+                        loginDraft.template === template.id
+                          ? "border-white/20 bg-white text-black"
+                          : "border-white/10 bg-white/[0.035] text-zinc-300 hover:bg-white/10 hover:text-white"
+                      }`}
+                      key={template.id}
+                      onClick={() => setLoginDraft((current) => ({ ...current, template: template.id }))}
+                      type="button"
+                    >
+                      {template.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {loginEditorSection === "form" ? (
+              <div className="space-y-3 rounded-[8px] border border-white/10 bg-black/20 p-3">
+                <label className="grid gap-1 text-xs font-black uppercase text-zinc-500">
+                  Titulo opcional
+                  <input
+                    className={inputClassName}
+                    onChange={(event) => setLoginDraft((current) => ({ ...current, title: event.target.value }))}
+                    placeholder="Sem titulo por padrao"
+                    value={loginDraft.title}
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-black uppercase text-zinc-500">
+                  Texto opcional
+                  <textarea
+                    className={`${inputClassName} min-h-20 resize-none py-3`}
+                    onChange={(event) => setLoginDraft((current) => ({ ...current, subtitle: event.target.value }))}
+                    placeholder="Sem texto por padrao"
+                    value={loginDraft.subtitle}
+                  />
+                </label>
+              </div>
+            ) : null}
+          </div>
+        </aside>
+
+        <div className="relative min-w-0 overflow-hidden rounded-[8px] border border-white/10 bg-black shadow-2xl shadow-black/20">
+          <button className="absolute right-5 top-5 z-30 inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-white/15 bg-black/55 px-3 py-2 text-xs font-black text-white backdrop-blur transition hover:bg-white hover:text-black" type="button">
+            <Pencil className="h-4 w-4" />
+            Editar area selecionada
+          </button>
+          <div className="pointer-events-none">
+            <LoginExperience
+              authConfigured={false}
+              config={loginPreviewConfig}
+              localAuthEnabled
+              redirectTo="/"
+            />
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function renderProductsPagePersonalization() {
+    return (
+      <section className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className={`${panelClassName} h-fit overflow-hidden`}>
+          <div className="border-b border-white/10 p-4">
+            <p className="text-sm font-black text-white">Pagina de produtos</p>
+          </div>
+          <div className="space-y-3 p-3">
+            {[
+              ["header", "Cabecalho", "Titulo e resumo da lista"],
+              ["filters", "Filtros", "Abas e busca"],
+              ["cards", "Cards", "Tamanho e informacoes visiveis"]
+            ].map(([id, label, description]) => {
+              const isSelected = productsEditorSection === id;
+
+              return (
+                <button
+                  className={`w-full rounded-[8px] border px-3 py-2 text-left transition ${
+                    isSelected
+                      ? "border-white/25 bg-white text-black"
+                      : "border-white/10 bg-white/[0.035] text-zinc-300 hover:bg-white/10 hover:text-white"
+                  }`}
+                  key={id}
+                  onClick={() => setProductsEditorSection(id as ProductsEditorSection)}
+                  type="button"
+                >
+                  <span className="block text-sm font-black">{label}</span>
+                  <span className={`mt-1 block text-[11px] font-semibold ${isSelected ? "text-black/55" : "text-zinc-500"}`}>
+                    {description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+
+        <div className="relative min-w-0 overflow-hidden rounded-[8px] border border-white/10 bg-[#141414] shadow-2xl shadow-black/20">
+          <div className="absolute left-0 right-0 top-0 z-20 flex h-16 items-center gap-4 bg-[#080808]/92 px-4 sm:px-6">
+            <button aria-label="Abrir menu" className="grid h-10 w-10 place-items-center rounded-[6px] text-white transition hover:bg-white/10" type="button">
+              <Menu className="h-5 w-5" />
+            </button>
+            <Image alt="Bunker707" className="h-auto w-[150px] sm:w-[190px]" height={35} src="/brand/logo-bunker.png" width={306} />
+          </div>
+          <button className="absolute right-5 top-20 z-30 inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-white/15 bg-black/55 px-3 py-2 text-xs font-black text-white backdrop-blur transition hover:bg-white hover:text-black" type="button">
+            <Pencil className="h-4 w-4" />
+            Editar area selecionada
+          </button>
+          <div className="pointer-events-none">
+            <PurchasesExperience items={visiblePreviewRecords.map((record) => record.content)} />
+          </div>
+          <MemberFooter />
+        </div>
+      </section>
+    );
+  }
+
+  function renderContentPersonalization() {
+    if (!selectedRecord) {
+      return (
+        <section className={`${panelClassName} p-8 text-center`}>
+          <LibraryBig className="mx-auto h-8 w-8 text-zinc-600" />
+          <p className="mt-3 text-lg font-black text-white">Crie um produto no Catalogo primeiro.</p>
+        </section>
+      );
+    }
+
+    const heroSettings = selectedRecord.pageSettings?.hero;
+    const pageHero = {
+      badge: heroSettings?.badge ?? selectedRecord.content.accessLabel ?? selectedRecord.kind,
+      ctaHref: heroSettings?.ctaHref ?? "#conteudos",
+      ctaLabel: heroSettings?.ctaLabel ?? "Acessar",
+      description: heroSettings?.description ?? selectedRecord.content.description,
+      mediaSrc: heroSettings?.mediaSrc ?? selectedRecord.content.image ?? hero.image,
+      mediaType: heroSettings?.mediaType ?? "image",
+      poster: heroSettings?.poster,
+      title: heroSettings?.title ?? selectedRecord.content.title,
+      visibility: {
+        badge: heroSettings?.visibility?.badge ?? false,
+        cta: heroSettings?.visibility?.cta ?? false,
+        description: heroSettings?.visibility?.description ?? false,
+        title: heroSettings?.visibility?.title ?? false
+      }
+    };
+    const showBadge = Boolean(pageHero.visibility.badge && pageHero.badge);
+    const showTitle = Boolean(pageHero.visibility.title && pageHero.title);
+    const showDescription = Boolean(pageHero.visibility.description && pageHero.description);
+    const showCta = Boolean(pageHero.visibility.cta && pageHero.ctaLabel);
+    const hasVisibleHeroContent = showBadge || showTitle || showDescription || showCta;
+
+    return (
+      <section className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)]">
+        <aside className={`${panelClassName} h-fit overflow-hidden`}>
+          <div className="border-b border-white/10 p-4">
+            <p className="text-sm font-black text-white">Produto</p>
+          </div>
+          <div className="space-y-3 p-3">
+            <label className="grid gap-2 text-xs font-black uppercase text-zinc-500">
+              Pagina
+              <select
+                className={inputClassName}
+                onChange={(event) => selectContentRecord(event.target.value)}
+                value={selectedRecord.content.id}
+              >
+                {visiblePreviewRecords.map((record) => (
+                  <option key={record.content.id} value={record.content.id}>
+                    {record.content.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {[
+              ["page", "Pagina do produto", "Hero, imagem e secoes da pagina"],
+              ["structure", "Modulos e cards", "Como cursos, modulos e aulas aparecem"]
+            ].map(([id, label, description]) => {
+              const isSelected = contentEditorPanel === id;
+
+              return (
+                <button
+                  className={`w-full rounded-[8px] border px-3 py-2 text-left transition ${
+                    isSelected
+                      ? "border-white/25 bg-white text-black"
+                      : "border-white/10 bg-white/[0.035] text-zinc-300 hover:bg-white/10 hover:text-white"
+                  }`}
+                  key={id}
+                  onClick={() => setContentEditorPanel(id as ContentEditorPanel)}
+                  type="button"
+                >
+                  <span className="block text-sm font-black">{label}</span>
+                  <span className={`mt-1 block text-[11px] font-semibold ${isSelected ? "text-black/55" : "text-zinc-500"}`}>
+                    {description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+
+        <div className="relative min-w-0 overflow-hidden rounded-[8px] border border-white/10 bg-[#141414] shadow-2xl shadow-black/20">
+          <div className="absolute left-0 right-0 top-0 z-20 flex h-16 items-center gap-4 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.72),rgba(0,0,0,0.08))] px-4 sm:px-6">
+            <button aria-label="Abrir menu" className="grid h-10 w-10 place-items-center rounded-[6px] text-white transition hover:bg-white/10" type="button">
+              <Menu className="h-5 w-5" />
+            </button>
+            <Image alt="Bunker707" className="h-auto w-[150px] sm:w-[190px]" height={35} src="/brand/logo-bunker.png" width={306} />
+          </div>
+
+          <section
+            className={`group/hero relative min-h-[640px] overflow-hidden transition ${
+              contentEditorPanel === "page" ? "outline outline-1 outline-white/20" : "outline outline-1 outline-transparent"
+            }`}
+          >
+            {pageHero.mediaType === "video" ? (
+              <video
+                aria-hidden="true"
+                autoPlay
+                className="absolute inset-0 h-full w-full object-cover"
+                loop
+                muted
+                playsInline
+                poster={pageHero.poster}
+                src={pageHero.mediaSrc}
+              />
+            ) : (
+              <div
+                className="absolute inset-0 bg-cover bg-center"
+                style={{ backgroundImage: `url(${pageHero.mediaSrc})` }}
+              />
+            )}
+            {hasVisibleHeroContent ? (
+              <div className="absolute inset-0 bg-gradient-to-r from-black via-black/72 to-black/18" />
+            ) : null}
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-b from-transparent via-[#141414]/88 to-[#141414]" />
+            <button
+              className="absolute right-5 top-20 z-30 inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-white/15 bg-black/55 px-3 py-2 text-xs font-black text-white opacity-100 backdrop-blur transition hover:bg-white hover:text-black sm:opacity-0 sm:group-hover/hero:opacity-100"
+              onClick={() => setContentEditorPanel("page")}
+              type="button"
+            >
+              <Pencil className="h-4 w-4" />
+              Editar hero
+            </button>
+
+            <div className="relative z-10 flex min-h-[640px] max-w-6xl flex-col px-5 pb-36 pt-24 sm:px-8 lg:px-12">
+              <div className="mt-auto">
+                {showBadge ? (
+                  <div className="mb-4 inline-flex w-fit items-center gap-2 rounded-[6px] border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-normal text-white backdrop-blur">
+                    <BookOpen className="h-4 w-4 text-[var(--accent-warm)]" />
+                    {pageHero.badge}
+                  </div>
+                ) : null}
+
+                {showTitle ? (
+                  <h1 className="max-w-4xl text-5xl font-black leading-none text-white sm:text-6xl lg:text-7xl">
+                    {pageHero.title}
+                  </h1>
+                ) : (
+                  <h1 className="sr-only">{selectedRecord.content.title}</h1>
+                )}
+
+                {showDescription ? (
+                  <p className="mt-6 max-w-2xl text-base leading-7 text-zinc-200 sm:text-lg">
+                    {pageHero.description}
+                  </p>
+                ) : null}
+
+                {showCta ? (
+                  <div className="mt-8">
+                    <span className="inline-flex min-h-12 items-center gap-2 rounded-[8px] bg-white px-6 py-3 text-sm font-extrabold text-black">
+                      <Play className="h-4 w-4 fill-current" />
+                      {pageHero.ctaLabel}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          <div
+            className={`group/structure relative z-20 -mt-28 transition sm:-mt-32 ${
+              contentEditorPanel === "structure" ? "outline outline-1 outline-white/20" : "outline outline-1 outline-transparent"
+            }`}
+          >
+            <button
+              className="absolute right-5 top-0 z-30 inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-white/15 bg-black/55 px-3 py-2 text-xs font-black text-white opacity-100 backdrop-blur transition hover:bg-white hover:text-black sm:opacity-0 sm:group-hover/structure:opacity-100"
+              onClick={() => setContentEditorPanel("structure")}
+              type="button"
+            >
+              <Pencil className="h-4 w-4" />
+              Editar modulos
+            </button>
+            <div className="pointer-events-none">
+              <ContentStructureSection
+                formationCourseOpenMode={selectedRecord.pageSettings?.formationCourseOpenMode ?? "course_lesson_format"}
+                formationCourses={selectedRecord.kind === "Formacao" ? formationCourses : []}
+                internalCardActionMode={selectedRecord.pageSettings?.internalCardActionMode ?? "implicit"}
+                item={selectedRecord.content}
+                modules={selectedModules}
+                showLockedStates={false}
+              />
+            </div>
+          </div>
+          <MemberFooter />
+        </div>
+      </section>
+    );
+  }
+
+  if (activeTarget.kind === "index") {
+    return renderPersonalizationIndex();
+  }
+
+  return (
+    <div className="space-y-4">
+      <PersonalizationEditorHeader
+        eyebrow="Personalizacao"
+        onBack={() => setActiveTarget({ kind: "index" })}
+        title={getActiveEditorTitle()}
+      />
+      <div className="min-w-0">
+        {activeTarget.kind === "showcase" ? renderShowcasePersonalization() : null}
+        {activeTarget.kind === "login" ? renderLoginPersonalization() : null}
+        {activeTarget.kind === "products" ? renderProductsPagePersonalization() : null}
+        {activeTarget.kind === "content" ? renderContentPersonalization() : null}
+      </div>
     </div>
   );
 }
@@ -4793,6 +5690,16 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
               courseModules={dashboardData.courseModules}
               onDashboardDataChange={updateDashboardData}
               selectedRecord={selectedRecord}
+            />
+          ) : null}
+          {activeView === "personalization" ? (
+            <PersonalizationView
+              courseModules={dashboardData.courseModules}
+              formationCourses={dashboardData.formationCourses}
+              hero={dashboardData.hero}
+              homeSections={dashboardData.homeSections}
+              homeRows={dashboardData.homeRows}
+              records={dashboardData.contentRecords}
             />
           ) : null}
         </main>

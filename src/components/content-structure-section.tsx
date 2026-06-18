@@ -23,6 +23,7 @@ type ContentStructureSectionProps = {
   internalCardActionMode: InternalCardActionMode;
   item: ContentItem;
   modules: CourseModule[];
+  showLockedStates?: boolean;
 };
 
 type InternalPosterCardProps = {
@@ -273,7 +274,8 @@ export function ContentStructureSection({
   formationCourses,
   internalCardActionMode,
   item,
-  modules
+  modules,
+  showLockedStates = true
 }: ContentStructureSectionProps) {
   const isFormation = item.kind === "Formacao";
   const isCourseLike = ["Curso", "Bootcamp", "Mentoria", "Webinario", "Produto"].includes(item.kind);
@@ -303,7 +305,7 @@ export function ContentStructureSection({
               ? `/conteudo/${course.id}/aulas/${firstModule.id}`
               : `/conteudo/${course.id}`;
             const releaseNotice = getReleaseRuleNotice(course.releaseRule, "curso");
-            const isLocked = Boolean(item.isLocked || course.isLocked || releaseNotice?.isLocked);
+            const isLocked = showLockedStates && Boolean(item.isLocked || course.isLocked || releaseNotice?.isLocked);
             const lockedDetail = item.isLocked
               ? "Este curso faz parte de um conteudo que ainda nao esta liberado para este aluno."
               : releaseNotice?.detail;
@@ -341,7 +343,7 @@ export function ContentStructureSection({
           {modules.map((module) => {
             const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo");
             const hasLessons = module.lessons.length > 0;
-            const isLocked = Boolean(item.isLocked || releaseNotice?.isLocked || !hasLessons);
+            const isLocked = Boolean((showLockedStates && (item.isLocked || releaseNotice?.isLocked)) || !hasLessons);
             const lockedDetail = item.isLocked
               ? "Este modulo fica disponivel quando o aluno tiver acesso ao conteudo."
               : !hasLessons

@@ -20,7 +20,7 @@ Para usuarios internos com papel administrativo, a area de membros deve manter a
 
 A tela de login deve ser uma experiencia fechada de area de membros, nao uma vitrine publica nem checkout.
 
-O produtor podera escolher futuramente um modelo de login no CMS. A configuracao deve ser persistida no backend quando a tela de login entrar no escopo administrativo.
+O produtor podera escolher um modelo de login na area `Personalizacao` do CRM. A configuracao deve ser persistida no backend quando a tela de login entrar no escopo administrativo persistido.
 
 Modelos iniciais:
 
@@ -46,6 +46,34 @@ Regras:
 - manter links discretos de suporte, privacidade e termos;
 - registrar o evento `user_signed_in` quando o aluno entrar por email/senha ou OAuth;
 - usar Supabase Auth no MVP, mantendo a tela configuravel pelo CMS futuro.
+
+## Personalizacao no CRM
+
+A sidebar do CRM/backoffice deve ter uma opcao principal chamada `Personalizacao`.
+
+Essa area agrupa as configuracoes visuais da experiencia do aluno:
+
+- pagina de login: template, logo, imagem, titulo, texto de apoio, superficie do formulario e provedores visiveis;
+- paginas dos cursos, formacoes, bootcamps e produtos principais: hero, textos opcionais, CTA, capa e modo de apresentacao;
+- estrutura interna dos cursos: como modulos, aulas, capas, ordem, overlays e estados de liberacao aparecem para o aluno;
+- vitrine/home: hero, banner, textos, fileiras, cards/secoes, ordem, origem dos conteudos e regras de visibilidade.
+
+A primeira tela de `Personalizacao` deve ser uma lista central dos destinos personalizaveis, no estilo operacional do CRM: `Vitrine`, `Pagina de login`, `Pagina de produtos` e cada produto/formacao/curso vendavel. Cada linha mostra nome, caminho de preview quando existir, status e acao `Personalizar`. O editor especifico so abre depois desse clique; a tela inicial nao deve abrir todas as opcoes de edicao ao mesmo tempo.
+
+Dentro de cada editor, o painel lateral deve listar apenas as partes editaveis daquela pagina, como `Banner` e `Secoes` na vitrine, `Template`, `Imagem`, `Formulario` e `Provedores` no login, ou `Pagina do produto` e `Modulos e cards` nos produtos/cursos. Ao escolher uma parte, o canvas ao lado continua mostrando a representacao fiel da pagina final.
+
+Nos editores de produtos/cursos, o canvas deve representar a composicao visual limpa que o produtor esta configurando para o aluno com acesso. Estados padrao de bloqueio por compra, entitlement ou drip nao precisam aparecer nesse modo de personalizacao, porque sao comportamentos globais ja conhecidos; eles continuam existindo na pagina real quando o aluno nao tiver acesso ou quando a regra de entrega exigir bloqueio.
+
+Ao clicar para personalizar a vitrine/home, o produtor deve ver uma representacao fiel da home real do aluno em modo editor, com controles discretos para editar banner, textos e secoes sobre a propria pagina. A tela nao deve introduzir um hero, dashboard ou explicacao de personalizacao acima da pagina editada; a renderizacao final da home continua respeitando entitlements, regras de liberacao e visibilidade por aluno.
+
+Essa representacao deve usar as mesmas fontes e variantes da home publicada:
+
+- `Continue assistindo` continua usando cards horizontais de aula, com thumbnail/resume frame da aula e barra de progresso, nunca capa vertical do curso;
+- secoes verticais continuam usando o mesmo tamanho e comportamento dos cards da area do aluno;
+- secoes de modulos de curso continuam usando a mesma composicao da home publicada;
+- textos, subtitulos, badges e elementos que nao aparecem na pagina final nao devem ser inventados no editor; o produtor pode adicionar novos textos ou secoes pelos controles de edicao quando isso fizer parte da configuracao.
+
+`Personalizacao` nao substitui `Catalogo` nem `Estrutura`: o catalogo cria produtos e conteudos, a estrutura monta modulos e aulas, e a personalizacao controla como esses elementos aparecem na experiencia final.
 
 ## Header
 

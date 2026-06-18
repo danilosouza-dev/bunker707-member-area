@@ -66,6 +66,7 @@ Entregas:
 - dashboard escuro inspirado em Netflix/ad manager;
 - catalogo de produtos e conteudos;
 - construtor de formacoes, cursos internos, modulos e aulas;
+- area `Personalizacao` no CRM com lista inicial de destinos editaveis e editores fieis para login, pagina de produtos, paginas de cursos, estrutura interna e vitrine/home;
 - regras de liberacao por compra, horas, dias, data fixa e atividade dentro do editor de formacoes, cursos, modulos e aulas;
 - entitlements e webhooks externos como camada tecnica/auditavel, nao como item solto da sidebar principal;
 - Supabase Postgres/RLS com seeds alinhadas ao modelo futuro e fallback local apenas para desenvolvimento sem variaveis.

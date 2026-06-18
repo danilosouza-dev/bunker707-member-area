@@ -152,7 +152,7 @@ Regras:
 
 ### login_page_settings
 
-Configuracao visual da tela de login escolhida pelo produtor no CMS futuro.
+Configuracao visual da tela de login escolhida pelo produtor na area `Personalizacao` do CRM.
 
 - id;
 - template: split_visual_right, split_visual_left, center_glass, side_glass_right;
@@ -177,6 +177,25 @@ Regras:
 - nenhuma chave de provedor de auth deve ser salva ou exposta nessa configuracao;
 - imagens e textos devem ser tratados como conteudo customizavel, nao como regra de autenticacao.
 
+## Personalizacao administrativa
+
+A area `Personalizacao` do CRM e uma camada de edicao visual sobre configuracoes existentes:
+
+- `login_page_settings` para a tela de login;
+- `content_page_settings` para paginas de cursos, formacoes, bootcamps, mentorias, webinarios e produtos;
+- `home_sections` para a vitrine/home, incluindo hero, fileiras, cards/secoes, ordem, origem dos conteudos e visibilidade;
+- dados de modulos e aulas para ajustar como a estrutura interna aparece dentro da pagina do curso.
+
+Regras:
+
+- personalizacao altera apresentacao, texto, imagens, ordem e preview, mas nao concede acesso;
+- a home/vitrine editavel deve ser uma representacao fiel da home real do aluno em modo editor, com controles discretos sobre banner, textos e secoes;
+- o editor da home deve consumir as mesmas `home_sections`/`homeRows` resolvidas pela home publicada, preservando variantes como `continue_watching`, `vertical` e `course_modules`;
+- `continue_watching` deve usar thumbnails/resume frames de aulas e proporcao horizontal de video, nao capas verticais de cursos;
+- a renderizacao final continua filtrando por `entitlements`, regras de liberacao e visibilidade da secao;
+- cursos internos de formacao continuam fora da vitrine como produto vendavel separado;
+- checkout interno continua fora do escopo do MVP.
+
 Regras de produto e acesso:
 
 - formacao e produto vendavel;
@@ -192,7 +211,7 @@ Regras de produto e acesso:
 
 O CMS em `/admin` grava dados por uma camada server-side persistida em Supabase Postgres/RLS. No desenvolvimento local sem variaveis Supabase, existe fallback em `.data/bunker707-platform.json` apenas para manter o `localhost:3000` navegavel; em ambientes reais, a fonte deve ser Supabase sem misturar autorizacao administrativa com a experiencia do aluno. Um Supabase vazio nao deve receber dados demo automaticamente: cadastros reais entram pelo CMS, APIs, webhooks ou migrations controladas.
 
-O menu principal do CMS deve ser enxuto: Visao geral, Alunos, Catalogo e Estrutura. Regras de liberacao nao ficam em uma tela solta; elas sao campos do proprio item editado, seja formacao, curso, mentoria, webinario, produto, modulo, aula ou material.
+O menu principal do CMS deve ser enxuto: Visao geral, Alunos, Catalogo, Estrutura e Personalizacao. Regras de liberacao nao ficam em uma tela solta; elas sao campos do proprio item editado, seja formacao, curso, mentoria, webinario, produto, modulo, aula ou material.
 
 O primeiro fluxo de criacao do CMS deve funcionar como um construtor LMS:
 
@@ -235,7 +254,7 @@ Para teste local/admin, a area de membros pode ser renderizada em modos de previ
 Rascunhos editaveis de produtos, cursos, modulos, aulas, materiais e configuracoes da home.
 
 - id;
-- owner_type: product, formation, course, bootcamp, module, lesson, material, home_section, login_page_settings;
+- owner_type: product, formation, course, bootcamp, module, lesson, material, home_section, login_page_settings, content_page_settings;
 - owner_id;
 - draft_payload jsonb;
 - status: draft, review, scheduled, published, archived;
