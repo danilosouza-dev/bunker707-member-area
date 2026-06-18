@@ -198,6 +198,11 @@ test("admin dashboard models student CRM lists and course grouping", () => {
   assert.match(adminStudentsCommandCenterSource, /Command center de alunos/);
   assert.match(adminStudentsCommandCenterSource, /Cursos/);
   assert.match(adminStudentsCommandCenterSource, /Acompanhar/);
+  assert.match(adminStudentsCommandCenterSource, /Inteligencia da base/);
+  assert.match(adminStudentsCommandCenterSource, /Fila operacional/);
+  assert.match(adminStudentsCommandCenterSource, /Leituras estrategicas/);
+  assert.match(adminStudentsCommandCenterSource, /Proxima melhor acao/);
+  assert.match(adminStudentsCommandCenterSource, /Sinais de negocio sem expor documento, telefone ou pedidos externos/);
   assert.match(adminDashboardSource, /CourseStudentGroups/);
   assert.match(adminDashboardSource, /onListModeChange=\{setListMode\}/);
   assert.match(adminDashboardSource, /Produtos comprados/);

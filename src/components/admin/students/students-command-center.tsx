@@ -3,18 +3,28 @@
 import * as React from "react";
 import {
   Activity,
+  AlertTriangle,
   ArrowUpRight,
   BookOpenCheck,
-  Filter,
+  BrainCircuit,
+  Clock3,
+  Crosshair,
+  Gauge,
   GraduationCap,
+  Layers3,
   LayoutGrid,
+  LineChart,
+  LockKeyhole,
+  Radar,
   Search,
   ShieldCheck,
   Sparkles,
+  Target,
   TrendingUp,
   UserCheck,
   UserPlus,
-  Users
+  Users,
+  Zap
 } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -117,25 +127,6 @@ function getStatusClassName(status: AdminEntitlementStatus) {
   return "bg-zinc-400/12 text-zinc-200 ring-zinc-300/20";
 }
 
-function getStudentSignal(student: AdminStudent) {
-  const progress = getAverageProgress(student.courses);
-  const accessCount = student.accessCount ?? 0;
-
-  if (student.status !== "active") {
-    return "Revisar acesso";
-  }
-
-  if (progress >= 75 || accessCount >= 30) {
-    return "Alto engajamento";
-  }
-
-  if (progress >= 35 || accessCount >= 8) {
-    return "Em evolucao";
-  }
-
-  return "Acompanhar";
-}
-
 function getStudentPriority(student: AdminStudent) {
   const progress = getAverageProgress(student.courses);
 
@@ -154,8 +145,100 @@ function getStudentPriority(student: AdminStudent) {
   return 3;
 }
 
+function hasNoFirstAccess(student: AdminStudent) {
+  const firstAccess = (student.firstAccessAt ?? "").toLowerCase();
+
+  return (student.accessCount ?? 0) === 0 || !firstAccess || firstAccess.includes("sem acesso");
+}
+
+function isAtRiskStudent(student: AdminStudent) {
+  return student.status === "active" && (hasNoFirstAccess(student) || getAverageProgress(student.courses) < 20);
+}
+
+function isHighIntentStudent(student: AdminStudent) {
+  return student.status === "active" && (getAverageProgress(student.courses) >= 75 || (student.accessCount ?? 0) >= 30);
+}
+
+function isExpansionOpportunity(student: AdminStudent) {
+  return student.status === "active" && student.courses.length === 1 && getAverageProgress(student.courses) >= 60;
+}
+
+function getStudentHealthScore(student: AdminStudent) {
+  if (student.status !== "active") {
+    return 18;
+  }
+
+  const progressScore = getAverageProgress(student.courses) * 0.52;
+  const accessScore = Math.min(30, (student.accessCount ?? 0) * 1.6);
+  const productScore = Math.min(18, student.courses.length * 6);
+
+  return clampPercent(progressScore + accessScore + productScore);
+}
+
+function getStudentStage(student: AdminStudent) {
+  const progress = getAverageProgress(student.courses);
+
+  if (student.status !== "active") {
+    return "Acesso em revisao";
+  }
+
+  if (hasNoFirstAccess(student)) {
+    return "Primeiro acesso";
+  }
+
+  if (progress >= 75) {
+    return "Avancado";
+  }
+
+  if (progress >= 35) {
+    return "Em progresso";
+  }
+
+  return "Onboarding";
+}
+
+function getNextBestAction(student: AdminStudent) {
+  if (student.status !== "active") {
+    return "Revisar entitlement antes de qualquer acao comercial.";
+  }
+
+  if (hasNoFirstAccess(student)) {
+    return "Reenviar acesso e acompanhar o primeiro login.";
+  }
+
+  if (getAverageProgress(student.courses) < 20) {
+    return "Acionar onboarding com recomendacao do primeiro modulo.";
+  }
+
+  if (isExpansionOpportunity(student)) {
+    return "Mapear proxima formacao ou conteudo complementar.";
+  }
+
+  if (isHighIntentStudent(student)) {
+    return "Priorizar relacionamento, depoimento ou oferta avancada.";
+  }
+
+  return "Manter acompanhamento semanal de progresso e atividade.";
+}
+
+function getAccessActionLabel(action: NonNullable<AdminStudent["accessHistory"]>[number]["action"]) {
+  const labels = {
+    access_email_sent: "Acesso enviado",
+    lesson_completed: "Aula concluida",
+    lesson_started: "Aula iniciada",
+    login: "Login",
+    material_downloaded: "Material baixado"
+  } satisfies Record<NonNullable<AdminStudent["accessHistory"]>[number]["action"], string>;
+
+  return labels[action];
+}
+
 function formatPercent(value: number) {
   return `${clampPercent(value)}%`;
+}
+
+function formatShare(value: number, total: number) {
+  return `${total > 0 ? Math.round((value / total) * 100) : 0}% da base`;
 }
 
 function getProductSummary(product: AdminSellableProduct, students: AdminStudent[]) {
@@ -168,13 +251,37 @@ function getProductSummary(product: AdminSellableProduct, students: AdminStudent
   const activeStudents = enrolledStudents.filter((student) =>
     student.status === "active" && student.courses.some((course) => course.targetId === product.id && course.status === "active")
   );
+  const stalledStudents = enrolledStudents.filter((student) => {
+    const productCourses = student.courses.filter((course) => course.targetId === product.id);
+
+    return student.status === "active" && getAverageProgress(productCourses) < 20;
+  });
+  const highIntentStudents = enrolledStudents.filter((student) => {
+    const productCourses = student.courses.filter((course) => course.targetId === product.id);
+
+    return student.status === "active" && getAverageProgress(productCourses) >= 75;
+  });
 
   return {
     activeStudents: activeStudents.length,
     averageProgress: getAverageProgress(courses),
     enrolledStudents: enrolledStudents.length,
+    highIntentStudents: highIntentStudents.length,
+    stalledStudents: stalledStudents.length,
     product
   };
+}
+
+function getSegmentToneClassName(tone: "amber" | "emerald" | "red" | "sky" | "zinc") {
+  const tones = {
+    amber: "border-amber-300/15 bg-amber-400/[0.07] text-amber-100",
+    emerald: "border-emerald-300/15 bg-emerald-400/[0.07] text-emerald-100",
+    red: "border-red-400/20 bg-red-500/[0.08] text-red-100",
+    sky: "border-sky-300/15 bg-sky-400/[0.07] text-sky-100",
+    zinc: "border-white/10 bg-white/[0.045] text-zinc-100"
+  };
+
+  return tones[tone];
 }
 
 export function StudentsCommandCenter({
@@ -229,14 +336,132 @@ export function StudentsCommandCenter({
     ];
   }, [students]);
 
-  const productSummaries = React.useMemo(
+  const intelligence = React.useMemo(() => {
+    const activeStudents = students.filter((student) => student.status === "active");
+    const atRiskStudents = students.filter(isAtRiskStudent);
+    const highIntentStudents = students.filter(isHighIntentStudent);
+    const onboardingStudents = students.filter((student) => student.status === "active" && hasNoFirstAccess(student));
+    const expansionStudents = students.filter(isExpansionOpportunity);
+    const accessReviewStudents = students.filter((student) => student.status !== "active");
+    const withoutProductsStudents = students.filter((student) => student.courses.length === 0);
+
+    return {
+      activeStudents,
+      atRiskStudents,
+      expansionStudents,
+      highIntentStudents,
+      onboardingStudents,
+      segments: [
+        {
+          detail: `${formatShare(atRiskStudents.length, students.length)} precisa de contato`,
+          icon: AlertTriangle,
+          label: "Risco de abandono",
+          students: atRiskStudents,
+          tone: "red" as const,
+          value: atRiskStudents.length.toString()
+        },
+        {
+          detail: `${formatShare(highIntentStudents.length, students.length)} com tracao`,
+          icon: Zap,
+          label: "Alta intencao",
+          students: highIntentStudents,
+          tone: "emerald" as const,
+          value: highIntentStudents.length.toString()
+        },
+        {
+          detail: `${formatShare(onboardingStudents.length, students.length)} sem primeiro ciclo`,
+          icon: Clock3,
+          label: "Onboarding",
+          students: onboardingStudents,
+          tone: "amber" as const,
+          value: onboardingStudents.length.toString()
+        },
+        {
+          detail: `${formatShare(expansionStudents.length, students.length)} prontos para proxima oferta`,
+          icon: Target,
+          label: "Expansao",
+          students: expansionStudents,
+          tone: "sky" as const,
+          value: expansionStudents.length.toString()
+        }
+      ],
+      strategicReads: [
+        {
+          detail: "Alunos ativos com baixo progresso ou sem primeiro acesso.",
+          icon: Crosshair,
+          label: "Fila de retencao",
+          students: atRiskStudents,
+          value: `${atRiskStudents.length} alunos`
+        },
+        {
+          detail: "Base sem produto liberado ou com acesso fora do estado ativo.",
+          icon: LockKeyhole,
+          label: "Governanca de acesso",
+          students: [...accessReviewStudents, ...withoutProductsStudents],
+          value: `${accessReviewStudents.length + withoutProductsStudents.length} casos`
+        },
+        {
+          detail: "Alunos de alta intencao com apenas uma compra ativa.",
+          icon: BrainCircuit,
+          label: "Leitura de receita",
+          students: expansionStudents,
+          value: `${expansionStudents.length} oportunidades`
+        }
+      ]
+    };
+  }, [students]);
+
+  const funnelSteps = [
+    { icon: Users, label: "Base", value: students.length },
+    { icon: ShieldCheck, label: "Ativos", value: intelligence.activeStudents.length },
+    { icon: Zap, label: "Alta intencao", value: intelligence.highIntentStudents.length },
+    { icon: Target, label: "Expansao", value: intelligence.expansionStudents.length }
+  ];
+
+  const allProductSummaries = React.useMemo(
     () =>
       sellableProducts
         .map((product) => getProductSummary(product, students))
-        .sort((first, second) => second.enrolledStudents - first.enrolledStudents)
-        .slice(0, 4),
+        .sort((first, second) => second.enrolledStudents - first.enrolledStudents),
     [sellableProducts, students]
   );
+
+  const productSummaries = React.useMemo(() => allProductSummaries.slice(0, 4), [allProductSummaries]);
+
+  const productSignals = React.useMemo(() => {
+    const productWithTraction = [...allProductSummaries].sort((first, second) => second.activeStudents - first.activeStudents)[0];
+    const productWithLowProgress = [...allProductSummaries]
+      .filter((summary) => summary.enrolledStudents > 0)
+      .sort((first, second) => first.averageProgress - second.averageProgress)[0];
+    const productWithIntent = [...allProductSummaries].sort((first, second) => second.highIntentStudents - first.highIntentStudents)[0];
+
+    return [
+      {
+        detail: productWithTraction
+          ? `${productWithTraction.activeStudents} ativos em ${productWithTraction.product.kind}`
+          : "Cadastre produtos para medir tracao",
+        icon: LineChart,
+        label: "Produto com maior tracao",
+        value: productWithTraction?.product.title ?? "Sem dados"
+      },
+      {
+        detail: productWithLowProgress
+          ? `${productWithLowProgress.stalledStudents} alunos travados no inicio`
+          : "Sem produto com matriculas ainda",
+        icon: Radar,
+        label: "Ponto de suporte",
+        value: productWithLowProgress ? formatPercent(productWithLowProgress.averageProgress) : "0%"
+      },
+      {
+        detail: productWithIntent
+          ? `${productWithIntent.highIntentStudents} alunos avancados`
+          : "Nenhuma turma avancada detectada",
+        icon: Layers3,
+        label: "Expansao por conteudo",
+        value: productWithIntent?.product.title ?? "Sem dados"
+      }
+    ];
+  }, [allProductSummaries]);
 
   const studentsToWatch = React.useMemo(
     () =>
@@ -255,6 +480,9 @@ export function StudentsCommandCenter({
   );
 
   const selectedStudent = students.find((student) => student.id === selectedStudentId) ?? students[0] ?? null;
+  const selectedStudentProgress = selectedStudent ? getAverageProgress(selectedStudent.courses) : 0;
+  const selectedStudentJourney = selectedStudent?.accessHistory?.slice(0, 4) ?? [];
+  const selectedStudentHealth = selectedStudent ? getStudentHealthScore(selectedStudent) : 0;
 
   return (
     <section className="overflow-hidden rounded-[8px] border border-white/10 bg-[#07080a] text-white shadow-2xl shadow-black/40">
@@ -404,6 +632,159 @@ export function StudentsCommandCenter({
             </CardContent>
           </Card>
 
+          <Card className="rounded-[8px] border-white/10 bg-[#101114] py-0 ring-0">
+            <CardHeader className="border-b border-white/10 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
+                    <BrainCircuit className="size-4 text-red-200" />
+                    Inteligencia da base
+                  </CardTitle>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Segmentos seguros para retencao, expansao e governanca de acesso.
+                  </p>
+                </div>
+                <Badge className="w-fit rounded-[6px] bg-white/10 text-zinc-200 ring-1 ring-white/15">
+                  {formatPercent(getAverageProgress(students.flatMap((student) => student.courses)))} progresso medio
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 p-4">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                {intelligence.segments.map((segment) => {
+                  const Icon = segment.icon;
+                  const firstStudent = segment.students[0];
+
+                  return (
+                    <button
+                      aria-label={`Abrir segmento ${segment.label}`}
+                      className={cn(
+                        "min-h-32 rounded-[8px] border p-3 text-left transition hover:border-white/25 hover:bg-white/[0.07]",
+                        getSegmentToneClassName(segment.tone)
+                      )}
+                      disabled={!firstStudent}
+                      key={segment.label}
+                      onClick={() => {
+                        if (firstStudent) {
+                          onOpenStudent(firstStudent.id);
+                        }
+                      }}
+                      type="button"
+                    >
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="grid size-9 place-items-center rounded-[7px] border border-current/15 bg-black/25">
+                          <Icon className="size-4" />
+                        </span>
+                        <span className="text-2xl font-semibold tracking-normal text-white">{segment.value}</span>
+                      </span>
+                      <span className="mt-4 block text-sm font-semibold text-white">{segment.label}</span>
+                      <span className="mt-1 block text-xs leading-5 text-zinc-400">{segment.detail}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="grid gap-3 xl:grid-cols-[0.95fr_1.05fr]">
+                <div className="rounded-[8px] border border-white/10 bg-black/25 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Funil da base</p>
+                      <p className="mt-1 text-xs text-zinc-500">Da base cadastrada ate oportunidades de expansao.</p>
+                    </div>
+                    <Gauge className="size-4 text-zinc-500" />
+                  </div>
+                  <div className="space-y-3">
+                    {funnelSteps.map((step) => {
+                      const Icon = step.icon;
+                      const stepWidth = students.length > 0 ? Math.round((step.value / students.length) * 100) : 0;
+
+                      return (
+                        <div className="space-y-1.5" key={step.label}>
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-zinc-400">
+                              <Icon className="size-3.5 shrink-0" />
+                              <span className="truncate">{step.label}</span>
+                            </span>
+                            <span className="font-semibold text-zinc-200">{step.value}</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-red-500 via-orange-300 to-emerald-300"
+                              style={{ width: `${step.value > 0 ? Math.max(8, stepWidth) : 0}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="rounded-[8px] border border-white/10 bg-black/25 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Leituras estrategicas</p>
+                      <p className="mt-1 text-xs text-zinc-500">Sinais de negocio sem expor documento, telefone ou pedidos externos.</p>
+                    </div>
+                    <Radar className="size-4 text-zinc-500" />
+                  </div>
+                  <div className="space-y-2">
+                    {intelligence.strategicReads.map((read) => {
+                      const Icon = read.icon;
+                      const firstStudent = read.students[0];
+
+                      return (
+                        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.035] p-3" key={read.label}>
+                          <span className="grid size-9 place-items-center rounded-[7px] bg-white/[0.055] text-zinc-300">
+                            <Icon className="size-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-semibold text-white">{read.label}</span>
+                            <span className="mt-1 block text-xs leading-5 text-zinc-500">{read.detail}</span>
+                          </span>
+                          <button
+                            className="rounded-[7px] border border-white/10 bg-white/[0.055] px-2.5 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={!firstStudent}
+                            onClick={() => {
+                              if (firstStudent) {
+                                onOpenStudent(firstStudent.id);
+                              }
+                            }}
+                            type="button"
+                          >
+                            {read.value}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-3 lg:grid-cols-3">
+            {productSignals.map((signal) => {
+              const Icon = signal.icon;
+
+              return (
+                <Card className="rounded-[8px] border-white/10 bg-[#101114] py-0 ring-0" key={signal.label}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">{signal.label}</p>
+                        <p className="mt-2 truncate text-sm font-semibold text-white">{signal.value}</p>
+                        <p className="mt-1 text-xs leading-5 text-zinc-500">{signal.detail}</p>
+                      </div>
+                      <span className="grid size-9 shrink-0 place-items-center rounded-[8px] border border-white/10 bg-white/[0.055] text-zinc-300">
+                        <Icon className="size-4" />
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
           <div className="grid gap-3 lg:grid-cols-2">
             {productSummaries.length > 0 ? (
               productSummaries.map((summary) => (
@@ -459,8 +840,11 @@ export function StudentsCommandCenter({
           <CardHeader className="border-b border-white/10 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <CardTitle className="text-base font-semibold text-white">Acompanhar</CardTitle>
-                <p className="mt-1 text-sm text-zinc-500">Alunos com sinal operacional relevante.</p>
+                <CardTitle className="flex items-center gap-2 text-base font-semibold text-white">
+                  <Radar className="size-4 text-red-200" />
+                  Fila operacional
+                </CardTitle>
+                <p className="mt-1 text-sm text-zinc-500">Prioridade, jornada e proxima melhor acao.</p>
               </div>
               <Badge className="rounded-[6px] bg-white/10 text-zinc-200 ring-1 ring-white/15">
                 {studentsToWatch.length} itens
@@ -473,6 +857,7 @@ export function StudentsCommandCenter({
                 {studentsToWatch.map((student) => {
                   const progress = getAverageProgress(student.courses);
                   const isSelected = selectedStudent?.id === student.id;
+                  const healthScore = getStudentHealthScore(student);
 
                   return (
                     <button
@@ -499,6 +884,22 @@ export function StudentsCommandCenter({
                           <Badge className={cn("rounded-[6px] px-1.5 text-[11px] ring-1", sourceAccent[student.sourceProvider])}>
                             {student.sourceProvider}
                           </Badge>
+                          <Badge className="rounded-[6px] bg-white/10 px-1.5 text-[11px] text-zinc-200 ring-1 ring-white/15">
+                            {getStudentStage(student)}
+                          </Badge>
+                        </span>
+                        <span className="mt-2 block h-1.5 overflow-hidden rounded-full bg-white/10">
+                          <span
+                            className={cn(
+                              "block h-full rounded-full",
+                              healthScore < 35
+                                ? "bg-red-400"
+                                : healthScore < 70
+                                  ? "bg-amber-300"
+                                  : "bg-emerald-300"
+                            )}
+                            style={{ width: `${healthScore}%` }}
+                          />
                         </span>
                       </span>
                       <span className="grid justify-items-end gap-1">
@@ -507,7 +908,7 @@ export function StudentsCommandCenter({
                           <ArrowUpRight className="size-3 text-zinc-500" />
                         </span>
                         <span className="whitespace-nowrap text-[11px] font-medium text-zinc-500">
-                          {getStudentSignal(student)}
+                          Saude {healthScore}
                         </span>
                       </span>
                     </button>
@@ -526,7 +927,7 @@ export function StudentsCommandCenter({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-white">{selectedStudent.fullName}</p>
                     <p className="mt-1 text-xs text-zinc-500">
-                      {selectedStudent.courses.length} produtos liberados · {formatPercent(getAverageProgress(selectedStudent.courses))} medio
+                      {getStudentStage(selectedStudent)} · {selectedStudent.courses.length} produtos liberados
                     </p>
                   </div>
                   <Button
@@ -539,9 +940,54 @@ export function StudentsCommandCenter({
                   </Button>
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2">
+                  <MiniSignal icon={Gauge} label="Saude" value={selectedStudentHealth.toString()} />
+                  <MiniSignal icon={TrendingUp} label="Progresso" value={formatPercent(selectedStudentProgress)} />
                   <MiniSignal icon={UserCheck} label="Acessos" value={(selectedStudent.accessCount ?? 0).toString()} />
-                  <MiniSignal icon={TrendingUp} label="Progresso" value={formatPercent(getAverageProgress(selectedStudent.courses))} />
-                  <MiniSignal icon={Filter} label="Origem" value={selectedStudent.sourceProvider} />
+                </div>
+
+                <div className="mt-3 rounded-[8px] border border-white/10 bg-white/[0.035] p-3">
+                  <div className="flex items-start gap-2">
+                    <Sparkles className="mt-0.5 size-4 shrink-0 text-red-200" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">Proxima melhor acao</p>
+                      <p className="mt-1 text-sm leading-5 text-zinc-200">{getNextBestAction(selectedStudent)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <MiniSignal icon={Clock3} label="Primeiro acesso" value={selectedStudent.firstAccessAt ?? "Sem acesso"} />
+                  <MiniSignal icon={Activity} label="Ultima atividade" value={selectedStudent.lastActivityAt} />
+                </div>
+
+                <div className="mt-3 rounded-[8px] border border-white/10 bg-white/[0.025] p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-white">Jornada recente</p>
+                    <Badge className="rounded-[6px] bg-white/10 text-[11px] text-zinc-300 ring-1 ring-white/15">
+                      Dados seguros
+                    </Badge>
+                  </div>
+                  {selectedStudentJourney.length > 0 ? (
+                    <div className="space-y-2">
+                      {selectedStudentJourney.map((event) => (
+                        <div className="grid grid-cols-[auto_1fr] gap-2" key={event.id}>
+                          <span className="mt-1 size-2 rounded-full bg-red-300" />
+                          <span className="min-w-0">
+                            <span className="block truncate text-xs font-semibold text-zinc-200">
+                              {getAccessActionLabel(event.action)}
+                            </span>
+                            <span className="mt-0.5 block truncate text-[11px] text-zinc-500">
+                              {event.occurredAt} · {event.device}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-[7px] border border-dashed border-white/10 p-3 text-xs leading-5 text-zinc-500">
+                      Sem eventos recentes. Use as acoes do perfil para preparar acesso ou registrar acompanhamento.
+                    </p>
+                  )}
                 </div>
               </div>
             ) : null}
