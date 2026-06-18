@@ -11,7 +11,6 @@ import {
   CheckCircle2,
   Copy,
   Eye,
-  Flame,
   GalleryVerticalEnd,
   GraduationCap,
   Home,
@@ -36,7 +35,8 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { adminMainNavItems } from "@/components/admin/admin-nav";
+import { AdminOverview } from "@/components/admin/admin-overview";
+import { AdminShell } from "@/components/admin/admin-shell";
 import { ContentRow, CourseModulesHomeSection } from "@/components/content-row";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { HeroSection } from "@/components/hero-section";
@@ -52,8 +52,6 @@ import type {
   AdminDashboardData,
   AdminEntitlementStatus,
   AdminHomeSection,
-  AdminMetric,
-  AdminPipelineItem,
   AdminReleaseRule,
   AdminSellableProduct,
   AdminSourceProvider,
@@ -82,22 +80,6 @@ const courseLayoutContentKinds = ["Curso", "Bootcamp", "Mentoria", "Webinario", 
 
 function supportsCoursePresentationMode(kind: ContentKind) {
   return (courseLayoutContentKinds as readonly ContentKind[]).includes(kind);
-}
-
-function getToneClassName(tone: AdminMetric["tone"]) {
-  if (tone === "red") {
-    return "from-[var(--accent)]/20 to-[var(--accent)]/0 text-[var(--accent)]";
-  }
-
-  if (tone === "green") {
-    return "from-emerald-500/18 to-emerald-500/0 text-emerald-400";
-  }
-
-  if (tone === "amber") {
-    return "from-amber-500/18 to-amber-500/0 text-amber-300";
-  }
-
-  return "from-white/10 to-white/0 text-zinc-300";
 }
 
 function getAccessClassName(access: AdminContentAccess) {
@@ -218,461 +200,6 @@ function StatusPill({ children, className = "" }: { children: React.ReactNode; c
     <span className={`inline-flex min-h-7 items-center rounded-full border px-2.5 text-[11px] font-bold ${className}`}>
       {children}
     </span>
-  );
-}
-
-function IconButton({
-  children,
-  label
-}: {
-  children: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      aria-label={label}
-      className="grid h-10 w-10 place-items-center rounded-[8px] border border-white/10 bg-white/[0.055] text-zinc-200 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
-      type="button"
-    >
-      {children}
-    </button>
-  );
-}
-
-function AdminSidebar({
-  activeView,
-  isOpen,
-  onChangeView,
-  onClose
-}: {
-  activeView: AdminView;
-  isOpen: boolean;
-  onChangeView: (view: AdminView) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div
-      aria-hidden={!isOpen}
-      className={`fixed inset-0 z-50 transition ${isOpen ? "pointer-events-auto" : "pointer-events-none"}`}
-    >
-      <button
-        aria-label="Fechar menu do CMS"
-        className={`absolute inset-0 bg-black/70 backdrop-blur-sm transition duration-300 ${
-          isOpen ? "opacity-100" : "opacity-0"
-        }`}
-        onClick={onClose}
-        type="button"
-      />
-      <aside
-        aria-label="Menu do CMS"
-        className={`relative flex h-full w-[min(380px,92vw)] flex-col border-r border-white/10 bg-[#121212] shadow-2xl shadow-black transition duration-300 ease-out ${
-          isOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="flex items-center justify-between border-b border-white/10 p-5">
-          <Link
-            className="inline-flex rounded-[6px] transition-opacity hover:opacity-85"
-            href="/admin"
-            onClick={() => {
-              onChangeView("overview");
-              onClose();
-            }}
-          >
-            <Image alt="Bunker707" className="h-auto w-[190px]" height={35} src="/brand/logo-bunker.png" width={306} />
-          </Link>
-          <button
-            aria-label="Fechar menu do CMS"
-            className="grid h-10 w-10 place-items-center rounded-[6px] bg-white/10 text-white transition hover:bg-white/15"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="border-b border-white/10 p-5">
-          <div className="inline-flex items-center gap-2 rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-bold text-red-200">
-            <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-            CMS Command Center
-          </div>
-        </div>
-
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {adminMainNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = item.id === activeView;
-
-            return (
-              <button
-                className={`flex w-full items-center gap-3 rounded-[8px] px-4 py-3 text-left text-sm font-bold transition ${
-                  isActive
-                    ? "bg-[var(--accent)] text-white shadow-[0_16px_42px_rgba(229,9,20,0.28)]"
-                    : "text-zinc-400 hover:bg-white/[0.07] hover:text-white"
-                }`}
-                key={item.id}
-                onClick={() => {
-                  onChangeView(item.id);
-                  onClose();
-                }}
-                type="button"
-              >
-                <Icon className="h-5 w-5" />
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="space-y-4 border-t border-white/10 p-5">
-          <div className="rounded-[8px] border border-white/10 bg-white/[0.045] p-4">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
-              <ShieldCheck className="h-4 w-4 text-emerald-400" />
-              Ambiente seguro
-            </div>
-            <p className="mt-2 text-xs leading-5 text-zinc-400">
-              Acesso, conteudo e eventos externos ficam separados de checkout.
-            </p>
-          </div>
-          <Link
-            className="flex items-center gap-3 rounded-[8px] px-4 py-3 text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white"
-            href="/"
-            onClick={onClose}
-          >
-            <Home className="h-5 w-5" />
-            Area do aluno
-          </Link>
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-function AdminTopbar({
-  activeView,
-  onGoHome,
-  sidebarOpen,
-  onToggleSidebar
-}: {
-  activeView: AdminView;
-  onGoHome: () => void;
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
-}) {
-  const activeLabel = adminMainNavItems.find((item) => item.id === activeView)?.label ?? "CMS";
-
-  return (
-    <header className="sticky top-0 z-30 border-b border-white/10 bg-[#0b0b0b]/92 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-8">
-      <div className="flex items-center gap-3">
-        <button
-          aria-expanded={sidebarOpen}
-          aria-label={sidebarOpen ? "Fechar menu do CMS" : "Abrir menu do CMS"}
-          className="grid h-10 w-10 place-items-center rounded-[8px] border border-white/10 bg-white/[0.055] text-white transition hover:bg-white/10"
-          onClick={onToggleSidebar}
-          type="button"
-        >
-          {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
-
-        <Link
-          aria-label="Ir para a home do CRM"
-          className="hidden min-w-fit rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white sm:inline-flex"
-          href="/admin"
-          onClick={onGoHome}
-        >
-          <Image
-            alt="Bunker707"
-            className="h-auto w-[154px] lg:w-[178px]"
-            height={35}
-            priority
-            src="/brand/logo-bunker.png"
-            width={306}
-          />
-        </Link>
-
-        <div className="min-w-0">
-          <p className="text-xs font-bold uppercase text-zinc-500">CRM Bunker707</p>
-          <h1 className="truncate text-lg font-black text-white sm:text-xl">{activeLabel}</h1>
-        </div>
-
-        <label className="ml-auto hidden h-10 w-full max-w-md items-center gap-3 rounded-[8px] border border-white/10 bg-black/30 px-3 text-sm text-zinc-400 focus-within:border-white/25 md:flex">
-          <Search className="h-4 w-4 text-zinc-500" />
-          <span className="sr-only">Buscar no CMS</span>
-          <input
-            className="min-w-0 flex-1 border-0 bg-transparent text-white outline-none placeholder:text-zinc-600"
-            placeholder="Buscar produtos, aulas, alunos..."
-            type="search"
-          />
-        </label>
-
-        <IconButton label="Notificacoes">
-          <Bell className="h-4 w-4" />
-        </IconButton>
-        <Link
-          className="hidden h-10 items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-sm font-bold text-zinc-200 transition hover:bg-white/10 hover:text-white lg:flex"
-          href="/"
-        >
-          <Eye className="h-4 w-4" />
-          Ver area de membros
-        </Link>
-        <button
-          className="hidden h-10 items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-sm font-bold text-white transition hover:bg-white/10 sm:flex"
-          type="button"
-        >
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-[var(--accent)] text-xs">DS</span>
-          Danilo
-        </button>
-      </div>
-
-    </header>
-  );
-}
-
-function MetricCard({ metric }: { metric: AdminMetric }) {
-  return (
-    <div className={`${panelClassName} overflow-hidden p-4`}>
-      <div className={`pointer-events-none -mx-4 -mt-4 mb-4 h-1 bg-gradient-to-r ${getToneClassName(metric.tone)}`} />
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-zinc-400">{metric.label}</p>
-          <p className="mt-3 text-3xl font-black leading-none text-white">{metric.value}</p>
-        </div>
-        <span className={`grid h-10 w-10 place-items-center rounded-[8px] bg-gradient-to-br ${getToneClassName(metric.tone)}`}>
-          <Sparkles className="h-5 w-5" />
-        </span>
-      </div>
-      <p className="mt-4 text-xs font-bold text-zinc-500">{metric.delta}</p>
-    </div>
-  );
-}
-
-function ConsumptionChart({ points }: { points: AdminDashboardData["chartPoints"] }) {
-  return (
-    <div className={`${panelClassName} p-5 lg:col-span-2`}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-white">Consumo e acesso</h2>
-          <p className="mt-1 text-sm text-zinc-500">Eventos de progresso, aulas iniciadas e acessos liberados.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {["7D", "30D", "90D"].map((range, index) => (
-            <button
-              className={`rounded-[7px] px-3 py-2 text-xs font-black transition ${
-                index === 0 ? "bg-white text-black" : "bg-white/[0.06] text-zinc-300 hover:bg-white/10 hover:text-white"
-              }`}
-              key={range}
-              type="button"
-            >
-              {range}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-8 flex h-72 items-end gap-3 border-b border-l border-white/10 px-2 pb-5 sm:gap-5 sm:px-5">
-        {points.map((point) => (
-          <div className="flex min-w-0 flex-1 flex-col items-center justify-end gap-2" key={point.label}>
-            <div className="flex h-56 w-full items-end justify-center gap-1.5">
-              <div
-                className="w-full max-w-[1.6rem] rounded-t-[5px] bg-[var(--accent)] shadow-[0_0_24px_rgba(229,9,20,0.28)]"
-                style={{ height: `${point.progress}%` }}
-              />
-              <div
-                className="w-full max-w-[1.6rem] rounded-t-[5px] bg-white/24"
-                style={{ height: `${point.access}%` }}
-              />
-            </div>
-            <span className="text-xs font-bold text-zinc-500">{point.label}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-4 text-xs font-bold text-zinc-500">
-        <span className="inline-flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-          Progresso
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-white/40" />
-          Acessos
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function PipelinePanel({ pipeline }: { pipeline: AdminPipelineItem[] }) {
-  return (
-    <div className={`${panelClassName} p-5`}>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-black text-white">Fila editorial</h2>
-          <p className="mt-1 text-sm text-zinc-500">Conteudos em producao e publicacao.</p>
-        </div>
-        <IconButton label="Mais opcoes">
-          <MoreHorizontal className="h-4 w-4" />
-        </IconButton>
-      </div>
-
-      <div className="mt-6 space-y-4">
-        {pipeline.map((item) => (
-          <div className="flex items-center gap-3" key={item.label}>
-            <span className={`h-3 w-3 rounded-full ${item.tone}`} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="font-bold text-white">{item.label}</span>
-                <span className="font-black text-zinc-300">{item.count}</span>
-              </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                <div className={`h-full ${item.tone}`} style={{ width: `${Math.min(item.count * 8, 100)}%` }} />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PosterStrip({ records }: { records: AdminContentRecord[] }) {
-  return (
-    <div className={`${panelClassName} overflow-hidden p-5`}>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-black text-white">Catalogo em destaque</h2>
-          <p className="mt-1 text-sm text-zinc-500">Como os produtos aparecem nas linhas da area do aluno.</p>
-        </div>
-        <button className="inline-flex min-h-10 items-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200" type="button">
-          <Plus className="h-4 w-4" />
-          Novo
-        </button>
-      </div>
-
-      <div className="-mx-5 mt-5 flex gap-3 overflow-x-auto px-5 pb-2 scrollbar-hidden">
-        {records.slice(0, 8).map((record) => (
-          <button
-            className="group relative aspect-[720/1040] w-[9.5rem] shrink-0 overflow-hidden rounded-[8px] bg-[#101010] text-left shadow-xl shadow-black/35 transition hover:-translate-y-1 hover:shadow-[0_28px_72px_rgba(0,0,0,0.6)] sm:w-[11rem]"
-            key={record.content.id}
-            type="button"
-          >
-            <div
-              className="absolute inset-0 bg-cover bg-center transition duration-700 group-hover:scale-[1.04]"
-              style={{ backgroundImage: `url(${record.content.image})` }}
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/64 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 p-3">
-              <StatusPill className={getAccessClassName(record.access)}>{record.access}</StatusPill>
-              <h3 className="mt-3 line-clamp-2 text-sm font-black leading-tight text-white">{record.content.title}</h3>
-              <p className="mt-1 line-clamp-1 text-xs font-semibold text-zinc-400">{record.kind}</p>
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HomeSectionsPanel({ sections }: { sections: AdminHomeSection[] }) {
-  return (
-    <div className={`${panelClassName} p-5`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-black text-white">Home do aluno</h2>
-          <p className="mt-1 text-sm text-zinc-500">Linhas configuraveis e visibilidade.</p>
-        </div>
-        <Home className="h-5 w-5 text-zinc-500" />
-      </div>
-      <div className="mt-5 space-y-3">
-        {sections.map((section) => (
-          <div className="rounded-[8px] border border-white/10 bg-black/20 p-3" key={section.id}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-white">
-                  {section.order}. {section.title}
-                </p>
-                <p className="mt-1 text-xs text-zinc-500">{section.source}</p>
-              </div>
-              <StatusPill className="border-white/10 bg-white/[0.055] text-zinc-300">
-                {section.contentCount}
-              </StatusPill>
-            </div>
-            <div className="mt-3 flex items-center justify-between text-xs font-bold text-zinc-500">
-              <span>Visibilidade</span>
-              <span>{section.visibility}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function OverviewView({
-  chartPoints,
-  homeSections,
-  metrics,
-  pipeline,
-  records
-}: {
-  chartPoints: AdminDashboardData["chartPoints"];
-  homeSections: AdminHomeSection[];
-  metrics: AdminMetric[];
-  pipeline: AdminPipelineItem[];
-  records: AdminContentRecord[];
-}) {
-  return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-[8px] border border-white/10 bg-[#111]">
-        <div className="relative p-5 sm:p-8">
-          <div className="absolute inset-0 bg-[linear-gradient(115deg,rgba(229,9,20,0.26),rgba(20,20,20,0.34)_46%,rgba(255,255,255,0.04))]" />
-          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-red-400/20 bg-red-500/10 px-3 py-1.5 text-xs font-black text-red-100">
-                <Flame className="h-4 w-4 text-[var(--accent)]" />
-                Netflix-style control room
-              </div>
-              <h2 className="mt-5 text-4xl font-black leading-none text-white sm:text-5xl">
-                CMS para controlar toda a area de membros.
-              </h2>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-300 sm:text-base">
-                Catalogo, home, hierarquia de aulas, regras de drip, materiais, entitlements e eventos externos no mesmo painel.
-              </p>
-            </div>
-            <div className="grid min-w-[18rem] gap-3 rounded-[8px] border border-white/10 bg-black/30 p-4 backdrop-blur">
-              <div className="flex items-center justify-between text-sm font-bold">
-                <span className="text-zinc-400">Status operacional</span>
-                <StatusPill className="border-emerald-400/25 bg-emerald-500/10 text-emerald-300">
-                  Online
-                </StatusPill>
-              </div>
-              <div className="flex items-center justify-between text-sm font-bold">
-                <span className="text-zinc-400">Entitlement truth</span>
-                <span className="text-white">Interno</span>
-              </div>
-              <div className="flex items-center justify-between text-sm font-bold">
-                <span className="text-zinc-400">Checkout</span>
-                <span className="text-white">Externo</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {metrics.map((metric) => (
-          <MetricCard key={metric.label} metric={metric} />
-        ))}
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-3">
-        <ConsumptionChart points={chartPoints} />
-        <PipelinePanel pipeline={pipeline} />
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(20rem,0.8fr)]">
-        <PosterStrip records={records} />
-        <HomeSectionsPanel sections={homeSections} />
-      </section>
-    </div>
   );
 }
 
@@ -5573,7 +5100,6 @@ function StudentsView({
 export function AdminDashboard({ initialData }: { initialData: AdminDashboardData }) {
   const [activeView, setActiveView] = useState<AdminView>("overview");
   const [dashboardData, setDashboardData] = useState(initialData);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState(initialData.contentRecords[0]?.content.id ?? "");
   const [selectedStudentId, setSelectedStudentId] = useState(initialData.students[0]?.id ?? "");
   const selectedRecord =
@@ -5625,74 +5151,50 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
   }
 
   return (
-    <div className="min-h-screen bg-[#0b0b0b] text-white">
-      <AdminSidebar
-        activeView={activeView}
-        isOpen={sidebarOpen}
-        onChangeView={handleChangeView}
-        onClose={() => setSidebarOpen(false)}
-      />
-      <div className="min-h-screen">
-        <AdminTopbar
-          activeView={activeView}
-          onGoHome={() => setActiveView("overview")}
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen((current) => !current)}
-        />
+    <div className="min-h-screen bg-background text-foreground">
+      <AdminShell activeView={activeView} onChangeView={handleChangeView}>
+        {activeView === "overview" ? <AdminOverview data={dashboardData} /> : null}
+        {activeView === "students" ? (
+          <StudentsView
+            cohorts={dashboardData.cohorts}
+            onChangeStudents={persistStudents}
+            onSelectStudent={setSelectedStudentId}
+            persistenceProvider={dashboardData.persistenceProvider}
+            selectedStudentId={selectedStudentId}
+            sellableProducts={dashboardData.sellableProducts}
+            students={dashboardData.students}
+          />
+        ) : null}
+        {activeView === "catalog" ? (
+          <CatalogView
+            courseModules={dashboardData.courseModules}
+            onDashboardDataChange={updateDashboardData}
+            records={dashboardData.contentRecords}
+            selectedRecord={selectedRecord}
+            setSelectedRecord={(record) => setSelectedRecordId(record.content.id)}
+          />
+        ) : null}
+        {activeView === "structure" ? (
+          <StructureView
+            cohorts={dashboardData.cohorts}
+            courseModules={dashboardData.courseModules}
+            onDashboardDataChange={updateDashboardData}
+            selectedRecord={selectedRecord}
+          />
+        ) : null}
+        {activeView === "personalization" ? (
+          <PersonalizationView
+            courseModules={dashboardData.courseModules}
+            formationCourses={dashboardData.formationCourses}
+            hero={dashboardData.hero}
+            homeRows={dashboardData.homeRows}
+            homeSections={dashboardData.homeSections}
+            records={dashboardData.contentRecords}
+          />
+        ) : null}
+      </AdminShell>
 
-        <main className="px-4 py-6 sm:px-6 lg:px-8">
-          {activeView === "overview" ? (
-            <OverviewView
-              chartPoints={dashboardData.chartPoints}
-              homeSections={dashboardData.homeSections}
-              metrics={dashboardData.metrics}
-              pipeline={dashboardData.pipeline}
-              records={dashboardData.contentRecords}
-            />
-          ) : null}
-          {activeView === "students" ? (
-            <StudentsView
-              cohorts={dashboardData.cohorts}
-              onChangeStudents={persistStudents}
-        onSelectStudent={setSelectedStudentId}
-        persistenceProvider={dashboardData.persistenceProvider}
-        selectedStudentId={selectedStudentId}
-              sellableProducts={dashboardData.sellableProducts}
-              students={dashboardData.students}
-            />
-          ) : null}
-          {activeView === "catalog" ? (
-            <CatalogView
-              courseModules={dashboardData.courseModules}
-              onDashboardDataChange={updateDashboardData}
-              records={dashboardData.contentRecords}
-              selectedRecord={selectedRecord}
-              setSelectedRecord={(record) => setSelectedRecordId(record.content.id)}
-            />
-          ) : null}
-          {activeView === "structure" ? (
-            <StructureView
-              cohorts={dashboardData.cohorts}
-              courseModules={dashboardData.courseModules}
-              onDashboardDataChange={updateDashboardData}
-              selectedRecord={selectedRecord}
-            />
-          ) : null}
-          {activeView === "personalization" ? (
-            <PersonalizationView
-              courseModules={dashboardData.courseModules}
-              formationCourses={dashboardData.formationCourses}
-              hero={dashboardData.hero}
-              homeSections={dashboardData.homeSections}
-              homeRows={dashboardData.homeRows}
-              records={dashboardData.contentRecords}
-            />
-          ) : null}
-        </main>
-      </div>
-
-      <div className="pointer-events-none fixed inset-x-0 top-0 h-40 bg-gradient-to-b from-red-950/10 to-transparent" />
-      <div className="pointer-events-none fixed bottom-4 right-4 hidden rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-xs font-bold text-zinc-500 backdrop-blur md:block">
+      <div className="pointer-events-none fixed bottom-4 right-4 hidden rounded-full border border-border bg-background/80 px-3 py-1.5 text-xs font-bold text-muted-foreground backdrop-blur md:block">
         {dashboardData.persistenceProvider === "supabase" ? "Supabase persistido" : "Fallback local"}
       </div>
     </div>

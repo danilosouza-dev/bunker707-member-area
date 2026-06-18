@@ -93,7 +93,8 @@ test("admin dashboard exposes the core CMS views", () => {
 });
 
 test("admin shadcn nav keeps the core CRM modules and student preview action", () => {
-  assert.match(adminDashboardSource, /import \{ adminMainNavItems \} from "@\/components\/admin\/admin-nav";/);
+  assert.match(adminSidebarSource, /adminMainNavItems/);
+  assert.match(adminTopbarSource, /adminMainNavItems/);
   assert.doesNotMatch(adminDashboardSource, /const adminNavItems = \[/);
 
   for (const label of ["Visao geral", "Alunos", "Catalogo", "Estrutura", "Personalizacao"]) {
@@ -145,6 +146,15 @@ test("admin overview uses shadcn dashboard components with safe CRM data", () =>
   assert.doesNotMatch(adminRecentOperationsTableSource, /payload/);
 });
 
+test("admin dashboard delegates shell and overview to shadcn admin components", () => {
+  assert.match(adminDashboardSource, /AdminShell/);
+  assert.match(adminDashboardSource, /AdminOverview/);
+  assert.match(adminDashboardSource, /<AdminShell/);
+  assert.match(adminDashboardSource, /<AdminOverview data=\{dashboardData\} \/>/);
+  assert.doesNotMatch(adminDashboardSource, /<AdminSidebar[\s\S]*isOpen=\{sidebarOpen\}/);
+  assert.doesNotMatch(adminDashboardSource, /<AdminTopbar[\s\S]*sidebarOpen=\{sidebarOpen\}/);
+});
+
 test("admin dashboard models student CRM lists and course grouping", () => {
   assert.match(adminDashboardSource, /Lista de alunos/);
   assert.match(adminDashboardSource, /Por curso/);
@@ -184,11 +194,11 @@ test("admin dashboard models student CRM lists and course grouping", () => {
   assert.match(adminDashboardSource, /Turma/);
   assert.match(adminDashboardSource, /Papel/);
   assert.match(adminDashboardSource, /Ver detalhe/);
-  assert.match(adminDashboardSource, /Abrir menu do CMS/);
-  assert.match(adminDashboardSource, /aria-label="Ir para a home do CRM"/);
+  assert.match(adminTopbarSource, /SidebarTrigger/);
+  assert.match(adminShellSource, /onChangeView=\{onChangeView\}/);
   assert.match(adminDashboardSource, /CRM Bunker707/);
-  assert.match(adminDashboardSource, /Ver area de membros/);
-  assert.match(adminDashboardSource, /onGoHome=\{\(\) => setActiveView\("overview"\)\}/);
+  assert.match(adminTopbarSource, /Ver area do aluno/);
+  assert.match(adminDashboardSource, /onChangeView=\{handleChangeView\}/);
   assert.match(adminDashboardSource, /Supabase persistido/);
   assert.match(adminDashboardSource, /Fallback local/);
   assert.doesNotMatch(adminDashboardSource, /admin-mock-data/);
