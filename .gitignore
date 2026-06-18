@@ -16,3 +16,4 @@ tsconfig.tsbuildinfo
 .turbo/
 .codex-backups/
 .data/
+.superpowers/
