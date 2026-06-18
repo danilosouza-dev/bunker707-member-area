@@ -5,6 +5,8 @@ import test from "node:test";
 const adminPageSource = await readFile(new URL("../src/app/admin/page.tsx", import.meta.url), "utf8");
 const adminNavSource = await readFile(new URL("../src/components/admin/admin-nav.ts", import.meta.url), "utf8");
 const adminSidebarSource = await readFile(new URL("../src/components/admin/admin-sidebar.tsx", import.meta.url), "utf8");
+const adminShellSource = await readFile(new URL("../src/components/admin/admin-shell.tsx", import.meta.url), "utf8");
+const adminTopbarSource = await readFile(new URL("../src/components/admin/admin-topbar.tsx", import.meta.url), "utf8");
 const adminDashboardSource = await readFile(new URL("../src/components/admin-dashboard.tsx", import.meta.url), "utf8");
 const adminDataSource = await readFile(new URL("../src/server/db/admin-seed.ts", import.meta.url), "utf8");
 const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
@@ -111,6 +113,17 @@ test("admin sidebar uses shadcn sidebar primitives and shared navigation", () =>
   assert.match(adminSidebarSource, /adminOperationNavItems/);
   assert.match(adminSidebarSource, /onChangeView\(item\.id\)/);
   assert.match(adminSidebarSource, /isActive=\{activeView === item\.id\}/);
+});
+
+test("admin shell uses shadcn sidebar provider without touching the student shell", () => {
+  assert.match(adminShellSource, /SidebarProvider/);
+  assert.match(adminShellSource, /defaultOpen=\{false\}/);
+  assert.match(adminShellSource, /AdminSidebar/);
+  assert.match(adminShellSource, /SidebarInset/);
+  assert.match(adminTopbarSource, /SidebarTrigger/);
+  assert.match(adminTopbarSource, /Ver area do aluno/);
+  assert.match(adminTopbarSource, /href="\/"/);
+  assert.doesNotMatch(appShellSource, /SidebarProvider/);
 });
 
 test("admin dashboard models student CRM lists and course grouping", () => {
