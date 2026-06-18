@@ -194,19 +194,25 @@ test("shadcn tokens coexist with Bunker707 student area tokens", () => {
   assert.match(designSystemSource, /CRM admin/);
 });
 
-test("admin dashboard models student CRM lists and course grouping", () => {
-  assert.match(adminStudentsCommandCenterSource, /Command center de alunos/);
-  assert.match(adminStudentsCommandCenterSource, /Cursos/);
-  assert.match(adminStudentsCommandCenterSource, /Acompanhar/);
-  assert.match(adminStudentsCommandCenterSource, /Inteligencia da base/);
-  assert.match(adminStudentsCommandCenterSource, /Fila operacional/);
-  assert.match(adminStudentsCommandCenterSource, /Leituras estrategicas/);
-  assert.match(adminStudentsCommandCenterSource, /Proxima melhor acao/);
-  assert.match(adminStudentsCommandCenterSource, /Sinais de negocio sem expor documento, telefone ou pedidos externos/);
-  assert.match(adminDashboardSource, /CourseStudentGroups/);
-  assert.match(adminDashboardSource, /onListModeChange=\{setListMode\}/);
+test("admin dashboard models a simple student CRM list with row actions", () => {
+  assert.match(adminStudentsCommandCenterSource, /Membros/);
+  assert.match(adminStudentsCommandCenterSource, /Buscar por nome ou email/);
+  assert.match(adminStudentsCommandCenterSource, /Total de membros/);
+  assert.match(adminStudentsCommandCenterSource, /Progresso medio/);
+  assert.match(adminStudentsCommandCenterSource, /Engajamento/);
+  assert.match(adminStudentsCommandCenterSource, /Adicionar membro/);
+  assert.doesNotMatch(adminStudentsCommandCenterSource, /Inteligencia da base/);
+  assert.doesNotMatch(adminDashboardSource, /CourseStudentGroups/);
+  assert.doesNotMatch(adminDashboardSource, /onListModeChange=\{setListMode\}/);
+  assert.match(adminDashboardSource, /Lista de membros/);
+  assert.match(adminDashboardSource, /StudentRowActions/);
+  assert.match(adminDashboardSource, /Reenviar acesso por email/);
+  assert.match(adminDashboardSource, /Enviar acesso por WhatsApp/);
+  assert.match(adminDashboardSource, /Bloquear acesso/);
+  assert.match(adminDashboardSource, /Mudar turma/);
+  assert.match(adminDashboardSource, /Produtos do aluno/);
   assert.match(adminDashboardSource, /Produtos comprados/);
-  assert.match(adminDashboardAndStudentSource, /Novo aluno/);
+  assert.match(adminDashboardAndStudentSource, /Adicionar membro/);
   assert.match(adminDashboardSource, /StudentProfileModal/);
   assert.match(adminDashboardSource, /Reenviar acesso/);
   assert.match(adminDashboardSource, /Enviar convite para criar senha/);
@@ -225,7 +231,8 @@ test("admin dashboard models student CRM lists and course grouping", () => {
   assert.match(adminDashboardSource, /StudentDeleteConfirmationModal/);
   assert.match(adminDashboardSource, /Confirmacao necessaria/);
   assert.match(adminDashboardSource, /studentPendingDeletion/);
-  assert.match(adminDashboardSource, /aria-label=\{`Excluir \$\{student\.fullName\}`\}/);
+  assert.match(adminDashboardSource, /aria-label=\{`Acoes de \$\{student\.fullName\}`\}/);
+  assert.match(adminDashboardSource, /Remover membro/);
   assert.doesNotMatch(adminDashboardSource, /Excluir "\$\{studentToRemove\.fullName\}" do CRM/);
   assert.match(adminDashboardSource, /Mudar turma/);
   assert.match(adminDashboardSource, /Bloquear/);
@@ -240,7 +247,7 @@ test("admin dashboard models student CRM lists and course grouping", () => {
   assert.match(adminDashboardSource, /document\.body\.style\.overflow = "hidden"/);
   assert.match(adminDashboardSource, /Turma/);
   assert.match(adminDashboardSource, /Papel/);
-  assert.match(adminDashboardSource, /Ver detalhe/);
+  assert.match(adminDashboardSource, /Detalhes do usuario/);
   assert.match(adminTopbarSource, /SidebarTrigger/);
   assert.match(adminShellSource, /onChangeView=\{onChangeView\}/);
   assert.match(adminDashboardSource, /CRM Bunker707/);

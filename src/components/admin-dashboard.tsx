@@ -16,13 +16,13 @@ import {
   LibraryBig,
   Mail,
   Menu,
+  MessageCircle,
   MoreHorizontal,
   Pencil,
   Play,
   Plus,
   Search,
   Send,
-  ShoppingBag,
   Trash2,
   Users,
   X
@@ -34,6 +34,17 @@ import { AdminOverview } from "@/components/admin/admin-overview";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { PersonalizationCommandCenter } from "@/components/admin/personalization/personalization-command-center";
 import { StudentsCommandCenter } from "@/components/admin/students/students-command-center";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import { ContentRow, CourseModulesHomeSection } from "@/components/content-row";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { HeroSection } from "@/components/hero-section";
@@ -162,6 +173,30 @@ function getEntitlementStatusClassName(status: AdminEntitlementStatus) {
   }
 
   return "border-red-400/25 bg-red-500/10 text-red-300";
+}
+
+function getStudentAccessOverview(student: AdminStudent) {
+  const activeCourses = student.courses.filter((course) => course.status === "active").length;
+  const blockedCourses = student.courses.filter((course) => course.status !== "active").length;
+
+  if (student.status === "expired") {
+    return {
+      className: "border-red-400/25 bg-red-500/10 text-red-200",
+      label: "Bloqueado por pagamento"
+    };
+  }
+
+  if (activeCourses > 0 && blockedCourses > 0) {
+    return {
+      className: "border-amber-300/25 bg-amber-400/10 text-amber-200",
+      label: "Misto"
+    };
+  }
+
+  return {
+    className: getEntitlementStatusClassName(student.status),
+    label: getEntitlementStatusLabel(student.status)
+  };
 }
 
 function getProviderClassName(provider: AdminSourceProvider) {
@@ -3054,7 +3089,6 @@ function StructureView({
   );
 }
 
-type StudentListMode = "students" | "courses";
 type StudentModalMode = "view" | "new" | "edit" | null;
 type StudentEngagementLevel = "Nenhum" | "Baixo" | "Medio" | "Alto" | "Altissimo";
 type StudentAccessSetupMode = "invite" | "generated_password" | "manual_password" | "none";
@@ -3310,6 +3344,16 @@ function getAccessActionLabel(action: NonNullable<AdminStudent["accessHistory"]>
   return "Login";
 }
 
+function formatAdminAccessDate(value: string) {
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (!value || normalizedValue.includes("sem acesso") || normalizedValue.includes("nunca")) {
+    return value || "Sem acesso";
+  }
+
+  return `${value} (UTC-3 Brasil)`;
+}
+
 function StudentAvatar({
   avatarUrl,
   name,
@@ -3338,10 +3382,10 @@ function ProductCover({
 }: {
   course: AdminStudentCourse;
   sellableProducts: AdminSellableProduct[];
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
 }) {
   const product = getStudentCourseProduct(course, sellableProducts);
-  const sizeClassName = size === "md" ? "h-24 w-16" : "h-14 w-10";
+  const sizeClassName = size === "md" ? "h-24 w-16" : size === "xs" ? "h-7 w-5" : "h-14 w-10";
 
   return (
     <span className={`relative shrink-0 overflow-hidden rounded-[6px] bg-[#101010] ring-1 ring-white/10 ${sizeClassName}`}>
@@ -3356,6 +3400,161 @@ function ProductCover({
         </span>
       )}
     </span>
+  );
+}
+
+function StudentRowActions({
+  accessActionBusy,
+  onBlockAllCourses,
+  onBlockCourse,
+  onEdit,
+  onMoveAllCourses,
+  onMoveCourse,
+  onOpenDetails,
+  onRemove,
+  onResendEmail,
+  onSendWhatsApp,
+  sellableProducts,
+  student
+}: {
+  accessActionBusy: boolean;
+  onBlockAllCourses: () => void;
+  onBlockCourse: (courseId: string) => void;
+  onEdit: () => void;
+  onMoveAllCourses: () => void;
+  onMoveCourse: (courseId: string) => void;
+  onOpenDetails: () => void;
+  onRemove: () => void;
+  onResendEmail: () => void;
+  onSendWhatsApp: () => void;
+  sellableProducts: AdminSellableProduct[];
+  student: AdminStudent;
+}) {
+  const hasCourses = student.courses.length > 0;
+  const hasWhatsApp = Boolean(student.phone.replace(/\D/g, ""));
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Acoes de ${student.fullName}`}
+        className="grid h-9 w-9 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 outline-none transition hover:bg-white/10 hover:text-white focus-visible:border-white/25"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-64 border border-white/10 bg-[#111216] p-1 text-zinc-100 shadow-2xl shadow-black/50"
+      >
+        <DropdownMenuLabel className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-normal text-zinc-500">
+          Membro
+        </DropdownMenuLabel>
+        <DropdownMenuItem className="px-2 py-2 text-sm text-zinc-200 focus:bg-white/10" onClick={onOpenDetails}>
+          <Eye className="h-4 w-4" />
+          Detalhes do usuario
+        </DropdownMenuItem>
+        <DropdownMenuItem className="px-2 py-2 text-sm text-zinc-200 focus:bg-white/10" onClick={onEdit}>
+          <Pencil className="h-4 w-4" />
+          Editar cadastro
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator className="bg-white/10" />
+        <DropdownMenuLabel className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-normal text-zinc-500">
+          Acesso
+        </DropdownMenuLabel>
+        <DropdownMenuItem
+          className="px-2 py-2 text-sm text-zinc-200 focus:bg-white/10"
+          disabled={accessActionBusy}
+          onClick={onResendEmail}
+        >
+          <Mail className="h-4 w-4" />
+          Reenviar acesso por email
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="px-2 py-2 text-sm text-zinc-200 focus:bg-white/10"
+          disabled={!hasWhatsApp}
+          onClick={onSendWhatsApp}
+        >
+          <MessageCircle className="h-4 w-4" />
+          Enviar acesso por WhatsApp
+        </DropdownMenuItem>
+
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger
+            className="px-2 py-2 text-sm text-zinc-200 focus:bg-white/10"
+            disabled={!hasCourses}
+          >
+            <Ban className="h-4 w-4" />
+            Bloquear acesso
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent
+            className="w-72 border border-white/10 bg-[#111216] p-1 text-zinc-100 shadow-2xl shadow-black/50"
+          >
+            <DropdownMenuItem className="px-2 py-2 text-sm text-red-100 focus:bg-red-500/15" onClick={onBlockAllCourses}>
+              <Ban className="h-4 w-4" />
+              Todos os produtos
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="bg-white/10" />
+            {student.courses.map((course) => {
+              const product = getStudentCourseProduct(course, sellableProducts);
+
+              return (
+                <DropdownMenuItem
+                  className="px-2 py-2 text-sm text-zinc-200 focus:bg-white/10"
+                  key={course.id}
+                  onClick={() => onBlockCourse(course.id)}
+                >
+                  <ProductCover course={course} sellableProducts={sellableProducts} size="xs" />
+                  <span className="min-w-0 truncate">{product?.title ?? course.product}</span>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger
+            className="px-2 py-2 text-sm text-zinc-200 focus:bg-white/10"
+            disabled={!hasCourses}
+          >
+            <ArrowRightLeft className="h-4 w-4" />
+            Mudar turma
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent
+            className="w-72 border border-white/10 bg-[#111216] p-1 text-zinc-100 shadow-2xl shadow-black/50"
+          >
+            <DropdownMenuItem className="px-2 py-2 text-sm text-zinc-200 focus:bg-white/10" onClick={onMoveAllCourses}>
+              <ArrowRightLeft className="h-4 w-4" />
+              Todos os produtos
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="bg-white/10" />
+            {student.courses.map((course) => {
+              const product = getStudentCourseProduct(course, sellableProducts);
+
+              return (
+                <DropdownMenuItem
+                  className="px-2 py-2 text-sm text-zinc-200 focus:bg-white/10"
+                  key={course.id}
+                  onClick={() => onMoveCourse(course.id)}
+                >
+                  <ProductCover course={course} sellableProducts={sellableProducts} size="xs" />
+                  <span className="min-w-0 truncate">{product?.title ?? course.product}</span>
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuSeparator className="bg-white/10" />
+        <DropdownMenuItem
+          className="px-2 py-2 text-sm text-red-100 focus:bg-red-500/15"
+          onClick={onRemove}
+          variant="destructive"
+        >
+          <Trash2 className="h-4 w-4" />
+          Remover membro
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -3835,8 +4034,8 @@ function StudentProfileModal({
   const isFormMode = modalMode === "new" || modalMode === "edit";
   const title = modalMode === "new" ? "Novo aluno" : modalMode === "edit" ? "Editar aluno" : "Perfil do aluno";
   const accessHistory = student?.accessHistory ?? [];
-  const firstAccess = student?.firstAccessAt ?? student?.joinedAt ?? "Sem acesso";
-  const lastAccess = student?.lastActivityAt ?? "Sem acesso";
+  const firstAccess = formatAdminAccessDate(student?.firstAccessAt ?? student?.joinedAt ?? "Sem acesso");
+  const lastAccess = formatAdminAccessDate(student?.lastActivityAt ?? "Sem acesso");
   const accessCount = student?.accessCount ?? 0;
   const studentCategory = student ? getStudentCategory(student) : "Aluno";
   const studentEngagement = student ? getStudentEngagement(student) : "Nenhum";
@@ -4032,7 +4231,7 @@ function StudentProfileModal({
                     <GraduationCap className="h-5 w-5" />
                   </span>
                   <div>
-                    <h4 className="text-lg font-black text-white">Produtos comprados</h4>
+                    <h4 className="text-lg font-black text-white">Produtos do aluno</h4>
                     <p className="text-sm text-zinc-500">Turma, papel, origem, acesso e progresso por produto.</p>
                   </div>
                 </div>
@@ -4126,91 +4325,6 @@ function StudentProfileModal({
   );
 }
 
-function CourseStudentGroups({
-  courseFilter,
-  onSelectStudent,
-  sellableProducts,
-  students
-}: {
-  courseFilter: "all" | string;
-  onSelectStudent: (studentId: string) => void;
-  sellableProducts: AdminSellableProduct[];
-  students: AdminStudent[];
-}) {
-  const courseGroups = sellableProducts
-    .filter((product) => courseFilter === "all" || product.id === courseFilter)
-    .map((product) => {
-      const enrolledStudents = students.filter((student) =>
-        student.courses.some((course) => course.targetId === product.id)
-      );
-      const activeStudents = enrolledStudents.filter((student) =>
-        student.courses.some((course) => course.targetId === product.id && course.status === "active")
-      );
-
-      return {
-        activeStudents,
-        enrolledStudents,
-        product
-      };
-    });
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {courseGroups.map((group) => (
-        <article className={`${panelClassName} p-5`} key={group.product.id}>
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <StatusPill className="border-white/10 bg-white/[0.055] text-zinc-300">{group.product.kind}</StatusPill>
-              <h3 className="mt-3 truncate text-lg font-black text-white">{group.product.title}</h3>
-              <p className="mt-1 text-sm text-zinc-500">
-                {group.activeStudents.length} ativos / {group.enrolledStudents.length} alunos
-              </p>
-            </div>
-            <span className="grid h-12 w-12 place-items-center rounded-[8px] bg-white/[0.055] text-zinc-300">
-              <GraduationCap className="h-6 w-6" />
-            </span>
-          </div>
-
-          <div className="mt-5 space-y-2">
-            {group.enrolledStudents.length > 0 ? (
-              group.enrolledStudents.map((student) => {
-                const course = student.courses.find((item) => item.targetId === group.product.id);
-
-                return (
-                  <button
-                    className="flex w-full items-center gap-3 rounded-[8px] border border-white/10 bg-black/25 p-3 text-left transition hover:bg-white/[0.055]"
-                    key={`${group.product.id}-${student.id}`}
-                    onClick={() => onSelectStudent(student.id)}
-                    type="button"
-                  >
-                    <StudentAvatar name={student.fullName} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-black text-white">{student.fullName}</span>
-                      <span className="mt-1 block truncate text-xs font-semibold text-zinc-500">{student.email}</span>
-                    </span>
-                    {course ? (
-                      <span className="text-right">
-                        <StatusPill className={getEntitlementStatusClassName(course.status)}>
-                          {getEntitlementStatusLabel(course.status)}
-                        </StatusPill>
-                        <span className="mt-1 block text-xs font-bold text-zinc-500">{course.progressPercent}%</span>
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })
-            ) : (
-              <div className="rounded-[8px] border border-dashed border-white/10 bg-black/20 p-4 text-sm font-semibold text-zinc-500">
-                Nenhum aluno listado neste curso.
-              </div>
-            )}
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-}
-
 function StudentsView({
   cohorts,
   onChangeStudents,
@@ -4232,7 +4346,6 @@ function StudentsView({
   const [sourceFilter, setSourceFilter] = useState<"all" | AdminSourceProvider>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | AdminEntitlementStatus>("all");
   const [courseFilter, setCourseFilter] = useState<"all" | string>("all");
-  const [listMode, setListMode] = useState<StudentListMode>("students");
   const [modalMode, setModalMode] = useState<StudentModalMode>(null);
   const [accessActionBusy, setAccessActionBusy] = useState(false);
   const [accessNotice, setAccessNotice] = useState<StudentAccessNotice | null>(null);
@@ -4441,40 +4554,82 @@ function StudentsView({
     await requestStudentAccessDelivery(selectedStudent, "invite");
   }
 
-  function blockStudentCourse(courseId: string) {
-    if (!selectedStudent) {
+  async function resendStudentAccess(student: AdminStudent) {
+    onSelectStudent(student.id);
+    await requestStudentAccessDelivery(student, "invite");
+  }
+
+  function openWhatsAppAccess(student: AdminStudent) {
+    const phoneDigits = student.phone.replace(/\D/g, "");
+
+    if (!phoneDigits) {
+      setAccessNotice({
+        message: "Cadastre um telefone com WhatsApp antes de enviar o acesso por este canal.",
+        recipientEmail: student.email,
+        title: "WhatsApp indisponivel",
+        tone: "warning"
+      });
       return;
     }
 
+    const firstName = student.fullName.split(/\s+/)[0] || "aluno";
+    const message = [
+      `Ola, ${firstName}! Seu acesso a area de membros Bunker707 esta liberado.`,
+      `Use o email ${student.email} para entrar.`
+    ].join("\n");
+
+    window.open(`https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+  }
+
+  function blockStudentCourseForStudent(studentId: string, courseId: string) {
     onChangeStudents((current) =>
-      current.map((student) =>
-        student.id === selectedStudent.id
+      current.map((student) => {
+        if (student.id !== studentId) {
+          return student;
+        }
+
+        const nextCourses = student.courses.map((course) =>
+          course.id === courseId
+            ? {
+                ...course,
+                endsAt: "Bloqueado manualmente",
+                status: "suspended" as AdminEntitlementStatus
+              }
+            : course
+        );
+        const hasActiveCourse = nextCourses.some((course) => course.status === "active");
+
+        return {
+          ...student,
+          courses: nextCourses,
+          status: hasActiveCourse ? student.status : "suspended"
+        };
+      })
+    );
+  }
+
+  function blockAllStudentCourses(student: AdminStudent) {
+    onChangeStudents((current) =>
+      current.map((studentRecord) =>
+        studentRecord.id === student.id
           ? {
-              ...student,
-              courses: student.courses.map((course) =>
-                course.id === courseId
-                  ? {
-                      ...course,
-                      endsAt: "Bloqueado manualmente",
-                      status: "suspended"
-                    }
-                  : course
-              ),
-              status: student.courses.length === 1 ? "suspended" : student.status
+              ...studentRecord,
+              courses: studentRecord.courses.map((course) => ({
+                ...course,
+                endsAt: "Bloqueado manualmente",
+                status: "suspended" as AdminEntitlementStatus
+              })),
+              status: "suspended"
             }
-          : student
+          : studentRecord
       )
     );
   }
 
-  function moveStudentCourse(courseId: string) {
-    if (!selectedStudent) {
-      return;
-    }
-
+  function moveStudentCourseForStudent(studentId: string, courseId: string) {
     onChangeStudents((current) =>
       current.map((student) =>
-        student.id === selectedStudent.id
+        student.id === studentId
           ? {
               ...student,
               courses: student.courses.map((course) =>
@@ -4489,6 +4644,38 @@ function StudentsView({
           : student
       )
     );
+  }
+
+  function moveAllStudentCourses(student: AdminStudent) {
+    onChangeStudents((current) =>
+      current.map((studentRecord) =>
+        studentRecord.id === student.id
+          ? {
+              ...studentRecord,
+              courses: studentRecord.courses.map((course) => ({
+                ...course,
+                cohort: getNextCohort(course.cohort, cohorts)
+              }))
+            }
+          : studentRecord
+      )
+    );
+  }
+
+  function blockStudentCourse(courseId: string) {
+    if (!selectedStudent) {
+      return;
+    }
+
+    blockStudentCourseForStudent(selectedStudent.id, courseId);
+  }
+
+  function moveStudentCourse(courseId: string) {
+    if (!selectedStudent) {
+      return;
+    }
+
+    moveStudentCourseForStudent(selectedStudent.id, courseId);
   }
 
   function updateFormField(field: keyof StudentFormState, value: string) {
@@ -4620,16 +4807,12 @@ function StudentsView({
       <section className="min-w-0 space-y-5">
         <StudentsCommandCenter
           courseFilter={courseFilter}
-          listMode={listMode}
           onCourseFilterChange={setCourseFilter}
           onCreateStudent={openNewStudentForm}
-          onListModeChange={setListMode}
-          onOpenStudent={openStudentModal}
           onQueryChange={setQuery}
           onSourceFilterChange={setSourceFilter}
           onStatusFilterChange={setStatusFilter}
           query={query}
-          selectedStudentId={selectedStudent?.id}
           sellableProducts={sellableProducts}
           sourceFilter={sourceFilter}
           statusFilter={statusFilter}
@@ -4640,129 +4823,115 @@ function StudentsView({
           <StudentAccessNoticePanel notice={accessNotice} onDismiss={() => setAccessNotice(null)} />
         ) : null}
 
-        {listMode === "students" ? (
-          <div className={`${panelClassName} overflow-hidden`}>
-            <div className="overflow-x-auto">
-              <div className="grid min-w-[72rem] grid-cols-[2fr_1fr_0.85fr_0.95fr_1.25fr_0.85fr] border-b border-white/10 px-4 py-3 text-xs font-black uppercase text-zinc-500">
-                <span>Aluno</span>
-                <span>Ultimo acesso</span>
-                <span>Status</span>
-                <span>Engajamento</span>
-                <span>Produtos</span>
-                <span className="text-right">Acoes</span>
+        <div className={`${panelClassName} overflow-hidden`}>
+          <div className="border-b border-white/10 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-white">Lista de membros</h3>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {filteredStudents.length} resultado{filteredStudents.length === 1 ? "" : "s"} encontrado{filteredStudents.length === 1 ? "" : "s"}.
+                </p>
               </div>
-
-              {filteredStudents.length > 0 ? (
-                filteredStudents.map((student) => {
-                  const isSelected = selectedStudent?.id === student.id;
-                  const engagement = getStudentEngagement(student);
-                  const visibleCourses = student.courses.slice(0, 3);
-
-                  return (
-                    <div
-                      className={`border-b border-white/10 last:border-b-0 ${
-                        isSelected ? "bg-white/[0.075]" : "hover:bg-white/[0.035]"
-                      }`}
-                      key={student.id}
-                    >
-                      <div className="grid min-w-[72rem] grid-cols-[2fr_1fr_0.85fr_0.95fr_1.25fr_0.85fr] items-center gap-4 px-4 py-4">
-                        <button
-                          className="flex min-w-0 items-center gap-3 text-left"
-                          onClick={() => openStudentModal(student.id)}
-                          type="button"
-                        >
-                          <StudentAvatar avatarUrl={student.avatarUrl} name={student.fullName} />
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-black text-white">{student.fullName}</span>
-                            <span className="mt-1 block truncate text-xs font-semibold text-zinc-500">{student.email}</span>
-                          </span>
-                        </button>
-                        <span className="text-sm font-bold text-zinc-400">{student.lastActivityAt}</span>
-                        <span>
-                          <StatusPill className={getEntitlementStatusClassName(student.status)}>
-                            {getEntitlementStatusLabel(student.status)}
-                          </StatusPill>
-                        </span>
-                        <span>
-                          <StatusPill className={getStudentEngagementClassName(engagement)}>{engagement}</StatusPill>
-                        </span>
-                        <span className="min-w-0">
-                          <button
-                            aria-label={`Ver produtos de ${student.fullName}`}
-                            className="inline-flex min-h-10 max-w-full items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 py-2 text-left text-xs font-black text-white transition hover:bg-white/10"
-                            onClick={() => openStudentModal(student.id)}
-                            type="button"
-                          >
-                            <span className="flex shrink-0 -space-x-2">
-                              {visibleCourses.length > 0 ? (
-                                visibleCourses.map((course) => (
-                                  <span className="rounded-[5px] ring-2 ring-[#171717]" key={course.id}>
-                                    <ProductCover course={course} sellableProducts={sellableProducts} />
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="grid h-10 w-10 place-items-center rounded-[6px] bg-black/30 text-zinc-500 ring-2 ring-[#171717]">
-                                  <ShoppingBag className="h-4 w-4" />
-                                </span>
-                              )}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block truncate">
-                                {student.courses.length} produto{student.courses.length === 1 ? "" : "s"}
-                              </span>
-                              <span className="mt-0.5 block truncate text-[11px] font-semibold text-zinc-500">
-                                Ver detalhe
-                              </span>
-                            </span>
-                          </button>
-                        </span>
-                        <span className="flex justify-end gap-2">
-                          <button
-                            aria-label={`Visualizar ${student.fullName}`}
-                            className="grid h-9 w-9 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                            onClick={() => openStudentModal(student.id)}
-                            type="button"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
-                          <button
-                            aria-label={`Editar ${student.fullName}`}
-                            className="grid h-9 w-9 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                            onClick={() => {
-                              openEditStudentForm(student);
-                            }}
-                            type="button"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            aria-label={`Excluir ${student.fullName}`}
-                            className="grid h-9 w-9 place-items-center rounded-[7px] border border-red-400/25 bg-red-500/10 text-red-200 transition hover:bg-red-500/15 hover:text-red-100"
-                            onClick={() => requestStudentRemoval(student)}
-                            type="button"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="min-w-[72rem] px-4 py-10 text-center text-sm font-bold text-zinc-500">
-                  Nenhum aluno encontrado com os filtros atuais.
-                </div>
-              )}
             </div>
           </div>
-        ) : (
-          <CourseStudentGroups
-            courseFilter={courseFilter}
-            onSelectStudent={openStudentModal}
-            sellableProducts={sellableProducts}
-            students={filteredStudents}
-          />
-        )}
+
+          <div className="overflow-x-auto">
+            <div className="grid min-w-[74rem] grid-cols-[2.1fr_1fr_1.05fr_0.95fr_1.45fr_0.45fr] border-b border-white/10 px-4 py-3 text-xs font-semibold uppercase text-zinc-500">
+              <span>Membro</span>
+              <span>Ultimo acesso</span>
+              <span>Status</span>
+              <span>Engajamento</span>
+              <span>Produtos</span>
+              <span className="text-right">Acoes</span>
+            </div>
+
+            {filteredStudents.length > 0 ? (
+              filteredStudents.map((student) => {
+                const isSelected = selectedStudent?.id === student.id;
+                const engagement = getStudentEngagement(student);
+                const visibleCourses = student.courses.slice(0, 3);
+                const accessOverview = getStudentAccessOverview(student);
+
+                return (
+                  <div
+                    className={`border-b border-white/10 last:border-b-0 ${
+                      isSelected ? "bg-white/[0.07]" : "hover:bg-white/[0.035]"
+                    }`}
+                    key={student.id}
+                  >
+                    <div className="grid min-w-[74rem] grid-cols-[2.1fr_1fr_1.05fr_0.95fr_1.45fr_0.45fr] items-center gap-4 px-4 py-4">
+                      <button
+                        className="flex min-w-0 items-center gap-3 text-left"
+                        onClick={() => openStudentModal(student.id)}
+                        type="button"
+                      >
+                        <StudentAvatar avatarUrl={student.avatarUrl} name={student.fullName} />
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-white">{student.fullName}</span>
+                          <span className="mt-1 block truncate text-xs font-medium text-zinc-500">{student.email}</span>
+                        </span>
+                      </button>
+
+                      <span className="truncate text-sm font-medium text-zinc-400">{student.lastActivityAt}</span>
+
+                      <span>
+                        <StatusPill className={accessOverview.className}>{accessOverview.label}</StatusPill>
+                      </span>
+
+                      <span>
+                        <StatusPill className={getStudentEngagementClassName(engagement)}>{engagement}</StatusPill>
+                      </span>
+
+                      <span className="min-w-0">
+                        {visibleCourses.length > 0 ? (
+                          <span className="flex min-w-0 flex-wrap gap-1.5">
+                            {visibleCourses.map((course) => (
+                              <span
+                                className="inline-flex max-w-[11rem] items-center gap-1.5 rounded-[7px] border border-white/10 bg-white/[0.045] px-2 py-1 text-xs font-semibold text-zinc-200"
+                                key={course.id}
+                              >
+                                <ProductCover course={course} sellableProducts={sellableProducts} size="xs" />
+                                <span className="truncate">{course.product}</span>
+                              </span>
+                            ))}
+                            {student.courses.length > visibleCourses.length ? (
+                              <span className="rounded-[7px] border border-white/10 bg-white/[0.035] px-2 py-1 text-xs font-semibold text-zinc-500">
+                                +{student.courses.length - visibleCourses.length}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : (
+                          <span className="text-sm font-medium text-zinc-500">Sem produto</span>
+                        )}
+                      </span>
+
+                      <span className="flex justify-end">
+                        <StudentRowActions
+                          accessActionBusy={accessActionBusy}
+                          onBlockAllCourses={() => blockAllStudentCourses(student)}
+                          onBlockCourse={(courseId) => blockStudentCourseForStudent(student.id, courseId)}
+                          onEdit={() => openEditStudentForm(student)}
+                          onMoveAllCourses={() => moveAllStudentCourses(student)}
+                          onMoveCourse={(courseId) => moveStudentCourseForStudent(student.id, courseId)}
+                          onOpenDetails={() => openStudentModal(student.id)}
+                          onRemove={() => requestStudentRemoval(student)}
+                          onResendEmail={() => void resendStudentAccess(student)}
+                          onSendWhatsApp={() => openWhatsAppAccess(student)}
+                          sellableProducts={sellableProducts}
+                          student={student}
+                        />
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="min-w-[74rem] px-4 py-10 text-center text-sm font-semibold text-zinc-500">
+                Nenhum membro encontrado com os filtros atuais.
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       <StudentProfileModal
