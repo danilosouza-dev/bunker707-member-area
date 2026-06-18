@@ -32,7 +32,7 @@ export function AdminTopbar({ activeView }: { activeView: AdminView }) {
       <Button render={<Link href="/" />} nativeButton={false} size="sm" variant="outline">
         Ver area do aluno
       </Button>
-      <Button className="hidden sm:inline-flex" size="sm">
+      <Button className="hidden sm:inline-flex" disabled size="sm">
         <UserPlus data-icon="inline-start" />
         Novo aluno
       </Button>

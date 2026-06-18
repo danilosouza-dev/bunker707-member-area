@@ -127,6 +127,8 @@ test("admin shell uses shadcn sidebar provider without touching the student shel
   assert.match(adminTopbarSource, /SidebarTrigger/);
   assert.match(adminTopbarSource, /Ver area do aluno/);
   assert.match(adminTopbarSource, /href="\/"/);
+  assert.match(adminTopbarSource, /render=\{<Link href="\/" \/>\}/);
+  assert.match(adminTopbarSource, /nativeButton=\{false\}/);
   assert.doesNotMatch(appShellSource, /SidebarProvider/);
 });
 

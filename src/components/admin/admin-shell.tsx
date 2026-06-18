@@ -20,7 +20,7 @@ export function AdminShell({
       <AdminSidebar activeView={activeView} onChangeView={onChangeView} />
       <SidebarInset className="min-h-screen bg-background">
         <AdminTopbar activeView={activeView} />
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        <div className="flex-1 p-4 md:p-6">{children}</div>
       </SidebarInset>
     </SidebarProvider>
   );
