@@ -7,6 +7,10 @@ const adminNavSource = await readFile(new URL("../src/components/admin/admin-nav
 const adminSidebarSource = await readFile(new URL("../src/components/admin/admin-sidebar.tsx", import.meta.url), "utf8");
 const adminShellSource = await readFile(new URL("../src/components/admin/admin-shell.tsx", import.meta.url), "utf8");
 const adminTopbarSource = await readFile(new URL("../src/components/admin/admin-topbar.tsx", import.meta.url), "utf8");
+const adminOverviewSource = await readFile(new URL("../src/components/admin/admin-overview.tsx", import.meta.url), "utf8");
+const adminMetricCardSource = await readFile(new URL("../src/components/admin/overview/metric-card.tsx", import.meta.url), "utf8");
+const adminOperationsPanelSource = await readFile(new URL("../src/components/admin/overview/operations-panel.tsx", import.meta.url), "utf8");
+const adminRecentOperationsTableSource = await readFile(new URL("../src/components/admin/overview/recent-operations-table.tsx", import.meta.url), "utf8");
 const adminDashboardSource = await readFile(new URL("../src/components/admin-dashboard.tsx", import.meta.url), "utf8");
 const adminDataSource = await readFile(new URL("../src/server/db/admin-seed.ts", import.meta.url), "utf8");
 const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
@@ -124,6 +128,19 @@ test("admin shell uses shadcn sidebar provider without touching the student shel
   assert.match(adminTopbarSource, /Ver area do aluno/);
   assert.match(adminTopbarSource, /href="\/"/);
   assert.doesNotMatch(appShellSource, /SidebarProvider/);
+});
+
+test("admin overview uses shadcn dashboard components with safe CRM data", () => {
+  assert.match(adminOverviewSource, /AdminMetricCard/);
+  assert.match(adminOverviewSource, /OperationsPanel/);
+  assert.match(adminOverviewSource, /RecentOperationsTable/);
+  assert.match(adminMetricCardSource, /@\/components\/ui\/card/);
+  assert.match(adminOperationsPanelSource, /@\/components\/ui\/badge/);
+  assert.match(adminRecentOperationsTableSource, /@\/components\/ui\/table/);
+  assert.match(adminOverviewSource, /Entitlements internos/);
+  assert.doesNotMatch(adminOverviewSource, /payload/);
+  assert.doesNotMatch(adminOperationsPanelSource, /payload/);
+  assert.doesNotMatch(adminRecentOperationsTableSource, /payload/);
 });
 
 test("admin dashboard models student CRM lists and course grouping", () => {
