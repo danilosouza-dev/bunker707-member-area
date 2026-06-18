@@ -63,7 +63,7 @@ test("admin route renders the CMS dashboard", () => {
 
 test("admin dashboard exposes the core CMS views", () => {
   for (const label of ["Visao geral", "Alunos", "Catalogo", "Estrutura", "Personalizacao"]) {
-    assert.match(adminDashboardSource, new RegExp(label));
+    assert.match(adminNavSource, new RegExp(label));
   }
   assert.match(adminDashboardSource, /PersonalizationView/);
   assert.match(adminDashboardSource, /activeView === "personalization"/);
@@ -86,6 +86,9 @@ test("admin dashboard exposes the core CMS views", () => {
 });
 
 test("admin shadcn nav keeps the core CRM modules and student preview action", () => {
+  assert.match(adminDashboardSource, /import \{ adminMainNavItems \} from "@\/components\/admin\/admin-nav";/);
+  assert.doesNotMatch(adminDashboardSource, /const adminNavItems = \[/);
+
   for (const label of ["Visao geral", "Alunos", "Catalogo", "Estrutura", "Personalizacao"]) {
     assert.match(adminNavSource, new RegExp(`label: "${label}"`));
   }

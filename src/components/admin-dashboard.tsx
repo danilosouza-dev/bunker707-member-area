@@ -29,7 +29,6 @@ import {
   ShoppingBag,
   Sparkles,
   Trash2,
-  Trophy,
   UserPlus,
   Users,
   X
@@ -37,6 +36,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { adminMainNavItems } from "@/components/admin/admin-nav";
 import { ContentRow, CourseModulesHomeSection } from "@/components/content-row";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { HeroSection } from "@/components/hero-section";
@@ -72,20 +72,6 @@ import type {
   LockedContentActionMode,
   PurchaseTarget
 } from "@/lib/platform-types";
-
-type AdminNavItem = {
-  icon: LucideIcon;
-  id: AdminView;
-  label: string;
-};
-
-const adminNavItems = [
-  { icon: Trophy, id: "overview", label: "Visao geral" },
-  { icon: Users, id: "students", label: "Alunos" },
-  { icon: LibraryBig, id: "catalog", label: "Catalogo" },
-  { icon: GalleryVerticalEnd, id: "structure", label: "Estrutura" },
-  { icon: Pencil, id: "personalization", label: "Personalizacao" }
-] satisfies AdminNavItem[];
 
 const panelClassName = "rounded-[8px] border border-white/10 bg-[#171717] shadow-2xl shadow-black/20";
 const subtlePanelClassName = "rounded-[8px] border border-white/10 bg-white/[0.045]";
@@ -312,7 +298,7 @@ function AdminSidebar({
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {adminNavItems.map((item) => {
+          {adminMainNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = item.id === activeView;
 
@@ -372,7 +358,7 @@ function AdminTopbar({
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
 }) {
-  const activeLabel = adminNavItems.find((item) => item.id === activeView)?.label ?? "CMS";
+  const activeLabel = adminMainNavItems.find((item) => item.id === activeView)?.label ?? "CMS";
 
   return (
     <header className="sticky top-0 z-30 border-b border-white/10 bg-[#0b0b0b]/92 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-8">
