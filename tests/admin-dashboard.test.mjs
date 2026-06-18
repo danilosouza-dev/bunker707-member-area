@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const adminPageSource = await readFile(new URL("../src/app/admin/page.tsx", import.meta.url), "utf8");
+const adminNavSource = await readFile(new URL("../src/components/admin/admin-nav.ts", import.meta.url), "utf8");
 const adminDashboardSource = await readFile(new URL("../src/components/admin-dashboard.tsx", import.meta.url), "utf8");
 const adminDataSource = await readFile(new URL("../src/server/db/admin-seed.ts", import.meta.url), "utf8");
 const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
@@ -82,6 +83,19 @@ test("admin dashboard exposes the core CMS views", () => {
   assert.doesNotMatch(adminDashboardSource, /PersonalizationModeBar/);
   assert.doesNotMatch(adminDashboardSource, /id: "release"/);
   assert.doesNotMatch(adminDashboardSource, /id: "access"/);
+});
+
+test("admin shadcn nav keeps the core CRM modules and student preview action", () => {
+  for (const label of ["Visao geral", "Alunos", "Catalogo", "Estrutura", "Personalizacao"]) {
+    assert.match(adminNavSource, new RegExp(`label: "${label}"`));
+  }
+
+  assert.match(adminNavSource, /href: "\/"/);
+  assert.match(adminNavSource, /id: "overview"/);
+  assert.match(adminNavSource, /id: "students"/);
+  assert.match(adminNavSource, /id: "catalog"/);
+  assert.match(adminNavSource, /id: "structure"/);
+  assert.match(adminNavSource, /id: "personalization"/);
 });
 
 test("admin dashboard models student CRM lists and course grouping", () => {
