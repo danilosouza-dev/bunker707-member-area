@@ -128,21 +128,25 @@ test("admin shell uses shadcn sidebar provider without touching the student shel
   assert.match(adminShellSource, /AdminSidebar/);
   assert.match(adminShellSource, /SidebarInset/);
   assert.match(adminTopbarSource, /SidebarTrigger/);
-  assert.match(adminTopbarSource, /Ver area do aluno/);
-  assert.match(adminTopbarSource, /href="\/"/);
-  assert.match(adminTopbarSource, /render=\{<Link href="\/" \/>\}/);
-  assert.match(adminTopbarSource, /nativeButton=\{false\}/);
+  assert.match(adminNavSource, /label: "Area do aluno"/);
+  assert.doesNotMatch(adminTopbarSource, /Buscar no CRM/);
+  assert.doesNotMatch(adminTopbarSource, /Novo aluno/);
+  assert.doesNotMatch(adminOverviewSource, /Ver area do aluno/);
   assert.doesNotMatch(appShellSource, /SidebarProvider/);
 });
 
 test("admin overview uses shadcn dashboard components with safe CRM data", () => {
-  assert.match(adminOverviewSource, /AdminMetricCard/);
-  assert.match(adminOverviewSource, /OperationsPanel/);
-  assert.match(adminOverviewSource, /RecentOperationsTable/);
+  assert.match(adminOverviewSource, /ChartContainer/);
+  assert.match(adminOverviewSource, /AreaChart/);
+  assert.match(adminOverviewSource, /BarChart/);
+  assert.match(adminOverviewSource, /Produtos em alta/);
+  assert.match(adminOverviewSource, /Alunos para acompanhar/);
+  assert.match(adminOverviewSource, /Painel do produtor/);
+  assert.match(adminOverviewSource, /Resumo seguro/);
   assert.match(adminMetricCardSource, /@\/components\/ui\/card/);
   assert.match(adminOperationsPanelSource, /@\/components\/ui\/badge/);
   assert.match(adminRecentOperationsTableSource, /@\/components\/ui\/table/);
-  assert.match(adminOverviewSource, /Entitlements internos/);
+  assert.match(adminTopbarSource, /Entitlements como fonte de verdade/);
   assert.doesNotMatch(adminOverviewSource, /payload/);
   assert.doesNotMatch(adminOperationsPanelSource, /payload/);
   assert.doesNotMatch(adminRecentOperationsTableSource, /payload/);
@@ -212,7 +216,8 @@ test("admin dashboard models student CRM lists and course grouping", () => {
   assert.match(adminTopbarSource, /SidebarTrigger/);
   assert.match(adminShellSource, /onChangeView=\{onChangeView\}/);
   assert.match(adminDashboardSource, /CRM Bunker707/);
-  assert.match(adminTopbarSource, /Ver area do aluno/);
+  assert.match(adminNavSource, /Area do aluno/);
+  assert.doesNotMatch(adminTopbarSource, /Ver area do aluno/);
   assert.match(adminDashboardSource, /onChangeView=\{handleChangeView\}/);
   assert.match(adminDashboardSource, /Supabase persistido/);
   assert.match(adminDashboardSource, /Fallback local/);

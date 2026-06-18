@@ -1,9 +1,7 @@
 "use client";
 
-import { Search, UserPlus } from "lucide-react";
-import Link from "next/link";
+import { Activity, ShieldCheck } from "lucide-react";
 import { adminMainNavItems } from "@/components/admin/admin-nav";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { AdminView } from "@/lib/platform-types";
@@ -21,21 +19,16 @@ export function AdminTopbar({ activeView }: { activeView: AdminView }) {
         <h1 className="truncate text-sm font-semibold text-foreground">{activeLabel}</h1>
       </div>
 
-      <div
-        aria-hidden="true"
-        className="hidden h-8 min-w-56 items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 text-sm text-muted-foreground md:flex"
-      >
-        <Search className="size-4 shrink-0" />
-        <span className="truncate">Buscar no CRM</span>
+      <div className="hidden items-center gap-2 md:flex">
+        <div className="inline-flex h-8 items-center gap-2 rounded-lg border border-border bg-muted/25 px-3 text-xs font-medium text-muted-foreground">
+          <ShieldCheck className="size-3.5 text-primary" />
+          RBAC ativo
+        </div>
+        <div className="inline-flex h-8 items-center gap-2 rounded-lg border border-border bg-muted/25 px-3 text-xs font-medium text-muted-foreground">
+          <Activity className="size-3.5 text-[color:var(--chart-2)]" />
+          Entitlements como fonte de verdade
+        </div>
       </div>
-
-      <Button render={<Link href="/" />} nativeButton={false} size="sm" variant="outline">
-        Ver area do aluno
-      </Button>
-      <Button className="hidden sm:inline-flex" disabled size="sm">
-        <UserPlus data-icon="inline-start" />
-        Novo aluno
-      </Button>
     </header>
   );
 }

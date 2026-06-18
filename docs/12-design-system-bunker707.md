@@ -218,6 +218,8 @@ A area do aluno mantem a UI streaming-inspired existente. Tokens shadcn do admin
 
 No admin, componentes como `Sidebar`, `Card`, `Badge`, `Button` e `Table` devem preferir tokens semanticos (`bg-background`, `bg-card`, `border-border`, `text-muted-foreground`, `bg-primary`) e composicao shadcn. Acentos primarios usam o vermelho Bunker707 via `--primary`/`--sidebar-primary`; superficies permanecem escuras e discretas.
 
+A home do CRM deve ter cara de painel executivo premium, nao wireframe. A primeira dobra precisa mostrar graficos reais, cards densos, insights operacionais para o produtor, produtos com capas e listas de alunos com progresso. Evitar CTAs repetidos, busca falsa, botoes desabilitados sem funcao e textos explicativos que descrevem o proprio painel.
+
 ## Documentacao e evolucao
 
 Quando uma decisao visual mudar, atualizar este documento e os documentos de UX relacionados.

@@ -30,5 +30,5 @@ export const adminMainNavItems = [
 ] satisfies AdminNavItem[];
 
 export const adminOperationNavItems = [
-  { href: "/", icon: Home, label: "Ver area do aluno" }
+  { href: "/", icon: Home, label: "Area do aluno" }
 ] satisfies AdminExternalNavItem[];
