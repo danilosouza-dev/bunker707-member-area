@@ -4,6 +4,7 @@ import test from "node:test";
 
 const adminPageSource = await readFile(new URL("../src/app/admin/page.tsx", import.meta.url), "utf8");
 const adminNavSource = await readFile(new URL("../src/components/admin/admin-nav.ts", import.meta.url), "utf8");
+const adminSidebarSource = await readFile(new URL("../src/components/admin/admin-sidebar.tsx", import.meta.url), "utf8");
 const adminDashboardSource = await readFile(new URL("../src/components/admin-dashboard.tsx", import.meta.url), "utf8");
 const adminDataSource = await readFile(new URL("../src/server/db/admin-seed.ts", import.meta.url), "utf8");
 const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
@@ -99,6 +100,17 @@ test("admin shadcn nav keeps the core CRM modules and student preview action", (
   assert.match(adminNavSource, /id: "catalog"/);
   assert.match(adminNavSource, /id: "structure"/);
   assert.match(adminNavSource, /id: "personalization"/);
+});
+
+test("admin sidebar uses shadcn sidebar primitives and shared navigation", () => {
+  assert.match(adminSidebarSource, /@\/components\/ui\/sidebar/);
+  assert.match(adminSidebarSource, /collapsible="icon"/);
+  assert.match(adminSidebarSource, /SidebarMenuButton/);
+  assert.match(adminSidebarSource, /tooltip=/);
+  assert.match(adminSidebarSource, /adminMainNavItems/);
+  assert.match(adminSidebarSource, /adminOperationNavItems/);
+  assert.match(adminSidebarSource, /onChangeView\(item\.id\)/);
+  assert.match(adminSidebarSource, /isActive=\{activeView === item\.id\}/);
 });
 
 test("admin dashboard models student CRM lists and course grouping", () => {
