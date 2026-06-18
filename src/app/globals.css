@@ -19,8 +19,8 @@
   --card-foreground: var(--foreground);
   --popover: var(--panel-strong);
   --popover-foreground: var(--foreground);
-  --primary: var(--foreground);
-  --primary-foreground: var(--background);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
   --secondary: var(--panel-strong);
   --secondary-foreground: var(--foreground);
   --muted-foreground: var(--muted);
@@ -33,8 +33,8 @@
   --chart-3: #f7f7f4;
   --chart-4: #a8a8a2;
   --chart-5: #52525b;
-  --radius: 0.625rem;
-  --sidebar: var(--panel);
+  --radius: 0.5rem;
+  --sidebar: #0f0f0f;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--accent);
   --sidebar-primary-foreground: #ffffff;

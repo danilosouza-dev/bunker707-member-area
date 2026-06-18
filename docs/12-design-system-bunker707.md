@@ -210,6 +210,14 @@ Comportamento:
 - Evitar imagem escura/blur quando o usuario precisa reconhecer o conteudo.
 - Miniaturas de aulas e cursos devem manter aspect ratio estavel.
 
+## CRM admin with shadcn/ui
+
+O CRM admin em `/admin` usa blocos e primitivas oficiais do shadcn/ui como fundacao de componentes. O shell inicial do admin segue o padrao de dashboard/sidebar do shadcn, com tokens Bunker707 dark premium aplicados por CSS variables.
+
+A area do aluno mantem a UI streaming-inspired existente. Tokens shadcn do admin devem ser adicionados em camada sobre `--background`, `--foreground`, `--panel`, `--border` e `--accent`, sem alterar cards, carrosseis, paginas de aula, modais ou sidebar/hamburger do aluno.
+
+No admin, componentes como `Sidebar`, `Card`, `Badge`, `Button` e `Table` devem preferir tokens semanticos (`bg-background`, `bg-card`, `border-border`, `text-muted-foreground`, `bg-primary`) e composicao shadcn. Acentos primarios usam o vermelho Bunker707 via `--primary`/`--sidebar-primary`; superficies permanecem escuras e discretas.
+
 ## Documentacao e evolucao
 
 Quando uma decisao visual mudar, atualizar este documento e os documentos de UX relacionados.

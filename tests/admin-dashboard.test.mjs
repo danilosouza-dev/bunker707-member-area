@@ -14,6 +14,8 @@ const adminRecentOperationsTableSource = await readFile(new URL("../src/componen
 const adminDashboardSource = await readFile(new URL("../src/components/admin-dashboard.tsx", import.meta.url), "utf8");
 const adminDataSource = await readFile(new URL("../src/server/db/admin-seed.ts", import.meta.url), "utf8");
 const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
+const globalsCssSource = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
+const designSystemSource = await readFile(new URL("../docs/12-design-system-bunker707.md", import.meta.url), "utf8");
 const favoritesPageSource = await readFile(new URL("../src/app/favoritos/page.tsx", import.meta.url), "utf8");
 const favoritesExperienceSource = await readFile(new URL("../src/components/favorites-experience.tsx", import.meta.url), "utf8");
 const loginExperienceSource = await readFile(new URL("../src/components/login-experience.tsx", import.meta.url), "utf8");
@@ -153,6 +155,19 @@ test("admin dashboard delegates shell and overview to shadcn admin components", 
   assert.match(adminDashboardSource, /<AdminOverview data=\{dashboardData\} \/>/);
   assert.doesNotMatch(adminDashboardSource, /<AdminSidebar[\s\S]*isOpen=\{sidebarOpen\}/);
   assert.doesNotMatch(adminDashboardSource, /<AdminTopbar[\s\S]*sidebarOpen=\{sidebarOpen\}/);
+});
+
+test("shadcn tokens coexist with Bunker707 student area tokens", () => {
+  for (const token of ["--background", "--foreground", "--panel", "--border", "--accent"]) {
+    assert.match(globalsCssSource, new RegExp(token));
+  }
+
+  for (const token of ["--card", "--card-foreground", "--sidebar", "--sidebar-foreground", "--primary"]) {
+    assert.match(globalsCssSource, new RegExp(token));
+  }
+
+  assert.match(designSystemSource, /shadcn\/ui/);
+  assert.match(designSystemSource, /CRM admin/);
 });
 
 test("admin dashboard models student CRM lists and course grouping", () => {
