@@ -7,13 +7,11 @@ import {
   Bell,
   BookOpen,
   CalendarDays,
-  ChevronDown,
   CheckCircle2,
   Copy,
   Eye,
   GalleryVerticalEnd,
   GraduationCap,
-  Home,
   KeyRound,
   LibraryBig,
   Mail,
@@ -24,19 +22,18 @@ import {
   Plus,
   Search,
   Send,
-  ShieldCheck,
   ShoppingBag,
-  Sparkles,
   Trash2,
-  UserPlus,
   Users,
   X
 } from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { CatalogCommandCenter } from "@/components/admin/catalog/catalog-command-center";
 import { AdminOverview } from "@/components/admin/admin-overview";
 import { AdminShell } from "@/components/admin/admin-shell";
+import { PersonalizationCommandCenter } from "@/components/admin/personalization/personalization-command-center";
+import { StudentsCommandCenter } from "@/components/admin/students/students-command-center";
 import { ContentRow, CourseModulesHomeSection } from "@/components/content-row";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { HeroSection } from "@/components/hero-section";
@@ -44,7 +41,6 @@ import { LoginExperience } from "@/components/login-experience";
 import { MemberFooter } from "@/components/member-footer";
 import { PurchasesExperience } from "@/components/purchases-experience";
 import { getLoginPageConfig, loginTemplateOptions } from "@/lib/login-config";
-import type { LucideIcon } from "lucide-react";
 import type { LoginPageConfig, LoginTemplateId } from "@/lib/login-config";
 import type {
   AdminContentAccess,
@@ -967,22 +963,18 @@ function CatalogView({
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
       <section className="min-w-0 space-y-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-3xl font-black text-white">Catalogo de produtos e conteudos</h2>
-            <p className="mt-2 text-sm text-zinc-500">
-              Crie cursos, formacoes, mentorias, webinarios e produtos antes de montar modulos e aulas.
-            </p>
-          </div>
-          <button
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] bg-[var(--accent)] px-4 py-2 text-sm font-black text-white transition hover:bg-red-600"
-            onClick={openNewContentForm}
-            type="button"
-          >
-            <Plus className="h-4 w-4" />
-            Criar item
-          </button>
-        </div>
+        <CatalogCommandCenter
+          filter={filter}
+          filteredRecords={filteredRecords}
+          onCreateContent={openNewContentForm}
+          onEditContent={openEditContentForm}
+          onFilterChange={setFilter}
+          onQueryChange={setQuery}
+          onSelectRecord={setSelectedRecord}
+          query={query}
+          records={records}
+          selectedRecord={selectedRecord}
+        />
 
         {contentFormOpen ? (
           <div className={`${subtlePanelClassName} space-y-4 p-4`}>
@@ -1787,39 +1779,6 @@ function CatalogView({
           </div>
         ) : null}
 
-        <div className={`${subtlePanelClassName} flex flex-col gap-3 p-3 lg:flex-row lg:items-center`}>
-          <label className="flex h-11 flex-1 items-center gap-3 rounded-[8px] border border-white/10 bg-black/30 px-3 text-sm text-zinc-400 focus-within:border-white/25">
-            <Search className="h-4 w-4 text-zinc-500" />
-            <span className="sr-only">Buscar conteudo</span>
-            <input
-              className="min-w-0 flex-1 border-0 bg-transparent text-white outline-none placeholder:text-zinc-600"
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar por produto, curso, regra..."
-              type="search"
-              value={query}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {[
-              ["all", "Todos"],
-              ["sellable", "Vendaveis"],
-              ["included", "Inclusos"],
-              ["locked", "Bloqueados"]
-            ].map(([id, label]) => (
-              <button
-                className={`min-h-10 rounded-[8px] px-3 text-sm font-black transition ${
-                  filter === id ? "bg-white text-black" : "bg-white/[0.055] text-zinc-300 hover:bg-white/10 hover:text-white"
-                }`}
-                key={id}
-                onClick={() => setFilter(id as typeof filter)}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         <CatalogTable
           filteredRecords={filteredRecords}
           onDeleteRecord={deleteRecord}
@@ -1928,93 +1887,6 @@ function PersonalizationEditorHeader({
             Publicar
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function PersonalizationIndexRow({
-  disabledCustomize = false,
-  disabledPreview = false,
-  icon: Icon,
-  image,
-  onCustomize,
-  previewHref,
-  showChevron = false,
-  status,
-  statusClassName = "border-emerald-400/25 bg-emerald-500/10 text-emerald-300",
-  subtitle,
-  title,
-  urlLabel
-}: {
-  disabledCustomize?: boolean;
-  disabledPreview?: boolean;
-  icon?: LucideIcon;
-  image?: string;
-  onCustomize?: () => void;
-  previewHref?: string;
-  showChevron?: boolean;
-  status?: string;
-  statusClassName?: string;
-  subtitle: string;
-  title: string;
-  urlLabel: string;
-}) {
-  return (
-    <div className="grid gap-3 rounded-[8px] border border-white/10 bg-black/20 p-3 transition hover:border-white/18 hover:bg-white/[0.035] lg:grid-cols-[minmax(0,1.2fr)_minmax(14rem,0.9fr)_auto] lg:items-center">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-[8px] bg-white/[0.06] text-zinc-200">
-          {image ? (
-            <span
-              className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: `url(${image})` }}
-            />
-          ) : Icon ? (
-            <Icon className="h-5 w-5" />
-          ) : null}
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-black text-white">{title}</span>
-          <span className="mt-1 block truncate text-xs font-semibold text-zinc-500">{subtitle}</span>
-        </span>
-      </div>
-
-      <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-zinc-500">
-        <Copy className="h-4 w-4 shrink-0 text-zinc-600" />
-        <span className="truncate">{urlLabel}</span>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-        {status ? <StatusPill className={statusClassName}>{status}</StatusPill> : null}
-        {previewHref && !disabledPreview ? (
-          <Link
-            aria-label={`Visualizar ${title}`}
-            className="grid h-10 w-10 place-items-center rounded-[8px] border border-white/10 bg-white/[0.055] text-zinc-200 transition hover:bg-white/10 hover:text-white"
-            href={previewHref}
-            target="_blank"
-          >
-            <Eye className="h-4 w-4" />
-          </Link>
-        ) : (
-          <button
-            aria-label={`Visualizar ${title}`}
-            className="grid h-10 w-10 cursor-not-allowed place-items-center rounded-[8px] border border-white/10 bg-white/[0.025] text-zinc-700"
-            disabled
-            type="button"
-          >
-            <Eye className="h-4 w-4" />
-          </button>
-        )}
-        <button
-          className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-xs font-black text-zinc-200 transition hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.025] disabled:text-zinc-700 disabled:hover:bg-white/[0.025] disabled:hover:text-zinc-700"
-          disabled={disabledCustomize}
-          onClick={onCustomize}
-          type="button"
-        >
-          <Pencil className="h-4 w-4" />
-          Personalizar
-          {showChevron ? <ChevronDown className="h-4 w-4" /> : null}
-        </button>
       </div>
     </div>
   );
@@ -2140,78 +2012,15 @@ function PersonalizationView({
 
   function renderPersonalizationIndex() {
     return (
-      <div className="space-y-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-[var(--accent)]">CRM</p>
-            <h2 className="text-3xl font-black text-white">Personalizacao</h2>
-          </div>
-          <span className="inline-flex min-h-9 items-center rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-xs font-black text-zinc-300">
-            {personalizationItemsCount} itens
-          </span>
-        </div>
-
-        <section className={`${panelClassName} p-5`}>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h3 className="text-lg font-black text-white">Bunker707</h3>
-              <p className="mt-1 text-sm font-semibold text-zinc-500">
-                Link principal: <span className="text-zinc-300">/</span>
-              </p>
-            </div>
-            <button className="inline-flex min-h-10 w-fit items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white" type="button">
-              <Sparkles className="h-4 w-4 text-[var(--accent)]" />
-              Editar tema
-            </button>
-          </div>
-        </section>
-
-        <section className={`${panelClassName} space-y-3 p-3`}>
-          <PersonalizationIndexRow
-            icon={Home}
-            onCustomize={() => setActiveTarget({ kind: "showcase" })}
-            previewHref="/"
-            status="Publicada"
-            subtitle="Essa e a pagina inicial"
-            title="Vitrine"
-            urlLabel="/"
-          />
-          <PersonalizationIndexRow
-            icon={KeyRound}
-            onCustomize={() => setActiveTarget({ kind: "login" })}
-            previewHref="/login"
-            status="Publicada"
-            subtitle="Acesso fechado da area de membros"
-            title="Pagina de login"
-            urlLabel="/login"
-          />
-          <PersonalizationIndexRow
-            icon={LibraryBig}
-            onCustomize={() => setActiveTarget({ kind: "products" })}
-            previewHref="/minhas-compras"
-            status="Em edicao"
-            statusClassName="border-amber-400/25 bg-amber-500/10 text-amber-300"
-            subtitle="Lista dos produtos e compras do aluno"
-            title="Pagina de produtos"
-            urlLabel="/minhas-compras"
-          />
-
-          {visiblePreviewRecords.map((record) => (
-            <PersonalizationIndexRow
-              image={record.content.image}
-              key={record.content.id}
-              onCustomize={() => openContentEditor(record)}
-              previewHref={`/conteudo/${record.content.id}`}
-              showChevron
-              status={record.access}
-              statusClassName={getAccessClassName(record.access)}
-              subtitle={record.kind}
-              title={record.content.title}
-              urlLabel={`/conteudo/${record.content.id}`}
-            />
-          ))}
-        </section>
-      </div>
+      <PersonalizationCommandCenter
+        onOpenContent={openContentEditor}
+        onOpenLogin={() => setActiveTarget({ kind: "login" })}
+        onOpenProducts={() => setActiveTarget({ kind: "products" })}
+        onOpenShowcase={() => setActiveTarget({ kind: "showcase" })}
+        personalizationItemsCount={personalizationItemsCount}
+        records={records}
+        visiblePreviewRecords={visiblePreviewRecords}
+      />
     );
   }
 
@@ -4467,19 +4276,6 @@ function StudentsView({
     })
   ), [courseFilter, normalizedQuery, sourceFilter, statusFilter, students]);
 
-  const studentStats = useMemo(() => {
-    const activeStudents = students.filter((student) => student.status === "active").length;
-    const totalCourses = students.reduce((total, student) => total + student.courses.length, 0);
-    const manualStudents = students.filter((student) => student.sourceProvider === "Manual").length;
-
-    return [
-      { icon: Users, label: "Alunos", value: String(students.length) },
-      { icon: ShieldCheck, label: "Ativos", value: String(activeStudents) },
-      { icon: ShoppingBag, label: "Compras", value: String(totalCourses) },
-      { icon: UserPlus, label: "Manuais", value: String(manualStudents) }
-    ];
-  }, [students]);
-
   function openNewStudentForm() {
     setFormState({
       ...emptyStudentFormState,
@@ -4822,127 +4618,27 @@ function StudentsView({
   return (
     <div className="space-y-6">
       <section className="min-w-0 space-y-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-3xl font-black text-white">Lista de alunos</h2>
-            <p className="mt-2 text-sm text-zinc-500">
-              Alunos vindos das plataformas externas e cadastros manuais, com cursos comprados por entitlement.
-            </p>
-          </div>
-          <button
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] bg-[var(--accent)] px-4 py-2 text-sm font-black text-white transition hover:bg-red-600"
-            onClick={openNewStudentForm}
-            type="button"
-          >
-            <UserPlus className="h-4 w-4" />
-            Novo aluno
-          </button>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {studentStats.map((stat) => {
-            const Icon = stat.icon;
-
-            return (
-              <div className={`${subtlePanelClassName} p-4`} key={stat.label}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-zinc-500">{stat.label}</p>
-                    <p className="mt-2 text-2xl font-black text-white">{stat.value}</p>
-                  </div>
-                  <span className="grid h-10 w-10 place-items-center rounded-[8px] bg-white/[0.055] text-zinc-300">
-                    <Icon className="h-5 w-5" />
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <StudentsCommandCenter
+          courseFilter={courseFilter}
+          listMode={listMode}
+          onCourseFilterChange={setCourseFilter}
+          onCreateStudent={openNewStudentForm}
+          onListModeChange={setListMode}
+          onOpenStudent={openStudentModal}
+          onQueryChange={setQuery}
+          onSourceFilterChange={setSourceFilter}
+          onStatusFilterChange={setStatusFilter}
+          query={query}
+          selectedStudentId={selectedStudent?.id}
+          sellableProducts={sellableProducts}
+          sourceFilter={sourceFilter}
+          statusFilter={statusFilter}
+          students={students}
+        />
 
         {accessNotice ? (
           <StudentAccessNoticePanel notice={accessNotice} onDismiss={() => setAccessNotice(null)} />
         ) : null}
-
-        <div className={`${subtlePanelClassName} space-y-3 p-3`}>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            <label className="flex h-11 flex-1 items-center gap-3 rounded-[8px] border border-white/10 bg-black/30 px-3 text-sm text-zinc-400 focus-within:border-white/25">
-              <Search className="h-4 w-4 text-zinc-500" />
-              <span className="sr-only">Buscar aluno</span>
-              <input
-                className="min-w-0 flex-1 border-0 bg-transparent text-white outline-none placeholder:text-zinc-600"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Buscar por nome, email, telefone, origem ou curso..."
-                type="search"
-                value={query}
-              />
-            </label>
-            <div className="flex rounded-[8px] border border-white/10 bg-black/25 p-1">
-              {[
-                ["students", "Todos"],
-                ["courses", "Por curso"]
-              ].map(([id, label]) => (
-                <button
-                  className={`min-h-9 rounded-[7px] px-3 text-sm font-black transition ${
-                    listMode === id ? "bg-white text-black" : "text-zinc-400 hover:bg-white/[0.055] hover:text-white"
-                  }`}
-                  key={id}
-                  onClick={() => setListMode(id as StudentListMode)}
-                  type="button"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-2 md:grid-cols-3">
-            <label className="grid gap-1 text-xs font-black uppercase text-zinc-500">
-              Origem
-              <select
-                className={inputClassName}
-                onChange={(event) => setSourceFilter(event.target.value as "all" | AdminSourceProvider)}
-                value={sourceFilter}
-              >
-                <option value="all">Todas</option>
-                {sourceProviderOptions.map((provider) => (
-                  <option key={provider} value={provider}>
-                    {provider}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="grid gap-1 text-xs font-black uppercase text-zinc-500">
-              Status
-              <select
-                className={inputClassName}
-                onChange={(event) => setStatusFilter(event.target.value as "all" | AdminEntitlementStatus)}
-                value={statusFilter}
-              >
-                <option value="all">Todos</option>
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {getEntitlementStatusLabel(status)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="grid gap-1 text-xs font-black uppercase text-zinc-500">
-              Curso
-              <select
-                className={inputClassName}
-                onChange={(event) => setCourseFilter(event.target.value)}
-                value={courseFilter}
-              >
-                <option value="all">Todos os cursos</option>
-                {sellableProducts.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
 
         {listMode === "students" ? (
           <div className={`${panelClassName} overflow-hidden`}>

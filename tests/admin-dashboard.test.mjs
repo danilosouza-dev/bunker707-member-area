@@ -8,10 +8,23 @@ const adminSidebarSource = await readFile(new URL("../src/components/admin/admin
 const adminShellSource = await readFile(new URL("../src/components/admin/admin-shell.tsx", import.meta.url), "utf8");
 const adminTopbarSource = await readFile(new URL("../src/components/admin/admin-topbar.tsx", import.meta.url), "utf8");
 const adminOverviewSource = await readFile(new URL("../src/components/admin/admin-overview.tsx", import.meta.url), "utf8");
+const adminCatalogCommandCenterSource = await readFile(
+  new URL("../src/components/admin/catalog/catalog-command-center.tsx", import.meta.url),
+  "utf8"
+);
 const adminMetricCardSource = await readFile(new URL("../src/components/admin/overview/metric-card.tsx", import.meta.url), "utf8");
 const adminOperationsPanelSource = await readFile(new URL("../src/components/admin/overview/operations-panel.tsx", import.meta.url), "utf8");
+const adminPersonalizationCommandCenterSource = await readFile(
+  new URL("../src/components/admin/personalization/personalization-command-center.tsx", import.meta.url),
+  "utf8"
+);
 const adminRecentOperationsTableSource = await readFile(new URL("../src/components/admin/overview/recent-operations-table.tsx", import.meta.url), "utf8");
+const adminStudentsCommandCenterSource = await readFile(
+  new URL("../src/components/admin/students/students-command-center.tsx", import.meta.url),
+  "utf8"
+);
 const adminDashboardSource = await readFile(new URL("../src/components/admin-dashboard.tsx", import.meta.url), "utf8");
+const adminDashboardAndStudentSource = `${adminDashboardSource}\n${adminStudentsCommandCenterSource}`;
 const adminDataSource = await readFile(new URL("../src/server/db/admin-seed.ts", import.meta.url), "utf8");
 const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
 const globalsCssSource = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
@@ -76,7 +89,13 @@ test("admin dashboard exposes the core CMS views", () => {
   }
   assert.match(adminDashboardSource, /PersonalizationView/);
   assert.match(adminDashboardSource, /activeView === "personalization"/);
-  assert.match(adminDashboardSource, /PersonalizationIndexRow/);
+  assert.match(adminDashboardSource, /PersonalizationCommandCenter/);
+  assert.match(adminDashboardSource, /CatalogCommandCenter/);
+  assert.match(adminDashboardSource, /StudentsCommandCenter/);
+  assert.match(adminCatalogCommandCenterSource, /Catalogo/);
+  assert.match(adminCatalogCommandCenterSource, /Conteudos recentes/);
+  assert.match(adminPersonalizationCommandCenterSource, /Central visual da area do aluno/);
+  assert.match(adminPersonalizationCommandCenterSource, /Produtos personalizaveis/);
   assert.match(adminDashboardSource, /useState<PersonalizationTarget>\(\{ kind: "index" \}\)/);
   assert.match(adminDashboardSource, /Pagina de produtos/);
   assert.match(adminDashboardSource, /formationCourses=\{dashboardData\.formationCourses\}/);
@@ -90,6 +109,7 @@ test("admin dashboard exposes the core CMS views", () => {
   assert.match(adminDashboardSource, /PurchasesExperience/);
   assert.match(platformStoreSource, /homeRows/);
   assert.doesNotMatch(adminDashboardSource, /PersonalizationModeBar/);
+  assert.doesNotMatch(adminDashboardSource, /PersonalizationIndexRow/);
   assert.doesNotMatch(adminDashboardSource, /id: "release"/);
   assert.doesNotMatch(adminDashboardSource, /id: "access"/);
 });
@@ -175,10 +195,13 @@ test("shadcn tokens coexist with Bunker707 student area tokens", () => {
 });
 
 test("admin dashboard models student CRM lists and course grouping", () => {
-  assert.match(adminDashboardSource, /Lista de alunos/);
-  assert.match(adminDashboardSource, /Por curso/);
+  assert.match(adminStudentsCommandCenterSource, /Command center de alunos/);
+  assert.match(adminStudentsCommandCenterSource, /Cursos/);
+  assert.match(adminStudentsCommandCenterSource, /Acompanhar/);
+  assert.match(adminDashboardSource, /CourseStudentGroups/);
+  assert.match(adminDashboardSource, /onListModeChange=\{setListMode\}/);
   assert.match(adminDashboardSource, /Produtos comprados/);
-  assert.match(adminDashboardSource, /Novo aluno/);
+  assert.match(adminDashboardAndStudentSource, /Novo aluno/);
   assert.match(adminDashboardSource, /StudentProfileModal/);
   assert.match(adminDashboardSource, /Reenviar acesso/);
   assert.match(adminDashboardSource, /Enviar convite para criar senha/);
