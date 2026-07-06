@@ -220,6 +220,60 @@ No admin, componentes como `Sidebar`, `Card`, `Badge`, `Button` e `Table` devem 
 
 A home do CRM deve ter cara de painel executivo premium, nao wireframe. A primeira dobra precisa mostrar graficos reais, cards densos, insights operacionais para o produtor, produtos com capas e listas de alunos com progresso. Evitar CTAs repetidos, busca falsa, botoes desabilitados sem funcao e textos explicativos que descrevem o proprio painel.
 
+### Catalogo no CRM
+
+A area de Catalogo deve manter a listagem e o painel operacional como contexto principal. A criacao e edicao de formacoes, cursos, mentorias, webinarios, produtos, bootcamps, modulos e aulas deve abrir em `Dialog` central amplo, sobre a tela atual, nunca como pagina externa nem como painel inline que empurra a listagem.
+
+Modal de criacao/edicao no Catalogo:
+
+- Deve usar cabecalho escuro premium, breadcrumb curto `Catalogo / Criacao` ou `Catalogo / Edicao`, botao de fechar circular e conteudo rolavel dentro do modal.
+- O construtor em passos continua com `Configuracao`, `Modulos` e `Aulas`, mas os passos aparecem dentro do modal.
+- Salvar a configuracao inicial deve manter o modal aberto e avancar para `Modulos`; salvar modulo pode avancar para `Aulas`; finalizar apenas fecha o modal e devolve o usuario para a listagem.
+- A pagina de fundo fica bloqueada pela primitiva `Dialog` enquanto o modal esta aberto, preservando o estado da busca, filtros e item selecionado no Catalogo; componentes de Catalogo nao devem alterar `document.body.style.overflow` manualmente.
+- Edicao por botoes de tabela, card destacado ou painel lateral deve abrir o mesmo modal padronizado.
+
+### Novas areas operacionais do CRM
+
+Combos, Moderacao, Agentes de IA e Integracoes devem seguir o mesmo padrao shadcn dark premium do CRM: cards densos, tabelas/listas operacionais, filtros compactos, badges discretos e botoes com icones Lucide. Essas telas nao devem virar landing pages explicativas nem duplicar o fluxo de Catalogo.
+
+Regras:
+
+- `Produtos` usa o Catalogo/construtor existente;
+- `Combos` agrupa produtos existentes e mostra turma, produtos incluidos e status;
+- `Comunidade` pode aparecer como placeholder de fase futura, sem ativar experiencia de comunidade para alunos;
+- `Moderacao` prioriza filtros por produto, tipo de comentario/resposta e status;
+- `Agentes de IA` separa escopos de comentario, tutor de aula, assistente geral e chat da home;
+- `Configuracoes > Integracoes` deve mostrar provedores, eventos esperados e status do segredo sem exibir segredos reais.
+
+### CRM de alunos com referencia estrutural operacional
+
+A area de alunos do CRM usa a referencia Hotmart apenas para organizacao e hierarquia, nunca para copia visual. A interface deve permanecer Bunker707 dark premium, com superficies escuras, bordas discretas, acento vermelho controlado e componentes shadcn/ui adaptados aos tokens do produto.
+
+Listagem de alunos:
+
+- Usar titulo `Alunos`, busca, filtro de produto e botao `Filtrar` em uma faixa operacional limpa.
+- Metricas continuam existindo, com graficos visiveis em cards escuros discretos.
+- A tabela deve ser densa, escura e organizada, com divisores finos, menu de tres pontos por linha e selecao sutil em vermelho.
+- O menu de linha deve priorizar as acoes da referencia: detalhes do usuario, reenviar acesso, bloquear acesso a produtos e mudar turma.
+- Nao usar fundo claro, azul Hotmart, cinza `#f4f6f8`, superficies brancas ou avatar azul como linguagem visual da pagina.
+
+Modal de detalhes do aluno:
+
+- Deve abrir como `Dialog` central amplo, nao como sheet lateral e nao como pagina externa.
+- A organizacao pode se inspirar na referencia: breadcrumb, identidade do aluno, progresso/engajamento, informacoes pessoais e produtos.
+- A composicao visual deve ser propria: header escuro premium, resumo lateral, leitura principal e tabela de produtos em superficie escura.
+- Nao usar abas para `Visao geral`, `Produtos` e `Atividade`; o modal deve ser uma unica leitura vertical.
+- Produtos aparecem em tabela simples com miniatura, nome, progresso, turma, papel, categoria e acesso.
+- Evitar scroll interno por aba, paineis aninhados, tiles repetitivos e excesso de acoes visuais dentro da tabela.
+
+Modal de criacao/edicao de aluno:
+
+- Deve usar o mesmo `Dialog` central escuro do perfil.
+- O formulario deve ter topo com titulo/contexto leve e uma superficie unica dividida em secoes: identidade, primeiro acesso, origem/status, produtos comprados e notas internas.
+- Campos ficam compactos e alinhados; acoes de salvar/cancelar ficam em rodape fixo escuro.
+- Seletores de produto usam linhas selecionaveis compactas com miniatura pequena e check visual, em vez de cards grandes.
+- Reforcar que entitlements internos seguem como fonte de verdade para acesso.
+
 ## Documentacao e evolucao
 
 Quando uma decisao visual mudar, atualizar este documento e os documentos de UX relacionados.

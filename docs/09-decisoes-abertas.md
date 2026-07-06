@@ -72,10 +72,11 @@ Decisao tomada:
 
 ### Comunidade no MVP
 
-Recomendacao:
+Decisao atual:
 
-- nao entrar no MVP essencial;
-- manter no menu como item futuro ou ocultar ate estar pronto.
+- comunidade completa nao entra no MVP essencial;
+- o CRM pode exibir item `Comunidade` como placeholder operacional para manter a arquitetura de navegacao;
+- a area do aluno so deve receber comunidade quando categorias, topicos, notificacoes e moderacao estiverem persistidos.
 
 ### Ranking no MVP
 
@@ -93,10 +94,39 @@ Recomendacao:
 
 ### IA da aula
 
-Recomendacao:
+Decisao atual:
 
 - preparar modelo de dados;
-- implementar depois que aulas, transcricoes e progresso estiverem estaveis.
+- permitir configuracao UI-first de agentes no CRM: comentarios, tutor de aula, assistente geral e chat da home;
+- implementar respostas reais depois que aulas, transcricoes, chunks, entitlements e auditoria estiverem estaveis.
+
+### Combos de produtos
+
+Decisao tomada:
+
+- combos sao pacotes internos compostos por produtos existentes;
+- a compra externa de um combo deve resolver os produtos incluidos e criar entitlements internos para cada produto/alvo;
+- combo nao e checkout interno e nao autoriza conteudo diretamente;
+- todo combo pode ter turma, usando `Turma A` como padrao visual quando nenhuma turma foi criada;
+- remover produtos de um combo ativo exige cuidado operacional e auditoria, porque pode afetar ofertas ja vendidas.
+
+### Moderacao de comentarios
+
+Decisao tomada:
+
+- o CRM tera item `Moderacao` para comentarios e respostas de aulas;
+- filtros principais: produto, tipo (`comentario` ou `resposta`) e status (`pendente`, `aprovado`, `ocultado`, `spam`);
+- palavras bloqueadas impedem o envio e retornam mensagem amigavel ao aluno;
+- comentarios persistidos e acoes de moderacao devem ter auditoria antes de liberar a funcionalidade em producao.
+
+### Integracoes
+
+Decisao tomada:
+
+- integracoes ficam dentro de `Configuracoes > Integracoes`;
+- provedores iniciais: Hotmart, Ticto, TikTok, Kiwify e Manual;
+- segredos reais nao ficam no browser;
+- eventos externos alimentam adaptadores e entitlements internos.
 
 ## Design
 
@@ -125,6 +155,7 @@ Decisao tomada:
 - a primeira etapa de criacao do CMS cria um item educacional/produto: formacao, curso, mentoria, webinario, produto ou bootcamp. Dentro dele, o produtor monta trilhas/modulos e aulas.
 - cada item educacional pode ter capa, descricao, modelo de acesso `closed` ou `free`, limite de estudantes ilimitado ou numerico, link externo de compra e comportamento do link em mesma aba ou nova aba.
 - o cadastro principal do Catalogo funciona como um construtor em passos: configuracao inicial, modulos e aulas. O produtor pode salvar apenas a configuracao inicial e completar a estrutura depois.
+- todo fluxo de criar ou editar no Catalogo abre em modal central sobre a listagem. Novo item, novo curso, modulo e aula nao devem abrir como pagina separada nem substituir a tela inteira do catalogo.
 - a capa vertical enviada pelo produtor para cards deve usar 720 x 1040 px nesta fase, alinhada ao formato do curso Clones Perfeito 2.0 e aos cards verticais atuais.
 - a hero opcional da pagina propria de curso/produto usa 1920 x 720 px e fica salva em `content_page_settings.hero`, separada da capa vertical do card.
 - itens bloqueados por compra aparecem na vitrine e, ao clicar no card, abrem o modal de detalhes. O modal mostra o CTA de compra externa configurado, sem checkout interno.

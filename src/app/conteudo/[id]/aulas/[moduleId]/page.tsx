@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { LessonExperience } from "@/components/lesson-experience";
 import { MemberFooter } from "@/components/member-footer";
@@ -33,6 +33,10 @@ export default async function LessonPage({ params, searchParams }: LessonPagePro
 
   if (!lessonPageData) {
     notFound();
+  }
+
+  if (lessonPageData.item.isLocked) {
+    redirect("/");
   }
 
   const { allModules, initialLessonReactions, initialLessonWatchStates, item, returnContent, selectedModule } = lessonPageData;

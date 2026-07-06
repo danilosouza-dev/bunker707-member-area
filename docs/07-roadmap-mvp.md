@@ -67,6 +67,9 @@ Entregas:
 - catalogo de produtos e conteudos;
 - construtor de formacoes, cursos internos, modulos e aulas;
 - area `Personalizacao` no CRM com lista inicial de destinos editaveis e editores fieis para login, pagina de produtos, paginas de cursos, estrutura interna e vitrine/home;
+- itens de CRM para Produtos, Combos, Comunidade, Moderacao, Agentes de IA e Configuracoes > Integracoes;
+- CRUD persistido de combos de produtos, com turma padrao `Turma A` quando nenhuma turma for criada;
+- configuracao UI-first de palavras bloqueadas, moderacao de comentarios, integracoes externas e agentes de IA;
 - regras de liberacao por compra, horas, dias, data fixa e atividade dentro do editor de formacoes, cursos, modulos e aulas;
 - entitlements e webhooks externos como camada tecnica/auditavel, nao como item solto da sidebar principal;
 - Supabase Postgres/RLS com seeds alinhadas ao modelo futuro e fallback local apenas para desenvolvimento sem variaveis.
@@ -96,6 +99,8 @@ Entregas:
 - webhook manual/fake para testes;
 - adaptador Hotmart;
 - adaptador Ticto;
+- adaptador TikTok/Kiwify quando entrar no fluxo comercial;
+- mapeamento de provider para produto ou combo interno;
 - idempotencia;
 - logs de eventos;
 - tela de meus acessos.
@@ -117,12 +122,13 @@ Entregas:
 
 Funcionalidades:
 
-- comunidade;
+- comunidade completa;
 - ranking;
 - conversas;
 - certificados;
 - notificacoes;
-- IA da aula;
+- comentarios persistidos com moderacao completa;
+- IA da aula conectada a transcricoes e contexto;
 - dashboard do professor/admin;
 - automacoes de upsell/downsell.
 

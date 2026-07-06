@@ -1,13 +1,13 @@
 "use client";
 
 import { Activity, ShieldCheck } from "lucide-react";
-import { adminMainNavItems } from "@/components/admin/admin-nav";
+import { getAdminNavLabel } from "@/components/admin/admin-nav";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { AdminView } from "@/lib/platform-types";
 
 export function AdminTopbar({ activeView }: { activeView: AdminView }) {
-  const activeLabel = adminMainNavItems.find((item) => item.id === activeView)?.label ?? "CRM Admin";
+  const activeLabel = getAdminNavLabel(activeView);
 
   return (
     <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">

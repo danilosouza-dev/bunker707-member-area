@@ -236,113 +236,152 @@ export function AdminOverview({ data }: { data: AdminDashboardData }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)_minmax(280px,0.72fr)]">
-        <Card className="overflow-hidden border-white/10 bg-[linear-gradient(145deg,rgba(24,24,27,0.96),rgba(8,8,10,0.98))] shadow-2xl shadow-black/30">
-          <CardHeader className="gap-3">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <CardTitle className="text-2xl font-semibold tracking-normal">Performance da escola</CardTitle>
-                <CardDescription>Engajamento, acesso e progresso dos alunos.</CardDescription>
-              </div>
-              <Badge className="border-blue-400/20 bg-blue-500/10 text-blue-200" variant="outline">
-                7 dias
-              </Badge>
-            </div>
-            <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] text-center text-xs text-muted-foreground">
-              <span className="px-3 py-2">24h</span>
-              <span className="border-x border-white/10 px-3 py-2">Semana</span>
-              <span className="bg-white/10 px-3 py-2 font-medium text-foreground">Mes</span>
-            </div>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <ChartContainer className="h-56 aspect-auto" config={engagementChartConfig}>
-              <AreaChart accessibilityLayer data={chartPoints} margin={{ left: 2, right: 8, top: 10 }}>
-                <defs>
-                  <linearGradient id="accessFill" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="5%" stopColor="var(--color-access)" stopOpacity={0.42} />
-                    <stop offset="95%" stopColor="var(--color-access)" stopOpacity={0.02} />
-                  </linearGradient>
-                  <linearGradient id="progressFill" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="5%" stopColor="var(--color-progress)" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="var(--color-progress)" stopOpacity={0.01} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="4 8" vertical={false} />
-                <XAxis axisLine={false} dataKey="label" tickLine={false} />
-                <YAxis axisLine={false} tickLine={false} width={28} />
-                <ChartTooltip content={<ChartTooltipContent indicator="line" />} cursor={false} />
-                <Area
-                  dataKey="access"
-                  fill="url(#accessFill)"
-                  stroke="var(--color-access)"
-                  strokeWidth={2.5}
-                  type="natural"
-                />
-                <Area
-                  dataKey="progress"
-                  fill="url(#progressFill)"
-                  stroke="var(--color-progress)"
-                  strokeWidth={2}
-                  type="natural"
-                />
-              </AreaChart>
-            </ChartContainer>
-
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <div className="text-4xl font-semibold tracking-normal text-foreground">+{averageProgress}%</div>
-                <p className="mt-1 text-sm text-muted-foreground">media de progresso nos produtos ativos</p>
-              </div>
-              <div className="text-right text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">{highEngagementStudents} alunos quentes</p>
-                <p>prontos para proxima trilha</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_50%_0%,rgba(59,130,246,0.22),transparent_38%),linear-gradient(145deg,rgba(24,24,27,0.98),rgba(8,8,10,0.99))] shadow-2xl shadow-black/30">
-          <CardHeader className="gap-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <CardTitle className="text-2xl font-semibold tracking-normal">Painel do produtor</CardTitle>
-                <CardDescription>Visao executiva para conteudo, alunos e acessos.</CardDescription>
-              </div>
-              <Badge className="border-primary/25 bg-primary/15 text-primary" variant="outline">
-                Live CRM
-              </Badge>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <PremiumKpi icon={Users} label="Alunos ativos" value={activeStudents.toString()} />
-              <PremiumKpi icon={ShieldCheck} label="Entitlements" value={activeEntitlements.toString()} />
-              <PremiumKpi icon={BookOpen} label="Conteudos" value={publishedProducts.toString()} />
-            </div>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="relative min-h-52 overflow-hidden rounded-2xl border border-blue-300/10 bg-[linear-gradient(145deg,rgba(29,78,216,0.18),rgba(2,6,23,0.92))] p-5">
-              <div className="absolute -right-16 bottom-[-7.5rem] size-72 rounded-full bg-blue-500/25 blur-3xl" />
-              <div className="absolute right-8 bottom-[-4.5rem] size-48 rounded-full border border-blue-200/15 bg-[radial-gradient(circle,rgba(96,165,250,0.6),rgba(29,78,216,0.06)_64%,transparent_65%)] shadow-2xl shadow-blue-950/70" />
-              <div className="relative flex h-full flex-col justify-between gap-10">
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] xl:items-start">
+        <div className="grid gap-5">
+          <Card className="overflow-hidden border-white/10 bg-[linear-gradient(145deg,rgba(24,24,27,0.96),rgba(8,8,10,0.98))] shadow-2xl shadow-black/30">
+            <CardHeader className="gap-3">
+              <div className="flex items-start justify-between gap-4">
                 <div>
-                  <Badge className="border-blue-300/20 bg-blue-300/10 text-blue-100" variant="outline">
-                    <Sparkles className="size-3.5" />
-                    Insight Bunker
-                  </Badge>
-                  <h2 className="mt-4 max-w-md text-2xl font-semibold tracking-normal text-foreground">
-                    {highEngagementStudents} alunos com alto sinal de compra futura
-                  </h2>
-                  <p className="mt-3 max-w-sm text-sm leading-6 text-blue-100/72">
-                    Priorize ofertas, mentorias e comunicados para quem voltou, progrediu ou concluiu aulas nesta semana.
-                  </p>
+                  <CardTitle className="text-2xl font-semibold tracking-normal">Progresso medio dos alunos</CardTitle>
+                  <CardDescription>Media de progresso nos produtos ativos.</CardDescription>
                 </div>
-                <div className="flex items-center gap-2 text-sm font-medium text-blue-100">
+                <Badge className="border-blue-400/20 bg-blue-500/10 text-blue-200" variant="outline">
+                  7 dias
+                </Badge>
+              </div>
+              <div className="grid grid-cols-3 overflow-hidden rounded-[8px] border border-white/10 bg-white/[0.03] text-center text-xs text-muted-foreground">
+                <span className="px-3 py-2">24h</span>
+                <span className="border-x border-white/10 px-3 py-2">Semana</span>
+                <span className="bg-white/10 px-3 py-2 font-medium text-foreground">Mes</span>
+              </div>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-5">
+              <ChartContainer className="h-48 aspect-auto" config={engagementChartConfig}>
+                <AreaChart accessibilityLayer data={chartPoints} margin={{ left: 2, right: 8, top: 10 }}>
+                  <defs>
+                    <linearGradient id="accessFill" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="5%" stopColor="var(--color-access)" stopOpacity={0.34} />
+                      <stop offset="95%" stopColor="var(--color-access)" stopOpacity={0.02} />
+                    </linearGradient>
+                    <linearGradient id="progressFill" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="5%" stopColor="var(--color-progress)" stopOpacity={0.36} />
+                      <stop offset="95%" stopColor="var(--color-progress)" stopOpacity={0.01} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="4 8" vertical={false} />
+                  <XAxis axisLine={false} dataKey="label" tickLine={false} />
+                  <YAxis axisLine={false} tickLine={false} width={28} />
+                  <ChartTooltip content={<ChartTooltipContent indicator="line" />} cursor={false} />
+                  <Area
+                    dataKey="access"
+                    fill="url(#accessFill)"
+                    stroke="var(--color-access)"
+                    strokeWidth={2}
+                    type="natural"
+                  />
+                  <Area
+                    dataKey="progress"
+                    fill="url(#progressFill)"
+                    stroke="var(--color-progress)"
+                    strokeWidth={2.5}
+                    type="natural"
+                  />
+                </AreaChart>
+              </ChartContainer>
+
+              <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+                <div>
+                  <div className="text-4xl font-semibold tracking-normal text-foreground">+{averageProgress}%</div>
+                  <p className="mt-1 text-sm text-muted-foreground">progresso medio consolidado</p>
+                </div>
+                <div className="rounded-[8px] border border-white/10 bg-white/[0.04] p-3 text-sm text-muted-foreground sm:text-right">
+                  <p className="font-medium text-foreground">{highEngagementStudents} alunos quentes</p>
+                  <p>prontos para proxima trilha</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden border-white/10 bg-[linear-gradient(145deg,rgba(24,24,27,0.98),rgba(8,8,10,0.99))] shadow-2xl shadow-black/30">
+            <CardHeader>
+              <CardTitle className="text-2xl font-semibold tracking-normal">Radar operacional</CardTitle>
+              <CardDescription>O que merece atencao agora.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="rounded-[12px] border border-primary/20 bg-primary/10 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                  <Activity className="size-4" />
+                  Proxima acao recomendada
+                </div>
+                <p className="mt-3 text-lg font-semibold text-foreground">Reengajar alunos com progresso abaixo de 35%</p>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                  Use a tela de alunos para filtrar baixo progresso e enviar suporte ativo.
+                </p>
+              </div>
+
+              <div className="grid gap-3">
+                {recentActivity.map((activity) => (
+                  <div className="flex items-center gap-3 rounded-[10px] border border-white/10 bg-white/[0.03] p-3" key={activity.id}>
+                    <div className="grid size-9 shrink-0 place-items-center rounded-[8px] bg-white/10">
+                      <Clock3 className="size-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">{activity.student}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {activity.action.replaceAll("_", " ")} - {activity.occurredAt}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-5">
+          <Card className="overflow-hidden border-white/10 bg-[linear-gradient(145deg,rgba(24,24,27,0.98),rgba(8,8,10,0.99))] shadow-2xl shadow-black/30">
+            <CardHeader className="gap-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-2xl font-semibold tracking-normal">Painel do produtor</CardTitle>
+                  <CardDescription>Visao executiva para conteudo, alunos e acessos.</CardDescription>
+                </div>
+                <Badge className="border-primary/25 bg-primary/15 text-primary" variant="outline">
+                  Live CRM
+                </Badge>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <PremiumKpi icon={Users} label="Alunos ativos" value={activeStudents.toString()} />
+                <PremiumKpi icon={ShieldCheck} label="Entitlements" value={activeEntitlements.toString()} />
+                <PremiumKpi icon={BookOpen} label="Conteudos" value={publishedProducts.toString()} />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-[12px] border border-blue-300/10 bg-[linear-gradient(145deg,rgba(29,78,216,0.18),rgba(2,6,23,0.92))] p-5">
+                <Badge className="border-blue-300/20 bg-blue-300/10 text-blue-100" variant="outline">
+                  <Sparkles className="size-3.5" />
+                  Insight Bunker
+                </Badge>
+                <h2 className="mt-4 max-w-2xl text-2xl font-semibold tracking-normal text-foreground">
+                  {highEngagementStudents} alunos com alto sinal de compra futura
+                </h2>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-blue-100/72">
+                  Priorize ofertas, mentorias e comunicados para quem voltou, progrediu ou concluiu aulas nesta semana.
+                </p>
+                <div className="mt-6 flex items-center gap-2 text-sm font-medium text-blue-100">
                   Abrir segmentacao
                   <ArrowUpRight className="size-4" />
                 </div>
               </div>
-            </div>
+            </CardContent>
+          </Card>
 
-            <div className="grid content-start gap-3">
+          <Card className="overflow-hidden border-white/10 bg-[linear-gradient(145deg,rgba(24,24,27,0.96),rgba(8,8,10,0.99))] shadow-2xl shadow-black/30">
+            <CardHeader>
+              <CardTitle className="text-2xl font-semibold tracking-normal">Sinais operacionais</CardTitle>
+              <CardDescription>Saude de acesso, retencao e webhooks.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid content-start gap-3">
               <ProducerSignal
                 icon={CircleCheck}
                 label="Acessos saudaveis"
@@ -361,44 +400,9 @@ export function AdminOverview({ data }: { data: AdminDashboardData }) {
                 meta={failedWebhooks > 0 ? `${failedWebhooks} falha para revisar` : "Sem falhas criticas"}
                 value="Eventos externos auditaveis"
               />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden border-white/10 bg-[linear-gradient(145deg,rgba(24,24,27,0.98),rgba(8,8,10,0.99))] shadow-2xl shadow-black/30">
-          <CardHeader>
-            <CardTitle className="text-2xl font-semibold tracking-normal">Radar operacional</CardTitle>
-            <CardDescription>O que merece atencao agora.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="rounded-2xl border border-primary/20 bg-primary/10 p-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-primary">
-                <Activity className="size-4" />
-                Proxima acao recomendada
-              </div>
-              <p className="mt-3 text-lg font-semibold text-foreground">Reengajar alunos com progresso abaixo de 35%</p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Use a tela de alunos para filtrar baixo progresso e enviar suporte ativo.
-              </p>
-            </div>
-
-            <div className="grid gap-3">
-              {recentActivity.map((activity) => (
-                <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3" key={activity.id}>
-                  <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-white/10">
-                    <Clock3 className="size-4 text-muted-foreground" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">{activity.student}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {activity.action.replaceAll("_", " ")} - {activity.occurredAt}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">

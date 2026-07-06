@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, ChevronLeft, ChevronRight, LockKeyhole, Play, ShoppingCart } from "lucide-react";
+import { Bell, ChevronLeft, ChevronRight, Lock, Play, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -120,13 +120,8 @@ function CourseModuleHomeCard({
             style={{ backgroundImage: `url(${module.image})` }}
           />
           {isLocked ? (
-            <div className="absolute inset-0 z-30 flex items-start justify-center bg-black/48 p-3 text-center backdrop-blur-[1px]">
-              <div className="mt-2 w-full rounded-[8px] border border-white/12 bg-black/72 px-2.5 py-3 shadow-2xl shadow-black/40">
-                <LockKeyhole className="mx-auto h-5 w-5 stroke-[2.8] text-white" />
-                <p className="mt-2 text-[11px] font-black leading-tight text-white">
-                  {releaseNotice?.title ?? "Modulo bloqueado"}
-                </p>
-              </div>
+            <div className="absolute right-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white shadow-[0_8px_20px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-[2px] sm:right-2.5 sm:top-2.5 sm:h-8 sm:w-8 md:h-9 md:w-9">
+              <Lock className="h-3.5 w-3.5 stroke-[3] sm:h-4 sm:w-4 md:h-[1.05rem] md:w-[1.05rem]" aria-hidden="true" />
               <span className="sr-only">Modulo bloqueado</span>
             </div>
           ) : null}
@@ -315,6 +310,12 @@ export function CourseModulesHomeSection({
               style={{ backgroundImage: `url(${course.image})` }}
             />
             <div className="absolute inset-0 bg-black/0 transition duration-300 group-hover/course:bg-black/18" />
+            {isCourseLocked ? (
+              <div className="absolute right-1 top-1 z-10 grid h-5 w-5 place-items-center rounded-full bg-black/65 text-white shadow-[0_4px_12px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-[2px] sm:right-1.5 sm:top-1.5 sm:h-6 sm:w-6 lg:h-7 lg:w-7">
+                <Lock className="h-2.5 w-2.5 stroke-[3] sm:h-3 sm:w-3 lg:h-3.5 lg:w-3.5" aria-hidden="true" />
+                <span className="sr-only">Curso bloqueado</span>
+              </div>
+            ) : null}
           </button>
           <div className="min-w-0">
             <p className="text-xs font-medium text-zinc-500">{subtitle ?? "Cursos Online"}</p>
@@ -328,7 +329,7 @@ export function CourseModulesHomeSection({
             ) : null}
             <button
               className={`${cardActionClassName} mt-3 flex-none rounded-[6px] ${courseActionClassName}`}
-              onClick={openCourseAction}
+              onClick={course.isLocked ? openPurchaseUrl : openCourseAction}
               onFocus={prefetchCourseAction}
               onMouseEnter={prefetchCourseAction}
               type="button"

@@ -79,6 +79,9 @@ O repositorio ja possui a base inicial do app:
 - favoritos/minha lista persistidos por aluno para produtos, conteudos e aulas;
 - pagina `Favoritos` em `/favoritos`, acessivel pela sidebar, reunindo tudo que o aluno salvou;
 - CMS/admin em `/admin`, com dashboard, catalogo, estrutura de conteudo, personalizacao, CRM de alunos e turmas; regras de liberacao sao configuradas dentro de formacoes, cursos, modulos e aulas;
+- CRM com navegacao expandida para Produtos, Combos, Comunidade, Moderacao, Agentes de IA e Configuracoes > Integracoes;
+- CRUD persistido de combos de produtos, usando `Turma A` como padrao quando nenhuma turma foi criada;
+- telas UI-first para moderacao de comentarios/palavras bloqueadas, configuracao de integracoes externas e agentes de IA;
 - area de Personalizacao no CRM com lista inicial de vitrine, login, pagina de produtos e produtos/cursos; cada item abre um editor proprio com representacao fiel da pagina final e opcoes laterais de edicao;
 - separacao visual e de navegacao entre area de membros (`/`) e CRM/backoffice (`/admin`), com logos levando para a home correta e atalhos entre as duas experiencias para usuarios admin;
 - fluxo inicial de criacao no CMS para formacoes, cursos, mentorias, webinarios, produtos e bootcamps, com capa, acesso gratuito/fechado, limite de estudantes, link externo de compra e regras de entrega por data ou por dias apos inscricao;
@@ -89,7 +92,7 @@ O repositorio ja possui a base inicial do app:
 - Supabase Postgres/RLS como persistencia primaria, com fallback local em `.data/bunker707-platform.json` apenas quando as variaveis Supabase nao estao configuradas no ambiente de desenvolvimento.
 - quando Supabase esta configurado, a base real nao recebe seed/demo automaticamente; cursos, formacoes, modulos, turmas, alunos, aulas e progresso entram por cadastros persistidos e APIs server-side.
 
-Sem as variaveis Supabase em desenvolvimento, a tela de login mostra `Entrar em modo local` para permitir navegacao no MVP. Esse modo usa cookie local httpOnly, funciona apenas fora de producao e nao substitui Supabase Auth em ambiente real.
+Sem as variaveis Supabase em desenvolvimento, a tela de login mostra `Entrar em modo local` para permitir navegacao no MVP. Em `localhost`, esse modo tambem fica disponivel quando Supabase esta configurado mas inacessivel durante o desenvolvimento. Ele usa cookie local httpOnly, funciona apenas fora de producao e nao substitui Supabase Auth em ambiente real.
 
 O proximo passo natural e aplicar as migrations no projeto Supabase, popular `admin_roles` para os usuarios internos e evoluir a camada de entitlements/webhooks que libera acesso a partir das vendas externas.
 

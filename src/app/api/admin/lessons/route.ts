@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiAdmin } from "@/server/auth/guards";
 import { upsertLesson } from "@/server/db/platform-store";
+import { jsonRouteError } from "@/server/http/route-errors";
 import type { LessonWriteInput } from "@/server/db/platform-store";
 import type { AdminReleaseRule } from "@/lib/platform-types";
 
@@ -23,18 +24,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Modulo e titulo da aula sao obrigatorios." }, { status: 400 });
   }
 
-  const data = await upsertLesson({
-    ...payload,
-    releaseRule: payload.releaseMode
-      ? {
-          delayUnit: payload.releaseDelayUnit,
-          delayValue: payload.releaseDelayValue,
-          fixedDate: payload.releaseFixedDate,
-          mode: payload.releaseMode,
-          requirement: payload.releaseRequirement
-        }
-      : payload.releaseRule
-  } as LessonWriteInput);
+  try {
+    const data = await upsertLesson({
+      ...payload,
+      releaseRule: payload.releaseMode
+        ? {
+            delayUnit: payload.releaseDelayUnit,
+            delayValue: payload.releaseDelayValue,
+            fixedDate: payload.releaseFixedDate,
+            mode: payload.releaseMode,
+            requirement: payload.releaseRequirement
+          }
+        : payload.releaseRule
+    } as LessonWriteInput);
 
-  return NextResponse.json({ data });
+    return NextResponse.json({ data });
+  } catch (error) {
+    return jsonRouteError(error, "Nao foi possivel salvar a aula.");
+  }
 }

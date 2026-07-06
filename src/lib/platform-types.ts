@@ -211,7 +211,17 @@ export type ContentPageSettings = {
 };
 
 export type AdminContentAccess = "Liberado" | "Bloqueado" | "Drip" | "Em breve";
-export type AdminView = "overview" | "students" | "catalog" | "structure" | "personalization";
+export type AdminView =
+  | "overview"
+  | "students"
+  | "catalog"
+  | "combos"
+  | "structure"
+  | "community"
+  | "moderation"
+  | "ai-agents"
+  | "personalization"
+  | "integrations";
 export type ReleaseRuleMode =
   | "immediate"
   | "after_enrollment"
@@ -357,9 +367,77 @@ export type AdminPipelineItem = {
   tone: string;
 };
 
+export type AdminProductComboStatus = "active" | "draft" | "paused";
+
+export type AdminProductCombo = {
+  cohortName: string;
+  createdAt: string;
+  description: string;
+  id: string;
+  name: string;
+  productIds: string[];
+  studentsCount: number;
+  status: AdminProductComboStatus;
+  updatedAt?: string;
+};
+
+export type AdminCommentStatus = "pending" | "approved" | "hidden" | "spam";
+export type AdminCommentKind = "comment" | "reply";
+
+export type AdminModerationItem = {
+  authorName: string;
+  body: string;
+  createdAt: string;
+  id: string;
+  kind: AdminCommentKind;
+  lessonTitle: string;
+  parentAuthorName?: string;
+  productId: string;
+  productTitle: string;
+  status: AdminCommentStatus;
+};
+
+export type AdminBlockedWordRule = {
+  active: boolean;
+  id: string;
+  message: string;
+  word: string;
+};
+
+export type AdminIntegrationProvider = "Hotmart" | "Ticto" | "TikTok" | "Kiwify" | "Manual";
+export type AdminIntegrationStatus = "not_configured" | "configured" | "needs_attention";
+
+export type AdminIntegrationSetting = {
+  events: string[];
+  id: string;
+  lastSyncAt?: string;
+  provider: AdminIntegrationProvider;
+  secretStatus: "missing" | "saved";
+  status: AdminIntegrationStatus;
+  webhookUrl: string;
+};
+
+export type AdminAIAgentScope = "comments" | "lesson_tutor" | "global_assistant" | "home_chat";
+export type AdminAIAgentStatus = "draft" | "training" | "active" | "paused";
+
+export type AdminAIAgent = {
+  autoReply: boolean;
+  id: string;
+  instructions: string;
+  lastTrainedAt?: string;
+  name: string;
+  productIds: string[];
+  scope: AdminAIAgentScope;
+  status: AdminAIAgentStatus;
+  trainingSources: string[];
+};
+
 export type AdminDashboardData = {
+  aiAgents: AdminAIAgent[];
+  blockedWordRules: AdminBlockedWordRule[];
   chartPoints: AdminChartPoint[];
   cohorts: string[];
+  combos: AdminProductCombo[];
   contentRecords: AdminContentRecord[];
   courseModules: CourseModule[];
   entitlements: AdminEntitlement[];
@@ -367,7 +445,9 @@ export type AdminDashboardData = {
   hero: HomeHeroConfig;
   homeRows: HomeRow[];
   homeSections: AdminHomeSection[];
+  integrations: AdminIntegrationSetting[];
   metrics: AdminMetric[];
+  moderationItems: AdminModerationItem[];
   pipeline: AdminPipelineItem[];
   persistenceProvider: "local_fallback" | "supabase";
   releaseRules: AdminReleaseRule[];

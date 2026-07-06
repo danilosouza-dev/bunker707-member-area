@@ -18,7 +18,7 @@ export function AdminShell({
   return (
     <SidebarProvider defaultOpen={false}>
       <AdminSidebar activeView={activeView} onChangeView={onChangeView} />
-      <SidebarInset className="min-h-screen bg-background">
+      <SidebarInset className="min-h-screen w-0 min-w-0 overflow-x-hidden bg-background">
         <AdminTopbar activeView={activeView} />
         <div className="flex-1 p-4 md:p-6">{children}</div>
       </SidebarInset>

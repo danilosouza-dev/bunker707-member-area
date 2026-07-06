@@ -66,12 +66,12 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const needsUser = isProtectedPage(pathname);
   const publicPage = isPublicPage(pathname);
+  const authConfigured = hasAuthConfig();
+  const localAuthEnabled = isLocalAuthEnabled(authConfigured, request.nextUrl.hostname);
+  const hasLocalSession = localAuthEnabled &&
+    request.cookies.get(localAuthCookieName)?.value === localAuthCookieValue;
 
-  if (!hasAuthConfig()) {
-    const localAuthEnabled = isLocalAuthEnabled(false, request.nextUrl.hostname);
-    const hasLocalSession = localAuthEnabled &&
-      request.cookies.get(localAuthCookieName)?.value === localAuthCookieValue;
-
+  if (hasLocalSession) {
     if (publicPage && hasLocalSession) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = getSafeRedirectPath(request.nextUrl.searchParams.get("next"));
@@ -82,7 +82,9 @@ export async function middleware(request: NextRequest) {
     if (needsUser && hasLocalSession) {
       return NextResponse.next();
     }
+  }
 
+  if (!authConfigured) {
     return needsUser ? redirectToLogin(request) : NextResponse.next();
   }
 
@@ -105,7 +107,10 @@ export async function middleware(request: NextRequest) {
     }
   });
 
-  const { data, error } = await supabase.auth.getUser();
+  const { data, error } = await supabase.auth.getUser().catch(() => ({
+    data: { user: null },
+    error: new Error("Auth fetch failed")
+  }));
   const user = error ? null : data.user;
 
   if (needsUser && !user) {
@@ -123,13 +128,20 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(redirectUrl);
     }
 
-    const adminRoleResult = safeRedirectPath === "/alterar-senha"
-      ? { data: null }
-      : await supabase
-        .from("admin_roles")
-        .select("role")
-        .eq("user_id", user.id)
-        .maybeSingle();
+    let adminRoleResult: { data: { role?: unknown } | null } = { data: null };
+
+    if (safeRedirectPath !== "/alterar-senha") {
+      try {
+        adminRoleResult = await supabase
+          .from("admin_roles")
+          .select("role")
+          .eq("user_id", user.id)
+          .maybeSingle();
+      } catch {
+        adminRoleResult = { data: null };
+      }
+    }
+
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = adminRoleResult.data?.role ? "/admin" : safeRedirectPath;
     redirectUrl.search = "";

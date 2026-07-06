@@ -11,14 +11,20 @@ import {
 } from "@/server/db/admin-seed";
 import type { AuthenticatedUser } from "@/server/auth/session";
 import { getAdminRoleForUser, getUserDisplayName } from "@/server/auth/session";
+import { getLocalAuthenticatedUser } from "@/server/auth/local";
 import { getSupabaseAdminClient, hasSupabaseConfig } from "@/server/db/supabase/client";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedItemKey, getSavedTargetTypeForContentKind, savedItemCollectionLabel } from "@/lib/saved-items";
 import type {
+  AdminAIAgent,
+  AdminBlockedWordRule,
+  AdminIntegrationSetting,
   AdminContentAccess,
   AdminDashboardData,
   AdminEntitlementStatus,
+  AdminModerationItem,
+  AdminProductCombo,
   AdminSellableProduct,
   AdminSourceProvider,
   ContentAccessModel,
@@ -81,9 +87,12 @@ type AccessEntitlementRecord = {
 
 type PlatformDatabase = {
   accessEntitlements: AccessEntitlementRecord[];
+  aiAgents: AdminAIAgent[];
+  blockedWordRules: AdminBlockedWordRule[];
   bootcamps: ContentItem[];
   chartPoints: AdminDashboardData["chartPoints"];
   cohorts: string[];
+  combos: AdminProductCombo[];
   contentPageSettings: Record<string, ContentPageSettings>;
   continueWatching: ContentItem[];
   courseModules: CourseModule[];
@@ -92,8 +101,10 @@ type PlatformDatabase = {
   formationInternalCourses: ContentItem[];
   formations: ContentItem[];
   hero: HomeHeroConfig;
+  integrations: AdminIntegrationSetting[];
   lessonProgress: LessonProgressRecord[];
   metrics: AdminDashboardData["metrics"];
+  moderationItems: AdminModerationItem[];
   pipeline: AdminDashboardData["pipeline"];
   recentLessons: ContentItem[];
   releaseRules: AdminDashboardData["releaseRules"];
@@ -243,6 +254,23 @@ type AccessEntitlementRow = {
   user_id: string;
 };
 
+type ProductComboRow = {
+  cohort_name: string;
+  created_at: string;
+  description: string;
+  id: string;
+  name: string;
+  status: AdminProductCombo["status"];
+  students_count: number;
+  updated_at: string;
+};
+
+type ProductComboItemRow = {
+  combo_id: string;
+  product_id: string;
+  sort_order: number;
+};
+
 type LessonProgressExtrasRecord = {
   contentId: string;
   lessonReactions?: Partial<Record<string, LessonReaction>>;
@@ -296,6 +324,15 @@ export type LessonWriteInput = {
   video?: LessonVideoConfig | null;
 };
 
+export type ProductComboWriteInput = {
+  cohortName?: string;
+  description?: string;
+  id?: string;
+  name: string;
+  productIds: string[];
+  status?: AdminProductCombo["status"];
+};
+
 const dataDirectory = path.join(process.cwd(), ".data");
 const databasePath = path.join(dataDirectory, "bunker707-platform.json");
 const defaultHero: HomeHeroConfig = {
@@ -312,6 +349,7 @@ const defaultStudent: PlatformStudent = {
   fullName: "Aluno Bunker707",
   name: "Aluno"
 };
+const defaultCohortName = "Turma A";
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -320,6 +358,8 @@ function cloneJson<T>(value: T): T {
 function makeEmptyDatabase(): PlatformDatabase {
   return {
     accessEntitlements: [],
+    aiAgents: [],
+    blockedWordRules: [],
     bootcamps: [],
     chartPoints: cloneJson(adminChartPoints).map((point) => ({
       ...point,
@@ -328,6 +368,7 @@ function makeEmptyDatabase(): PlatformDatabase {
       revenueEvents: 0
     })),
     cohorts: [],
+    combos: [],
     contentPageSettings: {},
     continueWatching: [],
     courseModules: [],
@@ -336,12 +377,14 @@ function makeEmptyDatabase(): PlatformDatabase {
     formationInternalCourses: [],
     formations: [],
     hero: cloneJson(defaultHero),
+    integrations: [],
     lessonProgress: [],
     metrics: cloneJson(adminMetrics).map((metric) => ({
       ...metric,
       delta: "Sem dados ainda",
       value: "0"
     })),
+    moderationItems: [],
     pipeline: cloneJson(adminPipeline).map((item) => ({
       ...item,
       count: 0
@@ -507,6 +550,44 @@ function savedItemRowToRecord(row: SavedItemRow): SavedItemRecord {
   };
 }
 
+function comboToRow(combo: AdminProductCombo): ProductComboRow {
+  return {
+    cohort_name: combo.cohortName || defaultCohortName,
+    created_at: combo.createdAt,
+    description: combo.description,
+    id: combo.id,
+    name: combo.name,
+    status: combo.status,
+    students_count: combo.studentsCount,
+    updated_at: combo.updatedAt ?? combo.createdAt
+  };
+}
+
+function comboItemRows(combo: AdminProductCombo): ProductComboItemRow[] {
+  return combo.productIds.map((productId, index) => ({
+    combo_id: combo.id,
+    product_id: productId,
+    sort_order: index
+  }));
+}
+
+function comboRowsToCombos(comboRows: ProductComboRow[], itemRows: ProductComboItemRow[]): AdminProductCombo[] {
+  return comboRows.map((row) => ({
+    cohortName: row.cohort_name || defaultCohortName,
+    createdAt: row.created_at,
+    description: row.description,
+    id: row.id,
+    name: row.name,
+    productIds: itemRows
+      .filter((item) => item.combo_id === row.id)
+      .sort((left, right) => left.sort_order - right.sort_order)
+      .map((item) => item.product_id),
+    status: row.status,
+    studentsCount: row.students_count,
+    updatedAt: row.updated_at
+  }));
+}
+
 function studentToRow(studentRecord: AdminStudent): StudentRow {
   return {
     access_count: studentRecord.accessCount ?? 0,
@@ -617,9 +698,13 @@ function studentRowsToStudents(
 
 function settingsRows(database: PlatformDatabase) {
   return [
+    { key: "aiAgents", value: database.aiAgents },
+    { key: "blockedWordRules", value: database.blockedWordRules },
     { key: "hero", value: database.hero },
+    { key: "integrations", value: database.integrations },
     { key: "student", value: database.student },
     { key: "metrics", value: database.metrics },
+    { key: "moderationItems", value: database.moderationItems },
     { key: "chartPoints", value: database.chartPoints },
     { key: "pipeline", value: database.pipeline },
     { key: "releaseRules", value: database.releaseRules },
@@ -757,9 +842,12 @@ function normalizeDatabase(database: Partial<PlatformDatabase>): PlatformDatabas
     ...emptyDatabase,
     ...database,
     accessEntitlements: database.accessEntitlements ?? emptyDatabase.accessEntitlements,
+    aiAgents: database.aiAgents ?? emptyDatabase.aiAgents,
+    blockedWordRules: database.blockedWordRules ?? emptyDatabase.blockedWordRules,
     bootcamps: database.bootcamps ?? emptyDatabase.bootcamps,
     chartPoints: database.chartPoints ?? emptyDatabase.chartPoints,
     cohorts: database.cohorts ?? emptyDatabase.cohorts,
+    combos: database.combos ?? emptyDatabase.combos,
     contentPageSettings: database.contentPageSettings ?? emptyDatabase.contentPageSettings,
     continueWatching: database.continueWatching ?? emptyDatabase.continueWatching,
     courseModules: database.courseModules ?? emptyDatabase.courseModules,
@@ -768,6 +856,7 @@ function normalizeDatabase(database: Partial<PlatformDatabase>): PlatformDatabas
     formationInternalCourses: database.formationInternalCourses ?? emptyDatabase.formationInternalCourses,
     formations: database.formations ?? emptyDatabase.formations,
     hero: database.hero ?? emptyDatabase.hero,
+    integrations: database.integrations ?? emptyDatabase.integrations,
     lessonProgress: (database.lessonProgress ?? emptyDatabase.lessonProgress).map((record) => ({
       ...record,
       completedLessonIds: record.completedLessonIds ?? [],
@@ -775,6 +864,7 @@ function normalizeDatabase(database: Partial<PlatformDatabase>): PlatformDatabas
       lessonWatchStates: normalizeLessonWatchStates(record.lessonWatchStates)
     })),
     metrics: database.metrics ?? emptyDatabase.metrics,
+    moderationItems: database.moderationItems ?? emptyDatabase.moderationItems,
     pipeline: database.pipeline ?? emptyDatabase.pipeline,
     recentLessons: database.recentLessons ?? emptyDatabase.recentLessons,
     releaseRules: database.releaseRules ?? emptyDatabase.releaseRules,
@@ -788,12 +878,56 @@ function normalizeDatabase(database: Partial<PlatformDatabase>): PlatformDatabas
   };
 }
 
+function getSupabaseErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : JSON.stringify(error);
+  return message;
+}
+
+function getSupabaseErrorCode(error: unknown) {
+  return typeof error === "object" && error && "code" in error ? error.code : null;
+}
+
+async function shouldUseLocalFallbackDatabase() {
+  if (!hasSupabaseConfig()) {
+    return true;
+  }
+
+  try {
+    return Boolean(await getLocalAuthenticatedUser());
+  } catch {
+    return false;
+  }
+}
+
+async function shouldUseSupabaseDatabase() {
+  return hasSupabaseConfig() && !(await shouldUseLocalFallbackDatabase());
+}
+
+async function getPlatformPersistenceProvider(): Promise<AdminDashboardData["persistenceProvider"]> {
+  return (await shouldUseSupabaseDatabase()) ? "supabase" : "local_fallback";
+}
+
+function isMissingSupabaseSchemaObjectError(error: unknown) {
+  const code = getSupabaseErrorCode(error);
+  const message = getSupabaseErrorMessage(error);
+
+  return (
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST204" ||
+    code === "PGRST205" ||
+    message.includes("does not exist") ||
+    message.includes("Could not find") ||
+    message.includes("schema cache")
+  );
+}
+
 async function throwIfSupabaseError(error: unknown, context: string) {
   if (!error) {
     return;
   }
 
-  const message = error instanceof Error ? error.message : JSON.stringify(error);
+  const message = getSupabaseErrorMessage(error);
   throw new Error(`${context}. Confirme se a migration Supabase foi aplicada. Detalhe: ${message}`);
 }
 
@@ -828,15 +962,39 @@ async function hasSupabaseColumn(
     return true;
   }
 
-  const message = error instanceof Error ? error.message : JSON.stringify(error);
-  const code = typeof error === "object" && error && "code" in error ? error.code : null;
-
-  if (code === "42703" || code === "PGRST204" || message.includes("does not exist") || message.includes("Could not find")) {
+  if (isMissingSupabaseSchemaObjectError(error)) {
     return false;
   }
 
   await throwIfSupabaseError(error, `Erro verificando coluna ${table}.${column}`);
   return false;
+}
+
+async function hasSupabaseTable(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  table: string
+) {
+  const { error } = await supabase.from(table).select("*").limit(1);
+
+  if (!error) {
+    return true;
+  }
+
+  if (isMissingSupabaseSchemaObjectError(error)) {
+    return false;
+  }
+
+  await throwIfSupabaseError(error, `Erro verificando tabela ${table}`);
+  return false;
+}
+
+async function hasProductComboTables(supabase: ReturnType<typeof getSupabaseAdminClient>) {
+  const [hasCombosTable, hasComboItemsTable] = await Promise.all([
+    hasSupabaseTable(supabase, "product_combos"),
+    hasSupabaseTable(supabase, "product_combo_items")
+  ]);
+
+  return hasCombosTable && hasComboItemsTable;
 }
 
 async function getLessonProgressColumnSupport(supabase: ReturnType<typeof getSupabaseAdminClient>) {
@@ -875,6 +1033,18 @@ async function deleteMissingRows(
   await throwIfSupabaseError(error, context);
 }
 
+async function deleteComboItemsForCombos(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  comboIds: string[]
+) {
+  if (comboIds.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.from("product_combo_items").delete().in("combo_id", comboIds);
+  await throwIfSupabaseError(error, "Erro removendo itens antigos dos combos");
+}
+
 async function writeSupabaseDatabase(database: PlatformDatabase) {
   const supabase = getSupabaseAdminClient();
   const nextDatabase = {
@@ -910,6 +1080,9 @@ async function writeSupabaseDatabase(database: PlatformDatabase) {
     user_id: record.userId
   }));
   const savedItemRows = nextDatabase.savedItems.map(savedItemToRow);
+  const comboRows = nextDatabase.combos.map(comboToRow);
+  const comboItemRowsData = nextDatabase.combos.flatMap(comboItemRows);
+  const productComboTablesAvailable = await hasProductComboTables(supabase);
   const platformSettingRows = settingsRows(nextDatabase);
 
   await upsertRows(supabase, "content_items", contentRows, "id", "Erro sincronizando content_items");
@@ -928,12 +1101,26 @@ async function writeSupabaseDatabase(database: PlatformDatabase) {
   await upsertRows(supabase, "student_access_logs", accessLogRows, "id", "Erro sincronizando student_access_logs");
   await upsertRows(supabase, "lesson_progress", progressRows, "user_id,content_id", "Erro sincronizando lesson_progress");
   await upsertRows(supabase, "saved_items", savedItemRows, "id", "Erro sincronizando saved_items");
+  if (productComboTablesAvailable) {
+    await upsertRows(supabase, "product_combos", comboRows, "id", "Erro sincronizando product_combos");
+    await deleteComboItemsForCombos(supabase, comboRows.map((row) => row.id));
+    await upsertRows(supabase, "product_combo_items", comboItemRowsData, "combo_id,product_id", "Erro sincronizando product_combo_items");
+  } else if (comboRows.length > 0 || comboItemRowsData.length > 0) {
+    throw new Error(
+      "Para criar ou editar combos, aplique a migration Supabase supabase/migrations/202606190001_product_combos.sql."
+    );
+  }
+
   await upsertRows(supabase, "platform_settings", platformSettingRows, "key", "Erro sincronizando platform_settings");
 
   await deleteMissingRows(supabase, "student_access_logs", "id", accessLogRows.map((row) => row.id), "Erro removendo historicos antigos");
   await deleteMissingRows(supabase, "student_courses", "id", studentCourseRows.map((row) => row.id), "Erro removendo acessos antigos");
   await deleteMissingRows(supabase, "students", "id", studentRows.map((row) => row.id), "Erro removendo alunos antigos");
   await deleteMissingRows(supabase, "saved_items", "id", savedItemRows.map((row) => row.id), "Erro removendo favoritos antigos");
+  if (productComboTablesAvailable) {
+    await deleteMissingRows(supabase, "product_combos", "id", comboRows.map((row) => row.id), "Erro removendo combos antigos");
+  }
+
   await deleteMissingRows(
     supabase,
     "content_page_settings",
@@ -960,6 +1147,8 @@ async function readSupabaseDatabase() {
     accessLogsResult,
     progressResult,
     savedItemsResult,
+    productCombosResult,
+    productComboItemsResult,
     accessEntitlementsResult,
     settingsResult
   ] = await Promise.all([
@@ -973,6 +1162,8 @@ async function readSupabaseDatabase() {
     supabase.from("student_access_logs").select("*").order("created_at", { ascending: true }),
     supabase.from("lesson_progress").select("*"),
     supabase.from("saved_items").select("*").order("created_at", { ascending: true }),
+    supabase.from("product_combos").select("*").order("created_at", { ascending: true }),
+    supabase.from("product_combo_items").select("*").order("sort_order", { ascending: true }),
     supabase.from("entitlements").select("user_id,target_type,target_id,status,starts_at,ends_at"),
     supabase.from("platform_settings").select("*")
   ]);
@@ -992,6 +1183,19 @@ async function readSupabaseDatabase() {
     [settingsResult, "Erro lendo platform_settings"]
   ] as const) {
     await throwIfSupabaseError(result.error, context);
+  }
+
+  const productComboTablesAvailable = !productCombosResult.error && !productComboItemsResult.error;
+
+  if (!productComboTablesAvailable) {
+    for (const [result, context] of [
+      [productCombosResult, "Erro lendo product_combos"],
+      [productComboItemsResult, "Erro lendo product_combo_items"]
+    ] as const) {
+      if (result.error && !isMissingSupabaseSchemaObjectError(result.error)) {
+        await throwIfSupabaseError(result.error, context);
+      }
+    }
   }
 
   const contentRows = (contentItemsResult.data ?? []) as ContentItemRow[];
@@ -1021,9 +1225,17 @@ async function readSupabaseDatabase() {
       targetType: row.target_type,
       userId: row.user_id
     })),
+    aiAgents: (settingsMap.get("aiAgents") as PlatformDatabase["aiAgents"] | undefined) ?? [],
+    blockedWordRules: (settingsMap.get("blockedWordRules") as PlatformDatabase["blockedWordRules"] | undefined) ?? [],
     bootcamps: itemsByBucket("bootcamps"),
     chartPoints: (settingsMap.get("chartPoints") as PlatformDatabase["chartPoints"] | undefined) ?? [],
     cohorts: ((cohortsResult.data ?? []) as Array<{ name: string }>).map((cohort) => cohort.name),
+    combos: productComboTablesAvailable
+      ? comboRowsToCombos(
+        (productCombosResult.data ?? []) as ProductComboRow[],
+        (productComboItemsResult.data ?? []) as ProductComboItemRow[]
+      )
+      : [],
     contentPageSettings: contentPageSettingsMap,
     continueWatching: itemsByBucket("continue_watching"),
     courseModules: ((modulesResult.data ?? []) as CourseModuleRow[]).map((row) => moduleRowToModule(row, lessonRows)),
@@ -1032,6 +1244,7 @@ async function readSupabaseDatabase() {
     formationInternalCourses: itemsByBucket("formation_internal_courses"),
     formations: itemsByBucket("formations"),
     hero: (settingsMap.get("hero") as HomeHeroConfig | undefined) ?? defaultHero,
+    integrations: (settingsMap.get("integrations") as PlatformDatabase["integrations"] | undefined) ?? [],
     lessonProgress: ((progressResult.data ?? []) as LessonProgressRow[]).map((row) => {
       const extras = lessonProgressExtras.get(getLessonProgressExtrasKey(row.user_id, row.content_id));
 
@@ -1045,6 +1258,7 @@ async function readSupabaseDatabase() {
       };
     }),
     metrics: (settingsMap.get("metrics") as PlatformDatabase["metrics"] | undefined) ?? [],
+    moderationItems: (settingsMap.get("moderationItems") as PlatformDatabase["moderationItems"] | undefined) ?? [],
     pipeline: (settingsMap.get("pipeline") as PlatformDatabase["pipeline"] | undefined) ?? [],
     recentLessons: itemsByBucket("recent_lessons"),
     releaseRules: (settingsMap.get("releaseRules") as PlatformDatabase["releaseRules"] | undefined) ?? [],
@@ -1063,7 +1277,7 @@ async function readSupabaseDatabase() {
 }
 
 async function writeDatabase(database: PlatformDatabase) {
-  if (hasSupabaseConfig()) {
+  if (await shouldUseSupabaseDatabase()) {
     return writeSupabaseDatabase(database);
   }
 
@@ -1081,7 +1295,7 @@ async function writeDatabase(database: PlatformDatabase) {
 async function readDatabase() {
   noStore();
 
-  if (hasSupabaseConfig()) {
+  if (await shouldUseSupabaseDatabase()) {
     return readSupabaseDatabase();
   }
 
@@ -1871,14 +2085,24 @@ function getAdminHomeSections(database: PlatformDatabase) {
   }));
 }
 
-function toAdminDashboardData(database: PlatformDatabase): AdminDashboardData {
+function getEffectiveCohorts(database: PlatformDatabase) {
+  return database.cohorts.length > 0 ? database.cohorts : [defaultCohortName];
+}
+
+function toAdminDashboardData(
+  database: PlatformDatabase,
+  persistenceProvider: AdminDashboardData["persistenceProvider"]
+): AdminDashboardData {
   const homeRows = getHomeRows(database).filter((row) => (
     row.variant === "course_modules" ? (row.modules?.length ?? 0) > 0 : row.items.length > 0
   ));
 
   return {
+    aiAgents: database.aiAgents,
+    blockedWordRules: database.blockedWordRules,
     chartPoints: database.chartPoints,
-    cohorts: database.cohorts,
+    cohorts: getEffectiveCohorts(database),
+    combos: database.combos,
     contentRecords: getAdminRecords(database),
     courseModules: database.courseModules,
     entitlements: database.entitlements,
@@ -1886,9 +2110,11 @@ function toAdminDashboardData(database: PlatformDatabase): AdminDashboardData {
     hero: database.hero,
     homeRows,
     homeSections: getAdminHomeSections(database),
+    integrations: database.integrations,
     metrics: database.metrics,
+    moderationItems: database.moderationItems,
     pipeline: database.pipeline,
-    persistenceProvider: hasSupabaseConfig() ? "supabase" : "local_fallback",
+    persistenceProvider,
     releaseRules: database.releaseRules,
     sellableProducts: getSellableProducts(database),
     students: database.students,
@@ -1987,6 +2213,43 @@ function normalizeContentInput(input: ContentWriteInput): ContentItem {
     releaseRule: input.releaseRule,
     status: input.status ?? (accessModel === "free" ? "Liberado" : isLocked ? "Bloqueado" : "Novo"),
     title: input.title
+  };
+}
+
+function normalizeProductComboInput(
+  database: PlatformDatabase,
+  input: ProductComboWriteInput
+): AdminProductCombo {
+  const name = input.name.trim();
+
+  if (!name) {
+    throw new Error("Nome do combo e obrigatorio.");
+  }
+
+  const sellableProductIds = new Set(getSellableItems(database).map((item) => item.id));
+  const productIds = Array.from(new Set(input.productIds ?? []))
+    .map((productId) => productId.trim())
+    .filter((productId) => sellableProductIds.has(productId));
+
+  if (productIds.length === 0) {
+    throw new Error("Selecione pelo menos um produto valido para o combo.");
+  }
+
+  const existingCombo = input.id
+    ? database.combos.find((combo) => combo.id === input.id)
+    : undefined;
+  const createdAt = existingCombo?.createdAt ?? new Date().toISOString();
+
+  return {
+    cohortName: input.cohortName?.trim() || existingCombo?.cohortName || defaultCohortName,
+    createdAt,
+    description: input.description?.trim() ?? existingCombo?.description ?? "",
+    id: existingCombo?.id ?? input.id ?? makeId("combo", name),
+    name,
+    productIds,
+    status: input.status ?? existingCombo?.status ?? "draft",
+    studentsCount: existingCombo?.studentsCount ?? 0,
+    updatedAt: new Date().toISOString()
   };
 }
 
@@ -2225,7 +2488,7 @@ export async function getLessonPageData(
 
 export async function getAdminDashboardData() {
   const database = await readDatabase();
-  return toAdminDashboardData(database);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
 }
 
 async function getSupabaseUserIdsByEmail(
@@ -2265,6 +2528,79 @@ async function getSupabaseUserIdsByEmail(
   return userIdsByEmail;
 }
 
+function getAdminStudentEntitlementSourceEventId(studentRecord: AdminStudent, course: AdminStudentCourse) {
+  return `admin-student:${studentRecord.id}:${course.id ?? course.targetId}`;
+}
+
+function getAdminStudentEntitlementGrants(
+  students: AdminStudent[],
+  userIdsByEmail: Map<string, string>
+) {
+  return students.flatMap((studentRecord) => {
+    const userId = userIdsByEmail.get(studentRecord.email.trim().toLowerCase());
+
+    if (!userId) {
+      return [];
+    }
+
+    return studentRecord.courses.flatMap((course) => {
+      if (!course.targetId || !course.targetType) {
+        return [];
+      }
+
+      return [{
+        key: `${userId}:${getAdminStudentEntitlementSourceEventId(studentRecord, course)}`,
+        sourceEventId: getAdminStudentEntitlementSourceEventId(studentRecord, course),
+        userId
+      }];
+    });
+  });
+}
+
+async function revokeStaleSupabaseEntitlementsForStudents(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  userIdsByEmail: Map<string, string>,
+  previousStudents: AdminStudent[],
+  nextStudents: AdminStudent[]
+) {
+  const previousGrants = getAdminStudentEntitlementGrants(previousStudents, userIdsByEmail);
+
+  if (previousGrants.length === 0) {
+    return;
+  }
+
+  const nextGrantKeys = new Set(getAdminStudentEntitlementGrants(nextStudents, userIdsByEmail).map((grant) => grant.key));
+  const staleGrants = previousGrants.filter((grant) => (
+    !nextGrantKeys.has(grant.key)
+  ));
+
+  if (staleGrants.length === 0) {
+    return;
+  }
+
+  const staleSourceEventIdsByUserId = new Map<string, string[]>();
+
+  for (const grant of staleGrants) {
+    staleSourceEventIdsByUserId.set(grant.userId, [
+      ...(staleSourceEventIdsByUserId.get(grant.userId) ?? []),
+      grant.sourceEventId
+    ]);
+  }
+
+  for (const [userId, sourceEventIds] of staleSourceEventIdsByUserId.entries()) {
+    const { error } = await supabase
+      .from("entitlements")
+      .update({
+        ends_at: new Date().toISOString(),
+        status: "revoked"
+      })
+      .eq("user_id", userId)
+      .in("source_event_id", sourceEventIds);
+
+    await throwIfSupabaseError(error, "Erro revogando entitlements removidos do aluno");
+  }
+}
+
 async function upsertSupabaseEntitlementForStudentCourse(
   supabase: ReturnType<typeof getSupabaseAdminClient>,
   userId: string,
@@ -2278,7 +2614,7 @@ async function upsertSupabaseEntitlementForStudentCourse(
   const entitlementRow = {
     ends_at: accessDateValueToIso(course.endsAt),
     product_id: course.targetId,
-    source_event_id: `admin-student:${studentRecord.id}:${course.id ?? course.targetId}`,
+    source_event_id: getAdminStudentEntitlementSourceEventId(studentRecord, course),
     source_provider: normalizeEntitlementSourceProvider(course.sourceProvider ?? studentRecord.sourceProvider),
     starts_at: accessDateValueToIso(course.startsAt) ?? new Date().toISOString(),
     status: course.status,
@@ -2290,8 +2626,7 @@ async function upsertSupabaseEntitlementForStudentCourse(
     .from("entitlements")
     .select("id")
     .eq("user_id", userId)
-    .eq("target_type", course.targetType)
-    .eq("target_id", course.targetId)
+    .eq("source_event_id", entitlementRow.source_event_id)
     .limit(1)
     .maybeSingle();
 
@@ -2304,16 +2639,18 @@ async function upsertSupabaseEntitlementForStudentCourse(
   await throwIfSupabaseError(writeResult.error, "Erro sincronizando entitlement do aluno");
 }
 
-async function syncSupabaseEntitlementsForStudents(students: AdminStudent[]) {
-  if (!hasSupabaseConfig()) {
+async function syncSupabaseEntitlementsForStudents(students: AdminStudent[], previousStudents: AdminStudent[]) {
+  if (!(await shouldUseSupabaseDatabase())) {
     return;
   }
 
   const supabase = getSupabaseAdminClient();
   const userIdsByEmail = await getSupabaseUserIdsByEmail(
     supabase,
-    students.map((studentRecord) => studentRecord.email)
+    [...students, ...previousStudents].map((studentRecord) => studentRecord.email)
   );
+
+  await revokeStaleSupabaseEntitlementsForStudents(supabase, userIdsByEmail, previousStudents, students);
 
   for (const studentRecord of students) {
     const userId = userIdsByEmail.get(studentRecord.email.trim().toLowerCase());
@@ -2330,10 +2667,11 @@ async function syncSupabaseEntitlementsForStudents(students: AdminStudent[]) {
 
 export async function replaceAdminStudents(students: AdminStudent[]) {
   const database = await readDatabase();
+  const previousStudents = database.students;
   database.students = students;
   await writeDatabase(database);
-  await syncSupabaseEntitlementsForStudents(students);
-  return toAdminDashboardData(database);
+  await syncSupabaseEntitlementsForStudents(students, previousStudents);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
 }
 
 export async function upsertContentItem(input: ContentWriteInput) {
@@ -2444,7 +2782,7 @@ export async function upsertContentItem(input: ContentWriteInput) {
   }
 
   await writeDatabase(database);
-  return toAdminDashboardData(database);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
 }
 
 export async function deleteContentItem(itemId: string) {
@@ -2458,13 +2796,42 @@ export async function deleteContentItem(itemId: string) {
   removeContentById(database, itemId);
   delete database.contentPageSettings[itemId];
   database.courseModules = database.courseModules.filter((module) => module.ownerId !== itemId);
+  database.combos = database.combos.flatMap((combo) => {
+    const productIds = combo.productIds.filter((productId) => productId !== itemId);
+
+    return productIds.length > 0
+      ? [{ ...combo, productIds, updatedAt: new Date().toISOString() }]
+      : [];
+  });
   database.savedItems = database.savedItems.filter((savedItem) => !ownedTargetIds.has(savedItem.targetId));
   database.students = database.students.map((studentRecord) => ({
     ...studentRecord,
     courses: studentRecord.courses.filter((course) => course.targetId !== itemId)
   }));
   await writeDatabase(database);
-  return toAdminDashboardData(database);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+}
+
+export async function upsertProductCombo(input: ProductComboWriteInput) {
+  const database = await readDatabase();
+  const combo = normalizeProductComboInput(database, input);
+
+  database.combos = [
+    combo,
+    ...database.combos.filter((currentCombo) => currentCombo.id !== combo.id)
+  ];
+
+  await writeDatabase(database);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+}
+
+export async function deleteProductCombo(comboId: string) {
+  const database = await readDatabase();
+
+  database.combos = database.combos.filter((combo) => combo.id !== comboId);
+
+  await writeDatabase(database);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
 }
 
 export async function upsertCourseModule(input: ModuleWriteInput) {
@@ -2502,7 +2869,7 @@ export async function upsertCourseModule(input: ModuleWriteInput) {
   }));
 
   await writeDatabase(database);
-  return toAdminDashboardData(database);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
 }
 
 export async function upsertLesson(input: LessonWriteInput) {
@@ -2542,7 +2909,7 @@ export async function upsertLesson(input: LessonWriteInput) {
   });
 
   await writeDatabase(database);
-  return toAdminDashboardData(database);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
 }
 
 export async function addCohort(name: string) {
@@ -2558,7 +2925,35 @@ export async function addCohort(name: string) {
   }
 
   await writeDatabase(database);
-  return toAdminDashboardData(database);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+}
+
+export type AdminDashboardCollectionsInput = Partial<Pick<
+  PlatformDatabase,
+  "aiAgents" | "blockedWordRules" | "integrations" | "moderationItems"
+>>;
+
+export async function updateAdminDashboardCollections(input: AdminDashboardCollectionsInput) {
+  const database = await readDatabase();
+
+  if (Array.isArray(input.aiAgents)) {
+    database.aiAgents = input.aiAgents;
+  }
+
+  if (Array.isArray(input.blockedWordRules)) {
+    database.blockedWordRules = input.blockedWordRules;
+  }
+
+  if (Array.isArray(input.integrations)) {
+    database.integrations = input.integrations;
+  }
+
+  if (Array.isArray(input.moderationItems)) {
+    database.moderationItems = input.moderationItems;
+  }
+
+  await writeDatabase(database);
+  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
 }
 
 function targetExists(database: PlatformDatabase, targetType: SavedItemTargetType, targetId: string) {

@@ -12,6 +12,26 @@ const adminCatalogCommandCenterSource = await readFile(
   new URL("../src/components/admin/catalog/catalog-command-center.tsx", import.meta.url),
   "utf8"
 );
+const adminCombosCommandCenterSource = await readFile(
+  new URL("../src/components/admin/combos/combos-command-center.tsx", import.meta.url),
+  "utf8"
+);
+const adminCommunityPlaceholderSource = await readFile(
+  new URL("../src/components/admin/community/community-placeholder.tsx", import.meta.url),
+  "utf8"
+);
+const adminModerationCommandCenterSource = await readFile(
+  new URL("../src/components/admin/moderation/moderation-command-center.tsx", import.meta.url),
+  "utf8"
+);
+const adminAIAgentsCommandCenterSource = await readFile(
+  new URL("../src/components/admin/ai-agents/ai-agents-command-center.tsx", import.meta.url),
+  "utf8"
+);
+const adminIntegrationsCommandCenterSource = await readFile(
+  new URL("../src/components/admin/settings/integrations-command-center.tsx", import.meta.url),
+  "utf8"
+);
 const adminMetricCardSource = await readFile(new URL("../src/components/admin/overview/metric-card.tsx", import.meta.url), "utf8");
 const adminOperationsPanelSource = await readFile(new URL("../src/components/admin/overview/operations-panel.tsx", import.meta.url), "utf8");
 const adminPersonalizationCommandCenterSource = await readFile(
@@ -41,7 +61,10 @@ const postLoginRouteSource = await readFile(new URL("../src/app/api/auth/post-lo
 const middlewareSource = await readFile(new URL("../middleware.ts", import.meta.url), "utf8");
 const authRedirectSource = await readFile(new URL("../src/server/auth/redirect.ts", import.meta.url), "utf8");
 const platformStoreSource = await readFile(new URL("../src/server/db/platform-store.ts", import.meta.url), "utf8");
+const routeErrorsSource = await readFile(new URL("../src/server/http/route-errors.ts", import.meta.url), "utf8");
 const adminContentRouteSource = await readFile(new URL("../src/app/api/admin/content/route.ts", import.meta.url), "utf8");
+const adminCombosRouteSource = await readFile(new URL("../src/app/api/admin/combos/route.ts", import.meta.url), "utf8");
+const adminCollectionsRouteSource = await readFile(new URL("../src/app/api/admin/collections/route.ts", import.meta.url), "utf8");
 const contentPageSource = await readFile(new URL("../src/app/conteudo/[id]/page.tsx", import.meta.url), "utf8");
 const contentStructureSectionSource = await readFile(
   new URL("../src/components/content-structure-section.tsx", import.meta.url),
@@ -75,6 +98,10 @@ const supabaseSavedItemsMigrationSource = await readFile(
   new URL("../supabase/migrations/202606150006_saved_items.sql", import.meta.url),
   "utf8"
 );
+const supabaseCombosMigrationSource = await readFile(
+  new URL("../supabase/migrations/202606190001_product_combos.sql", import.meta.url),
+  "utf8"
+);
 
 test("admin route renders the CMS dashboard", () => {
   assert.match(adminPageSource, /import \{ AdminDashboard \} from "@\/components\/admin-dashboard";/);
@@ -84,13 +111,30 @@ test("admin route renders the CMS dashboard", () => {
 });
 
 test("admin dashboard exposes the core CMS views", () => {
-  for (const label of ["Visao geral", "Alunos", "Catalogo", "Estrutura", "Personalizacao"]) {
+  for (const label of [
+    "Visao geral",
+    "Alunos",
+    "Produtos",
+    "Combos",
+    "Estrutura",
+    "Comunidade",
+    "Moderacao",
+    "Agentes de IA",
+    "Personalizacao",
+    "Configuracoes",
+    "Integracoes"
+  ]) {
     assert.match(adminNavSource, new RegExp(label));
   }
   assert.match(adminDashboardSource, /PersonalizationView/);
   assert.match(adminDashboardSource, /activeView === "personalization"/);
   assert.match(adminDashboardSource, /PersonalizationCommandCenter/);
   assert.match(adminDashboardSource, /CatalogCommandCenter/);
+  assert.match(adminDashboardSource, /CombosCommandCenter/);
+  assert.match(adminDashboardSource, /CommunityPlaceholder/);
+  assert.match(adminDashboardSource, /ModerationCommandCenter/);
+  assert.match(adminDashboardSource, /AIAgentsCommandCenter/);
+  assert.match(adminDashboardSource, /IntegrationsCommandCenter/);
   assert.match(adminDashboardSource, /StudentsCommandCenter/);
   assert.match(adminCatalogCommandCenterSource, /Catalogo/);
   assert.match(adminCatalogCommandCenterSource, /Conteudos recentes/);
@@ -114,21 +158,80 @@ test("admin dashboard exposes the core CMS views", () => {
   assert.doesNotMatch(adminDashboardSource, /id: "access"/);
 });
 
+test("admin catalog creates and edits content inside a modal builder", () => {
+  assert.match(adminCatalogCommandCenterSource, /onCreateContent/);
+  assert.match(adminCatalogCommandCenterSource, /onEditContent/);
+  assert.match(adminDashboardSource, /open=\{contentFormOpen\}/);
+  assert.match(adminDashboardSource, /Fechar modal do catalogo/);
+  assert.match(adminDashboardSource, /Catalogo<\/span>/);
+  assert.match(adminDashboardSource, /h-\[min\(92dvh,900px\)\]/);
+  assert.match(adminDashboardSource, /setContentFormStep\("modules"\)/);
+  assert.match(adminDashboardSource, /setContentFormStep\(editingModuleId \? "modules" : "lessons"\)/);
+  assert.doesNotMatch(adminDashboardSource, /contentFormOpen \? \(/);
+  assert.doesNotMatch(adminDashboardSource, /document\.body\.style\.overflow[\s\S]{0,500}\}, \[contentFormOpen\]\);/);
+  assert.match(designSystemSource, /Modal de criacao\/edicao no Catalogo/);
+});
+
+test("admin dashboard exposes product combos, moderation, integrations and AI agents", () => {
+  assert.match(adminDashboardSource, /activeView === "combos"/);
+  assert.match(adminDashboardSource, /activeView === "community"/);
+  assert.match(adminDashboardSource, /activeView === "moderation"/);
+  assert.match(adminDashboardSource, /activeView === "ai-agents"/);
+  assert.match(adminDashboardSource, /activeView === "integrations"/);
+  assert.match(adminDashboardSource, /\/api\/admin\/collections/);
+  assert.match(adminDashboardSource, /\/api\/admin\/combos/);
+  assert.match(adminCombosRouteSource, /requireApiAdmin/);
+  assert.match(adminCombosRouteSource, /upsertProductCombo/);
+  assert.match(adminCombosRouteSource, /deleteProductCombo/);
+  assert.match(adminCollectionsRouteSource, /requireApiAdmin/);
+  assert.match(adminCollectionsRouteSource, /updateAdminDashboardCollections/);
+  assert.match(platformStoreSource, /defaultCohortName = "Turma A"/);
+  assert.match(platformStoreSource, /combos/);
+  assert.match(platformStoreSource, /product_combos/);
+  assert.match(platformStoreSource, /product_combo_items/);
+  assert.match(platformStoreSource, /isMissingSupabaseSchemaObjectError/);
+  assert.match(platformStoreSource, /hasProductComboTables/);
+  assert.match(platformStoreSource, /productComboTablesAvailable/);
+  assert.match(platformStoreSource, /202606190001_product_combos\.sql/);
+  assert.match(platformStoreSource, /blockedWordRules/);
+  assert.match(platformStoreSource, /integrations/);
+  assert.match(platformStoreSource, /aiAgents/);
+  assert.match(adminCombosCommandCenterSource, /Produtos incluidos/);
+  assert.match(adminCombosCommandCenterSource, /Turma padrao/);
+  assert.match(adminCombosCommandCenterSource, /Editar combo/);
+  assert.match(adminCombosCommandCenterSource, /Atualizar combo/);
+  assert.match(adminModerationCommandCenterSource, /Palavras bloqueadas/);
+  assert.match(adminModerationCommandCenterSource, /Aprovados/);
+  assert.match(adminIntegrationsCommandCenterSource, /Hotmart/);
+  assert.match(adminIntegrationsCommandCenterSource, /Segredos no browser/);
+  assert.match(adminAIAgentsCommandCenterSource, /Tutor de aula/);
+  assert.match(adminAIAgentsCommandCenterSource, /Responder comentarios/);
+  assert.match(adminCommunityPlaceholderSource, /Fase futura/);
+});
+
 test("admin shadcn nav keeps the core CRM modules and student preview action", () => {
   assert.match(adminSidebarSource, /adminMainNavItems/);
-  assert.match(adminTopbarSource, /adminMainNavItems/);
+  assert.match(adminSidebarSource, /adminSettingsNavGroup/);
+  assert.match(adminTopbarSource, /getAdminNavLabel/);
   assert.doesNotMatch(adminDashboardSource, /const adminNavItems = \[/);
 
-  for (const label of ["Visao geral", "Alunos", "Catalogo", "Estrutura", "Personalizacao"]) {
+  for (const label of ["Visao geral", "Alunos", "Produtos", "Combos", "Estrutura", "Comunidade", "Moderacao", "Agentes de IA", "Personalizacao"]) {
     assert.match(adminNavSource, new RegExp(`label: "${label}"`));
   }
 
+  assert.match(adminNavSource, /label: "Configuracoes"/);
+  assert.match(adminNavSource, /label: "Integracoes"/);
   assert.match(adminNavSource, /href: "\/"/);
   assert.match(adminNavSource, /id: "overview"/);
   assert.match(adminNavSource, /id: "students"/);
   assert.match(adminNavSource, /id: "catalog"/);
+  assert.match(adminNavSource, /id: "combos"/);
   assert.match(adminNavSource, /id: "structure"/);
+  assert.match(adminNavSource, /id: "community"/);
+  assert.match(adminNavSource, /id: "moderation"/);
+  assert.match(adminNavSource, /id: "ai-agents"/);
   assert.match(adminNavSource, /id: "personalization"/);
+  assert.match(adminNavSource, /id: "integrations"/);
 });
 
 test("admin sidebar uses shadcn sidebar primitives and shared navigation", () => {
@@ -137,6 +240,7 @@ test("admin sidebar uses shadcn sidebar primitives and shared navigation", () =>
   assert.match(adminSidebarSource, /SidebarMenuButton/);
   assert.match(adminSidebarSource, /tooltip=/);
   assert.match(adminSidebarSource, /adminMainNavItems/);
+  assert.match(adminSidebarSource, /SidebarMenuSub/);
   assert.match(adminSidebarSource, /adminOperationNavItems/);
   assert.match(adminSidebarSource, /onChangeView\(item\.id\)/);
   assert.match(adminSidebarSource, /isActive=\{activeView === item\.id\}/);
@@ -147,6 +251,7 @@ test("admin shell uses shadcn sidebar provider without touching the student shel
   assert.match(adminShellSource, /defaultOpen=\{false\}/);
   assert.match(adminShellSource, /AdminSidebar/);
   assert.match(adminShellSource, /SidebarInset/);
+  assert.match(adminShellSource, /w-0 min-w-0/);
   assert.match(adminTopbarSource, /SidebarTrigger/);
   assert.match(adminNavSource, /label: "Area do aluno"/);
   assert.doesNotMatch(adminTopbarSource, /Buscar no CRM/);
@@ -159,10 +264,13 @@ test("admin overview uses shadcn dashboard components with safe CRM data", () =>
   assert.match(adminOverviewSource, /ChartContainer/);
   assert.match(adminOverviewSource, /AreaChart/);
   assert.match(adminOverviewSource, /BarChart/);
+  assert.match(adminOverviewSource, /Progresso medio dos alunos/);
+  assert.match(adminOverviewSource, /Sinais operacionais/);
   assert.match(adminOverviewSource, /Produtos em alta/);
   assert.match(adminOverviewSource, /Alunos para acompanhar/);
   assert.match(adminOverviewSource, /Painel do produtor/);
   assert.match(adminOverviewSource, /Resumo seguro/);
+  assert.doesNotMatch(adminOverviewSource, /Performance da escola/);
   assert.match(adminMetricCardSource, /@\/components\/ui\/card/);
   assert.match(adminOperationsPanelSource, /@\/components\/ui\/badge/);
   assert.match(adminRecentOperationsTableSource, /@\/components\/ui\/table/);
@@ -192,28 +300,55 @@ test("shadcn tokens coexist with Bunker707 student area tokens", () => {
 
   assert.match(designSystemSource, /shadcn\/ui/);
   assert.match(designSystemSource, /CRM admin/);
+  assert.match(designSystemSource, /CRM de alunos com referencia estrutural operacional/);
+  assert.match(designSystemSource, /referencia Hotmart apenas para organizacao/);
 });
 
 test("admin dashboard models a simple student CRM list with row actions", () => {
-  assert.match(adminStudentsCommandCenterSource, /Membros/);
-  assert.match(adminStudentsCommandCenterSource, /Buscar por nome ou email/);
-  assert.match(adminStudentsCommandCenterSource, /Total de membros/);
+  assert.match(adminStudentsCommandCenterSource, /Alunos/);
+  assert.match(adminStudentsCommandCenterSource, /Buscar aluno por nome ou email/);
+  assert.match(adminStudentsCommandCenterSource, /studentMetricFallbackSeries/);
+  assert.match(adminStudentsCommandCenterSource, /buildMetricSeries/);
+  assert.match(adminStudentsCommandCenterSource, /buildMemberSeries/);
+  assert.match(adminStudentsCommandCenterSource, /Total de alunos/);
   assert.match(adminStudentsCommandCenterSource, /Progresso medio/);
   assert.match(adminStudentsCommandCenterSource, /Engajamento/);
-  assert.match(adminStudentsCommandCenterSource, /Adicionar membro/);
+  assert.match(adminStudentsCommandCenterSource, /chartColor="#e50914"/);
+  assert.match(adminStudentsCommandCenterSource, /chartColor="#22c55e"/);
+  assert.match(adminStudentsCommandCenterSource, /Adicionar aluno/);
   assert.doesNotMatch(adminStudentsCommandCenterSource, /Inteligencia da base/);
   assert.doesNotMatch(adminDashboardSource, /CourseStudentGroups/);
   assert.doesNotMatch(adminDashboardSource, /onListModeChange=\{setListMode\}/);
-  assert.match(adminDashboardSource, /Lista de membros/);
+  assert.match(adminDashboardSource, /Nome e email/);
   assert.match(adminDashboardSource, /StudentRowActions/);
-  assert.match(adminDashboardSource, /Reenviar acesso por email/);
-  assert.match(adminDashboardSource, /Enviar acesso por WhatsApp/);
-  assert.match(adminDashboardSource, /Bloquear acesso/);
+  assert.match(adminDashboardSource, /Reenviar acesso/);
+  assert.match(adminDashboardSource, /Bloquear acesso a produtos/);
   assert.match(adminDashboardSource, /Mudar turma/);
-  assert.match(adminDashboardSource, /Produtos do aluno/);
+  assert.match(adminDashboardSource, /Informacoes e dados pessoais/);
+  assert.match(adminDashboardSource, /Produtos/);
   assert.match(adminDashboardSource, /Produtos comprados/);
-  assert.match(adminDashboardAndStudentSource, /Adicionar membro/);
+  assert.match(adminDashboardAndStudentSource, /Adicionar aluno/);
+  assert.match(adminDashboardSource, /bg-\[linear-gradient\(180deg,#111217_0%,#0d0e11_100%\)\]/);
+  assert.match(adminDashboardSource, /bg-red-500\/\[0\.055\]/);
+  assert.doesNotMatch(adminDashboardSource, /bg-\[#f4f6f8\]/);
+  assert.doesNotMatch(adminDashboardSource, /#4364d8/);
   assert.match(adminDashboardSource, /StudentProfileModal/);
+  assert.match(adminDashboardSource, /@\/components\/ui\/badge/);
+  assert.match(adminDashboardSource, /@\/components\/ui\/table/);
+  assert.match(adminDashboardSource, /@\/components\/ui\/dialog/);
+  assert.match(adminDashboardSource, /DialogContent/);
+  assert.match(adminDashboardSource, /max-w-\[min\(1240px,calc\(100vw-2rem\)\)\]/);
+  assert.doesNotMatch(adminDashboardSource, /SheetContent/);
+  assert.doesNotMatch(adminDashboardSource, /TabsList/);
+  assert.doesNotMatch(adminDashboardSource, /defaultValue="overview"/);
+  assert.match(adminDashboardSource, /TableHeader/);
+  assert.match(adminDashboardSource, /Entitlements internos continuam sendo a fonte de verdade/);
+  assert.match(adminDashboardSource, /StudentProductAccessTable/);
+  assert.doesNotMatch(adminDashboardSource, /StudentProductAccessCard/);
+  assert.match(designSystemSource, /nao como sheet lateral e nao como pagina externa/);
+  assert.match(designSystemSource, /Nao usar abas/);
+  assert.match(designSystemSource, /Produtos aparecem em tabela simples/);
+  assert.match(designSystemSource, /nunca para copia visual/);
   assert.match(adminDashboardSource, /Reenviar acesso/);
   assert.match(adminDashboardSource, /Enviar convite para criar senha/);
   assert.match(adminDashboardSource, /Gerar senha temporaria automaticamente/);
@@ -232,25 +367,29 @@ test("admin dashboard models a simple student CRM list with row actions", () => 
   assert.match(adminDashboardSource, /Confirmacao necessaria/);
   assert.match(adminDashboardSource, /studentPendingDeletion/);
   assert.match(adminDashboardSource, /aria-label=\{`Acoes de \$\{student\.fullName\}`\}/);
-  assert.match(adminDashboardSource, /Remover membro/);
+  assert.match(adminDashboardSource, /Remover aluno/);
   assert.doesNotMatch(adminDashboardSource, /Excluir "\$\{studentToRemove\.fullName\}" do CRM/);
   assert.match(adminDashboardSource, /Mudar turma/);
   assert.match(adminDashboardSource, /Bloquear/);
   assert.match(adminDashboardSource, /Primeiro acesso/);
   assert.match(adminDashboardSource, /Ultimo acesso/);
-  assert.match(adminDashboardSource, /Dados pessoais e acesso/);
-  assert.match(adminDashboardSource, /Origem principal/);
-  assert.match(adminDashboardSource, /Ver historico/);
+  assert.match(adminDashboardSource, /Informacoes e dados pessoais/);
+  assert.match(adminDashboardSource, /Acesso geral/);
+  assert.doesNotMatch(adminDashboardSource, /Ver historico/);
   assert.match(adminDashboardSource, /Engajamento/);
   assert.match(adminDashboardSource, /Altissimo/);
-  assert.match(adminDashboardSource, /modal-viewport-scroll/);
-  assert.match(adminDashboardSource, /document\.body\.style\.overflow = "hidden"/);
+  assert.match(adminDashboardSource, /Fechar modal do aluno/);
+  assert.doesNotMatch(adminDashboardSource, /document\.body\.style\.overflow[\s\S]{0,500}\}, \[modalMode\]\);/);
   assert.match(adminDashboardSource, /Turma/);
   assert.match(adminDashboardSource, /Papel/);
   assert.match(adminDashboardSource, /Detalhes do usuario/);
+  assert.match(adminDashboardSource, /StudentProductAccessTable/);
+  assert.doesNotMatch(adminDashboardSource, /StudentProductAccessCard/);
+  assert.doesNotMatch(adminDashboardSource, /ProductFact/);
+  assert.doesNotMatch(adminDashboardSource, /md:grid-cols-2 xl:grid-cols-5/);
   assert.match(adminTopbarSource, /SidebarTrigger/);
   assert.match(adminShellSource, /onChangeView=\{onChangeView\}/);
-  assert.match(adminDashboardSource, /CRM Bunker707/);
+  assert.match(adminDashboardSource, /Alunos/);
   assert.match(adminNavSource, /Area do aluno/);
   assert.doesNotMatch(adminTopbarSource, /Ver area do aluno/);
   assert.match(adminDashboardSource, /onChangeView=\{handleChangeView\}/);
@@ -274,6 +413,17 @@ test("admin dashboard persists content, cohorts, lessons and students through Su
   assert.match(platformStoreSource, /replaceAdminStudents/);
   assert.match(platformStoreSource, /upsertContentItem/);
   assert.match(platformStoreSource, /deleteContentItem/);
+  assert.match(platformStoreSource, /upsertProductCombo/);
+  assert.match(platformStoreSource, /deleteProductCombo/);
+  assert.match(platformStoreSource, /updateAdminDashboardCollections/);
+  assert.match(platformStoreSource, /revokeStaleSupabaseEntitlementsForStudents/);
+  assert.match(platformStoreSource, /getAdminStudentEntitlementGrants/);
+  assert.match(platformStoreSource, /status: "revoked"/);
+  assert.match(adminDashboardSource, /setDashboardData\(previousData\)/);
+  assert.match(adminDashboardSource, /Aluno nao cadastrado/);
+  assert.match(routeErrorsSource, /jsonRouteError/);
+  assert.match(adminContentRouteSource, /jsonRouteError/);
+  assert.match(adminCombosRouteSource, /jsonRouteError/);
   assert.match(platformStoreSource, /upsertCourseModule/);
   assert.match(platformStoreSource, /upsertLesson/);
   assert.match(platformStoreSource, /addCohort/);
@@ -287,6 +437,8 @@ test("admin dashboard persists content, cohorts, lessons and students through Su
   assert.match(adminDashboardSource, /\/api\/admin\/students/);
   assert.match(adminDashboardSource, /\/api\/admin\/students\/access/);
   assert.match(adminDashboardSource, /\/api\/admin\/content/);
+  assert.match(adminDashboardSource, /\/api\/admin\/collections/);
+  assert.match(adminDashboardSource, /\/api\/admin\/combos/);
   assert.match(adminDashboardSource, /method: "DELETE"/);
   assert.match(adminDashboardSource, /Editar conteudo/);
   assert.match(adminDashboardSource, /Excluir conteudo/);
@@ -296,6 +448,8 @@ test("admin dashboard persists content, cohorts, lessons and students through Su
   assert.match(adminDashboardSource, /\/api\/admin\/cohorts/);
   for (const tableName of [
     "content_items",
+    "product_combos",
+    "product_combo_items",
     "course_modules",
     "lessons",
     "cohorts",
@@ -304,7 +458,8 @@ test("admin dashboard persists content, cohorts, lessons and students through Su
     "student_access_logs",
     "lesson_progress"
   ]) {
-    assert.match(supabaseMigrationSource, new RegExp(`create table if not exists public\\.${tableName}`));
+    const migrationSource = tableName.startsWith("product_combo") ? supabaseCombosMigrationSource : supabaseMigrationSource;
+    assert.match(migrationSource, new RegExp(`create table if not exists public\\.${tableName}`));
   }
   assert.match(supabaseMigrationSource, /enable row level security/);
   assert.match(adminStudentAccessRouteSource, /requireApiAdmin/);

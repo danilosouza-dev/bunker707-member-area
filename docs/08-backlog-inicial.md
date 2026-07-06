@@ -49,6 +49,12 @@
 - Refinar CRM de alunos com listagem enxuta, engajamento por nivel, produtos alinhados na linha e modal sem scroll duplo.
 - Permitir abrir e fechar a sidebar do CMS pelo hamburger, seguindo o padrao da area do aluno.
 - Criar suporte a turmas/coortes com conteudos extras por segmento, visiveis apenas para a turma correspondente.
+- Criar item `Combos` no CRM para agrupar produtos existentes e definir turma padrao.
+- Criar item `Comunidade` na sidebar do CRM como placeholder de fase futura.
+- Criar item `Moderacao` no CRM para filtrar comentarios por produto, tipo e status.
+- Criar cadastro de palavras bloqueadas com mensagem para o aluno.
+- Criar item `Agentes de IA` no CRM para configurar agentes de comentarios, tutor de aula, assistente geral e chat da home.
+- Criar `Configuracoes > Integracoes` no CRM para configurar Hotmart, Ticto, TikTok, Kiwify e Manual sem expor segredos no browser.
 
 ## Backend
 
@@ -63,6 +69,11 @@
 - Criar modelo e API autenticada de itens salvos/favoritos.
 - Criar APIs de busca.
 - Criar suporte simples.
+- Criar schema real de combos/produtos internos e mapeamento para entitlements.
+- Criar API persistida de comentarios e respostas.
+- Criar API administrativa de moderacao e palavras bloqueadas.
+- Criar tabela persistida de configuracoes de integracao.
+- Criar tabelas futuras de agentes de IA, escopos, conversas e fontes de treinamento.
 
 ## Video
 
@@ -76,7 +87,9 @@
 - Criar webhook manual de teste.
 - Criar webhook Hotmart.
 - Criar webhook Ticto.
+- Criar webhook TikTok quando a operacao exigir.
 - Criar adaptador Kiwify quando essa plataforma entrar no fluxo comercial.
+- Mapear vendas externas para produto ou combo interno.
 - Criar tabela de eventos brutos.
 - Criar job de processamento.
 - Criar logs de falhas.

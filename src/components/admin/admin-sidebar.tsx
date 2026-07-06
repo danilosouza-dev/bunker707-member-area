@@ -12,9 +12,12 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail
 } from "@/components/ui/sidebar";
-import { adminMainNavItems, adminOperationNavItems } from "@/components/admin/admin-nav";
+import { adminMainNavItems, adminOperationNavItems, adminSettingsNavGroup } from "@/components/admin/admin-nav";
 import type { AdminView } from "@/lib/platform-types";
 
 export function AdminSidebar({
@@ -24,6 +27,8 @@ export function AdminSidebar({
   activeView: AdminView;
   onChangeView: (view: AdminView) => void;
 }) {
+  const SettingsIcon = adminSettingsNavGroup.icon;
+
   return (
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader>
@@ -63,6 +68,38 @@ export function AdminSidebar({
                   </SidebarMenuItem>
                 );
               })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Sistema</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton className="cursor-default hover:bg-transparent" tooltip={adminSettingsNavGroup.label}>
+                  <SettingsIcon />
+                  <span>{adminSettingsNavGroup.label}</span>
+                </SidebarMenuButton>
+                <SidebarMenuSub>
+                  {adminSettingsNavGroup.children.map((item) => {
+                    const Icon = item.icon;
+
+                    return (
+                      <SidebarMenuSubItem key={item.id}>
+                        <SidebarMenuSubButton
+                          isActive={activeView === item.id}
+                          onClick={() => onChangeView(item.id)}
+                          render={<button type="button" />}
+                        >
+                          <Icon />
+                          <span>{item.label}</span>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    );
+                  })}
+                </SidebarMenuSub>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

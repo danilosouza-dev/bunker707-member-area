@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, LockKeyhole, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Lock, Play } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -70,6 +70,8 @@ function InternalPosterCard({
   const imageStateClass = isLocked
     ? "grayscale saturate-0 contrast-110 brightness-75 group-hover:grayscale-0 group-hover:saturate-100 group-hover:contrast-100 group-hover:brightness-100"
     : "";
+  const lockedAccessibilityDetail =
+    isLocked ? (lockedDetail ?? lockedTitle ?? "Conteudo bloqueado") : undefined;
 
   function prefetchPosterDestination() {
     if (!isLocked) {
@@ -79,7 +81,7 @@ function InternalPosterCard({
 
   return (
     <Link
-      aria-label={`Abrir ${title}`}
+      aria-label={lockedAccessibilityDetail ? `${title}. ${lockedAccessibilityDetail}` : `Abrir ${title}`}
       className="home-cover-card internal-poster-card group relative aspect-[1000/1618] w-[11rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[13.75rem] md:w-[15.5rem] lg:w-[18.75rem] 2xl:w-[20rem]"
       href={href}
       onClick={(event) => {
@@ -99,17 +101,9 @@ function InternalPosterCard({
             style={{ backgroundImage: `url(${image})` }}
           />
           {isLocked ? (
-            <div className="absolute inset-0 z-20 flex items-start justify-center bg-black/46 p-3 text-center backdrop-blur-[1px]">
-              <div className="mt-3 w-full rounded-[8px] border border-white/12 bg-black/72 px-3 py-3 shadow-2xl shadow-black/40">
-                <LockKeyhole className="mx-auto h-6 w-6 stroke-[2.8] text-white" />
-                <p className="mt-2 text-xs font-black leading-tight text-white">
-                  {lockedTitle ?? "Conteudo bloqueado"}
-                </p>
-                {lockedDetail ? (
-                  <p className="mt-1 text-[11px] font-semibold leading-4 text-zinc-300">{lockedDetail}</p>
-                ) : null}
-              </div>
-              <span className="sr-only">Conteudo bloqueado</span>
+            <div className="absolute right-2.5 top-2.5 z-20 grid h-8 w-8 place-items-center rounded-full bg-black/65 text-white shadow-[0_10px_24px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-[2px] sm:right-3 sm:top-3 sm:h-9 sm:w-9 md:h-10 md:w-10 lg:right-4 lg:top-4 lg:h-11 lg:w-11">
+              <Lock className="h-3.5 w-3.5 stroke-[3] sm:h-4 sm:w-4 md:h-[1.1rem] md:w-[1.1rem] lg:h-5 lg:w-5" aria-hidden="true" />
+              <span className="sr-only">{lockedTitle ?? "Conteudo bloqueado"}</span>
             </div>
           ) : null}
           <div className="home-cover-card-overlay absolute inset-0" />
@@ -153,7 +147,7 @@ function InternalPosterCard({
           aria-hidden="true"
           className="h-auto w-full object-contain"
           height={35}
-          src="/brand/logo-bunker.png"
+          src="/brand/logo-bunker.svg"
           unoptimized
           width={306}
         />

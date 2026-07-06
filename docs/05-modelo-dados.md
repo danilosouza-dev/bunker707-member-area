@@ -9,6 +9,8 @@ users
 profiles
 external_accounts
 products
+product_combos
+product_combo_items
 entitlements
 courses
 formations
@@ -17,6 +19,9 @@ bootcamps
 modules
 lessons
 lesson_materials
+lesson_comments
+comment_moderation_actions
+blocked_words
 content_release_rules
 material_access_rules
 content_drafts
@@ -31,6 +36,9 @@ learning_task_submissions
 saved_items
 student_events
 webhook_events
+integration_settings
+ai_agents
+ai_agent_scopes
 support_tickets
 ```
 
@@ -91,6 +99,43 @@ Representa um produto/plano interno da Bunker707.
 - active;
 - created_at.
 
+### product_combos
+
+Combos sao pacotes internos que agrupam produtos existentes. Eles nao criam checkout dentro da plataforma.
+
+- id;
+- name;
+- description;
+- status: active, draft, paused;
+- default_cohort_id ou cohort_name;
+- created_at;
+- updated_at.
+
+Regra: quando uma venda externa corresponde a um combo, o processamento do webhook deve resolver os produtos incluidos e criar/atualizar entitlements internos para cada alvo liberado. O combo em si nao substitui entitlement.
+
+Implementacao atual:
+
+- `product_combos` e `product_combo_items` possuem migration propria;
+- o CRM usa rota administrativa `/api/admin/combos` para criar, editar e remover combos;
+- no desenvolvimento local sem Supabase, combos continuam no fallback `.data/bunker707-platform.json`.
+
+### product_combo_items
+
+Relaciona um combo aos produtos que ele libera.
+
+- id;
+- combo_id;
+- product_id;
+- target_type;
+- target_id;
+- created_at.
+
+Regras:
+
+- combo pode incluir cursos, formacoes, mentorias, webinarios, produtos genericos e bootcamps;
+- remover um item do combo nao deve revogar automaticamente acessos ja concedidos sem uma operacao administrativa explicita;
+- a auditoria deve registrar alteracoes em combos ativos.
+
 ### entitlements
 
 Permissoes reais do aluno.
@@ -118,6 +163,7 @@ Implementacao atual:
 - webhooks, CRM e operacoes manuais devem alterar entitlements apenas via servidor/admin.
 - a area do aluno aplica entitlements ativos por usuario autenticado para liberar cards, paginas e `Minhas compras`;
 - enquanto o CRM manual e a tabela de entitlements coexistirem, o backend tambem reconhece os cursos ativos vinculados ao aluno por email/id e sincroniza esses cursos para `entitlements` quando o usuario Auth ja existe;
+- quando um curso/produto ou aluno sai do CRM manual, os entitlements gerenciados pela origem `admin-student:*` sao marcados como `revoked`; entitlements criados por webhooks externos nao sao apagados por essa rotina;
 - o modo de preview de acesso e ferramenta administrativa: so aparece para usuarios com papel em `admin_roles` e nao altera a experiencia de alunos comuns.
 
 ## Home configuravel
@@ -207,11 +253,131 @@ Regras de produto e acesso:
 - a vitrine deve listar produtos vendaveis, nunca cursos internos de formacao;
 - o webhook de pagamento cria/atualiza entitlement no produto comprado, nao em cada curso interno isoladamente.
 
+## Turmas
+
+### cohorts
+
+Turmas podem existir por produto, combo ou operacao manual. Quando nenhum nome for definido, a interface administrativa assume `Turma A` como padrao de cadastro.
+
+Campos conceituais:
+
+- id;
+- product_id opcional;
+- combo_id opcional;
+- name;
+- starts_at;
+- status;
+- created_at.
+
+### cohort_memberships
+
+- id;
+- user_id;
+- cohort_id;
+- entitlement_id;
+- role: student, mentor, professor;
+- created_at.
+
+Regras:
+
+- turma organiza experiencia, comunicacao e liberacoes extras;
+- turma nao deve autorizar acesso sozinha; ela complementa entitlements ativos.
+
+## Comentarios e moderacao
+
+### lesson_comments
+
+- id;
+- lesson_id;
+- user_id;
+- parent_comment_id;
+- body;
+- status: pending, approved, hidden, spam;
+- created_at;
+- updated_at.
+
+### comment_moderation_actions
+
+- id;
+- comment_id;
+- actor_user_id;
+- action: approve, hide, mark_spam, restore;
+- reason;
+- created_at.
+
+### blocked_words
+
+- id;
+- scope: global, product, lesson;
+- scope_id;
+- word;
+- match_type: contains, exact, regex;
+- message;
+- active;
+- created_at;
+- updated_at.
+
+Regras:
+
+- comentarios e respostas podem ser filtrados por produto, tipo e status;
+- palavras bloqueadas impedem o envio e mostram mensagem clara ao aluno;
+- a moderacao deve preservar auditoria das acoes tomadas.
+
+## Integracoes
+
+### integration_settings
+
+- id;
+- provider: hotmart, ticto, tiktok, kiwify, manual;
+- webhook_url;
+- secret_status;
+- status: not_configured, configured, needs_attention;
+- events jsonb;
+- last_sync_at;
+- created_at;
+- updated_at.
+
+Regras:
+
+- segredos reais de webhook ficam somente no servidor ou gerenciador de segredos;
+- dados de plataforma externa sao entrada para processamento, nao fonte de autorizacao;
+- cada provider deve ter adapter proprio.
+
+## Agentes de IA
+
+### ai_agents
+
+- id;
+- name;
+- scope: comments, lesson_tutor, global_assistant, home_chat;
+- status: draft, training, active, paused;
+- instructions;
+- auto_reply;
+- training_sources jsonb;
+- last_trained_at;
+- created_at;
+- updated_at.
+
+### ai_agent_scopes
+
+- id;
+- ai_agent_id;
+- product_id;
+- module_id;
+- lesson_id;
+- created_at.
+
+Regras:
+
+- agentes de comentarios, tutor de aula e assistente geral podem ser configurados antes da IA estar conectada;
+- respostas automaticas devem ficar desligadas por padrao ate treinamento e revisao;
+- agentes nao podem revelar conteudo sem entitlement ativo para o aluno.
+
 ## CMS administrativo
 
-O CMS em `/admin` grava dados por uma camada server-side persistida em Supabase Postgres/RLS. No desenvolvimento local sem variaveis Supabase, existe fallback em `.data/bunker707-platform.json` apenas para manter o `localhost:3000` navegavel; em ambientes reais, a fonte deve ser Supabase sem misturar autorizacao administrativa com a experiencia do aluno. Um Supabase vazio nao deve receber dados demo automaticamente: cadastros reais entram pelo CMS, APIs, webhooks ou migrations controladas.
+O CMS em `/admin` grava dados por uma camada server-side persistida em Supabase Postgres/RLS. No desenvolvimento local sem variaveis Supabase, ou em `localhost` quando Supabase esta configurado mas inacessivel, existe fallback em `.data/bunker707-platform.json` apenas para manter o app navegavel; em ambientes reais, a fonte deve ser Supabase sem misturar autorizacao administrativa com a experiencia do aluno. Um Supabase vazio nao deve receber dados demo automaticamente: cadastros reais entram pelo CMS, APIs, webhooks ou migrations controladas.
 
-O menu principal do CMS deve ser enxuto: Visao geral, Alunos, Catalogo, Estrutura e Personalizacao. Regras de liberacao nao ficam em uma tela solta; elas sao campos do proprio item editado, seja formacao, curso, mentoria, webinario, produto, modulo, aula ou material.
+O menu principal do CMS deve manter Produto/Aluno/Operacao separados: Visao geral, Alunos, Produtos, Combos, Estrutura, Comunidade, Moderacao, Agentes de IA, Personalizacao e Configuracoes > Integracoes. Regras de liberacao nao ficam em uma tela solta; elas sao campos do proprio item editado, seja formacao, curso, mentoria, webinario, produto, modulo, aula ou material.
 
 O primeiro fluxo de criacao do CMS deve funcionar como um construtor LMS:
 
@@ -222,6 +388,8 @@ O primeiro fluxo de criacao do CMS deve funcionar como um construtor LMS:
 5. em cada nivel, configurar regra de entrega/publicacao.
 
 O produtor pode salvar apenas o primeiro passo e voltar depois para completar modulos e aulas. A aba Estrutura continua existindo como visao operacional, mas o cadastro principal do Catalogo deve permitir montar o conteudo sem trocar de tela.
+
+O construtor de criacao e edicao do Catalogo deve abrir em um modal central sobre a listagem. Criar item, editar item, criar curso, modulo ou aula nao deve transformar a pagina inteira em formulario nem navegar para uma pagina separada; o contexto operacional do catalogo permanece visivel por baixo do modal.
 
 Campos planejados/adicionados ao item educacional:
 
@@ -338,10 +506,10 @@ Regras:
 - quando senha temporaria for usada, o usuario em Supabase Auth deve receber `must_change_password = true` em `user_metadata`;
 - no primeiro acesso, alunos com `must_change_password = true` sao enviados para `/alterar-senha` antes de acessar aulas;
 - compras de Hotmart, Ticto, TikTok, Kiwify ou plataformas similares entram por webhooks/adaptadores e atualizam entitlements;
-- remover um aluno pelo CRM nao deve apagar historico bruto de webhook nem eventos de auditoria;
+- remover um aluno pelo CRM nao deve apagar historico bruto de webhook nem eventos de auditoria, mas deve revogar os entitlements criados pela propria operacao manual do CRM;
 - a listagem por curso deve consultar alunos que possuem entitlement para o produto ou curso selecionado;
 - filtros de CRM podem combinar origem, status, produto/curso, texto livre, tags e atividade.
-- o modal de aluno deve bloquear o scroll da pagina de fundo e deixar a rolagem apenas na camada externa do modal;
+- o modal de aluno deve bloquear o scroll da pagina de fundo via primitiva `Dialog`, sem efeito manual no `body`, e deixar a rolagem apenas na camada externa do modal;
 - turmas podem liberar conteudos extras exclusivos por produto, sem expor esses extras para outras turmas.
 - a navegacao lateral do CMS deve abrir e fechar pelo hamburger, seguindo o padrao de drawer da area do aluno.
 
@@ -635,7 +803,7 @@ Implementacao atual:
 
 - `saved_items` existe em migration Supabase com RLS por `user_id`;
 - a rota `/api/saved-items` alterna salvar/remover para o usuario autenticado;
-- em desenvolvimento local sem Supabase, os registros ficam em `.data/bunker707-platform.json`;
+- em desenvolvimento local sem Supabase, ou no modo local de `localhost`, os registros ficam em `.data/bunker707-platform.json`;
 - cards da home, modal de detalhes e pagina de aula consomem `isSaved` retornado pelo backend.
 
 ## Eventos
