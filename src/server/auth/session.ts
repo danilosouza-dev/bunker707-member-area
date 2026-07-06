@@ -11,38 +11,59 @@ export type AdminRole = "owner" | "admin" | "editor" | "support" | "analyst";
 const adminRoles = new Set<AdminRole>(["owner", "admin", "editor", "support", "analyst"]);
 
 export async function getAuthenticatedUser() {
-  if (!hasSupabaseAuthConfig()) {
-    return getLocalAuthenticatedUser();
+  const localUser = await getLocalAuthenticatedUser();
+
+  if (localUser) {
+    return localUser;
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.auth.getUser();
-
-  if (error || !data.user) {
+  if (!hasSupabaseAuthConfig()) {
     return null;
   }
 
-  return data.user;
+  const supabase = await createSupabaseServerClient();
+
+  try {
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user) {
+      return null;
+    }
+
+    return data.user;
+  } catch {
+    return null;
+  }
 }
 
 export async function getAdminRoleForUser(userId: string) {
-  if (!hasSupabaseAuthConfig()) {
-    const localUser = await getLocalAuthenticatedUser();
-    return localUser?.id === userId ? "owner" : null;
+  const localUser = await getLocalAuthenticatedUser();
+
+  if (localUser?.id === userId) {
+    return "owner";
   }
 
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("admin_roles")
-    .select("role")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error || !data || typeof data.role !== "string") {
+  if (!hasSupabaseAuthConfig()) {
     return null;
   }
 
-  return adminRoles.has(data.role as AdminRole) ? (data.role as AdminRole) : null;
+  const supabase = await createSupabaseServerClient();
+
+  try {
+    const { data, error } = await supabase
+      .from("admin_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error || !data || typeof data.role !== "string") {
+      return null;
+    }
+
+    return adminRoles.has(data.role as AdminRole) ? (data.role as AdminRole) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function getUserDisplayName(user: Pick<User, "email" | "user_metadata">) {

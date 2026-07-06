@@ -6,5 +6,5 @@ export function isLocalhost(hostname?: string | null) {
 }
 
 export function isLocalAuthEnabled(authConfigured: boolean, hostname?: string | null) {
-  return !authConfigured && (process.env.NODE_ENV !== "production" || isLocalhost(hostname));
+  return process.env.NODE_ENV !== "production" && (!authConfigured || isLocalhost(hostname));
 }

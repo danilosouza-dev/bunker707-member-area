@@ -11,9 +11,11 @@ coverage/
 
 *.log
 .DS_Store
+._*
 tsconfig.tsbuildinfo
 .vercel/
 .turbo/
 .codex-backups/
 .data/
 .superpowers/
+.gemini-scratch/

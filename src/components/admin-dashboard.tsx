@@ -1,20 +1,17 @@
 "use client";
 
 import {
+  Activity,
   ArrowLeft,
   ArrowRightLeft,
   Ban,
   Bell,
   BookOpen,
   CalendarDays,
-  ChevronDown,
   CheckCircle2,
   Copy,
   Eye,
-  Flame,
   GalleryVerticalEnd,
-  GraduationCap,
-  Home,
   KeyRound,
   LibraryBig,
   Mail,
@@ -25,18 +22,47 @@ import {
   Plus,
   Search,
   Send,
-  ShieldCheck,
-  ShoppingBag,
-  Sparkles,
   Trash2,
-  Trophy,
-  UserPlus,
+  TrendingUp,
   Users,
   X
 } from "lucide-react";
 import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { CatalogCommandCenter } from "@/components/admin/catalog/catalog-command-center";
+import { AIAgentsCommandCenter } from "@/components/admin/ai-agents/ai-agents-command-center";
+import { AdminOverview } from "@/components/admin/admin-overview";
+import { AdminShell } from "@/components/admin/admin-shell";
+import { CombosCommandCenter } from "@/components/admin/combos/combos-command-center";
+import { CommunityPlaceholder } from "@/components/admin/community/community-placeholder";
+import { ModerationCommandCenter } from "@/components/admin/moderation/moderation-command-center";
+import { PersonalizationCommandCenter } from "@/components/admin/personalization/personalization-command-center";
+import { IntegrationsCommandCenter } from "@/components/admin/settings/integrations-command-center";
+import { StudentsCommandCenter } from "@/components/admin/students/students-command-center";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table";
 import { ContentRow, CourseModulesHomeSection } from "@/components/content-row";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { HeroSection } from "@/components/hero-section";
@@ -44,7 +70,6 @@ import { LoginExperience } from "@/components/login-experience";
 import { MemberFooter } from "@/components/member-footer";
 import { PurchasesExperience } from "@/components/purchases-experience";
 import { getLoginPageConfig, loginTemplateOptions } from "@/lib/login-config";
-import type { LucideIcon } from "lucide-react";
 import type { LoginPageConfig, LoginTemplateId } from "@/lib/login-config";
 import type {
   AdminContentAccess,
@@ -52,8 +77,7 @@ import type {
   AdminDashboardData,
   AdminEntitlementStatus,
   AdminHomeSection,
-  AdminMetric,
-  AdminPipelineItem,
+  AdminProductCombo,
   AdminReleaseRule,
   AdminSellableProduct,
   AdminSourceProvider,
@@ -73,45 +97,16 @@ import type {
   PurchaseTarget
 } from "@/lib/platform-types";
 
-type AdminNavItem = {
-  icon: LucideIcon;
-  id: AdminView;
-  label: string;
-};
-
-const adminNavItems = [
-  { icon: Trophy, id: "overview", label: "Visao geral" },
-  { icon: Users, id: "students", label: "Alunos" },
-  { icon: LibraryBig, id: "catalog", label: "Catalogo" },
-  { icon: GalleryVerticalEnd, id: "structure", label: "Estrutura" },
-  { icon: Pencil, id: "personalization", label: "Personalizacao" }
-] satisfies AdminNavItem[];
-
 const panelClassName = "rounded-[8px] border border-white/10 bg-[#171717] shadow-2xl shadow-black/20";
-const subtlePanelClassName = "rounded-[8px] border border-white/10 bg-white/[0.045]";
 const inputClassName =
   "h-11 rounded-[8px] border border-white/10 bg-black/30 px-3 text-sm font-semibold text-white outline-none transition placeholder:text-zinc-600 focus:border-white/30";
+const studentFormInputClassName =
+  "h-10 rounded-[8px] border border-white/10 bg-[#111217] px-3 text-sm font-semibold text-white outline-none transition placeholder:text-zinc-600 focus:border-white/30 focus:ring-3 focus:ring-white/10";
 const creatableContentKinds = ["Formacao", "Curso", "Mentoria", "Webinario", "Produto", "Bootcamp"] satisfies ContentKind[];
 const courseLayoutContentKinds = ["Curso", "Bootcamp", "Mentoria", "Webinario", "Produto"] satisfies ContentKind[];
 
 function supportsCoursePresentationMode(kind: ContentKind) {
   return (courseLayoutContentKinds as readonly ContentKind[]).includes(kind);
-}
-
-function getToneClassName(tone: AdminMetric["tone"]) {
-  if (tone === "red") {
-    return "from-[var(--accent)]/20 to-[var(--accent)]/0 text-[var(--accent)]";
-  }
-
-  if (tone === "green") {
-    return "from-emerald-500/18 to-emerald-500/0 text-emerald-400";
-  }
-
-  if (tone === "amber") {
-    return "from-amber-500/18 to-amber-500/0 text-amber-300";
-  }
-
-  return "from-white/10 to-white/0 text-zinc-300";
 }
 
 function getAccessClassName(access: AdminContentAccess) {
@@ -200,6 +195,56 @@ function getEntitlementStatusClassName(status: AdminEntitlementStatus) {
   return "border-red-400/25 bg-red-500/10 text-red-300";
 }
 
+function getSoftEntitlementStatusClassName(status: AdminEntitlementStatus) {
+  if (status === "active") {
+    return "border-emerald-400/25 bg-emerald-500/10 text-emerald-200";
+  }
+
+  if (status === "suspended") {
+    return "border-amber-400/25 bg-amber-500/10 text-amber-200";
+  }
+
+  if (status === "expired") {
+    return "border-zinc-400/20 bg-zinc-500/10 text-zinc-300";
+  }
+
+  return "border-red-400/25 bg-red-500/10 text-red-200";
+}
+
+function getStudentAccessOverview(student: AdminStudent) {
+  const activeCourses = student.courses.filter((course) => course.status === "active").length;
+  const blockedCourses = student.courses.filter((course) => course.status !== "active").length;
+
+  if (student.status === "expired") {
+    return {
+      className: "border-red-400/25 bg-red-500/10 text-red-200",
+      label: "Bloqueado por pagamento"
+    };
+  }
+
+  if (activeCourses > 0 && blockedCourses > 0) {
+    return {
+      className: "border-amber-300/25 bg-amber-400/10 text-amber-200",
+      label: "Misto"
+    };
+  }
+
+  return {
+    className: getEntitlementStatusClassName(student.status),
+    label: getEntitlementStatusLabel(student.status)
+  };
+}
+
+function getSoftStudentAccessOverviewClassName(student: AdminStudent) {
+  const overview = getStudentAccessOverview(student);
+
+  if (overview.label === "Misto") {
+    return "border-amber-400/25 bg-amber-500/10 text-amber-200";
+  }
+
+  return getSoftEntitlementStatusClassName(student.status);
+}
+
 function getProviderClassName(provider: AdminSourceProvider) {
   if (provider === "Hotmart") {
     return "border-orange-400/25 bg-orange-500/10 text-orange-200";
@@ -229,464 +274,9 @@ function normalizeSearchValue(value: string) {
 
 function StatusPill({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <span className={`inline-flex min-h-7 items-center rounded-full border px-2.5 text-[11px] font-bold ${className}`}>
+    <Badge variant="outline" className={`h-6 min-h-6 rounded-full px-2.5 text-[11px] font-semibold ${className}`}>
       {children}
-    </span>
-  );
-}
-
-function IconButton({
-  children,
-  label
-}: {
-  children: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      aria-label={label}
-      className="grid h-10 w-10 place-items-center rounded-[8px] border border-white/10 bg-white/[0.055] text-zinc-200 transition hover:border-white/20 hover:bg-white/10 hover:text-white"
-      type="button"
-    >
-      {children}
-    </button>
-  );
-}
-
-function AdminSidebar({
-  activeView,
-  isOpen,
-  onChangeView,
-  onClose
-}: {
-  activeView: AdminView;
-  isOpen: boolean;
-  onChangeView: (view: AdminView) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div
-      aria-hidden={!isOpen}
-      className={`fixed inset-0 z-50 transition ${isOpen ? "pointer-events-auto" : "pointer-events-none"}`}
-    >
-      <button
-        aria-label="Fechar menu do CMS"
-        className={`absolute inset-0 bg-black/70 backdrop-blur-sm transition duration-300 ${
-          isOpen ? "opacity-100" : "opacity-0"
-        }`}
-        onClick={onClose}
-        type="button"
-      />
-      <aside
-        aria-label="Menu do CMS"
-        className={`relative flex h-full w-[min(380px,92vw)] flex-col border-r border-white/10 bg-[#121212] shadow-2xl shadow-black transition duration-300 ease-out ${
-          isOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <div className="flex items-center justify-between border-b border-white/10 p-5">
-          <Link
-            className="inline-flex rounded-[6px] transition-opacity hover:opacity-85"
-            href="/admin"
-            onClick={() => {
-              onChangeView("overview");
-              onClose();
-            }}
-          >
-            <Image alt="Bunker707" className="h-auto w-[190px]" height={35} src="/brand/logo-bunker.png" width={306} />
-          </Link>
-          <button
-            aria-label="Fechar menu do CMS"
-            className="grid h-10 w-10 place-items-center rounded-[6px] bg-white/10 text-white transition hover:bg-white/15"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="border-b border-white/10 p-5">
-          <div className="inline-flex items-center gap-2 rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-bold text-red-200">
-            <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-            CMS Command Center
-          </div>
-        </div>
-
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {adminNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = item.id === activeView;
-
-            return (
-              <button
-                className={`flex w-full items-center gap-3 rounded-[8px] px-4 py-3 text-left text-sm font-bold transition ${
-                  isActive
-                    ? "bg-[var(--accent)] text-white shadow-[0_16px_42px_rgba(229,9,20,0.28)]"
-                    : "text-zinc-400 hover:bg-white/[0.07] hover:text-white"
-                }`}
-                key={item.id}
-                onClick={() => {
-                  onChangeView(item.id);
-                  onClose();
-                }}
-                type="button"
-              >
-                <Icon className="h-5 w-5" />
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="space-y-4 border-t border-white/10 p-5">
-          <div className="rounded-[8px] border border-white/10 bg-white/[0.045] p-4">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
-              <ShieldCheck className="h-4 w-4 text-emerald-400" />
-              Ambiente seguro
-            </div>
-            <p className="mt-2 text-xs leading-5 text-zinc-400">
-              Acesso, conteudo e eventos externos ficam separados de checkout.
-            </p>
-          </div>
-          <Link
-            className="flex items-center gap-3 rounded-[8px] px-4 py-3 text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white"
-            href="/"
-            onClick={onClose}
-          >
-            <Home className="h-5 w-5" />
-            Area do aluno
-          </Link>
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-function AdminTopbar({
-  activeView,
-  onGoHome,
-  sidebarOpen,
-  onToggleSidebar
-}: {
-  activeView: AdminView;
-  onGoHome: () => void;
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
-}) {
-  const activeLabel = adminNavItems.find((item) => item.id === activeView)?.label ?? "CMS";
-
-  return (
-    <header className="sticky top-0 z-30 border-b border-white/10 bg-[#0b0b0b]/92 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-8">
-      <div className="flex items-center gap-3">
-        <button
-          aria-expanded={sidebarOpen}
-          aria-label={sidebarOpen ? "Fechar menu do CMS" : "Abrir menu do CMS"}
-          className="grid h-10 w-10 place-items-center rounded-[8px] border border-white/10 bg-white/[0.055] text-white transition hover:bg-white/10"
-          onClick={onToggleSidebar}
-          type="button"
-        >
-          {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
-
-        <Link
-          aria-label="Ir para a home do CRM"
-          className="hidden min-w-fit rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white sm:inline-flex"
-          href="/admin"
-          onClick={onGoHome}
-        >
-          <Image
-            alt="Bunker707"
-            className="h-auto w-[154px] lg:w-[178px]"
-            height={35}
-            priority
-            src="/brand/logo-bunker.png"
-            width={306}
-          />
-        </Link>
-
-        <div className="min-w-0">
-          <p className="text-xs font-bold uppercase text-zinc-500">CRM Bunker707</p>
-          <h1 className="truncate text-lg font-black text-white sm:text-xl">{activeLabel}</h1>
-        </div>
-
-        <label className="ml-auto hidden h-10 w-full max-w-md items-center gap-3 rounded-[8px] border border-white/10 bg-black/30 px-3 text-sm text-zinc-400 focus-within:border-white/25 md:flex">
-          <Search className="h-4 w-4 text-zinc-500" />
-          <span className="sr-only">Buscar no CMS</span>
-          <input
-            className="min-w-0 flex-1 border-0 bg-transparent text-white outline-none placeholder:text-zinc-600"
-            placeholder="Buscar produtos, aulas, alunos..."
-            type="search"
-          />
-        </label>
-
-        <IconButton label="Notificacoes">
-          <Bell className="h-4 w-4" />
-        </IconButton>
-        <Link
-          className="hidden h-10 items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-sm font-bold text-zinc-200 transition hover:bg-white/10 hover:text-white lg:flex"
-          href="/"
-        >
-          <Eye className="h-4 w-4" />
-          Ver area de membros
-        </Link>
-        <button
-          className="hidden h-10 items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-sm font-bold text-white transition hover:bg-white/10 sm:flex"
-          type="button"
-        >
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-[var(--accent)] text-xs">DS</span>
-          Danilo
-        </button>
-      </div>
-
-    </header>
-  );
-}
-
-function MetricCard({ metric }: { metric: AdminMetric }) {
-  return (
-    <div className={`${panelClassName} overflow-hidden p-4`}>
-      <div className={`pointer-events-none -mx-4 -mt-4 mb-4 h-1 bg-gradient-to-r ${getToneClassName(metric.tone)}`} />
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-zinc-400">{metric.label}</p>
-          <p className="mt-3 text-3xl font-black leading-none text-white">{metric.value}</p>
-        </div>
-        <span className={`grid h-10 w-10 place-items-center rounded-[8px] bg-gradient-to-br ${getToneClassName(metric.tone)}`}>
-          <Sparkles className="h-5 w-5" />
-        </span>
-      </div>
-      <p className="mt-4 text-xs font-bold text-zinc-500">{metric.delta}</p>
-    </div>
-  );
-}
-
-function ConsumptionChart({ points }: { points: AdminDashboardData["chartPoints"] }) {
-  return (
-    <div className={`${panelClassName} p-5 lg:col-span-2`}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-white">Consumo e acesso</h2>
-          <p className="mt-1 text-sm text-zinc-500">Eventos de progresso, aulas iniciadas e acessos liberados.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {["7D", "30D", "90D"].map((range, index) => (
-            <button
-              className={`rounded-[7px] px-3 py-2 text-xs font-black transition ${
-                index === 0 ? "bg-white text-black" : "bg-white/[0.06] text-zinc-300 hover:bg-white/10 hover:text-white"
-              }`}
-              key={range}
-              type="button"
-            >
-              {range}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-8 flex h-72 items-end gap-3 border-b border-l border-white/10 px-2 pb-5 sm:gap-5 sm:px-5">
-        {points.map((point) => (
-          <div className="flex min-w-0 flex-1 flex-col items-center justify-end gap-2" key={point.label}>
-            <div className="flex h-56 w-full items-end justify-center gap-1.5">
-              <div
-                className="w-full max-w-[1.6rem] rounded-t-[5px] bg-[var(--accent)] shadow-[0_0_24px_rgba(229,9,20,0.28)]"
-                style={{ height: `${point.progress}%` }}
-              />
-              <div
-                className="w-full max-w-[1.6rem] rounded-t-[5px] bg-white/24"
-                style={{ height: `${point.access}%` }}
-              />
-            </div>
-            <span className="text-xs font-bold text-zinc-500">{point.label}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-4 text-xs font-bold text-zinc-500">
-        <span className="inline-flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-          Progresso
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-white/40" />
-          Acessos
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function PipelinePanel({ pipeline }: { pipeline: AdminPipelineItem[] }) {
-  return (
-    <div className={`${panelClassName} p-5`}>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-black text-white">Fila editorial</h2>
-          <p className="mt-1 text-sm text-zinc-500">Conteudos em producao e publicacao.</p>
-        </div>
-        <IconButton label="Mais opcoes">
-          <MoreHorizontal className="h-4 w-4" />
-        </IconButton>
-      </div>
-
-      <div className="mt-6 space-y-4">
-        {pipeline.map((item) => (
-          <div className="flex items-center gap-3" key={item.label}>
-            <span className={`h-3 w-3 rounded-full ${item.tone}`} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3 text-sm">
-                <span className="font-bold text-white">{item.label}</span>
-                <span className="font-black text-zinc-300">{item.count}</span>
-              </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-                <div className={`h-full ${item.tone}`} style={{ width: `${Math.min(item.count * 8, 100)}%` }} />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PosterStrip({ records }: { records: AdminContentRecord[] }) {
-  return (
-    <div className={`${panelClassName} overflow-hidden p-5`}>
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-black text-white">Catalogo em destaque</h2>
-          <p className="mt-1 text-sm text-zinc-500">Como os produtos aparecem nas linhas da area do aluno.</p>
-        </div>
-        <button className="inline-flex min-h-10 items-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200" type="button">
-          <Plus className="h-4 w-4" />
-          Novo
-        </button>
-      </div>
-
-      <div className="-mx-5 mt-5 flex gap-3 overflow-x-auto px-5 pb-2 scrollbar-hidden">
-        {records.slice(0, 8).map((record) => (
-          <button
-            className="group relative aspect-[720/1040] w-[9.5rem] shrink-0 overflow-hidden rounded-[8px] bg-[#101010] text-left shadow-xl shadow-black/35 transition hover:-translate-y-1 hover:shadow-[0_28px_72px_rgba(0,0,0,0.6)] sm:w-[11rem]"
-            key={record.content.id}
-            type="button"
-          >
-            <div
-              className="absolute inset-0 bg-cover bg-center transition duration-700 group-hover:scale-[1.04]"
-              style={{ backgroundImage: `url(${record.content.image})` }}
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/64 to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 p-3">
-              <StatusPill className={getAccessClassName(record.access)}>{record.access}</StatusPill>
-              <h3 className="mt-3 line-clamp-2 text-sm font-black leading-tight text-white">{record.content.title}</h3>
-              <p className="mt-1 line-clamp-1 text-xs font-semibold text-zinc-400">{record.kind}</p>
-            </div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HomeSectionsPanel({ sections }: { sections: AdminHomeSection[] }) {
-  return (
-    <div className={`${panelClassName} p-5`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-black text-white">Home do aluno</h2>
-          <p className="mt-1 text-sm text-zinc-500">Linhas configuraveis e visibilidade.</p>
-        </div>
-        <Home className="h-5 w-5 text-zinc-500" />
-      </div>
-      <div className="mt-5 space-y-3">
-        {sections.map((section) => (
-          <div className="rounded-[8px] border border-white/10 bg-black/20 p-3" key={section.id}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-white">
-                  {section.order}. {section.title}
-                </p>
-                <p className="mt-1 text-xs text-zinc-500">{section.source}</p>
-              </div>
-              <StatusPill className="border-white/10 bg-white/[0.055] text-zinc-300">
-                {section.contentCount}
-              </StatusPill>
-            </div>
-            <div className="mt-3 flex items-center justify-between text-xs font-bold text-zinc-500">
-              <span>Visibilidade</span>
-              <span>{section.visibility}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function OverviewView({
-  chartPoints,
-  homeSections,
-  metrics,
-  pipeline,
-  records
-}: {
-  chartPoints: AdminDashboardData["chartPoints"];
-  homeSections: AdminHomeSection[];
-  metrics: AdminMetric[];
-  pipeline: AdminPipelineItem[];
-  records: AdminContentRecord[];
-}) {
-  return (
-    <div className="space-y-6">
-      <section className="overflow-hidden rounded-[8px] border border-white/10 bg-[#111]">
-        <div className="relative p-5 sm:p-8">
-          <div className="absolute inset-0 bg-[linear-gradient(115deg,rgba(229,9,20,0.26),rgba(20,20,20,0.34)_46%,rgba(255,255,255,0.04))]" />
-          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-red-400/20 bg-red-500/10 px-3 py-1.5 text-xs font-black text-red-100">
-                <Flame className="h-4 w-4 text-[var(--accent)]" />
-                Netflix-style control room
-              </div>
-              <h2 className="mt-5 text-4xl font-black leading-none text-white sm:text-5xl">
-                CMS para controlar toda a area de membros.
-              </h2>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-zinc-300 sm:text-base">
-                Catalogo, home, hierarquia de aulas, regras de drip, materiais, entitlements e eventos externos no mesmo painel.
-              </p>
-            </div>
-            <div className="grid min-w-[18rem] gap-3 rounded-[8px] border border-white/10 bg-black/30 p-4 backdrop-blur">
-              <div className="flex items-center justify-between text-sm font-bold">
-                <span className="text-zinc-400">Status operacional</span>
-                <StatusPill className="border-emerald-400/25 bg-emerald-500/10 text-emerald-300">
-                  Online
-                </StatusPill>
-              </div>
-              <div className="flex items-center justify-between text-sm font-bold">
-                <span className="text-zinc-400">Entitlement truth</span>
-                <span className="text-white">Interno</span>
-              </div>
-              <div className="flex items-center justify-between text-sm font-bold">
-                <span className="text-zinc-400">Checkout</span>
-                <span className="text-white">Externo</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {metrics.map((metric) => (
-          <MetricCard key={metric.label} metric={metric} />
-        ))}
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-3">
-        <ConsumptionChart points={chartPoints} />
-        <PipelinePanel pipeline={pipeline} />
-      </section>
-
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(20rem,0.8fr)]">
-        <PosterStrip records={records} />
-        <HomeSectionsPanel sections={homeSections} />
-      </section>
-    </div>
+    </Badge>
   );
 }
 
@@ -1454,45 +1044,61 @@ function CatalogView({
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
       <section className="min-w-0 space-y-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-3xl font-black text-white">Catalogo de produtos e conteudos</h2>
-            <p className="mt-2 text-sm text-zinc-500">
-              Crie cursos, formacoes, mentorias, webinarios e produtos antes de montar modulos e aulas.
-            </p>
-          </div>
-          <button
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] bg-[var(--accent)] px-4 py-2 text-sm font-black text-white transition hover:bg-red-600"
-            onClick={openNewContentForm}
-            type="button"
+        <CatalogCommandCenter
+          filter={filter}
+          filteredRecords={filteredRecords}
+          onCreateContent={openNewContentForm}
+          onEditContent={openEditContentForm}
+          onFilterChange={setFilter}
+          onQueryChange={setQuery}
+          onSelectRecord={setSelectedRecord}
+          query={query}
+          records={records}
+          selectedRecord={selectedRecord}
+        />
+
+        <Dialog
+          open={contentFormOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              setContentFormOpen(false);
+            }
+          }}
+        >
+          <DialogContent
+            className="h-[min(92dvh,900px)] max-w-[min(1180px,calc(100vw-2rem))] rounded-[12px] border border-white/10 bg-[#0d0e11] p-0 text-zinc-100 shadow-[0_34px_140px_rgba(0,0,0,0.78)] ring-1 ring-white/[0.035]"
+            showCloseButton={false}
           >
-            <Plus className="h-4 w-4" />
-            Criar item
-          </button>
-        </div>
-
-        {contentFormOpen ? (
-          <div className={`${subtlePanelClassName} space-y-4 p-4`}>
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div>
-                <p className="text-sm font-black text-white">
-                  {contentForm.id ? "Editar item" : "Novo item educacional"}
-                </p>
-                <p className="mt-1 max-w-3xl text-xs font-semibold leading-5 text-zinc-500">
-                  Cadastre a configuracao inicial, avance para modulos e depois adicione aulas no mesmo fluxo. Voce tambem pode salvar so o primeiro passo e completar depois.
-                </p>
+            <DialogHeader className="shrink-0 border-b border-white/10 bg-[linear-gradient(135deg,#1c1114_0%,#17181d_42%,#101116_100%)] p-0">
+              <div className="flex items-start justify-between gap-4 px-5 py-4 sm:px-7">
+                <div className="min-w-0">
+                  <DialogDescription className="text-sm font-semibold text-zinc-500">
+                    <span className="text-zinc-200 underline underline-offset-2">Catalogo</span>
+                    <span className="px-3 text-zinc-700">/</span>
+                    <span>{contentForm.id ? "Edicao" : "Criacao"}</span>
+                  </DialogDescription>
+                  <DialogTitle className="mt-2 truncate text-2xl font-semibold tracking-normal text-white">
+                    {contentForm.id ? "Editar item" : "Novo item educacional"}
+                  </DialogTitle>
+                  <p className="mt-2 max-w-3xl text-xs font-semibold leading-5 text-zinc-500">
+                    Cadastre a configuracao inicial, avance para modulos e depois adicione aulas no mesmo fluxo. Voce tambem pode salvar so o primeiro passo e completar depois.
+                  </p>
+                </div>
+                <Button
+                  aria-label="Fechar modal do catalogo"
+                  className="size-9 rounded-full text-zinc-500 hover:bg-white/10 hover:text-white"
+                  onClick={() => setContentFormOpen(false)}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
               </div>
-              <button
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 py-2 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white"
-                onClick={() => setContentFormOpen(false)}
-                type="button"
-              >
-                <X className="h-4 w-4" />
-                Fechar
-              </button>
-            </div>
+            </DialogHeader>
 
-            <div className="grid gap-2 md:grid-cols-3">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6">
+              <div className="grid gap-2 md:grid-cols-3">
               {[
                 ["basic", "1. Configuracao"],
                 ["modules", "2. Modulos"],
@@ -1517,15 +1123,15 @@ function CatalogView({
                   </button>
                 );
               })}
-            </div>
+              </div>
 
-            {imageUploadError ? (
+              {imageUploadError ? (
               <div className="rounded-[8px] border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-100">
                 {imageUploadError}
               </div>
-            ) : null}
+              ) : null}
 
-            {contentFormStep === "basic" ? (
+              {contentFormStep === "basic" ? (
               <form className="grid gap-3 lg:grid-cols-6" onSubmit={submitContentForm}>
                 <label className="grid gap-1 text-xs font-black uppercase text-zinc-500 lg:col-span-2">
                   Nome
@@ -1868,10 +1474,10 @@ function CatalogView({
                     Salvar e continuar
                   </button>
                 </div>
-              </form>
-            ) : null}
+                </form>
+              ) : null}
 
-            {contentFormStep === "modules" ? (
+              {contentFormStep === "modules" ? (
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
                 <div className="rounded-[8px] border border-white/10 bg-black/20 p-4">
                   <div className="flex items-center justify-between gap-4">
@@ -2047,9 +1653,9 @@ function CatalogView({
                   </button>
                 </form>
               </div>
-            ) : null}
+              ) : null}
 
-            {contentFormStep === "lessons" ? (
+              {contentFormStep === "lessons" ? (
               <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
                 <div className="rounded-[8px] border border-white/10 bg-black/20 p-4">
                   <p className="text-sm font-black text-white">Aulas de {wizardRecord?.content.title ?? "conteudo"}</p>
@@ -2270,42 +1876,10 @@ function CatalogView({
                   </button>
                 </form>
               </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div className={`${subtlePanelClassName} flex flex-col gap-3 p-3 lg:flex-row lg:items-center`}>
-          <label className="flex h-11 flex-1 items-center gap-3 rounded-[8px] border border-white/10 bg-black/30 px-3 text-sm text-zinc-400 focus-within:border-white/25">
-            <Search className="h-4 w-4 text-zinc-500" />
-            <span className="sr-only">Buscar conteudo</span>
-            <input
-              className="min-w-0 flex-1 border-0 bg-transparent text-white outline-none placeholder:text-zinc-600"
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar por produto, curso, regra..."
-              type="search"
-              value={query}
-            />
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {[
-              ["all", "Todos"],
-              ["sellable", "Vendaveis"],
-              ["included", "Inclusos"],
-              ["locked", "Bloqueados"]
-            ].map(([id, label]) => (
-              <button
-                className={`min-h-10 rounded-[8px] px-3 text-sm font-black transition ${
-                  filter === id ? "bg-white text-black" : "bg-white/[0.055] text-zinc-300 hover:bg-white/10 hover:text-white"
-                }`}
-                key={id}
-                onClick={() => setFilter(id as typeof filter)}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+              ) : null}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <CatalogTable
           filteredRecords={filteredRecords}
@@ -2415,93 +1989,6 @@ function PersonalizationEditorHeader({
             Publicar
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function PersonalizationIndexRow({
-  disabledCustomize = false,
-  disabledPreview = false,
-  icon: Icon,
-  image,
-  onCustomize,
-  previewHref,
-  showChevron = false,
-  status,
-  statusClassName = "border-emerald-400/25 bg-emerald-500/10 text-emerald-300",
-  subtitle,
-  title,
-  urlLabel
-}: {
-  disabledCustomize?: boolean;
-  disabledPreview?: boolean;
-  icon?: LucideIcon;
-  image?: string;
-  onCustomize?: () => void;
-  previewHref?: string;
-  showChevron?: boolean;
-  status?: string;
-  statusClassName?: string;
-  subtitle: string;
-  title: string;
-  urlLabel: string;
-}) {
-  return (
-    <div className="grid gap-3 rounded-[8px] border border-white/10 bg-black/20 p-3 transition hover:border-white/18 hover:bg-white/[0.035] lg:grid-cols-[minmax(0,1.2fr)_minmax(14rem,0.9fr)_auto] lg:items-center">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="relative grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-[8px] bg-white/[0.06] text-zinc-200">
-          {image ? (
-            <span
-              className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: `url(${image})` }}
-            />
-          ) : Icon ? (
-            <Icon className="h-5 w-5" />
-          ) : null}
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-black text-white">{title}</span>
-          <span className="mt-1 block truncate text-xs font-semibold text-zinc-500">{subtitle}</span>
-        </span>
-      </div>
-
-      <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-zinc-500">
-        <Copy className="h-4 w-4 shrink-0 text-zinc-600" />
-        <span className="truncate">{urlLabel}</span>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-        {status ? <StatusPill className={statusClassName}>{status}</StatusPill> : null}
-        {previewHref && !disabledPreview ? (
-          <Link
-            aria-label={`Visualizar ${title}`}
-            className="grid h-10 w-10 place-items-center rounded-[8px] border border-white/10 bg-white/[0.055] text-zinc-200 transition hover:bg-white/10 hover:text-white"
-            href={previewHref}
-            target="_blank"
-          >
-            <Eye className="h-4 w-4" />
-          </Link>
-        ) : (
-          <button
-            aria-label={`Visualizar ${title}`}
-            className="grid h-10 w-10 cursor-not-allowed place-items-center rounded-[8px] border border-white/10 bg-white/[0.025] text-zinc-700"
-            disabled
-            type="button"
-          >
-            <Eye className="h-4 w-4" />
-          </button>
-        )}
-        <button
-          className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-xs font-black text-zinc-200 transition hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:border-white/5 disabled:bg-white/[0.025] disabled:text-zinc-700 disabled:hover:bg-white/[0.025] disabled:hover:text-zinc-700"
-          disabled={disabledCustomize}
-          onClick={onCustomize}
-          type="button"
-        >
-          <Pencil className="h-4 w-4" />
-          Personalizar
-          {showChevron ? <ChevronDown className="h-4 w-4" /> : null}
-        </button>
       </div>
     </div>
   );
@@ -2627,78 +2114,15 @@ function PersonalizationView({
 
   function renderPersonalizationIndex() {
     return (
-      <div className="space-y-5">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="text-sm font-bold text-[var(--accent)]">CRM</p>
-            <h2 className="text-3xl font-black text-white">Personalizacao</h2>
-          </div>
-          <span className="inline-flex min-h-9 items-center rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-xs font-black text-zinc-300">
-            {personalizationItemsCount} itens
-          </span>
-        </div>
-
-        <section className={`${panelClassName} p-5`}>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h3 className="text-lg font-black text-white">Bunker707</h3>
-              <p className="mt-1 text-sm font-semibold text-zinc-500">
-                Link principal: <span className="text-zinc-300">/</span>
-              </p>
-            </div>
-            <button className="inline-flex min-h-10 w-fit items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white" type="button">
-              <Sparkles className="h-4 w-4 text-[var(--accent)]" />
-              Editar tema
-            </button>
-          </div>
-        </section>
-
-        <section className={`${panelClassName} space-y-3 p-3`}>
-          <PersonalizationIndexRow
-            icon={Home}
-            onCustomize={() => setActiveTarget({ kind: "showcase" })}
-            previewHref="/"
-            status="Publicada"
-            subtitle="Essa e a pagina inicial"
-            title="Vitrine"
-            urlLabel="/"
-          />
-          <PersonalizationIndexRow
-            icon={KeyRound}
-            onCustomize={() => setActiveTarget({ kind: "login" })}
-            previewHref="/login"
-            status="Publicada"
-            subtitle="Acesso fechado da area de membros"
-            title="Pagina de login"
-            urlLabel="/login"
-          />
-          <PersonalizationIndexRow
-            icon={LibraryBig}
-            onCustomize={() => setActiveTarget({ kind: "products" })}
-            previewHref="/minhas-compras"
-            status="Em edicao"
-            statusClassName="border-amber-400/25 bg-amber-500/10 text-amber-300"
-            subtitle="Lista dos produtos e compras do aluno"
-            title="Pagina de produtos"
-            urlLabel="/minhas-compras"
-          />
-
-          {visiblePreviewRecords.map((record) => (
-            <PersonalizationIndexRow
-              image={record.content.image}
-              key={record.content.id}
-              onCustomize={() => openContentEditor(record)}
-              previewHref={`/conteudo/${record.content.id}`}
-              showChevron
-              status={record.access}
-              statusClassName={getAccessClassName(record.access)}
-              subtitle={record.kind}
-              title={record.content.title}
-              urlLabel={`/conteudo/${record.content.id}`}
-            />
-          ))}
-        </section>
-      </div>
+      <PersonalizationCommandCenter
+        onOpenContent={openContentEditor}
+        onOpenLogin={() => setActiveTarget({ kind: "login" })}
+        onOpenProducts={() => setActiveTarget({ kind: "products" })}
+        onOpenShowcase={() => setActiveTarget({ kind: "showcase" })}
+        personalizationItemsCount={personalizationItemsCount}
+        records={records}
+        visiblePreviewRecords={visiblePreviewRecords}
+      />
     );
   }
 
@@ -2765,7 +2189,7 @@ function PersonalizationView({
             >
               <Menu className="h-5 w-5" />
             </button>
-            <Image alt="Bunker707" className="h-auto w-[150px] sm:w-[190px]" height={35} src="/brand/logo-bunker.png" width={306} />
+            <Image alt="Bunker707" className="h-auto w-[150px] sm:w-[190px]" height={35} src="/brand/logo-bunker.svg" unoptimized width={306} />
             <div className="ml-auto flex items-center gap-2">
               <button aria-label="Buscar" className="grid h-10 w-10 place-items-center rounded-[6px] text-white transition hover:bg-white/10" type="button">
                 <Search className="h-5 w-5" />
@@ -2984,7 +2408,7 @@ function PersonalizationView({
             <button aria-label="Abrir menu" className="grid h-10 w-10 place-items-center rounded-[6px] text-white transition hover:bg-white/10" type="button">
               <Menu className="h-5 w-5" />
             </button>
-            <Image alt="Bunker707" className="h-auto w-[150px] sm:w-[190px]" height={35} src="/brand/logo-bunker.png" width={306} />
+            <Image alt="Bunker707" className="h-auto w-[150px] sm:w-[190px]" height={35} src="/brand/logo-bunker.svg" unoptimized width={306} />
           </div>
           <button className="absolute right-5 top-20 z-30 inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-white/15 bg-black/55 px-3 py-2 text-xs font-black text-white backdrop-blur transition hover:bg-white hover:text-black" type="button">
             <Pencil className="h-4 w-4" />
@@ -3086,7 +2510,7 @@ function PersonalizationView({
             <button aria-label="Abrir menu" className="grid h-10 w-10 place-items-center rounded-[6px] text-white transition hover:bg-white/10" type="button">
               <Menu className="h-5 w-5" />
             </button>
-            <Image alt="Bunker707" className="h-auto w-[150px] sm:w-[190px]" height={35} src="/brand/logo-bunker.png" width={306} />
+            <Image alt="Bunker707" className="h-auto w-[150px] sm:w-[190px]" height={35} src="/brand/logo-bunker.svg" unoptimized width={306} />
           </div>
 
           <section
@@ -3732,7 +3156,6 @@ function StructureView({
   );
 }
 
-type StudentListMode = "students" | "courses";
 type StudentModalMode = "view" | "new" | "edit" | null;
 type StudentEngagementLevel = "Nenhum" | "Baixo" | "Medio" | "Alto" | "Altissimo";
 type StudentAccessSetupMode = "invite" | "generated_password" | "manual_password" | "none";
@@ -3813,10 +3236,6 @@ function getStudentCategory(student: AdminStudent) {
   return categories[0] ?? (student.sourceProvider === "Manual" ? "Importado" : "Aluno");
 }
 
-function getStudentSourceLabel(student: AdminStudent) {
-  return student.sourceProvider === "Manual" ? "Importado manual" : `Compra ${student.sourceProvider}`;
-}
-
 function getCourseSourceLabel(course: AdminStudentCourse) {
   if (course.sourceProvider === "Manual") {
     return course.acquisition === "Cortesia" ? "Cortesia manual" : "Importado manual";
@@ -3864,26 +3283,6 @@ function getStudentEngagement(student: AdminStudent): StudentEngagementLevel {
   }
 
   return "Baixo";
-}
-
-function getStudentEngagementClassName(level: StudentEngagementLevel) {
-  if (level === "Altissimo") {
-    return "border-emerald-300/30 bg-emerald-400/14 text-emerald-200";
-  }
-
-  if (level === "Alto") {
-    return "border-lime-300/25 bg-lime-400/10 text-lime-200";
-  }
-
-  if (level === "Medio") {
-    return "border-amber-300/25 bg-amber-400/10 text-amber-200";
-  }
-
-  if (level === "Baixo") {
-    return "border-orange-300/25 bg-orange-400/10 text-orange-200";
-  }
-
-  return "border-zinc-400/20 bg-zinc-500/10 text-zinc-300";
 }
 
 function getStudentCourseProduct(course: AdminStudentCourse, sellableProducts: AdminSellableProduct[]) {
@@ -3968,24 +3367,14 @@ function buildStudentCourses({
   });
 }
 
-function getAccessActionLabel(action: NonNullable<AdminStudent["accessHistory"]>[number]["action"]) {
-  if (action === "lesson_completed") {
-    return "Aula concluida";
+function formatAdminAccessDate(value: string) {
+  const normalizedValue = value.trim().toLowerCase();
+
+  if (!value || normalizedValue.includes("sem acesso") || normalizedValue.includes("nunca")) {
+    return value || "Sem acesso";
   }
 
-  if (action === "lesson_started") {
-    return "Aula iniciada";
-  }
-
-  if (action === "material_downloaded") {
-    return "Material baixado";
-  }
-
-  if (action === "access_email_sent") {
-    return "Acesso reenviado";
-  }
-
-  return "Login";
+  return `${value} (UTC-3 Brasil)`;
 }
 
 function StudentAvatar({
@@ -3997,11 +3386,11 @@ function StudentAvatar({
   name: string;
   size?: "sm" | "lg";
 }) {
-  const sizeClassName = size === "lg" ? "h-24 w-24 text-2xl" : "h-11 w-11 text-sm";
+  const sizeClassName = size === "lg" ? "h-14 w-14 text-base" : "h-9 w-9 text-xs";
 
   return (
     <span
-      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-white/[0.075] bg-cover bg-center font-black text-white ring-1 ring-white/10 ${sizeClassName}`}
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--accent)] bg-cover bg-center font-semibold text-white ring-1 ring-red-400/25 ${sizeClassName}`}
       style={avatarUrl ? { backgroundImage: `url(${avatarUrl})` } : undefined}
     >
       {getStudentInitials(name)}
@@ -4016,39 +3405,137 @@ function ProductCover({
 }: {
   course: AdminStudentCourse;
   sellableProducts: AdminSellableProduct[];
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
 }) {
   const product = getStudentCourseProduct(course, sellableProducts);
-  const sizeClassName = size === "md" ? "h-24 w-16" : "h-14 w-10";
+  const sizeClassName = size === "md" ? "h-24 w-16" : size === "xs" ? "h-7 w-5" : "h-14 w-10";
 
   return (
-    <span className={`relative shrink-0 overflow-hidden rounded-[6px] bg-[#101010] ring-1 ring-white/10 ${sizeClassName}`}>
+    <span className={`relative block shrink-0 overflow-hidden rounded-[6px] bg-[#101010] ring-1 ring-white/10 ${sizeClassName}`}>
       {product?.image ? (
         <span
           className="absolute inset-0 bg-cover bg-center"
           style={{ backgroundImage: `url(${product.image})` }}
         />
       ) : (
-        <span className="absolute inset-0 grid place-items-center text-zinc-500">
-          <BookOpen className="h-4 w-4" />
+        <span className="absolute inset-0 grid place-items-center bg-[#202020] text-zinc-500">
+          <BookOpen className={size === "md" ? "h-5 w-5" : "h-4 w-4"} />
         </span>
       )}
     </span>
   );
 }
 
-function InfoTile({
+function StudentRowActions({
+  accessActionBusy,
+  onBlockAllCourses,
+  onEdit,
+  onMoveAllCourses,
+  onOpenDetails,
+  onRemove,
+  onResendEmail,
+  student
+}: {
+  accessActionBusy: boolean;
+  onBlockAllCourses: () => void;
+  onEdit: () => void;
+  onMoveAllCourses: () => void;
+  onOpenDetails: () => void;
+  onRemove: () => void;
+  onResendEmail: () => void;
+  student: AdminStudent;
+}) {
+  const hasCourses = student.courses.length > 0;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Acoes de ${student.fullName}`}
+        className="grid h-8 w-8 place-items-center rounded-full text-zinc-500 outline-none transition hover:bg-white/10 hover:text-white focus-visible:ring-3 focus-visible:ring-white/10"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-60 rounded-[8px] border border-white/10 bg-[#17181d] p-2 text-zinc-200 shadow-[0_24px_70px_rgba(0,0,0,0.55)]"
+      >
+        <DropdownMenuItem className="rounded-[7px] px-2.5 py-2.5 text-sm font-semibold text-zinc-200 focus:bg-white/10 focus:text-white" onClick={onOpenDetails}>
+          <Eye className="h-4 w-4" />
+          Detalhes do usuario
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="rounded-[7px] px-2.5 py-2.5 text-sm font-semibold text-zinc-200 focus:bg-white/10 focus:text-white"
+          disabled={accessActionBusy}
+          onClick={onResendEmail}
+        >
+          <Mail className="h-4 w-4" />
+          Reenviar acesso
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="rounded-[7px] px-2.5 py-2.5 text-sm font-semibold text-zinc-200 focus:bg-white/10 focus:text-white"
+          disabled={!hasCourses}
+          onClick={onBlockAllCourses}
+        >
+          <Ban className="h-4 w-4" />
+          Bloquear acesso a produtos
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="rounded-[7px] px-2.5 py-2.5 text-sm font-semibold text-zinc-200 focus:bg-white/10 focus:text-white"
+          disabled={!hasCourses}
+          onClick={onMoveAllCourses}
+        >
+          <ArrowRightLeft className="h-4 w-4" />
+          Mudar turma
+        </DropdownMenuItem>
+        <DropdownMenuSeparator className="-mx-2 bg-white/10" />
+        <DropdownMenuItem className="rounded-[7px] px-2.5 py-2.5 text-sm font-semibold text-zinc-200 focus:bg-white/10 focus:text-white" onClick={onEdit}>
+          <Pencil className="h-4 w-4" />
+          Editar cadastro
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="rounded-[7px] px-2.5 py-2.5 text-sm font-semibold text-red-200 focus:bg-red-500/15 focus:text-red-100"
+          onClick={onRemove}
+          variant="destructive"
+        >
+          <Trash2 className="h-4 w-4" />
+          Remover aluno
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function StudentInfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="grid min-h-14 grid-cols-[minmax(8rem,0.55fr)_minmax(0,1fr)] items-center gap-4 border-b border-white/10 py-3 last:border-b-0">
+      <dt className="text-sm font-medium text-zinc-500">{label}</dt>
+      <dd className="min-w-0 break-words text-right text-sm font-semibold leading-5 text-zinc-100">{value}</dd>
+    </div>
+  );
+}
+
+function StudentDetailMetricPanel({
+  children,
+  icon: Icon,
   label,
   value
 }: {
+  children?: React.ReactNode;
+  icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: React.ReactNode;
 }) {
   return (
-    <div className="rounded-[8px] border border-white/10 bg-black/25 p-3">
-      <p className="text-xs font-black uppercase text-zinc-500">{label}</p>
-      <div className="mt-2 min-w-0 text-sm font-bold text-white">{value}</div>
-    </div>
+    <section className="min-h-32 rounded-[8px] border border-white/10 bg-[linear-gradient(145deg,#1b1d23_0%,#14151a_52%,#101116_100%)] px-5 py-4 shadow-[0_18px_50px_rgba(0,0,0,0.22)] ring-1 ring-white/[0.025]">
+      <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <div className="mt-8 flex items-end justify-between gap-6">
+        <div className="min-w-0 text-3xl font-semibold tracking-normal text-white">{value}</div>
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -4065,7 +3552,7 @@ function StudentAccessNoticePanel({
     : notice.tone === "warning"
       ? "border-amber-400/25 bg-amber-500/10 text-amber-100"
       : notice.tone === "info"
-        ? "border-sky-400/20 bg-sky-500/10 text-sky-100"
+        ? "border-sky-400/25 bg-sky-500/10 text-sky-100"
       : "border-emerald-400/25 bg-emerald-500/10 text-emerald-100";
 
   async function copyAccessText() {
@@ -4078,18 +3565,18 @@ function StudentAccessNoticePanel({
   }
 
   return (
-    <div className={`rounded-[8px] border p-4 ${toneClassName}`}>
+    <div className={`rounded-[8px] border p-4 shadow-[0_18px_50px_rgba(0,0,0,0.22)] ${toneClassName}`}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <p className="text-sm font-black text-white">{notice.title}</p>
+          <p className="text-sm font-semibold text-current">{notice.title}</p>
           <p className="mt-1 text-sm font-semibold text-current/80">{notice.message}</p>
           {notice.temporaryPassword ? (
             <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
-              <code className="min-h-10 overflow-x-auto rounded-[8px] border border-white/10 bg-black/30 px-3 py-2 text-sm font-black text-white">
+              <code className="min-h-10 overflow-x-auto rounded-[7px] border border-current/15 bg-black/25 px-3 py-2 text-sm font-semibold text-current">
                 {notice.temporaryPassword}
               </code>
               <button
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.08] px-3 py-2 text-sm font-black text-white transition hover:bg-white/15"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[7px] border border-current/15 bg-black/25 px-3 py-2 text-sm font-semibold text-current transition hover:bg-white/10"
                 onClick={copyAccessText}
                 type="button"
               >
@@ -4101,12 +3588,85 @@ function StudentAccessNoticePanel({
         </div>
         <button
           aria-label="Fechar aviso"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-white transition hover:bg-white/10"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-current transition hover:bg-white/10"
           onClick={onDismiss}
           type="button"
         >
           <X className="h-4 w-4" />
         </button>
+      </div>
+    </div>
+  );
+}
+
+function StudentProductAccessTable({
+  courses,
+  sellableProducts
+}: {
+  courses: AdminStudentCourse[];
+  sellableProducts: AdminSellableProduct[];
+}) {
+  if (courses.length === 0) {
+    return (
+      <div className="rounded-[8px] border border-dashed border-white/10 bg-[#15161b] p-8 text-center">
+        <p className="text-sm font-semibold text-zinc-500">Este aluno ainda nao possui produtos vinculados.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-[8px] border border-white/10 bg-[#15161b]">
+      <div className="overflow-x-auto">
+      <Table className="min-w-[920px]">
+        <TableHeader>
+          <TableRow className="border-b border-white/10 bg-white/[0.025] hover:bg-white/[0.025]">
+            <TableHead className="w-[32%] px-4 py-3 text-xs font-semibold text-zinc-500">Produto</TableHead>
+            <TableHead className="py-3 text-xs font-semibold text-zinc-500">Progresso</TableHead>
+            <TableHead className="py-3 text-xs font-semibold text-zinc-500">Turma</TableHead>
+            <TableHead className="py-3 text-xs font-semibold text-zinc-500">Papel</TableHead>
+            <TableHead className="py-3 text-xs font-semibold text-zinc-500">Categoria</TableHead>
+            <TableHead className="py-3 pr-4 text-xs font-semibold text-zinc-500">Acesso</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {courses.map((course) => {
+            const product = getStudentCourseProduct(course, sellableProducts);
+            const courseProgress = Math.min(100, Math.max(0, course.progressPercent));
+
+            return (
+              <TableRow className="border-b border-white/10 hover:bg-white/[0.035]" key={course.id}>
+                <TableCell className="px-4 py-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <ProductCover course={course} sellableProducts={sellableProducts} size="xs" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{course.product}</p>
+                      <p className="mt-0.5 truncate text-xs text-zinc-500">
+                        {product?.kind ?? "Produto"}
+                      </p>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex min-w-[8rem] items-center gap-3 text-sm font-semibold text-zinc-200">
+                    <span>{courseProgress}%</span>
+                    <div className="h-1 w-24 overflow-hidden rounded-full bg-white/10">
+                      <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${courseProgress}%` }} />
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell className="text-sm font-semibold text-zinc-300">{course.cohort ?? "Sem turma"}</TableCell>
+                <TableCell className="text-sm font-semibold text-zinc-300">{getCourseRoleLabel(course)}</TableCell>
+                <TableCell className="text-sm font-semibold text-zinc-300">{course.category ?? getCourseSourceLabel(course)}</TableCell>
+                <TableCell className="pr-4">
+                  <StatusPill className={getSoftEntitlementStatusClassName(course.status)}>
+                    {getEntitlementStatusLabel(course.status)}
+                  </StatusPill>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
       </div>
     </div>
   );
@@ -4147,28 +3707,28 @@ function StudentDeleteConfirmationModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/72 px-4 py-6 backdrop-blur-md">
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/78 px-4 py-6 backdrop-blur-md">
       <section
         aria-labelledby="delete-student-title"
         aria-modal="true"
-        className="w-full max-w-lg overflow-hidden rounded-[8px] border border-red-400/25 bg-[#151515] shadow-[0_30px_120px_rgba(0,0,0,0.72)]"
+        className="w-full max-w-lg overflow-hidden rounded-[12px] border border-red-400/25 bg-[#0d0e11] shadow-[0_36px_140px_rgba(0,0,0,0.78)] ring-1 ring-white/[0.035]"
         role="dialog"
       >
-        <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-[#1b1b1b] p-5">
+        <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-gradient-to-r from-[#1f1718] via-[#141216] to-[#0d0e11] p-5">
           <div className="flex min-w-0 gap-3">
-            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] border border-red-400/25 bg-red-500/10 text-red-200">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[8px] border border-red-400/25 bg-red-500/12 text-red-200 shadow-inner shadow-red-500/10">
               <Trash2 className="h-5 w-5" />
             </span>
             <div className="min-w-0">
-              <p className="text-xs font-black uppercase text-red-200/70">Confirmacao necessaria</p>
-              <h3 className="mt-1 text-xl font-black text-white" id="delete-student-title">
+              <p className="text-[11px] font-semibold uppercase tracking-normal text-red-200/70">Confirmacao necessaria</p>
+              <h3 className="mt-1 text-xl font-semibold tracking-normal text-white" id="delete-student-title">
                 Excluir aluno?
               </h3>
             </div>
           </div>
           <button
             aria-label="Cancelar exclusao"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-[7px] border border-white/10 bg-white/[0.06] text-zinc-300 transition hover:bg-white/10 hover:text-white"
             onClick={onCancel}
             type="button"
           >
@@ -4177,26 +3737,34 @@ function StudentDeleteConfirmationModal({
         </div>
 
         <div className="space-y-4 p-5">
-          <div className="rounded-[8px] border border-white/10 bg-black/25 p-4">
-            <p className="text-sm font-black text-white">{student.fullName}</p>
-            <p className="mt-1 truncate text-sm font-semibold text-zinc-500">{student.email}</p>
+          <div className="flex items-center gap-4 rounded-[10px] border border-white/12 bg-gradient-to-br from-[#18191f] via-[#121318] to-[#0d0e11] p-4 shadow-[0_14px_44px_rgba(0,0,0,0.34)] ring-1 ring-white/[0.025]">
+            <StudentAvatar avatarUrl={student.avatarUrl} name={student.fullName} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-white">{student.fullName}</p>
+              <p className="mt-1 truncate text-sm font-medium text-zinc-500">{student.email}</p>
+              <div className="mt-2">
+                <StatusPill className={getEntitlementStatusClassName(student.status)}>
+                  {getEntitlementStatusLabel(student.status)}
+                </StatusPill>
+              </div>
+            </div>
           </div>
 
-          <p className="text-sm font-semibold leading-6 text-zinc-400">
+          <p className="text-sm font-medium leading-6 text-zinc-400">
             Esta acao remove o cadastro da listagem administrativa. Historico bruto de webhook, eventos de auditoria
             e registros externos nao sao apagados por esta operacao.
           </p>
 
           <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-4 sm:flex-row sm:justify-end">
             <button
-              className="inline-flex min-h-11 items-center justify-center rounded-[8px] border border-white/10 bg-white/[0.055] px-4 py-2 text-sm font-black text-white transition hover:bg-white/10"
+              className="inline-flex min-h-11 items-center justify-center rounded-[8px] border border-white/10 bg-white/[0.06] px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10"
               onClick={onCancel}
               type="button"
             >
               Cancelar
             </button>
             <button
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] border border-red-400/25 bg-red-500/15 px-4 py-2 text-sm font-black text-red-100 transition hover:bg-red-500/25"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] border border-red-400/25 bg-red-500/15 px-4 py-2 text-sm font-semibold text-red-100 transition hover:bg-red-500/25"
               onClick={onConfirm}
               type="button"
             >
@@ -4207,6 +3775,75 @@ function StudentDeleteConfirmationModal({
         </div>
       </section>
     </div>
+  );
+}
+
+function StudentFormSection({
+  children,
+  description,
+  icon: Icon,
+  title
+}: {
+  children: React.ReactNode;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+}) {
+  return (
+    <section className="border-b border-white/10 px-5 py-6 last:border-b-0 sm:px-6">
+      <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
+        <div className="flex min-w-0 gap-3">
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[8px] border border-white/10 bg-white/[0.045] text-zinc-400">
+            <Icon className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h4 className="text-sm font-semibold text-white">{title}</h4>
+            <p className="mt-1 text-sm leading-5 text-zinc-500">{description}</p>
+          </div>
+        </div>
+        <div className="min-w-0">{children}</div>
+      </div>
+    </section>
+  );
+}
+
+function StudentProductPickerCard({
+  onToggle,
+  product,
+  selected
+}: {
+  onToggle: () => void;
+  product: AdminSellableProduct;
+  selected: boolean;
+}) {
+  return (
+    <button
+      className={`flex min-w-0 items-center gap-3 px-3 py-3 text-left transition ${
+        selected
+          ? "bg-red-500/10 shadow-[inset_3px_0_0_var(--accent)]"
+          : "hover:bg-white/[0.045]"
+      }`}
+      onClick={onToggle}
+      type="button"
+    >
+      <span className="relative h-12 w-9 shrink-0 overflow-hidden rounded-[6px] bg-[#101010] ring-1 ring-white/10">
+        <span
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${product.image})` }}
+        />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-white">{product.title}</span>
+        <span className="mt-0.5 block truncate text-xs text-zinc-500">{product.kind}</span>
+      </span>
+      <span
+        className={`grid size-5 shrink-0 place-items-center rounded-md border ${
+          selected ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-white/15 text-transparent"
+        }`}
+      >
+        <CheckCircle2 className="h-3.5 w-3.5" />
+      </span>
+    </button>
   );
 }
 
@@ -4228,49 +3865,92 @@ function StudentFormFields({
   const supabaseConfigured = persistenceProvider === "supabase";
 
   return (
-    <div className="grid gap-4">
-      <div className="grid gap-3 lg:grid-cols-2">
-        <label className="grid gap-2 text-sm font-bold text-zinc-400">
-          Nome
-          <input
-            className={inputClassName}
-            onChange={(event) => onChange("fullName", event.target.value)}
-            required
-            value={formState.fullName}
-          />
-        </label>
-        <label className="grid gap-2 text-sm font-bold text-zinc-400">
-          Email
-          <input
-            className={inputClassName}
-            onChange={(event) => onChange("email", event.target.value)}
-            required
-            type="email"
-            value={formState.email}
-          />
-        </label>
-      </div>
+    <div className="overflow-hidden rounded-[8px] border border-white/10 bg-[#17181d]">
+      <StudentFormSection
+        description="Dados principais usados para busca, contato e identificacao."
+        icon={Users}
+        title="Identidade do aluno"
+      >
+        <div className="grid gap-3 lg:grid-cols-2">
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200">
+            Nome
+            <input
+              className={studentFormInputClassName}
+              onChange={(event) => onChange("fullName", event.target.value)}
+              required
+              value={formState.fullName}
+            />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200">
+            Email
+            <input
+              className={studentFormInputClassName}
+              onChange={(event) => onChange("email", event.target.value)}
+              required
+              type="email"
+              value={formState.email}
+            />
+          </label>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-4">
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200 lg:col-span-2">
+            Telefone
+            <input className={studentFormInputClassName} onChange={(event) => onChange("phone", event.target.value)} value={formState.phone} />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200 lg:col-span-2">
+            Documento
+            <input
+              className={studentFormInputClassName}
+              onChange={(event) => onChange("document", event.target.value)}
+              value={formState.document}
+            />
+          </label>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-4">
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200 lg:col-span-2">
+            Cidade
+            <input className={studentFormInputClassName} onChange={(event) => onChange("city", event.target.value)} value={formState.city} />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200">
+            UF
+            <input className={studentFormInputClassName} maxLength={2} onChange={(event) => onChange("state", event.target.value)} value={formState.state} />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200">
+            Entrada
+            <input
+              className={studentFormInputClassName}
+              onChange={(event) => onChange("joinedAt", event.target.value)}
+              value={formState.joinedAt}
+            />
+          </label>
+        </div>
+      </StudentFormSection>
 
       {showAccessSetup ? (
-        <div className="rounded-[8px] border border-white/10 bg-black/25 p-4">
-          <div className="flex items-start gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[8px] bg-white/[0.055] text-zinc-300">
-              <KeyRound className="h-5 w-5" />
-            </span>
-            <div className="min-w-0 flex-1 space-y-3">
-              <div>
-                <p className="text-sm font-black text-white">Primeiro acesso</p>
-                <p className="mt-1 text-sm text-zinc-500">
-                  {supabaseConfigured
-                    ? "Convite por email e o padrao. Senha temporaria exige troca no primeiro login."
-                    : "Ambiente local sem Supabase: o aluno sera salvo no CRM, mas nenhum email real sera enviado."}
-                </p>
-              </div>
+        <StudentFormSection
+          description={supabaseConfigured ? "Configure como o aluno vai receber o primeiro acesso." : "Ambiente local sem envio real de email."}
+          icon={KeyRound}
+          title="Primeiro acesso"
+        >
+          <div className="grid gap-3 lg:grid-cols-[1fr_1.1fr]">
+            <div className="border-l border-white/10 pl-4">
+              <p className="text-sm font-semibold text-white">
+                {supabaseConfigured ? "Convite seguro" : "Supabase nao configurado"}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-zinc-500">
+                {supabaseConfigured
+                  ? "Convite por email e o padrao. Senha temporaria exige troca no primeiro login."
+                  : "Ambiente local sem Supabase: o aluno sera salvo no CRM, mas nenhum email real sera enviado."}
+              </p>
+            </div>
 
-              <label className="grid gap-2 text-sm font-bold text-zinc-400">
+            <div className="grid gap-3">
+              <label className="grid gap-2 text-sm font-semibold text-zinc-200">
                 Entrega
                 <select
-                  className={inputClassName}
+                  className={studentFormInputClassName}
                   onChange={(event) => onChange("accessSetup", event.target.value)}
                   value={formState.accessSetup}
                 >
@@ -4292,20 +3972,12 @@ function StudentFormFields({
                 </select>
               </label>
 
-	              {!supabaseConfigured ? (
-	                <div className="rounded-[8px] border border-white/10 bg-white/[0.045] px-3 py-2 text-xs font-semibold leading-5 text-zinc-400">
-	                  Para disparar convite por email ou criar login real do aluno, configure `NEXT_PUBLIC_SUPABASE_URL`, uma
-	                  chave publica (`NEXT_PUBLIC_SUPABASE_ANON_KEY` ou `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`) e uma chave
-	                  server-side (`SUPABASE_SERVICE_ROLE_KEY` ou `SUPABASE_SECRET_KEY`).
-	                </div>
-	              ) : null}
-
               {formState.accessSetup === "manual_password" ? (
-                <label className="grid gap-2 text-sm font-bold text-zinc-400">
+                <label className="grid gap-2 text-sm font-semibold text-zinc-200">
                   Senha temporaria
                   <input
                     autoComplete="new-password"
-                    className={inputClassName}
+                    className={studentFormInputClassName}
                     minLength={8}
                     onChange={(event) => onChange("temporaryPassword", event.target.value)}
                     placeholder="Minimo de 8 caracteres"
@@ -4317,133 +3989,104 @@ function StudentFormFields({
               ) : null}
             </div>
           </div>
-        </div>
+
+          {!supabaseConfigured ? (
+            <div className="mt-3 rounded-[8px] border border-white/10 bg-white/[0.045] px-3 py-2 text-xs font-semibold leading-5 text-zinc-500">
+              Para disparar convite por email ou criar login real do aluno, configure `NEXT_PUBLIC_SUPABASE_URL`, uma
+              chave publica (`NEXT_PUBLIC_SUPABASE_ANON_KEY` ou `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`) e uma chave
+              server-side (`SUPABASE_SERVICE_ROLE_KEY` ou `SUPABASE_SECRET_KEY`).
+            </div>
+          ) : null}
+        </StudentFormSection>
       ) : null}
 
-      <div className="grid gap-3 lg:grid-cols-4">
-        <label className="grid gap-2 text-sm font-bold text-zinc-400 lg:col-span-2">
-          Telefone
-          <input className={inputClassName} onChange={(event) => onChange("phone", event.target.value)} value={formState.phone} />
-        </label>
-        <label className="grid gap-2 text-sm font-bold text-zinc-400 lg:col-span-2">
-          Documento
-          <input
-            className={inputClassName}
-            onChange={(event) => onChange("document", event.target.value)}
-            value={formState.document}
-          />
-        </label>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-4">
-        <label className="grid gap-2 text-sm font-bold text-zinc-400 lg:col-span-2">
-          Cidade
-          <input className={inputClassName} onChange={(event) => onChange("city", event.target.value)} value={formState.city} />
-        </label>
-        <label className="grid gap-2 text-sm font-bold text-zinc-400">
-          UF
-          <input className={inputClassName} maxLength={2} onChange={(event) => onChange("state", event.target.value)} value={formState.state} />
-        </label>
-        <label className="grid gap-2 text-sm font-bold text-zinc-400">
-          Entrada
-          <input
-            className={inputClassName}
-            onChange={(event) => onChange("joinedAt", event.target.value)}
-            value={formState.joinedAt}
-          />
-        </label>
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-3">
-        <label className="grid gap-2 text-sm font-bold text-zinc-400">
-          Origem
-          <select
-            className={inputClassName}
-            onChange={(event) => onChange("sourceProvider", event.target.value)}
-            value={formState.sourceProvider}
-          >
-            {sourceProviderOptions.map((provider) => (
-              <option key={provider} value={provider}>
-                {provider}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid gap-2 text-sm font-bold text-zinc-400">
-          Status
-          <select
-            className={inputClassName}
-            onChange={(event) => onChange("status", event.target.value)}
-            value={formState.status}
-          >
-            {statusOptions.map((status) => (
-              <option key={status} value={status}>
-                {getEntitlementStatusLabel(status)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid gap-2 text-sm font-bold text-zinc-400">
-          ID externo
-          <input
-            className={inputClassName}
-            onChange={(event) => onChange("externalCustomerId", event.target.value)}
-            value={formState.externalCustomerId}
-          />
-        </label>
-      </div>
-
-      <div>
-        <p className="text-sm font-bold text-zinc-400">Produtos comprados</p>
-        <div className="mt-2 grid gap-2 lg:grid-cols-2">
-          {sellableProducts.map((product) => {
-            const selected = formState.courseIds.includes(product.id);
-
-            return (
-              <button
-                className={`flex min-h-11 items-center justify-between gap-3 rounded-[8px] border px-3 py-2 text-left text-sm font-bold transition ${
-                  selected
-                    ? "border-[var(--accent)]/55 bg-red-500/10 text-white"
-                    : "border-white/10 bg-black/25 text-zinc-400 hover:bg-white/[0.055] hover:text-white"
-                }`}
-                key={product.id}
-                onClick={() => onToggleCourse(product.id)}
-                type="button"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate">{product.title}</span>
-                  <span className="mt-0.5 block text-xs text-zinc-500">{product.kind}</span>
-                </span>
-                <span
-                  className={`grid h-5 w-5 shrink-0 place-items-center rounded border ${
-                    selected ? "border-[var(--accent)] bg-[var(--accent)]" : "border-white/20"
-                  }`}
-                >
-                  {selected ? <CheckCircle2 className="h-3.5 w-3.5 text-white" /> : null}
-                </span>
-              </button>
-            );
-          })}
+      <StudentFormSection
+        description="Fonte da compra/importacao, status geral e identificador externo."
+        icon={CalendarDays}
+        title="Origem e status"
+      >
+        <div className="grid gap-3 lg:grid-cols-3">
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200">
+            Origem
+            <select
+              className={studentFormInputClassName}
+              onChange={(event) => onChange("sourceProvider", event.target.value)}
+              value={formState.sourceProvider}
+            >
+              {sourceProviderOptions.map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200">
+            Status
+            <select
+              className={studentFormInputClassName}
+              onChange={(event) => onChange("status", event.target.value)}
+              value={formState.status}
+            >
+              {statusOptions.map((status) => (
+                <option key={status} value={status}>
+                  {getEntitlementStatusLabel(status)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200">
+            ID externo
+            <input
+              className={studentFormInputClassName}
+              onChange={(event) => onChange("externalCustomerId", event.target.value)}
+              value={formState.externalCustomerId}
+            />
+          </label>
         </div>
-      </div>
+      </StudentFormSection>
 
-      <label className="grid gap-2 text-sm font-bold text-zinc-400">
-        Tags
-        <input
-          className={inputClassName}
-          onChange={(event) => onChange("tags", event.target.value)}
-          placeholder="novo aluno, bootcamp"
-          value={formState.tags}
-        />
-      </label>
-      <label className="grid gap-2 text-sm font-bold text-zinc-400">
-        Observacoes
-        <textarea
-          className={`${inputClassName} min-h-24 resize-none py-3`}
-          onChange={(event) => onChange("notes", event.target.value)}
-          value={formState.notes}
-        />
-      </label>
+      <StudentFormSection
+        description="Produtos liberados para este aluno dentro da area de alunos."
+        icon={LibraryBig}
+        title="Produtos comprados"
+      >
+        <div className="overflow-hidden rounded-[8px] border border-white/10 divide-y divide-white/10">
+          {sellableProducts.map((product) => (
+            <StudentProductPickerCard
+              key={product.id}
+              onToggle={() => onToggleCourse(product.id)}
+              product={product}
+              selected={formState.courseIds.includes(product.id)}
+            />
+          ))}
+        </div>
+      </StudentFormSection>
+
+      <StudentFormSection
+        description="Contexto interno para suporte, segmentacao e operacao."
+        icon={Pencil}
+        title="Notas internas"
+      >
+        <div className="grid gap-3">
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200">
+            Tags
+            <input
+              className={studentFormInputClassName}
+              onChange={(event) => onChange("tags", event.target.value)}
+              placeholder="novo aluno, bootcamp"
+              value={formState.tags}
+            />
+          </label>
+          <label className="grid gap-2 text-sm font-semibold text-zinc-200">
+            Observacoes
+            <textarea
+              className={`${studentFormInputClassName} min-h-28 resize-none py-3`}
+              onChange={(event) => onChange("notes", event.target.value)}
+              value={formState.notes}
+            />
+          </label>
+        </div>
+      </StudentFormSection>
     </div>
   );
 }
@@ -4453,11 +4096,9 @@ function StudentProfileModal({
   formSubmitting,
   formState,
   modalMode,
-  onBlockCourse,
   onChange,
   onClose,
   onEdit,
-  onMoveCourse,
   onRemove,
   onResendAccess,
   onSubmit,
@@ -4470,11 +4111,9 @@ function StudentProfileModal({
   formSubmitting: boolean;
   formState: StudentFormState;
   modalMode: StudentModalMode;
-  onBlockCourse: (courseId: string) => void;
   onChange: (field: keyof StudentFormState, value: string) => void;
   onClose: () => void;
   onEdit: () => void;
-  onMoveCourse: (courseId: string) => void;
   onRemove: () => void;
   onResendAccess: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -4483,411 +4122,286 @@ function StudentProfileModal({
   sellableProducts: AdminSellableProduct[];
   student: AdminStudent | null;
 }) {
-  const [showAccessHistory, setShowAccessHistory] = useState(false);
-
-  useEffect(() => {
-    if (!modalMode) {
-      return;
-    }
-
-    const previousOverflow = document.body.style.overflow;
-    const previousPaddingRight = document.body.style.paddingRight;
-    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
-
-    document.body.style.overflow = "hidden";
-
-    if (scrollbarWidth > 0) {
-      document.body.style.paddingRight = `${scrollbarWidth}px`;
-    }
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.body.style.paddingRight = previousPaddingRight;
-    };
-  }, [modalMode]);
-
   if (!modalMode) {
     return null;
   }
 
   const isFormMode = modalMode === "new" || modalMode === "edit";
   const title = modalMode === "new" ? "Novo aluno" : modalMode === "edit" ? "Editar aluno" : "Perfil do aluno";
-  const accessHistory = student?.accessHistory ?? [];
-  const firstAccess = student?.firstAccessAt ?? student?.joinedAt ?? "Sem acesso";
-  const lastAccess = student?.lastActivityAt ?? "Sem acesso";
+  const firstAccess = formatAdminAccessDate(student?.firstAccessAt ?? student?.joinedAt ?? "Sem acesso");
+  const lastAccess = formatAdminAccessDate(student?.lastActivityAt ?? "Sem acesso");
   const accessCount = student?.accessCount ?? 0;
   const studentCategory = student ? getStudentCategory(student) : "Aluno";
   const studentEngagement = student ? getStudentEngagement(student) : "Nenhum";
   const studentAverageProgress = student ? getStudentAverageProgress(student) : 0;
+  const selectedCourseCount = formState.courseIds.length;
+  const modalSubject = student && modalMode !== "new" ? student.fullName : "Novo aluno";
 
   return (
-    <div className="modal-viewport-scroll fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-black/72 px-3 py-4 backdrop-blur-md sm:px-6 sm:py-8">
-      <div
-        aria-labelledby="student-profile-modal-title"
-        aria-modal="true"
-        className="mx-auto max-w-5xl overflow-hidden rounded-[8px] border border-white/10 bg-[#121212] shadow-[0_30px_120px_rgba(0,0,0,0.72)]"
-        role="dialog"
+    <Dialog
+      open={Boolean(modalMode)}
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
+    >
+      <DialogContent
+        className="max-w-[min(1240px,calc(100vw-2rem))] rounded-[12px] border border-white/10 bg-[#0d0e11] p-0 text-zinc-100 shadow-[0_34px_140px_rgba(0,0,0,0.78)] ring-1 ring-white/[0.035]"
+        showCloseButton={false}
       >
-        <div className="flex items-center justify-between gap-4 border-b border-white/10 bg-[#181818] px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-xs font-black uppercase text-zinc-500">CRM Bunker707</p>
-            <h3 className="truncate text-xl font-black text-white" id="student-profile-modal-title">
-              {title}
-            </h3>
+        <DialogHeader className="shrink-0 border-b border-white/10 bg-[linear-gradient(135deg,#1c1114_0%,#17181d_42%,#101116_100%)] p-0">
+          <div className="flex items-center justify-between gap-4 px-5 py-4 sm:px-7">
+            <div className="min-w-0">
+              <DialogDescription className="text-sm font-semibold text-zinc-500">
+                <span className="text-zinc-200 underline underline-offset-2">Alunos</span>
+                <span className="px-3 text-zinc-700">/</span>
+                <span>{modalSubject}</span>
+              </DialogDescription>
+              <DialogTitle className="sr-only" id="student-profile-modal-title">
+                {title} - {modalSubject}
+              </DialogTitle>
+            </div>
+            <Button
+              aria-label="Fechar modal do aluno"
+              className="size-9 rounded-full text-zinc-500 hover:bg-white/10 hover:text-white"
+              onClick={onClose}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              <X className="h-5 w-5" />
+            </Button>
           </div>
-          <button
-            aria-label="Fechar modal"
-            className="grid h-10 w-10 place-items-center rounded-[8px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+        </DialogHeader>
 
         {isFormMode ? (
-          <form className="p-5 sm:p-6" onSubmit={onSubmit}>
-            {student && modalMode === "edit" ? (
-              <div className="mb-5 flex items-center gap-4 rounded-[8px] border border-white/10 bg-black/25 p-4">
-                <StudentAvatar avatarUrl={student.avatarUrl} name={student.fullName} size="lg" />
-                <div className="min-w-0">
-                  <StatusPill className={getEntitlementStatusClassName(student.status)}>
-                    {getEntitlementStatusLabel(student.status)}
-                  </StatusPill>
-                  <h4 className="mt-2 truncate text-2xl font-black text-white">{student.fullName}</h4>
-                  <p className="mt-1 truncate text-sm font-semibold text-zinc-500">{student.email}</p>
+          <form className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#0d0e11]" onSubmit={onSubmit}>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <section className="border-b border-white/10 bg-[#101116] px-5 py-6 sm:px-8">
+                <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-zinc-500">
+                      {modalMode === "new" ? "Novo cadastro" : "Atualizacao cadastral"}
+                    </p>
+                    <h2 className="mt-2 truncate text-3xl font-semibold tracking-normal text-white">
+                      {student && modalMode === "edit" ? student.fullName : "Configurar aluno"}
+                    </h2>
+                  </div>
+                  <div className="flex flex-wrap gap-2 lg:justify-end">
+                    {[
+                      ["Origem", formState.sourceProvider],
+                      ["Produtos", `${selectedCourseCount} selecionado${selectedCourseCount === 1 ? "" : "s"}`],
+                      ["Status", getEntitlementStatusLabel(formState.status)]
+                    ].map(([label, value]) => (
+                      <span className="inline-flex min-h-9 items-center gap-2 rounded-full border border-white/10 bg-white/[0.045] px-3 text-xs font-semibold text-zinc-300" key={label}>
+                        <span className="text-zinc-500">{label}</span>
+                        <span className="text-white">{value}</span>
+                      </span>
+                    ))}
+                  </div>
                 </div>
+              </section>
+
+              <div className="px-5 py-6 sm:px-8">
+                <StudentFormFields
+                  formState={formState}
+                  onChange={onChange}
+                  persistenceProvider={persistenceProvider}
+                  showAccessSetup={modalMode === "new"}
+                  onToggleCourse={onToggleCourse}
+                  sellableProducts={sellableProducts}
+                />
               </div>
-            ) : null}
+            </div>
 
-            <StudentFormFields
-              formState={formState}
-              onChange={onChange}
-              persistenceProvider={persistenceProvider}
-              showAccessSetup={modalMode === "new"}
-              onToggleCourse={onToggleCourse}
-              sellableProducts={sellableProducts}
-            />
-
-            <div className="mt-5 flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:justify-end">
-              <button
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-4 py-2 text-sm font-black text-white transition hover:bg-white/10"
-                onClick={onClose}
-                type="button"
-              >
-                Cancelar
-              </button>
-              <button
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] bg-[var(--accent)] px-4 py-2 text-sm font-black text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={formSubmitting}
-                type="submit"
-              >
-                <CheckCircle2 className="h-4 w-4" />
-                {formSubmitting ? "Salvando..." : modalMode === "new" ? "Adicionar aluno" : "Salvar alteracoes"}
-              </button>
+            <div className="sticky bottom-0 z-20 flex flex-col-reverse gap-3 border-t border-white/10 bg-[#17181d]/96 px-5 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-8">
+              <p className="text-xs font-semibold text-zinc-500">
+                Entitlements internos continuam sendo a fonte de verdade para liberar acesso.
+              </p>
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
+                <Button
+                  className="h-10 rounded-[8px] border-white/10 bg-[#111217] px-4 text-zinc-200 hover:bg-white/10 hover:text-white"
+                  onClick={onClose}
+                  type="button"
+                  variant="outline"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  className="h-10 rounded-[8px] bg-[var(--accent)] px-4 text-white hover:bg-[#ff1f2a]"
+                  disabled={formSubmitting}
+                  type="submit"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                  {formSubmitting ? "Salvando..." : modalMode === "new" ? "Adicionar aluno" : "Salvar alteracoes"}
+                </Button>
+              </div>
             </div>
           </form>
         ) : student ? (
-          <div className="space-y-4 p-5 sm:p-6">
-            <section className="rounded-[8px] border border-white/10 bg-white/[0.035] p-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
-                  <StudentAvatar avatarUrl={student.avatarUrl} name={student.fullName} size="lg" />
-                  <div className="min-w-0">
-                    <h2 className="text-3xl font-black leading-tight text-white">{student.fullName}</h2>
-                    <p className="mt-2 inline-flex max-w-full items-center gap-2 truncate text-sm font-semibold text-zinc-400">
-                      <Mail className="h-4 w-4 shrink-0 text-zinc-500" />
-                      <span className="truncate">{student.email}</span>
-                    </p>
+          <div className="min-h-0 flex-1 overflow-y-auto bg-[#0d0e11]">
+            <div className="px-5 py-7 sm:px-8">
+              <section className="rounded-[10px] border border-white/10 bg-[linear-gradient(145deg,#211216_0%,#17181d_44%,#101116_100%)] p-5 shadow-[0_24px_80px_rgba(0,0,0,0.38)] ring-1 ring-white/[0.025]">
+                <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <StudentAvatar avatarUrl={student.avatarUrl} name={student.fullName} size="lg" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-normal text-red-200/70">Perfil do aluno</p>
+                      <h2 className="mt-1 truncate text-3xl font-semibold tracking-normal text-white">{student.fullName}</h2>
+                      <p className="mt-1 truncate text-sm font-medium text-zinc-500">{student.email}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <StatusPill className={getSoftEntitlementStatusClassName(student.status)}>
+                          {getEntitlementStatusLabel(student.status)}
+                        </StatusPill>
+                        <StatusPill className="border-white/10 bg-white/[0.055] text-zinc-300">
+                          {studentCategory}
+                        </StatusPill>
+                        <StatusPill className={getProviderClassName(student.sourceProvider)}>
+                          {student.sourceProvider}
+                        </StatusPill>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <Button
+                      className="h-10 rounded-[8px] border-white/10 bg-[#17181d] px-4 text-zinc-200 hover:bg-white/10 hover:text-white"
+                      disabled={accessActionBusy}
+                      onClick={onResendAccess}
+                      type="button"
+                      variant="outline"
+                    >
+                      <Send className="h-4 w-4" />
+                      Reenviar acesso
+                    </Button>
+                    <Button
+                      className="h-10 rounded-[8px] bg-[var(--accent)] px-4 text-white hover:bg-[#ff1f2a]"
+                      onClick={onEdit}
+                      type="button"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Editar cadastro
+                    </Button>
+                    <Button
+                      className="h-10 rounded-[8px] bg-red-500/10 px-4 text-red-200 hover:bg-red-500/20"
+                      onClick={onRemove}
+                      type="button"
+                      variant="destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Remover
+                    </Button>
                   </div>
                 </div>
+              </section>
 
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[8px] bg-white px-3 py-2 text-sm font-black text-black transition hover:bg-zinc-200"
-                    onClick={onEdit}
-                    type="button"
-                  >
-                    <Pencil className="h-4 w-4" />
-                    Editar
-                  </button>
-                  <button
-                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[8px] border border-red-400/25 bg-red-500/10 px-3 py-2 text-sm font-black text-red-200 transition hover:bg-red-500/15"
-                    onClick={onRemove}
-                    type="button"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Remover
-                  </button>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <InfoTile label="Progresso" value={`${studentAverageProgress}%`} />
-                <InfoTile
-                  label="Engajamento"
-                  value={<StatusPill className={getStudentEngagementClassName(studentEngagement)}>{studentEngagement}</StatusPill>}
-                />
-                <InfoTile
-                  label="Status geral"
-                  value={<StatusPill className={getEntitlementStatusClassName(student.status)}>{getEntitlementStatusLabel(student.status)}</StatusPill>}
-                />
-                <InfoTile
-                  label="Produtos"
-                  value={`${student.courses.length} produto${student.courses.length === 1 ? "" : "s"}`}
-                />
-              </div>
-            </section>
-
-            <section className="rounded-[8px] border border-white/10 bg-white/[0.035] p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="grid h-10 w-10 place-items-center rounded-[8px] bg-white/[0.055] text-zinc-300">
-                    <CalendarDays className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h4 className="text-lg font-black text-white">Dados pessoais e acesso</h4>
-                    <p className="text-sm text-zinc-500">Cadastro, origem e historico de entrada.</p>
-                  </div>
-                </div>
-                <button
-                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 py-2 text-sm font-black text-white transition hover:bg-white/10"
-                  onClick={() => setShowAccessHistory((current) => !current)}
-                  type="button"
-                >
-                  <Eye className="h-4 w-4" />
-                  {showAccessHistory ? "Ocultar historico" : "Ver historico"}
-                </button>
-              </div>
-
-              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                <InfoTile label="Nome" value={student.fullName} />
-                <InfoTile label="Email" value={student.email} />
-                <InfoTile label="Telefone" value={student.phone || "Nao informado"} />
-                <InfoTile label="Documento" value={student.document || "Nao informado"} />
-                <InfoTile label="Cidade/UF" value={`${student.city || "Nao informada"}/${student.state || "--"}`} />
-                <InfoTile label="Categoria" value={studentCategory} />
-                <InfoTile label="Origem principal" value={getStudentSourceLabel(student)} />
-                <InfoTile label="Primeiro acesso" value={firstAccess} />
-                <InfoTile label="Ultimo acesso" value={lastAccess} />
-                <InfoTile label="Acessos" value={accessCount} />
-              </div>
-
-              {showAccessHistory ? (
-                <div className="mt-4 rounded-[8px] border border-white/10 bg-black/25">
-                  {accessHistory.length > 0 ? (
-                    <div className="divide-y divide-white/10">
-                      {accessHistory.map((event) => (
-                        <div className="grid gap-3 p-3 text-sm md:grid-cols-[1fr_1fr_1fr]" key={event.id}>
-                          <span>
-                            <span className="block text-xs font-black uppercase text-zinc-500">Evento</span>
-                            <span className="mt-1 block font-bold text-white">{getAccessActionLabel(event.action)}</span>
-                          </span>
-                          <span>
-                            <span className="block text-xs font-black uppercase text-zinc-500">Quando</span>
-                            <span className="mt-1 block font-bold text-white">{event.occurredAt}</span>
-                          </span>
-                          <span>
-                            <span className="block text-xs font-black uppercase text-zinc-500">Dispositivo/local</span>
-                            <span className="mt-1 block font-bold text-white">
-                              {event.device} / {event.location}
-                            </span>
-                          </span>
+              <div className="mt-5 grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
+                <aside className="space-y-4">
+                  <section className="rounded-[8px] border border-white/10 bg-[#15161b] p-4">
+                    <h3 className="text-sm font-semibold text-white">Resumo de acesso</h3>
+                    <dl className="mt-4 space-y-3">
+                      {[
+                        ["Produtos", student.courses.length.toString()],
+                        ["Acessos", accessCount.toString()],
+                        ["Primeiro acesso", firstAccess],
+                        ["Ultimo acesso", lastAccess]
+                      ].map(([label, value]) => (
+                        <div className="border-b border-white/10 pb-3 last:border-b-0 last:pb-0" key={label}>
+                          <dt className="text-xs font-semibold text-zinc-500">{label}</dt>
+                          <dd className="mt-1 break-words text-sm font-semibold text-zinc-100">{value}</dd>
                         </div>
                       ))}
+                    </dl>
+                  </section>
+
+                  <section className="rounded-[8px] border border-white/10 bg-[#15161b] p-4">
+                    <h3 className="text-sm font-semibold text-white">Segmentacao</h3>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {(student.tags.length > 0 ? student.tags : ["sem tags"]).map((tag) => (
+                        <span className="rounded-full border border-white/10 bg-white/[0.045] px-2.5 py-1 text-xs font-semibold text-zinc-300" key={tag}>
+                          {tag}
+                        </span>
+                      ))}
                     </div>
-                  ) : (
-                    <p className="p-4 text-sm font-semibold text-zinc-500">Nenhum acesso registrado ainda.</p>
-                  )}
-                </div>
-              ) : null}
-            </section>
+                  </section>
+                </aside>
 
-            <section className="rounded-[8px] border border-white/10 bg-white/[0.035]">
-              <div className="flex items-center justify-between gap-3 border-b border-white/10 p-4">
-                <div className="flex items-center gap-3">
-                  <span className="grid h-10 w-10 place-items-center rounded-[8px] bg-white/[0.055] text-zinc-300">
-                    <GraduationCap className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <h4 className="text-lg font-black text-white">Produtos comprados</h4>
-                    <p className="text-sm text-zinc-500">Turma, papel, origem, acesso e progresso por produto.</p>
-                  </div>
-                </div>
-                <StatusPill className="border-white/10 bg-white/[0.055] text-zinc-300">
-                  {student.courses.length} produto{student.courses.length === 1 ? "" : "s"}
-                </StatusPill>
-              </div>
-
-              <div className="divide-y divide-white/10">
-                {student.courses.map((course) => {
-                  const product = getStudentCourseProduct(course, sellableProducts);
-
-                  return (
-                    <article className="p-4" key={course.id}>
-                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                        <div className="flex min-w-0 flex-1 gap-4">
-                          <ProductCover course={course} sellableProducts={sellableProducts} size="md" />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap gap-2">
-                              <StatusPill className={getEntitlementStatusClassName(course.status)}>
-                                {getEntitlementStatusLabel(course.status)}
-                              </StatusPill>
-                              <StatusPill className="border-white/10 bg-white/[0.055] text-zinc-300">
-                                {product?.kind ?? "Produto"}
-                              </StatusPill>
-                              <StatusPill className={getProviderClassName(course.sourceProvider)}>
-                                {course.sourceProvider}
-                              </StatusPill>
-                            </div>
-                            <h5 className="mt-3 text-lg font-black text-white">{course.product}</h5>
-
-                            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                              <InfoTile label="Turma" value={course.cohort ?? "Sem turma"} />
-                              <InfoTile label="Papel" value={getCourseRoleLabel(course)} />
-                              <InfoTile label="Origem" value={getCourseSourceLabel(course)} />
-                              <InfoTile label="Acesso" value={getEntitlementStatusLabel(course.status)} />
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="w-full shrink-0 rounded-[8px] border border-white/10 bg-black/25 p-3 xl:w-60">
-                          <div className="flex items-center justify-between text-xs font-bold text-zinc-500">
-                            <span>Progresso</span>
-                            <span>{course.progressPercent}%</span>
-                          </div>
-                          <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
-                            <div className="h-full bg-[var(--accent)]" style={{ width: `${course.progressPercent}%` }} />
-                          </div>
-                          <p className="mt-3 text-xs font-bold text-zinc-500">
-                            Ultima atividade: {course.lastActivityAt}
-                          </p>
-                        </div>
+                <div className="min-w-0 space-y-5">
+                  <section className="grid gap-4 lg:grid-cols-2">
+                    <StudentDetailMetricPanel
+                      icon={TrendingUp}
+                      label="Progresso medio"
+                      value={`${studentAverageProgress}%`}
+                    >
+                      <div className="h-1 w-64 max-w-[45vw] overflow-hidden rounded-full bg-white/10">
+                        <div
+                          className="h-full rounded-full bg-[var(--accent)]"
+                          style={{ width: `${Math.min(100, Math.max(0, studentAverageProgress))}%` }}
+                        />
                       </div>
-
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <button
-                          className="inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 py-2 text-xs font-black text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                          disabled={accessActionBusy}
-                          onClick={onResendAccess}
-                          type="button"
-                        >
-                          <Send className="h-3.5 w-3.5" />
-                          {accessActionBusy ? "Enviando..." : "Reenviar acesso"}
-                        </button>
-                        <button
-                          className="inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-amber-400/25 bg-amber-500/10 px-3 py-2 text-xs font-black text-amber-200 transition hover:bg-amber-500/15"
-                          onClick={() => onMoveCourse(course.id)}
-                          type="button"
-                        >
-                          <ArrowRightLeft className="h-3.5 w-3.5" />
-                          Mudar turma
-                        </button>
-                        <button
-                          className="inline-flex min-h-9 items-center gap-2 rounded-[8px] border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs font-black text-red-200 transition hover:bg-red-500/15"
-                          onClick={() => onBlockCourse(course.id)}
-                          type="button"
-                        >
-                          <Ban className="h-3.5 w-3.5" />
-                          Bloquear
-                        </button>
+                    </StudentDetailMetricPanel>
+                    <StudentDetailMetricPanel
+                      icon={Activity}
+                      label="Engajamento"
+                      value={studentEngagement}
+                    >
+                      <div className="flex h-8 items-end gap-1">
+                        {[22, 36, 52, 68].map((height, index) => (
+                          <span
+                            className={`w-1 rounded-full ${index < Math.max(1, Math.ceil(accessCount / 8)) ? "bg-[var(--accent)]" : "bg-white/15"}`}
+                            key={height}
+                            style={{ height }}
+                          />
+                        ))}
                       </div>
-                    </article>
-                  );
-                })}
+                    </StudentDetailMetricPanel>
+                  </section>
+
+                  <section className="rounded-[8px] border border-white/10 bg-[#15161b] p-5">
+                    <h3 className="text-xl font-semibold tracking-normal text-white">Informacoes e dados pessoais</h3>
+                    <div className="mt-5 grid gap-x-8 lg:grid-cols-2">
+                      <dl>
+                        <StudentInfoRow label="Nome completo" value={student.fullName} />
+                        <StudentInfoRow label="E-mail" value={student.email} />
+                        <StudentInfoRow label="Categoria" value={studentCategory} />
+                        <StudentInfoRow label="Telefone" value={student.phone || "Nao informado"} />
+                        <StudentInfoRow label="Documento" value={student.document || "Nao informado"} />
+                      </dl>
+                      <dl>
+                        <StudentInfoRow label="Primeiro acesso" value={firstAccess} />
+                        <StudentInfoRow label="Ultimo acesso" value={lastAccess} />
+                        <StudentInfoRow label="Quantidade de acessos" value={accessCount} />
+                        <StudentInfoRow label="Acesso geral" value={getEntitlementStatusLabel(student.status)} />
+                        <StudentInfoRow label="Cidade/UF" value={`${student.city || "Nao informada"}/${student.state || "--"}`} />
+                      </dl>
+                    </div>
+                  </section>
+
+                  <section>
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <h3 className="text-xl font-semibold tracking-normal text-white">Produtos</h3>
+                      <span className="text-sm font-semibold text-zinc-500">
+                        {student.courses.length} produto{student.courses.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <StudentProductAccessTable
+                      courses={student.courses}
+                      sellableProducts={sellableProducts}
+                    />
+                  </section>
+                </div>
               </div>
-            </section>
+            </div>
           </div>
         ) : null}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function CourseStudentGroups({
-  courseFilter,
-  onSelectStudent,
-  sellableProducts,
-  students
-}: {
-  courseFilter: "all" | string;
-  onSelectStudent: (studentId: string) => void;
-  sellableProducts: AdminSellableProduct[];
-  students: AdminStudent[];
-}) {
-  const courseGroups = sellableProducts
-    .filter((product) => courseFilter === "all" || product.id === courseFilter)
-    .map((product) => {
-      const enrolledStudents = students.filter((student) =>
-        student.courses.some((course) => course.targetId === product.id)
-      );
-      const activeStudents = enrolledStudents.filter((student) =>
-        student.courses.some((course) => course.targetId === product.id && course.status === "active")
-      );
-
-      return {
-        activeStudents,
-        enrolledStudents,
-        product
-      };
-    });
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {courseGroups.map((group) => (
-        <article className={`${panelClassName} p-5`} key={group.product.id}>
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <StatusPill className="border-white/10 bg-white/[0.055] text-zinc-300">{group.product.kind}</StatusPill>
-              <h3 className="mt-3 truncate text-lg font-black text-white">{group.product.title}</h3>
-              <p className="mt-1 text-sm text-zinc-500">
-                {group.activeStudents.length} ativos / {group.enrolledStudents.length} alunos
-              </p>
-            </div>
-            <span className="grid h-12 w-12 place-items-center rounded-[8px] bg-white/[0.055] text-zinc-300">
-              <GraduationCap className="h-6 w-6" />
-            </span>
-          </div>
-
-          <div className="mt-5 space-y-2">
-            {group.enrolledStudents.length > 0 ? (
-              group.enrolledStudents.map((student) => {
-                const course = student.courses.find((item) => item.targetId === group.product.id);
-
-                return (
-                  <button
-                    className="flex w-full items-center gap-3 rounded-[8px] border border-white/10 bg-black/25 p-3 text-left transition hover:bg-white/[0.055]"
-                    key={`${group.product.id}-${student.id}`}
-                    onClick={() => onSelectStudent(student.id)}
-                    type="button"
-                  >
-                    <StudentAvatar name={student.fullName} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-black text-white">{student.fullName}</span>
-                      <span className="mt-1 block truncate text-xs font-semibold text-zinc-500">{student.email}</span>
-                    </span>
-                    {course ? (
-                      <span className="text-right">
-                        <StatusPill className={getEntitlementStatusClassName(course.status)}>
-                          {getEntitlementStatusLabel(course.status)}
-                        </StatusPill>
-                        <span className="mt-1 block text-xs font-bold text-zinc-500">{course.progressPercent}%</span>
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })
-            ) : (
-              <div className="rounded-[8px] border border-dashed border-white/10 bg-black/20 p-4 text-sm font-semibold text-zinc-500">
-                Nenhum aluno listado neste curso.
-              </div>
-            )}
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-}
+type StudentListUpdater = AdminStudent[] | ((students: AdminStudent[]) => AdminStudent[]);
+type PersistStudents = (updater: StudentListUpdater) => Promise<AdminStudent[]>;
 
 function StudentsView({
   cohorts,
@@ -4899,7 +4413,7 @@ function StudentsView({
   students
 }: {
   cohorts: string[];
-  onChangeStudents: React.Dispatch<React.SetStateAction<AdminStudent[]>>;
+  onChangeStudents: PersistStudents;
   onSelectStudent: (studentId: string) => void;
   persistenceProvider: AdminDashboardData["persistenceProvider"];
   selectedStudentId: string;
@@ -4910,7 +4424,6 @@ function StudentsView({
   const [sourceFilter, setSourceFilter] = useState<"all" | AdminSourceProvider>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | AdminEntitlementStatus>("all");
   const [courseFilter, setCourseFilter] = useState<"all" | string>("all");
-  const [listMode, setListMode] = useState<StudentListMode>("students");
   const [modalMode, setModalMode] = useState<StudentModalMode>(null);
   const [accessActionBusy, setAccessActionBusy] = useState(false);
   const [accessNotice, setAccessNotice] = useState<StudentAccessNotice | null>(null);
@@ -4954,18 +4467,18 @@ function StudentsView({
     })
   ), [courseFilter, normalizedQuery, sourceFilter, statusFilter, students]);
 
-  const studentStats = useMemo(() => {
-    const activeStudents = students.filter((student) => student.status === "active").length;
-    const totalCourses = students.reduce((total, student) => total + student.courses.length, 0);
-    const manualStudents = students.filter((student) => student.sourceProvider === "Manual").length;
-
-    return [
-      { icon: Users, label: "Alunos", value: String(students.length) },
-      { icon: ShieldCheck, label: "Ativos", value: String(activeStudents) },
-      { icon: ShoppingBag, label: "Compras", value: String(totalCourses) },
-      { icon: UserPlus, label: "Manuais", value: String(manualStudents) }
-    ];
-  }, [students]);
+  async function persistStudentChange(updater: StudentListUpdater, title = "Alteracao nao salva") {
+    try {
+      return await onChangeStudents(updater);
+    } catch (error) {
+      setAccessNotice({
+        message: error instanceof Error ? error.message : "Nao foi possivel persistir a alteracao no CRM.",
+        title,
+        tone: "error"
+      });
+      throw error;
+    }
+  }
 
   function openNewStudentForm() {
     setFormState({
@@ -5003,7 +4516,7 @@ function StudentsView({
         ? simulated ? "Cadastro local sem envio" : "Convite por email"
         : simulated ? "Senha temporaria local" : "Senha temporaria";
 
-    onChangeStudents((current) =>
+    void persistStudentChange((current) =>
       current.map((studentRecord) =>
         studentRecord.id === student.id
           ? {
@@ -5021,7 +4534,7 @@ function StudentsView({
             }
           : studentRecord
       )
-    );
+    ).catch(() => undefined);
   }
 
   function getTemporaryPasswordCopyText(student: AdminStudent, temporaryPassword: string) {
@@ -5132,54 +4645,43 @@ function StudentsView({
     await requestStudentAccessDelivery(selectedStudent, "invite");
   }
 
-  function blockStudentCourse(courseId: string) {
-    if (!selectedStudent) {
-      return;
-    }
-
-    onChangeStudents((current) =>
-      current.map((student) =>
-        student.id === selectedStudent.id
-          ? {
-              ...student,
-              courses: student.courses.map((course) =>
-                course.id === courseId
-                  ? {
-                      ...course,
-                      endsAt: "Bloqueado manualmente",
-                      status: "suspended"
-                    }
-                  : course
-              ),
-              status: student.courses.length === 1 ? "suspended" : student.status
-            }
-          : student
-      )
-    );
+  async function resendStudentAccess(student: AdminStudent) {
+    onSelectStudent(student.id);
+    await requestStudentAccessDelivery(student, "invite");
   }
 
-  function moveStudentCourse(courseId: string) {
-    if (!selectedStudent) {
-      return;
-    }
-
-    onChangeStudents((current) =>
-      current.map((student) =>
-        student.id === selectedStudent.id
+  function blockAllStudentCourses(student: AdminStudent) {
+    void persistStudentChange((current) =>
+      current.map((studentRecord) =>
+        studentRecord.id === student.id
           ? {
-              ...student,
-              courses: student.courses.map((course) =>
-                course.id === courseId
-                  ? {
-                      ...course,
-                      cohort: getNextCohort(course.cohort, cohorts)
-                    }
-                  : course
-              )
+              ...studentRecord,
+              courses: studentRecord.courses.map((course) => ({
+                ...course,
+                endsAt: "Bloqueado manualmente",
+                status: "suspended" as AdminEntitlementStatus
+              })),
+              status: "suspended"
             }
-          : student
+          : studentRecord
       )
-    );
+    ).catch(() => undefined);
+  }
+
+  function moveAllStudentCourses(student: AdminStudent) {
+    void persistStudentChange((current) =>
+      current.map((studentRecord) =>
+        studentRecord.id === student.id
+          ? {
+              ...studentRecord,
+              courses: studentRecord.courses.map((course) => ({
+                ...course,
+                cohort: getNextCohort(course.cohort, cohorts)
+              }))
+            }
+          : studentRecord
+      )
+    ).catch(() => undefined);
   }
 
   function updateFormField(field: keyof StudentFormState, value: string) {
@@ -5252,13 +4754,13 @@ function StudentsView({
     };
 
     try {
-      onChangeStudents((current) => {
+      await persistStudentChange((current) => {
         if (existingStudent) {
           return current.map((student) => (student.id === existingStudent.id ? nextStudent : student));
         }
 
         return [nextStudent, ...current];
-      });
+      }, existingStudent ? "Aluno nao atualizado" : "Aluno nao cadastrado");
       onSelectStudent(nextStudent.id);
 
       if (!existingStudent) {
@@ -5267,6 +4769,8 @@ function StudentsView({
 
       setFormState(emptyStudentFormState);
       setModalMode("view");
+    } catch {
+      return;
     } finally {
       setStudentFormSubmitting(false);
     }
@@ -5276,26 +4780,28 @@ function StudentsView({
     setStudentPendingDeletion(studentToRemove);
   }
 
-  function confirmStudentRemoval() {
+  async function confirmStudentRemoval() {
     if (!studentPendingDeletion) {
       return;
     }
 
-    onChangeStudents((current) => {
-      const nextStudents = current.filter((student) => student.id !== studentPendingDeletion.id);
+    const studentToRemove = studentPendingDeletion;
 
-      if (selectedStudent?.id === studentPendingDeletion.id) {
+    try {
+      const nextStudents = await persistStudentChange(
+        (current) => current.filter((student) => student.id !== studentToRemove.id),
+        "Aluno nao excluido"
+      );
+
+      if (selectedStudent?.id === studentToRemove.id) {
         onSelectStudent(nextStudents[0]?.id ?? "");
+        setModalMode(null);
       }
 
-      return nextStudents;
-    });
-
-    if (selectedStudent?.id === studentPendingDeletion.id) {
-      setModalMode(null);
+      setStudentPendingDeletion(null);
+    } catch {
+      return;
     }
-
-    setStudentPendingDeletion(null);
   }
 
   function removeSelectedStudent() {
@@ -5307,253 +4813,145 @@ function StudentsView({
   }
 
   return (
-    <div className="space-y-6">
-      <section className="min-w-0 space-y-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-3xl font-black text-white">Lista de alunos</h2>
-            <p className="mt-2 text-sm text-zinc-500">
-              Alunos vindos das plataformas externas e cadastros manuais, com cursos comprados por entitlement.
-            </p>
-          </div>
-          <button
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] bg-[var(--accent)] px-4 py-2 text-sm font-black text-white transition hover:bg-red-600"
-            onClick={openNewStudentForm}
-            type="button"
-          >
-            <UserPlus className="h-4 w-4" />
-            Novo aluno
-          </button>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {studentStats.map((stat) => {
-            const Icon = stat.icon;
-
-            return (
-              <div className={`${subtlePanelClassName} p-4`} key={stat.label}>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-zinc-500">{stat.label}</p>
-                    <p className="mt-2 text-2xl font-black text-white">{stat.value}</p>
-                  </div>
-                  <span className="grid h-10 w-10 place-items-center rounded-[8px] bg-white/[0.055] text-zinc-300">
-                    <Icon className="h-5 w-5" />
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+    <div className="-m-4 min-h-[calc(100vh-4rem)] bg-[linear-gradient(180deg,#111217_0%,#0d0e11_100%)] px-4 py-6 text-zinc-100 md:-m-6 md:px-10 md:py-8">
+      <section className="min-w-0 space-y-7">
+        <StudentsCommandCenter
+          courseFilter={courseFilter}
+          onCourseFilterChange={setCourseFilter}
+          onCreateStudent={openNewStudentForm}
+          onQueryChange={setQuery}
+          onSourceFilterChange={setSourceFilter}
+          onStatusFilterChange={setStatusFilter}
+          query={query}
+          sellableProducts={sellableProducts}
+          sourceFilter={sourceFilter}
+          statusFilter={statusFilter}
+          students={students}
+        />
 
         {accessNotice ? (
           <StudentAccessNoticePanel notice={accessNotice} onDismiss={() => setAccessNotice(null)} />
         ) : null}
 
-        <div className={`${subtlePanelClassName} space-y-3 p-3`}>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-            <label className="flex h-11 flex-1 items-center gap-3 rounded-[8px] border border-white/10 bg-black/30 px-3 text-sm text-zinc-400 focus-within:border-white/25">
-              <Search className="h-4 w-4 text-zinc-500" />
-              <span className="sr-only">Buscar aluno</span>
-              <input
-                className="min-w-0 flex-1 border-0 bg-transparent text-white outline-none placeholder:text-zinc-600"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Buscar por nome, email, telefone, origem ou curso..."
-                type="search"
-                value={query}
-              />
-            </label>
-            <div className="flex rounded-[8px] border border-white/10 bg-black/25 p-1">
-              {[
-                ["students", "Todos"],
-                ["courses", "Por curso"]
-              ].map(([id, label]) => (
+        <section className="overflow-hidden rounded-[8px] border border-white/10 bg-[#15161b] shadow-[0_24px_80px_rgba(0,0,0,0.26)] ring-1 ring-white/[0.025]">
+          <div className="overflow-x-auto">
+            <Table className="min-w-[72rem]">
+              <TableHeader>
+                <TableRow className="border-b border-white/10 bg-white/[0.025] hover:bg-white/[0.025]">
+                  <TableHead className="w-[31%] px-5 py-3 text-xs font-semibold text-zinc-500">Nome e email</TableHead>
+                  <TableHead className="py-3 text-xs font-semibold text-zinc-500">Ultimo acesso</TableHead>
+                  <TableHead className="py-3 text-xs font-semibold text-zinc-500">Status</TableHead>
+                  <TableHead className="py-3 text-xs font-semibold text-zinc-500">Engajamento</TableHead>
+                  <TableHead className="w-[24%] py-3 text-xs font-semibold text-zinc-500">Produtos</TableHead>
+                  <TableHead className="px-5 py-3 text-right text-xs font-semibold text-zinc-500">Acoes</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredStudents.length > 0 ? (
+                  filteredStudents.map((student) => {
+                    const isSelected = selectedStudent?.id === student.id;
+                    const engagement = getStudentEngagement(student);
+                    const accessOverview = getStudentAccessOverview(student);
+                    const primaryCourse = student.courses[0];
+
+                    return (
+                      <TableRow
+                        className={`border-b border-white/10 ${
+                          isSelected ? "bg-red-500/[0.055] hover:bg-red-500/[0.075]" : "hover:bg-white/[0.035]"
+                        }`}
+                        key={student.id}
+                      >
+                        <TableCell className="px-5 py-4">
+                          <button
+                            className="flex min-w-0 items-center gap-3 text-left"
+                            onClick={() => openStudentModal(student.id)}
+                            type="button"
+                          >
+                            <StudentAvatar avatarUrl={student.avatarUrl} name={student.fullName} />
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold text-white">{student.fullName}</span>
+                              <span className="mt-1 block truncate text-xs font-medium text-zinc-500">{student.email}</span>
+                            </span>
+                          </button>
+                        </TableCell>
+
+                        <TableCell className="text-sm font-medium text-zinc-400">{student.lastActivityAt}</TableCell>
+
+                        <TableCell>
+                          <StatusPill className={getSoftStudentAccessOverviewClassName(student)}>{accessOverview.label}</StatusPill>
+                        </TableCell>
+
+                        <TableCell>
+                          <span className="text-sm font-semibold text-zinc-300">{engagement}</span>
+                        </TableCell>
+
+                        <TableCell>
+                          {primaryCourse ? (
+                            <div className="flex min-w-0 items-center gap-3">
+                              <span className="truncate text-sm font-semibold text-zinc-300">
+                                {primaryCourse.product}
+                              </span>
+                              {student.courses.length > 1 ? (
+                                <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.045] px-2 py-0.5 text-xs font-semibold text-zinc-400">
+                                  +{student.courses.length - 1}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <span className="text-sm font-medium text-zinc-600">Sem produto</span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="px-5 text-right">
+                          <div className="flex justify-end">
+                            <StudentRowActions
+                              accessActionBusy={accessActionBusy}
+                              onBlockAllCourses={() => blockAllStudentCourses(student)}
+                              onEdit={() => openEditStudentForm(student)}
+                              onMoveAllCourses={() => moveAllStudentCourses(student)}
+                              onOpenDetails={() => openStudentModal(student.id)}
+                              onRemove={() => requestStudentRemoval(student)}
+                              onResendEmail={() => void resendStudentAccess(student)}
+                              student={student}
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                ) : (
+                  <TableRow>
+                    <TableCell className="h-28 text-center text-sm font-medium text-zinc-500" colSpan={6}>
+                      Nenhum aluno encontrado com os filtros atuais.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="flex flex-col gap-4 border-t border-white/10 bg-[#111217] px-5 py-5 sm:flex-row sm:items-center sm:justify-center">
+            <div className="flex items-center justify-center gap-2">
+              {[1, 2, 3, 4, 5].map((page) => (
                 <button
-                  className={`min-h-9 rounded-[7px] px-3 text-sm font-black transition ${
-                    listMode === id ? "bg-white text-black" : "text-zinc-400 hover:bg-white/[0.055] hover:text-white"
+                  className={`grid h-9 w-9 place-items-center rounded-[4px] text-sm font-semibold ${
+                    page === 1 ? "bg-[var(--accent)] text-white" : "text-zinc-500 hover:bg-white/[0.06] hover:text-white"
                   }`}
-                  key={id}
-                  onClick={() => setListMode(id as StudentListMode)}
+                  key={page}
                   type="button"
                 >
-                  {label}
+                  {page}
                 </button>
               ))}
             </div>
+            <button
+              className="h-10 rounded-[7px] border border-white/10 bg-white/[0.045] px-4 text-sm font-semibold text-zinc-300 hover:bg-white/[0.08] hover:text-white"
+              type="button"
+            >
+              15 itens por pagina
+            </button>
           </div>
-
-          <div className="grid gap-2 md:grid-cols-3">
-            <label className="grid gap-1 text-xs font-black uppercase text-zinc-500">
-              Origem
-              <select
-                className={inputClassName}
-                onChange={(event) => setSourceFilter(event.target.value as "all" | AdminSourceProvider)}
-                value={sourceFilter}
-              >
-                <option value="all">Todas</option>
-                {sourceProviderOptions.map((provider) => (
-                  <option key={provider} value={provider}>
-                    {provider}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="grid gap-1 text-xs font-black uppercase text-zinc-500">
-              Status
-              <select
-                className={inputClassName}
-                onChange={(event) => setStatusFilter(event.target.value as "all" | AdminEntitlementStatus)}
-                value={statusFilter}
-              >
-                <option value="all">Todos</option>
-                {statusOptions.map((status) => (
-                  <option key={status} value={status}>
-                    {getEntitlementStatusLabel(status)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="grid gap-1 text-xs font-black uppercase text-zinc-500">
-              Curso
-              <select
-                className={inputClassName}
-                onChange={(event) => setCourseFilter(event.target.value)}
-                value={courseFilter}
-              >
-                <option value="all">Todos os cursos</option>
-                {sellableProducts.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-
-        {listMode === "students" ? (
-          <div className={`${panelClassName} overflow-hidden`}>
-            <div className="overflow-x-auto">
-              <div className="grid min-w-[72rem] grid-cols-[2fr_1fr_0.85fr_0.95fr_1.25fr_0.85fr] border-b border-white/10 px-4 py-3 text-xs font-black uppercase text-zinc-500">
-                <span>Aluno</span>
-                <span>Ultimo acesso</span>
-                <span>Status</span>
-                <span>Engajamento</span>
-                <span>Produtos</span>
-                <span className="text-right">Acoes</span>
-              </div>
-
-              {filteredStudents.length > 0 ? (
-                filteredStudents.map((student) => {
-                  const isSelected = selectedStudent?.id === student.id;
-                  const engagement = getStudentEngagement(student);
-                  const visibleCourses = student.courses.slice(0, 3);
-
-                  return (
-                    <div
-                      className={`border-b border-white/10 last:border-b-0 ${
-                        isSelected ? "bg-white/[0.075]" : "hover:bg-white/[0.035]"
-                      }`}
-                      key={student.id}
-                    >
-                      <div className="grid min-w-[72rem] grid-cols-[2fr_1fr_0.85fr_0.95fr_1.25fr_0.85fr] items-center gap-4 px-4 py-4">
-                        <button
-                          className="flex min-w-0 items-center gap-3 text-left"
-                          onClick={() => openStudentModal(student.id)}
-                          type="button"
-                        >
-                          <StudentAvatar avatarUrl={student.avatarUrl} name={student.fullName} />
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-black text-white">{student.fullName}</span>
-                            <span className="mt-1 block truncate text-xs font-semibold text-zinc-500">{student.email}</span>
-                          </span>
-                        </button>
-                        <span className="text-sm font-bold text-zinc-400">{student.lastActivityAt}</span>
-                        <span>
-                          <StatusPill className={getEntitlementStatusClassName(student.status)}>
-                            {getEntitlementStatusLabel(student.status)}
-                          </StatusPill>
-                        </span>
-                        <span>
-                          <StatusPill className={getStudentEngagementClassName(engagement)}>{engagement}</StatusPill>
-                        </span>
-                        <span className="min-w-0">
-                          <button
-                            aria-label={`Ver produtos de ${student.fullName}`}
-                            className="inline-flex min-h-10 max-w-full items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.055] px-3 py-2 text-left text-xs font-black text-white transition hover:bg-white/10"
-                            onClick={() => openStudentModal(student.id)}
-                            type="button"
-                          >
-                            <span className="flex shrink-0 -space-x-2">
-                              {visibleCourses.length > 0 ? (
-                                visibleCourses.map((course) => (
-                                  <span className="rounded-[5px] ring-2 ring-[#171717]" key={course.id}>
-                                    <ProductCover course={course} sellableProducts={sellableProducts} />
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="grid h-10 w-10 place-items-center rounded-[6px] bg-black/30 text-zinc-500 ring-2 ring-[#171717]">
-                                  <ShoppingBag className="h-4 w-4" />
-                                </span>
-                              )}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block truncate">
-                                {student.courses.length} produto{student.courses.length === 1 ? "" : "s"}
-                              </span>
-                              <span className="mt-0.5 block truncate text-[11px] font-semibold text-zinc-500">
-                                Ver detalhe
-                              </span>
-                            </span>
-                          </button>
-                        </span>
-                        <span className="flex justify-end gap-2">
-                          <button
-                            aria-label={`Visualizar ${student.fullName}`}
-                            className="grid h-9 w-9 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                            onClick={() => openStudentModal(student.id)}
-                            type="button"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </button>
-                          <button
-                            aria-label={`Editar ${student.fullName}`}
-                            className="grid h-9 w-9 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                            onClick={() => {
-                              openEditStudentForm(student);
-                            }}
-                            type="button"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            aria-label={`Excluir ${student.fullName}`}
-                            className="grid h-9 w-9 place-items-center rounded-[7px] border border-red-400/25 bg-red-500/10 text-red-200 transition hover:bg-red-500/15 hover:text-red-100"
-                            onClick={() => requestStudentRemoval(student)}
-                            type="button"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="min-w-[72rem] px-4 py-10 text-center text-sm font-bold text-zinc-500">
-                  Nenhum aluno encontrado com os filtros atuais.
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          <CourseStudentGroups
-            courseFilter={courseFilter}
-            onSelectStudent={openStudentModal}
-            sellableProducts={sellableProducts}
-            students={filteredStudents}
-          />
-        )}
+        </section>
       </section>
 
       <StudentProfileModal
@@ -5562,11 +4960,9 @@ function StudentsView({
         formState={formState}
         key={`${modalMode ?? "closed"}-${selectedStudent?.id ?? "none"}`}
         modalMode={modalMode}
-        onBlockCourse={blockStudentCourse}
         onChange={updateFormField}
         onClose={closeStudentModal}
         onEdit={() => openEditStudentForm()}
-        onMoveCourse={moveStudentCourse}
         onRemove={removeSelectedStudent}
         onResendAccess={resendSelectedStudentAccess}
         onSubmit={submitStudentForm}
@@ -5577,7 +4973,7 @@ function StudentsView({
       />
       <StudentDeleteConfirmationModal
         onCancel={() => setStudentPendingDeletion(null)}
-        onConfirm={confirmStudentRemoval}
+        onConfirm={() => void confirmStudentRemoval()}
         student={studentPendingDeletion}
       />
     </div>
@@ -5587,7 +4983,6 @@ function StudentsView({
 export function AdminDashboard({ initialData }: { initialData: AdminDashboardData }) {
   const [activeView, setActiveView] = useState<AdminView>("overview");
   const [dashboardData, setDashboardData] = useState(initialData);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState(initialData.contentRecords[0]?.content.id ?? "");
   const [selectedStudentId, setSelectedStudentId] = useState(initialData.students[0]?.id ?? "");
   const selectedRecord =
@@ -5598,31 +4993,35 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
     setActiveView(view);
   }
 
-  const persistStudents: React.Dispatch<React.SetStateAction<AdminStudent[]>> = (updater) => {
-    setDashboardData((current) => {
-      const nextStudents = typeof updater === "function" ? updater(current.students) : updater;
-      const nextData = {
-        ...current,
-        students: nextStudents
-      };
+  async function persistStudents(updater: StudentListUpdater) {
+    const previousData = dashboardData;
+    const nextStudents = typeof updater === "function" ? updater(previousData.students) : updater;
+    setDashboardData({
+      ...previousData,
+      students: nextStudents
+    });
 
-      void fetch("/api/admin/students", {
+    try {
+      const response = await fetch("/api/admin/students", {
         body: JSON.stringify({ students: nextStudents }),
         headers: {
           "Content-Type": "application/json"
         },
         method: "PUT"
-      })
-        .then((response) => response.json() as Promise<{ data?: AdminDashboardData }>)
-        .then((payload) => {
-          if (payload.data) {
-            setDashboardData(payload.data);
-          }
-        });
+      });
+      const payload = await response.json() as { data?: AdminDashboardData; error?: string };
 
-      return nextData;
-    });
-  };
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error ?? "Nao foi possivel salvar os alunos.");
+      }
+
+      updateDashboardData(payload.data);
+      return payload.data.students;
+    } catch (error) {
+      setDashboardData(previousData);
+      throw error;
+    }
+  }
 
   function updateDashboardData(nextData: AdminDashboardData) {
     setDashboardData(nextData);
@@ -5638,75 +5037,133 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
     );
   }
 
+  async function persistDashboardCollections(payload: Record<string, unknown>) {
+    const response = await fetch("/api/admin/collections", {
+      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/json"
+      },
+      method: "POST"
+    });
+    const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+    if (!response.ok || !result.data) {
+      throw new Error(result.error ?? "Nao foi possivel salvar a configuracao.");
+    }
+
+    updateDashboardData(result.data);
+  }
+
+  async function upsertCombo(combo: AdminProductCombo) {
+    const response = await fetch("/api/admin/combos", {
+      body: JSON.stringify(combo),
+      headers: {
+        "Content-Type": "application/json"
+      },
+      method: "POST"
+    });
+    const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+    if (!response.ok || !result.data) {
+      throw new Error(result.error ?? "Nao foi possivel salvar o combo.");
+    }
+
+    updateDashboardData(result.data);
+  }
+
+  async function deleteCombo(comboId: string) {
+    const response = await fetch("/api/admin/combos", {
+      body: JSON.stringify({ id: comboId }),
+      headers: {
+        "Content-Type": "application/json"
+      },
+      method: "DELETE"
+    });
+    const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+    if (!response.ok || !result.data) {
+      throw new Error(result.error ?? "Nao foi possivel excluir o combo.");
+    }
+
+    updateDashboardData(result.data);
+  }
+
   return (
-    <div className="min-h-screen bg-[#0b0b0b] text-white">
-      <AdminSidebar
-        activeView={activeView}
-        isOpen={sidebarOpen}
-        onChangeView={handleChangeView}
-        onClose={() => setSidebarOpen(false)}
-      />
-      <div className="min-h-screen">
-        <AdminTopbar
-          activeView={activeView}
-          onGoHome={() => setActiveView("overview")}
-          sidebarOpen={sidebarOpen}
-          onToggleSidebar={() => setSidebarOpen((current) => !current)}
-        />
+    <div className="min-h-screen bg-background text-foreground">
+      <AdminShell activeView={activeView} onChangeView={handleChangeView}>
+        {activeView === "overview" ? <AdminOverview data={dashboardData} /> : null}
+        {activeView === "students" ? (
+          <StudentsView
+            cohorts={dashboardData.cohorts}
+            onChangeStudents={persistStudents}
+            onSelectStudent={setSelectedStudentId}
+            persistenceProvider={dashboardData.persistenceProvider}
+            selectedStudentId={selectedStudentId}
+            sellableProducts={dashboardData.sellableProducts}
+            students={dashboardData.students}
+          />
+        ) : null}
+        {activeView === "catalog" ? (
+          <CatalogView
+            courseModules={dashboardData.courseModules}
+            onDashboardDataChange={updateDashboardData}
+            records={dashboardData.contentRecords}
+            selectedRecord={selectedRecord}
+            setSelectedRecord={(record) => setSelectedRecordId(record.content.id)}
+          />
+        ) : null}
+        {activeView === "combos" ? (
+          <CombosCommandCenter
+            cohorts={dashboardData.cohorts}
+            combos={dashboardData.combos}
+            onDeleteCombo={deleteCombo}
+            onUpsertCombo={upsertCombo}
+            products={dashboardData.sellableProducts}
+          />
+        ) : null}
+        {activeView === "structure" ? (
+          <StructureView
+            cohorts={dashboardData.cohorts}
+            courseModules={dashboardData.courseModules}
+            onDashboardDataChange={updateDashboardData}
+            selectedRecord={selectedRecord}
+          />
+        ) : null}
+        {activeView === "community" ? <CommunityPlaceholder /> : null}
+        {activeView === "moderation" ? (
+          <ModerationCommandCenter
+            blockedWordRules={dashboardData.blockedWordRules}
+            items={dashboardData.moderationItems}
+            onSaveModeration={persistDashboardCollections}
+            products={dashboardData.sellableProducts}
+          />
+        ) : null}
+        {activeView === "ai-agents" ? (
+          <AIAgentsCommandCenter
+            agents={dashboardData.aiAgents}
+            onSaveAgents={(aiAgents) => persistDashboardCollections({ aiAgents })}
+            products={dashboardData.sellableProducts}
+          />
+        ) : null}
+        {activeView === "personalization" ? (
+          <PersonalizationView
+            courseModules={dashboardData.courseModules}
+            formationCourses={dashboardData.formationCourses}
+            hero={dashboardData.hero}
+            homeRows={dashboardData.homeRows}
+            homeSections={dashboardData.homeSections}
+            records={dashboardData.contentRecords}
+          />
+        ) : null}
+        {activeView === "integrations" ? (
+          <IntegrationsCommandCenter
+            integrations={dashboardData.integrations}
+            onSaveIntegrations={(integrations) => persistDashboardCollections({ integrations })}
+          />
+        ) : null}
+      </AdminShell>
 
-        <main className="px-4 py-6 sm:px-6 lg:px-8">
-          {activeView === "overview" ? (
-            <OverviewView
-              chartPoints={dashboardData.chartPoints}
-              homeSections={dashboardData.homeSections}
-              metrics={dashboardData.metrics}
-              pipeline={dashboardData.pipeline}
-              records={dashboardData.contentRecords}
-            />
-          ) : null}
-          {activeView === "students" ? (
-            <StudentsView
-              cohorts={dashboardData.cohorts}
-              onChangeStudents={persistStudents}
-        onSelectStudent={setSelectedStudentId}
-        persistenceProvider={dashboardData.persistenceProvider}
-        selectedStudentId={selectedStudentId}
-              sellableProducts={dashboardData.sellableProducts}
-              students={dashboardData.students}
-            />
-          ) : null}
-          {activeView === "catalog" ? (
-            <CatalogView
-              courseModules={dashboardData.courseModules}
-              onDashboardDataChange={updateDashboardData}
-              records={dashboardData.contentRecords}
-              selectedRecord={selectedRecord}
-              setSelectedRecord={(record) => setSelectedRecordId(record.content.id)}
-            />
-          ) : null}
-          {activeView === "structure" ? (
-            <StructureView
-              cohorts={dashboardData.cohorts}
-              courseModules={dashboardData.courseModules}
-              onDashboardDataChange={updateDashboardData}
-              selectedRecord={selectedRecord}
-            />
-          ) : null}
-          {activeView === "personalization" ? (
-            <PersonalizationView
-              courseModules={dashboardData.courseModules}
-              formationCourses={dashboardData.formationCourses}
-              hero={dashboardData.hero}
-              homeSections={dashboardData.homeSections}
-              homeRows={dashboardData.homeRows}
-              records={dashboardData.contentRecords}
-            />
-          ) : null}
-        </main>
-      </div>
-
-      <div className="pointer-events-none fixed inset-x-0 top-0 h-40 bg-gradient-to-b from-red-950/10 to-transparent" />
-      <div className="pointer-events-none fixed bottom-4 right-4 hidden rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-xs font-bold text-zinc-500 backdrop-blur md:block">
+      <div className="pointer-events-none fixed bottom-4 right-4 hidden rounded-full border border-border bg-background/80 px-3 py-1.5 text-xs font-bold text-muted-foreground backdrop-blur md:block">
         {dashboardData.persistenceProvider === "supabase" ? "Supabase persistido" : "Fallback local"}
       </div>
     </div>

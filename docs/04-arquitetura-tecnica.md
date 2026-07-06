@@ -44,10 +44,27 @@ Hotmart/Ticto/etc.
   -> job de processamento
   -> entitlement/acesso
 
+Hotmart/Ticto/TikTok/Kiwify
+  -> adapter do provider
+  -> produto ou combo interno
+  -> entitlements por produto incluido
+
 Aluno assistindo aula
   -> eventos de progresso
   -> tabela student_events
   -> dashboards futuros
+
+Aluno comentando aula
+  -> bloqueio por palavra proibida
+  -> comentario pendente/aprovado
+  -> fila de moderacao
+  -> notificacoes futuras
+
+Aluno perguntando para IA
+  -> checagem de entitlement
+  -> escopo do agente
+  -> contexto permitido
+  -> conversa auditavel
 ```
 
 ## Modulos do backend
@@ -72,6 +89,9 @@ src/
     payments/
     video/
     support/
+    comments/
+    moderation/
+    ai/
     jobs/
 ```
 
@@ -148,8 +168,32 @@ Fluxo:
 4. Checar idempotencia.
 5. Normalizar evento.
 6. Processar em job.
-7. Atualizar acesso.
-8. Registrar auditoria.
+7. Resolver produto ou combo interno.
+8. Atualizar entitlements internos.
+9. Registrar auditoria.
+
+Combos devem ser tratados como pacotes internos: o adapter normaliza a venda externa, o backend encontra o combo/produto correspondente e a camada de acesso cria entitlements para todos os produtos incluidos. O dado do provider nao autoriza conteudo diretamente.
+
+## Comentarios e moderacao
+
+Comentarios de aula entram pela API autenticada do aluno e devem passar por validacoes antes de aparecer:
+
+1. Verificar sessao e entitlement da aula.
+2. Checar palavras bloqueadas.
+3. Criar comentario como `pending` ou `approved`, conforme regra do produto.
+4. Permitir que moderadores aprovem, ocultem, restaurem ou marquem como spam.
+5. Registrar acoes sensiveis em auditoria.
+
+## Agentes de IA
+
+Agentes de IA devem ficar atras de adapters e regras de escopo:
+
+- agente de comentarios: pode sugerir ou publicar respostas conforme configuracao;
+- tutor de aula: responde apenas com contexto da aula/produto liberado;
+- assistente geral: conhece estrutura, produtos liberados e links internos;
+- chat da home: orienta proximos passos do aluno.
+
+Antes de qualquer resposta, o servidor precisa checar entitlement e escopo. Transcricoes, chunks e historico de conversa devem ser armazenados em tabelas proprias quando a IA sair da fase de configuracao.
 
 ## Video
 

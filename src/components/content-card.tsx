@@ -272,7 +272,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
           aria-hidden="true"
           className="h-auto w-full object-contain"
           height={35}
-          src="/brand/logo-bunker.png"
+          src="/brand/logo-bunker.svg"
           unoptimized
           width={306}
         />

@@ -75,6 +75,8 @@ Essa representacao deve usar as mesmas fontes e variantes da home publicada:
 
 `Personalizacao` nao substitui `Catalogo` nem `Estrutura`: o catalogo cria produtos e conteudos, a estrutura monta modulos e aulas, e a personalizacao controla como esses elementos aparecem na experiencia final.
 
+No CRM/backoffice, a sidebar administrativa pode ir alem do MVP do aluno quando o produtor pedir: `Produtos` reaproveita o Catalogo/construtor, `Combos` agrupa produtos existentes, `Moderacao` controla comentarios das aulas, `Agentes de IA` prepara agentes por escopo e `Configuracoes > Integracoes` concentra provedores externos. `Comunidade` pode aparecer como item reservado de fase futura, sem ativar a experiencia de comunidade para alunos comuns.
+
 ## Header
 
 Elementos recomendados:

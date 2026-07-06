@@ -192,7 +192,8 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
               className="h-auto w-[150px] sm:w-[190px]"
               height={35}
               priority
-              src="/brand/logo-bunker.png"
+              src="/brand/logo-bunker.svg"
+              unoptimized
               width={306}
             />
           </Link>
@@ -302,7 +303,8 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
                     alt="Bunker707"
                     className="h-auto w-[210px]"
                     height={35}
-                    src="/brand/logo-bunker.png"
+                    src="/brand/logo-bunker.svg"
+                    unoptimized
                     width={306}
                   />
                 </Link>
@@ -406,15 +408,7 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
             </nav>
 
             <div className="border-t border-white/10 p-5">
-              <div className="mb-4 rounded-[8px] border border-white/10 bg-white/5 p-4">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                  Acesso ativo
-                </div>
-                <p className="text-xs leading-5 text-zinc-400">
-                  Seus conteudos liberados aparecem na home e em Minhas compras.
-                </p>
-              </div>
+
               <button
                 className="flex w-full items-center gap-3 rounded-[8px] px-4 py-3 text-sm font-semibold text-zinc-300 transition hover:bg-white/10 hover:text-white"
                 disabled={signingOut}

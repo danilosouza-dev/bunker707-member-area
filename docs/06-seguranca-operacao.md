@@ -37,6 +37,7 @@ Implementado no MVP atual:
 Excecao de desenvolvimento:
 
 - sem variaveis Supabase e fora de producao, o login oferece modo local de desenvolvimento;
+- em `localhost` fora de producao, o modo local tambem pode ser usado quando Supabase esta configurado mas inacessivel para desbloquear testes do MVP;
 - o modo local usa cookie httpOnly e usuario fixo de desenvolvimento;
 - esse modo nao deve existir como autorizacao de producao e e automaticamente indisponivel em `NODE_ENV=production`.
 
@@ -50,6 +51,30 @@ Regras:
 - processar em background;
 - registrar erro sem perder evento;
 - permitir reprocessamento seguro.
+- mapear evento externo para produto ou combo interno antes de alterar acesso;
+- criar ou revogar somente entitlements internos, nunca liberar conteudo direto pelo payload do provider;
+- guardar segredos de webhook somente no servidor ou gerenciador de segredos.
+
+## Comentarios e moderacao
+
+Regras:
+
+- aluno so comenta em aula/produto que pode acessar;
+- comentario deve passar por bloqueio de palavras antes de ser salvo como publicado;
+- comentarios podem ficar pendentes, aprovados, ocultos ou marcados como spam;
+- acoes de moderacao devem registrar ator, acao, comentario e horario;
+- palavras bloqueadas devem mostrar uma mensagem clara ao aluno sem expor regras internas demais;
+- denuncias de comentarios devem entrar na fila de moderacao.
+
+## Agentes de IA
+
+Regras:
+
+- qualquer agente precisa checar entitlement antes de usar contexto de aula, produto ou transcricao;
+- agente geral pode apontar links somente para conteudos que o aluno pode ver ou para paginas de detalhe bloqueadas permitidas;
+- resposta automatica em comentario deve ser configuravel e auditavel;
+- prompts, instrucoes e fontes de treinamento nao devem incluir service keys, payloads privados ou dados pessoais desnecessarios;
+- conversas e feedbacks futuros devem respeitar LGPD, retencao e exportacao/remocao quando aplicavel.
 
 ## Video
 
@@ -140,4 +165,5 @@ Regras:
 - senha temporaria nao deve ser salva em banco, logs, historico do CRM ou metadata;
 - `service_role` so pode ser usado na rota server-side administrativa;
 - a tela `/alterar-senha` limpa `must_change_password` somente depois de atualizar a senha do usuario;
+- remover aluno ou produto do acesso manual no CRM deve marcar os entitlements `admin-student:*` como `revoked`, sem apagar eventos ou payloads externos;
 - o admin deve enviar senha temporaria por canal de atendimento controlado, evitando expor senha permanente por email.
