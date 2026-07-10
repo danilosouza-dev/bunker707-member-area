@@ -70,7 +70,6 @@ O repositorio ja possui a base inicial do app:
 - pagina propria de formacao/curso com breadcrumb;
 - pagina `Minhas compras` em `/minhas-compras`;
 - login real com Supabase Auth, middleware de sessao e callback OAuth;
-- modo local de desenvolvimento para navegar sem Supabase quando `NODE_ENV !== "production"`;
 - paginas autenticadas protegidas por sessao;
 - CMS/admin em `/admin` protegido por papel em `admin_roles`;
 - hero de conteudo configuravel por backend persistido;
@@ -89,10 +88,10 @@ O repositorio ja possui a base inicial do app:
 - opcao no CMS para exibir na home uma secao com capa pequena do curso e cards menores dos modulos de um curso especifico, util para produtores com catalogo curto;
 - upload local da capa vertical do card em 720 x 1040 px e hero opcional da pagina propria em 1920 x 720 px;
 - modo de preview na area de membros para navegar como sessao atual, produtor/admin, aluno com acesso ou aluno sem acesso, visivel somente para usuarios internos com papel em `admin_roles`;
-- Supabase Postgres/RLS como persistencia primaria, com fallback local em `.data/bunker707-platform.json` apenas quando as variaveis Supabase nao estao configuradas no ambiente de desenvolvimento.
-- quando Supabase esta configurado, a base real nao recebe seed/demo automaticamente; cursos, formacoes, modulos, turmas, alunos, aulas e progresso entram por cadastros persistidos e APIs server-side.
+- Supabase Postgres/RLS como unica persistencia de runtime para catalogo, alunos, acessos, favoritos, progresso, comentarios, moderacao e configuracoes.
+- a base real nao recebe seed/demo automaticamente; cursos, formacoes, modulos, turmas, alunos, aulas, progresso e comentarios entram por cadastros persistidos, APIs server-side, webhooks ou migrations controladas.
 
-Sem as variaveis Supabase em desenvolvimento, a tela de login mostra `Entrar em modo local` para permitir navegacao no MVP. Em `localhost`, esse modo tambem fica disponivel quando Supabase esta configurado mas inacessivel durante o desenvolvimento. Ele usa cookie local httpOnly, funciona apenas fora de producao e nao substitui Supabase Auth em ambiente real.
+Sem variaveis Supabase ou sem migrations aplicadas, o app deve falhar explicitamente em vez de usar dados simulados, sinteticos, seed ou fallback local.
 
 O proximo passo natural e aplicar as migrations no projeto Supabase, popular `admin_roles` para os usuarios internos e evoluir a camada de entitlements/webhooks que libera acesso a partir das vendas externas.
 

@@ -72,7 +72,7 @@ Entregas:
 - moderacao persistida de comentarios e palavras bloqueadas; integracoes externas e agentes de IA continuam em configuracao UI-first;
 - regras de liberacao por compra, horas, dias, data fixa e atividade dentro do editor de formacoes, cursos, modulos e aulas;
 - entitlements e webhooks externos como camada tecnica/auditavel, nao como item solto da sidebar principal;
-- Supabase Postgres/RLS com seeds alinhadas ao modelo futuro e fallback local apenas para desenvolvimento sem variaveis.
+- Supabase Postgres/RLS como fonte unica de runtime, sem seeds automaticas, mocks ou fallback local.
 
 ## Fase 4: Banco e acesso
 

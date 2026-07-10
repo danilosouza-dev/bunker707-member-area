@@ -1,10 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import {
-  isLocalAuthEnabled,
-  localAuthCookieName,
-  localAuthCookieValue
-} from "@/lib/auth/local";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
@@ -67,22 +62,6 @@ export async function middleware(request: NextRequest) {
   const needsUser = isProtectedPage(pathname);
   const publicPage = isPublicPage(pathname);
   const authConfigured = hasAuthConfig();
-  const localAuthEnabled = isLocalAuthEnabled(authConfigured, request.nextUrl.hostname);
-  const hasLocalSession = localAuthEnabled &&
-    request.cookies.get(localAuthCookieName)?.value === localAuthCookieValue;
-
-  if (hasLocalSession) {
-    if (publicPage && hasLocalSession) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = getSafeRedirectPath(request.nextUrl.searchParams.get("next"));
-      redirectUrl.search = "";
-      return NextResponse.redirect(redirectUrl);
-    }
-
-    if (needsUser && hasLocalSession) {
-      return NextResponse.next();
-    }
-  }
 
   if (!authConfigured) {
     return needsUser ? redirectToLogin(request) : NextResponse.next();

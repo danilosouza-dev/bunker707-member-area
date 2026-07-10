@@ -34,12 +34,11 @@ Implementado no MVP atual:
 - login, callback e reentrada em `/login` direcionam usuarios administrativos para `/admin` depois da autenticacao;
 - `/api/progress/lessons` grava progresso usando `auth.user.id`, nao um id vindo do cliente.
 
-Excecao de desenvolvimento:
+Regra de desenvolvimento:
 
-- sem variaveis Supabase e fora de producao, o login oferece modo local de desenvolvimento;
-- em `localhost` fora de producao, o modo local tambem pode ser usado quando Supabase esta configurado mas inacessivel para desbloquear testes do MVP;
-- o modo local usa cookie httpOnly e usuario fixo de desenvolvimento;
-- esse modo nao deve existir como autorizacao de producao e e automaticamente indisponivel em `NODE_ENV=production`.
+- nao existe modo local de autenticacao, usuario fixo ou cookie de desenvolvimento;
+- sem variaveis Supabase, login e APIs autenticadas devem falhar explicitamente;
+- sem Supabase acessivel ou migrations aplicadas, a aplicacao nao deve criar dados sinteticos para seguir navegavel.
 
 ## Webhooks
 

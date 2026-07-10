@@ -19,7 +19,6 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 type LoginExperienceProps = {
   authConfigured: boolean;
   config: LoginPageConfig;
-  localAuthEnabled: boolean;
   redirectTo?: string;
 };
 
@@ -141,7 +140,7 @@ async function getPostLoginRedirectPath(userMetadata: unknown, safeRedirectPath:
   return safeRedirectPath;
 }
 
-function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }: LoginExperienceProps) {
+function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceProps) {
   const router = useRouter();
   const safeRedirectPath = getSafeRedirectPath(redirectTo);
   const [activeProvider, setActiveProvider] = useState<LoginProvider | null>(null);
@@ -151,9 +150,8 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submittingLocal, setSubmittingLocal] = useState(false);
   const tone = panelToneClasses[config.panelTone];
-  const canSubmit = authConfigured || localAuthEnabled;
+  const canSubmit = authConfigured;
 
   useEffect(() => {
     if (!authConfigured) {
@@ -203,41 +201,12 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
     });
   }
 
-  async function handleLocalLogin() {
-    setErrorMessage("");
-    setNoticeMessage("");
-    setSubmittingLocal(true);
-
-    try {
-      const response = await fetch("/api/auth/local-login", {
-        method: "POST"
-      });
-
-      if (!response.ok) {
-        setErrorMessage("Nao foi possivel iniciar o modo local.");
-        return;
-      }
-
-      router.replace(safeRedirectPath);
-      router.refresh();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Nao foi possivel iniciar o modo local.");
-    } finally {
-      setSubmittingLocal(false);
-    }
-  }
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage("");
     setNoticeMessage("");
 
     if (!authConfigured) {
-      if (localAuthEnabled) {
-        await handleLocalLogin();
-        return;
-      }
-
       setErrorMessage("Autenticacao indisponivel neste ambiente.");
       return;
     }
@@ -267,11 +236,7 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
       router.replace(await getPostLoginRedirectPath(data.user.user_metadata, safeRedirectPath));
       router.refresh();
     } catch {
-      setErrorMessage(
-        localAuthEnabled
-          ? "Nao foi possivel conectar ao Supabase agora. Em localhost, use o modo local de desenvolvimento."
-          : "Nao foi possivel autenticar agora."
-      );
+      setErrorMessage("Nao foi possivel autenticar agora.");
     } finally {
       setSubmitting(false);
     }
@@ -447,19 +412,7 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
           </div>
         </div>
 
-        {!authConfigured && localAuthEnabled ? (
-          <p className="rounded-[8px] border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100">
-            Modo local de desenvolvimento ativo. Use este acesso para navegar no MVP sem configurar Supabase.
-          </p>
-        ) : null}
-
-        {authConfigured && localAuthEnabled ? (
-          <p className="rounded-[8px] border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm font-medium text-amber-100">
-            Supabase configurado. Se ele estiver indisponivel no localhost, use o modo local de desenvolvimento.
-          </p>
-        ) : null}
-
-        {!authConfigured && !localAuthEnabled ? (
+        {!authConfigured ? (
           <p className="rounded-[8px] border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm font-medium text-amber-100">
             Login temporariamente indisponivel. Fale com o suporte da Bunker707 para liberar seu acesso.
           </p>
@@ -479,24 +432,12 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
 
         <button
           className="flex h-12 w-full items-center justify-center gap-2 rounded-[8px] bg-[var(--accent)] px-5 text-sm font-extrabold text-white shadow-[0_18px_42px_rgba(229,9,20,0.28)] transition hover:bg-[#ff1f2a] disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none"
-          disabled={submitting || submittingLocal || !canSubmit}
+          disabled={submitting || !canSubmit}
           type="submit"
         >
-          {submitting ? "Entrando..." : localAuthEnabled && !authConfigured ? "Entrar em modo local" : config.form.primaryCta}
+          {submitting ? "Entrando..." : config.form.primaryCta}
           <ArrowRight className="h-4 w-4" />
         </button>
-
-        {authConfigured && localAuthEnabled ? (
-          <button
-            className={`flex h-11 w-full items-center justify-center gap-2 rounded-[8px] border text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-55 ${tone.secondaryButton}`}
-            disabled={submitting || submittingLocal}
-            onClick={() => void handleLocalLogin()}
-            type="button"
-          >
-            {submittingLocal ? "Entrando..." : "Entrar em modo local"}
-            <ArrowRight className="h-4 w-4" />
-          </button>
-        ) : null}
       </form>
 
       {authConfigured && config.providers.length > 0 ? (

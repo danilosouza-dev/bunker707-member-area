@@ -333,13 +333,8 @@ export async function POST(request: NextRequest) {
 
   if (!hasSupabaseConfig()) {
     return NextResponse.json({
-      data: {
-        method,
-        simulated: true,
-        status: method === "invite" ? "sent" : "prepared",
-        temporaryPassword
-      }
-    });
+      error: "Supabase nao configurado. Acesso de aluno so pode ser criado em dados reais."
+    }, { status: 503 });
   }
 
   try {
@@ -356,7 +351,6 @@ export async function POST(request: NextRequest) {
       data: {
         authUserId: user.id,
         method,
-        simulated: false,
         status: method === "invite" ? "sent" : "prepared",
         temporaryPassword
       }

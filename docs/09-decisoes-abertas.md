@@ -145,7 +145,7 @@ Decisao tomada:
 
 Decisao tomada:
 
-- conectar o CMS em `/admin` a uma camada server-side persistida em Supabase Postgres/RLS, com fallback local somente quando as variaveis Supabase nao existirem no ambiente de desenvolvimento.
+- conectar o CMS em `/admin` a uma camada server-side persistida somente em Supabase Postgres/RLS, sem fallback local ou dados sinteticos de runtime.
 - o design do CMS segue a linha escura, densa e operacional da referencia Netflix-style Ad Manager enviada no Figma, sem copiar marca, textos ou assets proprietarios.
 - o CMS deve controlar catalogo, personalizacao, home, formacoes, cursos avulsos, mentorias, webinarios, produtos genericos, cursos internos de formacoes, bootcamps, modulos, aulas, materiais, turmas e alunos.
 - a area `Personalizacao` aparece na sidebar principal do CRM, abre primeiro uma lista de destinos editaveis (`Vitrine`, `Pagina de login`, `Pagina de produtos` e produtos/cursos) e so depois abre o editor visual do item escolhido.
