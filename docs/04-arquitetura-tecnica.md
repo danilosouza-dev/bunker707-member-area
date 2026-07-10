@@ -127,12 +127,12 @@ Cadastro manual de aluno:
 - senha temporaria cria ou atualiza o usuario no Supabase Auth, marca `must_change_password = true` e nao salva a senha no CMS;
 - o mesmo fluxo sincroniza `profiles` e `entitlements` para os cursos/produtos selecionados no cadastro.
 
-Para desenvolvimento local sem variaveis Supabase, existe um fallback controlado:
+Desenvolvimento local tambem usa Supabase real:
 
-- aparece o CTA `Entrar em modo local` no login;
-- cria um cookie httpOnly local;
-- funciona somente quando `NODE_ENV !== "production"` e Supabase Auth nao esta configurado;
-- serve apenas para navegar o MVP em `localhost`, nao para autorizacao real.
+- nao existe login local, usuario fixo ou cookie de desenvolvimento;
+- sem variaveis Supabase, a autenticacao fica indisponivel;
+- sem banco acessivel ou migrations aplicadas, leitura e escrita falham explicitamente;
+- dados de catalogo, modulos, aulas, alunos, favoritos, progresso e configuracoes nao devem vir de seed, mock, fallback `.data` ou fixtures de runtime.
 
 ## Acesso e entitlements
 
@@ -270,8 +270,7 @@ Regras:
 
 - salvar um item nao concede acesso;
 - itens salvos continuam respeitando entitlements e regras de liberacao;
-- no desenvolvimento local sem Supabase, a mesma lista fica no fallback `.data/bunker707-platform.json`;
-- quando Supabase esta configurado, a tabela `saved_items` usa RLS para que cada aluno leia e altere somente os proprios favoritos.
+- a tabela `saved_items` usa RLS para que cada aluno leia e altere somente os proprios favoritos.
 - a sidebar expõe a rota `/favoritos`, que lista conteudos, modulos e aulas salvos pelo aluno autenticado.
 
 ## Deploy

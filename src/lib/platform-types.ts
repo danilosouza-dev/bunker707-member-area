@@ -493,7 +493,7 @@ export type AdminDashboardData = {
   metrics: AdminMetric[];
   moderationItems: AdminModerationItem[];
   pipeline: AdminPipelineItem[];
-  persistenceProvider: "local_fallback" | "supabase";
+  persistenceProvider: "supabase";
   releaseRules: AdminReleaseRule[];
   sellableProducts: AdminSellableProduct[];
   students: AdminStudent[];

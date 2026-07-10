@@ -1,18 +1,9 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
 import { unstable_noStore as noStore } from "next/cache";
-import {
-  adminChartPoints,
-  adminMetrics,
-  adminPipeline
-} from "@/server/db/admin-seed";
 import type { AuthenticatedUser } from "@/server/auth/session";
 import { getAdminRoleForUser, getUserDisplayName } from "@/server/auth/session";
-import { getLocalAuthenticatedUser } from "@/server/auth/local";
-import { getSupabaseAdminClient, hasSupabaseConfig } from "@/server/db/supabase/client";
+import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedItemKey, getSavedTargetTypeForContentKind, savedItemCollectionLabel } from "@/lib/saved-items";
@@ -334,8 +325,6 @@ export type ProductComboWriteInput = {
   status?: AdminProductCombo["status"];
 };
 
-const dataDirectory = path.join(process.cwd(), ".data");
-const databasePath = path.join(dataDirectory, "bunker707-platform.json");
 const defaultHero: HomeHeroConfig = {
   image: "/hero/bunker-707-red-front-hero.png",
   mediaType: "image",
@@ -351,56 +340,6 @@ const defaultStudent: PlatformStudent = {
   name: "Aluno"
 };
 const defaultCohortName = "Turma A";
-
-function cloneJson<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function makeEmptyDatabase(): PlatformDatabase {
-  return {
-    accessEntitlements: [],
-    aiAgents: [],
-    blockedWordRules: [],
-    bootcamps: [],
-    chartPoints: cloneJson(adminChartPoints).map((point) => ({
-      ...point,
-      access: 0,
-      progress: 0,
-      revenueEvents: 0
-    })),
-    cohorts: [],
-    combos: [],
-    contentPageSettings: {},
-    continueWatching: [],
-    courseModules: [],
-    courses: [],
-    entitlements: [],
-    formationInternalCourses: [],
-    formations: [],
-    hero: cloneJson(defaultHero),
-    integrations: [],
-    lessonProgress: [],
-    metrics: cloneJson(adminMetrics).map((metric) => ({
-      ...metric,
-      delta: "Sem dados ainda",
-      value: "0"
-    })),
-    moderationItems: [],
-    pipeline: cloneJson(adminPipeline).map((item) => ({
-      ...item,
-      count: 0
-    })),
-    recentLessons: [],
-    releaseRules: [],
-    savedItems: [],
-    student: cloneJson(defaultStudent),
-    students: [],
-    upcomingProducts: [],
-    updatedAt: new Date().toISOString(),
-    version: 1,
-    webhookEvents: []
-  };
-}
 
 function contentBucketEntries(database: PlatformDatabase): Array<[ContentBucket, ContentItem[]]> {
   return [
@@ -836,49 +775,6 @@ function normalizeLessonProgressExtras(value: unknown) {
   );
 }
 
-function normalizeDatabase(database: Partial<PlatformDatabase>): PlatformDatabase {
-  const emptyDatabase = makeEmptyDatabase();
-
-  return {
-    ...emptyDatabase,
-    ...database,
-    accessEntitlements: database.accessEntitlements ?? emptyDatabase.accessEntitlements,
-    aiAgents: database.aiAgents ?? emptyDatabase.aiAgents,
-    blockedWordRules: database.blockedWordRules ?? emptyDatabase.blockedWordRules,
-    bootcamps: database.bootcamps ?? emptyDatabase.bootcamps,
-    chartPoints: database.chartPoints ?? emptyDatabase.chartPoints,
-    cohorts: database.cohorts ?? emptyDatabase.cohorts,
-    combos: database.combos ?? emptyDatabase.combos,
-    contentPageSettings: database.contentPageSettings ?? emptyDatabase.contentPageSettings,
-    continueWatching: database.continueWatching ?? emptyDatabase.continueWatching,
-    courseModules: database.courseModules ?? emptyDatabase.courseModules,
-    courses: database.courses ?? emptyDatabase.courses,
-    entitlements: database.entitlements ?? emptyDatabase.entitlements,
-    formationInternalCourses: database.formationInternalCourses ?? emptyDatabase.formationInternalCourses,
-    formations: database.formations ?? emptyDatabase.formations,
-    hero: database.hero ?? emptyDatabase.hero,
-    integrations: database.integrations ?? emptyDatabase.integrations,
-    lessonProgress: (database.lessonProgress ?? emptyDatabase.lessonProgress).map((record) => ({
-      ...record,
-      completedLessonIds: record.completedLessonIds ?? [],
-      lessonReactions: normalizeLessonReactions(record.lessonReactions),
-      lessonWatchStates: normalizeLessonWatchStates(record.lessonWatchStates)
-    })),
-    metrics: database.metrics ?? emptyDatabase.metrics,
-    moderationItems: database.moderationItems ?? emptyDatabase.moderationItems,
-    pipeline: database.pipeline ?? emptyDatabase.pipeline,
-    recentLessons: database.recentLessons ?? emptyDatabase.recentLessons,
-    releaseRules: database.releaseRules ?? emptyDatabase.releaseRules,
-    savedItems: database.savedItems ?? emptyDatabase.savedItems,
-    student: database.student ?? emptyDatabase.student,
-    students: database.students ?? emptyDatabase.students,
-    upcomingProducts: database.upcomingProducts ?? emptyDatabase.upcomingProducts,
-    updatedAt: database.updatedAt ?? emptyDatabase.updatedAt,
-    version: 1,
-    webhookEvents: database.webhookEvents ?? emptyDatabase.webhookEvents
-  };
-}
-
 function getSupabaseErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : JSON.stringify(error);
   return message;
@@ -888,24 +784,8 @@ function getSupabaseErrorCode(error: unknown) {
   return typeof error === "object" && error && "code" in error ? error.code : null;
 }
 
-async function shouldUseLocalFallbackDatabase() {
-  if (!hasSupabaseConfig()) {
-    return true;
-  }
-
-  try {
-    return Boolean(await getLocalAuthenticatedUser());
-  } catch {
-    return false;
-  }
-}
-
-async function shouldUseSupabaseDatabase() {
-  return hasSupabaseConfig() && !(await shouldUseLocalFallbackDatabase());
-}
-
 async function getPlatformPersistenceProvider(): Promise<AdminDashboardData["persistenceProvider"]> {
-  return (await shouldUseSupabaseDatabase()) ? "supabase" : "local_fallback";
+  return "supabase";
 }
 
 function isMissingSupabaseSchemaObjectError(error: unknown) {
@@ -1278,41 +1158,12 @@ async function readSupabaseDatabase() {
 }
 
 async function writeDatabase(database: PlatformDatabase) {
-  if (await shouldUseSupabaseDatabase()) {
-    return writeSupabaseDatabase(database);
-  }
-
-  await mkdir(dataDirectory, { recursive: true });
-  const nextDatabase = {
-    ...normalizeDatabase(database),
-    updatedAt: new Date().toISOString()
-  };
-  const temporaryPath = `${databasePath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(nextDatabase, null, 2)}\n`, "utf8");
-  await rename(temporaryPath, databasePath);
-  return nextDatabase;
+  return writeSupabaseDatabase(database);
 }
 
 async function readDatabase() {
   noStore();
-
-  if (await shouldUseSupabaseDatabase()) {
-    return readSupabaseDatabase();
-  }
-
-  try {
-    const rawDatabase = await readFile(databasePath, "utf8");
-    return normalizeDatabase(JSON.parse(rawDatabase) as Partial<PlatformDatabase>);
-  } catch (error) {
-    const code = typeof error === "object" && error && "code" in error ? error.code : null;
-
-    if (code !== "ENOENT") {
-      throw error;
-    }
-
-    const emptyDatabase = makeEmptyDatabase();
-    return writeDatabase(emptyDatabase);
-  }
+  return readSupabaseDatabase();
 }
 
 function getAllContentItems(database: PlatformDatabase) {
@@ -2653,10 +2504,6 @@ async function upsertSupabaseEntitlementForStudentCourse(
 }
 
 async function syncSupabaseEntitlementsForStudents(students: AdminStudent[], previousStudents: AdminStudent[]) {
-  if (!(await shouldUseSupabaseDatabase())) {
-    return;
-  }
-
   const supabase = getSupabaseAdminClient();
   const userIdsByEmail = await getSupabaseUserIdsByEmail(
     supabase,

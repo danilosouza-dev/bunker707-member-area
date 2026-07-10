@@ -2,7 +2,6 @@ import "server-only";
 
 import type { User } from "@supabase/supabase-js";
 import { hasSupabaseAuthConfig } from "@/server/auth/config";
-import { getLocalAuthenticatedUser } from "@/server/auth/local";
 import { createSupabaseServerClient } from "@/server/auth/supabase";
 
 export type AuthenticatedUser = User;
@@ -11,12 +10,6 @@ export type AdminRole = "owner" | "admin" | "editor" | "support" | "analyst";
 const adminRoles = new Set<AdminRole>(["owner", "admin", "editor", "support", "analyst"]);
 
 export async function getAuthenticatedUser() {
-  const localUser = await getLocalAuthenticatedUser();
-
-  if (localUser) {
-    return localUser;
-  }
-
   if (!hasSupabaseAuthConfig()) {
     return null;
   }
@@ -37,12 +30,6 @@ export async function getAuthenticatedUser() {
 }
 
 export async function getAdminRoleForUser(userId: string) {
-  const localUser = await getLocalAuthenticatedUser();
-
-  if (localUser?.id === userId) {
-    return "owner";
-  }
-
   if (!hasSupabaseAuthConfig()) {
     return null;
   }

@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { LoginExperience } from "@/components/login-experience";
-import { isLocalAuthEnabled } from "@/lib/auth/local";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import { getLoginPageConfig } from "@/lib/login-config";
 import { hasSupabaseAuthConfig } from "@/server/auth/config";
@@ -55,9 +53,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   }
 
   const authConfigured = hasSupabaseAuthConfig();
-  const headerStore = await headers();
-  const hostname = headerStore.get("host")?.split(":")[0] ?? null;
-  const localAuthEnabled = isLocalAuthEnabled(authConfigured, hostname);
   const user = await getAuthenticatedUser();
 
   if (user) {
@@ -70,7 +65,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     <LoginExperience
       authConfigured={authConfigured}
       config={config}
-      localAuthEnabled={localAuthEnabled}
       redirectTo={redirectTo}
     />
   );

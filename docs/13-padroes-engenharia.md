@@ -51,7 +51,7 @@ Esse comando cobre lint, typecheck, testes automatizados e build.
 - O CMS faz parte do mesmo produto e do mesmo repositorio, mas deve manter codigo modular.
 - Regras de acesso ficam separadas de parsers de provedores de pagamento.
 - Entitlements internos sao a fonte de verdade para acesso.
-- Dados iniciais devem entrar como seed server-side. O frontend nao deve importar dados de runtime como mock.
+- Dados de runtime devem vir do Supabase real. Nao usar seed automatico, mock, fixture ou fallback local para catalogo, alunos, acessos, aulas, progresso, favoritos ou configuracoes.
 
 ## Seguranca operacional
 

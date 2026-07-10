@@ -2358,7 +2358,6 @@ function PersonalizationView({
             <LoginExperience
               authConfigured={false}
               config={loginPreviewConfig}
-              localAuthEnabled
               redirectTo="/"
             />
           </div>
@@ -3850,20 +3849,16 @@ function StudentProductPickerCard({
 function StudentFormFields({
   formState,
   onChange,
-  persistenceProvider,
   showAccessSetup,
   onToggleCourse,
   sellableProducts
 }: {
   formState: StudentFormState;
   onChange: (field: keyof StudentFormState, value: string) => void;
-  persistenceProvider: AdminDashboardData["persistenceProvider"];
   showAccessSetup: boolean;
   onToggleCourse: (courseId: string) => void;
   sellableProducts: AdminSellableProduct[];
 }) {
-  const supabaseConfigured = persistenceProvider === "supabase";
-
   return (
     <div className="overflow-hidden rounded-[8px] border border-white/10 bg-[#17181d]">
       <StudentFormSection
@@ -3930,19 +3925,17 @@ function StudentFormFields({
 
       {showAccessSetup ? (
         <StudentFormSection
-          description={supabaseConfigured ? "Configure como o aluno vai receber o primeiro acesso." : "Ambiente local sem envio real de email."}
+          description="Configure como o aluno vai receber o primeiro acesso."
           icon={KeyRound}
           title="Primeiro acesso"
         >
           <div className="grid gap-3 lg:grid-cols-[1fr_1.1fr]">
             <div className="border-l border-white/10 pl-4">
               <p className="text-sm font-semibold text-white">
-                {supabaseConfigured ? "Convite seguro" : "Supabase nao configurado"}
+                Convite seguro
               </p>
               <p className="mt-2 text-sm leading-6 text-zinc-500">
-                {supabaseConfigured
-                  ? "Convite por email e o padrao. Senha temporaria exige troca no primeiro login."
-                  : "Ambiente local sem Supabase: o aluno sera salvo no CRM, mas nenhum email real sera enviado."}
+                Convite por email e o padrao. Senha temporaria exige troca no primeiro login.
               </p>
             </div>
 
@@ -3954,21 +3947,10 @@ function StudentFormFields({
                   onChange={(event) => onChange("accessSetup", event.target.value)}
                   value={formState.accessSetup}
                 >
-                  {supabaseConfigured ? (
-                    <>
-                      <option value="invite">Enviar convite para criar senha</option>
-                      <option value="generated_password">Gerar senha temporaria automaticamente</option>
-                      <option value="manual_password">Criar senha temporaria manualmente</option>
-                      <option value="none">Nao enviar agora</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="none">Nao enviar agora</option>
-                      <option disabled value="invite">Enviar convite para criar senha - exige Supabase</option>
-                      <option disabled value="generated_password">Gerar senha temporaria - exige Supabase</option>
-                      <option disabled value="manual_password">Criar senha temporaria - exige Supabase</option>
-                    </>
-                  )}
+                  <option value="invite">Enviar convite para criar senha</option>
+                  <option value="generated_password">Gerar senha temporaria automaticamente</option>
+                  <option value="manual_password">Criar senha temporaria manualmente</option>
+                  <option value="none">Nao enviar agora</option>
                 </select>
               </label>
 
@@ -3990,13 +3972,6 @@ function StudentFormFields({
             </div>
           </div>
 
-          {!supabaseConfigured ? (
-            <div className="mt-3 rounded-[8px] border border-white/10 bg-white/[0.045] px-3 py-2 text-xs font-semibold leading-5 text-zinc-500">
-              Para disparar convite por email ou criar login real do aluno, configure `NEXT_PUBLIC_SUPABASE_URL`, uma
-              chave publica (`NEXT_PUBLIC_SUPABASE_ANON_KEY` ou `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`) e uma chave
-              server-side (`SUPABASE_SERVICE_ROLE_KEY` ou `SUPABASE_SECRET_KEY`).
-            </div>
-          ) : null}
         </StudentFormSection>
       ) : null}
 
@@ -4103,7 +4078,6 @@ function StudentProfileModal({
   onResendAccess,
   onSubmit,
   onToggleCourse,
-  persistenceProvider,
   sellableProducts,
   student
 }: {
@@ -4118,7 +4092,6 @@ function StudentProfileModal({
   onResendAccess: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   onToggleCourse: (courseId: string) => void;
-  persistenceProvider: AdminDashboardData["persistenceProvider"];
   sellableProducts: AdminSellableProduct[];
   student: AdminStudent | null;
 }) {
@@ -4207,7 +4180,6 @@ function StudentProfileModal({
                 <StudentFormFields
                   formState={formState}
                   onChange={onChange}
-                  persistenceProvider={persistenceProvider}
                   showAccessSetup={modalMode === "new"}
                   onToggleCourse={onToggleCourse}
                   sellableProducts={sellableProducts}
@@ -4407,7 +4379,6 @@ function StudentsView({
   cohorts,
   onChangeStudents,
   onSelectStudent,
-  persistenceProvider,
   selectedStudentId,
   sellableProducts,
   students
@@ -4415,7 +4386,6 @@ function StudentsView({
   cohorts: string[];
   onChangeStudents: PersistStudents;
   onSelectStudent: (studentId: string) => void;
-  persistenceProvider: AdminDashboardData["persistenceProvider"];
   selectedStudentId: string;
   sellableProducts: AdminSellableProduct[];
   students: AdminStudent[];
@@ -4483,7 +4453,7 @@ function StudentsView({
   function openNewStudentForm() {
     setFormState({
       ...emptyStudentFormState,
-      accessSetup: persistenceProvider === "supabase" ? "invite" : "none"
+      accessSetup: "invite"
     });
     setAccessNotice(null);
     setModalMode("new");
@@ -4510,11 +4480,11 @@ function StudentsView({
     setModalMode(null);
   }
 
-  function addAccessHistoryEvent(student: AdminStudent, accessSetup: StudentAccessSetupMode, simulated: boolean) {
+  function addAccessHistoryEvent(student: AdminStudent, accessSetup: StudentAccessSetupMode) {
     const location =
       accessSetup === "invite"
-        ? simulated ? "Cadastro local sem envio" : "Convite por email"
-        : simulated ? "Senha temporaria local" : "Senha temporaria";
+        ? "Convite por email"
+        : "Senha temporaria";
 
     void persistStudentChange((current) =>
       current.map((studentRecord) =>
@@ -4582,7 +4552,6 @@ function StudentsView({
       const payload = await response.json() as {
         data?: {
           method: "invite" | "temporary_password";
-          simulated: boolean;
           status: "sent" | "prepared";
           temporaryPassword?: string;
         };
@@ -4599,16 +4568,14 @@ function StudentsView({
         return;
       }
 
-      addAccessHistoryEvent(student, accessSetup, payload.data.simulated);
+      addAccessHistoryEvent(student, accessSetup);
 
       if (payload.data.method === "invite") {
         setAccessNotice({
-          message: payload.data.simulated
-            ? "Ambiente local sem Supabase. O aluno foi salvo no CRM, mas nenhum email real foi enviado."
-            : "O aluno recebeu um email para criar ou redefinir a senha antes de entrar.",
+          message: "O aluno recebeu um email para criar ou redefinir a senha antes de entrar.",
           recipientEmail: student.email,
-          title: payload.data.simulated ? "Aluno salvo localmente" : "Convite enviado",
-          tone: payload.data.simulated ? "info" : "success"
+          title: "Convite enviado",
+          tone: "success"
         });
         return;
       }
@@ -4617,13 +4584,11 @@ function StudentsView({
 
       setAccessNotice({
         copyText: returnedPassword ? getTemporaryPasswordCopyText(student, returnedPassword) : undefined,
-        message: payload.data.simulated
-          ? "Ambiente local sem Supabase. Use esta senha apenas para validar o texto de entrega; ela nao cria login real."
-          : "Envie esta senha temporaria por um canal de atendimento. Ela nao fica salva no CMS e o aluno sera obrigado a trocar no primeiro login.",
+        message: "Envie esta senha temporaria por um canal de atendimento. Ela nao fica salva no CMS e o aluno sera obrigado a trocar no primeiro login.",
         recipientEmail: student.email,
         temporaryPassword: returnedPassword,
-        title: payload.data.simulated ? "Senha temporaria local" : "Senha temporaria criada",
-        tone: payload.data.simulated ? "info" : "success"
+        title: "Senha temporaria criada",
+        tone: "success"
       });
     } catch (error) {
       setAccessNotice({
@@ -4704,7 +4669,7 @@ function StudentsView({
     event.preventDefault();
     setAccessNotice(null);
 
-    const resolvedAccessSetup = persistenceProvider === "supabase" ? formState.accessSetup : "none";
+    const resolvedAccessSetup = formState.accessSetup;
 
     if (resolvedAccessSetup === "manual_password" && formState.temporaryPassword.trim().length < 8) {
       setAccessNotice({
@@ -4967,7 +4932,6 @@ function StudentsView({
         onResendAccess={resendSelectedStudentAccess}
         onSubmit={submitStudentForm}
         onToggleCourse={toggleCourse}
-        persistenceProvider={persistenceProvider}
         sellableProducts={sellableProducts}
         student={selectedStudent}
       />
@@ -5097,7 +5061,6 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
             cohorts={dashboardData.cohorts}
             onChangeStudents={persistStudents}
             onSelectStudent={setSelectedStudentId}
-            persistenceProvider={dashboardData.persistenceProvider}
             selectedStudentId={selectedStudentId}
             sellableProducts={dashboardData.sellableProducts}
             students={dashboardData.students}
@@ -5170,7 +5133,7 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
       </AdminShell>
 
       <div className="pointer-events-none fixed bottom-4 right-4 hidden rounded-full border border-border bg-background/80 px-3 py-1.5 text-xs font-bold text-muted-foreground backdrop-blur md:block">
-        {dashboardData.persistenceProvider === "supabase" ? "Supabase persistido" : "Fallback local"}
+        Supabase persistido
       </div>
     </div>
   );

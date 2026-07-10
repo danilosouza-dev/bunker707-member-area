@@ -43,6 +43,8 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
+const homeRowCardHoverScale = 1.14;
+
 function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
   if (!row) {
     return;
@@ -52,6 +54,8 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
 
   for (const card of cards) {
     card.removeAttribute("data-hover-edge");
+    card.style.removeProperty("--home-row-card-hover-shift-x");
+    card.style.removeProperty("--home-row-card-hover-logo-shift-x");
   }
 
   if (cards.length === 0) {
@@ -87,10 +91,23 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
     rightEdgeCard = cards[cards.length - 1];
   }
 
-  leftEdgeCard?.setAttribute("data-hover-edge", "left");
+  if (leftEdgeCard) {
+    const leftEdgeRect = leftEdgeCard.getBoundingClientRect();
+    const leftHiddenOffset = Math.max(leftBoundary - leftEdgeRect.left, 0);
+
+    leftEdgeCard.setAttribute("data-hover-edge", "left");
+    leftEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${leftHiddenOffset}px`);
+    leftEdgeCard.style.setProperty("--home-row-card-hover-logo-shift-x", `${leftHiddenOffset}px`);
+  }
 
   if (rightEdgeCard && rightEdgeCard !== leftEdgeCard) {
+    const rightEdgeRect = rightEdgeCard.getBoundingClientRect();
+    const rightHiddenOffset = Math.max(rightEdgeRect.right - rightBoundary, 0);
+    const rightLogoShiftX = Math.round((-rightHiddenOffset - rightEdgeRect.width * (homeRowCardHoverScale - 1)) * 100) / 100;
+
     rightEdgeCard.setAttribute("data-hover-edge", "right");
+    rightEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${-rightHiddenOffset}px`);
+    rightEdgeCard.style.setProperty("--home-row-card-hover-logo-shift-x", `${rightLogoShiftX}px`);
   }
 }
 

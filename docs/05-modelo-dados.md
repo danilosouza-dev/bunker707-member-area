@@ -119,7 +119,7 @@ Implementacao atual:
 
 - `product_combos` e `product_combo_items` possuem migration propria;
 - o CRM usa rota administrativa `/api/admin/combos` para criar, editar e remover combos;
-- no desenvolvimento local sem Supabase, combos continuam no fallback `.data/bunker707-platform.json`.
+- combos sao persistidos somente no Supabase; sem banco configurado, o CRM deve falhar explicitamente.
 
 ### product_combo_items
 
@@ -406,7 +406,7 @@ Regras:
 
 ## CMS administrativo
 
-O CMS em `/admin` grava dados por uma camada server-side persistida em Supabase Postgres/RLS. No desenvolvimento local sem variaveis Supabase, ou em `localhost` quando Supabase esta configurado mas inacessivel, existe fallback em `.data/bunker707-platform.json` apenas para manter o app navegavel; em ambientes reais, a fonte deve ser Supabase sem misturar autorizacao administrativa com a experiencia do aluno. Um Supabase vazio nao deve receber dados demo automaticamente: cadastros reais entram pelo CMS, APIs, webhooks ou migrations controladas.
+O CMS em `/admin` grava dados por uma camada server-side persistida em Supabase Postgres/RLS. A fonte de verdade de runtime e sempre Supabase: nao existe fallback em `.data`, seed automatico, mock ou modo local para manter o app navegavel. Um Supabase vazio deve continuar vazio; cadastros reais entram pelo CMS, APIs, webhooks ou migrations controladas.
 
 O menu principal do CMS deve manter Produto/Aluno/Operacao separados: Visao geral, Alunos, Produtos, Combos, Estrutura, Comunidade, Moderacao, Agentes de IA, Personalizacao e Configuracoes > Integracoes. Regras de liberacao nao ficam em uma tela solta; elas sao campos do proprio item editado, seja formacao, curso, mentoria, webinario, produto, modulo, aula ou material.
 
@@ -834,12 +834,11 @@ Implementacao atual:
 
 - `saved_items` existe em migration Supabase com RLS por `user_id`;
 - a rota `/api/saved-items` alterna salvar/remover para o usuario autenticado;
-- em desenvolvimento local sem Supabase, ou no modo local de `localhost`, os registros ficam em `.data/bunker707-platform.json`;
 - cards da home, modal de detalhes e pagina de aula consomem `isSaved` retornado pelo backend.
 
 ## Eventos
 
-Regra de produto: toda interacao relevante do aluno deve ser persistivel e virar dado para CRM, dashboards, segmentacao, suporte, recomendacao e IA futura. No prototipo UI-first, essas interacoes podem existir em estado local/mock, mas a interface deve preservar o contrato mental do produto: reagiu, salvou, assistiu, concluiu, baixou, comentou ou denunciou, isso futuramente vira registro.
+Regra de produto: toda interacao relevante do aluno deve ser persistivel e virar dado real no Supabase para CRM, dashboards, segmentacao, suporte, recomendacao e IA futura. A interface nao deve tratar interacoes do aluno como mock quando fizerem parte de um fluxo de produto.
 
 ### student_events
 
