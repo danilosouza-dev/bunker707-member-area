@@ -51,6 +51,7 @@ export default async function LessonPage({ params, searchParams }: LessonPagePro
         <LessonExperience
           accessPreviewMode={accessPreviewMode}
           allModules={allModules}
+          currentUserName={shellData.student.fullName}
           initialLessonId={requestedLessonId}
           initialLessonReactions={initialLessonReactions}
           initialLessonWatchStates={initialLessonWatchStates}

@@ -35,10 +35,10 @@ import type {
 type ModerationCommandCenterProps = {
   blockedWordRules: AdminBlockedWordRule[];
   items: AdminModerationItem[];
-  onSaveModeration: (input: {
-    blockedWordRules?: AdminBlockedWordRule[];
-    moderationItems?: AdminModerationItem[];
-  }) => Promise<void> | void;
+  onModerationDataChange: (data: {
+    blockedWordRules: AdminBlockedWordRule[];
+    moderationItems: AdminModerationItem[];
+  }) => void;
   products: AdminSellableProduct[];
 };
 
@@ -53,17 +53,6 @@ const kindLabels: Record<AdminCommentKind, string> = {
   comment: "Comentario",
   reply: "Resposta"
 };
-
-function makeId(prefix: string, value: string) {
-  const slug = value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-
-  return `${prefix}-${slug || Date.now().toString(36)}`;
-}
 
 function getStatusClassName(status: AdminCommentStatus) {
   if (status === "approved") {
@@ -84,27 +73,33 @@ function getStatusClassName(status: AdminCommentStatus) {
 export function ModerationCommandCenter({
   blockedWordRules,
   items,
-  onSaveModeration,
+  onModerationDataChange,
   products
 }: ModerationCommandCenterProps) {
   const [productFilter, setProductFilter] = React.useState("all");
   const [query, setQuery] = React.useState("");
   const [kindFilter, setKindFilter] = React.useState<"all" | AdminCommentKind>("all");
-  const [statusFilter, setStatusFilter] = React.useState<"all" | AdminCommentStatus>("pending");
+  const [statusFilter, setStatusFilter] = React.useState<"all" | "review" | AdminCommentStatus>("review");
   const [word, setWord] = React.useState("");
   const [message, setMessage] = React.useState("Alguma palavra usada esta contra as regras da comunidade.");
+  const [requestError, setRequestError] = React.useState("");
+  const [savingKey, setSavingKey] = React.useState("");
   const normalizedQuery = query.trim().toLowerCase();
   const counts = React.useMemo(() => ({
     approved: items.filter((item) => item.status === "approved").length,
     hidden: items.filter((item) => item.status === "hidden").length,
-    pending: items.filter((item) => item.status === "pending").length,
+    review: items.filter((item) => item.status === "pending" || item.reportCount > 0).length,
     spam: items.filter((item) => item.status === "spam").length
   }), [items]);
   const filteredItems = React.useMemo(() => (
     items.filter((item) => {
       const matchesProduct = productFilter === "all" || item.productId === productFilter;
       const matchesKind = kindFilter === "all" || item.kind === kindFilter;
-      const matchesStatus = statusFilter === "all" || item.status === statusFilter;
+      const matchesStatus = statusFilter === "all" || (
+        statusFilter === "review"
+          ? item.status === "pending" || item.reportCount > 0
+          : item.status === statusFilter
+      );
       const matchesQuery = !normalizedQuery || [
         item.authorName,
         item.body,
@@ -116,10 +111,45 @@ export function ModerationCommandCenter({
     })
   ), [items, kindFilter, normalizedQuery, productFilter, statusFilter]);
 
+  async function requestModerationData(path: string, init: RequestInit, key: string) {
+    setRequestError("");
+    setSavingKey(key);
+
+    try {
+      const response = await fetch(path, {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          ...init.headers
+        }
+      });
+      const payload = await response.json() as {
+        data?: {
+          blockedWordRules: AdminBlockedWordRule[];
+          moderationItems: AdminModerationItem[];
+        };
+        error?: string;
+      };
+
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error ?? "Nao foi possivel salvar a moderacao.");
+      }
+
+      onModerationDataChange(payload.data);
+      return true;
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Nao foi possivel salvar a moderacao.");
+      return false;
+    } finally {
+      setSavingKey("");
+    }
+  }
+
   async function updateItemStatus(itemId: string, status: AdminCommentStatus) {
-    await onSaveModeration({
-      moderationItems: items.map((item) => (item.id === itemId ? { ...item, status } : item))
-    });
+    await requestModerationData(`/api/admin/moderation/comments/${encodeURIComponent(itemId)}`, {
+      body: JSON.stringify({ status }),
+      method: "PATCH"
+    }, `comment:${itemId}`);
   }
 
   async function addBlockedWord(event: React.FormEvent<HTMLFormElement>) {
@@ -130,31 +160,29 @@ export function ModerationCommandCenter({
       return;
     }
 
-    const nextRule: AdminBlockedWordRule = {
-      active: true,
-      id: makeId("blocked-word", trimmedWord),
-      message: message.trim() || "Alguma palavra usada esta contra as regras da comunidade.",
-      word: trimmedWord
-    };
+    const saved = await requestModerationData("/api/admin/moderation/blocked-words", {
+      body: JSON.stringify({ message, word: trimmedWord }),
+      method: "POST"
+    }, "blocked-word:new");
 
-    await onSaveModeration({
-      blockedWordRules: [nextRule, ...blockedWordRules.filter((rule) => rule.id !== nextRule.id)]
-    });
-    setWord("");
+    if (saved) setWord("");
   }
 
   async function toggleBlockedWord(ruleId: string) {
-    await onSaveModeration({
-      blockedWordRules: blockedWordRules.map((rule) => (
-        rule.id === ruleId ? { ...rule, active: !rule.active } : rule
-      ))
-    });
+    const rule = blockedWordRules.find((candidate) => candidate.id === ruleId);
+
+    if (!rule) return;
+
+    await requestModerationData(`/api/admin/moderation/blocked-words/${encodeURIComponent(ruleId)}`, {
+      body: JSON.stringify({ active: !rule.active }),
+      method: "PATCH"
+    }, `blocked-word:${ruleId}`);
   }
 
   async function removeBlockedWord(ruleId: string) {
-    await onSaveModeration({
-      blockedWordRules: blockedWordRules.filter((rule) => rule.id !== ruleId)
-    });
+    await requestModerationData(`/api/admin/moderation/blocked-words/${encodeURIComponent(ruleId)}`, {
+      method: "DELETE"
+    }, `blocked-word:${ruleId}`);
   }
 
   return (
@@ -170,11 +198,17 @@ export function ModerationCommandCenter({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-4">
-        <MetricCard icon={OctagonAlert} label="Pendentes" value={counts.pending.toString()} tone="amber" />
+        <MetricCard icon={OctagonAlert} label="Em revisao" value={counts.review.toString()} tone="amber" />
         <MetricCard icon={CheckCircle2} label="Aprovados" value={counts.approved.toString()} tone="emerald" />
         <MetricCard icon={EyeOff} label="Ocultados" value={counts.hidden.toString()} tone="zinc" />
         <MetricCard icon={ShieldAlert} label="Spam" value={counts.spam.toString()} tone="red" />
       </div>
+
+      {requestError ? (
+        <div className="rounded-[8px] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100" role="alert">
+          {requestError}
+        </div>
+      ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <Card className="rounded-[8px] border-white/10 bg-[#17181d] py-0 shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
@@ -204,7 +238,8 @@ export function ModerationCommandCenter({
                 <SelectItem value="comment">Comentarios</SelectItem>
                 <SelectItem value="reply">Respostas</SelectItem>
               </FilterSelect>
-              <FilterSelect onValueChange={(value) => setStatusFilter(value as "all" | AdminCommentStatus)} value={statusFilter}>
+              <FilterSelect onValueChange={(value) => setStatusFilter(value as "all" | "review" | AdminCommentStatus)} value={statusFilter}>
+                <SelectItem value="review">Em revisao</SelectItem>
                 <SelectItem value="all">Todos status</SelectItem>
                 <SelectItem value="pending">Pendentes</SelectItem>
                 <SelectItem value="approved">Aprovados</SelectItem>
@@ -219,7 +254,7 @@ export function ModerationCommandCenter({
                 <MessageCircle className="mx-auto size-10 text-zinc-700" />
                 <p className="mt-4 text-lg font-semibold text-white">Nenhum comentario para moderar.</p>
                 <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6 text-zinc-500">
-                  Quando os comentarios das aulas forem persistidos, eles entram aqui com status pendente, aprovado, ocultado ou spam.
+                  A fila esta atualizada. Novos comentarios, respostas e denuncias aparecem aqui automaticamente.
                 </p>
               </div>
             ) : (
@@ -234,6 +269,11 @@ export function ModerationCommandCenter({
                         <Badge className="border-white/10 bg-white/[0.055] text-zinc-300" variant="outline">
                           {kindLabels[item.kind]}
                         </Badge>
+                        {item.reportCount > 0 ? (
+                          <Badge className="border-red-400/25 bg-red-500/10 text-red-200" variant="outline">
+                            {item.reportCount} {item.reportCount === 1 ? "denuncia" : "denuncias"}
+                          </Badge>
+                        ) : null}
                         <span className="text-xs font-semibold text-zinc-500">{item.productTitle} / {item.lessonTitle}</span>
                       </div>
                       <p className="mt-3 text-sm font-semibold text-white">
@@ -241,11 +281,17 @@ export function ModerationCommandCenter({
                         {item.parentAuthorName ? <span className="text-zinc-500"> respondeu {item.parentAuthorName}</span> : null}
                       </p>
                       <p className="mt-1 max-w-3xl text-sm font-medium leading-6 text-zinc-300">{item.body}</p>
+                      <p className="mt-2 text-xs font-semibold text-zinc-600">
+                        {item.reactionCount} {item.reactionCount === 1 ? "reacao" : "reacoes"} · {new Intl.DateTimeFormat("pt-BR", {
+                          dateStyle: "short",
+                          timeStyle: "short"
+                        }).format(new Date(item.createdAt))}
+                      </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                      <ActionButton icon={CheckCircle2} label="Aprovar" onClick={() => updateItemStatus(item.id, "approved")} />
-                      <ActionButton icon={EyeOff} label="Ocultar" onClick={() => updateItemStatus(item.id, "hidden")} />
-                      <ActionButton icon={ShieldAlert} label="Spam" onClick={() => updateItemStatus(item.id, "spam")} />
+                      <ActionButton disabled={savingKey === `comment:${item.id}` || item.status === "approved"} icon={CheckCircle2} label={item.status === "approved" ? "Aprovado" : "Aprovar"} onClick={() => updateItemStatus(item.id, "approved")} />
+                      <ActionButton disabled={savingKey === `comment:${item.id}` || item.status === "hidden"} icon={EyeOff} label={item.status === "hidden" ? "Ocultado" : "Ocultar"} onClick={() => updateItemStatus(item.id, "hidden")} />
+                      <ActionButton disabled={savingKey === `comment:${item.id}` || item.status === "spam"} icon={ShieldAlert} label={item.status === "spam" ? "Spam" : "Spam"} onClick={() => updateItemStatus(item.id, "spam")} />
                     </div>
                   </article>
                 ))}
@@ -282,7 +328,7 @@ export function ModerationCommandCenter({
               </label>
               <Button
                 className="h-10 w-full rounded-[8px] bg-white text-sm font-semibold text-black hover:bg-zinc-200"
-                disabled={!word.trim()}
+                disabled={!word.trim() || savingKey === "blocked-word:new"}
                 type="submit"
               >
                 <Plus className="size-4" />
@@ -305,6 +351,7 @@ export function ModerationCommandCenter({
                     <Button
                       aria-label={`Excluir palavra ${rule.word}`}
                       className="size-8 rounded-[8px] text-zinc-500 hover:bg-red-500/10 hover:text-red-200"
+                      disabled={savingKey === `blocked-word:${rule.id}`}
                       onClick={() => removeBlockedWord(rule.id)}
                       size="icon-sm"
                       type="button"
@@ -315,6 +362,7 @@ export function ModerationCommandCenter({
                   </div>
                   <Button
                     className="mt-3 h-8 w-full rounded-[8px] border-white/10 bg-white/[0.04] text-xs font-semibold text-zinc-300 hover:bg-white/10"
+                    disabled={savingKey === `blocked-word:${rule.id}`}
                     onClick={() => toggleBlockedWord(rule.id)}
                     type="button"
                     variant="outline"
@@ -360,10 +408,12 @@ function FilterSelect({
 }
 
 function ActionButton({
+  disabled,
   icon: Icon,
   label,
   onClick
 }: {
+  disabled?: boolean;
   icon: typeof CheckCircle2 | typeof EyeOff | typeof ShieldAlert;
   label: string;
   onClick: () => void;
@@ -371,6 +421,7 @@ function ActionButton({
   return (
     <Button
       className="h-9 rounded-[8px] border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-zinc-300 hover:bg-white/10 hover:text-white"
+      disabled={disabled}
       onClick={onClick}
       type="button"
       variant="outline"

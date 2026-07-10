@@ -32,7 +32,18 @@ import { SavedItemButton } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import type { KeyboardEvent } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
-import type { ContentItem, CourseModule, LessonPreview, LessonReaction, LessonVideoConfig, LessonWatchState, LessonWatchStatus } from "@/lib/platform-types";
+import type {
+  ContentItem,
+  CourseModule,
+  LessonCommentReaction,
+  LessonCommentRecord,
+  LessonCommentStatus,
+  LessonPreview,
+  LessonReaction,
+  LessonVideoConfig,
+  LessonWatchState,
+  LessonWatchStatus
+} from "@/lib/platform-types";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 
 type LessonExperienceProps = {
@@ -42,12 +53,13 @@ type LessonExperienceProps = {
   initialLessonReactions?: Partial<Record<string, LessonReaction>>;
   initialLessonWatchStates?: Record<string, LessonWatchState>;
   item: ContentItem;
+  currentUserName: string;
   returnContent?: Pick<ContentItem, "id" | "title">;
   selectedModule: CourseModule;
 };
 
 type LessonTab = "comments" | "materials";
-type CommentReaction = "like" | "fire" | "insight" | "love" | "clap" | "laugh" | "wow" | "rocket" | "eyes" | "check";
+type CommentReaction = LessonCommentReaction;
 
 type CommentAvatarData = {
   backgroundClassName: string;
@@ -62,8 +74,10 @@ type LessonCommentBase = {
   avatar: CommentAvatarData;
   body: string;
   id: string;
+  isOwn: boolean;
   role?: string;
   reactions: Partial<Record<CommentReaction, number>>;
+  status: LessonCommentStatus;
   time: string;
   username: string;
 };
@@ -239,87 +253,6 @@ const commentReactionOptions = [
   id: CommentReaction;
   label: string;
 }>;
-
-const initialComments: LessonComment[] = [
-  {
-    id: "comment-1",
-    author: "Ana Beatriz",
-    avatar: {
-      backgroundClassName: "bg-emerald-300",
-      label: "👩‍💻",
-      labelClassName: "text-[34px]",
-      online: true
-    },
-    body: "Ficou bem mais claro quando voce separou referencia, prompt e criterio visual. Ja vou testar esse fluxo no meu projeto.",
-    reactions: {
-      fire: 4,
-      insight: 2,
-      like: 6
-    },
-    replies: [
-      {
-        id: "reply-1",
-        parentId: "comment-1",
-        author: "Bruno Bunker",
-        avatar: {
-          backgroundClassName: "bg-red-500",
-          label: "BB",
-          labelClassName: "text-[15px]",
-          online: true
-        },
-        body: "@ana.beatriz exatamente. O segredo e criar uma esteira simples: primeiro direcao visual, depois variacoes controladas, depois refinamento por criterio.",
-        reactions: {
-          fire: 8,
-          love: 3
-        },
-        role: "Professor",
-        time: "1 hora atras",
-        username: "bruno.bunker"
-      }
-    ],
-    time: "12 minutos atras",
-    username: "ana.beatriz"
-  },
-  {
-    id: "comment-3",
-    author: "Rafael Leme",
-    avatar: {
-      backgroundClassName: "bg-amber-300",
-      label: "🧠",
-      labelClassName: "text-[34px]"
-    },
-    body: "A parte de salvar os melhores prompts por etapa resolveu uma bagunca que eu estava criando aqui.",
-    reactions: {
-      insight: 1,
-      like: 2
-    },
-    time: "3 dias atras",
-    username: "rafael.leme"
-  },
-  {
-    id: "comment-4",
-    author: "Marina Costa",
-    avatar: {
-      backgroundClassName: "bg-fuchsia-500",
-      label: "MC",
-      labelClassName: "text-[15px]"
-    },
-    body: "Voltei nessa aula um mes depois e fez ainda mais sentido agora que comecei a montar o workflow completo.",
-    reactions: {
-      fire: 1,
-      love: 1
-    },
-    time: "1 mes atras",
-    username: "marina.costa"
-  }
-];
-
-const currentUserCommentAvatar: CommentAvatarData = {
-  backgroundClassName: "bg-red-500",
-  label: "DS",
-  labelClassName: "text-[15px]",
-  online: true
-};
 
 const lessonIconButtonClassName =
   "group/action relative grid h-11 w-11 place-items-center rounded-full border border-white/40 bg-[#232323]/90 text-white shadow-xl shadow-black/30 backdrop-blur transition duration-150 hover:border-white/90 hover:bg-[#3a3a3a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:scale-95 sm:h-12 sm:w-12";
@@ -709,6 +642,85 @@ function CommentAvatar({
   );
 }
 
+const commentAvatarBackgrounds = [
+  "bg-red-500",
+  "bg-emerald-600",
+  "bg-sky-600",
+  "bg-violet-600",
+  "bg-amber-600",
+  "bg-fuchsia-600"
+];
+
+function getCommentInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase("pt-BR") ?? "")
+    .join("") || "AL";
+}
+
+function getCommentAvatar(name: string, imageSrc?: string): CommentAvatarData {
+  const colorIndex = Array.from(name).reduce((total, character) => total + character.charCodeAt(0), 0) % commentAvatarBackgrounds.length;
+
+  return {
+    backgroundClassName: commentAvatarBackgrounds[colorIndex],
+    imageSrc,
+    label: getCommentInitials(name),
+    labelClassName: "text-[15px]",
+    online: false
+  };
+}
+
+function formatCommentTime(value: string) {
+  const timestamp = new Date(value).getTime();
+
+  if (Number.isNaN(timestamp)) return "agora";
+
+  const diffSeconds = Math.round((timestamp - Date.now()) / 1000);
+  const relativeTime = new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" });
+  const absoluteDiff = Math.abs(diffSeconds);
+
+  if (absoluteDiff < 60) return relativeTime.format(diffSeconds, "second");
+
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (Math.abs(diffMinutes) < 60) return relativeTime.format(diffMinutes, "minute");
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 24) return relativeTime.format(diffHours, "hour");
+
+  const diffDays = Math.round(diffHours / 24);
+  if (Math.abs(diffDays) < 30) return relativeTime.format(diffDays, "day");
+
+  const diffMonths = Math.round(diffDays / 30);
+  if (Math.abs(diffMonths) < 12) return relativeTime.format(diffMonths, "month");
+
+  return relativeTime.format(Math.round(diffMonths / 12), "year");
+}
+
+function lessonCommentRecordToView(record: LessonCommentRecord): LessonComment {
+  return {
+    author: record.authorName,
+    avatar: getCommentAvatar(record.authorName, record.authorAvatarUrl),
+    body: record.body,
+    id: record.id,
+    isOwn: record.isOwn,
+    reactions: record.reactions,
+    replies: record.replies.map((reply) => ({
+      ...lessonCommentRecordToView(reply),
+      parentId: record.id
+    })),
+    role: record.authorRole === "student" ? undefined : "Professor",
+    status: record.status,
+    time: formatCommentTime(record.createdAt),
+    username: record.authorUsername
+  };
+}
+
+function flattenCommentRecords(records: LessonCommentRecord[]): LessonCommentRecord[] {
+  return records.flatMap((record) => [record, ...flattenCommentRecords(record.replies)]);
+}
+
 function applyCommentReactionDelta(
   reactions: Partial<Record<CommentReaction, number>>,
   reactionId: CommentReaction,
@@ -834,6 +846,7 @@ function LessonReactionControl({
 export function LessonExperience({
   accessPreviewMode,
   allModules,
+  currentUserName,
   initialLessonId: requestedInitialLessonId,
   initialLessonReactions = {},
   initialLessonWatchStates = {},
@@ -863,12 +876,15 @@ export function LessonExperience({
   const [activeModuleId, setActiveModuleId] = useState<string | null>(selectedModule.id);
   const [activeTab, setActiveTab] = useState<LessonTab>("comments");
   const [commentText, setCommentText] = useState("");
-  const [comments, setComments] = useState<LessonComment[]>(initialComments);
+  const [comments, setComments] = useState<LessonComment[]>([]);
   const [commentReactionSelections, setCommentReactionSelections] = useState<Partial<Record<string, CommentReaction>>>({});
   const [commentReactionMenuId, setCommentReactionMenuId] = useState<string | null>(null);
   const [commentMenuId, setCommentMenuId] = useState<string | null>(null);
   const [reportedCommentIds, setReportedCommentIds] = useState<Set<string>>(() => new Set());
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
+  const [commentsLessonId, setCommentsLessonId] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [commentError, setCommentError] = useState("");
   const [lessonReactions, setLessonReactions] = useState<Partial<Record<string, LessonReaction>>>(initialLessonReactions);
   const [lessonWatchStates, setLessonWatchStates] = useState<Record<string, LessonWatchState>>(initialLessonWatchStates);
   const [startedLessonIds, setStartedLessonIds] = useState<Set<string>>(() => new Set());
@@ -887,6 +903,10 @@ export function LessonExperience({
   const playlistScrollRef = useRef<HTMLDivElement>(null);
   const moduleRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const totalCommentCount = useMemo(() => getTotalCommentCount(comments), [comments]);
+  const currentUserCommentAvatar = useMemo(
+    () => ({ ...getCommentAvatar(currentUserName), online: true }),
+    [currentUserName]
+  );
 
   const fallbackTarget =
     getLessonTarget(allModules, activeLessonId) ??
@@ -899,6 +919,44 @@ export function LessonExperience({
   const activeLesson = fallbackTarget?.lesson ?? null;
   const activeModule = allModules.find((courseModule) => courseModule.id === activeModuleId) ?? fallbackTarget?.module ?? selectedModule;
   const activeLessonKey = activeLesson?.id ?? "";
+  const commentsLoading = commentsLessonId !== activeLessonKey;
+  const loadLessonComments = useCallback(async (lessonId: string, signal?: AbortSignal) => {
+    if (!lessonId) {
+      return;
+    }
+
+    try {
+      const searchParams = new URLSearchParams({ contentId: item.id });
+      const response = await fetch(`/api/comments/lessons/${encodeURIComponent(lessonId)}?${searchParams}`, {
+        credentials: "same-origin",
+        signal
+      });
+      const payload = await response.json() as { data?: LessonCommentRecord[]; error?: string };
+
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error ?? "Nao foi possivel carregar os comentarios.");
+      }
+
+      const flatRecords = flattenCommentRecords(payload.data);
+      setComments(payload.data.map(lessonCommentRecordToView));
+      setCommentReactionSelections(Object.fromEntries(
+        flatRecords.flatMap((record) => (
+          record.selectedReaction ? [[record.id, record.selectedReaction] as const] : []
+        ))
+      ));
+      setReportedCommentIds(new Set(
+        flatRecords.filter((record) => record.reportedByCurrentUser).map((record) => record.id)
+      ));
+      setCommentError("");
+    } catch (error) {
+      if (signal?.aborted) return;
+
+      setComments([]);
+      setCommentError(error instanceof Error ? error.message : "Nao foi possivel carregar os comentarios.");
+    } finally {
+      if (!signal?.aborted) setCommentsLessonId(lessonId);
+    }
+  }, [item.id]);
   const activeLessonDurationLabel = activeLesson?.duration;
   const activeLessonVideoProvider = activeLesson?.video?.provider;
   const activeReleaseNotice = activeLesson
@@ -1247,6 +1305,18 @@ export function LessonExperience({
       document.removeEventListener("pointerdown", handleCommentPopoverPointerDown);
     };
   }, [commentMenuId, commentReactionMenuId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadTimeout = window.setTimeout(() => {
+      void loadLessonComments(activeLessonKey, controller.signal);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(loadTimeout);
+      controller.abort();
+    };
+  }, [activeLessonKey, loadLessonComments]);
 
   useEffect(() => {
     if (!activeModuleId) {
@@ -1686,9 +1756,11 @@ export function LessonExperience({
     }));
   }
 
-  function handleCommentReactionToggle(commentId: string, reactionId: CommentReaction) {
+  async function handleCommentReactionToggle(commentId: string, reactionId: CommentReaction) {
     const selectedReaction = commentReactionSelections[commentId] ?? null;
+    const nextReaction = selectedReaction === reactionId ? null : reactionId;
     setCommentReactionMenuId(null);
+    setCommentError("");
 
     setComments((current) => current.map((comment) => {
       const updateReactions = (reactions: Partial<Record<CommentReaction, number>>) => {
@@ -1744,15 +1816,54 @@ export function LessonExperience({
 
       return next;
     });
+
+    try {
+      const response = await fetch(`/api/comments/${encodeURIComponent(commentId)}/reaction`, {
+        body: JSON.stringify({ reaction: nextReaction }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "PUT"
+      });
+      const payload = await response.json() as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Nao foi possivel salvar a reacao.");
+      }
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : "Nao foi possivel salvar a reacao.");
+      void loadLessonComments(activeLessonKey);
+    }
   }
 
-  function handleCommentReport(commentId: string) {
+  async function handleCommentReport(commentId: string) {
+    setCommentError("");
     setReportedCommentIds((current) => {
       const next = new Set(current);
       next.add(commentId);
       return next;
     });
     setCommentMenuId(null);
+
+    try {
+      const response = await fetch(`/api/comments/${encodeURIComponent(commentId)}/report`, {
+        body: JSON.stringify({}),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const payload = await response.json() as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Nao foi possivel enviar a denuncia.");
+      }
+    } catch (error) {
+      setReportedCommentIds((current) => {
+        const next = new Set(current);
+        next.delete(commentId);
+        return next;
+      });
+      setCommentError(error instanceof Error ? error.message : "Nao foi possivel enviar a denuncia.");
+    }
   }
 
   function handleReplyStart(parentCommentId: string, target: Pick<LessonCommentBase, "author" | "username">) {
@@ -1804,6 +1915,10 @@ export function LessonExperience({
       return;
     }
 
+    setCommentText("");
+    setReplyTarget(null);
+    setCommentMenuId(null);
+    setCommentReactionMenuId(null);
     setActiveModuleId(courseModule.id);
     setActiveLessonId(lesson.id);
   }
@@ -1821,58 +1936,48 @@ export function LessonExperience({
     handleLessonSelect(courseModule, lesson);
   }
 
-  function handleCommentSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleCommentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const body = commentText.trim();
 
-    if (!body) {
+    if (!body || commentSubmitting || !activeLessonKey) {
       return;
     }
+    const submittedLessonId = activeLessonKey;
+    const submittedReplyTarget = replyTarget;
+    setCommentSubmitting(true);
+    setCommentError("");
 
-    const baseComment: LessonCommentBase = {
-      author: "Danilo Souza",
-      avatar: currentUserCommentAvatar,
-      body,
-      id: `comment-${Date.now()}`,
-      reactions: {},
-      time: "agora",
-      username: "danilo.souza"
-    };
+    try {
+      const response = await fetch(`/api/comments/lessons/${encodeURIComponent(submittedLessonId)}`, {
+        body: JSON.stringify({
+          body,
+          contentId: item.id,
+          parentCommentId: submittedReplyTarget?.parentCommentId
+        }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const payload = await response.json() as { data?: LessonCommentRecord; error?: string };
 
-    if (replyTarget) {
-      setComments((current) => current.map((comment) => {
-        if (comment.id !== replyTarget.parentCommentId) {
-          return comment;
-        }
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error ?? "Nao foi possivel enviar o comentario.");
+      }
 
-        const reply: LessonCommentReply = {
-          ...baseComment,
-          id: `reply-${Date.now()}`,
-          parentId: comment.id
-        };
-
-        return {
-          ...comment,
-          replies: [...(comment.replies ?? []), reply]
-        };
-      }));
-    } else {
-      setComments((current) => [
-        ...current,
-        {
-          ...baseComment,
-          id: `comment-${Date.now()}`
-        }
-      ]);
+      setReplyTarget(null);
+      setCommentText("");
+      setActiveTab("comments");
+      await loadLessonComments(submittedLessonId);
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : "Nao foi possivel enviar o comentario.");
+    } finally {
+      setCommentSubmitting(false);
     }
-
-    setReplyTarget(null);
-    setCommentText("");
-    setActiveTab("comments");
   }
 
   const primaryActionLabel = isActiveLessonLocked ? "Bloqueada" : isActiveLessonCompleted ? "Concluida" : "Concluir";
-  const canSubmitComment = commentText.trim().length > 0;
+  const canSubmitComment = commentText.trim().length > 0 && !commentSubmitting && !isActiveLessonLocked;
   const returnHref = withAccessPreviewParam(`/conteudo/${returnContent?.id ?? item.id}`, accessPreviewMode);
   const returnLabel = returnContent?.title ?? item.title;
 
@@ -2250,7 +2355,26 @@ export function LessonExperience({
           {activeTab === "comments" ? (
             <div className="p-4 sm:p-6">
               <div className="divide-y divide-white/[0.07]">
-                {comments.map((comment) => {
+                {commentsLoading ? (
+                  <div className="space-y-4 py-2" aria-label="Carregando comentarios">
+                    {[0, 1].map((item) => (
+                      <div className="flex animate-pulse gap-4 py-3" key={item}>
+                        <span className="h-11 w-11 shrink-0 rounded-full bg-white/10" />
+                        <span className="flex-1 space-y-2">
+                          <span className="block h-4 w-40 rounded bg-white/10" />
+                          <span className="block h-3 w-full max-w-2xl rounded bg-white/[0.06]" />
+                          <span className="block h-3 w-3/5 rounded bg-white/[0.06]" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : comments.length === 0 ? (
+                  <div className="py-8 text-center">
+                    <MessageCircle className="mx-auto h-8 w-8 text-zinc-600" />
+                    <p className="mt-3 text-sm font-bold text-zinc-200">Ainda nao ha comentarios nesta aula.</p>
+                    <p className="mt-1 text-sm text-zinc-500">Compartilhe uma duvida ou insight para iniciar a conversa.</p>
+                  </div>
+                ) : comments.map((comment) => {
                   const selectedReaction = commentReactionSelections[comment.id] ?? null;
                   const isMenuOpen = commentMenuId === comment.id;
                   const isReported = reportedCommentIds.has(comment.id);
@@ -2270,6 +2394,11 @@ export function LessonExperience({
                                 </span>
                               ) : null}
                               <span className="text-xs font-semibold text-zinc-500">{comment.time}</span>
+                              {comment.status === "pending" ? (
+                                <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+                                  Aguardando moderacao
+                                </span>
+                              ) : null}
                             </div>
                             <CommentBody body={comment.body} className="mt-1 max-w-3xl text-sm leading-6 text-zinc-300" />
                           </div>
@@ -2280,6 +2409,7 @@ export function LessonExperience({
                               aria-haspopup="menu"
                               aria-label={`Mais opcoes para comentario de ${comment.author}`}
                               className="grid h-8 w-8 place-items-center rounded-full text-zinc-500 opacity-100 transition hover:bg-white/10 hover:text-white focus-visible:bg-white/10 focus-visible:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:opacity-0 sm:group-hover/comment:opacity-100 sm:group-focus-within/comment:opacity-100"
+                              disabled={comment.isOwn}
                               onClick={() => {
                                 setCommentReactionMenuId(null);
                                 setCommentMenuId((current) => (current === comment.id ? null : comment.id));
@@ -2289,7 +2419,7 @@ export function LessonExperience({
                               <MoreHorizontal className="h-4 w-4" />
                             </button>
 
-                            {isMenuOpen ? (
+                            {isMenuOpen && !comment.isOwn ? (
                               <div className="absolute right-0 top-9 z-30 min-w-[14.25rem] overflow-hidden rounded-[8px] border border-white/10 bg-[#242424] p-1.5 shadow-2xl shadow-black/60">
                                 <button
                                   className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-[6px] px-3 py-2.5 text-left text-[13px] font-semibold leading-none text-zinc-200 transition hover:bg-white/10 hover:text-white disabled:cursor-default disabled:text-zinc-500 disabled:hover:bg-transparent"
@@ -2407,6 +2537,11 @@ export function LessonExperience({
                                             </span>
                                           ) : null}
                                           <span className="text-xs font-semibold text-zinc-500">{reply.time}</span>
+                                          {reply.status === "pending" ? (
+                                            <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+                                              Aguardando moderacao
+                                            </span>
+                                          ) : null}
                                         </div>
                                         <CommentBody body={reply.body} className="mt-1 max-w-3xl text-sm leading-6 text-zinc-300" />
                                       </div>
@@ -2417,6 +2552,7 @@ export function LessonExperience({
                                           aria-haspopup="menu"
                                           aria-label={`Mais opcoes para comentario de ${reply.author}`}
                                           className="grid h-8 w-8 place-items-center rounded-full text-zinc-500 opacity-100 transition hover:bg-white/10 hover:text-white focus-visible:bg-white/10 focus-visible:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:opacity-0 sm:group-hover/comment:opacity-100 sm:group-focus-within/comment:opacity-100"
+                                          disabled={reply.isOwn}
                                           onClick={() => {
                                             setCommentReactionMenuId(null);
                                             setCommentMenuId((current) => (current === reply.id ? null : reply.id));
@@ -2426,7 +2562,7 @@ export function LessonExperience({
                                           <MoreHorizontal className="h-4 w-4" />
                                         </button>
 
-                                        {isReplyMenuOpen ? (
+                                        {isReplyMenuOpen && !reply.isOwn ? (
                                           <div className="absolute right-0 top-9 z-30 min-w-[14.25rem] overflow-hidden rounded-[8px] border border-white/10 bg-[#242424] p-1.5 shadow-2xl shadow-black/60">
                                             <button
                                               className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-[6px] px-3 py-2.5 text-left text-[13px] font-semibold leading-none text-zinc-200 transition hover:bg-white/10 hover:text-white disabled:cursor-default disabled:text-zinc-500 disabled:hover:bg-transparent"
@@ -2533,15 +2669,16 @@ export function LessonExperience({
                 })}
               </div>
 
+              {commentError && !commentsLoading ? (
+                <div className="mt-4 rounded-[8px] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100" role="alert">
+                  {commentError}
+                </div>
+              ) : null}
+
               <form className="mt-5 rounded-[8px] border border-white/10 bg-white/[0.045] p-3 shadow-inner shadow-black/20 sm:p-4" onSubmit={handleCommentSubmit}>
                 <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]">
                   <CommentAvatar
-                    avatar={{
-                      backgroundClassName: "bg-red-500",
-                      label: "DS",
-                      labelClassName: "text-[15px]",
-                      online: true
-                    }}
+                    avatar={currentUserCommentAvatar}
                     size="lg"
                   />
                   <div className="min-w-0">
@@ -2566,10 +2703,12 @@ export function LessonExperience({
                     <textarea
                       className="block min-h-20 w-full resize-none rounded-[8px] border border-white/10 bg-black/25 px-3 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-zinc-500 focus:border-[var(--accent)] focus:bg-black/35"
                       id="lesson-comment"
+                      maxLength={2000}
                       onChange={(event) => setCommentText(event.target.value)}
                       placeholder={replyTarget ? "Escreva sua resposta..." : "Escreva um comentario..."}
                       ref={commentInputRef}
                       rows={3}
+                      disabled={commentSubmitting || isActiveLessonLocked}
                       value={commentText}
                     />
                     <div className="mt-3 flex justify-end">
@@ -2584,7 +2723,7 @@ export function LessonExperience({
                         type="submit"
                       >
                         <Send className="h-4 w-4" />
-                        Enviar
+                        {commentSubmitting ? "Enviando..." : "Enviar"}
                       </button>
                     </div>
                   </div>

@@ -39,6 +39,40 @@ export type ReleaseRuleConfig = {
 
 export type LessonVideoProvider = "youtube" | "vimeo" | "bunny" | "mux" | "custom_url" | "embed_code";
 export type LessonReaction = "not-for-me" | "liked" | "loved";
+export type LessonCommentStatus = "pending" | "approved" | "hidden" | "spam";
+export type LessonCommentReaction =
+  | "like"
+  | "fire"
+  | "insight"
+  | "love"
+  | "clap"
+  | "laugh"
+  | "wow"
+  | "rocket"
+  | "eyes"
+  | "check";
+export type LessonCommentAuthorRole = "student" | "producer" | "moderator";
+
+export type LessonCommentRecord = {
+  authorAvatarUrl?: string;
+  authorId?: string;
+  authorName: string;
+  authorRole: LessonCommentAuthorRole;
+  authorUsername: string;
+  body: string;
+  contentId: string;
+  createdAt: string;
+  id: string;
+  isOwn: boolean;
+  lessonId: string;
+  parentCommentId?: string;
+  reactions: Partial<Record<LessonCommentReaction, number>>;
+  replies: LessonCommentRecord[];
+  reportedByCurrentUser: boolean;
+  selectedReaction?: LessonCommentReaction;
+  status: LessonCommentStatus;
+  updatedAt: string;
+};
 
 export type LessonVideoConfig = {
   assetId?: string;
@@ -381,26 +415,36 @@ export type AdminProductCombo = {
   updatedAt?: string;
 };
 
-export type AdminCommentStatus = "pending" | "approved" | "hidden" | "spam";
+export type AdminCommentStatus = LessonCommentStatus;
 export type AdminCommentKind = "comment" | "reply";
 
 export type AdminModerationItem = {
+  analysisStatus: "pending" | "processing" | "completed" | "failed";
+  authorId?: string;
   authorName: string;
+  authorRole: LessonCommentAuthorRole;
   body: string;
   createdAt: string;
   id: string;
   kind: AdminCommentKind;
+  lessonId: string;
   lessonTitle: string;
+  moderationNote?: string;
   parentAuthorName?: string;
   productId: string;
   productTitle: string;
+  reactionCount: number;
+  reportCount: number;
   status: AdminCommentStatus;
+  updatedAt: string;
 };
 
 export type AdminBlockedWordRule = {
   active: boolean;
+  createdAt?: string;
   id: string;
   message: string;
+  updatedAt?: string;
   word: string;
 };
 
