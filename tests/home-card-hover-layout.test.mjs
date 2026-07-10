@@ -58,7 +58,7 @@ test("home can show an access card and intermediate modules for a selected cours
 
 test("home vertical card hover expands the card without inner image zoom", () => {
   assert.match(cardSource, /home-row-cover-card group/);
-  assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-surface \{\s*transform: translate3d\(0, -8px, 0\) scale\(1\.14\);/);
+  assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-surface \{\s*transform: translate3d\(var\(--home-row-card-hover-shift-x, 0px\), -8px, 0\) scale\(1\.14\);/);
   assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-image \{\s*transform: scale\(1\);/);
   assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-image \{\s*transform: scale\(1\) !important;/);
 });
@@ -68,12 +68,23 @@ test("home vertical cards grow inward only at carousel edges", () => {
   assert.match(rowSource, /querySelectorAll<HTMLElement>\("\[data-home-row-card\]"\)/);
   assert.match(rowSource, /setAttribute\("data-hover-edge", "left"\)/);
   assert.match(rowSource, /setAttribute\("data-hover-edge", "right"\)/);
+  assert.match(rowSource, /removeProperty\("--home-row-card-hover-shift-x"\)/);
+  assert.match(rowSource, /removeProperty\("--home-row-card-hover-logo-shift-x"\)/);
+  assert.match(rowSource, /leftHiddenOffset = Math\.max\(leftBoundary - leftEdgeRect\.left, 0\)/);
+  assert.match(rowSource, /rightHiddenOffset = Math\.max\(rightEdgeRect\.right - rightBoundary, 0\)/);
+  assert.match(rowSource, /homeRowCardHoverScale = 1\.14/);
+  assert.match(rowSource, /rightLogoShiftX = Math\.round\(\(-rightHiddenOffset - rightEdgeRect\.width \* \(homeRowCardHoverScale - 1\)\) \* 100\) \/ 100/);
+  assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{leftHiddenOffset\}px`\)/);
+  assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{leftHiddenOffset\}px`\)/);
+  assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{-rightHiddenOffset\}px`\)/);
+  assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{rightLogoShiftX\}px`\)/);
   assert.match(cardSource, /data-home-row-card/);
   assert.doesNotMatch(cardSource, /home-row-watch-card/);
   assert.doesNotMatch(cardSource, /home-row-card-surface/);
   assert.match(cssSource, /\[data-home-row-card\]\[data-hover-edge="left"\] \.home-cover-card-surface \{\s*transform-origin: left center;/);
   assert.match(cssSource, /\[data-home-row-card\]\[data-hover-edge="right"\] \.home-cover-card-surface \{\s*transform-origin: right center;/);
-  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="left"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(0, -27px, 0\);/);
+  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="left"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, 0px\), -27px, 0\);/);
+  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, var\(--home-row-card-hover-shift-x, 0px\)\), -27px, 0\);/);
 });
 
 test("home cards prefetch content routes before click navigation", () => {
@@ -101,6 +112,14 @@ test("content details modal opens module lessons as lesson page links", () => {
   assert.ok(modalSource.includes("href={lessonHref}"));
   assert.match(modalSource, /module-card-motion isolate cursor-pointer/);
   assert.match(modalSource, /className="grid cursor-pointer gap-4/);
+});
+
+test("content details modal lets lesson-list wheel gestures continue to the modal", () => {
+  const lessonsScrollBlock = cssSource.match(/\.modal-lessons-scroll \{[\s\S]*?\}/)?.[0] ?? "";
+
+  assert.match(lessonsScrollBlock, /overflow-y: auto;/);
+  assert.match(lessonsScrollBlock, /overscroll-behavior: auto;/);
+  assert.doesNotMatch(lessonsScrollBlock, /overscroll-behavior: contain;/);
 });
 
 test("content details modal calculates course progress from module progress", () => {
