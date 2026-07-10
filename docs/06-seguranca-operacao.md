@@ -27,7 +27,7 @@ Implementado no MVP atual:
 
 - Supabase Auth e usado como provedor de identidade;
 - o middleware do Next.js renova/valida sessao com `@supabase/ssr`;
-- `profiles`, `entitlements`, `student_events`, `lesson_progress` e `admin_roles` possuem RLS;
+- `profiles`, `entitlements`, `student_events`, `lesson_progress`, `admin_roles` e todas as tabelas de comentarios/moderacao possuem RLS;
 - aluno pode ler/editar somente o proprio perfil, ler os proprios entitlements e gravar eventos proprios;
 - aluno nao possui policy para criar, alterar ou remover entitlements;
 - `/admin` e as APIs `/api/admin/*` exigem papel em `admin_roles`;
@@ -65,6 +65,16 @@ Regras:
 - acoes de moderacao devem registrar ator, acao, comentario e horario;
 - palavras bloqueadas devem mostrar uma mensagem clara ao aluno sem expor regras internas demais;
 - denuncias de comentarios devem entrar na fila de moderacao.
+
+Implementado no fluxo atual:
+
+- todas as operacoes de comentario exigem sessao e validacao server-side do acesso real a aula; usuarios administrativos podem acessar como produtores;
+- tabelas de comentarios nao possuem policy direta para `anon` ou `authenticated` e sao acessadas somente pelas APIs server-side;
+- corpo limitado a 2.000 caracteres, caracteres de controle removidos, ate cinco envios por minuto e bloqueio de duplicata imediata;
+- palavras bloqueadas sao normalizadas sem expor ao aluno qual termo interno foi encontrado;
+- denuncias sao idempotentes por aluno/comentario e nao removem o conteudo automaticamente;
+- moderacao usa funcao transacional no banco para alterar o status e inserir a auditoria na mesma operacao;
+- triggers registram criacao, resposta, reacao e denuncia em `student_events` sem copiar o corpo do comentario.
 
 ## Agentes de IA
 

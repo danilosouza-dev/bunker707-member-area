@@ -20,8 +20,10 @@ modules
 lessons
 lesson_materials
 lesson_comments
-comment_moderation_actions
-blocked_words
+lesson_comment_reactions
+lesson_comment_reports
+lesson_comment_moderation_actions
+lesson_comment_blocked_words
 content_release_rules
 material_access_rules
 content_drafts
@@ -288,32 +290,57 @@ Regras:
 ### lesson_comments
 
 - id;
+- content_id;
 - lesson_id;
-- user_id;
+- author_id;
+- author_name, author_username, author_avatar_url e author_role como snapshot de exibicao;
 - parent_comment_id;
 - body;
 - status: pending, approved, hidden, spam;
+- moderation_note, moderated_by e moderated_at;
+- analysis_status: pending, processing, completed, failed;
+- analysis_result jsonb e analyzed_at;
+- deleted_at e deleted_by para remocao preservando rastreabilidade quando esse fluxo for habilitado;
 - created_at;
 - updated_at.
 
-### comment_moderation_actions
+### lesson_comment_reactions
+
+- comment_id;
+- user_id;
+- reaction: like, fire, insight, love, clap, laugh, wow, rocket, eyes, check;
+- created_at;
+- updated_at;
+- chave primaria composta por comment_id e user_id, permitindo uma reacao ativa por aluno em cada comentario.
+
+### lesson_comment_reports
 
 - id;
 - comment_id;
-- actor_user_id;
-- action: approve, hide, mark_spam, restore;
-- reason;
-- created_at.
+- reporter_id;
+- reason opcional;
+- created_at;
+- unicidade por comment_id e reporter_id para tornar a denuncia idempotente.
 
-### blocked_words
+### lesson_comment_moderation_actions
 
 - id;
-- scope: global, product, lesson;
-- scope_id;
+- comment_id;
+- actor_id;
+- action: approved, hidden, marked_spam, restored;
+- previous_status;
+- next_status;
+- note;
+- created_at.
+
+### lesson_comment_blocked_words
+
+- id;
 - word;
-- match_type: contains, exact, regex;
+- normalized_word;
 - message;
 - active;
+- created_by e updated_by;
 - created_at;
 - updated_at.
 
@@ -321,7 +348,11 @@ Regras:
 
 - comentarios e respostas podem ser filtrados por produto, tipo e status;
 - palavras bloqueadas impedem o envio e mostram mensagem clara ao aluno;
-- a moderacao deve preservar auditoria das acoes tomadas.
+- termos sao comparados sem diferenca de caixa/acentos e com limite de palavra ou frase, evitando falso positivo por substring;
+- a moderacao preserva ator, estado anterior, estado seguinte, observacao e horario;
+- denuncias nao ocultam automaticamente o comentario, evitando censura por abuso; elas elevam o item para a fila `Em revisao`;
+- corpos de comentarios permanecem na tabela de dominio; `student_events` recebe ids, tipo, tamanho e contexto, sem copiar o texto para analytics;
+- os campos de analise existem desde a coleta, mas o job/IA que preenche sentimento, temas e insights continua uma etapa futura.
 
 ## Integracoes
 

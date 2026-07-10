@@ -16,6 +16,7 @@ import { getSupabaseAdminClient, hasSupabaseConfig } from "@/server/db/supabase/
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedItemKey, getSavedTargetTypeForContentKind, savedItemCollectionLabel } from "@/lib/saved-items";
+import { getAdminModerationData } from "@/server/comments/comment-store";
 import type {
   AdminAIAgent,
   AdminBlockedWordRule,
@@ -2122,6 +2123,18 @@ function toAdminDashboardData(
   };
 }
 
+async function toHydratedAdminDashboardData(database: PlatformDatabase) {
+  const [persistenceProvider, moderationData] = await Promise.all([
+    getPlatformPersistenceProvider(),
+    getAdminModerationData()
+  ]);
+
+  return {
+    ...toAdminDashboardData(database, persistenceProvider),
+    ...moderationData
+  };
+}
+
 function slugify(value: string) {
   return value
     .normalize("NFD")
@@ -2488,7 +2501,7 @@ export async function getLessonPageData(
 
 export async function getAdminDashboardData() {
   const database = await readDatabase();
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 async function getSupabaseUserIdsByEmail(
@@ -2671,7 +2684,7 @@ export async function replaceAdminStudents(students: AdminStudent[]) {
   database.students = students;
   await writeDatabase(database);
   await syncSupabaseEntitlementsForStudents(students, previousStudents);
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 export async function upsertContentItem(input: ContentWriteInput) {
@@ -2782,7 +2795,7 @@ export async function upsertContentItem(input: ContentWriteInput) {
   }
 
   await writeDatabase(database);
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 export async function deleteContentItem(itemId: string) {
@@ -2809,7 +2822,7 @@ export async function deleteContentItem(itemId: string) {
     courses: studentRecord.courses.filter((course) => course.targetId !== itemId)
   }));
   await writeDatabase(database);
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 export async function upsertProductCombo(input: ProductComboWriteInput) {
@@ -2822,7 +2835,7 @@ export async function upsertProductCombo(input: ProductComboWriteInput) {
   ];
 
   await writeDatabase(database);
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 export async function deleteProductCombo(comboId: string) {
@@ -2831,7 +2844,7 @@ export async function deleteProductCombo(comboId: string) {
   database.combos = database.combos.filter((combo) => combo.id !== comboId);
 
   await writeDatabase(database);
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 export async function upsertCourseModule(input: ModuleWriteInput) {
@@ -2869,7 +2882,7 @@ export async function upsertCourseModule(input: ModuleWriteInput) {
   }));
 
   await writeDatabase(database);
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 export async function upsertLesson(input: LessonWriteInput) {
@@ -2909,7 +2922,7 @@ export async function upsertLesson(input: LessonWriteInput) {
   });
 
   await writeDatabase(database);
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 export async function addCohort(name: string) {
@@ -2925,7 +2938,7 @@ export async function addCohort(name: string) {
   }
 
   await writeDatabase(database);
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 export type AdminDashboardCollectionsInput = Partial<Pick<
@@ -2953,7 +2966,7 @@ export async function updateAdminDashboardCollections(input: AdminDashboardColle
   }
 
   await writeDatabase(database);
-  return toAdminDashboardData(database, await getPlatformPersistenceProvider());
+  return toHydratedAdminDashboardData(database);
 }
 
 function targetExists(database: PlatformDatabase, targetType: SavedItemTargetType, targetId: string) {

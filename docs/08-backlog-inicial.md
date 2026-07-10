@@ -51,8 +51,8 @@
 - Criar suporte a turmas/coortes com conteudos extras por segmento, visiveis apenas para a turma correspondente.
 - Criar item `Combos` no CRM para agrupar produtos existentes e definir turma padrao.
 - Criar item `Comunidade` na sidebar do CRM como placeholder de fase futura.
-- Criar item `Moderacao` no CRM para filtrar comentarios por produto, tipo e status.
-- Criar cadastro de palavras bloqueadas com mensagem para o aluno.
+- Implementado: item `Moderacao` no CRM filtra comentarios persistidos por produto, tipo, status, denuncia e texto.
+- Implementado: cadastro persistido de palavras bloqueadas com mensagem segura para o aluno.
 - Criar item `Agentes de IA` no CRM para configurar agentes de comentarios, tutor de aula, assistente geral e chat da home.
 - Criar `Configuracoes > Integracoes` no CRM para configurar Hotmart, Ticto, TikTok, Kiwify e Manual sem expor segredos no browser.
 
@@ -70,8 +70,8 @@
 - Criar APIs de busca.
 - Criar suporte simples.
 - Criar schema real de combos/produtos internos e mapeamento para entitlements.
-- Criar API persistida de comentarios e respostas.
-- Criar API administrativa de moderacao e palavras bloqueadas.
+- Implementado: API persistida de comentarios, respostas, reacoes e denuncias com validacao de entitlement.
+- Implementado: API administrativa de moderacao e palavras bloqueadas com auditoria transacional.
 - Criar tabela persistida de configuracoes de integracao.
 - Criar tabelas futuras de agentes de IA, escopos, conversas e fontes de treinamento.
 

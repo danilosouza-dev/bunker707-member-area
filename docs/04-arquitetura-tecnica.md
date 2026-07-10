@@ -180,9 +180,21 @@ Comentarios de aula entram pela API autenticada do aluno e devem passar por vali
 
 1. Verificar sessao e entitlement da aula.
 2. Checar palavras bloqueadas.
-3. Criar comentario como `pending` ou `approved`, conforme regra do produto.
-4. Permitir que moderadores aprovem, ocultem, restaurem ou marquem como spam.
-5. Registrar acoes sensiveis em auditoria.
+3. Aplicar limite de tamanho, controle de rajada e protecao contra envio duplicado.
+4. Criar comentario como `pending` ou `approved`, conforme regra do produto; no MVP atual, comentarios validos entram como `approved`.
+5. Persistir respostas, uma reacao por aluno/comentario e denuncias idempotentes.
+6. Permitir que moderadores aprovem, ocultem, restaurem ou marquem como spam.
+7. Registrar acoes sensiveis em auditoria e eventos comportamentais sem duplicar o corpo do comentario nos metadados.
+
+Implementacao atual:
+
+- leitura e criacao: `/api/comments/lessons/[lessonId]`;
+- reacoes: `/api/comments/[commentId]/reaction`;
+- denuncias: `/api/comments/[commentId]/report`;
+- moderacao: `/api/admin/moderation/comments/[commentId]`;
+- palavras bloqueadas: `/api/admin/moderation/blocked-words`;
+- tabelas de comentarios ficam com RLS habilitado e sem acesso direto de `anon`/`authenticated`; as regras de sessao, entitlement e moderacao rodam nas APIs server-side;
+- `analysis_status`, `analysis_result` e `analyzed_at` deixam cada comentario pronto para jobs futuros de sentimento, temas, intencao, duvidas e oportunidades de conteudo.
 
 ## Agentes de IA
 
@@ -237,6 +249,11 @@ Eventos iniciais:
 - lesson_progress_updated;
 - lesson_retention_point_recorded;
 - lesson_completed;
+- lesson_comment_created;
+- lesson_comment_reply_created;
+- lesson_comment_reacted;
+- lesson_comment_reaction_removed;
+- lesson_comment_reported;
 - material_downloaded;
 - search_performed;
 - support_requested.

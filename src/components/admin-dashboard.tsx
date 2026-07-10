@@ -5134,7 +5134,13 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
           <ModerationCommandCenter
             blockedWordRules={dashboardData.blockedWordRules}
             items={dashboardData.moderationItems}
-            onSaveModeration={persistDashboardCollections}
+            onModerationDataChange={(moderationData) => {
+              setDashboardData((currentData) => ({
+                ...currentData,
+                blockedWordRules: moderationData.blockedWordRules,
+                moderationItems: moderationData.moderationItems
+              }));
+            }}
             products={dashboardData.sellableProducts}
           />
         ) : null}
