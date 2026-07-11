@@ -1,94 +1,297 @@
-# Secao imersiva de conteudo na Home
+# Editor funcional de secoes e secao imersiva da Home
 
 ## Objetivo
 
-Permitir que o produtor escolha como um curso, formacao ou outro conteudo com estrutura interna aparece na Home do aluno. O formato atual continua disponivel como `Compacto`; o novo formato `Imersivo` usa um banner panoramico com informacoes do conteudo e cards internos integrados ao mesmo bloco.
+Transformar `Personalizacao > Vitrine` em um editor funcional da Home do aluno. O produtor deve conseguir criar, selecionar, configurar, ordenar, duplicar, ocultar e excluir secoes, visualizar o resultado e publicar as alteracoes.
 
-O novo layout deve destacar um unico conteudo por secao. Ele nao substitui fileiras genericas como `Minhas compras`, `Produtos a venda` ou `Em breve`.
+O mesmo trabalho adiciona uma segunda apresentacao para secoes ligadas a um curso ou formacao: `Compacta`, preservando o formato atual, e `Imersiva`, com banner panoramico e cards internos integrados.
 
-## Alternativas consideradas
+## Diagnostico do estado atual
 
-1. Manter apenas o formato compacto. E mais simples, mas nao atende ao pedido de uma apresentacao editorial e visualmente marcante.
-2. Criar uma secao imersiva independente, com curadoria manual de cards. Oferece liberdade, mas duplica configuracoes e permite misturar cards sem uma hierarquia clara para o aluno.
-3. Usar os mesmos dados da secao estrutural e permitir escolher seu layout. Esta e a decisao adotada: preserva o comportamento existente e adiciona somente uma variacao de apresentacao.
+A interface atual comunica funcoes que ainda nao existem:
 
-## Configuracao no CMS
+- `Criar`, menu de opcoes e varios botoes de edicao nao possuem operacoes reais;
+- a lista de secoes e inicializada como estado somente de leitura;
+- nao existem comandos para reordenar, duplicar, ocultar ou excluir;
+- a Home e montada por uma lista fixa no servidor;
+- nao existe API nem persistencia para `home_sections`;
+- o preview ocupa quase toda a area, enquanto a secao selecionada nao possui um inspetor de propriedades.
 
-A configuracao da pagina do conteudo passa a aceitar uma secao estrutural na Home com:
+A correcao deve tratar a causa estrutural. Nao basta adicionar drag-and-drop sobre a lista estatica.
 
-- `enabled`: mostra ou oculta a secao;
-- `layout`: `compact` ou `immersive`;
-- o valor padrao e `compact`, inclusive para registros existentes sem `layout` salvo.
+## Decisoes aprovadas
 
-O controle aparece para formacoes e para conteudos com modulos. Ao ativar a secao, o produtor escolhe entre dois cards de opcao com nome e descricao curta: `Compacta` e `Imersiva`.
+### Estrutura do editor
 
-## Hierarquia dos cards
+Usar o modelo de tres paineis escolhido pelo usuario:
 
-- Formacao: os cards representam somente os cursos internos daquela formacao.
-- Curso, bootcamp, mentoria, webinario ou produto com aulas: os cards representam somente seus modulos.
-- A secao nao permite uma mistura livre de produtos, cursos e modulos.
-- Itens indisponiveis preservam as regras atuais de entitlement, liberacao e acao de compra/detalhes.
+1. **Estrutura à esquerda:** lista ordenavel do banner e das secoes.
+2. **Preview ao centro:** representacao fiel da Home publicada.
+3. **Inspetor à direita:** propriedades completas do item selecionado.
+
+O preview nao deve ser coberto pelo inspetor. Em larguras menores, o inspetor pode virar drawer, mas a lista de estrutura continua acessivel.
+
+### Fontes de conteudo
+
+Oferecer dois modos:
+
+- `Automatico`: a secao resolve seus cards a partir de uma fonte dinamica;
+- `Selecao manual`: o produtor escolhe e ordena os cards individualmente.
+
+### Layout estrutural
+
+Secoes ligadas a um unico conteudo oferecem:
+
+- `Compacta`: capa pequena, titulo, CTA e cards internos logo abaixo;
+- `Imersiva`: banner panoramico, bloco editorial e cards internos integrados.
+
+## Arquitetura da tela
+
+### Barra superior
+
+A barra superior mostra:
+
+- voltar para a Personalizacao;
+- nome `Vitrine`;
+- indicador `Alteracoes nao publicadas` quando o rascunho divergir da versao publicada;
+- `Descartar`, desabilitado quando nao houver alteracoes;
+- `Publicar`, desabilitado quando nao houver alteracoes ou houver erro de validacao.
+
+`Publicar` envia a configuracao completa para o servidor. `Descartar` restaura a ultima versao publicada. Ao tentar sair com alteracoes, a interface pede confirmacao.
+
+### Painel Estrutura
+
+O banner aparece como item fixo no topo. Ele nao pode ser removido nem reordenado entre as secoes.
+
+Cada secao mostra:
+
+- alca de arraste;
+- titulo;
+- quantidade de itens resolvidos;
+- status ativo/oculto;
+- menu de acoes.
+
+O menu oferece:
+
+- duplicar;
+- ocultar/ativar;
+- mover para cima;
+- mover para baixo;
+- excluir.
+
+O drag-and-drop altera a ordem imediatamente no rascunho e mostra placeholder de destino. `Mover para cima/baixo` oferece a mesma funcao para teclado e tecnologias assistivas.
+
+O botao `Criar secao` abre o fluxo de criacao. Um estado vazio explica como adicionar a primeira secao.
+
+### Preview
+
+O preview usa os mesmos componentes e a mesma resolucao de dados da Home do aluno. Clicar numa secao do preview seleciona o mesmo item no painel Estrutura e abre suas propriedades no inspetor.
+
+A secao selecionada recebe um contorno discreto somente no modo editor. Controles administrativos nunca aparecem na Home publicada.
+
+O preview pode ser alternado entre desktop e mobile. Interacoes que atrapalhariam a edicao, como navegar para outra pagina, ficam desabilitadas no preview.
+
+### Inspetor
+
+O inspetor da secao possui:
+
+- status: ativa ou oculta;
+- titulo;
+- subtitulo opcional;
+- tipo de secao;
+- modo de conteudo: automatico ou manual;
+- fonte automatica ou seletor de cards;
+- layout disponivel para aquele tipo;
+- visibilidade;
+- resumo de validacao;
+- acoes `Duplicar` e `Excluir`.
+
+Alteracoes do inspetor atualizam o rascunho e o preview imediatamente. O botao `Publicar` continua sendo a confirmacao global.
+
+## Criacao de secao
+
+`Criar secao` abre um dialog com tres grupos claros.
+
+### 1. Secoes automaticas
+
+- `Continue assistindo`: aulas iniciadas pelo aluno, em cards horizontais;
+- `Minhas compras`: produtos com entitlement ativo;
+- `Produtos à venda`: produtos vendaveis;
+- `Em breve`: produtos e turmas futuras.
+
+Cada fonte automatica pode existir apenas uma vez por Home na primeira versao, evitando secoes duplicadas com a mesma funcao.
+
+### 2. Secao de conteudo em destaque
+
+O produtor escolhe um curso, formacao, bootcamp, mentoria, webinario ou produto com estrutura interna.
+
+- formacao mostra somente seus cursos internos;
+- curso, bootcamp, mentoria, webinario ou produto mostra somente seus modulos;
+- o produtor escolhe `Compacta` ou `Imersiva`;
+- a hierarquia interna nao pode ser misturada manualmente.
+
+### 3. Selecao manual
+
+O produtor informa titulo e subtitulo, pesquisa conteudos publicaveis, seleciona cards e define sua ordem. Cursos internos de formacao nao podem ser escolhidos como produtos independentes de vitrine.
+
+O dialog cria a secao no rascunho e a seleciona no editor. A secao so chega à Home do aluno depois de `Publicar`.
+
+## Tipos, fontes e layouts
+
+### Tipos de secao
+
+- `continue_watching`;
+- `content_carousel`;
+- `content_structure`.
+
+### Fontes automaticas
+
+- `recent_lessons`;
+- `entitlement_products`;
+- `sellable_products`;
+- `upcoming_products`.
+
+### Fonte manual
+
+- `manual`, acompanhada por uma lista ordenada de IDs de conteudo.
+
+### Layouts
+
+- `continue`: exclusivo para `continue_watching`;
+- `vertical`: padrao de `content_carousel`;
+- `compact`: opcao de `content_structure`;
+- `immersive`: opcao de `content_structure`.
+
+O editor mostra apenas combinacoes validas, evitando configuracoes contraditorias.
+
+## Visibilidade e acesso
+
+Cada secao aceita:
+
+- `students`: alunos com acesso ativo;
+- `non_students`: usuarios sem compra ativa para os itens relevantes;
+- `all`: todos os usuarios autenticados.
+
+A visibilidade da secao nao concede acesso. Entitlements e regras de liberacao continuam sendo aplicados ao resolver os cards.
+
+Uma secao ativa que resulte em zero itens para determinado aluno nao aparece para ele. No editor, ela continua visivel com um aviso de estado vazio.
 
 ## Layout compacto
 
-O formato atual permanece inalterado: capa vertical reduzida, rotulo, titulo e CTA no cabecalho da secao, com o carrossel de cards logo abaixo.
+Preservar o formato existente: capa vertical reduzida, rotulo, titulo e CTA no cabecalho, com o carrossel de cards internos logo abaixo.
 
 ## Layout imersivo
 
-No desktop, a secao e um painel panoramico de largura total e altura controlada:
+No desktop, usar um painel panoramico de largura total e altura menor que a hero principal:
 
 - imagem de fundo do conteudo, priorizando a hero configurada e usando a capa como fallback;
-- degradê escuro lateral e inferior para manter contraste;
-- bloco editorial à esquerda com rotulo, titulo, descricao curta opcional e CTA;
-- carrossel dos cards internos ocupando a metade direita e podendo avancar visualmente sobre o fundo;
-- cantos discretamente arredondados e acabamento coerente com o tema escuro da Bunker707;
-- controles do carrossel somente quando houver overflow real.
+- degrade escuro lateral e inferior;
+- rotulo, titulo, descricao curta opcional e CTA à esquerda;
+- carrossel dos cards internos à direita;
+- controles somente quando houver overflow real.
 
-O bloco deve ser visualmente forte, mas menor que a hero principal da Home. A Home pode ter varias secoes configuradas, embora a recomendacao editorial seja usar no maximo uma ou duas secoes imersivas por pagina.
+No mobile, empilhar informacoes, CTA e carrossel. O overlay fica mais forte e o texto nao se sobrepoe aos cards.
 
-No mobile, o painel vira uma composicao vertical: informacoes e CTA no topo, carrossel abaixo, sem texto sobreposto aos cards. A imagem de fundo permanece como ambientacao e recebe overlay mais forte.
+Recomenda-se no maximo uma ou duas secoes imersivas por Home, sem impor bloqueio tecnico.
 
-## Interacoes
+## Interacoes dos cards
 
-- O CTA abre a pagina do conteudo quando houver acesso.
-- Sem acesso, o CTA preserva o modo configurado: modal de detalhes ou link externo de compra.
-- Clicar em um curso interno abre seu destino configurado.
-- Clicar em um modulo abre a pagina de aula/playlist quando liberado; quando bloqueado, usa a explicacao existente.
-- Os cards mantem foco visivel, navegacao por teclado e rotulos acessiveis.
-- O carrossel reutiliza paginacao, setas, scroll suave e tratamento de bordas existentes.
+- CTA do conteudo com acesso abre sua pagina;
+- sem acesso, o CTA preserva a configuracao de modal ou link externo;
+- curso interno abre seu destino configurado;
+- modulo liberado abre aula/playlist;
+- item bloqueado preserva a explicacao de acesso existente;
+- cards mantem foco visivel, rotulos acessiveis, prefetch e comportamento edge-aware existentes.
 
-## Dados e compatibilidade
+## Persistencia
 
-`ContentPageSettings.homeModuleSection` continua sendo a configuracao persistida para evitar migracao destrutiva, mas passa a aceitar `layout`. A leitura sem esse campo usa `compact`.
+Materializar `home_sections` no Supabase conforme o modelo de dados do projeto.
 
-A linha entregue à Home passa a informar:
+Campos principais:
 
-- o conteudo pai em `course`/conteudo destacado;
-- os cards internos apropriados;
-- o layout escolhido;
-- a variante estrutural da secao.
+- `id`;
+- `title`;
+- `subtitle`;
+- `order_index`;
+- `section_type`;
+- `content_source`;
+- `source_content_id`;
+- `layout`;
+- `visibility`;
+- `is_active`;
+- timestamps.
 
-Formacoes tambem passam a poder gerar essa linha, usando seus cursos internos em vez de modulos.
+Materializar `home_section_items` para a selecao manual:
 
-## Estados de excecao
+- `section_id`;
+- `content_id`;
+- `order_index`.
 
-- Sem cards internos publicados: a secao nao aparece.
-- Sem hero configurada: usar a capa do conteudo como fundo, ampliada com overlay suficiente.
-- Sem descricao: manter somente rotulo, titulo e CTA, sem reservar espaco vazio.
-- Imagem indisponivel: manter fundo escuro e conteudo textual utilizavel.
-- Um unico card: esconder setas e indicador de paginas.
+O servidor recebe e valida a configuracao completa no momento de publicar. A versao publicada e a unica consumida pela Home do aluno. O rascunho desta primeira versao vive no estado do editor ate publicar ou descartar; nao existe salvamento de rascunho entre sessoes.
+
+Registros existentes sem `home_sections` recebem uma configuracao inicial equivalente às fileiras atuais. Isso preserva `Continue assistindo`, `Minhas compras`, secoes de curso ja habilitadas, `Produtos à venda` e `Em breve`.
+
+`ContentPageSettings.homeModuleSection` continua sendo lido durante a compatibilidade inicial, mas novas secoes sao controladas por `home_sections`. Depois da migracao dos dados, o editor deixa de depender desse campo para ordenar a Home.
+
+## API administrativa
+
+Criar uma rota administrativa dedicada à configuracao da Home:
+
+- leitura da versao publicada e dos itens resolvidos para preview;
+- publicacao da lista completa com validacao server-side;
+- autorizacao obrigatoria de admin;
+- rejeicao de IDs inexistentes, combinacoes invalidas, ordens duplicadas e cursos internos usados indevidamente como produtos manuais.
+
+A resposta de publicacao devolve a configuracao canonica e os `homeRows` resolvidos para manter editor e Home sincronizados.
+
+## Erros e feedback
+
+- mostrar erro no campo correspondente quando uma configuracao for invalida;
+- mostrar toast de sucesso apenas depois da persistencia confirmada;
+- manter o rascunho na tela se a publicacao falhar;
+- pedir confirmacao antes de excluir uma secao;
+- impedir exclusao acidental de todas as secoes sem mostrar um estado vazio orientativo;
+- exibir skeleton durante a primeira carga e estado de retry em falha de leitura.
 
 ## Verificacao
 
-- Testes de dados para layout padrao `compact`, layout `immersive` e formacao com cursos internos.
-- Testes do formulario administrativo e persistencia do campo `layout`.
-- Testes de renderizacao para estados com acesso, sem acesso, sem descricao e sem overflow.
-- Validacao visual em desktop e mobile, incluindo contraste, recorte da imagem, carrossel e ausencia de cortes no hover.
-- Execucao de `npm run verify` antes da entrega.
+### Testes de dados e API
+
+- criacao e publicacao dos tres tipos de secao;
+- fontes automaticas e selecao manual;
+- ordenacao persistida;
+- duplicacao, ocultacao e exclusao;
+- validacao de combinacoes de tipo, fonte e layout;
+- migracao da configuracao fixa atual;
+- filtragem por visibilidade e entitlement;
+- formacao com cursos internos e curso com modulos.
+
+### Testes do editor
+
+- drag-and-drop e botoes mover;
+- sincronizacao entre lista, preview e inspetor;
+- estado sujo, descartar e publicar;
+- aviso ao sair com alteracoes;
+- dialog de criacao;
+- seletor manual e ordenacao dos cards;
+- estados vazio, carregando e erro.
+
+### Validacao visual
+
+- editor em desktop amplo, notebook e tablet;
+- preview desktop e mobile;
+- layouts compacto e imersivo;
+- contraste, foco, recorte de imagem e ausencia de cortes no hover;
+- comparacao da Home publicada com o preview.
+
+Executar `npm run verify` antes da entrega e validar o fluxo real no navegador.
 
 ## Fora de escopo
 
-- Curadoria livre de cards dentro da secao.
-- Mais de uma imagem de fundo por secao.
-- Video de fundo na Home nesta primeira versao.
-- Novas regras de entitlement, compra ou liberacao.
+- salvar rascunhos entre sessoes;
+- agendar publicacao;
+- historico de versoes e rollback;
+- segmentacao por turma ou tags alem das tres visibilidades iniciais;
+- curadoria manual dos cursos/modulos internos de uma secao estrutural;
+- video de fundo na secao imersiva;
+- novas regras de entitlement, compra ou liberacao.
