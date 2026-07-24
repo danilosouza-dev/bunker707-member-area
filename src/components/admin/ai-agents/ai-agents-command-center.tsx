@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Bot, Brain, MessageCircle, PauseCircle, PlayCircle, Save, Sparkles, Trash2 } from "lucide-react";
 
+import { AIProviderSettings } from "@/components/admin/settings/ai-provider-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -154,9 +155,11 @@ export function AIAgentsCommandCenter({
         <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">CRM / IA</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-normal text-white">Agentes de IA</h1>
         <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-zinc-500">
-          Configure agentes para comentarios, tutores de aula e busca geral. Eles ficam preparados para usar aulas, transcricoes e estrutura quando a base de IA for conectada.
+          Configure o Tutor IA, a IA Diretor e os demais agentes. Modelos, limites, conexoes e consumo ficam centralizados aqui.
         </p>
       </div>
+
+      <AIProviderSettings />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <MetricCard icon={Bot} label="Agentes ativos" value={activeAgents.toString()} />

@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
+import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { SavedItemButton } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
@@ -59,7 +59,7 @@ function DetailDots({ details }: { details: string[] }) {
 }
 
 function MiniContentCard({ accessPreviewMode, card }: { accessPreviewMode?: AccessPreviewMode; card: ModalCard }) {
-  const router = useRouter();
+  const router = useNavigationFeedbackRouter();
   const imageStateClass = card.isLocked
     ? "modal-vertical-card-image-locked"
     : "";
@@ -470,7 +470,8 @@ function LessonPanel({
 }
 
 export function ContentDetailsModal({ accessPreviewMode, item, onClose, structure }: ContentDetailsModalProps) {
-  const router = useRouter();
+  const router = useNavigationFeedbackRouter();
+  const { startNavigation } = useNavigationFeedback();
   const [expandedMainSection, setExpandedMainSection] = useState(false);
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
   const [lessonPanelHeight, setLessonPanelHeight] = useState<number | null>(null);
@@ -695,6 +696,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
       return;
     }
 
+    startNavigation(currentItem.purchaseUrl, { message: "Abrindo página de compra..." });
     window.location.href = currentItem.purchaseUrl;
   }
 

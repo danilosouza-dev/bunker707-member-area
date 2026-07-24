@@ -52,6 +52,7 @@ Entregas:
 - pagina de curso avulso, formacao ou bootcamp;
 - pagina da aula;
 - player integrado;
+- Modo TV proprio para YouTube com codigo/QR temporario, controle remoto e progresso persistido;
 - playlist lateral;
 - tabs de descricao/materiais/comentarios;
 - dados persistidos com seed inicial.
@@ -128,7 +129,8 @@ Funcionalidades:
 - certificados;
 - notificacoes;
 - analise automatizada de sentimento, temas e insights dos comentarios para produtores (a persistencia e a moderacao operacional ja estao implementadas);
-- IA da aula conectada a transcricoes e contexto;
+- Implementado antecipadamente: Tutor IA conectado a transcricoes versionadas, chunks, BYOK de Gemini/OpenAI/Anthropic, entitlement, citacoes e historico por aluno/aula/chat;
+- Implementado antecipadamente: IA Diretor global para localizar conteudos autorizados, recomendar caminhos e montar trilhas, com historico separado, referencias internas validadas e consumo auditado;
 - dashboard do professor/admin;
 - automacoes de upsell/downsell.
 

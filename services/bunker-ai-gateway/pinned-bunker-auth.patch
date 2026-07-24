@@ -1,0 +1,19 @@
+diff --git a/sdk/api/handlers/handlers.go b/sdk/api/handlers/handlers.go
+index f3ab717..d65f443 100644
+--- a/sdk/api/handlers/handlers.go
++++ b/sdk/api/handlers/handlers.go
+@@ -277,7 +277,13 @@ func requestExecutionMetadata(ctx context.Context) map[string]any {
+ 	if requestPath != "" {
+ 		meta[coreexecutor.RequestPathMetadataKey] = requestPath
+ 	}
+-	if pinnedAuthID := pinnedAuthIDFromContext(ctx); pinnedAuthID != "" {
++	pinnedAuthID := pinnedAuthIDFromContext(ctx)
++	if pinnedAuthID == "" && ctx != nil {
++		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil {
++			pinnedAuthID = strings.TrimSpace(ginCtx.GetHeader("X-Bunker-Auth-ID"))
++		}
++	}
++	if pinnedAuthID != "" {
+ 		meta[coreexecutor.PinnedAuthMetadataKey] = pinnedAuthID
+ 	}
+ 	if selectedCallback := selectedAuthIDCallbackFromContext(ctx); selectedCallback != nil {

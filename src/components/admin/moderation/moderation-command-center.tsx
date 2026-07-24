@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { useAdminOperation } from "@/components/admin/admin-operation-feedback";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -76,6 +77,7 @@ export function ModerationCommandCenter({
   onModerationDataChange,
   products
 }: ModerationCommandCenterProps) {
+  const { runAdminOperation } = useAdminOperation();
   const [productFilter, setProductFilter] = React.useState("all");
   const [query, setQuery] = React.useState("");
   const [kindFilter, setKindFilter] = React.useState<"all" | AdminCommentKind>("all");
@@ -116,26 +118,31 @@ export function ModerationCommandCenter({
     setSavingKey(key);
 
     try {
-      const response = await fetch(path, {
-        ...init,
-        headers: {
-          "Content-Type": "application/json",
-          ...init.headers
-        }
-      });
-      const payload = await response.json() as {
-        data?: {
-          blockedWordRules: AdminBlockedWordRule[];
-          moderationItems: AdminModerationItem[];
+      await runAdminOperation(`moderation:${key}`, {
+        pending: key.startsWith("comment:") ? "Atualizando a moderacao do comentario..." : "Salvando a regra de moderacao...",
+        success: key.startsWith("comment:") ? "Moderacao do comentario atualizada." : "Regra de moderacao salva."
+      }, async () => {
+        const response = await fetch(path, {
+          ...init,
+          headers: {
+            "Content-Type": "application/json",
+            ...init.headers
+          }
+        });
+        const payload = await response.json() as {
+          data?: {
+            blockedWordRules: AdminBlockedWordRule[];
+            moderationItems: AdminModerationItem[];
+          };
+          error?: string;
         };
-        error?: string;
-      };
 
-      if (!response.ok || !payload.data) {
-        throw new Error(payload.error ?? "Nao foi possivel salvar a moderacao.");
-      }
+        if (!response.ok || !payload.data) {
+          throw new Error(payload.error ?? "Nao foi possivel salvar a moderacao.");
+        }
 
-      onModerationDataChange(payload.data);
+        onModerationDataChange(payload.data);
+      });
       return true;
     } catch (error) {
       setRequestError(error instanceof Error ? error.message : "Nao foi possivel salvar a moderacao.");

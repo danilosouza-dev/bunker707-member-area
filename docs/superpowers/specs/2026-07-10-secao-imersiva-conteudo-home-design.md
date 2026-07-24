@@ -116,7 +116,7 @@ Alteracoes do inspetor atualizam o rascunho e o preview imediatamente. O botao `
 
 - `Continue assistindo`: aulas iniciadas pelo aluno, em cards horizontais;
 - `Minhas compras`: produtos com entitlement ativo;
-- `Produtos à venda`: produtos vendaveis;
+- `Produtos à venda`: produtos vendaveis aos quais o aluno ainda nao tem acesso;
 - `Em breve`: produtos e turmas futuras.
 
 Cada fonte automatica pode existir apenas uma vez por Home na primeira versao, evitando secoes duplicadas com a mesma funcao.
@@ -173,6 +173,8 @@ Cada secao aceita:
 - `all`: todos os usuarios autenticados.
 
 A visibilidade da secao nao concede acesso. Entitlements e regras de liberacao continuam sendo aplicados ao resolver os cards.
+
+Na fonte `sellable_products`, a resolucao remove todo produto que ja esteja acessivel ao aluno. Essa regra e obrigatoria e nao pode ser desativada pela curadoria da Home.
 
 Uma secao ativa que resulte em zero itens para determinado aluno nao aparece para ele. No editor, ela continua visivel com um aviso de estado vazio.
 

@@ -1,9 +1,11 @@
 import "server-only";
 
+import { cache } from "react";
 import { unstable_noStore as noStore } from "next/cache";
 import type { AuthenticatedUser } from "@/server/auth/session";
 import { getAdminRoleForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
+import { persistImageAsset } from "@/server/db/media-assets";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedItemKey, getSavedTargetTypeForContentKind, savedItemCollectionLabel } from "@/lib/saved-items";
@@ -27,10 +29,12 @@ import type {
   ContentItem,
   ContentKind,
   ContentPageSettings,
+  ContentPublicationStatus,
   CoursePresentationMode,
   ContentStatus,
   CourseModule,
   HomeHeroConfig,
+  HomeSectionConfig,
   LessonVideoConfig,
   LessonReaction,
   LessonWatchState,
@@ -93,6 +97,8 @@ type PlatformDatabase = {
   formationInternalCourses: ContentItem[];
   formations: ContentItem[];
   hero: HomeHeroConfig;
+  homeSectionConfigs: HomeSectionConfig[];
+  homeSectionsConfigured: boolean;
   integrations: AdminIntegrationSetting[];
   lessonProgress: LessonProgressRecord[];
   metrics: AdminDashboardData["metrics"];
@@ -135,6 +141,7 @@ type ContentItemRow = {
   level_label: string | null;
   max_students: number | null;
   progress: number;
+  publication_status: ContentPublicationStatus;
   purchase_label: string | null;
   purchase_target: PurchaseTarget | null;
   purchase_url: string | null;
@@ -287,12 +294,18 @@ export type ContentWriteInput = {
   lessons?: string;
   lockedActionMode?: LockedContentActionMode;
   maxStudents?: number | null;
+  parentFormationId?: string;
   purchaseLabel?: string;
   purchaseTarget?: PurchaseTarget;
   purchaseUrl?: string;
+  publicationStatus?: ContentPublicationStatus;
   releaseRule?: ReleaseRuleConfig;
   status?: ContentStatus;
   title: string;
+};
+
+export type ContentOrderInput = {
+  orderedIds: string[];
 };
 
 export type ModuleWriteInput = {
@@ -305,6 +318,11 @@ export type ModuleWriteInput = {
   title: string;
 };
 
+export type ModuleOrderInput = {
+  orderedIds: string[];
+  ownerId?: string;
+};
+
 export type LessonWriteInput = {
   description?: string;
   duration?: string;
@@ -314,6 +332,11 @@ export type LessonWriteInput = {
   releaseRule?: ReleaseRuleConfig;
   title: string;
   video?: LessonVideoConfig | null;
+};
+
+export type LessonOrderInput = {
+  moduleId: string;
+  orderedIds: string[];
 };
 
 export type ProductComboWriteInput = {
@@ -340,6 +363,66 @@ const defaultStudent: PlatformStudent = {
   name: "Aluno"
 };
 const defaultCohortName = "Turma A";
+
+function normalizeHomeSectionOrder(sections: HomeSectionConfig[]) {
+  return sections
+    .slice()
+    .sort((left, right) => left.order - right.order)
+    .map((section, order) => ({ ...section, order }));
+}
+
+function normalizeHomeSectionConfigs(value: unknown): HomeSectionConfig[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const sectionTypes = new Set(["continue_watching", "content_carousel", "content_structure"]);
+  const contentSources = new Set([
+    "recent_lessons",
+    "entitlement_products",
+    "sellable_products",
+    "upcoming_products",
+    "manual",
+    "selected_content_structure"
+  ]);
+  const layouts = new Set(["continue", "vertical", "compact", "immersive"]);
+  const visibilities = new Set(["students", "non_students", "all"]);
+
+  return normalizeHomeSectionOrder(value.flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+
+    const section = entry as Partial<HomeSectionConfig>;
+
+    if (
+      typeof section.id !== "string" ||
+      typeof section.title !== "string" ||
+      !sectionTypes.has(section.sectionType ?? "") ||
+      !contentSources.has(section.contentSource ?? "") ||
+      !layouts.has(section.layout ?? "") ||
+      !visibilities.has(section.visibility ?? "")
+    ) {
+      return [];
+    }
+
+    return [{
+      contentSource: section.contentSource as HomeSectionConfig["contentSource"],
+      id: section.id,
+      isActive: section.isActive !== false,
+      itemIds: Array.isArray(section.itemIds)
+        ? section.itemIds.filter((itemId): itemId is string => typeof itemId === "string")
+        : [],
+      layout: section.layout as HomeSectionConfig["layout"],
+      order: typeof section.order === "number" ? section.order : index,
+      sectionType: section.sectionType as HomeSectionConfig["sectionType"],
+      sourceContentId: typeof section.sourceContentId === "string" ? section.sourceContentId : undefined,
+      subtitle: typeof section.subtitle === "string" ? section.subtitle : undefined,
+      title: section.title,
+      visibility: section.visibility as HomeSectionConfig["visibility"]
+    }];
+  }));
+}
 
 function contentBucketEntries(database: PlatformDatabase): Array<[ContentBucket, ContentItem[]]> {
   return [
@@ -371,6 +454,7 @@ function contentItemToRow(item: ContentItem, bucket: ContentBucket, sortOrder: n
     level_label: item.level ?? null,
     max_students: item.maxStudents ?? null,
     progress: item.progress,
+    publication_status: item.publicationStatus ?? "published",
     purchase_label: item.purchaseLabel ?? null,
     purchase_target: item.purchaseTarget ?? null,
     purchase_url: item.purchaseUrl ?? null,
@@ -398,6 +482,7 @@ function contentRowToItem(row: ContentItemRow): ContentItem {
     level: row.level_label ?? undefined,
     maxStudents: row.max_students,
     progress: row.progress,
+    publicationStatus: row.publication_status ?? "published",
     purchaseLabel: row.purchase_label ?? undefined,
     purchaseTarget: row.purchase_target ?? undefined,
     purchaseUrl: row.purchase_url ?? undefined,
@@ -641,6 +726,7 @@ function settingsRows(database: PlatformDatabase) {
     { key: "aiAgents", value: database.aiAgents },
     { key: "blockedWordRules", value: database.blockedWordRules },
     { key: "hero", value: database.hero },
+    { key: "homeSections", value: database.homeSectionConfigs },
     { key: "integrations", value: database.integrations },
     { key: "student", value: database.student },
     { key: "metrics", value: database.metrics },
@@ -827,69 +913,6 @@ async function upsertRows(
   await throwIfSupabaseError(error, context);
 }
 
-let lessonProgressColumnSupportPromise: Promise<{
-  lessonReactions: boolean;
-  lessonWatchStates: boolean;
-}> | null = null;
-
-async function hasSupabaseColumn(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  table: string,
-  column: string
-) {
-  const { error } = await supabase.from(table).select(column).limit(1);
-
-  if (!error) {
-    return true;
-  }
-
-  if (isMissingSupabaseSchemaObjectError(error)) {
-    return false;
-  }
-
-  await throwIfSupabaseError(error, `Erro verificando coluna ${table}.${column}`);
-  return false;
-}
-
-async function hasSupabaseTable(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  table: string
-) {
-  const { error } = await supabase.from(table).select("*").limit(1);
-
-  if (!error) {
-    return true;
-  }
-
-  if (isMissingSupabaseSchemaObjectError(error)) {
-    return false;
-  }
-
-  await throwIfSupabaseError(error, `Erro verificando tabela ${table}`);
-  return false;
-}
-
-async function hasProductComboTables(supabase: ReturnType<typeof getSupabaseAdminClient>) {
-  const [hasCombosTable, hasComboItemsTable] = await Promise.all([
-    hasSupabaseTable(supabase, "product_combos"),
-    hasSupabaseTable(supabase, "product_combo_items")
-  ]);
-
-  return hasCombosTable && hasComboItemsTable;
-}
-
-async function getLessonProgressColumnSupport(supabase: ReturnType<typeof getSupabaseAdminClient>) {
-  lessonProgressColumnSupportPromise ??= Promise.all([
-    hasSupabaseColumn(supabase, "lesson_progress", "lesson_reactions"),
-    hasSupabaseColumn(supabase, "lesson_progress", "lesson_watch_states")
-  ]).then(([lessonReactions, lessonWatchStates]) => ({
-    lessonReactions,
-    lessonWatchStates
-  }));
-
-  return lessonProgressColumnSupportPromise;
-}
-
 async function deleteMissingRows(
   supabase: ReturnType<typeof getSupabaseAdminClient>,
   table: string,
@@ -926,97 +949,66 @@ async function deleteComboItemsForCombos(
   await throwIfSupabaseError(error, "Erro removendo itens antigos dos combos");
 }
 
-async function writeSupabaseDatabase(database: PlatformDatabase) {
-  const supabase = getSupabaseAdminClient();
-  const nextDatabase = {
-    ...database,
-    updatedAt: new Date().toISOString()
-  };
+type ReadSupabaseDatabaseOptions = {
+  includeAdminData?: boolean;
+  userEmail?: string;
+  userId?: string;
+};
 
-  const contentRows = contentBucketEntries(nextDatabase).flatMap(([bucket, items]) =>
-    items.map((item, index) => contentItemToRow(item, bucket, index))
-  );
-  const moduleRows = nextDatabase.courseModules.map(moduleToRow);
-  const lessonRows = nextDatabase.courseModules.flatMap((courseModule) =>
-    courseModule.lessons.map((lesson, index) => lessonToRow(lesson, courseModule.id, index))
-  );
-  const studentRows = nextDatabase.students.map(studentToRow);
-  const studentCourseRows = nextDatabase.students.flatMap((studentRecord) =>
-    studentRecord.courses.map((course) => studentCourseToRow(course, studentRecord.id))
-  );
-  const accessLogRows = nextDatabase.students.flatMap((studentRecord) =>
-    (studentRecord.accessHistory ?? []).map((log) => studentAccessLogToRow(log, studentRecord.id))
-  );
-  const contentSettingsRows = Object.entries(nextDatabase.contentPageSettings).map(([contentId, settings]) => ({
-    content_id: contentId,
-    settings
-  }));
-  const lessonProgressColumnSupport = await getLessonProgressColumnSupport(supabase);
-  const progressRows = nextDatabase.lessonProgress.map((record) => ({
-    completed_lesson_ids: record.completedLessonIds,
-    content_id: record.contentId,
-    ...(lessonProgressColumnSupport.lessonReactions ? { lesson_reactions: record.lessonReactions } : {}),
-    ...(lessonProgressColumnSupport.lessonWatchStates ? { lesson_watch_states: record.lessonWatchStates } : {}),
-    updated_at: record.updatedAt,
-    user_id: record.userId
-  }));
-  const savedItemRows = nextDatabase.savedItems.map(savedItemToRow);
-  const comboRows = nextDatabase.combos.map(comboToRow);
-  const comboItemRowsData = nextDatabase.combos.flatMap(comboItemRows);
-  const productComboTablesAvailable = await hasProductComboTables(supabase);
-  const platformSettingRows = settingsRows(nextDatabase);
-
-  await upsertRows(supabase, "content_items", contentRows, "id", "Erro sincronizando content_items");
-  await upsertRows(supabase, "content_page_settings", contentSettingsRows, "content_id", "Erro sincronizando content_page_settings");
-  await upsertRows(supabase, "course_modules", moduleRows, "id", "Erro sincronizando course_modules");
-  await upsertRows(supabase, "lessons", lessonRows, "id", "Erro sincronizando lessons");
-  await upsertRows(
-    supabase,
-    "cohorts",
-    nextDatabase.cohorts.map((name) => ({ name })),
-    "name",
-    "Erro sincronizando cohorts"
-  );
-  await upsertRows(supabase, "students", studentRows, "id", "Erro sincronizando students");
-  await upsertRows(supabase, "student_courses", studentCourseRows, "id", "Erro sincronizando student_courses");
-  await upsertRows(supabase, "student_access_logs", accessLogRows, "id", "Erro sincronizando student_access_logs");
-  await upsertRows(supabase, "lesson_progress", progressRows, "user_id,content_id", "Erro sincronizando lesson_progress");
-  await upsertRows(supabase, "saved_items", savedItemRows, "id", "Erro sincronizando saved_items");
-  if (productComboTablesAvailable) {
-    await upsertRows(supabase, "product_combos", comboRows, "id", "Erro sincronizando product_combos");
-    await deleteComboItemsForCombos(supabase, comboRows.map((row) => row.id));
-    await upsertRows(supabase, "product_combo_items", comboItemRowsData, "combo_id,product_id", "Erro sincronizando product_combo_items");
-  } else if (comboRows.length > 0 || comboItemRowsData.length > 0) {
-    throw new Error(
-      "Para criar ou editar combos, aplique a migration Supabase supabase/migrations/202606190001_product_combos.sql."
-    );
-  }
-
-  await upsertRows(supabase, "platform_settings", platformSettingRows, "key", "Erro sincronizando platform_settings");
-
-  await deleteMissingRows(supabase, "student_access_logs", "id", accessLogRows.map((row) => row.id), "Erro removendo historicos antigos");
-  await deleteMissingRows(supabase, "student_courses", "id", studentCourseRows.map((row) => row.id), "Erro removendo acessos antigos");
-  await deleteMissingRows(supabase, "students", "id", studentRows.map((row) => row.id), "Erro removendo alunos antigos");
-  await deleteMissingRows(supabase, "saved_items", "id", savedItemRows.map((row) => row.id), "Erro removendo favoritos antigos");
-  if (productComboTablesAvailable) {
-    await deleteMissingRows(supabase, "product_combos", "id", comboRows.map((row) => row.id), "Erro removendo combos antigos");
-  }
-
-  await deleteMissingRows(
-    supabase,
-    "content_page_settings",
-    "content_id",
-    contentSettingsRows.map((row) => row.content_id),
-    "Erro removendo configuracoes de pagina antigas"
-  );
-  await deleteMissingRows(supabase, "cohorts", "name", nextDatabase.cohorts, "Erro removendo turmas antigas");
-  await deleteMissingRows(supabase, "content_items", "id", contentRows.map((row) => row.id), "Erro removendo conteudos antigos");
-
-  return nextDatabase;
+function emptySupabaseResult() {
+  return Promise.resolve({ data: [], error: null });
 }
 
-async function readSupabaseDatabase() {
+async function readSupabaseDatabase({
+  includeAdminData = true,
+  userEmail,
+  userId
+}: ReadSupabaseDatabaseOptions = {}) {
   const supabase = getSupabaseAdminClient();
+  const cohortsQuery = includeAdminData
+    ? supabase.from("cohorts").select("name").order("created_at", { ascending: true })
+    : emptySupabaseResult();
+  const contentItemsQuery = includeAdminData
+    ? supabase.from("content_items").select("*").order("sort_order", { ascending: true })
+    : supabase
+      .from("content_items")
+      .select("*")
+      .eq("publication_status", "published")
+      .order("sort_order", { ascending: true });
+  const modulesQuery = includeAdminData
+    ? supabase.from("course_modules").select("*").order("sort_order", { ascending: true })
+    : supabase.from("course_modules").select("*").eq("status", "published").order("sort_order", { ascending: true });
+  const lessonsQuery = includeAdminData
+    ? supabase.from("lessons").select("*").order("sort_order", { ascending: true })
+    : supabase.from("lessons").select("*").eq("status", "published").order("sort_order", { ascending: true });
+  const studentsQuery = includeAdminData
+    ? supabase.from("students").select("*").order("created_at", { ascending: true })
+    : userEmail
+      ? supabase.from("students").select("*").ilike("email", userEmail).limit(1)
+      : userId
+        ? supabase.from("students").select("*").eq("id", userId).limit(1)
+        : emptySupabaseResult();
+  const studentCoursesQuery = includeAdminData
+    ? supabase.from("student_courses").select("*").order("created_at", { ascending: true })
+    : emptySupabaseResult();
+  const accessLogsQuery = includeAdminData
+    ? supabase.from("student_access_logs").select("*").order("created_at", { ascending: true })
+    : emptySupabaseResult();
+  const progressQuery = !includeAdminData && userId
+    ? supabase.from("lesson_progress").select("*").eq("user_id", userId)
+    : supabase.from("lesson_progress").select("*");
+  const savedItemsQuery = !includeAdminData && userId
+    ? supabase.from("saved_items").select("*").eq("user_id", userId).order("created_at", { ascending: true })
+    : supabase.from("saved_items").select("*").order("created_at", { ascending: true });
+  const productCombosQuery = includeAdminData
+    ? supabase.from("product_combos").select("*").order("created_at", { ascending: true })
+    : emptySupabaseResult();
+  const productComboItemsQuery = includeAdminData
+    ? supabase.from("product_combo_items").select("*").order("sort_order", { ascending: true })
+    : emptySupabaseResult();
+  const accessEntitlementsQuery = !includeAdminData && userId
+    ? supabase.from("entitlements").select("user_id,target_type,target_id,status,starts_at,ends_at").eq("user_id", userId)
+    : supabase.from("entitlements").select("user_id,target_type,target_id,status,starts_at,ends_at");
   const [
     contentItemsResult,
     contentSettingsResult,
@@ -1024,7 +1016,7 @@ async function readSupabaseDatabase() {
     lessonsResult,
     cohortsResult,
     studentsResult,
-    studentCoursesResult,
+    initialStudentCoursesResult,
     accessLogsResult,
     progressResult,
     savedItemsResult,
@@ -1033,21 +1025,32 @@ async function readSupabaseDatabase() {
     accessEntitlementsResult,
     settingsResult
   ] = await Promise.all([
-    supabase.from("content_items").select("*").order("sort_order", { ascending: true }),
+    contentItemsQuery,
     supabase.from("content_page_settings").select("*"),
-    supabase.from("course_modules").select("*").order("sort_order", { ascending: true }),
-    supabase.from("lessons").select("*").order("sort_order", { ascending: true }),
-    supabase.from("cohorts").select("name").order("created_at", { ascending: true }),
-    supabase.from("students").select("*").order("created_at", { ascending: true }),
-    supabase.from("student_courses").select("*").order("created_at", { ascending: true }),
-    supabase.from("student_access_logs").select("*").order("created_at", { ascending: true }),
-    supabase.from("lesson_progress").select("*"),
-    supabase.from("saved_items").select("*").order("created_at", { ascending: true }),
-    supabase.from("product_combos").select("*").order("created_at", { ascending: true }),
-    supabase.from("product_combo_items").select("*").order("sort_order", { ascending: true }),
-    supabase.from("entitlements").select("user_id,target_type,target_id,status,starts_at,ends_at"),
+    modulesQuery,
+    lessonsQuery,
+    cohortsQuery,
+    studentsQuery,
+    studentCoursesQuery,
+    accessLogsQuery,
+    progressQuery,
+    savedItemsQuery,
+    productCombosQuery,
+    productComboItemsQuery,
+    accessEntitlementsQuery,
     supabase.from("platform_settings").select("*")
   ]);
+
+  const memberStudentIds = includeAdminData
+    ? []
+    : ((studentsResult.data ?? []) as StudentRow[]).map((student) => student.id);
+  const studentCoursesResult = !includeAdminData && memberStudentIds.length > 0
+    ? await supabase
+      .from("student_courses")
+      .select("*")
+      .in("student_id", memberStudentIds)
+      .order("created_at", { ascending: true })
+    : initialStudentCoursesResult;
 
   for (const [result, context] of [
     [contentItemsResult, "Erro lendo content_items"],
@@ -1095,7 +1098,12 @@ async function readSupabaseDatabase() {
   const itemsByBucket = (bucket: ContentBucket) => contentRows
     .filter((row) => row.bucket === bucket)
     .sort((left, right) => left.sort_order - right.sort_order)
-    .map(contentRowToItem);
+    .map((row) => {
+      const item = contentRowToItem(row);
+      const parentFormationId = contentPageSettingsMap[item.id]?.parentFormationId;
+
+      return parentFormationId ? { ...item, parentContentId: parentFormationId } : item;
+    });
 
   return {
     accessEntitlements: ((accessEntitlementsResult.data ?? []) as AccessEntitlementRow[]).map((row) => ({
@@ -1125,6 +1133,8 @@ async function readSupabaseDatabase() {
     formationInternalCourses: itemsByBucket("formation_internal_courses"),
     formations: itemsByBucket("formations"),
     hero: (settingsMap.get("hero") as HomeHeroConfig | undefined) ?? defaultHero,
+    homeSectionConfigs: normalizeHomeSectionConfigs(settingsMap.get("homeSections")),
+    homeSectionsConfigured: settingsMap.has("homeSections"),
     integrations: (settingsMap.get("integrations") as PlatformDatabase["integrations"] | undefined) ?? [],
     lessonProgress: ((progressResult.data ?? []) as LessonProgressRow[]).map((row) => {
       const extras = lessonProgressExtras.get(getLessonProgressExtrasKey(row.user_id, row.content_id));
@@ -1157,13 +1167,23 @@ async function readSupabaseDatabase() {
   } satisfies PlatformDatabase;
 }
 
-async function writeDatabase(database: PlatformDatabase) {
-  return writeSupabaseDatabase(database);
-}
-
-async function readDatabase() {
+const readAdminDatabase = cache(async () => {
   noStore();
-  return readSupabaseDatabase();
+  return readSupabaseDatabase({ includeAdminData: true });
+});
+
+const readMemberDatabase = cache(async (userId: string, userEmail: string) => {
+  noStore();
+  return readSupabaseDatabase({
+    includeAdminData: false,
+    userEmail: userEmail || undefined,
+    userId: userId || undefined
+  });
+});
+
+function readDatabaseForUser(user?: AuthenticatedUser | string) {
+  const { email, userId } = getUserIdentity(user);
+  return readMemberDatabase(userId ?? "", email ?? "");
 }
 
 function getAllContentItems(database: PlatformDatabase) {
@@ -1292,7 +1312,10 @@ function hasUserEntitlementForItem(item: ContentItem, userAccessKeys: Set<string
   }
 
   if (item.commerceScope === "included_content") {
-    return Array.from(userAccessKeys).some((accessKey) => accessKey.startsWith("formation:"));
+    return Boolean(
+      item.parentContentId &&
+      userAccessKeys.has(getAccessTargetKey("formation", item.parentContentId))
+    );
   }
 
   return false;
@@ -1455,7 +1478,7 @@ function getSavedLessonItems(
           description: lesson.description,
           duration: lesson.duration,
           id: lesson.id,
-          image: lesson.image ?? courseModule.image,
+          image: getVideoThumbnailUrl(lesson.video) || lesson.image || courseModule.image,
           isSaved: true,
           moduleId: courseModule.id,
           moduleTitle: courseModule.title,
@@ -1485,6 +1508,16 @@ function getPurchasedProducts(
 ) {
   return getSellableItems(database)
     .filter((item) => hasPurchaseAccess(item, accessPreviewMode, userAccessKeys))
+    .map((item) => applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys));
+}
+
+function getProductsAvailableForSale(
+  database: PlatformDatabase,
+  accessPreviewMode?: AccessPreviewMode,
+  userAccessKeys = new Set<string>()
+) {
+  return getSellableItems(database)
+    .filter((item) => !hasPurchaseAccess(item, accessPreviewMode, userAccessKeys))
     .map((item) => applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys));
 }
 
@@ -1545,6 +1578,86 @@ function getHomeCourseModuleRows(
       visibility: "all"
     }];
   });
+}
+
+function getDefaultHomeSectionConfigs(database: PlatformDatabase): HomeSectionConfig[] {
+  const structuralSections = getHomeCourseModuleRows(
+    database,
+    undefined,
+    undefined,
+    new Set(),
+    new Set()
+  ).flatMap((row) => row.course ? [{
+      contentSource: "selected_content_structure" as const,
+      id: row.id,
+      isActive: true,
+      itemIds: [],
+      layout: "compact" as const,
+      order: 0,
+      sectionType: "content_structure" as const,
+      sourceContentId: row.course.id,
+      subtitle: row.subtitle,
+      title: row.title,
+      visibility: "all" as const
+    }] : []);
+
+  return normalizeHomeSectionOrder([
+    {
+      contentSource: "recent_lessons",
+      id: "continue-watching",
+      isActive: true,
+      itemIds: [],
+      layout: "continue",
+      order: 0,
+      sectionType: "continue_watching",
+      subtitle: "Retome exatamente de onde parou.",
+      title: "Continue assistindo",
+      visibility: "students"
+    },
+    {
+      contentSource: "entitlement_products",
+      id: "my-purchases",
+      isActive: true,
+      itemIds: [],
+      layout: "vertical",
+      order: 1,
+      sectionType: "content_carousel",
+      subtitle: "Todos os produtos que voce ja tem acesso: formacoes, bootcamps e cursos.",
+      title: "Minhas compras",
+      visibility: "students"
+    },
+    ...structuralSections,
+    {
+      contentSource: "sellable_products",
+      id: "showcase",
+      isActive: true,
+      itemIds: [],
+      layout: "vertical",
+      order: structuralSections.length + 2,
+      sectionType: "content_carousel",
+      subtitle: "Produtos disponiveis e destaques configurados pela Bunker707.",
+      title: "Produtos a venda",
+      visibility: "all"
+    },
+    {
+      contentSource: "upcoming_products",
+      id: "upcoming",
+      isActive: true,
+      itemIds: [],
+      layout: "vertical",
+      order: structuralSections.length + 3,
+      sectionType: "content_carousel",
+      subtitle: "Proximos cursos, formacoes e turmas para entrar no radar.",
+      title: "Em breve na Bunker707",
+      visibility: "all"
+    }
+  ]);
+}
+
+function getPublishedHomeSectionConfigs(database: PlatformDatabase) {
+  return database.homeSectionsConfigured
+    ? normalizeHomeSectionOrder(database.homeSectionConfigs)
+    : getDefaultHomeSectionConfigs(database);
 }
 
 function formatWatchProgressLabel(watchState: LessonWatchState, lesson: { duration: string }) {
@@ -1643,52 +1756,127 @@ function getHomeRows(
     ...applyAccessPreviewToItems(database.continueWatching, accessPreviewMode, userAccessKeys)
   ];
 
-  return [
-    {
-      id: "continue-watching",
-      items: accessPreviewMode === "student_without_access"
-        ? []
-        : applySavedStateToItems(
-          continueWatchingItems,
-          savedItems
-        ),
-      subtitle: "Retome exatamente de onde parou.",
-      title: "Continue assistindo",
-      variant: "continue",
-      visibility: "students"
-    },
-    {
-      id: "my-purchases",
-      items: applySavedStateToItems(getPurchasedProducts(database, accessPreviewMode, userAccessKeys), savedItems),
-      subtitle: "Todos os produtos que voce ja tem acesso: formacoes, bootcamps e cursos.",
-      title: "Minhas compras",
-      variant: "vertical",
-      visibility: "students"
-    },
-    ...getHomeCourseModuleRows(database, accessPreviewMode, userId, userAccessKeys, savedItems),
-    {
-      id: "showcase",
-      items: applySavedStateToItems(
-        applyAccessPreviewToItems(getSellableItems(database), accessPreviewMode, userAccessKeys),
-        savedItems
-      ),
-      subtitle: "Produtos disponiveis e destaques configurados pela Bunker707.",
-      title: "Produtos a venda",
-      variant: "vertical",
-      visibility: "all"
-    },
-    {
-      id: "upcoming",
-      items: applySavedStateToItems(
-        applyAccessPreviewToItems(database.upcomingProducts, accessPreviewMode, userAccessKeys),
-        savedItems
-      ),
-      subtitle: "Proximos cursos, formacoes e turmas para entrar no radar.",
-      title: "Em breve na Bunker707",
-      variant: "vertical",
-      visibility: "all"
-    }
+  return resolveConfiguredHomeRows(
+    database,
+    getPublishedHomeSectionConfigs(database),
+    accessPreviewMode,
+    user,
+    { continueWatchingItems, savedItems, userAccessKeys, userId }
+  );
+}
+
+function resolveConfiguredHomeRows(
+  database: PlatformDatabase,
+  sections: HomeSectionConfig[],
+  accessPreviewMode: AccessPreviewMode | undefined,
+  user: AuthenticatedUser | string | undefined,
+  context?: {
+    continueWatchingItems: ContentItem[];
+    savedItems: Set<string>;
+    userAccessKeys: Set<string>;
+    userId?: string;
+  }
+): HomeRow[] {
+  const { userId } = context ?? getUserIdentity(user);
+  const savedItems = context?.savedItems ?? getSavedItemSet(database, userId);
+  const userAccessKeys = context?.userAccessKeys ?? getUserAccessKeys(database, user);
+  const continueWatchingItems = context?.continueWatchingItems ?? [
+    ...getContinueWatchingFromProgress(database, accessPreviewMode, user, userAccessKeys),
+    ...applyAccessPreviewToItems(database.continueWatching, accessPreviewMode, userAccessKeys)
   ];
+  const sellableItems = getSellableItems(database);
+  const sellableById = new Map(sellableItems.map((item) => [item.id, item]));
+
+  return normalizeHomeSectionOrder(sections).flatMap<HomeRow>((section) => {
+    if (!section.isActive) {
+      return [];
+    }
+
+    if (section.visibility === "students" && accessPreviewMode === "student_without_access") {
+      return [];
+    }
+
+    if (section.visibility === "non_students" && accessPreviewMode === "student_with_access") {
+      return [];
+    }
+
+    if (section.sectionType === "content_structure") {
+      const source = section.sourceContentId ? sellableById.get(section.sourceContentId) : undefined;
+
+      if (!source) {
+        return [];
+      }
+
+      const course = applySavedStateToItem(
+        applyAccessPreviewToItem(source, accessPreviewMode, userAccessKeys),
+        savedItems
+      );
+      const modules = applySavedStateToModules(
+        applyLessonProgress(database, course.id, getModulesForContent(database, course), userId),
+        savedItems
+      );
+      const structureItems = course.kind === "Formacao"
+        ? applySavedStateToItems(
+          applyAccessPreviewToItems(
+            database.formationInternalCourses.filter((item) => item.parentContentId === course.id),
+            accessPreviewMode,
+            userAccessKeys
+          ),
+          savedItems
+        )
+        : [];
+
+      if (modules.length === 0 && structureItems.length === 0) {
+        return [];
+      }
+
+      const settings = database.contentPageSettings[course.id];
+
+      return [{
+        backgroundImage: settings?.hero?.mediaSrc ?? course.image,
+        course,
+        id: section.id,
+        items: [course],
+        layout: section.layout,
+        lockedActionMode: settings?.lockedActionMode ?? "details_modal",
+        modules,
+        sectionId: section.id,
+        structureItems,
+        subtitle: section.subtitle ?? getOnlineCourseSectionLabel(course),
+        title: section.title,
+        variant: "course_modules" as const,
+        visibility: section.visibility
+      }];
+    }
+
+    let items: ContentItem[];
+
+    if (section.contentSource === "recent_lessons") {
+      items = accessPreviewMode === "student_without_access" ? [] : continueWatchingItems;
+    } else if (section.contentSource === "entitlement_products") {
+      items = getPurchasedProducts(database, accessPreviewMode, userAccessKeys);
+    } else if (section.contentSource === "upcoming_products") {
+      items = applyAccessPreviewToItems(database.upcomingProducts, accessPreviewMode, userAccessKeys);
+    } else if (section.contentSource === "manual") {
+      items = section.itemIds.flatMap((itemId) => {
+        const item = sellableById.get(itemId);
+        return item ? [applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys)] : [];
+      });
+    } else {
+      items = getProductsAvailableForSale(database, accessPreviewMode, userAccessKeys);
+    }
+
+    return [{
+      id: section.id,
+      items: applySavedStateToItems(items, savedItems),
+      layout: section.layout,
+      sectionId: section.id,
+      subtitle: section.subtitle,
+      title: section.title,
+      variant: section.sectionType === "continue_watching" ? "continue" as const : "vertical" as const,
+      visibility: section.visibility
+    }];
+  });
 }
 
 function getHomeModalStructures(
@@ -1709,7 +1897,11 @@ function getHomeModalStructures(
       {
         formationCourses: item.kind === "Formacao"
           ? applySavedStateToItems(
-            applyAccessPreviewToItems(database.formationInternalCourses, accessPreviewMode, userAccessKeys),
+            applyAccessPreviewToItems(
+              database.formationInternalCourses.filter((course) => course.parentContentId === item.id),
+              accessPreviewMode,
+              userAccessKeys
+            ),
             savedItems
           )
           : [],
@@ -1920,21 +2112,28 @@ function getSellableProducts(database: PlatformDatabase): AdminSellableProduct[]
 }
 
 function getAdminHomeSections(database: PlatformDatabase) {
-  return getHomeRows(database).map((row, index) => ({
-    contentCount: row.variant === "course_modules" ? row.modules?.length ?? 0 : row.items.length,
-    id: row.id,
-    order: index + 1,
-    source:
-      row.variant === "continue"
-        ? "Progresso do aluno"
-        : row.variant === "course_modules"
-          ? "Modulos de curso escolhido"
-        : row.visibility === "students"
-          ? "Entitlements ativos"
-          : "Curadoria persistida",
-    title: row.title,
-    visibility: row.visibility
-  }));
+  const rowsById = new Map(getHomeRows(database).map((row) => [row.id, row]));
+
+  return getPublishedHomeSectionConfigs(database).map((section) => {
+    const row = rowsById.get(section.id);
+
+    return {
+      ...section,
+      contentCount: row?.variant === "course_modules"
+        ? (row.modules?.length ?? 0) + (row.structureItems?.length ?? 0)
+        : row?.items.length ?? 0,
+      source:
+        section.contentSource === "recent_lessons"
+          ? "Progresso do aluno"
+          : section.contentSource === "entitlement_products"
+            ? "Entitlements ativos"
+            : section.contentSource === "selected_content_structure"
+              ? "Estrutura de conteudo"
+              : section.contentSource === "manual"
+                ? "Selecao manual"
+                : "Curadoria automatica"
+    };
+  });
 }
 
 function getEffectiveCohorts(database: PlatformDatabase) {
@@ -1946,7 +2145,9 @@ function toAdminDashboardData(
   persistenceProvider: AdminDashboardData["persistenceProvider"]
 ): AdminDashboardData {
   const homeRows = getHomeRows(database).filter((row) => (
-    row.variant === "course_modules" ? (row.modules?.length ?? 0) > 0 : row.items.length > 0
+    row.variant === "course_modules"
+      ? (row.modules?.length ?? 0) + (row.structureItems?.length ?? 0) > 0
+      : row.items.length > 0
   ));
 
   return {
@@ -1960,6 +2161,7 @@ function toAdminDashboardData(
     entitlements: database.entitlements,
     formationCourses: database.formationInternalCourses,
     hero: database.hero,
+    homeSectionConfigs: getPublishedHomeSectionConfigs(database),
     homeRows,
     homeSections: getAdminHomeSections(database),
     integrations: database.integrations,
@@ -2071,6 +2273,7 @@ function normalizeContentInput(input: ContentWriteInput): ContentItem {
     lessons: input.lessons || (input.kind === "Aula" ? "Aula" : "0 aulas"),
     maxStudents: input.maxStudents ?? null,
     progress: 0,
+    publicationStatus: input.publicationStatus ?? "draft",
     purchaseLabel: input.purchaseLabel ?? (isLocked && accessModel !== "free" ? "Comprar" : undefined),
     purchaseTarget: input.purchaseTarget ?? "same_tab",
     purchaseUrl: input.purchaseUrl,
@@ -2167,6 +2370,27 @@ function extractYouTubeId(value?: string) {
   return "";
 }
 
+function minimizeStudentYouTubeVideoConfigs(modules: CourseModule[]) {
+  return modules.map((courseModule) => ({
+    ...courseModule,
+    lessons: courseModule.lessons.map((lesson) => {
+      if (lesson.video?.provider !== "youtube") {
+        return lesson;
+      }
+
+      const videoId = lesson.video.assetId?.trim() || extractYouTubeId(lesson.video.url);
+
+      return {
+        ...lesson,
+        video: {
+          ...(videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId) ? { assetId: videoId } : {}),
+          provider: "youtube" as const
+        }
+      };
+    })
+  }));
+}
+
 function getVideoThumbnailUrl(video?: LessonVideoConfig) {
   if (video?.provider !== "youtube") {
     return "";
@@ -2223,7 +2447,7 @@ function applyLessonProgress(database: PlatformDatabase, contentId: string, modu
 }
 
 export async function getAppShellData(user?: AuthenticatedUser) {
-  const database = await readDatabase();
+  const database = await readDatabaseForUser(user);
   const adminRole = user ? await getAdminRoleForUser(user.id) : null;
 
   return {
@@ -2233,7 +2457,7 @@ export async function getAppShellData(user?: AuthenticatedUser) {
 }
 
 export async function getHomePageData(accessPreviewMode?: AccessPreviewMode, user?: AuthenticatedUser | string) {
-  const database = await readDatabase();
+  const database = await readDatabaseForUser(user);
   const homeRows = getHomeRows(database, accessPreviewMode, user).filter((row) => row.items.length > 0);
 
   return {
@@ -2244,14 +2468,14 @@ export async function getHomePageData(accessPreviewMode?: AccessPreviewMode, use
 }
 
 export async function getPurchasesPageData(accessPreviewMode?: AccessPreviewMode, user?: AuthenticatedUser | string) {
-  const database = await readDatabase();
+  const database = await readDatabaseForUser(user);
   return {
     purchasedProducts: getPurchasedProducts(database, accessPreviewMode, getUserAccessKeys(database, user))
   };
 }
 
 export async function getFavoritesPageData(accessPreviewMode?: AccessPreviewMode, user?: AuthenticatedUser | string) {
-  const database = await readDatabase();
+  const database = await readDatabaseForUser(user);
   const { userId } = getUserIdentity(user);
   const savedItems = getSavedItemSet(database, userId);
   const userAccessKeys = getUserAccessKeys(database, user);
@@ -2264,14 +2488,14 @@ export async function getFavoritesPageData(accessPreviewMode?: AccessPreviewMode
 }
 
 export async function getContentRouteParams() {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
   return getAllContentItems(database).map((item) => ({
     id: item.id
   }));
 }
 
 export async function getLessonRouteParams() {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
   return getAllContentItems(database).flatMap((item) =>
     getModulesForContent(database, item).map((module) => ({
       id: item.id,
@@ -2285,7 +2509,7 @@ export async function getContentPageData(
   user?: AuthenticatedUser | string,
   accessPreviewMode?: AccessPreviewMode
 ) {
-  const database = await readDatabase();
+  const database = await readDatabaseForUser(user);
   const allContentItems = getAllContentItems(database);
   const item = allContentItems.find((content) => content.id === contentId) ?? null;
   const { userId } = getUserIdentity(user);
@@ -2303,7 +2527,13 @@ export async function getContentPageData(
     ),
     courseModules: applySavedStateToModules(applyLessonProgress(database, contentId, getModulesForContent(database, item), userId), savedItems),
     formationInternalCourses: applySavedStateToItems(
-      applyAccessPreviewToItems(database.formationInternalCourses, accessPreviewMode, userAccessKeys),
+      applyAccessPreviewToItems(
+        item.kind === "Formacao"
+          ? database.formationInternalCourses.filter((course) => course.parentContentId === item.id)
+          : database.formationInternalCourses,
+        accessPreviewMode,
+        userAccessKeys
+      ),
       savedItems
     ),
     formations: applySavedStateToItems(
@@ -2322,17 +2552,24 @@ export async function getLessonPageData(
   user?: AuthenticatedUser | string,
   accessPreviewMode?: AccessPreviewMode
 ) {
-  const database = await readDatabase();
+  const database = await readDatabaseForUser(user);
   const allContentItems = getAllContentItems(database);
   const item = allContentItems.find((content) => content.id === contentId) ?? null;
   const { userId } = getUserIdentity(user);
   const savedItems = getSavedItemSet(database, userId);
   const userAccessKeys = getUserAccessKeys(database, user);
   const modules = item
-    ? applySavedStateToModules(applyLessonProgress(database, contentId, getModulesForContent(database, item), userId), savedItems)
+    ? minimizeStudentYouTubeVideoConfigs(
+        applySavedStateToModules(
+          applyLessonProgress(database, contentId, getModulesForContent(database, item), userId),
+          savedItems
+        )
+      )
     : [];
   const selectedModule = modules.find((courseModule) => courseModule.id === moduleId) ?? null;
-  const parentFormation = item?.commerceScope === "included_content" ? database.formations[0] : undefined;
+  const parentFormation = item?.commerceScope === "included_content"
+    ? database.formations.find((formation) => formation.id === item.parentContentId)
+    : undefined;
 
   if (!item || !selectedModule) {
     return null;
@@ -2351,7 +2588,86 @@ export async function getLessonPageData(
 }
 
 export async function getAdminDashboardData() {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
+  return toHydratedAdminDashboardData(database);
+}
+
+function validateHomeSectionConfigs(configs: HomeSectionConfig[], database: PlatformDatabase) {
+  const sellableIds = new Set(getSellableItems(database).map((item) => item.id));
+  const ids = new Set<string>();
+  const automaticSources = new Set<string>();
+  const validLayoutsByType: Record<HomeSectionConfig["sectionType"], Set<HomeSectionConfig["layout"]>> = {
+    continue_watching: new Set(["continue"]),
+    content_carousel: new Set(["vertical"]),
+    content_structure: new Set(["compact", "immersive"])
+  };
+
+  for (const section of configs) {
+    const id = section.id.trim();
+
+    if (!id || ids.has(id)) {
+      throw new Error("Cada secao precisa ter um identificador unico.");
+    }
+
+    if (!section.title.trim()) {
+      throw new Error("O titulo da secao e obrigatorio.");
+    }
+
+    if (!validLayoutsByType[section.sectionType].has(section.layout)) {
+      throw new Error(`O layout ${section.layout} nao e valido para esta secao.`);
+    }
+
+    if (section.contentSource === "manual") {
+      if (section.sectionType !== "content_carousel") {
+        throw new Error("Selecao manual so pode ser usada em carrosseis de conteudo.");
+      }
+
+      if (section.itemIds.some((itemId) => !sellableIds.has(itemId))) {
+        throw new Error("A selecao manual contem um produto invalido.");
+      }
+    } else if (section.contentSource === "selected_content_structure") {
+      if (!section.sourceContentId || !sellableIds.has(section.sourceContentId)) {
+        throw new Error("Escolha um curso ou formacao valido para a secao.");
+      }
+    } else {
+      if (automaticSources.has(section.contentSource)) {
+        throw new Error("Cada fonte automatica pode aparecer apenas uma vez.");
+      }
+
+      automaticSources.add(section.contentSource);
+    }
+
+    ids.add(id);
+  }
+
+  return normalizeHomeSectionOrder(configs.map((section) => ({
+    ...section,
+    id: section.id.trim(),
+    itemIds: Array.from(new Set(section.itemIds)),
+    subtitle: section.subtitle?.trim() || undefined,
+    title: section.title.trim()
+  })));
+}
+
+export async function publishHomeSections(configs: HomeSectionConfig[]) {
+  const database = await readAdminDatabase();
+  const normalized = validateHomeSectionConfigs(configs, database);
+
+  database.homeSectionConfigs = normalized;
+  database.homeSectionsConfigured = true;
+  database.updatedAt = new Date().toISOString();
+
+  await upsertRows(
+    getSupabaseAdminClient(),
+    "platform_settings",
+    [
+      { key: "homeSections", value: normalized },
+      { key: "updatedAt", value: database.updatedAt }
+    ],
+    "key",
+    "Erro publicando secoes da Home"
+  );
+
   return toHydratedAdminDashboardData(database);
 }
 
@@ -2526,22 +2842,43 @@ async function syncSupabaseEntitlementsForStudents(students: AdminStudent[], pre
 }
 
 export async function replaceAdminStudents(students: AdminStudent[]) {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
   const previousStudents = database.students;
   database.students = students;
-  await writeDatabase(database);
+  const supabase = getSupabaseAdminClient();
+  const studentRows = students.map(studentToRow);
+  const studentCourseRows = students.flatMap((studentRecord) =>
+    studentRecord.courses.map((course) => studentCourseToRow(course, studentRecord.id))
+  );
+  const accessLogRows = students.flatMap((studentRecord) =>
+    (studentRecord.accessHistory ?? []).map((log) => studentAccessLogToRow(log, studentRecord.id))
+  );
+
+  await upsertRows(supabase, "students", studentRows, "id", "Erro sincronizando students");
+  await upsertRows(supabase, "student_courses", studentCourseRows, "id", "Erro sincronizando student_courses");
+  await upsertRows(supabase, "student_access_logs", accessLogRows, "id", "Erro sincronizando student_access_logs");
+  await deleteMissingRows(supabase, "student_access_logs", "id", accessLogRows.map((row) => row.id), "Erro removendo historicos antigos");
+  await deleteMissingRows(supabase, "student_courses", "id", studentCourseRows.map((row) => row.id), "Erro removendo acessos antigos");
+  await deleteMissingRows(supabase, "students", "id", studentRows.map((row) => row.id), "Erro removendo alunos antigos");
   await syncSupabaseEntitlementsForStudents(students, previousStudents);
   return toHydratedAdminDashboardData(database);
 }
 
 export async function upsertContentItem(input: ContentWriteInput) {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
   const existingItem = input.id ? getAllContentItems(database).find((item) => item.id === input.id) : undefined;
   const normalizedItem = normalizeContentInput(input);
+  const [persistedCoverImage, persistedHeroImage] = await Promise.all([
+    persistImageAsset(normalizedItem.image, `content/${normalizedItem.id}/cover`),
+    input.heroImage !== undefined
+      ? persistImageAsset(input.heroImage, `content/${normalizedItem.id}/hero`)
+      : Promise.resolve(undefined)
+  ]);
   const item = {
     ...existingItem,
     ...normalizedItem,
     id: existingItem?.id ?? input.id ?? normalizedItem.id,
+    image: persistedCoverImage,
     progress: existingItem?.progress ?? 0
   };
   removeContentById(database, item.id);
@@ -2549,7 +2886,7 @@ export async function upsertContentItem(input: ContentWriteInput) {
 
   if (input.heroImage !== undefined) {
     const currentSettings = database.contentPageSettings[item.id] ?? {};
-    const heroImage = input.heroImage.trim();
+    const heroImage = persistedHeroImage?.trim() ?? "";
 
     if (heroImage) {
       database.contentPageSettings[item.id] = {
@@ -2641,12 +2978,58 @@ export async function upsertContentItem(input: ContentWriteInput) {
     }
   }
 
-  await writeDatabase(database);
+  if (input.parentFormationId !== undefined) {
+    const currentSettings = database.contentPageSettings[item.id] ?? {};
+    const parentFormationId = input.parentFormationId.trim();
+
+    if (item.commerceScope === "included_content" && parentFormationId) {
+      const parentFormation = database.formations.find((formation) => formation.id === parentFormationId);
+
+      if (!parentFormation || parentFormation.kind !== "Formacao" || parentFormation.id === item.id) {
+        throw new Error("Selecione uma formacao principal valida para este curso interno.");
+      }
+      database.contentPageSettings[item.id] = {
+        ...currentSettings,
+        parentFormationId
+      };
+      item.parentContentId = parentFormationId;
+    } else {
+      const remainingSettings = { ...currentSettings };
+      delete remainingSettings.parentFormationId;
+
+      if (Object.keys(remainingSettings).length > 0) {
+        database.contentPageSettings[item.id] = remainingSettings;
+      } else {
+        delete database.contentPageSettings[item.id];
+      }
+      delete item.parentContentId;
+    }
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const contentRows = contentBucketEntries(database).flatMap(([bucket, items]) =>
+    items.map((content, index) => contentItemToRow(content, bucket, index))
+  );
+  await upsertRows(supabase, "content_items", contentRows, "id", "Erro salvando content_items");
+
+  const itemSettings = database.contentPageSettings[item.id];
+
+  if (itemSettings) {
+    await upsertRows(supabase, "content_page_settings", [{
+      content_id: item.id,
+      settings: itemSettings
+    }], "content_id", "Erro salvando content_page_settings");
+  } else {
+    const deleteSettingsResult = await supabase.from("content_page_settings").delete().eq("content_id", item.id);
+    await throwIfSupabaseError(deleteSettingsResult.error, "Erro removendo content_page_settings");
+  }
+
   return toHydratedAdminDashboardData(database);
 }
 
 export async function deleteContentItem(itemId: string) {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
+  const combosBeforeDelete = database.combos;
   const ownedModules = database.courseModules.filter((module) => module.ownerId === itemId);
   const ownedTargetIds = new Set([
     itemId,
@@ -2668,12 +3051,64 @@ export async function deleteContentItem(itemId: string) {
     ...studentRecord,
     courses: studentRecord.courses.filter((course) => course.targetId !== itemId)
   }));
-  await writeDatabase(database);
+  const removedComboIds = combosBeforeDelete
+    .filter((combo) => combo.productIds.includes(itemId) && combo.productIds.length === 1)
+    .map((combo) => combo.id);
+  const supabase = getSupabaseAdminClient();
+  const deleteContentResult = await supabase.from("content_items").delete().eq("id", itemId);
+  await throwIfSupabaseError(deleteContentResult.error, "Erro removendo conteudo");
+
+  if (ownedTargetIds.size > 0) {
+    const deleteSavedResult = await supabase.from("saved_items").delete().in("target_id", Array.from(ownedTargetIds));
+    await throwIfSupabaseError(deleteSavedResult.error, "Erro removendo favoritos do conteudo");
+  }
+
+  const deleteStudentCoursesResult = await supabase.from("student_courses").delete().eq("target_id", itemId);
+  await throwIfSupabaseError(deleteStudentCoursesResult.error, "Erro removendo acessos do conteudo");
+
+  if (removedComboIds.length > 0) {
+    const deleteCombosResult = await supabase.from("product_combos").delete().in("id", removedComboIds);
+    await throwIfSupabaseError(deleteCombosResult.error, "Erro removendo combos vazios");
+  }
+
+  return toHydratedAdminDashboardData(database);
+}
+
+export async function reorderContentItems(input: ContentOrderInput) {
+  const database = await readAdminDatabase();
+  const orderedIds = normalizeOrderedIds(input.orderedIds);
+  const hasKnownContentId = contentBucketEntries(database).some(([, items]) =>
+    items.some((item) => orderedIds.includes(item.id))
+  );
+
+  if (!hasKnownContentId) {
+    throw createAdminMutationError("Nenhum conteudo valido foi encontrado para ordenar.", 400);
+  }
+
+  database.formations = reorderContentBucket(database.formations, orderedIds);
+  database.bootcamps = reorderContentBucket(database.bootcamps, orderedIds);
+  database.courses = reorderContentBucket(database.courses, orderedIds);
+  database.formationInternalCourses = reorderContentBucket(database.formationInternalCourses, orderedIds);
+  database.recentLessons = reorderContentBucket(database.recentLessons, orderedIds);
+  database.upcomingProducts = reorderContentBucket(database.upcomingProducts, orderedIds);
+  database.continueWatching = reorderContentBucket(database.continueWatching, orderedIds);
+
+  const contentRows = contentBucketEntries(database).flatMap(([bucket, items]) =>
+    items.map((content, index) => contentItemToRow(content, bucket, index))
+  );
+  await upsertRows(
+    getSupabaseAdminClient(),
+    "content_items",
+    contentRows,
+    "id",
+    "Erro ordenando conteudos"
+  );
+
   return toHydratedAdminDashboardData(database);
 }
 
 export async function upsertProductCombo(input: ProductComboWriteInput) {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
   const combo = normalizeProductComboInput(database, input);
 
   database.combos = [
@@ -2681,21 +3116,227 @@ export async function upsertProductCombo(input: ProductComboWriteInput) {
     ...database.combos.filter((currentCombo) => currentCombo.id !== combo.id)
   ];
 
-  await writeDatabase(database);
+  const supabase = getSupabaseAdminClient();
+  await upsertRows(supabase, "product_combos", [comboToRow(combo)], "id", "Erro salvando combo");
+  await deleteComboItemsForCombos(supabase, [combo.id]);
+  await upsertRows(
+    supabase,
+    "product_combo_items",
+    comboItemRows(combo),
+    "combo_id,product_id",
+    "Erro salvando itens do combo"
+  );
   return toHydratedAdminDashboardData(database);
 }
 
 export async function deleteProductCombo(comboId: string) {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
 
   database.combos = database.combos.filter((combo) => combo.id !== comboId);
 
-  await writeDatabase(database);
+  const deleteResult = await getSupabaseAdminClient().from("product_combos").delete().eq("id", comboId);
+  await throwIfSupabaseError(deleteResult.error, "Erro removendo combo");
+  return toHydratedAdminDashboardData(database);
+}
+
+function createAdminMutationError(message: string, status: number) {
+  const error = new Error(message) as Error & { status: number };
+  error.status = status;
+  return error;
+}
+
+function normalizeOrderedIds(orderedIds: string[]) {
+  return Array.from(new Set(
+    orderedIds
+      .map((id) => id.trim())
+      .filter(Boolean)
+  ));
+}
+
+function reorderItemsByIds<T extends { id: string }>(
+  items: T[],
+  orderedIds: string[],
+  entityLabel: string
+) {
+  const normalizedIds = normalizeOrderedIds(orderedIds);
+
+  if (normalizedIds.length === 0) {
+    throw createAdminMutationError(`Informe a ordem de ${entityLabel}.`, 400);
+  }
+
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const orderedItems = normalizedIds.flatMap((id) => {
+    const item = itemById.get(id);
+    return item ? [item] : [];
+  });
+
+  if (orderedItems.length === 0) {
+    throw createAdminMutationError(`Nenhum ${entityLabel} valido foi encontrado para ordenar.`, 400);
+  }
+
+  const movedIds = new Set(orderedItems.map((item) => item.id));
+
+  return [
+    ...orderedItems,
+    ...items.filter((item) => !movedIds.has(item.id))
+  ];
+}
+
+function reorderContentBucket(items: ContentItem[], orderedIds: string[]) {
+  const ids = new Set(orderedIds);
+
+  if (!items.some((item) => ids.has(item.id))) {
+    return items;
+  }
+
+  return reorderItemsByIds(items, orderedIds, "conteudos");
+}
+
+function reorderItemsInsideGroup<T extends { id: string }>(
+  items: T[],
+  predicate: (item: T) => boolean,
+  orderedIds: string[],
+  entityLabel: string
+) {
+  const groupItems = items.filter(predicate);
+
+  if (groupItems.length === 0) {
+    throw createAdminMutationError(`Nenhum ${entityLabel} encontrado para ordenar.`, 404);
+  }
+
+  const reorderedGroup = reorderItemsByIds(groupItems, orderedIds, entityLabel);
+  const queue = [...reorderedGroup];
+
+  return items.map((item) => predicate(item) ? queue.shift() ?? item : item);
+}
+
+function removeDeletedLearningReferences(
+  database: PlatformDatabase,
+  lessonIds: Set<string>,
+  moduleIds: Set<string>
+) {
+  const removedSavedItemIds = database.savedItems
+    .filter((savedItem) => (
+      (savedItem.targetType === "lesson" && lessonIds.has(savedItem.targetId)) ||
+      (savedItem.targetType === "module" && moduleIds.has(savedItem.targetId))
+    ))
+    .map((savedItem) => savedItem.id);
+  const updatedProgressRecords: LessonProgressRecord[] = [];
+  const removedSavedItemIdSet = new Set(removedSavedItemIds);
+  database.savedItems = database.savedItems.filter((savedItem) => !removedSavedItemIdSet.has(savedItem.id));
+  database.lessonProgress = database.lessonProgress.map((progress) => {
+    const completedLessonIds = progress.completedLessonIds.filter((lessonId) => !lessonIds.has(lessonId));
+    const lessonReactions = { ...progress.lessonReactions };
+    const lessonWatchStates = { ...progress.lessonWatchStates };
+    let changed = completedLessonIds.length !== progress.completedLessonIds.length;
+
+    for (const lessonId of lessonIds) {
+      if (lessonId in lessonReactions) {
+        delete lessonReactions[lessonId];
+        changed = true;
+      }
+
+      if (lessonId in lessonWatchStates) {
+        delete lessonWatchStates[lessonId];
+        changed = true;
+      }
+    }
+
+    if (!changed) {
+      return progress;
+    }
+
+    const nextProgress = {
+      ...progress,
+      completedLessonIds,
+      lessonReactions,
+      lessonWatchStates,
+      updatedAt: new Date().toISOString()
+    };
+    updatedProgressRecords.push(nextProgress);
+    return nextProgress;
+  });
+
+  return { removedSavedItemIds, updatedProgressRecords };
+}
+
+async function persistDeletedLearningReferences(
+  supabase: ReturnType<typeof getSupabaseAdminClient>,
+  cleanup: ReturnType<typeof removeDeletedLearningReferences>
+) {
+  if (cleanup.removedSavedItemIds.length > 0) {
+    const deleteSavedItemsResult = await supabase
+      .from("saved_items")
+      .delete()
+      .in("id", cleanup.removedSavedItemIds);
+    await throwIfSupabaseError(deleteSavedItemsResult.error, "Erro removendo favoritos da estrutura excluida");
+  }
+
+  await upsertRows(
+    supabase,
+    "lesson_progress",
+    cleanup.updatedProgressRecords.map((progress) => ({
+      completed_lesson_ids: progress.completedLessonIds,
+      content_id: progress.contentId,
+      lesson_reactions: progress.lessonReactions,
+      lesson_watch_states: progress.lessonWatchStates,
+      updated_at: progress.updatedAt,
+      user_id: progress.userId
+    })),
+    "user_id,content_id",
+    "Erro removendo referencias de progresso da estrutura excluida"
+  );
+}
+
+export async function deleteCourseModule(moduleId: string) {
+  const database = await readAdminDatabase();
+  const courseModule = database.courseModules.find((module) => module.id === moduleId);
+
+  if (!courseModule) {
+    throw createAdminMutationError("Modulo nao encontrado.", 404);
+  }
+
+  const lessonIds = new Set(courseModule.lessons.map((lesson) => lesson.id));
+  const supabase = getSupabaseAdminClient();
+  const deleteResult = await supabase.from("course_modules").delete().eq("id", moduleId);
+  await throwIfSupabaseError(deleteResult.error, "Erro removendo modulo");
+
+  database.courseModules = database.courseModules.filter((module) => module.id !== moduleId);
+  const cleanup = removeDeletedLearningReferences(database, lessonIds, new Set([moduleId]));
+  await persistDeletedLearningReferences(supabase, cleanup);
+  return toHydratedAdminDashboardData(database);
+}
+
+export async function reorderCourseModules(input: ModuleOrderInput) {
+  const database = await readAdminDatabase();
+  const ownerId = input.ownerId?.trim();
+  const hasScopedModules = ownerId
+    ? database.courseModules.some((module) => module.ownerId === ownerId)
+    : false;
+  const matchesTargetOwner = (module: CourseModule) =>
+    hasScopedModules ? module.ownerId === ownerId : !module.ownerId;
+
+  database.courseModules = reorderItemsInsideGroup(
+    database.courseModules,
+    matchesTargetOwner,
+    input.orderedIds,
+    "modulos"
+  );
+
+  const moduleRows = database.courseModules.map(moduleToRow);
+  await upsertRows(
+    getSupabaseAdminClient(),
+    "course_modules",
+    moduleRows,
+    "id",
+    "Erro ordenando modulos"
+  );
+
   return toHydratedAdminDashboardData(database);
 }
 
 export async function upsertCourseModule(input: ModuleWriteInput) {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
   const moduleId = input.id || makeId("module", input.title);
   const existingModule = database.courseModules.find((module) => module.id === moduleId);
   const ownerId = input.ownerId ?? existingModule?.ownerId;
@@ -2703,13 +3344,15 @@ export async function upsertCourseModule(input: ModuleWriteInput) {
   const ownerModulesCount = database.courseModules.filter((module) =>
     ownerId ? module.ownerId === ownerId : !module.ownerId
   ).length;
+  const moduleImage = await persistImageAsset(
+    input.image || existingModule?.image || "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=900&q=80",
+    `modules/${moduleId}/cover`
+  );
   const nextModule: CourseModule = {
     description: input.description || "Modulo cadastrado no CMS persistido.",
     eyebrow: existingModule?.eyebrow ?? `Modulo ${String(ownerModulesCount + 1).padStart(2, "0")}`,
     id: moduleId,
-    image:
-      input.image ||
-      "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=900&q=80",
+    image: moduleImage,
     lessons: existingModule?.lessons ?? [],
     meta: "0 aulas",
     ownerId,
@@ -2722,18 +3365,25 @@ export async function upsertCourseModule(input: ModuleWriteInput) {
   database.courseModules = (
     existingModule
       ? database.courseModules.map((module) => (module.id === moduleId ? nextModule : module))
-      : [nextModule, ...database.courseModules]
+      : [...database.courseModules, nextModule]
   ).map((module) => ({
     ...module,
     meta: `${module.lessons.length} aula${module.lessons.length === 1 ? "" : "s"}`
   }));
 
-  await writeDatabase(database);
+  const moduleRows = database.courseModules.map(moduleToRow);
+  await upsertRows(
+    getSupabaseAdminClient(),
+    "course_modules",
+    moduleRows,
+    "id",
+    "Erro salvando modulo"
+  );
   return toHydratedAdminDashboardData(database);
 }
 
 export async function upsertLesson(input: LessonWriteInput) {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
   const moduleIndex = database.courseModules.findIndex((module) => module.id === input.moduleId);
 
   if (moduleIndex < 0) {
@@ -2746,20 +3396,32 @@ export async function upsertLesson(input: LessonWriteInput) {
     .flatMap((module) => module.lessons)
     .find((lesson) => lesson.id === lessonId);
   const hasVideoInput = Object.prototype.hasOwnProperty.call(input, "video");
+  const lessonImage = await persistImageAsset(
+    input.image || existingLesson?.image,
+    `lessons/${lessonId}/thumbnail`
+  );
   const nextLesson = {
     completed: existingLesson?.completed ?? false,
     description: input.description || existingLesson?.description || "Aula cadastrada no CMS persistido.",
     duration: input.duration || existingLesson?.duration || "15 min",
     id: lessonId,
-    image: input.image || existingLesson?.image,
+    image: lessonImage || undefined,
     releaseRule: input.releaseRule ?? existingLesson?.releaseRule,
     title: input.title,
     video: hasVideoInput ? input.video ?? undefined : existingLesson?.video
   };
 
   database.courseModules = database.courseModules.map((module, index) => {
+    const currentLessonIndex = module.lessons.findIndex((lesson) => lesson.id === lessonId);
     const moduleLessons = module.lessons.filter((lesson) => lesson.id !== lessonId);
-    const lessons = index === moduleIndex ? [nextLesson, ...moduleLessons] : moduleLessons;
+    const insertAt = currentLessonIndex >= 0 ? currentLessonIndex : moduleLessons.length;
+    const lessons = index === moduleIndex
+      ? [
+          ...moduleLessons.slice(0, insertAt),
+          nextLesson,
+          ...moduleLessons.slice(insertAt)
+        ]
+      : moduleLessons;
 
     return {
       ...module,
@@ -2768,12 +3430,95 @@ export async function upsertLesson(input: LessonWriteInput) {
     };
   });
 
-  await writeDatabase(database);
+  const supabase = getSupabaseAdminClient();
+  const moduleRows = database.courseModules.map(moduleToRow);
+  const lessonRows = database.courseModules.flatMap((module) =>
+    module.lessons.map((lesson, index) => lessonToRow(lesson, module.id, index))
+  );
+  await upsertRows(supabase, "course_modules", moduleRows, "id", "Erro atualizando modulo da aula");
+  await upsertRows(supabase, "lessons", lessonRows, "id", "Erro salvando aula");
+  return {
+    data: toHydratedAdminDashboardData(database),
+    lessonId
+  };
+}
+
+export async function reorderLessons(input: LessonOrderInput) {
+  const database = await readAdminDatabase();
+  const moduleIndex = database.courseModules.findIndex((module) => module.id === input.moduleId);
+
+  if (moduleIndex < 0) {
+    throw createAdminMutationError("Modulo nao encontrado.", 404);
+  }
+
+  database.courseModules = database.courseModules.map((module, index) => {
+    if (index !== moduleIndex) {
+      return module;
+    }
+
+    const lessons = reorderItemsByIds(module.lessons, input.orderedIds, "aulas");
+
+    return {
+      ...module,
+      lessons
+    };
+  });
+
+  const lessonRows = database.courseModules.flatMap((module) =>
+    module.lessons.map((lesson, index) => lessonToRow(lesson, module.id, index))
+  );
+  await upsertRows(
+    getSupabaseAdminClient(),
+    "lessons",
+    lessonRows,
+    "id",
+    "Erro ordenando aulas"
+  );
+
+  return toHydratedAdminDashboardData(database);
+}
+
+export async function deleteLesson(lessonId: string) {
+  const database = await readAdminDatabase();
+  const ownerModule = database.courseModules.find((module) =>
+    module.lessons.some((lesson) => lesson.id === lessonId)
+  );
+
+  if (!ownerModule) {
+    throw createAdminMutationError("Aula nao encontrada.", 404);
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const deleteResult = await supabase.from("lessons").delete().eq("id", lessonId);
+  await throwIfSupabaseError(deleteResult.error, "Erro removendo aula");
+  const remainingLessonsCount = ownerModule.lessons.filter((lesson) => lesson.id !== lessonId).length;
+  const moduleMeta = `${remainingLessonsCount} aula${remainingLessonsCount === 1 ? "" : "s"}`;
+  const updateModuleResult = await supabase
+    .from("course_modules")
+    .update({ meta: moduleMeta })
+    .eq("id", ownerModule.id);
+  await throwIfSupabaseError(updateModuleResult.error, "Erro atualizando a quantidade de aulas do modulo");
+
+  database.courseModules = database.courseModules.map((module) => {
+    if (module.id !== ownerModule.id) {
+      return module;
+    }
+
+    const lessons = module.lessons.filter((lesson) => lesson.id !== lessonId);
+
+    return {
+      ...module,
+      lessons,
+      meta: moduleMeta
+    };
+  });
+  const cleanup = removeDeletedLearningReferences(database, new Set([lessonId]), new Set());
+  await persistDeletedLearningReferences(supabase, cleanup);
   return toHydratedAdminDashboardData(database);
 }
 
 export async function addCohort(name: string) {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
   const trimmedName = name.trim();
 
   if (!trimmedName) {
@@ -2784,7 +3529,13 @@ export async function addCohort(name: string) {
     database.cohorts = [trimmedName, ...database.cohorts];
   }
 
-  await writeDatabase(database);
+  await upsertRows(
+    getSupabaseAdminClient(),
+    "cohorts",
+    [{ name: trimmedName }],
+    "name",
+    "Erro salvando turma"
+  );
   return toHydratedAdminDashboardData(database);
 }
 
@@ -2794,7 +3545,7 @@ export type AdminDashboardCollectionsInput = Partial<Pick<
 >>;
 
 export async function updateAdminDashboardCollections(input: AdminDashboardCollectionsInput) {
-  const database = await readDatabase();
+  const database = await readAdminDatabase();
 
   if (Array.isArray(input.aiAgents)) {
     database.aiAgents = input.aiAgents;
@@ -2812,23 +3563,47 @@ export async function updateAdminDashboardCollections(input: AdminDashboardColle
     database.moderationItems = input.moderationItems;
   }
 
-  await writeDatabase(database);
+  const updatedKeys = new Set(Object.keys(input));
+  const rows = settingsRows(database).filter((row) => updatedKeys.has(row.key));
+  await upsertRows(
+    getSupabaseAdminClient(),
+    "platform_settings",
+    rows,
+    "key",
+    "Erro salvando configuracoes administrativas"
+  );
   return toHydratedAdminDashboardData(database);
 }
 
-function targetExists(database: PlatformDatabase, targetType: SavedItemTargetType, targetId: string) {
-  if (["formation", "standalone_course", "mentorship", "webinar", "product", "bootcamp", "material"].includes(targetType)) {
-    return getAllContentItems(database).some((item) => (
-      item.id === targetId &&
-      getSavedTargetTypeForContentKind(item.kind) === targetType
-    ));
+async function savedItemTargetExists(targetType: SavedItemTargetType, targetId: string) {
+  const supabase = getSupabaseAdminClient();
+
+  if (["formation", "standalone_course", "mentorship", "webinar", "product", "bootcamp"].includes(targetType)) {
+    const result = await supabase
+      .from("content_items")
+      .select("id,kind")
+      .eq("id", targetId)
+      .maybeSingle();
+    await throwIfSupabaseError(result.error, "Erro validando conteudo favorito");
+    return Boolean(
+      result.data &&
+      getSavedTargetTypeForContentKind(result.data.kind as ContentKind) === targetType
+    );
   }
 
   if (targetType === "module") {
-    return database.courseModules.some((module) => module.id === targetId);
+    const result = await supabase.from("course_modules").select("id").eq("id", targetId).maybeSingle();
+    await throwIfSupabaseError(result.error, "Erro validando modulo favorito");
+    return Boolean(result.data);
   }
 
-  return database.courseModules.some((module) => module.lessons.some((lesson) => lesson.id === targetId));
+  if (targetType === "lesson") {
+    const result = await supabase.from("lessons").select("id").eq("id", targetId).maybeSingle();
+    await throwIfSupabaseError(result.error, "Erro validando aula favorita");
+    return Boolean(result.data);
+  }
+
+  return false;
 }
 
 export async function setSavedItem({
@@ -2844,24 +3619,22 @@ export async function setSavedItem({
   targetType: SavedItemTargetType;
   userId: string;
 }) {
-  const database = await readDatabase();
+  const supabase = getSupabaseAdminClient();
   const normalizedCollectionLabel = collectionLabel.trim() || savedItemCollectionLabel;
-  const existingIndex = database.savedItems.findIndex((savedItem) => (
-    savedItem.userId === userId &&
-    savedItem.targetType === targetType &&
-    savedItem.targetId === targetId &&
-    savedItem.collectionLabel === normalizedCollectionLabel
-  ));
 
-  if (!targetExists(database, targetType, targetId)) {
+  if (!await savedItemTargetExists(targetType, targetId)) {
     throw new Error("Item para salvar nao encontrado.");
   }
 
   if (!saved) {
-    if (existingIndex >= 0) {
-      database.savedItems.splice(existingIndex, 1);
-      await writeDatabase(database);
-    }
+    const deleteResult = await supabase
+      .from("saved_items")
+      .delete()
+      .eq("user_id", userId)
+      .eq("target_type", targetType)
+      .eq("target_id", targetId)
+      .eq("collection_label", normalizedCollectionLabel);
+    await throwIfSupabaseError(deleteResult.error, "Erro removendo favorito");
 
     return {
       collectionLabel: normalizedCollectionLabel,
@@ -2871,24 +3644,20 @@ export async function setSavedItem({
     };
   }
 
-  const nextRecord: SavedItemRecord = existingIndex >= 0
-    ? database.savedItems[existingIndex]
-    : {
-        collectionLabel: normalizedCollectionLabel,
-        createdAt: new Date().toISOString(),
-        id: `saved-${normalizedCollectionLabel}-${targetType}-${targetId}-${userId}`.replace(/[^a-zA-Z0-9_-]+/g, "-"),
-        targetId,
-        targetType,
-        userId
-      };
-
-  if (existingIndex >= 0) {
-    database.savedItems[existingIndex] = nextRecord;
-  } else {
-    database.savedItems.push(nextRecord);
-  }
-
-  await writeDatabase(database);
+  const nextRecord: SavedItemRecord = {
+    collectionLabel: normalizedCollectionLabel,
+    createdAt: new Date().toISOString(),
+    id: `saved-${normalizedCollectionLabel}-${targetType}-${targetId}-${userId}`.replace(/[^a-zA-Z0-9_-]+/g, "-"),
+    targetId,
+    targetType,
+    userId
+  };
+  const upsertResult = await supabase
+    .from("saved_items")
+    .upsert(savedItemToRow(nextRecord), {
+      onConflict: "user_id,target_type,target_id,collection_label"
+    });
+  await throwIfSupabaseError(upsertResult.error, "Erro salvando favorito");
 
   return {
     collectionLabel: normalizedCollectionLabel,
@@ -2943,11 +3712,25 @@ async function replaceCompletedLessonsUnsafe({
   status?: LessonWatchStatus;
   userId: string;
 }) {
-  const database = await readDatabase();
-  const currentIndex = database.lessonProgress.findIndex(
-    (record) => record.userId === userId && record.contentId === contentId
-  );
-  const currentRecord = currentIndex >= 0 ? database.lessonProgress[currentIndex] : null;
+  const supabase = getSupabaseAdminClient();
+  const currentResult = await supabase
+    .from("lesson_progress")
+    .select("completed_lesson_ids,content_id,lesson_reactions,lesson_watch_states,updated_at,user_id")
+    .eq("user_id", userId)
+    .eq("content_id", contentId)
+    .maybeSingle();
+  await throwIfSupabaseError(currentResult.error, "Erro lendo progresso da aula");
+  const currentRow = currentResult.data as LessonProgressRow | null;
+  const currentRecord: LessonProgressRecord | null = currentRow
+    ? {
+        completedLessonIds: currentRow.completed_lesson_ids,
+        contentId: currentRow.content_id,
+        lessonReactions: normalizeLessonReactions(currentRow.lesson_reactions),
+        lessonWatchStates: normalizeLessonWatchStates(currentRow.lesson_watch_states),
+        updatedAt: currentRow.updated_at,
+        userId: currentRow.user_id
+      }
+    : null;
   const uniqueLessonIds = Array.from(new Set(completedLessonIds ?? currentRecord?.completedLessonIds ?? []));
   const nextLessonWatchStates = normalizeLessonWatchStates(currentRecord?.lessonWatchStates);
 
@@ -3016,13 +3799,15 @@ async function replaceCompletedLessonsUnsafe({
     userId
   };
 
-  if (currentIndex >= 0) {
-    database.lessonProgress[currentIndex] = nextRecord;
-  } else {
-    database.lessonProgress.push(nextRecord);
-  }
-
-  await writeDatabase(database);
+  const upsertResult = await supabase.from("lesson_progress").upsert({
+    completed_lesson_ids: nextRecord.completedLessonIds,
+    content_id: nextRecord.contentId,
+    lesson_reactions: nextRecord.lessonReactions,
+    lesson_watch_states: nextRecord.lessonWatchStates,
+    updated_at: nextRecord.updatedAt,
+    user_id: nextRecord.userId
+  }, { onConflict: "user_id,content_id" });
+  await throwIfSupabaseError(upsertResult.error, "Erro salvando progresso da aula");
   return nextRecord;
 }
 

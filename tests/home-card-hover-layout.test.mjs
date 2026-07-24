@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 
 const rowSource = await readFile(new URL("../src/components/content-row.tsx", import.meta.url), "utf8");
 const cardSource = await readFile(new URL("../src/components/content-card.tsx", import.meta.url), "utf8");
@@ -8,10 +9,22 @@ const modalSource = await readFile(new URL("../src/components/content-details-mo
 const pageSource = await readFile(new URL("../src/app/page.tsx", import.meta.url), "utf8");
 const favoritesPageSource = await readFile(new URL("../src/app/favoritos/page.tsx", import.meta.url), "utf8");
 const favoritesExperienceSource = await readFile(new URL("../src/components/favorites-experience.tsx", import.meta.url), "utf8");
+const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
 const platformStoreSource = await readFile(new URL("../src/server/db/platform-store.ts", import.meta.url), "utf8");
 const savedButtonSource = await readFile(new URL("../src/components/saved-item-button.tsx", import.meta.url), "utf8");
 const adminDashboardSource = await readFile(new URL("../src/components/admin-dashboard.tsx", import.meta.url), "utf8");
+const carouselNavigationSource = await readFile(new URL("../src/components/carousel-navigation.tsx", import.meta.url), "utf8");
 const cssSource = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
+const hoverLayoutSource = await readFile(new URL("../src/lib/home-row-hover-layout.ts", import.meta.url), "utf8");
+const hoverLayoutJavaScript = ts.transpileModule(hoverLayoutSource, {
+  compilerOptions: {
+    module: ts.ModuleKind.ESNext,
+    target: ts.ScriptTarget.ES2022
+  }
+}).outputText;
+const { getHomeRowHoverEdgeIndexes } = await import(
+  `data:text/javascript;base64,${Buffer.from(hoverLayoutJavaScript).toString("base64")}`
+);
 
 test("home vertical card rows use tighter spacing", () => {
   assert.match(rowSource, /const rowGap = variant === "vertical" \? "gap-\[0\.75rem\]" : "gap-\[1\.5rem\]";/);
@@ -23,11 +36,31 @@ test("home hides sections that have no resolved items", () => {
   assert.match(rowSource, /if \(itemsWithSavedState\.length === 0\) \{\s*return null;/);
 });
 
-test("home carousel arrows appear only when the row overflows horizontally", () => {
+test("home carousel uses Netflix-style edge arrows and page indicators only with overflow", () => {
   assert.match(rowSource, /const \[hasHorizontalOverflow, setHasHorizontalOverflow\] = useState\(false\);/);
-  assert.match(rowSource, /setHasHorizontalOverflow\(maxScrollLeft > 4\);/);
-  assert.match(rowSource, /\{hasHorizontalOverflow \? \(\s*<div className="flex shrink-0 items-center gap-2">/);
-  assert.match(rowSource, /\) : null\}\s*<\/div>\s*<div\s*className=\{`scrollbar-hidden flex scroll-smooth/);
+  assert.match(rowSource, /setHasHorizontalOverflow\(metrics\.hasOverflow\);/);
+  assert.match(rowSource, /<CarouselPaginationIndicator/);
+  assert.match(rowSource, /<CarouselEdgeControls/);
+  assert.match(rowSource, /<div className="relative">\s*<div\s*className=\{`scrollbar-hidden flex scroll-smooth/);
+  assert.doesNotMatch(rowSource, /import \{[^}]*ChevronLeft/);
+  assert.match(carouselNavigationSource, /export function getCarouselMetrics/);
+  assert.match(carouselNavigationSource, /pagePositions\.push\(maxScrollLeft\)/);
+  assert.match(carouselNavigationSource, /export function CarouselPaginationIndicator/);
+  assert.match(carouselNavigationSource, /pagina \$\{currentPage \+ 1\} de \$\{pageCount\}/);
+  assert.match(carouselNavigationSource, /export function CarouselEdgeControls/);
+  assert.match(carouselNavigationSource, /carousel-edge-fade-left/);
+  assert.match(carouselNavigationSource, /carousel-edge-fade-right/);
+  assert.match(carouselNavigationSource, /verticalInset: "compact" \| "home" \| "internal"/);
+  assert.match(carouselNavigationSource, /verticalInset === "home"\s*\? "inset-y-4 sm:inset-y-14"/);
+  assert.match(carouselNavigationSource, /verticalInset === "compact"\s*\? "inset-y-3 sm:inset-y-6"/);
+  assert.match(rowSource, /verticalInset="home"/);
+  assert.match(rowSource, /verticalInset=\{variant === "vertical" \? "home" : "compact"\}/);
+  assert.doesNotMatch(carouselNavigationSource, /carousel-edge-button[^"\n]*hover:bg-black/);
+  assert.match(cssSource, /\.carousel-edge-fade-left \{\s*background: linear-gradient\(90deg/);
+  assert.match(cssSource, /\.carousel-edge-fade-right \{\s*background: linear-gradient\(270deg/);
+  assert.match(cssSource, /\.carousel-edge-fade:has\(\+ \.carousel-edge-button:hover\)[\s\S]*?filter: brightness\(0\.72\);[\s\S]*?transform: scaleX\(1\.08\);/);
+  assert.match(cssSource, /\.carousel-edge-button-left:hover svg[\s\S]*?translateX\(-3px\) scale\(1\.24\)/);
+  assert.match(cssSource, /\.carousel-edge-button-right:hover svg[\s\S]*?translateX\(3px\) scale\(1\.24\)/);
 });
 
 test("home can show an access card and intermediate modules for a selected course", () => {
@@ -66,17 +99,30 @@ test("home vertical card hover expands the card without inner image zoom", () =>
 test("home vertical cards grow inward only at carousel edges", () => {
   assert.match(rowSource, /function syncHomeRowHoverEdges/);
   assert.match(rowSource, /querySelectorAll<HTMLElement>\("\[data-home-row-card\]"\)/);
+  assert.match(rowSource, /getHomeRowHoverEdgeIndexes/);
   assert.match(rowSource, /setAttribute\("data-hover-edge", "left"\)/);
   assert.match(rowSource, /setAttribute\("data-hover-edge", "right"\)/);
+  assert.match(rowSource, /removeAttribute\("data-hover-reveals-next"\)/);
+  assert.match(rowSource, /removeAttribute\("data-hover-reveals-previous"\)/);
   assert.match(rowSource, /removeProperty\("--home-row-card-hover-shift-x"\)/);
   assert.match(rowSource, /removeProperty\("--home-row-card-hover-logo-shift-x"\)/);
+  assert.match(rowSource, /removeProperty\("--home-row-card-hover-preview-shift-x"\)/);
   assert.match(rowSource, /leftHiddenOffset = Math\.max\(leftBoundary - leftEdgeRect\.left, 0\)/);
   assert.match(rowSource, /rightHiddenOffset = Math\.max\(rightEdgeRect\.right - rightBoundary, 0\)/);
   assert.match(rowSource, /homeRowCardHoverScale = 1\.14/);
-  assert.match(rowSource, /rightLogoShiftX = Math\.round\(\(-rightHiddenOffset - rightEdgeRect\.width \* \(homeRowCardHoverScale - 1\)\) \* 100\) \/ 100/);
-  assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{leftHiddenOffset\}px`\)/);
-  assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{leftHiddenOffset\}px`\)/);
-  assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{-rightHiddenOffset\}px`\)/);
+  assert.match(rowSource, /const previousCard = leftEdgeIndex > 0 \? cards\[leftEdgeIndex - 1\] : undefined/);
+  assert.match(rowSource, /if \(previousCard && leftHiddenOffset > edgeTolerance\)/);
+  assert.match(rowSource, /previewShiftX = Math\.round\(\(leftEdgeRect\.left - previousCardRect\.left\) \* 100\) \/ 100/);
+  assert.match(rowSource, /setAttribute\("data-hover-reveals-previous", "true"\)/);
+  assert.match(rowSource, /const nextCard = rightEdgeIndex >= 0 \? cards\[rightEdgeIndex \+ 1\] : undefined/);
+  assert.match(rowSource, /if \(nextCard && rightHiddenOffset > edgeTolerance\)/);
+  assert.match(rowSource, /previewShiftX = Math\.round\(\(rightEdgeRect\.left - nextCardRect\.left\) \* 100\) \/ 100/);
+  assert.match(rowSource, /setAttribute\("data-hover-reveals-next", "true"\)/);
+  assert.match(rowSource, /setProperty\("--home-row-card-hover-preview-shift-x", `\$\{previewShiftX\}px`\)/);
+  assert.match(rowSource, /rightLogoShiftX = Math\.round\(\(rightSurfaceShiftX - rightEdgeRect\.width \* \(homeRowCardHoverScale - 1\)\) \* 100\) \/ 100/);
+  assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{leftSurfaceShiftX\}px`\)/);
+  assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{leftSurfaceShiftX\}px`\)/);
+  assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{rightSurfaceShiftX\}px`\)/);
   assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{rightLogoShiftX\}px`\)/);
   assert.match(cardSource, /data-home-row-card/);
   assert.doesNotMatch(cardSource, /home-row-watch-card/);
@@ -85,6 +131,50 @@ test("home vertical cards grow inward only at carousel edges", () => {
   assert.match(cssSource, /\[data-home-row-card\]\[data-hover-edge="right"\] \.home-cover-card-surface \{\s*transform-origin: right center;/);
   assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="left"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, 0px\), -27px, 0\);/);
   assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, var\(--home-row-card-hover-shift-x, 0px\)\), -27px, 0\);/);
+  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\[data-hover-reveals-next="true"\]\.group:hover \+ \.home-row-cover-card \{\s*transform: translate3d\(var\(--home-row-card-hover-preview-shift-x, 0px\), 0, 0\);/);
+  assert.match(cssSource, /\.home-row-cover-card:has\(\+ \.home-row-cover-card\[data-hover-edge="left"\]\[data-hover-reveals-previous="true"\]\.group:hover\) \{\s*transform: translate3d\(var\(--home-row-card-hover-preview-shift-x, 0px\), 0, 0\);/);
+});
+
+test("a short row with two cards keeps the second card centered on hover", () => {
+  const edgeIndexes = getHomeRowHoverEdgeIndexes({
+    cardBounds: [
+      { left: 48, right: 328 },
+      { left: 340, right: 620 }
+    ],
+    edgeTolerance: 2,
+    leftBoundary: 48,
+    rightBoundary: 1232
+  });
+
+  assert.equal(edgeIndexes.leftEdgeIndex, 0);
+  assert.equal(edgeIndexes.rightEdgeIndex, undefined);
+});
+
+test("a card that reaches the visual right edge still grows inward", () => {
+  const edgeIndexes = getHomeRowHoverEdgeIndexes({
+    cardBounds: [
+      { left: 48, right: 328 },
+      { left: 964, right: 1244 }
+    ],
+    edgeTolerance: 2,
+    leftBoundary: 48,
+    rightBoundary: 1232
+  });
+
+  assert.equal(edgeIndexes.leftEdgeIndex, 0);
+  assert.equal(edgeIndexes.rightEdgeIndex, 1);
+});
+
+test("home edge previews keep hover stable while crossing either visual gap", () => {
+  assert.match(cardSource, /export function HomeRowHoverBridge/);
+  assert.match(cardSource, /data-home-row-hover-bridge/);
+  assert.match(cardSource, /onClickCapture=\{preventHomeRowHoverBridgeClick\}/);
+  assert.match(rowSource, /<HomeRowHoverBridge \/>/);
+  assert.match(rowSource, /onClickCapture=\{preventHomeRowHoverBridgeClick\}/);
+  assert.match(cardSource, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);/);
+  assert.match(cssSource, /\.home-row-card-hover-bridge \{\s*display: none;/);
+  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="left"\]\[data-hover-reveals-previous="true"\]\.group:hover > \.home-row-card-hover-bridge \{\s*left: 100%;\s*right: calc\(100% - var\(--home-row-card-hover-shift-x, 0px\)\);/);
+  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\[data-hover-reveals-next="true"\]\.group:hover > \.home-row-card-hover-bridge \{\s*left: calc\(100% \+ var\(--home-row-card-hover-shift-x, 0px\)\);\s*right: 100%;/);
 });
 
 test("home cards prefetch content routes before click navigation", () => {
@@ -193,6 +283,10 @@ test("content cards and modal persist saved items", () => {
   assert.match(savedButtonSource, /savedRef\.current/);
   assert.match(savedButtonSource, /dispatchSavedItemChanged\(\{\s*saved: nextSaved,/);
   assert.match(savedButtonSource, /requestSavedItemSync\(\{/);
+  assert.match(savedButtonSource, /keepalive: true/);
+  assert.match(savedButtonSource, /export async function flushPendingSavedItemChanges/);
+  assert.match(savedButtonSource, /className=\{cn\("relative", className,/);
+  assert.match(appShellSource, /await flushPendingSavedItemChanges\(\);\s*router\.push\(href\);/);
   assert.doesNotMatch(savedButtonSource, /disabled=\{pending\}/);
   assert.doesNotMatch(savedButtonSource, /disabled:cursor-wait/);
   assert.match(platformStoreSource, /applySavedStateToItems/);
@@ -207,4 +301,30 @@ test("favorites page lists persisted saved items", () => {
   assert.match(favoritesExperienceSource, /Aulas/);
   assert.match(platformStoreSource, /getSavedContentItems/);
   assert.match(platformStoreSource, /getSavedLessonItems/);
+});
+
+test("favorite lesson cards prefer the video thumbnail and center the play action", () => {
+  const favoriteLessonCardSource = favoritesExperienceSource.match(
+    /function FavoriteLessonCard[\s\S]*?\n\}/u
+  )?.[0] ?? "";
+
+  assert.match(
+    platformStoreSource,
+    /image: getVideoThumbnailUrl\(lesson\.video\) \|\| lesson\.image \|\| courseModule\.image/
+  );
+  assert.match(favoriteLessonCardSource, /pointer-events-none absolute inset-0 grid place-items-center/);
+  assert.match(favoriteLessonCardSource, /continue-watching-card-image/);
+  assert.doesNotMatch(favoriteLessonCardSource, /hover:-translate-y-1/);
+  assert.doesNotMatch(favoriteLessonCardSource, /absolute left-4 top-4 grid h-11 w-11/);
+});
+
+test("favorite cards reuse the faster continue-watching image zoom without moving the card", () => {
+  const favoriteCardsSource = favoritesExperienceSource.match(
+    /function FavoriteContentCard[\s\S]*?export function FavoritesExperience/u
+  )?.[0] ?? "";
+  const sharedImageEffects = favoriteCardsSource.match(/continue-watching-card-image/g) ?? [];
+
+  assert.doesNotMatch(favoriteCardsSource, /hover:-translate-y-1/);
+  assert.equal(sharedImageEffects.length, 3);
+  assert.doesNotMatch(favoriteCardsSource, /duration-700 group-hover:scale-\[1\.035\]/);
 });

@@ -2,9 +2,9 @@
 
 import { Bell, ChevronDown, Lock, Play, ShoppingCart } from "lucide-react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { useRef } from "react";
 import { cardActionClassName } from "@/components/card-action-style";
+import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { SavedItemButton } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
@@ -19,6 +19,19 @@ type CardProps = {
   onOpenDetails?: (item: ContentItem) => void;
 };
 
+export function preventHomeRowHoverBridgeClick(event: MouseEvent<HTMLElement>) {
+  if (!(event.target as HTMLElement).closest("[data-home-row-hover-bridge]")) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+export function HomeRowHoverBridge() {
+  return <span aria-hidden="true" className="home-row-card-hover-bridge" data-home-row-hover-bridge />;
+}
+
 function getContentHref(item: ContentItem, accessPreviewMode?: AccessPreviewMode) {
   return withAccessPreviewParam(item.href ?? `/conteudo/${item.id}`, accessPreviewMode);
 }
@@ -32,7 +45,7 @@ function usesTouchCardMode() {
 }
 
 export function ContinueWatchingCard({ accessPreviewMode, item }: CardProps) {
-  const router = useRouter();
+  const router = useNavigationFeedbackRouter();
   const contentHref = getContentHref(item, accessPreviewMode);
 
   function prefetchContentPage() {
@@ -77,7 +90,7 @@ export function ContinueWatchingCard({ accessPreviewMode, item }: CardProps) {
 }
 
 export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: CardProps) {
-  const router = useRouter();
+  const router = useNavigationFeedbackRouter();
   const touchStateRef = useRef({
     moved: false,
     startX: 0,
@@ -192,6 +205,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
       className="home-cover-card home-row-cover-card group relative aspect-[720/1040] w-[11.75rem] shrink-0 cursor-pointer overflow-visible hover:z-[120] sm:w-[15rem] md:w-[18.75rem] lg:w-[21.875rem] xl:w-[24.875rem]"
       data-home-row-card
       onClick={openCardDestination}
+      onClickCapture={preventHomeRowHoverBridgeClick}
       onFocus={prefetchContentPage}
       onKeyDown={handleCardKeyDown}
       onMouseEnter={prefetchContentPage}
@@ -277,6 +291,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
           width={306}
         />
       </div>
+      <HomeRowHoverBridge />
     </article>
   );
 }

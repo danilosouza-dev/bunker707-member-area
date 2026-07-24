@@ -3,18 +3,22 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const sectionSource = await readFile(new URL("../src/components/content-structure-section.tsx", import.meta.url), "utf8");
+const carouselNavigationSource = await readFile(new URL("../src/components/carousel-navigation.tsx", import.meta.url), "utf8");
 const cssSource = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
 
-test("internal poster cards render as a single horizontal row with conditional arrow controls", () => {
+test("internal poster cards render as one row with edge controls and a page indicator", () => {
   assert.match(sectionSource, /function InternalPosterRow/);
   assert.match(sectionSource, /overflow-x-auto/);
   assert.match(sectionSource, /scrollBy/);
-  assert.match(sectionSource, /ChevronLeft/);
-  assert.match(sectionSource, /ChevronRight/);
+  assert.match(sectionSource, /CarouselEdgeControls/);
+  assert.match(sectionSource, /CarouselPaginationIndicator/);
+  assert.match(sectionSource, /getCarouselMetrics/);
   assert.match(sectionSource, /const \[hasHorizontalOverflow, setHasHorizontalOverflow\] = useState\(false\);/);
-  assert.match(sectionSource, /setHasHorizontalOverflow\(maxScrollLeft > 4\);/);
-  assert.match(sectionSource, /\{hasHorizontalOverflow \? \(\s*<div className="flex shrink-0 items-center gap-2">/);
-  assert.match(sectionSource, /\) : null\}\s*<\/div>\s*<div\s*className="scrollbar-hidden flex scroll-smooth/);
+  assert.match(sectionSource, /setHasHorizontalOverflow\(metrics\.hasOverflow\);/);
+  assert.match(sectionSource, /<div className="relative">\s*<div\s*className="scrollbar-hidden flex scroll-smooth/);
+  assert.match(sectionSource, /verticalInset="internal"/);
+  assert.doesNotMatch(sectionSource, /import \{[^}]*ChevronLeft/);
+  assert.match(carouselNavigationSource, /carousel-edge-fade/);
   assert.doesNotMatch(sectionSource, /function InternalPosterGrid/);
   assert.doesNotMatch(sectionSource, /flex flex-wrap gap-\[0\.75rem\]/);
 });
@@ -25,7 +29,7 @@ test("internal poster card hover keeps the card stable and zooms only the image"
 });
 
 test("internal poster cards prefetch lesson destinations on intent", () => {
-  assert.match(sectionSource, /useRouter/);
+  assert.match(sectionSource, /useNavigationFeedbackRouter/);
   assert.match(sectionSource, /router\.prefetch\(href\)/);
   assert.match(sectionSource, /onMouseEnter=\{prefetchPosterDestination\}/);
   assert.match(sectionSource, /onFocus=\{prefetchPosterDestination\}/);

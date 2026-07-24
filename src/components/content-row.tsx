@@ -1,14 +1,25 @@
 "use client";
 
-import { Bell, ChevronLeft, ChevronRight, Lock, Play, ShoppingCart } from "lucide-react";
+import { Bell, Lock, Play, ShoppingCart } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cardActionClassName } from "@/components/card-action-style";
+import {
+  CarouselEdgeControls,
+  CarouselPaginationIndicator,
+  getCarouselMetrics
+} from "@/components/carousel-navigation";
 import { ContentDetailsModal } from "@/components/content-details-modal";
-import { ContinueWatchingCard, VerticalCoverCard } from "@/components/content-card";
+import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
+import {
+  ContinueWatchingCard,
+  HomeRowHoverBridge,
+  preventHomeRowHoverBridgeClick,
+  VerticalCoverCard
+} from "@/components/content-card";
 import { savedItemChangedEvent } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
+import { getHomeRowHoverEdgeIndexes } from "@/lib/home-row-hover-layout";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getSavedItemKey, getSavedTargetTypeForContentKind } from "@/lib/saved-items";
@@ -54,8 +65,11 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
 
   for (const card of cards) {
     card.removeAttribute("data-hover-edge");
+    card.removeAttribute("data-hover-reveals-next");
+    card.removeAttribute("data-hover-reveals-previous");
     card.style.removeProperty("--home-row-card-hover-shift-x");
     card.style.removeProperty("--home-row-card-hover-logo-shift-x");
+    card.style.removeProperty("--home-row-card-hover-preview-shift-x");
   }
 
   if (cards.length === 0) {
@@ -67,46 +81,57 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
   const leftBoundary = rowRect.left + (Number.parseFloat(rowStyle.paddingLeft) || 0);
   const rightBoundary = rowRect.right - (Number.parseFloat(rowStyle.paddingRight) || 0);
   const edgeTolerance = 2;
-  const visibleCards = cards.filter((card) => {
-    const cardRect = card.getBoundingClientRect();
-
-    return cardRect.right > leftBoundary + edgeTolerance && cardRect.left < rightBoundary - edgeTolerance;
+  const cardBounds = cards.map((card) => card.getBoundingClientRect());
+  const { leftEdgeIndex, rightEdgeIndex } = getHomeRowHoverEdgeIndexes({
+    cardBounds,
+    edgeTolerance,
+    leftBoundary,
+    rightBoundary
   });
-
-  const leftEdgeCard =
-    visibleCards.find((card) => card.getBoundingClientRect().left <= leftBoundary + edgeTolerance) ??
-    (row.scrollLeft <= edgeTolerance ? cards[0] : undefined);
-  let rightEdgeCard: HTMLElement | undefined;
-
-  for (let index = visibleCards.length - 1; index >= 0; index -= 1) {
-    const card = visibleCards[index];
-
-    if (card.getBoundingClientRect().right >= rightBoundary - edgeTolerance) {
-      rightEdgeCard = card;
-      break;
-    }
-  }
-
-  if (!rightEdgeCard && row.scrollWidth - row.clientWidth - row.scrollLeft <= edgeTolerance) {
-    rightEdgeCard = cards[cards.length - 1];
-  }
+  const leftEdgeCard = leftEdgeIndex === undefined ? undefined : cards[leftEdgeIndex];
+  const rightEdgeCard = rightEdgeIndex === undefined ? undefined : cards[rightEdgeIndex];
 
   if (leftEdgeCard) {
     const leftEdgeRect = leftEdgeCard.getBoundingClientRect();
     const leftHiddenOffset = Math.max(leftBoundary - leftEdgeRect.left, 0);
+    const leftEdgeIndex = cards.indexOf(leftEdgeCard);
+    const previousCard = leftEdgeIndex > 0 ? cards[leftEdgeIndex - 1] : undefined;
+    let leftSurfaceShiftX = leftHiddenOffset;
+
+    if (previousCard && leftHiddenOffset > edgeTolerance) {
+      const previousCardRect = previousCard.getBoundingClientRect();
+      const previewShiftX = Math.round((leftEdgeRect.left - previousCardRect.left) * 100) / 100;
+
+      leftSurfaceShiftX = previewShiftX;
+      leftEdgeCard.setAttribute("data-hover-reveals-previous", "true");
+      previousCard.style.setProperty("--home-row-card-hover-preview-shift-x", `${previewShiftX}px`);
+    }
 
     leftEdgeCard.setAttribute("data-hover-edge", "left");
-    leftEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${leftHiddenOffset}px`);
-    leftEdgeCard.style.setProperty("--home-row-card-hover-logo-shift-x", `${leftHiddenOffset}px`);
+    leftEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${leftSurfaceShiftX}px`);
+    leftEdgeCard.style.setProperty("--home-row-card-hover-logo-shift-x", `${leftSurfaceShiftX}px`);
   }
 
   if (rightEdgeCard && rightEdgeCard !== leftEdgeCard) {
     const rightEdgeRect = rightEdgeCard.getBoundingClientRect();
     const rightHiddenOffset = Math.max(rightEdgeRect.right - rightBoundary, 0);
-    const rightLogoShiftX = Math.round((-rightHiddenOffset - rightEdgeRect.width * (homeRowCardHoverScale - 1)) * 100) / 100;
+    const rightEdgeIndex = cards.indexOf(rightEdgeCard);
+    const nextCard = rightEdgeIndex >= 0 ? cards[rightEdgeIndex + 1] : undefined;
+    let rightSurfaceShiftX = -rightHiddenOffset;
+
+    if (nextCard && rightHiddenOffset > edgeTolerance) {
+      const nextCardRect = nextCard.getBoundingClientRect();
+      const previewShiftX = Math.round((rightEdgeRect.left - nextCardRect.left) * 100) / 100;
+
+      rightSurfaceShiftX = previewShiftX;
+      rightEdgeCard.setAttribute("data-hover-reveals-next", "true");
+      nextCard.style.setProperty("--home-row-card-hover-preview-shift-x", `${previewShiftX}px`);
+    }
+
+    const rightLogoShiftX = Math.round((rightSurfaceShiftX - rightEdgeRect.width * (homeRowCardHoverScale - 1)) * 100) / 100;
 
     rightEdgeCard.setAttribute("data-hover-edge", "right");
-    rightEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${-rightHiddenOffset}px`);
+    rightEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${rightSurfaceShiftX}px`);
     rightEdgeCard.style.setProperty("--home-row-card-hover-logo-shift-x", `${rightLogoShiftX}px`);
   }
 }
@@ -158,6 +183,7 @@ function CourseModuleHomeCard({
           </div>
         </div>
       </div>
+      <HomeRowHoverBridge />
     </>
   );
   const className =
@@ -172,6 +198,7 @@ function CourseModuleHomeCard({
         className={className}
         data-home-row-card
         onClick={onOpenCourseDetails}
+        onClickCapture={preventHomeRowHoverBridgeClick}
         type="button"
       >
         {content}
@@ -180,7 +207,14 @@ function CourseModuleHomeCard({
   }
 
   return (
-    <Link aria-label={`Abrir ${module.title}`} className={className} data-home-row-card href={href} prefetch>
+    <Link
+      aria-label={`Abrir ${module.title}`}
+      className={className}
+      data-home-row-card
+      href={href}
+      onClickCapture={preventHomeRowHoverBridgeClick}
+      prefetch
+    >
       {content}
     </Link>
   );
@@ -194,11 +228,14 @@ export function CourseModulesHomeSection({
   subtitle,
   title
 }: CourseModulesHomeSectionProps) {
-  const router = useRouter();
+  const router = useNavigationFeedbackRouter();
+  const { startNavigation } = useNavigationFeedback();
   const rowRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
   const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [pageCount, setPageCount] = useState(1);
   const [detailsItem, setDetailsItem] = useState<ContentItem | null>(null);
 
   const updateScrollState = useCallback(() => {
@@ -208,13 +245,17 @@ export function CourseModulesHomeSection({
       return;
     }
 
-    const maxScrollLeft = Math.max(row.scrollWidth - row.clientWidth, 0);
-    const hasOverflow = maxScrollLeft > 4;
+    const metrics = getCarouselMetrics(row, {
+      minScrollDistance: 280,
+      scrollFraction: 0.72
+    });
 
     syncHomeRowHoverEdges(row);
-    setHasHorizontalOverflow(maxScrollLeft > 4);
-    setCanScrollLeft(hasOverflow && row.scrollLeft > 4);
-    setCanScrollRight(hasOverflow && row.scrollLeft < maxScrollLeft - 4);
+    setHasHorizontalOverflow(metrics.hasOverflow);
+    setCanScrollLeft(metrics.canScrollLeft);
+    setCanScrollRight(metrics.canScrollRight);
+    setCurrentPage(metrics.currentPage);
+    setPageCount(metrics.pageCount);
   }, []);
 
   useEffect(() => {
@@ -249,10 +290,13 @@ export function CourseModulesHomeSection({
       return;
     }
 
-    const distance = Math.max(280, row.clientWidth * 0.72);
+    const { scrollDistance } = getCarouselMetrics(row, {
+      minScrollDistance: 280,
+      scrollFraction: 0.72
+    });
     row.scrollBy({
       behavior: "smooth",
-      left: direction === "right" ? distance : -distance
+      left: direction === "right" ? scrollDistance : -scrollDistance
     });
 
     window.setTimeout(updateScrollState, 420);
@@ -285,6 +329,7 @@ export function CourseModulesHomeSection({
       return;
     }
 
+    startNavigation(course.purchaseUrl, { message: "Abrindo página de compra..." });
     window.location.href = course.purchaseUrl;
   }
 
@@ -357,41 +402,37 @@ export function CourseModulesHomeSection({
           </div>
         </div>
         {hasHorizontalOverflow ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              aria-label={`Ver modulos anteriores de ${title}`}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
-              disabled={!canScrollLeft}
-              onClick={() => scrollRow("left")}
-              type="button"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              aria-label={`Ver proximos modulos de ${title}`}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
-              disabled={!canScrollRight}
-              onClick={() => scrollRow("right")}
-              type="button"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
+          <CarouselPaginationIndicator
+            currentPage={currentPage}
+            label={`Posicao dos modulos de ${title}`}
+            pageCount={pageCount}
+          />
         ) : null}
       </div>
-      <div
-        className="scrollbar-hidden -my-4 flex scroll-smooth gap-[1.5rem] overflow-x-auto overflow-y-visible overscroll-x-contain px-5 py-4 sm:-my-14 sm:px-8 sm:py-14 lg:px-12"
-        ref={rowRef}
-      >
-        {modules.map((module) => (
-          <CourseModuleHomeCard
-            accessPreviewMode={accessPreviewMode}
-            course={course}
-            key={module.id}
-            module={module}
-            onOpenCourseDetails={openCourseDetails}
-          />
-        ))}
+      <div className="relative">
+        <div
+          className="scrollbar-hidden -my-4 flex scroll-smooth gap-[1.5rem] overflow-x-auto overflow-y-visible overscroll-x-contain px-5 py-4 sm:-my-14 sm:px-8 sm:py-14 lg:px-12"
+          ref={rowRef}
+        >
+          {modules.map((module) => (
+            <CourseModuleHomeCard
+              accessPreviewMode={accessPreviewMode}
+              course={course}
+              key={module.id}
+              module={module}
+              onOpenCourseDetails={openCourseDetails}
+            />
+          ))}
+        </div>
+        <CarouselEdgeControls
+          canScrollLeft={canScrollLeft}
+          canScrollRight={canScrollRight}
+          nextLabel={`Ver proximos modulos de ${title}`}
+          onNext={() => scrollRow("right")}
+          onPrevious={() => scrollRow("left")}
+          previousLabel={`Ver modulos anteriores de ${title}`}
+          verticalInset="home"
+        />
       </div>
       <ContentDetailsModal
         accessPreviewMode={accessPreviewMode}
@@ -412,6 +453,8 @@ export function ContentRow({ accessPreviewMode, title, subtitle, items, modalStr
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
   const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [pageCount, setPageCount] = useState(1);
   const [savedOverrides, setSavedOverrides] = useState<Record<string, boolean>>({});
   const rowGap = variant === "vertical" ? "gap-[0.75rem]" : "gap-[1.5rem]";
   const scrollPadding = variant === "vertical" ? "-my-4 py-4 sm:-my-14 sm:py-14" : "-my-3 py-3 sm:-my-6 sm:py-6";
@@ -438,13 +481,17 @@ export function ContentRow({ accessPreviewMode, title, subtitle, items, modalStr
       return;
     }
 
-    const maxScrollLeft = Math.max(row.scrollWidth - row.clientWidth, 0);
-    const hasOverflow = maxScrollLeft > 4;
+    const metrics = getCarouselMetrics(row, {
+      minScrollDistance: 320,
+      scrollFraction: 0.78
+    });
 
     syncHomeRowHoverEdges(row);
-    setHasHorizontalOverflow(maxScrollLeft > 4);
-    setCanScrollLeft(hasOverflow && row.scrollLeft > 4);
-    setCanScrollRight(hasOverflow && row.scrollLeft < maxScrollLeft - 4);
+    setHasHorizontalOverflow(metrics.hasOverflow);
+    setCanScrollLeft(metrics.canScrollLeft);
+    setCanScrollRight(metrics.canScrollRight);
+    setCurrentPage(metrics.currentPage);
+    setPageCount(metrics.pageCount);
   }, []);
 
   useEffect(() => {
@@ -500,10 +547,13 @@ export function ContentRow({ accessPreviewMode, title, subtitle, items, modalStr
       return;
     }
 
-    const distance = Math.max(320, row.clientWidth * 0.78);
+    const { scrollDistance } = getCarouselMetrics(row, {
+      minScrollDistance: 320,
+      scrollFraction: 0.78
+    });
     row.scrollBy({
       behavior: "smooth",
-      left: direction === "right" ? distance : -distance
+      left: direction === "right" ? scrollDistance : -scrollDistance
     });
 
     window.setTimeout(updateScrollState, 420);
@@ -517,39 +567,35 @@ export function ContentRow({ accessPreviewMode, title, subtitle, items, modalStr
           {subtitle ? <p className="mt-1 text-sm text-zinc-400">{subtitle}</p> : null}
         </div>
         {hasHorizontalOverflow ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              aria-label={`Ver cards anteriores de ${title}`}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
-              disabled={!canScrollLeft}
-              onClick={() => scrollRow("left")}
-              type="button"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              aria-label={`Ver proximos cards de ${title}`}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
-              disabled={!canScrollRight}
-              onClick={() => scrollRow("right")}
-              type="button"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
+          <CarouselPaginationIndicator
+            currentPage={currentPage}
+            label={`Posicao do carrossel ${title}`}
+            pageCount={pageCount}
+          />
         ) : null}
       </div>
-      <div
-        className={`scrollbar-hidden flex scroll-smooth ${rowGap} overflow-x-auto overflow-y-visible overscroll-x-contain px-5 sm:px-8 lg:px-12 ${scrollPadding}`}
-        ref={rowRef}
-      >
-        {itemsWithSavedState.map((item) => (
-          variant === "continue" ? (
-            <ContinueWatchingCard accessPreviewMode={accessPreviewMode} item={item} key={item.id} />
-          ) : (
-            <VerticalCoverCard accessPreviewMode={accessPreviewMode} item={item} key={item.id} onOpenDetails={setSelectedItem} />
-          )
-        ))}
+      <div className="relative">
+        <div
+          className={`scrollbar-hidden flex scroll-smooth ${rowGap} overflow-x-auto overflow-y-visible overscroll-x-contain px-5 sm:px-8 lg:px-12 ${scrollPadding}`}
+          ref={rowRef}
+        >
+          {itemsWithSavedState.map((item) => (
+            variant === "continue" ? (
+              <ContinueWatchingCard accessPreviewMode={accessPreviewMode} item={item} key={item.id} />
+            ) : (
+              <VerticalCoverCard accessPreviewMode={accessPreviewMode} item={item} key={item.id} onOpenDetails={setSelectedItem} />
+            )
+          ))}
+        </div>
+        <CarouselEdgeControls
+          canScrollLeft={canScrollLeft}
+          canScrollRight={canScrollRight}
+          nextLabel={`Ver proximos cards de ${title}`}
+          onNext={() => scrollRow("right")}
+          onPrevious={() => scrollRow("left")}
+          previousLabel={`Ver cards anteriores de ${title}`}
+          verticalInset={variant === "vertical" ? "home" : "compact"}
+        />
       </div>
       <ContentDetailsModal
         accessPreviewMode={accessPreviewMode}

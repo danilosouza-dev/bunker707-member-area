@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/app-shell";
-import { ContentRow, CourseModulesHomeSection } from "@/components/content-row";
+import { ContentRow } from "@/components/content-row";
 import { HeroSection } from "@/components/hero-section";
+import { FeaturedStructureHomeSection } from "@/components/featured-structure-home-section";
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { getAppShellData, getHomePageData } from "@/server/db/platform-store";
@@ -33,14 +34,10 @@ export default async function Home({ searchParams }: HomeProps) {
         {homeRows.map((row) => {
           if (row.variant === "course_modules" && row.course && row.modules) {
             return (
-              <CourseModulesHomeSection
+              <FeaturedStructureHomeSection
                 accessPreviewMode={accessPreviewMode}
-                course={row.course}
                 key={row.id}
-                lockedActionMode={row.lockedActionMode}
-                modules={row.modules}
-                subtitle={row.subtitle}
-                title={row.title}
+                row={row}
               />
             );
           }
