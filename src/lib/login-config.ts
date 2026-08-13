@@ -115,7 +115,7 @@ const baseLoginPageConfig: LoginPageConfig = {
   panelTone: "dark",
   brandName: "Bunker707",
   logo: {
-    src: "/brand/logo-bunker.png",
+    src: "/brand/logo-bunker.svg",
     alt: "Bunker707"
   },
   visual: {

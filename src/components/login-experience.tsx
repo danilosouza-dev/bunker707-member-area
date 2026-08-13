@@ -10,8 +10,8 @@ import {
   Mail
 } from "lucide-react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
+import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import type { LoginPageConfig, LoginProvider } from "@/lib/login-config";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -19,7 +19,6 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 type LoginExperienceProps = {
   authConfigured: boolean;
   config: LoginPageConfig;
-  localAuthEnabled: boolean;
   redirectTo?: string;
 };
 
@@ -141,8 +140,8 @@ async function getPostLoginRedirectPath(userMetadata: unknown, safeRedirectPath:
   return safeRedirectPath;
 }
 
-function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }: LoginExperienceProps) {
-  const router = useRouter();
+function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceProps) {
+  const router = useNavigationFeedbackRouter();
   const safeRedirectPath = getSafeRedirectPath(redirectTo);
   const [activeProvider, setActiveProvider] = useState<LoginProvider | null>(null);
   const [email, setEmail] = useState("");
@@ -152,7 +151,7 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const tone = panelToneClasses[config.panelTone];
-  const canSubmit = authConfigured || localAuthEnabled;
+  const canSubmit = authConfigured;
 
   useEffect(() => {
     if (!authConfigured) {
@@ -208,30 +207,6 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
     setNoticeMessage("");
 
     if (!authConfigured) {
-      if (localAuthEnabled) {
-        setSubmitting(true);
-
-        try {
-          const response = await fetch("/api/auth/local-login", {
-            method: "POST"
-          });
-
-          if (!response.ok) {
-            setErrorMessage("Nao foi possivel iniciar o modo local.");
-            return;
-          }
-
-          router.replace(safeRedirectPath);
-          router.refresh();
-        } catch (error) {
-          setErrorMessage(error instanceof Error ? error.message : "Nao foi possivel iniciar o modo local.");
-        } finally {
-          setSubmitting(false);
-        }
-
-        return;
-      }
-
       setErrorMessage("Autenticacao indisponivel neste ambiente.");
       return;
     }
@@ -260,8 +235,8 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
       await recordLoginEvent(supabase, data.user.id, "password");
       router.replace(await getPostLoginRedirectPath(data.user.user_metadata, safeRedirectPath));
       router.refresh();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Nao foi possivel autenticar agora.");
+    } catch {
+      setErrorMessage("Nao foi possivel autenticar agora.");
     } finally {
       setSubmitting(false);
     }
@@ -437,13 +412,7 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
           </div>
         </div>
 
-        {!authConfigured && localAuthEnabled ? (
-          <p className="rounded-[8px] border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100">
-            Modo local de desenvolvimento ativo. Use este acesso para navegar no MVP sem configurar Supabase.
-          </p>
-        ) : null}
-
-        {!authConfigured && !localAuthEnabled ? (
+        {!authConfigured ? (
           <p className="rounded-[8px] border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm font-medium text-amber-100">
             Login temporariamente indisponivel. Fale com o suporte da Bunker707 para liberar seu acesso.
           </p>
@@ -466,7 +435,7 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
           disabled={submitting || !canSubmit}
           type="submit"
         >
-          {submitting ? "Entrando..." : localAuthEnabled && !authConfigured ? "Entrar em modo local" : config.form.primaryCta}
+          {submitting ? "Entrando..." : config.form.primaryCta}
           <ArrowRight className="h-4 w-4" />
         </button>
       </form>
@@ -518,14 +487,16 @@ function LoginFormPanel({ authConfigured, config, localAuthEnabled, redirectTo }
 
 function VisualPanel({ config }: LoginConfigProps) {
   return (
-    <section className="relative hidden min-h-screen overflow-hidden bg-black lg:block">
+    <section className="relative hidden h-screen min-h-screen overflow-hidden bg-black lg:block">
       <Image
         alt={config.visual.alt}
-        className="object-cover object-[72%_center]"
-        fill
+        className="absolute inset-0 h-full w-full object-cover object-[72%_center]"
+        height={1024}
         priority
         sizes="(min-width: 1024px) 50vw, 100vw"
         src={config.visual.imageSrc}
+        unoptimized
+        width={1536}
       />
       <div className="absolute inset-0 bg-gradient-to-r from-black/12 via-black/18 to-black/28" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/18 to-black/18" />
@@ -571,11 +542,13 @@ export function LoginExperience(props: LoginExperienceProps) {
       <main className="relative min-h-screen overflow-x-hidden bg-[#070707] px-4 py-4 text-white sm:px-6 sm:py-6">
         <Image
           alt={config.visual.alt}
-          className="object-cover"
-          fill
+          className="absolute inset-0 h-full w-full object-cover"
+          height={1024}
           priority
           sizes="100vw"
           src={config.visual.imageSrc}
+          unoptimized
+          width={1536}
         />
         <div className="absolute inset-0 bg-black/55" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(229,9,20,0.22),transparent_28rem),linear-gradient(to_top,rgba(7,7,7,0.96),rgba(7,7,7,0.16)_52%,rgba(7,7,7,0.78))]" />
@@ -595,11 +568,13 @@ export function LoginExperience(props: LoginExperienceProps) {
       <div className="absolute inset-0 lg:hidden">
         <Image
           alt={config.visual.alt}
-          className="object-cover"
-          fill
+          className="absolute inset-0 h-full w-full object-cover"
+          height={1024}
           priority
           sizes="(max-width: 1023px) 100vw, 1px"
           src={config.visual.imageSrc}
+          unoptimized
+          width={1536}
         />
         <div className="absolute inset-0 bg-black/72" />
         <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d]/40 to-[#0d0d0d]/80" />

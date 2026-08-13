@@ -58,7 +58,7 @@ function FavoriteContentCard({ accessPreviewMode, item }: { accessPreviewMode?: 
   const targetType = getSavedTargetTypeForContentKind(item.kind);
 
   return (
-    <article className="group relative overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/30 transition hover:-translate-y-1 hover:shadow-[0_34px_90px_rgba(0,0,0,0.68)]">
+    <article className="group relative overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/30 transition hover:shadow-[0_34px_90px_rgba(0,0,0,0.68)]">
       <Link
         aria-label={`Abrir ${item.title}`}
         className="block outline-none focus-visible:ring-2 focus-visible:ring-white/70"
@@ -66,7 +66,7 @@ function FavoriteContentCard({ accessPreviewMode, item }: { accessPreviewMode?: 
       >
         <div className="relative aspect-[720/1040] overflow-hidden bg-[#101010]">
           <div
-            className="absolute inset-0 bg-cover bg-center transition duration-700 group-hover:scale-[1.035]"
+            className="continue-watching-card-image absolute inset-0 bg-cover bg-center"
             style={{ backgroundImage: `url(${item.image})` }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/78 to-transparent" />
@@ -99,7 +99,7 @@ function FavoriteContentCard({ accessPreviewMode, item }: { accessPreviewMode?: 
 
 function FavoriteModuleCard({ accessPreviewMode, module }: { accessPreviewMode?: AccessPreviewMode; module: SavedModuleItem }) {
   return (
-    <article className="group relative overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/30 transition hover:-translate-y-1 hover:shadow-[0_34px_90px_rgba(0,0,0,0.68)]">
+    <article className="group relative overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/30 transition hover:shadow-[0_34px_90px_rgba(0,0,0,0.68)]">
       <Link
         aria-label={`Abrir ${module.title}`}
         className="block outline-none focus-visible:ring-2 focus-visible:ring-white/70"
@@ -107,7 +107,7 @@ function FavoriteModuleCard({ accessPreviewMode, module }: { accessPreviewMode?:
       >
         <div className="relative aspect-[720/1040] overflow-hidden bg-[#101010]">
           <div
-            className="absolute inset-0 bg-cover bg-center transition duration-700 group-hover:scale-[1.035]"
+            className="continue-watching-card-image absolute inset-0 bg-cover bg-center"
             style={{ backgroundImage: `url(${module.image})` }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/78 to-transparent" />
@@ -136,7 +136,7 @@ function FavoriteModuleCard({ accessPreviewMode, module }: { accessPreviewMode?:
 
 function FavoriteLessonCard({ accessPreviewMode, lesson }: { accessPreviewMode?: AccessPreviewMode; lesson: SavedLessonItem }) {
   return (
-    <article className="group relative overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/30 transition hover:-translate-y-1 hover:shadow-[0_34px_90px_rgba(0,0,0,0.68)]">
+    <article className="group relative overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/30 transition hover:shadow-[0_34px_90px_rgba(0,0,0,0.68)]">
       <Link
         aria-label={`Abrir ${lesson.title}`}
         className="block outline-none focus-visible:ring-2 focus-visible:ring-white/70"
@@ -144,12 +144,14 @@ function FavoriteLessonCard({ accessPreviewMode, lesson }: { accessPreviewMode?:
       >
         <div className="relative aspect-video overflow-hidden bg-[#101010]">
           <div
-            className="absolute inset-0 bg-cover bg-center transition duration-700 group-hover:scale-[1.035]"
+            className="continue-watching-card-image absolute inset-0 bg-cover bg-center"
             style={{ backgroundImage: `url(${lesson.image})` }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/72 to-transparent" />
-          <span className="absolute left-4 top-4 grid h-11 w-11 place-items-center rounded-full bg-white text-black shadow-xl shadow-black/30">
-            <Play className="h-4 w-4 fill-current" />
+          <span className="pointer-events-none absolute inset-0 grid place-items-center">
+            <span className="grid h-12 w-12 place-items-center rounded-full bg-white/95 text-black shadow-xl shadow-black/40 transition duration-300 group-hover:scale-110 group-hover:bg-white">
+              <Play className="ml-0.5 h-4 w-4 fill-current" />
+            </span>
           </span>
         </div>
         <div className="p-4">

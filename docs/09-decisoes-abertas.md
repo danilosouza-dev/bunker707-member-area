@@ -43,7 +43,26 @@ Recomendacao atual:
 - Bunny Stream para custo inicial menor;
 - Mux para experiencia de desenvolvedor e analytics de video mais fortes.
 
-Decisao pendente.
+Decisao temporaria para a origem gratuita:
+
+- aceitar videos nao listados do YouTube e apresentar somente controles Bunker707, sem branding ou links clicaveis para o provedor;
+- manter `Automatica` via embed e oferecer no modo manual apenas as resolucoes reais encontradas para o video, inclusive `2160p` (`3840x2160`) quando disponivel;
+- no modo manual, entregar ao navegador fluxos temporarios diretos e separados de audio e video, sem proxy pela aplicacao;
+- tratar a extracao manual como integracao nao oficial, sujeita a expiracao e quebras por mudancas do YouTube, sem promessa de sigilo, DRM ou protecao da origem.
+
+A escolha de um provedor pago definitivo continua pendente.
+
+### Modo TV
+
+Decisao tomada e implementada para a primeira versao:
+
+- usar um receptor web proprio da Bunker707 em `/tv`, sem chamar o recurso de Chromecast, Google Cast ou AirPlay;
+- o aluno autenticado cria uma sessao para a aula autorizada, abre o modal `Assistir na TV` e recebe endereco, QR e codigo temporario de seis caracteres;
+- a TV consome o codigo uma unica vez e recebe um token temporario; somente o hash desse token fica no Supabase;
+- depois da conexao, o modal vira controle remoto para play, pause, voltar 10 segundos, avancar 10 segundos e encerrar;
+- comandos e estado usam polling/heartbeat persistido em `tv_sessions`, com revisao monotona, presenca e expiracao. O tempo reproduzido atualiza `lesson_progress` do aluno;
+- o QR nao recebe link do YouTube. O receptor pareado usa somente o ID canonico no embed `youtube-nocookie.com`, que continua tecnicamente observavel e nao equivale a DRM;
+- a primeira versao cobre YouTube. Cast/AirPlay nativos e receptores para outros providers ficam como evolucao futura.
 
 ### Deploy
 
@@ -72,10 +91,11 @@ Decisao tomada:
 
 ### Comunidade no MVP
 
-Recomendacao:
+Decisao atual:
 
-- nao entrar no MVP essencial;
-- manter no menu como item futuro ou ocultar ate estar pronto.
+- comunidade completa nao entra no MVP essencial;
+- o CRM pode exibir item `Comunidade` como placeholder operacional para manter a arquitetura de navegacao;
+- a area do aluno so deve receber comunidade quando categorias, topicos, notificacoes e moderacao estiverem persistidos.
 
 ### Ranking no MVP
 
@@ -91,12 +111,58 @@ Recomendacao:
 - fase futura;
 - avaliar custo operacional e moderacao.
 
-### IA da aula
+### Tutor IA, Bunker AI LB e IA Diretor
 
-Recomendacao:
+Decisao tomada e implementada para o tutor de aula:
 
-- preparar modelo de dados;
-- implementar depois que aulas, transcricoes e progresso estiverem estaveis.
+- o produtor configura modelo e limites de Gemini, OpenAI/GPT ou Anthropic/Claude em `Agentes de IA` e pode cadastrar varias chaves de API ou conectar varias contas em cada provedor; `Configuracoes > Integracoes` permanece reservado aos provedores externos da operacao comercial;
+- cada chave fica no Supabase Vault e nunca volta ao browser; contas conectadas passam pelo Bunker AI Gateway isolado e aparecem apenas por nome/dica, saude e identificador;
+- o Bunker AI LB respeita prioridade e, entre conexoes equivalentes, usa a menos recentemente utilizada; conexoes pausadas, em cooldown ou que exigem autenticacao ficam fora da selecao normal;
+- 429, falhas transitorias e indisponibilidade atualizam cooldown/backoff e acionam fallback para a proxima conexao. A resposta registra tentativas e a conexao exata usada;
+- conectar conta de consumidor e opcao experimental, dependente dos termos e limites do provedor; nao significa que uma assinatura ChatGPT, Google AI ou Claude conceda cota oficial de API;
+- a opcao de o aluno consumir creditos comprados diretamente da Bunker707 foi adiada e nao aparece nesta entrega;
+- aulas do YouTube importam a legenda publica automaticamente. Quando ela nao existe, ou para outros providers, o produtor envia SRT, VTT, TXT ou cola a transcricao;
+- a importacao salva uma versao permanente no Supabase, cria chunks e analisa a aula quando houver provedor configurado; nenhuma pergunta busca a legenda novamente no YouTube;
+- a aba `Tutor IA` ao lado de `Comentários` e `Materiais` usa respostas reais, sem mock, e so envia depois de validar sessao, ownership, entitlement, transcricao e limites;
+- o historico nao expira automaticamente, fica separado por aluno, aula e conversa e permite varios chats independentes para a mesma aula;
+- cada chat pode ser renomeado pelo aluno por um menu compacto de ações; o novo titulo e persistido no Supabase somente depois de validar ownership;
+- `Excluir chat` remove a conversa do historico e do contexto futuro do aluno por meio de `student_deleted_at`, mas preserva o registro no backend para analises internas agregadas; pedidos formais de privacidade continuam podendo exigir apagamento ou anonimizacao real;
+- somente timestamps derivados pelo servidor de uma cue citada e semanticamente validada levam ao player; o seek comeca 3 segundos antes da legenda correspondente. A IA nunca calcula o horario e citacoes antigas ou livres permanecem sem clique. Transcricoes sem tempo usam `Trecho N`;
+- o produtor acompanha consumo real por periodo: total, tipo de agente, tutor/aula, aluno, ranking dos alunos que mais usam IA, provedor/modelo, conexao e dia;
+- o ranking de uso e operacional/custo, nao uma classificacao de desempenho do aluno, e fica restrito ao CRM administrativo;
+- a IA Diretor usa o tipo interno `platform_guide` e um chat global separado. Ela consulta somente a estrutura e o conteudo autorizados ao aluno para orientar, localizar aulas e recomendar caminhos ou trilhas;
+- o primeiro release usa ranking lexical de titulos, descricoes, perfis e chunks, sem embeddings. Referencias opacas retornadas pelo modelo sao resolvidas em links internos somente pelo servidor;
+- creditos especificos para a IA Diretor continuam adiados; perguntas e tokens ja sao auditados separadamente para permitir cotas futuras;
+- a IA Diretor nao e outro tutor: o Tutor IA funciona como professor de uma aula especifica; a IA Diretor funciona como orientador amplo da escola. Historicos, prompts, fontes e metricas permanecem separados para o aluno nao misturar os dois contextos;
+- agentes de comentarios continuam como evolucao separada.
+
+### Combos de produtos
+
+Decisao tomada:
+
+- combos sao pacotes internos compostos por produtos existentes;
+- a compra externa de um combo deve resolver os produtos incluidos e criar entitlements internos para cada produto/alvo;
+- combo nao e checkout interno e nao autoriza conteudo diretamente;
+- todo combo pode ter turma, usando `Turma A` como padrao visual quando nenhuma turma foi criada;
+- remover produtos de um combo ativo exige cuidado operacional e auditoria, porque pode afetar ofertas ja vendidas.
+
+### Moderacao de comentarios
+
+Decisao tomada:
+
+- o CRM tera item `Moderacao` para comentarios e respostas de aulas;
+- filtros principais: produto, tipo (`comentario` ou `resposta`) e status (`pendente`, `aprovado`, `ocultado`, `spam`);
+- palavras bloqueadas impedem o envio e retornam mensagem amigavel ao aluno;
+- comentarios persistidos e acoes de moderacao devem ter auditoria antes de liberar a funcionalidade em producao.
+
+### Integracoes
+
+Decisao tomada:
+
+- integracoes ficam dentro de `Configuracoes > Integracoes`;
+- provedores iniciais: Hotmart, Ticto, TikTok, Kiwify e Manual;
+- segredos reais nao ficam no browser;
+- eventos externos alimentam adaptadores e entitlements internos.
 
 ## Design
 
@@ -115,12 +181,18 @@ Decisao tomada:
 
 Decisao tomada:
 
-- conectar o CMS em `/admin` a uma camada server-side persistida em Supabase Postgres/RLS, com fallback local somente quando as variaveis Supabase nao existirem no ambiente de desenvolvimento.
+- conectar o CMS em `/admin` a uma camada server-side persistida somente em Supabase Postgres/RLS, sem fallback local ou dados sinteticos de runtime.
 - o design do CMS segue a linha escura, densa e operacional da referencia Netflix-style Ad Manager enviada no Figma, sem copiar marca, textos ou assets proprietarios.
-- o CMS deve controlar catalogo, home, formacoes, cursos avulsos, mentorias, webinarios, produtos genericos, cursos internos de formacoes, bootcamps, modulos, aulas, materiais, turmas e alunos.
+- o CMS deve controlar catalogo, personalizacao, home, formacoes, cursos avulsos, mentorias, webinarios, produtos genericos, cursos internos de formacoes, bootcamps, modulos, aulas, materiais, turmas e alunos.
+- a area `Personalizacao` aparece na sidebar principal do CRM, abre primeiro uma lista de destinos editaveis (`Vitrine`, `Pagina de login`, `Pagina de produtos` e produtos/cursos) e so depois abre o editor visual do item escolhido.
+- ao personalizar a vitrine/home, o produtor deve ver uma representacao fiel da home real do aluno em modo editor, com controles editaveis para banner, textos, cards/secoes, ordem, origem dos conteudos e visibilidade sobre a propria pagina.
+- a vitrine/home em modo editor deve consumir as mesmas linhas e componentes da home publicada, preservando card horizontal de `Continue assistindo`, thumbnails/resume frames de aulas, cards verticais e secoes de modulos sem inventar textos ou formatos que nao existem na pagina final.
+- a personalizacao altera apresentacao e composicao visual, mas a liberacao final continua dependendo de entitlements internos, regras de entrega e visibilidade por aluno.
 - a primeira etapa de criacao do CMS cria um item educacional/produto: formacao, curso, mentoria, webinario, produto ou bootcamp. Dentro dele, o produtor monta trilhas/modulos e aulas.
 - cada item educacional pode ter capa, descricao, modelo de acesso `closed` ou `free`, limite de estudantes ilimitado ou numerico, link externo de compra e comportamento do link em mesma aba ou nova aba.
 - o cadastro principal do Catalogo funciona como um construtor em passos: configuracao inicial, modulos e aulas. O produtor pode salvar apenas a configuracao inicial e completar a estrutura depois.
+- todo fluxo CRUD do Catalogo permanece no modal central sobre a listagem. Novo item, novo curso, modulo e aula nao devem abrir como pagina separada nem substituir a tela inteira do catalogo; catalogo, modulos e aulas podem ser reordenados por comandos de mover, persistindo a ordem em `sort_order`; modulos e aulas podem ser excluidos individualmente com confirmacao explicita.
+- a exclusao de modulo ou aula e fisica no Supabase: dependencias relacionais sao removidas por cascata, favoritos e referencias de progresso sao limpos por triggers na mesma transacao e eventos comportamentais historicos permanecem append-only.
 - a capa vertical enviada pelo produtor para cards deve usar 720 x 1040 px nesta fase, alinhada ao formato do curso Clones Perfeito 2.0 e aos cards verticais atuais.
 - a hero opcional da pagina propria de curso/produto usa 1920 x 720 px e fica salva em `content_page_settings.hero`, separada da capa vertical do card.
 - itens bloqueados por compra aparecem na vitrine e, ao clicar no card, abrem o modal de detalhes. O modal mostra o CTA de compra externa configurado, sem checkout interno.
@@ -128,7 +200,7 @@ Decisao tomada:
 - quando uma regra de entrega bloqueia modulo ou aula, a area do aluno deve mostrar overlay com cadeado e mensagem de liberacao no card/thumbnail. A data deve ser calculada por aluno quando houver inscricao/entitlement real.
 - no localhost/admin, a area de membros tem modo de preview por query string: sessao atual, produtor/admin, aluno com acesso e aluno sem acesso. Aluno com acesso remove bloqueios de compra/entitlement, mas regras de data ou drip continuam bloqueando. Aluno sem acesso mostra a vitrine bloqueada e nao preenche `Minhas compras`.
 - aulas cadastradas pelo CMS precisam incluir descricao, duracao, thumbnail e configuracao de player. Os provedores iniciais sao YouTube, Vimeo, Bunny Stream, Mux, URL propria/player proprio e codigo embed. A plataforma armazena referencia/configuracao do video, nao o arquivo de video no servidor da aplicacao.
-- a sidebar principal do CMS deve ser enxuta: Visao geral, Alunos, Catalogo e Estrutura. Liberação e acessos nao sao areas soltas no menu principal.
+- a sidebar principal do CMS deve ser enxuta: Visao geral, Alunos, Catalogo, Estrutura e Personalizacao. Liberação e acessos nao sao areas soltas no menu principal.
 - entitlements continuam sendo a fonte de verdade de acesso; eventos de Hotmart, Ticto, TikTok ou outros provedores sao entradas externas auditaveis, nao autorizacao direta.
 - cadastro manual de aluno oferece convite por email como fluxo padrao e senha temporaria como alternativa; senha temporaria marca `must_change_password = true` no Supabase Auth e obriga troca em `/alterar-senha`.
 - o acesso ao CMS e protegido por papel/permissao administrativa em `admin_roles`.
@@ -170,7 +242,7 @@ Decisao tomada:
 - cards verticais sem compra/entitlement ativo devem ficar preferencialmente em uma fileira de `Vitrine` ou outra fileira configurada para oferta, com capa em preto e branco no estado normal, cadeado preto sem caixa/moldura, sem texto no topo; no hover a capa volta a ter cor, o cadeado permanece visivel, e o card exibe somente titulo, descricao curta e botao verde solido `Comprar`, largo e com texto branco, sem botao de salvar/favoritar.
 - `Minhas compras` substitui a separacao inicial entre `Minhas formacoes`, `Meus cursos avulsos` e `Meus bootcamps`; ela agrupa todos os produtos com entitlement ativo do aluno.
 - `Minhas compras` tambem substitui `Meu Conteudo` como item principal da sidebar. `Formacoes` nao deve aparecer como item principal no MVP; deve ser filtro/tipo dentro de `Minhas compras`.
-- `Produtos a venda`/`Vitrine` e configuravel no dashboard e pode conter produtos comprados e nao comprados na mesma fileira.
+- `Produtos a venda`/`Vitrine` e configuravel no dashboard, mas a resolucao por aluno remove qualquer produto que ele ja tenha comprado ou possa acessar.
 - fileiras configuraveis devem poder ter regra de visibilidade: apenas alunos/compradores, apenas nao compradores/visitantes ou todos.
 - uma fileira `Em breve` pode mostrar proximos cursos, formacoes, bootcamps, novidades e listas de espera.
 - a vitrine mostra apenas produtos vendaveis: formacoes, bootcamps e cursos avulsos.

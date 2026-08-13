@@ -1,38 +1,80 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  ClosedCaption,
   Download,
   FileText,
   Flag,
   GalleryVerticalEnd,
+  Gauge,
+  GraduationCap,
   Heart,
   LockKeyhole,
-  Maximize2,
+  Maximize,
   MessageCircle,
+  Minimize,
   MonitorPlay,
   MoreHorizontal,
   PanelRightClose,
+  Pause,
   Play,
   Reply,
+  RotateCcw,
+  RotateCw,
   Send,
+  Settings,
+  SlidersHorizontal,
   SmilePlus,
+  Sparkles,
   ThumbsDown,
   ThumbsUp,
   Volume2,
+  VolumeX,
   X
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type MouseEvent } from "react";
 import { SavedItemButton } from "@/components/saved-item-button";
+import { LessonAiTutor } from "@/components/lesson-ai-tutor";
+import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
+import { LessonTvControl } from "@/components/lesson-tv-control";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger
+} from "@/components/ui/tooltip";
+import {
+  YouTubeManualStreamPlayer,
+  type YouTubeManualPlayerController
+} from "@/components/youtube-manual-stream-player";
 import { withAccessPreviewParam } from "@/lib/access-preview";
+import { shouldBlockLessonPageKeyboardShortcut } from "@/lib/lesson-page-deterrence";
+import { findActiveCaptionCue } from "@/lib/media-captions";
+import {
+  consumePendingTutorSeek,
+  queuePendingTutorSeek,
+  type PendingTutorSeek
+} from "@/lib/tutor-seek-intent";
 import type { KeyboardEvent } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
-import type { ContentItem, CourseModule, LessonPreview, LessonReaction, LessonVideoConfig, LessonWatchState, LessonWatchStatus } from "@/lib/platform-types";
+import type {
+  ContentItem,
+  CourseModule,
+  LessonCommentReaction,
+  LessonCommentRecord,
+  LessonCommentStatus,
+  LessonPreview,
+  LessonReaction,
+  LessonVideoConfig,
+  LessonWatchState,
+  LessonWatchStatus
+} from "@/lib/platform-types";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 
 type LessonExperienceProps = {
@@ -42,12 +84,27 @@ type LessonExperienceProps = {
   initialLessonReactions?: Partial<Record<string, LessonReaction>>;
   initialLessonWatchStates?: Record<string, LessonWatchState>;
   item: ContentItem;
+  currentUserId: string;
+  currentUserName: string;
   returnContent?: Pick<ContentItem, "id" | "title">;
   selectedModule: CourseModule;
 };
 
-type LessonTab = "comments" | "materials";
-type CommentReaction = "like" | "fire" | "insight" | "love" | "clap" | "laugh" | "wow" | "rocket" | "eyes" | "check";
+type LessonTab = "aiTutor" | "comments" | "materials";
+type CommentReaction = LessonCommentReaction;
+type YouTubeSettingsMenuView = "playbackRate" | "quality" | "root";
+
+function TutorAiIcon({ className = "", strokeWidth = 1.9 }: { className?: string; strokeWidth?: number }) {
+  return (
+    <span aria-hidden="true" className={`relative inline-grid shrink-0 place-items-center ${className}`}>
+      <GraduationCap className="h-full w-full" strokeWidth={strokeWidth} />
+      <Sparkles
+        className="absolute -right-1 -top-1 h-2.5 w-2.5 text-[var(--accent)]"
+        strokeWidth={2.2}
+      />
+    </span>
+  );
+}
 
 type CommentAvatarData = {
   backgroundClassName: string;
@@ -62,8 +119,10 @@ type LessonCommentBase = {
   avatar: CommentAvatarData;
   body: string;
   id: string;
+  isOwn: boolean;
   role?: string;
   reactions: Partial<Record<CommentReaction, number>>;
+  status: LessonCommentStatus;
   time: string;
   username: string;
 };
@@ -115,12 +174,41 @@ type PlayerRenderConfig =
 
 type YouTubePlayer = {
   destroy?: () => void;
+  getAvailablePlaybackRates?: () => number[];
   getCurrentTime: () => number;
   getDuration: () => number;
+  getPlaybackRate?: () => number;
   getPlayerState?: () => number;
+  getVolume?: () => number;
+  isMuted?: () => boolean;
+  mute?: () => void;
   pauseVideo?: () => void;
   playVideo?: () => void;
   seekTo: (seconds: number, allowSeekAhead: boolean) => void;
+  setPlaybackRate?: (playbackRate: number) => void;
+  setVolume?: (volume: number) => void;
+  unloadModule?: (moduleName: string) => void;
+  unMute?: () => void;
+};
+
+type ReadyYouTubePlayer = {
+  lessonId: string;
+  player: YouTubePlayer;
+};
+
+type YouTubePlaybackState = "buffering" | "ended" | "error" | "paused" | "playing" | "unstarted";
+
+type YouTubeControlState = {
+  availablePlaybackRates: number[];
+  automaticQuality: string | null;
+  currentTime: number;
+  duration: number;
+  errorCode: number | null;
+  isMuted: boolean;
+  isReady: boolean;
+  playbackRate: number;
+  playbackState: YouTubePlaybackState;
+  volume: number;
 };
 
 type YouTubePlayerEvent = {
@@ -131,11 +219,81 @@ type YouTubePlayerStateChangeEvent = YouTubePlayerEvent & {
   data: number;
 };
 
+type YouTubePlayerErrorEvent = YouTubePlayerEvent & {
+  data: number;
+};
+
+type YouTubePlayerQualityChangeEvent = YouTubePlayerEvent & {
+  data: string;
+};
+
+type YouTubePlayerRateChangeEvent = YouTubePlayerEvent & {
+  data: number;
+};
+
+type YouTubeCaptionCue = {
+  durationSeconds: number;
+  startSeconds: number;
+  text: string;
+};
+
+type YouTubeCaptionsResponse = {
+  cues?: YouTubeCaptionCue[];
+  error?: string;
+  tracks?: Array<{
+    isAutoGenerated: boolean;
+    languageCode: string;
+    name: string;
+  }>;
+};
+
+type YouTubeCaptionResult = {
+  cues: YouTubeCaptionCue[];
+  status: "ready" | "unavailable";
+  videoId: string;
+};
+
+type YouTubeVideoStream = {
+  bitrate: number;
+  height: number;
+  itag: number;
+  label: string;
+  mimeType: string;
+  url: string;
+  width: number;
+};
+
+type YouTubeAudioStream = {
+  bitrate: number;
+  itag: number;
+  mimeType: string;
+  url: string;
+};
+
+type YouTubeStreamsResponse = {
+  audio?: YouTubeAudioStream;
+  error?: string;
+  expiresAt?: string;
+  qualities?: YouTubeVideoStream[];
+};
+
+type YouTubeStreamsResult = {
+  audio: YouTubeAudioStream | null;
+  expiresAt: string;
+  qualities: YouTubeVideoStream[];
+  status: "error" | "loading" | "ready" | "unavailable";
+  videoId: string;
+};
+
 type YouTubeNamespace = {
   Player: new (
     iframe: HTMLIFrameElement,
     options: {
       events: {
+        onAutoplayBlocked?: () => void;
+        onError?: (event: YouTubePlayerErrorEvent) => void;
+        onPlaybackQualityChange?: (event: YouTubePlayerQualityChangeEvent) => void;
+        onPlaybackRateChange?: (event: YouTubePlayerRateChangeEvent) => void;
         onReady?: (event: YouTubePlayerEvent) => void;
         onStateChange?: (event: YouTubePlayerStateChangeEvent) => void;
       };
@@ -158,6 +316,28 @@ declare global {
 }
 
 let youTubeIframeApiPromise: Promise<void> | null = null;
+const manualYouTubePlaybackRates = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
+const initialYouTubeControlState: YouTubeControlState = {
+  availablePlaybackRates: [1],
+  automaticQuality: null,
+  currentTime: 0,
+  duration: 0,
+  errorCode: null,
+  isMuted: false,
+  isReady: false,
+  playbackRate: 1,
+  playbackState: "unstarted",
+  volume: 100
+};
+
+const initialYouTubeStreamsResult: YouTubeStreamsResult = {
+  audio: null,
+  expiresAt: "",
+  qualities: [],
+  status: "unavailable",
+  videoId: ""
+};
 
 const lessonMaterials = [
   {
@@ -239,87 +419,6 @@ const commentReactionOptions = [
   id: CommentReaction;
   label: string;
 }>;
-
-const initialComments: LessonComment[] = [
-  {
-    id: "comment-1",
-    author: "Ana Beatriz",
-    avatar: {
-      backgroundClassName: "bg-emerald-300",
-      label: "👩‍💻",
-      labelClassName: "text-[34px]",
-      online: true
-    },
-    body: "Ficou bem mais claro quando voce separou referencia, prompt e criterio visual. Ja vou testar esse fluxo no meu projeto.",
-    reactions: {
-      fire: 4,
-      insight: 2,
-      like: 6
-    },
-    replies: [
-      {
-        id: "reply-1",
-        parentId: "comment-1",
-        author: "Bruno Bunker",
-        avatar: {
-          backgroundClassName: "bg-red-500",
-          label: "BB",
-          labelClassName: "text-[15px]",
-          online: true
-        },
-        body: "@ana.beatriz exatamente. O segredo e criar uma esteira simples: primeiro direcao visual, depois variacoes controladas, depois refinamento por criterio.",
-        reactions: {
-          fire: 8,
-          love: 3
-        },
-        role: "Professor",
-        time: "1 hora atras",
-        username: "bruno.bunker"
-      }
-    ],
-    time: "12 minutos atras",
-    username: "ana.beatriz"
-  },
-  {
-    id: "comment-3",
-    author: "Rafael Leme",
-    avatar: {
-      backgroundClassName: "bg-amber-300",
-      label: "🧠",
-      labelClassName: "text-[34px]"
-    },
-    body: "A parte de salvar os melhores prompts por etapa resolveu uma bagunca que eu estava criando aqui.",
-    reactions: {
-      insight: 1,
-      like: 2
-    },
-    time: "3 dias atras",
-    username: "rafael.leme"
-  },
-  {
-    id: "comment-4",
-    author: "Marina Costa",
-    avatar: {
-      backgroundClassName: "bg-fuchsia-500",
-      label: "MC",
-      labelClassName: "text-[15px]"
-    },
-    body: "Voltei nessa aula um mes depois e fez ainda mais sentido agora que comecei a montar o workflow completo.",
-    reactions: {
-      fire: 1,
-      love: 1
-    },
-    time: "1 mes atras",
-    username: "marina.costa"
-  }
-];
-
-const currentUserCommentAvatar: CommentAvatarData = {
-  backgroundClassName: "bg-red-500",
-  label: "DS",
-  labelClassName: "text-[15px]",
-  online: true
-};
 
 const lessonIconButtonClassName =
   "group/action relative grid h-11 w-11 place-items-center rounded-full border border-white/40 bg-[#232323]/90 text-white shadow-xl shadow-black/30 backdrop-blur transition duration-150 hover:border-white/90 hover:bg-[#3a3a3a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white active:scale-95 sm:h-12 sm:w-12";
@@ -469,6 +568,15 @@ function getYouTubeThumbnailUrl(video?: LessonVideoConfig) {
   return videoId ? `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg` : "";
 }
 
+function isYouTubeEmbedUrl(value: string) {
+  try {
+    const hostname = new URL(value).hostname;
+    return hostname === "youtube.com" || hostname.endsWith(".youtube.com") || hostname.endsWith(".youtube-nocookie.com");
+  } catch {
+    return false;
+  }
+}
+
 function extractVimeoId(value?: string) {
   if (!value) {
     return "";
@@ -506,7 +614,7 @@ function getPlayerRenderConfig(video?: LessonVideoConfig): PlayerRenderConfig | 
     return videoId
       ? {
           kind: "iframe",
-          src: `https://www.youtube.com/embed/${videoId}?enablejsapi=1&rel=0&modestbranding=1&playsinline=1`
+          src: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?enablejsapi=1&controls=0&disablekb=1&fs=0&iv_load_policy=3&playsinline=1&rel=0`
         }
       : null;
   }
@@ -552,14 +660,18 @@ function getUrlWithPlaybackParams(
   try {
     const url = new URL(src);
 
-    if (url.hostname.includes("youtube.com")) {
+    if (isYouTubeEmbedUrl(src)) {
       url.searchParams.set("enablejsapi", "1");
       url.searchParams.set("autoplay", autoplay ? "1" : "0");
+
+      if (typeof window !== "undefined" && window.location.origin) {
+        url.searchParams.set("origin", window.location.origin);
+      }
     } else if (autoplay) {
       url.searchParams.set("autoplay", "1");
     }
 
-    if (url.hostname.includes("youtube.com")) {
+    if (isYouTubeEmbedUrl(src)) {
       if (startSeconds && startSeconds > 0) {
         url.searchParams.set("start", String(Math.max(0, Math.floor(startSeconds))));
       } else {
@@ -616,6 +728,129 @@ function readYouTubeMetric(readMetric: () => number) {
   } catch {
     return undefined;
   }
+}
+
+function getCurrentTimestamp() {
+  return Date.now();
+}
+
+function formatPlaybackTime(seconds: number) {
+  const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function formatPlaybackRate(playbackRate: number) {
+  return `${String(playbackRate).replace(".", ",")}x`;
+}
+
+function getPlaybackRateMenuLabel(playbackRate: number) {
+  return playbackRate === 1 ? "Normal" : formatPlaybackRate(playbackRate);
+}
+
+function readYouTubePlaybackRates(player: YouTubePlayer) {
+  try {
+    const playbackRates = player.getAvailablePlaybackRates?.() ?? [1];
+    const normalizedRates = [...new Set(playbackRates)]
+      .filter((playbackRate) => Number.isFinite(playbackRate) && playbackRate > 0)
+      .sort((firstRate, secondRate) => firstRate - secondRate);
+
+    return normalizedRates.length > 0 ? normalizedRates : [1];
+  } catch {
+    return [1];
+  }
+}
+
+function normalizeYouTubePlaybackQuality(quality: string) {
+  const normalizedQuality = quality.trim().toLowerCase();
+  const legacyQualityLabels: Record<string, string> = {
+    hd1080: "1080p",
+    hd1440: "1440p",
+    hd2160: "2160p",
+    hd2880: "2880p",
+    hd4320: "4320p",
+    hd720: "720p",
+    large: "480p",
+    medium: "360p",
+    small: "240p",
+    tiny: "144p"
+  };
+
+  if (legacyQualityLabels[normalizedQuality]) {
+    return legacyQualityLabels[normalizedQuality];
+  }
+
+  if (normalizedQuality === "highres") {
+    return "highres";
+  }
+
+  const exactHeight = normalizedQuality.match(/^(?:hd)?(\d{3,4})p?$/)?.[1];
+  return exactHeight ? `${exactHeight}p` : null;
+}
+
+function getYouTubeQualityDisplayName(quality: string) {
+  return quality === "highres" ? "alta resolucao" : quality;
+}
+
+function getYouTubeQualityBadge(quality: string) {
+  if (quality === "auto") {
+    return "AUTO";
+  }
+
+  if (quality === "highres") {
+    return "HD+";
+  }
+
+  const height = Number.parseInt(quality, 10);
+
+  if (height >= 4320) return "8K";
+  if (height >= 2880) return "5K";
+  if (height >= 2160) return "4K";
+  if (height >= 1440) return "2K";
+  if (height >= 720) return "HD";
+
+  return Number.isFinite(height) ? String(height) : quality.toUpperCase();
+}
+
+function getYouTubePlaybackState(playerState: number | undefined): YouTubePlaybackState | undefined {
+  if (playerState === -1) return "unstarted";
+  if (playerState === 0) return "ended";
+  if (playerState === 1) return "playing";
+  if (playerState === 2 || playerState === 5) return "paused";
+  if (playerState === 3) return "buffering";
+
+  return undefined;
+}
+
+function getYouTubePlayerErrorMessage(errorCode: number | null) {
+  if (errorCode === 2) {
+    return "O endereco deste video e invalido.";
+  }
+
+  if (errorCode === 5) {
+    return "O navegador nao conseguiu reproduzir este video.";
+  }
+
+  if (errorCode === 100) {
+    return "Este video foi removido ou esta privado.";
+  }
+
+  if (errorCode === 101 || errorCode === 150) {
+    return "Este video nao permite reproducao incorporada.";
+  }
+
+  if (errorCode === 153) {
+    return "A origem desta pagina nao foi aceita pelo provedor do video.";
+  }
+
+  return "Nao foi possivel reproduzir este video.";
 }
 
 function parseLessonDurationSeconds(duration: string) {
@@ -707,6 +942,85 @@ function CommentAvatar({
       </span>
     </span>
   );
+}
+
+const commentAvatarBackgrounds = [
+  "bg-red-500",
+  "bg-emerald-600",
+  "bg-sky-600",
+  "bg-violet-600",
+  "bg-amber-600",
+  "bg-fuchsia-600"
+];
+
+function getCommentInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase("pt-BR") ?? "")
+    .join("") || "AL";
+}
+
+function getCommentAvatar(name: string, imageSrc?: string): CommentAvatarData {
+  const colorIndex = Array.from(name).reduce((total, character) => total + character.charCodeAt(0), 0) % commentAvatarBackgrounds.length;
+
+  return {
+    backgroundClassName: commentAvatarBackgrounds[colorIndex],
+    imageSrc,
+    label: getCommentInitials(name),
+    labelClassName: "text-[15px]",
+    online: false
+  };
+}
+
+function formatCommentTime(value: string) {
+  const timestamp = new Date(value).getTime();
+
+  if (Number.isNaN(timestamp)) return "agora";
+
+  const diffSeconds = Math.round((timestamp - Date.now()) / 1000);
+  const relativeTime = new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" });
+  const absoluteDiff = Math.abs(diffSeconds);
+
+  if (absoluteDiff < 60) return relativeTime.format(diffSeconds, "second");
+
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (Math.abs(diffMinutes) < 60) return relativeTime.format(diffMinutes, "minute");
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 24) return relativeTime.format(diffHours, "hour");
+
+  const diffDays = Math.round(diffHours / 24);
+  if (Math.abs(diffDays) < 30) return relativeTime.format(diffDays, "day");
+
+  const diffMonths = Math.round(diffDays / 30);
+  if (Math.abs(diffMonths) < 12) return relativeTime.format(diffMonths, "month");
+
+  return relativeTime.format(Math.round(diffMonths / 12), "year");
+}
+
+function lessonCommentRecordToView(record: LessonCommentRecord): LessonComment {
+  return {
+    author: record.authorName,
+    avatar: getCommentAvatar(record.authorName, record.authorAvatarUrl),
+    body: record.body,
+    id: record.id,
+    isOwn: record.isOwn,
+    reactions: record.reactions,
+    replies: record.replies.map((reply) => ({
+      ...lessonCommentRecordToView(reply),
+      parentId: record.id
+    })),
+    role: record.authorRole === "student" ? undefined : "Professor",
+    status: record.status,
+    time: formatCommentTime(record.createdAt),
+    username: record.authorUsername
+  };
+}
+
+function flattenCommentRecords(records: LessonCommentRecord[]): LessonCommentRecord[] {
+  return records.flatMap((record) => [record, ...flattenCommentRecords(record.replies)]);
 }
 
 function applyCommentReactionDelta(
@@ -834,6 +1148,8 @@ function LessonReactionControl({
 export function LessonExperience({
   accessPreviewMode,
   allModules,
+  currentUserId,
+  currentUserName,
   initialLessonId: requestedInitialLessonId,
   initialLessonReactions = {},
   initialLessonWatchStates = {},
@@ -841,7 +1157,8 @@ export function LessonExperience({
   returnContent,
   selectedModule
 }: LessonExperienceProps) {
-  const router = useRouter();
+  const router = useNavigationFeedbackRouter();
+  const { startNavigation } = useNavigationFeedback();
   const [completedLessonIds, setCompletedLessonIds] = useState<Set<string>>(
     () => new Set(getInitialCompletedLessonIds(allModules))
   );
@@ -860,33 +1177,115 @@ export function LessonExperience({
   ), [completedLessonIds, selectedModule]);
   const initialActiveLessonId = requestedLessonId || fallbackInitialLessonId;
   const [activeLessonId, setActiveLessonId] = useState(initialActiveLessonId);
+  const [activeEmbedResume, setActiveEmbedResume] = useState(() => ({
+    lessonId: initialActiveLessonId,
+    seconds: initialLessonWatchStates[initialActiveLessonId]?.progressSeconds ?? 0
+  }));
   const [activeModuleId, setActiveModuleId] = useState<string | null>(selectedModule.id);
   const [activeTab, setActiveTab] = useState<LessonTab>("comments");
+  const [mountedTutorLessonId, setMountedTutorLessonId] = useState("");
   const [commentText, setCommentText] = useState("");
-  const [comments, setComments] = useState<LessonComment[]>(initialComments);
+  const [comments, setComments] = useState<LessonComment[]>([]);
   const [commentReactionSelections, setCommentReactionSelections] = useState<Partial<Record<string, CommentReaction>>>({});
   const [commentReactionMenuId, setCommentReactionMenuId] = useState<string | null>(null);
   const [commentMenuId, setCommentMenuId] = useState<string | null>(null);
   const [reportedCommentIds, setReportedCommentIds] = useState<Set<string>>(() => new Set());
   const [replyTarget, setReplyTarget] = useState<ReplyTarget | null>(null);
+  const [commentsLessonId, setCommentsLessonId] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [commentError, setCommentError] = useState("");
   const [lessonReactions, setLessonReactions] = useState<Partial<Record<string, LessonReaction>>>(initialLessonReactions);
   const [lessonWatchStates, setLessonWatchStates] = useState<Record<string, LessonWatchState>>(initialLessonWatchStates);
   const [startedLessonIds, setStartedLessonIds] = useState<Set<string>>(() => new Set());
   const [canRenderEmbeddedPlayer, setCanRenderEmbeddedPlayer] = useState(false);
+  const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
+  const [youTubeControlState, setYouTubeControlState] = useState<YouTubeControlState>(initialYouTubeControlState);
+  const [youTubeCaptionResult, setYouTubeCaptionResult] = useState<YouTubeCaptionResult>({
+    cues: [],
+    status: "unavailable",
+    videoId: ""
+  });
+  const [youTubeCaptionsEnabled, setYouTubeCaptionsEnabled] = useState(true);
+  const [youTubeSettingsMenuOpen, setYouTubeSettingsMenuOpen] = useState(false);
+  const [youTubeSettingsMenuView, setYouTubeSettingsMenuView] = useState<YouTubeSettingsMenuView>("root");
+  const [youTubeSelectedQuality, setYouTubeSelectedQuality] = useState("auto");
+  const [youTubeStreamsResult, setYouTubeStreamsResult] = useState<YouTubeStreamsResult>(initialYouTubeStreamsResult);
+  const [youTubeStreamsReloadToken, setYouTubeStreamsReloadToken] = useState(0);
+  const [youTubeManualSwitch, setYouTubeManualSwitch] = useState({
+    lessonId: "",
+    seconds: 0,
+    shouldPlay: false,
+    token: 0
+  });
+  const [youTubeReloadToken, setYouTubeReloadToken] = useState(0);
   const [savedLessonOverrides, setSavedLessonOverrides] = useState<Record<string, boolean>>({});
   const [playlistOpen, setPlaylistOpen] = useState(true);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
+  const lessonPlayerFrameRef = useRef<HTMLDivElement>(null);
+  const lessonSupportPanelRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const youtubeIframeRef = useRef<HTMLIFrameElement>(null);
   const youtubePlayerRef = useRef<YouTubePlayer | null>(null);
-  const initialResumeSecondsRef = useRef<Record<string, number>>({});
+  const pendingTutorSeekRef = useRef<PendingTutorSeek | null>(null);
+  const readyYouTubePlayerRef = useRef<ReadyYouTubePlayer | null>(null);
+  const initialResumeSecondsRef = useRef<Record<string, number>>(
+    Object.fromEntries(
+      Object.entries(initialLessonWatchStates).map(([lessonId, watchState]) => [
+        lessonId,
+        watchState.progressSeconds
+      ])
+    )
+  );
   const lastProgressSyncRef = useRef<Record<string, number>>({});
+  const lastNonZeroYouTubeVolumeRef = useRef(100);
   const lessonWatchStatesRef = useRef(lessonWatchStates);
+  const lessonSelectionRequestRef = useRef(0);
   const pendingYouTubePlayLessonIdRef = useRef<string | null>(null);
+  const youTubePlaybackIntentLessonIdRef = useRef<string | null>(null);
+  const youTubeAudioPreferenceRef = useRef({ isMuted: false, volume: 100 });
+  const youTubePlaybackRatePreferenceRef = useRef(1);
+  const youTubeSelectedQualityRef = useRef("auto");
+  const lastLoadedYouTubeStreamsVideoIdRef = useRef("");
   const startedLessonIdsRef = useRef(startedLessonIds);
   const playlistScrollRef = useRef<HTMLDivElement>(null);
   const moduleRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const handleTvReceiverConnected = useCallback(() => {
+    pendingTutorSeekRef.current = null;
+    readyYouTubePlayerRef.current = null;
+    pendingYouTubePlayLessonIdRef.current = null;
+    youTubePlaybackIntentLessonIdRef.current = null;
+    youtubePlayerRef.current?.pauseVideo?.();
+    videoRef.current?.pause();
+  }, []);
+
+  useEffect(() => {
+    const blockContextMenu = (event: globalThis.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const blockInspectionShortcut = (event: globalThis.KeyboardEvent) => {
+      if (!shouldBlockLessonPageKeyboardShortcut(event)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    document.addEventListener("contextmenu", blockContextMenu, true);
+    window.addEventListener("keydown", blockInspectionShortcut, true);
+
+    return () => {
+      document.removeEventListener("contextmenu", blockContextMenu, true);
+      window.removeEventListener("keydown", blockInspectionShortcut, true);
+    };
+  }, []);
+
   const totalCommentCount = useMemo(() => getTotalCommentCount(comments), [comments]);
+  const currentUserCommentAvatar = useMemo(
+    () => ({ ...getCommentAvatar(currentUserName), online: true }),
+    [currentUserName]
+  );
 
   const fallbackTarget =
     getLessonTarget(allModules, activeLessonId) ??
@@ -899,8 +1298,69 @@ export function LessonExperience({
   const activeLesson = fallbackTarget?.lesson ?? null;
   const activeModule = allModules.find((courseModule) => courseModule.id === activeModuleId) ?? fallbackTarget?.module ?? selectedModule;
   const activeLessonKey = activeLesson?.id ?? "";
+  const commentsLoading = commentsLessonId !== activeLessonKey;
+
+  function selectLessonTab(nextTab: LessonTab) {
+    if (activeTab === "aiTutor" || nextTab === "aiTutor") {
+      setMountedTutorLessonId(activeLessonKey);
+    }
+
+    setActiveTab(nextTab);
+  }
+  const loadLessonComments = useCallback(async (lessonId: string, signal?: AbortSignal) => {
+    if (!lessonId) {
+      return;
+    }
+
+    try {
+      const searchParams = new URLSearchParams({ contentId: item.id });
+      const response = await fetch(`/api/comments/lessons/${encodeURIComponent(lessonId)}?${searchParams}`, {
+        credentials: "same-origin",
+        signal
+      });
+      const payload = await response.json() as { data?: LessonCommentRecord[]; error?: string };
+
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error ?? "Nao foi possivel carregar os comentarios.");
+      }
+
+      const flatRecords = flattenCommentRecords(payload.data);
+      setComments(payload.data.map(lessonCommentRecordToView));
+      setCommentReactionSelections(Object.fromEntries(
+        flatRecords.flatMap((record) => (
+          record.selectedReaction ? [[record.id, record.selectedReaction] as const] : []
+        ))
+      ));
+      setReportedCommentIds(new Set(
+        flatRecords.filter((record) => record.reportedByCurrentUser).map((record) => record.id)
+      ));
+      setCommentError("");
+    } catch (error) {
+      if (signal?.aborted) return;
+
+      setComments([]);
+      setCommentError(error instanceof Error ? error.message : "Nao foi possivel carregar os comentarios.");
+    } finally {
+      if (!signal?.aborted) setCommentsLessonId(lessonId);
+    }
+  }, [item.id]);
   const activeLessonDurationLabel = activeLesson?.duration;
   const activeLessonVideoProvider = activeLesson?.video?.provider;
+  const activeYouTubeVideoId = activeLessonVideoProvider === "youtube"
+    ? activeLesson?.video?.assetId || extractYouTubeId(activeLesson?.video?.url)
+    : "";
+  const effectiveYouTubeSelectedQuality = youTubeStreamsResult.videoId === activeYouTubeVideoId
+    ? youTubeSelectedQuality
+    : "auto";
+  const effectiveYouTubeAutomaticQuality = effectiveYouTubeSelectedQuality === "auto"
+    ? youTubeControlState.automaticQuality
+    : null;
+  const effectiveYouTubeQualityBadgeSource = effectiveYouTubeAutomaticQuality ?? effectiveYouTubeSelectedQuality;
+  const effectiveYouTubeQualityDescription = effectiveYouTubeSelectedQuality === "auto"
+    ? effectiveYouTubeAutomaticQuality
+      ? `Automático, atual ${getYouTubeQualityDisplayName(effectiveYouTubeAutomaticQuality)}`
+      : "Automático"
+    : effectiveYouTubeSelectedQuality;
   const activeReleaseNotice = activeLesson
     ? (
         item.isLocked
@@ -918,9 +1378,6 @@ export function LessonExperience({
   const isActiveLessonLocked = Boolean(activeReleaseNotice?.isLocked);
   const playerRenderConfig = activeLesson ? getPlayerRenderConfig(activeLesson.video) : null;
   const activeLessonWatchState = activeLessonKey ? lessonWatchStates[activeLessonKey] : undefined;
-  if (activeLessonKey && initialResumeSecondsRef.current[activeLessonKey] === undefined) {
-    initialResumeSecondsRef.current[activeLessonKey] = activeLessonWatchState?.progressSeconds ?? 0;
-  }
   const activeLessonDurationSeconds = activeLesson
     ? activeLessonWatchState?.durationSeconds ?? parseLessonDurationSeconds(activeLesson.duration)
     : undefined;
@@ -934,10 +1391,80 @@ export function LessonExperience({
     ? {
         ...playerRenderConfig,
         src: getUrlWithPlaybackParams(playerRenderConfig.src, {
-          startSeconds: initialResumeSecondsRef.current[activeLessonKey]
+          startSeconds: activeEmbedResume.lessonId === activeLessonKey
+            ? activeEmbedResume.seconds
+            : activeLessonWatchState?.progressSeconds ?? 0
         })
       }
     : playerRenderConfig;
+  const updateYouTubeControlMetrics = useCallback((
+    player: YouTubePlayer,
+    updates: Partial<Pick<YouTubeControlState, "errorCode" | "isReady" | "playbackState">> = {}
+  ) => {
+    const currentTime = readYouTubeMetric(() => player.getCurrentTime());
+    const duration = readYouTubeMetric(() => player.getDuration());
+    const playbackState = getYouTubePlaybackState(player.getPlayerState?.());
+    let isMuted: boolean | undefined;
+    let volume: number | undefined;
+
+    try {
+      isMuted = player.isMuted?.();
+      volume = player.getVolume?.();
+    } catch {
+      // The API may be transitioning between lessons while the iframe is replaced.
+    }
+
+    if (volume !== undefined && Number.isFinite(volume) && volume > 0) {
+      lastNonZeroYouTubeVolumeRef.current = volume;
+    }
+
+    setYouTubeControlState((current) => ({
+      ...current,
+      ...(currentTime !== undefined ? { currentTime } : {}),
+      ...(duration !== undefined && duration > 0 ? { duration } : {}),
+      ...(isMuted !== undefined ? { isMuted } : {}),
+      ...(playbackState !== undefined ? { playbackState } : {}),
+      ...(volume !== undefined && Number.isFinite(volume) ? { volume } : {}),
+      ...updates
+    }));
+  }, []);
+  const consumePendingTutorSeekForYouTube = useCallback((player: YouTubePlayer, lessonId: string) => {
+    try {
+      const seconds = consumePendingTutorSeek(
+        pendingTutorSeekRef,
+        lessonId,
+        (targetSeconds) => player.seekTo(targetSeconds, true)
+      );
+
+      if (seconds === null) return false;
+      setYouTubeControlState((current) => ({ ...current, currentTime: seconds }));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+  const consumePendingTutorSeekForNativeVideo = useCallback((video: HTMLVideoElement, lessonId: string) => {
+    if (video.readyState < 1) return false;
+
+    try {
+      const seconds = consumePendingTutorSeek(
+        pendingTutorSeekRef,
+        lessonId,
+        (targetSeconds) => {
+          const maximumSeconds = Number.isFinite(video.duration) && video.duration > 0
+            ? video.duration
+            : targetSeconds;
+          video.currentTime = Math.min(targetSeconds, maximumSeconds);
+        }
+      );
+
+      if (seconds === null) return false;
+      void video.play().catch(() => undefined);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
   const persistLessonProgress = useCallback(async (payload: LessonProgressPayload) => {
     try {
       const response = await fetch("/api/progress/lessons", {
@@ -981,7 +1508,7 @@ export function LessonExperience({
       return;
     }
 
-    const now = Date.now();
+    const now = getCurrentTimestamp();
     const lastSync = lastProgressSyncRef.current[lessonId] ?? 0;
 
     if (!force && now - lastSync < 3000) {
@@ -1015,6 +1542,7 @@ export function LessonExperience({
       ...lessonWatchStatesRef.current,
       [lessonId]: nextState
     };
+    initialResumeSecondsRef.current[lessonId] = nextState.progressSeconds;
     setLessonWatchStates(lessonWatchStatesRef.current);
 
     if (status === "completed") {
@@ -1036,7 +1564,7 @@ export function LessonExperience({
     });
   }, [isActiveLessonLocked, item.id, persistLessonProgress]);
 
-  const handlePlayerStart = useCallback(() => {
+  function handlePlayerStart() {
     if (isActiveLessonLocked || !activeLessonKey) {
       return;
     }
@@ -1068,17 +1596,9 @@ export function LessonExperience({
 
     if (activeLessonVideoProvider === "youtube") {
       pendingYouTubePlayLessonIdRef.current = activeLessonKey;
-      youtubePlayerRef.current?.playVideo?.();
+      youTubePlaybackIntentLessonIdRef.current = activeLessonKey;
     }
-  }, [
-    activeLessonDurationSeconds,
-    activeLessonKey,
-    activeLessonVideoProvider,
-    activeLessonWatchedPercent,
-    isActiveLessonLocked,
-    lessonWatchStates,
-    syncLessonWatchProgress
-  ]);
+  }
 
   const syncYouTubePlayerProgress = useCallback(async (
     player: YouTubePlayer,
@@ -1222,6 +1742,44 @@ export function LessonExperience({
   }, []);
 
   useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsPlayerFullscreen(document.fullscreenElement === lessonPlayerFrameRef.current);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!youTubeSettingsMenuOpen) {
+      return;
+    }
+
+    function handleYouTubeSettingsPointerDown(event: PointerEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Element &&
+        target.closest("[data-youtube-settings-control]")
+      ) {
+        return;
+      }
+
+      setYouTubeSettingsMenuOpen(false);
+      setYouTubeSettingsMenuView("root");
+    }
+
+    document.addEventListener("pointerdown", handleYouTubeSettingsPointerDown, true);
+
+    return () => {
+      document.removeEventListener("pointerdown", handleYouTubeSettingsPointerDown, true);
+    };
+  }, [youTubeSettingsMenuOpen]);
+
+  useEffect(() => {
     if (!commentMenuId && !commentReactionMenuId) {
       return;
     }
@@ -1247,6 +1805,18 @@ export function LessonExperience({
       document.removeEventListener("pointerdown", handleCommentPopoverPointerDown);
     };
   }, [commentMenuId, commentReactionMenuId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadTimeout = window.setTimeout(() => {
+      void loadLessonComments(activeLessonKey, controller.signal);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(loadTimeout);
+      controller.abort();
+    };
+  }, [activeLessonKey, loadLessonComments]);
 
   useEffect(() => {
     if (!activeModuleId) {
@@ -1285,13 +1855,203 @@ export function LessonExperience({
   }, [activeModuleId]);
 
   useEffect(() => {
+    youTubeAudioPreferenceRef.current = {
+      isMuted: youTubeControlState.isMuted,
+      volume: youTubeControlState.volume
+    };
+  }, [youTubeControlState.isMuted, youTubeControlState.volume]);
+
+  useEffect(() => {
+    youTubeSelectedQualityRef.current = youTubeSelectedQuality;
+  }, [youTubeSelectedQuality]);
+
+  useEffect(() => {
+    if (
+      !activeLessonKey ||
+      activeLessonVideoProvider !== "youtube" ||
+      isActiveLessonLocked ||
+      !/^[A-Za-z0-9_-]{11}$/.test(activeYouTubeVideoId)
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams({
+      contentId: item.id,
+      lessonId: activeLessonKey
+    });
+
+    void fetch(`/api/video/youtube/streams?${searchParams}`, {
+      credentials: "same-origin",
+      signal: controller.signal
+    })
+      .then(async (response) => {
+        const payload = await response.json() as YouTubeStreamsResponse;
+
+        if (!response.ok || !payload.audio || !payload.expiresAt || !Array.isArray(payload.qualities)) {
+          throw new Error(payload.error ?? "Nao foi possivel carregar as resolucoes.");
+        }
+
+        const videoProbe = document.createElement("video");
+        const audioProbe = document.createElement("audio");
+        const qualities = payload.qualities.filter((quality) => (
+          typeof quality.label === "string" &&
+          /^\d{2,5}p(?:\d{1,3})?(?: HDR)?$/.test(quality.label) &&
+          typeof quality.url === "string" &&
+          quality.url.startsWith("https://") &&
+          typeof quality.mimeType === "string" &&
+          videoProbe.canPlayType(quality.mimeType) !== ""
+        ));
+
+        if (
+          qualities.length === 0 ||
+          typeof payload.audio.url !== "string" ||
+          !payload.audio.url.startsWith("https://") ||
+          audioProbe.canPlayType(payload.audio.mimeType) === ""
+        ) {
+          throw new Error("O navegador nao suporta as faixas disponiveis.");
+        }
+
+        return {
+          audio: payload.audio,
+          expiresAt: payload.expiresAt,
+          qualities
+        };
+      })
+      .then(({ audio, expiresAt, qualities }) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        if (lastLoadedYouTubeStreamsVideoIdRef.current !== activeYouTubeVideoId) {
+          lastLoadedYouTubeStreamsVideoIdRef.current = activeYouTubeVideoId;
+          youTubeSelectedQualityRef.current = "auto";
+          setYouTubeSelectedQuality("auto");
+          setYouTubeManualSwitch((current) => ({
+            lessonId: activeLessonKey,
+            seconds: 0,
+            shouldPlay: false,
+            token: current.token + 1
+          }));
+        }
+
+        setYouTubeStreamsResult({
+          audio,
+          expiresAt,
+          qualities,
+          status: "ready",
+          videoId: activeYouTubeVideoId
+        });
+      })
+      .catch(() => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setYouTubeStreamsResult({
+          audio: null,
+          expiresAt: "",
+          qualities: [],
+          status: "error",
+          videoId: activeYouTubeVideoId
+        });
+
+        if (youTubeSelectedQualityRef.current !== "auto") {
+          youTubeSelectedQualityRef.current = "auto";
+          setYouTubeSelectedQuality("auto");
+          setYouTubeReloadToken((current) => current + 1);
+        }
+      });
+
+    return () => controller.abort();
+  }, [
+    activeLessonKey,
+    activeLessonVideoProvider,
+    activeYouTubeVideoId,
+    isActiveLessonLocked,
+    item.id,
+    youTubeStreamsReloadToken
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeLessonKey ||
+      activeLessonVideoProvider !== "youtube" ||
+      isActiveLessonLocked ||
+      !/^[A-Za-z0-9_-]{11}$/.test(activeYouTubeVideoId)
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const searchParams = new URLSearchParams({
+      contentId: item.id,
+      language: "pt",
+      lessonId: activeLessonKey
+    });
+
+    void fetch(`/api/video/youtube/captions?${searchParams}`, {
+      credentials: "same-origin",
+      signal: controller.signal
+    })
+      .then(async (response) => {
+        const payload = await response.json() as YouTubeCaptionsResponse;
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Nao foi possivel carregar as legendas.");
+        }
+
+        return (payload.cues ?? [])
+          .filter((cue) => (
+            Number.isFinite(cue.startSeconds) &&
+            cue.startSeconds >= 0 &&
+            Number.isFinite(cue.durationSeconds) &&
+            cue.durationSeconds >= 0 &&
+            typeof cue.text === "string" &&
+            cue.text.trim().length > 0
+          ))
+          .map((cue) => ({
+            durationSeconds: cue.durationSeconds,
+            startSeconds: cue.startSeconds,
+            text: cue.text.trim()
+          }));
+      })
+      .then((cues) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setYouTubeCaptionResult({
+          cues,
+          status: cues.length > 0 ? "ready" : "unavailable",
+          videoId: activeYouTubeVideoId
+        });
+      })
+      .catch(() => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setYouTubeCaptionResult({
+          cues: [],
+          status: "unavailable",
+          videoId: activeYouTubeVideoId
+        });
+      });
+
+    return () => controller.abort();
+  }, [activeLessonKey, activeLessonVideoProvider, activeYouTubeVideoId, isActiveLessonLocked, item.id]);
+
+  useEffect(() => {
     if (
       !canRenderEmbeddedPlayer ||
       !activeLessonKey ||
       activeLessonVideoProvider !== "youtube" ||
       isActiveLessonLocked ||
+      effectiveYouTubeSelectedQuality !== "auto" ||
       activePlayerRenderConfig?.kind !== "iframe"
     ) {
+      readyYouTubePlayerRef.current = null;
       youtubePlayerRef.current = null;
       return;
     }
@@ -1318,26 +2078,121 @@ export function LessonExperience({
 
       player = new window.YT.Player(iframe, {
         events: {
-          onReady: (event) => {
+          onAutoplayBlocked: () => {
             if (cancelled) {
               return;
             }
 
-            youtubePlayerRef.current = event.target;
-            const resumeSeconds = Math.max(0, Math.floor(initialResumeSecondsRef.current[lessonId] ?? 0));
+            pendingYouTubePlayLessonIdRef.current = null;
+            youTubePlaybackIntentLessonIdRef.current = null;
 
-            if (resumeSeconds > 0) {
-              try {
-                event.target.seekTo(resumeSeconds, true);
-              } catch {
-                // The player can reject seek requests while its iframe is still warming up.
-              }
+            if (youtubePlayerRef.current) {
+              updateYouTubeControlMetrics(youtubePlayerRef.current);
+            }
+          },
+          onError: (event) => {
+            if (cancelled) {
+              return;
             }
 
-            if (pendingYouTubePlayLessonIdRef.current === lessonId) {
-              pendingYouTubePlayLessonIdRef.current = null;
+            pendingYouTubePlayLessonIdRef.current = null;
+            youTubePlaybackIntentLessonIdRef.current = null;
+            if (readyYouTubePlayerRef.current?.player === event.target) {
+              readyYouTubePlayerRef.current = null;
+            }
+            youtubePlayerRef.current = event.target;
+            setYouTubeControlState((current) => ({
+              ...current,
+              errorCode: event.data,
+              isReady: false,
+              playbackState: "error"
+            }));
+          },
+          onPlaybackQualityChange: (event) => {
+            if (cancelled) {
+              return;
+            }
+
+            const automaticQuality = normalizeYouTubePlaybackQuality(event.data);
+
+            if (!automaticQuality) {
+              return;
+            }
+
+            youtubePlayerRef.current = event.target;
+            setYouTubeControlState((current) => ({
+              ...current,
+              automaticQuality
+            }));
+          },
+          onPlaybackRateChange: (event) => {
+            if (cancelled || !Number.isFinite(event.data) || event.data <= 0) {
+              return;
+            }
+
+            youtubePlayerRef.current = event.target;
+            youTubePlaybackRatePreferenceRef.current = event.data;
+            setYouTubeControlState((current) => ({
+              ...current,
+              playbackRate: event.data
+            }));
+          },
+          onReady: (event) => {
+            if (cancelled || youTubeSelectedQualityRef.current !== "auto") {
+              return;
+            }
+
+            youtubePlayerRef.current = event.target;
+            readyYouTubePlayerRef.current = { lessonId, player: event.target };
+
+            try {
+              event.target.unloadModule?.("captions");
+            } catch {
+              // Native captions would be cropped with the oversized iframe; Bunker707 renders its own centered cues.
+            }
+
+            const audioPreference = youTubeAudioPreferenceRef.current;
+            event.target.setVolume?.(audioPreference.volume);
+
+            if (audioPreference.isMuted || audioPreference.volume === 0) {
+              event.target.mute?.();
+            } else {
+              event.target.unMute?.();
+            }
+
+            const availablePlaybackRates = readYouTubePlaybackRates(event.target);
+            const preferredPlaybackRate = youTubePlaybackRatePreferenceRef.current;
+
+            if (availablePlaybackRates.includes(preferredPlaybackRate)) {
+              event.target.setPlaybackRate?.(preferredPlaybackRate);
+            } else {
+              youTubePlaybackRatePreferenceRef.current = 1;
+            }
+
+            const reportedPlaybackRate = readYouTubeMetric(() => event.target.getPlaybackRate?.() ?? 1) ?? 1;
+
+            setYouTubeControlState((current) => ({
+              ...current,
+              availablePlaybackRates,
+              playbackRate: reportedPlaybackRate
+            }));
+
+            updateYouTubeControlMetrics(event.target, {
+              errorCode: null,
+              isReady: true,
+              playbackState: "paused"
+            });
+            consumePendingTutorSeekForYouTube(event.target, lessonId);
+
+            if (
+              pendingYouTubePlayLessonIdRef.current === lessonId &&
+              youTubePlaybackIntentLessonIdRef.current === lessonId
+            ) {
               event.target.playVideo?.();
             } else {
+              if (pendingYouTubePlayLessonIdRef.current === lessonId) {
+                pendingYouTubePlayLessonIdRef.current = null;
+              }
               event.target.pauseVideo?.();
             }
           },
@@ -1349,11 +2204,34 @@ export function LessonExperience({
             youtubePlayerRef.current = event.target;
 
             if (event.data === playerStates.PLAYING) {
+              const playbackWasRequested = youTubePlaybackIntentLessonIdRef.current === lessonId;
+
+              if (!playbackWasRequested) {
+                if (pendingYouTubePlayLessonIdRef.current === lessonId) {
+                  pendingYouTubePlayLessonIdRef.current = null;
+                }
+                event.target.pauseVideo?.();
+                updateYouTubeControlMetrics(event.target, {
+                  isReady: true,
+                  playbackState: "paused"
+                });
+                return;
+              }
+
+              try {
+                event.target.unloadModule?.("captions");
+              } catch {
+                // Keep the provider captions hidden so only the centered Bunker707 track is shown.
+              }
+
+              updateYouTubeControlMetrics(event.target, {
+                errorCode: null,
+                isReady: true,
+                playbackState: "playing"
+              });
+
               if (pendingYouTubePlayLessonIdRef.current === lessonId) {
                 pendingYouTubePlayLessonIdRef.current = null;
-              } else if (!startedLessonIdsRef.current.has(lessonId)) {
-                event.target.pauseVideo?.();
-                return;
               }
 
               setStartedLessonIds((current) => {
@@ -1376,6 +2254,17 @@ export function LessonExperience({
             }
 
             if (event.data === playerStates.PAUSED) {
+              if (
+                pendingYouTubePlayLessonIdRef.current !== lessonId &&
+                youTubePlaybackIntentLessonIdRef.current === lessonId
+              ) {
+                youTubePlaybackIntentLessonIdRef.current = null;
+              }
+              updateYouTubeControlMetrics(event.target, {
+                isReady: true,
+                playbackState: "paused"
+              });
+
               if (!startedLessonIdsRef.current.has(lessonId)) {
                 return;
               }
@@ -1390,11 +2279,34 @@ export function LessonExperience({
             }
 
             if (event.data === playerStates.ENDED) {
+              pendingYouTubePlayLessonIdRef.current = null;
+              youTubePlaybackIntentLessonIdRef.current = null;
+              updateYouTubeControlMetrics(event.target, {
+                isReady: true,
+                playbackState: "ended"
+              });
               void syncYouTubePlayerProgress(event.target, {
                 fallbackDurationSeconds,
                 force: true,
                 lessonId,
                 status: "completed"
+              });
+              return;
+            }
+
+            if (event.data === playerStates.BUFFERING) {
+              if (youTubePlaybackIntentLessonIdRef.current !== lessonId) {
+                event.target.pauseVideo?.();
+                updateYouTubeControlMetrics(event.target, {
+                  isReady: true,
+                  playbackState: "paused"
+                });
+                return;
+              }
+
+              updateYouTubeControlMetrics(event.target, {
+                isReady: true,
+                playbackState: "buffering"
               });
             }
           }
@@ -1406,7 +2318,11 @@ export function LessonExperience({
     return () => {
       cancelled = true;
 
-      if (player) {
+      if (
+        player &&
+        startedLessonIdsRef.current.has(lessonId) &&
+        lessonWatchStatesRef.current[lessonId]?.status !== "completed"
+      ) {
         void syncYouTubePlayerProgress(player, {
           fallbackDurationSeconds,
           force: true,
@@ -1425,8 +2341,16 @@ export function LessonExperience({
         youtubePlayerRef.current = null;
       }
 
+      if (readyYouTubePlayerRef.current?.player === player) {
+        readyYouTubePlayerRef.current = null;
+      }
+
       if (pendingYouTubePlayLessonIdRef.current === lessonId) {
         pendingYouTubePlayLessonIdRef.current = null;
+      }
+
+      if (youTubePlaybackIntentLessonIdRef.current === lessonId) {
+        youTubePlaybackIntentLessonIdRef.current = null;
       }
     };
   }, [
@@ -1435,8 +2359,12 @@ export function LessonExperience({
     activeLessonVideoProvider,
     activePlayerRenderConfig?.kind,
     canRenderEmbeddedPlayer,
+    consumePendingTutorSeekForYouTube,
     isActiveLessonLocked,
-    syncYouTubePlayerProgress
+    syncYouTubePlayerProgress,
+    updateYouTubeControlMetrics,
+    effectiveYouTubeSelectedQuality,
+    youTubeReloadToken
   ]);
 
   useEffect(() => {
@@ -1486,6 +2414,55 @@ export function LessonExperience({
     activeLessonStarted,
     isActiveLessonLocked,
     syncYouTubePlayerProgress
+  ]);
+
+  useEffect(() => {
+    if (
+      !activeLessonKey ||
+      activeLessonVideoProvider !== "youtube" ||
+      !activeLessonStarted ||
+      isActiveLessonLocked
+    ) {
+      return;
+    }
+
+    const lessonId = activeLessonKey;
+    const fallbackDurationSeconds = activeLessonDurationLabel
+      ? parseLessonDurationSeconds(activeLessonDurationLabel)
+      : undefined;
+    const refreshControls = () => {
+      const player = youtubePlayerRef.current;
+
+      if (player) {
+        updateYouTubeControlMetrics(player);
+
+        if (
+          player.getPlayerState?.() === (window.YT?.PlayerState.ENDED ?? 0) &&
+          lessonWatchStatesRef.current[lessonId]?.status !== "completed"
+        ) {
+          void syncYouTubePlayerProgress(player, {
+            fallbackDurationSeconds,
+            force: true,
+            lessonId,
+            status: "completed"
+          });
+        }
+      }
+    };
+    refreshControls();
+    const interval = window.setInterval(refreshControls, 500);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [
+    activeLessonDurationLabel,
+    activeLessonKey,
+    activeLessonStarted,
+    activeLessonVideoProvider,
+    isActiveLessonLocked,
+    syncYouTubePlayerProgress,
+    updateYouTubeControlMetrics
   ]);
 
   useEffect(() => {
@@ -1555,6 +2532,51 @@ export function LessonExperience({
   const hasRatedLesson = Boolean(lessonReaction);
   const canRateLesson = activeLessonMaxWatchedPercent >= 30 || hasRatedLesson;
   const activeLessonSaved = savedLessonOverrides[activeLessonKey] ?? Boolean(activeLesson.isSaved);
+  const usesCustomYouTubeControls =
+    !isActiveLessonLocked &&
+    activeLessonVideoProvider === "youtube" &&
+    activePlayerRenderConfig?.kind === "iframe";
+  const youTubeAvailableQualities = youTubeStreamsResult.videoId === activeYouTubeVideoId
+    ? youTubeStreamsResult.qualities
+    : [];
+  const youTubeStreamsStatus = youTubeStreamsResult.videoId === activeYouTubeVideoId
+    ? youTubeStreamsResult.status
+    : /^[A-Za-z0-9_-]{11}$/.test(activeYouTubeVideoId) ? "loading" : "unavailable";
+  const selectedYouTubeManualStream = effectiveYouTubeSelectedQuality === "auto"
+    ? null
+    : youTubeAvailableQualities.find((quality) => quality.label === effectiveYouTubeSelectedQuality) ?? null;
+  const isYouTubePlaying =
+    youTubeControlState.playbackState === "playing" ||
+    youTubeControlState.playbackState === "buffering";
+  const youTubePlaybackActionLabel = youTubeControlState.playbackState === "error"
+    ? "Tentar novamente"
+    : isYouTubePlaying ? "Pausar" : "Reproduzir";
+  const isYouTubePlayerPreparing =
+    usesCustomYouTubeControls &&
+    !youTubeControlState.isReady &&
+    youTubeControlState.playbackState !== "error";
+  const youTubeDuration = youTubeControlState.duration || activeLessonDurationSeconds || 0;
+  const youTubeCurrentTime = Math.min(youTubeControlState.currentTime, youTubeDuration || youTubeControlState.currentTime);
+  const youTubeProgressPercent = youTubeDuration > 0
+    ? Math.max(0, Math.min(100, (youTubeCurrentTime / youTubeDuration) * 100))
+    : 0;
+  const youTubeCaptionCues = youTubeCaptionResult.videoId === activeYouTubeVideoId
+    ? youTubeCaptionResult.cues
+    : [];
+  const youTubeCaptionsStatus = !/^[A-Za-z0-9_-]{11}$/.test(activeYouTubeVideoId)
+    ? "idle"
+    : youTubeCaptionResult.videoId === activeYouTubeVideoId
+      ? youTubeCaptionResult.status
+      : "loading";
+  const youTubeCaptionsAvailable = youTubeCaptionsStatus === "ready" && youTubeCaptionCues.length > 0;
+  const activeYouTubeCaptionCue = youTubeCaptionsEnabled && youTubeCaptionsAvailable
+    ? findActiveCaptionCue(youTubeCaptionCues, youTubeCurrentTime)
+    : null;
+  const youTubeCaptionsActionLabel = youTubeCaptionsStatus === "loading"
+    ? "Carregando legendas"
+    : !youTubeCaptionsAvailable
+      ? "Legendas indisponiveis"
+      : youTubeCaptionsEnabled ? "Desativar legendas" : "Ativar legendas";
   const showPlayerClickOverlay =
     !isActiveLessonLocked &&
     Boolean(activePlayerRenderConfig) &&
@@ -1570,6 +2592,428 @@ export function LessonExperience({
     }
 
     handleLessonCompletionToggle(activeLessonKey);
+  }
+
+  function handleYouTubePlaybackToggle() {
+    closeYouTubeSettingsMenu();
+    const player = youtubePlayerRef.current;
+
+    if (youTubeControlState.playbackState === "error") {
+      if (selectedYouTubeManualStream && youTubeStreamsResult.audio) {
+        const currentTime = player
+          ? readYouTubeMetric(() => player.getCurrentTime()) ?? youTubeCurrentTime
+          : youTubeCurrentTime;
+
+        handlePlayerStart();
+        pendingYouTubePlayLessonIdRef.current = activeLessonKey;
+        youTubePlaybackIntentLessonIdRef.current = activeLessonKey;
+        setActiveEmbedResume({
+          lessonId: activeLessonKey,
+          seconds: currentTime
+        });
+        setYouTubeManualSwitch((current) => ({
+          lessonId: activeLessonKey,
+          seconds: currentTime,
+          shouldPlay: true,
+          token: current.token + 1
+        }));
+        setYouTubeControlState((current) => ({
+          ...current,
+          errorCode: null,
+          isReady: false,
+          playbackState: "buffering"
+        }));
+        setYouTubeStreamsReloadToken((current) => current + 1);
+        return;
+      }
+
+      handlePlayerStart();
+      pendingYouTubePlayLessonIdRef.current = activeLessonKey;
+      youTubePlaybackIntentLessonIdRef.current = activeLessonKey;
+      setActiveEmbedResume({
+        lessonId: activeLessonKey,
+        seconds: initialResumeSecondsRef.current[activeLessonKey] ?? 0
+      });
+      setYouTubeControlState(initialYouTubeControlState);
+      setYouTubeReloadToken((current) => current + 1);
+      return;
+    }
+
+    if (!player || !youTubeControlState.isReady) {
+      handlePlayerStart();
+      return;
+    }
+
+    if (activeLessonStarted && isYouTubePlaying) {
+      pendingYouTubePlayLessonIdRef.current = null;
+      youTubePlaybackIntentLessonIdRef.current = null;
+      player.pauseVideo?.();
+      return;
+    }
+
+    if (youTubeControlState.playbackState === "ended") {
+      player.seekTo(0, true);
+      setYouTubeControlState((current) => ({
+        ...current,
+        currentTime: 0,
+        playbackState: "buffering"
+      }));
+    }
+
+    handlePlayerStart();
+    player.playVideo?.();
+  }
+
+  function handleYouTubeSeek(event: FormEvent<HTMLInputElement>) {
+    const player = youtubePlayerRef.current;
+    const nextTime = Number(event.currentTarget.value);
+
+    if (!player || !youTubeControlState.isReady || !Number.isFinite(nextTime)) {
+      return;
+    }
+
+    player.seekTo(nextTime, true);
+    setYouTubeControlState((current) => ({
+      ...current,
+      currentTime: nextTime
+    }));
+  }
+
+  function handleYouTubeSkip(seconds: number) {
+    const player = youtubePlayerRef.current;
+
+    if (!player || !youTubeControlState.isReady) {
+      return;
+    }
+
+    const currentTime = readYouTubeMetric(() => player.getCurrentTime()) ?? youTubeCurrentTime;
+    const duration = readYouTubeMetric(() => player.getDuration()) ?? youTubeDuration;
+    const nextTime = Math.max(0, Math.min(duration || Number.POSITIVE_INFINITY, currentTime + seconds));
+
+    player.seekTo(nextTime, true);
+    setYouTubeControlState((current) => ({
+      ...current,
+      currentTime: nextTime
+    }));
+  }
+
+  function handleYouTubeMuteToggle() {
+    const player = youtubePlayerRef.current;
+
+    if (!player || !youTubeControlState.isReady) {
+      return;
+    }
+
+    if (youTubeControlState.isMuted || youTubeControlState.volume === 0) {
+      const restoredVolume = Math.max(1, lastNonZeroYouTubeVolumeRef.current || 100);
+
+      player.setVolume?.(restoredVolume);
+      player.unMute?.();
+      setYouTubeControlState((current) => ({
+        ...current,
+        isMuted: false,
+        volume: restoredVolume
+      }));
+    } else {
+      if (youTubeControlState.volume > 0) {
+        lastNonZeroYouTubeVolumeRef.current = youTubeControlState.volume;
+      }
+
+      player.mute?.();
+      setYouTubeControlState((current) => ({
+        ...current,
+        isMuted: true
+      }));
+    }
+  }
+
+  function handleYouTubeVolumeChange(event: FormEvent<HTMLInputElement>) {
+    const player = youtubePlayerRef.current;
+    const nextVolume = Math.max(0, Math.min(100, Number(event.currentTarget.value)));
+
+    if (!player || !youTubeControlState.isReady || !Number.isFinite(nextVolume)) {
+      return;
+    }
+
+    player.setVolume?.(nextVolume);
+
+    if (nextVolume > 0 && youTubeControlState.isMuted) {
+      lastNonZeroYouTubeVolumeRef.current = nextVolume;
+      player.unMute?.();
+    } else if (nextVolume === 0) {
+      player.mute?.();
+    } else if (nextVolume > 0) {
+      lastNonZeroYouTubeVolumeRef.current = nextVolume;
+    }
+
+    setYouTubeControlState((current) => ({
+      ...current,
+      isMuted: nextVolume === 0,
+      volume: nextVolume
+    }));
+  }
+
+  function handleYouTubeQualitySelect(selection: string) {
+    if (
+      selection !== "auto" &&
+      !youTubeAvailableQualities.some((quality) => quality.label === selection)
+    ) {
+      return;
+    }
+
+    if (selection === effectiveYouTubeSelectedQuality) {
+      closeYouTubeSettingsMenu();
+      return;
+    }
+
+    const player = youtubePlayerRef.current;
+    const currentTime = player
+      ? readYouTubeMetric(() => player.getCurrentTime()) ?? youTubeCurrentTime
+      : youTubeCurrentTime;
+    const duration = player
+      ? readYouTubeMetric(() => player.getDuration()) ?? youTubeDuration
+      : youTubeDuration;
+    const shouldPlay =
+      youTubePlaybackIntentLessonIdRef.current === activeLessonKey ||
+      isYouTubePlaying;
+
+    if (shouldPlay) {
+      pendingYouTubePlayLessonIdRef.current = activeLessonKey;
+      youTubePlaybackIntentLessonIdRef.current = activeLessonKey;
+    } else {
+      pendingYouTubePlayLessonIdRef.current = null;
+      youTubePlaybackIntentLessonIdRef.current = null;
+    }
+
+    youTubeSelectedQualityRef.current = selection;
+    readyYouTubePlayerRef.current = null;
+    player?.pauseVideo?.();
+    setActiveEmbedResume({
+      lessonId: activeLessonKey,
+      seconds: currentTime
+    });
+    setYouTubeManualSwitch((current) => ({
+      lessonId: activeLessonKey,
+      seconds: currentTime,
+      shouldPlay,
+      token: current.token + 1
+    }));
+    setYouTubeControlState((current) => ({
+      ...initialYouTubeControlState,
+      currentTime,
+      duration,
+      availablePlaybackRates: selection === "auto"
+        ? current.availablePlaybackRates
+        : [...manualYouTubePlaybackRates],
+      isMuted: current.isMuted,
+      playbackRate: current.playbackRate,
+      playbackState: shouldPlay ? "buffering" : "paused",
+      volume: current.volume
+    }));
+    setYouTubeSelectedQuality(selection);
+    closeYouTubeSettingsMenu();
+
+    if (selection === "auto") {
+      setYouTubeReloadToken((current) => current + 1);
+    }
+  }
+
+  function handleManualYouTubeControllerReady(controller: YouTubeManualPlayerController) {
+    if (youTubeSelectedQualityRef.current === "auto") return;
+    youtubePlayerRef.current = controller;
+    readyYouTubePlayerRef.current = { lessonId: activeLessonKey, player: controller };
+    controller.setPlaybackRate(youTubePlaybackRatePreferenceRef.current);
+    setYouTubeControlState((current) => ({
+      ...current,
+      availablePlaybackRates: controller.getAvailablePlaybackRates(),
+      playbackRate: controller.getPlaybackRate()
+    }));
+    updateYouTubeControlMetrics(controller, {
+      errorCode: null,
+      isReady: true,
+      playbackState: youTubeManualSwitch.shouldPlay ? "buffering" : "paused"
+    });
+    const resumedTutorSeek = consumePendingTutorSeekForYouTube(controller, activeLessonKey);
+
+    if (
+      resumedTutorSeek &&
+      pendingYouTubePlayLessonIdRef.current === activeLessonKey &&
+      youTubePlaybackIntentLessonIdRef.current === activeLessonKey
+    ) {
+      setYouTubeControlState((current) => ({ ...current, playbackState: "buffering" }));
+      controller.playVideo();
+    }
+  }
+
+  function handleManualYouTubePlaybackStateChange(
+    controller: YouTubeManualPlayerController,
+    playbackState: "buffering" | "paused" | "playing"
+  ) {
+    youtubePlayerRef.current = controller;
+
+    if (
+      playbackState === "playing" &&
+      youTubePlaybackIntentLessonIdRef.current !== activeLessonKey
+    ) {
+      controller.pauseVideo();
+      updateYouTubeControlMetrics(controller, {
+        isReady: true,
+        playbackState: "paused"
+      });
+      return;
+    }
+
+    if (playbackState === "playing" && pendingYouTubePlayLessonIdRef.current === activeLessonKey) {
+      pendingYouTubePlayLessonIdRef.current = null;
+    }
+
+    updateYouTubeControlMetrics(controller, {
+      errorCode: null,
+      isReady: true,
+      playbackState
+    });
+  }
+
+  function handleManualYouTubeEnded(controller: YouTubeManualPlayerController) {
+    pendingYouTubePlayLessonIdRef.current = null;
+    youTubePlaybackIntentLessonIdRef.current = null;
+    updateYouTubeControlMetrics(controller, {
+      isReady: true,
+      playbackState: "ended"
+    });
+    void syncYouTubePlayerProgress(controller, {
+      fallbackDurationSeconds: activeLessonDurationSeconds,
+      force: true,
+      lessonId: activeLessonKey,
+      status: "completed"
+    });
+  }
+
+  function handleManualYouTubeError() {
+    pendingYouTubePlayLessonIdRef.current = null;
+    youTubePlaybackIntentLessonIdRef.current = null;
+    readyYouTubePlayerRef.current = null;
+    setYouTubeControlState((current) => ({
+      ...current,
+      errorCode: null,
+      isReady: false,
+      playbackState: "error"
+    }));
+  }
+
+  function handleManualYouTubeAutoplayBlocked() {
+    pendingYouTubePlayLessonIdRef.current = null;
+    youTubePlaybackIntentLessonIdRef.current = null;
+    setYouTubeControlState((current) => ({
+      ...current,
+      isReady: true,
+      playbackState: "paused"
+    }));
+  }
+
+  function handleYouTubePlaybackRateSelect(playbackRate: number) {
+    const player = youtubePlayerRef.current;
+
+    if (
+      !player ||
+      !youTubeControlState.isReady ||
+      !youTubeControlState.availablePlaybackRates.includes(playbackRate)
+    ) {
+      return;
+    }
+
+    player.setPlaybackRate?.(playbackRate);
+
+    if (effectiveYouTubeSelectedQuality !== "auto") {
+      youTubePlaybackRatePreferenceRef.current = playbackRate;
+      setYouTubeControlState((current) => ({
+        ...current,
+        playbackRate
+      }));
+    }
+
+    closeYouTubeSettingsMenu();
+  }
+
+  function handleTvPlaybackRateConfirmed(playbackRate: number) {
+    if (!manualYouTubePlaybackRates.includes(playbackRate)) return;
+
+    youTubePlaybackRatePreferenceRef.current = playbackRate;
+    youtubePlayerRef.current?.setPlaybackRate?.(playbackRate);
+    setYouTubeControlState((current) => ({
+      ...current,
+      availablePlaybackRates: current.availablePlaybackRates.includes(playbackRate)
+        ? current.availablePlaybackRates
+        : [...current.availablePlaybackRates, playbackRate].sort((left, right) => left - right),
+      playbackRate
+    }));
+  }
+
+  function closeYouTubeSettingsMenu() {
+    setYouTubeSettingsMenuOpen(false);
+    setYouTubeSettingsMenuView("root");
+  }
+
+  function handleYouTubeSettingsMenuToggle() {
+    if (youTubeSettingsMenuOpen) {
+      closeYouTubeSettingsMenu();
+      return;
+    }
+
+    setYouTubeSettingsMenuView("root");
+    setYouTubeSettingsMenuOpen(true);
+  }
+
+  function handleMaterialsShortcut() {
+    selectLessonTab("materials");
+
+    window.requestAnimationFrame(() => {
+      lessonSupportPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+      document.getElementById("lesson-tab-materials")?.focus({ preventScroll: true });
+    });
+  }
+
+  function handlePlayerFullscreen() {
+    const playerFrame = lessonPlayerFrameRef.current;
+
+    if (!playerFrame) {
+      return;
+    }
+
+    if (document.fullscreenElement === playerFrame) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+
+    void playerFrame.requestFullscreen().catch(() => undefined);
+  }
+
+  function handleTutorTimestampSeek(seconds: number) {
+    if (isActiveLessonLocked || !activeLessonKey) return;
+    const pendingSeek = queuePendingTutorSeek(pendingTutorSeekRef, activeLessonKey, seconds);
+
+    if (!pendingSeek) return;
+    handlePlayerStart();
+
+    if (activeLesson?.video?.provider === "youtube") {
+      const readyPlayer = readyYouTubePlayerRef.current;
+
+      if (
+        readyPlayer?.lessonId === activeLessonKey &&
+        readyPlayer.player === youtubePlayerRef.current &&
+        consumePendingTutorSeekForYouTube(readyPlayer.player, activeLessonKey)
+      ) {
+        setYouTubeControlState((current) => ({ ...current, playbackState: "buffering" }));
+        readyPlayer.player.playVideo?.();
+      }
+    } else if (videoRef.current) {
+      consumePendingTutorSeekForNativeVideo(videoRef.current, activeLessonKey);
+    }
+
+    lessonPlayerFrameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function handleLessonCompletionToggle(lessonId: string) {
@@ -1686,9 +3130,11 @@ export function LessonExperience({
     }));
   }
 
-  function handleCommentReactionToggle(commentId: string, reactionId: CommentReaction) {
+  async function handleCommentReactionToggle(commentId: string, reactionId: CommentReaction) {
     const selectedReaction = commentReactionSelections[commentId] ?? null;
+    const nextReaction = selectedReaction === reactionId ? null : reactionId;
     setCommentReactionMenuId(null);
+    setCommentError("");
 
     setComments((current) => current.map((comment) => {
       const updateReactions = (reactions: Partial<Record<CommentReaction, number>>) => {
@@ -1744,15 +3190,54 @@ export function LessonExperience({
 
       return next;
     });
+
+    try {
+      const response = await fetch(`/api/comments/${encodeURIComponent(commentId)}/reaction`, {
+        body: JSON.stringify({ reaction: nextReaction }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "PUT"
+      });
+      const payload = await response.json() as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Nao foi possivel salvar a reacao.");
+      }
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : "Nao foi possivel salvar a reacao.");
+      void loadLessonComments(activeLessonKey);
+    }
   }
 
-  function handleCommentReport(commentId: string) {
+  async function handleCommentReport(commentId: string) {
+    setCommentError("");
     setReportedCommentIds((current) => {
       const next = new Set(current);
       next.add(commentId);
       return next;
     });
     setCommentMenuId(null);
+
+    try {
+      const response = await fetch(`/api/comments/${encodeURIComponent(commentId)}/report`, {
+        body: JSON.stringify({}),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const payload = await response.json() as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Nao foi possivel enviar a denuncia.");
+      }
+    } catch (error) {
+      setReportedCommentIds((current) => {
+        const next = new Set(current);
+        next.delete(commentId);
+        return next;
+      });
+      setCommentError(error instanceof Error ? error.message : "Nao foi possivel enviar a denuncia.");
+    }
   }
 
   function handleReplyStart(parentCommentId: string, target: Pick<LessonCommentBase, "author" | "username">) {
@@ -1774,7 +3259,7 @@ export function LessonExperience({
 
       return `${mention}${nextBody}`;
     });
-    setActiveTab("comments");
+    selectLessonTab("comments");
     window.requestAnimationFrame(() => {
       commentInputRef.current?.focus();
     });
@@ -1804,8 +3289,38 @@ export function LessonExperience({
       return;
     }
 
-    setActiveModuleId(courseModule.id);
-    setActiveLessonId(lesson.id);
+    if (lesson.id === activeLessonKey) {
+      setActiveModuleId(courseModule.id);
+      return;
+    }
+
+    const selectionRequest = lessonSelectionRequestRef.current + 1;
+    lessonSelectionRequestRef.current = selectionRequest;
+
+    void (async () => {
+      await flushActiveLessonProgress();
+
+      if (lessonSelectionRequestRef.current !== selectionRequest) {
+        return;
+      }
+
+      setCommentText("");
+      setReplyTarget(null);
+      setCommentMenuId(null);
+      setCommentReactionMenuId(null);
+      pendingTutorSeekRef.current = null;
+      readyYouTubePlayerRef.current = null;
+      pendingYouTubePlayLessonIdRef.current = null;
+      youTubePlaybackIntentLessonIdRef.current = null;
+      setYouTubeControlState(initialYouTubeControlState);
+      closeYouTubeSettingsMenu();
+      setActiveModuleId(courseModule.id);
+      setActiveEmbedResume({
+        lessonId: lesson.id,
+        seconds: lessonWatchStatesRef.current[lesson.id]?.progressSeconds ?? 0
+      });
+      setActiveLessonId(lesson.id);
+    })();
   }
 
   function handleLessonRowKeyDown(
@@ -1821,58 +3336,48 @@ export function LessonExperience({
     handleLessonSelect(courseModule, lesson);
   }
 
-  function handleCommentSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleCommentSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const body = commentText.trim();
 
-    if (!body) {
+    if (!body || commentSubmitting || !activeLessonKey) {
       return;
     }
+    const submittedLessonId = activeLessonKey;
+    const submittedReplyTarget = replyTarget;
+    setCommentSubmitting(true);
+    setCommentError("");
 
-    const baseComment: LessonCommentBase = {
-      author: "Danilo Souza",
-      avatar: currentUserCommentAvatar,
-      body,
-      id: `comment-${Date.now()}`,
-      reactions: {},
-      time: "agora",
-      username: "danilo.souza"
-    };
+    try {
+      const response = await fetch(`/api/comments/lessons/${encodeURIComponent(submittedLessonId)}`, {
+        body: JSON.stringify({
+          body,
+          contentId: item.id,
+          parentCommentId: submittedReplyTarget?.parentCommentId
+        }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        method: "POST"
+      });
+      const payload = await response.json() as { data?: LessonCommentRecord; error?: string };
 
-    if (replyTarget) {
-      setComments((current) => current.map((comment) => {
-        if (comment.id !== replyTarget.parentCommentId) {
-          return comment;
-        }
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error ?? "Nao foi possivel enviar o comentario.");
+      }
 
-        const reply: LessonCommentReply = {
-          ...baseComment,
-          id: `reply-${Date.now()}`,
-          parentId: comment.id
-        };
-
-        return {
-          ...comment,
-          replies: [...(comment.replies ?? []), reply]
-        };
-      }));
-    } else {
-      setComments((current) => [
-        ...current,
-        {
-          ...baseComment,
-          id: `comment-${Date.now()}`
-        }
-      ]);
+      setReplyTarget(null);
+      setCommentText("");
+      selectLessonTab("comments");
+      await loadLessonComments(submittedLessonId);
+    } catch (error) {
+      setCommentError(error instanceof Error ? error.message : "Nao foi possivel enviar o comentario.");
+    } finally {
+      setCommentSubmitting(false);
     }
-
-    setReplyTarget(null);
-    setCommentText("");
-    setActiveTab("comments");
   }
 
   const primaryActionLabel = isActiveLessonLocked ? "Bloqueada" : isActiveLessonCompleted ? "Concluida" : "Concluir";
-  const canSubmitComment = commentText.trim().length > 0;
+  const canSubmitComment = commentText.trim().length > 0 && !commentSubmitting && !isActiveLessonLocked;
   const returnHref = withAccessPreviewParam(`/conteudo/${returnContent?.id ?? item.id}`, accessPreviewMode);
   const returnLabel = returnContent?.title ?? item.title;
 
@@ -1889,14 +3394,224 @@ export function LessonExperience({
     }
 
     event.preventDefault();
+    startNavigation(href);
 
     void (async () => {
       await flushActiveLessonProgress();
       router.push(href);
-      window.setTimeout(() => {
-        router.refresh();
-      }, 0);
     })();
+  }
+
+  function renderYouTubeCaptionsButton() {
+    return (
+      <button
+        aria-label={youTubeCaptionsActionLabel}
+        aria-pressed={youTubeCaptionsAvailable && youTubeCaptionsEnabled}
+        className={`group/action relative grid h-10 w-10 shrink-0 place-items-center transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-45 sm:h-11 sm:w-11 ${
+          youTubeCaptionsAvailable && youTubeCaptionsEnabled
+            ? "text-[var(--accent)]"
+            : "text-white"
+        }`}
+        disabled={!youTubeCaptionsAvailable}
+        onClick={() => {
+          setYouTubeCaptionsEnabled((current) => !current);
+          closeYouTubeSettingsMenu();
+        }}
+        type="button"
+      >
+        <ActionTooltip label={youTubeCaptionsActionLabel} />
+        <ClosedCaption className="h-5 w-5" strokeWidth={2} />
+      </button>
+    );
+  }
+
+  function renderYouTubeQualityControl(placement: "above" | "below") {
+    const panelId = `youtube-settings-${placement}`;
+    const playbackRateLabel = formatPlaybackRate(youTubeControlState.playbackRate);
+    const playbackRateSummary = getPlaybackRateMenuLabel(youTubeControlState.playbackRate);
+    const qualitySummary = effectiveYouTubeSelectedQuality === "auto"
+      ? effectiveYouTubeAutomaticQuality
+        ? `Automático (${getYouTubeQualityDisplayName(effectiveYouTubeAutomaticQuality)})`
+        : "Automático"
+      : effectiveYouTubeSelectedQuality;
+
+    return (
+      <div className="group/action relative" data-youtube-settings-control>
+        <button
+          aria-controls={panelId}
+          aria-expanded={youTubeSettingsMenuOpen}
+          aria-label={`Configuracoes do video: velocidade ${playbackRateLabel}, qualidade ${effectiveYouTubeQualityDescription}`}
+          className={`relative grid h-10 w-10 shrink-0 place-items-center transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:h-11 sm:w-11 ${
+            youTubeSettingsMenuOpen ? "text-[var(--accent)]" : "text-white"
+          }`}
+          onClick={handleYouTubeSettingsMenuToggle}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              closeYouTubeSettingsMenu();
+            }
+          }}
+          type="button"
+        >
+          <Settings className="h-5 w-5" strokeWidth={2} />
+          <span
+            aria-hidden="true"
+            className="absolute right-0 top-0 rounded-[2px] bg-[var(--accent)] px-0.5 text-[7px] font-black leading-[10px] tracking-[-0.02em] text-white shadow-[0_1px_2px_rgba(0,0,0,0.9)] sm:right-0.5 sm:top-0.5"
+            data-youtube-quality-badge
+          >
+            {getYouTubeQualityBadge(effectiveYouTubeQualityBadgeSource)}
+          </span>
+        </button>
+
+        {youTubeSettingsMenuOpen ? (
+          <div
+            aria-label="Configuracoes do video"
+            className={`absolute -right-10 w-[min(26rem,calc(100vw-1rem))] rounded-2xl border border-white/10 bg-black/85 p-1.5 text-left text-white shadow-2xl shadow-black/50 backdrop-blur-xl sm:right-0 ${
+              placement === "above" ? "bottom-full mb-2" : "top-full mt-2"
+            }`}
+            data-youtube-settings-menu
+            id={panelId}
+            role="menu"
+          >
+            {youTubeSettingsMenuView === "root" ? (
+              <div data-youtube-settings-root>
+                <button
+                  className="grid min-h-12 w-full grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-normal transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                  onClick={() => setYouTubeSettingsMenuView("playbackRate")}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Gauge className="h-5 w-5 text-zinc-100" strokeWidth={1.8} />
+                  <span>Velocidade de reprodução</span>
+                  <span className="flex shrink-0 items-center gap-1.5 text-sm font-normal text-zinc-300">
+                    {playbackRateSummary}
+                    <ChevronRight className="h-4 w-4 text-zinc-400" strokeWidth={1.5} />
+                  </span>
+                </button>
+                <button
+                  className="grid min-h-12 w-full grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-normal transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                  onClick={() => setYouTubeSettingsMenuView("quality")}
+                  role="menuitem"
+                  type="button"
+                >
+                  <SlidersHorizontal className="h-5 w-5 text-zinc-100" strokeWidth={1.8} />
+                  <span>Qualidade</span>
+                  <span className="flex min-w-0 items-center gap-1.5 text-sm font-normal text-zinc-300">
+                    <span className="max-w-40 truncate">{qualitySummary}</span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" strokeWidth={1.5} />
+                  </span>
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex h-11 items-center border-b border-white/10 px-1" data-youtube-settings-submenu-header>
+                  <button
+                    aria-label="Voltar para configuracoes"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-full transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                    onClick={() => setYouTubeSettingsMenuView("root")}
+                    type="button"
+                  >
+                    <ChevronLeft className="h-5 w-5" strokeWidth={1.5} />
+                  </button>
+                  <p className="min-w-0 flex-1 pr-9 text-center text-sm font-medium">
+                    {youTubeSettingsMenuView === "playbackRate" ? "Velocidade de reprodução" : "Qualidade"}
+                  </p>
+                </div>
+
+                {youTubeSettingsMenuView === "playbackRate" ? (
+                  <div className="py-1" data-youtube-playback-rate-menu>
+                    {youTubeControlState.availablePlaybackRates.map((playbackRate) => (
+                      <button
+                        aria-checked={youTubeControlState.playbackRate === playbackRate}
+                        className="flex h-10 w-full items-center justify-between rounded-xl px-3 text-sm font-normal transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                        disabled={!youTubeControlState.isReady}
+                        key={playbackRate}
+                        onClick={() => handleYouTubePlaybackRateSelect(playbackRate)}
+                        role="menuitemradio"
+                        type="button"
+                      >
+                        <span>{getPlaybackRateMenuLabel(playbackRate)}</span>
+                        {youTubeControlState.playbackRate === playbackRate ? (
+                          <Check className="h-4 w-4 text-[var(--accent)]" />
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-1" data-youtube-quality-menu>
+                    {youTubeAvailableQualities.map((quality) => (
+                      <button
+                        aria-checked={effectiveYouTubeSelectedQuality === quality.label}
+                        className="flex h-10 w-full items-center justify-between rounded-xl px-3 text-sm font-normal transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                        key={quality.itag}
+                        onClick={() => handleYouTubeQualitySelect(quality.label)}
+                        role="menuitemradio"
+                        type="button"
+                      >
+                        <span>{quality.label}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-[11px] font-normal text-zinc-500">
+                            {quality.width}x{quality.height}
+                          </span>
+                          {effectiveYouTubeSelectedQuality === quality.label ? (
+                            <Check className="h-4 w-4 text-[var(--accent)]" />
+                          ) : null}
+                        </span>
+                      </button>
+                    ))}
+
+                    {youTubeStreamsStatus === "loading" ? (
+                      <p className="px-3 py-2 text-[11px] font-medium text-zinc-400" role="status">
+                        Carregando resolucoes...
+                      </p>
+                    ) : null}
+
+                    {youTubeStreamsStatus === "error" ? (
+                      <button
+                        className="mt-1 w-full rounded-md px-3 py-2 text-left text-[11px] font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                        onClick={() => setYouTubeStreamsReloadToken((current) => current + 1)}
+                        type="button"
+                      >
+                        Tentar carregar resolucoes novamente
+                      </button>
+                    ) : null}
+
+                    <button
+                      aria-checked={effectiveYouTubeSelectedQuality === "auto"}
+                      className="flex h-10 w-full items-center justify-between rounded-xl px-3 text-sm font-normal transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                      onClick={() => handleYouTubeQualitySelect("auto")}
+                      role="menuitemradio"
+                      type="button"
+                    >
+                      Automático
+                      {effectiveYouTubeSelectedQuality === "auto" ? <Check className="h-4 w-4 text-[var(--accent)]" /> : null}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderPlayerFullscreenButton() {
+    return (
+      <button
+        aria-label={isPlayerFullscreen ? "Sair da tela cheia" : "Tela cheia"}
+        aria-pressed={isPlayerFullscreen}
+        className="group/action relative grid h-10 w-10 shrink-0 place-items-center text-white transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:h-11 sm:w-11"
+        onClick={handlePlayerFullscreen}
+        type="button"
+      >
+        <ActionTooltip label={isPlayerFullscreen ? "Sair da tela cheia" : "Tela cheia"} />
+        {isPlayerFullscreen ? (
+          <Minimize className="h-5 w-5" strokeWidth={2} />
+        ) : (
+          <Maximize className="h-5 w-5" strokeWidth={2} />
+        )}
+      </button>
+    );
   }
 
   return (
@@ -1933,15 +3648,27 @@ export function LessonExperience({
 
       <div className={`lesson-experience-grid relative grid gap-6 ${playlistOpen ? "" : "lesson-experience-grid-collapsed"}`}>
         <div className="lesson-main-content min-w-0">
-          <div className="lesson-player-frame group/player relative z-0 aspect-video overflow-visible rounded-[8px] bg-black shadow-[0_32px_90px_rgba(0,0,0,0.58)]">
-            <div className="absolute inset-0 overflow-hidden rounded-[8px] bg-black">
+          <div
+            className="lesson-player-frame group/player relative z-0 aspect-video overflow-visible rounded-[8px] bg-black shadow-[0_32px_90px_rgba(0,0,0,0.58)]"
+            ref={lessonPlayerFrameRef}
+          >
+            <div
+              className={isPlayerFullscreen
+                ? "absolute left-1/2 top-1/2 aspect-video w-full max-w-[177.7778vh] -translate-x-1/2 -translate-y-1/2 overflow-hidden bg-black"
+                : "absolute inset-0 overflow-hidden rounded-[8px] bg-black"}
+              data-lesson-player-stage
+            >
               {!isActiveLessonLocked && activePlayerRenderConfig ? (
                 activePlayerRenderConfig.kind === "video" ? (
                   <video
                     className="h-full w-full bg-black object-contain"
                     controls
+                    onCanPlay={(event) => {
+                      consumePendingTutorSeekForNativeVideo(event.currentTarget, activeLessonKey);
+                    }}
                     onEnded={(event) => handleNativeVideoProgress(event.currentTarget, true, "completed")}
                     onLoadedMetadata={(event) => {
+                      if (consumePendingTutorSeekForNativeVideo(event.currentTarget, activeLessonKey)) return;
                       const resumeSeconds = initialResumeSecondsRef.current[activeLessonKey] ?? 0;
 
                       if (
@@ -1963,21 +3690,63 @@ export function LessonExperience({
                     src={activePlayerRenderConfig.src}
                   />
                 ) : canRenderEmbeddedPlayer ? (
-                  <iframe
-                    allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowFullScreen
-                    className="h-full w-full border-0"
-                    ref={
-                      activeLesson.video?.provider === "youtube" && activePlayerRenderConfig.kind === "iframe"
-                        ? youtubeIframeRef
-                        : undefined
-                    }
-                    referrerPolicy="strict-origin-when-cross-origin"
-                    sandbox="allow-same-origin allow-scripts allow-presentation allow-popups"
-                    src={activePlayerRenderConfig.kind === "iframe" ? activePlayerRenderConfig.src : undefined}
-                    srcDoc={activePlayerRenderConfig.kind === "srcdoc" ? activePlayerRenderConfig.srcDoc : undefined}
-                    title={activeLesson.title}
-                  />
+                  selectedYouTubeManualStream && youTubeStreamsResult.audio ? (
+                    <YouTubeManualStreamPlayer
+                      audioUrl={youTubeStreamsResult.audio.url}
+                      initialMuted={youTubeControlState.isMuted}
+                      initialPlaybackRate={youTubeControlState.playbackRate}
+                      initialVolume={youTubeControlState.volume}
+                      key={`${activeLessonKey}-manual-stream`}
+                      onAutoplayBlocked={handleManualYouTubeAutoplayBlocked}
+                      onControllerReady={handleManualYouTubeControllerReady}
+                      onEnded={handleManualYouTubeEnded}
+                      onError={handleManualYouTubeError}
+                      onPlaybackStateChange={handleManualYouTubePlaybackStateChange}
+                      posterUrl={videoPosterImage}
+                      shouldPlay={
+                        youTubeManualSwitch.lessonId === activeLessonKey &&
+                        youTubeManualSwitch.shouldPlay
+                      }
+                      startSeconds={
+                        youTubeManualSwitch.lessonId === activeLessonKey
+                          ? youTubeManualSwitch.seconds
+                          : youTubeCurrentTime
+                      }
+                      switchToken={youTubeManualSwitch.token}
+                      videoUrl={selectedYouTubeManualStream.url}
+                    />
+                  ) : (
+                    <iframe
+                      allow={usesCustomYouTubeControls ? "autoplay; encrypted-media" : "accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"}
+                      allowFullScreen={!usesCustomYouTubeControls}
+                      aria-hidden={usesCustomYouTubeControls ? "true" : undefined}
+                      className={usesCustomYouTubeControls
+                        ? "pointer-events-none absolute left-1/2 top-0 h-full w-[300%] max-w-none -translate-x-1/2 select-none border-0"
+                        : "h-full w-full border-0"}
+                      key={`${activeLessonKey}-${youTubeReloadToken}`}
+                      onError={usesCustomYouTubeControls ? () => {
+                        setYouTubeControlState((current) => ({
+                          ...current,
+                          errorCode: null,
+                          isReady: false,
+                          playbackState: "error"
+                        }));
+                      } : undefined}
+                      ref={
+                        activeLesson.video?.provider === "youtube" && activePlayerRenderConfig.kind === "iframe"
+                          ? youtubeIframeRef
+                          : undefined
+                      }
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      sandbox={usesCustomYouTubeControls
+                        ? "allow-same-origin allow-scripts allow-presentation"
+                        : "allow-same-origin allow-scripts allow-presentation allow-popups"}
+                      src={activePlayerRenderConfig.kind === "iframe" ? activePlayerRenderConfig.src : undefined}
+                      srcDoc={activePlayerRenderConfig.kind === "srcdoc" ? activePlayerRenderConfig.srcDoc : undefined}
+                      tabIndex={usesCustomYouTubeControls ? -1 : undefined}
+                      title={activeLesson.title}
+                    />
+                  )
                 ) : (
                   <>
                     <div
@@ -2000,13 +3769,204 @@ export function LessonExperience({
               )}
             </div>
 
+          {usesCustomYouTubeControls && canRenderEmbeddedPlayer ? (
+            <>
+              {/*
+                UX containment only: the iframe remains a YouTube embed. Its video ID is still
+                discoverable in page/network inspection, and YouTube UI changes can require
+                adjustments to the oversized edge crop. This is not DRM or source protection.
+              */}
+              {activeLessonStarted && activeYouTubeCaptionCue ? (
+                <div
+                  aria-live="off"
+                  className="pointer-events-none absolute inset-x-[6%] bottom-28 z-20 flex justify-center sm:inset-x-[10%] sm:bottom-20"
+                  data-youtube-custom-caption
+                >
+                  <span className="max-w-full whitespace-pre-line text-center text-sm font-bold leading-snug text-white [text-shadow:0_2px_2px_rgba(0,0,0,1),0_0_6px_rgba(0,0,0,0.95)] sm:text-lg lg:text-xl">
+                    {activeYouTubeCaptionCue.text}
+                  </span>
+                </div>
+              ) : null}
+
+              {activeLessonStarted ? (
+                <button
+                  aria-label={youTubeControlState.playbackState === "error"
+                    ? "Tentar reproduzir o video novamente"
+                    : `${youTubePlaybackActionLabel} aula`}
+                  className="absolute inset-0 z-10 overflow-hidden rounded-[8px] bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                  data-youtube-interaction-shield
+                  onClick={handleYouTubePlaybackToggle}
+                  type="button"
+                >
+                  {youTubeControlState.playbackState === "ended" || youTubeControlState.playbackState === "error" ? (
+                    <>
+                      <span
+                        aria-hidden="true"
+                        className="absolute inset-0 bg-cover bg-center"
+                        style={{ backgroundImage: `url(${videoPosterImage})` }}
+                      />
+                      <span aria-hidden="true" className="absolute inset-0 bg-black/60" />
+                      {youTubeControlState.playbackState === "ended" ? (
+                        <span
+                          aria-hidden="true"
+                          className="absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-black shadow-2xl shadow-black/60 sm:h-20 sm:w-20"
+                        >
+                          <Play className="ml-1 h-7 w-7 fill-current sm:h-9 sm:w-9" />
+                        </span>
+                      ) : (
+                        <span className="absolute left-1/2 top-1/2 w-[min(28rem,calc(100%-3rem))] -translate-x-1/2 -translate-y-1/2 text-center text-white">
+                          <span className="block text-sm font-bold sm:text-base">
+                            {getYouTubePlayerErrorMessage(youTubeControlState.errorCode)}
+                          </span>
+                          <span className="mt-2 block text-xs font-semibold text-zinc-300 sm:text-sm">
+                            Clique para tentar novamente.
+                          </span>
+                        </span>
+                      )}
+                    </>
+                  ) : null}
+                </button>
+              ) : null}
+
+              {activeLessonStarted ? (
+                <div
+                  aria-label="Controles do video"
+                  className={`pointer-events-none absolute inset-x-2 bottom-1.5 z-30 flex flex-col gap-0.5 text-white drop-shadow-[0_2px_3px_rgba(0,0,0,0.95)] transition-opacity duration-200 sm:inset-x-4 sm:bottom-2 ${
+                    isYouTubePlaying && !youTubeSettingsMenuOpen
+                      ? "opacity-100 sm:opacity-0 sm:group-hover/player:opacity-100 sm:group-focus-within/player:opacity-100"
+                      : "opacity-100"
+                  }`}
+                  data-youtube-custom-controls
+                  role="group"
+                >
+                  <input
+                    aria-label="Progresso do video"
+                    aria-valuetext={`${formatPlaybackTime(youTubeCurrentTime)} de ${formatPlaybackTime(youTubeDuration)}`}
+                    className="bunker-player-timeline pointer-events-auto w-full cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={!youTubeControlState.isReady || youTubeDuration <= 0}
+                    max={Math.max(youTubeDuration, 1)}
+                    min="0"
+                    onInput={handleYouTubeSeek}
+                    step="0.1"
+                    style={{ "--player-progress": `${youTubeProgressPercent}%` } as CSSProperties}
+                    type="range"
+                    value={youTubeCurrentTime}
+                  />
+
+                  <div
+                    aria-hidden="true"
+                    className="flex items-center justify-between px-1 text-[10px] font-medium leading-none tabular-nums text-white sm:hidden"
+                    data-youtube-mobile-time
+                  >
+                    <span>{formatPlaybackTime(youTubeCurrentTime)}</span>
+                    <span>{formatPlaybackTime(youTubeDuration)}</span>
+                  </div>
+
+                  <div className="flex min-w-0 items-center justify-between gap-0 sm:gap-2">
+                    <div
+                      className="pointer-events-auto flex min-w-0 items-center"
+                      data-youtube-primary-controls
+                    >
+                      <button
+                        aria-label={youTubePlaybackActionLabel}
+                        className="group/action relative grid h-10 w-10 shrink-0 place-items-center text-white transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:h-11 sm:w-11"
+                        onClick={handleYouTubePlaybackToggle}
+                        type="button"
+                      >
+                        <ActionTooltip label={youTubePlaybackActionLabel} />
+                        {isYouTubePlaying ? (
+                          <Pause className="h-5 w-5 fill-current" strokeWidth={2} />
+                        ) : (
+                          <Play className="ml-0.5 h-5 w-5 fill-current" strokeWidth={2} />
+                        )}
+                      </button>
+
+                      <button
+                        aria-label="Retroceder 10 segundos"
+                        className="group/action relative grid h-10 w-10 shrink-0 place-items-center text-white transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:h-11 sm:w-11"
+                        disabled={!youTubeControlState.isReady}
+                        onClick={() => handleYouTubeSkip(-10)}
+                        type="button"
+                      >
+                        <ActionTooltip label="Retroceder 10 segundos" />
+                        <RotateCcw className="h-6 w-6" strokeWidth={2} />
+                        <span aria-hidden="true" className="absolute text-[8px] font-extrabold leading-none">10</span>
+                      </button>
+
+                      <button
+                        aria-label="Avancar 10 segundos"
+                        className="group/action relative grid h-10 w-10 shrink-0 place-items-center text-white transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:h-11 sm:w-11"
+                        disabled={!youTubeControlState.isReady}
+                        onClick={() => handleYouTubeSkip(10)}
+                        type="button"
+                      >
+                        <ActionTooltip label="Avancar 10 segundos" />
+                        <RotateCw className="h-6 w-6" strokeWidth={2} />
+                        <span aria-hidden="true" className="absolute text-[8px] font-extrabold leading-none">10</span>
+                      </button>
+
+                      <button
+                        aria-label={youTubeControlState.isMuted ? "Ativar som" : "Silenciar"}
+                        className="group/action relative grid h-10 w-10 shrink-0 place-items-center text-white transition hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:h-11 sm:w-11"
+                        disabled={!youTubeControlState.isReady}
+                        onClick={handleYouTubeMuteToggle}
+                        type="button"
+                      >
+                        <ActionTooltip label={youTubeControlState.isMuted ? "Ativar som" : "Silenciar"} />
+                        {youTubeControlState.isMuted || youTubeControlState.volume === 0 ? (
+                          <VolumeX className="h-5 w-5" strokeWidth={2} />
+                        ) : (
+                          <Volume2 className="h-5 w-5" strokeWidth={2} />
+                        )}
+                      </button>
+
+                      <input
+                        aria-label="Volume"
+                        aria-valuetext={`${youTubeControlState.isMuted ? 0 : Math.round(youTubeControlState.volume)} por cento`}
+                        className="hidden h-11 w-14 cursor-pointer accent-white disabled:cursor-not-allowed disabled:opacity-50 md:block lg:w-16"
+                        disabled={!youTubeControlState.isReady}
+                        max="100"
+                        min="0"
+                        onInput={handleYouTubeVolumeChange}
+                        step="1"
+                        type="range"
+                        value={youTubeControlState.isMuted ? 0 : youTubeControlState.volume}
+                      />
+
+                      <span
+                        aria-label={`${formatPlaybackTime(youTubeCurrentTime)} de ${formatPlaybackTime(youTubeDuration)}`}
+                        className="ml-2 hidden shrink-0 text-xs font-medium tabular-nums text-white sm:inline"
+                      >
+                        {formatPlaybackTime(youTubeCurrentTime)} / {formatPlaybackTime(youTubeDuration)}
+                      </span>
+                    </div>
+
+                    <div
+                      className="pointer-events-auto flex shrink-0 items-center"
+                      data-youtube-secondary-controls
+                    >
+                      {renderYouTubeCaptionsButton()}
+                      {renderYouTubeQualityControl("above")}
+                      {renderPlayerFullscreenButton()}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
           {showPlayerClickOverlay ? (
             <button
-              aria-label="Reproduzir aula"
+              aria-label={isYouTubePlayerPreparing
+                ? "Preparando video"
+                : youTubeControlState.playbackState === "error"
+                  ? "Tentar carregar a aula novamente"
+                  : "Reproduzir aula"}
               className={`absolute inset-0 z-30 overflow-hidden rounded-[8px] text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
                 showPlayerPosterOverlay ? "bg-black" : "bg-transparent"
-              }`}
-              onClick={handlePlayerStart}
+              } disabled:cursor-wait`}
+              disabled={isYouTubePlayerPreparing}
+              onClick={usesCustomYouTubeControls ? handleYouTubePlaybackToggle : handlePlayerStart}
               type="button"
             >
               {showPlayerPosterOverlay ? (
@@ -2074,20 +4034,26 @@ export function LessonExperience({
               </p>
             </div>
           ) : activePlayerRenderConfig && !activeLessonStarted ? (
-            <button
-              aria-label="Reproduzir aula"
-              className="absolute left-1/2 top-1/2 z-40 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-black shadow-2xl shadow-black/55 transition hover:scale-105 hover:bg-zinc-200 sm:h-20 sm:w-20"
-              onClick={() => {
-                handlePlayerStart();
-
-                if (activePlayerRenderConfig.kind === "video") {
+            activePlayerRenderConfig.kind === "video" ? (
+              <button
+                aria-label="Reproduzir aula"
+                className="absolute left-1/2 top-1/2 z-40 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-black shadow-2xl shadow-black/55 transition hover:scale-105 hover:bg-zinc-200 sm:h-20 sm:w-20"
+                onClick={() => {
+                  handlePlayerStart();
                   void videoRef.current?.play();
-                }
-              }}
-              type="button"
-            >
-              <Play className="ml-1 h-7 w-7 fill-current sm:h-9 sm:w-9" />
-            </button>
+                }}
+                type="button"
+              >
+                <Play className="ml-1 h-7 w-7 fill-current sm:h-9 sm:w-9" />
+              </button>
+            ) : (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-1/2 top-1/2 z-40 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white text-black shadow-2xl shadow-black/55 sm:h-20 sm:w-20"
+              >
+                <Play className="ml-1 h-7 w-7 fill-current sm:h-9 sm:w-9" />
+              </span>
+            )
           ) : activePlayerRenderConfig ? null : (
             <button
               aria-label="Reproduzir aula"
@@ -2121,7 +4087,7 @@ export function LessonExperience({
                     type="button"
                   >
                     <ActionTooltip label="Tela cheia" />
-                    <Maximize2 className="h-4 w-4" />
+                    <Maximize className="h-4 w-4" />
                   </button>
                 </div>
               </div>
@@ -2131,7 +4097,7 @@ export function LessonExperience({
 
         <div className="lesson-details-header mt-6 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <h1 className="max-w-5xl text-2xl font-black leading-tight text-white sm:text-3xl lg:text-4xl">
+            <h1 className="max-w-5xl text-2xl font-black leading-tight text-[#ffffff] sm:text-3xl lg:text-4xl">
               {activeLesson.title}
             </h1>
             <p className="mt-4 max-w-4xl text-sm leading-6 text-zinc-300 sm:text-base sm:leading-7">
@@ -2170,20 +4136,31 @@ export function LessonExperience({
               <button
                 aria-label="Abrir materiais"
                 className={lessonIconButtonClassName}
-                onClick={() => setActiveTab("materials")}
+                onClick={handleMaterialsShortcut}
                 type="button"
               >
                 <ActionTooltip label="Materiais" />
                 <Download className="h-5 w-5 stroke-[2.35]" />
               </button>
-              <button
-                aria-label="Modo TV"
-                className={lessonIconButtonClassName}
-                type="button"
-              >
-                <ActionTooltip label="TV" />
-                <MonitorPlay className="h-5 w-5 stroke-[2.35]" />
-              </button>
+              <LessonTvControl
+                buttonClassName={lessonIconButtonClassName}
+                captionsEnabled={youTubeCaptionsEnabled}
+                contentId={item.id}
+                currentTimeSeconds={activeLessonVideoProvider === "youtube"
+                  ? youTubeCurrentTime
+                  : activeLessonWatchState?.progressSeconds ?? 0}
+                durationSeconds={activeLessonDurationSeconds ?? 0}
+                isPlaying={isYouTubePlaying}
+                key={activeLesson.id}
+                lessonId={activeLesson.id}
+                lessonTitle={activeLesson.title}
+                muted={youTubeControlState.isMuted}
+                onConnected={handleTvReceiverConnected}
+                onPlaybackRateConfirmed={handleTvPlaybackRateConfirmed}
+                playbackRate={youTubeControlState.playbackRate}
+                quality={effectiveYouTubeSelectedQuality}
+                volume={youTubeControlState.volume}
+              />
               <span className="group/action relative inline-grid">
                 <ActionTooltip label={activeLessonSaved ? "Remover da Minha lista" : "Adicionar a Minha lista"} />
                 <SavedItemButton
@@ -2216,29 +4193,39 @@ export function LessonExperience({
           </div>
         </div>
 
-        <div className="lesson-support-panel mt-8 overflow-visible rounded-[8px] border border-white/10 bg-[#181818]">
-          <div className="flex border-b border-white/10">
+        <div
+          className="lesson-support-panel mt-8 scroll-mt-24 overflow-visible rounded-[8px] border border-white/10 bg-[#181818]"
+          ref={lessonSupportPanelRef}
+        >
+          <div aria-label="Conteúdo da aula" className="flex overflow-x-auto border-b border-white/10" role="tablist">
             {[
-              { id: "comments" as const, label: "Comentarios", count: totalCommentCount, icon: MessageCircle },
-              { id: "materials" as const, label: "Materiais", count: lessonMaterials.length, icon: FileText }
+              { id: "comments" as const, label: "Comentários", count: totalCommentCount, icon: MessageCircle },
+              { id: "materials" as const, label: "Materiais", count: lessonMaterials.length, icon: FileText },
+              { id: "aiTutor" as const, label: "Tutor IA", count: null, icon: TutorAiIcon }
             ].map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
 
               return (
                 <button
-                  className={`relative inline-flex min-h-14 items-center gap-2 px-4 text-sm font-extrabold transition sm:px-6 ${
+                  aria-controls={`lesson-panel-${tab.id}`}
+                  aria-selected={isActive}
+                  className={`relative inline-flex min-h-14 shrink-0 items-center gap-2 px-4 text-sm font-extrabold transition sm:px-6 ${
                     isActive ? "text-white" : "text-zinc-400 hover:text-white"
                   }`}
+                  id={`lesson-tab-${tab.id}`}
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => selectLessonTab(tab.id)}
+                  role="tab"
                   type="button"
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-4 w-4" strokeWidth={1.9} />
                   {tab.label}
-                  <span className="grid min-w-6 place-items-center rounded-full bg-white/10 px-1.5 py-0.5 text-xs text-zinc-200">
-                    {tab.count}
-                  </span>
+                  {tab.count !== null ? (
+                    <span className="grid min-w-6 place-items-center rounded-full bg-white/10 px-1.5 py-0.5 text-xs text-zinc-200">
+                      {tab.count}
+                    </span>
+                  ) : null}
                   {isActive ? (
                     <span className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-[var(--accent)] sm:inset-x-6" />
                   ) : null}
@@ -2248,9 +4235,33 @@ export function LessonExperience({
           </div>
 
           {activeTab === "comments" ? (
-            <div className="p-4 sm:p-6">
+            <div
+              aria-labelledby="lesson-tab-comments"
+              className="p-4 sm:p-6"
+              id="lesson-panel-comments"
+              role="tabpanel"
+            >
               <div className="divide-y divide-white/[0.07]">
-                {comments.map((comment) => {
+                {commentsLoading ? (
+                  <div className="space-y-4 py-2" aria-label="Carregando comentarios">
+                    {[0, 1].map((item) => (
+                      <div className="flex animate-pulse gap-4 py-3" key={item}>
+                        <span className="h-11 w-11 shrink-0 rounded-full bg-white/10" />
+                        <span className="flex-1 space-y-2">
+                          <span className="block h-4 w-40 rounded bg-white/10" />
+                          <span className="block h-3 w-full max-w-2xl rounded bg-white/[0.06]" />
+                          <span className="block h-3 w-3/5 rounded bg-white/[0.06]" />
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : comments.length === 0 ? (
+                  <div className="py-8 text-center">
+                    <MessageCircle className="mx-auto h-8 w-8 text-zinc-600" />
+                    <p className="mt-3 text-sm font-bold text-zinc-200">Ainda nao ha comentarios nesta aula.</p>
+                    <p className="mt-1 text-sm text-zinc-500">Compartilhe uma duvida ou insight para iniciar a conversa.</p>
+                  </div>
+                ) : comments.map((comment) => {
                   const selectedReaction = commentReactionSelections[comment.id] ?? null;
                   const isMenuOpen = commentMenuId === comment.id;
                   const isReported = reportedCommentIds.has(comment.id);
@@ -2270,6 +4281,11 @@ export function LessonExperience({
                                 </span>
                               ) : null}
                               <span className="text-xs font-semibold text-zinc-500">{comment.time}</span>
+                              {comment.status === "pending" ? (
+                                <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+                                  Aguardando moderacao
+                                </span>
+                              ) : null}
                             </div>
                             <CommentBody body={comment.body} className="mt-1 max-w-3xl text-sm leading-6 text-zinc-300" />
                           </div>
@@ -2280,6 +4296,7 @@ export function LessonExperience({
                               aria-haspopup="menu"
                               aria-label={`Mais opcoes para comentario de ${comment.author}`}
                               className="grid h-8 w-8 place-items-center rounded-full text-zinc-500 opacity-100 transition hover:bg-white/10 hover:text-white focus-visible:bg-white/10 focus-visible:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:opacity-0 sm:group-hover/comment:opacity-100 sm:group-focus-within/comment:opacity-100"
+                              disabled={comment.isOwn}
                               onClick={() => {
                                 setCommentReactionMenuId(null);
                                 setCommentMenuId((current) => (current === comment.id ? null : comment.id));
@@ -2289,7 +4306,7 @@ export function LessonExperience({
                               <MoreHorizontal className="h-4 w-4" />
                             </button>
 
-                            {isMenuOpen ? (
+                            {isMenuOpen && !comment.isOwn ? (
                               <div className="absolute right-0 top-9 z-30 min-w-[14.25rem] overflow-hidden rounded-[8px] border border-white/10 bg-[#242424] p-1.5 shadow-2xl shadow-black/60">
                                 <button
                                   className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-[6px] px-3 py-2.5 text-left text-[13px] font-semibold leading-none text-zinc-200 transition hover:bg-white/10 hover:text-white disabled:cursor-default disabled:text-zinc-500 disabled:hover:bg-transparent"
@@ -2407,6 +4424,11 @@ export function LessonExperience({
                                             </span>
                                           ) : null}
                                           <span className="text-xs font-semibold text-zinc-500">{reply.time}</span>
+                                          {reply.status === "pending" ? (
+                                            <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+                                              Aguardando moderacao
+                                            </span>
+                                          ) : null}
                                         </div>
                                         <CommentBody body={reply.body} className="mt-1 max-w-3xl text-sm leading-6 text-zinc-300" />
                                       </div>
@@ -2417,6 +4439,7 @@ export function LessonExperience({
                                           aria-haspopup="menu"
                                           aria-label={`Mais opcoes para comentario de ${reply.author}`}
                                           className="grid h-8 w-8 place-items-center rounded-full text-zinc-500 opacity-100 transition hover:bg-white/10 hover:text-white focus-visible:bg-white/10 focus-visible:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:opacity-0 sm:group-hover/comment:opacity-100 sm:group-focus-within/comment:opacity-100"
+                                          disabled={reply.isOwn}
                                           onClick={() => {
                                             setCommentReactionMenuId(null);
                                             setCommentMenuId((current) => (current === reply.id ? null : reply.id));
@@ -2426,7 +4449,7 @@ export function LessonExperience({
                                           <MoreHorizontal className="h-4 w-4" />
                                         </button>
 
-                                        {isReplyMenuOpen ? (
+                                        {isReplyMenuOpen && !reply.isOwn ? (
                                           <div className="absolute right-0 top-9 z-30 min-w-[14.25rem] overflow-hidden rounded-[8px] border border-white/10 bg-[#242424] p-1.5 shadow-2xl shadow-black/60">
                                             <button
                                               className="flex w-full items-center gap-2.5 whitespace-nowrap rounded-[6px] px-3 py-2.5 text-left text-[13px] font-semibold leading-none text-zinc-200 transition hover:bg-white/10 hover:text-white disabled:cursor-default disabled:text-zinc-500 disabled:hover:bg-transparent"
@@ -2533,15 +4556,16 @@ export function LessonExperience({
                 })}
               </div>
 
+              {commentError && !commentsLoading ? (
+                <div className="mt-4 rounded-[8px] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100" role="alert">
+                  {commentError}
+                </div>
+              ) : null}
+
               <form className="mt-5 rounded-[8px] border border-white/10 bg-white/[0.045] p-3 shadow-inner shadow-black/20 sm:p-4" onSubmit={handleCommentSubmit}>
                 <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]">
                   <CommentAvatar
-                    avatar={{
-                      backgroundClassName: "bg-red-500",
-                      label: "DS",
-                      labelClassName: "text-[15px]",
-                      online: true
-                    }}
+                    avatar={currentUserCommentAvatar}
                     size="lg"
                   />
                   <div className="min-w-0">
@@ -2566,10 +4590,12 @@ export function LessonExperience({
                     <textarea
                       className="block min-h-20 w-full resize-none rounded-[8px] border border-white/10 bg-black/25 px-3 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-zinc-500 focus:border-[var(--accent)] focus:bg-black/35"
                       id="lesson-comment"
+                      maxLength={2000}
                       onChange={(event) => setCommentText(event.target.value)}
                       placeholder={replyTarget ? "Escreva sua resposta..." : "Escreva um comentario..."}
                       ref={commentInputRef}
                       rows={3}
+                      disabled={commentSubmitting || isActiveLessonLocked}
                       value={commentText}
                     />
                     <div className="mt-3 flex justify-end">
@@ -2584,15 +4610,22 @@ export function LessonExperience({
                         type="submit"
                       >
                         <Send className="h-4 w-4" />
-                        Enviar
+                        {commentSubmitting ? "Enviando..." : "Enviar"}
                       </button>
                     </div>
                   </div>
                 </div>
               </form>
             </div>
-          ) : (
-            <div className="p-4 sm:p-5">
+          ) : null}
+
+          {activeTab === "materials" ? (
+            <div
+              aria-labelledby="lesson-tab-materials"
+              className="p-4 sm:p-5"
+              id="lesson-panel-materials"
+              role="tabpanel"
+            >
               <div className="grid gap-3 sm:grid-cols-3">
                 {lessonMaterials.map((material) => {
                   const isMaterialLocked = Boolean(material.requiresRating && (!canRateLesson || !hasRatedLesson));
@@ -2640,7 +4673,25 @@ export function LessonExperience({
                 })}
               </div>
             </div>
-          )}
+          ) : null}
+
+          {activeLessonKey && (activeTab === "aiTutor" || mountedTutorLessonId === activeLessonKey) ? (
+            <div
+              aria-labelledby="lesson-tab-aiTutor"
+              hidden={activeTab !== "aiTutor"}
+              id="lesson-panel-aiTutor"
+              key={`${currentUserId}:${item.id}:${activeLessonKey}`}
+              role="tabpanel"
+            >
+              <LessonAiTutor
+                contentId={item.id}
+                isLocked={isActiveLessonLocked}
+                lessonId={activeLessonKey}
+                onSeek={handleTutorTimestampSeek}
+                userId={currentUserId}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -2660,15 +4711,25 @@ export function LessonExperience({
               <div className="flex min-h-36 min-w-0 flex-1 flex-col justify-between">
                 <div className="flex items-start justify-between gap-3">
                   <p className="line-clamp-3 text-[15px] font-semibold leading-snug text-white">{item.title}</p>
-                  <button
-                    aria-label="Esconder listagem de aulas"
-                    className="group/action relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/10 text-zinc-200 transition duration-300 hover:bg-white/15 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                    onClick={() => setPlaylistOpen(false)}
-                    type="button"
-                  >
-                    <ActionTooltip label="Esconder aulas" />
-                    <PanelRightClose className="h-5 w-5 stroke-[2.35]" />
-                  </button>
+                  <TooltipProvider delay={0}>
+                    <Tooltip>
+                      <TooltipTrigger
+                        aria-label="Esconder listagem de aulas"
+                        className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/10 text-zinc-200 transition duration-300 hover:bg-white/15 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                        onClick={() => setPlaylistOpen(false)}
+                        type="button"
+                      >
+                        <PanelRightClose className="h-5 w-5 stroke-[2.35]" />
+                      </TooltipTrigger>
+                      <TooltipContent
+                        className="rounded-[4px] px-4 py-2 text-[13px] font-medium shadow-xl shadow-black/35"
+                        side="top"
+                        sideOffset={12}
+                      >
+                        Esconder aulas
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold text-zinc-400">
@@ -2759,7 +4820,9 @@ export function LessonExperience({
                               <span className="relative aspect-video overflow-hidden rounded-[6px] bg-black">
                                 <span
                                   className="absolute inset-0 bg-cover bg-center transition duration-500 group-hover:scale-105"
-                                  style={{ backgroundImage: `url(${lesson.image ?? courseModule.image})` }}
+                                  style={{
+                                    backgroundImage: `url(${getYouTubeThumbnailUrl(lesson.video) || lesson.image || courseModule.image})`
+                                  }}
                                 />
                                 <span className={`absolute inset-0 transition-colors ${
                                   isLessonLocked ? "bg-black/68" : isActive ? "bg-black/70" : "bg-black/[0.2]"

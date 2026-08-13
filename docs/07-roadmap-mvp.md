@@ -52,6 +52,7 @@ Entregas:
 - pagina de curso avulso, formacao ou bootcamp;
 - pagina da aula;
 - player integrado;
+- Modo TV proprio para YouTube com codigo/QR temporario, controle remoto e progresso persistido;
 - playlist lateral;
 - tabs de descricao/materiais/comentarios;
 - dados persistidos com seed inicial.
@@ -66,9 +67,13 @@ Entregas:
 - dashboard escuro inspirado em Netflix/ad manager;
 - catalogo de produtos e conteudos;
 - construtor de formacoes, cursos internos, modulos e aulas;
+- area `Personalizacao` no CRM com lista inicial de destinos editaveis e editores fieis para login, pagina de produtos, paginas de cursos, estrutura interna e vitrine/home;
+- itens de CRM para Produtos, Combos, Comunidade, Moderacao, Agentes de IA e Configuracoes > Integracoes;
+- CRUD persistido de combos de produtos, com turma padrao `Turma A` quando nenhuma turma for criada;
+- moderacao persistida de comentarios e palavras bloqueadas; integracoes externas e agentes de IA continuam em configuracao UI-first;
 - regras de liberacao por compra, horas, dias, data fixa e atividade dentro do editor de formacoes, cursos, modulos e aulas;
 - entitlements e webhooks externos como camada tecnica/auditavel, nao como item solto da sidebar principal;
-- Supabase Postgres/RLS com seeds alinhadas ao modelo futuro e fallback local apenas para desenvolvimento sem variaveis.
+- Supabase Postgres/RLS como fonte unica de runtime, sem seeds automaticas, mocks ou fallback local.
 
 ## Fase 4: Banco e acesso
 
@@ -95,6 +100,8 @@ Entregas:
 - webhook manual/fake para testes;
 - adaptador Hotmart;
 - adaptador Ticto;
+- adaptador TikTok/Kiwify quando entrar no fluxo comercial;
+- mapeamento de provider para produto ou combo interno;
 - idempotencia;
 - logs de eventos;
 - tela de meus acessos.
@@ -116,12 +123,14 @@ Entregas:
 
 Funcionalidades:
 
-- comunidade;
+- comunidade completa;
 - ranking;
 - conversas;
 - certificados;
 - notificacoes;
-- IA da aula;
+- analise automatizada de sentimento, temas e insights dos comentarios para produtores (a persistencia e a moderacao operacional ja estao implementadas);
+- Implementado antecipadamente: Tutor IA conectado a transcricoes versionadas, chunks, BYOK de Gemini/OpenAI/Anthropic, entitlement, citacoes e historico por aluno/aula/chat;
+- Implementado antecipadamente: IA Diretor global para localizar conteudos autorizados, recomendar caminhos e montar trilhas, com historico separado, referencias internas validadas e consumo auditado;
 - dashboard do professor/admin;
 - automacoes de upsell/downsell.
 

@@ -1,11 +1,16 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, LockKeyhole, Play } from "lucide-react";
+import { Lock, Play } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cardActionClassName } from "@/components/card-action-style";
+import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
+import {
+  CarouselEdgeControls,
+  CarouselPaginationIndicator,
+  getCarouselMetrics
+} from "@/components/carousel-navigation";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import type { AccessPreviewMode } from "@/lib/access-preview";
@@ -23,6 +28,7 @@ type ContentStructureSectionProps = {
   internalCardActionMode: InternalCardActionMode;
   item: ContentItem;
   modules: CourseModule[];
+  showLockedStates?: boolean;
 };
 
 type InternalPosterCardProps = {
@@ -65,10 +71,12 @@ function InternalPosterCard({
   showProgress = true,
   title
 }: InternalPosterCardProps) {
-  const router = useRouter();
+  const router = useNavigationFeedbackRouter();
   const imageStateClass = isLocked
     ? "grayscale saturate-0 contrast-110 brightness-75 group-hover:grayscale-0 group-hover:saturate-100 group-hover:contrast-100 group-hover:brightness-100"
     : "";
+  const lockedAccessibilityDetail =
+    isLocked ? (lockedDetail ?? lockedTitle ?? "Conteudo bloqueado") : undefined;
 
   function prefetchPosterDestination() {
     if (!isLocked) {
@@ -78,8 +86,9 @@ function InternalPosterCard({
 
   return (
     <Link
-      aria-label={`Abrir ${title}`}
-      className="home-cover-card internal-poster-card group relative aspect-[1000/1618] w-[11rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[13.75rem] md:w-[15.5rem] lg:w-[18.75rem] 2xl:w-[20rem]"
+      aria-label={lockedAccessibilityDetail ? `${title}. ${lockedAccessibilityDetail}` : `Abrir ${title}`}
+      className="home-cover-card internal-poster-card group relative aspect-[720/1040] w-[11rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[13.75rem] md:w-[15.5rem] lg:w-[18.75rem] 2xl:w-[20rem]"
+      data-navigation-feedback={isLocked ? "false" : undefined}
       href={href}
       onClick={(event) => {
         if (isLocked) {
@@ -98,17 +107,9 @@ function InternalPosterCard({
             style={{ backgroundImage: `url(${image})` }}
           />
           {isLocked ? (
-            <div className="absolute inset-0 z-20 flex items-start justify-center bg-black/46 p-3 text-center backdrop-blur-[1px]">
-              <div className="mt-3 w-full rounded-[8px] border border-white/12 bg-black/72 px-3 py-3 shadow-2xl shadow-black/40">
-                <LockKeyhole className="mx-auto h-6 w-6 stroke-[2.8] text-white" />
-                <p className="mt-2 text-xs font-black leading-tight text-white">
-                  {lockedTitle ?? "Conteudo bloqueado"}
-                </p>
-                {lockedDetail ? (
-                  <p className="mt-1 text-[11px] font-semibold leading-4 text-zinc-300">{lockedDetail}</p>
-                ) : null}
-              </div>
-              <span className="sr-only">Conteudo bloqueado</span>
+            <div className="absolute right-2.5 top-2.5 z-20 grid h-8 w-8 place-items-center rounded-full bg-black/65 text-white shadow-[0_10px_24px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-[2px] sm:right-3 sm:top-3 sm:h-9 sm:w-9 md:h-10 md:w-10 lg:right-4 lg:top-4 lg:h-11 lg:w-11">
+              <Lock className="h-3.5 w-3.5 stroke-[3] sm:h-4 sm:w-4 md:h-[1.1rem] md:w-[1.1rem] lg:h-5 lg:w-5" aria-hidden="true" />
+              <span className="sr-only">{lockedTitle ?? "Conteudo bloqueado"}</span>
             </div>
           ) : null}
           <div className="home-cover-card-overlay absolute inset-0" />
@@ -152,7 +153,7 @@ function InternalPosterCard({
           aria-hidden="true"
           className="h-auto w-full object-contain"
           height={35}
-          src="/brand/logo-bunker.png"
+          src="/brand/logo-bunker.svg"
           unoptimized
           width={306}
         />
@@ -172,6 +173,8 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
   const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [pageCount, setPageCount] = useState(1);
 
   const updateScrollState = useCallback(() => {
     const row = rowRef.current;
@@ -180,12 +183,16 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
       return;
     }
 
-    const maxScrollLeft = Math.max(row.scrollWidth - row.clientWidth, 0);
-    const hasOverflow = maxScrollLeft > 4;
+    const metrics = getCarouselMetrics(row, {
+      minScrollDistance: 320,
+      scrollFraction: 0.78
+    });
 
-    setHasHorizontalOverflow(maxScrollLeft > 4);
-    setCanScrollLeft(hasOverflow && row.scrollLeft > 4);
-    setCanScrollRight(hasOverflow && row.scrollLeft < maxScrollLeft - 4);
+    setHasHorizontalOverflow(metrics.hasOverflow);
+    setCanScrollLeft(metrics.canScrollLeft);
+    setCanScrollRight(metrics.canScrollRight);
+    setCurrentPage(metrics.currentPage);
+    setPageCount(metrics.pageCount);
   }, []);
 
   useEffect(() => {
@@ -216,10 +223,13 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
       return;
     }
 
-    const distance = Math.max(320, row.clientWidth * 0.78);
+    const { scrollDistance } = getCarouselMetrics(row, {
+      minScrollDistance: 320,
+      scrollFraction: 0.78
+    });
     row.scrollBy({
       behavior: "smooth",
-      left: direction === "right" ? distance : -distance
+      left: direction === "right" ? scrollDistance : -scrollDistance
     });
 
     window.setTimeout(updateScrollState, 420);
@@ -235,33 +245,29 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
           ) : null}
         </div>
         {hasHorizontalOverflow ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              aria-label={`Ver cards anteriores de ${title}`}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
-              disabled={!canScrollLeft}
-              onClick={() => scrollRow("left")}
-              type="button"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              aria-label={`Ver proximos cards de ${title}`}
-              className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/10 text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-white/10 lg:h-9 lg:w-9"
-              disabled={!canScrollRight}
-              onClick={() => scrollRow("right")}
-              type="button"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
+          <CarouselPaginationIndicator
+            currentPage={currentPage}
+            label={`Posicao do carrossel ${title}`}
+            pageCount={pageCount}
+          />
         ) : null}
       </div>
-      <div
-        className="scrollbar-hidden flex scroll-smooth gap-[0.75rem] overflow-x-auto overflow-y-hidden overscroll-x-contain px-5 py-4 sm:px-8 lg:px-12"
-        ref={rowRef}
-      >
-        {children}
+      <div className="relative">
+        <div
+          className="scrollbar-hidden flex scroll-smooth gap-[0.75rem] overflow-x-auto overflow-y-hidden overscroll-x-contain px-5 py-4 sm:px-8 lg:px-12"
+          ref={rowRef}
+        >
+          {children}
+        </div>
+        <CarouselEdgeControls
+          canScrollLeft={canScrollLeft}
+          canScrollRight={canScrollRight}
+          nextLabel={`Ver proximos cards de ${title}`}
+          onNext={() => scrollRow("right")}
+          onPrevious={() => scrollRow("left")}
+          previousLabel={`Ver cards anteriores de ${title}`}
+          verticalInset="internal"
+        />
       </div>
     </section>
   );
@@ -273,7 +279,8 @@ export function ContentStructureSection({
   formationCourses,
   internalCardActionMode,
   item,
-  modules
+  modules,
+  showLockedStates = true
 }: ContentStructureSectionProps) {
   const isFormation = item.kind === "Formacao";
   const isCourseLike = ["Curso", "Bootcamp", "Mentoria", "Webinario", "Produto"].includes(item.kind);
@@ -303,7 +310,7 @@ export function ContentStructureSection({
               ? `/conteudo/${course.id}/aulas/${firstModule.id}`
               : `/conteudo/${course.id}`;
             const releaseNotice = getReleaseRuleNotice(course.releaseRule, "curso");
-            const isLocked = Boolean(item.isLocked || course.isLocked || releaseNotice?.isLocked);
+            const isLocked = showLockedStates && Boolean(item.isLocked || course.isLocked || releaseNotice?.isLocked);
             const lockedDetail = item.isLocked
               ? "Este curso faz parte de um conteudo que ainda nao esta liberado para este aluno."
               : releaseNotice?.detail;
@@ -341,7 +348,7 @@ export function ContentStructureSection({
           {modules.map((module) => {
             const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo");
             const hasLessons = module.lessons.length > 0;
-            const isLocked = Boolean(item.isLocked || releaseNotice?.isLocked || !hasLessons);
+            const isLocked = Boolean((showLockedStates && (item.isLocked || releaseNotice?.isLocked)) || !hasLessons);
             const lockedDetail = item.isLocked
               ? "Este modulo fica disponivel quando o aluno tiver acesso ao conteudo."
               : !hasLessons

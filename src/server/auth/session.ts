@@ -2,7 +2,6 @@ import "server-only";
 
 import type { User } from "@supabase/supabase-js";
 import { hasSupabaseAuthConfig } from "@/server/auth/config";
-import { getLocalAuthenticatedUser } from "@/server/auth/local";
 import { createSupabaseServerClient } from "@/server/auth/supabase";
 
 export type AuthenticatedUser = User;
@@ -12,37 +11,46 @@ const adminRoles = new Set<AdminRole>(["owner", "admin", "editor", "support", "a
 
 export async function getAuthenticatedUser() {
   if (!hasSupabaseAuthConfig()) {
-    return getLocalAuthenticatedUser();
-  }
-
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.auth.getUser();
-
-  if (error || !data.user) {
     return null;
   }
 
-  return data.user;
+  const supabase = await createSupabaseServerClient();
+
+  try {
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user) {
+      return null;
+    }
+
+    return data.user;
+  } catch {
+    return null;
+  }
 }
 
 export async function getAdminRoleForUser(userId: string) {
   if (!hasSupabaseAuthConfig()) {
-    const localUser = await getLocalAuthenticatedUser();
-    return localUser?.id === userId ? "owner" : null;
-  }
-
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("admin_roles")
-    .select("role")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error || !data || typeof data.role !== "string") {
     return null;
   }
 
-  return adminRoles.has(data.role as AdminRole) ? (data.role as AdminRole) : null;
+  const supabase = await createSupabaseServerClient();
+
+  try {
+    const { data, error } = await supabase
+      .from("admin_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error || !data || typeof data.role !== "string") {
+      return null;
+    }
+
+    return adminRoles.has(data.role as AdminRole) ? (data.role as AdminRole) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function getUserDisplayName(user: Pick<User, "email" | "user_metadata">) {

@@ -179,7 +179,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
   const isCourseLike = supportsCoursePresentationMode(item);
   const firstModule = courseModules[0];
 
-  if (isCourseLike && coursePresentationMode === "lesson_playlist" && firstModule) {
+  if (isCourseLike && !item.isLocked && coursePresentationMode === "lesson_playlist" && firstModule) {
     redirect(withAccessPreviewParam(`/conteudo/${item.id}/aulas/${firstModule.id}`, accessPreviewMode));
   }
 

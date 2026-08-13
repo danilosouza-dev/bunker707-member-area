@@ -16,7 +16,8 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - pagina de aula com player, playlist, materiais e comentarios;
 - webhooks de plataformas externas;
 - eventos comportamentais para dashboards futuros;
-- IA futura para tirar duvidas dentro das aulas;
+- Tutor IA por aula para tirar duvidas somente sobre aquela aula;
+- IA Diretor, separada do Tutor, para orientar o aluno sobre cursos, assuntos, trilhas e a plataforma como um todo;
 - base de dados preparada para metricas, segmentacao e personalizacao.
 
 ## Documentos
@@ -34,6 +35,7 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Inventario da coleta Astron](docs/11-inventario-coleta-astron.md)
 - [Design system Bunker707](docs/12-design-system-bunker707.md)
 - [Padroes de engenharia e repositorio](docs/13-padroes-engenharia.md)
+- [Auditoria tecnica de 10/07/2026](docs/14-auditoria-tecnica-2026-07-10.md)
 
 ## Padroes de trabalho
 
@@ -70,27 +72,42 @@ O repositorio ja possui a base inicial do app:
 - pagina propria de formacao/curso com breadcrumb;
 - pagina `Minhas compras` em `/minhas-compras`;
 - login real com Supabase Auth, middleware de sessao e callback OAuth;
-- modo local de desenvolvimento para navegar sem Supabase quando `NODE_ENV !== "production"`;
 - paginas autenticadas protegidas por sessao;
 - CMS/admin em `/admin` protegido por papel em `admin_roles`;
 - hero de conteudo configuravel por backend persistido;
 - cards internos de cursos e modulos;
-- pagina da aula com player, playlist, materiais, comentarios e progresso persistido no backend;
+- pagina da aula com player, playlist, materiais, progresso e comentarios/respostas/reacoes/denuncias persistidos no backend;
+- Modo TV proprio para aulas do YouTube, com pareamento temporario por codigo ou QR, controle remoto no celular e progresso da reproducao persistido no Supabase;
+- Tutor IA funcional na pagina da aula, com respostas baseadas no conteudo da aula, timestamps clicaveis, historico persistente, varios chats independentes por aluno/aula, exclusao logica e cache privado em memoria que preserva o estado entre abas sem armazenar conversas no cache HTTP;
+- transcricoes versionadas no Supabase, importadas da legenda publica do YouTube ou enviadas pelo produtor em SRT, VTT, TXT ou texto colado quando o video nao possui legenda;
+- Bunker AI LB server-side para Gemini, OpenAI/GPT e Anthropic/Claude, com varias conexoes por API ou conta, prioridade, round-robin, saude, cooldown e fallback; chaves de API ficam criptografadas no Supabase Vault e logins por conta passam por um gateway isolado;
+- consumo de IA auditavel por tipo de agente, tutor/aula, aluno, provedor, modelo e conexao, incluindo ranking administrativo dos alunos que mais usam IA;
+- IA Diretor (`platform_guide`) em chat flutuante global, com busca somente no catalogo autorizado do aluno, recomendacao de caminhos e trilhas, referencias internas validadas, historico persistente, varios chats, renomeacao e exclusao logica, sem compartilhar contexto com o Tutor IA (`lesson_tutor`);
 - favoritos/minha lista persistidos por aluno para produtos, conteudos e aulas;
 - pagina `Favoritos` em `/favoritos`, acessivel pela sidebar, reunindo tudo que o aluno salvou;
-- CMS/admin em `/admin`, com dashboard, catalogo, estrutura de conteudo, CRM de alunos e turmas; regras de liberacao sao configuradas dentro de formacoes, cursos, modulos e aulas;
+- CMS/admin em `/admin`, com dashboard, catalogo, estrutura de conteudo, personalizacao, CRM de alunos e turmas; regras de liberacao sao configuradas dentro de formacoes, cursos, modulos e aulas;
+- CRM com navegacao expandida para Produtos, Combos, Comunidade, Moderacao, Agentes de IA e Configuracoes > Integracoes;
+- CRUD persistido de combos de produtos, usando `Turma A` como padrao quando nenhuma turma foi criada;
+- moderacao persistida de comentarios e palavras bloqueadas no CRM, com fila por status/denuncia e auditoria das acoes;
+- area de Personalizacao no CRM com lista inicial de vitrine, login, pagina de produtos e produtos/cursos; cada item abre um editor proprio com representacao fiel da pagina final e opcoes laterais de edicao;
 - separacao visual e de navegacao entre area de membros (`/`) e CRM/backoffice (`/admin`), com logos levando para a home correta e atalhos entre as duas experiencias para usuarios admin;
 - fluxo inicial de criacao no CMS para formacoes, cursos, mentorias, webinarios, produtos e bootcamps, com capa, acesso gratuito/fechado, limite de estudantes, link externo de compra e regras de entrega por data ou por dias apos inscricao;
-- construtor em passos dentro do Catalogo para salvar a configuracao inicial e, no mesmo local, cadastrar modulos e aulas;
+- construtor em passos dentro do Catalogo para salvar a configuracao inicial e, no mesmo local, cadastrar, editar, reordenar e excluir modulos e aulas;
+- feedback de carregamento e persistencia no CRM, com estado local nos controles acionados, status global acessivel e confirmacao explicita de sucesso ou erro;
 - opcao no CMS para exibir na home uma secao com capa pequena do curso e cards menores dos modulos de um curso especifico, util para produtores com catalogo curto;
 - upload local da capa vertical do card em 720 x 1040 px e hero opcional da pagina propria em 1920 x 720 px;
 - modo de preview na area de membros para navegar como sessao atual, produtor/admin, aluno com acesso ou aluno sem acesso, visivel somente para usuarios internos com papel em `admin_roles`;
-- Supabase Postgres/RLS como persistencia primaria, com fallback local em `.data/bunker707-platform.json` apenas quando as variaveis Supabase nao estao configuradas no ambiente de desenvolvimento.
-- quando Supabase esta configurado, a base real nao recebe seed/demo automaticamente; cursos, formacoes, modulos, turmas, alunos, aulas e progresso entram por cadastros persistidos e APIs server-side.
+- Supabase Postgres/RLS como unica persistencia de runtime para catalogo, alunos, acessos, favoritos, progresso, comentarios, moderacao e configuracoes;
+- leituras da area do aluno isoladas por usuario e memoizadas por request, sem carregar dados administrativos ou de outros alunos;
+- gravacoes granulares no Supabase para conteudo, modulos, aulas, favoritos e progresso, sem regravar a base inteira;
+- imagens de conteudo no Supabase Storage, com limite de 8 MB, formatos JPG/PNG/WebP e cache imutavel, sem Base64 dentro das linhas do banco ou do HTML;
+- autorizacao centralizada de aulas, incluindo pertencimento ao conteudo, publicacao, regra de liberacao e entitlement da formacao principal;
+- relacao explicita entre curso interno e formacao principal por `content_page_settings.parentFormationId` enquanto a tabela relacional definitiva nao e materializada;
+- a base real nao recebe seed/demo automaticamente; cursos, formacoes, modulos, turmas, alunos, aulas, progresso, comentarios, transcricoes e conversas do tutor entram por cadastros persistidos, APIs server-side, webhooks ou migrations controladas.
 
-Sem as variaveis Supabase em desenvolvimento, a tela de login mostra `Entrar em modo local` para permitir navegacao no MVP. Esse modo usa cookie local httpOnly, funciona apenas fora de producao e nao substitui Supabase Auth em ambiente real.
+Sem variaveis Supabase ou sem migrations aplicadas, o app deve falhar explicitamente em vez de usar dados simulados, sinteticos, seed ou fallback local.
 
-O proximo passo natural e aplicar as migrations no projeto Supabase, popular `admin_roles` para os usuarios internos e evoluir a camada de entitlements/webhooks que libera acesso a partir das vendas externas.
+Ao preparar um novo ambiente, todas as migrations versionadas em `supabase/migrations` precisam ser aplicadas na ordem antes de liberar o runtime. Elas materializam as garantias relacionais, o Tutor IA, a IA Diretor, a exclusao logica dos chats, as sessoes protegidas do Modo TV e o pool auditavel de conexoes de IA. A evolucao natural e concluir adapters idempotentes de webhooks, observabilidade e testes E2E automatizados.
 
 ## Skill Codex
 

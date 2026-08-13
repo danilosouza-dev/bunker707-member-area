@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Exo_2, Inter } from "next/font/google";
+import { Suspense } from "react";
+import { NavigationFeedbackProvider } from "@/components/navigation-feedback";
 import "./globals.css";
 
 const inter = Inter({
@@ -26,7 +28,9 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className={`${inter.variable} ${exo2.variable} antialiased`} suppressHydrationWarning>
-        {children}
+        <Suspense fallback={null}>
+          <NavigationFeedbackProvider>{children}</NavigationFeedbackProvider>
+        </Suspense>
       </body>
     </html>
   );

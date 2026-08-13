@@ -44,10 +44,27 @@ Hotmart/Ticto/etc.
   -> job de processamento
   -> entitlement/acesso
 
+Hotmart/Ticto/TikTok/Kiwify
+  -> adapter do provider
+  -> produto ou combo interno
+  -> entitlements por produto incluido
+
 Aluno assistindo aula
   -> eventos de progresso
   -> tabela student_events
   -> dashboards futuros
+
+Aluno comentando aula
+  -> bloqueio por palavra proibida
+  -> comentario pendente/aprovado
+  -> fila de moderacao
+  -> notificacoes futuras
+
+Aluno perguntando para IA
+  -> checagem de entitlement
+  -> escopo do agente
+  -> contexto permitido
+  -> conversa auditavel
 ```
 
 ## Modulos do backend
@@ -72,8 +89,59 @@ src/
     payments/
     video/
     support/
+    comments/
+    moderation/
+    ai/
     jobs/
 ```
+
+## Arquitetura de dados implementada
+
+A aplicacao usa o Supabase como fonte unica, mas o browser nao consulta as tabelas de catalogo diretamente. O fluxo atual e:
+
+```txt
+Browser autenticado
+  -> pagina ou Route Handler do Next.js
+  -> guard de sessao/admin
+  -> regra de acesso de dominio
+  -> cliente Supabase service role somente no servidor
+  -> consulta ou mutacao granular
+```
+
+Invariantes:
+
+- leituras administrativas e leituras da area do aluno usam caminhos separados;
+- a leitura do aluno filtra `lesson_progress`, `saved_items`, `entitlements`, `students` e `student_courses` pela identidade autenticada;
+- modulos e aulas da area do aluno carregam somente registros publicados;
+- chamadas repetidas durante a mesma renderizacao sao memoizadas com `cache`, evitando a segunda leitura integral antes causada pelo shell e pela pagina;
+- favoritos e progresso usam `upsert`/`delete` direcionados; mutacoes do CMS gravam somente as tabelas afetadas;
+- exclusoes de aulas e modulos sao mutacoes administrativas autenticadas; a camada server-side limpa favoritos e referencias de progresso e os triggers do Supabase repetem essa garantia na mesma transacao da exclusao, enquanto eventos comportamentais historicos permanecem append-only;
+- nao existe mais sincronizacao que leia e regrave toda a base para salvar uma unica interacao;
+- erros inesperados sao registrados no servidor e recebem mensagem publica sanitizada.
+
+O arquivo `src/server/db/platform-store.ts` ainda concentra mapeamentos legados e casos de uso demais. A separacao por dominios (`content`, `students`, `progress`, `saved-items`) e divida estrutural registrada na auditoria, mas deve ser feita incrementalmente com testes de contrato, sem trocar a fonte de verdade nem duplicar regras.
+
+### Configuracao publicada da Home
+
+`HomeSectionConfig` e o contrato canonico compartilhado entre o CRM e a Home do aluno. O editor mantem o rascunho no cliente e publica a lista ordenada inteira por `PUT /api/admin/home-sections`; a rota exige administrador, valida IDs, fontes, layouts e referencias de conteudo e so entao atualiza a configuracao publicada.
+
+O servidor transforma a configuracao em `HomeRow` e aplica visibilidade, entitlements, progresso e estado salvo antes de renderizar. Preview e Home reutilizam `FeaturedStructureHomeSection` para os layouts estrutural compacto e imersivo, evitando uma implementacao visual paralela que possa divergir da pagina final.
+
+A fonte `sellable_products` e resolvida por aluno: antes de criar a fileira, o servidor remove todo produto para o qual `hasPurchaseAccess` ja retorna acesso. Assim, `Produtos a venda` nunca repete um produto presente na biblioteca do aluno; se nenhuma oferta restar, a fileira nao e renderizada.
+
+A migration `202607100003_home_sections.sql` materializa `home_sections` e `home_section_items`. Enquanto essa migration relacional nao estiver aplicada no ambiente remoto, a implementacao ativa persiste a lista canonica em `platform_settings.homeSections`; esse fallback e transitorio e nao altera o contrato da API nem transforma configuracao visual em autorizacao.
+
+## Midia de conteudo
+
+Capas e thumbnails nao devem ser persistidas como Data URL/Base64 em colunas do Postgres. O fluxo implementado converte uploads inline em objetos deterministas no bucket publico `content-assets`:
+
+- JPG, PNG e WebP;
+- limite de 8 MB;
+- caminho segmentado por entidade e hash SHA-256 do arquivo;
+- `Cache-Control` de um ano;
+- URL publica persistida nas tabelas de conteudo.
+
+O bucket e publico porque as capas sao arte de exibicao, nao material protegido. Videos, materiais privados e arquivos originais continuam fora desse bucket e exigem autorizacao/token proprio.
 
 ## Autenticacao
 
@@ -107,18 +175,20 @@ Cadastro manual de aluno:
 - senha temporaria cria ou atualiza o usuario no Supabase Auth, marca `must_change_password = true` e nao salva a senha no CMS;
 - o mesmo fluxo sincroniza `profiles` e `entitlements` para os cursos/produtos selecionados no cadastro.
 
-Para desenvolvimento local sem variaveis Supabase, existe um fallback controlado:
+Desenvolvimento local tambem usa Supabase real:
 
-- aparece o CTA `Entrar em modo local` no login;
-- cria um cookie httpOnly local;
-- funciona somente quando `NODE_ENV !== "production"` e Supabase Auth nao esta configurado;
-- serve apenas para navegar o MVP em `localhost`, nao para autorizacao real.
+- nao existe login local, usuario fixo ou cookie de desenvolvimento;
+- sem variaveis Supabase, a autenticacao fica indisponivel;
+- sem banco acessivel ou migrations aplicadas, leitura e escrita falham explicitamente;
+- dados de catalogo, modulos, aulas, alunos, favoritos, progresso e configuracoes nao devem vir de seed, mock, fallback `.data` ou fixtures de runtime.
 
 ## Acesso e entitlements
 
 A plataforma nao deve perguntar "o aluno comprou?". Ela deve perguntar "o aluno tem entitlement ativo para este conteudo?".
 
 Entitlement e a permissao real dentro da Bunker707.
+
+Cursos com `commerce_scope = included_content` precisam declarar a formacao principal. A implementacao atual grava essa relacao em `content_page_settings.parentFormationId`; o entitlement da formacao libera apenas os cursos explicitamente associados a ela. A relacao deve migrar para `formation_courses` quando o modelo relacional definitivo for materializado, mantendo compatibilidade de leitura durante a transicao.
 
 Exemplos:
 
@@ -148,8 +218,101 @@ Fluxo:
 4. Checar idempotencia.
 5. Normalizar evento.
 6. Processar em job.
-7. Atualizar acesso.
-8. Registrar auditoria.
+7. Resolver produto ou combo interno.
+8. Atualizar entitlements internos.
+9. Registrar auditoria.
+
+Combos devem ser tratados como pacotes internos: o adapter normaliza a venda externa, o backend encontra o combo/produto correspondente e a camada de acesso cria entitlements para todos os produtos incluidos. O dado do provider nao autoriza conteudo diretamente.
+
+## Comentarios e moderacao
+
+Comentarios de aula entram pela API autenticada do aluno e devem passar por validacoes antes de aparecer:
+
+1. Verificar sessao e entitlement da aula.
+2. Checar palavras bloqueadas.
+3. Aplicar limite de tamanho, controle de rajada e protecao contra envio duplicado.
+4. Criar comentario como `pending` ou `approved`, conforme regra do produto; no MVP atual, comentarios validos entram como `approved`.
+5. Persistir respostas, uma reacao por aluno/comentario e denuncias idempotentes.
+6. Permitir que moderadores aprovem, ocultem, restaurem ou marquem como spam.
+7. Registrar acoes sensiveis em auditoria e eventos comportamentais sem duplicar o corpo do comentario nos metadados.
+
+Implementacao atual:
+
+- leitura e criacao: `/api/comments/lessons/[lessonId]`;
+- reacoes: `/api/comments/[commentId]/reaction`;
+- denuncias: `/api/comments/[commentId]/report`;
+- moderacao: `/api/admin/moderation/comments/[commentId]`;
+- palavras bloqueadas: `/api/admin/moderation/blocked-words`;
+- tabelas de comentarios ficam com RLS habilitado e sem acesso direto de `anon`/`authenticated`; as regras de sessao, entitlement e moderacao rodam nas APIs server-side;
+- `analysis_status`, `analysis_result` e `analyzed_at` deixam cada comentario pronto para jobs futuros de sentimento, temas, intencao, duvidas e oportunidades de conteudo.
+
+## Agentes de IA
+
+Agentes de IA devem ficar atras de adapters e regras de escopo:
+
+- agente de comentarios: pode sugerir ou publicar respostas conforme configuracao;
+- `lesson_tutor` (Tutor IA): representa o professor daquela aula e responde apenas com a transcricao, o perfil e o historico daquele chat de uma aula autorizada;
+- `platform_guide` (IA Diretor): representa a orientacao geral da escola, conhece a estrutura autorizada de cursos, modulos, aulas e assuntos, pode recomendar caminhos e localizar conteudo, mas nao e um tutor de aula;
+- os dois agentes usam conversas, escopos, prompts e metricas separados. A IA Diretor aparece no shell autenticado do aluno e nunca reutiliza silenciosamente uma conversa do Tutor.
+
+O Tutor IA de aula esta implementado com o seguinte fluxo:
+
+```txt
+Cadastro da aula
+  -> legenda publica do YouTube ou SRT/VTT/TXT/texto do produtor
+  -> normalizacao, checksum e versao ativa em lesson_transcripts
+  -> chunks com timestamps em content_chunks
+  -> analise da aula em lesson_ai_profiles quando houver provedor
+
+Pergunta do aluno
+  -> sessao + ownership da conversa + entitlement da aula
+  -> limites de perguntas por aluno e da plataforma
+  -> selecao da transcricao/chunks permitidos e cues identificadas por fontes opacas
+  -> Bunker AI LB seleciona uma conexao elegivel de Gemini, OpenAI ou Anthropic
+  -> adapter REST usa API protegida ou conta especifica no gateway
+  -> validacao lexical das fontes citadas, resolucao server-side dos tempos e margem de seek de 3 segundos
+  -> resposta, tokens, tentativas, conexao e citacoes verificadas persistidos em ai_messages
+```
+
+No cliente, o painel do Tutor e montado somente no primeiro acesso e depois permanece no DOM com `hidden` durante as trocas de aba, mantendo ativos o provider SWR, o chat, o rascunho e o scroll. O SWR funciona como cache privado somente em memoria. As chaves incluem usuario, conteudo, aula e conversa; a lista e cada historico possuem recursos separados, evitando que respostas atrasadas de um chat sobrescrevam outro. A primeira leitura mostra loading, enquanto revalidacoes por foco, reconexao ou mutacao explicita preservam os dados atuais e acontecem sem bloquear a interface. Criar, renomear, excluir e enviar atualizam somente as chaves afetadas e revalidam a lista em segundo plano.
+
+Esse cache de aplicacao nao altera o contrato HTTP: todas as rotas do Tutor continuam dinamicas, autenticadas e com `Cache-Control: private, no-store`, e o fetcher tambem usa `cache: "no-store"`. Nenhum historico e persistido em `localStorage`, IndexedDB, service worker, CDN ou cache compartilhado. Respostas `401` e `403` limpam imediatamente o namespace privado e interrompem novas leituras no componente montado.
+
+`list_tutor_conversations` agrega contagem e ultima mensagem concluida em uma unica RPC restrita a `service_role`, filtrada por aluno, aula, `lesson_tutor` e exclusao logica. Isso remove a antiga consulta adicional a `ai_messages` para cada conversa sem impor limite novo ao historico do Tutor.
+
+A IA Diretor usa o mesmo pool de provedores, mas possui um pipeline de recuperacao independente:
+
+```txt
+Pergunta autenticada em conversa platform_guide
+  -> ownership + exclusao logica + limites de uso
+  -> catalogo server-side com publication_status, regras de liberacao e entitlements ativos
+  -> ranking lexical de titulos, descricoes, resumos e topicos autorizados
+  -> chunks relevantes somente das aulas candidatas e com transcricao ativa
+  -> contexto limitado com referencias opacas [R1], [R2]...
+  -> Bunker AI LB e fallback entre conexoes elegiveis
+  -> servidor descarta referencias inventadas e resolve somente links internos autorizados
+  -> resposta, referencias, tokens, tentativas e conexao persistidos em ai_messages
+```
+
+`content_items.publication_status` separa publicacao editorial (`draft`, `published`, `archived`) do campo legado `status`, que representa estado pedagogico/comercial como `Novo` ou `Liberado`. Registros existentes recebem `published` no backfill; novos conteudos nascem como `draft` e o CMS exige a decisao editorial. Autorizacao de aula, leitura do aluno e catalogo da IA usam exclusivamente o campo editorial, alem da publicacao de modulo/aula, regras de liberacao e entitlement. O navegador nunca escolhe os IDs que formam o contexto da IA Diretor.
+
+`ai_provider_configs` define modelo, limites, prioridade e habilitacao por provedor. Cada provedor pode ter varias entradas em `ai_provider_connections`: chaves BYOK protegidas no Supabase Vault ou contas ligadas ao Bunker AI Gateway. Segredos sao lidos somente pelo servidor; APIs administrativas retornam apenas identificadores e dicas mascaradas. Conexoes pausadas, em cooldown ou que exigem nova autenticacao nao entram no pool normal.
+
+A politica de modelo e compartilhada pelas conexoes do mesmo provedor. O CRM consulta `/v1/models` do gateway, filtra modelos de texto pelo provedor e os oferece como sugestoes; a conexao fica salva, mas o teste permanece desabilitado ate o produtor salvar uma politica compativel em `Modelos e limites`. Modelos de API ainda podem ser digitados manualmente quando nao aparecem no gateway.
+
+Dentro de cada politica de provedor, o pool ordena conexoes por prioridade, saude e menor `last_used_at`, produzindo round-robin entre conexoes equivalentes. Cada falha fica registrada em `provider_attempts`, atualiza saude e pode causar cooldown/backoff; o servidor tenta a proxima conexao elegivel e grava em `connection_id` qual delas concluiu a resposta. Erros 401/403 exigem atencao, 429 aciona cooldown de cota e falhas transitorias usam backoff crescente. Uma conexao degradada volta por provas sucessivas antes de ser considerada saudavel.
+
+Logins por conta sao intermediados por um servico isolado e persistente em `services/bunker-ai-gateway`, configurado por `BUNKER_AI_GATEWAY_URL`, `BUNKER_AI_GATEWAY_API_KEY` e `BUNKER_AI_GATEWAY_MANAGEMENT_KEY`. O app inicia OAuth, valida sessao/ator/state e registra a conta encontrada; o gateway renova credenciais e traduz protocolos, enquanto a Bunker707 continua escolhendo a conexao exata. O uso de conta de consumidor e experimental e operacionalmente distinto de uma API oficial: deve ser validado contra os termos e limites do provedor antes de producao.
+
+No desenvolvimento local, `services/bunker-ai-gateway/compose.yml` publica o servico somente em `127.0.0.1:8317`, persiste `/data/auth` no volume nomeado `bunker707-ai-gateway-auth` e recebe segredos por `.env.bunker-ai-gateway.local`. O Next.js recebe as variaveis correspondentes por `.env.local`. Os comandos `ai-gateway:up`, `ai-gateway:status`, `ai-gateway:smoke`, `ai-gateway:logs` e `ai-gateway:down` padronizam a operacao; detalhes e fluxo de login estao em `services/bunker-ai-gateway/README.md`.
+
+Conversas ficam separadas por `user_id`, `agent_type`, aula quando aplicavel e `conversation_id`, nao expiram automaticamente e nao compartilham historico entre chats. `PATCH /api/tutor/conversations/[conversationId]` normaliza e atualiza o titulo somente depois de validar sessao e ownership. `DELETE` no mesmo endpoint grava `student_deleted_at`: listagem, leitura e novas perguntas sempre filtram esse campo, portanto um chat excluido pelo aluno permanece somente no backend para analise e deixa de integrar sua experiencia e o contexto do tutor.
+
+Cada mensagem recebe no banco um `message_sequence` estritamente crescente dentro da conversa. A sequencia e atribuida por trigger com bloqueio transacional por `conversation_id`, e todas as telas, previas e historicos enviados aos modelos usam esse campo. Assim, pergunta e resposta permanecem na ordem correta mesmo quando compartilham o mesmo `created_at` por terem sido criadas na mesma transacao.
+
+O consumo administrativo e calculado a partir de respostas persistidas, nunca por estimativa do frontend. O produtor pode filtrar o periodo e acompanhar totais, falhas, tokens de entrada/saida, tipo de agente, tutor/aula, provedor/modelo, conexao, dia e aluno. A lista por aluno funciona tambem como ranking de quem mais utilizou IA no periodo. `lesson_tutor` e `platform_guide` permanecem separaveis no agregado para que a IA Diretor nao distorca o custo de cada tutor.
+
+Para aulas curtas o tutor pode usar toda a transcricao dentro do limite configurado. Em aulas longas, uma selecao lexical escolhe chunks relevantes e vizinhos. O modelo recebe cada cue com um identificador como `[F152]`, sem acesso ao horario, e deve citar a primeira fonte que sustenta diretamente a afirmacao. O servidor rejeita marcadores incompatíveis com o texto proximo, converte somente fontes verificadas no timestamp real e subtrai 3 segundos do inicio para dar contexto ao aluno. O frontend nao transforma tempos livres ou citacoes legadas sem `verified` em links. O prompt proibe conhecimento externo: quando um assunto nao aparece no material, o tutor deve informar essa ausencia.
 
 ## Video
 
@@ -175,7 +338,20 @@ Tracking de progresso:
 - o frontend deve registrar inicio, segundos assistidos, percentual atual, maior percentual ja alcancado, abandono/pausa e conclusao por aula;
 - players HTML5/proprios usam eventos nativos (`play`, `timeupdate`, `pause`, `ended`) para segundos reais;
 - YouTube usa a IFrame API como adapter inicial, lendo `currentTime`, `duration`, estados de play/pause/end e retomando com `seekTo` sem autoplay; enquanto o aluno nao aciona play, a UI cobre o iframe com a thumbnail oficial do YouTube e a barra de progresso salva, porque o frame pausado do embed pode aparecer preto antes da reproducao;
+- o adapter gratuito do YouTube usa o dominio `youtube-nocookie.com`, desliga controles, teclado e fullscreen nativos, remove o iframe da ordem de foco e dos pointer events e fornece controles Bunker707 para play/pausa, timeline, volume e fullscreen do container. Mascaras nas bordas e uma tela final propria evitam expor o chrome clicavel do provedor na UI; como esse chrome e controlado externamente, mudancas no embed podem exigir manutencao;
+- no seletor de qualidade, `Automático` e o modo inicial, continua no embed e delega a adaptacao ao YouTube. O provedor escolhe dinamicamente a maior qualidade sustentavel para conexao, buffer, tamanho de exibicao e dispositivo, podendo chegar a 4K quando a origem e as condicoes permitirem e reduzir a resolucao quando necessario. O adapter acompanha `onPlaybackQualityChange` para atualizar o selo da engrenagem conforme a qualidade efetiva reportada; `getPlaybackQuality`, `setPlaybackQuality`, `getAvailableQualityLevels`, `suggestedQuality` e o parametro `vq` nao devem ser usados porque deixaram de ser suportados ou sao ignorados oficialmente. Os valores exatos como `hd1080`, `hd1440` e `hd2160` podem ser convertidos para `HD`, `2K` e `4K`; o valor publico generico `highres` deve aparecer como `HD+`, sem inferir uma resolucao exata. As opcoes manuais vem de `GET /api/video/youtube/streams`, rota sem cache que exige sessao e acesso a aula, correspondem apenas aos formatos reais encontrados para o video e compativeis com o navegador, incluindo `2160p` (`3840x2160`) quando a origem disponibilizar esse formato, e aparecem antes de `Automático` em uma caixa sem scroll interno;
+- a resposta dessa rota contem um fluxo de audio, os fluxos de video por qualidade e o prazo de expiracao. O servidor resolve essas URLs temporarias, mas nao retransmite nem faz proxy dos bytes: no modo manual, elementos HTML de audio e video consomem os fluxos diretamente. A troca prepara as duas faixas com preload, mantem a thumbnail sobre o player ate o primeiro frame estar disponivel, so retoma quando ambas possuem dados suficientes e usa uma tolerancia conservadora nas correcoes periodicas de sincronizacao para evitar cortes audiveis;
+- a extracao dos fluxos manuais nao usa uma API oficial de playback do YouTube. URLs podem expirar ou deixar de funcionar por mudancas do provedor, codec/navegador, CORS ou restricoes da entrega; `Automático` deve permanecer como fallback operacional, e o modo manual nao deve ser descrito como streaming protegido;
+- esse adapter nao protege a URL nem substitui streaming com token/DRM: o ID do YouTube permanece tecnicamente descobrivel no DOM e na rede, mesmo que nenhum link direto apareca para o aluno;
+- na pagina de aula, uma barreira de atrito em captura bloqueia o evento global de menu de contexto e atalhos comuns de DevTools/codigo-fonte somente enquanto a experiencia estiver montada. A carga do aluno serializa apenas o ID canonico do YouTube, sem repetir a URL original de visualizacao, e as rotas de streams/legendas derivam esse ID no servidor a partir de `contentId` e `lessonId` depois de validar acesso. Essas medidas reduzem exposicao casual, mas nao alteram o seletor de qualidade e nao impedem inspecao iniciada pelo navegador;
 - antes de navegar da aula para home, curso ou modulos, a UI deve forcar um ultimo flush de progresso do player para evitar que carrosseis e barras carreguem dados antigos vindos de prefetch/cache de rota;
+- o Modo TV inicial usa uma sessao Bunker707 persistida em `tv_sessions`, sem fingir Google Cast: o aluno autenticado cria a sessao somente depois de `requireLessonAccess`, a TV abre a rota publica `/tv`, consome uma vez o codigo temporario e passa a autenticar cada polling/heartbeat com um token aleatorio cujo banco guarda apenas o SHA-256;
+- comandos de play, pause, seek relativo, mudanca dedicada de velocidade e sincronizacao integral do player sao persistidos com revisao monotona. A sincronizacao integral carrega posicao absoluta, estado de reproducao, volume, mudo, velocidade, legenda e qualidade ao parear ou reabrir o modal. O receptor consulta comandos em polling curto, aplica cada revisao uma unica vez e envia heartbeat com estado, tempo, duracao, revisao aplicada, velocidade efetiva e taxas disponiveis; `tv_sessions.playback_rate` e `available_playback_rates` alimentam o seletor remoto somente depois da confirmacao real do player. O servidor atualiza `lesson_progress` para o usuario dono da sessao, enquanto o modal consulta estado e presenca da TV separadamente;
+- o receptor descarrega o modulo nativo de legendas do YouTube e busca cues pela rota protegida com bearer token, renderizando a legenda Bunker707 fora do iframe. O seletor temporal compartilhado escolhe a cue mais recente ja iniciada quando o JSON3 possui duracoes sobrepostas, em vez de manter uma frase anterior ainda ativa. A legenda usa um relogio curto separado do heartbeat; no player manual esse relogio le `audio.currentTime`, com fallback para o video, porque a fala audivel vem da faixa de audio. Qualidade `Automático` usa o embed; uma selecao manual usa uma rota de streams exclusiva do receptor e o mesmo player de video/audio separados da aula. Essas rotas revalidam token, sessao e `requireLessonAccess` antes de devolver dados;
+- erros publicos do player e do Modo TV devem ser sanitizados na fronteira de UI/API e permanecer agnosticos ao provedor; nomes como YouTube, Vimeo, Bunny ou Mux podem existir apenas em implementacao, logs internos e CMS, nunca na experiencia do aluno;
+- a tela cheia do receptor usa a Fullscreen API sobre o container Bunker707 do video e fica no canto inferior direito da barra de controles, com o mesmo icone do player da aula e sem botao textual flutuante. A barra e seu degrade entram durante interacao local e perdem opacidade automaticamente apos um curto periodo sem mouse, toque ou tecla, sem depender de hover persistente. Ela precisa ser ativada por gesto direto na pagina `/tv`; um comando remoto nao pode inicia-la porque navegadores bloqueiam fullscreen sem interacao local;
+- o QR do Modo TV aponta somente para `/tv?code=...`, nunca para o YouTube. A resposta pareada entrega apenas o ID canonico necessario ao embed `youtube-nocookie.com`; isso preserva a mesma limitacao do player principal: o ID ainda e tecnicamente observavel na TV e o recurso nao equivale a DRM;
+- a primeira entrega cobre YouTube. Chromecast/AirPlay nativos e adapters receptores para Vimeo, Bunny, Mux ou URL propria permanecem evolucoes separadas por provider;
 - Vimeo, Bunny, Mux e embeds externos devem ficar atras de adapters de player equivalentes, expondo uma interface comum de play, pause, currentTime, duration, seek e estado de conclusao;
 - enquanto um adapter especifico ainda nao estiver completo, o app pode registrar inicio por clique no player e um temporizador de sessao para alimentar `Continue assistindo`, deixando claro que esse fallback nao substitui a precisao de provedores com API integrada.
 
@@ -193,6 +369,11 @@ Eventos iniciais:
 - lesson_progress_updated;
 - lesson_retention_point_recorded;
 - lesson_completed;
+- lesson_comment_created;
+- lesson_comment_reply_created;
+- lesson_comment_reacted;
+- lesson_comment_reaction_removed;
+- lesson_comment_reported;
 - material_downloaded;
 - search_performed;
 - support_requested.
@@ -209,9 +390,18 @@ Regras:
 
 - salvar um item nao concede acesso;
 - itens salvos continuam respeitando entitlements e regras de liberacao;
-- no desenvolvimento local sem Supabase, a mesma lista fica no fallback `.data/bunker707-platform.json`;
-- quando Supabase esta configurado, a tabela `saved_items` usa RLS para que cada aluno leia e altere somente os proprios favoritos.
+- a tabela `saved_items` usa RLS para que cada aluno leia e altere somente os proprios favoritos.
 - a sidebar expõe a rota `/favoritos`, que lista conteudos, modulos e aulas salvos pelo aluno autenticado.
+
+## Performance de navegacao
+
+As regras atuais para evitar regressao sao:
+
+- nao encadear `router.push` e `router.refresh` para a mesma navegacao;
+- nao colocar Base64 de imagem em payload de Server Component ou HTML;
+- compartilhar a mesma leitura memoizada entre app shell e pagina dentro do request;
+- salvar progresso e favorito por chave, sem regravar outras entidades;
+- manter caches de build e dependencias em filesystem APFS quando o repositorio estiver em volume ExFAT.
 
 ## Deploy
 

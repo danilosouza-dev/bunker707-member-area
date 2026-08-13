@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { localAuthCookieName } from "@/lib/auth/local";
+
+const legacyLocalAuthCookieName = "bunker707_local_session";
 
 export async function POST() {
   const response = NextResponse.json({ ok: true });
-  response.cookies.set(localAuthCookieName, "", {
+  response.cookies.set(legacyLocalAuthCookieName, "", {
     httpOnly: true,
     maxAge: 0,
     path: "/",

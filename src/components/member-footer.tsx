@@ -14,7 +14,8 @@ export function MemberFooter() {
             alt="Bunker707"
             className="h-auto w-[150px]"
             height={35}
-            src="/brand/logo-bunker.png"
+            src="/brand/logo-bunker.svg"
+            unoptimized
             width={306}
           />
         </Link>

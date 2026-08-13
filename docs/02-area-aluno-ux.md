@@ -14,13 +14,15 @@ Todas as telas autenticadas devem compartilhar uma estrutura consistente:
 - avatar/perfil;
 - sidebar aberta pelo menu hamburguer.
 
+Toda mudanca de pagina deve ser reconhecida no mesmo instante do clique ou comando. O app shell mantem um unico spinner circular vermelho ancorado no centro do viewport, sobre uma camada preta mais escura e desfocada que preserva as cores da pagina, no estilo Netflix, ate a nova tela assumir. O mesmo posicionamento e usado pelo fallback do App Router e os dois indicadores nunca aparecem ao mesmo tempo. O comportamento cobre links, cards, navegacao programatica, redirecionamentos e voltar/avancar. O destino contextual continua anunciado para leitores de tela, sem caixa de texto visivel. Esse feedback tambem deve aparecer em rotas rapidas, cacheadas ou pre-carregadas; nenhum fluxo pode depender apenas do fallback `loading.tsx` do App Router.
+
 Para usuarios internos com papel administrativo, a area de membros deve manter a experiencia de aluno como produto final, mas expor um atalho claro para o CRM/backoffice. O CRM e a area de membros sao experiencias separadas: a home da area do aluno e `/`, enquanto a home do CRM e `/admin`.
 
 ## Login
 
 A tela de login deve ser uma experiencia fechada de area de membros, nao uma vitrine publica nem checkout.
 
-O produtor podera escolher futuramente um modelo de login no CMS. A configuracao deve ser persistida no backend quando a tela de login entrar no escopo administrativo.
+O produtor podera escolher um modelo de login na area `Personalizacao` do CRM. A configuracao deve ser persistida no backend quando a tela de login entrar no escopo administrativo persistido.
 
 Modelos iniciais:
 
@@ -46,6 +48,40 @@ Regras:
 - manter links discretos de suporte, privacidade e termos;
 - registrar o evento `user_signed_in` quando o aluno entrar por email/senha ou OAuth;
 - usar Supabase Auth no MVP, mantendo a tela configuravel pelo CMS futuro.
+
+## Personalizacao no CRM
+
+A sidebar do CRM/backoffice deve ter uma opcao principal chamada `Personalizacao`.
+
+Essa area agrupa as configuracoes visuais da experiencia do aluno:
+
+- pagina de login: template, logo, imagem, titulo, texto de apoio, superficie do formulario e provedores visiveis;
+- paginas dos cursos, formacoes, bootcamps e produtos principais: hero, textos opcionais, CTA, capa e modo de apresentacao;
+- estrutura interna dos cursos: como modulos, aulas, capas, ordem, overlays e estados de liberacao aparecem para o aluno;
+- vitrine/home: hero, banner, textos, fileiras, cards/secoes, ordem, origem dos conteudos e regras de visibilidade.
+
+A primeira tela de `Personalizacao` deve ser uma lista central dos destinos personalizaveis, no estilo operacional do CRM: `Vitrine`, `Pagina de login`, `Pagina de produtos` e cada produto/formacao/curso vendavel. Cada linha mostra nome, caminho de preview quando existir, status e acao `Personalizar`. O editor especifico so abre depois desse clique; a tela inicial nao deve abrir todas as opcoes de edicao ao mesmo tempo.
+
+Dentro de cada editor, o painel lateral deve listar apenas as partes editaveis daquela pagina, como `Banner` e `Secoes` na vitrine, `Template`, `Imagem`, `Formulario` e `Provedores` no login, ou `Pagina do produto` e `Modulos e cards` nos produtos/cursos. Ao escolher uma parte, o canvas ao lado continua mostrando a representacao fiel da pagina final.
+
+Nos editores de produtos/cursos, o canvas deve representar a composicao visual limpa que o produtor esta configurando para o aluno com acesso. Estados padrao de bloqueio por compra, entitlement ou drip nao precisam aparecer nesse modo de personalizacao, porque sao comportamentos globais ja conhecidos; eles continuam existindo na pagina real quando o aluno nao tiver acesso ou quando a regra de entrega exigir bloqueio.
+
+Ao clicar para personalizar a vitrine/home, o produtor deve ver uma representacao fiel da home real do aluno em modo editor, com controles discretos para editar banner, textos e secoes sobre a propria pagina. A tela nao deve introduzir um hero, dashboard ou explicacao de personalizacao acima da pagina editada; a renderizacao final da home continua respeitando entitlements, regras de liberacao e visibilidade por aluno.
+
+O editor da vitrine usa tres areas coordenadas: estrutura ordenavel à esquerda, preview central da Home e inspetor da secao selecionada à direita. O produtor pode criar, duplicar, ocultar, excluir e reordenar secoes por arraste ou pelos comandos de mover. As mudancas permanecem em rascunho ate `Publicar`; `Descartar` restaura a ultima configuracao publicada e sair/recarregar com rascunho pendente deve gerar aviso.
+
+Uma secao de cards pode usar fonte automatica (`Continue assistindo`, entitlements, produtos vendaveis ou futuros) ou selecao manual de produtos. Uma secao estrutural escolhe um curso, formacao ou bootcamp e oferece apresentacao `Compacta` ou `Imersiva`. Formacoes exibem seus cursos internos; cursos e bootcamps exibem seus modulos. A configuracao visual nunca concede acesso e o preview deve deixar claro o estado publicado versus rascunho.
+
+Essa representacao deve usar as mesmas fontes e variantes da home publicada:
+
+- `Continue assistindo` continua usando cards horizontais de aula, com thumbnail/resume frame da aula e barra de progresso, nunca capa vertical do curso;
+- secoes verticais continuam usando o mesmo tamanho e comportamento dos cards da area do aluno;
+- secoes de modulos de curso continuam usando a mesma composicao da home publicada;
+- textos, subtitulos, badges e elementos que nao aparecem na pagina final nao devem ser inventados no editor; o produtor pode adicionar novos textos ou secoes pelos controles de edicao quando isso fizer parte da configuracao.
+
+`Personalizacao` nao substitui `Catalogo` nem `Estrutura`: o catalogo cria produtos e conteudos, a estrutura monta modulos e aulas, e a personalizacao controla como esses elementos aparecem na experiencia final.
+
+No CRM/backoffice, a sidebar administrativa pode ir alem do MVP do aluno quando o produtor pedir: `Produtos` reaproveita o Catalogo/construtor, `Combos` agrupa produtos existentes, `Moderacao` controla comentarios das aulas, `Agentes de IA` prepara agentes por escopo e `Configuracoes > Integracoes` concentra provedores externos. `Comunidade` pode aparecer como item reservado de fase futura, sem ativar a experiencia de comunidade para alunos comuns.
 
 ## Header
 
@@ -136,6 +172,8 @@ Fileiras configuradas, mas sem itens resolvidos para aquele aluno, nao devem apa
 
 Para produtores com pouco catalogo, o CMS deve permitir ativar uma secao de modulos de um curso especifico na home. Essa secao mostra uma capa vertical reduzida do curso à esquerda, preservando a mesma proporcao da capa principal. À direita da thumbnail ficam o rotulo pequeno como `Cursos Online`, o titulo do curso e o botao de acao abaixo do titulo. O objetivo e evitar uma home vazia quando o produtor tem apenas um curso e reduzir o caminho do aluno: home > modulo > aula, sem exigir clique previo na capa do curso.
 
+A mesma secao estrutural pode usar o layout imersivo: a imagem do conteudo vira um banner de fundo com degradê de legibilidade, titulo, descricao, CTA e uma fileira interna de cards. O layout compacto preserva a composicao mais curta. Em formacoes, os cards internos representam cursos associados; em cursos e bootcamps, representam modulos. Os dois layouts usam o mesmo resolvedor de acesso da Home e nao podem expor conteudo fora dos entitlements do aluno.
+
 Quando o aluno tem acesso, o botao da capa reduzida do curso deve ser `Acessar`, com hover premium no estilo dos demais cards, e leva para a pagina normal do curso, com os modulos listados. Quando o aluno nao tem acesso, o botao deve ser `Comprar`. O produtor configura no CMS se esse botao abre o modal de detalhes ou o link externo de compra; quando usar link externo, o CMS tambem define se abre na mesma aba ou em nova aba.
 
 Clicar diretamente em um card de modulo leva para a pagina de aula/playlist daquele modulo, com a sidebar de modulos à direita, quando o aluno tem acesso. O card de modulo dessa secao nao exibe botao proprio; o hover mostra titulo, metadado curto e progresso sobre o overlay. Quando o aluno nao tem acesso ao curso, clicar em qualquer modulo abre o modal de detalhes do curso por padrao.
@@ -152,7 +190,7 @@ Cada fileira configuravel deve poder definir uma regra de visibilidade:
 - apenas visitantes ou pessoas sem compra ativa;
 - todos.
 
-A fileira `Produtos a venda`/`Vitrine` e configuravel no dashboard e pode misturar produtos comprados e nao comprados, de acordo com a estrategia da escola. Produtos sem entitlement aparecem com cadeado.
+A fileira `Produtos a venda`/`Vitrine` mostra somente produtos vendaveis aos quais o aluno ainda nao tem acesso. Produtos com entitlement ativo, gratuitos ou ja liberados para aquele aluno ficam fora dessa fileira e permanecem em `Minhas compras` ou nas demais secoes de biblioteca. Os produtos ainda nao adquiridos aparecem com cadeado.
 
 Uma fileira como `Em breve na Bunker707` pode mostrar proximos cursos, formacoes, bootcamps, novidades e listas de espera para criar expectativa sem liberar acesso.
 
@@ -216,10 +254,10 @@ A excecao e a primeira fileira da home:
 
 Formato recomendado:
 
-- tamanho exibido do card vertical no desktop: cerca de 300 x 485.4;
-- em telas desktop muito largas, pode crescer ate cerca de 320 x 517.8 sem dominar a fileira;
-- proporcao do card: proxima da regra aurea, com largura:altura de 1:1.618;
-- arquivo de capa enviado pelo admin/professor: preferencialmente 1000 x 1618 px, preservando margem de seguranca nas laterais; capas antigas em 720 x 1040 px ainda podem funcionar com enquadramento central temporario;
+- tamanho exibido do card vertical no desktop: cerca de 300 x 433.33;
+- em telas desktop muito largas, pode crescer ate cerca de 320 x 462.22 sem dominar a fileira;
+- proporcao do card: 720:1040, com largura:altura de 1:1.444;
+- arquivo de capa enviado pelo admin/professor: 720 x 1040 px nesta fase, preservando margem de seguranca nas laterais;
 - imagem/capa deve funcionar como poster premium: arte forte, titulo legivel e poucos elementos fixos;
 - a foto do professor pode aparecer na arte quando fizer sentido para o curso, mas nao deve ser obrigatoria em todos os cards;
 - dados como nome do professor, Instagram, nivel, quantidade de aulas e promessa curta devem existir como metadata do conteudo, para uso no modal e na pagina propria do curso/formacao;
@@ -227,7 +265,8 @@ Formato recomendado:
 - a capa deve aparecer limpa no estado normal;
 - cards verticais podem exibir a logo horizontal completa da Bunker707 no canto superior esquerdo apenas no hover, em tamanho discreto, preservando a capa como elemento principal;
 - no hover, o card vertical da home deve saltar para frente com escala maior que o estado inicial, leve elevacao para cima, sombra profunda, `z-index` acima dos vizinhos e transicao suave, aproximando o comportamento visual da Netflix sem parecer brusco;
-- nos cards verticais expansivos da home, o hover deve respeitar a borda visivel do carrossel: o card encostado à esquerda cresce para a direita, e o card encostado à direita cresce para a esquerda, sem invadir o alinhamento lateral da secao; os cards internos da fileira mantem a escala central normal;
+- nos cards verticais expansivos da home, o hover deve respeitar a borda visivel do carrossel: o card encostado à esquerda cresce para a direita, e o card encostado à direita cresce para a esquerda, sem invadir o alinhamento lateral da secao; os cards internos da fileira mantem a escala central normal; em uma fileira curta, o ultimo card com espaco livre depois dele nao conta como borda direita e tambem cresce de forma centralizada;
+- quando um card parcialmente visivel em qualquer borda vier para dentro no hover, o card adjacente que está fora da area visivel deve ocupar temporariamente o trecho parcial deixado no canto, indicando que a fileira continua; isso vale para o card seguinte à direita e para o card anterior à esquerda durante a volta do carrossel; ao sair do hover, os dois retornam suavemente às posicoes originais;
 - o arredondamento deve permanecer em todos os cantos durante o hover;
 - o hover nao deve revelar filetes claros, bordas brancas acidentais ou linhas de subpixel na parte inferior dos cards;
 - as informacoes devem aparecer dentro do proprio card, sobre um degrade escuro de baixo para cima, sem criar painel externo abaixo da capa;
@@ -246,7 +285,9 @@ Formato recomendado:
 
 As setas laterais de cada fileira devem aparecer somente quando houver overflow horizontal real e mover os cards com scroll horizontal suave, no estilo streaming. O movimento deve ser suficiente para revelar novos cards sem saltos bruscos.
 
-Quando os cards cabem dentro da largura disponivel da fileira, nao exibir setas. Quando houver overflow, a seta da direcao sem mais conteudo para navegar deve ficar visualmente desativada.
+As setas nao ficam em botoes circulares acima da fileira. Elas devem ser sobrepostas diretamente às bordas esquerda e direita do carrossel, centralizadas verticalmente sobre os cards, com um degrade escuro/esfumacado limitado à altura visual das capas entre a borda da pagina e o conteudo. O fade nao pode invadir o indicador acima, nem o respiro superior/inferior reservado para o card crescer no hover. O hover da seta nao pode criar um quadrado escuro isolado ao redor do icone; o feedback deve intensificar a faixa inteira do fade e ampliar/deslocar claramente a seta na direcao da navegacao. Exibir apenas a direcao que ainda tem conteudo disponivel; no inicio, a seta esquerda fica oculta, e no fim, a seta direita fica oculta. Quando os cards cabem dentro da largura disponivel, nao exibir setas nem fades.
+
+Acima da fileira, alinhado à direita antes dos cards, deve existir um indicador compacto de paginas no formato de pequenos segmentos horizontais. O segmento ativo fica mais claro e deve acompanhar o `scrollLeft` real durante cliques nas setas, scroll nativo ou gesto de toque. O indicador aparece somente quando houver mais de uma pagina e vale para fileiras de produtos, cursos, formacoes e modulos, tanto na home quanto nas paginas internas de conteudo.
 
 Carrosseis com cards verticais devem manter respiro vertical interno suficiente para que o hover ampliado nao seja cortado pelo proprio container de scroll horizontal, preservando o arredondamento superior e inferior dos cards.
 
@@ -313,7 +354,7 @@ Excecao para conteudo nao comprado:
 
 - cards verticais de formacoes, bootcamps e cursos avulsos sem entitlement ativo podem aparecer na home;
 - devem aparecer preferencialmente em uma fileira de `Vitrine` ou outra fileira configurada para oferta, nao nas fileiras de biblioteca como `Minhas formacoes`, `Meus cursos avulsos` ou `Meus bootcamps`;
-- a `Vitrine` pode conter tanto produtos comprados quanto nao comprados;
+- a `Vitrine` deve conter somente produtos que o aluno ainda nao possui nem consegue acessar;
 - no estado normal, devem mostrar apenas a capa em preto e branco e um cadeado moderno, bem visivel, sem texto e sem efeito colorido no topo;
 - o cadeado de produto nao adquirido deve ser preto, sem caixa ou moldura ao redor, para nao competir com a marca/capa;
 - ao passar o mouse, a capa bloqueada deve voltar a ter cor, mantendo o cadeado visivel;
@@ -470,7 +511,7 @@ Botao Concluir / Concluida
 Favoritar ou salvar
 Materiais
 Avaliacao por reacao
-Tabs: Descricao, Comentarios, Duvidas/IA futura
+Tabs: Comentários, Materiais, Tutor IA
 Playlist lateral com modulos e aulas
 ```
 
@@ -481,9 +522,23 @@ Desktop:
 - botao de voltar para a pagina do conteudo sobreposto no canto superior esquerdo do player, aparecendo no hover/foco e usando o mesmo hover circular escuro dos botoes secundarios; seu tooltip deve ficar acima do player e nao pode ser cortado pela area do video;
 - overlays do player, como voltar, reproduzir e mostrar playlist, devem ficar abaixo do header global quando houver sobreposicao durante o scroll;
 - nao exibir selo/tag do provedor de video sobre o player, como `YouTube`, `Vimeo` ou similares; essa informacao nao ajuda o aluno no consumo da aula;
+- mensagens visiveis ao aluno sobre carregamento, indisponibilidade, erro ou Modo TV devem ser neutras e nunca citar `YouTube`, Vimeo, Bunny, Mux ou qualquer outro provedor de video;
 - controles de aula anterior/proxima nao ficam no topo da pagina; essa navegacao acontece pela playlist lateral e futuramente pelos controles internos do player;
 - botao principal abaixo do video marca/desmarca a aula como concluida, muda para estado verde `Concluida` e deve preservar esse estado quando o aluno voltar para a aula;
 - botoes secundarios como materiais, TV, salvar e avaliar devem ser circulares, iconograficos, com borda discreta no estado normal e feedback visual proprio no hover/foco, sem depender de tooltip nativo do navegador;
+- o botao de TV usa o nome acessivel e o tooltip `Assistir na TV`. Ao clicar, abre um modal compacto com endereco `/tv`, QR Code, codigo temporario de seis caracteres e estados explicitos de preparacao, espera, conexao, reconexao, expiracao, erro e encerramento;
+- o QR Code contem apenas o endereco Bunker707 `/tv` com o codigo temporario. Depois do pareamento, o mesmo modal vira um controle remoto com reproduzir/pausar, voltar 10 segundos, avancar 10 segundos e encerrar; o tempo assistido na TV atualiza o progresso real da aula;
+- depois do pareamento, o receptor mantem a capa da aula sobre o embed ate o primeiro estado real de reproducao, evitando mostrar o frame preto inicial e legendas soltas do YouTube; depois do primeiro play, pausas normais preservam o frame atual do video;
+- comandos do controle remoto devem chegar ao receptor em poucos centenas de milissegundos, sem requisicoes sobrepostas; play e pausa atualizam o modal de forma otimista enquanto a confirmacao real da TV continua vindo do heartbeat;
+- o controle remoto conectado tambem oferece `Velocidade de reprodução` com as taxas realmente aceitas pelo player da TV. A taxa marcada e sempre a velocidade efetiva confirmada pelo receptor; enquanto uma mudanca aguarda confirmacao, o modal mostra esse estado sem declarar antecipadamente que a TV aceitou a nova velocidade;
+- no primeiro pareamento e sempre que um modal conectado e reaberto, o estado atual do player da aula e enviado por inteiro para a TV: posicao absoluta, reproduzindo/pausado, volume, mudo, velocidade, legenda e qualidade. Assim, assistir um trecho no computador com o modal fechado e reabrir `Assistir na TV` transfere a reproducao a partir do ponto atual;
+- a legenda nativa do YouTube permanece descarregada no receptor. Quando a legenda Bunker707 estiver ativa no player, a TV consulta a mesma faixa protegida e renderiza sua propria legenda centralizada, sem fragmentos cortados pelo recorte do iframe. Cues sobrepostas usam sempre a frase mais recente que ja iniciou; no player manual, o relogio da legenda acompanha o audio audivel, mantendo a fala alinhada sem tornar a sincronizacao de audio e video agressiva;
+- em `Automático`, a TV continua usando a adaptacao do embed. Quando a aula estiver em uma resolucao manual como `2160p`, o receptor autenticado pelo token temporario busca os mesmos fluxos separados de video e audio e reproduz essa resolucao com o player manual da plataforma;
+- o receptor oferece o mesmo controle iconografico de tela cheia do player, no canto inferior direito da barra de controles, sem um botao textual flutuante sobre o conteudo. O icone muda para sair da tela cheia enquanto o modo estiver ativo. O controle e seu degrade aparecem durante interacao por mouse, toque, teclado ou controle remoto e desaparecem automaticamente depois de alguns segundos sem atividade, deixando o video limpo. A entrada nesse modo exige uma acao feita na propria TV por restricao dos navegadores e nao pode ser forçada pelo controle remoto em outro aparelho;
+- o iframe do receptor nao recebe clique, foco ou teclado e usa o mesmo recorte de contencao visual do player da aula para manter titulo, links laterais e marca do YouTube fora da area visivel. Essa camada e de UX e nao oculta tecnicamente a origem do video;
+- a primeira versao do Modo TV e propria da plataforma e atende aulas do YouTube. Ela nao deve ser apresentada como Chromecast, Google Cast ou AirPlay nativo, porque a IFrame API do YouTube nao fornece um comando programatico para iniciar esses protocolos;
+- o titulo principal da aula usa branco puro para manter a hierarquia e o contraste sobre o fundo escuro;
+- clicar no atalho iconografico de `Materiais` seleciona essa aba, move o foco para ela e faz uma rolagem suave ate o painel de apoio, respeitando a altura do header fixo;
 - tooltips desses botoes devem usar caixa branca com seta, fonte media/regular e sem peso excessivo;
 - avaliacao da aula deve seguir o padrao de reacao da Netflix: um botao de curtida abre tres opcoes (`Nao gostei`, `Gostei`, `Amei`) em uma pilula escura, com tooltip branco individual; opcoes selecionadas usam apenas contorno colorido, incluindo o coracao de `Amei`;
 - depois da selecao da reacao, a pilula deve fechar para nao conflitar com outros tooltips;
@@ -493,10 +548,33 @@ Desktop:
 - playlist lateral deve ter scroll interno proprio, com cabecalho fixo e area de aulas rolavel, garantindo que o ultimo modulo e a ultima aula fiquem totalmente acessiveis;
 - abrir/fechar um modulo na playlist nao deve trocar a aula em reproducao; a aula ativa muda somente quando o aluno clica em uma aula;
 - tabs abaixo do player.
+- o painel de apoio da aula usa as abas `Comentários`, `Materiais` e `Tutor IA`; a terceira combina um chapéu de formatura, representando tutoria, com uma estrela discreta, representando IA;
+- `Tutor IA` usa respostas reais geradas somente depois de validar sessao, entitlement, transcricao ativa, chunks e provedor configurado. A interface nunca simula resposta e explica quando a aula ou o modelo ainda nao estao prontos;
+- o histórico do `Tutor IA` pertence ao aluno e à aula atual, fica persistido sem expiração automática e pode ser consultado ou retomado posteriormente;
+- o Tutor e carregado somente no primeiro acesso daquela aula. Depois disso, trocar entre `Comentários`, `Materiais` e `Tutor IA` preserva chat selecionado, mensagens, rascunho, posição e resposta em andamento; dados ja carregados reaparecem imediatamente, sem retornar ao loading integral;
+- o historico pode ser revalidado silenciosamente depois da janela de frescor, ao recuperar foco ou conexao. A interface continua mostrando os dados existentes durante essa verificacao e so muda quando o servidor devolver um estado diferente;
+- trocar de aula encerra o escopo em memoria da aula anterior. A nova aula nunca exibe conversas antigas e continua sem buscar o Tutor antes do primeiro acesso, exceto quando o aluno troca de aula mantendo a aba `Tutor IA` visivel;
+- um mesmo aluno pode criar vários chats independentes com o tutor dentro da mesma aula. Por exemplo, pode manter um chat para resumo e outro para localizar os momentos em que determinado assunto aparece no vídeo;
+- a entrada da aba deve permitir abrir um chat anterior ou iniciar `Novo chat`; continuar um chat preserva todas as mensagens anteriores, enquanto criar outro inicia um contexto separado sem misturar as conversas;
+- cada item do histórico deve oferecer um menu discreto de três pontos com `Renomear chat` e `Excluir chat`. O dropdown usa largura fixa, tipografia leve, ícones pequenos e rótulos em uma única linha; renomear abre um diálogo compacto e persiste o título, enquanto excluir exige confirmação;
+- depois de confirmar a exclusão, a conversa desaparece imediatamente, não pode ser aberta nem continuada pelo aluno e o próximo chat disponível é selecionado;
+- essa ação é uma exclusão lógica: a conversa permanece no backend para análise agregada de dúvidas, temas e oportunidades de novos conteúdos, sem voltar ao contexto do tutor. Exclusão ou anonimização efetiva de dados pessoais pertence ao fluxo de privacidade/LGPD, não a essa ação de organização do histórico;
+- respostas do tutor podem mostrar `[MM:SS]` ou `[HH:MM:SS]` somente quando o backend validar uma fonte especifica da legenda. A IA cita identificadores opacos de cues, nunca calcula horarios; o servidor converte a fonte aprovada no tempo real, aplica margem de 3 segundos para tras e torna apenas esse marcador clicavel. Horarios antigos, livres ou sem citacao validada permanecem como texto comum. Transcricoes TXT sem tempo usam `Trecho N` e nunca inventam horario;
 - o estado `Assistindo...` na thumbnail da playlist deve aparecer somente depois que o aluno clicar no player/botao de reproduzir naquela sessao, nao apenas porque a aula esta selecionada.
 - o clique/play do player deve registrar `lesson_started`/progresso inicial e permitir que a aula apareca em `Continue assistindo`.
 - a plataforma deve salvar segundos e percentual assistidos por aula, independentemente do provedor de video. HTML5/player proprio envia tempo real por eventos nativos; YouTube usa a IFrame API para ler `currentTime`, `duration`, pausa e conclusao; Vimeo, Bunny, Mux e embeds externos devem passar por adaptadores equivalentes ou, enquanto a API especifica nao estiver integrada, por uma ponte de inicio + temporizador de sessao.
 - ao retornar para uma aula com progresso salvo, o player deve posicionar no ponto salvo quando o provedor permitir `seek`/parametro de inicio; YouTube deve usar `start` no embed e `seekTo` no adapter, mas sem autoplay. O aluno precisa dar play explicitamente. No YouTube, antes do clique de play, a UI deve mostrar a thumbnail oficial do video com a barra de progresso salva, evitando a tela preta que o embed pode renderizar antes da reproducao. Providers que renderizem frame pausado de forma confiavel podem usar esse frame no futuro.
+- no modo gratuito com YouTube, a area do aluno deve exibir somente os controles Bunker707: o iframe nao recebe clique, foco ou teclado, os controles nativos ficam desativados e as regioes residuais de titulo, canal, compartilhamento e marca do provedor sao cobertas pelo proprio player. Play/pausa, seek, som/volume, velocidade, qualidade e tela cheia continuam acessiveis pelos controles da plataforma.
+- os controles Bunker707 usam uma timeline fina e transparente acima da linha de acoes, sem faixa escura continua sobre o video. À esquerda ficam play/pausa, retroceder 10 segundos, avancar 10 segundos, volume e tempo atual/total; à direita ficam somente legenda, engrenagem de configuracoes e tela cheia. Em telas estreitas, os tempos podem ficar junto da timeline para preservar todos os sete botoes.
+- a engrenagem de configuracoes deve reunir velocidade e qualidade em navegacao hierarquica igual ao YouTube. O primeiro nivel mostra somente `Velocidade de reprodução` e `Qualidade`, cada linha com icone proprio, valor atual discreto e chevron fino. A superficie e preta translucida com blur, cantos suaves e tipografia regular, sem fontes grandes ou pesadas. Ao clicar, o menu navega para a lista vertical correspondente, com titulo e botao de voltar; velocidade e resolucoes nunca aparecem achatadas ao mesmo tempo. A engrenagem nao exibe tooltip visual no hover; seu contexto permanece no nome acessivel para tecnologias assistivas. Ela continua exibindo um selo compacto da qualidade em uso; no modo manual, ele deriva da selecao (`HD`, `2K`, `4K` etc.) e, em `Automático`, comeca como `AUTO` e muda conforme a qualidade reportada pelo player. Se o provider informar apenas a categoria generica `highres`, usar `HD+` e nao inventar `2K` ou `4K`.
+- o menu da engrenagem fecha e retorna ao primeiro nivel quando o aluno clica em qualquer ponto fora do proprio controle, inclusive fora do player;
+- o submenu de velocidade deve listar verticalmente somente as taxas aceitas pelo video/player atual, marcar a taxa efetiva e confirmar mudancas reportadas pela API do provider. A velocidade escolhida deve ser preservada ao trocar entre resolucao automatica e manual; no modo manual, audio e video separados precisam usar a mesma taxa para permanecer sincronizados.
+- o submenu de qualidade deve listar verticalmente primeiro todas as resolucoes reais disponiveis para aquele video e compativeis com o navegador, deixando `Automático` como a ultima opcao. Se a origem oferecer 4K, por exemplo, o menu deve incluir `2160p` com a dimensao `3840x2160`; nao exibir opcoes fixas ou inventadas. A caixa deve mostrar todas as opcoes sem scroll interno e nao precisa de paragrafo explicando como o modo automatico funciona.
+- `Automático` e o modo inicial e mantem a adaptacao nativa do YouTube: o provedor busca a maior qualidade sustentavel para as condicoes atuais de conexao, buffer, tamanho de exibicao e capacidade do dispositivo, podendo subir ou reduzir a resolucao durante a aula. Em um video 4K, conexao estavel e dispositivo compativel permitem que o YouTube chegue a 4K, mas a plataforma nao deve fingir que `Automático` fixa 4K. A IFrame API nao aceita mais comandos para forcar ou consultar diretamente a qualidade; a UI apenas acompanha as mudancas reportadas por `onPlaybackQualityChange`.
+- ao escolher uma resolucao manual, o player Bunker707 reproduz diretamente os fluxos temporarios separados de video e audio, mantendo os mesmos controles e sem revelar branding clicavel do provedor. A troca de modo ou resolucao deve preservar, sempre que possivel, a posicao atual, o estado de reproducao, o volume, a velocidade e a legenda. Durante a preparacao conjunta das duas faixas, inclusive em 4K, a thumbnail permanece visivel em vez de uma tela preta; a reproducao so retoma quando audio e video possuem dados suficientes, e correcoes periodicas de sincronia devem evitar reposicionamentos agressivos que causem cortes audiveis.
+- essa camada e apenas de apresentacao e pode precisar de ajuste quando o YouTube mudar o embed. Ela nao e DRM: uma pessoa com conhecimento tecnico ainda pode descobrir o ID e a origem do video inspecionando o HTML ou as requisicoes de rede.
+- enquanto a pagina de aula estiver montada, o menu de contexto deve ficar bloqueado em toda a pagina, inclusive fora do player. A mesma barreira de atrito intercepta `F12`, os atalhos comuns de DevTools no Windows, Linux e macOS, `Ver codigo-fonte`, a tecla de menu de contexto e `Shift+F10`. Esses bloqueios nao substituem autorizacao, nao impedem abertura das ferramentas pelo menu do navegador e nao devem ser descritos como protecao absoluta.
+- a carga da pagina do aluno nao deve serializar a URL original de visualizacao do YouTube quando um ID valido ja puder ser derivado no servidor. Rotas auxiliares de resolucao e legenda recebem apenas os IDs internos de conteudo/aula, validam sessao e entitlement e resolvem o ID do YouTube no servidor. O iframe e os fluxos de reproducao ainda tornam a origem tecnicamente observavel, mas a URL completa deixa de aparecer de forma redundante nos dados e consultas da aplicacao.
 - comentarios da aula devem usar layout de thread leve, sem transformar cada comentario em card; avatar/foto, nome, tempo relativo, selo `Professor` quando aplicavel, reacoes por emoji/curtida e menu de denuncia ficam no proprio item;
 - respostas a um comentario devem aparecer indentadas dentro do comentario principal; respostas de professor mantem selo `Professor` no item indentado;
 - cada comentario e resposta deve ter acao `Responder`; ao clicar, o composer deve entrar em modo resposta e preencher automaticamente a mencao `@nickname` da pessoa respondida;
@@ -511,6 +589,24 @@ Mobile:
 - player no topo;
 - playlist vira accordion ou drawer;
 - materiais e comentarios abaixo.
+
+## IA Diretor
+
+A IA Diretor e a orientadora geral da escola. Ela nao substitui o Tutor IA de cada aula: o Tutor funciona como professor do conteudo atual, enquanto a Diretora ajuda o aluno a encontrar cursos, modulos, aulas e assuntos, decidir o proximo passo e organizar trilhas de estudo.
+
+Comportamento:
+
+- fica disponivel em um launcher circular discreto no canto inferior direito de todas as paginas autenticadas da area do aluno;
+- usa `Compass` com uma estrela de IA, diferenciando-se do chapeu de formatura do Tutor;
+- no desktop abre um painel flutuante ancorado acima do launcher, sem bloquear a pagina; no celular ocupa a tela para preservar leitura, teclado e historico;
+- a entrada explica apenas que o aluno pode encontrar aulas, descobrir o que estudar e organizar o proximo passo, sem mencionar transcricao ou detalhes tecnicos;
+- oferece sugestoes como `Onde encontro um assunto?`, `O que devo estudar agora?` e `Monte uma trilha de estudos`;
+- possui historico persistente, varios chats independentes, novo chat, renomeacao e exclusao logica;
+- respostas podem usar Markdown, mas destinos de navegacao aparecem como referencias internas verificadas pelo servidor, com tipo, titulo, contexto e acao `Abrir`;
+- ao abrir uma referencia, a navegacao preserva o salvamento pendente de progresso e favoritos;
+- o historico da IA Diretor nunca e misturado com chats do Tutor IA, mesmo quando o painel e usado dentro de uma pagina de aula;
+- as conversas ficam salvas no historico do aluno. Excluir um chat o remove da experiencia e do contexto futuro, mantendo o registro de backend conforme a politica de retencao e privacidade;
+- se nao houver provedor ativo ou conteudo autorizado disponivel, a interface apresenta indisponibilidade real e nao simula respostas.
 
 ## Busca
 

@@ -3,6 +3,7 @@
 import { Bookmark, Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { savedItemCollectionLabel } from "@/lib/saved-items";
+import { cn } from "@/lib/utils";
 import type { MouseEvent } from "react";
 import type { SavedItemTargetType } from "@/lib/platform-types";
 
@@ -17,8 +18,8 @@ type SavedItemChangedDetail = {
 type SavedItemSyncEntry = {
   collectionLabel: string;
   desiredSaved: boolean;
-  inFlight: boolean;
   lastConfirmedSaved: boolean;
+  syncPromise?: Promise<void>;
   targetId: string;
   targetType: SavedItemTargetType;
 };
@@ -56,6 +57,7 @@ async function persistSavedItemChange(entry: SavedItemSyncEntry, saved: boolean)
     headers: {
       "Content-Type": "application/json"
     },
+    keepalive: true,
     method: "PUT"
   });
 
@@ -64,34 +66,58 @@ async function persistSavedItemChange(entry: SavedItemSyncEntry, saved: boolean)
   }
 }
 
-async function flushSavedItemSync(key: string) {
+function flushSavedItemSync(key: string): Promise<void> {
   const entry = savedItemSyncQueue.get(key);
 
-  if (!entry || entry.inFlight) {
-    return;
+  if (!entry) {
+    return Promise.resolve();
   }
 
-  const savedToSend = entry.desiredSaved;
-  entry.inFlight = true;
+  if (entry.syncPromise) {
+    return entry.syncPromise;
+  }
 
-  try {
-    await persistSavedItemChange(entry, savedToSend);
-    entry.lastConfirmedSaved = savedToSend;
-  } catch {
-    if (entry.desiredSaved === savedToSend) {
-      entry.desiredSaved = entry.lastConfirmedSaved;
-      dispatchSavedItemChanged({
-        saved: entry.lastConfirmedSaved,
-        targetId: entry.targetId,
-        targetType: entry.targetType
-      });
+  const syncPromise = (async () => {
+    while (entry.desiredSaved !== entry.lastConfirmedSaved) {
+      const savedToSend = entry.desiredSaved;
+
+      try {
+        await persistSavedItemChange(entry, savedToSend);
+        entry.lastConfirmedSaved = savedToSend;
+      } catch {
+        if (entry.desiredSaved === savedToSend) {
+          entry.desiredSaved = entry.lastConfirmedSaved;
+          dispatchSavedItemChanged({
+            saved: entry.lastConfirmedSaved,
+            targetId: entry.targetId,
+            targetType: entry.targetType
+          });
+        }
+      }
     }
-  } finally {
-    entry.inFlight = false;
+  })().finally(() => {
+    entry.syncPromise = undefined;
 
     if (entry.desiredSaved !== entry.lastConfirmedSaved) {
       void flushSavedItemSync(key);
     }
+  });
+
+  entry.syncPromise = syncPromise;
+  return syncPromise;
+}
+
+export async function flushPendingSavedItemChanges() {
+  while (true) {
+    const pendingKeys = [...savedItemSyncQueue.entries()]
+      .filter(([, entry]) => entry.syncPromise || entry.desiredSaved !== entry.lastConfirmedSaved)
+      .map(([key]) => key);
+
+    if (pendingKeys.length === 0) {
+      return;
+    }
+
+    await Promise.all(pendingKeys.map((key) => flushSavedItemSync(key)));
   }
 }
 
@@ -110,7 +136,6 @@ function requestSavedItemSync({
   const entry = savedItemSyncQueue.get(key) ?? {
     collectionLabel: savedItemCollectionLabel,
     desiredSaved: previousSaved,
-    inFlight: false,
     lastConfirmedSaved: previousSaved,
     targetId,
     targetType
@@ -193,11 +218,11 @@ export function SavedItemButton({
     <button
       aria-label={saved ? `Remover ${targetTitle} dos favoritos` : `Salvar ${targetTitle} nos favoritos`}
       aria-pressed={saved}
-      className={`${className} relative ${
+      className={cn("relative", className,
         saved
           ? "border-emerald-400/85 bg-[#2f2f2f]/95 text-white shadow-[0_12px_34px_rgba(0,0,0,0.42)] ring-2 ring-emerald-400/70 ring-offset-2 ring-offset-black hover:border-emerald-300 hover:bg-[#3a3a3a]"
           : "border-zinc-400 bg-black/30 text-white hover:border-white hover:bg-white/10"
-      }`}
+      )}
       onClick={handleClick}
       type="button"
     >

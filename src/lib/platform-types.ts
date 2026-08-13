@@ -11,7 +11,30 @@ export type ContentKind =
   | "Material";
 export type CommerceScope = "sellable_product" | "included_content" | "learning_content";
 export type ContentStatus = "Novo" | "Em andamento" | "Concluido" | "Liberado" | "Bloqueado" | "Em breve";
+export type ContentPublicationStatus = "archived" | "draft" | "published";
 export type RowVisibility = "students" | "non_students" | "all";
+export type HomeSectionType = "continue_watching" | "content_carousel" | "content_structure";
+export type HomeSectionContentSource =
+  | "recent_lessons"
+  | "entitlement_products"
+  | "sellable_products"
+  | "upcoming_products"
+  | "manual"
+  | "selected_content_structure";
+export type HomeSectionLayout = "continue" | "vertical" | "compact" | "immersive";
+export type HomeSectionConfig = {
+  contentSource: HomeSectionContentSource;
+  id: string;
+  isActive: boolean;
+  itemIds: string[];
+  layout: HomeSectionLayout;
+  order: number;
+  sectionType: HomeSectionType;
+  sourceContentId?: string;
+  subtitle?: string;
+  title: string;
+  visibility: RowVisibility;
+};
 export type FormationCourseOpenMode = "course_page_modules" | "course_lesson_format";
 export type CoursePresentationMode = "module_cards" | "lesson_playlist";
 export type LockedContentActionMode = "details_modal" | "external_link";
@@ -39,6 +62,40 @@ export type ReleaseRuleConfig = {
 
 export type LessonVideoProvider = "youtube" | "vimeo" | "bunny" | "mux" | "custom_url" | "embed_code";
 export type LessonReaction = "not-for-me" | "liked" | "loved";
+export type LessonCommentStatus = "pending" | "approved" | "hidden" | "spam";
+export type LessonCommentReaction =
+  | "like"
+  | "fire"
+  | "insight"
+  | "love"
+  | "clap"
+  | "laugh"
+  | "wow"
+  | "rocket"
+  | "eyes"
+  | "check";
+export type LessonCommentAuthorRole = "student" | "producer" | "moderator";
+
+export type LessonCommentRecord = {
+  authorAvatarUrl?: string;
+  authorId?: string;
+  authorName: string;
+  authorRole: LessonCommentAuthorRole;
+  authorUsername: string;
+  body: string;
+  contentId: string;
+  createdAt: string;
+  id: string;
+  isOwn: boolean;
+  lessonId: string;
+  parentCommentId?: string;
+  reactions: Partial<Record<LessonCommentReaction, number>>;
+  replies: LessonCommentRecord[];
+  reportedByCurrentUser: boolean;
+  selectedReaction?: LessonCommentReaction;
+  status: LessonCommentStatus;
+  updatedAt: string;
+};
 
 export type LessonVideoConfig = {
   assetId?: string;
@@ -80,7 +137,9 @@ export type ContentItem = {
   lessons?: string;
   level?: string;
   maxStudents?: number | null;
+  parentContentId?: string;
   progress: number;
+  publicationStatus?: ContentPublicationStatus;
   purchaseLabel?: string;
   purchaseTarget?: PurchaseTarget;
   purchaseUrl?: string;
@@ -90,11 +149,15 @@ export type ContentItem = {
 };
 
 export type HomeRow = {
+  backgroundImage?: string;
   course?: ContentItem;
   id: string;
   items: ContentItem[];
+  layout?: HomeSectionLayout;
   lockedActionMode?: LockedContentActionMode;
   modules?: CourseModule[];
+  sectionId?: string;
+  structureItems?: ContentItem[];
   subtitle?: string;
   title: string;
   variant: "continue" | "vertical" | "course_modules";
@@ -208,10 +271,21 @@ export type ContentPageSettings = {
   internalCardActionMode?: InternalCardActionMode;
   lockedActionMode?: LockedContentActionMode;
   moduleOpenMode?: ModuleOpenMode;
+  parentFormationId?: string;
 };
 
 export type AdminContentAccess = "Liberado" | "Bloqueado" | "Drip" | "Em breve";
-export type AdminView = "overview" | "students" | "catalog" | "structure";
+export type AdminView =
+  | "overview"
+  | "students"
+  | "catalog"
+  | "combos"
+  | "structure"
+  | "community"
+  | "moderation"
+  | "ai-agents"
+  | "personalization"
+  | "integrations";
 export type ReleaseRuleMode =
   | "immediate"
   | "after_enrollment"
@@ -342,13 +416,9 @@ export type AdminSellableProduct = {
   title: string;
 };
 
-export type AdminHomeSection = {
+export type AdminHomeSection = HomeSectionConfig & {
   contentCount: number;
-  id: string;
-  order: number;
   source: string;
-  title: string;
-  visibility: RowVisibility;
 };
 
 export type AdminPipelineItem = {
@@ -357,17 +427,100 @@ export type AdminPipelineItem = {
   tone: string;
 };
 
+export type AdminProductComboStatus = "active" | "draft" | "paused";
+
+export type AdminProductCombo = {
+  cohortName: string;
+  createdAt: string;
+  description: string;
+  id: string;
+  name: string;
+  productIds: string[];
+  studentsCount: number;
+  status: AdminProductComboStatus;
+  updatedAt?: string;
+};
+
+export type AdminCommentStatus = LessonCommentStatus;
+export type AdminCommentKind = "comment" | "reply";
+
+export type AdminModerationItem = {
+  analysisStatus: "pending" | "processing" | "completed" | "failed";
+  authorId?: string;
+  authorName: string;
+  authorRole: LessonCommentAuthorRole;
+  body: string;
+  createdAt: string;
+  id: string;
+  kind: AdminCommentKind;
+  lessonId: string;
+  lessonTitle: string;
+  moderationNote?: string;
+  parentAuthorName?: string;
+  productId: string;
+  productTitle: string;
+  reactionCount: number;
+  reportCount: number;
+  status: AdminCommentStatus;
+  updatedAt: string;
+};
+
+export type AdminBlockedWordRule = {
+  active: boolean;
+  createdAt?: string;
+  id: string;
+  message: string;
+  updatedAt?: string;
+  word: string;
+};
+
+export type AdminIntegrationProvider = "Hotmart" | "Ticto" | "TikTok" | "Kiwify" | "Manual";
+export type AdminIntegrationStatus = "not_configured" | "configured" | "needs_attention";
+
+export type AdminIntegrationSetting = {
+  events: string[];
+  id: string;
+  lastSyncAt?: string;
+  provider: AdminIntegrationProvider;
+  secretStatus: "missing" | "saved";
+  status: AdminIntegrationStatus;
+  webhookUrl: string;
+};
+
+export type AdminAIAgentScope = "comments" | "lesson_tutor" | "global_assistant" | "home_chat";
+export type AdminAIAgentStatus = "draft" | "training" | "active" | "paused";
+
+export type AdminAIAgent = {
+  autoReply: boolean;
+  id: string;
+  instructions: string;
+  lastTrainedAt?: string;
+  name: string;
+  productIds: string[];
+  scope: AdminAIAgentScope;
+  status: AdminAIAgentStatus;
+  trainingSources: string[];
+};
+
 export type AdminDashboardData = {
+  aiAgents: AdminAIAgent[];
+  blockedWordRules: AdminBlockedWordRule[];
   chartPoints: AdminChartPoint[];
   cohorts: string[];
+  combos: AdminProductCombo[];
   contentRecords: AdminContentRecord[];
   courseModules: CourseModule[];
   entitlements: AdminEntitlement[];
   formationCourses: ContentItem[];
+  hero: HomeHeroConfig;
+  homeRows: HomeRow[];
+  homeSectionConfigs: HomeSectionConfig[];
   homeSections: AdminHomeSection[];
+  integrations: AdminIntegrationSetting[];
   metrics: AdminMetric[];
+  moderationItems: AdminModerationItem[];
   pipeline: AdminPipelineItem[];
-  persistenceProvider: "local_fallback" | "supabase";
+  persistenceProvider: "supabase";
   releaseRules: AdminReleaseRule[];
   sellableProducts: AdminSellableProduct[];
   students: AdminStudent[];

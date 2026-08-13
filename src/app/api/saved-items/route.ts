@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { savedItemCollectionLabel } from "@/lib/saved-items";
 import { requireApiUser } from "@/server/auth/guards";
 import { setSavedItem } from "@/server/db/platform-store";
+import { jsonRouteError } from "@/server/http/route-errors";
 import type { SavedItemTargetType } from "@/lib/platform-types";
 
 const savedTargetTypes = new Set<SavedItemTargetType>([
@@ -55,7 +56,6 @@ export async function PUT(request: Request) {
 
     return NextResponse.json({ data });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Nao foi possivel atualizar o favorito.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return jsonRouteError(error, "Nao foi possivel atualizar o favorito.");
   }
 }
