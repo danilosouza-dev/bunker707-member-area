@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireApiAdmin } from "@/server/auth/guards";
-import { deleteContentItem, upsertContentItem } from "@/server/db/platform-store";
+import { deleteContentItem, reorderContentItems, upsertContentItem } from "@/server/db/platform-store";
 import { jsonRouteError } from "@/server/http/route-errors";
-import type { ContentWriteInput } from "@/server/db/platform-store";
+import type { ContentOrderInput, ContentWriteInput } from "@/server/db/platform-store";
 
 export async function POST(request: Request) {
   const auth = await requireApiAdmin();
@@ -45,5 +45,27 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ data });
   } catch (error) {
     return jsonRouteError(error, "Nao foi possivel excluir o conteudo.");
+  }
+}
+
+export async function PATCH(request: Request) {
+  const auth = await requireApiAdmin();
+
+  if (auth.response) {
+    return auth.response;
+  }
+
+  const payload = await request.json() as Partial<ContentOrderInput>;
+
+  if (!Array.isArray(payload.orderedIds) || payload.orderedIds.length === 0) {
+    return NextResponse.json({ error: "Ordem de conteudos invalida." }, { status: 400 });
+  }
+
+  try {
+    const data = await reorderContentItems({ orderedIds: payload.orderedIds });
+
+    return NextResponse.json({ data });
+  } catch (error) {
+    return jsonRouteError(error, "Nao foi possivel ordenar os conteudos.");
   }
 }

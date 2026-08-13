@@ -86,13 +86,13 @@ Adaptar para:
 - hero maior e mais cinematografico;
 - primeira linha de cards sobrepondo o fim da hero;
 - primeira linha `Continue assistindo` com thumbnails horizontais e barra de progresso;
-- fileiras seguintes configuraveis com cards verticais exibidos em cerca de 300 x 485.4 no desktop, podendo chegar perto de 320 x 517.8 em telas muito largas;
-- setas de carrossel aparecem somente quando a fileira tiver overflow horizontal real; com poucos cards, a fileira fica limpa, sem botoes desativados;
-- capas dos cards verticais enviadas preferencialmente em proporcao proxima da regra aurea, por exemplo 1000 x 1618 px;
-- cards verticais limpos por padrao, com hover flutuante: escala edge-aware nas bordas do carrossel, sombra forte, camada acima dos vizinhos, imagem escurecida com degrade inferior e informacoes dentro do proprio card;
+- fileiras seguintes configuraveis com cards verticais exibidos em cerca de 300 x 433.33 no desktop, podendo chegar perto de 320 x 462.22 em telas muito largas;
+- setas de carrossel aparecem somente quando a fileira tiver overflow horizontal real; na adaptacao Bunker707, elas ficam sobrepostas às bordas dos cards com fade escuro lateral, e um indicador segmentado acima da fileira acompanha a pagina atual; com poucos cards, a fileira fica limpa, sem controles;
+- capas dos cards verticais enviadas em 720 x 1040 px nesta fase, mantendo a mesma proporcao usada nos cards;
+- cards verticais limpos por padrao, com hover flutuante: escala edge-aware somente nos cards que tocam as bordas visiveis do carrossel, enquanto o ultimo card de uma fileira curta com espaco livre à direita cresce centralizado; sombra forte, camada acima dos vizinhos, imagem escurecida com degrade inferior e informacoes dentro do proprio card;
 - seta de detalhes nos cards verticais abre modal com informacoes do conteudo;
 - `Minhas compras` agrupa tudo que o aluno comprou/tem entitlement ativo: formacoes, bootcamps e cursos avulsos;
-- `Produtos a venda`/`Vitrine` pode conter conteudos comprados e nao comprados conforme configuracao do dashboard;
+- `Produtos a venda`/`Vitrine` mostra somente conteudos vendaveis aos quais o aluno ainda nao tem acesso;
 - conteudos sem entitlement ativo devem aparecer com badge circular escuro/translucido no canto superior direito e cadeado branco sobreposto, capa em preto e branco no estado normal e CTA verde solido `Comprar` em destaque no hover, sem botao de salvar/favoritar; status, duracao, tipo e quantidade de aulas ficam para modal/pagina propria;
 - secoes configuraveis podem aparecer para alunos/compradores, nao compradores/visitantes ou todos;
 - adaptacao Bunker707: produtores com catalogo curto podem ativar uma secao com capa vertical reduzida do curso à esquerda, rotulo pequeno, titulo e botao `Acessar`/`Comprar` à direita, alem de cards de modulos em tamanho intermediario sem botao proprio; sem acesso, os modulos abrem o modal de detalhes do curso;
@@ -196,6 +196,9 @@ Decisoes Bunker707 para a pagina de aula:
 - o botao de voltar para a pagina do conteudo deve ficar sobreposto no canto superior esquerdo do player, aparecendo no hover/foco no desktop, usando o mesmo hover circular escuro dos botoes secundarios, com tooltip acima do player sem corte pela area do video, e permanecendo acessivel em telas touch;
 - overlays do player devem permanecer abaixo do header global quando houver sobreposicao durante o scroll;
 - nao exibir tag do provedor de video sobre o player, como `YouTube`, porque essa informacao e tecnica e nao melhora o consumo da aula;
+- erros, mensagens de carregamento e fallbacks da experiencia do aluno devem ser neutros e nunca revelar o provedor de video;
+- o player Bunker707 deve usar timeline fina sobre uma superficie transparente e uma unica linha de controles: play/pausa, -10s, +10s, volume e tempos à esquerda; legenda, engrenagem de configuracoes e tela cheia à direita, sem outras acoes nem faixa escura continua. A engrenagem segue a navegacao hierarquica do YouTube: o primeiro nivel mostra somente `Velocidade de reprodução` e `Qualidade`, com o valor atual e seta; cada linha abre um submenu vertical dedicado com titulo e voltar, sem exibir as duas listas simultaneamente. Velocidade preserva a taxa escolhida ao trocar a resolucao e sincroniza audio/video no modo manual. O selo mostra a qualidade manual selecionada ou, em `Automático`, a qualidade efetiva reportada durante a reproducao; `AUTO` e apenas o estado inicial, e `highres` generico vira `HD+` sem falsa precisao. O submenu de qualidade lista todas as resolucoes sem scroll, deixa `Automático` por ultimo e nao exibe texto explicativo abaixo das opcoes;
+- no Modo TV, o modal conectado deve oferecer velocidade junto aos controles remotos e marcar apenas a taxa confirmada pelo receptor. A legenda propria da plataforma deve trocar para a cue mais recente quando os tempos do YouTube se sobrepoem e, em qualidade manual, acompanhar o relogio do audio audivel;
 - controles de aula anterior/proxima nao devem ficar no topo da pagina; a navegacao entre aulas acontece pela playlist lateral e futuramente pelos controles internos do player;
 - o botao principal `Concluir` deve marcar/desmarcar a conclusao e preservar esse estado quando o aluno voltar para a aula; no prototipo UI-first isso pode ser feito localmente, e no produto final a fonte deve ser o backend de progresso;
 - botoes secundarios como materiais, TV, salvar e avaliar devem ser circulares, iconograficos, com borda discreta no estado normal e feedback visual proprio no hover/foco, sem depender de tooltip nativo do navegador;
@@ -211,7 +214,7 @@ Decisoes Bunker707 para a pagina de aula:
 - o CRM/dashboard deve coletar consumo e comportamento com detalhe: aulas assistidas, percentual concluido por aula, ponto de abandono, trechos de maior retencao, avaliacoes, comentarios, downloads, cliques, frequencia de login e progresso por curso/produto;
 - eventos futuros devem registrar conclusao manual pela playlist, conclusao pelo botao principal, avaliacao, tentativas de baixar material bloqueado, downloads liberados, progresso de video, abandono, retomada, login e interacoes relevantes.
 
-Futuro:
+Na referencia original, futuro; na Bunker707, Tutor IA e transcricao ja implementados:
 
 - assistente de IA da aula;
 - transcricao;
@@ -590,7 +593,7 @@ Nao entrar inicialmente:
 - conversas;
 - ranking;
 - certificados;
-- IA da aula.
+- agentes gerais de IA alem do Tutor IA da aula, que ja foi implementado.
 
 ## Decisoes de adaptacao
 

@@ -8,10 +8,9 @@ import type {
   LessonCommentAuthorRole,
   LessonCommentReaction,
   LessonCommentRecord,
-  LessonCommentStatus,
-  ReleaseRuleConfig
+  LessonCommentStatus
 } from "@/lib/platform-types";
-import { getReleaseRuleNotice } from "@/lib/release-rules";
+import { requireLessonAccess } from "@/server/access/lesson-access";
 import { getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import {
@@ -63,12 +62,6 @@ type BlockedWordRow = {
   word: string;
 };
 
-type LessonAccessContext = {
-  contentId: string;
-  isAdmin: boolean;
-  lessonId: string;
-};
-
 const commentReactionValues = new Set<LessonCommentReaction>([
   "like",
   "fire",
@@ -102,129 +95,6 @@ function throwDatabaseError(error: { message: string } | null, context: string) 
   if (error) {
     throw new Error(`${context}: ${error.message}`);
   }
-}
-
-function isActiveAccessWindow(startsAt?: string | null, endsAt?: string | null) {
-  const now = Date.now();
-  const start = startsAt ? new Date(startsAt).getTime() : Number.NaN;
-  const end = endsAt ? new Date(endsAt).getTime() : Number.NaN;
-
-  return !(!Number.isNaN(start) && start > now) && !(!Number.isNaN(end) && end < now);
-}
-
-function getTargetTypeForContentKind(kind: string) {
-  if (kind === "Formacao") return "formation";
-  if (kind === "Mentoria") return "mentorship";
-  if (kind === "Webinario") return "webinar";
-  if (kind === "Produto") return "product";
-  if (kind === "Bootcamp") return "bootcamp";
-  return "standalone_course";
-}
-
-async function requireLessonAccess(
-  supabase: SupabaseAdminClient,
-  contentId: string,
-  lessonId: string,
-  userId: string
-): Promise<LessonAccessContext> {
-  const lessonResult = await supabase
-    .from("lessons")
-    .select("id,module_id,release_rule,status")
-    .eq("id", lessonId)
-    .maybeSingle();
-  throwDatabaseError(lessonResult.error, "Nao foi possivel validar a aula");
-
-  if (!lessonResult.data || lessonResult.data.status !== "published") {
-    throw new LessonCommentStoreError("Aula nao encontrada.", 404);
-  }
-
-  const [moduleResult, contentResult, adminRoleResult] = await Promise.all([
-    supabase
-      .from("course_modules")
-      .select("id,owner_id,release_rule,status")
-      .eq("id", lessonResult.data.module_id)
-      .maybeSingle(),
-    supabase
-      .from("content_items")
-      .select("id,access_model,commerce_scope,is_locked,kind")
-      .eq("id", contentId)
-      .maybeSingle(),
-    supabase
-      .from("admin_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .maybeSingle()
-  ]);
-
-  throwDatabaseError(moduleResult.error, "Nao foi possivel validar o modulo");
-  throwDatabaseError(contentResult.error, "Nao foi possivel validar o conteudo");
-  throwDatabaseError(adminRoleResult.error, "Nao foi possivel validar o papel do usuario");
-
-  if (
-    !moduleResult.data ||
-    moduleResult.data.status !== "published" ||
-    moduleResult.data.owner_id !== contentId ||
-    !contentResult.data
-  ) {
-    throw new LessonCommentStoreError("A aula nao pertence a este conteudo.", 404);
-  }
-
-  const content = contentResult.data;
-  const isAdmin = Boolean(adminRoleResult.data);
-
-  if (isAdmin) {
-    return { contentId, isAdmin, lessonId };
-  }
-
-  const lessonReleaseNotice = getReleaseRuleNotice(
-    lessonResult.data.release_rule as ReleaseRuleConfig | undefined,
-    "aula"
-  );
-  const moduleReleaseNotice = getReleaseRuleNotice(
-    moduleResult.data.release_rule as ReleaseRuleConfig | undefined,
-    "modulo"
-  );
-
-  if (lessonReleaseNotice?.isLocked || moduleReleaseNotice?.isLocked) {
-    throw new LessonCommentStoreError("Os comentarios ficam disponiveis quando a aula for liberada.", 403);
-  }
-
-  if (content.access_model === "free" || content.is_locked === false) {
-    return { contentId, isAdmin, lessonId };
-  }
-
-  const entitlementResult = await supabase
-    .from("entitlements")
-    .select("target_id,target_type,starts_at,ends_at,status")
-    .eq("user_id", userId)
-    .eq("status", "active");
-  throwDatabaseError(entitlementResult.error, "Nao foi possivel validar o acesso do aluno");
-
-  const expectedTargetType = getTargetTypeForContentKind(content.kind);
-  const hasEntitlement = (entitlementResult.data ?? []).some((entitlement) => {
-    if (!isActiveAccessWindow(entitlement.starts_at, entitlement.ends_at)) {
-      return false;
-    }
-
-    if (entitlement.target_type === "platform") {
-      return entitlement.target_id === "platform" || entitlement.target_id === "*";
-    }
-
-    if (
-      entitlement.target_type === expectedTargetType &&
-      entitlement.target_id === contentId
-    ) {
-      return true;
-    }
-
-    return content.commerce_scope === "included_content" && entitlement.target_type === "formation";
-  });
-
-  if (!hasEntitlement) {
-    throw new LessonCommentStoreError("Voce nao tem acesso aos comentarios desta aula.", 403);
-  }
-
-  return { contentId, isAdmin, lessonId };
 }
 
 function getInitials(name: string) {
@@ -355,7 +225,7 @@ export async function listLessonComments({
   userId: string;
 }) {
   const supabase = getSupabaseAdminClient();
-  await requireLessonAccess(supabase, contentId, lessonId, userId);
+  await requireLessonAccess({ contentId, lessonId, userId });
   const rows = await getCommentRowsForLesson(supabase, contentId, lessonId, userId);
   const commentIds = rows.map((row) => row.id);
 
@@ -400,7 +270,7 @@ export async function createLessonComment({
   user: User;
 }) {
   const supabase = getSupabaseAdminClient();
-  const access = await requireLessonAccess(supabase, contentId, lessonId, user.id);
+  const access = await requireLessonAccess({ contentId, lessonId, userId: user.id });
   const validatedBody = validateLessonCommentBody(rawBody);
 
   if (validatedBody.error) {
@@ -542,7 +412,11 @@ async function getAccessibleComment(
     throw new LessonCommentStoreError("Comentario nao encontrado.", 404);
   }
 
-  await requireLessonAccess(supabase, result.data.content_id, result.data.lesson_id, userId);
+  await requireLessonAccess({
+    contentId: result.data.content_id,
+    lessonId: result.data.lesson_id,
+    userId
+  });
 
   if (result.data.status !== "approved" && !(result.data.status === "pending" && result.data.author_id === userId)) {
     throw new LessonCommentStoreError("Comentario nao encontrado.", 404);

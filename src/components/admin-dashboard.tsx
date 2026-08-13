@@ -2,8 +2,10 @@
 
 import {
   Activity,
+  ArrowDown,
   ArrowLeft,
   ArrowRightLeft,
+  ArrowUp,
   Ban,
   Bell,
   BookOpen,
@@ -14,6 +16,7 @@ import {
   GalleryVerticalEnd,
   KeyRound,
   LibraryBig,
+  LoaderCircle,
   Mail,
   Menu,
   MoreHorizontal,
@@ -32,12 +35,24 @@ import { useEffect, useMemo, useState } from "react";
 import { CatalogCommandCenter } from "@/components/admin/catalog/catalog-command-center";
 import { AIAgentsCommandCenter } from "@/components/admin/ai-agents/ai-agents-command-center";
 import { AdminOverview } from "@/components/admin/admin-overview";
+import {
+  AdminOperationProvider,
+  useAdminOperation,
+  type AdminOperationCopy
+} from "@/components/admin/admin-operation-feedback";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { CombosCommandCenter } from "@/components/admin/combos/combos-command-center";
 import { CommunityPlaceholder } from "@/components/admin/community/community-placeholder";
 import { ModerationCommandCenter } from "@/components/admin/moderation/moderation-command-center";
 import { PersonalizationCommandCenter } from "@/components/admin/personalization/personalization-command-center";
+import { HomeShowcaseEditor } from "@/components/admin/personalization/home-showcase-editor";
 import { IntegrationsCommandCenter } from "@/components/admin/settings/integrations-command-center";
+import {
+  emptyLessonTranscriptDraft,
+  keepLessonTranscriptDraft,
+  LessonTranscriptFields,
+  type LessonTranscriptDraft
+} from "@/components/admin/lesson-transcript-fields";
 import { StudentsCommandCenter } from "@/components/admin/students/students-command-center";
 import {
   DropdownMenu,
@@ -87,6 +102,7 @@ import type {
   CommerceScope,
   ContentAccessModel,
   ContentKind,
+  ContentPublicationStatus,
   CoursePresentationMode,
   ContentStatus,
   CourseModule,
@@ -104,9 +120,50 @@ const studentFormInputClassName =
   "h-10 rounded-[8px] border border-white/10 bg-[#111217] px-3 text-sm font-semibold text-white outline-none transition placeholder:text-zinc-600 focus:border-white/30 focus:ring-3 focus:ring-white/10";
 const creatableContentKinds = ["Formacao", "Curso", "Mentoria", "Webinario", "Produto", "Bootcamp"] satisfies ContentKind[];
 const courseLayoutContentKinds = ["Curso", "Bootcamp", "Mentoria", "Webinario", "Produto"] satisfies ContentKind[];
+type MoveDirection = "up" | "down";
 
 function supportsCoursePresentationMode(kind: ContentKind) {
   return (courseLayoutContentKinds as readonly ContentKind[]).includes(kind);
+}
+
+function getContentOrderGroupKey(record: AdminContentRecord) {
+  if (record.kind === "Formacao") {
+    return "formations";
+  }
+
+  if (record.kind === "Bootcamp") {
+    return "bootcamps";
+  }
+
+  return record.commerceScope === "included_content" ? "formation_internal_courses" : "courses";
+}
+
+function moveOrderedId(ids: string[], targetId: string, direction: MoveDirection) {
+  const currentIndex = ids.indexOf(targetId);
+
+  if (currentIndex < 0) {
+    return ids;
+  }
+
+  const nextIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+
+  if (nextIndex < 0 || nextIndex >= ids.length) {
+    return ids;
+  }
+
+  const nextIds = [...ids];
+  [nextIds[currentIndex], nextIds[nextIndex]] = [nextIds[nextIndex], nextIds[currentIndex]];
+  return nextIds;
+}
+
+function canMoveOrderedId(ids: string[], targetId: string, direction: MoveDirection) {
+  const currentIndex = ids.indexOf(targetId);
+
+  if (direction === "up") {
+    return currentIndex > 0;
+  }
+
+  return currentIndex >= 0 && currentIndex < ids.length - 1;
 }
 
 function getAccessClassName(access: AdminContentAccess) {
@@ -281,21 +338,27 @@ function StatusPill({ children, className = "" }: { children: React.ReactNode; c
 }
 
 function CatalogTable({
+  canMoveRecord,
   filteredRecords,
   onDeleteRecord,
   onEditRecord,
+  onMoveRecord,
   onSelectRecord,
   selectedRecord
 }: {
+  canMoveRecord: (record: AdminContentRecord, direction: MoveDirection) => boolean;
   filteredRecords: AdminContentRecord[];
   onDeleteRecord: (record: AdminContentRecord) => void;
   onEditRecord: (record: AdminContentRecord) => void;
+  onMoveRecord: (record: AdminContentRecord, direction: MoveDirection) => void;
   onSelectRecord: (record: AdminContentRecord) => void;
   selectedRecord?: AdminContentRecord;
 }) {
+  const { isOperationPending } = useAdminOperation();
+
   return (
     <div className={`${panelClassName} overflow-hidden`}>
-      <div className="grid min-w-[66rem] grid-cols-[2fr_0.8fr_0.9fr_0.9fr_0.9fr_0.9fr_0.8fr] border-b border-white/10 px-4 py-3 text-xs font-black uppercase text-zinc-500">
+      <div className="grid min-w-[72rem] grid-cols-[2fr_0.8fr_0.9fr_0.9fr_0.9fr_0.9fr_12rem] border-b border-white/10 px-4 py-3 text-xs font-black uppercase text-zinc-500">
         <span>Conteudo</span>
         <span>Tipo</span>
         <span>Modelo</span>
@@ -316,7 +379,7 @@ function CatalogTable({
 
           return (
             <div
-              className={`grid min-w-[66rem] grid-cols-[2fr_0.8fr_0.9fr_0.9fr_0.9fr_0.9fr_0.8fr] items-center gap-4 border-b border-white/10 px-4 py-4 text-left transition last:border-b-0 ${
+              className={`grid min-w-[72rem] grid-cols-[2fr_0.8fr_0.9fr_0.9fr_0.9fr_0.9fr_12rem] items-center gap-4 border-b border-white/10 px-4 py-4 text-left transition last:border-b-0 ${
                 isSelected ? "bg-white/[0.075]" : "hover:bg-white/[0.045]"
               }`}
               key={record.content.id}
@@ -352,8 +415,31 @@ function CatalogTable({
               </span>
               <span className="flex justify-end gap-2">
                 <button
+                  aria-label={`Mover ${record.content.title} para cima`}
+                  className="grid h-9 w-9 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                  disabled={!canMoveRecord(record, "up") || isOperationPending(`catalog:content:order:${record.content.id}`)}
+                  onClick={() => onMoveRecord(record, "up")}
+                  type="button"
+                >
+                  {isOperationPending(`catalog:content:order:${record.content.id}`)
+                    ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                    : <ArrowUp className="h-4 w-4" />}
+                </button>
+                <button
+                  aria-label={`Mover ${record.content.title} para baixo`}
+                  className="grid h-9 w-9 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                  disabled={!canMoveRecord(record, "down") || isOperationPending(`catalog:content:order:${record.content.id}`)}
+                  onClick={() => onMoveRecord(record, "down")}
+                  type="button"
+                >
+                  {isOperationPending(`catalog:content:order:${record.content.id}`)
+                    ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                    : <ArrowDown className="h-4 w-4" />}
+                </button>
+                <button
                   aria-label={`Editar ${record.content.title}`}
                   className="grid h-9 w-9 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                  disabled={isOperationPending(`catalog:content:delete:${record.content.id}`)}
                   onClick={() => onEditRecord(record)}
                   type="button"
                 >
@@ -362,10 +448,13 @@ function CatalogTable({
                 <button
                   aria-label={`Excluir ${record.content.title}`}
                   className="grid h-9 w-9 place-items-center rounded-[7px] border border-red-400/20 bg-red-500/10 text-red-200 transition hover:bg-red-500/20 hover:text-white"
+                  disabled={isOperationPending(`catalog:content:delete:${record.content.id}`)}
                   onClick={() => onDeleteRecord(record)}
                   type="button"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  {isOperationPending(`catalog:content:delete:${record.content.id}`)
+                    ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                    : <Trash2 className="h-4 w-4" />}
                 </button>
               </span>
             </div>
@@ -465,6 +554,8 @@ type ContentFormState = {
   kind: ContentKind;
   lockedActionMode: LockedContentActionMode;
   maxStudents: string;
+  parentFormationId: string;
+  publicationStatus: ContentPublicationStatus;
   purchaseTarget: PurchaseTarget;
   purchaseUrl: string;
   releaseDelayUnit: "horas" | "dias";
@@ -508,6 +599,7 @@ type LessonBuilderFormState = {
   releaseFixedDate: string;
   releaseMode: AdminReleaseRule["mode"];
   title: string;
+  transcript: LessonTranscriptDraft;
   videoAssetId: string;
   videoEmbedCode: string;
   videoProvider: LessonVideoProvider;
@@ -544,6 +636,8 @@ const emptyContentFormState: ContentFormState = {
   kind: "Formacao",
   lockedActionMode: "details_modal",
   maxStudents: "",
+  parentFormationId: "",
+  publicationStatus: "draft",
   purchaseTarget: "same_tab",
   purchaseUrl: "",
   releaseDelayUnit: "dias",
@@ -576,6 +670,7 @@ const emptyLessonBuilderFormState: LessonBuilderFormState = {
   releaseFixedDate: "",
   releaseMode: "immediate",
   title: "",
+  transcript: emptyLessonTranscriptDraft,
   videoAssetId: "",
   videoEmbedCode: "",
   videoProvider: "youtube",
@@ -595,6 +690,8 @@ function contentRecordToFormState(record: AdminContentRecord): ContentFormState 
     kind: record.content.kind,
     lockedActionMode: record.pageSettings?.lockedActionMode ?? "details_modal",
     maxStudents: record.content.maxStudents ? String(record.content.maxStudents) : "",
+    parentFormationId: record.pageSettings?.parentFormationId ?? record.content.parentContentId ?? "",
+    publicationStatus: record.content.publicationStatus ?? "published",
     purchaseTarget: record.content.purchaseTarget ?? "same_tab",
     purchaseUrl: record.content.purchaseUrl ?? "",
     releaseDelayUnit: record.content.releaseRule?.delayUnit ?? "dias",
@@ -636,6 +733,7 @@ function lessonToBuilderForm(lesson: LessonPreview, moduleId: string): LessonBui
     image: lesson.image ?? "",
     moduleId,
     title: lesson.title,
+    transcript: keepLessonTranscriptDraft,
     videoAssetId: lesson.video?.assetId ?? "",
     videoEmbedCode: lesson.video?.embedCode ?? "",
     videoProvider: lesson.video?.provider ?? "youtube",
@@ -711,6 +809,7 @@ function CatalogView({
   selectedRecord?: AdminContentRecord;
   setSelectedRecord: (record: AdminContentRecord) => void;
 }) {
+  const { isOperationPending, runAdminOperation } = useAdminOperation();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "sellable" | "included" | "locked">("all");
   const [contentFormOpen, setContentFormOpen] = useState(false);
@@ -762,6 +861,10 @@ function CatalogView({
   ), [filter, normalizedQuery, records]);
   const isEditingModule = Boolean(moduleBuilderForm.id);
   const isEditingLesson = Boolean(lessonBuilderForm.id);
+  const isCatalogBusy = isOperationPending();
+  const isSavingContent = isOperationPending("catalog:content:save");
+  const isSavingModule = isOperationPending("catalog:module:save");
+  const isSavingLesson = isOperationPending("catalog:lesson:save");
   const showCourseLayoutSwitch = supportsCoursePresentationMode(contentForm.kind);
   const usesSingleCardLayout = contentForm.coursePresentationMode === "lesson_playlist";
 
@@ -782,7 +885,21 @@ function CatalogView({
   function updateLessonBuilderForm(field: keyof LessonBuilderFormState, value: string) {
     setLessonBuilderForm((current) => ({
       ...current,
-      [field]: value
+      [field]: value,
+      ...(
+        current.id && (field === "videoAssetId" || field === "videoEmbedCode" || field === "videoProvider" || field === "videoUrl")
+          ? {
+              transcript: {
+                ...emptyLessonTranscriptDraft,
+                mode: field === "videoProvider" && value !== "youtube"
+                  ? "manual"
+                  : field !== "videoProvider" && current.videoProvider !== "youtube"
+                    ? "manual"
+                    : "youtube"
+              } satisfies LessonTranscriptDraft
+            }
+          : {}
+      )
     }));
   }
 
@@ -822,7 +939,10 @@ function CatalogView({
     setImageUploadError("");
 
     try {
-      const src = await readValidatedImage(file, spec);
+      const src = await runAdminOperation(`catalog:image:${field}`, {
+        pending: field === "image" ? "Validando e carregando a capa..." : "Validando e carregando a imagem de hero...",
+        success: field === "image" ? "Capa carregada e pronta para salvar." : "Imagem de hero carregada e pronta para salvar."
+      }, () => readValidatedImage(file, spec));
       updateContentForm(field, src);
     } catch (error) {
       setImageUploadError(error instanceof Error ? error.message : "Nao foi possivel validar a imagem.");
@@ -837,29 +957,166 @@ function CatalogView({
     setImageUploadError("");
 
     try {
-      const src = await readValidatedImage(file, posterImageSpec);
+      const src = await runAdminOperation("catalog:image:module", {
+        pending: "Validando e carregando a capa do modulo...",
+        success: "Capa do modulo carregada e pronta para salvar."
+      }, () => readValidatedImage(file, posterImageSpec));
       updateModuleBuilderForm("image", src);
     } catch (error) {
       setImageUploadError(error instanceof Error ? error.message : "Nao foi possivel validar a imagem.");
     }
   }
 
-  async function postDashboardMutation(endpoint: string, payload: Record<string, unknown>) {
-    const response = await fetch(endpoint, {
-      body: JSON.stringify(payload),
-      headers: {
-        "Content-Type": "application/json"
-      },
-      method: "POST"
-    });
-    const result = await response.json() as { data?: AdminDashboardData; error?: string };
+  async function postDashboardMutation(
+    endpoint: string,
+    payload: Record<string, unknown>,
+    operationKey: string,
+    copy: AdminOperationCopy
+  ) {
+    return runAdminOperation(operationKey, copy, async () => {
+      const response = await fetch(endpoint, {
+        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
 
-    if (!response.ok || !result.data) {
-      throw new Error(result.error ?? "Nao foi possivel salvar.");
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? "Nao foi possivel salvar.");
+      }
+
+      onDashboardDataChange(result.data);
+      return result.data;
+    });
+  }
+
+  async function deleteDashboardMutation(
+    endpoint: string,
+    id: string,
+    fallbackMessage: string,
+    operationKey: string,
+    copy: AdminOperationCopy
+  ) {
+    return runAdminOperation(operationKey, copy, async () => {
+      const response = await fetch(endpoint, {
+        body: JSON.stringify({ id }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "DELETE"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? fallbackMessage);
+      }
+
+      onDashboardDataChange(result.data);
+      return result.data;
+    });
+  }
+
+  async function patchDashboardMutation(
+    endpoint: string,
+    payload: Record<string, unknown>,
+    operationKey: string,
+    copy: AdminOperationCopy
+  ) {
+    return runAdminOperation(operationKey, copy, async () => {
+      const response = await fetch(endpoint, {
+        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "PATCH"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? "Nao foi possivel ordenar.");
+      }
+
+      onDashboardDataChange(result.data);
+      return result.data;
+    });
+  }
+
+  function getContentOrderGroup(record: AdminContentRecord) {
+    const groupKey = getContentOrderGroupKey(record);
+    return records.filter((candidate) => getContentOrderGroupKey(candidate) === groupKey);
+  }
+
+  function canMoveContentRecord(record: AdminContentRecord, direction: MoveDirection) {
+    return canMoveOrderedId(
+      getContentOrderGroup(record).map((candidate) => candidate.content.id),
+      record.content.id,
+      direction
+    );
+  }
+
+  async function moveContentRecord(record: AdminContentRecord, direction: MoveDirection) {
+    const groupIds = getContentOrderGroup(record).map((candidate) => candidate.content.id);
+
+    await patchDashboardMutation(
+      "/api/admin/content",
+      { orderedIds: moveOrderedId(groupIds, record.content.id, direction) },
+      `catalog:content:order:${record.content.id}`,
+      {
+        pending: `Reordenando ${record.content.title}...`,
+        success: "Ordem do catalogo atualizada."
+      }
+    );
+  }
+
+  async function moveWizardModule(moduleId: string, direction: MoveDirection) {
+    if (!wizardRecord) {
+      return;
     }
 
-    onDashboardDataChange(result.data);
-    return result.data;
+    const orderedIds = moveOrderedId(
+      wizardModules.map((module) => module.id),
+      moduleId,
+      direction
+    );
+
+    const targetModule = wizardModules.find((candidate) => candidate.id === moduleId);
+    await patchDashboardMutation(
+      "/api/admin/modules",
+      { orderedIds, ownerId: wizardRecord.content.id },
+      `catalog:module:order:${moduleId}`,
+      {
+        pending: `Reordenando o modulo ${targetModule?.title ?? "selecionado"}...`,
+        success: "Ordem dos modulos atualizada."
+      }
+    );
+  }
+
+  async function moveWizardLesson(moduleId: string, lessonId: string, direction: MoveDirection) {
+    const targetModule = wizardModules.find((candidate) => candidate.id === moduleId);
+
+    if (!targetModule) {
+      return;
+    }
+
+    const targetLesson = targetModule.lessons.find((lesson) => lesson.id === lessonId);
+    await patchDashboardMutation(
+      "/api/admin/lessons",
+      {
+        moduleId,
+        orderedIds: moveOrderedId(
+          targetModule.lessons.map((lesson) => lesson.id),
+          lessonId,
+          direction
+        )
+      },
+      `catalog:lesson:order:${lessonId}`,
+      {
+        pending: `Reordenando a aula ${targetLesson?.title ?? "selecionada"}...`,
+        success: "Ordem das aulas atualizada."
+      }
+    );
   }
 
   async function submitContentForm(event: React.FormEvent<HTMLFormElement>) {
@@ -880,44 +1137,51 @@ function CatalogView({
         ? "Liberado"
         : contentForm.status;
 
-    const response = await fetch("/api/admin/content", {
-      body: JSON.stringify({
-        ...contentForm,
-        homeModuleSectionEnabled: contentForm.homeModuleSectionEnabled,
-        isLocked: isClosed || status === "Bloqueado",
-        lockedActionMode: contentForm.lockedActionMode,
-        maxStudents,
-        purchaseTarget: contentForm.purchaseTarget,
-        purchaseUrl: contentForm.purchaseUrl.trim() || undefined,
-        status,
-        releaseRule: {
-          delayUnit: contentForm.releaseDelayUnit,
-          delayValue: contentForm.releaseDelayValue,
-          fixedDate: contentForm.releaseFixedDate,
-          mode: contentForm.releaseMode,
-          requirement: contentForm.releaseRequirement
-        }
-      }),
-      headers: {
-        "Content-Type": "application/json"
-      },
-      method: "POST"
+    const savedData = await runAdminOperation("catalog:content:save", {
+      error: "Nao foi possivel salvar o item.",
+      pending: contentForm.id ? "Salvando alteracoes do item..." : "Criando o item no catalogo...",
+      success: `${contentForm.title} foi salvo com sucesso.`
+    }, async () => {
+      const response = await fetch("/api/admin/content", {
+        body: JSON.stringify({
+          ...contentForm,
+          homeModuleSectionEnabled: contentForm.homeModuleSectionEnabled,
+          isLocked: isClosed || status === "Bloqueado",
+          lockedActionMode: contentForm.lockedActionMode,
+          maxStudents,
+          purchaseTarget: contentForm.purchaseTarget,
+          purchaseUrl: contentForm.purchaseUrl.trim() || undefined,
+          status,
+          releaseRule: {
+            delayUnit: contentForm.releaseDelayUnit,
+            delayValue: contentForm.releaseDelayValue,
+            fixedDate: contentForm.releaseFixedDate,
+            mode: contentForm.releaseMode,
+            requirement: contentForm.releaseRequirement
+          }
+        }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? "Nao foi possivel cadastrar conteudo.");
+      }
+
+      onDashboardDataChange(result.data);
+      return result.data;
     });
-    const result = await response.json() as { data?: AdminDashboardData; error?: string };
-
-    if (!response.ok || !result.data) {
-      throw new Error(result.error ?? "Nao foi possivel cadastrar conteudo.");
-    }
-
-    onDashboardDataChange(result.data);
     const savedRecord =
-      result.data.contentRecords.find((record) => record.content.id === contentForm.id) ??
-      result.data.contentRecords.find((record) => (
+      savedData.contentRecords.find((record) => record.content.id === contentForm.id) ??
+      savedData.contentRecords.find((record) => (
         !previousRecordIds.has(record.content.id) &&
         record.content.title === contentForm.title &&
         record.content.kind === contentForm.kind
       )) ??
-      result.data.contentRecords.find((record) => (
+      savedData.contentRecords.find((record) => (
         record.content.title === contentForm.title &&
         record.content.kind === contentForm.kind
       ));
@@ -958,20 +1222,26 @@ function CatalogView({
       return;
     }
 
-    const response = await fetch("/api/admin/content", {
-      body: JSON.stringify({ id: record.content.id }),
-      headers: {
-        "Content-Type": "application/json"
-      },
-      method: "DELETE"
+    await runAdminOperation(`catalog:content:delete:${record.content.id}`, {
+      error: "Nao foi possivel excluir o item.",
+      pending: `Excluindo ${record.content.title}...`,
+      success: `${record.content.title} foi excluido.`
+    }, async () => {
+      const response = await fetch("/api/admin/content", {
+        body: JSON.stringify({ id: record.content.id }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "DELETE"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? "Nao foi possivel excluir conteudo.");
+      }
+
+      onDashboardDataChange(result.data);
     });
-    const result = await response.json() as { data?: AdminDashboardData; error?: string };
-
-    if (!response.ok || !result.data) {
-      throw new Error(result.error ?? "Nao foi possivel excluir conteudo.");
-    }
-
-    onDashboardDataChange(result.data);
     setContentForm(emptyContentFormState);
     setContentFormStep("basic");
     setContentFormOpen(false);
@@ -986,18 +1256,26 @@ function CatalogView({
 
     const editingModuleId = moduleBuilderForm.id;
     const previousModuleIds = new Set(courseModules.map((module) => module.id));
-    const nextData = await postDashboardMutation("/api/admin/modules", {
-      description: moduleBuilderForm.description,
-      id: editingModuleId,
-      image: moduleBuilderForm.image,
-      ownerId: wizardRecord.content.id,
-      ownerKind: wizardRecord.kind,
-      releaseDelayUnit: moduleBuilderForm.releaseDelayUnit,
-      releaseDelayValue: moduleBuilderForm.releaseDelayValue,
-      releaseFixedDate: moduleBuilderForm.releaseFixedDate,
-      releaseMode: moduleBuilderForm.releaseMode,
-      title: moduleBuilderForm.title
-    });
+    const nextData = await postDashboardMutation(
+      "/api/admin/modules",
+      {
+        description: moduleBuilderForm.description,
+        id: editingModuleId,
+        image: moduleBuilderForm.image,
+        ownerId: wizardRecord.content.id,
+        ownerKind: wizardRecord.kind,
+        releaseDelayUnit: moduleBuilderForm.releaseDelayUnit,
+        releaseDelayValue: moduleBuilderForm.releaseDelayValue,
+        releaseFixedDate: moduleBuilderForm.releaseFixedDate,
+        releaseMode: moduleBuilderForm.releaseMode,
+        title: moduleBuilderForm.title
+      },
+      "catalog:module:save",
+      {
+        pending: editingModuleId ? "Salvando alteracoes do modulo..." : "Criando o modulo...",
+        success: `${moduleBuilderForm.title} foi salvo com sucesso.`
+      }
+    );
     const savedModule =
       (editingModuleId ? nextData.courseModules.find((module) => module.id === editingModuleId) : undefined) ??
       nextData.courseModules.find((module) => (
@@ -1014,6 +1292,42 @@ function CatalogView({
     setContentFormStep(editingModuleId ? "modules" : "lessons");
   }
 
+  async function deleteWizardModule(module: CourseModule) {
+    const lessonsLabel = `${module.lessons.length} aula${module.lessons.length === 1 ? "" : "s"}`;
+    const confirmed = window.confirm(
+      `Excluir o modulo "${module.title}" e suas ${lessonsLabel}? Comentarios, favoritos e progresso dessas aulas tambem serao removidos.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const nextData = await deleteDashboardMutation(
+      "/api/admin/modules",
+      module.id,
+      "Nao foi possivel excluir o modulo.",
+      `catalog:module:delete:${module.id}`,
+      {
+        pending: `Excluindo o modulo ${module.title}...`,
+        success: `Modulo ${module.title} excluido.`
+      }
+    );
+
+    if (moduleBuilderForm.id === module.id) {
+      setModuleBuilderForm(emptyModuleBuilderFormState);
+    }
+
+    if (lessonBuilderForm.moduleId === module.id) {
+      const nextModule = nextData.courseModules.find((candidate) =>
+        candidate.ownerId === wizardRecord?.content.id
+      );
+      setLessonBuilderForm({
+        ...emptyLessonBuilderFormState,
+        moduleId: nextModule?.id ?? ""
+      });
+    }
+  }
+
   async function submitWizardLesson(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const moduleId = effectiveLessonModuleId;
@@ -1022,23 +1336,66 @@ function CatalogView({
       return;
     }
 
-    await postDashboardMutation("/api/admin/lessons", {
-      description: lessonBuilderForm.description,
-      duration: lessonBuilderForm.duration,
-      id: lessonBuilderForm.id,
-      image: lessonBuilderForm.image,
-      moduleId,
-      releaseDelayUnit: lessonBuilderForm.releaseDelayUnit,
-      releaseDelayValue: lessonBuilderForm.releaseDelayValue,
-      releaseFixedDate: lessonBuilderForm.releaseFixedDate,
-      releaseMode: lessonBuilderForm.releaseMode,
-      title: lessonBuilderForm.title,
-      video: buildLessonVideoConfig(lessonBuilderForm) ?? null
-    });
-    setLessonBuilderForm((current) => ({
-      ...emptyLessonBuilderFormState,
-      moduleId: current.moduleId
-    }));
+    setImageUploadError("");
+
+    try {
+      await postDashboardMutation(
+        "/api/admin/lessons",
+        {
+          description: lessonBuilderForm.description,
+          duration: lessonBuilderForm.duration,
+          id: lessonBuilderForm.id,
+          image: lessonBuilderForm.image,
+          moduleId,
+          releaseDelayUnit: lessonBuilderForm.releaseDelayUnit,
+          releaseDelayValue: lessonBuilderForm.releaseDelayValue,
+          releaseFixedDate: lessonBuilderForm.releaseFixedDate,
+          releaseMode: lessonBuilderForm.releaseMode,
+          title: lessonBuilderForm.title,
+          transcript: lessonBuilderForm.transcript,
+          video: buildLessonVideoConfig(lessonBuilderForm) ?? null
+        },
+        "catalog:lesson:save",
+        {
+          pending: lessonBuilderForm.id ? "Salvando alteracoes da aula..." : "Criando a aula...",
+          success: `${lessonBuilderForm.title} foi salva com sucesso.`
+        }
+      );
+      setLessonBuilderForm((current) => ({
+        ...emptyLessonBuilderFormState,
+        moduleId: current.moduleId
+      }));
+    } catch (error) {
+      setImageUploadError(error instanceof Error ? error.message : "Nao foi possivel salvar a aula.");
+    }
+  }
+
+  async function deleteWizardLesson(moduleId: string, lesson: LessonPreview) {
+    const confirmed = window.confirm(
+      `Excluir a aula "${lesson.title}"? Comentarios, favoritos e progresso desta aula tambem serao removidos.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteDashboardMutation(
+      "/api/admin/lessons",
+      lesson.id,
+      "Nao foi possivel excluir a aula.",
+      `catalog:lesson:delete:${lesson.id}`,
+      {
+        pending: `Excluindo a aula ${lesson.title}...`,
+        success: `Aula ${lesson.title} excluida.`
+      }
+    );
+
+    if (lessonBuilderForm.id === lesson.id) {
+      setLessonBuilderForm({
+        ...emptyLessonBuilderFormState,
+        moduleId
+      });
+    }
   }
 
   return (
@@ -1060,7 +1417,7 @@ function CatalogView({
         <Dialog
           open={contentFormOpen}
           onOpenChange={(open) => {
-            if (!open) {
+            if (!open && !isCatalogBusy) {
               setContentFormOpen(false);
             }
           }}
@@ -1087,6 +1444,7 @@ function CatalogView({
                 <Button
                   aria-label="Fechar modal do catalogo"
                   className="size-9 rounded-full text-zinc-500 hover:bg-white/10 hover:text-white"
+                  disabled={isCatalogBusy}
                   onClick={() => setContentFormOpen(false)}
                   size="icon-sm"
                   type="button"
@@ -1105,7 +1463,7 @@ function CatalogView({
                 ["lessons", "3. Aulas"]
               ].map(([id, label]) => {
                 const isActive = contentFormStep === id;
-                const isDisabled = id !== "basic" && !contentForm.id;
+                const isDisabled = isCatalogBusy || (id !== "basic" && !contentForm.id);
 
                 return (
                   <button
@@ -1132,7 +1490,7 @@ function CatalogView({
               ) : null}
 
               {contentFormStep === "basic" ? (
-              <form className="grid gap-3 lg:grid-cols-6" onSubmit={submitContentForm}>
+              <form aria-busy={isSavingContent} className="grid gap-3 lg:grid-cols-6" onSubmit={submitContentForm}>
                 <label className="grid gap-1 text-xs font-black uppercase text-zinc-500 lg:col-span-2">
                   Nome
                   <input
@@ -1166,6 +1524,26 @@ function CatalogView({
                     <option value="learning_content">Conteudo de apoio</option>
                   </select>
                 </label>
+                {contentForm.commerceScope === "included_content" ? (
+                  <label className="grid gap-1 text-xs font-black uppercase text-zinc-500 lg:col-span-2">
+                    Formacao principal
+                    <select
+                      className={inputClassName}
+                      onChange={(event) => updateContentForm("parentFormationId", event.target.value)}
+                      required
+                      value={contentForm.parentFormationId}
+                    >
+                      <option value="">Selecione a formacao</option>
+                      {records
+                        .filter((record) => record.kind === "Formacao" && record.commerceScope === "sellable_product")
+                        .map((record) => (
+                          <option key={record.content.id} value={record.content.id}>
+                            {record.content.title}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                ) : null}
                 {showCourseLayoutSwitch ? (
                   <div className="rounded-[8px] border border-white/10 bg-black/20 p-3 lg:col-span-2">
                     <div className="flex items-center justify-between gap-4">
@@ -1283,6 +1661,18 @@ function CatalogView({
                     <option>Concluido</option>
                     <option>Bloqueado</option>
                     <option>Em breve</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs font-black uppercase text-zinc-500">
+                  Publicação
+                  <select
+                    className={inputClassName}
+                    onChange={(event) => updateContentForm("publicationStatus", event.target.value)}
+                    value={contentForm.publicationStatus}
+                  >
+                    <option value="draft">Rascunho</option>
+                    <option value="published">Publicado</option>
+                    <option value="archived">Arquivado</option>
                   </select>
                 </label>
                 <label className="grid gap-1 text-xs font-black uppercase text-zinc-500 lg:col-span-2">
@@ -1464,14 +1854,19 @@ function CatalogView({
                 <div className="flex flex-wrap justify-end gap-3 lg:col-span-6">
                   <button
                     className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-4 py-2 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white"
+                    disabled={isCatalogBusy}
                     onClick={() => setContentFormOpen(false)}
                     type="button"
                   >
                     Concluir depois
                   </button>
-                  <button className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200" type="submit">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Salvar e continuar
+                  <button
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-60"
+                    disabled={isSavingContent}
+                    type="submit"
+                  >
+                    {isSavingContent ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    {isSavingContent ? "Salvando item..." : "Salvar e continuar"}
                   </button>
                 </div>
                 </form>
@@ -1493,7 +1888,7 @@ function CatalogView({
                   </div>
                   {wizardModules.length > 0 ? (
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      {wizardModules.map((module) => (
+                      {wizardModules.map((module, moduleIndex) => (
                         <div
                           className={`rounded-[8px] border p-3 transition ${
                             moduleBuilderForm.id === module.id
@@ -1507,14 +1902,49 @@ function CatalogView({
                               <p className="truncate text-sm font-black text-white">{module.title}</p>
                               <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-zinc-500">{module.description}</p>
                             </div>
-                            <button
-                              aria-label={`Editar modulo ${module.title}`}
-                              className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                              onClick={() => editWizardModule(module)}
-                              type="button"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <button
+                                aria-label={`Mover modulo ${module.title} para cima`}
+                                className="grid h-8 w-8 place-items-center rounded-[8px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                disabled={moduleIndex === 0 || isOperationPending(`catalog:module:order:${module.id}`)}
+                                onClick={() => void moveWizardModule(module.id, "up")}
+                                type="button"
+                              >
+                                {isOperationPending(`catalog:module:order:${module.id}`)
+                                  ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                                  : <ArrowUp className="h-4 w-4" />}
+                              </button>
+                              <button
+                                aria-label={`Mover modulo ${module.title} para baixo`}
+                                className="grid h-8 w-8 place-items-center rounded-[8px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                disabled={moduleIndex === wizardModules.length - 1 || isOperationPending(`catalog:module:order:${module.id}`)}
+                                onClick={() => void moveWizardModule(module.id, "down")}
+                                type="button"
+                              >
+                                {isOperationPending(`catalog:module:order:${module.id}`)
+                                  ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                                  : <ArrowDown className="h-4 w-4" />}
+                              </button>
+                              <button
+                                aria-label={`Editar modulo ${module.title}`}
+                                className="grid h-8 w-8 place-items-center rounded-[8px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                                onClick={() => editWizardModule(module)}
+                                type="button"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                              <button
+                                aria-label={`Excluir modulo ${module.title}`}
+                                className="grid h-8 w-8 place-items-center rounded-[8px] border border-red-400/20 bg-red-500/10 text-red-200 transition hover:bg-red-500/20 hover:text-white"
+                                disabled={isOperationPending(`catalog:module:delete:${module.id}`)}
+                                onClick={() => void deleteWizardModule(module)}
+                                type="button"
+                              >
+                                {isOperationPending(`catalog:module:delete:${module.id}`)
+                                  ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                                  : <Trash2 className="h-4 w-4" />}
+                              </button>
+                            </div>
                           </div>
                           <p className="mt-3 text-xs font-bold text-zinc-300">{module.lessons.length} aulas</p>
                         </div>
@@ -1526,7 +1956,7 @@ function CatalogView({
                     </div>
                   )}
                 </div>
-                <form className="space-y-3 rounded-[8px] border border-white/10 bg-black/20 p-4" onSubmit={submitWizardModule}>
+                <form aria-busy={isSavingModule} className="space-y-3 rounded-[8px] border border-white/10 bg-black/20 p-4" onSubmit={submitWizardModule}>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-black text-white">{isEditingModule ? "Editar modulo" : "Novo modulo"}</p>
                     {isEditingModule ? (
@@ -1630,13 +2060,18 @@ function CatalogView({
                       value={moduleBuilderForm.releaseFixedDate}
                     />
                   </label>
-                  <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-45" disabled={!wizardRecord} type="submit">
-                    {isEditingModule ? <CheckCircle2 className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                    {isEditingModule ? "Salvar modulo" : "Cadastrar modulo"}
+                  <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-45" disabled={!wizardRecord || isSavingModule} type="submit">
+                    {isSavingModule
+                      ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                      : isEditingModule
+                        ? <CheckCircle2 className="h-4 w-4" />
+                        : <Plus className="h-4 w-4" />}
+                    {isSavingModule ? "Salvando modulo..." : isEditingModule ? "Salvar modulo" : "Cadastrar modulo"}
                   </button>
                   {isEditingModule ? (
                     <button
                       className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-4 py-2 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white"
+                      disabled={isSavingModule}
                       onClick={cancelWizardModuleEdit}
                       type="button"
                     >
@@ -1645,7 +2080,7 @@ function CatalogView({
                   ) : null}
                   <button
                     className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-4 py-2 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white"
-                    disabled={wizardModules.length === 0}
+                    disabled={wizardModules.length === 0 || isCatalogBusy}
                     onClick={() => setContentFormStep("lessons")}
                     type="button"
                   >
@@ -1673,7 +2108,7 @@ function CatalogView({
                           </div>
                           {module.lessons.length > 0 ? (
                             <div className="mt-3 space-y-2">
-                              {module.lessons.map((lesson) => (
+                              {module.lessons.map((lesson, lessonIndex) => (
                                 <div
                                   className={`flex items-center justify-between gap-3 rounded-[6px] px-3 py-2 text-xs font-semibold transition ${
                                     lessonBuilderForm.id === lesson.id
@@ -1688,14 +2123,49 @@ function CatalogView({
                                       <p className="mt-1 text-[11px] font-bold text-zinc-500">{lesson.duration}</p>
                                     ) : null}
                                   </div>
-                                  <button
-                                    aria-label={`Editar aula ${lesson.title}`}
-                                    className="grid h-7 w-7 shrink-0 place-items-center rounded-[6px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                                    onClick={() => editWizardLesson(module.id, lesson)}
-                                    type="button"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
+                                  <div className="flex shrink-0 items-center gap-2">
+                                    <button
+                                      aria-label={`Mover aula ${lesson.title} para cima`}
+                                      className="grid h-7 w-7 place-items-center rounded-[6px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                      disabled={lessonIndex === 0 || isOperationPending(`catalog:lesson:order:${lesson.id}`)}
+                                      onClick={() => void moveWizardLesson(module.id, lesson.id, "up")}
+                                      type="button"
+                                    >
+                                      {isOperationPending(`catalog:lesson:order:${lesson.id}`)
+                                        ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                        : <ArrowUp className="h-3.5 w-3.5" />}
+                                    </button>
+                                    <button
+                                      aria-label={`Mover aula ${lesson.title} para baixo`}
+                                      className="grid h-7 w-7 place-items-center rounded-[6px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                      disabled={lessonIndex === module.lessons.length - 1 || isOperationPending(`catalog:lesson:order:${lesson.id}`)}
+                                      onClick={() => void moveWizardLesson(module.id, lesson.id, "down")}
+                                      type="button"
+                                    >
+                                      {isOperationPending(`catalog:lesson:order:${lesson.id}`)
+                                        ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                        : <ArrowDown className="h-3.5 w-3.5" />}
+                                    </button>
+                                    <button
+                                      aria-label={`Editar aula ${lesson.title}`}
+                                      className="grid h-7 w-7 place-items-center rounded-[6px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white"
+                                      onClick={() => editWizardLesson(module.id, lesson)}
+                                      type="button"
+                                    >
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      aria-label={`Excluir aula ${lesson.title}`}
+                                      className="grid h-7 w-7 place-items-center rounded-[6px] border border-red-400/20 bg-red-500/10 text-red-200 transition hover:bg-red-500/20 hover:text-white"
+                                      disabled={isOperationPending(`catalog:lesson:delete:${lesson.id}`)}
+                                      onClick={() => void deleteWizardLesson(module.id, lesson)}
+                                      type="button"
+                                    >
+                                      {isOperationPending(`catalog:lesson:delete:${lesson.id}`)
+                                        ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                        : <Trash2 className="h-3.5 w-3.5" />}
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -1705,7 +2175,7 @@ function CatalogView({
                     )}
                   </div>
                 </div>
-                <form className="space-y-3 rounded-[8px] border border-white/10 bg-black/20 p-4" onSubmit={submitWizardLesson}>
+                <form aria-busy={isSavingLesson} className="space-y-3 rounded-[8px] border border-white/10 bg-black/20 p-4" onSubmit={submitWizardLesson}>
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-black text-white">{isEditingLesson ? "Editar aula" : "Nova aula"}</p>
                     {isEditingLesson ? (
@@ -1806,6 +2276,12 @@ function CatalogView({
                       </label>
                     </>
                   )}
+                  <LessonTranscriptFields
+                    draft={lessonBuilderForm.transcript}
+                    lessonId={lessonBuilderForm.id}
+                    onChange={(transcript) => setLessonBuilderForm((current) => ({ ...current, transcript }))}
+                    videoProvider={lessonBuilderForm.videoProvider}
+                  />
                   <label className="grid gap-2 text-sm font-bold text-zinc-400">
                     Liberacao da aula
                     <select
@@ -1854,13 +2330,18 @@ function CatalogView({
                       value={lessonBuilderForm.releaseFixedDate}
                     />
                   </label>
-                  <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-45" disabled={!effectiveLessonModuleId} type="submit">
-                    {isEditingLesson ? <CheckCircle2 className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                    {isEditingLesson ? "Salvar aula" : "Cadastrar aula"}
+                  <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-45" disabled={!effectiveLessonModuleId || isSavingLesson} type="submit">
+                    {isSavingLesson
+                      ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                      : isEditingLesson
+                        ? <CheckCircle2 className="h-4 w-4" />
+                        : <Play className="h-4 w-4" />}
+                    {isSavingLesson ? "Salvando aula..." : isEditingLesson ? "Salvar aula" : "Cadastrar aula"}
                   </button>
                   {isEditingLesson ? (
                     <button
                       className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-4 py-2 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white"
+                      disabled={isSavingLesson}
                       onClick={cancelWizardLessonEdit}
                       type="button"
                     >
@@ -1869,6 +2350,7 @@ function CatalogView({
                   ) : null}
                   <button
                     className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.055] px-4 py-2 text-sm font-black text-zinc-200 transition hover:bg-white/10 hover:text-white"
+                    disabled={isCatalogBusy}
                     onClick={() => setContentFormOpen(false)}
                     type="button"
                   >
@@ -1882,9 +2364,11 @@ function CatalogView({
         </Dialog>
 
         <CatalogTable
+          canMoveRecord={canMoveContentRecord}
           filteredRecords={filteredRecords}
           onDeleteRecord={deleteRecord}
           onEditRecord={openEditContentForm}
+          onMoveRecord={(record, direction) => void moveContentRecord(record, direction)}
           onSelectRecord={setSelectedRecord}
           selectedRecord={selectedRecord}
         />
@@ -1998,15 +2482,19 @@ function PersonalizationView({
   courseModules,
   formationCourses,
   hero,
+  homeSectionConfigs,
   homeSections,
   homeRows,
+  onPublished,
   records
 }: {
   courseModules: CourseModule[];
   formationCourses: AdminDashboardData["formationCourses"];
   hero: AdminDashboardData["hero"];
+  homeSectionConfigs: AdminDashboardData["homeSectionConfigs"];
   homeSections: AdminHomeSection[];
   homeRows: HomeRow[];
+  onPublished: (data: AdminDashboardData) => void;
   records: AdminContentRecord[];
 }) {
   const sellableRecords = records.filter((record) => record.commerceScope === "sellable_product");
@@ -2616,6 +3104,21 @@ function PersonalizationView({
     return renderPersonalizationIndex();
   }
 
+  if (["showcase"].includes(activeTarget.kind)) {
+    return (
+      <HomeShowcaseEditor
+        courseModules={courseModules}
+        formationCourses={formationCourses}
+        hero={hero}
+        homeRows={homeRows}
+        homeSectionConfigs={homeSectionConfigs}
+        onBack={() => setActiveTarget({ kind: "index" })}
+        onPublished={onPublished}
+        records={records}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
       <PersonalizationEditorHeader
@@ -2644,6 +3147,7 @@ function StructureView({
   onDashboardDataChange: (data: AdminDashboardData) => void;
   selectedRecord?: AdminContentRecord;
 }) {
+  const { isOperationPending, runAdminOperation } = useAdminOperation();
   const [moduleTitle, setModuleTitle] = useState("");
   const [moduleDescription, setModuleDescription] = useState("");
   const [moduleImage, setModuleImage] = useState("");
@@ -2664,6 +3168,8 @@ function StructureView({
   const [lessonVideoUrl, setLessonVideoUrl] = useState("");
   const [lessonVideoAssetId, setLessonVideoAssetId] = useState("");
   const [lessonVideoEmbedCode, setLessonVideoEmbedCode] = useState("");
+  const [lessonTranscriptDraft, setLessonTranscriptDraft] = useState<LessonTranscriptDraft>(emptyLessonTranscriptDraft);
+  const [lessonSubmitError, setLessonSubmitError] = useState("");
   const [cohortName, setCohortName] = useState("");
   const selectedOwnerModules = useMemo(() => {
     if (!selectedRecord) {
@@ -2682,22 +3188,100 @@ function StructureView({
   const effectiveLessonModuleId = selectedOwnerModules.some((module) => module.id === lessonModuleId)
     ? lessonModuleId
     : selectedOwnerModules[0]?.id ?? "";
+  const isSavingModule = isOperationPending("structure:module:save");
+  const isSavingLesson = isOperationPending("structure:lesson:save");
+  const isSavingCohort = isOperationPending("structure:cohort:save");
 
-  async function postDashboardMutation(endpoint: string, payload: Record<string, unknown>) {
-    const response = await fetch(endpoint, {
-      body: JSON.stringify(payload),
-      headers: {
-        "Content-Type": "application/json"
-      },
-      method: "POST"
+  async function postDashboardMutation(
+    endpoint: string,
+    payload: Record<string, unknown>,
+    operationKey: string,
+    copy: AdminOperationCopy
+  ) {
+    await runAdminOperation(operationKey, copy, async () => {
+      const response = await fetch(endpoint, {
+        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? "Nao foi possivel salvar.");
+      }
+
+      onDashboardDataChange(result.data);
     });
-    const result = await response.json() as { data?: AdminDashboardData; error?: string };
+  }
 
-    if (!response.ok || !result.data) {
-      throw new Error(result.error ?? "Nao foi possivel salvar.");
+  async function patchDashboardMutation(
+    endpoint: string,
+    payload: Record<string, unknown>,
+    operationKey: string,
+    copy: AdminOperationCopy
+  ) {
+    await runAdminOperation(operationKey, copy, async () => {
+      const response = await fetch(endpoint, {
+        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "PATCH"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? "Nao foi possivel ordenar.");
+      }
+
+      onDashboardDataChange(result.data);
+    });
+  }
+
+  async function moveStructureModule(moduleId: string, direction: MoveDirection) {
+    if (!selectedRecord) {
+      return;
     }
 
-    onDashboardDataChange(result.data);
+    const targetModule = selectedOwnerModules.find((candidate) => candidate.id === moduleId);
+    await patchDashboardMutation(
+      "/api/admin/modules",
+      {
+        orderedIds: moveOrderedId(
+          selectedOwnerModules.map((module) => module.id),
+          moduleId,
+          direction
+        ),
+        ownerId: selectedRecord.content.id
+      },
+      `structure:module:order:${moduleId}`,
+      {
+        pending: `Reordenando o modulo ${targetModule?.title ?? "selecionado"}...`,
+        success: "Ordem dos modulos atualizada."
+      }
+    );
+  }
+
+  async function moveStructureLesson(module: CourseModule, lessonId: string, direction: MoveDirection) {
+    const targetLesson = module.lessons.find((lesson) => lesson.id === lessonId);
+    await patchDashboardMutation(
+      "/api/admin/lessons",
+      {
+        moduleId: module.id,
+        orderedIds: moveOrderedId(
+          module.lessons.map((lesson) => lesson.id),
+          lessonId,
+          direction
+        )
+      },
+      `structure:lesson:order:${lessonId}`,
+      {
+        pending: `Reordenando a aula ${targetLesson?.title ?? "selecionada"}...`,
+        success: "Ordem das aulas atualizada."
+      }
+    );
   }
 
   async function submitModule(event: React.FormEvent<HTMLFormElement>) {
@@ -2707,17 +3291,25 @@ function StructureView({
       return;
     }
 
-    await postDashboardMutation("/api/admin/modules", {
-      description: moduleDescription,
-      image: moduleImage,
-      ownerId: selectedRecord.content.id,
-      ownerKind: selectedRecord.kind,
-      releaseFixedDate: moduleReleaseFixedDate,
-      releaseDelayUnit: moduleReleaseDelayUnit,
-      releaseDelayValue: moduleReleaseDelayValue,
-      releaseMode: moduleReleaseMode,
-      title: moduleTitle
-    });
+    await postDashboardMutation(
+      "/api/admin/modules",
+      {
+        description: moduleDescription,
+        image: moduleImage,
+        ownerId: selectedRecord.content.id,
+        ownerKind: selectedRecord.kind,
+        releaseFixedDate: moduleReleaseFixedDate,
+        releaseDelayUnit: moduleReleaseDelayUnit,
+        releaseDelayValue: moduleReleaseDelayValue,
+        releaseMode: moduleReleaseMode,
+        title: moduleTitle
+      },
+      "structure:module:save",
+      {
+        pending: "Criando o modulo...",
+        success: `${moduleTitle} foi criado com sucesso.`
+      }
+    );
     setModuleTitle("");
     setModuleDescription("");
     setModuleImage("");
@@ -2734,24 +3326,40 @@ function StructureView({
       return;
     }
 
-    await postDashboardMutation("/api/admin/lessons", {
-      description: lessonDescription,
-      duration: lessonDuration,
-      moduleId: selectedModuleId,
-      image: lessonImage,
-      releaseFixedDate: lessonReleaseFixedDate,
-      releaseDelayUnit: lessonReleaseDelayUnit,
-      releaseDelayValue: lessonReleaseDelayValue,
-      releaseMode: lessonReleaseMode,
-      title: lessonTitle,
-      video: buildLessonVideoConfig({
-        ...emptyLessonBuilderFormState,
-        videoAssetId: lessonVideoAssetId,
-        videoEmbedCode: lessonVideoEmbedCode,
-        videoProvider: lessonVideoProvider,
-        videoUrl: lessonVideoUrl
-      }) ?? null
-    });
+    setLessonSubmitError("");
+
+    try {
+      await postDashboardMutation(
+        "/api/admin/lessons",
+        {
+          description: lessonDescription,
+          duration: lessonDuration,
+          moduleId: selectedModuleId,
+          image: lessonImage,
+          releaseFixedDate: lessonReleaseFixedDate,
+          releaseDelayUnit: lessonReleaseDelayUnit,
+          releaseDelayValue: lessonReleaseDelayValue,
+          releaseMode: lessonReleaseMode,
+          title: lessonTitle,
+          transcript: lessonTranscriptDraft,
+          video: buildLessonVideoConfig({
+            ...emptyLessonBuilderFormState,
+            videoAssetId: lessonVideoAssetId,
+            videoEmbedCode: lessonVideoEmbedCode,
+            videoProvider: lessonVideoProvider,
+            videoUrl: lessonVideoUrl
+          }) ?? null
+        },
+        "structure:lesson:save",
+        {
+          pending: "Criando a aula...",
+          success: `${lessonTitle} foi criada com sucesso.`
+        }
+      );
+    } catch (error) {
+      setLessonSubmitError(error instanceof Error ? error.message : "Nao foi possivel salvar a aula.");
+      return;
+    }
     setLessonTitle("");
     setLessonDescription("");
     setLessonDuration("");
@@ -2763,13 +3371,20 @@ function StructureView({
     setLessonVideoEmbedCode("");
     setLessonVideoProvider("youtube");
     setLessonVideoUrl("");
+    setLessonTranscriptDraft(emptyLessonTranscriptDraft);
   }
 
   async function submitCohort(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await postDashboardMutation("/api/admin/cohorts", {
-      name: cohortName
-    });
+    await postDashboardMutation(
+      "/api/admin/cohorts",
+      { name: cohortName },
+      "structure:cohort:save",
+      {
+        pending: "Criando a turma...",
+        success: `${cohortName} foi criada com sucesso.`
+      }
+    );
     setCohortName("");
   }
 
@@ -2846,9 +3461,30 @@ function StructureView({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between gap-3">
                             <h5 className="truncate text-sm font-black text-white">{module.title}</h5>
-                            <button aria-label="Mais opcoes" className="text-zinc-500 hover:text-white" type="button">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </button>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <button
+                                aria-label={`Mover modulo ${module.title} para cima`}
+                                className="grid h-8 w-8 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                disabled={moduleIndex === 0 || isOperationPending(`structure:module:order:${module.id}`)}
+                                onClick={() => void moveStructureModule(module.id, "up")}
+                                type="button"
+                              >
+                                {isOperationPending(`structure:module:order:${module.id}`)
+                                  ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                                  : <ArrowUp className="h-4 w-4" />}
+                              </button>
+                              <button
+                                aria-label={`Mover modulo ${module.title} para baixo`}
+                                className="grid h-8 w-8 place-items-center rounded-[7px] border border-white/10 bg-white/[0.055] text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                disabled={moduleIndex === selectedOwnerModules.length - 1 || isOperationPending(`structure:module:order:${module.id}`)}
+                                onClick={() => void moveStructureModule(module.id, "down")}
+                                type="button"
+                              >
+                                {isOperationPending(`structure:module:order:${module.id}`)
+                                  ? <LoaderCircle className="h-4 w-4 animate-spin" />
+                                  : <ArrowDown className="h-4 w-4" />}
+                              </button>
+                            </div>
                           </div>
                           <p className="mt-1 text-xs font-semibold text-zinc-500">{module.lessons.length} aulas</p>
                           <div className="mt-3 flex flex-wrap gap-2">
@@ -2859,6 +3495,52 @@ function StructureView({
                               {module.meta}
                             </StatusPill>
                           </div>
+                          {module.lessons.length > 0 ? (
+                            <div className="mt-4 space-y-2">
+                              {module.lessons.map((lesson, lessonIndex) => (
+                                <div
+                                  className="flex items-center justify-between gap-3 rounded-[6px] border border-white/10 bg-white/[0.035] px-3 py-2"
+                                  key={lesson.id}
+                                >
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-[5px] bg-black/35 text-[11px] font-black text-zinc-300">
+                                      {lessonIndex + 1}
+                                    </span>
+                                    <span className="min-w-0">
+                                      <span className="block truncate text-xs font-black text-zinc-200">{lesson.title}</span>
+                                      {lesson.duration ? (
+                                        <span className="mt-0.5 block text-[11px] font-semibold text-zinc-500">{lesson.duration}</span>
+                                      ) : null}
+                                    </span>
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-2">
+                                    <button
+                                      aria-label={`Mover aula ${lesson.title} para cima`}
+                                      className="grid h-7 w-7 place-items-center rounded-[6px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                      disabled={lessonIndex === 0 || isOperationPending(`structure:lesson:order:${lesson.id}`)}
+                                      onClick={() => void moveStructureLesson(module, lesson.id, "up")}
+                                      type="button"
+                                    >
+                                      {isOperationPending(`structure:lesson:order:${lesson.id}`)
+                                        ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                        : <ArrowUp className="h-3.5 w-3.5" />}
+                                    </button>
+                                    <button
+                                      aria-label={`Mover aula ${lesson.title} para baixo`}
+                                      className="grid h-7 w-7 place-items-center rounded-[6px] border border-white/10 bg-black/25 text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                      disabled={lessonIndex === module.lessons.length - 1 || isOperationPending(`structure:lesson:order:${lesson.id}`)}
+                                      onClick={() => void moveStructureLesson(module, lesson.id, "down")}
+                                      type="button"
+                                    >
+                                      {isOperationPending(`structure:lesson:order:${lesson.id}`)
+                                        ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                        : <ArrowDown className="h-3.5 w-3.5" />}
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -2882,7 +3564,7 @@ function StructureView({
         </div>
 
         <div className="mt-6 space-y-6">
-          <form className="space-y-3" onSubmit={submitModule}>
+          <form aria-busy={isSavingModule} className="space-y-3" onSubmit={submitModule}>
             <p className="text-sm font-black text-white">Novo modulo</p>
             <label className="grid gap-2 text-sm font-bold text-zinc-400">
               Nome do modulo
@@ -2960,15 +3642,15 @@ function StructureView({
             </label>
             <button
               className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={!selectedRecord}
+              disabled={!selectedRecord || isSavingModule}
               type="submit"
             >
-              <Plus className="h-4 w-4" />
-              Cadastrar modulo
+              {isSavingModule ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              {isSavingModule ? "Criando modulo..." : "Cadastrar modulo"}
             </button>
           </form>
 
-          <form className="space-y-3 border-t border-white/10 pt-5" onSubmit={submitLesson}>
+          <form aria-busy={isSavingLesson} className="space-y-3 border-t border-white/10 pt-5" onSubmit={submitLesson}>
             <p className="text-sm font-black text-white">Nova aula</p>
             <label className="grid gap-2 text-sm font-bold text-zinc-400">
               Modulo
@@ -3028,7 +3710,14 @@ function StructureView({
               Player da aula
               <select
                 className={inputClassName}
-                onChange={(event) => setLessonVideoProvider(event.target.value as LessonVideoProvider)}
+                onChange={(event) => {
+                  const nextProvider = event.target.value as LessonVideoProvider;
+                  setLessonVideoProvider(nextProvider);
+                  setLessonTranscriptDraft({
+                    ...emptyLessonTranscriptDraft,
+                    mode: nextProvider === "youtube" ? "youtube" : "manual"
+                  });
+                }}
                 value={lessonVideoProvider}
               >
                 {lessonVideoProviderOptions.map(([provider, label]) => (
@@ -3068,6 +3757,11 @@ function StructureView({
                 </label>
               </>
             )}
+            <LessonTranscriptFields
+              draft={lessonTranscriptDraft}
+              onChange={setLessonTranscriptDraft}
+              videoProvider={lessonVideoProvider}
+            />
             <label className="grid gap-2 text-sm font-bold text-zinc-400">
               Liberacao da aula
               <select
@@ -3116,17 +3810,22 @@ function StructureView({
                 value={lessonReleaseFixedDate}
               />
             </label>
+            {lessonSubmitError ? (
+              <p className="rounded-[8px] border border-red-400/20 bg-red-500/10 px-3 py-2 text-xs font-semibold leading-5 text-red-200">
+                {lessonSubmitError}
+              </p>
+            ) : null}
             <button
               className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={!effectiveLessonModuleId}
+              disabled={!effectiveLessonModuleId || isSavingLesson}
               type="submit"
             >
-              <Play className="h-4 w-4" />
-              Cadastrar aula
+              {isSavingLesson ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {isSavingLesson ? "Criando aula..." : "Cadastrar aula"}
             </button>
           </form>
 
-          <form className="space-y-3 border-t border-white/10 pt-5" onSubmit={submitCohort}>
+          <form aria-busy={isSavingCohort} className="space-y-3 border-t border-white/10 pt-5" onSubmit={submitCohort}>
             <p className="text-sm font-black text-white">Nova turma</p>
             <label className="grid gap-2 text-sm font-bold text-zinc-400">
               Nome da turma
@@ -3137,9 +3836,9 @@ function StructureView({
                 value={cohortName}
               />
             </label>
-            <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200" type="submit">
-              <Users className="h-4 w-4" />
-              Cadastrar turma
+            <button className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200 disabled:cursor-wait disabled:opacity-60" disabled={isSavingCohort} type="submit">
+              {isSavingCohort ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
+              {isSavingCohort ? "Criando turma..." : "Cadastrar turma"}
             </button>
             <div className="flex flex-wrap gap-2 pt-1">
               {cohorts.slice(0, 6).map((cohort) => (
@@ -4944,11 +5643,12 @@ function StudentsView({
   );
 }
 
-export function AdminDashboard({ initialData }: { initialData: AdminDashboardData }) {
+function AdminDashboardContent({ initialData }: { initialData: AdminDashboardData }) {
   const [activeView, setActiveView] = useState<AdminView>("overview");
   const [dashboardData, setDashboardData] = useState(initialData);
   const [selectedRecordId, setSelectedRecordId] = useState(initialData.contentRecords[0]?.content.id ?? "");
   const [selectedStudentId, setSelectedStudentId] = useState(initialData.students[0]?.id ?? "");
+  const { runAdminOperation } = useAdminOperation();
   const selectedRecord =
     dashboardData.contentRecords.find((record) => record.content.id === selectedRecordId) ??
     dashboardData.contentRecords[0];
@@ -4966,21 +5666,27 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
     });
 
     try {
-      const response = await fetch("/api/admin/students", {
-        body: JSON.stringify({ students: nextStudents }),
-        headers: {
-          "Content-Type": "application/json"
-        },
-        method: "PUT"
+      return await runAdminOperation("students:save", {
+        error: "Nao foi possivel salvar o aluno.",
+        pending: "Salvando dados e acessos do aluno...",
+        success: "Dados do aluno salvos com sucesso."
+      }, async () => {
+        const response = await fetch("/api/admin/students", {
+          body: JSON.stringify({ students: nextStudents }),
+          headers: {
+            "Content-Type": "application/json"
+          },
+          method: "PUT"
+        });
+        const payload = await response.json() as { data?: AdminDashboardData; error?: string };
+
+        if (!response.ok || !payload.data) {
+          throw new Error(payload.error ?? "Nao foi possivel salvar os alunos.");
+        }
+
+        updateDashboardData(payload.data);
+        return payload.data.students;
       });
-      const payload = await response.json() as { data?: AdminDashboardData; error?: string };
-
-      if (!response.ok || !payload.data) {
-        throw new Error(payload.error ?? "Nao foi possivel salvar os alunos.");
-      }
-
-      updateDashboardData(payload.data);
-      return payload.data.students;
     } catch (error) {
       setDashboardData(previousData);
       throw error;
@@ -5001,55 +5707,73 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
     );
   }
 
-  async function persistDashboardCollections(payload: Record<string, unknown>) {
-    const response = await fetch("/api/admin/collections", {
-      body: JSON.stringify(payload),
-      headers: {
-        "Content-Type": "application/json"
-      },
-      method: "POST"
+  async function persistDashboardCollections(
+    payload: Record<string, unknown>,
+    operationKey: string,
+    copy: AdminOperationCopy
+  ) {
+    await runAdminOperation(operationKey, copy, async () => {
+      const response = await fetch("/api/admin/collections", {
+        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? "Nao foi possivel salvar a configuracao.");
+      }
+
+      updateDashboardData(result.data);
     });
-    const result = await response.json() as { data?: AdminDashboardData; error?: string };
-
-    if (!response.ok || !result.data) {
-      throw new Error(result.error ?? "Nao foi possivel salvar a configuracao.");
-    }
-
-    updateDashboardData(result.data);
   }
 
   async function upsertCombo(combo: AdminProductCombo) {
-    const response = await fetch("/api/admin/combos", {
-      body: JSON.stringify(combo),
-      headers: {
-        "Content-Type": "application/json"
-      },
-      method: "POST"
+    await runAdminOperation(`combos:save:${combo.id}`, {
+      error: "Nao foi possivel salvar o combo.",
+      pending: `Salvando o combo ${combo.name}...`,
+      success: `Combo ${combo.name} salvo com sucesso.`
+    }, async () => {
+      const response = await fetch("/api/admin/combos", {
+        body: JSON.stringify(combo),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? "Nao foi possivel salvar o combo.");
+      }
+
+      updateDashboardData(result.data);
     });
-    const result = await response.json() as { data?: AdminDashboardData; error?: string };
-
-    if (!response.ok || !result.data) {
-      throw new Error(result.error ?? "Nao foi possivel salvar o combo.");
-    }
-
-    updateDashboardData(result.data);
   }
 
   async function deleteCombo(comboId: string) {
-    const response = await fetch("/api/admin/combos", {
-      body: JSON.stringify({ id: comboId }),
-      headers: {
-        "Content-Type": "application/json"
-      },
-      method: "DELETE"
+    await runAdminOperation(`combos:delete:${comboId}`, {
+      error: "Nao foi possivel excluir o combo.",
+      pending: "Excluindo combo...",
+      success: "Combo excluido com sucesso."
+    }, async () => {
+      const response = await fetch("/api/admin/combos", {
+        body: JSON.stringify({ id: comboId }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "DELETE"
+      });
+      const result = await response.json() as { data?: AdminDashboardData; error?: string };
+
+      if (!response.ok || !result.data) {
+        throw new Error(result.error ?? "Nao foi possivel excluir o combo.");
+      }
+
+      updateDashboardData(result.data);
     });
-    const result = await response.json() as { data?: AdminDashboardData; error?: string };
-
-    if (!response.ok || !result.data) {
-      throw new Error(result.error ?? "Nao foi possivel excluir o combo.");
-    }
-
-    updateDashboardData(result.data);
   }
 
   return (
@@ -5110,7 +5834,10 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
         {activeView === "ai-agents" ? (
           <AIAgentsCommandCenter
             agents={dashboardData.aiAgents}
-            onSaveAgents={(aiAgents) => persistDashboardCollections({ aiAgents })}
+            onSaveAgents={(aiAgents) => persistDashboardCollections({ aiAgents }, "agents:save", {
+              pending: "Salvando configuracao dos agentes de IA...",
+              success: "Configuracao dos agentes de IA salva."
+            })}
             products={dashboardData.sellableProducts}
           />
         ) : null}
@@ -5120,14 +5847,19 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
             formationCourses={dashboardData.formationCourses}
             hero={dashboardData.hero}
             homeRows={dashboardData.homeRows}
+            homeSectionConfigs={dashboardData.homeSectionConfigs}
             homeSections={dashboardData.homeSections}
+            onPublished={updateDashboardData}
             records={dashboardData.contentRecords}
           />
         ) : null}
         {activeView === "integrations" ? (
           <IntegrationsCommandCenter
             integrations={dashboardData.integrations}
-            onSaveIntegrations={(integrations) => persistDashboardCollections({ integrations })}
+            onSaveIntegrations={(integrations) => persistDashboardCollections({ integrations }, "integrations:save", {
+              pending: "Salvando configuracao da integracao...",
+              success: "Configuracao da integracao salva."
+            })}
           />
         ) : null}
       </AdminShell>
@@ -5136,5 +5868,13 @@ export function AdminDashboard({ initialData }: { initialData: AdminDashboardDat
         Supabase persistido
       </div>
     </div>
+  );
+}
+
+export function AdminDashboard({ initialData }: { initialData: AdminDashboardData }) {
+  return (
+    <AdminOperationProvider>
+      <AdminDashboardContent initialData={initialData} />
+    </AdminOperationProvider>
   );
 }

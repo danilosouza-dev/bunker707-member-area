@@ -187,9 +187,8 @@ test("admin dashboard exposes product combos, moderation, integrations and AI ag
   assert.match(platformStoreSource, /product_combos/);
   assert.match(platformStoreSource, /product_combo_items/);
   assert.match(platformStoreSource, /isMissingSupabaseSchemaObjectError/);
-  assert.match(platformStoreSource, /hasProductComboTables/);
-  assert.match(platformStoreSource, /productComboTablesAvailable/);
-  assert.match(platformStoreSource, /202606190001_product_combos\.sql/);
+  assert.match(platformStoreSource, /deleteComboItemsForCombos/);
+  assert.match(platformStoreSource, /"product_combo_items",\s*comboItemRows\(combo\)/);
   assert.match(platformStoreSource, /blockedWordRules/);
   assert.match(platformStoreSource, /integrations/);
   assert.match(platformStoreSource, /aiAgents/);
@@ -201,8 +200,11 @@ test("admin dashboard exposes product combos, moderation, integrations and AI ag
   assert.match(adminModerationCommandCenterSource, /Aprovados/);
   assert.match(adminIntegrationsCommandCenterSource, /Hotmart/);
   assert.match(adminIntegrationsCommandCenterSource, /Segredos no browser/);
+  assert.doesNotMatch(adminIntegrationsCommandCenterSource, /AIProviderSettings/);
   assert.match(adminAIAgentsCommandCenterSource, /Tutor de aula/);
   assert.match(adminAIAgentsCommandCenterSource, /Responder comentarios/);
+  assert.match(adminAIAgentsCommandCenterSource, /AIProviderSettings/);
+  assert.match(adminAIAgentsCommandCenterSource, /Tutor IA, a IA Diretor/);
   assert.match(adminCommunityPlaceholderSource, /Fase futura/);
 });
 
@@ -403,8 +405,9 @@ test("admin dashboard persists content, cohorts, lessons and students through Su
   assert.match(supabaseClientSource, /SUPABASE_SERVICE_ROLE_KEY/);
   assert.match(supabaseClientSource, /SUPABASE_SECRET_KEY/);
   assert.match(platformStoreSource, /getSupabaseAdminClient/);
-  assert.match(platformStoreSource, /return readSupabaseDatabase\(\);/);
-  assert.match(platformStoreSource, /return writeSupabaseDatabase\(database\);/);
+  assert.match(platformStoreSource, /return readSupabaseDatabase\(\{ includeAdminData: true \}\);/);
+  assert.doesNotMatch(platformStoreSource, /writeSupabaseDatabase/);
+  assert.match(platformStoreSource, /const readMemberDatabase = cache/);
   assert.doesNotMatch(platformStoreSource, /bunker707-platform\.json/);
   assert.doesNotMatch(platformStoreSource, /shouldUseSupabaseDatabase/);
   assert.match(platformStoreSource, /replaceAdminStudents/);
@@ -429,6 +432,7 @@ test("admin dashboard persists content, cohorts, lessons and students through Su
   assert.match(platformStoreSource, /saved_items/);
   assert.match(platformStoreSource, /upsertRows/);
   assert.match(platformStoreSource, /deleteMissingRows/);
+  assert.match(platformStoreSource, /persistImageAsset/);
   assert.doesNotMatch(platformStoreSource, /deleteAllRows/);
   assert.doesNotMatch(platformStoreSource, /writeSupabaseDatabase\(makeSeedDatabase\(\)\)/);
   assert.match(adminDashboardSource, /\/api\/admin\/students/);

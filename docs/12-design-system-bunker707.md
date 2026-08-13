@@ -8,6 +8,7 @@ Este documento define a base visual da area de membros Bunker707. A referencia p
 - Escuro premium: usar base escura constante, sem variacoes aleatorias de paleta por tela.
 - Poucas fontes e pesos: usar uma familia tipografica principal e variar por tamanho/peso, nao por troca de fonte.
 - Estados visiveis: todo botao interativo deve ter hover/foco proprio, sem depender de tooltip nativo do navegador.
+- Feedback continuo: toda navegacao, salvamento ou mutacao deve reconhecer a acao imediatamente e manter um estado visivel ate a interface confirmar o resultado.
 - Bordas discretas: bordas normais devem ser suaves; hover pode reforcar contraste.
 - UI previsivel: abrir modulo nao troca aula; trocar aula exige clique em aula.
 - Sem excesso de cards: cards devem representar conteudo, modais ou ferramentas reais, nao envolver secoes inteiras.
@@ -88,6 +89,15 @@ Regras:
 
 ## Botoes
 
+### Feedback de navegacao e operacoes
+
+- Toda troca de pagina interna deve exibir feedback imediato, inclusive quando a rota ja estiver em cache ou tiver sido pre-carregada.
+- O estado visual de navegacao usa somente um spinner circular vermelho, ancorado de forma estavel no centro do viewport sobre uma camada preta mais escura, desfocada e sem dessaturar a pagina, no estilo Netflix. Apenas um spinner pode ficar visivel durante a transicao, mesmo quando o fallback do App Router estiver montado, e ele permanece ate a nova rota ser renderizada.
+- Links, cards com navegacao programatica, redirecionamentos e os comandos voltar/avancar do navegador devem seguir o mesmo padrao global.
+- Enquanto a troca esta pendente, cliques repetidos ficam bloqueados. Se a rota exceder o tempo de seguranca, o bloqueio e liberado e uma mensagem de demora e anunciada.
+- O texto contextual, como `Abrindo Favoritos...`, fica disponivel para leitores de tela sem adicionar caixas ou avisos visuais. O status deve usar `role="status"`, `aria-live`, `aria-busy` e respeitar `prefers-reduced-motion`.
+- Operacoes de criar, editar, publicar, excluir, conectar ou salvar devem manter feedback local contextual ate sucesso ou erro; o indicador global de rota nao substitui o estado da operacao.
+
 ### Botao primario claro
 
 Uso: assistir, concluir, acoes centrais.
@@ -130,6 +140,11 @@ Tooltip:
 - Player fica alinhado com o topo da playlist lateral.
 - Botao de voltar fica sobreposto no canto superior esquerdo do player.
 - A camada de video pode ter `overflow-hidden` para preservar cantos arredondados, mas a camada de controles deve permitir tooltip acima do player.
+- A barra do player nao usa fundo ou degrade continuo: somente icones, textos e sombras leves ficam sobre o video.
+- A timeline tem trilho de 3px, progresso e thumb solido em `--accent`, e fica acima da linha de botoes.
+- Ordem à esquerda: play/pausa, retroceder 10 segundos, avancar 10 segundos, volume, slider quando houver espaco e tempo atual/total. Ordem à direita: legenda, engrenagem de configuracoes e tela cheia; nao adicionar outras acoes nesse grupo. A engrenagem reune velocidade e resolucao para manter a barra compacta, usando primeiro nivel com duas linhas iconograficas e submenus verticais separados com voltar, no padrao do YouTube. O painel usa preto translucido com blur, chevrons finos, icones leves e texto regular de 14 px; valores atuais ficam discretos à direita, sem peso excessivo.
+- A engrenagem usa o icone Lucide de engrenagem e exibe um selo pequeno da qualidade efetiva. No modo automatico, `AUTO` aparece somente enquanto a qualidade ainda nao foi informada; depois o selo acompanha `HD`, `2K`, `4K` ou `HD+` quando o provider retornar apenas alta resolucao generica. O menu mostra todas as resolucoes reais com dimensoes no desktop, deixa `Automático` como ultima opcao e nao usa scroll interno nem paragrafo explicativo. Em telas estreitas, usa tres colunas e pode ocultar apenas as dimensoes auxiliares para manter todas as resolucoes visiveis.
+- Legenda usa o icone `CC`; tela cheia usa o icone de quatro cantos. Todos os botoes preservam nome acessivel, foco visivel e area clicavel de 40-44px conforme a largura.
 - Controles de aula anterior/proxima nao ficam no topo da pagina; futuramente podem existir dentro do player.
 - Abaixo do player, nao colocar chips de duracao ou contagem antes do titulo; o titulo da aula deve alinhar visualmente com os botoes de acao.
 
@@ -190,6 +205,9 @@ Comportamento:
 - Fileiras de cards verticais da home devem usar gap de 12px entre cards.
 - Hover pode ampliar e elevar o card, mantendo cantos arredondados. Na home, o card vertical deve ampliar por escala externa sem zoom interno adicional da imagem.
 - Cards verticais expansivos da home devem crescer para dentro somente quando estiverem nas bordas visíveis do carrossel: o primeiro da esquerda preserva a borda esquerda e expande para a direita; o último da direita preserva a borda direita e expande para a esquerda. Os cards internos mantem escala central normal.
+- Quando o hover traz para dentro um card parcialmente visivel em qualquer borda, o card adjacente externo deve deslizar temporariamente para o trecho liberado no canto e sinalizar a continuidade do carrossel: o proximo card na direita e o card anterior na esquerda durante a volta. Ambos retornam às posicoes originais ao encerrar o hover.
+- Carrosseis com overflow usam setas grandes diretamente sobre as bordas esquerda/direita dos cards, apoiadas por fades escuros limitados à altura visual das capas e dissolvidos sobre o conteudo; o fade exclui o padding vertical usado pelo hover expansivo e o botao da seta nao cria um bloco quadrado separado. No hover/foco, a faixa inteira escurece e se expande discretamente, enquanto a seta aumenta e se desloca na direcao da navegacao para produzir feedback inequivoco. Nao usar o par de botoes circulares no cabecalho da secao. A direcao sem conteudo restante fica oculta.
+- O cabecalho da fileira pode mostrar, alinhado à direita, um indicador de paginas composto por segmentos horizontais pequenos; o segmento ativo usa `zinc-200`, os demais `zinc-600`, e o estado acompanha o scroll real da fileira.
 - `Continue assistindo` usa hover proprio de video: superficie estavel, zoom interno minimo na imagem igual aos cards de modulo do modal e play aparente no centro, sem a expansao externa grande dos cards verticais.
 - Overlay do hover deve priorizar legibilidade.
 - Cards bloqueados na home devem usar badge circular escuro/translucido no canto superior direito, com cadeado branco simples centralizado sobre a capa. O icone deve usar o `Lock` da Lucide, sem preenchimento (`fill`), para evitar efeito de massa branca.
@@ -220,6 +238,19 @@ No admin, componentes como `Sidebar`, `Card`, `Badge`, `Button` e `Table` devem 
 
 A home do CRM deve ter cara de painel executivo premium, nao wireframe. A primeira dobra precisa mostrar graficos reais, cards densos, insights operacionais para o produtor, produtos com capas e listas de alunos com progresso. Evitar CTAs repetidos, busca falsa, botoes desabilitados sem funcao e textos explicativos que descrevem o proprio painel.
 
+### Editor da vitrine/Home
+
+O editor usa uma grade de tres paineis no desktop: estrutura compacta à esquerda, preview como area de maior peso visual no centro e inspetor fixo à direita. Os paineis usam a mesma familia de superficies escuras do CRM, borda `white/10`, raio entre 8 e 10 px e hierarquia tipografica curta. Em larguras menores, os paineis podem empilhar, mas a estrutura e o inspetor precisam continuar operaveis por toque e o preview deve permitir scroll sem alargar a pagina inteira.
+
+O item selecionado na estrutura usa contraste claro inequivoco; menus de tres pontos fecham depois da acao; arraste tem alternativa por botoes mover para cima/baixo. O topo fixo mostra `Alteracoes nao publicadas` e mantem `Descartar` e `Publicar` juntos. Feedback de publicacao aparece como estado textual persistente, nao apenas por mudanca de cor.
+
+Secoes estruturais usam duas variantes:
+
+- `Compacta`: identificacao do curso/formacao e fileira interna sem dominar a Home;
+- `Imersiva`: banner com imagem de fundo, degradê escuro, CTA e cards internos sobrepostos, mantendo contraste de texto e scroll horizontal em telas menores.
+
+Formacoes usam cards internos de cursos; cursos e bootcamps usam cards de modulos. O preview administrativo deve reutilizar o componente da Home publicada para que espacamento, bloqueio e comportamento responsivo nao divirjam.
+
 ### Catalogo no CRM
 
 A area de Catalogo deve manter a listagem e o painel operacional como contexto principal. A criacao e edicao de formacoes, cursos, mentorias, webinarios, produtos, bootcamps, modulos e aulas deve abrir em `Dialog` central amplo, sobre a tela atual, nunca como pagina externa nem como painel inline que empurra a listagem.
@@ -229,6 +260,7 @@ Modal de criacao/edicao no Catalogo:
 - Deve usar cabecalho escuro premium, breadcrumb curto `Catalogo / Criacao` ou `Catalogo / Edicao`, botao de fechar circular e conteudo rolavel dentro do modal.
 - O construtor em passos continua com `Configuracao`, `Modulos` e `Aulas`, mas os passos aparecem dentro do modal.
 - Salvar a configuracao inicial deve manter o modal aberto e avancar para `Modulos`; salvar modulo pode avancar para `Aulas`; finalizar apenas fecha o modal e devolve o usuario para a listagem.
+- Toda leitura inicial e mutacao do CRM deve mostrar o estado do sistema. Em criacao, edicao, exclusao, reordenacao, upload ou publicacao, o controle acionado troca para spinner e texto especifico, fica bloqueado contra reenvio e e acompanhado por um status global persistente com resultado de sucesso ou erro. O feedback deve usar `role=status`/`aria-live` e nao depender apenas de cor.
 - A pagina de fundo fica bloqueada pela primitiva `Dialog` enquanto o modal esta aberto, preservando o estado da busca, filtros e item selecionado no Catalogo; componentes de Catalogo nao devem alterar `document.body.style.overflow` manualmente.
 - Edicao por botoes de tabela, card destacado ou painel lateral deve abrir o mesmo modal padronizado.
 
@@ -244,6 +276,17 @@ Regras:
 - `Moderacao` prioriza filtros por produto, tipo de comentario/resposta e status;
 - `Agentes de IA` separa escopos de comentario, tutor de aula, assistente geral e chat da home;
 - `Configuracoes > Integracoes` deve mostrar provedores, eventos esperados e status do segredo sem exibir segredos reais.
+
+### Chat flutuante da IA Diretor
+
+- O launcher usa `Compass` com uma pequena `Sparkles`, mede entre 52 e 56 px e fica no canto inferior direito sem cobrir controles centrais da pagina.
+- No desktop, o painel fica ancorado acima do launcher, com 400-420 px de largura, altura limitada ao viewport, superficie `--panel`, borda discreta, raio de 12 px e sombra forte. Nao usa backdrop nem transforma a pagina em modal.
+- No celular, o painel ocupa `100dvh`, respeita safe areas e mantem cabecalho, mensagens e composer operaveis com o teclado aberto.
+- O cabecalho usa `IA Diretor` e o apoio `Orientação sobre seus cursos e trilhas`, com acoes iconograficas para historico, novo chat e fechar.
+- O historico substitui temporariamente a area da conversa dentro do proprio painel. Cada item usa titulo truncado, data e menu compacto para renomear ou excluir, sem duas colunas apertadas.
+- Respostas usam tipografia regular, Markdown contido e cards compactos para referencias autorizadas. Cada card mostra tipo, titulo, breadcrumb e `Abrir`; links livres do texto nunca recebem confianca automatica.
+- A camada global fica acima de cards e carrosseis, mas abaixo de modais centrais. Abrir a sidebar principal fecha o chat para evitar duas superficies concorrentes.
+- O desktop restaura o foco no launcher ao fechar; `Escape` fecha historico, dialogos internos ou painel na ordem correta. Nomes acessiveis e foco visivel sao obrigatorios.
 
 ### CRM de alunos com referencia estrutural operacional
 

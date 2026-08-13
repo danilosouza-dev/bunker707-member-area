@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import type { LessonCommentReaction } from "@/lib/platform-types";
 import { requireApiUser } from "@/server/auth/guards";
 import {
-  LessonCommentStoreError,
   setLessonCommentReaction
 } from "@/server/comments/comment-store";
+import { jsonRouteError } from "@/server/http/route-errors";
 
 type CommentReactionRouteContext = {
   params: Promise<{ commentId: string }>;
@@ -38,10 +38,6 @@ export async function PUT(request: Request, context: CommentReactionRouteContext
 
     return NextResponse.json({ data });
   } catch (error) {
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : "Nao foi possivel salvar a reacao."
-    }, {
-      status: error instanceof LessonCommentStoreError ? error.status : 500
-    });
+    return jsonRouteError(error, "Nao foi possivel salvar a reacao.");
   }
 }

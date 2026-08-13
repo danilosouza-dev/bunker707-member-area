@@ -7,8 +7,8 @@ import {
   EyeOff,
   LockKeyhole
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
+import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
@@ -25,7 +25,7 @@ export function PasswordChangeExperience({
   nextPath = "/",
   requiresPasswordChange
 }: PasswordChangeExperienceProps) {
-  const router = useRouter();
+  const router = useNavigationFeedbackRouter();
   const safeNextPath = getSafeRedirectPath(nextPath);
   const redirectPath = safeNextPath === "/alterar-senha" ? "/" : safeNextPath;
   const [confirmPassword, setConfirmPassword] = useState("");

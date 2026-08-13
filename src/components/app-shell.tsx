@@ -19,8 +19,11 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
+import { PlatformDirectorChat } from "@/components/platform-director-chat";
+import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
 import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
 import type { NavigationItem } from "@/lib/platform-types";
 import type { AccessPreviewMode } from "@/lib/access-preview";
@@ -55,7 +58,8 @@ const navigationItems = [
 
 export function AppShell({ accessPreviewMode, canUseAccessPreview = false, children, student }: AppShellProps) {
   const pathname = usePathname();
-  const router = useRouter();
+  const router = useNavigationFeedbackRouter();
+  const { startNavigation } = useNavigationFeedback();
   const searchParams = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [headerSolidOpacity, setHeaderSolidOpacity] = useState(0);
@@ -100,6 +104,7 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
     }
 
     event.preventDefault();
+    startNavigation(href);
 
     if (closeSidebar) {
       setSidebarOpen(false);
@@ -107,10 +112,8 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
 
     void (async () => {
       await window.__bunker707FlushLessonProgress?.();
+      await flushPendingSavedItemChanges();
       router.push(href);
-      window.setTimeout(() => {
-        router.refresh();
-      }, 0);
     })();
   }
 
@@ -130,7 +133,10 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
     const queryString = nextSearchParams.toString();
     router.replace(queryString ? `${pathname}?${queryString}` : pathname);
     setSidebarOpen(false);
-    router.refresh();
+  }
+
+  function handleDirectorNavigation(event: MouseEvent<HTMLAnchorElement>, href: string) {
+    handleProgressAwareNavigation(event, withAccessPreviewParam(href, accessPreviewMode));
   }
 
   async function handleSignOut() {
@@ -423,6 +429,8 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
         </div>
 
       <main>{children}</main>
+
+      {!sidebarOpen ? <PlatformDirectorChat onNavigate={handleDirectorNavigation} /> : null}
 
     </div>
   );

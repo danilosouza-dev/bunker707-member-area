@@ -37,8 +37,9 @@
 - Criar rota `/admin` com CMS UI-first.
 - Criar dashboard administrativo com visao geral, catalogo, estrutura, personalizacao, alunos/turmas e acessos.
 - Criar area `Personalizacao` no CRM com lista inicial de destinos editaveis e, apos clique em `Personalizar`, previa fiel da experiencia do aluno para login, pagina de produtos, paginas dos cursos, estrutura interna e vitrine/home.
-- Criar persistencia do CMS para criacao de formacoes, cursos, mentorias, webinarios, produtos, modulos e aulas.
-- Evoluir o cadastro do Catalogo para um construtor em passos: configuracao inicial, modulos e aulas no mesmo local.
+- Criar persistencia CRUD do CMS para formacoes, cursos, mentorias, webinarios, produtos, modulos e aulas, incluindo ordenacao e exclusao individual de modulos e aulas com limpeza de referencias.
+- Implementado: cadastro do Catalogo em construtor por passos, com configuracao inicial, modulos e aulas no mesmo local.
+- Implementado: feedback acessivel de carregamento e persistencia no CRM, com spinner e texto contextual nos controles de curso, modulo, aula e turma, status global de sucesso/erro e bloqueio contra envios duplicados.
 - Permitir que o produtor ative, no CMS, uma secao da home com capa pequena do curso e cards menores dos modulos de um curso especifico.
 - Permitir upload local da capa vertical do card em 720 x 1040 px e hero opcional em 1920 x 720 px para paginas de cursos/produtos.
 - Adicionar no cadastro de aula os campos de descricao, duracao, thumbnail e player: YouTube, Vimeo, Bunny Stream, Mux, URL propria ou codigo embed.
@@ -72,8 +73,11 @@
 - Criar schema real de combos/produtos internos e mapeamento para entitlements.
 - Implementado: API persistida de comentarios, respostas, reacoes e denuncias com validacao de entitlement.
 - Implementado: API administrativa de moderacao e palavras bloqueadas com auditoria transacional.
+- Implementado: aba `Tutor IA` ao lado de `Comentários` e `Materiais`, com respostas reais baseadas na aula, timestamps clicaveis e estados explicitos quando a transcricao ou o provedor ainda nao estao prontos.
 - Criar tabela persistida de configuracoes de integracao.
-- Criar tabelas futuras de agentes de IA, escopos, conversas e fontes de treinamento.
+- Implementado para o tutor de aula: provedores BYOK, transcricoes, chunks, perfis analisados, conversas e mensagens persistidas; cada aluno mantem varios chats independentes por aula e retoma qualquer historico anterior.
+- Implementado para a IA Diretor: chat global separado do Tutor, catalogo autorizado por aluno, recuperacao lexical de aulas/assuntos, referencias internas verificadas e historico com varios chats, renomeacao e exclusao logica.
+- Implementado para aulas do YouTube: Modo TV proprio com `/tv`, codigo/QR temporario de uso unico, token armazenado somente como hash, controle remoto e sincronizacao de progresso pelo Supabase. Cast/AirPlay nativos e outros providers ficam para evolucao.
 
 ## Video
 
@@ -117,5 +121,5 @@
 - Conversas.
 - Ranking.
 - Certificados.
-- IA da aula.
+- Implementado antecipadamente: IA da aula; agentes gerais e de comentarios continuam como evolucoes separadas.
 - Dashboard administrativo.

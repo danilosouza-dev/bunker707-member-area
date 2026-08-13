@@ -173,28 +173,40 @@ Implementacao atual:
 ### home_sections
 
 - id;
-- title;
+- title editavel pelo aluno, normalizado e limitado a 160 caracteres;
 - subtitle;
 - order_index;
-- section_type: continue_watching, purchases, course_modules, showcase, upcoming, custom;
+- section_type: continue_watching, content_carousel, content_structure;
 - visibility: students, non_students, all;
-- content_source: manual, entitlement_products, selected_course_modules, sellable_products, upcoming_products, recent_lessons;
-- source_content_id: curso/produto usado quando `section_type` for `course_modules`;
+- content_source: manual, entitlement_products, selected_content_structure, sellable_products, upcoming_products, recent_lessons;
+- layout: continue, vertical, compact, immersive;
+- source_content_id: curso, formacao ou bootcamp usado quando `section_type` for `content_structure`;
 - is_active;
 - created_at;
 - updated_at.
 
+### home_section_items
+
+- section_id;
+- content_id;
+- order_index.
+
+Registra a selecao manual ordenada de cards de uma secao. A chave composta `section_id + content_id` evita duplicacao e a exclusao da secao remove seus itens em cascata.
+
 Regras:
 
 - `purchases` deve listar produtos com entitlement ativo do aluno, agrupando formacoes, bootcamps e cursos avulsos;
-- `showcase`/`sellable_products` pode listar produtos comprados e nao comprados, conforme configuracao;
-- produtos sem entitlement aparecem bloqueados na UI;
+- `showcase`/`sellable_products` lista somente produtos vendaveis aos quais o aluno ainda nao tem acesso;
+- produtos com entitlement ativo, gratuitos ou ja liberados para o aluno sao removidos dessa fonte durante a resolucao da Home;
+- produtos restantes sem entitlement aparecem bloqueados na UI;
 - `upcoming_products` pode listar produtos futuros, novidades e listas de espera;
-- `course_modules` mostra os modulos de um curso especifico escolhido pelo produtor, com capa vertical reduzida do curso à esquerda e, à direita, rotulo pequeno, titulo e botao de acao abaixo do titulo;
-- `course_modules` pode aparecer para alunos com ou sem entitlement ativo; os cards de modulos nao exibem botao proprio e usam clique no card; sem acesso, o curso mostra acao `Comprar` e os modulos abrem o modal de detalhes por padrao;
+- `content_structure` mostra os modulos de um curso/bootcamp ou os cursos internos de uma formacao escolhida pelo produtor;
+- `content_structure` aceita layout `compact` ou `immersive` e pode aparecer para alunos com ou sem entitlement ativo; sem acesso, o conteudo mostra acao `Comprar` e os cards internos preservam bloqueio;
 - o botao `Comprar` pode abrir o modal de detalhes ou o link externo de compra, conforme configuracao do CMS;
 - modulos dentro de `course_modules` continuam respeitando regras de compra, entitlement, drip/agendamento e podem aparecer bloqueados;
 - a regra `visibility` define se a secao aparece apenas para alunos/compradores, apenas para nao compradores/visitantes ou para todos.
+
+Estado de rollout: a migration relacional `202607100003_home_sections.sql` define essas duas tabelas. Ate sua aplicacao no Supabase remoto, a configuracao publicada e gravada em `platform_settings` com chave `homeSections`, usando a mesma estrutura `HomeSectionConfig[]`. Esse fallback e uma representacao transitoria da configuracao e nunca participa da decisao de acesso.
 
 ## Login configuravel
 
@@ -234,11 +246,17 @@ A area `Personalizacao` do CRM e uma camada de edicao visual sobre configuracoes
 - `home_sections` para a vitrine/home, incluindo hero, fileiras, cards/secoes, ordem, origem dos conteudos e visibilidade;
 - dados de modulos e aulas para ajustar como a estrutura interna aparece dentro da pagina do curso.
 
+Campo de transicao implementado dentro de `content_page_settings.settings`:
+
+- `parentFormationId`: formacao principal de um curso com `commerce_scope = included_content`.
+
+Um curso interno deve apontar para exatamente uma formacao principal antes de ser publicado para consumo. O entitlement da formacao libera somente cursos internos cujo `parentFormationId` corresponde a ela; paginas e modais tambem listam apenas os cursos explicitamente associados. O campo representa a futura relacao `formation_courses` e nunca e aceito como autorizacao fornecida pelo browser.
+
 Regras:
 
 - personalizacao altera apresentacao, texto, imagens, ordem e preview, mas nao concede acesso;
 - a home/vitrine editavel deve ser uma representacao fiel da home real do aluno em modo editor, com controles discretos sobre banner, textos e secoes;
-- o editor da home deve consumir as mesmas `home_sections`/`homeRows` resolvidas pela home publicada, preservando variantes como `continue_watching`, `vertical` e `course_modules`;
+- o editor da home deve consumir as mesmas `home_sections`/`homeRows` resolvidas pela home publicada, preservando variantes como `continue_watching`, `vertical` e `content_structure`;
 - `continue_watching` deve usar thumbnails/resume frames de aulas e proporcao horizontal de video, nao capas verticais de cursos;
 - a renderizacao final continua filtrando por `entitlements`, regras de liberacao e visibilidade da secao;
 - cursos internos de formacao continuam fora da vitrine como produto vendavel separado;
@@ -376,11 +394,75 @@ Regras:
 
 ## Agentes de IA
 
+### ai_provider_configs
+
+- provider: gemini, openai, anthropic;
+- default_model;
+- is_default;
+- enabled;
+- priority do provedor;
+- status;
+- daily_question_limit por aluno nas ultimas 24 horas;
+- monthly_question_limit da plataforma;
+- max_output_tokens;
+- context_max_characters;
+- temperature;
+- last_tested_at;
+- created_by, updated_by, created_at, updated_at.
+
+Esta tabela representa a politica de modelo e limites do provedor, nao uma credencial unica. `vault_secret_id` e `key_last_four` permanecem nullable durante a compatibilidade com a configuracao BYOK antiga; migrations idempotentes movem cada segredo legado para o pool. Alteracoes e testes de politica geram `ai_provider_config_events` sem registrar a chave.
+
+### ai_provider_connections
+
+Cada linha e uma credencial elegivel no Bunker AI LB. Um mesmo provedor pode ter varias conexoes.
+
+- provider: gemini, openai, anthropic;
+- auth_mode: `api_key` ou `account_gateway`;
+- label e `credential_hint` mascarada;
+- `vault_secret_id` somente para API, ou `gateway_auth_id`, `gateway_auth_index` e `gateway_auth_name` somente para conta;
+- status: active, paused, needs_attention, connecting;
+- priority;
+- consecutive_failures;
+- health_tier: healthy, draining, probing;
+- probe_success_streak;
+- cooldown_until;
+- last_error_at, last_error_code e mensagem sanitizada;
+- last_tested_at e last_used_at;
+- created_by, updated_by, created_at e updated_at.
+
+Regras:
+
+- a constraint separa conexoes de API e de conta: uma linha nunca pode ter os dois tipos de segredo;
+- chaves de API ficam no Supabase Vault e apenas os ultimos caracteres aparecem na dica mascarada;
+- conexoes equivalentes sao ordenadas por prioridade, saude e menor `last_used_at`, permitindo round-robin;
+- falha atualiza cooldown/backoff e saude; sucesso em modo de prova exige uma sequencia antes de recuperar `healthy`;
+- remover uma conexao apaga seu segredo de API, quando houver, mas `ai_messages.connection_id` usa `on delete set null` para preservar o consumo historico.
+
+### ai_provider_connection_events e ai_account_link_sessions
+
+`ai_provider_connection_events` audita criacao, edicao, teste, pausa, retomada, remocao, OAuth e resultados de runtime sem armazenar credenciais nem corpos de conversa.
+
+`ai_account_link_sessions` representa uma tentativa curta de conectar conta:
+
+- pertence ao administrador/produtor em `actor_id`;
+- guarda provider, label, state do gateway e IDs existentes antes do login;
+- status: pending, completed, failed, cancelled;
+- expira em cinco minutos e registra erro sanitizado/conclusao;
+- o callback so e aceito para URL HTTP local exibida pelo provedor, com codigo/erro e `state` compativel.
+
+### lesson_transcripts e content_chunks
+
+- `lesson_transcripts` guarda versoes por aula, origem `youtube`, `upload` ou `paste`, formato, idioma, texto, cues, checksum e versao ativa;
+- a mesma transcricao ativa nao e importada novamente quando o checksum nao mudou;
+- `content_chunks` divide a versao em trechos ordenados com `start_seconds`, `end_seconds`, texto e indice de busca;
+- SRT, VTT e legendas do YouTube preservam tempo; TXT nao recebe timestamps inventados;
+- `lesson_ai_profiles` guarda resumo, capitulos, topicos, FAQ, modelo e estado da analise da versao ativa.
+
 ### ai_agents
 
 - id;
 - name;
-- scope: comments, lesson_tutor, global_assistant, home_chat;
+- scope: comments, lesson_tutor, platform_guide;
 - status: draft, training, active, paused;
 - instructions;
 - auto_reply;
@@ -398,11 +480,73 @@ Regras:
 - lesson_id;
 - created_at.
 
+### ai_conversations
+
+- id;
+- user_id;
+- agent_type: `lesson_tutor` ou `platform_guide`;
+- lesson_id;
+- lesson_title_snapshot;
+- content_id_snapshot;
+- title;
+- summary e summarized_message_count para evolucao do contexto longo;
+- student_deleted_at para exclusao logica solicitada pelo aluno;
+- created_at;
+- updated_at;
+- last_message_at.
+
+### ai_messages
+
+- id;
+- conversation_id;
+- user_id;
+- role: user, assistant, system;
+- body;
+- status: pending, completed, failed;
+- citations jsonb: fontes verificadas da legenda usadas na resposta, com `verified`, identificador, trecho, tempo real e inicio de seek ja ajustado 3 segundos para tras; citacoes legadas sem verificacao nao habilitam navegacao no player;
+- provider;
+- model;
+- connection_id: conexao que concluiu a resposta, preservada como nullable se a conexao for removida;
+- provider_attempts: sequencia sanitizada de tentativas e fallbacks, sem segredo ou corpo;
+- gateway_request_id: correlacao tecnica retornada pelo gateway quando aplicavel;
+- input_tokens;
+- output_tokens;
+- client_request_id para envio idempotente;
+- message_sequence: ordem canonica, positiva e unica dentro da conversa, atribuida pelo banco antes de cada insert;
+- created_at.
+
 Regras:
 
-- agentes de comentarios, tutor de aula e assistente geral podem ser configurados antes da IA estar conectada;
+- `lesson_tutor` e o professor de uma aula especifica e usa somente o contexto autorizado daquela aula;
+- `platform_guide` identifica a IA Diretor, que conhece somente a estrutura, os assuntos e os conteudos autorizados ao aluno para localizar aulas e aconselhar trilhas; ela nunca reutiliza silenciosamente um chat do Tutor IA;
+- o tutor de aula usa o pool real de APIs e contas atras de adapters server-side;
 - respostas automaticas devem ficar desligadas por padrao ate treinamento e revisao;
 - agentes nao podem revelar conteudo sem entitlement ativo para o aluno.
+- cada conversa do Tutor pertence a exatamente um aluno e uma aula; conversas da IA Diretor pertencem a um aluno e nao possuem escopo de aula;
+- o mesmo aluno pode criar varios chats independentes para a mesma aula;
+- o aluno pode renomear qualquer conversa ativa que lhe pertença; chats excluidos logicamente nao podem ser renomeados;
+- mensagens sao persistidas em ordem e permanecem disponiveis sem expiracao automatica, permitindo consultar ou continuar qualquer chat anterior;
+- continuar um chat reutiliza apenas o historico daquela conversa; chats diferentes da mesma aula nao compartilham mensagens entre si;
+- conversas de alunos diferentes nunca compartilham historico, mesmo quando pertencem a mesma aula.
+- excluir um chat preenche `student_deleted_at` somente depois de validar ownership; o registro e suas mensagens permanecem no Supabase, mas deixam de ser listados, abertos ou usados como contexto para novas perguntas;
+- conversas excluidas logicamente podem alimentar apenas analises internas autorizadas e agregadas; um pedido de exclusao de dados pessoais deve apagar ou anonimizar o conteudo conforme a politica de privacidade aplicavel;
+- transcricoes e tabelas do tutor ficam com RLS habilitado e sem privilegio direto para `anon` ou `authenticated`; as APIs server-side aplicam sessao, ownership e entitlement antes de usar o contexto;
+- remover uma aula preserva a conversa e as mensagens historicas por snapshot, mas impede novas perguntas sem uma aula acessivel;
+- referencias da IA Diretor ficam persistidas em `ai_messages.citations`, mas os links sao construidos pelo servidor somente depois de validar que o identificador opaco pertence ao conjunto autorizado recuperado para aquela resposta;
+- `content_items.publication_status` controla publicacao editorial sem sobrecarregar `content_items.status`, que continua representando o estado pedagogico/comercial exibido na experiencia. O backfill preserva os itens existentes como `published`; novos itens usam `draft` ate a escolha explicita no CMS.
+
+### Agregacao de consumo de IA
+
+`get_ai_usage_summary(days, agent_type)` agrega somente mensagens de assistente persistidas no periodo e pode separar `lesson_tutor` de `platform_guide`. O retorno administrativo inclui:
+
+- totais de respostas, falhas, conversas, alunos ativos, aulas e tokens de entrada/saida;
+- consumo por tipo de agente;
+- consumo por tutor/aula;
+- consumo por aluno, ordenado por tokens para formar o ranking de quem mais usa IA no periodo;
+- consumo por provedor/modelo, conexao e modo de autenticacao;
+- serie diaria.
+
+O ranking e uma visao de consumo, nao uma classificacao pedagogica. Ele deve ficar restrito ao produtor/admin, permitir periodo e filtro de agente e usar nome/email apenas na tela autorizada; exportacoes e analises amplas devem preferir identificadores ou dados agregados.
 
 ## CMS administrativo
 
@@ -420,7 +564,9 @@ O primeiro fluxo de criacao do CMS deve funcionar como um construtor LMS:
 
 O produtor pode salvar apenas o primeiro passo e voltar depois para completar modulos e aulas. A aba Estrutura continua existindo como visao operacional, mas o cadastro principal do Catalogo deve permitir montar o conteudo sem trocar de tela.
 
-O construtor de criacao e edicao do Catalogo deve abrir em um modal central sobre a listagem. Criar item, editar item, criar curso, modulo ou aula nao deve transformar a pagina inteira em formulario nem navegar para uma pagina separada; o contexto operacional do catalogo permanece visivel por baixo do modal.
+O construtor CRUD do Catalogo deve abrir em um modal central sobre a listagem. Criar ou editar item, curso, modulo ou aula nao deve transformar a pagina inteira em formulario nem navegar para uma pagina separada; o contexto operacional do catalogo permanece visivel por baixo do modal. Modulos e aulas podem ser excluidos individualmente no mesmo fluxo, sempre com confirmacao explicita.
+
+As exclusoes de estrutura sao fisicas e persistidas no Supabase. Excluir um modulo tambem exclui suas aulas. As FKs removem comentarios e seus registros dependentes em cascata; a camada server-side limpa favoritos e os IDs da aula em `completed_lesson_ids`, `lesson_reactions` e `lesson_watch_states`, e triggers no banco repetem essa garantia dentro da transacao da exclusao. `student_events` continua append-only para preservar o historico comportamental e de auditoria.
 
 Campos planejados/adicionados ao item educacional:
 
@@ -615,6 +761,8 @@ Regra:
 - `courses.sale_scope = formation_internal` nao deve ter produto direto na vitrine;
 - `courses.sale_scope = standalone` pode ter produto proprio e aparecer na vitrine.
 
+Estado atual de implementacao: a mesma relacao esta persistida em `content_page_settings.settings.parentFormationId`. Quando `formation_courses` for materializada no schema de runtime, a migracao deve ser idempotente, validar referencias orfas e manter leitura compativel ate todos os registros serem convertidos.
+
 ### bootcamps
 
 Bootcamps sao produtos vendaveis com estrutura propria de modulos/aulas ou relacao com cursos, conforme desenho final.
@@ -639,6 +787,8 @@ Bootcamps sao produtos vendaveis com estrutura propria de modulos/aulas ou relac
 - order_index;
 - status.
 
+Capas devem armazenar URL de objeto no bucket `content-assets`; Data URL/Base64 e aceita apenas como formato temporario de entrada no servidor e e convertida antes do `upsert`.
+
 ### lessons
 
 - id;
@@ -655,6 +805,8 @@ Bootcamps sao produtos vendaveis com estrutura propria de modulos/aulas ou relac
 - status;
 - order_index;
 - published_at.
+
+Thumbnails seguem a mesma regra de Storage: a coluna guarda URL, nunca o binario codificado. Imagens aceitas no upload de CMS sao JPG, PNG ou WebP, com limite de 8 MB.
 
 No CMS, o cadastro de aula deve expor pelo menos: titulo, descricao, duracao, thumbnail, tipo de player/origem do video, URL ou ID do asset e codigo embed quando o player for externo/customizado. O app nao hospeda videos; ele referencia YouTube, Vimeo, Bunny Stream, Mux, URL propria segura ou codigo embed informado pelo produtor.
 
@@ -735,6 +887,40 @@ Regra de MVP:
 - a imagem de `Continue assistindo` deve priorizar `resume_frame_url` quando existir, depois thumbnail oficial do video, depois thumbnail cadastrada da aula ou imagem do modulo;
 - aulas concluidas nao entram em `Continue assistindo`;
 - a home nao renderiza fileiras sem itens depois de aplicar acesso, regras de liberacao e progresso do aluno.
+
+### tv_sessions
+
+Sessao temporaria criada quando um aluno autorizado usa `Assistir na TV`.
+
+- id;
+- user_id;
+- content_id;
+- lesson_id;
+- pairing_code: codigo aleatorio de seis caracteres, unico e de curta duracao;
+- pairing_expires_at;
+- receiver_token_hash: SHA-256 do token entregue uma unica vez ao receptor;
+- status: pending, connected, ended;
+- current_time_seconds;
+- duration_seconds;
+- playback_state: unstarted, buffering, paused, playing, ended;
+- last_command;
+- command_revision;
+- receiver_command_revision;
+- connected_at;
+- receiver_last_seen_at;
+- expires_at;
+- ended_at;
+- created_at;
+- updated_at.
+
+Regras:
+
+- a tabela usa RLS e revoga acesso direto de `anon` e `authenticated`; somente APIs server-side manipulam sessoes;
+- o codigo pode ser pareado apenas enquanto a sessao esta `pending`, sem token e dentro da validade. A funcao de conexao usa bloqueio transacional para impedir consumo duplo;
+- o token bruto existe somente no receptor durante a sessao do navegador; o banco persiste apenas o hash;
+- cada comando incrementa uma revisao monotona, e a TV informa a ultima revisao aplicada;
+- o heartbeat da TV atualiza presenca, posicao e estado, e alimenta `lesson_progress` do aluno dono da sessao;
+- criacao, conexao, comandos e encerramento geram `student_events` auditaveis sem gravar o token.
 
 ### course_progress
 
@@ -957,8 +1143,5 @@ Ranking:
 
 IA:
 
-- lesson_transcripts;
-- content_chunks;
-- ai_conversations;
-- ai_messages;
+- experiencia e fontes indexadas da IA Diretor (`platform_guide`);
 - ai_feedback;

@@ -1,0 +1,36 @@
+name: bunker707-ai
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bunker707-ai-gateway
+    env_file:
+      - ../../.env.bunker-ai-gateway.local
+    ports:
+      - "127.0.0.1:8317:8317"
+    volumes:
+      - bunker-ai-gateway-auth:/data/auth
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    stop_grace_period: 20s
+
+volumes:
+  bunker-ai-gateway-auth:
+    name: bunker707-ai-gateway-auth

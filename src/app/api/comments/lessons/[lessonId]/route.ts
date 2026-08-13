@@ -2,19 +2,16 @@ import { NextResponse } from "next/server";
 import { requireApiUser } from "@/server/auth/guards";
 import {
   createLessonComment,
-  LessonCommentStoreError,
   listLessonComments
 } from "@/server/comments/comment-store";
+import { jsonRouteError } from "@/server/http/route-errors";
 
 type LessonCommentsRouteContext = {
   params: Promise<{ lessonId: string }>;
 };
 
 function commentErrorResponse(error: unknown, fallbackMessage: string) {
-  const status = error instanceof LessonCommentStoreError ? error.status : 500;
-  return NextResponse.json({
-    error: error instanceof Error ? error.message : fallbackMessage
-  }, { status });
+  return jsonRouteError(error, fallbackMessage);
 }
 
 export async function GET(request: Request, context: LessonCommentsRouteContext) {

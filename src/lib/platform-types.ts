@@ -11,7 +11,30 @@ export type ContentKind =
   | "Material";
 export type CommerceScope = "sellable_product" | "included_content" | "learning_content";
 export type ContentStatus = "Novo" | "Em andamento" | "Concluido" | "Liberado" | "Bloqueado" | "Em breve";
+export type ContentPublicationStatus = "archived" | "draft" | "published";
 export type RowVisibility = "students" | "non_students" | "all";
+export type HomeSectionType = "continue_watching" | "content_carousel" | "content_structure";
+export type HomeSectionContentSource =
+  | "recent_lessons"
+  | "entitlement_products"
+  | "sellable_products"
+  | "upcoming_products"
+  | "manual"
+  | "selected_content_structure";
+export type HomeSectionLayout = "continue" | "vertical" | "compact" | "immersive";
+export type HomeSectionConfig = {
+  contentSource: HomeSectionContentSource;
+  id: string;
+  isActive: boolean;
+  itemIds: string[];
+  layout: HomeSectionLayout;
+  order: number;
+  sectionType: HomeSectionType;
+  sourceContentId?: string;
+  subtitle?: string;
+  title: string;
+  visibility: RowVisibility;
+};
 export type FormationCourseOpenMode = "course_page_modules" | "course_lesson_format";
 export type CoursePresentationMode = "module_cards" | "lesson_playlist";
 export type LockedContentActionMode = "details_modal" | "external_link";
@@ -114,7 +137,9 @@ export type ContentItem = {
   lessons?: string;
   level?: string;
   maxStudents?: number | null;
+  parentContentId?: string;
   progress: number;
+  publicationStatus?: ContentPublicationStatus;
   purchaseLabel?: string;
   purchaseTarget?: PurchaseTarget;
   purchaseUrl?: string;
@@ -124,11 +149,15 @@ export type ContentItem = {
 };
 
 export type HomeRow = {
+  backgroundImage?: string;
   course?: ContentItem;
   id: string;
   items: ContentItem[];
+  layout?: HomeSectionLayout;
   lockedActionMode?: LockedContentActionMode;
   modules?: CourseModule[];
+  sectionId?: string;
+  structureItems?: ContentItem[];
   subtitle?: string;
   title: string;
   variant: "continue" | "vertical" | "course_modules";
@@ -242,6 +271,7 @@ export type ContentPageSettings = {
   internalCardActionMode?: InternalCardActionMode;
   lockedActionMode?: LockedContentActionMode;
   moduleOpenMode?: ModuleOpenMode;
+  parentFormationId?: string;
 };
 
 export type AdminContentAccess = "Liberado" | "Bloqueado" | "Drip" | "Em breve";
@@ -386,13 +416,9 @@ export type AdminSellableProduct = {
   title: string;
 };
 
-export type AdminHomeSection = {
+export type AdminHomeSection = HomeSectionConfig & {
   contentCount: number;
-  id: string;
-  order: number;
   source: string;
-  title: string;
-  visibility: RowVisibility;
 };
 
 export type AdminPipelineItem = {
@@ -488,6 +514,7 @@ export type AdminDashboardData = {
   formationCourses: ContentItem[];
   hero: HomeHeroConfig;
   homeRows: HomeRow[];
+  homeSectionConfigs: HomeSectionConfig[];
   homeSections: AdminHomeSection[];
   integrations: AdminIntegrationSetting[];
   metrics: AdminMetric[];

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/server/auth/guards";
 import {
-  LessonCommentStoreError,
   reportLessonComment
 } from "@/server/comments/comment-store";
+import { jsonRouteError } from "@/server/http/route-errors";
 
 type CommentReportRouteContext = {
   params: Promise<{ commentId: string }>;
@@ -33,10 +33,6 @@ export async function POST(request: Request, context: CommentReportRouteContext)
 
     return NextResponse.json({ data }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({
-      error: error instanceof Error ? error.message : "Nao foi possivel enviar a denuncia."
-    }, {
-      status: error instanceof LessonCommentStoreError ? error.status : 500
-    });
+    return jsonRouteError(error, "Nao foi possivel enviar a denuncia.");
   }
 }
