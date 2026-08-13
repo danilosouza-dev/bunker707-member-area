@@ -249,6 +249,20 @@ Checklist de producao:
 - pagina de erro amigavel;
 - suporte funcional.
 
+## Importacao de playlist
+
+- exigir `requireApiAdmin` no preview e na gravacao;
+- limitar o corpo das requisicoes mesmo quando `Content-Length` estiver ausente;
+- nunca enviar a chave da API do YouTube ao navegador;
+- reler metadados no servidor antes de persistir;
+- no modo manual, tratar intervalos como intencao e rejeitar lacunas, sobreposicoes, modulos vazios e posicoes fora da playlist relida;
+- limitar respostas externas, quantidade de paginas, tempo e numero de videos;
+- aceitar somente IDs estritos e hosts fixos do YouTube;
+- manter a `service_role` no servidor e restringir a RPC ao papel `service_role`;
+- manter a tabela de importacoes com RLS sem acesso de `anon` ou `authenticated`;
+- importar sempre como rascunho e sem conceder entitlement;
+- sincronizar por IDs deterministas, arquivando ausencias sem exclusao automatica.
+
 ## Cadastro manual e senha temporaria
 
 Regras:

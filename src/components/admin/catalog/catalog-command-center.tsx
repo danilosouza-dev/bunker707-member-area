@@ -11,6 +11,7 @@ import {
   Eye,
   Layers3,
   LibraryBig,
+  ListVideo,
   LockKeyhole,
   PackagePlus,
   Search,
@@ -45,6 +46,7 @@ export type CatalogCommandCenterProps = {
   filter: CatalogFilter;
   onFilterChange: (value: CatalogFilter) => void;
   onCreateContent: () => void;
+  onImportYouTubePlaylist: () => void;
   onEditContent: (record: AdminContentRecord) => void;
   onSelectRecord: (record: AdminContentRecord) => void;
 };
@@ -197,13 +199,24 @@ function CoverArt({
   className?: string;
   record: AdminContentRecord;
 }) {
+  const hasCover = Boolean(record.content.image.trim());
+
   return (
     <div className={cn("relative overflow-hidden rounded-lg bg-zinc-950 ring-1 ring-white/10", className)}>
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url(${record.content.image})` }}
-      />
+      {hasCover ? (
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{ backgroundImage: `url(${record.content.image})` }}
+        />
+      ) : (
+        <div className="absolute inset-0 bg-[linear-gradient(145deg,#27272a,#09090b)]" />
+      )}
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
+      {!hasCover ? (
+        <p className="absolute inset-0 grid place-items-center p-3 text-center text-sm font-semibold leading-5 text-white">
+          {record.content.title}
+        </p>
+      ) : null}
       {record.access === "Bloqueado" ? (
         <div className="absolute right-2 top-2 grid size-7 place-items-center rounded-full bg-black/70 text-white ring-1 ring-white/15">
           <LockKeyhole className="size-3.5" />
@@ -251,6 +264,7 @@ function CatalogCommandCenter({
   filter,
   onFilterChange,
   onCreateContent,
+  onImportYouTubePlaylist,
   onEditContent,
   onSelectRecord
 }: CatalogCommandCenterProps) {
@@ -270,7 +284,7 @@ function CatalogCommandCenter({
     <section className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(22rem,0.6fr)]">
         <Card className="relative min-h-[25rem] overflow-hidden rounded-lg border-white/10 bg-[#0a0a0b] py-0 shadow-2xl shadow-black/40">
-          {activeRecord ? (
+          {activeRecord?.content.image ? (
             <>
               <div
                 className="absolute inset-0 scale-105 bg-cover bg-center opacity-45 blur-sm"
@@ -336,6 +350,15 @@ function CatalogCommandCenter({
                 >
                   <PackagePlus className="size-4" />
                   Criar item
+                </Button>
+                <Button
+                  className="h-10 rounded-lg border-white/10 bg-white/[0.06] px-4 text-sm font-semibold text-white hover:bg-white/10"
+                  onClick={onImportYouTubePlaylist}
+                  type="button"
+                  variant="outline"
+                >
+                  <ListVideo className="size-4" />
+                  Criar curso com YouTube
                 </Button>
                 {activeRecord ? (
                   <Button

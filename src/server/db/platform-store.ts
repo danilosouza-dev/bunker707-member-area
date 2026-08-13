@@ -2265,9 +2265,7 @@ function normalizeContentInput(input: ContentWriteInput): ContentItem {
     durationLabel: input.durationLabel,
     eyebrow: input.eyebrow || input.kind,
     id: input.id || makeId(idPrefix, input.title),
-    image:
-      input.image ||
-      "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=900&q=80",
+    image: input.image?.trim() ?? "",
     isLocked,
     kind: input.kind,
     lessons: input.lessons || (input.kind === "Aula" ? "Aula" : "0 aulas"),

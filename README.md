@@ -93,10 +93,12 @@ O repositorio ja possui a base inicial do app:
 - area de Personalizacao no CRM com lista inicial de vitrine, login, pagina de produtos e produtos/cursos; cada item abre um editor proprio com representacao fiel da pagina final e opcoes laterais de edicao;
 - separacao visual e de navegacao entre area de membros (`/`) e CRM/backoffice (`/admin`), com logos levando para a home correta e atalhos entre as duas experiencias para usuarios admin;
 - fluxo inicial de criacao no CMS para formacoes, cursos, mentorias, webinarios, produtos e bootcamps, com capa, acesso gratuito/fechado, limite de estudantes, link externo de compra e regras de entrega por data ou por dias apos inscricao;
+- assistente nativo de criacao de cursos pelo YouTube, com preview, organizacao automatica pela nomenclatura `C01 - Curso | M01 - Modulo | A01 - Aula` ou divisao manual por intervalos de videos, capa opcional, card unico ou cards de modulos e gravacao idempotente sempre em rascunho;
 - construtor em passos dentro do Catalogo para salvar a configuracao inicial e, no mesmo local, cadastrar, editar, reordenar e excluir modulos e aulas;
 - feedback de carregamento e persistencia no CRM, com estado local nos controles acionados, status global acessivel e confirmacao explicita de sucesso ou erro;
 - opcao no CMS para exibir na home uma secao com capa pequena do curso e cards menores dos modulos de um curso especifico, util para produtores com catalogo curto;
 - upload local da capa vertical do card em 720 x 1040 px e hero opcional da pagina propria em 1920 x 720 px;
+- cards de curso sem capa usam uma superficie neutra apenas com o nome, sem imagem generica automatica;
 - modo de preview na area de membros para navegar como sessao atual, produtor/admin, aluno com acesso ou aluno sem acesso, visivel somente para usuarios internos com papel em `admin_roles`;
 - Supabase Postgres/RLS como unica persistencia de runtime para catalogo, alunos, acessos, favoritos, progresso, comentarios, moderacao e configuracoes;
 - leituras da area do aluno isoladas por usuario e memoizadas por request, sem carregar dados administrativos ou de outros alunos;
