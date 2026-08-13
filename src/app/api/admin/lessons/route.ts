@@ -4,6 +4,7 @@ import { deleteLesson, reorderLessons, upsertLesson } from "@/server/db/platform
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { LessonOrderInput, LessonWriteInput } from "@/server/db/platform-store";
 import type { AdminReleaseRule } from "@/lib/platform-types";
+import { normalizeLessonVideoConfig } from "@/lib/video-embed";
 import { processLessonAIProfile } from "@/server/ai/lesson-profile";
 import {
   getLessonTranscriptStatus,
@@ -46,10 +47,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Modulo e titulo da aula sao obrigatorios." }, { status: 400 });
   }
 
+  const hasVideoInput = Object.prototype.hasOwnProperty.call(payload, "video");
+  const normalizedVideo = payload.video == null ? null : normalizeLessonVideoConfig(payload.video);
+
+  if (payload.video != null && !normalizedVideo) {
+    return NextResponse.json({
+      error: "Configuracao de video invalida. Use uma URL HTTPS ou um iframe HTTPS valido."
+    }, { status: 400 });
+  }
+
+  const normalizedPayload = hasVideoInput ? { ...payload, video: normalizedVideo } : payload;
+
   try {
-    const transcriptPayload = payload.transcript;
+    const transcriptPayload = normalizedPayload.transcript;
     const transcriptMode = transcriptPayload?.mode;
-    const currentTranscript = payload.id ? await getLessonTranscriptStatus(payload.id) : null;
+    const currentTranscript = normalizedPayload.id ? await getLessonTranscriptStatus(normalizedPayload.id) : null;
     let preparedTranscript: NormalizedTranscript | null = null;
 
     if (transcriptMode === "manual") {
@@ -70,26 +82,26 @@ export async function POST(request: Request) {
       !currentTranscript ||
       (
         currentTranscript.source === "youtube" &&
-        extractYouTubeVideoId(payload.video) !== currentTranscript.sourceVideoId
+        extractYouTubeVideoId(normalizedPayload.video) !== currentTranscript.sourceVideoId
       )
     ) {
       preparedTranscript = await prepareYouTubeTranscript(
-        payload.video,
+        normalizedPayload.video,
         typeof transcriptPayload?.language === "string" ? transcriptPayload.language : "pt"
       );
     }
 
     const result = await upsertLesson({
-      ...payload,
-      releaseRule: payload.releaseMode
+      ...normalizedPayload,
+      releaseRule: normalizedPayload.releaseMode
         ? {
-            delayUnit: payload.releaseDelayUnit,
-            delayValue: payload.releaseDelayValue,
-            fixedDate: payload.releaseFixedDate,
-            mode: payload.releaseMode,
-            requirement: payload.releaseRequirement
+            delayUnit: normalizedPayload.releaseDelayUnit,
+            delayValue: normalizedPayload.releaseDelayValue,
+            fixedDate: normalizedPayload.releaseFixedDate,
+            mode: normalizedPayload.releaseMode,
+            requirement: normalizedPayload.releaseRequirement
           }
-        : payload.releaseRule
+        : normalizedPayload.releaseRule
     } as LessonWriteInput);
 
     if (preparedTranscript) {

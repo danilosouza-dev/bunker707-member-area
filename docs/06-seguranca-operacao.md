@@ -57,6 +57,13 @@ Situacao operacional em 10/07/2026:
 - ate a migration ser aplicada por um proprietario, a exposicao direta antiga continua sendo um risco real no Supabase remoto;
 - nao considerar o hardening concluido apenas porque o arquivo SQL existe no repositorio.
 
+Revisao de deploy em 13/08/2026:
+
+- a aplicacao passou a emitir CSP com nonce por requisicao, `frame-ancestors 'none'`, HSTS em producao e os demais cabecalhos defensivos documentados em `docs/15-deploy-vercel-seguro.md`;
+- codigo embed de aula nao e mais executado como HTML em `srcDoc`; apenas a URL HTTPS de um iframe valido e extraida e persistida;
+- o arquivo declarativo `supabase/config.toml` desabilita cadastro publico e exige senha com pelo menos oito caracteres;
+- essas configuracoes locais nao comprovam o estado remoto. Antes de publicar, um proprietario ainda precisa confirmar no Dashboard que cadastro publico esta desligado, que todas as migrations constam como aplicadas e que os Security Advisors nao apontam RLS ou privilegios perigosos.
+
 Aplicacao e verificacao exigidas:
 
 ```bash

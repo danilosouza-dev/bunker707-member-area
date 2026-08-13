@@ -75,6 +75,7 @@ import type {
   LessonWatchState,
   LessonWatchStatus
 } from "@/lib/platform-types";
+import { getSafeEmbedUrl, getSafeExternalMediaUrl } from "@/lib/video-embed";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 
 type LessonExperienceProps = {
@@ -162,10 +163,6 @@ type PlayerRenderConfig =
   | {
       kind: "iframe";
       src: string;
-    }
-  | {
-      kind: "srcdoc";
-      srcDoc: string;
     }
   | {
       kind: "video";
@@ -602,10 +599,15 @@ function getPlayerRenderConfig(video?: LessonVideoConfig): PlayerRenderConfig | 
   }
 
   if (video.provider === "embed_code" && video.embedCode) {
-    return {
-      kind: "srcdoc",
-      srcDoc: video.embedCode
-    };
+    const embedUrl = getSafeEmbedUrl(video.embedCode);
+
+    return embedUrl ? { kind: "iframe", src: embedUrl } : null;
+  }
+
+  if (video.provider === "embed_code" && video.url) {
+    const embedUrl = getSafeEmbedUrl(video.url);
+
+    return embedUrl ? { kind: "iframe", src: embedUrl } : null;
   }
 
   if (video.provider === "youtube") {
@@ -631,17 +633,15 @@ function getPlayerRenderConfig(video?: LessonVideoConfig): PlayerRenderConfig | 
   }
 
   if (video.provider === "custom_url" && video.url) {
-    return {
-      kind: "video",
-      src: video.url
-    };
+    const mediaUrl = getSafeExternalMediaUrl(video.url);
+
+    return mediaUrl ? { kind: "video", src: mediaUrl } : null;
   }
 
   if (video.url) {
-    return {
-      kind: "iframe",
-      src: video.url
-    };
+    const embedUrl = getSafeExternalMediaUrl(video.url);
+
+    return embedUrl ? { kind: "iframe", src: embedUrl } : null;
   }
 
   return null;
@@ -3741,8 +3741,7 @@ export function LessonExperience({
                       sandbox={usesCustomYouTubeControls
                         ? "allow-same-origin allow-scripts allow-presentation"
                         : "allow-same-origin allow-scripts allow-presentation allow-popups"}
-                      src={activePlayerRenderConfig.kind === "iframe" ? activePlayerRenderConfig.src : undefined}
-                      srcDoc={activePlayerRenderConfig.kind === "srcdoc" ? activePlayerRenderConfig.srcDoc : undefined}
+                      src={activePlayerRenderConfig.src}
                       tabIndex={usesCustomYouTubeControls ? -1 : undefined}
                       title={activeLesson.title}
                     />

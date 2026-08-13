@@ -38,8 +38,62 @@ function getTurbopackRoot() {
   }
 }
 
+const securityHeaders = [
+  {
+    key: "Cross-Origin-Opener-Policy",
+    value: "same-origin"
+  },
+  {
+    key: "Cross-Origin-Resource-Policy",
+    value: "same-origin"
+  },
+  {
+    key: "Permissions-Policy",
+    value: [
+      "camera=()",
+      "display-capture=()",
+      "geolocation=()",
+      "microphone=()",
+      "payment=()",
+      'fullscreen=(self "https://www.youtube.com" "https://www.youtube-nocookie.com" "https://player.vimeo.com")'
+    ].join(", ")
+  },
+  {
+    key: "Referrer-Policy",
+    value: "strict-origin-when-cross-origin"
+  },
+  {
+    key: "X-Content-Type-Options",
+    value: "nosniff"
+  },
+  {
+    key: "X-DNS-Prefetch-Control",
+    value: "off"
+  },
+  {
+    key: "X-Frame-Options",
+    value: "DENY"
+  },
+  {
+    key: "X-Permitted-Cross-Domain-Policies",
+    value: "none"
+  },
+  ...(process.env.NODE_ENV === "production"
+    ? [{
+        key: "Strict-Transport-Security",
+        value: "max-age=31536000; includeSubDomains"
+      }]
+    : [])
+];
+
 const nextConfig: NextConfig = {
   allowedDevOrigins: localDevOrigins,
+  async headers() {
+    return [{
+      headers: securityHeaders,
+      source: "/:path*"
+    }];
+  },
   turbopack: {
     root: getTurbopackRoot()
   }
