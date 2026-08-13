@@ -123,3 +123,14 @@
 - Certificados.
 - Implementado antecipadamente: IA da aula; agentes gerais e de comentarios continuam como evolucoes separadas.
 - Dashboard administrativo.
+## Entregue — importacao de cursos por playlist
+
+- preview administrativo de playlist do YouTube;
+- assistente nativo `Criar curso com YouTube`;
+- parser de curso/modulo/aula e avisos de nomenclatura;
+- organizacao automatica ou definicao manual de modulos pelo primeiro e ultimo video;
+- validacao de cobertura integral, lacunas, sobreposicoes e intervalos vazios;
+- escolha entre card unico e cards de modulos;
+- capa opcional e card textual sem capa;
+- importacao transacional, idempotente e sempre em rascunho;
+- testes de contrato e seguranca.

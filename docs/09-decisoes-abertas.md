@@ -312,6 +312,22 @@ Decisao tomada:
 
 ## Dados
 
+### Playlists do YouTube
+
+Decisao tomada:
+
+- cada playlist representa um curso;
+- o importador e uma funcionalidade nativa do produto-base, nao uma customizacao de uma implantacao;
+- nomenclatura canonica: `C01 - Nome do curso | M01 - Nome do modulo | A01 - Nome da aula`;
+- o formato anterior `M01 - Nome do modulo | A01 - Nome da aula` permanece compativel;
+- o formato compacto `M01 A01 - Nome da aula` tambem e aceito e gera nome generico para o modulo;
+- o produtor escolhe organizacao automatica ou manual; no modo manual define cada modulo pelo video inicial e final;
+- titulos fora do padrao entram em `Conteudo do curso` no modo automatico e podem ser reorganizados sem renomear os videos pelo modo manual;
+- todo video precisa pertencer exatamente a um modulo antes da importacao manual;
+- `lesson_playlist` e o modo padrao, com `module_cards` opcional;
+- capa e opcional e nao recebe fallback automatico;
+- toda importacao e rascunho e nao concede acesso.
+
 ### Fonte da verdade de acesso
 
 Decisao tomada:

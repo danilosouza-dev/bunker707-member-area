@@ -16,6 +16,7 @@ import {
   GalleryVerticalEnd,
   KeyRound,
   LibraryBig,
+  ListVideo,
   LoaderCircle,
   Mail,
   Menu,
@@ -86,6 +87,15 @@ import { MemberFooter } from "@/components/member-footer";
 import { PurchasesExperience } from "@/components/purchases-experience";
 import { getLoginPageConfig, loginTemplateOptions } from "@/lib/login-config";
 import type { LoginPageConfig, LoginTemplateId } from "@/lib/login-config";
+import {
+  rebuildYouTubeCoursePreviewWithRanges,
+  suggestYouTubeCourseModuleRanges,
+  youtubeCourseNamingExample,
+  youtubeCourseLegacyNamingExample,
+  type YouTubeCourseImportCommitInput,
+  type YouTubeCourseImportModuleRange,
+  type YouTubeCourseImportPreview
+} from "@/lib/youtube-course-import";
 import type {
   AdminContentAccess,
   AdminContentRecord,
@@ -677,6 +687,17 @@ const emptyLessonBuilderFormState: LessonBuilderFormState = {
   videoUrl: ""
 };
 
+const emptyYouTubeCourseImportInput: YouTubeCourseImportCommitInput = {
+  accessModel: "closed",
+  coursePresentationMode: "lesson_playlist",
+  description: "",
+  image: "",
+  moduleRanges: [],
+  organizationMode: "automatic",
+  playlistUrl: "",
+  title: ""
+};
+
 function contentRecordToFormState(record: AdminContentRecord): ContentFormState {
   return {
     accessModel: record.content.accessModel ?? (record.content.isLocked ? "closed" : "free"),
@@ -818,6 +839,31 @@ function CatalogView({
   const [imageUploadError, setImageUploadError] = useState("");
   const [lessonBuilderForm, setLessonBuilderForm] = useState<LessonBuilderFormState>(emptyLessonBuilderFormState);
   const [moduleBuilderForm, setModuleBuilderForm] = useState<ModuleBuilderFormState>(emptyModuleBuilderFormState);
+  const [youtubeImportError, setYoutubeImportError] = useState("");
+  const [youtubeImportForm, setYoutubeImportForm] = useState<YouTubeCourseImportCommitInput>(emptyYouTubeCourseImportInput);
+  const [youtubeImportOpen, setYoutubeImportOpen] = useState(false);
+  const [youtubeImportPreview, setYoutubeImportPreview] = useState<YouTubeCourseImportPreview>();
+  const youtubeImportReview = useMemo(() => {
+    if (!youtubeImportPreview) {
+      return { error: "", preview: undefined };
+    }
+
+    if (youtubeImportForm.organizationMode === "automatic") {
+      return { error: "", preview: youtubeImportPreview };
+    }
+
+    try {
+      return {
+        error: "",
+        preview: rebuildYouTubeCoursePreviewWithRanges(youtubeImportPreview, youtubeImportForm.moduleRanges)
+      };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : "Revise os intervalos dos modulos.",
+        preview: undefined
+      };
+    }
+  }, [youtubeImportForm.moduleRanges, youtubeImportForm.organizationMode, youtubeImportPreview]);
   const normalizedQuery = query.trim().toLowerCase();
   const wizardRecord = contentForm.id
     ? records.find((record) => record.content.id === contentForm.id)
@@ -865,6 +911,8 @@ function CatalogView({
   const isSavingContent = isOperationPending("catalog:content:save");
   const isSavingModule = isOperationPending("catalog:module:save");
   const isSavingLesson = isOperationPending("catalog:lesson:save");
+  const isImportingYouTubePlaylist = isOperationPending("catalog:youtube:import");
+  const isReadingYouTubePlaylist = isOperationPending("catalog:youtube:preview");
   const showCourseLayoutSwitch = supportsCoursePresentationMode(contentForm.kind);
   const usesSingleCardLayout = contentForm.coursePresentationMode === "lesson_playlist";
 
@@ -901,6 +949,93 @@ function CatalogView({
           : {}
       )
     }));
+  }
+
+  function updateYouTubeImportForm(field: keyof YouTubeCourseImportCommitInput, value: string) {
+    setYoutubeImportForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function setYouTubeOrganizationMode(value: YouTubeCourseImportCommitInput["organizationMode"]) {
+    setYoutubeImportForm((current) => ({
+      ...current,
+      moduleRanges: value === "manual_ranges" && youtubeImportPreview
+        ? suggestYouTubeCourseModuleRanges(youtubeImportPreview)
+        : [],
+      organizationMode: value
+    }));
+  }
+
+  function updateYouTubeModuleRange(
+    index: number,
+    field: keyof YouTubeCourseImportModuleRange,
+    value: number | string
+  ) {
+    setYoutubeImportForm((current) => ({
+      ...current,
+      moduleRanges: current.moduleRanges.map((range, rangeIndex) => (
+        rangeIndex === index ? { ...range, [field]: value } : range
+      ))
+    }));
+  }
+
+  function removeYouTubeModuleRange(index: number) {
+    setYoutubeImportForm((current) => ({
+      ...current,
+      moduleRanges: current.moduleRanges.filter((_, rangeIndex) => rangeIndex !== index)
+    }));
+  }
+
+  function addYouTubeModuleRange() {
+    if (!youtubeImportPreview) {
+      return;
+    }
+
+    setYoutubeImportForm((current) => {
+      const videos = youtubeImportPreview.videos;
+      const assigned = new Set(current.moduleRanges.flatMap((range) => (
+        videos
+          .filter((video) => video.position >= range.startPosition && video.position <= range.endPosition)
+          .map((video) => video.position)
+      )));
+      const unassigned = videos.filter((video) => !assigned.has(video.position));
+
+      if (unassigned.length > 0) {
+        return {
+          ...current,
+          moduleRanges: [...current.moduleRanges, {
+            endPosition: unassigned.at(-1)!.position,
+            startPosition: unassigned[0].position,
+            title: `Modulo ${String(current.moduleRanges.length + 1).padStart(2, "0")}`
+          }]
+        };
+      }
+
+      const splitIndex = [...current.moduleRanges]
+        .map((range, index) => ({
+          index,
+          videos: videos.filter((video) => video.position >= range.startPosition && video.position <= range.endPosition)
+        }))
+        .reverse()
+        .find((candidate) => candidate.videos.length > 1);
+
+      if (!splitIndex) {
+        return current;
+      }
+
+      const rightStartIndex = Math.ceil(splitIndex.videos.length / 2);
+      const leftEnd = splitIndex.videos[rightStartIndex - 1].position;
+      const rightStart = splitIndex.videos[rightStartIndex].position;
+      const moduleRanges = current.moduleRanges.map((range, index) => (
+        index === splitIndex.index ? { ...range, endPosition: leftEnd } : range
+      ));
+      moduleRanges.splice(splitIndex.index + 1, 0, {
+        endPosition: splitIndex.videos.at(-1)!.position,
+        startPosition: rightStart,
+        title: `Modulo ${String(moduleRanges.length + 1).padStart(2, "0")}`
+      });
+
+      return { ...current, moduleRanges };
+    });
   }
 
   function editWizardModule(module: CourseModule) {
@@ -964,6 +1099,120 @@ function CatalogView({
       updateModuleBuilderForm("image", src);
     } catch (error) {
       setImageUploadError(error instanceof Error ? error.message : "Nao foi possivel validar a imagem.");
+    }
+  }
+
+  async function handleYouTubeCourseImageUpload(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    if (file.size > 4 * 1024 * 1024) {
+      setYoutubeImportError("A capa deve ter no maximo 4 MB.");
+      return;
+    }
+
+    setYoutubeImportError("");
+
+    try {
+      const src = await runAdminOperation("catalog:youtube:image", {
+        pending: "Validando a capa do curso...",
+        success: "Capa pronta para a importacao."
+      }, () => readValidatedImage(file, posterImageSpec));
+      updateYouTubeImportForm("image", src);
+    } catch (error) {
+      setYoutubeImportError(error instanceof Error ? error.message : "Nao foi possivel validar a capa.");
+    }
+  }
+
+  function openYouTubePlaylistImport() {
+    setYoutubeImportError("");
+    setYoutubeImportForm(emptyYouTubeCourseImportInput);
+    setYoutubeImportPreview(undefined);
+    setYoutubeImportOpen(true);
+  }
+
+  async function readYouTubePlaylist(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setYoutubeImportError("");
+
+    try {
+      const preview = await runAdminOperation("catalog:youtube:preview", {
+        error: "Nao foi possivel ler a playlist.",
+        pending: "Lendo videos, modulos e duracoes no YouTube...",
+        success: "Playlist lida e pronta para revisao."
+      }, async () => {
+        const response = await fetch("/api/admin/youtube-playlists/preview", {
+          body: JSON.stringify({ playlistUrl: youtubeImportForm.playlistUrl }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        });
+        const result = await response.json() as { data?: YouTubeCourseImportPreview; error?: string };
+
+        if (!response.ok || !result.data) {
+          throw new Error(result.error ?? "Nao foi possivel ler a playlist.");
+        }
+
+        return result.data;
+      });
+      setYoutubeImportPreview(preview);
+      setYoutubeImportForm((current) => ({
+        ...current,
+        description: preview.description,
+        moduleRanges: [],
+        organizationMode: "automatic",
+        playlistUrl: preview.playlistUrl,
+        title: preview.title
+      }));
+    } catch (error) {
+      setYoutubeImportError(error instanceof Error ? error.message : "Nao foi possivel ler a playlist.");
+    }
+  }
+
+  async function submitYouTubePlaylistImport(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!youtubeImportReview.preview) {
+      return;
+    }
+
+    setYoutubeImportError("");
+
+    try {
+      const result = await runAdminOperation("catalog:youtube:import", {
+        error: "Nao foi possivel importar o curso.",
+        pending: "Validando novamente e criando o curso em rascunho...",
+        success: `${youtubeImportForm.title} foi importado como rascunho.`
+      }, async () => {
+        const response = await fetch("/api/admin/youtube-playlists/import", {
+          body: JSON.stringify(youtubeImportForm),
+          headers: { "Content-Type": "application/json" },
+          method: "POST"
+        });
+        const payload = await response.json() as {
+          data?: AdminDashboardData;
+          error?: string;
+          importResult?: { courseId: string };
+        };
+
+        if (!response.ok || !payload.data || !payload.importResult) {
+          throw new Error(payload.error ?? "Nao foi possivel importar o curso.");
+        }
+
+        return payload;
+      });
+      onDashboardDataChange(result.data!);
+      const importedRecord = result.data!.contentRecords.find((record) => record.content.id === result.importResult!.courseId);
+
+      if (importedRecord) {
+        setSelectedRecord(importedRecord);
+      }
+
+      setYoutubeImportOpen(false);
+      setYoutubeImportPreview(undefined);
+      setYoutubeImportForm(emptyYouTubeCourseImportInput);
+    } catch (error) {
+      setYoutubeImportError(error instanceof Error ? error.message : "Nao foi possivel importar o curso.");
     }
   }
 
@@ -1121,10 +1370,6 @@ function CatalogView({
 
   async function submitContentForm(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!contentForm.image.trim()) {
-      setImageUploadError(`Envie a capa vertical do item em ${posterImageSpec.label}.`);
-      return;
-    }
 
     const previousRecordIds = new Set(records.map((record) => record.content.id));
     const maxStudents =
@@ -1407,12 +1652,345 @@ function CatalogView({
           onCreateContent={openNewContentForm}
           onEditContent={openEditContentForm}
           onFilterChange={setFilter}
+          onImportYouTubePlaylist={openYouTubePlaylistImport}
           onQueryChange={setQuery}
           onSelectRecord={setSelectedRecord}
           query={query}
           records={records}
           selectedRecord={selectedRecord}
         />
+
+        <Dialog
+          open={youtubeImportOpen}
+          onOpenChange={(open) => {
+            if (!open && !isReadingYouTubePlaylist && !isImportingYouTubePlaylist) {
+              setYoutubeImportOpen(false);
+            }
+          }}
+        >
+          <DialogContent
+            className="max-h-[92dvh] max-w-[min(980px,calc(100vw-2rem))] overflow-y-auto rounded-[12px] border border-white/10 bg-[#0d0e11] p-0 text-zinc-100 shadow-[0_34px_140px_rgba(0,0,0,0.78)]"
+            showCloseButton={false}
+          >
+            <DialogHeader className="border-b border-white/10 bg-[linear-gradient(135deg,#211014_0%,#16171b_50%,#0d0e11_100%)] px-6 py-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <DialogTitle className="flex items-center gap-2 text-2xl font-semibold text-white">
+                    <ListVideo className="h-6 w-6 text-red-400" />
+                    Importar playlist do YouTube
+                  </DialogTitle>
+                  <DialogDescription className="mt-2 max-w-3xl text-sm font-semibold leading-6 text-zinc-400">
+                    Crie o curso completo em poucos passos. Use a nomenclatura automatica ou defina exatamente quais videos pertencem a cada modulo.
+                  </DialogDescription>
+                </div>
+                <Button
+                  aria-label="Fechar importacao"
+                  className="size-9 rounded-full text-zinc-500 hover:bg-white/10 hover:text-white"
+                  disabled={isReadingYouTubePlaylist || isImportingYouTubePlaylist}
+                  onClick={() => setYoutubeImportOpen(false)}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+            </DialogHeader>
+
+            <div className="space-y-5 p-5 sm:p-6">
+              {youtubeImportError ? (
+                <div className="rounded-[8px] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100">
+                  {youtubeImportError}
+                </div>
+              ) : null}
+
+              {!youtubeImportPreview ? (
+                <form className="space-y-5" onSubmit={readYouTubePlaylist}>
+                  <label className="grid gap-2 text-xs font-black uppercase text-zinc-500">
+                    URL da playlist
+                    <input
+                      autoFocus
+                      className={inputClassName}
+                      disabled={isReadingYouTubePlaylist}
+                      onChange={(event) => updateYouTubeImportForm("playlistUrl", event.target.value)}
+                      placeholder="https://www.youtube.com/playlist?list=..."
+                      required
+                      value={youtubeImportForm.playlistUrl}
+                    />
+                  </label>
+
+                  <div className="rounded-[8px] border border-sky-400/20 bg-sky-500/8 p-4">
+                    <p className="text-sm font-black text-white">Nomenclatura recomendada</p>
+                    <code className="mt-2 block rounded-[6px] bg-black/35 px-3 py-2 text-sm text-sky-200">
+                      {youtubeCourseNamingExample}
+                    </code>
+                    <p className="mt-2 text-xs font-semibold leading-5 text-zinc-400">
+                      O formato anterior <code className="text-sky-200">{youtubeCourseLegacyNamingExample}</code> continua aceito. Titulos fora do padrao podem ser organizados manualmente por intervalos.
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button
+                      className="h-11 rounded-[8px] bg-white px-5 font-black text-black hover:bg-zinc-200"
+                      disabled={isReadingYouTubePlaylist}
+                      type="submit"
+                    >
+                      {isReadingYouTubePlaylist ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ListVideo className="h-4 w-4" />}
+                      Ler playlist
+                    </Button>
+                  </div>
+                </form>
+              ) : (
+                <form className="space-y-5" onSubmit={submitYouTubePlaylistImport}>
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
+                    <div className="grid gap-4">
+                      <label className="grid gap-2 text-xs font-black uppercase text-zinc-500">
+                        Nome do curso
+                        <input
+                          className={inputClassName}
+                          maxLength={180}
+                          onChange={(event) => updateYouTubeImportForm("title", event.target.value)}
+                          required
+                          value={youtubeImportForm.title}
+                        />
+                      </label>
+                      <label className="grid gap-2 text-xs font-black uppercase text-zinc-500">
+                        Descricao
+                        <textarea
+                          className="min-h-28 rounded-[8px] border border-white/10 bg-black/30 px-3 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-zinc-600 focus:border-white/30"
+                          maxLength={10000}
+                          onChange={(event) => updateYouTubeImportForm("description", event.target.value)}
+                          value={youtubeImportForm.description}
+                        />
+                      </label>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <label className="grid gap-2 text-xs font-black uppercase text-zinc-500">
+                          Apresentacao
+                          <select
+                            className={inputClassName}
+                            onChange={(event) => updateYouTubeImportForm("coursePresentationMode", event.target.value)}
+                            value={youtubeImportForm.coursePresentationMode}
+                          >
+                            <option value="lesson_playlist">Card unico - abrir direto nas aulas</option>
+                            <option value="module_cards">Mostrar cards dos modulos</option>
+                          </select>
+                        </label>
+                        <label className="grid gap-2 text-xs font-black uppercase text-zinc-500">
+                          Modelo de acesso
+                          <select
+                            className={inputClassName}
+                            onChange={(event) => updateYouTubeImportForm("accessModel", event.target.value)}
+                            value={youtubeImportForm.accessModel}
+                          >
+                            <option value="closed">Fechado - exige liberacao</option>
+                            <option value="free">Gratuito</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <p className="text-xs font-black uppercase text-zinc-500">Capa opcional - 720 x 1040</p>
+                      <div className="relative aspect-[720/1040] overflow-hidden rounded-[8px] border border-white/10 bg-[linear-gradient(145deg,#27272a,#09090b)]">
+                        {youtubeImportForm.image ? (
+                          <div
+                            className="absolute inset-0 bg-cover bg-center"
+                            style={{ backgroundImage: `url(${youtubeImportForm.image})` }}
+                          />
+                        ) : (
+                          <div className="absolute inset-0 grid place-items-center p-5 text-center">
+                            <p className="text-xl font-black text-white">{youtubeImportForm.title || "Nome do curso"}</p>
+                          </div>
+                        )}
+                      </div>
+                      <input
+                        accept="image/png,image/jpeg,image/webp"
+                        className="block w-full text-xs font-semibold text-zinc-500 file:mr-3 file:rounded-[6px] file:border-0 file:bg-white file:px-3 file:py-2 file:font-black file:text-black"
+                        onChange={(event) => void handleYouTubeCourseImageUpload(event.target.files?.[0])}
+                        type="file"
+                      />
+                      {youtubeImportForm.image ? (
+                        <Button
+                          className="w-full rounded-[8px] border-white/10"
+                          onClick={() => updateYouTubeImportForm("image", "")}
+                          type="button"
+                          variant="outline"
+                        >
+                          Remover capa
+                        </Button>
+                      ) : (
+                        <p className="text-xs font-semibold leading-5 text-zinc-500">
+                          Sem capa, o card usa uma superficie neutra apenas com o nome do curso.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <section className="rounded-[8px] border border-white/10 bg-black/25 p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-sm font-black text-white">Como organizar as aulas</p>
+                        <p className="mt-1 text-xs font-semibold leading-5 text-zinc-500">
+                          {youtubeImportPreview.naming.compliantLessons} de {youtubeImportPreview.naming.totalLessons} videos seguem a nomenclatura reconhecida.
+                        </p>
+                      </div>
+                      <select
+                        className={`${inputClassName} sm:max-w-[25rem]`}
+                        onChange={(event) => setYouTubeOrganizationMode(event.target.value as YouTubeCourseImportCommitInput["organizationMode"])}
+                        value={youtubeImportForm.organizationMode}
+                      >
+                        <option value="automatic">Curso completo - organizar pelos titulos</option>
+                        <option value="manual_ranges">Definir modulos por intervalos de videos</option>
+                      </select>
+                    </div>
+
+                    {youtubeImportForm.organizationMode === "manual_ranges" ? (
+                      <div className="mt-4 space-y-3 border-t border-white/10 pt-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-black text-white">Intervalos dos modulos</p>
+                            <p className="mt-1 text-xs font-semibold text-zinc-500">
+                              Cada video precisa aparecer uma unica vez. Os intervalos sao conferidos novamente no servidor.
+                            </p>
+                          </div>
+                          <Button
+                            className="rounded-[8px] border-white/10"
+                            onClick={addYouTubeModuleRange}
+                            type="button"
+                            variant="outline"
+                          >
+                            <Plus className="h-4 w-4" />
+                            Adicionar ou dividir modulo
+                          </Button>
+                        </div>
+
+                        {youtubeImportForm.moduleRanges.map((range, rangeIndex) => (
+                          <div className="grid gap-3 rounded-[8px] border border-white/10 bg-white/[0.035] p-3 lg:grid-cols-[minmax(12rem,1fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_auto]" key={`${rangeIndex}-${range.startPosition}-${range.endPosition}`}>
+                            <label className="grid gap-1.5 text-[11px] font-black uppercase text-zinc-500">
+                              Modulo {rangeIndex + 1}
+                              <input
+                                className={inputClassName}
+                                maxLength={180}
+                                onChange={(event) => updateYouTubeModuleRange(rangeIndex, "title", event.target.value)}
+                                value={range.title}
+                              />
+                            </label>
+                            <label className="grid gap-1.5 text-[11px] font-black uppercase text-zinc-500">
+                              Do video
+                              <select
+                                className={inputClassName}
+                                onChange={(event) => updateYouTubeModuleRange(rangeIndex, "startPosition", Number(event.target.value))}
+                                value={range.startPosition}
+                              >
+                                {youtubeImportPreview.videos.map((video) => (
+                                  <option key={`start-${video.videoId}`} value={video.position}>
+                                    {video.position}. {video.title}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="grid gap-1.5 text-[11px] font-black uppercase text-zinc-500">
+                              Ate o video
+                              <select
+                                className={inputClassName}
+                                onChange={(event) => updateYouTubeModuleRange(rangeIndex, "endPosition", Number(event.target.value))}
+                                value={range.endPosition}
+                              >
+                                {youtubeImportPreview.videos.map((video) => (
+                                  <option key={`end-${video.videoId}`} value={video.position}>
+                                    {video.position}. {video.title}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <Button
+                              aria-label={`Remover modulo ${rangeIndex + 1}`}
+                              className="self-end rounded-[8px] border-red-400/20 text-red-200 hover:bg-red-500/10 hover:text-red-100"
+                              onClick={() => removeYouTubeModuleRange(rangeIndex)}
+                              size="icon"
+                              type="button"
+                              variant="outline"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+
+                        {youtubeImportReview.error ? (
+                          <div className="rounded-[8px] border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-xs font-semibold leading-5 text-amber-100">
+                            {youtubeImportReview.error}
+                          </div>
+                        ) : (
+                          <div className="rounded-[8px] border border-emerald-400/20 bg-emerald-500/8 px-4 py-3 text-xs font-semibold text-emerald-100">
+                            Todos os videos estao cobertos uma unica vez.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  {youtubeImportReview.preview?.warnings.length ? (
+                    <div className="rounded-[8px] border border-amber-400/25 bg-amber-500/10 p-4">
+                      <p className="text-sm font-black text-amber-100">Revisar nomenclatura</p>
+                      <ul className="mt-2 space-y-1 text-xs font-semibold leading-5 text-amber-100/80">
+                        {youtubeImportReview.preview.warnings.map((warning) => <li key={warning}>- {warning}</li>)}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <div className="rounded-[8px] border border-white/10 bg-black/25 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-black text-white">Estrutura encontrada</p>
+                      <p className="text-xs font-black text-zinc-400">
+                        {youtubeImportReview.preview?.modules.length ?? 0} modulos / {youtubeImportReview.preview?.totalLessons ?? 0} aulas
+                      </p>
+                    </div>
+                    <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
+                      {youtubeImportReview.preview?.modules.map((courseModule) => (
+                        <div className="rounded-[8px] border border-white/10 bg-white/[0.035] p-3" key={`${courseModule.order}-${courseModule.title}`}>
+                          <p className="text-sm font-black text-white">
+                            M{String(courseModule.order).padStart(2, "0")} - {courseModule.title}
+                          </p>
+                          <ol className="mt-2 space-y-1 text-xs font-semibold text-zinc-400">
+                            {courseModule.lessons.map((lesson) => (
+                              <li className="flex justify-between gap-4" key={lesson.videoId}>
+                                <span className="min-w-0 truncate">A{String(lesson.order).padStart(2, "0")} - {lesson.title}</span>
+                                <span className="shrink-0 text-zinc-600">{lesson.duration}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
+                    <Button
+                      className="rounded-[8px] border-white/10"
+                      disabled={isImportingYouTubePlaylist}
+                      onClick={() => setYoutubeImportPreview(undefined)}
+                      type="button"
+                      variant="outline"
+                    >
+                      Trocar playlist
+                    </Button>
+                    <div className="text-right">
+                      <p className="text-xs font-semibold text-zinc-500">A importacao nao libera acesso e nao publica o curso.</p>
+                      <Button
+                        className="mt-2 h-11 rounded-[8px] bg-white px-5 font-black text-black hover:bg-zinc-200"
+                        disabled={isImportingYouTubePlaylist || !youtubeImportReview.preview}
+                        type="submit"
+                      >
+                        {isImportingYouTubePlaylist ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                        Importar como rascunho
+                      </Button>
+                    </div>
+                  </div>
+                </form>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog
           open={contentFormOpen}

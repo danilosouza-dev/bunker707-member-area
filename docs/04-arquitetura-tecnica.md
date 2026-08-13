@@ -418,3 +418,16 @@ Para facilitar migracao futura para Hetzner:
 - usar Route Handlers padrao;
 - criar Dockerfile quando a implementacao comecar;
 - nao guardar arquivos importantes no filesystem local do servidor.
+
+## Importador de playlists do YouTube
+
+- o recurso pertence ao produto-base e aparece no Catalogo como um assistente nativo de criacao de curso;
+- endpoints administrativos separados para preview e importacao;
+- URL e playlist ID validados por allowlist fixa de hosts do YouTube;
+- `YOUTUBE_DATA_API_KEY` e `SUPABASE_SERVICE_ROLE_KEY` permanecem somente no servidor;
+- o backend rele a playlist no momento da gravacao e nao confia na arvore enviada pelo navegador;
+- o modo `automatic` deriva modulos e aulas dos titulos; o modo `manual_ranges` recebe somente nomes e intervalos de posicoes, relê a playlist no servidor e rejeita lacunas, sobreposicoes, intervalos vazios e posicoes invalidas;
+- a funcao Postgres `import_youtube_course(jsonb)` grava curso, configuracao, modulos, aulas e fonte em uma unica transacao;
+- IDs derivados da playlist e dos videos tornam o reenvio idempotente;
+- itens que desapareceram da playlist sao arquivados, nao apagados, preservando auditoria e progresso;
+- o caminho sem chave da API oficial e um fallback para playlists publicamente acessiveis e pode exigir manutencao se o HTML do YouTube mudar.

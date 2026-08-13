@@ -659,3 +659,14 @@ Para o MVP, suporte pode enviar email ou registrar ticket simples no banco.
 - Notificacoes;
 - IA dentro da aula;
 - recomendacoes personalizadas.
+
+## Curso importado por playlist
+
+- uma playlist do YouTube representa um curso;
+- o CRM oferece `Criar curso com YouTube` como fluxo nativo, sem exigir scripts, SQL ou edicao manual de cada aula;
+- o produtor pode organizar o curso automaticamente pelos titulos ou definir cada modulo pelo primeiro e ultimo video do intervalo;
+- antes de importar, o assistente mostra todos os modulos e aulas e bloqueia intervalos vazios, sobrepostos ou com videos sem modulo;
+- o card unico do curso abre diretamente a experiencia de aula com modulos e aulas na playlist lateral;
+- o produtor pode optar por exibir cards de modulos antes das aulas;
+- a capa vertical do curso e opcional; sem capa, o card mostra somente o nome sobre uma superficie neutra;
+- a importacao entra como rascunho e nao aparece para alunos antes da revisao e publicacao administrativa.

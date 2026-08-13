@@ -1089,6 +1089,20 @@ Metadados importantes para CRM/dashboard:
 - frequencia de login e sessoes;
 - cliques relevantes em aula, materiais, TV, salvar, comentarios e avaliacoes.
 
+## youtube_course_imports
+
+Registra a origem idempotente de cursos criados por playlist.
+
+- `playlist_id`: chave primaria externa validada;
+- `playlist_url`: URL canonica da playlist;
+- `course_id`: curso interno unico;
+- `last_manifest`: ultimo manifesto relido e validado no servidor, incluindo `organizationMode`, intervalos solicitados, conformidade da nomenclatura e arvore final;
+- `created_at` e `updated_at`.
+
+As aulas importadas usam `video_config.provider = youtube` e `assetId = videoId`. Importar nao cria `entitlements` e sempre redefine `content_items.publication_status` para `draft`.
+
+No modo manual, `moduleRanges` armazena somente a intencao administrativa (`title`, `startPosition`, `endPosition`). A arvore persistida nunca e aceita diretamente do navegador: o servidor baixa novamente a playlist, confere cobertura integral e constroi os modulos com os videos atuais.
+
 ## Webhooks
 
 ### webhook_events
