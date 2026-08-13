@@ -8,6 +8,57 @@ const supabasePublicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.e
 const protectedPagePrefixes = ["/", "/admin", "/alterar-senha", "/conteudo", "/favoritos", "/minhas-compras"];
 const publicPagePrefixes = ["/login", "/auth/callback"];
 
+function getSupabaseConnectionSources() {
+  if (!supabaseUrl) {
+    return [];
+  }
+
+  try {
+    const url = new URL(supabaseUrl);
+    const websocketProtocol = url.protocol === "https:" ? "wss:" : "ws:";
+
+    return [url.origin, `${websocketProtocol}//${url.host}`];
+  } catch {
+    return [];
+  }
+}
+
+function createContentSecurityPolicy(nonce: string) {
+  const directives = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    `connect-src 'self' ${getSupabaseConnectionSources().join(" ")}`.trim(),
+    "font-src 'self' data:",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "frame-src 'self' https:",
+    "img-src 'self' data: blob: https:",
+    "manifest-src 'self'",
+    "media-src 'self' blob: https:",
+    "object-src 'none'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://www.youtube.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+    "script-src-attr 'none'",
+    "style-src 'self' 'unsafe-inline'",
+    "worker-src 'self' blob:"
+  ];
+
+  if (process.env.NODE_ENV === "production") {
+    directives.push("upgrade-insecure-requests");
+  }
+
+  return directives.join("; ");
+}
+
+function secureResponse(response: NextResponse, contentSecurityPolicy: string, noStore = false) {
+  response.headers.set("Content-Security-Policy", contentSecurityPolicy);
+
+  if (noStore) {
+    response.headers.set("Cache-Control", "private, no-store");
+  }
+
+  return response;
+}
+
 function hasAuthConfig() {
   return Boolean(supabaseUrl && supabasePublicKey);
 }
@@ -26,7 +77,7 @@ function isPublicPage(pathname: string) {
   return publicPagePrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-function redirectToLogin(request: NextRequest) {
+function redirectToLogin(request: NextRequest, contentSecurityPolicy: string) {
   const loginUrl = request.nextUrl.clone();
   loginUrl.pathname = "/login";
   loginUrl.search = "";
@@ -36,7 +87,7 @@ function redirectToLogin(request: NextRequest) {
     loginUrl.searchParams.set("setup", "missing-auth");
   }
 
-  return NextResponse.redirect(loginUrl);
+  return secureResponse(NextResponse.redirect(loginUrl), contentSecurityPolicy, true);
 }
 
 function userMustChangePassword(userMetadata: unknown) {
@@ -49,26 +100,33 @@ function userMustChangePassword(userMetadata: unknown) {
   );
 }
 
-function redirectToPasswordChange(request: NextRequest) {
+function redirectToPasswordChange(request: NextRequest, contentSecurityPolicy: string) {
   const passwordChangeUrl = request.nextUrl.clone();
   passwordChangeUrl.pathname = "/alterar-senha";
   passwordChangeUrl.search = "";
   passwordChangeUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
-  return NextResponse.redirect(passwordChangeUrl);
+  return secureResponse(NextResponse.redirect(passwordChangeUrl), contentSecurityPolicy, true);
 }
 
 export async function middleware(request: NextRequest) {
+  const nonce = btoa(crypto.randomUUID());
+  const contentSecurityPolicy = createContentSecurityPolicy(nonce);
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("Content-Security-Policy", contentSecurityPolicy);
+  requestHeaders.set("x-nonce", nonce);
   const pathname = request.nextUrl.pathname;
   const needsUser = isProtectedPage(pathname);
   const publicPage = isPublicPage(pathname);
   const authConfigured = hasAuthConfig();
 
   if (!authConfigured) {
-    return needsUser ? redirectToLogin(request) : NextResponse.next();
+    return needsUser
+      ? redirectToLogin(request, contentSecurityPolicy)
+      : secureResponse(NextResponse.next({ request: { headers: requestHeaders } }), contentSecurityPolicy);
   }
 
   let response = NextResponse.next({
-    request
+    request: { headers: requestHeaders }
   });
 
   const supabase = createServerClient(supabaseUrl as string, supabasePublicKey as string, {
@@ -78,7 +136,7 @@ export async function middleware(request: NextRequest) {
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
+        response = NextResponse.next({ request: { headers: requestHeaders } });
         cookiesToSet.forEach(({ name, options, value }) => {
           response.cookies.set(name, value, options);
         });
@@ -93,7 +151,7 @@ export async function middleware(request: NextRequest) {
   const user = error ? null : data.user;
 
   if (needsUser && !user) {
-    return redirectToLogin(request);
+    return redirectToLogin(request, contentSecurityPolicy);
   }
 
   if (publicPage && user) {
@@ -104,7 +162,7 @@ export async function middleware(request: NextRequest) {
       redirectUrl.pathname = "/alterar-senha";
       redirectUrl.search = "";
       redirectUrl.searchParams.set("next", safeRedirectPath);
-      return NextResponse.redirect(redirectUrl);
+      return secureResponse(NextResponse.redirect(redirectUrl), contentSecurityPolicy, true);
     }
 
     let adminRoleResult: { data: { role?: unknown } | null } = { data: null };
@@ -124,14 +182,14 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = adminRoleResult.data?.role ? "/admin" : safeRedirectPath;
     redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
+    return secureResponse(NextResponse.redirect(redirectUrl), contentSecurityPolicy, true);
   }
 
   if (needsUser && user && pathname !== "/alterar-senha" && userMustChangePassword(user.user_metadata)) {
-    return redirectToPasswordChange(request);
+    return redirectToPasswordChange(request, contentSecurityPolicy);
   }
 
-  return response;
+  return secureResponse(response, contentSecurityPolicy, needsUser || publicPage);
 }
 
 export const config = {

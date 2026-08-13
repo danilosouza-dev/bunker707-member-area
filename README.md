@@ -36,6 +36,7 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Design system Bunker707](docs/12-design-system-bunker707.md)
 - [Padroes de engenharia e repositorio](docs/13-padroes-engenharia.md)
 - [Auditoria tecnica de 10/07/2026](docs/14-auditoria-tecnica-2026-07-10.md)
+- [Deploy seguro na Vercel](docs/15-deploy-vercel-seguro.md)
 
 ## Padroes de trabalho
 
