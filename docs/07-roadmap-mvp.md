@@ -89,7 +89,7 @@ Entregas:
 - cursos/modulos/aulas;
 - progresso real.
 
-Status atual: Auth, middleware de sessao, guards de API, `admin_roles`, `profiles`, `student_events` e tabela base de `entitlements` foram implementados. A proxima etapa e conectar as regras de exibicao/liberacao de conteudo diretamente aos entitlements reais.
+Status atual: Auth, proxy de sessao (proxy.ts), guards de API, `admin_roles`, `profiles`, `student_events` e tabela base de `entitlements` foram implementados. A proxima etapa e conectar as regras de exibicao/liberacao de conteudo diretamente aos entitlements reais.
 
 ## Fase 5: Webhooks externos
 

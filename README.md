@@ -37,6 +37,8 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Padroes de engenharia e repositorio](docs/13-padroes-engenharia.md)
 - [Auditoria tecnica de 10/07/2026](docs/14-auditoria-tecnica-2026-07-10.md)
 - [Deploy seguro na Vercel](docs/15-deploy-vercel-seguro.md)
+- [Auditoria tecnica de 01/10/2026](docs/16-auditoria-tecnica-2026-10-01.md)
+- [Admin do Produtor: especificacao do redesign (10/10/2026)](docs/17-admin-produtor-redesign.md)
 
 ## Padroes de trabalho
 
@@ -72,7 +74,7 @@ O repositorio ja possui a base inicial do app:
 - cards verticais;
 - pagina propria de formacao/curso com breadcrumb;
 - pagina `Minhas compras` em `/minhas-compras`;
-- login real com Supabase Auth, middleware de sessao e callback OAuth;
+- login real com Supabase Auth, proxy de sessao (proxy.ts) e callback OAuth;
 - paginas autenticadas protegidas por sessao;
 - CMS/admin em `/admin` protegido por papel em `admin_roles`;
 - hero de conteudo configuravel por backend persistido;
