@@ -34,8 +34,8 @@ export function OperationsPanel({
   return (
     <Card className="border-border bg-card">
       <CardHeader>
-        <CardTitle>Operacao de acesso</CardTitle>
-        <CardDescription>Entitlements internos como Fonte de verdade para liberacao.</CardDescription>
+        <CardTitle>Operação de acesso</CardTitle>
+        <CardDescription>Regras de liberação e vendas recebidas das plataformas.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <div className="grid gap-3 sm:grid-cols-3">
@@ -44,11 +44,11 @@ export function OperationsPanel({
             <strong className="text-2xl font-semibold text-foreground">{activeReleaseRules}</strong>
           </div>
           <div className="flex flex-col gap-1 rounded-lg border border-border bg-muted/30 p-3">
-            <span className="text-sm text-muted-foreground">Webhooks pendentes</span>
+            <span className="text-sm text-muted-foreground">Vendas pendentes</span>
             <strong className="text-2xl font-semibold text-foreground">{pendingWebhooks}</strong>
           </div>
           <div className="flex flex-col gap-1 rounded-lg border border-border bg-muted/30 p-3">
-            <span className="text-sm text-muted-foreground">Webhooks com falha</span>
+            <span className="text-sm text-muted-foreground">Vendas com falha</span>
             <strong className="text-2xl font-semibold text-foreground">{failedWebhooks}</strong>
           </div>
         </div>
@@ -68,12 +68,12 @@ export function OperationsPanel({
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">Nenhum item no pipeline.</p>
+            <p className="text-sm text-muted-foreground">Nenhum dado ainda</p>
           )}
         </div>
 
         <div className="flex flex-col gap-3">
-          <h3 className="text-sm font-semibold text-foreground">Eventos externos recentes</h3>
+          <h3 className="text-sm font-semibold text-foreground">Vendas recebidas recentes</h3>
           {visibleWebhookEvents.length > 0 ? (
             <div className="flex flex-col gap-2">
               {visibleWebhookEvents.map((event) => (
@@ -86,7 +86,7 @@ export function OperationsPanel({
               ))}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">Nenhum evento externo recente.</p>
+            <p className="text-sm text-muted-foreground">Nenhum dado ainda</p>
           )}
         </div>
       </CardContent>

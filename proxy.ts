@@ -1,9 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
+import { getAuthSessionStrategy } from "@/lib/auth/session-strategy";
+import { cleanEnvValue } from "@/lib/env-value";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;
-const supabasePublicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const supabaseUrl = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? cleanEnvValue(process.env.SUPABASE_URL);
+const supabasePublicKey =
+  cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) ?? cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
 
 const protectedPagePrefixes = ["/", "/admin", "/alterar-senha", "/conteudo", "/favoritos", "/minhas-compras"];
 const publicPagePrefixes = ["/login", "/auth/callback"];
@@ -23,11 +27,56 @@ function getSupabaseConnectionSources() {
   }
 }
 
+const defaultPostHogHost = "https://us.i.posthog.com";
+
+function getHttpOrigin(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+
+    return url.protocol === "https:" || url.protocol === "http:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+// PostHog so entra na CSP com NEXT_PUBLIC_POSTHOG_KEY. O api_host recebe eventos e flags; nas regioes
+// gerenciadas (us/eu) o host "-assets" entrega a configuracao remota e as extensoes do SDK.
+function getPostHogSources() {
+  const apiOrigin = process.env.NEXT_PUBLIC_POSTHOG_KEY
+    ? getHttpOrigin(process.env.NEXT_PUBLIC_POSTHOG_HOST || defaultPostHogHost)
+    : null;
+
+  if (!apiOrigin) {
+    return { connect: [], script: [] };
+  }
+
+  const region = /^https:\/\/(us|eu)\.i\.posthog\.com$/.exec(apiOrigin)?.[1];
+  const assetsOrigin = region ? `https://${region}-assets.i.posthog.com` : apiOrigin;
+
+  return { connect: [...new Set([apiOrigin, assetsOrigin])], script: [assetsOrigin] };
+}
+
+// Sentry so entra na CSP com NEXT_PUBLIC_SENTRY_DSN: o navegador envia eventos ao host de ingestao do DSN
+// (ex.: https://o123.ingest.us.sentry.io); a chave publica do DSN nao faz parte da origem.
+function getSentryConnectionSources() {
+  const origin = getHttpOrigin(process.env.NEXT_PUBLIC_SENTRY_DSN);
+
+  return origin ? [origin] : [];
+}
+
+const postHogSources = getPostHogSources();
+const observabilityConnectionSources = [...postHogSources.connect, ...getSentryConnectionSources()];
+const observabilityScriptSources = postHogSources.script;
+
 function createContentSecurityPolicy(nonce: string) {
   const directives = [
     "default-src 'self'",
     "base-uri 'self'",
-    `connect-src 'self' ${getSupabaseConnectionSources().join(" ")}`.trim(),
+    `connect-src 'self' ${[...getSupabaseConnectionSources(), ...observabilityConnectionSources].join(" ")}`.trim(),
     "font-src 'self' data:",
     "form-action 'self'",
     "frame-ancestors 'none'",
@@ -36,7 +85,7 @@ function createContentSecurityPolicy(nonce: string) {
     "manifest-src 'self'",
     "media-src 'self' blob: https:",
     "object-src 'none'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://www.youtube.com${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${["https://www.youtube.com", ...observabilityScriptSources].join(" ")}${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
     "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline'",
     "worker-src 'self' blob:"
@@ -108,7 +157,50 @@ function redirectToPasswordChange(request: NextRequest, contentSecurityPolicy: s
   return secureResponse(NextResponse.redirect(passwordChangeUrl), contentSecurityPolicy, true);
 }
 
-export async function middleware(request: NextRequest) {
+type ProxySessionUser = {
+  id: string;
+  user_metadata: unknown;
+};
+
+type ProxySupabaseClient = {
+  auth: Pick<SupabaseClient["auth"], "getClaims" | "getUser">;
+};
+
+async function getVerifiedUser(supabase: ProxySupabaseClient): Promise<ProxySessionUser | null> {
+  const { data, error } = await supabase.auth.getUser().catch(() => ({
+    data: { user: null },
+    error: new Error("Auth fetch failed")
+  }));
+
+  return error ? null : data.user;
+}
+
+// AUTH_SESSION_STRATEGY=claims troca getUser() por getClaims(): com signing keys assimetricas o JWT e
+// validado localmente (JWKS em cache); sem elas o getClaims ainda consulta o Auth. Nunca use getSession() aqui.
+async function getProxySessionUser(supabase: ProxySupabaseClient): Promise<ProxySessionUser | null> {
+  if (getAuthSessionStrategy() !== "claims") {
+    return getVerifiedUser(supabase);
+  }
+
+  const { data, error } = await supabase.auth.getClaims().catch(() => ({
+    data: null,
+    error: new Error("Auth claims failed")
+  }));
+  const claims = error ? null : data?.claims;
+
+  if (!claims?.sub) {
+    return null;
+  }
+
+  // O user_metadata do JWT so muda quando o token e renovado: confirma no Auth antes de exigir troca de senha.
+  if (userMustChangePassword(claims.user_metadata)) {
+    return getVerifiedUser(supabase);
+  }
+
+  return { id: claims.sub, user_metadata: claims.user_metadata ?? null };
+}
+
+export async function proxy(request: NextRequest) {
   const nonce = btoa(crypto.randomUUID());
   const contentSecurityPolicy = createContentSecurityPolicy(nonce);
   const requestHeaders = new Headers(request.headers);
@@ -144,11 +236,7 @@ export async function middleware(request: NextRequest) {
     }
   });
 
-  const { data, error } = await supabase.auth.getUser().catch(() => ({
-    data: { user: null },
-    error: new Error("Auth fetch failed")
-  }));
-  const user = error ? null : data.user;
+  const user = await getProxySessionUser(supabase);
 
   if (needsUser && !user) {
     return redirectToLogin(request, contentSecurityPolicy);

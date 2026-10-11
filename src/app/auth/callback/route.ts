@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { AUTH_LINK_ERROR_PARAM, authCallbackErrorValue } from "@/lib/auth/password-reset";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import { getPostAuthRedirectPath } from "@/server/auth/redirect";
 import { createSupabaseServerClient } from "@/server/auth/supabase";
@@ -9,11 +10,18 @@ export async function GET(request: NextRequest) {
   const provider = requestUrl.searchParams.get("provider") ?? "oauth";
   const redirectPath = getSafeRedirectPath(requestUrl.searchParams.get("next"));
   const redirectUrl = new URL(redirectPath, requestUrl.origin);
+  // O Supabase volta com ?error=&error_code= (ex.: otp_expired) quando o link do e-mail ja expirou.
+  const linkRejected = requestUrl.searchParams.has("error") || requestUrl.searchParams.has("error_code");
 
   if (!code) {
     redirectUrl.pathname = "/login";
     redirectUrl.search = "";
     redirectUrl.searchParams.set("next", redirectPath);
+
+    if (linkRejected) {
+      redirectUrl.searchParams.set(AUTH_LINK_ERROR_PARAM, authCallbackErrorValue(provider));
+    }
+
     return NextResponse.redirect(redirectUrl);
   }
 
@@ -21,9 +29,12 @@ export async function GET(request: NextRequest) {
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
+    // Link de e-mail ja usado, expirado ou aberto em outro navegador (o codigo de verificacao fica no
+    // navegador que pediu o link), ou login social que nao concluiu: o login explica o que fazer.
     redirectUrl.pathname = "/login";
     redirectUrl.search = "";
     redirectUrl.searchParams.set("next", redirectPath);
+    redirectUrl.searchParams.set(AUTH_LINK_ERROR_PARAM, authCallbackErrorValue(provider));
     return NextResponse.redirect(redirectUrl);
   }
 

@@ -136,6 +136,8 @@ export type ContentItem = {
   kind: ContentKind;
   lessons?: string;
   level?: string;
+  /** content_items.listing: "hidden" = "Oculto por enquanto" (so quem tem acesso ve). Ausente = listado. */
+  listing?: "listed" | "hidden";
   maxStudents?: number | null;
   parentContentId?: string;
   progress: number;
@@ -177,16 +179,31 @@ export type NavigationItem = {
 
 export type HomeHeroConfig = {
   badge?: string;
+  /** Botao do destaque (Area de membros > Destaque). Link interno ("/...") ou https. */
+  cta?: {
+    href: string;
+    label: string;
+    target: "same_tab" | "new_tab";
+  };
   description?: string;
+  enabled?: boolean;
+  /** Imagem (mediaType "image") ou link do video (mediaType "video"). */
   image: string;
   mediaType: "image" | "video";
+  /** Capa do video: aparece enquanto carrega e para quem prefere menos movimento. */
+  poster?: string;
   purpose: "school-brand" | "editorial-highlight" | "content-highlight";
   title?: string;
   visibility?: {
     badge?: boolean;
+    cta?: boolean;
     description?: boolean;
     title?: boolean;
   };
+};
+
+export type PlatformBrandingConfig = {
+  logoImage: string | null;
 };
 
 export type ContentPageHeroConfig = {
@@ -505,6 +522,7 @@ export type AdminAIAgent = {
 export type AdminDashboardData = {
   aiAgents: AdminAIAgent[];
   blockedWordRules: AdminBlockedWordRule[];
+  branding: PlatformBrandingConfig;
   chartPoints: AdminChartPoint[];
   cohorts: string[];
   combos: AdminProductCombo[];
@@ -515,6 +533,8 @@ export type AdminDashboardData = {
   hero: HomeHeroConfig;
   homeRows: HomeRow[];
   homeSectionConfigs: HomeSectionConfig[];
+  /** Versao (updated_at) de platform_settings.homeSections lida junto com homeSectionConfigs; null = nunca publicada. */
+  homeSectionsUpdatedAt?: string | null;
   homeSections: AdminHomeSection[];
   integrations: AdminIntegrationSetting[];
   metrics: AdminMetric[];

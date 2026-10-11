@@ -84,7 +84,7 @@ test("home sections are resolved and published through an authenticated API", ()
   assert.match(storeSource, /function resolveConfiguredHomeRows/);
   assert.match(storeSource, /export async function publishHomeSections/);
   assert.match(storeSource, /key: "homeSections"/);
-  assert.match(routeSource, /requireApiAdmin/);
+  assert.match(routeSource, /requireApiRole\("storefront\.write"\)/);
   assert.match(routeSource, /publishHomeSections/);
   assert.match(routeSource, /export async function PUT/);
   assert.match(migrationSource, /create table if not exists public\.home_sections/);

@@ -281,7 +281,7 @@ export async function requireLessonsAccess({
     entitlements: (entitlementResult.data ?? []) as AccessEntitlementRow[],
     parentFormationId: validatedParentFormationId
   });
-  const hasOpenAccess = content.access_model === "free" || content.is_locked === false;
+  const hasOpenAccess = content.access_model === "free";
 
   if (!hasOpenAccess && matchingEntitlements.length === 0) {
     throw new LessonAccessError("Voce nao tem acesso a uma ou mais aulas.", 403);

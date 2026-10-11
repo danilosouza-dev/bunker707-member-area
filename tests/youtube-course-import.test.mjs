@@ -147,8 +147,8 @@ test("preview groups, orders and de-duplicates playlist lessons safely", () => {
 });
 
 test("admin routes revalidate the playlist server-side and never trust a client manifest", () => {
-  assert.match(previewRouteSource, /requireApiAdmin\(\)/);
-  assert.match(importRouteSource, /requireApiAdmin\(\)/);
+  assert.match(previewRouteSource, /requireApiRole\("catalog\.write"\)/);
+  assert.match(importRouteSource, /requireApiRole\("catalog\.write"\)/);
   assert.match(previewRouteSource, /readBoundedJson/);
   assert.match(importRouteSource, /readBoundedJson/);
   assert.match(importerSource, /loadYouTubeCourseImportPreview\(input\.playlistUrl/);

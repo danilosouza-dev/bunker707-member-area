@@ -6,12 +6,14 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
+import { usePlatformLogoImage } from "@/components/platform-branding";
 import { SavedItemButton } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
+import { cssImageUrl } from "@/lib/css-url";
 import type { ContentItem, ContentModalStructure, CourseModule, LessonVideoConfig } from "@/lib/platform-types";
 
 type ContentDetailsModalProps = {
@@ -97,7 +99,7 @@ function MiniContentCard({ accessPreviewMode, card }: { accessPreviewMode?: Acce
       <div className="modal-vertical-card-media relative aspect-[720/1040] overflow-hidden bg-[#181818] [transform:translateZ(0)]">
         <div
           className={`modal-vertical-card-image absolute inset-0 bg-cover bg-center ${imageStateClass}`}
-          style={{ backgroundImage: `url(${card.image})` }}
+          style={{ backgroundImage: cssImageUrl(card.image) }}
         />
         <div className="modal-vertical-card-overlay absolute inset-0" />
         {card.isLocked ? (
@@ -355,7 +357,7 @@ function ModuleCard({
       <div className="modal-vertical-card-media module-card-media relative aspect-[720/1040] overflow-hidden bg-[#181818] [transform:translateZ(0)]">
         <div
           className="modal-vertical-card-image absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${module.image})` }}
+          style={{ backgroundImage: cssImageUrl(module.image) }}
         />
         <div className="modal-vertical-card-overlay absolute inset-0" />
         <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black via-black/66 to-transparent" />
@@ -471,6 +473,7 @@ function LessonPanel({
 
 export function ContentDetailsModal({ accessPreviewMode, item, onClose, structure }: ContentDetailsModalProps) {
   const router = useNavigationFeedbackRouter();
+  const logoImage = usePlatformLogoImage();
   const { startNavigation } = useNavigationFeedback();
   const [expandedMainSection, setExpandedMainSection] = useState(false);
   const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
@@ -737,7 +740,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
         <div className="relative min-h-[420px] overflow-hidden sm:min-h-[520px] lg:min-h-[560px]">
           <div
             className="modal-hero-image-in absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${item.image})` }}
+            style={{ backgroundImage: cssImageUrl(item.image) }}
           />
           <div className="absolute inset-0 bg-black/16" />
           <div className="absolute inset-x-0 bottom-0 h-[72%] bg-gradient-to-t from-[#151515] via-[#151515]/88 to-transparent" />
@@ -745,15 +748,17 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
 
           <div className="absolute inset-x-0 top-0 z-20 flex items-center justify-between p-4 sm:p-6">
             <div className="w-[126px] drop-shadow-[0_6px_16px_rgba(0,0,0,0.72)] sm:w-[150px]">
-              <Image
-                alt=""
-                aria-hidden="true"
-                className="h-auto w-full object-contain"
-                height={35}
-                src="/brand/logo-bunker.svg"
-                unoptimized
-                width={306}
-              />
+              {logoImage ? (
+                <Image
+                  alt=""
+                  aria-hidden="true"
+                  className="h-auto max-h-10 w-full object-contain object-left"
+                  height={35}
+                  src={logoImage}
+                  unoptimized
+                  width={306}
+                />
+              ) : null}
             </div>
 
             <div className="flex h-10 items-center gap-2">

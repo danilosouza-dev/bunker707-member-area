@@ -163,10 +163,10 @@ export function CombosCommandCenter({
     <section className="space-y-6 text-zinc-100">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">CRM / Produtos</p>
+          <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">Produtos</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-normal text-white">Combos</h1>
           <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-zinc-500">
-            Monte pacotes internos com produtos existentes. A compra externa do combo deve gerar entitlement para todos os produtos incluidos.
+            Monte pacotes internos com produtos existentes. A compra externa do combo libera acesso a todos os produtos incluídos.
           </p>
         </div>
       </div>

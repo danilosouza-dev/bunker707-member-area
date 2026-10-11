@@ -58,8 +58,8 @@ test("module and lesson routes expose authenticated, validated DELETE mutations"
   ]) {
     const deleteSource = functionSource(source, "DELETE");
 
-    assert.match(deleteSource, /requireApiAdmin\(\)/, `${entity}: DELETE must require an admin`);
-    assert.match(deleteSource, /request\.json\(\)/, `${entity}: DELETE must parse its payload`);
+    assert.match(deleteSource, /requireApi(?:Admin\(\)|Role\("catalog\.write"\))/, `${entity}: DELETE must require an admin`);
+    assert.match(deleteSource, /readBoundedJson/, `${entity}: DELETE must parse its payload with a bounded reader`);
     assert.match(deleteSource, /payload\.id/, `${entity}: DELETE must validate an id`);
     assert.match(deleteSource, /status:\s*400/, `${entity}: missing ids must be rejected`);
     assert.match(deleteSource, new RegExp(`await ${storeFunction}\\(payload\\.id\\)`), `${entity}: DELETE must call its store mutation`);
@@ -147,8 +147,8 @@ test("admin catalog, modules and lessons expose ordering mutations", () => {
   ]) {
     const patchSource = functionSource(source, "PATCH");
 
-    assert.match(patchSource, /requireApiAdmin\(\)/, `${entity}: PATCH must require an admin`);
-    assert.match(patchSource, /request\.json\(\)/, `${entity}: PATCH must parse its payload`);
+    assert.match(patchSource, /requireApi(?:Admin\(\)|Role\("catalog\.write"\))/, `${entity}: PATCH must require an admin`);
+    assert.match(patchSource, /readBoundedJson/, `${entity}: PATCH must parse its payload with a bounded reader`);
     assert.match(patchSource, /orderedIds/, `${entity}: PATCH must validate ordered ids`);
     assert.match(patchSource, /status:\s*400/, `${entity}: invalid order must be rejected`);
     assert.match(patchSource, new RegExp(`await ${storeFunction}\\(`), `${entity}: PATCH must call its store reorder mutation`);

@@ -26,7 +26,8 @@ Politicas iniciais:
 Implementado no MVP atual:
 
 - Supabase Auth e usado como provedor de identidade;
-- o middleware do Next.js renova/valida sessao com `@supabase/ssr`;
+- o `proxy.ts` do Next.js (antigo `middleware.ts`) renova/valida sessao com `@supabase/ssr`: `getUser()` por padrao ou `getClaims()` com `AUTH_SESSION_STRATEGY=claims`; `getSession()` nunca decide acesso no servidor;
+- com `claims`, uma sessao revogada e um `must_change_password` marcado depois do login so aparecem no proxy quando o JWT for renovado (ate 1 h), mas as paginas protegidas seguem validando com `getUser()` (uma vez por request via `React.cache`) e, se o JWT ainda marca `must_change_password`, o proxy confirma com `getUser()` antes de redirecionar; ative `claims` primeiro no staging e so depois de migrar o projeto para signing keys assimetricas;
 - `profiles`, `entitlements`, `student_events`, `lesson_progress`, `admin_roles` e todas as tabelas de comentarios/moderacao possuem RLS;
 - aluno pode ler/editar somente o proprio perfil, ler os proprios entitlements e gravar eventos proprios;
 - aluno nao possui policy para criar, alterar ou remover entitlements;
@@ -191,12 +192,89 @@ Pontos de atencao:
 
 ## Observabilidade
 
-Ferramentas recomendadas:
+Ferramentas (fase 0 de `docs/17-admin-produtor-redesign.md`):
 
-- Sentry para erros;
-- PostHog para analytics;
+- Vercel Speed Insights para Web Vitals reais por rota (sempre ligado);
+- Sentry para erros e uma amostra de performance (opcional, por variavel de ambiente);
+- PostHog para analytics de produto (opcional, por variavel de ambiente);
 - logs estruturados no servidor;
 - tabela de auditoria para acoes sensiveis.
+
+Regra de carregamento: sem as variaveis do Sentry e do PostHog, o navegador nao baixa nenhum codigo nem faz nenhuma requisicao para esses servicos, e a CSP nao muda. O unico script de observabilidade sempre presente e o do Speed Insights.
+
+### Variaveis de ambiente
+
+Todas estao em `.env.example`, sem valores. Variaveis `NEXT_PUBLIC_*` entram no bundle no build: depois de alterar, e preciso novo deploy.
+
+| Variavel | Onde e lida | Vazia |
+|---|---|---|
+| `NEXT_PUBLIC_POSTHOG_KEY` | `src/app/layout.tsx`, `src/components/analytics/posthog-analytics.tsx`, `proxy.ts` (CSP) | PostHog desligado: o layout nao le a sessao para analytics e `posthog-js` nunca e baixado |
+| `NEXT_PUBLIC_POSTHOG_HOST` | `src/components/analytics/posthog-analytics.tsx`, `proxy.ts` (CSP) | `https://us.i.posthog.com` (UE: `https://eu.i.posthog.com`) |
+| `SENTRY_DSN` | `src/instrumentation.ts`, `src/sentry.server.config.ts`, `src/sentry.edge.config.ts` | usa `NEXT_PUBLIC_SENTRY_DSN`; as duas vazias = SDK nem e importado no servidor |
+| `NEXT_PUBLIC_SENTRY_DSN` | `src/instrumentation-client.ts`, `proxy.ts` (CSP) | Sentry desligado no navegador e fora da CSP |
+| `SENTRY_ENVIRONMENT` | configs de servidor e edge | `VERCEL_ENV` ou `NODE_ENV` (no navegador: `NEXT_PUBLIC_VERCEL_ENV` ou `NODE_ENV`) |
+| `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | ainda nao usadas | reservadas para `withSentryConfig` e upload de source maps; o token e segredo de build e nunca leva prefixo `NEXT_PUBLIC_` |
+
+A chave do PostHog e o DSN do Sentry sao publicos por natureza (vao para o navegador); nenhum deles autoriza leitura de dados. Tokens de API do PostHog e o `SENTRY_AUTH_TOKEN` sao segredos e nao entram no app.
+
+### O que cada ferramenta coleta
+
+**Vercel Speed Insights** (`src/components/analytics/speed-insights.tsx`, no layout raiz):
+
+- coleta LCP, INP, CLS, FCP e TTFB por rota, com tipo de dispositivo e de conexao;
+- a URL enviada perde query string e fragmento (`beforeSend`), entao `?code=` do login e `#access_token=` de convites nunca saem do navegador;
+- nao usa cookies nem identifica o aluno;
+- precisa ser ativado no painel do projeto na Vercel; fora da Vercel o script em `/_vercel/speed-insights` responde 404 sem afetar a pagina.
+
+**Sentry, servidor** (`src/instrumentation.ts` + `src/sentry.server.config.ts` / `src/sentry.edge.config.ts`):
+
+- `register()` so importa o SDK quando ha DSN, sem custo de cold start quando desligado;
+- `onRequestError` envia erros de Server Components, Route Handlers, Server Actions e do `proxy.ts`;
+- `tracesSampleRate: 0.1` (10% das requisicoes viram trace);
+- o SDK 11 coleta cookies, cabecalhos, corpos e query strings por padrao. A configuracao (`dataCollection`) desliga cookies, corpos de request e resposta, query strings, variaveis locais de stack, dados de consultas ao banco, dados de fila, GraphQL e entradas/saidas de IA (prompts do Tutor e da IA Diretor), alem de `userInfo` (IP e usuario automaticos). Cabecalhos de request so em allowlist: `user-agent`, `content-type`, `accept-language`, `x-vercel-id`; os demais chegam como `[Filtered]`.
+
+**Sentry, navegador** (`src/instrumentation-client.ts`):
+
+- import dinamico so com `NEXT_PUBLIC_SENTRY_DSN`. O SDK inicia logo depois da hidratacao, nao antes: um erro muito precoce pode nao ser capturado, em troca de zero peso para quem nao configurou;
+- coleta erros nao tratados, breadcrumbs (cliques, navegacao, fetch, console) e 10% das navegacoes como trace (`onRouterTransitionStart`);
+- sem Session Replay e sem widget de feedback;
+- URL do evento e URLs de breadcrumbs perdem query string e fragmento; cookies, corpos, `Referer` e dados de usuario nao sao enviados;
+- mensagens de erro vao como foram escritas: nunca montar mensagens de erro com e-mail, nome, telefone ou token.
+
+**PostHog** (`src/components/analytics/posthog-identity.tsx` + `posthog-analytics.tsx`, no layout raiz):
+
+- so com `NEXT_PUBLIC_POSTHOG_KEY`. O layout raiz le o usuario dentro de `<Suspense>` com `getAuthenticatedUser()` (memoizado por request, entao paginas protegidas nao pagam outra validacao) e passa ao navegador apenas o `auth.users.id`;
+- `posthog-js` e baixado depois da hidratacao com `defaults: '2026-08-30'`;
+- coleta `$pageview` a cada troca de rota do App Router (`capture_pageview: 'history_change'`), `$pageleave`, cliques por autocapture com o texto dos elementos mascarado (`mask_all_text`), navegador, sistema, tamanho de tela e origem (`utm_source`, `utm_medium`, `utm_campaign`);
+- identidade: `identify(auth.users.id)` quando ha sessao, nunca e-mail ou nome; `person_profiles: 'identified_only'` (anonimo nao gera perfil); sem sessao, uma identidade anterior e descartada com `reset()` (logout);
+- `before_send` remove query string (exceto os tres `utm_*`), fragmento e credenciais de toda propriedade com URL (`$current_url`, `$referrer`, `$initial_*`);
+- desligados: gravacao de sessao, surveys, product tours, conversations e captura de excecoes (erros ficam no Sentry);
+- persistencia padrao do SDK (`localStorage` + cookie primario `ph_<chave>_posthog`), que deve constar na politica de privacidade;
+- no projeto do PostHog: ligar "Discard client IP data" e alinhar a retencao a decisao D8 de `docs/17` (24 meses);
+- eventos de dominio (catalogo tipado em `src/server/events`, espelhados com `$insert_id`) e `posthog-node` no servidor entram com o catalogo de eventos; o heartbeat de video nunca vai ao PostHog.
+
+Custo conhecido com o PostHog ligado: como o layout raiz le a sessao, `/tv` deixa de ser pre-renderizada e paginas publicas (`/login`, `/tv`) fazem um `getUser()` a mais. A leitura fica em `<Suspense>` e nao atrasa o HTML inicial.
+
+### CSP
+
+O `proxy.ts` so acrescenta hosts quando a variavel correspondente existe:
+
+- `connect-src`: origem de `NEXT_PUBLIC_POSTHOG_HOST` (padrao `https://us.i.posthog.com`) e, nas regioes gerenciadas, o host de assets (`https://us-assets.i.posthog.com` ou `https://eu-assets.i.posthog.com`); origem de ingestao derivada do `NEXT_PUBLIC_SENTRY_DSN` (por exemplo `https://o123.ingest.us.sentry.io`, sem a chave);
+- `script-src`: host de assets do PostHog. Com `'strict-dynamic'`, navegadores modernos ignoram a lista de hosts e confiam nos scripts carregados pelo bundle com nonce; o host fica listado para navegadores sem CSP 3;
+- Speed Insights usa o proprio dominio (`/_vercel/speed-insights`) em producao; em desenvolvimento o script de debug vem de `va.vercel-scripts.com`, liberado pelo `'strict-dynamic'`;
+- proxy reverso do PostHog e `tunnelRoute` do Sentry estao fora do escopo desta fase.
+
+### Verificacao
+
+- sem as variaveis: na aba Network so aparece o script do Speed Insights; nenhuma requisicao para `posthog.com` ou `sentry.io`; a CSP e a mesma de antes;
+- com as variaveis, num Preview da Vercel: `$pageview` aparece em Live events com `distinct_id` igual ao UUID do aluno e URL sem query; um erro de teste aparece no Sentry sem cookies nem corpo;
+- rodar `next build` com `SENTRY_DSN` definido num Preview antes de promover, porque o SDK do servidor ainda nao passou por build com DSN nesta fase.
+
+### Pendencias de observabilidade
+
+- envolver `next.config.ts` com `withSentryConfig` (source maps, release e instrumentacao automatica);
+- criar `src/app/global-error.tsx` chamando `Sentry.captureException` para erros de renderizacao no cliente;
+- `Server-Timing` (auth/db/render), orcamento de bundle e Lighthouse CI, conforme `docs/17` 2.8.
 
 Eventos criticos:
 
@@ -274,3 +352,29 @@ Regras:
 - a tela `/alterar-senha` limpa `must_change_password` somente depois de atualizar a senha do usuario;
 - remover aluno ou produto do acesso manual no CRM deve marcar os entitlements `admin-student:*` como `revoked`, sem apagar eventos ou payloads externos;
 - o admin deve enviar senha temporaria por canal de atendimento controlado, evitando expor senha permanente por email.
+
+## Recuperacao de senha e e-mails do Auth
+
+Fluxo do "Esqueci minha senha" no `/login`: o navegador chama `resetPasswordForEmail` (PKCE), o e-mail leva a `/auth/callback?code=...&next=/alterar-senha&provider=email`, o servidor troca o codigo por sessao e a pessoa define a senha em `/alterar-senha`.
+
+Regras e armadilhas (verificadas em 2026-10-11 no projeto `hrtnqcznhdmodjikvddm`):
+
+- cada pedido grava um codigo de verificacao novo no navegador antes de chamar o Supabase, mesmo quando o pedido falha; um segundo clique invalida o link do e-mail anterior (erro `code challenge does not match previously saved code verifier` no `/token`). Por isso o botao trava enquanto envia e por 1 minuto depois do envio (`src/lib/auth/password-reset.ts`);
+- o link precisa ser aberto no mesmo navegador em que foi pedido;
+- o `?next=` (login, `/auth/callback`, troca de senha) so aceita caminho interno: `getSafeRedirectPath` (`src/lib/auth/redirect.ts`) recusa `//host`, barra invertida (`/\host` e `/%5Chost`, que o navegador le como outro site) e caracteres de controle, monta o caminho com o parser de URL e exige a mesma origem (`tests/auth-redirect.test.mjs`);
+- quando a troca falha ou o Supabase volta com `?error_code=` (ex.: `otp_expired`), o callback manda para `/login?erro=link` e o login explica o que fazer; falha de login social vai para `?erro=oauth`;
+- erros do Auth viram frases em portugues (`describePasswordResetError`); a mensagem tecnica nunca aparece na tela;
+- o SMTP embutido do Supabase envia no maximo **2 e-mails por hora** por projeto (campo travado no painel) e so entrega para membros da organizacao. Estourar o limite devolve `429 over_email_send_rate_limit`. Antes de liberar alunos reais, configurar SMTP proprio em Authentication > Emails > SMTP Settings e ajustar o limite em Authentication > Rate Limits;
+- convites gerados pelo painel do Supabase ou por `inviteUserByEmail` chegam com `#access_token=` (fluxo implicito), que o cliente PKCE do app recusa; ate o fluxo de convite migrar para `token_hash` + `verifyOtp`, contas de admin devem ser criadas em Authentication > Users > Create new user, e alunos convidados usam "Esqueci minha senha".
+
+## Login e destaque configuraveis (Area de membros)
+
+Desde 2026-10-11 o visual do `/login` e o topo da home sao editados no admin novo (Area de membros > Login e > Destaque) e gravados em `platform_settings` (`loginPage` e `hero`; formato em `docs/05`).
+
+- `platform_settings` continua com RLS ligado e sem acesso para `anon`/`authenticated`: o `/login` le a configuracao no servidor, com a chave de servico, e entrega ao navegador so o que o componente desenha (textos, links e URLs de imagem). Nenhuma chave de provedor de auth fica nessa configuracao;
+- gravar exige `storefront.write` (dono, administrador ou editor) na Server Action, alem da tela; analista e suporte so leem;
+- a leitura do `/login` fica em cache (`unstable_cache`, tags `member-area-login` e `catalog`, 1 h). Falha de banco nao e guardada em cache: o login cai no visual padrao e tenta de novo na proxima visita. Publicar invalida na hora;
+- links editaveis sao conferidos ao gravar e ao desenhar: a ajuda do login aceita so `https://` ou e-mail (vira `mailto:`), sem usuario/senha no link; o botao do destaque aceita caminho interno da area ou `https://`, e o que vier diferente (`javascript:`, `//host`, `/\host`, `http:`, `/api/...`) some da home, inclusive se tiver sido gravado pelo admin antigo ou por SQL. Link externo em nova aba abre com `rel="noopener noreferrer"`;
+- imagens chegam ao banco so como URL: o recorte vira WebP no navegador, o servidor confere medida e peso pelo cabecalho do WebP e envia ao bucket `content-assets`; data URL, `http://` e `javascript:` sao recusados. Link de imagem colado (destaque, login, capa de produto, capa de modulo) tambem nao pode ter espaco, aspas, parenteses, `<`, `>` ou `\` (`imageLinkSchema`), e os cards do aluno desenham o fundo entre aspas e escapado (`cssImageUrl`): sem isso, uma capa `https://x/a.png);position:fixed;...` injetava CSS na home de todos os alunos;
+- `?template=` no endereco do `/login` nao muda mais nada (antes qualquer visitante trocava o modelo pelo endereco);
+- a previa do admin usa o proprio `LoginExperience` em modo `preview`: nao le nem cria sessao, nao envia formulario e nao redireciona. Quem esta logado e redirecionado ao abrir `/login`; para conferir o login publicado, use uma janela anonima.

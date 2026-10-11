@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import {
   deleteBlockedWord,
   LessonCommentStoreError,
   updateBlockedWord
 } from "@/server/comments/comment-store";
+import { readBoundedJson } from "@/server/http/bounded-json";
+import { jsonRouteError } from "@/server/http/route-errors";
 
 type BlockedWordRouteContext = {
   params: Promise<{ ruleId: string }>;
@@ -19,14 +21,20 @@ function errorResponse(error: unknown, fallbackMessage: string) {
 }
 
 export async function PATCH(request: Request, context: BlockedWordRouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("community.moderate");
 
   if (auth.response || !auth.user) {
     return auth.response;
   }
 
   const { ruleId } = await context.params;
-  const payload = await request.json() as { active?: unknown };
+  let payload: { active?: unknown };
+
+  try {
+    payload = await readBoundedJson<{ active?: unknown }>(request, 64_000);
+  } catch (error) {
+    return jsonRouteError(error, "Nao foi possivel ler os dados enviados.", 400);
+  }
 
   if (!ruleId || typeof payload.active !== "boolean") {
     return NextResponse.json({ error: "Regra de bloqueio invalida." }, { status: 400 });
@@ -45,7 +53,7 @@ export async function PATCH(request: Request, context: BlockedWordRouteContext) 
 }
 
 export async function DELETE(_request: Request, context: BlockedWordRouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("community.moderate");
 
   if (auth.response || !auth.user) {
     return auth.response;

@@ -156,13 +156,14 @@ Motivos:
 
 Implementacao atual:
 
-- `@supabase/ssr` cria clientes de browser, servidor e middleware;
-- o middleware protege home, `Minhas compras`, `Favoritos`, paginas de conteudo/aula e `/admin`;
+- `@supabase/ssr` cria clientes de browser, servidor e proxy;
+- o `proxy.ts` na raiz (convencao do Next 16 que substitui `middleware.ts`, runtime Node) protege home, `Minhas compras`, `Favoritos`, paginas de conteudo/aula e `/admin`;
+- o `proxy.ts` valida a sessao com `getUser()` por padrao ou com `getClaims()` quando `AUTH_SESSION_STRATEGY=claims` (verificacao local do JWT via JWKS so com signing keys assimetricas no Supabase; sem elas o `getClaims()` ainda consulta o Auth); nas paginas, `getAuthenticatedUser` e `getAdminRoleForUser` usam `React.cache`, entao layout, pagina, guards e loaders fazem uma unica chamada ao Supabase por request;
 - `/login` autentica por email/senha e provedores sociais habilitados no Supabase;
 - `/auth/callback` troca o codigo OAuth por sessao no servidor;
 - apos autenticar, usuarios com papel em `admin_roles` sao direcionados para `/admin`; alunos sem papel administrativo seguem para a area de membros;
 - `/alterar-senha` permite que aluno autenticado defina nova senha quando `must_change_password` estiver ativo;
-- o middleware redireciona usuarios com `must_change_password = true` para `/alterar-senha` antes de liberar a area de membros;
+- o `proxy.ts` redireciona usuarios com `must_change_password = true` para `/alterar-senha` antes de liberar a area de membros;
 - `/admin` exige papel em `admin_roles`;
 - APIs de progresso exigem usuario autenticado e APIs do CMS exigem permissao administrativa.
 
@@ -342,6 +343,7 @@ Tracking de progresso:
 - no seletor de qualidade, `Automático` e o modo inicial, continua no embed e delega a adaptacao ao YouTube. O provedor escolhe dinamicamente a maior qualidade sustentavel para conexao, buffer, tamanho de exibicao e dispositivo, podendo chegar a 4K quando a origem e as condicoes permitirem e reduzir a resolucao quando necessario. O adapter acompanha `onPlaybackQualityChange` para atualizar o selo da engrenagem conforme a qualidade efetiva reportada; `getPlaybackQuality`, `setPlaybackQuality`, `getAvailableQualityLevels`, `suggestedQuality` e o parametro `vq` nao devem ser usados porque deixaram de ser suportados ou sao ignorados oficialmente. Os valores exatos como `hd1080`, `hd1440` e `hd2160` podem ser convertidos para `HD`, `2K` e `4K`; o valor publico generico `highres` deve aparecer como `HD+`, sem inferir uma resolucao exata. As opcoes manuais vem de `GET /api/video/youtube/streams`, rota sem cache que exige sessao e acesso a aula, correspondem apenas aos formatos reais encontrados para o video e compativeis com o navegador, incluindo `2160p` (`3840x2160`) quando a origem disponibilizar esse formato, e aparecem antes de `Automático` em uma caixa sem scroll interno;
 - a resposta dessa rota contem um fluxo de audio, os fluxos de video por qualidade e o prazo de expiracao. O servidor resolve essas URLs temporarias, mas nao retransmite nem faz proxy dos bytes: no modo manual, elementos HTML de audio e video consomem os fluxos diretamente. A troca prepara as duas faixas com preload, mantem a thumbnail sobre o player ate o primeiro frame estar disponivel, so retoma quando ambas possuem dados suficientes e usa uma tolerancia conservadora nas correcoes periodicas de sincronizacao para evitar cortes audiveis;
 - a extracao dos fluxos manuais nao usa uma API oficial de playback do YouTube. URLs podem expirar ou deixar de funcionar por mudancas do provedor, codec/navegador, CORS ou restricoes da entrega; `Automático` deve permanecer como fallback operacional, e o modo manual nao deve ser descrito como streaming protegido;
+- essa extracao fica atras da flag de servidor `YOUTUBE_UNOFFICIAL_STREAMS` (`src/server/video/feature-flags.ts`), criada na fase 0 de `docs/17-admin-produtor-redesign.md`: vazia ou `on` (padrao nesta fase) preserva o comportamento atual; `off`, ou qualquer valor diferente de `on`, faz `GET /api/video/youtube/streams` e `GET /api/tv/receiver/{sessionId}/streams` responderem `404` com `{ "error": "youtube_unofficial_streams_disabled" }` antes de sessao, banco ou YouTube, e `fetchYouTubeStreams` falha com o mesmo codigo sem nenhuma requisicao externa. O aluno fica apenas com `Automático` no embed oficial, inclusive no Modo TV; legendas (`youtube-captions.ts` e rotas `captions`) continuam ativas porque alimentam a transcricao do Tutor IA. A flag sera desligada na fase 4 e o codigo removido um ciclo depois;
 - esse adapter nao protege a URL nem substitui streaming com token/DRM: o ID do YouTube permanece tecnicamente descobrivel no DOM e na rede, mesmo que nenhum link direto apareca para o aluno;
 - na pagina de aula, uma barreira de atrito em captura bloqueia o evento global de menu de contexto e atalhos comuns de DevTools/codigo-fonte somente enquanto a experiencia estiver montada. A carga do aluno serializa apenas o ID canonico do YouTube, sem repetir a URL original de visualizacao, e as rotas de streams/legendas derivam esse ID no servidor a partir de `contentId` e `lessonId` depois de validar acesso. Essas medidas reduzem exposicao casual, mas nao alteram o seletor de qualidade e nao impedem inspecao iniciada pelo navegador;
 - antes de navegar da aula para home, curso ou modulos, a UI deve forcar um ultimo flush de progresso do player para evitar que carrosseis e barras carreguem dados antigos vindos de prefetch/cache de rota;
@@ -402,6 +404,56 @@ As regras atuais para evitar regressao sao:
 - compartilhar a mesma leitura memoizada entre app shell e pagina dentro do request;
 - salvar progresso e favorito por chave, sem regravar outras entidades;
 - manter caches de build e dependencias em filesystem APFS quando o repositorio estiver em volume ExFAT.
+
+## Jobs
+
+Dois mecanismos, com papeis diferentes (ver `docs/17-admin-produtor-redesign.md`, secao 2.3):
+
+- **Tick de minuto** (implementado na fase 0): `pg_cron` + `pg_net` no Supabase chamam `POST /api/jobs/tick` a cada minuto. Serve para trabalho leve e frequente: lembretes, envios agendados, liberacoes vencidas, rollups horarios pequenos.
+- **Fila de jobs** (Inngest ou Trigger.dev, a partir da fase 1): importacoes, transcricoes, exportacoes, calculo de audiencias e envios em massa, com retomada e retentativas. Nada disso roda dentro do tick.
+
+Fluxo do tick:
+
+```txt
+pg_cron 'bunker707-jobs-tick' (* * * * *)
+  -> select public.enqueue_jobs_tick()            -- security definer, search_path fixo
+       le 'jobs_tick_url' e 'jobs_tick_token' de vault.decrypted_secrets
+       sem os dois segredos: retorna null e nao faz nada
+  -> net.http_post(url, Authorization: Bearer <token>, body {source, scheduled_at}, timeout 55 s)
+  -> POST /api/jobs/tick (runtime nodejs, maxDuration 60)
+       1. JOBS_TICK_TOKEN ausente ou com menos de 32 caracteres -> 503
+       2. Bearer diferente -> 401 (comparacao em tempo constante: SHA-256 + crypto.timingSafeEqual)
+       3. corpo opcional, lido com readBoundedJson (ate 4 KB) so quando enviado como JSON
+       4. marca como failed execucoes em running ha mais de 15 min
+       5. job_runs(job='tick', running) -> percorre jobRegistry -> succeeded/failed
+       6. responde { ok, ran: [...] } (+ failed/skipped quando houver; 500 se algum job falhar)
+```
+
+Codigo:
+
+- `src/app/api/jobs/tick/route.ts`: autenticacao, leitura do corpo e resposta;
+- `src/server/jobs/tick-auth.ts`: validacao do token, modulo puro coberto por `tests/jobs-tick.test.mjs`;
+- `src/server/jobs/registry.ts`: ponto de extensao. `Job = { name, run(ctx) }`; `ctx` traz o cliente administrativo do Supabase, um `AbortSignal` com o prazo do tick, o instante do tick e os ids de `job_runs`. Hoje o registro esta vazio;
+- `src/server/jobs/run-tick.ts`: executa os jobs em sequencia com orcamento de 45 s; um job que lanca erro ou estoura o prazo vira `failed` sem derrubar os demais; jobs que nao couberem no prazo ficam para o proximo tick (`skipped`);
+- `src/server/jobs/job-runs.ts`: gravacao de `public.job_runs`.
+
+Regras para um job novo no registro:
+
+- `name` unico em kebab-case (`tick` e reservado);
+- idempotente: o mesmo minuto pode chegar duas vezes e um minuto pode ser perdido; o job busca o que esta vencido em vez de assumir que roda exatamente uma vez por minuto;
+- curto e em lotes pequenos, respeitando `ctx.signal`;
+- recomputos pesados (por exemplo `student_facts`) rodam a noite em agendamento proprio, nunca por minuto no banco primario;
+- dead-letter apos 3 falhas e retentativas com `attempts` ficam com o job que precisar delas (a coluna ja existe em `job_runs`).
+
+Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias.
+
+Configuracao por ambiente (passos completos no topo de `supabase/migrations/202610100001_jobs_cron.sql`):
+
+1. gerar o token com `openssl rand -hex 32`;
+2. definir `JOBS_TICK_TOKEN` nas variaveis de ambiente do servidor;
+3. criar no Vault os segredos `jobs_tick_url` (URL completa da rota) e `jobs_tick_token` (mesmo valor do passo 2) com `select vault.create_secret(...)`.
+
+Sem esses passos o agendamento existe mas nao chama nada, o que e o estado esperado em desenvolvimento local e em branches de preview. Para pausar: `select cron.unschedule('bunker707-jobs-tick');`. Diagnostico: `cron.job_run_details` (execucao do agendamento), `net._http_response` (status HTTP da chamada) e `public.job_runs` (resultado na aplicacao). Vercel Cron fica apenas como redundancia diaria, se necessario.
 
 ## Deploy
 

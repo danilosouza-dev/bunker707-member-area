@@ -196,7 +196,7 @@ export function ModerationCommandCenter({
     <section className="space-y-6 text-zinc-100">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">CRM / Comentarios</p>
+          <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">Comentários</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-normal text-white">Moderacao</h1>
           <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-zinc-500">
             Revise comentarios e respostas das aulas por produto, status e texto. Palavras bloqueadas impedem o envio antes da publicacao.

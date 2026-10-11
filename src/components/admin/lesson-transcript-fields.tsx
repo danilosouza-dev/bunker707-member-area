@@ -275,7 +275,7 @@ export function LessonTranscriptFields({
           />
           <span className="min-w-0">
             <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200"><CirclePlay className="size-3.5 text-red-400" /> Importar legenda do YouTube</span>
-            <span className="mt-1 block text-[11px] leading-4 text-zinc-500">Usa a faixa publica do video e salva uma copia permanente no Supabase.</span>
+            <span className="mt-1 block text-[11px] leading-4 text-zinc-500">Usa a faixa pública do vídeo e salva uma cópia permanente na plataforma.</span>
           </span>
         </label>
       ) : null}

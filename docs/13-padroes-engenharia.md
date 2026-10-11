@@ -56,6 +56,9 @@ Alteracoes em acesso, persistencia ou navegacao devem incluir teste de regressao
 - Dados de runtime devem vir do Supabase real. Nao usar seed automatico, mock, fixture ou fallback local para catalogo, alunos, acessos, aulas, progresso, favoritos ou configuracoes.
 - Leituras do aluno devem ser filtradas pela identidade autenticada antes de montar o modelo de pagina.
 - Escritas devem ser granulares; e proibido sincronizar ou regravar o snapshot completo da plataforma para alterar uma entidade.
+- `platform_settings` e gravada uma chave por vez e com versao: telas novas usam `writePlatformSettingGuarded` (`src/server/member-area/settings-store.ts`), que so grava se `updated_at` continua o que a tela leu (senao, 409); quem grava por outro caminho carimba `updated_at` na mesma gravacao. A tabela nao tem gatilho para isso.
+- A checagem de versao fica no proprio UPDATE (`.eq("updated_at", lida)`), nunca em "le, confere e depois grava": entre conferir e gravar outra tela pode gravar (a rota da Vitrine fazia isso e perdia a fileira ligada em Modulos). A resposta devolve a versao desta gravacao, nunca uma releitura. Quem muda so parte de uma chave sem ter versao na tela (aparencia do admin antigo) usa `updatePlatformSettingLatest`: rele na hora (depois de qualquer trabalho demorado, como enviar imagem), aplica a mudanca e grava com a versao lida, tentando de novo uma vez.
+- Endereco vindo do banco dentro de CSS (`background-image`) passa por `cssImageUrl` (`src/lib/css-url.ts`: entre aspas e escapado), e link de imagem colado e validado por `imageLinkSchema` (https, sem espaco, aspas, parenteses, `<`, `>` ou `\`). Destino de redirecionamento vindo do endereco (`?next=`) passa por `getSafeRedirectPath`, que monta com o parser de URL e exige a mesma origem (`/\host` vira outro site no navegador).
 - Regra de acesso de aula deve ser centralizada e reutilizada por progresso, comentarios, reacoes e denuncias.
 - APIs do Tutor IA devem reutilizar a mesma regra central de acesso, validar ownership da conversa e selecionar contexto somente da transcricao ativa da aula autorizada.
 - Chaves de provedores de IA pertencem ao Vault/servidor; respostas administrativas podem expor apenas metadados e os ultimos quatro caracteres.
@@ -71,6 +74,8 @@ Alteracoes em acesso, persistencia ou navegacao devem incluir teste de regressao
 ## Desenvolvimento em volume externo
 
 Em volumes ExFAT no macOS, arquivos AppleDouble e blocos de alocacao grandes podem tornar `node_modules`, `.next`, lint e compilacao desnecessariamente lentos.
+
+Com o repositorio em volume APFS (situacao atual), `next dev` usa o Turbopack padrao do Next 16 (o `package.json` ja foi ajustado); a observacao sobre Webpack abaixo vale apenas para volumes exFAT.
 
 - usar Webpack no `next dev`: o banco de persistencia do Turbopack pode falhar nesse volume com `Failed to open database`;
 - manter `.next` fisicamente dentro do workspace nesta versao do Next. Um symlink para fora do projeto separa os contextos internos de `AsyncLocalStorage` e quebra o prerender com `Expected workStore to be initialized`;

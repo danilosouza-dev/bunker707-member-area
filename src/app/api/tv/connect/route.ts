@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { connectTvReceiver } from "@/server/video/tv-sessions";
 
@@ -15,7 +16,7 @@ function noStore(response: NextResponse) {
 
 export async function POST(request: Request) {
   try {
-    const payload = await request.json() as { code?: unknown };
+    const payload = await readBoundedJson<{ code?: unknown }>(request, 16_000);
     const code = typeof payload.code === "string"
       ? payload.code.toUpperCase().replace(/[^A-Z0-9]/g, "")
       : "";

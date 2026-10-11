@@ -48,7 +48,8 @@ Decisao temporaria para a origem gratuita:
 - aceitar videos nao listados do YouTube e apresentar somente controles Bunker707, sem branding ou links clicaveis para o provedor;
 - manter `Automatica` via embed e oferecer no modo manual apenas as resolucoes reais encontradas para o video, inclusive `2160p` (`3840x2160`) quando disponivel;
 - no modo manual, entregar ao navegador fluxos temporarios diretos e separados de audio e video, sem proxy pela aplicacao;
-- tratar a extracao manual como integracao nao oficial, sujeita a expiracao e quebras por mudancas do YouTube, sem promessa de sigilo, DRM ou protecao da origem.
+- tratar a extracao manual como integracao nao oficial, sujeita a expiracao e quebras por mudancas do YouTube, sem promessa de sigilo, DRM ou protecao da origem;
+- (2026-10-10) a extracao manual ganhou o desligamento `YOUTUBE_UNOFFICIAL_STREAMS=off` (padrao `on` na fase 0, desligada na fase 4 de `docs/17-admin-produtor-redesign.md`), que deixa o aluno e o Modo TV so com `Automático` no embed oficial e mantem as legendas.
 
 A escolha de um provedor pago definitivo continua pendente.
 
@@ -177,7 +178,23 @@ Decisao tomada:
 - a tela de login nao deve virar vitrine publica nem checkout; suporte e links legais ficam discretos.
 - a autenticacao real usa Supabase Auth, com email/senha, OAuth e recuperacao de senha.
 
+Decisao tomada (2026-10-11, rodada Area de membros; detalhes em `docs/17`, "Registro da rodada Area de membros", e formato em `docs/05`):
+
+- o login e editado em Area de membros > Login no admin novo e gravado em `platform_settings.loginPage` (JSON versao 1), sem tabela nova; `login_page_settings` continua como desenho futuro;
+- o produtor escolhe um dos quatro modelos prontos ("Formulario a esquerda", "Imagem a esquerda", "Central sobre a imagem", "Lateral sobre a imagem") e edita so o que o modelo usa: imagem lateral ou de fundo, frase da imagem, tom do formulario, titulo e texto, botao do Google e a linha de ajuda;
+- a "superficie configuravel" virou o tom do formulario: Escuro, Translucido ou Claro (transparente/borda/painel nao foram implementados); posicao do formulario segue o modelo;
+- a logo do login e a logo da Marca; no tom Claro aparece o nome em texto;
+- a linha "Ainda nao tem acesso? Fale com o suporte" so aparece com link `https://` ou e-mail;
+- `?template=` no endereco do `/login` deixou de valer; a previa dos modelos fica no admin, desenhada com o proprio componente do login;
+- Apple, links de rodape e rotulos de e-mail/senha editaveis ficam fora desta rodada.
+
 ### CMS/Admin
+
+Nota (2026-10-11, rodada Area de membros): a area Area de membros do admin novo tem as abas Vitrine, Destaque, Modulos, Login e Marca, todas gravando de verdade. A fileira de modulos de um curso na home e uma fileira da Vitrine (o tipo "Destaque de um produto" virou "Fileira de modulos"); `content_page_settings.homeModuleSection` ficou so como espelho para o admin antigo. "Como abre" e a capa de cada modulo tambem se editam no admin novo. Cada chave de `platform_settings` tem versao (`updated_at`): duas telas mexendo na mesma chave dao 409 em vez de uma apagar a outra, inclusive a Vitrine do admin antigo. Sem migracao nova. Registro completo em `docs/17` (2.10).
+
+Nota (2026-10-10, fase 1 do admin novo): decisoes da rodada registradas em `docs/17` (secao 2.10, "Registro da fase 1"): "Oculto por enquanto" vira a coluna `content_items.listing` (nao chave de JSON); excluir modulo ou aula no admin novo marca `status = 'deleted'` com Desfazer (o legado ainda apaga de verdade); o painel da aula abre por `?aula=<id>` na aba Conteudo do produto; a Comunidade tem uma aba unica Aulas no lugar de "Avaliacoes" e "Aulas com mais duvidas"; o deploy pode sair antes das migracoes 202610110010-0020, e as telas novas mostram um aviso ate elas serem aplicadas.
+
+Nota (2026-10-10): `docs/17-admin-produtor-redesign.md` propoe a reconstrucao completa da area do produtor (sidebar de 6 areas, produto como entidade central, dois estados, modulo de Comunicacao, player multi-provedor). Quando o produtor aprovar as decisoes D1-D13 daquele documento, as decisoes abaixo sobre sidebar, catalogo em modal, construtor em passos e capa 720x1040 ficam substituidas.
 
 Decisao tomada:
 
@@ -302,6 +319,7 @@ Decisao tomada:
 - consumo principal acontece nos cards e fileiras, nao necessariamente na hero.
 - na home, o header fica transparente sobre a hero com degrade sutil; apos scroll, assume fundo preto solido por transicao suave de opacidade/altura, revelando o preto de cima para baixo, sem borda inferior e sem piscadas.
 - os controles do header nao devem trocar de estado visual durante o scroll; apenas o fundo do header transiciona.
+- (2026-10-11) o topo da home e editado em Area de membros > Destaque: imagem ou video (so link https, com capa obrigatoria), selo, titulo e descricao opcionais e um botao opcional (botao primario claro) que leva a um produto, a uma pagina da area ou a um link externo, na mesma aba ou em nova aba. Continua valendo que a hero pode ser so visual. Quem prefere menos movimento ve a capa parada. A Marca ficou so com a logo.
 
 ### Sidebar
 

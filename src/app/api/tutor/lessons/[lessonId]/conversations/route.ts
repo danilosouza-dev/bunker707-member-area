@@ -7,6 +7,7 @@ import {
   getTutorAvailability,
   listTutorConversations
 } from "@/server/ai/tutor";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type RouteContext = { params: Promise<{ lessonId: string }> };
@@ -49,7 +50,7 @@ export async function POST(request: Request, context: RouteContext) {
   const { lessonId } = await context.params;
 
   try {
-    const payload = await request.json() as { contentId?: unknown };
+    const payload = await readBoundedJson<{ contentId?: unknown }>(request, 64_000);
     const contentId = typeof payload.contentId === "string" ? payload.contentId.trim() : "";
 
     if (!contentId) return noStore(NextResponse.json({ error: "Conteudo obrigatorio." }, { status: 400 }));

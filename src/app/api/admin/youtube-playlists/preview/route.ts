@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { loadYouTubeCourseImportPreview } from "@/server/video/youtube-playlist-import";
@@ -7,7 +7,7 @@ import { loadYouTubeCourseImportPreview } from "@/server/video/youtube-playlist-
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("catalog.write");
 
   if (auth.response) {
     return auth.response;

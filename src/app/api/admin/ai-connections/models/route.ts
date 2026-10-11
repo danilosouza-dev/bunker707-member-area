@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { listAccountGatewayModels } from "@/server/ai/account-gateway";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import { AIProviderConfigError } from "@/server/ai/provider-config";
 import { isAIProvider } from "@/server/ai/types";
 import { jsonRouteError } from "@/server/http/route-errors";
@@ -16,7 +16,7 @@ function noStore(response: NextResponse) {
 }
 
 export async function GET(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("admin.read");
 
   if (auth.response) return noStore(auth.response);
 

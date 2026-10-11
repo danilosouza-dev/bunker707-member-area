@@ -7,6 +7,7 @@ import { SavedItemButton, savedItemChangedEvent } from "@/components/saved-item-
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import { getSavedItemKey, getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import type { AccessPreviewMode } from "@/lib/access-preview";
+import { cssImageUrl } from "@/lib/css-url";
 import type { ContentItem, SavedLessonItem, SavedModuleItem } from "@/lib/platform-types";
 
 type FavoritesExperienceProps = {
@@ -67,7 +68,7 @@ function FavoriteContentCard({ accessPreviewMode, item }: { accessPreviewMode?: 
         <div className="relative aspect-[720/1040] overflow-hidden bg-[#101010]">
           <div
             className="continue-watching-card-image absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${item.image})` }}
+            style={{ backgroundImage: cssImageUrl(item.image) }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/78 to-transparent" />
           <div className="absolute inset-x-0 bottom-0 p-4">
@@ -108,7 +109,7 @@ function FavoriteModuleCard({ accessPreviewMode, module }: { accessPreviewMode?:
         <div className="relative aspect-[720/1040] overflow-hidden bg-[#101010]">
           <div
             className="continue-watching-card-image absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${module.image})` }}
+            style={{ backgroundImage: cssImageUrl(module.image) }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/78 to-transparent" />
           <div className="absolute inset-x-0 bottom-0 p-4">
@@ -145,7 +146,7 @@ function FavoriteLessonCard({ accessPreviewMode, lesson }: { accessPreviewMode?:
         <div className="relative aspect-video overflow-hidden bg-[#101010]">
           <div
             className="continue-watching-card-image absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${lesson.image})` }}
+            style={{ backgroundImage: cssImageUrl(lesson.image) }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/72 to-transparent" />
           <span className="pointer-events-none absolute inset-0 grid place-items-center">

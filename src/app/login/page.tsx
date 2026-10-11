@@ -1,33 +1,33 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { LoginExperience } from "@/components/login-experience";
+import { readAuthLinkError } from "@/lib/auth/password-reset";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
-import { getLoginPageConfig } from "@/lib/login-config";
 import { hasSupabaseAuthConfig } from "@/server/auth/config";
 import { getPostAuthRedirectPath } from "@/server/auth/redirect";
 import { getAuthenticatedUser } from "@/server/auth/session";
+import { getLoginPageConfigForRequest } from "@/server/member-area/login-queries";
 
 export const metadata: Metadata = {
   title: "Entrar | Bunker707",
-  description: "Login da area de membros Bunker707"
+  description: "Login da área de membros Bunker707"
 };
 
+// O visual vem do que o produtor publicou em Área de membros > Login (platform_settings.loginPage,
+// em cache). A escolha de modelo pelo endereco (?template=) deixou de valer: a previa fica no admin.
 type LoginPageProps = {
   searchParams?: Promise<{
     code?: string | string[];
+    erro?: string | string[];
     next?: string | string[];
     provider?: string | string[];
     setup?: string | string[];
-    template?: string | string[];
     type?: string | string[];
   }>;
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const resolvedSearchParams = await searchParams;
-  const templateParam = Array.isArray(resolvedSearchParams?.template)
-    ? resolvedSearchParams.template[0]
-    : resolvedSearchParams?.template;
   const nextParam = Array.isArray(resolvedSearchParams?.next)
     ? resolvedSearchParams.next[0]
     : resolvedSearchParams?.next;
@@ -59,12 +59,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     redirect(await getPostAuthRedirectPath(user, redirectTo));
   }
 
-  const config = getLoginPageConfig(templateParam);
+  const config = await getLoginPageConfigForRequest();
 
   return (
     <LoginExperience
       authConfigured={authConfigured}
       config={config}
+      initialErrorMessage={readAuthLinkError(resolvedSearchParams?.erro)}
       redirectTo={redirectTo}
     />
   );

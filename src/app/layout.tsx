@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Exo_2, Inter } from "next/font/google";
 import { Suspense } from "react";
+import { PostHogIdentity } from "@/components/analytics/posthog-identity";
+import { SpeedInsights } from "@/components/analytics/speed-insights";
 import { NavigationFeedbackProvider } from "@/components/navigation-feedback";
 import "./globals.css";
 
@@ -15,6 +17,9 @@ const exo2 = Exo_2({
   weight: ["500", "600", "700"]
 });
 
+// Sem NEXT_PUBLIC_POSTHOG_KEY o layout nao le a sessao para analytics e posthog-js nunca e baixado.
+const postHogEnabled = Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY);
+
 export const metadata: Metadata = {
   title: "Bunker707",
   description: "Area de membros da escola de IA Bunker707"
@@ -26,11 +31,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR">
+    // Extensões do navegador injetam atributos em <html>/<body> antes da hidratação
+    // (ex.: data-yd-*); a supressão vale só para atributos destes dois elementos.
+    <html lang="pt-BR" suppressHydrationWarning>
       <body className={`${inter.variable} ${exo2.variable} antialiased`} suppressHydrationWarning>
         <Suspense fallback={null}>
           <NavigationFeedbackProvider>{children}</NavigationFeedbackProvider>
         </Suspense>
+        <SpeedInsights />
+        {postHogEnabled ? (
+          <Suspense fallback={null}>
+            <PostHogIdentity />
+          </Suspense>
+        ) : null}
       </body>
     </html>
   );

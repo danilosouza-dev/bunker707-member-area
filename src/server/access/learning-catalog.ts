@@ -424,7 +424,7 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
         ? parentFormationId
         : undefined
     });
-    const hasOpenAccess = content.access_model === "free" || content.is_locked === false;
+    const hasOpenAccess = content.access_model === "free";
     const hasAccess = isAdmin || hasOpenAccess || matchingEntitlements.length > 0;
 
     if (!hasAccess) continue;
