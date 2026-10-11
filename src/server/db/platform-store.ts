@@ -1,4 +1,5 @@
 import "server-only";
+import { redactSecrets } from "@/lib/env-value";
 
 import { cache } from "react";
 import { unstable_noStore as noStore } from "next/cache";
@@ -912,7 +913,7 @@ function normalizeLessonProgressExtras(value: unknown) {
 
 function getSupabaseErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : JSON.stringify(error);
-  return message;
+  return redactSecrets(message);
 }
 
 function getSupabaseErrorCode(error: unknown) {

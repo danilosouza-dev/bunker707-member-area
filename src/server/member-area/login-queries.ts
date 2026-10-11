@@ -12,6 +12,7 @@ import { DEFAULT_LOGO_IMAGE, normalizeLogo } from "@/server/storefront/model";
 import { LOGIN_PAGE_CACHE_KEY, LOGIN_PAGE_CACHE_TAGS, LOGIN_PAGE_REVALIDATE_SECONDS } from "./cache-tags";
 import { DEFAULT_LOGIN_PAGE_SETTINGS, parseStoredLoginPage, resolveLoginPageConfig, type LoginPageSettings } from "./login-model";
 import { readPlatformSettings } from "./settings-store";
+import { redactSecrets } from "@/lib/env-value";
 
 export type LoginEditorData = {
   /** Logo da Marca, para a previa (null = nome da escola em texto). */
@@ -76,7 +77,7 @@ export async function getLoginPageConfigForRequest(): Promise<LoginPageConfig> {
 
     return resolveLoginPageConfig(stored.settings, { logoImage: normalizeLogo(rows.branding.value, rows.branding.exists) });
   } catch (error) {
-    console.error("[login] configuracao da pagina de entrar", error);
+    console.error("[login] configuracao da pagina de entrar", redactSecrets(error instanceof Error ? error.message : String(error)));
     return defaultLoginPageConfig();
   }
 }

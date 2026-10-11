@@ -8,6 +8,7 @@
 // Modulo puro (sem "server-only") para os testes rodarem com node --test.
 
 import { INVALID_SUPABASE_KEY_MESSAGE, isInvalidSupabaseKeyError } from "./supabase-key-error";
+import { redactSecrets } from "../../lib/env-value";
 
 export const PENDING_MIGRATION_RANGE = "202610110010-0020";
 export const PENDING_MIGRATION_MESSAGE = `Esta tela precisa da atualização do banco (migrações ${PENDING_MIGRATION_RANGE}).`;
@@ -59,10 +60,10 @@ export function toDbError(error: { code?: string | null; hint?: string | null; m
   }
 
   if (isMissingSchemaObjectError(error)) {
-    return new PendingMigrationError(context, error.message);
+    return new PendingMigrationError(context, redactSecrets(error.message));
   }
 
-  return new Error(`${context}: ${error.message}`);
+  return new Error(`${context}: ${redactSecrets(error.message)}`);
 }
 
 export type PendingMigrationResult<T> = { data: T; ok: true } | { ok: false; pendingMigration: true };
