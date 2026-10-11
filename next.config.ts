@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { realpathSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { imageRemotePatterns } from "./src/lib/image-hosts";
 
 const localDevOrigins = Object.values(networkInterfaces()).flatMap((networkAddresses = []) => {
   return networkAddresses
@@ -93,6 +94,11 @@ const nextConfig: NextConfig = {
       headers: securityHeaders,
       source: "/:path*"
     }];
+  },
+  images: {
+    formats: ["image/avif", "image/webp"],
+    // src/lib/image-hosts.ts também alimenta canOptimizeImageSrc no render.
+    remotePatterns: imageRemotePatterns
   },
   turbopack: {
     root: getTurbopackRoot()

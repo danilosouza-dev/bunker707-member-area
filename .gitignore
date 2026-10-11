@@ -19,3 +19,6 @@ tsconfig.tsbuildinfo
 .data/
 .superpowers/
 .gemini-scratch/
+
+# backups locais
+*.bundle
