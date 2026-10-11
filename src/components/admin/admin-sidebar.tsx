@@ -4,7 +4,6 @@ import Link from "next/link";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -34,13 +33,12 @@ export function AdminSidebar({
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" tooltip="CRM Bunker707">
+            <SidebarMenuButton size="lg" tooltip="Admin Bunker707">
               <span className="grid aspect-square size-8 place-items-center rounded-[8px] bg-sidebar-primary text-sm font-black text-sidebar-primary-foreground">
                 B
               </span>
               <span className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-black">Bunker707</span>
-                <span className="truncate text-xs text-muted-foreground">CRM Admin</span>
+                <span className="truncate font-black">Admin Bunker707</span>
               </span>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -124,22 +122,6 @@ export function AdminSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton tooltip="Ambiente seguro">
-              <span className="grid size-7 place-items-center rounded-[8px] border border-border text-xs font-black">
-                R
-              </span>
-              <span className="grid flex-1 text-left text-xs leading-tight">
-                <span className="truncate font-bold">RBAC ativo</span>
-                <span className="truncate text-muted-foreground">Entitlements preservados</span>
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarFooter>
 
       <SidebarRail />
     </Sidebar>

@@ -44,6 +44,7 @@ export default async function LessonPage({ params, searchParams }: LessonPagePro
   return (
     <AppShell
       accessPreviewMode={accessPreviewMode}
+      branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
@@ -62,7 +63,7 @@ export default async function LessonPage({ params, searchParams }: LessonPagePro
           selectedModule={selectedModule}
         />
       </div>
-      <MemberFooter />
+      <MemberFooter branding={shellData.branding} />
     </AppShell>
   );
 }

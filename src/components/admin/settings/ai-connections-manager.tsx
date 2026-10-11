@@ -487,7 +487,7 @@ export function AIConnectionsManager({
       ) : (
         <div className="flex items-start gap-2.5 rounded-[8px] border border-white/[0.07] bg-black/15 px-3 py-2.5">
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-zinc-500" />
-          <p className="text-xs leading-5 text-zinc-500">A chave é criptografada no Vault do Supabase e nunca volta para o navegador.</p>
+          <p className="text-xs leading-5 text-zinc-500">A chave é criptografada no cofre da plataforma e nunca volta para o navegador.</p>
         </div>
       )}
 
@@ -703,7 +703,7 @@ export function AIConnectionsManager({
             <DialogDescription className="text-xs leading-5 text-zinc-500">
               {deleteTarget?.authMode === "account_gateway"
                 ? "A conta será removida também do gateway e precisará de um novo login para ser usada novamente."
-                : "A chave protegida será apagada do Vault. O histórico de consumo continuará preservado."}
+                : "A chave protegida será apagada do cofre da plataforma. O histórico de consumo continuará preservado."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="px-5 py-4">

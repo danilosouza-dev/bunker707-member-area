@@ -159,6 +159,44 @@ type LessonProgressPayload = {
   status?: LessonWatchStatus;
 };
 
+// Batida de progresso durante a reprodução (docs/17 §2.8: no máximo 4 escritas
+// por aluno por minuto). Play, pausa, fim, troca de aula, navegação interna e
+// saída da página continuam gravando na hora (force).
+const LESSON_PROGRESS_HEARTBEAT_MS = 15_000;
+// Aulas em iframe de outros provedores não expõem o tempo assistido: o cronômetro
+// sintético avança na mesma batida, somando o intervalo em segundos.
+const LESSON_PROGRESS_HEARTBEAT_SECONDS = LESSON_PROGRESS_HEARTBEAT_MS / 1000;
+const LESSON_PROGRESS_ENDPOINT = "/api/progress/lessons";
+
+// "beacon": a página está sendo ocultada ou descarregada e um fetch comum pode
+// ser cancelado pelo navegador antes de chegar ao servidor.
+type LessonProgressTransport = "beacon" | "fetch";
+
+function sendLessonProgressOnPageExit(payload: LessonProgressPayload) {
+  const body = JSON.stringify(payload);
+
+  try {
+    if (
+      typeof navigator.sendBeacon === "function" &&
+      navigator.sendBeacon(LESSON_PROGRESS_ENDPOINT, new Blob([body], { type: "application/json" }))
+    ) {
+      return;
+    }
+  } catch {
+    // Alguns navegadores lançam quando a fila do beacon está cheia; segue para o fetch.
+  }
+
+  void fetch(LESSON_PROGRESS_ENDPOINT, {
+    body,
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    keepalive: true,
+    method: "PUT"
+  }).catch(() => undefined);
+}
+
 type PlayerRenderConfig =
   | {
       kind: "iframe";
@@ -1465,9 +1503,17 @@ export function LessonExperience({
       return false;
     }
   }, []);
-  const persistLessonProgress = useCallback(async (payload: LessonProgressPayload) => {
+  const persistLessonProgress = useCallback(async (
+    payload: LessonProgressPayload,
+    transport: LessonProgressTransport = "fetch"
+  ) => {
+    if (transport === "beacon") {
+      sendLessonProgressOnPageExit(payload);
+      return;
+    }
+
     try {
-      const response = await fetch("/api/progress/lessons", {
+      const response = await fetch(LESSON_PROGRESS_ENDPOINT, {
         body: JSON.stringify(payload),
         credentials: "same-origin",
         headers: {
@@ -1495,7 +1541,8 @@ export function LessonExperience({
     lessonId,
     progressPercent,
     progressSeconds,
-    status
+    status,
+    transport = "fetch"
   }: {
     durationSeconds?: number;
     force?: boolean;
@@ -1503,6 +1550,7 @@ export function LessonExperience({
     progressPercent: number;
     progressSeconds: number;
     status: LessonWatchStatus;
+    transport?: LessonProgressTransport;
   }) => {
     if (!lessonId || isActiveLessonLocked) {
       return;
@@ -1511,7 +1559,7 @@ export function LessonExperience({
     const now = getCurrentTimestamp();
     const lastSync = lastProgressSyncRef.current[lessonId] ?? 0;
 
-    if (!force && now - lastSync < 3000) {
+    if (!force && now - lastSync < LESSON_PROGRESS_HEARTBEAT_MS) {
       return;
     }
 
@@ -1561,7 +1609,7 @@ export function LessonExperience({
       progressPercent: nextState.progressPercent,
       progressSeconds: nextState.progressSeconds,
       status
-    });
+    }, transport);
   }, [isActiveLessonLocked, item.id, persistLessonProgress]);
 
   function handlePlayerStart() {
@@ -1607,13 +1655,15 @@ export function LessonExperience({
       force = false,
       lessonId,
       minimumProgressSeconds = 0,
-      status = "in_progress"
+      status = "in_progress",
+      transport = "fetch"
     }: {
       fallbackDurationSeconds?: number;
       force?: boolean;
       lessonId: string;
       minimumProgressSeconds?: number;
       status?: LessonWatchStatus;
+      transport?: LessonProgressTransport;
     }
   ) => {
     const playerCurrentTime = readYouTubeMetric(() => player.getCurrentTime());
@@ -1641,11 +1691,12 @@ export function LessonExperience({
       lessonId,
       progressPercent,
       progressSeconds,
-      status
+      status,
+      transport
     });
   }, [syncLessonWatchProgress]);
 
-  const flushActiveLessonProgress = useCallback(async () => {
+  const flushActiveLessonProgress = useCallback(async (transport: LessonProgressTransport = "fetch") => {
     if (!activeLessonKey || isActiveLessonLocked) {
       return;
     }
@@ -1660,7 +1711,8 @@ export function LessonExperience({
         fallbackDurationSeconds,
         force: true,
         lessonId: activeLessonKey,
-        status
+        status,
+        transport
       });
       return;
     }
@@ -1681,7 +1733,8 @@ export function LessonExperience({
         lessonId: activeLessonKey,
         progressPercent,
         progressSeconds,
-        status
+        status,
+        transport
       });
       return;
     }
@@ -1698,7 +1751,8 @@ export function LessonExperience({
       lessonId: activeLessonKey,
       progressPercent: currentState.progressPercent,
       progressSeconds: currentState.progressSeconds,
-      status: currentState.status
+      status: currentState.status,
+      transport
     });
   }, [
     activeLessonDurationLabel,
@@ -1718,6 +1772,7 @@ export function LessonExperience({
   }, [lessonWatchStates]);
 
   useEffect(() => {
+    // Navegação interna (AppShell) chama sem argumento: PUT comum, aguardado antes da troca de rota.
     window.__bunker707FlushLessonProgress = flushActiveLessonProgress;
 
     return () => {
@@ -1726,6 +1781,42 @@ export function LessonExperience({
       }
     };
   }, [flushActiveLessonProgress]);
+
+  useEffect(() => {
+    if (!activeLessonStarted) {
+      return;
+    }
+
+    let lastExitFlushAt = 0;
+
+    // Fechar a aba, trocar de app no celular ou sair do site: grava a posição
+    // atual com sendBeacon, que o navegador entrega mesmo descarregando a página.
+    function flushOnPageExit() {
+      const now = getCurrentTimestamp();
+
+      // visibilitychange (hidden) e pagehide costumam disparar juntos ao fechar a aba.
+      if (now - lastExitFlushAt < 1000) {
+        return;
+      }
+
+      lastExitFlushAt = now;
+      void flushActiveLessonProgress("beacon");
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        flushOnPageExit();
+      }
+    }
+
+    window.addEventListener("pagehide", flushOnPageExit);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pagehide", flushOnPageExit);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [activeLessonStarted, flushActiveLessonProgress]);
 
   useEffect(() => {
     startedLessonIdsRef.current = startedLessonIds;
@@ -2402,7 +2493,7 @@ export function LessonExperience({
         lessonId,
         status: "in_progress"
       });
-    }, 3000);
+    }, LESSON_PROGRESS_HEARTBEAT_MS);
 
     return () => {
       window.clearInterval(interval);
@@ -2478,7 +2569,7 @@ export function LessonExperience({
 
     const interval = window.setInterval(() => {
       const currentState = lessonWatchStates[activeLesson.id];
-      const nextSeconds = (currentState?.progressSeconds ?? 0) + 10;
+      const nextSeconds = (currentState?.progressSeconds ?? 0) + LESSON_PROGRESS_HEARTBEAT_SECONDS;
       const nextPercent = activeLessonDurationSeconds && activeLessonDurationSeconds > 0
         ? clampProgressPercent((nextSeconds / activeLessonDurationSeconds) * 100)
         : Math.max(currentState?.progressPercent ?? 1, 1);
@@ -2491,7 +2582,7 @@ export function LessonExperience({
         progressSeconds: nextSeconds,
         status: "in_progress"
       });
-    }, 10000);
+    }, LESSON_PROGRESS_HEARTBEAT_MS);
 
     return () => {
       window.clearInterval(interval);

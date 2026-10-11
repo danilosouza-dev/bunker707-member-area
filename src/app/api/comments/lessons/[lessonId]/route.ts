@@ -4,6 +4,7 @@ import {
   createLessonComment,
   listLessonComments
 } from "@/server/comments/comment-store";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type LessonCommentsRouteContext = {
@@ -49,11 +50,22 @@ export async function POST(request: Request, context: LessonCommentsRouteContext
   }
 
   const { lessonId } = await context.params;
-  const payload = await request.json() as {
+  let payload: {
     body?: unknown;
     contentId?: unknown;
     parentCommentId?: unknown;
   };
+
+  try {
+    payload = await readBoundedJson<{
+      body?: unknown;
+      contentId?: unknown;
+      parentCommentId?: unknown;
+    }>(request, 16_000);
+  } catch (error) {
+    return jsonRouteError(error, "Nao foi possivel enviar o comentario.", 400);
+  }
+
   const contentId = typeof payload.contentId === "string" ? payload.contentId.trim() : "";
   const body = typeof payload.body === "string" ? payload.body : "";
   const parentCommentId = typeof payload.parentCommentId === "string"

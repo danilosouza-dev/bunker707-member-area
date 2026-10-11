@@ -210,6 +210,8 @@ Estado de rollout: a migration relacional `202607100003_home_sections.sql` defin
 
 ## Login configuravel
 
+Estado atual (2026-10-11): a configuracao publicada fica em `platform_settings.loginPage` (ver "Area de membros do admin v2" abaixo), editada em Area de membros > Login. A tabela `login_page_settings` abaixo continua sendo o desenho futuro; nenhuma migracao a cria ainda.
+
 ### login_page_settings
 
 Configuracao visual da tela de login escolhida pelo produtor na area `Personalizacao` do CRM.
@@ -1103,6 +1105,149 @@ As aulas importadas usam `video_config.provider = youtube` e `assetId = videoId`
 
 No modo manual, `moduleRanges` armazena somente a intencao administrativa (`title`, `startPosition`, `endPosition`). A arvore persistida nunca e aceita diretamente do navegador: o servidor baixa novamente a playlist, confere cobertura integral e constroi os modulos com os videos atuais.
 
+Reimportar a mesma playlist marca como `deleted` (com `deleted_at`) os modulos e aulas que sairam dela, em vez de `archived` (migracao `202610110010`).
+
+## Catalogo do admin v2 (fase 1 de Produtos)
+
+Migracoes `202610110010_catalog_v2_listing_and_soft_delete.sql` e `202610110011_catalog_v2_rpcs.sql`. Leituras e escritas em `src/server/catalog/**` (Server Actions com zod, escrita de uma linha por vez, `invalidateCatalog` depois de gravar).
+
+### content_items.listing
+
+- `listing text not null default 'listed'`, check `listing in ('listed', 'hidden')`;
+- "Quem pode ver" = `access_model` + `listing`: "So quem tem acesso" = `closed` + `listed`; "Todos os alunos" = `free` + `listed`; "Oculto por enquanto" = `closed` + `hidden`;
+- e coluna (e nao chave de `content_page_settings.settings`) porque filtra consultas da vitrine, de Minhas compras e da lista do admin, precisa de check no banco e nao pode ser apagada por quem regrava o JSON de apresentacao;
+- oculto fica fora da vitrine (Produtos a venda, Em breve, secoes padrao e a lista "disponivel para comprar"), aparece em Minhas compras e na pagina do produto para quem tem acesso e responde como inexistente para quem nao tem;
+- o admin legado nunca grava `listing` (`contentItemToRow` nao inclui a coluna), entao nao desfaz o "oculto";
+- campos legados derivados a cada escrita nova: `is_locked` (= fechado), `status` (`Liberado` se aberto, senao `Bloqueado`; nunca `Em breve`), `purchase_label` (texto proprio, ou "Comprar" se fechado com link). "Em breve" e "Novo" sao calculados, nunca gravados.
+
+### Status de modulos e aulas
+
+- `course_modules.status` e `lessons.status` em `published`, `draft` ou `deleted` (check no banco); valores antigos fora disso viraram `draft` (`archived` virou `deleted`);
+- excluir no admin novo = `status = 'deleted'` + `deleted_at` + `deleted_by` (referencia `auth.users`, `on delete set null`), com "Desfazer" que restaura o status anterior. Nada e apagado de verdade nesta fase: progresso, comentarios e avaliacoes da aula sobrevivem;
+- a area do aluno so le `status = 'published'`; o admin legado le tudo menos `deleted`;
+- aula nova nasce `published` dentro de produto em Rascunho e `draft` dentro de produto ja Publicado ou Arquivado;
+- `course_modules.meta` ("N aulas") conta so aulas nao excluidas e e atualizado ao criar, excluir, restaurar e mover;
+- indices `lessons (module_id, status, sort_order)` e `course_modules (owner_id, status, sort_order)`.
+
+### Formacao
+
+Curso incluido = `content_items.commerce_scope = 'included_content'` + `content_page_settings.settings.parentFormationId`, ordenado por `sort_order`. Remover da formacao devolve o curso como avulso em Rascunho (`sellable_product`, bucket `courses`); publicar a formacao publica junto os cursos incluidos em Rascunho.
+
+### RPCs (security invoker, so `service_role`)
+
+- `admin_product_list(p_kinds, p_status, p_search, p_offset, p_limit)`: pagina da lista de Produtos ja filtrada, com aulas (total e publicadas; Formacao soma os cursos incluidos), alunos com acesso ativo agora e `total_count`;
+- `admin_reorder_product_content(p_content_id, p_modules)`: reescreve a ordem de modulos e aulas (inclusive entre modulos) numa transacao; conjunto de ids diferente do banco levanta `stale_structure` (a acao responde 409);
+- `admin_product_cohorts(p_content_id)`: turmas com matricula ativa no produto e quantidade de alunos;
+- `admin_product_students_with_access(p_content_id)`: alunos distintos com acesso ativo agora;
+- `admin_patch_product_settings(p_content_id, p_set, p_unset)` (migracao `202610110012`): muda so as chaves pedidas de `content_page_settings.settings` num UPDATE atomico (`(settings - p_unset) || p_set`); sem chaves, a linha sai. Nenhuma escrita do admin novo le e regrava o JSON inteiro;
+- `admin_add_course_to_formation`, `admin_remove_course_from_formation`, `admin_reorder_formation_courses`: `commerce_scope`, `sort_order` e `parentFormationId` do curso mudam na mesma transacao, com a formacao travada; conjunto divergente levanta `stale_structure` (409);
+- `admin_save_combo(...)`: dados do pacote e troca de `product_combo_items` na mesma transacao.
+
+Reordenar aceita a estrutura que ja existe ate o limite da importacao de playlist (100 modulos, 500 aulas por modulo); os limites de criacao (50 modulos, 100 aulas por modulo) valem so para criar.
+
+`import_youtube_course` (sincronizacao do admin antigo) mantem `publication_status` e a capa de um curso que ja existe, so marca como excluidas aulas `yt-lesson-<playlist>-*` que sairam da playlist, nao republica aulas em Rascunho nem as excluidas pelo produtor (`deleted_by` preenchido) e nao esconde modulo da playlist que ainda tem aula criada pelo produtor. O admin novo recusa importar de novo uma playlist que ja virou curso.
+
+### Imagens do produto
+
+Capa (WebP 720×1040) e imagem de topo (WebP 1920×720) sao recortadas no navegador; o servidor confere a medida no cabecalho do WebP, envia ao Storage (`content-assets`, caminho `content/{id}/{cover|hero}`) e grava so a URL publica (capa em `content_items.image`, topo em `content_page_settings.settings.hero`). Data URL nunca chega ao banco.
+
+### Edicao concorrente
+
+Toda edicao do admin novo envia o `updated_at` lido; a gravacao filtra por ele. Nenhuma linha afetada = 404 se o registro nao existe (ou foi excluido), senao 409 "Alterado em outro lugar ha instantes".
+
+### Deploy antes da migracao
+
+O codigo pode ir para producao antes das migracoes `202610110010`, `202610110011`, `202610110012` e `202610110020`. A area do aluno e o admin legado nao dependem delas: `listing` e lido como opcional (ausente = listado), `.neq('status', 'deleted')` nao muda nada enquanto nao ha linha `deleted`, e nenhuma rota REST chama RPC nova. As telas novas do admin que dependem delas (Produtos, Comunidade) trocam os dados pelo aviso "Esta tela precisa da atualizacao do banco (migracoes 202610110010-0020)": `failOnError`/`assertNoDbError` convertem erro de coluna, tabela ou funcao inexistente (42703, 42P01, 42883, PGRST202/204/205) em `PendingMigrationError` (`src/server/db/pending-migration.ts`). O contador da Comunidade no menu some ate a `202610110020` existir. Pacotes nao dependem das migracoes: sem `admin_save_combo`, salvar grava em passos, como antes. Ordem de aplicacao: `202610110010` → `202610110011` → `202610110012` → `202610110020`.
+
+## Comunidade do admin v2 (fase 1)
+
+Migracao `202610110020_community_v1.sql`. Leituras em `src/server/community/queries.ts` (RPCs, uma pagina por vez) e Server Actions em `src/server/community/actions.ts` e `rules.ts` (`runAdminAction` com `community.reply` ou `community.moderate`).
+
+### lesson_comments: resolvido
+
+- `resolved_at timestamptz` e `resolved_by uuid` (referencia `auth.users`, `on delete set null`): o professor tira a pergunta da fila "Precisam de resposta" sem responder; "Desfazer" limpa as duas colunas. Responder pela fila ja resolve junto;
+- a area do aluno nao le estas colunas;
+- indices parciais: fila (raiz de aluno, aprovada, nao excluida, nao resolvida, por `created_at`), respostas de professor/moderador por pergunta, `(status, created_at desc)` para a aba Comentarios e `ai_conversations (lesson_id)` para perguntas ao Tutor IA por aula.
+
+### community_quick_replies
+
+- `id`, `title` (1-60), `body` (1-2000, com `{nome}` e `{aula}`), `sort_order`, `created_by`, `updated_by`, `created_at`, `updated_at` (trigger `set_updated_at`);
+- RLS ligada e nenhum acesso para `anon`/`authenticated`: so o servidor (`service_role`) le e grava, depois de conferir o papel.
+
+### Views internas (so `service_role`)
+
+- `community_open_questions`: pergunta sem resposta = comentario raiz de aluno, `approved`, sem `deleted_at`, nao resolvido e sem resposta visivel de professor/moderador;
+- `community_report_state`: denuncia aberta = comentario visivel com denuncia mais nova que a ultima acao de moderacao.
+
+Toda contagem da Comunidade usa estas definicoes e ignora aula ou modulo `deleted` e comentario com `deleted_at`.
+
+### RPCs (security invoker, `search_path` fixo, so `service_role`)
+
+- `community_lesson_scope(p_content_id)`: aulas visiveis de um produto (formacao inclui os cursos incluidos);
+- `community_unanswered(...)`, `community_stats(...)`, `community_comment_list(...)`, `community_reported_comments(...)`, `community_top_commenters(...)`, `community_lesson_rows(...)`: fila, quatro numeros do topo, aba Comentarios, Denuncias, Top alunos (28 dias) e Aulas, sempre paginadas no banco;
+- `community_filter_options()`: produtos e aulas para os filtros;
+- `community_overdue_count(p_hours)`: perguntas sem resposta ha mais de `p_hours` horas (contador do menu e alerta de Hoje).
+
+## Area de membros do admin v2 (login, destaque, modulos)
+
+Rodada de 2026-10-11 (`docs/17`, "Registro da rodada Area de membros"). Sem migracao nova: tudo usa `platform_settings`, `content_page_settings` (pela RPC `admin_patch_product_settings` da `202610110012`) e `course_modules.image`. Leituras e Server Actions em `src/server/member-area/**` e `src/server/catalog/module-cover-actions.ts`.
+
+### platform_settings: versao por chave
+
+- `updated_at` e a versao de cada chave. A tabela nao tem gatilho: toda gravacao carimba a coluna (Server Actions novas por `writePlatformSettingGuarded` e as gravacoes do `platform-store.ts`: `publishHomeSections`, `updatePlatformAppearance`, `updateAdminDashboardCollections`);
+- quem edita le a versao junto com o valor e manda de volta ao gravar: `UPDATE ... WHERE key = ? AND updated_at = ?` (ou `INSERT` quando a chave nao existia). Nenhuma linha afetada (ou chave criada no meio) = 409 "Esta configuracao mudou em outra tela ha instantes";
+- `PUT /api/admin/home-sections` aceita `expectedUpdatedAt` (confere antes de gravar) e responde `{ data, sectionsUpdatedAt }`. A Vitrine nova e, desde esta rodada, a Vitrine do admin antigo (campo `homeSectionsUpdatedAt` de `AdminDashboardData`) mandam a versao. Sem o campo, a rota grava como antes;
+- gatilho de `updated_at` no banco fica sugerido para a fase 6 (pegaria SQL manual).
+
+### platform_settings.loginPage
+
+JSON validado por zod (`src/server/member-area/login-model.ts`); chave ausente ou invalida = o login padrao (o `/login` nunca quebra).
+
+- `version`: 1;
+- `template`: `split-visual-right`, `split-visual-left`, `center-glass`, `side-glass-right`;
+- `panelTone`: `dark`, `glass`, `light` (Escuro, Translucido, Claro);
+- `sideImage` e `backgroundImage`: `{ url, alt }`. `url` e link https (Storage) ou imagem padrao do app (`/login/...`), `null` = imagem padrao; `alt` ate 160. Os modelos divididos usam `sideImage` (1200 x 1500), os modelos sobre a imagem usam `backgroundImage` (1920 x 1080); trocar de modelo nao apaga a outra;
+- `quote` (ate 160) e `quoteDetail` (ate 240): frase da imagem, so nos modelos divididos;
+- `formTitle` (ate 80) e `formSubtitle` (ate 200), opcionais;
+- `supportLabel` (ate 60), `supportLinkLabel` (ate 40) e `supportHref`: so `https://` ou `mailto:`; `null` esconde a linha de ajuda;
+- `googleEnabled`: mostra o botao "Entrar com Google" (Apple fica fora).
+
+A logo do login nao fica aqui: vem de `platform_settings.branding` (Marca). Nenhuma chave de provedor de auth e gravada. O `/login` le `loginPage` e `branding` com `unstable_cache` (tags `member-area-login` e `catalog`, revalidacao de 1 h); publicar chama `updateTag("member-area-login")`. O parametro `?template=` do endereco nao muda mais o visual.
+
+### platform_settings.hero (campos novos)
+
+`HomeHeroConfig` ganhou, sem quebrar o que existia:
+
+- `cta`: `{ href, label, target }`. `href` e caminho interno da area (comeca com uma `/`, nunca `//`, `/\`, espaco ou `/api`; ate 512) ou link `https://`; `label` ate 32; `target` `same_tab` ou `new_tab`. Produto grava `/conteudo/{id}`;
+- `poster`: capa do video (obrigatoria quando `mediaType = video`; mesma medida da imagem, 1920 x 720);
+- `visibility.cta`: mostra o botao.
+
+`image` continua sendo a imagem (`mediaType = image`) ou o link do video (`.mp4`, `.webm`, `.mov`, so https). Texto escondido continua guardado. Chaves desconhecidas (ex.: `purpose`) sao preservadas pela gravacao. A home normaliza o que esta gravado (`resolveHomeHero`) e descarta botao com link inseguro, inclusive o que o admin antigo ou SQL manual gravarem.
+
+### platform_settings.homeSections (fileira de modulos)
+
+A fileira de modulos de um produto e uma secao `content_structure` (`contentSource = selected_content_structure`, `sourceContentId` = produto). A tela Modulos liga (`isActive`) ou cria (layout `compact`, `visibility = all`, antes de "Produtos a venda", senao depois de "Minhas compras", senao no fim) e troca o `title` (ate 80). Vitrine nunca publicada: a primeira gravacao fixa a ordem padrao atual mais a fileira. Desligar mantem titulo e posicao.
+
+### content_page_settings
+
+- `coursePresentationMode` (`module_cards` ou `lesson_playlist`): gravado pela tela Modulos e pela aba Detalhes com `admin_patch_product_settings` (so essa chave). Formacao nao tem (abre nos cursos dela);
+- `homeModuleSection`: virou espelho para o admin antigo. A fonte da verdade da fileira e `homeSections`; com a Vitrine publicada, a home ignora esta chave.
+
+### course_modules.image (capa do modulo)
+
+WebP 720 x 1040 recortado no navegador, conferido no servidor e enviado ao Storage (`content-assets`, `content/{produto}/modules/{modulo}/...`); so a URL fica na coluna. "Usar a capa do produto" grava de novo a capa atual do produto (a coluna e `not null`; o modulo ja nasce com uma copia dela). Gravacao com `updated_at` lido (409 se mudou).
+
+### Storage
+
+Pastas novas no bucket `content-assets`, nome do arquivo pelo hash do conteudo: `platform/home-hero`, `platform/login-side`, `platform/login-background`. Teto conferido no cabecalho do WebP: 230 KB para destaque e capas, 420 KB para as imagens do login. Imagem enviada e depois descartada fica sem referencia (limpeza fica para depois).
+
+### Admin antigo convivendo com as chaves novas
+
+- grava `platform_settings` chave por chave (`settingsRows(...).filter`) e nao conhece `loginPage`;
+- a aparencia antiga (`PUT /api/admin/appearance`) rele o `hero` e espalha o que existe: `cta`, `poster` e `visibility.cta` sobrevivem;
+- o salvar de curso rele `content_page_settings` e espalha as chaves que nao conhece, mas manda sempre `coursePresentationMode`, `homeModuleSection` e `lockedActionMode` do formulario que carregou; o salvar de modulo manda a capa que carregou. Formulario do legado aberto desde antes de uma mudanca no admin novo desfaz essa mudanca: recarregar o legado antes de editar (risco aceito ate o legado ser desligado);
+- `tests/member-area-integration.test.mjs` trava esses pontos.
+
 ## Webhooks
 
 ### webhook_events
@@ -1125,6 +1270,29 @@ Obrigatorio:
 - idempotencia por provider + external_event_id;
 - guardar payload bruto;
 - nao confiar no payload sem validacao.
+
+## Jobs
+
+### job_runs
+
+Registro de cada execucao do tick de minuto (`POST /api/jobs/tick`) e de cada job do registro (`src/server/jobs/registry.ts`). Migracao `202610100001_jobs_cron.sql`.
+
+- id uuid, chave primaria;
+- job: nome do job (`tick` para o proprio tick; demais em kebab-case);
+- status: running, succeeded, failed;
+- started_at;
+- finished_at: nulo somente enquanto `status = running` (check no banco);
+- attempts: comeca em 1; reservado para retentativas e dead-letter apos 3 falhas;
+- error: mensagem truncada em 2.000 caracteres pela aplicacao (limite de 4.000 no banco);
+- metadata jsonb (objeto): no tick, `source`, `scheduled_at`, `ran`, `failed`, `skipped`; nos jobs, `tick_run_id`.
+
+Indices: `(job, started_at desc)` para historico por job e indice parcial em `started_at` para `status = running`, usado pelo tick para marcar como `failed` execucoes presas ha mais de 15 minutos.
+
+Seguranca: RLS ligada sem policies e `revoke all` de `anon` e `authenticated`; somente o servidor (service role) le e grava.
+
+Retencao: `public.prune_job_history()`, agendada diariamente, apaga linhas com sucesso apos 30 dias e com falha apos 90 dias.
+
+Agendamentos (`cron.job`): `bunker707-jobs-tick` (a cada minuto, chama `public.enqueue_jobs_tick()`) e `bunker707-jobs-history-prune` (diario). Segredos no Vault: `jobs_tick_url` e `jobs_tick_token`.
 
 ## Suporte
 

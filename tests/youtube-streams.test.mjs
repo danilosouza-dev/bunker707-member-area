@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import {
+import "./support/resolve-extensionless-ts.mjs";
+
+// Import dinamico: precisa acontecer depois do hook de resolucao acima.
+const {
   extractYouTubePlayerConfig,
   fetchYouTubeStreams,
   isValidPlatformResourceId,
   isValidYouTubeVideoId,
   parseYouTubePlayerStreams,
   validateGoogleVideoStreamUrl
-} from "../src/server/video/youtube-streams.ts";
+} = await import("../src/server/video/youtube-streams.ts");
 
 const streamsRouteSource = await readFile(
   new URL("../src/app/api/video/youtube/streams/route.ts", import.meta.url),

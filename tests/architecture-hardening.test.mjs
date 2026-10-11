@@ -33,7 +33,8 @@ test("member reads are request-memoized and scoped to the authenticated user", (
 });
 
 test("progress and favorites use granular writes", () => {
-  assert.match(platformStoreSource, /\.from\("lesson_progress"\)\.upsert/);
+  assert.match(platformStoreSource, /\.from\("lesson_progress"\)\s*\.update\(nextRow\)/);
+  assert.match(platformStoreSource, /\.from\("lesson_progress"\)\.insert\(nextRow\)/);
   assert.match(platformStoreSource, /\.from\("saved_items"\)\s*\.upsert/);
   assert.match(platformStoreSource, /savedItemTargetExists/);
   assert.doesNotMatch(platformStoreSource, /writeSupabaseDatabase/);

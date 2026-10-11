@@ -1,10 +1,22 @@
-export type LoginTemplateId =
-  | "split-visual-right"
-  | "split-visual-left"
-  | "center-glass"
-  | "side-glass-right";
+// Pagina de entrar (/login): os 4 modelos prontos e o formato que o componente LoginExperience
+// desenha. Modulo puro (sem React, sem aliases): o /login, a previa do admin novo
+// (src/components/admin/v2/member-area/login), o admin antigo e os testes carregam daqui.
+//
+// O que o produtor publica fica em platform_settings.loginPage (src/server/member-area/login-model.ts);
+// getLoginPageConfig(template?) continua existindo para o admin antigo, que so faz previa.
 
-export type LoginPanelTone = "dark" | "glass" | "light";
+export const LOGIN_TEMPLATE_IDS = [
+  "split-visual-right",
+  "split-visual-left",
+  "center-glass",
+  "side-glass-right"
+] as const;
+
+export type LoginTemplateId = (typeof LOGIN_TEMPLATE_IDS)[number];
+
+export const LOGIN_PANEL_TONES = ["dark", "glass", "light"] as const;
+
+export type LoginPanelTone = (typeof LOGIN_PANEL_TONES)[number];
 export type LoginProvider = "google" | "apple";
 
 export type LoginTemplateOption = {
@@ -27,7 +39,8 @@ export type LoginPageConfig = {
   panelTone: LoginPanelTone;
   brandName: string;
   logo: {
-    src: string;
+    /** null = a Marca esta sem logo: o nome da escola aparece em texto. */
+    src: string | null;
     alt: string;
   };
   visual: {
@@ -36,6 +49,8 @@ export type LoginPageConfig = {
     eyebrow: string;
     title: string;
     description: string;
+    /** object-position da imagem lateral; a imagem padrao usa "72% center" (o rosto do astronauta). */
+    objectPosition?: string;
   };
   form: {
     title: string;
@@ -48,6 +63,8 @@ export type LoginPageConfig = {
     primaryCta: string;
     supportLabel: string;
     supportCta: string;
+    /** Link da linha de ajuda (https:// ou mailto:). Sem link, a linha nao aparece. */
+    supportHref?: string | null;
   };
   providers: LoginProvider[];
   footerLinks: Array<{
@@ -56,11 +73,17 @@ export type LoginPageConfig = {
   }>;
 };
 
+/** Imagem que vem com o app e aparece enquanto o produtor nao envia outra. */
+export const DEFAULT_LOGIN_VISUAL_IMAGE = "/login/bunker-astronaut-login.png";
+export const DEFAULT_LOGIN_VISUAL_ALT = "Astronauta em ambiente escuro com circuitos de IA em vermelho";
+/** Enquadramento da imagem padrao na lateral; imagem enviada ja vem recortada e fica centralizada. */
+export const DEFAULT_LOGIN_VISUAL_POSITION = "72% center";
+
 export const loginTemplateOptions: LoginTemplateOption[] = [
   {
     id: "split-visual-right",
-    name: "Astronauta dividido",
-    description: "Formulario a esquerda com painel visual editorial a direita.",
+    name: "Formulário à esquerda",
+    description: "Formulário à esquerda e uma imagem grande à direita, com uma frase sua.",
     supportedCustomizations: [
       "side_image",
       "logo",
@@ -72,8 +95,8 @@ export const loginTemplateOptions: LoginTemplateOption[] = [
   },
   {
     id: "split-visual-left",
-    name: "Imagem editorial",
-    description: "Imagem forte a esquerda e formulario direto a direita.",
+    name: "Imagem à esquerda",
+    description: "Imagem grande à esquerda, com uma frase sua, e o formulário à direita.",
     supportedCustomizations: [
       "side_image",
       "logo",
@@ -85,8 +108,8 @@ export const loginTemplateOptions: LoginTemplateOption[] = [
   },
   {
     id: "center-glass",
-    name: "Central translucido",
-    description: "Imagem de fundo em tela cheia com formulario translúcido central.",
+    name: "Central sobre a imagem",
+    description: "Uma imagem ocupa a tela toda e o formulário fica no centro, translúcido.",
     supportedCustomizations: [
       "background_image",
       "logo",
@@ -97,8 +120,8 @@ export const loginTemplateOptions: LoginTemplateOption[] = [
   },
   {
     id: "side-glass-right",
-    name: "Lateral translucido",
-    description: "Imagem de fundo em tela cheia com formulario translúcido lateral.",
+    name: "Lateral sobre a imagem",
+    description: "Uma imagem ocupa a tela toda e o formulário fica à direita, translúcido.",
     supportedCustomizations: [
       "background_image",
       "logo",
@@ -119,63 +142,78 @@ const baseLoginPageConfig: LoginPageConfig = {
     alt: "Bunker707"
   },
   visual: {
-    imageSrc: "/login/bunker-astronaut-login.png",
-    alt: "Astronauta em ambiente escuro com circuitos de IA em vermelho",
+    imageSrc: DEFAULT_LOGIN_VISUAL_IMAGE,
+    alt: DEFAULT_LOGIN_VISUAL_ALT,
     eyebrow: "",
     title: "Na superfície, todos seguem no automático. No Bunker, a IA vira método.",
-    description: ""
+    description: "",
+    objectPosition: DEFAULT_LOGIN_VISUAL_POSITION
   },
   form: {
     title: "",
     subtitle: "",
-    emailLabel: "Email",
+    emailLabel: "E-mail",
     emailPlaceholder: "seuemail@exemplo.com",
     passwordLabel: "Senha",
     passwordPlaceholder: "Digite sua senha",
     forgotPasswordLabel: "Esqueci minha senha",
     primaryCta: "Entrar",
-    supportLabel: "Ainda nao tem acesso?",
-    supportCta: "Fale com o suporte"
+    supportLabel: "Ainda não tem acesso?",
+    supportCta: "Fale com o suporte",
+    supportHref: null
   },
   providers: ["google"],
   footerLinks: []
 };
 
-const loginTemplatePreviewOverrides: Record<
-  LoginTemplateId,
-  Pick<LoginPageConfig, "template" | "panelTone">
-> = {
-  "split-visual-right": {
-    template: "split-visual-right",
-    panelTone: "dark"
-  },
-  "split-visual-left": {
-    template: "split-visual-left",
-    panelTone: "dark"
-  },
-  "center-glass": {
-    template: "center-glass",
-    panelTone: "glass"
-  },
-  "side-glass-right": {
-    template: "side-glass-right",
-    panelTone: "glass"
-  }
-};
+/** Modelos com imagem ao lado do formulario (os outros usam a imagem de fundo em tela cheia). */
+export function isSplitLoginTemplate(template: LoginTemplateId) {
+  return template === "split-visual-right" || template === "split-visual-left";
+}
 
-function isLoginTemplateId(template: string | undefined): template is LoginTemplateId {
-  return Boolean(
-    template &&
-      loginTemplateOptions.some((templateOption) => templateOption.id === template)
-  );
+/** Tom de painel de cada modelo quando o produtor nao escolhe outro. */
+export function defaultLoginPanelTone(template: LoginTemplateId): LoginPanelTone {
+  return isSplitLoginTemplate(template) ? "dark" : "glass";
+}
+
+export function isLoginTemplateId(template: unknown): template is LoginTemplateId {
+  return typeof template === "string" && (LOGIN_TEMPLATE_IDS as readonly string[]).includes(template);
+}
+
+const SUPPORT_EMAIL_PATTERN = /^mailto:[^\s@<>()[\]\\,;:"?#&]+@[^\s@<>()[\]\\,;:"?#&]+\.[A-Za-z]{2,}$/i;
+
+/** Links que a linha de ajuda aceita: https:// (sem usuario/senha no endereco) ou mailto:email. */
+export function isAllowedLoginSupportHref(href: string | null | undefined): href is string {
+  const value = href?.trim();
+
+  if (!value) {
+    return false;
+  }
+
+  if (SUPPORT_EMAIL_PATTERN.test(value)) {
+    return true;
+  }
+
+  try {
+    const url = new URL(value);
+
+    return url.protocol === "https:" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
 }
 
 export function getLoginPageConfig(template?: string): LoginPageConfig {
   const templateId = isLoginTemplateId(template) ? template : baseLoginPageConfig.template;
-  const override = loginTemplatePreviewOverrides[templateId];
 
   return {
     ...baseLoginPageConfig,
-    ...override
+    logo: { ...baseLoginPageConfig.logo },
+    visual: { ...baseLoginPageConfig.visual },
+    form: { ...baseLoginPageConfig.form },
+    providers: [...baseLoginPageConfig.providers],
+    footerLinks: [],
+    template: templateId,
+    panelTone: defaultLoginPanelTone(templateId)
   };
 }

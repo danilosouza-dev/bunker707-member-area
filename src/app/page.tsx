@@ -6,6 +6,7 @@ import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { getAppShellData, getHomePageData } from "@/server/db/platform-store";
 import { requirePageUser } from "@/server/auth/guards";
+import { isHeroVisible, resolveHomeHero } from "@/server/member-area/home-hero-model";
 
 export const dynamic = "force-dynamic";
 
@@ -21,16 +22,20 @@ export default async function Home({ searchParams }: HomeProps) {
   const user = await requirePageUser("/");
   const shellData = await getAppShellData(user);
   const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
-  const { hero, homeRows, modalStructures } = await getHomePageData(accessPreviewMode, user);
+  const { hero: storedHero, homeRows, modalStructures } = await getHomePageData(accessPreviewMode, user);
+  // Destaque gravado em Área de membros > Destaque: normalizado e com o botão conferido (link seguro).
+  const hero = resolveHomeHero(storedHero);
+  const heroVisible = isHeroVisible(hero);
 
   return (
     <AppShell
       accessPreviewMode={accessPreviewMode}
+      branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
-      <HeroSection hero={hero} />
-      <div className="relative z-20 -mt-24 space-y-20 pb-24">
+      <HeroSection accessPreviewMode={accessPreviewMode} hero={hero} />
+      <div className={`relative z-20 space-y-20 pb-24 ${heroVisible ? "-mt-24" : "pt-24"}`}>
         {homeRows.map((row) => {
           if (row.variant === "course_modules" && row.course && row.modules) {
             return (
@@ -55,7 +60,7 @@ export default async function Home({ searchParams }: HomeProps) {
           );
         })}
       </div>
-      <MemberFooter />
+      <MemberFooter branding={shellData.branding} />
     </AppShell>
   );
 }

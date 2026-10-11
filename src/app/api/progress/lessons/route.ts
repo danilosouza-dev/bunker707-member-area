@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiUser } from "@/server/auth/guards";
 import { replaceCompletedLessons } from "@/server/db/platform-store";
 import { requireLessonsAccess } from "@/server/access/lesson-access";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { LessonReaction, LessonWatchStatus } from "@/lib/platform-types";
 
@@ -16,7 +17,7 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Sessao obrigatoria." }, { status: 401 });
   }
 
-  const payload = await request.json() as {
+  let payload: {
     completedLessonIds?: string[];
     contentId?: string;
     durationSeconds?: number;
@@ -28,6 +29,12 @@ export async function PUT(request: Request) {
     resumeFrameUrl?: string;
     status?: LessonWatchStatus;
   };
+
+  try {
+    payload = await readBoundedJson<typeof payload>(request, 256_000);
+  } catch (error) {
+    return jsonRouteError(error, "Nao foi possivel ler o progresso enviado.", 400);
+  }
   const hasWatchProgress =
     typeof payload.lessonId === "string" &&
     (
@@ -103,3 +110,7 @@ export async function PUT(request: Request) {
     return jsonRouteError(error, "Nao foi possivel salvar o progresso da aula.");
   }
 }
+
+// O flush ao sair da aula usa navigator.sendBeacon, que só envia POST. Mesmo payload,
+// mesma sessão por cookie e mesmas validações do PUT, sem duplicar o handler.
+export { PUT as POST };

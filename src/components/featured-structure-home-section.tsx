@@ -5,6 +5,7 @@ import Link from "next/link";
 import { CourseModulesHomeSection, ContentRow } from "@/components/content-row";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import type { AccessPreviewMode } from "@/lib/access-preview";
+import { cssImageUrl } from "@/lib/css-url";
 import type { HomeRow } from "@/lib/platform-types";
 
 type FeaturedStructureHomeSectionProps = {
@@ -81,7 +82,7 @@ export function FeaturedStructureHomeSection({ accessPreviewMode, row }: Feature
       <span className="sr-only">Apresentacao Immersiva</span>
       <div
         className="absolute inset-0 scale-[1.02] bg-cover bg-center"
-        style={{ backgroundImage: `url(${backgroundImage})` }}
+        style={{ backgroundImage: cssImageUrl(backgroundImage) }}
       />
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(0,0,0,0.96)_0%,rgba(0,0,0,0.82)_32%,rgba(0,0,0,0.38)_68%,rgba(0,0,0,0.58)_100%),linear-gradient(0deg,rgba(0,0,0,0.92)_0%,transparent_62%)]" />
       <div className="relative grid min-h-[34rem] items-end gap-8 px-6 py-8 md:px-8 lg:grid-cols-[minmax(15rem,0.72fr)_minmax(0,1.28fr)] lg:px-10 lg:py-10">
@@ -108,7 +109,7 @@ export function FeaturedStructureHomeSection({ accessPreviewMode, row }: Feature
                 href={card.href}
                 key={card.id}
               >
-                <div className="absolute inset-0 bg-cover bg-center transition duration-700 group-hover:scale-[1.035]" style={{ backgroundImage: `url(${card.image})` }} />
+                <div className="absolute inset-0 bg-cover bg-center transition duration-700 group-hover:scale-[1.035]" style={{ backgroundImage: cssImageUrl(card.image) }} />
                 <div className="absolute inset-0 bg-gradient-to-t from-black via-black/25 to-transparent" />
                 {card.isLocked ? <span className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-black/70 text-white"><Lock className="h-4 w-4" /></span> : null}
                 <div className="absolute inset-x-0 bottom-0 p-4">

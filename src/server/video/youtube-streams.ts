@@ -1,3 +1,8 @@
+import {
+  isYouTubeUnofficialStreamsEnabled,
+  youTubeUnofficialStreamsDisabledCode
+} from "./feature-flags";
+
 const requestTimeoutMs = 8_000;
 const maxRequestTimeoutMs = 15_000;
 const watchPageMaxBytes = 3 * 1024 * 1024;
@@ -429,6 +434,16 @@ export async function fetchYouTubeStreams({
   timeoutMs?: number;
   videoId: string;
 }): Promise<YouTubeStreamsResult> {
+  // Flag desligada: falha antes de qualquer chamada ao YouTube. As rotas ja checam a flag
+  // antes; esta checagem protege qualquer outro chamador.
+  if (!isYouTubeUnofficialStreamsEnabled()) {
+    throw new YouTubeStreamsError(
+      "A seleção manual de qualidade está desativada.",
+      404,
+      youTubeUnofficialStreamsDisabledCode
+    );
+  }
+
   if (!isValidYouTubeVideoId(videoId)) {
     throw inputError("Identificador de video invalido.", "invalid_video_id");
   }

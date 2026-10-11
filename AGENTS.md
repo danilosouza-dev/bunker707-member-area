@@ -25,6 +25,10 @@ Before making product, UX, architecture, or implementation decisions, read the r
 - `docs/08-backlog-inicial.md`
 - `docs/09-decisoes-abertas.md`
 - `docs/11-inventario-coleta-astron.md`
+- `docs/12-design-system-bunker707.md`
+- `docs/13-padroes-engenharia.md`
+- `docs/16-auditoria-tecnica-2026-10-01.md`
+- `docs/17-admin-produtor-redesign.md` (proposta de reconstrucao da area do produtor; vale para qualquer trabalho em `/admin`)
 
 Update docs when decisions change.
 

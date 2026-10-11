@@ -417,7 +417,16 @@ test("lesson player records watch progress before completion", () => {
   assert.match(lessonSource, /const persistLessonProgress = useCallback/);
   assert.match(lessonSource, /credentials: "same-origin"/);
   assert.match(lessonSource, /Erro ao salvar progresso da aula/);
-  assert.doesNotMatch(lessonSource, /keepalive: true/);
+  const persistLessonProgressSource =
+    lessonSource.match(/const persistLessonProgress = useCallback[\s\S]*?\n  \}, \[\]\);/u)?.[0] ?? "";
+  assert.match(persistLessonProgressSource, /fetch\(LESSON_PROGRESS_ENDPOINT/);
+  assert.doesNotMatch(persistLessonProgressSource, /keepalive: true/);
+  assert.match(lessonSource, /const LESSON_PROGRESS_HEARTBEAT_MS = 15_000;/);
+  assert.match(lessonSource, /if \(!force && now - lastSync < LESSON_PROGRESS_HEARTBEAT_MS\)/);
+  assert.match(lessonSource, /\}, LESSON_PROGRESS_HEARTBEAT_MS\);/);
+  assert.match(lessonSource, /const LESSON_PROGRESS_HEARTBEAT_SECONDS = LESSON_PROGRESS_HEARTBEAT_MS \/ 1000;/);
+  assert.match(lessonSource, /progressSeconds \?\? 0\) \+ LESSON_PROGRESS_HEARTBEAT_SECONDS;/);
+  assert.doesNotMatch(lessonSource, /now - lastSync < 3000|\}, 3000\);|\}, 10000\);|progressSeconds \?\? 0\) \+ 10;/);
   assert.match(lessonSource, /onLoadedMetadata=\{\(event\) =>/);
   assert.match(lessonSource, /function loadYouTubeIframeApi/);
   assert.match(lessonSource, /new window\.YT\.Player\(iframe/);
@@ -460,7 +469,9 @@ test("lesson player records watch progress before completion", () => {
   assert.match(platformStoreSource, /const safeProgressSeconds = progressSeconds === undefined\s*\?\s*existingWatchState\?\.progressSeconds \?\? 0\s*:\s*incomingProgressSeconds;/);
   assert.match(platformStoreSource, /normalizeProgressNumber\(record\.maxProgressPercent, progressPercent\)/);
   assert.match(platformStoreSource, /let lessonProgressWriteQueue = Promise\.resolve\(\);/);
-  assert.match(platformStoreSource, /lessonProgressWriteQueue\.then\(\(\) => replaceCompletedLessonsUnsafe\(input\)\)/);
+  assert.match(platformStoreSource, /return await replaceCompletedLessonsUnsafe\(input\);/);
+  assert.match(platformStoreSource, /LESSON_PROGRESS_CONFLICT_CODE/);
+  assert.match(platformStoreSource, /\.eq\("updated_at", currentRow\.updated_at\)/);
   assert.match(platformStoreSource, /const safeMaxProgressPercent = nextStatus === "completed"/);
   assert.match(platformStoreSource, /const safeResumeFrameUrl = normalizeImageUrl\(resumeFrameUrl\) \?\? existingWatchState\?\.resumeFrameUrl;/);
   assert.match(platformStoreSource, /\.\.\.\(safeResumeFrameUrl \? \{ resumeFrameUrl: safeResumeFrameUrl \} : \{\}\)/);
@@ -487,7 +498,14 @@ test("module progress includes partial watch progress", () => {
 
 test("lesson progress flushes before navigating away", () => {
   assert.match(lessonSource, /__bunker707FlushLessonProgress\?: \(\) => Promise<void>;/);
-  assert.match(lessonSource, /const flushActiveLessonProgress = useCallback\(async \(\) =>/);
+  assert.match(lessonSource, /const flushActiveLessonProgress = useCallback\(async \(transport: LessonProgressTransport = "fetch"\) =>/);
+  assert.match(lessonSource, /navigator\.sendBeacon\(LESSON_PROGRESS_ENDPOINT, new Blob\(\[body\], \{ type: "application\/json" \}\)\)/);
+  // sendBeacon só envia POST: sem o alias, o flush de saída recebe 405 e o progresso se perde.
+  assert.match(progressRouteSource, /export \{ PUT as POST \};/);
+  assert.match(lessonSource, /keepalive: true,\s*method: "PUT"/);
+  assert.match(lessonSource, /window\.addEventListener\("pagehide", flushOnPageExit\);/);
+  assert.match(lessonSource, /document\.visibilityState === "hidden"/);
+  assert.match(lessonSource, /void flushActiveLessonProgress\("beacon"\);/);
   assert.match(lessonSource, /await syncYouTubePlayerProgress\(youtubePlayerRef\.current/);
   assert.match(lessonSource, /window\.__bunker707FlushLessonProgress = flushActiveLessonProgress;/);
   assert.match(lessonSource, /function handleProgressAwareNavigation/);
@@ -495,7 +513,7 @@ test("lesson progress flushes before navigating away", () => {
   assert.match(lessonSource, /prefetch=\{false\}/);
   assert.match(appShellSource, /await window\.__bunker707FlushLessonProgress\?\.\(\);/);
   assert.match(appShellSource, /router\.push\(href\);/);
-  assert.match(appShellSource, /prefetch=\{false\}/);
+  assert.doesNotMatch(appShellSource, /prefetch=\{false\}/);
 });
 
 test("lesson playlist module headers avoid duplicate module labels", () => {

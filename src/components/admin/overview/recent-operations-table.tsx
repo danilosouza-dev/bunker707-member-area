@@ -45,7 +45,7 @@ export function RecentOperationsTable({
 }) {
   const rows: OperationRow[] = [
     ...webhookEvents.slice(0, 3).map((event) => ({
-      area: "Webhook externo",
+      area: "Venda recebida",
       event: `${event.provider} - ${event.type}`,
       id: `webhook-${event.id}`,
       status: event.status,
@@ -63,8 +63,8 @@ export function RecentOperationsTable({
   return (
     <Card className="border-border bg-card">
       <CardHeader>
-        <CardTitle>Operacoes recentes</CardTitle>
-        <CardDescription>Resumo seguro de eventos externos e regras de liberacao.</CardDescription>
+        <CardTitle>Operações recentes</CardTitle>
+        <CardDescription>Vendas recebidas e regras de liberação.</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
@@ -89,7 +89,7 @@ export function RecentOperationsTable({
             ) : (
               <TableRow>
                 <TableCell className="text-muted-foreground" colSpan={3}>
-                  Nenhuma operacao recente.
+                  Nenhum dado ainda
                 </TableCell>
               </TableRow>
             )}

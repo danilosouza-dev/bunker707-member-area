@@ -24,6 +24,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
   return (
     <AppShell
       accessPreviewMode={accessPreviewMode}
+      branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
@@ -33,7 +34,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
         lessonItems={favoritesData.savedLessonItems}
         moduleItems={favoritesData.savedModuleItems}
       />
-      <MemberFooter />
+      <MemberFooter branding={shellData.branding} />
     </AppShell>
   );
 }

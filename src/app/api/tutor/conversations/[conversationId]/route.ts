@@ -8,6 +8,7 @@ import {
   renameTutorConversation
 } from "@/server/ai/tutor";
 import { requireApiUser } from "@/server/auth/guards";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type RouteContext = { params: Promise<{ conversationId: string }> };
@@ -57,7 +58,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const { conversationId } = await context.params;
 
   try {
-    const body = await request.json().catch(() => ({})) as { title?: unknown };
+    const body = await readBoundedJson<{ title?: unknown }>(request, 16_000).catch(() => ({})) as { title?: unknown };
     return noStore(NextResponse.json({ data: await renameTutorConversation(conversationId, auth.user.id, body.title) }));
   } catch (error) {
     return noStore(jsonRouteError(error, "Nao foi possivel renomear esta conversa do Tutor IA."));

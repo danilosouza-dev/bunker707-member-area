@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { isTvPlaybackRate } from "@/lib/tv-session-contract";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import {
   getTvReceiverSession,
@@ -42,14 +43,14 @@ export async function GET(request: Request, context: RouteContext) {
 
 export async function PUT(request: Request, context: RouteContext) {
   try {
-    const payload = await request.json() as {
+    const payload = await readBoundedJson<{
       appliedCommandRevision?: unknown;
       availablePlaybackRates?: unknown;
       currentTimeSeconds?: unknown;
       durationSeconds?: unknown;
       playbackRate?: unknown;
       playbackState?: unknown;
-    };
+    }>(request, 16_000);
 
     if (
       typeof payload.appliedCommandRevision !== "number" ||

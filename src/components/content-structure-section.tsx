@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cardActionClassName } from "@/components/card-action-style";
 import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
+import { usePlatformLogoImage } from "@/components/platform-branding";
 import {
   CarouselEdgeControls,
   CarouselPaginationIndicator,
@@ -14,6 +15,7 @@ import {
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import type { AccessPreviewMode } from "@/lib/access-preview";
+import { cssImageUrl } from "@/lib/css-url";
 import type {
   ContentItem,
   CourseModule,
@@ -72,6 +74,7 @@ function InternalPosterCard({
   title
 }: InternalPosterCardProps) {
   const router = useNavigationFeedbackRouter();
+  const logoImage = usePlatformLogoImage();
   const imageStateClass = isLocked
     ? "grayscale saturate-0 contrast-110 brightness-75 group-hover:grayscale-0 group-hover:saturate-100 group-hover:contrast-100 group-hover:brightness-100"
     : "";
@@ -87,7 +90,7 @@ function InternalPosterCard({
   return (
     <Link
       aria-label={lockedAccessibilityDetail ? `${title}. ${lockedAccessibilityDetail}` : `Abrir ${title}`}
-      className="home-cover-card internal-poster-card group relative aspect-[720/1040] w-[11rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[13.75rem] md:w-[15.5rem] lg:w-[18.75rem] 2xl:w-[20rem]"
+      className="home-cover-card internal-poster-card group relative aspect-[2/3] w-[8.75rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[11rem] md:w-[12.5rem] lg:w-[15rem] 2xl:w-[16rem]"
       data-navigation-feedback={isLocked ? "false" : undefined}
       href={href}
       onClick={(event) => {
@@ -104,7 +107,7 @@ function InternalPosterCard({
         <div className="relative h-full w-full">
           <div
             className={`home-cover-card-image absolute inset-0 bg-cover bg-center ${imageStateClass}`}
-            style={{ backgroundImage: `url(${image})` }}
+            style={{ backgroundImage: cssImageUrl(image) }}
           />
           {isLocked ? (
             <div className="absolute right-2.5 top-2.5 z-20 grid h-8 w-8 place-items-center rounded-full bg-black/65 text-white shadow-[0_10px_24px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-[2px] sm:right-3 sm:top-3 sm:h-9 sm:w-9 md:h-10 md:w-10 lg:right-4 lg:top-4 lg:h-11 lg:w-11">
@@ -147,17 +150,17 @@ function InternalPosterCard({
           </div>
         </div>
       </div>
-      <div className="home-cover-card-logo pointer-events-none absolute left-4 top-4 z-[130] w-[6.6875rem] opacity-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.7)] sm:w-[7.5625rem]">
+      {logoImage ? <div className="home-cover-card-logo pointer-events-none absolute left-4 top-4 z-[130] w-[5.75rem] opacity-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.7)] sm:w-[6.25rem] lg:w-[6.75rem]">
         <Image
           alt=""
           aria-hidden="true"
-          className="h-auto w-full object-contain"
+          className="h-auto max-h-10 w-full object-contain object-left"
           height={35}
-          src="/brand/logo-bunker.svg"
+          src={logoImage}
           unoptimized
           width={306}
         />
-      </div>
+      </div> : null}
     </Link>
   );
 }

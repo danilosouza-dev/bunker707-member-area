@@ -100,7 +100,7 @@ Regras:
 
 ### Botao primario claro
 
-Uso: assistir, concluir, acoes centrais.
+Uso: assistir, concluir, acoes centrais. Tambem e o botao opcional do destaque (topo) da home: altura 48 px, icone `ArrowRight` depois do texto, foco visivel e alvo de pelo menos 44 px no celular.
 
 - Fundo branco, texto preto.
 - Raio: 6-8px.
@@ -250,6 +250,23 @@ Secoes estruturais usam duas variantes:
 - `Imersiva`: banner com imagem de fundo, degradê escuro, CTA e cards internos sobrepostos, mantendo contraste de texto e scroll horizontal em telas menores.
 
 Formacoes usam cards internos de cursos; cursos e bootcamps usam cards de modulos. O preview administrativo deve reutilizar o componente da Home publicada para que espacamento, bloqueio e comportamento responsivo nao divirjam.
+
+Na Vitrine do admin novo o tipo de fileira estrutural se chama `Fileira de modulos` (antes "Destaque de um produto"), para nao confundir com a aba Destaque, que e o banner do topo.
+
+### Area de membros: previa real do login e do destaque
+
+As abas Login e Destaque (Area de membros) mostram o componente real do aluno (`LoginExperience`, `HeroSection`), nunca uma imitacao, dentro de `PreviewFrame` (`src/components/admin/v2/member-area/preview-frame.tsx`):
+
+- a moldura desenha uma "tela" de 1280 x 800 (Computador) ou 390 x 844 (Celular) e reduz com `transform` para caber na coluna; o conteudo fica `inert` (sem foco nem clique) e com os tokens do aluno restaurados (o admin troca `--accent` por cinza);
+- por isso `LoginExperience` e `HeroSection` respondem a container query e nao a janela: `@container` num elemento de fora e `@min-[640px]:`, `@min-[768px]:`, `@min-[1024px]:`, `@min-[1280px]:` no lugar de `sm:`, `md:`, `lg:`, `xl:`. Um elemento nao consulta o proprio container, entao o `@container` vai num wrapper;
+- altura de tela cheia usa `var(--member-preview-vh, 100vh)` (`min-h-[var(--member-preview-vh,100vh)]`) no lugar de `min-h-screen`/`h-screen`; a moldura define a variavel com a altura da tela simulada;
+- os dois componentes tem a prop `preview`: sem efeitos de sessao, sem envio de formulario, sem `preload`/`fetchPriority`, e os links viram texto. Na area do aluno nada muda (o container tem a largura da janela); conferir com screenshot antes/depois ao mexer neles;
+- `LoginExperience` gera os ids dos campos com `useId` (duas previas na mesma pagina nao repetem id). Nos modelos com imagem ao lado, no celular a imagem aparece escurecida atras do formulario. A logo tem teto de 56 px de altura; no tom Claro vira texto;
+- `HeroSection` mostra o botao claro quando ha `cta` visivel; video toca sem som, em repeticao, com `poster`, e quem prefere menos movimento ve a capa parada (`motion-reduce`, so CSS);
+- no tom Claro do login, mensagens (erro, aviso de link enviado, login indisponivel), divisoria "ou continue com", botao de mostrar senha e "Esqueci minha senha" usam cores proprias de fundo claro (`panelToneClasses` em `login-experience.tsx`); cor pensada para fundo escuro nunca entra no tom Claro;
+- a galeria de modelos do login usa miniaturas vivas (a mesma moldura com o rascunho aplicado a cada modelo), semantica de `radiogroup` (setas trocam, Enter/Espaco escolhem) e o selo "Em uso" no modelo publicado. No login, a partir de 1440 px de janela Computador e Celular aparecem lado a lado (abaixo disso, pilulas trocam); no destaque, pilulas Computador | Celular em todas as larguras. Login e Destaque viram duas colunas (formulario e previa fixa ao lado) a partir de 1024 px de janela.
+
+Controles do admin que salvam na hora (chaves, pilulas, titulo editavel no lugar, botoes que somem depois de gravar) nao ficam `disabled` enquanto gravam: um controle focado que vira `disabled` joga o foco do teclado no corpo da pagina. Use `aria-busy`/`aria-disabled`, ignore o clique no handler (`AdminSwitch` tem `pending`) e, quando o botao some, mova o foco para a proxima acao natural. Em textos com a chave "Mostrar" (destaque), escrever num campo vazio liga a chave sozinho; texto preenchido com a chave desligada mostra "Escondido na home".
 
 ### Catalogo no CRM
 

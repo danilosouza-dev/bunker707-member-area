@@ -42,7 +42,7 @@ export async function requireApiUser() {
   return { response: null, user };
 }
 
-export async function requireApiAdmin() {
+export async function requireApiAdmin(options?: { roles?: readonly string[] }) {
   const auth = await requireApiUser();
 
   if (auth.response || !auth.user) {
@@ -54,6 +54,14 @@ export async function requireApiAdmin() {
   if (!role) {
     return {
       response: NextResponse.json({ error: "Permissao administrativa obrigatoria." }, { status: 403 }),
+      user: auth.user
+    };
+  }
+
+  if (options?.roles && !options.roles.includes(role)) {
+    return {
+      response: NextResponse.json({ error: "Seu papel administrativo nao permite esta operacao." }, { status: 403 }),
+      role,
       user: auth.user
     };
   }

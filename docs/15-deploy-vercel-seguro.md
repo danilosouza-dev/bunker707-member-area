@@ -88,3 +88,7 @@ A aplicacao aplica CSP com nonce por requisicao, HSTS em producao, bloqueio de f
 - definir export/backup periodico; o plano Free nao oferece a mesma protecao operacional de um plano pago;
 - rotacionar imediatamente qualquer segredo suspeito de exposicao e republicar a Vercel;
 - usar um ambiente Supabase separado para staging assim que previews ou colaboradores adicionais entrarem no fluxo.
+
+## Regiao das funcoes (2026-10-11)
+
+`vercel.json` fixa as funcoes em `gru1` (Sao Paulo), a mesma regiao do banco Supabase novo (`hrtnqcznhdmodjikvddm`, sa-east-1). Sem isso a Vercel usa `iad1` (EUA) e cada consulta ao banco atravessa o continente: medido em 2026-10-11, cada ida ao Supabase ja custa ~0,15 s a partir de Fortaleza, e uma pagina do admin faz varias em sequencia. Trocar o banco de producao para o projeto novo e esta regiao devem andar juntos.

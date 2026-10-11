@@ -5,6 +5,7 @@ import {
   submitPlatformGuideQuestion
 } from "@/server/ai/platform-guide";
 import { requireApiUser } from "@/server/auth/guards";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type RouteContext = { params: Promise<{ conversationId: string }> };
@@ -27,7 +28,7 @@ export async function POST(request: Request, context: RouteContext) {
   const { conversationId } = await context.params;
 
   try {
-    const payload = await request.json() as { clientRequestId?: unknown; question?: unknown };
+    const payload = await readBoundedJson<{ clientRequestId?: unknown; question?: unknown }>(request, 64_000);
     const clientRequestId = typeof payload.clientRequestId === "string" ? payload.clientRequestId : "";
 
     if (!uuidPattern.test(clientRequestId)) {

@@ -8,7 +8,8 @@ import {
   TranscriptError,
   type TranscriptFormat
 } from "@/server/ai/transcripts";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type RouteContext = { params: Promise<{ lessonId: string }> };
@@ -47,12 +48,12 @@ async function readManualTranscript(request: Request) {
     });
   }
 
-  const payload = await request.json() as {
+  const payload = await readBoundedJson<{
     format?: unknown;
     language?: unknown;
     source?: unknown;
     text?: unknown;
-  };
+  }>(request, 256_000);
   const format = typeof payload.format === "string" ? payload.format : "txt";
 
   if (!(["srt", "txt", "vtt"] as string[]).includes(format)) {
@@ -69,7 +70,7 @@ async function readManualTranscript(request: Request) {
 }
 
 export async function GET(_request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("admin.read");
 
   if (auth.response) return noStore(auth.response);
   const { lessonId } = await context.params;
@@ -82,7 +83,7 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PUT(request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("catalog.write");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
   const { lessonId } = await context.params;

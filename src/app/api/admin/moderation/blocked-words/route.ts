@@ -1,18 +1,27 @@
 import { NextResponse } from "next/server";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import {
   createBlockedWord,
   LessonCommentStoreError
 } from "@/server/comments/comment-store";
+import { readBoundedJson } from "@/server/http/bounded-json";
+import { jsonRouteError } from "@/server/http/route-errors";
 
 export async function POST(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("community.moderate");
 
   if (auth.response || !auth.user) {
     return auth.response;
   }
 
-  const payload = await request.json() as { message?: unknown; word?: unknown };
+  let payload: { message?: unknown; word?: unknown };
+
+  try {
+    payload = await readBoundedJson<{ message?: unknown; word?: unknown }>(request, 64_000);
+  } catch (error) {
+    return jsonRouteError(error, "Nao foi possivel ler os dados enviados.", 400);
+  }
+
   const word = typeof payload.word === "string" ? payload.word : "";
   const message = typeof payload.message === "string" ? payload.message : undefined;
 

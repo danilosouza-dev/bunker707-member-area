@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
+import { invalidateCatalog } from "@/server/catalog/cache";
 import { deleteLesson, reorderLessons, upsertLesson } from "@/server/db/platform-store";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { LessonOrderInput, LessonWriteInput } from "@/server/db/platform-store";
 import type { AdminReleaseRule } from "@/lib/platform-types";
@@ -28,37 +30,37 @@ type LessonTranscriptPayload = {
 };
 
 export async function POST(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("catalog.write");
 
   if (auth.response || !auth.user) {
     return auth.response;
   }
 
-  const payload = await request.json() as Partial<LessonWriteInput> & {
-    releaseFixedDate?: string;
-    releaseDelayUnit?: "horas" | "dias";
-    releaseDelayValue?: string;
-    releaseMode?: AdminReleaseRule["mode"];
-    releaseRequirement?: string;
-    transcript?: LessonTranscriptPayload;
-  };
-
-  if (!payload.moduleId || !payload.title) {
-    return NextResponse.json({ error: "Modulo e titulo da aula sao obrigatorios." }, { status: 400 });
-  }
-
-  const hasVideoInput = Object.prototype.hasOwnProperty.call(payload, "video");
-  const normalizedVideo = payload.video == null ? null : normalizeLessonVideoConfig(payload.video);
-
-  if (payload.video != null && !normalizedVideo) {
-    return NextResponse.json({
-      error: "Configuracao de video invalida. Use uma URL HTTPS ou um iframe HTTPS valido."
-    }, { status: 400 });
-  }
-
-  const normalizedPayload = hasVideoInput ? { ...payload, video: normalizedVideo } : payload;
-
   try {
+    const payload = await readBoundedJson<Partial<LessonWriteInput> & {
+      releaseFixedDate?: string;
+      releaseDelayUnit?: "horas" | "dias";
+      releaseDelayValue?: string;
+      releaseMode?: AdminReleaseRule["mode"];
+      releaseRequirement?: string;
+      transcript?: LessonTranscriptPayload;
+    }>(request, 10_000_000);
+
+    if (!payload.moduleId || !payload.title) {
+      return NextResponse.json({ error: "Modulo e titulo da aula sao obrigatorios." }, { status: 400 });
+    }
+
+    const hasVideoInput = Object.prototype.hasOwnProperty.call(payload, "video");
+    const normalizedVideo = payload.video == null ? null : normalizeLessonVideoConfig(payload.video);
+
+    if (payload.video != null && !normalizedVideo) {
+      return NextResponse.json({
+        error: "Configuracao de video invalida. Use uma URL HTTPS ou um iframe HTTPS valido."
+      }, { status: 400 });
+    }
+
+    const normalizedPayload = hasVideoInput ? { ...payload, video: normalizedVideo } : payload;
+
     const transcriptPayload = normalizedPayload.transcript;
     const transcriptMode = transcriptPayload?.mode;
     const currentTranscript = normalizedPayload.id ? await getLessonTranscriptStatus(normalizedPayload.id) : null;
@@ -103,6 +105,7 @@ export async function POST(request: Request) {
           }
         : normalizedPayload.releaseRule
     } as LessonWriteInput);
+    invalidateCatalog({ from: "route" });
 
     if (preparedTranscript) {
       await saveLessonTranscript({
@@ -133,20 +136,21 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("catalog.write");
 
   if (auth.response) {
     return auth.response;
   }
 
-  const payload = await request.json() as { id?: string };
-
-  if (!payload.id) {
-    return NextResponse.json({ error: "Aula invalida." }, { status: 400 });
-  }
-
   try {
+    const payload = await readBoundedJson<{ id?: string }>(request, 10_000_000);
+
+    if (!payload.id) {
+      return NextResponse.json({ error: "Aula invalida." }, { status: 400 });
+    }
+
     const data = await deleteLesson(payload.id);
+    invalidateCatalog({ from: "route" });
 
     return NextResponse.json({ data });
   } catch (error) {
@@ -155,23 +159,24 @@ export async function DELETE(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("catalog.write");
 
   if (auth.response) {
     return auth.response;
   }
 
-  const payload = await request.json() as Partial<LessonOrderInput>;
-
-  if (!payload.moduleId || !Array.isArray(payload.orderedIds) || payload.orderedIds.length === 0) {
-    return NextResponse.json({ error: "Ordem de aulas invalida." }, { status: 400 });
-  }
-
   try {
+    const payload = await readBoundedJson<Partial<LessonOrderInput>>(request, 10_000_000);
+
+    if (!payload.moduleId || !Array.isArray(payload.orderedIds) || payload.orderedIds.length === 0) {
+      return NextResponse.json({ error: "Ordem de aulas invalida." }, { status: 400 });
+    }
+
     const data = await reorderLessons({
       moduleId: payload.moduleId,
       orderedIds: payload.orderedIds
     });
+    invalidateCatalog({ from: "route" });
 
     return NextResponse.json({ data });
   } catch (error) {

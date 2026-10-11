@@ -8,29 +8,35 @@ import {
   Home,
   LibraryBig,
   LifeBuoy,
+  LoaderCircle,
   LogOut,
   Menu,
   PlayCircle,
   Search,
   ShieldCheck,
+  Sparkles,
   Trophy,
   UserCircle,
   X
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
-import { PlatformDirectorChat } from "@/components/platform-director-chat";
+import { PlatformBrandingProvider } from "@/components/platform-branding";
+import type { PlatformDirectorChat as PlatformDirectorChatComponent } from "@/components/platform-director-chat";
 import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
 import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
-import type { NavigationItem } from "@/lib/platform-types";
+import { signOutAndLeave } from "@/lib/auth/sign-out";
+import { canOptimizeImageSrc } from "@/lib/image-hosts";
+import type { NavigationItem, PlatformBrandingConfig } from "@/lib/platform-types";
 import type { AccessPreviewMode } from "@/lib/access-preview";
-import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type AppShellProps = {
   accessPreviewMode?: AccessPreviewMode;
+  branding?: PlatformBrandingConfig;
   canUseAccessPreview?: boolean;
   children: React.ReactNode;
   student: {
@@ -56,7 +62,73 @@ const navigationItems = [
   { label: "Perfil", icon: UserCircle }
 ] satisfies NavigationItem[];
 
-export function AppShell({ accessPreviewMode, canUseAccessPreview = false, children, student }: AppShellProps) {
+type DirectorLauncherState = "failed" | "idle" | "loading";
+type PlatformDirectorChatProps = ComponentProps<typeof PlatformDirectorChatComponent>;
+
+// Botão estático com o mesmo visual do lançador da IA Diretor. O chat completo
+// (react-markdown, remark-gfm) só é baixado depois do primeiro clique.
+function PlatformDirectorLauncher({
+  onActivate,
+  onWarmUp,
+  state = "idle"
+}: {
+  onActivate?: () => void;
+  onWarmUp?: () => void;
+  state?: DirectorLauncherState;
+}) {
+  const loading = state === "loading";
+  const label = state === "failed" ? "Recarregar a página para abrir a IA Diretor" : "Abrir IA Diretor";
+
+  return (
+    <div className="fixed bottom-4 right-4 z-[180] sm:bottom-6 sm:right-6">
+      <span className="group/director relative block">
+        <button
+          aria-busy={loading}
+          aria-expanded={false}
+          aria-label={label}
+          className="grid size-14 place-items-center rounded-full border border-white/15 bg-white text-black shadow-[0_18px_55px_rgba(0,0,0,0.62)] transition duration-200 hover:scale-105 hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+          disabled={loading}
+          onClick={onActivate}
+          onFocus={onWarmUp}
+          onPointerEnter={onWarmUp}
+          type="button"
+        >
+          {loading ? (
+            <LoaderCircle aria-hidden="true" className="size-5 animate-spin" />
+          ) : (
+            <span aria-hidden="true" className="relative inline-grid size-6 place-items-center">
+              <Compass className="h-full w-full" strokeWidth={1.9} />
+              <Sparkles className="absolute -right-1 -top-1 h-2.5 w-2.5 text-[var(--accent)]" strokeWidth={2.2} />
+            </span>
+          )}
+        </button>
+        {!loading ? (
+          <span className="pointer-events-none absolute bottom-[calc(100%+10px)] right-0 translate-y-1 whitespace-nowrap rounded-[5px] bg-[#eeeeee] px-3 py-2 text-xs font-medium text-[#202020] opacity-0 shadow-xl transition group-hover/director:translate-y-0 group-hover/director:opacity-100 group-focus-within/director:translate-y-0 group-focus-within/director:opacity-100 max-sm:hidden" role="tooltip">
+            {state === "failed" ? "Recarregue a página para conversar com a IA Diretor" : "Conversar com a IA Diretor"}
+          </span>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+function PlatformDirectorLoadFailed() {
+  return <PlatformDirectorLauncher onActivate={() => window.location.reload()} state="failed" />;
+}
+
+const PlatformDirectorChat = dynamic(
+  () => import("@/components/platform-director-chat")
+    .then((directorModule) => directorModule.PlatformDirectorChat)
+    // Falha de rede ou deploy novo: mantém o botão e oferece recarregar, sem derrubar a página.
+    .catch((): ComponentType<PlatformDirectorChatProps> => PlatformDirectorLoadFailed),
+  {
+    loading: () => <PlatformDirectorLauncher state="loading" />,
+    ssr: false
+  }
+);
+
+export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = false, children, student }: AppShellProps) {
+  const logoImage = branding === undefined ? "/brand/logo-bunker.svg" : branding.logoImage;
   const pathname = usePathname();
   const router = useNavigationFeedbackRouter();
   const { startNavigation } = useNavigationFeedback();
@@ -65,6 +137,8 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
   const [headerSolidOpacity, setHeaderSolidOpacity] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [directorRequested, setDirectorRequested] = useState(false);
+  const [directorOpenOnMount, setDirectorOpenOnMount] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -139,27 +213,38 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
     handleProgressAwareNavigation(event, withAccessPreviewParam(href, accessPreviewMode));
   }
 
+  function openSidebar() {
+    // A IA Diretor desmonta enquanto o menu está aberto; ao voltar, ela não reabre sozinha.
+    setDirectorOpenOnMount(false);
+    setSidebarOpen(true);
+  }
+
+  function warmUpDirectorChat() {
+    // Antecipa o download do chunk no hover/foco; o clique costuma encontrá-lo pronto.
+    void import("@/components/platform-director-chat").catch(() => undefined);
+  }
+
+  function activateDirectorChat() {
+    setDirectorOpenOnMount(true);
+    setDirectorRequested(true);
+  }
+
   async function handleSignOut() {
     setSigningOut(true);
 
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST"
-      });
+    // Salvar progresso e favoritos é melhor esforço: nunca impede a saída.
+    await Promise.allSettled([
+      window.__bunker707FlushLessonProgress?.(),
+      flushPendingSavedItemChanges()
+    ]);
 
-      try {
-        const supabase = createBrowserSupabaseClient();
-        await supabase.auth.signOut();
-      } catch {
-        // In local development without Supabase, only the local cookie exists.
-      }
-    } finally {
-      router.replace("/login");
-      router.refresh();
-    }
+    // O servidor encerra a sessão e a navegação completa descarta o cache do router
+    // e o estado do aluno na memória.
+    await signOutAndLeave();
   }
 
   return (
+    <PlatformBrandingProvider branding={branding}>
     <div className="min-h-screen bg-[#141414] text-white">
       <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden">
         <div
@@ -180,7 +265,7 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
           <button
             aria-label="Abrir menu"
             className={`grid h-10 w-10 place-items-center rounded-[6px] border transition ${iconButtonChrome}`}
-            onClick={() => setSidebarOpen(true)}
+            onClick={openSidebar}
             type="button"
           >
             <Menu className="h-5 w-5" />
@@ -191,17 +276,20 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
             className="flex min-w-fit items-center rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
             href={homeHref}
             onClick={(event) => handleProgressAwareNavigation(event, homeHref)}
-            prefetch={false}
           >
-            <Image
-              alt="Bunker707"
-              className="h-auto w-[150px] sm:w-[190px]"
-              height={35}
-              priority
-              src="/brand/logo-bunker.svg"
-              unoptimized
-              width={306}
-            />
+            {logoImage ? (
+              <Image
+                alt="Bunker707"
+                className="h-auto max-h-10 w-[150px] object-contain object-left sm:w-[190px]"
+                height={35}
+                priority
+                src={logoImage}
+                unoptimized={!canOptimizeImageSrc(logoImage)}
+                width={306}
+              />
+            ) : (
+              <span className="text-lg font-black uppercase tracking-wide text-white sm:text-xl">Bunker707</span>
+            )}
           </Link>
 
           <div className={`ml-auto flex min-w-0 items-center gap-2 ${searchOpen ? "max-sm:flex-1" : ""}`}>
@@ -303,16 +391,19 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
                   className="inline-flex rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
                   href={homeHref}
                   onClick={(event) => handleProgressAwareNavigation(event, homeHref, true)}
-                  prefetch={false}
                 >
-                  <Image
-                    alt="Bunker707"
-                    className="h-auto w-[210px]"
-                    height={35}
-                    src="/brand/logo-bunker.svg"
-                    unoptimized
-                    width={306}
-                  />
+                  {logoImage ? (
+                    <Image
+                      alt="Bunker707"
+                      className="h-auto max-h-12 w-[210px] object-contain object-left"
+                      height={35}
+                      src={logoImage}
+                      unoptimized={!canOptimizeImageSrc(logoImage)}
+                      width={306}
+                    />
+                  ) : (
+                    <span className="text-xl font-black uppercase tracking-wide text-white">Bunker707</span>
+                  )}
                 </Link>
               </div>
               <button
@@ -344,7 +435,7 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
                   onClick={() => setSidebarOpen(false)}
                 >
                   <ShieldCheck className="h-5 w-5" />
-                  Ir para o CRM
+                  Ir para o admin
                 </Link>
                 <label className="grid gap-2 text-sm font-semibold text-zinc-300">
                   <span className="flex items-center gap-2">
@@ -391,7 +482,6 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
                       href={itemHref}
                       key={item.label}
                       onClick={(event) => handleProgressAwareNavigation(event, itemHref, true)}
-                      prefetch={false}
                     >
                       <Icon className="h-5 w-5" />
                       {item.label}
@@ -430,8 +520,15 @@ export function AppShell({ accessPreviewMode, canUseAccessPreview = false, child
 
       <main>{children}</main>
 
-      {!sidebarOpen ? <PlatformDirectorChat onNavigate={handleDirectorNavigation} /> : null}
+      {!sidebarOpen ? (
+        directorRequested ? (
+          <PlatformDirectorChat defaultOpen={directorOpenOnMount} onNavigate={handleDirectorNavigation} />
+        ) : (
+          <PlatformDirectorLauncher onActivate={activateDirectorChat} onWarmUp={warmUpDirectorChat} />
+        )
+      ) : null}
 
     </div>
+    </PlatformBrandingProvider>
   );
 }

@@ -1,22 +1,15 @@
-import { LoaderCircle } from "lucide-react";
+"use client";
 
+import { usePathname } from "next/navigation";
+import { isAdminLegacyPath } from "@/components/admin/v2/nav";
+import { AdminShellSkeleton } from "@/components/admin/v2/skeletons";
+import AdminLegacyLoading from "./legado/loading";
+
+// Este loading envolve todo /admin, inclusive o admin antigo, que nao usa a moldura nova.
+// Admin novo: skeleton com a forma final (docs/17 §2.7), nunca o spinner de tela cheia.
+// Admin antigo (/admin/legado): o mesmo estado de carregamento do proprio legado.
 export default function AdminLoading() {
-  return (
-    <main
-      aria-busy="true"
-      aria-live="polite"
-      className="grid min-h-screen place-items-center bg-background px-6 text-foreground"
-      role="status"
-    >
-      <div className="flex flex-col items-center gap-4 text-center">
-        <span className="grid size-12 place-items-center rounded-full border border-border bg-muted/30">
-          <LoaderCircle className="size-5 animate-spin text-primary" />
-        </span>
-        <div>
-          <p className="text-sm font-semibold">Carregando o CRM Bunker707...</p>
-          <p className="mt-1 text-xs text-muted-foreground">Preparando catalogo, estrutura e configuracoes.</p>
-        </div>
-      </div>
-    </main>
-  );
+  const pathname = usePathname();
+
+  return isAdminLegacyPath(pathname) ? <AdminLegacyLoading /> : <AdminShellSkeleton />;
 }

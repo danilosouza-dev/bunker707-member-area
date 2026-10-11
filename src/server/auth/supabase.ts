@@ -20,7 +20,7 @@ export async function createSupabaseServerClient() {
           });
         } catch {
           // Server Components can read cookies but cannot always write them.
-          // Middleware refreshes sessions and applies Set-Cookie headers.
+          // Proxy (proxy.ts) refreshes sessions and applies Set-Cookie headers.
         }
       }
     }
