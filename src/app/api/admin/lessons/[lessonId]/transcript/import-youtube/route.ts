@@ -7,7 +7,8 @@ import {
   prepareYouTubeTranscript,
   saveLessonTranscript
 } from "@/server/ai/transcripts";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type RouteContext = { params: Promise<{ lessonId: string }> };
@@ -17,13 +18,13 @@ export const maxDuration = 60;
 export const revalidate = 0;
 
 export async function POST(request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("catalog.write");
 
   if (auth.response || !auth.user) return auth.response;
   const { lessonId } = await context.params;
 
   try {
-    const payload = await request.json().catch(() => ({})) as { language?: unknown };
+    const payload = await readBoundedJson<{ language?: unknown }>(request, 256_000).catch(() => ({} as { language?: unknown }));
     const lesson = await loadLessonVideo(lessonId);
     const transcript = await prepareYouTubeTranscript(
       lesson.video,

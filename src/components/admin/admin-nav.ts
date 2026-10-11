@@ -57,7 +57,7 @@ export function getAdminNavLabel(view: AdminView) {
   return (
     adminMainNavItems.find((item) => item.id === view)?.label ??
     adminSettingsNavGroup.children.find((item) => item.id === view)?.label ??
-    "CRM Admin"
+    "Admin Bunker707"
   );
 }
 

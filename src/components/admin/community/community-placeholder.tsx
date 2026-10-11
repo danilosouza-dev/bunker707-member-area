@@ -9,10 +9,9 @@ export function CommunityPlaceholder() {
   return (
     <section className="space-y-6 text-zinc-100">
       <div className="min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">CRM / Comunidade</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-normal text-white">Comunidade</h1>
+        <h1 className="text-3xl font-semibold tracking-normal text-white">Comunidade</h1>
         <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-zinc-500">
-          A comunidade fica visivel na navegacao do CRM, mas sera implementada em uma fase propria com categorias, topicos, mural e conversas.
+          A comunidade fica visível na navegação do admin, mas será implementada em uma fase própria com categorias, tópicos, mural e conversas.
         </p>
       </div>
 
@@ -31,7 +30,7 @@ export function CommunityPlaceholder() {
               Base reservada para a comunidade dos alunos Bunker707.
             </h2>
             <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-zinc-500">
-              Quando entrar no escopo, esta area deve controlar comunidades, categorias, topicos, regras de participacao e integracao com moderacao.
+              Quando for desenvolvida, esta área deve controlar comunidades, categorias, tópicos, regras de participação e integração com moderação.
             </p>
           </div>
 

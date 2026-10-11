@@ -2,14 +2,6 @@
 
 import * as React from "react";
 import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  XAxis,
-  YAxis
-} from "recharts";
-import {
-  Activity,
   Filter,
   Search,
   TrendingUp,
@@ -22,7 +14,6 @@ import {
   Card,
   CardContent
 } from "@/components/ui/card";
-import { ChartContainer, type ChartConfig } from "@/components/ui/chart";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -63,11 +54,11 @@ const statusLabels: Record<AdminEntitlementStatus, string> = {
   suspended: "Suspenso"
 };
 
-const studentMetricFallbackSeries = {
-  engagement: [28, 35, 42, 48, 56, 63, 71],
-  members: [312, 338, 361, 389, 422, 456, 487],
-  progress: [36, 41, 46, 52, 57, 61, 66]
-};
+// Estado vazio honesto (docs/17 §1.2, regra 2): sem dado real, o card mostra
+// "—" e a legenda; nada de séries de exemplo, pontuação inventada nem caixa
+// de gráfico vazia. Só ficam os cards com caminho de dado real.
+const EMPTY_VALUE = "—";
+const EMPTY_KPI_CAPTION = "Sem dados no período";
 
 function clampPercent(value: number) {
   if (!Number.isFinite(value)) {
@@ -79,80 +70,10 @@ function clampPercent(value: number) {
 
 function getAverageProgress(courses: AdminStudentCourse[]) {
   if (courses.length === 0) {
-    return 0;
+    return null;
   }
 
   return clampPercent(courses.reduce((total, course) => total + course.progressPercent, 0) / courses.length);
-}
-
-function getStudentEngagementScore(student: AdminStudent) {
-  if (student.status !== "active") {
-    return 0;
-  }
-
-  const progressScore = getAverageProgress(student.courses) * 0.68;
-  const accessScore = Math.min(32, (student.accessCount ?? 0) * 1.8);
-
-  return clampPercent(progressScore + accessScore);
-}
-
-function getEngagementLabel(score: number) {
-  if (score <= 5) {
-    return "Nenhum";
-  }
-
-  if (score < 30) {
-    return "Baixo";
-  }
-
-  if (score < 58) {
-    return "Medio";
-  }
-
-  if (score < 82) {
-    return "Alto";
-  }
-
-  return "Altissimo";
-}
-
-function buildMetricSeries(values: number[], fallback: number[]) {
-  const normalizedValues = values
-    .filter((value) => Number.isFinite(value))
-    .slice(0, fallback.length)
-    .map(clampPercent);
-
-  if (normalizedValues.length === 0) {
-    return fallback;
-  }
-
-  if (normalizedValues.length === fallback.length) {
-    return normalizedValues;
-  }
-
-  const [firstValue] = normalizedValues;
-  const missingCount = fallback.length - normalizedValues.length;
-  const leadingValues = fallback.slice(0, missingCount).map((value, index) => {
-    const progress = (index + 1) / (missingCount + 1);
-    return clampPercent(value + (firstValue - value) * progress);
-  });
-
-  return [...leadingValues, ...normalizedValues];
-}
-
-function buildMemberSeries(totalStudents: number) {
-  if (totalStudents <= 0) {
-    return studentMetricFallbackSeries.members;
-  }
-
-  return studentMetricFallbackSeries.members.map((_, index, series) => {
-    const progress = (index + 1) / series.length;
-    return Math.max(1, Math.round(totalStudents * (0.62 + progress * 0.38)));
-  });
-}
-
-function formatPercent(value: number) {
-  return `${clampPercent(value)}%`;
 }
 
 export function StudentsCommandCenter({
@@ -172,22 +93,12 @@ export function StudentsCommandCenter({
   const totalStudents = students.length;
   const activeStudents = students.filter((student) => student.status === "active").length;
   const averageProgress = getAverageProgress(students.flatMap((student) => student.courses));
-  const averageEngagement = students.length > 0
-    ? clampPercent(students.reduce((total, student) => total + getStudentEngagementScore(student), 0) / students.length)
-    : 0;
-  const engagementLabel = getEngagementLabel(averageEngagement);
-  const engagementSeries = buildMetricSeries(students.map(getStudentEngagementScore), studentMetricFallbackSeries.engagement);
-  const progressSeries = buildMetricSeries(
-    students.map((student) => getAverageProgress(student.courses)),
-    studentMetricFallbackSeries.progress
-  );
-  const memberSeries = buildMemberSeries(totalStudents);
 
   return (
     <section className="space-y-6 text-zinc-100">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">CRM / Relacionamento</p>
+          <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">Relacionamento</p>
           <h1 className="mt-2 text-3xl font-semibold tracking-normal text-white">Alunos</h1>
         </div>
         <Button
@@ -267,33 +178,18 @@ export function StudentsCommandCenter({
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <MetricCard
-          chartColor="#e50914"
           detail={`${activeStudents} com acesso ativo`}
           icon={Users}
           label="Total de alunos"
-          series={memberSeries}
-          tone={activeStudents > 0 ? "green" : "neutral"}
           value={totalStudents.toString()}
         />
         <MetricCard
-          chartColor="#22c55e"
-          detail="Media dos produtos liberados"
+          detail={averageProgress === null ? EMPTY_KPI_CAPTION : "Média dos produtos liberados"}
           icon={TrendingUp}
-          label="Progresso medio"
-          series={progressSeries}
-          tone="green"
-          value={formatPercent(averageProgress)}
-        />
-        <MetricCard
-          chartColor="#f59e0b"
-          detail={`${averageEngagement} pontos de atividade`}
-          icon={Activity}
-          label="Engajamento"
-          series={engagementSeries}
-          tone={averageEngagement >= 58 ? "green" : averageEngagement >= 30 ? "amber" : "red"}
-          value={engagementLabel}
+          label="Progresso médio"
+          value={averageProgress === null ? EMPTY_VALUE : `${averageProgress}%`}
         />
       </div>
     </section>
@@ -335,45 +231,16 @@ function FilterSelect({
 }
 
 function MetricCard({
-  chartColor,
   detail,
   icon: Icon,
   label,
-  series,
-  tone = "neutral",
   value
 }: {
-  chartColor: string;
   detail: string;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  series: number[];
-  tone?: "amber" | "green" | "neutral" | "red";
   value: string;
 }) {
-  const gradientId = React.useId().replace(/:/g, "");
-  const toneClassName = tone === "green"
-    ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-200"
-    : tone === "amber"
-      ? "border-amber-400/25 bg-amber-500/10 text-amber-200"
-      : tone === "red"
-        ? "border-red-400/25 bg-red-500/10 text-red-200"
-        : "border-white/10 bg-white/[0.055] text-zinc-300";
-  const chartData = series.map((item, index) => ({
-    label: `${index + 1}`,
-    value: item
-  }));
-  const firstValue = series[0] ?? 0;
-  const lastValue = series.at(-1) ?? firstValue;
-  const trendLabel = Math.abs(lastValue - firstValue) <= 3 ? "Estavel" : lastValue > firstValue ? "Subindo" : "Oscilando";
-  const yMax = Math.max(10, ...series);
-  const chartConfig = {
-    value: {
-      color: chartColor,
-      label
-    }
-  } satisfies ChartConfig;
-
   return (
     <Card className="overflow-hidden rounded-[8px] border-white/10 bg-[#17181d] py-0 shadow-[0_18px_50px_rgba(0,0,0,0.22)] ring-1 ring-white/[0.025]">
       <CardContent className="p-5">
@@ -386,53 +253,6 @@ function MetricCard({
             <p className="mt-8 truncate text-3xl font-semibold tracking-normal text-white">{value}</p>
             <p className="mt-1 truncate text-xs font-semibold text-zinc-500">{detail}</p>
           </div>
-        </div>
-
-        <div className="mt-5 rounded-[8px] border border-white/10 bg-[#111217] p-2.5">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <span className={`inline-flex h-6 items-center rounded-full border px-2 text-[11px] font-semibold ${toneClassName}`}>
-              {trendLabel}
-            </span>
-            <span className="text-[11px] font-semibold text-zinc-600">Tendencia</span>
-          </div>
-          <ChartContainer
-            className="h-20 w-full"
-            config={chartConfig}
-            initialDimension={{ width: 320, height: 80 }}
-          >
-            <AreaChart data={chartData} margin={{ bottom: 0, left: 0, right: 4, top: 8 }}>
-              <defs>
-                <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor={chartColor} stopOpacity={0.34} />
-                  <stop offset="62%" stopColor={chartColor} stopOpacity={0.11} />
-                  <stop offset="100%" stopColor={chartColor} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke={chartColor} strokeDasharray="4 6" strokeOpacity={0.12} vertical />
-              <XAxis
-                axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
-                dataKey="label"
-                interval="preserveStartEnd"
-                minTickGap={18}
-                tick={{ fill: "rgba(161,161,170,0.68)", fontSize: 10 }}
-                tickLine={false}
-              />
-              <YAxis
-                domain={[0, Math.ceil(yMax * 1.15)]}
-                hide
-              />
-              <Area
-                activeDot={{ r: 4, stroke: chartColor, strokeWidth: 2 }}
-                dataKey="value"
-                dot={false}
-                fill={`url(#${gradientId})`}
-                stroke="var(--color-value)"
-                strokeLinecap="round"
-                strokeWidth={2.4}
-                type="monotone"
-              />
-            </AreaChart>
-          </ChartContainer>
         </div>
       </CardContent>
     </Card>

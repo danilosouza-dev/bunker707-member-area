@@ -1,24 +1,33 @@
 import { NextResponse } from "next/server";
 import type { AdminCommentStatus } from "@/lib/platform-types";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import {
   LessonCommentStoreError,
   moderateLessonComment
 } from "@/server/comments/comment-store";
+import { readBoundedJson } from "@/server/http/bounded-json";
+import { jsonRouteError } from "@/server/http/route-errors";
 
 type AdminCommentRouteContext = {
   params: Promise<{ commentId: string }>;
 };
 
 export async function PATCH(request: Request, context: AdminCommentRouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("community.moderate");
 
   if (auth.response || !auth.user) {
     return auth.response;
   }
 
   const { commentId } = await context.params;
-  const payload = await request.json() as { note?: unknown; status?: unknown };
+  let payload: { note?: unknown; status?: unknown };
+
+  try {
+    payload = await readBoundedJson<{ note?: unknown; status?: unknown }>(request, 64_000);
+  } catch (error) {
+    return jsonRouteError(error, "Nao foi possivel ler os dados enviados.", 400);
+  }
+
   const status = typeof payload.status === "string" ? payload.status as AdminCommentStatus : undefined;
   const note = typeof payload.note === "string" ? payload.note : undefined;
 

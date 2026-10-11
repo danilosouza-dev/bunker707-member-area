@@ -5,7 +5,7 @@ import {
   pollAIAccountLink,
   submitAIAccountLinkCallback
 } from "@/server/ai/account-link";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type RouteContext = { params: Promise<{ sessionId: string }> };
@@ -20,7 +20,7 @@ function noStore(response: NextResponse) {
 }
 
 export async function GET(_request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("admin.read");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
 
@@ -33,7 +33,7 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function POST(request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
 
@@ -49,7 +49,7 @@ export async function POST(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
 

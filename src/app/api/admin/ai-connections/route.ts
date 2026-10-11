@@ -5,7 +5,7 @@ import {
   listAIProviderConnections,
   saveAIProviderAPIConnection
 } from "@/server/ai/provider-connections";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ function noStore(response: NextResponse) {
 }
 
 export async function GET() {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("admin.read");
 
   if (auth.response) return noStore(auth.response);
 
@@ -40,7 +40,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
 

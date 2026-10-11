@@ -152,7 +152,7 @@ export function AIAgentsCommandCenter({
   return (
     <section className="space-y-6 text-zinc-100">
       <div className="min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">CRM / IA</p>
+        <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">IA</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-normal text-white">Agentes de IA</h1>
         <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-zinc-500">
           Configure o Tutor IA, a IA Diretor e os demais agentes. Modelos, limites, conexoes e consumo ficam centralizados aqui.
@@ -178,7 +178,7 @@ export function AIAgentsCommandCenter({
                 <Bot className="mx-auto size-10 text-zinc-700" />
                 <p className="mt-4 text-lg font-semibold text-white">Nenhum agente configurado.</p>
                 <p className="mx-auto mt-2 max-w-xl text-sm font-medium leading-6 text-zinc-500">
-                  Crie agentes agora para deixar os escopos definidos antes de conectar transcricoes, embeddings e conversas.
+                  Crie agentes agora para definir onde cada um atua antes de conectar transcrições, embeddings e conversas.
                 </p>
               </div>
             ) : (
@@ -197,7 +197,7 @@ export function AIAgentsCommandCenter({
                       </div>
                       <p className="mt-2 line-clamp-2 text-sm font-medium leading-6 text-zinc-500">{agent.instructions}</p>
                       <p className="mt-2 text-xs font-semibold text-zinc-600">
-                        {agent.productIds.length > 0 ? `${agent.productIds.length} produto(s) vinculados` : "Escopo geral"}
+                        {agent.productIds.length > 0 ? `${agent.productIds.length} produto(s) vinculados` : "Todos os produtos"}
                         {agent.autoReply ? " / auto resposta ligada" : ""}
                       </p>
                     </div>
@@ -257,7 +257,7 @@ export function AIAgentsCommandCenter({
                 />
               </label>
               <label className="grid gap-1.5">
-                <span className="text-xs font-semibold text-zinc-500">Escopo</span>
+                <span className="text-xs font-semibold text-zinc-500">Onde aparece</span>
                 <Select onValueChange={(value) => updateScope(value as AdminAIAgentScope)} value={scope}>
                   <SelectTrigger className="h-10 rounded-[8px] border-[#2a2d35] bg-[#111217] text-sm font-semibold text-zinc-200">
                     <SelectValue />

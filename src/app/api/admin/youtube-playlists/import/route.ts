@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import type { YouTubeCourseImportCommitInput } from "@/lib/youtube-course-import";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
+import { invalidateCatalog } from "@/server/catalog/cache";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { importYouTubePlaylistAsCourse } from "@/server/video/youtube-playlist-import";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("catalog.write");
 
   if (auth.response) {
     return auth.response;
@@ -31,6 +33,7 @@ export async function POST(request: Request) {
     }
 
     const result = await importYouTubePlaylistAsCourse(payload as YouTubeCourseImportCommitInput);
+    invalidateCatalog({ from: "route" });
     return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" }
     });

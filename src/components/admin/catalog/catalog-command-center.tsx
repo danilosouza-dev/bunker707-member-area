@@ -65,17 +65,23 @@ const filterOptions: Array<{ label: string; value: CatalogFilter }> = [
   { label: "Bloqueados", value: "locked" }
 ];
 
+// O servidor envia o carimbo de atualização da plataforma (ou vazio);
+// sem data válida, não mostramos nada.
 function formatUpdatedAt(value: string) {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    return value;
+    return null;
   }
 
   return new Intl.DateTimeFormat("pt-BR", {
     day: "2-digit",
     month: "short"
   }).format(date);
+}
+
+function getAccessLabel(record: AdminContentRecord) {
+  return record.access === "Drip" ? "Liberação programada" : record.access;
 }
 
 function getAccessModelLabel(record: AdminContentRecord) {
@@ -310,7 +316,7 @@ function CatalogCommandCenter({
                         {getCommerceLabel(activeRecord)}
                       </Badge>
                       <Badge className={getStatusClassName(activeRecord)} variant="outline">
-                        {activeRecord.access}
+                        {getAccessLabel(activeRecord)}
                       </Badge>
                     </>
                   ) : null}
@@ -391,7 +397,7 @@ function CatalogCommandCenter({
         </Card>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-          <StatCard detail={`${filteredRecords.length} no recorte`} icon={LibraryBig} label="Itens ativos" value={String(records.length)} />
+          <StatCard detail={`${filteredRecords.length} no recorte`} icon={LibraryBig} label="Itens cadastrados" value={String(records.length)} />
           <StatCard detail={`${includedCount} internos`} icon={CircleDollarSign} label="Produtos vendaveis" value={String(sellableCount)} />
           <StatCard detail={`${totalModules} modulos`} icon={BookOpen} label="Aulas cadastradas" value={String(totalLessons)} />
           <StatCard detail="para revisar" icon={LockKeyhole} label="Bloqueios" value={String(lockedCount)} />
@@ -513,13 +519,15 @@ function CatalogCommandCenter({
                         <CoverArt className="h-12 w-9 shrink-0" record={record} />
                         <span className="min-w-0">
                           <span className="block truncate text-sm font-semibold text-white">{record.content.title}</span>
-                          <span className="mt-1 block text-xs font-medium text-zinc-500">{formatUpdatedAt(record.updatedAt)}</span>
+                          {formatUpdatedAt(record.updatedAt) ? (
+                            <span className="mt-1 block text-xs font-medium text-zinc-500">{formatUpdatedAt(record.updatedAt)}</span>
+                          ) : null}
                         </span>
                       </button>
                     </TableCell>
                     <TableCell>
                       <Badge className={getStatusClassName(record)} variant="outline">
-                        {record.access}
+                        {getAccessLabel(record)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm font-medium text-zinc-400">

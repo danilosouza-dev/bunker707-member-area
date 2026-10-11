@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { startAIAccountLink } from "@/server/ai/account-link";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return auth.response;
 

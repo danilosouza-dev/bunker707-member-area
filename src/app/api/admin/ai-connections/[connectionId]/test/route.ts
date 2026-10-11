@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { generateAITextWithFallback, getAIProviderRuntimeCandidateForConnection } from "@/server/ai/provider-pool";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type RouteContext = { params: Promise<{ connectionId: string }> };
@@ -11,7 +11,7 @@ export const maxDuration = 60;
 export const revalidate = 0;
 
 export async function POST(_request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return auth.response;
 

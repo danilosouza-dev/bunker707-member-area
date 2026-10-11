@@ -39,15 +39,19 @@ import type {
   HomeRow,
   HomeSectionConfig,
   HomeSectionContentSource,
+  PlatformBrandingConfig,
   RowVisibility
 } from "@/lib/platform-types";
 
 type HomeShowcaseEditorProps = {
+  branding: PlatformBrandingConfig;
   courseModules: CourseModule[];
   formationCourses: ContentItem[];
   hero: HomeHeroConfig;
   homeRows: HomeRow[];
   homeSectionConfigs: HomeSectionConfig[];
+  /** Versao das fileiras lidas (platform_settings.homeSections.updated_at); null = nunca publicada. */
+  homeSectionsUpdatedAt?: string | null;
   onBack: () => void;
   onPublished: (data: AdminDashboardData) => void;
   records: AdminContentRecord[];
@@ -74,7 +78,7 @@ const automaticOptions: Array<{
     visibility: "students"
   },
   {
-    description: "Produtos liberados pelos entitlements ativos do aluno.",
+    description: "Produtos liberados pelos acessos ativos do aluno.",
     layout: "vertical",
     sectionType: "content_carousel",
     source: "entitlement_products",
@@ -116,7 +120,7 @@ function getSectionSourceLabel(section: HomeSectionConfig) {
   if (section.contentSource === "manual") return "Selecao manual";
   if (section.contentSource === "selected_content_structure") return "Conteudo em destaque";
   if (section.contentSource === "recent_lessons") return "Progresso do aluno";
-  if (section.contentSource === "entitlement_products") return "Entitlements ativos";
+  if (section.contentSource === "entitlement_products") return "Acessos ativos";
   if (section.contentSource === "sellable_products") return "Produtos vendaveis";
   return "Conteudos futuros";
 }
@@ -217,17 +221,22 @@ function resolvePreviewRows(
 }
 
 export function HomeShowcaseEditor({
+  branding,
   courseModules,
   formationCourses,
   hero,
   homeRows,
   homeSectionConfigs,
+  homeSectionsUpdatedAt,
   onBack,
   onPublished,
   records
 }: HomeShowcaseEditorProps) {
   const initialSections = useMemo(() => normalizeOrder(homeSectionConfigs), [homeSectionConfigs]);
   const [publishedSections, setPublishedSections] = useState(initialSections);
+  // Versao lida junto com as fileiras acima. Vai no PUT: se a Vitrine nova ou a tela Modulos do admin
+  // novo mudaram as fileiras depois disso, a rota responde 409 em vez de apagar a mudanca.
+  const [publishedVersion, setPublishedVersion] = useState(homeSectionsUpdatedAt);
   const [drafts, setDrafts] = useState(initialSections);
   const [selectedId, setSelectedId] = useState(initialSections[0]?.id ?? "");
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -249,6 +258,7 @@ export function HomeShowcaseEditor({
     [courseModules, drafts, formationCourses, homeRows, records]
   );
   const previewById = useMemo(() => new Map(previewRows.map((row) => [row.id, row])), [previewRows]);
+  const heroVisible = hero.enabled !== false && Boolean(hero.image);
   const sellableRecords = useMemo(
     () => records.filter((record) => record.commerceScope === "sellable_product"),
     [records]
@@ -379,17 +389,21 @@ export function HomeShowcaseEditor({
     setNotice(null);
     try {
       const response = await fetch("/api/admin/home-sections", {
-        body: JSON.stringify({ sections: normalizeOrder(drafts) }),
+        body: JSON.stringify({
+          sections: normalizeOrder(drafts),
+          ...(publishedVersion !== undefined ? { expectedUpdatedAt: publishedVersion } : {})
+        }),
         headers: { "Content-Type": "application/json" },
         method: "PUT"
       });
-      const payload = await response.json() as { data?: AdminDashboardData; error?: string };
+      const payload = await response.json() as { data?: AdminDashboardData; error?: string; sectionsUpdatedAt?: string | null };
       if (!response.ok || !payload.data) {
         throw new Error(payload.error ?? "Nao foi possivel publicar a Home.");
       }
       const canonical = normalizeOrder(payload.data.homeSectionConfigs);
       setPublishedSections(canonical);
       setDrafts(canonical);
+      setPublishedVersion(payload.sectionsUpdatedAt ?? payload.data.homeSectionsUpdatedAt ?? publishedVersion);
       setNotice({ message: "Home publicada com sucesso.", tone: "success" });
       onPublished(payload.data);
     } catch (error) {
@@ -440,7 +454,7 @@ export function HomeShowcaseEditor({
             <button className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-white/10 bg-white/[0.055] px-2.5 text-xs font-black text-zinc-200 transition hover:bg-white/10" onClick={() => setCreateOpen(true)} type="button"><Plus className="h-3.5 w-3.5" /> Criar</button>
           </div>
           <div className="border-b border-white/10 p-3">
-            <div className="flex items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] px-3 py-2 text-xs font-black text-zinc-300"><Layers3 className="h-4 w-4" /> Banner <span className="ml-auto text-[10px] text-zinc-600">fixo</span></div>
+            <div className="flex items-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.035] px-3 py-2 text-xs font-black text-zinc-300"><Layers3 className="h-4 w-4" /> Banner <span className="ml-auto text-[10px] text-zinc-600">{heroVisible ? "fixo" : "removido"}</span></div>
           </div>
           <div className="space-y-2 p-3">
             {drafts.length === 0 ? <div className="rounded-[8px] border border-dashed border-white/15 p-5 text-center"><p className="text-xs font-bold text-zinc-400">Nenhuma secao</p><button className="mt-3 text-xs font-black text-white underline" onClick={() => setCreateOpen(true)} type="button">Criar primeira secao</button></div> : null}
@@ -483,7 +497,7 @@ export function HomeShowcaseEditor({
           <div className="max-h-[calc(100dvh-13rem)] overflow-y-auto">
             <div className="pointer-events-none relative min-h-[700px] min-w-[680px] origin-top-left overflow-hidden bg-[#141414]">
               <HeroSection hero={hero} />
-              <div className="relative z-20 -mt-24 space-y-20 pb-20">
+              <div className={`relative z-20 space-y-20 pb-20 ${heroVisible ? "-mt-24" : "pt-16"}`}>
                 {previewRows.map((row) => (
                   <div className={`pointer-events-auto relative rounded-[8px] outline outline-2 transition ${row.id === selected?.id ? "outline-red-500/75" : "outline-transparent hover:outline-white/25"}`} key={row.id} onClick={() => setSelectedId(row.id)}>
                     {row.variant === "course_modules" && row.course ? (
@@ -496,7 +510,7 @@ export function HomeShowcaseEditor({
                   </div>
                 ))}
               </div>
-              <MemberFooter />
+              <MemberFooter branding={branding} />
             </div>
           </div>
         </div>

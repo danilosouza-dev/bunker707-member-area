@@ -109,10 +109,10 @@ export function IntegrationsCommandCenter({
   return (
     <section className="space-y-6 text-zinc-100">
       <div className="min-w-0">
-        <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">CRM / Configuracoes</p>
+        <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">Configurações</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-normal text-white">Integracoes</h1>
         <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-zinc-500">
-          Configure provedores externos como entrada de eventos. A liberacao final continua sendo feita por entitlements internos da Bunker707.
+          Configure provedores externos como entrada de eventos. A liberação final continua sendo feita pelos acessos internos da Bunker707.
         </p>
       </div>
 

@@ -313,7 +313,7 @@ function validatePayload(payload: StudentAccessPayload) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiAdmin({ roles: ["owner", "admin"] });
 
   if (auth.response) {
     return auth.response;

@@ -30,6 +30,7 @@ type PersonalizationCommandCenterProps = {
   records: AdminContentRecord[];
   visiblePreviewRecords: AdminContentRecord[];
   personalizationItemsCount: number;
+  onOpenAppearance: () => void;
   onOpenShowcase: () => void;
   onOpenLogin: () => void;
   onOpenProducts: () => void;
@@ -267,6 +268,7 @@ function ProductPersonalizationCard({
 }
 
 export function PersonalizationCommandCenter({
+  onOpenAppearance,
   onOpenContent,
   onOpenLogin,
   onOpenProducts,
@@ -280,6 +282,16 @@ export function PersonalizationCommandCenter({
   const closedRecords = visiblePreviewRecords.filter((record) => record.content.accessModel !== "free").length;
   const freeRecords = visiblePreviewRecords.length - closedRecords;
   const destinationCards: DestinationCard[] = [
+    {
+      actionLabel: "Editar identidade",
+      description: "Capa da home e logo da plataforma: adicione, troque ou remova.",
+      href: "/",
+      icon: ImageIcon,
+      metric: "Capa e logo",
+      onOpen: onOpenAppearance,
+      status: "Publicado",
+      title: "Identidade visual"
+    },
     {
       actionLabel: "Abrir vitrine",
       description: "Hero, fileiras, ordem e regras de visibilidade da home do aluno.",
@@ -358,7 +370,7 @@ export function PersonalizationCommandCenter({
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-sm">
                   <span className="text-muted-foreground">Fonte de acesso</span>
-                  <span className="font-medium text-foreground">Entitlements internos</span>
+                  <span className="font-medium text-foreground">Acessos internos</span>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-sm">
                   <span className="text-muted-foreground">Arquivos visuais</span>
@@ -370,7 +382,7 @@ export function PersonalizationCommandCenter({
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {destinationCards.map((destination) => (
           <DestinationCardItem destination={destination} key={destination.title} />
         ))}

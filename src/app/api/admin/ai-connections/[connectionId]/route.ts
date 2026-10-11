@@ -6,7 +6,7 @@ import {
   updateAIProviderConnection,
   getAIProviderConnectionRow
 } from "@/server/ai/provider-connections";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type RouteContext = { params: Promise<{ connectionId: string }> };
@@ -21,7 +21,7 @@ function noStore(response: NextResponse) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
 
@@ -52,7 +52,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
 

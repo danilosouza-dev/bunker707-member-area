@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { processLessonAIProfile } from "@/server/ai/lesson-profile";
 import { getLessonTranscriptStatus } from "@/server/ai/transcripts";
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type RouteContext = { params: Promise<{ lessonId: string }> };
@@ -10,7 +10,7 @@ type RouteContext = { params: Promise<{ lessonId: string }> };
 export const maxDuration = 60;
 
 export async function POST(_request: Request, context: RouteContext) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("catalog.write");
 
   if (auth.response) return auth.response;
   const { lessonId } = await context.params;

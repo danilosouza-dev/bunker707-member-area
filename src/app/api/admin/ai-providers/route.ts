@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireApiAdmin } from "@/server/auth/guards";
+import { requireApiRole } from "@/server/auth/permissions";
 import {
   listAIProviderConfigs,
   removeAIProviderConfig,
@@ -18,7 +18,7 @@ function noStore(response: NextResponse) {
 }
 
 export async function GET() {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("admin.read");
 
   if (auth.response) return noStore(auth.response);
 
@@ -30,7 +30,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
 
@@ -56,7 +56,7 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const auth = await requireApiAdmin();
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
 
