@@ -239,14 +239,16 @@ test("antes de publicar: aponta as fileiras que o servidor recusaria", () => {
       section({ id: "a", order: 0 }),
       section({ id: "b", order: 1, title: "Outra vitrine" }),
       section({ contentSource: "manual", id: "c", itemIds: [], order: 2, title: "Vazia" }),
-      section({ contentSource: "selected_content_structure", id: "d", layout: "compact", order: 3, sectionType: "content_structure", sourceContentId: "sumiu", title: "Destaque" })
+      section({ contentSource: "selected_content_structure", id: "d", layout: "compact", order: 3, sectionType: "content_structure", sourceContentId: "sumiu", title: "Destaque" }),
+      section({ contentSource: "manual", id: "e", itemIds: ["curso-prompts", "sumiu"], order: 4, title: "Para você" })
     ],
     productsById
   );
 
   assert.deepEqual(
     problems.map((problem) => problem.sectionId),
-    ["b", "c", "d"]
+    ["b", "c"],
+    "produto fora de venda nao trava: a limpeza tira antes (d sai inteira, e fica sem o produto)"
   );
   assert.match(problems[0].message, /repete uma fileira automática/);
   assert.equal(model.findSectionProblems(editorData().sections, productsById).length, 0, "ordem padrao e publicavel");

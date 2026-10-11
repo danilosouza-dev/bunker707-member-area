@@ -11,7 +11,7 @@ import type {
   LessonCommentStatus
 } from "@/lib/platform-types";
 import { requireLessonAccess } from "@/server/access/lesson-access";
-import { getUserDisplayName } from "@/server/auth/session";
+import { getAdminRoleForUser, getUserDisplayName, type AdminRole } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import {
   containsBlockedTerm,
@@ -215,6 +215,19 @@ async function getCommentRowsForLesson(
   ));
 }
 
+/**
+ * Etiqueta de quem comenta, gravada no comentario: equipe que ensina (dono, admin, editor) aparece como
+ * "Professor"; suporte e analista como "Moderador"; quem nao e da equipe, "Aluno". Comentarios antigos
+ * mantem o que foi gravado. Equipe sem papel legivel (falha ao ler) continua "Professor", como antes.
+ */
+export function getCommentAuthorRole(isAdmin: boolean, adminRole: AdminRole | null): LessonCommentAuthorRole {
+  if (!isAdmin) {
+    return "student";
+  }
+
+  return adminRole === "support" || adminRole === "analyst" ? "moderator" : "producer";
+}
+
 export async function listLessonComments({
   contentId,
   lessonId,
@@ -354,7 +367,7 @@ export async function createLessonComment({
 
   const displayName = getUserDisplayName(user);
   const authorName = profileResult.data?.full_name?.trim() || displayName.fullName;
-  const authorRole: LessonCommentAuthorRole = access.isAdmin ? "producer" : "student";
+  const authorRole = getCommentAuthorRole(access.isAdmin, access.isAdmin ? await getAdminRoleForUser(user.id) : null);
   const insertResult = await supabase
     .from("lesson_comments")
     .insert({

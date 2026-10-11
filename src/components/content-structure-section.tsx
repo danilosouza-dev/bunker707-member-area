@@ -312,7 +312,7 @@ export function ContentStructureSection({
             const href = formationCourseOpenMode === "course_lesson_format" && firstModule
               ? `/conteudo/${course.id}/aulas/${firstModule.id}`
               : `/conteudo/${course.id}`;
-            const releaseNotice = getReleaseRuleNotice(course.releaseRule, "curso");
+            const releaseNotice = getReleaseRuleNotice(course.releaseRule, "curso", course.releaseState);
             const isLocked = showLockedStates && Boolean(item.isLocked || course.isLocked || releaseNotice?.isLocked);
             const lockedDetail = item.isLocked
               ? "Este curso faz parte de um conteudo que ainda nao esta liberado para este aluno."
@@ -349,7 +349,7 @@ export function ContentStructureSection({
           title={moduleRowTitle}
         >
           {modules.map((module) => {
-            const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo");
+            const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo", module.releaseState);
             const hasLessons = module.lessons.length > 0;
             const isLocked = Boolean((showLockedStates && (item.isLocked || releaseNotice?.isLocked)) || !hasLessons);
             const lockedDetail = item.isLocked

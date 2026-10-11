@@ -150,7 +150,7 @@ function CourseModuleHomeCard({
   module: CourseModule;
   onOpenCourseDetails: () => void;
 }) {
-  const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo");
+  const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo", module.releaseState);
   const isLocked = Boolean(course.isLocked || releaseNotice?.isLocked);
   const href = withAccessPreviewParam(`/conteudo/${course.id}/aulas/${module.id}`, accessPreviewMode);
   const imageStateClass = isLocked
@@ -303,7 +303,7 @@ export function CourseModulesHomeSection({
   }
 
   const courseHref = withAccessPreviewParam(`/conteudo/${course.id}`, accessPreviewMode);
-  const releaseNotice = getReleaseRuleNotice(course.releaseRule, course.kind.toLowerCase());
+  const releaseNotice = getReleaseRuleNotice(course.releaseRule, course.kind.toLowerCase(), course.releaseState);
   const isReleaseLocked = Boolean(releaseNotice?.isLocked);
   const isCourseLocked = Boolean(course.isLocked || isReleaseLocked);
   const actionLabel = course.isLocked ? course.purchaseLabel ?? "Comprar" : isReleaseLocked ? "Bloqueado" : "Acessar";
@@ -385,8 +385,8 @@ export function CourseModulesHomeSection({
               {title}
             </h2>
             {isReleaseLocked ? (
-              <p className="mt-2 line-clamp-2 max-w-md text-xs font-semibold leading-5 text-zinc-400">
-                {releaseNotice?.detail ?? "Disponivel de acordo com a regra de entrega."}
+              <p className="mt-2 line-clamp-2 max-w-md text-xs font-semibold leading-5 text-zinc-400" suppressHydrationWarning>
+                {releaseNotice?.detail ?? "Disponível de acordo com a regra de entrega."}
               </p>
             ) : null}
             <button

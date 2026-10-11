@@ -6,7 +6,8 @@
 // O formato gravado continua o de hoje (platform_settings: homeSections, hero, branding), salvo
 // pelas rotas PUT /api/admin/home-sections e PUT /api/admin/appearance. As regras abaixo espelham
 // as do servidor (validateHomeSectionConfigs e getDefaultHomeSectionConfigs em platform-store.ts)
-// para o erro aparecer antes de publicar; o servidor continua sendo quem decide.
+// para o erro aparecer antes de publicar; o servidor continua sendo quem decide. A limpeza de produto
+// que saiu de venda (pruneHomeSectionRefs) e a mesma nos dois lados: o servidor importa daqui.
 
 import type {
   ContentKind,
@@ -703,9 +704,139 @@ export function duplicateSection(sections: readonly HomeSectionConfig[], section
   return { newId: copy.id, sections: next.map((section, order) => ({ ...section, order })) };
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * Produto que saiu de venda (excluido ou fora de venda)
+ * ---------------------------------------------------------------------------------------------- */
+
+export type RemovedSectionRef = {
+  /** Produtos tirados da fileira (na fileira de modulos, o produto dela; vazio se ela nao tinha). */
+  productIds: string[];
+  /** true = a fileira inteira saiu (fileira de modulos sem produto, ou escolha manual que ficou vazia). */
+  sectionRemoved: boolean;
+  sectionId: string;
+  title: string;
+};
+
+export type PrunedSections = { removed: RemovedSectionRef[]; sections: HomeSectionConfig[] };
+
+function isModuleRowSection(section: Pick<HomeSectionConfig, "contentSource" | "sectionType">) {
+  return section.contentSource === "selected_content_structure" || section.sectionType === "content_structure";
+}
+
+/**
+ * Regra unica para produto que nao esta mais a venda, a mesma que a home do aluno ja aplica
+ * (resolveConfiguredHomeRows ignora o que nao esta a venda): sai da escolha manual; a fileira de
+ * modulos dele sai inteira; a escolha manual que fica vazia por causa disso sai tambem. Escolha
+ * manual que ja estava vazia fica (e problema do produtor, ver findSectionProblems). Usada na
+ * Vitrine (ao abrir e ao publicar), em publishHomeSections e ao excluir um produto.
+ */
+export function pruneHomeSectionRefs(
+  sections: readonly HomeSectionConfig[],
+  isAvailable: (productId: string) => boolean
+): PrunedSections {
+  const removed: RemovedSectionRef[] = [];
+  const kept = normalizeSectionOrder(sections).flatMap((section): HomeSectionConfig[] => {
+    const title = section.title.trim() || "Fileira sem título";
+
+    if (section.contentSource === "manual") {
+      const gone = Array.from(new Set(section.itemIds.filter((id) => !isAvailable(id))));
+
+      if (gone.length === 0) {
+        return [section];
+      }
+
+      const itemIds = section.itemIds.filter((id) => isAvailable(id));
+      const sectionRemoved = itemIds.length === 0;
+      removed.push({ productIds: gone, sectionId: section.id, sectionRemoved, title });
+
+      return sectionRemoved ? [] : [{ ...section, itemIds }];
+    }
+
+    if (isModuleRowSection(section)) {
+      if (section.sourceContentId && isAvailable(section.sourceContentId)) {
+        return [section];
+      }
+
+      removed.push({
+        productIds: section.sourceContentId ? [section.sourceContentId] : [],
+        sectionId: section.id,
+        sectionRemoved: true,
+        title
+      });
+
+      return [];
+    }
+
+    return [section];
+  });
+
+  return { removed, sections: kept.map((section, order) => ({ ...section, order })) };
+}
+
+/** pruneHomeSectionRefs com os produtos da Vitrine: fica so o que esta a venda (sellable). */
+export function pruneUnavailableSectionRefs(
+  sections: readonly HomeSectionConfig[],
+  productsById: ReadonlyMap<string, Pick<StorefrontProduct, "sellable">>
+): PrunedSections {
+  return pruneHomeSectionRefs(sections, (id) => productsById.get(id)?.sellable === true);
+}
+
+function listSectionTitles(titles: readonly string[]) {
+  const quoted = titles.map((title) => `“${title}”`);
+
+  if (quoted.length > 3) {
+    return `${quoted.length} fileiras`;
+  }
+
+  return quoted.length === 1 ? quoted[0] : `${quoted.slice(0, -1).join(", ")} e ${quoted[quoted.length - 1]}`;
+}
+
+/**
+ * Aviso curto (neutro, nao bloqueia) do que a limpeza tirou, ex.: "1 produto que não está mais à
+ * venda saiu de “Para você”. Publique para salvar." null = nada saiu.
+ */
+export function describeSectionCleanup(removed: readonly RemovedSectionRef[]): string | null {
+  const trimmed = removed.filter((entry) => !entry.sectionRemoved);
+  const dropped = removed.filter((entry) => entry.sectionRemoved);
+
+  if (trimmed.length === 0 && dropped.length === 0) {
+    return null;
+  }
+
+  const parts: string[] = [];
+
+  if (trimmed.length > 0) {
+    // Produtos diferentes: o mesmo curso em duas fileiras conta uma vez so.
+    const count = new Set(trimmed.flatMap((entry) => entry.productIds)).size;
+    const where = listSectionTitles(trimmed.map((entry) => entry.title));
+
+    parts.push(
+      count === 1
+        ? `1 produto que não está mais à venda saiu de ${where}.`
+        : `${count} produtos que não estão mais à venda saíram de ${where}.`
+    );
+  }
+
+  if (dropped.length === 1) {
+    parts.push(`A fileira “${dropped[0].title}” saiu: nenhum produto dela está mais à venda.`);
+  } else if (dropped.length > 3) {
+    // Muitas fileiras: so a quantidade (listSectionTitles ja resumiria em "N fileiras").
+    parts.push(`${dropped.length} fileiras saíram: nenhum produto delas está mais à venda.`);
+  } else if (dropped.length > 1) {
+    const where = listSectionTitles(dropped.map((entry) => entry.title));
+
+    parts.push(`As fileiras ${where} saíram: nenhum produto delas está mais à venda.`);
+  }
+
+  parts.push("Publique para salvar.");
+
+  return parts.join(" ");
+}
+
 /**
  * Problemas que impedem publicar a vitrine inteira (mesmas regras de validateHomeSectionConfigs).
- * Devolve um texto por fileira com problema, na ordem da lista.
+ * Olha o que vai ser publicado: produto que saiu de venda nao e problema, a limpeza
+ * (pruneUnavailableSectionRefs) tira antes. Devolve um texto por fileira com problema, na ordem da lista.
  */
 export function findSectionProblems(
   sections: readonly HomeSectionConfig[],
@@ -715,7 +846,7 @@ export function findSectionProblems(
   const ids = new Set<string>();
   const automatic = new Set<string>();
 
-  for (const section of normalizeSectionOrder(sections)) {
+  for (const section of pruneUnavailableSectionRefs(sections, productsById).sections) {
     const label = section.title.trim() || "Fileira sem título";
 
     if (ids.has(section.id)) {
@@ -731,19 +862,16 @@ export function findSectionProblems(
     const kind = sectionKind(section);
 
     if (kind === "manual") {
+      // Vazia aqui = o produtor deixou assim (a que esvazia por produto fora de venda ja saiu).
       if (section.itemIds.length === 0) {
         problems.push({ message: `“${label}” não tem nenhum produto escolhido.`, sectionId: section.id });
-      } else if (section.itemIds.some((id) => !productsById.get(id)?.sellable)) {
-        problems.push({ message: `“${label}” tem um produto que não está mais à venda.`, sectionId: section.id });
       }
-    } else if (kind === "structure") {
-      if (!section.sourceContentId || !productsById.get(section.sourceContentId)?.sellable) {
-        problems.push({ message: `“${label}” aponta para um produto que não está mais à venda.`, sectionId: section.id });
+    } else if (kind === "automatic") {
+      if (automatic.has(section.contentSource)) {
+        problems.push({ message: `“${label}” repete uma fileira automática. Exclua uma delas.`, sectionId: section.id });
+      } else {
+        automatic.add(section.contentSource);
       }
-    } else if (automatic.has(section.contentSource)) {
-      problems.push({ message: `“${label}” repete uma fileira automática. Exclua uma delas.`, sectionId: section.id });
-    } else {
-      automatic.add(section.contentSource);
     }
   }
 

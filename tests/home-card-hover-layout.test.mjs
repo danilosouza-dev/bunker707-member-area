@@ -243,7 +243,9 @@ test("content details modal avoids back-office summary labels", () => {
 
 test("content details modal uses only lesson-owned thumbnails in lesson lists", () => {
   assert.match(modalSource, /function getLessonThumbnailUrl/);
-  assert.match(modalSource, /getVideoThumbnailUrl\(lesson\.video\) \|\| lesson\.image \|\| ""/);
+  // O servidor manda a imagem da aula ja resolvida e nunca o video (aula bloqueada/produto nao comprado).
+  assert.match(modalSource, /return lesson\.image \|\| "";/);
+  assert.doesNotMatch(modalSource, /lesson\.video/);
   assert.match(modalSource, /style=\{\{ backgroundImage: `url\(\$\{lessonThumbnailUrl\}\)` \}\}/);
   assert.match(modalSource, /Sem thumbnail/);
   assert.doesNotMatch(modalSource, /lesson\.image \?\? module\.image/);
@@ -301,34 +303,42 @@ test("favorites page lists persisted saved items", () => {
   assert.match(favoritesPageSource, /\/favoritos/);
   assert.match(favoritesPageSource, /getFavoritesPageData/);
   assert.match(favoritesExperienceSource, /Favoritos/);
-  assert.match(favoritesExperienceSource, /Conteudos/);
+  assert.match(favoritesExperienceSource, /Conteúdos/);
   assert.match(favoritesExperienceSource, /Aulas/);
   assert.match(platformStoreSource, /getSavedContentItems/);
   assert.match(platformStoreSource, /getSavedLessonItems/);
 });
 
-test("favorite lesson cards prefer the video thumbnail and center the play action", () => {
+test("favorite lesson cards prefer the video thumbnail and center the play action", async () => {
   const favoriteLessonCardSource = favoritesExperienceSource.match(
     /function FavoriteLessonCard[\s\S]*?\n\}/u
   )?.[0] ?? "";
+  const lessonCardSource = await readFile(new URL("../src/components/member/ui/member-lesson-card.tsx", import.meta.url), "utf8");
+  const favoritesViewSource = await readFile(new URL("../src/server/member-area/favorites-view.ts", import.meta.url), "utf8");
 
-  assert.match(
-    platformStoreSource,
-    /image: getVideoThumbnailUrl\(lesson\.video\) \|\| lesson\.image \|\| courseModule\.image/
-  );
-  assert.match(favoriteLessonCardSource, /pointer-events-none absolute inset-0 grid place-items-center/);
-  assert.match(favoriteLessonCardSource, /continue-watching-card-image/);
-  assert.doesNotMatch(favoriteLessonCardSource, /hover:-translate-y-1/);
+  const savedLessonItemsSource = platformStoreSource.match(/function getSavedLessonItems[\s\S]*?\n\}/u)?.[0] ?? "";
+
+  // Thumbnail do video primeiro (quando a aula pode mostrar o video), depois a imagem da aula e a do modulo.
+  assert.match(savedLessonItemsSource, /image: [^\n]*getVideoThumbnailUrl\(lesson\.video\)[^\n]*\|\| lesson\.image \|\| courseModule\.image/);
+  // Aula liberada: thumbnail do video primeiro (a biblioteca ja a coloca em libraryLesson.image).
+  assert.match(favoritesViewSource, /libraryLesson\.image \|\| lesson\.image \|\| libraryModule\.image/);
+  assert.match(favoriteLessonCardSource, /<MemberLessonCard/);
+  assert.match(lessonCardSource, /absolute left-1\/2 top-1\/2 grid size-12 -translate-x-1\/2 -translate-y-1\/2 place-items-center/);
+  assert.doesNotMatch(lessonCardSource, /hover:-translate-y-1/);
   assert.doesNotMatch(favoriteLessonCardSource, /absolute left-4 top-4 grid h-11 w-11/);
 });
 
 test("favorite cards reuse the faster continue-watching image zoom without moving the card", () => {
   const favoriteCardsSource = favoritesExperienceSource.match(
-    /function FavoriteContentCard[\s\S]*?export function FavoritesExperience/u
+    /function FavoritePosterCard[\s\S]*?export function FavoritesExperience/u
   )?.[0] ?? "";
-  const sharedImageEffects = favoriteCardsSource.match(/continue-watching-card-image/g) ?? [];
 
+  // Capas e aulas usam as pecas da base (zoom curto so na imagem). A capa nao sobe no hover: o botao de
+  // remover fica fora do link e nao acompanharia o card.
+  assert.match(favoriteCardsSource, /<MemberPosterCard/);
+  assert.match(favoriteCardsSource, /<MemberLessonCard/);
+  assert.match(favoritesExperienceSource, /const keepPosterInPlaceClassName = "\[&>a>div\]:translate-none!";/);
+  assert.match(favoriteCardsSource, /className=\{cn\(keepPosterInPlaceClassName/);
   assert.doesNotMatch(favoriteCardsSource, /hover:-translate-y-1/);
-  assert.equal(sharedImageEffects.length, 3);
   assert.doesNotMatch(favoriteCardsSource, /duration-700 group-hover:scale-\[1\.035\]/);
 });

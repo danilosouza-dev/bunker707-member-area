@@ -22,6 +22,7 @@ import {
   areSectionsEqual,
   canDuplicateSection,
   describeSection,
+  describeSectionCleanup,
   draftToSection,
   duplicateSection,
   findSectionProblems,
@@ -30,6 +31,7 @@ import {
   moveSectionTo,
   normalizeSectionOrder,
   normalizeStoredSections,
+  pruneUnavailableSectionRefs,
   type SectionDraft,
   type StorefrontEditorData,
   type StorefrontProduct
@@ -49,6 +51,8 @@ import { VitrinePreview } from "./vitrine-preview";
 // se a tela Modulos ligou uma fileira (ou o admin antigo publicou) no meio, o servidor responde 409 e
 // nada e apagado; o rascunho fica ate o produtor clicar em "Recarregar". Arrastar pela alca, Alt+setas
 // na alca ou o menu "…" mudam a ordem; clicar na fileira abre o painel de edicao.
+// Produto que saiu de venda (excluido ou fora de venda) nunca trava a publicacao: o rascunho ja nasce
+// sem ele (pruneUnavailableSectionRefs, a mesma regra da home do aluno) e um aviso neutro diz o que saiu.
 
 type VitrineEditorProps = {
   canEdit: boolean;
@@ -218,21 +222,32 @@ function SectionRow({ canEdit, index, isLast, onDelete, onDuplicate, onMove, onO
 
 export function VitrineEditor({ canEdit, data }: VitrineEditorProps) {
   const router = useRouter();
+  const productsById = useMemo(() => new Map(data.products.map((product) => [product.id, product])), [data.products]);
   const [source, setSource] = useState(data);
+  // Como esta gravado (pode ainda ter produto que saiu de venda depois de publicar).
   const [published, setPublished] = useState(() => normalizeSectionOrder(data.sections));
   const [configured, setConfigured] = useState(data.sectionsConfigured);
   // Versao da chave homeSections que esta tela leu (null = vitrine nunca publicada).
   const [version, setVersion] = useState(data.sectionsUpdatedAt);
   const [reloadRequested, setReloadRequested] = useState(false);
-  const [drafts, setDrafts] = useState(published);
+  const [drafts, setDrafts] = useState(() => pruneUnavailableSectionRefs(published, productsById).sections);
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const [sheetSession, setSheetSession] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [error, setError] = useState<PublishError | null>(null);
   const [problems, setProblems] = useState<{ message: string; sectionId: string }[]>([]);
-  const productsById = useMemo(() => new Map(data.products.map((product) => [product.id, product])), [data.products]);
+  // O publicado sem os produtos fora de venda: ponto de partida do rascunho e do "Descartar".
+  const cleaned = useMemo(() => pruneUnavailableSectionRefs(published, productsById), [published, productsById]);
+  const cleanupNotice = canEdit ? describeSectionCleanup(cleaned.removed) : null;
+  // A limpeza sozinha tambem abre a barra (precisa publicar), mas nao conta como mudanca do produtor.
   const dirty = canEdit && !areSectionsEqual(drafts, published);
+  const ownChanges = canEdit && !areSectionsEqual(drafts, cleaned.sections);
+  // So a limpeza pendente: a barra diz isso e nao oferece "Descartar" (nao ha o que desfazer).
+  const cleanupMessage =
+    new Set(cleaned.removed.flatMap((entry) => entry.productIds)).size === 1
+      ? "Produto fora de venda removido · publique para salvar"
+      : "Produtos fora de venda removidos · publique para salvar";
   const editing = sheet?.mode === "edit" ? (drafts.find((section) => section.id === sheet.sectionId) ?? null) : null;
   const visibleCount = drafts.filter((section) => section.isActive).length;
 
@@ -246,16 +261,19 @@ export function VitrineEditor({ canEdit, data }: VitrineEditorProps) {
     setConfigured(data.sectionsConfigured);
     setVersion(data.sectionsUpdatedAt);
 
-    if (reloadRequested || !dirty) {
-      setDrafts(next);
+    if (reloadRequested || !ownChanges) {
+      setDrafts(pruneUnavailableSectionRefs(next, productsById).sections);
       setProblems([]);
       setError(null);
       setReloadRequested(false);
+    } else {
+      // Fica o que o produtor mudou, sem os produtos que sairam de venda nesse meio-tempo.
+      setDrafts(pruneUnavailableSectionRefs(drafts, productsById).sections);
     }
   }
 
   useEffect(() => {
-    if (!dirty) {
+    if (!ownChanges) {
       return;
     }
 
@@ -265,7 +283,7 @@ export function VitrineEditor({ canEdit, data }: VitrineEditorProps) {
 
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [ownChanges]);
 
   // Soltura: o alvo mais interno diz a fileira e a borda; a posicao final segue a regra do hitbox.
   useEffect(() => {
@@ -386,7 +404,7 @@ export function VitrineEditor({ canEdit, data }: VitrineEditorProps) {
   }
 
   function discard() {
-    setDrafts(published);
+    setDrafts(cleaned.sections);
     setProblems([]);
     setError((current) => (current?.conflict ? current : null));
   }
@@ -396,7 +414,9 @@ export function VitrineEditor({ canEdit, data }: VitrineEditorProps) {
       return;
     }
 
-    const found = findSectionProblems(drafts, productsById);
+    // Publica sem os produtos que sairam de venda (o servidor faz a mesma limpeza).
+    const sections = pruneUnavailableSectionRefs(drafts, productsById).sections;
+    const found = findSectionProblems(sections, productsById);
 
     if (found.length > 0) {
       setProblems(found);
@@ -409,7 +429,7 @@ export function VitrineEditor({ canEdit, data }: VitrineEditorProps) {
 
     try {
       const response = await fetch("/api/admin/home-sections", {
-        body: JSON.stringify({ expectedUpdatedAt: configured ? version : null, sections: normalizeSectionOrder(drafts) }),
+        body: JSON.stringify({ expectedUpdatedAt: configured ? version : null, sections }),
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         method: "PUT"
@@ -458,6 +478,15 @@ export function VitrineEditor({ canEdit, data }: VitrineEditorProps) {
       ) : !configured ? (
         <p className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] px-4 py-3 text-sm leading-5 text-[var(--text-secondary)]">
           A home ainda segue a ordem padrão. Mude o que quiser e publique para fixar a sua.
+        </p>
+      ) : null}
+
+      {cleanupNotice ? (
+        <p
+          className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] px-4 py-3 text-sm leading-5 text-[var(--text-secondary)]"
+          role="status"
+        >
+          {cleanupNotice}
         </p>
       ) : null}
 
@@ -582,8 +611,8 @@ export function VitrineEditor({ canEdit, data }: VitrineEditorProps) {
 
       <SaveBar
         error={problems.length > 0 || error?.conflict ? null : (error?.message ?? null)}
-        message="Alterações não publicadas"
-        onDiscard={discard}
+        message={ownChanges ? "Alterações não publicadas" : cleanupMessage}
+        onDiscard={ownChanges ? discard : undefined}
         onSave={() => void publish()}
         open={dirty}
         saveLabel="Publicar vitrine"

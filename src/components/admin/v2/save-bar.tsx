@@ -10,7 +10,8 @@ type SaveBarProps = {
   /** Erro persistente do ultimo salvamento (nunca toast). */
   error?: string | null;
   message?: string;
-  onDiscard: () => void;
+  /** Sem ele a barra nao mostra "Descartar" (ex.: so ha ajuste automatico, nada para desfazer). */
+  onDiscard?: () => void;
   onSave: () => void;
   /** Mostra a barra quando ha alteracoes nao salvas. */
   open: boolean;
@@ -78,15 +79,17 @@ export function SaveBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <Button
-          className="px-4 text-[var(--text-secondary)]"
-          disabled={saving}
-          onClick={onDiscard}
-          type="button"
-          variant="ghost"
-        >
-          {discardLabel}
-        </Button>
+        {onDiscard ? (
+          <Button
+            className="px-4 text-[var(--text-secondary)]"
+            disabled={saving}
+            onClick={onDiscard}
+            type="button"
+            variant="ghost"
+          >
+            {discardLabel}
+          </Button>
+        ) : null}
         <Button
           aria-keyshortcuts="Meta+Enter Control+Enter"
           className="px-4"

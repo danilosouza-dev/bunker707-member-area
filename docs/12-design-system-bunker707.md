@@ -188,7 +188,7 @@ Comportamento:
 - A lista de comentarios deve parecer conversa/thread, nao uma pilha de cards.
 - Cada comentario usa avatar circular ou foto de perfil, nome, tempo relativo e texto em fluxo livre, com separadores discretos entre itens.
 - Avatares usam cor solida ou foto, sem degrade decorativo; icones/emoji devem preencher bem o circulo, e o indicador de presenca fica na intersecao inferior direita do avatar, com borda na cor do fundo da pagina e sem brilho/esfumacado. Online usa ponto verde; offline usa ponto cinza com centro na cor do fundo.
-- O selo `Professor` aparece ao lado do nome quando a resposta vier de professor/equipe.
+- Toda pessoa tem etiqueta de funcao ao lado do nome, com `MemberRoleBadge`: `Professor` (vermelho, chapeu de formatura), `Moderador` (neutro, escudo) e `Aluno` (contorno discreto). Vale para comentario e resposta.
 - Respostas aparecem indentadas dentro do comentario principal, com recuo e divisor vertical discreto para deixar clara a hierarquia da conversa.
 - Todo comentario e resposta deve ter acao `Responder`; ao clicar, o composer entra em modo resposta e preenche automaticamente `@nickname` da pessoa respondida.
 - O composer em modo resposta deve mostrar uma faixa de contexto com a mencao ativa e opcao de cancelar antes do envio.
@@ -198,6 +198,27 @@ Comportamento:
 - O menu de tres pontos deve oferecer denuncia de comentario para moderacao.
 - Menus de reacao e denuncia devem fechar ao clicar fora deles.
 - O composer de novo comentario deve ser diferente dos comentarios publicados: caixa propria de digitacao, textarea evidente e botao de envio alinhado dentro do bloco.
+- O composer fica no topo da aba (`src/components/lesson/lesson-comment-composer.tsx`): cartao proprio com avatar do aluno, campo que cresce ate 240 px, placeholder `Compartilhe uma dúvida ou insight sobre a aula`, faixa `Respondendo a @usuario` com cancelar, contador a partir de 1.800 de 2.000 caracteres, dica de `Ctrl/⌘ + Enter` e botao primario `Publicar`/`Responder` com `Enviando...`. Aula bloqueada: campo desabilitado com cadeado e o motivo.
+
+## Aviso de liberacao da aula
+
+- Sobre o video (`src/components/lesson/lesson-release-overlay.tsx`): cadeado, titulo `Esta aula será liberada`, a data em destaque (`Liberação em 08/01/2026`, `Liberação em 08/01/2026 às 14:00` ou `Liberação hoje às 14:00`) e a linha discreta `Conta a partir da data da sua compra.`. Quando a data passa com a pagina aberta, o titulo vira `Esta aula já foi liberada` e aparece `Atualizar agora`.
+- Na playlist e nos cards, o selo curto e ambar: `Liberação em 08/01`, `Hoje às 14:00` ou `Após a aula anterior`; a frase completa vai no nome acessivel.
+- Datas sempre no fuso de Sao Paulo, iguais no servidor e no navegador. So o texto com `hoje` depende do relogio e usa `suppressHydrationWarning`.
+
+## Aba Materiais da aula
+
+- Painel `src/components/lesson/lesson-materials-panel.tsx` com linhas `MemberMaterialRow`, em dois grupos: `Disponíveis` e `Para liberar` (motivo em ambar, visivel tambem no celular, e o que fazer para liberar).
+- Cabecalho curto com a contagem real; o numero da aba so aparece depois de carregar.
+- Estados: esqueleto de 3 linhas, vazio compacto (`Esta aula ainda não tem materiais` / `Quando o professor publicar arquivos de apoio, eles aparecem aqui.`) e erro com `Tentar de novo`.
+
+## Tutor IA da aula
+
+- Cabecalho do painel: icone do Tutor em circulo, `Tutor IA`, apoio `Responde com base nesta aula` e ponto de disponibilidade (verde disponivel, cinza indisponivel); acoes Historico e Novo chat a direita.
+- Historico recolhivel: trilho a esquerda no computador (>= 1024 px) e folha sobre o painel no celular. Cada item tem titulo, data relativa e menu de tres pontos (Renomear/Excluir).
+- Chat vazio: saudacao curta e quatro sugestoes em grade 2x2, com icone e frase completa; clicar preenche o campo.
+- Mensagens: aluno em balao a direita; Tutor sem balao, com avatar, Markdown contido e marcadores `[MM:SS]` como chips clicaveis; `Pensando sobre a aula...` com animacao discreta que respeita menos movimento.
+- Composer em pilula: campo que cresce ate 6 linhas, botao circular de enviar, dica de `Enter`/`Shift+Enter`, contador perto do limite de 4.000 caracteres e aviso de indisponivel dentro da pilula.
 
 ## Cards
 
@@ -215,6 +236,33 @@ Comportamento:
 - Cards de cursos internos dentro de formacoes e cards de modulos dentro de cursos podem compartilhar o mesmo poster vertical.
 - A diferenca atual e funcional: modulos mostram progresso no hover; cursos internos dentro de formacoes nao mostram barra de progresso nem botao `Acessar`.
 - O CMS futuro pode permitir tags/selo por card para indicar `Curso`, `Modulo`, `Bonus`, `Projeto` ou outro texto configurado pelo produtor.
+
+## Base visual das paginas do aluno (aluno v2)
+
+As paginas internas do aluno (Minhas compras, Favoritos, Minha jornada, Continue assistindo, Materiais, Suporte, Perfil), a aba Materiais da aula e a etiqueta de funcao dos comentarios usam as pecas de `src/components/member/ui/`. Elas funcionam no servidor (sem `"use client"` e sem estado proprio); filtros e busca que recebem `onChange` so entram dentro de componente de cliente.
+
+- `MemberPage` + `MemberPageHeader` + `MemberSection` (`member-page.tsx`): respiro lateral de 16 px no celular, 32 px no tablet e 48 px no computador; titulo de pagina 28-40 px `font-black`; rotulo pequeno acima do titulo com icone vermelho; acoes a direita no computador. Larguras `wide` (grades), `default` (listas) e `narrow` (leitura).
+- `MemberPosterCard` (`member-poster-card.tsx`): card vertical 2:3 para produtos. A capa fica limpa (etiqueta no canto e progresso na borda inferior); titulo, detalhes e "Continuar..." ficam abaixo da capa. Acao extra (ex.: remover dos favoritos) fica fora do link, no canto superior direito. Grade: `memberPosterGridClassName` (2 colunas no celular ate 6 no computador grande, espaco de 12-16 px).
+- `MemberLessonCard` (`member-lesson-card.tsx`): aula em 16:9 com zoom minimo, play no centro no hover, barra de progresso na borda e selo de tempo ("faltam 12min"). Aula bloqueada pela liberacao mostra cadeado e a frase de liberacao, sem play.
+- `MemberMaterialRow` (`member-material-row.tsx`): material de apoio em linha (icone pelo tipo, titulo, tipo, tamanho, "Gerado com IA"). Liberado abre em nova aba (`rel="noopener noreferrer"`); bloqueado pela regra do material mostra o motivo em ambar, visivel sem hover, e nao tem link.
+- `MemberChip` e `MemberRoleBadge` (`member-chip.tsx`): etiquetas curtas. Tons: neutro, contorno, vermelho (destaque), verde (concluido), ambar (liberacao/bloqueio), branco (tipo sobre a capa). Funcao de quem comenta: `Professor` (vermelho, chapeu de formatura), `Moderador` (neutro, escudo) e `Aluno` (contorno discreto).
+- `MemberStat`/`MemberStatGrid`: numeros reais do aluno no topo (2 colunas no celular, 4 no computador). Sem dado real, o numero nao aparece.
+- `MemberFilterPills` (filtros na mesma tela, `aria-pressed`, rolam na horizontal no celular), `MemberTabNav` (abas que trocam o endereco, sublinhado vermelho, `aria-current`) e `MemberSearchField` (busca com limpar e `Esc`).
+- `MemberEmptyState`: estado vazio honesto (o que falta e o proximo passo real), borda tracejada discreta; variante compacta para abas.
+- `MemberButton`/`MemberButtonLink`/`memberButtonClassName`: primario claro (branco, texto preto), secundario translucido, fantasma, vermelho da marca e perigo; alturas 36, 40 e 48 px.
+- `MemberAvatar`: foto ou iniciais sobre cor solida derivada do nome.
+- `MemberProgressBar`: trilho fino; vermelho em andamento, verde em 100%.
+- Esqueletos (`member-skeletons.tsx`): todo `loading.tsx` de pagina do aluno desenha a forma final (barra do topo de 64 px, cabecalho, grade ou lista) com `motion-safe:animate-pulse`, sem o marcador do loading global, para o spinner sumir assim que o endereco muda.
+
+Datas mostradas ao aluno usam `src/lib/member-format.ts` (fuso America/Sao_Paulo, "08/01/2026", "08/01/2026 às 14:30", "há 2 dias"). Rotas e itens da barra lateral vem de `src/lib/member-navigation.ts`.
+
+## Barra lateral e menu da conta (aluno)
+
+- Gaveta `src/components/member/shell/member-sidebar.tsx`: largura `min(340px, 88vw)`, altura total, logo + fechar no topo, grupos `Estudar` e `Conta e ajuda` com titulo pequeno.
+- Item com 44 px de altura, texto 14 px semibold e icone Lucide proprio (Inicio `House`, Minha jornada `Route`, Continue assistindo `CirclePlay`, Minhas compras `LibraryBig`, Favoritos `Bookmark`, Materiais `FolderOpen`, Suporte `LifeBuoy`, Perfil `CircleUser`; a `Compass` e so da IA Diretor). Normal `zinc-300`, hover `white/[0.05]`; ativo com fundo `white/[0.08]`, barra vermelha de 3 px a esquerda, icone vermelho e texto branco; foco visivel.
+- Rodape com a conta do aluno (`MemberAvatar`, nome completo e `Ver perfil`) e `Sair` (`Saindo...` durante a saida). Produtor/admin ve antes o cartao `Área do produtor` com `Ir para o admin` e `Modo de visualização`.
+- Menu da conta no avatar do topo (`member-account-menu.tsx`): `Perfil`, `Minhas compras`, `Suporte` e `Sair`; fecha ao clicar fora, com `Esc` ou ao perder o foco; setas percorrem os itens.
+- O topo nao tem trofeu nem sino ate existirem conquistas e notificacoes reais.
 
 ## Modal de detalhes
 
@@ -297,11 +345,13 @@ Regras:
 ### Chat flutuante da IA Diretor
 
 - O launcher usa `Compass` com uma pequena `Sparkles`, mede entre 52 e 56 px e fica no canto inferior direito sem cobrir controles centrais da pagina.
-- No desktop, o painel fica ancorado acima do launcher, com 400-420 px de largura, altura limitada ao viewport, superficie `--panel`, borda discreta, raio de 12 px e sombra forte. Nao usa backdrop nem transforma a pagina em modal.
+- No desktop, o painel fica ancorado acima do launcher, com 420 px de largura, altura limitada ao viewport, superficie `--panel`, borda discreta, raio de 16 px e sombra forte. Nao usa backdrop nem transforma a pagina em modal.
 - No celular, o painel ocupa `100dvh`, respeita safe areas e mantem cabecalho, mensagens e composer operaveis com o teclado aberto.
-- O cabecalho usa `IA Diretor` e o apoio `Orientação sobre seus cursos e trilhas`, com acoes iconograficas para historico, novo chat e fechar.
-- O historico substitui temporariamente a area da conversa dentro do proprio painel. Cada item usa titulo truncado, data e menu compacto para renomear ou excluir, sem duas colunas apertadas.
-- Respostas usam tipografia regular, Markdown contido e cards compactos para referencias autorizadas. Cada card mostra tipo, titulo, breadcrumb e `Abrir`; links livres do texto nunca recebem confianca automatica.
+- O cabecalho usa a marca da Diretora (`Compass` + estrela) em circulo, `IA Diretor`, o apoio `Orientação sobre seus cursos e trilhas` e um ponto verde ou cinza de disponibilidade, com acoes iconograficas (e dica propria) para historico, novo chat e fechar.
+- A entrada cumprimenta pelo primeiro nome (`Olá, Ana`), repete `Encontre aulas, descubra o que estudar e organize seu próximo passo.` e mostra tres sugestoes como cartoes com icone. Indisponivel: o motivo ocupa o lugar das sugestoes.
+- O historico substitui temporariamente a area da conversa dentro do proprio painel, agrupado em `Hoje`, `Ontem`, `Últimos 7 dias`, `Últimos 30 dias` e `Mais antigas` (fuso de Sao Paulo). Cada item usa titulo truncado, data relativa com quantidade de mensagens (`há 2 horas · 6 mensagens`) e menu compacto para renomear ou excluir, sem duas colunas apertadas.
+- Pergunta do aluno em balao; resposta da Diretora sem balao, com avatar, tipografia regular, Markdown contido e cards compactos para referencias autorizadas. Cada card mostra tipo, titulo, breadcrumb e `Abrir`; links livres do texto nunca recebem confianca automatica.
+- Composer em pilula: campo que cresce ate 6 linhas, `Enter` envia, botao circular, contador a partir de 3.600 de 4.000 caracteres e `Carregando a IA Diretor...` enquanto carrega.
 - A camada global fica acima de cards e carrosseis, mas abaixo de modais centrais. Abrir a sidebar principal fecha o chat para evitar duas superficies concorrentes.
 - O desktop restaura o foco no launcher ao fechar; `Escape` fecha historico, dialogos internos ou painel na ordem correta. Nomes acessiveis e foco visivel sao obrigatorios.
 

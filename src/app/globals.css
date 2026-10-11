@@ -264,7 +264,6 @@ button:disabled {
 }
 
 .lesson-playlist-panel {
-  min-width: 430px;
   opacity: 1;
   position: relative;
   transform: translate3d(0, 0, 0);
@@ -313,6 +312,11 @@ button:disabled {
   .lesson-experience-grid-collapsed {
     column-gap: 0;
     grid-template-columns: minmax(0, 1fr) 0;
+  }
+
+  /* Largura fixa da playlist so ao lado do player (>= 1280 px); abaixo ela ocupa a largura da tela. */
+  .lesson-playlist-panel {
+    min-width: 430px;
   }
 
   .lesson-playlist-shell {

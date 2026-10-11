@@ -9,6 +9,15 @@ import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { persistImageAsset } from "@/server/db/media-assets";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
+import type { MemberReleaseState } from "@/lib/release-state";
+import { resolveReleaseState, type ReleasePolicyEntitlement } from "@/server/access/release-policy";
+import {
+  getMemberContentHref,
+  type MemberLibrary,
+  type MemberLibraryAccess,
+  type MemberLibraryContent,
+  type MemberLibraryModule
+} from "@/lib/member-library";
 import { getSavedItemKey, getSavedTargetTypeForContentKind, savedItemCollectionLabel } from "@/lib/saved-items";
 import { getAdminModerationData } from "@/server/comments/comment-store";
 import {
@@ -17,7 +26,9 @@ import {
   onlyListedItems
 } from "@/server/catalog/storefront-listing";
 import { INVALID_SUPABASE_KEY_MESSAGE, isInvalidSupabaseKeyError } from "@/server/db/supabase-key-error";
-import { updatePlatformSettingLatest, writePlatformSettingGuarded } from "@/server/member-area/settings-store";
+import { MemberAreaConflictError } from "@/server/member-area/errors";
+import { readPlatformSetting, updatePlatformSettingLatest, writePlatformSettingGuarded } from "@/server/member-area/settings-store";
+import { pruneHomeSectionRefs } from "@/server/storefront/model";
 import type {
   AdminAIAgent,
   AdminBlockedWordRule,
@@ -1520,7 +1531,8 @@ function getSavedLessonItems(
   database: PlatformDatabase,
   accessPreviewMode: AccessPreviewMode | undefined,
   savedItems: Set<string>,
-  userAccessKeys: Set<string>
+  userAccessKeys: Set<string>,
+  release: MemberReleaseContext
 ): SavedLessonItem[] {
   const seenLessonIds = new Set<string>();
   const lessons: SavedLessonItem[] = [];
@@ -1535,11 +1547,14 @@ function getSavedLessonItems(
         }
 
         seenLessonIds.add(lesson.id);
+        // Thumbnail do YouTube so para aula liberada de conteudo com acesso (o endereco revela o video).
+        const canShowVideoThumbnail = !parentWithAccess.isLocked &&
+          isMemberLessonReleased(resolveContentReleaseStates(release, parentItem), courseModule.id, lesson.id);
         lessons.push({
           description: lesson.description,
           duration: lesson.duration,
           id: lesson.id,
-          image: getVideoThumbnailUrl(lesson.video) || lesson.image || courseModule.image,
+          image: (canShowVideoThumbnail ? getVideoThumbnailUrl(lesson.video) : "") || lesson.image || courseModule.image,
           isSaved: true,
           moduleId: courseModule.id,
           moduleTitle: courseModule.title,
@@ -1554,6 +1569,276 @@ function getSavedLessonItems(
   }
 
   return lessons;
+}
+
+// --- Liberacao por aluno (src/server/access/release-policy.ts) ---------------------------------------
+// Fonte unica da data de liberacao na tela: o mesmo resolveReleaseState que as APIs da aula usam
+// (lesson-access.ts), com os acessos do aluno que casam com o conteudo (plataforma, o proprio conteudo
+// ou a formacao publicada que inclui o curso) e as aulas que ELE concluiu. Um instante (`now`) por
+// requisicao.
+// - Previa do produtor e visitante nao tem compra real: so a data fixa e calculada; o resto vira
+//   "unknown" (frase generica, continua bloqueado, como antes).
+// - Aula nao liberada nunca leva o video para o navegador (nem a thumbnail do YouTube, que revela o ID).
+// - Ponto de extensao da garantia: quando o pipeline de compras gravar o fim da garantia no acesso,
+//   mande `warranty_ends_at` junto de `starts_at` em getReleasePolicyEntitlements; a regra com
+//   `anchor: "warranty_end"` passa a contar dali (release-policy.ts, getReleaseAnchorTimestamp).
+
+type ContentReleaseStates = {
+  content: MemberReleaseState;
+  lessons: Map<string, MemberReleaseState>;
+  modules: Map<string, MemberReleaseState>;
+};
+
+type MemberReleaseContext = {
+  /** false = previa do produtor ou visitante (sem compra real para calcular a data). */
+  canResolveForUser: boolean;
+  completedLessonIdsByContent: Map<string, ReadonlySet<string>>;
+  contentStates: Map<string, ContentReleaseStates>;
+  database: PlatformDatabase;
+  now: number;
+  userEntitlements: AccessEntitlementRecord[];
+};
+
+type MemberLessonVideoMode = "keep_released" | "strip_all";
+
+const releasedMemberState: MemberReleaseState = { status: "released" };
+const unknownMemberState: MemberReleaseState = { status: "unknown" };
+const emptyCompletedLessonIds: ReadonlySet<string> = new Set();
+
+function createMemberReleaseContext(
+  database: PlatformDatabase,
+  user: AuthenticatedUser | string | undefined,
+  accessPreviewMode: AccessPreviewMode | undefined
+): MemberReleaseContext {
+  const { userId } = getUserIdentity(user);
+  const completedLessonIdsByContent = new Map<string, ReadonlySet<string>>();
+
+  if (userId) {
+    for (const record of database.lessonProgress) {
+      if (record.userId === userId) {
+        completedLessonIdsByContent.set(
+          record.contentId,
+          new Set(Array.isArray(record.completedLessonIds) ? record.completedLessonIds : [])
+        );
+      }
+    }
+  }
+
+  return {
+    canResolveForUser: Boolean(userId) && !accessPreviewMode,
+    completedLessonIdsByContent,
+    contentStates: new Map(),
+    database,
+    now: Date.now(),
+    userEntitlements: userId ? database.accessEntitlements.filter((entitlement) => entitlement.userId === userId) : []
+  };
+}
+
+/**
+ * Acessos ativos do aluno que valem para o conteudo: plataforma inteira, o proprio conteudo ou, para
+ * curso interno, a formacao publicada que o inclui (mesma regra de lesson-access.ts).
+ */
+function getMatchingAccessEntitlements(
+  database: PlatformDatabase,
+  item: ContentItem,
+  userEntitlements: AccessEntitlementRecord[]
+) {
+  const targetType = getTargetType(item.kind);
+  const parentFormationId = item.commerceScope === "included_content" &&
+    item.parentContentId &&
+    database.formations.some((formation) => formation.id === item.parentContentId)
+    ? item.parentContentId
+    : undefined;
+
+  return userEntitlements.filter((entitlement) => (
+    isActiveEntitlement(entitlement) && (
+      (entitlement.targetType === "platform" && (entitlement.targetId === "platform" || entitlement.targetId === "*")) ||
+      (entitlement.targetType === targetType && entitlement.targetId === item.id) ||
+      (Boolean(parentFormationId) && entitlement.targetType === "formation" && entitlement.targetId === parentFormationId)
+    )
+  ));
+}
+
+function getReleasePolicyEntitlements(entitlements: AccessEntitlementRecord[]): ReleasePolicyEntitlement[] {
+  // Extensao futura: { starts_at, warranty_ends_at } quando o acesso guardar o fim da garantia.
+  return entitlements.map((entitlement) => ({ starts_at: entitlement.startsAt }));
+}
+
+/** Aula anterior de cada aula e de cada modulo, na ordem do curso (mesma regra de lesson-access.ts). */
+function getPreviousLessonMaps(modules: CourseModule[]) {
+  const previousLessonByLessonId = new Map<string, string | undefined>();
+  const previousLessonByModuleId = new Map<string, string | undefined>();
+  let previousLessonId: string | undefined;
+
+  for (const courseModule of modules) {
+    previousLessonByModuleId.set(courseModule.id, previousLessonId);
+
+    for (const lesson of courseModule.lessons) {
+      previousLessonByLessonId.set(lesson.id, previousLessonId);
+      previousLessonId = lesson.id;
+    }
+  }
+
+  return { previousLessonByLessonId, previousLessonByModuleId };
+}
+
+function resolveMemberReleaseState(
+  context: MemberReleaseContext,
+  matchingEntitlements: ReleasePolicyEntitlement[],
+  completedLessonIds: ReadonlySet<string>,
+  releaseRule: ReleaseRuleConfig | undefined,
+  previousLessonId?: string
+): MemberReleaseState {
+  if (!releaseRule || releaseRule.mode === "immediate") {
+    return releasedMemberState;
+  }
+
+  if (!context.canResolveForUser) {
+    const state = resolveReleaseState({
+      completedLessonIds: emptyCompletedLessonIds,
+      matchingEntitlements: [],
+      now: context.now,
+      releaseRule
+    });
+
+    return state.status === "released" || (state.status === "scheduled" && releaseRule.mode === "fixed_date")
+      ? state
+      : unknownMemberState;
+  }
+
+  return resolveReleaseState({
+    completedLessonIds,
+    matchingEntitlements,
+    now: context.now,
+    previousLessonId,
+    releaseRule
+  });
+}
+
+/** Estados do conteudo, de cada modulo e de cada aula para o aluno (cache por requisicao). */
+function resolveContentReleaseStates(context: MemberReleaseContext, item: ContentItem): ContentReleaseStates {
+  const cached = context.contentStates.get(item.id);
+
+  if (cached) {
+    return cached;
+  }
+
+  const matchingEntitlements = context.canResolveForUser
+    ? getReleasePolicyEntitlements(getMatchingAccessEntitlements(context.database, item, context.userEntitlements))
+    : [];
+  const completedLessonIds = context.completedLessonIdsByContent.get(item.id) ?? emptyCompletedLessonIds;
+  const modules = getModulesForContent(context.database, item);
+  const previous = getPreviousLessonMaps(modules);
+  const states: ContentReleaseStates = {
+    content: resolveMemberReleaseState(context, matchingEntitlements, completedLessonIds, item.releaseRule),
+    lessons: new Map(),
+    modules: new Map()
+  };
+
+  for (const courseModule of modules) {
+    states.modules.set(courseModule.id, resolveMemberReleaseState(
+      context,
+      matchingEntitlements,
+      completedLessonIds,
+      courseModule.releaseRule,
+      previous.previousLessonByModuleId.get(courseModule.id)
+    ));
+
+    for (const lesson of courseModule.lessons) {
+      states.lessons.set(lesson.id, resolveMemberReleaseState(
+        context,
+        matchingEntitlements,
+        completedLessonIds,
+        lesson.releaseRule,
+        previous.previousLessonByLessonId.get(lesson.id)
+      ));
+    }
+  }
+
+  context.contentStates.set(item.id, states);
+  return states;
+}
+
+/** Aula aberta para o aluno: conteudo, modulo e aula liberados. */
+function isMemberLessonReleased(states: ContentReleaseStates, moduleId: string, lessonId: string) {
+  return (
+    states.content.status === "released" &&
+    (states.modules.get(moduleId) ?? releasedMemberState).status === "released" &&
+    (states.lessons.get(lessonId) ?? releasedMemberState).status === "released"
+  );
+}
+
+/** So entidades com regra recebem o estado (regra imediata nao precisa de nada). */
+function withMemberReleaseState<T extends { releaseRule?: ReleaseRuleConfig; releaseState?: MemberReleaseState }>(
+  entity: T,
+  state: MemberReleaseState | undefined
+): T {
+  if (!state || !entity.releaseRule || entity.releaseRule.mode === "immediate") {
+    return entity;
+  }
+
+  return { ...entity, releaseState: state };
+}
+
+function applyMemberReleaseToItem(context: MemberReleaseContext, item: ContentItem): ContentItem {
+  if (!item.releaseRule || item.releaseRule.mode === "immediate") {
+    return item;
+  }
+
+  return withMemberReleaseState(item, resolveContentReleaseStates(context, item).content);
+}
+
+function applyMemberReleaseToItems(context: MemberReleaseContext, items: ContentItem[]) {
+  return items.map((item) => applyMemberReleaseToItem(context, item));
+}
+
+/**
+ * Estados de liberacao nos modulos e aulas de `item`.
+ * - "keep_released" (pagina da aula): aula liberada mantem o video; as outras chegam sem video.
+ * - "strip_all" (home, modal, pagina do conteudo): nenhuma aula leva video; a imagem da aula vira a
+ *   thumbnail so quando a aula esta liberada e o aluno tem acesso ao conteudo.
+ */
+function applyMemberReleaseToModules(
+  context: MemberReleaseContext,
+  item: ContentItem,
+  modules: CourseModule[],
+  { hasAccess, videoMode }: { hasAccess: boolean; videoMode: MemberLessonVideoMode }
+): CourseModule[] {
+  const states = resolveContentReleaseStates(context, item);
+
+  return modules.map((courseModule) => ({
+    ...withMemberReleaseState(courseModule, states.modules.get(courseModule.id)),
+    lessons: courseModule.lessons.map((lesson) => {
+      const lessonWithState = withMemberReleaseState(lesson, states.lessons.get(lesson.id));
+      const isReleased = hasAccess && isMemberLessonReleased(states, courseModule.id, lesson.id);
+
+      if (videoMode === "keep_released" && isReleased) {
+        return lessonWithState;
+      }
+
+      const { video, ...lessonWithoutVideo } = lessonWithState;
+      const thumbnail = isReleased ? getVideoThumbnailUrl(video) : "";
+
+      return { ...lessonWithoutVideo, image: thumbnail || lesson.image };
+    })
+  }));
+}
+
+function applyMemberReleaseToHomeRow(context: MemberReleaseContext, row: HomeRow): HomeRow {
+  const course = row.course ? applyMemberReleaseToItem(context, row.course) : undefined;
+
+  return {
+    ...row,
+    course,
+    items: applyMemberReleaseToItems(context, row.items),
+    modules: row.modules && row.course
+      ? applyMemberReleaseToModules(context, row.course, row.modules, {
+          hasAccess: !row.course.isLocked,
+          videoMode: "strip_all"
+        })
+      : row.modules,
+    structureItems: row.structureItems ? applyMemberReleaseToItems(context, row.structureItems) : row.structureItems
+  };
 }
 
 function getSellableItems(database: PlatformDatabase) {
@@ -1745,6 +2030,7 @@ function getContinueWatchingFromProgress(
   }
 
   const contentItems = getAllContentItems(database);
+  const release = createMemberReleaseContext(database, user, accessPreviewMode);
 
   return database.lessonProgress
     .filter((record) => record.userId === userId)
@@ -1773,11 +2059,8 @@ function getContinueWatchingFromProgress(
             continue;
           }
 
-          const releaseNotice =
-            getReleaseRuleNotice(lesson.releaseRule, "aula") ??
-            getReleaseRuleNotice(courseModule.releaseRule, "modulo");
-
-          if (releaseNotice?.isLocked) {
+          // Mesma conta do servidor da aula: so entra aula que o aluno consegue abrir agora.
+          if (!isMemberLessonReleased(resolveContentReleaseStates(release, parentItem), courseModule.id, lesson.id)) {
             return [];
           }
 
@@ -1952,8 +2235,9 @@ function resolveConfiguredHomeRows(
 function getHomeModalStructures(
   database: PlatformDatabase,
   rows: HomeRow[],
-  accessPreviewMode?: AccessPreviewMode,
-  user?: AuthenticatedUser | string
+  accessPreviewMode: AccessPreviewMode | undefined,
+  user: AuthenticatedUser | string | undefined,
+  release: MemberReleaseContext
 ): Record<string, ContentModalStructure> {
   const items = rows.flatMap((row) => row.items);
   const uniqueItems = new Map(items.map((item) => [item.id, item]));
@@ -1966,7 +2250,7 @@ function getHomeModalStructures(
       item.id,
       {
         formationCourses: item.kind === "Formacao"
-          ? applySavedStateToItems(
+          ? applyMemberReleaseToItems(release, applySavedStateToItems(
             applyAccessPreviewToItems(
               itemsVisibleTo(
                 database.formationInternalCourses.filter((course) => course.parentContentId === item.id),
@@ -1976,9 +2260,15 @@ function getHomeModalStructures(
               userAccessKeys
             ),
             savedItems
-          )
+          ))
           : [],
-        modules: applySavedStateToModules(applyLessonProgress(database, item.id, getModulesForContent(database, item), userId), savedItems)
+        // O modal da home so mostra capa, titulo e duracao das aulas: nenhum video sai daqui.
+        modules: applyMemberReleaseToModules(
+          release,
+          item,
+          applySavedStateToModules(applyLessonProgress(database, item.id, getModulesForContent(database, item), userId), savedItems),
+          { hasAccess: hasPurchaseAccess(item, accessPreviewMode, userAccessKeys), videoMode: "strip_all" }
+        )
       }
     ])
   );
@@ -2541,12 +2831,14 @@ export async function getAppShellData(user?: AuthenticatedUser) {
 
 export async function getHomePageData(accessPreviewMode?: AccessPreviewMode, user?: AuthenticatedUser | string) {
   const database = await readDatabaseForUser(user);
-  const homeRows = getHomeRows(database, accessPreviewMode, user).filter((row) => row.items.length > 0);
+  const release = createMemberReleaseContext(database, user, accessPreviewMode);
+  const homeRows = getHomeRows(database, accessPreviewMode, user).filter((row) => row.items.length > 0)
+    .map((row) => applyMemberReleaseToHomeRow(release, row));
 
   return {
     hero: database.hero,
     homeRows,
-    modalStructures: getHomeModalStructures(database, homeRows, accessPreviewMode, user)
+    modalStructures: getHomeModalStructures(database, homeRows, accessPreviewMode, user, release)
   };
 }
 
@@ -2565,9 +2857,192 @@ export async function getFavoritesPageData(accessPreviewMode?: AccessPreviewMode
 
   return {
     savedContentItems: getSavedContentItems(database, accessPreviewMode, savedItems, userAccessKeys),
-    savedLessonItems: getSavedLessonItems(database, accessPreviewMode, savedItems, userAccessKeys),
+    savedLessonItems: getSavedLessonItems(
+      database,
+      accessPreviewMode,
+      savedItems,
+      userAccessKeys,
+      createMemberReleaseContext(database, user, accessPreviewMode)
+    ),
     savedModuleItems: getSavedModuleItems(database, accessPreviewMode, savedItems, userAccessKeys)
   };
+}
+
+// --- Biblioteca do aluno (src/lib/member-library.ts) -------------------------------------------------
+// Minhas compras, Favoritos e as paginas novas da barra lateral leem daqui. So entra conteudo que o
+// aluno pode abrir (mesma regra de hasPurchaseAccess), com o progresso dele; nada de video sai daqui.
+
+type MemberLibraryRelease = { isReleaseLocked: boolean; releaseLabel?: string };
+
+/**
+ * Ponto unico de liberacao da biblioteca: o estado calculado no servidor para o aluno (release-policy,
+ * via resolveContentReleaseStates) vira o texto com a data real ("Liberação em 08/01/2026"); previa e
+ * sem compra caem na frase generica da regra.
+ */
+function resolveMemberLibraryRelease(
+  releaseRule: ReleaseRuleConfig | undefined,
+  entityLabel: "aula" | "modulo" | string,
+  releaseState: MemberReleaseState | undefined,
+  now: number
+): MemberLibraryRelease {
+  const notice = getReleaseRuleNotice(releaseRule, entityLabel, releaseState, now);
+  return notice?.isLocked ? { isReleaseLocked: true, releaseLabel: notice.detail } : { isReleaseLocked: false };
+}
+
+function getMemberLibraryAccess(
+  database: PlatformDatabase,
+  item: ContentItem,
+  userEntitlements: AccessEntitlementRecord[],
+  accessPreviewMode: AccessPreviewMode | undefined
+): MemberLibraryAccess {
+  const matching = getMatchingAccessEntitlements(database, item, userEntitlements);
+
+  if (matching.length > 0) {
+    const startsAt = matching
+      .map((entitlement) => entitlement.startsAt)
+      .filter((value) => Number.isFinite(Date.parse(value)))
+      .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
+    const endsAt = matching.some((entitlement) => !entitlement.endsAt)
+      ? null
+      : matching
+        .map((entitlement) => entitlement.endsAt as string)
+        .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+
+    return { endsAt, kind: "entitlement", startsAt };
+  }
+
+  if (item.accessModel === "free") {
+    return { endsAt: null, kind: "free", startsAt: null };
+  }
+
+  return { endsAt: null, kind: accessPreviewMode ? "preview" : "entitlement", startsAt: null };
+}
+
+function toMemberLibraryModules(
+  database: PlatformDatabase,
+  item: ContentItem,
+  contentRelease: MemberLibraryRelease,
+  savedItems: Set<string>,
+  userId: string | undefined,
+  release: MemberReleaseContext
+): MemberLibraryModule[] {
+  const modules = applyLessonProgress(database, item.id, getModulesForContent(database, item), userId);
+  const watchStates = getLessonWatchStates(database, item.id, userId);
+  const reactions = getLessonReactions(database, item.id, userId);
+  const releaseStates = resolveContentReleaseStates(release, item);
+
+  return modules.map((courseModule) => {
+    const moduleRelease = contentRelease.isReleaseLocked
+      ? contentRelease
+      : resolveMemberLibraryRelease(courseModule.releaseRule, "modulo", releaseStates.modules.get(courseModule.id), release.now);
+
+    return {
+      contentId: item.id,
+      id: courseModule.id,
+      image: courseModule.image,
+      isReleaseLocked: moduleRelease.isReleaseLocked,
+      isSaved: savedItems.has(getSavedItemKey("module", courseModule.id)),
+      lessons: courseModule.lessons.map((lesson) => {
+        const lessonRelease = moduleRelease.isReleaseLocked
+          ? moduleRelease
+          : resolveMemberLibraryRelease(lesson.releaseRule, "aula", releaseStates.lessons.get(lesson.id), release.now);
+        const watchState = watchStates[lesson.id];
+        // Aula bloqueada nunca leva a thumbnail do video (o endereco revelaria o video antes da liberacao).
+        const image = lessonRelease.isReleaseLocked
+          ? lesson.image ?? ""
+          : getVideoThumbnailUrl(lesson.video) || lesson.image || "";
+
+        return {
+          completed: Boolean(lesson.completed),
+          contentId: item.id,
+          duration: lesson.duration,
+          id: lesson.id,
+          image,
+          isReleaseLocked: lessonRelease.isReleaseLocked,
+          isSaved: savedItems.has(getSavedItemKey("lesson", lesson.id)),
+          moduleId: courseModule.id,
+          rated: Boolean(reactions[lesson.id]),
+          releaseLabel: lessonRelease.releaseLabel,
+          resumeImage: lessonRelease.isReleaseLocked
+            ? image || courseModule.image
+            : watchState?.resumeFrameUrl || image || courseModule.image,
+          title: lesson.title,
+          watch: watchState
+            ? {
+                ...(watchState.durationSeconds !== undefined ? { durationSeconds: watchState.durationSeconds } : {}),
+                lastWatchedAt: watchState.lastWatchedAt,
+                maxProgressPercent: watchState.maxProgressPercent ?? watchState.progressPercent,
+                progressPercent: watchState.progressPercent,
+                progressSeconds: watchState.progressSeconds,
+                status: watchState.status
+              }
+            : null
+        };
+      }),
+      releaseLabel: moduleRelease.releaseLabel,
+      title: courseModule.title
+    };
+  });
+}
+
+export async function getMemberLibrary(
+  accessPreviewMode?: AccessPreviewMode,
+  user?: AuthenticatedUser | string
+): Promise<MemberLibrary> {
+  const database = await readDatabaseForUser(user);
+  const { userId } = getUserIdentity(user);
+  const savedItems = getSavedItemSet(database, userId);
+  const userAccessKeys = getUserAccessKeys(database, user);
+  const userEntitlements = userId
+    ? database.accessEntitlements.filter((entitlement) => entitlement.userId === userId)
+    : [];
+  const release = createMemberReleaseContext(database, user, accessPreviewMode);
+  const candidates = new Map<string, ContentItem>();
+
+  // Buckets de conteudo real; continue_watching/recent_lessons/upcoming_products sao legado da home.
+  for (const item of [
+    ...database.formations,
+    ...database.bootcamps,
+    ...database.courses,
+    ...database.formationInternalCourses
+  ]) {
+    if (!candidates.has(item.id) && hasPurchaseAccess(item, accessPreviewMode, userAccessKeys)) {
+      candidates.set(item.id, item);
+    }
+  }
+
+  const contents = Array.from(candidates.values()).map((item): MemberLibraryContent => {
+    const contentRelease = resolveMemberLibraryRelease(
+      item.releaseRule,
+      item.kind.toLowerCase(),
+      resolveContentReleaseStates(release, item).content,
+      release.now
+    );
+
+    return {
+      access: getMemberLibraryAccess(database, item, userEntitlements, accessPreviewMode),
+      childContentIds: item.kind === "Formacao"
+        ? database.formationInternalCourses
+          .filter((course) => course.parentContentId === item.id && candidates.has(course.id))
+          .map((course) => course.id)
+        : [],
+      commerceScope: item.commerceScope,
+      description: item.description ?? "",
+      eyebrow: item.eyebrow,
+      href: getMemberContentHref(item.id, accessPreviewMode),
+      id: item.id,
+      image: item.image,
+      isReleaseLocked: contentRelease.isReleaseLocked,
+      isSaved: savedItems.has(getSavedItemKey(getSavedTargetTypeForContentKind(item.kind), item.id)),
+      kind: item.kind,
+      modules: toMemberLibraryModules(database, item, contentRelease, savedItems, userId, release),
+      parentContentId: item.parentContentId,
+      releaseLabel: contentRelease.releaseLabel,
+      title: item.title
+    };
+  });
+
+  return { accessPreviewMode, contents, userId: userId ?? null };
 }
 
 export async function getContentRouteParams() {
@@ -2604,13 +3079,22 @@ export async function getContentPageData(
     return null;
   }
 
+  const hasAccess = hasPurchaseAccess(item, accessPreviewMode, userAccessKeys);
+  const release = createMemberReleaseContext(database, user, accessPreviewMode);
+
   return {
     allContentItems: applySavedStateToItems(
       applyAccessPreviewToItems(allContentItems, accessPreviewMode, userAccessKeys),
       savedItems
     ),
-    courseModules: applySavedStateToModules(applyLessonProgress(database, contentId, getModulesForContent(database, item), userId), savedItems),
-    formationInternalCourses: applySavedStateToItems(
+    // A pagina do conteudo so mostra modulos e contagem de aulas: nenhum video sai daqui.
+    courseModules: applyMemberReleaseToModules(
+      release,
+      item,
+      applySavedStateToModules(applyLessonProgress(database, contentId, getModulesForContent(database, item), userId), savedItems),
+      { hasAccess, videoMode: "strip_all" }
+    ),
+    formationInternalCourses: applyMemberReleaseToItems(release, applySavedStateToItems(
       applyAccessPreviewToItems(
         itemsVisibleTo(
           item.kind === "Formacao"
@@ -2622,13 +3106,16 @@ export async function getContentPageData(
         userAccessKeys
       ),
       savedItems
-    ),
+    )),
     formations: applySavedStateToItems(
       applyAccessPreviewToItems(database.formations, accessPreviewMode, userAccessKeys),
       savedItems
     ),
     hero: database.hero,
-    item: applySavedStateToItem(applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys), savedItems),
+    item: applyMemberReleaseToItem(
+      release,
+      applySavedStateToItem(applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys), savedItems)
+    ),
     settings: database.contentPageSettings[item.id]
   };
 }
@@ -2645,11 +3132,21 @@ export async function getLessonPageData(
   const { userId } = getUserIdentity(user);
   const savedItems = getSavedItemSet(database, userId);
   const userAccessKeys = getUserAccessKeys(database, user);
+  const release = createMemberReleaseContext(database, user, accessPreviewMode);
+  // Aula ainda nao liberada para o aluno chega sem video (nem ID do YouTube); sem acesso, nenhuma leva.
   const modules = item
     ? minimizeStudentYouTubeVideoConfigs(
-        applySavedStateToModules(
-          applyLessonProgress(database, contentId, getModulesForContent(database, item), userId),
-          savedItems
+        applyMemberReleaseToModules(
+          release,
+          item,
+          applySavedStateToModules(
+            applyLessonProgress(database, contentId, getModulesForContent(database, item), userId),
+            savedItems
+          ),
+          {
+            hasAccess: hasPurchaseAccess(item, accessPreviewMode, userAccessKeys),
+            videoMode: "keep_released"
+          }
         )
       )
     : [];
@@ -2666,7 +3163,10 @@ export async function getLessonPageData(
     allModules: modules,
     initialLessonReactions: getLessonReactions(database, contentId, userId),
     initialLessonWatchStates: getLessonWatchStates(database, contentId, userId),
-    item: applySavedStateToItem(applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys), savedItems),
+    item: applyMemberReleaseToItem(
+      release,
+      applySavedStateToItem(applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys), savedItems)
+    ),
     returnContent: parentFormation
       ? applySavedStateToItem(applyAccessPreviewToItem(parentFormation, accessPreviewMode, userAccessKeys), savedItems)
       : undefined,
@@ -2681,6 +3181,10 @@ export async function getAdminDashboardData() {
 
 function validateHomeSectionConfigs(configs: HomeSectionConfig[], database: PlatformDatabase) {
   const sellableIds = new Set(getSellableItems(database).map((item) => item.id));
+  // Produto que nao esta mais a venda (excluido ou fora de venda) nao trava a publicacao: sai da
+  // escolha manual e leva junto a fileira de modulos dele, como a home do aluno ja faz. Cobre a tela
+  // antiga e a corrida com uma exclusao entre abrir a Vitrine e publicar.
+  const { sections } = pruneHomeSectionRefs(configs, (itemId) => sellableIds.has(itemId));
   const ids = new Set<string>();
   const automaticSources = new Set<string>();
   const validLayoutsByType: Record<HomeSectionConfig["sectionType"], Set<HomeSectionConfig["layout"]>> = {
@@ -2689,7 +3193,7 @@ function validateHomeSectionConfigs(configs: HomeSectionConfig[], database: Plat
     content_structure: new Set(["compact", "immersive"])
   };
 
-  for (const section of configs) {
+  for (const section of sections) {
     const id = section.id.trim();
 
     if (!id || ids.has(id)) {
@@ -2708,15 +3212,7 @@ function validateHomeSectionConfigs(configs: HomeSectionConfig[], database: Plat
       if (section.sectionType !== "content_carousel") {
         throw new Error("Selecao manual so pode ser usada em carrosseis de conteudo.");
       }
-
-      if (section.itemIds.some((itemId) => !sellableIds.has(itemId))) {
-        throw new Error("A selecao manual contem um produto invalido.");
-      }
-    } else if (section.contentSource === "selected_content_structure") {
-      if (!section.sourceContentId || !sellableIds.has(section.sourceContentId)) {
-        throw new Error("Escolha um curso ou formacao valido para a secao.");
-      }
-    } else {
+    } else if (section.contentSource !== "selected_content_structure") {
       if (automaticSources.has(section.contentSource)) {
         throw new Error("Cada fonte automatica pode aparecer apenas uma vez.");
       }
@@ -2727,7 +3223,7 @@ function validateHomeSectionConfigs(configs: HomeSectionConfig[], database: Plat
     ids.add(id);
   }
 
-  return normalizeHomeSectionOrder(configs.map((section) => ({
+  return normalizeHomeSectionOrder(sections.map((section) => ({
     ...section,
     id: section.id.trim(),
     itemIds: Array.from(new Set(section.itemIds)),
@@ -3267,6 +3763,40 @@ export async function upsertContentItem(input: ContentWriteInput) {
   return toHydratedAdminDashboardData(database);
 }
 
+/**
+ * Tira o produto excluido da vitrine (platform_settings.homeSections): sai das escolhas manuais, a
+ * fileira de modulos dele sai inteira e a escolha manual que fica vazia sai tambem (pruneHomeSectionRefs,
+ * a mesma regra da home do aluno). Rele a chave na hora e grava com a versao lida
+ * (writePlatformSettingGuarded); se outra tela gravou no meio, rele e tenta mais uma vez. Vitrine
+ * nunca publicada: nada a gravar (a ordem padrao ja nao mostra o produto). Devolve o que foi gravado
+ * ou null quando nao havia nada a tirar.
+ */
+async function removeProductFromHomeSections(productId: string) {
+  for (let attempt = 0; ; attempt += 1) {
+    const current = await readPlatformSetting("homeSections");
+
+    if (!current.exists) {
+      return null;
+    }
+
+    const pruned = pruneHomeSectionRefs(normalizeHomeSectionConfigs(current.value), (itemId) => itemId !== productId);
+
+    if (pruned.removed.length === 0) {
+      return null;
+    }
+
+    try {
+      const saved = await writePlatformSettingGuarded("homeSections", pruned.sections, current.updatedAt);
+
+      return { sections: pruned.sections, updatedAt: saved.updatedAt };
+    } catch (error) {
+      if (!(error instanceof MemberAreaConflictError) || attempt >= 1) {
+        throw error;
+      }
+    }
+  }
+}
+
 export async function deleteContentItem(itemId: string) {
   const database = await readAdminDatabase();
   const combosBeforeDelete = database.combos;
@@ -3297,6 +3827,19 @@ export async function deleteContentItem(itemId: string) {
   const supabase = getSupabaseAdminClient();
   const deleteContentResult = await supabase.from("content_items").delete().eq("id", itemId);
   await throwIfSupabaseError(deleteContentResult.error, "Erro removendo conteudo");
+
+  // Junto com a exclusao, o produto sai das fileiras da vitrine. Falhar aqui nao desfaz a exclusao: a
+  // home do aluno ja ignora o produto e a Vitrine/publishHomeSections limpam de novo ao publicar.
+  try {
+    const homeSections = await removeProductFromHomeSections(itemId);
+
+    if (homeSections) {
+      database.homeSectionConfigs = homeSections.sections;
+      database.homeSectionsUpdatedAt = homeSections.updatedAt;
+    }
+  } catch (error) {
+    console.error("[vitrine] limpeza das fileiras ao excluir produto", error);
+  }
 
   if (ownedTargetIds.size > 0) {
     const deleteSavedResult = await supabase.from("saved_items").delete().in("target_id", Array.from(ownedTargetIds));

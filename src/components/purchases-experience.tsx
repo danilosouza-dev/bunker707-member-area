@@ -3,279 +3,333 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
-  BookOpen,
-  CheckCircle2,
-  Clock3,
+  CalendarClock,
+  CircleCheck,
+  CirclePlay,
+  Layers3,
   LibraryBig,
+  LifeBuoy,
+  ListChecks,
+  LockKeyhole,
   Play,
-  Search,
-  Sparkles
+  RotateCcw,
+  SearchX,
+  type LucideIcon
 } from "lucide-react";
-import { withAccessPreviewParam } from "@/lib/access-preview";
-import type { LucideIcon } from "lucide-react";
-import type { AccessPreviewMode } from "@/lib/access-preview";
-import { cssImageUrl } from "@/lib/css-url";
+import { MemberButton, MemberButtonLink } from "@/components/member/ui/member-button";
+import { MemberChip } from "@/components/member/ui/member-chip";
+import { MemberEmptyState } from "@/components/member/ui/member-empty-state";
+import { MemberFilterPills, MemberSearchField, type MemberFilterOption } from "@/components/member/ui/member-filters";
+import { MemberPage, MemberPageHeader } from "@/components/member/ui/member-page";
+import { MemberPosterCard, memberPosterGridClassName } from "@/components/member/ui/member-poster-card";
+import { MemberStat, MemberStatGrid } from "@/components/member/ui/member-stat";
+import { formatMemberCount } from "@/lib/member-format";
 import type { ContentItem, ContentKind } from "@/lib/platform-types";
+import { cn } from "@/lib/utils";
+import {
+  buildPurchasesPreviewView,
+  getPurchaseLessonsMeta,
+  normalizeMemberSearchText,
+  type PurchaseProductView,
+  type PurchaseResumeKind,
+  type PurchaseStatusFilter,
+  type PurchasesPageView
+} from "@/server/member-area/purchases-view";
 
-type PurchasesExperienceProps = {
-  accessPreviewMode?: AccessPreviewMode;
-  items: ContentItem[];
+// Minhas compras (cliente leve): recebe so o recorte montado no servidor (buildPurchasesPageView) e
+// cuida de filtro e busca. Progresso e situacao sao do proprio aluno; nada vem de content_items.progress.
+
+type PurchasesExperienceProps =
+  | { items?: never; view: PurchasesPageView }
+  /** Previa de layout da tela antiga do admin (/admin/legado): itens do catalogo, sem aluno. */
+  | { items: ContentItem[]; view?: never };
+
+type KindFilter = "all" | ContentKind;
+
+const resumeVerbs: Record<PurchaseResumeKind, { icon: LucideIcon; label: string }> = {
+  browse: { icon: Layers3, label: "Ver cursos" },
+  continue: { icon: Play, label: "Continuar" },
+  review: { icon: RotateCcw, label: "Revisar" },
+  start: { icon: Play, label: "Começar" }
 };
 
-type PurchaseFilter = "all" | "in-progress" | "completed" | "new" | "formations" | "courses" | "bootcamps";
+const statusFilterLabels: Record<PurchaseStatusFilter, string> = {
+  all: "Todos",
+  completed: "Concluídos",
+  in_progress: "Em andamento",
+  not_started: "Não iniciados"
+};
 
-const filterOptions = [
-  { id: "all", label: "Todos" },
-  { id: "in-progress", label: "Em andamento" },
-  { id: "completed", label: "Concluidos" },
-  { id: "new", label: "Novos" },
-  { id: "formations", label: "Formacoes" },
-  { id: "courses", label: "Cursos" },
-  { id: "bootcamps", label: "Bootcamps" }
-] satisfies Array<{
-  id: PurchaseFilter;
-  label: string;
-}>;
-
-function getContentHref(item: ContentItem, accessPreviewMode?: AccessPreviewMode) {
-  return withAccessPreviewParam(`/conteudo/${item.id}`, accessPreviewMode);
-}
-
-function getActionLabel(item: ContentItem) {
-  if (item.status === "Concluido" || item.progress >= 100) {
-    return "Revisar";
+function PurchaseResumeLink({ product }: { product: PurchaseProductView }) {
+  if (!product.resumeHref || !product.resumeKind) {
+    return null;
   }
 
-  if (item.status === "Em andamento" || item.progress > 0) {
-    return "Continuar";
-  }
-
-  if (item.kind === "Formacao") {
-    return "Ver cursos";
-  }
-
-  if (item.kind === "Bootcamp") {
-    return "Comecar bootcamp";
-  }
-
-  return "Comecar";
-}
-
-function getKindPlural(kind: ContentKind) {
-  if (kind === "Formacao") {
-    return "Formacoes";
-  }
-
-  if (kind === "Bootcamp") {
-    return "Bootcamps";
-  }
-
-  return "Cursos";
-}
-
-function matchesFilter(item: ContentItem, activeFilter: PurchaseFilter) {
-  if (activeFilter === "all") {
-    return true;
-  }
-
-  if (activeFilter === "in-progress") {
-    return item.status === "Em andamento" || (item.progress > 0 && item.progress < 100);
-  }
-
-  if (activeFilter === "completed") {
-    return item.status === "Concluido" || item.progress >= 100;
-  }
-
-  if (activeFilter === "new") {
-    return item.status === "Novo" || item.progress === 0;
-  }
-
-  if (activeFilter === "formations") {
-    return item.kind === "Formacao";
-  }
-
-  if (activeFilter === "courses") {
-    return item.kind === "Curso";
-  }
-
-  return item.kind === "Bootcamp";
-}
-
-function PurchaseStat({
-  icon: Icon,
-  label,
-  value
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-[8px] border border-white/10 bg-white/[0.045] p-4">
-      <div className="flex items-center gap-3">
-        <span className="grid h-10 w-10 place-items-center rounded-[8px] bg-white/10 text-white">
-          <Icon className="h-5 w-5" />
-        </span>
-        <div>
-          <p className="text-2xl font-black leading-none text-white">{value}</p>
-          <p className="mt-1 text-xs font-semibold text-zinc-400">{label}</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PurchaseCard({ accessPreviewMode, item }: { accessPreviewMode?: AccessPreviewMode; item: ContentItem }) {
-  const progress = Math.min(Math.max(item.progress, 0), 100);
-  const actionLabel = getActionLabel(item);
+  const verb = resumeVerbs[product.resumeKind];
+  const Icon = verb.icon;
+  const highlighted = product.resumeKind === "continue" || product.resumeKind === "start";
 
   return (
     <Link
-      aria-label={`Abrir ${item.title}`}
-      className="group block overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/30 outline-none transition hover:-translate-y-1 hover:shadow-[0_34px_90px_rgba(0,0,0,0.68)] focus-visible:ring-2 focus-visible:ring-white/70"
-      href={getContentHref(item, accessPreviewMode)}
+      aria-label={product.resumeAriaLabel ?? undefined}
+      className="group/resume mt-2.5 flex min-w-0 items-center gap-2.5 rounded-[8px] outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      href={product.resumeHref}
+      title={product.resumeLabel ?? undefined}
     >
-      <div className="relative aspect-[720/1040] overflow-hidden bg-[#101010]">
-        <div
-          className="absolute inset-0 bg-cover bg-center transition duration-700 group-hover:scale-[1.035]"
-          style={{ backgroundImage: cssImageUrl(item.image) }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/78 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase text-zinc-300">
-            <span>{item.kind}</span>
-            <span className="h-1 w-1 rounded-full bg-zinc-500" />
-            <span>{item.status}</span>
-          </div>
-          <h2 className="line-clamp-2 text-lg font-black leading-tight text-white">
-            {item.title}
-          </h2>
-          <p className="mt-2 line-clamp-2 text-xs leading-5 text-zinc-300">
-            {item.description ?? item.eyebrow}
-          </p>
-          <div className="mt-4">
-            <div className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold text-zinc-300">
-              <span className="line-clamp-1">{item.lessons ?? getKindPlural(item.kind)}</span>
-              <span className="text-white">{Math.round(progress)}%</span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-white/20">
-              <div
-                className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-500"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-          <span className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-extrabold text-black transition group-hover:bg-zinc-200">
-            <Play className="h-4 w-4 fill-current" />
-            {actionLabel}
+      <span
+        aria-hidden="true"
+        className={cn(
+          "grid size-8 shrink-0 place-items-center rounded-full transition-[transform,background-color] duration-200 group-hover/resume:scale-105 motion-reduce:transition-none motion-reduce:group-hover/resume:scale-100",
+          highlighted ? "bg-white text-black group-hover/resume:bg-zinc-200" : "bg-white/[0.08] text-white ring-1 ring-white/10 group-hover/resume:bg-white/[0.14]"
+        )}
+      >
+        <Icon className={cn("size-3.5", verb.icon === Play ? "ml-0.5 fill-current" : "")} strokeWidth={2.4} />
+      </span>
+      <span className="min-w-0 leading-tight">
+        <span className="block truncate text-[13px] font-semibold text-white">{verb.label}</span>
+        {product.resumeLessonTitle ? (
+          <span className="mt-0.5 block truncate text-xs text-zinc-400 transition-colors group-hover/resume:text-zinc-300">
+            {product.resumeLessonTitle}
           </span>
-        </div>
-      </div>
+        ) : null}
+      </span>
     </Link>
   );
 }
 
-export function PurchasesExperience({ accessPreviewMode, items }: PurchasesExperienceProps) {
-  const [activeFilter, setActiveFilter] = useState<PurchaseFilter>("all");
-  const [query, setQuery] = useState("");
-  const normalizedQuery = query.trim().toLowerCase();
+function PurchaseInfoLines({ product }: { product: PurchaseProductView }) {
+  const releaseLine = product.releaseLabel
+    ? product.releaseLabel
+    : product.lockedLessons > 0
+      ? `${formatMemberCount(product.lockedLessons, "aula")} para liberar`
+      : null;
 
-  const filteredItems = useMemo(() => (
-    items.filter((item) => {
-      const matchesText = !normalizedQuery || [
-        item.title,
-        item.eyebrow,
-        item.description,
-        item.kind,
-        item.status
-      ].some((value) => value?.toLowerCase().includes(normalizedQuery));
-
-      return matchesText && matchesFilter(item, activeFilter);
-    })
-  ), [activeFilter, items, normalizedQuery]);
-
-  const completedCount = items.filter((item) => item.status === "Concluido" || item.progress >= 100).length;
-  const inProgressCount = items.filter((item) => item.status === "Em andamento" || (item.progress > 0 && item.progress < 100)).length;
-  const averageProgress = items.length > 0
-    ? Math.round(items.reduce((total, item) => total + item.progress, 0) / items.length)
-    : 0;
+  if (!releaseLine && !product.accessLabel) {
+    return null;
+  }
 
   return (
-    <section className="min-h-screen bg-[#141414] px-5 pb-24 pt-28 sm:px-8 lg:px-12">
-      <div className="mx-auto max-w-[104rem]">
-        <div className="max-w-4xl">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-[6px] border border-white/10 bg-white/[0.055] px-3 py-2 text-xs font-bold uppercase text-zinc-300">
-            <LibraryBig className="h-4 w-4 text-[var(--accent)]" />
-            Biblioteca liberada
-          </div>
-          <h1 className="text-4xl font-black leading-none text-white sm:text-5xl lg:text-6xl">
-            Minhas compras
-          </h1>
-          <p className="mt-5 max-w-2xl text-sm leading-6 text-zinc-300 sm:text-base sm:leading-7">
-            Todos os produtos que voce tem acesso ativo: formacoes, cursos avulsos e bootcamps em um unico lugar.
-          </p>
-        </div>
+    <div className="mt-2.5 grid gap-1.5 text-[11px] font-medium leading-4">
+      {releaseLine ? (
+        <p className={cn("flex min-w-0 items-start gap-1.5", product.releaseLabel ? "text-amber-200" : "text-zinc-400")}>
+          <LockKeyhole aria-hidden="true" className="mt-px size-3.5 shrink-0" strokeWidth={2.2} />
+          <span className="min-w-0">{releaseLine}</span>
+        </p>
+      ) : null}
+      {product.accessLabel ? (
+        <p className={cn("flex min-w-0 items-start gap-1.5", product.accessEndsSoon ? "text-amber-200" : "text-zinc-500")}>
+          <CalendarClock aria-hidden="true" className="mt-px size-3.5 shrink-0" strokeWidth={2.2} />
+          <span className="min-w-0">{product.accessLabel}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
-        <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <PurchaseStat icon={LibraryBig} label="Produtos liberados" value={String(items.length)} />
-          <PurchaseStat icon={Clock3} label="Em andamento" value={String(inProgressCount)} />
-          <PurchaseStat icon={CheckCircle2} label="Concluidos" value={String(completedCount)} />
-          <PurchaseStat icon={BookOpen} label="Progresso medio" value={`${averageProgress}%`} />
-        </div>
+function PurchaseProductCard({
+  priority,
+  product,
+  showProgress
+}: {
+  priority: boolean;
+  product: PurchaseProductView;
+  showProgress: boolean;
+}) {
+  const lessonsMeta = getPurchaseLessonsMeta(product);
 
-        <div className="mt-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap gap-2">
-            {filterOptions.map((filter) => {
-              const isActive = activeFilter === filter.id;
+  return (
+    <>
+      <MemberPosterCard
+        ariaLabel={`Abrir ${product.title}`}
+        badge={
+          <>
+            <MemberChip tone="solid">{product.kindLabel}</MemberChip>
+            {product.status === "completed" ? (
+              <MemberChip className="border-emerald-400/40 bg-black/70 text-emerald-200 backdrop-blur" icon={CircleCheck} tone="success">
+                Concluído
+              </MemberChip>
+            ) : null}
+          </>
+        }
+        href={product.href}
+        image={product.image}
+        meta={
+          !showProgress
+            ? product.eyebrow || undefined
+            : product.status === "not_started" || product.totalLessons === 0
+              ? lessonsMeta
+              : `${lessonsMeta} · ${product.percent}%`
+        }
+        priority={priority}
+        progress={
+          product.status === "not_started"
+            ? undefined
+            : { label: `Seu progresso em ${product.title}: ${product.percent}%`, value: product.percent }
+        }
+        title={product.title}
+      />
+      <PurchaseResumeLink product={product} />
+      <PurchaseInfoLines product={product} />
+    </>
+  );
+}
 
-              return (
-                <button
-                  className={`min-h-10 rounded-[8px] border px-4 py-2 text-sm font-bold transition ${
-                    isActive
-                      ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-                      : "border-white/10 bg-white/[0.045] text-zinc-300 hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
-                  }`}
-                  key={filter.id}
-                  onClick={() => setActiveFilter(filter.id)}
-                  type="button"
-                >
-                  {filter.label}
-                </button>
-              );
-            })}
-          </div>
+function ContinueAction({ target }: { target: NonNullable<PurchasesPageView["continueTarget"]> }) {
+  return (
+    <div className="flex min-w-0 max-w-full flex-col items-start gap-2 lg:items-end">
+      <MemberButtonLink
+        aria-label={`Continuar de onde parei: ${target.lessonTitle}, em ${target.productTitle}`}
+        href={target.href}
+        size="lg"
+        variant="primary"
+      >
+        <Play className="ml-0.5 fill-current" />
+        Continuar de onde parei
+      </MemberButtonLink>
+      <p className="max-w-[20rem] truncate text-xs text-zinc-500" title={`${target.lessonTitle} · ${target.productTitle}`}>
+        {target.lessonTitle} <span aria-hidden="true">·</span> {target.productTitle}
+      </p>
+    </div>
+  );
+}
 
-          <label className="flex h-11 w-full items-center gap-3 rounded-[8px] border border-white/10 bg-black/25 px-4 text-sm text-zinc-300 transition focus-within:border-white/25 focus-within:bg-black/35 lg:max-w-sm">
-            <Search className="h-4 w-4 text-zinc-500" />
-            <span className="sr-only">Buscar em Minhas compras</span>
-            <input
-              className="min-w-0 flex-1 border-0 bg-transparent text-white outline-none placeholder:text-zinc-500"
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar nas compras..."
-              type="search"
-              value={query}
+export function PurchasesExperience(props: PurchasesExperienceProps) {
+  const { items, view: serverView } = props;
+  const view = useMemo(() => serverView ?? buildPurchasesPreviewView(items ?? []), [items, serverView]);
+  const [statusFilter, setStatusFilter] = useState<PurchaseStatusFilter>("all");
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [query, setQuery] = useState("");
+  const normalizedQuery = normalizeMemberSearchText(query);
+  const { products, stats } = view;
+
+  const statusOptions = useMemo<MemberFilterOption<PurchaseStatusFilter>[]>(() => {
+    const counts: Record<PurchaseStatusFilter, number> = {
+      all: stats.products,
+      completed: stats.completed,
+      in_progress: stats.inProgress,
+      not_started: stats.notStarted
+    };
+
+    return (["all", "in_progress", "not_started", "completed"] as const)
+      .filter((id) => id === "all" || counts[id] > 0)
+      .map((id) => ({ count: counts[id], id, label: statusFilterLabels[id] }));
+  }, [stats]);
+
+  const kindOptions = useMemo<MemberFilterOption<KindFilter>[]>(() => [
+    { id: "all", label: "Todos os tipos" },
+    ...view.kindOptions.map((option) => ({ count: option.count, id: option.id, label: option.label }))
+  ], [view.kindOptions]);
+
+  const filteredProducts = useMemo(() => products.filter((product) => (
+    (statusFilter === "all" || product.status === statusFilter) &&
+    (kindFilter === "all" || product.kind === kindFilter) &&
+    (!normalizedQuery || product.searchText.includes(normalizedQuery))
+  )), [kindFilter, normalizedQuery, products, statusFilter]);
+
+  const isFiltering = statusFilter !== "all" || kindFilter !== "all" || Boolean(normalizedQuery);
+
+  function clearFilters() {
+    setStatusFilter("all");
+    setKindFilter("all");
+    setQuery("");
+  }
+
+  return (
+    <MemberPage>
+      <MemberPageHeader
+        actions={view.continueTarget ? <ContinueAction target={view.continueTarget} /> : null}
+        description="Tudo o que você comprou ou recebeu acesso, com o seu progresso em cada um."
+        eyebrow={{ icon: LibraryBig, label: "Sua biblioteca" }}
+        title="Minhas compras"
+      >
+        {view.showProgress && stats.products > 0 ? (
+          <MemberStatGrid>
+            <MemberStat icon={LibraryBig} label={stats.products === 1 ? "Produto" : "Produtos"} value={stats.products} />
+            <MemberStat icon={CirclePlay} label="Em andamento" value={stats.inProgress} />
+            <MemberStat icon={CircleCheck} label={stats.completed === 1 ? "Concluído" : "Concluídos"} value={stats.completed} />
+            <MemberStat
+              hint={stats.totalLessons > 0 ? `de ${formatMemberCount(stats.totalLessons, "aula")}` : undefined}
+              icon={ListChecks}
+              label="Aulas concluídas"
+              value={stats.completedLessons}
             />
-          </label>
-        </div>
+          </MemberStatGrid>
+        ) : null}
+      </MemberPageHeader>
 
-        {filteredItems.length > 0 ? (
-          <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-            {filteredItems.map((item) => (
-              <PurchaseCard accessPreviewMode={accessPreviewMode} item={item} key={item.id} />
-            ))}
-          </div>
-        ) : (
-          <div className="mt-8 rounded-[8px] border border-white/10 bg-white/[0.04] px-6 py-12 text-center">
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-[8px] bg-white/10 text-white">
-              <Sparkles className="h-5 w-5" />
+      {products.length === 0 ? (
+        <MemberEmptyState
+          action={
+            <>
+              <MemberButtonLink href="/suporte" variant="primary">
+                <LifeBuoy />
+                Falar com o suporte
+              </MemberButtonLink>
+              <MemberButtonLink href={view.homeHref} variant="secondary">
+                Ir para o início
+              </MemberButtonLink>
+            </>
+          }
+          description="Quando uma compra for confirmada, o produto aparece aqui com o seu progresso. Comprou e não aparece? Fale com o suporte."
+          icon={LibraryBig}
+          title="Você ainda não tem produtos liberados"
+        />
+      ) : (
+        <>
+          <div className="mb-6 grid gap-3">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {view.showProgress ? (
+                <MemberFilterPills
+                  ariaLabel="Filtrar por situação"
+                  className="min-w-0"
+                  onChange={setStatusFilter}
+                  options={statusOptions}
+                  value={statusFilter}
+                />
+              ) : (
+                <MemberFilterPills ariaLabel="Filtrar por tipo" className="min-w-0" onChange={setKindFilter} options={kindOptions} value={kindFilter} />
+              )}
+              <MemberSearchField
+                className="sm:w-72 sm:max-w-none sm:shrink-0"
+                label="Buscar em Minhas compras"
+                onChange={setQuery}
+                placeholder="Buscar pelo nome..."
+                value={query}
+              />
             </div>
-            <h2 className="mt-4 text-xl font-black text-white">Nada encontrado</h2>
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-zinc-400">
-              Tente limpar a busca ou escolher outro filtro para ver os produtos liberados.
-            </p>
+            {view.showProgress && view.kindOptions.length > 1 ? (
+              <MemberFilterPills ariaLabel="Filtrar por tipo" onChange={setKindFilter} options={kindOptions} value={kindFilter} />
+            ) : null}
           </div>
-        )}
-      </div>
-    </section>
+
+          <p aria-live="polite" className={isFiltering ? "mb-4 text-xs font-medium text-zinc-500" : "sr-only"} role="status">
+            {isFiltering
+              ? `${filteredProducts.length.toLocaleString("pt-BR")} de ${formatMemberCount(products.length, "produto")}`
+              : formatMemberCount(products.length, "produto")}
+          </p>
+
+          {filteredProducts.length > 0 ? (
+            <ul className={memberPosterGridClassName}>
+              {filteredProducts.map((product, index) => (
+                <li className="min-w-0" key={product.id}>
+                  <PurchaseProductCard priority={index < 5} product={product} showProgress={view.showProgress} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <MemberEmptyState
+              action={
+                <MemberButton onClick={clearFilters} variant="secondary">
+                  Limpar filtros
+                </MemberButton>
+              }
+              description="Nenhum produto combina com a busca e os filtros escolhidos."
+              icon={SearchX}
+              title="Nada encontrado"
+            />
+          )}
+        </>
+      )}
+    </MemberPage>
   );
 }

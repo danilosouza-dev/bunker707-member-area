@@ -167,6 +167,8 @@ Implementacao atual:
 - enquanto o CRM manual e a tabela de entitlements coexistirem, o backend tambem reconhece os cursos ativos vinculados ao aluno por email/id e sincroniza esses cursos para `entitlements` quando o usuario Auth ja existe;
 - quando um curso/produto ou aluno sai do CRM manual, os entitlements gerenciados pela origem `admin-student:*` sao marcados como `revoked`; entitlements criados por webhooks externos nao sao apagados por essa rotina;
 - o modo de preview de acesso e ferramenta administrativa: so aparece para usuarios com papel em `admin_roles` e nao altera a experiencia de alunos comuns.
+- `starts_at` e o inicio da contagem das regras de liberacao "depois da compra/inscricao": a data mostrada ao aluno (`Liberação em 08/01/2026`) e a liberacao real saem da mesma conta (`resolveReleaseState` em `src/server/access/release-policy.ts`), usando o acesso ativo mais antigo que vale para o conteudo, no fuso de Sao Paulo.
+- ponto de extensao da garantia (sem migracao nesta fase): quando o pipeline de webhooks gravar o fim da garantia da compra (Hotmart: `purchase.warranty_expire_date`), entra uma coluna opcional `warranty_ends_at` em `entitlements` (migracao `202610130002+`), enviada em `getReleasePolicyEntitlements` (`src/server/db/platform-store.ts`). A conta ja aceita esse campo e so o usa quando a regra pedir `anchor: "warranty_end"`; sem a data gravada, volta para `starts_at`.
 
 ## Home configuravel
 
@@ -313,7 +315,7 @@ Regras:
 - content_id;
 - lesson_id;
 - author_id;
-- author_name, author_username, author_avatar_url e author_role como snapshot de exibicao;
+- author_name, author_username, author_avatar_url e author_role como snapshot de exibicao. `author_role` e gravado no envio: `producer` para papel administrativo `owner`, `admin` ou `editor` (etiqueta `Professor`), `moderator` para `support` ou `analyst` (etiqueta `Moderador`) e `student` para quem nao tem papel (etiqueta `Aluno`). Comentarios antigos mantem o papel gravado;
 - parent_comment_id;
 - body;
 - status: pending, approved, hidden, spam;
@@ -833,6 +835,8 @@ Regra:
 - materiais bonus podem exigir regra individual configurada no CMS, como avaliacao da aula, comentario, percentual minimo assistido ou outra atividade;
 - a regra e por material, nao por aba inteira de materiais.
 
+Estado atual (migracao `202610130001_lesson_materials.sql`, ainda nao aplicada em todos os bancos): colunas `id`, `lesson_id`, `title`, `description`, `file_url` (so https), `file_type` (pdf, spreadsheet, document, presentation, image, archive, audio, video, link, other), `file_size_bytes`, `unlock_rule` (`none`, `lesson_rated`, `lesson_progress` + `unlock_threshold`), `generated_by_ai`, `status` (draft, published, deleted), `sort_order`, `created_by`, `created_at`, `updated_at`. RLS ligada sem politica para aluno: o servidor le com a chave de servico depois de validar o acesso a aula e so devolve o endereco quando a regra do material foi cumprida (`src/server/member-area/lesson-materials.ts`, `src/lib/lesson-materials.ts`). Banco sem a tabela: a aula e a pagina Materiais mostram estado vazio. O cadastro de materiais no admin e a proxima etapa.
+
 ### content_release_rules
 
 Regras configuraveis no CMS para liberar formacoes, cursos, modulos, aulas ou materiais. No produto, essas regras sao editadas dentro do item correspondente, nao como uma area isolada da navegacao principal.
@@ -845,6 +849,8 @@ Regras configuraveis no CMS para liberar formacoes, cursos, modulos, aulas ou ma
 - is_active;
 - created_at;
 - updated_at.
+
+Estado atual: a regra fica no proprio item como `release_rule` (`ReleaseRuleConfig` em `src/lib/platform-types.ts`: `mode`, `delayValue`, `delayUnit` em horas ou dias, `fixedDate`, `requirement`). Campo opcional `anchor` (`access_start`, padrao, ou `warranty_end`) diz de onde conta o atraso de `after_enrollment`/`after_purchase`; nenhuma tela do admin grava `warranty_end` ainda.
 
 Exemplos:
 

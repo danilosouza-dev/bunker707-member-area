@@ -45,7 +45,20 @@ test("proxy uses the Next 16 file convention and keeps protected pages behind lo
   assert.doesNotMatch(proxySource, /export (async )?function middleware/);
   assert.doesNotMatch(proxySource, /export const runtime/);
   const protectedPrefixes = proxySource.match(/const protectedPagePrefixes = \[([^\]]*)\]/)?.[1] ?? "";
-  for (const prefix of ["/", "/admin", "/alterar-senha", "/conteudo", "/favoritos", "/minhas-compras"]) {
+  for (const prefix of [
+    "/",
+    "/admin",
+    "/alterar-senha",
+    "/conteudo",
+    "/favoritos",
+    "/minhas-compras",
+    // Paginas da barra lateral do aluno (aluno v2).
+    "/minha-jornada",
+    "/continue-assistindo",
+    "/materiais",
+    "/suporte",
+    "/perfil"
+  ]) {
     assert.ok(protectedPrefixes.includes(`"${prefix}"`), `${prefix} must stay behind login`);
   }
   assert.match(proxySource, /if \(needsUser && !user\)[^}]*?return redirectToLogin\(request, contentSecurityPolicy\);/);

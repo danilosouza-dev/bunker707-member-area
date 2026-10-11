@@ -10,9 +10,10 @@ Todas as telas autenticadas devem compartilhar uma estrutura consistente:
 - menu hamburguer no inicio do header;
 - logo Bunker707 clicavel, levando para a home;
 - busca global;
-- notificacoes;
-- avatar/perfil;
+- avatar do aluno com menu da conta (`Perfil`, `Minhas compras`, `Suporte` e `Sair`);
 - sidebar aberta pelo menu hamburguer.
+
+Notificacoes e conquistas ficam para a fase 2. Ate la o topo nao mostra sino, trofeu ou qualquer icone sem funcao (decisao de 2026-10-11, aluno v2).
 
 Toda mudanca de pagina deve ser reconhecida no mesmo instante do clique ou comando. O app shell mantem um unico spinner circular vermelho ancorado no centro do viewport, sobre uma camada preta mais escura e desfocada que preserva as cores da pagina, no estilo Netflix, ate a nova tela assumir. O mesmo posicionamento e usado pelo fallback do App Router e os dois indicadores nunca aparecem ao mesmo tempo. O comportamento cobre links, cards, navegacao programatica, redirecionamentos e voltar/avancar. O destino contextual continua anunciado para leitores de tela, sem caixa de texto visivel. Esse feedback tambem deve aparecer em rotas rapidas, cacheadas ou pre-carregadas; nenhum fluxo pode depender apenas do fallback `loading.tsx` do App Router.
 
@@ -90,8 +91,9 @@ Elementos recomendados:
 - menu hamburguer;
 - logo Bunker707 clicavel, levando para a home;
 - busca global em icone expansivel, alinhada aos icones da direita;
-- icone de notificacoes;
-- avatar do aluno com menu de perfil.
+- avatar do aluno, que abre o menu da conta com `Perfil`, `Minhas compras`, `Suporte` e `Sair` (`Saindo...` enquanto sai). O menu fecha ao clicar fora, com `Esc` ou quando o foco sai dele, e as setas percorrem os itens (`src/components/member/shell/member-account-menu.tsx`).
+
+O sino de notificacoes volta quando existirem notificacoes reais (fase 2).
 
 Na home, o header deve ficar praticamente transparente sobre a hero, com apenas um degrade sutil de cima para baixo para manter menu e icones legiveis. Apos o aluno fazer scroll, o header deve assumir fundo preto/solido, como no comportamento da Netflix.
 
@@ -111,19 +113,24 @@ A abertura e o fechamento devem ser suaves, com backdrop em fade e painel desliz
 
 O sidebar nao deve mostrar formacao atual fixa, curso atual fixo ou barra generica de progresso do aluno. Progresso deve ser contextual por formacao, curso, bootcamp, modulo ou aula, porque um percentual unico da escola inteira fica pouco claro quando o aluno tem varios produtos, desafios, quizzes e projetos.
 
-Itens iniciais:
+Itens (fonte unica em `src/lib/member-navigation.ts`), em dois grupos:
 
-- Home;
-- Minha jornada;
-- Minhas compras;
-- Favoritos;
-- Continue assistindo;
-- Materiais;
-- Suporte;
-- Perfil;
-- Sair.
+- Estudar: Inicio (`/`), Minha jornada (`/minha-jornada`), Continue assistindo (`/continue-assistindo`), Minhas compras (`/minhas-compras`), Favoritos (`/favoritos`), Materiais (`/materiais`);
+- Conta e ajuda: Suporte (`/suporte`), Perfil (`/perfil`);
+- rodape com a conta do aluno (avatar, nome, link para Perfil) e `Sair`.
 
-Quando o usuario autenticado tambem for admin/produtor, a sidebar pode exibir um item administrativo separado para ir ao CRM/backoffice. Esse item nao deve aparecer para alunos comuns.
+Todo item leva a uma pagina real; nenhum item fica desabilitado ou sem destino. O item ativo usa fundo claro translucido, barra vermelha a esquerda e icone vermelho (tambem no modo de visualizacao do produtor, com `?accessPreview`). Cada item tem icone proprio; a bussola fica reservada para a IA Diretor.
+
+Comportamento (`src/components/member/shell/member-sidebar.tsx`):
+
+- largura `min(340px, 88vw)`, altura total e respiro para a borda inferior do aparelho;
+- abrir o menu poe o foco no primeiro item; `Tab` e `Shift+Tab` ficam presos dentro do menu; `Esc` fecha e o foco volta ao botao do menu;
+- fechado, o menu sai do alcance do teclado e do leitor de tela (`inert`), e a pagina nao rola enquanto ele esta aberto;
+- a animacao some para quem pede menos movimento;
+- todo link do menu salva progresso e favoritos pendentes antes de trocar de pagina;
+- abrir o menu fecha a IA Diretor.
+
+Quando o usuario autenticado tambem for admin/produtor, a sidebar mostra o cartao `Área do produtor`, com `Ir para o admin` (`/admin`) e o `Modo de visualização` da area do aluno. Esse cartao nao aparece para alunos comuns.
 
 `Formacoes` nao deve aparecer como item principal da sidebar no MVP, porque formacoes sao apenas um tipo de produto dentro de `Minhas compras`. Quando o aluno quiser ver somente formacoes, isso deve acontecer por filtro dentro de `Minhas compras`.
 
@@ -383,6 +390,16 @@ Deve incluir:
 
 Nao deve mostrar cursos internos de formacao como produtos comprados separados. Cursos internos aparecem dentro da pagina/modal da propria formacao.
 
+Implementacao atual (aluno v2, `src/server/member-area/purchases-view.ts` + `src/components/purchases-experience.tsx`):
+
+- os numeros vem da biblioteca do aluno (`getMemberLibrary`), com o progresso do proprio aluno; a tela nao usa mais as colunas globais `content_items.progress/status` e o antigo "Progresso medio" saiu;
+- topo com `Produtos`, `Em andamento`, `Concluídos` e `Aulas concluídas` (de N) e o botao `Continuar de onde parei` quando existe aula para retomar;
+- filtros por situacao (`Todos`, `Em andamento`, `Não iniciados`, `Concluídos`), por tipo (so os tipos presentes) e busca pelo nome;
+- card vertical por produto: progresso real (na formacao, soma os cursos internos), acao `Continuar` com o nome da aula, `Começar`, `Revisar` ou `Ver cursos`, quantas aulas faltam liberar ou `Liberação em 08/11/2026` quando o produto inteiro ainda esta fechado;
+- linha de acesso: `Desde 01/01/2026 · Acesso vitalício` ou `Acesso até ...`, em ambar quando faltam 30 dias ou menos. Conteudo gratuito, previa do produtor e acesso sem data registrada ficam sem essa linha;
+- ordem: o que o aluno assistiu por ultimo primeiro; depois os nao iniciados, na ordem do produtor;
+- vazio real: `Você ainda não tem produtos liberados`, com o caminho para o Suporte; vazio de filtro: `Nada encontrado` com limpar filtros.
+
 ## Favoritos
 
 Tela em `/favoritos` com tudo que o aluno salvou para voltar depois.
@@ -397,6 +414,18 @@ Deve incluir:
 - acao para remover da lista sem sair da tela.
 
 Favoritar nao libera acesso. A tela continua respeitando entitlements e regras de liberacao.
+
+Implementacao atual (aluno v2, `src/server/member-area/favorites-view.ts` + `src/components/favorites-experience.tsx`): abas `Todos`, `Conteúdos`, `Módulos` e `Aulas` com contagem, busca, produtos e modulos em card vertical e aulas em card 16:9 com o progresso do aluno. Item salvo sem acesso aparece como `Sem acesso`, leva para a pagina do produto e nunca mostra a capa do video; aula ainda nao liberada mostra a data de liberacao. Remover um favorito tira o card na hora, sem sair da tela. Vazio: `Você ainda não salvou nada`, com o caminho para a pagina inicial.
+
+## Paginas da barra lateral (aluno v2)
+
+Todas leem a biblioteca do aluno (`getMemberLibrary` em `src/server/db/platform-store.ts`, tipos em `src/lib/member-library.ts`): so conteudo com acesso real (ou gratuito, ou previa do produtor para admin), com o progresso do proprio aluno. Nenhuma pagina mostra numero, curso ou material inventado; sem dado, aparece o estado vazio com o proximo passo.
+
+- Minha jornada: numeros reais (aulas concluidas, cursos em andamento e concluidos, ultima atividade), "Continue de onde parou", progresso por produto com a proxima aula e as aulas que ainda vao ser liberadas, e atividade recente. Sem pontos, ranking ou sequencia de dias nesta fase.
+- Continue assistindo: aulas comecadas e nao terminadas (mesma regra da fileira da home), da mais recente para a mais antiga.
+- Materiais: materiais de apoio de todas as aulas liberadas do aluno, com filtro por produto e tipo e busca; material com regra extra mostra o motivo do bloqueio.
+- Suporte: canais configurados pela escola (link de ajuda da tela de entrar: e-mail, WhatsApp ou pagina de ajuda) e perguntas frequentes. Sem formulario enquanto nao existir caixa de entrada no admin para responder.
+- Perfil: abas Dados, Acessos (data de inicio e fim de cada acesso ativo) e Segurança (alterar senha e sair). Edicao de nome/telefone fica para depois de unificar as tres origens do nome (cadastro do aluno, perfil e conta).
 
 ## Pagina de formacao e curso
 
@@ -524,6 +553,10 @@ Desktop:
 - nao exibir selo/tag do provedor de video sobre o player, como `YouTube`, `Vimeo` ou similares; essa informacao nao ajuda o aluno no consumo da aula;
 - mensagens visiveis ao aluno sobre carregamento, indisponibilidade, erro ou Modo TV devem ser neutras e nunca citar `YouTube`, Vimeo, Bunny, Mux ou qualquer outro provedor de video;
 - controles de aula anterior/proxima nao ficam no topo da pagina; essa navegacao acontece pela playlist lateral e futuramente pelos controles internos do player;
+- aula ou modulo com liberacao programada mostra a data real calculada no servidor para aquele aluno, no fuso de Sao Paulo, tanto na lista de aulas quanto no aviso sobre o video: `Liberação em 08/01/2026` (com hora, `Liberação em 08/01/2026 às 14:00`, quando o atraso for em horas; `Liberação hoje às 14:00` no proprio dia). A data vem da mesma conta que libera o acesso (`src/server/access/release-policy.ts`: inicio do acesso + atraso). Sem acesso real ou sem data (visitante, previa do produtor, conteudo gratuito) continua a frase generica (`Disponível 7 dias após a compra`). Quando o webhook da plataforma de venda gravar o fim da garantia (Hotmart: `warranty_expire_date`), a mesma conta podera usar essa data como inicio;
+- o aviso sobre o video mostra cadeado, `Esta aula será liberada`, a data e a linha discreta `Conta a partir da data da sua compra.`; na lista de aulas o selo curto e `Liberação em 08/01` (a frase completa fica no nome acessivel). Aula que depende da anterior mostra `Disponível depois que a aula anterior for concluída`;
+- se a data passar com a pagina aberta, a pagina se atualiza sozinha e o aviso oferece `Atualizar agora` como plano B. Ao concluir a aula anterior, a pagina busca de novo os dados e a proxima aula chega pronta para assistir;
+- aula ainda nao liberada nunca chega ao navegador com o video (nem o ID do YouTube); o modal da home e a pagina do conteudo nao enviam video de nenhuma aula, so a imagem ja resolvida;
 - botao principal abaixo do video marca/desmarca a aula como concluida, muda para estado verde `Concluida` e deve preservar esse estado quando o aluno voltar para a aula;
 - botoes secundarios como materiais, TV, salvar e avaliar devem ser circulares, iconograficos, com borda discreta no estado normal e feedback visual proprio no hover/foco, sem depender de tooltip nativo do navegador;
 - o botao de TV usa o nome acessivel e o tooltip `Assistir na TV`. Ao clicar, abre um modal compacto com endereco `/tv`, QR Code, codigo temporario de seis caracteres e estados explicitos de preparacao, espera, conexao, reconexao, expiracao, erro e encerramento;
@@ -550,6 +583,8 @@ Desktop:
 - tabs abaixo do player.
 - o painel de apoio da aula usa as abas `Comentários`, `Materiais` e `Tutor IA`; a terceira combina um chapéu de formatura, representando tutoria, com uma estrela discreta, representando IA;
 - `Tutor IA` usa respostas reais geradas somente depois de validar sessao, entitlement, transcricao ativa, chunks e provedor configurado. A interface nunca simula resposta e explica quando a aula ou o modelo ainda nao estao prontos;
+- visual do `Tutor IA` (aluno v2): cabecalho com o icone do Tutor, `Responde com base nesta aula` e ponto verde/cinza de disponibilidade; historico recolhivel (trilho a esquerda no computador, folha por cima no celular); sugestoes em 2x2 no chat vazio; pergunta do aluno em balao a direita e resposta sem balao, com avatar; campo em pilula que cresce ate 6 linhas, `Enter` envia e `Shift+Enter` quebra linha;
+- aba `Materiais` (aluno v2): mostra so materiais reais da aula, lidos por `/api/materials/lessons/[lessonId]` depois de conferir sessao, acesso e liberacao da aula. O painel separa `Disponíveis` de `Para liberar` (com o que fazer para liberar), tem estados de carregando, vazio (`Esta aula ainda não tem materiais`) e erro com `Tentar de novo`; o numero da aba so aparece depois de carregar. A antiga lista fixa de exemplo foi removida;
 - o histórico do `Tutor IA` pertence ao aluno e à aula atual, fica persistido sem expiração automática e pode ser consultado ou retomado posteriormente;
 - o Tutor e carregado somente no primeiro acesso daquela aula. Depois disso, trocar entre `Comentários`, `Materiais` e `Tutor IA` preserva chat selecionado, mensagens, rascunho, posição e resposta em andamento; dados ja carregados reaparecem imediatamente, sem retornar ao loading integral;
 - o historico pode ser revalidado silenciosamente depois da janela de frescor, ao recuperar foco ou conexao. A interface continua mostrando os dados existentes durante essa verificacao e so muda quando o servidor devolver um estado diferente;
@@ -575,14 +610,16 @@ Desktop:
 - essa camada e apenas de apresentacao e pode precisar de ajuste quando o YouTube mudar o embed. Ela nao e DRM: uma pessoa com conhecimento tecnico ainda pode descobrir o ID e a origem do video inspecionando o HTML ou as requisicoes de rede.
 - enquanto a pagina de aula estiver montada, o menu de contexto deve ficar bloqueado em toda a pagina, inclusive fora do player. A mesma barreira de atrito intercepta `F12`, os atalhos comuns de DevTools no Windows, Linux e macOS, `Ver codigo-fonte`, a tecla de menu de contexto e `Shift+F10`. Esses bloqueios nao substituem autorizacao, nao impedem abertura das ferramentas pelo menu do navegador e nao devem ser descritos como protecao absoluta.
 - a carga da pagina do aluno nao deve serializar a URL original de visualizacao do YouTube quando um ID valido ja puder ser derivado no servidor. Rotas auxiliares de resolucao e legenda recebem apenas os IDs internos de conteudo/aula, validam sessao e entitlement e resolvem o ID do YouTube no servidor. O iframe e os fluxos de reproducao ainda tornam a origem tecnicamente observavel, mas a URL completa deixa de aparecer de forma redundante nos dados e consultas da aplicacao.
-- comentarios da aula devem usar layout de thread leve, sem transformar cada comentario em card; avatar/foto, nome, tempo relativo, selo `Professor` quando aplicavel, reacoes por emoji/curtida e menu de denuncia ficam no proprio item;
-- respostas a um comentario devem aparecer indentadas dentro do comentario principal; respostas de professor mantem selo `Professor` no item indentado;
+- comentarios da aula devem usar layout de thread leve, sem transformar cada comentario em card; avatar/foto, nome, tempo relativo, etiqueta de funcao, reacoes por emoji/curtida e menu de denuncia ficam no proprio item;
+- toda pessoa tem etiqueta de funcao ao lado do nome: `Aluno` (discreta), `Professor` (vermelha, para produtor/equipe de conteudo) e `Moderador` (neutra, para os papeis de suporte e analista). O papel e gravado no comentario no momento do envio; comentarios antigos mantem o papel gravado;
+- respostas a um comentario devem aparecer indentadas dentro do comentario principal, com a mesma etiqueta de funcao;
 - cada comentario e resposta deve ter acao `Responder`; ao clicar, o composer deve entrar em modo resposta e preencher automaticamente a mencao `@nickname` da pessoa respondida;
 - mencoes em comentarios/respostas devem gerar notificacao futura no sininho da plataforma para a pessoa mencionada ou dona do comentario respondido;
 - avatares dos comentarios usam cor solida ou foto do perfil, sem degrade; o indicador de presenca fica na intersecao inferior direita do circulo, com borda na cor do fundo da pagina e sem brilho/esfumacado; online usa ponto verde, offline usa ponto cinza com centro na cor do fundo;
 - a lista padrao de reacoes de comentario deve ter mais opcoes que apenas curtir, por exemplo curtir, fogo, insight, coracao, aplausos, risada, surpresa, foguete, de olho e util;
 - menus de reacao e denuncia devem fechar quando o aluno clicar fora do menu;
-- o campo de novo comentario deve ser visualmente diferente da thread, usando uma caixa clara de digitacao com textarea e botao de envio alinhado dentro do mesmo bloco.
+- o campo de novo comentario deve ser visualmente diferente da thread, usando uma caixa clara de digitacao com textarea e botao de envio alinhado dentro do mesmo bloco;
+- a caixa de escrever fica no topo da aba (aluno v2, `src/components/lesson/lesson-comment-composer.tsx`): avatar do aluno, campo que cresce, faixa `Respondendo a @usuario` com cancelar, contador a partir de 1.800 de 2.000 caracteres, `Ctrl/⌘ + Enter` publica e botao `Publicar` (ou `Responder`). Com a aula ainda bloqueada, a caixa fica desabilitada com o motivo e os comentarios nao sao buscados.
 
 Mobile:
 
@@ -606,7 +643,9 @@ Comportamento:
 - ao abrir uma referencia, a navegacao preserva o salvamento pendente de progresso e favoritos;
 - o historico da IA Diretor nunca e misturado com chats do Tutor IA, mesmo quando o painel e usado dentro de uma pagina de aula;
 - as conversas ficam salvas no historico do aluno. Excluir um chat o remove da experiencia e do contexto futuro, mantendo o registro de backend conforme a politica de retencao e privacidade;
-- se nao houver provedor ativo ou conteudo autorizado disponivel, a interface apresenta indisponibilidade real e nao simula respostas.
+- se nao houver provedor ativo ou conteudo autorizado disponivel, a interface apresenta indisponibilidade real e nao simula respostas; o motivo aparece no lugar das sugestoes, para nao ficar escondido;
+- visual (aluno v2): a entrada cumprimenta pelo primeiro nome (`Olá, Ana`) e mostra tres sugestoes em cartoes; o historico abre dentro do proprio painel, agrupado em `Hoje`, `Ontem`, `Últimos 7 dias`, `Últimos 30 dias` e `Mais antigas`, com data relativa e quantidade de mensagens; o campo cresce ate 6 linhas, `Enter` envia e um contador aparece perto do limite de 4.000 caracteres;
+- a pergunta recem-enviada fica na tela ate a resposta chegar, mesmo quando o envio cria um chat novo.
 
 ## Busca
 
@@ -628,26 +667,24 @@ Estado vazio deve ser simples e util:
 
 ## Perfil
 
-Abas recomendadas:
+Pagina `/perfil` (aluno v2), com abas no endereco (`?aba=dados|acessos|seguranca`):
 
-- Meu perfil;
-- Meus acessos;
-- Alterar senha;
-- Preferencias;
-- Dispositivos/sessoes, fase futura.
+- `Dados`: nome, e-mail, telefone, aluno desde e ultimo acesso. Le so a linha do proprio usuario em `profiles` (com a sessao dele e RLS) e os dados da conta; o que nao existe aparece como `Não informado`;
+- `Acessos`: cada produto com acesso, com data de inicio e fim (ou vitalicio); gratuito e previa do produtor aparecem rotulados; sem acessos, estado vazio com o caminho para o Suporte;
+- `Segurança`: `Alterar senha` (leva a `/alterar-senha` e volta para o perfil) e `Sair da conta`.
+
+Fica para depois: editar nome/telefone/foto (antes e preciso unificar as tres origens do nome: cadastro do aluno, perfil e conta), preferencias e dispositivos/sessoes.
 
 ## Suporte
 
-Formulario inicial:
+Pagina `/suporte` (aluno v2, `src/lib/member-support.ts` + `src/components/member/pages/support-view.tsx`):
 
-- nome;
-- email;
-- assunto;
-- mensagem;
-- categoria opcional;
-- anexos em fase futura.
+- canais de atendimento: o link de ajuda que a escola ja configura em Admin › Área de membros › Entrar (`mailto:` vira `E-mail`, `wa.me`/`api.whatsapp.com` vira `WhatsApp`, outro `https://` vira `Central de ajuda`) mais a lista fixa `MEMBER_SUPPORT_CHANNELS` (vazia por padrao). So entram links `https://` sem usuario/senha ou `mailto:` valido;
+- sem canal cadastrado: `A escola ainda não cadastrou um canal de atendimento`; para o produtor aparece o caminho da configuracao;
+- perguntas frequentes revisadas: acesso depois da compra, por que algumas aulas mostram `Liberação em` (inclui o prazo de garantia de 7 dias), senha, onde ficam os materiais, como o progresso e contado e acesso expirado;
+- atalhos para `Minhas compras`, `Meus acessos` e `Alterar senha`.
 
-Para o MVP, suporte pode enviar email ou registrar ticket simples no banco.
+Formulario (nome, e-mail, assunto, mensagem, categoria e anexos no futuro) fica para quando existir caixa de entrada no admin para responder e envio de e-mail. Ate la, nada de formulario que grava sem ninguem ler.
 
 ## Funcionalidades de fase 2
 

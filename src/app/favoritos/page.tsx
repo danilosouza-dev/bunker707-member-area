@@ -3,7 +3,8 @@ import { FavoritesExperience } from "@/components/favorites-experience";
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { requirePageUser } from "@/server/auth/guards";
-import { getAppShellData, getFavoritesPageData } from "@/server/db/platform-store";
+import { getAppShellData, getFavoritesPageData, getMemberLibrary } from "@/server/db/platform-store";
+import { buildFavoritesPageView } from "@/server/member-area/favorites-view";
 
 export const dynamic = "force-dynamic";
 
@@ -13,13 +14,19 @@ type FavoritesPageProps = {
   }>;
 };
 
+// Favoritos: a lista vem de getFavoritesPageData (inclui o que o aluno salvou e nao pode abrir); o
+// progresso vem da biblioteca do aluno. As duas leituras usam a mesma consulta em cache da requisicao.
+// O componente de cliente recebe so o recorte da tela (buildFavoritesPageView).
 export default async function FavoritesPage({ searchParams }: FavoritesPageProps) {
-  const resolvedSearchParams = await searchParams;
+  const [resolvedSearchParams, user] = await Promise.all([searchParams, requirePageUser("/favoritos")]);
   const requestedAccessPreviewMode = normalizeAccessPreviewMode(resolvedSearchParams?.accessPreview);
-  const user = await requirePageUser("/favoritos");
   const shellData = await getAppShellData(user);
   const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
-  const favoritesData = await getFavoritesPageData(accessPreviewMode, user);
+  const [favoritesData, library] = await Promise.all([
+    getFavoritesPageData(accessPreviewMode, user),
+    getMemberLibrary(accessPreviewMode, user)
+  ]);
+  const view = buildFavoritesPageView(favoritesData, library);
 
   return (
     <AppShell
@@ -28,12 +35,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
-      <FavoritesExperience
-        accessPreviewMode={accessPreviewMode}
-        contentItems={favoritesData.savedContentItems}
-        lessonItems={favoritesData.savedLessonItems}
-        moduleItems={favoritesData.savedModuleItems}
-      />
+      <FavoritesExperience view={view} />
       <MemberFooter branding={shellData.branding} />
     </AppShell>
   );

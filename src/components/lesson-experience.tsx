@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   ArrowLeft,
+  CalendarClock,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -27,7 +28,6 @@ import {
   Reply,
   RotateCcw,
   RotateCw,
-  Send,
   Settings,
   SlidersHorizontal,
   SmilePlus,
@@ -35,12 +35,15 @@ import {
   ThumbsDown,
   ThumbsUp,
   Volume2,
-  VolumeX,
-  X
+  VolumeX
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type MouseEvent } from "react";
 import { SavedItemButton } from "@/components/saved-item-button";
 import { LessonAiTutor } from "@/components/lesson-ai-tutor";
+import { LessonCommentComposer } from "@/components/lesson/lesson-comment-composer";
+import { LessonMaterialsPanel } from "@/components/lesson/lesson-materials-panel";
+import { LessonReleaseOverlay, type LessonLockNotice } from "@/components/lesson/lesson-release-overlay";
+import { MemberRoleBadge } from "@/components/member/ui/member-chip";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { LessonTvControl } from "@/components/lesson-tv-control";
 import {
@@ -54,6 +57,11 @@ import {
   type YouTubeManualPlayerController
 } from "@/components/youtube-manual-stream-player";
 import { withAccessPreviewParam } from "@/lib/access-preview";
+import {
+  EMPTY_LESSON_MATERIAL_LEARNER_STATE,
+  mergeSavedLessonMaterialLearnerState,
+  type LessonMaterialLearnerState
+} from "@/lib/lesson-materials";
 import { shouldBlockLessonPageKeyboardShortcut } from "@/lib/lesson-page-deterrence";
 import { findActiveCaptionCue } from "@/lib/media-captions";
 import {
@@ -66,6 +74,7 @@ import type { AccessPreviewMode } from "@/lib/access-preview";
 import type {
   ContentItem,
   CourseModule,
+  LessonCommentAuthorRole,
   LessonCommentReaction,
   LessonCommentRecord,
   LessonCommentStatus,
@@ -73,10 +82,17 @@ import type {
   LessonReaction,
   LessonVideoConfig,
   LessonWatchState,
-  LessonWatchStatus
+  LessonWatchStatus,
+  MemberReleaseState
 } from "@/lib/platform-types";
 import { getSafeEmbedUrl, getSafeExternalMediaUrl } from "@/lib/video-embed";
-import { getReleaseRuleNotice } from "@/lib/release-rules";
+import {
+  getNextReleaseTimestamp,
+  getReleaseRefreshDelay,
+  getReleaseRuleNotice,
+  pickReleaseNotice,
+  type ReleaseRuleNotice
+} from "@/lib/release-rules";
 
 type LessonExperienceProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -121,7 +137,7 @@ type LessonCommentBase = {
   body: string;
   id: string;
   isOwn: boolean;
-  role?: string;
+  role: LessonCommentAuthorRole;
   reactions: Partial<Record<CommentReaction, number>>;
   status: LessonCommentStatus;
   time: string;
@@ -374,30 +390,6 @@ const initialYouTubeStreamsResult: YouTubeStreamsResult = {
   videoId: ""
 };
 
-const lessonMaterials = [
-  {
-    id: "prompt-pack",
-    title: "Prompt base da aula",
-    meta: "PDF"
-  },
-  {
-    id: "visual-checklist",
-    title: "Checklist de qualidade visual",
-    meta: "Planilha"
-  },
-  {
-    id: "workflow-map",
-    title: "Mapa do workflow",
-    meta: "Arquivo"
-  },
-  {
-    id: "ai-brief",
-    title: "Resumo estrategico da aula",
-    meta: "Infografico IA",
-    requiresRating: true
-  }
-];
-
 const commentReactionOptions = [
   {
     emoji: "👍",
@@ -492,12 +484,120 @@ function getInitialCompletedLessonIds(modules: CourseModule[]) {
   ));
 }
 
-function getFirstPlayableLessonId(courseModule: CourseModule, completedLessonIds: Set<string>) {
+// Aba Materiais: o que o servidor ja tem gravado de cada aula (avaliou? quanto assistiu?). Comeca com o
+// que veio na pagina e so muda depois que o PUT do progresso da certo (applySavedProgressToLearnerStates).
+function getInitialMaterialLearnerStates(
+  modules: CourseModule[],
+  reactions: Partial<Record<string, LessonReaction>>,
+  watchStates: Record<string, LessonWatchState>
+) {
+  const completedLessonIds = new Set(getInitialCompletedLessonIds(modules));
+  const lessonIds = new Set([...completedLessonIds, ...Object.keys(reactions), ...Object.keys(watchStates)]);
+  const states: Record<string, LessonMaterialLearnerState> = {};
+
+  for (const lessonId of lessonIds) {
+    const watchState = watchStates[lessonId];
+
+    states[lessonId] = mergeSavedLessonMaterialLearnerState(EMPTY_LESSON_MATERIAL_LEARNER_STATE, {
+      completed: completedLessonIds.has(lessonId) || watchState?.status === "completed",
+      maxProgressPercent: watchState?.maxProgressPercent,
+      progressPercent: watchState?.progressPercent,
+      rated: Boolean(reactions[lessonId])
+    });
+  }
+
+  return states;
+}
+
+function applySavedProgressToLearnerStates(
+  current: Record<string, LessonMaterialLearnerState>,
+  payload: LessonProgressPayload
+) {
+  let next = current;
+
+  function merge(lessonId: string, saved: Parameters<typeof mergeSavedLessonMaterialLearnerState>[1]) {
+    const previous = next[lessonId] ?? EMPTY_LESSON_MATERIAL_LEARNER_STATE;
+    const merged = mergeSavedLessonMaterialLearnerState(previous, saved);
+
+    if (merged.rated !== previous.rated || merged.maxProgressPercent !== previous.maxProgressPercent) {
+      next = { ...next, [lessonId]: merged };
+    }
+  }
+
+  if (payload.lessonId) {
+    merge(payload.lessonId, {
+      completed: payload.status === "completed",
+      maxProgressPercent: payload.maxProgressPercent,
+      progressPercent: payload.progressPercent,
+      rated: payload.lessonReactions ? Boolean(payload.lessonReactions[payload.lessonId]) : undefined
+    });
+  }
+
+  for (const lessonId of payload.completedLessonIds ?? []) {
+    merge(lessonId, { completed: true });
+  }
+
+  return next;
+}
+
+const purchasePendingNotice: LessonLockNotice = {
+  detail: "Esta aula fica disponível quando você tiver acesso ao conteúdo.",
+  title: "Acesso pendente"
+};
+
+/**
+ * Aviso de liberacao da aula para este aluno: aula, modulo e conteudo, com o estado (e a data real)
+ * calculado no servidor. Vale o mais restritivo (pickReleaseNotice).
+ */
+function getLessonReleaseNotice(
+  item: Pick<ContentItem, "kind" | "releaseRule" | "releaseState">,
+  courseModule: Pick<CourseModule, "releaseRule" | "releaseState">,
+  lesson: Pick<LessonPreview, "releaseRule" | "releaseState">,
+  now: number
+): ReleaseRuleNotice | null {
+  return pickReleaseNotice([
+    getReleaseRuleNotice(lesson.releaseRule, "aula", lesson.releaseState, now),
+    getReleaseRuleNotice(courseModule.releaseRule, "modulo", courseModule.releaseState, now),
+    getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase(), item.releaseState, now)
+  ]);
+}
+
+function getFirstPlayableLessonId(
+  item: Pick<ContentItem, "kind" | "releaseRule" | "releaseState">,
+  courseModule: CourseModule,
+  completedLessonIds: Set<string>,
+  now: number
+) {
   return courseModule.lessons.find((lesson) => (
     !completedLessonIds.has(lesson.id) &&
-    !getReleaseRuleNotice(lesson.releaseRule, "aula")?.isLocked &&
-    !getReleaseRuleNotice(courseModule.releaseRule, "modulo")?.isLocked
+    !getLessonReleaseNotice(item, courseModule, lesson, now)?.isLocked
   ))?.id ?? courseModule.lessons[0]?.id ?? "";
+}
+
+function collectReleaseStates(
+  item: Pick<ContentItem, "releaseState">,
+  modules: CourseModule[]
+): Array<MemberReleaseState | undefined> {
+  return [
+    item.releaseState,
+    ...modules.flatMap((courseModule) => [
+      courseModule.releaseState,
+      ...courseModule.lessons.map((lesson) => lesson.releaseState)
+    ])
+  ];
+}
+
+/** Aulas cuja conclusao destrava outra aula ou modulo ("depois da aula anterior"). */
+function getUnlockingLessonIds(modules: CourseModule[]) {
+  const lessonIds = new Set<string>();
+
+  for (const state of collectReleaseStates({}, modules)) {
+    if (state?.status === "waiting_previous_lesson" && state.previousLessonId) {
+      lessonIds.add(state.previousLessonId);
+    }
+  }
+
+  return lessonIds;
 }
 
 function getLessonTarget(modules: CourseModule[], lessonId: string): LessonTarget | null {
@@ -1050,7 +1150,7 @@ function lessonCommentRecordToView(record: LessonCommentRecord): LessonComment {
       ...lessonCommentRecordToView(reply),
       parentId: record.id
     })),
-    role: record.authorRole === "student" ? undefined : "Professor",
+    role: record.authorRole === "producer" || record.authorRole === "moderator" ? record.authorRole : "student",
     status: record.status,
     time: formatCommentTime(record.createdAt),
     username: record.authorUsername
@@ -1210,9 +1310,12 @@ export function LessonExperience({
       ? requestedInitialLessonId
       : ""
   ), [requestedInitialLessonId, selectedModule]);
+  // Relogio da liberacao: muda quando uma data agendada passa (timer abaixo) ou a aba volta a aparecer.
+  // Datas sempre no fuso de Sao Paulo; so o "hoje" depende do relogio (suppressHydrationWarning).
+  const [releaseNow, setReleaseNow] = useState(() => Date.now());
   const fallbackInitialLessonId = useMemo(() => (
-    getFirstPlayableLessonId(selectedModule, completedLessonIds)
-  ), [completedLessonIds, selectedModule]);
+    getFirstPlayableLessonId(item, selectedModule, completedLessonIds, releaseNow)
+  ), [completedLessonIds, item, releaseNow, selectedModule]);
   const initialActiveLessonId = requestedLessonId || fallbackInitialLessonId;
   const [activeLessonId, setActiveLessonId] = useState(initialActiveLessonId);
   const [activeEmbedResume, setActiveEmbedResume] = useState(() => ({
@@ -1234,6 +1337,9 @@ export function LessonExperience({
   const [commentError, setCommentError] = useState("");
   const [lessonReactions, setLessonReactions] = useState<Partial<Record<string, LessonReaction>>>(initialLessonReactions);
   const [lessonWatchStates, setLessonWatchStates] = useState<Record<string, LessonWatchState>>(initialLessonWatchStates);
+  const [savedMaterialLearnerStates, setSavedMaterialLearnerStates] = useState<Record<string, LessonMaterialLearnerState>>(
+    () => getInitialMaterialLearnerStates(allModules, initialLessonReactions, initialLessonWatchStates)
+  );
   const [startedLessonIds, setStartedLessonIds] = useState<Set<string>>(() => new Set());
   const [canRenderEmbeddedPlayer, setCanRenderEmbeddedPlayer] = useState(false);
   const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
@@ -1258,6 +1364,10 @@ export function LessonExperience({
   const [youTubeReloadToken, setYouTubeReloadToken] = useState(0);
   const [savedLessonOverrides, setSavedLessonOverrides] = useState<Record<string, boolean>>({});
   const [playlistOpen, setPlaylistOpen] = useState(true);
+  const [materialsCountByLesson, setMaterialsCountByLesson] = useState<Record<string, number>>({});
+  const releaseRefreshAttemptsRef = useRef<Map<string, number>>(new Map());
+  const unlockingLessonIdsRef = useRef<Set<string>>(new Set());
+  const unlockRefreshedLessonIdsRef = useRef<Set<string>>(new Set());
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const lessonPlayerFrameRef = useRef<HTMLDivElement>(null);
   const lessonSupportPanelRef = useRef<HTMLDivElement>(null);
@@ -1287,6 +1397,88 @@ export function LessonExperience({
   const startedLessonIdsRef = useRef(startedLessonIds);
   const playlistScrollRef = useRef<HTMLDivElement>(null);
   const moduleRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const handleMaterialsLoaded = useCallback((lessonId: string, count: number) => {
+    setMaterialsCountByLesson((current) => (current[lessonId] === count ? current : { ...current, [lessonId]: count }));
+  }, []);
+  const nextReleaseAt = useMemo(
+    () => getNextReleaseTimestamp(collectReleaseStates(item, allModules), releaseNow),
+    [allModules, item, releaseNow]
+  );
+  // Datas agendadas que ja passaram no relogio do navegador: a pagina se atualiza sozinha (efeito abaixo).
+  const dueReleaseKey = useMemo(() => (
+    collectReleaseStates(item, allModules)
+      .flatMap((state) => (
+        state?.status === "scheduled" && Date.parse(state.availableAt) <= releaseNow ? [state.availableAt] : []
+      ))
+      .sort()
+      .join("|")
+  ), [allModules, item, releaseNow]);
+
+  useEffect(() => {
+    unlockingLessonIdsRef.current = getUnlockingLessonIds(allModules);
+  }, [allModules]);
+
+  useEffect(() => {
+    if (nextReleaseAt === null) {
+      return;
+    }
+
+    // Folga de 1,5 s depois da data; no maximo 6 h por espera (o timer se rearma a cada tique).
+    const delay = Math.min(Math.max(nextReleaseAt - Date.now() + 1_500, 1_000), 6 * 60 * 60 * 1_000);
+    const timer = window.setTimeout(() => setReleaseNow(Date.now()), delay);
+
+    return () => window.clearTimeout(timer);
+  }, [nextReleaseAt, releaseNow]);
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        setReleaseNow(Date.now());
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
+  useEffect(() => {
+    if (!dueReleaseKey) {
+      return;
+    }
+
+    // Atualiza na hora. Se o servidor ainda responder "agendado" (relogio do navegador adiantado), a chave
+    // continua a mesma e tenta de novo em 5 s, 15 s e 30 s; quando libera, a chave muda e o timer cai.
+    const attempts = releaseRefreshAttemptsRef.current;
+    let timer: number | undefined;
+
+    function scheduleReleaseRefresh() {
+      const delay = getReleaseRefreshDelay(attempts.get(dueReleaseKey) ?? 0);
+
+      if (delay === null) {
+        return;
+      }
+
+      timer = window.setTimeout(() => {
+        attempts.set(dueReleaseKey, (attempts.get(dueReleaseKey) ?? 0) + 1);
+        router.refresh();
+        scheduleReleaseRefresh();
+      }, delay);
+    }
+
+    scheduleReleaseRefresh();
+    return () => window.clearTimeout(timer);
+  }, [dueReleaseKey, router]);
+
+  const refreshAfterUnlockingLesson = useCallback((lessonId: string) => {
+    // Concluir a aula anterior destrava a proxima no servidor: busca a pagina de novo para ela chegar
+    // com o video (uma vez por aula).
+    if (!unlockingLessonIdsRef.current.has(lessonId) || unlockRefreshedLessonIdsRef.current.has(lessonId)) {
+      return;
+    }
+
+    unlockRefreshedLessonIdsRef.current.add(lessonId);
+    router.refresh();
+  }, [router]);
   const handleTvReceiverConnected = useCallback(() => {
     pendingTutorSeekRef.current = null;
     readyYouTubePlayerRef.current = null;
@@ -1320,10 +1512,6 @@ export function LessonExperience({
   }, []);
 
   const totalCommentCount = useMemo(() => getTotalCommentCount(comments), [comments]);
-  const currentUserCommentAvatar = useMemo(
-    () => ({ ...getCommentAvatar(currentUserName), online: true }),
-    [currentUserName]
-  );
 
   const fallbackTarget =
     getLessonTarget(allModules, activeLessonId) ??
@@ -1335,6 +1523,8 @@ export function LessonExperience({
       : null);
   const activeLesson = fallbackTarget?.lesson ?? null;
   const activeModule = allModules.find((courseModule) => courseModule.id === activeModuleId) ?? fallbackTarget?.module ?? selectedModule;
+  // Modulo da aula em reproducao (o acordeao aberto na playlist pode ser outro).
+  const activeLessonModule = fallbackTarget?.module ?? selectedModule;
   const activeLessonKey = activeLesson?.id ?? "";
   const commentsLoading = commentsLessonId !== activeLessonKey;
 
@@ -1399,21 +1589,14 @@ export function LessonExperience({
       ? `Automático, atual ${getYouTubeQualityDisplayName(effectiveYouTubeAutomaticQuality)}`
       : "Automático"
     : effectiveYouTubeSelectedQuality;
-  const activeReleaseNotice = activeLesson
+  const activeReleaseNotice: LessonLockNotice | null = activeLesson
     ? (
         item.isLocked
-          ? {
-              detail: "Esta aula fica disponivel quando o aluno tiver acesso ao conteudo.",
-              isLocked: true,
-              title: "Acesso pendente"
-            }
-          : (
-              getReleaseRuleNotice(activeLesson.releaseRule, "aula") ??
-              getReleaseRuleNotice(activeModule.releaseRule, "modulo")
-            )
+          ? purchasePendingNotice
+          : getLessonReleaseNotice(item, activeLessonModule, activeLesson, releaseNow)
       )
     : null;
-  const isActiveLessonLocked = Boolean(activeReleaseNotice?.isLocked);
+  const isActiveLessonLocked = Boolean(activeReleaseNotice);
   const playerRenderConfig = activeLesson ? getPlayerRenderConfig(activeLesson.video) : null;
   const activeLessonWatchState = activeLessonKey ? lessonWatchStates[activeLessonKey] : undefined;
   const activeLessonDurationSeconds = activeLesson
@@ -1509,7 +1692,7 @@ export function LessonExperience({
   ) => {
     if (transport === "beacon") {
       sendLessonProgressOnPageExit(payload);
-      return;
+      return false;
     }
 
     try {
@@ -1523,7 +1706,9 @@ export function LessonExperience({
       });
 
       if (response.ok) {
-        return;
+        // So agora a avaliacao/o progresso estao gravados: a aba Materiais pode perguntar de novo.
+        setSavedMaterialLearnerStates((current) => applySavedProgressToLearnerStates(current, payload));
+        return true;
       }
 
       const detail = await response.text();
@@ -1534,6 +1719,8 @@ export function LessonExperience({
     } catch (error: unknown) {
       console.error("Erro de rede ao salvar progresso da aula.", error);
     }
+
+    return false;
   }, []);
   const syncLessonWatchProgress = useCallback(async ({
     durationSeconds,
@@ -1601,7 +1788,7 @@ export function LessonExperience({
       });
     }
 
-    await persistLessonProgress({
+    const saved = await persistLessonProgress({
       contentId: item.id,
       durationSeconds: nextState.durationSeconds,
       lessonId,
@@ -1610,7 +1797,11 @@ export function LessonExperience({
       progressSeconds: nextState.progressSeconds,
       status
     }, transport);
-  }, [isActiveLessonLocked, item.id, persistLessonProgress]);
+
+    if (saved && status === "completed") {
+      refreshAfterUnlockingLesson(lessonId);
+    }
+  }, [isActiveLessonLocked, item.id, persistLessonProgress, refreshAfterUnlockingLesson]);
 
   function handlePlayerStart() {
     if (isActiveLessonLocked || !activeLessonKey) {
@@ -1898,6 +2089,11 @@ export function LessonExperience({
   }, [commentMenuId, commentReactionMenuId]);
 
   useEffect(() => {
+    // Aula ainda fechada: os comentarios abrem junto com ela (a API responderia 403).
+    if (isActiveLessonLocked) {
+      return;
+    }
+
     const controller = new AbortController();
     const loadTimeout = window.setTimeout(() => {
       void loadLessonComments(activeLessonKey, controller.signal);
@@ -1907,7 +2103,7 @@ export function LessonExperience({
       window.clearTimeout(loadTimeout);
       controller.abort();
     };
-  }, [activeLessonKey, loadLessonComments]);
+  }, [activeLessonKey, isActiveLessonLocked, loadLessonComments]);
 
   useEffect(() => {
     if (!activeModuleId) {
@@ -3137,6 +3333,10 @@ export function LessonExperience({
         ? activeLessonDurationSeconds ?? lessonWatchStates[lessonId]?.progressSeconds ?? 0
         : lessonWatchStates[lessonId]?.progressSeconds ?? 0,
       status: willCompleteLesson ? "completed" : "in_progress"
+    }).then((saved) => {
+      if (saved && willCompleteLesson) {
+        refreshAfterUnlockingLesson(lessonId);
+      }
     });
     setCompletedLessonIds(nextCompletedLessonIds);
     setLessonWatchStates((current) => {
@@ -3371,9 +3571,7 @@ export function LessonExperience({
   }
 
   function handleLessonSelect(courseModule: CourseModule, lesson: LessonPreview) {
-    const releaseNotice =
-      getReleaseRuleNotice(lesson.releaseRule, "aula") ??
-      getReleaseRuleNotice(courseModule.releaseRule, "modulo");
+    const releaseNotice = getLessonReleaseNotice(item, courseModule, lesson, releaseNow);
 
     if (releaseNotice?.isLocked) {
       setActiveModuleId(courseModule.id);
@@ -3467,8 +3665,7 @@ export function LessonExperience({
     }
   }
 
-  const primaryActionLabel = isActiveLessonLocked ? "Bloqueada" : isActiveLessonCompleted ? "Concluida" : "Concluir";
-  const canSubmitComment = commentText.trim().length > 0 && !commentSubmitting && !isActiveLessonLocked;
+  const primaryActionLabel = isActiveLessonLocked ? "Bloqueada" : isActiveLessonCompleted ? "Concluída" : "Concluir";
   const returnHref = withAccessPreviewParam(`/conteudo/${returnContent?.id ?? item.id}`, accessPreviewMode);
   const returnLabel = returnContent?.title ?? item.title;
 
@@ -4113,16 +4310,8 @@ export function LessonExperience({
             </button>
           ) : null}
 
-          {isActiveLessonLocked ? (
-            <div className="absolute left-1/2 top-1/2 z-40 w-[min(30rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[8px] border border-white/12 bg-black/76 p-5 text-center shadow-2xl shadow-black/60 backdrop-blur">
-              <LockKeyhole className="mx-auto h-9 w-9 stroke-[2.6] text-white" />
-              <p className="mt-3 text-lg font-black leading-tight text-white">
-                {activeReleaseNotice?.title ?? "Esta aula sera liberada"}
-              </p>
-              <p className="mt-2 text-sm font-semibold leading-6 text-zinc-300">
-                {activeReleaseNotice?.detail ?? "Disponivel de acordo com a regra de entrega."}
-              </p>
-            </div>
+          {activeReleaseNotice ? (
+            <LessonReleaseOverlay notice={activeReleaseNotice} onRefresh={() => router.refresh()} />
           ) : activePlayerRenderConfig && !activeLessonStarted ? (
             activePlayerRenderConfig.kind === "video" ? (
               <button
@@ -4155,32 +4344,18 @@ export function LessonExperience({
             </button>
           )}
 
-          {!activePlayerRenderConfig ? (
-            <div className="absolute inset-x-4 bottom-4 sm:inset-x-6 sm:bottom-5">
+          {/* Aula sem video configurado: so o progresso real gravado (nada de tempo inventado nem botoes que
+              nao fazem nada). Aula bloqueada ou agendada mostra apenas o aviso de liberacao. */}
+          {!activePlayerRenderConfig && !activeReleaseNotice ? (
+            <div className="pointer-events-none absolute inset-x-4 bottom-4 sm:inset-x-6 sm:bottom-5">
               <div className="mb-3 h-1 overflow-hidden rounded-full bg-white/20">
                 <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${activeLessonWatchedPercent}%` }} />
               </div>
-              <div className="flex items-center justify-between gap-4 text-xs font-semibold text-zinc-300">
-                <span className="truncate">12:48 / {activeLesson.duration}</span>
-                <div className="flex items-center gap-3">
-                  <button
-                    aria-label="Volume"
-                    className="group/action relative grid h-8 w-8 place-items-center rounded-full text-zinc-300 transition hover:scale-105 hover:bg-white hover:text-black"
-                    type="button"
-                  >
-                    <ActionTooltip label="Volume" />
-                    <Volume2 className="h-4 w-4" />
-                  </button>
-                  <button
-                    aria-label="Tela cheia"
-                    className="group/action relative grid h-8 w-8 place-items-center rounded-full text-zinc-300 transition hover:scale-105 hover:bg-white hover:text-black"
-                    type="button"
-                  >
-                    <ActionTooltip label="Tela cheia" />
-                    <Maximize className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+              <p className="truncate text-xs font-semibold text-zinc-300">
+                {[formatPlaybackTime(activeLessonWatchState?.progressSeconds ?? 0), activeLesson.duration.trim()]
+                  .filter(Boolean)
+                  .join(" / ")}
+              </p>
             </div>
           ) : null}
         </div>
@@ -4198,7 +4373,7 @@ export function LessonExperience({
           <div className="w-full space-y-3 lg:w-auto lg:min-w-[420px] lg:max-w-none">
             <div className="flex flex-wrap items-center justify-start gap-2 lg:justify-end">
               <button
-                aria-label={isActiveLessonCompleted ? "Desmarcar aula atual como concluida" : "Concluir aula atual"}
+                aria-label={isActiveLessonCompleted ? "Desmarcar aula atual como concluída" : "Concluir aula atual"}
                 aria-pressed={isActiveLessonCompleted}
                 className={`lesson-primary-complete-button group/complete relative inline-flex min-h-12 min-w-[9rem] items-center justify-center gap-2 overflow-hidden rounded-[8px] px-5 py-3 text-sm font-extrabold shadow-2xl shadow-black/30 transition duration-200 hover:scale-[1.02] hover:brightness-105 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:scale-100 sm:min-w-[10rem] ${
                   isActiveLessonCompleted ? "lesson-primary-complete-button-done" : ""
@@ -4290,7 +4465,7 @@ export function LessonExperience({
           <div aria-label="Conteúdo da aula" className="flex overflow-x-auto border-b border-white/10" role="tablist">
             {[
               { id: "comments" as const, label: "Comentários", count: totalCommentCount, icon: MessageCircle },
-              { id: "materials" as const, label: "Materiais", count: lessonMaterials.length, icon: FileText },
+              { id: "materials" as const, label: "Materiais", count: materialsCountByLesson[activeLessonKey] ?? null, icon: FileText },
               { id: "aiTutor" as const, label: "Tutor IA", count: null, icon: TutorAiIcon }
             ].map((tab) => {
               const Icon = tab.icon;
@@ -4300,7 +4475,7 @@ export function LessonExperience({
                 <button
                   aria-controls={`lesson-panel-${tab.id}`}
                   aria-selected={isActive}
-                  className={`relative inline-flex min-h-14 shrink-0 items-center gap-2 px-4 text-sm font-extrabold transition sm:px-6 ${
+                  className={`relative inline-flex min-h-14 shrink-0 items-center gap-2 px-3 text-sm font-extrabold transition sm:px-6 ${
                     isActive ? "text-white" : "text-zinc-400 hover:text-white"
                   }`}
                   id={`lesson-tab-${tab.id}`}
@@ -4309,7 +4484,7 @@ export function LessonExperience({
                   role="tab"
                   type="button"
                 >
-                  <Icon className="h-4 w-4" strokeWidth={1.9} />
+                  <Icon className="h-4 w-4 max-sm:hidden" strokeWidth={1.9} />
                   {tab.label}
                   {tab.count !== null ? (
                     <span className="grid min-w-6 place-items-center rounded-full bg-white/10 px-1.5 py-0.5 text-xs text-zinc-200">
@@ -4317,7 +4492,7 @@ export function LessonExperience({
                     </span>
                   ) : null}
                   {isActive ? (
-                    <span className="absolute inset-x-4 bottom-0 h-0.5 rounded-full bg-[var(--accent)] sm:inset-x-6" />
+                    <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[var(--accent)] sm:inset-x-6" />
                   ) : null}
                 </button>
               );
@@ -4331,7 +4506,25 @@ export function LessonExperience({
               id="lesson-panel-comments"
               role="tabpanel"
             >
-              <div className="divide-y divide-white/[0.07]">
+              <LessonCommentComposer
+                authorName={currentUserName}
+                disabledReason={isActiveLessonLocked ? "Comentários liberados junto com a aula" : undefined}
+                inputRef={commentInputRef}
+                onCancelReply={handleReplyCancel}
+                onChange={setCommentText}
+                onSubmit={handleCommentSubmit}
+                replyTarget={replyTarget}
+                submitting={commentSubmitting}
+                value={commentText}
+              />
+
+              {commentError && !commentsLoading && !isActiveLessonLocked ? (
+                <div className="mt-4 rounded-[8px] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100" role="alert">
+                  {commentError}
+                </div>
+              ) : null}
+
+              <div className={`mt-6 divide-y divide-white/[0.07] ${isActiveLessonLocked ? "hidden" : ""}`}>
                 {commentsLoading ? (
                   <div className="space-y-4 py-2" aria-label="Carregando comentarios">
                     {[0, 1].map((item) => (
@@ -4365,11 +4558,7 @@ export function LessonExperience({
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                               <h3 className="text-sm font-extrabold text-white">{comment.author}</h3>
-                              {comment.role === "Professor" ? (
-                                <span className="rounded-[6px] border border-[var(--accent)]/40 bg-[var(--accent)]/12 px-1.5 py-0.5 text-[10px] font-black uppercase text-red-100">
-                                  Professor
-                                </span>
-                              ) : null}
+                              <MemberRoleBadge role={comment.role} />
                               <span className="text-xs font-semibold text-zinc-500">{comment.time}</span>
                               {comment.status === "pending" ? (
                                 <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">
@@ -4508,11 +4697,7 @@ export function LessonExperience({
                                       <div className="min-w-0 flex-1">
                                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                           <h4 className="text-sm font-extrabold text-white">{reply.author}</h4>
-                                          {reply.role === "Professor" ? (
-                                            <span className="rounded-[6px] border border-[var(--accent)]/40 bg-[var(--accent)]/12 px-1.5 py-0.5 text-[10px] font-black uppercase text-red-100">
-                                              Professor
-                                            </span>
-                                          ) : null}
+                                          <MemberRoleBadge role={reply.role} />
                                           <span className="text-xs font-semibold text-zinc-500">{reply.time}</span>
                                           {reply.status === "pending" ? (
                                             <span className="rounded-full border border-amber-400/25 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">
@@ -4646,122 +4831,25 @@ export function LessonExperience({
                 })}
               </div>
 
-              {commentError && !commentsLoading ? (
-                <div className="mt-4 rounded-[8px] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100" role="alert">
-                  {commentError}
-                </div>
-              ) : null}
-
-              <form className="mt-5 rounded-[8px] border border-white/10 bg-white/[0.045] p-3 shadow-inner shadow-black/20 sm:p-4" onSubmit={handleCommentSubmit}>
-                <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]">
-                  <CommentAvatar
-                    avatar={currentUserCommentAvatar}
-                    size="lg"
-                  />
-                  <div className="min-w-0">
-                    {replyTarget ? (
-                      <div className="mb-3 flex items-center justify-between gap-3 rounded-[8px] border border-white/10 bg-black/25 px-3 py-2 text-xs font-semibold text-zinc-300">
-                        <span className="min-w-0 truncate">
-                          Respondendo <span className="font-extrabold text-white">@{replyTarget.username}</span>
-                        </span>
-                        <button
-                          aria-label="Cancelar resposta"
-                          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-zinc-500 transition hover:bg-white/10 hover:text-white"
-                          onClick={handleReplyCancel}
-                          type="button"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ) : null}
-                    <label className="sr-only" htmlFor="lesson-comment">
-                      Escrever comentario
-                    </label>
-                    <textarea
-                      className="block min-h-20 w-full resize-none rounded-[8px] border border-white/10 bg-black/25 px-3 py-3 text-sm leading-6 text-white outline-none transition placeholder:text-zinc-500 focus:border-[var(--accent)] focus:bg-black/35"
-                      id="lesson-comment"
-                      maxLength={2000}
-                      onChange={(event) => setCommentText(event.target.value)}
-                      placeholder={replyTarget ? "Escreva sua resposta..." : "Escreva um comentario..."}
-                      ref={commentInputRef}
-                      rows={3}
-                      disabled={commentSubmitting || isActiveLessonLocked}
-                      value={commentText}
-                    />
-                    <div className="mt-3 flex justify-end">
-                      <button
-                        aria-label="Enviar comentario"
-                        className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-[8px] px-4 py-2 text-sm font-extrabold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
-                          canSubmitComment
-                            ? "bg-white text-black shadow-xl shadow-black/25 hover:bg-zinc-200"
-                            : "bg-white/10 text-zinc-500"
-                        }`}
-                        disabled={!canSubmitComment}
-                        type="submit"
-                      >
-                        <Send className="h-4 w-4" />
-                        {commentSubmitting ? "Enviando..." : "Enviar"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </form>
             </div>
           ) : null}
 
           {activeTab === "materials" ? (
             <div
               aria-labelledby="lesson-tab-materials"
-              className="p-4 sm:p-5"
+              className="p-4 sm:p-6"
               id="lesson-panel-materials"
               role="tabpanel"
             >
-              <div className="grid gap-3 sm:grid-cols-3">
-                {lessonMaterials.map((material) => {
-                  const isMaterialLocked = Boolean(material.requiresRating && (!canRateLesson || !hasRatedLesson));
-                  const lockedMessage = !canRateLesson
-                    ? "Assista pelo menos 30% da aula para avaliar e desbloquear este material."
-                    : "Avalie esta aula para desbloquear este material.";
-
-                  return (
-                    <button
-                      aria-disabled={isMaterialLocked}
-                      className={`group relative flex min-h-24 items-center gap-3 rounded-[8px] border border-white/10 bg-white/[0.03] p-4 text-left transition ${
-                        isMaterialLocked
-                          ? "cursor-not-allowed opacity-80 hover:border-amber-500/40 hover:bg-white/[0.045]"
-                          : "hover:border-white/20 hover:bg-white/[0.06]"
-                      }`}
-                      key={material.id}
-                      onClick={(event) => {
-                        if (isMaterialLocked) {
-                          event.preventDefault();
-                        }
-                      }}
-                      type="button"
-                    >
-                      <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-[8px] bg-black/[0.35] ${
-                        isMaterialLocked ? "text-zinc-500" : "text-[var(--accent)]"
-                      }`}>
-                        {isMaterialLocked ? <Download className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block line-clamp-2 text-sm font-bold text-white">{material.title}</span>
-                        <span className="mt-1 block text-xs font-semibold text-zinc-500">
-                          {isMaterialLocked ? "Bloqueado por avaliacao" : material.meta}
-                        </span>
-                      </span>
-                      {isMaterialLocked ? (
-                        <span className="pointer-events-none absolute inset-x-3 bottom-3 z-20 translate-y-1 rounded-[8px] border border-amber-500/35 bg-[#101010]/95 px-3 py-2 text-xs font-semibold leading-5 text-zinc-100 opacity-0 shadow-2xl shadow-black/50 backdrop-blur transition group-hover:translate-y-0 group-hover:opacity-100">
-                          <span className="mb-1 block text-[10px] font-black uppercase tracking-normal text-amber-400">
-                            Material bloqueado
-                          </span>
-                          <span>{lockedMessage}</span>
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
+              <LessonMaterialsPanel
+                canRateLesson={canRateLesson}
+                contentId={item.id}
+                key={activeLessonKey}
+                lessonId={activeLessonKey}
+                lockedNotice={activeReleaseNotice}
+                onLoaded={handleMaterialsLoaded}
+                savedLearner={savedMaterialLearnerStates[activeLessonKey] ?? EMPTY_LESSON_MATERIAL_LEARNER_STATE}
+              />
             </div>
           ) : null}
 
@@ -4880,18 +4968,11 @@ export function LessonExperience({
                       {courseModule.lessons.map((lesson) => {
                         const isActive = lesson.id === activeLesson.id;
                         const isCompleted = completedLessonIds.has(lesson.id);
-                        const releaseNotice =
-                          item.isLocked
-                            ? {
-                                detail: "Acesso pendente",
-                                isLocked: true,
-                                title: "Acesso pendente"
-                              }
-                            : (
-                                getReleaseRuleNotice(lesson.releaseRule, "aula") ??
-                                getReleaseRuleNotice(courseModule.releaseRule, "modulo")
-                              );
-                        const isLessonLocked = Boolean(releaseNotice?.isLocked);
+                        const releaseNotice: (LessonLockNotice & { shortLabel?: string }) | null = item.isLocked
+                          ? { ...purchasePendingNotice, shortLabel: "Acesso pendente" }
+                          : getLessonReleaseNotice(item, courseModule, lesson, releaseNow);
+                        const isLessonLocked = Boolean(releaseNotice);
+                        const isLessonScheduled = releaseNotice?.kind === "scheduled";
 
                         return (
                           <li className="border-t border-white/10 first:border-t-0" key={lesson.id}>
@@ -4919,9 +5000,22 @@ export function LessonExperience({
                                 }`} />
                                 {isLessonLocked ? (
                                   <span className="absolute inset-0 z-10 grid place-items-center p-2 text-center">
-                                    <span className="rounded-[6px] border border-white/10 bg-black/76 px-2 py-2 text-[10px] font-bold leading-4 text-white shadow-xl shadow-black/40">
-                                      <LockKeyhole className="mx-auto mb-1 h-4 w-4" />
-                                      {releaseNotice?.detail ?? "Aula bloqueada"}
+                                    <span
+                                      className={`flex max-w-full flex-col items-center gap-1 rounded-[8px] border bg-black/80 px-2.5 py-1.5 text-[10px] font-bold leading-[14px] shadow-xl shadow-black/40 sm:text-[11px] ${
+                                        isLessonScheduled ? "border-amber-400/30 text-amber-100" : "border-white/12 text-white"
+                                      }`}
+                                    >
+                                      {isLessonScheduled ? (
+                                        <CalendarClock aria-hidden="true" className="h-4 w-4 shrink-0" strokeWidth={2.4} />
+                                      ) : (
+                                        <LockKeyhole aria-hidden="true" className="h-4 w-4 shrink-0" strokeWidth={2.4} />
+                                      )}
+                                      <span aria-hidden="true" className="max-w-full truncate" suppressHydrationWarning>
+                                        {releaseNotice?.shortLabel ?? "Aula bloqueada"}
+                                      </span>
+                                      <span className="sr-only" suppressHydrationWarning>
+                                        {releaseNotice ? `${releaseNotice.title}. ${releaseNotice.detail}` : "Aula bloqueada"}
+                                      </span>
                                     </span>
                                   </span>
                                 ) : isActive && startedLessonIds.has(lesson.id) ? (
@@ -4950,7 +5044,7 @@ export function LessonExperience({
                               <span className="flex items-center justify-between gap-3 sm:flex-col sm:justify-start sm:pt-1">
                                 <span className="text-xs font-semibold text-zinc-500">{lesson.duration}</span>
                                 <button
-                                  aria-label={isCompleted ? "Desmarcar aula concluida" : "Marcar aula como concluida"}
+                                  aria-label={isCompleted ? "Desmarcar aula concluída" : "Marcar aula como concluída"}
                                   className={`grid h-7 w-7 place-items-center rounded-full shadow-xl shadow-black/30 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${
                                     isCompleted
                                       ? "bg-emerald-600 text-white hover:bg-emerald-500"

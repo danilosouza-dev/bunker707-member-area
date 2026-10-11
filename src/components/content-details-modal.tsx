@@ -14,7 +14,7 @@ import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
-import type { ContentItem, ContentModalStructure, CourseModule, LessonVideoConfig } from "@/lib/platform-types";
+import type { ContentItem, ContentModalStructure, CourseModule } from "@/lib/platform-types";
 
 type ContentDetailsModalProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -283,46 +283,10 @@ function ProgressBar({ className = "", value }: { className?: string; value: num
   );
 }
 
-function extractYouTubeId(value?: string) {
-  if (!value) {
-    return "";
-  }
-
-  const trimmedValue = value.trim();
-
-  if (/^[\w-]{11}$/.test(trimmedValue)) {
-    return trimmedValue;
-  }
-
-  try {
-    const url = new URL(trimmedValue);
-
-    if (url.hostname.includes("youtu.be")) {
-      return url.pathname.replace("/", "");
-    }
-
-    if (url.hostname.includes("youtube.com")) {
-      return url.searchParams.get("v") ?? url.pathname.split("/").filter(Boolean).pop() ?? "";
-    }
-  } catch {
-    return trimmedValue;
-  }
-
-  return "";
-}
-
-function getVideoThumbnailUrl(video?: LessonVideoConfig) {
-  if (video?.provider !== "youtube") {
-    return "";
-  }
-
-  const videoId = video.assetId || extractYouTubeId(video.url);
-
-  return videoId ? `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg` : "";
-}
-
+// O servidor manda a imagem da aula ja resolvida (thumbnail so de aula liberada com acesso) e nunca o
+// video: o modal da home nao revela o video de aula bloqueada ou de produto nao comprado.
 function getLessonThumbnailUrl(lesson: ModulePreview["lessons"][number]) {
-  return getVideoThumbnailUrl(lesson.video) || lesson.image || "";
+  return lesson.image || "";
 }
 
 function ModuleCard({
@@ -602,7 +566,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     return null;
   }
 
-  const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase());
+  const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase(), item.releaseState);
   const isReleaseLocked = Boolean(releaseNotice?.isLocked);
   const isLocked = Boolean(item.isLocked || isReleaseLocked);
   const actionLabel = item.isLocked ? item.purchaseLabel ?? "Comprar" : isReleaseLocked ? "Bloqueado" : "Acessar";
@@ -809,8 +773,8 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
               ) : null}
             </div>
             {isReleaseLocked ? (
-              <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-300">
-                {releaseNotice?.detail ?? "Conteudo indisponivel de acordo com a regra de entrega."}
+              <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-300" suppressHydrationWarning>
+                {releaseNotice?.detail ?? "Conteúdo indisponível de acordo com a regra de entrega."}
               </p>
             ) : item.isLocked && !canPurchase ? (
               <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-300">

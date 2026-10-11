@@ -86,7 +86,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
     startY: 0
   });
   const description = item.description ?? item.eyebrow;
-  const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase());
+  const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase(), item.releaseState);
   const isReleaseLocked = Boolean(releaseNotice?.isLocked);
   const isLocked = Boolean(item.isLocked || isReleaseLocked);
   const actionLabel = item.isLocked ? item.purchaseLabel ?? "Comprar" : isReleaseLocked ? "Bloqueado" : "Acessar";
@@ -228,10 +228,10 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
             <div className="absolute inset-x-3 top-3 z-20 rounded-[8px] border border-white/12 bg-black/72 px-3 py-3 text-center shadow-2xl shadow-black/45 backdrop-blur-sm sm:inset-x-4 sm:top-4">
               <Lock className="mx-auto h-5 w-5 stroke-[3] text-white" />
               <p className="mt-2 text-[11px] font-black leading-tight text-white sm:text-xs">
-                {releaseNotice?.title ?? "Este conteudo sera liberado"}
+                {releaseNotice?.title ?? "Este conteúdo será liberado"}
               </p>
-              <p className="mt-1 line-clamp-2 text-[10px] font-semibold leading-4 text-zinc-300 sm:text-[11px]">
-                {releaseNotice?.detail ?? "Disponivel de acordo com a regra de entrega."}
+              <p className="mt-1 line-clamp-2 text-[10px] font-semibold leading-4 text-zinc-300 sm:text-[11px]" suppressHydrationWarning>
+                {releaseNotice?.detail ?? "Disponível de acordo com a regra de entrega."}
               </p>
             </div>
           ) : null}
