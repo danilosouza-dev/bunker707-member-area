@@ -9,10 +9,13 @@ const directorSource = await readFile(
 const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
 
 test("the authenticated member shell mounts the IA Diretor outside lesson-specific UI", () => {
-  assert.match(appShellSource, /import \{ PlatformDirectorChat \} from "@\/components\/platform-director-chat"/);
+  assert.doesNotMatch(appShellSource, /import \{ PlatformDirectorChat \} from "@\/components\/platform-director-chat"/);
+  assert.match(appShellSource, /const PlatformDirectorChat = dynamic\(\s*\(\) => import\("@\/components\/platform-director-chat"\)/);
+  assert.match(appShellSource, /ssr: false/);
   assert.match(appShellSource, /<main>\{children\}<\/main>[\s\S]*?<PlatformDirectorChat/);
   assert.match(appShellSource, /onNavigate=\{handleDirectorNavigation\}/);
-  assert.match(appShellSource, /!sidebarOpen \? <PlatformDirectorChat/);
+  assert.match(appShellSource, /!sidebarOpen \? \(\s*directorRequested \? \(\s*<PlatformDirectorChat defaultOpen=\{directorOpenOnMount\}/);
+  assert.match(appShellSource, /<PlatformDirectorLauncher onActivate=\{activateDirectorChat\}/);
   assert.match(appShellSource, /handleProgressAwareNavigation\(event, withAccessPreviewParam\(href, accessPreviewMode\)\)/);
 });
 

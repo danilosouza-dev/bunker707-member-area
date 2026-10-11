@@ -8,7 +8,7 @@ async function readSource(path) {
 
 const dashboardSource = await readSource("../src/components/admin-dashboard.tsx");
 const feedbackSource = await readSource("../src/components/admin/admin-operation-feedback.tsx");
-const loadingSource = await readSource("../src/app/admin/loading.tsx");
+const loadingSource = await readSource("../src/app/admin/legado/loading.tsx");
 const moderationSource = await readSource("../src/components/admin/moderation/moderation-command-center.tsx");
 
 test("admin operations expose persistent and accessible pending, success and error feedback", () => {
@@ -27,7 +27,8 @@ test("admin operations expose persistent and accessible pending, success and err
 test("admin route has an explicit loading state before dashboard data is ready", () => {
   assert.match(loadingSource, /aria-busy="true"/);
   assert.match(loadingSource, /role="status"/);
-  assert.match(loadingSource, /Carregando o CRM Bunker707/);
+  assert.match(loadingSource, /Carregando o Admin Bunker707/);
+  assert.doesNotMatch(loadingSource, /CRM/);
   assert.match(loadingSource, /LoaderCircle/);
   assert.match(loadingSource, /animate-spin/);
 });

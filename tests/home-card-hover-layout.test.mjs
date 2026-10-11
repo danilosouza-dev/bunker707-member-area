@@ -41,7 +41,7 @@ test("home carousel uses Netflix-style edge arrows and page indicators only with
   assert.match(rowSource, /setHasHorizontalOverflow\(metrics\.hasOverflow\);/);
   assert.match(rowSource, /<CarouselPaginationIndicator/);
   assert.match(rowSource, /<CarouselEdgeControls/);
-  assert.match(rowSource, /<div className="relative">\s*<div\s*className=\{`scrollbar-hidden flex scroll-smooth/);
+  assert.match(rowSource, /<div className="home-row-viewport relative">\s*<div\s*className=\{`scrollbar-hidden flex scroll-smooth/);
   assert.doesNotMatch(rowSource, /import \{[^}]*ChevronLeft/);
   assert.match(carouselNavigationSource, /export function getCarouselMetrics/);
   assert.match(carouselNavigationSource, /pagePositions\.push\(maxScrollLeft\)/);
@@ -85,8 +85,8 @@ test("home can show an access card and intermediate modules for a selected cours
   assert.doesNotMatch(rowSource, /Ver aulas/);
   assert.doesNotMatch(rowSource, /\$\{cardActionClassName\} mt-3 max-w-fit flex-none/);
   assert.match(rowSource, /home-row-cover-card/);
-  assert.match(rowSource, /w-\[10\.25rem\]/);
-  assert.match(rowSource, /xl:w-\[17\.5rem\]/);
+  assert.match(rowSource, /w-\[8\.75rem\]/);
+  assert.match(rowSource, /xl:w-\[14rem\]/);
 });
 
 test("home vertical card hover expands the card without inner image zoom", () => {
@@ -102,24 +102,14 @@ test("home vertical cards grow inward only at carousel edges", () => {
   assert.match(rowSource, /getHomeRowHoverEdgeIndexes/);
   assert.match(rowSource, /setAttribute\("data-hover-edge", "left"\)/);
   assert.match(rowSource, /setAttribute\("data-hover-edge", "right"\)/);
-  assert.match(rowSource, /removeAttribute\("data-hover-reveals-next"\)/);
-  assert.match(rowSource, /removeAttribute\("data-hover-reveals-previous"\)/);
   assert.match(rowSource, /removeProperty\("--home-row-card-hover-shift-x"\)/);
   assert.match(rowSource, /removeProperty\("--home-row-card-hover-logo-shift-x"\)/);
-  assert.match(rowSource, /removeProperty\("--home-row-card-hover-preview-shift-x"\)/);
-  assert.match(rowSource, /leftHiddenOffset = Math\.max\(leftBoundary - leftEdgeRect\.left, 0\)/);
-  assert.match(rowSource, /rightHiddenOffset = Math\.max\(rightEdgeRect\.right - rightBoundary, 0\)/);
   assert.match(rowSource, /homeRowCardHoverScale = 1\.14/);
-  assert.match(rowSource, /const previousCard = leftEdgeIndex > 0 \? cards\[leftEdgeIndex - 1\] : undefined/);
-  assert.match(rowSource, /if \(previousCard && leftHiddenOffset > edgeTolerance\)/);
-  assert.match(rowSource, /previewShiftX = Math\.round\(\(leftEdgeRect\.left - previousCardRect\.left\) \* 100\) \/ 100/);
-  assert.match(rowSource, /setAttribute\("data-hover-reveals-previous", "true"\)/);
-  assert.match(rowSource, /const nextCard = rightEdgeIndex >= 0 \? cards\[rightEdgeIndex \+ 1\] : undefined/);
-  assert.match(rowSource, /if \(nextCard && rightHiddenOffset > edgeTolerance\)/);
-  assert.match(rowSource, /previewShiftX = Math\.round\(\(rightEdgeRect\.left - nextCardRect\.left\) \* 100\) \/ 100/);
-  assert.match(rowSource, /setAttribute\("data-hover-reveals-next", "true"\)/);
-  assert.match(rowSource, /setProperty\("--home-row-card-hover-preview-shift-x", `\$\{previewShiftX\}px`\)/);
-  assert.match(rowSource, /rightLogoShiftX = Math\.round\(\(rightSurfaceShiftX - rightEdgeRect\.width \* \(homeRowCardHoverScale - 1\)\) \* 100\) \/ 100/);
+  assert.match(rowSource, /hiddenOffset = Math\.max\(leftBoundary - leftEdgeRect\.left, 0\)/);
+  assert.match(rowSource, /hiddenOffset = Math\.max\(rightEdgeRect\.right - rightBoundary, 0\)/);
+  assert.match(rowSource, /leftSurfaceShiftX = roundPx\(hiddenOffset \+ neighborPeekOffset\)/);
+  assert.match(rowSource, /rightSurfaceShiftX = roundPx\(-\(hiddenOffset \+ neighborPeekOffset\)\)/);
+  assert.match(rowSource, /rightLogoShiftX = roundPx\(rightSurfaceShiftX - rightEdgeRect\.width \* \(homeRowCardHoverScale - 1\)\)/);
   assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{leftSurfaceShiftX\}px`\)/);
   assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{leftSurfaceShiftX\}px`\)/);
   assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{rightSurfaceShiftX\}px`\)/);
@@ -131,8 +121,6 @@ test("home vertical cards grow inward only at carousel edges", () => {
   assert.match(cssSource, /\[data-home-row-card\]\[data-hover-edge="right"\] \.home-cover-card-surface \{\s*transform-origin: right center;/);
   assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="left"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, 0px\), -27px, 0\);/);
   assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, var\(--home-row-card-hover-shift-x, 0px\)\), -27px, 0\);/);
-  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\[data-hover-reveals-next="true"\]\.group:hover \+ \.home-row-cover-card \{\s*transform: translate3d\(var\(--home-row-card-hover-preview-shift-x, 0px\), 0, 0\);/);
-  assert.match(cssSource, /\.home-row-cover-card:has\(\+ \.home-row-cover-card\[data-hover-edge="left"\]\[data-hover-reveals-previous="true"\]\.group:hover\) \{\s*transform: translate3d\(var\(--home-row-card-hover-preview-shift-x, 0px\), 0, 0\);/);
 });
 
 test("a short row with two cards keeps the second card centered on hover", () => {
@@ -165,16 +153,32 @@ test("a card that reaches the visual right edge still grows inward", () => {
   assert.equal(edgeIndexes.rightEdgeIndex, 1);
 });
 
-test("home edge previews keep hover stable while crossing either visual gap", () => {
-  assert.match(cardSource, /export function HomeRowHoverBridge/);
-  assert.match(cardSource, /data-home-row-hover-bridge/);
-  assert.match(cardSource, /onClickCapture=\{preventHomeRowHoverBridgeClick\}/);
-  assert.match(rowSource, /<HomeRowHoverBridge \/>/);
-  assert.match(rowSource, /onClickCapture=\{preventHomeRowHoverBridgeClick\}/);
-  assert.match(cardSource, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);/);
-  assert.match(cssSource, /\.home-row-card-hover-bridge \{\s*display: none;/);
-  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="left"\]\[data-hover-reveals-previous="true"\]\.group:hover > \.home-row-card-hover-bridge \{\s*left: 100%;\s*right: calc\(100% - var\(--home-row-card-hover-shift-x, 0px\)\);/);
-  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\[data-hover-reveals-next="true"\]\.group:hover > \.home-row-card-hover-bridge \{\s*left: calc\(100% \+ var\(--home-row-card-hover-shift-x, 0px\)\);\s*right: 100%;/);
+test("home edge cards shift only enough to uncover the cut portion", () => {
+  assert.doesNotMatch(rowSource, /previewShiftX/);
+  assert.doesNotMatch(rowSource, /data-hover-reveals/);
+  assert.doesNotMatch(rowSource, /--home-row-card-hover-preview-shift-x/);
+  assert.doesNotMatch(rowSource, /HomeRowHoverBridge/);
+  assert.doesNotMatch(cardSource, /HomeRowHoverBridge/);
+  assert.doesNotMatch(cardSource, /data-home-row-hover-bridge/);
+  assert.doesNotMatch(cssSource, /home-row-card-hover-bridge/);
+  assert.doesNotMatch(cssSource, /data-hover-reveals/);
+  assert.doesNotMatch(cssSource, /--home-row-card-hover-preview-shift-x/);
+});
+
+test("a hidden neighbor peeks out when the edge card comes forward", () => {
+  assert.match(rowSource, /const homeRowNeighborPeekWidth = 56;/);
+  assert.match(rowSource, /neighborPeekOffset = previousRect\s*\? Math\.max\(homeRowNeighborPeekWidth - \(paddingLeft - \(leftEdgeRect\.left - previousRect\.right\)\), 0\)\s*: 0;/);
+  assert.match(rowSource, /neighborPeekOffset = nextRect\s*\? Math\.max\(homeRowNeighborPeekWidth - \(paddingRight - \(nextRect\.left - rightEdgeRect\.right\)\), 0\)\s*: 0;/);
+  assert.match(rowSource, /setAttribute\("data-hover-peeks-previous", "true"\)/);
+  assert.match(rowSource, /setAttribute\("data-hover-peeks-next", "true"\)/);
+  assert.match(rowSource, /previousCard\.style\.setProperty\("--home-row-card-hover-neighbor-shift-x", `\$\{leftSurfaceShiftX\}px`\)/);
+  assert.match(rowSource, /nextCard\.style\.setProperty\("--home-row-card-hover-neighbor-shift-x", `\$\{rightSurfaceShiftX\}px`\)/);
+  assert.match(rowSource, /removeAttribute\("data-hover-peeks-next"\)/);
+  assert.match(rowSource, /removeAttribute\("data-hover-peeks-previous"\)/);
+  assert.match(rowSource, /removeProperty\("--home-row-card-hover-neighbor-shift-x"\)/);
+  assert.equal((rowSource.match(/className="home-row-viewport relative"/g) ?? []).length, 2);
+  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\[data-hover-peeks-next="true"\]\.group:hover \+ \.home-row-cover-card \.home-cover-card-surface,\s*\.home-row-cover-card:has\(\+ \.home-row-cover-card\[data-hover-edge="left"\]\[data-hover-peeks-previous="true"\]\.group:hover\) \.home-cover-card-surface \{\s*pointer-events: none;\s*transform: translate3d\(var\(--home-row-card-hover-neighbor-shift-x, 0px\), 0, 0\);/);
+  assert.match(cssSource, /\.home-row-viewport:has\(\.home-row-cover-card\[data-hover-edge="right"\]\[data-hover-peeks-next="true"\]\.group:hover\) \.carousel-edge-fade-right,\s*\.home-row-viewport:has\(\.home-row-cover-card\[data-hover-edge="left"\]\[data-hover-peeks-previous="true"\]\.group:hover\) \.carousel-edge-fade-left \{\s*opacity: 0\.22;/);
 });
 
 test("home cards prefetch content routes before click navigation", () => {

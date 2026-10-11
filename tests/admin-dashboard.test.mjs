@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const adminPageSource = await readFile(new URL("../src/app/admin/page.tsx", import.meta.url), "utf8");
+const adminPageSource = await readFile(new URL("../src/app/admin/legado/page.tsx", import.meta.url), "utf8");
 const adminNavSource = await readFile(new URL("../src/components/admin/admin-nav.ts", import.meta.url), "utf8");
 const adminSidebarSource = await readFile(new URL("../src/components/admin/admin-sidebar.tsx", import.meta.url), "utf8");
 const adminShellSource = await readFile(new URL("../src/components/admin/admin-shell.tsx", import.meta.url), "utf8");
@@ -55,7 +55,7 @@ const loginPageSource = await readFile(new URL("../src/app/login/page.tsx", impo
 const callbackRouteSource = await readFile(new URL("../src/app/auth/callback/route.ts", import.meta.url), "utf8");
 const logoutRouteSource = await readFile(new URL("../src/app/api/auth/logout/route.ts", import.meta.url), "utf8");
 const postLoginRouteSource = await readFile(new URL("../src/app/api/auth/post-login/route.ts", import.meta.url), "utf8");
-const middlewareSource = await readFile(new URL("../middleware.ts", import.meta.url), "utf8");
+const proxySource = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
 const authRedirectSource = await readFile(new URL("../src/server/auth/redirect.ts", import.meta.url), "utf8");
 const platformStoreSource = await readFile(new URL("../src/server/db/platform-store.ts", import.meta.url), "utf8");
 const routeErrorsSource = await readFile(new URL("../src/server/http/route-errors.ts", import.meta.url), "utf8");
@@ -104,7 +104,8 @@ test("admin route renders the CMS dashboard", () => {
   assert.match(adminPageSource, /import \{ AdminDashboard \} from "@\/components\/admin-dashboard";/);
   assert.match(adminPageSource, /requirePageAdmin/);
   assert.match(adminPageSource, /getAdminDashboardData/);
-  assert.match(adminPageSource, /return <AdminDashboard initialData=\{data\} \/>;/);
+  assert.match(adminPageSource, /return <AdminDashboard initialData=\{data\}/);
+  assert.match(adminPageSource, /readLegacyAdminParams\(params\)/);
 });
 
 test("admin dashboard exposes the core CMS views", () => {
@@ -177,10 +178,10 @@ test("admin dashboard exposes product combos, moderation, integrations and AI ag
   assert.match(adminDashboardSource, /activeView === "integrations"/);
   assert.match(adminDashboardSource, /\/api\/admin\/collections/);
   assert.match(adminDashboardSource, /\/api\/admin\/combos/);
-  assert.match(adminCombosRouteSource, /requireApiAdmin/);
+  assert.match(adminCombosRouteSource, /requireApiRole\("catalog\.write"\)/);
   assert.match(adminCombosRouteSource, /upsertProductCombo/);
   assert.match(adminCombosRouteSource, /deleteProductCombo/);
-  assert.match(adminCollectionsRouteSource, /requireApiAdmin/);
+  assert.match(adminCollectionsRouteSource, /requireApiRole\("settings\.ai"\)/);
   assert.match(adminCollectionsRouteSource, /updateAdminDashboardCollections/);
   assert.match(platformStoreSource, /defaultCohortName = "Turma A"/);
   assert.match(platformStoreSource, /combos/);
@@ -260,20 +261,24 @@ test("admin shell uses shadcn sidebar provider without touching the student shel
 });
 
 test("admin overview uses shadcn dashboard components with safe CRM data", () => {
-  assert.match(adminOverviewSource, /ChartContainer/);
-  assert.match(adminOverviewSource, /AreaChart/);
-  assert.match(adminOverviewSource, /BarChart/);
-  assert.match(adminOverviewSource, /Progresso medio dos alunos/);
-  assert.match(adminOverviewSource, /Sinais operacionais/);
-  assert.match(adminOverviewSource, /Produtos em alta/);
+  assert.doesNotMatch(adminOverviewSource, /\|\| (487|612|64|132|9|2)\b/);
+  assert.doesNotMatch(adminOverviewSource, /previewStudentRows|previewActivityRows|previewChartPoints|previewPipeline/);
+  assert.doesNotMatch(adminOverviewSource, /EmptyChartState|EMPTY_CHART_MESSAGE|Nada aqui é simulado/);
+  assert.match(adminOverviewSource, /Sem dados no período/);
+  assert.match(adminOverviewSource, /Progresso médio dos alunos/);
+  assert.doesNotMatch(adminOverviewSource, /Sinais operacionais/);
+  assert.match(adminOverviewSource, /Produtos com mais alunos/);
   assert.match(adminOverviewSource, /Alunos para acompanhar/);
   assert.match(adminOverviewSource, /Painel do produtor/);
-  assert.match(adminOverviewSource, /Resumo seguro/);
+  assert.doesNotMatch(adminOverviewSource, /Resumo seguro|Live CRM|Abrir segmentacao|alto sinal de compra/);
   assert.doesNotMatch(adminOverviewSource, /Performance da escola/);
   assert.match(adminMetricCardSource, /@\/components\/ui\/card/);
   assert.match(adminOperationsPanelSource, /@\/components\/ui\/badge/);
   assert.match(adminRecentOperationsTableSource, /@\/components\/ui\/table/);
-  assert.match(adminTopbarSource, /Entitlements como fonte de verdade/);
+  assert.doesNotMatch(adminTopbarSource, /Entitlements como fonte de verdade|RBAC ativo/);
+  assert.doesNotMatch(adminSidebarSource, /RBAC ativo|CRM Admin/);
+  assert.doesNotMatch(adminNavSource, /CRM Admin/);
+  assert.match(adminNavSource, /"Admin Bunker707"/);
   assert.doesNotMatch(adminOverviewSource, /payload/);
   assert.doesNotMatch(adminOperationsPanelSource, /payload/);
   assert.doesNotMatch(adminRecentOperationsTableSource, /payload/);
@@ -306,14 +311,15 @@ test("shadcn tokens coexist with Bunker707 student area tokens", () => {
 test("admin dashboard models a simple student CRM list with row actions", () => {
   assert.match(adminStudentsCommandCenterSource, /Alunos/);
   assert.match(adminStudentsCommandCenterSource, /Buscar aluno por nome ou email/);
-  assert.match(adminStudentsCommandCenterSource, /studentMetricFallbackSeries/);
-  assert.match(adminStudentsCommandCenterSource, /buildMetricSeries/);
-  assert.match(adminStudentsCommandCenterSource, /buildMemberSeries/);
+  assert.doesNotMatch(adminStudentsCommandCenterSource, /studentMetricFallbackSeries/);
+  assert.doesNotMatch(adminStudentsCommandCenterSource, /buildMetricSeries/);
+  assert.doesNotMatch(adminStudentsCommandCenterSource, /buildMemberSeries/);
   assert.match(adminStudentsCommandCenterSource, /Total de alunos/);
-  assert.match(adminStudentsCommandCenterSource, /Progresso medio/);
-  assert.match(adminStudentsCommandCenterSource, /Engajamento/);
-  assert.match(adminStudentsCommandCenterSource, /chartColor="#e50914"/);
-  assert.match(adminStudentsCommandCenterSource, /chartColor="#22c55e"/);
+  assert.match(adminStudentsCommandCenterSource, /Progresso médio/);
+  assert.doesNotMatch(adminStudentsCommandCenterSource, /Engajamento/);
+  assert.doesNotMatch(adminStudentsCommandCenterSource, /getStudentEngagementScore/);
+  assert.doesNotMatch(adminStudentsCommandCenterSource, /h-\[8\.25rem\]|EMPTY_CHART_MESSAGE|Nada aqui é simulado/);
+  assert.match(adminStudentsCommandCenterSource, /Sem dados no período/);
   assert.match(adminStudentsCommandCenterSource, /Adicionar aluno/);
   assert.doesNotMatch(adminStudentsCommandCenterSource, /Inteligencia da base/);
   assert.doesNotMatch(adminDashboardSource, /CourseStudentGroups/);
@@ -341,7 +347,10 @@ test("admin dashboard models a simple student CRM list with row actions", () => 
   assert.doesNotMatch(adminDashboardSource, /TabsList/);
   assert.doesNotMatch(adminDashboardSource, /defaultValue="overview"/);
   assert.match(adminDashboardSource, /TableHeader/);
-  assert.match(adminDashboardSource, /Entitlements internos continuam sendo a fonte de verdade/);
+  assert.match(adminDashboardSource, /Os acessos internos da Bunker707 continuam sendo a fonte de verdade/);
+  assert.doesNotMatch(adminDashboardSource, /Depois do entitlement|Entitlements ativos|Curadoria persistida|\["Escopo"|ID do asset|no CRM\./);
+  assert.doesNotMatch(adminDashboardSource, /\{(record|selectedRecord)\.access\}<\/StatusPill>/);
+  assert.match(adminDashboardSource, /Liberação programada/);
   assert.match(adminDashboardSource, /StudentProductAccessTable/);
   assert.doesNotMatch(adminDashboardSource, /StudentProductAccessCard/);
   assert.match(designSystemSource, /nao como sheet lateral e nao como pagina externa/);
@@ -392,7 +401,8 @@ test("admin dashboard models a simple student CRM list with row actions", () => 
   assert.match(adminNavSource, /Area do aluno/);
   assert.doesNotMatch(adminTopbarSource, /Ver area do aluno/);
   assert.match(adminDashboardSource, /onChangeView=\{handleChangeView\}/);
-  assert.match(adminDashboardSource, /Supabase persistido/);
+  assert.doesNotMatch(adminDashboardSource, /Supabase persistido/);
+  assert.doesNotMatch(adminDashboardSource, /15 itens por pagina/);
   assert.doesNotMatch(adminDashboardSource, /Fallback local/);
   assert.doesNotMatch(adminDashboardSource, /admin-mock-data/);
   assert.doesNotMatch(adminDashboardSource, /mock-data/);
@@ -484,12 +494,12 @@ test("admin dashboard lets producers choose course card flow explicitly", () => 
 });
 
 test("auth and security guard the student area, progress and admin mutations", () => {
-  assert.match(middlewareSource, /createServerClient/);
-  assert.match(middlewareSource, /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/);
-  assert.match(middlewareSource, /protectedPagePrefixes/);
-  assert.match(middlewareSource, /\/alterar-senha/);
-  assert.match(middlewareSource, /userMustChangePassword/);
-  assert.match(middlewareSource, /supabase\.auth\.getUser/);
+  assert.match(proxySource, /createServerClient/);
+  assert.match(proxySource, /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/);
+  assert.match(proxySource, /protectedPagePrefixes/);
+  assert.match(proxySource, /\/alterar-senha/);
+  assert.match(proxySource, /userMustChangePassword/);
+  assert.match(proxySource, /supabase\.auth\.getUser/);
   assert.match(platformStoreSource, /getAdminRoleForUser/);
   assert.match(platformStoreSource, /canUseAccessPreview: Boolean\(adminRole\)/);
   assert.match(platformStoreSource, /accessEntitlements/);
@@ -502,10 +512,11 @@ test("auth and security guard the student area, progress and admin mutations", (
   assert.match(appShellSource, /Modo de visualizacao no menu/);
   assert.match(appShellSource, /Aluno com acesso/);
   assert.match(appShellSource, /Aluno sem acesso/);
-  assert.match(appShellSource, /Ir para o CRM/);
+  assert.match(appShellSource, /Ir para o admin/);
+  assert.doesNotMatch(appShellSource, /CRM/);
   assert.match(appShellSource, /href="\/admin"/);
   assert.match(appShellSource, /label: "Favoritos", href: "\/favoritos"/);
-  assert.match(middlewareSource, /"\/favoritos"/);
+  assert.match(proxySource, /"\/favoritos"/);
   assert.match(loginExperienceSource, /signInWithPassword/);
   assert.match(loginExperienceSource, /getPostLoginRedirectPath/);
   assert.match(loginExperienceSource, /\/api\/auth\/post-login\?next=/);
@@ -516,19 +527,20 @@ test("auth and security guard the student area, progress and admin mutations", (
   assert.match(authRedirectSource, /getAdminRoleForUser/);
   assert.match(authRedirectSource, /return adminRole \? "\/admin" : safeRedirectPath/);
   assert.match(callbackRouteSource, /getPostAuthRedirectPath/);
-  assert.match(middlewareSource, /from\("admin_roles"\)/);
+  assert.match(proxySource, /from\("admin_roles"\)/);
   assert.match(loginPageSource, /getPostAuthRedirectPath/);
   assert.match(loginExperienceSource, /must_change_password/);
   assert.match(loginExperienceSource, /signInWithOAuth/);
   assert.match(loginExperienceSource, /resetPasswordForEmail/);
   assert.match(loginExperienceSource, /new URL\("\/auth\/callback", window\.location\.origin\)/);
   assert.doesNotMatch(loginExperienceSource, /NEXT_PUBLIC_SUPABASE_URL/);
-  assert.match(loginExperienceSource, /Login temporariamente indisponivel/);
+  assert.match(loginExperienceSource, /Login temporariamente indispon[ií]vel/);
   assert.doesNotMatch(loginExperienceSource, /Entrar em modo local/);
   assert.doesNotMatch(loginExperienceSource, /\/api\/auth\/local-login/);
   assert.match(logoutRouteSource, /legacyLocalAuthCookieName/);
-  assert.doesNotMatch(middlewareSource, /localAuthCookieName/);
-  assert.match(appShellSource, /supabase\.auth\.signOut/);
+  assert.doesNotMatch(proxySource, /localAuthCookieName/);
+  assert.doesNotMatch(appShellSource, /@\/lib\/supabase\/browser|supabase\.auth/);
+  assert.match(logoutRouteSource, /await supabase\.auth\.signOut\(\);/);
   assert.doesNotMatch(appShellSource, /label: "CMS"/);
   assert.match(progressRouteSource, /requireApiUser/);
   assert.match(progressRouteSource, /userId: auth\.user\.id/);
@@ -540,7 +552,7 @@ test("auth and security guard the student area, progress and admin mutations", (
   assert.match(favoritesPageSource, /FavoritesExperience/);
   assert.match(favoritesExperienceSource, /Favoritos/);
   assert.match(favoritesExperienceSource, /savedItemChangedEvent/);
-  assert.match(adminContentRouteSource, /requireApiAdmin/);
+  assert.match(adminContentRouteSource, /requireApiRole\("catalog\.(?:write|delete)"\)/);
   assert.match(passwordChangePageSource, /requirePageUser/);
   assert.match(passwordChangeExperienceSource, /updateUser/);
   assert.match(passwordChangeExperienceSource, /password_changed/);
