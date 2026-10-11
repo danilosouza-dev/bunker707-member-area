@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { savedItemCollectionLabel } from "@/lib/saved-items";
 import { requireApiUser } from "@/server/auth/guards";
 import { setSavedItem } from "@/server/db/platform-store";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { SavedItemTargetType } from "@/lib/platform-types";
 
@@ -28,12 +29,18 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Sessao obrigatoria." }, { status: 401 });
   }
 
-  const payload = await request.json() as {
+  let payload: {
     collectionLabel?: unknown;
     saved?: boolean;
     targetId?: string;
     targetType?: string;
   };
+
+  try {
+    payload = await readBoundedJson<typeof payload>(request, 16_000);
+  } catch (error) {
+    return jsonRouteError(error, "Nao foi possivel ler o favorito enviado.", 400);
+  }
 
   const targetType = payload.targetType as SavedItemTargetType | undefined;
   const targetId = payload.targetId?.trim();

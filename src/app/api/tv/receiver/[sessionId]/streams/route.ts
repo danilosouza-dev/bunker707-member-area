@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { jsonRouteError } from "@/server/http/route-errors";
+import {
+  isYouTubeUnofficialStreamsEnabled,
+  youTubeUnofficialStreamsDisabledCode
+} from "@/server/video/feature-flags";
 import { getTvReceiverSession } from "@/server/video/tv-sessions";
 import { fetchYouTubeStreams } from "@/server/video/youtube-streams";
 
@@ -22,6 +26,11 @@ function getBearerToken(request: Request) {
 }
 
 export async function GET(request: Request, context: RouteContext) {
+  // Flag desligada: o receptor fica so no embed oficial (qualidade automatica).
+  if (!isYouTubeUnofficialStreamsEnabled()) {
+    return noStore(NextResponse.json({ error: youTubeUnofficialStreamsDisabledCode }, { status: 404 }));
+  }
+
   try {
     const { sessionId } = await context.params;
     const data = await getTvReceiverSession(sessionId, getBearerToken(request), true);

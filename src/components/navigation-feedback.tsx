@@ -117,7 +117,6 @@ function shouldHandleAnchorClick(event: MouseEvent, anchor: HTMLAnchorElement, u
     event.shiftKey ||
     anchor.hasAttribute("download") ||
     anchor.dataset.navigationFeedback === "false" ||
-    (event.target instanceof Element && event.target.closest("[data-home-row-hover-bridge]")) ||
     (anchor.target && anchor.target !== "_self")
   ) {
     return false;

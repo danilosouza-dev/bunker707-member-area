@@ -14,6 +14,7 @@ import {
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import type { LucideIcon } from "lucide-react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
+import { cssImageUrl } from "@/lib/css-url";
 import type { ContentItem, ContentKind } from "@/lib/platform-types";
 
 type PurchasesExperienceProps = {
@@ -137,7 +138,7 @@ function PurchaseCard({ accessPreviewMode, item }: { accessPreviewMode?: AccessP
       <div className="relative aspect-[720/1040] overflow-hidden bg-[#101010]">
         <div
           className="absolute inset-0 bg-cover bg-center transition duration-700 group-hover:scale-[1.035]"
-          style={{ backgroundImage: `url(${item.image})` }}
+          style={{ backgroundImage: cssImageUrl(item.image) }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/78 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 p-4">

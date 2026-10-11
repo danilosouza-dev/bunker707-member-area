@@ -7,10 +7,12 @@ import { cardActionClassName } from "@/components/card-action-style";
 import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { SavedItemButton } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
+import { usePlatformLogoImage } from "@/components/platform-branding";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import type { KeyboardEvent, MouseEvent, TouchEvent } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
+import { cssImageUrl } from "@/lib/css-url";
 import type { ContentItem } from "@/lib/platform-types";
 
 type CardProps = {
@@ -18,19 +20,6 @@ type CardProps = {
   item: ContentItem;
   onOpenDetails?: (item: ContentItem) => void;
 };
-
-export function preventHomeRowHoverBridgeClick(event: MouseEvent<HTMLElement>) {
-  if (!(event.target as HTMLElement).closest("[data-home-row-hover-bridge]")) {
-    return;
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
-}
-
-export function HomeRowHoverBridge() {
-  return <span aria-hidden="true" className="home-row-card-hover-bridge" data-home-row-hover-bridge />;
-}
 
 function getContentHref(item: ContentItem, accessPreviewMode?: AccessPreviewMode) {
   return withAccessPreviewParam(item.href ?? `/conteudo/${item.id}`, accessPreviewMode);
@@ -66,7 +55,7 @@ export function ContinueWatchingCard({ accessPreviewMode, item }: CardProps) {
         <div className="absolute inset-0 z-0 w-full origin-center overflow-hidden rounded-[8px] bg-[#181818] shadow-xl shadow-black/35">
           <div
             className="continue-watching-card-image absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${item.image})` }}
+            style={{ backgroundImage: cssImageUrl(item.image) }}
           />
           <div className="continue-watching-card-overlay absolute inset-0" />
           <span className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/92 text-black opacity-0 shadow-xl shadow-black/40 transition-opacity duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] group-hover:opacity-100">
@@ -112,6 +101,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
     : "";
   const contentHref = getContentHref(item, accessPreviewMode);
   const hasCover = Boolean(item.image.trim());
+  const logoImage = usePlatformLogoImage();
 
   function prefetchContentPage() {
     if (!isLocked) {
@@ -203,10 +193,9 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
   return (
     <article
       aria-label={`Abrir ${item.title}`}
-      className="home-cover-card home-row-cover-card group relative aspect-[720/1040] w-[11.75rem] shrink-0 cursor-pointer overflow-visible hover:z-[120] sm:w-[15rem] md:w-[18.75rem] lg:w-[21.875rem] xl:w-[24.875rem]"
+      className="home-cover-card home-row-cover-card group relative aspect-[2/3] w-[9.5rem] shrink-0 cursor-pointer overflow-visible hover:z-[120] sm:w-[11.5rem] md:w-[13.5rem] lg:w-[15rem] xl:w-[16rem]"
       data-home-row-card
       onClick={openCardDestination}
-      onClickCapture={preventHomeRowHoverBridgeClick}
       onFocus={prefetchContentPage}
       onKeyDown={handleCardKeyDown}
       onMouseEnter={prefetchContentPage}
@@ -224,14 +213,14 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
           {hasCover ? (
             <div
               className={`home-cover-card-image absolute inset-0 bg-cover bg-center ${imageStateClass}`}
-              style={{ backgroundImage: `url(${item.image})` }}
+              style={{ backgroundImage: cssImageUrl(item.image) }}
             />
           ) : (
             <div className="absolute inset-0 bg-[linear-gradient(145deg,#27272a_0%,#18181b_48%,#09090b_100%)]" />
           )}
           {isLocked && hasCover ? (
-            <div className="home-cover-card-lock-badge absolute right-3 top-3 z-10 grid h-10 w-10 place-items-center rounded-full bg-black/65 text-white shadow-[0_12px_28px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-[2px] sm:right-4 sm:top-4 sm:h-11 sm:w-11 lg:h-12 lg:w-12">
-              <Lock className="h-[1.15rem] w-[1.15rem] stroke-[3.1] sm:h-5 sm:w-5 lg:h-[1.35rem] lg:w-[1.35rem]" aria-hidden="true" />
+            <div className="home-cover-card-lock-badge absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full bg-black/65 text-white shadow-[0_12px_28px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-[2px] sm:right-3.5 sm:top-3.5 sm:h-10 sm:w-10">
+              <Lock className="h-4 w-4 stroke-[3] sm:h-[1.125rem] sm:w-[1.125rem]" aria-hidden="true" />
               <span className="sr-only">Conteudo bloqueado</span>
             </div>
           ) : null}
@@ -249,12 +238,12 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
           {hasCover ? <div className="home-cover-card-overlay absolute inset-0" /> : null}
           {hasCover ? <div className="home-cover-card-gradient absolute inset-x-0 bottom-0 h-[78%] bg-gradient-to-t from-black via-black/92 to-transparent" /> : null}
           <div className={hasCover
-            ? "home-cover-card-content absolute inset-x-0 bottom-3 p-3 sm:bottom-4 sm:p-4 lg:bottom-5 lg:p-5"
+            ? "home-cover-card-content absolute inset-x-0 bottom-3 p-3 sm:bottom-3.5 sm:p-3.5 lg:bottom-4 lg:p-4"
             : "absolute inset-0 grid place-items-center p-5 text-center"
           }>
-            <h3 className="line-clamp-2 text-sm font-bold leading-tight text-white drop-shadow sm:text-base lg:text-lg">{item.title}</h3>
-            {hasCover ? <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-zinc-200 drop-shadow sm:mt-3 sm:line-clamp-3 sm:text-xs sm:leading-5">{description}</p> : null}
-            {hasCover ? <div className="mt-2 flex items-center gap-1.5 sm:mt-3 sm:gap-2 lg:mt-4">
+            <h3 className="line-clamp-2 text-[13px] font-bold leading-tight text-white drop-shadow sm:text-sm lg:text-base">{item.title}</h3>
+            {hasCover ? <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-zinc-200 drop-shadow sm:mt-2 sm:line-clamp-3 sm:text-xs sm:leading-[1.125rem]">{description}</p> : null}
+            {hasCover ? <div className="mt-2 flex items-center gap-1.5 sm:mt-2.5 sm:gap-2 lg:mt-3">
               <button
                 className={`${cardActionClassName} ${actionClass}`}
                 onClick={(event) => {
@@ -263,13 +252,13 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
                 }}
                 type="button"
               >
-                <ActionIcon className="h-3.5 w-3.5 fill-current sm:h-4 sm:w-4" />
+                <ActionIcon className="hidden shrink-0 fill-current md:block md:h-3.5 md:w-3.5 lg:h-4 lg:w-4" />
                 {actionLabel}
               </button>
               {!isLocked ? (
                 <SavedItemButton
-                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 transition sm:h-9 sm:w-9 lg:h-11 lg:w-11"
-                  iconClassName="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 transition md:h-9 md:w-9"
+                  iconClassName="h-3.5 w-3.5 md:h-4 md:w-4"
                   initialSaved={item.isSaved}
                   targetId={item.id}
                   targetTitle={item.title}
@@ -278,28 +267,27 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
               ) : null}
               <button
                 aria-label={`Ver detalhes de ${item.title}`}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-zinc-400 bg-black/30 text-white transition hover:border-white hover:bg-white/10 sm:h-9 sm:w-9 lg:h-11 lg:w-11"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-zinc-400 bg-black/30 text-white transition hover:border-white hover:bg-white/10 md:h-9 md:w-9"
                 onClick={handleDetailsClick}
                 type="button"
               >
-                <ChevronDown className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
+                <ChevronDown className="h-3.5 w-3.5 md:h-4 md:w-4" />
               </button>
             </div> : null}
           </div>
         </div>
       </div>
-      {hasCover ? <div className="home-cover-card-logo pointer-events-none absolute left-4 top-4 z-[130] w-[6.6875rem] opacity-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.7)] sm:w-[7.5625rem]">
+      {hasCover && logoImage ? <div className="home-cover-card-logo pointer-events-none absolute left-4 top-4 z-[130] w-[5.75rem] opacity-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.7)] sm:w-[6.25rem] lg:w-[6.75rem]">
         <Image
           alt=""
           aria-hidden="true"
-          className="h-auto w-full object-contain"
+          className="h-auto max-h-10 w-full object-contain object-left"
           height={35}
-          src="/brand/logo-bunker.svg"
+          src={logoImage}
           unoptimized
           width={306}
         />
       </div> : null}
-      <HomeRowHoverBridge />
     </article>
   );
 }

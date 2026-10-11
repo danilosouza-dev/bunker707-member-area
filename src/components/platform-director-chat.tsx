@@ -56,8 +56,12 @@ type GuideMessage = {
 };
 
 type PlatformDirectorChatProps = {
+  /** Abre o painel ao montar; usado pelo AppShell, que carrega o chat só depois do primeiro clique. */
+  defaultOpen?: boolean;
   onNavigate: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
 };
+
+const mobileMediaQuery = "(max-width: 639px)";
 
 const panelId = "platform-director-chat";
 
@@ -167,9 +171,13 @@ async function readResponse<T>(response: Response, fallback: string) {
   return payload.data;
 }
 
-export function PlatformDirectorChat({ onNavigate }: PlatformDirectorChatProps) {
-  const [open, setOpen] = React.useState(false);
-  const [mobile, setMobile] = React.useState(false);
+export function PlatformDirectorChat({ defaultOpen = false, onNavigate }: PlatformDirectorChatProps) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  // Montado só no cliente (next/dynamic com ssr: false): lê a mídia já no primeiro
+  // render para o painel aberto por defaultOpen não piscar no layout de desktop.
+  const [mobile, setMobile] = React.useState(() => (
+    typeof window !== "undefined" && window.matchMedia(mobileMediaQuery).matches
+  ));
   const [availability, setAvailability] = React.useState<GuideAvailability>({ available: false, reason: null });
   const [conversations, setConversations] = React.useState<GuideConversation[]>([]);
   const [activeConversationId, setActiveConversationId] = React.useState("");
@@ -272,13 +280,24 @@ export function PlatformDirectorChat({ onNavigate }: PlatformDirectorChatProps) 
   }, [activeConversationId, loadConversation]);
 
   React.useEffect(() => {
-    const media = window.matchMedia("(max-width: 639px)");
+    const media = window.matchMedia(mobileMediaQuery);
     const update = () => setMobile(media.matches);
     update();
     media.addEventListener("change", update);
 
     return () => media.removeEventListener("change", update);
   }, []);
+
+  React.useEffect(() => {
+    if (!defaultOpen) return;
+    // O botão estático que recebeu o clique já saiu da tela: o foco vai para o
+    // campo ou, enquanto ele estiver desabilitado, para o próprio painel.
+    const frame = window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      if (document.activeElement !== inputRef.current) panelRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [defaultOpen]);
 
   React.useEffect(() => {
     if (!open) return;

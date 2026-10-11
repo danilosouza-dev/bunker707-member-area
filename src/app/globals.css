@@ -89,9 +89,13 @@ body {
   font-family: var(--font-inter), system-ui, sans-serif;
 }
 
-button,
-input {
-  font: inherit;
+/* iOS aplica zoom automatico em campos com fonte menor que 16px; em telas touch manter 1rem. */
+@media (hover: none) and (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 1rem;
+  }
 }
 
 button {
@@ -432,14 +436,6 @@ button:disabled {
   transform: scale(1.035);
 }
 
-.home-row-cover-card {
-  transition: transform 560ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.home-row-card-hover-bridge {
-  display: none;
-}
-
 .home-row-cover-card.group:hover .home-cover-card-surface {
   transform: translate3d(var(--home-row-card-hover-shift-x, 0px), -8px, 0) scale(1.14);
 }
@@ -448,33 +444,16 @@ button:disabled {
   transform: scale(1);
 }
 
-@media (min-width: 1024px) and (hover: hover) and (pointer: fine) {
-  .home-row-cover-card[data-hover-edge="left"][data-hover-reveals-previous="true"].group:hover > .home-row-card-hover-bridge,
-  .home-row-cover-card[data-hover-edge="right"][data-hover-reveals-next="true"].group:hover > .home-row-card-hover-bridge {
-    bottom: -10%;
-    display: block;
-    position: absolute;
-    top: -10%;
-    z-index: 130;
-  }
+/* O vizinho escondido acompanha o card da borda para deixar um pedaco visivel, sem capturar o mouse. */
+.home-row-cover-card[data-hover-edge="right"][data-hover-peeks-next="true"].group:hover + .home-row-cover-card .home-cover-card-surface,
+.home-row-cover-card:has(+ .home-row-cover-card[data-hover-edge="left"][data-hover-peeks-previous="true"].group:hover) .home-cover-card-surface {
+  pointer-events: none;
+  transform: translate3d(var(--home-row-card-hover-neighbor-shift-x, 0px), 0, 0);
+}
 
-  .home-row-cover-card[data-hover-edge="left"][data-hover-reveals-previous="true"].group:hover > .home-row-card-hover-bridge {
-    left: 100%;
-    right: calc(100% - var(--home-row-card-hover-shift-x, 0px));
-  }
-
-  .home-row-cover-card[data-hover-edge="right"][data-hover-reveals-next="true"].group:hover > .home-row-card-hover-bridge {
-    left: calc(100% + var(--home-row-card-hover-shift-x, 0px));
-    right: 100%;
-  }
-
-  .home-row-cover-card:has(+ .home-row-cover-card[data-hover-edge="left"][data-hover-reveals-previous="true"].group:hover) {
-    transform: translate3d(var(--home-row-card-hover-preview-shift-x, 0px), 0, 0);
-  }
-
-  .home-row-cover-card[data-hover-edge="right"][data-hover-reveals-next="true"].group:hover + .home-row-cover-card {
-    transform: translate3d(var(--home-row-card-hover-preview-shift-x, 0px), 0, 0);
-  }
+.home-row-viewport:has(.home-row-cover-card[data-hover-edge="right"][data-hover-peeks-next="true"].group:hover) .carousel-edge-fade-right,
+.home-row-viewport:has(.home-row-cover-card[data-hover-edge="left"][data-hover-peeks-previous="true"].group:hover) .carousel-edge-fade-left {
+  opacity: 0.22;
 }
 
 .internal-poster-card.group:hover .home-cover-card-surface {
@@ -1149,4 +1128,111 @@ button:disabled {
   html {
     @apply font-sans;
   }
+}
+
+/*
+ * Admin Bunker707 (docs/17 §2.7). Tokens escopados ao admin para nao vazar para a area do aluno.
+ * Somente variaveis: as cores entram pelas classes dos componentes.
+ * `:root:has(...)` liga os tokens no documento inteiro enquanto a moldura do admin (que leva
+ * data-scope="admin") esta montada, entao popovers em portal (Tooltip, Sheet, DropdownMenu,
+ * Select) herdam os tokens sem repetir o atributo. `[data-scope="admin"]` mantem a moldura
+ * temada por conta propria. Ver src/components/admin/v2/styles.ts.
+ */
+:root:has([data-scope="admin"]),
+[data-scope="admin"] {
+  color-scheme: dark;
+
+  --surface-0: #0f0f10;
+  --surface-1: #161617;
+  --surface-2: #1c1c1e;
+  --surface-3: #232326;
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-stronger: rgba(255, 255, 255, 0.22);
+  --hover-overlay: rgba(255, 255, 255, 0.04);
+  --press-overlay: rgba(255, 255, 255, 0.07);
+  --text-primary: #f5f5f4;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
+  --text-disabled: #52525b;
+  --success: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.12);
+  --success-border: rgba(52, 211, 153, 0.3);
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.12);
+  --warning-border: rgba(251, 191, 36, 0.3);
+  --error: #f87171;
+  --error-bg: rgba(248, 113, 113, 0.12);
+  --error-border: rgba(248, 113, 113, 0.3);
+  --brand-red: #e50914;
+  --focus-ring: #f5f5f4;
+  --series-1: #e4e4e7;
+  --series-2: #a1a1aa;
+  --series-previous: #52525b;
+  --ease-admin: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Tokens semanticos do shadcn remapeados dentro do admin: primario claro, nunca vermelho. */
+  --background: var(--surface-0);
+  --foreground: var(--text-primary);
+  --card: var(--surface-1);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-3);
+  --popover-foreground: var(--text-primary);
+  --primary: #f5f5f4;
+  --primary-foreground: #0f0f10;
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--surface-2);
+  --accent-foreground: var(--text-primary);
+  --destructive: var(--error);
+  --border: var(--border-subtle);
+  --input: var(--border-strong);
+  --ring: rgba(245, 245, 244, 0.72);
+  --chart-1: var(--series-1);
+  --chart-2: var(--series-2);
+  --chart-3: var(--series-previous);
+  --chart-4: #71717a;
+  --chart-5: #3f3f46;
+  --radius: 0.5rem;
+}
+
+/*
+ * Botao do admin: o primitivo src/components/ui/button.tsx e temado uma unica vez aqui (prototipo
+ * aprovado, docs/17 rodada "Layout do prototipo"). 36 px de altura (e de largura minima, para os botoes
+ * de icone ficarem quadrados) e raio de 8 px; `size="sm"`/`size="icon-sm"` do primitivo (classes h-7 e
+ * size-7) ficam com 32 px; com ponteiro grosso (toque) ou abaixo de 768 px, 44 px e 40 px. Campos
+ * continuam com 40 px.
+ * Fora de @layer de proposito: vence os utilitarios de tamanho do proprio primitivo (h-8, size-8).
+ */
+:root:has([data-scope="admin"]) [data-slot="button"] {
+  height: 2.25rem;
+  min-width: 2.25rem;
+  border-radius: 0.5rem;
+}
+
+:root:has([data-scope="admin"]) [data-slot="button"]:is(.h-7, .size-7) {
+  height: 2rem;
+  min-width: 2rem;
+}
+
+@media (pointer: coarse), (max-width: 767px) {
+  :root:has([data-scope="admin"]) [data-slot="button"] {
+    height: 2.75rem;
+    min-width: 2.75rem;
+  }
+
+  :root:has([data-scope="admin"]) [data-slot="button"]:is(.h-7, .size-7) {
+    height: 2.5rem;
+    min-width: 2.5rem;
+  }
+}
+
+/* Foco visivel de 2 px em todo elemento interativo do admin, inclusive em portais. */
+:root:has([data-scope="admin"])
+  :is(a[href], button, input, select, textarea, summary, [role="button"], [role="combobox"], [role="tab"]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: none;
 }

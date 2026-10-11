@@ -11,17 +11,13 @@ import {
 } from "@/components/carousel-navigation";
 import { ContentDetailsModal } from "@/components/content-details-modal";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
-import {
-  ContinueWatchingCard,
-  HomeRowHoverBridge,
-  preventHomeRowHoverBridgeClick,
-  VerticalCoverCard
-} from "@/components/content-card";
+import { ContinueWatchingCard, VerticalCoverCard } from "@/components/content-card";
 import { savedItemChangedEvent } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import { getHomeRowHoverEdgeIndexes } from "@/lib/home-row-hover-layout";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import type { AccessPreviewMode } from "@/lib/access-preview";
+import { cssImageUrl } from "@/lib/css-url";
 import { getSavedItemKey, getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import type { ContentItem, ContentModalStructure, CourseModule, LockedContentActionMode } from "@/lib/platform-types";
 
@@ -55,6 +51,12 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 const homeRowCardHoverScale = 1.14;
+// Largura minima do vizinho escondido que deve ficar visivel quando o card da borda vem para frente.
+const homeRowNeighborPeekWidth = 56;
+
+function roundPx(value: number) {
+  return Math.round(value * 100) / 100;
+}
 
 function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
   if (!row) {
@@ -65,11 +67,11 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
 
   for (const card of cards) {
     card.removeAttribute("data-hover-edge");
-    card.removeAttribute("data-hover-reveals-next");
-    card.removeAttribute("data-hover-reveals-previous");
+    card.removeAttribute("data-hover-peeks-next");
+    card.removeAttribute("data-hover-peeks-previous");
     card.style.removeProperty("--home-row-card-hover-shift-x");
     card.style.removeProperty("--home-row-card-hover-logo-shift-x");
-    card.style.removeProperty("--home-row-card-hover-preview-shift-x");
+    card.style.removeProperty("--home-row-card-hover-neighbor-shift-x");
   }
 
   if (cards.length === 0) {
@@ -78,8 +80,10 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
 
   const rowRect = row.getBoundingClientRect();
   const rowStyle = window.getComputedStyle(row);
-  const leftBoundary = rowRect.left + (Number.parseFloat(rowStyle.paddingLeft) || 0);
-  const rightBoundary = rowRect.right - (Number.parseFloat(rowStyle.paddingRight) || 0);
+  const paddingLeft = Number.parseFloat(rowStyle.paddingLeft) || 0;
+  const paddingRight = Number.parseFloat(rowStyle.paddingRight) || 0;
+  const leftBoundary = rowRect.left + paddingLeft;
+  const rightBoundary = rowRect.right - paddingRight;
   const edgeTolerance = 2;
   const cardBounds = cards.map((card) => card.getBoundingClientRect());
   const { leftEdgeIndex, rightEdgeIndex } = getHomeRowHoverEdgeIndexes({
@@ -91,48 +95,47 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
   const leftEdgeCard = leftEdgeIndex === undefined ? undefined : cards[leftEdgeIndex];
   const rightEdgeCard = rightEdgeIndex === undefined ? undefined : cards[rightEdgeIndex];
 
-  if (leftEdgeCard) {
-    const leftEdgeRect = leftEdgeCard.getBoundingClientRect();
-    const leftHiddenOffset = Math.max(leftBoundary - leftEdgeRect.left, 0);
-    const leftEdgeIndex = cards.indexOf(leftEdgeCard);
-    const previousCard = leftEdgeIndex > 0 ? cards[leftEdgeIndex - 1] : undefined;
-    let leftSurfaceShiftX = leftHiddenOffset;
-
-    if (previousCard && leftHiddenOffset > edgeTolerance) {
-      const previousCardRect = previousCard.getBoundingClientRect();
-      const previewShiftX = Math.round((leftEdgeRect.left - previousCardRect.left) * 100) / 100;
-
-      leftSurfaceShiftX = previewShiftX;
-      leftEdgeCard.setAttribute("data-hover-reveals-previous", "true");
-      previousCard.style.setProperty("--home-row-card-hover-preview-shift-x", `${previewShiftX}px`);
-    }
+  if (leftEdgeCard && leftEdgeIndex !== undefined) {
+    const leftEdgeRect = cardBounds[leftEdgeIndex];
+    const previousCard = cards[leftEdgeIndex - 1];
+    const previousRect = cardBounds[leftEdgeIndex - 1];
+    // Desloca o suficiente para descobrir a parte cortada e, se houver vizinho escondido,
+    // um pouco mais para que um pedaco dele continue visivel no padding da fileira.
+    const hiddenOffset = Math.max(leftBoundary - leftEdgeRect.left, 0);
+    const neighborPeekOffset = previousRect
+      ? Math.max(homeRowNeighborPeekWidth - (paddingLeft - (leftEdgeRect.left - previousRect.right)), 0)
+      : 0;
+    const leftSurfaceShiftX = roundPx(hiddenOffset + neighborPeekOffset);
 
     leftEdgeCard.setAttribute("data-hover-edge", "left");
     leftEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${leftSurfaceShiftX}px`);
     leftEdgeCard.style.setProperty("--home-row-card-hover-logo-shift-x", `${leftSurfaceShiftX}px`);
+
+    if (previousCard) {
+      leftEdgeCard.setAttribute("data-hover-peeks-previous", "true");
+      previousCard.style.setProperty("--home-row-card-hover-neighbor-shift-x", `${leftSurfaceShiftX}px`);
+    }
   }
 
-  if (rightEdgeCard && rightEdgeCard !== leftEdgeCard) {
-    const rightEdgeRect = rightEdgeCard.getBoundingClientRect();
-    const rightHiddenOffset = Math.max(rightEdgeRect.right - rightBoundary, 0);
-    const rightEdgeIndex = cards.indexOf(rightEdgeCard);
-    const nextCard = rightEdgeIndex >= 0 ? cards[rightEdgeIndex + 1] : undefined;
-    let rightSurfaceShiftX = -rightHiddenOffset;
-
-    if (nextCard && rightHiddenOffset > edgeTolerance) {
-      const nextCardRect = nextCard.getBoundingClientRect();
-      const previewShiftX = Math.round((rightEdgeRect.left - nextCardRect.left) * 100) / 100;
-
-      rightSurfaceShiftX = previewShiftX;
-      rightEdgeCard.setAttribute("data-hover-reveals-next", "true");
-      nextCard.style.setProperty("--home-row-card-hover-preview-shift-x", `${previewShiftX}px`);
-    }
-
-    const rightLogoShiftX = Math.round((rightSurfaceShiftX - rightEdgeRect.width * (homeRowCardHoverScale - 1)) * 100) / 100;
+  if (rightEdgeCard && rightEdgeIndex !== undefined && rightEdgeCard !== leftEdgeCard) {
+    const rightEdgeRect = cardBounds[rightEdgeIndex];
+    const nextCard = cards[rightEdgeIndex + 1];
+    const nextRect = cardBounds[rightEdgeIndex + 1];
+    const hiddenOffset = Math.max(rightEdgeRect.right - rightBoundary, 0);
+    const neighborPeekOffset = nextRect
+      ? Math.max(homeRowNeighborPeekWidth - (paddingRight - (nextRect.left - rightEdgeRect.right)), 0)
+      : 0;
+    const rightSurfaceShiftX = roundPx(-(hiddenOffset + neighborPeekOffset));
+    const rightLogoShiftX = roundPx(rightSurfaceShiftX - rightEdgeRect.width * (homeRowCardHoverScale - 1));
 
     rightEdgeCard.setAttribute("data-hover-edge", "right");
     rightEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${rightSurfaceShiftX}px`);
     rightEdgeCard.style.setProperty("--home-row-card-hover-logo-shift-x", `${rightLogoShiftX}px`);
+
+    if (nextCard) {
+      rightEdgeCard.setAttribute("data-hover-peeks-next", "true");
+      nextCard.style.setProperty("--home-row-card-hover-neighbor-shift-x", `${rightSurfaceShiftX}px`);
+    }
   }
 }
 
@@ -159,7 +162,7 @@ function CourseModuleHomeCard({
         <div className="relative h-full w-full">
           <div
             className={`home-cover-card-image absolute inset-0 bg-cover bg-center ${imageStateClass}`}
-            style={{ backgroundImage: `url(${module.image})` }}
+            style={{ backgroundImage: cssImageUrl(module.image) }}
           />
           {isLocked ? (
             <div className="absolute right-2 top-2 z-30 grid h-7 w-7 place-items-center rounded-full bg-black/65 text-white shadow-[0_8px_20px_rgba(0,0,0,0.45)] ring-1 ring-white/10 backdrop-blur-[2px] sm:right-2.5 sm:top-2.5 sm:h-8 sm:w-8 md:h-9 md:w-9">
@@ -183,11 +186,10 @@ function CourseModuleHomeCard({
           </div>
         </div>
       </div>
-      <HomeRowHoverBridge />
     </>
   );
   const className =
-    `home-cover-card home-row-cover-card group relative aspect-[720/1040] w-[10.25rem] shrink-0 overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[12.25rem] md:w-[14.25rem] lg:w-[16.25rem] xl:w-[17.5rem] ${
+    `home-cover-card home-row-cover-card group relative aspect-[2/3] w-[8.75rem] shrink-0 overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[10.5rem] md:w-[12rem] lg:w-[13rem] xl:w-[14rem] ${
       isLocked ? "cursor-not-allowed" : "cursor-pointer"
     }`;
 
@@ -198,7 +200,6 @@ function CourseModuleHomeCard({
         className={className}
         data-home-row-card
         onClick={onOpenCourseDetails}
-        onClickCapture={preventHomeRowHoverBridgeClick}
         type="button"
       >
         {content}
@@ -212,7 +213,6 @@ function CourseModuleHomeCard({
       className={className}
       data-home-row-card
       href={href}
-      onClickCapture={preventHomeRowHoverBridgeClick}
       prefetch
     >
       {content}
@@ -359,7 +359,7 @@ export function CourseModulesHomeSection({
         <div className="flex min-w-0 items-center gap-4">
           <button
             aria-label={`${actionLabel} ${title}`}
-            className="group/course relative aspect-[720/1040] w-16 shrink-0 overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/35 outline-none transition duration-500 ease-out hover:-translate-y-0.5 hover:scale-[1.035] hover:shadow-[0_20px_60px_rgba(0,0,0,0.62)] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-20 lg:w-24"
+            className="group/course relative aspect-[2/3] w-16 shrink-0 overflow-hidden rounded-[8px] bg-[#181818] shadow-2xl shadow-black/35 outline-none transition duration-500 ease-out hover:-translate-y-0.5 hover:scale-[1.035] hover:shadow-[0_20px_60px_rgba(0,0,0,0.62)] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-20 lg:w-24"
             onClick={openCourseAction}
             onFocus={prefetchCourseAction}
             onMouseEnter={prefetchCourseAction}
@@ -369,7 +369,7 @@ export function CourseModulesHomeSection({
               className={`absolute inset-0 bg-cover bg-center transition duration-700 group-hover/course:scale-[1.035] ${
                 course.isLocked ? "grayscale saturate-0 contrast-110 brightness-75 group-hover/course:grayscale-0 group-hover/course:saturate-100 group-hover/course:contrast-100 group-hover/course:brightness-100" : ""
               }`}
-              style={{ backgroundImage: `url(${course.image})` }}
+              style={{ backgroundImage: cssImageUrl(course.image) }}
             />
             <div className="absolute inset-0 bg-black/0 transition duration-300 group-hover/course:bg-black/18" />
             {isCourseLocked ? (
@@ -409,7 +409,7 @@ export function CourseModulesHomeSection({
           />
         ) : null}
       </div>
-      <div className="relative">
+      <div className="home-row-viewport relative">
         <div
           className="scrollbar-hidden -my-4 flex scroll-smooth gap-[1.5rem] overflow-x-auto overflow-y-visible overscroll-x-contain px-5 py-4 sm:-my-14 sm:px-8 sm:py-14 lg:px-12"
           ref={rowRef}
@@ -574,7 +574,7 @@ export function ContentRow({ accessPreviewMode, title, subtitle, items, modalStr
           />
         ) : null}
       </div>
-      <div className="relative">
+      <div className="home-row-viewport relative">
         <div
           className={`scrollbar-hidden flex scroll-smooth ${rowGap} overflow-x-auto overflow-y-visible overscroll-x-contain px-5 sm:px-8 lg:px-12 ${scrollPadding}`}
           ref={rowRef}

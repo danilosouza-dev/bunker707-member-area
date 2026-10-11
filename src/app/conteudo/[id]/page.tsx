@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import {
@@ -12,6 +13,7 @@ import { AppShell } from "@/components/app-shell";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode, withAccessPreviewParam } from "@/lib/access-preview";
+import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import {
   getAppShellData,
   getContentPageData
@@ -202,6 +204,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
   return (
     <AppShell
       accessPreviewMode={accessPreviewMode}
+      branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
@@ -218,12 +221,18 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
               poster={pageHero.poster}
               src={pageHero.mediaSrc}
             />
-          ) : (
-            <div
-              className="absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: `url(${pageHero.mediaSrc})` }}
+          ) : pageHero.mediaSrc ? (
+            <Image
+              alt=""
+              className="object-cover object-center"
+              fetchPriority="high"
+              fill
+              preload
+              sizes="100vw"
+              src={pageHero.mediaSrc}
+              unoptimized={!canOptimizeImageSrc(pageHero.mediaSrc)}
             />
-          )}
+          ) : null}
           {hasVisibleHeroContent ? (
             <div className="absolute inset-0 bg-gradient-to-r from-black via-black/72 to-black/18" />
           ) : null}
@@ -297,7 +306,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
           />
         </div>
       </div>
-      <MemberFooter />
+      <MemberFooter branding={shellData.branding} />
     </AppShell>
   );
 }

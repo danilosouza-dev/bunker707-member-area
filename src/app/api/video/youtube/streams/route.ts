@@ -3,6 +3,10 @@ import { requireLessonAccess } from "@/server/access/lesson-access";
 import { requireApiUser } from "@/server/auth/guards";
 import { jsonRouteError } from "@/server/http/route-errors";
 import {
+  isYouTubeUnofficialStreamsEnabled,
+  youTubeUnofficialStreamsDisabledCode
+} from "@/server/video/feature-flags";
+import {
   fetchYouTubeStreams,
   isValidPlatformResourceId,
   isValidYouTubeVideoId
@@ -66,6 +70,11 @@ function getStoredYouTubeVideoId(videoConfig: {
 }
 
 export async function GET(request: Request) {
+  // Flag desligada: a rota se comporta como inexistente, sem sessao, banco ou YouTube.
+  if (!isYouTubeUnofficialStreamsEnabled()) {
+    return jsonResponse({ error: youTubeUnofficialStreamsDisabledCode }, 404);
+  }
+
   const auth = await requireApiUser();
 
   if (auth.response || !auth.user) {

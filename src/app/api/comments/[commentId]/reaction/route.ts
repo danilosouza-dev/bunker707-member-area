@@ -4,6 +4,7 @@ import { requireApiUser } from "@/server/auth/guards";
 import {
   setLessonCommentReaction
 } from "@/server/comments/comment-store";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type CommentReactionRouteContext = {
@@ -18,7 +19,14 @@ export async function PUT(request: Request, context: CommentReactionRouteContext
   }
 
   const { commentId } = await context.params;
-  const payload = await request.json() as { reaction?: unknown };
+  let payload: { reaction?: unknown };
+
+  try {
+    payload = await readBoundedJson<{ reaction?: unknown }>(request, 16_000);
+  } catch (error) {
+    return jsonRouteError(error, "Reacao invalida.", 400);
+  }
+
   const reaction = payload.reaction === null
     ? null
     : typeof payload.reaction === "string"

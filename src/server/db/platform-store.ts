@@ -10,6 +10,13 @@ import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedItemKey, getSavedTargetTypeForContentKind, savedItemCollectionLabel } from "@/lib/saved-items";
 import { getAdminModerationData } from "@/server/comments/comment-store";
+import {
+  canOpenProductPage,
+  itemsVisibleTo,
+  onlyListedItems
+} from "@/server/catalog/storefront-listing";
+import { INVALID_SUPABASE_KEY_MESSAGE, isInvalidSupabaseKeyError } from "@/server/db/supabase-key-error";
+import { updatePlatformSettingLatest, writePlatformSettingGuarded } from "@/server/member-area/settings-store";
 import type {
   AdminAIAgent,
   AdminBlockedWordRule,
@@ -41,6 +48,7 @@ import type {
   LessonWatchStatus,
   LockedContentActionMode,
   HomeRow,
+  PlatformBrandingConfig,
   PurchaseTarget,
   ReleaseRuleConfig,
   RowVisibility,
@@ -86,6 +94,7 @@ type PlatformDatabase = {
   aiAgents: AdminAIAgent[];
   blockedWordRules: AdminBlockedWordRule[];
   bootcamps: ContentItem[];
+  branding: PlatformBrandingConfig;
   chartPoints: AdminDashboardData["chartPoints"];
   cohorts: string[];
   combos: AdminProductCombo[];
@@ -99,6 +108,12 @@ type PlatformDatabase = {
   hero: HomeHeroConfig;
   homeSectionConfigs: HomeSectionConfig[];
   homeSectionsConfigured: boolean;
+  /**
+   * Versao (coluna updated_at) da chave homeSections quando esta leitura foi feita; null = nunca
+   * publicada. A Vitrine do admin antigo manda de volta ao publicar, para nao apagar uma fileira que a
+   * Vitrine nova ou a tela Modulos gravou depois que ela abriu (409 em vez de perda silenciosa).
+   */
+  homeSectionsUpdatedAt: string | null;
   integrations: AdminIntegrationSetting[];
   lessonProgress: LessonProgressRecord[];
   metrics: AdminDashboardData["metrics"];
@@ -139,6 +154,8 @@ type ContentItemRow = {
   kind: ContentKind;
   lessons_label: string | null;
   level_label: string | null;
+  /** Coluna do admin v2 (migracao 202610110010); so leitura aqui: contentItemToRow nunca a grava. */
+  listing?: "listed" | "hidden" | null;
   max_students: number | null;
   progress: number;
   publication_status: ContentPublicationStatus;
@@ -348,7 +365,18 @@ export type ProductComboWriteInput = {
   status?: AdminProductCombo["status"];
 };
 
+export type PlatformAppearanceInput = {
+  hero?: {
+    enabled: boolean;
+    image?: string;
+  };
+  logo?: {
+    image: string | null;
+  };
+};
+
 const defaultHero: HomeHeroConfig = {
+  enabled: true,
   image: "/hero/bunker-707-red-front-hero.png",
   mediaType: "image",
   purpose: "school-brand",
@@ -358,6 +386,25 @@ const defaultHero: HomeHeroConfig = {
     title: false
   }
 };
+const defaultLogoImage = "/brand/logo-bunker.svg";
+const defaultBranding: PlatformBrandingConfig = {
+  logoImage: defaultLogoImage
+};
+
+function normalizePlatformBranding(value: unknown): PlatformBrandingConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return defaultBranding;
+  }
+
+  const branding = value as Partial<PlatformBrandingConfig>;
+
+  if (branding.logoImage === null) {
+    return { logoImage: null };
+  }
+
+  const logoImage = typeof branding.logoImage === "string" ? branding.logoImage.trim() : "";
+  return { logoImage: logoImage || defaultLogoImage };
+}
 const defaultStudent: PlatformStudent = {
   fullName: "Aluno Bunker707",
   name: "Aluno"
@@ -480,6 +527,7 @@ function contentRowToItem(row: ContentItemRow): ContentItem {
     kind: row.kind,
     lessons: row.lessons_label ?? undefined,
     level: row.level_label ?? undefined,
+    ...(row.listing === "hidden" ? { listing: "hidden" as const } : {}),
     maxStudents: row.max_students,
     progress: row.progress,
     publicationStatus: row.publication_status ?? "published",
@@ -725,6 +773,7 @@ function settingsRows(database: PlatformDatabase) {
   return [
     { key: "aiAgents", value: database.aiAgents },
     { key: "blockedWordRules", value: database.blockedWordRules },
+    { key: "branding", value: database.branding },
     { key: "hero", value: database.hero },
     { key: "homeSections", value: database.homeSectionConfigs },
     { key: "integrations", value: database.integrations },
@@ -894,6 +943,10 @@ async function throwIfSupabaseError(error: unknown, context: string) {
     return;
   }
 
+  if (isInvalidSupabaseKeyError(error)) {
+    throw new Error(`${context}. ${INVALID_SUPABASE_KEY_MESSAGE}`);
+  }
+
   const message = getSupabaseErrorMessage(error);
   throw new Error(`${context}. Confirme se a migration Supabase foi aplicada. Detalhe: ${message}`);
 }
@@ -911,6 +964,15 @@ async function upsertRows(
 
   const { error } = await supabase.from(table).upsert(rows, { onConflict });
   await throwIfSupabaseError(error, context);
+}
+
+/**
+ * platform_settings nao tem gatilho de updated_at. Toda gravacao de chave carimba a coluna para a
+ * checagem de versao da Area de membros (src/server/member-area/settings-store.ts) perceber quando o
+ * admin antigo, a Vitrine ou a Marca mudaram a mesma chave depois que outra tela a leu.
+ */
+function stampPlatformSettingRows(rows: Array<{ key: string; value: unknown }>, now = new Date().toISOString()) {
+  return rows.map((row) => ({ ...row, updated_at: now }));
 }
 
 async function deleteMissingRows(
@@ -975,16 +1037,17 @@ async function readSupabaseDatabase({
       .select("*")
       .eq("publication_status", "published")
       .order("sort_order", { ascending: true });
+  // Admin le rascunhos, mas nunca o que foi excluido com "Desfazer" no admin v2 (status 'deleted').
   const modulesQuery = includeAdminData
-    ? supabase.from("course_modules").select("*").order("sort_order", { ascending: true })
+    ? supabase.from("course_modules").select("*").neq("status", "deleted").order("sort_order", { ascending: true })
     : supabase.from("course_modules").select("*").eq("status", "published").order("sort_order", { ascending: true });
   const lessonsQuery = includeAdminData
-    ? supabase.from("lessons").select("*").order("sort_order", { ascending: true })
+    ? supabase.from("lessons").select("*").neq("status", "deleted").order("sort_order", { ascending: true })
     : supabase.from("lessons").select("*").eq("status", "published").order("sort_order", { ascending: true });
   const studentsQuery = includeAdminData
     ? supabase.from("students").select("*").order("created_at", { ascending: true })
     : userEmail
-      ? supabase.from("students").select("*").ilike("email", userEmail).limit(1)
+      ? supabase.from("students").select("*").ilike("email", userEmail.replace(/[\\%_]/g, "\\$&")).limit(1)
       : userId
         ? supabase.from("students").select("*").eq("id", userId).limit(1)
         : emptySupabaseResult();
@@ -1063,7 +1126,7 @@ async function readSupabaseDatabase({
     [accessLogsResult, "Erro lendo student_access_logs"],
     [progressResult, "Erro lendo lesson_progress"],
     [savedItemsResult, "Erro lendo saved_items"],
-    [accessEntitlementsResult, "Erro lendo entitlements"],
+    [accessEntitlementsResult, "Erro lendo acessos"],
     [settingsResult, "Erro lendo platform_settings"]
   ] as const) {
     await throwIfSupabaseError(result.error, context);
@@ -1084,9 +1147,9 @@ async function readSupabaseDatabase({
 
   const contentRows = (contentItemsResult.data ?? []) as ContentItemRow[];
   const lessonRows = (lessonsResult.data ?? []) as LessonRow[];
-  const settingsMap = new Map(
-    ((settingsResult.data ?? []) as Array<{ key: string; value: unknown }>).map((setting) => [setting.key, setting.value])
-  );
+  const settingsRowsRead = (settingsResult.data ?? []) as Array<{ key: string; updated_at?: string | null; value: unknown }>;
+  const settingsMap = new Map(settingsRowsRead.map((setting) => [setting.key, setting.value]));
+  const homeSectionsUpdatedAt = settingsRowsRead.find((setting) => setting.key === "homeSections")?.updated_at ?? null;
   const lessonProgressExtras = normalizeLessonProgressExtras(settingsMap.get("lessonProgressExtras"));
   const contentPageSettingsMap = Object.fromEntries(
     ((contentSettingsResult.data ?? []) as Array<{ content_id: string; settings: ContentPageSettings }>).map((setting) => [
@@ -1117,6 +1180,10 @@ async function readSupabaseDatabase({
     aiAgents: (settingsMap.get("aiAgents") as PlatformDatabase["aiAgents"] | undefined) ?? [],
     blockedWordRules: (settingsMap.get("blockedWordRules") as PlatformDatabase["blockedWordRules"] | undefined) ?? [],
     bootcamps: itemsByBucket("bootcamps"),
+    branding: settingsMap.has("branding") ? normalizePlatformBranding(settingsMap.get("branding")) : defaultBranding,
+    // Legado decorativo: chartPoints, entitlements, metrics, pipeline, releaseRules e webhookEvents
+    // vêm do JSON semeado em platform_settings, não de tabelas. O overview deixou de exibi-los;
+    // serão removidos na fase 3 com os demais JSONs decorativos (docs/17 §2.4). Ficam só para tipar o legado.
     chartPoints: (settingsMap.get("chartPoints") as PlatformDatabase["chartPoints"] | undefined) ?? [],
     cohorts: ((cohortsResult.data ?? []) as Array<{ name: string }>).map((cohort) => cohort.name),
     combos: productComboTablesAvailable
@@ -1135,6 +1202,7 @@ async function readSupabaseDatabase({
     hero: (settingsMap.get("hero") as HomeHeroConfig | undefined) ?? defaultHero,
     homeSectionConfigs: normalizeHomeSectionConfigs(settingsMap.get("homeSections")),
     homeSectionsConfigured: settingsMap.has("homeSections"),
+    homeSectionsUpdatedAt,
     integrations: (settingsMap.get("integrations") as PlatformDatabase["integrations"] | undefined) ?? [],
     lessonProgress: ((progressResult.data ?? []) as LessonProgressRow[]).map((row) => {
       const extras = lessonProgressExtras.get(getLessonProgressExtrasKey(row.user_id, row.content_id));
@@ -1211,10 +1279,6 @@ function getUserIdentity(user?: AuthenticatedUser | string) {
     email: user.email?.trim().toLowerCase(),
     userId: user.id
   };
-}
-
-function hasAccess(item: ContentItem) {
-  return !item.isLocked;
 }
 
 function parseAccessDateValue(value?: string | null) {
@@ -1338,11 +1402,7 @@ function hasPurchaseAccess(
     return false;
   }
 
-  if (hasUserEntitlementForItem(item, userAccessKeys)) {
-    return true;
-  }
-
-  return hasAccess(item);
+  return hasUserEntitlementForItem(item, userAccessKeys);
 }
 
 function applyAccessPreviewToItem(
@@ -1516,7 +1576,8 @@ function getProductsAvailableForSale(
   accessPreviewMode?: AccessPreviewMode,
   userAccessKeys = new Set<string>()
 ) {
-  return getSellableItems(database)
+  // "Oculto por enquanto" nunca e oferecido para compra (itemsAvailableForSale em storefront-listing.ts).
+  return onlyListedItems(getSellableItems(database))
     .filter((item) => !hasPurchaseAccess(item, accessPreviewMode, userAccessKeys))
     .map((item) => applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys));
 }
@@ -1548,7 +1609,7 @@ function getHomeCourseModuleRows(
   userAccessKeys: Set<string>,
   savedItems: Set<string>
 ): HomeRow[] {
-  return getSellableItems(database).flatMap((item) => {
+  return onlyListedItems(getSellableItems(database)).flatMap((item) => {
     const settings = database.contentPageSettings[item.id];
 
     if (!settings?.homeModuleSection?.enabled || !supportsCoursePresentationMode(item.kind)) {
@@ -1786,6 +1847,8 @@ function resolveConfiguredHomeRows(
   ];
   const sellableItems = getSellableItems(database);
   const sellableById = new Map(sellableItems.map((item) => [item.id, item]));
+  // "Oculto por enquanto": fora da vitrine; em listas com curadoria, so para quem tem acesso.
+  const canSeeHidden = (item: ContentItem) => hasPurchaseAccess(item, accessPreviewMode, userAccessKeys);
 
   return normalizeHomeSectionOrder(sections).flatMap<HomeRow>((section) => {
     if (!section.isActive) {
@@ -1803,7 +1866,7 @@ function resolveConfiguredHomeRows(
     if (section.sectionType === "content_structure") {
       const source = section.sourceContentId ? sellableById.get(section.sourceContentId) : undefined;
 
-      if (!source) {
+      if (!source || itemsVisibleTo([source], canSeeHidden).length === 0) {
         return [];
       }
 
@@ -1818,7 +1881,10 @@ function resolveConfiguredHomeRows(
       const structureItems = course.kind === "Formacao"
         ? applySavedStateToItems(
           applyAccessPreviewToItems(
-            database.formationInternalCourses.filter((item) => item.parentContentId === course.id),
+            itemsVisibleTo(
+              database.formationInternalCourses.filter((item) => item.parentContentId === course.id),
+              canSeeHidden
+            ),
             accessPreviewMode,
             userAccessKeys
           ),
@@ -1856,12 +1922,15 @@ function resolveConfiguredHomeRows(
     } else if (section.contentSource === "entitlement_products") {
       items = getPurchasedProducts(database, accessPreviewMode, userAccessKeys);
     } else if (section.contentSource === "upcoming_products") {
-      items = applyAccessPreviewToItems(database.upcomingProducts, accessPreviewMode, userAccessKeys);
+      items = applyAccessPreviewToItems(onlyListedItems(database.upcomingProducts), accessPreviewMode, userAccessKeys);
     } else if (section.contentSource === "manual") {
-      items = section.itemIds.flatMap((itemId) => {
-        const item = sellableById.get(itemId);
-        return item ? [applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys)] : [];
-      });
+      items = itemsVisibleTo(
+        section.itemIds.flatMap((itemId) => {
+          const item = sellableById.get(itemId);
+          return item ? [item] : [];
+        }),
+        canSeeHidden
+      ).map((item) => applyAccessPreviewToItem(item, accessPreviewMode, userAccessKeys));
     } else {
       items = getProductsAvailableForSale(database, accessPreviewMode, userAccessKeys);
     }
@@ -1898,7 +1967,10 @@ function getHomeModalStructures(
         formationCourses: item.kind === "Formacao"
           ? applySavedStateToItems(
             applyAccessPreviewToItems(
-              database.formationInternalCourses.filter((course) => course.parentContentId === item.id),
+              itemsVisibleTo(
+                database.formationInternalCourses.filter((course) => course.parentContentId === item.id),
+                (course) => hasPurchaseAccess(course, accessPreviewMode, userAccessKeys)
+              ),
               accessPreviewMode,
               userAccessKeys
             ),
@@ -1945,7 +2017,7 @@ function getReleaseSummary(item: ContentItem) {
   }
 
   if (item.isLocked) {
-    return "Bloqueado sem entitlement";
+    return "Bloqueado até ganhar acesso";
   }
 
   if (item.kind === "Formacao") {
@@ -2072,7 +2144,7 @@ function getAdminRecords(database: PlatformDatabase) {
     pageSettings: database.contentPageSettings[content.id],
     releaseSummary: getReleaseSummary(content),
     status: content.status,
-    updatedAt: database.updatedAt ? "Persistido agora" : "Sem data",
+    updatedAt: database.updatedAt ?? "",
     visibility: getVisibility(content)
   }));
 }
@@ -2126,7 +2198,7 @@ function getAdminHomeSections(database: PlatformDatabase) {
         section.contentSource === "recent_lessons"
           ? "Progresso do aluno"
           : section.contentSource === "entitlement_products"
-            ? "Entitlements ativos"
+            ? "Acessos ativos"
             : section.contentSource === "selected_content_structure"
               ? "Estrutura de conteudo"
               : section.contentSource === "manual"
@@ -2153,6 +2225,7 @@ function toAdminDashboardData(
   return {
     aiAgents: database.aiAgents,
     blockedWordRules: database.blockedWordRules,
+    branding: database.branding,
     chartPoints: database.chartPoints,
     cohorts: getEffectiveCohorts(database),
     combos: database.combos,
@@ -2162,6 +2235,7 @@ function toAdminDashboardData(
     formationCourses: database.formationInternalCourses,
     hero: database.hero,
     homeSectionConfigs: getPublishedHomeSectionConfigs(database),
+    homeSectionsUpdatedAt: database.homeSectionsUpdatedAt,
     homeRows,
     homeSections: getAdminHomeSections(database),
     integrations: database.integrations,
@@ -2416,7 +2490,16 @@ function applyLessonProgress(database: PlatformDatabase, contentId: string, modu
   const hasWatchProgress = Object.keys(lessonWatchStates).length > 0;
 
   if (completedLessonIds.size === 0 && !hasWatchProgress) {
-    return modules;
+    if (!userId) {
+      return modules;
+    }
+
+    // Sem registro proprio de progresso, o estado global lessons.completed/progress nao pode vazar para o aluno.
+    return modules.map((module) => ({
+      ...module,
+      lessons: module.lessons.map((lesson) => ({ ...lesson, completed: false })),
+      progress: 0
+    }));
   }
 
   return modules.map((module) => {
@@ -2449,6 +2532,7 @@ export async function getAppShellData(user?: AuthenticatedUser) {
   const adminRole = user ? await getAdminRoleForUser(user.id) : null;
 
   return {
+    branding: database.branding,
     canUseAccessPreview: Boolean(adminRole),
     student: getStudentForUser(database, user)
   };
@@ -2514,7 +2598,8 @@ export async function getContentPageData(
   const savedItems = getSavedItemSet(database, userId);
   const userAccessKeys = getUserAccessKeys(database, user);
 
-  if (!item) {
+  // "Oculto por enquanto" sem acesso responde como inexistente.
+  if (!item || !canOpenProductPage(item, hasPurchaseAccess(item, accessPreviewMode, userAccessKeys))) {
     return null;
   }
 
@@ -2526,9 +2611,12 @@ export async function getContentPageData(
     courseModules: applySavedStateToModules(applyLessonProgress(database, contentId, getModulesForContent(database, item), userId), savedItems),
     formationInternalCourses: applySavedStateToItems(
       applyAccessPreviewToItems(
-        item.kind === "Formacao"
-          ? database.formationInternalCourses.filter((course) => course.parentContentId === item.id)
-          : database.formationInternalCourses,
+        itemsVisibleTo(
+          item.kind === "Formacao"
+            ? database.formationInternalCourses.filter((course) => course.parentContentId === item.id)
+            : database.formationInternalCourses,
+          (course) => hasPurchaseAccess(course, accessPreviewMode, userAccessKeys)
+        ),
         accessPreviewMode,
         userAccessKeys
       ),
@@ -2647,23 +2735,155 @@ function validateHomeSectionConfigs(configs: HomeSectionConfig[], database: Plat
   })));
 }
 
-export async function publishHomeSections(configs: HomeSectionConfig[]) {
+export type PublishHomeSectionsOptions = {
+  /**
+   * Versao (updated_at) da chave homeSections que a tela leu; null = nunca publicada. Com ela a
+   * gravacao e condicional no proprio UPDATE (writePlatformSettingGuarded): se a tela Modulos, a outra
+   * Vitrine ou outra pessoa gravou depois da leitura (inclusive enquanto o banco inteiro e lido aqui
+   * em cima), responde 409 sem gravar. Sem ela (chamada antiga), grava sem conferir.
+   */
+  expectedUpdatedAt?: string | null;
+};
+
+export async function publishHomeSections(configs: HomeSectionConfig[], options: PublishHomeSectionsOptions = {}) {
   const database = await readAdminDatabase();
   const normalized = validateHomeSectionConfigs(configs, database);
+  const supabase = getSupabaseAdminClient();
+  const now = new Date();
+  const stamp = now.toISOString();
+  let sectionsUpdatedAt = stamp;
+
+  if (options.expectedUpdatedAt !== undefined) {
+    sectionsUpdatedAt = (await writePlatformSettingGuarded("homeSections", normalized, options.expectedUpdatedAt, now)).updatedAt;
+  } else {
+    await upsertRows(
+      supabase,
+      "platform_settings",
+      stampPlatformSettingRows([{ key: "homeSections", value: normalized }], stamp),
+      "key",
+      "Erro publicando secoes da Home"
+    );
+  }
 
   database.homeSectionConfigs = normalized;
   database.homeSectionsConfigured = true;
-  database.updatedAt = new Date().toISOString();
+  database.updatedAt = stamp;
+  // A versao exata desta gravacao: a tela manda de volta no proximo Publicar.
+  database.homeSectionsUpdatedAt = sectionsUpdatedAt;
 
+  try {
+    await upsertRows(
+      supabase,
+      "platform_settings",
+      stampPlatformSettingRows([{ key: "updatedAt", value: database.updatedAt }], stamp),
+      "key",
+      "Erro publicando secoes da Home"
+    );
+  } catch (error) {
+    // Carimbo geral do legado: as fileiras ja estao gravadas, que e o que o aluno ve.
+    console.error("[vitrine] carimbo updatedAt", error);
+  }
+
+  return toHydratedAdminDashboardData(database);
+}
+
+async function persistAppearanceImage(value: string, ownerPath: string, context: string) {
+  const persisted = (await persistImageAsset(value, ownerPath)).trim();
+  const isHttpUrl = /^https?:\/\//i.test(persisted);
+  const isLocalPath = persisted.startsWith("/") && !persisted.startsWith("//");
+
+  if (
+    !persisted ||
+    persisted.length > 2048 ||
+    /[\s"'()<>\\]/.test(persisted) ||
+    (!isHttpUrl && !isLocalPath)
+  ) {
+    throw createAdminMutationError(`${context} precisa ser um upload valido ou uma URL http(s).`, 400);
+  }
+
+  return persisted;
+}
+
+/**
+ * Aparencia do admin antigo sobre o destaque gravado AGORA: so liga/desliga e troca imagem e tipo de
+ * midia. O resto (textos, botao, capa do video, chaves que o legado nao conhece) fica como esta.
+ */
+function applyAppearanceToHero(stored: unknown, input: { enabled: boolean; image: string | null }): HomeHeroConfig {
+  const current = stored && typeof stored === "object" && !Array.isArray(stored) ? (stored as HomeHeroConfig) : defaultHero;
+
+  if (!input.enabled) {
+    return { ...current, enabled: false };
+  }
+
+  const image = input.image ?? current.image;
+
+  if (!image) {
+    throw createAdminMutationError("Envie uma imagem ou informe uma URL para a capa da home.", 400);
+  }
+
+  return {
+    ...current,
+    enabled: true,
+    image,
+    mediaType: input.image ? (/\.(mp4|webm|mov)(\?|#|$)/i.test(image) ? "video" : "image") : current.mediaType
+  };
+}
+
+export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
+  if (input.hero === undefined && input.logo === undefined) {
+    throw createAdminMutationError("Nenhuma alteracao de aparencia informada.", 400);
+  }
+
+  if (input.logo !== undefined && input.logo.image !== null && !input.logo.image.trim()) {
+    throw createAdminMutationError("Envie uma imagem ou informe uma URL para a logo.", 400);
+  }
+
+  const database = await readAdminDatabase();
+  const settingsKeys: string[] = [];
+
+  if (input.hero !== undefined) {
+    const enabled = input.hero.enabled;
+    const providedImage = enabled ? input.hero.image?.trim() : undefined;
+    // O envio da imagem leva segundos. So depois dele o destaque e relido e gravado com a versao lida
+    // (updatePlatformSettingLatest): o que a tela Destaque publicar nesse meio-tempo nao se perde.
+    const uploadedImage = providedImage
+      ? await persistAppearanceImage(providedImage, "platform/home-hero", "A capa da home")
+      : null;
+    const saved = await updatePlatformSettingLatest("hero", (current) =>
+      applyAppearanceToHero(current.exists ? current.value : null, { enabled, image: uploadedImage })
+    );
+
+    database.hero = saved.value;
+  }
+
+  if (input.logo !== undefined) {
+    if (input.logo.image === null) {
+      database.branding = { logoImage: null };
+    } else {
+      const providedLogo = input.logo.image.trim();
+
+      if (!providedLogo) {
+        throw createAdminMutationError("Envie uma imagem ou informe uma URL para a logo.", 400);
+      }
+
+      database.branding = {
+        logoImage: await persistAppearanceImage(providedLogo, "platform/logo", "A logo da plataforma")
+      };
+    }
+
+    settingsKeys.push("branding");
+  }
+
+  database.updatedAt = new Date().toISOString();
+  settingsKeys.push("updatedAt");
+
+  const wantedKeys = new Set(settingsKeys);
   await upsertRows(
     getSupabaseAdminClient(),
     "platform_settings",
-    [
-      { key: "homeSections", value: normalized },
-      { key: "updatedAt", value: database.updatedAt }
-    ],
+    stampPlatformSettingRows(settingsRows(database).filter((row) => wantedKeys.has(row.key)), database.updatedAt),
     "key",
-    "Erro publicando secoes da Home"
+    "Erro salvando aparencia da plataforma"
   );
 
   return toHydratedAdminDashboardData(database);
@@ -2775,7 +2995,7 @@ async function revokeStaleSupabaseEntitlementsForStudents(
       .eq("user_id", userId)
       .in("source_event_id", sourceEventIds);
 
-    await throwIfSupabaseError(error, "Erro revogando entitlements removidos do aluno");
+    await throwIfSupabaseError(error, "Erro revogando acessos removidos do aluno");
   }
 }
 
@@ -2800,21 +3020,31 @@ async function upsertSupabaseEntitlementForStudentCourse(
     target_type: course.targetType,
     user_id: userId
   };
-  const existingResult = await supabase
+  const upsertResult = await supabase
     .from("entitlements")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("source_event_id", entitlementRow.source_event_id)
-    .limit(1)
-    .maybeSingle();
+    .upsert(entitlementRow, { onConflict: "user_id,source_event_id" });
 
-  await throwIfSupabaseError(existingResult.error, "Erro consultando entitlement existente");
+  // 42P10: o indice unico (migration 202610010002) ainda nao foi aplicado no banco; usa o caminho legado.
+  if (upsertResult.error?.code === "42P10") {
+    const existingResult = await supabase
+      .from("entitlements")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("source_event_id", entitlementRow.source_event_id)
+      .limit(1)
+      .maybeSingle();
 
-  const writeResult = existingResult.data?.id
-    ? await supabase.from("entitlements").update(entitlementRow).eq("id", existingResult.data.id)
-    : await supabase.from("entitlements").insert(entitlementRow);
+    await throwIfSupabaseError(existingResult.error, "Erro consultando acesso existente");
 
-  await throwIfSupabaseError(writeResult.error, "Erro sincronizando entitlement do aluno");
+    const writeResult = existingResult.data?.id
+      ? await supabase.from("entitlements").update(entitlementRow).eq("id", existingResult.data.id)
+      : await supabase.from("entitlements").insert(entitlementRow);
+
+    await throwIfSupabaseError(writeResult.error, "Erro sincronizando acesso do aluno");
+    return;
+  }
+
+  await throwIfSupabaseError(upsertResult.error, "Erro sincronizando acesso do aluno");
 }
 
 async function syncSupabaseEntitlementsForStudents(students: AdminStudent[], previousStudents: AdminStudent[]) {
@@ -2842,6 +3072,17 @@ async function syncSupabaseEntitlementsForStudents(students: AdminStudent[], pre
 export async function replaceAdminStudents(students: AdminStudent[]) {
   const database = await readAdminDatabase();
   const previousStudents = database.students;
+  const incomingIds = new Set(students.map((studentRecord) => studentRecord.id));
+  const removedCount = previousStudents.filter((studentRecord) => !incomingIds.has(studentRecord.id)).length;
+
+  // Trava contra payload truncado/malformado: remocoes em massa exigem exclusao explicita por aluno.
+  if (removedCount > 10 && removedCount > previousStudents.length / 2) {
+    throw createAdminMutationError(
+      `O salvamento removeria ${removedCount} de ${previousStudents.length} alunos. Exclusoes em massa devem ser feitas aluno a aluno.`,
+      409
+    );
+  }
+
   database.students = students;
   const supabase = getSupabaseAdminClient();
   const studentRows = students.map(studentToRow);
@@ -3063,6 +3304,15 @@ export async function deleteContentItem(itemId: string) {
 
   const deleteStudentCoursesResult = await supabase.from("student_courses").delete().eq("target_id", itemId);
   await throwIfSupabaseError(deleteStudentCoursesResult.error, "Erro removendo acessos do conteudo");
+
+  // Entitlements apontando para o conteudo removido sao revogados (nao apagados) para manter trilha de auditoria
+  // e impedir que um re-import com id deterministico (ex.: yt-course-<playlistId>) reanexe acessos antigos.
+  const revokeEntitlementsResult = await supabase
+    .from("entitlements")
+    .update({ status: "revoked" })
+    .eq("target_id", itemId)
+    .eq("status", "active");
+  await throwIfSupabaseError(revokeEntitlementsResult.error, "Erro revogando acessos do conteúdo removido");
 
   if (removedComboIds.length > 0) {
     const deleteCombosResult = await supabase.from("product_combos").delete().in("id", removedComboIds);
@@ -3562,7 +3812,7 @@ export async function updateAdminDashboardCollections(input: AdminDashboardColle
   }
 
   const updatedKeys = new Set(Object.keys(input));
-  const rows = settingsRows(database).filter((row) => updatedKeys.has(row.key));
+  const rows = stampPlatformSettingRows(settingsRows(database).filter((row) => updatedKeys.has(row.key)));
   await upsertRows(
     getSupabaseAdminClient(),
     "platform_settings",
@@ -3667,6 +3917,14 @@ export async function setSavedItem({
 
 let lessonProgressWriteQueue = Promise.resolve();
 
+const LESSON_PROGRESS_CONFLICT_CODE = "lesson-progress-conflict";
+
+function createLessonProgressConflictError() {
+  return Object.assign(new Error("Progresso atualizado por outra sessao."), {
+    code: LESSON_PROGRESS_CONFLICT_CODE
+  });
+}
+
 export async function replaceCompletedLessons(input: {
   completedLessonIds?: string[];
   contentId: string;
@@ -3680,7 +3938,19 @@ export async function replaceCompletedLessons(input: {
   status?: LessonWatchStatus;
   userId: string;
 }) {
-  const writeResult = lessonProgressWriteQueue.then(() => replaceCompletedLessonsUnsafe(input));
+  // A fila local serializa escritas da mesma instancia; o compare-and-swap em replaceCompletedLessonsUnsafe
+  // protege contra instancias serverless concorrentes, com releitura e novo merge em caso de conflito.
+  const writeResult = lessonProgressWriteQueue.then(async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await replaceCompletedLessonsUnsafe(input);
+      } catch (error) {
+        if ((error as { code?: string }).code !== LESSON_PROGRESS_CONFLICT_CODE || attempt >= 3) {
+          throw error;
+        }
+      }
+    }
+  });
   lessonProgressWriteQueue = writeResult.then(() => undefined, () => undefined);
   return writeResult;
 }
@@ -3797,18 +4067,42 @@ async function replaceCompletedLessonsUnsafe({
     userId
   };
 
-  const upsertResult = await supabase.from("lesson_progress").upsert({
+  const nextRow = {
     completed_lesson_ids: nextRecord.completedLessonIds,
     content_id: nextRecord.contentId,
     lesson_reactions: nextRecord.lessonReactions,
     lesson_watch_states: nextRecord.lessonWatchStates,
     updated_at: nextRecord.updatedAt,
     user_id: nextRecord.userId
-  }, { onConflict: "user_id,content_id" });
-  await throwIfSupabaseError(upsertResult.error, "Erro salvando progresso da aula");
+  };
+
+  if (currentRow) {
+    const updateResult = await supabase
+      .from("lesson_progress")
+      .update(nextRow)
+      .eq("user_id", nextRecord.userId)
+      .eq("content_id", nextRecord.contentId)
+      .eq("updated_at", currentRow.updated_at)
+      .select("user_id");
+    await throwIfSupabaseError(updateResult.error, "Erro salvando progresso da aula");
+
+    if ((updateResult.data ?? []).length === 0) {
+      throw createLessonProgressConflictError();
+    }
+
+    return nextRecord;
+  }
+
+  const insertResult = await supabase.from("lesson_progress").insert(nextRow);
+
+  if (insertResult.error?.code === "23505") {
+    throw createLessonProgressConflictError();
+  }
+
+  await throwIfSupabaseError(insertResult.error, "Erro salvando progresso da aula");
   return nextRecord;
 }
 
-export function getDefaultAdminStatus(sourceProvider: AdminSourceProvider): AdminEntitlementStatus {
-  return sourceProvider === "Manual" ? "active" : "active";
+export function getDefaultAdminStatus(): AdminEntitlementStatus {
+  return "active";
 }

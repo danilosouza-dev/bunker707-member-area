@@ -10,21 +10,64 @@ import {
   Mail
 } from "lucide-react";
 import Image from "next/image";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
+import {
+  describePasswordResetError,
+  PASSWORD_RESET_COOLDOWN_MS,
+  PASSWORD_RESET_MISSING_EMAIL,
+  PASSWORD_RESET_SENT_NOTICE
+} from "@/lib/auth/password-reset";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
-import type { LoginPageConfig, LoginProvider } from "@/lib/login-config";
+import { canOptimizeImageSrc } from "@/lib/image-hosts";
+import {
+  DEFAULT_LOGIN_VISUAL_POSITION,
+  isAllowedLoginSupportHref,
+  type LoginPageConfig,
+  type LoginProvider
+} from "@/lib/login-config";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+
+// Pagina de entrar do aluno. Responde por container query (`@container` no wrapper de fora e
+// `@min-[1024px]:` no lugar de `lg:`) e usa `var(--member-preview-vh, 100vh)` como altura de tela
+// cheia: no /login o container tem a largura da janela e nada muda; dentro da moldura de previa do
+// admin (PreviewFrame) o mesmo componente desenha a "tela" de 1280 ou 390 px.
+//
+// As imagens do visual saem sem o otimizador (como antes): o recorte do admin ja entrega WebP na medida
+// e o `sizes` nao acompanha o object-cover em tela cheia.
+//
+// `preview`: modo da previa do admin. Nao le a sessao (nao redireciona o produtor), nao envia nada,
+// mostra o formulario e os provedores como o aluno ve, mesmo sem login configurado neste ambiente.
 
 type LoginExperienceProps = {
   authConfigured: boolean;
   config: LoginPageConfig;
+  /** Erro mostrado ao abrir o login, como o link de recuperacao que nao vale mais (?erro=link). */
+  initialErrorMessage?: string;
+  /** Previa do admin: sem sessao, sem envio, sem pre-carregar imagens. */
+  preview?: boolean;
   redirectTo?: string;
 };
 
 type LoginConfigProps = {
   config: LoginPageConfig;
+  preview: boolean;
 };
+
+const SCREEN_MIN_HEIGHT = "min-h-[var(--member-preview-vh,100vh)]";
+
+// Mensagens (erro, aviso de link enviado, login indisponivel), divisoria, botao de mostrar senha e
+// "Esqueci minha senha" tambem mudam com o tom: as cores pensadas para fundo escuro somem no painel
+// claro (o aluno erraria a senha sem ver o aviso).
+const darkPanelMessages = {
+  divider: "bg-white/10",
+  error: "border-red-500/30 bg-red-500/10 text-red-100",
+  forgot: "text-zinc-600 hover:text-zinc-400",
+  forgotUnderline: "decoration-white/15 group-hover:decoration-white/35",
+  iconButton: "text-zinc-400 hover:bg-white/10 hover:text-white",
+  notice: "border-emerald-400/25 bg-emerald-400/10 text-emerald-100",
+  warning: "border-amber-400/25 bg-amber-400/10 text-amber-100"
+} as const;
 
 const panelToneClasses = {
   dark: {
@@ -37,7 +80,8 @@ const panelToneClasses = {
     secondaryButton:
       "border-white/10 bg-white/[0.04] text-white hover:border-white/18 hover:bg-white/[0.08]",
     link: "text-zinc-300 hover:text-white",
-    logo: "image"
+    logo: "image",
+    ...darkPanelMessages
   },
   glass: {
     panel:
@@ -49,7 +93,8 @@ const panelToneClasses = {
     secondaryButton:
       "border-white/12 bg-white/[0.07] text-white hover:border-white/22 hover:bg-white/[0.11]",
     link: "text-zinc-200 hover:text-white",
-    logo: "image"
+    logo: "image",
+    ...darkPanelMessages
   },
   light: {
     panel:
@@ -61,7 +106,14 @@ const panelToneClasses = {
     secondaryButton:
       "border-black/10 bg-white text-[#141414] hover:border-black/20 hover:bg-zinc-100",
     link: "text-zinc-700 hover:text-black",
-    logo: "text"
+    logo: "text",
+    divider: "bg-black/10",
+    error: "border-red-200 bg-red-50 text-red-700",
+    forgot: "text-zinc-600 hover:text-black",
+    forgotUnderline: "decoration-black/20 group-hover:decoration-black/45",
+    iconButton: "text-zinc-500 hover:bg-black/5 hover:text-black",
+    notice: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    warning: "border-amber-200 bg-amber-50 text-amber-900"
   }
 } as const;
 
@@ -140,21 +192,46 @@ async function getPostLoginRedirectPath(userMetadata: unknown, safeRedirectPath:
   return safeRedirectPath;
 }
 
-function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceProps) {
+function LoginFormPanel({
+  authConfigured: authAvailable,
+  config,
+  initialErrorMessage,
+  preview = false,
+  redirectTo
+}: LoginExperienceProps) {
   const router = useNavigationFeedbackRouter();
   const safeRedirectPath = getSafeRedirectPath(redirectTo);
+  const fieldId = useId();
+  const emailId = `${fieldId}-email`;
+  const passwordId = `${fieldId}-password`;
+  // Na previa o formulario aparece como o aluno ve (habilitado), mas nada e enviado.
+  const authConfigured = authAvailable || preview;
   const [activeProvider, setActiveProvider] = useState<LoginProvider | null>(null);
   const [email, setEmail] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState(preview ? "" : initialErrorMessage ?? "");
   const [noticeMessage, setNoticeMessage] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Um segundo pedido de link troca o codigo de verificacao do navegador e invalida o e-mail anterior.
+  const [resetPending, setResetPending] = useState(false);
+  const [resetLocked, setResetLocked] = useState(false);
+  const resetUnlockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tone = panelToneClasses[config.panelTone];
   const canSubmit = authConfigured;
+  const logoSrc = tone.logo === "image" ? config.logo.src : null;
+  const supportHref = isAllowedLoginSupportHref(config.form.supportHref) ? config.form.supportHref : null;
+  const supportOpensNewTab = Boolean(supportHref?.startsWith("https://"));
+
+  useEffect(() => () => {
+    if (resetUnlockTimer.current) {
+      clearTimeout(resetUnlockTimer.current);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!authConfigured) {
+    // A previa do admin nunca le a sessao: o produtor logado seria mandado para fora do editor.
+    if (!authConfigured || preview) {
       return;
     }
 
@@ -183,7 +260,7 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
       active = false;
       data.subscription.unsubscribe();
     };
-  }, [authConfigured, router, safeRedirectPath]);
+  }, [authConfigured, preview, router, safeRedirectPath]);
 
   async function recordLoginEvent(
     supabase: ReturnType<typeof createBrowserSupabaseClient>,
@@ -203,18 +280,23 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (preview) {
+      return;
+    }
+
     setErrorMessage("");
     setNoticeMessage("");
 
     if (!authConfigured) {
-      setErrorMessage("Autenticacao indisponivel neste ambiente.");
+      setErrorMessage("Autenticação indisponível neste ambiente.");
       return;
     }
 
     const trimmedEmail = email.trim();
 
     if (!trimmedEmail || !password) {
-      setErrorMessage("Informe email e senha para entrar.");
+      setErrorMessage("Informe e-mail e senha para entrar.");
       return;
     }
 
@@ -228,7 +310,7 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
       });
 
       if (error || !data.user) {
-        setErrorMessage("Email ou senha invalidos.");
+        setErrorMessage("E-mail ou senha inválidos.");
         return;
       }
 
@@ -236,18 +318,22 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
       router.replace(await getPostLoginRedirectPath(data.user.user_metadata, safeRedirectPath));
       router.refresh();
     } catch {
-      setErrorMessage("Nao foi possivel autenticar agora.");
+      setErrorMessage("Não foi possível entrar agora. Tente de novo em instantes.");
     } finally {
       setSubmitting(false);
     }
   }
 
   async function handleOAuth(provider: LoginProvider) {
+    if (preview) {
+      return;
+    }
+
     setErrorMessage("");
     setNoticeMessage("");
 
     if (!authConfigured) {
-      setErrorMessage("Autenticacao indisponivel neste ambiente.");
+      setErrorMessage("Autenticação indisponível neste ambiente.");
       return;
     }
 
@@ -266,30 +352,40 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
       });
 
       if (error) {
-        setErrorMessage("Nao foi possivel iniciar o login social.");
+        setErrorMessage("Não foi possível iniciar o login social.");
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Nao foi possivel iniciar o login social.");
+      setErrorMessage(error instanceof Error ? error.message : "Não foi possível iniciar o login social.");
     } finally {
       setActiveProvider(null);
     }
   }
 
   async function handlePasswordReset() {
+    if (preview) {
+      return;
+    }
+
+    if (resetPending || resetLocked) {
+      return;
+    }
+
     setErrorMessage("");
     setNoticeMessage("");
 
     if (!authConfigured) {
-      setErrorMessage("Autenticacao indisponivel neste ambiente.");
+      setErrorMessage("Autenticação indisponível neste ambiente.");
       return;
     }
 
     const trimmedEmail = email.trim();
 
     if (!trimmedEmail) {
-      setErrorMessage("Informe seu email para receber o link de recuperacao.");
+      setErrorMessage(PASSWORD_RESET_MISSING_EMAIL);
       return;
     }
+
+    setResetPending(true);
 
     try {
       const supabase = createBrowserSupabaseClient();
@@ -301,29 +397,34 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
       });
 
       if (error) {
-        setErrorMessage("Nao foi possivel enviar a recuperacao de senha.");
+        setErrorMessage(describePasswordResetError(error));
         return;
       }
 
-      setNoticeMessage("Se o email existir na base, enviaremos um link de recuperacao.");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Nao foi possivel enviar a recuperacao de senha.");
+      setNoticeMessage(PASSWORD_RESET_SENT_NOTICE);
+      setResetLocked(true);
+      resetUnlockTimer.current = setTimeout(() => setResetLocked(false), PASSWORD_RESET_COOLDOWN_MS);
+    } catch {
+      setErrorMessage(describePasswordResetError(null));
+    } finally {
+      setResetPending(false);
     }
   }
 
   return (
     <section
-      aria-label="Formulario de login"
-      className={`relative z-10 w-full max-w-[27rem] rounded-[8px] border p-6 sm:p-7 lg:p-8 ${tone.panel}`}
+      aria-label="Formulário de login"
+      className={`relative z-10 w-full max-w-[27rem] rounded-[8px] border p-6 @min-[640px]:p-7 @min-[1024px]:p-8 ${tone.panel}`}
     >
       <div className="mb-10 flex items-center justify-center">
-        {tone.logo === "image" ? (
+        {logoSrc ? (
           <Image
             alt={config.logo.alt}
-            className="h-auto w-[154px]"
+            className="h-auto max-h-14 w-[154px] object-contain"
             height={35}
-            priority
-            src={config.logo.src}
+            priority={!preview}
+            src={logoSrc}
+            unoptimized={!canOptimizeImageSrc(logoSrc)}
             width={306}
           />
         ) : (
@@ -334,10 +435,10 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
       {config.form.title || config.form.subtitle ? (
         <div className="pb-1.5">
           {config.form.title ? (
-        <h1 className="text-3xl font-black leading-tight sm:text-4xl">{config.form.title}</h1>
+            <h1 className="text-3xl font-black leading-tight @min-[640px]:text-4xl">{config.form.title}</h1>
           ) : null}
           {config.form.subtitle ? (
-            <p className={`mt-3 text-sm leading-6 sm:text-base ${tone.muted}`}>
+            <p className={`mt-3 text-sm leading-6 @min-[640px]:text-base ${tone.muted}`}>
               {config.form.subtitle}
             </p>
           ) : null}
@@ -349,7 +450,7 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
         onSubmit={handleSubmit}
       >
         <div>
-          <label className="text-sm font-semibold" htmlFor="login-email">
+          <label className="text-sm font-semibold" htmlFor={emailId}>
             {config.form.emailLabel}
           </label>
           <div
@@ -360,7 +461,7 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
               autoComplete="email"
               className={`min-w-0 flex-1 border-0 bg-transparent text-sm outline-none ${tone.input}`}
               disabled={submitting || !authConfigured}
-              id="login-email"
+              id={emailId}
               onChange={(event) => setEmail(event.target.value)}
               placeholder={config.form.emailPlaceholder}
               required
@@ -371,7 +472,7 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
         </div>
 
         <div>
-          <label className="text-sm font-semibold" htmlFor="login-password">
+          <label className="text-sm font-semibold" htmlFor={passwordId}>
             {config.form.passwordLabel}
           </label>
           <div
@@ -382,7 +483,7 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
               autoComplete="current-password"
               className={`min-w-0 flex-1 border-0 bg-transparent text-sm outline-none ${tone.input}`}
               disabled={submitting || !authConfigured}
-              id="login-password"
+              id={passwordId}
               onChange={(event) => setPassword(event.target.value)}
               placeholder={config.form.passwordPlaceholder}
               required
@@ -391,7 +492,7 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
             />
             <button
               aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-[6px] text-zinc-400 transition hover:bg-white/10 hover:text-white"
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-[6px] transition ${tone.iconButton}`}
               onClick={() => setShowPassword((current) => !current)}
               type="button"
             >
@@ -400,32 +501,33 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
           </div>
           <div className="mt-1 flex justify-end">
             <button
-              className="group text-[0] leading-none text-zinc-600 transition hover:text-zinc-400"
-              disabled={!authConfigured}
+              aria-busy={resetPending}
+              className={`group text-[0] leading-none transition disabled:cursor-not-allowed disabled:opacity-60 ${tone.forgot}`}
+              disabled={!authConfigured || resetPending || resetLocked}
               onClick={handlePasswordReset}
               type="button"
             >
-              <span className="text-[11px] font-medium leading-none underline decoration-white/15 underline-offset-2 group-hover:decoration-white/35">
-                {config.form.forgotPasswordLabel}
+              <span className={`text-[11px] font-medium leading-none underline underline-offset-2 ${tone.forgotUnderline}`}>
+                {resetPending ? "Enviando link…" : config.form.forgotPasswordLabel}
               </span>
             </button>
           </div>
         </div>
 
         {!authConfigured ? (
-          <p className="rounded-[8px] border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm font-medium text-amber-100">
-            Login temporariamente indisponivel. Fale com o suporte da Bunker707 para liberar seu acesso.
+          <p className={`rounded-[8px] border px-4 py-3 text-sm font-medium ${tone.warning}`}>
+            Login temporariamente indisponível. Fale com o suporte da Bunker707 para liberar seu acesso.
           </p>
         ) : null}
 
         {errorMessage ? (
-          <p className="rounded-[8px] border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-100" role="alert">
+          <p className={`rounded-[8px] border px-4 py-3 text-sm font-medium ${tone.error}`} role="alert">
             {errorMessage}
           </p>
         ) : null}
 
         {noticeMessage ? (
-          <p className="rounded-[8px] border border-emerald-400/25 bg-emerald-400/10 px-4 py-3 text-sm font-medium text-emerald-100" role="status">
+          <p className={`rounded-[8px] border px-4 py-3 text-sm font-medium ${tone.notice}`} role="status">
             {noticeMessage}
           </p>
         ) : null}
@@ -443,9 +545,9 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
       {authConfigured && config.providers.length > 0 ? (
         <div className="mt-6">
           <div className="flex items-center gap-3">
-            <span className="h-px flex-1 bg-white/10" />
+            <span className={`h-px flex-1 ${tone.divider}`} />
             <span className={`text-xs font-medium ${tone.muted}`}>ou continue com</span>
-            <span className="h-px flex-1 bg-white/10" />
+            <span className={`h-px flex-1 ${tone.divider}`} />
           </div>
           <div className="mt-4 grid gap-3">
             {config.providers.map((provider) => (
@@ -464,43 +566,55 @@ function LoginFormPanel({ authConfigured, config, redirectTo }: LoginExperienceP
         </div>
       ) : null}
 
-      <div className={`mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm ${tone.muted}`}>
-        <HelpCircle className="h-4 w-4 shrink-0" />
-        <span>{config.form.supportLabel}</span>
-        <a className={`font-semibold transition ${tone.link}`} href="#">
-          {config.form.supportCta}
-        </a>
-      </div>
+      {supportHref && config.form.supportCta ? (
+        <div className={`mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm ${tone.muted}`}>
+          <HelpCircle className="h-4 w-4 shrink-0" />
+          {config.form.supportLabel ? <span>{config.form.supportLabel}</span> : null}
+          {preview ? (
+            <span className={`font-semibold ${tone.link}`}>{config.form.supportCta}</span>
+          ) : (
+            <a
+              className={`font-semibold transition ${tone.link}`}
+              href={supportHref}
+              rel={supportOpensNewTab ? "noopener noreferrer" : undefined}
+              target={supportOpensNewTab ? "_blank" : undefined}
+            >
+              {config.form.supportCta}
+            </a>
+          )}
+        </div>
+      ) : null}
 
       {config.footerLinks.length > 0 ? (
         <div className={`mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs ${tone.muted}`}>
-        {config.footerLinks.map((link) => (
-          <a className={`transition ${tone.link}`} href={link.href} key={link.label}>
-            {link.label}
-          </a>
-        ))}
+          {config.footerLinks.map((link) => (
+            <a className={`transition ${tone.link}`} href={link.href} key={link.label}>
+              {link.label}
+            </a>
+          ))}
         </div>
       ) : null}
     </section>
   );
 }
 
-function VisualPanel({ config }: LoginConfigProps) {
+function VisualPanel({ config, preview }: LoginConfigProps) {
   return (
-    <section className="relative hidden h-screen min-h-screen overflow-hidden bg-black lg:block">
+    <section className="relative hidden h-[var(--member-preview-vh,100vh)] min-h-[var(--member-preview-vh,100vh)] overflow-hidden bg-black @min-[1024px]:block">
       <Image
         alt={config.visual.alt}
-        className="absolute inset-0 h-full w-full object-cover object-[72%_center]"
+        className="absolute inset-0 h-full w-full object-cover"
         height={1024}
-        priority
+        priority={!preview}
         sizes="(min-width: 1024px) 50vw, 100vw"
         src={config.visual.imageSrc}
+        style={{ objectPosition: config.visual.objectPosition ?? DEFAULT_LOGIN_VISUAL_POSITION }}
         unoptimized
         width={1536}
       />
       <div className="absolute inset-0 bg-gradient-to-r from-black/12 via-black/18 to-black/28" />
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/18 to-black/18" />
-      <div className="absolute bottom-[13%] left-0 max-w-xl p-8 xl:p-12">
+      <div className="absolute bottom-[13%] left-0 max-w-xl p-8 @min-[1280px]:p-12">
         {config.visual.title ? (
           <div
             className="max-w-[29rem] text-white"
@@ -516,7 +630,7 @@ function VisualPanel({ config }: LoginConfigProps) {
             >
               &ldquo;
             </span>
-            <h2 className="text-2xl font-semibold leading-[1.16] text-white/95 sm:text-3xl">
+            <h2 className="text-2xl font-semibold leading-[1.16] text-white/95 @min-[640px]:text-3xl">
               {config.visual.title}
             </h2>
           </div>
@@ -533,60 +647,66 @@ function VisualPanel({ config }: LoginConfigProps) {
 
 export function LoginExperience(props: LoginExperienceProps) {
   const { config } = props;
+  const preview = props.preview ?? false;
   const fullBackground = isFullBackgroundTemplate(config.template);
   const splitVisualLeft = config.template === "split-visual-left";
   const sideGlassRight = config.template === "side-glass-right";
 
   if (fullBackground) {
     return (
-      <main className="relative min-h-screen overflow-x-hidden bg-[#070707] px-4 py-4 text-white sm:px-6 sm:py-6">
-        <Image
-          alt={config.visual.alt}
-          className="absolute inset-0 h-full w-full object-cover"
-          height={1024}
-          priority
-          sizes="100vw"
-          src={config.visual.imageSrc}
-          unoptimized
-          width={1536}
-        />
-        <div className="absolute inset-0 bg-black/55" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(229,9,20,0.22),transparent_28rem),linear-gradient(to_top,rgba(7,7,7,0.96),rgba(7,7,7,0.16)_52%,rgba(7,7,7,0.78))]" />
-        <div
-          className={`relative z-10 mx-auto flex min-h-[calc(100vh-2rem)] max-w-7xl items-center ${
-            sideGlassRight ? "justify-end" : "justify-center"
-          }`}
-        >
-          <LoginFormPanel {...props} />
-        </div>
-      </main>
+      <div className="@container">
+        <main className={`relative ${SCREEN_MIN_HEIGHT} overflow-x-hidden bg-[#070707] px-4 py-4 text-white @min-[640px]:px-6 @min-[640px]:py-6`}>
+          <Image
+            alt={config.visual.alt}
+            className="absolute inset-0 h-full w-full object-cover"
+            height={1024}
+            priority={!preview}
+            sizes="100vw"
+            src={config.visual.imageSrc}
+            unoptimized
+            width={1536}
+          />
+          <div className="absolute inset-0 bg-black/55" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(229,9,20,0.22),transparent_28rem),linear-gradient(to_top,rgba(7,7,7,0.96),rgba(7,7,7,0.16)_52%,rgba(7,7,7,0.78))]" />
+          <div
+            className={`relative z-10 mx-auto flex min-h-[calc(var(--member-preview-vh,100vh)-2rem)] max-w-7xl items-center @min-[640px]:min-h-[calc(var(--member-preview-vh,100vh)-3rem)] ${
+              sideGlassRight ? "justify-end" : "justify-center"
+            }`}
+          >
+            <LoginFormPanel {...props} />
+          </div>
+        </main>
+      </div>
     );
   }
 
   return (
-    <main className="relative min-h-screen overflow-x-hidden bg-[#0d0d0d] text-white">
-      <div className="absolute inset-0 lg:hidden">
-        <Image
-          alt={config.visual.alt}
-          className="absolute inset-0 h-full w-full object-cover"
-          height={1024}
-          priority
-          sizes="(max-width: 1023px) 100vw, 1px"
-          src={config.visual.imageSrc}
-          unoptimized
-          width={1536}
-        />
-        <div className="absolute inset-0 bg-black/72" />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d]/40 to-[#0d0d0d]/80" />
-      </div>
-
-      <div className="relative z-10 grid min-h-screen grid-cols-1 items-stretch lg:grid-cols-2">
-        {splitVisualLeft ? <VisualPanel config={config} /> : null}
-        <div className="flex min-h-screen items-center justify-center bg-[#101010] px-6 py-8 sm:px-10 lg:px-16">
-          <LoginFormPanel {...props} />
+    <div className="@container">
+      <main className={`relative ${SCREEN_MIN_HEIGHT} overflow-x-hidden bg-[#0d0d0d] text-white`}>
+        {/* Celular e telas estreitas: a imagem lateral vira fundo escurecido atras do formulario. */}
+        <div className="absolute inset-0 @min-[1024px]:hidden">
+          <Image
+            alt={config.visual.alt}
+            className="absolute inset-0 h-full w-full object-cover"
+            height={1024}
+            priority={!preview}
+            sizes="(max-width: 1023px) 100vw, 1px"
+            src={config.visual.imageSrc}
+            unoptimized
+            width={1536}
+          />
+          <div className="absolute inset-0 bg-black/72" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d]/40 to-[#0d0d0d]/80" />
         </div>
-        {!splitVisualLeft ? <VisualPanel config={config} /> : null}
-      </div>
-    </main>
+
+        <div className={`relative z-10 grid ${SCREEN_MIN_HEIGHT} grid-cols-1 items-stretch @min-[1024px]:grid-cols-2`}>
+          {splitVisualLeft ? <VisualPanel config={config} preview={preview} /> : null}
+          <div className={`flex ${SCREEN_MIN_HEIGHT} items-center justify-center px-6 py-8 @min-[640px]:px-10 @min-[1024px]:bg-[#101010] @min-[1024px]:px-16`}>
+            <LoginFormPanel {...props} />
+          </div>
+          {!splitVisualLeft ? <VisualPanel config={config} preview={preview} /> : null}
+        </div>
+      </main>
+    </div>
   );
 }

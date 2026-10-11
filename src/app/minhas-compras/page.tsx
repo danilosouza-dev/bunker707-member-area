@@ -24,11 +24,12 @@ export default async function PurchasesPage({ searchParams }: PurchasesPageProps
   return (
     <AppShell
       accessPreviewMode={accessPreviewMode}
+      branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
       <PurchasesExperience accessPreviewMode={accessPreviewMode} items={purchasedProducts} />
-      <MemberFooter />
+      <MemberFooter branding={shellData.branding} />
     </AppShell>
   );
 }

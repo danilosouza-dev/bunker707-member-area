@@ -46,6 +46,7 @@ import { CombosCommandCenter } from "@/components/admin/combos/combos-command-ce
 import { CommunityPlaceholder } from "@/components/admin/community/community-placeholder";
 import { ModerationCommandCenter } from "@/components/admin/moderation/moderation-command-center";
 import { PersonalizationCommandCenter } from "@/components/admin/personalization/personalization-command-center";
+import { AppearanceEditor } from "@/components/admin/personalization/appearance-editor";
 import { HomeShowcaseEditor } from "@/components/admin/personalization/home-showcase-editor";
 import { IntegrationsCommandCenter } from "@/components/admin/settings/integrations-command-center";
 import {
@@ -84,6 +85,7 @@ import { ContentStructureSection } from "@/components/content-structure-section"
 import { HeroSection } from "@/components/hero-section";
 import { LoginExperience } from "@/components/login-experience";
 import { MemberFooter } from "@/components/member-footer";
+import { PlatformBrandingProvider } from "@/components/platform-branding";
 import { PurchasesExperience } from "@/components/purchases-experience";
 import { getLoginPageConfig, loginTemplateOptions } from "@/lib/login-config";
 import type { LoginPageConfig, LoginTemplateId } from "@/lib/login-config";
@@ -415,7 +417,7 @@ function CatalogTable({
                 </StatusPill>
               </span>
               <span>
-                <StatusPill className={getAccessClassName(record.access)}>{record.access}</StatusPill>
+                <StatusPill className={getAccessClassName(record.access)}>{record.access === "Drip" ? "Liberação programada" : record.access}</StatusPill>
               </span>
               <span className="text-sm font-bold text-zinc-400">
                 {getStudentLimitLabel(record.content.maxStudents)}
@@ -509,7 +511,7 @@ function SelectedContentPanel({
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 p-4">
-          <StatusPill className={getAccessClassName(selectedRecord.access)}>{selectedRecord.access}</StatusPill>
+          <StatusPill className={getAccessClassName(selectedRecord.access)}>{selectedRecord.access === "Drip" ? "Liberação programada" : selectedRecord.access}</StatusPill>
           <h2 className="mt-3 text-2xl font-black leading-tight text-white">{selectedRecord.content.title}</h2>
         </div>
       </div>
@@ -519,7 +521,6 @@ function SelectedContentPanel({
           ["Modelo", getContentAccessModelLabel(selectedRecord.content.accessModel)],
           ["Limite", getStudentLimitLabel(selectedRecord.content.maxStudents)],
           ["Compra", selectedRecord.content.purchaseUrl ? "Link configurado" : "Sem link"],
-          ["Escopo", selectedRecord.commerceScope],
           ["Visibilidade", selectedRecord.visibility],
           ["Liberacao", selectedRecord.releaseSummary],
           ["Status", selectedRecord.status]
@@ -591,6 +592,11 @@ type ModuleBuilderFormState = {
   description: string;
   id?: string;
   image: string;
+  /**
+   * Capa que o formulario carregou ao abrir o modulo. Ao salvar, a capa so vai junto se mudou: assim
+   * renomear um modulo aqui nao desfaz uma capa trocada depois no admin novo (Conteudo > capa do modulo).
+   */
+  initialImage?: string;
   releaseDelayUnit: "horas" | "dias";
   releaseDelayValue: string;
   releaseFixedDate: string;
@@ -741,8 +747,14 @@ function moduleToBuilderForm(module: CourseModule): ModuleBuilderFormState {
     description: module.description ?? "",
     id: module.id,
     image: module.image ?? "",
+    initialImage: module.image ?? "",
     title: module.title
   };
+}
+
+/** Capa a enviar ao salvar o modulo: so quando o produtor mudou (undefined = manter a gravada). */
+function changedModuleImage(form: ModuleBuilderFormState) {
+  return form.image !== (form.initialImage ?? "") ? form.image : undefined;
 }
 
 function lessonToBuilderForm(lesson: LessonPreview, moduleId: string): LessonBuilderFormState {
@@ -1506,7 +1518,7 @@ function CatalogView({
       {
         description: moduleBuilderForm.description,
         id: editingModuleId,
-        image: moduleBuilderForm.image,
+        image: changedModuleImage(moduleBuilderForm),
         ownerId: wizardRecord.content.id,
         ownerKind: wizardRecord.kind,
         releaseDelayUnit: moduleBuilderForm.releaseDelayUnit,
@@ -2263,7 +2275,7 @@ function CatalogView({
                     <option value="immediate">Disponivel imediatamente</option>
                     <option value="after_enrollment">X dias apos inscricao</option>
                     <option value="fixed_date">Agendar data de publicacao</option>
-                    <option value="after_purchase">Depois do entitlement</option>
+                    <option value="after_purchase">Depois de ganhar acesso</option>
                     <option value="after_previous_lesson">Depois da aula anterior</option>
                     <option value="activity_required">Atividade obrigatoria</option>
                   </select>
@@ -2600,7 +2612,7 @@ function CatalogView({
                       <option value="immediate">Disponivel imediatamente</option>
                       <option value="after_enrollment">X dias apos inscricao</option>
                       <option value="fixed_date">Agendar publicacao</option>
-                      <option value="after_purchase">Depois do entitlement</option>
+                      <option value="after_purchase">Depois de ganhar acesso</option>
                       <option value="after_previous_lesson">Depois do anterior</option>
                       <option value="activity_required">Atividade obrigatoria</option>
                     </select>
@@ -2844,7 +2856,7 @@ function CatalogView({
                         />
                       </label>
                       <label className="grid gap-2 text-sm font-bold text-zinc-400">
-                        ID do asset
+                        ID do vídeo no provedor
                         <input
                           className={inputClassName}
                           onChange={(event) => updateLessonBuilderForm("videoAssetId", event.target.value)}
@@ -2870,7 +2882,7 @@ function CatalogView({
                       <option value="immediate">Disponivel imediatamente</option>
                       <option value="after_enrollment">X dias apos inscricao</option>
                       <option value="fixed_date">Agendar publicacao</option>
-                      <option value="after_purchase">Depois do entitlement</option>
+                      <option value="after_purchase">Depois de ganhar acesso</option>
                       <option value="after_previous_lesson">Depois do anterior</option>
                       <option value="activity_required">Atividade obrigatoria</option>
                     </select>
@@ -2963,6 +2975,7 @@ function CatalogView({
 
 type PersonalizationTarget =
   | { kind: "index" }
+  | { kind: "appearance" }
   | { kind: "showcase" }
   | { kind: "login" }
   | { kind: "products" }
@@ -3057,19 +3070,23 @@ function PersonalizationEditorHeader({
 }
 
 function PersonalizationView({
+  branding,
   courseModules,
   formationCourses,
   hero,
   homeSectionConfigs,
+  homeSectionsUpdatedAt,
   homeSections,
   homeRows,
   onPublished,
   records
 }: {
+  branding: AdminDashboardData["branding"];
   courseModules: CourseModule[];
   formationCourses: AdminDashboardData["formationCourses"];
   hero: AdminDashboardData["hero"];
   homeSectionConfigs: AdminDashboardData["homeSectionConfigs"];
+  homeSectionsUpdatedAt: AdminDashboardData["homeSectionsUpdatedAt"];
   homeSections: AdminHomeSection[];
   homeRows: HomeRow[];
   onPublished: (data: AdminDashboardData) => void;
@@ -3101,8 +3118,8 @@ function PersonalizationView({
               : row.variant === "course_modules"
                 ? "Modulos de curso escolhido"
                 : row.visibility === "students"
-                  ? "Entitlements ativos"
-                  : "Curadoria persistida",
+                  ? "Acessos ativos"
+                  : "Curadoria manual",
           title: row.title,
           visibility: row.visibility
         }))
@@ -3145,7 +3162,7 @@ function PersonalizationView({
   const selectedSection =
     homeSectionDrafts.find((section) => section.id === selectedSectionId) ??
     homeSectionDrafts[0];
-  const personalizationItemsCount = visiblePreviewRecords.length + 3;
+  const personalizationItemsCount = visiblePreviewRecords.length + 4;
 
   function openContentEditor(record: AdminContentRecord, panel: ContentEditorPanel = "page") {
     setSelectedRecordId(record.content.id);
@@ -3181,6 +3198,7 @@ function PersonalizationView({
   function renderPersonalizationIndex() {
     return (
       <PersonalizationCommandCenter
+        onOpenAppearance={() => setActiveTarget({ kind: "appearance" })}
         onOpenContent={openContentEditor}
         onOpenLogin={() => setActiveTarget({ kind: "login" })}
         onOpenProducts={() => setActiveTarget({ kind: "products" })}
@@ -3327,7 +3345,7 @@ function PersonalizationView({
             )}
           </div>
 
-          <MemberFooter />
+          <MemberFooter branding={branding} />
         </div>
       </section>
     );
@@ -3482,7 +3500,7 @@ function PersonalizationView({
           <div className="pointer-events-none">
             <PurchasesExperience items={visiblePreviewRecords.map((record) => record.content)} />
           </div>
-          <MemberFooter />
+          <MemberFooter branding={branding} />
         </div>
       </section>
     );
@@ -3672,7 +3690,7 @@ function PersonalizationView({
               />
             </div>
           </div>
-          <MemberFooter />
+          <MemberFooter branding={branding} />
         </div>
       </section>
     );
@@ -3682,14 +3700,27 @@ function PersonalizationView({
     return renderPersonalizationIndex();
   }
 
+  if (activeTarget.kind === "appearance") {
+    return (
+      <AppearanceEditor
+        branding={branding}
+        hero={hero}
+        onBack={() => setActiveTarget({ kind: "index" })}
+        onPublished={onPublished}
+      />
+    );
+  }
+
   if (["showcase"].includes(activeTarget.kind)) {
     return (
       <HomeShowcaseEditor
+        branding={branding}
         courseModules={courseModules}
         formationCourses={formationCourses}
         hero={hero}
         homeRows={homeRows}
         homeSectionConfigs={homeSectionConfigs}
+        homeSectionsUpdatedAt={homeSectionsUpdatedAt}
         onBack={() => setActiveTarget({ kind: "index" })}
         onPublished={onPublished}
         records={records}
@@ -3992,10 +4023,6 @@ function StructureView({
                     : "Escolha um item no Catalogo para comecar."}
                 </p>
               </div>
-              <button className="inline-flex min-h-10 items-center gap-2 rounded-[8px] bg-white px-4 py-2 text-sm font-black text-black transition hover:bg-zinc-200" type="button">
-                <Plus className="h-4 w-4" />
-                Persistido
-              </button>
             </div>
           </div>
 
@@ -4180,7 +4207,7 @@ function StructureView({
                 <option value="immediate">Disponivel imediatamente</option>
                 <option value="after_enrollment">X dias apos inscricao</option>
                 <option value="fixed_date">Agendar publicacao</option>
-                <option value="after_purchase">Depois do entitlement</option>
+                <option value="after_purchase">Depois de ganhar acesso</option>
                 <option value="after_previous_lesson">Depois do anterior</option>
                 <option value="activity_required">Atividade obrigatoria</option>
               </select>
@@ -4325,7 +4352,7 @@ function StructureView({
                   />
                 </label>
                 <label className="grid gap-2 text-sm font-bold text-zinc-400">
-                  ID do asset
+                  ID do vídeo no provedor
                   <input
                     className={inputClassName}
                     onChange={(event) => setLessonVideoAssetId(event.target.value)}
@@ -4350,7 +4377,7 @@ function StructureView({
                 <option value="immediate">Disponivel imediatamente</option>
                 <option value="after_enrollment">X dias apos inscricao</option>
                 <option value="fixed_date">Agendar publicacao</option>
-                <option value="after_purchase">Depois do entitlement</option>
+                <option value="after_purchase">Depois de ganhar acesso</option>
                 <option value="after_previous_lesson">Depois da aula anterior</option>
                 <option value="activity_required">Atividade obrigatoria</option>
               </select>
@@ -5027,8 +5054,8 @@ function StudentDeleteConfirmationModal({
           </div>
 
           <p className="text-sm font-medium leading-6 text-zinc-400">
-            Esta acao remove o cadastro da listagem administrativa. Historico bruto de webhook, eventos de auditoria
-            e registros externos nao sao apagados por esta operacao.
+            Esta ação remove o cadastro da listagem administrativa. Histórico bruto de vendas recebidas, eventos de auditoria
+            e registros externos não são apagados por esta operação.
           </p>
 
           <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-4 sm:flex-row sm:justify-end">
@@ -5466,7 +5493,7 @@ function StudentProfileModal({
 
             <div className="sticky bottom-0 z-20 flex flex-col-reverse gap-3 border-t border-white/10 bg-[#17181d]/96 px-5 py-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:px-8">
               <p className="text-xs font-semibold text-zinc-500">
-                Entitlements internos continuam sendo a fonte de verdade para liberar acesso.
+                Os acessos internos da Bunker707 continuam sendo a fonte de verdade para liberar conteúdo.
               </p>
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
                 <Button
@@ -5654,6 +5681,7 @@ type PersistStudents = (updater: StudentListUpdater) => Promise<AdminStudent[]>;
 
 function StudentsView({
   cohorts,
+  initialQuery = "",
   onChangeStudents,
   onSelectStudent,
   selectedStudentId,
@@ -5661,13 +5689,15 @@ function StudentsView({
   students
 }: {
   cohorts: string[];
+  /** Busca ja preenchida (link "Ver aluno" do admin novo: /admin/legado?tela=alunos&busca=Nome). */
+  initialQuery?: string;
   onChangeStudents: PersistStudents;
   onSelectStudent: (studentId: string) => void;
   selectedStudentId: string;
   sellableProducts: AdminSellableProduct[];
   students: AdminStudent[];
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [sourceFilter, setSourceFilter] = useState<"all" | AdminSourceProvider>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | AdminEntitlementStatus>("all");
   const [courseFilter, setCourseFilter] = useState<"all" | string>("all");
@@ -5719,7 +5749,7 @@ function StudentsView({
       return await onChangeStudents(updater);
     } catch (error) {
       setAccessNotice({
-        message: error instanceof Error ? error.message : "Nao foi possivel persistir a alteracao no CRM.",
+        message: error instanceof Error ? error.message : "Não foi possível salvar a alteração.",
         title,
         tone: "error"
       });
@@ -6171,28 +6201,6 @@ function StudentsView({
               </TableBody>
             </Table>
           </div>
-
-          <div className="flex flex-col gap-4 border-t border-white/10 bg-[#111217] px-5 py-5 sm:flex-row sm:items-center sm:justify-center">
-            <div className="flex items-center justify-center gap-2">
-              {[1, 2, 3, 4, 5].map((page) => (
-                <button
-                  className={`grid h-9 w-9 place-items-center rounded-[4px] text-sm font-semibold ${
-                    page === 1 ? "bg-[var(--accent)] text-white" : "text-zinc-500 hover:bg-white/[0.06] hover:text-white"
-                  }`}
-                  key={page}
-                  type="button"
-                >
-                  {page}
-                </button>
-              ))}
-            </div>
-            <button
-              className="h-10 rounded-[7px] border border-white/10 bg-white/[0.045] px-4 text-sm font-semibold text-zinc-300 hover:bg-white/[0.08] hover:text-white"
-              type="button"
-            >
-              15 itens por pagina
-            </button>
-          </div>
         </section>
       </section>
 
@@ -6221,8 +6229,15 @@ function StudentsView({
   );
 }
 
-function AdminDashboardContent({ initialData }: { initialData: AdminDashboardData }) {
-  const [activeView, setActiveView] = useState<AdminView>("overview");
+type AdminDashboardProps = {
+  initialData: AdminDashboardData;
+  /** Busca de alunos ja preenchida; so vale junto com initialView "students". */
+  initialStudentQuery?: string;
+  initialView?: AdminView;
+};
+
+function AdminDashboardContent({ initialData, initialStudentQuery, initialView = "overview" }: AdminDashboardProps) {
+  const [activeView, setActiveView] = useState<AdminView>(initialView);
   const [dashboardData, setDashboardData] = useState(initialData);
   const [selectedRecordId, setSelectedRecordId] = useState(initialData.contentRecords[0]?.content.id ?? "");
   const [selectedStudentId, setSelectedStudentId] = useState(initialData.students[0]?.id ?? "");
@@ -6355,12 +6370,14 @@ function AdminDashboardContent({ initialData }: { initialData: AdminDashboardDat
   }
 
   return (
+    <PlatformBrandingProvider branding={dashboardData.branding}>
     <div className="min-h-screen bg-background text-foreground">
       <AdminShell activeView={activeView} onChangeView={handleChangeView}>
         {activeView === "overview" ? <AdminOverview data={dashboardData} /> : null}
         {activeView === "students" ? (
           <StudentsView
             cohorts={dashboardData.cohorts}
+            initialQuery={initialStudentQuery}
             onChangeStudents={persistStudents}
             onSelectStudent={setSelectedStudentId}
             selectedStudentId={selectedStudentId}
@@ -6421,11 +6438,13 @@ function AdminDashboardContent({ initialData }: { initialData: AdminDashboardDat
         ) : null}
         {activeView === "personalization" ? (
           <PersonalizationView
+            branding={dashboardData.branding}
             courseModules={dashboardData.courseModules}
             formationCourses={dashboardData.formationCourses}
             hero={dashboardData.hero}
             homeRows={dashboardData.homeRows}
             homeSectionConfigs={dashboardData.homeSectionConfigs}
+            homeSectionsUpdatedAt={dashboardData.homeSectionsUpdatedAt}
             homeSections={dashboardData.homeSections}
             onPublished={updateDashboardData}
             records={dashboardData.contentRecords}
@@ -6441,18 +6460,15 @@ function AdminDashboardContent({ initialData }: { initialData: AdminDashboardDat
           />
         ) : null}
       </AdminShell>
-
-      <div className="pointer-events-none fixed bottom-4 right-4 hidden rounded-full border border-border bg-background/80 px-3 py-1.5 text-xs font-bold text-muted-foreground backdrop-blur md:block">
-        Supabase persistido
-      </div>
     </div>
+    </PlatformBrandingProvider>
   );
 }
 
-export function AdminDashboard({ initialData }: { initialData: AdminDashboardData }) {
+export function AdminDashboard({ initialData, initialStudentQuery, initialView }: AdminDashboardProps) {
   return (
     <AdminOperationProvider>
-      <AdminDashboardContent initialData={initialData} />
+      <AdminDashboardContent initialData={initialData} initialStudentQuery={initialStudentQuery} initialView={initialView} />
     </AdminOperationProvider>
   );
 }

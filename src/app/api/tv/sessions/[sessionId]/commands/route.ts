@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { isTvPlaybackRate, type TvCommand } from "@/lib/tv-session-contract";
 import { requireApiUser } from "@/server/auth/guards";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { sendTvCommand } from "@/server/video/tv-sessions";
 
@@ -80,7 +81,7 @@ export async function POST(request: Request, context: RouteContext) {
   if (auth.response || !auth.user) return noStore(auth.response!);
 
   try {
-    const command = parseCommand(await request.json());
+    const command = parseCommand(await readBoundedJson<unknown>(request, 16_000));
     if (!command) {
       return noStore(NextResponse.json({ error: "Comando de TV invalido." }, { status: 400 }));
     }

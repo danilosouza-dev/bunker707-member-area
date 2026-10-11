@@ -3,6 +3,7 @@ import { requireApiUser } from "@/server/auth/guards";
 import {
   reportLessonComment
 } from "@/server/comments/comment-store";
+import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 type CommentReportRouteContext = {
@@ -17,7 +18,7 @@ export async function POST(request: Request, context: CommentReportRouteContext)
   }
 
   const { commentId } = await context.params;
-  const payload = await request.json().catch(() => ({})) as { reason?: unknown };
+  const payload = await readBoundedJson<{ reason?: unknown }>(request, 16_000).catch(() => ({})) as { reason?: unknown };
   const reason = typeof payload.reason === "string" ? payload.reason : undefined;
 
   if (!commentId) {

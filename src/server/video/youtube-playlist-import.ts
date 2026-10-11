@@ -415,7 +415,25 @@ function validateCourseImage(value: string) {
   return image;
 }
 
-export async function importYouTubePlaylistAsCourse(input: YouTubeCourseImportCommitInput) {
+export type YouTubePlaylistCourseImportResult = {
+  importResult: {
+    courseId: string;
+    /** A playlist ja tinha virado este curso (sincronizacao): situacao e capa foram mantidas. */
+    courseExisted?: boolean;
+    lessonCount: number;
+    moduleCount: number;
+    /** Curso novo nasce em Rascunho; sincronizar mantem a situacao que o curso ja tinha. */
+    publicationStatus: "draft" | "published";
+  };
+  warnings: string[];
+};
+
+/**
+ * Miolo da importacao, sem devolver o banco inteiro: valida, rele a playlist no servidor, envia a capa
+ * ao Storage e grava pela RPC transacional import_youtube_course. Usado pela Server Action do admin
+ * novo (src/server/catalog/import-actions.ts) e pela rota legada (importYouTubePlaylistAsCourse).
+ */
+export async function importYouTubePlaylistCourse(input: YouTubeCourseImportCommitInput): Promise<YouTubePlaylistCourseImportResult> {
   const title = input.title.trim();
   const description = input.description.trim();
 
@@ -471,13 +489,17 @@ export async function importYouTubePlaylistAsCourse(input: YouTubeCourseImportCo
   }
 
   return {
-    data: await getAdminDashboardData(),
-    importResult: result.data as {
-      courseId: string;
-      lessonCount: number;
-      moduleCount: number;
-      publicationStatus: "draft";
-    },
+    importResult: result.data as YouTubePlaylistCourseImportResult["importResult"],
     warnings: preview.warnings
+  };
+}
+
+export async function importYouTubePlaylistAsCourse(input: YouTubeCourseImportCommitInput) {
+  const { importResult, warnings } = await importYouTubePlaylistCourse(input);
+
+  return {
+    data: await getAdminDashboardData(),
+    importResult,
+    warnings
   };
 }
