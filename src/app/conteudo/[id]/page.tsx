@@ -205,11 +205,13 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
   return (
     <AppShell
       accessPreviewMode={accessPreviewMode}
+      bannerCorners={pageHero.corners}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
-      {/* data-member-banner: a escolha do produto (Detalhes > Cantos do banner) vence a da area so neste banner. */}
+      {/* data-member-banner: a escolha do produto (Detalhes > Cantos do banner) vence a da area so neste banner;
+          o cabecalho (logo e perfil) e as fileiras acompanham o banner arredondado. */}
       <div className="min-h-screen bg-[#141414]" data-member-banner={pageHero.corners === "inherit" ? undefined : pageHero.corners}>
         {/* Mesmos cantos e recuo do destaque da home (Marca > Estilo): no modo arredondado a capa fica como la. */}
         <section className="relative min-h-[640px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">

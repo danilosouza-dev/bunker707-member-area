@@ -10,6 +10,7 @@ import { withAccessPreviewParam } from "@/lib/access-preview";
 import { usePlatformLogoImage } from "@/components/platform-branding";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
+import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { KeyboardEvent, MouseEvent, TouchEvent } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
@@ -278,19 +279,24 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
               </button>
             </div> : null}
           </div>
+          {/* Logo da escola dentro da superficie: cresce junto com o card e e rasterizada uma vez, no tamanho
+              final (fora da superficie ficava pequena, deslocada por conta propria e serrilhada). */}
+          {hasCover && !isReleaseLocked && logoImage ? (
+            <div className="home-cover-card-logo pointer-events-none absolute left-3 top-3 z-30 w-[56%] max-w-[11rem] opacity-0 sm:left-3.5 sm:top-3.5 lg:left-4 lg:top-4">
+              <Image
+                alt=""
+                aria-hidden="true"
+                className="h-auto max-h-11 w-full object-contain object-left drop-shadow-[0_4px_10px_rgba(0,0,0,0.75)]"
+                height={35}
+                sizes="200px"
+                src={logoImage}
+                unoptimized={!canOptimizeImageSrc(logoImage)}
+                width={306}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
-      {hasCover && logoImage ? <div className="home-cover-card-logo pointer-events-none absolute left-4 top-4 z-[130] w-[5.75rem] opacity-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.7)] sm:w-[6.25rem] lg:w-[6.75rem]">
-        <Image
-          alt=""
-          aria-hidden="true"
-          className="h-auto max-h-10 w-full object-contain object-left"
-          height={35}
-          src={logoImage}
-          unoptimized
-          width={306}
-        />
-      </div> : null}
     </article>
   );
 }

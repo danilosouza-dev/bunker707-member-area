@@ -20,11 +20,13 @@ import { signOutAndLeave } from "@/lib/auth/sign-out";
 import { normalizeMemberStyle } from "@/lib/member-style";
 import { cn } from "@/lib/utils";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
-import type { PlatformBrandingConfig } from "@/lib/platform-types";
+import type { ContentPageHeroCorners, PlatformBrandingConfig } from "@/lib/platform-types";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 
 type AppShellProps = {
   accessPreviewMode?: AccessPreviewMode;
+  /** Cantos do banner desta pagina (Produto > Detalhes): "rounded" recua logo e foto do perfil como no estilo arredondado. */
+  bannerCorners?: ContentPageHeroCorners;
   branding?: PlatformBrandingConfig;
   canUseAccessPreview?: boolean;
   children: React.ReactNode;
@@ -137,7 +139,7 @@ const PlatformDirectorChat = dynamic(
   }
 );
 
-export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = false, children, student }: AppShellProps) {
+export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAccessPreview = false, children, student }: AppShellProps) {
   const logoImage = branding === undefined ? "/brand/logo-bunker.svg" : branding.logoImage;
   // Estilo escolhido em Area de membros > Marca: cantos (variaveis CSS no raiz) e posicao do menu.
   const style = normalizeMemberStyle(branding);
@@ -147,8 +149,9 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   const menuInHeader = style.menu === "header";
   // Cantos arredondados: a capa recua 64 px (perto da Netflix); a logo fica nessa linha (hamburguer a
   // 16 px + 40 px + 8 px, ou o cabecalho recuado 64 px quando os links escritos dispensam o hamburguer) e
-  // o cabecalho recua o mesmo a direita, para a foto do perfil alinhar com a borda da capa.
-  const rounded = style.corners === "rounded";
+  // o cabecalho recua o mesmo a direita, para a foto do perfil alinhar com a borda da capa. Vale tambem
+  // quando so o banner desta pagina e arredondado (escolha do produto): logo e perfil seguem o banner.
+  const rounded = style.corners === "rounded" || bannerCorners === "rounded";
   const pathname = usePathname();
   const headerLinks = menuInHeader
     ? (getMemberSidebarSections(pathname, accessPreviewMode).find((section) => section.id === "estudar")?.items ?? [])

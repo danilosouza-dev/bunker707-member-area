@@ -154,6 +154,8 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 
 /* Banner da pagina do produto por produto (Detalhes > Cantos do banner): vence a escolha da area so
    nas variaveis do banner; cards e fileiras continuam seguindo Marca > Estilo. */
+/* Banner arredondado so neste produto: os titulos e cards da pagina comecam na linha do banner (o
+   cabecalho acompanha pelo AppShell, prop bannerCorners). */
 [data-member-banner="rounded"] {
   --member-hero-content-pb: 5rem;
   --member-hero-fade: 0;
@@ -161,6 +163,7 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   --member-hero-radius: 20px;
   --member-hero-top: 76px;
   --member-page-overlap: 2rem;
+  --member-row-inset: 12px;
 }
 
 [data-member-banner="soft"] {
@@ -175,6 +178,7 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 @media (min-width: 640px) {
   [data-member-banner="rounded"] {
     --member-hero-inset: 64px;
+    --member-row-inset: 64px;
   }
 
   [data-member-banner="soft"] {
@@ -608,11 +612,6 @@ button:disabled {
   transform: scale(1.06);
 }
 
-.internal-poster-card.group:hover .home-cover-card-logo {
-  opacity: 0.9;
-  transform: translate3d(0, 0, 0);
-}
-
 .home-cover-card-overlay {
   background: rgba(0, 0, 0, 0);
   transition: background-color 520ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -631,53 +630,14 @@ button:disabled {
   opacity: 1;
 }
 
+/* Logo da escola no canto do card: fica dentro da superficie, entao cresce junto com o card no hover e
+   e rasterizada uma vez, no tamanho final. Aparece junto com o texto, sem atraso. */
 .home-cover-card-logo {
-  transform: translate3d(0, 0, 0);
-  transition:
-    opacity 300ms ease,
-    transform 560ms cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity, transform;
+  transition: opacity 300ms ease;
 }
 
 .group:hover .home-cover-card-logo {
-  opacity: 0.9;
-  transform: translate3d(-12px, -27px, 0);
-}
-
-.home-row-cover-card[data-hover-edge="left"].group:hover .home-cover-card-logo {
-  transform: translate3d(var(--home-row-card-hover-logo-shift-x, 0px), -27px, 0);
-}
-
-.home-row-cover-card[data-hover-edge="right"].group:hover .home-cover-card-logo {
-  transform: translate3d(var(--home-row-card-hover-logo-shift-x, var(--home-row-card-hover-shift-x, 0px)), -27px, 0);
-}
-
-@media (min-width: 640px) {
-  .group:hover .home-cover-card-logo {
-    transform: translate3d(-16px, -32px, 0);
-  }
-
-  .home-row-cover-card[data-hover-edge="left"].group:hover .home-cover-card-logo {
-    transform: translate3d(var(--home-row-card-hover-logo-shift-x, 0px), -32px, 0);
-  }
-
-  .home-row-cover-card[data-hover-edge="right"].group:hover .home-cover-card-logo {
-    transform: translate3d(var(--home-row-card-hover-logo-shift-x, var(--home-row-card-hover-shift-x, 0px)), -32px, 0);
-  }
-}
-
-@media (min-width: 1024px) {
-  .group:hover .home-cover-card-logo {
-    transform: translate3d(-22px, -40px, 0);
-  }
-
-  .home-row-cover-card[data-hover-edge="left"].group:hover .home-cover-card-logo {
-    transform: translate3d(var(--home-row-card-hover-logo-shift-x, 0px), -40px, 0);
-  }
-
-  .home-row-cover-card[data-hover-edge="right"].group:hover .home-cover-card-logo {
-    transform: translate3d(var(--home-row-card-hover-logo-shift-x, var(--home-row-card-hover-shift-x, 0px)), -40px, 0);
-  }
+  opacity: 0.92;
 }
 
 .home-cover-card-content {
@@ -696,6 +656,10 @@ button:disabled {
      suavizacao, quando a transicao termina. */
   .home-cover-card-content {
     will-change: opacity, transform;
+  }
+
+  .home-cover-card-logo {
+    will-change: opacity;
   }
 }
 

@@ -50,7 +50,6 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
-const homeRowCardHoverScale = 1.14;
 // Largura minima do vizinho escondido que deve ficar visivel quando o card da borda vem para frente.
 const homeRowNeighborPeekWidth = 56;
 
@@ -70,7 +69,6 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
     card.removeAttribute("data-hover-peeks-next");
     card.removeAttribute("data-hover-peeks-previous");
     card.style.removeProperty("--home-row-card-hover-shift-x");
-    card.style.removeProperty("--home-row-card-hover-logo-shift-x");
     card.style.removeProperty("--home-row-card-hover-neighbor-shift-x");
   }
 
@@ -109,7 +107,6 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
 
     leftEdgeCard.setAttribute("data-hover-edge", "left");
     leftEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${leftSurfaceShiftX}px`);
-    leftEdgeCard.style.setProperty("--home-row-card-hover-logo-shift-x", `${leftSurfaceShiftX}px`);
 
     if (previousCard) {
       leftEdgeCard.setAttribute("data-hover-peeks-previous", "true");
@@ -126,11 +123,9 @@ function syncHomeRowHoverEdges(row: HTMLDivElement | null) {
       ? Math.max(homeRowNeighborPeekWidth - (paddingRight - (nextRect.left - rightEdgeRect.right)), 0)
       : 0;
     const rightSurfaceShiftX = roundPx(-(hiddenOffset + neighborPeekOffset));
-    const rightLogoShiftX = roundPx(rightSurfaceShiftX - rightEdgeRect.width * (homeRowCardHoverScale - 1));
 
     rightEdgeCard.setAttribute("data-hover-edge", "right");
     rightEdgeCard.style.setProperty("--home-row-card-hover-shift-x", `${rightSurfaceShiftX}px`);
-    rightEdgeCard.style.setProperty("--home-row-card-hover-logo-shift-x", `${rightLogoShiftX}px`);
 
     if (nextCard) {
       rightEdgeCard.setAttribute("data-hover-peeks-next", "true");

@@ -103,24 +103,22 @@ test("home vertical cards grow inward only at carousel edges", () => {
   assert.match(rowSource, /setAttribute\("data-hover-edge", "left"\)/);
   assert.match(rowSource, /setAttribute\("data-hover-edge", "right"\)/);
   assert.match(rowSource, /removeProperty\("--home-row-card-hover-shift-x"\)/);
-  assert.match(rowSource, /removeProperty\("--home-row-card-hover-logo-shift-x"\)/);
-  assert.match(rowSource, /homeRowCardHoverScale = 1\.14/);
+  // A logo fica dentro da superficie (cresce com o card): sem deslocamento proprio.
+  assert.doesNotMatch(rowSource, /hover-logo-shift/);
+  assert.doesNotMatch(cssSource, /hover-logo-shift/);
+  assert.match(cardSource, /home-cover-card-logo pointer-events-none absolute left-3 top-3 z-30 w-\[56%\]/);
+  assert.match(cssSource, /\.group:hover \.home-cover-card-logo \{\s*opacity: 0\.92;\s*\}/);
   assert.match(rowSource, /hiddenOffset = Math\.max\(leftBoundary - leftEdgeRect\.left, 0\)/);
   assert.match(rowSource, /hiddenOffset = Math\.max\(rightEdgeRect\.right - rightBoundary, 0\)/);
   assert.match(rowSource, /leftSurfaceShiftX = roundPx\(hiddenOffset \+ neighborPeekOffset\)/);
   assert.match(rowSource, /rightSurfaceShiftX = roundPx\(-\(hiddenOffset \+ neighborPeekOffset\)\)/);
-  assert.match(rowSource, /rightLogoShiftX = roundPx\(rightSurfaceShiftX - rightEdgeRect\.width \* \(homeRowCardHoverScale - 1\)\)/);
   assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{leftSurfaceShiftX\}px`\)/);
-  assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{leftSurfaceShiftX\}px`\)/);
   assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{rightSurfaceShiftX\}px`\)/);
-  assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{rightLogoShiftX\}px`\)/);
   assert.match(cardSource, /data-home-row-card/);
   assert.doesNotMatch(cardSource, /home-row-watch-card/);
   assert.doesNotMatch(cardSource, /home-row-card-surface/);
   assert.match(cssSource, /\[data-home-row-card\]\[data-hover-edge="left"\] \.home-cover-card-surface \{\s*transform-origin: left center;/);
   assert.match(cssSource, /\[data-home-row-card\]\[data-hover-edge="right"\] \.home-cover-card-surface \{\s*transform-origin: right center;/);
-  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="left"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, 0px\), -27px, 0\);/);
-  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, var\(--home-row-card-hover-shift-x, 0px\)\), -27px, 0\);/);
 });
 
 test("a short row with two cards keeps the second card centered on hover", () => {
