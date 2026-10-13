@@ -3,7 +3,7 @@
 import { Bell, ChevronDown, ChevronUp, LockKeyhole, Play, ShoppingCart, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { usePlatformLogoImage } from "@/components/platform-branding";
@@ -526,7 +526,9 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     };
   }, [activeModuleId, item]);
 
-  useEffect(() => {
+  // Altura do painel de aulas = altura do card do modulo aberto (a partir de 1024 px). Medida antes da
+  // primeira pintura (useLayoutEffect): o painel ja nasce no tamanho certo, sem saltar um quadro depois.
+  useLayoutEffect(() => {
     if (!activeModuleId || !item) {
       return;
     }
@@ -547,7 +549,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
       ));
     }
 
-    const animationFrame = window.requestAnimationFrame(measurePanelHeight);
+    measurePanelHeight();
     const resizeObserver = "ResizeObserver" in window
       ? new ResizeObserver(measurePanelHeight)
       : null;
@@ -559,7 +561,6 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     window.addEventListener("resize", measurePanelHeight);
 
     return () => {
-      window.cancelAnimationFrame(animationFrame);
       resizeObserver?.disconnect();
       window.removeEventListener("resize", measurePanelHeight);
     };

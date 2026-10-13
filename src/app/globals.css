@@ -786,12 +786,15 @@ button:disabled {
   }
 }
 
+/* Troca entre a grade de modulos e o modulo aberto: so um fade, sem deslocamento, escala nem atrasos
+   escalonados. O modal rola suavemente ate a secao ao mesmo tempo; qualquer outro movimento somado a
+   essa rolagem (e a escala em bloco cheio de texto) virava uma "tremida" (13/10/2026). */
 .module-grid-layout {
-  animation: module-grid-layout-in 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: module-grid-layout-in 320ms ease-out both;
 }
 
 .module-focus-layout {
-  animation: module-focus-layout-in 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: module-focus-layout-in 320ms ease-out both;
 }
 
 .module-card-motion {
@@ -862,11 +865,11 @@ button:disabled {
 }
 
 .module-lessons-in {
-  animation: module-lessons-in 540ms cubic-bezier(0.16, 1, 0.3, 1) 70ms both;
+  animation: module-lessons-in 320ms ease-out both;
 }
 
 .module-secondary-grid {
-  animation: module-secondary-grid-in 500ms cubic-bezier(0.16, 1, 0.3, 1) 110ms both;
+  animation: module-secondary-grid-in 320ms ease-out both;
 }
 
 @keyframes modal-backdrop-in {
@@ -930,52 +933,40 @@ button:disabled {
 @keyframes module-grid-layout-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.992);
   }
 
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 @keyframes module-focus-layout-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 12px, 0) scale(0.992);
-  }
-
-  55% {
-    opacity: 1;
   }
 
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 @keyframes module-lessons-in {
   from {
     opacity: 0;
-    transform: translate3d(12px, 0, 0) scale(0.995);
   }
 
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 @keyframes module-secondary-grid-in {
   from {
     opacity: 0;
-    transform: translate3d(0, 8px, 0);
   }
 
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -989,24 +980,6 @@ button:disabled {
   50% {
     box-shadow: 0 0 0 6px rgba(251, 191, 36, 0);
     opacity: 0.82;
-  }
-}
-
-@media (max-width: 1023px) {
-  .module-lessons-in {
-    animation-name: module-lessons-mobile-in;
-  }
-}
-
-@keyframes module-lessons-mobile-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.995);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
