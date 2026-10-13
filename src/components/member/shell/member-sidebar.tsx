@@ -10,9 +10,9 @@ import { cn } from "@/lib/utils";
 import { getMemberSidebarSections } from "./member-shell-model";
 import { memberNavigationIcons } from "./member-navigation-icons";
 
-// Barra lateral do aluno expandida (menu hamburguer), sempre por cima da pagina com veu escuro: no
-// computador abre a partir do trilho de icones (member-rail.tsx), no celular a partir do topo. Leva a
-// logo inteira ao lado do hamburguer que fecha; perfil e Sair ficam no menu da conta do topo.
+// Barra lateral do aluno expandida (menu hamburguer), sempre por cima da pagina com veu escuro, aberta
+// pelo hamburguer do cabecalho (como no YouTube). Hamburguer e logo ficam no mesmo lugar do cabecalho;
+// perfil e Sair ficam no menu da conta do topo.
 // Gaveta modal: abre focando o primeiro item, prende o foco enquanto aberta, fecha com Esc,
 // hamburguer ou fundo e devolve o foco ao botao que abriu. Fechada fica `inert` (fora do teclado e do
 // leitor de tela), nao so escondida.
@@ -175,7 +175,7 @@ export function MemberSidebar({
         ref={panelRef}
         role="dialog"
       >
-        <div className="flex h-16 shrink-0 items-center gap-3 pl-4 pr-3">
+        <div className="flex h-16 shrink-0 items-center gap-4 px-4 sm:px-6">
           <button
             aria-label="Fechar menu"
             className="grid size-10 shrink-0 place-items-center rounded-full text-white transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none"
@@ -193,7 +193,7 @@ export function MemberSidebar({
             {logoImage ? (
               <Image
                 alt="Bunker707"
-                className="h-auto max-h-9 w-[150px] object-contain object-left"
+                className="h-auto max-h-10 w-[124px] object-contain object-left sm:w-[150px]"
                 height={35}
                 src={logoImage}
                 unoptimized={!canOptimizeImageSrc(logoImage)}

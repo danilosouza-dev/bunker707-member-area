@@ -81,6 +81,28 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   --sidebar-ring: var(--ring);
 }
 
+/* Marca > Estilo: os atributos ficam no raiz da area do aluno (AppShell). */
+[data-member-buttons="pill"] {
+  --member-button-radius: 9999px;
+}
+
+[data-member-corners="rounded"] {
+  --member-cover-radius: 16px;
+  --member-hero-content-pb: 5rem;
+  --member-hero-fade: 0;
+  --member-hero-inset: 12px;
+  --member-hero-overlap: 2rem;
+  --member-hero-radius: 20px;
+  --member-hero-top: 76px;
+}
+
+@media (min-width: 640px) {
+  /* A borda da capa alinha com a logo do cabecalho: 24 px + hamburguer de 40 px + 16 px. */
+  [data-member-corners="rounded"] {
+    --member-hero-inset: 80px;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

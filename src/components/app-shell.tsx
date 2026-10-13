@@ -9,7 +9,6 @@ import { useCallback, useEffect, useRef, useState, type ComponentProps, type Com
 import { DirectorIcon } from "@/components/member/shell/director-parts";
 import { MemberAccountMenu } from "@/components/member/shell/member-account-menu";
 import { MemberNotificationsMenu } from "@/components/member/shell/member-notifications-menu";
-import { MemberRail } from "@/components/member/shell/member-rail";
 import { getMemberSidebarSections } from "@/components/member/shell/member-shell-model";
 import { MemberSidebar } from "@/components/member/shell/member-sidebar";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
@@ -18,7 +17,7 @@ import type { PlatformDirectorChat as PlatformDirectorChatComponent } from "@/co
 import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
 import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
 import { signOutAndLeave } from "@/lib/auth/sign-out";
-import { memberStyleCssVars, normalizeMemberStyle } from "@/lib/member-style";
+import { normalizeMemberStyle } from "@/lib/member-style";
 import { cn } from "@/lib/utils";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { PlatformBrandingConfig } from "@/lib/platform-types";
@@ -42,8 +41,9 @@ declare global {
 }
 
 // Itens da barra lateral e do menu da conta: src/lib/member-navigation.ts (fonte unica), desenhados
-// por MemberRail (trilho de icones, computador), MemberSidebar (gaveta por cima, todas as larguras) e
-// MemberAccountMenu (src/components/member/shell/). O conteudo fica sempre a 80 px do trilho.
+// por MemberSidebar (gaveta por cima da pagina, aberta pelo hamburguer do cabecalho, como no YouTube)
+// e MemberAccountMenu (src/components/member/shell/). Hamburguer e logo ficam sempre no cabecalho; a
+// gaveta repete os dois no mesmo lugar ao abrir.
 const sidebarId = "member-sidebar";
 
 const accessPreviewOptions = [
@@ -142,7 +142,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   // Estilo escolhido em Area de membros > Marca: cantos (variaveis CSS no raiz) e posicao do menu.
   const style = normalizeMemberStyle(branding);
   // Menu no cabecalho (estilo Netflix): os destinos de "Estudar" viram links escritos no topo a partir de
-  // 1024 px e nao ha trilho nem gaveta nessa largura; abaixo disso o hamburguer abre a gaveta.
+  // 1024 px e o hamburguer some nessa largura; abaixo disso ele abre a gaveta como sempre.
   // Suporte e Perfil ficam no menu da conta, que ja os tem.
   const menuInHeader = style.menu === "header";
   const pathname = usePathname();
@@ -160,9 +160,6 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   const [directorOpenOnMount, setDirectorOpenOnMount] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const railMenuButtonRef = useRef<HTMLButtonElement>(null);
-  // Botao que abriu a gaveta (trilho no computador, topo no celular): recebe o foco ao fechar.
-  const sidebarTriggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     function updateHeaderState() {
@@ -236,8 +233,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
     handleProgressAwareNavigation(event, withAccessPreviewParam(href, accessPreviewMode));
   }
 
-  function openSidebar(trigger: HTMLElement | null) {
-    sidebarTriggerRef.current = trigger;
+  function openSidebar() {
     // A IA Diretor desmonta enquanto o menu está aberto; ao voltar, ela não reabre sozinha.
     setDirectorOpenOnMount(false);
     setSidebarOpen(true);
@@ -269,8 +265,8 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
 
   return (
     <PlatformBrandingProvider branding={branding}>
-    <div className="min-h-screen bg-[#141414] text-white" data-member-menu={style.menu} style={memberStyleCssVars(style)}>
-      <header className={cn("fixed left-0 right-0 top-0 z-40 overflow-hidden", !menuInHeader && "md:left-[80px]")}>
+    <div className="min-h-screen bg-[#141414] text-white" data-member-buttons={style.buttons} data-member-corners={style.corners} data-member-menu={style.menu}>
+      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden">
         <div
           aria-hidden="true"
           className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.68)_0%,rgba(0,0,0,0.26)_58%,rgba(0,0,0,0)_100%)] transition-opacity duration-300 ease-out will-change-opacity"
@@ -291,8 +287,8 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             aria-expanded={sidebarOpen}
             aria-haspopup="dialog"
             aria-label="Abrir menu"
-            className={cn("grid h-10 w-10 place-items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white", menuInHeader ? "lg:hidden" : "md:hidden", iconButtonChrome)}
-            onClick={(event) => openSidebar(event.currentTarget)}
+            className={cn("grid h-10 w-10 place-items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white", menuInHeader && "lg:hidden", iconButtonChrome)}
+            onClick={openSidebar}
             ref={menuButtonRef}
             type="button"
           >
@@ -301,7 +297,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
 
           <Link
             aria-label="Ir para o início"
-            className={cn("flex min-w-fit items-center rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white", !menuInHeader && "md:hidden")}
+            className="flex min-w-fit items-center rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
             href={homeHref}
             onClick={(event) => handleProgressAwareNavigation(event, homeHref)}
           >
@@ -396,19 +392,6 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
         </div>
       </header>
 
-      {menuInHeader ? null : (
-      <MemberRail
-        accessPreviewMode={accessPreviewMode}
-        homeHref={homeHref}
-        menuButtonRef={railMenuButtonRef}
-        menuId={sidebarId}
-        menuOpen={sidebarOpen}
-        onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
-        onOpenMenu={() => openSidebar(railMenuButtonRef.current)}
-        pathname={pathname}
-      />
-      )}
-
       <MemberSidebar
         accessPreviewMode={accessPreviewMode}
         homeHref={homeHref}
@@ -444,10 +427,10 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             </label>
           </section>
         ) : null}
-        returnFocusRef={sidebarTriggerRef}
+        returnFocusRef={menuButtonRef}
       />
 
-      <main className={cn(!menuInHeader && "md:pl-[80px]")}>{children}</main>
+      <main>{children}</main>
 
       {!sidebarOpen ? (
         directorRequested ? (

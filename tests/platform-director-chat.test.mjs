@@ -16,7 +16,7 @@ test("the authenticated member shell mounts the IA Diretor outside lesson-specif
   assert.doesNotMatch(appShellSource, /import \{ PlatformDirectorChat \} from "@\/components\/platform-director-chat"/);
   assert.match(appShellSource, /const PlatformDirectorChat = dynamic\(\s*\(\) => import\("@\/components\/platform-director-chat"\)/);
   assert.match(appShellSource, /ssr: false/);
-  assert.match(appShellSource, /<main className=\{cn\(!menuInHeader && "md:pl-\[80px\]"\)\}>\{children\}<\/main>[\s\S]*?<PlatformDirectorChat/);
+  assert.match(appShellSource, /<main>\{children\}<\/main>[\s\S]*?<PlatformDirectorChat/);
   assert.match(appShellSource, /onNavigate=\{handleDirectorNavigation\}/);
   assert.match(appShellSource, /!sidebarOpen \? \(\s*directorRequested \? \(\s*<PlatformDirectorChat defaultOpen=\{directorOpenOnMount\}/);
   assert.match(appShellSource, /<PlatformDirectorLauncher onActivate=\{activateDirectorChat\}/);
