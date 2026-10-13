@@ -161,6 +161,15 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   width: calc((100% - (var(--member-row-cols) - 1) * var(--member-row-gap)) / var(--member-row-cols));
 }
 
+@media (min-width: 640px) {
+  /* Teste do produtor (13/10/2026): capas 2:3 fixas em 284 x 426 px. Com largura fixa o ultimo card so
+     termina na borda direita quando a conta fecha; se o tamanho for aprovado, a quantidade por largura
+     de tela passa a ser calculada a partir dele. */
+  [data-member-corners="rounded"] .member-row-card {
+    width: 284px;
+  }
+}
+
 [data-member-corners="rounded"] .member-row-card-wide {
   scroll-snap-align: start;
   width: calc((100% - (var(--member-row-cols-wide) - 1) * var(--member-row-gap)) / var(--member-row-cols-wide));
