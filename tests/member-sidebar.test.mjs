@@ -196,7 +196,7 @@ test("trilho de icones no computador: simbolo, hamburguer, sem empurrar o conteu
 
   assert.match(railSource, /hidden w-\[80px\][^"]*md:flex/, "trilho fixo de 80 px so a partir de 768 px");
   assert.match(railSource, /fill=\{item\.active \? "currentColor" : "none"\}/, "ativo com icone preenchido");
-  assert.match(railSource, /\/brand\/icon-bunker\.png/, "recolhido mostra so o simbolo");
+  assert.match(railSource, /\/brand\/icon-bunker\.svg/, "recolhido mostra so o simbolo");
   assert.match(railSource, /getMemberSidebarSections\(pathname, accessPreviewMode\)/, "mesma fonte de rotas da gaveta");
   assert.match(railSource, /aria-current=\{item\.active \? "page" : undefined\}/);
   assert.match(railSource, /title=\{item\.label\}/);

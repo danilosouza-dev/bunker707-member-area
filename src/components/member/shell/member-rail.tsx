@@ -15,7 +15,7 @@ import { memberNavigationIcons } from "./member-navigation-icons";
 // trilho nunca muda de largura, entao o conteudo nunca e empurrado. Abaixo de 768 px nao ha trilho:
 // o hamburguer do topo abre a mesma gaveta.
 
-export const MEMBER_RAIL_SYMBOL_SRC = "/brand/icon-bunker.png";
+export const MEMBER_RAIL_SYMBOL_SRC = "/brand/icon-bunker.svg";
 
 type MemberRailProps = {
   accessPreviewMode?: AccessPreviewMode;
