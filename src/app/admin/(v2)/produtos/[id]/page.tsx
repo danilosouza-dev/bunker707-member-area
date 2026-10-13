@@ -54,6 +54,7 @@ export default async function ProductContentPage({ params, searchParams }: Produ
       initialModules={content.modules}
       productId={content.header.id}
       productTitle={content.header.title}
+      productThumbnailSize={content.thumbnailSize}
       requestedLessonId={lessonId}
       situation={content.header.situation}
       studentPreviewHref={content.header.studentPreviewHref}

@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useOptimistic, useState, useTransition, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { LessonEditorData, ModuleNode, ProductSituation } from "@/server/catalog/types";
+import type { LessonEditorData, ModuleNode, ProductSituation, ProductThumbnailSize } from "@/server/catalog/types";
 import { ErrorBanner } from "../error-banner";
 import { AdminLinkButton } from "../link-button";
 import { adminCard } from "../styles";
@@ -44,6 +44,8 @@ type ContentTabProps = {
   initialModules: ModuleNode[];
   productId: string;
   productTitle: string;
+  /** Tamanho da thumbnail do curso (Detalhes): recorte da capa propria dos modulos. */
+  productThumbnailSize: ProductThumbnailSize;
   requestedLessonId: string | null;
   situation: ProductSituation;
   studentPreviewHref: string;
@@ -63,6 +65,7 @@ export function ContentTab({
   initialModules,
   productId,
   productTitle,
+  productThumbnailSize,
   requestedLessonId,
   situation,
   studentPreviewHref
@@ -371,6 +374,7 @@ export function ContentTab({
             open={coverFor.open}
             productCoverUrl={productCoverUrl}
             productTitle={productTitle}
+            thumbnailSize={productThumbnailSize}
           />
         ) : null}
 

@@ -269,7 +269,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
 
   return (
     <PlatformBrandingProvider branding={branding}>
-    <div className="min-h-screen bg-[#141414] text-white" data-member-buttons={style.buttons} data-member-corners={style.corners} data-member-cover-size={style.coverSize} data-member-menu={style.menu}>
+    <div className="min-h-screen bg-[#141414] text-white" data-member-buttons={style.buttons} data-member-corners={style.corners} data-member-menu={style.menu}>
       <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden">
         <div
           aria-hidden="true"

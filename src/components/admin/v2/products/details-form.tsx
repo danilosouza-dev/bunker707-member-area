@@ -7,9 +7,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { CONFLICT_MESSAGE } from "@/server/catalog/errors";
 import { PRODUCT_FORMAT_LABELS, type ProductFormat } from "@/server/catalog/model";
-import { setProductHeroCorners, setProductImage, updateProductDetails } from "@/server/catalog/product-actions";
+import { setProductHeroCorners, setProductImage, setProductThumbnailSize, updateProductDetails } from "@/server/catalog/product-actions";
 import { shortDescriptionSchema, updateProductDetailsSchema } from "@/server/catalog/schemas";
-import type { ProductDetails, ProductHeroCorners } from "@/server/catalog/types";
+import type { ProductDetails, ProductHeroCorners, ProductThumbnailSize } from "@/server/catalog/types";
 import type { HomeModuleRowState } from "@/server/member-area/modules-model";
 import { ErrorBanner } from "../error-banner";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../form";
@@ -50,6 +50,20 @@ const DESCRIPTION_LIMIT = 300;
 
 type ImageSlot = "cover" | "hero";
 
+/** Tamanho da thumbnail do card (salva na hora). Define o recorte do envio e o tamanho do card do aluno. */
+const THUMBNAIL_SIZE_OPTIONS: ReadonlyArray<{ label: string; value: ProductThumbnailSize }> = [
+  { label: "Tamanho anterior (720 × 1040)", value: "classic" },
+  { label: "284 × 426", value: "large" }
+];
+const THUMBNAIL_SIZE_HINTS: Record<ProductThumbnailSize, string> = {
+  classic: "Recorte 9:13 em até 720 × 1040 px (imagem a partir de 540 × 780). Os cards deste produto e dos módulos ficam no tamanho anterior. Salva na hora.",
+  large: "Recorte 2:3 em 284 × 426 px (imagem a partir de 284 × 426). Os cards deste produto e dos módulos ficam com 284 × 426 no computador. Salva na hora."
+};
+const THUMBNAIL_SIZE_TOASTS: Record<ProductThumbnailSize, string> = {
+  classic: "Thumbnail no tamanho anterior",
+  large: "Thumbnail em 284 × 426"
+};
+
 /** Cantos do banner da pagina do produto (salva na hora). "Como a área" segue Marca > Estilo. */
 const HERO_CORNERS_OPTIONS: ReadonlyArray<{ label: string; value: ProductHeroCorners }> = [
   { label: "Como a área", value: "inherit" },
@@ -69,7 +83,7 @@ const HERO_CORNERS_TOASTS: Record<ProductHeroCorners, string> = {
 type SaveFailure = { message: string; status: number };
 
 const imageCopy: Record<ImageSlot, { removed: string; saved: string }> = {
-  cover: { removed: "Capa removida", saved: "Capa salva" },
+  cover: { removed: "Thumbnail removida", saved: "Thumbnail salva" },
   hero: { removed: "Imagem de destaque removida", saved: "Imagem de destaque salva" }
 };
 
@@ -97,6 +111,9 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
   const [saving, setSaving] = useState(false);
   const [heroUrl, setHeroUrl] = useState(details.heroUrl);
   const [heroCorners, setHeroCorners] = useState<ProductHeroCorners>(details.heroCorners);
+  const [thumbnailSize, setThumbnailSize] = useState<ProductThumbnailSize>(details.thumbnailSize);
+  const [thumbnailPending, setThumbnailPending] = useState(false);
+  const [thumbnailError, setThumbnailError] = useState<string | null>(null);
   const [cornersPending, setCornersPending] = useState(false);
   const [cornersError, setCornersError] = useState<string | null>(null);
   const [imagePending, setImagePending] = useState<ImageSlot | null>(null);
@@ -121,6 +138,7 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
     if (!imagePending) {
       setHeroUrl(details.heroUrl);
       setHeroCorners(details.heroCorners);
+      setThumbnailSize(details.thumbnailSize);
     }
   }
 
@@ -202,7 +220,8 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
 
     setImagePending(slot);
     setImageErrors((current) => ({ ...current, [slot]: undefined }));
-    const result = await setProductImage({ id: header.id, image: value, slot });
+    // A thumbnail sobe no tamanho escolhido acima do campo ("cover" = anterior, "coverLarge" = 284 x 426).
+    const result = await setProductImage({ id: header.id, image: value, slot: slot === "cover" && thumbnailSize === "large" ? "coverLarge" : slot });
     setImagePending(null);
 
     if (!result.ok) {
@@ -230,6 +249,30 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
         ? { onUndo: () => void saveImage(slot, previous, { undoable: false }) }
         : undefined
     );
+  }
+
+  // Tamanho da thumbnail: salva na hora e define o recorte do proximo envio (produto e modulos).
+  async function saveThumbnailSize(size: ProductThumbnailSize) {
+    if (readOnly || thumbnailPending || size === thumbnailSize) {
+      return;
+    }
+
+    const previous = thumbnailSize;
+    setThumbnailSize(size);
+    setThumbnailPending(true);
+    setThumbnailError(null);
+
+    const result = await setProductThumbnailSize({ id: header.id, thumbnailSize: size });
+    setThumbnailPending(false);
+
+    if (!result.ok) {
+      setThumbnailSize(previous);
+      setThumbnailError(result.error);
+      return;
+    }
+
+    applyHeader({ ...header, updatedAt: result.data.updatedAt });
+    adminToast.success(THUMBNAIL_SIZE_TOASTS[size]);
   }
 
   // Cantos do banner: salva na hora, como as imagens. Erro volta a escolha anterior.
@@ -375,14 +418,31 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
         </p>
       </fieldset>
 
+      <fieldset className="flex min-w-0 flex-col gap-2">
+        <FieldLegend>Tamanho da thumbnail do card</FieldLegend>
+        <PillGroup
+          ariaLabel="Tamanho da thumbnail do card"
+          disabled={readOnly || thumbnailPending}
+          name="detalhes-thumbnail-tamanho"
+          onChange={(value: ProductThumbnailSize) => void saveThumbnailSize(value)}
+          options={THUMBNAIL_SIZE_OPTIONS}
+          value={thumbnailSize}
+        />
+        {thumbnailError ? (
+          <FieldError>{thumbnailError}</FieldError>
+        ) : (
+          <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{THUMBNAIL_SIZE_HINTS[thumbnailSize]}</p>
+        )}
+      </fieldset>
+
       <ImageField
         error={imageErrors.cover}
         id="detalhes-capa"
-        label="Capa"
+        label="Thumbnail do card"
         onChange={(value) => void saveImage("cover", value)}
         pending={imagePending === "cover"}
         readOnly={readOnly}
-        slot="cover"
+        slot={thumbnailSize === "large" ? "coverLarge" : "cover"}
         value={images.cover}
       />
 

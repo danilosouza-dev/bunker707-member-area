@@ -195,6 +195,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
       aria-label={`Abrir ${item.title}`}
       className="home-cover-card home-row-cover-card member-row-card group relative aspect-[2/3] w-[9.5rem] shrink-0 cursor-pointer overflow-visible hover:z-[120] sm:w-[11.5rem] md:w-[13.5rem] lg:w-[15rem] xl:w-[16rem]"
       data-home-row-card
+      data-thumb-size={item.thumbnailSize === "large" ? "large" : undefined}
       onClick={openCardDestination}
       onFocus={prefetchContentPage}
       onKeyDown={handleCardKeyDown}

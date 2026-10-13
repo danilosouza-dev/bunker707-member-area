@@ -196,7 +196,7 @@ test("cabecalho como no YouTube: hamburguer + logo sempre visiveis, gaveta por c
   assert.doesNotMatch(appShellSource, /MemberRail|md:pl-\[80px\]|md:left-\[80px\]|memberStyleCssVars/);
   assert.match(appShellSource, /<header className="fixed left-0 right-0 top-0 z-40 overflow-hidden">/);
   assert.match(appShellSource, /<main>\{children\}<\/main>/);
-  assert.match(appShellSource, /data-member-buttons=\{style\.buttons\} data-member-corners=\{style\.corners\} data-member-cover-size=\{style\.coverSize\} data-member-menu=\{style\.menu\}/, "cantos e botoes pelos atributos do raiz");
+  assert.match(appShellSource, /data-member-buttons=\{style\.buttons\} data-member-corners=\{style\.corners\} data-member-menu=\{style\.menu\}/, "cantos e botoes pelos atributos do raiz");
   // Gaveta repete hamburguer + logo no mesmo lugar do cabecalho.
   assert.match(sidebarSource, /flex h-16 shrink-0 items-center gap-2 px-4/);
   assert.match(appShellSource, /<MemberNotificationsMenu /, "lembretes no topo, ao lado da conta");

@@ -199,6 +199,7 @@ function CourseModuleHomeCard({
         aria-label={`Ver detalhes de ${module.title}`}
         className={className}
         data-home-row-card
+        data-thumb-size={course.thumbnailSize === "large" ? "large" : undefined}
         onClick={onOpenCourseDetails}
         type="button"
       >
@@ -212,6 +213,7 @@ function CourseModuleHomeCard({
       aria-label={`Abrir ${module.title}`}
       className={className}
       data-home-row-card
+      data-thumb-size={course.thumbnailSize === "large" ? "large" : undefined}
       href={href}
       prefetch
     >

@@ -127,6 +127,9 @@ export type LessonWatchState = {
   status: LessonWatchStatus;
 };
 
+/** Tamanho da thumbnail do card escolhido no cadastro do produto: "classic" (anterior, 9:13 ate 720x1040) ou "large" (284x426). */
+export type CardThumbnailSize = "classic" | "large";
+
 export type ContentItem = {
   accessLabel?: string;
   accessModel?: ContentAccessModel;
@@ -160,6 +163,8 @@ export type ContentItem = {
   /** Liberacao calculada no servidor para o aluno da requisicao (com a data real). */
   releaseState?: MemberReleaseState;
   status: ContentStatus;
+  /** Ausente = tamanho anterior. Os modulos seguem o curso. */
+  thumbnailSize?: CardThumbnailSize;
   title: string;
 };
 
@@ -302,6 +307,8 @@ export type SavedLessonItem = {
 };
 
 export type ContentPageSettings = {
+  /** Tamanho da thumbnail do card (Detalhes do produto). Ausente = anterior. */
+  cardThumbnailSize?: CardThumbnailSize;
   coursePresentationMode?: CoursePresentationMode;
   formationCourseOpenMode?: FormationCourseOpenMode;
   homeModuleSection?: {

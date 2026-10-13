@@ -46,6 +46,7 @@ import {
   setProductHeroCornersSchema,
   setProductImageSchema,
   setProductSituationSchema,
+  setProductThumbnailSizeSchema,
   updateProductAccessSchema,
   updateProductDetailsSchema
 } from "./schemas";
@@ -68,12 +69,14 @@ import type {
   ProductImageSaved,
   ProductPublished,
   ProductSaved,
+  ProductThumbnailSizeSaved,
   PublishChecklist,
   PublishProductInput,
   RenameProductInput,
   SetProductHeroCornersInput,
   SetProductImageInput,
   SetProductSituationInput,
+  SetProductThumbnailSizeInput,
   UpdateProductAccessInput,
   UpdateProductDetailsInput
 } from "./types";
@@ -348,12 +351,54 @@ export async function setProductHeroCorners(input: SetProductHeroCornersInput): 
   });
 }
 
-/** [catalog.write] Capa (ate 720×1080) ou hero (1920×720) recortados no cliente em WebP; null remove. */
+/**
+ * [catalog.write] Tamanho da thumbnail do card (Detalhes): "classic" (anterior, nao gravado) ou "large"
+ * (284 x 426). Define o recorte dos proximos envios (produto e modulos) e o tamanho do card do aluno.
+ */
+export async function setProductThumbnailSize(input: SetProductThumbnailSizeInput): Promise<ActionResult<ProductThumbnailSizeSaved>> {
+  return runAdminAction("catalog.write", setProductThumbnailSizeSchema, input, async ({ input: data }) => {
+    const db = catalogDb();
+    await requireProductRow(data.id, db);
+    await patchProductSettings(
+      data.id,
+      data.thumbnailSize === "large" ? { set: { cardThumbnailSize: "large" } } : { unset: ["cardThumbnailSize"] },
+      db
+    );
+
+    const row = await updateRowGuarded<{ updated_at: string }>({
+      columns: "id,updated_at",
+      db,
+      id: data.id,
+      notFoundMessage: PRODUCT_NOT_FOUND,
+      patch: {},
+      table: "content_items"
+    });
+
+    invalidateCatalog({ from: "action" });
+
+    return { thumbnailSize: data.thumbnailSize, updatedAt: row.updated_at };
+  });
+}
+
+/**
+ * [catalog.write] Thumbnail do card (slot "cover" 720×1040 ou "coverLarge" 284×426, conforme o tamanho
+ * escolhido) ou hero (1920×720), recortados no cliente em WebP; null remove.
+ */
 export async function setProductImage(input: SetProductImageInput): Promise<ActionResult<ProductImageSaved>> {
   return runAdminAction("catalog.write", setProductImageSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     await requireProductRow(data.id, db);
     const url = await persistProductImage(data.slot, data.id, data.image, "image");
+    const isCover = data.slot !== "hero";
+
+    if (isCover && url) {
+      // O tamanho da thumbnail e o do recorte enviado: o card do aluno segue (os modulos seguem o curso).
+      await patchProductSettings(
+        data.id,
+        data.slot === "coverLarge" ? { set: { cardThumbnailSize: "large" } } : { unset: ["cardThumbnailSize"] },
+        db
+      );
+    }
 
     if (data.slot === "hero") {
       if (!url) {
@@ -388,13 +433,13 @@ export async function setProductImage(input: SetProductImageInput): Promise<Acti
       db,
       id: data.id,
       notFoundMessage: PRODUCT_NOT_FOUND,
-      patch: data.slot === "cover" ? { image: url ?? "" } : {},
+      patch: isCover ? { image: url ?? "" } : {},
       table: "content_items"
     });
 
     invalidateCatalog({ from: "action" });
 
-    return { slot: data.slot, updatedAt: row.updated_at, url };
+    return { slot: isCover ? "cover" : "hero", updatedAt: row.updated_at, url };
   });
 }
 

@@ -1155,7 +1155,7 @@ Reordenar aceita a estrutura que ja existe ate o limite da importacao de playlis
 
 ### Imagens do produto
 
-Capa (WebP 2:3, ate 720×1080; imagem menor sai no tamanho dela, sem ampliar) e imagem de topo (WebP 1920×720) sao recortadas no navegador; o servidor confere a medida no cabecalho do WebP, envia ao Storage (`content-assets`, caminho `content/{id}/{cover|hero}`) e grava so a URL publica (capa em `content_items.image`, topo em `content_page_settings.settings.hero`). Data URL nunca chega ao banco.
+Thumbnail do card (WebP no tamanho escolhido no cadastro do produto: tamanho anterior 9:13 ate 720×1040, imagem menor sai no tamanho dela, sem ampliar; ou 284×426 em 2:3, gravado em `content_page_settings.settings.cardThumbnailSize = "large"`, ausente = tamanho anterior) e imagem de topo (WebP 1920×720) sao recortadas no navegador; o servidor confere a medida no cabecalho do WebP (slot `cover`, `coverLarge` ou `hero`), envia ao Storage (`content-assets`, caminho `content/{id}/{cover|hero}`) e grava so a URL publica (thumbnail em `content_items.image`, topo em `content_page_settings.settings.hero`). A capa propria dos modulos segue o tamanho do curso. Data URL nunca chega ao banco.
 
 ### Edicao concorrente
 

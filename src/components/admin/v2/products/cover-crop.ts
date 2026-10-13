@@ -1,4 +1,5 @@
-// Recorte de imagem no cliente (docs/17 §1.6.2 e §2.3): capa 2:3 (WebP ate 720×1080) e imagem de
+// Recorte de imagem no cliente (docs/17 §1.6.2 e §2.3): thumbnail do card no tamanho anterior (9:13, WebP
+// ate 720×1040) ou em 284×426 (2:3), conforme o cadastro do produto; imagem de
 // destaque 8:3 (WebP 1920×720), ate 150 KB; na Area de membros, imagem lateral do login 4:5
 // (WebP 1200×1500) e imagem de fundo do login 16:9 (WebP 1920×1080), ate 250 KB. Modulo puro (sem
 // React, sem DOM, sem imports): a geometria do recorte, os limites de zoom e a escolha da qualidade
@@ -6,7 +7,7 @@
 // o desenho no canvas fica em image-crop-dialog.tsx. As mesmas medidas valem no servidor
 // (IMAGE_UPLOAD_SPECS em src/server/catalog/webp.ts); o teste confere que as duas listas batem.
 
-export type ImageSlot = "cover" | "hero" | "loginSide" | "loginBackground";
+export type ImageSlot = "cover" | "coverLarge" | "hero" | "loginSide" | "loginBackground";
 
 export type CropSpec = {
   /** Nome no texto da tela ("capa", "imagem de destaque"). */
@@ -35,16 +36,28 @@ export const MAX_LARGE_IMAGE_DATA_URL_LENGTH = 560_000;
 
 export const IMAGE_SPECS: Record<ImageSlot, CropSpec> = {
   cover: {
-    label: "capa",
+    // Tamanho anterior da thumbnail (escolhido no cadastro do produto). Imagem menor que a saida sai
+    // no tamanho dela, sem ampliar (outputSizeFor).
+    label: "thumbnail do card",
     maxBytes: MAX_IMAGE_BYTES,
     maxDataUrlLength: MAX_IMAGE_DATA_URL_LENGTH,
-    // 2:3 e a proporcao do card do aluno. Minimo baixo (pedido do produtor, 13/10/2026) para testar
-    // capas pequenas; imagem menor que a saida sai no tamanho dela, sem ampliar (outputSizeFor).
+    minHeight: 780,
+    minWidth: 540,
+    orientation: "portrait",
+    outputHeight: 1040,
+    outputWidth: 720,
+    ratioLabel: "9:13"
+  },
+  coverLarge: {
+    // Thumbnail 284 x 426 (pedido do produtor, 13/10/2026): a proporcao 2:3 do card do aluno.
+    label: "thumbnail do card",
+    maxBytes: MAX_IMAGE_BYTES,
+    maxDataUrlLength: MAX_IMAGE_DATA_URL_LENGTH,
     minHeight: 426,
     minWidth: 284,
     orientation: "portrait",
-    outputHeight: 1080,
-    outputWidth: 720,
+    outputHeight: 426,
+    outputWidth: 284,
     ratioLabel: "2:3"
   },
   hero: {
@@ -239,5 +252,9 @@ export function describeEncodingProblem(error: "unsupported" | "too_large") {
 
 /** Frase de ajuda abaixo do campo de imagem. */
 export function describeImageRequirement(spec: CropSpec) {
+  if (spec.minWidth === spec.outputWidth && spec.minHeight === spec.outputHeight) {
+    return `Qualquer imagem a partir de ${spec.minWidth}×${spec.minHeight} px serve; ela sai com ${spec.outputWidth}×${spec.outputHeight} px. Você ajusta o recorte ${spec.ratioLabel} em seguida.`;
+  }
+
   return `Qualquer imagem a partir de ${spec.minWidth}×${spec.minHeight} px serve; de ${spec.outputWidth}×${spec.outputHeight} px para cima fica nítida em qualquer tela. Você ajusta o recorte ${spec.ratioLabel} em seguida.`;
 }

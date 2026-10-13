@@ -7,7 +7,7 @@ import { checkProductImage, decodeWebpDataUrl, type ProductImageSlot } from "./w
 export { readWebpDimensions } from "./webp";
 
 /**
- * Capa (720×1040) ou hero (1920×720) do produto. Recebe o WebP recortado no cliente (data URL) ou um
+ * Thumbnail do card (720×1040 ou 284×426, conforme o slot) ou hero (1920×720) do produto. Recebe o WebP recortado no cliente (data URL) ou um
  * link https colado; confere a medida no cabecalho do WebP, envia ao Storage (bucket de conteudo, mesmo
  * caminho do admin legado) e devolve so a URL publica. Data URL nunca chega ao banco.
  * `null`/vazio = remover a imagem.
@@ -35,7 +35,8 @@ export async function persistProductImage(
     throw new CatalogFieldError(field, check.message);
   }
 
-  const url = await persistImageAsset(value, `content/${productId}/${slot}`);
+  // Os dois tamanhos de thumbnail moram no mesmo caminho da capa.
+  const url = await persistImageAsset(value, `content/${productId}/${slot === "coverLarge" ? "cover" : slot}`);
 
   if (!url || url.startsWith("data:")) {
     throw new Error("Imagem do produto nao foi enviada ao armazenamento.");

@@ -1,11 +1,13 @@
 // Validacao das imagens enviadas pelo admin no servidor (docs/17 §2.3, "Imagens"). O cliente recorta e
-// redimensiona (WebP ate 720×1080 para capa, 1920×720 para hero, alvo ≤ 150 KB; no login, 1200×1500 para a
+// redimensiona (thumbnail do card em WebP 9:13 ate 720×1040 ou 2:3 em 284×426, conforme o tamanho escolhido
+// no cadastro; 1920×720 para hero, alvo ≤ 150 KB; no login, 1200×1500 para a
 // imagem lateral e 1920×1080 para a de fundo, alvo ≤ 250 KB); o servidor nao confia no navegador: le as
 // dimensoes no cabecalho do WebP antes de enviar ao Storage. Modulo puro (sem Buffer, sem "server-only")
 // para tests/catalog-server.test.mjs carregar direto pelo Node. As medidas sao as mesmas de IMAGE_SPECS
 // (src/components/admin/v2/products/cover-crop.ts); tests/member-area-foundation.test.mjs confere.
 
-export type ProductImageSlot = "cover" | "hero";
+/** "cover" = thumbnail no tamanho anterior (9:13); "coverLarge" = thumbnail 284×426 (2:3). Os dois gravam content_items.image. */
+export type ProductImageSlot = "cover" | "coverLarge" | "hero";
 /** Slots aceitos pelo servidor: os do produto e os da Area de membros (login). */
 export type ImageUploadSlot = ProductImageSlot | "loginSide" | "loginBackground";
 
@@ -18,7 +20,8 @@ export const MAX_PRODUCT_IMAGE_BYTES = 230 * 1024;
 export const MAX_LARGE_IMAGE_BYTES = 420_000;
 
 export const IMAGE_UPLOAD_SPECS: Record<ImageUploadSlot, ImageUploadSpec> = {
-  cover: { height: 1080, label: "capa", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 284, width: 720 },
+  cover: { height: 1040, label: "thumbnail do card", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 540, width: 720 },
+  coverLarge: { height: 426, label: "thumbnail do card", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 284, width: 284 },
   hero: { height: 720, label: "imagem de topo", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 1440, width: 1920 },
   loginBackground: { height: 1080, label: "imagem de fundo", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 1280, width: 1920 },
   loginSide: { height: 1500, label: "imagem lateral", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 800, width: 1200 }
@@ -26,6 +29,7 @@ export const IMAGE_UPLOAD_SPECS: Record<ImageUploadSlot, ImageUploadSpec> = {
 
 export const PRODUCT_IMAGE_SPECS: Record<ProductImageSlot, ImageUploadSpec> = {
   cover: IMAGE_UPLOAD_SPECS.cover,
+  coverLarge: IMAGE_UPLOAD_SPECS.coverLarge,
   hero: IMAGE_UPLOAD_SPECS.hero
 };
 
@@ -115,7 +119,7 @@ export function decodeWebpDataUrl(value: string): Uint8Array | null {
 export type ProductImageCheck = { ok: true; height: number; width: number } | { message: string; ok: false };
 
 /**
- * Confere tamanho e medida do recorte: ate a saida do slot (720×1080 na capa, 1920×720 no hero, e os do
+ * Confere tamanho e medida do recorte: ate a saida do slot (720×1040 ou 284×426 na thumbnail, 1920×720 no hero, e os do
  * login), na mesma proporcao (1 px de arredondamento) e nunca abaixo da menor origem aceita.
  */
 export function checkProductImage(slot: ImageUploadSlot, bytes: Uint8Array | null): ProductImageCheck {

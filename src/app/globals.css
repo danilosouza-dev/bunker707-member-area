@@ -196,9 +196,10 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 }
 
 @media (min-width: 640px) {
-  /* Marca > Estilo > Thumbnails dos cards "284 x 426": cards 2:3 fixos (vale nos dois estilos de
-     cantos). Com largura fixa o ultimo card so termina na borda direita quando a conta fecha. */
-  [data-member-cover-size="large"] .member-row-card {
+  /* Produto > Detalhes > Tamanho da thumbnail do card "284 x 426": o card do produto (e dos seus
+     modulos) fica 2:3 fixo, nos dois estilos de cantos. Com largura fixa o ultimo card so termina na
+     borda direita quando a conta fecha. */
+  .member-row-card[data-thumb-size="large"] {
     width: 284px;
   }
 }
