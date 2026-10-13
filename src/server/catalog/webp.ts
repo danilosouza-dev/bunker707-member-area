@@ -1,5 +1,5 @@
 // Validacao das imagens enviadas pelo admin no servidor (docs/17 §2.3, "Imagens"). O cliente recorta e
-// redimensiona (WebP 720×1040 para capa, 1920×720 para hero, alvo ≤ 150 KB; no login, 1200×1500 para a
+// redimensiona (WebP ate 720×1080 para capa, 1920×720 para hero, alvo ≤ 150 KB; no login, 1200×1500 para a
 // imagem lateral e 1920×1080 para a de fundo, alvo ≤ 250 KB); o servidor nao confia no navegador: le as
 // dimensoes no cabecalho do WebP antes de enviar ao Storage. Modulo puro (sem Buffer, sem "server-only")
 // para tests/catalog-server.test.mjs carregar direto pelo Node. As medidas sao as mesmas de IMAGE_SPECS
@@ -9,7 +9,8 @@ export type ProductImageSlot = "cover" | "hero";
 /** Slots aceitos pelo servidor: os do produto e os da Area de membros (login). */
 export type ImageUploadSlot = ProductImageSlot | "loginSide" | "loginBackground";
 
-export type ImageUploadSpec = { height: number; label: string; maxBytes: number; width: number };
+/** width × height = saida do recorte; minWidth = menor origem aceita (o cliente nunca amplia, entao a imagem pode chegar menor). */
+export type ImageUploadSpec = { height: number; label: string; maxBytes: number; minWidth: number; width: number };
 
 /** Teto do arquivo decodificado (o schema limita o texto base64 a 300 mil caracteres, ~220 KB). */
 export const MAX_PRODUCT_IMAGE_BYTES = 230 * 1024;
@@ -17,10 +18,10 @@ export const MAX_PRODUCT_IMAGE_BYTES = 230 * 1024;
 export const MAX_LARGE_IMAGE_BYTES = 420_000;
 
 export const IMAGE_UPLOAD_SPECS: Record<ImageUploadSlot, ImageUploadSpec> = {
-  cover: { height: 1040, label: "capa", maxBytes: MAX_PRODUCT_IMAGE_BYTES, width: 720 },
-  hero: { height: 720, label: "imagem de topo", maxBytes: MAX_PRODUCT_IMAGE_BYTES, width: 1920 },
-  loginBackground: { height: 1080, label: "imagem de fundo", maxBytes: MAX_LARGE_IMAGE_BYTES, width: 1920 },
-  loginSide: { height: 1500, label: "imagem lateral", maxBytes: MAX_LARGE_IMAGE_BYTES, width: 1200 }
+  cover: { height: 1080, label: "capa", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 284, width: 720 },
+  hero: { height: 720, label: "imagem de topo", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 1440, width: 1920 },
+  loginBackground: { height: 1080, label: "imagem de fundo", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 1280, width: 1920 },
+  loginSide: { height: 1500, label: "imagem lateral", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 800, width: 1200 }
 };
 
 export const PRODUCT_IMAGE_SPECS: Record<ProductImageSlot, ImageUploadSpec> = {
@@ -113,7 +114,10 @@ export function decodeWebpDataUrl(value: string): Uint8Array | null {
 
 export type ProductImageCheck = { ok: true; height: number; width: number } | { message: string; ok: false };
 
-/** Confere tamanho e medida exata do recorte (720×1040 na capa, 1920×720 no hero, e os do login). */
+/**
+ * Confere tamanho e medida do recorte: ate a saida do slot (720×1080 na capa, 1920×720 no hero, e os do
+ * login), na mesma proporcao (1 px de arredondamento) e nunca abaixo da menor origem aceita.
+ */
 export function checkProductImage(slot: ImageUploadSlot, bytes: Uint8Array | null): ProductImageCheck {
   const spec = IMAGE_UPLOAD_SPECS[slot];
 
@@ -131,9 +135,11 @@ export function checkProductImage(slot: ImageUploadSlot, bytes: Uint8Array | nul
     return { message: "Envie a imagem recortada (WebP).", ok: false };
   }
 
-  if (dimensions.width !== spec.width || dimensions.height !== spec.height) {
+  const sameRatio = Math.abs(dimensions.width * spec.height - dimensions.height * spec.width) <= spec.width;
+
+  if (dimensions.width > spec.width || dimensions.height > spec.height || dimensions.width < spec.minWidth || !sameRatio) {
     return {
-      message: `A ${spec.label} precisa ter ${spec.width}×${spec.height} px. Recorte de novo.`,
+      message: `A ${spec.label} precisa ter até ${spec.width}×${spec.height} px, na proporção do recorte. Recorte de novo.`,
       ok: false
     };
   }

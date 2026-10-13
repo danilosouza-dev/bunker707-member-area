@@ -1155,7 +1155,7 @@ Reordenar aceita a estrutura que ja existe ate o limite da importacao de playlis
 
 ### Imagens do produto
 
-Capa (WebP 720×1040) e imagem de topo (WebP 1920×720) sao recortadas no navegador; o servidor confere a medida no cabecalho do WebP, envia ao Storage (`content-assets`, caminho `content/{id}/{cover|hero}`) e grava so a URL publica (capa em `content_items.image`, topo em `content_page_settings.settings.hero`). Data URL nunca chega ao banco.
+Capa (WebP 2:3, ate 720×1080; imagem menor sai no tamanho dela, sem ampliar) e imagem de topo (WebP 1920×720) sao recortadas no navegador; o servidor confere a medida no cabecalho do WebP, envia ao Storage (`content-assets`, caminho `content/{id}/{cover|hero}`) e grava so a URL publica (capa em `content_items.image`, topo em `content_page_settings.settings.hero`). Data URL nunca chega ao banco.
 
 ### Edicao concorrente
 

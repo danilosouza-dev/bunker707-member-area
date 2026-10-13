@@ -6,20 +6,21 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ErrorBanner } from "../error-banner";
 import {
-  IMAGE_SPECS,
-  WEBP_QUALITY_STEPS,
   aspectRatioOf,
   chooseEncodedImage,
   cropRect,
   dataUrlByteLength,
   describeEncodingProblem,
+  IMAGE_SPECS,
   initialCropState,
   isWebpDataUrl,
   maxZoomFor,
+  outputSizeFor,
   panCrop,
-  zoomCrop,
   type CropState,
-  type ImageSlot
+  type ImageSlot,
+  WEBP_QUALITY_STEPS,
+  zoomCrop
 } from "./cover-crop";
 import { ProductDialog } from "./dialog-frame";
 
@@ -123,8 +124,9 @@ export function ImageCropDialog({ onCancel, onConfirm, open, slot, source }: Ima
 
     try {
       const canvas = document.createElement("canvas");
-      canvas.width = spec.outputWidth;
-      canvas.height = spec.outputHeight;
+      const output = outputSizeFor(rect, spec);
+      canvas.width = output.width;
+      canvas.height = output.height;
       const context = canvas.getContext("2d");
 
       if (!context) {
@@ -133,7 +135,7 @@ export function ImageCropDialog({ onCancel, onConfirm, open, slot, source }: Ima
 
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = "high";
-      context.drawImage(source.element, rect.x, rect.y, rect.width, rect.height, 0, 0, spec.outputWidth, spec.outputHeight);
+      context.drawImage(source.element, rect.x, rect.y, rect.width, rect.height, 0, 0, output.width, output.height);
 
       const attempts: string[] = [];
 
@@ -165,7 +167,7 @@ export function ImageCropDialog({ onCancel, onConfirm, open, slot, source }: Ima
   return (
     <ProductDialog
       className={spec.orientation === "landscape" ? "max-w-[720px]" : "max-w-[480px]"}
-      description={`Arraste para posicionar e use o zoom. A ${spec.label} fica com ${spec.outputWidth}×${spec.outputHeight} px.`}
+      description={`Arraste para posicionar e use o zoom. A ${spec.label} sai com até ${spec.outputWidth}×${spec.outputHeight} px, sem ampliar imagens menores.`}
       footer={
         <>
           <Button className="px-4" disabled={processing} onClick={onCancel} type="button" variant="ghost">

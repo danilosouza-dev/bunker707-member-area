@@ -1,4 +1,4 @@
-// Recorte de imagem no cliente (docs/17 §1.6.2 e §2.3): capa 9:13 (WebP 720×1040) e imagem de
+// Recorte de imagem no cliente (docs/17 §1.6.2 e §2.3): capa 2:3 (WebP ate 720×1080) e imagem de
 // destaque 8:3 (WebP 1920×720), ate 150 KB; na Area de membros, imagem lateral do login 4:5
 // (WebP 1200×1500) e imagem de fundo do login 16:9 (WebP 1920×1080), ate 250 KB. Modulo puro (sem
 // React, sem DOM, sem imports): a geometria do recorte, os limites de zoom e a escolha da qualidade
@@ -38,12 +38,14 @@ export const IMAGE_SPECS: Record<ImageSlot, CropSpec> = {
     label: "capa",
     maxBytes: MAX_IMAGE_BYTES,
     maxDataUrlLength: MAX_IMAGE_DATA_URL_LENGTH,
-    minHeight: 780,
-    minWidth: 540,
+    // 2:3 e a proporcao do card do aluno. Minimo baixo (pedido do produtor, 13/10/2026) para testar
+    // capas pequenas; imagem menor que a saida sai no tamanho dela, sem ampliar (outputSizeFor).
+    minHeight: 426,
+    minWidth: 284,
     orientation: "portrait",
-    outputHeight: 1040,
+    outputHeight: 1080,
     outputWidth: 720,
-    ratioLabel: "9:13"
+    ratioLabel: "2:3"
   },
   hero: {
     label: "imagem de destaque",
@@ -80,7 +82,20 @@ export const IMAGE_SPECS: Record<ImageSlot, CropSpec> = {
   }
 };
 
-/** Proporcao CSS (aspect-ratio) da saida, ex.: "720 / 1040". */
+/**
+ * Tamanho final do arquivo: o da saida do slot ou, quando o recorte tem menos pixels que ela, o do
+ * proprio recorte na mesma proporcao. Nunca amplia (ampliar so borra).
+ */
+export function outputSizeFor(rect: { width: number }, spec: Pick<CropSpec, "outputHeight" | "outputWidth">) {
+  const scale = Math.min(1, rect.width / spec.outputWidth);
+
+  return {
+    height: Math.max(1, Math.round(spec.outputHeight * scale)),
+    width: Math.max(1, Math.round(spec.outputWidth * scale))
+  };
+}
+
+/** Proporcao CSS (aspect-ratio) da saida, ex.: "720 / 1080". */
 export function aspectRatioOf(spec: Pick<CropSpec, "outputHeight" | "outputWidth">) {
   return `${spec.outputWidth} / ${spec.outputHeight}`;
 }
@@ -224,5 +239,5 @@ export function describeEncodingProblem(error: "unsupported" | "too_large") {
 
 /** Frase de ajuda abaixo do campo de imagem. */
 export function describeImageRequirement(spec: CropSpec) {
-  return `Qualquer imagem a partir de ${spec.minWidth}×${spec.minHeight} px serve. Você ajusta o recorte ${spec.ratioLabel} em seguida.`;
+  return `Qualquer imagem a partir de ${spec.minWidth}×${spec.minHeight} px serve; de ${spec.outputWidth}×${spec.outputHeight} px para cima fica nítida em qualquer tela. Você ajusta o recorte ${spec.ratioLabel} em seguida.`;
 }
