@@ -32,7 +32,7 @@ export const MEMBER_BUTTON_OPTIONS: ReadonlyArray<{ description: string; label: 
 
 export const MEMBER_MENU_OPTIONS: ReadonlyArray<{ description: string; label: string; value: MemberMenuPlacement }> = [
   { description: "Trilho de ícones fixo à esquerda; o menu completo abre por cima da página.", label: "Barra lateral", value: "sidebar" },
-  { description: "Hambúrguer e logo no cabeçalho, sem trilho; o menu completo abre por cima da página.", label: "No cabeçalho", value: "header" }
+  { description: "Links escritos no cabeçalho, como na Netflix, sem barra lateral no computador; no celular o hambúrguer abre o menu.", label: "No cabeçalho", value: "header" }
 ];
 
 function pick<Value extends string>(value: unknown, allowed: readonly Value[], fallback: Value): Value {

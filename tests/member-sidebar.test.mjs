@@ -207,6 +207,9 @@ test("trilho de icones no computador: simbolo, hamburguer, sem empurrar o conteu
   assert.match(appShellSource, /<header className=\{cn\("fixed left-0 right-0 top-0 z-40 overflow-hidden", !menuInHeader && "md:left-\[80px\]"\)\}>/);
   assert.match(appShellSource, /<main className=\{cn\(!menuInHeader && "md:pl-\[80px\]"\)\}>/, "conteudo ao lado do trilho; a gaveta abre por cima");
   assert.match(appShellSource, /\{menuInHeader \? null : \(\s*<MemberRail/);
+  // Menu no cabecalho: links escritos a partir de 1024 px (estilo Netflix) e hamburguer so abaixo disso.
+  assert.match(appShellSource, /<nav aria-label="Navegação principal" className="ml-3 hidden min-w-0 items-center gap-1 lg:flex">/);
+  assert.match(appShellSource, /menuInHeader \? "lg:hidden" : "md:hidden"/);
   assert.match(appShellSource, /style=\{memberStyleCssVars\(style\)\}/, "cantos e botoes entram como variaveis CSS no raiz");
   assert.match(appShellSource, /<MemberNotificationsMenu /, "lembretes no topo, ao lado da conta");
   assert.match(notificationsSource, /Nenhum lembrete por enquanto\./, "sem lembrete inventado");

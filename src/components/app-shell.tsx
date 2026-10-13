@@ -10,6 +10,7 @@ import { DirectorIcon } from "@/components/member/shell/director-parts";
 import { MemberAccountMenu } from "@/components/member/shell/member-account-menu";
 import { MemberNotificationsMenu } from "@/components/member/shell/member-notifications-menu";
 import { MemberRail } from "@/components/member/shell/member-rail";
+import { getMemberSidebarSections } from "@/components/member/shell/member-shell-model";
 import { MemberSidebar } from "@/components/member/shell/member-sidebar";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { PlatformBrandingProvider } from "@/components/platform-branding";
@@ -140,8 +141,14 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   const logoImage = branding === undefined ? "/brand/logo-bunker.svg" : branding.logoImage;
   // Estilo escolhido em Area de membros > Marca: cantos (variaveis CSS no raiz) e posicao do menu.
   const style = normalizeMemberStyle(branding);
+  // Menu no cabecalho (estilo Netflix): os destinos de "Estudar" viram links escritos no topo a partir de
+  // 1024 px e nao ha trilho nem gaveta nessa largura; abaixo disso o hamburguer abre a gaveta.
+  // Suporte e Perfil ficam no menu da conta, que ja os tem.
   const menuInHeader = style.menu === "header";
   const pathname = usePathname();
+  const headerLinks = menuInHeader
+    ? (getMemberSidebarSections(pathname, accessPreviewMode).find((section) => section.id === "estudar")?.items ?? [])
+    : [];
   const router = useNavigationFeedbackRouter();
   const { startNavigation } = useNavigationFeedback();
   const searchParams = useSearchParams();
@@ -284,7 +291,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             aria-expanded={sidebarOpen}
             aria-haspopup="dialog"
             aria-label="Abrir menu"
-            className={cn("grid h-10 w-10 place-items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white", !menuInHeader && "md:hidden", iconButtonChrome)}
+            className={cn("grid h-10 w-10 place-items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white", menuInHeader ? "lg:hidden" : "md:hidden", iconButtonChrome)}
             onClick={(event) => openSidebar(event.currentTarget)}
             ref={menuButtonRef}
             type="button"
@@ -312,6 +319,25 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
               <span className="text-lg font-black uppercase tracking-wide text-white sm:text-xl">Bunker707</span>
             )}
           </Link>
+
+          {menuInHeader ? (
+            <nav aria-label="Navegação principal" className="ml-3 hidden min-w-0 items-center gap-1 lg:flex">
+              {headerLinks.map((item) => (
+                <Link
+                  aria-current={item.active ? "page" : undefined}
+                  className={cn(
+                    "rounded-full px-3 py-2 text-sm whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none",
+                    item.active ? "bg-white/[0.12] font-bold text-white" : "font-medium text-zinc-300 hover:text-white"
+                  )}
+                  href={item.href}
+                  key={item.key}
+                  onClick={(event) => handleProgressAwareNavigation(event, item.href)}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          ) : null}
 
           <div className={`ml-auto flex min-w-0 items-center gap-2 ${searchOpen ? "max-sm:flex-1" : ""}`}>
             {showPreviewControl ? (

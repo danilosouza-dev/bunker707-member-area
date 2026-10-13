@@ -260,7 +260,7 @@ Datas mostradas ao aluno usam `src/lib/member-format.ts` (fuso America/Sao_Paulo
 
 - Gravado em `platform_settings.branding.style` (`src/lib/member-style.ts`): `corners` (`soft` | `rounded`), `buttons` (`soft` | `pill`) e `menu` (`sidebar` | `header`). Padrao: discreto, botoes discretos, menu na barra lateral.
 - Cantos e botoes viram variaveis CSS no raiz do `AppShell` (`--member-cover-radius` 10/16 px, `--member-button-radius` 8 px/pilula, `--member-hero-radius`, `--member-hero-inset` e `--member-hero-top` para o destaque com margem e cantos redondos no modo arredondado). `MemberButton`, o botao do destaque, `MemberPosterCard`, `MemberLessonCard` e o card de continuar assistindo usam essas variaveis; os padroes ficam em `globals.css` (`:root`), entao a previa do admin desenha o modo discreto.
-- Menu no cabecalho: sem trilho e sem recuo de 80 px; hamburguer + logo no topo em todas as larguras, a gaveta continua abrindo por cima. O esqueleto de carregamento desenha sempre o trilho (nao le a escolha).
+- Menu no cabecalho (estilo Netflix): sem trilho e sem recuo de 80 px; a partir de 1024 px os destinos de `Estudar` viram links escritos no topo (ativo em pilula `white/[0.12]` e negrito) e nao ha hamburguer nem gaveta; abaixo disso o hamburguer abre a gaveta. Suporte e Perfil ficam no menu da conta. O esqueleto de carregamento desenha sempre o trilho (nao le a escolha).
 
 ## Barra lateral e menu da conta (aluno)
 
