@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
 import type { ReactNode } from "react";
 import { AdminShellV2 } from "@/components/admin/v2/admin-shell";
 import type { AdminFilterProduct } from "@/components/admin/v2/filters";
 import { formatAdminRole } from "@/components/admin/v2/format";
-import { ADMIN_SIDEBAR_COOKIE, type AdminNavCounts } from "@/components/admin/v2/nav";
+import type { AdminNavCounts } from "@/components/admin/v2/nav";
 import { readTodayAlertSummary } from "@/server/admin/today";
 import { requirePageAdmin } from "@/server/auth/guards";
 import { getUserDisplayName } from "@/server/auth/session";
@@ -30,14 +29,12 @@ export const metadata: Metadata = {
 export default async function AdminV2Layout({ children }: { children: ReactNode }) {
   const { role, user } = await requirePageAdmin();
   const { fullName } = getUserDisplayName(user);
-  const [counts, products, cookieStore] = await Promise.all([readNavCounts(), readProductFilterOptions(), cookies()]);
-  const sidebarCollapsed = cookieStore.get(ADMIN_SIDEBAR_COOKIE)?.value === "collapsed";
+  const [counts, products] = await Promise.all([readNavCounts(), readProductFilterOptions()]);
 
   return (
     <AdminShellV2
       account={{ email: user.email ?? "", name: fullName, roleLabel: formatAdminRole(role) }}
       counts={counts}
-      initialCollapsed={sidebarCollapsed}
       products={products}
     >
       {children}

@@ -446,13 +446,20 @@ test("botao e foco do admin sao temados uma vez em globals.css (36/32/44 px do p
   assert.doesNotMatch(sourceOf("src/components/admin/v2/save-bar.tsx"), /\bh-10\b|rounded-lg h-|focus-visible:/);
 });
 
-test("barra superior: busca a esquerda, Periodo e Produto so no escopo, sem migalha e sem avatar", () => {
+test("barra superior: busca a esquerda, Periodo e Produto so no escopo, lembretes e conta a direita, sem migalha", () => {
   const topbar = sourceOf("src/components/admin/v2/admin-topbar.tsx");
 
   assert.match(topbar, /<GlobalSearch \/>/);
   assert.match(topbar, /getAdminTopbarScope\(pathname\)/);
   assert.match(topbar, /getAdminMobileTitle\(pathname\)/);
-  assert.doesNotMatch(topbar, /Breadcrumb|AccountMenu|Busca em breve/, "sem migalha, sem avatar e sem o aviso antigo");
+  assert.doesNotMatch(topbar, /Breadcrumb|Busca em breve/, "sem migalha e sem o aviso antigo");
+  assert.match(topbar, /<NotificationsMenu counts=\{counts\} \/>/);
+  assert.match(topbar, /<AccountMenu account=\{account\} \/>/, "a conta fica na barra superior");
+
+  const notifications = sourceOf("src/components/admin/v2/notifications-menu.tsx");
+  assert.match(notifications, /counts\.hoje/);
+  assert.match(notifications, /counts\.comunidade/);
+  assert.match(notifications, /Tudo em dia\./, "sem pendencia, nunca um exemplo");
 
   const search = sourceOf("src/components/admin/v2/global-search.tsx");
   assert.match(search, /<input/);
@@ -498,29 +505,30 @@ test("barra superior: busca a esquerda, Periodo e Produto so no escopo, sem miga
   assert.match(productFilter, /"Produto selecionado"/);
 });
 
-test("barra lateral: 240 px, recolhe para 64 px so com icones e expande de novo (pedido do produtor)", () => {
+test("barra lateral: trilho de 72 px so com icones; o menu completo abre por cima, com veu (pedido do produtor)", () => {
   const shell = sourceOf("src/components/admin/v2/admin-shell.tsx");
-  const topbar = sourceOf("src/components/admin/v2/admin-topbar.tsx");
   const layout = sourceOf("src/app/admin/(v2)/layout.tsx");
 
-  assert.match(shell, /collapsed \? "w-16" : "w-60"/);
-  assert.match(shell, /collapsed \? "md:pl-16" : "md:pl-60"/);
-  assert.match(shell, /ADMIN_SIDEBAR_COOKIE/, "a escolha fica guardada");
-  assert.match(layout, /cookieStore\.get\(ADMIN_SIDEBAR_COOKIE\)/, "a pagina ja abre recolhida, sem piscar");
-  assert.match(topbar, /aria-label=\{sidebarCollapsed \? "Expandir menu" : "Recolher menu"\}/);
-  assert.match(topbar, /aria-expanded=\{!sidebarCollapsed\}/);
-  assert.match(shell, /title=\{collapsed \? item\.label : undefined\}/, "recolhida mostra o nome ao passar o mouse");
+  assert.match(shell, /w-\[72px\]/, "trilho fixo de 72 px");
+  assert.match(shell, /md:pl-\[72px\]/, "o conteudo nunca e empurrado pelo menu aberto");
+  assert.doesNotMatch(shell, /md:pl-60|ADMIN_SIDEBAR_COOKIE|setCollapsed/, "nao existe mais barra que empurra o conteudo");
+  assert.doesNotMatch(layout, /cookies\(\)/);
+  assert.match(shell, /<Dialog\.Backdrop/, "veu escuro por cima da pagina");
+  assert.match(shell, /bg-black\/70/);
+  assert.doesNotMatch(shell, /Dialog\.Backdrop[^>]*md:hidden|Dialog\.Popup[^>]*md:hidden/, "o menu por cima vale em todas as larguras");
+  assert.match(shell, /\/brand\/icon-bunker\.png/, "trilho mostra so o simbolo");
+  assert.match(shell, /\/brand\/logo-bunker\.svg/, "menu aberto mostra a logo inteira");
+  assert.match(shell, /title=\{item\.label\}/, "trilho mostra o nome ao passar o mouse");
   assert.match(shell, /<button\s[^>]*aria-expanded=\{groupOpen\}/, "grupo abre e fecha, nao navega");
   assert.match(shell, /data-nav-group=\{item\.id\}/);
   assert.match(shell, /rotate-90/);
   assert.match(shell, /Ver área do aluno/);
   assert.match(shell, /Admin antigo/);
-  assert.match(shell, /<AccountMenu account=\{account\} compact=\{collapsed\} \/>/);
+  assert.doesNotMatch(shell, /<AccountMenu/, "a conta saiu da barra lateral");
   assert.match(shell, /buildAdminNavHref\(/, "menu leva o periodo para as telas");
-  assert.match(shell, /w-\[min\(280px,86vw\)\]/, "gaveta do celular");
-  assert.doesNotMatch(shell, /Fechar menu/, "gaveta sem botao X");
+  assert.match(shell, /w-\[min\(280px,86vw\)\]/, "largura do menu aberto");
+  assert.doesNotMatch(shell, /\bSun\b|\bMoon\b|theme/i, "sempre escuro, sem troca de tema");
   assert.match(shell, /hoje: LayoutDashboard/, "Visão geral com icone de painel, nao sol");
-  assert.doesNotMatch(shell, /\bSun\b/);
   assert.match(shell, /produtos: Box/);
   assert.match(shell, /comunidade: MessageCircle/);
   assert.match(shell, /configuracoes: SlidersHorizontal/);
