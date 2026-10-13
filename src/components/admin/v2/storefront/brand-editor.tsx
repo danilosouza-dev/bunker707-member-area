@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import {
   MEMBER_BUTTON_OPTIONS,
   MEMBER_CORNER_OPTIONS,
+  MEMBER_COVER_SIZE_OPTIONS,
   MEMBER_MENU_OPTIONS,
   normalizeMemberStyle,
   type MemberStyleConfig
@@ -352,6 +353,14 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
             onChange={(corners) => changeStyle({ corners })}
             options={MEMBER_CORNER_OPTIONS}
             value={draft.style.corners}
+          />
+          <StyleChoice
+            disabled={locked}
+            label="Tamanho das capas"
+            name="marca-estilo-capas"
+            onChange={(coverSize) => changeStyle({ coverSize })}
+            options={MEMBER_COVER_SIZE_OPTIONS}
+            value={draft.style.coverSize}
           />
           <StyleChoice
             disabled={locked}

@@ -417,9 +417,12 @@ function LessonPanel({
                     </span>
                   </span>
                 </span>
-                <span>
-                  <span className="block text-sm font-bold text-white">{lesson.title}</span>
-                  <span className="mt-1 block text-xs leading-5 text-zinc-400">{lesson.description}</span>
+                {/* Titulo em 1 linha e descricao em 2 (reticencias): a linha fica uniforme, com a altura da thumbnail. */}
+                <span className="min-w-0">
+                  <span className="line-clamp-1 text-sm font-bold text-white">{lesson.title}</span>
+                  <span className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-400" title={lesson.description || undefined}>
+                    {lesson.description}
+                  </span>
                 </span>
                 <span className="pt-1 text-xs font-semibold text-zinc-500">{lesson.duration}</span>
               </Link>

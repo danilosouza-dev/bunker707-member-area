@@ -209,7 +209,8 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
       student={shellData.student}
     >
       <div className="min-h-screen bg-[#141414]">
-        <section className="relative min-h-[640px] overflow-hidden">
+        {/* Mesmos cantos e recuo do destaque da home (Marca > Estilo): no modo arredondado a capa fica como la. */}
+        <section className="relative min-h-[640px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
           {pageHero.mediaType === "video" ? (
             <video
               aria-hidden="true"
@@ -236,7 +237,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
           {hasVisibleHeroContent ? (
             <div className="absolute inset-0 bg-gradient-to-r from-black via-black/72 to-black/18" />
           ) : null}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-b from-transparent via-[#141414]/88 to-[#141414]" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-b from-transparent via-[#141414]/88 to-[#141414] opacity-[var(--member-hero-fade)]" />
 
           <div className="relative z-10 flex min-h-[640px] max-w-6xl flex-col px-5 pb-36 pt-24 sm:px-8 lg:px-12">
             {hasVisibleHeroContent ? <Breadcrumbs items={breadcrumbs} /> : null}
@@ -295,7 +296,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
           </div>
         </section>
 
-        <div className="relative z-20 -mt-28 sm:-mt-32">
+        <div className="relative z-20 mt-[var(--member-page-overlap)]">
           <ContentStructureSection
             accessPreviewMode={accessPreviewMode}
             formationCourseOpenMode={formationCourseOpenMode}

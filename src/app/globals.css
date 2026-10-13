@@ -49,6 +49,8 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   --member-hero-fade: 1;
   --member-hero-inset: 0px;
   --member-hero-overlap: -6rem;
+  /* Pagina do curso: quanto a primeira secao sobe sobre a capa (no arredondado, comeca abaixo dela). */
+  --member-page-overlap: -7rem;
   --member-hero-radius: 0px;
   --member-hero-top: 0px;
   /* Fileiras da home: recuo lateral (o mesmo das classes antigas px-5/sm:px-8/lg:px-12) e quantos
@@ -89,6 +91,7 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 /* Marca > Estilo: os atributos ficam no raiz da area do aluno (AppShell). */
 @media (min-width: 640px) {
   :root {
+    --member-page-overlap: -8rem;
     --member-row-inset: 32px;
     --member-row-cols: 4;
     --member-row-cols-wide: 3;
@@ -134,6 +137,7 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   --member-hero-fade: 0;
   --member-hero-inset: 12px;
   --member-hero-overlap: 2rem;
+  --member-page-overlap: 2rem;
   --member-hero-radius: 20px;
   --member-hero-top: 76px;
 }
@@ -162,10 +166,9 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 }
 
 @media (min-width: 640px) {
-  /* Teste do produtor (13/10/2026): capas 2:3 fixas em 284 x 426 px. Com largura fixa o ultimo card so
-     termina na borda direita quando a conta fecha; se o tamanho for aprovado, a quantidade por largura
-     de tela passa a ser calculada a partir dele. */
-  [data-member-corners="rounded"] .member-row-card {
+  /* Marca > Estilo > Tamanho das capas "Grande": capas 2:3 fixas em 284 x 426 px (vale nos dois estilos
+     de cantos). Com largura fixa o ultimo card so termina na borda direita quando a conta fecha. */
+  [data-member-cover-size="large"] .member-row-card {
     width: 284px;
   }
 }

@@ -126,7 +126,7 @@ test("marca: banner e logo seguem os padroes do servidor", () => {
   assert.deepEqual(model.mapStorefrontBrand([]), {
     hero: { enabled: true, image: model.DEFAULT_HERO_IMAGE, mediaType: "image" },
     logoImage: model.DEFAULT_LOGO_IMAGE,
-    style: { buttons: "soft", corners: "soft", menu: "sidebar" }
+    style: { buttons: "soft", corners: "soft", coverSize: "default", menu: "sidebar" }
   });
 
   const brand = model.mapStorefrontBrand([
@@ -313,7 +313,7 @@ test("rascunho igual ao publicado nao conta como alteracao", () => {
 });
 
 test("marca: o PUT so leva o que mudou, como no admin antigo", () => {
-  const style = { buttons: "soft", corners: "soft", menu: "sidebar" };
+  const style = { buttons: "soft", corners: "soft", coverSize: "default", menu: "sidebar" };
   const published = { heroEnabled: true, heroImage: "/hero.png", logoImage: "/logo.svg", style };
 
   assert.deepEqual(model.buildAppearancePayload(published, published), {});

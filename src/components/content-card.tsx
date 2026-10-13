@@ -208,7 +208,9 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
       role="link"
       tabIndex={0}
     >
-      <div className="home-cover-card-surface absolute inset-0 z-0 w-full shadow-2xl shadow-black/35 group-hover:z-[120] group-hover:shadow-[0_42px_130px_rgba(0,0,0,0.82)]">
+      {/* Mesma superficie do card de modulo: sombra fixa e sem trocar o z-index no hover. Sombra animada junto
+          com a escala fazia o Chrome re-rasterizar o texto a cada quadro (titulo, descricao e botao "piscavam"). */}
+      <div className="home-cover-card-surface absolute inset-0 z-0 w-full shadow-2xl shadow-black/35">
         <div className="relative h-full w-full">
           {hasCover ? (
             <div
@@ -235,10 +237,10 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
               </p>
             </div>
           ) : null}
-          {hasCover ? <div className="home-cover-card-overlay absolute inset-0" /> : null}
-          {hasCover ? <div className="home-cover-card-gradient absolute inset-x-0 bottom-0 h-[78%] bg-gradient-to-t from-black via-black/92 to-transparent" /> : null}
+          {hasCover ? <div className="home-cover-card-overlay absolute inset-0 z-10" /> : null}
+          {hasCover ? <div className="home-cover-card-gradient absolute inset-x-0 bottom-0 z-10 h-[78%] bg-gradient-to-t from-black via-black/92 to-transparent" /> : null}
           <div className={hasCover
-            ? "home-cover-card-content absolute inset-x-0 bottom-3 p-3 sm:bottom-3.5 sm:p-3.5 lg:bottom-4 lg:p-4"
+            ? "home-cover-card-content absolute inset-x-0 bottom-3 z-20 p-3 sm:bottom-3.5 sm:p-3.5 lg:bottom-4 lg:p-4"
             : "absolute inset-0 grid place-items-center p-5 text-center"
           }>
             <h3 className="line-clamp-2 text-[13px] font-bold leading-tight text-white drop-shadow sm:text-sm lg:text-base">{item.title}</h3>
