@@ -8,6 +8,8 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
 import { DirectorIcon } from "@/components/member/shell/director-parts";
 import { MemberAccountMenu } from "@/components/member/shell/member-account-menu";
+import { MemberNotificationsMenu } from "@/components/member/shell/member-notifications-menu";
+import { MemberRail } from "@/components/member/shell/member-rail";
 import { MemberSidebar } from "@/components/member/shell/member-sidebar";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { PlatformBrandingProvider } from "@/components/platform-branding";
@@ -37,7 +39,8 @@ declare global {
 }
 
 // Itens da barra lateral e do menu da conta: src/lib/member-navigation.ts (fonte unica), desenhados
-// por MemberSidebar e MemberAccountMenu (src/components/member/shell/).
+// por MemberRail (trilho de icones, computador), MemberSidebar (gaveta por cima, todas as larguras) e
+// MemberAccountMenu (src/components/member/shell/). O conteudo fica sempre a 72 px do trilho.
 const sidebarId = "member-sidebar";
 
 const accessPreviewOptions = [
@@ -145,6 +148,9 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   const [directorOpenOnMount, setDirectorOpenOnMount] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const railMenuButtonRef = useRef<HTMLButtonElement>(null);
+  // Botao que abriu a gaveta (trilho no computador, topo no celular): recebe o foco ao fechar.
+  const sidebarTriggerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     function updateHeaderState() {
@@ -218,7 +224,8 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
     handleProgressAwareNavigation(event, withAccessPreviewParam(href, accessPreviewMode));
   }
 
-  function openSidebar() {
+  function openSidebar(trigger: HTMLElement | null) {
+    sidebarTriggerRef.current = trigger;
     // A IA Diretor desmonta enquanto o menu está aberto; ao voltar, ela não reabre sozinha.
     setDirectorOpenOnMount(false);
     setSidebarOpen(true);
@@ -251,7 +258,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   return (
     <PlatformBrandingProvider branding={branding}>
     <div className="min-h-screen bg-[#141414] text-white">
-      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden">
+      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-[72px]">
         <div
           aria-hidden="true"
           className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.68)_0%,rgba(0,0,0,0.26)_58%,rgba(0,0,0,0)_100%)] transition-opacity duration-300 ease-out will-change-opacity"
@@ -272,8 +279,8 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             aria-expanded={sidebarOpen}
             aria-haspopup="dialog"
             aria-label="Abrir menu"
-            className={`grid h-10 w-10 place-items-center rounded-[8px] border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${iconButtonChrome}`}
-            onClick={openSidebar}
+            className={`grid h-10 w-10 place-items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white md:hidden ${iconButtonChrome}`}
+            onClick={(event) => openSidebar(event.currentTarget)}
             ref={menuButtonRef}
             type="button"
           >
@@ -282,14 +289,14 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
 
           <Link
             aria-label="Ir para o início"
-            className="flex min-w-fit items-center rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+            className="flex min-w-fit items-center rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white md:hidden"
             href={homeHref}
             onClick={(event) => handleProgressAwareNavigation(event, homeHref)}
           >
             {logoImage ? (
               <Image
                 alt="Bunker707"
-                className="h-auto max-h-10 w-[150px] object-contain object-left sm:w-[190px]"
+                className="h-auto max-h-10 w-[124px] object-contain object-left sm:w-[150px]"
                 height={35}
                 priority
                 src={logoImage}
@@ -344,6 +351,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
                 placeholder="Pesquisar aulas, cursos, formações e bootcamps..."
               />
             </div>
+            <MemberNotificationsMenu className={searchOpen ? "max-sm:hidden" : undefined} />
             <MemberAccountMenu
               accessPreviewMode={accessPreviewMode}
               className={searchOpen ? "max-sm:hidden" : undefined}
@@ -357,6 +365,17 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
         </div>
       </header>
 
+      <MemberRail
+        accessPreviewMode={accessPreviewMode}
+        homeHref={homeHref}
+        menuButtonRef={railMenuButtonRef}
+        menuId={sidebarId}
+        menuOpen={sidebarOpen}
+        onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
+        onOpenMenu={() => openSidebar(railMenuButtonRef.current)}
+        pathname={pathname}
+      />
+
       <MemberSidebar
         accessPreviewMode={accessPreviewMode}
         homeHref={homeHref}
@@ -364,7 +383,6 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
         logoImage={logoImage}
         onClose={closeSidebarMenu}
         onNavigate={(event, href) => handleProgressAwareNavigation(event, href, true)}
-        onSignOut={() => void handleSignOut()}
         open={sidebarOpen}
         pathname={pathname}
         producerPanel={showPreviewControl ? (
@@ -393,12 +411,10 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             </label>
           </section>
         ) : null}
-        returnFocusRef={menuButtonRef}
-        signingOut={signingOut}
-        student={student}
+        returnFocusRef={sidebarTriggerRef}
       />
 
-      <main>{children}</main>
+      <main className="md:pl-[72px]">{children}</main>
 
       {!sidebarOpen ? (
         directorRequested ? (

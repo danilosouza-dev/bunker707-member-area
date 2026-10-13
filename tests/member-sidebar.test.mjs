@@ -115,15 +115,17 @@ test("app-shell usa a nova barra lateral e o menu da conta, sem lista propria ne
   assert.doesNotMatch(appShellSource, /const navigationItems = \[/);
   assert.doesNotMatch(appShellSource, /\bTrophy\b|\bBell\b/, "trofeu e sino sem funcao sairam do topo (fase 2)");
   assert.doesNotMatch(appShellSource, /cursor-default text-zinc-500/);
-  // Navegacao da gaveta e do menu da conta salva progresso e favoritos antes de trocar de pagina.
+  // Navegacao do trilho, da gaveta e do menu da conta salva progresso e favoritos antes de trocar de pagina.
   assert.match(appShellSource, /onNavigate=\{\(event, href\) => handleProgressAwareNavigation\(event, href, true\)\}/);
   assert.match(appShellSource, /onNavigate=\{\(event, href\) => handleProgressAwareNavigation\(event, href\)\}/);
   assert.match(appShellSource, /onSignOut=\{\(\) => void handleSignOut\(\)\}/);
-  // Botao do menu: anuncia a gaveta e recebe o foco de volta ao fechar.
+  // Botao do menu: anuncia a gaveta; o botao que abriu (trilho ou topo) recebe o foco de volta.
   assert.match(appShellSource, /aria-controls=\{sidebarId\}/);
   assert.match(appShellSource, /aria-expanded=\{sidebarOpen\}/);
   assert.match(appShellSource, /ref=\{menuButtonRef\}/);
-  assert.match(appShellSource, /returnFocusRef=\{menuButtonRef\}/);
+  assert.match(appShellSource, /onClick=\{\(event\) => openSidebar\(event\.currentTarget\)\}/);
+  assert.match(appShellSource, /onOpenMenu=\{\(\) => openSidebar\(railMenuButtonRef\.current\)\}/);
+  assert.match(appShellSource, /returnFocusRef=\{sidebarTriggerRef\}/);
   // Bloco do produtor so para quem pode usar a visualizacao como aluno.
   assert.match(appShellSource, /producerPanel=\{showPreviewControl \? \(/);
   assert.match(sidebarSource, /\{producerPanel \? </);
@@ -139,7 +141,7 @@ test("gaveta acessivel: inert fechada, dialogo modal, Esc, foco preso e rolagem 
   assert.match(sidebarSource, /returnFocusRef\.current\?\.focus\(\)/);
   assert.match(sidebarSource, /querySelector<HTMLElement>\("\[data-member-sidebar-item\]"\)\?\.focus\(\)/);
   assert.match(sidebarSource, /body\.style\.overflow = "hidden"/);
-  assert.match(sidebarSource, /w-\[min\(340px,88vw\)\]/);
+  assert.match(sidebarSource, /w-\[min\(300px,86vw\)\]/);
   assert.match(sidebarSource, /pb-\[env\(safe-area-inset-bottom\)\]/);
   assert.match(sidebarSource, /motion-reduce:transition-none/);
 });
@@ -151,13 +153,13 @@ test("itens da gaveta: todos sao links, ativo com aria-current e barra vermelha"
   assert.match(sidebarSource, /w-\[3px\] rounded-full bg-\[var\(--accent\)\]/);
   assert.match(sidebarSource, /bg-white\/\[0\.08\] text-white/);
   assert.match(sidebarSource, /h-11 items-center/);
-  // Nenhum atributo disabled alem do "Sair" enquanto sai (antes: 5 itens cinza sem destino).
-  assert.deepEqual(sidebarSource.match(/\sdisabled(?:=\{[^}]*\}|(?=[\s>]))/g), [" disabled={signingOut}"]);
-  // Rodape: conta do aluno com "Ver perfil" e "Sair".
-  assert.match(sidebarSource, /<MemberAvatar name=\{student\.fullName \|\| student\.name\}/);
-  assert.match(sidebarSource, /Ver perfil/);
-  assert.match(sidebarSource, /MEMBER_ROUTES\.profile/);
-  assert.match(sidebarSource, /\{signingOut \? "Saindo\.\.\." : "Sair"\}/);
+  // Nenhum item desativado (antes: 5 itens cinza sem destino).
+  assert.equal(sidebarSource.match(/\sdisabled(?:=\{[^}]*\}|(?=[\s>]))/g), null);
+  // Perfil e Sair ficam so no menu da conta do topo (pedido do produtor, 13/10/2026).
+  assert.doesNotMatch(sidebarSource, /MemberAvatar|Ver perfil|onSignOut/);
+  // Topo da gaveta: hamburguer que fecha e logo inteira.
+  assert.match(sidebarSource, /aria-label="Fechar menu"[\s\S]*?<Menu aria-hidden="true"/);
+  assert.match(sidebarSource, /src=\{logoImage\}/);
 });
 
 test("cada destino tem icone proprio; a bussola fica reservada para a IA Diretor", () => {
@@ -181,4 +183,22 @@ test("menu da conta: fecha fora/Esc/Tab, setas percorrem e o Esc nao chega na IA
   assert.match(accountMenuSource, /\{signingOut \? "Saindo\.\.\." : "Sair"\}/);
   // O topo tem overflow-hidden: o painel do menu e fixed para nao ser cortado.
   assert.match(accountMenuSource, /className="fixed right-4 top-\[60px\]/);
+});
+
+test("trilho de icones no computador: simbolo, hamburguer, sem empurrar o conteudo (pedido do produtor)", () => {
+  const railSource = read("src/components/member/shell/member-rail.tsx");
+  const notificationsSource = read("src/components/member/shell/member-notifications-menu.tsx");
+
+  assert.match(railSource, /hidden w-\[72px\][^"]*md:flex/, "trilho fixo de 72 px so a partir de 768 px");
+  assert.match(railSource, /\/brand\/icon-bunker\.png/, "recolhido mostra so o simbolo");
+  assert.match(railSource, /getMemberSidebarSections\(pathname, accessPreviewMode\)/, "mesma fonte de rotas da gaveta");
+  assert.match(railSource, /aria-current=\{item\.active \? "page" : undefined\}/);
+  assert.match(railSource, /title=\{item\.label\}/);
+  assert.match(railSource, /onClick=\{\(event\) => onNavigate\(event, item\.href\)\}/);
+  assert.doesNotMatch(railSource, /\bSun\b|\bMoon\b/, "sempre escuro, sem troca de tema");
+
+  assert.match(appShellSource, /<header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-\[72px\]">/);
+  assert.match(appShellSource, /<main className="md:pl-\[72px\]">/, "conteudo ao lado do trilho; a gaveta abre por cima");
+  assert.match(appShellSource, /<MemberNotificationsMenu /, "lembretes no topo, ao lado da conta");
+  assert.match(notificationsSource, /Nenhum lembrete por enquanto\./, "sem lembrete inventado");
 });
