@@ -683,9 +683,20 @@ button:disabled {
 .home-cover-card-content {
   opacity: 0;
   transform: translate3d(0, 16px, 0);
+  /* Sem atraso: o texto comeca a aparecer junto com a escala do card. Com os 70 ms de atraso o Chrome
+     criava a camada do texto no meio da escala e re-rasterizava titulo, descricao e botao tres vezes no
+     fim da animacao (o "piscar" das fontes, medido quadro a quadro em 13/10/2026). */
   transition:
-    opacity 460ms cubic-bezier(0.16, 1, 0.3, 1) 70ms,
-    transform 520ms cubic-bezier(0.16, 1, 0.3, 1) 70ms;
+    opacity 460ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 520ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (hover: hover) {
+  /* Camada propria e estavel para o texto (so onde ha hover): o texto nao troca de camada, nem de
+     suavizacao, quando a transicao termina. */
+  .home-cover-card-content {
+    will-change: opacity, transform;
+  }
 }
 
 .group:hover .home-cover-card-content {
