@@ -227,17 +227,18 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   width: calc((100% - (var(--member-row-cols-wide) - 1) * var(--member-row-gap)) / var(--member-row-cols-wide));
 }
 
-/* Luz de fundo do destaque (HeroGlow): a cor da imagem (ou a escolhida em Destaque), forte no topo e
-   sumindo no cinza da pagina antes do fim do destaque (como na Netflix: do meio para cima e um pouco para
-   baixo, sem invadir as fileiras). No arredondado ela aparece em volta do destaque; no discreto a imagem
-   cobre o destaque de ponta a ponta, entao a luz nao aparece. */
+/* Luz de fundo do destaque (HeroGlow): a cor da imagem (ou a escolhida em Destaque), forte do meio do
+   destaque para cima e enfraquecendo dali para baixo, ate sumir no cinza da pagina pouco antes do fim do
+   destaque (como na Netflix: nao invade as fileiras). No arredondado ela aparece em volta do destaque; no
+   discreto a imagem cobre o destaque de ponta a ponta, entao a luz nao aparece. */
 .member-hero-glow {
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--member-hero-accent, #141414) 48%, #141414) 0%,
-    color-mix(in srgb, var(--member-hero-accent, #141414) 30%, #141414) 22%,
-    color-mix(in srgb, var(--member-hero-accent, #141414) 12%, #141414) 46%,
-    #141414 64%
+    color-mix(in srgb, var(--member-hero-accent, #141414) 40%, #141414) 32%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 22%, #141414) 60%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 8%, #141414) 80%,
+    #141414 94%
   );
 }
 

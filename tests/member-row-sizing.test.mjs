@@ -43,8 +43,8 @@ test("destaque da home e banner do curso tem a luz de fundo na cor da imagem", (
   assert.match(heroSource, /<section className="@container relative z-\[1\] min-h-\[var\(--member-hero-min-h\)\]/);
   assert.match(css, /--member-hero-min-h: clamp\(520px, calc\(100vh - 256px\), 680px\);/, "arredondado: destaque mais baixo em telas curtas");
   assert.match(coursePageSource, /<HeroGlow src=\{pageHero\.mediaType === "video" \? pageHero\.poster \?\? null : pageHero\.mediaSrc \?\? null\} \/>/);
-  // Do meio para cima e um pouco para baixo, como na Netflix: a luz some antes do fim do destaque (64%).
-  assert.match(css, /\.member-hero-glow \{[\s\S]*color-mix\(in srgb, var\(--member-hero-accent, #141414\) 48%, #141414\) 0%,[\s\S]*#141414 64%/);
+  // Forte do meio para cima, enfraquecendo para baixo e sumindo pouco antes do fim do destaque (94%), sem invadir as fileiras.
+  assert.match(css, /\.member-hero-glow \{[\s\S]*color-mix\(in srgb, var\(--member-hero-accent, #141414\) 48%, #141414\) 0%,[\s\S]*40%, #141414\) 32%,[\s\S]*22%, #141414\) 60%,[\s\S]*#141414 94%/);
   assert.doesNotMatch(css, /--member-hero-glow-extend/, "a luz fica dentro da area do destaque");
   // Medicao no navegador: versao pequena da imagem pelo otimizador (mesma origem), canvas 24 px, cor media
   // com saturacao reforcada; sem cor util ou sem CORS, a luz fica apagada.
