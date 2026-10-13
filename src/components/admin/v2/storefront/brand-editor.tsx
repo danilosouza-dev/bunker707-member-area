@@ -356,7 +356,7 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
           />
           <StyleChoice
             disabled={locked}
-            label="Tamanho das capas"
+            label="Thumbnails dos cards"
             name="marca-estilo-capas"
             onChange={(coverSize) => changeStyle({ coverSize })}
             options={MEMBER_COVER_SIZE_OPTIONS}

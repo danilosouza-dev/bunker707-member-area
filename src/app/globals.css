@@ -152,6 +152,36 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   }
 }
 
+/* Banner da pagina do produto por produto (Detalhes > Cantos do banner): vence a escolha da area so
+   nas variaveis do banner; cards e fileiras continuam seguindo Marca > Estilo. */
+[data-member-banner="rounded"] {
+  --member-hero-content-pb: 5rem;
+  --member-hero-fade: 0;
+  --member-hero-inset: 12px;
+  --member-hero-radius: 20px;
+  --member-hero-top: 76px;
+  --member-page-overlap: 2rem;
+}
+
+[data-member-banner="soft"] {
+  --member-hero-content-pb: 12rem;
+  --member-hero-fade: 1;
+  --member-hero-inset: 0px;
+  --member-hero-radius: 0px;
+  --member-hero-top: 0px;
+  --member-page-overlap: -7rem;
+}
+
+@media (min-width: 640px) {
+  [data-member-banner="rounded"] {
+    --member-hero-inset: 64px;
+  }
+
+  [data-member-banner="soft"] {
+    --member-page-overlap: -8rem;
+  }
+}
+
 /* Arredondado (como na Netflix): titulos e cards comecam na linha da capa; cabe um numero inteiro de
    cards entre as bordas (o ultimo inteiro termina na borda direita, os seguintes passam) e a rolagem
    encaixa no inicio de um card, entao o alinhamento se mantem depois de rolar. */
@@ -166,8 +196,8 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 }
 
 @media (min-width: 640px) {
-  /* Marca > Estilo > Tamanho das capas "Grande": capas 2:3 fixas em 284 x 426 px (vale nos dois estilos
-     de cantos). Com largura fixa o ultimo card so termina na borda direita quando a conta fecha. */
+  /* Marca > Estilo > Thumbnails dos cards "284 x 426": cards 2:3 fixos (vale nos dois estilos de
+     cantos). Com largura fixa o ultimo card so termina na borda direita quando a conta fecha. */
   [data-member-cover-size="large"] .member-row-card {
     width: 284px;
   }

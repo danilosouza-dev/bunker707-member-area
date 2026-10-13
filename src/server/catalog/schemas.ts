@@ -202,6 +202,12 @@ export const setProductImageSchema = z.object({
   slot: z.enum(["cover", "hero"])
 });
 
+/** Cantos do banner da pagina do produto: "inherit" segue Marca > Estilo. */
+export const setProductHeroCornersSchema = z.object({
+  corners: z.enum(["inherit", "rounded", "soft"]),
+  id: catalogIdSchema
+});
+
 export const publishProductSchema = z.object({
   expectedUpdatedAt: expectedUpdatedAtSchema,
   id: catalogIdSchema

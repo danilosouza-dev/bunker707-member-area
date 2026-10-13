@@ -92,6 +92,7 @@ function getHeroConfig(item: ContentItem, settings: ContentPageSettings | undefi
   };
 
   return {
+    corners: heroSettings?.corners ?? "inherit",
     mediaType: heroSettings?.mediaType ?? "image",
     mediaSrc: heroSettings?.mediaSrc ?? item.image ?? homeHero.image,
     poster: heroSettings?.poster,
@@ -208,7 +209,8 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
-      <div className="min-h-screen bg-[#141414]">
+      {/* data-member-banner: a escolha do produto (Detalhes > Cantos do banner) vence a da area so neste banner. */}
+      <div className="min-h-screen bg-[#141414]" data-member-banner={pageHero.corners === "inherit" ? undefined : pageHero.corners}>
         {/* Mesmos cantos e recuo do destaque da home (Marca > Estilo): no modo arredondado a capa fica como la. */}
         <section className="relative min-h-[640px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
           {pageHero.mediaType === "video" ? (

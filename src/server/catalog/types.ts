@@ -46,6 +46,7 @@ import type {
   restoreStructureSchema,
   setLessonsStatusSchema,
   setModuleCoverSchema,
+  setProductHeroCornersSchema,
   setProductImageSchema,
   setProductSituationSchema,
   softDeleteStructureSchema,
@@ -77,6 +78,7 @@ export type RenameProductInput = z.input<typeof renameProductSchema>;
 export type UpdateProductDetailsInput = z.input<typeof updateProductDetailsSchema>;
 export type UpdateProductAccessInput = z.input<typeof updateProductAccessSchema>;
 export type SetProductImageInput = z.input<typeof setProductImageSchema>;
+export type SetProductHeroCornersInput = z.input<typeof setProductHeroCornersSchema>;
 export type PublishProductInput = z.input<typeof publishProductSchema>;
 export type SetProductSituationInput = z.input<typeof setProductSituationSchema>;
 export type DeleteProductInput = z.input<typeof deleteProductSchema>;
@@ -229,6 +231,7 @@ export type ProductDetails = {
   /** Soma das duracoes das aulas publicadas, ex.: "3 h 20 min"; null quando nao ha duracao. */
   durationTotalLabel: string | null;
   header: ProductHeader;
+  heroCorners: ProductHeroCorners;
   heroUrl: string | null;
   instructorName: string | null;
   level: string | null;
@@ -286,6 +289,9 @@ export type VideoPreview = {
 export type CreatedProduct = { href: string; id: string };
 export type ProductSaved = { header: ProductHeader };
 export type ProductImageSaved = { slot: "cover" | "hero"; updatedAt: string; url: string | null };
+/** Cantos do banner da pagina do produto; "inherit" = segue Marca > Estilo. */
+export type ProductHeroCorners = "inherit" | "rounded" | "soft";
+export type ProductHeroCornersSaved = { corners: ProductHeroCorners; updatedAt: string };
 /** Capa do modulo gravada (setModuleCover, src/server/catalog/module-cover-actions.ts). */
 export type ModuleCoverSaved = { coverUrl: string | null; id: string; updatedAt: string; usesProductCover: boolean };
 export type ProductPublished = { checklist: PublishChecklist; header: ProductHeader; published: boolean };
@@ -374,6 +380,7 @@ export type RenameProductAction = (input: RenameProductInput) => Promise<ActionR
 export type UpdateProductDetailsAction = (input: UpdateProductDetailsInput) => Promise<ActionResult<ProductSaved>>; // [catalog.write]
 export type UpdateProductAccessAction = (input: UpdateProductAccessInput) => Promise<ActionResult<ProductSaved>>; // [catalog.write]
 export type SetProductImageAction = (input: SetProductImageInput) => Promise<ActionResult<ProductImageSaved>>; // [catalog.write]
+export type SetProductHeroCornersAction = (input: SetProductHeroCornersInput) => Promise<ActionResult<ProductHeroCornersSaved>>; // [catalog.write]
 export type PublishProductAction = (input: PublishProductInput) => Promise<ActionResult<ProductPublished>>; // [catalog.publish]
 export type SetProductSituationAction = (input: SetProductSituationInput) => Promise<ActionResult<ProductSaved>>; // [catalog.publish]
 export type DeleteProductAction = (input: DeleteProductInput) => Promise<ActionResult<{ id: string }>>; // [catalog.delete]

@@ -43,6 +43,7 @@ import {
   productIdInputSchema,
   publishProductSchema,
   renameProductSchema,
+  setProductHeroCornersSchema,
   setProductImageSchema,
   setProductSituationSchema,
   updateProductAccessSchema,
@@ -63,12 +64,14 @@ import type {
   CreatedProduct,
   CreateProductInput,
   DeleteProductInput,
+  ProductHeroCornersSaved,
   ProductImageSaved,
   ProductPublished,
   ProductSaved,
   PublishChecklist,
   PublishProductInput,
   RenameProductInput,
+  SetProductHeroCornersInput,
   SetProductImageInput,
   SetProductSituationInput,
   UpdateProductAccessInput,
@@ -310,7 +313,42 @@ export async function updateProductAccess(input: UpdateProductAccessInput): Prom
   });
 }
 
-/** [catalog.write] Capa (720×1040) ou hero (1920×720) recortados no cliente em WebP; null remove. */
+/** [catalog.write] Cantos do banner da pagina do produto: como a area ("inherit", nao gravado), arredondados ou retos. */
+export async function setProductHeroCorners(input: SetProductHeroCornersInput): Promise<ActionResult<ProductHeroCornersSaved>> {
+  return runAdminAction("catalog.write", setProductHeroCornersSchema, input, async ({ input: data }) => {
+    const db = catalogDb();
+    await requireProductRow(data.id, db);
+    const settings = await fetchProductSettings(data.id, db);
+    const currentHero = settings.hero && typeof settings.hero === "object" && !Array.isArray(settings.hero)
+      ? (settings.hero as Record<string, unknown>)
+      : {};
+    // So a chave corners muda; imagem, textos e visibilidade do banner ficam como estao.
+    const rest = Object.fromEntries(Object.entries(currentHero).filter(([key]) => key !== "corners"));
+    const nextHero = data.corners === "inherit" ? rest : { ...rest, corners: data.corners };
+
+    if (Object.keys(nextHero).length === 0) {
+      await patchProductSettings(data.id, { unset: ["hero"] }, db);
+    } else {
+      await patchProductSettings(data.id, { set: { hero: nextHero } }, db);
+    }
+
+    // A linha do produto e tocada para o updated_at novo voltar a tela (o proximo "Salvar" confere contra ele).
+    const row = await updateRowGuarded<{ updated_at: string }>({
+      columns: "id,updated_at",
+      db,
+      id: data.id,
+      notFoundMessage: PRODUCT_NOT_FOUND,
+      patch: {},
+      table: "content_items"
+    });
+
+    invalidateCatalog({ from: "action" });
+
+    return { corners: data.corners, updatedAt: row.updated_at };
+  });
+}
+
+/** [catalog.write] Capa (ate 720×1080) ou hero (1920×720) recortados no cliente em WebP; null remove. */
 export async function setProductImage(input: SetProductImageInput): Promise<ActionResult<ProductImageSaved>> {
   return runAdminAction("catalog.write", setProductImageSchema, input, async ({ input: data }) => {
     const db = catalogDb();

@@ -221,8 +221,12 @@ export type PlatformBrandingConfig = {
   style?: MemberStyleConfig;
 };
 
+/** Cantos do banner da pagina do produto: ausente ou "inherit" = segue Marca > Estilo. */
+export type ContentPageHeroCorners = "inherit" | "rounded" | "soft";
+
 export type ContentPageHeroConfig = {
   badge?: string;
+  corners?: ContentPageHeroCorners;
   ctaHref?: string;
   ctaLabel?: string;
   description?: string;

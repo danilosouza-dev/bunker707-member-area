@@ -493,6 +493,13 @@ test("pequenos tradutores de configuracao e de compra", () => {
   assert.equal(mappers.heroUrlOf({ hero: { mediaSrc: " https://cdn/hero.webp ", mediaType: "image" } }), "https://cdn/hero.webp");
   assert.equal(mappers.heroUrlOf({ hero: { mediaSrc: "https://cdn/hero.mp4", mediaType: "video" } }), null);
   assert.equal(mappers.heroUrlOf({ hero: [] }), null);
+  // Cantos do banner por produto: so "rounded" e "soft" valem; o resto segue a area.
+  assert.equal(mappers.heroCornersOf({ hero: { corners: "rounded", mediaSrc: "https://cdn/hero.webp" } }), "rounded");
+  assert.equal(mappers.heroCornersOf({ hero: { corners: "soft" } }), "soft");
+  assert.equal(mappers.heroCornersOf({ hero: { corners: "inherit" } }), "inherit");
+  assert.equal(mappers.heroCornersOf({ hero: { corners: "oval" } }), "inherit");
+  assert.equal(mappers.heroCornersOf({}), "inherit");
+  assert.equal(mappers.heroCornersOf(null), "inherit");
   assert.equal(mappers.parentFormationIdOf({ parentFormationId: " formation-1 " }), "formation-1");
   assert.equal(mappers.parentFormationIdOf({ parentFormationId: 3 }), null);
   assert.equal(mappers.customPurchaseLabelOf("Comprar"), null, "'Comprar' e o padrao derivado, nao texto proprio");

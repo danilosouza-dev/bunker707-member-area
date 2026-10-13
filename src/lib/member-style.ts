@@ -9,7 +9,7 @@
 export type MemberCornerStyle = "soft" | "rounded";
 export type MemberButtonStyle = "soft" | "pill";
 export type MemberMenuPlacement = "sidebar" | "header";
-/** Capas 2:3 das fileiras: "default" = tamanho de cada modo (discreto: responsivo; arredondado: cabe um numero inteiro); "large" = 284 x 426 fixo a partir de 640 px. */
+/** Thumbnails dos cards (cursos, formacoes e modulos): "default" = tamanho anterior (discreto: responsivo; arredondado: cabe um numero inteiro); "large" = 284 x 426 fixo a partir de 640 px. */
 export type MemberCoverSize = "default" | "large";
 
 export type MemberStyleConfig = {
@@ -22,8 +22,8 @@ export type MemberStyleConfig = {
 export const MEMBER_STYLE_DEFAULTS: MemberStyleConfig = { buttons: "soft", corners: "soft", coverSize: "default", menu: "sidebar" };
 
 export const MEMBER_COVER_SIZE_OPTIONS: ReadonlyArray<{ description: string; label: string; value: MemberCoverSize }> = [
-  { description: "Capas no tamanho de cada estilo: responsivas no discreto; no arredondado, cabe um número inteiro entre as bordas.", label: "Padrão", value: "default" },
-  { description: "Capas de 284 × 426 px no computador (no celular seguem o padrão).", label: "Grande (284 × 426)", value: "large" }
+  { description: "Cards de cursos, formações e módulos no tamanho anterior: responsivo no discreto; no arredondado, cabe um número inteiro entre as bordas.", label: "Tamanho anterior", value: "default" },
+  { description: "Cards de cursos, formações e módulos com 284 × 426 px no computador (no celular seguem o tamanho anterior). Os banners não mudam.", label: "284 × 426", value: "large" }
 ];
 
 export const MEMBER_CORNER_OPTIONS: ReadonlyArray<{ description: string; label: string; value: MemberCornerStyle }> = [
