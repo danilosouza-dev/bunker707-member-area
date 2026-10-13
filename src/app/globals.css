@@ -97,9 +97,17 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 }
 
 @media (min-width: 640px) {
-  /* A borda da capa alinha com a logo do cabecalho: 24 px + hamburguer de 40 px + 16 px. */
+  /* A borda da capa alinha com a logo do cabecalho: 24 px + hamburguer de 40 px + 16 px. O cabecalho
+     ganha o mesmo recuo a direita (AppShell), para a foto do perfil alinhar com a outra borda. */
   [data-member-corners="rounded"] {
     --member-hero-inset: 80px;
+  }
+}
+
+@media (min-width: 1024px) {
+  /* Menu no cabecalho (links escritos): sem hamburguer, a logo fica no respiro de 24 px. */
+  [data-member-corners="rounded"][data-member-menu="header"] {
+    --member-hero-inset: 24px;
   }
 }
 

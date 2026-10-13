@@ -145,6 +145,9 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   // 1024 px e o hamburguer some nessa largura; abaixo disso ele abre a gaveta como sempre.
   // Suporte e Perfil ficam no menu da conta, que ja os tem.
   const menuInHeader = style.menu === "header";
+  // Cantos arredondados: o cabecalho recua a direita o mesmo que a capa (80 px; 24 px quando os links
+  // estao no cabecalho e o hamburguer some), para a foto do perfil alinhar com a borda da capa.
+  const rounded = style.corners === "rounded";
   const pathname = usePathname();
   const headerLinks = menuInHeader
     ? (getMemberSidebarSections(pathname, accessPreviewMode).find((section) => section.id === "estudar")?.items ?? [])
@@ -281,7 +284,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             transformOrigin: "top"
           }}
         />
-        <div className="relative flex h-16 items-center gap-4 px-4 sm:px-6">
+        <div className={cn("relative flex h-16 items-center gap-4 px-4 sm:pl-6", rounded ? "sm:pr-20" : "sm:pr-6", rounded && menuInHeader && "lg:pr-6")}>
           <button
             aria-controls={sidebarId}
             aria-expanded={sidebarOpen}
