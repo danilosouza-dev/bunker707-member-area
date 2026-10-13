@@ -52,7 +52,7 @@ export function ContinueWatchingCard({ accessPreviewMode, item }: CardProps) {
         onTouchStart={prefetchContentPage}
         type="button"
       >
-        <div className="absolute inset-0 z-0 w-full origin-center overflow-hidden rounded-[8px] bg-[#181818] shadow-xl shadow-black/35">
+        <div className="absolute inset-0 z-0 w-full origin-center overflow-hidden rounded-[var(--member-cover-radius)] bg-[#181818] shadow-xl shadow-black/35">
           <div
             className="continue-watching-card-image absolute inset-0 bg-cover bg-center"
             style={{ backgroundImage: cssImageUrl(item.image) }}

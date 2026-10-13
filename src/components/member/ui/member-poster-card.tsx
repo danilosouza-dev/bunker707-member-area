@@ -55,10 +55,10 @@ export function MemberPosterCard({
     <article className={cn("group relative min-w-0", className)}>
       <Link
         aria-label={ariaLabel ?? `Abrir ${title}`}
-        className="block rounded-[10px] outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-4 focus-visible:ring-offset-[#141414]"
+        className="block rounded-[var(--member-cover-radius)] outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-4 focus-visible:ring-offset-[#141414]"
         href={href}
       >
-        <div className="relative aspect-[2/3] overflow-hidden rounded-[10px] bg-[#1f1f1f] ring-1 ring-white/[0.08] transition duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_26px_60px_rgba(0,0,0,0.6)] group-hover:ring-white/25 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
+        <div className="relative aspect-[2/3] overflow-hidden rounded-[var(--member-cover-radius)] bg-[#1f1f1f] ring-1 ring-white/[0.08] transition duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_26px_60px_rgba(0,0,0,0.6)] group-hover:ring-white/25 motion-reduce:transition-none motion-reduce:group-hover:translate-y-0">
           {src ? (
             <Image
               alt=""

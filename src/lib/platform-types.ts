@@ -1,3 +1,4 @@
+import type { MemberStyleConfig } from "./member-style";
 import type { LucideIcon } from "lucide-react";
 import type { MemberReleaseState } from "./release-state";
 
@@ -216,6 +217,8 @@ export type HomeHeroConfig = {
 
 export type PlatformBrandingConfig = {
   logoImage: string | null;
+  /** Cantos, botoes e menu da area do aluno (src/lib/member-style.ts). Ausente = padrao discreto. */
+  style?: MemberStyleConfig;
 };
 
 export type ContentPageHeroConfig = {

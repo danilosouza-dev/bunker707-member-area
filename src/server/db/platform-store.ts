@@ -1,3 +1,4 @@
+import { MEMBER_STYLE_DEFAULTS, normalizeMemberStyle, type MemberStyleConfig } from "@/lib/member-style";
 import "server-only";
 import { redactSecrets } from "@/lib/env-value";
 
@@ -385,6 +386,8 @@ export type PlatformAppearanceInput = {
   logo?: {
     image: string | null;
   };
+  /** Estilo da area do aluno (Marca > Estilo); sempre completo. */
+  style?: MemberStyleConfig;
 };
 
 const defaultHero: HomeHeroConfig = {
@@ -400,7 +403,8 @@ const defaultHero: HomeHeroConfig = {
 };
 const defaultLogoImage = "/brand/logo-bunker.svg";
 const defaultBranding: PlatformBrandingConfig = {
-  logoImage: defaultLogoImage
+  logoImage: defaultLogoImage,
+  style: MEMBER_STYLE_DEFAULTS
 };
 
 function normalizePlatformBranding(value: unknown): PlatformBrandingConfig {
@@ -409,13 +413,14 @@ function normalizePlatformBranding(value: unknown): PlatformBrandingConfig {
   }
 
   const branding = value as Partial<PlatformBrandingConfig>;
+  const style = normalizeMemberStyle(value);
 
   if (branding.logoImage === null) {
-    return { logoImage: null };
+    return { logoImage: null, style };
   }
 
   const logoImage = typeof branding.logoImage === "string" ? branding.logoImage.trim() : "";
-  return { logoImage: logoImage || defaultLogoImage };
+  return { logoImage: logoImage || defaultLogoImage, style };
 }
 const defaultStudent: PlatformStudent = {
   fullName: "Aluno Bunker707",
@@ -3327,7 +3332,7 @@ function applyAppearanceToHero(stored: unknown, input: { enabled: boolean; image
 }
 
 export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
-  if (input.hero === undefined && input.logo === undefined) {
+  if (input.hero === undefined && input.logo === undefined && input.style === undefined) {
     throw createAdminMutationError("Nenhuma alteracao de aparencia informada.", 400);
   }
 
@@ -3354,8 +3359,11 @@ export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
   }
 
   if (input.logo !== undefined) {
+    // Trocar a logo nunca apaga o estilo (cantos, botoes, menu) gravado na mesma chave.
+    const style = normalizeMemberStyle(database.branding);
+
     if (input.logo.image === null) {
-      database.branding = { logoImage: null };
+      database.branding = { logoImage: null, style };
     } else {
       const providedLogo = input.logo.image.trim();
 
@@ -3364,11 +3372,20 @@ export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
       }
 
       database.branding = {
-        logoImage: await persistAppearanceImage(providedLogo, "platform/logo", "A logo da plataforma")
+        logoImage: await persistAppearanceImage(providedLogo, "platform/logo", "A logo da plataforma"),
+        style
       };
     }
 
     settingsKeys.push("branding");
+  }
+
+  if (input.style !== undefined) {
+    database.branding = { ...database.branding, style: normalizeMemberStyle({ style: input.style }) };
+
+    if (!settingsKeys.includes("branding")) {
+      settingsKeys.push("branding");
+    }
   }
 
   database.updatedAt = new Date().toISOString();

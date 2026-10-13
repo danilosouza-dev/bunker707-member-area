@@ -10,7 +10,7 @@ export type MemberButtonVariant = "accent" | "danger" | "ghost" | "primary" | "s
 export type MemberButtonSize = "icon" | "lg" | "md" | "sm";
 
 const baseClassName =
-  "inline-flex shrink-0 select-none items-center justify-center gap-2 whitespace-nowrap rounded-[8px] font-semibold transition-[background-color,border-color,color,box-shadow,opacity] duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:pointer-events-none disabled:opacity-45 aria-disabled:pointer-events-none aria-disabled:opacity-45 [&_svg]:shrink-0";
+  "inline-flex shrink-0 select-none items-center justify-center gap-2 whitespace-nowrap rounded-[var(--member-button-radius)] font-semibold transition-[background-color,border-color,color,box-shadow,opacity] duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:pointer-events-none disabled:opacity-45 aria-disabled:pointer-events-none aria-disabled:opacity-45 [&_svg]:shrink-0";
 
 const variantClassNames: Record<MemberButtonVariant, string> = {
   accent: "bg-[var(--accent)] text-white shadow-[0_12px_32px_rgba(229,9,20,0.28)] hover:bg-[#f40612]",

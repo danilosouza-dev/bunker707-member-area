@@ -48,10 +48,10 @@ export function MemberLessonCard({
     <article className={cn("group relative min-w-0", className)}>
       <Link
         aria-label={locked ? `${title}. ${locked.label}` : `Assistir ${title}`}
-        className="block rounded-[10px] outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-4 focus-visible:ring-offset-[#141414]"
+        className="block rounded-[var(--member-cover-radius)] outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-4 focus-visible:ring-offset-[#141414]"
         href={href}
       >
-        <div className="relative aspect-video overflow-hidden rounded-[10px] bg-[#1f1f1f] ring-1 ring-white/[0.08] transition duration-300 group-hover:ring-white/25 motion-reduce:transition-none">
+        <div className="relative aspect-video overflow-hidden rounded-[var(--member-cover-radius)] bg-[#1f1f1f] ring-1 ring-white/[0.08] transition duration-300 group-hover:ring-white/25 motion-reduce:transition-none">
           {src ? (
             <Image
               alt=""

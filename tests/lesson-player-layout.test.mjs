@@ -38,7 +38,7 @@ test("lesson player stays within viewport height when playlist is collapsed", ()
 });
 
 test("lesson player overlays stay below the global header", () => {
-  assert.match(appShellSource, /<header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-\[80px\]">/);
+  assert.match(appShellSource, /<header className=\{cn\("fixed left-0 right-0 top-0 z-40 overflow-hidden", !menuInHeader && "md:left-\[80px\]"\)\}>/);
   assert.match(lessonSource, /lesson-player-frame group\/player relative z-0 aspect-video/);
   assert.match(lessonSource, /aria-label=\{`Voltar para \$\{returnLabel\}`\}\s*className="group\/action absolute left-3 top-3 z-30/);
   assert.match(lessonSource, /aria-label="Mostrar listagem de aulas"\s*className="group\/action absolute right-4 top-4 z-30/);

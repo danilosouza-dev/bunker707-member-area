@@ -256,6 +256,12 @@ As paginas internas do aluno (Minhas compras, Favoritos, Minha jornada, Continue
 
 Datas mostradas ao aluno usam `src/lib/member-format.ts` (fuso America/Sao_Paulo, "08/01/2026", "08/01/2026 às 14:30", "há 2 dias"). Rotas e itens da barra lateral vem de `src/lib/member-navigation.ts`.
 
+## Estilo escolhido pelo produtor (Marca > Estilo)
+
+- Gravado em `platform_settings.branding.style` (`src/lib/member-style.ts`): `corners` (`soft` | `rounded`), `buttons` (`soft` | `pill`) e `menu` (`sidebar` | `header`). Padrao: discreto, botoes discretos, menu na barra lateral.
+- Cantos e botoes viram variaveis CSS no raiz do `AppShell` (`--member-cover-radius` 10/16 px, `--member-button-radius` 8 px/pilula, `--member-hero-radius`, `--member-hero-inset` e `--member-hero-top` para o destaque com margem e cantos redondos no modo arredondado). `MemberButton`, o botao do destaque, `MemberPosterCard`, `MemberLessonCard` e o card de continuar assistindo usam essas variaveis; os padroes ficam em `globals.css` (`:root`), entao a previa do admin desenha o modo discreto.
+- Menu no cabecalho: sem trilho e sem recuo de 80 px; hamburguer + logo no topo em todas as larguras, a gaveta continua abrindo por cima. O esqueleto de carregamento desenha sempre o trilho (nao le a escolha).
+
 ## Barra lateral e menu da conta (aluno)
 
 - Atualizacao 13/10/2026 (pedido do produtor, referencia "sidebar do YouTube", sempre escuro, sem troca de tema): a partir de 768 px fica fixo o trilho `src/components/member/shell/member-rail.tsx`, 80 px, fundo `#0f0f0f`, com hamburguer, simbolo da marca (`/brand/icon-bunker.svg`, recortado do SVG da logo com a caixa exata; o PNG antigo de 35 px vinha cortado na direita e embaixo) e so os icones dos mesmos destinos (botao de 48 px, raio 12 px, icone de 24 px com traco 1,5; ativo em `white/[0.1]` com o icone preenchido a 18 %; nome no `title`), com uma linha entre `Estudar` e `Conta e ajuda`. O conteudo e o topo ficam a 80 px do trilho (`md:pl-[80px]`, `md:left-[80px]`) e nunca sao empurrados. No computador o topo nao mostra a logo; no celular nao ha trilho e o topo mostra hamburguer + logo.

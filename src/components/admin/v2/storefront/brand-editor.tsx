@@ -1,12 +1,19 @@
 "use client";
 
-import { ArrowRight, RotateCcw, Trash2, Upload } from "lucide-react";
+import { ArrowRight, Check, RotateCcw, Trash2, Upload } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useState, type ChangeEvent } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  MEMBER_BUTTON_OPTIONS,
+  MEMBER_CORNER_OPTIONS,
+  MEMBER_MENU_OPTIONS,
+  normalizeMemberStyle,
+  type MemberStyleConfig
+} from "@/lib/member-style";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_LOGO_IMAGE,
@@ -19,13 +26,13 @@ import {
   type BrandDraft,
   type StorefrontBrand
 } from "@/server/storefront/model";
-import { AdminField, adminInputClass, fieldDescribedBy } from "../form";
+import { AdminField, adminInputClass, adminPillClasses, fieldDescribedBy } from "../form";
 import { SaveBar } from "../save-bar";
 import { SectionCard } from "../settings/kit";
 import { adminToast } from "../toast";
 import { IMAGE_ACCEPT, ImageFileError, prepareImageUpload } from "./image-file";
 
-// Marca (docs/17 §1.6.8): a logo da area do aluno. Rascunho local ate "Publicar marca", que manda so o
+// Marca (docs/17 §1.6.8): a logo e o estilo (cantos das capas, botoes, posicao do menu) da area do aluno. Rascunho local ate "Publicar marca", que manda so o
 // que mudou pela rota de sempre (PUT /api/admin/appearance). O banner do topo da home saiu daqui e foi
 // para Area de membros > Destaque: o rascunho do banner nunca muda nesta tela, entao a rota recebe so
 // a logo (e, do seu lado, preserva tudo o que esta gravado no destaque).
@@ -92,6 +99,47 @@ function LinkField({ disabled, id, label, onApply }: LinkFieldProps) {
         </Button>
       </div>
     </AdminField>
+  );
+}
+
+type StyleChoiceProps<Value extends string> = {
+  disabled: boolean;
+  label: string;
+  name: string;
+  onChange: (value: Value) => void;
+  options: ReadonlyArray<{ description: string; label: string; value: Value }>;
+  value: Value;
+};
+
+/** Escolha de estilo em pilulas (radios nativos por baixo); a frase da opcao marcada fica embaixo. */
+function StyleChoice<Value extends string>({ disabled, label, name, onChange, options, value }: StyleChoiceProps<Value>) {
+  const current = options.find((option) => option.value === value);
+
+  return (
+    <fieldset className="flex min-w-0 flex-col gap-2" disabled={disabled}>
+      <legend className="text-sm leading-5 font-medium text-[var(--text-primary)]">{label}</legend>
+      <div className="flex flex-wrap gap-1.5" role="radiogroup">
+        {options.map((option) => {
+          const checked = option.value === value;
+
+          return (
+            <label
+              className={cn(
+                adminPillClasses(checked),
+                "has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-[var(--focus-ring)]",
+                disabled && "cursor-not-allowed opacity-60"
+              )}
+              key={option.value}
+            >
+              <input checked={checked} className="sr-only" name={name} onChange={() => onChange(option.value)} type="radio" value={option.value} />
+              {checked ? <Check aria-hidden="true" className="size-3.5 shrink-0" /> : null}
+              {option.label}
+            </label>
+          );
+        })}
+      </div>
+      {current ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{current.description}</p> : null}
+    </fieldset>
   );
 }
 
@@ -165,6 +213,11 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
     setSaveError(null);
   }
 
+  function changeStyle(next: Partial<MemberStyleConfig>) {
+    setDraft((current) => ({ ...current, style: { ...current.style, ...next } }));
+    setSaveError(null);
+  }
+
   async function handleLogoFile(file: File) {
     setBusy(true);
     setLogoError(null);
@@ -199,7 +252,11 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
         throw new Error(payload.error || "Não foi possível publicar a marca.");
       }
 
-      const next = brandToDraft({ hero: normalizeHero(payload.data.hero), logoImage: normalizeLogo(payload.data.branding, true) });
+      const next = brandToDraft({
+        hero: normalizeHero(payload.data.hero),
+        logoImage: normalizeLogo(payload.data.branding, true),
+        style: normalizeMemberStyle(payload.data.branding)
+      });
       setPublished(next);
       setDraft(next);
       adminToast.success("Marca publicada. Os alunos já veem o novo visual.");
@@ -283,6 +340,35 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
           </div>
 
           <LinkField disabled={locked} id="marca-logo-link" label="Ou cole o link da logo" onApply={(link) => change({ logoImage: link })} />
+        </div>
+      </SectionCard>
+
+      <SectionCard description="Vale para toda a área do aluno. Publique para os alunos verem." title="Estilo">
+        <div className="flex flex-col gap-6">
+          <StyleChoice
+            disabled={locked}
+            label="Cantos das capas"
+            name="marca-estilo-cantos"
+            onChange={(corners) => changeStyle({ corners })}
+            options={MEMBER_CORNER_OPTIONS}
+            value={draft.style.corners}
+          />
+          <StyleChoice
+            disabled={locked}
+            label="Botões"
+            name="marca-estilo-botoes"
+            onChange={(buttons) => changeStyle({ buttons })}
+            options={MEMBER_BUTTON_OPTIONS}
+            value={draft.style.buttons}
+          />
+          <StyleChoice
+            disabled={locked}
+            label="Menu"
+            name="marca-estilo-menu"
+            onChange={(menu) => changeStyle({ menu })}
+            options={MEMBER_MENU_OPTIONS}
+            value={draft.style.menu}
+          />
         </div>
       </SectionCard>
 

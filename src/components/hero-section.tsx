@@ -20,7 +20,7 @@ type HeroSectionProps = {
 };
 
 const ctaClass =
-  "inline-flex min-h-12 items-center justify-center gap-2 rounded-[8px] bg-white px-6 py-3 text-base font-extrabold text-black shadow-xl shadow-black/25 transition hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white motion-reduce:transition-none";
+  "inline-flex min-h-12 items-center justify-center gap-2 rounded-[var(--member-button-radius)] bg-white px-6 py-3 text-base font-extrabold text-black shadow-xl shadow-black/25 transition hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white motion-reduce:transition-none";
 
 function HeroCta({
   accessPreviewMode,
@@ -90,7 +90,7 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
   const poster = hero.mediaType === "video" && hero.poster ? hero.poster : null;
 
   return (
-    <section className="@container relative min-h-[680px] overflow-hidden">
+    <section className="@container relative min-h-[680px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
       {hero.mediaType === "video" ? (
         <>
           <video

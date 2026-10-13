@@ -203,8 +203,11 @@ test("trilho de icones no computador: simbolo, hamburguer, sem empurrar o conteu
   assert.match(railSource, /onClick=\{\(event\) => onNavigate\(event, item\.href\)\}/);
   assert.doesNotMatch(railSource, /\bSun\b|\bMoon\b/, "sempre escuro, sem troca de tema");
 
-  assert.match(appShellSource, /<header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-\[80px\]">/);
-  assert.match(appShellSource, /<main className="md:pl-\[80px\]">/, "conteudo ao lado do trilho; a gaveta abre por cima");
+  // Posicao do menu (Marca > Estilo): com o menu no cabecalho nao ha trilho nem recuo de 80 px.
+  assert.match(appShellSource, /<header className=\{cn\("fixed left-0 right-0 top-0 z-40 overflow-hidden", !menuInHeader && "md:left-\[80px\]"\)\}>/);
+  assert.match(appShellSource, /<main className=\{cn\(!menuInHeader && "md:pl-\[80px\]"\)\}>/, "conteudo ao lado do trilho; a gaveta abre por cima");
+  assert.match(appShellSource, /\{menuInHeader \? null : \(\s*<MemberRail/);
+  assert.match(appShellSource, /style=\{memberStyleCssVars\(style\)\}/, "cantos e botoes entram como variaveis CSS no raiz");
   assert.match(appShellSource, /<MemberNotificationsMenu /, "lembretes no topo, ao lado da conta");
   assert.match(notificationsSource, /Nenhum lembrete por enquanto\./, "sem lembrete inventado");
 });

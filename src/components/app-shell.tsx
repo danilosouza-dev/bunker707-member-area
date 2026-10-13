@@ -17,6 +17,8 @@ import type { PlatformDirectorChat as PlatformDirectorChatComponent } from "@/co
 import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
 import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
 import { signOutAndLeave } from "@/lib/auth/sign-out";
+import { memberStyleCssVars, normalizeMemberStyle } from "@/lib/member-style";
+import { cn } from "@/lib/utils";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { PlatformBrandingConfig } from "@/lib/platform-types";
 import type { AccessPreviewMode } from "@/lib/access-preview";
@@ -136,6 +138,9 @@ const PlatformDirectorChat = dynamic(
 
 export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = false, children, student }: AppShellProps) {
   const logoImage = branding === undefined ? "/brand/logo-bunker.svg" : branding.logoImage;
+  // Estilo escolhido em Area de membros > Marca: cantos (variaveis CSS no raiz) e posicao do menu.
+  const style = normalizeMemberStyle(branding);
+  const menuInHeader = style.menu === "header";
   const pathname = usePathname();
   const router = useNavigationFeedbackRouter();
   const { startNavigation } = useNavigationFeedback();
@@ -257,8 +262,8 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
 
   return (
     <PlatformBrandingProvider branding={branding}>
-    <div className="min-h-screen bg-[#141414] text-white">
-      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-[80px]">
+    <div className="min-h-screen bg-[#141414] text-white" data-member-menu={style.menu} style={memberStyleCssVars(style)}>
+      <header className={cn("fixed left-0 right-0 top-0 z-40 overflow-hidden", !menuInHeader && "md:left-[80px]")}>
         <div
           aria-hidden="true"
           className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.68)_0%,rgba(0,0,0,0.26)_58%,rgba(0,0,0,0)_100%)] transition-opacity duration-300 ease-out will-change-opacity"
@@ -279,7 +284,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             aria-expanded={sidebarOpen}
             aria-haspopup="dialog"
             aria-label="Abrir menu"
-            className={`grid h-10 w-10 place-items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white md:hidden ${iconButtonChrome}`}
+            className={cn("grid h-10 w-10 place-items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white", !menuInHeader && "md:hidden", iconButtonChrome)}
             onClick={(event) => openSidebar(event.currentTarget)}
             ref={menuButtonRef}
             type="button"
@@ -289,7 +294,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
 
           <Link
             aria-label="Ir para o início"
-            className="flex min-w-fit items-center rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white md:hidden"
+            className={cn("flex min-w-fit items-center rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white", !menuInHeader && "md:hidden")}
             href={homeHref}
             onClick={(event) => handleProgressAwareNavigation(event, homeHref)}
           >
@@ -365,6 +370,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
         </div>
       </header>
 
+      {menuInHeader ? null : (
       <MemberRail
         accessPreviewMode={accessPreviewMode}
         homeHref={homeHref}
@@ -375,6 +381,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
         onOpenMenu={() => openSidebar(railMenuButtonRef.current)}
         pathname={pathname}
       />
+      )}
 
       <MemberSidebar
         accessPreviewMode={accessPreviewMode}
@@ -414,7 +421,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
         returnFocusRef={sidebarTriggerRef}
       />
 
-      <main className="md:pl-[80px]">{children}</main>
+      <main className={cn(!menuInHeader && "md:pl-[80px]")}>{children}</main>
 
       {!sidebarOpen ? (
         directorRequested ? (

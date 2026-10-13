@@ -41,6 +41,14 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   --accent: #e50914;
   --accent-warm: #ff7a1a;
 
+  /* Estilo da area do aluno (Area de membros > Marca > Estilo). Padrao "discreto"; o AppShell
+     sobrescreve no raiz conforme a escolha (src/lib/member-style.ts). */
+  --member-button-radius: 8px;
+  --member-cover-radius: 10px;
+  --member-hero-inset: 0px;
+  --member-hero-radius: 0px;
+  --member-hero-top: 0px;
+
   --card: var(--panel);
   --card-foreground: var(--foreground);
   --popover: var(--panel-strong);

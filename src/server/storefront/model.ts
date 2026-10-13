@@ -9,6 +9,7 @@
 // para o erro aparecer antes de publicar; o servidor continua sendo quem decide. A limpeza de produto
 // que saiu de venda (pruneHomeSectionRefs) e a mesma nos dois lados: o servidor importa daqui.
 
+import { isSameMemberStyle, normalizeMemberStyle, type MemberStyleConfig } from "../../lib/member-style";
 import type {
   ContentKind,
   HomeSectionConfig,
@@ -92,7 +93,7 @@ export type StorefrontEditorData = {
   sectionsUpdatedAt: string | null;
 };
 
-export type StorefrontBrand = { hero: StorefrontHero; logoImage: string | null };
+export type StorefrontBrand = { hero: StorefrontHero; logoImage: string | null; style: MemberStyleConfig };
 
 export const DEFAULT_HERO_IMAGE = "/hero/bunker-707-red-front-hero.png";
 export const DEFAULT_LOGO_IMAGE = "/brand/logo-bunker.svg";
@@ -472,7 +473,8 @@ export function mapStorefrontBrand(platformRows: readonly PlatformSettingRow[]):
 
   return {
     hero: normalizeHero(settings.get("hero")),
-    logoImage: normalizeLogo(settings.get("branding"), settings.has("branding"))
+    logoImage: normalizeLogo(settings.get("branding"), settings.has("branding")),
+    style: normalizeMemberStyle(settings.get("branding"))
   };
 }
 
@@ -963,13 +965,14 @@ export function resolveSectionPreview(section: HomeSectionConfig, products: read
  * Marca: rascunho e corpo do PUT /api/admin/appearance
  * ---------------------------------------------------------------------------------------------- */
 
-export type BrandDraft = { heroEnabled: boolean; heroImage: string; logoImage: string | null };
+export type BrandDraft = { heroEnabled: boolean; heroImage: string; logoImage: string | null; style: MemberStyleConfig };
 
 export function brandToDraft(brand: StorefrontBrand): BrandDraft {
   return {
     heroEnabled: brand.hero.enabled,
     heroImage: brand.hero.image || DEFAULT_HERO_IMAGE,
-    logoImage: brand.logoImage
+    logoImage: brand.logoImage,
+    style: brand.style
   };
 }
 
@@ -978,12 +981,16 @@ export function isBrandHeroDirty(published: BrandDraft, draft: BrandDraft) {
 }
 
 export function isBrandDirty(published: BrandDraft, draft: BrandDraft) {
-  return isBrandHeroDirty(published, draft) || draft.logoImage !== published.logoImage;
+  return (
+    isBrandHeroDirty(published, draft) ||
+    draft.logoImage !== published.logoImage ||
+    !isSameMemberStyle(draft.style, published.style)
+  );
 }
 
 /** Mesmo contrato do admin antigo: so manda o que mudou; imagem so quando trocou. */
 export function buildAppearancePayload(published: BrandDraft, draft: BrandDraft) {
-  const payload: { hero?: { enabled: boolean; image?: string }; logo?: { image: string | null } } = {};
+  const payload: { hero?: { enabled: boolean; image?: string }; logo?: { image: string | null }; style?: MemberStyleConfig } = {};
 
   if (isBrandHeroDirty(published, draft)) {
     payload.hero = draft.heroEnabled
@@ -993,6 +1000,10 @@ export function buildAppearancePayload(published: BrandDraft, draft: BrandDraft)
 
   if (draft.logoImage !== published.logoImage) {
     payload.logo = { image: draft.logoImage };
+  }
+
+  if (!isSameMemberStyle(draft.style, published.style)) {
+    payload.style = draft.style;
   }
 
   return payload;
