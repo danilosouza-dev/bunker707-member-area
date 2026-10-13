@@ -10,6 +10,7 @@ import {
   ShoppingCart
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { HeroGlow } from "@/components/member/hero-glow";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode, withAccessPreviewParam } from "@/lib/access-preview";
@@ -214,7 +215,9 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
           o cabecalho (logo e perfil) e as fileiras acompanham o banner arredondado. */}
       <div className="min-h-screen bg-[#141414]" data-member-banner={pageHero.corners === "inherit" ? undefined : pageHero.corners}>
         {/* Mesmos cantos e recuo do destaque da home (Marca > Estilo): no modo arredondado a capa fica como la. */}
-        <section className="relative min-h-[640px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
+        <div className="relative flow-root">
+        <HeroGlow src={pageHero.mediaType === "video" ? pageHero.poster ?? null : pageHero.mediaSrc ?? null} />
+        <section className="relative z-[1] min-h-[640px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
           {pageHero.mediaType === "video" ? (
             <video
               aria-hidden="true"
@@ -299,6 +302,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
             </div>
           </div>
         </section>
+        </div>
 
         <div className="relative z-20 mt-[var(--member-page-overlap)]">
           <ContentStructureSection

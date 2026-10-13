@@ -1,6 +1,7 @@
 import { ArrowRight, Zap } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { HeroGlow } from "@/components/member/hero-glow";
 import { withAccessPreviewParam, type AccessPreviewMode } from "@/lib/access-preview";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { HomeHeroConfig } from "@/lib/platform-types";
@@ -90,7 +91,10 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
   const poster = hero.mediaType === "video" && hero.poster ? hero.poster : null;
 
   return (
-    <section className="@container relative min-h-[680px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
+    // flow-root: a margem de cima do destaque fica dentro do bloco, entao a luz comeca no topo da pagina.
+    <div className="relative flow-root">
+      <HeroGlow src={hero.mediaType === "video" ? poster : hero.image} />
+      <section className="@container relative z-[1] min-h-[680px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
       {hero.mediaType === "video" ? (
         <>
           <video
@@ -158,5 +162,6 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
         </div>
       ) : null}
     </section>
+    </div>
   );
 }

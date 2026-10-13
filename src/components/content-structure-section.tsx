@@ -18,7 +18,6 @@ import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type {
-  CardThumbnailSize,
   ContentItem,
   CourseModule,
   FormationCourseOpenMode,
@@ -47,8 +46,6 @@ type InternalPosterCardProps = {
   progress?: number;
   showAction?: boolean;
   showProgress?: boolean;
-  /** Tamanho da thumbnail do curso (Detalhes): o card segue o produto. */
-  thumbnailSize?: CardThumbnailSize;
   title: string;
 };
 
@@ -75,7 +72,6 @@ function InternalPosterCard({
   progress = 0,
   showAction = true,
   showProgress = true,
-  thumbnailSize,
   title
 }: InternalPosterCardProps) {
   const router = useNavigationFeedbackRouter();
@@ -95,9 +91,8 @@ function InternalPosterCard({
   return (
     <Link
       aria-label={lockedAccessibilityDetail ? `${title}. ${lockedAccessibilityDetail}` : `Abrir ${title}`}
-      className="home-cover-card internal-poster-card member-row-card group relative aspect-[2/3] w-[8.75rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[11rem] md:w-[12.5rem] lg:w-[15rem] 2xl:w-[16rem]"
+      className="home-cover-card internal-poster-card member-row-card group relative aspect-[2/3] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70"
       data-navigation-feedback={isLocked ? "false" : undefined}
-      data-thumb-size={thumbnailSize === "large" ? "large" : undefined}
       href={href}
       onClick={(event) => {
         if (isLocked) {
@@ -342,7 +337,6 @@ export function ContentStructureSection({
                 progress={course.progress}
                 showAction={showInternalCardActions}
                 showProgress={false}
-                thumbnailSize={course.thumbnailSize}
                 title={course.title}
               />
             );
@@ -387,7 +381,6 @@ export function ContentStructureSection({
                 meta={module.meta}
                 progress={module.progress}
                 showAction={showInternalCardActions && !isLocked && hasLessons}
-                thumbnailSize={item.thumbnailSize}
                 title={module.title}
               />
             );

@@ -184,7 +184,7 @@ function CourseModuleHomeCard({
     </>
   );
   const className =
-    `home-cover-card home-row-cover-card member-row-card group relative aspect-[2/3] w-[8.75rem] shrink-0 overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[10.5rem] md:w-[12rem] lg:w-[13rem] xl:w-[14rem] ${
+    `home-cover-card home-row-cover-card member-row-card group relative aspect-[2/3] shrink-0 overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 ${
       isLocked ? "cursor-not-allowed" : "cursor-pointer"
     }`;
 
@@ -194,7 +194,6 @@ function CourseModuleHomeCard({
         aria-label={`Ver detalhes de ${module.title}`}
         className={className}
         data-home-row-card
-        data-thumb-size={course.thumbnailSize === "large" ? "large" : undefined}
         onClick={onOpenCourseDetails}
         type="button"
       >
@@ -208,7 +207,6 @@ function CourseModuleHomeCard({
       aria-label={`Abrir ${module.title}`}
       className={className}
       data-home-row-card
-      data-thumb-size={course.thumbnailSize === "large" ? "large" : undefined}
       href={href}
       prefetch
     >

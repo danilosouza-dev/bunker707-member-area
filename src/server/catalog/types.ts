@@ -48,7 +48,6 @@ import type {
   setModuleCoverSchema,
   setProductHeroCornersSchema,
   setProductImageSchema,
-  setProductThumbnailSizeSchema,
   setProductSituationSchema,
   softDeleteStructureSchema,
   updateLessonSchema,
@@ -80,7 +79,6 @@ export type UpdateProductDetailsInput = z.input<typeof updateProductDetailsSchem
 export type UpdateProductAccessInput = z.input<typeof updateProductAccessSchema>;
 export type SetProductImageInput = z.input<typeof setProductImageSchema>;
 export type SetProductHeroCornersInput = z.input<typeof setProductHeroCornersSchema>;
-export type SetProductThumbnailSizeInput = z.input<typeof setProductThumbnailSizeSchema>;
 export type PublishProductInput = z.input<typeof publishProductSchema>;
 export type SetProductSituationInput = z.input<typeof setProductSituationSchema>;
 export type DeleteProductInput = z.input<typeof deleteProductSchema>;
@@ -206,8 +204,6 @@ export type ProductContent = {
   formationCourses: FormationCourseItem[] | null;
   header: ProductHeader;
   modules: ModuleNode[];
-  /** Define o recorte da capa propria dos modulos (segue a thumbnail do curso). */
-  thumbnailSize: ProductThumbnailSize;
 };
 
 /** Painel da aula (?aula=<id> na aba Conteúdo, ou /admin/produtos/[id]/aulas/[lessonId]). */
@@ -241,7 +237,6 @@ export type ProductDetails = {
   level: string | null;
   lockedActionMode: "details_modal" | "external_link";
   shortDescription: string;
-  thumbnailSize: ProductThumbnailSize;
 };
 
 export type ProductCohortSummary = { name: string; studentsCount: number };
@@ -297,9 +292,6 @@ export type ProductImageSaved = { slot: "cover" | "hero"; updatedAt: string; url
 /** Cantos do banner da pagina do produto; "inherit" = segue Marca > Estilo. */
 export type ProductHeroCorners = "inherit" | "rounded" | "soft";
 export type ProductHeroCornersSaved = { corners: ProductHeroCorners; updatedAt: string };
-/** Tamanho da thumbnail do card: "classic" = anterior (9:13 ate 720x1040); "large" = 284x426. */
-export type ProductThumbnailSize = "classic" | "large";
-export type ProductThumbnailSizeSaved = { thumbnailSize: ProductThumbnailSize; updatedAt: string };
 /** Capa do modulo gravada (setModuleCover, src/server/catalog/module-cover-actions.ts). */
 export type ModuleCoverSaved = { coverUrl: string | null; id: string; updatedAt: string; usesProductCover: boolean };
 export type ProductPublished = { checklist: PublishChecklist; header: ProductHeader; published: boolean };
@@ -389,7 +381,6 @@ export type UpdateProductDetailsAction = (input: UpdateProductDetailsInput) => P
 export type UpdateProductAccessAction = (input: UpdateProductAccessInput) => Promise<ActionResult<ProductSaved>>; // [catalog.write]
 export type SetProductImageAction = (input: SetProductImageInput) => Promise<ActionResult<ProductImageSaved>>; // [catalog.write]
 export type SetProductHeroCornersAction = (input: SetProductHeroCornersInput) => Promise<ActionResult<ProductHeroCornersSaved>>; // [catalog.write]
-export type SetProductThumbnailSizeAction = (input: SetProductThumbnailSizeInput) => Promise<ActionResult<ProductThumbnailSizeSaved>>; // [catalog.write]
 export type PublishProductAction = (input: PublishProductInput) => Promise<ActionResult<ProductPublished>>; // [catalog.publish]
 export type SetProductSituationAction = (input: SetProductSituationInput) => Promise<ActionResult<ProductSaved>>; // [catalog.publish]
 export type DeleteProductAction = (input: DeleteProductInput) => Promise<ActionResult<{ id: string }>>; // [catalog.delete]

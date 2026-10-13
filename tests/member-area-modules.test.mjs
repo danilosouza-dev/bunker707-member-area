@@ -786,12 +786,12 @@ function webpDataUrl(width, height) {
   return `data:image/webp;base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
-test("capa do modulo: WebP 720×1040 vai ao Storage e so a URL e gravada em course_modules.image", async () => {
+test("capa do modulo: WebP 720×1080 vai ao Storage e so a URL e gravada em course_modules.image", async () => {
   reset();
   const db = createDb({ tables: storefrontTables([]) });
   actionStubs.db = db;
 
-  const result = await setModuleCover({ image: webpDataUrl(720, 1040), moduleId: "mod-2" });
+  const result = await setModuleCover({ image: webpDataUrl(720, 1080), moduleId: "mod-2" });
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.match(result.data.coverUrl, /^https:\/\/projeto\.supabase\.co\/storage\/v1\/object\/public\/content-assets\/content\/curso-ia\/modules\/mod-2\/[a-f0-9]{24}\.webp$/);
@@ -814,26 +814,9 @@ test("capa do modulo: medida errada vira erro no campo, sem enviar nem gravar", 
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.match(result.fieldErrors.image[0], /720×1040/);
+  assert.match(result.fieldErrors.image[0], /720×1080/);
   assert.equal(db.calls.uploads.length, 0);
   assert.equal(db.calls.writes.length, 0);
-});
-
-test("capa do modulo segue o tamanho da thumbnail do curso: 284×426 quando o cadastro escolheu esse tamanho", async () => {
-  reset();
-  const tables = storefrontTables([]);
-  tables.content_page_settings = [{ content_id: "curso-ia", settings: { cardThumbnailSize: "large" } }];
-  const db = createDb({ tables });
-  actionStubs.db = db;
-
-  const classic = await setModuleCover({ image: webpDataUrl(720, 1040), moduleId: "mod-2" });
-  assert.equal(classic.ok, false);
-  assert.match(classic.fieldErrors.image[0], /284×426/);
-  assert.equal(db.calls.uploads.length, 0);
-
-  const large = await setModuleCover({ image: webpDataUrl(284, 426), moduleId: "mod-2" });
-  assert.equal(large.ok, true, JSON.stringify(large));
-  assert.equal(db.calls.uploads.length, 1);
 });
 
 test("capa do modulo: link com caracteres de CSS vira erro no campo, sem gravar", async () => {
@@ -1000,7 +983,7 @@ test("Detalhes le a fileira da home sem quebrar a aba; Conteudo tem a capa do mo
   assert.match(page, /return null;/, "falha vira null");
   assert.match(form, /<HomeRowControl/);
   assert.match(block, /Trocar capa do módulo…/);
-  assert.match(sheet, /slot=\{thumbnailSize === "large" \? "coverLarge" : "cover"\}/, "capa do modulo no tamanho da thumbnail do curso");
+  assert.match(sheet, /slot="cover"/);
   assert.match(sheet, /Usar a capa do produto/);
   assert.match(sheet, /Aparece no card do módulo na página do curso e na fileira de módulos da home\./);
 });

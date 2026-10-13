@@ -199,13 +199,7 @@ export const updateProductAccessSchema = z.object({
 export const setProductImageSchema = z.object({
   id: catalogIdSchema,
   image: imageInputSchema.nullable(),
-  slot: z.enum(["cover", "coverLarge", "hero"])
-});
-
-/** Tamanho da thumbnail do card (Detalhes): "classic" = anterior (9:13, ate 720x1040); "large" = 284x426. */
-export const setProductThumbnailSizeSchema = z.object({
-  id: catalogIdSchema,
-  thumbnailSize: z.enum(["classic", "large"])
+  slot: z.enum(["cover", "hero"])
 });
 
 /** Cantos do banner da pagina do produto: "inherit" segue Marca > Estilo. */

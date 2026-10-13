@@ -27,8 +27,7 @@ import type {
   ModuleNode,
   ProductHeader,
   ProductHeroCorners,
-  ProductListItem,
-  ProductThumbnailSize
+  ProductListItem
 } from "./types";
 
 /* ------------------------------------------------------------------------------------------------
@@ -150,11 +149,6 @@ export function heroCornersOf(settings: ProductSettings | null | undefined): Pro
   const corners = hero && typeof hero === "object" && !Array.isArray(hero) ? (hero as { corners?: unknown }).corners : undefined;
 
   return corners === "rounded" || corners === "soft" ? corners : "inherit";
-}
-
-/** Tamanho da thumbnail do card (Detalhes): so "large" vale; o resto e o tamanho anterior. */
-export function thumbnailSizeOf(settings: ProductSettings | null | undefined): ProductThumbnailSize {
-  return settings?.cardThumbnailSize === "large" ? "large" : "classic";
 }
 
 export function heroUrlOf(settings: ProductSettings | null | undefined) {

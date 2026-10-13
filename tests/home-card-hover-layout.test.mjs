@@ -85,8 +85,9 @@ test("home can show an access card and intermediate modules for a selected cours
   assert.doesNotMatch(rowSource, /Ver aulas/);
   assert.doesNotMatch(rowSource, /\$\{cardActionClassName\} mt-3 max-w-fit flex-none/);
   assert.match(rowSource, /home-row-cover-card/);
-  assert.match(rowSource, /w-\[8\.75rem\]/);
-  assert.match(rowSource, /xl:w-\[14rem\]/);
+  // Largura fluida (fracao da fileira, tests/member-row-sizing.test.mjs): nada de rem fixo no card do modulo.
+  assert.match(rowSource, /home-row-cover-card member-row-card group/);
+  assert.doesNotMatch(rowSource, /w-\[8\.75rem\]|xl:w-\[14rem\]/);
 });
 
 test("home vertical card hover expands the card without inner image zoom", () => {

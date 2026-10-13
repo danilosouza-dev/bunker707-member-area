@@ -55,8 +55,7 @@ test("cada slot de imagem tem a mesma medida no recorte do cliente e na checagem
   assert.deepEqual([crop.IMAGE_SPECS.loginBackground.outputWidth, crop.IMAGE_SPECS.loginBackground.outputHeight], [1920, 1080]);
   assert.equal(crop.IMAGE_SPECS.loginSide.orientation, "portrait");
   assert.equal(crop.IMAGE_SPECS.loginBackground.orientation, "landscape");
-  assert.equal(crop.aspectRatioOf(crop.IMAGE_SPECS.cover), "720 / 1040");
-  assert.equal(crop.aspectRatioOf(crop.IMAGE_SPECS.coverLarge), "284 / 426");
+  assert.equal(crop.aspectRatioOf(crop.IMAGE_SPECS.cover), "720 / 1080");
 });
 
 test("o teto de texto de cada upload da area de membros e o mesmo do recorte", () => {

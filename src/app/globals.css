@@ -56,8 +56,12 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   /* Fileiras da home: recuo lateral (o mesmo das classes antigas px-5/sm:px-8/lg:px-12) e quantos
      cards cabem entre as bordas no modo arredondado (capas 2:3 e cards 16:9). */
   --member-row-inset: 20px;
-  --member-row-cols: 3;
-  --member-row-cols-wide: 2;
+  /* Cards fluidos como as thumbs de Shorts do YouTube: largura = fracao da fileira (colunas por largura de
+     tela). No celular 2,2 colunas: dois cards inteiros e um pedaco do proximo (a fileira rola). */
+  --member-row-cols: 2.2;
+  --member-row-cols-wide: 1.3;
+  --member-row-gap: 0.75rem;
+  --member-hero-glow-extend: 0px;
 
   --card: var(--panel);
   --card-foreground: var(--foreground);
@@ -93,36 +97,51 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   :root {
     --member-page-overlap: -8rem;
     --member-row-inset: 32px;
+    --member-row-cols: 3;
+    --member-row-cols-wide: 2;
+  }
+}
+
+@media (min-width: 768px) {
+  :root {
     --member-row-cols: 4;
-    --member-row-cols-wide: 3;
   }
 }
 
 @media (min-width: 1024px) {
   :root {
     --member-row-inset: 48px;
+    --member-row-cols: 4;
+    --member-row-cols-wide: 3;
+  }
+}
+
+/* 5 colunas de 1280 a 1699 px (cards de 227 a 311 px), 6 a partir de 1700 (294 px em 1920), como no YouTube. */
+@media (min-width: 1280px) {
+  :root {
     --member-row-cols: 5;
     --member-row-cols-wide: 4;
   }
 }
 
-@media (min-width: 1280px) {
+@media (min-width: 1700px) {
   :root {
     --member-row-cols: 6;
     --member-row-cols-wide: 5;
   }
 }
 
-@media (min-width: 1536px) {
+@media (min-width: 2100px) {
   :root {
     --member-row-cols: 7;
     --member-row-cols-wide: 6;
   }
 }
 
-@media (min-width: 1800px) {
+@media (min-width: 2560px) {
   :root {
     --member-row-cols: 8;
+    --member-row-cols-wide: 7;
   }
 }
 
@@ -132,6 +151,7 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 
 [data-member-corners="rounded"] {
   --member-row-inset: 12px;
+  --member-hero-glow-extend: 38vh;
   --member-cover-radius: 16px;
   --member-hero-content-pb: 5rem;
   --member-hero-fade: 0;
@@ -159,6 +179,7 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 [data-member-banner="rounded"] {
   --member-hero-content-pb: 5rem;
   --member-hero-fade: 0;
+  --member-hero-glow-extend: 38vh;
   --member-hero-inset: 12px;
   --member-hero-radius: 20px;
   --member-hero-top: 76px;
@@ -169,6 +190,7 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 [data-member-banner="soft"] {
   --member-hero-content-pb: 12rem;
   --member-hero-fade: 1;
+  --member-hero-glow-extend: 0px;
   --member-hero-inset: 0px;
   --member-hero-radius: 0px;
   --member-hero-top: 0px;
@@ -186,31 +208,35 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   }
 }
 
-/* Arredondado (como na Netflix): titulos e cards comecam na linha da capa; cabe um numero inteiro de
-   cards entre as bordas (o ultimo inteiro termina na borda direita, os seguintes passam) e a rolagem
-   encaixa no inicio de um card, entao o alinhamento se mantem depois de rolar. */
-[data-member-corners="rounded"] .member-row-scroller {
+/* Nos dois estilos de cantos: os cards sao uma fracao da fileira (--member-row-cols), entao crescem com a
+   janela, como as thumbs de Shorts do YouTube; cabe um numero inteiro entre as bordas a partir de 640 px
+   (o ultimo inteiro termina na borda direita, os seguintes passam) e a rolagem encaixa no inicio de um
+   card, entao o alinhamento se mantem depois de rolar. */
+.member-row-scroller {
   scroll-snap-type: x mandatory;
   scroll-padding-inline: var(--member-row-inset);
 }
 
-[data-member-corners="rounded"] .member-row-card {
+.member-row-card {
   scroll-snap-align: start;
   width: calc((100% - (var(--member-row-cols) - 1) * var(--member-row-gap)) / var(--member-row-cols));
 }
 
-@media (min-width: 640px) {
-  /* Produto > Detalhes > Tamanho da thumbnail do card "284 x 426": o card do produto (e dos seus
-     modulos) fica 2:3 fixo, nos dois estilos de cantos. Com largura fixa o ultimo card so termina na
-     borda direita quando a conta fecha. */
-  .member-row-card[data-thumb-size="large"] {
-    width: 284px;
-  }
-}
-
-[data-member-corners="rounded"] .member-row-card-wide {
+.member-row-card-wide {
   scroll-snap-align: start;
   width: calc((100% - (var(--member-row-cols-wide) - 1) * var(--member-row-gap)) / var(--member-row-cols-wide));
+}
+
+/* Luz de fundo do destaque (HeroGlow): a cor media da imagem, forte no topo, some no cinza da pagina. No
+   arredondado ela aparece em volta do destaque e desce 38vh por tras da primeira fileira; no discreto a
+   imagem cobre o destaque de ponta a ponta, entao a luz nao passa dele. */
+.member-hero-glow {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 46%, #141414) 0%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 26%, #141414) 48%,
+    #141414 100%
+  );
 }
 
 * {

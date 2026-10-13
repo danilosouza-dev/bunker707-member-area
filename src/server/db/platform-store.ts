@@ -1180,12 +1180,9 @@ async function readSupabaseDatabase({
     .sort((left, right) => left.sort_order - right.sort_order)
     .map((row) => {
       const item = contentRowToItem(row);
-      const settings = contentPageSettingsMap[item.id];
-      const parentFormationId = settings?.parentFormationId;
-      // Tamanho da thumbnail escolhido no cadastro (Detalhes): o card do aluno segue; os modulos seguem o curso.
-      const sized = settings?.cardThumbnailSize === "large" ? { ...item, thumbnailSize: "large" as const } : item;
+      const parentFormationId = contentPageSettingsMap[item.id]?.parentFormationId;
 
-      return parentFormationId ? { ...sized, parentContentId: parentFormationId } : sized;
+      return parentFormationId ? { ...item, parentContentId: parentFormationId } : item;
     });
 
   return {

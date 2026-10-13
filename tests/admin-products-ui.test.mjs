@@ -12,7 +12,6 @@ const forms = await import("../src/components/admin/v2/products/product-forms.ts
 const { updateProductAccessSchema, updateProductDetailsSchema, webpDataUrlSchema } = await import("../src/server/catalog/schemas.ts");
 
 const cover = crop.IMAGE_SPECS.cover;
-const coverLarge = crop.IMAGE_SPECS.coverLarge;
 const hero = crop.IMAGE_SPECS.hero;
 
 function webpDataUrl(bytes) {
@@ -20,15 +19,11 @@ function webpDataUrl(bytes) {
 }
 
 test("especificacoes de imagem: saida e minimo na mesma proporcao", () => {
-  // Thumbnail do card: tamanho anterior (9:13) ou 284 x 426 (2:3), escolhido no cadastro do produto (13/10/2026).
-  assert.deepEqual([cover.outputWidth, cover.outputHeight], [720, 1040]);
-  assert.deepEqual([cover.minWidth, cover.minHeight], [540, 780]);
-  assert.deepEqual([coverLarge.outputWidth, coverLarge.outputHeight], [284, 426]);
-  assert.deepEqual([coverLarge.minWidth, coverLarge.minHeight], [284, 426], "284 x 426 sai no tamanho exato: a origem precisa ter pelo menos isso");
+  assert.deepEqual([cover.outputWidth, cover.outputHeight], [720, 1080]);
   assert.deepEqual([hero.outputWidth, hero.outputHeight], [1920, 720]);
-  assert.deepEqual([cover.ratioLabel, coverLarge.ratioLabel, hero.ratioLabel], ["9:13", "2:3", "8:3"]);
+  assert.deepEqual([cover.minWidth, cover.minHeight], [284, 426], "minimo baixo para testar capas pequenas (13/10/2026)");
 
-  for (const spec of [cover, coverLarge, hero]) {
+  for (const spec of [cover, hero]) {
     assert.ok(Math.abs(spec.minWidth / spec.minHeight - spec.outputWidth / spec.outputHeight) < 0.001, spec.label);
   }
 });
@@ -36,68 +31,51 @@ test("especificacoes de imagem: saida e minimo na mesma proporcao", () => {
 test("recusa origem pequena com a frase do tamanho minimo", () => {
   assert.equal(crop.describeSourceSizeProblem({ height: 780, width: 540 }, cover), null);
   assert.equal(crop.describeSourceSizeProblem({ height: 4000, width: 3000 }, cover), null);
+  assert.equal(crop.describeSourceSizeProblem({ height: 426, width: 284 }, cover), null);
   assert.equal(
-    crop.describeSourceSizeProblem({ height: 426, width: 284 }, cover),
-    "Esta imagem tem 284×426 px. Use uma imagem a partir de 540×780 px.",
-    "284 x 426 so serve no tamanho 284 x 426 do cadastro"
-  );
-  assert.match(crop.describeSourceSizeProblem({ height: 1000, width: 539 }, cover), /a partir de 540×780/);
-  assert.equal(crop.describeSourceSizeProblem({ height: 426, width: 284 }, coverLarge), null);
-  assert.equal(crop.describeSourceSizeProblem({ height: 4000, width: 3000 }, coverLarge), null);
-  assert.equal(
-    crop.describeSourceSizeProblem({ height: 300, width: 200 }, coverLarge),
+    crop.describeSourceSizeProblem({ height: 300, width: 200 }, cover),
     "Esta imagem tem 200×300 px. Use uma imagem a partir de 284×426 px."
   );
-  assert.match(crop.describeSourceSizeProblem({ height: 1000, width: 283 }, coverLarge), /a partir de 284×426/);
+  assert.match(crop.describeSourceSizeProblem({ height: 1000, width: 283 }, cover), /a partir de 284×426/);
   assert.match(crop.describeSourceSizeProblem({ height: 0, width: 0 }, cover), /Não conseguimos ler/);
   assert.match(crop.describeSourceSizeProblem({ height: 720, width: 1280 }, hero), /a partir de 1440×540/);
 });
 
-test("recorte base ocupa o maximo da imagem na proporcao do slot (9:13 ou 2:3)", () => {
+test("recorte base ocupa o maximo da imagem na proporcao 2:3", () => {
   // Paisagem: altura inteira.
   const wide = crop.baseCropSize({ height: 1300, width: 2000 }, cover);
   assert.equal(wide.height, 1300);
-  assert.equal(Math.round(wide.width), 900);
+  assert.equal(Math.round(wide.width), 867);
   // Retrato estreito: largura inteira.
   const narrow = crop.baseCropSize({ height: 3000, width: 900 }, cover);
   assert.equal(narrow.width, 900);
-  assert.equal(Math.round(narrow.height), 1300);
+  assert.equal(Math.round(narrow.height), 1350);
 
   const initial = crop.initialCropState({ height: 1300, width: 2000 }, cover);
   const rect = crop.cropRect({ height: 1300, width: 2000 }, cover, initial);
   assert.equal(rect.height, 1300);
-  assert.equal(Math.round(rect.width), 900);
-  assert.deepEqual([Math.round(rect.x), rect.y], [550, 0]);
-
-  // 284 x 426 recorta em 2:3.
-  const wideLarge = crop.baseCropSize({ height: 1300, width: 2000 }, coverLarge);
-  assert.deepEqual([wideLarge.height, Math.round(wideLarge.width)], [1300, 867]);
-  const rectLarge = crop.cropRect({ height: 1300, width: 2000 }, coverLarge, crop.initialCropState({ height: 1300, width: 2000 }, coverLarge));
-  assert.deepEqual([Math.round(rectLarge.x), rectLarge.y], [567, 0]);
+  assert.equal(Math.round(rect.width), 867);
+  assert.deepEqual([Math.round(rect.x), rect.y], [567, 0]);
 });
 
 test("saida nunca amplia: imagem pequena sai no tamanho dela, grande sai no tamanho do slot", () => {
-  assert.deepEqual(crop.outputSizeFor({ width: 540 }, cover), { height: 780, width: 540 });
-  assert.deepEqual(crop.outputSizeFor({ width: 2000 }, cover), { height: 1040, width: 720 });
-  assert.deepEqual(crop.outputSizeFor({ width: 720 }, cover), { height: 1040, width: 720 });
-  assert.deepEqual(crop.outputSizeFor({ width: 284 }, coverLarge), { height: 426, width: 284 });
-  assert.deepEqual(crop.outputSizeFor({ width: 2000 }, coverLarge), { height: 426, width: 284 });
+  assert.deepEqual(crop.outputSizeFor({ width: 284 }, cover), { height: 426, width: 284 });
+  assert.deepEqual(crop.outputSizeFor({ width: 2000 }, cover), { height: 1080, width: 720 });
+  assert.deepEqual(crop.outputSizeFor({ width: 720 }, cover), { height: 1080, width: 720 });
 });
 
 test("zoom nunca deixa o recorte com menos pixels que o minimo", () => {
-  assert.equal(crop.maxZoomFor({ height: 780, width: 540 }, cover), 1, "imagem no limite nao tem zoom");
-  assert.equal(crop.maxZoomFor({ height: 1560, width: 1080 }, cover), 2);
+  assert.equal(crop.maxZoomFor({ height: 426, width: 284 }, cover), 1, "imagem no limite nao tem zoom");
+  assert.equal(crop.maxZoomFor({ height: 852, width: 568 }, cover), 2);
   assert.equal(crop.maxZoomFor({ height: 26000, width: 18000 }, cover), crop.MAX_ZOOM_CAP);
-  assert.equal(crop.maxZoomFor({ height: 426, width: 284 }, coverLarge), 1, "284 x 426 exato nao tem zoom");
-  assert.equal(crop.maxZoomFor({ height: 852, width: 568 }, coverLarge), 2);
 
-  const source = { height: 2340, width: 1620 };
+  const source = { height: 1278, width: 852 };
   const zoomed = crop.zoomCrop(source, cover, crop.initialCropState(source, cover), 10);
   assert.equal(zoomed.zoom, 3);
   const rect = crop.cropRect(source, cover, zoomed);
-  assert.equal(rect.width, 540);
-  assert.equal(rect.height, 780);
-  assert.deepEqual([rect.x, rect.y], [540, 780], "zoom mantem o centro");
+  assert.equal(rect.width, 284);
+  assert.equal(rect.height, 426);
+  assert.deepEqual([rect.x, rect.y], [284, 426], "zoom mantem o centro");
 });
 
 test("arrastar move o recorte e para nas bordas da imagem", () => {
@@ -105,7 +83,7 @@ test("arrastar move o recorte e para nas bordas da imagem", () => {
   const start = crop.initialCropState(source, cover);
 
   const right = crop.panCrop(source, cover, start, 10_000, 0);
-  assert.equal(Math.round(crop.cropRect(source, cover, right).x), 1100, "encosta na borda direita");
+  assert.equal(Math.round(crop.cropRect(source, cover, right).x), 1133, "encosta na borda direita");
 
   const left = crop.panCrop(source, cover, start, -10_000, 50);
   const leftRect = crop.cropRect(source, cover, left);

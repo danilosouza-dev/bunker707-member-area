@@ -57,29 +57,20 @@ test("readWebpDimensions devolve null para lixo, PNG e arquivo cortado", () => {
   assert.equal(webp.readWebpDimensions(unknownChunk), null);
 });
 
-test("thumbnail (anterior ou 284 x 426) e hero exigem a medida do recorte e WebP de verdade", () => {
-  const cover = webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1040)));
-  assert.deepEqual(cover, { height: 1040, ok: true, width: 720 });
-  // Thumbnail 284 x 426 so no slot coverLarge (escolhido no cadastro): no tamanho anterior e pequena e fora da proporcao.
-  assert.deepEqual(webp.checkProductImage("coverLarge", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_284x426))), { height: 426, ok: true, width: 284 });
-  const smallOnClassic = webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_284x426)));
-  assert.equal(smallOnClassic.ok, false);
-  assert.match(smallOnClassic.message, /thumbnail do card precisa ter até 720×1040 px, na proporção/);
-  const classicOnLarge = webp.checkProductImage("coverLarge", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1040)));
-  assert.equal(classicOnLarge.ok, false);
-  assert.match(classicOnLarge.message, /até 284×426 px/);
-  // 2:3 no tamanho anterior (9:13): fora da proporcao.
-  const wrongRatio = webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1080)));
-  assert.equal(wrongRatio.ok, false);
-  assert.match(wrongRatio.message, /até 720×1040 px, na proporção/);
-  // Abaixo do minimo nos dois.
+test("capa e hero exigem a medida exata do recorte e WebP de verdade", () => {
+  const cover = webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1080)));
+  assert.deepEqual(cover, { height: 1080, ok: true, width: 720 });
+  // Menor que a saida, na mesma proporcao: aceita (o cliente nao amplia). Fora da proporcao ou abaixo do minimo: nao.
+  assert.deepEqual(webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_284x426))), { height: 426, ok: true, width: 284 });
+  const oldRatio = webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1040)));
+  assert.equal(oldRatio.ok, false);
+  assert.match(oldRatio.message, /até 720×1080 px, na proporção/);
   assert.equal(webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_200x300))).ok, false);
-  assert.equal(webp.checkProductImage("coverLarge", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_200x300))).ok, false);
 
   const hero = webp.checkProductImage("hero", webp.decodeWebpDataUrl(dataUrlFromHex(VP8X_EXTENDED_1920x720)));
   assert.equal(hero.ok, true);
 
-  const wrongSlot = webp.checkProductImage("hero", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1040)));
+  const wrongSlot = webp.checkProductImage("hero", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1080)));
   assert.equal(wrongSlot.ok, false);
   assert.match(wrongSlot.message, /1920×720/);
 
@@ -87,7 +78,7 @@ test("thumbnail (anterior ou 284 x 426) e hero exigem a medida do recorte e WebP
   assert.equal(webp.checkProductImage("cover", null).ok, false);
 
   const oversized = new Uint8Array(webp.MAX_PRODUCT_IMAGE_BYTES + 1);
-  oversized.set(bytesFromHex(VP8_LOSSY_720x1040));
+  oversized.set(bytesFromHex(VP8_LOSSY_720x1080));
   const tooBig = webp.checkProductImage("cover", oversized);
   assert.equal(tooBig.ok, false);
   assert.match(tooBig.message, /grande demais/);
@@ -509,12 +500,6 @@ test("pequenos tradutores de configuracao e de compra", () => {
   assert.equal(mappers.heroCornersOf({ hero: { corners: "oval" } }), "inherit");
   assert.equal(mappers.heroCornersOf({}), "inherit");
   assert.equal(mappers.heroCornersOf(null), "inherit");
-  // Tamanho da thumbnail do card por produto: so "large" muda; o resto e o tamanho anterior.
-  assert.equal(mappers.thumbnailSizeOf({ cardThumbnailSize: "large" }), "large");
-  assert.equal(mappers.thumbnailSizeOf({ cardThumbnailSize: "classic" }), "classic");
-  assert.equal(mappers.thumbnailSizeOf({ cardThumbnailSize: "huge" }), "classic");
-  assert.equal(mappers.thumbnailSizeOf({}), "classic");
-  assert.equal(mappers.thumbnailSizeOf(null), "classic");
   assert.equal(mappers.parentFormationIdOf({ parentFormationId: " formation-1 " }), "formation-1");
   assert.equal(mappers.parentFormationIdOf({ parentFormationId: 3 }), null);
   assert.equal(mappers.customPurchaseLabelOf("Comprar"), null, "'Comprar' e o padrao derivado, nao texto proprio");

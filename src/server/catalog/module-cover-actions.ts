@@ -11,27 +11,16 @@ import { invalidateCatalog } from "@/server/catalog/cache";
 import { persistImageAsset } from "@/server/db/media-assets";
 import { moduleUsesProductCover, productCoverForModule } from "../member-area/modules-model";
 import { CatalogFieldError, CatalogNotFoundError } from "./errors";
-import {
-  coverUrlOf,
-  MODULE_COLUMNS,
-  thumbnailSizeOf,
-  type ModuleRow
-} from "./mappers";
+import { MODULE_COLUMNS, coverUrlOf, type ModuleRow } from "./mappers";
 import { setModuleCoverSchema } from "./schemas";
-import {
-  catalogDb,
-  fetchModuleRow,
-  fetchProductSettings,
-  requireProductRow,
-  updateRowGuarded
-} from "./store";
+import { catalogDb, fetchModuleRow, requireProductRow, updateRowGuarded } from "./store";
 import type { ModuleCoverSaved, SetModuleCoverInput } from "./types";
 import { checkProductImage, decodeWebpDataUrl } from "./webp";
 
 const MODULE_NOT_FOUND = "Não encontramos este módulo. Ele pode ter sido excluído.";
 
 /**
- * [catalog.write] WebP no tamanho da thumbnail do curso (720×1040 ou 284×426, recortado no cliente) ou link https; null = volta para a
+ * [catalog.write] WebP 720×1040 (slot cover, recortado no cliente) ou link https; null = volta para a
  * capa do produto. Confere a medida no cabecalho do WebP, envia ao Storage e grava so a URL.
  */
 export async function setModuleCover(input: SetModuleCoverInput): Promise<ActionResult<ModuleCoverSaved>> {
@@ -49,9 +38,7 @@ export async function setModuleCover(input: SetModuleCoverInput): Promise<Action
     if (data.image === null) {
       image = productCoverForModule(product.image);
     } else if (data.image.startsWith("data:")) {
-      // A capa propria do modulo segue o tamanho da thumbnail do curso (Detalhes).
-      const settings = await fetchProductSettings(product.id, db);
-      const check = checkProductImage(thumbnailSizeOf(settings) === "large" ? "coverLarge" : "cover", decodeWebpDataUrl(data.image));
+      const check = checkProductImage("cover", decodeWebpDataUrl(data.image));
 
       if (!check.ok) {
         throw new CatalogFieldError("image", check.message);

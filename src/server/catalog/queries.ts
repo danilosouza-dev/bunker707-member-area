@@ -36,10 +36,9 @@ import {
   productFormatOf,
   publishedLessonRows,
   studentLessonPreviewHrefFor,
-  thumbnailSizeOf,
+  videoInputOf,
   type ProductListRpcRow,
-  type ProductRow,
-  videoInputOf
+  type ProductRow
 } from "./mappers";
 import { PRODUCT_LIST_PAGE_SIZE } from "./schemas";
 import {
@@ -239,15 +238,14 @@ export const getProductContent: GetProductContent = async (productId) => {
       },
       formationCourses: items,
       header: loaded.header,
-      modules: [],
-      thumbnailSize: thumbnailSizeOf(loaded.settings)
+      modules: []
     };
   }
 
   const { lessons, modules } = await fetchProductStructure(productId);
   const tree = buildModuleTree(modules, lessons);
 
-  return { counts: countTree(tree), formationCourses: null, header: loaded.header, modules: tree, thumbnailSize: thumbnailSizeOf(loaded.settings) };
+  return { counts: countTree(tree), formationCourses: null, header: loaded.header, modules: tree };
 };
 
 /* ------------------------------------------------------------------------------------------------
@@ -335,8 +333,7 @@ export const getProductDetails: GetProductDetails = async (productId) => {
     instructorName: instructorNameOf(row.instructor),
     level: row.level_label?.trim() || null,
     lockedActionMode: settings.lockedActionMode === "external_link" ? "external_link" : "details_modal",
-    shortDescription: row.description ?? "",
-    thumbnailSize: thumbnailSizeOf(settings)
+    shortDescription: row.description ?? ""
   };
 };
 

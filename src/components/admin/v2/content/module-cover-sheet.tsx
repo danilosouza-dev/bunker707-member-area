@@ -8,11 +8,10 @@ import { ErrorBanner } from "../error-banner";
 import { ImageField } from "../products/image-field";
 import { AdminSheet, AdminSheetSection } from "../sheet";
 import { StatusChip } from "../status-chip";
-import type { ProductThumbnailSize } from "@/server/catalog/types";
 import type { TreeModule } from "./tree-model";
 
 // Capa do modulo (menu do modulo › "Trocar capa do módulo…" ou a miniatura no cabecalho do modulo).
-// Recorte no tamanho da thumbnail do curso (9:13 ate 720×1040 ou 284×426, o mesmo card vertical da area do aluno) e grava na hora; "Usar a capa do
+// Recorte 2:3 (ate 720×1080, o mesmo card vertical da area do aluno) e grava na hora; "Usar a capa do
 // produto" volta para a capa do produto. Sem rascunho: o painel so mostra o que ja esta gravado.
 
 type ModuleCoverSheetProps = {
@@ -26,8 +25,6 @@ type ModuleCoverSheetProps = {
   /** Capa do produto (28 x 40) a esquerda do titulo do painel. */
   media?: ReactNode;
   productTitle: string;
-  /** Tamanho da thumbnail do curso (Detalhes): define o recorte da capa propria do modulo. */
-  thumbnailSize: ProductThumbnailSize;
 };
 
 function backgroundFor(url: string) {
@@ -68,8 +65,7 @@ export function ModuleCoverSheet({
   onSave,
   open,
   productCoverUrl,
-  productTitle,
-  thumbnailSize
+  productTitle
 }: ModuleCoverSheetProps) {
   const [pending, setPending] = useState<"image" | "product" | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -174,7 +170,7 @@ export function ModuleCoverSheet({
             optional
             pending={pending === "image"}
             readOnly={!canWrite}
-            slot={thumbnailSize === "large" ? "coverLarge" : "cover"}
+            slot="cover"
             value={ownCover}
           />
         </div>
