@@ -90,7 +90,7 @@ function InternalPosterCard({
   return (
     <Link
       aria-label={lockedAccessibilityDetail ? `${title}. ${lockedAccessibilityDetail}` : `Abrir ${title}`}
-      className="home-cover-card internal-poster-card group relative aspect-[2/3] w-[8.75rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[11rem] md:w-[12.5rem] lg:w-[15rem] 2xl:w-[16rem]"
+      className="home-cover-card internal-poster-card member-row-card group relative aspect-[2/3] w-[8.75rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[11rem] md:w-[12.5rem] lg:w-[15rem] 2xl:w-[16rem]"
       data-navigation-feedback={isLocked ? "false" : undefined}
       href={href}
       onClick={(event) => {
@@ -240,7 +240,7 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
 
   return (
     <section className="relative" id="conteudos">
-      <div className="mb-4 flex items-end justify-between gap-4 px-5 sm:px-8 lg:px-12">
+      <div className="mb-4 flex items-end justify-between gap-4 px-[var(--member-row-inset)]">
         <div>
           <h2 className="text-2xl font-black text-white sm:text-3xl">{title}</h2>
           {description ? (
@@ -257,7 +257,7 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
       </div>
       <div className="relative">
         <div
-          className="scrollbar-hidden flex scroll-smooth gap-[0.75rem] overflow-x-auto overflow-y-hidden overscroll-x-contain px-5 py-4 sm:px-8 lg:px-12"
+          className="member-row-scroller scrollbar-hidden flex scroll-smooth gap-[0.75rem] [--member-row-gap:0.75rem] overflow-x-auto overflow-y-hidden overscroll-x-contain px-[var(--member-row-inset)] py-4"
           ref={rowRef}
         >
           {children}

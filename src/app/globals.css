@@ -51,6 +51,11 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   --member-hero-overlap: -6rem;
   --member-hero-radius: 0px;
   --member-hero-top: 0px;
+  /* Fileiras da home: recuo lateral (o mesmo das classes antigas px-5/sm:px-8/lg:px-12) e quantos
+     cards cabem entre as bordas no modo arredondado (capas 2:3 e cards 16:9). */
+  --member-row-inset: 20px;
+  --member-row-cols: 3;
+  --member-row-cols-wide: 2;
 
   --card: var(--panel);
   --card-foreground: var(--foreground);
@@ -82,11 +87,48 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 }
 
 /* Marca > Estilo: os atributos ficam no raiz da area do aluno (AppShell). */
+@media (min-width: 640px) {
+  :root {
+    --member-row-inset: 32px;
+    --member-row-cols: 4;
+    --member-row-cols-wide: 3;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --member-row-inset: 48px;
+    --member-row-cols: 5;
+    --member-row-cols-wide: 4;
+  }
+}
+
+@media (min-width: 1280px) {
+  :root {
+    --member-row-cols: 6;
+    --member-row-cols-wide: 5;
+  }
+}
+
+@media (min-width: 1536px) {
+  :root {
+    --member-row-cols: 7;
+    --member-row-cols-wide: 6;
+  }
+}
+
+@media (min-width: 1800px) {
+  :root {
+    --member-row-cols: 8;
+  }
+}
+
 [data-member-buttons="pill"] {
   --member-button-radius: 9999px;
 }
 
 [data-member-corners="rounded"] {
+  --member-row-inset: 12px;
   --member-cover-radius: 16px;
   --member-hero-content-pb: 5rem;
   --member-hero-fade: 0;
@@ -102,7 +144,26 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
      para a foto do perfil alinhar com a outra borda da capa. */
   [data-member-corners="rounded"] {
     --member-hero-inset: 64px;
+    --member-row-inset: 64px;
   }
+}
+
+/* Arredondado (como na Netflix): titulos e cards comecam na linha da capa; cabe um numero inteiro de
+   cards entre as bordas (o ultimo inteiro termina na borda direita, os seguintes passam) e a rolagem
+   encaixa no inicio de um card, entao o alinhamento se mantem depois de rolar. */
+[data-member-corners="rounded"] .member-row-scroller {
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: var(--member-row-inset);
+}
+
+[data-member-corners="rounded"] .member-row-card {
+  scroll-snap-align: start;
+  width: calc((100% - (var(--member-row-cols) - 1) * var(--member-row-gap)) / var(--member-row-cols));
+}
+
+[data-member-corners="rounded"] .member-row-card-wide {
+  scroll-snap-align: start;
+  width: calc((100% - (var(--member-row-cols-wide) - 1) * var(--member-row-gap)) / var(--member-row-cols-wide));
 }
 
 * {

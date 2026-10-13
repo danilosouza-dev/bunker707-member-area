@@ -189,7 +189,7 @@ function CourseModuleHomeCard({
     </>
   );
   const className =
-    `home-cover-card home-row-cover-card group relative aspect-[2/3] w-[8.75rem] shrink-0 overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[10.5rem] md:w-[12rem] lg:w-[13rem] xl:w-[14rem] ${
+    `home-cover-card home-row-cover-card member-row-card group relative aspect-[2/3] w-[8.75rem] shrink-0 overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[10.5rem] md:w-[12rem] lg:w-[13rem] xl:w-[14rem] ${
       isLocked ? "cursor-not-allowed" : "cursor-pointer"
     }`;
 
@@ -355,7 +355,7 @@ export function CourseModulesHomeSection({
 
   return (
     <section className="relative">
-      <div className="mb-5 flex items-end justify-between gap-4 px-5 sm:px-8 lg:px-12">
+      <div className="mb-5 flex items-end justify-between gap-4 px-[var(--member-row-inset)]">
         <div className="flex min-w-0 items-center gap-4">
           <button
             aria-label={`${actionLabel} ${title}`}
@@ -411,7 +411,7 @@ export function CourseModulesHomeSection({
       </div>
       <div className="home-row-viewport relative">
         <div
-          className="scrollbar-hidden -my-4 flex scroll-smooth gap-[1.5rem] overflow-x-auto overflow-y-visible overscroll-x-contain px-5 py-4 sm:-my-14 sm:px-8 sm:py-14 lg:px-12"
+          className="member-row-scroller scrollbar-hidden -my-4 flex scroll-smooth gap-[1.5rem] [--member-row-gap:1.5rem] overflow-x-auto overflow-y-visible overscroll-x-contain px-[var(--member-row-inset)] py-4 sm:-my-14 sm:py-14"
           ref={rowRef}
         >
           {modules.map((module) => (
@@ -456,7 +456,7 @@ export function ContentRow({ accessPreviewMode, title, subtitle, items, modalStr
   const [currentPage, setCurrentPage] = useState(0);
   const [pageCount, setPageCount] = useState(1);
   const [savedOverrides, setSavedOverrides] = useState<Record<string, boolean>>({});
-  const rowGap = variant === "vertical" ? "gap-[0.75rem]" : "gap-[1.5rem]";
+  const rowGap = variant === "vertical" ? "gap-[0.75rem] [--member-row-gap:0.75rem]" : "gap-[1.5rem] [--member-row-gap:1.5rem]";
   const scrollPadding = variant === "vertical" ? "-my-4 py-4 sm:-my-14 sm:py-14" : "-my-3 py-3 sm:-my-6 sm:py-6";
   const itemsWithSavedState = items.map((item) => {
     const key = getSavedItemKey(getSavedTargetTypeForContentKind(item.kind), item.id);
@@ -561,7 +561,7 @@ export function ContentRow({ accessPreviewMode, title, subtitle, items, modalStr
 
   return (
     <section className="relative">
-      <div className="mb-4 flex items-end justify-between gap-4 px-5 sm:px-8 lg:px-12">
+      <div className="mb-4 flex items-end justify-between gap-4 px-[var(--member-row-inset)]">
         <div>
           <h2 className="text-xl font-semibold text-white sm:text-2xl">{title}</h2>
           {subtitle ? <p className="mt-1 text-sm text-zinc-400">{subtitle}</p> : null}
@@ -576,7 +576,7 @@ export function ContentRow({ accessPreviewMode, title, subtitle, items, modalStr
       </div>
       <div className="home-row-viewport relative">
         <div
-          className={`scrollbar-hidden flex scroll-smooth ${rowGap} overflow-x-auto overflow-y-visible overscroll-x-contain px-5 sm:px-8 lg:px-12 ${scrollPadding}`}
+          className={`member-row-scroller scrollbar-hidden flex scroll-smooth ${rowGap} overflow-x-auto overflow-y-visible overscroll-x-contain px-[var(--member-row-inset)] ${scrollPadding}`}
           ref={rowRef}
         >
           {itemsWithSavedState.map((item) => (

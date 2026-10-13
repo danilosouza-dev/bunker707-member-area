@@ -27,7 +27,7 @@ const { getHomeRowHoverEdgeIndexes } = await import(
 );
 
 test("home vertical card rows use tighter spacing", () => {
-  assert.match(rowSource, /const rowGap = variant === "vertical" \? "gap-\[0\.75rem\]" : "gap-\[1\.5rem\]";/);
+  assert.match(rowSource, /const rowGap = variant === "vertical" \? "gap-\[0\.75rem\] \[--member-row-gap:0\.75rem\]" : "gap-\[1\.5rem\] \[--member-row-gap:1\.5rem\]";/);
   assert.match(rowSource, /\$\{rowGap\}/);
 });
 
@@ -41,7 +41,7 @@ test("home carousel uses Netflix-style edge arrows and page indicators only with
   assert.match(rowSource, /setHasHorizontalOverflow\(metrics\.hasOverflow\);/);
   assert.match(rowSource, /<CarouselPaginationIndicator/);
   assert.match(rowSource, /<CarouselEdgeControls/);
-  assert.match(rowSource, /<div className="home-row-viewport relative">\s*<div\s*className=\{`scrollbar-hidden flex scroll-smooth/);
+  assert.match(rowSource, /<div className="home-row-viewport relative">\s*<div\s*className=\{`member-row-scroller scrollbar-hidden flex scroll-smooth/);
   assert.doesNotMatch(rowSource, /import \{[^}]*ChevronLeft/);
   assert.match(carouselNavigationSource, /export function getCarouselMetrics/);
   assert.match(carouselNavigationSource, /pagePositions\.push\(maxScrollLeft\)/);
@@ -90,7 +90,7 @@ test("home can show an access card and intermediate modules for a selected cours
 });
 
 test("home vertical card hover expands the card without inner image zoom", () => {
-  assert.match(cardSource, /home-row-cover-card group/);
+  assert.match(cardSource, /home-row-cover-card member-row-card group/);
   assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-surface \{\s*transform: translate3d\(var\(--home-row-card-hover-shift-x, 0px\), -8px, 0\) scale\(1\.14\);/);
   assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-image \{\s*transform: scale\(1\);/);
   assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-image \{\s*transform: scale\(1\) !important;/);

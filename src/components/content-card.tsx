@@ -42,7 +42,7 @@ export function ContinueWatchingCard({ accessPreviewMode, item }: CardProps) {
   }
 
   return (
-    <article className="group relative w-[16.25rem] shrink-0 overflow-visible hover:z-[80] sm:w-[18.75rem] lg:w-[20.625rem]">
+    <article className="member-row-card-wide group relative w-[16.25rem] shrink-0 overflow-visible hover:z-[80] sm:w-[18.75rem] lg:w-[20.625rem]">
       <button
         aria-label={`Continuar ${item.title}`}
         className="relative block aspect-video w-full text-left"
@@ -193,7 +193,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
   return (
     <article
       aria-label={`Abrir ${item.title}`}
-      className="home-cover-card home-row-cover-card group relative aspect-[2/3] w-[9.5rem] shrink-0 cursor-pointer overflow-visible hover:z-[120] sm:w-[11.5rem] md:w-[13.5rem] lg:w-[15rem] xl:w-[16rem]"
+      className="home-cover-card home-row-cover-card member-row-card group relative aspect-[2/3] w-[9.5rem] shrink-0 cursor-pointer overflow-visible hover:z-[120] sm:w-[11.5rem] md:w-[13.5rem] lg:w-[15rem] xl:w-[16rem]"
       data-home-row-card
       onClick={openCardDestination}
       onFocus={prefetchContentPage}
