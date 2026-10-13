@@ -236,14 +236,16 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
    destaque para cima, enfraquecendo dali para baixo e esfumacando 72 px alem da base do banner
    (--member-hero-glow-extend), sem chegar nos cards da primeira fileira (que comecam ~80 px abaixo). No
    arredondado ela aparece em volta do destaque; no discreto a imagem cobre o destaque de ponta a ponta. */
+/* Intensidade calibrada pelo print da Netflix (13/10/2026): no topo a cor fica ~45 niveis acima do cinza
+   (#141414), nao 100 como estava; a mistura maxima e 26%. */
 .member-hero-glow {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--member-hero-accent, #141414) 48%, #141414) 0%,
-    color-mix(in srgb, var(--member-hero-accent, #141414) 40%, #141414) 30%,
-    color-mix(in srgb, var(--member-hero-accent, #141414) 22%, #141414) 58%,
-    color-mix(in srgb, var(--member-hero-accent, #141414) 9%, #141414) 80%,
-    color-mix(in srgb, var(--member-hero-accent, #141414) 4%, #141414) 91%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 26%, #141414) 0%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 21%, #141414) 30%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 11%, #141414) 58%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 5%, #141414) 80%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 2%, #141414) 91%,
     #141414 100%
   );
 }

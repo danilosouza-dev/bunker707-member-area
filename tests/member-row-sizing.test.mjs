@@ -45,7 +45,7 @@ test("destaque da home e banner do curso tem a luz de fundo na cor da imagem", (
   assert.match(coursePageSource, /<HeroGlow src=\{pageHero\.mediaType === "video" \? pageHero\.poster \?\? null : pageHero\.mediaSrc \?\? null\} \/>/);
   // Forte do meio para cima, enfraquecendo para baixo e esfumacando 72 px alem da base do banner (so no
   // arredondado), sem chegar nos cards da primeira fileira.
-  assert.match(css, /\.member-hero-glow \{[\s\S]*color-mix\(in srgb, var\(--member-hero-accent, #141414\) 48%, #141414\) 0%,[\s\S]*40%, #141414\) 30%,[\s\S]*22%, #141414\) 58%,[\s\S]*4%, #141414\) 91%,[\s\S]*#141414 100%/);
+  assert.match(css, /\.member-hero-glow \{[\s\S]*color-mix\(in srgb, var\(--member-hero-accent, #141414\) 26%, #141414\) 0%,[\s\S]*21%, #141414\) 30%,[\s\S]*11%, #141414\) 58%,[\s\S]*2%, #141414\) 91%,[\s\S]*#141414 100%/);
   assert.match(css, /--member-hero-glow-extend: 0px;/);
   assert.match(css, /\[data-member-corners="rounded"\] \{[^}]*--member-hero-glow-extend: 72px;/);
   assert.match(css, /\[data-member-banner="rounded"\] \{[^}]*--member-hero-glow-extend: 72px;/);
