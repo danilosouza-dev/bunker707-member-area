@@ -1,7 +1,7 @@
 "use client";
 
 import { Menu } from "@base-ui/react/menu";
-import { LogOut } from "lucide-react";
+import { ChevronDown, LogOut } from "lucide-react";
 import { useState } from "react";
 import { signOutAndLeave } from "@/lib/auth/sign-out";
 import { cn } from "@/lib/utils";
@@ -17,13 +17,15 @@ export type AdminAccount = {
 type AccountMenuProps = {
   account: AdminAccount;
   className?: string;
+  /** Barra lateral recolhida: so o avatar, com o nome no title. */
+  compact?: boolean;
 };
 
 /**
- * Conta na barra superior, a direita (pedido do produtor, 13/10/2026): avatar redondo de 32 px com
- * borda e o nome no title. Abre para baixo com nome, e-mail, papel e "Sair".
+ * Conta no rodape da barra lateral (prototipo aprovado): avatar redondo de 32 px com borda, nome 14/500,
+ * papel 12 px e seta para baixo. Abre para cima com o e-mail e "Sair". A barra superior nao tem avatar.
  */
-export function AccountMenu({ account, className }: AccountMenuProps) {
+export function AccountMenu({ account, className, compact = false }: AccountMenuProps) {
   const [signingOut, setSigningOut] = useState(false);
   const initials = getInitials(account.name);
 
@@ -41,11 +43,12 @@ export function AccountMenu({ account, className }: AccountMenuProps) {
       <Menu.Trigger
         aria-label={`Conta de ${account.name}`}
         className={cn(
-          "grid size-9 shrink-0 place-items-center rounded-full outline-none hover:bg-[var(--hover-overlay)] data-popup-open:bg-[var(--hover-overlay)]",
+          "flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2 text-left outline-none hover:bg-[var(--hover-overlay)] data-popup-open:bg-[var(--hover-overlay)]",
+          compact && "justify-center px-0",
           adminTransition,
           className
         )}
-        title={account.name}
+        title={compact ? account.name : undefined}
       >
         <span
           aria-hidden="true"
@@ -53,9 +56,14 @@ export function AccountMenu({ account, className }: AccountMenuProps) {
         >
           {initials}
         </span>
+        <span className={cn("grid min-w-0 flex-1", compact && "sr-only")}>
+          <span className="truncate text-sm leading-[1.2] font-medium text-[var(--text-primary)]">{account.name}</span>
+          <span className="truncate text-xs leading-[1.2] text-[var(--text-tertiary)]">{account.roleLabel}</span>
+        </span>
+        {compact ? null : <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-[var(--text-tertiary)]" />}
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Positioner align="end" className="z-50 outline-none" collisionPadding={8} side="bottom" sideOffset={8}>
+        <Menu.Positioner align="start" className="z-50 outline-none" collisionPadding={8} side="top" sideOffset={8}>
           <Menu.Popup className={cn(adminMenuPopup, "w-60")}>
             <div className="px-2.5 py-1.5">
               <p className="truncate text-sm leading-5 font-medium text-[var(--text-primary)]">{account.name}</p>

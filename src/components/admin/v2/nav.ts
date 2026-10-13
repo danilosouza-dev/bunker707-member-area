@@ -34,6 +34,8 @@ export type AdminNavItem = {
 };
 
 export const ADMIN_HOME_HREF = "/admin";
+/** Cookie com a escolha "barra lateral recolhida" (lido no servidor para a pagina ja abrir certa). */
+export const ADMIN_SIDEBAR_COOKIE = "bunker-admin-sidebar";
 export const ADMIN_LEGACY_HREF = "/admin/legado";
 export const STUDENT_AREA_HREF = "/";
 

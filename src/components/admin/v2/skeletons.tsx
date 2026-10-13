@@ -66,8 +66,8 @@ export function PlaceholderPageSkeleton() {
 }
 
 /**
- * Moldura do admin enquanto a sessao e validada: trilho de 72 px (hamburguer, simbolo, icones),
- * barra superior com a busca a esquerda, lembretes e conta a direita, e a forma do Hoje.
+ * Moldura do admin enquanto a sessao e validada, na forma do prototipo aprovado: barra lateral de
+ * 240 px (marca, itens, rodape), barra superior com a busca a esquerda e a forma do Hoje.
  * Estatico, sem dados, para pintar em menos de 300 ms.
  */
 export function AdminShellSkeleton() {
@@ -75,18 +75,25 @@ export function AdminShellSkeleton() {
     <div className="min-h-dvh bg-[var(--surface-0)] text-[var(--text-primary)]" data-scope="admin">
       <div
         aria-hidden="true"
-        className="fixed inset-y-0 left-0 z-40 hidden w-[72px] flex-col items-center border-r border-[var(--border-subtle)] bg-[var(--surface-0)] md:flex"
+        className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-0)] md:flex"
       >
-        <div className="flex h-14 w-full shrink-0 items-center justify-center border-b border-[var(--border-subtle)]">
-          <Skeleton className={cn("size-6 rounded-md", bar)} />
+        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-[var(--border-subtle)] px-5">
+          <span className="size-3 rounded-[3px] bg-[var(--brand-red)]" />
+          <span className="text-[15px] leading-5 font-semibold tracking-[-0.01em]">Bunker707</span>
+          <span className="ml-auto text-xs leading-4 font-medium text-[var(--text-tertiary)]">Admin</span>
         </div>
-        <div className={cn("mt-3 flex flex-1 flex-col items-center gap-1 px-3", adminDelayedReveal)}>
-          {[0, 1, 2, 3, 4, 5, 6, 7].map((item) => (
-            <Skeleton className={cn("size-12 rounded-xl", bar)} key={item} />
+        <div className={cn("flex flex-1 flex-col gap-0.5 p-3", adminDelayedReveal)}>
+          {[0, 1, 2, 3, 4, 5, 6].map((item) => (
+            <Skeleton className={cn("h-9 w-full rounded-lg", bar)} key={item} />
           ))}
         </div>
+        <div className={cn("flex flex-col gap-1 border-t border-[var(--border-subtle)] p-3", adminDelayedReveal)}>
+          <Skeleton className={cn("h-9 w-full rounded-lg", bar)} />
+          <Skeleton className={cn("h-9 w-full rounded-lg", bar)} />
+          <Skeleton className={cn("h-11 w-full rounded-lg", bar)} />
+        </div>
       </div>
-      <div className="md:pl-[72px]">
+      <div className="md:pl-60">
         <div
           aria-hidden="true"
           className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-[clamp(16px,3vw,32px)] max-md:gap-1 max-md:px-4"
@@ -94,8 +101,6 @@ export function AdminShellSkeleton() {
           <Skeleton className={cn("size-9 rounded-lg md:hidden", bar)} />
           <Skeleton className={cn("h-5 w-24 md:hidden", bar)} />
           <span className="h-9 w-[320px] max-w-full shrink rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] max-md:ml-auto max-md:w-9 max-md:border-transparent max-md:bg-transparent" />
-          <Skeleton className={cn("ml-auto size-8 rounded-full max-md:ml-0", bar)} />
-          <Skeleton className={cn("size-8 rounded-full", bar)} />
         </div>
         <main aria-busy="true">
           <TodaySkeleton />

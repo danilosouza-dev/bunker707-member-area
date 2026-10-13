@@ -9,23 +9,22 @@ import {
   LayoutDashboard,
   LayoutTemplate,
   Megaphone,
-  Menu,
   MessageCircle,
   SlidersHorizontal,
   Users,
   type LucideIcon
 } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Fragment, Suspense, useState, type ReactNode } from "react";
+import { Suspense, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import type { AdminAccount } from "./account-menu";
+import { AccountMenu, type AdminAccount } from "./account-menu";
 import { AdminTopbar } from "./admin-topbar";
 import { ADMIN_PERIOD_PARAM, type AdminFilterProduct } from "./filters";
 import {
   ADMIN_HOME_HREF,
   ADMIN_LEGACY_HREF,
+  ADMIN_SIDEBAR_COOKIE,
   STUDENT_AREA_HREF,
   adminNavItems,
   buildAdminNavHref,
@@ -41,17 +40,14 @@ import { AdminToaster } from "./toast";
 import { adminTransition } from "./styles";
 import { AdminTopbarTitleProvider } from "./topbar-title";
 
-// Moldura do Admin Bunker707 (pedido do produtor, 13/10/2026, referencia "sidebar do YouTube", sempre
-// escura). A partir de 768 px fica fixo um trilho de 72 px so com icones e o simbolo da marca; o
-// hamburguer do trilho abre o menu completo (logo inteira, rotulos e subitens) POR CIMA da pagina, com
-// veu escuro, sem empurrar o conteudo. Abaixo de 768 px nao ha trilho: o hamburguer da barra superior
-// abre o mesmo menu. Fecha no veu, no Esc, no hamburguer do menu ou ao navegar. A conta, a busca e os
-// avisos ficam na barra superior.
+// Moldura do Admin Bunker707 na forma do prototipo aprovado: barra lateral de 240 px a partir de 768 px
+// (o produtor pode recolher para 64 px, so com icones, e expandir de novo pelo botao da barra superior;
+// a escolha fica no cookie ADMIN_SIDEBAR_COOKIE), barra superior de 56 px e a area principal. Abaixo de 768 px a barra lateral vira
+// uma gaveta de min(280 px, 86 % da tela) sobre veu escuro, sem botao X (fecha no veu, no Esc ou ao
+// navegar).
 
-const MENU_ID = "admin-menu";
+const SIDEBAR_ID = "admin-sidebar";
 const emptyCounts: AdminNavCounts = {};
-const LOGO_SRC = "/brand/logo-bunker.svg";
-const SYMBOL_SRC = "/brand/icon-bunker.png";
 
 /** Icone de cada area (os do prototipo). Fica aqui para que nav.ts continue puro (sem React). */
 const navIcons: Record<AdminNavId, LucideIcon> = {
@@ -64,13 +60,15 @@ const navIcons: Record<AdminNavId, LucideIcon> = {
   produtos: Box
 };
 
-/** Divisoria depois destas areas: acompanhar (Visão geral, Alunos, Produtos), falar com o aluno, ajustar. */
-const dividerAfter = new Set<AdminNavId>(["produtos", "comunidade"]);
-
-const hamburgerClass = cn(
-  "grid size-10 shrink-0 place-items-center rounded-full text-[var(--text-primary)] hover:bg-[var(--hover-overlay)]",
+const navItemBase = cn(
+  "relative flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm leading-5 font-medium whitespace-nowrap outline-offset-[-2px]",
   adminTransition
 );
+const navItemIdle = "text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]";
+const navItemActive =
+  "bg-[var(--surface-2)] text-[var(--text-primary)] before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-[var(--text-primary)]";
+const navIconClass = "size-4 shrink-0";
+const navItemCollapsed = "justify-center px-0";
 
 function NavCount({ label }: { label: string }) {
   return (
@@ -86,266 +84,196 @@ function NavCount({ label }: { label: string }) {
   );
 }
 
-/** Trilho: um ponto sobre o icone no lugar da pilula; o numero vai para o leitor de tela. */
+/** Barra recolhida: um ponto sobre o icone no lugar da pilula; o numero vai para o leitor de tela. */
 function NavCountDot({ label }: { label: string }) {
   return (
     <>
-      <span
-        aria-hidden="true"
-        className="absolute top-2 right-2.5 size-2 rounded-full bg-[var(--text-primary)] ring-2 ring-[var(--surface-0)]"
-      />
+      <span aria-hidden="true" className="absolute top-1.5 right-2.5 size-2 rounded-full bg-[var(--text-primary)]" />
       <span className="sr-only">{` (${label} pendentes)`}</span>
     </>
   );
 }
 
-function Divider() {
-  return <li aria-hidden="true" className="my-2 h-px shrink-0 bg-[var(--border-subtle)]" role="presentation" />;
-}
-
-/* ------------------------------------------------------------------------------------------------
- * Trilho fixo (computador): so icones, nome no title e no leitor de tela
- * ---------------------------------------------------------------------------------------------- */
-
-const railItem = cn(
-  "relative mx-auto grid size-12 place-items-center rounded-xl outline-offset-[-2px]",
-  adminTransition
-);
-const railItemIdle = "text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]";
-const railItemActive = "bg-[var(--surface-2)] text-[var(--text-primary)]";
-
-type RailProps = {
+type SidebarContentsProps = {
+  account: AdminAccount;
+  /** So na barra fixa do computador: recolhida mostra so os icones (o nome vai no title e para leitor de tela). */
+  collapsed?: boolean;
   counts: AdminNavCounts;
-  menuOpen: boolean;
-  onOpenMenu: () => void;
-  pathname: string;
-  periodParam: string | null;
-};
-
-function RailContents({ counts, menuOpen, onOpenMenu, pathname, periodParam }: RailProps) {
-  const path = normalizeAdminPath(pathname);
-
-  return (
-    <div className="flex h-full min-h-0 flex-col items-center">
-      <div className="flex h-14 w-full shrink-0 items-center justify-center border-b border-[var(--border-subtle)]">
-        <button
-          aria-controls={MENU_ID}
-          aria-expanded={menuOpen}
-          aria-label="Abrir menu"
-          className={hamburgerClass}
-          onClick={onOpenMenu}
-          title="Abrir menu"
-          type="button"
-        >
-          <Menu aria-hidden="true" className="size-5" strokeWidth={1.75} />
-        </button>
-      </div>
-
-      <Link
-        className="mt-3 grid size-12 shrink-0 place-items-center rounded-xl outline-offset-[-2px] hover:bg-[var(--hover-overlay)]"
-        data-navigation-feedback="false"
-        href={buildAdminNavHref(ADMIN_HOME_HREF, periodParam)}
-        title="Bunker707 · Visão geral"
-      >
-        <Image alt="Bunker707" className="size-7" height={35} priority src={SYMBOL_SRC} unoptimized width={35} />
-      </Link>
-
-      <nav aria-label="Áreas do admin" className="mt-1 min-h-0 w-full flex-1 overflow-x-hidden overflow-y-auto px-3 py-2">
-        <ul className="flex flex-col gap-1">
-          {adminNavItems.map((item) => {
-            const Icon = navIcons[item.id];
-            const sectionActive = isAdminNavSectionActive(path, item);
-            const countLabel = formatAdminNavCount(counts[item.id]);
-
-            return (
-              <Fragment key={item.id}>
-                <li>
-                  {/* Sem submenu no trilho: o icone leva direto para a primeira tela da area. */}
-                  <Link
-                    aria-current={sectionActive ? (path === item.href ? "page" : "true") : undefined}
-                    className={cn(railItem, sectionActive ? railItemActive : railItemIdle)}
-                    data-navigation-feedback="false"
-                    href={buildAdminNavHref(item.href, periodParam)}
-                    title={item.label}
-                  >
-                    <Icon aria-hidden="true" className="size-5" strokeWidth={1.75} />
-                    <span className="sr-only">{item.label}</span>
-                    {countLabel ? <NavCountDot label={countLabel} /> : null}
-                  </Link>
-                </li>
-                {dividerAfter.has(item.id) ? <Divider /> : null}
-              </Fragment>
-            );
-          })}
-        </ul>
-      </nav>
-
-      <div className="flex w-full shrink-0 flex-col gap-1 border-t border-[var(--border-subtle)] px-3 py-3">
-        <Link className={cn(railItem, railItemIdle)} href={STUDENT_AREA_HREF} title="Ver área do aluno">
-          <Eye aria-hidden="true" className="size-5" strokeWidth={1.75} />
-          <span className="sr-only">Ver área do aluno</span>
-        </Link>
-        <Link className={cn(railItem, railItemIdle)} href={ADMIN_LEGACY_HREF} title="Admin antigo">
-          <History aria-hidden="true" className="size-5" strokeWidth={1.75} />
-          <span className="sr-only">Admin antigo</span>
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------------------------------------
- * Menu completo (por cima da pagina, todas as larguras)
- * ---------------------------------------------------------------------------------------------- */
-
-const menuItemBase = cn(
-  "relative flex min-h-11 w-full items-center gap-4 rounded-xl px-3 text-left text-sm leading-5 whitespace-nowrap outline-offset-[-2px]",
-  adminTransition
-);
-const menuItemIdle = "font-normal text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)] hover:text-[var(--text-primary)]";
-const menuItemActive = "bg-[var(--surface-2)] font-semibold text-[var(--text-primary)]";
-const menuIconClass = "size-5 shrink-0";
-
-type MenuContentsProps = {
-  counts: AdminNavCounts;
+  idPrefix: string;
   isGroupOpen: (item: AdminNavItem, sectionActive: boolean) => boolean;
-  onClose: () => void;
+  onNavigate?: () => void;
   onToggleGroup: (item: AdminNavItem, sectionActive: boolean) => void;
   pathname: string;
   periodParam: string | null;
 };
 
-function MenuContents({ counts, isGroupOpen, onClose, onToggleGroup, pathname, periodParam }: MenuContentsProps) {
+function SidebarContents({
+  account,
+  collapsed = false,
+  counts,
+  idPrefix,
+  isGroupOpen,
+  onNavigate,
+  onToggleGroup,
+  pathname,
+  periodParam
+}: SidebarContentsProps) {
   const path = normalizeAdminPath(pathname);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-4">
-        <button aria-controls={MENU_ID} aria-expanded="true" aria-label="Fechar menu" className={hamburgerClass} onClick={onClose} type="button">
-          <Menu aria-hidden="true" className="size-5" strokeWidth={1.75} />
-        </button>
-        <Link
-          className="flex min-w-0 items-center rounded-md outline-offset-2"
-          data-navigation-feedback="false"
-          href={buildAdminNavHref(ADMIN_HOME_HREF, periodParam)}
-          onClick={onClose}
-        >
-          <Image alt="Bunker707" className="h-auto w-[148px]" height={35} src={LOGO_SRC} unoptimized width={306} />
-          <span className="ml-2 self-end pb-px text-[11px] leading-4 font-medium tracking-[0.04em] text-[var(--text-tertiary)] uppercase">
-            Admin
-          </span>
-        </Link>
-      </div>
+      <Link
+        className={cn(
+          "flex h-14 shrink-0 items-center gap-2.5 border-b border-[var(--border-subtle)] px-5 outline-offset-[-2px]",
+          collapsed && "justify-center px-0"
+        )}
+        data-navigation-feedback="false"
+        href={buildAdminNavHref(ADMIN_HOME_HREF, periodParam)}
+        onClick={onNavigate}
+        title={collapsed ? "Bunker707 · Admin" : undefined}
+      >
+        <span aria-hidden="true" className="size-3 shrink-0 rounded-[3px] bg-[var(--brand-red)]" />
+        <span className={cn("text-[15px] leading-5 font-semibold tracking-[-0.01em] text-[var(--text-primary)]", collapsed && "sr-only")}>Bunker707</span>
+        {collapsed ? null : <span className="ml-auto text-xs leading-4 font-medium text-[var(--text-tertiary)]">Admin</span>}
+      </Link>
 
-      <nav aria-label="Áreas do admin" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-3">
-        <ul className="flex flex-col gap-1">
+      <nav aria-label="Áreas do admin" className={cn("min-h-0 flex-1 overflow-x-hidden overflow-y-auto", collapsed ? "p-2" : "p-3")}>
+        <ul className="flex flex-col gap-0.5">
           {adminNavItems.map((item) => {
             const Icon = navIcons[item.id];
             const sectionActive = isAdminNavSectionActive(path, item);
             const countLabel = formatAdminNavCount(counts[item.id]);
-            const divider = dividerAfter.has(item.id) ? <Divider /> : null;
 
             if (!item.children?.length) {
               return (
-                <Fragment key={item.id}>
-                  <li>
-                    <Link
-                      aria-current={sectionActive ? (path === item.href ? "page" : "true") : undefined}
-                      className={cn(menuItemBase, sectionActive ? menuItemActive : menuItemIdle)}
-                      data-navigation-feedback="false"
-                      href={buildAdminNavHref(item.href, periodParam)}
-                      onClick={onClose}
-                    >
-                      <Icon aria-hidden="true" className={menuIconClass} strokeWidth={1.75} />
-                      <span className="truncate">{item.label}</span>
-                      {countLabel ? <NavCount label={countLabel} /> : null}
-                    </Link>
-                  </li>
-                  {divider}
-                </Fragment>
+                <li key={item.id}>
+                  <Link
+                    aria-current={sectionActive ? (path === item.href ? "page" : "true") : undefined}
+                    className={cn(navItemBase, sectionActive ? navItemActive : navItemIdle, collapsed && navItemCollapsed)}
+                    data-navigation-feedback="false"
+                    href={buildAdminNavHref(item.href, periodParam)}
+                    onClick={onNavigate}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <Icon aria-hidden="true" className={navIconClass} strokeWidth={1.75} />
+                    <span className={collapsed ? "sr-only" : "truncate"}>{item.label}</span>
+                    {countLabel ? collapsed ? <NavCountDot label={countLabel} /> : <NavCount label={countLabel} /> : null}
+                  </Link>
+                </li>
+              );
+            }
+
+            if (collapsed) {
+              // Recolhida nao tem submenu: o icone leva direto para a primeira tela da area.
+              return (
+                <li key={item.id}>
+                  <Link
+                    aria-current={sectionActive ? "true" : undefined}
+                    className={cn(navItemBase, sectionActive ? navItemActive : navItemIdle, navItemCollapsed)}
+                    data-navigation-feedback="false"
+                    href={buildAdminNavHref(item.href, periodParam)}
+                    onClick={onNavigate}
+                    title={item.label}
+                  >
+                    <Icon aria-hidden="true" className={navIconClass} strokeWidth={1.75} />
+                    <span className="sr-only">{item.label}</span>
+                    {countLabel ? <NavCountDot label={countLabel} /> : null}
+                  </Link>
+                </li>
               );
             }
 
             const groupOpen = isGroupOpen(item, sectionActive);
-            const groupId = `${MENU_ID}-${item.id}`;
+            const groupId = `${idPrefix}-nav-${item.id}`;
             const activeChild = getActiveAdminNavChild(path, item);
 
             return (
-              <Fragment key={item.id}>
-                <li>
-                  <button
-                    aria-controls={groupId}
-                    aria-expanded={groupOpen}
-                    className={cn(menuItemBase, sectionActive ? "font-semibold text-[var(--text-primary)] hover:bg-[var(--hover-overlay)]" : menuItemIdle)}
-                    data-nav-group={item.id}
-                    onClick={() => onToggleGroup(item, sectionActive)}
-                    type="button"
-                  >
-                    <Icon aria-hidden="true" className={menuIconClass} strokeWidth={1.75} />
-                    <span className="truncate">{item.label}</span>
-                    {countLabel ? <NavCount label={countLabel} /> : null}
-                    <ChevronRight
-                      aria-hidden="true"
-                      className={cn(
-                        "size-4 shrink-0 text-[var(--text-tertiary)] transition-transform duration-150 ease-[var(--ease-admin)] motion-reduce:transition-none",
-                        countLabel ? "ml-1" : "ml-auto",
-                        groupOpen && "rotate-90"
-                      )}
-                    />
-                  </button>
+              <li key={item.id}>
+                <button
+                  aria-controls={groupId}
+                  aria-expanded={groupOpen}
+                  className={cn(
+                    navItemBase,
+                    sectionActive ? "text-[var(--text-primary)] hover:bg-[var(--hover-overlay)]" : navItemIdle
+                  )}
+                  data-nav-group={item.id}
+                  onClick={() => onToggleGroup(item, sectionActive)}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" className={navIconClass} strokeWidth={1.75} />
+                  <span className="truncate">{item.label}</span>
+                  {countLabel ? <NavCount label={countLabel} /> : null}
+                  <ChevronRight
+                    aria-hidden="true"
+                    className={cn(
+                      "size-4 shrink-0 text-[var(--text-tertiary)] transition-transform duration-150 ease-[var(--ease-admin)] motion-reduce:transition-none",
+                      countLabel ? "ml-1" : "ml-auto",
+                      groupOpen && "rotate-90"
+                    )}
+                  />
+                </button>
 
-                  <ul className={cn("mt-1 mb-1 flex-col gap-0.5 pl-9", groupOpen ? "flex" : "hidden")} id={groupId}>
-                    {item.children.map((child) => {
-                      const childActive = activeChild?.href === child.href;
+                <ul className={cn("mt-0.5 mb-1 flex-col gap-0.5 pl-[26px]", groupOpen ? "flex" : "hidden")} id={groupId}>
+                  {item.children.map((child) => {
+                    const childActive = activeChild?.href === child.href;
 
-                      return (
-                        <li key={child.href}>
-                          <Link
-                            aria-current={childActive ? (path === child.href ? "page" : "true") : undefined}
-                            className={cn(menuItemBase, "min-h-9 text-[13px]", childActive ? menuItemActive : menuItemIdle)}
-                            data-navigation-feedback="false"
-                            href={buildAdminNavHref(child.href, periodParam)}
-                            onClick={onClose}
-                          >
-                            <span className="truncate">{child.label}</span>
-                          </Link>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </li>
-                {divider}
-              </Fragment>
+                    return (
+                      <li key={child.href}>
+                        <Link
+                          aria-current={childActive ? (path === child.href ? "page" : "true") : undefined}
+                          className={cn(navItemBase, "min-h-8 text-[13px]", childActive ? navItemActive : navItemIdle)}
+                          data-navigation-feedback="false"
+                          href={buildAdminNavHref(child.href, periodParam)}
+                          onClick={onNavigate}
+                        >
+                          <span className="truncate">{child.label}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </li>
             );
           })}
         </ul>
       </nav>
 
-      <div className="flex shrink-0 flex-col gap-1 border-t border-[var(--border-subtle)] px-3 py-3">
-        <Link className={cn(menuItemBase, menuItemIdle)} href={STUDENT_AREA_HREF} onClick={onClose}>
-          <Eye aria-hidden="true" className={menuIconClass} strokeWidth={1.75} />
-          <span className="truncate">Ver área do aluno</span>
+      <div className={cn("flex shrink-0 flex-col gap-1 border-t border-[var(--border-subtle)]", collapsed ? "p-2" : "p-3")}>
+        <Link
+          className={cn(navItemBase, navItemIdle, collapsed && navItemCollapsed)}
+          href={STUDENT_AREA_HREF}
+          onClick={onNavigate}
+          title={collapsed ? "Ver área do aluno" : undefined}
+        >
+          <Eye aria-hidden="true" className={navIconClass} strokeWidth={1.75} />
+          <span className={collapsed ? "sr-only" : "truncate"}>Ver área do aluno</span>
         </Link>
-        <Link className={cn(menuItemBase, menuItemIdle)} href={ADMIN_LEGACY_HREF} onClick={onClose}>
-          <History aria-hidden="true" className={menuIconClass} strokeWidth={1.75} />
-          <span className="truncate">Admin antigo</span>
+        <Link
+          className={cn(navItemBase, navItemIdle, collapsed && navItemCollapsed)}
+          href={ADMIN_LEGACY_HREF}
+          onClick={onNavigate}
+          title={collapsed ? "Admin antigo" : undefined}
+        >
+          <History aria-hidden="true" className={navIconClass} strokeWidth={1.75} />
+          <span className={collapsed ? "sr-only" : "truncate"}>Admin antigo</span>
         </Link>
+        <AccountMenu account={account} compact={collapsed} />
       </div>
     </div>
   );
 }
 
 /** Le ?periodo= para os links do menu (fica em Suspense: useSearchParams). */
-function WithPeriod({ render }: { render: (periodParam: string | null) => ReactNode }) {
+function SidebarWithPeriod(props: Omit<SidebarContentsProps, "periodParam">) {
   const searchParams = useSearchParams();
 
-  return render(searchParams.get(ADMIN_PERIOD_PARAM));
+  return <SidebarContents {...props} periodParam={searchParams.get(ADMIN_PERIOD_PARAM)} />;
 }
 
-function PeriodAware({ render }: { render: (periodParam: string | null) => ReactNode }) {
+function Sidebar(props: Omit<SidebarContentsProps, "periodParam">) {
   return (
-    <Suspense fallback={render(null)}>
-      <WithPeriod render={render} />
+    <Suspense fallback={<SidebarContents {...props} periodParam={null} />}>
+      <SidebarWithPeriod {...props} />
     </Suspense>
   );
 }
@@ -355,14 +283,25 @@ type AdminShellV2Props = {
   children: ReactNode;
   /** Contadores do menu (pilula ao lado do rotulo): Hoje e Comunidade. Zero ou ausente nao aparece. */
   counts?: AdminNavCounts;
+  /** Barra lateral recolhida ao abrir a pagina (cookie lido no servidor). */
+  initialCollapsed?: boolean;
   /** Opcoes do filtro Produto da barra superior. */
   products?: readonly AdminFilterProduct[];
 };
 
-/** Moldura do Admin Bunker707: trilho de icones, menu por cima, barra superior e area principal. */
-export function AdminShellV2({ account, children, counts = emptyCounts, products = [] }: AdminShellV2Props) {
+/** Moldura do Admin Bunker707: barra lateral, barra superior e area principal. */
+export function AdminShellV2({ account, children, counts = emptyCounts, initialCollapsed = false, products = [] }: AdminShellV2Props) {
   const pathname = usePathname() ?? ADMIN_HOME_HREF;
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
+
+  function toggleCollapsed() {
+    setCollapsed((current) => {
+      const next = !current;
+      document.cookie = `${ADMIN_SIDEBAR_COOKIE}=${next ? "collapsed" : "expanded"}; path=/; max-age=31536000; samesite=lax`;
+      return next;
+    });
+  }
   const [groupOverrides, setGroupOverrides] = useState<Record<string, boolean>>({});
 
   function isGroupOpen(item: AdminNavItem, sectionActive: boolean) {
@@ -373,8 +312,7 @@ export function AdminShellV2({ account, children, counts = emptyCounts, products
     setGroupOverrides((current) => ({ ...current, [item.id]: !(current[item.id] ?? sectionActive) }));
   }
 
-  const openMenu = () => setMenuOpen(true);
-  const closeMenu = () => setMenuOpen(false);
+  const sharedProps = { account, counts, isGroupOpen, onToggleGroup: toggleGroup, pathname };
 
   return (
     <AdminTopbarTitleProvider>
@@ -388,50 +326,51 @@ export function AdminShellV2({ account, children, counts = emptyCounts, products
 
         <aside
           aria-label="Menu do admin"
-          className="fixed inset-y-0 left-0 z-40 hidden w-[72px] border-r border-[var(--border-subtle)] bg-[var(--surface-0)] md:block"
+          className={cn(
+            "fixed inset-y-0 left-0 z-40 hidden border-r border-[var(--border-subtle)] bg-[var(--surface-0)] transition-[width] duration-200 ease-[var(--ease-admin)] motion-reduce:transition-none md:block",
+            collapsed ? "w-16" : "w-60"
+          )}
+          data-collapsed={collapsed || undefined}
+          id={SIDEBAR_ID}
         >
-          <PeriodAware
-            render={(periodParam) => (
-              <RailContents counts={counts} menuOpen={menuOpen} onOpenMenu={openMenu} pathname={pathname} periodParam={periodParam} />
-            )}
-          />
+          <Sidebar {...sharedProps} collapsed={collapsed} idPrefix="sidebar" />
         </aside>
 
-        <Dialog.Root onOpenChange={setMenuOpen} open={menuOpen}>
+        <Dialog.Root onOpenChange={setDrawerOpen} open={drawerOpen}>
           <Dialog.Portal>
             <Dialog.Backdrop
               className={cn(
-                "fixed inset-0 z-50 bg-black/70",
+                "fixed inset-0 z-50 bg-black/60 md:hidden",
                 "transition-opacity duration-200 ease-[var(--ease-admin)] data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none"
               )}
             />
             <Dialog.Popup
               aria-label="Menu do admin"
               className={cn(
-                "fixed inset-y-0 left-0 z-50 w-[min(280px,86vw)] border-r border-[var(--border-subtle)] bg-[var(--surface-0)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-[var(--text-primary)] shadow-[24px_0_48px_rgba(0,0,0,0.5)] outline-none",
+                "fixed inset-y-0 left-0 z-50 w-[min(280px,86vw)] bg-[var(--surface-1)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-[var(--text-primary)] shadow-[24px_0_48px_rgba(0,0,0,0.4)] outline-none md:hidden",
                 "transition-transform duration-200 ease-[var(--ease-admin)] data-ending-style:-translate-x-full data-starting-style:-translate-x-full motion-reduce:transition-none"
               )}
-              id={MENU_ID}
             >
               <Dialog.Title className="sr-only">Menu do admin</Dialog.Title>
-              <PeriodAware
-                render={(periodParam) => (
-                  <MenuContents
-                    counts={counts}
-                    isGroupOpen={isGroupOpen}
-                    onClose={closeMenu}
-                    onToggleGroup={toggleGroup}
-                    pathname={pathname}
-                    periodParam={periodParam}
-                  />
-                )}
-              />
+              <Sidebar {...sharedProps} idPrefix="drawer" onNavigate={() => setDrawerOpen(false)} />
             </Dialog.Popup>
           </Dialog.Portal>
         </Dialog.Root>
 
-        <div className="flex min-h-dvh min-w-0 flex-col md:pl-[72px]">
-          <AdminTopbar account={account} counts={counts} menuId={MENU_ID} menuOpen={menuOpen} onOpenMenu={openMenu} products={products} />
+        <div
+          className={cn(
+            "flex min-h-dvh min-w-0 flex-col transition-[padding] duration-200 ease-[var(--ease-admin)] motion-reduce:transition-none",
+            collapsed ? "md:pl-16" : "md:pl-60"
+          )}
+        >
+          <AdminTopbar
+            drawerOpen={drawerOpen}
+            onOpenDrawer={() => setDrawerOpen(true)}
+            onToggleSidebar={toggleCollapsed}
+            products={products}
+            sidebarCollapsed={collapsed}
+            sidebarId={SIDEBAR_ID}
+          />
           <main className="min-w-0 flex-1 outline-none" id="admin-main" tabIndex={-1}>
             {children}
           </main>
