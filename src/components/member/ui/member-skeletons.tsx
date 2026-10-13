@@ -24,7 +24,7 @@ export function MemberShellSkeleton({
 }) {
   return (
     <div aria-busy="true" className="min-h-screen bg-[#141414] text-white">
-      <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 flex h-16 items-center gap-4 bg-[#141414] px-4 sm:px-6">
+      <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 flex h-16 items-center gap-2 bg-[#141414] px-4 sm:px-6">
         <MemberSkeletonBlock className="size-10 rounded-full bg-white/[0.05]" />
         <MemberSkeletonBlock className="h-7 w-[124px] bg-white/[0.05] sm:w-[150px]" />
         <div className="ml-auto flex items-center gap-2">

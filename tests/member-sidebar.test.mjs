@@ -198,13 +198,13 @@ test("cabecalho como no YouTube: hamburguer + logo sempre visiveis, gaveta por c
   assert.match(appShellSource, /<main>\{children\}<\/main>/);
   assert.match(appShellSource, /data-member-buttons=\{style\.buttons\} data-member-corners=\{style\.corners\} data-member-menu=\{style\.menu\}/, "cantos e botoes pelos atributos do raiz");
   // Gaveta repete hamburguer + logo no mesmo lugar do cabecalho.
-  assert.match(sidebarSource, /flex h-16 shrink-0 items-center gap-4 px-4 sm:px-6/);
+  assert.match(sidebarSource, /flex h-16 shrink-0 items-center gap-2 px-4/);
   assert.match(appShellSource, /<MemberNotificationsMenu /, "lembretes no topo, ao lado da conta");
   assert.match(notificationsSource, /Nenhum lembrete por enquanto\./, "sem lembrete inventado");
   // Avatar sem nome no cabecalho; o nome fica no painel.
   assert.doesNotMatch(accountMenuSource, /ChevronDown|<span[^>]*>\{student\.name\}<\/span>/);
   assert.match(accountMenuSource, /<p className="truncate text-sm font-semibold text-white">\{displayName\}<\/p>/);
   // Menu no cabecalho (Marca > Estilo): links escritos a partir de 1024 px (estilo Netflix) e hamburguer so abaixo disso.
-  assert.match(appShellSource, /<nav aria-label="Navegação principal" className="ml-3 hidden min-w-0 items-center gap-1 lg:flex">/);
+  assert.match(appShellSource, /<nav aria-label="Navegação principal" className="ml-5 hidden min-w-0 items-center gap-1 lg:flex">/);
   assert.match(appShellSource, /menuInHeader && "lg:hidden"/);
 });

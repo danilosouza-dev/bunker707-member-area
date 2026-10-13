@@ -145,8 +145,9 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   // 1024 px e o hamburguer some nessa largura; abaixo disso ele abre a gaveta como sempre.
   // Suporte e Perfil ficam no menu da conta, que ja os tem.
   const menuInHeader = style.menu === "header";
-  // Cantos arredondados: o cabecalho recua a direita o mesmo que a capa (80 px; 24 px quando os links
-  // estao no cabecalho e o hamburguer some), para a foto do perfil alinhar com a borda da capa.
+  // Cantos arredondados: a capa recua 64 px (perto da Netflix); a logo fica nessa linha (hamburguer a
+  // 16 px + 40 px + 8 px, ou o cabecalho recuado 64 px quando os links escritos dispensam o hamburguer) e
+  // o cabecalho recua o mesmo a direita, para a foto do perfil alinhar com a borda da capa.
   const rounded = style.corners === "rounded";
   const pathname = usePathname();
   const headerLinks = menuInHeader
@@ -284,7 +285,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             transformOrigin: "top"
           }}
         />
-        <div className={cn("relative flex h-16 items-center gap-4 px-4 sm:pl-6", rounded ? "sm:pr-20" : "sm:pr-6", rounded && menuInHeader && "lg:pr-6")}>
+        <div className={cn("relative flex h-16 items-center gap-2 px-4", rounded ? "sm:pr-16" : "sm:px-6", rounded && menuInHeader && "lg:pl-16")}>
           <button
             aria-controls={sidebarId}
             aria-expanded={sidebarOpen}
@@ -320,7 +321,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
           </Link>
 
           {menuInHeader ? (
-            <nav aria-label="Navegação principal" className="ml-3 hidden min-w-0 items-center gap-1 lg:flex">
+            <nav aria-label="Navegação principal" className="ml-5 hidden min-w-0 items-center gap-1 lg:flex">
               {headerLinks.map((item) => (
                 <Link
                   aria-current={item.active ? "page" : undefined}

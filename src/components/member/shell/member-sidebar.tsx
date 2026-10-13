@@ -175,7 +175,7 @@ export function MemberSidebar({
         ref={panelRef}
         role="dialog"
       >
-        <div className="flex h-16 shrink-0 items-center gap-4 px-4 sm:px-6">
+        <div className="flex h-16 shrink-0 items-center gap-2 px-4">
           <button
             aria-label="Fechar menu"
             className="grid size-10 shrink-0 place-items-center rounded-full text-white transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none"
