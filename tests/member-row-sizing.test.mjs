@@ -43,9 +43,13 @@ test("destaque da home e banner do curso tem a luz de fundo na cor da imagem", (
   assert.match(heroSource, /<section className="@container relative z-\[1\] min-h-\[var\(--member-hero-min-h\)\]/);
   assert.match(css, /--member-hero-min-h: clamp\(520px, calc\(100vh - 256px\), 680px\);/, "arredondado: destaque mais baixo em telas curtas");
   assert.match(coursePageSource, /<HeroGlow src=\{pageHero\.mediaType === "video" \? pageHero\.poster \?\? null : pageHero\.mediaSrc \?\? null\} \/>/);
-  // Forte do meio para cima, enfraquecendo para baixo e sumindo pouco antes do fim do destaque (94%), sem invadir as fileiras.
-  assert.match(css, /\.member-hero-glow \{[\s\S]*color-mix\(in srgb, var\(--member-hero-accent, #141414\) 48%, #141414\) 0%,[\s\S]*40%, #141414\) 32%,[\s\S]*22%, #141414\) 60%,[\s\S]*#141414 94%/);
-  assert.doesNotMatch(css, /--member-hero-glow-extend/, "a luz fica dentro da area do destaque");
+  // Forte do meio para cima, enfraquecendo para baixo e esfumacando 72 px alem da base do banner (so no
+  // arredondado), sem chegar nos cards da primeira fileira.
+  assert.match(css, /\.member-hero-glow \{[\s\S]*color-mix\(in srgb, var\(--member-hero-accent, #141414\) 48%, #141414\) 0%,[\s\S]*40%, #141414\) 30%,[\s\S]*22%, #141414\) 58%,[\s\S]*4%, #141414\) 91%,[\s\S]*#141414 100%/);
+  assert.match(css, /--member-hero-glow-extend: 0px;/);
+  assert.match(css, /\[data-member-corners="rounded"\] \{[^}]*--member-hero-glow-extend: 72px;/);
+  assert.match(css, /\[data-member-banner="rounded"\] \{[^}]*--member-hero-glow-extend: 72px;/);
+  assert.match(glowSource, /h-\[calc\(100%\+var\(--member-hero-glow-extend\)\)\]/);
   // Medicao no navegador: versao pequena da imagem pelo otimizador (mesma origem), canvas 24 px, cor media
   // com saturacao reforcada; sem cor util ou sem CORS, a luz fica apagada.
   assert.match(glowSource, /\/_next\/image\?url=\$\{encodeURIComponent\(src\)\}&w=64&q=75/);
