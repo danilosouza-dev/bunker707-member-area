@@ -40,7 +40,7 @@ declare global {
 
 // Itens da barra lateral e do menu da conta: src/lib/member-navigation.ts (fonte unica), desenhados
 // por MemberRail (trilho de icones, computador), MemberSidebar (gaveta por cima, todas as larguras) e
-// MemberAccountMenu (src/components/member/shell/). O conteudo fica sempre a 72 px do trilho.
+// MemberAccountMenu (src/components/member/shell/). O conteudo fica sempre a 80 px do trilho.
 const sidebarId = "member-sidebar";
 
 const accessPreviewOptions = [
@@ -258,7 +258,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   return (
     <PlatformBrandingProvider branding={branding}>
     <div className="min-h-screen bg-[#141414] text-white">
-      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-[72px]">
+      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-[80px]">
         <div
           aria-hidden="true"
           className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.68)_0%,rgba(0,0,0,0.26)_58%,rgba(0,0,0,0)_100%)] transition-opacity duration-300 ease-out will-change-opacity"
@@ -284,7 +284,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             ref={menuButtonRef}
             type="button"
           >
-            <Menu aria-hidden="true" className="h-5 w-5" />
+            <Menu aria-hidden="true" className="size-6" strokeWidth={1.5} />
           </button>
 
           <Link
@@ -414,7 +414,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
         returnFocusRef={sidebarTriggerRef}
       />
 
-      <main className="md:pl-[72px]">{children}</main>
+      <main className="md:pl-[80px]">{children}</main>
 
       {!sidebarOpen ? (
         directorRequested ? (

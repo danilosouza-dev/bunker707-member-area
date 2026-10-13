@@ -182,7 +182,7 @@ export function MemberSidebar({
             onClick={onClose}
             type="button"
           >
-            <Menu aria-hidden="true" className="size-5" />
+            <Menu aria-hidden="true" className="size-6" strokeWidth={1.5} />
           </button>
           <Link
             aria-label="Ir para o início"
@@ -208,15 +208,17 @@ export function MemberSidebar({
         {producerPanel ? <div className="shrink-0 px-3 pb-2 pt-1">{producerPanel}</div> : null}
 
         <nav aria-label="Navegação da área do aluno" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-4">
-          {sections.map((section) => {
+          {sections.map((section, sectionIndex) => {
             const sectionTitleId = `${id}-${section.id}`;
 
             return (
-              <div className="mt-4 first:mt-2" key={section.id}>
-                <p className="px-4 pb-1.5 text-xs font-semibold text-zinc-500" id={sectionTitleId}>
+              <div key={section.id}>
+                {/* Grupos separados so por uma linha (referencia); o nome do grupo fica para o leitor de tela. */}
+                {sectionIndex > 0 ? <hr aria-hidden="true" className="mx-1 my-3 border-0 border-t border-white/[0.08]" /> : null}
+                <p className="sr-only" id={sectionTitleId}>
                   {section.label}
                 </p>
-                <ul aria-labelledby={sectionTitleId} className="space-y-0.5">
+                <ul aria-labelledby={sectionTitleId} className="space-y-1">
                   {section.items.map((item) => {
                     const Icon = memberNavigationIcons[item.key];
 
@@ -225,23 +227,19 @@ export function MemberSidebar({
                         <Link
                           aria-current={item.active ? "page" : undefined}
                           className={cn(
-                            "group/item relative flex h-11 items-center gap-3 rounded-[10px] pl-4 pr-3 text-sm font-semibold outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/80",
-                            item.active ? "bg-white/[0.08] text-white" : "text-zinc-300 hover:bg-white/[0.05] hover:text-white"
+                            "flex h-12 items-center gap-5 rounded-[10px] pl-4 pr-3 text-[15px] outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/80 motion-reduce:transition-none",
+                            item.active ? "bg-white/[0.1] font-bold text-white" : "font-normal text-zinc-300 hover:bg-white/[0.06] hover:text-white"
                           )}
                           data-member-sidebar-item
                           href={item.href}
                           onClick={(event) => onNavigate(event, item.href)}
                         >
-                          {item.active ? (
-                            <span aria-hidden="true" className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-[var(--accent)]" />
-                          ) : null}
                           <Icon
                             aria-hidden="true"
-                            className={cn(
-                              "size-5 shrink-0 transition-colors",
-                              item.active ? "text-[var(--accent)]" : "text-zinc-500 group-hover/item:text-zinc-200"
-                            )}
-                            strokeWidth={2}
+                            className="size-6 shrink-0"
+                            fill={item.active ? "currentColor" : "none"}
+                            fillOpacity={item.active ? 0.18 : undefined}
+                            strokeWidth={1.5}
                           />
                           <span className="truncate">{item.label}</span>
                         </Link>

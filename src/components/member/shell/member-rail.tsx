@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { getMemberSidebarSections } from "./member-shell-model";
 import { memberNavigationIcons } from "./member-navigation-icons";
 
-// Trilho fixo da area do aluno a partir de 768 px (referencia "sidebar do YouTube", sempre escuro):
+// Trilho fixo de 80 px da area do aluno a partir de 768 px (referencia "sidebar do YouTube", sempre escuro):
 // hamburguer, simbolo da marca e so os icones de cada destino, com o nome no title e para leitor de
 // tela. O hamburguer abre a gaveta completa (MemberSidebar) por cima da pagina, com veu escuro; o
 // trilho nunca muda de largura, entao o conteudo nunca e empurrado. Abaixo de 768 px nao ha trilho:
@@ -45,7 +45,7 @@ export function MemberRail({
   return (
     <aside
       aria-label="Menu recolhido"
-      className="fixed inset-y-0 left-0 z-40 hidden w-[72px] flex-col items-center border-r border-white/[0.06] bg-[#0f0f0f] md:flex"
+      className="fixed inset-y-0 left-0 z-40 hidden w-[80px] flex-col items-center border-r border-white/[0.06] bg-[#0f0f0f] md:flex"
     >
       <div className="flex h-16 w-full shrink-0 items-center justify-center">
         <button
@@ -59,7 +59,7 @@ export function MemberRail({
           title="Abrir menu"
           type="button"
         >
-          <Menu aria-hidden="true" className="size-5" />
+          <Menu aria-hidden="true" className="size-6" strokeWidth={1.5} />
         </button>
       </div>
 
@@ -73,11 +73,11 @@ export function MemberRail({
         <Image alt="" className="size-7" height={35} priority src={MEMBER_RAIL_SYMBOL_SRC} unoptimized width={35} />
       </Link>
 
-      <nav aria-label="Navegação da área do aluno (ícones)" className="mt-3 min-h-0 w-full flex-1 overflow-y-auto overscroll-contain px-3 pb-4 [scrollbar-width:none]">
+      <nav aria-label="Navegação da área do aluno (ícones)" className="mt-3 min-h-0 w-full flex-1 overflow-y-auto overscroll-contain px-4 pb-4 [scrollbar-width:none]">
         <ul className="flex flex-col items-center gap-1">
           {sections.map((section, sectionIndex) => (
             <Fragment key={section.id}>
-              {sectionIndex > 0 ? <li aria-hidden="true" className="my-2 h-px w-10 bg-white/[0.08]" role="presentation" /> : null}
+              {sectionIndex > 0 ? <li aria-hidden="true" className="my-2 h-px w-14 bg-white/[0.08]" role="presentation" /> : null}
               {section.items.map((item) => {
                 const Icon = memberNavigationIcons[item.key];
 
@@ -87,13 +87,20 @@ export function MemberRail({
                       aria-current={item.active ? "page" : undefined}
                       className={cn(
                         "grid size-12 place-items-center rounded-xl outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/80 motion-reduce:transition-none",
-                        item.active ? "bg-white/[0.1] text-white" : "text-zinc-400 hover:bg-white/[0.06] hover:text-white"
+                        item.active ? "bg-white/[0.1] text-white" : "text-zinc-300 hover:bg-white/[0.06] hover:text-white"
                       )}
                       href={item.href}
                       onClick={(event) => onNavigate(event, item.href)}
                       title={item.label}
                     >
-                      <Icon aria-hidden="true" className="size-5" strokeWidth={item.active ? 2.25 : 1.9} />
+                      {/* Ativo: icone "preenchido" como na referencia (preenchimento leve, o traco continua). */}
+                      <Icon
+                        aria-hidden="true"
+                        className="size-6"
+                        fill={item.active ? "currentColor" : "none"}
+                        fillOpacity={item.active ? 0.18 : undefined}
+                        strokeWidth={1.5}
+                      />
                       <span className="sr-only">{item.label}</span>
                     </Link>
                   </li>

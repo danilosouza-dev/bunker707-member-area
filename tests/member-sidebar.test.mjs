@@ -146,13 +146,18 @@ test("gaveta acessivel: inert fechada, dialogo modal, Esc, foco preso e rolagem 
   assert.match(sidebarSource, /motion-reduce:transition-none/);
 });
 
-test("itens da gaveta: todos sao links, ativo com aria-current e barra vermelha", () => {
+test("itens da gaveta: todos sao links, ativo neutro (fundo cinza, negrito), grupos so com linha", () => {
   assert.match(sidebarSource, /getMemberSidebarSections\(pathname, accessPreviewMode\)/);
   assert.match(sidebarSource, /aria-current=\{item\.active \? "page" : undefined\}/);
   assert.match(sidebarSource, /href=\{item\.href\}\s*onClick=\{\(event\) => onNavigate\(event, item\.href\)\}/);
-  assert.match(sidebarSource, /w-\[3px\] rounded-full bg-\[var\(--accent\)\]/);
-  assert.match(sidebarSource, /bg-white\/\[0\.08\] text-white/);
-  assert.match(sidebarSource, /h-11 items-center/);
+  // Referencia do produtor (13/10/2026): ativo e um retangulo cinza com texto em negrito, sem barra nem
+  // icone vermelho; inativo em peso regular; o nome do grupo so para leitor de tela, com uma linha entre grupos.
+  assert.doesNotMatch(sidebarSource, /var\(--accent\)/, "sem vermelho na gaveta");
+  assert.match(sidebarSource, /item\.active \? "bg-white\/\[0\.1\] font-bold text-white" : "font-normal text-zinc-300/);
+  assert.match(sidebarSource, /h-12 items-center/);
+  assert.match(sidebarSource, /<p className="sr-only" id=\{sectionTitleId\}>/);
+  assert.match(sidebarSource, /sectionIndex > 0 \? <hr aria-hidden="true"/);
+  assert.match(sidebarSource, /strokeWidth=\{1\.5\}/);
   // Nenhum item desativado (antes: 5 itens cinza sem destino).
   assert.equal(sidebarSource.match(/\sdisabled(?:=\{[^}]*\}|(?=[\s>]))/g), null);
   // Perfil e Sair ficam so no menu da conta do topo (pedido do produtor, 13/10/2026).
@@ -189,7 +194,8 @@ test("trilho de icones no computador: simbolo, hamburguer, sem empurrar o conteu
   const railSource = read("src/components/member/shell/member-rail.tsx");
   const notificationsSource = read("src/components/member/shell/member-notifications-menu.tsx");
 
-  assert.match(railSource, /hidden w-\[72px\][^"]*md:flex/, "trilho fixo de 72 px so a partir de 768 px");
+  assert.match(railSource, /hidden w-\[80px\][^"]*md:flex/, "trilho fixo de 80 px so a partir de 768 px");
+  assert.match(railSource, /fill=\{item\.active \? "currentColor" : "none"\}/, "ativo com icone preenchido");
   assert.match(railSource, /\/brand\/icon-bunker\.png/, "recolhido mostra so o simbolo");
   assert.match(railSource, /getMemberSidebarSections\(pathname, accessPreviewMode\)/, "mesma fonte de rotas da gaveta");
   assert.match(railSource, /aria-current=\{item\.active \? "page" : undefined\}/);
@@ -197,8 +203,8 @@ test("trilho de icones no computador: simbolo, hamburguer, sem empurrar o conteu
   assert.match(railSource, /onClick=\{\(event\) => onNavigate\(event, item\.href\)\}/);
   assert.doesNotMatch(railSource, /\bSun\b|\bMoon\b/, "sempre escuro, sem troca de tema");
 
-  assert.match(appShellSource, /<header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-\[72px\]">/);
-  assert.match(appShellSource, /<main className="md:pl-\[72px\]">/, "conteudo ao lado do trilho; a gaveta abre por cima");
+  assert.match(appShellSource, /<header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-\[80px\]">/);
+  assert.match(appShellSource, /<main className="md:pl-\[80px\]">/, "conteudo ao lado do trilho; a gaveta abre por cima");
   assert.match(appShellSource, /<MemberNotificationsMenu /, "lembretes no topo, ao lado da conta");
   assert.match(notificationsSource, /Nenhum lembrete por enquanto\./, "sem lembrete inventado");
 });
