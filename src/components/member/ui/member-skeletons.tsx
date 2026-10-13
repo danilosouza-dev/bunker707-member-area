@@ -24,18 +24,27 @@ export function MemberShellSkeleton({
 }) {
   return (
     <div aria-busy="true" className="min-h-screen bg-[#141414] text-white">
-      <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 flex h-16 items-center gap-4 bg-[#141414] px-4 sm:px-6">
-        <MemberSkeletonBlock className="size-10 rounded-[6px] bg-white/[0.05]" />
-        <MemberSkeletonBlock className="h-7 w-[150px] bg-white/[0.05] sm:w-[190px]" />
+      <div aria-hidden="true" className="fixed inset-y-0 left-0 z-40 hidden w-[80px] flex-col items-center gap-1 border-r border-white/[0.06] bg-[#0f0f0f] md:flex">
+        <div className="grid h-16 place-items-center">
+          <MemberSkeletonBlock className="size-10 rounded-full bg-white/[0.05]" />
+        </div>
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
+          <MemberSkeletonBlock className="size-12 rounded-xl bg-white/[0.05]" key={item} />
+        ))}
+      </div>
+      <div aria-hidden="true" className="fixed inset-x-0 top-0 z-40 flex h-16 items-center gap-4 bg-[#141414] px-4 sm:px-6 md:left-[80px]">
+        <MemberSkeletonBlock className="size-10 rounded-full bg-white/[0.05] md:hidden" />
+        <MemberSkeletonBlock className="h-7 w-[124px] bg-white/[0.05] sm:w-[150px] md:hidden" />
         <div className="ml-auto flex items-center gap-2">
           <MemberSkeletonBlock className="size-10 rounded-[6px] bg-white/[0.05]" />
+          <MemberSkeletonBlock className="size-10 rounded-full bg-white/[0.05]" />
           <MemberSkeletonBlock className="h-10 w-10 rounded-[6px] bg-white/[0.05] sm:w-28" />
         </div>
       </div>
       <p className="sr-only" role="status">
         {label}
       </p>
-      {children}
+      <div className="md:pl-[80px]">{children}</div>
     </div>
   );
 }
