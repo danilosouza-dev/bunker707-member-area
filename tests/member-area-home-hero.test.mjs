@@ -497,7 +497,7 @@ test("home do aluno resolve o destaque antes de desenhar e o componente segue o 
   assert.match(page, /<HeroSection accessPreviewMode=\{accessPreviewMode\} hero=\{hero\} \/>/);
 
   const section = (await readSource("../src/components/hero-section.tsx")).replace(/^\s*\/\/.*$/gm, "");
-  assert.match(section, /className="@container relative z-\[1\] min-h-\[680px\]/);
+  assert.match(section, /className="@container relative z-\[1\] min-h-\[var\(--member-hero-min-h\)\]/);
   assert.doesNotMatch(section, /\b(?:sm|md|lg|xl):/, "nada de variante da janela: a prévia tem outra largura");
   assert.match(section, /rel="noopener noreferrer" target="_blank"/);
   assert.match(section, /motion-reduce:hidden/);

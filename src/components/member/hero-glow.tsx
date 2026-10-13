@@ -146,7 +146,7 @@ export function HeroGlow({ src }: HeroGlowProps) {
   return (
     <div
       aria-hidden="true"
-      className="member-hero-glow pointer-events-none absolute inset-x-0 top-0 z-0 h-[calc(100%+var(--member-hero-glow-extend))] transition-opacity duration-700 ease-out motion-reduce:transition-none"
+      className="member-hero-glow pointer-events-none absolute inset-x-0 top-0 z-0 h-full transition-opacity duration-700 ease-out motion-reduce:transition-none"
       style={{ "--member-hero-accent": accent ?? undefined, opacity: accent ? 1 : 0 } as CSSProperties}
     />
   );

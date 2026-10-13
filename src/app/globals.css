@@ -61,7 +61,7 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   --member-row-cols: 2.2;
   --member-row-cols-wide: 1.3;
   --member-row-gap: 0.75rem;
-  --member-hero-glow-extend: 0px;
+  --member-hero-min-h: 680px;
 
   --card: var(--panel);
   --card-foreground: var(--foreground);
@@ -151,7 +151,9 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 
 [data-member-corners="rounded"] {
   --member-row-inset: 12px;
-  --member-hero-glow-extend: 38vh;
+  /* Destaque mais baixo em telas curtas: o titulo da primeira fileira e o topo dos cards aparecem antes da
+     dobra (no discreto a fileira sobe por cima do destaque; aqui ela comeca depois dele). */
+  --member-hero-min-h: clamp(520px, calc(100vh - 256px), 680px);
   --member-cover-radius: 16px;
   --member-hero-content-pb: 5rem;
   --member-hero-fade: 0;
@@ -179,7 +181,6 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 [data-member-banner="rounded"] {
   --member-hero-content-pb: 5rem;
   --member-hero-fade: 0;
-  --member-hero-glow-extend: 38vh;
   --member-hero-inset: 12px;
   --member-hero-radius: 20px;
   --member-hero-top: 76px;
@@ -190,7 +191,6 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
 [data-member-banner="soft"] {
   --member-hero-content-pb: 12rem;
   --member-hero-fade: 1;
-  --member-hero-glow-extend: 0px;
   --member-hero-inset: 0px;
   --member-hero-radius: 0px;
   --member-hero-top: 0px;
@@ -227,15 +227,17 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   width: calc((100% - (var(--member-row-cols-wide) - 1) * var(--member-row-gap)) / var(--member-row-cols-wide));
 }
 
-/* Luz de fundo do destaque (HeroGlow): a cor media da imagem, forte no topo, some no cinza da pagina. No
-   arredondado ela aparece em volta do destaque e desce 38vh por tras da primeira fileira; no discreto a
-   imagem cobre o destaque de ponta a ponta, entao a luz nao passa dele. */
+/* Luz de fundo do destaque (HeroGlow): a cor da imagem (ou a escolhida em Destaque), forte no topo e
+   sumindo no cinza da pagina antes do fim do destaque (como na Netflix: do meio para cima e um pouco para
+   baixo, sem invadir as fileiras). No arredondado ela aparece em volta do destaque; no discreto a imagem
+   cobre o destaque de ponta a ponta, entao a luz nao aparece. */
 .member-hero-glow {
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--member-hero-accent, #141414) 46%, #141414) 0%,
-    color-mix(in srgb, var(--member-hero-accent, #141414) 26%, #141414) 48%,
-    #141414 100%
+    color-mix(in srgb, var(--member-hero-accent, #141414) 48%, #141414) 0%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 30%, #141414) 22%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 12%, #141414) 46%,
+    #141414 64%
   );
 }
 
@@ -812,16 +814,10 @@ button:disabled {
   }
 }
 
-/* Troca entre a grade de modulos e o modulo aberto: so um fade, sem deslocamento, escala nem atrasos
-   escalonados. O modal rola suavemente ate a secao ao mesmo tempo; qualquer outro movimento somado a
-   essa rolagem (e a escala em bloco cheio de texto) virava uma "tremida" (13/10/2026). */
-.module-grid-layout {
-  animation: module-grid-layout-in 320ms ease-out both;
-}
-
-.module-focus-layout {
-  animation: module-focus-layout-in 320ms ease-out both;
-}
+/* Troca entre a grade de modulos e o modulo aberto: instantanea, como a lista de episodios da Netflix.
+   Fade, deslocamento, escala e atrasos escalonados (somados a rolagem do modal) pareciam uma tremida ou
+   um piscar (13/10/2026). As classes .module-grid-layout, .module-focus-layout, .module-lessons-in e
+   .module-secondary-grid ficam so como marcadores. */
 
 .module-card-motion {
   transform-origin: center;
@@ -890,14 +886,6 @@ button:disabled {
   }
 }
 
-.module-lessons-in {
-  animation: module-lessons-in 320ms ease-out both;
-}
-
-.module-secondary-grid {
-  animation: module-secondary-grid-in 320ms ease-out both;
-}
-
 @keyframes modal-backdrop-in {
   from {
     opacity: 0;
@@ -956,46 +944,6 @@ button:disabled {
   }
 }
 
-@keyframes module-grid-layout-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes module-focus-layout-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes module-lessons-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes module-secondary-grid-in {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
 @keyframes lesson-watching-dot-pulse {
   0%,
   100% {
@@ -1020,10 +968,6 @@ button:disabled {
   .modal-panel-in,
   .modal-panel-out,
   .modal-hero-image-in,
-  .module-grid-layout,
-  .module-focus-layout,
-  .module-lessons-in,
-  .module-secondary-grid,
   .lesson-watching-dot {
     animation-duration: 1ms;
     transition-duration: 1ms;

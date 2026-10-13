@@ -39,11 +39,12 @@ test("cards das fileiras tem largura fluida (colunas por largura de tela) nos do
 test("destaque da home e banner do curso tem a luz de fundo na cor da imagem", () => {
   assert.match(heroSource, /import \{ HeroGlow \} from "@\/components\/member\/hero-glow";/);
   assert.match(heroSource, /<div className="relative flow-root">\s*<HeroGlow src=\{hero\.mediaType === "video" \? poster : hero\.image\} \/>/);
-  assert.match(heroSource, /<section className="@container relative z-\[1\] min-h-\[680px\]/);
+  assert.match(heroSource, /<section className="@container relative z-\[1\] min-h-\[var\(--member-hero-min-h\)\]/);
+  assert.match(css, /--member-hero-min-h: clamp\(520px, calc\(100vh - 256px\), 680px\);/, "arredondado: destaque mais baixo em telas curtas");
   assert.match(coursePageSource, /<HeroGlow src=\{pageHero\.mediaType === "video" \? pageHero\.poster \?\? null : pageHero\.mediaSrc \?\? null\} \/>/);
-  assert.match(css, /\.member-hero-glow \{[\s\S]*color-mix\(in srgb, var\(--member-hero-accent, #141414\) 46%, #141414\)/);
-  assert.match(css, /--member-hero-glow-extend: 0px;/, "no estilo discreto a imagem cobre o destaque inteiro: a luz nao passa dele");
-  assert.match(css, /\[data-member-banner="rounded"\] \{[^}]*--member-hero-glow-extend: 38vh;/);
+  // Do meio para cima e um pouco para baixo, como na Netflix: a luz some antes do fim do destaque (64%).
+  assert.match(css, /\.member-hero-glow \{[\s\S]*color-mix\(in srgb, var\(--member-hero-accent, #141414\) 48%, #141414\) 0%,[\s\S]*#141414 64%/);
+  assert.doesNotMatch(css, /--member-hero-glow-extend/, "a luz fica dentro da area do destaque");
   // Medicao no navegador: versao pequena da imagem pelo otimizador (mesma origem), canvas 24 px, cor media
   // com saturacao reforcada; sem cor util ou sem CORS, a luz fica apagada.
   assert.match(glowSource, /\/_next\/image\?url=\$\{encodeURIComponent\(src\)\}&w=64&q=75/);

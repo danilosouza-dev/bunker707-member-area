@@ -499,31 +499,27 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     };
   }, []);
 
-  useEffect(() => {
+  // Abrir um modulo nao rola o modal: a troca acontece no lugar, como a lista de episodios da Netflix
+  // (rolagem suave somada a troca de conteudo parecia uma tremida). So quando o titulo da secao ja saiu
+  // por cima e que o modal pula, de uma vez e antes de pintar, para a lista aparecer.
+  useLayoutEffect(() => {
     if (!activeModuleId || !item) {
       return;
     }
 
-    const animationFrame = window.requestAnimationFrame(() => {
-      const scroller = modalScrollerRef.current;
-      const target = moduleSectionHeaderRef.current;
+    const scroller = modalScrollerRef.current;
+    const target = moduleSectionHeaderRef.current;
 
-      if (!scroller || !target) {
-        return;
-      }
+    if (!scroller || !target) {
+      return;
+    }
 
-      const scrollerTop = scroller.getBoundingClientRect().top;
-      const targetTop = target.getBoundingClientRect().top;
+    const scrollerTop = scroller.getBoundingClientRect().top;
+    const targetTop = target.getBoundingClientRect().top;
 
-      scroller.scrollTo({
-        behavior: "smooth",
-        top: scroller.scrollTop + targetTop - scrollerTop - 28
-      });
-    });
-
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-    };
+    if (targetTop < scrollerTop + 8) {
+      scroller.scrollTop = scroller.scrollTop + targetTop - scrollerTop - 28;
+    }
   }, [activeModuleId, item]);
 
   // Altura do painel de aulas = altura do card do modulo aberto (a partir de 1024 px). Medida antes da
