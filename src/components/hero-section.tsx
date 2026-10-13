@@ -93,7 +93,7 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
   return (
     // flow-root: a margem de cima do destaque fica dentro do bloco, entao a luz comeca no topo da pagina.
     <div className="relative flow-root">
-      <HeroGlow src={hero.mediaType === "video" ? poster : hero.image} />
+      <HeroGlow color={hero.glowColor} src={hero.mediaType === "video" ? poster : hero.image} />
       <section className="@container relative z-[1] min-h-[var(--member-hero-min-h)] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
       {hero.mediaType === "video" ? (
         <>

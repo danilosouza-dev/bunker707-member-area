@@ -200,6 +200,8 @@ export type HomeHeroConfig = {
   };
   description?: string;
   enabled?: boolean;
+  /** Cor da luz de fundo atras do destaque (#rrggbb). Ausente = automatica, medida na imagem. */
+  glowColor?: string;
   /** Imagem (mediaType "image") ou link do video (mediaType "video"). */
   image: string;
   mediaType: "image" | "video";

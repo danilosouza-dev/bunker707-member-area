@@ -3,8 +3,9 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 
-// Luz de fundo atras do destaque, na cor da imagem (como na Netflix): a cor media da imagem, um pouco
-// mais viva, vira um degrade do topo da pagina ate o cinza (#141414) logo abaixo do destaque. Calculada
+// Luz de fundo atras do destaque, na cor da imagem (como na Netflix) ou na cor escolhida em Area de
+// membros > Destaque > Luz de fundo: a cor media da imagem, um pouco mais viva, vira um degrade do topo
+// da pagina ate o cinza (#141414) antes do fim do destaque. Calculada
 // no navegador a partir de uma versao pequena da imagem (mesma origem quando o otimizador do Next atende
 // o host); quando a imagem nao pode ser lida (outra origem sem CORS), a luz simplesmente nao aparece.
 // `globals.css` desenha o degrade com `--member-hero-accent` (`.member-hero-glow`).
@@ -97,17 +98,19 @@ export function accentColorOf(image: CanvasImageSource & { height?: number; widt
 }
 
 type HeroGlowProps = {
-  /** Imagem do destaque (ou a capa do video). Sem imagem, sem luz. */
+  /** Cor escolhida pelo produtor (Destaque > Luz de fundo). Ausente = medida na imagem. */
+  color?: string | null;
+  /** Imagem do destaque (ou a capa do video). Sem imagem (e sem cor escolhida), sem luz. */
   src?: string | null;
 };
 
-export function HeroGlow({ src }: HeroGlowProps) {
+export function HeroGlow({ color, src }: HeroGlowProps) {
   // Cor medida e para qual imagem: ao trocar a imagem, a luz some ate a nova medida chegar.
   const [measured, setMeasured] = useState<{ color: string | null; src: string } | null>(null);
-  const accent = src && measured?.src === src ? measured.color : null;
+  const accent = color ?? (src && measured?.src === src ? measured.color : null);
 
   useEffect(() => {
-    if (!src) {
+    if (!src || color) {
       return;
     }
 
@@ -141,7 +144,7 @@ export function HeroGlow({ src }: HeroGlowProps) {
     return () => {
       cancelled = true;
     };
-  }, [src]);
+  }, [color, src]);
 
   return (
     <div

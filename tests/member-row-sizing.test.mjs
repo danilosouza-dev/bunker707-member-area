@@ -38,7 +38,8 @@ test("cards das fileiras tem largura fluida (colunas por largura de tela) nos do
 
 test("destaque da home e banner do curso tem a luz de fundo na cor da imagem", () => {
   assert.match(heroSource, /import \{ HeroGlow \} from "@\/components\/member\/hero-glow";/);
-  assert.match(heroSource, /<div className="relative flow-root">\s*<HeroGlow src=\{hero\.mediaType === "video" \? poster : hero\.image\} \/>/);
+  assert.match(heroSource, /<div className="relative flow-root">\s*<HeroGlow color=\{hero\.glowColor\} src=\{hero\.mediaType === "video" \? poster : hero\.image\} \/>/);
+  assert.match(glowSource, /const accent = color \?\? \(src && measured\?\.src === src \? measured\.color : null\);/, "cor escolhida vence a medida");
   assert.match(heroSource, /<section className="@container relative z-\[1\] min-h-\[var\(--member-hero-min-h\)\]/);
   assert.match(css, /--member-hero-min-h: clamp\(520px, calc\(100vh - 256px\), 680px\);/, "arredondado: destaque mais baixo em telas curtas");
   assert.match(coursePageSource, /<HeroGlow src=\{pageHero\.mediaType === "video" \? pageHero\.poster \?\? null : pageHero\.mediaSrc \?\? null\} \/>/);

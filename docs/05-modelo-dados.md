@@ -1226,6 +1226,7 @@ A logo do login nao fica aqui: vem de `platform_settings.branding` (Marca). Nenh
 
 - `cta`: `{ href, label, target }`. `href` e caminho interno da area (comeca com uma `/`, nunca `//`, `/\`, espaco ou `/api`; ate 512) ou link `https://`; `label` ate 32; `target` `same_tab` ou `new_tab`. Produto grava `/conteudo/{id}`;
 - `poster`: capa do video (obrigatoria quando `mediaType = video`; mesma medida da imagem, 1920 x 720);
+- `glowColor`: cor da luz de fundo atras do destaque (`#rrggbb`); ausente = automatica, medida na imagem no navegador do aluno (13/10/2026);
 - `visibility.cta`: mostra o botao.
 
 `image` continua sendo a imagem (`mediaType = image`) ou o link do video (`.mp4`, `.webm`, `.mov`, so https). Texto escondido continua guardado. Chaves desconhecidas (ex.: `purpose`) sao preservadas pela gravacao. A home normaliza o que esta gravado (`resolveHomeHero`) e descarta botao com link inseguro, inclusive o que o admin antigo ou SQL manual gravarem.
