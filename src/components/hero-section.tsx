@@ -129,10 +129,11 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
         />
       )}
       <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/35 to-black/15" />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-black/5 to-black/35" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-80 bg-gradient-to-b from-transparent via-[#141414]/85 to-[#141414]" />
+      {/* Esfumacado inferior: some no modo arredondado (--member-hero-fade: 0), a capa vai limpa ate a borda. */}
+      <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-black/5 to-black/35 opacity-[var(--member-hero-fade)]" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-80 bg-gradient-to-b from-transparent via-[#141414]/85 to-[#141414] opacity-[var(--member-hero-fade)]" />
       {hasContent ? (
-        <div className="relative z-10 flex min-h-[680px] max-w-6xl flex-col justify-center px-5 pb-48 pt-28 @min-[640px]:px-8 @min-[1024px]:px-12">
+        <div className="relative z-10 flex min-h-[680px] max-w-6xl flex-col justify-center px-5 pb-[var(--member-hero-content-pb)] pt-28 @min-[640px]:px-8 @min-[1024px]:px-12">
           {showBadge ? (
             <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-[6px] border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-normal text-white backdrop-blur">
               <Zap className="h-4 w-4 text-[var(--accent-warm)]" />

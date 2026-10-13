@@ -45,7 +45,10 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
      sobrescreve no raiz conforme a escolha (src/lib/member-style.ts). */
   --member-button-radius: 8px;
   --member-cover-radius: 10px;
+  --member-hero-content-pb: 12rem;
+  --member-hero-fade: 1;
   --member-hero-inset: 0px;
+  --member-hero-overlap: -6rem;
   --member-hero-radius: 0px;
   --member-hero-top: 0px;
 

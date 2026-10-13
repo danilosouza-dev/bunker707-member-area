@@ -62,7 +62,12 @@ export function memberStyleCssVars(style: MemberStyleConfig): CSSProperties {
   return {
     "--member-button-radius": style.buttons === "pill" ? "9999px" : "8px",
     "--member-cover-radius": rounded ? "16px" : "10px",
+    // Arredondado: capa limpa ate a borda (sem o esfumacado inferior), menos espaco embaixo e a primeira
+    // fileira comeca abaixo do destaque em vez de sobrepor.
+    "--member-hero-content-pb": rounded ? "5rem" : "12rem",
+    "--member-hero-fade": rounded ? "0" : "1",
     "--member-hero-inset": rounded ? "clamp(12px, 3vw, 40px)" : "0px",
+    "--member-hero-overlap": rounded ? "2rem" : "-6rem",
     "--member-hero-radius": rounded ? "20px" : "0px",
     "--member-hero-top": rounded ? "76px" : "0px"
   } as CSSProperties;
