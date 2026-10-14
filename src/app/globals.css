@@ -844,10 +844,11 @@ button:disabled {
   }
 }
 
-/* Troca entre a grade de modulos e o modulo aberto: instantanea, como a lista de episodios da Netflix.
-   Fade, deslocamento, escala e atrasos escalonados (somados a rolagem do modal) pareciam uma tremida ou
-   um piscar (13/10/2026). As classes .module-grid-layout, .module-focus-layout, .module-lessons-in e
-   .module-secondary-grid ficam so como marcadores. */
+/* Troca entre a grade de modulos e o modulo aberto: sem animacoes de entrada por CSS. Fade, deslocamento,
+   escala e atrasos escalonados (somados a rolagem do modal) pareciam uma tremida ou um piscar (13/10/2026).
+   O movimento fica por conta da View Transition coordenada mais abaixo ("Foco de modulo no modal"); sem
+   suporte do navegador, a troca e instantanea, como a lista de episodios da Netflix. As classes
+   .module-grid-layout, .module-focus-layout, .module-lessons-in e .module-secondary-grid ficam so como marcadores. */
 
 .module-card-motion {
   transform-origin: center;
@@ -984,6 +985,162 @@ button:disabled {
   50% {
     box-shadow: 0 0 0 6px rgba(251, 191, 36, 0);
     opacity: 0.82;
+  }
+}
+
+/* --- Foco de modulo no modal: transicao coordenada via View Transitions ---
+   Os cards viajam ate a nova posicao, o painel de aulas se desdobra ao lado do modulo
+   e o modal cresce/encolhe de forma continua, sem corte seco. O JS liga o atributo
+   data-vt-module-focus no <html> so enquanto a transicao roda. */
+.module-card-motion {
+  view-transition-class: module-card;
+}
+
+.module-active-card {
+  view-transition-class: module-card module-card-focus;
+}
+
+html[data-vt-module-focus]::view-transition {
+  pointer-events: none;
+}
+
+html[data-vt-module-focus]::view-transition-group(*) {
+  animation-duration: 560ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html[data-vt-module-focus]::view-transition-group(modal-content-panel) {
+  border-radius: 8px;
+  box-shadow: 0 34px 120px rgba(0, 0, 0, 0.82);
+  overflow: clip;
+}
+
+/* Ordem durante o movimento: card em foco > demais cards > painel de aulas > fundo do modal. */
+html[data-vt-module-focus]::view-transition-group(.module-card) {
+  border-radius: 8px;
+  overflow: clip;
+  z-index: 2;
+}
+
+html[data-vt-module-focus]::view-transition-group(.module-card-focus) {
+  z-index: 3;
+}
+
+html[data-vt-module-focus]::view-transition-group(module-lesson-panel) {
+  z-index: 1;
+}
+
+html[data-vt-module-focus]::view-transition-new(.module-card):only-child {
+  animation: module-card-vt-in 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html[data-vt-module-focus]::view-transition-old(.module-card):only-child {
+  animation: module-card-vt-out 240ms cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+html[data-vt-module-focus]::view-transition-new(module-lesson-panel):only-child {
+  animation: module-lesson-panel-vt-in 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child {
+  animation: module-lesson-panel-vt-out 260ms cubic-bezier(0.4, 0, 0.6, 1) both;
+}
+
+@media (max-width: 1023px) {
+  html[data-vt-module-focus]::view-transition-new(module-lesson-panel):only-child {
+    animation-name: module-lesson-panel-vt-in-stacked;
+  }
+
+  html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child {
+    animation-name: module-lesson-panel-vt-out-stacked;
+  }
+}
+
+/* --vt-scroll-shift (definida pelo JS no <html> durante a transicao) e o quanto o conteudo rolou:
+   quem entra parte dessa distancia e quem sai acompanha o deslocamento, em vez de ficar parado na tela. */
+@keyframes module-card-vt-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, calc(var(--vt-scroll-shift, 0px) + 14px), 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes module-card-vt-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, calc(-1 * var(--vt-scroll-shift, 0px)), 0);
+  }
+}
+
+/* Desktop: o painel se desdobra a partir do card do modulo, da esquerda para a direita. */
+@keyframes module-lesson-panel-vt-in {
+  from {
+    clip-path: inset(0 42% 0 0 round 8px);
+    opacity: 0;
+    transform: translate3d(-22px, var(--vt-scroll-shift, 0px), 0);
+  }
+
+  45% {
+    opacity: 1;
+  }
+
+  to {
+    clip-path: inset(0 0 0 0 round 8px);
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes module-lesson-panel-vt-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(-14px, calc(-1 * var(--vt-scroll-shift, 0px)), 0);
+  }
+}
+
+/* Telas menores: o painel fica abaixo do card e se desdobra de cima para baixo, como um acordeao. */
+@keyframes module-lesson-panel-vt-in-stacked {
+  from {
+    clip-path: inset(0 0 55% 0 round 8px);
+    opacity: 0;
+    transform: translate3d(0, calc(var(--vt-scroll-shift, 0px) - 14px), 0);
+  }
+
+  45% {
+    opacity: 1;
+  }
+
+  to {
+    clip-path: inset(0 0 0 0 round 8px);
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes module-lesson-panel-vt-out-stacked {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(0, calc(-1 * var(--vt-scroll-shift, 0px) - 10px), 0);
   }
 }
 
