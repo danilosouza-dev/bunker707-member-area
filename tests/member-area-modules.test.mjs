@@ -786,12 +786,12 @@ function webpDataUrl(width, height) {
   return `data:image/webp;base64,${Buffer.from(bytes).toString("base64")}`;
 }
 
-test("capa do modulo: WebP 720×1040 vai ao Storage e so a URL e gravada em course_modules.image", async () => {
+test("capa do modulo: WebP 720×1080 vai ao Storage e so a URL e gravada em course_modules.image", async () => {
   reset();
   const db = createDb({ tables: storefrontTables([]) });
   actionStubs.db = db;
 
-  const result = await setModuleCover({ image: webpDataUrl(720, 1040), moduleId: "mod-2" });
+  const result = await setModuleCover({ image: webpDataUrl(720, 1080), moduleId: "mod-2" });
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.match(result.data.coverUrl, /^https:\/\/projeto\.supabase\.co\/storage\/v1\/object\/public\/content-assets\/content\/curso-ia\/modules\/mod-2\/[a-f0-9]{24}\.webp$/);
@@ -814,7 +814,7 @@ test("capa do modulo: medida errada vira erro no campo, sem enviar nem gravar", 
 
   assert.equal(result.ok, false);
   assert.equal(result.status, 400);
-  assert.match(result.fieldErrors.image[0], /720×1040/);
+  assert.match(result.fieldErrors.image[0], /720×1080/);
   assert.equal(db.calls.uploads.length, 0);
   assert.equal(db.calls.writes.length, 0);
 });

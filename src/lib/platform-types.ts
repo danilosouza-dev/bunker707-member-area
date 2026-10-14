@@ -1,4 +1,8 @@
+import type { MemberStyleConfig } from "./member-style";
 import type { LucideIcon } from "lucide-react";
+import type { MemberReleaseState } from "./release-state";
+
+export type { MemberReleaseState } from "./release-state";
 
 export type ContentKind =
   | "Formacao"
@@ -53,6 +57,13 @@ export type SavedItemTargetType =
   | "lesson"
   | "material";
 export type ReleaseRuleConfig = {
+  /**
+   * De onde conta o atraso de "after_enrollment"/"after_purchase". Ausente = inicio do acesso
+   * (entitlements.starts_at, a data da compra). "warranty_end" = fim da garantia gravado no acesso
+   * (Hotmart: purchase.warranty_expire_date), quando o pipeline de compras passar a gravar; sem a data
+   * gravada, volta para o inicio do acesso. Ver getReleaseAnchorTimestamp em release-policy.ts.
+   */
+  anchor?: "access_start" | "warranty_end";
   delayUnit?: "horas" | "dias";
   delayValue?: string;
   fixedDate?: string;
@@ -146,6 +157,8 @@ export type ContentItem = {
   purchaseTarget?: PurchaseTarget;
   purchaseUrl?: string;
   releaseRule?: ReleaseRuleConfig;
+  /** Liberacao calculada no servidor para o aluno da requisicao (com a data real). */
+  releaseState?: MemberReleaseState;
   status: ContentStatus;
   title: string;
 };
@@ -187,6 +200,8 @@ export type HomeHeroConfig = {
   };
   description?: string;
   enabled?: boolean;
+  /** Cor da luz de fundo atras do destaque (#rrggbb). Ausente = automatica, medida na imagem. */
+  glowColor?: string;
   /** Imagem (mediaType "image") ou link do video (mediaType "video"). */
   image: string;
   mediaType: "image" | "video";
@@ -204,10 +219,16 @@ export type HomeHeroConfig = {
 
 export type PlatformBrandingConfig = {
   logoImage: string | null;
+  /** Cantos, botoes e menu da area do aluno (src/lib/member-style.ts). Ausente = padrao discreto. */
+  style?: MemberStyleConfig;
 };
+
+/** Cantos do banner da pagina do produto: ausente ou "inherit" = segue Marca > Estilo. */
+export type ContentPageHeroCorners = "inherit" | "rounded" | "soft";
 
 export type ContentPageHeroConfig = {
   badge?: string;
+  corners?: ContentPageHeroCorners;
   ctaHref?: string;
   ctaLabel?: string;
   description?: string;
@@ -231,6 +252,8 @@ export type LessonPreview = {
   image?: string;
   isSaved?: boolean;
   releaseRule?: ReleaseRuleConfig;
+  /** Liberacao calculada no servidor para o aluno; aula nao liberada chega sem `video`. */
+  releaseState?: MemberReleaseState;
   title: string;
   video?: LessonVideoConfig;
 };
@@ -247,6 +270,8 @@ export type CourseModule = {
   ownerKind?: ContentKind;
   progress: number;
   releaseRule?: ReleaseRuleConfig;
+  /** Liberacao calculada no servidor para o aluno da requisicao. */
+  releaseState?: MemberReleaseState;
   title: string;
 };
 

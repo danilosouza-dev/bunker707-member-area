@@ -35,7 +35,7 @@ export default async function Home({ searchParams }: HomeProps) {
       student={shellData.student}
     >
       <HeroSection accessPreviewMode={accessPreviewMode} hero={hero} />
-      <div className={`relative z-20 space-y-20 pb-24 ${heroVisible ? "-mt-24" : "pt-24"}`}>
+      <div className={`relative z-20 space-y-20 pb-24 ${heroVisible ? "mt-[var(--member-hero-overlap)]" : "pt-24"}`}>
         {homeRows.map((row) => {
           if (row.variant === "course_modules" && row.course && row.modules) {
             return (

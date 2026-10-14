@@ -15,7 +15,7 @@ test("internal poster cards render as one row with edge controls and a page indi
   assert.match(sectionSource, /getCarouselMetrics/);
   assert.match(sectionSource, /const \[hasHorizontalOverflow, setHasHorizontalOverflow\] = useState\(false\);/);
   assert.match(sectionSource, /setHasHorizontalOverflow\(metrics\.hasOverflow\);/);
-  assert.match(sectionSource, /<div className="relative">\s*<div\s*className="scrollbar-hidden flex scroll-smooth/);
+  assert.match(sectionSource, /<div className="relative">\s*<div\s*className="member-row-scroller scrollbar-hidden flex scroll-smooth/);
   assert.match(sectionSource, /verticalInset="internal"/);
   assert.doesNotMatch(sectionSource, /import \{[^}]*ChevronLeft/);
   assert.match(carouselNavigationSource, /carousel-edge-fade/);

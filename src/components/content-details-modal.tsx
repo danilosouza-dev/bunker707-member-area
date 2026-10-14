@@ -3,18 +3,19 @@
 import { Bell, ChevronDown, ChevronUp, LockKeyhole, Play, ShoppingCart, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { usePlatformLogoImage } from "@/components/platform-branding";
 import { SavedItemButton } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
+import { clampProgress, getCompletedLessonsCount, getCourseProgressFromModules, getModuleProgress } from "@/lib/course-progress";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
-import type { ContentItem, ContentModalStructure, CourseModule, LessonVideoConfig } from "@/lib/platform-types";
+import type { ContentItem, ContentModalStructure, CourseModule } from "@/lib/platform-types";
 
 type ContentDetailsModalProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -201,14 +202,6 @@ function chunkItems<T>(items: T[], size: number) {
   return chunks;
 }
 
-function clampProgress(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return 0;
-  }
-
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
 function formatCount(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -239,31 +232,6 @@ function formatCompletedRatio(
   }`;
 }
 
-function getCompletedLessonsCount(module: ModulePreview) {
-  return module.lessons.filter((lesson) => lesson.completed).length;
-}
-
-function getModuleProgress(module: ModulePreview) {
-  const savedModuleProgress = clampProgress(module.progress);
-  const completedLessons = getCompletedLessonsCount(module);
-
-  if (savedModuleProgress > 0 || module.lessons.length === 0 || completedLessons === 0) {
-    return savedModuleProgress;
-  }
-
-  return clampProgress((completedLessons / module.lessons.length) * 100);
-}
-
-function getCourseProgressFromModules(modules: ModulePreview[], fallbackProgress: number) {
-  if (modules.length === 0) {
-    return clampProgress(fallbackProgress);
-  }
-
-  const moduleProgressTotal = modules.reduce((total, module) => total + getModuleProgress(module), 0);
-
-  return clampProgress(moduleProgressTotal / modules.length);
-}
-
 function ProgressBar({ className = "", value }: { className?: string; value: number }) {
   const progress = clampProgress(value);
 
@@ -283,46 +251,10 @@ function ProgressBar({ className = "", value }: { className?: string; value: num
   );
 }
 
-function extractYouTubeId(value?: string) {
-  if (!value) {
-    return "";
-  }
-
-  const trimmedValue = value.trim();
-
-  if (/^[\w-]{11}$/.test(trimmedValue)) {
-    return trimmedValue;
-  }
-
-  try {
-    const url = new URL(trimmedValue);
-
-    if (url.hostname.includes("youtu.be")) {
-      return url.pathname.replace("/", "");
-    }
-
-    if (url.hostname.includes("youtube.com")) {
-      return url.searchParams.get("v") ?? url.pathname.split("/").filter(Boolean).pop() ?? "";
-    }
-  } catch {
-    return trimmedValue;
-  }
-
-  return "";
-}
-
-function getVideoThumbnailUrl(video?: LessonVideoConfig) {
-  if (video?.provider !== "youtube") {
-    return "";
-  }
-
-  const videoId = video.assetId || extractYouTubeId(video.url);
-
-  return videoId ? `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg` : "";
-}
-
+// O servidor manda a imagem da aula ja resolvida (thumbnail so de aula liberada com acesso) e nunca o
+// video: o modal da home nao revela o video de aula bloqueada ou de produto nao comprado.
 function getLessonThumbnailUrl(lesson: ModulePreview["lessons"][number]) {
-  return getVideoThumbnailUrl(lesson.video) || lesson.image || "";
+  return lesson.image || "";
 }
 
 function ModuleCard({
@@ -453,9 +385,12 @@ function LessonPanel({
                     </span>
                   </span>
                 </span>
-                <span>
-                  <span className="block text-sm font-bold text-white">{lesson.title}</span>
-                  <span className="mt-1 block text-xs leading-5 text-zinc-400">{lesson.description}</span>
+                {/* Titulo em 1 linha e descricao em 2 (reticencias): a linha fica uniforme, com a altura da thumbnail. */}
+                <span className="min-w-0">
+                  <span className="line-clamp-1 text-sm font-bold text-white">{lesson.title}</span>
+                  <span className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-400" title={lesson.description || undefined}>
+                    {lesson.description}
+                  </span>
                 </span>
                 <span className="pt-1 text-xs font-semibold text-zinc-500">{lesson.duration}</span>
               </Link>
@@ -532,34 +467,32 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     };
   }, []);
 
-  useEffect(() => {
+  // Abrir um modulo nao rola o modal: a troca acontece no lugar, como a lista de episodios da Netflix
+  // (rolagem suave somada a troca de conteudo parecia uma tremida). So quando o titulo da secao ja saiu
+  // por cima e que o modal pula, de uma vez e antes de pintar, para a lista aparecer.
+  useLayoutEffect(() => {
     if (!activeModuleId || !item) {
       return;
     }
 
-    const animationFrame = window.requestAnimationFrame(() => {
-      const scroller = modalScrollerRef.current;
-      const target = moduleSectionHeaderRef.current;
+    const scroller = modalScrollerRef.current;
+    const target = moduleSectionHeaderRef.current;
 
-      if (!scroller || !target) {
-        return;
-      }
+    if (!scroller || !target) {
+      return;
+    }
 
-      const scrollerTop = scroller.getBoundingClientRect().top;
-      const targetTop = target.getBoundingClientRect().top;
+    const scrollerTop = scroller.getBoundingClientRect().top;
+    const targetTop = target.getBoundingClientRect().top;
 
-      scroller.scrollTo({
-        behavior: "smooth",
-        top: scroller.scrollTop + targetTop - scrollerTop - 28
-      });
-    });
-
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-    };
+    if (targetTop < scrollerTop + 8) {
+      scroller.scrollTop = scroller.scrollTop + targetTop - scrollerTop - 28;
+    }
   }, [activeModuleId, item]);
 
-  useEffect(() => {
+  // Altura do painel de aulas = altura do card do modulo aberto (a partir de 1024 px). Medida antes da
+  // primeira pintura (useLayoutEffect): o painel ja nasce no tamanho certo, sem saltar um quadro depois.
+  useLayoutEffect(() => {
     if (!activeModuleId || !item) {
       return;
     }
@@ -580,7 +513,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
       ));
     }
 
-    const animationFrame = window.requestAnimationFrame(measurePanelHeight);
+    measurePanelHeight();
     const resizeObserver = "ResizeObserver" in window
       ? new ResizeObserver(measurePanelHeight)
       : null;
@@ -592,7 +525,6 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     window.addEventListener("resize", measurePanelHeight);
 
     return () => {
-      window.cancelAnimationFrame(animationFrame);
       resizeObserver?.disconnect();
       window.removeEventListener("resize", measurePanelHeight);
     };
@@ -602,7 +534,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     return null;
   }
 
-  const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase());
+  const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase(), item.releaseState);
   const isReleaseLocked = Boolean(releaseNotice?.isLocked);
   const isLocked = Boolean(item.isLocked || isReleaseLocked);
   const actionLabel = item.isLocked ? item.purchaseLabel ?? "Comprar" : isReleaseLocked ? "Bloqueado" : "Acessar";
@@ -809,8 +741,8 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
               ) : null}
             </div>
             {isReleaseLocked ? (
-              <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-300">
-                {releaseNotice?.detail ?? "Conteudo indisponivel de acordo com a regra de entrega."}
+              <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-300" suppressHydrationWarning>
+                {releaseNotice?.detail ?? "Conteúdo indisponível de acordo com a regra de entrega."}
               </p>
             ) : item.isLocked && !canPurchase ? (
               <p className="mt-3 max-w-md text-xs font-semibold leading-5 text-zinc-300">

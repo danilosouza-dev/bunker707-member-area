@@ -33,7 +33,7 @@ import { adminCard } from "../../styles";
 import { adminToast } from "../../toast";
 import type { PreviewDevice } from "../preview-frame";
 import { CtaField } from "./cta-field";
-import { HeroTextField } from "./fields";
+import { GLOW_COLOR_PRESETS, GlowColorPicker, HeroTextField } from "./fields";
 import { HeroPreview } from "./hero-preview";
 
 // Area de membros > Destaque (docs/17 §1.6.8): o topo da home do aluno. Rascunho local ate "Publicar
@@ -71,6 +71,7 @@ const FIELD_FOCUS: Record<HomeHeroDraftField, string> = {
   description: "#destaque-descricao",
   enabled: "#destaque-ligado",
   image: "[aria-labelledby='destaque-imagem-label']",
+  glowColor: "[name='destaque-luz']",
   mediaType: "[name='destaque-midia']",
   poster: "[aria-labelledby='destaque-capa-label']",
   showBadge: "#destaque-selo",
@@ -81,7 +82,13 @@ const FIELD_FOCUS: Record<HomeHeroDraftField, string> = {
   videoUrl: "#destaque-video"
 };
 
-const FIELD_ORDER: HomeHeroDraftField[] = ["image", "videoUrl", "poster", "badge", "title", "description", "ctaLabel", "ctaHref"];
+const FIELD_ORDER: HomeHeroDraftField[] = ["image", "videoUrl", "poster", "glowColor", "badge", "title", "description", "ctaLabel", "ctaHref"];
+
+type GlowMode = "auto" | "custom";
+const GLOW_OPTIONS: ReadonlyArray<{ label: string; value: GlowMode }> = [
+  { label: "Automática (cor da imagem)", value: "auto" },
+  { label: "Escolher cor", value: "custom" }
+];
 
 function omitKey<Value>(record: Partial<Record<ImageSlotField, Value>>, key: ImageSlotField) {
   const next = { ...record };
@@ -483,6 +490,26 @@ export function HeroEditor({ canEdit, data }: HeroEditorProps) {
                 <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
                 No celular a imagem é cortada nas laterais; deixe o assunto principal no centro.
               </p>
+            </div>
+          </SectionCard>
+
+          <SectionCard description="A cor que aparece atrás do destaque e some no cinza da página, como na Netflix." title="Luz de fundo">
+            <div className="flex min-w-0 flex-col gap-4">
+              <PillGroup
+                ariaLabel="Luz de fundo"
+                disabled={locked}
+                name="destaque-luz"
+                onChange={(mode: GlowMode) => change({ glowColor: mode === "custom" ? (draft.glowColor ?? GLOW_COLOR_PRESETS[0].value) : null })}
+                options={GLOW_OPTIONS}
+                value={draft.glowColor ? "custom" : "auto"}
+              />
+              {draft.glowColor ? (
+                <GlowColorPicker color={draft.glowColor} disabled={locked} onChange={(glowColor) => change({ glowColor })} />
+              ) : (
+                <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
+                  Automática: a cor média da imagem do destaque (ou da capa do vídeo), medida na hora de mostrar.
+                </p>
+              )}
             </div>
           </SectionCard>
 

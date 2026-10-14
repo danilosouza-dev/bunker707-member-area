@@ -46,6 +46,7 @@ const adminStudentsCommandCenterSource = await readFile(
 const adminDashboardSource = await readFile(new URL("../src/components/admin-dashboard.tsx", import.meta.url), "utf8");
 const adminDashboardAndStudentSource = `${adminDashboardSource}\n${adminStudentsCommandCenterSource}`;
 const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
+const memberNavigationSource = await readFile(new URL("../src/lib/member-navigation.ts", import.meta.url), "utf8");
 const globalsCssSource = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
 const designSystemSource = await readFile(new URL("../docs/12-design-system-bunker707.md", import.meta.url), "utf8");
 const favoritesPageSource = await readFile(new URL("../src/app/favoritos/page.tsx", import.meta.url), "utf8");
@@ -509,13 +510,15 @@ test("auth and security guard the student area, progress and admin mutations", (
   assert.match(appShellSource, /canUseAccessPreview\?: boolean/);
   assert.match(appShellSource, /const showPreviewControl = canUseAccessPreview;/);
   assert.doesNotMatch(appShellSource, /NODE_ENV !== "production" \|\| Boolean\(accessPreviewMode\)/);
-  assert.match(appShellSource, /Modo de visualizacao no menu/);
+  assert.match(appShellSource, /Modo de visualiza[cç][aã]o no menu/);
   assert.match(appShellSource, /Aluno com acesso/);
   assert.match(appShellSource, /Aluno sem acesso/);
   assert.match(appShellSource, /Ir para o admin/);
   assert.doesNotMatch(appShellSource, /CRM/);
   assert.match(appShellSource, /href="\/admin"/);
-  assert.match(appShellSource, /label: "Favoritos", href: "\/favoritos"/);
+  // Itens da barra lateral vem da fonte unica (src/lib/member-navigation.ts), desenhada pelo app-shell.
+  assert.match(memberNavigationSource, /label: "Favoritos", href: "\/favoritos"/);
+  assert.match(appShellSource, /<MemberSidebar/);
   assert.match(proxySource, /"\/favoritos"/);
   assert.match(loginExperienceSource, /signInWithPassword/);
   assert.match(loginExperienceSource, /getPostLoginRedirectPath/);

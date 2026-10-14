@@ -1,5 +1,6 @@
 import Image from "next/image";
-import Link from "next/link";
+import { MemberProgressLink } from "@/components/member/ui/member-progress-link";
+import { MEMBER_ROUTES } from "@/lib/member-navigation";
 import type { PlatformBrandingConfig } from "@/lib/platform-types";
 
 export function MemberFooter({ branding }: { branding?: PlatformBrandingConfig }) {
@@ -8,7 +9,8 @@ export function MemberFooter({ branding }: { branding?: PlatformBrandingConfig }
   return (
     <footer className="border-t border-white/10 px-5 py-7 text-xs text-zinc-500 sm:px-8 lg:px-12">
       <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
-        <Link
+        {/* Links do rodape gravam o progresso da aula antes de sair (o rodape tambem aparece na aula). */}
+        <MemberProgressLink
           aria-label="Voltar para a home"
           className="inline-flex shrink-0 rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
           href="/"
@@ -25,17 +27,20 @@ export function MemberFooter({ branding }: { branding?: PlatformBrandingConfig }
           ) : (
             <span className="text-base font-black uppercase tracking-wide text-white">Bunker707</span>
           )}
-        </Link>
+        </MemberProgressLink>
 
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           <p>(c) 2026 Bunker707</p>
-          <p>Conteudos liberados conforme os acessos ativos.</p>
+          <p>Conteúdos liberados conforme os acessos ativos.</p>
         </div>
 
-        <nav className="flex flex-wrap gap-x-5 gap-y-2">
-          <button className="transition hover:text-white" type="button">
+        <nav aria-label="Rodapé" className="flex flex-wrap gap-x-5 gap-y-2">
+          <MemberProgressLink
+            className="rounded-[4px] transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+            href={MEMBER_ROUTES.support}
+          >
             Suporte
-          </button>
+          </MemberProgressLink>
           <button className="transition hover:text-white" type="button">
             Termos
           </button>

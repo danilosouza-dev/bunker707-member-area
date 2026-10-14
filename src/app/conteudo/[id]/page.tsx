@@ -10,6 +10,7 @@ import {
   ShoppingCart
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
+import { HeroGlow } from "@/components/member/hero-glow";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode, withAccessPreviewParam } from "@/lib/access-preview";
@@ -92,6 +93,7 @@ function getHeroConfig(item: ContentItem, settings: ContentPageSettings | undefi
   };
 
   return {
+    corners: heroSettings?.corners ?? "inherit",
     mediaType: heroSettings?.mediaType ?? "image",
     mediaSrc: heroSettings?.mediaSrc ?? item.image ?? homeHero.image,
     poster: heroSettings?.poster,
@@ -204,12 +206,18 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
   return (
     <AppShell
       accessPreviewMode={accessPreviewMode}
+      bannerCorners={pageHero.corners}
       branding={shellData.branding}
       canUseAccessPreview={shellData.canUseAccessPreview}
       student={shellData.student}
     >
-      <div className="min-h-screen bg-[#141414]">
-        <section className="relative min-h-[640px] overflow-hidden">
+      {/* data-member-banner: a escolha do produto (Detalhes > Cantos do banner) vence a da area so neste banner;
+          o cabecalho (logo e perfil) e as fileiras acompanham o banner arredondado. */}
+      <div className="min-h-screen bg-[#141414]" data-member-banner={pageHero.corners === "inherit" ? undefined : pageHero.corners}>
+        {/* Mesmos cantos e recuo do destaque da home (Marca > Estilo): no modo arredondado a capa fica como la. */}
+        <div className="relative flow-root">
+        <HeroGlow src={pageHero.mediaType === "video" ? pageHero.poster ?? null : pageHero.mediaSrc ?? null} />
+        <section className="relative z-[1] min-h-[640px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
           {pageHero.mediaType === "video" ? (
             <video
               aria-hidden="true"
@@ -236,7 +244,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
           {hasVisibleHeroContent ? (
             <div className="absolute inset-0 bg-gradient-to-r from-black via-black/72 to-black/18" />
           ) : null}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-b from-transparent via-[#141414]/88 to-[#141414]" />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-72 bg-gradient-to-b from-transparent via-[#141414]/88 to-[#141414] opacity-[var(--member-hero-fade)]" />
 
           <div className="relative z-10 flex min-h-[640px] max-w-6xl flex-col px-5 pb-36 pt-24 sm:px-8 lg:px-12">
             {hasVisibleHeroContent ? <Breadcrumbs items={breadcrumbs} /> : null}
@@ -294,8 +302,9 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
             </div>
           </div>
         </section>
+        </div>
 
-        <div className="relative z-20 -mt-28 sm:-mt-32">
+        <div className="relative z-20 mt-[var(--member-page-overlap)]">
           <ContentStructureSection
             accessPreviewMode={accessPreviewMode}
             formationCourseOpenMode={formationCourseOpenMode}

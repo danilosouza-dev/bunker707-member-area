@@ -11,7 +11,7 @@ import { adminTransition } from "../styles";
 import { IMAGE_SPECS, MAX_SOURCE_FILE_BYTES, aspectRatioOf, describeImageRequirement, describeSourceSizeProblem, type ImageSlot } from "./cover-crop";
 import { ImageCropDialog, type CropSource } from "./image-crop-dialog";
 
-// Campo de imagem (capa 9:13 e imagem de destaque 8:3 do produto; imagens do login 4:5 e 16:9 na
+// Campo de imagem (capa 2:3 e imagem de destaque 8:3 do produto; imagens do login 4:5 e 16:9 na
 // Area de membros): arrastar, escolher, colar um arquivo ou um link. Capa vazia na forma do prototipo:
 // a area tracejada inteira e o botao, com o campo "ou cole o link de uma imagem" embaixo. Arquivo (e link que permite recorte) abre o recorte; link que o navegador nao
 // deixa recortar e usado como esta, com aviso. O valor e um data URL WebP ou um link https.

@@ -9,7 +9,19 @@ const supabaseUrl = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? clean
 const supabasePublicKey =
   cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) ?? cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
 
-const protectedPagePrefixes = ["/", "/admin", "/alterar-senha", "/conteudo", "/favoritos", "/minhas-compras"];
+const protectedPagePrefixes = [
+  "/",
+  "/admin",
+  "/alterar-senha",
+  "/conteudo",
+  "/continue-assistindo",
+  "/favoritos",
+  "/materiais",
+  "/minha-jornada",
+  "/minhas-compras",
+  "/perfil",
+  "/suporte"
+];
 const publicPagePrefixes = ["/login", "/auth/callback"];
 
 function getSupabaseConnectionSources() {

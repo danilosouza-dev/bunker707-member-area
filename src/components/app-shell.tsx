@@ -1,41 +1,32 @@
 "use client";
 
-import {
-  Bell,
-  Bookmark,
-  Compass,
-  FileText,
-  Home,
-  LibraryBig,
-  LifeBuoy,
-  LoaderCircle,
-  LogOut,
-  Menu,
-  PlayCircle,
-  Search,
-  ShieldCheck,
-  Sparkles,
-  Trophy,
-  UserCircle,
-  X
-} from "lucide-react";
+import { ArrowRight, LayoutDashboard, LoaderCircle, Menu, Search, ShieldCheck } from "lucide-react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
+import { DirectorIcon } from "@/components/member/shell/director-parts";
+import { MemberAccountMenu } from "@/components/member/shell/member-account-menu";
+import { MemberNotificationsMenu } from "@/components/member/shell/member-notifications-menu";
+import { getMemberSidebarSections } from "@/components/member/shell/member-shell-model";
+import { MemberSidebar } from "@/components/member/shell/member-sidebar";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { PlatformBrandingProvider } from "@/components/platform-branding";
 import type { PlatformDirectorChat as PlatformDirectorChatComponent } from "@/components/platform-director-chat";
 import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
 import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
 import { signOutAndLeave } from "@/lib/auth/sign-out";
+import { normalizeMemberStyle } from "@/lib/member-style";
+import { cn } from "@/lib/utils";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
-import type { NavigationItem, PlatformBrandingConfig } from "@/lib/platform-types";
+import type { ContentPageHeroCorners, PlatformBrandingConfig } from "@/lib/platform-types";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 
 type AppShellProps = {
   accessPreviewMode?: AccessPreviewMode;
+  /** Cantos do banner desta pagina (Produto > Detalhes): "rounded" recua logo e foto do perfil como no estilo arredondado. */
+  bannerCorners?: ContentPageHeroCorners;
   branding?: PlatformBrandingConfig;
   canUseAccessPreview?: boolean;
   children: React.ReactNode;
@@ -51,16 +42,40 @@ declare global {
   }
 }
 
-const navigationItems = [
-  { label: "Home", href: "/", icon: Home },
-  { label: "Minha jornada", icon: Compass },
-  { label: "Minhas compras", href: "/minhas-compras", icon: LibraryBig },
-  { label: "Favoritos", href: "/favoritos", icon: Bookmark },
-  { label: "Continue assistindo", icon: PlayCircle },
-  { label: "Materiais", icon: FileText },
-  { label: "Suporte", icon: LifeBuoy },
-  { label: "Perfil", icon: UserCircle }
-] satisfies NavigationItem[];
+// Itens da barra lateral e do menu da conta: src/lib/member-navigation.ts (fonte unica), desenhados
+// por MemberSidebar (gaveta por cima da pagina, aberta pelo hamburguer do cabecalho, como no YouTube)
+// e MemberAccountMenu (src/components/member/shell/). Hamburguer e logo ficam sempre no cabecalho; a
+// gaveta repete os dois no mesmo lugar ao abrir.
+const sidebarId = "member-sidebar";
+
+const accessPreviewOptions = [
+  { label: "Sessão atual", value: "current" },
+  { label: "Produtor/admin", value: "producer" },
+  { label: "Aluno com acesso", value: "student_with_access" },
+  { label: "Aluno sem acesso", value: "student_without_access" }
+] as const;
+
+function AccessPreviewSelect({
+  className,
+  label,
+  onChange,
+  value
+}: {
+  className: string;
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <select aria-label={label} className={className} onChange={(event) => onChange(event.target.value)} value={value}>
+      {accessPreviewOptions.map((option) => (
+        <option className="bg-[#141414]" key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 type DirectorLauncherState = "failed" | "idle" | "loading";
 type PlatformDirectorChatProps = ComponentProps<typeof PlatformDirectorChatComponent>;
@@ -86,7 +101,7 @@ function PlatformDirectorLauncher({
           aria-busy={loading}
           aria-expanded={false}
           aria-label={label}
-          className="grid size-14 place-items-center rounded-full border border-white/15 bg-white text-black shadow-[0_18px_55px_rgba(0,0,0,0.62)] transition duration-200 hover:scale-105 hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+          className="grid size-14 place-items-center rounded-full border border-white/15 bg-white text-black shadow-[0_18px_55px_rgba(0,0,0,0.62)] transition duration-200 hover:scale-105 hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white motion-reduce:transition-none motion-reduce:hover:scale-100"
           disabled={loading}
           onClick={onActivate}
           onFocus={onWarmUp}
@@ -96,14 +111,11 @@ function PlatformDirectorLauncher({
           {loading ? (
             <LoaderCircle aria-hidden="true" className="size-5 animate-spin" />
           ) : (
-            <span aria-hidden="true" className="relative inline-grid size-6 place-items-center">
-              <Compass className="h-full w-full" strokeWidth={1.9} />
-              <Sparkles className="absolute -right-1 -top-1 h-2.5 w-2.5 text-[var(--accent)]" strokeWidth={2.2} />
-            </span>
+            <DirectorIcon className="size-6" />
           )}
         </button>
         {!loading ? (
-          <span className="pointer-events-none absolute bottom-[calc(100%+10px)] right-0 translate-y-1 whitespace-nowrap rounded-[5px] bg-[#eeeeee] px-3 py-2 text-xs font-medium text-[#202020] opacity-0 shadow-xl transition group-hover/director:translate-y-0 group-hover/director:opacity-100 group-focus-within/director:translate-y-0 group-focus-within/director:opacity-100 max-sm:hidden" role="tooltip">
+          <span className="pointer-events-none absolute bottom-[calc(100%+10px)] right-0 translate-y-1 whitespace-nowrap rounded-[6px] bg-[#eeeeee] px-3 py-2 text-[13px] font-medium text-[#202020] opacity-0 shadow-xl transition group-hover/director:translate-y-0 group-hover/director:opacity-100 group-focus-within/director:translate-y-0 group-focus-within/director:opacity-100 max-sm:hidden" role="tooltip">
             {state === "failed" ? "Recarregue a página para conversar com a IA Diretor" : "Conversar com a IA Diretor"}
           </span>
         ) : null}
@@ -127,9 +139,23 @@ const PlatformDirectorChat = dynamic(
   }
 );
 
-export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = false, children, student }: AppShellProps) {
+export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAccessPreview = false, children, student }: AppShellProps) {
   const logoImage = branding === undefined ? "/brand/logo-bunker.svg" : branding.logoImage;
+  // Estilo escolhido em Area de membros > Marca: cantos (variaveis CSS no raiz) e posicao do menu.
+  const style = normalizeMemberStyle(branding);
+  // Menu no cabecalho (estilo Netflix): os destinos de "Estudar" viram links escritos no topo a partir de
+  // 1024 px e o hamburguer some nessa largura; abaixo disso ele abre a gaveta como sempre.
+  // Suporte e Perfil ficam no menu da conta, que ja os tem.
+  const menuInHeader = style.menu === "header";
+  // Cantos arredondados: a capa recua 64 px (perto da Netflix); a logo fica nessa linha (hamburguer a
+  // 16 px + 40 px + 8 px, ou o cabecalho recuado 64 px quando os links escritos dispensam o hamburguer) e
+  // o cabecalho recua o mesmo a direita, para a foto do perfil alinhar com a borda da capa. Vale tambem
+  // quando so o banner desta pagina e arredondado (escolha do produto): logo e perfil seguem o banner.
+  const rounded = style.corners === "rounded" || bannerCorners === "rounded";
   const pathname = usePathname();
+  const headerLinks = menuInHeader
+    ? (getMemberSidebarSections(pathname, accessPreviewMode).find((section) => section.id === "estudar")?.items ?? [])
+    : [];
   const router = useNavigationFeedbackRouter();
   const { startNavigation } = useNavigationFeedback();
   const searchParams = useSearchParams();
@@ -140,6 +166,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   const [directorRequested, setDirectorRequested] = useState(false);
   const [directorOpenOnMount, setDirectorOpenOnMount] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     function updateHeaderState() {
@@ -161,9 +188,9 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
   }, [searchOpen]);
 
   const iconButtonChrome = "border-transparent bg-transparent hover:bg-white/10";
-  const profileChrome = "border-transparent bg-black/10 hover:bg-white/10";
   const showPreviewControl = canUseAccessPreview;
   const homeHref = withAccessPreviewParam("/", accessPreviewMode);
+  const closeSidebarMenu = useCallback(() => setSidebarOpen(false), []);
 
   function handleProgressAwareNavigation(event: MouseEvent<HTMLAnchorElement>, href: string, closeSidebar = false) {
     if (
@@ -245,7 +272,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
 
   return (
     <PlatformBrandingProvider branding={branding}>
-    <div className="min-h-screen bg-[#141414] text-white">
+    <div className="min-h-screen bg-[#141414] text-white" data-member-buttons={style.buttons} data-member-corners={style.corners} data-member-menu={style.menu}>
       <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden">
         <div
           aria-hidden="true"
@@ -261,18 +288,22 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             transformOrigin: "top"
           }}
         />
-        <div className="relative flex h-16 items-center gap-4 px-4 sm:px-6">
+        <div className={cn("relative flex h-16 items-center gap-2 px-4", rounded ? "sm:pr-16" : "sm:px-6", rounded && menuInHeader && "lg:pl-16")}>
           <button
+            aria-controls={sidebarId}
+            aria-expanded={sidebarOpen}
+            aria-haspopup="dialog"
             aria-label="Abrir menu"
-            className={`grid h-10 w-10 place-items-center rounded-[6px] border transition ${iconButtonChrome}`}
+            className={cn("grid h-10 w-10 place-items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white", menuInHeader && "lg:hidden", iconButtonChrome)}
             onClick={openSidebar}
+            ref={menuButtonRef}
             type="button"
           >
-            <Menu className="h-5 w-5" />
+            <Menu aria-hidden="true" className="size-6" strokeWidth={1.5} />
           </button>
 
           <Link
-            aria-label="Voltar para a home"
+            aria-label="Ir para o início"
             className="flex min-w-fit items-center rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
             href={homeHref}
             onClick={(event) => handleProgressAwareNavigation(event, homeHref)}
@@ -280,7 +311,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             {logoImage ? (
               <Image
                 alt="Bunker707"
-                className="h-auto max-h-10 w-[150px] object-contain object-left sm:w-[190px]"
+                className="h-auto max-h-10 w-[124px] object-contain object-left sm:w-[150px]"
                 height={35}
                 priority
                 src={logoImage}
@@ -292,22 +323,36 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
             )}
           </Link>
 
+          {menuInHeader ? (
+            <nav aria-label="Navegação principal" className="ml-5 hidden min-w-0 items-center gap-1 lg:flex">
+              {headerLinks.map((item) => (
+                <Link
+                  aria-current={item.active ? "page" : undefined}
+                  className={cn(
+                    "rounded-full px-3 py-2 text-sm whitespace-nowrap transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white motion-reduce:transition-none",
+                    item.active ? "bg-white/[0.12] font-bold text-white" : "font-medium text-zinc-300 hover:text-white"
+                  )}
+                  href={item.href}
+                  key={item.key}
+                  onClick={(event) => handleProgressAwareNavigation(event, item.href)}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
+          ) : null}
+
           <div className={`ml-auto flex min-w-0 items-center gap-2 ${searchOpen ? "max-sm:flex-1" : ""}`}>
             {showPreviewControl ? (
-              <label className={`hidden h-10 items-center gap-2 rounded-[6px] border border-white/10 bg-black/25 px-2 text-xs font-bold text-zinc-300 backdrop-blur transition focus-within:border-white/25 md:flex ${searchOpen ? "max-lg:hidden" : ""}`}>
-                <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                <span className="sr-only">Modo de visualizacao</span>
-                <select
-                  aria-label="Modo de visualizacao"
+              <label className={`hidden h-10 items-center gap-2 rounded-[8px] border border-white/10 bg-black/25 px-2 text-xs font-bold text-zinc-300 backdrop-blur transition focus-within:border-white/25 md:flex ${searchOpen ? "max-lg:hidden" : ""}`}>
+                <ShieldCheck aria-hidden="true" className="h-4 w-4 text-emerald-400" />
+                <span className="sr-only">Modo de visualização</span>
+                <AccessPreviewSelect
                   className="h-8 border-0 bg-transparent text-xs font-bold text-white outline-none"
-                  onChange={(event) => handleAccessPreviewChange(event.target.value)}
+                  label="Modo de visualização"
+                  onChange={handleAccessPreviewChange}
                   value={accessPreviewMode ?? "current"}
-                >
-                  <option className="bg-[#141414]" value="current">Sessao atual</option>
-                  <option className="bg-[#141414]" value="producer">Produtor/admin</option>
-                  <option className="bg-[#141414]" value="student_with_access">Aluno com acesso</option>
-                  <option className="bg-[#141414]" value="student_without_access">Aluno sem acesso</option>
-                </select>
+                />
               </label>
             ) : null}
             <div
@@ -328,7 +373,7 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
               </button>
               <input
                 ref={searchInputRef}
-                aria-label="Pesquisar aulas, cursos, formacoes e bootcamps"
+                aria-label="Pesquisar aulas, cursos, formações e bootcamps"
                 className={`min-w-0 flex-1 border-0 bg-transparent pr-3 text-sm text-white outline-none placeholder:text-zinc-500 transition-opacity duration-200 ${
                   searchOpen ? "opacity-100" : "pointer-events-none opacity-0"
                 }`}
@@ -337,192 +382,66 @@ export function AppShell({ accessPreviewMode, branding, canUseAccessPreview = fa
                     setSearchOpen(false);
                   }
                 }}
-                placeholder="Pesquisar aulas, cursos, formacoes e bootcamps..."
+                placeholder="Pesquisar aulas, cursos, formações e bootcamps..."
               />
             </div>
-            <button
-              className={`grid h-10 w-10 place-items-center rounded-[6px] border transition ${searchOpen ? "max-sm:hidden" : ""} ${iconButtonChrome}`}
-              type="button"
-            >
-              <Trophy className="h-4 w-4" />
-            </button>
-            <button
-              className={`grid h-10 w-10 place-items-center rounded-[6px] border transition ${searchOpen ? "max-sm:hidden" : ""} ${iconButtonChrome}`}
-              type="button"
-            >
-              <Bell className="h-4 w-4" />
-            </button>
-            <button
-              className={`flex h-10 items-center gap-2 rounded-[6px] border px-2 pr-3 transition ${searchOpen ? "max-sm:hidden" : ""} ${profileChrome}`}
-              type="button"
-            >
-              <span className="grid h-7 w-7 place-items-center rounded-full bg-zinc-700 text-xs font-bold">
-                {student.name.slice(0, 1)}
-              </span>
-              <span className="hidden text-sm font-semibold sm:block">{student.name}</span>
-            </button>
+            <MemberNotificationsMenu className={searchOpen ? "max-sm:hidden" : undefined} />
+            <MemberAccountMenu
+              accessPreviewMode={accessPreviewMode}
+              className={searchOpen ? "max-sm:hidden" : undefined}
+              onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
+              onSignOut={() => void handleSignOut()}
+              pathname={pathname}
+              signingOut={signingOut}
+              student={student}
+            />
           </div>
         </div>
       </header>
 
-      <div
-        aria-hidden={!sidebarOpen}
-        className={`fixed inset-0 z-50 transition ${
-          sidebarOpen ? "pointer-events-auto" : "pointer-events-none"
-        }`}
-      >
-          <button
-            aria-label="Fechar menu"
-            className={`absolute inset-0 bg-black/70 backdrop-blur-sm transition duration-300 ${
-              sidebarOpen ? "opacity-100" : "opacity-0"
-            }`}
-            onClick={() => setSidebarOpen(false)}
-            type="button"
-          />
-          <aside
-            className={`relative flex h-full w-[min(380px,92vw)] flex-col border-r border-white/10 bg-[#121212] shadow-2xl shadow-black transition duration-300 ease-out ${
-              sidebarOpen ? "translate-x-0" : "-translate-x-full"
-            }`}
-          >
-            <div className="flex items-center justify-between border-b border-white/10 p-5">
-              <div>
-                <Link
-                  aria-label="Voltar para a home"
-                  className="inline-flex rounded-[6px] transition-opacity hover:opacity-85 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-                  href={homeHref}
-                  onClick={(event) => handleProgressAwareNavigation(event, homeHref, true)}
-                >
-                  {logoImage ? (
-                    <Image
-                      alt="Bunker707"
-                      className="h-auto max-h-12 w-[210px] object-contain object-left"
-                      height={35}
-                      src={logoImage}
-                      unoptimized={!canOptimizeImageSrc(logoImage)}
-                      width={306}
-                    />
-                  ) : (
-                    <span className="text-xl font-black uppercase tracking-wide text-white">Bunker707</span>
-                  )}
-                </Link>
-              </div>
-              <button
-                aria-label="Fechar menu"
-                className="grid h-10 w-10 place-items-center rounded-[6px] bg-white/10 transition hover:bg-white/15"
-                onClick={() => setSidebarOpen(false)}
-                type="button"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="border-b border-white/10 p-5">
-              <div className="flex items-center gap-4">
-                <div className="grid h-14 w-14 place-items-center rounded-full border border-white/15 bg-white/10 text-lg font-bold">
-                  {student.name.slice(0, 1)}
-                </div>
-                <div>
-                  <p className="font-semibold">{student.fullName}</p>
-                </div>
-              </div>
-            </div>
-
-            {showPreviewControl ? (
-              <div className="space-y-4 border-b border-white/10 p-5">
-                <Link
-                  className="flex items-center gap-3 rounded-[8px] border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-bold text-red-100 transition hover:border-red-400/40 hover:bg-red-500/15 hover:text-white"
-                  href="/admin"
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <ShieldCheck className="h-5 w-5" />
-                  Ir para o admin
-                </Link>
-                <label className="grid gap-2 text-sm font-semibold text-zinc-300">
-                  <span className="flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                    Modo de visualizacao
-                  </span>
-                  <select
-                    aria-label="Modo de visualizacao no menu"
-                    className="h-11 rounded-[8px] border border-white/10 bg-black/30 px-3 text-sm font-bold text-white outline-none transition focus:border-white/25"
-                    onChange={(event) => handleAccessPreviewChange(event.target.value)}
-                    value={accessPreviewMode ?? "current"}
-                  >
-                    <option className="bg-[#141414]" value="current">Sessao atual</option>
-                    <option className="bg-[#141414]" value="producer">Produtor/admin</option>
-                    <option className="bg-[#141414]" value="student_with_access">Aluno com acesso</option>
-                    <option className="bg-[#141414]" value="student_without_access">Aluno sem acesso</option>
-                  </select>
-                </label>
-              </div>
-            ) : null}
-
-            <nav className="flex-1 overflow-y-auto p-3">
-              {navigationItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = item.href === "/"
-                  ? pathname === "/"
-                  : item.href
-                    ? pathname.startsWith(item.href)
-                    : false;
-                const itemClassName = `mb-1 flex w-full items-center gap-3 rounded-[8px] px-4 py-3 text-left text-sm font-semibold transition ${
-                  isActive
-                    ? "bg-[var(--accent)] text-white"
-                    : item.href
-                      ? "text-zinc-300 hover:bg-white/10 hover:text-white"
-                      : "cursor-default text-zinc-500"
-                }`;
-
-                if (item.href) {
-                  const itemHref = withAccessPreviewParam(item.href, accessPreviewMode);
-
-                  return (
-                    <Link
-                      className={itemClassName}
-                      href={itemHref}
-                      key={item.label}
-                      onClick={(event) => handleProgressAwareNavigation(event, itemHref, true)}
-                    >
-                      <Icon className="h-5 w-5" />
-                      {item.label}
-                    </Link>
-                  );
-                }
-
-                return (
-                  <button
-                    className={itemClassName}
-                    disabled
-                    key={item.label}
-                    type="button"
-                  >
-                    <Icon className="h-5 w-5" />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </nav>
-
-            <div className="border-t border-white/10 p-5">
-
-              <button
-                className="flex w-full items-center gap-3 rounded-[8px] px-4 py-3 text-sm font-semibold text-zinc-300 transition hover:bg-white/10 hover:text-white"
-                disabled={signingOut}
-                onClick={() => void handleSignOut()}
-                type="button"
-              >
-                <LogOut className="h-5 w-5" />
-                {signingOut ? "Saindo..." : "Sair"}
-              </button>
-            </div>
-          </aside>
-        </div>
+      <MemberSidebar
+        accessPreviewMode={accessPreviewMode}
+        homeHref={homeHref}
+        id={sidebarId}
+        logoImage={logoImage}
+        onClose={closeSidebarMenu}
+        onNavigate={(event, href) => handleProgressAwareNavigation(event, href, true)}
+        open={sidebarOpen}
+        pathname={pathname}
+        producerPanel={showPreviewControl ? (
+          <section aria-label="Área do produtor" className="rounded-[14px] border border-white/[0.08] bg-white/[0.03] p-3">
+            <p className="flex items-center gap-2 px-1 text-xs font-semibold text-zinc-400">
+              <ShieldCheck aria-hidden="true" className="size-4 text-emerald-400" />
+              Área do produtor
+            </p>
+            <Link
+              className="group/admin mt-3 flex h-10 items-center gap-2.5 rounded-[10px] border border-red-500/25 bg-red-500/10 px-3 text-sm font-semibold text-red-100 outline-none transition-colors hover:border-red-400/45 hover:bg-red-500/15 hover:text-white focus-visible:ring-2 focus-visible:ring-white/80"
+              href="/admin"
+              onClick={(event) => handleProgressAwareNavigation(event, "/admin", true)}
+            >
+              <LayoutDashboard aria-hidden="true" className="size-4 shrink-0" />
+              <span className="flex-1">Ir para o admin</span>
+              <ArrowRight aria-hidden="true" className="size-4 shrink-0 transition-transform group-hover/admin:translate-x-0.5 motion-reduce:transition-none" />
+            </Link>
+            <label className="mt-3 grid gap-1.5 px-1 text-xs font-semibold text-zinc-400">
+              Modo de visualização
+              <AccessPreviewSelect
+                className="h-10 w-full rounded-[10px] border border-white/10 bg-black/30 px-2.5 text-sm font-semibold text-white outline-none transition focus:border-white/30"
+                label="Modo de visualização no menu"
+                onChange={handleAccessPreviewChange}
+                value={accessPreviewMode ?? "current"}
+              />
+            </label>
+          </section>
+        ) : null}
+        returnFocusRef={menuButtonRef}
+      />
 
       <main>{children}</main>
 
       {!sidebarOpen ? (
         directorRequested ? (
-          <PlatformDirectorChat defaultOpen={directorOpenOnMount} onNavigate={handleDirectorNavigation} />
+          <PlatformDirectorChat defaultOpen={directorOpenOnMount} onNavigate={handleDirectorNavigation} studentName={student.name} />
         ) : (
           <PlatformDirectorLauncher onActivate={activateDirectorChat} onWarmUp={warmUpDirectorChat} />
         )

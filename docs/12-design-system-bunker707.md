@@ -188,7 +188,7 @@ Comportamento:
 - A lista de comentarios deve parecer conversa/thread, nao uma pilha de cards.
 - Cada comentario usa avatar circular ou foto de perfil, nome, tempo relativo e texto em fluxo livre, com separadores discretos entre itens.
 - Avatares usam cor solida ou foto, sem degrade decorativo; icones/emoji devem preencher bem o circulo, e o indicador de presenca fica na intersecao inferior direita do avatar, com borda na cor do fundo da pagina e sem brilho/esfumacado. Online usa ponto verde; offline usa ponto cinza com centro na cor do fundo.
-- O selo `Professor` aparece ao lado do nome quando a resposta vier de professor/equipe.
+- Toda pessoa tem etiqueta de funcao ao lado do nome, com `MemberRoleBadge`: `Professor` (vermelho, chapeu de formatura), `Moderador` (neutro, escudo) e `Aluno` (contorno discreto). Vale para comentario e resposta.
 - Respostas aparecem indentadas dentro do comentario principal, com recuo e divisor vertical discreto para deixar clara a hierarquia da conversa.
 - Todo comentario e resposta deve ter acao `Responder`; ao clicar, o composer entra em modo resposta e preenche automaticamente `@nickname` da pessoa respondida.
 - O composer em modo resposta deve mostrar uma faixa de contexto com a mencao ativa e opcao de cancelar antes do envio.
@@ -198,13 +198,38 @@ Comportamento:
 - O menu de tres pontos deve oferecer denuncia de comentario para moderacao.
 - Menus de reacao e denuncia devem fechar ao clicar fora deles.
 - O composer de novo comentario deve ser diferente dos comentarios publicados: caixa propria de digitacao, textarea evidente e botao de envio alinhado dentro do bloco.
+- O composer fica no topo da aba (`src/components/lesson/lesson-comment-composer.tsx`): cartao proprio com avatar do aluno, campo que cresce ate 240 px, placeholder `Compartilhe uma dúvida ou insight sobre a aula`, faixa `Respondendo a @usuario` com cancelar, contador a partir de 1.800 de 2.000 caracteres, dica de `Ctrl/⌘ + Enter` e botao primario `Publicar`/`Responder` com `Enviando...`. Aula bloqueada: campo desabilitado com cadeado e o motivo.
+
+## Aviso de liberacao da aula
+
+- Sobre o video (`src/components/lesson/lesson-release-overlay.tsx`): cadeado, titulo `Esta aula será liberada`, a data em destaque (`Liberação em 08/01/2026`, `Liberação em 08/01/2026 às 14:00` ou `Liberação hoje às 14:00`) e a linha discreta `Conta a partir da data da sua compra.`. Quando a data passa com a pagina aberta, o titulo vira `Esta aula já foi liberada` e aparece `Atualizar agora`.
+- Na playlist e nos cards, o selo curto e ambar: `Liberação em 08/01`, `Hoje às 14:00` ou `Após a aula anterior`; a frase completa vai no nome acessivel.
+- Datas sempre no fuso de Sao Paulo, iguais no servidor e no navegador. So o texto com `hoje` depende do relogio e usa `suppressHydrationWarning`.
+
+## Aba Materiais da aula
+
+- Painel `src/components/lesson/lesson-materials-panel.tsx` com linhas `MemberMaterialRow`, em dois grupos: `Disponíveis` e `Para liberar` (motivo em ambar, visivel tambem no celular, e o que fazer para liberar).
+- Cabecalho curto com a contagem real; o numero da aba so aparece depois de carregar.
+- Estados: esqueleto de 3 linhas, vazio compacto (`Esta aula ainda não tem materiais` / `Quando o professor publicar arquivos de apoio, eles aparecem aqui.`) e erro com `Tentar de novo`.
+
+## Tutor IA da aula
+
+- Cabecalho do painel: icone do Tutor em circulo, `Tutor IA`, apoio `Responde com base nesta aula` e ponto de disponibilidade (verde disponivel, cinza indisponivel); acoes Historico e Novo chat a direita.
+- Historico recolhivel: trilho a esquerda no computador (>= 1024 px) e folha sobre o painel no celular. Cada item tem titulo, data relativa e menu de tres pontos (Renomear/Excluir).
+- Chat vazio: saudacao curta e quatro sugestoes em grade 2x2, com icone e frase completa; clicar preenche o campo.
+- Mensagens: aluno em balao a direita; Tutor sem balao, com avatar, Markdown contido e marcadores `[MM:SS]` como chips clicaveis; `Pensando sobre a aula...` com animacao discreta que respeita menos movimento.
+- Composer em pilula: campo que cresce ate 6 linhas, botao circular de enviar, dica de `Enter`/`Shift+Enter`, contador perto do limite de 4.000 caracteres e aviso de indisponivel dentro da pilula.
 
 ## Cards
 
 - Cards de conteudo devem ser verticais na home.
 - Fileiras de cards verticais da home devem usar gap de 12px entre cards.
 - Hover pode ampliar e elevar o card, mantendo cantos arredondados. Na home, o card vertical deve ampliar por escala externa sem zoom interno adicional da imagem.
+- Progresso no hover dos cards de produto (cursos, formacoes etc.): um anel no canto superior direito (`ProgressRing`, `src/components/member/progress-ring.tsx`) que aparece com o texto e se preenche ate a porcentagem; concluido vira anel verde com check. Diferente, de proposito, da barra horizontal dos cards de modulo (home e pagina do curso), para o aluno nao confundir produto com modulo. So aparece para quem tem acesso e ja comecou (progresso > 0). O progresso do item na home e o do aluno, calculado no servidor com a mesma conta do modal (`src/lib/course-progress.ts`: media dos modulos; `content_items.progress` so vale sem modulos).
+- Botoes redondos do hover (salvar e detalhes): circulo fino (1,5 px). Salvo nos favoritos (`SavedItemButton`): o circulo engrossa para 2,5 px e o marcador fica preenchido de branco; nao salvo, marcador vazado. Sem cor nem selo de check: verde com check fica so para "concluido" (anel de progresso), para as duas informacoes nao se confundirem no mesmo card (14/10/2026).
+- Largura dos cards: fluida, fracao da fileira por largura de tela (ver "Estilo escolhido pelo produtor"), como as thumbs de Shorts do YouTube; nenhum card de fileira fixa largura em rem.
 - Cards verticais expansivos da home devem crescer para dentro somente quando estiverem nas bordas visíveis do carrossel: o primeiro da esquerda preserva a borda esquerda e expande para a direita; o último da direita preserva a borda direita e expande para a esquerda. Os cards internos mantem escala central normal.
+- Texto e botoes do hover (`.home-cover-card-content`) aparecem com a mesma transicao da escala do card, sem atraso (`transition-delay`), e ficam numa camada propria onde ha hover (`will-change`). Com atraso, o Chrome criava a camada do texto no meio da escala e re-rasterizava titulo, descricao e botao varias vezes no fim da animacao: as fontes "piscavam" (medido quadro a quadro em 13/10/2026). Qualquer nova transicao dentro do card deve comecar junto com a escala.
 - Quando o hover traz para dentro um card parcialmente visivel em qualquer borda, o card adjacente externo deve deslizar temporariamente para o trecho liberado no canto e sinalizar a continuidade do carrossel: o proximo card na direita e o card anterior na esquerda durante a volta. Ambos retornam às posicoes originais ao encerrar o hover.
 - Carrosseis com overflow usam setas grandes diretamente sobre as bordas esquerda/direita dos cards, apoiadas por fades escuros limitados à altura visual das capas e dissolvidos sobre o conteudo; o fade exclui o padding vertical usado pelo hover expansivo e o botao da seta nao cria um bloco quadrado separado. No hover/foco, a faixa inteira escurece e se expande discretamente, enquanto a seta aumenta e se desloca na direcao da navegacao para produzir feedback inequivoco. Nao usar o par de botoes circulares no cabecalho da secao. A direcao sem conteudo restante fica oculta.
 - O cabecalho da fileira pode mostrar, alinhado à direita, um indicador de paginas composto por segmentos horizontais pequenos; o segmento ativo usa `zinc-200`, os demais `zinc-600`, e o estado acompanha o scroll real da fileira.
@@ -215,6 +240,44 @@ Comportamento:
 - Cards de cursos internos dentro de formacoes e cards de modulos dentro de cursos podem compartilhar o mesmo poster vertical.
 - A diferenca atual e funcional: modulos mostram progresso no hover; cursos internos dentro de formacoes nao mostram barra de progresso nem botao `Acessar`.
 - O CMS futuro pode permitir tags/selo por card para indicar `Curso`, `Modulo`, `Bonus`, `Projeto` ou outro texto configurado pelo produtor.
+
+## Base visual das paginas do aluno (aluno v2)
+
+As paginas internas do aluno (Minhas compras, Favoritos, Minha jornada, Continue assistindo, Materiais, Suporte, Perfil), a aba Materiais da aula e a etiqueta de funcao dos comentarios usam as pecas de `src/components/member/ui/`. Elas funcionam no servidor (sem `"use client"` e sem estado proprio); filtros e busca que recebem `onChange` so entram dentro de componente de cliente.
+
+- `MemberPage` + `MemberPageHeader` + `MemberSection` (`member-page.tsx`): respiro lateral de 16 px no celular, 32 px no tablet e 48 px no computador; titulo de pagina 28-40 px `font-black`; rotulo pequeno acima do titulo com icone vermelho; acoes a direita no computador. Larguras `wide` (grades), `default` (listas) e `narrow` (leitura).
+- `MemberPosterCard` (`member-poster-card.tsx`): card vertical 2:3 para produtos. A capa fica limpa (etiqueta no canto e progresso na borda inferior); titulo, detalhes e "Continuar..." ficam abaixo da capa. Acao extra (ex.: remover dos favoritos) fica fora do link, no canto superior direito. Grade: `memberPosterGridClassName` (2 colunas no celular ate 6 no computador grande, espaco de 12-16 px).
+- `MemberLessonCard` (`member-lesson-card.tsx`): aula em 16:9 com zoom minimo, play no centro no hover, barra de progresso na borda e selo de tempo ("faltam 12min"). Aula bloqueada pela liberacao mostra cadeado e a frase de liberacao, sem play.
+- `MemberMaterialRow` (`member-material-row.tsx`): material de apoio em linha (icone pelo tipo, titulo, tipo, tamanho, "Gerado com IA"). Liberado abre em nova aba (`rel="noopener noreferrer"`); bloqueado pela regra do material mostra o motivo em ambar, visivel sem hover, e nao tem link.
+- `MemberChip` e `MemberRoleBadge` (`member-chip.tsx`): etiquetas curtas. Tons: neutro, contorno, vermelho (destaque), verde (concluido), ambar (liberacao/bloqueio), branco (tipo sobre a capa). Funcao de quem comenta: `Professor` (vermelho, chapeu de formatura), `Moderador` (neutro, escudo) e `Aluno` (contorno discreto).
+- `MemberStat`/`MemberStatGrid`: numeros reais do aluno no topo (2 colunas no celular, 4 no computador). Sem dado real, o numero nao aparece.
+- `MemberFilterPills` (filtros na mesma tela, `aria-pressed`, rolam na horizontal no celular), `MemberTabNav` (abas que trocam o endereco, sublinhado vermelho, `aria-current`) e `MemberSearchField` (busca com limpar e `Esc`).
+- `MemberEmptyState`: estado vazio honesto (o que falta e o proximo passo real), borda tracejada discreta; variante compacta para abas.
+- `MemberButton`/`MemberButtonLink`/`memberButtonClassName`: primario claro (branco, texto preto), secundario translucido, fantasma, vermelho da marca e perigo; alturas 36, 40 e 48 px.
+- `MemberAvatar`: foto ou iniciais sobre cor solida derivada do nome.
+- `MemberProgressBar`: trilho fino; vermelho em andamento, verde em 100%.
+- Esqueletos (`member-skeletons.tsx`): todo `loading.tsx` de pagina do aluno desenha a forma final (barra do topo de 64 px, cabecalho, grade ou lista) com `motion-safe:animate-pulse`, sem o marcador do loading global, para o spinner sumir assim que o endereco muda.
+
+Datas mostradas ao aluno usam `src/lib/member-format.ts` (fuso America/Sao_Paulo, "08/01/2026", "08/01/2026 às 14:30", "há 2 dias"). Rotas e itens da barra lateral vem de `src/lib/member-navigation.ts`.
+
+## Estilo escolhido pelo produtor (Marca > Estilo)
+
+- Gravado em `platform_settings.branding.style` (`src/lib/member-style.ts`): `corners` (`soft` | `rounded`), `buttons` (`soft` | `pill`) e `menu` (`sidebar` | `header`). Padrao: discreto, botoes discretos, menu na barra lateral. A capa da pagina do curso segue os mesmos cantos e recuo do destaque da home, salvo escolha do proprio produto (Detalhes > Cantos do banner: como a area, arredondados ou retos; gravada em `content_page_settings.settings.hero.corners`, atributo `data-member-banner` no raiz da pagina). Com o banner arredondado so no produto, a pagina do curso inteira acompanha: o cabecalho recua 64 px (logo e foto do perfil na linha do banner, via prop `bannerCorners` do `AppShell`) e as fileiras usam o mesmo recuo (`--member-row-inset`).
+- Tamanho dos cards: fluido, como as thumbs de Shorts do YouTube. A largura e uma fracao da fileira (`.member-row-card`, `--member-row-cols` por largura de tela: 2,2 no celular, 3 a partir de 640 px, 4 de 768, 5 de 1280, 6 de 1700, 7 de 2100 e 8 de 2560; cards de 16:9 em `--member-row-cols-wide`), nos dois estilos de cantos, entao os cards crescem com a janela (227 a 311 px entre 1280 e 1699 px; 294 px em 1920). Nao ha tamanho por produto: a thumbnail do card e uma so (2:3, WebP ate 720 x 1080, imagem a partir de 284 x 426, sem ampliar).
+- Altura do destaque da home: `--member-hero-min-h` (680 px; no arredondado `clamp(520px, 100vh - 256px, 680px)`, para o titulo da primeira fileira e o topo dos cards aparecerem antes da dobra em telas curtas, ja que no arredondado a fileira comeca depois do destaque e no discreto ela sobe por cima dele).
+- Modal de detalhes: abrir um modulo troca a grade pela lista de aulas no lugar, sem fade, deslocamento nem rolagem suave (pareciam uma tremida); o modal so pula, de uma vez, quando o titulo da secao ja saiu por cima.
+- Luz de fundo do destaque (`HeroGlow`, `src/components/member/hero-glow.tsx`): a cor media da imagem do destaque (ou da capa do video), com a saturacao reforcada, ou a cor escolhida em Area de membros > Destaque > Luz de fundo (cores prontas ou qualquer cor; `platform_settings.hero.glowColor`, #rrggbb, ausente = automatica), vira um degrade do topo da pagina ate o `#141414` (`.member-hero-glow`, `--member-hero-accent`), como na Netflix. Medida no navegador com uma versao pequena da imagem. Forte do meio do destaque para cima, enfraquece dali para baixo e esfumaca 72 px alem da base do banner (`--member-hero-glow-extend`, so no arredondado), sem chegar nos cards da primeira fileira, como na Netflix (intensidade calibrada pelo print dela: mistura maxima de 26% da cor no cinza, ~45 niveis acima do #141414 no topo); no discreto a imagem cobre o destaque e a luz nao aparece.
+- Cantos e botoes entram pelos atributos `data-member-corners` e `data-member-buttons` no raiz do `AppShell`; `globals.css` define por atributo as variaveis `--member-cover-radius` (10/16 px), `--member-button-radius` (8 px/pilula) e, para o destaque arredondado, `--member-hero-radius`, `--member-hero-inset` (12 px; 64 px a partir de 640 px, alinhado com a logo; com os links no cabecalho e sem hamburguer, o cabecalho recua 64 px dos dois lados), `--member-hero-top`, `--member-hero-fade` (sem o esfumacado inferior) e `--member-hero-overlap` (a primeira fileira nao sobrepoe). As fileiras usam `--member-row-inset` (20/32/48 px; no arredondado 12 px e 64 px a partir de 640 px, na linha da capa) e, no arredondado, os cards (`member-row-card` 2:3, `member-row-card-wide` 16:9) tem largura calculada para caber um numero inteiro entre as bordas (`--member-row-cols`, 3 a 8 por largura de tela), com rolagem encaixada no inicio do card (`member-row-scroller`), como na Netflix. `MemberButton`, o botao do destaque, `MemberPosterCard`, `MemberLessonCard` e o card de continuar assistindo usam essas variaveis; os padroes ficam em `globals.css` (`:root`), entao a previa do admin desenha o modo discreto.
+- Menu no cabecalho (estilo Netflix): a partir de 1024 px os destinos de `Estudar` viram links escritos ao lado da logo (ativo em pilula `white/[0.12]` e negrito) e o hamburguer some; abaixo disso o hamburguer abre a gaveta. Suporte e Perfil ficam no menu da conta.
+
+## Barra lateral e menu da conta (aluno)
+
+- Atualizacao 13/10/2026 (pedido do produtor, referencia "sidebar do YouTube", sempre escuro, sem troca de tema): o cabecalho mostra sempre hamburguer (40 px, redondo) + logo inteira, em todas as larguras; nao ha trilho de icones nem recuo do conteudo. No modo de cantos arredondados a capa do destaque recua 64 px a partir de 640 px (perto da Netflix) e a logo fica nessa linha (hamburguer a 16 px + 40 px + 8 px); o cabecalho recua o mesmo a direita, para a foto do perfil alinhar. O trilho de icones de 72/80 px desta mesma data foi descartado pelo produtor.
+- Gaveta `src/components/member/shell/member-sidebar.tsx`: abre por cima da pagina com veu escuro, em todas as larguras; largura `min(300px, 86vw)`, altura total, hamburguer que fecha + logo inteira no topo, grupos `Estudar` e `Conta e ajuda` separados so por uma linha (o nome do grupo fica para o leitor de tela).
+- Item com 48 px de altura, texto 15 px e icone Lucide proprio de 24 px com traco 1,5 (Inicio `House`, Minha jornada `Route`, Continue assistindo `CirclePlay`, Minhas compras `LibraryBig`, Favoritos `Bookmark`, Materiais `FolderOpen`, Suporte `LifeBuoy`, Perfil `CircleUser`; a `Compass` e so da IA Diretor). Normal em peso regular `zinc-300`, hover `white/[0.06]`; ativo com fundo `white/[0.1]`, texto branco em negrito e icone preenchido a 18 %. Sem barra nem icone vermelho (decisao de 13/10/2026: o vermelho fica para a marca e para "ao vivo"); foco visivel.
+- Sem rodape de conta: perfil e `Sair` ficam so no menu da conta do topo. Produtor/admin ve no topo da gaveta o cartao `Área do produtor` com `Ir para o admin` e `Modo de visualização`.
+- Menu da conta no avatar do topo (`member-account-menu.tsx`, so o avatar, sem nome nem seta, como no YouTube; o nome aparece no painel): `Perfil`, `Minhas compras`, `Suporte` e `Sair`; fecha ao clicar fora, com `Esc` ou ao perder o foco; setas percorrem os itens.
+- Topo, a direita: busca, sino de lembretes (`member-notifications-menu.tsx`) e conta. Ate o modulo Comunicacao (docs/17, fase 5) entregar avisos, webinarios e promocoes, o sino abre "Nenhum lembrete por enquanto" com o que vai aparecer ali; nunca lembrete ou contador inventado. Sem trofeu ate existirem conquistas reais.
 
 ## Modal de detalhes
 
@@ -297,11 +360,13 @@ Regras:
 ### Chat flutuante da IA Diretor
 
 - O launcher usa `Compass` com uma pequena `Sparkles`, mede entre 52 e 56 px e fica no canto inferior direito sem cobrir controles centrais da pagina.
-- No desktop, o painel fica ancorado acima do launcher, com 400-420 px de largura, altura limitada ao viewport, superficie `--panel`, borda discreta, raio de 12 px e sombra forte. Nao usa backdrop nem transforma a pagina em modal.
+- No desktop, o painel fica ancorado acima do launcher, com 420 px de largura, altura limitada ao viewport, superficie `--panel`, borda discreta, raio de 16 px e sombra forte. Nao usa backdrop nem transforma a pagina em modal.
 - No celular, o painel ocupa `100dvh`, respeita safe areas e mantem cabecalho, mensagens e composer operaveis com o teclado aberto.
-- O cabecalho usa `IA Diretor` e o apoio `Orientação sobre seus cursos e trilhas`, com acoes iconograficas para historico, novo chat e fechar.
-- O historico substitui temporariamente a area da conversa dentro do proprio painel. Cada item usa titulo truncado, data e menu compacto para renomear ou excluir, sem duas colunas apertadas.
-- Respostas usam tipografia regular, Markdown contido e cards compactos para referencias autorizadas. Cada card mostra tipo, titulo, breadcrumb e `Abrir`; links livres do texto nunca recebem confianca automatica.
+- O cabecalho usa a marca da Diretora (`Compass` + estrela) em circulo, `IA Diretor`, o apoio `Orientação sobre seus cursos e trilhas` e um ponto verde ou cinza de disponibilidade, com acoes iconograficas (e dica propria) para historico, novo chat e fechar.
+- A entrada cumprimenta pelo primeiro nome (`Olá, Ana`), repete `Encontre aulas, descubra o que estudar e organize seu próximo passo.` e mostra tres sugestoes como cartoes com icone. Indisponivel: o motivo ocupa o lugar das sugestoes.
+- O historico substitui temporariamente a area da conversa dentro do proprio painel, agrupado em `Hoje`, `Ontem`, `Últimos 7 dias`, `Últimos 30 dias` e `Mais antigas` (fuso de Sao Paulo). Cada item usa titulo truncado, data relativa com quantidade de mensagens (`há 2 horas · 6 mensagens`) e menu compacto para renomear ou excluir, sem duas colunas apertadas.
+- Pergunta do aluno em balao; resposta da Diretora sem balao, com avatar, tipografia regular, Markdown contido e cards compactos para referencias autorizadas. Cada card mostra tipo, titulo, breadcrumb e `Abrir`; links livres do texto nunca recebem confianca automatica.
+- Composer em pilula: campo que cresce ate 6 linhas, `Enter` envia, botao circular, contador a partir de 3.600 de 4.000 caracteres e `Carregando a IA Diretor...` enquanto carrega.
 - A camada global fica acima de cards e carrosseis, mas abaixo de modais centrais. Abrir a sidebar principal fecha o chat para evitar duas superficies concorrentes.
 - O desktop restaura o foco no launcher ao fechar; `Escape` fecha historico, dialogos internos ou painel na ordem correta. Nomes acessiveis e foco visivel sao obrigatorios.
 

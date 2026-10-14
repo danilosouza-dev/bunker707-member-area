@@ -7,6 +7,7 @@ import { withAccessPreviewParam } from "@/lib/access-preview";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
 import type { HomeRow } from "@/lib/platform-types";
+import { getReleaseRuleNotice } from "@/lib/release-rules";
 
 type FeaturedStructureHomeSectionProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -54,25 +55,37 @@ export function FeaturedStructureHomeSection({ accessPreviewMode, row }: Feature
   const actionLabel = course.isLocked ? course.purchaseLabel ?? "Comprar" : "Acessar";
   const ActionIcon = course.isLocked ? ShoppingCart : Play;
   const backgroundImage = row.backgroundImage ?? course.image;
+  // Liberacao com a data real do aluno (estado calculado no servidor).
+  const courseReleaseNotice = getReleaseRuleNotice(course.releaseRule, course.kind.toLowerCase(), course.releaseState);
   const cards = structureItems.length > 0
-    ? structureItems.map((item) => ({
-      href: withAccessPreviewParam(`/conteudo/${item.id}`, accessPreviewMode),
-      id: item.id,
-      image: item.image,
-      isLocked: Boolean(course.isLocked || item.isLocked),
-      meta: item.lessons ?? item.kind,
-      title: item.title
-    }))
-    : modules.map((module) => ({
-      href: course.isLocked
-        ? courseHref
-        : withAccessPreviewParam(`/conteudo/${course.id}/aulas/${module.id}`, accessPreviewMode),
-      id: module.id,
-      image: module.image,
-      isLocked: Boolean(course.isLocked),
-      meta: module.meta,
-      title: module.title
-    }));
+    ? structureItems.map((item) => {
+      const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase(), item.releaseState);
+
+      return {
+        href: withAccessPreviewParam(`/conteudo/${item.id}`, accessPreviewMode),
+        id: item.id,
+        image: item.image,
+        isLocked: Boolean(course.isLocked || item.isLocked || releaseNotice?.isLocked),
+        meta: item.lessons ?? item.kind,
+        releaseLabel: course.isLocked || item.isLocked ? undefined : releaseNotice?.shortLabel,
+        title: item.title
+      };
+    })
+    : modules.map((module) => {
+      const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo", module.releaseState) ?? courseReleaseNotice;
+
+      return {
+        href: course.isLocked
+          ? courseHref
+          : withAccessPreviewParam(`/conteudo/${course.id}/aulas/${module.id}`, accessPreviewMode),
+        id: module.id,
+        image: module.image,
+        isLocked: Boolean(course.isLocked || releaseNotice?.isLocked),
+        meta: module.meta,
+        releaseLabel: course.isLocked ? undefined : releaseNotice?.shortLabel,
+        title: module.title
+      };
+    });
 
   return (
     <section
@@ -113,6 +126,14 @@ export function FeaturedStructureHomeSection({ accessPreviewMode, row }: Feature
                 <div className="absolute inset-0 bg-gradient-to-t from-black via-black/25 to-transparent" />
                 {card.isLocked ? <span className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-black/70 text-white"><Lock className="h-4 w-4" /></span> : null}
                 <div className="absolute inset-x-0 bottom-0 p-4">
+                  {card.releaseLabel ? (
+                    <p
+                      className="mb-2 inline-flex max-w-full rounded-full border border-amber-400/25 bg-black/70 px-2.5 py-1 text-[11px] font-semibold leading-none text-amber-100"
+                      suppressHydrationWarning
+                    >
+                      <span className="truncate">{card.releaseLabel}</span>
+                    </p>
+                  ) : null}
                   <p className="text-[10px] font-black uppercase tracking-[0.16em] text-zinc-300">{card.meta}</p>
                   <h3 className="mt-2 line-clamp-2 text-base font-black leading-tight text-white">{card.title}</h3>
                 </div>

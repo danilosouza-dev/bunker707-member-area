@@ -1,13 +1,14 @@
 "use client";
 
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Check } from "lucide-react";
+import { useId } from "react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { adminInputClass, adminTextareaClass } from "../../form";
 import { adminTransition } from "../../styles";
 
-// Pecas pequenas do editor do destaque: a chave "Mostrar" ao lado de cada texto e o campo de texto
-// com contador. Mesmo visual dos campos do admin (AdminField), com o contador junto da ajuda.
+// Pecas pequenas do editor do destaque: a chave "Mostrar" ao lado de cada texto, o campo de texto
+// com contador e o seletor da cor da luz de fundo. Mesmo visual dos campos do admin (AdminField).
 
 type ShowSwitchProps = {
   checked: boolean;
@@ -145,6 +146,73 @@ export function HeroTextField({
           {length} de {max}
         </span>
       </div>
+    </div>
+  );
+}
+
+/** Cores prontas da luz de fundo (a primeira e o vermelho da marca). */
+export const GLOW_COLOR_PRESETS: ReadonlyArray<{ label: string; value: string }> = [
+  { label: "Vermelho", value: "#e50914" },
+  { label: "Laranja", value: "#f97316" },
+  { label: "Âmbar", value: "#f59e0b" },
+  { label: "Verde", value: "#22c55e" },
+  { label: "Azul", value: "#3b82f6" },
+  { label: "Roxo", value: "#a855f7" },
+  { label: "Rosa", value: "#ec4899" },
+  { label: "Cinza", value: "#9ca3af" }
+];
+
+type GlowColorPickerProps = {
+  color: string;
+  disabled?: boolean;
+  onChange: (color: string) => void;
+};
+
+/** Cor da luz de fundo: cores prontas em bolinhas e o seletor de cor do navegador (qualquer cor). */
+export function GlowColorPicker({ color, disabled = false, onChange }: GlowColorPickerProps) {
+  const inputId = useId();
+  const current = color.toLowerCase();
+
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <div aria-label="Cores prontas" className="flex flex-wrap gap-2" role="group">
+        {GLOW_COLOR_PRESETS.map((preset) => {
+          const selected = preset.value === current;
+
+          return (
+            <button
+              aria-label={preset.label}
+              aria-pressed={selected}
+              className={cn(
+                "grid size-9 place-items-center rounded-full border-2 text-white outline-none hover:scale-105 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-60",
+                adminTransition,
+                selected ? "border-white" : "border-transparent"
+              )}
+              disabled={disabled}
+              key={preset.value}
+              onClick={() => onChange(preset.value)}
+              style={{ backgroundColor: preset.value }}
+              title={preset.label}
+              type="button"
+            >
+              {selected ? <Check aria-hidden="true" className="size-4 drop-shadow" strokeWidth={3} /> : null}
+            </button>
+          );
+        })}
+      </div>
+      <label className="flex min-w-0 items-center gap-3 text-[13px] leading-5 text-[var(--text-secondary)]" htmlFor={inputId}>
+        <input
+          className="h-9 w-12 shrink-0 cursor-pointer rounded-[6px] border border-white/10 bg-transparent p-0.5 disabled:cursor-not-allowed"
+          disabled={disabled}
+          id={inputId}
+          onChange={(event) => onChange(event.target.value)}
+          type="color"
+          value={current}
+        />
+        <span>
+          Ou escolha qualquer cor: <span className="font-mono text-[var(--text-primary)]">{current}</span>
+        </span>
+      </label>
     </div>
   );
 }

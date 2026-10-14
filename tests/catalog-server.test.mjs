@@ -15,7 +15,12 @@ const schemas = await import("../src/server/catalog/schemas.ts");
 const { toActionError } = await import("../src/lib/action-result.ts");
 
 // Primeiros 32 bytes de arquivos WebP reais (gerados com libwebp): o leitor so precisa do cabecalho.
+const VP8_LOSSY_720x1080 = "524946464806000057454250565038203c060000d0a2009d012ad00238043ed1";
+/** Medida antiga da capa (9:13): fora da proporcao 2:3, o servidor recusa. */
 const VP8_LOSSY_720x1040 = "524946464806000057454250565038203c060000d0a2009d012ad00210043ed1";
+/** Capa pequena na proporcao 2:3: o cliente nao amplia, o servidor aceita. */
+const VP8_LOSSY_284x426 = "524946464806000057454250565038203c060000d0a2009d012a1c01aa013ed1";
+const VP8_LOSSY_200x300 = "524946464806000057454250565038203c060000d0a2009d012ac8002c013ed1";
 const VP8L_LOSSLESS_5x7 = "524946461e000000574542505650384c110000002f0480010007508f2217a5ff";
 const VP8X_EXTENDED_1920x720 = "52494646380a000057454250565038580a000000100000007f0700cf0200414c";
 
@@ -32,7 +37,8 @@ function dataUrlFromHex(hex) {
  * ---------------------------------------------------------------------------------------------- */
 
 test("readWebpDimensions le os tres formatos do container WebP", () => {
-  assert.deepEqual(webp.readWebpDimensions(bytesFromHex(VP8_LOSSY_720x1040)), { height: 1040, width: 720 });
+  assert.deepEqual(webp.readWebpDimensions(bytesFromHex(VP8_LOSSY_720x1080)), { height: 1080, width: 720 });
+  assert.deepEqual(webp.readWebpDimensions(bytesFromHex(VP8_LOSSY_284x426)), { height: 426, width: 284 });
   assert.deepEqual(webp.readWebpDimensions(bytesFromHex(VP8L_LOSSLESS_5x7)), { height: 7, width: 5 });
   assert.deepEqual(webp.readWebpDimensions(bytesFromHex(VP8X_EXTENDED_1920x720)), { height: 720, width: 1920 });
 });
@@ -52,13 +58,19 @@ test("readWebpDimensions devolve null para lixo, PNG e arquivo cortado", () => {
 });
 
 test("capa e hero exigem a medida exata do recorte e WebP de verdade", () => {
-  const cover = webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1040)));
-  assert.deepEqual(cover, { height: 1040, ok: true, width: 720 });
+  const cover = webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1080)));
+  assert.deepEqual(cover, { height: 1080, ok: true, width: 720 });
+  // Menor que a saida, na mesma proporcao: aceita (o cliente nao amplia). Fora da proporcao ou abaixo do minimo: nao.
+  assert.deepEqual(webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_284x426))), { height: 426, ok: true, width: 284 });
+  const oldRatio = webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1040)));
+  assert.equal(oldRatio.ok, false);
+  assert.match(oldRatio.message, /até 720×1080 px, na proporção/);
+  assert.equal(webp.checkProductImage("cover", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_200x300))).ok, false);
 
   const hero = webp.checkProductImage("hero", webp.decodeWebpDataUrl(dataUrlFromHex(VP8X_EXTENDED_1920x720)));
   assert.equal(hero.ok, true);
 
-  const wrongSlot = webp.checkProductImage("hero", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1040)));
+  const wrongSlot = webp.checkProductImage("hero", webp.decodeWebpDataUrl(dataUrlFromHex(VP8_LOSSY_720x1080)));
   assert.equal(wrongSlot.ok, false);
   assert.match(wrongSlot.message, /1920×720/);
 
@@ -66,7 +78,7 @@ test("capa e hero exigem a medida exata do recorte e WebP de verdade", () => {
   assert.equal(webp.checkProductImage("cover", null).ok, false);
 
   const oversized = new Uint8Array(webp.MAX_PRODUCT_IMAGE_BYTES + 1);
-  oversized.set(bytesFromHex(VP8_LOSSY_720x1040));
+  oversized.set(bytesFromHex(VP8_LOSSY_720x1080));
   const tooBig = webp.checkProductImage("cover", oversized);
   assert.equal(tooBig.ok, false);
   assert.match(tooBig.message, /grande demais/);
@@ -481,6 +493,13 @@ test("pequenos tradutores de configuracao e de compra", () => {
   assert.equal(mappers.heroUrlOf({ hero: { mediaSrc: " https://cdn/hero.webp ", mediaType: "image" } }), "https://cdn/hero.webp");
   assert.equal(mappers.heroUrlOf({ hero: { mediaSrc: "https://cdn/hero.mp4", mediaType: "video" } }), null);
   assert.equal(mappers.heroUrlOf({ hero: [] }), null);
+  // Cantos do banner por produto: so "rounded" e "soft" valem; o resto segue a area.
+  assert.equal(mappers.heroCornersOf({ hero: { corners: "rounded", mediaSrc: "https://cdn/hero.webp" } }), "rounded");
+  assert.equal(mappers.heroCornersOf({ hero: { corners: "soft" } }), "soft");
+  assert.equal(mappers.heroCornersOf({ hero: { corners: "inherit" } }), "inherit");
+  assert.equal(mappers.heroCornersOf({ hero: { corners: "oval" } }), "inherit");
+  assert.equal(mappers.heroCornersOf({}), "inherit");
+  assert.equal(mappers.heroCornersOf(null), "inherit");
   assert.equal(mappers.parentFormationIdOf({ parentFormationId: " formation-1 " }), "formation-1");
   assert.equal(mappers.parentFormationIdOf({ parentFormationId: 3 }), null);
   assert.equal(mappers.customPurchaseLabelOf("Comprar"), null, "'Comprar' e o padrao derivado, nao texto proprio");

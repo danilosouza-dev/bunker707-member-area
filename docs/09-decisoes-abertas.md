@@ -165,6 +165,19 @@ Decisao tomada:
 - segredos reais nao ficam no browser;
 - eventos externos alimentam adaptadores e entitlements internos.
 
+### Area do aluno v2 (2026-10-11)
+
+Decisao tomada:
+
+- liberacao "X dias/horas depois da compra/inscricao" mostra ao aluno a data real (`Liberação em 08/01/2026`), calculada no servidor com a mesma conta que abre a aula: inicio do acesso ativo mais antigo (`entitlements.starts_at`) + atraso, no fuso de Sao Paulo. Sem acesso real (visitante, previa do produtor, gratuito sem compra) continua a frase generica;
+- garantia de 7 dias: por enquanto a conta usa a data da compra. A Hotmart informa o fim da garantia no webhook (`purchase.warranty_expire_date`); quando o pipeline de webhooks gravar esse campo no acesso, a regra podera contar a partir dele (`anchor: "warranty_end"`). A conta ja esta pronta; falta a coluna e a opcao no admin;
+- aula ainda nao liberada nao envia video ao navegador; a tela destrava sozinha quando a data passa ou quando a aula anterior e concluida;
+- comentarios mostram etiqueta de funcao para todos: `Professor` (owner/admin/editor), `Moderador` (support/analyst) e `Aluno`;
+- o topo da area do aluno nao mostra sino nem trofeu ate existirem notificacoes e conquistas reais; o avatar abre o menu da conta;
+- Suporte sem formulario enquanto nao existir caixa de entrada no admin para responder; a pagina mostra os canais configurados e perguntas frequentes;
+- Perfil so leitura nesta fase; editar nome/telefone/foto depende de unificar as tres origens do nome (cadastro do aluno, `profiles` e conta);
+- materiais de aula vem da tabela `lesson_materials` (migracao `202610130001`); a lista fixa de exemplo saiu. O cadastro de materiais no admin e a proxima etapa.
+
 ## Design
 
 ### Login
@@ -252,7 +265,7 @@ Decisao tomada:
 - cards verticais podem exibir a logo horizontal completa oficial da Bunker707 no canto superior esquerdo apenas no hover, em tamanho discreto.
 - cards verticais aparecem somente como capa no estado normal; no hover, os cards da home saltam mais para frente com escala maior, leve elevacao, transicao suave, cantos arredondados preservados, imagem escurecida e informacoes/acoes dentro do proprio card.
 - o hover dos cards verticais usa degrade escuro de baixo para cima, bem forte na area das informacoes e suave no topo, priorizando legibilidade sobre capas com muito contraste ou texto na arte.
-- o hover dos cards verticais deve ter apenas titulo, descricao curta, acao principal, botao de salvar/favoritar quando o aluno tiver acesso e botao de detalhes; status, duracao, quantidade de aulas e tipo ficam no modal/pagina propria.
+- o hover dos cards verticais deve ter apenas titulo, descricao curta, acao principal, botao de salvar/favoritar quando o aluno tiver acesso, botao de detalhes e, quando ha progresso, um anel de progresso no canto superior direito (diferente da barra dos modulos, 14/10/2026); status, duracao, quantidade de aulas e tipo ficam no modal/pagina propria.
 - professor, foto do professor, Instagram e informacoes complementares nao aparecem no hover dos cards verticais; ficam no modal e/ou na pagina propria do conteudo.
 - qualquer elemento com hover interativo deve usar cursor de mao/pointer.
 - clicar no card ou em `Acessar` leva para a pagina propria do curso/formacao/bootcamp; clicar na seta para baixo abre o modal de detalhes.
@@ -327,6 +340,7 @@ Decisao tomada:
 
 - menu hamburguer abre sidebar.
 - sidebar abre e fecha com transicao suave lateral e backdrop em fade.
+- (2026-10-11) itens em dois grupos, `Estudar` e `Conta e ajuda`, vindos de `src/lib/member-navigation.ts`; todo item leva a uma pagina real (sem item cinza ou desabilitado). Teclado completo: foco preso, `Esc` fecha e devolve o foco ao botao do menu.
 
 ## Dados
 

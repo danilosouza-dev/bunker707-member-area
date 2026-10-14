@@ -8,8 +8,10 @@ import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { SavedItemButton } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import { usePlatformLogoImage } from "@/components/platform-branding";
+import { ProgressRing } from "@/components/member/progress-ring";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
+import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { KeyboardEvent, MouseEvent, TouchEvent } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
@@ -42,7 +44,7 @@ export function ContinueWatchingCard({ accessPreviewMode, item }: CardProps) {
   }
 
   return (
-    <article className="group relative w-[16.25rem] shrink-0 overflow-visible hover:z-[80] sm:w-[18.75rem] lg:w-[20.625rem]">
+    <article className="member-row-card-wide group relative shrink-0 overflow-visible hover:z-[80]">
       <button
         aria-label={`Continuar ${item.title}`}
         className="relative block aspect-video w-full text-left"
@@ -52,7 +54,7 @@ export function ContinueWatchingCard({ accessPreviewMode, item }: CardProps) {
         onTouchStart={prefetchContentPage}
         type="button"
       >
-        <div className="absolute inset-0 z-0 w-full origin-center overflow-hidden rounded-[8px] bg-[#181818] shadow-xl shadow-black/35">
+        <div className="absolute inset-0 z-0 w-full origin-center overflow-hidden rounded-[var(--member-cover-radius)] bg-[#181818] shadow-xl shadow-black/35">
           <div
             className="continue-watching-card-image absolute inset-0 bg-cover bg-center"
             style={{ backgroundImage: cssImageUrl(item.image) }}
@@ -86,7 +88,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
     startY: 0
   });
   const description = item.description ?? item.eyebrow;
-  const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase());
+  const releaseNotice = getReleaseRuleNotice(item.releaseRule, item.kind.toLowerCase(), item.releaseState);
   const isReleaseLocked = Boolean(releaseNotice?.isLocked);
   const isLocked = Boolean(item.isLocked || isReleaseLocked);
   const actionLabel = item.isLocked ? item.purchaseLabel ?? "Comprar" : isReleaseLocked ? "Bloqueado" : "Acessar";
@@ -102,6 +104,8 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
   const contentHref = getContentHref(item, accessPreviewMode);
   const hasCover = Boolean(item.image.trim());
   const logoImage = usePlatformLogoImage();
+  // Anel de progresso no hover (canto de cima, a direita): so para quem ja comecou e tem acesso.
+  const showProgressRing = hasCover && !isLocked && item.progress > 0;
 
   function prefetchContentPage() {
     if (!isLocked) {
@@ -193,7 +197,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
   return (
     <article
       aria-label={`Abrir ${item.title}`}
-      className="home-cover-card home-row-cover-card group relative aspect-[2/3] w-[9.5rem] shrink-0 cursor-pointer overflow-visible hover:z-[120] sm:w-[11.5rem] md:w-[13.5rem] lg:w-[15rem] xl:w-[16rem]"
+      className="home-cover-card home-row-cover-card member-row-card group relative aspect-[2/3] shrink-0 cursor-pointer overflow-visible hover:z-[120]"
       data-home-row-card
       onClick={openCardDestination}
       onFocus={prefetchContentPage}
@@ -208,7 +212,9 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
       role="link"
       tabIndex={0}
     >
-      <div className="home-cover-card-surface absolute inset-0 z-0 w-full shadow-2xl shadow-black/35 group-hover:z-[120] group-hover:shadow-[0_42px_130px_rgba(0,0,0,0.82)]">
+      {/* Mesma superficie do card de modulo: sombra fixa e sem trocar o z-index no hover. Sombra animada junto
+          com a escala fazia o Chrome re-rasterizar o texto a cada quadro (titulo, descricao e botao "piscavam"). */}
+      <div className="home-cover-card-surface absolute inset-0 z-0 w-full shadow-2xl shadow-black/35">
         <div className="relative h-full w-full">
           {hasCover ? (
             <div
@@ -228,17 +234,17 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
             <div className="absolute inset-x-3 top-3 z-20 rounded-[8px] border border-white/12 bg-black/72 px-3 py-3 text-center shadow-2xl shadow-black/45 backdrop-blur-sm sm:inset-x-4 sm:top-4">
               <Lock className="mx-auto h-5 w-5 stroke-[3] text-white" />
               <p className="mt-2 text-[11px] font-black leading-tight text-white sm:text-xs">
-                {releaseNotice?.title ?? "Este conteudo sera liberado"}
+                {releaseNotice?.title ?? "Este conteúdo será liberado"}
               </p>
-              <p className="mt-1 line-clamp-2 text-[10px] font-semibold leading-4 text-zinc-300 sm:text-[11px]">
-                {releaseNotice?.detail ?? "Disponivel de acordo com a regra de entrega."}
+              <p className="mt-1 line-clamp-2 text-[10px] font-semibold leading-4 text-zinc-300 sm:text-[11px]" suppressHydrationWarning>
+                {releaseNotice?.detail ?? "Disponível de acordo com a regra de entrega."}
               </p>
             </div>
           ) : null}
-          {hasCover ? <div className="home-cover-card-overlay absolute inset-0" /> : null}
-          {hasCover ? <div className="home-cover-card-gradient absolute inset-x-0 bottom-0 h-[78%] bg-gradient-to-t from-black via-black/92 to-transparent" /> : null}
+          {hasCover ? <div className="home-cover-card-overlay absolute inset-0 z-10" /> : null}
+          {hasCover ? <div className="home-cover-card-gradient absolute inset-x-0 bottom-0 z-10 h-[78%] bg-gradient-to-t from-black via-black/92 to-transparent" /> : null}
           <div className={hasCover
-            ? "home-cover-card-content absolute inset-x-0 bottom-3 p-3 sm:bottom-3.5 sm:p-3.5 lg:bottom-4 lg:p-4"
+            ? "home-cover-card-content absolute inset-x-0 bottom-3 z-20 p-3 sm:bottom-3.5 sm:p-3.5 lg:bottom-4 lg:p-4"
             : "absolute inset-0 grid place-items-center p-5 text-center"
           }>
             <h3 className="line-clamp-2 text-[13px] font-bold leading-tight text-white drop-shadow sm:text-sm lg:text-base">{item.title}</h3>
@@ -267,7 +273,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
               ) : null}
               <button
                 aria-label={`Ver detalhes de ${item.title}`}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-zinc-400 bg-black/30 text-white transition hover:border-white hover:bg-white/10 md:h-9 md:w-9"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-[1.5px] border-zinc-300/80 bg-black/30 text-white transition hover:border-white hover:bg-white/10 md:h-9 md:w-9"
                 onClick={handleDetailsClick}
                 type="button"
               >
@@ -275,19 +281,29 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
               </button>
             </div> : null}
           </div>
+          {showProgressRing ? (
+            <div className="home-cover-card-progress pointer-events-none absolute right-3 top-3 z-30 sm:right-3.5 sm:top-3.5 lg:right-4 lg:top-4">
+              <ProgressRing value={item.progress} />
+            </div>
+          ) : null}
+          {/* Logo da escola dentro da superficie: cresce junto com o card e e rasterizada uma vez, no tamanho
+              final (fora da superficie ficava pequena, deslocada por conta propria e serrilhada). */}
+          {hasCover && !isReleaseLocked && logoImage ? (
+            <div className="home-cover-card-logo pointer-events-none absolute left-3 top-3 z-30 w-[56%] max-w-[11rem] opacity-0 sm:left-3.5 sm:top-3.5 lg:left-4 lg:top-4">
+              <Image
+                alt=""
+                aria-hidden="true"
+                className="h-auto max-h-11 w-full object-contain object-left drop-shadow-[0_4px_10px_rgba(0,0,0,0.75)]"
+                height={35}
+                sizes="200px"
+                src={logoImage}
+                unoptimized={!canOptimizeImageSrc(logoImage)}
+                width={306}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
-      {hasCover && logoImage ? <div className="home-cover-card-logo pointer-events-none absolute left-4 top-4 z-[130] w-[5.75rem] opacity-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.7)] sm:w-[6.25rem] lg:w-[6.75rem]">
-        <Image
-          alt=""
-          aria-hidden="true"
-          className="h-auto max-h-10 w-full object-contain object-left"
-          height={35}
-          src={logoImage}
-          unoptimized
-          width={306}
-        />
-      </div> : null}
     </article>
   );
 }

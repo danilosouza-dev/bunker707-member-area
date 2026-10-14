@@ -16,6 +16,7 @@ import { withAccessPreviewParam } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
+import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type {
   ContentItem,
   CourseModule,
@@ -90,7 +91,7 @@ function InternalPosterCard({
   return (
     <Link
       aria-label={lockedAccessibilityDetail ? `${title}. ${lockedAccessibilityDetail}` : `Abrir ${title}`}
-      className="home-cover-card internal-poster-card group relative aspect-[2/3] w-[8.75rem] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70 sm:w-[11rem] md:w-[12.5rem] lg:w-[15rem] 2xl:w-[16rem]"
+      className="home-cover-card internal-poster-card member-row-card group relative aspect-[2/3] shrink-0 cursor-pointer overflow-visible outline-none hover:z-[120] focus-visible:ring-2 focus-visible:ring-white/70"
       data-navigation-feedback={isLocked ? "false" : undefined}
       href={href}
       onClick={(event) => {
@@ -148,19 +149,23 @@ function InternalPosterCard({
               </p>
             ) : null}
           </div>
+          {/* Logo da escola dentro da superficie (ver VerticalCoverCard). */}
+          {logoImage ? (
+            <div className="home-cover-card-logo pointer-events-none absolute left-3 top-3 z-30 w-[56%] max-w-[11rem] opacity-0 sm:left-3.5 sm:top-3.5 lg:left-4 lg:top-4">
+              <Image
+                alt=""
+                aria-hidden="true"
+                className="h-auto max-h-11 w-full object-contain object-left drop-shadow-[0_4px_10px_rgba(0,0,0,0.75)]"
+                height={35}
+                sizes="200px"
+                src={logoImage}
+                unoptimized={!canOptimizeImageSrc(logoImage)}
+                width={306}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
-      {logoImage ? <div className="home-cover-card-logo pointer-events-none absolute left-4 top-4 z-[130] w-[5.75rem] opacity-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.7)] sm:w-[6.25rem] lg:w-[6.75rem]">
-        <Image
-          alt=""
-          aria-hidden="true"
-          className="h-auto max-h-10 w-full object-contain object-left"
-          height={35}
-          src={logoImage}
-          unoptimized
-          width={306}
-        />
-      </div> : null}
     </Link>
   );
 }
@@ -240,7 +245,7 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
 
   return (
     <section className="relative" id="conteudos">
-      <div className="mb-4 flex items-end justify-between gap-4 px-5 sm:px-8 lg:px-12">
+      <div className="mb-4 flex items-end justify-between gap-4 px-[var(--member-row-inset)]">
         <div>
           <h2 className="text-2xl font-black text-white sm:text-3xl">{title}</h2>
           {description ? (
@@ -257,7 +262,7 @@ function InternalPosterRow({ children, description, title }: InternalPosterRowPr
       </div>
       <div className="relative">
         <div
-          className="scrollbar-hidden flex scroll-smooth gap-[0.75rem] overflow-x-auto overflow-y-hidden overscroll-x-contain px-5 py-4 sm:px-8 lg:px-12"
+          className="member-row-scroller scrollbar-hidden flex scroll-smooth gap-[0.75rem] [--member-row-gap:0.75rem] overflow-x-auto overflow-y-hidden overscroll-x-contain px-[var(--member-row-inset)] py-4"
           ref={rowRef}
         >
           {children}
@@ -312,7 +317,7 @@ export function ContentStructureSection({
             const href = formationCourseOpenMode === "course_lesson_format" && firstModule
               ? `/conteudo/${course.id}/aulas/${firstModule.id}`
               : `/conteudo/${course.id}`;
-            const releaseNotice = getReleaseRuleNotice(course.releaseRule, "curso");
+            const releaseNotice = getReleaseRuleNotice(course.releaseRule, "curso", course.releaseState);
             const isLocked = showLockedStates && Boolean(item.isLocked || course.isLocked || releaseNotice?.isLocked);
             const lockedDetail = item.isLocked
               ? "Este curso faz parte de um conteudo que ainda nao esta liberado para este aluno."
@@ -349,7 +354,7 @@ export function ContentStructureSection({
           title={moduleRowTitle}
         >
           {modules.map((module) => {
-            const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo");
+            const releaseNotice = getReleaseRuleNotice(module.releaseRule, "modulo", module.releaseState);
             const hasLessons = module.lessons.length > 0;
             const isLocked = Boolean((showLockedStates && (item.isLocked || releaseNotice?.isLocked)) || !hasLessons);
             const lockedDetail = item.isLocked

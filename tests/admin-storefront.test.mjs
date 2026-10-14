@@ -125,7 +125,8 @@ test("vitrine publicada: le as fileiras gravadas, descarta as invalidas e normal
 test("marca: banner e logo seguem os padroes do servidor", () => {
   assert.deepEqual(model.mapStorefrontBrand([]), {
     hero: { enabled: true, image: model.DEFAULT_HERO_IMAGE, mediaType: "image" },
-    logoImage: model.DEFAULT_LOGO_IMAGE
+    logoImage: model.DEFAULT_LOGO_IMAGE,
+    style: { buttons: "soft", corners: "soft", menu: "sidebar" }
   });
 
   const brand = model.mapStorefrontBrand([
@@ -239,14 +240,16 @@ test("antes de publicar: aponta as fileiras que o servidor recusaria", () => {
       section({ id: "a", order: 0 }),
       section({ id: "b", order: 1, title: "Outra vitrine" }),
       section({ contentSource: "manual", id: "c", itemIds: [], order: 2, title: "Vazia" }),
-      section({ contentSource: "selected_content_structure", id: "d", layout: "compact", order: 3, sectionType: "content_structure", sourceContentId: "sumiu", title: "Destaque" })
+      section({ contentSource: "selected_content_structure", id: "d", layout: "compact", order: 3, sectionType: "content_structure", sourceContentId: "sumiu", title: "Destaque" }),
+      section({ contentSource: "manual", id: "e", itemIds: ["curso-prompts", "sumiu"], order: 4, title: "Para você" })
     ],
     productsById
   );
 
   assert.deepEqual(
     problems.map((problem) => problem.sectionId),
-    ["b", "c", "d"]
+    ["b", "c"],
+    "produto fora de venda nao trava: a limpeza tira antes (d sai inteira, e fica sem o produto)"
   );
   assert.match(problems[0].message, /repete uma fileira automática/);
   assert.equal(model.findSectionProblems(editorData().sections, productsById).length, 0, "ordem padrao e publicavel");
@@ -310,7 +313,8 @@ test("rascunho igual ao publicado nao conta como alteracao", () => {
 });
 
 test("marca: o PUT so leva o que mudou, como no admin antigo", () => {
-  const published = { heroEnabled: true, heroImage: "/hero.png", logoImage: "/logo.svg" };
+  const style = { buttons: "soft", corners: "soft", menu: "sidebar" };
+  const published = { heroEnabled: true, heroImage: "/hero.png", logoImage: "/logo.svg", style };
 
   assert.deepEqual(model.buildAppearancePayload(published, published), {});
   assert.equal(model.isBrandDirty(published, { ...published }), false);
@@ -322,6 +326,10 @@ test("marca: o PUT so leva o que mudou, como no admin antigo", () => {
     hero: { enabled: true }
   });
   assert.deepEqual(model.buildAppearancePayload(published, { ...published, logoImage: null }), { logo: { image: null } });
+  // Estilo (cantos, botoes, menu) vai inteiro so quando muda; o resto do PUT nao vai junto.
+  const rounded = { ...style, corners: "rounded" };
+  assert.deepEqual(model.buildAppearancePayload(published, { ...published, style: rounded }), { style: rounded });
+  assert.equal(model.isBrandDirty(published, { ...published, style: { ...style } }), false);
   assert.equal(
     model.isBrandDirty({ ...published, heroEnabled: false }, { ...published, heroEnabled: false, heroImage: "/outra.png" }),
     false,

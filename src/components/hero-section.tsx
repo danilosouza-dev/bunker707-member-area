@@ -1,6 +1,7 @@
 import { ArrowRight, Zap } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { HeroGlow } from "@/components/member/hero-glow";
 import { withAccessPreviewParam, type AccessPreviewMode } from "@/lib/access-preview";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { HomeHeroConfig } from "@/lib/platform-types";
@@ -20,7 +21,7 @@ type HeroSectionProps = {
 };
 
 const ctaClass =
-  "inline-flex min-h-12 items-center justify-center gap-2 rounded-[8px] bg-white px-6 py-3 text-base font-extrabold text-black shadow-xl shadow-black/25 transition hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white motion-reduce:transition-none";
+  "inline-flex min-h-12 items-center justify-center gap-2 rounded-[var(--member-button-radius)] bg-white px-6 py-3 text-base font-extrabold text-black shadow-xl shadow-black/25 transition hover:bg-zinc-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white motion-reduce:transition-none";
 
 function HeroCta({
   accessPreviewMode,
@@ -90,7 +91,10 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
   const poster = hero.mediaType === "video" && hero.poster ? hero.poster : null;
 
   return (
-    <section className="@container relative min-h-[680px] overflow-hidden">
+    // flow-root: a margem de cima do destaque fica dentro do bloco, entao a luz comeca no topo da pagina.
+    <div className="relative flow-root">
+      <HeroGlow color={hero.glowColor} src={hero.mediaType === "video" ? poster : hero.image} />
+      <section className="@container relative z-[1] min-h-[var(--member-hero-min-h)] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
       {hero.mediaType === "video" ? (
         <>
           <video
@@ -129,10 +133,11 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
         />
       )}
       <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/35 to-black/15" />
-      <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-black/5 to-black/35" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-80 bg-gradient-to-b from-transparent via-[#141414]/85 to-[#141414]" />
+      {/* Esfumacado inferior: some no modo arredondado (--member-hero-fade: 0), a capa vai limpa ate a borda. */}
+      <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-black/5 to-black/35 opacity-[var(--member-hero-fade)]" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-80 bg-gradient-to-b from-transparent via-[#141414]/85 to-[#141414] opacity-[var(--member-hero-fade)]" />
       {hasContent ? (
-        <div className="relative z-10 flex min-h-[680px] max-w-6xl flex-col justify-center px-5 pb-48 pt-28 @min-[640px]:px-8 @min-[1024px]:px-12">
+        <div className="relative z-10 flex min-h-[var(--member-hero-min-h)] max-w-6xl flex-col justify-center px-5 pb-[var(--member-hero-content-pb)] pt-28 @min-[640px]:px-8 @min-[1024px]:px-12">
           {showBadge ? (
             <div className="mb-5 inline-flex w-fit items-center gap-2 rounded-[6px] border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-normal text-white backdrop-blur">
               <Zap className="h-4 w-4 text-[var(--accent-warm)]" />
@@ -157,5 +162,6 @@ export function HeroSection({ accessPreviewMode, hero, preview = false }: HeroSe
         </div>
       ) : null}
     </section>
+    </div>
   );
 }

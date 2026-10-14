@@ -11,7 +11,7 @@ import { StatusChip } from "../status-chip";
 import type { TreeModule } from "./tree-model";
 
 // Capa do modulo (menu do modulo › "Trocar capa do módulo…" ou a miniatura no cabecalho do modulo).
-// Recorte 9:13 (720×1040, o mesmo card vertical da area do aluno) e grava na hora; "Usar a capa do
+// Recorte 2:3 (ate 720×1080, o mesmo card vertical da area do aluno) e grava na hora; "Usar a capa do
 // produto" volta para a capa do produto. Sem rascunho: o painel so mostra o que ja esta gravado.
 
 type ModuleCoverSheetProps = {
