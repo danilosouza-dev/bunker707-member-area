@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireLessonAccess } from "@/server/access/lesson-access";
+import { getActiveLessonTranscriptCaptions } from "@/server/ai/transcripts";
 import { requireApiUser } from "@/server/auth/guards";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { resolveLessonCaptions } from "@/server/video/lesson-captions";
 import {
   fetchYouTubeCaptions,
   isValidYouTubeVideoId,
@@ -95,7 +97,16 @@ export async function GET(request: Request) {
       return jsonResponse({ error: "Video da aula nao encontrado." }, 404);
     }
 
-    const captions = await fetchYouTubeCaptions({ language, videoId });
+    // Legenda guardada na plataforma primeiro; o YouTube ao vivo so quando nao ha copia.
+    const captions = await resolveLessonCaptions({
+      fetchCaptions: fetchYouTubeCaptions,
+      language,
+      loadStoredCaptions: () => getActiveLessonTranscriptCaptions(lessonId),
+      onStoredCaptionsError: (error) => {
+        console.warn("[legendas] copia guardada indisponivel; tentando o YouTube", error);
+      },
+      videoId
+    });
 
     return jsonResponse(captions);
   } catch (error) {
