@@ -8,8 +8,8 @@ import "server-only";
 // - `null` = a chave nao existia quando a tela abriu: a gravacao faz INSERT e falha com 409 se alguem
 //   criou a linha antes.
 // A tabela nao tem gatilho de updated_at: toda gravacao daqui carimba a coluna, e as gravacoes do
-// platform-store (vitrine, marca, colecoes do legado) tambem carimbam desde esta rodada, entao uma
-// mudanca feita no admin antigo tambem vira 409 aqui em vez de ser apagada em silencio.
+// platform-store (vitrine, marca) tambem carimbam desde esta rodada, entao uma mudanca feita em
+// outra tela tambem vira 409 aqui em vez de ser apagada em silencio.
 
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { MemberAreaConflictError } from "./errors";
@@ -133,7 +133,7 @@ export async function writePlatformSettingGuarded(
  * "Estado desejado" sobre UMA chave: rele o valor gravado agora, aplica `change` e grava com a versao
  * que acabou de ler (UPDATE condicional). Se alguem gravou no meio, rele e tenta mais uma vez; na
  * segunda, 409. Serve para quem muda so uma parte da chave sem apagar o resto que outra tela acabou de
- * publicar (ex.: a aparencia do admin antigo troca so a imagem do destaque, depois de enviar a imagem,
+ * publicar (ex.: a tela Marca troca so a imagem do destaque, depois de enviar a imagem,
  * e preserva textos, botao e capa do video gravados pela tela Destaque nesse meio-tempo).
  * `change` pode lancar (validacao): nada e gravado.
  */

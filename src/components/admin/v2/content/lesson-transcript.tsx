@@ -18,7 +18,7 @@ import {
 import { smallButtonClass } from "./lesson-video-field";
 
 // Secao "Transcrição e Tutor IA" do painel da aula (docs/17 §1.6.4). Usa as mesmas rotas que o admin
-// antigo ja usa (GET/PUT /api/admin/lessons/{id}/transcript, .../import-youtube, .../tutor/process),
+// de transcricao (GET/PUT /api/admin/lessons/{id}/transcript, .../import-youtube, .../tutor/process),
 // com o visual do admin novo. Grava na hora, independente do "Salvar" da aula: a transcricao e o
 // preparo do Tutor IA nao dependem do resto do formulario.
 

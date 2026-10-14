@@ -45,7 +45,7 @@ test("cartoes de atencao: ordem por urgencia, tom, rotulo de prioridade e destin
     cards.map((card) => [card.id, card.count, card.tone, card.priorityLabel, card.action.label, card.action.href]),
     [
       ["perguntas", 7, "critical", `Passou de 24${NB}h`, "Responder", "/admin/comunidade"],
-      ["acessos-expirando", 5, "warning", `Próximos 7${NB}dias`, "Ver no admin antigo", "/admin/legado?tela=alunos"],
+      ["acessos-expirando", 5, "warning", `Próximos 7${NB}dias`, "Ver alunos", "/admin/alunos"],
       ["produtos-sem-aula", 1, "neutral", "Catálogo", "Corrigir", "/admin/produtos/p1"]
     ]
   );
@@ -261,7 +261,7 @@ test("Criar: so destinos reais, o resto desativado com 'Em breve' e nunca 'fase'
       ["Produto", "/admin/produtos/novo", null],
       ["Produto a partir de uma playlist", "/admin/produtos/importar", null],
       ["Pacote", "/admin/produtos/pacotes", null],
-      ["Aluno", "/admin/legado?tela=alunos", "admin antigo"],
+      ["Aluno", "/admin/alunos/novo", null],
       ["Aviso", null, "Em breve"],
       ["Webinário", null, "Em breve"],
       ["Promoção", null, "Em breve"]
@@ -272,12 +272,13 @@ test("Criar: so destinos reais, o resto desativado com 'Em breve' e nunca 'fase'
     assert.doesNotMatch(`${item.label} ${item.meta ?? ""}`, /fase/i);
   }
 
-  // Cada destino ativo tem uma pagina no admin novo (ou e o admin antigo).
+  // Cada destino ativo tem uma pagina no admin.
   const { existsSync } = await import("node:fs");
   const pages = {
     "/admin/produtos/importar": "src/app/admin/(v2)/produtos/importar/page.tsx",
     "/admin/produtos/novo": "src/app/admin/(v2)/produtos/novo/page.tsx",
-    "/admin/produtos/pacotes": "src/app/admin/(v2)/produtos/pacotes/page.tsx"
+    "/admin/produtos/pacotes": "src/app/admin/(v2)/produtos/pacotes/page.tsx",
+    "/admin/alunos/novo": "src/app/admin/(v2)/alunos/novo/page.tsx"
   };
   for (const [href, file] of Object.entries(pages)) {
     assert.ok(items.some((item) => item.href === href), href);

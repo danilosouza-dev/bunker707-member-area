@@ -3,8 +3,11 @@ import { notFound } from "next/navigation";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { ProductStudentsView } from "@/components/admin/v2/products/product-students-view";
 import { requirePageAdmin } from "@/server/auth/guards";
+import { canRole } from "@/server/auth/roles";
 import { getProductAccess } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
+import { listStudents } from "@/server/students/queries";
+import { STUDENT_LIST_PAGE_SIZE } from "@/server/students/schemas";
 
 export const metadata: Metadata = {
   title: "Alunos do produto"
@@ -12,27 +15,52 @@ export const metadata: Metadata = {
 
 type ProductStudentsPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-// Aba Alunos (docs/17 §1.6.5). A lista por produto chega com a nova tela de Alunos; ate la mostramos
-// o numero real de acessos ativos, a tabela vazia com as colunas da tela futura e o caminho para o
-// admin antigo, que ainda libera acessos.
-export default async function ProductStudentsPage({ params }: ProductStudentsPageProps) {
-  await requirePageAdmin();
-  const { id } = await params;
-  const loaded = await loadUnlessPendingMigration(() => getProductAccess(id));
+function readPage(value: string | string[] | undefined) {
+  const parsed = Number.parseInt((Array.isArray(value) ? value[0] : value) ?? "1", 10);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+// Aba Alunos (docs/17 §1.6.5): quem ve este produto agora, com progresso nele; liberar e adicionar.
+/** Hora da leitura (renderizado no servidor): ritmo, "há 3 dias" e minimo das datas. */
+function readNow() {
+  return Date.now();
+}
+
+export default async function ProductStudentsPage({ params, searchParams }: ProductStudentsPageProps) {
+  const { role } = await requirePageAdmin();
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const loaded = await loadUnlessPendingMigration(async () => {
+    const access = await getProductAccess(id);
+
+    if (!access) {
+      return null;
+    }
+
+    const list = await listStudents({ page: readPage(query.pagina), pageSize: STUDENT_LIST_PAGE_SIZE, productId: id });
+
+    return { access, list };
+  });
 
   if (!loaded.ok) {
     return <PendingMigrationNotice />;
   }
 
-  const access = loaded.data;
-
-  if (!access) {
+  if (!loaded.data) {
     notFound();
   }
 
   return (
-    <ProductStudentsView audience={access.audience} productId={id} studentsWithAccess={access.studentsWithAccess} />
+    <ProductStudentsView
+      audience={loaded.data.access.audience}
+      canAccess={canRole(role, "students.access")}
+      list={loaded.data.list}
+      now={readNow()}
+      productId={id}
+      productTitle={loaded.data.access.header.title}
+    />
   );
 }

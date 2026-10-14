@@ -17,10 +17,6 @@ const learningCatalogSource = await readFile(
   new URL("../src/server/access/learning-catalog.ts", import.meta.url),
   "utf8"
 );
-const platformStoreSource = await readFile(
-  new URL("../src/server/db/platform-store.ts", import.meta.url),
-  "utf8"
-);
 
 const now = Date.parse("2026-07-17T12:00:00.000Z");
 const completedLessonIds = new Set(["lesson-previous"]);
@@ -78,7 +74,6 @@ test("lesson APIs and IA Diretor share the same release policy and validated for
   assert.doesNotMatch(lessonAccessSource, /getReleaseRuleNotice/);
   assert.match(lessonAccessSource, /parentFormation\?\.kind === "Formacao"/);
   assert.match(learningCatalogSource, /publishedFormationIds\.has\(parentFormationId\)/);
-  assert.match(platformStoreSource, /Selecione uma formacao principal valida para este curso interno/);
 });
 
 // --- Data de liberacao (fonte unica para a tela e para as APIs da aula) -----------------------------

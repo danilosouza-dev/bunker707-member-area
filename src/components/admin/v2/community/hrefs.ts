@@ -1,7 +1,7 @@
 // Enderecos da Comunidade no admin novo. Modulo puro (sem React): as paginas do servidor, os filtros
 // no cliente e tests/community-queue.test.mjs usam as mesmas funcoes.
 
-import { legacyStudentSearchHref } from "../../../../lib/admin-legacy-links";
+import { studentSearchHref as studentListSearchHref } from "../students/hrefs";
 
 export const COMMUNITY_BASE_HREF = "/admin/comunidade";
 
@@ -91,12 +91,9 @@ export function clearFiltersHref(pathname: string, current: SearchParamsRecord |
   return period ? `${pathname}?periodo=${encodeURIComponent(period)}` : pathname;
 }
 
-/**
- * "Ver aluno": lista de alunos filtrada pelo nome. Enquanto Alunos v2 nao existe (/admin/alunos ainda
- * e so o aviso "a caminho"), leva para a lista do admin antigo com a busca preenchida.
- */
+/** "Ver aluno": lista de Alunos filtrada pelo nome. */
 export function studentSearchHref(name: string) {
-  return legacyStudentSearchHref(name);
+  return studentListSearchHref(name);
 }
 
 /** "1–20 de 54" e se ha pagina anterior/proxima. */

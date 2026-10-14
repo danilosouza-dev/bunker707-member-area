@@ -54,7 +54,7 @@ test("enderecos de produto, modulo e aula", () => {
 
 test("telas e acoes estaticas apontam so para destinos que existem", () => {
   const items = model.listAdminStaticSearchItems();
-  const allowedOutside = new Set(["/", "/admin/legado", "/admin/legado?tela=alunos"]);
+  const allowedOutside = new Set(["/"]);
 
   assert.ok(items.length >= 10);
 
@@ -85,7 +85,8 @@ test("campo vazio mostra Acoes e Telas principais, nessa ordem", () => {
     groups[0].items.map((item) => item.title),
     ["Novo produto", "Importar playlist do YouTube", "Adicionar aluno"]
   );
-  assert.equal(groups[0].items[2].meta, "admin antigo");
+  assert.equal(groups[0].items[2].href, "/admin/alunos/novo");
+  assert.equal(groups[0].items[2].meta, undefined);
   assert.deepEqual(
     groups[1].items.map((item) => item.title),
     ["Visão geral", "Alunos", "Produtos", "Área de membros", "Comunicação", "Comunidade", "Configurações"]
@@ -107,7 +108,7 @@ test("texto: grupos na ordem Produtos · Módulos · Aulas · Telas · Ações, 
   const flat = model.flattenAdminSearchGroups(groups);
   assert.equal(flat[0].title, "Formação Agentes de IA");
   assert.equal(flat.at(-1).title, "Buscar “agente” em alunos");
-  assert.equal(flat.at(-1).href, "/admin/legado?tela=alunos&busca=agente");
+  assert.equal(flat.at(-1).href, "/admin/alunos?busca=agente");
   assert.equal(new Set(flat.map((item) => item.id)).size, flat.length);
 });
 

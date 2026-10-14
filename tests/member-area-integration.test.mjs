@@ -11,7 +11,6 @@ import "./support/resolve-extensionless-ts.mjs";
 
 const { adminNavItems } = await import("../src/components/admin/v2/nav.ts");
 const { ADMIN_ACTION_ROLES, rolesFor } = await import("../src/server/auth/roles.ts");
-const { MEMBER_AREA_SETTING_KEYS } = await import("../src/server/member-area/schemas.ts");
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const read = (path) => readFileSync(join(repoRoot, path), "utf8");
@@ -151,89 +150,3 @@ test("textos de tela da Area de membros nao usam jargao (template, hero, CTA, sl
   }
 });
 
-test("admin antigo grava platform_settings chave por chave e nunca toca em loginPage", () => {
-  const store = read("src/server/db/platform-store.ts");
-  const settingsRows = /function settingsRows\(database: PlatformDatabase\) \{[\s\S]*?\n\}/.exec(store)?.[0];
-
-  assert.ok(settingsRows, "settingsRows existe");
-  assert.doesNotMatch(settingsRows, /loginPage/, "a lista de chaves do legado nao inclui loginPage");
-  assert.ok(MEMBER_AREA_SETTING_KEYS.includes("loginPage"));
-
-  // Toda gravacao do legado em platform_settings escolhe as chaves e carimba updated_at.
-  const settingsWrites = [...store.matchAll(/upsertRows\(\s*[^,]+,\s*"platform_settings"/g)];
-  assert.ok(settingsWrites.length >= 3, `gravacoes encontradas: ${settingsWrites.length}`);
-  for (const write of settingsWrites) {
-    const functionStart = store.lastIndexOf("\nexport async function ", write.index);
-    const callEnd = store.indexOf("\n  );", write.index);
-    const body = store.slice(functionStart, callEnd);
-    const name = /function (\w+)/.exec(body)?.[1];
-
-    assert.match(body, /stampPlatformSettingRows\(/, `${name}: gravacao sem carimbo de versao`);
-  }
-  for (const use of store.matchAll(/settingsRows\(database\)([^\n]*)/g)) {
-    assert.match(use[1], /^\.filter\(/, "o snapshot inteiro de configuracoes nunca e regravado");
-  }
-  assert.match(store, /const rows = stampPlatformSettingRows\(settingsRows\(database\)\.filter\(\(row\) => updatedKeys\.has\(row\.key\)\)\);/);
-});
-
-test("admin antigo preserva o botao e a capa do destaque e as chaves desconhecidas de content_page_settings", () => {
-  const store = read("src/server/db/platform-store.ts");
-
-  // O hero e lido cru (sem normalizar) e a aparencia do legado so troca enabled/image/mediaType.
-  assert.match(store, /hero: \(settingsMap\.get\("hero"\) as HomeHeroConfig \| undefined\) \?\? defaultHero,/);
-  const appearance = /export async function updatePlatformAppearance[\s\S]*?\n\}/.exec(store)?.[0] ?? "";
-  const applyHero = /function applyAppearanceToHero[\s\S]*?\n\}/.exec(store)?.[0] ?? "";
-  assert.equal(applyHero.match(/\.\.\.current,/g)?.length, 2, "ligar e desligar o destaque espalham o hero gravado agora");
-
-  // Envia a imagem primeiro (leva segundos) e so depois rele o destaque e grava com a versao lida: o
-  // que a tela Destaque publicar nesse meio-tempo nao some (updatePlatformSettingLatest tenta de novo
-  // uma vez e, se mudar de novo, responde 409).
-  const upload = appearance.indexOf('persistAppearanceImage(providedImage, "platform/home-hero"');
-  const write = appearance.indexOf('updatePlatformSettingLatest("hero"');
-  assert.ok(upload > 0 && write > upload, "envio da imagem antes de reler e gravar o destaque");
-  assert.match(appearance, /applyAppearanceToHero\(current\.exists \? current\.value : null,/);
-  assert.doesNotMatch(appearance, /database\.hero = \{/, "nada de gravar o destaque lido no inicio");
-  assert.doesNotMatch(appearance, /wantedKeys[\s\S]*"hero"/, "o destaque nao vai junto no upsert sem versao");
-
-  // O salvar do curso no legado relê a linha do banco e espalha o que ja existia antes de mudar a chave.
-  assert.match(store, /\(\(contentSettingsResult\.data \?\? \[\]\) as Array<\{ content_id: string; settings: ContentPageSettings \}>\)\.map\(\(setting\) => \[\s*setting\.content_id,\s*setting\.settings\s*\]\)/);
-  assert.ok((store.match(/\.\.\.currentSettings,/g)?.length ?? 0) >= 5, "cada chave do legado espalha currentSettings");
-  assert.match(store, /await upsertRows\(supabase, "content_page_settings", \[\{\s*content_id: item\.id,\s*settings: itemSettings\s*\}\]/);
-});
-
-test("Vitrine do admin antigo manda a versao das fileiras e recebe 409 em vez de apagar", () => {
-  const store = read("src/server/db/platform-store.ts");
-  const editor = read("src/components/admin/personalization/home-showcase-editor.tsx");
-  const dashboard = read("src/components/admin-dashboard.tsx");
-  const route = read("src/app/api/admin/home-sections/route.ts");
-
-  assert.match(store, /const homeSectionsUpdatedAt = settingsRowsRead\.find\(\(setting\) => setting\.key === "homeSections"\)\?\.updated_at \?\? null;/);
-  assert.match(store, /homeSectionsUpdatedAt: database\.homeSectionsUpdatedAt,/);
-
-  // Com versao, a gravacao das fileiras e condicional no proprio UPDATE (sem janela entre conferir e
-  // gravar) e a versao devolvida e a desta gravacao.
-  const publish = /export async function publishHomeSections[\s\S]*?\n\}/.exec(store)?.[0] ?? "";
-  assert.match(publish, /if \(options\.expectedUpdatedAt !== undefined\) \{\s*sectionsUpdatedAt = \(await writePlatformSettingGuarded\("homeSections", normalized, options\.expectedUpdatedAt, now\)\)\.updatedAt;/);
-  assert.match(publish, /database\.homeSectionsUpdatedAt = sectionsUpdatedAt;/);
-  assert.doesNotMatch(publish, /\{ key: "homeSections", value: normalized \},\s*\{ key: "updatedAt"/, "fileiras nunca no mesmo upsert sem condicao");
-
-  assert.match(dashboard, /homeSectionsUpdatedAt=\{dashboardData\.homeSectionsUpdatedAt\}/);
-  assert.match(dashboard, /homeSectionsUpdatedAt=\{homeSectionsUpdatedAt\}/);
-
-  // A versao e lida junto com o rascunho (montagem do editor) e so muda depois de publicar.
-  assert.match(editor, /const \[publishedVersion, setPublishedVersion\] = useState\(homeSectionsUpdatedAt\);/);
-  assert.match(editor, /\.\.\.\(publishedVersion !== undefined \? \{ expectedUpdatedAt: publishedVersion \} : \{\}\)/);
-  assert.match(editor, /setPublishedVersion\(payload\.sectionsUpdatedAt \?\? payload\.data\.homeSectionsUpdatedAt \?\? publishedVersion\);/);
-
-  assert.match(route, /await publishHomeSections\(payload\.sections, \{ expectedUpdatedAt \}\)/, "a versao vai para a gravacao condicional");
-  assert.match(route, /sectionsUpdatedAt: data\.homeSectionsUpdatedAt \?\? null/, "devolve a versao desta gravacao");
-  assert.doesNotMatch(route, /readPlatformSetting|assertPlatformSettingVersion/, "nada de conferir antes e reler depois");
-});
-
-test("editor de modulo do admin antigo so manda a capa quando o produtor mudou", () => {
-  const dashboard = read("src/components/admin-dashboard.tsx");
-
-  assert.match(dashboard, /initialImage: module\.image \?\? "",/);
-  assert.match(dashboard, /return form\.image !== \(form\.initialImage \?\? ""\) \? form\.image : undefined;/);
-  assert.match(dashboard, /id: editingModuleId,\s*image: changedModuleImage\(moduleBuilderForm\),/);
-});

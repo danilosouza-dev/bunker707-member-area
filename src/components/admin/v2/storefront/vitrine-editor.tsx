@@ -47,7 +47,7 @@ import { VitrinePreview } from "./vitrine-preview";
 
 // Vitrine (docs/17 §1.8): a ordem das fileiras da home do aluno. Tudo o que muda aqui fica num
 // rascunho local ate "Publicar vitrine", que grava a lista inteira pela rota de sempre
-// (PUT /api/admin/home-sections), como o admin antigo, mandando a versao lida (`expectedUpdatedAt`):
+// (PUT /api/admin/home-sections), mandando a versao lida (`expectedUpdatedAt`):
 // se a tela Modulos ligou uma fileira (ou o admin antigo publicou) no meio, o servidor responde 409 e
 // nada e apagado; o rascunho fica ate o produtor clicar em "Recarregar". Arrastar pela alca, Alt+setas
 // na alca ou o menu "…" mudam a ordem; clicar na fileira abre o painel de edicao.

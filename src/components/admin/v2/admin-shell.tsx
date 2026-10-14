@@ -5,7 +5,6 @@ import {
   Box,
   ChevronRight,
   Eye,
-  History,
   LayoutDashboard,
   LayoutTemplate,
   Megaphone,
@@ -23,7 +22,6 @@ import { AdminTopbar } from "./admin-topbar";
 import { ADMIN_PERIOD_PARAM, type AdminFilterProduct } from "./filters";
 import {
   ADMIN_HOME_HREF,
-  ADMIN_LEGACY_HREF,
   ADMIN_SIDEBAR_COOKIE,
   STUDENT_AREA_HREF,
   adminNavItems,
@@ -247,15 +245,6 @@ function SidebarContents({
         >
           <Eye aria-hidden="true" className={navIconClass} strokeWidth={1.75} />
           <span className={collapsed ? "sr-only" : "truncate"}>Ver área do aluno</span>
-        </Link>
-        <Link
-          className={cn(navItemBase, navItemIdle, collapsed && navItemCollapsed)}
-          href={ADMIN_LEGACY_HREF}
-          onClick={onNavigate}
-          title={collapsed ? "Admin antigo" : undefined}
-        >
-          <History aria-hidden="true" className={navIconClass} strokeWidth={1.75} />
-          <span className={collapsed ? "sr-only" : "truncate"}>Admin antigo</span>
         </Link>
         <AccountMenu account={account} compact={collapsed} />
       </div>
