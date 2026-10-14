@@ -87,6 +87,7 @@ import type {
   MemberReleaseState
 } from "@/lib/platform-types";
 import { getSafeEmbedUrl, getSafeExternalMediaUrl } from "@/lib/video-embed";
+import { getYouTubeEmbedFrameGeometry, getYouTubeEmbedFrameStyle } from "@/lib/youtube-embed-sizing";
 import {
   getNextReleaseTimestamp,
   getReleaseRefreshDelay,
@@ -953,6 +954,7 @@ function getYouTubeQualityBadge(quality: string) {
   if (height >= 2880) return "5K";
   if (height >= 2160) return "4K";
   if (height >= 1440) return "2K";
+  if (height >= 1080) return "FHD";
   if (height >= 720) return "HD";
 
   return Number.isFinite(height) ? String(height) : quality.toUpperCase();
@@ -1344,6 +1346,7 @@ export function LessonExperience({
   const [startedLessonIds, setStartedLessonIds] = useState<Set<string>>(() => new Set());
   const [canRenderEmbeddedPlayer, setCanRenderEmbeddedPlayer] = useState(false);
   const [isPlayerFullscreen, setIsPlayerFullscreen] = useState(false);
+  const [playerStageSize, setPlayerStageSize] = useState<{ height: number; width: number } | null>(null);
   const [youTubeControlState, setYouTubeControlState] = useState<YouTubeControlState>(initialYouTubeControlState);
   const [youTubeCaptionResult, setYouTubeCaptionResult] = useState<YouTubeCaptionResult>({
     cues: [],
@@ -1371,6 +1374,7 @@ export function LessonExperience({
   const unlockRefreshedLessonIdsRef = useRef<Set<string>>(new Set());
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
   const lessonPlayerFrameRef = useRef<HTMLDivElement>(null);
+  const playerStageRef = useRef<HTMLDivElement>(null);
   const lessonSupportPanelRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const youtubeIframeRef = useRef<HTMLIFrameElement>(null);
@@ -2034,6 +2038,32 @@ export function LessonExperience({
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
+  }, []);
+
+  useEffect(() => {
+    const stage = playerStageRef.current;
+
+    if (!stage || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    // O iframe oficial do YouTube e dimensionado a partir do palco (ver youtube-embed-sizing.ts),
+    // inclusive quando o palco muda de tamanho em tela cheia ou ao redimensionar a janela.
+    const measure = () => {
+      const { height, width } = stage.getBoundingClientRect();
+
+      setPlayerStageSize((current) => (
+        current && Math.abs(current.height - height) < 0.5 && Math.abs(current.width - width) < 0.5
+          ? current
+          : { height, width }
+      ));
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(stage);
+
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -2824,6 +2854,18 @@ export function LessonExperience({
     !isActiveLessonLocked &&
     activeLessonVideoProvider === "youtube" &&
     activePlayerRenderConfig?.kind === "iframe";
+  const youTubeEmbedFrameGeometry = usesCustomYouTubeControls && playerStageSize
+    ? getYouTubeEmbedFrameGeometry({
+        saveData: typeof navigator !== "undefined"
+          ? Boolean((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData)
+          : false,
+        stageHeight: playerStageSize.height,
+        stageWidth: playerStageSize.width
+      })
+    : null;
+  const youTubeEmbedFrameStyle = youTubeEmbedFrameGeometry
+    ? getYouTubeEmbedFrameStyle(youTubeEmbedFrameGeometry)
+    : undefined;
   const youTubeAvailableQualities = youTubeStreamsResult.videoId === activeYouTubeVideoId
     ? youTubeStreamsResult.qualities
     : [];
@@ -3946,6 +3988,7 @@ export function LessonExperience({
                 ? "absolute left-1/2 top-1/2 aspect-video w-full max-w-[177.7778vh] -translate-x-1/2 -translate-y-1/2 overflow-hidden bg-black"
                 : "absolute inset-0 overflow-hidden rounded-[8px] bg-black"}
               data-lesson-player-stage
+              ref={playerStageRef}
             >
               {!isActiveLessonLocked && activePlayerRenderConfig ? (
                 activePlayerRenderConfig.kind === "video" ? (
@@ -4010,8 +4053,11 @@ export function LessonExperience({
                       allowFullScreen={!usesCustomYouTubeControls}
                       aria-hidden={usesCustomYouTubeControls ? "true" : undefined}
                       className={usesCustomYouTubeControls
-                        ? "pointer-events-none absolute left-1/2 top-0 h-full w-[300%] max-w-none -translate-x-1/2 select-none border-0"
+                        ? youTubeEmbedFrameStyle
+                          ? "pointer-events-none absolute left-1/2 top-0 max-w-none select-none border-0"
+                          : "pointer-events-none absolute left-1/2 top-0 h-full w-[300%] max-w-none -translate-x-1/2 select-none border-0"
                         : "h-full w-full border-0"}
+                      data-youtube-embed-frame={youTubeEmbedFrameGeometry ? `${youTubeEmbedFrameGeometry.width}x${youTubeEmbedFrameGeometry.height}` : undefined}
                       key={`${activeLessonKey}-${youTubeReloadToken}`}
                       onError={usesCustomYouTubeControls ? () => {
                         setYouTubeControlState((current) => ({
@@ -4031,6 +4077,7 @@ export function LessonExperience({
                         ? "allow-same-origin allow-scripts allow-presentation"
                         : "allow-same-origin allow-scripts allow-presentation allow-popups"}
                       src={activePlayerRenderConfig.src}
+                      style={youTubeEmbedFrameStyle}
                       tabIndex={usesCustomYouTubeControls ? -1 : undefined}
                       title={activeLesson.title}
                     />
