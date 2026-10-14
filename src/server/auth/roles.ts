@@ -37,6 +37,8 @@ export const ADMIN_ACTION_ROLES = {
   "students.read_personal": ["owner", "admin", "support"],
   /** Alunos: liberar, estender, suspender e revogar acesso. */
   "students.access": ["owner", "admin", "support"],
+  /** Alunos: excluir aluno (conta, acessos e dados pessoais). */
+  "students.delete": managers,
   /** Exportar CSV com dados pessoais. */
   "students.export": managers,
   /** Comunicacao: criar e agendar avisos, webinarios e promocoes. */

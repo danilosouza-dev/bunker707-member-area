@@ -6,18 +6,12 @@ const readSource = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
 const [
   accountLinkSource,
-  connectionsManagerSource,
   providerConnectionsSource,
-  providerAdapterSource,
-  providerSettingsSource,
-  usageDashboardSource
+  providerAdapterSource
 ] = await Promise.all([
   readSource("../src/server/ai/account-link.ts"),
-  readSource("../src/components/admin/settings/ai-connections-manager.tsx"),
   readSource("../src/server/ai/provider-connections.ts"),
-  readSource("../src/server/ai/provider-adapter.ts"),
-  readSource("../src/components/admin/settings/ai-provider-settings.tsx"),
-  readSource("../src/components/admin/settings/ai-usage-dashboard.tsx")
+  readSource("../src/server/ai/provider-adapter.ts")
 ]);
 
 test("expired and cancelled OAuth sessions persist their terminal state when remote cleanup fails", () => {
@@ -28,13 +22,6 @@ test("expired and cancelled OAuth sessions persist their terminal state when rem
   assert.match(accountLinkSource, /status: "cancelled"[\s\S]*?oauth_cleanup_failed_after_cancel/);
 });
 
-test("connected-account status polling never overlaps requests", () => {
-  assert.match(connectionsManagerSource, /nextPollTimeout = window\.setTimeout\(\(\) => void poll\(\), 2_000\)/);
-  assert.match(connectionsManagerSource, /signal: controller\.signal/);
-  assert.match(connectionsManagerSource, /controller\.abort\(\)/);
-  assert.doesNotMatch(connectionsManagerSource, /setInterval\(\(\) => void poll\(\), 2_000\)/);
-});
-
 test("producer can pause or remove account-gateway connections when remote cleanup fails", () => {
   assert.match(providerConnectionsSource, /gatewayPauseFailure = getGatewayFailureMetadata\(error\)/);
   assert.match(providerConnectionsSource, /A conexao sera pausada localmente, mas o gateway nao confirmou a pausa/);
@@ -43,12 +30,6 @@ test("producer can pause or remove account-gateway connections when remote clean
   assert.match(providerConnectionsSource, /A conexao sera removida localmente, mas o gateway nao confirmou a pausa/);
   assert.match(providerConnectionsSource, /delete_ai_provider_connection/);
   assert.match(providerConnectionsSource, /gateway_delete_error_code: gatewayDeleteFailure\?\.code/);
-});
-
-test("usage period changes only after the matching summary is loaded", () => {
-  assert.match(providerSettingsSource, /setUsage\(payload\.data\);\s*setUsageDays\(Number\.isInteger\(payload\.data\.days\) \? payload\.data\.days : days\)/);
-  assert.match(providerSettingsSource, /function changeUsageDays\(days: number\) \{\s*void loadUsage\(days\);\s*\}/);
-  assert.match(usageDashboardSource, /days=\{Number\.isInteger\(summary\.days\) \? summary\.days : days\}/);
 });
 
 test("Gemini authenticates with a header instead of exposing the API key in the URL", () => {

@@ -7,7 +7,7 @@ const proxySource = await readFile(new URL("../proxy.ts", import.meta.url), "utf
 const nextConfigSource = await readFile(new URL("../next.config.ts", import.meta.url), "utf8");
 const supabaseConfigSource = await readFile(new URL("../supabase/config.toml", import.meta.url), "utf8");
 const lessonExperienceSource = await readFile(new URL("../src/components/lesson-experience.tsx", import.meta.url), "utf8");
-const lessonRouteSource = await readFile(new URL("../src/app/api/admin/lessons/route.ts", import.meta.url), "utf8");
+const contentActionsSource = await readFile(new URL("../src/server/catalog/content-actions.ts", import.meta.url), "utf8");
 const videoEmbedSource = await readFile(new URL("../src/lib/video-embed.ts", import.meta.url), "utf8");
 const postHogAnalyticsSource = await readFile(
   new URL("../src/components/analytics/posthog-analytics.tsx", import.meta.url),
@@ -87,8 +87,7 @@ test("lesson embeds never execute producer HTML through srcDoc", () => {
   assert.match(lessonExperienceSource, /getSafeEmbedUrl/);
   assert.match(videoEmbedSource, /url\.protocol !== "https:"/);
   assert.match(videoEmbedSource, /url\.username \|\| url\.password/);
-  assert.match(lessonRouteSource, /normalizeLessonVideoConfig\(payload\.video\)/);
-  assert.match(lessonRouteSource, /Configuracao de video invalida/);
+  assert.match(contentActionsSource, /normalizeLessonVideoConfig\(detection\.config\)/);
 });
 
 test("PostHog autocapture never sends element text or attributes", () => {

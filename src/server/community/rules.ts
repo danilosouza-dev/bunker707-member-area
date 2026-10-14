@@ -2,7 +2,7 @@
 
 // Palavras bloqueadas (aba Regras). Mesma tabela e mesma normalizacao do bloqueio na publicacao do
 // aluno (src/server/comments/comment-store.ts), com escrita de uma linha por vez e mensagens com
-// acento. O admin antigo continua usando as rotas /api/admin/moderation/blocked-words.
+// acento.
 
 import { refresh } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";

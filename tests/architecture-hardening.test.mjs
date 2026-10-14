@@ -7,6 +7,8 @@ const lessonSource = await readFile(new URL("../src/components/lesson-experience
 const mediaAssetsSource = await readFile(new URL("../src/server/db/media-assets.ts", import.meta.url), "utf8");
 const lessonAccessSource = await readFile(new URL("../src/server/access/lesson-access.ts", import.meta.url), "utf8");
 const platformStoreSource = await readFile(new URL("../src/server/db/platform-store.ts", import.meta.url), "utf8");
+const productActionsSource = await readFile(new URL("../src/server/catalog/product-actions.ts", import.meta.url), "utf8");
+const catalogImagesSource = await readFile(new URL("../src/server/catalog/images.ts", import.meta.url), "utf8");
 const progressRouteSource = await readFile(new URL("../src/app/api/progress/lessons/route.ts", import.meta.url), "utf8");
 const routeErrorsSource = await readFile(new URL("../src/server/http/route-errors.ts", import.meta.url), "utf8");
 const hardeningMigrationSource = await readFile(
@@ -52,12 +54,11 @@ test("inline images are persisted in a constrained Storage bucket", () => {
   assert.match(mediaAssetsSource, /\["image\/png", "png"\]/);
   assert.match(mediaAssetsSource, /\["image\/webp", "webp"\]/);
   assert.match(mediaAssetsSource, /cacheControl: "31536000"/);
-  assert.match(platformStoreSource, /persistImageAsset\(normalizedItem\.image/);
+  assert.match(catalogImagesSource, /persistImageAsset\(value, `content\/\$\{productId\}\/\$\{slot\}`\)/);
 });
 
 test("content publication is explicit and member reads exclude drafts", () => {
-  assert.match(platformStoreSource, /publication_status: item\.publicationStatus \?\? "published"/);
-  assert.match(platformStoreSource, /publicationStatus: input\.publicationStatus \?\? "draft"/);
+  assert.match(productActionsSource, /publication_status: "draft"/, "produto novo nasce em rascunho");
   assert.match(platformStoreSource, /\.eq\("publication_status", "published"\)/);
 });
 

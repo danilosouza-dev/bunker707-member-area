@@ -75,8 +75,8 @@ async function writeHomeModuleRow(desired: { enabled: boolean; productId: string
 
 /**
  * [storefront.write] Liga/desliga a fileira de modulos do produto na home (a Vitrine e a fonte da
- * verdade) e, opcionalmente, troca o titulo. Espelha content_page_settings.homeModuleSection para o
- * admin antigo.
+ * verdade) e, opcionalmente, troca o titulo. Espelha content_page_settings.homeModuleSection, que a
+ * vitrine usa como padrao enquanto nunca foi publicada.
  */
 export async function setHomeModuleRow(input: SetHomeModuleRowInput): Promise<ActionResult<HomeModuleRowState>> {
   return runAdminAction("storefront.write", setHomeModuleRowSchema, input, async ({ input: data }) => {
@@ -99,7 +99,7 @@ export async function setHomeModuleRow(input: SetHomeModuleRowInput): Promise<Ac
         data.enabled ? { set: { homeModuleSection: { enabled: true } } } : { unset: ["homeModuleSection"] }
       );
     } catch (error) {
-      // O espelho so serve ao admin antigo: a fileira ja esta gravada na vitrine, que e o que o aluno ve.
+      // O espelho e so o padrao de uma vitrine nunca publicada: a fileira ja esta gravada na vitrine, que e o que o aluno ve.
       console.error("[area-de-membros/modulos] espelho de homeModuleSection", error);
     }
 

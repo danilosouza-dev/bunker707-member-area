@@ -63,8 +63,8 @@ const routes = listRoutes(apiRoot).map((path) => ({
 }));
 
 test("a varredura encontrou as rotas do admin", () => {
-  assert.ok(routes.length >= 25, `rotas encontradas: ${routes.length}`);
-  assert.ok(routes.some((route) => route.name === "content"));
+  assert.ok(routes.length >= 16, `rotas encontradas: ${routes.length}`);
+  assert.ok(routes.some((route) => route.name === "appearance"));
 });
 
 test("analista recebe 403 em qualquer escrita das rotas do admin", () => {
@@ -92,21 +92,13 @@ test("toda leitura das rotas do admin tem guarda", () => {
 test("cada escrita usa a acao certa do mapa da fase 1", () => {
   const expected = {
     appearance: { PUT: "storefront.write" },
-    cohorts: { POST: "catalog.write" },
-    collections: { POST: "settings.ai" },
-    combos: { DELETE: "catalog.write", POST: "catalog.write" },
-    content: { DELETE: "catalog.delete", PATCH: "catalog.write", POST: "catalog.write" },
     "home-sections": { PUT: "storefront.write" },
     "lessons/[lessonId]/transcript": { PUT: "catalog.write" },
     "lessons/[lessonId]/transcript/import-youtube": { POST: "catalog.write" },
     "lessons/[lessonId]/tutor/process": { POST: "catalog.write" },
-    lessons: { DELETE: "catalog.write", PATCH: "catalog.write", POST: "catalog.write" },
     "moderation/blocked-words": { POST: "community.moderate" },
     "moderation/blocked-words/[ruleId]": { DELETE: "community.moderate", PATCH: "community.moderate" },
-    "moderation/comments/[commentId]": { PATCH: "community.moderate" },
-    modules: { DELETE: "catalog.write", PATCH: "catalog.write", POST: "catalog.write" },
-    "youtube-playlists/import": { POST: "catalog.write" },
-    "youtube-playlists/preview": { POST: "catalog.write" }
+    "moderation/comments/[commentId]": { PATCH: "community.moderate" }
   };
 
   for (const [name, methods] of Object.entries(expected)) {
@@ -127,19 +119,20 @@ test("cada escrita usa a acao certa do mapa da fase 1", () => {
   }
 });
 
-test("alunos continuam restritos a dono e administrador ate Alunos v2", () => {
-  for (const name of ["students", "students/access"]) {
-    const route = routes.find((item) => item.name === name);
-    assert.ok(route, `rota ${name} existe`);
+test("alunos: toda Server Action passa por runAdminAction com uma acao students.*", () => {
+  const actions = readFileSync(join(apiRoot, "../../../server/students/actions.ts"), "utf8");
+  const exported = actions.match(/export async function \w+/g) ?? [];
+  const guarded = actions.match(/runAdminAction\("students\.(access|delete|export|read_basic)"/g) ?? [];
 
-    for (const handler of handlers(route.source).filter((item) => item.method !== "GET")) {
-      assert.deepEqual(guardRoles(handler.body), ["owner", "admin"], `${handler.method} /api/admin/${name}`);
-    }
-  }
+  assert.ok(exported.length >= 14, `acoes exportadas: ${exported.length}`);
+  assert.match(actions, /runAdminAction\("students\.export", exportQuerySchema/, "exportar CSV exige students.export");
+  assert.equal(guarded.length, exported.length, "cada acao exportada usa runAdminAction com acao students.*");
+  assert.match(actions, /runAdminAction\("students\.delete", deleteStudentSchema/);
+  assert.doesNotMatch(actions, /requireApiAdmin|getSupabaseAdminClient\(/);
 });
 
 test("rotas que mudam o catalogo invalidam o cache depois de gravar", () => {
-  const catalogRoutes = ["content", "modules", "lessons", "combos", "home-sections", "appearance", "youtube-playlists/import"];
+  const catalogRoutes = ["home-sections", "appearance"];
 
   for (const name of catalogRoutes) {
     const route = routes.find((item) => item.name === name);

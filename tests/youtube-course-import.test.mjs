@@ -9,12 +9,8 @@ import {
   suggestYouTubeCourseModuleRanges
 } from "../src/lib/youtube-course-import.ts";
 
-const previewRouteSource = await readFile(
-  new URL("../src/app/api/admin/youtube-playlists/preview/route.ts", import.meta.url),
-  "utf8"
-);
-const importRouteSource = await readFile(
-  new URL("../src/app/api/admin/youtube-playlists/import/route.ts", import.meta.url),
+const importActionsSource = await readFile(
+  new URL("../src/server/catalog/import-actions.ts", import.meta.url),
   "utf8"
 );
 const importerSource = await readFile(
@@ -146,16 +142,15 @@ test("preview groups, orders and de-duplicates playlist lessons safely", () => {
   assert.match(preview.warnings.join(" "), /nao segue/);
 });
 
-test("admin routes revalidate the playlist server-side and never trust a client manifest", () => {
-  assert.match(previewRouteSource, /requireApiRole\("catalog\.write"\)/);
-  assert.match(importRouteSource, /requireApiRole\("catalog\.write"\)/);
-  assert.match(previewRouteSource, /readBoundedJson/);
-  assert.match(importRouteSource, /readBoundedJson/);
+test("import actions revalidate the playlist server-side and never trust a client manifest", () => {
+  assert.match(importActionsSource, /runAdminAction\("catalog\.write", previewPlaylistSchema/);
+  assert.match(importActionsSource, /runAdminAction\("catalog\.write", importPlaylistSchema/);
+  assert.match(importActionsSource, /importYouTubePlaylistCourse\(/);
   assert.match(importerSource, /loadYouTubeCourseImportPreview\(input\.playlistUrl/);
   assert.match(importerSource, /organizationMode: input\.organizationMode/);
   assert.match(importerSource, /moduleRanges: input\.organizationMode === "manual_ranges"/);
   assert.match(importerSource, /process\.env\.YOUTUBE_DATA_API_KEY/);
-  assert.doesNotMatch(importRouteSource, /YOUTUBE_DATA_API_KEY/);
+  assert.doesNotMatch(importActionsSource, /YOUTUBE_DATA_API_KEY/);
 });
 
 test("database import is transactional, idempotent, private and always returns a draft", () => {
