@@ -49,7 +49,8 @@ Decisao temporaria para a origem gratuita:
 - manter `Automatica` via embed e oferecer no modo manual apenas as resolucoes reais encontradas para o video, inclusive `2160p` (`3840x2160`) quando disponivel;
 - no modo manual, entregar ao navegador fluxos temporarios diretos e separados de audio e video, sem proxy pela aplicacao;
 - tratar a extracao manual como integracao nao oficial, sujeita a expiracao e quebras por mudancas do YouTube, sem promessa de sigilo, DRM ou protecao da origem;
-- (2026-10-10) a extracao manual ganhou o desligamento `YOUTUBE_UNOFFICIAL_STREAMS=off` (padrao `on` na fase 0, desligada na fase 4 de `docs/17-admin-produtor-redesign.md`), que deixa o aluno e o Modo TV so com `Automático` no embed oficial e mantem as legendas.
+- (2026-10-10) a extracao manual ganhou o desligamento `YOUTUBE_UNOFFICIAL_STREAMS=off` (padrao `on` na fase 0, desligada na fase 4 de `docs/17-admin-produtor-redesign.md`), que deixa o aluno e o Modo TV so com `Automático` no embed oficial e mantem as legendas;
+- (2026-10-14) o `Automático` renderiza o iframe oficial com altura interna minima de 1080 px CSS, reduzido com `transform: scale()` ate o palco (ver `docs/04-arquitetura-tecnica.md`), porque o embed escolhe a qualidade pelo tamanho do viewport e ficava em 720p. No mesmo dia foi verificado que o `googlevideo` rejeita (`403`) requisicoes com `Range` aberto e nao libera CORS para a aplicacao, entao o modo manual nao reproduz em nenhum navegador: desligar `YOUTUBE_UNOFFICIAL_STREAMS` em producao e seguir com a migracao para Bunny (fase 4) para controle real de qualidade.
 
 A escolha de um provedor pago definitivo continua pendente.
 
