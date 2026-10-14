@@ -4,6 +4,7 @@
 // porque voltam na escrita seguinte como `expectedUpdatedAt` e precisam bater exatamente.
 
 import type { LessonVideoConfig, ReleaseRuleConfig } from "@/lib/platform-types";
+import { normalizeHeroVideoOptions } from "../../lib/hero-video";
 import { VIDEO_PROVIDER_LABELS } from "../../lib/video-detect";
 import { normalizeLessonVideoConfig } from "../../lib/video-embed";
 import {
@@ -151,16 +152,43 @@ export function heroCornersOf(settings: ProductSettings | null | undefined): Pro
   return corners === "rounded" || corners === "soft" ? corners : "inherit";
 }
 
-export function heroUrlOf(settings: ProductSettings | null | undefined) {
+function heroRecordOf(settings: ProductSettings | null | undefined) {
   const hero = settings?.hero;
 
-  if (!hero || typeof hero !== "object" || Array.isArray(hero)) {
+  return hero && typeof hero === "object" && !Array.isArray(hero)
+    ? (hero as { mediaSrc?: unknown; mediaType?: unknown; poster?: unknown; videoOptions?: unknown; youtubeId?: unknown })
+    : null;
+}
+
+/** Tipo do video de destaque: YouTube (id gravado) ou arquivo direto; null sem video. */
+export function heroVideoKindOf(settings: ProductSettings | null | undefined): "file" | "youtube" | null {
+  const hero = heroRecordOf(settings);
+
+  if (hero?.mediaType !== "video" || typeof hero.mediaSrc !== "string" || !hero.mediaSrc.trim()) {
     return null;
   }
 
-  const { mediaSrc, mediaType } = hero as { mediaSrc?: unknown; mediaType?: unknown };
+  return typeof hero.youtubeId === "string" && hero.youtubeId ? "youtube" : "file";
+}
 
-  return mediaType !== "video" && typeof mediaSrc === "string" && mediaSrc.trim() ? mediaSrc.trim() : null;
+/** Opcoes do video de destaque com os padroes preenchidos. */
+export function heroVideoOptionsOf(settings: ProductSettings | null | undefined) {
+  return normalizeHeroVideoOptions(heroRecordOf(settings)?.videoOptions);
+}
+
+/** Imagem de destaque: a imagem do banner ou, quando o destaque e um video, a capa (poster) dele. */
+export function heroUrlOf(settings: ProductSettings | null | undefined) {
+  const hero = heroRecordOf(settings);
+  const source = hero?.mediaType === "video" ? hero.poster : hero?.mediaSrc;
+
+  return typeof source === "string" && source.trim() ? source.trim() : null;
+}
+
+/** Link do video de destaque (settings.hero com mediaType "video"); null quando o destaque e so imagem. */
+export function heroVideoUrlOf(settings: ProductSettings | null | undefined) {
+  const hero = heroRecordOf(settings);
+
+  return hero?.mediaType === "video" && typeof hero.mediaSrc === "string" && hero.mediaSrc.trim() ? hero.mediaSrc.trim() : null;
 }
 
 export function instructorNameOf(instructor: ProductRow["instructor"]) {

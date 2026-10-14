@@ -1,4 +1,5 @@
 import { MEMBER_STYLE_DEFAULTS, normalizeMemberStyle, type MemberStyleConfig } from "@/lib/member-style";
+import { heroVideoPosterOf } from "@/lib/hero-video";
 import "server-only";
 import { redactSecrets } from "@/lib/env-value";
 
@@ -45,9 +46,11 @@ import type {
   AdminStudent,
   AdminStudentCourse,
   CommerceScope,
+  ContentModalMedia,
   ContentModalStructure,
   ContentItem,
   ContentKind,
+  ContentPageHeroConfig,
   ContentPageSettings,
   ContentPublicationStatus,
   CoursePresentationMode,
@@ -2189,7 +2192,7 @@ function resolveConfiguredHomeRows(
       const settings = database.contentPageSettings[course.id];
 
       return [{
-        backgroundImage: settings?.hero?.mediaSrc ?? course.image,
+        backgroundImage: getHeroImageSrc(settings?.hero) ?? course.image,
         course,
         id: section.id,
         items: [course],
@@ -2238,6 +2241,36 @@ function resolveConfiguredHomeRows(
   });
 }
 
+/** Imagem que representa o destaque do produto: a propria imagem ou, quando e um video, a capa (poster). */
+function getHeroImageSrc(hero: ContentPageHeroConfig | undefined): string | undefined {
+  const source = hero?.mediaType === "video" ? heroVideoPosterOf(hero) : hero?.mediaSrc;
+
+  return typeof source === "string" && source.trim() ? source.trim() : undefined;
+}
+
+/** Midia do topo do modal: a "Imagem de destaque" (ou o video de destaque com a capa) gravada em settings.hero. */
+function getContentModalMedia(hero: ContentPageHeroConfig | undefined): ContentModalMedia | undefined {
+  const mediaSrc = typeof hero?.mediaSrc === "string" ? hero.mediaSrc.trim() : "";
+
+  if (!hero || !mediaSrc) {
+    return undefined;
+  }
+
+  if (hero.mediaType === "video") {
+    const poster = typeof hero.poster === "string" && hero.poster.trim() ? hero.poster.trim() : undefined;
+
+    return {
+      mediaSrc,
+      mediaType: "video",
+      ...(poster ? { poster } : {}),
+      ...(typeof hero.youtubeId === "string" && hero.youtubeId ? { youtubeId: hero.youtubeId } : {}),
+      ...(hero.videoOptions ? { videoOptions: hero.videoOptions } : {})
+    };
+  }
+
+  return { mediaSrc, mediaType: "image" };
+}
+
 function getHomeModalStructures(
   database: PlatformDatabase,
   rows: HomeRow[],
@@ -2245,7 +2278,8 @@ function getHomeModalStructures(
   user: AuthenticatedUser | string | undefined,
   release: MemberReleaseContext
 ): Record<string, ContentModalStructure> {
-  const items = rows.flatMap((row) => row.items);
+  // Inclui os cursos internos da fileira de modulos (structureItems): eles tambem abrem o modal.
+  const items = rows.flatMap((row) => [...row.items, ...(row.structureItems ?? [])]);
   const uniqueItems = new Map(items.map((item) => [item.id, item]));
   const { userId } = getUserIdentity(user);
   const savedItems = getSavedItemSet(database, userId);
@@ -2268,7 +2302,9 @@ function getHomeModalStructures(
             savedItems
           ))
           : [],
-        // O modal da home so mostra capa, titulo e duracao das aulas: nenhum video sai daqui.
+        // Destaque publico do produto (imagem ou video de apresentacao), o mesmo da pagina do curso.
+        media: getContentModalMedia(database.contentPageSettings[item.id]?.hero),
+        // O modal da home so mostra capa, titulo e duracao das aulas: nenhum video de aula sai daqui.
         modules: applyMemberReleaseToModules(
           release,
           item,
@@ -3658,26 +3694,46 @@ export async function upsertContentItem(input: ContentWriteInput) {
   if (input.heroImage !== undefined) {
     const currentSettings = database.contentPageSettings[item.id] ?? {};
     const heroImage = persistedHeroImage?.trim() ?? "";
+    // Com video de destaque gravado (admin novo), a imagem do admin legado e a capa (poster) do video.
+    const videoHero = currentSettings.hero?.mediaType === "video" && currentSettings.hero.mediaSrc
+      ? currentSettings.hero
+      : undefined;
 
     if (heroImage) {
       database.contentPageSettings[item.id] = {
         ...currentSettings,
-        hero: {
-          ...currentSettings.hero,
-          mediaSrc: heroImage,
-          mediaType: "image",
-          visibility: {
-            badge: false,
-            cta: false,
-            description: false,
-            title: false,
-            ...currentSettings.hero?.visibility
+        hero: videoHero
+          ? { ...videoHero, poster: heroImage }
+          : {
+            ...currentSettings.hero,
+            mediaSrc: heroImage,
+            mediaType: "image",
+            visibility: {
+              badge: false,
+              cta: false,
+              description: false,
+              title: false,
+              ...currentSettings.hero?.visibility
+            }
           }
-        }
       };
+    } else if (videoHero) {
+      // Tirar a imagem nao apaga o video: so a capa sai.
+      const heroWithoutPoster = { ...videoHero };
+      delete heroWithoutPoster.poster;
+      database.contentPageSettings[item.id] = { ...currentSettings, hero: heroWithoutPoster };
     } else {
+      // Imagem vazia tira so a midia: cantos, textos e visibilidade do banner ficam como estavam.
+      const heroRest = Object.fromEntries(
+        Object.entries(currentSettings.hero ?? {}).filter(([key]) => !["mediaSrc", "mediaType", "poster", "youtubeId", "videoOptions"].includes(key))
+      );
       const remainingSettings = { ...currentSettings };
-      delete remainingSettings.hero;
+
+      if (Object.keys(heroRest).length > 0) {
+        remainingSettings.hero = heroRest as ContentPageHeroConfig;
+      } else {
+        delete remainingSettings.hero;
+      }
 
       if (Object.keys(remainingSettings).length > 0) {
         database.contentPageSettings[item.id] = remainingSettings;

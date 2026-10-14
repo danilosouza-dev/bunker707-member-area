@@ -42,6 +42,8 @@ export default async function Home({ searchParams }: HomeProps) {
               <FeaturedStructureHomeSection
                 accessPreviewMode={accessPreviewMode}
                 key={row.id}
+                media={modalStructures[row.course.id]?.media}
+                modalStructures={modalStructures}
                 row={row}
               />
             );

@@ -1,5 +1,6 @@
 "use client";
 
+import { Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -7,12 +8,13 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { CONFLICT_MESSAGE } from "@/server/catalog/errors";
 import { PRODUCT_FORMAT_LABELS, type ProductFormat } from "@/server/catalog/model";
-import { setProductHeroCorners, setProductImage, updateProductDetails } from "@/server/catalog/product-actions";
+import type { HeroVideoOptions } from "@/lib/platform-types";
+import { setProductHeroCorners, setProductHeroVideo, setProductHeroVideoOptions, setProductImage, updateProductDetails } from "@/server/catalog/product-actions";
 import { shortDescriptionSchema, updateProductDetailsSchema } from "@/server/catalog/schemas";
 import type { ProductDetails, ProductHeroCorners } from "@/server/catalog/types";
 import type { HomeModuleRowState } from "@/server/member-area/modules-model";
 import { ErrorBanner } from "../error-banner";
-import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../form";
+import { AdminField, PillGroup, adminInputClass, adminPillClasses, adminTextareaClass, fieldDescribedBy } from "../form";
 import { HomeRowControl } from "../member-area/modules/home-row-control";
 import { SaveBar } from "../save-bar";
 import { adminToast } from "../toast";
@@ -49,6 +51,40 @@ import { useWarnBeforeUnload } from "./use-warn-before-unload";
 const DESCRIPTION_LIMIT = 300;
 
 type ImageSlot = "cover" | "hero";
+type VideoOptionKey = keyof Required<HeroVideoOptions>;
+
+const VIDEO_OPTION_PILLS: ReadonlyArray<{ key: VideoOptionKey; label: string; youtubeOnly?: boolean }> = [
+  { key: "autoplay", label: "Tocar sozinho" },
+  { key: "startWithSound", label: "Começar com som" },
+  { key: "loop", label: "Repetir" },
+  { key: "soundButton", label: "Botão de som" },
+  { key: "volumeSlider", label: "Controle de volume" },
+  { key: "pauseButton", label: "Botão de pausar" },
+  { key: "timeline", label: "Linha do tempo" },
+  { key: "hideBranding", label: "Esconder logo e título do YouTube", youtubeOnly: true }
+];
+
+const VIDEO_OPTIONS_HINTS = {
+  file: "Os controles escolhidos (som, volume, pausar, linha do tempo) aparecem num grupo no canto do vídeo. Sem \"tocar sozinho\", o aluno vê a capa com um botão de tocar. \"Começar com som\" depende do navegador: funciona quando o aluno já clicou na página (como ao abrir o modal); se for bloqueado, começa sem som e o botão de som fica disponível. Em celulares costuma ser bloqueado.",
+  youtube:
+    "Os controles escolhidos (som, volume, pausar, linha do tempo) aparecem num grupo no canto do vídeo. \"Começar com som\" depende do navegador: funciona quando o aluno já clicou na página (como ao abrir o modal); se for bloqueado, recomeça sem som. Esconder a logo recorta um pouco as bordas do vídeo e bloqueia o clique sobre ele; os controles ficam todos pelos nossos botões. Ao pular na linha do tempo, o YouTube mostra por um instante os próprios botões no centro. É um recorte visual, fora das regras do player incorporado do YouTube, e não um recurso oficial: se o player mudar ou você preferir seguir as regras à risca, desligue a opção."
+};
+
+function OptionPill({ checked, disabled, label, onChange }: { checked: boolean; disabled?: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <label
+      className={cn(
+        adminPillClasses(checked),
+        "has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-[var(--focus-ring)]",
+        disabled && "cursor-not-allowed opacity-60"
+      )}
+    >
+      <input checked={checked} className="sr-only" disabled={disabled} onChange={(event) => onChange(event.target.checked)} type="checkbox" />
+      {checked ? <Check aria-hidden="true" className="size-4 shrink-0" /> : null}
+      {label}
+    </label>
+  );
+}
 
 /** Cantos do banner da pagina do produto (salva na hora). "Como a área" segue Marca > Estilo. */
 const HERO_CORNERS_OPTIONS: ReadonlyArray<{ label: string; value: ProductHeroCorners }> = [
@@ -97,6 +133,14 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
   const [saving, setSaving] = useState(false);
   const [heroUrl, setHeroUrl] = useState(details.heroUrl);
   const [heroCorners, setHeroCorners] = useState<ProductHeroCorners>(details.heroCorners);
+  const [heroVideoUrl, setHeroVideoUrl] = useState(details.heroVideoUrl);
+  const [heroVideoKind, setHeroVideoKind] = useState(details.heroVideoKind);
+  const [videoOptions, setVideoOptions] = useState(details.heroVideoOptions);
+  const [optionsPending, setOptionsPending] = useState(false);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+  const [videoDraft, setVideoDraft] = useState(details.heroVideoUrl ?? "");
+  const [videoPending, setVideoPending] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
   const [cornersPending, setCornersPending] = useState(false);
   const [cornersError, setCornersError] = useState<string | null>(null);
   const [imagePending, setImagePending] = useState<ImageSlot | null>(null);
@@ -122,9 +166,25 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
       setHeroUrl(details.heroUrl);
       setHeroCorners(details.heroCorners);
     }
+
+    if (!videoPending) {
+      // So substitui o rascunho do link quando ele nao foi mexido (igual ao valor salvo anterior).
+      if (videoDraft === (heroVideoUrl ?? "")) {
+        setVideoDraft(details.heroVideoUrl ?? "");
+      }
+
+      setHeroVideoUrl(details.heroVideoUrl);
+      setHeroVideoKind(details.heroVideoKind);
+    }
+
+    if (!optionsPending) {
+      setVideoOptions(details.heroVideoOptions);
+    }
   }
 
-  useWarnBeforeUnload(dirty);
+  const videoDirty = !readOnly && videoDraft.trim() !== (heroVideoUrl ?? "");
+
+  useWarnBeforeUnload(dirty || videoDirty);
 
   function update<Key extends keyof DetailsDraft>(key: Key, value: DetailsDraft[Key]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -230,6 +290,54 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
         ? { onUndo: () => void saveImage(slot, previous, { undoable: false }) }
         : undefined
     );
+  }
+
+  // Video de destaque: salva na hora, como as imagens. A imagem de destaque vira a capa do video.
+  async function saveHeroVideo(value: string | null) {
+    const next = value?.trim() || null;
+
+    if (readOnly || videoPending || next === heroVideoUrl) {
+      return;
+    }
+
+    setVideoPending(true);
+    setVideoError(null);
+    const result = await setProductHeroVideo({ id: header.id, videoUrl: next });
+    setVideoPending(false);
+
+    if (!result.ok) {
+      setVideoError(result.fieldErrors?.videoUrl?.[0] ?? result.error);
+      return;
+    }
+
+    setHeroVideoUrl(result.data.videoUrl);
+    setHeroVideoKind(result.data.videoKind);
+    setVideoDraft(result.data.videoUrl ?? "");
+    adminToast.success(result.data.videoUrl ? "Vídeo de destaque salvo" : "Vídeo de destaque removido");
+  }
+
+  // Opcoes do video: cada pilula salva na hora; erro volta a escolha anterior.
+  async function saveVideoOption(key: VideoOptionKey, checked: boolean) {
+    if (readOnly || optionsPending) {
+      return;
+    }
+
+    const previous = videoOptions;
+    const next = { ...videoOptions, [key]: checked };
+
+    setVideoOptions(next);
+    setOptionsPending(true);
+    setOptionsError(null);
+    const result = await setProductHeroVideoOptions({ id: header.id, options: next });
+    setOptionsPending(false);
+
+    if (!result.ok) {
+      setVideoOptions(previous);
+      setOptionsError(result.error);
+      return;
+    }
+
+    setVideoOptions(result.data.options);
   }
 
   // Cantos do banner: salva na hora, como as imagens. Erro volta a escolha anterior.
@@ -397,6 +505,82 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
         slot="hero"
         value={images.hero}
       />
+
+      <AdminField
+        error={videoError}
+        hint={
+          heroVideoUrl
+            ? "Visível para todos os alunos, inclusive quem ainda não comprou. Toca no topo do modal da home e na página do produto; a imagem de destaque é a capa (no YouTube, sem imagem, usa a miniatura do vídeo)."
+            : "Link do YouTube ou link direto do arquivo (.mp4, .webm ou .mov), por exemplo do Bunny Stream. Fica visível para todos os alunos, inclusive quem não comprou: use um trailer, nunca uma aula. Por padrão toca sozinho, sem som e em repetição; dá para mudar nas opções depois de salvar. A imagem de destaque vira a capa."
+        }
+        id="detalhes-video-destaque"
+        label="Vídeo de destaque"
+        optional
+      >
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
+          <Input
+            aria-describedby={fieldDescribedBy("detalhes-video-destaque", { error: videoError, hint: true })}
+            aria-invalid={videoError ? true : undefined}
+            autoComplete="off"
+            className={cn(adminInputClass, "min-w-0 flex-1")}
+            disabled={readOnly || videoPending}
+            id="detalhes-video-destaque"
+            inputMode="url"
+            maxLength={2048}
+            onChange={(event) => setVideoDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void saveHeroVideo(videoDraft);
+              }
+            }}
+            placeholder="https://youtube.com/watch?v=… ou https://…/video.mp4"
+            value={videoDraft}
+          />
+          {!readOnly ? (
+            <div className="flex shrink-0 gap-2">
+              <Button
+                className="px-3"
+                disabled={videoPending || videoDraft.trim() === (heroVideoUrl ?? "")}
+                onClick={() => void saveHeroVideo(videoDraft)}
+                type="button"
+                variant="secondary"
+              >
+                {videoPending ? "Salvando…" : "Salvar vídeo"}
+              </Button>
+              {heroVideoUrl ? (
+                <Button className="px-3" disabled={videoPending} onClick={() => void saveHeroVideo(null)} type="button" variant="ghost">
+                  Remover
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </AdminField>
+
+      {heroVideoUrl ? (
+        <fieldset className="flex min-w-0 flex-col gap-2">
+          <FieldLegend>Opções do vídeo</FieldLegend>
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {VIDEO_OPTION_PILLS.filter((pill) => !pill.youtubeOnly || heroVideoKind === "youtube").map((pill) => (
+              <OptionPill
+                checked={videoOptions[pill.key]}
+                disabled={readOnly || optionsPending}
+                key={pill.key}
+                label={pill.label}
+                onChange={(checked) => void saveVideoOption(pill.key, checked)}
+              />
+            ))}
+          </div>
+          {optionsError ? (
+            <FieldError>{optionsError}</FieldError>
+          ) : (
+            <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
+              {heroVideoKind === "youtube" ? VIDEO_OPTIONS_HINTS.youtube : VIDEO_OPTIONS_HINTS.file}
+            </p>
+          )}
+        </fieldset>
+      ) : null}
 
       <fieldset className="flex min-w-0 flex-col gap-2">
         <FieldLegend>Cantos do banner</FieldLegend>
