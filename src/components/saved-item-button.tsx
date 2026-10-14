@@ -219,11 +219,12 @@ export function SavedItemButton({
       aria-label={saved ? `Remover ${targetTitle} dos favoritos` : `Salvar ${targetTitle} nos favoritos`}
       aria-pressed={saved}
       className={cn("relative", className,
-        // Salvo = marcador preenchido em ambar. Verde com check e o "concluido" (anel de progresso), nao se
-        // repete aqui para as duas informacoes nao se confundirem no mesmo card.
+        // Estado so pelo traco: circulo fino e marcador vazado quando nao esta salvo; salvo, o circulo
+        // engrossa (2,5 px) e o marcador fica preenchido de branco. Sem cor nem check: verde com check e o
+        // "concluido" (anel de progresso) e nao se repete no mesmo card.
         saved
-          ? "border-amber-400/90 bg-black/45 text-amber-300 shadow-[0_12px_34px_rgba(0,0,0,0.42)] hover:border-amber-300 hover:bg-black/60"
-          : "border-zinc-400 bg-black/30 text-white hover:border-white hover:bg-white/10"
+          ? "border-[2.5px] border-white bg-black/45 text-white shadow-[0_12px_34px_rgba(0,0,0,0.42)] hover:bg-black/60"
+          : "border-[1.5px] border-zinc-300/80 bg-black/30 text-white hover:border-white hover:bg-white/10"
       )}
       onClick={handleClick}
       type="button"

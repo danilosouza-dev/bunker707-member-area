@@ -273,7 +273,7 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
               ) : null}
               <button
                 aria-label={`Ver detalhes de ${item.title}`}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-zinc-400 bg-black/30 text-white transition hover:border-white hover:bg-white/10 md:h-9 md:w-9"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full border-[1.5px] border-zinc-300/80 bg-black/30 text-white transition hover:border-white hover:bg-white/10 md:h-9 md:w-9"
                 onClick={handleDetailsClick}
                 type="button"
               >

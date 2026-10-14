@@ -282,9 +282,12 @@ test("content cards and modal persist saved items", () => {
   assert.match(savedButtonSource, /\/api\/saved-items/);
   assert.match(savedButtonSource, /aria-pressed=\{saved\}/);
   assert.match(savedButtonSource, /import \{ Bookmark \} from "lucide-react";/);
-  // Salvo = marcador preenchido em ambar; verde com check fica so para "concluido" (anel de progresso).
-  assert.match(savedButtonSource, /border-amber-400\/90 bg-black\/45 text-amber-300/);
-  assert.doesNotMatch(savedButtonSource, /emerald|<Check/, "salvo nao usa verde nem check");
+  // Estado so pelo traco: circulo fino (1,5 px) e marcador vazado; salvo = circulo de 2,5 px e marcador
+  // preenchido de branco. Verde com check fica so para "concluido" (anel de progresso).
+  assert.match(savedButtonSource, /border-\[2\.5px\] border-white bg-black\/45 text-white/);
+  assert.match(savedButtonSource, /border-\[1\.5px\] border-zinc-300\/80 bg-black\/30 text-white/);
+  assert.doesNotMatch(savedButtonSource, /emerald|amber|<Check/, "salvo nao usa cor nem check");
+  assert.match(cardSource, /rounded-full border-\[1\.5px\] border-zinc-300\/80 bg-black\/30 text-white transition hover:border-white/, "botao de detalhes com o mesmo circulo fino");
   assert.match(savedButtonSource, /saved \? "scale-95 fill-current" : ""/);
   assert.match(savedButtonSource, /function dispatchSavedItemChanged/);
   assert.match(savedButtonSource, /const savedItemSyncQueue = new Map/);
