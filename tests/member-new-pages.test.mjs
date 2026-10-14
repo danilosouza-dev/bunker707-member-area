@@ -92,7 +92,9 @@ test("servidor das paginas: so leitura do proprio aluno, sem chave de servico e 
   assert.match(profile, /^import "server-only";/m);
   assert.match(profile, /createSupabaseServerClient\(\)/);
   assert.doesNotMatch(profile, /getSupabaseAdminClient/);
-  assert.match(profile, /\.from\("profiles"\)[\s\S]*\.eq\("id", user\.id\)/);
+  // A leitura e memoizada por id do usuario logado (menu do topo e Perfil leem uma vez so).
+  assert.match(profile, /readStudentProfileRecord\(user\.id\)/);
+  assert.match(profile, /\.from\("profiles"\)[\s\S]*\.eq\("id", userId\)/);
 
   // Perfil: a linha de profiles vai ao banco junto com o menu, nao depois dele.
   const profilePage = read("src/app/perfil/page.tsx");

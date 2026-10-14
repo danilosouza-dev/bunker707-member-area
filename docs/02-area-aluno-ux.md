@@ -669,11 +669,13 @@ Estado vazio deve ser simples e util:
 
 Pagina `/perfil` (aluno v2), com abas no endereco (`?aba=dados|acessos|seguranca`):
 
+- foto do perfil (desde 14/10/2026): no cabecalho, clicar na foto ou em `Adicionar foto`/`Alterar foto` abre a escolha da imagem e um recorte redondo (arrastar, zoom, teclado); o navegador gera WebP quadrado de ate 512 px e o servidor confere de novo (`src/components/member/profile/profile-avatar-editor.tsx`, `PUT/DELETE /api/profile/avatar`). A foto fica no bucket publico `content-assets` em `avatars/{id}/`, o endereco vai para `profiles.avatar_url` com a sessao do aluno, a foto antiga e apagada, e ela aparece no menu do topo e nos comentarios novos. `Remover foto` volta para as iniciais;
+
 - `Dados`: nome, e-mail, telefone, aluno desde e ultimo acesso. Le so a linha do proprio usuario em `profiles` (com a sessao dele e RLS) e os dados da conta; o que nao existe aparece como `Não informado`;
 - `Acessos`: cada produto com acesso, com data de inicio e fim (ou vitalicio); gratuito e previa do produtor aparecem rotulados; sem acessos, estado vazio com o caminho para o Suporte;
 - `Segurança`: `Alterar senha` (leva a `/alterar-senha` e volta para o perfil) e `Sair da conta`.
 
-Fica para depois: editar nome/telefone/foto (antes e preciso unificar as tres origens do nome: cadastro do aluno, perfil e conta), preferencias e dispositivos/sessoes.
+Fica para depois: editar nome/telefone (antes e preciso unificar as tres origens do nome: cadastro do aluno, perfil e conta), preferencias e dispositivos/sessoes.
 
 ## Suporte
 

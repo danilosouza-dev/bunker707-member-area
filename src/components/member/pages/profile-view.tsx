@@ -17,7 +17,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { MemberAvatar } from "@/components/member/ui/member-avatar";
+import { ProfileAvatarEditor } from "@/components/member/profile/profile-avatar-editor";
 import { MemberButtonLink } from "@/components/member/ui/member-button";
 import { MemberChip, type MemberChipTone } from "@/components/member/ui/member-chip";
 import { MemberEmptyState } from "@/components/member/ui/member-empty-state";
@@ -30,8 +30,8 @@ import { MEMBER_ROUTES } from "@/lib/member-navigation";
 import type { ProfileAccessView, ProfileDetailsView, ProfileTab } from "@/server/member-area/student-pages-model";
 import { ProfileSignOutButton } from "./profile-sign-out-button";
 
-// Perfil do aluno: Dados (somente leitura nesta fase), Acessos (inicio e fim de cada acesso ativo) e
-// Segurança (alterar senha e sair). Abas trocam o endereco (?aba=), sem JavaScript. Rotulos curtos
+// Perfil do aluno: foto (o aluno troca ou remove no cabecalho), Dados (somente leitura nesta fase),
+// Acessos (inicio e fim de cada acesso ativo) e Segurança (alterar senha e sair). Abas trocam o endereco (?aba=), sem JavaScript. Rotulos curtos
 // para as tres abas caberem em 390 px sem rolar.
 
 const accessTones: Record<ProfileAccessView["kind"], MemberChipTone> = {
@@ -226,16 +226,13 @@ export function ProfileView({
           <CircleUser aria-hidden="true" className="size-4 text-[var(--accent)]" strokeWidth={2.2} />
           Sua conta
         </p>
-        <div className="flex min-w-0 items-center gap-4 sm:gap-5">
-          <MemberAvatar className="max-sm:size-16" imageSrc={details.avatarUrl} name={details.fullName} size="xl" />
-          <div className="min-w-0">
-            <h1 className="truncate text-[26px] font-black leading-[1.1] text-white sm:text-4xl">{details.fullName}</h1>
-            {details.email ? <p className="mt-1.5 truncate text-sm text-zinc-400 sm:text-[15px]">{details.email}</p> : null}
-            {details.memberSinceLabel ? (
-              <p className="mt-1 text-xs text-zinc-500">Aluno desde {details.memberSinceLabel}</p>
-            ) : null}
-          </div>
-        </div>
+        <ProfileAvatarEditor avatarUrl={details.avatarUrl} name={details.fullName}>
+          <h1 className="truncate text-[26px] font-black leading-[1.1] text-white sm:text-4xl">{details.fullName}</h1>
+          {details.email ? <p className="mt-1.5 truncate text-sm text-zinc-400 sm:text-[15px]">{details.email}</p> : null}
+          {details.memberSinceLabel ? (
+            <p className="mt-1 text-xs text-zinc-500">Aluno desde {details.memberSinceLabel}</p>
+          ) : null}
+        </ProfileAvatarEditor>
       </header>
 
       <MemberTabNav

@@ -29,6 +29,8 @@ import {
 } from "@/server/catalog/storefront-listing";
 import { INVALID_SUPABASE_KEY_MESSAGE, isInvalidSupabaseKeyError } from "@/server/db/supabase-key-error";
 import { MemberAreaConflictError } from "@/server/member-area/errors";
+import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
+import { getStudentProfileRecord } from "@/server/member-area/student-profile";
 import { readPlatformSetting, updatePlatformSettingLatest, writePlatformSettingGuarded } from "@/server/member-area/settings-store";
 import { pruneHomeSectionRefs } from "@/server/storefront/model";
 import type {
@@ -75,6 +77,8 @@ import type {
 import { getCourseProgressFromModules } from "@/lib/course-progress";
 
 type PlatformStudent = {
+  /** Foto do perfil (profiles.avatar_url), so no menu do topo; ausente = iniciais. */
+  avatarUrl?: string | null;
   fullName: string;
   name: string;
 };
@@ -2861,13 +2865,16 @@ function applyLessonProgress(database: PlatformDatabase, contentId: string, modu
 }
 
 export async function getAppShellData(user?: AuthenticatedUser) {
-  const database = await readDatabaseForUser(user);
-  const adminRole = user ? await getAdminRoleForUser(user.id) : null;
+  const [database, adminRole, profile] = await Promise.all([
+    readDatabaseForUser(user),
+    user ? getAdminRoleForUser(user.id) : Promise.resolve(null),
+    user ? getStudentProfileRecord(user) : Promise.resolve(null)
+  ]);
 
   return {
     branding: database.branding,
     canUseAccessPreview: Boolean(adminRole),
-    student: getStudentForUser(database, user)
+    student: { ...getStudentForUser(database, user), avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl) }
   };
 }
 
