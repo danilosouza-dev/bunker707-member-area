@@ -272,6 +272,10 @@ export type HeroVideoOptions = {
   pauseButton?: boolean;
   /** Botao nosso de ligar/desligar o som. */
   soundButton?: boolean;
+  /** Linha do tempo nossa, com arrasto e tempos. */
+  timeline?: boolean;
+  /** Controle de volume nosso (deslizante). */
+  volumeSlider?: boolean;
 };
 
 export type LessonPreview = {

@@ -650,5 +650,5 @@ test("destaque em video: heroUrlOf devolve a capa, heroVideoUrlOf o link e o sch
   assert.equal(mappers.heroVideoKindOf(yt), "youtube");
   assert.equal(mappers.heroVideoKindOf(video), "file");
   assert.equal(mappers.heroVideoKindOf({ hero: { mediaSrc: "https://cdn/hero.webp", mediaType: "image" } }), null);
-  assert.deepEqual(mappers.heroVideoOptionsOf(yt), { autoplay: false, hideBranding: true, loop: true, nativeControls: false, pauseButton: false, soundButton: true });
+  assert.deepEqual(mappers.heroVideoOptionsOf(yt), { autoplay: false, hideBranding: true, loop: true, nativeControls: false, pauseButton: false, soundButton: true, timeline: false, volumeSlider: false });
 });

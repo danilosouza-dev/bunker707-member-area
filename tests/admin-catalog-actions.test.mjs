@@ -292,10 +292,10 @@ test("video de destaque: salvar guarda o link como video e a imagem vira capa; r
   db = heroDb({ mediaSrc: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", mediaType: "video", youtubeId: "dQw4w9WgXcQ", corners: "rounded" });
   const optionsResult = await setProductHeroVideoOptions({
     id: COURSE.id,
-    options: { autoplay: false, hideBranding: true, loop: false, nativeControls: false, pauseButton: true, soundButton: true }
+    options: { autoplay: false, hideBranding: true, loop: false, nativeControls: false, pauseButton: true, soundButton: true, timeline: true, volumeSlider: false }
   });
   assert.equal(optionsResult.ok, true, JSON.stringify(optionsResult));
-  assert.deepEqual(heroPatch(db).p_set.hero.videoOptions, { autoplay: false, hideBranding: true, loop: false, nativeControls: false, pauseButton: true, soundButton: true });
+  assert.deepEqual(heroPatch(db).p_set.hero.videoOptions, { autoplay: false, hideBranding: true, loop: false, nativeControls: false, pauseButton: true, soundButton: true, timeline: true, volumeSlider: false });
   assert.equal(heroPatch(db).p_set.hero.corners, "rounded");
   assert.equal(heroPatch(db).p_set.hero.youtubeId, "dQw4w9WgXcQ");
 
@@ -339,7 +339,7 @@ test("video de destaque: remover sem imagem apaga a chave; tirar a imagem preser
 });
 
 test("video de destaque: trocar YouTube por arquivo tira o youtubeId; remover tira as opcoes; a imagem nao mexe nos dois", async () => {
-  const OPTS = { autoplay: false, hideBranding: true, loop: false, nativeControls: false, pauseButton: true, soundButton: true };
+  const OPTS = { autoplay: false, hideBranding: true, loop: false, nativeControls: false, pauseButton: true, soundButton: true, timeline: true, volumeSlider: true };
   const YT = {
     corners: "rounded",
     mediaSrc: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",

@@ -14,7 +14,9 @@ export const HERO_VIDEO_OPTION_DEFAULTS: Required<HeroVideoOptions> = {
   loop: true,
   nativeControls: false,
   pauseButton: false,
-  soundButton: true
+  soundButton: true,
+  timeline: false,
+  volumeSlider: false
 };
 
 function flag(value: unknown, fallback: boolean) {
@@ -31,7 +33,9 @@ export function normalizeHeroVideoOptions(raw: unknown): Required<HeroVideoOptio
     loop: flag(source.loop, HERO_VIDEO_OPTION_DEFAULTS.loop),
     nativeControls: flag(source.nativeControls, HERO_VIDEO_OPTION_DEFAULTS.nativeControls),
     pauseButton: flag(source.pauseButton, HERO_VIDEO_OPTION_DEFAULTS.pauseButton),
-    soundButton: flag(source.soundButton, HERO_VIDEO_OPTION_DEFAULTS.soundButton)
+    soundButton: flag(source.soundButton, HERO_VIDEO_OPTION_DEFAULTS.soundButton),
+    timeline: flag(source.timeline, HERO_VIDEO_OPTION_DEFAULTS.timeline),
+    volumeSlider: flag(source.volumeSlider, HERO_VIDEO_OPTION_DEFAULTS.volumeSlider)
   };
 }
 

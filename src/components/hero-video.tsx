@@ -1,6 +1,6 @@
 "use client";
 
-import { Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { Pause, Play, Volume1, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cssImageUrl } from "@/lib/css-url";
 import { normalizeHeroVideoOptions, youtubeThumbnailUrl, type HeroVideoSource } from "@/lib/hero-video";
@@ -48,8 +48,130 @@ const AUTOPLAY_WAIT_MS = 2500;
 const HANDSHAKE_RETRY_MS = 400;
 const HANDSHAKE_MAX_TRIES = 12;
 
-const ROUND_BUTTON =
-  "grid h-10 w-10 place-items-center rounded-full bg-black/70 text-white shadow-lg shadow-black/30 transition hover:bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-white";
+const CONTROL_BUTTON =
+  "grid h-8 w-8 shrink-0 place-items-center rounded-full text-white transition hover:bg-white/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white";
+/** Quanto a linha do tempo anda com as setas do teclado (segundos) e o volume (pontos). */
+const TIMELINE_KEY_STEP_SECONDS = 5;
+const VOLUME_KEY_STEP = 10;
+/** Depois de mexer no som por aqui, ignora por um instante o que o player reporta (evita o botao piscar). */
+const LOCAL_CONTROL_GRACE_MS = 1200;
+
+function formatClock(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  const minutesLabel = hours > 0 ? String(minutes).padStart(2, "0") : String(minutes);
+
+  return `${hours > 0 ? `${hours}:` : ""}${minutesLabel}:${String(rest).padStart(2, "0")}`;
+}
+
+type MiniSliderProps = {
+  ariaLabel: string;
+  ariaValueText: string;
+  className?: string;
+  max: number;
+  /** Chamado enquanto arrasta ou com as setas. */
+  onChange: (value: number) => void;
+  /** Chamado ao soltar (ou com as setas), para acoes mais pesadas como pular no video. */
+  onCommit?: (value: number) => void;
+  step: number;
+  value: number;
+};
+
+/** Barra fina com arrasto, clique e teclado (setas, Home, End). Serve para a linha do tempo e para o volume. */
+function MiniSlider({ ariaLabel, ariaValueText, className = "", max, onChange, onCommit, step, value }: MiniSliderProps) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [dragValue, setDragValue] = useState(value);
+  const shown = dragging ? dragValue : value;
+  const fraction = max > 0 ? Math.min(1, Math.max(0, shown / max)) : 0;
+
+  function valueAt(clientX: number) {
+    const rect = trackRef.current?.getBoundingClientRect();
+
+    if (!rect || rect.width <= 0) {
+      return value;
+    }
+
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)) * max;
+  }
+
+  return (
+    <div
+      aria-label={ariaLabel}
+      aria-valuemax={Math.round(max)}
+      aria-valuemin={0}
+      aria-valuenow={Math.round(shown)}
+      aria-valuetext={ariaValueText}
+      className={`group relative flex h-7 cursor-pointer touch-none items-center outline-none ${className}`}
+      onKeyDown={(event) => {
+        let next: number | null = null;
+
+        if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+          next = Math.min(max, value + step);
+        } else if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+          next = Math.max(0, value - step);
+        } else if (event.key === "Home") {
+          next = 0;
+        } else if (event.key === "End") {
+          next = max;
+        }
+
+        if (next !== null) {
+          event.preventDefault();
+          onChange(next);
+          onCommit?.(next);
+        }
+      }}
+      onPointerCancel={() => setDragging(false)}
+      onPointerDown={(event) => {
+        if (max <= 0) {
+          return;
+        }
+
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const next = valueAt(event.clientX);
+
+        setDragging(true);
+        setDragValue(next);
+        onChange(next);
+      }}
+      onPointerMove={(event) => {
+        if (!dragging) {
+          return;
+        }
+
+        const next = valueAt(event.clientX);
+
+        setDragValue(next);
+        onChange(next);
+      }}
+      onPointerUp={(event) => {
+        if (!dragging) {
+          return;
+        }
+
+        const next = valueAt(event.clientX);
+
+        setDragging(false);
+        onChange(next);
+        onCommit?.(next);
+      }}
+      ref={trackRef}
+      role="slider"
+      tabIndex={0}
+    >
+      <div className="relative h-1 w-full overflow-hidden rounded-full bg-white/25">
+        <div className="absolute inset-y-0 left-0 rounded-full bg-[var(--accent,#e50914)]" style={{ width: `${fraction * 100}%` }} />
+      </div>
+      <div
+        className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white opacity-0 shadow transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+        style={{ left: `${fraction * 100}%` }}
+      />
+    </div>
+  );
+}
 
 function subscribeToReducedMotion(onChange: () => void) {
   const mediaQuery = window.matchMedia(REDUCED_MOTION_QUERY);
@@ -121,7 +243,12 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
   // Fica separado de `muted` para o src do iframe nao mudar (e recarregar) a cada toque no botao de som.
   const [startMuted, setStartMuted] = useState(true);
   const [muted, setMuted] = useState(true);
+  const [volume, setVolume] = useState(100);
   const [paused, setPaused] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  // Enquanto arrasta a linha do tempo, mostra o tempo do arrasto e ignora o que o player reporta.
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
   const [ended, setEnded] = useState(false);
   const [playerFailed, setPlayerFailed] = useState(false);
   const [fileBlocked, setFileBlocked] = useState(false);
@@ -136,6 +263,8 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
   // O que a pessoa pediu (som/pausa) enquanto o player ainda nao estava pronto para receber comandos.
   const desiredRef = useRef({ muted: true, paused: false });
   const youtubeReadyRef = useRef(false);
+  // Ate quando ignorar som/volume reportados pelo player, logo depois de um ajuste feito por aqui.
+  const localControlUntilRef = useRef(0);
 
   const autoStart = settings.autoplay && !prefersReducedMotion;
   const playerActive = mounted && !ended && !playerFailed && (autoStart || startedByClick);
@@ -145,6 +274,7 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
   // Autoplay bloqueado no YouTube: o iframe volta a receber toque para a pessoa usar o botao do proprio player.
   const youtubeNeedsTap = youtube && playerActive && youtubePhase === "blocked";
   const ownControls = playerActive && !youtubeNeedsTap && !(youtube && settings.nativeControls);
+  const anyControl = settings.soundButton || settings.volumeSlider || settings.pauseButton || settings.timeline;
   const showPlayButton = mounted && !playerFailed && (!playerActive || (!youtube && fileBlocked));
   const posterSrc = poster || (youtubeId ? youtubeThumbnailUrl(youtubeId, youtubePosterQuality) : "");
   const hasFrame = frame !== null;
@@ -275,7 +405,10 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
         return;
       }
 
-      let data: { event?: unknown; info?: { playerState?: unknown } } | null = null;
+      let data: {
+        event?: unknown;
+        info?: { currentTime?: unknown; duration?: unknown; muted?: unknown; playerState?: unknown; volume?: unknown };
+      } | null = null;
 
       try {
         data = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
@@ -302,8 +435,32 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
         }
       } else if (data.event === "onError") {
         setPlayerFailed(true);
-      } else if (data.event === "infoDelivery" && data.info && typeof data.info.playerState === "number") {
-        const state = data.info.playerState;
+      } else if (data.event === "infoDelivery" && data.info) {
+        const info = data.info;
+
+        if (typeof info.currentTime === "number") {
+          setCurrentTime(info.currentTime);
+        }
+
+        if (typeof info.duration === "number" && info.duration > 0) {
+          setDuration(info.duration);
+        }
+
+        if (Date.now() > localControlUntilRef.current) {
+          if (typeof info.volume === "number") {
+            setVolume(Math.round(info.volume));
+          }
+
+          if (typeof info.muted === "boolean") {
+            setMuted(info.muted);
+          }
+        }
+
+        if (typeof info.playerState !== "number") {
+          return;
+        }
+
+        const state = info.playerState;
 
         if (state === YT_PLAYING || state === YT_BUFFERING) {
           if (blockedTimer) {
@@ -402,6 +559,7 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
     const nextMuted = !muted;
 
     desiredRef.current.muted = nextMuted;
+    localControlUntilRef.current = Date.now() + LOCAL_CONTROL_GRACE_MS;
     setMuted(nextMuted);
 
     if (youtube) {
@@ -414,6 +572,40 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
       }
     } else if (videoRef.current) {
       videoRef.current.muted = nextMuted;
+    }
+  }
+
+  function changeVolume(nextVolume: number) {
+    const level = Math.round(Math.min(100, Math.max(0, nextVolume)));
+    const nextMuted = level === 0;
+
+    desiredRef.current.muted = nextMuted;
+    localControlUntilRef.current = Date.now() + LOCAL_CONTROL_GRACE_MS;
+    setVolume(level);
+    setMuted(nextMuted);
+
+    if (youtube) {
+      if (youtubeReadyRef.current) {
+        postToYouTube("setVolume", [level]);
+        postToYouTube(nextMuted ? "mute" : "unMute");
+      }
+    } else if (videoRef.current) {
+      videoRef.current.volume = level / 100;
+      videoRef.current.muted = nextMuted;
+    }
+  }
+
+  function seekTo(seconds: number) {
+    const target = Math.min(duration > 0 ? duration : seconds, Math.max(0, seconds));
+
+    setCurrentTime(target);
+
+    if (youtube) {
+      if (youtubeReadyRef.current) {
+        postToYouTube("seekTo", [target, true]);
+      }
+    } else if (videoRef.current) {
+      videoRef.current.currentTime = target;
     }
   }
 
@@ -475,9 +667,15 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
               setEnded(true);
             }
           }}
+          onDurationChange={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
           onError={() => setPlayerFailed(true)}
           onPause={() => setPaused(true)}
           onPlay={() => setPaused(false)}
+          onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+          onVolumeChange={(event) => {
+            setVolume(Math.round(event.currentTarget.volume * 100));
+            setMuted(event.currentTarget.muted);
+          }}
           playsInline
           poster={posterSrc || undefined}
           ref={videoRef}
@@ -503,7 +701,7 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
       ) : null}
     </div>
 
-    {showPlayButton || (ownControls && (settings.soundButton || settings.pauseButton)) ? (
+    {showPlayButton || (ownControls && anyControl) ? (
       <div className="pointer-events-none absolute inset-0 z-30" data-hero-video-controls="" ref={controlsRef}>
         {showPlayButton ? (
           <button
@@ -516,17 +714,56 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
           </button>
         ) : null}
 
-        {ownControls && (settings.soundButton || settings.pauseButton) ? (
-          <div className={`pointer-events-auto absolute flex gap-2 ${controlsClassName}`}>
+        {ownControls && anyControl ? (
+          /* Grupo de controles nossos: so os que o produtor ligou, numa pilula escura no canto do video. */
+          <div
+            className={`pointer-events-auto absolute flex max-w-[calc(100%-2rem)] items-center gap-1 rounded-full bg-black/70 px-1.5 py-1 text-white shadow-lg shadow-black/30 backdrop-blur-sm ${controlsClassName}`}
+            data-hero-video-controlbar=""
+          >
             {settings.pauseButton ? (
-              <button aria-label={paused ? "Continuar vídeo" : "Pausar vídeo"} className={ROUND_BUTTON} onClick={togglePause} type="button">
+              <button aria-label={paused ? "Continuar vídeo" : "Pausar vídeo"} className={CONTROL_BUTTON} onClick={togglePause} type="button">
                 {paused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4 fill-current" />}
               </button>
             ) : null}
-            {settings.soundButton ? (
-              <button aria-label={muted ? "Ativar som" : "Desativar som"} aria-pressed={!muted} className={ROUND_BUTTON} onClick={toggleSound} type="button">
-                {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-              </button>
+            {settings.timeline ? (
+              <div className="flex min-w-0 items-center gap-2 px-1">
+                <MiniSlider
+                  ariaLabel="Linha do tempo"
+                  ariaValueText={`${formatClock(scrubTime ?? currentTime)} de ${formatClock(duration)}`}
+                  className="w-24 sm:w-36"
+                  max={duration}
+                  onChange={(value) => setScrubTime(value)}
+                  onCommit={(value) => {
+                    setScrubTime(null);
+                    seekTo(value);
+                  }}
+                  step={TIMELINE_KEY_STEP_SECONDS}
+                  value={scrubTime ?? currentTime}
+                />
+                <span className="text-[11px] font-semibold tabular-nums text-zinc-200">
+                  {formatClock(scrubTime ?? currentTime)} / {formatClock(duration)}
+                </span>
+              </div>
+            ) : null}
+            {settings.soundButton || settings.volumeSlider ? (
+              <div className="flex items-center gap-1">
+                {settings.soundButton ? (
+                  <button aria-label={muted ? "Ativar som" : "Desativar som"} aria-pressed={!muted} className={CONTROL_BUTTON} onClick={toggleSound} type="button">
+                    {muted || volume === 0 ? <VolumeX className="h-4 w-4" /> : volume < 50 ? <Volume1 className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                  </button>
+                ) : null}
+                {settings.volumeSlider ? (
+                  <MiniSlider
+                    ariaLabel="Volume"
+                    ariaValueText={muted ? "Sem som" : `${volume}%`}
+                    className="w-14 pr-1"
+                    max={100}
+                    onChange={changeVolume}
+                    step={VOLUME_KEY_STEP}
+                    value={muted ? 0 : volume}
+                  />
+                ) : null}
+              </div>
             ) : null}
           </div>
         ) : null}
