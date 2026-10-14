@@ -284,7 +284,7 @@ test("content cards and modal persist saved items", () => {
   assert.match(savedButtonSource, /import \{ Bookmark \} from "lucide-react";/);
   // Estado so pelo traco: circulo fino (1,5 px) e marcador vazado; salvo = circulo de 2,5 px e marcador
   // preenchido de branco. Verde com check fica so para "concluido" (anel de progresso).
-  assert.match(savedButtonSource, /border-\[2\.5px\] border-white bg-black\/45 text-white/);
+  assert.match(savedButtonSource, /border-\[2\.5px\] border-white bg-black\/45 text-white[^"]*hover:bg-white\/20/, "salvo tambem reage ao mouse");
   assert.match(savedButtonSource, /border-\[1\.5px\] border-zinc-300\/80 bg-black\/30 text-white/);
   assert.doesNotMatch(savedButtonSource, /emerald|amber|<Check/, "salvo nao usa cor nem check");
   assert.match(cardSource, /rounded-full border-\[1\.5px\] border-zinc-300\/80 bg-black\/30 text-white transition hover:border-white/, "botao de detalhes com o mesmo circulo fino");

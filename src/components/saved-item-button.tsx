@@ -223,7 +223,7 @@ export function SavedItemButton({
         // engrossa (2,5 px) e o marcador fica preenchido de branco. Sem cor nem check: verde com check e o
         // "concluido" (anel de progresso) e nao se repete no mesmo card.
         saved
-          ? "border-[2.5px] border-white bg-black/45 text-white shadow-[0_12px_34px_rgba(0,0,0,0.42)] hover:bg-black/60"
+          ? "border-[2.5px] border-white bg-black/45 text-white shadow-[0_12px_34px_rgba(0,0,0,0.42)] hover:bg-white/20 hover:shadow-[0_12px_34px_rgba(0,0,0,0.55)]"
           : "border-[1.5px] border-zinc-300/80 bg-black/30 text-white hover:border-white hover:bg-white/10"
       )}
       onClick={handleClick}
