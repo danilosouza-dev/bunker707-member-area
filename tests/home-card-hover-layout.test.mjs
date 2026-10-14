@@ -215,10 +215,13 @@ test("content details modal lets lesson-list wheel gestures continue to the moda
   assert.doesNotMatch(lessonsScrollBlock, /overscroll-behavior: contain;/);
 });
 
-test("content details modal calculates course progress from module progress", () => {
-  assert.match(modalSource, /function getCourseProgressFromModules/);
-  assert.match(modalSource, /modules\.reduce\(\(total, module\) => total \+ getModuleProgress\(module\), 0\)/);
-  assert.match(modalSource, /moduleProgressTotal \/ modules\.length/);
+test("content details modal calculates course progress from module progress", async () => {
+  // A conta mora em src/lib/course-progress.ts (a home usa a mesma); o modal so importa.
+  const progressSource = await readFile(new URL("../src/lib/course-progress.ts", import.meta.url), "utf8");
+  assert.match(modalSource, /import \{ clampProgress, getCompletedLessonsCount, getCourseProgressFromModules, getModuleProgress \} from "@\/lib\/course-progress";/);
+  assert.match(progressSource, /export function getCourseProgressFromModules/);
+  assert.match(progressSource, /modules\.reduce\(\(total, module\) => total \+ getModuleProgress\(module\), 0\)/);
+  assert.match(progressSource, /moduleProgressTotal \/ modules\.length/);
   assert.match(modalSource, /const courseProgress = getCourseProgressFromModules\(itemModules, item\.progress\);/);
   assert.match(modalSource, /<ProgressBar className="mt-4 h-1\.5" value=\{courseProgress\} \/>/);
   assert.doesNotMatch(modalSource, /Math\.round\(item\.progress\)% concluido/);

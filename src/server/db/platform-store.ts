@@ -69,6 +69,7 @@ import type {
   SavedModuleItem,
   SavedItemTargetType
 } from "@/lib/platform-types";
+import { getCourseProgressFromModules } from "@/lib/course-progress";
 
 type PlatformStudent = {
   fullName: string;
@@ -2840,10 +2841,27 @@ export async function getHomePageData(accessPreviewMode?: AccessPreviewMode, use
   const homeRows = getHomeRows(database, accessPreviewMode, user).filter((row) => row.items.length > 0)
     .map((row) => applyMemberReleaseToHomeRow(release, row));
 
+  const modalStructures = getHomeModalStructures(database, homeRows, accessPreviewMode, user, release);
+
   return {
     hero: database.hero,
-    homeRows,
-    modalStructures: getHomeModalStructures(database, homeRows, accessPreviewMode, user, release)
+    // O card da home mostra o progresso do aluno no produto (anel no hover) com a mesma conta do modal.
+    homeRows: homeRows.map((row) => withStudentProgress(row, modalStructures)),
+    modalStructures
+  };
+}
+
+/** Progresso do aluno em cada item da fileira (media dos modulos; content_items.progress so sem modulos). */
+function withStudentProgress(row: HomeRow, structures: Record<string, ContentModalStructure>): HomeRow {
+  const withProgress = (item: ContentItem): ContentItem => ({
+    ...item,
+    progress: getCourseProgressFromModules(structures[item.id]?.modules ?? [], item.progress)
+  });
+
+  return {
+    ...row,
+    course: row.course ? withProgress(row.course) : row.course,
+    items: row.items.map(withProgress)
   };
 }
 

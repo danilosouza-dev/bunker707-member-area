@@ -9,6 +9,7 @@ import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components
 import { usePlatformLogoImage } from "@/components/platform-branding";
 import { SavedItemButton } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
+import { clampProgress, getCompletedLessonsCount, getCourseProgressFromModules, getModuleProgress } from "@/lib/course-progress";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
@@ -201,14 +202,6 @@ function chunkItems<T>(items: T[], size: number) {
   return chunks;
 }
 
-function clampProgress(value: number | null | undefined) {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return 0;
-  }
-
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
 function formatCount(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -237,31 +230,6 @@ function formatCompletedRatio(
   return `${completedCount} de ${formatCount(totalCount, singular, plural)} ${
     totalCount === 1 ? completedSingular : completedPlural
   }`;
-}
-
-function getCompletedLessonsCount(module: ModulePreview) {
-  return module.lessons.filter((lesson) => lesson.completed).length;
-}
-
-function getModuleProgress(module: ModulePreview) {
-  const savedModuleProgress = clampProgress(module.progress);
-  const completedLessons = getCompletedLessonsCount(module);
-
-  if (savedModuleProgress > 0 || module.lessons.length === 0 || completedLessons === 0) {
-    return savedModuleProgress;
-  }
-
-  return clampProgress((completedLessons / module.lessons.length) * 100);
-}
-
-function getCourseProgressFromModules(modules: ModulePreview[], fallbackProgress: number) {
-  if (modules.length === 0) {
-    return clampProgress(fallbackProgress);
-  }
-
-  const moduleProgressTotal = modules.reduce((total, module) => total + getModuleProgress(module), 0);
-
-  return clampProgress(moduleProgressTotal / modules.length);
 }
 
 function ProgressBar({ className = "", value }: { className?: string; value: number }) {
