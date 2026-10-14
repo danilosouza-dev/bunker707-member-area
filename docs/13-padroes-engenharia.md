@@ -68,7 +68,7 @@ Alteracoes em acesso, persistencia ou navegacao devem incluir teste de regressao
 ## Limites arquiteturais
 
 - Componentes e stores acima de aproximadamente 1.000 linhas devem ser tratados como candidatos a decomposicao por dominio, sem criar abstracoes vazias.
-- Novas regras nao devem aumentar `admin-dashboard.tsx`, `lesson-experience.tsx` ou `platform-store.ts` quando puderem viver em modulo de dominio testavel.
+- Novas regras nao devem aumentar `lesson-experience.tsx` ou `platform-store.ts` quando puderem viver em modulo de dominio testavel (ex.: `src/server/students/`).
 - Refatoracoes desses arquivos devem ser incrementais e acompanhadas por testes de contrato para evitar regressao visual ou de persistencia.
 
 ## Desenvolvimento em volume externo

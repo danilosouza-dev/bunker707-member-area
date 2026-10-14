@@ -48,7 +48,7 @@ test("pagina do produto oculto responde como inexistente para quem nao tem acess
   assert.equal(listing.canOpenProductPage({}, false), true, "item antigo sem a coluna continua listado");
 });
 
-test("a area do aluno usa estas regras nos pontos certos e o legado nunca grava listing", () => {
+test("a area do aluno usa estas regras nos pontos certos", () => {
   const store = readFileSync(new URL("../src/server/db/platform-store.ts", import.meta.url), "utf8");
   const block = (start, end) => {
     const from = store.indexOf(start);
@@ -66,5 +66,5 @@ test("a area do aluno usa estas regras nos pontos certos e o legado nunca grava 
 
   assert.match(block("export async function getContentPageData", "export async function"), /canOpenProductPage\(item, hasPurchaseAccess\(item, accessPreviewMode, userAccessKeys\)\)/);
   assert.match(store, /\.\.\.\(row\.listing === "hidden" \? \{ listing: "hidden" as const \} : \{\}\)/);
-  assert.doesNotMatch(block("function contentItemToRow", "function contentRowToItem"), /listing/);
+  assert.doesNotMatch(store, /listing: (?:item|input)\.listing/, "o platform-store nunca grava listing: so o catalogo v2 (coluna propria)");
 });

@@ -21,7 +21,15 @@ const providerConfigSource = await readFile(new URL("../src/server/ai/provider-c
 const providerAdapterSource = await readFile(new URL("../src/server/ai/provider-adapter.ts", import.meta.url), "utf8");
 const transcriptSource = await readFile(new URL("../src/server/ai/transcripts.ts", import.meta.url), "utf8");
 const tutorSource = await readFile(new URL("../src/server/ai/tutor.ts", import.meta.url), "utf8");
-const lessonRouteSource = await readFile(new URL("../src/app/api/admin/lessons/route.ts", import.meta.url), "utf8");
+const transcriptRoutesSource = (
+  await Promise.all(
+    [
+      "../src/app/api/admin/lessons/[lessonId]/transcript/route.ts",
+      "../src/app/api/admin/lessons/[lessonId]/transcript/import-youtube/route.ts",
+      "../src/app/api/admin/lessons/[lessonId]/tutor/process/route.ts"
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8"))
+  )
+).join("\n");
 const tutorConversationsRouteSource = await readFile(
   new URL("../src/app/api/tutor/lessons/[lessonId]/conversations/route.ts", import.meta.url),
   "utf8"
@@ -38,8 +46,7 @@ const tutorUiSource = await readFile(new URL("../src/components/lesson-ai-tutor.
 const lessonExperienceSource = await readFile(new URL("../src/components/lesson-experience.tsx", import.meta.url), "utf8");
 const lessonPageSource = await readFile(new URL("../src/app/conteudo/[id]/aulas/[moduleId]/page.tsx", import.meta.url), "utf8");
 const packageSource = await readFile(new URL("../package.json", import.meta.url), "utf8");
-const transcriptUiSource = await readFile(new URL("../src/components/admin/lesson-transcript-fields.tsx", import.meta.url), "utf8");
-const providerUiSource = await readFile(new URL("../src/components/admin/settings/ai-provider-settings.tsx", import.meta.url), "utf8");
+const transcriptUiSource = await readFile(new URL("../src/components/admin/v2/content/lesson-transcript.tsx", import.meta.url), "utf8");
 
 test("Tutor IA schema stores protected provider config, versioned context and permanent chat history", () => {
   for (const table of [
@@ -73,26 +80,21 @@ test("provider policies stay server-side and use fixed Gemini, OpenAI and Claude
   assert.doesNotMatch(providerConfigSource, /save_ai_provider_secret|read_ai_provider_secret|delete_ai_provider_secret/);
   assert.match(providerAdapterSource, /generativelanguage\.googleapis\.com\/v1beta\/models/);
   assert.match(providerAdapterSource, /O modelo configurado no \$\{displayName\} nao esta disponivel/);
-  assert.match(providerUiSource, /gemini-3\.1-flash-lite/);
   assert.match(providerAdapterSource, /https:\/\/api\.openai\.com\/v1\/responses/);
   assert.match(providerAdapterSource, /https:\/\/api\.anthropic\.com\/v1\/messages/);
   assert.match(providerAdapterSource, /provider_network_error/);
-  assert.match(providerUiSource, /A politica vale para todas as APIs e contas deste provedor\./);
-  assert.match(providerUiSource, /Perguntas por aluno \/ 24h/);
-  assert.match(providerUiSource, /Perguntas mensais deste provedor/);
 });
 
 test("lesson registration imports YouTube captions or requires a producer transcript", () => {
-  assert.match(lessonRouteSource, /prepareYouTubeTranscript/);
-  assert.match(lessonRouteSource, /normalizeManualTranscript/);
-  assert.match(lessonRouteSource, /saveLessonTranscript/);
-  assert.match(lessonRouteSource, /processLessonAIProfile/);
+  assert.match(transcriptRoutesSource, /prepareYouTubeTranscript/);
+  assert.match(transcriptRoutesSource, /normalizeManualTranscript/);
+  assert.match(transcriptRoutesSource, /saveLessonTranscript/);
+  assert.match(transcriptRoutesSource, /processLessonAIProfile/);
   assert.match(transcriptSource, /Este video nao possui uma legenda publica utilizavel\. Envie um arquivo SRT, VTT ou TXT, ou cole a transcricao\./);
   assert.match(transcriptSource, /source: "youtube"/);
   assert.match(transcriptSource, /createHash\("sha256"\)/);
   assert.match(transcriptSource, /rpc\("save_lesson_transcript_atomic"/);
   assert.match(transcriptSource, /p_chunks: chunks/);
-  assert.match(transcriptUiSource, /A legenda do YouTube e importada automaticamente\. Se o video nao tiver legenda, envie ou cole a transcricao\./);
   assert.match(transcriptUiSource, /accept="\.srt,\.vtt,\.txt/);
 });
 

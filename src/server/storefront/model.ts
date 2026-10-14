@@ -88,7 +88,7 @@ export type StorefrontEditorData = {
   sectionsConfigured: boolean;
   /**
    * Versao (updated_at) da chave homeSections quando a vitrine foi lida; null = nunca publicada.
-   * Publicar manda de volta: se a tela Modulos (ou o admin antigo) mudou as fileiras no meio, 409.
+   * Publicar manda de volta: se a tela Modulos mudou as fileiras no meio, 409.
    */
   sectionsUpdatedAt: string | null;
 };
@@ -988,7 +988,7 @@ export function isBrandDirty(published: BrandDraft, draft: BrandDraft) {
   );
 }
 
-/** Mesmo contrato do admin antigo: so manda o que mudou; imagem so quando trocou. */
+/** So manda o que mudou; imagem so quando trocou. */
 export function buildAppearancePayload(published: BrandDraft, draft: BrandDraft) {
   const payload: { hero?: { enabled: boolean; image?: string }; logo?: { image: string | null }; style?: MemberStyleConfig } = {};
 

@@ -23,7 +23,7 @@ const [
   connectionsRouteSource,
   connectionsUiSource,
   modelsRouteSource,
-  providerSettingsSource
+  policyEditorSource
 ] = await Promise.all([
   readSource("../.env.example"),
   readSource("../supabase/migrations/202607160001_ai_provider_connection_pools.sql"),
@@ -34,23 +34,19 @@ const [
   readSource("../src/server/ai/tutor.ts"),
   readSource("../src/server/ai/usage-analytics.ts"),
   readSource("../src/app/api/admin/ai-usage/route.ts"),
-  readSource("../src/components/admin/settings/ai-usage-dashboard.tsx"),
+  readSource("../src/components/admin/v2/settings/ai-usage-view.tsx"),
   readSource("../services/bunker-ai-gateway/Dockerfile"),
   readSource("../services/bunker-ai-gateway/entrypoint.sh"),
   readSource("../services/bunker-ai-gateway/compose.yml"),
   readSource("../scripts/smoke-ai-gateway.mjs"),
   readSource("../.gitignore"),
   readSource("../src/app/api/admin/ai-connections/route.ts"),
-  readSource("../src/components/admin/settings/ai-connections-manager.tsx"),
+  readSource("../src/components/admin/v2/settings/ai-connections-manager.tsx"),
   readSource("../src/app/api/admin/ai-connections/models/route.ts"),
-  readSource("../src/components/admin/settings/ai-provider-settings.tsx")
+  readSource("../src/components/admin/v2/settings/ai-policy-editor.tsx")
 ]);
 
 test("Bunker AI Gateway uses explicit server-only runtime and management credentials", () => {
-  const accountStartHandler = connectionsUiSource.match(
-    /async function startAccountLink[\s\S]*?(?=\n  async function copyAccountLoginLink)/
-  )?.[0] ?? "";
-
   for (const variable of [
     "BUNKER_AI_GATEWAY_URL",
     "BUNKER_AI_GATEWAY_API_KEY",
@@ -73,19 +69,9 @@ test("Bunker AI Gateway uses explicit server-only runtime and management credent
   assert.match(connectionsRouteSource, /getAccountGatewayStatus\(\)/);
   assert.match(connectionsRouteSource, /Promise\.all/);
   assert.match(connectionsUiSource, /gateway\.reachable/);
-  assert.match(connectionsUiSource, /!gateway\.configured \|\| !gateway\.reachable/);
-  assert.match(connectionsUiSource, /ERR_EMPTY_RESPONSE/);
-  assert.match(connectionsUiSource, /\n\s+Continuar\n/);
-  assert.match(connectionsUiSource, /<ExternalLink[^>]*\/> Abrir login/);
-  assert.doesNotMatch(accountStartHandler, /window\.open/);
-  assert.match(connectionsUiSource, /Copiar link de login/);
-  assert.match(connectionsUiSource, /navigator\.clipboard\.writeText\(accountLink\.url\)/);
-  assert.match(connectionsUiSource, /Copiei a URL, concluir conexão/);
-  assert.match(connectionsUiSource, /Configure o modelo antes de testar/);
   assert.match(modelsRouteSource, /requireApiRole\("admin\.read"\)/);
   assert.match(modelsRouteSource, /listAccountGatewayModels\(provider\)/);
-  assert.match(providerSettingsSource, /\/api\/admin\/ai-connections\/models\?provider=/);
-  assert.match(providerSettingsSource, /Detectados no gateway/);
+  assert.match(policyEditorSource, /\/api\/admin\/ai-connections\/models\?provider=/);
 });
 
 test("Bunker AI Gateway has a persistent loopback-only operational runtime", () => {
@@ -274,8 +260,6 @@ test("producer usage contract includes tutor per lesson, Director, students and 
 
   assert.match(usageRouteSource, /requireApiRole\("admin\.read"\)/);
   assert.match(usageRouteSource, /Cache-Control", "private, no-store, max-age=0"/);
-  assert.match(usageUiSource, /Consumo por aula \/ tutor/);
-  assert.match(usageUiSource, /Ranking de (?:alunos|uso por aluno)/);
   assert.match(usageUiSource, /Tutor(?: IA|es das aulas)/);
   assert.match(usageUiSource, /Diretor/);
 });

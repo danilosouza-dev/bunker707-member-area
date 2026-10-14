@@ -1,25 +1,57 @@
 import type { Metadata } from "next";
-import { StudentsFrame } from "@/components/admin/v2/frames/students-frame";
-import { legacyStudentSearchHref } from "@/lib/admin-legacy-links";
+import { AdminPage } from "@/components/admin/v2/page-container";
+import { PageHeader } from "@/components/admin/v2/page-header";
+import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
+import { StudentListView } from "@/components/admin/v2/students/student-list-view";
 import { requirePageAdmin } from "@/server/auth/guards";
+import { canRole } from "@/server/auth/roles";
+import { listProductOptions } from "@/server/catalog/queries";
+import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
+import { listStudents } from "@/server/students/queries";
+import { parseStudentListSearchParams } from "@/server/students/schemas";
 
 export const metadata: Metadata = {
   title: "Alunos"
 };
 
 type AdminStudentsPageProps = {
-  searchParams?: Promise<{ busca?: string | string[] }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-// Alunos (docs/17 §1.7): a nova lista ainda esta sendo construida. A moldura segue o prototipo
-// aprovado (cabecalho, ciclo de vida e numeros da semana vazios) e leva ao admin antigo.
-export default async function AdminStudentsPage({ searchParams }: AdminStudentsPageProps) {
-  await requirePageAdmin();
-  const params = await searchParams;
-  const search = Array.isArray(params?.busca) ? params.busca[0] : params?.busca;
+// Lista de alunos (docs/17 §1.7.1): filtros no endereco, 25 por pagina, linha inteira abre o perfil.
+// Esta pagina so le; a disposicao fica em StudentListView.
+/** Hora da leitura (renderizado no servidor): ritmo, "há 3 dias" e minimo das datas. */
+function readNow() {
+  return Date.now();
+}
 
-  // Lista de alunos do admin antigo; com ?busca= (links da Comunidade e salvos), ja filtrada.
+export default async function AdminStudentsPage({ searchParams }: AdminStudentsPageProps) {
+  const { role } = await requirePageAdmin();
+  const query = parseStudentListSearchParams(await searchParams);
+  const loaded = await loadUnlessPendingMigration(async () => {
+    const [list, products] = await Promise.all([listStudents(query), listProductOptions()]);
+
+    return { list, products };
+  });
+
+  if (!loaded.ok) {
+    return (
+      <AdminPage className="gap-6">
+        <PageHeader title="Alunos" />
+        <PendingMigrationNotice />
+      </AdminPage>
+    );
+  }
+
   return (
-    <StudentsFrame data-phase={2} legacyHref={legacyStudentSearchHref(search ?? "")} />
+    <AdminPage className="gap-6">
+      <StudentListView
+        canAdd={canRole(role, "students.access")}
+        filters={{ page: query.page, pace: query.pace, productId: query.productId, q: query.q }}
+        list={loaded.data.list}
+        now={readNow()}
+        products={loaded.data.products.map((product) => ({ id: product.id, title: product.title }))}
+      />
+    </AdminPage>
   );
 }

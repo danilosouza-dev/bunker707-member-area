@@ -79,7 +79,7 @@ export type PurchasesPageView = {
   /** Tipos presentes, na ordem fixa (Formações, Cursos, Bootcamps...). */
   kindOptions: PurchasesKindOption[];
   products: PurchaseProductView[];
-  /** false na previa de layout sem aluno (admin legado): sem numeros nem filtro por situacao. */
+  /** false na previa de layout sem aluno: sem numeros nem filtro por situacao. */
   showProgress: boolean;
   stats: {
     completed: number;
@@ -274,8 +274,8 @@ export function buildPurchasesPageView(library: MemberLibrary, options: { now?: 
 }
 
 /**
- * Previa de layout da tela antiga do admin (src/components/admin-dashboard.tsx, /admin/legado), que so
- * tem os itens do catalogo e nenhum aluno: sem progresso, sem acesso e sem acao (nada inventado).
+ * Previa de layout sem aluno (purchases-experience sem a visao do servidor), que so tem os itens do
+ * catalogo: sem progresso, sem acesso e sem acao (nada inventado).
  */
 export function buildPurchasesPreviewView(items: ContentItem[]): PurchasesPageView {
   const products = items.map((item): PurchaseProductView => {

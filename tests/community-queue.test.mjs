@@ -299,7 +299,7 @@ test("enderecos dos filtros voltam para a pagina 1 e apagam valores vazios", () 
   assert.equal(hrefs.hasActiveFilters({ busca: "", produto: undefined }, ["busca", "produto"]), false);
   assert.equal(hrefs.hasActiveFilters({ situacao: "spam" }, ["situacao"]), true);
   // Alunos v2 ainda nao existe: "Ver aluno" abre a lista do admin antigo com a busca preenchida.
-  assert.equal(hrefs.studentSearchHref(" Ana Souza "), "/admin/legado?tela=alunos&busca=Ana+Souza");
+  assert.equal(hrefs.studentSearchHref(" Ana Souza "), "/admin/alunos?busca=Ana+Souza");
 });
 
 test("faixa da paginacao em pt-BR", () => {

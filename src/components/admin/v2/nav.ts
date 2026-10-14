@@ -36,7 +36,6 @@ export type AdminNavItem = {
 export const ADMIN_HOME_HREF = "/admin";
 /** Cookie com a escolha "barra lateral recolhida" (lido no servidor para a pagina ja abrir certa). */
 export const ADMIN_SIDEBAR_COOKIE = "bunker-admin-sidebar";
-export const ADMIN_LEGACY_HREF = "/admin/legado";
 export const STUDENT_AREA_HREF = "/";
 
 export const adminNavItems: readonly AdminNavItem[] = [
@@ -143,14 +142,9 @@ export function isAdminNavChildActive(pathname: string, child: AdminNavChild, it
   return childMatches(normalizeAdminPath(pathname), child);
 }
 
-/** O admin antigo (/admin/legado e abaixo) nao usa a moldura nova nem os skeletons dela. */
-export function isAdminLegacyPath(pathname: string | null | undefined) {
-  return matchesAdminPath(normalizeAdminPath(pathname), ADMIN_LEGACY_HREF);
-}
-
-/** Links do admin novo dispensam o overlay global de navegacao: o shell ja mostra o skeleton. */
+/** Links do admin dispensam o overlay global de navegacao: o shell ja mostra o skeleton. */
 export function isAdminV2Href(href: string) {
-  return matchesAdminPath(normalizeAdminPath(href), ADMIN_HOME_HREF) && !isAdminLegacyPath(href);
+  return matchesAdminPath(normalizeAdminPath(href), ADMIN_HOME_HREF);
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -238,19 +232,3 @@ export function formatAdminNavCount(value: number | null | undefined) {
   return value > 99 ? "99+" : String(Math.floor(value));
 }
 
-/**
- * Areas que nao existem no admin antigo, com a frase que explica isso ao produtor.
- * Todas as outras ja tem uma tela equivalente em /admin/legado.
- */
-const adminAreasNewInV2: Partial<Record<AdminNavId, string>> = {
-  comunicacao: "Avisos, webinários e promoções são novidade: ainda não existem no admin antigo."
-};
-
-export type AdminLegacyAvailability = { href: string; kind: "legacy" } | { kind: "new"; note: string };
-
-/** Diz se uma area em construcao pode mandar o produtor para o admin antigo enquanto isso. */
-export function getAdminLegacyAvailability(area: AdminNavId): AdminLegacyAvailability {
-  const note = adminAreasNewInV2[area];
-
-  return note ? { kind: "new", note } : { href: ADMIN_LEGACY_HREF, kind: "legacy" };
-}

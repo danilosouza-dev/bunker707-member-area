@@ -3,11 +3,11 @@
 // Action e tests/admin-search.test.mjs usam as mesmas funcoes.
 //
 // Ordem dos grupos: Produtos · Módulos · Aulas · Telas · Ações, no maximo 5 por grupo. Campo vazio =
-// Ações e Telas principais (todas); com 1 letra, so telas e acoes do menu (o banco espera 2 letras). Alunos ainda nao tem tela no admin novo: a busca oferece a acao
-// honesta "Buscar “x” em alunos no admin antigo".
+// Ações e Telas principais (todas); com 1 letra, so telas e acoes do menu (o banco espera 2 letras). Com texto, a busca tambem oferece "Buscar “x” em alunos", que abre a
+// lista de Alunos ja filtrada.
 
-import { legacyStudentSearchHref } from "../../../lib/admin-legacy-links";
-import { ADMIN_LEGACY_HREF, STUDENT_AREA_HREF, adminNavItems } from "./nav";
+import { STUDENT_AREA_HREF, adminNavItems } from "./nav";
+import { newStudentHref, studentSearchHref } from "./students/hrefs";
 
 export const ADMIN_SEARCH_MIN_LENGTH = 2;
 export const ADMIN_SEARCH_MAX_LENGTH = 80;
@@ -128,14 +128,12 @@ const ACTIONS: readonly StaticEntry[] = [
   {
     featured: true,
     group: "actions",
-    href: legacyStudentSearchHref(""),
+    href: newStudentHref(),
     id: "acao:adicionar-aluno",
     keywords: "aluno liberar acesso",
-    meta: "admin antigo",
     title: "Adicionar aluno"
   },
-  { group: "actions", href: STUDENT_AREA_HREF, id: "acao:area-do-aluno", keywords: "ver como aluno", title: "Ver área do aluno" },
-  { group: "actions", href: ADMIN_LEGACY_HREF, id: "acao:admin-antigo", title: "Abrir o admin antigo" }
+  { group: "actions", href: STUDENT_AREA_HREF, id: "acao:area-do-aluno", keywords: "ver como aluno", title: "Ver área do aluno" }
 ];
 
 const SCREENS = buildScreens();
@@ -185,9 +183,8 @@ export function buildAdminSearchGroups(
         ...staticItems.actions,
         {
           group: "actions" as const,
-          href: legacyStudentSearchHref(cleaned),
+          href: studentSearchHref(cleaned),
           id: "acao:buscar-alunos",
-          meta: "admin antigo",
           title: `Buscar “${cleaned}” em alunos`
         }
       ]

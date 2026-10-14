@@ -2,7 +2,7 @@
 
 // Importar playlist do YouTube (docs/17 §1.6.7, aba Playlist). Reaproveita a leitura da playlist e a
 // RPC transacional do fluxo atual, sem devolver o banco inteiro (importYouTubePlaylistCourse).
-// Aqui so se cria curso novo: playlist que ja virou curso e recusada (o admin antigo segue podendo
+// Aqui so se cria curso novo: playlist que ja virou curso e recusada (reimportar por cima nao existe;
 // sincronizar, e a RPC preserva situacao, capa e o que o produtor excluiu ou deixou em rascunho).
 
 import type { ActionResult } from "@/lib/action-result";
