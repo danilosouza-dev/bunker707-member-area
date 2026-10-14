@@ -381,8 +381,10 @@ test("caption route is authenticated, read-only and never cacheable", () => {
   assert.match(captionsRouteSource, /private, no-store, max-age=0/);
   assert.match(captionsRouteSource, /export const dynamic = "force-dynamic"/);
   assert.match(captionsRouteSource, /jsonRouteError\(/);
+  assert.match(captionsRouteSource, /loadStoredCaptions: \(\) => getActiveLessonTranscriptCaptions\(lessonId\)/);
+  assert.match(captionsRouteSource, /fetchCaptions: fetchYouTubeCaptions/);
   assert.ok(
-    captionsRouteSource.indexOf("await requireLessonAccess") < captionsRouteSource.indexOf("await fetchYouTubeCaptions"),
-    "lesson access must be checked before upstream caption discovery"
+    captionsRouteSource.indexOf("await requireLessonAccess") < captionsRouteSource.indexOf("await resolveLessonCaptions"),
+    "lesson access must be checked before any caption source is read"
   );
 });

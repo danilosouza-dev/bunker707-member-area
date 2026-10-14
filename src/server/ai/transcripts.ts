@@ -4,6 +4,11 @@ import { createHash } from "node:crypto";
 
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import {
+  buildStoredCaptionTrack,
+  normalizeStoredCaptionCues,
+  type StoredLessonCaptions
+} from "@/server/video/lesson-captions";
+import {
   fetchYouTubeCaptions,
   normalizeYouTubeCaptionLanguage,
   type YouTubeCaptionCue
@@ -369,6 +374,34 @@ export async function saveLessonTranscript({
   }
 
   return getLessonTranscriptStatus(lessonId);
+}
+
+/**
+ * Transcricao ativa da aula no formato de legenda do player. Devolve `null` quando a aula nao
+ * tem transcricao, quando ela esta marcada com erro ou quando nenhuma cue e aproveitavel.
+ */
+export async function getActiveLessonTranscriptCaptions(lessonId: string): Promise<StoredLessonCaptions | null> {
+  const supabase = getSupabaseAdminClient();
+  const result = await supabase
+    .from("lesson_transcripts")
+    .select("cues,language,source,status")
+    .eq("lesson_id", lessonId)
+    .eq("is_active", true)
+    .maybeSingle();
+  throwDatabaseError(result.error, "Nao foi possivel carregar a legenda guardada da aula");
+
+  if (!result.data || result.data.status === "error") return null;
+  const cues = normalizeStoredCaptionCues(result.data.cues);
+
+  if (cues.length === 0) return null;
+
+  return {
+    cues,
+    track: buildStoredCaptionTrack({
+      language: typeof result.data.language === "string" && result.data.language ? result.data.language : "pt-BR",
+      source: String(result.data.source ?? "")
+    })
+  };
 }
 
 export async function getLessonTranscriptStatus(lessonId: string): Promise<LessonTranscriptStatus | null> {
