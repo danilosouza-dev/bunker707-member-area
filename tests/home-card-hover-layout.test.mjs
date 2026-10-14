@@ -281,10 +281,10 @@ test("content cards and modal persist saved items", () => {
   assert.match(modalSource, /SavedItemButton/);
   assert.match(savedButtonSource, /\/api\/saved-items/);
   assert.match(savedButtonSource, /aria-pressed=\{saved\}/);
-  assert.match(savedButtonSource, /import \{ Bookmark, Check \} from "lucide-react";/);
-  assert.match(savedButtonSource, /bg-\[#2f2f2f\]\/95 text-white/);
-  assert.match(savedButtonSource, /ring-emerald-400\/70/);
-  assert.match(savedButtonSource, /<Check className="h-2\.5 w-2\.5 stroke-\[3\.5\]" \/>/);
+  assert.match(savedButtonSource, /import \{ Bookmark \} from "lucide-react";/);
+  // Salvo = marcador preenchido em ambar; verde com check fica so para "concluido" (anel de progresso).
+  assert.match(savedButtonSource, /border-amber-400\/90 bg-black\/45 text-amber-300/);
+  assert.doesNotMatch(savedButtonSource, /emerald|<Check/, "salvo nao usa verde nem check");
   assert.match(savedButtonSource, /saved \? "scale-95 fill-current" : ""/);
   assert.match(savedButtonSource, /function dispatchSavedItemChanged/);
   assert.match(savedButtonSource, /const savedItemSyncQueue = new Map/);

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bookmark, Check } from "lucide-react";
+import { Bookmark } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { savedItemCollectionLabel } from "@/lib/saved-items";
 import { cn } from "@/lib/utils";
@@ -219,19 +219,16 @@ export function SavedItemButton({
       aria-label={saved ? `Remover ${targetTitle} dos favoritos` : `Salvar ${targetTitle} nos favoritos`}
       aria-pressed={saved}
       className={cn("relative", className,
+        // Salvo = marcador preenchido em ambar. Verde com check e o "concluido" (anel de progresso), nao se
+        // repete aqui para as duas informacoes nao se confundirem no mesmo card.
         saved
-          ? "border-emerald-400/85 bg-[#2f2f2f]/95 text-white shadow-[0_12px_34px_rgba(0,0,0,0.42)] ring-2 ring-emerald-400/70 ring-offset-2 ring-offset-black hover:border-emerald-300 hover:bg-[#3a3a3a]"
+          ? "border-amber-400/90 bg-black/45 text-amber-300 shadow-[0_12px_34px_rgba(0,0,0,0.42)] hover:border-amber-300 hover:bg-black/60"
           : "border-zinc-400 bg-black/30 text-white hover:border-white hover:bg-white/10"
       )}
       onClick={handleClick}
       type="button"
     >
       <Bookmark className={`${iconClassName} transition-transform ${saved ? "scale-95 fill-current" : ""}`} />
-      {saved ? (
-        <span className="pointer-events-none absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full bg-emerald-500 text-white shadow-[0_6px_16px_rgba(16,185,129,0.45)] ring-2 ring-black">
-          <Check className="h-2.5 w-2.5 stroke-[3.5]" />
-        </span>
-      ) : null}
     </button>
   );
 }
