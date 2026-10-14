@@ -3,7 +3,7 @@
 import { Bell, ChevronDown, ChevronUp, LockKeyhole, Play, ShoppingCart, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { usePlatformLogoImage } from "@/components/platform-branding";
@@ -38,6 +38,19 @@ type ModulePreview = CourseModule;
 
 const MODULE_FOCUS_TRANSITION_ATTRIBUTE = "data-vt-module-focus";
 const MODULE_FOCUS_SCROLL_SHIFT_PROPERTY = "--vt-scroll-shift";
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function subscribeToReducedMotion(onChange: () => void) {
+  const mediaQuery = window.matchMedia(REDUCED_MOTION_QUERY);
+
+  mediaQuery.addEventListener("change", onChange);
+
+  return () => mediaQuery.removeEventListener("change", onChange);
+}
+
+function getPrefersReducedMotion() {
+  return window.matchMedia(REDUCED_MOTION_QUERY).matches;
+}
 
 function getModuleCardTransitionName(moduleId: string) {
   return `module-card-${moduleId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -46,7 +59,7 @@ function getModuleCardTransitionName(moduleId: string) {
 function canUseModuleViewTransition() {
   return typeof document !== "undefined"
     && typeof document.startViewTransition === "function"
-    && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    && !window.matchMedia(REDUCED_MOTION_QUERY).matches;
 }
 
 function contentItemToModalCard(content: ContentItem): ModalCard {
@@ -437,6 +450,8 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
   const modalScrollerRef = useRef<HTMLDivElement>(null);
   const moduleSectionHeaderRef = useRef<HTMLDivElement>(null);
   const isClosing = item ? closingItemId === item.id : false;
+  // Quem prefere menos movimento nao recebe o <video> do topo (nem o download dele): ve a capa parada.
+  const prefersReducedMotion = useSyncExternalStore(subscribeToReducedMotion, getPrefersReducedMotion, () => false);
 
   function handleClose() {
     if (!item || closingItemId === item.id) {
@@ -475,6 +490,29 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
       document.body.style.overflow = previousBodyOverflow;
       document.documentElement.style.overflow = previousHtmlOverflow;
       document.body.style.paddingRight = previousPaddingRight;
+    };
+  }, [item]);
+
+  // Enquanto o modal esta aberto, videos em autoplay fora dele (o Destaque da home) ficam cobertos pelo
+  // backdrop desfocado; pausar evita dois decodificadores ao mesmo tempo. Ao fechar, voltam a tocar.
+  useEffect(() => {
+    if (!item) {
+      return;
+    }
+
+    const scroller = modalScrollerRef.current;
+    const pausedByModal = Array.from(document.querySelectorAll("video")).filter((video) => (
+      !scroller?.contains(video) && !video.paused
+    ));
+
+    pausedByModal.forEach((video) => video.pause());
+
+    return () => {
+      pausedByModal.forEach((video) => {
+        if (video.isConnected) {
+          void video.play().catch(() => undefined);
+        }
+      });
     };
   }, [item]);
 
@@ -625,6 +663,12 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
   const primaryFormationRows = chunkItems(formationCourseCards.slice(0, 3), 3);
   const extraFormationRows = chunkItems(formationCourseCards.slice(3), 3);
   const itemHref = withAccessPreviewParam(`/conteudo/${item.id}`, accessPreviewMode);
+  // Midia do topo: "Imagem de destaque" (ou video de destaque + capa) do produto; sem ela, a capa do card, como antes.
+  const heroMedia = structure?.media;
+  const heroPoster = (heroMedia?.mediaType === "video" ? heroMedia.poster : undefined) || item.image;
+  const heroImageSrc = heroMedia?.mediaType === "image" ? heroMedia.mediaSrc : item.image;
+  const showHeroVideo = heroMedia?.mediaType === "video" && !prefersReducedMotion;
+  const heroStillSrc = heroMedia?.mediaType === "video" ? heroPoster : heroImageSrc;
 
   function handlePrimaryAction() {
     const currentItem = item;
@@ -741,11 +785,29 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
         }`}
         style={{ viewTransitionName: "modal-content-panel" }}
       >
-        <div className="relative min-h-[420px] overflow-hidden sm:min-h-[520px] lg:min-h-[560px]">
-          <div
-            className="modal-hero-image-in absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: cssImageUrl(item.image) }}
-          />
+        {/* O topo tem nome proprio na View Transition dos modulos: viaja com o painel, sem cross-fade sobre o video. */}
+        <div
+          className="relative min-h-[420px] overflow-hidden sm:min-h-[520px] lg:min-h-[560px]"
+          style={{ viewTransitionName: "modal-hero-media" }}
+        >
+          {showHeroVideo && heroMedia ? (
+            /* Video de destaque: toca sem som e em repeticao, com a imagem de destaque como capa. */
+            <video
+              aria-hidden="true"
+              autoPlay
+              className="modal-hero-image-in absolute inset-0 h-full w-full object-cover"
+              loop
+              muted
+              playsInline
+              poster={heroPoster}
+              src={heroMedia.mediaSrc}
+            />
+          ) : (
+            <div
+              className="modal-hero-image-in absolute inset-0 bg-cover bg-center"
+              style={{ backgroundImage: cssImageUrl(heroStillSrc) }}
+            />
+          )}
           <div className="absolute inset-0 bg-black/16" />
           <div className="absolute inset-x-0 bottom-0 h-[72%] bg-gradient-to-t from-[#151515] via-[#151515]/88 to-transparent" />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/36 via-black/10 to-transparent" />

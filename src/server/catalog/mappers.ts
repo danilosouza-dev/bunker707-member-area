@@ -151,16 +151,27 @@ export function heroCornersOf(settings: ProductSettings | null | undefined): Pro
   return corners === "rounded" || corners === "soft" ? corners : "inherit";
 }
 
-export function heroUrlOf(settings: ProductSettings | null | undefined) {
+function heroRecordOf(settings: ProductSettings | null | undefined) {
   const hero = settings?.hero;
 
-  if (!hero || typeof hero !== "object" || Array.isArray(hero)) {
-    return null;
-  }
+  return hero && typeof hero === "object" && !Array.isArray(hero)
+    ? (hero as { mediaSrc?: unknown; mediaType?: unknown; poster?: unknown })
+    : null;
+}
 
-  const { mediaSrc, mediaType } = hero as { mediaSrc?: unknown; mediaType?: unknown };
+/** Imagem de destaque: a imagem do banner ou, quando o destaque e um video, a capa (poster) dele. */
+export function heroUrlOf(settings: ProductSettings | null | undefined) {
+  const hero = heroRecordOf(settings);
+  const source = hero?.mediaType === "video" ? hero.poster : hero?.mediaSrc;
 
-  return mediaType !== "video" && typeof mediaSrc === "string" && mediaSrc.trim() ? mediaSrc.trim() : null;
+  return typeof source === "string" && source.trim() ? source.trim() : null;
+}
+
+/** Link do video de destaque (settings.hero com mediaType "video"); null quando o destaque e so imagem. */
+export function heroVideoUrlOf(settings: ProductSettings | null | undefined) {
+  const hero = heroRecordOf(settings);
+
+  return hero?.mediaType === "video" && typeof hero.mediaSrc === "string" && hero.mediaSrc.trim() ? hero.mediaSrc.trim() : null;
 }
 
 export function instructorNameOf(instructor: ProductRow["instructor"]) {

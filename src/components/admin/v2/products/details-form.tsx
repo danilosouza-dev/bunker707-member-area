@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { CONFLICT_MESSAGE } from "@/server/catalog/errors";
 import { PRODUCT_FORMAT_LABELS, type ProductFormat } from "@/server/catalog/model";
-import { setProductHeroCorners, setProductImage, updateProductDetails } from "@/server/catalog/product-actions";
+import { setProductHeroCorners, setProductHeroVideo, setProductImage, updateProductDetails } from "@/server/catalog/product-actions";
 import { shortDescriptionSchema, updateProductDetailsSchema } from "@/server/catalog/schemas";
 import type { ProductDetails, ProductHeroCorners } from "@/server/catalog/types";
 import type { HomeModuleRowState } from "@/server/member-area/modules-model";
@@ -97,6 +97,10 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
   const [saving, setSaving] = useState(false);
   const [heroUrl, setHeroUrl] = useState(details.heroUrl);
   const [heroCorners, setHeroCorners] = useState<ProductHeroCorners>(details.heroCorners);
+  const [heroVideoUrl, setHeroVideoUrl] = useState(details.heroVideoUrl);
+  const [videoDraft, setVideoDraft] = useState(details.heroVideoUrl ?? "");
+  const [videoPending, setVideoPending] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
   const [cornersPending, setCornersPending] = useState(false);
   const [cornersError, setCornersError] = useState<string | null>(null);
   const [imagePending, setImagePending] = useState<ImageSlot | null>(null);
@@ -122,9 +126,20 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
       setHeroUrl(details.heroUrl);
       setHeroCorners(details.heroCorners);
     }
+
+    if (!videoPending) {
+      // So substitui o rascunho do link quando ele nao foi mexido (igual ao valor salvo anterior).
+      if (videoDraft === (heroVideoUrl ?? "")) {
+        setVideoDraft(details.heroVideoUrl ?? "");
+      }
+
+      setHeroVideoUrl(details.heroVideoUrl);
+    }
   }
 
-  useWarnBeforeUnload(dirty);
+  const videoDirty = !readOnly && videoDraft.trim() !== (heroVideoUrl ?? "");
+
+  useWarnBeforeUnload(dirty || videoDirty);
 
   function update<Key extends keyof DetailsDraft>(key: Key, value: DetailsDraft[Key]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -230,6 +245,29 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
         ? { onUndo: () => void saveImage(slot, previous, { undoable: false }) }
         : undefined
     );
+  }
+
+  // Video de destaque: salva na hora, como as imagens. A imagem de destaque vira a capa do video.
+  async function saveHeroVideo(value: string | null) {
+    const next = value?.trim() || null;
+
+    if (readOnly || videoPending || next === heroVideoUrl) {
+      return;
+    }
+
+    setVideoPending(true);
+    setVideoError(null);
+    const result = await setProductHeroVideo({ id: header.id, videoUrl: next });
+    setVideoPending(false);
+
+    if (!result.ok) {
+      setVideoError(result.fieldErrors?.videoUrl?.[0] ?? result.error);
+      return;
+    }
+
+    setHeroVideoUrl(result.data.videoUrl);
+    setVideoDraft(result.data.videoUrl ?? "");
+    adminToast.success(result.data.videoUrl ? "Vídeo de destaque salvo" : "Vídeo de destaque removido");
   }
 
   // Cantos do banner: salva na hora, como as imagens. Erro volta a escolha anterior.
@@ -397,6 +435,58 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
         slot="hero"
         value={images.hero}
       />
+
+      <AdminField
+        error={videoError}
+        hint={
+          heroVideoUrl
+            ? "Visível para todos os alunos, inclusive quem ainda não comprou. Toca sem som e em repetição na página do produto e no topo do modal da home; a imagem de destaque é a capa."
+            : "Link direto do arquivo (.mp4, .webm ou .mov), por exemplo do Bunny Stream. Fica visível para todos os alunos, inclusive quem não comprou: use um trailer, nunca uma aula, e um link permanente, sem token temporário. Toca sem som e em repetição; a imagem de destaque vira a capa."
+        }
+        id="detalhes-video-destaque"
+        label="Vídeo de destaque"
+        optional
+      >
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
+          <Input
+            aria-describedby={fieldDescribedBy("detalhes-video-destaque", { error: videoError, hint: true })}
+            aria-invalid={videoError ? true : undefined}
+            autoComplete="off"
+            className={cn(adminInputClass, "min-w-0 flex-1")}
+            disabled={readOnly || videoPending}
+            id="detalhes-video-destaque"
+            inputMode="url"
+            maxLength={2048}
+            onChange={(event) => setVideoDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void saveHeroVideo(videoDraft);
+              }
+            }}
+            placeholder="https://…/video.mp4"
+            value={videoDraft}
+          />
+          {!readOnly ? (
+            <div className="flex shrink-0 gap-2">
+              <Button
+                className="px-3"
+                disabled={videoPending || videoDraft.trim() === (heroVideoUrl ?? "")}
+                onClick={() => void saveHeroVideo(videoDraft)}
+                type="button"
+                variant="secondary"
+              >
+                {videoPending ? "Salvando…" : "Salvar vídeo"}
+              </Button>
+              {heroVideoUrl ? (
+                <Button className="px-3" disabled={videoPending} onClick={() => void saveHeroVideo(null)} type="button" variant="ghost">
+                  Remover
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </AdminField>
 
       <fieldset className="flex min-w-0 flex-col gap-2">
         <FieldLegend>Cantos do banner</FieldLegend>

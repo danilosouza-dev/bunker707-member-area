@@ -319,7 +319,7 @@ O topo do modal deve concentrar:
 - botoes de acao logo abaixo do titulo, tambem sobrepostos a capa;
 - degrade inferior suficiente para manter titulo e botoes legiveis sobre a imagem.
 
-No estado atual, o topo do modal usa imagem/capa. Futuramente, o CMS deve permitir trocar essa imagem por video configurado para o modal, mantendo fallback de imagem quando o video nao estiver configurado ou nao puder reproduzir.
+A midia do topo e a mesma do banner da pagina do produto (`content_page_settings.hero`), desde 14/10/2026: a Imagem de destaque ou, quando o produtor cadastra um Video de destaque na aba Detalhes do admin (link direto .mp4/.webm/.mov), esse video sem som e em repeticao, com a Imagem de destaque como capa; quem prefere menos movimento ve so a capa. Sem destaque configurado, o topo continua usando a capa vertical do card (fallback). Links de YouTube/Vimeo nao servem para esse campo: o video precisa ser um arquivo direto, como o mp4 do Bunny Stream.
 
 Depois da imagem/capa, o modal deve exibir:
 

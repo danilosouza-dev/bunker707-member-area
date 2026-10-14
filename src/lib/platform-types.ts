@@ -179,8 +179,17 @@ export type HomeRow = {
   visibility: RowVisibility;
 };
 
+/** Midia do topo do modal do curso: a "Imagem de destaque" do produto ou o video de destaque com a capa. */
+export type ContentModalMedia = {
+  mediaSrc: string;
+  mediaType: "image" | "video";
+  poster?: string;
+};
+
 export type ContentModalStructure = {
   formationCourses: ContentItem[];
+  /** Ausente = o modal usa a capa do card (item.image), como antes. */
+  media?: ContentModalMedia;
   modules: CourseModule[];
 };
 

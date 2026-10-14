@@ -221,7 +221,7 @@ Limites: 50 módulos por produto, 100 aulas por módulo, 20 materiais por aula (
 
 #### 1.6.5 Abas Detalhes, Acesso e venda, Alunos, Desempenho
 
-- **Detalhes**: hero com recorte, descrição longa, instrutor, nível, duração total calculada, "Como abre" (Card único / Mostrar módulos), "Ao clicar quando bloqueado" (abrir detalhes / ir ao link de compra), **cor do produto** (seis opções, usada em chips e gráficos do admin).
+- **Detalhes**: hero com recorte, **vídeo de destaque** (desde 14/10/2026: link direto .mp4/.webm/.mov que toca sem som na página do produto e no topo do modal da home, com a imagem de destaque como capa; remover o vídeo devolve a imagem ao lugar), descrição longa, instrutor, nível, duração total calculada, "Como abre" (Card único / Mostrar módulos), "Ao clicar quando bloqueado" (abrir detalhes / ir ao link de compra), **cor do produto** (seis opções, usada em chips e gráficos do admin).
 - **Acesso e venda**: Quem pode ver; Link de compra; texto do botão; liberação padrão; **Pacotes** que incluem este produto; Turmas; limite de alunos; **Próximo passo** (qual produto oferecer a quem concluir este — alimenta "Candidatos a upsell"); para Formação, a lista de cursos descrita em 1.6.9.
 - **Alunos**: a tabela de Alunos filtrada pelo produto, com **Liberar acesso para alguém** (busca por e-mail; sem conta, cria e envia o convite junto).
 - **Desempenho**: funil por módulo, tabela por aula (iniciaram, concluíram, queda vs. anterior, avaliação, comentários, perguntas ao Tutor por 100 visualizações), distribuição de progresso em faixas de 25 % com "Ver alunos", e as 5 aulas que mais precisam de atenção com **Abrir aula**. Antes de haver eventos: "Os dados aparecem quando os alunos assistirem aulas. Nada aqui é simulado."

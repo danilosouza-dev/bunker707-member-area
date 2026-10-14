@@ -628,3 +628,16 @@ test("importar playlist aceita o contrato legado mais 'Quem pode ver' e recusa i
   assert.equal(schemas.productIdInputSchema.safeParse({ id: "course-ia" }).success, true);
   assert.equal(schemas.productIdInputSchema.safeParse({ id: "../etc" }).success, false);
 });
+
+test("destaque em video: heroUrlOf devolve a capa, heroVideoUrlOf o link e o schema so aceita arquivo direto", () => {
+  const video = { hero: { mediaSrc: "https://cdn/hero.mp4", mediaType: "video", poster: " https://cdn/capa.webp " } };
+  assert.equal(mappers.heroUrlOf(video), "https://cdn/capa.webp");
+  assert.equal(mappers.heroVideoUrlOf(video), "https://cdn/hero.mp4");
+  assert.equal(mappers.heroVideoUrlOf({ hero: { mediaSrc: "https://cdn/hero.webp", mediaType: "image" } }), null);
+  assert.equal(mappers.heroVideoUrlOf(null), null);
+  assert.equal(schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: "https://vz-1.b-cdn.net/abc/play_720p.mp4?x=1" }).success, true);
+  assert.equal(schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: null }).success, true);
+  const youtube = schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: "https://www.youtube.com/watch?v=abc" });
+  assert.equal(youtube.success, false);
+  assert.equal(schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: "http://cdn/hero.mp4" }).success, false);
+});

@@ -711,7 +711,7 @@ function contentRecordToFormState(record: AdminContentRecord): ContentFormState 
     coursePresentationMode: record.pageSettings?.coursePresentationMode ?? "module_cards",
     description: record.content.description ?? "",
     homeModuleSectionEnabled: Boolean(record.pageSettings?.homeModuleSection?.enabled),
-    heroImage: record.pageSettings?.hero?.mediaSrc ?? "",
+    heroImage: (record.pageSettings?.hero?.mediaType === "video" ? record.pageSettings.hero.poster : record.pageSettings?.hero?.mediaSrc) ?? "",
     id: record.content.id,
     image: record.content.image,
     kind: record.content.kind,

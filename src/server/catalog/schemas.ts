@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import { extractYouTubePlaylistId } from "../../lib/youtube-course-import";
+import { videoFileLinkSchema } from "../../lib/video-file-link";
 import {
   CREATABLE_PRODUCT_FORMATS,
   MAX_LESSONS_PER_PASTE,
@@ -206,6 +207,12 @@ export const setProductImageSchema = z.object({
 export const setProductHeroCornersSchema = z.object({
   corners: z.enum(["inherit", "rounded", "soft"]),
   id: catalogIdSchema
+});
+
+/** Video de destaque do produto: link direto https (.mp4, .webm ou .mov), como o Destaque da home; null remove. */
+export const setProductHeroVideoSchema = z.object({
+  id: catalogIdSchema,
+  videoUrl: videoFileLinkSchema.nullable()
 });
 
 export const publishProductSchema = z.object({
