@@ -5,6 +5,7 @@ import { redactSecrets } from "@/lib/env-value";
 
 import { cache } from "react";
 import { unstable_noStore as noStore } from "next/cache";
+import { after } from "next/server";
 import type { AuthenticatedUser } from "@/server/auth/session";
 import { getAdminRoleForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
@@ -29,6 +30,8 @@ import {
 import { INVALID_SUPABASE_KEY_MESSAGE, isInvalidSupabaseKeyError } from "@/server/db/supabase-key-error";
 import { MemberAreaConflictError } from "@/server/member-area/errors";
 import { getStudentProfileRecord } from "@/server/member-area/student-profile";
+import { activityDeltaOf, type ActivityDelta } from "@/server/progress/activity-delta";
+import { recordStudentActivity } from "@/server/progress/student-activity";
 import { readPlatformSetting, updatePlatformSettingLatest, writePlatformSettingGuarded } from "@/server/member-area/settings-store";
 import { pruneHomeSectionRefs } from "@/server/storefront/model";
 import type {
@@ -2976,7 +2979,11 @@ export async function replaceCompletedLessons(input: {
   const writeResult = lessonProgressWriteQueue.then(async () => {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await replaceCompletedLessonsUnsafe(input);
+        const { activity, record } = await replaceCompletedLessonsUnsafe(input);
+        // Atividade real (docs/17 §1.11) so depois do compare-and-swap confirmado: uma tentativa que
+        // perdeu o conflito nao conta. Fora do caminho da resposta, para nao atrasar o heartbeat.
+        scheduleStudentActivity({ contentId: record.contentId, delta: activity, userId: record.userId });
+        return record;
       } catch (error) {
         if ((error as { code?: string }).code !== LESSON_PROGRESS_CONFLICT_CODE || attempt >= 3) {
           throw error;
@@ -2986,6 +2993,19 @@ export async function replaceCompletedLessons(input: {
   });
   lessonProgressWriteQueue = writeResult.then(() => undefined, () => undefined);
   return writeResult;
+}
+
+function scheduleStudentActivity(input: { contentId: string; delta: ActivityDelta; userId: string }) {
+  if (input.delta.seconds <= 0 && input.delta.completed <= 0) {
+    return;
+  }
+
+  try {
+    after(() => recordStudentActivity(input));
+  } catch {
+    // Fora de um request (ex.: job): grava direto, sem bloquear quem chamou.
+    void recordStudentActivity(input);
+  }
 }
 
 async function replaceCompletedLessonsUnsafe({
@@ -3034,6 +3054,7 @@ async function replaceCompletedLessonsUnsafe({
     : null;
   const uniqueLessonIds = Array.from(new Set(completedLessonIds ?? currentRecord?.completedLessonIds ?? []));
   const nextLessonWatchStates = normalizeLessonWatchStates(currentRecord?.lessonWatchStates);
+  const previousWatchState = lessonId ? (normalizeLessonWatchStates(currentRecord?.lessonWatchStates)[lessonId] ?? null) : null;
 
   if (lessonId) {
     const existingWatchState = nextLessonWatchStates[lessonId];
@@ -3099,6 +3120,14 @@ async function replaceCompletedLessonsUnsafe({
     updatedAt: new Date().toISOString(),
     userId
   };
+  const activity = activityDeltaOf({
+    nextCompletedLessonIds: uniqueLessonIds,
+    nextProgressSeconds: lessonId ? (nextLessonWatchStates[lessonId]?.progressSeconds ?? 0) : 0,
+    now: Date.now(),
+    previousCompletedLessonIds: currentRecord?.completedLessonIds ?? [],
+    previousLastWatchedAt: previousWatchState?.lastWatchedAt ?? null,
+    previousProgressSeconds: previousWatchState ? previousWatchState.progressSeconds : null
+  });
 
   const nextRow = {
     completed_lesson_ids: nextRecord.completedLessonIds,
@@ -3123,7 +3152,7 @@ async function replaceCompletedLessonsUnsafe({
       throw createLessonProgressConflictError();
     }
 
-    return nextRecord;
+    return { activity, record: nextRecord };
   }
 
   const insertResult = await supabase.from("lesson_progress").insert(nextRow);
@@ -3133,5 +3162,5 @@ async function replaceCompletedLessonsUnsafe({
   }
 
   await throwIfSupabaseError(insertResult.error, "Erro salvando progresso da aula");
-  return nextRecord;
+  return { activity, record: nextRecord };
 }

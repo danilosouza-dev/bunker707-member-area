@@ -367,6 +367,8 @@ Regras e armadilhas (verificadas em 2026-10-11 no projeto `hrtnqcznhdmodjikvddm`
 - o SMTP embutido do Supabase envia no maximo **2 e-mails por hora** por projeto (campo travado no painel) e so entrega para membros da organizacao. Estourar o limite devolve `429 over_email_send_rate_limit`. Antes de liberar alunos reais, configurar SMTP proprio em Authentication > Emails > SMTP Settings e ajustar o limite em Authentication > Rate Limits;
 - convites gerados pelo painel do Supabase ou por `inviteUserByEmail` chegam com `#access_token=` (fluxo implicito), que o cliente PKCE do app recusa; ate o fluxo de convite migrar para `token_hash` + `verifyOtp`, contas de admin devem ser criadas em Authentication > Users > Create new user, e alunos convidados usam "Esqueci minha senha".
 
+- Envio em massa (Reenviar convite na lista de Alunos, importacao com convite): depende de SMTP proprio (Amazon SES) com limite conhecido; sem ele, o Supabase hospedado entrega so para a equipe e poucos por hora. As rotinas param no primeiro 429 e marcam os e-mails como pendentes em vez de falhar as contas (`src/server/students/access.ts`).
+
 ## Login e destaque configuraveis (Area de membros)
 
 Desde 2026-10-11 o visual do `/login` e o topo da home sao editados no admin novo (Area de membros > Login e > Destaque) e gravados em `platform_settings` (`loginPage` e `hero`; formato em `docs/05`).

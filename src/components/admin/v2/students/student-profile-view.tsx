@@ -6,6 +6,7 @@ import {
   isAccessOpen,
   sourceProviderLabel,
   type StudentAccessItem,
+  type StudentCohort,
   type StudentDetail,
   type StudentProgressItem,
   type StudentTimelineEvent
@@ -19,6 +20,7 @@ import { StatusChip } from "../status-chip";
 import { adminCard } from "../styles";
 import { accessStateTone, describeAccessEnd, formatDateTime, formatRelativeDate, formatShortDate, paceTone, todayInputValue } from "./format";
 import { studentHref, studentListHref, type StudentProfileTab } from "./hrefs";
+import { CohortCell } from "./cohort-cell";
 import { AccessRowActions, StudentHeaderActions } from "./student-actions";
 import { StudentAvatar } from "./student-avatar";
 import { ProgressBar } from "./student-list-table";
@@ -34,6 +36,7 @@ export type StudentProfilePermissions = {
 };
 
 type StudentProfileViewProps = {
+  cohorts: readonly StudentCohort[];
   detail: StudentDetail;
   now: number;
   permissions: StudentProfilePermissions;
@@ -62,7 +65,7 @@ function Fact({ label, children }: { children: React.ReactNode; label: string })
   );
 }
 
-function AccessesTab({ accesses, canAccess, now, userId }: { accesses: readonly StudentAccessItem[]; canAccess: boolean; now: number; userId: string }) {
+function AccessesTab({ accesses, canAccess, cohorts, now, userId }: { accesses: readonly StudentAccessItem[]; canAccess: boolean; cohorts: readonly StudentCohort[]; now: number; userId: string }) {
   const today = todayInputValue(now);
   const columns: DataTableColumn<StudentAccessItem>[] = [
     {
@@ -78,6 +81,22 @@ function AccessesTab({ accesses, canAccess, now, userId }: { accesses: readonly 
       id: "produto"
     },
     { cell: (row) => sourceProviderLabel(row.sourceProvider), header: "Origem", hideOnMobile: true, id: "origem" },
+    {
+      cell: (row) => (
+        <CohortCell
+          canEdit={canAccess && isAccessOpen(row.state) && row.targetType !== "platform"}
+          cohort={row.cohort}
+          cohorts={cohorts}
+          productId={row.targetId}
+          productTitle={row.product?.title ?? "produto"}
+          userId={userId}
+        />
+      ),
+      className: "max-w-[160px]",
+      header: "Turma",
+      id: "turma",
+      mobileLabel: "Turma"
+    },
     { cell: (row) => formatShortDate(row.startsAt), header: "Desde", id: "desde", mobileLabel: "Desde" },
     { cell: (row) => describeAccessEnd(row.endsAt, now), header: "Até", id: "ate", mobileLabel: "Até" },
     {
@@ -159,7 +178,7 @@ function TimelineTab({ timeline }: { timeline: readonly StudentTimelineEvent[] }
   );
 }
 
-export function StudentProfileView({ detail, now, permissions, products, tab }: StudentProfileViewProps) {
+export function StudentProfileView({ cohorts, detail, now, permissions, products, tab }: StudentProfileViewProps) {
   const openAccesses = detail.accesses.filter((access) => isAccessOpen(access.state));
   const account = accountLabel(detail, now);
   const descriptionParts = [detail.email, permissions.canSeePersonal ? detail.phone : null, `Entrou em ${formatShortDate(detail.createdAt)}`].filter(Boolean);
@@ -210,7 +229,7 @@ export function StudentProfileView({ detail, now, permissions, products, tab }: 
         ]}
       />
 
-      {tab === "acessos" ? <AccessesTab accesses={detail.accesses} canAccess={permissions.canAccess} now={now} userId={detail.id} /> : null}
+      {tab === "acessos" ? <AccessesTab accesses={detail.accesses} canAccess={permissions.canAccess} cohorts={cohorts} now={now} userId={detail.id} /> : null}
       {tab === "progresso" ? <ProgressTab now={now} progress={detail.progress} /> : null}
       {tab === "historico" ? <TimelineTab timeline={detail.timeline} /> : null}
     </>

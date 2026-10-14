@@ -13,6 +13,22 @@ const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz2345
 const LIST_PAGE_SIZE = 1000;
 const LIST_MAX_PAGES = 10;
 
+/** 429 do Auth ao enviar e-mail (limite do SMTP): as rotinas em massa param de enviar e avisam. */
+export function isEmailRateLimitError(error: unknown) {
+  const candidate = error as { code?: string; message?: string; status?: number } | null;
+
+  return Boolean(candidate && (candidate.status === 429 || candidate.code === "over_email_send_rate_limit" || /rate limit/i.test(candidate.message ?? "")));
+}
+
+export class EmailRateLimitError extends Error {
+  readonly status = 429;
+
+  constructor() {
+    super("Limite de envio de e-mail da plataforma atingido. Tente de novo em 1 hora.");
+    this.name = "EmailRateLimitError";
+  }
+}
+
 export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
@@ -40,8 +56,12 @@ export async function getAccountById(db: StudentsDb, userId: string): Promise<Us
   return data.user ?? null;
 }
 
-/** Procura pelo perfil (indice por e-mail) e, se nao houver, varre a lista do Auth. */
-export async function findAccountByEmail(db: StudentsDb, email: string): Promise<User | null> {
+/**
+ * Procura pelo perfil (indice por e-mail). So varre a lista do Auth quando pedido (`scanAuth`), que e
+ * o caminho raro de uma conta sem perfil: no fluxo normal `createUser` acusa `email_exists` e ai sim
+ * vale a varredura, uma vez.
+ */
+export async function findAccountByEmail(db: StudentsDb, email: string, options: { scanAuth?: boolean } = {}): Promise<User | null> {
   const normalized = normalizeEmail(email);
   const profile = await fetchProfileByEmail(db, normalized);
 
@@ -51,6 +71,10 @@ export async function findAccountByEmail(db: StudentsDb, email: string): Promise
     if (account && normalizeEmail(account.email ?? "") === normalized) {
       return account;
     }
+  }
+
+  if (!options.scanAuth) {
+    return null;
   }
 
   for (let page = 1; page <= LIST_MAX_PAGES; page += 1) {
@@ -109,6 +133,10 @@ export async function inviteAccount(db: StudentsDb, input: { email: string; full
   });
 
   if (error || !data.user) {
+    if (isEmailRateLimitError(error)) {
+      throw new EmailRateLimitError();
+    }
+
     throw authError("Convite por e-mail", error?.message);
   }
 
@@ -132,6 +160,10 @@ export async function sendAccessEmail(db: StudentsDb, user: User, input: { fullN
   const reset = await db.auth.resetPasswordForEmail(email, { redirectTo: input.redirectTo });
 
   if (reset.error) {
+    if (isEmailRateLimitError(reset.error)) {
+      throw new EmailRateLimitError();
+    }
+
     throw authError("E-mail de acesso", reset.error.message);
   }
 }
@@ -152,6 +184,15 @@ export async function createAccountWithPassword(
   }
 
   return data.user;
+}
+
+/** `createUser` devolve este codigo quando o e-mail ja existe no Auth (conta sem perfil). */
+export function isEmailExistsError(error: { code?: string; message?: string; status?: number } | null | undefined) {
+  if (!error) {
+    return false;
+  }
+
+  return error.code === "email_exists" || error.status === 422 || /already (?:been )?registered|already exists/i.test(error.message ?? "");
 }
 
 export async function setTemporaryPassword(db: StudentsDb, user: User, input: { fullName: string | null; password: string }) {

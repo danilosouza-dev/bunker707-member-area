@@ -11,6 +11,7 @@ import { canRole } from "@/server/auth/roles";
 import { listProductOptions } from "@/server/catalog/queries";
 import { catalogIdSchema } from "@/server/catalog/schemas";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
+import { listCohorts } from "@/server/students/queries";
 
 export const metadata: Metadata = {
   title: "Adicionar aluno"
@@ -38,7 +39,11 @@ export default async function NewStudentPage({ searchParams }: NewStudentPagePro
   }
 
   const productParam = catalogIdSchema.safeParse(firstParam((await searchParams).produto) ?? "");
-  const loaded = await loadUnlessPendingMigration(() => listProductOptions());
+  const loaded = await loadUnlessPendingMigration(async () => {
+    const [products, cohorts] = await Promise.all([listProductOptions(), listCohorts()]);
+
+    return { cohorts, products };
+  });
 
   if (!loaded.ok) {
     return (
@@ -49,7 +54,7 @@ export default async function NewStudentPage({ searchParams }: NewStudentPagePro
     );
   }
 
-  const products = loaded.data;
+  const { cohorts, products } = loaded.data;
   const preselected = productParam.success && products.some((product) => product.id === productParam.data) ? productParam.data : null;
 
   return (
@@ -59,7 +64,7 @@ export default async function NewStudentPage({ searchParams }: NewStudentPagePro
         description="Nome e e-mail bastam. Marque os produtos e escolha como o aluno recebe o acesso."
         title="Adicionar aluno"
       />
-      <NewStudentForm preselectedProductId={preselected} products={products} today={todayInputValue(readNow())} />
+      <NewStudentForm cohorts={cohorts} preselectedProductId={preselected} products={products} today={todayInputValue(readNow())} />
     </AdminPage>
   );
 }

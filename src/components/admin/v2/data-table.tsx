@@ -22,11 +22,18 @@ export type DataTableColumn<Row> = {
   mobileLabel?: string;
 };
 
+/** Coluna estreita antes da primeira (caixa de selecao): fica por cima do link da linha, como as acoes. */
+export type DataTableLeading<Row> = {
+  cell: (row: Row) => ReactNode;
+  header: ReactNode;
+};
+
 type DataTableProps<Row> = {
   /** Descricao da tabela para leitores de tela. */
   caption: string;
   className?: string;
   columns: readonly DataTableColumn<Row>[];
+  leading?: DataTableLeading<Row>;
   emptyAction?: { href: string; label: string };
   emptyDescription?: string;
   emptyTitle?: string;
@@ -66,6 +73,7 @@ export function DataTable<Row>({
   emptyTitle = "Nada por aqui ainda",
   getRowHref,
   getRowKey,
+  leading,
   loading = false,
   loadingRowCount = 5,
   mobile = "scroll",
@@ -81,6 +89,14 @@ export function DataTable<Row>({
           <caption className="sr-only">{caption}</caption>
           <thead>
             <tr>
+              {leading ? (
+                <th
+                  className={cn("h-9 w-10 border-b border-[var(--border-subtle)] bg-[var(--surface-1)] pl-4 text-left align-middle")}
+                  scope="col"
+                >
+                  {leading.header}
+                </th>
+              ) : null}
               {columns.map((column) => (
                 <th
                   className={cn(
@@ -101,6 +117,7 @@ export function DataTable<Row>({
             {loading
               ? Array.from({ length: loadingRowCount }, (_, rowIndex) => (
                   <tr className="h-12 border-b border-[var(--border-subtle)] last:border-b-0" key={`loading-${rowIndex}`}>
+                    {leading ? <td className="w-10 pl-4" /> : null}
                     {columns.map((column) => (
                       <td className={cn("align-middle", cellPadding)} key={column.id}>
                         <Skeleton
@@ -117,7 +134,7 @@ export function DataTable<Row>({
 
             {isEmpty ? (
               <tr>
-                <td className="p-0 whitespace-normal" colSpan={columns.length}>
+                <td className="p-0 whitespace-normal" colSpan={columns.length + (leading ? 1 : 0)}>
                   <EmptyState
                     action={emptyAction}
                     description={emptyDescription}
@@ -143,6 +160,11 @@ export function DataTable<Row>({
                       )}
                       key={getRowKey(row)}
                     >
+                      {leading ? (
+                        <td className={cn("relative z-10 w-10 align-middle pl-4", asCards && "max-md:col-span-full max-md:pl-0")}>
+                          {leading.cell(row)}
+                        </td>
+                      ) : null}
                       {columns.map((column, columnIndex) => {
                         const content = column.cell(row);
                         const cardFullWidth = asCards && (column.emphasis || !column.mobileLabel);

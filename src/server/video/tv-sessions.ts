@@ -14,6 +14,7 @@ import { replaceCompletedLessons } from "@/server/db/platform-store";
 
 const PAIRING_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PAIRING_CODE_LENGTH = 6;
+const TV_PROGRESS_WRITE_SECONDS = 15;
 const PAIRING_WINDOW_MS = 10 * 60 * 1000;
 const SESSION_WINDOW_MS = 4 * 60 * 60 * 1000;
 
@@ -464,17 +465,27 @@ export async function updateTvReceiverState({
       ? Math.min(Math.max(Math.round((safeCurrentTime / safeDuration) * 100), safeCurrentTime > 0 ? 1 : 0), 99)
       : safeCurrentTime > 0 ? 1 : 0;
   const status: LessonWatchStatus = completed ? "completed" : "in_progress";
+  // O receptor manda a posicao a cada 2 s; o progresso da aula (e a atividade real) e gravado quando a
+  // posicao cruza uma fronteira de 15 s de video (a cada ~15 s de reproducao), ao pausar, ao terminar
+  // ou num salto grande. `current_time_seconds` ja foi regravado acima, por isso a fronteira, e nao a
+  // diferenca para o tick anterior (que seria sempre ~2 s).
+  const previousTime = getNumber(row.current_time_seconds);
+  const pausedNow = playbackState === "paused" && row.playback_state !== "paused";
+  const crossedBoundary = Math.floor(safeCurrentTime / TV_PROGRESS_WRITE_SECONDS) !== Math.floor(previousTime / TV_PROGRESS_WRITE_SECONDS);
+  const shouldPersistProgress = completed || pausedNow || crossedBoundary || Math.abs(safeCurrentTime - previousTime) >= TV_PROGRESS_WRITE_SECONDS;
 
-  await replaceCompletedLessons({
-    contentId: row.content_id,
-    durationSeconds: safeDuration || undefined,
-    lessonId: row.lesson_id,
-    maxProgressPercent: progressPercent,
-    progressPercent,
-    progressSeconds: safeCurrentTime,
-    status,
-    userId: row.user_id
-  });
+  if (shouldPersistProgress) {
+    await replaceCompletedLessons({
+      contentId: row.content_id,
+      durationSeconds: safeDuration || undefined,
+      lessonId: row.lesson_id,
+      maxProgressPercent: progressPercent,
+      progressPercent,
+      progressSeconds: safeCurrentTime,
+      status,
+      userId: row.user_id
+    });
+  }
 
   return normalizeSession(updateResult.data as TvSessionRow);
 }

@@ -2,22 +2,20 @@
 // carregam direto pelo Node e os outros modulos do admin (busca, Comunidade, Hoje, Produtos) montam
 // links para ca sem conhecer os parametros.
 //
-//   /admin/alunos                 lista (?busca=, ?produto=, ?ritmo=, ?pagina=)
+//   /admin/alunos                 lista (?busca=, ?produto=, ?ritmo=, ?turma=, ?expira=30, ?conta=nunca, ?comecou=nao, ?comentadores=top, ?semana=&grupo=, ?pagina=)
 //   /admin/alunos/novo            adicionar aluno (?produto= ja marca o produto a liberar)
+//   /admin/alunos/importar        importar CSV
 //   /admin/alunos/<id>            perfil do aluno (?aba=acessos|progresso|historico)
 
-import type { StudentPace } from "@/server/students/model";
+import { hasStudentListFilters, studentListParamsToSearch, type StudentListParams } from "../../../../server/students/model";
 
 export const STUDENT_LIST_PATH = "/admin/alunos";
 export const NEW_STUDENT_PATH = "/admin/alunos/novo";
+export const IMPORT_STUDENTS_PATH = "/admin/alunos/importar";
 export const STUDENT_SEARCH_MAX_LENGTH = 120;
 
-export type StudentListFilters = {
-  page?: number;
-  pace?: StudentPace;
-  productId?: string;
-  q?: string;
-};
+/** Filtros da lista no endereco (forma canonica do modelo) mais a pagina. */
+export type StudentListFilters = StudentListParams & { page?: number };
 
 export type StudentProfileTab = "acessos" | "progresso" | "historico";
 
@@ -26,36 +24,23 @@ export type StudentProfileTab = "acessos" | "progresso" | "historico";
  * so `patch.page` muda a pagina. Valores vazios saem do endereco.
  */
 export function studentListHref(current: StudentListFilters = {}, patch: Partial<StudentListFilters> = {}) {
-  const changesFilter = "pace" in patch || "productId" in patch || "q" in patch;
-  const next: StudentListFilters = { ...current, ...patch };
-  const page = "page" in patch ? patch.page : changesFilter ? undefined : current.page;
-  const params = new URLSearchParams();
-  const q = next.q?.trim().slice(0, STUDENT_SEARCH_MAX_LENGTH);
-
-  if (next.productId) {
-    params.set("produto", next.productId);
-  }
-
-  if (next.pace) {
-    params.set("ritmo", next.pace);
-  }
-
-  if (q) {
-    params.set("busca", q);
-  }
-
-  if (page && page > 1) {
-    params.set("pagina", String(page));
-  }
-
-  const query = params.toString();
+  const changesFilter = Object.keys(patch).some((key) => key !== "page");
+  const { page: currentPage, ...currentParams } = current;
+  const { page: patchPage, ...patchParams } = patch;
+  const page = "page" in patch ? patchPage : changesFilter ? undefined : currentPage;
+  const query = studentListParamsToSearch({ ...currentParams, ...patchParams }, page).toString();
 
   return query ? `${STUDENT_LIST_PATH}?${query}` : STUDENT_LIST_PATH;
 }
 
 /** Lista de alunos filtrada por nome ou e-mail ("Ver aluno" na Comunidade, busca global). */
 export function studentSearchHref(query: string) {
-  return studentListHref({}, { q: query });
+  return studentListHref({}, { q: query.trim().slice(0, STUDENT_SEARCH_MAX_LENGTH) });
+}
+
+/** Lista so com os filtros de um segmento (sem pagina). */
+export function segmentHref(params: StudentListParams) {
+  return studentListHref({}, params);
 }
 
 export function studentHref(userId: string, tab?: StudentProfileTab) {
@@ -70,5 +55,5 @@ export function newStudentHref(productId?: string | null) {
 }
 
 export function hasActiveStudentFilters(filters: StudentListFilters) {
-  return Boolean(filters.pace || filters.productId || filters.q?.trim());
+  return hasStudentListFilters(filters);
 }
