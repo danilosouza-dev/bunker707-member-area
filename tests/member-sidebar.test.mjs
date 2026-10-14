@@ -123,9 +123,8 @@ test("app-shell usa a nova barra lateral e o menu da conta, sem lista propria ne
   assert.match(appShellSource, /aria-controls=\{sidebarId\}/);
   assert.match(appShellSource, /aria-expanded=\{sidebarOpen\}/);
   assert.match(appShellSource, /ref=\{menuButtonRef\}/);
-  assert.match(appShellSource, /onClick=\{\(event\) => openSidebar\(event\.currentTarget\)\}/);
-  assert.match(appShellSource, /onOpenMenu=\{\(\) => openSidebar\(railMenuButtonRef\.current\)\}/);
-  assert.match(appShellSource, /returnFocusRef=\{sidebarTriggerRef\}/);
+  assert.match(appShellSource, /onClick=\{openSidebar\}/);
+  assert.match(appShellSource, /returnFocusRef=\{menuButtonRef\}/);
   // Bloco do produtor so para quem pode usar a visualizacao como aluno.
   assert.match(appShellSource, /producerPanel=\{showPreviewControl \? \(/);
   assert.match(sidebarSource, /\{producerPanel \? </);
@@ -190,21 +189,22 @@ test("menu da conta: fecha fora/Esc/Tab, setas percorrem e o Esc nao chega na IA
   assert.match(accountMenuSource, /className="fixed right-4 top-\[60px\]/);
 });
 
-test("trilho de icones no computador: simbolo, hamburguer, sem empurrar o conteudo (pedido do produtor)", () => {
-  const railSource = read("src/components/member/shell/member-rail.tsx");
+test("cabecalho como no YouTube: hamburguer + logo sempre visiveis, gaveta por cima, avatar sem nome", () => {
   const notificationsSource = read("src/components/member/shell/member-notifications-menu.tsx");
 
-  assert.match(railSource, /hidden w-\[80px\][^"]*md:flex/, "trilho fixo de 80 px so a partir de 768 px");
-  assert.match(railSource, /fill=\{item\.active \? "currentColor" : "none"\}/, "ativo com icone preenchido");
-  assert.match(railSource, /\/brand\/icon-bunker\.svg/, "recolhido mostra so o simbolo");
-  assert.match(railSource, /getMemberSidebarSections\(pathname, accessPreviewMode\)/, "mesma fonte de rotas da gaveta");
-  assert.match(railSource, /aria-current=\{item\.active \? "page" : undefined\}/);
-  assert.match(railSource, /title=\{item\.label\}/);
-  assert.match(railSource, /onClick=\{\(event\) => onNavigate\(event, item\.href\)\}/);
-  assert.doesNotMatch(railSource, /\bSun\b|\bMoon\b/, "sempre escuro, sem troca de tema");
-
-  assert.match(appShellSource, /<header className="fixed left-0 right-0 top-0 z-40 overflow-hidden md:left-\[80px\]">/);
-  assert.match(appShellSource, /<main className="md:pl-\[80px\]">/, "conteudo ao lado do trilho; a gaveta abre por cima");
+  // Sem trilho de icones (decisao do produtor, 13/10/2026): nada empurra o conteudo.
+  assert.doesNotMatch(appShellSource, /MemberRail|md:pl-\[80px\]|md:left-\[80px\]|memberStyleCssVars/);
+  assert.match(appShellSource, /<header className="fixed left-0 right-0 top-0 z-40 overflow-hidden">/);
+  assert.match(appShellSource, /<main>\{children\}<\/main>/);
+  assert.match(appShellSource, /data-member-buttons=\{style\.buttons\} data-member-corners=\{style\.corners\} data-member-menu=\{style\.menu\}/, "cantos e botoes pelos atributos do raiz");
+  // Gaveta repete hamburguer + logo no mesmo lugar do cabecalho.
+  assert.match(sidebarSource, /flex h-16 shrink-0 items-center gap-2 px-4/);
   assert.match(appShellSource, /<MemberNotificationsMenu /, "lembretes no topo, ao lado da conta");
   assert.match(notificationsSource, /Nenhum lembrete por enquanto\./, "sem lembrete inventado");
+  // Avatar sem nome no cabecalho; o nome fica no painel.
+  assert.doesNotMatch(accountMenuSource, /ChevronDown|<span[^>]*>\{student\.name\}<\/span>/);
+  assert.match(accountMenuSource, /<p className="truncate text-sm font-semibold text-white">\{displayName\}<\/p>/);
+  // Menu no cabecalho (Marca > Estilo): links escritos a partir de 1024 px (estilo Netflix) e hamburguer so abaixo disso.
+  assert.match(appShellSource, /<nav aria-label="Navegação principal" className="ml-5 hidden min-w-0 items-center gap-1 lg:flex">/);
+  assert.match(appShellSource, /menuInHeader && "lg:hidden"/);
 });

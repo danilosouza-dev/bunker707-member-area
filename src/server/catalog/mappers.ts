@@ -26,6 +26,7 @@ import type {
   LessonVideoSummary,
   ModuleNode,
   ProductHeader,
+  ProductHeroCorners,
   ProductListItem
 } from "./types";
 
@@ -140,6 +141,14 @@ export function parentFormationIdOf(settings: ProductSettings | null | undefined
   const value = settings?.parentFormationId;
 
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** Cantos do banner gravados em settings.hero.corners; ausente ou invalido = "inherit" (segue Marca > Estilo). */
+export function heroCornersOf(settings: ProductSettings | null | undefined): ProductHeroCorners {
+  const hero = settings?.hero;
+  const corners = hero && typeof hero === "object" && !Array.isArray(hero) ? (hero as { corners?: unknown }).corners : undefined;
+
+  return corners === "rounded" || corners === "soft" ? corners : "inherit";
 }
 
 export function heroUrlOf(settings: ProductSettings | null | undefined) {

@@ -7,9 +7,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { CONFLICT_MESSAGE } from "@/server/catalog/errors";
 import { PRODUCT_FORMAT_LABELS, type ProductFormat } from "@/server/catalog/model";
-import { setProductImage, updateProductDetails } from "@/server/catalog/product-actions";
+import { setProductHeroCorners, setProductImage, updateProductDetails } from "@/server/catalog/product-actions";
 import { shortDescriptionSchema, updateProductDetailsSchema } from "@/server/catalog/schemas";
-import type { ProductDetails } from "@/server/catalog/types";
+import type { ProductDetails, ProductHeroCorners } from "@/server/catalog/types";
 import type { HomeModuleRowState } from "@/server/member-area/modules-model";
 import { ErrorBanner } from "../error-banner";
 import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../form";
@@ -49,10 +49,27 @@ import { useWarnBeforeUnload } from "./use-warn-before-unload";
 const DESCRIPTION_LIMIT = 300;
 
 type ImageSlot = "cover" | "hero";
+
+/** Cantos do banner da pagina do produto (salva na hora). "Como a área" segue Marca > Estilo. */
+const HERO_CORNERS_OPTIONS: ReadonlyArray<{ label: string; value: ProductHeroCorners }> = [
+  { label: "Como a área", value: "inherit" },
+  { label: "Arredondados", value: "rounded" },
+  { label: "Retos", value: "soft" }
+];
+const HERO_CORNERS_HINTS: Record<ProductHeroCorners, string> = {
+  inherit: "Segue a escolha de Área de membros › Marca › Estilo. Salva na hora.",
+  rounded: "Nesta página o banner tem margem e cantos redondos, como a home arredondada. Salva na hora.",
+  soft: "Nesta página o banner vai de ponta a ponta. Salva na hora."
+};
+const HERO_CORNERS_TOASTS: Record<ProductHeroCorners, string> = {
+  inherit: "Banner segue a área",
+  rounded: "Banner com cantos arredondados",
+  soft: "Banner com cantos retos"
+};
 type SaveFailure = { message: string; status: number };
 
 const imageCopy: Record<ImageSlot, { removed: string; saved: string }> = {
-  cover: { removed: "Capa removida", saved: "Capa salva" },
+  cover: { removed: "Thumbnail removida", saved: "Thumbnail salva" },
   hero: { removed: "Imagem de destaque removida", saved: "Imagem de destaque salva" }
 };
 
@@ -79,6 +96,9 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
   const [failure, setFailure] = useState<SaveFailure | null>(null);
   const [saving, setSaving] = useState(false);
   const [heroUrl, setHeroUrl] = useState(details.heroUrl);
+  const [heroCorners, setHeroCorners] = useState<ProductHeroCorners>(details.heroCorners);
+  const [cornersPending, setCornersPending] = useState(false);
+  const [cornersError, setCornersError] = useState<string | null>(null);
   const [imagePending, setImagePending] = useState<ImageSlot | null>(null);
   const [imageErrors, setImageErrors] = useState<Partial<Record<ImageSlot, string>>>({});
   const patch = buildDetailsPatch(baseline, draft);
@@ -100,6 +120,7 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
 
     if (!imagePending) {
       setHeroUrl(details.heroUrl);
+      setHeroCorners(details.heroCorners);
     }
   }
 
@@ -209,6 +230,30 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
         ? { onUndo: () => void saveImage(slot, previous, { undoable: false }) }
         : undefined
     );
+  }
+
+  // Cantos do banner: salva na hora, como as imagens. Erro volta a escolha anterior.
+  async function saveHeroCorners(corners: ProductHeroCorners) {
+    if (readOnly || cornersPending || corners === heroCorners) {
+      return;
+    }
+
+    const previous = heroCorners;
+    setHeroCorners(corners);
+    setCornersPending(true);
+    setCornersError(null);
+
+    const result = await setProductHeroCorners({ corners, id: header.id });
+    setCornersPending(false);
+
+    if (!result.ok) {
+      setHeroCorners(previous);
+      setCornersError(result.error);
+      return;
+    }
+
+    applyHeader({ ...header, updatedAt: result.data.updatedAt });
+    adminToast.success(HERO_CORNERS_TOASTS[corners]);
   }
 
   const descriptionHint = "Aparece no card e nos detalhes do produto na área do aluno.";
@@ -333,7 +378,7 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
       <ImageField
         error={imageErrors.cover}
         id="detalhes-capa"
-        label="Capa"
+        label="Thumbnail do card"
         onChange={(value) => void saveImage("cover", value)}
         pending={imagePending === "cover"}
         readOnly={readOnly}
@@ -352,6 +397,23 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
         slot="hero"
         value={images.hero}
       />
+
+      <fieldset className="flex min-w-0 flex-col gap-2">
+        <FieldLegend>Cantos do banner</FieldLegend>
+        <PillGroup
+          ariaLabel="Cantos do banner"
+          disabled={readOnly || cornersPending}
+          name="detalhes-banner-cantos"
+          onChange={(value: ProductHeroCorners) => void saveHeroCorners(value)}
+          options={HERO_CORNERS_OPTIONS}
+          value={heroCorners}
+        />
+        {cornersError ? (
+          <FieldError>{cornersError}</FieldError>
+        ) : (
+          <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{HERO_CORNERS_HINTS[heroCorners]}</p>
+        )}
+      </fieldset>
 
       {presentation && homeModuleRow ? (
         <HomeRowControl canWrite={canWriteStorefront} productId={header.id} productTitle={header.title} state={homeModuleRow} />

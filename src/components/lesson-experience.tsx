@@ -41,6 +41,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { SavedItemButton } from "@/components/saved-item-button";
 import { LessonAiTutor } from "@/components/lesson-ai-tutor";
 import { LessonCommentComposer } from "@/components/lesson/lesson-comment-composer";
+import { LessonDescription } from "@/components/lesson/lesson-description";
 import { LessonMaterialsPanel } from "@/components/lesson/lesson-materials-panel";
 import { LessonReleaseOverlay, type LessonLockNotice } from "@/components/lesson/lesson-release-overlay";
 import { MemberRoleBadge } from "@/components/member/ui/member-chip";
@@ -4365,9 +4366,7 @@ export function LessonExperience({
             <h1 className="max-w-5xl text-2xl font-black leading-tight text-[#ffffff] sm:text-3xl lg:text-4xl">
               {activeLesson.title}
             </h1>
-            <p className="mt-4 max-w-4xl text-sm leading-6 text-zinc-300 sm:text-base sm:leading-7">
-              {activeLesson.description}
-            </p>
+            <LessonDescription className="mt-4" key={activeLesson.id} text={activeLesson.description} />
           </div>
 
           <div className="w-full space-y-3 lg:w-auto lg:min-w-[420px] lg:max-w-none">

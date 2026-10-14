@@ -5,6 +5,7 @@ import { updatePlatformAppearance } from "@/server/db/platform-store";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { PlatformAppearanceInput } from "@/server/db/platform-store";
+import { isSameMemberStyle, normalizeMemberStyle } from "@/lib/member-style";
 
 function isValidHeroInput(hero: PlatformAppearanceInput["hero"]) {
   return (
@@ -23,6 +24,15 @@ function isValidLogoInput(logo: PlatformAppearanceInput["logo"]) {
   );
 }
 
+/** Estilo valido = completo e so com valores conhecidos (normalizar nao muda nada). */
+function isValidStyleInput(style: PlatformAppearanceInput["style"]) {
+  return (
+    typeof style === "object" &&
+    style !== null &&
+    isSameMemberStyle(normalizeMemberStyle({ style }), style)
+  );
+}
+
 export async function PUT(request: Request) {
   const auth = await requireApiRole("storefront.write");
 
@@ -34,8 +44,8 @@ export async function PUT(request: Request) {
     // Capa + logo podem ir juntas como data URLs base64 (ate 8 MB cada antes do encode).
     const payload = await readBoundedJson<Partial<PlatformAppearanceInput>>(request, 24_000_000);
 
-    if (payload.hero === undefined && payload.logo === undefined) {
-      return NextResponse.json({ error: "Informe a capa da home ou a logo." }, { status: 400 });
+    if (payload.hero === undefined && payload.logo === undefined && payload.style === undefined) {
+      return NextResponse.json({ error: "Informe a capa da home, a logo ou o estilo." }, { status: 400 });
     }
 
     if (payload.hero !== undefined && !isValidHeroInput(payload.hero)) {
@@ -46,9 +56,14 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "Configuracao de logo invalida." }, { status: 400 });
     }
 
+    if (payload.style !== undefined && !isValidStyleInput(payload.style)) {
+      return NextResponse.json({ error: "Configuracao de estilo invalida." }, { status: 400 });
+    }
+
     const data = await updatePlatformAppearance({
       hero: payload.hero,
-      logo: payload.logo
+      logo: payload.logo,
+      style: payload.style
     });
     invalidateCatalog({ from: "route" });
 

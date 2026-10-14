@@ -27,7 +27,7 @@ const { getHomeRowHoverEdgeIndexes } = await import(
 );
 
 test("home vertical card rows use tighter spacing", () => {
-  assert.match(rowSource, /const rowGap = variant === "vertical" \? "gap-\[0\.75rem\]" : "gap-\[1\.5rem\]";/);
+  assert.match(rowSource, /const rowGap = variant === "vertical" \? "gap-\[0\.75rem\] \[--member-row-gap:0\.75rem\]" : "gap-\[1\.5rem\] \[--member-row-gap:1\.5rem\]";/);
   assert.match(rowSource, /\$\{rowGap\}/);
 });
 
@@ -41,7 +41,7 @@ test("home carousel uses Netflix-style edge arrows and page indicators only with
   assert.match(rowSource, /setHasHorizontalOverflow\(metrics\.hasOverflow\);/);
   assert.match(rowSource, /<CarouselPaginationIndicator/);
   assert.match(rowSource, /<CarouselEdgeControls/);
-  assert.match(rowSource, /<div className="home-row-viewport relative">\s*<div\s*className=\{`scrollbar-hidden flex scroll-smooth/);
+  assert.match(rowSource, /<div className="home-row-viewport relative">\s*<div\s*className=\{`member-row-scroller scrollbar-hidden flex scroll-smooth/);
   assert.doesNotMatch(rowSource, /import \{[^}]*ChevronLeft/);
   assert.match(carouselNavigationSource, /export function getCarouselMetrics/);
   assert.match(carouselNavigationSource, /pagePositions\.push\(maxScrollLeft\)/);
@@ -85,12 +85,13 @@ test("home can show an access card and intermediate modules for a selected cours
   assert.doesNotMatch(rowSource, /Ver aulas/);
   assert.doesNotMatch(rowSource, /\$\{cardActionClassName\} mt-3 max-w-fit flex-none/);
   assert.match(rowSource, /home-row-cover-card/);
-  assert.match(rowSource, /w-\[8\.75rem\]/);
-  assert.match(rowSource, /xl:w-\[14rem\]/);
+  // Largura fluida (fracao da fileira, tests/member-row-sizing.test.mjs): nada de rem fixo no card do modulo.
+  assert.match(rowSource, /home-row-cover-card member-row-card group/);
+  assert.doesNotMatch(rowSource, /w-\[8\.75rem\]|xl:w-\[14rem\]/);
 });
 
 test("home vertical card hover expands the card without inner image zoom", () => {
-  assert.match(cardSource, /home-row-cover-card group/);
+  assert.match(cardSource, /home-row-cover-card member-row-card group/);
   assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-surface \{\s*transform: translate3d\(var\(--home-row-card-hover-shift-x, 0px\), -8px, 0\) scale\(1\.14\);/);
   assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-image \{\s*transform: scale\(1\);/);
   assert.match(cssSource, /\.home-row-cover-card\.group:hover \.home-cover-card-image \{\s*transform: scale\(1\) !important;/);
@@ -103,24 +104,22 @@ test("home vertical cards grow inward only at carousel edges", () => {
   assert.match(rowSource, /setAttribute\("data-hover-edge", "left"\)/);
   assert.match(rowSource, /setAttribute\("data-hover-edge", "right"\)/);
   assert.match(rowSource, /removeProperty\("--home-row-card-hover-shift-x"\)/);
-  assert.match(rowSource, /removeProperty\("--home-row-card-hover-logo-shift-x"\)/);
-  assert.match(rowSource, /homeRowCardHoverScale = 1\.14/);
+  // A logo fica dentro da superficie (cresce com o card): sem deslocamento proprio.
+  assert.doesNotMatch(rowSource, /hover-logo-shift/);
+  assert.doesNotMatch(cssSource, /hover-logo-shift/);
+  assert.match(cardSource, /home-cover-card-logo pointer-events-none absolute left-3 top-3 z-30 w-\[56%\]/);
+  assert.match(cssSource, /\.group:hover \.home-cover-card-logo \{\s*opacity: 0\.92;\s*\}/);
   assert.match(rowSource, /hiddenOffset = Math\.max\(leftBoundary - leftEdgeRect\.left, 0\)/);
   assert.match(rowSource, /hiddenOffset = Math\.max\(rightEdgeRect\.right - rightBoundary, 0\)/);
   assert.match(rowSource, /leftSurfaceShiftX = roundPx\(hiddenOffset \+ neighborPeekOffset\)/);
   assert.match(rowSource, /rightSurfaceShiftX = roundPx\(-\(hiddenOffset \+ neighborPeekOffset\)\)/);
-  assert.match(rowSource, /rightLogoShiftX = roundPx\(rightSurfaceShiftX - rightEdgeRect\.width \* \(homeRowCardHoverScale - 1\)\)/);
   assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{leftSurfaceShiftX\}px`\)/);
-  assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{leftSurfaceShiftX\}px`\)/);
   assert.match(rowSource, /setProperty\("--home-row-card-hover-shift-x", `\$\{rightSurfaceShiftX\}px`\)/);
-  assert.match(rowSource, /setProperty\("--home-row-card-hover-logo-shift-x", `\$\{rightLogoShiftX\}px`\)/);
   assert.match(cardSource, /data-home-row-card/);
   assert.doesNotMatch(cardSource, /home-row-watch-card/);
   assert.doesNotMatch(cardSource, /home-row-card-surface/);
   assert.match(cssSource, /\[data-home-row-card\]\[data-hover-edge="left"\] \.home-cover-card-surface \{\s*transform-origin: left center;/);
   assert.match(cssSource, /\[data-home-row-card\]\[data-hover-edge="right"\] \.home-cover-card-surface \{\s*transform-origin: right center;/);
-  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="left"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, 0px\), -27px, 0\);/);
-  assert.match(cssSource, /\.home-row-cover-card\[data-hover-edge="right"\]\.group:hover \.home-cover-card-logo \{\s*transform: translate3d\(var\(--home-row-card-hover-logo-shift-x, var\(--home-row-card-hover-shift-x, 0px\)\), -27px, 0\);/);
 });
 
 test("a short row with two cards keeps the second card centered on hover", () => {
@@ -216,10 +215,13 @@ test("content details modal lets lesson-list wheel gestures continue to the moda
   assert.doesNotMatch(lessonsScrollBlock, /overscroll-behavior: contain;/);
 });
 
-test("content details modal calculates course progress from module progress", () => {
-  assert.match(modalSource, /function getCourseProgressFromModules/);
-  assert.match(modalSource, /modules\.reduce\(\(total, module\) => total \+ getModuleProgress\(module\), 0\)/);
-  assert.match(modalSource, /moduleProgressTotal \/ modules\.length/);
+test("content details modal calculates course progress from module progress", async () => {
+  // A conta mora em src/lib/course-progress.ts (a home usa a mesma); o modal so importa.
+  const progressSource = await readFile(new URL("../src/lib/course-progress.ts", import.meta.url), "utf8");
+  assert.match(modalSource, /import \{ clampProgress, getCompletedLessonsCount, getCourseProgressFromModules, getModuleProgress \} from "@\/lib\/course-progress";/);
+  assert.match(progressSource, /export function getCourseProgressFromModules/);
+  assert.match(progressSource, /modules\.reduce\(\(total, module\) => total \+ getModuleProgress\(module\), 0\)/);
+  assert.match(progressSource, /moduleProgressTotal \/ modules\.length/);
   assert.match(modalSource, /const courseProgress = getCourseProgressFromModules\(itemModules, item\.progress\);/);
   assert.match(modalSource, /<ProgressBar className="mt-4 h-1\.5" value=\{courseProgress\} \/>/);
   assert.doesNotMatch(modalSource, /Math\.round\(item\.progress\)% concluido/);
@@ -279,10 +281,13 @@ test("content cards and modal persist saved items", () => {
   assert.match(modalSource, /SavedItemButton/);
   assert.match(savedButtonSource, /\/api\/saved-items/);
   assert.match(savedButtonSource, /aria-pressed=\{saved\}/);
-  assert.match(savedButtonSource, /import \{ Bookmark, Check \} from "lucide-react";/);
-  assert.match(savedButtonSource, /bg-\[#2f2f2f\]\/95 text-white/);
-  assert.match(savedButtonSource, /ring-emerald-400\/70/);
-  assert.match(savedButtonSource, /<Check className="h-2\.5 w-2\.5 stroke-\[3\.5\]" \/>/);
+  assert.match(savedButtonSource, /import \{ Bookmark \} from "lucide-react";/);
+  // Estado so pelo traco: circulo fino (1,5 px) e marcador vazado; salvo = circulo de 2,5 px e marcador
+  // preenchido de branco. Verde com check fica so para "concluido" (anel de progresso).
+  assert.match(savedButtonSource, /border-\[2\.5px\] border-white bg-black\/45 text-white[^"]*hover:bg-white\/20/, "salvo tambem reage ao mouse");
+  assert.match(savedButtonSource, /border-\[1\.5px\] border-zinc-300\/80 bg-black\/30 text-white/);
+  assert.doesNotMatch(savedButtonSource, /emerald|amber|<Check/, "salvo nao usa cor nem check");
+  assert.match(cardSource, /rounded-full border-\[1\.5px\] border-zinc-300\/80 bg-black\/30 text-white transition hover:border-white/, "botao de detalhes com o mesmo circulo fino");
   assert.match(savedButtonSource, /saved \? "scale-95 fill-current" : ""/);
   assert.match(savedButtonSource, /function dispatchSavedItemChanged/);
   assert.match(savedButtonSource, /const savedItemSyncQueue = new Map/);
@@ -341,4 +346,18 @@ test("favorite cards reuse the faster continue-watching image zoom without movin
   assert.match(favoriteCardsSource, /className=\{cn\(keepPosterInPlaceClassName/);
   assert.doesNotMatch(favoriteCardsSource, /hover:-translate-y-1/);
   assert.doesNotMatch(favoriteCardsSource, /duration-700 group-hover:scale-\[1\.035\]/);
+});
+
+test("cards de produto mostram o progresso no hover como um anel, diferente da barra dos modulos", async () => {
+  const ringSource = await readFile(new URL("../src/components/member/progress-ring.tsx", import.meta.url), "utf8");
+  assert.match(cardSource, /const showProgressRing = hasCover && !isLocked && item\.progress > 0;/);
+  assert.match(cardSource, /home-cover-card-progress pointer-events-none absolute right-3 top-3 z-30/);
+  assert.match(cardSource, /<ProgressRing value=\{item\.progress\} \/>/);
+  assert.doesNotMatch(cardSource, /<ProgressBar/, "o card de produto nao usa a barra dos modulos");
+  assert.match(ringSource, /strokeDasharray=\{circumference\}/);
+  assert.match(ringSource, /done \? "stroke-emerald-400" : "stroke-\[var\(--accent\)\]"/);
+  assert.match(ringSource, /aria-label=\{done \? "Concluído" : `\$\{percent\}% concluído`\}/);
+  assert.match(cssSource, /\.group:hover \.home-cover-card-progress \{\s*opacity: 1;/);
+  assert.match(cssSource, /\.group:hover \.progress-ring-value \{\s*stroke-dashoffset: var\(--ring-offset\);/);
+  assert.doesNotMatch(cssSource, /\.home-cover-card-progress \{[^}]*transition: opacity 300ms ease \d/, "sem atraso na transicao");
 });

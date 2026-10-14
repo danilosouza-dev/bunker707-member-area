@@ -41,6 +41,30 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   --accent: #e50914;
   --accent-warm: #ff7a1a;
 
+  /* Estilo da area do aluno (Area de membros > Marca > Estilo). Padrao "discreto"; o AppShell
+     sobrescreve no raiz conforme a escolha (src/lib/member-style.ts). */
+  --member-button-radius: 8px;
+  --member-cover-radius: 10px;
+  --member-hero-content-pb: 12rem;
+  --member-hero-fade: 1;
+  --member-hero-inset: 0px;
+  --member-hero-overlap: -6rem;
+  /* Pagina do curso: quanto a primeira secao sobe sobre a capa (no arredondado, comeca abaixo dela). */
+  --member-page-overlap: -7rem;
+  --member-hero-radius: 0px;
+  --member-hero-top: 0px;
+  /* Fileiras da home: recuo lateral (o mesmo das classes antigas px-5/sm:px-8/lg:px-12) e quantos
+     cards cabem entre as bordas no modo arredondado (capas 2:3 e cards 16:9). */
+  --member-row-inset: 20px;
+  /* Cards fluidos como as thumbs de Shorts do YouTube: largura = fracao da fileira (colunas por largura de
+     tela). No celular 2,2 colunas: dois cards inteiros e um pedaco do proximo (a fileira rola). */
+  --member-row-cols: 2.2;
+  --member-row-cols-wide: 1.3;
+  --member-row-gap: 0.75rem;
+  --member-hero-min-h: 680px;
+  /* Quanto a luz do destaque desce alem da base do banner (so no arredondado, onde a pagina aparece em volta). */
+  --member-hero-glow-extend: 0px;
+
   --card: var(--panel);
   --card-foreground: var(--foreground);
   --popover: var(--panel-strong);
@@ -68,6 +92,162 @@ html[data-navigation-pending="true"] [data-route-loading-spinner] {
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+}
+
+/* Marca > Estilo: os atributos ficam no raiz da area do aluno (AppShell). */
+@media (min-width: 640px) {
+  :root {
+    --member-page-overlap: -8rem;
+    --member-row-inset: 32px;
+    --member-row-cols: 3;
+    --member-row-cols-wide: 2;
+  }
+}
+
+@media (min-width: 768px) {
+  :root {
+    --member-row-cols: 4;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --member-row-inset: 48px;
+    --member-row-cols: 4;
+    --member-row-cols-wide: 3;
+  }
+}
+
+/* 5 colunas de 1280 a 1699 px (cards de 227 a 311 px), 6 a partir de 1700 (294 px em 1920), como no YouTube. */
+@media (min-width: 1280px) {
+  :root {
+    --member-row-cols: 5;
+    --member-row-cols-wide: 4;
+  }
+}
+
+@media (min-width: 1700px) {
+  :root {
+    --member-row-cols: 6;
+    --member-row-cols-wide: 5;
+  }
+}
+
+@media (min-width: 2100px) {
+  :root {
+    --member-row-cols: 7;
+    --member-row-cols-wide: 6;
+  }
+}
+
+@media (min-width: 2560px) {
+  :root {
+    --member-row-cols: 8;
+    --member-row-cols-wide: 7;
+  }
+}
+
+[data-member-buttons="pill"] {
+  --member-button-radius: 9999px;
+}
+
+[data-member-corners="rounded"] {
+  --member-row-inset: 12px;
+  /* Destaque mais baixo em telas curtas: o titulo da primeira fileira e o topo dos cards aparecem antes da
+     dobra (no discreto a fileira sobe por cima do destaque; aqui ela comeca depois dele). */
+  --member-hero-min-h: clamp(520px, calc(100vh - 256px), 680px);
+  --member-hero-glow-extend: 72px;
+  --member-cover-radius: 16px;
+  --member-hero-content-pb: 5rem;
+  --member-hero-fade: 0;
+  --member-hero-inset: 12px;
+  --member-hero-overlap: 2rem;
+  --member-page-overlap: 2rem;
+  --member-hero-radius: 20px;
+  --member-hero-top: 76px;
+}
+
+@media (min-width: 640px) {
+  /* Recuo de 64 px, perto do da Netflix (~60 px): a logo fica nessa linha (16 px + hamburguer de 40 px
+     + 8 px; sem hamburguer, o cabecalho recua 64 px) e o cabecalho recua o mesmo a direita (AppShell),
+     para a foto do perfil alinhar com a outra borda da capa. */
+  [data-member-corners="rounded"] {
+    --member-hero-inset: 64px;
+    --member-row-inset: 64px;
+  }
+}
+
+/* Banner da pagina do produto por produto (Detalhes > Cantos do banner): vence a escolha da area so
+   nas variaveis do banner; cards e fileiras continuam seguindo Marca > Estilo. */
+/* Banner arredondado so neste produto: os titulos e cards da pagina comecam na linha do banner (o
+   cabecalho acompanha pelo AppShell, prop bannerCorners). */
+[data-member-banner="rounded"] {
+  --member-hero-content-pb: 5rem;
+  --member-hero-fade: 0;
+  --member-hero-glow-extend: 72px;
+  --member-hero-inset: 12px;
+  --member-hero-radius: 20px;
+  --member-hero-top: 76px;
+  --member-page-overlap: 2rem;
+  --member-row-inset: 12px;
+}
+
+[data-member-banner="soft"] {
+  --member-hero-content-pb: 12rem;
+  --member-hero-fade: 1;
+  --member-hero-glow-extend: 0px;
+  --member-hero-inset: 0px;
+  --member-hero-radius: 0px;
+  --member-hero-top: 0px;
+  --member-page-overlap: -7rem;
+}
+
+@media (min-width: 640px) {
+  [data-member-banner="rounded"] {
+    --member-hero-inset: 64px;
+    --member-row-inset: 64px;
+  }
+
+  [data-member-banner="soft"] {
+    --member-page-overlap: -8rem;
+  }
+}
+
+/* Nos dois estilos de cantos: os cards sao uma fracao da fileira (--member-row-cols), entao crescem com a
+   janela, como as thumbs de Shorts do YouTube; cabe um numero inteiro entre as bordas a partir de 640 px
+   (o ultimo inteiro termina na borda direita, os seguintes passam) e a rolagem encaixa no inicio de um
+   card, entao o alinhamento se mantem depois de rolar. */
+.member-row-scroller {
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: var(--member-row-inset);
+}
+
+.member-row-card {
+  scroll-snap-align: start;
+  width: calc((100% - (var(--member-row-cols) - 1) * var(--member-row-gap)) / var(--member-row-cols));
+}
+
+.member-row-card-wide {
+  scroll-snap-align: start;
+  width: calc((100% - (var(--member-row-cols-wide) - 1) * var(--member-row-gap)) / var(--member-row-cols-wide));
+}
+
+/* Luz de fundo do destaque (HeroGlow): a cor da imagem (ou a escolhida em Destaque), forte do meio do
+   destaque para cima, enfraquecendo dali para baixo e esfumacando 72 px alem da base do banner
+   (--member-hero-glow-extend), sem chegar nos cards da primeira fileira (que comecam ~80 px abaixo). No
+   arredondado ela aparece em volta do destaque; no discreto a imagem cobre o destaque de ponta a ponta. */
+/* Intensidade calibrada pelo print da Netflix (13/10/2026): no topo a cor fica ~45 niveis acima do cinza
+   (#141414), nao 100 como estava; a mistura maxima e 26%. */
+.member-hero-glow {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 26%, #141414) 0%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 21%, #141414) 30%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 11%, #141414) 58%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 5%, #141414) 80%,
+    color-mix(in srgb, var(--member-hero-accent, #141414) 2%, #141414) 91%,
+    #141414 100%
+  );
 }
 
 * {
@@ -469,11 +649,6 @@ button:disabled {
   transform: scale(1.06);
 }
 
-.internal-poster-card.group:hover .home-cover-card-logo {
-  opacity: 0.9;
-  transform: translate3d(0, 0, 0);
-}
-
 .home-cover-card-overlay {
   background: rgba(0, 0, 0, 0);
   transition: background-color 520ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -492,61 +667,58 @@ button:disabled {
   opacity: 1;
 }
 
+/* Logo da escola no canto do card: fica dentro da superficie, entao cresce junto com o card no hover e
+   e rasterizada uma vez, no tamanho final. Aparece junto com o texto, sem atraso. */
 .home-cover-card-logo {
-  transform: translate3d(0, 0, 0);
-  transition:
-    opacity 300ms ease,
-    transform 560ms cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity, transform;
+  transition: opacity 300ms ease;
 }
 
 .group:hover .home-cover-card-logo {
-  opacity: 0.9;
-  transform: translate3d(-12px, -27px, 0);
+  opacity: 0.92;
 }
 
-.home-row-cover-card[data-hover-edge="left"].group:hover .home-cover-card-logo {
-  transform: translate3d(var(--home-row-card-hover-logo-shift-x, 0px), -27px, 0);
+/* Anel de progresso dos cards de produto (ProgressRing): aparece no hover, no canto oposto ao da logo,
+   e se preenche ate a porcentagem (sem atraso: as transicoes dentro do card comecam junto com a escala). */
+.home-cover-card-progress {
+  opacity: 0;
+  transition: opacity 300ms ease;
 }
 
-.home-row-cover-card[data-hover-edge="right"].group:hover .home-cover-card-logo {
-  transform: translate3d(var(--home-row-card-hover-logo-shift-x, var(--home-row-card-hover-shift-x, 0px)), -27px, 0);
+.group:hover .home-cover-card-progress {
+  opacity: 1;
 }
 
-@media (min-width: 640px) {
-  .group:hover .home-cover-card-logo {
-    transform: translate3d(-16px, -32px, 0);
-  }
-
-  .home-row-cover-card[data-hover-edge="left"].group:hover .home-cover-card-logo {
-    transform: translate3d(var(--home-row-card-hover-logo-shift-x, 0px), -32px, 0);
-  }
-
-  .home-row-cover-card[data-hover-edge="right"].group:hover .home-cover-card-logo {
-    transform: translate3d(var(--home-row-card-hover-logo-shift-x, var(--home-row-card-hover-shift-x, 0px)), -32px, 0);
-  }
+.progress-ring-value {
+  stroke-dashoffset: var(--ring-circumference);
+  transition: stroke-dashoffset 700ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@media (min-width: 1024px) {
-  .group:hover .home-cover-card-logo {
-    transform: translate3d(-22px, -40px, 0);
-  }
-
-  .home-row-cover-card[data-hover-edge="left"].group:hover .home-cover-card-logo {
-    transform: translate3d(var(--home-row-card-hover-logo-shift-x, 0px), -40px, 0);
-  }
-
-  .home-row-cover-card[data-hover-edge="right"].group:hover .home-cover-card-logo {
-    transform: translate3d(var(--home-row-card-hover-logo-shift-x, var(--home-row-card-hover-shift-x, 0px)), -40px, 0);
-  }
+.group:hover .progress-ring-value {
+  stroke-dashoffset: var(--ring-offset);
 }
 
 .home-cover-card-content {
   opacity: 0;
   transform: translate3d(0, 16px, 0);
+  /* Sem atraso: o texto comeca a aparecer junto com a escala do card. Com os 70 ms de atraso o Chrome
+     criava a camada do texto no meio da escala e re-rasterizava titulo, descricao e botao tres vezes no
+     fim da animacao (o "piscar" das fontes, medido quadro a quadro em 13/10/2026). */
   transition:
-    opacity 460ms cubic-bezier(0.16, 1, 0.3, 1) 70ms,
-    transform 520ms cubic-bezier(0.16, 1, 0.3, 1) 70ms;
+    opacity 460ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 520ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (hover: hover) {
+  /* Camada propria e estavel para o texto (so onde ha hover): o texto nao troca de camada, nem de
+     suavizacao, quando a transicao termina. */
+  .home-cover-card-content {
+    will-change: opacity, transform;
+  }
+
+  .home-cover-card-logo,
+  .home-cover-card-progress {
+    will-change: opacity;
+  }
 }
 
 .group:hover .home-cover-card-content {
@@ -672,13 +844,10 @@ button:disabled {
   }
 }
 
-.module-grid-layout {
-  animation: module-grid-layout-in 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.module-focus-layout {
-  animation: module-focus-layout-in 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
+/* Troca entre a grade de modulos e o modulo aberto: instantanea, como a lista de episodios da Netflix.
+   Fade, deslocamento, escala e atrasos escalonados (somados a rolagem do modal) pareciam uma tremida ou
+   um piscar (13/10/2026). As classes .module-grid-layout, .module-focus-layout, .module-lessons-in e
+   .module-secondary-grid ficam so como marcadores. */
 
 .module-card-motion {
   transform-origin: center;
@@ -747,14 +916,6 @@ button:disabled {
   }
 }
 
-.module-lessons-in {
-  animation: module-lessons-in 540ms cubic-bezier(0.16, 1, 0.3, 1) 70ms both;
-}
-
-.module-secondary-grid {
-  animation: module-secondary-grid-in 500ms cubic-bezier(0.16, 1, 0.3, 1) 110ms both;
-}
-
 @keyframes modal-backdrop-in {
   from {
     opacity: 0;
@@ -813,58 +974,6 @@ button:disabled {
   }
 }
 
-@keyframes module-grid-layout-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.992);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes module-focus-layout-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 12px, 0) scale(0.992);
-  }
-
-  55% {
-    opacity: 1;
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes module-lessons-in {
-  from {
-    opacity: 0;
-    transform: translate3d(12px, 0, 0) scale(0.995);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes module-secondary-grid-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 8px, 0);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
 @keyframes lesson-watching-dot-pulse {
   0%,
   100% {
@@ -878,39 +987,19 @@ button:disabled {
   }
 }
 
-@media (max-width: 1023px) {
-  .module-lessons-in {
-    animation-name: module-lessons-mobile-in;
-  }
-}
-
-@keyframes module-lessons-mobile-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 10px, 0) scale(0.995);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .home-cover-card-surface,
   .home-cover-card-image,
   .home-cover-card-overlay,
   .home-cover-card-gradient,
   .home-cover-card-content,
+  .home-cover-card-progress,
+  .progress-ring-value,
   .modal-backdrop-in,
   .modal-backdrop-out,
   .modal-panel-in,
   .modal-panel-out,
   .modal-hero-image-in,
-  .module-grid-layout,
-  .module-focus-layout,
-  .module-lessons-in,
-  .module-secondary-grid,
   .lesson-watching-dot {
     animation-duration: 1ms;
     transition-duration: 1ms;

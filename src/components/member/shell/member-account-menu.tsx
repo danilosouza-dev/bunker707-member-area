@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, LoaderCircle, LogOut } from "lucide-react";
+import { LoaderCircle, LogOut } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
@@ -150,7 +150,8 @@ export function MemberAccountMenu({
         aria-expanded={open}
         aria-label={`Menu da conta de ${displayName}`}
         className={cn(
-          "flex h-10 items-center gap-2 rounded-full py-1 pl-1 pr-1 transition-colors duration-150 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:pr-2.5",
+          // So o avatar (como no YouTube): o nome aparece dentro do painel.
+          "grid size-10 place-items-center rounded-full transition-colors duration-150 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
           open ? "bg-white/10" : "bg-black/10"
         )}
         onClick={() => setOpen((current) => !current)}
@@ -158,14 +159,6 @@ export function MemberAccountMenu({
         type="button"
       >
         <MemberAvatar name={displayName} size="sm" />
-        <span className="hidden max-w-[10rem] truncate text-sm font-semibold text-white sm:block">{student.name}</span>
-        <ChevronDown
-          aria-hidden="true"
-          className={cn(
-            "hidden size-4 text-zinc-400 transition-transform duration-200 motion-reduce:transition-none sm:block",
-            open && "rotate-180"
-          )}
-        />
       </button>
 
       {open ? (

@@ -7,6 +7,7 @@
 // sobrevivem a uma troca de logo). Formato gravado = HomeHeroConfig (src/lib/platform-types.ts):
 // - `image`: a imagem (mediaType "image") ou o link do video (mediaType "video"), como sempre foi;
 // - `poster`: capa do video (so com video);
+// - `glowColor`: cor da luz de fundo atras do destaque (#rrggbb; ausente = automatica, a cor da imagem);
 // - `cta`: { href, label, target } e `visibility.cta`;
 // - texto escondido continua guardado (desligar "Mostrar título" nao apaga o titulo);
 // - chaves que o editor nao conhece (ex.: `purpose`) sao preservadas.
@@ -40,6 +41,7 @@ export const DEFAULT_HOME_HERO_IMAGE = "/hero/bunker-707-red-front-hero.png";
 export const HERO_TEXT_LIMITS = { badge: 40, ctaLabel: 32, description: 240, title: 90 } as const;
 
 const HERO_PURPOSES = new Set<HomeHeroConfig["purpose"]>(["school-brand", "editorial-highlight", "content-highlight"]);
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const VIDEO_EXTENSION = /\.(?:mp4|webm|mov)$/i;
 
 /* ------------------------------------------------------------------------------------------------
@@ -100,6 +102,14 @@ export const heroVideoLinkSchema = z.string({ error: "Cole o link do vídeo." })
   }
 });
 
+/** Cor da luz de fundo: #rrggbb (o seletor de cor do navegador devolve assim). */
+export const heroGlowColorSchema = z.string({ error: "Escolha uma cor válida." }).trim().regex(HEX_COLOR, "Escolha uma cor válida.");
+
+/** #rrggbb valido (minusculo) ou null. */
+function hexColor(value: unknown) {
+  return typeof value === "string" && HEX_COLOR.test(value.trim()) ? value.trim().toLowerCase() : null;
+}
+
 function textSchema(max: number) {
   return z.string({ error: "Texto inválido." }).trim().max(max, `Use no máximo ${max} caracteres.`);
 }
@@ -112,6 +122,7 @@ export const homeHeroDraftSchema = z
     ctaTarget: z.enum(["same_tab", "new_tab"], { error: "Escolha onde o link abre." }),
     description: textSchema(HERO_TEXT_LIMITS.description),
     enabled: z.boolean(),
+    glowColor: heroGlowColorSchema.nullable(),
     image: memberAreaImageRefSchema.nullable(),
     mediaType: z.enum(["image", "video"], { error: "Escolha imagem ou vídeo." }),
     poster: memberAreaImageRefSchema.nullable(),
@@ -183,6 +194,7 @@ export const DEFAULT_HOME_HERO_DRAFT: HomeHeroDraft = Object.freeze({
   ctaTarget: "same_tab",
   description: "",
   enabled: true,
+  glowColor: null,
   image: DEFAULT_HOME_HERO_IMAGE,
   mediaType: "image",
   poster: null,
@@ -289,6 +301,7 @@ export function normalizeHeroDraft(draft: HomeHeroDraft): HomeHeroDraft {
   return {
     ...draft,
     ctaTarget: hasCta ? draft.ctaTarget : "same_tab",
+    glowColor: hexColor(draft.glowColor),
     image: video ? null : draft.image,
     poster: video ? draft.poster : null,
     showBadge: draft.showBadge && Boolean(draft.badge),
@@ -329,6 +342,7 @@ export function heroDraftFromStored(raw: unknown): HomeHeroDraft {
     ctaTarget,
     description,
     enabled: raw.enabled !== false,
+    glowColor: hexColor(raw.glowColor),
     image: mediaType === "image" && source ? source : null,
     mediaType,
     poster: mediaType === "video" && text(raw.poster) ? text(raw.poster) : null,
@@ -372,6 +386,12 @@ export function buildStoredHero(raw: unknown, draft: HomeHeroDraft): HomeHeroCon
     stored.poster = next.poster;
   } else {
     delete stored.poster;
+  }
+
+  if (next.glowColor) {
+    stored.glowColor = next.glowColor;
+  } else {
+    delete stored.glowColor;
   }
 
   if (next.ctaHref || next.ctaLabel) {
@@ -431,6 +451,12 @@ export function resolveHomeHero(raw: unknown): HomeHeroConfig {
 
   if (typeof raw.enabled === "boolean") {
     hero.enabled = raw.enabled;
+  }
+
+  const glowColor = hexColor(raw.glowColor);
+
+  if (glowColor) {
+    hero.glowColor = glowColor;
   }
 
   for (const key of ["badge", "title", "description"] as const) {

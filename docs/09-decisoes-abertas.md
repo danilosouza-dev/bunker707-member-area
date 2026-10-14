@@ -265,7 +265,7 @@ Decisao tomada:
 - cards verticais podem exibir a logo horizontal completa oficial da Bunker707 no canto superior esquerdo apenas no hover, em tamanho discreto.
 - cards verticais aparecem somente como capa no estado normal; no hover, os cards da home saltam mais para frente com escala maior, leve elevacao, transicao suave, cantos arredondados preservados, imagem escurecida e informacoes/acoes dentro do proprio card.
 - o hover dos cards verticais usa degrade escuro de baixo para cima, bem forte na area das informacoes e suave no topo, priorizando legibilidade sobre capas com muito contraste ou texto na arte.
-- o hover dos cards verticais deve ter apenas titulo, descricao curta, acao principal, botao de salvar/favoritar quando o aluno tiver acesso e botao de detalhes; status, duracao, quantidade de aulas e tipo ficam no modal/pagina propria.
+- o hover dos cards verticais deve ter apenas titulo, descricao curta, acao principal, botao de salvar/favoritar quando o aluno tiver acesso, botao de detalhes e, quando ha progresso, um anel de progresso no canto superior direito (diferente da barra dos modulos, 14/10/2026); status, duracao, quantidade de aulas e tipo ficam no modal/pagina propria.
 - professor, foto do professor, Instagram e informacoes complementares nao aparecem no hover dos cards verticais; ficam no modal e/ou na pagina propria do conteudo.
 - qualquer elemento com hover interativo deve usar cursor de mao/pointer.
 - clicar no card ou em `Acessar` leva para a pagina propria do curso/formacao/bootcamp; clicar na seta para baixo abre o modal de detalhes.

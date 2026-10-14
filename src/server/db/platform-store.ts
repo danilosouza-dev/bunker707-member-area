@@ -1,3 +1,4 @@
+import { MEMBER_STYLE_DEFAULTS, normalizeMemberStyle, type MemberStyleConfig } from "@/lib/member-style";
 import "server-only";
 import { redactSecrets } from "@/lib/env-value";
 
@@ -68,6 +69,7 @@ import type {
   SavedModuleItem,
   SavedItemTargetType
 } from "@/lib/platform-types";
+import { getCourseProgressFromModules } from "@/lib/course-progress";
 
 type PlatformStudent = {
   fullName: string;
@@ -385,6 +387,8 @@ export type PlatformAppearanceInput = {
   logo?: {
     image: string | null;
   };
+  /** Estilo da area do aluno (Marca > Estilo); sempre completo. */
+  style?: MemberStyleConfig;
 };
 
 const defaultHero: HomeHeroConfig = {
@@ -400,7 +404,8 @@ const defaultHero: HomeHeroConfig = {
 };
 const defaultLogoImage = "/brand/logo-bunker.svg";
 const defaultBranding: PlatformBrandingConfig = {
-  logoImage: defaultLogoImage
+  logoImage: defaultLogoImage,
+  style: MEMBER_STYLE_DEFAULTS
 };
 
 function normalizePlatformBranding(value: unknown): PlatformBrandingConfig {
@@ -409,13 +414,14 @@ function normalizePlatformBranding(value: unknown): PlatformBrandingConfig {
   }
 
   const branding = value as Partial<PlatformBrandingConfig>;
+  const style = normalizeMemberStyle(value);
 
   if (branding.logoImage === null) {
-    return { logoImage: null };
+    return { logoImage: null, style };
   }
 
   const logoImage = typeof branding.logoImage === "string" ? branding.logoImage.trim() : "";
-  return { logoImage: logoImage || defaultLogoImage };
+  return { logoImage: logoImage || defaultLogoImage, style };
 }
 const defaultStudent: PlatformStudent = {
   fullName: "Aluno Bunker707",
@@ -2835,10 +2841,27 @@ export async function getHomePageData(accessPreviewMode?: AccessPreviewMode, use
   const homeRows = getHomeRows(database, accessPreviewMode, user).filter((row) => row.items.length > 0)
     .map((row) => applyMemberReleaseToHomeRow(release, row));
 
+  const modalStructures = getHomeModalStructures(database, homeRows, accessPreviewMode, user, release);
+
   return {
     hero: database.hero,
-    homeRows,
-    modalStructures: getHomeModalStructures(database, homeRows, accessPreviewMode, user, release)
+    // O card da home mostra o progresso do aluno no produto (anel no hover) com a mesma conta do modal.
+    homeRows: homeRows.map((row) => withStudentProgress(row, modalStructures)),
+    modalStructures
+  };
+}
+
+/** Progresso do aluno em cada item da fileira (media dos modulos; content_items.progress so sem modulos). */
+function withStudentProgress(row: HomeRow, structures: Record<string, ContentModalStructure>): HomeRow {
+  const withProgress = (item: ContentItem): ContentItem => ({
+    ...item,
+    progress: getCourseProgressFromModules(structures[item.id]?.modules ?? [], item.progress)
+  });
+
+  return {
+    ...row,
+    course: row.course ? withProgress(row.course) : row.course,
+    items: row.items.map(withProgress)
   };
 }
 
@@ -3327,7 +3350,7 @@ function applyAppearanceToHero(stored: unknown, input: { enabled: boolean; image
 }
 
 export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
-  if (input.hero === undefined && input.logo === undefined) {
+  if (input.hero === undefined && input.logo === undefined && input.style === undefined) {
     throw createAdminMutationError("Nenhuma alteracao de aparencia informada.", 400);
   }
 
@@ -3354,8 +3377,11 @@ export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
   }
 
   if (input.logo !== undefined) {
+    // Trocar a logo nunca apaga o estilo (cantos, botoes, menu) gravado na mesma chave.
+    const style = normalizeMemberStyle(database.branding);
+
     if (input.logo.image === null) {
-      database.branding = { logoImage: null };
+      database.branding = { logoImage: null, style };
     } else {
       const providedLogo = input.logo.image.trim();
 
@@ -3364,11 +3390,20 @@ export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
       }
 
       database.branding = {
-        logoImage: await persistAppearanceImage(providedLogo, "platform/logo", "A logo da plataforma")
+        logoImage: await persistAppearanceImage(providedLogo, "platform/logo", "A logo da plataforma"),
+        style
       };
     }
 
     settingsKeys.push("branding");
+  }
+
+  if (input.style !== undefined) {
+    database.branding = { ...database.branding, style: normalizeMemberStyle({ style: input.style }) };
+
+    if (!settingsKeys.includes("branding")) {
+      settingsKeys.push("branding");
+    }
   }
 
   database.updatedAt = new Date().toISOString();

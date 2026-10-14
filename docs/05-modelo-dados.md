@@ -1155,7 +1155,7 @@ Reordenar aceita a estrutura que ja existe ate o limite da importacao de playlis
 
 ### Imagens do produto
 
-Capa (WebP 720×1040) e imagem de topo (WebP 1920×720) sao recortadas no navegador; o servidor confere a medida no cabecalho do WebP, envia ao Storage (`content-assets`, caminho `content/{id}/{cover|hero}`) e grava so a URL publica (capa em `content_items.image`, topo em `content_page_settings.settings.hero`). Data URL nunca chega ao banco.
+Thumbnail do card (WebP 2:3, ate 720×1080; imagem menor sai no tamanho dela, sem ampliar) e imagem de topo (WebP 1920×720) sao recortadas no navegador; o servidor confere a medida no cabecalho do WebP, envia ao Storage (`content-assets`, caminho `content/{id}/{cover|hero}`) e grava so a URL publica (thumbnail em `content_items.image`, topo em `content_page_settings.settings.hero`). A capa propria dos modulos usa a mesma medida. Data URL nunca chega ao banco.
 
 ### Edicao concorrente
 
@@ -1226,6 +1226,7 @@ A logo do login nao fica aqui: vem de `platform_settings.branding` (Marca). Nenh
 
 - `cta`: `{ href, label, target }`. `href` e caminho interno da area (comeca com uma `/`, nunca `//`, `/\`, espaco ou `/api`; ate 512) ou link `https://`; `label` ate 32; `target` `same_tab` ou `new_tab`. Produto grava `/conteudo/{id}`;
 - `poster`: capa do video (obrigatoria quando `mediaType = video`; mesma medida da imagem, 1920 x 720);
+- `glowColor`: cor da luz de fundo atras do destaque (`#rrggbb`); ausente = automatica, medida na imagem no navegador do aluno (13/10/2026);
 - `visibility.cta`: mostra o botao.
 
 `image` continua sendo a imagem (`mediaType = image`) ou o link do video (`.mp4`, `.webm`, `.mov`, so https). Texto escondido continua guardado. Chaves desconhecidas (ex.: `purpose`) sao preservadas pela gravacao. A home normaliza o que esta gravado (`resolveHomeHero`) e descarta botao com link inseguro, inclusive o que o admin antigo ou SQL manual gravarem.

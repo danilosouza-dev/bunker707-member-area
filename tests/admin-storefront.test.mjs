@@ -125,7 +125,8 @@ test("vitrine publicada: le as fileiras gravadas, descarta as invalidas e normal
 test("marca: banner e logo seguem os padroes do servidor", () => {
   assert.deepEqual(model.mapStorefrontBrand([]), {
     hero: { enabled: true, image: model.DEFAULT_HERO_IMAGE, mediaType: "image" },
-    logoImage: model.DEFAULT_LOGO_IMAGE
+    logoImage: model.DEFAULT_LOGO_IMAGE,
+    style: { buttons: "soft", corners: "soft", menu: "sidebar" }
   });
 
   const brand = model.mapStorefrontBrand([
@@ -312,7 +313,8 @@ test("rascunho igual ao publicado nao conta como alteracao", () => {
 });
 
 test("marca: o PUT so leva o que mudou, como no admin antigo", () => {
-  const published = { heroEnabled: true, heroImage: "/hero.png", logoImage: "/logo.svg" };
+  const style = { buttons: "soft", corners: "soft", menu: "sidebar" };
+  const published = { heroEnabled: true, heroImage: "/hero.png", logoImage: "/logo.svg", style };
 
   assert.deepEqual(model.buildAppearancePayload(published, published), {});
   assert.equal(model.isBrandDirty(published, { ...published }), false);
@@ -324,6 +326,10 @@ test("marca: o PUT so leva o que mudou, como no admin antigo", () => {
     hero: { enabled: true }
   });
   assert.deepEqual(model.buildAppearancePayload(published, { ...published, logoImage: null }), { logo: { image: null } });
+  // Estilo (cantos, botoes, menu) vai inteiro so quando muda; o resto do PUT nao vai junto.
+  const rounded = { ...style, corners: "rounded" };
+  assert.deepEqual(model.buildAppearancePayload(published, { ...published, style: rounded }), { style: rounded });
+  assert.equal(model.isBrandDirty(published, { ...published, style: { ...style } }), false);
   assert.equal(
     model.isBrandDirty({ ...published, heroEnabled: false }, { ...published, heroEnabled: false, heroImage: "/outra.png" }),
     false,

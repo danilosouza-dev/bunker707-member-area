@@ -1,3 +1,4 @@
+import type { MemberStyleConfig } from "./member-style";
 import type { LucideIcon } from "lucide-react";
 import type { MemberReleaseState } from "./release-state";
 
@@ -199,6 +200,8 @@ export type HomeHeroConfig = {
   };
   description?: string;
   enabled?: boolean;
+  /** Cor da luz de fundo atras do destaque (#rrggbb). Ausente = automatica, medida na imagem. */
+  glowColor?: string;
   /** Imagem (mediaType "image") ou link do video (mediaType "video"). */
   image: string;
   mediaType: "image" | "video";
@@ -216,10 +219,16 @@ export type HomeHeroConfig = {
 
 export type PlatformBrandingConfig = {
   logoImage: string | null;
+  /** Cantos, botoes e menu da area do aluno (src/lib/member-style.ts). Ausente = padrao discreto. */
+  style?: MemberStyleConfig;
 };
+
+/** Cantos do banner da pagina do produto: ausente ou "inherit" = segue Marca > Estilo. */
+export type ContentPageHeroCorners = "inherit" | "rounded" | "soft";
 
 export type ContentPageHeroConfig = {
   badge?: string;
+  corners?: ContentPageHeroCorners;
   ctaHref?: string;
   ctaLabel?: string;
   description?: string;

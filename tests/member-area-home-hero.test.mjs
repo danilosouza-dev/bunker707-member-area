@@ -497,7 +497,7 @@ test("home do aluno resolve o destaque antes de desenhar e o componente segue o 
   assert.match(page, /<HeroSection accessPreviewMode=\{accessPreviewMode\} hero=\{hero\} \/>/);
 
   const section = (await readSource("../src/components/hero-section.tsx")).replace(/^\s*\/\/.*$/gm, "");
-  assert.match(section, /className="@container relative min-h-\[680px\]/);
+  assert.match(section, /className="@container relative z-\[1\] min-h-\[var\(--member-hero-min-h\)\]/);
   assert.doesNotMatch(section, /\b(?:sm|md|lg|xl):/, "nada de variante da janela: a prévia tem outra largura");
   assert.match(section, /rel="noopener noreferrer" target="_blank"/);
   assert.match(section, /motion-reduce:hidden/);
@@ -609,4 +609,31 @@ test("editor do Destaque: Recarregar mantém o rascunho e sempre limpa o aviso; 
   // Duas colunas a partir de 1024 px, como o Login (prévia ao lado do formulário).
   assert.match(editor, /lg:grid-cols-\[minmax\(0,480px\)_minmax\(0,1fr\)\] xl:grid-cols-\[minmax\(0,560px\)_minmax\(0,1fr\)\]/);
   assert.match(editor, /lg:sticky lg:top-20/);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Luz de fundo (cor atras do destaque)
+ * ---------------------------------------------------------------------------------------------- */
+
+test("luz de fundo: automática por padrão; cor escolhida vai e volta do gravado e chega à home", async () => {
+  assert.equal(model.DEFAULT_HOME_HERO_DRAFT.glowColor, null, "sem cor = automática (medida na imagem)");
+  assert.deepEqual(model.validateHomeHeroDraft(draft({ glowColor: "#E50914" })), {});
+  assert.match(model.validateHomeHeroDraft(draft({ glowColor: "vermelho" })).glowColor, /cor válida/);
+
+  const stored = model.buildStoredHero(undefined, draft({ glowColor: "#E50914" }));
+  assert.equal(stored.glowColor, "#e50914", "gravado em minúsculas");
+  assert.equal(model.heroDraftFromStored(stored).glowColor, "#e50914");
+  assert.equal(model.resolveHomeHero(stored).glowColor, "#e50914");
+  assert.equal(model.previewHeroFromDraft(draft({ glowColor: "#3b82f6" })).glowColor, "#3b82f6", "a prévia mostra a cor na hora");
+  assert.equal(model.buildStoredHero({ glowColor: "#e50914" }, draft({ glowColor: null })).glowColor, undefined, "voltar para automática apaga a cor gravada");
+  assert.equal(model.resolveHomeHero({ ...stored, glowColor: "red" }).glowColor, undefined, "valor estranho = automática");
+  assert.equal(model.heroDraftFromStored({ ...stored, glowColor: 12 }).glowColor, null);
+
+  const editor = await readSource("../src/components/admin/v2/member-area/home-hero/hero-editor.tsx");
+  assert.match(editor, /title="Luz de fundo"/);
+  assert.match(editor, /name="destaque-luz"/);
+  assert.match(editor, /value=\{draft\.glowColor \? "custom" : "auto"\}/);
+  const fields = await readSource("../src/components/admin/v2/member-area/home-hero/fields.tsx");
+  assert.match(fields, /type="color"/, "qualquer cor pelo seletor do navegador");
+  assert.match(fields, /aria-label="Cores prontas"/);
 });

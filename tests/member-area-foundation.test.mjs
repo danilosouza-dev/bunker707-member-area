@@ -44,6 +44,7 @@ test("cada slot de imagem tem a mesma medida no recorte do cliente e na checagem
   for (const [slot, spec] of Object.entries(crop.IMAGE_SPECS)) {
     const server = webp.IMAGE_UPLOAD_SPECS[slot];
     assert.deepEqual([spec.outputWidth, spec.outputHeight], [server.width, server.height], slot);
+    assert.equal(spec.minWidth, server.minWidth, `${slot}: menor origem aceita igual nos dois lados`);
     assert.ok(Math.abs(spec.minWidth / spec.minHeight - spec.outputWidth / spec.outputHeight) < 0.001, `${slot}: minimo na proporcao`);
     // O maior texto que o cliente aceita cabe no teto de bytes do servidor.
     assert.ok(Math.floor((spec.maxDataUrlLength * 3) / 4) <= server.maxBytes, `${slot}: teto do cliente cabe no servidor`);
@@ -54,7 +55,7 @@ test("cada slot de imagem tem a mesma medida no recorte do cliente e na checagem
   assert.deepEqual([crop.IMAGE_SPECS.loginBackground.outputWidth, crop.IMAGE_SPECS.loginBackground.outputHeight], [1920, 1080]);
   assert.equal(crop.IMAGE_SPECS.loginSide.orientation, "portrait");
   assert.equal(crop.IMAGE_SPECS.loginBackground.orientation, "landscape");
-  assert.equal(crop.aspectRatioOf(crop.IMAGE_SPECS.cover), "720 / 1040");
+  assert.equal(crop.aspectRatioOf(crop.IMAGE_SPECS.cover), "720 / 1080");
 });
 
 test("o teto de texto de cada upload da area de membros e o mesmo do recorte", () => {
