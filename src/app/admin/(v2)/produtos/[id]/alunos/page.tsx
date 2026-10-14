@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { ProductStudentsView } from "@/components/admin/v2/products/product-students-view";
-import { requirePageAdmin } from "@/server/auth/guards";
+import { requirePageRole } from "@/server/auth/permissions";
 import { canRole } from "@/server/auth/roles";
 import { getProductAccess } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
@@ -31,7 +31,7 @@ function readNow() {
 }
 
 export default async function ProductStudentsPage({ params, searchParams }: ProductStudentsPageProps) {
-  const { role } = await requirePageAdmin();
+  const { role } = await requirePageRole("students.read_basic", "/admin");
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const loaded = await loadUnlessPendingMigration(async () => {
     const access = await getProductAccess(id);

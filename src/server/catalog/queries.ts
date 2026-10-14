@@ -446,7 +446,7 @@ export const getPublishChecklist: GetPublishChecklist = async (productId) => {
  * Seletores
  * ---------------------------------------------------------------------------------------------- */
 
-export const listProductOptions: ListProductOptions = async (options) => {
+export const listProductOptions: ListProductOptions = cache(async (options) => {
   const db = catalogDb();
   let query = db
     .from("content_items")
@@ -500,7 +500,7 @@ export const listProductOptions: ListProductOptions = async (options) => {
         }]
       : [];
   });
-};
+});
 
 /** Cabecalho a partir de uma linha ja lida ou recem-gravada (Server Actions devolvem `{ header }`). */
 export async function headerForRow(row: ProductRow): Promise<ProductHeader> {

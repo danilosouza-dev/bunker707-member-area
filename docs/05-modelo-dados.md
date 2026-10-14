@@ -1251,6 +1251,15 @@ Pastas novas no bucket `content-assets`, nome do arquivo pelo hash do conteudo: 
 
 O admin antigo (`/admin/legado`, `src/components/admin-dashboard.tsx`, rotas `/api/admin/{students,content,modules,lessons,combos,cohorts,collections,youtube-playlists}`) saiu do projeto. Existe um admin so (`src/app/admin/(v2)`). As tabelas `students`, `student_courses` e `student_access_logs` foram derrubadas pela migracao `202610140001_remove_legacy_admin_students.sql`; a funcao `admin_product_cohorts` mantem a assinatura e devolve vazio ate existir vinculo aluno x turma no modelo novo. Alunos passaram a ser `auth.users` + `profiles` + `entitlements` (ver "Alunos" em `docs/17` §1.7).
 
+## Alunos (entrega 2, 15/10/2026, migracao 202610150001)
+
+- `admin_audit_log(id, actor_id -> auth.users set null, action, entity_type, entity_id, count, metadata jsonb <= 4 KB, occurred_at)`: quem fez o que no admin (acesso, exportacao, importacao, exclusao). Append-only: o servidor so insere e le (`grant select, insert` para `service_role`). Metadata guarda ids e contagens; nunca nome, busca digitada ou e-mail, exceto a prova da exclusao.
+- `student_segments(id, name unico sem maiusculas, params jsonb <= 2 KB, created_by, created_at, updated_at)`: segmentos salvos da lista de Alunos; `params` e a forma canonica dos filtros do endereco, revalidada ao abrir.
+- `cohort_memberships(id, user_id -> auth.users cascade, product_id -> content_items cascade, cohort_id -> cohorts cascade, created_by, created_at; unique (user_id, product_id))`: uma turma por aluno por produto. `cohorts.name` ganhou indice unico por `lower(name)`. `admin_product_cohorts` conta so alunos com acesso aberto ao produto (sem a equipe). Modelo diferente do previsto em §cohort_memberships (sem `entitlement_id`): `grantProductAccess` garante um acesso por (aluno, produto).
+- `profiles.last_sign_in_at`: copiado de `auth.users` pelo gatilho `on_auth_user_signed_in` (`sync_profile_last_sign_in`, security definer, nunca lanca erro). `authenticated` so atualiza `full_name, phone, avatar_url` em `profiles`.
+- `student_daily_activity(user_id -> auth.users cascade, day, content_id, seconds_watched, lessons_completed, approximate, updated_at; pk (user_id, day, content_id))`: estudo real por dia, gravado por `record_student_activity` (no maximo 30 s e 50 aulas por chamada; dia em America/Sao_Paulo) depois de cada progresso confirmado. Backfill aproximado a partir de `lesson_watch_states.lastWatchedAt`.
+- RPCs `admin_lifecycle_weeks(p_weeks)` (<= 26 linhas prontas: novos, retidos, recuperados, inativos por semana) e `admin_lifecycle_week_members(p_week_start, p_group)` (ate 1000 ids), ambas `security invoker`, so `service_role`.
+
 ## Webhooks
 
 ### webhook_events

@@ -5,11 +5,11 @@ import { PageHeader } from "@/components/admin/v2/page-header";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { studentListHref, type StudentProfileTab } from "@/components/admin/v2/students/hrefs";
 import { StudentProfileView } from "@/components/admin/v2/students/student-profile-view";
-import { requirePageAdmin } from "@/server/auth/guards";
+import { requirePageRole } from "@/server/auth/permissions";
 import { canRole } from "@/server/auth/roles";
 import { listProductOptions } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
-import { getStudentDetail } from "@/server/students/queries";
+import { getStudentDetail, listCohorts } from "@/server/students/queries";
 import { userIdSchema } from "@/server/students/schemas";
 
 export const metadata: Metadata = {
@@ -34,7 +34,7 @@ function readNow() {
 }
 
 export default async function StudentPage({ params, searchParams }: StudentPageProps) {
-  const { role } = await requirePageAdmin();
+  const { role } = await requirePageRole("students.read_basic", "/admin");
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const idCheck = userIdSchema.safeParse(id);
 
@@ -43,9 +43,9 @@ export default async function StudentPage({ params, searchParams }: StudentPageP
   }
 
   const loaded = await loadUnlessPendingMigration(async () => {
-    const [detail, products] = await Promise.all([getStudentDetail(idCheck.data), listProductOptions()]);
+    const [detail, products, cohorts] = await Promise.all([getStudentDetail(idCheck.data), listProductOptions(), listCohorts()]);
 
-    return { detail, products };
+    return { cohorts, detail, products };
   });
 
   if (!loaded.ok) {
@@ -64,6 +64,7 @@ export default async function StudentPage({ params, searchParams }: StudentPageP
   return (
     <AdminPage className="gap-6">
       <StudentProfileView
+        cohorts={loaded.data.cohorts}
         detail={loaded.data.detail}
         now={readNow()}
         permissions={{

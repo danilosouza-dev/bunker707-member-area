@@ -337,14 +337,19 @@ test("layout e toda pagina do admin novo chamam o guard de admin antes de render
   assert.ok(pages.length >= 10, `esperava as 10 rotas do admin novo, achei ${pages.length}`);
 
   for (const entry of [...pages, { path: "src/app/admin/(v2)/layout.tsx", source: sourceOf("src/app/admin/(v2)/layout.tsx") }]) {
-    assert.match(entry.source, /import \{ requirePageAdmin \} from "@\/server\/auth\/guards";/, entry.path);
+    // requirePageRole("acao", "/admin") chama requirePageAdmin() por dentro e ainda confere o papel (Alunos).
+    assert.match(
+      entry.source,
+      /import \{ requirePageAdmin \} from "@\/server\/auth\/guards";|import \{ requirePageRole \} from "@\/server\/auth\/permissions";/,
+      entry.path
+    );
 
-    const guardIndex = entry.source.search(/requirePageAdmin\(\)/);
+    const guardIndex = entry.source.search(/requirePageAdmin\(\)|requirePageRole\("[a-z._]+", "\/admin"\)/);
     // Fim da pagina: o primeiro JSX devolvido ou, numa pagina so de redirecionamento, o redirect.
     const exits = [entry.source.search(/return \(/), entry.source.search(/\bredirect\(/)].filter((index) => index >= 0);
     const renderIndex = exits.length > 0 ? Math.min(...exits) : -1;
 
-    assert.ok(guardIndex > 0, `${entry.path} precisa chamar requirePageAdmin()`);
+    assert.ok(guardIndex > 0, `${entry.path} precisa chamar requirePageAdmin() ou requirePageRole()`);
     assert.ok(renderIndex > 0, `${entry.path} precisa devolver JSX ou redirecionar`);
     assert.ok(guardIndex < renderIndex, `${entry.path} chama o guard antes de devolver o JSX ou redirecionar`);
     assert.match(entry.source, /export default async function/, `${entry.path} precisa aguardar o guard`);

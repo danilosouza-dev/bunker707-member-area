@@ -122,9 +122,10 @@ test("cada escrita usa a acao certa do mapa da fase 1", () => {
 test("alunos: toda Server Action passa por runAdminAction com uma acao students.*", () => {
   const actions = readFileSync(join(apiRoot, "../../../server/students/actions.ts"), "utf8");
   const exported = actions.match(/export async function \w+/g) ?? [];
-  const guarded = actions.match(/runAdminAction\("students\.(access|delete|read_basic)"/g) ?? [];
+  const guarded = actions.match(/runAdminAction\("students\.(access|delete|export|read_basic)"/g) ?? [];
 
-  assert.ok(exported.length >= 7, `acoes exportadas: ${exported.length}`);
+  assert.ok(exported.length >= 14, `acoes exportadas: ${exported.length}`);
+  assert.match(actions, /runAdminAction\("students\.export", exportQuerySchema/, "exportar CSV exige students.export");
   assert.equal(guarded.length, exported.length, "cada acao exportada usa runAdminAction com acao students.*");
   assert.match(actions, /runAdminAction\("students\.delete", deleteStudentSchema/);
   assert.doesNotMatch(actions, /requireApiAdmin|getSupabaseAdminClient\(/);

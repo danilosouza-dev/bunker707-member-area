@@ -10,12 +10,14 @@ import {
   ACCESS_DELIVERY_METHODS,
   TEMPORARY_PASSWORD_MIN_LENGTH,
   type AccessDeliveryMethod,
-  type CreatedStudentResult
+  type CreatedStudentResult,
+  type StudentCohort
 } from "@/server/students/model";
 import { studentEmailSchema, studentNameSchema, studentPhoneSchema } from "@/server/students/schemas";
 import { ErrorBanner } from "../error-banner";
 import { AdminField, PillGroup, adminInputClass, fieldDescribedBy } from "../form";
 import { AdminLinkButton } from "../link-button";
+import { CohortSelect, withCohort } from "./cohort-select";
 import { useWarnBeforeUnload } from "../products/use-warn-before-unload";
 import { studentListHref } from "./hrefs";
 import { ProductPicker, type PickerProduct } from "./product-picker";
@@ -29,6 +31,7 @@ type FieldName = "delivery" | "email" | "endsAt" | "fullName" | "phone" | "produ
 type FieldErrors = Partial<Record<FieldName, string>>;
 
 type NewStudentFormProps = {
+  cohorts: readonly StudentCohort[];
   /** ?produto= ja marcado (veio da aba Alunos do produto). */
   preselectedProductId: string | null;
   products: readonly PickerProduct[];
@@ -49,12 +52,14 @@ function firstIssue(result: { error?: { issues: { message: string }[] } }) {
   return result.error?.issues[0]?.message ?? null;
 }
 
-export function NewStudentForm({ preselectedProductId, products, today }: NewStudentFormProps) {
+export function NewStudentForm({ cohorts: initialCohorts, preselectedProductId, products, today }: NewStudentFormProps) {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [productIds, setProductIds] = useState<string[]>(preselectedProductId ? [preselectedProductId] : []);
   const [endsAt, setEndsAt] = useState("");
+  const [cohortId, setCohortId] = useState<string | null>(null);
+  const [cohorts, setCohorts] = useState(initialCohorts);
   const [delivery, setDelivery] = useState<AccessDeliveryMethod>("invite");
   const [temporaryPassword, setTemporaryPassword] = useState("");
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -85,6 +90,7 @@ export function NewStudentForm({ preselectedProductId, products, today }: NewStu
     setPhone("");
     setProductIds(preselectedProductId ? [preselectedProductId] : []);
     setEndsAt("");
+    setCohortId(null);
     setDelivery("invite");
     setTemporaryPassword("");
     setErrors({});
@@ -112,6 +118,7 @@ export function NewStudentForm({ preselectedProductId, products, today }: NewStu
     setSubmitting(true);
     setFormError(null);
     const response = await createStudent({
+      cohortId: productIds.length > 0 ? cohortId : null,
       delivery,
       email: emailCheck.data,
       endsAt: endsAt || null,
@@ -239,6 +246,18 @@ export function NewStudentForm({ preselectedProductId, products, today }: NewStu
         </div>
         <ProductPicker ariaLabel="Produtos a liberar" disabled={submitting} onChange={setProductIds} products={products} selected={productIds} />
         {errors.productIds ? <p className="text-[13px] text-[var(--error)]">{errors.productIds}</p> : null}
+        {productIds.length > 0 ? (
+          <AdminField hint="Vale para os produtos marcados acima." id="aluno-turma" label="Turma" optional>
+            <CohortSelect
+              cohorts={cohorts}
+              disabled={submitting}
+              id="aluno-turma"
+              onChange={setCohortId}
+              onCreated={(cohort) => setCohorts((current) => withCohort(current, cohort))}
+              value={cohortId}
+            />
+          </AdminField>
+        ) : null}
         <AdminField
           error={errors.endsAt}
           hint="Vale para os produtos marcados acima. Em branco, o acesso não vence."

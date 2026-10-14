@@ -3,13 +3,14 @@ import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { STUDENT_PACE_LABELS, lessonsProgressLabel, progressPercentOf, type StudentListItem } from "@/server/students/model";
-import { DataTable, type DataTableColumn } from "../data-table";
+import { DataTable, type DataTableColumn, type DataTableLeading } from "../data-table";
 import { describePageRange, pageCount } from "../products/list-filters";
 import { StatusChip } from "../status-chip";
 import { formatRelativeDate, formatShortDate, paceTone } from "./format";
 import { newStudentHref, studentHref, studentListHref, type StudentListFilters } from "./hrefs";
 import { ProductChips } from "./product-chips";
 import { StudentAvatar } from "./student-avatar";
+import { RowSelectCheckbox, SelectAllCheckbox } from "./student-selection";
 
 // Tabela de alunos (docs/17 §1.7.1): linha inteira abre o perfil. Colunas na ordem do prototipo:
 // Aluno, Produtos, Ultimo estudo, Progresso, Ritmo, Entrou em. Apresentacao pura.
@@ -20,7 +21,24 @@ type StudentListTableProps = {
   filters: StudentListFilters;
   now: number;
   rows: readonly StudentListItem[];
+  /** Caixas de selecao para as acoes em massa (so para quem pode liberar acesso). */
+  selectable?: boolean;
 };
+
+function cohortsLabel(row: StudentListItem, productId?: string) {
+  const names = Array.from(new Set(row.cohorts.filter((membership) => !productId || membership.productId === productId).map((membership) => membership.cohortName)));
+
+  if (names.length === 0) {
+    return <span className="text-[var(--text-tertiary)]">—</span>;
+  }
+
+  return (
+    <span className="truncate" title={names.join(", ")}>
+      {names[0]}
+      {names.length > 1 ? <span className="text-[var(--text-tertiary)]"> +{names.length - 1}</span> : null}
+    </span>
+  );
+}
 
 export function ProgressBar({ completed, total }: { completed: number; total: number }) {
   const percent = progressPercentOf(completed, total);
@@ -35,7 +53,7 @@ export function ProgressBar({ completed, total }: { completed: number; total: nu
   );
 }
 
-function buildColumns(now: number): DataTableColumn<StudentListItem>[] {
+function buildColumns(now: number, productId?: string): DataTableColumn<StudentListItem>[] {
   return [
     {
       cell: (row) => (
@@ -86,6 +104,13 @@ function buildColumns(now: number): DataTableColumn<StudentListItem>[] {
       mobileLabel: "Ritmo"
     },
     {
+      cell: (row) => cohortsLabel(row, productId),
+      className: "max-w-[160px]",
+      header: "Turma",
+      hideOnMobile: true,
+      id: "turma"
+    },
+    {
       cell: (row) => formatShortDate(row.createdAt),
       header: "Entrou em",
       hideOnMobile: true,
@@ -94,12 +119,27 @@ function buildColumns(now: number): DataTableColumn<StudentListItem>[] {
   ];
 }
 
-export function StudentListTable({ canAdd, filtered, filters, now, rows }: StudentListTableProps) {
+export function StudentListTable({ canAdd, filtered, filters, now, rows, selectable = false }: StudentListTableProps) {
+  const leading: DataTableLeading<StudentListItem> | undefined = selectable
+    ? {
+        cell: (row) => <RowSelectCheckbox id={row.id} label={row.fullName} />,
+        header: <SelectAllCheckbox ids={rows.map((row) => row.id)} />
+      }
+    : undefined;
+
   return (
+    <>
+      {selectable && rows.length > 0 ? (
+        <label className="flex items-center gap-2 text-[13px] text-[var(--text-secondary)] md:hidden">
+          <SelectAllCheckbox ids={rows.map((row) => row.id)} />
+          Selecionar os {rows.length} desta página
+        </label>
+      ) : null}
     <DataTable
       caption="Alunos"
-      className="max-md:[&_tbody_td:first-child]:col-span-full"
-      columns={buildColumns(now)}
+      className={cn(selectable ? "max-md:[&_tbody_td:nth-child(2)]:col-span-full" : "max-md:[&_tbody_td:first-child]:col-span-full")}
+      columns={buildColumns(now, filters.productId)}
+      leading={leading}
       emptyAction={
         filtered
           ? { href: studentListHref(), label: "Limpar filtros" }
@@ -118,6 +158,7 @@ export function StudentListTable({ canAdd, filtered, filters, now, rows }: Stude
       mobile="cards"
       rows={rows}
     />
+    </>
   );
 }
 

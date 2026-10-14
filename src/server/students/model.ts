@@ -197,6 +197,8 @@ export type StudentProductChip = {
 
 export type StudentListItem = {
   avatarUrl: string | null;
+  /** Turmas dos produtos com acesso aberto. */
+  cohorts: StudentCohortMembership[];
   completedLessons: number;
   createdAt: string;
   email: string;
@@ -204,6 +206,8 @@ export type StudentListItem = {
   id: string;
   /** Faz parte da equipe (admin_roles). Nunca entra nas metricas; na lista ganha o chip "Equipe". */
   isStaff: boolean;
+  /** Copiado de auth.users pelo gatilho; null = nunca entrou. */
+  lastSignInAt: string | null;
   lastStudiedAt: string | null;
   pace: StudentPace;
   /** Produtos com acesso aberto agora, em ordem alfabetica. */
@@ -211,12 +215,9 @@ export type StudentListItem = {
   totalLessons: number;
 };
 
-export type StudentListQuery = {
+export type StudentListQuery = StudentListParams & {
   page: number;
-  pace?: StudentPace;
   pageSize: number;
-  productId?: string;
-  q?: string;
 };
 
 export type StudentListPage = {
@@ -227,6 +228,8 @@ export type StudentListPage = {
 };
 
 export type StudentAccessItem = {
+  /** Turma do aluno neste produto, se houver. */
+  cohort: StudentCohort | null;
   endsAt: string | null;
   id: string;
   /** null quando o produto foi excluido do catalogo. */
@@ -341,3 +344,228 @@ export function extendAccessIso(currentEndsAt: string | null, days: number, now:
 
   return new Date(base + days * DAY_MS).toISOString();
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Filtros da lista (entrega 2): alem de busca, produto e ritmo, a lista aceita turma, "expira em 30
+ * dias", "nunca entrou", "comprou e nao comecou", "top comentadores" e um grupo do ciclo de vida.
+ * Os mesmos parametros vivem no endereco (?busca=&produto=&ritmo=&turma=&expira=30&conta=nunca&
+ * comecou=nao&comentadores=top&semana=&grupo=) e nos segmentos salvos (forma canonica abaixo).
+ * ---------------------------------------------------------------------------------------------- */
+
+export const LIFECYCLE_GROUPS = ["new", "retained", "recovered", "inactive"] as const;
+export type LifecycleGroup = (typeof LIFECYCLE_GROUPS)[number];
+
+export const LIFECYCLE_GROUP_LABELS: Record<LifecycleGroup, string> = {
+  inactive: "Inativos",
+  new: "Novos",
+  recovered: "Recuperados",
+  retained: "Retidos"
+};
+
+/** Formula de cada grupo, visivel no cartao (docs/17 §1.11: nenhuma metrica sem formula). */
+export const LIFECYCLE_GROUP_FORMULAS: Record<LifecycleGroup, string> = {
+  inactive: "Acesso aberto há pelo menos 4 semanas e nenhuma semana ativa nas últimas 4",
+  new: "Primeira semana ativa de toda a história do aluno",
+  recovered: "Ativo nesta semana, parado na anterior, com atividade antes",
+  retained: "Ativo nesta semana e na anterior"
+};
+
+export const LIFECYCLE_ACTIVE_SECONDS = 600;
+export const LIFECYCLE_WEEKS = 12;
+export const LIFECYCLE_ACTIVE_RULE = "Semana ativa = 10 minutos assistidos ou 1 aula concluída. A equipe não entra.";
+
+export function isLifecycleGroup(value: unknown): value is LifecycleGroup {
+  return typeof value === "string" && (LIFECYCLE_GROUPS as readonly string[]).includes(value);
+}
+
+export type LifecycleWeek = {
+  inactiveCount: number;
+  newCount: number;
+  recoveredCount: number;
+  retainedCount: number;
+  /** Segunda-feira da semana, "AAAA-MM-DD". */
+  weekStart: string;
+};
+
+/** Forma canonica dos filtros (o que fica no endereco e no segmento salvo). */
+export type StudentListParams = {
+  account?: "never";
+  cohortId?: string;
+  commenters?: "top";
+  expiring?: boolean;
+  group?: LifecycleGroup;
+  notStarted?: boolean;
+  pace?: StudentPace;
+  productId?: string;
+  q?: string;
+  /** Segunda-feira "AAAA-MM-DD" do ciclo de vida; so vale junto com `group`. */
+  week?: string;
+};
+
+export const STUDENT_LIST_PARAM_NAMES = {
+  account: "conta",
+  cohortId: "turma",
+  commenters: "comentadores",
+  expiring: "expira",
+  group: "grupo",
+  notStarted: "comecou",
+  pace: "ritmo",
+  page: "pagina",
+  productId: "produto",
+  q: "busca",
+  week: "semana"
+} as const;
+
+/** Parametros do endereco a partir dos filtros canonicos (ordem fixa; vazio nao entra). */
+export function studentListParamsToSearch(params: StudentListParams, page?: number) {
+  const search = new URLSearchParams();
+  const n = STUDENT_LIST_PARAM_NAMES;
+
+  if (params.productId) search.set(n.productId, params.productId);
+  if (params.pace) search.set(n.pace, params.pace);
+  if (params.cohortId) search.set(n.cohortId, params.cohortId);
+  if (params.expiring) search.set(n.expiring, "30");
+  if (params.account) search.set(n.account, "nunca");
+  if (params.notStarted) search.set(n.notStarted, "nao");
+  if (params.commenters) search.set(n.commenters, "top");
+  if (params.week && params.group) {
+    search.set(n.week, params.week);
+    search.set(n.group, params.group);
+  }
+  if (params.q?.trim()) search.set(n.q, params.q.trim());
+  if (page && page > 1) search.set(n.page, String(page));
+
+  return search;
+}
+
+export function hasStudentListFilters(params: StudentListParams) {
+  return Boolean(
+    params.productId || params.pace || params.cohortId || params.expiring || params.account || params.notStarted || params.commenters || (params.week && params.group) || params.q?.trim()
+  );
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Segmentos prontos (docs/17 §1.7.1), cada um com a regra escrita para o produtor.
+ * ---------------------------------------------------------------------------------------------- */
+
+export type StudentSegmentPreset = {
+  formula: string;
+  id: string;
+  label: string;
+  params: StudentListParams;
+};
+
+export const STUDENT_SEGMENT_PRESETS: readonly StudentSegmentPreset[] = [
+  { formula: "Todos os alunos cadastrados.", id: "todos", label: "Todos", params: {} },
+  { formula: "Progresso gravado em aula há menos de 14 dias.", id: "estudando", label: "Estudando", params: { pace: "studying" } },
+  { formula: "Entre 14 e 29 dias sem progresso em aula.", id: "em-risco", label: "Em risco", params: { pace: "at_risk" } },
+  { formula: "Nenhum progresso gravado em aula.", id: "nunca-comecaram", label: "Nunca começaram", params: { pace: "never_started" } },
+  { formula: "Todas as aulas publicadas dos produtos com acesso concluídas.", id: "concluiram", label: "Concluíram", params: { pace: "completed" } },
+  { formula: "Acesso ativo que termina em até 30 dias.", id: "expiram-30", label: "Expiram em 30 dias", params: { expiring: true } },
+  { formula: "Conta criada e nenhum login até agora.", id: "nunca-entraram", label: "Nunca entraram", params: { account: "never" } },
+  { formula: "Acesso liberado há 2 a 7 dias e nenhum progresso em aula.", id: "compraram-nao-comecaram", label: "Compraram e não começaram", params: { notStarted: true } },
+  { formula: "Mesma régua de Comunidade › Top alunos (os 100 primeiros por pontuação): comentários aprovados + respostas a colegas + reações recebidas, 28 dias.", id: "top-comentadores", label: "Top comentadores", params: { commenters: "top" } }
+];
+
+export const NOT_STARTED_MIN_DAYS = 2;
+export const NOT_STARTED_MAX_DAYS = 7;
+
+export type StudentSavedSegment = {
+  createdAt: string;
+  id: string;
+  name: string;
+  params: StudentListParams;
+};
+
+/* ------------------------------------------------------------------------------------------------
+ * Liberar acesso nunca encurta (decisao da revisao de 2026-10-15): quem ja tem acesso aberto fica
+ * com o maior prazo, e "sem prazo" vence qualquer data. Quem nao tem acesso aberto recebe o prazo pedido.
+ * ---------------------------------------------------------------------------------------------- */
+
+export function nextAccessEndOnGrant(input: { existingEndsAt: string | null; requestedEndsAt: string | null; wasOpen: boolean }) {
+  if (!input.wasOpen) {
+    return input.requestedEndsAt;
+  }
+
+  if (input.existingEndsAt === null || input.requestedEndsAt === null) {
+    return null;
+  }
+
+  return Date.parse(input.existingEndsAt) >= Date.parse(input.requestedEndsAt) ? input.existingEndsAt : input.requestedEndsAt;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Turmas, acoes em massa e importacao
+ * ---------------------------------------------------------------------------------------------- */
+
+export type StudentCohort = { id: string; name: string };
+
+export type StudentCohortMembership = { cohortId: string; cohortName: string; productId: string };
+
+export const BULK_ACTIONS = ["grant", "revoke", "extend_30", "extend_90", "set_end", "set_cohort", "resend_access_email"] as const;
+export type BulkAction = (typeof BULK_ACTIONS)[number];
+
+export const BULK_ACTION_LABELS: Record<BulkAction, string> = {
+  extend_30: "Estender 30 dias",
+  extend_90: "Estender 90 dias",
+  grant: "Liberar acesso",
+  resend_access_email: "Reenviar convite",
+  revoke: "Remover acesso",
+  set_cohort: "Mudar turma",
+  set_end: "Mudar data de término"
+};
+
+/** Lote por chamada (progresso no cliente) e teto por rodada (acima disso, filtrar melhor). */
+export const BULK_BATCH_SIZE = 25;
+/** Com e-mail no meio (convite), o lote e menor: cada envio passa pelo SMTP antes de responder. */
+export const BULK_EMAIL_BATCH_SIZE = 8;
+export const BULK_MAX_TOTAL = 200;
+
+export type BulkSkipReason = "staff" | "already_has_access" | "no_access" | "email_limit" | "no_account";
+
+export const BULK_SKIP_REASON_LABELS: Record<BulkSkipReason, string> = {
+  already_has_access: "já tinha acesso",
+  email_limit: "limite de e-mail da plataforma",
+  no_access: "não tinha acesso a este produto",
+  no_account: "sem conta de acesso",
+  staff: "faz parte da equipe"
+};
+
+export type EntitlementSnapshot = {
+  endsAt: string | null;
+  id: string;
+  startsAt: string;
+  status: EntitlementStatus;
+};
+
+export type BulkItemResult =
+  | { status: "done"; userId: string; snapshot?: EntitlementSnapshot }
+  | { status: "skipped"; userId: string; reason: BulkSkipReason }
+  | { status: "failed"; userId: string; error: string };
+
+export type BulkBatchResult = {
+  batchId: string;
+  /** Interrompeu os envios por limite de e-mail: o resto do lote ficou como "skipped: email_limit". */
+  emailLimitHit: boolean;
+  items: BulkItemResult[];
+};
+
+export const IMPORT_BATCH_SIZE = 25;
+export const IMPORT_EMAIL_BATCH_SIZE = 8;
+export const IMPORT_MAX_ROWS = 2_000;
+export const IMPORT_MAX_FILE_BYTES = 2 * 1024 * 1024;
+/** Teto por pessoa da equipe por hora (somado no audit log). */
+export const IMPORT_HOURLY_LIMIT = 2_000;
+
+export const IMPORT_DELIVERY_METHODS = ["invite", "none"] as const;
+export type ImportDeliveryMethod = (typeof IMPORT_DELIVERY_METHODS)[number];
+
+export type ImportRowResult =
+  | { emailSent: boolean; index: number; status: "created" | "existing"; userId: string }
+  | { index: number; status: "failed"; error: string };
+
+export type ImportBatchResult = {
+  batchId: string;
+  emailLimitHit: boolean;
+  rows: ImportRowResult[];
+};

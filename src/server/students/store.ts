@@ -33,7 +33,7 @@ export function likeContains(value: string) {
  * Linhas
  * ---------------------------------------------------------------------------------------------- */
 
-export const PROFILE_COLUMNS = "id,email,full_name,phone,avatar_url,created_at";
+export const PROFILE_COLUMNS = "id,email,full_name,phone,avatar_url,created_at,last_sign_in_at";
 
 export type ProfileRow = {
   avatar_url: string | null;
@@ -41,6 +41,7 @@ export type ProfileRow = {
   email: string | null;
   full_name: string | null;
   id: string;
+  last_sign_in_at: string | null;
   phone: string | null;
 };
 
@@ -87,30 +88,50 @@ export type ContentKindRow = { id: string; image: string | null; kind: string; t
 const PAGE_SIZE = 1000;
 const MAX_ROWS = 50_000;
 
-/** Le todas as linhas em paginas de 1000 (limite do PostgREST), com teto para nao estourar memoria. */
+type CountOption = { count: "exact" } | undefined;
+type PageResult = { count?: number | null; data: unknown; error: DbError };
+
+/**
+ * Le todas as linhas em paginas de 1000 (limite do PostgREST): a primeira pagina pede o total e as
+ * demais vem em paralelo. Teto para nao estourar memoria; acima dele a tela avisa (nunca corta em
+ * silencio) e e hora de levar o calculo para uma RPC.
+ */
 async function fetchAll<Row>(
   context: string,
-  page: (from: number, to: number) => PromiseLike<{ data: unknown; error: DbError }>
+  page: (from: number, to: number, count: CountOption) => PromiseLike<PageResult>
 ): Promise<Row[]> {
-  const rows: Row[] = [];
+  const first = await page(0, PAGE_SIZE - 1, { count: "exact" });
+  failOnError(first.error, context);
+  const rows = (first.data ?? []) as Row[];
+  const total = typeof first.count === "number" ? first.count : rows.length;
 
-  for (let from = 0; from < MAX_ROWS; from += PAGE_SIZE) {
-    const { data, error } = await page(from, from + PAGE_SIZE - 1);
-    failOnError(error, context);
-    const chunk = (data ?? []) as Row[];
-    rows.push(...chunk);
+  if (total > MAX_ROWS) {
+    throw new Error(`${context}: mais de ${MAX_ROWS} linhas; a lista precisa ser calculada no banco.`);
+  }
 
-    if (chunk.length < PAGE_SIZE) {
-      break;
-    }
+  if (total <= rows.length) {
+    return rows;
+  }
+
+  const starts: number[] = [];
+
+  for (let from = PAGE_SIZE; from < total; from += PAGE_SIZE) {
+    starts.push(from);
+  }
+
+  const pages = await Promise.all(starts.map((from) => page(from, from + PAGE_SIZE - 1, undefined)));
+
+  for (const result of pages) {
+    failOnError(result.error, context);
+    rows.push(...((result.data ?? []) as Row[]));
   }
 
   return rows;
 }
 
 export function fetchProfiles(db: StudentsDb) {
-  return fetchAll<ProfileRow>("Alunos", (from, to) =>
-    db.from("profiles").select(PROFILE_COLUMNS).order("created_at", { ascending: false }).order("id").range(from, to)
+  return fetchAll<ProfileRow>("Alunos", (from, to, count) =>
+    db.from("profiles").select(PROFILE_COLUMNS, count).order("created_at", { ascending: false }).order("id").range(from, to)
   );
 }
 
@@ -140,12 +161,16 @@ export async function fetchStaffUserIds(db: StudentsDb): Promise<Set<string>> {
   return new Set(((data ?? []) as { user_id: string }[]).map((row) => row.user_id));
 }
 
-export function fetchEntitlements(db: StudentsDb, filter: { targetId?: string; userId?: string } = {}) {
-  return fetchAll<EntitlementRow>("Acessos", (from, to) => {
-    let query = db.from("entitlements").select(ENTITLEMENT_COLUMNS).order("created_at", { ascending: false }).order("id");
+export function fetchEntitlements(db: StudentsDb, filter: { targetId?: string; userId?: string; userIds?: string[] } = {}) {
+  return fetchAll<EntitlementRow>("Acessos", (from, to, count) => {
+    let query = db.from("entitlements").select(ENTITLEMENT_COLUMNS, count).order("created_at", { ascending: false }).order("id");
 
     if (filter.userId) {
       query = query.eq("user_id", filter.userId);
+    }
+
+    if (filter.userIds) {
+      query = query.in("user_id", filter.userIds);
     }
 
     if (filter.targetId) {
@@ -164,8 +189,8 @@ export async function fetchEntitlement(db: StudentsDb, entitlementId: string): P
 }
 
 export function fetchProgressRows(db: StudentsDb, userId?: string) {
-  return fetchAll<ProgressRow>("Progresso dos alunos", (from, to) => {
-    let query = db.from("lesson_progress").select("user_id,content_id,completed_lesson_ids,updated_at").order("id");
+  return fetchAll<ProgressRow>("Progresso dos alunos", (from, to, count) => {
+    let query = db.from("lesson_progress").select("user_id,content_id,completed_lesson_ids,updated_at", count).order("id");
 
     if (userId) {
       query = query.eq("user_id", userId);
@@ -178,11 +203,11 @@ export function fetchProgressRows(db: StudentsDb, userId?: string) {
 /** Aulas publicadas (em modulos publicados) por produto: Map<contentId, Set<lessonId>>. */
 export async function fetchPublishedLessonIndex(db: StudentsDb): Promise<Map<string, Set<string>>> {
   const [modules, lessons] = await Promise.all([
-    fetchAll<{ id: string; owner_id: string }>("Módulos", (from, to) =>
-      db.from("course_modules").select("id,owner_id").eq("status", "published").order("id").range(from, to)
+    fetchAll<{ id: string; owner_id: string }>("Módulos", (from, to, count) =>
+      db.from("course_modules").select("id,owner_id", count).eq("status", "published").order("id").range(from, to)
     ),
-    fetchAll<{ id: string; module_id: string }>("Aulas", (from, to) =>
-      db.from("lessons").select("id,module_id").eq("status", "published").order("id").range(from, to)
+    fetchAll<{ id: string; module_id: string }>("Aulas", (from, to, count) =>
+      db.from("lessons").select("id,module_id", count).eq("status", "published").order("id").range(from, to)
     )
   ]);
   const ownerByModule = new Map(modules.map((module) => [module.id, module.owner_id] as const));
@@ -357,4 +382,259 @@ export async function removeAvatarFiles(db: StudentsDb, userId: string) {
 export async function deleteProfile(db: StudentsDb, userId: string) {
   const { error } = await db.from("profiles").delete().eq("id", userId);
   failOnError(error, "Excluir perfil");
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Entrega 2: turmas, segmentos, auditoria, atividade e consultas de apoio
+ * ---------------------------------------------------------------------------------------------- */
+
+export type CohortRow = { id: string; name: string };
+export type CohortMembershipRow = { cohort_id: string; product_id: string; user_id: string };
+export type SegmentRow = { created_at: string; id: string; name: string; params: Record<string, unknown> | null };
+export type LifecycleWeekRow = {
+  inactive_count: number;
+  new_count: number;
+  recovered_count: number;
+  retained_count: number;
+  week_start: string;
+};
+
+export async function fetchCohorts(db: StudentsDb): Promise<CohortRow[]> {
+  const { data, error } = await db.from("cohorts").select("id,name").order("name", { ascending: true });
+  failOnError(error, "Turmas");
+
+  return (data ?? []) as CohortRow[];
+}
+
+export async function insertCohort(db: StudentsDb, name: string): Promise<CohortRow> {
+  const { data, error } = await db.from("cohorts").insert({ name }).select("id,name").single();
+  failOnError(error, "Criar turma");
+
+  return data as CohortRow;
+}
+
+export function fetchCohortMemberships(db: StudentsDb, filter: { productId?: string; userIds?: string[] } = {}) {
+  return fetchAll<CohortMembershipRow>("Turmas dos alunos", (from, to, count) => {
+    let query = db.from("cohort_memberships").select("user_id,product_id,cohort_id", count).order("id");
+
+    if (filter.productId) {
+      query = query.eq("product_id", filter.productId);
+    }
+
+    if (filter.userIds) {
+      query = query.in("user_id", filter.userIds);
+    }
+
+    return query.range(from, to);
+  });
+}
+
+export async function upsertCohortMembership(
+  db: StudentsDb,
+  membership: { actorId: string | null; cohortId: string; productId: string; userId: string }
+) {
+  const { error } = await db
+    .from("cohort_memberships")
+    .upsert(
+      { cohort_id: membership.cohortId, created_by: membership.actorId, product_id: membership.productId, user_id: membership.userId },
+      { onConflict: "user_id,product_id" }
+    );
+  failOnError(error, "Turma do aluno");
+}
+
+export async function deleteCohortMembership(db: StudentsDb, userId: string, productId: string) {
+  const { error } = await db.from("cohort_memberships").delete().eq("user_id", userId).eq("product_id", productId);
+  failOnError(error, "Tirar da turma");
+}
+
+export async function fetchSegments(db: StudentsDb): Promise<SegmentRow[]> {
+  const { data, error } = await db.from("student_segments").select("id,name,params,created_at").order("name", { ascending: true });
+  failOnError(error, "Segmentos salvos");
+
+  return (data ?? []) as SegmentRow[];
+}
+
+export async function insertSegment(
+  db: StudentsDb,
+  segment: { actorId: string; name: string; params: Record<string, unknown> }
+): Promise<SegmentRow> {
+  const { data, error } = await db
+    .from("student_segments")
+    .insert({ created_by: segment.actorId, name: segment.name, params: segment.params })
+    .select("id,name,params,created_at")
+    .single();
+  failOnError(error, "Salvar segmento");
+
+  return data as SegmentRow;
+}
+
+export async function deleteSegment(db: StudentsDb, segmentId: string) {
+  const { error } = await db.from("student_segments").delete().eq("id", segmentId);
+  failOnError(error, "Excluir segmento");
+}
+
+export type AuditInsert = {
+  action: string;
+  actorId: string | null;
+  count?: number | null;
+  entityId?: string | null;
+  entityType?: string | null;
+  /** So ids e contagens; nunca nome, e-mail (exceto a prova da exclusao) ou texto digitado. */
+  metadata?: Record<string, unknown>;
+};
+
+/** Registro de auditoria (append-only). Falha vira log: a acao ja aconteceu. */
+export async function recordAudit(db: StudentsDb, entry: AuditInsert) {
+  const { error } = await db.from("admin_audit_log").insert({
+    action: entry.action,
+    actor_id: entry.actorId,
+    count: entry.count ?? null,
+    entity_id: entry.entityId ?? null,
+    entity_type: entry.entityType ?? null,
+    metadata: entry.metadata ?? {}
+  });
+
+  if (error) {
+    console.error(`[auditoria] ${entry.action} nao gravada: ${error.message}`);
+  }
+}
+
+/** Linhas importadas por esta pessoa na ultima hora (teto no servidor). */
+export async function countImportedLastHour(db: StudentsDb, actorId: string) {
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { data, error } = await db
+    .from("admin_audit_log")
+    .select("count")
+    .eq("actor_id", actorId)
+    .eq("action", "students.import_batch")
+    .gte("occurred_at", since)
+    .limit(1000);
+  failOnError(error, "Importações da última hora");
+
+  return ((data ?? []) as { count: number | null }[]).reduce((sum, row) => sum + (row.count ?? 0), 0);
+}
+
+export async function fetchLifecycleWeeks(db: StudentsDb, weeks: number): Promise<LifecycleWeekRow[]> {
+  const { data, error } = await db.rpc("admin_lifecycle_weeks", { p_weeks: weeks });
+  failOnError(error, "Ciclo de vida");
+
+  return (data ?? []) as LifecycleWeekRow[];
+}
+
+export async function fetchLifecycleWeekMembers(db: StudentsDb, weekStart: string, group: string): Promise<Set<string>> {
+  const { data, error } = await db.rpc("admin_lifecycle_week_members", { p_group: group, p_week_start: weekStart });
+  failOnError(error, "Alunos da semana");
+
+  return new Set(((data ?? []) as { user_id: string }[]).map((row) => row.user_id));
+}
+
+const TOP_COMMENTERS_WINDOW_DAYS = 28;
+/** Teto da propria RPC community_top_commenters. */
+const TOP_COMMENTERS_LIMIT = 100;
+
+/** Mesma regua de Comunidade › Top alunos (community_top_commenters, 28 dias). */
+export async function fetchTopCommenterIds(db: StudentsDb): Promise<Set<string>> {
+  const since = new Date(Date.now() - TOP_COMMENTERS_WINDOW_DAYS * 86_400_000).toISOString();
+  const { data, error } = await db.rpc("community_top_commenters", { p_content_id: null, p_limit: TOP_COMMENTERS_LIMIT, p_since: since });
+  failOnError(error, "Top comentadores");
+
+  return new Set(((data ?? []) as { author_id: string | null }[]).map((row) => row.author_id).filter((id): id is string => Boolean(id)));
+}
+
+/** Comentarios aprovados por autor nos ultimos 28 dias (coluna do CSV). */
+export async function fetchApprovedCommentCounts(db: StudentsDb): Promise<Map<string, number>> {
+  const since = new Date(Date.now() - TOP_COMMENTERS_WINDOW_DAYS * 86_400_000).toISOString();
+  const rows = await fetchAll<{ author_id: string | null }>("Comentários recentes", (from, to, count) =>
+    db
+      .from("lesson_comments")
+      .select("author_id", count)
+      .eq("status", "approved")
+      .eq("author_role", "student")
+      .is("deleted_at", null)
+      .gte("created_at", since)
+      .order("id")
+      .range(from, to)
+  );
+  const counts = new Map<string, number>();
+
+  for (const row of rows) {
+    if (row.author_id) {
+      counts.set(row.author_id, (counts.get(row.author_id) ?? 0) + 1);
+    }
+  }
+
+  return counts;
+}
+
+export async function fetchProfilesByIds(db: StudentsDb, userIds: string[]): Promise<ProfileRow[]> {
+  if (userIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await db.from("profiles").select(PROFILE_COLUMNS).in("id", userIds);
+  failOnError(error, "Alunos selecionados");
+
+  return (data ?? []) as ProfileRow[];
+}
+
+export async function fetchProfilesByEmails(db: StudentsDb, emails: string[]): Promise<ProfileRow[]> {
+  if (emails.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await db.from("profiles").select(PROFILE_COLUMNS).in("email", emails);
+  failOnError(error, "Alunos por e-mail");
+
+  return (data ?? []) as ProfileRow[];
+}
+
+/** Preenche so o que esta vazio no perfil (importacao de conta que ja existia). */
+export async function fillProfileGaps(db: StudentsDb, current: ProfileRow, patch: { fullName: string | null; phone: string | null }) {
+  const next: { full_name?: string; phone?: string } = {};
+
+  if (!current.full_name?.trim() && patch.fullName?.trim()) {
+    next.full_name = patch.fullName.trim();
+  }
+
+  if (!current.phone?.trim() && patch.phone?.trim()) {
+    next.phone = patch.phone.trim();
+  }
+
+  if (Object.keys(next).length === 0) {
+    return false;
+  }
+
+  const { error } = await db.from("profiles").update(next).eq("id", current.id);
+  failOnError(error, "Perfil do aluno");
+
+  return true;
+}
+
+/** Varios eventos de uma vez (acoes em massa): uma ida ao banco. */
+export async function recordEvents(db: StudentsDb, events: StudentEventInsert[]) {
+  if (events.length === 0) {
+    return;
+  }
+
+  const { error } = await db.from("student_events").insert(
+    events.map((event) => ({
+      entity_id: event.entity_id ?? null,
+      entity_type: event.entity_type ?? null,
+      event_type: event.event_type,
+      metadata: event.metadata ?? {},
+      user_id: event.user_id
+    }))
+  );
+
+  if (error) {
+    console.error(`[alunos] ${events.length} eventos nao gravados: ${error.message}`);
+  }
+}
+
+/** Ultimo dia com atividade aproximada (backfill); null quando tudo ja e exato. */
+export async function fetchApproximateActivityUntil(db: StudentsDb): Promise<string | null> {
+  const { data, error } = await db.from("student_daily_activity").select("day").eq("approximate", true).order("day", { ascending: false }).limit(1);
+  failOnError(error, "Atividade aproximada");
+
+  return ((data ?? []) as { day: string }[])[0]?.day ?? null;
 }
