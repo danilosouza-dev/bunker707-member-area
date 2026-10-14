@@ -677,6 +677,26 @@ button:disabled {
   opacity: 0.92;
 }
 
+/* Anel de progresso dos cards de produto (ProgressRing): aparece no hover, no canto oposto ao da logo,
+   e se preenche ate a porcentagem (sem atraso: as transicoes dentro do card comecam junto com a escala). */
+.home-cover-card-progress {
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.group:hover .home-cover-card-progress {
+  opacity: 1;
+}
+
+.progress-ring-value {
+  stroke-dashoffset: var(--ring-circumference);
+  transition: stroke-dashoffset 700ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.group:hover .progress-ring-value {
+  stroke-dashoffset: var(--ring-offset);
+}
+
 .home-cover-card-content {
   opacity: 0;
   transform: translate3d(0, 16px, 0);
@@ -695,7 +715,8 @@ button:disabled {
     will-change: opacity, transform;
   }
 
-  .home-cover-card-logo {
+  .home-cover-card-logo,
+  .home-cover-card-progress {
     will-change: opacity;
   }
 }
@@ -972,6 +993,8 @@ button:disabled {
   .home-cover-card-overlay,
   .home-cover-card-gradient,
   .home-cover-card-content,
+  .home-cover-card-progress,
+  .progress-ring-value,
   .modal-backdrop-in,
   .modal-backdrop-out,
   .modal-panel-in,

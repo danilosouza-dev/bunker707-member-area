@@ -341,3 +341,17 @@ test("favorite cards reuse the faster continue-watching image zoom without movin
   assert.doesNotMatch(favoriteCardsSource, /hover:-translate-y-1/);
   assert.doesNotMatch(favoriteCardsSource, /duration-700 group-hover:scale-\[1\.035\]/);
 });
+
+test("cards de produto mostram o progresso no hover como um anel, diferente da barra dos modulos", async () => {
+  const ringSource = await readFile(new URL("../src/components/member/progress-ring.tsx", import.meta.url), "utf8");
+  assert.match(cardSource, /const showProgressRing = hasCover && !isLocked && item\.progress > 0;/);
+  assert.match(cardSource, /home-cover-card-progress pointer-events-none absolute right-3 top-3 z-30/);
+  assert.match(cardSource, /<ProgressRing value=\{item\.progress\} \/>/);
+  assert.doesNotMatch(cardSource, /<ProgressBar/, "o card de produto nao usa a barra dos modulos");
+  assert.match(ringSource, /strokeDasharray=\{circumference\}/);
+  assert.match(ringSource, /done \? "stroke-emerald-400" : "stroke-\[var\(--accent\)\]"/);
+  assert.match(ringSource, /aria-label=\{done \? "Concluído" : `\$\{percent\}% concluído`\}/);
+  assert.match(cssSource, /\.group:hover \.home-cover-card-progress \{\s*opacity: 1;/);
+  assert.match(cssSource, /\.group:hover \.progress-ring-value \{\s*stroke-dashoffset: var\(--ring-offset\);/);
+  assert.doesNotMatch(cssSource, /\.home-cover-card-progress \{[^}]*transition: opacity 300ms ease \d/, "sem atraso na transicao");
+});

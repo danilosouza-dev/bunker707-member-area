@@ -8,6 +8,7 @@ import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { SavedItemButton } from "@/components/saved-item-button";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import { usePlatformLogoImage } from "@/components/platform-branding";
+import { ProgressRing } from "@/components/member/progress-ring";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
@@ -103,6 +104,8 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
   const contentHref = getContentHref(item, accessPreviewMode);
   const hasCover = Boolean(item.image.trim());
   const logoImage = usePlatformLogoImage();
+  // Anel de progresso no hover (canto de cima, a direita): so para quem ja comecou e tem acesso.
+  const showProgressRing = hasCover && !isLocked && item.progress > 0;
 
   function prefetchContentPage() {
     if (!isLocked) {
@@ -278,6 +281,11 @@ export function VerticalCoverCard({ accessPreviewMode, item, onOpenDetails }: Ca
               </button>
             </div> : null}
           </div>
+          {showProgressRing ? (
+            <div className="home-cover-card-progress pointer-events-none absolute right-3 top-3 z-30 sm:right-3.5 sm:top-3.5 lg:right-4 lg:top-4">
+              <ProgressRing value={item.progress} />
+            </div>
+          ) : null}
           {/* Logo da escola dentro da superficie: cresce junto com o card e e rasterizada uma vez, no tamanho
               final (fora da superficie ficava pequena, deslocada por conta propria e serrilhada). */}
           {hasCover && !isReleaseLocked && logoImage ? (

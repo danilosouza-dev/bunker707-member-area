@@ -279,7 +279,7 @@ Formato recomendado:
 - as informacoes devem aparecer dentro do proprio card, sobre um degrade escuro de baixo para cima, sem criar painel externo abaixo da capa;
 - o degrade do hover deve ser bem forte na area inferior, onde ficam texto e botoes, priorizando legibilidade sobre capas com muito contraste ou texto na arte; o topo deve continuar suave para preservar a arte;
 - o hover deve mostrar apenas titulo, descricao curta, acao principal, botao para salvar/favoritar quando o aluno tiver acesso e um botao de seta para baixo para abrir o modal de detalhes;
-- status de acesso, duracao, quantidade de aulas, tipo de produto e demais metadados nao devem aparecer no hover do card vertical da home; essas informacoes ficam no modal e/ou na pagina propria do conteudo;
+- status de acesso, duracao, quantidade de aulas, tipo de produto e demais metadados nao devem aparecer no hover do card vertical da home; essas informacoes ficam no modal e/ou na pagina propria do conteudo; a excecao e o progresso, mostrado como um anel no canto superior direito do hover (nunca como a barra dos modulos, para nao confundir);
 - qualquer elemento que tenha hover interativo deve usar cursor de mao/pointer;
 - professor, foto do professor, Instagram e demais informacoes complementares nao devem aparecer no hover dos cards verticais; devem ficar no modal ou na pagina propria do curso/formacao;
 - clicar no card ou na acao principal `Acessar` deve levar para a pagina propria do curso, formacao ou bootcamp;
