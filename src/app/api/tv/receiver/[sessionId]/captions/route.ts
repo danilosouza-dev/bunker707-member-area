@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { getActiveLessonTranscriptCaptions } from "@/server/ai/transcripts";
 import { jsonRouteError } from "@/server/http/route-errors";
+import { resolveLessonCaptions } from "@/server/video/lesson-captions";
 import { getTvReceiverSession } from "@/server/video/tv-sessions";
 import { fetchYouTubeCaptions, normalizeYouTubeCaptionLanguage } from "@/server/video/youtube-captions";
 
@@ -36,10 +38,19 @@ export async function GET(request: Request, context: RouteContext) {
       return noStore(NextResponse.json({ error: "A aula desta sessao nao esta mais disponivel." }, { status: 410 }));
     }
 
-    return noStore(NextResponse.json(await fetchYouTubeCaptions({
+    // Mesma regra do player principal: legenda guardada na plataforma antes do YouTube ao vivo.
+    const lessonId = data.lesson.id;
+    const captions = await resolveLessonCaptions({
+      fetchCaptions: fetchYouTubeCaptions,
       language,
+      loadStoredCaptions: () => getActiveLessonTranscriptCaptions(lessonId),
+      onStoredCaptionsError: (error) => {
+        console.warn("[legendas TV] copia guardada indisponivel; tentando o YouTube", error);
+      },
       videoId: data.lesson.video.assetId
-    })));
+    });
+
+    return noStore(NextResponse.json(captions));
   } catch (error) {
     return noStore(jsonRouteError(error, "Nao foi possivel carregar as legendas na TV."));
   }

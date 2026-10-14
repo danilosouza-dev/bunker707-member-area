@@ -174,7 +174,7 @@ Modo TV:
 - o codigo de seis caracteres expira em dez minutos, e consumido uma unica vez e nao pode reconectar outro aparelho depois que a sessao muda para `connected`;
 - o token do receptor usa entropia criptografica, e enviado uma unica vez, fica apenas em `sessionStorage` na TV e e armazenado no Supabase somente como SHA-256;
 - a sessao completa expira em quatro horas e pode ser encerrada pelo aluno. APIs e pagina usam `no-store`, e `tv_sessions` nao concede privilegios diretos a `anon` ou `authenticated`;
-- rotas de legenda e streams manuais da TV exigem o bearer token do receptor, revalidam a sessao e o entitlement antes de resolver a midia e nunca usam cache. Em qualidade manual, as URLs temporarias do `googlevideo` chegam ao navegador da TV e conservam as mesmas limitacoes de observabilidade e ausencia de DRM do player principal;
+- rotas de legenda e streams manuais da TV exigem o bearer token do receptor, revalidam a sessao e o entitlement antes de resolver a midia e nunca usam cache. A legenda (na TV e no player principal) le primeiro a transcricao guardada da aula, sempre depois da checagem de acesso, e so entao consulta o YouTube. Em qualidade manual, as URLs temporarias do `googlevideo` chegam ao navegador da TV e conservam as mesmas limitacoes de observabilidade e ausencia de DRM do player principal;
 - o QR aponta apenas para a rota da Bunker707 com o codigo temporario. Apos o pareamento, o receptor YouTube ainda precisa do ID canonico para tocar o embed; esse ID continua observavel e nao deve ser descrito como ocultacao absoluta, streaming protegido ou DRM;
 - o desenho atual e um controle remoto Bunker707 por polling e heartbeat, nao implementacao de Chromecast ou AirPlay nativo.
 

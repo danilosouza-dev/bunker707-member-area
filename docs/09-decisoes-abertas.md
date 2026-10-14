@@ -49,7 +49,8 @@ Decisao temporaria para a origem gratuita:
 - manter `Automatica` via embed e oferecer no modo manual apenas as resolucoes reais encontradas para o video, inclusive `2160p` (`3840x2160`) quando disponivel;
 - no modo manual, entregar ao navegador fluxos temporarios diretos e separados de audio e video, sem proxy pela aplicacao;
 - tratar a extracao manual como integracao nao oficial, sujeita a expiracao e quebras por mudancas do YouTube, sem promessa de sigilo, DRM ou protecao da origem;
-- (2026-10-10) a extracao manual ganhou o desligamento `YOUTUBE_UNOFFICIAL_STREAMS=off` (padrao `on` na fase 0, desligada na fase 4 de `docs/17-admin-produtor-redesign.md`), que deixa o aluno e o Modo TV so com `Automático` no embed oficial e mantem as legendas.
+- (2026-10-10) a extracao manual ganhou o desligamento `YOUTUBE_UNOFFICIAL_STREAMS=off` (padrao `on` na fase 0, desligada na fase 4 de `docs/17-admin-produtor-redesign.md`), que deixa o aluno e o Modo TV so com `Automático` no embed oficial e mantem as legendas;
+- (2026-10-14) a legenda do player e do Modo TV passa a vir primeiro da transcricao guardada da aula (`lesson_transcripts`, enviada/colada/importada no admin) e so depois do YouTube ao vivo, porque em producao o YouTube nega a legenda ao servidor (IP de datacenter). O botao "Importar do YouTube" do admin tambem roda no servidor e tende a falhar em producao; o caminho confiavel e enviar o SRT/VTT baixado do YouTube Studio.
 
 A escolha de um provedor pago definitivo continua pendente.
 
