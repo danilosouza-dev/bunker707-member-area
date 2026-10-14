@@ -19,7 +19,7 @@ import { getReleaseRuleNotice } from "@/lib/release-rules";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
 import { getSavedItemKey, getSavedTargetTypeForContentKind } from "@/lib/saved-items";
-import type { ContentItem, ContentModalStructure, CourseModule, LockedContentActionMode } from "@/lib/platform-types";
+import type { ContentItem, ContentModalMedia, ContentModalStructure, CourseModule, LockedContentActionMode } from "@/lib/platform-types";
 
 type ContentRowProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -34,6 +34,8 @@ type CourseModulesHomeSectionProps = {
   accessPreviewMode?: AccessPreviewMode;
   course: ContentItem;
   lockedActionMode?: LockedContentActionMode;
+  /** Midia do topo do modal (imagem ou video de destaque do curso). */
+  media?: ContentModalMedia;
   modules: CourseModule[];
   subtitle?: string;
   title: string;
@@ -219,6 +221,7 @@ export function CourseModulesHomeSection({
   accessPreviewMode,
   course,
   lockedActionMode = "details_modal",
+  media,
   modules,
   subtitle,
   title
@@ -435,6 +438,7 @@ export function CourseModulesHomeSection({
         onClose={() => setDetailsItem(null)}
         structure={{
           formationCourses: [],
+          media,
           modules
         }}
       />

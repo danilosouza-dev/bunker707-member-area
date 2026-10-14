@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { HeroVideo } from "@/components/hero-video";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { usePlatformLogoImage } from "@/components/platform-branding";
 import { SavedItemButton } from "@/components/saved-item-button";
@@ -15,6 +16,7 @@ import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
+import { heroVideoSourceOf } from "@/lib/hero-video";
 import type { ContentItem, ContentModalStructure, CourseModule } from "@/lib/platform-types";
 
 type ContentDetailsModalProps = {
@@ -38,6 +40,7 @@ type ModulePreview = CourseModule;
 
 const MODULE_FOCUS_TRANSITION_ATTRIBUTE = "data-vt-module-focus";
 const MODULE_FOCUS_SCROLL_SHIFT_PROPERTY = "--vt-scroll-shift";
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 function getModuleCardTransitionName(moduleId: string) {
   return `module-card-${moduleId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -46,7 +49,7 @@ function getModuleCardTransitionName(moduleId: string) {
 function canUseModuleViewTransition() {
   return typeof document !== "undefined"
     && typeof document.startViewTransition === "function"
-    && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    && !window.matchMedia(REDUCED_MOTION_QUERY).matches;
 }
 
 function contentItemToModalCard(content: ContentItem): ModalCard {
@@ -478,6 +481,29 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     };
   }, [item]);
 
+  // Enquanto o modal esta aberto, videos em autoplay fora dele (o Destaque da home) ficam cobertos pelo
+  // backdrop desfocado; pausar evita dois decodificadores ao mesmo tempo. Ao fechar, voltam a tocar.
+  useEffect(() => {
+    if (!item) {
+      return;
+    }
+
+    const scroller = modalScrollerRef.current;
+    const pausedByModal = Array.from(document.querySelectorAll("video")).filter((video) => (
+      !scroller?.contains(video) && !video.paused
+    ));
+
+    pausedByModal.forEach((video) => video.pause());
+
+    return () => {
+      pausedByModal.forEach((video) => {
+        if (video.isConnected) {
+          void video.play().catch(() => undefined);
+        }
+      });
+    };
+  }, [item]);
+
   useEffect(() => {
     return () => {
       if (closeTimeoutRef.current) {
@@ -625,6 +651,12 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
   const primaryFormationRows = chunkItems(formationCourseCards.slice(0, 3), 3);
   const extraFormationRows = chunkItems(formationCourseCards.slice(3), 3);
   const itemHref = withAccessPreviewParam(`/conteudo/${item.id}`, accessPreviewMode);
+  // Midia do topo: "Imagem de destaque" (ou video de destaque + capa) do produto; sem ela, a capa do card, como antes.
+  const heroMedia = structure?.media;
+  const heroVideo = heroMedia?.mediaType === "video" ? heroMedia : null;
+  // Capa do video: a imagem de destaque; sem ela, YouTube escolhe a propria miniatura e arquivo usa a capa do card.
+  const heroPoster = heroVideo ? heroVideo.poster ?? (heroVideo.youtubeId ? null : item.image) : null;
+  const heroImageSrc = heroMedia?.mediaType === "image" ? heroMedia.mediaSrc : item.image;
 
   function handlePrimaryAction() {
     const currentItem = item;
@@ -741,11 +773,26 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
         }`}
         style={{ viewTransitionName: "modal-content-panel" }}
       >
-        <div className="relative min-h-[420px] overflow-hidden sm:min-h-[520px] lg:min-h-[560px]">
-          <div
-            className="modal-hero-image-in absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: cssImageUrl(item.image) }}
-          />
+        {/* O topo tem nome proprio na View Transition dos modulos: viaja com o painel, sem cross-fade sobre o video. */}
+        <div
+          className="relative min-h-[420px] overflow-hidden sm:min-h-[520px] lg:min-h-[560px]"
+          style={{ viewTransitionName: "modal-hero-media" }}
+        >
+          {heroVideo ? (
+            /* Video de destaque (arquivo ou YouTube), com as opcoes escolhidas pelo produtor e a capa por baixo. */
+            <HeroVideo
+              className="modal-hero-image-in absolute inset-0"
+              controlsClassName="right-4 bottom-4 max-sm:bottom-auto max-sm:top-[4.5rem]"
+              options={heroVideo.videoOptions}
+              poster={heroPoster}
+              source={heroVideoSourceOf(heroVideo)}
+            />
+          ) : (
+            <div
+              className="modal-hero-image-in absolute inset-0 bg-cover bg-center"
+              style={{ backgroundImage: cssImageUrl(heroImageSrc) }}
+            />
+          )}
           <div className="absolute inset-0 bg-black/16" />
           <div className="absolute inset-x-0 bottom-0 h-[72%] bg-gradient-to-t from-[#151515] via-[#151515]/88 to-transparent" />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/36 via-black/10 to-transparent" />

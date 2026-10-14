@@ -177,7 +177,7 @@ function resolvePreviewRows(
         ? formationCourses.filter((course) => course.parentContentId === item.id)
         : [];
       return [{
-        backgroundImage: record.pageSettings?.hero?.mediaSrc ?? item.image,
+        backgroundImage: (record.pageSettings?.hero?.mediaType === "video" ? record.pageSettings.hero.poster : record.pageSettings?.hero?.mediaSrc) ?? item.image,
         course: item,
         id: section.id,
         items: [item],

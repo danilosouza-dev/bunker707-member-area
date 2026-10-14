@@ -4,6 +4,8 @@
 
 import { z } from "zod";
 import { extractYouTubePlaylistId } from "../../lib/youtube-course-import";
+import { detectLessonVideo } from "../../lib/video-detect";
+import { describeVideoFileLinkProblem } from "../../lib/video-file-link";
 import {
   CREATABLE_PRODUCT_FORMATS,
   MAX_LESSONS_PER_PASTE,
@@ -206,6 +208,51 @@ export const setProductImageSchema = z.object({
 export const setProductHeroCornersSchema = z.object({
   corners: z.enum(["inherit", "rounded", "soft"]),
   id: catalogIdSchema
+});
+
+/** Link do video de destaque: YouTube (qualquer formato de link) ou arquivo direto https (.mp4, .webm ou .mov). */
+export const heroVideoLinkSchema = z.string({ error: "Cole o link do vídeo." }).trim().max(2048, "Link longo demais.").superRefine((value, context) => {
+  const detected = detectLessonVideo(value);
+
+  if (detected.ok && detected.provider === "youtube") {
+    return;
+  }
+
+  const generic = "Use um link do YouTube ou um link direto do arquivo de vídeo (.mp4, .webm ou .mov).";
+
+  // Codigo <iframe> colado (Vimeo, Bunny, Mux...): nao e link, entao "comece com https://" nao ajudaria.
+  if (/^<iframe\b/i.test(value)) {
+    context.addIssue({ code: "custom", message: generic });
+    return;
+  }
+
+  const problem = describeVideoFileLinkProblem(value);
+
+  if (problem) {
+    context.addIssue({ code: "custom", message: problem.includes("terminado em") ? generic : problem });
+  }
+});
+
+/** Video de destaque do produto; null remove. */
+export const setProductHeroVideoSchema = z.object({
+  id: catalogIdSchema,
+  videoUrl: heroVideoLinkSchema.nullable()
+});
+
+/** Opcoes do video de destaque (o form manda o conjunto completo). */
+export const setProductHeroVideoOptionsSchema = z.object({
+  id: catalogIdSchema,
+  options: z.object({
+    autoplay: z.boolean(),
+    hideBranding: z.boolean(),
+    loop: z.boolean(),
+    nativeControls: z.boolean(),
+    pauseButton: z.boolean(),
+    soundButton: z.boolean(),
+    startWithSound: z.boolean(),
+    timeline: z.boolean(),
+    volumeSlider: z.boolean()
+  })
 });
 
 export const publishProductSchema = z.object({

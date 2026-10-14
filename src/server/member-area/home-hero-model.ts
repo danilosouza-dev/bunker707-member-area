@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 import type { HomeHeroConfig } from "../../lib/platform-types";
+import { describeVideoFileLinkProblem, videoFileLinkSchema } from "../../lib/video-file-link";
 import {
   defaultCtaTarget,
   describeHeroCtaHrefProblem,
@@ -42,7 +43,6 @@ export const HERO_TEXT_LIMITS = { badge: 40, ctaLabel: 32, description: 240, tit
 
 const HERO_PURPOSES = new Set<HomeHeroConfig["purpose"]>(["school-brand", "editorial-highlight", "content-highlight"]);
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
-const VIDEO_EXTENSION = /\.(?:mp4|webm|mov)$/i;
 
 /* ------------------------------------------------------------------------------------------------
  * Schemas
@@ -66,41 +66,11 @@ const heroCtaHrefFieldSchema = z.string().trim().superRefine((value, context) =>
   }
 });
 
-/** Motivo para um link de video nao servir; null quando serve. */
-export function describeHeroVideoLinkProblem(raw: string): string | null {
-  const value = raw.trim();
-
-  if (!value) {
-    return "Cole o link do vídeo.";
-  }
-
-  let url: URL;
-
-  try {
-    url = new URL(value);
-  } catch {
-    return "Use um link que comece com https://.";
-  }
-
-  if (url.protocol !== "https:" || /\s/.test(value) || url.username || url.password) {
-    return "Use um link que comece com https://.";
-  }
-
-  if (value.length > 2_048) {
-    return "Link longo demais.";
-  }
-
-  return VIDEO_EXTENSION.test(url.pathname) ? null : "Use um link direto do arquivo de vídeo, terminado em .mp4, .webm ou .mov.";
-}
+/** Motivo para um link de video nao servir; null quando serve (regra compartilhada em src/lib/video-file-link.ts). */
+export const describeHeroVideoLinkProblem = describeVideoFileLinkProblem;
 
 /** Link direto de video (https, terminando em .mp4, .webm ou .mov antes de ? ou #). */
-export const heroVideoLinkSchema = z.string({ error: "Cole o link do vídeo." }).trim().superRefine((value, context) => {
-  const problem = describeHeroVideoLinkProblem(value);
-
-  if (problem) {
-    context.addIssue({ code: "custom", message: problem });
-  }
-});
+export const heroVideoLinkSchema = videoFileLinkSchema;
 
 /** Cor da luz de fundo: #rrggbb (o seletor de cor do navegador devolve assim). */
 export const heroGlowColorSchema = z.string({ error: "Escolha uma cor válida." }).trim().regex(HEX_COLOR, "Escolha uma cor válida.");

@@ -1030,6 +1030,22 @@ html[data-vt-module-focus]::view-transition-group(module-lesson-panel) {
   z-index: 1;
 }
 
+/* O topo do modal (imagem ou video) e capturado a parte: acompanha o painel, mas sem cross-fade entre
+   um quadro parado e o video ao vivo. */
+html[data-vt-module-focus]::view-transition-group(modal-hero-media) {
+  border-radius: 8px 8px 0 0;
+  overflow: clip;
+}
+
+html[data-vt-module-focus]::view-transition-old(modal-hero-media) {
+  animation: none;
+  opacity: 0;
+}
+
+html[data-vt-module-focus]::view-transition-new(modal-hero-media) {
+  animation: none;
+}
+
 html[data-vt-module-focus]::view-transition-new(.module-card):only-child {
   animation: module-card-vt-in 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
