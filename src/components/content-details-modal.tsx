@@ -3,8 +3,8 @@
 import { Bell, ChevronDown, ChevronUp, LockKeyhole, Play, ShoppingCart, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState, useLayoutEffect } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal, flushSync } from "react-dom";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { usePlatformLogoImage } from "@/components/platform-branding";
 import { SavedItemButton } from "@/components/saved-item-button";
@@ -35,6 +35,19 @@ type ModalCard = {
 };
 
 type ModulePreview = CourseModule;
+
+const MODULE_FOCUS_TRANSITION_ATTRIBUTE = "data-vt-module-focus";
+const MODULE_FOCUS_SCROLL_SHIFT_PROPERTY = "--vt-scroll-shift";
+
+function getModuleCardTransitionName(moduleId: string) {
+  return `module-card-${moduleId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+function canUseModuleViewTransition() {
+  return typeof document !== "undefined"
+    && typeof document.startViewTransition === "function"
+    && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 function contentItemToModalCard(content: ContentItem): ModalCard {
   return {
@@ -261,11 +274,14 @@ function ModuleCard({
   active,
   cardRef,
   module,
+  morph = true,
   onClick
 }: {
   active: boolean;
   cardRef?: Ref<HTMLButtonElement>;
   module: ModulePreview;
+  /** Liga o card ao seu equivalente no proximo layout para ele deslizar ate la na View Transition. */
+  morph?: boolean;
   onClick: () => void;
 }) {
   const completedLessons = getCompletedLessonsCount(module);
@@ -284,6 +300,7 @@ function ModuleCard({
       }`}
       onClick={onClick}
       ref={cardRef}
+      style={morph ? { viewTransitionName: getModuleCardTransitionName(module.id) } : undefined}
       type="button"
     >
       <div className="modal-vertical-card-media module-card-media relative aspect-[720/1040] overflow-hidden bg-[#181818] [transform:translateZ(0)]">
@@ -341,7 +358,7 @@ function LessonPanel({
   return (
     <div
       className="module-lessons-in flex flex-col self-start overflow-hidden rounded-[8px] border border-white/10 bg-[#1f1f1f] shadow-2xl shadow-black/35"
-      style={maxHeight ? { height: maxHeight } : undefined}
+      style={{ height: maxHeight ?? undefined, viewTransitionName: "module-lesson-panel" }}
     >
       <div className="border-b border-white/10 p-4">
         <p className="text-xs font-semibold uppercase tracking-normal text-zinc-500">
@@ -416,6 +433,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
   const [closingItemId, setClosingItemId] = useState<string | null>(null);
   const activeModuleCardRef = useRef<HTMLButtonElement>(null);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const moduleViewTransitionRef = useRef<ViewTransition | null>(null);
   const modalScrollerRef = useRef<HTMLDivElement>(null);
   const moduleSectionHeaderRef = useRef<HTMLDivElement>(null);
   const isClosing = item ? closingItemId === item.id : false;
@@ -425,6 +443,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
       return;
     }
 
+    moduleViewTransitionRef.current?.skipTransition();
     setClosingItemId(item.id);
     closeTimeoutRef.current = setTimeout(() => {
       setExpandedMainSection(false);
@@ -469,7 +488,8 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
 
   // Abrir um modulo nao rola o modal: a troca acontece no lugar, como a lista de episodios da Netflix
   // (rolagem suave somada a troca de conteudo parecia uma tremida). So quando o titulo da secao ja saiu
-  // por cima e que o modal pula, de uma vez e antes de pintar, para a lista aparecer.
+  // por cima e que o modal pula, de uma vez e antes de pintar, para a lista aparecer. Dentro de uma
+  // View Transition esse salto roda no flushSync, antes da captura do estado final, e vira parte do movimento.
   useLayoutEffect(() => {
     if (!activeModuleId || !item) {
       return;
@@ -635,12 +655,61 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     window.location.href = currentItem.purchaseUrl;
   }
 
-  function toggleMainSection() {
-    if (expandedMainSection && activeModuleId && itemModules.slice(primaryModuleCount).some((module) => module.id === activeModuleId)) {
-      setActiveModuleId(null);
+  /**
+   * Aplica uma mudanca de layout da secao de modulos como View Transition: os cards deslizam ate a nova
+   * posicao, o painel de aulas se desdobra e o modal cresce/encolhe de forma continua. Sem suporte do
+   * navegador (ou com reducao de movimento ativa) a troca segue instantanea, como antes.
+   */
+  function runModuleLayoutUpdate(update: () => void) {
+    if (!canUseModuleViewTransition()) {
+      update();
+      return;
     }
 
-    setExpandedMainSection((current) => !current);
+    const root = document.documentElement;
+    const scroller = modalScrollerRef.current;
+    const scrollTopBefore = scroller?.scrollTop ?? 0;
+    root.setAttribute(MODULE_FOCUS_TRANSITION_ATTRIBUTE, "");
+
+    const transition = document.startViewTransition(() => {
+      // Aplica o novo layout de uma vez (incluindo o salto de scroll do useLayoutEffect, quando houver)
+      // antes de o navegador capturar o estado final da transicao.
+      flushSync(update);
+
+      // Quanto o conteudo deslocou na tela por causa desse salto: elementos que so existem no novo layout
+      // (painel de aulas, cards recem-revelados) partem dessa distancia para viajar junto com o resto.
+      const scrollShift = (scroller?.scrollTop ?? 0) - scrollTopBefore;
+      root.style.setProperty(MODULE_FOCUS_SCROLL_SHIFT_PROPERTY, `${Math.round(scrollShift)}px`);
+    });
+
+    moduleViewTransitionRef.current = transition;
+    transition.finished
+      .catch(() => undefined)
+      .finally(() => {
+        if (moduleViewTransitionRef.current === transition) {
+          moduleViewTransitionRef.current = null;
+          root.removeAttribute(MODULE_FOCUS_TRANSITION_ATTRIBUTE);
+          root.style.removeProperty(MODULE_FOCUS_SCROLL_SHIFT_PROPERTY);
+        }
+      });
+  }
+
+  function focusModule(nextModuleId: string | null) {
+    if (nextModuleId === activeModuleId) {
+      return;
+    }
+
+    runModuleLayoutUpdate(() => setActiveModuleId(nextModuleId));
+  }
+
+  function toggleMainSection() {
+    runModuleLayoutUpdate(() => {
+      if (expandedMainSection && activeModuleId && itemModules.slice(primaryModuleCount).some((module) => module.id === activeModuleId)) {
+        setActiveModuleId(null);
+      }
+
+      setExpandedMainSection((current) => !current);
+    });
   }
 
   function prefetchPrimaryAction() {
@@ -666,9 +735,12 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
         }}
         type="button"
       />
-      <section className={`relative z-10 mx-auto w-full max-w-4xl overflow-hidden rounded-[8px] border border-white/10 bg-[#151515] shadow-[0_34px_120px_rgba(0,0,0,0.82)] ${
-        isClosing ? "modal-panel-out" : "modal-panel-in"
-      }`}>
+      <section
+        className={`relative z-10 mx-auto w-full max-w-4xl overflow-hidden rounded-[8px] border border-white/10 bg-[#151515] shadow-[0_34px_120px_rgba(0,0,0,0.82)] ${
+          isClosing ? "modal-panel-out" : "modal-panel-in"
+        }`}
+        style={{ viewTransitionName: "modal-content-panel" }}
+      >
         <div className="relative min-h-[420px] overflow-hidden sm:min-h-[520px] lg:min-h-[560px]">
           <div
             className="modal-hero-image-in absolute inset-0 bg-cover bg-center"
@@ -822,7 +894,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
                         active
                         cardRef={activeModuleCardRef}
                         module={activeModule}
-                        onClick={() => setActiveModuleId(null)}
+                        onClick={() => focusModule(null)}
                       />
                       <LessonPanel
                         accessPreviewMode={accessPreviewMode}
@@ -843,7 +915,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
                               active={false}
                               key={module.id}
                               module={module}
-                              onClick={() => setActiveModuleId(module.id)}
+                              onClick={() => focusModule(module.id)}
                             />
                           ))}
                         </div>
@@ -857,7 +929,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
                         active={false}
                         key={module.id}
                         module={module}
-                        onClick={() => setActiveModuleId(module.id)}
+                        onClick={() => focusModule(module.id)}
                       />
                     ))}
                   </div>
@@ -878,7 +950,8 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
                             active={false}
                             key={module.id}
                             module={module}
-                            onClick={() => setActiveModuleId(module.id)}
+                            morph={expandedMainSection}
+                            onClick={() => focusModule(module.id)}
                           />
                         ))}
                       </div>
@@ -935,7 +1008,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
             </section>
           ) : null}
 
-          <section className="border-t border-white/10 pt-7">
+          <section className="border-t border-white/10 pt-7" style={{ viewTransitionName: "modal-about-section" }}>
             <h3 className="text-xl font-bold text-white">Sobre {item.title}</h3>
             <div className="mt-4 grid gap-6 text-sm leading-6 text-zinc-400 sm:grid-cols-[1.35fr_0.85fr]">
               <p>
