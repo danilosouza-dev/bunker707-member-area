@@ -4,6 +4,8 @@
 // runAdminAction (papel + zod + erro como ActionResult), grava so a linha do produto (e a sua linha de
 // content_page_settings), confere updated_at quando o contrato pede e invalida o cache do catalogo.
 
+import { normalizeHeroVideoOptions } from "../../lib/hero-video";
+import { detectLessonVideo } from "../../lib/video-detect";
 import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
 import { invalidateCatalog } from "@/server/catalog/cache";
@@ -44,6 +46,7 @@ import {
   publishProductSchema,
   renameProductSchema,
   setProductHeroCornersSchema,
+  setProductHeroVideoOptionsSchema,
   setProductHeroVideoSchema,
   setProductImageSchema,
   setProductSituationSchema,
@@ -66,6 +69,7 @@ import type {
   CreateProductInput,
   DeleteProductInput,
   ProductHeroCornersSaved,
+  ProductHeroVideoOptionsSaved,
   ProductHeroVideoSaved,
   ProductImageSaved,
   ProductPublished,
@@ -75,6 +79,7 @@ import type {
   RenameProductInput,
   SetProductHeroCornersInput,
   SetProductHeroVideoInput,
+  SetProductHeroVideoOptionsInput,
   SetProductImageInput,
   SetProductSituationInput,
   UpdateProductAccessInput,
@@ -353,6 +358,8 @@ export async function setProductHeroCorners(input: SetProductHeroCornersInput): 
 
 // Textos do banner da pagina do produto nascem escondidos quando a midia e gravada pelo admin novo.
 const HIDDEN_HERO_TEXTS = { badge: false, cta: false, description: false, title: false };
+/** Chaves de midia do hero; o resto (cantos, textos, visibilidade, opcoes do video) e preservado. */
+const HERO_MEDIA_KEYS = ["mediaSrc", "mediaType", "poster", "youtubeId"];
 
 function heroRecordOf(settings: { hero?: unknown }): Record<string, unknown> {
   return settings.hero && typeof settings.hero === "object" && !Array.isArray(settings.hero)
@@ -392,9 +399,9 @@ async function patchHeroSettings(id: string, hero: Record<string, unknown>, db: 
 }
 
 /**
- * [catalog.write] Video de destaque do produto: link direto https (.mp4, .webm ou .mov), como o Destaque da
- * home. Toca sem som e em repeticao na pagina do produto e no topo do modal da home; a imagem de destaque
- * vira a capa (poster). null remove o video e a capa volta a ser a imagem de destaque.
+ * [catalog.write] Video de destaque do produto: link do YouTube ou arquivo direto https (.mp4, .webm ou .mov).
+ * Toca no topo do modal da home e no banner da pagina do produto conforme as opcoes (setProductHeroVideoOptions);
+ * a imagem de destaque vira a capa (poster). null remove o video (e as opcoes) e a capa volta a ser a imagem.
  */
 export async function setProductHeroVideo(input: SetProductHeroVideoInput): Promise<ActionResult<ProductHeroVideoSaved>> {
   return runAdminAction("catalog.write", setProductHeroVideoSchema, input, async ({ input: data }) => {
@@ -402,20 +409,23 @@ export async function setProductHeroVideo(input: SetProductHeroVideoInput): Prom
     await requireProductRow(data.id, db);
     const currentHero = heroRecordOf(await fetchProductSettings(data.id, db));
     const image = heroImageOf(currentHero);
-    const rest = Object.fromEntries(
-      Object.entries(currentHero).filter(([key]) => key !== "mediaSrc" && key !== "mediaType" && key !== "poster")
-    );
-    const nextHero: Record<string, unknown> = data.videoUrl
+    const detected = data.videoUrl ? detectLessonVideo(data.videoUrl) : null;
+    const youtubeId = detected?.ok && detected.provider === "youtube" ? detected.config.assetId ?? null : null;
+    const videoUrl = data.videoUrl ? (youtubeId ? `https://www.youtube.com/watch?v=${youtubeId}` : data.videoUrl) : null;
+    const rest = Object.fromEntries(Object.entries(currentHero).filter(([key]) => !HERO_MEDIA_KEYS.includes(key)));
+    const restWithoutOptions = Object.fromEntries(Object.entries(rest).filter(([key]) => key !== "videoOptions"));
+    const nextHero: Record<string, unknown> = videoUrl
       ? {
         ...rest,
-        mediaSrc: data.videoUrl,
+        mediaSrc: videoUrl,
         mediaType: "video",
+        ...(youtubeId ? { youtubeId } : {}),
         ...(image ? { poster: image } : {}),
         visibility: { ...HIDDEN_HERO_TEXTS, ...heroVisibilityOf(currentHero) }
       }
       : image
-        ? { ...rest, mediaSrc: image, mediaType: "image" }
-        : withoutDefaultVisibility(rest);
+        ? { ...restWithoutOptions, mediaSrc: image, mediaType: "image" }
+        : withoutDefaultVisibility(restWithoutOptions);
 
     await patchHeroSettings(data.id, nextHero, db);
 
@@ -430,7 +440,32 @@ export async function setProductHeroVideo(input: SetProductHeroVideoInput): Prom
 
     invalidateCatalog({ from: "action" });
 
-    return { updatedAt: row.updated_at, videoUrl: data.videoUrl ?? null };
+    return { updatedAt: row.updated_at, videoKind: videoUrl ? (youtubeId ? "youtube" : "file") : null, videoUrl };
+  });
+}
+
+/** [catalog.write] Opcoes do video de destaque (tocar sozinho, repetir, botoes, recorte do YouTube). */
+export async function setProductHeroVideoOptions(input: SetProductHeroVideoOptionsInput): Promise<ActionResult<ProductHeroVideoOptionsSaved>> {
+  return runAdminAction("catalog.write", setProductHeroVideoOptionsSchema, input, async ({ input: data }) => {
+    const db = catalogDb();
+    await requireProductRow(data.id, db);
+    const currentHero = heroRecordOf(await fetchProductSettings(data.id, db));
+    const options = normalizeHeroVideoOptions(data.options);
+
+    await patchHeroSettings(data.id, { ...currentHero, videoOptions: options }, db);
+
+    const row = await updateRowGuarded<{ updated_at: string }>({
+      columns: "id,updated_at",
+      db,
+      id: data.id,
+      notFoundMessage: PRODUCT_NOT_FOUND,
+      patch: {},
+      table: "content_items"
+    });
+
+    invalidateCatalog({ from: "action" });
+
+    return { options, updatedAt: row.updated_at };
   });
 }
 
@@ -448,7 +483,7 @@ export async function setProductImage(input: SetProductImageInput): Promise<Acti
       if (!url) {
         // Tirar a imagem nao apaga o video de destaque (so a capa sai) nem os cantos e textos do banner.
         const heroRest = Object.fromEntries(
-          Object.entries(currentHero).filter(([key]) => key !== "poster" && (keepsVideo || (key !== "mediaSrc" && key !== "mediaType")))
+          Object.entries(currentHero).filter(([key]) => key !== "poster" && (keepsVideo || !HERO_MEDIA_KEYS.includes(key)))
         );
 
         await patchHeroSettings(data.id, keepsVideo ? heroRest : withoutDefaultVisibility(heroRest), db);

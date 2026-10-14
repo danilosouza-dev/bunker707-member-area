@@ -12,7 +12,7 @@
 
 import type { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
-import type { LessonVideoConfig, LessonVideoProvider } from "@/lib/platform-types";
+import type { HeroVideoOptions, LessonVideoConfig, LessonVideoProvider } from "@/lib/platform-types";
 import type { VideoDetection } from "@/lib/video-detect";
 import type {
   YouTubeCourseImportCommitInput,
@@ -47,6 +47,7 @@ import type {
   setLessonsStatusSchema,
   setModuleCoverSchema,
   setProductHeroCornersSchema,
+  setProductHeroVideoOptionsSchema,
   setProductHeroVideoSchema,
   setProductImageSchema,
   setProductSituationSchema,
@@ -81,6 +82,7 @@ export type UpdateProductAccessInput = z.input<typeof updateProductAccessSchema>
 export type SetProductImageInput = z.input<typeof setProductImageSchema>;
 export type SetProductHeroCornersInput = z.input<typeof setProductHeroCornersSchema>;
 export type SetProductHeroVideoInput = z.input<typeof setProductHeroVideoSchema>;
+export type SetProductHeroVideoOptionsInput = z.input<typeof setProductHeroVideoOptionsSchema>;
 export type PublishProductInput = z.input<typeof publishProductSchema>;
 export type SetProductSituationInput = z.input<typeof setProductSituationSchema>;
 export type DeleteProductInput = z.input<typeof deleteProductSchema>;
@@ -235,7 +237,11 @@ export type ProductDetails = {
   header: ProductHeader;
   heroCorners: ProductHeroCorners;
   heroUrl: string | null;
-  /** Link direto do video de destaque (.mp4/.webm/.mov); null = destaque so com imagem. */
+  /** YouTube ou arquivo direto; null sem video de destaque. */
+  heroVideoKind: "file" | "youtube" | null;
+  /** Opcoes do video de destaque, ja com os padroes. */
+  heroVideoOptions: Required<HeroVideoOptions>;
+  /** Link do video de destaque (YouTube canonico ou arquivo .mp4/.webm/.mov); null = destaque so com imagem. */
   heroVideoUrl: string | null;
   instructorName: string | null;
   level: string | null;
@@ -296,7 +302,8 @@ export type ProductImageSaved = { slot: "cover" | "hero"; updatedAt: string; url
 /** Cantos do banner da pagina do produto; "inherit" = segue Marca > Estilo. */
 export type ProductHeroCorners = "inherit" | "rounded" | "soft";
 export type ProductHeroCornersSaved = { corners: ProductHeroCorners; updatedAt: string };
-export type ProductHeroVideoSaved = { updatedAt: string; videoUrl: string | null };
+export type ProductHeroVideoSaved = { updatedAt: string; videoKind: "file" | "youtube" | null; videoUrl: string | null };
+export type ProductHeroVideoOptionsSaved = { options: Required<HeroVideoOptions>; updatedAt: string };
 /** Capa do modulo gravada (setModuleCover, src/server/catalog/module-cover-actions.ts). */
 export type ModuleCoverSaved = { coverUrl: string | null; id: string; updatedAt: string; usesProductCover: boolean };
 export type ProductPublished = { checklist: PublishChecklist; header: ProductHeader; published: boolean };
@@ -387,6 +394,7 @@ export type UpdateProductAccessAction = (input: UpdateProductAccessInput) => Pro
 export type SetProductImageAction = (input: SetProductImageInput) => Promise<ActionResult<ProductImageSaved>>; // [catalog.write]
 export type SetProductHeroCornersAction = (input: SetProductHeroCornersInput) => Promise<ActionResult<ProductHeroCornersSaved>>; // [catalog.write]
 export type SetProductHeroVideoAction = (input: SetProductHeroVideoInput) => Promise<ActionResult<ProductHeroVideoSaved>>; // [catalog.write]
+export type SetProductHeroVideoOptionsAction = (input: SetProductHeroVideoOptionsInput) => Promise<ActionResult<ProductHeroVideoOptionsSaved>>; // [catalog.write]
 export type PublishProductAction = (input: PublishProductInput) => Promise<ActionResult<ProductPublished>>; // [catalog.publish]
 export type SetProductSituationAction = (input: SetProductSituationInput) => Promise<ActionResult<ProductSaved>>; // [catalog.publish]
 export type DeleteProductAction = (input: DeleteProductInput) => Promise<ActionResult<{ id: string }>>; // [catalog.delete]

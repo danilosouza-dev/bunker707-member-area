@@ -42,7 +42,7 @@ test("destaque da home e banner do curso tem a luz de fundo na cor da imagem", (
   assert.match(glowSource, /const accent = color \?\? \(src && measured\?\.src === src \? measured\.color : null\);/, "cor escolhida vence a medida");
   assert.match(heroSource, /<section className="@container relative z-\[1\] min-h-\[var\(--member-hero-min-h\)\]/);
   assert.match(css, /--member-hero-min-h: clamp\(520px, calc\(100vh - 256px\), 680px\);/, "arredondado: destaque mais baixo em telas curtas");
-  assert.match(coursePageSource, /<HeroGlow src=\{pageHero\.mediaType === "video" \? pageHero\.poster \?\? null : pageHero\.mediaSrc \?\? null\} \/>/);
+  assert.match(coursePageSource, /<HeroGlow src=\{pageHero\.mediaType === "video" \? heroVideoPosterOf\(pageHero\) : pageHero\.mediaSrc \?\? null\} \/>/);
   // Forte do meio para cima, enfraquecendo para baixo e esfumacando 72 px alem da base do banner (so no
   // arredondado), sem chegar nos cards da primeira fileira.
   assert.match(css, /\.member-hero-glow \{[\s\S]*color-mix\(in srgb, var\(--member-hero-accent, #141414\) 26%, #141414\) 0%,[\s\S]*21%, #141414\) 30%,[\s\S]*11%, #141414\) 58%,[\s\S]*2%, #141414\) 91%,[\s\S]*#141414 100%/);

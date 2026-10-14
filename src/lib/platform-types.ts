@@ -184,6 +184,8 @@ export type ContentModalMedia = {
   mediaSrc: string;
   mediaType: "image" | "video";
   poster?: string;
+  videoOptions?: HeroVideoOptions;
+  youtubeId?: string;
 };
 
 export type ContentModalStructure = {
@@ -245,12 +247,31 @@ export type ContentPageHeroConfig = {
   mediaType: "image" | "video";
   poster?: string;
   title?: string;
+  /** Opcoes do video de destaque (arquivo ou YouTube); ausentes = padroes de src/lib/hero-video.ts. */
+  videoOptions?: HeroVideoOptions;
   visibility?: {
     badge?: boolean;
     cta?: boolean;
     description?: boolean;
     title?: boolean;
   };
+  /** Video de destaque pelo YouTube (id de 11 caracteres); mediaSrc guarda o link canonico de watch. */
+  youtubeId?: string;
+};
+
+/** Como o video de destaque se comporta; cada chave ausente usa o padrao. */
+export type HeroVideoOptions = {
+  /** Toca sozinho, sem som, ao abrir. Desligado: capa com botao de tocar. */
+  autoplay?: boolean;
+  /** YouTube: recorta as bordas e bloqueia o mouse para a logo e o titulo nao aparecerem. */
+  hideBranding?: boolean;
+  loop?: boolean;
+  /** YouTube: mostra os controles do proprio YouTube (sem recorte, com a logo). */
+  nativeControls?: boolean;
+  /** Botao nosso de pausar/continuar. */
+  pauseButton?: boolean;
+  /** Botao nosso de ligar/desligar o som. */
+  soundButton?: boolean;
 };
 
 export type LessonPreview = {

@@ -637,7 +637,18 @@ test("destaque em video: heroUrlOf devolve a capa, heroVideoUrlOf o link e o sch
   assert.equal(mappers.heroVideoUrlOf(null), null);
   assert.equal(schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: "https://vz-1.b-cdn.net/abc/play_720p.mp4?x=1" }).success, true);
   assert.equal(schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: null }).success, true);
-  const youtube = schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: "https://www.youtube.com/watch?v=abc" });
-  assert.equal(youtube.success, false);
+  // YouTube vale (qualquer formato de link); id invalido e link http nao valem.
+  assert.equal(schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: "https://youtu.be/dQw4w9WgXcQ" }).success, true);
+  assert.equal(schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: "https://www.youtube.com/watch?v=abc" }).success, false);
   assert.equal(schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: "http://cdn/hero.mp4" }).success, false);
+  assert.match(
+    schemas.setProductHeroVideoSchema.safeParse({ id: "curso-1", videoUrl: "https://vimeo.com/123" }).error.issues[0].message,
+    /YouTube ou um link direto/
+  );
+  // Tipo e opcoes do video, com os padroes preenchidos.
+  const yt = { hero: { mediaSrc: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", mediaType: "video", youtubeId: "dQw4w9WgXcQ", videoOptions: { autoplay: false, hideBranding: "sim" } } };
+  assert.equal(mappers.heroVideoKindOf(yt), "youtube");
+  assert.equal(mappers.heroVideoKindOf(video), "file");
+  assert.equal(mappers.heroVideoKindOf({ hero: { mediaSrc: "https://cdn/hero.webp", mediaType: "image" } }), null);
+  assert.deepEqual(mappers.heroVideoOptionsOf(yt), { autoplay: false, hideBranding: true, loop: true, nativeControls: false, pauseButton: false, soundButton: true });
 });

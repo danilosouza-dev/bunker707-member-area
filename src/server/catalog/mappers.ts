@@ -4,6 +4,7 @@
 // porque voltam na escrita seguinte como `expectedUpdatedAt` e precisam bater exatamente.
 
 import type { LessonVideoConfig, ReleaseRuleConfig } from "@/lib/platform-types";
+import { normalizeHeroVideoOptions } from "../../lib/hero-video";
 import { VIDEO_PROVIDER_LABELS } from "../../lib/video-detect";
 import { normalizeLessonVideoConfig } from "../../lib/video-embed";
 import {
@@ -155,8 +156,24 @@ function heroRecordOf(settings: ProductSettings | null | undefined) {
   const hero = settings?.hero;
 
   return hero && typeof hero === "object" && !Array.isArray(hero)
-    ? (hero as { mediaSrc?: unknown; mediaType?: unknown; poster?: unknown })
+    ? (hero as { mediaSrc?: unknown; mediaType?: unknown; poster?: unknown; videoOptions?: unknown; youtubeId?: unknown })
     : null;
+}
+
+/** Tipo do video de destaque: YouTube (id gravado) ou arquivo direto; null sem video. */
+export function heroVideoKindOf(settings: ProductSettings | null | undefined): "file" | "youtube" | null {
+  const hero = heroRecordOf(settings);
+
+  if (hero?.mediaType !== "video" || typeof hero.mediaSrc !== "string" || !hero.mediaSrc.trim()) {
+    return null;
+  }
+
+  return typeof hero.youtubeId === "string" && hero.youtubeId ? "youtube" : "file";
+}
+
+/** Opcoes do video de destaque com os padroes preenchidos. */
+export function heroVideoOptionsOf(settings: ProductSettings | null | undefined) {
+  return normalizeHeroVideoOptions(heroRecordOf(settings)?.videoOptions);
 }
 
 /** Imagem de destaque: a imagem do banner ou, quando o destaque e um video, a capa (poster) dele. */

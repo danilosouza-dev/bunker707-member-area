@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { HeroGlow } from "@/components/member/hero-glow";
+import { HeroVideo } from "@/components/hero-video";
+import { heroVideoPosterOf, heroVideoSourceOf } from "@/lib/hero-video";
 import { ContentStructureSection } from "@/components/content-structure-section";
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode, withAccessPreviewParam } from "@/lib/access-preview";
@@ -97,6 +99,8 @@ function getHeroConfig(item: ContentItem, settings: ContentPageSettings | undefi
     mediaType: heroSettings?.mediaType ?? "image",
     mediaSrc: heroSettings?.mediaSrc ?? item.image ?? homeHero.image,
     poster: heroSettings?.poster,
+    videoOptions: heroSettings?.videoOptions,
+    youtubeId: heroSettings?.youtubeId,
     badge: heroSettings?.badge ?? item.accessLabel ?? item.kind,
     title: heroSettings?.title ?? item.title,
     description: heroSettings?.description ?? item.description,
@@ -216,18 +220,15 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
       <div className="min-h-screen bg-[#141414]" data-member-banner={pageHero.corners === "inherit" ? undefined : pageHero.corners}>
         {/* Mesmos cantos e recuo do destaque da home (Marca > Estilo): no modo arredondado a capa fica como la. */}
         <div className="relative flow-root">
-        <HeroGlow src={pageHero.mediaType === "video" ? pageHero.poster ?? null : pageHero.mediaSrc ?? null} />
+        <HeroGlow src={pageHero.mediaType === "video" ? heroVideoPosterOf(pageHero) : pageHero.mediaSrc ?? null} />
         <section className="relative z-[1] min-h-[640px] overflow-hidden rounded-[var(--member-hero-radius)] mx-[var(--member-hero-inset)] mt-[var(--member-hero-top)]">
           {pageHero.mediaType === "video" ? (
-            <video
-              aria-hidden="true"
-              autoPlay
-              className="absolute inset-0 h-full w-full object-cover"
-              loop
-              muted
-              playsInline
-              poster={pageHero.poster}
-              src={pageHero.mediaSrc}
+            <HeroVideo
+              className="absolute inset-0"
+              controlsClassName="right-4 bottom-[max(1rem,calc(1rem_-_var(--member-page-overlap)))]"
+              options={pageHero.videoOptions}
+              poster={pageHero.poster ?? null}
+              source={heroVideoSourceOf(pageHero)}
             />
           ) : pageHero.mediaSrc ? (
             <Image

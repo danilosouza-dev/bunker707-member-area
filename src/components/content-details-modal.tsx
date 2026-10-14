@@ -3,8 +3,9 @@
 import { Bell, ChevronDown, ChevronUp, LockKeyhole, Play, ShoppingCart, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
+import { HeroVideo } from "@/components/hero-video";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { usePlatformLogoImage } from "@/components/platform-branding";
 import { SavedItemButton } from "@/components/saved-item-button";
@@ -15,6 +16,7 @@ import { getSavedTargetTypeForContentKind } from "@/lib/saved-items";
 import type { KeyboardEvent, ReactNode, Ref } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
+import { heroVideoSourceOf } from "@/lib/hero-video";
 import type { ContentItem, ContentModalStructure, CourseModule } from "@/lib/platform-types";
 
 type ContentDetailsModalProps = {
@@ -39,18 +41,6 @@ type ModulePreview = CourseModule;
 const MODULE_FOCUS_TRANSITION_ATTRIBUTE = "data-vt-module-focus";
 const MODULE_FOCUS_SCROLL_SHIFT_PROPERTY = "--vt-scroll-shift";
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-
-function subscribeToReducedMotion(onChange: () => void) {
-  const mediaQuery = window.matchMedia(REDUCED_MOTION_QUERY);
-
-  mediaQuery.addEventListener("change", onChange);
-
-  return () => mediaQuery.removeEventListener("change", onChange);
-}
-
-function getPrefersReducedMotion() {
-  return window.matchMedia(REDUCED_MOTION_QUERY).matches;
-}
 
 function getModuleCardTransitionName(moduleId: string) {
   return `module-card-${moduleId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -450,8 +440,6 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
   const modalScrollerRef = useRef<HTMLDivElement>(null);
   const moduleSectionHeaderRef = useRef<HTMLDivElement>(null);
   const isClosing = item ? closingItemId === item.id : false;
-  // Quem prefere menos movimento nao recebe o <video> do topo (nem o download dele): ve a capa parada.
-  const prefersReducedMotion = useSyncExternalStore(subscribeToReducedMotion, getPrefersReducedMotion, () => false);
 
   function handleClose() {
     if (!item || closingItemId === item.id) {
@@ -665,10 +653,10 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
   const itemHref = withAccessPreviewParam(`/conteudo/${item.id}`, accessPreviewMode);
   // Midia do topo: "Imagem de destaque" (ou video de destaque + capa) do produto; sem ela, a capa do card, como antes.
   const heroMedia = structure?.media;
-  const heroPoster = (heroMedia?.mediaType === "video" ? heroMedia.poster : undefined) || item.image;
+  const heroVideo = heroMedia?.mediaType === "video" ? heroMedia : null;
+  // Capa do video: a imagem de destaque; sem ela, YouTube escolhe a propria miniatura e arquivo usa a capa do card.
+  const heroPoster = heroVideo ? heroVideo.poster ?? (heroVideo.youtubeId ? null : item.image) : null;
   const heroImageSrc = heroMedia?.mediaType === "image" ? heroMedia.mediaSrc : item.image;
-  const showHeroVideo = heroMedia?.mediaType === "video" && !prefersReducedMotion;
-  const heroStillSrc = heroMedia?.mediaType === "video" ? heroPoster : heroImageSrc;
 
   function handlePrimaryAction() {
     const currentItem = item;
@@ -790,22 +778,19 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
           className="relative min-h-[420px] overflow-hidden sm:min-h-[520px] lg:min-h-[560px]"
           style={{ viewTransitionName: "modal-hero-media" }}
         >
-          {showHeroVideo && heroMedia ? (
-            /* Video de destaque: toca sem som e em repeticao, com a imagem de destaque como capa. */
-            <video
-              aria-hidden="true"
-              autoPlay
-              className="modal-hero-image-in absolute inset-0 h-full w-full object-cover"
-              loop
-              muted
-              playsInline
+          {heroVideo ? (
+            /* Video de destaque (arquivo ou YouTube), com as opcoes escolhidas pelo produtor e a capa por baixo. */
+            <HeroVideo
+              className="modal-hero-image-in absolute inset-0"
+              controlsClassName="right-4 bottom-4 max-sm:bottom-auto max-sm:top-[4.5rem]"
+              options={heroVideo.videoOptions}
               poster={heroPoster}
-              src={heroMedia.mediaSrc}
+              source={heroVideoSourceOf(heroVideo)}
             />
           ) : (
             <div
               className="modal-hero-image-in absolute inset-0 bg-cover bg-center"
-              style={{ backgroundImage: cssImageUrl(heroStillSrc) }}
+              style={{ backgroundImage: cssImageUrl(heroImageSrc) }}
             />
           )}
           <div className="absolute inset-0 bg-black/16" />

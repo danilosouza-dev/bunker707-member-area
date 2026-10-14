@@ -6,17 +6,19 @@ import { CourseModulesHomeSection, ContentRow } from "@/components/content-row";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
-import type { ContentModalMedia, HomeRow } from "@/lib/platform-types";
+import type { ContentModalMedia, ContentModalStructure, HomeRow } from "@/lib/platform-types";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 
 type FeaturedStructureHomeSectionProps = {
   accessPreviewMode?: AccessPreviewMode;
   /** Midia do topo do modal do curso (imagem ou video de destaque), a mesma das outras fileiras da home. */
   media?: ContentModalMedia;
+  /** Estruturas do modal (modulos e midia) dos cursos internos listados nesta fileira. */
+  modalStructures?: Record<string, ContentModalStructure>;
   row: HomeRow;
 };
 
-export function FeaturedStructureHomeSection({ accessPreviewMode, media, row }: FeaturedStructureHomeSectionProps) {
+export function FeaturedStructureHomeSection({ accessPreviewMode, media, modalStructures, row }: FeaturedStructureHomeSectionProps) {
   const course = row.course;
   const modules = row.modules ?? [];
   const structureItems = row.structureItems ?? [];
@@ -46,6 +48,7 @@ export function FeaturedStructureHomeSection({ accessPreviewMode, media, row }: 
       <ContentRow
         accessPreviewMode={accessPreviewMode}
         items={structureItems}
+        modalStructures={modalStructures}
         subtitle={row.subtitle}
         title={row.title}
         variant="vertical"

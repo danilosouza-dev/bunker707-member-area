@@ -1,5 +1,6 @@
 "use client";
 
+import { Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -7,12 +8,13 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { CONFLICT_MESSAGE } from "@/server/catalog/errors";
 import { PRODUCT_FORMAT_LABELS, type ProductFormat } from "@/server/catalog/model";
-import { setProductHeroCorners, setProductHeroVideo, setProductImage, updateProductDetails } from "@/server/catalog/product-actions";
+import type { HeroVideoOptions } from "@/lib/platform-types";
+import { setProductHeroCorners, setProductHeroVideo, setProductHeroVideoOptions, setProductImage, updateProductDetails } from "@/server/catalog/product-actions";
 import { shortDescriptionSchema, updateProductDetailsSchema } from "@/server/catalog/schemas";
 import type { ProductDetails, ProductHeroCorners } from "@/server/catalog/types";
 import type { HomeModuleRowState } from "@/server/member-area/modules-model";
 import { ErrorBanner } from "../error-banner";
-import { AdminField, PillGroup, adminInputClass, adminTextareaClass, fieldDescribedBy } from "../form";
+import { AdminField, PillGroup, adminInputClass, adminPillClasses, adminTextareaClass, fieldDescribedBy } from "../form";
 import { HomeRowControl } from "../member-area/modules/home-row-control";
 import { SaveBar } from "../save-bar";
 import { adminToast } from "../toast";
@@ -49,6 +51,37 @@ import { useWarnBeforeUnload } from "./use-warn-before-unload";
 const DESCRIPTION_LIMIT = 300;
 
 type ImageSlot = "cover" | "hero";
+type VideoOptionKey = keyof Required<HeroVideoOptions>;
+
+const VIDEO_OPTION_PILLS: ReadonlyArray<{ key: VideoOptionKey; label: string; youtubeOnly?: boolean }> = [
+  { key: "autoplay", label: "Tocar sozinho (sem som)" },
+  { key: "loop", label: "Repetir" },
+  { key: "soundButton", label: "Botão de som" },
+  { key: "pauseButton", label: "Botão de pausar" },
+  { key: "hideBranding", label: "Esconder logo e título do YouTube", youtubeOnly: true }
+];
+
+const VIDEO_OPTIONS_HINTS = {
+  file: "Os botões de som e pausar aparecem no canto do vídeo. Sem \"tocar sozinho\", o aluno vê a capa com um botão de tocar.",
+  youtube:
+    "Esconder a logo recorta um pouco as bordas do vídeo e bloqueia o clique sobre ele; som e pausa ficam pelos nossos botões. É um recorte visual, fora das regras do player incorporado do YouTube, e não um recurso oficial: se o player mudar ou você preferir seguir as regras à risca, desligue a opção."
+};
+
+function OptionPill({ checked, disabled, label, onChange }: { checked: boolean; disabled?: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <label
+      className={cn(
+        adminPillClasses(checked),
+        "has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-[var(--focus-ring)]",
+        disabled && "cursor-not-allowed opacity-60"
+      )}
+    >
+      <input checked={checked} className="sr-only" disabled={disabled} onChange={(event) => onChange(event.target.checked)} type="checkbox" />
+      {checked ? <Check aria-hidden="true" className="size-4 shrink-0" /> : null}
+      {label}
+    </label>
+  );
+}
 
 /** Cantos do banner da pagina do produto (salva na hora). "Como a área" segue Marca > Estilo. */
 const HERO_CORNERS_OPTIONS: ReadonlyArray<{ label: string; value: ProductHeroCorners }> = [
@@ -98,6 +131,10 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
   const [heroUrl, setHeroUrl] = useState(details.heroUrl);
   const [heroCorners, setHeroCorners] = useState<ProductHeroCorners>(details.heroCorners);
   const [heroVideoUrl, setHeroVideoUrl] = useState(details.heroVideoUrl);
+  const [heroVideoKind, setHeroVideoKind] = useState(details.heroVideoKind);
+  const [videoOptions, setVideoOptions] = useState(details.heroVideoOptions);
+  const [optionsPending, setOptionsPending] = useState(false);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
   const [videoDraft, setVideoDraft] = useState(details.heroVideoUrl ?? "");
   const [videoPending, setVideoPending] = useState(false);
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -134,6 +171,11 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
       }
 
       setHeroVideoUrl(details.heroVideoUrl);
+      setHeroVideoKind(details.heroVideoKind);
+    }
+
+    if (!optionsPending) {
+      setVideoOptions(details.heroVideoOptions);
     }
   }
 
@@ -266,8 +308,33 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
     }
 
     setHeroVideoUrl(result.data.videoUrl);
+    setHeroVideoKind(result.data.videoKind);
     setVideoDraft(result.data.videoUrl ?? "");
     adminToast.success(result.data.videoUrl ? "Vídeo de destaque salvo" : "Vídeo de destaque removido");
+  }
+
+  // Opcoes do video: cada pilula salva na hora; erro volta a escolha anterior.
+  async function saveVideoOption(key: VideoOptionKey, checked: boolean) {
+    if (readOnly || optionsPending) {
+      return;
+    }
+
+    const previous = videoOptions;
+    const next = { ...videoOptions, [key]: checked };
+
+    setVideoOptions(next);
+    setOptionsPending(true);
+    setOptionsError(null);
+    const result = await setProductHeroVideoOptions({ id: header.id, options: next });
+    setOptionsPending(false);
+
+    if (!result.ok) {
+      setVideoOptions(previous);
+      setOptionsError(result.error);
+      return;
+    }
+
+    setVideoOptions(result.data.options);
   }
 
   // Cantos do banner: salva na hora, como as imagens. Erro volta a escolha anterior.
@@ -440,8 +507,8 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
         error={videoError}
         hint={
           heroVideoUrl
-            ? "Visível para todos os alunos, inclusive quem ainda não comprou. Toca sem som e em repetição na página do produto e no topo do modal da home; a imagem de destaque é a capa."
-            : "Link direto do arquivo (.mp4, .webm ou .mov), por exemplo do Bunny Stream. Fica visível para todos os alunos, inclusive quem não comprou: use um trailer, nunca uma aula, e um link permanente, sem token temporário. Toca sem som e em repetição; a imagem de destaque vira a capa."
+            ? "Visível para todos os alunos, inclusive quem ainda não comprou. Toca no topo do modal da home e na página do produto; a imagem de destaque é a capa (no YouTube, sem imagem, usa a miniatura do vídeo)."
+            : "Link do YouTube ou link direto do arquivo (.mp4, .webm ou .mov), por exemplo do Bunny Stream. Fica visível para todos os alunos, inclusive quem não comprou: use um trailer, nunca uma aula. Por padrão toca sozinho, sem som e em repetição; dá para mudar nas opções depois de salvar. A imagem de destaque vira a capa."
         }
         id="detalhes-video-destaque"
         label="Vídeo de destaque"
@@ -464,7 +531,7 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
                 void saveHeroVideo(videoDraft);
               }
             }}
-            placeholder="https://…/video.mp4"
+            placeholder="https://youtube.com/watch?v=… ou https://…/video.mp4"
             value={videoDraft}
           />
           {!readOnly ? (
@@ -487,6 +554,30 @@ export function ProductDetailsForm({ canWriteStorefront = false, details, homeMo
           ) : null}
         </div>
       </AdminField>
+
+      {heroVideoUrl ? (
+        <fieldset className="flex min-w-0 flex-col gap-2">
+          <FieldLegend>Opções do vídeo</FieldLegend>
+          <div className="flex min-w-0 flex-wrap gap-2">
+            {VIDEO_OPTION_PILLS.filter((pill) => !pill.youtubeOnly || heroVideoKind === "youtube").map((pill) => (
+              <OptionPill
+                checked={videoOptions[pill.key]}
+                disabled={readOnly || optionsPending}
+                key={pill.key}
+                label={pill.label}
+                onChange={(checked) => void saveVideoOption(pill.key, checked)}
+              />
+            ))}
+          </div>
+          {optionsError ? (
+            <FieldError>{optionsError}</FieldError>
+          ) : (
+            <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
+              {heroVideoKind === "youtube" ? VIDEO_OPTIONS_HINTS.youtube : VIDEO_OPTIONS_HINTS.file}
+            </p>
+          )}
+        </fieldset>
+      ) : null}
 
       <fieldset className="flex min-w-0 flex-col gap-2">
         <FieldLegend>Cantos do banner</FieldLegend>

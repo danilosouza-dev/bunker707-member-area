@@ -1,4 +1,5 @@
 import { MEMBER_STYLE_DEFAULTS, normalizeMemberStyle, type MemberStyleConfig } from "@/lib/member-style";
+import { heroVideoPosterOf } from "@/lib/hero-video";
 import "server-only";
 import { redactSecrets } from "@/lib/env-value";
 
@@ -2242,7 +2243,7 @@ function resolveConfiguredHomeRows(
 
 /** Imagem que representa o destaque do produto: a propria imagem ou, quando e um video, a capa (poster). */
 function getHeroImageSrc(hero: ContentPageHeroConfig | undefined): string | undefined {
-  const source = hero?.mediaType === "video" ? hero.poster : hero?.mediaSrc;
+  const source = hero?.mediaType === "video" ? heroVideoPosterOf(hero) : hero?.mediaSrc;
 
   return typeof source === "string" && source.trim() ? source.trim() : undefined;
 }
@@ -2258,7 +2259,13 @@ function getContentModalMedia(hero: ContentPageHeroConfig | undefined): ContentM
   if (hero.mediaType === "video") {
     const poster = typeof hero.poster === "string" && hero.poster.trim() ? hero.poster.trim() : undefined;
 
-    return poster ? { mediaSrc, mediaType: "video", poster } : { mediaSrc, mediaType: "video" };
+    return {
+      mediaSrc,
+      mediaType: "video",
+      ...(poster ? { poster } : {}),
+      ...(typeof hero.youtubeId === "string" && hero.youtubeId ? { youtubeId: hero.youtubeId } : {}),
+      ...(hero.videoOptions ? { videoOptions: hero.videoOptions } : {})
+    };
   }
 
   return { mediaSrc, mediaType: "image" };
@@ -2271,7 +2278,8 @@ function getHomeModalStructures(
   user: AuthenticatedUser | string | undefined,
   release: MemberReleaseContext
 ): Record<string, ContentModalStructure> {
-  const items = rows.flatMap((row) => row.items);
+  // Inclui os cursos internos da fileira de modulos (structureItems): eles tambem abrem o modal.
+  const items = rows.flatMap((row) => [...row.items, ...(row.structureItems ?? [])]);
   const uniqueItems = new Map(items.map((item) => [item.id, item]));
   const { userId } = getUserIdentity(user);
   const savedItems = getSavedItemSet(database, userId);
@@ -3717,7 +3725,7 @@ export async function upsertContentItem(input: ContentWriteInput) {
     } else {
       // Imagem vazia tira so a midia: cantos, textos e visibilidade do banner ficam como estavam.
       const heroRest = Object.fromEntries(
-        Object.entries(currentSettings.hero ?? {}).filter(([key]) => key !== "mediaSrc" && key !== "mediaType" && key !== "poster")
+        Object.entries(currentSettings.hero ?? {}).filter(([key]) => !["mediaSrc", "mediaType", "poster", "youtubeId", "videoOptions"].includes(key))
       );
       const remainingSettings = { ...currentSettings };
 

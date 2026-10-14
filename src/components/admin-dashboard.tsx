@@ -87,6 +87,7 @@ import { LoginExperience } from "@/components/login-experience";
 import { MemberFooter } from "@/components/member-footer";
 import { PlatformBrandingProvider } from "@/components/platform-branding";
 import { PurchasesExperience } from "@/components/purchases-experience";
+import { heroVideoPosterOf } from "@/lib/hero-video";
 import { getLoginPageConfig, loginTemplateOptions } from "@/lib/login-config";
 import type { LoginPageConfig, LoginTemplateId } from "@/lib/login-config";
 import {
@@ -3601,7 +3602,7 @@ function PersonalizationView({
               contentEditorPanel === "page" ? "outline outline-1 outline-white/20" : "outline outline-1 outline-transparent"
             }`}
           >
-            {pageHero.mediaType === "video" ? (
+            {pageHero.mediaType === "video" && !heroSettings?.youtubeId ? (
               <video
                 aria-hidden="true"
                 autoPlay
@@ -3613,9 +3614,10 @@ function PersonalizationView({
                 src={pageHero.mediaSrc}
               />
             ) : (
+              // Video do YouTube: a previa do admin legado mostra so a capa (ou a miniatura do video).
               <div
                 className="absolute inset-0 bg-cover bg-center"
-                style={{ backgroundImage: `url(${pageHero.mediaSrc})` }}
+                style={{ backgroundImage: `url(${heroSettings?.youtubeId ? heroVideoPosterOf(heroSettings, selectedRecord.content.image) : pageHero.mediaSrc})` }}
               />
             )}
             {hasVisibleHeroContent ? (

@@ -580,7 +580,7 @@ Campos planejados/adicionados ao item educacional:
 - purchase_target: same_tab ou new_tab;
 - release_rule: regra de entrega/publicacao.
 - cover_url/image: capa vertical enviada pelo produtor, preferencialmente em 720 x 1040 px nesta fase;
-- hero media opcional via `content_page_settings.hero`, com tamanho definido de 1920 x 720 px para pagina propria do curso/produto; desde 14/10/2026 o mesmo `hero` aceita `mediaType: "video"` com `mediaSrc` = link direto do arquivo (.mp4/.webm/.mov) e `poster` = a imagem de destaque, e o modal da home usa essa mesma midia no topo.
+- hero media opcional via `content_page_settings.hero`, com tamanho definido de 1920 x 720 px para pagina propria do curso/produto; desde 14/10/2026 o mesmo `hero` aceita `mediaType: "video"` com `mediaSrc` = link direto do arquivo (.mp4/.webm/.mov) ou link canonico do YouTube (nesse caso com `youtubeId`), `poster` = a imagem de destaque e `videoOptions` = { autoplay, loop, soundButton, pauseButton, hideBranding, nativeControls } (ausentes = padroes em src/lib/hero-video.ts); o modal da home usa essa mesma midia no topo.
 - coursePresentationMode em `content_page_settings`: `module_cards` para curso com cards de modulos ou `lesson_playlist` para `Card unico`.
 - homeModuleSection em `content_page_settings`: quando `enabled`, a home do aluno pode mostrar o nome do curso, capa pequena e os modulos desse curso como secao propria.
 - lockedActionMode em `content_page_settings`: `details_modal` para abrir modal em conteudo sem acesso ou `external_link` para abrir o link externo de compra configurado em `purchase_url`.

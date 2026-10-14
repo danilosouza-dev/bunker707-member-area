@@ -222,7 +222,7 @@ test("cor em Detalhes muda so a chave accent, sem regravar o JSON inteiro", asyn
  * Video de destaque (topo do modal e banner do produto)
  * ---------------------------------------------------------------------------------------------- */
 
-const { setProductHeroVideo, setProductImage } = await import("../src/server/catalog/product-actions.ts");
+const { setProductHeroVideo, setProductHeroVideoOptions, setProductImage } = await import("../src/server/catalog/product-actions.ts");
 
 const HIDDEN_TEXTS = { badge: false, cta: false, description: false, title: false };
 
@@ -274,11 +274,36 @@ test("video de destaque: salvar guarda o link como video e a imagem vira capa; r
     hero: { corners: "rounded", mediaSrc: "https://cdn/destaque.webp", mediaType: "image", visibility: HIDDEN_TEXTS }
   });
 
-  // Link que nao e arquivo direto e recusado no campo, antes de tocar no banco.
+  // YouTube: guarda o id e o link canonico; a imagem continua como capa.
+  db = heroDb({ mediaSrc: "https://cdn/destaque.webp", mediaType: "image" });
+  result = await setProductHeroVideo({ id: COURSE.id, videoUrl: "https://youtu.be/dQw4w9WgXcQ?t=10" });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.videoKind, "youtube");
+  assert.equal(result.data.videoUrl, "https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  assert.deepEqual(heroPatch(db).p_set.hero, {
+    mediaSrc: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    mediaType: "video",
+    poster: "https://cdn/destaque.webp",
+    visibility: HIDDEN_TEXTS,
+    youtubeId: "dQw4w9WgXcQ"
+  });
+
+  // Opcoes: gravadas completas na chave videoOptions, sem mexer no resto do hero.
+  db = heroDb({ mediaSrc: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", mediaType: "video", youtubeId: "dQw4w9WgXcQ", corners: "rounded" });
+  const optionsResult = await setProductHeroVideoOptions({
+    id: COURSE.id,
+    options: { autoplay: false, hideBranding: true, loop: false, nativeControls: false, pauseButton: true, soundButton: true }
+  });
+  assert.equal(optionsResult.ok, true, JSON.stringify(optionsResult));
+  assert.deepEqual(heroPatch(db).p_set.hero.videoOptions, { autoplay: false, hideBranding: true, loop: false, nativeControls: false, pauseButton: true, soundButton: true });
+  assert.equal(heroPatch(db).p_set.hero.corners, "rounded");
+  assert.equal(heroPatch(db).p_set.hero.youtubeId, "dQw4w9WgXcQ");
+
+  // Link que nao e YouTube nem arquivo direto e recusado no campo, antes de tocar no banco.
   db = heroDb(undefined);
-  result = await setProductHeroVideo({ id: COURSE.id, videoUrl: "https://www.youtube.com/watch?v=abc" });
+  result = await setProductHeroVideo({ id: COURSE.id, videoUrl: "https://vimeo.com/123456" });
   assert.equal(result.ok, false);
-  assert.match(result.fieldErrors?.videoUrl?.[0] ?? "", /\.mp4, \.webm ou \.mov/);
+  assert.match(result.fieldErrors?.videoUrl?.[0] ?? "", /YouTube ou um link direto/);
   assert.equal(db.calls.rpc.length, 0);
 });
 
@@ -311,6 +336,58 @@ test("video de destaque: remover sem imagem apaga a chave; tirar a imagem preser
 
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(heroPatch(db).p_unset, ["hero"]);
+});
+
+test("video de destaque: trocar YouTube por arquivo tira o youtubeId; remover tira as opcoes; a imagem nao mexe nos dois", async () => {
+  const OPTS = { autoplay: false, hideBranding: true, loop: false, nativeControls: false, pauseButton: true, soundButton: true };
+  const YT = {
+    corners: "rounded",
+    mediaSrc: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    mediaType: "video",
+    poster: "https://cdn/capa.webp",
+    videoOptions: OPTS,
+    visibility: HIDDEN_TEXTS,
+    youtubeId: "dQw4w9WgXcQ"
+  };
+
+  // YouTube -> arquivo: sai o youtubeId; capa, cantos e opcoes ficam.
+  let db = heroDb(YT);
+  let result = await setProductHeroVideo({ id: COURSE.id, videoUrl: "https://cdn/trailer.mp4" });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.videoKind, "file");
+  assert.deepEqual(heroPatch(db).p_set.hero, {
+    corners: "rounded",
+    mediaSrc: "https://cdn/trailer.mp4",
+    mediaType: "video",
+    poster: "https://cdn/capa.webp",
+    videoOptions: OPTS,
+    visibility: HIDDEN_TEXTS
+  });
+
+  // Remover o video: a capa volta a ser a imagem; youtubeId e opcoes somem; cantos ficam.
+  db = heroDb(YT);
+  result = await setProductHeroVideo({ id: COURSE.id, videoUrl: null });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(heroPatch(db).p_set.hero, { corners: "rounded", mediaSrc: "https://cdn/capa.webp", mediaType: "image", visibility: HIDDEN_TEXTS });
+
+  // Tirar a imagem com YouTube: so a capa sai; youtubeId e opcoes continuam.
+  db = heroDb(YT);
+  result = await setProductImage({ id: COURSE.id, image: null, slot: "hero" });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(heroPatch(db).p_set.hero, {
+    corners: "rounded",
+    mediaSrc: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    mediaType: "video",
+    videoOptions: OPTS,
+    visibility: HIDDEN_TEXTS,
+    youtubeId: "dQw4w9WgXcQ"
+  });
+
+  // Codigo <iframe> colado recebe a mensagem generica, nao "comece com https://".
+  db = heroDb(undefined);
+  result = await setProductHeroVideo({ id: COURSE.id, videoUrl: '<iframe src="https://player.vimeo.com/video/123"></iframe>' });
+  assert.equal(result.ok, false);
+  assert.match(result.fieldErrors?.videoUrl?.[0] ?? "", /YouTube ou um link direto/);
 });
 
 /* ------------------------------------------------------------------------------------------------
