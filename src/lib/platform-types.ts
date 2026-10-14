@@ -261,8 +261,10 @@ export type ContentPageHeroConfig = {
 
 /** Como o video de destaque se comporta; cada chave ausente usa o padrao. */
 export type HeroVideoOptions = {
-  /** Toca sozinho, sem som, ao abrir. Desligado: capa com botao de tocar. */
+  /** Toca sozinho ao abrir. Desligado: capa com botao de tocar. */
   autoplay?: boolean;
+  /** Tenta comecar com som no autoplay; se o navegador bloquear, recomeca sem som. */
+  startWithSound?: boolean;
   /** YouTube: recorta as bordas e bloqueia o mouse para a logo e o titulo nao aparecerem. */
   hideBranding?: boolean;
   loop?: boolean;

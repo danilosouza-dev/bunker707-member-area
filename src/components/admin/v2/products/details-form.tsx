@@ -54,7 +54,8 @@ type ImageSlot = "cover" | "hero";
 type VideoOptionKey = keyof Required<HeroVideoOptions>;
 
 const VIDEO_OPTION_PILLS: ReadonlyArray<{ key: VideoOptionKey; label: string; youtubeOnly?: boolean }> = [
-  { key: "autoplay", label: "Tocar sozinho (sem som)" },
+  { key: "autoplay", label: "Tocar sozinho" },
+  { key: "startWithSound", label: "Começar com som" },
   { key: "loop", label: "Repetir" },
   { key: "soundButton", label: "Botão de som" },
   { key: "volumeSlider", label: "Controle de volume" },
@@ -64,9 +65,9 @@ const VIDEO_OPTION_PILLS: ReadonlyArray<{ key: VideoOptionKey; label: string; yo
 ];
 
 const VIDEO_OPTIONS_HINTS = {
-  file: "Os controles escolhidos (som, volume, pausar, linha do tempo) aparecem num grupo no canto do vídeo. Sem \"tocar sozinho\", o aluno vê a capa com um botão de tocar.",
+  file: "Os controles escolhidos (som, volume, pausar, linha do tempo) aparecem num grupo no canto do vídeo. Sem \"tocar sozinho\", o aluno vê a capa com um botão de tocar. \"Começar com som\" depende do navegador: funciona quando o aluno já clicou na página (como ao abrir o modal); se for bloqueado, começa sem som e o botão de som fica disponível. Em celulares costuma ser bloqueado.",
   youtube:
-    "Os controles escolhidos (som, volume, pausar, linha do tempo) aparecem num grupo no canto do vídeo. Esconder a logo recorta um pouco as bordas do vídeo e bloqueia o clique sobre ele; os controles ficam todos pelos nossos botões. Ao pular na linha do tempo, o YouTube mostra por um instante os próprios botões no centro. É um recorte visual, fora das regras do player incorporado do YouTube, e não um recurso oficial: se o player mudar ou você preferir seguir as regras à risca, desligue a opção."
+    "Os controles escolhidos (som, volume, pausar, linha do tempo) aparecem num grupo no canto do vídeo. \"Começar com som\" depende do navegador: funciona quando o aluno já clicou na página (como ao abrir o modal); se for bloqueado, recomeça sem som. Esconder a logo recorta um pouco as bordas do vídeo e bloqueia o clique sobre ele; os controles ficam todos pelos nossos botões. Ao pular na linha do tempo, o YouTube mostra por um instante os próprios botões no centro. É um recorte visual, fora das regras do player incorporado do YouTube, e não um recurso oficial: se o player mudar ou você preferir seguir as regras à risca, desligue a opção."
 };
 
 function OptionPill({ checked, disabled, label, onChange }: { checked: boolean; disabled?: boolean; label: string; onChange: (checked: boolean) => void }) {

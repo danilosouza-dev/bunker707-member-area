@@ -249,6 +249,7 @@ export const setProductHeroVideoOptionsSchema = z.object({
     nativeControls: z.boolean(),
     pauseButton: z.boolean(),
     soundButton: z.boolean(),
+    startWithSound: z.boolean(),
     timeline: z.boolean(),
     volumeSlider: z.boolean()
   })

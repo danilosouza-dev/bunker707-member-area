@@ -241,8 +241,9 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
   const [startedByClick, setStartedByClick] = useState(false);
   // O som comeca ligado so quando a pessoa clicou para tocar (gesto dela); no autoplay, sempre mudo.
   // Fica separado de `muted` para o src do iframe nao mudar (e recarregar) a cada toque no botao de som.
-  const [startMuted, setStartMuted] = useState(true);
-  const [muted, setMuted] = useState(true);
+  // Tentativa de comecar com som recusada pelo navegador: a partir dai o player recomeca sem som.
+  const [soundAttemptFailed, setSoundAttemptFailed] = useState(false);
+  const [muted, setMuted] = useState(!settings.startWithSound);
   const [volume, setVolume] = useState(100);
   const [paused, setPaused] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -261,12 +262,14 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   // O que a pessoa pediu (som/pausa) enquanto o player ainda nao estava pronto para receber comandos.
-  const desiredRef = useRef({ muted: true, paused: false });
+  const desiredRef = useRef({ muted: !settings.startWithSound, paused: false });
   const youtubeReadyRef = useRef(false);
   // Ate quando ignorar som/volume reportados pelo player, logo depois de um ajuste feito por aqui.
   const localControlUntilRef = useRef(0);
 
   const autoStart = settings.autoplay && !prefersReducedMotion;
+  // Com som desde o inicio quando a pessoa clicou (gesto dela) ou quando o produtor pediu e o navegador deixou.
+  const startMuted = !(startedByClick || (settings.startWithSound && !soundAttemptFailed));
   const playerActive = mounted && !ended && !playerFailed && (autoStart || startedByClick);
   const youtube = source.kind === "youtube";
   const youtubeId = youtube ? source.id : null;
@@ -358,6 +361,10 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
     setYoutubePhase("loading");
     setRevealed(false);
 
+    // Tentativa de autoplay com som (pedida pelo produtor, sem gesto da pessoa): se o navegador recusar,
+    // o player recarrega sem som antes de pedir toque. startMuted muda o src, entao este efeito reinicia.
+    const triedWithSound = !startMuted && !startedByClick;
+
     let gotMessage = false;
     let handshakeTries = 0;
     let handshakeTimer: ReturnType<typeof setInterval> | null = null;
@@ -429,6 +436,13 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
 
         if (!desiredRef.current.paused && !blockedTimer) {
           blockedTimer = setTimeout(() => {
+            if (triedWithSound) {
+              desiredRef.current.muted = true;
+              setMuted(true);
+              setSoundAttemptFailed(true);
+              return;
+            }
+
             setYoutubePhase((current) => (current === "ready" ? "blocked" : current));
             setRevealed(true);
           }, AUTOPLAY_WAIT_MS);
@@ -506,6 +520,12 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
 
     let cancelled = false;
 
+    const markBlocked = () => {
+      if (!cancelled) {
+        setFileBlocked(true);
+      }
+    };
+
     video.play().then(
       () => {
         if (!cancelled) {
@@ -513,16 +533,32 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
         }
       },
       () => {
-        if (!cancelled) {
-          setFileBlocked(true);
+        if (cancelled) {
+          return;
         }
+
+        if (!video.muted && !startedByClick) {
+          // Som recusado pelo navegador: recomeca sem som (o botao de som continua disponivel).
+          video.muted = true;
+          desiredRef.current.muted = true;
+          setMuted(true);
+          setSoundAttemptFailed(true);
+          video.play().then(() => {
+            if (!cancelled) {
+              setFileBlocked(false);
+            }
+          }, markBlocked);
+          return;
+        }
+
+        markBlocked();
       }
     );
 
     return () => {
       cancelled = true;
     };
-  }, [youtube, playerActive, source]);
+  }, [youtube, playerActive, source, startedByClick]);
 
   // Ao tocar pelo teclado o botao de tocar some; o foco segue para o primeiro controle (som/pausa) ou para o topo.
   useEffect(() => {
@@ -539,7 +575,6 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
     const video = videoRef.current;
 
     desiredRef.current = { muted: false, paused: false };
-    setStartMuted(false);
     setMuted(false);
     setPaused(false);
     setEnded(false);
