@@ -65,12 +65,8 @@ export function ProductHeaderBar() {
   // Abas conforme as permissoes (o Professor fica so com Conteudo, e entao a barra de abas some).
   const tabs = [
     { href: base, label: header.format === "formacao" ? "Cursos" : "Conteúdo" },
-    ...(capabilities.canSeeSettings
-      ? [
-          { href: `${base}/detalhes`, label: "Detalhes" },
-          { href: `${base}/acesso`, label: "Acesso e venda" }
-        ]
-      : []),
+    ...(capabilities.canSeeDetails ? [{ href: `${base}/detalhes`, label: "Detalhes" }] : []),
+    ...(capabilities.canSeeAccess ? [{ href: `${base}/acesso`, label: "Acesso e venda" }] : []),
     ...(capabilities.canSeeStudents ? [{ href: `${base}/alunos`, label: "Alunos" }] : []),
     ...(capabilities.canSeePerformance ? [{ href: `${base}/desempenho`, label: "Desempenho" }] : [])
   ];

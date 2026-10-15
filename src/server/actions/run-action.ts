@@ -17,8 +17,8 @@ export type AdminActionContext<Input> = {
 
 export type AdminActionOptions<Input> = {
   /**
-   * Em que curso a acao mexe (produto, modulo, aula ou comentario), conferido para quem tem acesso so
-   * a alguns cursos; "any" = a acao nao toca dado de curso. Sem `target`, essa pessoa e recusada.
+   * Em que curso a acao mexe (produto, modulo, aula ou comentario), conferido para quem tem a acao so
+   * nos cursos dela; "any" = a acao nao toca curso existente. Sem `target`, essa pessoa e recusada.
    */
   target?: (input: Input) => ScopeTarget;
 };
@@ -27,7 +27,7 @@ export type AdminActionOptions<Input> = {
  * Esqueleto unico das Server Actions do admin:
  * 1. requireRole(action) (401/403 viram ActionFailure);
  * 2. schema.parse(rawInput) (erros viram 400 com fieldErrors);
- * 3. requireScope(access, options.target(input)) para quem tem acesso so a alguns cursos;
+ * 3. requireScope(access, action, options.target(input)) quando a pessoa tem a acao so nos cursos dela;
  * 4. handler; qualquer erro vira ActionFailure via toActionError (nunca lanca para o cliente).
  *
  * Invalidacao de cache e responsabilidade do handler (ex.: invalidateCatalog({ from: "action" })),
@@ -49,7 +49,7 @@ export async function runAdminAction<Input, Output>(
     const { access, role, user } = await requireRole(action);
     const input = schema.parse(rawInput);
 
-    await requireScope(access, options.target?.(input));
+    await requireScope(access, action, options.target?.(input));
 
     return actionOk(await handler({ access, input, role, user }));
   } catch (error) {

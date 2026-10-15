@@ -7,7 +7,7 @@ import { formatAdminRole } from "@/components/admin/v2/format";
 import { ADMIN_SIDEBAR_COOKIE, type AdminNavCounts } from "@/components/admin/v2/nav";
 import { readTodayAlertSummary } from "@/server/admin/today";
 import { requirePageAdmin } from "@/server/auth/guards";
-import { toAccessSnapshot, type AdminAccess } from "@/server/auth/roles";
+import { catalogScope, communityScope, toAccessSnapshot, type AdminAccess } from "@/server/auth/roles";
 import { getUserDisplayName } from "@/server/auth/session";
 import { PRODUCT_ACCENTS } from "@/server/catalog/model";
 import { listProductOptions } from "@/server/catalog/queries";
@@ -31,12 +31,9 @@ export const metadata: Metadata = {
 export default async function AdminV2Layout({ children }: { children: ReactNode }) {
   const { access, role, user } = await requirePageAdmin();
   const { fullName } = getUserDisplayName(user);
-  // Contadores valem para a escola toda: quem tem acesso so a alguns cursos nao os ve.
-  const [counts, products, cookieStore] = await Promise.all([
-    access.productIds === null ? readNavCounts() : Promise.resolve({}),
-    readProductFilterOptions(access),
-    cookies()
-  ]);
+  // Contadores valem para a escola toda: a Comunidade de quem responde so nos proprios cursos nao conta.
+  const [allCounts, products, cookieStore] = await Promise.all([readNavCounts(), readProductFilterOptions(access), cookies()]);
+  const counts = communityScope(access) === null ? allCounts : { ...allCounts, comunidade: undefined };
   const sidebarCollapsed = cookieStore.get(ADMIN_SIDEBAR_COOKIE)?.value === "collapsed";
 
   return (
@@ -77,12 +74,12 @@ async function readNavCounts(): Promise<AdminNavCounts> {
 
 /**
  * Opcoes do filtro Produto (nome e cor). Sem catalogo legivel, o filtro mostra so "Todos os produtos".
- * Professor: so os cursos dele.
+ * Quem ve so os proprios cursos (Professor): so os dele.
  */
 async function readProductFilterOptions(access: AdminAccess): Promise<AdminFilterProduct[]> {
   try {
     const options = await listProductOptions();
-    const allowed = access.productIds;
+    const allowed = catalogScope(access);
 
     return options
       .filter((option) => allowed === null || allowed.includes(option.id))

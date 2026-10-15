@@ -149,11 +149,11 @@ test("data relativa da coluna Atualizado", () => {
   assert.equal(combos.formatRelativeDate("ontem", now), "—");
 });
 
-test("acoes de pacote: papel catalog.write, escrita granular e cache do catalogo invalidado", async () => {
+test("acoes de pacote: permissao de acesso e venda, escrita granular e cache do catalogo invalidado", async () => {
   const source = await readFile(new URL("../src/server/catalog/combo-actions.ts", import.meta.url), "utf8");
 
   assert.match(source, /^"use server";/);
-  assert.equal(source.match(/runAdminAction\("catalog\.write"/g)?.length, 2, "salvar e excluir checam o papel");
+  assert.equal(source.match(/runAdminAction\("catalog\.access"/g)?.length, 2, "salvar e excluir checam a permissao de acesso e venda");
   assert.equal(source.match(/invalidateCatalog\(\{ from: "action" \}\)/g)?.length, 2, "salvar e excluir invalidam o catalogo");
   const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.doesNotMatch(code, /readAdminDatabase|upsertProductCombo|getAdminDashboardData|upsertRows/, "sem regravar o banco inteiro");

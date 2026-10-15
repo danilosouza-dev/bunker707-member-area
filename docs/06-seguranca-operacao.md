@@ -28,7 +28,7 @@ Implementado no MVP atual:
 - Supabase Auth e usado como provedor de identidade;
 - o `proxy.ts` do Next.js (antigo `middleware.ts`) renova/valida sessao com `@supabase/ssr`: `getUser()` por padrao ou `getClaims()` com `AUTH_SESSION_STRATEGY=claims`; `getSession()` nunca decide acesso no servidor;
 - com `claims`, uma sessao revogada e um `must_change_password` marcado depois do login so aparecem no proxy quando o JWT for renovado (ate 1 h), mas as paginas protegidas seguem validando com `getUser()` (uma vez por request via `React.cache`) e, se o JWT ainda marca `must_change_password`, o proxy confirma com `getUser()` antes de redirecionar; ative `claims` primeiro no staging e so depois de migrar o projeto para signing keys assimetricas;
-- `profiles`, `entitlements`, `student_events`, `lesson_progress`, `admin_roles` e todas as tabelas de comentarios/moderacao possuem RLS;
+- `profiles`, `entitlements`, `student_events`, `lesson_progress`, `admin_roles`, `admin_functions` e todas as tabelas de comentarios/moderacao possuem RLS;
 - aluno pode ler/editar somente o proprio perfil, ler os proprios entitlements e gravar eventos proprios;
 - aluno nao possui policy para criar, alterar ou remover entitlements;
 - `/admin` e as APIs `/api/admin/*` exigem papel em `admin_roles`, e cada area, tela, Server Action e rota exige a permissao dela (tabela em docs/17 §2.3, secao "Equipe e permissoes" abaixo);
@@ -383,10 +383,13 @@ Desde 2026-10-11 o visual do `/login` e o topo da home sao editados no admin nov
 
 ## Equipe e permissoes
 
-Desde 2026-10-16 o dono monta a equipe em Configuracoes > Equipe (`/admin/configuracoes/equipe`). Papeis, tabela e decisao de mercado em docs/17 §2.3.
+Desde 2026-10-15 o dono monta a equipe em Configuracoes > Equipe (`/admin/configuracoes/equipe`): funcoes prontas que se combinam, funcoes personalizadas e permissoes extras por pessoa. Tabela, regras e decisao de mercado em docs/17 §2.3.
 
-- **Uma conta por pessoa.** Ninguem compartilha senha. Conta existente (um aluno, por exemplo) so ganha a funcao. Conta nova e criada sem e-mail, a funcao e gravada e so entao sai o link para criar a senha, para nunca mandar convite a quem nao entrou na equipe.
-- **Menor privilegio e negar por padrao.** Cada area, tela, Server Action e rota confere a permissao no servidor. O Professor so alcanca os cursos escolhidos: toda acao de conteudo ou de comunidade diz o que toca, e acao sem alvo e recusada para quem tem escopo. Personalizado nunca recebe Equipe nem chaves de venda.
+- **Uma conta por pessoa.** Ninguem compartilha senha. Conta existente (um aluno, por exemplo) so ganha as funcoes. Conta nova e criada sem e-mail, as funcoes sao gravadas e so entao sai o link para criar a senha, para nunca mandar convite a quem nao entrou na equipe.
+- **Menor privilegio e negar por padrao.** Cada area, tela, Server Action e rota confere a permissao no servidor. Permissao que vale so nos cursos da pessoa (a do Professor, por exemplo) so alcanca os cursos escolhidos: toda acao que pode valer por curso diz o que toca, e acao sem alvo e recusada. Permissao nova nunca entra sozinha numa funcao personalizada nem numa pessoa. Equipe e chaves de venda nunca entram numa funcao nem como extra.
+- **Funcao personalizada muda para todos.** Mudar uma funcao muda as permissoes de todo mundo que a tem, na proxima requisicao; a lista de funcoes mostra quantas pessoas cada uma tem, e funcao com alguem nela nao e excluida. Funcao que sumiu do banco nao da nada, e erro ao ler as funcoes deixa a pessoa sem admin ate a leitura voltar.
+- **Criar curso nao e vender curso.** Quem cria curso sem "Regras de acesso e venda" cria o curso fechado (so para quem tiver acesso), sem link de venda, fora de formacao e nao cria Formacao. Quem publica so nos proprios cursos nao publica uma formacao que levaria junto curso de fora da lista dele.
+- **O que se abre sem compra.** Na area do aluno, a pessoa da equipe abre sem compra o que enxerga no catalogo do admin: so quem e da escola toda (Suporte, Analista, Editor...) ve tudo; quem tem alguma permissao so nos cursos (inclusive so de comunidade) ve so os cursos dela.
 - **Dados pessoais e dinheiro.** Exportar CSV, excluir aluno e ver telefone sao permissoes separadas de "ver a lista". Exportar exige ver dados pessoais, porque o CSV leva telefone. Sem essa permissao, telefone e historico nem saem do servidor. Chaves das plataformas de venda (`settings.sales`) e a Equipe (`settings.team`) ficam so com o dono.
 - **Conta da equipe nao muda por Alunos.** Adicionar aluno e "Enviar e-mail de acesso" recusam conta da equipe. Dados da equipe so o dono muda. Isso impede que alguem que libera acesso gere a senha do dono e entre como ele. Ao entrar na equipe, a senha antiga de uma conta que nunca entrou e trocada por uma aleatoria.
 - **Dono protegido.**
@@ -394,8 +397,8 @@ Desde 2026-10-16 o dono monta a equipe em Configuracoes > Equipe (`/admin/config
   - A escola nunca fica sem dono: o servidor confere, e o gatilho `guard_last_admin_owner` confere de novo, com trava.
   - Apagar a conta do ultimo dono tambem falha.
 - **Saida de alguem da equipe.** Tirar da equipe corta o admin na proxima requisicao, porque as permissoes sao lidas a cada requisicao. A conta continua como aluno; nao e preciso derrubar a sessao.
-- **Area do aluno.** A equipe abre conteudo sem compra para conferir o que vende. O Professor so abre os cursos dele, e o "Ver como aluno" e so da equipe da escola toda.
-- **Auditoria.** Adicionar, mudar funcao (antes e depois), tirar da equipe e reenviar convite gravam em `admin_audit_log`.
+- **Area do aluno.** A equipe abre conteudo sem compra para conferir o que vende. Quem tem permissoes so nos cursos (o Professor, por exemplo) so abre os cursos dele, e o "Ver como aluno" e so de quem ve o catalogo da escola toda.
+- **Auditoria.** Adicionar, mudar funcoes, extras e cursos (antes e depois), tirar da equipe, reenviar convite e criar, mudar (antes e depois) ou excluir funcao personalizada gravam em `admin_audit_log`.
 - **Recomendado antes de abrir a equipe para mais gente:**
   - ligar a 2FA (Supabase TOTP) e exigir `aal2` no `/admin`;
   - ligar a protecao contra senhas vazadas no Supabase Auth;

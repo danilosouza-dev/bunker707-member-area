@@ -2,7 +2,7 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 import { canSeeAdminArea } from "@/components/admin/v2/nav";
-import type { AdminAccess } from "@/server/auth/roles";
+import { communityScope, isProductInScope, type AdminAccess } from "@/server/auth/roles";
 import type { CommunityFilterOptions, CommunityLessonPath } from "./types";
 
 // Comunidade de quem tem acesso so a alguns cursos (Professor, docs/17 §2.3): um curso dele por vez,
@@ -19,7 +19,7 @@ const NO_COURSE = "sem-curso";
  * (sem ?aula=, que podia ser de outro curso). Devolve os parametros que a pagina deve ler.
  */
 export function scopeCommunityParams(access: AdminAccess, pathname: string, params: SearchParams): SearchParams {
-  const allowed = access.productIds;
+  const allowed = communityScope(access);
 
   if (allowed === null) {
     return params;
@@ -53,7 +53,7 @@ export function scopeCommunityParams(access: AdminAccess, pathname: string, para
 
 /** Opcoes dos filtros Produto e Aula: so os cursos (e as aulas) da pessoa. */
 export function scopeCommunityFilterOptions(access: AdminAccess, options: CommunityFilterOptions): CommunityFilterOptions {
-  const allowed = access.productIds;
+  const allowed = communityScope(access);
 
   if (allowed === null) {
     return options;
@@ -65,12 +65,15 @@ export function scopeCommunityFilterOptions(access: AdminAccess, options: Commun
   };
 }
 
-/** Sem a area Produtos (ex.: Suporte), o link "Abrir aula no admin" some: a pagina do produto nao abre para a pessoa. */
+/**
+ * O link "Abrir aula no admin" so aparece para quem abre a pagina daquele produto: some para quem nao
+ * ve a area Produtos (ex.: Suporte) e para curso fora dos cursos da pessoa (ex.: Professor que tambem e Suporte).
+ */
 export function lessonPathFor(access: AdminAccess, path: CommunityLessonPath): CommunityLessonPath {
-  return canSeeAdminArea(access, "produtos") ? path : { ...path, adminHref: null };
+  return canSeeAdminArea(access, "produtos") && isProductInScope(access, path.productId) ? path : { ...path, adminHref: null };
 }
 
 /** Filtros que contam como "lista filtrada" (o curso fixo do professor nao conta). */
 export function communityFilterKeys(access: AdminAccess, keys: readonly string[]) {
-  return access.productIds === null ? [...keys] : keys.filter((key) => key !== "produto");
+  return communityScope(access) === null ? [...keys] : keys.filter((key) => key !== "produto");
 }

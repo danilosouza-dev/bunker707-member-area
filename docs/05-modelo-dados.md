@@ -29,6 +29,7 @@ material_access_rules
 content_drafts
 content_versions
 admin_roles
+admin_functions
 admin_activity_log
 lesson_progress
 course_progress
@@ -315,7 +316,7 @@ Regras:
 - content_id;
 - lesson_id;
 - author_id;
-- author_name, author_username, author_avatar_url e author_role como snapshot de exibicao. `author_role` e gravado no envio: `producer` para papel administrativo `owner`, `admin`, `editor` ou `instructor` (etiqueta `Professor`), `moderator` para `support`, `analyst` ou `custom` (etiqueta `Moderador`) e `student` para quem nao tem papel (etiqueta `Aluno`). Comentarios antigos mantem o papel gravado;
+- author_name, author_username, author_avatar_url e author_role como snapshot de exibicao. `author_role` e gravado no envio: `producer` para quem da equipe monta modulos e aulas (dono, Administrador, Editor, Professor ou funcao com essa permissao; etiqueta `Professor`), `moderator` para o resto da equipe (Suporte, Analista...; etiqueta `Moderador`) e `student` para quem nao tem papel (etiqueta `Aluno`). Comentarios antigos mantem o papel gravado;
 - parent_comment_id;
 - body;
 - status: pending, approved, hidden, spam;
@@ -627,12 +628,12 @@ Historico de publicacao para auditoria e rollback.
 
 ### admin_roles
 
-Equipe do admin com Supabase Auth: uma linha por pessoa, um papel por pessoa (docs/17 §2.3).
+Equipe do admin com Supabase Auth: uma linha por pessoa, com uma ou mais funcoes e permissoes extras (docs/17 §2.3).
 
 - id;
 - user_id (unico, `auth.users` com `on delete cascade`);
-- role: owner, admin, editor, instructor (Professor), support, analyst, custom (Personalizado);
-- permissions jsonb (objeto, ate 16 KB): `{ "productIds": [...] }` no Professor (cursos em que ele monta aulas e responde a comunidade) e `{ "actions": [...] }` no Personalizado (o que o dono marcou). Os outros papeis gravam `{}`; o servidor descarta acao desconhecida e id invalido ao ler;
+- role: owner (Dono, exclusivo), admin, editor, instructor (Professor), support ou analyst quando a pessoa tem so essa funcao pronta e nenhum extra, e custom quando combina funcoes, usa funcao personalizada ou tem extras;
+- permissions jsonb (objeto, ate 16 KB). Dono: `{}`. Funcao pronta sozinha: `{}`, ou `{ "productIds": [...] }` quando alguma permissao vale so nos cursos (Professor). `custom`: `{ "functions": [...], "actions": [...], "scopedActions": [...], "productIds": [...] }`, com `functions` = chaves das funcoes prontas (`admin`, `editor`, `instructor`, `support`, `analyst`) e ids de `admin_functions`, `actions` = permissoes extras so desta pessoa, `scopedActions` = quais extras valem so nos cursos e `productIds` = cursos escolhidos. Linha `custom` antiga, so com `actions`, vale como "so permissoes extras". O servidor descarta acao desconhecida, funcao que nao existe e id invalido ao ler; papel pronto nunca le extras;
 - created_at;
 - updated_at (gravacao condicional da tela de Equipe).
 
@@ -640,7 +641,30 @@ Regras de admin_roles (migracao `202610160001`):
 
 - escrita so pelo servidor (`service_role`, depois de `settings.team`); o navegador le so a propria linha;
 - gatilho `guard_last_admin_owner`: remover, rebaixar ou apagar a conta do ultimo dono falha (`last_owner`), com trava nas linhas de dono para dois pedidos ao mesmo tempo nao removerem os dois ultimos;
-- permissoes efetivas sao calculadas a cada requisicao (`resolveAdminAccess` em `src/server/auth/roles.ts`): mudar ou remover alguem vale na proxima requisicao da pessoa.
+- permissoes efetivas sao calculadas a cada requisicao (`loadAdminAccess` em `src/server/auth/admin-access.ts`, que le a linha e as funcoes personalizadas citadas e chama `resolveAdminAccess` em `src/server/auth/roles.ts`): mudar ou remover alguem, ou mudar uma funcao personalizada, vale na proxima requisicao da pessoa;
+- funcoes e extras se somam, e a escola toda vence "so nos cursos"; extra que as funcoes ja dao igual nao e gravado;
+- erro ao ler as funcoes personalizadas da pessoa deixa a pessoa sem admin ate a leitura voltar (nunca com mais acesso); funcao que nao existe mais nao da nada;
+- curso criado por quem cria so nos proprios cursos entra em `permissions.productIds` por `admin_add_course_to_member_scope(user_id, product_id)` (migracao `202610170001`): um UPDATE so, com a linha travada, que mexe so na lista de cursos (nao desfaz o que o dono mudou ao mesmo tempo) e respeita o teto de 100 cursos.
+
+### admin_functions
+
+Funcoes personalizadas da equipe (migracao `202610170001`, docs/17 §2.3): o dono junta funcoes prontas e marca permissoes, cada uma na escola toda ou so nos cursos de cada pessoa.
+
+- id uuid;
+- name (2 a 60 caracteres, unico sem diferenciar maiusculas e espacos nas pontas);
+- description (ate 240 caracteres);
+- actions text[] (1 a 40 permissoes, ja com os pre-requisitos);
+- scoped_actions text[] (quais valem so nos cursos de cada pessoa; sempre dentro de `actions`);
+- created_by (`auth.users`, `on delete set null`);
+- created_at;
+- updated_at (gatilho `set_updated_at`; gravacao condicional da tela).
+
+Regras de admin_functions:
+
+- RLS ligado e sem politica; `anon` e `authenticated` sem acesso. So o servidor (`service_role`, depois de `settings.team`) le e grava;
+- Equipe (`settings.team`) e chaves de venda (`settings.sales`) nunca entram numa funcao;
+- funcao com alguem nela nao e excluida (a pessoa perderia permissoes sem ver); a contagem usa `admin_roles.permissions->functions`;
+- funcao citada numa pessoa e que nao existe mais nao da nada (falha fechada).
 
 ### admin_activity_log
 
@@ -1156,7 +1180,7 @@ Curso incluido = `content_items.commerce_scope = 'included_content'` + `content_
 
 Reordenar aceita a estrutura que ja existe ate o limite da importacao de playlist (100 modulos, 500 aulas por modulo); os limites de criacao (50 modulos, 100 aulas por modulo) valem so para criar.
 
-`import_youtube_course` mantem `publication_status` e a capa de um curso que ja existe, so marca como excluidas aulas `yt-lesson-<playlist>-*` que sairam da playlist, nao republica aulas em Rascunho nem as excluidas pelo produtor (`deleted_by` preenchido) e nao esconde modulo da playlist que ainda tem aula criada pelo produtor. O admin novo recusa importar de novo uma playlist que ja virou curso.
+`import_youtube_course` mantem `publication_status` e a capa de um curso que ja existe, so marca como excluidas aulas `yt-lesson-<playlist>-*` que sairam da playlist, nao republica aulas em Rascunho nem as excluidas pelo produtor (`deleted_by` preenchido) e nao esconde modulo da playlist que ainda tem aula criada pelo produtor. O admin novo recusa importar de novo uma playlist que ja virou curso, na tela e no banco: `admin_import_new_youtube_course` (migracao `202610170001`) trava a playlist e levanta `playlist_already_imported` antes de chamar `import_youtube_course`.
 
 ### Imagens do produto
 

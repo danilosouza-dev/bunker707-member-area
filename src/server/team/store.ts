@@ -24,6 +24,18 @@ export class TeamRuleError extends Error {
   }
 }
 
+/** Erro de um campo (vira fieldErrors na tela, como um erro do zod). */
+export class TeamFieldError extends Error {
+  issues: { message: string; path: string[] }[];
+  status = 400 as const;
+
+  constructor(field: string, message: string) {
+    super(message);
+    this.name = "ZodError";
+    this.issues = [{ message, path: field.split(".") }];
+  }
+}
+
 export const TEAM_MIGRATION_MESSAGE =
   "Falta aplicar a atualização do banco da Equipe (migração 202610160001) para usar Professor e Personalizado.";
 
@@ -168,6 +180,122 @@ export async function updateTeamRole(
   }
 
   return row;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Funcoes personalizadas (admin_functions, migracao 202610170001)
+ * ---------------------------------------------------------------------------------------------- */
+
+export type TeamFunctionRow = {
+  actions: string[] | null;
+  description: string | null;
+  id: string;
+  name: string;
+  scoped_actions: string[] | null;
+  updated_at: string;
+};
+
+const FUNCTION_COLUMNS = "id, name, description, actions, scoped_actions, updated_at";
+const FUNCTION_LIMIT = 200;
+
+function translateFunctionError(error: NonNullable<DbError>, context: string): never {
+  if (error.code === "23505") {
+    throw new TeamFieldError("name", "Já existe uma função com esse nome.");
+  }
+
+  fail(error, context);
+}
+
+export async function fetchTeamFunctionRows(db: TeamDb): Promise<TeamFunctionRow[]> {
+  const { data, error } = await db.from("admin_functions").select(FUNCTION_COLUMNS).order("name", { ascending: true }).limit(FUNCTION_LIMIT);
+
+  if (error) {
+    fail(error, "Funções da equipe");
+  }
+
+  return (data ?? []) as TeamFunctionRow[];
+}
+
+export async function fetchTeamFunctionRow(db: TeamDb, id: string): Promise<TeamFunctionRow | null> {
+  const { data, error } = await db.from("admin_functions").select(FUNCTION_COLUMNS).eq("id", id).maybeSingle();
+
+  if (error) {
+    fail(error, "Função da equipe");
+  }
+
+  return (data ?? null) as TeamFunctionRow | null;
+}
+
+export async function insertTeamFunction(
+  db: TeamDb,
+  input: { actions: readonly string[]; createdBy: string; description: string; name: string; scopedActions: readonly string[] }
+): Promise<TeamFunctionRow> {
+  const { data, error } = await db
+    .from("admin_functions")
+    .insert({ actions: input.actions, created_by: input.createdBy, description: input.description, name: input.name, scoped_actions: input.scopedActions })
+    .select(FUNCTION_COLUMNS)
+    .single();
+
+  if (error) {
+    translateFunctionError(error, "Criar função");
+  }
+
+  return data as TeamFunctionRow;
+}
+
+export async function updateTeamFunctionRow(
+  db: TeamDb,
+  input: { actions: readonly string[]; description: string; expectedUpdatedAt?: string; id: string; name: string; scopedActions: readonly string[] }
+): Promise<TeamFunctionRow> {
+  let query = db
+    .from("admin_functions")
+    .update({ actions: input.actions, description: input.description, name: input.name, scoped_actions: input.scopedActions })
+    .eq("id", input.id);
+
+  if (input.expectedUpdatedAt) {
+    query = query.eq("updated_at", input.expectedUpdatedAt);
+  }
+
+  const { data, error } = await query.select(FUNCTION_COLUMNS);
+
+  if (error) {
+    translateFunctionError(error, "Salvar função");
+  }
+
+  const row = ((data ?? []) as TeamFunctionRow[])[0];
+
+  if (!row) {
+    const current = await fetchTeamFunctionRow(db, input.id);
+
+    throw current
+      ? new TeamRuleError(409, "Outra pessoa mudou esta função agora há pouco. Recarregue a página e tente de novo.")
+      : new TeamRuleError(404, "Essa função não existe mais.");
+  }
+
+  return row;
+}
+
+export async function deleteTeamFunctionRow(db: TeamDb, id: string) {
+  const { data, error } = await db.from("admin_functions").delete().eq("id", id).select("id");
+
+  if (error) {
+    fail(error, "Excluir função");
+  }
+
+  if (!data || data.length === 0) {
+    throw new TeamRuleError(404, "Essa função não existe mais.");
+  }
+}
+
+/** Quantas pessoas tem a funcao (admin_roles.permissions.functions contem o id). */
+export async function countMembersWithFunction(db: TeamDb, id: string): Promise<number> {
+  const { count, error } = await db.from("admin_roles").select("user_id", { count: "exact", head: true }).contains("permissions", { functions: [id] });
+
+  if (error) {
+    fail(error, "Pessoas com a função");
+  }
+
+  return count ?? 0;
 }
 
 export async function deleteTeamRole(db: TeamDb, userId: string) {

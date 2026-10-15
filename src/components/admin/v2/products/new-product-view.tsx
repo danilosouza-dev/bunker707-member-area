@@ -6,10 +6,12 @@ import { NewProductForm } from "./new-product-form";
 // ("Criar curso aqui"), a migalha passa pela formação. Apresentacao pura; a pagina confere permissao.
 
 type NewProductViewProps = {
+  /** Pode decidir quem ve, o link de venda e criar Formação ("regras de acesso e venda"). */
+  canSetAccess: boolean;
   parentFormation: { id: string; title: string } | null;
 };
 
-export function NewProductView({ parentFormation }: NewProductViewProps) {
+export function NewProductView({ canSetAccess, parentFormation }: NewProductViewProps) {
   return (
     <>
       <PageHeader
@@ -25,7 +27,7 @@ export function NewProductView({ parentFormation }: NewProductViewProps) {
         }
         title={parentFormation ? "Novo curso" : "Novo produto"}
       />
-      <NewProductForm parentFormation={parentFormation} />
+      <NewProductForm canSetAccess={canSetAccess} parentFormation={parentFormation} />
     </>
   );
 }

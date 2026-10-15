@@ -7,7 +7,7 @@ import { CommunityPagination } from "@/components/admin/v2/community/pagination"
 import { ReportList } from "@/components/admin/v2/community/report-list";
 import { EmptyState } from "@/components/admin/v2/empty-state";
 import { requirePageArea } from "@/server/auth/permissions";
-import { can } from "@/server/auth/roles";
+import { can, communityScope } from "@/server/auth/roles";
 import { getCommunityFilterOptions, getCommunityStats, listReportsPage } from "@/server/community/queries";
 import { parseCommunitySearchParams } from "@/server/community/schemas";
 import { communityFilterKeys, lessonPathFor, scopeCommunityFilterOptions, scopeCommunityParams } from "@/server/community/scope";
@@ -47,7 +47,7 @@ export default async function CommunityReportsPage({ searchParams }: CommunityRe
   const filtered = hasActiveFilters(params, communityFilterKeys(access, ["produto", "aula", "periodo"]));
 
   return (
-    <CommunityFrame stats={stats} toolbar={<CommunityFilters allowAllProducts={access.productIds === null} options={options} periodMode="all-or-window" />}>
+    <CommunityFrame stats={stats} toolbar={<CommunityFilters allowAllProducts={communityScope(access) === null} options={options} periodMode="all-or-window" />}>
       {reports.total === 0 ? (
         filtered ? (
           <EmptyState

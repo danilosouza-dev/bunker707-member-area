@@ -34,7 +34,7 @@ export default async function ProductStudentsPage({ params, searchParams }: Prod
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const { access } = await requireProductPage(id);
 
-  if (!can(access, "students.read_basic") || access.productIds !== null) {
+  if (!can(access, "students.read_basic")) {
     redirect(`/admin/produtos/${encodeURIComponent(id)}`);
   }
 

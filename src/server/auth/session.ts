@@ -2,8 +2,9 @@ import "server-only";
 
 import { cache } from "react";
 import type { User } from "@supabase/supabase-js";
+import { loadAdminAccess } from "@/server/auth/admin-access";
 import { hasSupabaseAuthConfig } from "@/server/auth/config";
-import { resolveAdminAccess, type AdminAccess, type AdminRole } from "@/server/auth/roles";
+import type { AdminAccess, AdminRole } from "@/server/auth/roles";
 import { createSupabaseServerClient } from "@/server/auth/supabase";
 
 export type AuthenticatedUser = User;
@@ -41,20 +42,8 @@ export const getAdminAccessForUser = cache(async (userId: string): Promise<Admin
     return null;
   }
 
-  const supabase = await createSupabaseServerClient();
-
   try {
-    const { data, error } = await supabase
-      .from("admin_roles")
-      .select("role, permissions")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (error || !data) {
-      return null;
-    }
-
-    return resolveAdminAccess(data.role, data.permissions);
+    return await loadAdminAccess(userId);
   } catch {
     return null;
   }

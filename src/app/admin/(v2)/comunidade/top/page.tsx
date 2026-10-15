@@ -6,6 +6,7 @@ import { COMMUNITY_TAB_HREFS } from "@/components/admin/v2/community/hrefs";
 import { TopTable } from "@/components/admin/v2/community/top-table";
 import { EmptyState } from "@/components/admin/v2/empty-state";
 import { requirePageArea } from "@/server/auth/permissions";
+import { communityScope } from "@/server/auth/roles";
 import { COMMUNITY_STATS_WINDOW_DAYS } from "@/server/community/model";
 import { getCommunityFilterOptions, getCommunityStats, listTopCommenters } from "@/server/community/queries";
 import { parseCommunitySearchParams } from "@/server/community/schemas";
@@ -43,7 +44,7 @@ export default async function CommunityTopPage({ searchParams }: CommunityTopPag
   return (
     <CommunityFrame
       stats={stats}
-      toolbar={<CommunityFilters allowAllProducts={access.productIds === null} options={options} periodMode="none" showLesson={false} />}
+      toolbar={<CommunityFilters allowAllProducts={communityScope(access) === null} options={options} periodMode="none" showLesson={false} />}
     >
       {top.length === 0 ? (
         <EmptyState

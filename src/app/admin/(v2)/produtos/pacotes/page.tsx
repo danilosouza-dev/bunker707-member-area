@@ -23,8 +23,8 @@ async function loadCombos() {
 }
 
 export default async function AdminCombosPage() {
-  // Pacotes juntam produtos da escola toda: so quem edita produtos (o menu tambem so mostra para eles).
-  const { access } = await requirePageRole("catalog.write", "/admin/produtos");
+  // Pacotes juntam produtos da escola toda: so quem cuida de acesso e venda (o menu tambem so mostra para eles).
+  const { access } = await requirePageRole("catalog.access", "/admin/produtos");
   const data = await loadCombos();
 
   if (!data.ok) {
@@ -40,7 +40,7 @@ export default async function AdminCombosPage() {
 
   return (
     <AdminPage>
-      <CombosManager canEdit={can(access, "catalog.write")} cohorts={data.cohorts} combos={data.combos} products={data.products} />
+      <CombosManager canEdit={can(access, "catalog.access")} cohorts={data.cohorts} combos={data.combos} products={data.products} />
     </AdminPage>
   );
 }

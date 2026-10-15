@@ -5,11 +5,12 @@ import { AdminPage } from "@/components/admin/v2/page-container";
 import { PageHeader } from "@/components/admin/v2/page-header";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { NEW_TEAM_MEMBER_PATH } from "@/components/admin/v2/team/hrefs";
-import { RolesOverview } from "@/components/admin/v2/team/roles-overview";
 import { TeamMemberList } from "@/components/admin/v2/team/team-member-list";
+import { TeamTabs } from "@/components/admin/v2/team/team-tabs";
 import { requirePageRole } from "@/server/auth/permissions";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
-import { listTeamCourseOptions, listTeamMembers } from "@/server/team/queries";
+import { functionDefinitions, memberGrantsOf } from "@/server/team/model";
+import { listTeamFunctions, listTeamMembers } from "@/server/team/queries";
 
 export const metadata: Metadata = {
   title: "Equipe"
@@ -20,11 +21,11 @@ function readNow() {
   return Date.now();
 }
 
-// Configuracoes > Equipe (docs/17 §2.3): so o dono ve e muda. Lista de quem entra no admin, com a
-// funcao de cada pessoa, e o resumo do que cada funcao faz.
+// Configuracoes > Equipe > Pessoas (docs/17 §2.3): so o dono ve e muda. Quem entra no admin, as
+// funcoes de cada pessoa e o que ela alcanca.
 export default async function TeamPage() {
   const { user } = await requirePageRole("settings.team", "/admin/configuracoes");
-  const loaded = await loadUnlessPendingMigration(() => Promise.all([listTeamMembers(), listTeamCourseOptions()]));
+  const loaded = await loadUnlessPendingMigration(() => Promise.all([listTeamMembers(), listTeamFunctions()]));
   const header = (
     <PageHeader
       actions={
@@ -48,16 +49,15 @@ export default async function TeamPage() {
     );
   }
 
-  const [members, courses] = loaded.data;
-  const courseTitles = Object.fromEntries(courses.map((course) => [course.id, course.title]));
+  const [members, { functions }] = loaded.data;
+  const definitions = functionDefinitions(functions);
+  const rows = members.map((member) => ({ ...member, grants: memberGrantsOf(member, definitions) }));
 
   return (
-    <AdminPage>
-      <div className="flex min-w-0 flex-col gap-6">
-        {header}
-        <TeamMemberList courseTitles={courseTitles} currentUserId={user.id} members={members} now={readNow()} />
-      </div>
-      <RolesOverview />
+    <AdminPage className="gap-6">
+      {header}
+      <TeamTabs functionCount={functions.length} memberCount={members.length} />
+      <TeamMemberList currentUserId={user.id} customFunctions={functions} members={rows} now={readNow()} />
     </AdminPage>
   );
 }

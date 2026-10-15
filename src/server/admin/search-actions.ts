@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { ADMIN_SEARCH_MAX_LENGTH, ADMIN_SEARCH_MIN_LENGTH, cleanAdminSearchQuery, type AdminSearchResults } from "@/components/admin/v2/search-model";
 import { runAdminAction } from "@/server/actions/run-action";
+import { catalogScope } from "@/server/auth/roles";
 import { searchAdminCatalog } from "./search";
 
 const searchAdminSchema = z.object({
@@ -18,7 +19,7 @@ const searchAdminSchema = z.object({
 });
 
 export async function searchAdmin(raw: unknown): Promise<ActionResult<AdminSearchResults>> {
-  return runAdminAction("admin.read", searchAdminSchema, raw, async ({ access, input }) => searchAdminCatalog(input.q, access.productIds), {
+  return runAdminAction("admin.read", searchAdminSchema, raw, async ({ access, input }) => searchAdminCatalog(input.q, catalogScope(access)), {
     target: () => "any"
   });
 }

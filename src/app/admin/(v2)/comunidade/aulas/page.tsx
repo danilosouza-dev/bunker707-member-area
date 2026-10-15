@@ -7,6 +7,7 @@ import { LessonRowsTable, LessonSortBar } from "@/components/admin/v2/community/
 import { CommunityPagination } from "@/components/admin/v2/community/pagination";
 import { EmptyState } from "@/components/admin/v2/empty-state";
 import { requirePageArea } from "@/server/auth/permissions";
+import { communityScope } from "@/server/auth/roles";
 import { getCommunityFilterOptions, getCommunityStats, listLessonCommunityRowsPage } from "@/server/community/queries";
 import { parseLessonRowsSearchParams } from "@/server/community/schemas";
 import { communityFilterKeys, lessonPathFor, scopeCommunityFilterOptions, scopeCommunityParams } from "@/server/community/scope";
@@ -44,7 +45,7 @@ export default async function CommunityLessonsPage({ searchParams }: CommunityLe
   const byRating = query.sort !== "doubts";
 
   return (
-    <CommunityFrame stats={stats} toolbar={<CommunityFilters allowAllProducts={access.productIds === null} options={options} showLesson={false} />}>
+    <CommunityFrame stats={stats} toolbar={<CommunityFilters allowAllProducts={communityScope(access) === null} options={options} showLesson={false} />}>
       <LessonSortBar active={query.sort} pathname={COMMUNITY_TAB_HREFS.aulas} searchParams={params} />
       {rows.total === 0 ? (
         filtered ? (

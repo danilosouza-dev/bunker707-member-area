@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ProductDetailsForm } from "@/components/admin/v2/products/details-form";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { requireProductPage } from "@/server/auth/permissions";
-import { can, canSeeProductSettings } from "@/server/auth/roles";
+import { can, canSeeProductDetails } from "@/server/auth/roles";
 import { getProductDetails } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import type { HomeModuleRowState } from "@/server/member-area/modules-model";
@@ -32,7 +32,7 @@ export default async function ProductDetailsPage({ params }: ProductDetailsPageP
   const { id } = await params;
   const { access } = await requireProductPage(id);
 
-  if (!canSeeProductSettings(access)) {
+  if (!canSeeProductDetails(access)) {
     redirect(`/admin/produtos/${encodeURIComponent(id)}`);
   }
 

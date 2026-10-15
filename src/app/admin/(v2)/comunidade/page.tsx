@@ -8,7 +8,7 @@ import { CommunityPagination } from "@/components/admin/v2/community/pagination"
 import { QueueList } from "@/components/admin/v2/community/queue-list";
 import { EmptyState } from "@/components/admin/v2/empty-state";
 import { requirePageArea } from "@/server/auth/permissions";
-import { can } from "@/server/auth/roles";
+import { can, communityScope } from "@/server/auth/roles";
 import { getCommunityFilterOptions, getCommunityStats, listQuickReplies, listUnansweredQueue } from "@/server/community/queries";
 import { parseCommunitySearchParams } from "@/server/community/schemas";
 import { communityFilterKeys, lessonPathFor, scopeCommunityFilterOptions, scopeCommunityParams } from "@/server/community/scope";
@@ -54,7 +54,7 @@ export default async function CommunityQueuePage({ searchParams }: CommunityPage
     <CommunityFrame
       stats={stats}
       toolbar={
-        <CommunityFilters allowAllProducts={access.productIds === null} aside={<QueueKeyboardHint />} options={options} periodMode="all-or-window" />
+        <CommunityFilters allowAllProducts={communityScope(access) === null} aside={<QueueKeyboardHint />} options={options} periodMode="all-or-window" />
       }
     >
       {queue.total === 0 ? (

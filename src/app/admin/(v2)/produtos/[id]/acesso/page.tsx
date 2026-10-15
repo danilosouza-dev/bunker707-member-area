@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { ProductAccessForm } from "@/components/admin/v2/products/access-form";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { requireProductPage } from "@/server/auth/permissions";
-import { canSeeProductSettings } from "@/server/auth/roles";
+import { canSeeProductAccess } from "@/server/auth/roles";
 import { getProductAccess } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
@@ -20,7 +20,7 @@ export default async function ProductAccessPage({ params }: ProductAccessPagePro
   const { id } = await params;
   const session = await requireProductPage(id);
 
-  if (!canSeeProductSettings(session.access)) {
+  if (!canSeeProductAccess(session.access)) {
     redirect(`/admin/produtos/${encodeURIComponent(id)}`);
   }
 

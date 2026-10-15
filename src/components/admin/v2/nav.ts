@@ -8,7 +8,7 @@
 // pessoa mostra so o que ela pode usar (visibleAdminNav) e cada pagina confere a mesma regra no
 // servidor (requirePageArea em src/server/auth/permissions.ts).
 
-import { canAny, type AdminAccess, type AdminAction } from "../../../server/auth/roles";
+import { canAny, catalogScope, type AdminAccess, type AdminAction } from "../../../server/auth/roles";
 
 export type AdminNavId =
   | "hoje"
@@ -54,13 +54,13 @@ export const adminNavItems: readonly AdminNavItem[] = [
   {
     children: [
       { href: "/admin/produtos", label: "Todos os produtos" },
-      { href: "/admin/produtos/pacotes", label: "Pacotes", requires: ["catalog.write"] },
-      { href: "/admin/produtos/importar", label: "Importar", requires: ["catalog.write"] }
+      { href: "/admin/produtos/pacotes", label: "Pacotes", requires: ["catalog.access"] },
+      { href: "/admin/produtos/importar", label: "Importar", requires: ["catalog.create"] }
     ],
     href: "/admin/produtos",
     id: "produtos",
     label: "Produtos",
-    requires: ["catalog.content", "catalog.write", "catalog.publish", "reports.read"],
+    requires: ["catalog.content", "catalog.create", "catalog.write", "catalog.access", "catalog.publish", "catalog.delete", "reports.read"],
     sections: ["/admin/produtos"]
   },
   {
@@ -125,7 +125,7 @@ export function canSeeAdminArea(access: AdminAccess | null | undefined, id: Admi
  * cursos (Professor) ve "Meus cursos" no lugar de Produtos, sem subitens.
  */
 export function visibleAdminNav(access: AdminAccess | null | undefined): AdminNavItem[] {
-  const scoped = Boolean(access && access.productIds !== null);
+  const scoped = Boolean(access && catalogScope(access) !== null);
 
   return adminNavItems
     .filter((item) => canAny(access, item.requires))

@@ -39,11 +39,13 @@ async function readParentFormation(raw: string | undefined) {
 export default async function NewProductPage({ searchParams }: NewProductPageProps) {
   const { access } = await requirePageAdmin();
 
-  if (!can(access, "catalog.write")) {
+  if (!can(access, "catalog.create")) {
     redirect("/admin/produtos");
   }
 
-  const formationParam = firstParam((await searchParams).formacao);
+  // "Criar curso aqui" dentro de uma Formação e de quem cuida de acesso e venda.
+  const canSetAccess = can(access, "catalog.access");
+  const formationParam = canSetAccess ? firstParam((await searchParams).formacao) : undefined;
   const loaded = await loadUnlessPendingMigration(async () => {
     await assertCatalogSchemaReady();
     return readParentFormation(formationParam);
@@ -60,7 +62,7 @@ export default async function NewProductPage({ searchParams }: NewProductPagePro
 
   return (
     <AdminPage className="gap-6">
-      <NewProductView parentFormation={loaded.data} />
+      <NewProductView canSetAccess={canSetAccess} parentFormation={loaded.data} />
     </AdminPage>
   );
 }

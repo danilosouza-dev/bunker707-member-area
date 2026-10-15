@@ -19,7 +19,7 @@ const IMPORT_BREADCRUMB = [{ href: "/admin/produtos", label: "Produtos" }, { lab
 export default async function ImportProductsPage() {
   const { access } = await requirePageAdmin();
 
-  if (!can(access, "catalog.write")) {
+  if (!can(access, "catalog.create")) {
     redirect("/admin/produtos");
   }
 
@@ -41,7 +41,7 @@ export default async function ImportProductsPage() {
         description="Cole o link de uma playlist. Cada vídeo vira uma aula e o produto nasce em rascunho."
         title="Importar do YouTube"
       />
-      <PlaylistImport />
+      <PlaylistImport canSetAccess={can(access, "catalog.access")} />
     </AdminPage>
   );
 }

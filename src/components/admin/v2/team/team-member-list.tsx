@@ -1,43 +1,29 @@
-import { ADMIN_ROLE_LABELS } from "@/server/auth/roles";
-import { describeMemberAccess, type TeamMember } from "@/server/team/model";
+import type { AdminAction, ActionScope } from "@/server/auth/roles";
+import { describeMemberAccess, describeMemberFunctions, type TeamCustomFunction, type TeamMember } from "@/server/team/model";
 import { DataTable, type DataTableColumn } from "../data-table";
 import { StatusChip } from "../status-chip";
 import { formatRelativeDate } from "../students/format";
 import { StudentAvatar } from "../students/student-avatar";
 import { teamMemberHref } from "./hrefs";
 
-// Lista da equipe (Configuracoes > Equipe): quem e, funcao, o que alcanca e ultimo acesso. A linha
-// inteira abre a pessoa. Apresentacao pura: a pagina le o banco.
+// Lista da equipe (Configuracoes > Equipe > Pessoas): quem e, funcoes, o que alcanca e ultimo acesso.
+// A linha inteira abre a pessoa. Apresentacao pura: a pagina le o banco e calcula as permissoes.
+
+export type TeamMemberRow = TeamMember & {
+  /** Permissoes efetivas (funcoes + extras), calculadas no servidor. */
+  grants: ReadonlyMap<AdminAction, ActionScope>;
+};
 
 type TeamMemberListProps = {
-  /** Nome dos cursos (Professor mostra "Curso X +1"). */
-  courseTitles: Readonly<Record<string, string>>;
   currentUserId: string;
-  members: readonly TeamMember[];
+  customFunctions: readonly TeamCustomFunction[];
+  members: readonly TeamMemberRow[];
   now: number;
 };
 
-function accessLabel(member: TeamMember, courseTitles: Readonly<Record<string, string>>) {
-  if (member.role !== "instructor" || member.productIds.length === 0) {
-    return describeMemberAccess(member);
-  }
-
-  const titles = member.productIds.map((id) => courseTitles[id]).filter(Boolean);
-
-  if (titles.length === 0) {
-    return describeMemberAccess(member);
-  }
-
-  return (
-    <span className="truncate" title={titles.join(", ")}>
-      {titles[0]}
-      {member.productIds.length > 1 ? <span className="text-[var(--text-tertiary)]"> +{member.productIds.length - 1}</span> : null}
-    </span>
-  );
-}
-
-export function TeamMemberList({ courseTitles, currentUserId, members, now }: TeamMemberListProps) {
-  const columns: DataTableColumn<TeamMember>[] = [
+export function TeamMemberList({ currentUserId, customFunctions, members, now }: TeamMemberListProps) {
+  const names = new Map(customFunctions.map((fn) => [fn.id, fn]));
+  const columns: DataTableColumn<TeamMemberRow>[] = [
     {
       cell: (member) => (
         <span className="flex min-w-0 items-center gap-3">
@@ -57,7 +43,14 @@ export function TeamMemberList({ courseTitles, currentUserId, members, now }: Te
       id: "pessoa"
     },
     {
-      cell: (member) => <StatusChip tone={member.role === "owner" ? "success" : "neutral"}>{ADMIN_ROLE_LABELS[member.role]}</StatusChip>,
+      cell: (member) =>
+        member.owner ? (
+          <StatusChip tone="success">Dono</StatusChip>
+        ) : (
+          <span className="block max-w-[260px] truncate max-md:max-w-full" title={describeMemberFunctions(member, names)}>
+            {describeMemberFunctions(member, names)}
+          </span>
+        ),
       // Cartao do celular: Funcao em duas colunas ao lado do Ultimo acesso; Acesso numa linha inteira embaixo.
       className: "max-md:col-span-2",
       header: "Função",
@@ -65,7 +58,7 @@ export function TeamMemberList({ courseTitles, currentUserId, members, now }: Te
       mobileLabel: "Função"
     },
     {
-      cell: (member) => <span className="block max-w-[260px] truncate max-md:max-w-full">{accessLabel(member, courseTitles)}</span>,
+      cell: (member) => <span className="block max-w-[240px] truncate max-md:max-w-full">{describeMemberAccess(member, member.grants)}</span>,
       className: "max-md:order-last max-md:col-span-full",
       header: "Acesso",
       id: "acesso",
