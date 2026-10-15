@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ProductDetailsForm } from "@/components/admin/v2/products/details-form";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requireProductPage } from "@/server/auth/permissions";
+import { can, canSeeProductSettings } from "@/server/auth/roles";
 import { getProductDetails } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import type { HomeModuleRowState } from "@/server/member-area/modules-model";
@@ -29,8 +29,13 @@ async function loadHomeModuleRow(productId: string): Promise<HomeModuleRowState 
 
 // Aba Detalhes (docs/17 §1.6.5). O cabecalho e as permissoes vem do layout do produto.
 export default async function ProductDetailsPage({ params }: ProductDetailsPageProps) {
-  const { role } = await requirePageAdmin();
   const { id } = await params;
+  const { access } = await requireProductPage(id);
+
+  if (!canSeeProductSettings(access)) {
+    redirect(`/admin/produtos/${encodeURIComponent(id)}`);
+  }
+
   const [loaded, homeModuleRow] = await Promise.all([
     loadUnlessPendingMigration(() => getProductDetails(id)),
     loadHomeModuleRow(id)
@@ -48,7 +53,7 @@ export default async function ProductDetailsPage({ params }: ProductDetailsPageP
 
   return (
     <ProductDetailsForm
-      canWriteStorefront={canRole(role, "storefront.write")}
+      canWriteStorefront={can(access, "storefront.write")}
       details={details}
       homeModuleRow={homeModuleRow}
     />

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { LessonVideoConfig, ReleaseRuleConfig } from "@/lib/platform-types";
 import { isReleaseRuleSatisfied } from "@/server/access/release-policy";
+import { isProductInScope, resolveAdminAccess } from "@/server/auth/roles";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 
 type AccessContentRow = {
@@ -181,7 +182,7 @@ export async function requireLessonsAccess({
       .maybeSingle(),
     supabase
       .from("admin_roles")
-      .select("role")
+      .select("role, permissions")
       .eq("user_id", userId)
       .maybeSingle()
   ]);
@@ -218,7 +219,10 @@ export async function requireLessonsAccess({
   const parentFormationId = typeof contentSettings?.parentFormationId === "string"
     ? contentSettings.parentFormationId.trim() || undefined
     : undefined;
-  const isAdmin = Boolean(adminRoleResult.data);
+  // Equipe ve a aula sem compra (previa), mas o Professor so nos cursos dele (docs/17 §2.3): fora
+  // deles, vale a regra de aluno (compra, liberacao).
+  const staff = resolveAdminAccess(adminRoleResult.data?.role, adminRoleResult.data?.permissions);
+  const isAdmin = Boolean(staff && isProductInScope(staff, contentId));
   const lessonVideoConfigs = Object.fromEntries(lessons.map((lesson) => [
     lesson.id,
     (lesson.video_config as LessonVideoConfig | null) ?? null

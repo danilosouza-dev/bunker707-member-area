@@ -20,7 +20,7 @@ function noStore(response: NextResponse) {
 }
 
 export async function GET(_request: Request, context: RouteContext) {
-  const auth = await requireApiRole("admin.read");
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response || !auth.user) return noStore(auth.response!);
 

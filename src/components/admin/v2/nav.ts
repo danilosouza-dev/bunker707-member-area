@@ -3,6 +3,12 @@
 //
 // Modulo puro, sem React nem icones: tests/admin-v2-shell.test.mjs carrega este arquivo direto
 // pelo Node. Os icones de cada area ficam em admin-shell.tsx, indexados por `AdminNavId`.
+//
+// Cada area e cada subitem dizem quais permissoes os abrem (`requires`, basta uma). O menu de cada
+// pessoa mostra so o que ela pode usar (visibleAdminNav) e cada pagina confere a mesma regra no
+// servidor (requirePageArea em src/server/auth/permissions.ts).
+
+import { canAny, type AdminAccess, type AdminAction } from "../../../server/auth/roles";
 
 export type AdminNavId =
   | "hoje"
@@ -22,6 +28,8 @@ export type AdminNavChild = {
   exact?: boolean;
   href: string;
   label: string;
+  /** Permissoes que mostram o subitem (basta uma). Sem a lista, vale para quem ve a area. */
+  requires?: readonly AdminAction[];
 };
 
 export type AdminNavItem = {
@@ -29,6 +37,8 @@ export type AdminNavItem = {
   href: string;
   id: AdminNavId;
   label: string;
+  /** Permissoes que abrem a area (basta uma). */
+  requires: readonly AdminAction[];
   /** Prefixos de endereco que pertencem a esta area. */
   sections: readonly string[];
 };
@@ -39,17 +49,18 @@ export const ADMIN_SIDEBAR_COOKIE = "bunker-admin-sidebar";
 export const STUDENT_AREA_HREF = "/";
 
 export const adminNavItems: readonly AdminNavItem[] = [
-  { href: "/admin", id: "hoje", label: "Visão geral", sections: [] },
-  { href: "/admin/alunos", id: "alunos", label: "Alunos", sections: ["/admin/alunos"] },
+  { href: "/admin", id: "hoje", label: "Visão geral", requires: ["reports.read"], sections: [] },
+  { href: "/admin/alunos", id: "alunos", label: "Alunos", requires: ["students.read_basic"], sections: ["/admin/alunos"] },
   {
     children: [
       { href: "/admin/produtos", label: "Todos os produtos" },
-      { href: "/admin/produtos/pacotes", label: "Pacotes" },
-      { href: "/admin/produtos/importar", label: "Importar" }
+      { href: "/admin/produtos/pacotes", label: "Pacotes", requires: ["catalog.write"] },
+      { href: "/admin/produtos/importar", label: "Importar", requires: ["catalog.write"] }
     ],
     href: "/admin/produtos",
     id: "produtos",
     label: "Produtos",
+    requires: ["catalog.content", "catalog.write", "catalog.publish", "reports.read"],
     sections: ["/admin/produtos"]
   },
   {
@@ -63,6 +74,7 @@ export const adminNavItems: readonly AdminNavItem[] = [
     href: "/admin/area-de-membros",
     id: "membros",
     label: "Área de membros",
+    requires: ["storefront.write"],
     // Ordem dos filhos: as duas pecas da home juntas (fileiras e banner do topo), o que fica dentro
     // dos cursos, a pagina de entrar (muda pouco) e a logo (muda quase nunca).
     // /admin/home era a "Home do aluno" da fase 0 e hoje redireciona para a Vitrine.
@@ -77,20 +89,59 @@ export const adminNavItems: readonly AdminNavItem[] = [
     href: "/admin/comunicacao",
     id: "comunicacao",
     label: "Comunicação",
+    requires: ["messaging.write"],
     sections: ["/admin/comunicacao"]
   },
-  { href: "/admin/comunidade", id: "comunidade", label: "Comunidade", sections: ["/admin/comunidade"] },
+  {
+    href: "/admin/comunidade",
+    id: "comunidade",
+    label: "Comunidade",
+    requires: ["community.reply", "community.moderate"],
+    sections: ["/admin/comunidade"]
+  },
   {
     children: [
       { exact: true, href: "/admin/configuracoes", label: "Todas as configurações" },
-      { href: "/admin/configuracoes/ia", label: "Tutor IA" }
+      { href: "/admin/configuracoes/equipe", label: "Equipe", requires: ["settings.team"] },
+      { href: "/admin/configuracoes/ia", label: "Tutor IA", requires: ["settings.ai"] }
     ],
     href: "/admin/configuracoes",
     id: "configuracoes",
     label: "Configurações",
+    requires: ["settings.ai", "settings.sales", "settings.team"],
     sections: ["/admin/configuracoes"]
   }
 ];
+
+/** A pessoa enxerga a area? (mesma regra do menu e de requirePageArea). */
+export function canSeeAdminArea(access: AdminAccess | null | undefined, id: AdminNavId) {
+  const item = adminNavItems.find((candidate) => candidate.id === id);
+
+  return Boolean(item && canAny(access, item.requires));
+}
+
+/**
+ * Menu da pessoa: so as areas e os subitens que as permissoes dela abrem. Quem tem acesso so a alguns
+ * cursos (Professor) ve "Meus cursos" no lugar de Produtos, sem subitens.
+ */
+export function visibleAdminNav(access: AdminAccess | null | undefined): AdminNavItem[] {
+  const scoped = Boolean(access && access.productIds !== null);
+
+  return adminNavItems
+    .filter((item) => canAny(access, item.requires))
+    .map((item) => {
+      if (scoped && item.id === "produtos") {
+        return { ...item, children: undefined, label: "Meus cursos" };
+      }
+
+      return item.children ? { ...item, children: item.children.filter((child) => !child.requires || canAny(access, child.requires)) } : item;
+    });
+}
+
+/** Primeira tela da pessoa: a primeira area que ela enxerga (Professor cai em Produtos; Suporte, em Alunos). */
+export function adminHomeHref(access: AdminAccess | null | undefined) {
+  return visibleAdminNav(access)[0]?.href ?? "/";
+}
 
 export function normalizeAdminPath(pathname: string | null | undefined) {
   const path = (pathname ?? "").split(/[?#]/)[0].replace(/\/+$/, "");
@@ -184,6 +235,7 @@ const mobileTitleOverrides: readonly AdminNavChild[] = [
   { href: "/admin/produtos/novo", label: "Novo produto" },
   { href: "/admin/produtos/importar", label: "Importar" },
   { href: "/admin/produtos/pacotes", label: "Pacotes" },
+  { href: "/admin/configuracoes/equipe", label: "Equipe" },
   { href: "/admin/configuracoes/ia", label: "Tutor IA" }
 ];
 

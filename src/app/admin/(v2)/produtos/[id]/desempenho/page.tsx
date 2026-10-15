@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { readAdminPeriod } from "@/components/admin/v2/period";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import {
@@ -10,7 +10,8 @@ import {
   describePerformanceBase
 } from "@/components/admin/v2/products/performance-model";
 import { ProductPerformanceView } from "@/components/admin/v2/products/product-performance-view";
-import { requirePageAdmin } from "@/server/auth/guards";
+import { requireProductPage } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getProductAccess, getProductContent } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
@@ -28,8 +29,13 @@ type ProductPerformancePageProps = {
 // assistidas ainda, os numeros de estudo ficam em "—" (nenhum numero de exemplo). O periodo da barra
 // superior (?periodo=) aparece no titulo da tabela por aula.
 export default async function ProductPerformancePage({ params, searchParams }: ProductPerformancePageProps) {
-  await requirePageAdmin();
   const [{ id }, query] = await Promise.all([params, searchParams]);
+  const session = await requireProductPage(id);
+
+  if (!can(session.access, "reports.read")) {
+    redirect(`/admin/produtos/${encodeURIComponent(id)}`);
+  }
+
   const period = readAdminPeriod(query, new Date());
   const loaded = await loadUnlessPendingMigration(() => Promise.all([getProductContent(id), getProductAccess(id)]));
 

@@ -3,8 +3,8 @@ import { CombosManager } from "@/components/admin/v2/combos/combos-manager";
 import { ErrorBanner } from "@/components/admin/v2/error-banner";
 import { AdminPage } from "@/components/admin/v2/page-container";
 import { PageHeader } from "@/components/admin/v2/page-header";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageRole } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { listCohortNames, listComboProductOptions, listCombos } from "@/server/catalog/combos";
 
 export const metadata: Metadata = {
@@ -23,7 +23,8 @@ async function loadCombos() {
 }
 
 export default async function AdminCombosPage() {
-  const { role } = await requirePageAdmin();
+  // Pacotes juntam produtos da escola toda: so quem edita produtos (o menu tambem so mostra para eles).
+  const { access } = await requirePageRole("catalog.write", "/admin/produtos");
   const data = await loadCombos();
 
   if (!data.ok) {
@@ -39,7 +40,7 @@ export default async function AdminCombosPage() {
 
   return (
     <AdminPage>
-      <CombosManager canEdit={canRole(role, "catalog.write")} cohorts={data.cohorts} combos={data.combos} products={data.products} />
+      <CombosManager canEdit={can(access, "catalog.write")} cohorts={data.cohorts} combos={data.combos} products={data.products} />
     </AdminPage>
   );
 }

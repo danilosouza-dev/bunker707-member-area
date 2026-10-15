@@ -7,7 +7,7 @@ import { todayInputValue } from "@/components/admin/v2/students/format";
 import { studentListHref } from "@/components/admin/v2/students/hrefs";
 import { ImportStudentsView } from "@/components/admin/v2/students/import-students-view";
 import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { can } from "@/server/auth/roles";
 import { listProductOptions } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { listCohorts } from "@/server/students/queries";
@@ -26,9 +26,9 @@ function readNow() {
 
 // Importar CSV (docs/17 §1.7.2). Sem permissao de liberar acesso, volta para a lista.
 export default async function ImportStudentsPage() {
-  const { role } = await requirePageAdmin();
+  const { access } = await requirePageAdmin();
 
-  if (!canRole(role, "students.access")) {
+  if (!can(access, "students.access")) {
     redirect(studentListHref());
   }
 

@@ -164,7 +164,7 @@ Implementacao atual:
 - apos autenticar, usuarios com papel em `admin_roles` sao direcionados para `/admin`; alunos sem papel administrativo seguem para a area de membros;
 - `/alterar-senha` permite que aluno autenticado defina nova senha quando `must_change_password` estiver ativo;
 - o `proxy.ts` redireciona usuarios com `must_change_password = true` para `/alterar-senha` antes de liberar a area de membros;
-- `/admin` exige papel em `admin_roles`;
+- `/admin` exige papel em `admin_roles`, e cada area, tela e acao exige a permissao dela (docs/17 §2.3): menu e busca mostram so o que a pessoa pode abrir, e o Professor fica preso aos cursos dele (`requireScope`, `src/server/auth/product-scope.ts`);
 - APIs de progresso exigem usuario autenticado e APIs do CMS exigem permissao administrativa.
 
 Cadastro manual de aluno:

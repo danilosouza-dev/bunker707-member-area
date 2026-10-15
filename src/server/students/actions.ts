@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import { csvFileName, toCsv } from "@/lib/csv";
 import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
+import { can } from "@/server/auth/roles";
 import { getAccessEmailRedirectTo } from "@/server/auth/site-origin";
 import {
   StudentAccessError,
@@ -60,6 +61,7 @@ import {
   fetchContentKinds,
   fetchProfile,
   fetchStaffUserIds,
+  isStaffUser,
   insertCohort,
   insertSegment,
   recordAudit,
@@ -108,6 +110,7 @@ export async function createStudent(raw: unknown): Promise<ActionResult<CreatedS
       phone: input.phone,
       productIds: input.productIds,
       redirectTo: await getAccessEmailRedirectTo(),
+      rejectStaff: true,
       temporaryPassword: input.temporaryPassword
     });
 
@@ -192,6 +195,11 @@ export async function sendStudentAccessEmail(raw: unknown): Promise<ActionResult
       throw new StudentAccessError(409, "Este aluno não tem conta de acesso. Adicione-o de novo pelo botão Adicionar aluno.");
     }
 
+    // O e-mail de acesso pede senha nova: nunca para a equipe (o convite dela sai por Configuracoes > Equipe).
+    if (await isStaffUser(db, account.id)) {
+      throw new StudentAccessError(409, "Esta conta é da equipe. O convite de quem ainda não entrou sai por Configurações › Equipe; quem já entra usa “Esqueci minha senha”.");
+    }
+
     await sendAccessEmail(db, account, { fullName: profile?.full_name ?? null, redirectTo: await getAccessEmailRedirectTo() });
     await recordEvent(db, {
       entity_id: account.id,
@@ -209,10 +217,18 @@ export async function sendStudentAccessEmail(raw: unknown): Promise<ActionResult
 }
 
 export async function updateStudentProfile(raw: unknown): Promise<ActionResult<{ fullName: string; phone: string | null }>> {
-  return runAdminAction("students.access", updateStudentProfileSchema, raw, async ({ input, user }) => {
-    const { account, db } = await requireStudent(input.userId);
+  return runAdminAction("students.access", updateStudentProfileSchema, raw, async ({ access, input, user }) => {
+    const { account, db, profile } = await requireStudent(input.userId);
 
-    await updateProfile(db, input.userId, { full_name: input.fullName, phone: input.phone });
+    // Nome da equipe so o dono muda (ninguem renomeia o dono para se passar por ele).
+    if (!can(access, "settings.team") && (await isStaffUser(db, input.userId))) {
+      throw new StudentAccessError(409, "Esta conta é da equipe. Só o dono muda os dados de quem é da equipe.");
+    }
+
+    // Sem "ver dados pessoais", o telefone nem chega a tela: fica o que ja estava gravado.
+    const phone = can(access, "students.read_personal") ? input.phone : (profile?.phone ?? null);
+
+    await updateProfile(db, input.userId, { full_name: input.fullName, phone });
 
     if (account) {
       await updateAccountName(db, account, input.fullName);
@@ -229,7 +245,7 @@ export async function updateStudentProfile(raw: unknown): Promise<ActionResult<{
     await recordAudit(db, { action: "students.profile_update", actorId: user.id, entityId: input.userId, entityType: "student" });
     revalidateStudents(input.userId);
 
-    return { fullName: input.fullName, phone: input.phone };
+    return { fullName: input.fullName, phone: can(access, "students.read_personal") ? phone : null };
   });
 }
 

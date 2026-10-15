@@ -1,4 +1,4 @@
-import type { AdminRole } from "@/server/auth/session";
+import { ADMIN_ROLE_LABELS, type AdminRole } from "../../../server/auth/roles";
 
 // Formatacao pt-BR do Admin Bunker707. Nada aqui inventa valor: sem dado, devolve "—".
 
@@ -50,16 +50,8 @@ export function formatDeltaMagnitude(delta: number, unit: DeltaUnit = "percent")
   return `${text}${NBSP}%`;
 }
 
-const adminRoleLabels: Record<AdminRole, string> = {
-  admin: "Administrador",
-  analyst: "Analista",
-  editor: "Editor",
-  owner: "Dono",
-  support: "Suporte"
-};
-
 export function formatAdminRole(role: AdminRole) {
-  return adminRoleLabels[role];
+  return ADMIN_ROLE_LABELS[role];
 }
 
 export function getInitials(name: string) {

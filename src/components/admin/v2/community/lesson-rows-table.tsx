@@ -168,9 +168,11 @@ export function LessonRowsTable({ items, periodLabel }: LessonRowsTableProps) {
                   <BalanceCell row={row} />
                 </td>
                 <td className="px-3 pr-4 text-right">
-                  <Link className={openLinkClass} data-navigation-feedback="false" href={row.path.adminHref}>
-                    Abrir aula
-                  </Link>
+                  {row.path.adminHref ? (
+                    <Link className={openLinkClass} data-navigation-feedback="false" href={row.path.adminHref}>
+                      Abrir aula
+                    </Link>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -191,9 +193,11 @@ export function LessonRowsTable({ items, periodLabel }: LessonRowsTableProps) {
               <RatingBar className="flex-1" row={row} />
               <BalanceCell row={row} />
             </div>
-            <Link className={cn(openLinkClass, "h-11 justify-center")} data-navigation-feedback="false" href={row.path.adminHref}>
-              Abrir aula
-            </Link>
+            {row.path.adminHref ? (
+              <Link className={cn(openLinkClass, "h-11 justify-center")} data-navigation-feedback="false" href={row.path.adminHref}>
+                Abrir aula
+              </Link>
+            ) : null}
           </li>
         ))}
       </ul>

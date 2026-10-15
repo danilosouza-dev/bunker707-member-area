@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { searchAdmin } from "@/server/admin/search-actions";
+import type { AdminAccess } from "@/server/auth/roles";
 import {
   ADMIN_SEARCH_DEBOUNCE_MS,
   EMPTY_ADMIN_SEARCH_RESULTS,
@@ -36,7 +37,8 @@ function getShortcutLabel() {
   return /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent) ? "Cmd" : "Ctrl";
 }
 
-export function GlobalSearch() {
+/** `access`: permissoes de quem busca (telas e acoes que nao pode abrir nao aparecem). */
+export function GlobalSearch({ access }: { access: AdminAccess }) {
   const router = useRouter();
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -51,7 +53,7 @@ export function GlobalSearch() {
   const searching = shouldSearchAdminCatalog(cleaned);
   const current = remote && remote.query === cleaned ? remote : null;
   const results = current?.status === "done" ? current.results : EMPTY_ADMIN_SEARCH_RESULTS;
-  const groups = buildAdminSearchGroups(cleaned, results);
+  const groups = buildAdminSearchGroups(cleaned, results, access);
   const items = flattenAdminSearchGroups(groups);
   const active = items.find((item) => item.id === activeId) ?? items[0] ?? null;
   const loading = searching && (!current || current.status === "loading");

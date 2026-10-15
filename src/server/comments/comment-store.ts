@@ -216,16 +216,17 @@ async function getCommentRowsForLesson(
 }
 
 /**
- * Etiqueta de quem comenta, gravada no comentario: equipe que ensina (dono, admin, editor) aparece como
- * "Professor"; suporte e analista como "Moderador"; quem nao e da equipe, "Aluno". Comentarios antigos
- * mantem o que foi gravado. Equipe sem papel legivel (falha ao ler) continua "Professor", como antes.
+ * Etiqueta de quem comenta, gravada no comentario: equipe que ensina (dono, admin, editor, professor)
+ * aparece como "Professor"; suporte, analista e personalizado como "Moderador"; quem nao e da equipe,
+ * "Aluno". Comentarios antigos mantem o que foi gravado. Equipe sem papel legivel (falha ao ler)
+ * continua "Professor", como antes.
  */
 export function getCommentAuthorRole(isAdmin: boolean, adminRole: AdminRole | null): LessonCommentAuthorRole {
   if (!isAdmin) {
     return "student";
   }
 
-  return adminRole === "support" || adminRole === "analyst" ? "moderator" : "producer";
+  return adminRole === "support" || adminRole === "analyst" || adminRole === "custom" ? "moderator" : "producer";
 }
 
 export async function listLessonComments({

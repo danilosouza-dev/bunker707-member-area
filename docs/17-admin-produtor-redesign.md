@@ -267,7 +267,7 @@ Regras, escritas uma vez:
 > - **Segmentos**: 10 prontos e os salvos pela equipe (`student_segments`, params canônicos do endereço). **Sem coluna lateral** (decisão do produtor em 15/10/2026: repetia as pílulas de ritmo e tirava largura da tabela, que passava a rolar de lado): uma linha de **pílulas com contagem** (Todos, Estudando, Em risco, Inativos, Nunca começaram, Concluíram) e, no fim, o menu **Mais segmentos** com Expiram em 30 dias, **Nunca entraram** (no lugar de "Sem conta": no modelo novo todo aluno é uma conta), **Compraram e não começaram**, Top comentadores (mesma régua de Comunidade › Top alunos) e os salvos, cada um com a sua regra. A pílula troca só o segmento e mantém produto, turma e busca; as contagens valem para esses filtros. Filtro **Turma** na barra. Na tabela, progresso compacto ("7/24"); Turma e Entrou em só em telas largas. Fora, por ora: Origem, Entrou (período), Progresso em faixas, Tag e 50/100 por página.
 > - **Exportação**: Server Action `students.export` (dono/admin) devolve o CSV e o navegador baixa; colunas exatamente as de §1.7.4 (sem documento/endereço, que não existem); equipe fora; `;` + BOM, proteção contra fórmula; registrada no `admin_audit_log` sem o texto da busca.
 > - **Turmas**: uma turma por (aluno, produto) em `cohort_memberships(user_id, product_id, cohort_id)` — modelo diferente de §2.4 (sem `entitlement_id`), escolhido porque `grantProductAccess` garante um acesso por (aluno, produto); nome único sem diferenciar maiúsculas; `admin_product_cohorts` conta só quem tem acesso aberto. Turma no perfil (aba Acessos), no Adicionar aluno e na importação.
-> - **Ações em massa**: barra fixa com Liberar, Estender (30/90/data), Remover, Mudar turma, Reenviar convite e Exportar; lotes de 25 pelo navegador com progresso, teto de 200 por rodada; equipe sempre recusada; **liberar nunca encurta** acesso aberto (regra também no perfil); Desfazer (10 s) restaura o retrato exato de cada acesso. Enviar aviso e Adicionar tag chegam com Comunicação.
+> - **Ações em massa**: barra flutuante no rodapé, na largura da tabela (mesmo desenho da barra de salvar), com Liberar, Estender (30/90/data), Remover, Mudar turma, Reenviar convite e Exportar; lotes de 25 pelo navegador com progresso, teto de 200 por rodada; equipe sempre recusada (as linhas da equipe nem têm caixa de seleção, e a caixa do cabeçalho mostra traço na seleção parcial); **liberar nunca encurta** acesso aberto (regra também no perfil); Desfazer (10 s) restaura o retrato exato de cada acesso. Enviar aviso e Adicionar tag chegam com Comunicação.
 > - **Importar CSV**: leitura no navegador (UTF-8 com fallback windows-1252), mapeamento por cabeçalho, prévia com erro por linha (título de produto ambíguo = erro), convite ou sem envio (senha temporária não cabe em lote), lotes de 25 com retomada por `sessionStorage`; conta existente não recebe convite de novo e só ganha campos vazios; teto no servidor de 2.000 linhas/hora por pessoa.
 > - **Ciclo de vida**: classificado no banco (`admin_lifecycle_weeks`), ver §1.11; atividade real gravada pelo servidor depois de cada progresso confirmado (`student_daily_activity`), com backfill aproximado.
 > - **Auditoria**: `admin_audit_log` (append-only) para criar, liberar, estender/revogar, e-mail de acesso, editar dados, excluir (e-mail como prova), exportar, massa e importação.
@@ -363,7 +363,7 @@ Tudo isso sai de dados que **já existem hoje** (comentários com autor e respos
 
 ### 1.10 Configurações
 
-Geral (nome da escola, fuso, domínio); **Equipe** (papéis: dono, admin, editor, suporte, analista — tabela de permissões na Parte 2); **Vídeo** (provedores conectados, provedor padrão, custo estimado do mês, aviso de que o YouTube exibe a marca); **IA** (Tutor e Diretor: provedores, limites, conexões e consumo — telas atuais, que já são reais, movidas para cá); **Vendas** (Hotmart, Ticto, Kiwify: até existir a integração, aparece honestamente como "Em configuração", nunca como "Configurada"; depois, URL para colar na plataforma, segredo e registro de vendas recebidas); **Canais de envio** (remetente de e-mail, WhatsApp, push).
+Geral (nome da escola, fuso, domínio); **Equipe** (funções: dono, admin, editor, professor, suporte, analista e personalizado; tabela de permissões em §2.3, tela em `/admin/configuracoes/equipe`); **Vídeo** (provedores conectados, provedor padrão, custo estimado do mês, aviso de que o YouTube exibe a marca); **IA** (Tutor e Diretor: provedores, limites, conexões e consumo — telas atuais, que já são reais, movidas para cá); **Vendas** (Hotmart, Ticto, Kiwify: até existir a integração, aparece honestamente como "Em configuração", nunca como "Configurada"; depois, URL para colar na plataforma, segredo e registro de vendas recebidas); **Canais de envio** (remetente de e-mail, WhatsApp, push).
 
 ### 1.11 Métricas: o que o produtor precisa, com fórmula e ação
 
@@ -619,21 +619,58 @@ src/components/admin/
 
 **Auth e segurança**: `proxy.ts` substitui `middleware.ts` (codemod oficial), runtime Node; `getClaims()` com chaves assimétricas ativadas primeiro no staging, com **fallback para `getUser()` por flag**; um único `getUser` por request (hoje são dois: `middleware.ts:147`, na raiz do repositório, e `src/server/auth/session.ts:20`). Tabelas novas com RLS deny para `authenticated` e acesso via rotas/Server Actions; tabelas por aluno com `auth.uid() = user_id`. `POST /api/events` com rate limit por usuário e IP, `occurred_at` do cliente limitado a ±5 min, `user_id` sempre da sessão; a policy "Students can create own events" (`202606150003:98-102`) e os inserts diretos do browser (`login-experience.tsx:193`, `password-change-experience.tsx:97`) são removidos. `GET /r/:token` só redireciona para o `checkout_url` **da promoção dona do token** (sem open redirect). Imagens: recorte e redimensionamento **no cliente** (WebP 720×1040 para capa, 1920×720 para hero, ≤ 150 KB), validação de dimensões no servidor, upload para o Storage e só a referência no banco; `images.remotePatterns` para o host do Storage; sem `sharp` no bundle serverless. `readBoundedJson` em todas as rotas; webhooks com assinatura, idempotência e payload bruto.
 
-**Papéis** (`admin_roles` já tem check com `owner, admin, editor, support, analyst`, `202606150003:14`; mantêm-se os cinco). Hoje `requireApiAdmin({ roles })` restringe só 12 handlers; na fase 1 entra `requireRole(action)` aplicado às Server Actions novas **e** às rotas legadas em `/api/admin/**`, com o critério "analyst recebe 403 em qualquer escrita". A aprovação acima de 500 alunos usa `campaigns.status = 'pending_approval'` + `approved_by`:
+**Papéis e permissões** (decisão de 16/10/2026, depois de pesquisa de mercado: Hotmart, Kiwify, Eduzz, Memberkit, Cademí, Greenn, Ticto, Teachable, Thinkific, Kajabi, LearnWorlds, Podia, Circle, Skool, Mighty Networks, Stripe, Shopify, Intercom, Linear, Notion, GitHub e o guia de autorização da OWASP).
 
-| Área | owner | admin | editor | support | analyst |
-|---|---|---|---|---|---|
-| Produtos (criar, editar, publicar) | sim | sim | sim | não | não |
-| Alunos: ver dados pessoais | sim | sim | nome e e-mail | sim | só agregados |
-| Alunos: liberar/revogar acesso | sim | sim | não | sim (com registro) | não |
-| Exportar CSV | sim | sim | não | não | só agregados |
-| Comunicação: criar e agendar | sim | sim | sim | não | não |
-| Comunicação: publicar acima de 500 alunos | sim | sim | precisa de aprovação | não | não |
-| Comunidade: responder/moderar | sim | sim | sim | sim | não |
-| Configurações > Vendas (segredos) | sim | sim | não | não | não |
-| Configurações > Equipe | sim | não | não | não | não |
+Modelo: permissões finas por ação (`src/server/auth/roles.ts`) e papéis prontos que são pacotes delas, um papel por pessoa (`admin_roles.role`). Dois papéis guardam dados em `admin_roles.permissions` (jsonb, lido sem confiar: ação desconhecida e id inválido são descartados):
 
-Toda ação de acesso, exportação, publicação de aviso e troca de papel grava em `admin_audit_log`.
+- **Professor** (`instructor`): `{ "productIds": [...] }`, só nos cursos escolhidos. Sem lista, nenhum curso (nunca "todos").
+- **Personalizado** (`custom`): `{ "actions": [...] }`, o que o dono marcou. Ação nova nunca entra sozinha (menor privilégio). Pré-requisitos vêm juntos: exportar CSV traz "ver a lista de alunos".
+
+O que seguimos do mercado: titular com o que não se delega (equipe e chaves de venda), admin "quase dono" sem chaves de venda, papel de conteúdo preso aos cursos atribuídos, suporte sem financeiro nem configurações, conta própria por convite, exportar como permissão à parte, último dono protegido e ninguém mudando a própria função. O Personalizado, que lá fora costuma ficar em planos caros, entra porque as brasileiras que também vendem (Hotmart, Ticto, Eduzz) oferecem e o produtor pediu ("funcionário com funcionalidades específicas").
+
+| Permissão | Dono | Admin | Editor | Professor | Suporte | Analista |
+|---|---|---|---|---|---|---|
+| Ver os números (Visão geral, desempenho) `reports.read` | sim | sim | sim | não | não | sim |
+| Módulos e aulas `catalog.content` | sim | sim | sim | só nos cursos dele | não | não |
+| Criar e editar produto `catalog.write` | sim | sim | sim | não | não | não |
+| Publicar e arquivar produto `catalog.publish` | sim | sim | sim | não | não | não |
+| Excluir produto `catalog.delete` | sim | sim | não | não | não | não |
+| Área de membros `storefront.write` | sim | sim | sim | não | não | não |
+| Alunos: lista `students.read_basic` | sim | sim | nome e e-mail | não | sim | não |
+| Alunos: dados pessoais `students.read_personal` | sim | sim | não | não | sim | não |
+| Alunos: liberar e remover acesso `students.access` | sim | sim | não | não | sim | não |
+| Alunos: excluir e exportar CSV | sim | sim | não | não | não | não |
+| Comunicação: criar e publicar até 500 alunos | sim | sim | sim | não | não | não |
+| Comunicação: acima de 500 `messaging.publish_large` | sim | sim | precisa de aprovação | não | não | não |
+| Comunidade: responder e moderar | sim | sim | sim | só nos cursos dele | sim | não |
+| Configurações › Tutor IA `settings.ai` | sim | sim | não | não | não | não |
+| Configurações › Vendas (chaves) `settings.sales` | sim | não | não | não | não | não |
+| Configurações › Equipe `settings.team` | sim | não | não | não | não | não |
+
+Regras:
+
+- **Servidor decide.** Toda Server Action passa por `runAdminAction(ação, schema, input, handler, { target })`; toda rota `/api/admin/**`, por `requireApiRole(ação, alvo)`; páginas, por `requirePageArea(área)`, `requirePageRole(ação)` ou `requireProductPage(id)`. Menu, busca global e atalhos mostram só o que a pessoa pode abrir (`visibleAdminNav`), mas isso é conveniência.
+- **Escopo por curso.** Cada ação de conteúdo e de comunidade diz o que toca (produto, módulo, aula ou comentário). `requireScope` resolve até o produto dono (`src/server/auth/product-scope.ts`, lendo também a lixeira). Sem alvo, quem tem escopo é recusado (negar por padrão).
+- **O que o Professor vê.** "Meus cursos", só com a aba Conteúdo (Pacotes, Importar e Novo produto não abrem). A Comunidade, um curso dele por vez. A busca, só nos cursos dele. Na área do aluno, os cursos dele abrem como acesso liberado, sem virar compra; aulas com liberação programada seguem a regra. O "Ver como aluno" é só da equipe da escola toda.
+- **Área sem permissão** some do menu, e a página leva para a primeira área da pessoa: o Professor cai em Meus cursos; o Suporte, em Alunos (ele não vê os números da escola nem a página do produto: trabalha com o filtro por produto e as ações em massa de Alunos, e o "Abrir aula no admin" da Comunidade some para ele).
+- **Conta da equipe não muda por Alunos.** Adicionar aluno recusa e-mail da equipe. Enviar e-mail de acesso também recusa conta da equipe. Dados da equipe, só o dono muda. Sem isso, quem libera acesso conseguiria gerar a senha do dono e entrar como ele. Liberar curso para alguém da equipe continua valendo.
+- **Dados pessoais.** Sem "ver dados pessoais", telefone e histórico nem saem do servidor, e editar o aluno mantém o telefone gravado. Exportar CSV exige ver dados pessoais, porque o arquivo leva telefone.
+- **Configurações › Equipe**, só o dono:
+  - adicionar por e-mail: conta existente que já entrou só ganha a função; conta nova é criada, a função é gravada e auditada, e só então sai o e-mail para criar a senha. Conta que nunca entrou também recebe o e-mail, e a senha antiga dela (uma senha temporária de Alunos, por exemplo) é trocada por uma aleatória antes;
+  - mudar função, cursos ou permissões, com gravação condicional por `updated_at`;
+  - reenviar convite;
+  - tirar da equipe: a conta continua, como aluno.
+- **Ninguém muda a própria função, e a escola nunca fica sem dono.** O servidor confere e o gatilho `guard_last_admin_owner` confere de novo, com uma trava de transação que enfileira as mudanças de dono sem risco de deadlock (migração `202610160001`).
+- **Mudança vale na próxima requisição** da pessoa: as permissões são lidas a cada requisição, sem derrubar a sessão.
+- **Auditoria.** Toda ação de acesso, exportação, publicação de aviso e mudança na equipe grava em `admin_audit_log` (`team.member_added`, `team.member_updated` com antes e depois, `team.member_removed`, `team.invite_resent`).
+
+Próximos passos, fora desta entrega:
+
+- 2FA obrigatória para a equipe (Supabase TOTP, `aal2`);
+- pedir a senha de novo para exportar e mudar a equipe;
+- Professor vendo os alunos dos próprios cursos (nome e progresso, sem e-mail e telefone);
+- separar chaves de IA dos limites de IA;
+- Admin vendo a equipe sem poder mudar.
 
 ### 2.4 Modelo de dados
 
@@ -872,7 +909,7 @@ Pedido do produtor: "Quero poder editar login, escolher algum template de login 
 | Marcada à mão / Aproximado / Coleta ativa desde | `completion_source = manual/admin` / derivado de `lesson_watch_states` / data do primeiro `lesson_started` em produção |
 | Ver como aluno | `?accessPreview=producer\|student_with_access\|student_without_access` + cookie `bunker707_access_preview` (`src/lib/access-preview.ts`); rascunhos visíveis para `admin_roles` são entrega da fase 1 |
 | Tutor IA / Diretor; marcar como FAQ | `ai_conversations`, `ai_messages`; par pergunta/resposta em `lesson_ai_profiles` |
-| Equipe: dono, admin, editor, suporte, analista | `admin_roles.role` (owner, admin, editor, support, analyst) |
+| Equipe: dono, admin, editor, professor, suporte, analista, personalizado | `admin_roles.role` (owner, admin, editor, instructor, support, analyst, custom) + `admin_roles.permissions` (cursos do professor, ações do personalizado) |
 | Registro de quem fez o quê | `admin_audit_log` |
 | Admin antigo | `/admin/legado` (`admin-dashboard.tsx`), removido na fase 6 |
 

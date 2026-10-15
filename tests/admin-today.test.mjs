@@ -456,7 +456,7 @@ test("a tela nao inventa numero: estudo em '—', sem 'Exemplo', sem 'fase' no t
   assert.match(view, /O registro de aulas assistidas ainda está sendo construído/);
 
   const page = await read("src/app/admin/(v2)/page.tsx");
-  assert.match(page, /requirePageAdmin\(\)/);
+  assert.match(page, /requirePageArea\("hoje"\)/, "Visao geral so para quem ve os numeros (reports.read)");
   assert.doesNotMatch(page, /from "@\/components\/admin\/v2\/filters";\s*import \{ describeAdminPeriod/);
   assert.doesNotMatch(page, /parseAdminPeriod\(|describeAdminPeriod|describePreviousPeriod/, "o Hoje usa o modelo novo de periodo");
 });

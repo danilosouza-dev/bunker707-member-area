@@ -85,6 +85,11 @@ import type {
 } from "./types";
 import { EMPTY_VIDEO_METADATA, fetchVideoMetadata, fetchVideoMetadataBatch } from "./video-meta";
 
+/** Alvo do escopo por curso (Professor) ao excluir ou restaurar modulos ou aulas. */
+function structureTarget(kind: "lesson" | "module", ids: readonly string[]) {
+  return kind === "module" ? { moduleIds: ids } : { lessonIds: ids };
+}
+
 const MODULE_NOT_FOUND = "Não encontramos este módulo. Ele pode ter sido excluído.";
 const LESSON_NOT_FOUND = "Não encontramos esta aula. Ela pode ter sido excluída.";
 
@@ -123,9 +128,9 @@ async function lessonPosition(lesson: LessonRow, db: CatalogDb) {
  * Módulos
  * ---------------------------------------------------------------------------------------------- */
 
-/** [catalog.write] */
+/** [catalog.content] */
 export async function createModule(input: CreateModuleInput): Promise<ActionResult<ModuleNode>> {
-  return runAdminAction("catalog.write", createModuleSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", createModuleSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const product = await requireProductRow(data.productId, db);
 
@@ -174,12 +179,12 @@ export async function createModule(input: CreateModuleInput): Promise<ActionResu
     invalidateCatalog({ from: "action" });
 
     return mapModuleNode(inserted as ModuleRow, plan.position, []);
-  });
+  }, { target: (data) => ({ productIds: [data.productId] }) });
 }
 
-/** [catalog.write] Nome inline e frase de liberacao. */
+/** [catalog.content] Nome inline e frase de liberacao. */
 export async function updateModule(input: UpdateModuleInput): Promise<ActionResult<ModuleNode>> {
-  return runAdminAction("catalog.write", updateModuleSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", updateModuleSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const patch: Record<string, unknown> = {};
 
@@ -205,16 +210,16 @@ export async function updateModule(input: UpdateModuleInput): Promise<ActionResu
     invalidateCatalog({ from: "action" });
 
     return moduleNodeFor(updated, db);
-  });
+  }, { target: (data) => ({ moduleIds: [data.id] }) });
 }
 
 /* ------------------------------------------------------------------------------------------------
  * Aulas
  * ---------------------------------------------------------------------------------------------- */
 
-/** [catalog.write] Uma ou varias aulas (Enter ou colar varias linhas); `skipped` = linhas sem titulo nem video reconhecido. */
+/** [catalog.content] Uma ou varias aulas (Enter ou colar varias linhas); `skipped` = linhas sem titulo nem video reconhecido. */
 export async function createLessons(input: CreateLessonsInput): Promise<ActionResult<{ lessons: LessonNode[]; skipped: number }>> {
-  return runAdminAction("catalog.write", createLessonsSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", createLessonsSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const target = await requireModule(data.moduleId, db);
     const product = await requireProductRow(target.owner_id, db);
@@ -273,12 +278,12 @@ export async function createLessons(input: CreateLessonsInput): Promise<ActionRe
       lessons: created.map((lesson, index) => mapLessonNode(lesson, activeCount + index + 1)),
       skipped: plan.skipped
     };
-  });
+  }, { target: (data) => ({ moduleIds: [data.moduleId] }) });
 }
 
-/** [catalog.write] Painel da aula. */
+/** [catalog.content] Painel da aula. */
 export async function updateLesson(input: UpdateLessonInput): Promise<ActionResult<LessonNode>> {
-  return runAdminAction("catalog.write", updateLessonSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", updateLessonSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const patch: Record<string, unknown> = {};
 
@@ -342,12 +347,12 @@ export async function updateLesson(input: UpdateLessonInput): Promise<ActionResu
     invalidateCatalog({ from: "action" });
 
     return mapLessonNode(lesson, await lessonPosition(lesson, db));
-  });
+  }, { target: (data) => ({ lessonIds: [data.id] }) });
 }
 
-/** [catalog.write] Selecao multipla: Publicar / Despublicar. */
+/** [catalog.content] Selecao multipla: Publicar / Despublicar. */
 export async function setLessonsStatus(input: SetLessonsStatusInput): Promise<ActionResult<{ ids: string[]; status: LessonStatus }>> {
-  return runAdminAction("catalog.write", setLessonsStatusSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", setLessonsStatusSchema, input, async ({ input: data }) => {
     const { data: updated, error } = await catalogDb()
       .from("lessons")
       .update({ status: data.status })
@@ -359,12 +364,12 @@ export async function setLessonsStatus(input: SetLessonsStatusInput): Promise<Ac
     invalidateCatalog({ from: "action" });
 
     return { ids: ((updated ?? []) as { id: string }[]).map((row) => row.id), status: data.status };
-  });
+  }, { target: (data) => ({ lessonIds: data.ids }) });
 }
 
-/** [catalog.write] Excluir aula(s) ou modulo(s) com "Desfazer" (status "deleted"). */
+/** [catalog.content] Excluir aula(s) ou modulo(s) com "Desfazer" (status "deleted"). */
 export async function softDeleteStructure(input: SoftDeleteStructureInput): Promise<ActionResult<StructureDeleted>> {
-  return runAdminAction("catalog.write", softDeleteStructureSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("catalog.content", softDeleteStructureSchema, input, async ({ input: data, user }) => {
     const db = catalogDb();
     const table = data.kind === "module" ? "course_modules" : "lessons";
     const columns = data.kind === "module" ? "id,status" : "id,status,module_id";
@@ -398,12 +403,12 @@ export async function softDeleteStructure(input: SoftDeleteStructureInput): Prom
       items: current.map((item) => ({ id: item.id, previousStatus: restorableStatus(item.status) })),
       kind: data.kind
     };
-  });
+  }, { target: (data) => structureTarget(data.kind, data.ids) });
 }
 
-/** [catalog.write] Desfazer a exclusao com o status devolvido por softDeleteStructure. */
+/** [catalog.content] Desfazer a exclusao com o status devolvido por softDeleteStructure. */
 export async function restoreStructure(input: RestoreStructureInput): Promise<ActionResult<{ ids: string[] }>> {
-  return runAdminAction("catalog.write", restoreStructureSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", restoreStructureSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const table = data.kind === "module" ? "course_modules" : "lessons";
     const restored: string[] = [];
@@ -440,12 +445,12 @@ export async function restoreStructure(input: RestoreStructureInput): Promise<Ac
     invalidateCatalog({ from: "action" });
 
     return { ids: restored };
-  });
+  }, { target: (data) => structureTarget(data.kind, data.items.map((item) => item.id)) });
 }
 
-/** [catalog.write] Ordem completa de modulos e aulas, de uma vez (arrastar, Alt+setas, "Mover para"). */
+/** [catalog.content] Ordem completa de modulos e aulas, de uma vez (arrastar, Alt+setas, "Mover para"). */
 export async function reorderContent(input: ReorderContentInput): Promise<ActionResult<ContentReordered>> {
-  return runAdminAction("catalog.write", reorderContentSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", reorderContentSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     await requireProductRow(data.productId, db);
     assertReorderPayload(data.modules);
@@ -470,16 +475,16 @@ export async function reorderContent(input: ReorderContentInput): Promise<Action
     const { lessons, modules } = await fetchProductStructure(data.productId, db);
 
     return { modules: buildModuleTree(modules, lessons) };
-  });
+  }, { target: (data) => ({ productIds: [data.productId] }) });
 }
 
 /* ------------------------------------------------------------------------------------------------
  * Vídeo
  * ---------------------------------------------------------------------------------------------- */
 
-/** [catalog.write] Titulo, miniatura e duracao sugeridos pelo provedor (oEmbed), com o chip do provedor. */
+/** [catalog.content] Titulo, miniatura e duracao sugeridos pelo provedor (oEmbed), com o chip do provedor. */
 export async function previewVideo(input: VideoPreviewInput): Promise<ActionResult<VideoPreview>> {
-  return runAdminAction("catalog.write", videoPreviewSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", videoPreviewSchema, input, async ({ input: data }) => {
     const detection = detectLessonVideo(data.videoInput, { allowEmbedCode: data.allowEmbedCode });
 
     if (!detection.ok) {
@@ -495,5 +500,5 @@ export async function previewVideo(input: VideoPreviewInput): Promise<ActionResu
       suggestedTitle: metadata.suggestedTitle,
       thumbnailUrl: lessonThumbnailOf(metadata.thumbnailUrl, config)
     };
-  });
+  }, { target: () => "any" });
 }

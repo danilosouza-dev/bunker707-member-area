@@ -170,7 +170,7 @@ export async function replyToComment(
         reportCount: 0
       })
     };
-  });
+  }, { target: (data) => ({ commentIds: [data.commentId] }) });
 }
 
 /** [community.reply] Resolver = atendido sem responder (sai da fila). resolved=false desfaz. */
@@ -193,7 +193,7 @@ export async function resolveComment(input: ResolveCommentInput): Promise<Action
     refresh();
 
     return { commentId: data.commentId, resolved: data.resolved };
-  });
+  }, { target: (data) => ({ commentIds: [data.commentId] }) });
 }
 
 /* ================================================================================================
@@ -209,7 +209,7 @@ export async function moderateComment(
     refresh();
 
     return { commentId: data.commentId, status: data.status };
-  });
+  }, { target: (data) => ({ commentIds: [data.commentId] }) });
 }
 
 /** [community.moderate] Mesma moderacao para varios comentarios (ate 50), um por vez na RPC. */
@@ -242,7 +242,7 @@ export async function moderateComments(input: ModerateCommentsInput): Promise<Ac
     }
 
     return { failed, status: data.status, updated };
-  });
+  }, { target: (data) => ({ commentIds: data.commentIds }) });
 }
 
 /* ================================================================================================

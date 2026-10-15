@@ -11,6 +11,13 @@ import type { ProductHeader, ProductImageSaved } from "@/server/catalog/types";
 export type ProductCapabilities = {
   canDelete: boolean;
   canPublish: boolean;
+  /** Aba Desempenho (reports.read). */
+  canSeePerformance: boolean;
+  /** Abas Detalhes e "Acesso e venda" (canSeeProductSettings). */
+  canSeeSettings: boolean;
+  /** Aba Alunos (students.read_basic, escola toda). */
+  canSeeStudents: boolean;
+  /** Editar o produto em si (nome, Detalhes, Acesso). Modulos e aulas usam catalog.content. */
   canWrite: boolean;
 };
 

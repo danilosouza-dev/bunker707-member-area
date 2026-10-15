@@ -16,9 +16,11 @@ type ProductListViewProps = {
   list: ProductListPage;
   /** Hora da leitura, para o "Atualizado há..." (vem do servidor). */
   now: Date;
+  /** Professor: a lista mostra so os cursos dele ("Meus cursos"). */
+  scoped?: boolean;
 };
 
-export function ProductListView({ canWrite, list, now }: ProductListViewProps) {
+export function ProductListView({ canWrite, list, now, scoped = false }: ProductListViewProps) {
   const filters: ProductListFilters = { format: list.query.format, page: list.page, q: list.query.q, situation: list.query.situation };
   const filtered = hasActiveProductFilters(filters);
 
@@ -39,21 +41,33 @@ export function ProductListView({ canWrite, list, now }: ProductListViewProps) {
           ) : null
         }
         description={
-          list.totalUnfiltered > 0 ? describeProductCount(list.totalUnfiltered) : "Cursos, formações, mentorias, bootcamps e materiais."
+          scoped
+            ? "Os cursos em que você monta módulos e aulas e responde os alunos."
+            : list.totalUnfiltered > 0
+              ? describeProductCount(list.totalUnfiltered)
+              : "Cursos, formações, mentorias, bootcamps e materiais."
         }
-        title="Produtos"
+        title={scoped ? "Meus cursos" : "Produtos"}
       />
 
       {list.totalUnfiltered === 0 ? (
-        <EmptyState
-          action={canWrite ? { href: "/admin/produtos/novo", label: "Novo produto" } : undefined}
-          description={
-            canWrite ? "Crie o primeiro ou importe uma playlist do YouTube." : "Quando a equipe criar produtos, eles aparecem aqui."
-          }
-          icon={Package}
-          secondaryAction={canWrite ? { href: "/admin/produtos/importar", label: "Importar do YouTube" } : undefined}
-          title="Você ainda não tem produtos."
-        />
+        scoped ? (
+          <EmptyState
+            description="Peça ao dono da escola para escolher os seus cursos em Configurações › Equipe."
+            icon={Package}
+            title="Nenhum curso foi atribuído a você ainda."
+          />
+        ) : (
+          <EmptyState
+            action={canWrite ? { href: "/admin/produtos/novo", label: "Novo produto" } : undefined}
+            description={
+              canWrite ? "Crie o primeiro ou importe uma playlist do YouTube." : "Quando a equipe criar produtos, eles aparecem aqui."
+            }
+            icon={Package}
+            secondaryAction={canWrite ? { href: "/admin/produtos/importar", label: "Importar do YouTube" } : undefined}
+            title="Você ainda não tem produtos."
+          />
+        )
       ) : (
         <div className="flex min-w-0 flex-col gap-3">
           <ProductListFiltersBar filters={filters} />

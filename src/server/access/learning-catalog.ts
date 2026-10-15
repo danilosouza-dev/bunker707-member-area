@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ReleaseRuleConfig } from "@/lib/platform-types";
 import { isReleaseRuleSatisfied } from "@/server/access/release-policy";
+import { isProductInScope, resolveAdminAccess } from "@/server/auth/roles";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 
 type ContentRow = {
@@ -376,7 +377,7 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
       .eq("status", "published")
       .order("sort_order", { ascending: true })
       .order("id", { ascending: true }),
-    supabase.from("admin_roles").select("role").eq("user_id", normalizedUserId).maybeSingle(),
+    supabase.from("admin_roles").select("role, permissions").eq("user_id", normalizedUserId).maybeSingle(),
     supabase
       .from("entitlements")
       .select("target_id,target_type,starts_at,ends_at,status")
@@ -400,7 +401,10 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
   const lessons = (lessonsResult.data ?? []) as LessonRow[];
   const entitlements = (entitlementsResult.data ?? []) as EntitlementRow[];
   const progressRows = (progressResult.data ?? []) as ProgressRow[];
-  const isAdmin = Boolean(adminRoleResult.data);
+  // Equipe da escola toda ve tudo (previa); o Professor, so os cursos dele (docs/17 §2.3).
+  const staff = resolveAdminAccess(adminRoleResult.data?.role, adminRoleResult.data?.permissions);
+  const isAdmin = Boolean(staff && staff.productIds === null);
+  const staffSees = (contentId: string) => Boolean(staff && isProductInScope(staff, contentId));
   const parentFormationByContent = new Map(
     settings.flatMap((row) => {
       const parentFormationId = getParentFormationId(row.settings);
@@ -425,12 +429,12 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
         : undefined
     });
     const hasOpenAccess = content.access_model === "free";
-    const hasAccess = isAdmin || hasOpenAccess || matchingEntitlements.length > 0;
+    const hasAccess = staffSees(content.id) || hasOpenAccess || matchingEntitlements.length > 0;
 
     if (!hasAccess) continue;
     const completedLessonIds = getCompletedLessonIds(progressRows, content.id);
 
-    if (!isAdmin && !isReleaseRuleSatisfied({
+    if (!staffSees(content.id) && !isReleaseRuleSatisfied({
       completedLessonIds,
       matchingEntitlements,
       now,
@@ -452,7 +456,7 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
       if (
         courseModule.status !== "published" ||
         courseModule.owner_id !== content.id ||
-        (!isAdmin && !isReleaseRuleSatisfied({
+        (!staffSees(content.id) && !isReleaseRuleSatisfied({
           completedLessonIds,
           matchingEntitlements: matchingEntitlementsByContent.get(content.id) ?? [],
           now,
@@ -479,7 +483,7 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
         lesson.status !== "published" ||
         !courseModule ||
         courseModule.owner_id !== content.id ||
-        (!isAdmin && !isReleaseRuleSatisfied({
+        (!staffSees(content.id) && !isReleaseRuleSatisfied({
           completedLessonIds,
           matchingEntitlements: matchingEntitlementsByContent.get(content.id) ?? [],
           now,

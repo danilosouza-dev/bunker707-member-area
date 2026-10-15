@@ -25,7 +25,7 @@ function stubModule(source) {
 }
 
 const STUBS = {
-  "@/server/auth/permissions": `export async function requireRole() { return globalThis.__adminActionStubs.role; }`,
+  "@/server/auth/permissions": `export async function requireRole() { return globalThis.__adminActionStubs.role; } export async function requireScope() {}`,
   "@/server/catalog/cache": `export function invalidateCatalog(input) { globalThis.__adminActionStubs.invalidations.push(input); }`,
   // Area de membros: mesma lista de invalidacoes, com o alvo ("login" ou "home") junto.
   "@/server/member-area/cache": `export function invalidateMemberArea(target, input) { globalThis.__adminActionStubs.invalidations.push({ target, ...input }); }`,

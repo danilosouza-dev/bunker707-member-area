@@ -6,7 +6,7 @@ import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-
 import { studentListHref, type StudentProfileTab } from "@/components/admin/v2/students/hrefs";
 import { StudentProfileView } from "@/components/admin/v2/students/student-profile-view";
 import { requirePageRole } from "@/server/auth/permissions";
-import { canRole } from "@/server/auth/roles";
+import { can } from "@/server/auth/roles";
 import { listProductOptions } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { getStudentDetail, listCohorts } from "@/server/students/queries";
@@ -34,7 +34,7 @@ function readNow() {
 }
 
 export default async function StudentPage({ params, searchParams }: StudentPageProps) {
-  const { role } = await requirePageRole("students.read_basic", "/admin");
+  const { access } = await requirePageRole("students.read_basic", "/admin");
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const idCheck = userIdSchema.safeParse(id);
 
@@ -61,16 +61,21 @@ export default async function StudentPage({ params, searchParams }: StudentPageP
     notFound();
   }
 
+  // Sem "ver dados pessoais", telefone e historico nem saem do servidor (nao basta esconder na tela).
+  const canSeePersonal = can(access, "students.read_personal");
+  const detail = canSeePersonal ? loaded.data.detail : { ...loaded.data.detail, phone: null, timeline: [] };
+
   return (
     <AdminPage className="gap-6">
       <StudentProfileView
         cohorts={loaded.data.cohorts}
-        detail={loaded.data.detail}
+        detail={detail}
         now={readNow()}
         permissions={{
-          canAccess: canRole(role, "students.access"),
-          canDelete: canRole(role, "students.delete"),
-          canSeePersonal: canRole(role, "students.read_personal")
+          canAccess: can(access, "students.access"),
+          canDelete: can(access, "students.delete"),
+          canManageTeam: can(access, "settings.team"),
+          canSeePersonal
         }}
         products={loaded.data.products}
         tab={readTab(query.aba)}

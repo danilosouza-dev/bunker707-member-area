@@ -4,30 +4,29 @@ import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import * as adminFilters from "../src/components/admin/v2/filters.ts";
-import {
-  EMPTY_VALUE,
-  formatAdminRole,
-  formatDelta,
-  formatDeltaMagnitude,
-  formatKpiValue,
-  formatLongDate,
-  getGreeting,
-  getInitials
-} from "../src/components/admin/v2/format.ts";
-import {
+import "./support/resolve-extensionless-ts.mjs";
+
+// Os tres modulos abaixo sao puros (sem React) para que este teste os carregue direto pelo Node. Eles
+// importam src/server/auth/roles.ts sem extensao, entao o gancho acima vem antes e a carga e dinamica.
+const adminFilters = await import("../src/components/admin/v2/filters.ts");
+const { EMPTY_VALUE, formatAdminRole, formatDelta, formatDeltaMagnitude, formatKpiValue, formatLongDate, getGreeting, getInitials } = await import(
+  "../src/components/admin/v2/format.ts"
+);
+const {
+  adminHomeHref,
   adminNavItems,
   buildAdminNavHref,
+  canSeeAdminArea,
   formatAdminNavCount,
   getActiveAdminNavChild,
   getAdminMobileTitle,
   getAdminTopbarScope,
   isAdminNavChildActive,
   isAdminNavSectionActive,
-  isAdminV2Href
-} from "../src/components/admin/v2/nav.ts";
-
-// Os tres modulos acima sao puros (sem React) para que este teste os carregue direto pelo Node.
+  isAdminV2Href,
+  visibleAdminNav
+} = await import("../src/components/admin/v2/nav.ts");
+const { resolveAdminAccess } = await import("../src/server/auth/roles.ts");
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const v2RouteDir = join(repoRoot, "src/app/admin/(v2)");
@@ -197,6 +196,7 @@ test("menu tem sete areas, na ordem do mapa, e so a area certa fica ativa", () =
   ]);
   assert.deepEqual(childrenOf("configuracoes"), [
     ["Todas as configurações", "/admin/configuracoes"],
+    ["Equipe", "/admin/configuracoes/equipe"],
     ["Tutor IA", "/admin/configuracoes/ia"]
   ]);
 
@@ -209,6 +209,47 @@ test("menu tem sete areas, na ordem do mapa, e so a area certa fica ativa", () =
   assert.deepEqual(active("/admin/produtos/pacotes"), ["produtos"]);
   assert.deepEqual(active("/admin/comunicacao/webinarios?periodo=7"), ["comunicacao"]);
   assert.deepEqual(active("/admin/alunosx"), []);
+});
+
+test("menu de cada funcao: so as areas que ela abre, e a primeira tela e a primeira area", () => {
+  const menu = (role, permissions = {}) =>
+    visibleAdminNav(resolveAdminAccess(role, permissions)).map((item) =>
+      item.children ? `${item.label}[${item.children.map((child) => child.label).join("|")}]` : item.label
+    );
+  const home = (role, permissions = {}) => adminHomeHref(resolveAdminAccess(role, permissions));
+
+  assert.deepEqual(menu("owner"), [
+    "Visão geral",
+    "Alunos",
+    "Produtos[Todos os produtos|Pacotes|Importar]",
+    "Área de membros[Vitrine|Destaque|Módulos|Login|Marca]",
+    "Comunicação[Avisos e pop-ups|Webinários|Promoções]",
+    "Comunidade",
+    "Configurações[Todas as configurações|Equipe|Tutor IA]"
+  ]);
+  assert.deepEqual(menu("admin").at(-1), "Configurações[Todas as configurações|Tutor IA]", "admin nao ve Equipe");
+  assert.deepEqual(menu("editor"), [
+    "Visão geral",
+    "Alunos",
+    "Produtos[Todos os produtos|Pacotes|Importar]",
+    "Área de membros[Vitrine|Destaque|Módulos|Login|Marca]",
+    "Comunicação[Avisos e pop-ups|Webinários|Promoções]",
+    "Comunidade"
+  ]);
+  assert.deepEqual(menu("instructor", { productIds: ["curso-1"] }), ["Meus cursos", "Comunidade"]);
+  assert.deepEqual(menu("support"), ["Alunos", "Comunidade"]);
+  assert.deepEqual(menu("analyst"), ["Visão geral", "Produtos[Todos os produtos]"]);
+  assert.deepEqual(menu("custom", { actions: ["settings.ai"] }), ["Configurações[Todas as configurações|Tutor IA]"]);
+  assert.deepEqual(menu("custom", {}), [], "personalizado sem nada marcado nao ve nenhuma area");
+
+  assert.equal(home("owner"), "/admin");
+  assert.equal(home("instructor", { productIds: ["curso-1"] }), "/admin/produtos");
+  assert.equal(home("support"), "/admin/alunos");
+  assert.equal(home("custom", {}), "/", "sem area: volta para a area do aluno, sem laço de redirecionamento");
+
+  assert.equal(canSeeAdminArea(resolveAdminAccess("support", {}), "hoje"), false, "suporte nao ve os numeros da escola");
+  assert.equal(canSeeAdminArea(resolveAdminAccess("instructor", { productIds: [] }), "alunos"), false);
+  assert.equal(canSeeAdminArea(null, "produtos"), false);
 });
 
 test("subitem ativo: vence o endereco mais especifico, e o exato so no proprio endereco", () => {
@@ -232,7 +273,8 @@ test("subitem ativo: vence o endereco mais especifico, e o exato so no proprio e
 
   assert.equal(activeLabel("/admin/configuracoes", "configuracoes"), "Todas as configurações");
   assert.equal(activeLabel("/admin/configuracoes/ia/conexoes", "configuracoes"), "Tutor IA");
-  assert.equal(activeLabel("/admin/configuracoes/equipe", "configuracoes"), null, "exato nao acende em subpaginas");
+  assert.equal(activeLabel("/admin/configuracoes/equipe/novo", "configuracoes"), "Equipe");
+  assert.equal(activeLabel("/admin/configuracoes/video", "configuracoes"), null, "exato nao acende em subpaginas");
 
   const products = item("produtos");
   const [allProducts, bundles] = products.children;
@@ -337,19 +379,22 @@ test("layout e toda pagina do admin novo chamam o guard de admin antes de render
   assert.ok(pages.length >= 10, `esperava as 10 rotas do admin novo, achei ${pages.length}`);
 
   for (const entry of [...pages, { path: "src/app/admin/(v2)/layout.tsx", source: sourceOf("src/app/admin/(v2)/layout.tsx") }]) {
-    // requirePageRole("acao", "/admin") chama requirePageAdmin() por dentro e ainda confere o papel (Alunos).
+    // requirePageRole("acao"), requirePageArea("area") e requireProductPage(id) chamam requirePageAdmin()
+    // por dentro e ainda conferem a permissao, a area do menu ou o curso do Professor.
     assert.match(
       entry.source,
-      /import \{ requirePageAdmin \} from "@\/server\/auth\/guards";|import \{ requirePageRole \} from "@\/server\/auth\/permissions";/,
+      /import \{ requirePageAdmin \} from "@\/server\/auth\/guards";|import \{ (?:requirePageRole|requirePageArea|requireProductPage) \} from "@\/server\/auth\/permissions";/,
       entry.path
     );
 
-    const guardIndex = entry.source.search(/requirePageAdmin\(\)|requirePageRole\("[a-z._]+", "\/admin"\)/);
+    const guardIndex = entry.source.search(
+      /requirePageAdmin\(\)|requirePageRole\("[a-z._]+"(?:, "[^"]+")?\)|requirePageArea\("[a-z]+"\)|requireProductPage\(id\)/
+    );
     // Fim da pagina: o primeiro JSX devolvido ou, numa pagina so de redirecionamento, o redirect.
     const exits = [entry.source.search(/return \(/), entry.source.search(/\bredirect\(/)].filter((index) => index >= 0);
     const renderIndex = exits.length > 0 ? Math.min(...exits) : -1;
 
-    assert.ok(guardIndex > 0, `${entry.path} precisa chamar requirePageAdmin() ou requirePageRole()`);
+    assert.ok(guardIndex > 0, `${entry.path} precisa chamar requirePageAdmin(), requirePageRole(), requirePageArea() ou requireProductPage()`);
     assert.ok(renderIndex > 0, `${entry.path} precisa devolver JSX ou redirecionar`);
     assert.ok(guardIndex < renderIndex, `${entry.path} chama o guard antes de devolver o JSX ou redirecionar`);
     assert.match(entry.source, /export default async function/, `${entry.path} precisa aguardar o guard`);
@@ -433,7 +478,7 @@ test("botao e foco do admin sao temados uma vez em globals.css (36/32/44 px do p
 test("barra superior: busca a esquerda, Periodo e Produto so no escopo, sem migalha e sem avatar", () => {
   const topbar = sourceOf("src/components/admin/v2/admin-topbar.tsx");
 
-  assert.match(topbar, /<GlobalSearch \/>/);
+  assert.match(topbar, /<GlobalSearch access=\{access\} \/>/);
   assert.match(topbar, /getAdminTopbarScope\(pathname\)/);
   assert.match(topbar, /getAdminMobileTitle\(pathname\)/);
   assert.doesNotMatch(topbar, /Breadcrumb|AccountMenu|Busca em breve/, "sem migalha, sem avatar e sem o aviso antigo");

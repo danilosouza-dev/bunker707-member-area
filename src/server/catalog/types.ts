@@ -369,7 +369,8 @@ export type CatalogSnapshot = {
  * Toda leitura e chamada depois de requirePageAdmin() na pagina; nao repete o guard.
  * ============================================================================================== */
 
-export type ListProducts = (query: ProductListQuery) => Promise<ProductListPage>;
+/** `scope`: so estes produtos (Professor); null ou ausente = todos. */
+export type ListProducts = (query: ProductListQuery, scope?: readonly string[] | null) => Promise<ProductListPage>;
 /** null = produto inexistente (a pagina chama notFound()). Excluidos nunca aparecem. */
 export type GetProductHeader = (productId: string) => Promise<ProductHeader | null>;
 export type GetProductContent = (productId: string) => Promise<ProductContent | null>;

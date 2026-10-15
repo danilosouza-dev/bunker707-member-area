@@ -521,8 +521,8 @@ test("Marca não edita mais o banner e aponta para Destaque", async () => {
 
 test("tela Destaque: página com guard e skeleton, textos sem jargão", async () => {
   const page = await readSource("../src/app/admin/(v2)/area-de-membros/destaque/page.tsx");
-  assert.match(page, /await requirePageAdmin\(\)/);
-  assert.match(page, /canRole\(role, "storefront\.write"\)/);
+  assert.match(page, /await requirePageArea\("membros"\)/);
+  assert.match(page, /can\(access, "storefront\.write"\)/);
   assert.match(page, /Não foi possível carregar o destaque/);
   assert.match(await readSource("../src/app/admin/(v2)/area-de-membros/destaque/loading.tsx"), /HeroSkeleton/);
 

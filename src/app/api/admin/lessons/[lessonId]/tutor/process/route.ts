@@ -10,10 +10,10 @@ type RouteContext = { params: Promise<{ lessonId: string }> };
 export const maxDuration = 60;
 
 export async function POST(_request: Request, context: RouteContext) {
-  const auth = await requireApiRole("catalog.write");
+  const { lessonId } = await context.params;
+  const auth = await requireApiRole("catalog.content", { lessonIds: [lessonId] });
 
   if (auth.response) return auth.response;
-  const { lessonId } = await context.params;
 
   try {
     await processLessonAIProfile(lessonId);

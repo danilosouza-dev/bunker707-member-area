@@ -70,10 +70,10 @@ async function readManualTranscript(request: Request) {
 }
 
 export async function GET(_request: Request, context: RouteContext) {
-  const auth = await requireApiRole("admin.read");
+  const { lessonId } = await context.params;
+  const auth = await requireApiRole("catalog.content", { lessonIds: [lessonId] });
 
   if (auth.response) return noStore(auth.response);
-  const { lessonId } = await context.params;
 
   try {
     return noStore(NextResponse.json({ data: await getLessonTranscriptStatus(lessonId) }));
@@ -83,10 +83,10 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PUT(request: Request, context: RouteContext) {
-  const auth = await requireApiRole("catalog.write");
+  const { lessonId } = await context.params;
+  const auth = await requireApiRole("catalog.content", { lessonIds: [lessonId] });
 
   if (auth.response || !auth.user) return noStore(auth.response!);
-  const { lessonId } = await context.params;
 
   try {
     const transcript = await readManualTranscript(request);
