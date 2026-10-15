@@ -54,7 +54,7 @@ const plainChip =
 export function ProductAccessForm({ access }: { access: ProductAccess }) {
   const router = useRouter();
   const { applyHeader, capabilities, header } = useProductWorkspace();
-  const readOnly = !capabilities.canWrite;
+  const readOnly = !capabilities.canEditAccess;
   const [source, setSource] = useState(access);
   const [baseline, setBaseline] = useState(() => accessDraftFrom(access));
   const [draft, setDraft] = useState(baseline);

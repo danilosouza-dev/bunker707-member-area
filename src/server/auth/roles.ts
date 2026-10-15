@@ -1,20 +1,30 @@
-// Papeis e permissoes do Admin Bunker707 (docs/17 §2.3). Modulo puro: sem "server-only", sem React,
-// sem aliases; tests/admin-permissions.test.mjs carrega este arquivo direto pelo Node.
+// Papeis, funcoes e permissoes do Admin Bunker707 (docs/17 §2.3). Modulo puro: sem "server-only", sem
+// React, sem aliases; tests/admin-permissions.test.mjs carrega este arquivo direto pelo Node.
 //
-// Modelo (padrao de mercado: papeis prontos, um papel personalizado e professor preso aos cursos dele):
-// - cada pessoa da equipe tem um papel (admin_roles.role). Os papeis prontos tem um conjunto fixo de
-//   permissoes (ROLE_PRESETS), que acompanha o codigo: acao nova entra no papel sem migrar dados;
-// - "custom" (Personalizado) usa so o que o dono marcou (admin_roles.permissions.actions). Acao nova
-//   nunca entra sozinha num personalizado (menor privilegio);
-// - "instructor" (Professor) vale so nos cursos de admin_roles.permissions.productIds.
+// Modelo (funcoes que se somam, padrao Hotmart/Ticto/Eduzz):
+// - permissoes finas por acao (ADMIN_ACTIONS). Algumas podem valer so nos cursos escolhidos da pessoa
+//   (SCOPABLE_ACTIONS: conteudo, criar, editar e publicar curso, e comunidade);
+// - funcoes prontas (ROLE_PRESETS) sao pacotes fixos que acompanham o codigo. O Dono e exclusivo;
+// - funcoes personalizadas (tabela admin_functions) sao pacotes que o dono monta;
+// - cada pessoa (admin_roles) tem uma ou mais funcoes, permissoes extras so dela e a lista de cursos.
+//   As permissoes se somam: se uma fonte da a acao para a escola toda e outra so nos cursos, vale a
+//   escola toda. Pre-requisitos entram juntos (exportar CSV traz ver dados pessoais).
 //
 // Regra unica: toda Server Action e toda rota /api/admin/** chama requireRole(acao) ou
-// requireApiRole(acao) (src/server/auth/permissions.ts), que consultam can(); quem tem escopo por
-// curso passa tambem por requireScope(). A UI so usa can() para esconder botoes e areas.
+// requireApiRole(acao) (src/server/auth/permissions.ts), que consultam can(); acao que vale so nos
+// cursos da pessoa passa tambem por requireScope(). A UI so usa can() para esconder botoes e areas.
 
 export const ADMIN_ROLES = ["owner", "admin", "editor", "instructor", "support", "analyst", "custom"] as const;
 
 export type AdminRole = (typeof ADMIN_ROLES)[number];
+
+/** Papeis com conjunto fixo de permissoes. */
+export type PresetAdminRole = Exclude<AdminRole, "custom">;
+
+/** Funcoes prontas que se combinam numa pessoa ou numa funcao personalizada (o Dono ja pode tudo). */
+export const COMBINABLE_PRESETS = ["admin", "editor", "instructor", "support", "analyst"] as const satisfies readonly PresetAdminRole[];
+
+export type CombinablePreset = (typeof COMBINABLE_PRESETS)[number];
 
 /**
  * Acoes do admin. Acrescentar uma acao = uma linha aqui, o lugar dela nos papeis prontos, o texto em
@@ -27,8 +37,12 @@ export const ADMIN_ACTIONS = [
   "reports.read",
   /** Modulos e aulas: criar, editar, ordenar, excluir, video, transcricao e Tutor IA da aula. */
   "catalog.content",
-  /** Produto: criar, detalhes, capa, regras de acesso, formacoes, pacotes e importacao. */
+  /** Criar curso (e importar playlist). Por curso: o curso criado entra na lista da pessoa. */
+  "catalog.create",
+  /** Detalhes do produto: nome, descricao, capa, destaque e como abre. */
   "catalog.write",
+  /** Regras de acesso e venda: gratuito ou pago, quem pode ver, vitrine, formacoes e pacotes. */
+  "catalog.access",
   /** Produto: publicar, voltar para rascunho, arquivar. */
   "catalog.publish",
   /** Produto: excluir (revoga os acessos ligados a ele). */
@@ -51,7 +65,7 @@ export const ADMIN_ACTIONS = [
   "messaging.publish",
   /** Comunicacao: publicar acima de 500 alunos sem segunda aprovacao, e aprovar o pedido de outro. */
   "messaging.publish_large",
-  /** Comunidade: responder como professor, resolver, respostas prontas. */
+  /** Comunidade: responder como equipe, resolver, respostas prontas. */
   "community.reply",
   /** Comunidade: ocultar, marcar spam, restaurar, palavras bloqueadas. */
   "community.moderate",
@@ -65,8 +79,12 @@ export const ADMIN_ACTIONS = [
 
 export type AdminAction = (typeof ADMIN_ACTIONS)[number];
 
+/** Alcance de uma permissao: a escola toda ou so os cursos escolhidos da pessoa. */
+export type ActionScope = "school" | "courses";
+
 const adminRoleSet = new Set<string>(ADMIN_ROLES);
 const adminActionSet = new Set<string>(ADMIN_ACTIONS);
+const combinablePresetSet = new Set<string>(COMBINABLE_PRESETS);
 
 export function isAdminRole(value: unknown): value is AdminRole {
   return typeof value === "string" && adminRoleSet.has(value);
@@ -76,10 +94,11 @@ export function isAdminAction(value: unknown): value is AdminAction {
   return typeof value === "string" && adminActionSet.has(value);
 }
 
-/** Papeis com conjunto fixo de permissoes. */
-export type PresetAdminRole = Exclude<AdminRole, "custom">;
+export function isCombinablePreset(value: unknown): value is CombinablePreset {
+  return typeof value === "string" && combinablePresetSet.has(value);
+}
 
-/** So o dono: mudar a equipe e as chaves de venda (nunca entram em outro papel nem num personalizado). */
+/** So o dono: mudar a equipe e as chaves de venda (nunca entram em outra funcao nem como extra). */
 export const OWNER_ONLY_ACTIONS: readonly AdminAction[] = ["settings.sales", "settings.team"];
 
 const ownerOnlySet = new Set<AdminAction>(OWNER_ONLY_ACTIONS);
@@ -92,7 +111,9 @@ export const ROLE_PRESETS: Readonly<Record<PresetAdminRole, readonly AdminAction
     "admin.read",
     "reports.read",
     "catalog.content",
+    "catalog.create",
     "catalog.write",
+    "catalog.access",
     "catalog.publish",
     "storefront.write",
     "students.read_basic",
@@ -106,14 +127,41 @@ export const ROLE_PRESETS: Readonly<Record<PresetAdminRole, readonly AdminAction
   analyst: ["admin.read", "reports.read"]
 };
 
-/** O que o dono pode marcar num personalizado: tudo menos entrar (implicito) e o que e so do dono. */
+/** Acoes de papel pronto que valem so nos cursos da pessoa (o Professor). */
+export const PRESET_SCOPED_ACTIONS: Readonly<Partial<Record<PresetAdminRole, readonly AdminAction[]>>> = {
+  instructor: ["catalog.content", "community.reply", "community.moderate"]
+};
+
+/** O que pode ser marcado numa funcao personalizada ou como extra: tudo menos entrar (implicito) e o que e so do dono. */
 export const GRANTABLE_ACTIONS: readonly AdminAction[] = ADMIN_ACTIONS.filter((action) => action !== "admin.read" && !ownerOnlySet.has(action));
 
 const grantableSet = new Set<AdminAction>(GRANTABLE_ACTIONS);
 
+export function isGrantableAction(value: unknown): value is AdminAction {
+  return isAdminAction(value) && grantableSet.has(value);
+}
+
+/** Acoes que podem valer so nos cursos escolhidos da pessoa. */
+export const SCOPABLE_ACTIONS: readonly AdminAction[] = [
+  "catalog.content",
+  "catalog.create",
+  "catalog.write",
+  "catalog.publish",
+  "community.reply",
+  "community.moderate"
+];
+
+const scopableSet = new Set<AdminAction>(SCOPABLE_ACTIONS);
+
+export function isScopableAction(action: AdminAction) {
+  return scopableSet.has(action);
+}
+
 /** Acoes que so fazem sentido junto com outra (marcar a de cima marca a de baixo). */
 export const ACTION_REQUIRES: Readonly<Partial<Record<AdminAction, readonly AdminAction[]>>> = {
+  "catalog.create": ["catalog.write"],
   "catalog.write": ["catalog.content"],
+  "catalog.access": ["catalog.write"],
   "catalog.publish": ["catalog.write"],
   "catalog.delete": ["catalog.write"],
   "students.read_personal": ["students.read_basic"],
@@ -147,33 +195,116 @@ export function dependentActionsOf(action: AdminAction): AdminAction[] {
   return ADMIN_ACTIONS.filter((candidate) => candidate !== action && withRequiredActions([candidate]).has(action));
 }
 
-/** Acoes que um professor pode ter, sempre presas aos cursos dele. */
-export const PRODUCT_SCOPED_ACTIONS: readonly AdminAction[] = ["catalog.content", "community.reply", "community.moderate"];
+/* ------------------------------------------------------------------------------------------------
+ * Permissoes com alcance (escola toda ou so os cursos da pessoa)
+ * ---------------------------------------------------------------------------------------------- */
 
-const productScopedSet = new Set<AdminAction>(PRODUCT_SCOPED_ACTIONS);
+/** Permissoes de uma funcao, de uma pessoa ou de uma combinacao: acao -> alcance. */
+export type GrantMap = Map<AdminAction, ActionScope>;
 
-export function isProductScopedAction(action: AdminAction) {
-  return productScopedSet.has(action);
+/** Soma uma permissao: a escola toda vence "so nos cursos"; acao que nao pode ser por curso vale para a escola toda. */
+export function addGrant(grants: GrantMap, action: AdminAction, scope: ActionScope) {
+  if (grants.get(action) === "school") {
+    return;
+  }
+
+  grants.set(action, scope === "courses" && isScopableAction(action) ? "courses" : "school");
 }
 
-/** Permissoes efetivas de uma pessoa da equipe, calculadas uma vez por requisicao. */
-export type AdminAccess = {
-  readonly actions: ReadonlySet<AdminAction>;
-  /** null = escola toda; lista = so estes produtos (Professor). Lista vazia = nenhum curso ainda. */
-  readonly productIds: readonly string[] | null;
-  readonly role: AdminRole;
+/** Soma todas as permissoes de `source` em `target` (a escola toda vence). */
+export function mergeGrants(target: GrantMap, source: ReadonlyMap<AdminAction, ActionScope>) {
+  for (const [action, scope] of source) {
+    addGrant(target, action, scope);
+  }
+
+  return target;
+}
+
+/** Pre-requisitos entram com o mesmo alcance da acao que pede (por curso so quando ele pode ser por curso). */
+export function closeGrants(grants: GrantMap): GrantMap {
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const [action, scope] of [...grants]) {
+      for (const required of ACTION_REQUIRES[action] ?? []) {
+        const before = grants.get(required);
+        addGrant(grants, required, scope);
+        changed ||= grants.get(required) !== before;
+      }
+    }
+  }
+
+  return grants;
+}
+
+/** Permissoes marcadas (funcao personalizada ou extras): so as que podem ser dadas, com pre-requisitos. */
+export function grantsFromSelection(actions: Iterable<unknown>, scopedActions: Iterable<unknown> = []): GrantMap {
+  const scoped = new Set([...scopedActions].filter(isAdminAction));
+  const grants: GrantMap = new Map();
+
+  for (const action of actions) {
+    if (isGrantableAction(action)) {
+      addGrant(grants, action, scoped.has(action) ? "courses" : "school");
+    }
+  }
+
+  return closeGrants(grants);
+}
+
+/** Permissoes de uma funcao pronta (o Professor vale so nos cursos da pessoa). */
+export function presetGrants(preset: PresetAdminRole): GrantMap {
+  const scoped = new Set(PRESET_SCOPED_ACTIONS[preset] ?? []);
+  const grants: GrantMap = new Map();
+
+  for (const action of ROLE_PRESETS[preset]) {
+    addGrant(grants, action, scoped.has(action) ? "courses" : "school");
+  }
+
+  return grants;
+}
+
+/** Acoes e quais delas valem so nos cursos, para gravar (ordem da lista de acoes). */
+export function splitGrants(grants: ReadonlyMap<AdminAction, ActionScope>) {
+  const actions = ADMIN_ACTIONS.filter((action) => grants.has(action));
+
+  return { actions, scopedActions: actions.filter((action) => grants.get(action) === "courses") };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Permissoes efetivas de uma pessoa
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Funcao personalizada lida do banco (admin_functions). */
+export type CustomFunctionDefinition = {
+  actions: readonly string[];
+  id: string;
+  scopedActions: readonly string[];
 };
 
 /** Formato de admin_roles.permissions (jsonb). Campos desconhecidos sao ignorados. */
 export type StoredAdminPermissions = {
+  /** Permissoes extras so desta pessoa (no Personalizado antigo, a lista inteira). */
   actions?: AdminAction[];
+  /** Funcoes da pessoa: chaves das funcoes prontas combinaveis e ids de funcoes personalizadas. */
+  functions?: string[];
+  /** Cursos escolhidos para a pessoa (valem para as permissoes por curso). */
   productIds?: string[];
+  /** Quais extras valem so nos cursos da pessoa. */
+  scopedActions?: AdminAction[];
 };
 
 /** Mesmo formato de id do catalogo (catalogIdSchema em src/server/catalog/schemas.ts). */
 const PRODUCT_ID_PATTERN = /^[A-Za-z0-9_-]{1,240}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const MAX_SCOPED_PRODUCTS = 100;
+export const MAX_MEMBER_FUNCTIONS = 20;
+
+export function isCustomFunctionId(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
 
 function uniqueStrings(values: unknown, accept: (value: string) => boolean, limit: number) {
   if (!Array.isArray(values)) {
@@ -196,62 +327,103 @@ function uniqueStrings(values: unknown, accept: (value: string) => boolean, limi
 }
 
 /** Le admin_roles.permissions sem confiar no conteudo: so acoes conhecidas e ids validos sobrevivem. */
-export function parseStoredPermissions(value: unknown): { actions: AdminAction[]; productIds: string[] } {
+export function parseStoredPermissions(value: unknown) {
   const record = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
   return {
     actions: uniqueStrings(record.actions, isAdminAction, ADMIN_ACTIONS.length) as AdminAction[],
-    productIds: uniqueStrings(record.productIds, (id) => PRODUCT_ID_PATTERN.test(id), MAX_SCOPED_PRODUCTS)
+    functions: uniqueStrings(record.functions, (ref) => isCombinablePreset(ref) || isCustomFunctionId(ref), MAX_MEMBER_FUNCTIONS),
+    productIds: uniqueStrings(record.productIds, (id) => PRODUCT_ID_PATTERN.test(id), MAX_SCOPED_PRODUCTS),
+    scopedActions: uniqueStrings(record.scopedActions, isAdminAction, ADMIN_ACTIONS.length) as AdminAction[]
   };
 }
 
-/** Acoes de um personalizado: so as que podem ser dadas, com pre-requisitos, mais "entrar". */
-export function customActionsOf(actions: Iterable<AdminAction>): Set<AdminAction> {
-  const granted = withRequiredActions([...actions].filter((action) => grantableSet.has(action)));
-  granted.add("admin.read");
+/** Ids das funcoes personalizadas citadas na pessoa (para ler so essas de admin_functions). */
+export function customFunctionIdsOf(stored: unknown): string[] {
+  return parseStoredPermissions(stored).functions.filter(isCustomFunctionId);
+}
 
-  return granted;
+/** Permissoes efetivas de uma pessoa da equipe, calculadas uma vez por requisicao. */
+export type AdminAccess = {
+  readonly actions: ReadonlySet<AdminAction>;
+  /** Cursos escolhidos para a pessoa: valem para as acoes de `scopedActions`. */
+  readonly courseIds: readonly string[];
+  /** Funcoes da pessoa (chaves prontas e ids de funcoes personalizadas). Vazio para o Dono. */
+  readonly functions: readonly string[];
+  /** Papel gravado: "owner", um papel pronto unico ou "custom" quando combina funcoes ou tem extras. */
+  readonly role: AdminRole;
+  /** Acoes que valem so nos cursos da pessoa. */
+  readonly scopedActions: ReadonlySet<AdminAction>;
+};
+
+/** Funcoes da pessoa: numa linha combinada ("custom"), as gravadas; num papel pronto, o proprio papel. */
+export function memberFunctionsOf(role: AdminRole, stored: ReturnType<typeof parseStoredPermissions>): string[] {
+  if (role === "custom") {
+    return stored.functions;
+  }
+
+  return isCombinablePreset(role) ? [role] : [];
+}
+
+/** Extras da pessoa: so numa linha combinada ("custom"). Papel pronto vale exatamente o papel. */
+export function memberExtrasOf(role: AdminRole, stored: ReturnType<typeof parseStoredPermissions>) {
+  return role === "custom" ? { actions: stored.actions, scopedActions: stored.scopedActions } : { actions: [], scopedActions: [] };
+}
+
+/** Permissoes somadas de funcoes e extras (sem o Dono). Funcao personalizada desconhecida nao da nada. */
+export function memberGrants(
+  functions: readonly string[],
+  extras: { actions: readonly unknown[]; scopedActions: readonly unknown[] },
+  customFunctions: ReadonlyMap<string, CustomFunctionDefinition> = new Map()
+): GrantMap {
+  const grants: GrantMap = new Map();
+
+  for (const ref of functions) {
+    if (isCombinablePreset(ref)) {
+      mergeGrants(grants, presetGrants(ref));
+    } else {
+      const definition = customFunctions.get(ref);
+
+      if (definition) {
+        mergeGrants(grants, grantsFromSelection(definition.actions, definition.scopedActions));
+      }
+    }
+  }
+
+  mergeGrants(grants, grantsFromSelection(extras.actions, extras.scopedActions));
+
+  return closeGrants(grants);
 }
 
 /**
- * Permissoes efetivas a partir da linha de admin_roles. Papel desconhecido = sem acesso (null).
- * Professor sem lista de cursos fica sem curso nenhum (nunca "todos").
+ * Permissoes efetivas a partir da linha de admin_roles e das funcoes personalizadas que ela cita.
+ * Papel desconhecido = sem acesso (null). Dono = tudo. Permissao por curso sem curso nao alcanca nada.
  */
-export function resolveAdminAccess(role: unknown, stored: unknown): AdminAccess | null {
+export function resolveAdminAccess(
+  role: unknown,
+  stored: unknown,
+  customFunctions: ReadonlyMap<string, CustomFunctionDefinition> = new Map()
+): AdminAccess | null {
   if (!isAdminRole(role)) {
     return null;
   }
 
+  if (role === "owner") {
+    return { actions: new Set(ADMIN_ACTIONS), courseIds: [], functions: [], role, scopedActions: new Set() };
+  }
+
   const parsed = parseStoredPermissions(stored);
+  const functions = memberFunctionsOf(role, parsed);
+  const grants = memberGrants(functions, memberExtrasOf(role, parsed), customFunctions);
 
-  if (role === "custom") {
-    return { actions: customActionsOf(parsed.actions), productIds: null, role };
-  }
+  grants.set("admin.read", "school");
 
-  if (role === "instructor") {
-    return { actions: new Set(ROLE_PRESETS.instructor), productIds: parsed.productIds, role };
-  }
-
-  return { actions: new Set(ROLE_PRESETS[role]), productIds: null, role };
-}
-
-/** Copia serializavel de AdminAccess, para levar as permissoes do servidor a componentes de cliente. */
-export type AdminAccessSnapshot = {
-  actions: AdminAction[];
-  productIds: string[] | null;
-  role: AdminRole;
-};
-
-export function toAccessSnapshot(access: AdminAccess): AdminAccessSnapshot {
-  return { actions: [...access.actions], productIds: access.productIds ? [...access.productIds] : null, role: access.role };
-}
-
-/** No cliente: so esconde o que a pessoa nao pode usar (o servidor confere tudo de novo). */
-export function fromAccessSnapshot(snapshot: AdminAccessSnapshot): AdminAccess {
   return {
-    actions: new Set(snapshot.actions.filter(isAdminAction)),
-    productIds: snapshot.productIds ? [...snapshot.productIds] : null,
-    role: snapshot.role
+    actions: new Set(grants.keys()),
+    courseIds: parsed.productIds,
+    functions,
+    role,
+    scopedActions: new Set([...grants].filter(([, scope]) => scope === "courses").map(([action]) => action))
   };
 }
 
@@ -265,36 +437,90 @@ export function canAny(access: AdminAccess | null | undefined, actions: readonly
   return actions.some((action) => can(access, action));
 }
 
-/** O produto esta dentro do que a pessoa pode ver? Sem escopo (escola toda), sempre. */
+/** A acao vale so nos cursos da pessoa? */
+export function isActionScoped(access: AdminAccess | null | undefined, action: AdminAction) {
+  return Boolean(access?.scopedActions.has(action));
+}
+
+/** A pessoa tem alguma permissao por curso? (Os cursos dela abrem na area do aluno.) */
+export function hasCourseScope(access: AdminAccess | null | undefined) {
+  return Boolean(access && access.scopedActions.size > 0);
+}
+
+const CATALOG_AREA_ACTIONS: readonly AdminAction[] = [
+  "catalog.content",
+  "catalog.create",
+  "catalog.write",
+  "catalog.access",
+  "catalog.publish",
+  "catalog.delete",
+  "reports.read"
+];
+const COMMUNITY_AREA_ACTIONS: readonly AdminAction[] = ["community.reply", "community.moderate"];
+
+/** Alguma permissao (alem de entrar no admin) vale para a escola toda? */
+function hasSchoolWidePermission(access: AdminAccess) {
+  return [...access.actions].some((action) => action !== "admin.read" && !access.scopedActions.has(action));
+}
+
+/**
+ * Cursos que limitam uma area: null = escola toda. Alguma permissao da area na escola toda: null; todas
+ * so nos cursos: os cursos da pessoa. Sem permissao na area, vale o resto: so a equipe da escola toda
+ * (Suporte, Analista) enxerga tudo; quem tem algo so nos cursos, ou nada (funcao que nao abriu), fica
+ * nos cursos dela. Isto decide tambem o que a pessoa abre sem compra na area do aluno.
+ */
+function areaScope(access: AdminAccess, area: readonly AdminAction[]): readonly string[] | null {
+  const held = area.filter((action) => access.actions.has(action));
+
+  if (held.length === 0) {
+    return hasCourseScope(access) || !hasSchoolWidePermission(access) ? access.courseIds : null;
+  }
+
+  return held.some((action) => !access.scopedActions.has(action)) ? null : access.courseIds;
+}
+
+/** Produtos que a pessoa enxerga no admin (lista, pagina do produto, busca): null = todos. */
+export function catalogScope(access: AdminAccess): readonly string[] | null {
+  return areaScope(access, CATALOG_AREA_ACTIONS);
+}
+
+/** Cursos da Comunidade da pessoa: null = todos. */
+export function communityScope(access: AdminAccess): readonly string[] | null {
+  return areaScope(access, COMMUNITY_AREA_ACTIONS);
+}
+
+/** O produto esta dentro do que a pessoa enxerga? (catalogo da escola toda: sempre). */
 export function isProductInScope(access: AdminAccess | null | undefined, productId: string) {
   if (!access) {
     return false;
   }
 
-  return access.productIds === null || access.productIds.includes(productId);
+  const scope = catalogScope(access);
+
+  return scope === null || scope.includes(productId);
 }
 
 /**
- * Abas Detalhes e "Acesso e venda" do produto: quem edita ou publica produto, ou ve os numeros. Quem
- * tem acesso so a alguns cursos (Professor) fica so com Conteudo.
+ * O alvo de uma acao cabe no que a pessoa pode? `touched` = produtos que a acao toca (null = algum id
+ * nao existe). Acao da escola toda: sempre. Acao por curso: alvo nao vazio e todo produto tocado nos
+ * cursos da pessoa.
  */
-export function canSeeProductSettings(access: AdminAccess | null | undefined) {
-  return Boolean(access && access.productIds === null && canAny(access, ["catalog.write", "catalog.publish", "reports.read"]));
-}
-
-/**
- * O alvo de uma acao cabe no escopo da pessoa? `touched` = produtos que a acao toca (null = algum id
- * nao existe). Sem escopo (escola toda), sempre; com escopo, o alvo nao pode ser vazio e todo produto
- * tocado tem que ser da pessoa.
- */
-export function scopeAllows(access: AdminAccess, touched: readonly string[] | null): boolean {
-  const allowed = access.productIds;
-
-  if (allowed === null) {
+export function scopeAllows(access: AdminAccess, action: AdminAction, touched: readonly string[] | null): boolean {
+  if (!access.scopedActions.has(action)) {
     return true;
   }
 
-  return Boolean(touched && touched.length > 0 && touched.every((productId) => allowed.includes(productId)));
+  return Boolean(touched && touched.length > 0 && touched.every((productId) => access.courseIds.includes(productId)));
+}
+
+/** Aba Detalhes do produto: quem edita, publica ou cuida de acesso e venda, ou ve os numeros. */
+export function canSeeProductDetails(access: AdminAccess | null | undefined) {
+  return canAny(access, ["catalog.write", "catalog.access", "catalog.publish", "reports.read"]);
+}
+
+/** Aba "Acesso e venda" do produto: quem cuida de acesso e venda ou ve os numeros (nunca por curso). */
+export function canSeeProductAccess(access: AdminAccess | null | undefined) {
+  return canAny(access, ["catalog.access", "reports.read"]);
 }
 
 /** Papel pronto pode executar a acao? (tabela de §2.3; o personalizado depende do que foi marcado). */
@@ -330,6 +556,38 @@ export const ADMIN_ROLE_LABELS: Readonly<Record<AdminRole, string>> = {
   support: "Suporte"
 };
 
+/** Copia serializavel de AdminAccess, para levar as permissoes do servidor a componentes de cliente. */
+export type AdminAccessSnapshot = {
+  actions: AdminAction[];
+  courseIds: string[];
+  functions: string[];
+  role: AdminRole;
+  scopedActions: AdminAction[];
+};
+
+export function toAccessSnapshot(access: AdminAccess): AdminAccessSnapshot {
+  return {
+    actions: [...access.actions],
+    courseIds: [...access.courseIds],
+    functions: [...access.functions],
+    role: access.role,
+    scopedActions: [...access.scopedActions]
+  };
+}
+
+/** No cliente: so esconde o que a pessoa nao pode usar (o servidor confere tudo de novo). */
+export function fromAccessSnapshot(snapshot: AdminAccessSnapshot): AdminAccess {
+  const actions = new Set(snapshot.actions.filter(isAdminAction));
+
+  return {
+    actions,
+    courseIds: [...snapshot.courseIds],
+    functions: [...snapshot.functions],
+    role: snapshot.role,
+    scopedActions: new Set(snapshot.scopedActions.filter((action) => isAdminAction(action) && actions.has(action)))
+  };
+}
+
 /** Frase de recusa em portugues do produtor, igual em Server Action e rota. */
 export function describeForbidden(action: AdminAction) {
   if (action === "settings.team") {
@@ -344,8 +602,8 @@ export function describeForbidden(action: AdminAction) {
     return "Só o dono ou um administrador pode fazer isso.";
   }
 
-  return "Seu papel na equipe não permite esta ação.";
+  return "Sua função na equipe não permite esta ação.";
 }
 
-/** Recusa de quem tem acesso so a alguns cursos. */
+/** Recusa de quem tem a acao so em alguns cursos. */
 export const OUT_OF_SCOPE_MESSAGE = "Você só tem acesso aos cursos que o dono escolheu para você.";

@@ -11,7 +11,8 @@ import type {
   LessonCommentStatus
 } from "@/lib/platform-types";
 import { requireLessonAccess } from "@/server/access/lesson-access";
-import { getAdminRoleForUser, getUserDisplayName, type AdminRole } from "@/server/auth/session";
+import { can, type AdminAccess } from "@/server/auth/roles";
+import { getAdminAccessForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import {
   containsBlockedTerm,
@@ -216,17 +217,17 @@ async function getCommentRowsForLesson(
 }
 
 /**
- * Etiqueta de quem comenta, gravada no comentario: equipe que ensina (dono, admin, editor, professor)
- * aparece como "Professor"; suporte, analista e personalizado como "Moderador"; quem nao e da equipe,
- * "Aluno". Comentarios antigos mantem o que foi gravado. Equipe sem papel legivel (falha ao ler)
- * continua "Professor", como antes.
+ * Etiqueta de quem comenta, gravada no comentario: equipe que monta conteudo (pode "Montar modulos e
+ * aulas", em qualquer funcao ou combinacao) aparece como "Professor"; o resto da equipe, como
+ * "Moderador"; quem nao e da equipe naquela aula, "Aluno". Comentarios antigos mantem o que foi
+ * gravado. Equipe sem permissoes legiveis (falha ao ler) continua "Professor", como antes.
  */
-export function getCommentAuthorRole(isAdmin: boolean, adminRole: AdminRole | null): LessonCommentAuthorRole {
+export function getCommentAuthorRole(isAdmin: boolean, staffAccess: AdminAccess | null): LessonCommentAuthorRole {
   if (!isAdmin) {
     return "student";
   }
 
-  return adminRole === "support" || adminRole === "analyst" || adminRole === "custom" ? "moderator" : "producer";
+  return !staffAccess || can(staffAccess, "catalog.content") ? "producer" : "moderator";
 }
 
 export async function listLessonComments({
@@ -368,7 +369,7 @@ export async function createLessonComment({
 
   const displayName = getUserDisplayName(user);
   const authorName = profileResult.data?.full_name?.trim() || displayName.fullName;
-  const authorRole = getCommentAuthorRole(access.isAdmin, access.isAdmin ? await getAdminRoleForUser(user.id) : null);
+  const authorRole = getCommentAuthorRole(access.isAdmin, access.isAdmin ? await getAdminAccessForUser(user.id) : null);
   const insertResult = await supabase
     .from("lesson_comments")
     .insert({

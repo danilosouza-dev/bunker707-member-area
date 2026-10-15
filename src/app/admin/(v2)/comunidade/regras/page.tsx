@@ -4,7 +4,7 @@ import { CommunityFrame, CommunityPendingMigration } from "@/components/admin/v2
 import { COMMUNITY_TAB_HREFS } from "@/components/admin/v2/community/hrefs";
 import { QuickRepliesSection } from "@/components/admin/v2/community/quick-replies-section";
 import { requirePageArea } from "@/server/auth/permissions";
-import { can } from "@/server/auth/roles";
+import { can, communityScope } from "@/server/auth/roles";
 import { getCommunityRules, getCommunityStats } from "@/server/community/queries";
 import { parseCommunitySearchParams } from "@/server/community/schemas";
 import { scopeCommunityParams } from "@/server/community/scope";
@@ -24,7 +24,7 @@ export default async function CommunityRulesPage({ searchParams }: CommunityRule
   const { access } = await requirePageArea("comunidade");
   const query = parseCommunitySearchParams(scopeCommunityParams(access, COMMUNITY_TAB_HREFS.regras, await searchParams));
   // Respostas prontas e palavras bloqueadas valem para a escola toda: quem tem acesso so a alguns cursos so le.
-  const schoolWide = access.productIds === null;
+  const schoolWide = communityScope(access) === null;
   const loaded = await loadUnlessPendingMigration(() =>
     Promise.all([getCommunityStats({ product: query.product }), getCommunityRules()])
   );

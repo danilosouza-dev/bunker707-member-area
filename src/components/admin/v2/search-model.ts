@@ -129,7 +129,7 @@ const ACTIONS: readonly StaticEntry[] = [
     href: "/admin/produtos/novo",
     id: "acao:novo-produto",
     keywords: "criar curso",
-    requires: ["catalog.write"],
+    requires: ["catalog.create"],
     title: "Novo produto"
   },
   {
@@ -138,7 +138,7 @@ const ACTIONS: readonly StaticEntry[] = [
     href: "/admin/produtos/importar",
     id: "acao:importar-playlist",
     keywords: "youtube importar curso",
-    requires: ["catalog.write"],
+    requires: ["catalog.create"],
     title: "Importar playlist do YouTube"
   },
   {

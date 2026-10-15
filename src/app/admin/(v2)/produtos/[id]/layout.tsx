@@ -7,7 +7,7 @@ import { ProductNotFound } from "@/components/admin/v2/products/product-not-foun
 import { ProductWorkspaceProvider } from "@/components/admin/v2/products/product-workspace";
 import { ProductWorkspaceSkeleton } from "@/components/admin/v2/products/skeletons";
 import { requireProductPage } from "@/server/auth/permissions";
-import { can, canSeeProductSettings, type AdminAccess } from "@/server/auth/roles";
+import { can, canSeeProductAccess, canSeeProductDetails, type AdminAccess } from "@/server/auth/roles";
 import { getProductHeader } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
@@ -46,10 +46,12 @@ async function ProductWorkspace({ access, children, id }: { access: AdminAccess;
     <ProductWorkspaceProvider
       capabilities={{
         canDelete: can(access, "catalog.delete"),
+        canEditAccess: can(access, "catalog.access"),
         canPublish: can(access, "catalog.publish"),
+        canSeeAccess: canSeeProductAccess(access),
+        canSeeDetails: canSeeProductDetails(access),
         canSeePerformance: can(access, "reports.read"),
-        canSeeSettings: canSeeProductSettings(access),
-        canSeeStudents: can(access, "students.read_basic") && access.productIds === null,
+        canSeeStudents: can(access, "students.read_basic"),
         canWrite: can(access, "catalog.write")
       }}
       header={header}

@@ -19,9 +19,9 @@ export default async function ProductContentPage({ params, searchParams }: Produ
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const { access } = await requireProductPage(id);
   const lessonId = readLessonParam(query.aula);
-  // Modulos e aulas: catalog.content (o Professor tambem, nos cursos dele). Cursos da formacao: catalog.write.
+  // Modulos e aulas: catalog.content (o Professor tambem, nos cursos dele). Cursos da formacao: catalog.access.
   const canEditContent = can(access, "catalog.content");
-  const canWrite = can(access, "catalog.write");
+  const canWrite = can(access, "catalog.access");
   const loaded = await loadUnlessPendingMigration(() =>
     Promise.all([getProductContent(id), lessonId ? getLessonEditorData(id, lessonId) : Promise.resolve(null)])
   );

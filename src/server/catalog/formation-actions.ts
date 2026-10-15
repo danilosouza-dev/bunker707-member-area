@@ -70,9 +70,9 @@ function failOnFormationError(error: { code?: string; message: string } | null, 
   failOnError(error, context);
 }
 
-/** [catalog.write] Curso existente (formato Curso, sem acessos ativos proprios) passa a fazer parte da formacao. */
+/** [catalog.access] Curso existente (formato Curso, sem acessos ativos proprios) passa a fazer parte da formacao. */
 export async function addCourseToFormation(input: FormationCourseInput): Promise<ActionResult<FormationCourseItem[]>> {
-  return runAdminAction("catalog.write", formationCourseSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.access", formationCourseSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const formation = await requireFormation(data.formationId, db);
     const { course, parentFormationId } = await requireCourse(data.courseId, db);
@@ -96,9 +96,9 @@ export async function addCourseToFormation(input: FormationCourseInput): Promise
   });
 }
 
-/** [catalog.write] Tira da formacao sem apagar: vira curso avulso em Rascunho. */
+/** [catalog.access] Tira da formacao sem apagar: vira curso avulso em Rascunho. */
 export async function removeCourseFromFormation(input: FormationCourseInput): Promise<ActionResult<FormationCourseItem[]>> {
-  return runAdminAction("catalog.write", formationCourseSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.access", formationCourseSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const formation = await requireFormation(data.formationId, db);
     const { course, parentFormationId } = await requireCourse(data.courseId, db);
@@ -121,7 +121,7 @@ export async function removeCourseFromFormation(input: FormationCourseInput): Pr
 
 /** [catalog.write] */
 export async function reorderFormationCourses(input: ReorderFormationCoursesInput): Promise<ActionResult<FormationCourseItem[]>> {
-  return runAdminAction("catalog.write", reorderFormationCoursesSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.access", reorderFormationCoursesSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const formation = await requireFormation(data.formationId, db);
     const { courses } = await fetchIncludedCourses(formation.id, db);

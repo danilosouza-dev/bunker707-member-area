@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/admin/v2/page-header";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { ProductListView } from "@/components/admin/v2/products/product-list-view";
 import { requirePageArea } from "@/server/auth/permissions";
-import { can } from "@/server/auth/roles";
+import { can, catalogScope } from "@/server/auth/roles";
 import { listProducts } from "@/server/catalog/queries";
 import { parseProductListSearchParams } from "@/server/catalog/schemas";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
@@ -29,7 +29,8 @@ function readTime() {
 export default async function AdminProductsPage({ searchParams }: AdminProductsPageProps) {
   const { access } = await requirePageArea("produtos");
   const query = parseProductListSearchParams(await searchParams);
-  const loaded = await loadUnlessPendingMigration(() => listProducts(query, access.productIds));
+  const scope = catalogScope(access);
+  const loaded = await loadUnlessPendingMigration(() => listProducts(query, scope));
 
   if (!loaded.ok) {
     return (
@@ -52,7 +53,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
 
   return (
     <AdminPage className="gap-6">
-      <ProductListView canWrite={can(access, "catalog.write")} list={list} now={readTime()} scoped={access.productIds !== null} />
+      <ProductListView canCreate={can(access, "catalog.create")} list={list} now={readTime()} scoped={scope !== null} />
     </AdminPage>
   );
 }

@@ -7,7 +7,7 @@ import { clearFiltersHref, COMMUNITY_TAB_HREFS, hasActiveFilters } from "@/compo
 import { CommunityPagination } from "@/components/admin/v2/community/pagination";
 import { EmptyState } from "@/components/admin/v2/empty-state";
 import { requirePageArea } from "@/server/auth/permissions";
-import { can } from "@/server/auth/roles";
+import { can, communityScope } from "@/server/auth/roles";
 import { getCommunityFilterOptions, getCommunityStats, listComments } from "@/server/community/queries";
 import { parseCommentListSearchParams } from "@/server/community/schemas";
 import { communityFilterKeys, lessonPathFor, scopeCommunityFilterOptions, scopeCommunityParams } from "@/server/community/scope";
@@ -49,7 +49,7 @@ export default async function CommunityCommentsPage({ searchParams }: CommunityC
   return (
     <CommunityFrame
       stats={stats}
-      toolbar={<CommunityFilters allowAllProducts={access.productIds === null} options={options} showAnswered showSearch showStatus />}
+      toolbar={<CommunityFilters allowAllProducts={communityScope(access) === null} options={options} showAnswered showSearch showStatus />}
     >
       {list.total === 0 ? (
         filtered ? (

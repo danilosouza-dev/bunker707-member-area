@@ -164,7 +164,7 @@ Implementacao atual:
 - apos autenticar, usuarios com papel em `admin_roles` sao direcionados para `/admin`; alunos sem papel administrativo seguem para a area de membros;
 - `/alterar-senha` permite que aluno autenticado defina nova senha quando `must_change_password` estiver ativo;
 - o `proxy.ts` redireciona usuarios com `must_change_password = true` para `/alterar-senha` antes de liberar a area de membros;
-- `/admin` exige papel em `admin_roles`, e cada area, tela e acao exige a permissao dela (docs/17 §2.3): menu e busca mostram so o que a pessoa pode abrir, e o Professor fica preso aos cursos dele (`requireScope`, `src/server/auth/product-scope.ts`);
+- `/admin` exige papel em `admin_roles`, e cada area, tela e acao exige a permissao dela (docs/17 §2.3): menu e busca mostram so o que a pessoa pode abrir, e permissao que vale so nos cursos da pessoa (a do Professor, por exemplo) fica presa aos cursos dela (`requireScope`, `src/server/auth/product-scope.ts`). As permissoes somam as funcoes da pessoa (prontas e personalizadas, `admin_functions`) e os extras dela, calculadas uma vez por requisicao (`loadAdminAccess`, `src/server/auth/admin-access.ts`);
 - APIs de progresso exigem usuario autenticado e APIs do CMS exigem permissao administrativa.
 
 Cadastro manual de aluno:
@@ -479,7 +479,7 @@ Para facilitar migracao futura para Hetzner:
 - `YOUTUBE_DATA_API_KEY` e `SUPABASE_SERVICE_ROLE_KEY` permanecem somente no servidor;
 - o backend rele a playlist no momento da gravacao e nao confia na arvore enviada pelo navegador;
 - o modo `automatic` deriva modulos e aulas dos titulos; o modo `manual_ranges` recebe somente nomes e intervalos de posicoes, relê a playlist no servidor e rejeita lacunas, sobreposicoes, intervalos vazios e posicoes invalidas;
-- a funcao Postgres `import_youtube_course(jsonb)` grava curso, configuracao, modulos, aulas e fonte em uma unica transacao;
+- a funcao Postgres `import_youtube_course(jsonb)` grava curso, configuracao, modulos, aulas e fonte em uma unica transacao; o admin chama por `admin_import_new_youtube_course(jsonb)`, que trava a playlist e recusa (`playlist_already_imported`) a que ja virou curso, para duas importacoes ao mesmo tempo nao regravarem o curso uma da outra;
 - IDs derivados da playlist e dos videos tornam o reenvio idempotente;
 - itens que desapareceram da playlist sao arquivados, nao apagados, preservando auditoria e progresso;
 - o caminho sem chave da API oficial e um fallback para playlists publicamente acessiveis e pode exigir manutencao se o HTML do YouTube mudar.

@@ -7,6 +7,7 @@ import { cache } from "react";
 import { unstable_noStore as noStore } from "next/cache";
 import { after } from "next/server";
 import type { AuthenticatedUser } from "@/server/auth/session";
+import { catalogScope, hasCourseScope } from "@/server/auth/roles";
 import { getAdminAccessForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { persistImageAsset } from "@/server/db/media-assets";
@@ -948,7 +949,7 @@ async function readStaffProductIds(userId: string): Promise<string[]> {
   try {
     const access = await getAdminAccessForUser(userId);
 
-    return access?.productIds ? [...access.productIds] : [];
+    return access && hasCourseScope(access) ? [...access.courseIds] : [];
   } catch {
     return [];
   }
@@ -2202,8 +2203,8 @@ export async function getAppShellData(user?: AuthenticatedUser) {
 
   return {
     branding: database.branding,
-    // "Ver como aluno com/sem acesso": so a equipe da escola toda (o Professor ve os cursos dele de verdade).
-    canUseAccessPreview: Boolean(adminAccess && adminAccess.productIds === null),
+    // "Ver como aluno com/sem acesso": so quem ve o catalogo da escola toda (o Professor ve os cursos dele de verdade).
+    canUseAccessPreview: Boolean(adminAccess && catalogScope(adminAccess) === null),
     // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam.
     student: { ...getStudentForUser(database, user, profile?.fullName), avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl) }
   };

@@ -6,7 +6,7 @@ import { TEAM_PATH } from "@/components/admin/v2/team/hrefs";
 import { TeamMemberForm } from "@/components/admin/v2/team/team-member-form";
 import { requirePageRole } from "@/server/auth/permissions";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
-import { listTeamCourseOptions } from "@/server/team/queries";
+import { listTeamCourseOptions, listTeamFunctions } from "@/server/team/queries";
 
 export const metadata: Metadata = {
   title: "Adicionar pessoa"
@@ -18,11 +18,11 @@ const breadcrumb = [
   { label: "Adicionar pessoa" }
 ];
 
-// Adicionar alguem a equipe (docs/17 §2.3): e-mail e funcao. Professor pede os cursos; Personalizado,
-// as permissoes. So o dono.
+// Adicionar alguem a equipe (docs/17 §2.3): e-mail, uma ou mais funcoes e, se precisar, permissoes
+// extras e cursos. So o dono.
 export default async function NewTeamMemberPage() {
   await requirePageRole("settings.team", "/admin/configuracoes");
-  const loaded = await loadUnlessPendingMigration(() => listTeamCourseOptions());
+  const loaded = await loadUnlessPendingMigration(() => Promise.all([listTeamCourseOptions(), listTeamFunctions()]));
 
   if (!loaded.ok) {
     return (
@@ -33,14 +33,16 @@ export default async function NewTeamMemberPage() {
     );
   }
 
+  const [courses, { functions }] = loaded.data;
+
   return (
     <AdminPage className="gap-6">
       <PageHeader
         breadcrumb={breadcrumb}
-        description="E-mail e função bastam. Professor pede os cursos; Personalizado, o que a pessoa pode fazer."
+        description="E-mail e uma função bastam. Dá para juntar funções e somar permissões só para esta pessoa."
         title="Adicionar pessoa"
       />
-      <TeamMemberForm courses={loaded.data} />
+      <TeamMemberForm courses={courses} customFunctions={functions} />
     </AdminPage>
   );
 }

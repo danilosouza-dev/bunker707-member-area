@@ -11,10 +11,9 @@ import { RemoveTeamMemberButton, ResendTeamInviteButton } from "@/components/adm
 import { PermissionSummary } from "@/components/admin/v2/team/permission-checklist";
 import { TeamMemberForm } from "@/components/admin/v2/team/team-member-form";
 import { requirePageRole } from "@/server/auth/permissions";
-import { ADMIN_ROLE_LABELS } from "@/server/auth/roles";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
-import { actionsOfRole } from "@/server/team/model";
-import { getTeamMember, listTeamCourseOptions } from "@/server/team/queries";
+import { describeMemberFunctions, functionDefinitions, memberGrantsOf } from "@/server/team/model";
+import { getTeamMember, listTeamCourseOptions, listTeamFunctions } from "@/server/team/queries";
 
 export const metadata: Metadata = {
   title: "Pessoa da equipe"
@@ -41,7 +40,7 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
   const { user } = await requirePageRole("settings.team", "/admin/configuracoes");
   const { userId } = await params;
   const valid = userIdSchema.safeParse(userId).success;
-  const loaded = valid ? await loadUnlessPendingMigration(() => Promise.all([getTeamMember(userId), listTeamCourseOptions()])) : null;
+  const loaded = valid ? await loadUnlessPendingMigration(() => Promise.all([getTeamMember(userId), listTeamCourseOptions(), listTeamFunctions()])) : null;
 
   if (loaded && !loaded.ok) {
     return (
@@ -52,7 +51,7 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
     );
   }
 
-  const [member, courses] = loaded?.ok ? loaded.data : [null, []];
+  const [member, courses, { functions }] = loaded?.ok ? loaded.data : [null, [], { functions: [] }];
 
   if (!member) {
     return (
@@ -69,6 +68,8 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
   }
 
   const isSelf = member.userId === user.id;
+  const names = new Map(functions.map((fn) => [fn.id, fn]));
+  const functionsLabel = describeMemberFunctions(member, names);
   const lastAccess = member.lastSignInAt ? `Último acesso ${formatRelativeDate(member.lastSignInAt, readNow()).toLocaleLowerCase("pt-BR")}` : "Nunca entrou";
   const sectionTitle = "text-[15px] leading-5 font-semibold text-[var(--text-primary)]";
 
@@ -76,7 +77,7 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
     <AdminPage className="gap-8">
       <PageHeader
         breadcrumb={breadcrumbFor(member.fullName)}
-        description={`${member.email || "Sem e-mail"} · ${ADMIN_ROLE_LABELS[member.role]} · ${lastAccess} · Na equipe desde ${formatShortDate(member.createdAt)}`}
+        description={`${member.email || "Sem e-mail"} · ${functionsLabel} · ${lastAccess} · Na equipe desde ${formatShortDate(member.createdAt)}`}
         title={member.fullName}
       />
 
@@ -85,17 +86,27 @@ export default async function TeamMemberPage({ params }: TeamMemberPageProps) {
           <p className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] px-4 py-3 text-sm leading-5 text-[var(--text-secondary)]">
             Esta é a sua conta. Ninguém muda a própria função: se precisar, peça a outro dono.
           </p>
-          <h2 className={sectionTitle}>O que a sua função permite</h2>
+          <h2 className={sectionTitle}>O que você pode fazer</h2>
           <PermissionSummary
-            actions={actionsOfRole(member.role, member.actions)}
-            extra={member.role === "owner" ? ["Mudar a equipe", "Chaves das plataformas de venda"] : []}
+            coursesLabel="Só nos seus cursos"
+            extra={member.owner ? ["Mudar a equipe", "Chaves das plataformas de venda"] : []}
+            grants={memberGrantsOf(member, functionDefinitions(functions))}
           />
         </section>
       ) : (
         <>
           <TeamMemberForm
             courses={courses}
-            member={{ actions: member.actions, productIds: member.productIds, role: member.role, updatedAt: member.updatedAt, userId: member.userId }}
+            customFunctions={functions}
+            member={{
+              extraActions: member.extraActions,
+              extraScopedActions: member.extraScopedActions,
+              functions: member.functions,
+              owner: member.owner,
+              productIds: member.productIds,
+              updatedAt: member.updatedAt,
+              userId: member.userId
+            }}
           />
           <section aria-labelledby="acesso-titulo" className="flex max-w-[720px] flex-col gap-3 border-t border-[var(--border-subtle)] pt-6">
             <h2 className={sectionTitle} id="acesso-titulo">

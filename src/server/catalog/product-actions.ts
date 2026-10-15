@@ -8,9 +8,11 @@ import { normalizeHeroVideoOptions } from "../../lib/hero-video";
 import { detectLessonVideo } from "../../lib/video-detect";
 import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
+import { can, isActionScoped } from "@/server/auth/roles";
 import { invalidateCatalog } from "@/server/catalog/cache";
 import { deleteContentItem } from "@/server/db/platform-store";
-import { CatalogNotFoundError, CatalogRuleError } from "./errors";
+import { addCreatedCourseToScope, assertCreatorScopeRoom } from "./creator-scope";
+import { CatalogFieldError, CatalogNotFoundError, CatalogRuleError } from "./errors";
 import { persistProductImage } from "./images";
 import {
   PRODUCT_COLUMNS,
@@ -93,9 +95,26 @@ function supportsPresentationSettings(kind: string) {
   return kind !== "Formacao";
 }
 
-/** [catalog.write] Cria em Rascunho e devolve o endereco da aba Conteúdo. */
+/**
+ * [catalog.create] Cria em Rascunho e devolve o endereco da aba Conteúdo. Sem "regras de acesso e venda",
+ * o produto nasce so para quem tiver acesso, sem link de venda e fora de formacao, e Formação nao e
+ * criada (quem cuida de venda ajusta depois). Quem cria so nos proprios cursos ganha o curso novo na lista.
+ */
 export async function createProduct(input: CreateProductInput): Promise<ActionResult<CreatedProduct>> {
-  return runAdminAction("catalog.write", createProductSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.create", createProductSchema, input, async ({ access, input: requested, user }) => {
+    const canSetAccess = can(access, "catalog.access");
+
+    if (!canSetAccess && requested.parentFormationId) {
+      throw new CatalogRuleError("Curso dentro de uma formação é com quem cuida de acesso e venda. Crie o curso avulso.");
+    }
+
+    if (!canSetAccess && requested.format === "formacao") {
+      throw new CatalogFieldError("format", "Formação é com quem cuida de acesso e venda. Escolha outro formato.");
+    }
+
+    assertCreatorScopeRoom(access);
+
+    const data = canSetAccess ? requested : { ...requested, audience: "with_access" as const, purchaseUrl: null };
     const db = catalogDb();
     const parent = data.parentFormationId ? await fetchProductRow(data.parentFormationId, db) : null;
 
@@ -125,9 +144,9 @@ export async function createProduct(input: CreateProductInput): Promise<ActionRe
 
     const coverUrl = await persistProductImage("cover", id, data.cover ?? null, "cover");
     const formatLabel = PRODUCT_FORMAT_LABELS[data.format];
-    const access = accessColumnsFor({ audience: data.audience, purchaseUrl: data.purchaseUrl });
+    const accessColumns = accessColumnsFor({ audience: data.audience, purchaseUrl: data.purchaseUrl });
     const { error: insertError } = await db.from("content_items").insert({
-      ...access,
+      ...accessColumns,
       access_label: formatLabel,
       bucket,
       commerce_scope: scope,
@@ -161,9 +180,10 @@ export async function createProduct(input: CreateProductInput): Promise<ActionRe
     }
 
     invalidateCatalog({ from: "action" });
+    await addCreatedCourseToScope(access, user.id, id);
 
     return { href: productHrefFor(id), id };
-  });
+  }, { target: () => "any" });
 }
 
 /** [catalog.write] Nome editavel no cabecalho (autosave com updated_at). */
@@ -181,7 +201,7 @@ export async function renameProduct(input: RenameProductInput): Promise<ActionRe
     invalidateCatalog({ from: "action" });
 
     return { header: await headerForRow(row) };
-  });
+  }, { target: (data) => ({ productIds: [data.id] }) });
 }
 
 /** [catalog.write] Aba Detalhes. */
@@ -275,12 +295,12 @@ export async function updateProductDetails(input: UpdateProductDetailsInput): Pr
     invalidateCatalog({ from: "action" });
 
     return { header: await headerForRow(row) };
-  });
+  }, { target: (data) => ({ productIds: [data.id] }) });
 }
 
-/** [catalog.write] Aba Acesso e venda. */
+/** [catalog.access] Aba Acesso e venda. */
 export async function updateProductAccess(input: UpdateProductAccessInput): Promise<ActionResult<ProductSaved>> {
-  return runAdminAction("catalog.write", updateProductAccessSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.access", updateProductAccessSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const current = await requireProductRow(data.id, db);
     const audience = data.audience ?? audienceFromColumns({ accessModel: current.access_model, listing: current.listing });
@@ -353,7 +373,7 @@ export async function setProductHeroCorners(input: SetProductHeroCornersInput): 
     invalidateCatalog({ from: "action" });
 
     return { corners: data.corners, updatedAt: row.updated_at };
-  });
+  }, { target: (data) => ({ productIds: [data.id] }) });
 }
 
 // Textos do banner da pagina do produto nascem escondidos quando a midia e gravada pelo admin novo.
@@ -441,7 +461,7 @@ export async function setProductHeroVideo(input: SetProductHeroVideoInput): Prom
     invalidateCatalog({ from: "action" });
 
     return { updatedAt: row.updated_at, videoKind: videoUrl ? (youtubeId ? "youtube" : "file") : null, videoUrl };
-  });
+  }, { target: (data) => ({ productIds: [data.id] }) });
 }
 
 /** [catalog.write] Opcoes do video de destaque (tocar sozinho, repetir, botoes, recorte do YouTube). */
@@ -466,7 +486,7 @@ export async function setProductHeroVideoOptions(input: SetProductHeroVideoOptio
     invalidateCatalog({ from: "action" });
 
     return { options, updatedAt: row.updated_at };
-  });
+  }, { target: (data) => ({ productIds: [data.id] }) });
 }
 
 /** [catalog.write] Capa (ate 720×1080) ou hero (1920×720) recortados no cliente em WebP; null remove. */
@@ -514,7 +534,7 @@ export async function setProductImage(input: SetProductImageInput): Promise<Acti
     invalidateCatalog({ from: "action" });
 
     return { slot: data.slot, updatedAt: row.updated_at, url };
-  });
+  }, { target: (data) => ({ productIds: [data.id] }) });
 }
 
 /** [catalog.publish] Checklist atual, para o dialogo "Publicar" (leitura sob demanda). */
@@ -527,12 +547,12 @@ export async function loadPublishChecklist(input: { id: string }): Promise<Actio
     }
 
     return checklist;
-  });
+  }, { target: (data) => ({ productIds: [data.id] }) });
 }
 
 /** [catalog.publish] Reavalia o checklist no servidor; com bloqueio devolve published: false. */
 export async function publishProduct(input: PublishProductInput): Promise<ActionResult<ProductPublished>> {
-  return runAdminAction("catalog.publish", publishProductSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.publish", publishProductSchema, input, async ({ access, input: data }) => {
     const db = catalogDb();
     const current = await requireProductRow(data.id, db);
     const checklist = await evaluateChecklistFor(current);
@@ -545,6 +565,17 @@ export async function publishProduct(input: PublishProductInput): Promise<Action
       return { checklist, header: await headerForRow(current), published: false };
     }
 
+    // O aluno so acessa curso incluido publicado: publicar a formacao publica junto os cursos em rascunho.
+    const draftIds =
+      productFormatOf(current) === "formacao"
+        ? (await fetchIncludedCourses(current.id, db)).courses.filter((course) => course.publication_status === "draft").map((course) => course.id)
+        : [];
+
+    // Quem publica so nos proprios cursos nao publica, junto com a formacao, curso de fora da lista.
+    if (isActionScoped(access, "catalog.publish") && draftIds.some((id) => !access.courseIds.includes(id))) {
+      throw new CatalogRuleError("Esta formação tem cursos em rascunho fora da sua lista. Peça a quem cuida de acesso e venda para publicar.");
+    }
+
     const row = await updateRowGuarded<ProductRow>({
       columns: PRODUCT_COLUMNS,
       db,
@@ -555,21 +586,15 @@ export async function publishProduct(input: PublishProductInput): Promise<Action
       table: "content_items"
     });
 
-    if (productFormatOf(row) === "formacao") {
-      // O aluno so acessa curso incluido publicado: publicar a formacao publica junto os cursos em rascunho.
-      const { courses } = await fetchIncludedCourses(row.id, db);
-      const draftIds = courses.filter((course) => course.publication_status === "draft").map((course) => course.id);
-
-      if (draftIds.length > 0) {
-        const { error } = await db.from("content_items").update({ publication_status: "published" }).in("id", draftIds);
-        failOnError(error, "Publicando cursos da formacao");
-      }
+    if (draftIds.length > 0) {
+      const { error } = await db.from("content_items").update({ publication_status: "published" }).in("id", draftIds);
+      failOnError(error, "Publicando cursos da formacao");
     }
 
     invalidateCatalog({ from: "action" });
 
     return { checklist, header: await headerForRow(row), published: true };
-  });
+  }, { target: (data) => ({ productIds: [data.id] }) });
 }
 
 /** [catalog.publish] Voltar para Rascunho ou Arquivar. */
@@ -587,7 +612,7 @@ export async function setProductSituation(input: SetProductSituationInput): Prom
     invalidateCatalog({ from: "action" });
 
     return { header: await headerForRow(row) };
-  });
+  }, { target: (data) => ({ productIds: [data.id] }) });
 }
 
 /** [catalog.delete] Exclui de verdade (revoga acessos ligados); exige digitar o nome. */

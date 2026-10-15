@@ -16,7 +16,19 @@ import {
   type AdminAction
 } from "@/server/auth/roles";
 
-export { can, canAny, canRole, canSeeProductSettings, isProductInScope, rolesFor, type AdminAccess, type AdminAction } from "@/server/auth/roles";
+export {
+  can,
+  canAny,
+  canRole,
+  canSeeProductAccess,
+  canSeeProductDetails,
+  catalogScope,
+  communityScope,
+  isProductInScope,
+  rolesFor,
+  type AdminAccess,
+  type AdminAction
+} from "@/server/auth/roles";
 export type { ProductScopeTarget } from "@/server/auth/product-scope";
 
 /** Erro de permissao com status HTTP; toActionError (src/lib/action-result.ts) o converte em 401/403. */
@@ -31,10 +43,10 @@ export class AdminPermissionError extends Error {
 }
 
 /**
- * Onde a acao mexe, para quem tem acesso so a alguns cursos (Professor):
+ * Onde a acao mexe, para quem tem a acao so nos cursos dele (ex.: Professor):
  * - um ProductScopeTarget (produto, modulo, aula ou comentario), conferido contra os cursos da pessoa;
- * - "any": a acao nao toca dado de curso (ex.: pre-visualizar um link de video);
- * - ausente: a acao vale para a escola toda e quem tem escopo e recusado (negar por padrao).
+ * - "any": a acao nao toca curso existente (ex.: pre-visualizar um link de video, criar curso);
+ * - ausente: a acao nao diz onde mexe e quem a tem so por curso e recusado (negar por padrao).
  */
 export type ScopeTarget = ProductScopeTarget | "any";
 
@@ -64,13 +76,13 @@ export async function requireRole(action: AdminAction) {
   return { access, role: access.role, user };
 }
 
-/** Escopo por curso: sem escopo (escola toda) passa direto; com escopo, todo curso tocado tem que ser da pessoa. */
-export async function requireScope(access: AdminAccess, target: ScopeTarget | undefined) {
-  if (access.productIds === null || target === "any") {
+/** Escopo por curso: acao da escola toda passa direto; acao por curso exige que todo curso tocado seja da pessoa. */
+export async function requireScope(access: AdminAccess, action: AdminAction, target: ScopeTarget | undefined) {
+  if (!access.scopedActions.has(action) || target === "any") {
     return;
   }
 
-  if (!target || !scopeAllows(access, await resolveTargetProductIds(target))) {
+  if (!target || !scopeAllows(access, action, await resolveTargetProductIds(target))) {
     throw new AdminPermissionError(OUT_OF_SCOPE_MESSAGE, 403);
   }
 }
@@ -91,7 +103,7 @@ export async function requireApiRole(action: AdminAction, target?: ScopeTarget) 
   }
 
   try {
-    await requireScope(auth.access, target);
+    await requireScope(auth.access, action, target);
   } catch (error) {
     if (error instanceof AdminPermissionError) {
       return { ...auth, response: NextResponse.json({ error: error.message }, { status: error.status }) };
