@@ -24,6 +24,7 @@ type MemberAccountMenuProps = {
   pathname: string;
   signingOut: boolean;
   student: {
+    avatarUrl?: string | null;
     fullName: string;
     name: string;
   };
@@ -158,7 +159,7 @@ export function MemberAccountMenu({
         ref={triggerRef}
         type="button"
       >
-        <MemberAvatar name={displayName} size="sm" />
+        <MemberAvatar imageSrc={student.avatarUrl} name={displayName} size="sm" />
       </button>
 
       {open ? (
@@ -169,7 +170,7 @@ export function MemberAccountMenu({
           role="region"
         >
           <div className="flex items-center gap-3 px-2.5 pb-3 pt-2.5">
-            <MemberAvatar name={displayName} size="md" />
+            <MemberAvatar imageSrc={student.avatarUrl} name={displayName} size="md" />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-white">{displayName}</p>
               <p className="mt-0.5 text-xs font-medium text-zinc-400">Sua conta</p>

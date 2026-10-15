@@ -31,6 +31,7 @@ type AppShellProps = {
   canUseAccessPreview?: boolean;
   children: React.ReactNode;
   student: {
+    avatarUrl?: string | null;
     fullName: string;
     name: string;
   };
