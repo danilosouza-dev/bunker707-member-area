@@ -444,6 +444,73 @@ export function hasStudentListFilters(params: StudentListParams) {
   );
 }
 
+/**
+ * Filtros da lista em duas partes: a BASE (produto, turma, busca) continua quando o produtor troca de
+ * segmento; o SEGMENTO (ritmo, prazo, login, comecou, comentadores, semana do ciclo de vida) e o que
+ * cada pilula define. Assim as contagens das pilulas valem para o produto, a turma e a busca atuais.
+ */
+const BASE_PARAM_KEYS = ["productId", "cohortId", "q"] as const;
+const SEGMENT_PARAM_KEYS = ["pace", "expiring", "account", "notStarted", "commenters", "week", "group"] as const;
+
+function isFilled(value: unknown) {
+  return value !== undefined && value !== null && value !== "" && value !== false;
+}
+
+/** So as chaves conhecidas dos filtros, sem vazios (descarta pagina, tamanho da pagina e o que vier a mais). */
+export function pickStudentListParams(value: Readonly<Record<string, unknown>>): StudentListParams {
+  const params: Record<string, unknown> = {};
+
+  for (const key of [...BASE_PARAM_KEYS, ...SEGMENT_PARAM_KEYS]) {
+    const raw = value[key];
+    const normalized = typeof raw === "string" ? raw.trim() : raw;
+
+    if (isFilled(normalized)) {
+      params[key] = normalized;
+    }
+  }
+
+  return params as StudentListParams;
+}
+
+export function splitStudentListParams(params: StudentListParams): { base: StudentListParams; segment: StudentListParams } {
+  const picked = pickStudentListParams(params);
+  const base: Record<string, unknown> = {};
+  const segment: Record<string, unknown> = {};
+
+  for (const key of BASE_PARAM_KEYS) {
+    if (isFilled(picked[key])) base[key] = picked[key];
+  }
+
+  for (const key of SEGMENT_PARAM_KEYS) {
+    if (isFilled(picked[key])) segment[key] = picked[key];
+  }
+
+  return { base: base as StudentListParams, segment: segment as StudentListParams };
+}
+
+/** Mesmos filtros, sem depender da ordem das chaves nem de valores vazios. */
+export function sameStudentListParams(left: StudentListParams, right: StudentListParams) {
+  const canonical = (params: StudentListParams) => {
+    const picked = pickStudentListParams(params);
+
+    return JSON.stringify(Object.keys(picked).sort().map((key) => [key, picked[key as keyof StudentListParams]]));
+  };
+
+  return canonical(left) === canonical(right);
+}
+
+/** Filtros sem a semana do ciclo de vida (uma semana fixa nao vira segmento salvo). */
+export function withoutLifecycle(params: StudentListParams): StudentListParams {
+  const picked = pickStudentListParams(params);
+  const next: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(picked)) {
+    if (key !== "week" && key !== "group") next[key] = value;
+  }
+
+  return next as StudentListParams;
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Segmentos prontos (docs/17 §1.7.1), cada um com a regra escrita para o produtor.
  * ---------------------------------------------------------------------------------------------- */
@@ -453,18 +520,21 @@ export type StudentSegmentPreset = {
   id: string;
   label: string;
   params: StudentListParams;
+  /** "main" = pilula na linha de cima; "more" = menu "Mais segmentos". */
+  placement: "main" | "more";
 };
 
 export const STUDENT_SEGMENT_PRESETS: readonly StudentSegmentPreset[] = [
-  { formula: "Todos os alunos cadastrados.", id: "todos", label: "Todos", params: {} },
-  { formula: "Progresso gravado em aula há menos de 14 dias.", id: "estudando", label: "Estudando", params: { pace: "studying" } },
-  { formula: "Entre 14 e 29 dias sem progresso em aula.", id: "em-risco", label: "Em risco", params: { pace: "at_risk" } },
-  { formula: "Nenhum progresso gravado em aula.", id: "nunca-comecaram", label: "Nunca começaram", params: { pace: "never_started" } },
-  { formula: "Todas as aulas publicadas dos produtos com acesso concluídas.", id: "concluiram", label: "Concluíram", params: { pace: "completed" } },
-  { formula: "Acesso ativo que termina em até 30 dias.", id: "expiram-30", label: "Expiram em 30 dias", params: { expiring: true } },
-  { formula: "Conta criada e nenhum login até agora.", id: "nunca-entraram", label: "Nunca entraram", params: { account: "never" } },
-  { formula: "Acesso liberado há 2 a 7 dias e nenhum progresso em aula.", id: "compraram-nao-comecaram", label: "Compraram e não começaram", params: { notStarted: true } },
-  { formula: "Mesma régua de Comunidade › Top alunos (os 100 primeiros por pontuação): comentários aprovados + respostas a colegas + reações recebidas, 28 dias.", id: "top-comentadores", label: "Top comentadores", params: { commenters: "top" } }
+  { formula: "Todos os alunos com os filtros atuais.", id: "todos", label: "Todos", params: {}, placement: "main" },
+  { formula: "Progresso gravado em aula há menos de 14 dias.", id: "estudando", label: "Estudando", params: { pace: "studying" }, placement: "main" },
+  { formula: "Entre 14 e 29 dias sem progresso em aula.", id: "em-risco", label: "Em risco", params: { pace: "at_risk" }, placement: "main" },
+  { formula: "30 dias ou mais sem progresso em aula.", id: "inativos", label: "Inativos", params: { pace: "inactive" }, placement: "main" },
+  { formula: "Nenhum progresso gravado em aula.", id: "nunca-comecaram", label: "Nunca começaram", params: { pace: "never_started" }, placement: "main" },
+  { formula: "Todas as aulas publicadas dos produtos com acesso concluídas.", id: "concluiram", label: "Concluíram", params: { pace: "completed" }, placement: "main" },
+  { formula: "Acesso ativo que termina em até 30 dias.", id: "expiram-30", label: "Expiram em 30 dias", params: { expiring: true }, placement: "more" },
+  { formula: "Conta criada e nenhum login até agora.", id: "nunca-entraram", label: "Nunca entraram", params: { account: "never" }, placement: "more" },
+  { formula: "Acesso liberado há 2 a 7 dias e nenhum progresso em aula.", id: "compraram-nao-comecaram", label: "Compraram e não começaram", params: { notStarted: true }, placement: "more" },
+  { formula: "Mesma régua de Comunidade › Top alunos (os 100 primeiros por pontuação): comentários aprovados, respostas a colegas e reações recebidas em 28 dias.", id: "top-comentadores", label: "Top comentadores", params: { commenters: "top" }, placement: "more" }
 ];
 
 export const NOT_STARTED_MIN_DAYS = 2;

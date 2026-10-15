@@ -15,6 +15,7 @@ import {
   type LifecycleWeek
 } from "@/server/students/model";
 import { ChartCard } from "../chart-card";
+import { adminCard } from "../styles";
 import { formatShortDate } from "./format";
 import { studentListHref } from "./hrefs";
 
@@ -71,25 +72,34 @@ export function LifecycleCard({ approximateUntil, weeks }: LifecycleCardProps) {
     router.push(studentListHref({}, { group, week: weekStart }));
   }
 
+  // Sem estudo registrado ainda: uma faixa de uma linha em vez de um grafico vazio ocupando a tela.
+  if (!hasData) {
+    return (
+      <section aria-label="Ciclo de vida" className={cn(adminCard, "flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-[13px] leading-5")}>
+        <ChartColumn aria-hidden="true" className="size-4 shrink-0 text-[var(--text-tertiary)]" />
+        <h2 className="font-medium text-[var(--text-primary)]">Ciclo de vida</h2>
+        <p className="min-w-0 text-[var(--text-secondary)]">
+          Aparece quando houver estudo registrado pelo player. {LIFECYCLE_ACTIVE_RULE}
+        </p>
+      </section>
+    );
+  }
+
   return (
     <ChartCard
       actions={
-        hasData ? (
-          <Button aria-pressed={asTable} className="gap-1.5 px-3" onClick={() => setAsTable((value) => !value)} type="button" variant="ghost">
-            {asTable ? <ChartColumn aria-hidden="true" className="size-4" /> : <Table2 aria-hidden="true" className="size-4" />}
-            {asTable ? "Ver como gráfico" : "Ver como tabela"}
-          </Button>
-        ) : undefined
+        <Button aria-pressed={asTable} className="gap-1.5 px-3" onClick={() => setAsTable((value) => !value)} type="button" variant="ghost">
+          {asTable ? <ChartColumn aria-hidden="true" className="size-4" /> : <Table2 aria-hidden="true" className="size-4" />}
+          {asTable ? "Ver como gráfico" : "Ver como tabela"}
+        </Button>
       }
-      emptyDescription="Aparece quando houver estudo registrado pelo player. Semana ativa = 10 minutos assistidos ou 1 aula concluída."
-      emptyTitle="Sem dados no período"
       footer={
         <p className="text-xs leading-5 text-[var(--text-tertiary)]">
           {LIFECYCLE_ACTIVE_RULE}
           {approximateUntil ? ` Dados aproximados até ${formatShortDate(`${approximateUntil}T12:00:00.000Z`)}; exatos a partir daí.` : ""}
         </p>
       }
-      height={220}
+      height={200}
       legend={
         <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text-secondary)]">
           {SERIES.map((series) => (
@@ -101,7 +111,7 @@ export function LifecycleCard({ approximateUntil, weeks }: LifecycleCardProps) {
         </ul>
       }
       meta="últimas 12 semanas"
-      state={hasData ? "ready" : "empty"}
+      state="ready"
       title="Ciclo de vida"
     >
       {asTable ? (
