@@ -3,12 +3,23 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: /
+    # Fluxo do repositorio: feature -> dev -> main. As atualizacoes entram pela dev, como todo o resto.
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
       time: "09:00"
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
+    ignore:
+      # ESLint 10: eslint-plugin-react, eslint-plugin-import e eslint-plugin-jsx-a11y (usados pelo
+      # eslint-config-next) so suportam ate o ESLint 9. Reavaliar quando o Next declarar suporte.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+      # @types/node acompanha o Node do servidor (engines: >=24 <25); versoes maiores descrevem APIs
+      # que o runtime nao tem.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       next-stack:
         patterns:
@@ -19,6 +30,7 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
