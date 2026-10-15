@@ -126,19 +126,22 @@ function buildColumns(now: number, productId?: string): DataTableColumn<StudentL
 }
 
 export function StudentListTable({ canAdd, filtered, filters, now, rows, selectable = false }: StudentListTableProps) {
+  // A equipe nunca entra nas acoes em massa (o servidor tambem recusa): a linha fica sem caixa e o
+  // "selecionar todos" conta so os alunos.
+  const selectableIds = rows.filter((row) => !row.isStaff).map((row) => row.id);
   const leading: DataTableLeading<StudentListItem> | undefined = selectable
     ? {
-        cell: (row) => <RowSelectCheckbox id={row.id} label={row.fullName} />,
-        header: <SelectAllCheckbox ids={rows.map((row) => row.id)} />
+        cell: (row) => (row.isStaff ? null : <RowSelectCheckbox id={row.id} label={row.fullName} />),
+        header: selectableIds.length > 0 ? <SelectAllCheckbox ids={selectableIds} /> : null
       }
     : undefined;
 
   return (
     <>
-      {selectable && rows.length > 0 ? (
+      {selectable && selectableIds.length > 0 ? (
         <label className="flex items-center gap-2 text-[13px] text-[var(--text-secondary)] md:hidden">
-          <SelectAllCheckbox ids={rows.map((row) => row.id)} />
-          Selecionar os {rows.length} desta página
+          <SelectAllCheckbox ids={selectableIds} />
+          {selectableIds.length === 1 ? "Selecionar o aluno desta página" : `Selecionar os ${selectableIds.length} desta página`}
         </label>
       ) : null}
     <DataTable
