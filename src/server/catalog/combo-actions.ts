@@ -1,7 +1,7 @@
 "use server";
 
 // Escritas de Pacotes (frente E; mesmas assinaturas de SaveComboAction e DeleteComboAction em types.ts).
-// Granular, como upsertProductCombo do admin antigo faz na gravacao, mas sem ler o banco inteiro:
+// Granular, sem ler o banco inteiro:
 // uma linha em product_combos e a troca dos itens daquele pacote, numa transacao. Papel: catalog.write.
 // Mudar os produtos de um pacote nao mexe no acesso de quem ja comprou (D7: nada retroativo).
 
@@ -68,7 +68,7 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
     const db = getSupabaseAdminClient();
     const productIds = Array.from(new Set(input.productIds));
 
-    // So produtos vendidos sozinhos entram num pacote (mesma regra do admin antigo).
+    // So produtos vendidos sozinhos entram num pacote.
     const { data: productData, error: productError } = await db
       .from("content_items")
       .select("id")

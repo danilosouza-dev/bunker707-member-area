@@ -26,6 +26,7 @@ test("tabela de papeis segue docs/17 §2.3", () => {
     "settings.team": ["owner"],
     "storefront.write": ["owner", "admin", "editor"],
     "students.access": ["owner", "admin", "support"],
+    "students.delete": ["owner", "admin"],
     "students.export": ["owner", "admin"],
     "students.read_basic": ["owner", "admin", "editor", "support"],
     "students.read_personal": ["owner", "admin", "support"]

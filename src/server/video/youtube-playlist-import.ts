@@ -8,7 +8,6 @@ import {
   type YouTubeCourseOrganizationMode,
   type YouTubePlaylistSourceItem
 } from "@/lib/youtube-course-import";
-import { getAdminDashboardData } from "@/server/db/platform-store";
 import { persistImageAsset } from "@/server/db/media-assets";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 
@@ -491,15 +490,5 @@ export async function importYouTubePlaylistCourse(input: YouTubeCourseImportComm
   return {
     importResult: result.data as YouTubePlaylistCourseImportResult["importResult"],
     warnings: preview.warnings
-  };
-}
-
-export async function importYouTubePlaylistAsCourse(input: YouTubeCourseImportCommitInput) {
-  const { importResult, warnings } = await importYouTubePlaylistCourse(input);
-
-  return {
-    data: await getAdminDashboardData(),
-    importResult,
-    warnings
   };
 }

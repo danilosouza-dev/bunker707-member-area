@@ -16,12 +16,11 @@ import { ADMIN_TIME_ZONE } from "../format";
 import type { AdminPeriodPreset, ResolvedAdminPeriod } from "../period";
 import type { AdminAction } from "@/server/auth/roles";
 import type { ProductAccent } from "@/server/catalog/model";
+import { newStudentHref, studentListHref } from "../students/hrefs";
 import type { TodayDemoData } from "./today-demo";
 
 /** Espaco que nao quebra: "24 h", "7 dias" ficam sempre na mesma linha. */
 const NB = " ";
-
-export const LEGACY_STUDENTS_HREF = "/admin/legado?tela=alunos";
 
 /* ------------------------------------------------------------------------------------------------
  * Cabecalho
@@ -113,8 +112,7 @@ export function buildAttentionCards(input: TodayAttentionInput): TodayAttentionC
 
   if (expiring > 0) {
     cards.push({
-      // A nova tela de Alunos ainda nao existe: a lista com a data de termino fica no admin antigo.
-      action: { href: LEGACY_STUDENTS_HREF, label: "Ver no admin antigo" },
+      action: { href: studentListHref(), label: "Ver alunos" },
       count: expiring,
       id: "acessos-expirando",
       priorityLabel: `Próximos 7${NB}dias`,
@@ -257,7 +255,7 @@ export const TODAY_CREATE_ITEMS: readonly TodayCreateItem[] = [
   { href: "/admin/produtos/novo", id: "produto", label: "Produto", permission: "catalog.write" },
   { href: "/admin/produtos/importar", id: "playlist", label: "Produto a partir de uma playlist", permission: "catalog.write" },
   { href: "/admin/produtos/pacotes", id: "pacote", label: "Pacote", permission: "catalog.write" },
-  { href: LEGACY_STUDENTS_HREF, id: "aluno", label: "Aluno", meta: "admin antigo", permission: "students.access" },
+  { href: newStudentHref(), id: "aluno", label: "Aluno", permission: "students.access" },
   { href: null, id: "aviso", label: "Aviso", meta: "Em breve", permission: "messaging.write" },
   { href: null, id: "webinario", label: "Webinário", meta: "Em breve", permission: "messaging.write" },
   { href: null, id: "promocao", label: "Promoção", meta: "Em breve", permission: "messaging.write" }

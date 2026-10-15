@@ -160,8 +160,9 @@ test("abas Desempenho e Alunos: so dado real, sem linha nem numero de exemplo", 
   assert.match(model.PERFORMANCE_NOTICE, /Nada aqui é simulado\./);
   assert.doesNotMatch(performanceView, /Math\.random|onClick|href=/, "nada clicavel nem sorteado sem dado");
 
-  assert.match(studentsView, /rows=\{\[\]\}/, "a tabela de alunos nao desenha linhas ate existir a lista");
-  assert.match(studentsView, /legacyStudentSearchHref\(""\)/, "liberar acesso continua no admin antigo");
+  assert.match(studentsView, /rows=\{openToAll \? \[\] : list\.items\}/, "a tabela de alunos mostra so a lista real do banco");
+  assert.match(studentsView, /<ProductStudentsActions /, "liberar acesso e adicionar aluno ficam na propria aba");
+  assert.doesNotMatch(studentsView, /admin antigo|legacy/i);
 });
 
 test("abas do produto levam o periodo e o cabecalho fica preso ao rolar", async () => {

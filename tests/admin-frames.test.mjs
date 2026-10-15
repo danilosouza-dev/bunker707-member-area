@@ -65,7 +65,6 @@ test("Comunicacao: moldura sem numero inventado e sem botao que finge funcionar"
 
   assert.match(frame, /value=\{null\}/, "os numeros ficam em \"—\"");
   assert.match(frame, /UNDER_CONSTRUCTION_MESSAGE/);
-  assert.match(frame, /getAdminLegacyAvailability\("comunicacao"\)/);
   assert.match(frame, /preserveParams=\{\["periodo"\]\}/);
   assert.doesNotMatch(stripComments(frame), /Novo aviso|Novo webinário|Nova promoção/);
 
@@ -79,19 +78,3 @@ test("Comunicacao: moldura sem numero inventado e sem botao que finge funcionar"
   assert.match(root, /redirect\(suffix \? `\$\{COMMUNICATION_HOME_HREF\}\?\$\{suffix\}` : COMMUNICATION_HOME_HREF\)/, "leva o periodo junto");
 });
 
-test("Alunos: moldura do prototipo com o caminho para o admin antigo", async () => {
-  const frame = await read("src/components/admin/v2/frames/students-frame.tsx");
-  const page = await read("src/app/admin/(v2)/alunos/page.tsx");
-
-  assert.match(frame, /"Quem está estudando, quem precisa de atenção e o que fazer em massa\."/);
-  assert.match(frame, /title="Ciclo de vida semanal"/);
-  assert.match(frame, /state="empty"/);
-  assert.match(frame, /\["Ativos", "Novos", "Inativos"\]/);
-  assert.match(frame, /EMPTY_VALUE/);
-  assert.match(frame, /OPEN_LEGACY_ADMIN_LABEL/);
-  assert.match(frame, /UNDER_CONSTRUCTION_MESSAGE/);
-  assert.doesNotMatch(stripComments(frame), /Importar CSV|Adicionar aluno|Nome ou e-mail/, "sem controles que nao funcionam");
-
-  assert.match(page, /data-phase=\{2\}/);
-  assert.match(page, /legacyStudentSearchHref\(search \?\? ""\)/, "?busca= segue para o admin antigo");
-});

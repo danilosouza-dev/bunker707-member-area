@@ -111,7 +111,7 @@ Browser autenticado
 Invariantes:
 
 - leituras administrativas e leituras da area do aluno usam caminhos separados;
-- a leitura do aluno filtra `lesson_progress`, `saved_items`, `entitlements`, `students` e `student_courses` pela identidade autenticada;
+- a leitura do aluno filtra `lesson_progress`, `saved_items` e `entitlements` pela identidade autenticada (entitlements sao a unica fonte de acesso; as tabelas `students`/`student_courses` do admin antigo foram removidas em 14/10/2026);
 - modulos e aulas da area do aluno carregam somente registros publicados;
 - chamadas repetidas durante a mesma renderizacao sao memoizadas com `cache`, evitando a segunda leitura integral antes causada pelo shell e pela pagina;
 - favoritos e progresso usam `upsert`/`delete` direcionados; mutacoes do CMS gravam somente as tabelas afetadas;
@@ -171,7 +171,7 @@ Cadastro manual de aluno:
 
 - o CRM pode enviar convite para o aluno criar senha, que e o fluxo padrao;
 - alternativamente, o admin pode gerar ou definir uma senha temporaria;
-- a rota `/api/admin/students/access` roda apenas no servidor, exige admin e usa Supabase Admin com `service_role`;
+- as Server Actions de Alunos (`src/server/students/actions.ts`) rodam apenas no servidor, passam por `runAdminAction` com as acoes `students.*` e usam o Supabase Admin com `service_role` para criar contas, convidar e liberar acesso (`src/server/students/access.ts`, a mesma rotina que os webhooks de venda vao usar);
 - convite usa Supabase Auth e direciona para `/auth/callback?next=/alterar-senha&provider=email`, para trocar o codigo do link em sessao server-side antes de levar o aluno para definir senha;
 - senha temporaria cria ou atualiza o usuario no Supabase Auth, marca `must_change_password = true` e nao salva a senha no CMS;
 - o mesmo fluxo sincroniza `profiles` e `entitlements` para os cursos/produtos selecionados no cadastro.

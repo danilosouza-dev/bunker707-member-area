@@ -12,7 +12,6 @@ const favoritesExperienceSource = await readFile(new URL("../src/components/favo
 const appShellSource = await readFile(new URL("../src/components/app-shell.tsx", import.meta.url), "utf8");
 const platformStoreSource = await readFile(new URL("../src/server/db/platform-store.ts", import.meta.url), "utf8");
 const savedButtonSource = await readFile(new URL("../src/components/saved-item-button.tsx", import.meta.url), "utf8");
-const adminDashboardSource = await readFile(new URL("../src/components/admin-dashboard.tsx", import.meta.url), "utf8");
 const carouselNavigationSource = await readFile(new URL("../src/components/carousel-navigation.tsx", import.meta.url), "utf8");
 const cssSource = await readFile(new URL("../src/app/globals.css", import.meta.url), "utf8");
 const hoverLayoutSource = await readFile(new URL("../src/lib/home-row-hover-layout.ts", import.meta.url), "utf8");
@@ -64,10 +63,6 @@ test("home carousel uses Netflix-style edge arrows and page indicators only with
 });
 
 test("home can show an access card and intermediate modules for a selected course", () => {
-  assert.match(adminDashboardSource, /homeModuleSectionEnabled/);
-  assert.match(adminDashboardSource, /lockedActionMode/);
-  assert.match(adminDashboardSource, /Modulos na home/);
-  assert.match(adminDashboardSource, /Ao comprar/);
   assert.match(platformStoreSource, /function getHomeCourseModuleRows/);
   assert.match(platformStoreSource, /settings\?\.homeModuleSection\?\.enabled/);
   assert.match(platformStoreSource, /lockedActionMode: settings\.lockedActionMode \?\? "details_modal"/);

@@ -2,7 +2,6 @@ import { BellRing, CalendarClock, TicketPercent, type LucideIcon } from "lucide-
 import { Suspense } from "react";
 import { EmptyState } from "../empty-state";
 import { KpiTile } from "../kpi-tile";
-import { getAdminLegacyAvailability } from "../nav";
 import { AdminPage } from "../page-container";
 import { PageHeader } from "../page-header";
 import type { ResolvedAdminPeriod } from "../period";
@@ -55,8 +54,7 @@ type CommunicationFrameProps = {
 
 export function CommunicationFrame({ "data-phase": phase, period, tab }: CommunicationFrameProps) {
   const meta = COMMUNICATION_TAB_META[tab];
-  const legacy = getAdminLegacyAvailability("comunicacao");
-  const note = legacy.kind === "new" ? ` ${legacy.note}` : "";
+  const note = " Avisos, webinários e promoções chegam com esta tela.";
   const periodLabel = period.label.toLocaleLowerCase("pt-BR");
 
   return (

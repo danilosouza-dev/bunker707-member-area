@@ -1123,14 +1123,13 @@ Migracoes `202610110010_catalog_v2_listing_and_soft_delete.sql` e `202610110011_
 - "Quem pode ver" = `access_model` + `listing`: "So quem tem acesso" = `closed` + `listed`; "Todos os alunos" = `free` + `listed`; "Oculto por enquanto" = `closed` + `hidden`;
 - e coluna (e nao chave de `content_page_settings.settings`) porque filtra consultas da vitrine, de Minhas compras e da lista do admin, precisa de check no banco e nao pode ser apagada por quem regrava o JSON de apresentacao;
 - oculto fica fora da vitrine (Produtos a venda, Em breve, secoes padrao e a lista "disponivel para comprar"), aparece em Minhas compras e na pagina do produto para quem tem acesso e responde como inexistente para quem nao tem;
-- o admin legado nunca grava `listing` (`contentItemToRow` nao inclui a coluna), entao nao desfaz o "oculto";
 - campos legados derivados a cada escrita nova: `is_locked` (= fechado), `status` (`Liberado` se aberto, senao `Bloqueado`; nunca `Em breve`), `purchase_label` (texto proprio, ou "Comprar" se fechado com link). "Em breve" e "Novo" sao calculados, nunca gravados.
 
 ### Status de modulos e aulas
 
 - `course_modules.status` e `lessons.status` em `published`, `draft` ou `deleted` (check no banco); valores antigos fora disso viraram `draft` (`archived` virou `deleted`);
 - excluir no admin novo = `status = 'deleted'` + `deleted_at` + `deleted_by` (referencia `auth.users`, `on delete set null`), com "Desfazer" que restaura o status anterior. Nada e apagado de verdade nesta fase: progresso, comentarios e avaliacoes da aula sobrevivem;
-- a area do aluno so le `status = 'published'`; o admin legado le tudo menos `deleted`;
+- a area do aluno so le `status = 'published'`; o admin le tudo menos `deleted`;
 - aula nova nasce `published` dentro de produto em Rascunho e `draft` dentro de produto ja Publicado ou Arquivado;
 - `course_modules.meta` ("N aulas") conta so aulas nao excluidas e e atualizado ao criar, excluir, restaurar e mover;
 - indices `lessons (module_id, status, sort_order)` e `course_modules (owner_id, status, sort_order)`.
@@ -1151,7 +1150,7 @@ Curso incluido = `content_items.commerce_scope = 'included_content'` + `content_
 
 Reordenar aceita a estrutura que ja existe ate o limite da importacao de playlist (100 modulos, 500 aulas por modulo); os limites de criacao (50 modulos, 100 aulas por modulo) valem so para criar.
 
-`import_youtube_course` (sincronizacao do admin antigo) mantem `publication_status` e a capa de um curso que ja existe, so marca como excluidas aulas `yt-lesson-<playlist>-*` que sairam da playlist, nao republica aulas em Rascunho nem as excluidas pelo produtor (`deleted_by` preenchido) e nao esconde modulo da playlist que ainda tem aula criada pelo produtor. O admin novo recusa importar de novo uma playlist que ja virou curso.
+`import_youtube_course` mantem `publication_status` e a capa de um curso que ja existe, so marca como excluidas aulas `yt-lesson-<playlist>-*` que sairam da playlist, nao republica aulas em Rascunho nem as excluidas pelo produtor (`deleted_by` preenchido) e nao esconde modulo da playlist que ainda tem aula criada pelo produtor. O admin novo recusa importar de novo uma playlist que ja virou curso.
 
 ### Imagens do produto
 
@@ -1238,7 +1237,7 @@ A fileira de modulos de um produto e uma secao `content_structure` (`contentSour
 ### content_page_settings
 
 - `coursePresentationMode` (`module_cards` ou `lesson_playlist`): gravado pela tela Modulos e pela aba Detalhes com `admin_patch_product_settings` (so essa chave). Formacao nao tem (abre nos cursos dela);
-- `homeModuleSection`: virou espelho para o admin antigo. A fonte da verdade da fileira e `homeSections`; com a Vitrine publicada, a home ignora esta chave.
+- `homeModuleSection`: espelho usado so como padrao de uma vitrine nunca publicada. A fonte da verdade da fileira e `homeSections`; com a Vitrine publicada, a home ignora esta chave.
 
 ### course_modules.image (capa do modulo)
 
@@ -1248,12 +1247,18 @@ WebP 720 x 1040 recortado no navegador, conferido no servidor e enviado ao Stora
 
 Pastas novas no bucket `content-assets`, nome do arquivo pelo hash do conteudo: `platform/home-hero`, `platform/login-side`, `platform/login-background`. Teto conferido no cabecalho do WebP: 230 KB para destaque e capas, 420 KB para as imagens do login. Imagem enviada e depois descartada fica sem referencia (limpeza fica para depois).
 
-### Admin antigo convivendo com as chaves novas
+### Admin antigo (removido em 14/10/2026)
 
-- grava `platform_settings` chave por chave (`settingsRows(...).filter`) e nao conhece `loginPage`;
-- a aparencia antiga (`PUT /api/admin/appearance`) rele o `hero` e espalha o que existe: `cta`, `poster` e `visibility.cta` sobrevivem;
-- o salvar de curso rele `content_page_settings` e espalha as chaves que nao conhece, mas manda sempre `coursePresentationMode`, `homeModuleSection` e `lockedActionMode` do formulario que carregou; o salvar de modulo manda a capa que carregou. Formulario do legado aberto desde antes de uma mudanca no admin novo desfaz essa mudanca: recarregar o legado antes de editar (risco aceito ate o legado ser desligado);
-- `tests/member-area-integration.test.mjs` trava esses pontos.
+O admin antigo (`/admin/legado`, `src/components/admin-dashboard.tsx`, rotas `/api/admin/{students,content,modules,lessons,combos,cohorts,collections,youtube-playlists}`) saiu do projeto. Existe um admin so (`src/app/admin/(v2)`). As tabelas `students`, `student_courses` e `student_access_logs` foram derrubadas pela migracao `202610140001_remove_legacy_admin_students.sql`; a funcao `admin_product_cohorts` mantem a assinatura e devolve vazio ate existir vinculo aluno x turma no modelo novo. Alunos passaram a ser `auth.users` + `profiles` + `entitlements` (ver "Alunos" em `docs/17` §1.7).
+
+## Alunos (entrega 2, 15/10/2026, migracao 202610150001)
+
+- `admin_audit_log(id, actor_id -> auth.users set null, action, entity_type, entity_id, count, metadata jsonb <= 4 KB, occurred_at)`: quem fez o que no admin (acesso, exportacao, importacao, exclusao). Append-only: o servidor so insere e le (`grant select, insert` para `service_role`). Metadata guarda ids e contagens; nunca nome, busca digitada ou e-mail, exceto a prova da exclusao.
+- `student_segments(id, name unico sem maiusculas, params jsonb <= 2 KB, created_by, created_at, updated_at)`: segmentos salvos da lista de Alunos; `params` e a forma canonica dos filtros do endereco, revalidada ao abrir.
+- `cohort_memberships(id, user_id -> auth.users cascade, product_id -> content_items cascade, cohort_id -> cohorts cascade, created_by, created_at; unique (user_id, product_id))`: uma turma por aluno por produto. `cohorts.name` ganhou indice unico por `lower(name)`. `admin_product_cohorts` conta so alunos com acesso aberto ao produto (sem a equipe). Modelo diferente do previsto em §cohort_memberships (sem `entitlement_id`): `grantProductAccess` garante um acesso por (aluno, produto).
+- `profiles.last_sign_in_at`: copiado de `auth.users` pelo gatilho `on_auth_user_signed_in` (`sync_profile_last_sign_in`, security definer, nunca lanca erro). `authenticated` so atualiza `full_name, phone, avatar_url` em `profiles`.
+- `student_daily_activity(user_id -> auth.users cascade, day, content_id, seconds_watched, lessons_completed, approximate, updated_at; pk (user_id, day, content_id))`: estudo real por dia, gravado por `record_student_activity` (no maximo 30 s e 50 aulas por chamada; dia em America/Sao_Paulo) depois de cada progresso confirmado. Backfill aproximado a partir de `lesson_watch_states.lastWatchedAt`.
+- RPCs `admin_lifecycle_weeks(p_weeks)` (<= 26 linhas prontas: novos, retidos, recuperados, inativos por semana) e `admin_lifecycle_week_members(p_week_start, p_group)` (ate 1000 ids), ambas `security invoker`, so `service_role`.
 
 ## Webhooks
 

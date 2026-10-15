@@ -5,6 +5,7 @@ import { redactSecrets } from "@/lib/env-value";
 
 import { cache } from "react";
 import { unstable_noStore as noStore } from "next/cache";
+import { after } from "next/server";
 import type { AuthenticatedUser } from "@/server/auth/session";
 import { getAdminRoleForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
@@ -21,7 +22,6 @@ import {
   type MemberLibraryModule
 } from "@/lib/member-library";
 import { getSavedItemKey, getSavedTargetTypeForContentKind, savedItemCollectionLabel } from "@/lib/saved-items";
-import { getAdminModerationData } from "@/server/comments/comment-store";
 import {
   canOpenProductPage,
   itemsVisibleTo,
@@ -31,22 +31,19 @@ import { INVALID_SUPABASE_KEY_MESSAGE, isInvalidSupabaseKeyError } from "@/serve
 import { MemberAreaConflictError } from "@/server/member-area/errors";
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { getStudentProfileRecord } from "@/server/member-area/student-profile";
+import { activityDeltaOf, type ActivityDelta } from "@/server/progress/activity-delta";
+import { recordStudentActivity } from "@/server/progress/student-activity";
 import { readPlatformSetting, updatePlatformSettingLatest, writePlatformSettingGuarded } from "@/server/member-area/settings-store";
 import { pruneHomeSectionRefs } from "@/server/storefront/model";
 import type {
   AdminAIAgent,
   AdminBlockedWordRule,
   AdminIntegrationSetting,
-  AdminContentAccess,
   AdminDashboardData,
   AdminEntitlementStatus,
   AdminModerationItem,
   AdminProductCombo,
-  AdminSellableProduct,
-  AdminSourceProvider,
   ContentAccessModel,
-  AdminStudent,
-  AdminStudentCourse,
   CommerceScope,
   ContentModalMedia,
   ContentModalStructure,
@@ -69,7 +66,6 @@ import type {
   PlatformBrandingConfig,
   PurchaseTarget,
   ReleaseRuleConfig,
-  RowVisibility,
   SavedLessonItem,
   SavedModuleItem,
   SavedItemTargetType
@@ -101,12 +97,14 @@ type SavedItemRecord = {
   userId: string;
 };
 
+type AccessTargetType = "formation" | "standalone_course" | "mentorship" | "webinar" | "product" | "bootcamp";
+
 type AccessEntitlementRecord = {
   endsAt: string | null;
   startsAt: string;
   status: AdminEntitlementStatus;
   targetId: string;
-  targetType: "platform" | AdminStudentCourse["targetType"];
+  targetType: "platform" | AccessTargetType;
   userId: string;
 };
 
@@ -131,7 +129,7 @@ type PlatformDatabase = {
   homeSectionsConfigured: boolean;
   /**
    * Versao (coluna updated_at) da chave homeSections quando esta leitura foi feita; null = nunca
-   * publicada. A Vitrine do admin antigo manda de volta ao publicar, para nao apagar uma fileira que a
+   * publicada. A Vitrine manda de volta ao publicar, para nao apagar uma fileira que a
    * Vitrine nova ou a tela Modulos gravou depois que ela abriu (409 em vez de perda silenciosa).
    */
   homeSectionsUpdatedAt: string | null;
@@ -144,7 +142,6 @@ type PlatformDatabase = {
   releaseRules: AdminDashboardData["releaseRules"];
   savedItems: SavedItemRecord[];
   student: PlatformStudent;
-  students: AdminStudent[];
   upcomingProducts: ContentItem[];
   updatedAt: string;
   version: 1;
@@ -216,54 +213,6 @@ type LessonRow = {
   video_config: LessonVideoConfig | null;
 };
 
-type StudentRow = {
-  access_count: number;
-  avatar_url: string | null;
-  city: string | null;
-  document: string | null;
-  email: string;
-  external_customer_id: string | null;
-  first_access_at: string | null;
-  full_name: string;
-  id: string;
-  joined_at: string;
-  last_activity_at: string;
-  notes: string | null;
-  phone: string | null;
-  source_provider: AdminSourceProvider;
-  state: string | null;
-  status: AdminEntitlementStatus;
-  tags: string[] | null;
-};
-
-type StudentCourseRow = {
-  acquisition: AdminStudentCourse["acquisition"] | null;
-  category: AdminStudentCourse["category"] | null;
-  cohort: string | null;
-  ends_at: string;
-  external_order_id: string;
-  id: string;
-  last_activity_at: string;
-  product: string;
-  progress_percent: number;
-  role: AdminStudentCourse["role"] | null;
-  source_provider: AdminSourceProvider;
-  starts_at: string;
-  status: AdminEntitlementStatus;
-  student_id: string;
-  target_id: string;
-  target_type: AdminStudentCourse["targetType"];
-};
-
-type StudentAccessLogRow = {
-  action: NonNullable<AdminStudent["accessHistory"]>[number]["action"];
-  device: string;
-  id: string;
-  location: string;
-  occurred_at: string;
-  student_id: string;
-};
-
 type LessonProgressRow = {
   completed_lesson_ids: string[];
   content_id: string;
@@ -287,7 +236,7 @@ type AccessEntitlementRow = {
   starts_at: string;
   status: AdminEntitlementStatus;
   target_id: string;
-  target_type: "platform" | AdminStudentCourse["targetType"];
+  target_type: "platform" | AccessTargetType;
   user_id: string;
 };
 
@@ -496,47 +445,6 @@ function normalizeHomeSectionConfigs(value: unknown): HomeSectionConfig[] {
   }));
 }
 
-function contentBucketEntries(database: PlatformDatabase): Array<[ContentBucket, ContentItem[]]> {
-  return [
-    ["continue_watching", database.continueWatching],
-    ["formations", database.formations],
-    ["formation_internal_courses", database.formationInternalCourses],
-    ["bootcamps", database.bootcamps],
-    ["courses", database.courses],
-    ["recent_lessons", database.recentLessons],
-    ["upcoming_products", database.upcomingProducts]
-  ];
-}
-
-function contentItemToRow(item: ContentItem, bucket: ContentBucket, sortOrder: number): ContentItemRow {
-  return {
-    access_label: item.accessLabel ?? null,
-    access_model: item.accessModel ?? null,
-    bucket,
-    commerce_scope: item.commerceScope ?? null,
-    description: item.description ?? null,
-    duration_label: item.durationLabel ?? null,
-    eyebrow: item.eyebrow,
-    id: item.id,
-    image: item.image,
-    instructor: item.instructor ?? null,
-    is_locked: item.isLocked ?? false,
-    kind: item.kind,
-    lessons_label: item.lessons ?? null,
-    level_label: item.level ?? null,
-    max_students: item.maxStudents ?? null,
-    progress: item.progress,
-    publication_status: item.publicationStatus ?? "published",
-    purchase_label: item.purchaseLabel ?? null,
-    purchase_target: item.purchaseTarget ?? null,
-    purchase_url: item.purchaseUrl ?? null,
-    release_rule: item.releaseRule ?? null,
-    sort_order: sortOrder,
-    status: item.status,
-    title: item.title
-  };
-}
-
 function contentRowToItem(row: ContentItemRow): ContentItem {
   return {
     accessLabel: row.access_label ?? undefined,
@@ -562,22 +470,6 @@ function contentRowToItem(row: ContentItemRow): ContentItem {
     releaseRule: row.release_rule ?? undefined,
     status: row.status,
     title: row.title
-  };
-}
-
-function moduleToRow(courseModule: CourseModule, sortOrder: number): CourseModuleRow {
-  return {
-    description: courseModule.description,
-    eyebrow: courseModule.eyebrow,
-    id: courseModule.id,
-    image: courseModule.image,
-    meta: courseModule.meta,
-    owner_id: courseModule.ownerId ?? null,
-    owner_kind: courseModule.ownerKind ?? null,
-    progress: courseModule.progress,
-    release_rule: courseModule.releaseRule ?? null,
-    sort_order: sortOrder,
-    title: courseModule.title
   };
 }
 
@@ -611,21 +503,6 @@ function moduleRowToModule(row: CourseModuleRow, lessonRows: LessonRow[]): Cours
   };
 }
 
-function lessonToRow(lesson: CourseModule["lessons"][number], moduleId: string, sortOrder: number): LessonRow {
-  return {
-    completed: lesson.completed ?? false,
-    description: lesson.description,
-    duration: lesson.duration,
-    id: lesson.id,
-    image: lesson.image ?? null,
-    module_id: moduleId,
-    release_rule: lesson.releaseRule ?? null,
-    sort_order: sortOrder,
-    title: lesson.title,
-    video_config: lesson.video ?? null
-  };
-}
-
 function savedItemToRow(savedItem: SavedItemRecord): SavedItemRow {
   return {
     collection_label: savedItem.collectionLabel,
@@ -648,27 +525,6 @@ function savedItemRowToRecord(row: SavedItemRow): SavedItemRecord {
   };
 }
 
-function comboToRow(combo: AdminProductCombo): ProductComboRow {
-  return {
-    cohort_name: combo.cohortName || defaultCohortName,
-    created_at: combo.createdAt,
-    description: combo.description,
-    id: combo.id,
-    name: combo.name,
-    status: combo.status,
-    students_count: combo.studentsCount,
-    updated_at: combo.updatedAt ?? combo.createdAt
-  };
-}
-
-function comboItemRows(combo: AdminProductCombo): ProductComboItemRow[] {
-  return combo.productIds.map((productId, index) => ({
-    combo_id: combo.id,
-    product_id: productId,
-    sort_order: index
-  }));
-}
-
 function comboRowsToCombos(comboRows: ProductComboRow[], itemRows: ProductComboItemRow[]): AdminProductCombo[] {
   return comboRows.map((row) => ({
     cohortName: row.cohort_name || defaultCohortName,
@@ -683,114 +539,6 @@ function comboRowsToCombos(comboRows: ProductComboRow[], itemRows: ProductComboI
     status: row.status,
     studentsCount: row.students_count,
     updatedAt: row.updated_at
-  }));
-}
-
-function studentToRow(studentRecord: AdminStudent): StudentRow {
-  return {
-    access_count: studentRecord.accessCount ?? 0,
-    avatar_url: studentRecord.avatarUrl ?? null,
-    city: studentRecord.city || null,
-    document: studentRecord.document || null,
-    email: studentRecord.email,
-    external_customer_id: studentRecord.externalCustomerId || null,
-    first_access_at: studentRecord.firstAccessAt ?? null,
-    full_name: studentRecord.fullName,
-    id: studentRecord.id,
-    joined_at: studentRecord.joinedAt,
-    last_activity_at: studentRecord.lastActivityAt,
-    notes: studentRecord.notes || null,
-    phone: studentRecord.phone || null,
-    source_provider: studentRecord.sourceProvider,
-    state: studentRecord.state || null,
-    status: studentRecord.status,
-    tags: studentRecord.tags
-  };
-}
-
-function studentCourseToRow(course: AdminStudentCourse, studentId: string): StudentCourseRow {
-  return {
-    acquisition: course.acquisition ?? null,
-    category: course.category ?? null,
-    cohort: course.cohort ?? null,
-    ends_at: course.endsAt,
-    external_order_id: course.externalOrderId,
-    id: course.id,
-    last_activity_at: course.lastActivityAt,
-    product: course.product,
-    progress_percent: course.progressPercent,
-    role: course.role ?? null,
-    source_provider: course.sourceProvider,
-    starts_at: course.startsAt,
-    status: course.status,
-    student_id: studentId,
-    target_id: course.targetId,
-    target_type: course.targetType
-  };
-}
-
-function studentAccessLogToRow(log: NonNullable<AdminStudent["accessHistory"]>[number], studentId: string): StudentAccessLogRow {
-  return {
-    action: log.action,
-    device: log.device,
-    id: log.id,
-    location: log.location,
-    occurred_at: log.occurredAt,
-    student_id: studentId
-  };
-}
-
-function studentRowsToStudents(
-  studentRows: StudentRow[],
-  courseRows: StudentCourseRow[],
-  accessLogRows: StudentAccessLogRow[]
-): AdminStudent[] {
-  return studentRows.map((row) => ({
-    accessCount: row.access_count,
-    accessHistory: accessLogRows
-      .filter((log) => log.student_id === row.id)
-      .map((log) => ({
-        action: log.action,
-        device: log.device,
-        id: log.id,
-        location: log.location,
-        occurredAt: log.occurred_at
-      })),
-    avatarUrl: row.avatar_url ?? undefined,
-    city: row.city ?? "",
-    courses: courseRows
-      .filter((course) => course.student_id === row.id)
-      .map((course) => ({
-        acquisition: course.acquisition ?? undefined,
-        category: course.category ?? undefined,
-        cohort: course.cohort ?? undefined,
-        endsAt: course.ends_at,
-        externalOrderId: course.external_order_id,
-        id: course.id,
-        lastActivityAt: course.last_activity_at,
-        product: course.product,
-        progressPercent: course.progress_percent,
-        role: course.role ?? undefined,
-        sourceProvider: course.source_provider,
-        startsAt: course.starts_at,
-        status: course.status,
-        targetId: course.target_id,
-        targetType: course.target_type
-      })),
-    document: row.document ?? "",
-    email: row.email,
-    externalCustomerId: row.external_customer_id ?? "",
-    firstAccessAt: row.first_access_at ?? undefined,
-    fullName: row.full_name,
-    id: row.id,
-    joinedAt: row.joined_at,
-    lastActivityAt: row.last_activity_at,
-    notes: row.notes ?? "",
-    phone: row.phone ?? "",
-    sourceProvider: row.source_provider,
-    state: row.state ?? "",
-    status: row.status,
-    tags: row.tags ?? []
   }));
 }
 
@@ -944,10 +692,6 @@ function getSupabaseErrorCode(error: unknown) {
   return typeof error === "object" && error && "code" in error ? error.code : null;
 }
 
-async function getPlatformPersistenceProvider(): Promise<AdminDashboardData["persistenceProvider"]> {
-  return "supabase";
-}
-
 function isMissingSupabaseSchemaObjectError(error: unknown) {
   const code = getSupabaseErrorCode(error);
   const message = getSupabaseErrorMessage(error);
@@ -994,46 +738,10 @@ async function upsertRows(
 /**
  * platform_settings nao tem gatilho de updated_at. Toda gravacao de chave carimba a coluna para a
  * checagem de versao da Area de membros (src/server/member-area/settings-store.ts) perceber quando o
- * admin antigo, a Vitrine ou a Marca mudaram a mesma chave depois que outra tela a leu.
+ * a Vitrine ou a Marca mudaram a mesma chave depois que outra tela a leu.
  */
 function stampPlatformSettingRows(rows: Array<{ key: string; value: unknown }>, now = new Date().toISOString()) {
   return rows.map((row) => ({ ...row, updated_at: now }));
-}
-
-async function deleteMissingRows(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  table: string,
-  column: string,
-  wantedValues: string[],
-  context: string
-) {
-  const existingResult = await supabase.from(table).select(column);
-  await throwIfSupabaseError(existingResult.error, `Erro lendo ${table} para sincronizacao`);
-
-  const wanted = new Set(wantedValues);
-  const existingRows = (existingResult.data ?? []) as unknown as Array<Record<string, string>>;
-  const missingValues = existingRows
-    .map((row) => row[column])
-    .filter((value) => value && !wanted.has(value));
-
-  if (missingValues.length === 0) {
-    return;
-  }
-
-  const { error } = await supabase.from(table).delete().in(column, missingValues);
-  await throwIfSupabaseError(error, context);
-}
-
-async function deleteComboItemsForCombos(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  comboIds: string[]
-) {
-  if (comboIds.length === 0) {
-    return;
-  }
-
-  const { error } = await supabase.from("product_combo_items").delete().in("combo_id", comboIds);
-  await throwIfSupabaseError(error, "Erro removendo itens antigos dos combos");
 }
 
 type ReadSupabaseDatabaseOptions = {
@@ -1048,7 +756,6 @@ function emptySupabaseResult() {
 
 async function readSupabaseDatabase({
   includeAdminData = true,
-  userEmail,
   userId
 }: ReadSupabaseDatabaseOptions = {}) {
   const supabase = getSupabaseAdminClient();
@@ -1069,19 +776,6 @@ async function readSupabaseDatabase({
   const lessonsQuery = includeAdminData
     ? supabase.from("lessons").select("*").neq("status", "deleted").order("sort_order", { ascending: true })
     : supabase.from("lessons").select("*").eq("status", "published").order("sort_order", { ascending: true });
-  const studentsQuery = includeAdminData
-    ? supabase.from("students").select("*").order("created_at", { ascending: true })
-    : userEmail
-      ? supabase.from("students").select("*").ilike("email", userEmail.replace(/[\\%_]/g, "\\$&")).limit(1)
-      : userId
-        ? supabase.from("students").select("*").eq("id", userId).limit(1)
-        : emptySupabaseResult();
-  const studentCoursesQuery = includeAdminData
-    ? supabase.from("student_courses").select("*").order("created_at", { ascending: true })
-    : emptySupabaseResult();
-  const accessLogsQuery = includeAdminData
-    ? supabase.from("student_access_logs").select("*").order("created_at", { ascending: true })
-    : emptySupabaseResult();
   const progressQuery = !includeAdminData && userId
     ? supabase.from("lesson_progress").select("*").eq("user_id", userId)
     : supabase.from("lesson_progress").select("*");
@@ -1103,9 +797,6 @@ async function readSupabaseDatabase({
     modulesResult,
     lessonsResult,
     cohortsResult,
-    studentsResult,
-    initialStudentCoursesResult,
-    accessLogsResult,
     progressResult,
     savedItemsResult,
     productCombosResult,
@@ -1118,9 +809,6 @@ async function readSupabaseDatabase({
     modulesQuery,
     lessonsQuery,
     cohortsQuery,
-    studentsQuery,
-    studentCoursesQuery,
-    accessLogsQuery,
     progressQuery,
     savedItemsQuery,
     productCombosQuery,
@@ -1129,26 +817,12 @@ async function readSupabaseDatabase({
     supabase.from("platform_settings").select("*")
   ]);
 
-  const memberStudentIds = includeAdminData
-    ? []
-    : ((studentsResult.data ?? []) as StudentRow[]).map((student) => student.id);
-  const studentCoursesResult = !includeAdminData && memberStudentIds.length > 0
-    ? await supabase
-      .from("student_courses")
-      .select("*")
-      .in("student_id", memberStudentIds)
-      .order("created_at", { ascending: true })
-    : initialStudentCoursesResult;
-
   for (const [result, context] of [
     [contentItemsResult, "Erro lendo content_items"],
     [contentSettingsResult, "Erro lendo content_page_settings"],
     [modulesResult, "Erro lendo course_modules"],
     [lessonsResult, "Erro lendo lessons"],
     [cohortsResult, "Erro lendo cohorts"],
-    [studentsResult, "Erro lendo students"],
-    [studentCoursesResult, "Erro lendo student_courses"],
-    [accessLogsResult, "Erro lendo student_access_logs"],
     [progressResult, "Erro lendo lesson_progress"],
     [savedItemsResult, "Erro lendo saved_items"],
     [accessEntitlementsResult, "Erro lendo acessos"],
@@ -1248,11 +922,6 @@ async function readSupabaseDatabase({
     releaseRules: (settingsMap.get("releaseRules") as PlatformDatabase["releaseRules"] | undefined) ?? [],
     savedItems: ((savedItemsResult.data ?? []) as SavedItemRow[]).map(savedItemRowToRecord),
     student: (settingsMap.get("student") as PlatformStudent | undefined) ?? defaultStudent,
-    students: studentRowsToStudents(
-      (studentsResult.data ?? []) as StudentRow[],
-      (studentCoursesResult.data ?? []) as StudentCourseRow[],
-      (accessLogsResult.data ?? []) as StudentAccessLogRow[]
-    ),
     upcomingProducts: itemsByBucket("upcoming_products"),
     updatedAt: (settingsMap.get("updatedAt") as string | undefined) ?? new Date().toISOString(),
     version: 1,
@@ -1324,10 +993,6 @@ function parseAccessDateValue(value?: string | null) {
   return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
 }
 
-function accessDateValueToIso(value?: string | null) {
-  return parseAccessDateValue(value)?.toISOString() ?? null;
-}
-
 function isActiveAccessWindow(startsAt?: string | null, endsAt?: string | null) {
   const now = Date.now();
   const parsedStartDate = parseAccessDateValue(startsAt);
@@ -1344,46 +1009,19 @@ function getAccessTargetKey(targetType: AccessEntitlementRecord["targetType"], t
   return `${targetType}:${targetId}`;
 }
 
-function normalizeEntitlementSourceProvider(provider: AdminSourceProvider) {
-  return provider.trim().toLowerCase() === "tiktok" ? "tiktok" : provider.trim().toLowerCase();
-}
-
 function isActiveEntitlement(entitlement: AccessEntitlementRecord) {
   return entitlement.status === "active" && isActiveAccessWindow(entitlement.startsAt, entitlement.endsAt);
 }
 
-function isActiveStudentCourse(course: AdminStudentCourse) {
-  return (
-    course.status === "active" &&
-    !/^bloqueado/i.test(course.endsAt.trim()) &&
-    isActiveAccessWindow(course.startsAt, course.endsAt)
-  );
-}
-
+/** Entitlements sao a unica fonte de autorizacao (AGENTS.md): nada mais libera conteudo fechado. */
 function getUserAccessKeys(database: PlatformDatabase, user?: AuthenticatedUser | string) {
-  const { email, userId } = getUserIdentity(user);
+  const { userId } = getUserIdentity(user);
   const accessKeys = new Set<string>();
 
   if (userId) {
     for (const entitlement of database.accessEntitlements) {
       if (entitlement.userId === userId && isActiveEntitlement(entitlement)) {
         accessKeys.add(getAccessTargetKey(entitlement.targetType, entitlement.targetId));
-      }
-    }
-  }
-
-  for (const studentRecord of database.students) {
-    const studentMatchesUser =
-      Boolean(userId && studentRecord.id === userId) ||
-      Boolean(email && studentRecord.email.toLowerCase() === email);
-
-    if (!studentMatchesUser || studentRecord.status !== "active") {
-      continue;
-    }
-
-    for (const course of studentRecord.courses) {
-      if (isActiveStudentCourse(course)) {
-        accessKeys.add(getAccessTargetKey(course.targetType, course.targetId));
       }
     }
   }
@@ -2320,84 +1958,6 @@ function getHomeModalStructures(
   );
 }
 
-function getAccess(item: ContentItem): AdminContentAccess {
-  if (item.status === "Em breve") {
-    return "Em breve";
-  }
-
-  if (item.accessModel === "free") {
-    return "Liberado";
-  }
-
-  if (item.isLocked) {
-    return "Bloqueado";
-  }
-
-  if (item.progress === 0 || item.status === "Novo") {
-    return "Drip";
-  }
-
-  return "Liberado";
-}
-
-function getReleaseSummary(item: ContentItem) {
-  if (item.accessModel === "free") {
-    return "Gratuito para cadastro";
-  }
-
-  if (item.releaseRule) {
-    return describeReleaseRule(item.releaseRule);
-  }
-
-  if (item.status === "Em breve") {
-    return "Data fixa futura";
-  }
-
-  if (item.isLocked) {
-    return "Bloqueado até ganhar acesso";
-  }
-
-  if (item.kind === "Formacao") {
-    return "Cursos internos por ordem";
-  }
-
-  if (item.kind === "Curso") {
-    return item.commerceScope === "included_content" ? "Incluso na formacao" : "Apos compra";
-  }
-
-  return "Liberacao imediata";
-}
-
-function describeReleaseRule(releaseRule: ReleaseRuleConfig) {
-  if (releaseRule.mode === "immediate") {
-    return "Liberar imediatamente";
-  }
-
-  if (releaseRule.mode === "after_enrollment") {
-    const delay = releaseRule.delayValue
-      ? ` apos ${releaseRule.delayValue} ${releaseRule.delayUnit ?? "dias"}`
-      : "";
-    return `Depois da inscricao${delay}`;
-  }
-
-  if (releaseRule.mode === "after_purchase") {
-    const delay = releaseRule.delayValue
-      ? ` apos ${releaseRule.delayValue} ${releaseRule.delayUnit ?? "dias"}`
-      : "";
-    return `Depois da compra${delay}`;
-  }
-
-  if (releaseRule.mode === "after_previous_lesson") {
-    return "Depois da aula anterior";
-  }
-
-  if (releaseRule.mode === "fixed_date") {
-    return releaseRule.fixedDate ? `Agendado para ${releaseRule.fixedDate}` : "Data e hora fixa";
-  }
-
-  return releaseRule.requirement || "Atividade obrigatoria";
-}
-
 function getModulesForContent(database: PlatformDatabase, item: ContentItem) {
   const ownedModules = database.courseModules.filter((module) => module.ownerId === item.id);
 
@@ -2409,54 +1969,14 @@ function getModulesForContent(database: PlatformDatabase, item: ContentItem) {
   return hasScopedModules ? [] : database.courseModules;
 }
 
-function getModulesCount(database: PlatformDatabase, item: ContentItem) {
-  if (item.kind === "Formacao") {
-    const modules = getModulesForContent(database, item);
-    return modules.length > 0 ? modules.length : database.formationInternalCourses.length;
-  }
-
-  if (item.kind === "Aula" || item.kind === "Material") {
-    return 0;
-  }
-
-  return getModulesForContent(database, item).length;
-}
-
-function getLessonsCount(database: PlatformDatabase, item: ContentItem) {
-  if (item.kind === "Formacao") {
-    return getModulesForContent(database, item).reduce((total, module) => total + module.lessons.length, 0);
-  }
-
-  if (item.kind === "Aula") {
-    return 1;
-  }
-
-  if (item.kind === "Material") {
-    return 0;
-  }
-
-  return getModulesForContent(database, item).reduce((total, module) => total + module.lessons.length, 0);
-}
-
-function getVisibility(item: ContentItem): RowVisibility {
-  return item.isLocked ? "all" : "students";
-}
-
-function getStudentForUser(database: PlatformDatabase, user?: AuthenticatedUser): PlatformStudent {
+/** Nome do aluno: o do perfil (profiles.full_name, editavel no admin) e, sem perfil, o da conta. */
+function getStudentForUser(database: PlatformDatabase, user?: AuthenticatedUser, profileFullName?: string | null): PlatformStudent {
   if (!user) {
     return database.student;
   }
 
   const displayName = getUserDisplayName(user);
-  const userEmail = user.email?.toLowerCase();
-  const matchingStudent = database.students.find((studentRecord) => {
-    if (studentRecord.id === user.id) {
-      return true;
-    }
-
-    return Boolean(userEmail && studentRecord.email.toLowerCase() === userEmail);
-  });
-  const fullName = matchingStudent?.fullName || displayName.fullName;
+  const fullName = profileFullName?.trim() || displayName.fullName;
 
   return {
     fullName,
@@ -2464,29 +1984,7 @@ function getStudentForUser(database: PlatformDatabase, user?: AuthenticatedUser)
   };
 }
 
-function getAdminRecords(database: PlatformDatabase) {
-  return [
-    ...database.formations,
-    ...database.courses,
-    ...database.bootcamps,
-    ...database.formationInternalCourses
-  ].map((content) => ({
-    access: getAccess(content),
-    commerceScope: content.commerceScope ?? "learning_content",
-    content,
-    kind: content.kind,
-    lessonsCount: getLessonsCount(database, content),
-    modulesCount: getModulesCount(database, content),
-    owner: "CMS Bunker707",
-    pageSettings: database.contentPageSettings[content.id],
-    releaseSummary: getReleaseSummary(content),
-    status: content.status,
-    updatedAt: database.updatedAt ?? "",
-    visibility: getVisibility(content)
-  }));
-}
-
-function getTargetType(kind: ContentKind): AdminStudentCourse["targetType"] {
+function getTargetType(kind: ContentKind): AccessTargetType {
   if (kind === "Formacao") {
     return "formation";
   }
@@ -2510,129 +2008,6 @@ function getTargetType(kind: ContentKind): AdminStudentCourse["targetType"] {
   return "standalone_course";
 }
 
-function getSellableProducts(database: PlatformDatabase): AdminSellableProduct[] {
-  return getSellableItems(database).map((item) => ({
-    id: item.id,
-    image: item.image,
-    kind: item.kind,
-    targetType: getTargetType(item.kind),
-    title: item.title
-  }));
-}
-
-function getAdminHomeSections(database: PlatformDatabase) {
-  const rowsById = new Map(getHomeRows(database).map((row) => [row.id, row]));
-
-  return getPublishedHomeSectionConfigs(database).map((section) => {
-    const row = rowsById.get(section.id);
-
-    return {
-      ...section,
-      contentCount: row?.variant === "course_modules"
-        ? (row.modules?.length ?? 0) + (row.structureItems?.length ?? 0)
-        : row?.items.length ?? 0,
-      source:
-        section.contentSource === "recent_lessons"
-          ? "Progresso do aluno"
-          : section.contentSource === "entitlement_products"
-            ? "Acessos ativos"
-            : section.contentSource === "selected_content_structure"
-              ? "Estrutura de conteudo"
-              : section.contentSource === "manual"
-                ? "Selecao manual"
-                : "Curadoria automatica"
-    };
-  });
-}
-
-function getEffectiveCohorts(database: PlatformDatabase) {
-  return database.cohorts.length > 0 ? database.cohorts : [defaultCohortName];
-}
-
-function toAdminDashboardData(
-  database: PlatformDatabase,
-  persistenceProvider: AdminDashboardData["persistenceProvider"]
-): AdminDashboardData {
-  const homeRows = getHomeRows(database).filter((row) => (
-    row.variant === "course_modules"
-      ? (row.modules?.length ?? 0) + (row.structureItems?.length ?? 0) > 0
-      : row.items.length > 0
-  ));
-
-  return {
-    aiAgents: database.aiAgents,
-    blockedWordRules: database.blockedWordRules,
-    branding: database.branding,
-    chartPoints: database.chartPoints,
-    cohorts: getEffectiveCohorts(database),
-    combos: database.combos,
-    contentRecords: getAdminRecords(database),
-    courseModules: database.courseModules,
-    entitlements: database.entitlements,
-    formationCourses: database.formationInternalCourses,
-    hero: database.hero,
-    homeSectionConfigs: getPublishedHomeSectionConfigs(database),
-    homeSectionsUpdatedAt: database.homeSectionsUpdatedAt,
-    homeRows,
-    homeSections: getAdminHomeSections(database),
-    integrations: database.integrations,
-    metrics: database.metrics,
-    moderationItems: database.moderationItems,
-    pipeline: database.pipeline,
-    persistenceProvider,
-    releaseRules: database.releaseRules,
-    sellableProducts: getSellableProducts(database),
-    students: database.students,
-    webhookEvents: database.webhookEvents
-  };
-}
-
-async function toHydratedAdminDashboardData(database: PlatformDatabase) {
-  const [persistenceProvider, moderationData] = await Promise.all([
-    getPlatformPersistenceProvider(),
-    getAdminModerationData()
-  ]);
-
-  return {
-    ...toAdminDashboardData(database, persistenceProvider),
-    ...moderationData
-  };
-}
-
-function slugify(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 60);
-}
-
-function makeId(prefix: string, title: string) {
-  return `${prefix}-${slugify(title) || Date.now()}-${Date.now().toString(36)}`;
-}
-
-function getContentBucket(database: PlatformDatabase, item: ContentItem) {
-  if (item.kind === "Formacao") {
-    return database.formations;
-  }
-
-  if (item.kind === "Bootcamp") {
-    return database.bootcamps;
-  }
-
-  if (item.kind === "Aula") {
-    return database.recentLessons;
-  }
-
-  if (item.commerceScope === "included_content") {
-    return database.formationInternalCourses;
-  }
-
-  return database.courses;
-}
-
 function supportsCoursePresentationMode(kind: ContentKind) {
   return ["Curso", "Bootcamp", "Mentoria", "Webinario", "Produto"].includes(kind);
 }
@@ -2645,88 +2020,6 @@ function removeContentById(database: PlatformDatabase, itemId: string) {
   database.recentLessons = database.recentLessons.filter((item) => item.id !== itemId);
   database.upcomingProducts = database.upcomingProducts.filter((item) => item.id !== itemId);
   database.continueWatching = database.continueWatching.filter((item) => item.id !== itemId);
-}
-
-function normalizeContentInput(input: ContentWriteInput): ContentItem {
-  const commerceScope = input.commerceScope ?? (input.kind === "Aula" ? "learning_content" : "sellable_product");
-  const accessModel = input.accessModel ?? "closed";
-  const isLocked = input.isLocked ?? (input.status === "Bloqueado" || accessModel === "closed");
-  const idPrefix =
-    input.kind === "Formacao"
-      ? "formation"
-      : input.kind === "Mentoria"
-        ? "mentorship"
-        : input.kind === "Webinario"
-          ? "webinar"
-          : input.kind === "Produto"
-            ? "product"
-      : input.kind === "Bootcamp"
-        ? "bootcamp"
-        : input.kind === "Aula"
-          ? "lesson"
-          : commerceScope === "included_content"
-            ? "formation-course"
-            : "course";
-
-  return {
-    accessLabel: input.accessLabel ?? (commerceScope === "included_content" ? "Curso da formacao" : input.kind),
-    accessModel,
-    commerceScope,
-    description: input.description || "Conteudo cadastrado no CMS persistido da Bunker707.",
-    durationLabel: input.durationLabel,
-    eyebrow: input.eyebrow || input.kind,
-    id: input.id || makeId(idPrefix, input.title),
-    image: input.image?.trim() ?? "",
-    isLocked,
-    kind: input.kind,
-    lessons: input.lessons || (input.kind === "Aula" ? "Aula" : "0 aulas"),
-    maxStudents: input.maxStudents ?? null,
-    progress: 0,
-    publicationStatus: input.publicationStatus ?? "draft",
-    purchaseLabel: input.purchaseLabel ?? (isLocked && accessModel !== "free" ? "Comprar" : undefined),
-    purchaseTarget: input.purchaseTarget ?? "same_tab",
-    purchaseUrl: input.purchaseUrl,
-    releaseRule: input.releaseRule,
-    status: input.status ?? (accessModel === "free" ? "Liberado" : isLocked ? "Bloqueado" : "Novo"),
-    title: input.title
-  };
-}
-
-function normalizeProductComboInput(
-  database: PlatformDatabase,
-  input: ProductComboWriteInput
-): AdminProductCombo {
-  const name = input.name.trim();
-
-  if (!name) {
-    throw new Error("Nome do combo e obrigatorio.");
-  }
-
-  const sellableProductIds = new Set(getSellableItems(database).map((item) => item.id));
-  const productIds = Array.from(new Set(input.productIds ?? []))
-    .map((productId) => productId.trim())
-    .filter((productId) => sellableProductIds.has(productId));
-
-  if (productIds.length === 0) {
-    throw new Error("Selecione pelo menos um produto valido para o combo.");
-  }
-
-  const existingCombo = input.id
-    ? database.combos.find((combo) => combo.id === input.id)
-    : undefined;
-  const createdAt = existingCombo?.createdAt ?? new Date().toISOString();
-
-  return {
-    cohortName: input.cohortName?.trim() || existingCombo?.cohortName || defaultCohortName,
-    createdAt,
-    description: input.description?.trim() ?? existingCombo?.description ?? "",
-    id: existingCombo?.id ?? input.id ?? makeId("combo", name),
-    name,
-    productIds,
-    status: input.status ?? existingCombo?.status ?? "draft",
-    studentsCount: existingCombo?.studentsCount ?? 0,
-    updatedAt: new Date().toISOString()
-  };
 }
 
 function getLessonReactions(database: PlatformDatabase, contentId: string, userId?: string) {
@@ -2874,7 +2167,8 @@ export async function getAppShellData(user?: AuthenticatedUser) {
   return {
     branding: database.branding,
     canUseAccessPreview: Boolean(adminRole),
-    student: { ...getStudentForUser(database, user), avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl) }
+    // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam.
+    student: { ...getStudentForUser(database, user, profile?.fullName), avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl) }
   };
 }
 
@@ -3240,11 +2534,6 @@ export async function getLessonPageData(
   };
 }
 
-export async function getAdminDashboardData() {
-  const database = await readAdminDatabase();
-  return toHydratedAdminDashboardData(database);
-}
-
 function validateHomeSectionConfigs(configs: HomeSectionConfig[], database: PlatformDatabase) {
   const sellableIds = new Set(getSellableItems(database).map((item) => item.id));
   // Produto que nao esta mais a venda (excluido ou fora de venda) nao trava a publicacao: sai da
@@ -3343,11 +2632,12 @@ export async function publishHomeSections(configs: HomeSectionConfig[], options:
       "Erro publicando secoes da Home"
     );
   } catch (error) {
-    // Carimbo geral do legado: as fileiras ja estao gravadas, que e o que o aluno ve.
+    // Carimbo geral: as fileiras ja estao gravadas, que e o que o aluno ve.
     console.error("[vitrine] carimbo updatedAt", error);
   }
 
-  return toHydratedAdminDashboardData(database);
+  // A Vitrine (admin) relê o que ficou gravado para alinhar o rascunho com o banco.
+  return { homeSectionConfigs: getPublishedHomeSectionConfigs(database), homeSectionsUpdatedAt: database.homeSectionsUpdatedAt };
 }
 
 async function persistAppearanceImage(value: string, ownerPath: string, context: string) {
@@ -3368,8 +2658,8 @@ async function persistAppearanceImage(value: string, ownerPath: string, context:
 }
 
 /**
- * Aparencia do admin antigo sobre o destaque gravado AGORA: so liga/desliga e troca imagem e tipo de
- * midia. O resto (textos, botao, capa do video, chaves que o legado nao conhece) fica como esta.
+ * Aparencia (tela Marca) sobre o destaque gravado AGORA: so liga/desliga e troca imagem e tipo de
+ * midia. O resto (textos, botao, capa do video e demais chaves) fica como esta.
  */
 function applyAppearanceToHero(stored: unknown, input: { enabled: boolean; image: string | null }): HomeHeroConfig {
   const current = stored && typeof stored === "object" && !Array.isArray(stored) ? (stored as HomeHeroConfig) : defaultHero;
@@ -3461,404 +2751,8 @@ export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
     "Erro salvando aparencia da plataforma"
   );
 
-  return toHydratedAdminDashboardData(database);
-}
-
-async function getSupabaseUserIdsByEmail(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  emails: string[]
-) {
-  const wantedEmails = new Set(emails.map((email) => email.trim().toLowerCase()).filter(Boolean));
-  const userIdsByEmail = new Map<string, string>();
-
-  if (wantedEmails.size === 0) {
-    return userIdsByEmail;
-  }
-
-  for (let page = 1; page <= 10; page += 1) {
-    const { data, error } = await supabase.auth.admin.listUsers({
-      page,
-      perPage: 1000
-    });
-
-    if (error) {
-      throw new Error(`Nao foi possivel consultar usuarios do Supabase Auth: ${error.message}`);
-    }
-
-    for (const userRecord of data.users) {
-      const email = userRecord.email?.trim().toLowerCase();
-
-      if (email && wantedEmails.has(email)) {
-        userIdsByEmail.set(email, userRecord.id);
-      }
-    }
-
-    if (userIdsByEmail.size === wantedEmails.size || data.users.length < 1000) {
-      break;
-    }
-  }
-
-  return userIdsByEmail;
-}
-
-function getAdminStudentEntitlementSourceEventId(studentRecord: AdminStudent, course: AdminStudentCourse) {
-  return `admin-student:${studentRecord.id}:${course.id ?? course.targetId}`;
-}
-
-function getAdminStudentEntitlementGrants(
-  students: AdminStudent[],
-  userIdsByEmail: Map<string, string>
-) {
-  return students.flatMap((studentRecord) => {
-    const userId = userIdsByEmail.get(studentRecord.email.trim().toLowerCase());
-
-    if (!userId) {
-      return [];
-    }
-
-    return studentRecord.courses.flatMap((course) => {
-      if (!course.targetId || !course.targetType) {
-        return [];
-      }
-
-      return [{
-        key: `${userId}:${getAdminStudentEntitlementSourceEventId(studentRecord, course)}`,
-        sourceEventId: getAdminStudentEntitlementSourceEventId(studentRecord, course),
-        userId
-      }];
-    });
-  });
-}
-
-async function revokeStaleSupabaseEntitlementsForStudents(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  userIdsByEmail: Map<string, string>,
-  previousStudents: AdminStudent[],
-  nextStudents: AdminStudent[]
-) {
-  const previousGrants = getAdminStudentEntitlementGrants(previousStudents, userIdsByEmail);
-
-  if (previousGrants.length === 0) {
-    return;
-  }
-
-  const nextGrantKeys = new Set(getAdminStudentEntitlementGrants(nextStudents, userIdsByEmail).map((grant) => grant.key));
-  const staleGrants = previousGrants.filter((grant) => (
-    !nextGrantKeys.has(grant.key)
-  ));
-
-  if (staleGrants.length === 0) {
-    return;
-  }
-
-  const staleSourceEventIdsByUserId = new Map<string, string[]>();
-
-  for (const grant of staleGrants) {
-    staleSourceEventIdsByUserId.set(grant.userId, [
-      ...(staleSourceEventIdsByUserId.get(grant.userId) ?? []),
-      grant.sourceEventId
-    ]);
-  }
-
-  for (const [userId, sourceEventIds] of staleSourceEventIdsByUserId.entries()) {
-    const { error } = await supabase
-      .from("entitlements")
-      .update({
-        ends_at: new Date().toISOString(),
-        status: "revoked"
-      })
-      .eq("user_id", userId)
-      .in("source_event_id", sourceEventIds);
-
-    await throwIfSupabaseError(error, "Erro revogando acessos removidos do aluno");
-  }
-}
-
-async function upsertSupabaseEntitlementForStudentCourse(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  userId: string,
-  studentRecord: AdminStudent,
-  course: AdminStudentCourse
-) {
-  if (!course.targetId || !course.targetType) {
-    return;
-  }
-
-  const entitlementRow = {
-    ends_at: accessDateValueToIso(course.endsAt),
-    product_id: course.targetId,
-    source_event_id: getAdminStudentEntitlementSourceEventId(studentRecord, course),
-    source_provider: normalizeEntitlementSourceProvider(course.sourceProvider ?? studentRecord.sourceProvider),
-    starts_at: accessDateValueToIso(course.startsAt) ?? new Date().toISOString(),
-    status: course.status,
-    target_id: course.targetId,
-    target_type: course.targetType,
-    user_id: userId
-  };
-  const upsertResult = await supabase
-    .from("entitlements")
-    .upsert(entitlementRow, { onConflict: "user_id,source_event_id" });
-
-  // 42P10: o indice unico (migration 202610010002) ainda nao foi aplicado no banco; usa o caminho legado.
-  if (upsertResult.error?.code === "42P10") {
-    const existingResult = await supabase
-      .from("entitlements")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("source_event_id", entitlementRow.source_event_id)
-      .limit(1)
-      .maybeSingle();
-
-    await throwIfSupabaseError(existingResult.error, "Erro consultando acesso existente");
-
-    const writeResult = existingResult.data?.id
-      ? await supabase.from("entitlements").update(entitlementRow).eq("id", existingResult.data.id)
-      : await supabase.from("entitlements").insert(entitlementRow);
-
-    await throwIfSupabaseError(writeResult.error, "Erro sincronizando acesso do aluno");
-    return;
-  }
-
-  await throwIfSupabaseError(upsertResult.error, "Erro sincronizando acesso do aluno");
-}
-
-async function syncSupabaseEntitlementsForStudents(students: AdminStudent[], previousStudents: AdminStudent[]) {
-  const supabase = getSupabaseAdminClient();
-  const userIdsByEmail = await getSupabaseUserIdsByEmail(
-    supabase,
-    [...students, ...previousStudents].map((studentRecord) => studentRecord.email)
-  );
-
-  await revokeStaleSupabaseEntitlementsForStudents(supabase, userIdsByEmail, previousStudents, students);
-
-  for (const studentRecord of students) {
-    const userId = userIdsByEmail.get(studentRecord.email.trim().toLowerCase());
-
-    if (!userId) {
-      continue;
-    }
-
-    for (const course of studentRecord.courses) {
-      await upsertSupabaseEntitlementForStudentCourse(supabase, userId, studentRecord, course);
-    }
-  }
-}
-
-export async function replaceAdminStudents(students: AdminStudent[]) {
-  const database = await readAdminDatabase();
-  const previousStudents = database.students;
-  const incomingIds = new Set(students.map((studentRecord) => studentRecord.id));
-  const removedCount = previousStudents.filter((studentRecord) => !incomingIds.has(studentRecord.id)).length;
-
-  // Trava contra payload truncado/malformado: remocoes em massa exigem exclusao explicita por aluno.
-  if (removedCount > 10 && removedCount > previousStudents.length / 2) {
-    throw createAdminMutationError(
-      `O salvamento removeria ${removedCount} de ${previousStudents.length} alunos. Exclusoes em massa devem ser feitas aluno a aluno.`,
-      409
-    );
-  }
-
-  database.students = students;
-  const supabase = getSupabaseAdminClient();
-  const studentRows = students.map(studentToRow);
-  const studentCourseRows = students.flatMap((studentRecord) =>
-    studentRecord.courses.map((course) => studentCourseToRow(course, studentRecord.id))
-  );
-  const accessLogRows = students.flatMap((studentRecord) =>
-    (studentRecord.accessHistory ?? []).map((log) => studentAccessLogToRow(log, studentRecord.id))
-  );
-
-  await upsertRows(supabase, "students", studentRows, "id", "Erro sincronizando students");
-  await upsertRows(supabase, "student_courses", studentCourseRows, "id", "Erro sincronizando student_courses");
-  await upsertRows(supabase, "student_access_logs", accessLogRows, "id", "Erro sincronizando student_access_logs");
-  await deleteMissingRows(supabase, "student_access_logs", "id", accessLogRows.map((row) => row.id), "Erro removendo historicos antigos");
-  await deleteMissingRows(supabase, "student_courses", "id", studentCourseRows.map((row) => row.id), "Erro removendo acessos antigos");
-  await deleteMissingRows(supabase, "students", "id", studentRows.map((row) => row.id), "Erro removendo alunos antigos");
-  await syncSupabaseEntitlementsForStudents(students, previousStudents);
-  return toHydratedAdminDashboardData(database);
-}
-
-export async function upsertContentItem(input: ContentWriteInput) {
-  const database = await readAdminDatabase();
-  const existingItem = input.id ? getAllContentItems(database).find((item) => item.id === input.id) : undefined;
-  const normalizedItem = normalizeContentInput(input);
-  const [persistedCoverImage, persistedHeroImage] = await Promise.all([
-    persistImageAsset(normalizedItem.image, `content/${normalizedItem.id}/cover`),
-    input.heroImage !== undefined
-      ? persistImageAsset(input.heroImage, `content/${normalizedItem.id}/hero`)
-      : Promise.resolve(undefined)
-  ]);
-  const item = {
-    ...existingItem,
-    ...normalizedItem,
-    id: existingItem?.id ?? input.id ?? normalizedItem.id,
-    image: persistedCoverImage,
-    progress: existingItem?.progress ?? 0
-  };
-  removeContentById(database, item.id);
-  getContentBucket(database, item).unshift(item);
-
-  if (input.heroImage !== undefined) {
-    const currentSettings = database.contentPageSettings[item.id] ?? {};
-    const heroImage = persistedHeroImage?.trim() ?? "";
-    // Com video de destaque gravado (admin novo), a imagem do admin legado e a capa (poster) do video.
-    const videoHero = currentSettings.hero?.mediaType === "video" && currentSettings.hero.mediaSrc
-      ? currentSettings.hero
-      : undefined;
-
-    if (heroImage) {
-      database.contentPageSettings[item.id] = {
-        ...currentSettings,
-        hero: videoHero
-          ? { ...videoHero, poster: heroImage }
-          : {
-            ...currentSettings.hero,
-            mediaSrc: heroImage,
-            mediaType: "image",
-            visibility: {
-              badge: false,
-              cta: false,
-              description: false,
-              title: false,
-              ...currentSettings.hero?.visibility
-            }
-          }
-      };
-    } else if (videoHero) {
-      // Tirar a imagem nao apaga o video: so a capa sai.
-      const heroWithoutPoster = { ...videoHero };
-      delete heroWithoutPoster.poster;
-      database.contentPageSettings[item.id] = { ...currentSettings, hero: heroWithoutPoster };
-    } else {
-      // Imagem vazia tira so a midia: cantos, textos e visibilidade do banner ficam como estavam.
-      const heroRest = Object.fromEntries(
-        Object.entries(currentSettings.hero ?? {}).filter(([key]) => !["mediaSrc", "mediaType", "poster", "youtubeId", "videoOptions"].includes(key))
-      );
-      const remainingSettings = { ...currentSettings };
-
-      if (Object.keys(heroRest).length > 0) {
-        remainingSettings.hero = heroRest as ContentPageHeroConfig;
-      } else {
-        delete remainingSettings.hero;
-      }
-
-      if (Object.keys(remainingSettings).length > 0) {
-        database.contentPageSettings[item.id] = remainingSettings;
-      } else {
-        delete database.contentPageSettings[item.id];
-      }
-    }
-  }
-
-  if (input.coursePresentationMode !== undefined) {
-    const currentSettings = database.contentPageSettings[item.id] ?? {};
-
-    if (supportsCoursePresentationMode(item.kind)) {
-      database.contentPageSettings[item.id] = {
-        ...currentSettings,
-        coursePresentationMode: input.coursePresentationMode
-      };
-    } else {
-      const remainingSettings = { ...currentSettings };
-      delete remainingSettings.coursePresentationMode;
-
-      if (Object.keys(remainingSettings).length > 0) {
-        database.contentPageSettings[item.id] = remainingSettings;
-      } else {
-        delete database.contentPageSettings[item.id];
-      }
-    }
-  }
-
-  if (input.lockedActionMode !== undefined) {
-    const currentSettings = database.contentPageSettings[item.id] ?? {};
-
-    if (supportsCoursePresentationMode(item.kind)) {
-      database.contentPageSettings[item.id] = {
-        ...currentSettings,
-        lockedActionMode: input.lockedActionMode
-      };
-    } else {
-      const remainingSettings = { ...currentSettings };
-      delete remainingSettings.lockedActionMode;
-
-      if (Object.keys(remainingSettings).length > 0) {
-        database.contentPageSettings[item.id] = remainingSettings;
-      } else {
-        delete database.contentPageSettings[item.id];
-      }
-    }
-  }
-
-  if (input.homeModuleSectionEnabled !== undefined) {
-    const currentSettings = database.contentPageSettings[item.id] ?? {};
-
-    if (supportsCoursePresentationMode(item.kind) && input.homeModuleSectionEnabled) {
-      database.contentPageSettings[item.id] = {
-        ...currentSettings,
-        homeModuleSection: {
-          enabled: true
-        }
-      };
-    } else {
-      const remainingSettings = { ...currentSettings };
-      delete remainingSettings.homeModuleSection;
-
-      if (Object.keys(remainingSettings).length > 0) {
-        database.contentPageSettings[item.id] = remainingSettings;
-      } else {
-        delete database.contentPageSettings[item.id];
-      }
-    }
-  }
-
-  if (input.parentFormationId !== undefined) {
-    const currentSettings = database.contentPageSettings[item.id] ?? {};
-    const parentFormationId = input.parentFormationId.trim();
-
-    if (item.commerceScope === "included_content" && parentFormationId) {
-      const parentFormation = database.formations.find((formation) => formation.id === parentFormationId);
-
-      if (!parentFormation || parentFormation.kind !== "Formacao" || parentFormation.id === item.id) {
-        throw new Error("Selecione uma formacao principal valida para este curso interno.");
-      }
-      database.contentPageSettings[item.id] = {
-        ...currentSettings,
-        parentFormationId
-      };
-      item.parentContentId = parentFormationId;
-    } else {
-      const remainingSettings = { ...currentSettings };
-      delete remainingSettings.parentFormationId;
-
-      if (Object.keys(remainingSettings).length > 0) {
-        database.contentPageSettings[item.id] = remainingSettings;
-      } else {
-        delete database.contentPageSettings[item.id];
-      }
-      delete item.parentContentId;
-    }
-  }
-
-  const supabase = getSupabaseAdminClient();
-  const contentRows = contentBucketEntries(database).flatMap(([bucket, items]) =>
-    items.map((content, index) => contentItemToRow(content, bucket, index))
-  );
-  await upsertRows(supabase, "content_items", contentRows, "id", "Erro salvando content_items");
-
-  const itemSettings = database.contentPageSettings[item.id];
-
-  if (itemSettings) {
-    await upsertRows(supabase, "content_page_settings", [{
-      content_id: item.id,
-      settings: itemSettings
-    }], "content_id", "Erro salvando content_page_settings");
-  } else {
-    const deleteSettingsResult = await supabase.from("content_page_settings").delete().eq("content_id", item.id);
-    await throwIfSupabaseError(deleteSettingsResult.error, "Erro removendo content_page_settings");
-  }
-
-  return toHydratedAdminDashboardData(database);
+  // A Marca (admin) relê marca e destaque gravados para alinhar o rascunho com o banco.
+  return { branding: database.branding, hero: database.hero };
 }
 
 /**
@@ -3915,10 +2809,6 @@ export async function deleteContentItem(itemId: string) {
       : [];
   });
   database.savedItems = database.savedItems.filter((savedItem) => !ownedTargetIds.has(savedItem.targetId));
-  database.students = database.students.map((studentRecord) => ({
-    ...studentRecord,
-    courses: studentRecord.courses.filter((course) => course.targetId !== itemId)
-  }));
   const removedComboIds = combosBeforeDelete
     .filter((combo) => combo.productIds.includes(itemId) && combo.productIds.length === 1)
     .map((combo) => combo.id);
@@ -3960,73 +2850,6 @@ export async function deleteContentItem(itemId: string) {
     const deleteCombosResult = await supabase.from("product_combos").delete().in("id", removedComboIds);
     await throwIfSupabaseError(deleteCombosResult.error, "Erro removendo combos vazios");
   }
-
-  return toHydratedAdminDashboardData(database);
-}
-
-export async function reorderContentItems(input: ContentOrderInput) {
-  const database = await readAdminDatabase();
-  const orderedIds = normalizeOrderedIds(input.orderedIds);
-  const hasKnownContentId = contentBucketEntries(database).some(([, items]) =>
-    items.some((item) => orderedIds.includes(item.id))
-  );
-
-  if (!hasKnownContentId) {
-    throw createAdminMutationError("Nenhum conteudo valido foi encontrado para ordenar.", 400);
-  }
-
-  database.formations = reorderContentBucket(database.formations, orderedIds);
-  database.bootcamps = reorderContentBucket(database.bootcamps, orderedIds);
-  database.courses = reorderContentBucket(database.courses, orderedIds);
-  database.formationInternalCourses = reorderContentBucket(database.formationInternalCourses, orderedIds);
-  database.recentLessons = reorderContentBucket(database.recentLessons, orderedIds);
-  database.upcomingProducts = reorderContentBucket(database.upcomingProducts, orderedIds);
-  database.continueWatching = reorderContentBucket(database.continueWatching, orderedIds);
-
-  const contentRows = contentBucketEntries(database).flatMap(([bucket, items]) =>
-    items.map((content, index) => contentItemToRow(content, bucket, index))
-  );
-  await upsertRows(
-    getSupabaseAdminClient(),
-    "content_items",
-    contentRows,
-    "id",
-    "Erro ordenando conteudos"
-  );
-
-  return toHydratedAdminDashboardData(database);
-}
-
-export async function upsertProductCombo(input: ProductComboWriteInput) {
-  const database = await readAdminDatabase();
-  const combo = normalizeProductComboInput(database, input);
-
-  database.combos = [
-    combo,
-    ...database.combos.filter((currentCombo) => currentCombo.id !== combo.id)
-  ];
-
-  const supabase = getSupabaseAdminClient();
-  await upsertRows(supabase, "product_combos", [comboToRow(combo)], "id", "Erro salvando combo");
-  await deleteComboItemsForCombos(supabase, [combo.id]);
-  await upsertRows(
-    supabase,
-    "product_combo_items",
-    comboItemRows(combo),
-    "combo_id,product_id",
-    "Erro salvando itens do combo"
-  );
-  return toHydratedAdminDashboardData(database);
-}
-
-export async function deleteProductCombo(comboId: string) {
-  const database = await readAdminDatabase();
-
-  database.combos = database.combos.filter((combo) => combo.id !== comboId);
-
-  const deleteResult = await getSupabaseAdminClient().from("product_combos").delete().eq("id", comboId);
-  await throwIfSupabaseError(deleteResult.error, "Erro removendo combo");
-  return toHydratedAdminDashboardData(database);
 }
 
 function createAdminMutationError(message: string, status: number) {
@@ -4035,435 +2858,10 @@ function createAdminMutationError(message: string, status: number) {
   return error;
 }
 
-function normalizeOrderedIds(orderedIds: string[]) {
-  return Array.from(new Set(
-    orderedIds
-      .map((id) => id.trim())
-      .filter(Boolean)
-  ));
-}
-
-function reorderItemsByIds<T extends { id: string }>(
-  items: T[],
-  orderedIds: string[],
-  entityLabel: string
-) {
-  const normalizedIds = normalizeOrderedIds(orderedIds);
-
-  if (normalizedIds.length === 0) {
-    throw createAdminMutationError(`Informe a ordem de ${entityLabel}.`, 400);
-  }
-
-  const itemById = new Map(items.map((item) => [item.id, item]));
-  const orderedItems = normalizedIds.flatMap((id) => {
-    const item = itemById.get(id);
-    return item ? [item] : [];
-  });
-
-  if (orderedItems.length === 0) {
-    throw createAdminMutationError(`Nenhum ${entityLabel} valido foi encontrado para ordenar.`, 400);
-  }
-
-  const movedIds = new Set(orderedItems.map((item) => item.id));
-
-  return [
-    ...orderedItems,
-    ...items.filter((item) => !movedIds.has(item.id))
-  ];
-}
-
-function reorderContentBucket(items: ContentItem[], orderedIds: string[]) {
-  const ids = new Set(orderedIds);
-
-  if (!items.some((item) => ids.has(item.id))) {
-    return items;
-  }
-
-  return reorderItemsByIds(items, orderedIds, "conteudos");
-}
-
-function reorderItemsInsideGroup<T extends { id: string }>(
-  items: T[],
-  predicate: (item: T) => boolean,
-  orderedIds: string[],
-  entityLabel: string
-) {
-  const groupItems = items.filter(predicate);
-
-  if (groupItems.length === 0) {
-    throw createAdminMutationError(`Nenhum ${entityLabel} encontrado para ordenar.`, 404);
-  }
-
-  const reorderedGroup = reorderItemsByIds(groupItems, orderedIds, entityLabel);
-  const queue = [...reorderedGroup];
-
-  return items.map((item) => predicate(item) ? queue.shift() ?? item : item);
-}
-
-function removeDeletedLearningReferences(
-  database: PlatformDatabase,
-  lessonIds: Set<string>,
-  moduleIds: Set<string>
-) {
-  const removedSavedItemIds = database.savedItems
-    .filter((savedItem) => (
-      (savedItem.targetType === "lesson" && lessonIds.has(savedItem.targetId)) ||
-      (savedItem.targetType === "module" && moduleIds.has(savedItem.targetId))
-    ))
-    .map((savedItem) => savedItem.id);
-  const updatedProgressRecords: LessonProgressRecord[] = [];
-  const removedSavedItemIdSet = new Set(removedSavedItemIds);
-  database.savedItems = database.savedItems.filter((savedItem) => !removedSavedItemIdSet.has(savedItem.id));
-  database.lessonProgress = database.lessonProgress.map((progress) => {
-    const completedLessonIds = progress.completedLessonIds.filter((lessonId) => !lessonIds.has(lessonId));
-    const lessonReactions = { ...progress.lessonReactions };
-    const lessonWatchStates = { ...progress.lessonWatchStates };
-    let changed = completedLessonIds.length !== progress.completedLessonIds.length;
-
-    for (const lessonId of lessonIds) {
-      if (lessonId in lessonReactions) {
-        delete lessonReactions[lessonId];
-        changed = true;
-      }
-
-      if (lessonId in lessonWatchStates) {
-        delete lessonWatchStates[lessonId];
-        changed = true;
-      }
-    }
-
-    if (!changed) {
-      return progress;
-    }
-
-    const nextProgress = {
-      ...progress,
-      completedLessonIds,
-      lessonReactions,
-      lessonWatchStates,
-      updatedAt: new Date().toISOString()
-    };
-    updatedProgressRecords.push(nextProgress);
-    return nextProgress;
-  });
-
-  return { removedSavedItemIds, updatedProgressRecords };
-}
-
-async function persistDeletedLearningReferences(
-  supabase: ReturnType<typeof getSupabaseAdminClient>,
-  cleanup: ReturnType<typeof removeDeletedLearningReferences>
-) {
-  if (cleanup.removedSavedItemIds.length > 0) {
-    const deleteSavedItemsResult = await supabase
-      .from("saved_items")
-      .delete()
-      .in("id", cleanup.removedSavedItemIds);
-    await throwIfSupabaseError(deleteSavedItemsResult.error, "Erro removendo favoritos da estrutura excluida");
-  }
-
-  await upsertRows(
-    supabase,
-    "lesson_progress",
-    cleanup.updatedProgressRecords.map((progress) => ({
-      completed_lesson_ids: progress.completedLessonIds,
-      content_id: progress.contentId,
-      lesson_reactions: progress.lessonReactions,
-      lesson_watch_states: progress.lessonWatchStates,
-      updated_at: progress.updatedAt,
-      user_id: progress.userId
-    })),
-    "user_id,content_id",
-    "Erro removendo referencias de progresso da estrutura excluida"
-  );
-}
-
-export async function deleteCourseModule(moduleId: string) {
-  const database = await readAdminDatabase();
-  const courseModule = database.courseModules.find((module) => module.id === moduleId);
-
-  if (!courseModule) {
-    throw createAdminMutationError("Modulo nao encontrado.", 404);
-  }
-
-  const lessonIds = new Set(courseModule.lessons.map((lesson) => lesson.id));
-  const supabase = getSupabaseAdminClient();
-  const deleteResult = await supabase.from("course_modules").delete().eq("id", moduleId);
-  await throwIfSupabaseError(deleteResult.error, "Erro removendo modulo");
-
-  database.courseModules = database.courseModules.filter((module) => module.id !== moduleId);
-  const cleanup = removeDeletedLearningReferences(database, lessonIds, new Set([moduleId]));
-  await persistDeletedLearningReferences(supabase, cleanup);
-  return toHydratedAdminDashboardData(database);
-}
-
-export async function reorderCourseModules(input: ModuleOrderInput) {
-  const database = await readAdminDatabase();
-  const ownerId = input.ownerId?.trim();
-  const hasScopedModules = ownerId
-    ? database.courseModules.some((module) => module.ownerId === ownerId)
-    : false;
-  const matchesTargetOwner = (module: CourseModule) =>
-    hasScopedModules ? module.ownerId === ownerId : !module.ownerId;
-
-  database.courseModules = reorderItemsInsideGroup(
-    database.courseModules,
-    matchesTargetOwner,
-    input.orderedIds,
-    "modulos"
-  );
-
-  const moduleRows = database.courseModules.map(moduleToRow);
-  await upsertRows(
-    getSupabaseAdminClient(),
-    "course_modules",
-    moduleRows,
-    "id",
-    "Erro ordenando modulos"
-  );
-
-  return toHydratedAdminDashboardData(database);
-}
-
-export async function upsertCourseModule(input: ModuleWriteInput) {
-  const database = await readAdminDatabase();
-  const moduleId = input.id || makeId("module", input.title);
-  const existingModule = database.courseModules.find((module) => module.id === moduleId);
-  const ownerId = input.ownerId ?? existingModule?.ownerId;
-  const ownerKind = input.ownerKind ?? existingModule?.ownerKind;
-  const ownerModulesCount = database.courseModules.filter((module) =>
-    ownerId ? module.ownerId === ownerId : !module.ownerId
-  ).length;
-  const moduleImage = await persistImageAsset(
-    input.image || existingModule?.image || "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=900&q=80",
-    `modules/${moduleId}/cover`
-  );
-  const nextModule: CourseModule = {
-    description: input.description || "Modulo cadastrado no CMS persistido.",
-    eyebrow: existingModule?.eyebrow ?? `Modulo ${String(ownerModulesCount + 1).padStart(2, "0")}`,
-    id: moduleId,
-    image: moduleImage,
-    lessons: existingModule?.lessons ?? [],
-    meta: "0 aulas",
-    ownerId,
-    ownerKind,
-    progress: existingModule?.progress ?? 0,
-    releaseRule: input.releaseRule ?? existingModule?.releaseRule,
-    title: input.title
-  };
-
-  database.courseModules = (
-    existingModule
-      ? database.courseModules.map((module) => (module.id === moduleId ? nextModule : module))
-      : [...database.courseModules, nextModule]
-  ).map((module) => ({
-    ...module,
-    meta: `${module.lessons.length} aula${module.lessons.length === 1 ? "" : "s"}`
-  }));
-
-  const moduleRows = database.courseModules.map(moduleToRow);
-  await upsertRows(
-    getSupabaseAdminClient(),
-    "course_modules",
-    moduleRows,
-    "id",
-    "Erro salvando modulo"
-  );
-  return toHydratedAdminDashboardData(database);
-}
-
-export async function upsertLesson(input: LessonWriteInput) {
-  const database = await readAdminDatabase();
-  const moduleIndex = database.courseModules.findIndex((module) => module.id === input.moduleId);
-
-  if (moduleIndex < 0) {
-    throw new Error("Modulo nao encontrado.");
-  }
-
-  const courseModule = database.courseModules[moduleIndex];
-  const lessonId = input.id || makeId(`${courseModule.id}-lesson`, input.title);
-  const existingLesson = database.courseModules
-    .flatMap((module) => module.lessons)
-    .find((lesson) => lesson.id === lessonId);
-  const hasVideoInput = Object.prototype.hasOwnProperty.call(input, "video");
-  const lessonImage = await persistImageAsset(
-    input.image || existingLesson?.image,
-    `lessons/${lessonId}/thumbnail`
-  );
-  const nextLesson = {
-    completed: existingLesson?.completed ?? false,
-    description: input.description || existingLesson?.description || "Aula cadastrada no CMS persistido.",
-    duration: input.duration || existingLesson?.duration || "15 min",
-    id: lessonId,
-    image: lessonImage || undefined,
-    releaseRule: input.releaseRule ?? existingLesson?.releaseRule,
-    title: input.title,
-    video: hasVideoInput ? input.video ?? undefined : existingLesson?.video
-  };
-
-  database.courseModules = database.courseModules.map((module, index) => {
-    const currentLessonIndex = module.lessons.findIndex((lesson) => lesson.id === lessonId);
-    const moduleLessons = module.lessons.filter((lesson) => lesson.id !== lessonId);
-    const insertAt = currentLessonIndex >= 0 ? currentLessonIndex : moduleLessons.length;
-    const lessons = index === moduleIndex
-      ? [
-          ...moduleLessons.slice(0, insertAt),
-          nextLesson,
-          ...moduleLessons.slice(insertAt)
-        ]
-      : moduleLessons;
-
-    return {
-      ...module,
-      lessons,
-      meta: `${lessons.length} aula${lessons.length === 1 ? "" : "s"}`
-    };
-  });
-
-  const supabase = getSupabaseAdminClient();
-  const moduleRows = database.courseModules.map(moduleToRow);
-  const lessonRows = database.courseModules.flatMap((module) =>
-    module.lessons.map((lesson, index) => lessonToRow(lesson, module.id, index))
-  );
-  await upsertRows(supabase, "course_modules", moduleRows, "id", "Erro atualizando modulo da aula");
-  await upsertRows(supabase, "lessons", lessonRows, "id", "Erro salvando aula");
-  return {
-    data: toHydratedAdminDashboardData(database),
-    lessonId
-  };
-}
-
-export async function reorderLessons(input: LessonOrderInput) {
-  const database = await readAdminDatabase();
-  const moduleIndex = database.courseModules.findIndex((module) => module.id === input.moduleId);
-
-  if (moduleIndex < 0) {
-    throw createAdminMutationError("Modulo nao encontrado.", 404);
-  }
-
-  database.courseModules = database.courseModules.map((module, index) => {
-    if (index !== moduleIndex) {
-      return module;
-    }
-
-    const lessons = reorderItemsByIds(module.lessons, input.orderedIds, "aulas");
-
-    return {
-      ...module,
-      lessons
-    };
-  });
-
-  const lessonRows = database.courseModules.flatMap((module) =>
-    module.lessons.map((lesson, index) => lessonToRow(lesson, module.id, index))
-  );
-  await upsertRows(
-    getSupabaseAdminClient(),
-    "lessons",
-    lessonRows,
-    "id",
-    "Erro ordenando aulas"
-  );
-
-  return toHydratedAdminDashboardData(database);
-}
-
-export async function deleteLesson(lessonId: string) {
-  const database = await readAdminDatabase();
-  const ownerModule = database.courseModules.find((module) =>
-    module.lessons.some((lesson) => lesson.id === lessonId)
-  );
-
-  if (!ownerModule) {
-    throw createAdminMutationError("Aula nao encontrada.", 404);
-  }
-
-  const supabase = getSupabaseAdminClient();
-  const deleteResult = await supabase.from("lessons").delete().eq("id", lessonId);
-  await throwIfSupabaseError(deleteResult.error, "Erro removendo aula");
-  const remainingLessonsCount = ownerModule.lessons.filter((lesson) => lesson.id !== lessonId).length;
-  const moduleMeta = `${remainingLessonsCount} aula${remainingLessonsCount === 1 ? "" : "s"}`;
-  const updateModuleResult = await supabase
-    .from("course_modules")
-    .update({ meta: moduleMeta })
-    .eq("id", ownerModule.id);
-  await throwIfSupabaseError(updateModuleResult.error, "Erro atualizando a quantidade de aulas do modulo");
-
-  database.courseModules = database.courseModules.map((module) => {
-    if (module.id !== ownerModule.id) {
-      return module;
-    }
-
-    const lessons = module.lessons.filter((lesson) => lesson.id !== lessonId);
-
-    return {
-      ...module,
-      lessons,
-      meta: moduleMeta
-    };
-  });
-  const cleanup = removeDeletedLearningReferences(database, new Set([lessonId]), new Set());
-  await persistDeletedLearningReferences(supabase, cleanup);
-  return toHydratedAdminDashboardData(database);
-}
-
-export async function addCohort(name: string) {
-  const database = await readAdminDatabase();
-  const trimmedName = name.trim();
-
-  if (!trimmedName) {
-    throw new Error("Nome da turma e obrigatorio.");
-  }
-
-  if (!database.cohorts.includes(trimmedName)) {
-    database.cohorts = [trimmedName, ...database.cohorts];
-  }
-
-  await upsertRows(
-    getSupabaseAdminClient(),
-    "cohorts",
-    [{ name: trimmedName }],
-    "name",
-    "Erro salvando turma"
-  );
-  return toHydratedAdminDashboardData(database);
-}
-
 export type AdminDashboardCollectionsInput = Partial<Pick<
   PlatformDatabase,
   "aiAgents" | "blockedWordRules" | "integrations" | "moderationItems"
 >>;
-
-export async function updateAdminDashboardCollections(input: AdminDashboardCollectionsInput) {
-  const database = await readAdminDatabase();
-
-  if (Array.isArray(input.aiAgents)) {
-    database.aiAgents = input.aiAgents;
-  }
-
-  if (Array.isArray(input.blockedWordRules)) {
-    database.blockedWordRules = input.blockedWordRules;
-  }
-
-  if (Array.isArray(input.integrations)) {
-    database.integrations = input.integrations;
-  }
-
-  if (Array.isArray(input.moderationItems)) {
-    database.moderationItems = input.moderationItems;
-  }
-
-  const updatedKeys = new Set(Object.keys(input));
-  const rows = stampPlatformSettingRows(settingsRows(database).filter((row) => updatedKeys.has(row.key)));
-  await upsertRows(
-    getSupabaseAdminClient(),
-    "platform_settings",
-    rows,
-    "key",
-    "Erro salvando configuracoes administrativas"
-  );
-  return toHydratedAdminDashboardData(database);
-}
 
 async function savedItemTargetExists(targetType: SavedItemTargetType, targetId: string) {
   const supabase = getSupabaseAdminClient();
@@ -4585,7 +2983,11 @@ export async function replaceCompletedLessons(input: {
   const writeResult = lessonProgressWriteQueue.then(async () => {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await replaceCompletedLessonsUnsafe(input);
+        const { activity, record } = await replaceCompletedLessonsUnsafe(input);
+        // Atividade real (docs/17 §1.11) so depois do compare-and-swap confirmado: uma tentativa que
+        // perdeu o conflito nao conta. Fora do caminho da resposta, para nao atrasar o heartbeat.
+        scheduleStudentActivity({ contentId: record.contentId, delta: activity, userId: record.userId });
+        return record;
       } catch (error) {
         if ((error as { code?: string }).code !== LESSON_PROGRESS_CONFLICT_CODE || attempt >= 3) {
           throw error;
@@ -4595,6 +2997,19 @@ export async function replaceCompletedLessons(input: {
   });
   lessonProgressWriteQueue = writeResult.then(() => undefined, () => undefined);
   return writeResult;
+}
+
+function scheduleStudentActivity(input: { contentId: string; delta: ActivityDelta; userId: string }) {
+  if (input.delta.seconds <= 0 && input.delta.completed <= 0) {
+    return;
+  }
+
+  try {
+    after(() => recordStudentActivity(input));
+  } catch {
+    // Fora de um request (ex.: job): grava direto, sem bloquear quem chamou.
+    void recordStudentActivity(input);
+  }
 }
 
 async function replaceCompletedLessonsUnsafe({
@@ -4643,6 +3058,7 @@ async function replaceCompletedLessonsUnsafe({
     : null;
   const uniqueLessonIds = Array.from(new Set(completedLessonIds ?? currentRecord?.completedLessonIds ?? []));
   const nextLessonWatchStates = normalizeLessonWatchStates(currentRecord?.lessonWatchStates);
+  const previousWatchState = lessonId ? (normalizeLessonWatchStates(currentRecord?.lessonWatchStates)[lessonId] ?? null) : null;
 
   if (lessonId) {
     const existingWatchState = nextLessonWatchStates[lessonId];
@@ -4708,6 +3124,14 @@ async function replaceCompletedLessonsUnsafe({
     updatedAt: new Date().toISOString(),
     userId
   };
+  const activity = activityDeltaOf({
+    nextCompletedLessonIds: uniqueLessonIds,
+    nextProgressSeconds: lessonId ? (nextLessonWatchStates[lessonId]?.progressSeconds ?? 0) : 0,
+    now: Date.now(),
+    previousCompletedLessonIds: currentRecord?.completedLessonIds ?? [],
+    previousLastWatchedAt: previousWatchState?.lastWatchedAt ?? null,
+    previousProgressSeconds: previousWatchState ? previousWatchState.progressSeconds : null
+  });
 
   const nextRow = {
     completed_lesson_ids: nextRecord.completedLessonIds,
@@ -4732,7 +3156,7 @@ async function replaceCompletedLessonsUnsafe({
       throw createLessonProgressConflictError();
     }
 
-    return nextRecord;
+    return { activity, record: nextRecord };
   }
 
   const insertResult = await supabase.from("lesson_progress").insert(nextRow);
@@ -4742,9 +3166,5 @@ async function replaceCompletedLessonsUnsafe({
   }
 
   await throwIfSupabaseError(insertResult.error, "Erro salvando progresso da aula");
-  return nextRecord;
-}
-
-export function getDefaultAdminStatus(): AdminEntitlementStatus {
-  return "active";
+  return { activity, record: nextRecord };
 }

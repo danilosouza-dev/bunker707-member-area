@@ -16,15 +16,12 @@ import {
   getInitials
 } from "../src/components/admin/v2/format.ts";
 import {
-  ADMIN_LEGACY_HREF,
   adminNavItems,
   buildAdminNavHref,
   formatAdminNavCount,
   getActiveAdminNavChild,
-  getAdminLegacyAvailability,
   getAdminMobileTitle,
   getAdminTopbarScope,
-  isAdminLegacyPath,
   isAdminNavChildActive,
   isAdminNavSectionActive,
   isAdminV2Href
@@ -128,7 +125,6 @@ test("barra superior mostra so os filtros que a tela usa (prototipo aprovado)", 
     "/admin/configuracoes",
     "/admin/configuracoes/ia",
     "/admin/configuracoes/ia/conexoes",
-    "/admin/legado",
     null,
     undefined
   ]) {
@@ -257,6 +253,8 @@ test("contador do menu: so numeros positivos, com teto de 99+", () => {
 
 test("cada destino do menu que pertence a esta fase tem uma pagina", () => {
   for (const href of [
+    "/admin/alunos",
+    "/admin/alunos/novo",
     "/admin/produtos/pacotes",
     "/admin/area-de-membros",
     "/admin/area-de-membros/destaque",
@@ -274,32 +272,13 @@ test("cada destino do menu que pertence a esta fase tem uma pagina", () => {
   }
 });
 
-test("isAdminV2Href separa o admin novo do legado e da area do aluno", () => {
+test("isAdminV2Href separa o admin da area do aluno", () => {
   assert.equal(isAdminV2Href("/admin"), true);
   assert.equal(isAdminV2Href("/admin/"), true);
   assert.equal(isAdminV2Href("/admin/alunos?periodo=7"), true);
-  assert.equal(isAdminV2Href("/admin/legado"), false);
-  assert.equal(isAdminV2Href("/admin/legado/"), false);
-  assert.equal(isAdminV2Href("/admin/legado?aba=alunos"), false);
+  assert.equal(isAdminV2Href("/admin/alunos/novo"), true);
   assert.equal(isAdminV2Href("/administrador"), false);
   assert.equal(isAdminV2Href("/"), false);
-
-  assert.equal(isAdminLegacyPath("/admin/legado"), true);
-  assert.equal(isAdminLegacyPath("/admin/legado/qualquer"), true);
-  assert.equal(isAdminLegacyPath("/admin/legadox"), false);
-  assert.equal(isAdminLegacyPath("/admin"), false);
-  assert.equal(isAdminLegacyPath(null), false);
-});
-
-test("so areas que existem no admin antigo oferecem o atalho para ele", () => {
-  for (const area of ["alunos", "produtos", "membros", "comunidade", "configuracoes"]) {
-    assert.deepEqual(getAdminLegacyAvailability(area), { href: ADMIN_LEGACY_HREF, kind: "legacy" }, area);
-  }
-
-  assert.deepEqual(getAdminLegacyAvailability("comunicacao"), {
-    kind: "new",
-    note: "Avisos, webinários e promoções são novidade: ainda não existem no admin antigo."
-  });
 });
 
 test("getGreeting usa o horario de Sao Paulo", () => {
@@ -358,14 +337,19 @@ test("layout e toda pagina do admin novo chamam o guard de admin antes de render
   assert.ok(pages.length >= 10, `esperava as 10 rotas do admin novo, achei ${pages.length}`);
 
   for (const entry of [...pages, { path: "src/app/admin/(v2)/layout.tsx", source: sourceOf("src/app/admin/(v2)/layout.tsx") }]) {
-    assert.match(entry.source, /import \{ requirePageAdmin \} from "@\/server\/auth\/guards";/, entry.path);
+    // requirePageRole("acao", "/admin") chama requirePageAdmin() por dentro e ainda confere o papel (Alunos).
+    assert.match(
+      entry.source,
+      /import \{ requirePageAdmin \} from "@\/server\/auth\/guards";|import \{ requirePageRole \} from "@\/server\/auth\/permissions";/,
+      entry.path
+    );
 
-    const guardIndex = entry.source.search(/requirePageAdmin\(\)/);
+    const guardIndex = entry.source.search(/requirePageAdmin\(\)|requirePageRole\("[a-z._]+", "\/admin"\)/);
     // Fim da pagina: o primeiro JSX devolvido ou, numa pagina so de redirecionamento, o redirect.
     const exits = [entry.source.search(/return \(/), entry.source.search(/\bredirect\(/)].filter((index) => index >= 0);
     const renderIndex = exits.length > 0 ? Math.min(...exits) : -1;
 
-    assert.ok(guardIndex > 0, `${entry.path} precisa chamar requirePageAdmin()`);
+    assert.ok(guardIndex > 0, `${entry.path} precisa chamar requirePageAdmin() ou requirePageRole()`);
     assert.ok(renderIndex > 0, `${entry.path} precisa devolver JSX ou redirecionar`);
     assert.ok(guardIndex < renderIndex, `${entry.path} chama o guard antes de devolver o JSX ou redirecionar`);
     assert.match(entry.source, /export default async function/, `${entry.path} precisa aguardar o guard`);
@@ -514,7 +498,7 @@ test("barra lateral: 240 px, recolhe para 64 px so com icones e expande de novo 
   assert.match(shell, /data-nav-group=\{item\.id\}/);
   assert.match(shell, /rotate-90/);
   assert.match(shell, /Ver área do aluno/);
-  assert.match(shell, /Admin antigo/);
+  assert.doesNotMatch(shell, /Admin antigo|legado/, "nao existe mais admin antigo no menu");
   assert.match(shell, /<AccountMenu account=\{account\} compact=\{collapsed\} \/>/);
   assert.match(shell, /buildAdminNavHref\(/, "menu leva o periodo para as telas");
   assert.match(shell, /w-\[min\(280px,86vw\)\]/, "gaveta do celular");
@@ -530,7 +514,7 @@ test("telas em construcao falam a lingua do produto e guardam a fase so no atrib
   const placeholder = sourceOf("src/components/admin/v2/phase-placeholder.tsx");
 
   assert.match(placeholder, /"Esta tela ainda está sendo construída\."/);
-  assert.match(placeholder, /"Abrir no admin antigo"/);
+  assert.doesNotMatch(placeholder, /admin antigo|legado|legacy/i, "nao existe mais admin antigo para onde mandar");
   assert.match(placeholder, /data-phase=\{phase\}/);
   assert.doesNotMatch(stripComments(placeholder), /chega na fase|docs\/17|Até lá, use o admin antigo/);
 
@@ -563,13 +547,11 @@ test("telas em construcao falam a lingua do produto e guardam a fase so no atrib
   assert.doesNotMatch(stripComments(today), /fase \d|próximas fases/);
 });
 
-test("loading de /admin respeita o admin antigo e o menu da conta usa o sair compartilhado", () => {
+test("loading de /admin e o skeleton da moldura e o menu da conta usa o sair compartilhado", () => {
   const loading = sourceOf("src/app/admin/loading.tsx");
 
-  assert.match(loading, /^"use client";/);
-  assert.match(loading, /usePathname\(\)/);
-  assert.match(loading, /isAdminLegacyPath\(pathname\) \? <AdminLegacyLoading \/> : <AdminShellSkeleton \/>/);
-  assert.match(loading, /from "\.\/legado\/loading"/);
+  assert.match(loading, /return <AdminShellSkeleton \/>;/);
+  assert.doesNotMatch(loading, /"use client"|usePathname|legado/);
 
   const accountMenu = sourceOf("src/components/admin/v2/account-menu.tsx");
   assert.match(accountMenu, /import \{ signOutAndLeave \} from "@\/lib\/auth\/sign-out";/);

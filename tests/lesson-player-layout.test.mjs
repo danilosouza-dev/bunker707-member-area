@@ -469,7 +469,7 @@ test("lesson player records watch progress before completion", () => {
   assert.match(platformStoreSource, /const safeProgressSeconds = progressSeconds === undefined\s*\?\s*existingWatchState\?\.progressSeconds \?\? 0\s*:\s*incomingProgressSeconds;/);
   assert.match(platformStoreSource, /normalizeProgressNumber\(record\.maxProgressPercent, progressPercent\)/);
   assert.match(platformStoreSource, /let lessonProgressWriteQueue = Promise\.resolve\(\);/);
-  assert.match(platformStoreSource, /return await replaceCompletedLessonsUnsafe\(input\);/);
+  assert.match(platformStoreSource, /const \{ activity, record \} = await replaceCompletedLessonsUnsafe\(input\);/);
   assert.match(platformStoreSource, /LESSON_PROGRESS_CONFLICT_CODE/);
   assert.match(platformStoreSource, /\.eq\("updated_at", currentRow\.updated_at\)/);
   assert.match(platformStoreSource, /const safeMaxProgressPercent = nextStatus === "completed"/);
