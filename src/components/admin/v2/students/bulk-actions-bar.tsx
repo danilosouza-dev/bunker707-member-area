@@ -30,7 +30,8 @@ import { downloadTextFile } from "./export-button";
 import type { PickerProduct } from "./product-picker";
 import { useStudentSelection } from "./student-selection";
 
-// Barra fixa "N selecionados" (docs/17 §1.7.1). Cada acao roda em lotes de 25 com progresso, teto de
+// Barra "N selecionados" (docs/17 §1.7.1): cartao flutuante no rodape, na largura da tabela, no mesmo
+// desenho da barra de salvar (SaveBar). Cada acao roda em lotes de 25 com progresso, teto de
 // 200 por rodada; a equipe e sempre recusada no servidor. Remover/estender tem "Desfazer" por 10 s, que
 // restaura exatamente o que cada acesso tinha. Falhas parciais ficam num resumo persistente com
 // "Baixar lista" (nunca em toast).
@@ -43,6 +44,9 @@ type BulkActionsBarProps = {
   products: readonly PickerProduct[];
   today: string;
 };
+
+const floatingBar =
+  "sticky bottom-4 z-30 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-3)] px-4 py-3 shadow-[0_16px_40px_rgba(0,0,0,0.45)] animate-in fade-in slide-in-from-bottom-2 duration-200 ease-[var(--ease-admin)] motion-reduce:animate-none";
 
 type DialogKind = Exclude<BulkAction, "extend_30" | "extend_90" | "set_end"> | "extend" | null;
 type ExtendMode = "extend_30" | "extend_90" | "set_end";
@@ -122,7 +126,7 @@ export function BulkActionsBar({ canExport, cohorts: initialCohorts, labels, pro
   if (count === 0 && undoError) {
     // A selecao ja foi limpa, mas o Desfazer falhou: o erro fica visivel ate ser fechado.
     return (
-      <div className="sticky bottom-0 z-30 mt-4" role="region" aria-label="Erro ao desfazer">
+      <div className="sticky bottom-4 z-30" role="region" aria-label="Erro ao desfazer">
         <ErrorBanner action={<Button className="px-3" onClick={() => setUndoError(null)} type="button" variant="ghost">Fechar</Button>}>
           {undoError}
         </ErrorBanner>
@@ -364,11 +368,7 @@ export function BulkActionsBar({ canExport, cohorts: initialCohorts, labels, pro
 
   return (
     <>
-      <div
-        className="sticky bottom-0 z-30 -mx-4 mt-2 border-t border-[var(--border-strong)] bg-[var(--surface-2)]/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-[var(--surface-2)]/80 md:-mx-6 md:px-6"
-        role="region"
-        aria-label="Ações para os alunos selecionados"
-      >
+      <div className={floatingBar} role="region" aria-label="Ações para os alunos selecionados">
         <div className="flex flex-wrap items-center gap-2">
           <p className="mr-2 flex items-center gap-2 text-sm font-medium text-[var(--text-primary)] tabular-nums">
             <Users aria-hidden="true" className="size-4 text-[var(--text-secondary)]" />

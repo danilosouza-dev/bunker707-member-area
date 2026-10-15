@@ -32,6 +32,8 @@ import { ProgressBar } from "./student-list-table";
 export type StudentProfilePermissions = {
   canAccess: boolean;
   canDelete: boolean;
+  /** Dono (settings.team): unico que muda os dados de quem e da equipe. */
+  canManageTeam: boolean;
   canSeePersonal: boolean;
 };
 
@@ -191,6 +193,10 @@ export function StudentProfileView({ cohorts, detail, now, permissions, products
             alreadyGranted={openAccesses.map((access) => access.targetId)}
             canAccess={permissions.canAccess}
             canDelete={permissions.canDelete && !detail.isStaff}
+            // Conta da equipe: convite e senha nao mudam por Alunos; dados, so o dono muda.
+            canEditProfile={permissions.canAccess && (!detail.isStaff || permissions.canManageTeam)}
+            canEditPhone={permissions.canSeePersonal}
+            canSendAccessEmail={permissions.canAccess && !detail.isStaff}
             products={products}
             student={{ email: detail.email, fullName: detail.fullName, hasAccount: Boolean(detail.account), id: detail.id, phone: detail.phone }}
             today={todayInputValue(now)}
@@ -225,13 +231,13 @@ export function StudentProfileView({ cohorts, detail, now, permissions, products
         items={[
           { count: openAccesses.length, href: studentHref(detail.id), label: "Acessos" },
           { href: studentHref(detail.id, "progresso"), label: "Progresso" },
-          { href: studentHref(detail.id, "historico"), label: "Histórico" }
+          ...(permissions.canSeePersonal ? [{ href: studentHref(detail.id, "historico"), label: "Histórico" }] : [])
         ]}
       />
 
       {tab === "acessos" ? <AccessesTab accesses={detail.accesses} canAccess={permissions.canAccess} cohorts={cohorts} now={now} userId={detail.id} /> : null}
       {tab === "progresso" ? <ProgressTab now={now} progress={detail.progress} /> : null}
-      {tab === "historico" ? <TimelineTab timeline={detail.timeline} /> : null}
+      {tab === "historico" && permissions.canSeePersonal ? <TimelineTab timeline={detail.timeline} /> : null}
     </>
   );
 }

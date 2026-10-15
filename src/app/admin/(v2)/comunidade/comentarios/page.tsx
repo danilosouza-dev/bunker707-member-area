@@ -6,10 +6,11 @@ import { CommunityFrame, CommunityPendingMigration } from "@/components/admin/v2
 import { clearFiltersHref, COMMUNITY_TAB_HREFS, hasActiveFilters } from "@/components/admin/v2/community/hrefs";
 import { CommunityPagination } from "@/components/admin/v2/community/pagination";
 import { EmptyState } from "@/components/admin/v2/empty-state";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageArea } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getCommunityFilterOptions, getCommunityStats, listComments } from "@/server/community/queries";
 import { parseCommentListSearchParams } from "@/server/community/schemas";
+import { communityFilterKeys, lessonPathFor, scopeCommunityFilterOptions, scopeCommunityParams } from "@/server/community/scope";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
 export const metadata: Metadata = {
@@ -27,14 +28,14 @@ function readNow() {
 // Comunidade › Comentarios (docs/17 §1.9): todos os comentarios do periodo, mais novos primeiro, com
 // filtros de produto, aula, situacao, resposta, periodo e busca; moderacao na linha e em massa.
 export default async function CommunityCommentsPage({ searchParams }: CommunityCommentsPageProps) {
-  const { role } = await requirePageAdmin();
-  const params = await searchParams;
+  const { access } = await requirePageArea("comunidade");
+  const params = scopeCommunityParams(access, COMMUNITY_TAB_HREFS.comentarios, await searchParams);
   const query = parseCommentListSearchParams(params);
   const loaded = await loadUnlessPendingMigration(() =>
     Promise.all([
       getCommunityStats({ product: query.product }),
       listComments(query),
-      getCommunityFilterOptions()
+      getCommunityFilterOptions().then((options) => scopeCommunityFilterOptions(access, options))
     ])
   );
 
@@ -43,12 +44,12 @@ export default async function CommunityCommentsPage({ searchParams }: CommunityC
   }
 
   const [stats, list, options] = loaded.data;
-  const filtered = hasActiveFilters(params, ["produto", "aula", "situacao", "respondido", "busca"]);
+  const filtered = hasActiveFilters(params, communityFilterKeys(access, ["produto", "aula", "situacao", "respondido", "busca"]));
 
   return (
     <CommunityFrame
       stats={stats}
-      toolbar={<CommunityFilters options={options} showAnswered showSearch showStatus />}
+      toolbar={<CommunityFilters allowAllProducts={access.productIds === null} options={options} showAnswered showSearch showStatus />}
     >
       {list.total === 0 ? (
         filtered ? (
@@ -67,7 +68,11 @@ export default async function CommunityCommentsPage({ searchParams }: CommunityC
         )
       ) : (
         <>
-          <CommentsTable canModerate={canRole(role, "community.moderate")} items={list.items} nowIso={readNow()} />
+          <CommentsTable
+            canModerate={can(access, "community.moderate")}
+            items={list.items.map((item) => ({ ...item, path: lessonPathFor(access, item.path) }))}
+            nowIso={readNow()}
+          />
           <CommunityPagination
             itemLabel="comentários"
             page={list.page}

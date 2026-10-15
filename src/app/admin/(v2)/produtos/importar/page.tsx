@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/admin/v2/page-header";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { PlaylistImport } from "@/components/admin/v2/products/playlist-import";
 import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { can } from "@/server/auth/roles";
 import { assertCatalogSchemaReady } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
@@ -17,9 +17,9 @@ const IMPORT_BREADCRUMB = [{ href: "/admin/produtos", label: "Produtos" }, { lab
 
 // Importar (docs/17 §1.6.7), aba Playlist do YouTube. Sem permissao de editar o catalogo, volta para a lista.
 export default async function ImportProductsPage() {
-  const { role } = await requirePageAdmin();
+  const { access } = await requirePageAdmin();
 
-  if (!canRole(role, "catalog.write")) {
+  if (!can(access, "catalog.write")) {
     redirect("/admin/produtos");
   }
 

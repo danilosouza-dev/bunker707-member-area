@@ -21,6 +21,7 @@ export async function requireRole(action) {
   if (!canRole(stubs.role.role, action)) throw new AdminPermissionError("Seu papel não permite esta ação.", 403);
   return stubs.role;
 }
+export async function requireScope() {}
 export async function requireApiRole(action) {
   const stubs = globalThis.__adminActionStubs;
   if (!canRole(stubs.role.role, action)) return { response: Response.json({ error: "Seu papel não permite esta ação." }, { status: 403 }) };

@@ -24,7 +24,7 @@ const MODULE_NOT_FOUND = "Não encontramos este módulo. Ele pode ter sido exclu
  * capa do produto. Confere a medida no cabecalho do WebP, envia ao Storage e grava so a URL.
  */
 export async function setModuleCover(input: SetModuleCoverInput): Promise<ActionResult<ModuleCoverSaved>> {
-  return runAdminAction("catalog.write", setModuleCoverSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.content", setModuleCoverSchema, input, async ({ input: data }) => {
     const db = catalogDb();
     const current = await fetchModuleRow(data.moduleId, db);
 
@@ -73,5 +73,5 @@ export async function setModuleCover(input: SetModuleCoverInput): Promise<Action
       updatedAt: updated.updated_at,
       usesProductCover: moduleUsesProductCover(updated.image, product.image)
     };
-  });
+  }, { target: (data) => ({ moduleIds: [data.moduleId] }) });
 }

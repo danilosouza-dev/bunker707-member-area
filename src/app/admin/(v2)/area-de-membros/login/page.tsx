@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { ErrorBanner } from "@/components/admin/v2/error-banner";
 import { LoginEditor } from "@/components/admin/v2/member-area/login/login-editor";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageArea } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getLoginEditorData } from "@/server/member-area/login-queries";
 
 export const metadata: Metadata = {
@@ -19,7 +19,7 @@ async function loadLoginPage() {
 }
 
 export default async function AdminLoginPage() {
-  const { role } = await requirePageAdmin();
+  const { access } = await requirePageArea("membros");
   const result = await loadLoginPage();
 
   if (!result.ok) {
@@ -30,5 +30,5 @@ export default async function AdminLoginPage() {
     );
   }
 
-  return <LoginEditor canEdit={canRole(role, "storefront.write")} data={result.data} />;
+  return <LoginEditor canEdit={can(access, "storefront.write")} data={result.data} />;
 }

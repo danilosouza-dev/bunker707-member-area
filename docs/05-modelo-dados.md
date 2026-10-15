@@ -166,7 +166,7 @@ Implementacao atual:
 - a area do aluno aplica entitlements ativos por usuario autenticado para liberar cards, paginas e `Minhas compras`;
 - enquanto o CRM manual e a tabela de entitlements coexistirem, o backend tambem reconhece os cursos ativos vinculados ao aluno por email/id e sincroniza esses cursos para `entitlements` quando o usuario Auth ja existe;
 - quando um curso/produto ou aluno sai do CRM manual, os entitlements gerenciados pela origem `admin-student:*` sao marcados como `revoked`; entitlements criados por webhooks externos nao sao apagados por essa rotina;
-- o modo de preview de acesso e ferramenta administrativa: so aparece para usuarios com papel em `admin_roles` e nao altera a experiencia de alunos comuns.
+- o modo de preview de acesso e ferramenta administrativa: so aparece para a equipe da escola toda (papel em `admin_roles` sem escopo por curso; o Professor nao) e nao altera a experiencia de alunos comuns. Na area do aluno, a equipe abre conteudo sem compra; o Professor, so os cursos dele.
 - `starts_at` e o inicio da contagem das regras de liberacao "depois da compra/inscricao": a data mostrada ao aluno (`Liberação em 08/01/2026`) e a liberacao real saem da mesma conta (`resolveReleaseState` em `src/server/access/release-policy.ts`), usando o acesso ativo mais antigo que vale para o conteudo, no fuso de Sao Paulo.
 - ponto de extensao da garantia (sem migracao nesta fase): quando o pipeline de webhooks gravar o fim da garantia da compra (Hotmart: `purchase.warranty_expire_date`), entra uma coluna opcional `warranty_ends_at` em `entitlements` (migracao `202610130002+`), enviada em `getReleasePolicyEntitlements` (`src/server/db/platform-store.ts`). A conta ja aceita esse campo e so o usa quando a regra pedir `anchor: "warranty_end"`; sem a data gravada, volta para `starts_at`.
 
@@ -315,7 +315,7 @@ Regras:
 - content_id;
 - lesson_id;
 - author_id;
-- author_name, author_username, author_avatar_url e author_role como snapshot de exibicao. `author_role` e gravado no envio: `producer` para papel administrativo `owner`, `admin` ou `editor` (etiqueta `Professor`), `moderator` para `support` ou `analyst` (etiqueta `Moderador`) e `student` para quem nao tem papel (etiqueta `Aluno`). Comentarios antigos mantem o papel gravado;
+- author_name, author_username, author_avatar_url e author_role como snapshot de exibicao. `author_role` e gravado no envio: `producer` para papel administrativo `owner`, `admin`, `editor` ou `instructor` (etiqueta `Professor`), `moderator` para `support`, `analyst` ou `custom` (etiqueta `Moderador`) e `student` para quem nao tem papel (etiqueta `Aluno`). Comentarios antigos mantem o papel gravado;
 - parent_comment_id;
 - body;
 - status: pending, approved, hidden, spam;
@@ -627,14 +627,20 @@ Historico de publicacao para auditoria e rollback.
 
 ### admin_roles
 
-Permissoes de usuarios administrativos com Supabase Auth.
+Equipe do admin com Supabase Auth: uma linha por pessoa, um papel por pessoa (docs/17 §2.3).
 
 - id;
-- user_id;
-- role: owner, admin, editor, support, analyst;
-- permissions jsonb;
+- user_id (unico, `auth.users` com `on delete cascade`);
+- role: owner, admin, editor, instructor (Professor), support, analyst, custom (Personalizado);
+- permissions jsonb (objeto, ate 16 KB): `{ "productIds": [...] }` no Professor (cursos em que ele monta aulas e responde a comunidade) e `{ "actions": [...] }` no Personalizado (o que o dono marcou). Os outros papeis gravam `{}`; o servidor descarta acao desconhecida e id invalido ao ler;
 - created_at;
-- updated_at.
+- updated_at (gravacao condicional da tela de Equipe).
+
+Regras de admin_roles (migracao `202610160001`):
+
+- escrita so pelo servidor (`service_role`, depois de `settings.team`); o navegador le so a propria linha;
+- gatilho `guard_last_admin_owner`: remover, rebaixar ou apagar a conta do ultimo dono falha (`last_owner`), com trava nas linhas de dono para dois pedidos ao mesmo tempo nao removerem os dois ultimos;
+- permissoes efetivas sao calculadas a cada requisicao (`resolveAdminAccess` em `src/server/auth/roles.ts`): mudar ou remover alguem vale na proxima requisicao da pessoa.
 
 ### admin_activity_log
 

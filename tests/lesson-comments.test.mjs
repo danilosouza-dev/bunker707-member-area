@@ -53,12 +53,12 @@ test("frontend da aula nao usa mais a lista mockada de comentarios", async () =>
   assert.match(source, /\/api\/comments\/\$\{encodeURIComponent\(commentId\)\}\/report/);
 });
 
-test("etiqueta de funcao: equipe que ensina e Professor, suporte e analista sao Moderador", async () => {
+test("etiqueta de funcao: equipe que ensina e Professor; suporte, analista e personalizado sao Moderador", async () => {
   const store = await readFile(new URL("../src/server/comments/comment-store.ts", import.meta.url), "utf8");
   const helper = store.slice(store.indexOf("export function getCommentAuthorRole"), store.indexOf("export async function listLessonComments"));
 
   assert.match(helper, /if \(!isAdmin\) \{\s*return "student";\s*\}/);
-  assert.match(helper, /return adminRole === "support" \|\| adminRole === "analyst" \? "moderator" : "producer";/);
+  assert.match(helper, /return adminRole === "support" \|\| adminRole === "analyst" \|\| adminRole === "custom" \? "moderator" : "producer";/);
   assert.match(store, /const authorRole = getCommentAuthorRole\(access\.isAdmin, access\.isAdmin \? await getAdminRoleForUser\(user\.id\) : null\);/);
   assert.match(store, /author_role: authorRole,/);
   assert.doesNotMatch(store, /access\.isAdmin \? "producer" : "student"/);

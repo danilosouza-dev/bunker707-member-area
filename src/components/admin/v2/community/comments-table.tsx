@@ -50,7 +50,7 @@ function rowMenuActions(item: CommentListItem): RowMenuAction[] {
     ...(item.authorRole === "student"
       ? [{ href: studentSearchHref(item.author.name), icon: UserRound, label: "Ver aluno" }]
       : []),
-    { href: item.path.adminHref, icon: GraduationCap, label: "Abrir aula no admin" },
+    ...(item.path.adminHref ? [{ href: item.path.adminHref, icon: GraduationCap, label: "Abrir aula no admin" }] : []),
     ...(item.path.studentHref ? [{ external: true, href: item.path.studentHref, icon: MonitorPlay, label: "Ver na área do aluno" }] : [])
   ];
 }
@@ -428,14 +428,18 @@ function CommentCell({ item }: { item: CommentListItem }) {
         <p className="line-clamp-2 text-sm leading-5 text-[var(--text-primary)] [overflow-wrap:anywhere]" title={item.body}>
           {item.body}
         </p>
-        <Link
-          className={cn("w-fit max-w-full truncate rounded-sm text-xs leading-5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]", adminTransition)}
-          data-navigation-feedback="false"
-          href={item.path.adminHref}
-          title={`Abrir a aula no admin: ${item.path.label}`}
-        >
-          {item.path.label}
-        </Link>
+        {item.path.adminHref ? (
+          <Link
+            className={cn("w-fit max-w-full truncate rounded-sm text-xs leading-5 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]", adminTransition)}
+            data-navigation-feedback="false"
+            href={item.path.adminHref}
+            title={`Abrir a aula no admin: ${item.path.label}`}
+          >
+            {item.path.label}
+          </Link>
+        ) : (
+          <span className="w-fit max-w-full truncate text-xs leading-5 text-[var(--text-tertiary)]">{item.path.label}</span>
+        )}
       </div>
     </div>
   );

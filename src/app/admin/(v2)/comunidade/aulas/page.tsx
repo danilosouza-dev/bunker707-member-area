@@ -6,9 +6,10 @@ import { clearFiltersHref, COMMUNITY_TAB_HREFS, hasActiveFilters } from "@/compo
 import { LessonRowsTable, LessonSortBar } from "@/components/admin/v2/community/lesson-rows-table";
 import { CommunityPagination } from "@/components/admin/v2/community/pagination";
 import { EmptyState } from "@/components/admin/v2/empty-state";
-import { requirePageAdmin } from "@/server/auth/guards";
+import { requirePageArea } from "@/server/auth/permissions";
 import { getCommunityFilterOptions, getCommunityStats, listLessonCommunityRowsPage } from "@/server/community/queries";
 import { parseLessonRowsSearchParams } from "@/server/community/schemas";
+import { communityFilterKeys, lessonPathFor, scopeCommunityFilterOptions, scopeCommunityParams } from "@/server/community/scope";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
 export const metadata: Metadata = {
@@ -23,14 +24,14 @@ type CommunityLessonsPageProps = {
 // mesma tabela (sao a mesma linha por aula). Ordem no servidor: mais duvidas, piores ou melhores
 // avaliacoes (estas so com avaliacoes; 20 respostas ou mais primeiro).
 export default async function CommunityLessonsPage({ searchParams }: CommunityLessonsPageProps) {
-  await requirePageAdmin();
-  const params = await searchParams;
+  const { access } = await requirePageArea("comunidade");
+  const params = scopeCommunityParams(access, COMMUNITY_TAB_HREFS.aulas, await searchParams);
   const query = parseLessonRowsSearchParams(params);
   const loaded = await loadUnlessPendingMigration(() =>
     Promise.all([
       getCommunityStats({ product: query.product }),
       listLessonCommunityRowsPage(query),
-      getCommunityFilterOptions()
+      getCommunityFilterOptions().then((options) => scopeCommunityFilterOptions(access, options))
     ])
   );
 
@@ -39,11 +40,11 @@ export default async function CommunityLessonsPage({ searchParams }: CommunityLe
   }
 
   const [stats, rows, options] = loaded.data;
-  const filtered = hasActiveFilters(params, ["produto"]);
+  const filtered = hasActiveFilters(params, communityFilterKeys(access, ["produto"]));
   const byRating = query.sort !== "doubts";
 
   return (
-    <CommunityFrame stats={stats} toolbar={<CommunityFilters options={options} showLesson={false} />}>
+    <CommunityFrame stats={stats} toolbar={<CommunityFilters allowAllProducts={access.productIds === null} options={options} showLesson={false} />}>
       <LessonSortBar active={query.sort} pathname={COMMUNITY_TAB_HREFS.aulas} searchParams={params} />
       {rows.total === 0 ? (
         filtered ? (
@@ -70,7 +71,7 @@ export default async function CommunityLessonsPage({ searchParams }: CommunityLe
         )
       ) : (
         <>
-          <LessonRowsTable items={rows.items} periodLabel={query.period.inlineLabel} />
+          <LessonRowsTable items={rows.items.map((row) => ({ ...row, path: lessonPathFor(access, row.path) }))} periodLabel={query.period.inlineLabel} />
           <CommunityPagination
             itemLabel="aulas"
             page={rows.page}

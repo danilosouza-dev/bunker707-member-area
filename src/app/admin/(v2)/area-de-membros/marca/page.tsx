@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { ErrorBanner } from "@/components/admin/v2/error-banner";
 import { BrandEditor } from "@/components/admin/v2/storefront/brand-editor";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageArea } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getStorefrontBrand } from "@/server/storefront/queries";
 
 export const metadata: Metadata = {
@@ -19,7 +19,7 @@ async function loadBrand() {
 }
 
 export default async function AdminBrandPage() {
-  const { role } = await requirePageAdmin();
+  const { access } = await requirePageArea("membros");
   const result = await loadBrand();
 
   if (!result.ok) {
@@ -30,5 +30,5 @@ export default async function AdminBrandPage() {
     );
   }
 
-  return <BrandEditor brand={result.brand} canEdit={canRole(role, "storefront.write")} />;
+  return <BrandEditor brand={result.brand} canEdit={can(access, "storefront.write")} />;
 }

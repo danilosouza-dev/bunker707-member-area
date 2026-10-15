@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { ProductStudentsView } from "@/components/admin/v2/products/product-students-view";
-import { requirePageRole } from "@/server/auth/permissions";
-import { canRole } from "@/server/auth/roles";
+import { requireProductPage } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getProductAccess } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { listStudents } from "@/server/students/queries";
@@ -31,8 +31,13 @@ function readNow() {
 }
 
 export default async function ProductStudentsPage({ params, searchParams }: ProductStudentsPageProps) {
-  const { role } = await requirePageRole("students.read_basic", "/admin");
   const [{ id }, query] = await Promise.all([params, searchParams]);
+  const { access } = await requireProductPage(id);
+
+  if (!can(access, "students.read_basic") || access.productIds !== null) {
+    redirect(`/admin/produtos/${encodeURIComponent(id)}`);
+  }
+
   const loaded = await loadUnlessPendingMigration(async () => {
     const access = await getProductAccess(id);
 
@@ -56,7 +61,7 @@ export default async function ProductStudentsPage({ params, searchParams }: Prod
   return (
     <ProductStudentsView
       audience={loaded.data.access.audience}
-      canAccess={canRole(role, "students.access")}
+      canAccess={can(access, "students.access")}
       list={loaded.data.list}
       now={readNow()}
       productId={id}

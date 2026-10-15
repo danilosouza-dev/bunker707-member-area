@@ -69,7 +69,7 @@ test("Bunker AI Gateway uses explicit server-only runtime and management credent
   assert.match(connectionsRouteSource, /getAccountGatewayStatus\(\)/);
   assert.match(connectionsRouteSource, /Promise\.all/);
   assert.match(connectionsUiSource, /gateway\.reachable/);
-  assert.match(modelsRouteSource, /requireApiRole\("admin\.read"\)/);
+  assert.match(modelsRouteSource, /requireApiRole\("settings\.ai"\)/);
   assert.match(modelsRouteSource, /listAccountGatewayModels\(provider\)/);
   assert.match(policyEditorSource, /\/api\/admin\/ai-connections\/models\?provider=/);
 });
@@ -258,7 +258,7 @@ test("producer usage contract includes tutor per lesson, Director, students and 
     assert.match(usageSource, new RegExp(`${field}:`));
   }
 
-  assert.match(usageRouteSource, /requireApiRole\("admin\.read"\)/);
+  assert.match(usageRouteSource, /requireApiRole\("settings\.ai"\)/);
   assert.match(usageRouteSource, /Cache-Control", "private, no-store, max-age=0"/);
   assert.match(usageUiSource, /Tutor(?: IA|es das aulas)/);
   assert.match(usageUiSource, /Diretor/);

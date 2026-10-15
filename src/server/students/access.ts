@@ -42,6 +42,7 @@ import {
   fetchStaffUserIds,
   fillProfileGaps,
   findEntitlementForTarget,
+  isStaffUser,
   insertEntitlement,
   recordEvent,
   recordEvents,
@@ -193,6 +194,13 @@ export async function grantResolvedProducts(
  * Adicionar aluno (conta + entrega + produtos)
  * ---------------------------------------------------------------------------------------------- */
 
+/**
+ * Conta da equipe: Alunos nunca troca a senha, manda convite nem muda nome e telefone dela (quem tem
+ * "liberar acesso" poderia gerar a senha do dono e entrar como ele). Liberar curso continua valendo.
+ */
+export const STAFF_ACCOUNT_MESSAGE =
+  "Esse e-mail é de alguém da equipe. Senha, convite e dados da equipe não mudam por Alunos; para liberar um curso, use o perfil da pessoa.";
+
 export type ProvisionStudentAccessInput = AccessContext & {
   delivery: AccessDeliveryMethod;
   email: string;
@@ -203,6 +211,8 @@ export type ProvisionStudentAccessInput = AccessContext & {
   productIds: string[];
   /** Link de retorno do e-mail de acesso (convite/redefinir senha). */
   redirectTo: string;
+  /** Recusar (409) quando o e-mail e de alguem da equipe (cadastro manual). Sem isso, a conta so ganha os acessos. */
+  rejectStaff?: boolean;
   /** Senha escolhida pela equipe; vazia = gerada aqui. So vale com delivery = temporary_password. */
   temporaryPassword?: string | null;
 };
@@ -210,9 +220,17 @@ export type ProvisionStudentAccessInput = AccessContext & {
 async function ensureAccount(
   db: StudentsDb,
   input: ProvisionStudentAccessInput
-): Promise<{ existing: boolean; temporaryPassword?: string; user: User }> {
+): Promise<{ existing: boolean; staff?: boolean; temporaryPassword?: string; user: User }> {
   const email = normalizeEmail(input.email);
   const current = await findAccountByEmail(db, email);
+
+  if (current && (await isStaffUser(db, current.id))) {
+    if (input.rejectStaff) {
+      throw new StudentAccessError(409, STAFF_ACCOUNT_MESSAGE);
+    }
+
+    return { existing: true, staff: true, user: current };
+  }
 
   if (input.delivery === "temporary_password") {
     const password = input.temporaryPassword?.trim() || generateTemporaryPassword();
@@ -262,9 +280,12 @@ async function createOrRecover(db: StudentsDb, email: string, create: () => Prom
 
 export async function provisionStudentAccess(input: ProvisionStudentAccessInput, db: StudentsDb = studentsDb()): Promise<CreatedStudentResult> {
   const email = normalizeEmail(input.email);
-  const { existing, temporaryPassword, user } = await ensureAccount(db, input);
+  const { existing, staff, temporaryPassword, user } = await ensureAccount(db, input);
 
-  await upsertProfile(db, { email, fullName: input.fullName, id: user.id, phone: input.phone });
+  // Conta da equipe (venda futura por webhook): so ganha os acessos; nome, telefone e senha ficam como estao.
+  if (!staff) {
+    await upsertProfile(db, { email, fullName: input.fullName, id: user.id, phone: input.phone });
+  }
 
   if (!existing) {
     await recordEvent(db, {
@@ -276,7 +297,7 @@ export async function provisionStudentAccess(input: ProvisionStudentAccessInput,
     });
   }
 
-  if (input.delivery === "invite") {
+  if (input.delivery === "invite" && !staff) {
     await recordEvent(db, {
       entity_id: user.id,
       entity_type: "auth",
@@ -284,7 +305,7 @@ export async function provisionStudentAccess(input: ProvisionStudentAccessInput,
       metadata: eventMetadata(input, { delivery: "invite" }),
       user_id: user.id
     });
-  } else if (input.delivery === "temporary_password") {
+  } else if (input.delivery === "temporary_password" && !staff) {
     await recordEvent(db, {
       entity_id: user.id,
       entity_type: "auth",

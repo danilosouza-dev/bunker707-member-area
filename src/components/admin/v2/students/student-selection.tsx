@@ -68,7 +68,7 @@ export function useStudentSelection() {
 }
 
 const checkboxClass =
-  "size-[18px] border-[var(--border-stronger)] bg-[var(--surface-1)] data-checked:border-[var(--text-primary)] data-checked:bg-[var(--text-primary)] data-checked:text-[var(--surface-0)] pointer-coarse:size-6";
+  "size-[18px] border-[var(--border-stronger)] bg-[var(--surface-1)] data-checked:border-[var(--text-primary)] data-checked:bg-[var(--text-primary)] data-checked:text-[var(--surface-0)] data-indeterminate:border-[var(--text-primary)] data-indeterminate:bg-[var(--text-primary)] data-indeterminate:text-[var(--surface-0)] pointer-coarse:size-6";
 
 export function RowSelectCheckbox({ id, label }: { id: string; label: string }) {
   const { selected, toggle } = useStudentSelection();

@@ -77,12 +77,12 @@ test("toda tela da Area de membros tem guarda, loading e so libera gravacao para
     assert.ok(existsSync(join(directory, "loading.tsx")), `${child.href} precisa de loading.tsx`);
 
     const page = readFileSync(pagePath, "utf8");
-    assert.match(page, /const \{ role \} = await requirePageAdmin\(\);/, `${child.href}: guarda antes de ler dados`);
-    assert.match(page, /canRole\(role, "storefront\.write"\)/, `${child.href}: a tela so edita com storefront.write`);
+    assert.match(page, /const \{ access \} = await requirePageArea\("membros"\);/, `${child.href}: guarda (area do menu) antes de ler dados`);
+    assert.match(page, /can\(access, "storefront\.write"\)/, `${child.href}: a tela so edita com storefront.write`);
   }
 
   // Modulos mistura as duas permissoes: "Como abre" e capa sao do produto (catalog.write).
-  assert.match(read("src/app/admin/(v2)/area-de-membros/modulos/page.tsx"), /canWriteCatalog=\{canRole\(role, "catalog\.write"\)\}/);
+  assert.match(read("src/app/admin/(v2)/area-de-membros/modulos/page.tsx"), /canWriteCatalog=\{can\(access, "catalog\.write"\)\}/);
 });
 
 test("Server Actions da rodada passam por runAdminAction com uma permissao de produtor", () => {
@@ -97,7 +97,7 @@ test("Server Actions da rodada passam por runAdminAction com uma permissao de pr
     saveHomeHero: "storefront.write",
     saveLoginPage: "storefront.write",
     setHomeModuleRow: "storefront.write",
-    setModuleCover: "catalog.write",
+    setModuleCover: "catalog.content",
     setProductOpensAs: "catalog.write",
     uploadMemberAreaImage: "storefront.write"
   };
@@ -114,7 +114,9 @@ test("Server Actions da rodada passam por runAdminAction com uma permissao de pr
       assert.ok(action, `${name} precisa de runAdminAction(acao, ...)`);
       assert.ok(Object.hasOwn(ADMIN_ACTION_ROLES, action), `${name}: acao desconhecida ${action}`);
       assert.equal(action, expected[name], `${name} usa ${expected[name]}`);
-      assert.deepEqual([...rolesFor(action)].sort(), ["admin", "editor", "owner"], `${name}: analista e suporte so leem`);
+      // Capa do modulo e conteudo do curso: o Professor tambem pode (so nos cursos dele, conferido por requireScope).
+      const producers = action === "catalog.content" ? ["admin", "editor", "instructor", "owner"] : ["admin", "editor", "owner"];
+      assert.deepEqual([...rolesFor(action)].sort(), producers, `${name}: analista e suporte so leem`);
       seen.push(name);
     }
   }

@@ -18,10 +18,10 @@ export const maxDuration = 60;
 export const revalidate = 0;
 
 export async function POST(request: Request, context: RouteContext) {
-  const auth = await requireApiRole("catalog.write");
+  const { lessonId } = await context.params;
+  const auth = await requireApiRole("catalog.content", { lessonIds: [lessonId] });
 
   if (auth.response || !auth.user) return auth.response;
-  const { lessonId } = await context.params;
 
   try {
     const payload = await readBoundedJson<{ language?: unknown }>(request, 256_000).catch(() => ({} as { language?: unknown }));

@@ -2,6 +2,7 @@
 
 // Busca global do admin (Cmd/Ctrl+K). Qualquer papel do admin pode buscar ("admin.read"); o texto e
 // validado aqui (2 a 80 caracteres) e a leitura devolve so nome, contexto e endereco de cada item.
+// Professor: a busca fica nos cursos dele (target "any" + filtro pelos cursos na leitura).
 
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
@@ -17,5 +18,7 @@ const searchAdminSchema = z.object({
 });
 
 export async function searchAdmin(raw: unknown): Promise<ActionResult<AdminSearchResults>> {
-  return runAdminAction("admin.read", searchAdminSchema, raw, async ({ input }) => searchAdminCatalog(input.q));
+  return runAdminAction("admin.read", searchAdminSchema, raw, async ({ access, input }) => searchAdminCatalog(input.q, access.productIds), {
+    target: () => "any"
+  });
 }

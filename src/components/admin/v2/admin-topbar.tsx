@@ -4,6 +4,7 @@ import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 import { cn } from "@/lib/utils";
+import type { AdminAccess } from "@/server/auth/roles";
 import type { AdminFilterProduct } from "./filters";
 import { GlobalFilters, GlobalFiltersPlaceholder } from "./global-filters";
 import { GlobalSearch } from "./global-search";
@@ -12,6 +13,7 @@ import { adminTransition } from "./styles";
 import { useAdminTopbarTitleOverride } from "./topbar-title";
 
 type AdminTopbarProps = {
+  access: AdminAccess;
   drawerOpen: boolean;
   onOpenDrawer: () => void;
   /** Recolhe ou expande a barra lateral do computador. */
@@ -27,7 +29,7 @@ type AdminTopbarProps = {
  * Sem migalha e sem avatar (a conta fica no rodape da barra lateral). No celular: hamburguer, titulo
  * da pagina e icones de 36 px (busca, periodo, produto).
  */
-export function AdminTopbar({ drawerOpen, onOpenDrawer, onToggleSidebar, products, sidebarCollapsed, sidebarId }: AdminTopbarProps) {
+export function AdminTopbar({ access, drawerOpen, onOpenDrawer, onToggleSidebar, products, sidebarCollapsed, sidebarId }: AdminTopbarProps) {
   const pathname = usePathname();
   const scope = getAdminTopbarScope(pathname);
   const titleOverride = useAdminTopbarTitleOverride();
@@ -73,7 +75,7 @@ export function AdminTopbar({ drawerOpen, onOpenDrawer, onToggleSidebar, product
         {mobileTitle}
       </span>
 
-      <GlobalSearch />
+      <GlobalSearch access={access} />
 
       <div className="ml-auto flex min-w-0 shrink-0 items-center gap-2 max-md:ml-0 max-md:gap-1">
         <Suspense fallback={<GlobalFiltersPlaceholder scope={scope} />}>

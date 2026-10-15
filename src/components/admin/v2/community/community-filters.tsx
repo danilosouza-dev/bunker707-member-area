@@ -85,6 +85,8 @@ function FilterSelect({ className, label, onChange, options, value }: FilterSele
 }
 
 type CommunityFiltersProps = {
+  /** false = sem "Todos" no Produto (Professor: um curso dele por vez). */
+  allowAllProducts?: boolean;
   /** Conteudo a direita (ex.: dica de teclado da fila). */
   aside?: ReactNode;
   options: CommunityFilterOptions;
@@ -96,6 +98,7 @@ type CommunityFiltersProps = {
 };
 
 export function CommunityFilters({
+  allowAllProducts = true,
   aside,
   options,
   periodMode = "window",
@@ -123,7 +126,10 @@ export function CommunityFilters({
     });
   }
 
-  const productOptions: Option[] = [{ label: "Todos", value: null }, ...options.products.map((item) => ({ label: item.label, value: item.id }))];
+  const productOptions: Option[] = [
+    ...(allowAllProducts ? [{ label: "Todos", value: null }] : []),
+    ...options.products.map((item) => ({ label: item.label, value: item.id }))
+  ];
   const lessonOptions: Option[] = [
     { label: "Todas", value: null },
     ...lessonsForProduct(options.lessons, product).map((item) => ({ label: item.label, value: item.id }))

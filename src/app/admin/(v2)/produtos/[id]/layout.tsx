@@ -6,8 +6,8 @@ import { ProductHeaderBar } from "@/components/admin/v2/products/product-header"
 import { ProductNotFound } from "@/components/admin/v2/products/product-not-found";
 import { ProductWorkspaceProvider } from "@/components/admin/v2/products/product-workspace";
 import { ProductWorkspaceSkeleton } from "@/components/admin/v2/products/skeletons";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole, type AdminRole } from "@/server/auth/roles";
+import { requireProductPage } from "@/server/auth/permissions";
+import { can, canSeeProductSettings, type AdminAccess } from "@/server/auth/roles";
 import { getProductHeader } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
@@ -17,8 +17,8 @@ type ProductLayoutProps = {
 };
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
-  await requirePageAdmin();
   const { id } = await params;
+  await requireProductPage(id);
   const loaded = await loadUnlessPendingMigration(() => getProductHeader(id));
 
   if (!loaded.ok) {
@@ -28,7 +28,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: loaded.data ? loaded.data.title : "Produto não encontrado" };
 }
 
-async function ProductWorkspace({ children, id, role }: { children: ReactNode; id: string; role: AdminRole }) {
+async function ProductWorkspace({ access, children, id }: { access: AdminAccess; children: ReactNode; id: string }) {
   const loaded = await loadUnlessPendingMigration(() => getProductHeader(id));
 
   // Banco sem as migracoes da fase 1: o aviso substitui cabecalho e abas (as abas nao sao renderizadas).
@@ -45,9 +45,12 @@ async function ProductWorkspace({ children, id, role }: { children: ReactNode; i
   return (
     <ProductWorkspaceProvider
       capabilities={{
-        canDelete: canRole(role, "catalog.delete"),
-        canPublish: canRole(role, "catalog.publish"),
-        canWrite: canRole(role, "catalog.write")
+        canDelete: can(access, "catalog.delete"),
+        canPublish: can(access, "catalog.publish"),
+        canSeePerformance: can(access, "reports.read"),
+        canSeeSettings: canSeeProductSettings(access),
+        canSeeStudents: can(access, "students.read_basic") && access.productIds === null,
+        canWrite: can(access, "catalog.write")
       }}
       header={header}
     >
@@ -62,13 +65,13 @@ async function ProductWorkspace({ children, id, role }: { children: ReactNode; i
 // para a troca de aba nunca mostrar o skeleton da lista de produtos. O corpo de cada aba fica a 20 px
 // das abas, como no prototipo aprovado.
 export default async function ProductLayout({ children, params }: ProductLayoutProps) {
-  const { role } = await requirePageAdmin();
   const { id } = await params;
+  const { access } = await requireProductPage(id);
 
   return (
     <AdminPage className="gap-5">
       <Suspense fallback={<ProductWorkspaceSkeleton />}>
-        <ProductWorkspace id={id} role={role}>
+        <ProductWorkspace access={access} id={id}>
           {children}
         </ProductWorkspace>
       </Suspense>

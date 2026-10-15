@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { ErrorBanner } from "@/components/admin/v2/error-banner";
 import { VitrineEditor } from "@/components/admin/v2/storefront/vitrine-editor";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageArea } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getStorefrontEditorData } from "@/server/storefront/queries";
 
 export const metadata: Metadata = {
@@ -19,7 +19,7 @@ async function loadStorefront() {
 }
 
 export default async function AdminStorefrontPage() {
-  const { role } = await requirePageAdmin();
+  const { access } = await requirePageArea("membros");
   const result = await loadStorefront();
 
   if (!result.ok) {
@@ -30,5 +30,5 @@ export default async function AdminStorefrontPage() {
     );
   }
 
-  return <VitrineEditor canEdit={canRole(role, "storefront.write")} data={result.data} />;
+  return <VitrineEditor canEdit={can(access, "storefront.write")} data={result.data} />;
 }

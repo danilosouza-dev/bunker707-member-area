@@ -4,7 +4,7 @@ import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-
 import { readAdminPeriod, type ResolvedAdminPeriod } from "@/components/admin/v2/period";
 import { AiUsageView } from "@/components/admin/v2/settings/ai-usage-view";
 import { AI_USAGE_BETWEEN_MIGRATION, getAIUsageSummaryBetween } from "@/server/ai/usage-analytics";
-import { requirePageAdmin } from "@/server/auth/guards";
+import { requirePageRole } from "@/server/auth/permissions";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
 export const metadata: Metadata = {
@@ -35,7 +35,7 @@ async function loadUsage(period: ResolvedAdminPeriod) {
 // O periodo vem do menu "Período" da barra superior (?periodo=hoje|1d|3d|7d|30d ou um intervalo do
 // calendario; links antigos 7|30|90 continuam valendo), lido com a mesma hora que vai para a tela.
 export default async function AdminAiUsagePage({ searchParams }: PageProps) {
-  const [, params] = await Promise.all([requirePageAdmin(), searchParams]);
+  const [, params] = await Promise.all([requirePageRole("settings.ai", "/admin/configuracoes"), searchParams]);
   const now = new Date();
   const period = readAdminPeriod(params, now);
   const data = await loadUsage(period);

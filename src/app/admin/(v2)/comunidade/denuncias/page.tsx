@@ -6,10 +6,11 @@ import { clearFiltersHref, COMMUNITY_TAB_HREFS, hasActiveFilters } from "@/compo
 import { CommunityPagination } from "@/components/admin/v2/community/pagination";
 import { ReportList } from "@/components/admin/v2/community/report-list";
 import { EmptyState } from "@/components/admin/v2/empty-state";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageArea } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getCommunityFilterOptions, getCommunityStats, listReportsPage } from "@/server/community/queries";
 import { parseCommunitySearchParams } from "@/server/community/schemas";
+import { communityFilterKeys, lessonPathFor, scopeCommunityFilterOptions, scopeCommunityParams } from "@/server/community/scope";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
 export const metadata: Metadata = {
@@ -27,14 +28,14 @@ function readNow() {
 // Comunidade › Denuncias (docs/17 §1.9): comentarios denunciados, abertos primeiro, com motivo,
 // contagem e historico. Sem ?periodo=, mostra todas; com ele, so as denunciadas no periodo.
 export default async function CommunityReportsPage({ searchParams }: CommunityReportsPageProps) {
-  const { role } = await requirePageAdmin();
-  const params = await searchParams;
+  const { access } = await requirePageArea("comunidade");
+  const params = scopeCommunityParams(access, COMMUNITY_TAB_HREFS.denuncias, await searchParams);
   const query = parseCommunitySearchParams(params);
   const loaded = await loadUnlessPendingMigration(() =>
     Promise.all([
       getCommunityStats({ product: query.product }),
       listReportsPage(query),
-      getCommunityFilterOptions()
+      getCommunityFilterOptions().then((options) => scopeCommunityFilterOptions(access, options))
     ])
   );
 
@@ -43,10 +44,10 @@ export default async function CommunityReportsPage({ searchParams }: CommunityRe
   }
 
   const [stats, reports, options] = loaded.data;
-  const filtered = hasActiveFilters(params, ["produto", "aula", "periodo"]);
+  const filtered = hasActiveFilters(params, communityFilterKeys(access, ["produto", "aula", "periodo"]));
 
   return (
-    <CommunityFrame stats={stats} toolbar={<CommunityFilters options={options} periodMode="all-or-window" />}>
+    <CommunityFrame stats={stats} toolbar={<CommunityFilters allowAllProducts={access.productIds === null} options={options} periodMode="all-or-window" />}>
       {reports.total === 0 ? (
         filtered ? (
           <EmptyState
@@ -64,7 +65,11 @@ export default async function CommunityReportsPage({ searchParams }: CommunityRe
         )
       ) : (
         <>
-          <ReportList canModerate={canRole(role, "community.moderate")} items={reports.items} nowIso={readNow()} />
+          <ReportList
+            canModerate={can(access, "community.moderate")}
+            items={reports.items.map((report) => ({ ...report, comment: { ...report.comment, path: lessonPathFor(access, report.comment.path) } }))}
+            nowIso={readNow()}
+          />
           <CommunityPagination
             itemLabel="denúncias"
             page={reports.page}

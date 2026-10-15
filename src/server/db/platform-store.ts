@@ -7,7 +7,7 @@ import { cache } from "react";
 import { unstable_noStore as noStore } from "next/cache";
 import { after } from "next/server";
 import type { AuthenticatedUser } from "@/server/auth/session";
-import { getAdminRoleForUser, getUserDisplayName } from "@/server/auth/session";
+import { getAdminAccessForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { persistImageAsset } from "@/server/db/media-assets";
 import type { AccessPreviewMode } from "@/lib/access-preview";
@@ -110,6 +110,11 @@ type AccessEntitlementRecord = {
 
 type PlatformDatabase = {
   accessEntitlements: AccessEntitlementRecord[];
+  /**
+   * Professor (equipe com escopo por curso): os cursos dele contam como acesso liberado na area do aluno,
+   * sem virar compra (docs/17 §2.3). Vazio para quem nao e da equipe ou ve a escola toda.
+   */
+  staffProductIds?: readonly string[];
   aiAgents: AdminAIAgent[];
   blockedWordRules: AdminBlockedWordRule[];
   bootcamps: ContentItem[];
@@ -934,13 +939,33 @@ const readAdminDatabase = cache(async () => {
   return readSupabaseDatabase({ includeAdminData: true });
 });
 
+/** Cursos do Professor (so quem tem escopo por curso); falha de leitura = nenhum (o aluno segue como aluno). */
+async function readStaffProductIds(userId: string): Promise<string[]> {
+  if (!userId) {
+    return [];
+  }
+
+  try {
+    const access = await getAdminAccessForUser(userId);
+
+    return access?.productIds ? [...access.productIds] : [];
+  } catch {
+    return [];
+  }
+}
+
 const readMemberDatabase = cache(async (userId: string, userEmail: string) => {
   noStore();
-  return readSupabaseDatabase({
-    includeAdminData: false,
-    userEmail: userEmail || undefined,
-    userId: userId || undefined
-  });
+  const [database, staffProductIds] = await Promise.all([
+    readSupabaseDatabase({
+      includeAdminData: false,
+      userEmail: userEmail || undefined,
+      userId: userId || undefined
+    }),
+    readStaffProductIds(userId)
+  ]);
+
+  return staffProductIds.length > 0 ? { ...database, staffProductIds } : database;
 });
 
 function readDatabaseForUser(user?: AuthenticatedUser | string) {
@@ -1022,6 +1047,17 @@ function getUserAccessKeys(database: PlatformDatabase, user?: AuthenticatedUser 
     for (const entitlement of database.accessEntitlements) {
       if (entitlement.userId === userId && isActiveEntitlement(entitlement)) {
         accessKeys.add(getAccessTargetKey(entitlement.targetType, entitlement.targetId));
+      }
+    }
+  }
+
+  // Professor: os cursos dele abrem como se tivessem sido liberados (mesma regra de lesson-access.ts).
+  if (database.staffProductIds?.length) {
+    const staffProducts = new Set(database.staffProductIds);
+
+    for (const item of getAllContentItems(database)) {
+      if (staffProducts.has(item.id)) {
+        accessKeys.add(getAccessTargetKey(getTargetType(item.kind), item.id));
       }
     }
   }
@@ -2158,15 +2194,16 @@ function applyLessonProgress(database: PlatformDatabase, contentId: string, modu
 }
 
 export async function getAppShellData(user?: AuthenticatedUser) {
-  const [database, adminRole, profile] = await Promise.all([
+  const [database, adminAccess, profile] = await Promise.all([
     readDatabaseForUser(user),
-    user ? getAdminRoleForUser(user.id) : Promise.resolve(null),
+    user ? getAdminAccessForUser(user.id) : Promise.resolve(null),
     user ? getStudentProfileRecord(user) : Promise.resolve(null)
   ]);
 
   return {
     branding: database.branding,
-    canUseAccessPreview: Boolean(adminRole),
+    // "Ver como aluno com/sem acesso": so a equipe da escola toda (o Professor ve os cursos dele de verdade).
+    canUseAccessPreview: Boolean(adminAccess && adminAccess.productIds === null),
     // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam.
     student: { ...getStudentForUser(database, user, profile?.fullName), avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl) }
   };

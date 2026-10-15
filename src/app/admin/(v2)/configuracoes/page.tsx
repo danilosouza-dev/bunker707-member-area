@@ -5,7 +5,9 @@ import { summarizeAiSetup } from "@/components/admin/v2/settings/ai-settings-mod
 import { SettingsHub, type SettingsHubStatus } from "@/components/admin/v2/settings/settings-hub";
 import { listAIProviderConfigs } from "@/server/ai/provider-config";
 import { listAIProviderConnections } from "@/server/ai/provider-connections";
-import { requirePageAdmin } from "@/server/auth/guards";
+import { requirePageArea } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
+import { listTeamMembers } from "@/server/team/queries";
 
 export const metadata: Metadata = {
   title: "Configurações"
@@ -23,14 +25,28 @@ async function loadAiStatus(): Promise<SettingsHubStatus | null> {
   }
 }
 
+/** Quantas pessoas ha na equipe (linha da Equipe). Sem leitura, a linha fica sem contagem. */
+async function loadTeamCount(): Promise<number | null> {
+  try {
+    const members = await listTeamMembers();
+
+    return members.length;
+  } catch (error) {
+    console.error("[admin/configuracoes] contagem da equipe", error);
+    return null;
+  }
+}
+
 export default async function AdminSettingsPage() {
-  await requirePageAdmin();
-  const aiStatus = await loadAiStatus();
+  const { access } = await requirePageArea("configuracoes");
+  const canAi = can(access, "settings.ai");
+  const canTeam = can(access, "settings.team");
+  const [aiStatus, teamCount] = await Promise.all([canAi ? loadAiStatus() : Promise.resolve(null), canTeam ? loadTeamCount() : Promise.resolve(null)]);
 
   return (
     <AdminPage className="gap-6">
       <PageHeader description="Equipe, vídeo, Tutor IA, vendas, canais de envio e dados da escola." title="Configurações" />
-      <SettingsHub aiStatus={aiStatus} />
+      <SettingsHub access={{ canAi, canSales: can(access, "settings.sales"), canTeam, teamCount }} aiStatus={aiStatus} />
     </AdminPage>
   );
 }

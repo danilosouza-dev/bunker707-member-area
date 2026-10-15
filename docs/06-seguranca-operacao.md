@@ -31,7 +31,7 @@ Implementado no MVP atual:
 - `profiles`, `entitlements`, `student_events`, `lesson_progress`, `admin_roles` e todas as tabelas de comentarios/moderacao possuem RLS;
 - aluno pode ler/editar somente o proprio perfil, ler os proprios entitlements e gravar eventos proprios;
 - aluno nao possui policy para criar, alterar ou remover entitlements;
-- `/admin` e as APIs `/api/admin/*` exigem papel em `admin_roles`;
+- `/admin` e as APIs `/api/admin/*` exigem papel em `admin_roles`, e cada area, tela, Server Action e rota exige a permissao dela (tabela em docs/17 §2.3, secao "Equipe e permissoes" abaixo);
 - login, callback e reentrada em `/login` direcionam usuarios administrativos para `/admin` depois da autenticacao;
 - `/api/progress/lessons` grava progresso usando `auth.user.id`, nao um id vindo do cliente.
 - comentarios, reacoes, denuncias e progresso passam pela mesma autorizacao central de aula;
@@ -380,3 +380,23 @@ Desde 2026-10-11 o visual do `/login` e o topo da home sao editados no admin nov
 - imagens chegam ao banco so como URL: o recorte vira WebP no navegador, o servidor confere medida e peso pelo cabecalho do WebP e envia ao bucket `content-assets`; data URL, `http://` e `javascript:` sao recusados. Link de imagem colado (destaque, login, capa de produto, capa de modulo) tambem nao pode ter espaco, aspas, parenteses, `<`, `>` ou `\` (`imageLinkSchema`), e os cards do aluno desenham o fundo entre aspas e escapado (`cssImageUrl`): sem isso, uma capa `https://x/a.png);position:fixed;...` injetava CSS na home de todos os alunos;
 - `?template=` no endereco do `/login` nao muda mais nada (antes qualquer visitante trocava o modelo pelo endereco);
 - a previa do admin usa o proprio `LoginExperience` em modo `preview`: nao le nem cria sessao, nao envia formulario e nao redireciona. Quem esta logado e redirecionado ao abrir `/login`; para conferir o login publicado, use uma janela anonima.
+
+## Equipe e permissoes
+
+Desde 2026-10-16 o dono monta a equipe em Configuracoes > Equipe (`/admin/configuracoes/equipe`). Papeis, tabela e decisao de mercado em docs/17 §2.3.
+
+- **Uma conta por pessoa.** Ninguem compartilha senha. Conta existente (um aluno, por exemplo) so ganha a funcao. Conta nova e criada sem e-mail, a funcao e gravada e so entao sai o link para criar a senha, para nunca mandar convite a quem nao entrou na equipe.
+- **Menor privilegio e negar por padrao.** Cada area, tela, Server Action e rota confere a permissao no servidor. O Professor so alcanca os cursos escolhidos: toda acao de conteudo ou de comunidade diz o que toca, e acao sem alvo e recusada para quem tem escopo. Personalizado nunca recebe Equipe nem chaves de venda.
+- **Dados pessoais e dinheiro.** Exportar CSV, excluir aluno e ver telefone sao permissoes separadas de "ver a lista". Exportar exige ver dados pessoais, porque o CSV leva telefone. Sem essa permissao, telefone e historico nem saem do servidor. Chaves das plataformas de venda (`settings.sales`) e a Equipe (`settings.team`) ficam so com o dono.
+- **Conta da equipe nao muda por Alunos.** Adicionar aluno e "Enviar e-mail de acesso" recusam conta da equipe. Dados da equipe so o dono muda. Isso impede que alguem que libera acesso gere a senha do dono e entre como ele. Ao entrar na equipe, a senha antiga de uma conta que nunca entrou e trocada por uma aleatoria.
+- **Dono protegido.**
+  - Ninguem muda a propria funcao nem se remove.
+  - A escola nunca fica sem dono: o servidor confere, e o gatilho `guard_last_admin_owner` confere de novo, com trava.
+  - Apagar a conta do ultimo dono tambem falha.
+- **Saida de alguem da equipe.** Tirar da equipe corta o admin na proxima requisicao, porque as permissoes sao lidas a cada requisicao. A conta continua como aluno; nao e preciso derrubar a sessao.
+- **Area do aluno.** A equipe abre conteudo sem compra para conferir o que vende. O Professor so abre os cursos dele, e o "Ver como aluno" e so da equipe da escola toda.
+- **Auditoria.** Adicionar, mudar funcao (antes e depois), tirar da equipe e reenviar convite gravam em `admin_audit_log`.
+- **Recomendado antes de abrir a equipe para mais gente:**
+  - ligar a 2FA (Supabase TOTP) e exigir `aal2` no `/admin`;
+  - ligar a protecao contra senhas vazadas no Supabase Auth;
+  - revisar a equipe a cada trimestre (a lista mostra o ultimo acesso).
