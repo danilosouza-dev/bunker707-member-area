@@ -9,6 +9,7 @@ import "server-only";
 // Sem configuracao do Supabase ou em erro de leitura: devolve null e a pagina mostra o que vem da
 // conta (e-mail, data de cadastro) com "Não informado" no resto.
 
+import { cache } from "react";
 import { redactSecrets } from "@/lib/env-value";
 import { hasSupabaseAuthConfig } from "@/server/auth/config";
 import type { AuthenticatedUser } from "@/server/auth/session";
@@ -31,7 +32,12 @@ function cleanText(value: unknown) {
 }
 
 export async function getStudentProfileRecord(user: Pick<AuthenticatedUser, "id">): Promise<StudentProfileRecord | null> {
-  if (!user.id || !hasSupabaseAuthConfig()) {
+  return readStudentProfileRecord(user.id);
+}
+
+// Memoizado por request (chave: id do usuario): o menu do topo e a pagina de Perfil leem a linha uma vez so.
+const readStudentProfileRecord = cache(async (userId: string): Promise<StudentProfileRecord | null> => {
+  if (!userId || !hasSupabaseAuthConfig()) {
     return null;
   }
 
@@ -40,7 +46,7 @@ export async function getStudentProfileRecord(user: Pick<AuthenticatedUser, "id"
     const { data, error } = await supabase
       .from("profiles")
       .select("full_name,phone,avatar_url")
-      .eq("id", user.id)
+      .eq("id", userId)
       .maybeSingle();
 
     if (error) {
@@ -57,4 +63,4 @@ export async function getStudentProfileRecord(user: Pick<AuthenticatedUser, "id"
     console.error("[perfil] leitura do perfil do aluno", redactSecrets(error instanceof Error ? error.message : String(error)));
     return null;
   }
-}
+});

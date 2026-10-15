@@ -29,6 +29,7 @@ import {
 } from "@/server/catalog/storefront-listing";
 import { INVALID_SUPABASE_KEY_MESSAGE, isInvalidSupabaseKeyError } from "@/server/db/supabase-key-error";
 import { MemberAreaConflictError } from "@/server/member-area/errors";
+import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { getStudentProfileRecord } from "@/server/member-area/student-profile";
 import { activityDeltaOf, type ActivityDelta } from "@/server/progress/activity-delta";
 import { recordStudentActivity } from "@/server/progress/student-activity";
@@ -72,6 +73,8 @@ import type {
 import { getCourseProgressFromModules } from "@/lib/course-progress";
 
 type PlatformStudent = {
+  /** Foto do perfil (profiles.avatar_url), so no menu do topo; ausente = iniciais. */
+  avatarUrl?: string | null;
   fullName: string;
   name: string;
 };
@@ -2164,7 +2167,8 @@ export async function getAppShellData(user?: AuthenticatedUser) {
   return {
     branding: database.branding,
     canUseAccessPreview: Boolean(adminRole),
-    student: getStudentForUser(database, user, profile?.fullName)
+    // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam.
+    student: { ...getStudentForUser(database, user, profile?.fullName), avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl) }
   };
 }
 
