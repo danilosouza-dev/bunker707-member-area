@@ -7,7 +7,7 @@ import { requirePageRole } from "@/server/auth/permissions";
 import { canRole } from "@/server/auth/roles";
 import { listProductOptions } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
-import { STUDENT_SEGMENT_PRESETS } from "@/server/students/model";
+import { STUDENT_SEGMENT_PRESETS, pickStudentListParams, splitStudentListParams } from "@/server/students/model";
 import { countStudentSegments, getLifecycleSummary, listCohorts, listSavedSegments, listStudents } from "@/server/students/queries";
 import { parseStudentListSearchParams } from "@/server/students/schemas";
 
@@ -33,6 +33,8 @@ function readNow() {
 export default async function AdminStudentsPage({ searchParams }: AdminStudentsPageProps) {
   const { role } = await requirePageRole("students.read_basic", "/admin");
   const query = parseStudentListSearchParams(await searchParams);
+  const params = pickStudentListParams(query);
+  const { base } = splitStudentListParams(params);
   const loaded = await loadUnlessPendingMigration(async () => {
     const [list, products, savedSegments, cohorts, lifecycle] = await Promise.all([
       listStudents(query),
@@ -44,7 +46,11 @@ export default async function AdminStudentsPage({ searchParams }: AdminStudentsP
         return null;
       })
     ]);
-    const segmentCounts = await countStudentSegments([...STUDENT_SEGMENT_PRESETS, ...savedSegments]);
+    // Pilulas contam dentro do produto, da turma e da busca atuais; salvos contam os proprios filtros.
+    const segmentCounts = await countStudentSegments([
+      ...STUDENT_SEGMENT_PRESETS.map((preset) => ({ id: preset.id, params: { ...base, ...preset.params } })),
+      ...savedSegments.map((saved) => ({ id: saved.id, params: saved.params }))
+    ]);
 
     return { cohorts, lifecycle, list, products, savedSegments, segmentCounts };
   });
@@ -65,7 +71,7 @@ export default async function AdminStudentsPage({ searchParams }: AdminStudentsP
         canAdd={canRole(role, "students.access")}
         canExport={canRole(role, "students.export")}
         cohorts={loaded.data.cohorts}
-        filters={query}
+        filters={{ ...params, page: query.page }}
         lifecycle={loaded.data.lifecycle}
         list={loaded.data.list}
         now={readNow()}

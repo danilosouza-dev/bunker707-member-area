@@ -56,7 +56,7 @@ const cellPadding = "px-3 first:pl-4 last:pr-4";
 
 const cardsTable = cn(
   "max-md:block max-md:[&_tbody]:block max-md:[&_thead]:hidden",
-  "max-md:[&_tbody_tr]:grid max-md:[&_tbody_tr]:h-auto max-md:[&_tbody_tr]:grid-cols-3 max-md:[&_tbody_tr]:gap-x-3 max-md:[&_tbody_tr]:gap-y-2.5 max-md:[&_tbody_tr]:px-4 max-md:[&_tbody_tr]:py-3.5",
+  "max-md:[&_tbody_tr]:relative max-md:[&_tbody_tr]:grid max-md:[&_tbody_tr]:h-auto max-md:[&_tbody_tr]:grid-cols-3 max-md:[&_tbody_tr]:gap-x-3 max-md:[&_tbody_tr]:gap-y-2.5 max-md:[&_tbody_tr]:px-4 max-md:[&_tbody_tr]:py-3.5",
   "max-md:[&_tbody_td]:block max-md:[&_tbody_td]:h-auto max-md:[&_tbody_td]:p-0! max-md:[&_tbody_td]:text-left! max-md:[&_tbody_td]:whitespace-normal"
 );
 
@@ -161,7 +161,7 @@ export function DataTable<Row>({
                       key={getRowKey(row)}
                     >
                       {leading ? (
-                        <td className={cn("relative z-10 w-10 align-middle pl-4", asCards && "max-md:col-span-full max-md:pl-0")}>
+                        <td className={cn("relative z-10 w-10 align-middle pl-4", asCards && "max-md:absolute max-md:top-2 max-md:right-2 max-md:w-auto")}>
                           {leading.cell(row)}
                         </td>
                       ) : null}

@@ -33,10 +33,19 @@ test("filtros canonicos vao e voltam do endereco; valor estranho e ignorado", ()
   assert.equal(model.hasStudentListFilters({ week: "2026-10-12" }), false, "semana sem grupo nao e filtro");
 });
 
-test("segmentos prontos: 9, com formula, ids unicos e params validos", () => {
+test("segmentos prontos: 10, com formula, ids unicos, params validos e lugar (pilula ou menu)", () => {
   const presets = model.STUDENT_SEGMENT_PRESETS;
-  assert.equal(presets.length, 9);
-  assert.equal(new Set(presets.map((preset) => preset.id)).size, 9);
+  assert.equal(presets.length, 10);
+  assert.equal(new Set(presets.map((preset) => preset.id)).size, 10);
+  assert.deepEqual(
+    presets.filter((preset) => preset.placement === "main").map((preset) => preset.label),
+    ["Todos", "Estudando", "Em risco", "Inativos", "Nunca começaram", "Concluíram"],
+    "as pilulas cobrem todos os ritmos, no plural"
+  );
+  assert.deepEqual(
+    presets.filter((preset) => preset.placement === "more").map((preset) => preset.id),
+    ["expiram-30", "nunca-entraram", "compraram-nao-comecaram", "top-comentadores"]
+  );
 
   for (const preset of presets) {
     assert.ok(preset.formula.length > 10, preset.id);
@@ -136,4 +145,22 @@ test("exportacao: colunas da §1.7.4 e celulas na mesma ordem", () => {
   assert.equal(cells[5], "Estudando");
   assert.equal(cells[6], "01/10/2026");
   assert.equal(cells[9], 3);
+});
+
+test("filtros em base e segmento: pilula troca o segmento e mantem produto, turma e busca", () => {
+  const current = { cohortId: "8d1f0c9e-1111-4222-8333-444455556666", page: 3, pace: "at_risk", pageSize: 25, productId: "curso-x", q: " ana ", week: "2026-10-12", group: "new" };
+  const picked = model.pickStudentListParams(current);
+  assert.deepEqual(picked, { cohortId: "8d1f0c9e-1111-4222-8333-444455556666", group: "new", pace: "at_risk", productId: "curso-x", q: "ana", week: "2026-10-12" }, "pagina e tamanho da pagina saem; busca sem espacos");
+
+  const { base, segment } = model.splitStudentListParams(picked);
+  assert.deepEqual(base, { cohortId: "8d1f0c9e-1111-4222-8333-444455556666", productId: "curso-x", q: "ana" });
+  assert.deepEqual(segment, { group: "new", pace: "at_risk", week: "2026-10-12" });
+
+  assert.equal(model.sameStudentListParams({ pace: "at_risk", productId: "x" }, { productId: "x", pace: "at_risk", page: 2, pageSize: 25 }), true, "ordem e pagina nao importam");
+  assert.equal(model.sameStudentListParams({ pace: "at_risk" }, { pace: "at_risk", productId: "x" }), false);
+  assert.equal(model.sameStudentListParams({}, { q: "  " }), true, "busca vazia = sem filtro");
+  assert.deepEqual(model.withoutLifecycle(picked), { cohortId: "8d1f0c9e-1111-4222-8333-444455556666", pace: "at_risk", productId: "curso-x", q: "ana" });
+
+  const emRisco = model.STUDENT_SEGMENT_PRESETS.find((preset) => preset.id === "em-risco");
+  assert.equal(hrefs.segmentHref({ ...base, ...emRisco.params }), "/admin/alunos?produto=curso-x&ritmo=at_risk&turma=8d1f0c9e-1111-4222-8333-444455556666&busca=ana");
 });

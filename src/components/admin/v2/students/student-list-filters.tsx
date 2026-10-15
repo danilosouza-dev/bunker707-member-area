@@ -1,21 +1,21 @@
 "use client";
 
-import { Check, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { LIFECYCLE_GROUP_LABELS, STUDENT_PACES, STUDENT_PACE_LABELS, type StudentCohort, type StudentPace } from "@/server/students/model";
+import { LIFECYCLE_GROUP_LABELS, type StudentCohort } from "@/server/students/model";
 import { adminPillClasses } from "../form";
 import { resolveSearchText } from "../products/list-filters";
 import { adminTransition } from "../styles";
 import { studentListHref, type StudentListFilters } from "./hrefs";
 
-// Filtros da lista de alunos, na mesma linha da lista de Produtos: pilulas de Ritmo, select de Produto
-// e a busca por nome ou e-mail a direita. Tudo no endereco (?ritmo=&produto=&busca=&pagina=);
-// a busca espera 300 ms antes de navegar.
+// Filtros da lista de alunos (os segmentos ficam nas pilulas acima, em SegmentPicker): Produto, Turma,
+// a semana do ciclo de vida quando veio do grafico (chip removivel) e a busca por nome ou e-mail a
+// direita. Tudo no endereco; a busca espera 300 ms antes de navegar.
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -27,25 +27,17 @@ type StudentListFiltersBarProps = {
   products: readonly StudentFilterProduct[];
 };
 
-/** Filtros que so entram por segmento ou pelo ciclo de vida: aparecem como chips removiveis. */
-function extraFilterChips(filters: StudentListFilters) {
-  const chips: { label: string; patch: Partial<StudentListFilters> }[] = [];
-
-  if (filters.expiring) chips.push({ label: "Expiram em 30 dias", patch: { expiring: undefined } });
-  if (filters.account === "never") chips.push({ label: "Nunca entraram", patch: { account: undefined } });
-  if (filters.notStarted) chips.push({ label: "Compraram e não começaram", patch: { notStarted: undefined } });
-  if (filters.commenters === "top") chips.push({ label: "Top comentadores", patch: { commenters: undefined } });
-  if (filters.week && filters.group) {
-    chips.push({ label: `${LIFECYCLE_GROUP_LABELS[filters.group]} na semana de ${filters.week.slice(8, 10)}/${filters.week.slice(5, 7)}`, patch: { group: undefined, week: undefined } });
+/** Semana do ciclo de vida (veio do clique no grafico): chip removivel. */
+function lifecycleChip(filters: StudentListFilters) {
+  if (!filters.week || !filters.group) {
+    return null;
   }
 
-  return chips;
+  return {
+    label: `${LIFECYCLE_GROUP_LABELS[filters.group]} na semana de ${filters.week.slice(8, 10)}/${filters.week.slice(5, 7)}`,
+    patch: { group: undefined, week: undefined } satisfies Partial<StudentListFilters>
+  };
 }
-
-const paceOptions: { label: string; value: StudentPace | undefined }[] = [
-  { label: "Todos", value: undefined },
-  ...STUDENT_PACES.map((pace) => ({ label: STUDENT_PACE_LABELS[pace], value: pace }))
-];
 
 export function StudentListFiltersBar({ cohorts, filters, products }: StudentListFiltersBarProps) {
   const router = useRouter();
@@ -55,7 +47,7 @@ export function StudentListFiltersBar({ cohorts, filters, products }: StudentLis
   const searchText = resolveSearchText(addressQuery, typed);
   const productOptions = [{ label: "Todos", value: null as string | null }, ...products.map((product) => ({ label: product.title, value: product.id }))];
   const cohortOptions = [{ label: "Todas", value: null as string | null }, ...cohorts.map((cohort) => ({ label: cohort.name, value: cohort.id }))];
-  const chips = extraFilterChips(filters);
+  const chip = lifecycleChip(filters);
 
   useEffect(() => {
     const next = searchText.trim();
@@ -75,28 +67,6 @@ export function StudentListFiltersBar({ cohorts, filters, products }: StudentLis
 
   return (
     <div aria-busy={pending || undefined} className="flex min-w-0 flex-wrap items-center gap-2">
-      <nav aria-label="Ritmo" className="min-w-0">
-        <ul className="flex flex-wrap gap-2">
-          {paceOptions.map((option) => {
-            const active = filters.pace === option.value;
-
-            return (
-              <li key={option.label}>
-                <Link
-                  aria-current={active ? "page" : undefined}
-                  className={adminPillClasses(active)}
-                  data-navigation-feedback="false"
-                  href={studentListHref(filters, { pace: option.value })}
-                  scroll={false}
-                >
-                  {active ? <Check aria-hidden="true" className="size-4" /> : null}
-                  {option.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
 
       <div className="flex min-w-0 items-center gap-1.5 max-md:flex-[1_1_160px]">
         <span className="text-[13px] font-medium text-[var(--text-tertiary)] max-md:sr-only" id="filtro-aluno-produto">
@@ -164,19 +134,18 @@ export function StudentListFiltersBar({ cohorts, filters, products }: StudentLis
         </div>
       ) : null}
 
-      {chips.map((chip) => (
+      {chip ? (
         <Link
           className={cn(adminPillClasses(true), "gap-1 pr-2.5")}
           data-navigation-feedback="false"
           href={studentListHref(filters, chip.patch)}
-          key={chip.label}
           scroll={false}
           title="Tirar este filtro"
         >
           {chip.label}
           <X aria-hidden="true" className="size-3.5" />
         </Link>
-      ))}
+      ) : null}
 
       <span aria-hidden="true" className="hidden flex-1 md:block" />
 
