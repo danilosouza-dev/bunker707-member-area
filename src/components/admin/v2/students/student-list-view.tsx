@@ -3,10 +3,13 @@ import {
   STUDENT_SEGMENT_PRESETS,
   describeStudentCount,
   hasStudentListFilters,
+  pickStudentListParams,
+  sameStudentListParams,
+  splitStudentListParams,
+  withoutLifecycle,
   type LifecycleWeek,
   type StudentCohort,
   type StudentListPage,
-  type StudentListParams,
   type StudentSavedSegment
 } from "@/server/students/model";
 import { AdminLinkButton } from "../link-button";
@@ -15,7 +18,7 @@ import { SegmentPicker, type SegmentPickerItem } from "../segment-picker";
 import { BulkActionsBar } from "./bulk-actions-bar";
 import { ExportButton } from "./export-button";
 import { todayInputValue } from "./format";
-import { IMPORT_STUDENTS_PATH, hasActiveStudentFilters, newStudentHref, segmentHref, studentListHref, type StudentListFilters } from "./hrefs";
+import { IMPORT_STUDENTS_PATH, newStudentHref, segmentHref, studentListHref, type StudentListFilters } from "./hrefs";
 import { LifecycleCard } from "./lifecycle-card";
 import type { PickerProduct } from "./product-picker";
 import { DeleteSegmentButton, SaveSegmentButton } from "./segment-buttons";
@@ -23,8 +26,10 @@ import { StudentListFiltersBar, type StudentFilterProduct } from "./student-list
 import { StudentListPagination, StudentListTable } from "./student-list-table";
 import { StudentSelectionProvider } from "./student-selection";
 
-// Lista de alunos (docs/17 §1.7.1): ciclo de vida no topo, segmentos a esquerda, filtros, tabela com
-// selecao e barra de acoes em massa, paginacao de 25. A pagina le o banco e passa tudo pronto.
+// Lista de alunos (docs/17 §1.7.1): ciclo de vida no topo, segmentos em pilulas com contagem (e o menu
+// "Mais segmentos" com os demais e os salvos), filtros, tabela com selecao e barra de acoes em massa,
+// paginacao de 25. Sem coluna lateral (decisao do produtor em 15/10/2026: repetia as pilulas e tirava
+// largura da tabela). A pagina le o banco e passa tudo pronto.
 
 export type StudentSegmentView = { id: string; total: number };
 
@@ -43,20 +48,6 @@ type StudentListViewProps = {
   segmentCounts: readonly StudentSegmentView[];
 };
 
-function paramsOf(filters: StudentListFilters): StudentListParams {
-  const { page, ...params } = filters;
-  void page;
-
-  return params;
-}
-
-function sameParams(left: StudentListParams, right: StudentListParams) {
-  const normalize = (params: StudentListParams) =>
-    JSON.stringify(Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined && value !== "").sort(([a], [b]) => a.localeCompare(b))));
-
-  return normalize(left) === normalize(right);
-}
-
 export function StudentListView({
   canAccess,
   canAdd,
@@ -71,35 +62,42 @@ export function StudentListView({
   savedSegments,
   segmentCounts
 }: StudentListViewProps) {
-  const params = paramsOf(filters);
-  const filtered = hasActiveStudentFilters(filters);
-  const countOf = (id: string) => segmentCounts.find((segment) => segment.id === id)?.total ?? null;
-  const presetItems: SegmentPickerItem[] = STUDENT_SEGMENT_PRESETS.map((preset) => ({
-    active: sameParams(params, preset.params),
+  const params = pickStudentListParams(filters);
+  const { base, segment } = splitStudentListParams(params);
+  const filtered = hasStudentListFilters(params);
+  const countOf = (id: string) => segmentCounts.find((item) => item.id === id)?.total ?? null;
+
+  // Pilulas e "Mais segmentos": mantem produto, turma e busca; so trocam o segmento.
+  const presetItem = (preset: (typeof STUDENT_SEGMENT_PRESETS)[number]): SegmentPickerItem => ({
+    active: sameStudentListParams(segment, preset.params),
     count: countOf(preset.id),
     formula: preset.formula,
-    href: segmentHref(preset.params),
+    href: segmentHref({ ...base, ...preset.params }),
     id: preset.id,
     label: preset.label
-  }));
-  const { group: _group, week: _week, ...reusableParams } = params;
-  void _group;
-  void _week;
-  const canSaveSegment = canAccess && hasStudentListFilters(reusableParams);
-  const savedItems: SegmentPickerItem[] = savedSegments.map((segment) => {
-    const productMissing = Boolean(segment.params.productId && !products.some((product) => product.id === segment.params.productId));
+  });
+  const mainItems = STUDENT_SEGMENT_PRESETS.filter((preset) => preset.placement === "main").map(presetItem);
+  const moreItems = STUDENT_SEGMENT_PRESETS.filter((preset) => preset.placement === "more").map(presetItem);
+
+  // Salvos: abrem exatamente os filtros guardados.
+  const savedItems: SegmentPickerItem[] = savedSegments.map((saved) => {
+    const productMissing = Boolean(saved.params.productId && !products.some((product) => product.id === saved.params.productId));
 
     return {
-      action: canAccess ? <DeleteSegmentButton id={segment.id} name={segment.name} /> : undefined,
-      active: sameParams(params, segment.params),
-      count: countOf(segment.id),
+      active: sameStudentListParams(params, saved.params),
+      count: countOf(saved.id),
       formula: productMissing ? "O produto deste segmento foi removido do catálogo." : undefined,
-      href: segmentHref(segment.params),
-      id: segment.id,
-      label: productMissing ? `${segment.name} (produto removido)` : segment.name
+      href: segmentHref(saved.params),
+      id: saved.id,
+      label: productMissing ? `${saved.name} (produto removido)` : saved.name
     };
   });
-  const isPreset = presetItems.some((item) => item.active) || savedItems.some((item) => item.active);
+  const activeSaved = savedSegments.find((saved) => sameStudentListParams(params, saved.params)) ?? null;
+
+  // "Salvar como segmento": so quando ha filtro que ainda nao e um segmento pronto nem salvo.
+  const reusable = withoutLifecycle(params);
+  const isReadyMade = STUDENT_SEGMENT_PRESETS.some((preset) => sameStudentListParams(params, preset.params));
+  const canSaveSegment = canAccess && hasStudentListFilters(reusable) && !isReadyMade && !activeSaved;
   const labels = Object.fromEntries(list.items.map((item) => [item.id, item.fullName]));
 
   return (
@@ -132,25 +130,25 @@ export function StudentListView({
 
       {lifecycle ? <LifecycleCard approximateUntil={lifecycle.approximateUntil} weeks={lifecycle.weeks} /> : null}
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="flex min-w-0 flex-col gap-4">
         <SegmentPicker
           ariaLabel="Segmentos de alunos"
-          className="self-start"
-          items={presetItems}
+          items={mainItems}
+          more={moreItems}
           saved={savedItems}
           savedEmpty="Aplique um filtro e use “Salvar como segmento”."
+          trailing={activeSaved && canAccess ? <DeleteSegmentButton id={activeSaved.id} name={activeSaved.name} /> : null}
         />
-
-        <div className="flex min-w-0 flex-col gap-4">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1">
             <StudentListFiltersBar cohorts={cohorts} filters={filters} products={products} />
-            {canSaveSegment && !isPreset ? <SaveSegmentButton params={reusableParams} /> : null}
           </div>
-          <StudentListTable canAdd={canAdd} filtered={filtered} filters={filters} now={now} rows={list.items} selectable={canAccess} />
-          {list.total > list.pageSize || filtered ? (
-            <StudentListPagination hrefFor={(page) => studentListHref(filters, { page })} page={list.page} pageSize={list.pageSize} total={list.total} />
-          ) : null}
+          {canSaveSegment ? <SaveSegmentButton params={reusable} /> : null}
         </div>
+        <StudentListTable canAdd={canAdd} filtered={filtered} filters={filters} now={now} rows={list.items} selectable={canAccess} />
+        {list.total > list.pageSize || filtered ? (
+          <StudentListPagination hrefFor={(page) => studentListHref(filters, { page })} page={list.page} pageSize={list.pageSize} total={list.total} />
+        ) : null}
       </div>
 
       {canAccess ? <BulkActionsBar canExport={canExport} cohorts={cohorts} labels={labels} products={pickerProducts} today={todayInputValue(now)} /> : null}

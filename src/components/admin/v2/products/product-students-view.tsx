@@ -40,7 +40,7 @@ function buildColumns(now: number): DataTableColumn<StudentListItem>[] {
       id: "aluno"
     },
     { cell: (row) => formatRelativeDate(row.lastStudiedAt, now), header: "Último estudo", id: "ultimo-estudo", mobileLabel: "Último estudo" },
-    { cell: (row) => <ProgressBar completed={row.completedLessons} total={row.totalLessons} />, className: "min-w-[170px]", header: "Progresso", id: "progresso", mobileLabel: "Progresso" },
+    { cell: (row) => <ProgressBar completed={row.completedLessons} total={row.totalLessons} />, header: "Progresso", id: "progresso", mobileLabel: "Progresso" },
     { cell: (row) => <StatusChip tone={paceTone(row.pace)}>{STUDENT_PACE_LABELS[row.pace]}</StatusChip>, header: "Ritmo", id: "ritmo", mobileLabel: "Ritmo" },
     { cell: (row) => formatShortDate(row.createdAt), header: "Entrou em", hideOnMobile: true, id: "entrou-em" }
   ];

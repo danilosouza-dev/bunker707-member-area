@@ -23,7 +23,7 @@ export function ProductChips({ className, max = 2, products }: ProductChipsProps
     <span className={cn("flex min-w-0 flex-wrap items-center gap-1.5", className)}>
       {shown.map((product) => (
         <span
-          className="inline-flex h-[22px] max-w-[180px] items-center gap-1.5 rounded-[6px] border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.06)] px-2 text-xs leading-none font-medium text-[var(--text-primary)]"
+          className="inline-flex h-[22px] max-w-[170px] items-center max-md:max-w-full gap-1.5 rounded-[6px] border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.06)] px-2 text-xs leading-none font-medium text-[var(--text-primary)]"
           key={product.id}
           title={product.title}
         >

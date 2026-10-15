@@ -40,15 +40,20 @@ function cohortsLabel(row: StudentListItem, productId?: string) {
   );
 }
 
+/** Barra curta e "7/24"; o texto completo ("7 de 24 aulas") fica no title e no leitor de tela. */
 export function ProgressBar({ completed, total }: { completed: number; total: number }) {
   const percent = progressPercentOf(completed, total);
+  const label = lessonsProgressLabel(completed, total);
 
   return (
-    <span className="flex min-w-0 items-center gap-2">
-      <span aria-hidden="true" className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-[var(--surface-3)]">
+    <span className="flex min-w-0 items-center gap-2" title={label}>
+      <span aria-hidden="true" className="h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-[var(--surface-3)]">
         <span className="block h-full rounded-full bg-[var(--text-primary)]" style={{ width: `${percent}%` }} />
       </span>
-      <span className="min-w-0 text-[13px] whitespace-nowrap">{lessonsProgressLabel(completed, total)}</span>
+      <span aria-hidden="true" className="text-[13px] whitespace-nowrap tabular-nums">
+        {total > 0 ? `${completed}/${total}` : "—"}
+      </span>
+      <span className="sr-only">{label}</span>
     </span>
   );
 }
@@ -57,9 +62,9 @@ function buildColumns(now: number, productId?: string): DataTableColumn<StudentL
   return [
     {
       cell: (row) => (
-        <span className="flex min-w-0 items-center gap-3">
+        <span className="flex min-w-0 items-center gap-3 max-md:pr-10">
           <StudentAvatar avatarUrl={row.avatarUrl} name={row.fullName} />
-          <span className="min-w-0">
+          <span className="block min-w-0 max-w-[240px]">
             <span className="flex min-w-0 items-center gap-2">
               <span className="truncate font-medium text-[var(--text-primary)]">{row.fullName}</span>
               {row.isStaff ? <StatusChip tone="neutral">Equipe</StatusChip> : null}
@@ -68,14 +73,13 @@ function buildColumns(now: number, productId?: string): DataTableColumn<StudentL
           </span>
         </span>
       ),
-      className: "min-w-[220px] max-w-[320px]",
+      className: "min-w-[200px]",
       emphasis: true,
       header: "Aluno",
       id: "aluno"
     },
     {
-      cell: (row) => <ProductChips products={row.products} />,
-      className: "min-w-[180px]",
+      cell: (row) => <ProductChips max={1} products={row.products} />,
       header: "Produtos",
       id: "produtos",
       mobileLabel: "Produtos"
@@ -92,7 +96,6 @@ function buildColumns(now: number, productId?: string): DataTableColumn<StudentL
     },
     {
       cell: (row) => <ProgressBar completed={row.completedLessons} total={row.totalLessons} />,
-      className: "min-w-[170px]",
       header: "Progresso",
       id: "progresso",
       mobileLabel: "Progresso"
@@ -105,14 +108,17 @@ function buildColumns(now: number, productId?: string): DataTableColumn<StudentL
     },
     {
       cell: (row) => cohortsLabel(row, productId),
-      className: "max-w-[160px]",
+      className: "max-w-[160px] max-2xl:hidden",
       header: "Turma",
+      headerClassName: "max-2xl:hidden",
       hideOnMobile: true,
       id: "turma"
     },
     {
       cell: (row) => formatShortDate(row.createdAt),
+      className: "max-2xl:hidden",
       header: "Entrou em",
+      headerClassName: "max-2xl:hidden",
       hideOnMobile: true,
       id: "entrou-em"
     }
