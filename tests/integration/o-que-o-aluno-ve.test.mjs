@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "../support/integration-hooks.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
-import { ESCOLA_DE_TESTE, limparProgresso, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { ESCOLA_DE_TESTE, INICIO_DO_ACESSO, limparProgresso, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
 // O que cada aluno ve (docs/18 §1.5 item 3 e §3.1 Home / Curso): os leitores da home, da pagina do
 // curso e da biblioteca so entregam o que o aluno pode abrir, contra o banco LOCAL de verdade. Regra do
@@ -105,7 +105,7 @@ test("biblioteca da aluna: dois cursos com acesso real e sem data de fim; aula f
   for (const content of library.contents) {
     assert.equal(content.access.kind, "entitlement");
     assert.equal(content.access.endsAt, null, "vitalicio");
-    assert.equal(Date.parse(content.access.startsAt ?? ""), Date.parse("2026-01-01T00:00:00.000Z"), "acesso desde 01/01/2026");
+    assert.equal(Date.parse(content.access.startsAt ?? ""), Date.parse(INICIO_DO_ACESSO), "acesso desde 01/01/2026");
   }
 
   const liberacao = library.contents.find((content) => content.id === cursoLiberacao.id);
