@@ -538,6 +538,12 @@ export async function limparComentarios(db, userIds) {
   unwrap(await db.from("lesson_comments").delete().in("author_id", userIds), "Limpando comentarios de teste");
 }
 
+/** Apaga as sessoes de TV (e os eventos dessas sessoes) das contas informadas. */
+export async function limparSessoesDeTv(db, userIds) {
+  unwrap(await db.from("student_events").delete().in("user_id", userIds).eq("entity_type", "tv_session"), "Limpando eventos de TV de teste");
+  unwrap(await db.from("tv_sessions").delete().in("user_id", userIds), "Limpando sessoes de TV de teste");
+}
+
 /** Apaga progresso, favoritos e atividade das contas informadas (os testes comecam do zero). */
 export async function limparProgresso(db, userIds) {
   for (const table of ["lesson_progress", "saved_items", "student_daily_activity"]) {

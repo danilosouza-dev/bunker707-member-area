@@ -60,6 +60,7 @@ export function seedEscolaDeTeste(db: unknown): Promise<{
 }>;
 
 export function limparProgresso(db: unknown, userIds: string[]): Promise<void>;
+export function limparSessoesDeTv(db: unknown, userIds: string[]): Promise<void>;
 export function limparComentarios(db: unknown, userIds: string[]): Promise<void>;
 export function limparFotoDoPerfil(db: unknown, userIds: string[]): Promise<void>;
 export function apagarContaDeTeste(db: unknown, email: string): Promise<void>;

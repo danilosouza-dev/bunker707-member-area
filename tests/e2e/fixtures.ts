@@ -1,5 +1,5 @@
 import { test as base, expect, type BrowserContext } from "@playwright/test";
-import { apagarContaDeTeste, apagarProdutosDeTeste, contasDeTeste, definirCapaDoProduto, limparComentarios, limparConfiguracoesDeTeste, limparFotoDoPerfil, limparProgresso } from "../fixtures/escola-de-teste.mjs";
+import { apagarContaDeTeste, apagarProdutosDeTeste, contasDeTeste, definirCapaDoProduto, limparComentarios, limparConfiguracoesDeTeste, limparFotoDoPerfil, limparProgresso, limparSessoesDeTv } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 
 // Base dos testes de ponta a ponta: o navegador so fala com a maquina. Qualquer pedido para fora
@@ -29,6 +29,13 @@ export async function zerarProgressoDosAlunos() {
   const db = createLocalAdminClient();
   const contas = await contasDeTeste(db);
   await limparProgresso(db, [contas.aluna.id, contas.alunoSemAcesso.id]);
+}
+
+/** Apaga as sessoes de TV (e os eventos delas) das contas de aluno. */
+export async function zerarSessoesDeTv() {
+  const db = createLocalAdminClient();
+  const contas = await contasDeTeste(db);
+  await limparSessoesDeTv(db, [contas.aluna.id, contas.alunoSemAcesso.id]);
 }
 
 /** Apaga os comentarios escritos por todas as contas de teste (alunos e equipe). */
