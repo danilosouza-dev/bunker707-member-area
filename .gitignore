@@ -14,6 +14,14 @@ coverage/
 ._*
 tsconfig.tsbuildinfo
 .vercel/
+supabase/.temp/
+supabase/.branches/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+tests/e2e/.auth/
 .turbo/
 .codex-backups/
 .data/
