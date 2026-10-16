@@ -19,7 +19,7 @@ export type ProductCapabilities = {
   canSeeDetails: boolean;
   /** Aba Desempenho (reports.read). */
   canSeePerformance: boolean;
-  /** Aba Alunos (students.read_basic, escola toda). */
+  /** Aba Alunos (students.read_basic). */
   canSeeStudents: boolean;
   /** Detalhes do produto: nome, descricao, capa, destaque (catalog.write). Modulos e aulas usam catalog.content. */
   canWrite: boolean;

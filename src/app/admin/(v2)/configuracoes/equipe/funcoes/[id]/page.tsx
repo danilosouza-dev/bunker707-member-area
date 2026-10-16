@@ -9,7 +9,7 @@ import { TEAM_FUNCTIONS_PATH, TEAM_PATH } from "@/components/admin/v2/team/hrefs
 import { TeamFunctionForm } from "@/components/admin/v2/team/team-function-form";
 import { requirePageRole } from "@/server/auth/permissions";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
-import { listTeamFunctions } from "@/server/team/queries";
+import { TEAM_FUNCTIONS_MIGRATION, listTeamFunctions } from "@/server/team/queries";
 
 export const metadata: Metadata = {
   title: "Função da equipe"
@@ -42,7 +42,7 @@ export default async function TeamFunctionPage({ params }: TeamFunctionPageProps
     return (
       <AdminPage className="gap-6">
         <PageHeader breadcrumb={breadcrumbFor("Função")} title="Função da equipe" />
-        <PendingMigrationNotice />
+        <PendingMigrationNotice migration={loaded.ok ? TEAM_FUNCTIONS_MIGRATION : undefined} />
       </AdminPage>
     );
   }

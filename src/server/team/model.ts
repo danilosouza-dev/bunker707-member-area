@@ -373,7 +373,7 @@ export function describeMemberFunctions(
   return extras > 0 ? `${labels.join(" + ")} + ${plural(extras, "extra", "extras")}` : labels.join(" + ");
 }
 
-/** Resumo do acesso para a lista ("Tudo", "2 cursos · 5 permissões", "Alunos e comunidade"). */
+/** Resumo do acesso para a lista ("Tudo", "5 permissões", "2 cursos · 5 permissões", "Nenhum curso ainda · 3 permissões"). */
 export function describeMemberAccess(member: Pick<TeamMember, "owner" | "productIds">, grants: ReadonlyMap<AdminAction, ActionScope>) {
   if (member.owner) {
     return "Tudo";

@@ -78,9 +78,13 @@ export async function getTeamMember(userId: string): Promise<TeamMember | null> 
   return toMember(row, profiles.get(userId));
 }
 
+/** Migracao que cria admin_functions; e a que o aviso da aba Funcoes cita enquanto ela nao roda. */
+export const TEAM_FUNCTIONS_MIGRATION = "202610170001";
+
 /**
- * Funcoes personalizadas com quantas pessoas tem cada uma. Sem a migracao 202610170001 ainda, a lista
- * vem vazia (a tela de pessoas segue funcionando so com as funcoes prontas).
+ * Funcoes personalizadas com quantas pessoas tem cada uma. Sem a migracao TEAM_FUNCTIONS_MIGRATION
+ * ainda, a lista vem vazia com ready: false (a tela de pessoas segue funcionando so com as funcoes
+ * prontas; as telas de funcoes mostram o aviso).
  */
 export async function listTeamFunctions(): Promise<{ functions: TeamCustomFunction[]; ready: boolean }> {
   const db = teamDb();

@@ -119,7 +119,7 @@ export async function removeCourseFromFormation(input: FormationCourseInput): Pr
   });
 }
 
-/** [catalog.write] */
+/** [catalog.access] Nova ordem dos cursos dentro da formacao. */
 export async function reorderFormationCourses(input: ReorderFormationCoursesInput): Promise<ActionResult<FormationCourseItem[]>> {
   return runAdminAction("catalog.access", reorderFormationCoursesSchema, input, async ({ input: data }) => {
     const db = catalogDb();
