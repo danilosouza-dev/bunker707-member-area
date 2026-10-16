@@ -57,4 +57,11 @@ test("aluna abre o curso pela home e chega na aula com player, playlist e botao 
   await expect(playlist.getByText("Módulo 2: Na prática")).toBeVisible();
 
   await expect(page.getByRole("button", { name: "Concluir aula atual" })).toBeVisible();
+
+  // Painel de apoio da aula: as tres abas, em portugues, e o atalho de materiais seleciona a aba certa.
+  await expect(page.getByRole("tab", { name: /Comentários/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: /Materiais/ })).toBeVisible();
+  await expect(page.getByRole("tab", { name: /Tutor IA/ })).toBeVisible();
+  await page.getByRole("button", { name: "Abrir materiais" }).click();
+  await expect(page.getByRole("tab", { name: /Materiais/ })).toHaveAttribute("aria-selected", "true");
 });

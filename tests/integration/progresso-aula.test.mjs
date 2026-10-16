@@ -11,7 +11,7 @@ import { ESCOLA_DE_TESTE, limparProgresso, seedEscolaDeTeste, usuarioDeTeste } f
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
-const { PUT } = await import("../../src/app/api/progress/lessons/route.ts");
+const { POST, PUT } = await import("../../src/app/api/progress/lessons/route.ts");
 const { getHomePageData, getLessonPageData } = await import("../../src/server/db/platform-store.ts");
 const { getContinueWatchingPageData, getJourneyPageData } = await import("../../src/server/member-area/student-pages.ts");
 
@@ -222,4 +222,41 @@ test("Minha jornada e a pagina Continue assistindo leem o mesmo progresso que a 
 
   const fileira = await fileiraContinueAssistindo(aluna);
   assert.deepEqual(fileira.items.map((item) => item.id), [curso.aulas.aula2]);
+});
+
+test("reacao da aula (Gostei / Amei / Nao e para mim): a rota grava e a pagina da aula devolve; reacao desconhecida e 400", async () => {
+  actAs(aluna);
+  const gostei = await putProgresso({ contentId: curso.id, lessonId: curso.aulas.aula3, lessonReactions: { [curso.aulas.aula3]: "liked" } });
+  assert.equal(gostei.status, 200);
+  let page = await getLessonPageData(curso.id, curso.modulos.modulo2, aluna);
+  assert.equal(page.initialLessonReactions[curso.aulas.aula3], "liked");
+
+  const amei = await putProgresso({ contentId: curso.id, lessonId: curso.aulas.aula3, lessonReactions: { [curso.aulas.aula3]: "loved" } });
+  assert.equal(amei.status, 200);
+  page = await getLessonPageData(curso.id, curso.modulos.modulo2, aluna);
+  assert.equal(page.initialLessonReactions[curso.aulas.aula3], "loved", "a reacao nova substitui a anterior");
+
+  const tirada = await putProgresso({ contentId: curso.id, lessonId: curso.aulas.aula3, lessonReactions: {} });
+  assert.equal(tirada.status, 200);
+  page = await getLessonPageData(curso.id, curso.modulos.modulo2, aluna);
+  assert.equal(page.initialLessonReactions[curso.aulas.aula3], undefined, "sem reacao de novo");
+
+  const invalida = await putProgresso({ contentId: curso.id, lessonId: curso.aulas.aula3, lessonReactions: { [curso.aulas.aula3]: "odiei" } });
+  assert.equal(invalida.status, 400);
+});
+
+test("sair da pagina manda o progresso por POST (sendBeacon) e grava igual ao PUT", async () => {
+  actAs(aluna);
+  const response = await POST(
+    new Request("http://localhost/api/progress/lessons", {
+      body: JSON.stringify({ contentId: curso.id, durationSeconds: 900, lessonId: curso.aulas.aula3, progressSeconds: 450, status: "in_progress" }),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    })
+  );
+
+  assert.equal(response.status, 200);
+  const page = await getLessonPageData(curso.id, curso.modulos.modulo2, aluna);
+  assert.equal(page.initialLessonWatchStates[curso.aulas.aula3].progressPercent, 50);
+  assert.equal(page.selectedModule.progress, 50, "o modulo 2 (1 aula) fica em 50%");
 });
