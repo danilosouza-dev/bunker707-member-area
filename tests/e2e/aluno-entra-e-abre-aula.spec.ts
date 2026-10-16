@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { expect, test, zerarProgressoDosAlunos } from "./fixtures";
 import { ESCOLA_DE_TESTE, SENHA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
 
 // Fluxo principal do aluno (docs/18 §3.1): entrar, cair na home, abrir o curso comprado e chegar na
@@ -6,6 +6,9 @@ import { ESCOLA_DE_TESTE, SENHA_DE_TESTE } from "../fixtures/escola-de-teste.mjs
 
 const { curso } = ESCOLA_DE_TESTE;
 const enderecoDaAula = `/conteudo/${curso.id}/aulas/${curso.modulos.modulo1}`;
+
+// Sem progresso, a aula aberta pelo modulo e a primeira (Aula 1); outro arquivo pode ter concluido aulas.
+test.beforeAll(zerarProgressoDosAlunos);
 
 test.describe("entrar", () => {
   // Estes testes comecam sem sessao, ao contrario dos outros (que reaproveitam o login do setup).

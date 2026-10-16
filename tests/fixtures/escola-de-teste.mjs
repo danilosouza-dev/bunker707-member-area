@@ -190,20 +190,15 @@ async function findAccountByEmail(db, email) {
   return users.find((user) => user.email?.toLowerCase() === email) ?? null;
 }
 
-/** Cria (ou atualiza) a conta no Auth local, com e-mail confirmado e a senha de teste. */
+/**
+ * Cria a conta no Auth local, com e-mail confirmado e a senha de teste. Conta que ja existe fica como
+ * esta: trocar a senha (mesmo pela mesma) derruba as sessoes abertas, e os testes de navegador
+ * reaproveitam o login guardado. Para recriar do zero, `npm run db:reset`.
+ */
 async function ensureAccount(db, conta) {
   const existing = await findAccountByEmail(db, conta.email);
 
   if (existing) {
-    unwrap(
-      await db.auth.admin.updateUserById(existing.id, {
-        email_confirm: true,
-        password: SENHA_DE_TESTE,
-        user_metadata: { full_name: conta.nome }
-      }),
-      `Atualizando a conta ${conta.email}`
-    );
-
     return existing.id;
   }
 
@@ -233,6 +228,23 @@ export function usuarioDeTeste(conta) {
     id: conta.id,
     user_metadata: { full_name: conta.nome }
   };
+}
+
+/** As contas de teste ja criadas (`{ aluna, ... }`, cada uma `{ email, id, nome }`), sem gravar nada. */
+export async function contasDeTeste(db) {
+  const contas = {};
+
+  for (const [chave, conta] of Object.entries(ESCOLA_DE_TESTE.contas)) {
+    const existing = await findAccountByEmail(db, conta.email);
+
+    if (!existing) {
+      throw new Error(`A conta de teste ${conta.email} nao existe. Rode \`npm run db:seed\`.`);
+    }
+
+    contas[chave] = { ...conta, id: existing.id };
+  }
+
+  return contas;
 }
 
 /**

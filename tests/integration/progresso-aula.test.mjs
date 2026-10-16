@@ -13,6 +13,7 @@ const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
 const { PUT } = await import("../../src/app/api/progress/lessons/route.ts");
 const { getHomePageData, getLessonPageData } = await import("../../src/server/db/platform-store.ts");
+const { getContinueWatchingPageData, getJourneyPageData } = await import("../../src/server/member-area/student-pages.ts");
 
 const { curso } = ESCOLA_DE_TESTE;
 const aluna = usuarioDeTeste(contas.aluna);
@@ -183,4 +184,38 @@ test("aluno sem acesso nao ve o curso liberado nem a fileira Continue assistindo
 
   const page = await getLessonPageData(curso.id, curso.modulos.modulo1, alunoSemAcesso);
   assert.equal(page?.item.isLocked, true, "a pagina da aula marca o curso como bloqueado (a tela redireciona)");
+});
+
+test("Minha jornada e a pagina Continue assistindo leem o mesmo progresso que a aula e a home", async () => {
+  // Estado deixado pelos testes acima: aula 1 desmarcada (em andamento no fim do video) e aula 2 em andamento (20%).
+  actAs(aluna);
+  const concluir = await putProgresso({
+    completedLessonIds: [curso.aulas.aula1],
+    contentId: curso.id,
+    durationSeconds: 600,
+    lessonId: curso.aulas.aula1,
+    progressPercent: 100,
+    progressSeconds: 600,
+    status: "completed"
+  });
+  assert.equal(concluir.status, 200);
+
+  const jornada = await getJourneyPageData(undefined, aluna);
+  assert.equal(jornada.stats.completedLessons, 1, "1 aula concluida no total");
+  assert.equal(jornada.stats.totalLessons, 3, "3 aulas do curso comprado (o bloqueado nao conta)");
+  assert.equal(jornada.stats.inProgressContents, 1);
+  const produto = jornada.products.find((entry) => entry.id === curso.id);
+  assert.ok(produto, "o curso comprado aparece na jornada");
+  assert.equal(produto.completedLessons, 1);
+  assert.equal(produto.status, "in_progress");
+  assert.equal(produto.resume?.label, "Continuar");
+  assert.equal(produto.resume?.lessonTitle, "Aula 2: As peças de um agente", "retoma a aula comecada, nao a concluida");
+  assert.deepEqual(jornada.continueWatching.map((card) => card.title), ["Aula 2: As peças de um agente"]);
+
+  const continuar = await getContinueWatchingPageData(undefined, aluna);
+  assert.deepEqual(continuar.inProgress.map((card) => card.title), ["Aula 2: As peças de um agente"], "mesma regra da fileira da home");
+  assert.deepEqual(continuar.recentlyCompleted.map((card) => card.title), ["Aula 1: O que é um agente"]);
+
+  const fileira = await fileiraContinueAssistindo(aluna);
+  assert.deepEqual(fileira.items.map((item) => item.id), [curso.aulas.aula2]);
 });
