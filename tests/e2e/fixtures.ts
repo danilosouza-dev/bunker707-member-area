@@ -1,5 +1,5 @@
 import { test as base, expect, type BrowserContext } from "@playwright/test";
-import { apagarContaDeTeste, apagarProdutosDeTeste, contasDeTeste, definirCapaDoProduto, limparComentarios, limparFotoDoPerfil, limparProgresso } from "../fixtures/escola-de-teste.mjs";
+import { apagarContaDeTeste, apagarProdutosDeTeste, contasDeTeste, definirCapaDoProduto, limparComentarios, limparConfiguracoesDeTeste, limparFotoDoPerfil, limparProgresso } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 
 // Base dos testes de ponta a ponta: o navegador so fala com a maquina. Qualquer pedido para fora
@@ -61,4 +61,9 @@ export async function apagarProdutos(prefixoDoTitulo: string) {
  */
 export async function definirCapa(tituloDoProduto: string) {
   await definirCapaDoProduto(createLocalAdminClient(), tituloDoProduto);
+}
+
+/** Volta o destaque, as fileiras e a tela de entrar ao padrao (apaga o que um teste publicou). */
+export async function zerarAreaDeMembros() {
+  await limparConfiguracoesDeTeste(createLocalAdminClient(), ["hero", "homeSections", "loginPage"]);
 }
