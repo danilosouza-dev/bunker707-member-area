@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -58,6 +59,7 @@ import {
   type YouTubeManualPlayerController
 } from "@/components/youtube-manual-stream-player";
 import { withAccessPreviewParam } from "@/lib/access-preview";
+import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import {
   EMPTY_LESSON_MATERIAL_LEARNER_STATE,
   mergeSavedLessonMaterialLearnerState,
@@ -1055,15 +1057,23 @@ function CommentAvatar({
   const statusInnerSizeClassName = size === "lg" ? "h-2 w-2" : "h-1.5 w-1.5";
   const labelClassName = avatar.labelClassName ?? (size === "lg" ? "text-base" : "text-sm");
   const isOnline = avatar.online === true;
+  // Foto que nao carrega (endereco antigo, apagado do bucket, ou link quebrado) volta para as iniciais
+  // em vez de um circulo vazio. Guarda o endereco que falhou: se o comentario receber outro, tenta de novo.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const imageSrc = avatar.imageSrc && avatar.imageSrc !== failedSrc ? avatar.imageSrc : null;
 
   return (
     <span className={`relative shrink-0 ${sizeClassName}`}>
-      <span className={`grid h-full w-full place-items-center overflow-hidden rounded-full ${avatar.backgroundClassName} font-black text-white shadow-lg shadow-black/25`}>
-        {avatar.imageSrc ? (
-          <span
-            aria-hidden="true"
-            className="h-full w-full bg-cover bg-center"
-            style={{ backgroundImage: `url(${avatar.imageSrc})` }}
+      <span className={`relative grid h-full w-full place-items-center overflow-hidden rounded-full ${avatar.backgroundClassName} font-black text-white shadow-lg shadow-black/25`}>
+        {imageSrc ? (
+          <Image
+            alt=""
+            className="object-cover"
+            fill
+            onError={() => setFailedSrc(imageSrc)}
+            sizes="48px"
+            src={imageSrc}
+            unoptimized={!canOptimizeImageSrc(imageSrc)}
           />
         ) : (
           <span className={`leading-none ${labelClassName}`}>{avatar.label}</span>
