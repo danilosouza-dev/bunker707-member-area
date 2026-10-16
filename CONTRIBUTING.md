@@ -53,6 +53,17 @@ npm run typecheck
 npm test
 ```
 
+## Testes
+
+O padrao de testes (tipos, onde cada um fica, como rodar, dados de teste e a rotina) esta em [docs/18-padrao-de-testes.md](docs/18-padrao-de-testes.md). Em resumo:
+
+- toda PR de funcionalidade ou correcao traz teste de comportamento do que mudou (unitario, integracao ou ponta a ponta, conforme a regra de bolso do doc);
+- correcao traz um teste que falhava antes e passa depois;
+- conferir texto do codigo-fonte com expressao regular nao e teste de comportamento; so vale como guarda de regra de arquitetura, em arquivo `.guard.test.mjs`;
+- sem teste, so com justificativa escrita na PR e pendencia anotada no mapa de cobertura do doc.
+
+Os comandos de integracao e ponta a ponta (`npm run test:integration`, `npm run test:e2e`) e o checklist no template de PR entram na etapa 2 do plano descrito no doc.
+
 ## Seguranca
 
 - Nunca commitar `.env`, tokens, chaves de servico, payloads privados ou dados pessoais reais.

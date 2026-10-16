@@ -47,6 +47,8 @@ Esse comando cobre lint, typecheck, testes automatizados e build.
 
 Alteracoes em acesso, persistencia ou navegacao devem incluir teste de regressao que prove a invariante afetada. Para mudancas perceptiveis no browser, o gate de codigo nao substitui uma validacao autenticada da rota, do console e da requisicao real.
 
+Como escrever esses testes (unitario, integracao com banco local, ponta a ponta no navegador), onde cada um fica, como rodar e a rotina de PR estao em `docs/18-padrao-de-testes.md`. Teste que so confere texto do codigo-fonte por expressao regular nao conta como teste de regressao de comportamento.
+
 ## Organizacao de produto
 
 - A experiencia do aluno vem antes do admin/professor.
