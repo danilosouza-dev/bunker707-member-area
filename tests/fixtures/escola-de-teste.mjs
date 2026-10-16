@@ -11,8 +11,12 @@ export const SENHA_DE_TESTE = "bunker707-teste-2026";
 export const ESCOLA_DE_TESTE = {
   contas: {
     aluna: { email: "aluna.teste@bunker707.test", nome: "Aluna de Teste" },
+    /** Comprou o curso, mas o acesso terminou ontem. */
+    alunaAcessoExpirado: { email: "aluna.expirada@bunker707.test", nome: "Aluna Acesso Expirado" },
     alunoSemAcesso: { email: "aluno.sem-acesso@bunker707.test", nome: "Aluno Sem Acesso" },
     analista: { email: "analista.teste@bunker707.test", nome: "Analista de Teste" },
+    /** Equipe com alcance so no curso comprado pela aluna (Professor). */
+    professor: { email: "professor.teste@bunker707.test", nome: "Professor de Teste" },
     produtor: { email: "produtor.teste@bunker707.test", nome: "Produtor de Teste" }
   },
   /** Curso que a aluna comprou: 2 modulos, 3 aulas publicadas. */
@@ -31,17 +35,54 @@ export const ESCOLA_DE_TESTE = {
   },
   /** Curso a venda que ninguem comprou: aparece bloqueado para a aluna. */
   cursoBloqueado: {
+    aulas: { aula1: "teste-aula-bloqueada-1" },
     id: "teste-curso-bloqueado",
+    modulos: { modulo1: "teste-modulo-bloqueado-1" },
     titulo: "Curso de Teste: Bloqueado"
+  },
+  /** Curso que a aluna tambem comprou: 1 aula liberada, 1 com data futura e 1 em rascunho. */
+  cursoLiberacao: {
+    aulas: {
+      futura: "teste-aula-futura",
+      liberada: "teste-aula-liberada",
+      rascunho: "teste-aula-rascunho"
+    },
+    id: "teste-curso-liberacao",
+    modulos: { modulo1: "teste-modulo-liberacao-1" },
+    titulo: "Curso de Teste: Liberação"
   }
 };
+
+/** Data fixa de liberacao da aula futura (bem longe, para o teste nunca virar). */
+export const DATA_DE_LIBERACAO_FUTURA = "2099-01-01T12:00:00.000Z";
 
 const VIDEO_DE_TESTE = { provider: "youtube", url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ" };
 
 function contentItemRows() {
-  const { curso, cursoBloqueado } = ESCOLA_DE_TESTE;
+  const { curso, cursoBloqueado, cursoLiberacao } = ESCOLA_DE_TESTE;
 
   return [
+    {
+      access_label: null,
+      access_model: "closed",
+      bucket: "courses",
+      commerce_scope: "sellable_product",
+      description: "Curso ficticio com aulas em liberacao e em rascunho.",
+      eyebrow: "Curso",
+      id: cursoLiberacao.id,
+      image: "/hero/bunker-707-red-front-hero.png",
+      is_locked: false,
+      kind: "Curso",
+      lessons_label: "2 aulas",
+      listing: "listed",
+      progress: 0,
+      publication_status: "published",
+      purchase_label: "Comprar",
+      purchase_url: "https://exemplo.test/comprar/liberacao",
+      sort_order: 3,
+      status: "Bloqueado",
+      title: cursoLiberacao.titulo
+    },
     {
       access_label: null,
       access_model: "closed",
@@ -88,9 +129,22 @@ function contentItemRows() {
 }
 
 function moduleRows() {
-  const { curso, cursoBloqueado } = ESCOLA_DE_TESTE;
+  const { curso, cursoBloqueado, cursoLiberacao } = ESCOLA_DE_TESTE;
 
   return [
+    {
+      description: "Modulo do curso de liberacao.",
+      eyebrow: "Módulo 1",
+      id: cursoLiberacao.modulos.modulo1,
+      image: "/hero/bunker-707-red-front-hero.png",
+      meta: "2 aulas",
+      owner_id: cursoLiberacao.id,
+      owner_kind: "Curso",
+      progress: 0,
+      sort_order: 1,
+      status: "published",
+      title: "Módulo 1: Liberação"
+    },
     {
       description: "Primeiro modulo do curso de teste.",
       eyebrow: "Módulo 1",
@@ -120,7 +174,7 @@ function moduleRows() {
     {
       description: "Modulo do curso bloqueado.",
       eyebrow: "Módulo 1",
-      id: "teste-modulo-bloqueado-1",
+      id: cursoBloqueado.modulos.modulo1,
       image: "/hero/bunker-707-neon-hero.png",
       meta: "1 aula",
       owner_id: cursoBloqueado.id,
@@ -134,9 +188,44 @@ function moduleRows() {
 }
 
 function lessonRows() {
-  const { curso } = ESCOLA_DE_TESTE;
+  const { curso, cursoBloqueado, cursoLiberacao } = ESCOLA_DE_TESTE;
 
   return [
+    {
+      completed: false,
+      description: "Aula liberada na hora.",
+      duration: "5 min",
+      id: cursoLiberacao.aulas.liberada,
+      module_id: cursoLiberacao.modulos.modulo1,
+      release_rule: { mode: "immediate" },
+      sort_order: 1,
+      status: "published",
+      title: "Aula liberada",
+      video_config: VIDEO_DE_TESTE
+    },
+    {
+      completed: false,
+      description: "Aula com data de liberacao no futuro.",
+      duration: "5 min",
+      id: cursoLiberacao.aulas.futura,
+      module_id: cursoLiberacao.modulos.modulo1,
+      release_rule: { fixedDate: DATA_DE_LIBERACAO_FUTURA, mode: "fixed_date" },
+      sort_order: 2,
+      status: "published",
+      title: "Aula com liberação futura",
+      video_config: VIDEO_DE_TESTE
+    },
+    {
+      completed: false,
+      description: "Aula ainda em rascunho: o aluno nao ve.",
+      duration: "5 min",
+      id: cursoLiberacao.aulas.rascunho,
+      module_id: cursoLiberacao.modulos.modulo1,
+      sort_order: 3,
+      status: "draft",
+      title: "Aula em rascunho",
+      video_config: VIDEO_DE_TESTE
+    },
     {
       completed: false,
       description: "O que e um agente de IA e por que ele importa.",
@@ -174,8 +263,8 @@ function lessonRows() {
       completed: false,
       description: "Aula do curso bloqueado.",
       duration: "8 min",
-      id: "teste-aula-bloqueada-1",
-      module_id: "teste-modulo-bloqueado-1",
+      id: cursoBloqueado.aulas.aula1,
+      module_id: cursoBloqueado.modulos.modulo1,
       sort_order: 1,
       status: "published",
       title: "Aula 1: Introdução",
@@ -266,19 +355,24 @@ export async function seedEscolaDeTeste(db) {
     "Gravando perfis de teste"
   );
 
-  // Equipe: produtor e dono da escola; analista so le. Alunos nunca entram em admin_roles.
+  // Equipe: produtor e dono da escola; analista so le; professor so alcanca o curso da aluna.
+  // Alunos nunca entram em admin_roles.
   unwrap(
     await db.from("admin_roles").upsert(
       [
         { permissions: {}, role: "owner", user_id: contas.produtor.id },
-        { permissions: {}, role: "analyst", user_id: contas.analista.id }
+        { permissions: {}, role: "analyst", user_id: contas.analista.id },
+        { permissions: { productIds: [ESCOLA_DE_TESTE.curso.id] }, role: "instructor", user_id: contas.professor.id }
       ],
       { onConflict: "user_id" }
     ),
     "Gravando equipe de teste"
   );
   unwrap(
-    await db.from("admin_roles").delete().in("user_id", [contas.aluna.id, contas.alunoSemAcesso.id]),
+    await db
+      .from("admin_roles")
+      .delete()
+      .in("user_id", [contas.aluna.id, contas.alunoSemAcesso.id, contas.alunaAcessoExpirado.id]),
     "Tirando alunos de teste da equipe"
   );
 
@@ -286,22 +380,46 @@ export async function seedEscolaDeTeste(db) {
   unwrap(await db.from("course_modules").upsert(moduleRows(), { onConflict: "id" }), "Gravando modulos de teste");
   unwrap(await db.from("lessons").upsert(lessonRows(), { onConflict: "id" }), "Gravando aulas de teste");
 
-  // Acesso: a aluna comprou o curso; o aluno sem acesso nao tem nada.
+  // Acesso: a aluna comprou dois cursos; a aluna expirada comprou o curso, mas o acesso acabou ontem;
+  // o aluno sem acesso nao tem nada.
+  const ontem = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   unwrap(
     await db.from("entitlements").upsert(
-      {
-        ends_at: null,
-        source_event_id: "escola-de-teste:aluna:curso-agentes",
-        source_provider: "manual",
-        starts_at: "2026-01-01T00:00:00.000Z",
-        status: "active",
-        target_id: ESCOLA_DE_TESTE.curso.id,
-        target_type: "standalone_course",
-        user_id: contas.aluna.id
-      },
+      [
+        {
+          ends_at: null,
+          source_event_id: "escola-de-teste:aluna:curso-agentes",
+          source_provider: "manual",
+          starts_at: "2026-01-01T00:00:00.000Z",
+          status: "active",
+          target_id: ESCOLA_DE_TESTE.curso.id,
+          target_type: "standalone_course",
+          user_id: contas.aluna.id
+        },
+        {
+          ends_at: null,
+          source_event_id: "escola-de-teste:aluna:curso-liberacao",
+          source_provider: "manual",
+          starts_at: "2026-01-01T00:00:00.000Z",
+          status: "active",
+          target_id: ESCOLA_DE_TESTE.cursoLiberacao.id,
+          target_type: "standalone_course",
+          user_id: contas.aluna.id
+        },
+        {
+          ends_at: ontem,
+          source_event_id: "escola-de-teste:expirada:curso-agentes",
+          source_provider: "manual",
+          starts_at: "2026-01-01T00:00:00.000Z",
+          status: "active",
+          target_id: ESCOLA_DE_TESTE.curso.id,
+          target_type: "standalone_course",
+          user_id: contas.alunaAcessoExpirado.id
+        }
+      ],
       { onConflict: "user_id,source_event_id" }
     ),
-    "Gravando acesso da aluna de teste"
+    "Gravando acessos de teste"
   );
   unwrap(
     await db.from("entitlements").delete().eq("user_id", contas.alunoSemAcesso.id),

@@ -168,9 +168,9 @@ test("aula de outro curso no payload e recusada: nada muda no progresso do curso
   actAs(aluna);
   const antes = await lerProgressoNoBanco(contas.aluna.id);
   const response = await putProgresso({
-    completedLessonIds: ["teste-aula-bloqueada-1"],
+    completedLessonIds: [ESCOLA_DE_TESTE.cursoBloqueado.aulas.aula1],
     contentId: curso.id,
-    lessonId: "teste-aula-bloqueada-1",
+    lessonId: ESCOLA_DE_TESTE.cursoBloqueado.aulas.aula1,
     status: "completed"
   });
 
@@ -202,8 +202,12 @@ test("Minha jornada e a pagina Continue assistindo leem o mesmo progresso que a 
 
   const jornada = await getJourneyPageData(undefined, aluna);
   assert.equal(jornada.stats.completedLessons, 1, "1 aula concluida no total");
-  assert.equal(jornada.stats.totalLessons, 3, "3 aulas do curso comprado (o bloqueado nao conta)");
-  assert.equal(jornada.stats.inProgressContents, 1);
+  assert.equal(jornada.stats.totalContents, 2, "os dois cursos comprados (o bloqueado nao conta)");
+  assert.equal(jornada.stats.totalLessons, 5, "3 aulas do curso de agentes + 2 publicadas do curso de liberacao (rascunho nao conta)");
+  assert.equal(jornada.stats.inProgressContents, 1, "so o curso de agentes foi comecado");
+  const liberacao = jornada.products.find((entry) => entry.id === ESCOLA_DE_TESTE.cursoLiberacao.id);
+  assert.equal(liberacao?.lockedLessons, 1, "a aula com data futura conta como a liberar");
+  assert.equal(liberacao?.status, "not_started");
   const produto = jornada.products.find((entry) => entry.id === curso.id);
   assert.ok(produto, "o curso comprado aparece na jornada");
   assert.equal(produto.completedLessons, 1);

@@ -4,12 +4,15 @@ export type ContaDeTeste = { email: string; nome: string };
 export type ContaDeTesteCriada = ContaDeTeste & { id: string };
 
 export const SENHA_DE_TESTE: string;
+export const DATA_DE_LIBERACAO_FUTURA: string;
 
 export const ESCOLA_DE_TESTE: {
   contas: {
     aluna: ContaDeTeste;
+    alunaAcessoExpirado: ContaDeTeste;
     alunoSemAcesso: ContaDeTeste;
     analista: ContaDeTeste;
+    professor: ContaDeTeste;
     produtor: ContaDeTeste;
   };
   curso: {
@@ -18,7 +21,13 @@ export const ESCOLA_DE_TESTE: {
     modulos: { modulo1: string; modulo2: string };
     titulo: string;
   };
-  cursoBloqueado: { id: string; titulo: string };
+  cursoBloqueado: { aulas: { aula1: string }; id: string; modulos: { modulo1: string }; titulo: string };
+  cursoLiberacao: {
+    aulas: { futura: string; liberada: string; rascunho: string };
+    id: string;
+    modulos: { modulo1: string };
+    titulo: string;
+  };
 };
 
 export function usuarioDeTeste(conta: ContaDeTesteCriada): {
@@ -32,15 +41,19 @@ export function usuarioDeTeste(conta: ContaDeTesteCriada): {
 
 export function contasDeTeste(db: unknown): Promise<{
   aluna: ContaDeTesteCriada;
+  alunaAcessoExpirado: ContaDeTesteCriada;
   alunoSemAcesso: ContaDeTesteCriada;
   analista: ContaDeTesteCriada;
+  professor: ContaDeTesteCriada;
   produtor: ContaDeTesteCriada;
 }>;
 
 export function seedEscolaDeTeste(db: unknown): Promise<{
   aluna: ContaDeTesteCriada;
+  alunaAcessoExpirado: ContaDeTesteCriada;
   alunoSemAcesso: ContaDeTesteCriada;
   analista: ContaDeTesteCriada;
+  professor: ContaDeTesteCriada;
   produtor: ContaDeTesteCriada;
 }>;
 
