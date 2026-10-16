@@ -8,14 +8,16 @@ import "./resolve-extensionless-ts.mjs";
 // - "@/..." aponta para src/ (como o tsconfig);
 // - a sessao (src/server/auth/session.ts) vira integration-session.mjs, controlada por `actAs` ou
 //   `actAsSignedIn` (login real no Auth local, para o codigo que grava com a sessao do aluno);
-// - "server-only", "next/navigation" e "next/cache" viram dubles inofensivos (nao ha request do Next aqui;
-//   a invalidacao de cache fica anotada em integration-next-cache.mjs).
+// - "server-only", "next/navigation", "next/cache" e "next/headers" viram dubles inofensivos (nao ha
+//   request do Next aqui; a invalidacao de cache fica anotada em integration-next-cache.mjs e os
+//   cabecalhos sao os de um request local, em integration-next-headers.mjs).
 // Importe este modulo antes e carregue o codigo do app com import() dinamico.
 
 const sourceRoot = new URL("../../src/", import.meta.url);
 const sessionStubUrl = new URL("./integration-session.mjs", import.meta.url).href;
 const supabaseSessionStubUrl = new URL("./integration-supabase-session.mjs", import.meta.url).href;
 const nextCacheStubUrl = new URL("./integration-next-cache.mjs", import.meta.url).href;
+const nextHeadersStubUrl = new URL("./integration-next-headers.mjs", import.meta.url).href;
 
 export { actAs, actAsSignedIn, integrationSession } from "./integration-session.mjs";
 
@@ -54,6 +56,11 @@ registerHooks({
     // Invalidacao de cache do Next (revalidatePath etc.) so existe dentro de um request: vira anotacao.
     if (specifier === "next/cache") {
       return { shortCircuit: true, url: nextCacheStubUrl };
+    }
+
+    // Cabecalhos e cookies do request (next/headers) viram os de um request local.
+    if (specifier === "next/headers") {
+      return { shortCircuit: true, url: nextHeadersStubUrl };
     }
 
     if (Object.hasOwn(STUBS, specifier)) {
