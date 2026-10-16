@@ -21,3 +21,13 @@ setup("escola de teste pronta e aluna entra com e-mail e senha", async ({ page }
 
   await page.context().storageState({ path: "tests/e2e/.auth/aluna.json" });
 });
+
+setup("aluno sem acesso entra com e-mail e senha", async ({ page }) => {
+  await page.goto("/login");
+  await page.locator('input[type="email"]').fill(ESCOLA_DE_TESTE.contas.alunoSemAcesso.email);
+  await page.locator('input[type="password"]').fill(SENHA_DE_TESTE);
+  await page.getByRole("button", { exact: true, name: "Entrar" }).click();
+
+  await expect(page).toHaveURL("/");
+  await page.context().storageState({ path: "tests/e2e/.auth/aluno-sem-acesso.json" });
+});
