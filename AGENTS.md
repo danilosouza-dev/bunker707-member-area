@@ -29,6 +29,7 @@ Before making product, UX, architecture, or implementation decisions, read the r
 - `docs/13-padroes-engenharia.md`
 - `docs/16-auditoria-tecnica-2026-10-01.md`
 - `docs/17-admin-produtor-redesign.md` (proposta de reconstrucao da area do produtor; vale para qualquer trabalho em `/admin`)
+- `docs/18-padrao-de-testes.md` (padrao de testes, dados de teste e rotina: toda PR de funcionalidade ou correcao traz teste de comportamento)
 
 Update docs when decisions change.
 

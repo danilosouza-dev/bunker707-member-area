@@ -1,0 +1,420 @@
+# 18. Padrão de testes e rotina de qualidade
+
+Data: 16/10/2026. Etapa 1 de 3 (diagnóstico e padrão). Documento vivo: as etapas 2 e 3 só começam depois do ok do produtor nas decisões da seção 6.
+
+Este documento existe por causa de um erro simples que escapou: a mesma aula aparecia como **Concluída** quando o aluno entrava pelo módulo do curso e como **Concluir** quando entrava pelo card "Continue assistindo" da home. Nenhum dos 789 testes do repositório pegou isso, porque nenhum deles abre a tela ou grava no banco de verdade. A partir daqui, toda funcionalidade nova ou correção vem com um teste que prova o comportamento, e a rotina (template de PR, CI e documentação) cobra isso.
+
+Linguagem: o texto evita jargão. Os poucos termos técnicos necessários estão explicados no glossário da seção 8.
+
+---
+
+## Resumo em uma página
+
+**O que temos hoje.** 789 testes em 76 arquivos, rodando com `node --test` em cerca de 2 segundos. Cerca de dois terços chamam a função de verdade e conferem o resultado (bom). Cerca de um quarto só abre o arquivo do código e procura um trecho de texto, o que não prova que a tela funciona. Nenhum teste fala com um banco de dados real e nenhum abre o navegador. O CI roda `npm run verify` (lint, tipos, testes, build) em cerca de 2 minutos e meio. O GitHub **não bloqueia** merge com CI vermelho: o plano gratuito não permite proteção de branch em repositório privado (confirmado em 16/10: a API responde "Upgrade to GitHub Pro").
+
+**O que vamos fazer.** Três tipos de teste, cada um com lugar e comando próprios:
+
+| Tipo | O que prova | Onde fica | Comando |
+|---|---|---|---|
+| Unitário | uma regra, modelo ou ação do servidor, com dublês no lugar do banco | `tests/*.test.mjs` (como hoje) | `npm test` |
+| Integração | funções do servidor e rotas `/api` contra um **banco Supabase local**, com sessão simulada | `tests/integration/*.test.mjs` | `npm run test:integration` |
+| Ponta a ponta | o fluxo inteiro no navegador (Playwright), app rodando contra o banco local | `tests/e2e/*.spec.ts` | `npm run test:e2e` |
+
+`npm run verify` continua sendo o portão local (não muda). O CI ganha um segundo job que sobe o banco local, roda integração e ponta a ponta em toda PR para `dev` e `main`. Dados de teste: uma escola fictícia criada do zero a cada execução no Supabase local (Docker), nunca o projeto compartilhado de dev/produção. Uma trava impede rodar contra qualquer endereço que não seja `localhost`.
+
+**A rotina.** Toda PR de funcionalidade ou correção traz teste de comportamento do que mudou (correção traz um teste que falhava antes e passa depois). Sem teste, só com justificativa escrita na PR e pendência registrada no mapa de cobertura. Checklist no template de PR; regra em `CONTRIBUTING.md` e `docs/13`.
+
+**O que precisa de decisão do produtor** (detalhe na seção 6): 1) Playwright como ferramenta de navegador; 2) Supabase local via Docker para integração e ponta a ponta; 3) assinar GitHub Pro (cerca de US$ 4/mês) para o GitHub bloquear merge sem CI verde, ou seguir só com a regra operacional; 4) rodar ponta a ponta em toda PR (recomendado) ou só na promoção para `main`; 5) manter `node --test` para unitário e integração (sem trocar de ferramenta); 6) ordem da etapa 3 (progresso da aula primeiro).
+
+---
+
+## 1. Diagnóstico do que existe hoje
+
+### 1.1 Números
+
+Contagem feita por script em 16/10/2026 sobre `tests/*.test.mjs` (margem de erro de uns 5%, porque a classificação é automática):
+
+| Medida | Valor |
+|---|---|
+| Arquivos de teste | 76 |
+| Testes (`test(...)`) | 789 |
+| Testes de comportamento (chamam a função de verdade e conferem o resultado) | cerca de 530 (67%) |
+| Testes mistos (um pouco de cada) | 64 (8%) |
+| Testes que só conferem texto do código-fonte | cerca de 200 (25%) |
+| Afirmações (`assert`) no total | 5.934 |
+| Afirmações que conferem texto do código | cerca de 1.900 (um terço) |
+| Arquivos que não importam nada do código, só leem arquivos como texto | 16 |
+| Testes contra banco de dados real | 0 |
+| Testes no navegador | 0 |
+| Tempo do `npm test` | cerca de 2 s (789 testes, 16/10) |
+| Tempo do job Verify no CI (16/10, branch `dev`) | 2 min 16 s |
+| Hook de pre-commit (husky) | lint, typecheck e `npm test` |
+
+Como classificamos: "comportamento" é o teste que importa a função de `src/` (às vezes com um banco falso em memória, como `tests/support/admin-action-stubs.mjs`) e confere o que ela devolve. "Texto" é o teste que abre o `.tsx`, `.ts` ou `.sql` como string e procura um trecho com expressão regular (`assert.match(source, /.../)`).
+
+A auditoria de 01/10 (docs/16) apontava 91% de afirmações por texto em 210 testes. De lá para cá entraram cerca de 580 testes novos, a maioria de comportamento (admin v2: catálogo, alunos, equipe, comunidade). A proporção melhorou muito, mas o problema ficou concentrado justamente na **área do aluno**: home, página da aula, player, Modo TV, Tutor, comentários e menu.
+
+### 1.2 Por que teste de texto não prova nada
+
+Um teste que confere `assert.match(source, /isActiveLessonCompleted \? "Concluída" : "Concluir"/)` prova que **essa linha existe** no arquivo. Não prova que o botão mostra o texto certo para o aluno certo, nem que o estado vem do mesmo lugar nas duas telas. Ele tem dois defeitos que se somam:
+
+- **passa com o bug**: o erro do "Concluída/Concluir" convive com todos os 789 testes verdes;
+- **quebra sem bug**: qualquer reorganização inofensiva do código (mudar o nome de uma variável, extrair um componente) faz o teste falhar e obriga a editar o teste junto, o que acostuma todo mundo a "ajustar o teste até passar".
+
+Há um uso legítimo e pequeno para conferência de texto: **testes de guarda** de regras de arquitetura, por exemplo "nenhum componente do aluno importa o cliente com chave de serviço", "toda migração liga RLS", "nenhum número de fallback no admin". Esses continuam, com nome que diga o que são (`*.guard.test.mjs`), e nunca como único teste de um comportamento.
+
+### 1.3 Onde o texto domina
+
+Arquivos em que a maioria dos testes é conferência de texto, com o destino proposto na etapa 3:
+
+| Arquivo | Texto / total | O que vira |
+|---|---|---|
+| `home-card-hover-layout` | 24 / 26 | ponta a ponta da home (cards, fileiras, modal) + unitário do que for regra |
+| `lesson-player-layout` | 22 / 24 | ponta a ponta da aula + unitário dos modelos do player |
+| `lesson-tv-mode` | 20 / 21 | unitário do contrato da sessão de TV + integração das rotas `/api/tv` |
+| `ai-provider-pool` | 11 / 11 | unitário do pool de provedores com provedor falso |
+| `lesson-ai-tutor` | 8 / 15 | integração das rotas do Tutor com provedor falso |
+| `architecture-hardening` | 7 / 7 | guarda (mantém, renomeia para `.guard`) |
+| `deployment-security` | 6 / 9 | guarda (CSP, config do Supabase) |
+| `member-sidebar` | 6 / 12 | ponta a ponta do menu |
+| `platform-director-chat` | 6 / 6 | ponta a ponta do IA Diretor (abre, envia) |
+| `platform-guide` | 6 / 8 | integração das rotas do guia |
+| `lesson-comments` | 5 / 8 | integração do store e rotas + ponta a ponta de publicar |
+| `lesson-tutor-layout` | 5 / 5 | ponta a ponta do painel do Tutor |
+| `lesson-materials-api` | 4 / 7 | integração da rota de materiais |
+| `jobs-tick`, `lesson-release-date` | 4 / 12 cada | já têm comportamento; a parte de texto vira guarda ou sai |
+| `navigation-feedback` | 4 / 4 | ponta a ponta (barra de carregamento ao navegar) |
+| `ai-admin-reliability`, `internal-poster-row`, `home-section-editor` | 3 / 3 | unitário ou ponta a ponta conforme o caso |
+| `lesson-description` | 2 / 2 | ponta a ponta da aula (mesmo arquivo) |
+| `locked-card-badge`, `internal-trigger-security`, `member-row-sizing`, `course-progress`, `auth-session` | 1–2 | guarda ou integração |
+
+### 1.4 Onde já está bem
+
+O admin v2 nasceu com um padrão bom que vale copiar: modelos puros (`*-model.ts`, `mappers.ts`, `schemas.ts`) testados direto, e Server Actions carregadas no Node com sessão e banco trocados por dublês (`tests/support/admin-action-stubs.mjs`, com `createFakeDb`). Exemplos: `catalog-server` (30 testes), `admin-content-tree` (22), `community-queue` (23), `admin-catalog-actions` (14). Isso continua sendo o **unitário** do padrão.
+
+### 1.5 Buracos sem nenhum teste de comportamento
+
+Estes são os pontos em que hoje só existe texto ou nada, e por onde a etapa 3 começa:
+
+1. **Progresso da aula**: `PUT/POST /api/progress/lessons`, `replaceCompletedLessons` em `platform-store.ts` e a leitura desse estado nas três telas (módulo, "Continue assistindo", "Minha jornada"). É onde mora o bug que motivou este documento.
+2. **Regra de acesso à aula com banco**: `requireLessonAccess` / `requireLessonsAccess` (com e sem acesso, acesso expirado, liberação por data, conteúdo bloqueado, pessoa da equipe). Só as regras de data têm unitário.
+3. **O que o aluno vê**: `getHomePageData`, `getContentPageData`, `getLessonPageData`, `getMemberLibrary` (filtram pelo acesso do aluno; nenhum teste com banco).
+4. **Entrar e rota protegida**: login com senha de verdade, redirecionamento de página protegida para `/login` e volta, destino pós-login (equipe vai para `/admin`).
+5. **Comentários**: `comment-store.ts` (listar, criar, reagir, denunciar) e as rotas `/api/comments`.
+6. **Favoritos**: rota `/api/saved-items`.
+7. **Foto de perfil**: `PUT/DELETE /api/profile/avatar` com Storage (o bug do iPhone/iPad do #55 só é pego com WebKit no navegador).
+8. **Alunos no admin**: `src/server/students/access.ts` (criar conta, liberar, estender, revogar, importar), que também vai atender os webhooks de venda.
+9. **Equipe**: ações de convidar, trocar função, não remover a última pessoa dona, função protegida.
+10. **Gravação com versão em `platform_settings`** (`writePlatformSettingGuarded`, 409 quando outra tela gravou antes): invariante do docs/13 sem teste com banco.
+11. **Escritas atômicas do catálogo** (RPCs `202610110012`, `stale_structure` → 409): unitário com dublê existe; com banco, não.
+
+### 1.6 Processo
+
+- CI: um job `Verify` em push e PR para `dev` e `main`, rodando `npm run verify`. Nada de banco nem navegador.
+- Proteção de branch: indisponível no plano atual (GitHub Free, repositório privado). Hoje a regra "só entra com CI verde e ok no chat" é operacional.
+- Template de PR: a única linha de verificação é `npm run verify`. Não pergunta se há teste do comportamento.
+- `docs/13` já pede "teste de regressão que prove a invariante" para acesso, persistência e navegação, mas não diz de que tipo nem como. Na prática virou teste de texto.
+- Não existe `supabase/seed.sql` nem qualquer dado de teste; dev e produção usam o mesmo projeto Supabase (`hrtnqcznhdmodjikvddm`).
+
+---
+
+## 2. O padrão
+
+### 2.1 Os três tipos de teste
+
+| | Unitário | Integração | Ponta a ponta |
+|---|---|---|---|
+| **Pergunta que responde** | "Esta regra calcula certo?" | "Gravar e ler no banco dá o resultado certo, com as permissões certas?" | "O aluno (ou o produtor) consegue fazer isso na tela?" |
+| **O que usa** | só Node; banco e sessão são dublês | Supabase local (Postgres, Auth, Storage reais, em Docker); sessão simulada | navegador real (Chromium e WebKit) + app rodando + Supabase local; login de verdade |
+| **Onde fica** | `tests/*.test.mjs` (e `tests/*.guard.test.mjs` para guardas) | `tests/integration/*.test.mjs` | `tests/e2e/*.spec.ts` |
+| **Ferramenta** | `node --test` (como hoje) | `node --test` | Playwright |
+| **Velocidade** | milissegundos cada | segundos cada | 5 a 30 s cada |
+| **Quantos** | muitos | alguns por área | poucos: só os fluxos principais e as regressões |
+| **Comando** | `npm test` | `npm run test:integration` | `npm run test:e2e` |
+| **Roda no pre-commit?** | sim | não | não |
+| **Roda no CI?** | sim (job Verify) | sim (job E2E) | sim (job E2E) |
+
+### 2.2 Qual tipo usar (regra de bolso)
+
+1. Dá para chamar como função, sem banco? **Unitário.** Regras de liberação, cálculo de progresso, validação de comentário, mapeadores, schemas, modelos de tela, Server Actions com dublês.
+2. Lê ou grava no banco, depende de RLS, RPC, trigger ou Storage? **Integração.** `platform-store`, `lesson-access`, `students/access`, `team/actions`, `comment-store`, `settings-store`, rotas `/api` chamadas como função.
+3. O aluno ou o produtor vê e clica? **Ponta a ponta**, e só o caminho principal mais a regressão que motivou o bug. Variações e detalhes ficam no unitário ou na integração.
+4. Nunca teste de texto como único teste de um comportamento. Conferir texto só para regra de arquitetura, em arquivo `.guard.test.mjs`.
+5. Na dúvida entre integração e ponta a ponta: se o bug seria visível para o aluno numa tela, ponta a ponta; se é regra do servidor, integração.
+
+Uma correção (`fix`) sempre traz um teste que **falhava antes** da correção e passa depois. Quem revisa pergunta: "se o bug voltar, este teste fica vermelho?"
+
+### 2.3 Onde fica e como nomear
+
+```txt
+tests/
+  *.test.mjs                 unitários (os 76 de hoje ficam onde estão)
+  *.guard.test.mjs           guardas de arquitetura (conferência de texto, poucas)
+  integration/
+    *.test.mjs               contra o Supabase local
+  e2e/
+    *.spec.ts                Playwright
+    auth.setup.ts            faz login uma vez por persona e guarda a sessão
+  fixtures/
+    escola-de-teste.sql      dados da escola fictícia (produtos, módulos, aulas, acessos)
+    contas.ts                e-mails das contas de teste (domínio reservado .test)
+  support/
+    *.mjs                    ajudantes: dublês, carregador de TS, cliente do banco local
+playwright.config.ts
+```
+
+Os arquivos atuais não são movidos agora: mover 76 arquivos geraria conflito com as PRs em andamento. Novos unitários continuam na raiz de `tests/`.
+
+Nomes de arquivo: pelo comportamento ou tela, em português, com hífen. Ponta a ponta começa pela persona: `aluno-` ou `produtor-`.
+
+```txt
+tests/integration/progresso-aula.test.mjs
+tests/integration/acesso-aula.test.mjs
+tests/e2e/aluno-entra-e-abre-aula.spec.ts
+tests/e2e/aluno-conclui-aula.spec.ts
+tests/e2e/produtor-cria-produto.spec.ts
+```
+
+Título de cada teste: uma frase que diga o comportamento, para que a lista de falhas do CI se leia sozinha:
+
+```txt
+"aula concluída pelo módulo aparece concluída no card Continue assistindo"
+"aluno sem acesso recebe 403 ao gravar progresso"
+"analista recebe 403 em qualquer escrita do catálogo"
+```
+
+### 2.4 Como rodar
+
+Local:
+
+```bash
+npm test                    # unitários, sem nada instalado além do npm ci
+npm run db:start            # sobe o Supabase local (Docker), aplica migrações e a escola de teste
+npm run test:integration    # precisa do db:start
+npm run test:e2e            # precisa do db:start; o Playwright sobe o app sozinho (build + start na porta 3100)
+npm run test:e2e -- --ui    # modo visual para investigar
+npm run db:reset            # recria o banco local do zero
+npm run db:stop
+npm run verify              # portão local: lint, typecheck, unitários, build (inalterado)
+npm run verify:full         # verify + integração + ponta a ponta (o que o CI faz)
+```
+
+CI (`.github/workflows/ci.yml`), em toda PR e push para `dev` e `main`:
+
+- job **Verify** (como hoje): `npm run verify`, cerca de 2,5 min;
+- job **E2E** (novo, em paralelo): instala o Supabase CLI, `supabase start`, aplica migrações e a escola de teste, `next build`, `npm run test:integration`, `npm run test:e2e` em Chromium e WebKit; em falha, guarda traços, capturas de tela e vídeo como artefatos para baixar. Meta: menos de 8 min.
+
+Os dois precisam estar verdes para a PR entrar. Como o GitHub não bloqueia (seção 6, decisão 3), a regra fica no `CONTRIBUTING.md` e no template até a conta permitir proteção de branch.
+
+Pre-commit (husky) não muda: lint, typecheck e unitários. Integração e ponta a ponta ficam para o CI e para quem quiser rodar antes.
+
+### 2.5 Dados e sessão de teste sem tocar em dados reais
+
+**Problema.** Dev e produção usam o mesmo projeto Supabase. Nenhum teste automatizado pode escrever nele. Também não podem entrar nos testes dados reais de alunos.
+
+**Caminhos avaliados.**
+
+| Caminho | Como seria | Prós | Contras | Veredito |
+|---|---|---|---|---|
+| **Supabase local via CLI** | `npx supabase start` sobe Postgres, Auth, Storage e caixa de e-mail local em Docker; `supabase db reset` aplica as 37 migrações de `supabase/migrations` e os dados de teste | isolado de verdade; grátis; roda igual no Mac e no CI; de quebra prova que as migrações sobem do zero (hoje ninguém prova); e-mails de convite podem ser lidos na caixa local | precisa do Docker Desktop ligado no Mac (está instalado, mas desligado); primeira subida leva 1–2 min; versões das extensões (`pg_cron`, `pg_net`, `vault`) precisam bater com a nuvem | **Recomendado** para integração e ponta a ponta, local e CI |
+| Projeto Supabase separado na nuvem | um segundo projeto gratuito só para testes | não precisa de Docker | um banco só para todas as PRs ao mesmo tempo (testes se atropelam); acumula lixo; lento; mais um lugar para cuidar; o plano gratuito limita projetos e pausa os inativos | não para testes automáticos; faz sentido depois como **ambiente de dev separado da produção**, que é outra pendência |
+| Contas e escola de teste dentro do projeto compartilhado | criar "Aluno Teste" e "Curso Teste" no banco de produção | nenhuma instalação | escreve no banco dos alunos reais; risco de aparecer para aluno de verdade ou de apagar algo errado; e-mails reais disparados; nunca dá para resetar | **descartado** |
+| Supabase Branching | um banco por PR, criado pela própria Supabase | ideal em teoria | exige plano Pro da Supabase e integração com o GitHub | revisitar quando houver plano pago |
+
+**Escola de teste.** Um arquivo SQL (`tests/fixtures/escola-de-teste.sql`) cria uma escola fictícia pequena e previsível: 1 formação com 1 curso, 2 módulos e 3 aulas (vídeo do YouTube de placeholder), 1 aula com liberação futura, 1 produto bloqueado, materiais, 1 comentário. Contas (criadas pelo Auth local, com senha própria de teste): aluna com acesso, aluno sem acesso, produtor (dona), analista (só leitura), professor com alcance em um curso. E-mails em domínio reservado (`@bunker707.test`), que nunca entrega nada. Nenhum dado vem de pessoa real.
+
+**Sessão.**
+
+- Unitário: como hoje, `requireRole`/`getAuthenticatedUser` trocados por dublês pelo hook de `tests/support/admin-action-stubs.mjs`.
+- Integração: mesmo hook, mas só a **sessão** é dublê (devolve o id da conta de teste); o banco é o local, de verdade. Rotas `/api` são chamadas como função com um `Request` montado no teste.
+- Ponta a ponta: login real pela tela de entrar, uma vez por persona, com a sessão guardada e reaproveitada pelos testes (`storageState` do Playwright).
+
+**Travas de segurança.**
+
+- O cliente de banco dos testes de integração e o `webServer` do Playwright recebem as variáveis explicitamente (lidas de `npx supabase status`), nunca de `.env.local`. Se a URL não for `127.0.0.1`/`localhost`, o teste **recusa rodar** antes de qualquer consulta.
+- Nada de chave de produção em arquivo de teste. As chaves do Supabase local são as de demonstração do CLI e ficam em `.env.test.local` (ignorado pelo git), geradas pelo `npm run db:start`.
+- Serviços externos não são chamados: YouTube bloqueado por `page.route` (o espaço do player continua renderizando), Tutor IA com gateway falso em HTTP local, PostHog e Sentry desligados por variável, e-mail fica na caixa local.
+
+### 2.6 Ferramenta de ponta a ponta: Playwright
+
+Recomendação: **Playwright** (`@playwright/test`).
+
+- Grátis e sem serviço pago embutido; roda no Mac e no GitHub Actions com uma ação oficial.
+- Testa em **Chromium e WebKit** no mesmo comando. WebKit é o motor do Safari, do iPhone e do iPad, onde a foto de perfil quebrou (#55). Cypress só tem WebKit experimental.
+- Sobe o app sozinho (`webServer`), guarda login por persona (`storageState`), e tem o `request` para chamar rotas `/api` com a sessão real quando o teste de integração não bastar.
+- Em falha, gera traço navegável (cada passo com captura, rede e console), o que torna a investigação possível para quem não escreveu o teste.
+- Já era a ferramenta prevista em docs/17 §2.9.
+
+Alternativas: Cypress (mais pesado, WebKit experimental, painel pago), Testing Library com jsdom (testa componente isolado, não o fluxo; pode entrar depois para componentes do aluno se precisarmos, mas não resolve o problema de hoje).
+
+### 2.7 A rotina (regra válida a partir da etapa 2)
+
+1. Toda PR `feat` ou `fix` traz teste de comportamento do que mudou, no tipo certo pela regra de bolso (2.2).
+2. `fix` traz um teste que falhava antes e passa depois. O título do teste cita o sintoma.
+3. Mudou regra de acesso, progresso, gravação ou navegação: integração obrigatória (regra do docs/13, agora com forma definida).
+4. Tela ou fluxo novo do aluno ou do produtor: um ponta a ponta do caminho principal.
+5. PR sem teste só com "Sem teste porque ..." no corpo da PR e a pendência anotada no mapa (seção 3). Quem revisa decide se aceita.
+6. Teste de texto novo só em `.guard.test.mjs`, só para regra de arquitetura.
+7. Ao mexer em arquivo de teste de texto antigo, converte-se o que estiver ao alcance (regra do escoteiro: deixar o lugar melhor do que encontrou), além do plano da etapa 3.
+8. Verify e E2E verdes antes de pedir merge. Teste intermitente (passa e falha sem mudança) não se "reroda até passar": abre-se correção ou o teste é marcado como pendente com motivo.
+9. O mapa de cobertura (seção 3) é atualizado na PR que muda a situação de uma funcionalidade.
+
+Checklist proposto para `.github/pull_request_template.md` (entra na etapa 2):
+
+```markdown
+## Verificação
+
+- [ ] `npm run verify` verde
+- [ ] Job E2E do CI verde (integração + ponta a ponta)
+
+## Testes
+
+- [ ] Esta PR traz teste de comportamento do que mudou (unitário / integração / ponta a ponta)
+- [ ] Se é correção: o teste falhava antes e passa agora
+- [ ] Se mexe em acesso, progresso, gravação ou navegação: tem teste de integração
+- [ ] Sem teste? Explique aqui por quê e atualize o mapa em docs/18:
+```
+
+---
+
+## 3. Mapa de cobertura
+
+Legenda da coluna "Hoje": **C** = teste de comportamento, **T** = só texto do código, **—** = nada. As colunas Unit / Integ / E2E dizem o que existe hoje em cada tipo. "Falta" é o que entra no plano. Prioridade: **A** alta (etapas 2 e 3, primeiro bloco), **M** média, **B** baixa.
+
+### 3.1 Área do aluno
+
+| Funcionalidade | O que faz hoje | Unit | Integ | E2E | Falta | Prior. |
+|---|---|---|---|---|---|---|
+| Entrar | senha, Google, esqueci a senha, volta para a página pedida (`?next=`), visual publicado pelo admin | C (destino seguro, erro do link, configuração da tela) + T (tela) | — | — | entrar com senha e cair na home; senha errada mostra erro; rota protegida manda para `/login` e volta; equipe cai em `/admin` | A |
+| Home | hero/destaque, fileiras por acesso, "Continue assistindo", cards verticais, card bloqueado, modal de detalhes | C (destaque, vitrine, indisponíveis) + T (fileiras, cards, modal: 24 testes) | — | — | `getHomePageData` com banco: só o que tem acesso, fileira "Continue assistindo" só com aula começada e não terminada; home abre com hero, fileira e modal no navegador | A |
+| Continue assistindo (fileira e página) | aulas começadas e não terminadas, da mais recente | C (modelo da página) | — | — | mesma regra nos dois lugares com banco; **regressão: concluída no módulo = concluída no card** | A |
+| Curso, formação e módulos | página do produto, módulos, liberação por data, conteúdo bloqueado redireciona | C (regras de data; módulos/vitrine do lado do admin) | — | — | `getContentPageData` com banco; bloqueado redireciona; abrir curso → módulo → aula no navegador | A |
+| Aula com player | YouTube oficial em Full HD, legendas, playlist, descrição, atalhos | C (medidas do embed, detecção de vídeo, legendas, faixas) + T (layout: 22 testes) | — | — | abrir aula no navegador (player presente, playlist, trocar de aula); `getLessonPageData` com estados iniciais | A |
+| Concluir aula e progresso | botão Concluir/Concluída/Desmarcar, % no card, barra do módulo, Minha jornada | T (rota e componente) + C (1 cálculo de %) | — | — | PUT grava e lê igual; recusa sem acesso; limite de 500 ids; os três lugares leem o mesmo estado; concluir e desmarcar pelo módulo e pelo card, no navegador | **A** (bug aberto) |
+| Comentários | publicar, responder, reagir, denunciar, papel (Professor/Moderador), foto | C (validação e moderação de texto) + T (store, rotas, tela) | — | — | store e rotas com banco (só aula com acesso, criar, reagir, denunciar); publicar e ver aparecer com foto, no navegador | A |
+| Materiais (aba e página) | lista real por aula, filtro, bloqueio com motivo | C (recarregar) + T (rota) | — | — | rota só devolve de aula com acesso; aba mostra os materiais da escola de teste | M |
+| Tutor IA | pergunta sobre a aula, citações com tempo, contexto só da transcrição | C (citações, intenção de pular) + T (rotas, painel) | — | — | rotas com provedor falso (sessão, dono da conversa, contexto só da aula autorizada); enviar pergunta no navegador com gateway falso | M |
+| IA Diretor | orientação geral sobre a plataforma | C (referências) + T (chat) | — | — | abrir e enviar, no navegador | B |
+| Favoritos | salvar e ver em `/favoritos` | C (visão) | — | — | rota `/api/saved-items` com banco; favoritar e ver na página | M |
+| Perfil e foto | abas Dados/Acessos/Segurança, enviar e remover foto (WebP, JPEG no Safari) | C (recorte, formatos, cabeçalho) + T (rota) | — | — | PUT/DELETE com Storage local; enviar foto em **Chromium e WebKit** e ver no menu e no comentário | A |
+| Minhas compras | acessos com datas, expirados, vitalícios | C (visão) | — | — | com banco (expirado, vitalício); abre no navegador | M |
+| Minha jornada | números reais, continue de onde parou, progresso por produto | C (modelo) | — | — | números batem com o banco da escola de teste | M |
+| Suporte | canais configurados e perguntas frequentes | C | — | — | abre e mostra o canal configurado | B |
+| Alterar e redefinir senha | pelo perfil e pelo link de e-mail | C (erro do link) | — | — | alterar senha com Auth local | M |
+| Modo TV | controlar a aula em outra tela por QR code | T (20 de 21) | — | — | contrato da sessão (unitário), rotas `/api/tv` (integração) | B |
+| Menu lateral, cabeçalho, navegação | hambúrguer, itens por acesso, barra de carregamento | C (modelo do menu, formatação) + T | — | — | abrir menu e navegar, no navegador | M |
+
+### 3.2 Admin v2 (área do produtor)
+
+| Funcionalidade | O que faz hoje | Unit | Integ | E2E | Falta | Prior. |
+|---|---|---|---|---|---|---|
+| Entrar como equipe, proteção e permissões | papéis, permissões por ação, alcance por curso, analista só leitura | C (forte: papéis, permissões, alcance) | — | — | guards com banco (quem não é equipe volta para `/`; analista 403 em escrita); produtor entra e abre `/admin` | A |
+| Visão geral (Hoje) | números do período, atenção, por produto | C (modelo, período, busca) | — | — | consultas batem com SQL sobre a escola de teste; abre sem erro | M |
+| Produtos e conteúdo | lista, novo, árvore de módulos/aulas, painel de aula, detalhes, acesso e venda, alunos, desempenho, pacotes | C (forte: ações com dublês, árvore, formulários, imagens) | — | — | Server Actions com banco real (RPCs atômicas, 409 de estrutura antiga, exclusão lógica); criar produto com 2 módulos e 3 aulas e publicar; aparece na home da aluna | A |
+| Importação de playlist | YouTube → curso | C (parser, planejamento) | — | — | ação com YouTube falso | B |
+| Alunos | lista, segmentos, adicionar, importar CSV, perfil 360, liberar/estender/revogar, exportar | C (modelo, segmentos, CSV) | — | — | `students/access.ts` com Auth local (criar conta, liberar, estender, revogar, importar); adicionar aluno e liberar acesso em 3 cliques; o aluno consegue entrar | A |
+| Equipe e funções | funções prontas e personalizadas, permissões extras, alcance por curso | C (modelo, schemas) + T (10 mistos) | — | — | ações com banco (última pessoa dona não sai; função protegida; permissão vale na próxima requisição); convidar e trocar função | A |
+| Comunidade | fila de perguntas, moderação, denúncias, aulas com mais dúvidas, regras | C (forte: 34 testes de modelos e fila) | — | — | ações com banco (responder, aprovar, ocultar, denúncia); responder da fila e a aluna ver | M |
+| Comunicação | avisos, promoções, webinários (molduras; v1 é fase 5 do docs/17) | C (moldura) | — | — | só acesso/smoke até existir a v1 | B |
+| Área de membros | destaque (hero), tela de entrar, marca, módulos/vitrine | C (forte: modelos e ações com dublês) | — | — | `settings-store` com banco (gravação com versão → 409); publicar destaque e ver na home | A |
+| Configurações › IA | conexões, pool de provedores, consumo | C (modelo de consumo) + T (pool: 11) | — | — | pool com provedor falso (unitário); rotas | B |
+| Jobs (tick por minuto) | autenticação por token, registro das execuções | C (8) + T (4) | — | — | registro com banco | B |
+| Segurança do deploy | CSP, cabeçalhos, flags | T (guarda) | — | — | mantém como guarda | — |
+
+---
+
+## 4. Plano por etapas (cada item é uma PR para a `dev`)
+
+### Etapa 1 — Diagnóstico e padrão (esta PR)
+
+- Este documento, ligado em `README.md`, `CONTRIBUTING.md`, `docs/13` e `AGENTS.md`.
+- Pronto quando: o produtor leu e decidiu os itens da seção 6.
+
+### Etapa 2 — Base da rotina (3 PRs)
+
+**2a. Banco de teste e integração.** Supabase local configurado (`supabase/config.toml` já existe); `tests/fixtures/escola-de-teste.sql`; scripts `db:start`, `db:stop`, `db:reset`, `test:integration`; trava de URL local; cliente de banco de teste em `tests/support/`; **um teste de integração de verdade**: gravar progresso pelo `PUT /api/progress/lessons` e ler de volta pelo `getLessonPageData` e pela fileira da home. Job E2E no CI subindo o Supabase. Pronto quando: `npm run db:start && npm run test:integration` passa no Mac e no CI; as 37 migrações sobem do zero (se alguma não subir, a correção entra nesta PR ou vira pendência explícita).
+
+**2b. Navegador.** Playwright instalado (Chromium e WebKit), `playwright.config.ts` com `webServer` na porta 3100 e variáveis explícitas, `auth.setup.ts` com login por persona, bloqueio de YouTube/PostHog/Sentry; **um fluxo de verdade**: aluna entra com senha, cai na home, abre o curso, abre a aula e vê o player e a playlist. Artefatos de falha no CI. Pronto quando: `npm run test:e2e` verde no Mac e no CI, em menos de 8 min.
+
+**2c. Rotina escrita.** Template de PR com o checklist da seção 2.7; `CONTRIBUTING.md` e `docs/13` com a regra e os comandos; `verify:full`. Pronto quando: a próxima PR de qualquer pessoa já nasce com o checklist.
+
+### Etapa 3 — Cobertura por prioridade (PRs pequenas, nesta ordem)
+
+| # | PR | O que prova |
+|---|---|---|
+| 3a | Progresso da aula | integração: PUT grava/valida/recusa sem acesso; os três leitores (módulo, continue assistindo, minha jornada) devolvem o mesmo estado. Ponta a ponta: concluir pelo módulo → card da home mostra concluída → desmarcar pelo card → módulo mostra "Concluir". Entra **depois** da correção do bug que está em outra sessão, como teste de regressão dela (ou junto, se a correção ainda não tiver entrado) |
+| 3b | Acesso à aula | integração de `requireLessonAccess`: com acesso, sem acesso, expirado, liberação futura, bloqueado, equipe com e sem alcance |
+| 3c | O que o aluno vê | integração de `getHomePageData`, `getContentPageData`, `getMemberLibrary` com as duas contas (com e sem acesso); ponta a ponta do card bloqueado e do redirecionamento |
+| 3d | Comentários | integração do store e rotas; ponta a ponta publicar e responder (com foto) |
+| 3e | Perfil e foto | integração PUT/DELETE com Storage; ponta a ponta em Chromium e WebKit |
+| 3f | Favoritos, Minhas compras, Minha jornada, Materiais | integração das rotas e leitores; um smoke de navegador por página |
+| 3g | Admin: equipe e permissões | integração dos guards e das ações da Equipe; ponta a ponta do analista barrado |
+| 3h | Admin: produtos | integração das Server Actions com banco (RPCs, 409); ponta a ponta "criar produto com 2 módulos e 3 aulas e publicar; aparece na home da aluna" |
+| 3i | Admin: alunos | integração de `students/access.ts` com Auth local; ponta a ponta "adicionar aluno, liberar acesso, aluno entra" |
+| 3j | Admin: área de membros | integração do `settings-store` (409 de versão); ponta a ponta publicar destaque |
+| 3k–3n | Conversão dos testes de texto | um ou dois arquivos por PR, na ordem da tabela 1.3: `lesson-player-layout`, `home-card-hover-layout`, `lesson-tv-mode`, `lesson-ai-tutor`/`platform-guide`, `lesson-comments`, `member-sidebar`/`platform-director-chat`/`navigation-feedback`. O que for regra de arquitetura vira `.guard`; o que já estiver coberto por integração ou ponta a ponta é apagado |
+
+Cada PR da etapa 3 atualiza as tabelas da seção 3.
+
+### Riscos conhecidos
+
+- **Migrações do zero.** Nunca rodaram em banco vazio. `202610100001_jobs_cron.sql` cria `pg_cron`, `pg_net` e `vault` (existem no Supabase local); 12 migrações referenciam `auth.users` (existe no local). Se alguma quebrar, a 2a corrige e isso já é um ganho para a produção.
+- **Docker no Mac.** Instalado, mas desligado. Sem ele, integração e ponta a ponta só rodam no CI. É aceitável para começar.
+- **Tempo do CI.** O job E2E deve ficar abaixo de 8 min. Se passar, cortamos WebKit para só os fluxos que dependem dele (foto, player) e mantemos Chromium no resto.
+- **Testes intermitentes.** Player com vídeo externo e animações são as fontes clássicas. Mitigação: bloquear rede externa, esperar por estado e não por tempo, e a regra 8 da rotina.
+- **Versão do Node.** `package.json` pede Node 24; o CI usa 24.11; o Mac está no 26. Os scripts novos não podem depender de nada fora do 24.
+
+---
+
+## 5. Pronto quando (critério das três etapas)
+
+- O padrão existe aqui e está ligado em `CONTRIBUTING.md`, `docs/13`, `README.md` e `AGENTS.md`.
+- Qualquer pessoa, seguindo a seção 2.4, roda `npm test`, `npm run test:integration` e `npm run test:e2e` no próprio computador (com Docker) sem tocar no Supabase compartilhado.
+- O CI tem os jobs Verify e E2E em toda PR para `dev` e `main`; a regra "só entra verde" está escrita e, se a conta permitir, aplicada pelo GitHub.
+- O template de PR cobra teste de comportamento ou justificativa.
+- As tabelas da seção 3 mostram cada funcionalidade com teste de comportamento (C nas colunas certas) ou com a pendência escrita e justificada.
+- O bug do "Concluída/Concluir" tem um teste de ponta a ponta que ficaria vermelho se ele voltasse.
+
+---
+
+## 6. Decisões para o produtor
+
+| # | Decisão | Recomendação | Alternativa |
+|---|---|---|---|
+| 1 | Ferramenta de navegador | **Playwright** (2.6) | Cypress (mais pesado, WebKit experimental, painel pago) |
+| 2 | Banco de teste | **Supabase local em Docker**, no Mac e no CI (2.5). No Mac, exige abrir o Docker Desktop para rodar integração e ponta a ponta; unitários não precisam | só no CI (não roda local); projeto separado na nuvem só como futuro ambiente de dev |
+| 3 | Bloqueio de merge pelo GitHub | **assinar GitHub Pro** (cerca de US$ 4/mês por conta): habilita proteção de branch em repositório privado, e aí Verify e E2E viram obrigatórios de verdade | seguir com a regra operacional (como hoje), sabendo que um clique errado passa |
+| 4 | Quando rodar ponta a ponta | **em toda PR** para `dev` e `main` (é quando o erro é barato) | só na promoção para `main` (mais rápido, pega o erro tarde) |
+| 5 | Ferramenta de unitário e integração | **manter `node --test`** (zero dependência, 789 testes já nele) | migrar para Vitest (mais recursos, mas é churn sem ganho agora) |
+| 6 | Ordem da etapa 3 | **progresso da aula primeiro** (3a), depois acesso e o que o aluno vê, depois admin | admin primeiro |
+
+Com o ok nessas seis linhas, a etapa 2 começa pela PR 2a.
+
+---
+
+## 7. Relação com outros documentos
+
+- `docs/13-padroes-engenharia.md`: regra geral de verificação; passa a apontar para este documento para o "como".
+- `CONTRIBUTING.md`: fluxo de PR; ganha a seção de testes e o checklist na etapa 2c.
+- `docs/17-admin-produtor-redesign.md` §2.9: já previa Playwright e os fluxos "criar produto com 2 módulos e 3 aulas", "liberar acesso em 3 cliques" e "publicar → aparece na home". Este documento é a execução daquela previsão.
+- `docs/16-auditoria-tecnica-2026-10-01.md`: origem do diagnóstico "91% regex".
+- `docs/06-seguranca-operacao.md`: nenhum teste escreve em dado real; os dados de teste são fictícios.
+
+---
+
+## 8. Glossário
+
+- **Teste unitário**: testa uma peça pequena (uma função, uma regra) isolada do resto.
+- **Teste de integração**: testa peças juntas, aqui o código do servidor com o banco de verdade.
+- **Teste de ponta a ponta (e2e)**: abre o navegador e faz o que a pessoa faria, do login ao resultado na tela.
+- **Teste de guarda**: confere uma regra de organização do código (por exemplo, "esse arquivo não pode importar aquele"). Não prova comportamento.
+- **Dublê** (stub, fake): substituto controlado de uma peça de verdade, como um banco em memória que responde sempre igual.
+- **Fixture / escola de teste**: dados prontos e previsíveis usados pelos testes.
+- **Seed**: o ato de carregar esses dados num banco vazio.
+- **Supabase local**: cópia do Supabase rodando no seu computador via Docker, com banco, login, arquivos e caixa de e-mail próprios.
+- **Docker**: programa que roda serviços (como o banco) em caixas isoladas no computador.
+- **CI**: os robôs do GitHub que rodam os comandos a cada PR e mostram verde ou vermelho.
+- **Proteção de branch**: configuração do GitHub que impede o merge sem os checks verdes.
+- **Teste intermitente** (flaky): passa e falha sem ninguém mudar nada; sinal de teste mal escrito ou de dependência externa.
+- **Regressão**: erro que volta depois de já ter sido corrigido; teste de regressão é o que fica de guarda para ele não voltar.
+- **storageState**: arquivo em que o Playwright guarda a sessão depois do login para não precisar entrar de novo em cada teste.
