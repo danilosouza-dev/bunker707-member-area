@@ -221,7 +221,7 @@ test("telas do aluno passam o estado do servidor para o texto de liberação", (
   assert.match(lesson, /scheduleReleaseRefresh\(\);\s*return \(\) => window\.clearTimeout\(timer\);\s*\}, \[dueReleaseKey, router\]\);/);
   assert.doesNotMatch(lesson, /refreshedReleaseKeysRef/);
   assert.match(lesson, /if \(saved && status === "completed"\) \{\s*refreshAfterUnlockingLesson\(lessonId\);/);
-  assert.match(lesson, /if \(saved && willCompleteLesson\) \{\s*refreshAfterUnlockingLesson\(lessonId\);/);
+  assert.match(lesson, /if \(saved && toggle\.willComplete\) \{\s*refreshAfterUnlockingLesson\(lessonId\);/);
   assert.match(lesson, /\{releaseNotice\?\.shortLabel \?\? "Aula bloqueada"\}/);
   assert.match(lesson, /suppressHydrationWarning/);
   assert.match(overlay, /notice\.hint/);

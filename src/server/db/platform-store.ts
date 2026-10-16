@@ -72,6 +72,7 @@ import type {
   SavedItemTargetType
 } from "@/lib/platform-types";
 import { getCourseProgressFromModules } from "@/lib/course-progress";
+import { isLessonResumable, resolveLessonWatchStatus } from "@/lib/lesson-progress";
 
 type PlatformStudent = {
   /** Foto do perfil (profiles.avatar_url), so no menu do topo; ausente = iniciais. */
@@ -1735,8 +1736,12 @@ function getContinueWatchingFromProgress(
         return [];
       }
 
+      const completedLessonIds = new Set(Array.isArray(record.completedLessonIds) ? record.completedLessonIds : []);
+
       return Object.entries(normalizeLessonWatchStates(record.lessonWatchStates)).flatMap(([lessonId, watchState]) => {
-        if (watchState.status === "completed" || watchState.progressPercent <= 0 || watchState.progressPercent >= 100) {
+        // Aula concluida (completed_lesson_ids) nao e "em andamento", mesmo que o aluno a esteja revendo:
+        // a mesma regra da pagina /continue-assistindo (getMemberContinueWatching).
+        if (!isLessonResumable(lessonId, watchState, completedLessonIds)) {
           return [];
         }
 
@@ -3119,7 +3124,13 @@ async function replaceCompletedLessonsUnsafe({
       0,
       100
     ));
-    const nextStatus = status === "completed" ? "completed" : "in_progress";
+    // A lista de concluidas e a verdade (docs/02): heartbeat ou flush em aula concluida mantem
+    // "completed" e 100%, so avancando a posicao (progressSeconds) e lastWatchedAt. Desmarcar
+    // chega com completedLessonIds sem a aula e ai o status volta a "in_progress" de verdade.
+    const nextStatus = resolveLessonWatchStatus({
+      isInCompletedList: uniqueLessonIds.includes(lessonId),
+      requestedStatus: status
+    });
     const nextProgressPercent = nextStatus === "completed"
       ? 100
       : Math.min(safeProgressSeconds > 0 ? Math.max(safeProgressPercent, 1) : safeProgressPercent, 99);
