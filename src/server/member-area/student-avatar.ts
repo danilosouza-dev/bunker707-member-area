@@ -11,12 +11,17 @@ import { redactSecrets } from "@/lib/env-value";
 import { createSupabaseServerClient } from "@/server/auth/supabase";
 import { persistImageAsset } from "@/server/db/media-assets";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
-import { avatarObjectPathFromUrl, decodeAvatarDataUrl, describeAvatarImageProblem } from "./student-avatar-model";
+import { avatarObjectPathFromUrl, decodeAvatarDataUrl, describeAvatarImageProblem, isPublicAvatarUrl } from "./student-avatar-model";
 
+// Campo declarado (e nao "readonly" no parametro do construtor) para o Node carregar o arquivo nos
+// testes de integracao so tirando os tipos, sem transformar codigo (docs/18 §2.5).
 export class StudentAvatarError extends Error {
-  constructor(message: string, readonly status = 400) {
+  readonly status: number;
+
+  constructor(message: string, status = 400) {
     super(message);
     this.name = "StudentAvatarError";
+    this.status = status;
   }
 }
 
@@ -103,7 +108,7 @@ export async function saveStudentAvatar(userId: string, dataUrl: unknown): Promi
   // Extensao no bucket conforme o tipo do data URL (webp, jpg ou png).
   const avatarUrl = await persistImageAsset(dataUrl as string, `${AVATAR_STORAGE_FOLDER}/${userId}`);
 
-  if (!/^https:\/\//.test(avatarUrl)) {
+  if (!isPublicAvatarUrl(avatarUrl)) {
     throw new Error("Upload da foto nao devolveu um endereco publico.");
   }
 

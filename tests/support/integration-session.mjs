@@ -2,11 +2,33 @@
 // logado e quem o teste disser com `actAs`), mas as permissoes da equipe vem do banco local de verdade.
 // Fora daqui, nada do app e trocado: cliente do banco, regras de acesso e gravacoes sao as reais.
 
-export const integrationSession = (globalThis.__integrationSession ??= { user: null });
+export const integrationSession = (globalThis.__integrationSession ??= { supabase: null, user: null });
 
-/** Pessoa logada para as proximas chamadas (null = sem sessao). */
+/** Pessoa logada para as proximas chamadas (null = sem sessao). Sem cliente do aluno no banco. */
 export function actAs(user) {
   integrationSession.user = user;
+  integrationSession.supabase = null;
+}
+
+/**
+ * Entra de verdade no Auth local como a conta (e-mail e senha de teste) e deixa o cliente dessa sessao
+ * disponivel para o codigo do app que grava "com a sessao do aluno" (RLS valendo), como a foto do perfil.
+ */
+export async function actAsSignedIn(conta, senha) {
+  const { createClient } = await import("@supabase/supabase-js");
+  const { readLocalSupabaseConfig } = await import("./local-db.mjs");
+  const { anonKey, url } = readLocalSupabaseConfig();
+  const supabase = createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  const { data, error } = await supabase.auth.signInWithPassword({ email: conta.email, password: senha });
+
+  if (error || !data.user) {
+    throw new Error(`Nao foi possivel entrar como ${conta.email}: ${error?.message ?? "sem usuario"}`);
+  }
+
+  integrationSession.user = data.user;
+  integrationSession.supabase = supabase;
+
+  return data.user;
 }
 
 export async function getAuthenticatedUser() {

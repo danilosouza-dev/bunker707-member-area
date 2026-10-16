@@ -1,6 +1,7 @@
 // Regras puras da foto do perfil (sem "server-only", sem Supabase): o que o servidor aceita e qual
 // arquivo antigo pode ser apagado. Testado em tests/student-avatar.test.mjs.
 
+import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
 import {
   AVATAR_MAX_BYTES,
   AVATAR_MAX_DATA_URL_LENGTH,
@@ -41,6 +42,20 @@ export function decodeAvatarDataUrl(value: unknown): DecodedAvatar | null {
     return { bytes: Uint8Array.from(atob(payload), (character) => character.charCodeAt(0)), mimeType };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Endereco devolvido pelo Storage para a foto: https (producao) ou http na propria maquina (Supabase
+ * local dos testes), sempre dentro da pasta publica do bucket. Qualquer outra coisa nao vai para o perfil.
+ */
+export function isPublicAvatarUrl(value: string) {
+  try {
+    const url = new URL(value);
+
+    return isHttpsOrLoopbackUrl(url) && url.pathname.startsWith(PUBLIC_OBJECT_PATH);
+  } catch {
+    return false;
   }
 }
 

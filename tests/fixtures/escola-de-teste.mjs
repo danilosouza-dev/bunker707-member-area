@@ -429,6 +429,21 @@ export async function seedEscolaDeTeste(db) {
   return contas;
 }
 
+/** Tira a foto do perfil das contas informadas: limpa profiles.avatar_url e apaga os arquivos do bucket. */
+export async function limparFotoDoPerfil(db, userIds) {
+  unwrap(await db.from("profiles").update({ avatar_url: null }).in("id", userIds), "Limpando foto do perfil");
+  unwrap(await db.from("lesson_comments").update({ author_avatar_url: null }).in("author_id", userIds), "Limpando foto nos comentarios");
+
+  for (const userId of userIds) {
+    const { data } = await db.storage.from("content-assets").list(`avatars/${userId}`);
+    const paths = (data ?? []).map((object) => `avatars/${userId}/${object.name}`);
+
+    if (paths.length > 0) {
+      unwrap(await db.storage.from("content-assets").remove(paths), "Apagando fotos do bucket");
+    }
+  }
+}
+
 /** Apaga os comentarios (e, por cascata, reacoes e denuncias) escritos pelas contas informadas. */
 export async function limparComentarios(db, userIds) {
   unwrap(await db.from("lesson_comments").delete().in("author_id", userIds), "Limpando comentarios de teste");

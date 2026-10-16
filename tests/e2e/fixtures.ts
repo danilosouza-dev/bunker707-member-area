@@ -1,5 +1,5 @@
 import { test as base, expect } from "@playwright/test";
-import { contasDeTeste, limparComentarios, limparProgresso } from "../fixtures/escola-de-teste.mjs";
+import { contasDeTeste, limparComentarios, limparFotoDoPerfil, limparProgresso } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 
 // Base dos testes de ponta a ponta: o navegador so fala com a maquina. Qualquer pedido para fora
@@ -31,4 +31,11 @@ export async function zerarComentariosDeTeste() {
   const db = createLocalAdminClient();
   const contas = await contasDeTeste(db);
   await limparComentarios(db, Object.values(contas).map((conta) => conta.id));
+}
+
+/** Tira a foto do perfil das contas de aluno (perfil, comentarios e bucket). */
+export async function zerarFotoDosAlunos() {
+  const db = createLocalAdminClient();
+  const contas = await contasDeTeste(db);
+  await limparFotoDoPerfil(db, [contas.aluna.id, contas.alunoSemAcesso.id]);
 }

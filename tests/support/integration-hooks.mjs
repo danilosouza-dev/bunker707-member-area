@@ -6,14 +6,16 @@ import "./resolve-extensionless-ts.mjs";
 // Carrega o codigo do servidor (rotas /api, platform-store, regras de acesso) no Node, sem Next, mas
 // com o banco LOCAL de verdade (docs/18 §2.5). So tres coisas sao trocadas:
 // - "@/..." aponta para src/ (como o tsconfig);
-// - a sessao (src/server/auth/session.ts) vira integration-session.mjs, controlada por `actAs`;
+// - a sessao (src/server/auth/session.ts) vira integration-session.mjs, controlada por `actAs` ou
+//   `actAsSignedIn` (login real no Auth local, para o codigo que grava com a sessao do aluno);
 // - "server-only" e "next/navigation" viram dubles inofensivos (nao ha request do Next aqui).
 // Importe este modulo antes e carregue o codigo do app com import() dinamico.
 
 const sourceRoot = new URL("../../src/", import.meta.url);
 const sessionStubUrl = new URL("./integration-session.mjs", import.meta.url).href;
+const supabaseSessionStubUrl = new URL("./integration-supabase-session.mjs", import.meta.url).href;
 
-export { actAs, integrationSession } from "./integration-session.mjs";
+export { actAs, actAsSignedIn, integrationSession } from "./integration-session.mjs";
 
 function stubModule(source) {
   return { shortCircuit: true, url: `data:text/javascript,${encodeURIComponent(source)}` };
@@ -40,6 +42,11 @@ registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === "@/server/auth/session") {
       return { shortCircuit: true, url: sessionStubUrl };
+    }
+
+    // O cliente "com a sessao do aluno" (cookies do request no app) vem do login feito por actAsSignedIn.
+    if (specifier === "@/server/auth/supabase") {
+      return { shortCircuit: true, url: supabaseSessionStubUrl };
     }
 
     if (Object.hasOwn(STUBS, specifier)) {

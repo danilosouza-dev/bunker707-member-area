@@ -6,6 +6,7 @@
 // proprio aluno) e devolve recortes pequenos, ja com os textos prontos (datas no fuso de Sao Paulo).
 // Nada aqui inventa numero: sem dado, o campo fica vazio e a tela mostra o estado vazio.
 
+import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
 import {
   clampMemberPercent,
   formatMemberCount,
@@ -619,7 +620,8 @@ export function sanitizeProfileAvatarUrl(value: string | null | undefined) {
 
   try {
     const url = new URL(trimmed);
-    return url.protocol === "https:" && !url.username && !url.password ? url.href : null;
+    // https, ou http so na propria maquina (Supabase local dos testes); nunca com usuario e senha.
+    return isHttpsOrLoopbackUrl(url) && !url.username && !url.password ? url.href : null;
   } catch {
     return null;
   }
