@@ -8,6 +8,8 @@ import "./resolve-extensionless-ts.mjs";
 // - "@/..." aponta para src/ (como o tsconfig);
 // - a sessao (src/server/auth/session.ts) vira integration-session.mjs, controlada por `actAs` ou
 //   `actAsSignedIn` (login real no Auth local, para o codigo que grava com a sessao do aluno);
+// - o provedor de IA (src/server/ai/provider-adapter.ts) vira integration-ai-provider.mjs, um
+//   provedor falso controlado pelo teste (`provedorFalso`); o pool, os limites e o banco seguem reais;
 // - "server-only", "next/navigation", "next/cache" e "next/headers" viram dubles inofensivos (nao ha
 //   request do Next aqui; a invalidacao de cache fica anotada em integration-next-cache.mjs e os
 //   cabecalhos sao os de um request local, em integration-next-headers.mjs).
@@ -18,8 +20,10 @@ const sessionStubUrl = new URL("./integration-session.mjs", import.meta.url).hre
 const supabaseSessionStubUrl = new URL("./integration-supabase-session.mjs", import.meta.url).href;
 const nextCacheStubUrl = new URL("./integration-next-cache.mjs", import.meta.url).href;
 const nextHeadersStubUrl = new URL("./integration-next-headers.mjs", import.meta.url).href;
+const aiProviderStubUrl = new URL("./integration-ai-provider.mjs", import.meta.url).href;
 
 export { actAs, actAsSignedIn, integrationSession } from "./integration-session.mjs";
+export { provedorFalso } from "./integration-ai-provider.mjs";
 
 function stubModule(source) {
   return { shortCircuit: true, url: `data:text/javascript,${encodeURIComponent(source)}` };
@@ -51,6 +55,11 @@ registerHooks({
     // O cliente "com a sessao do aluno" (cookies do request no app) vem do login feito por actAsSignedIn.
     if (specifier === "@/server/auth/supabase") {
       return { shortCircuit: true, url: supabaseSessionStubUrl };
+    }
+
+    // A chamada HTTP ao provedor de IA vira o provedor falso; pool, limites e banco seguem de verdade.
+    if (specifier === "@/server/ai/provider-adapter") {
+      return { shortCircuit: true, url: aiProviderStubUrl };
     }
 
     // Invalidacao de cache do Next (revalidatePath etc.) so existe dentro de um request: vira anotacao.

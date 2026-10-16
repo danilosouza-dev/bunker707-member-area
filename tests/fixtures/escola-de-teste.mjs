@@ -538,6 +538,25 @@ export async function limparComentarios(db, userIds) {
   unwrap(await db.from("lesson_comments").delete().in("author_id", userIds), "Limpando comentarios de teste");
 }
 
+/** Apaga as conversas (e mensagens) do Tutor IA e da IA Diretor das contas informadas. */
+export async function limparConversasDeIa(db, userIds) {
+  unwrap(await db.from("ai_messages").delete().in("user_id", userIds), "Limpando mensagens de IA de teste");
+  unwrap(await db.from("ai_conversations").delete().in("user_id", userIds), "Limpando conversas de IA de teste");
+}
+
+/** Apaga a transcricao, os trechos e o perfil de IA de uma aula (o Tutor volta a ficar sem conteudo). */
+export async function limparTranscricaoDeTeste(db, lessonId) {
+  unwrap(await db.from("lesson_ai_profiles").delete().eq("lesson_id", lessonId), "Limpando perfil de IA da aula de teste");
+  unwrap(await db.from("content_chunks").delete().eq("lesson_id", lessonId), "Limpando trechos da aula de teste");
+  unwrap(await db.from("lesson_transcripts").delete().eq("lesson_id", lessonId), "Limpando transcricao da aula de teste");
+}
+
+/** Apaga toda configuracao de provedor de IA do banco local (politicas e conexoes). */
+export async function limparProvedoresDeIa(db) {
+  unwrap(await db.from("ai_provider_connections").delete().not("id", "is", null), "Limpando conexoes de IA de teste");
+  unwrap(await db.from("ai_provider_configs").delete().not("provider", "is", null), "Limpando politicas de IA de teste");
+}
+
 /** Apaga as sessoes de TV (e os eventos dessas sessoes) das contas informadas. */
 export async function limparSessoesDeTv(db, userIds) {
   unwrap(await db.from("student_events").delete().in("user_id", userIds).eq("entity_type", "tv_session"), "Limpando eventos de TV de teste");
