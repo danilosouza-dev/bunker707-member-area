@@ -30,6 +30,13 @@ export function usuarioDeTeste(conta: ContaDeTesteCriada): {
   user_metadata: Record<string, unknown>;
 };
 
+export function contasDeTeste(db: unknown): Promise<{
+  aluna: ContaDeTesteCriada;
+  alunoSemAcesso: ContaDeTesteCriada;
+  analista: ContaDeTesteCriada;
+  produtor: ContaDeTesteCriada;
+}>;
+
 export function seedEscolaDeTeste(db: unknown): Promise<{
   aluna: ContaDeTesteCriada;
   alunoSemAcesso: ContaDeTesteCriada;
