@@ -14,6 +14,8 @@ coverage/
 ._*
 tsconfig.tsbuildinfo
 .vercel/
+supabase/.temp/
+supabase/.branches/
 .turbo/
 .codex-backups/
 .data/
