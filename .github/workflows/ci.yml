@@ -5,10 +5,9 @@ on:
     branches:
       - main
       - dev
+  # Toda PR, qualquer que seja a base: as PRs empilhadas (uma aberta sobre a outra) tambem passam
+  # pelos dois jobs antes de chegar na dev.
   pull_request:
-    branches:
-      - main
-      - dev
 
 jobs:
   verify:
