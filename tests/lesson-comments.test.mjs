@@ -76,10 +76,15 @@ test("comentarios e respostas mostram a funcao de cada pessoa", async () => {
 test("caixa de escrever: cartao proprio, contador perto do limite, Ctrl/Cmd + Enter e motivo quando bloqueada", async () => {
   const source = await readFile(lessonExperiencePath, "utf8");
   const composer = await readFile(new URL("../src/components/lesson/lesson-comment-composer.tsx", import.meta.url), "utf8");
+  const lessonPage = await readFile(new URL("../src/app/conteudo/[id]/aulas/[moduleId]/page.tsx", import.meta.url), "utf8");
 
   assert.match(source, /<LessonCommentComposer[\s\S]*?inputRef=\{commentInputRef\}[\s\S]*?onSubmit=\{handleCommentSubmit\}/);
   assert.match(source, /disabledReason=\{isActiveLessonLocked \? "Comentários liberados junto com a aula" : undefined\}/);
   assert.match(composer, /id="lesson-comment"/);
+  // A caixa de escrever mostra a foto do aluno (a mesma do menu do topo) ou as iniciais
+  assert.match(composer, /<MemberAvatar className="max-sm:hidden" imageSrc=\{authorAvatarUrl\} name=\{authorName\} size="md" \/>/);
+  assert.match(source, /authorAvatarUrl=\{currentUserAvatarUrl\}/);
+  assert.match(lessonPage, /currentUserAvatarUrl=\{shellData\.student\.avatarUrl\}/);
   assert.match(composer, /maxLength=\{LESSON_COMMENT_MAX_LENGTH\}/);
   assert.match(composer, /export const LESSON_COMMENT_MAX_LENGTH = 2000;/);
   assert.match(composer, /const COUNTER_THRESHOLD = 1800;/);

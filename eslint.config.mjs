@@ -10,6 +10,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "coverage/**",
+    ".claude/**",
+    ".codex/**",
     ".codex-backups/**",
     ".gemini-scratch/**",
     "**/._*",

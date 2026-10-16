@@ -106,6 +106,7 @@ type LessonExperienceProps = {
   initialLessonWatchStates?: Record<string, LessonWatchState>;
   item: ContentItem;
   currentUserId: string;
+  currentUserAvatarUrl?: string | null;
   currentUserName: string;
   returnContent?: Pick<ContentItem, "id" | "title">;
   selectedModule: CourseModule;
@@ -1300,6 +1301,7 @@ export function LessonExperience({
   accessPreviewMode,
   allModules,
   currentUserId,
+  currentUserAvatarUrl,
   currentUserName,
   initialLessonId: requestedInitialLessonId,
   initialLessonReactions = {},
@@ -4563,6 +4565,7 @@ export function LessonExperience({
               role="tabpanel"
             >
               <LessonCommentComposer
+                authorAvatarUrl={currentUserAvatarUrl}
                 authorName={currentUserName}
                 disabledReason={isActiveLessonLocked ? "Comentários liberados junto com a aula" : undefined}
                 inputRef={commentInputRef}
