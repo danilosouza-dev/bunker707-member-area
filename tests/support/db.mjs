@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const envFile = `${root}.env.test.local`;
-const command = process.argv[2];
+export const envFilePath = envFile;
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const command = isMain ? process.argv[2] : null;
 const ci = process.argv.includes("--ci");
 // Servicos que os testes nao usam: fora no CI para subir mais rapido.
 const CI_EXCLUDED_SERVICES = "studio,imgproxy,logflare,vector,postgres-meta,edge-runtime";
@@ -71,24 +73,42 @@ function writeEnvFile() {
     throw new Error(`O endereco devolvido por \`supabase status\` nao e local: ${url}. Nada foi escrito.`);
   }
 
+  const testValues = {
+    ADMIN_DEMO_DATA: "off",
+    AUTH_SESSION_STRATEGY: "user",
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: anonKey,
+    NEXT_PUBLIC_SUPABASE_URL: url,
+    SUPABASE_SERVICE_ROLE_KEY: serviceKey,
+    YOUTUBE_UNOFFICIAL_STREAMS: "off"
+  };
   const lines = [
     "# Gerado por `npm run db:start` a partir de `supabase status`: Supabase LOCAL, so para testes.",
     "# Nao commitar (o .gitignore ja ignora). Nunca copie valores de .env.local para ca.",
-    `NEXT_PUBLIC_SUPABASE_URL=${url}`,
-    `NEXT_PUBLIC_SUPABASE_ANON_KEY=${anonKey}`,
-    `SUPABASE_SERVICE_ROLE_KEY=${serviceKey}`,
+    ...Object.entries(testValues).map(([key, value]) => `${key}=${value}`),
     values.DB_URL ? `SUPABASE_DB_URL=${values.DB_URL}` : null,
     values.MAILPIT_URL ?? values.INBUCKET_URL ? `SUPABASE_MAIL_URL=${values.MAILPIT_URL ?? values.INBUCKET_URL}` : null,
-    "AUTH_SESSION_STRATEGY=user",
-    "YOUTUBE_UNOFFICIAL_STREAMS=off",
-    "ADMIN_DEMO_DATA=off"
+    "# Todas as outras variaveis do .env.example ficam vazias de proposito: o app de teste nao fala com",
+    "# PostHog, Sentry, gateway de IA nem nada fora da maquina, mesmo que .env.local as tenha.",
+    ...exampleEnvKeys().filter((key) => !(key in testValues)).map((key) => `${key}=`)
   ].filter(Boolean);
 
   writeFileSync(envFile, `${lines.join("\n")}\n`);
   console.log(`Escrito ${envFile} apontando para ${url}.`);
 }
 
-function loadEnvFile() {
+/** Nomes das variaveis que o app conhece (inventario em .env.example). */
+function exampleEnvKeys() {
+  const example = readFileSync(`${root}.env.example`, "utf8");
+
+  return [...example.matchAll(/^([A-Z0-9_]+)=/gm)].map((match) => match[1]);
+}
+
+/**
+ * Carrega .env.test.local em process.env para os scripts e para o servidor de teste. Variavel ja
+ * exportada no terminal tem prioridade; as travas em local-db.mjs e no servidor de teste conferem o
+ * resultado antes de usar.
+ */
+export function loadEnvFile() {
   if (!existsSync(envFile)) {
     throw new Error("Nao achei .env.test.local. Rode `npm run db:start` primeiro.");
   }
@@ -144,6 +164,9 @@ switch (command) {
     break;
   case "stop":
     supabase(["stop"]);
+    break;
+  case null:
+    // Importado como modulo (loadEnvFile/envFilePath): nada a executar.
     break;
   default:
     console.error("Uso: node tests/support/db.mjs start|reset|seed|env|stop");
