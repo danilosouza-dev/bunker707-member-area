@@ -9,7 +9,7 @@ import { TeamFunctionsList } from "@/components/admin/v2/team/team-functions-lis
 import { TeamTabs } from "@/components/admin/v2/team/team-tabs";
 import { requirePageRole } from "@/server/auth/permissions";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
-import { listTeamFunctions, listTeamMembers } from "@/server/team/queries";
+import { TEAM_FUNCTIONS_MIGRATION, listTeamFunctions, listTeamMembers } from "@/server/team/queries";
 
 export const metadata: Metadata = {
   title: "Funções da equipe"
@@ -41,12 +41,14 @@ export default async function TeamFunctionsPage() {
     />
   );
 
+  // Sem a tabela admin_functions (loaded.ok, ready false), o aviso cita so a migracao dela; sem as
+  // migracoes da equipe inteira (loaded.ok false), o aviso geral.
   if (!loaded.ok || !ready) {
     return (
       <AdminPage className="gap-6">
         {header}
         <TeamTabs />
-        <PendingMigrationNotice />
+        <PendingMigrationNotice migration={loaded.ok ? TEAM_FUNCTIONS_MIGRATION : undefined} />
       </AdminPage>
     );
   }

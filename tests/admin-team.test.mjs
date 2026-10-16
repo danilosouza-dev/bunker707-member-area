@@ -346,6 +346,18 @@ test("Equipe: toda acao e toda tela sao so do dono; o banco protege o ultimo don
     assert.match(read(`src/app/admin/(v2)/configuracoes/equipe/${page}`), /requirePageRole\("settings\.team", "\/admin\/configuracoes"\)/, page);
   }
 
+  // Sem a tabela admin_functions, as tres telas de funcoes mostram o aviso (citando a migracao dela) em
+  // vez da lista ou do formulario; o aviso nao manda mais para o admin antigo, que nao existe.
+  assert.match(read("src/server/team/queries.ts"), /export const TEAM_FUNCTIONS_MIGRATION = "202610170001";/);
+
+  for (const page of ["funcoes/page.tsx", "funcoes/nova/page.tsx", "funcoes/[id]/page.tsx"]) {
+    const source = read(`src/app/admin/(v2)/configuracoes/equipe/${page}`);
+    assert.match(source, /loadUnlessPendingMigration\(/, `${page}: confere a migracao antes de mostrar`);
+    assert.match(source, /<PendingMigrationNotice migration=\{loaded\.ok \? TEAM_FUNCTIONS_MIGRATION : undefined\} \/>/, `${page}: aviso cita a migracao das funcoes`);
+  }
+
+  assert.doesNotMatch(read("src/components/admin/v2/pending-migration-notice.tsx"), /admin\/legado|admin antigo/, "nao existe mais admin antigo para onde mandar");
+
   const roles2 = read("supabase/migrations/202610160001_team_roles.sql");
   assert.match(roles2, /raise exception 'last_owner'/);
   assert.match(roles2, /perform pg_advisory_xact_lock\(hashtext\('public\.admin_roles:last_owner'\)\);/);
