@@ -28,6 +28,7 @@
     "ai-gateway:status": "docker compose -f services/bunker-ai-gateway/compose.yml ps",
     "ai-gateway:smoke": "node --env-file=.env.local scripts/smoke-ai-gateway.mjs",
     "verify": "npm run lint && npm run typecheck && npm test && npm run build",
+    "verify:full": "npm run verify && npm run test:integration && npm run test:e2e",
     "prepare": "husky"
   },
   "dependencies": {

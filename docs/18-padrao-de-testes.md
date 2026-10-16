@@ -1,6 +1,6 @@
 # 18. Padrão de testes e rotina de qualidade
 
-Data: 16/10/2026. Etapa 1 (diagnóstico e padrão) aprovada pelo produtor em 16/10, com ok nas seis decisões da seção 6. Etapa 2 em andamento: PR 2a (banco de teste local e primeiro teste de integração) e PR 2b (Playwright e primeiro fluxo no navegador) feitas; 2c vem em seguida. Documento vivo: cada PR das etapas 2 e 3 atualiza as seções 2.4, 3 e 4.
+Data: 16/10/2026. Etapa 1 (diagnóstico e padrão) aprovada pelo produtor em 16/10, com ok nas seis decisões da seção 6. Etapa 2 (base da rotina) feita nas PRs 2a (banco de teste local e primeiro teste de integração), 2b (Playwright e primeiro fluxo no navegador) e 2c (rotina escrita: template de PR, CONTRIBUTING, docs/13, `verify:full`). Etapa 3 (cobertura por prioridade) vem em seguida. Documento vivo: cada PR da etapa 3 atualiza as seções 2.4, 3 e 4.
 
 Este documento existe por causa de um erro simples que escapou: a mesma aula aparecia como **Concluída** quando o aluno entrava pelo módulo do curso e como **Concluir** quando entrava pelo card "Continue assistindo" da home. Nenhum dos 789 testes do repositório pegou isso, porque nenhum deles abre a tela ou grava no banco de verdade. A partir daqui, toda funcionalidade nova ou correção vem com um teste que prova o comportamento, e a rotina (template de PR, CI e documentação) cobra isso.
 
@@ -198,10 +198,10 @@ npm run test:e2e            # precisa do db:start; o Playwright builda e sobe o 
 npm run test:e2e -- --ui    # modo visual para investigar
 E2E_SKIP_BUILD=1 npm run test:e2e   # reaproveita o build anterior (iterar localmente)
 npm run verify              # portão local: lint, typecheck, unitários, build (inalterado)
-npm run verify:full         # (PR 2c) verify + integração + ponta a ponta (o que o CI faz)
+npm run verify:full         # verify + integração + ponta a ponta (o que o CI faz; precisa do db:start)
 ```
 
-O comando marcado com a PR ainda não existe; os outros já funcionam. Primeira vez: `npm run db:start` baixa o CLI do Supabase (via `npx`) e as imagens do Docker, o que leva alguns minutos; depois, uns 20 segundos. O Docker Desktop precisa estar aberto. O que `db:start` faz está em `tests/support/db.mjs`. Para os testes de ponta a ponta, uma vez por máquina: `npx playwright install chromium webkit` (baixa os dois navegadores). O `npm run test:e2e` builda o app (`next build`, 1 a 2 minutos) e o sobe na porta 3100 com as variáveis de `.env.test.local` (`tests/support/e2e-server.mjs`); com o app já no ar nessa porta, ele reaproveita.
+Primeira vez: `npm run db:start` baixa o CLI do Supabase (via `npx`) e as imagens do Docker, o que leva alguns minutos; depois, uns 20 segundos. O Docker Desktop precisa estar aberto. O que `db:start` faz está em `tests/support/db.mjs`. Para os testes de ponta a ponta, uma vez por máquina: `npx playwright install chromium webkit` (baixa os dois navegadores). O `npm run test:e2e` builda o app (`next build`, 1 a 2 minutos) e o sobe na porta 3100 com as variáveis de `.env.test.local` (`tests/support/e2e-server.mjs`); com o app já no ar nessa porta, ele reaproveita.
 
 CI (`.github/workflows/ci.yml`), em toda PR e push para `dev` e `main`:
 
@@ -264,7 +264,7 @@ Alternativas: Cypress (mais pesado, WebKit experimental, painel pago), Testing L
 8. Verify e E2E verdes antes de pedir merge. Teste intermitente (passa e falha sem mudança) não se "reroda até passar": abre-se correção ou o teste é marcado como pendente com motivo.
 9. O mapa de cobertura (seção 3) é atualizado na PR que muda a situação de uma funcionalidade.
 
-Checklist proposto para `.github/pull_request_template.md` (entra na etapa 2):
+Checklist em `.github/pull_request_template.md` (desde a PR 2c):
 
 ```markdown
 ## Verificação
@@ -341,7 +341,7 @@ Legenda da coluna "Hoje": **C** = teste de comportamento, **T** = só texto do c
 
 **2b. Navegador (feita).** Playwright instalado (Chromium e WebKit), `playwright.config.ts` com `webServer` na porta 3100 e variáveis de `.env.test.local`, `auth.setup.ts` com login da aluna e sessão guardada, `fixtures.ts` cortando qualquer pedido para fora; **o primeiro fluxo de verdade** (`tests/e2e/aluno-entra-e-abre-aula.spec.ts`, 3 testes × 2 navegadores): rota protegida manda para entrar e volta; senha errada avisa; aluna abre o curso pela home, o módulo e a aula com título, player, playlist e botão Concluir. Job de CI com navegadores e artefatos de falha. No Mac: 7 testes em cerca de 10 s depois do build.
 
-**2c. Rotina escrita.** Template de PR com o checklist da seção 2.7; `CONTRIBUTING.md` e `docs/13` com a regra e os comandos; `verify:full`. Pronto quando: a próxima PR de qualquer pessoa já nasce com o checklist.
+**2c. Rotina escrita (feita).** Template de PR com o checklist da seção 2.7; `CONTRIBUTING.md` (fluxo a partir da `dev`, seção Testes com os comandos) e `docs/13` com a regra; `npm run verify:full`. A próxima PR de qualquer pessoa já nasce com o checklist.
 
 ### Etapa 3 — Cobertura por prioridade (PRs pequenas, nesta ordem)
 
@@ -400,7 +400,7 @@ Com o ok nessas seis linhas, a etapa 2 começa pela PR 2a.
 ## 7. Relação com outros documentos
 
 - `docs/13-padroes-engenharia.md`: regra geral de verificação; passa a apontar para este documento para o "como".
-- `CONTRIBUTING.md`: fluxo de PR; ganha a seção de testes e o checklist na etapa 2c.
+- `CONTRIBUTING.md`: fluxo de PR, seção Testes com os comandos e a regra.
 - `docs/17-admin-produtor-redesign.md` §2.9: já previa Playwright e os fluxos "criar produto com 2 módulos e 3 aulas", "liberar acesso em 3 cliques" e "publicar → aparece na home". Este documento é a execução daquela previsão.
 - `docs/16-auditoria-tecnica-2026-10-01.md`: origem do diagnóstico "91% regex".
 - `docs/06-seguranca-operacao.md`: nenhum teste escreve em dado real; os dados de teste são fictícios.
