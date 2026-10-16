@@ -75,3 +75,20 @@ test("reagir ao comentario: abre o seletor, curte, e a reacao continua la depois
   await expect(page.getByText(COMENTARIO)).toBeVisible();
   await expect(page.getByRole("button", { name: `Curtir no comentario de ${autora}` }).first()).toHaveAttribute("aria-pressed", "true");
 });
+
+test("caixa de escrever: Cancelar resposta volta ao normal; Ctrl/Cmd + Enter publica", async ({ page }) => {
+  await page.goto(enderecoDaAula);
+  await expect(page.getByText(COMENTARIO)).toBeVisible();
+
+  await page.getByRole("button", { exact: true, name: "Responder" }).first().click();
+  await expect(page.getByText(/Respondendo a @\S+/)).toBeVisible();
+  await page.getByRole("button", { name: "Cancelar resposta" }).click();
+  await expect(page.getByText(/Respondendo a @\S+/)).toHaveCount(0);
+  await expect(page.locator("#lesson-comment")).toHaveValue("");
+
+  const ATALHO = "Publicado com o atalho do teclado.";
+  await page.locator("#lesson-comment").fill(ATALHO);
+  await agirEEsperar(page, () => page.locator("#lesson-comment").press("Control+Enter"), 201);
+  await expect(page.getByText(ATALHO)).toBeVisible();
+  await expect(page.locator("#lesson-comment")).toHaveValue("");
+});
