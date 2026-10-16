@@ -493,6 +493,16 @@ export async function seedEscolaDeTeste(db) {
   return contas;
 }
 
+/** Apaga os produtos criados por um teste (titulo comecando com o prefixo): modulos e aulas vao junto. */
+export async function apagarProdutosDeTeste(db, prefixoDoTitulo) {
+  unwrap(await db.from("content_items").delete().like("title", `${prefixoDoTitulo}%`), "Apagando produtos de teste");
+}
+
+/** Capa de um produto por arranjo do teste (um link https, que o app guarda como esta). */
+export async function definirCapaDoProduto(db, titulo, image = "https://exemplo.test/capas/produto-de-teste.webp") {
+  unwrap(await db.from("content_items").update({ image }).eq("title", titulo), "Definindo a capa do produto de teste");
+}
+
 /** Apaga uma conta criada por um teste (por e-mail), se existir: sai da equipe e some do Auth. */
 export async function apagarContaDeTeste(db, email) {
   const existing = await findAccountByEmail(db, email.toLowerCase());

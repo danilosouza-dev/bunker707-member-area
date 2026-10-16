@@ -1,13 +1,18 @@
-import { test as base, expect } from "@playwright/test";
-import { apagarContaDeTeste, contasDeTeste, limparComentarios, limparFotoDoPerfil, limparProgresso } from "../fixtures/escola-de-teste.mjs";
+import { test as base, expect, type BrowserContext } from "@playwright/test";
+import { apagarContaDeTeste, apagarProdutosDeTeste, contasDeTeste, definirCapaDoProduto, limparComentarios, limparFotoDoPerfil, limparProgresso } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 
 // Base dos testes de ponta a ponta: o navegador so fala com a maquina. Qualquer pedido para fora
 // (YouTube, PostHog, Sentry, fontes, CDNs) e cortado antes de sair. O player do YouTube continua
 // desenhado na pagina; so o video nao carrega, e nenhum teste depende dele.
+/** Corta qualquer pedido do navegador que nao seja para a propria maquina. */
+export async function bloquearRedeExterna(context: BrowserContext) {
+  await context.route(/^https?:\/\/(?!127\.0\.0\.1|localhost)/, (route) => route.abort("blockedbyclient"));
+}
+
 export const test = base.extend({
   context: async ({ context }, run) => {
-    await context.route(/^https?:\/\/(?!127\.0\.0\.1|localhost)/, (route) => route.abort("blockedbyclient"));
+    await bloquearRedeExterna(context);
     await run(context);
   }
 });
@@ -43,4 +48,17 @@ export async function zerarFotoDosAlunos() {
 /** Apaga uma conta criada por um teste de navegador (sai da equipe e some do Auth local). */
 export async function apagarConta(email: string) {
   await apagarContaDeTeste(createLocalAdminClient(), email);
+}
+
+/** Apaga os produtos criados por um teste de navegador (titulo com o prefixo), com modulos e aulas. */
+export async function apagarProdutos(prefixoDoTitulo: string) {
+  await apagarProdutosDeTeste(createLocalAdminClient(), prefixoDoTitulo);
+}
+
+/**
+ * Capa do produto por arranjo: enviar a capa pela tela exige recorte em WebP (o WebKit nao gera) e
+ * links externos sao cortados nos testes; a capa entra direto no banco, como um link https.
+ */
+export async function definirCapa(tituloDoProduto: string) {
+  await definirCapaDoProduto(createLocalAdminClient(), tituloDoProduto);
 }

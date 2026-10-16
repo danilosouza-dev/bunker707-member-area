@@ -17,6 +17,7 @@ test.describe("entrar", () => {
   test("pagina protegida sem sessao manda para a tela de entrar e volta para ela depois do login", async ({ page }) => {
     await page.goto(enderecoDaAula);
     await expect(page).toHaveURL(/\/login\?next=/);
+    await page.waitForLoadState("networkidle");
 
     await page.locator('input[type="email"]').fill(ESCOLA_DE_TESTE.contas.aluna.email);
     await page.locator('input[type="password"]').fill(SENHA_DE_TESTE);
@@ -28,6 +29,7 @@ test.describe("entrar", () => {
 
   test("senha errada mostra o aviso e continua na tela de entrar", async ({ page }) => {
     await page.goto("/login");
+    await page.waitForLoadState("networkidle");
     await page.locator('input[type="email"]').fill(ESCOLA_DE_TESTE.contas.aluna.email);
     await page.locator('input[type="password"]').fill("senha-errada");
     await page.getByRole("button", { exact: true, name: "Entrar" }).click();

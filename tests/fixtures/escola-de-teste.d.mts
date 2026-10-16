@@ -63,3 +63,5 @@ export function limparProgresso(db: unknown, userIds: string[]): Promise<void>;
 export function limparComentarios(db: unknown, userIds: string[]): Promise<void>;
 export function limparFotoDoPerfil(db: unknown, userIds: string[]): Promise<void>;
 export function apagarContaDeTeste(db: unknown, email: string): Promise<void>;
+export function apagarProdutosDeTeste(db: unknown, prefixoDoTitulo: string): Promise<void>;
+export function definirCapaDoProduto(db: unknown, titulo: string, image?: string): Promise<void>;
