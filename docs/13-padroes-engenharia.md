@@ -71,6 +71,8 @@ Alteracoes em acesso, persistencia ou navegacao devem incluir teste de regressao
 - Novas regras nao devem aumentar `lesson-experience.tsx` ou `platform-store.ts` quando puderem viver em modulo de dominio testavel (ex.: `src/server/students/`).
 - Refatoracoes desses arquivos devem ser incrementais e acompanhadas por testes de contrato para evitar regressao visual ou de persistencia.
 
+- Links para paginas por aluno (aula, progresso, perfil) usam o prefetch padrao do Next; nunca `<Link prefetch>` (prefetch cheio), que guarda a pagina por ate 5 min no navegador e mostra estado velho. O teste `tests/member-area-link-prefetch.test.mjs` guarda essa regra nos cards que levam a aula.
+
 ## Desenvolvimento em volume externo
 
 Em volumes ExFAT no macOS, arquivos AppleDouble e blocos de alocacao grandes podem tornar `node_modules`, `.next`, lint e compilacao desnecessariamente lentos.
