@@ -114,6 +114,7 @@ Invariantes:
 - a leitura do aluno filtra `lesson_progress`, `saved_items` e `entitlements` pela identidade autenticada (entitlements sao a unica fonte de acesso; as tabelas `students`/`student_courses` do admin antigo foram removidas em 14/10/2026);
 - modulos e aulas da area do aluno carregam somente registros publicados;
 - chamadas repetidas durante a mesma renderizacao sao memoizadas com `cache`, evitando a segunda leitura integral antes causada pelo shell e pela pagina;
+- paginas por aluno (aula com progresso, perfil) nunca sao abertas por `<Link prefetch>`: o prefetch cheio do Next 16 guarda a pagina inteira por ate 5 min no navegador e o clique mostra estado velho (bug da aula "Concluida" por um caminho e "Concluir" por outro, 16/10/2026); usa-se o prefetch padrao (auto), que so aquece a rota, e `router.refresh()` quando uma acao do cliente muda o que a pagina mostra;
 - favoritos e progresso usam `upsert`/`delete` direcionados; mutacoes do CMS gravam somente as tabelas afetadas;
 - exclusoes de aulas e modulos sao mutacoes administrativas autenticadas; a camada server-side limpa favoritos e referencias de progresso e os triggers do Supabase repetem essa garantia na mesma transacao da exclusao, enquanto eventos comportamentais historicos permanecem append-only;
 - nao existe mais sincronizacao que leia e regrave toda a base para salvar uma unica interacao;

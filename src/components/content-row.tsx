@@ -204,13 +204,14 @@ function CourseModuleHomeCard({
     );
   }
 
+  // Sem prefetch cheio: a pagina da aula e por aluno (progresso) e o Next guardaria uma copia dela por
+  // ate 5 min no navegador, mostrando conclusao velha ao clicar. O prefetch padrao so aquece a rota.
   return (
     <Link
       aria-label={`Abrir ${module.title}`}
       className={className}
       data-home-row-card
       href={href}
-      prefetch
     >
       {content}
     </Link>
