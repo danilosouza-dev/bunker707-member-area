@@ -1,5 +1,5 @@
 import { test as base, expect } from "@playwright/test";
-import { contasDeTeste, limparProgresso } from "../fixtures/escola-de-teste.mjs";
+import { contasDeTeste, limparComentarios, limparProgresso } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 
 // Base dos testes de ponta a ponta: o navegador so fala com a maquina. Qualquer pedido para fora
@@ -24,4 +24,11 @@ export async function zerarProgressoDosAlunos() {
   const db = createLocalAdminClient();
   const contas = await contasDeTeste(db);
   await limparProgresso(db, [contas.aluna.id, contas.alunoSemAcesso.id]);
+}
+
+/** Apaga os comentarios escritos por todas as contas de teste (alunos e equipe). */
+export async function zerarComentariosDeTeste() {
+  const db = createLocalAdminClient();
+  const contas = await contasDeTeste(db);
+  await limparComentarios(db, Object.values(contas).map((conta) => conta.id));
 }
