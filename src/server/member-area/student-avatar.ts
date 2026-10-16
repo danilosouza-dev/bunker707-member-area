@@ -1,9 +1,10 @@
 import "server-only";
 
 // Foto do perfil do aluno: grava a imagem recortada no bucket publico content-assets
-// (avatars/{id}/{hash}.webp, com a chave de servico, so no servidor) e o endereco na linha do proprio
-// aluno em profiles (com a sessao dele: a RLS so deixa cada pessoa mudar a propria linha). Ao trocar
-// ou remover, a foto antiga deste aluno e apagada do bucket. Comentarios novos passam a sair com a foto.
+// (avatars/{id}/{hash}.webp, .jpg ou .png, com a chave de servico, so no servidor) e o endereco na linha
+// do proprio aluno em profiles (com a sessao dele: a RLS so deixa cada pessoa mudar a propria linha). Ao
+// trocar ou remover, os comentarios do aluno passam a apontar para a foto nova e a antiga e apagada do
+// bucket.
 
 import { AVATAR_STORAGE_FOLDER } from "@/lib/avatar-image";
 import { redactSecrets } from "@/lib/env-value";
@@ -17,6 +18,10 @@ export class StudentAvatarError extends Error {
     super(message);
     this.name = "StudentAvatarError";
   }
+}
+
+function describeError(error: unknown) {
+  return redactSecrets(error instanceof Error ? error.message : String(error));
 }
 
 async function readCurrentAvatarUrl(userId: string) {
@@ -48,6 +53,24 @@ async function writeAvatarUrl(userId: string, avatarUrl: string | null) {
   }
 }
 
+/**
+ * Cada comentario guarda a foto do autor na publicacao (lesson_comments.author_avatar_url). Ao trocar
+ * ou remover, os comentarios deste aluno passam a apontar para a foto nova (ou nenhuma); senao ficariam
+ * com um endereco apagado do bucket. Chave de servico porque a RLS nao abre a tabela para o aluno, e
+ * so nas linhas deste autor. Falha aqui nao desfaz a troca: vai para o log.
+ */
+async function syncCommentAuthorAvatar(userId: string, avatarUrl: string | null) {
+  try {
+    const { error } = await getSupabaseAdminClient().from("lesson_comments").update({ author_avatar_url: avatarUrl }).eq("author_id", userId);
+
+    if (error) {
+      console.error("[perfil] foto nos comentarios", redactSecrets(error.message));
+    }
+  } catch (error) {
+    console.error("[perfil] foto nos comentarios", describeError(error));
+  }
+}
+
 async function removeOldAvatar(previousUrl: string | null, nextUrl: string | null, userId: string) {
   const objectPath = avatarObjectPathFromUrl(previousUrl, userId);
 
@@ -55,24 +78,29 @@ async function removeOldAvatar(previousUrl: string | null, nextUrl: string | nul
     return;
   }
 
+  // Limpeza e cortesia: a foto nova ja esta gravada, entao erro aqui so vai para o log.
   try {
-    await getSupabaseAdminClient().storage.from("content-assets").remove([objectPath]);
+    const { error } = await getSupabaseAdminClient().storage.from("content-assets").remove([objectPath]);
+
+    if (error) {
+      console.error("[perfil] limpeza da foto antiga", redactSecrets(error.message));
+    }
   } catch (error) {
-    // Limpeza e cortesia: a foto nova ja esta gravada.
-    console.error("[perfil] limpeza da foto antiga", redactSecrets(error instanceof Error ? error.message : String(error)));
+    console.error("[perfil] limpeza da foto antiga", describeError(error));
   }
 }
 
-/** Grava a foto recortada (data URL WebP quadrado) e devolve o endereco publico. */
+/** Grava a foto recortada (data URL quadrado em WebP, JPEG ou PNG) e devolve o endereco publico. */
 export async function saveStudentAvatar(userId: string, dataUrl: unknown): Promise<string> {
-  const bytes = decodeAvatarDataUrl(dataUrl);
-  const problem = describeAvatarImageProblem(bytes);
+  const image = decodeAvatarDataUrl(dataUrl);
+  const problem = describeAvatarImageProblem(image);
 
   if (problem) {
     throw new StudentAvatarError(problem);
   }
 
   const previousUrl = await readCurrentAvatarUrl(userId);
+  // Extensao no bucket conforme o tipo do data URL (webp, jpg ou png).
   const avatarUrl = await persistImageAsset(dataUrl as string, `${AVATAR_STORAGE_FOLDER}/${userId}`);
 
   if (!/^https:\/\//.test(avatarUrl)) {
@@ -80,15 +108,17 @@ export async function saveStudentAvatar(userId: string, dataUrl: unknown): Promi
   }
 
   await writeAvatarUrl(userId, avatarUrl);
+  await syncCommentAuthorAvatar(userId, avatarUrl);
   await removeOldAvatar(previousUrl, avatarUrl, userId);
 
   return avatarUrl;
 }
 
-/** Tira a foto do perfil (volta para as iniciais). */
+/** Tira a foto do perfil (volta para as iniciais, no Perfil, no menu e nos comentarios). */
 export async function removeStudentAvatar(userId: string): Promise<void> {
   const previousUrl = await readCurrentAvatarUrl(userId);
 
   await writeAvatarUrl(userId, null);
+  await syncCommentAuthorAvatar(userId, null);
   await removeOldAvatar(previousUrl, null, userId);
 }

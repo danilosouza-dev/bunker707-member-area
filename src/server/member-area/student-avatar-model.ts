@@ -1,42 +1,61 @@
 // Regras puras da foto do perfil (sem "server-only", sem Supabase): o que o servidor aceita e qual
 // arquivo antigo pode ser apagado. Testado em tests/student-avatar.test.mjs.
 
-import { AVATAR_MAX_BYTES, AVATAR_MAX_DATA_URL_LENGTH, AVATAR_MIN_SOURCE_SIZE, AVATAR_OUTPUT_SIZE, AVATAR_STORAGE_FOLDER } from "../../lib/avatar-image";
-import { readWebpDimensions } from "../catalog/webp";
+import {
+  AVATAR_MAX_BYTES,
+  AVATAR_MAX_DATA_URL_LENGTH,
+  AVATAR_MIN_SOURCE_SIZE,
+  AVATAR_OUTPUT_SIZE,
+  AVATAR_STORAGE_FOLDER,
+  avatarDataUrlType,
+  type AvatarMimeType
+} from "../../lib/avatar-image";
+import { readImageDimensions } from "./image-header";
 
-const WEBP_DATA_URL_PREFIX = "data:image/webp;base64,";
 const PUBLIC_OBJECT_PATH = "/storage/v1/object/public/content-assets/";
 
-/** Bytes de um data URL WebP; null quando nao e WebP em base64 ou passa do teto de texto. */
-export function decodeAvatarDataUrl(value: unknown): Uint8Array | null {
-  if (typeof value !== "string" || !value.startsWith(WEBP_DATA_URL_PREFIX) || value.length > AVATAR_MAX_DATA_URL_LENGTH) {
+export type DecodedAvatar = { bytes: Uint8Array; mimeType: AvatarMimeType };
+
+/**
+ * Bytes e tipo de um data URL base64 em WebP, JPEG ou PNG (o que cada navegador consegue gerar;
+ * ver AVATAR_FORMATS); null para outro formato ou acima do teto de texto.
+ */
+export function decodeAvatarDataUrl(value: unknown): DecodedAvatar | null {
+  if (typeof value !== "string" || value.length > AVATAR_MAX_DATA_URL_LENGTH) {
     return null;
   }
 
-  const payload = value.slice(WEBP_DATA_URL_PREFIX.length);
+  const mimeType = avatarDataUrlType(value);
+
+  if (!mimeType) {
+    return null;
+  }
+
+  const payload = value.slice(value.indexOf(",") + 1);
 
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(payload)) {
     return null;
   }
 
   try {
-    return Uint8Array.from(atob(payload), (character) => character.charCodeAt(0));
+    return { bytes: Uint8Array.from(atob(payload), (character) => character.charCodeAt(0)), mimeType };
   } catch {
     return null;
   }
 }
 
 /** Motivo para recusar a foto (frase para o aluno); null quando serve. */
-export function describeAvatarImageProblem(bytes: Uint8Array | null): string | null {
-  if (!bytes || bytes.length === 0) {
-    return "Envie a foto recortada em WebP. Escolha a imagem de novo.";
+export function describeAvatarImageProblem(image: DecodedAvatar | null): string | null {
+  if (!image || image.bytes.length === 0) {
+    return "Envie a foto recortada (WebP, JPG ou PNG). Escolha a imagem de novo.";
   }
 
-  if (bytes.length > AVATAR_MAX_BYTES) {
+  if (image.bytes.length > AVATAR_MAX_BYTES) {
     return "A foto ficou grande demais. Escolha outra imagem ou aumente o zoom.";
   }
 
-  const size = readWebpDimensions(bytes);
+  // Le o cabecalho do formato declarado: bytes de outro formato nao passam.
+  const size = readImageDimensions(image.bytes, image.mimeType);
 
   if (!size) {
     return "Não conseguimos ler esta foto. Escolha a imagem de novo.";
@@ -54,9 +73,9 @@ export function describeAvatarImageProblem(bytes: Uint8Array | null): string | n
 }
 
 /**
- * Caminho no bucket (avatars/{userId}/arquivo.webp) de uma foto enviada por este aluno, para apagar a
- * antiga quando ele troca ou remove. Qualquer outro endereco (outra pasta, outro aluno, link externo)
- * devolve null e nada e apagado.
+ * Caminho no bucket (avatars/{userId}/arquivo.webp, .jpg ou .png) de uma foto enviada por este aluno,
+ * para apagar a antiga quando ele troca ou remove. Qualquer outro endereco (outra pasta, outro aluno,
+ * link externo) devolve null e nada e apagado.
  */
 export function avatarObjectPathFromUrl(url: string | null | undefined, userId: string): string | null {
   if (!url || !userId) {
