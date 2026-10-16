@@ -429,6 +429,11 @@ export async function seedEscolaDeTeste(db) {
   return contas;
 }
 
+/** Apaga os comentarios (e, por cascata, reacoes e denuncias) escritos pelas contas informadas. */
+export async function limparComentarios(db, userIds) {
+  unwrap(await db.from("lesson_comments").delete().in("author_id", userIds), "Limpando comentarios de teste");
+}
+
 /** Apaga progresso, favoritos e atividade das contas informadas (os testes comecam do zero). */
 export async function limparProgresso(db, userIds) {
   for (const table of ["lesson_progress", "saved_items", "student_daily_activity"]) {
