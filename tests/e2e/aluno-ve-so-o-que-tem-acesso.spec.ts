@@ -34,6 +34,30 @@ test.describe("aluna com dois cursos comprados", () => {
     await expect(tituloDoModal).toBeHidden();
   });
 
+  test("detalhes do curso comprado: o modal lista as aulas do modulo e leva a aula", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+
+    // O botao de detalhes fica no card (aparece ao passar o mouse) e abre o modal sem sair da home.
+    const card = page.getByRole("link", { name: `Abrir ${curso.titulo}` });
+    await card.hover();
+    await card.getByRole("button", { name: `Ver detalhes de ${curso.titulo}` }).click();
+    await expect(page.getByRole("heading", { level: 2, name: curso.titulo })).toBeVisible();
+    await expect(page).toHaveURL("/");
+
+    // Cada modulo e um botao com o titulo e "Ver aulas"; abrir o modulo 1 lista so as aulas dele.
+    await page.getByRole("button").filter({ hasText: "Módulo 1: Fundamentos" }).filter({ hasText: "Ver aulas" }).click();
+    const aula1 = page.getByRole("link", { name: /Aula 1: O que é um agente/ });
+    await expect(aula1).toBeVisible();
+    await expect(page.getByRole("link", { name: /Aula 2: As peças de um agente/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Aula 3: Seu primeiro agente/ })).toHaveCount(0);
+
+    // A aula listada no modal abre a pagina da aula certa.
+    await aula1.click();
+    await expect(page).toHaveURL(`/conteudo/${curso.id}/aulas/${curso.modulos.modulo1}?lessonId=${curso.aulas.aula1}`);
+    await expect(page.getByRole("heading", { level: 1, name: "Aula 1: O que é um agente" })).toBeVisible();
+  });
+
   test("endereco da aula do curso a venda nao entrega a aula: volta para a home", async ({ page }) => {
     await page.goto(`/conteudo/${cursoBloqueado.id}/aulas/${cursoBloqueado.modulos.modulo1}`);
     await expect(page).toHaveURL("/");
