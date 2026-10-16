@@ -68,9 +68,10 @@ test("menu da conta: avatar abre o painel com o nome e os atalhos; Esc fecha; En
 });
 
 test("menu da conta: clicar no atalho com o mouse leva a pagina", async ({ browserName, page }) => {
-  // Safari (WebKit): o clique num link nao move o foco; o menu fecha no blur antes de o clique
-  // completar e a pagina nao muda. Bug do app, anotado no docs/18; quando for corrigido, tire esta marca.
-  test.fail(browserName === "webkit", "Safari: o menu da conta fecha no clique do item antes de navegar");
+  // Safari (WebKit no macOS e no iPhone): o clique num link nao move o foco; o menu fecha no blur
+  // antes de o clique completar e a pagina nao muda. No WebKit do Linux (a CI) o clique foca o link e
+  // navega. Bug do app, anotado no docs/18; quando for corrigido, tire esta marca.
+  test.fail(browserName === "webkit" && process.platform === "darwin", "Safari: o menu da conta fecha no clique do item antes de navegar");
   await page.goto("/");
   await page.waitForLoadState("networkidle");
 
