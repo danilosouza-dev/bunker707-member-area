@@ -1,5 +1,5 @@
 import { test as base, expect } from "@playwright/test";
-import { contasDeTeste, limparComentarios, limparFotoDoPerfil, limparProgresso } from "../fixtures/escola-de-teste.mjs";
+import { apagarContaDeTeste, contasDeTeste, limparComentarios, limparFotoDoPerfil, limparProgresso } from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 
 // Base dos testes de ponta a ponta: o navegador so fala com a maquina. Qualquer pedido para fora
@@ -38,4 +38,9 @@ export async function zerarFotoDosAlunos() {
   const db = createLocalAdminClient();
   const contas = await contasDeTeste(db);
   await limparFotoDoPerfil(db, [contas.aluna.id, contas.alunoSemAcesso.id]);
+}
+
+/** Apaga uma conta criada por um teste de navegador (sai da equipe e some do Auth local). */
+export async function apagarConta(email: string) {
+  await apagarContaDeTeste(createLocalAdminClient(), email);
 }
