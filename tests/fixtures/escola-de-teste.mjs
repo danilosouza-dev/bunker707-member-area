@@ -503,6 +503,11 @@ export async function definirCapaDoProduto(db, titulo, image = "https://exemplo.
   unwrap(await db.from("content_items").update({ image }).eq("title", titulo), "Definindo a capa do produto de teste");
 }
 
+/** Apaga configuracoes da area de membros gravadas por um teste (platform_settings), para a home e o login voltarem ao padrao. */
+export async function limparConfiguracoesDeTeste(db, keys) {
+  unwrap(await db.from("platform_settings").delete().in("key", keys), "Limpando configuracoes de teste");
+}
+
 /** Apaga uma conta criada por um teste (por e-mail), se existir: sai da equipe e some do Auth. */
 export async function apagarContaDeTeste(db, email) {
   const existing = await findAccountByEmail(db, email.toLowerCase());
