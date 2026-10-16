@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense, useState, type ReactNode } from "react";
+import { Suspense, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { fromAccessSnapshot, type AdminAccessSnapshot } from "@/server/auth/roles";
 import { AccountMenu, type AdminAccount } from "./account-menu";
 import { AdminTopbar } from "./admin-topbar";
 import { ADMIN_PERIOD_PARAM, type AdminFilterProduct } from "./filters";
@@ -24,7 +25,7 @@ import {
   ADMIN_HOME_HREF,
   ADMIN_SIDEBAR_COOKIE,
   STUDENT_AREA_HREF,
-  adminNavItems,
+  adminHomeHref,
   buildAdminNavHref,
   formatAdminNavCount,
   getActiveAdminNavChild,
@@ -32,7 +33,8 @@ import {
   normalizeAdminPath,
   type AdminNavCounts,
   type AdminNavId,
-  type AdminNavItem
+  type AdminNavItem,
+  visibleAdminNav
 } from "./nav";
 import { AdminToaster } from "./toast";
 import { adminTransition } from "./styles";
@@ -97,10 +99,14 @@ type SidebarContentsProps = {
   /** So na barra fixa do computador: recolhida mostra so os icones (o nome vai no title e para leitor de tela). */
   collapsed?: boolean;
   counts: AdminNavCounts;
+  /** Primeira tela da pessoa (a marca no topo leva para ela). */
+  homeHref: string;
   idPrefix: string;
   isGroupOpen: (item: AdminNavItem, sectionActive: boolean) => boolean;
   onNavigate?: () => void;
   onToggleGroup: (item: AdminNavItem, sectionActive: boolean) => void;
+  /** Areas que a pessoa enxerga (visibleAdminNav). */
+  navItems: readonly AdminNavItem[];
   pathname: string;
   periodParam: string | null;
 };
@@ -109,8 +115,10 @@ function SidebarContents({
   account,
   collapsed = false,
   counts,
+  homeHref,
   idPrefix,
   isGroupOpen,
+  navItems,
   onNavigate,
   onToggleGroup,
   pathname,
@@ -126,7 +134,7 @@ function SidebarContents({
           collapsed && "justify-center px-0"
         )}
         data-navigation-feedback="false"
-        href={buildAdminNavHref(ADMIN_HOME_HREF, periodParam)}
+        href={buildAdminNavHref(homeHref, periodParam)}
         onClick={onNavigate}
         title={collapsed ? "Bunker707 · Admin" : undefined}
       >
@@ -137,7 +145,7 @@ function SidebarContents({
 
       <nav aria-label="Áreas do admin" className={cn("min-h-0 flex-1 overflow-x-hidden overflow-y-auto", collapsed ? "p-2" : "p-3")}>
         <ul className="flex flex-col gap-0.5">
-          {adminNavItems.map((item) => {
+          {navItems.map((item) => {
             const Icon = navIcons[item.id];
             const sectionActive = isAdminNavSectionActive(path, item);
             const countLabel = formatAdminNavCount(counts[item.id]);
@@ -268,6 +276,8 @@ function Sidebar(props: Omit<SidebarContentsProps, "periodParam">) {
 }
 
 type AdminShellV2Props = {
+  /** Permissoes de quem esta logado: o menu e a busca mostram so o que a pessoa pode abrir. */
+  access: AdminAccessSnapshot;
   account: AdminAccount;
   children: ReactNode;
   /** Contadores do menu (pilula ao lado do rotulo): Hoje e Comunidade. Zero ou ausente nao aparece. */
@@ -279,8 +289,11 @@ type AdminShellV2Props = {
 };
 
 /** Moldura do Admin Bunker707: barra lateral, barra superior e area principal. */
-export function AdminShellV2({ account, children, counts = emptyCounts, initialCollapsed = false, products = [] }: AdminShellV2Props) {
+export function AdminShellV2({ access: accessSnapshot, account, children, counts = emptyCounts, initialCollapsed = false, products = [] }: AdminShellV2Props) {
   const pathname = usePathname() ?? ADMIN_HOME_HREF;
+  const access = useMemo(() => fromAccessSnapshot(accessSnapshot), [accessSnapshot]);
+  const navItems = useMemo(() => visibleAdminNav(access), [access]);
+  const homeHref = adminHomeHref(access);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(initialCollapsed);
 
@@ -301,7 +314,7 @@ export function AdminShellV2({ account, children, counts = emptyCounts, initialC
     setGroupOverrides((current) => ({ ...current, [item.id]: !(current[item.id] ?? sectionActive) }));
   }
 
-  const sharedProps = { account, counts, isGroupOpen, onToggleGroup: toggleGroup, pathname };
+  const sharedProps = { account, counts, homeHref, isGroupOpen, navItems, onToggleGroup: toggleGroup, pathname };
 
   return (
     <AdminTopbarTitleProvider>
@@ -353,6 +366,7 @@ export function AdminShellV2({ account, children, counts = emptyCounts, initialC
           )}
         >
           <AdminTopbar
+            access={access}
             drawerOpen={drawerOpen}
             onOpenDrawer={() => setDrawerOpen(true)}
             onToggleSidebar={toggleCollapsed}

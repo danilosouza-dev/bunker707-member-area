@@ -6,7 +6,8 @@
 // Ações e Telas principais (todas); com 1 letra, so telas e acoes do menu (o banco espera 2 letras). Com texto, a busca tambem oferece "Buscar “x” em alunos", que abre a
 // lista de Alunos ja filtrada.
 
-import { STUDENT_AREA_HREF, adminNavItems } from "./nav";
+import { canAny, type AdminAccess, type AdminAction } from "../../../server/auth/roles";
+import { STUDENT_AREA_HREF, adminNavItems, canSeeAdminArea, visibleAdminNav, type AdminNavItem } from "./nav";
 import { newStudentHref, studentSearchHref } from "./students/hrefs";
 
 export const ADMIN_SEARCH_MIN_LENGTH = 2;
@@ -90,13 +91,19 @@ export function formatAdminLessonMeta(productTitle: string | null | undefined, m
   return [productTitle?.trim(), moduleTitle?.trim()].filter(Boolean).join(" › ");
 }
 
-type StaticEntry = AdminSearchItem & { /** Aparece com o campo vazio. */ featured?: boolean; keywords?: string };
+type StaticEntry = AdminSearchItem & {
+  /** Aparece com o campo vazio. */
+  featured?: boolean;
+  keywords?: string;
+  /** Permissoes que mostram a acao (basta uma). */
+  requires?: readonly AdminAction[];
+};
 
 /** Telas: cada area do menu e cada subitem, todos com pagina de verdade. */
-function buildScreens(): StaticEntry[] {
+function buildScreens(items: readonly AdminNavItem[]): StaticEntry[] {
   const screens: StaticEntry[] = [];
 
-  for (const item of adminNavItems) {
+  for (const item of items) {
     screens.push({ featured: true, group: "screens", href: item.href, id: `tela:${item.href}`, title: item.label });
 
     for (const child of item.children ?? []) {
@@ -116,13 +123,22 @@ function buildScreens(): StaticEntry[] {
  * aparece em Telas (o "Novo pacote" fica dentro da propria tela).
  */
 const ACTIONS: readonly StaticEntry[] = [
-  { featured: true, group: "actions", href: "/admin/produtos/novo", id: "acao:novo-produto", keywords: "criar curso", title: "Novo produto" },
+  {
+    featured: true,
+    group: "actions",
+    href: "/admin/produtos/novo",
+    id: "acao:novo-produto",
+    keywords: "criar curso",
+    requires: ["catalog.create"],
+    title: "Novo produto"
+  },
   {
     featured: true,
     group: "actions",
     href: "/admin/produtos/importar",
     id: "acao:importar-playlist",
     keywords: "youtube importar curso",
+    requires: ["catalog.create"],
     title: "Importar playlist do YouTube"
   },
   {
@@ -131,15 +147,33 @@ const ACTIONS: readonly StaticEntry[] = [
     href: newStudentHref(),
     id: "acao:adicionar-aluno",
     keywords: "aluno liberar acesso",
+    requires: ["students.access"],
     title: "Adicionar aluno"
   },
   { group: "actions", href: STUDENT_AREA_HREF, id: "acao:area-do-aluno", keywords: "ver como aluno", title: "Ver área do aluno" }
 ];
 
-const SCREENS = buildScreens();
+const SCREENS = buildScreens(adminNavItems);
 
-export function listAdminStaticSearchItems(): AdminSearchItem[] {
-  return [...SCREENS, ...ACTIONS].map(stripStatic);
+/**
+ * Telas e acoes que a pessoa pode abrir. Sem `access` (testes de montagem), todas. O servidor confere
+ * cada tela de novo (requirePageArea); aqui so nao oferecemos o que ia dar em recusa.
+ */
+function staticEntriesFor(access: AdminAccess | null | undefined) {
+  if (access === undefined) {
+    return { actions: ACTIONS, screens: SCREENS };
+  }
+
+  return {
+    actions: ACTIONS.filter((entry) => !entry.requires || canAny(access, entry.requires)),
+    screens: buildScreens(visibleAdminNav(access))
+  };
+}
+
+export function listAdminStaticSearchItems(access?: AdminAccess | null): AdminSearchItem[] {
+  const entries = staticEntriesFor(access);
+
+  return [...entries.screens, ...entries.actions].map(stripStatic);
 }
 
 function stripStatic(entry: StaticEntry): AdminSearchItem {
@@ -155,12 +189,12 @@ function matches(entry: StaticEntry, query: string) {
 }
 
 /** Telas e acoes que combinam com o texto (vazio = as principais), na ordem do menu. */
-export function filterAdminStaticItems(query: string | null | undefined) {
+export function filterAdminStaticItems(query: string | null | undefined, access?: AdminAccess | null) {
   const normalized = normalizeAdminSearchText(query);
-  const pick = (entries: readonly StaticEntry[]) =>
-    entries.filter((entry) => (normalized ? matches(entry, normalized) : entry.featured)).map(stripStatic);
+  const entries = staticEntriesFor(access);
+  const pick = (list: readonly StaticEntry[]) => list.filter((entry) => (normalized ? matches(entry, normalized) : entry.featured)).map(stripStatic);
 
-  return { actions: pick(ACTIONS), screens: pick(SCREENS) };
+  return { actions: pick(entries.actions), screens: pick(entries.screens) };
 }
 
 function toItems(group: "products" | "modules" | "lessons", hits: readonly AdminSearchHit[]): AdminSearchItem[] {
@@ -173,12 +207,14 @@ function toItems(group: "products" | "modules" | "lessons", hits: readonly Admin
  */
 export function buildAdminSearchGroups(
   query: string | null | undefined,
-  results: AdminSearchResults = EMPTY_ADMIN_SEARCH_RESULTS
+  results: AdminSearchResults = EMPTY_ADMIN_SEARCH_RESULTS,
+  access?: AdminAccess | null
 ): AdminSearchGroup[] {
   const cleaned = cleanAdminSearchQuery(query);
   const searching = cleaned.length >= ADMIN_SEARCH_MIN_LENGTH;
-  const staticItems = filterAdminStaticItems(cleaned);
-  const actions = searching
+  const staticItems = filterAdminStaticItems(cleaned, access);
+  const canSearchStudents = access === undefined || canSeeAdminArea(access, "alunos");
+  const actions = searching && canSearchStudents
     ? [
         ...staticItems.actions,
         {

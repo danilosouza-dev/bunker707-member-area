@@ -5,7 +5,7 @@ import { useEffect, type FormEvent, type KeyboardEvent, type RefObject } from "r
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 
 // Caixa de escrever comentario da aula (docs/12 "Comentarios da aula"): cartao proprio, diferente dos
-// comentarios publicados, com avatar do aluno, campo que cresce, faixa "Respondendo a @usuario",
+// comentarios publicados, com a foto do aluno (ou as iniciais), campo que cresce, faixa "Respondendo a @usuario",
 // contador perto do limite e Ctrl/⌘ + Enter para publicar. Aula bloqueada: campo desabilitado com o
 // motivo. O envio continua em lesson-experience.tsx (handleCommentSubmit).
 
@@ -19,6 +19,7 @@ export type LessonCommentReplyTarget = {
 };
 
 export function LessonCommentComposer({
+  authorAvatarUrl,
   authorName,
   disabledReason,
   inputRef,
@@ -29,6 +30,8 @@ export function LessonCommentComposer({
   submitting,
   value
 }: {
+  /** Foto do aluno (a mesma do menu do topo); sem ela, as iniciais. */
+  authorAvatarUrl?: string | null;
   authorName: string;
   /** Aula ainda bloqueada: o campo fica desabilitado com este motivo. */
   disabledReason?: string;
@@ -95,7 +98,7 @@ export function LessonCommentComposer({
       ) : null}
 
       <div className="flex gap-3 px-3 pb-2 pt-3 sm:px-4 sm:pt-4">
-        <MemberAvatar className="max-sm:hidden" name={authorName} size="md" />
+        <MemberAvatar className="max-sm:hidden" imageSrc={authorAvatarUrl} name={authorName} size="md" />
         <div className="min-w-0 flex-1">
           <label className="sr-only" htmlFor="lesson-comment">
             {replyTarget ? "Escrever resposta" : "Escrever comentário"}

@@ -62,6 +62,14 @@ export function ProductHeaderBar() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const skipCommit = useRef(false);
   const base = `/admin/produtos/${header.id}`;
+  // Abas conforme as permissoes (o Professor fica so com Conteudo, e entao a barra de abas some).
+  const tabs = [
+    { href: base, label: header.format === "formacao" ? "Cursos" : "Conteúdo" },
+    ...(capabilities.canSeeDetails ? [{ href: `${base}/detalhes`, label: "Detalhes" }] : []),
+    ...(capabilities.canSeeAccess ? [{ href: `${base}/acesso`, label: "Acesso e venda" }] : []),
+    ...(capabilities.canSeeStudents ? [{ href: `${base}/alunos`, label: "Alunos" }] : []),
+    ...(capabilities.canSeePerformance ? [{ href: `${base}/desempenho`, label: "Desempenho" }] : [])
+  ];
 
   // No celular a barra superior mostra o nome do produto no lugar do nome da area.
   useAdminTopbarTitle(header.title);
@@ -343,17 +351,7 @@ export function ProductHeaderBar() {
           </div>
         </div>
 
-        <SectionTabs
-          ariaLabel="Seções do produto"
-          items={[
-            { href: base, label: header.format === "formacao" ? "Cursos" : "Conteúdo" },
-            { href: `${base}/detalhes`, label: "Detalhes" },
-            { href: `${base}/acesso`, label: "Acesso e venda" },
-            { href: `${base}/alunos`, label: "Alunos" },
-            { href: `${base}/desempenho`, label: "Desempenho" }
-          ]}
-          preserveParams={PRESERVED_TAB_PARAMS}
-        />
+        {tabs.length > 1 ? <SectionTabs ariaLabel="Seções do produto" items={tabs} preserveParams={PRESERVED_TAB_PARAMS} /> : null}
       </div>
 
       {headerError ? (

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -58,12 +59,22 @@ import {
   type YouTubeManualPlayerController
 } from "@/components/youtube-manual-stream-player";
 import { withAccessPreviewParam } from "@/lib/access-preview";
+import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import {
   EMPTY_LESSON_MATERIAL_LEARNER_STATE,
   mergeSavedLessonMaterialLearnerState,
   type LessonMaterialLearnerState
 } from "@/lib/lesson-materials";
 import { shouldBlockLessonPageKeyboardShortcut } from "@/lib/lesson-page-deterrence";
+import {
+  buildCompletionToggle,
+  buildWatchProgressState,
+  getCompletedLessonIdsFromModules,
+  reconcileCompletedLessonIds,
+  withLessonCompletion,
+  withLessonWatchState,
+  type LessonProgressSnapshot
+} from "@/lib/lesson-progress";
 import { findActiveCaptionCue } from "@/lib/media-captions";
 import {
   consumePendingTutorSeek,
@@ -104,6 +115,7 @@ type LessonExperienceProps = {
   initialLessonWatchStates?: Record<string, LessonWatchState>;
   item: ContentItem;
   currentUserId: string;
+  currentUserAvatarUrl?: string | null;
   currentUserName: string;
   returnContent?: Pick<ContentItem, "id" | "title">;
   selectedModule: CourseModule;
@@ -185,6 +197,10 @@ const LESSON_PROGRESS_HEARTBEAT_MS = 15_000;
 // sintético avança na mesma batida, somando o intervalo em segundos.
 const LESSON_PROGRESS_HEARTBEAT_SECONDS = LESSON_PROGRESS_HEARTBEAT_MS / 1000;
 const LESSON_PROGRESS_ENDPOINT = "/api/progress/lessons";
+// Aviso curto abaixo do botao Concluir quando a gravacao falha (rede, sessao, conflito): o estado
+// otimista volta ao que era e o aluno tenta de novo. Some sozinho depois de alguns segundos.
+const LESSON_PROGRESS_SAVE_ERROR = "Não foi possível salvar. Tente de novo.";
+const LESSON_PROGRESS_SAVE_ERROR_MS = 8_000;
 
 // "beacon": a página está sendo ocultada ou descarregada e um fetch comum pode
 // ser cancelado pelo navegador antes de chegar ao servidor.
@@ -478,14 +494,6 @@ const lessonReactionOptions = [
   selectedIconClassName: string;
 }>;
 
-function getInitialCompletedLessonIds(modules: CourseModule[]) {
-  return modules.flatMap((courseModule) => (
-    courseModule.lessons
-      .filter((lesson) => lesson.completed)
-      .map((lesson) => lesson.id)
-  ));
-}
-
 // Aba Materiais: o que o servidor ja tem gravado de cada aula (avaliou? quanto assistiu?). Comeca com o
 // que veio na pagina e so muda depois que o PUT do progresso da certo (applySavedProgressToLearnerStates).
 function getInitialMaterialLearnerStates(
@@ -493,7 +501,7 @@ function getInitialMaterialLearnerStates(
   reactions: Partial<Record<string, LessonReaction>>,
   watchStates: Record<string, LessonWatchState>
 ) {
-  const completedLessonIds = new Set(getInitialCompletedLessonIds(modules));
+  const completedLessonIds = new Set(getCompletedLessonIdsFromModules(modules));
   const lessonIds = new Set([...completedLessonIds, ...Object.keys(reactions), ...Object.keys(watchStates)]);
   const states: Record<string, LessonMaterialLearnerState> = {};
 
@@ -1055,15 +1063,23 @@ function CommentAvatar({
   const statusInnerSizeClassName = size === "lg" ? "h-2 w-2" : "h-1.5 w-1.5";
   const labelClassName = avatar.labelClassName ?? (size === "lg" ? "text-base" : "text-sm");
   const isOnline = avatar.online === true;
+  // Foto que nao carrega (endereco antigo, apagado do bucket, ou link quebrado) volta para as iniciais
+  // em vez de um circulo vazio. Guarda o endereco que falhou: se o comentario receber outro, tenta de novo.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const imageSrc = avatar.imageSrc && avatar.imageSrc !== failedSrc ? avatar.imageSrc : null;
 
   return (
     <span className={`relative shrink-0 ${sizeClassName}`}>
-      <span className={`grid h-full w-full place-items-center overflow-hidden rounded-full ${avatar.backgroundClassName} font-black text-white shadow-lg shadow-black/25`}>
-        {avatar.imageSrc ? (
-          <span
-            aria-hidden="true"
-            className="h-full w-full bg-cover bg-center"
-            style={{ backgroundImage: `url(${avatar.imageSrc})` }}
+      <span className={`relative grid h-full w-full place-items-center overflow-hidden rounded-full ${avatar.backgroundClassName} font-black text-white shadow-lg shadow-black/25`}>
+        {imageSrc ? (
+          <Image
+            alt=""
+            className="object-cover"
+            fill
+            onError={() => setFailedSrc(imageSrc)}
+            sizes="48px"
+            src={imageSrc}
+            unoptimized={!canOptimizeImageSrc(imageSrc)}
           />
         ) : (
           <span className={`leading-none ${labelClassName}`}>{avatar.label}</span>
@@ -1290,6 +1306,7 @@ export function LessonExperience({
   accessPreviewMode,
   allModules,
   currentUserId,
+  currentUserAvatarUrl,
   currentUserName,
   initialLessonId: requestedInitialLessonId,
   initialLessonReactions = {},
@@ -1300,8 +1317,11 @@ export function LessonExperience({
 }: LessonExperienceProps) {
   const router = useNavigationFeedbackRouter();
   const { startNavigation } = useNavigationFeedback();
+  // Conclusao segundo o servidor nesta renderizacao; muda com router.refresh ou nova navegacao para a
+  // mesma tela, e ai o estado local e ressincronizado (efeito abaixo).
+  const serverCompletedLessonIds = useMemo(() => getCompletedLessonIdsFromModules(allModules), [allModules]);
   const [completedLessonIds, setCompletedLessonIds] = useState<Set<string>>(
-    () => new Set(getInitialCompletedLessonIds(allModules))
+    () => new Set(serverCompletedLessonIds)
   );
   const allLessonIds = useMemo(() => (
     new Set(allModules.flatMap((courseModule) => (
@@ -1338,6 +1358,7 @@ export function LessonExperience({
   const [commentsLessonId, setCommentsLessonId] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [commentError, setCommentError] = useState("");
+  const [progressSaveError, setProgressSaveError] = useState("");
   const [lessonReactions, setLessonReactions] = useState<Partial<Record<string, LessonReaction>>>(initialLessonReactions);
   const [lessonWatchStates, setLessonWatchStates] = useState<Record<string, LessonWatchState>>(initialLessonWatchStates);
   const [savedMaterialLearnerStates, setSavedMaterialLearnerStates] = useState<Record<string, LessonMaterialLearnerState>>(
@@ -1392,6 +1413,11 @@ export function LessonExperience({
   const lastProgressSyncRef = useRef<Record<string, number>>({});
   const lastNonZeroYouTubeVolumeRef = useRef(100);
   const lessonWatchStatesRef = useRef(lessonWatchStates);
+  const completedLessonIdsRef = useRef(completedLessonIds);
+  // Gravacoes de conclusao em andamento (aula -> numero do pedido): o pedido mais novo de cada aula
+  // decide o estado final, e props novas nao apagam o otimismo delas (reconcileCompletedLessonIds).
+  const pendingCompletionRef = useRef<Map<string, number>>(new Map());
+  const completionRequestCounterRef = useRef(0);
   const lessonSelectionRequestRef = useRef(0);
   const pendingYouTubePlayLessonIdRef = useRef<string | null>(null);
   const youTubePlaybackIntentLessonIdRef = useRef<string | null>(null);
@@ -1691,6 +1717,40 @@ export function LessonExperience({
       return false;
     }
   }, []);
+  const beginCompletionRequest = useCallback((lessonId: string) => {
+    const requestId = completionRequestCounterRef.current + 1;
+
+    completionRequestCounterRef.current = requestId;
+    pendingCompletionRef.current.set(lessonId, requestId);
+    setProgressSaveError("");
+
+    return requestId;
+  }, []);
+  // Resposta do PUT de uma conclusao otimista: gravou, fica; falhou, a aula volta ao que a tela
+  // mostrava antes do clique (botao, lista e progresso) e o aviso aparece, sem travar o player.
+  const settleOptimisticCompletion = useCallback((
+    lessonId: string,
+    requestId: number,
+    saved: boolean,
+    snapshot: LessonProgressSnapshot
+  ) => {
+    // Um clique mais novo na mesma aula ja mandou outro PUT: ele decide o estado final.
+    if (pendingCompletionRef.current.get(lessonId) !== requestId) {
+      return;
+    }
+
+    pendingCompletionRef.current.delete(lessonId);
+
+    if (saved) {
+      return;
+    }
+
+    completedLessonIdsRef.current = withLessonCompletion(completedLessonIdsRef.current, lessonId, snapshot.wasCompleted);
+    setCompletedLessonIds((current) => withLessonCompletion(current, lessonId, snapshot.wasCompleted));
+    lessonWatchStatesRef.current = withLessonWatchState(lessonWatchStatesRef.current, lessonId, snapshot.watchState);
+    setLessonWatchStates(lessonWatchStatesRef.current);
+    setProgressSaveError(LESSON_PROGRESS_SAVE_ERROR);
+  }, []);
   const persistLessonProgress = useCallback(async (
     payload: LessonProgressPayload,
     transport: LessonProgressTransport = "fetch"
@@ -1757,40 +1817,31 @@ export function LessonExperience({
 
     lastProgressSyncRef.current[lessonId] = now;
 
-    const safeProgressSeconds = Math.max(0, Math.round(progressSeconds));
-    const roundedProgressPercent = clampProgressPercent(progressPercent);
-    const safeProgressPercent = status === "completed"
-      ? 100
-      : Math.min(safeProgressSeconds > 0 ? Math.max(roundedProgressPercent, 1) : roundedProgressPercent, 99);
     const existingWatchState = lessonWatchStatesRef.current[lessonId];
-    const safeMaxProgressPercent = status === "completed"
-      ? 100
-      : Math.max(
-          existingWatchState?.maxProgressPercent ?? existingWatchState?.progressPercent ?? 0,
-          safeProgressPercent
-        );
-    const nextState: LessonWatchState = {
-      ...(durationSeconds !== undefined ? { durationSeconds: Math.max(0, Math.round(durationSeconds)) } : {}),
-      lastWatchedAt: new Date().toISOString(),
-      maxProgressPercent: safeMaxProgressPercent,
-      progressPercent: safeProgressPercent,
-      progressSeconds: safeProgressSeconds,
+    const wasCompleted = completedLessonIdsRef.current.has(lessonId);
+    // Aula ja concluida continua "Concluída" (100%) na tela: a batida so avanca a posicao assistida.
+    const nextState = buildWatchProgressState({
+      durationSeconds,
+      existing: existingWatchState,
+      isInCompletedList: wasCompleted,
+      now: new Date().toISOString(),
+      progressPercent,
+      progressSeconds,
       status
-    };
+    });
+    // Fim do video (ou da TV): a aula acaba de ser concluida. Verde na hora; volta se nao gravar.
+    // Pelo beacon (saida da pagina) nao ha resposta para esperar, entao nao ha o que reverter.
+    const completesLesson = status === "completed" && !wasCompleted;
+    const requestId = completesLesson && transport === "fetch" ? beginCompletionRequest(lessonId) : 0;
+    const snapshot: LessonProgressSnapshot = { wasCompleted, watchState: existingWatchState };
 
-    lessonWatchStatesRef.current = {
-      ...lessonWatchStatesRef.current,
-      [lessonId]: nextState
-    };
+    lessonWatchStatesRef.current = withLessonWatchState(lessonWatchStatesRef.current, lessonId, nextState);
     initialResumeSecondsRef.current[lessonId] = nextState.progressSeconds;
     setLessonWatchStates(lessonWatchStatesRef.current);
 
-    if (status === "completed") {
-      setCompletedLessonIds((current) => {
-        const nextCompletedLessonIds = new Set(current);
-        nextCompletedLessonIds.add(lessonId);
-        return nextCompletedLessonIds;
-      });
+    if (completesLesson) {
+      completedLessonIdsRef.current = withLessonCompletion(completedLessonIdsRef.current, lessonId, true);
+      setCompletedLessonIds((current) => withLessonCompletion(current, lessonId, true));
     }
 
     const saved = await persistLessonProgress({
@@ -1800,13 +1851,25 @@ export function LessonExperience({
       maxProgressPercent: nextState.maxProgressPercent,
       progressPercent: nextState.progressPercent,
       progressSeconds: nextState.progressSeconds,
+      // A batida manda o status pedido; a lista de concluidas no servidor decide (src/lib/lesson-progress).
       status
     }, transport);
+
+    if (requestId > 0) {
+      settleOptimisticCompletion(lessonId, requestId, saved, snapshot);
+    }
 
     if (saved && status === "completed") {
       refreshAfterUnlockingLesson(lessonId);
     }
-  }, [isActiveLessonLocked, item.id, persistLessonProgress, refreshAfterUnlockingLesson]);
+  }, [
+    beginCompletionRequest,
+    isActiveLessonLocked,
+    item.id,
+    persistLessonProgress,
+    refreshAfterUnlockingLesson,
+    settleOptimisticCompletion
+  ]);
 
   function handlePlayerStart() {
     if (isActiveLessonLocked || !activeLessonKey) {
@@ -1966,6 +2029,39 @@ export function LessonExperience({
   useEffect(() => {
     lessonWatchStatesRef.current = lessonWatchStates;
   }, [lessonWatchStates]);
+
+  useEffect(() => {
+    completedLessonIdsRef.current = completedLessonIds;
+  }, [completedLessonIds]);
+
+  useEffect(() => {
+    // Props novas (router.refresh ou outra navegacao para a mesma tela): a conclusao local volta a ser
+    // a do servidor, menos a das aulas com gravacao em andamento. Um quadro depois, como o resto do
+    // arquivo faz, para nao encadear renderizacoes dentro do efeito.
+    const animationFrame = window.requestAnimationFrame(() => {
+      setCompletedLessonIds((current) => (
+        reconcileCompletedLessonIds(current, serverCompletedLessonIds, pendingCompletionRef.current.keys())
+      ));
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [serverCompletedLessonIds]);
+
+  useEffect(() => {
+    if (!progressSaveError) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setProgressSaveError("");
+    }, LESSON_PROGRESS_SAVE_ERROR_MS);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [progressSaveError]);
 
   useEffect(() => {
     // Navegação interna (AppShell) chama sem argumento: PUT comum, aguardado antes da troca de rota.
@@ -3347,67 +3443,43 @@ export function LessonExperience({
   }
 
   function handleLessonCompletionToggle(lessonId: string) {
-    const nextCompletedLessonIds = new Set(completedLessonIds);
-    const willCompleteLesson = !nextCompletedLessonIds.has(lessonId);
+    // Pode vir da playlist, para uma aula que nao e a ativa: duracao e progresso daquela aula.
+    const lesson = allModules.flatMap((courseModule) => courseModule.lessons).find((candidate) => candidate.id === lessonId);
+    const existingWatchState = lessonWatchStatesRef.current[lessonId];
+    const wasCompleted = completedLessonIds.has(lessonId);
+    const toggle = buildCompletionToggle({
+      allLessonIds,
+      completedLessonIds,
+      durationSeconds: existingWatchState?.durationSeconds ?? (lesson ? parseLessonDurationSeconds(lesson.duration) : undefined),
+      existing: existingWatchState,
+      lessonId,
+      now: new Date().toISOString()
+    });
+    // Resposta imediata: verde (ou cinza) na hora. Se a gravacao falhar, settleOptimisticCompletion
+    // volta ao que era e avisa.
+    const requestId = beginCompletionRequest(lessonId);
+    const snapshot: LessonProgressSnapshot = { wasCompleted, watchState: existingWatchState };
 
-    if (!willCompleteLesson) {
-      nextCompletedLessonIds.delete(lessonId);
-    } else {
-      nextCompletedLessonIds.add(lessonId);
-    }
-
-    const safeCompletedLessonIds = Array.from(nextCompletedLessonIds)
-      .filter((completedLessonId) => allLessonIds.has(completedLessonId))
-      .sort();
+    completedLessonIdsRef.current = toggle.completedLessonIds;
+    setCompletedLessonIds(toggle.completedLessonIds);
+    lessonWatchStatesRef.current = withLessonWatchState(lessonWatchStatesRef.current, lessonId, toggle.watchState);
+    setLessonWatchStates(lessonWatchStatesRef.current);
 
     void persistLessonProgress({
-      completedLessonIds: safeCompletedLessonIds,
+      completedLessonIds: toggle.payloadCompletedLessonIds,
       contentId: item.id,
-      durationSeconds: activeLessonDurationSeconds,
+      durationSeconds: toggle.watchState.durationSeconds,
       lessonId,
-      maxProgressPercent: willCompleteLesson
-        ? 100
-        : Math.max(
-            lessonWatchStates[lessonId]?.maxProgressPercent ?? 0,
-            lessonWatchStates[lessonId]?.progressPercent ?? activeLessonWatchedPercent
-          ),
-      progressPercent: willCompleteLesson ? 100 : activeLessonWatchedPercent,
-      progressSeconds: willCompleteLesson
-        ? activeLessonDurationSeconds ?? lessonWatchStates[lessonId]?.progressSeconds ?? 0
-        : lessonWatchStates[lessonId]?.progressSeconds ?? 0,
-      status: willCompleteLesson ? "completed" : "in_progress"
+      maxProgressPercent: toggle.watchState.maxProgressPercent,
+      progressPercent: toggle.watchState.progressPercent,
+      progressSeconds: toggle.watchState.progressSeconds,
+      status: toggle.watchState.status
     }).then((saved) => {
-      if (saved && willCompleteLesson) {
+      settleOptimisticCompletion(lessonId, requestId, saved, snapshot);
+
+      if (saved && toggle.willComplete) {
         refreshAfterUnlockingLesson(lessonId);
       }
-    });
-    setCompletedLessonIds(nextCompletedLessonIds);
-    setLessonWatchStates((current) => {
-      const currentState = current[lessonId];
-      const nextState = {
-        ...(activeLessonDurationSeconds !== undefined ? { durationSeconds: activeLessonDurationSeconds } : {}),
-        lastWatchedAt: new Date().toISOString(),
-        maxProgressPercent: willCompleteLesson
-          ? 100
-          : Math.max(
-              currentState?.maxProgressPercent ?? 0,
-              currentState?.progressPercent ?? activeLessonWatchedPercent
-            ),
-        progressPercent: willCompleteLesson
-          ? 100
-          : Math.min(currentState?.progressPercent ?? activeLessonWatchedPercent, 99),
-        progressSeconds: willCompleteLesson
-          ? activeLessonDurationSeconds ?? currentState?.progressSeconds ?? 0
-          : currentState?.progressSeconds ?? 0,
-        status: willCompleteLesson ? "completed" : "in_progress"
-      } satisfies LessonWatchState;
-      const next = {
-        ...current,
-        [lessonId]: nextState
-      };
-
-      lessonWatchStatesRef.current = next;
-      return next;
     });
   }
 
@@ -4493,6 +4565,15 @@ export function LessonExperience({
               ) : null}
             </div>
 
+            {progressSaveError ? (
+              <p
+                className="rounded-[8px] border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100 lg:text-right"
+                role="alert"
+              >
+                {progressSaveError}
+              </p>
+            ) : null}
+
             <button
               className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-bold text-zinc-200 transition hover:bg-white/[0.08] hover:text-white xl:hidden"
               onClick={() => setPlaylistOpen((current) => !current)}
@@ -4553,6 +4634,7 @@ export function LessonExperience({
               role="tabpanel"
             >
               <LessonCommentComposer
+                authorAvatarUrl={currentUserAvatarUrl}
                 authorName={currentUserName}
                 disabledReason={isActiveLessonLocked ? "Comentários liberados junto com a aula" : undefined}
                 inputRef={commentInputRef}

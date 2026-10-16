@@ -143,7 +143,10 @@ export const assertCatalogSchemaReady = cache(async () => {
  * Lista
  * ---------------------------------------------------------------------------------------------- */
 
-export const listProducts: ListProducts = async (query) => {
+/** Teto da lista de quem tem acesso so a alguns cursos (lida inteira e paginada aqui). */
+const SCOPED_PRODUCT_LIST_LIMIT = 500;
+
+export const listProducts: ListProducts = async (query, scope = null) => {
   const pageSize = PRODUCT_LIST_PAGE_SIZE;
   const page = Math.max(1, query.page);
   const filters = {
@@ -152,6 +155,29 @@ export const listProducts: ListProducts = async (query) => {
     status: query.situation ?? null
   };
   const hasFilters = Boolean(filters.kinds || filters.search || filters.status);
+
+  // Professor: poucos cursos. Le a lista com os filtros, fica so com os dele e pagina aqui.
+  if (scope) {
+    const allowed = new Set(scope);
+    const [filtered, unfiltered] = await Promise.all([
+      scope.length > 0 ? callProductList({ ...filters, limit: SCOPED_PRODUCT_LIST_LIMIT, offset: 0 }) : Promise.resolve([]),
+      scope.length > 0 && hasFilters ? callProductList({ kinds: null, limit: SCOPED_PRODUCT_LIST_LIMIT, offset: 0, search: null, status: null }) : Promise.resolve(null)
+    ]);
+    const mine = filtered.filter((row) => allowed.has(row.id));
+    const mineUnfiltered = unfiltered ? unfiltered.filter((row) => allowed.has(row.id)).length : mine.length;
+
+    return {
+      items: mine.slice((page - 1) * pageSize, page * pageSize).flatMap((row) => {
+        const item = mapProductListRow(row);
+        return item ? [item] : [];
+      }),
+      page,
+      pageSize,
+      query,
+      total: mine.length,
+      totalUnfiltered: mineUnfiltered
+    };
+  }
   const rows = await callProductList({ ...filters, limit: pageSize, offset: (page - 1) * pageSize });
   let total = Number(rows[0]?.total_count ?? 0);
 

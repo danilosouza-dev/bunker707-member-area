@@ -146,7 +146,7 @@ function ReportRow({ busy, canModerate, now, onModerate, report, state }: Report
   const resolution = describeReportResolution(state.history, now);
   const menuActions: RowMenuAction[] = [
     ...(comment.authorRole === "student" ? [{ href: studentSearchHref(comment.author.name), icon: UserRound, label: "Ver aluno" }] : []),
-    { href: comment.path.adminHref, icon: GraduationCap, label: "Abrir aula no admin" },
+    ...(comment.path.adminHref ? [{ href: comment.path.adminHref, icon: GraduationCap, label: "Abrir aula no admin" }] : []),
     ...(comment.path.studentHref ? [{ external: true, href: comment.path.studentHref, icon: MonitorPlay, label: "Ver na área do aluno" }] : [])
   ];
 
@@ -161,14 +161,18 @@ function ReportRow({ busy, canModerate, now, onModerate, report, state }: Report
           <span className="truncate text-sm leading-5 font-semibold text-[var(--text-primary)]">
             {comment.kind === "reply" ? "Resposta" : "Comentário"} de {comment.author.name}
           </span>
-          <Link
-            className={cn("w-fit max-w-full rounded-sm text-[13px] leading-5 text-[var(--text-secondary)] [overflow-wrap:anywhere] hover:text-[var(--text-primary)] md:truncate", adminTransition)}
-            data-navigation-feedback="false"
-            href={comment.path.adminHref}
-            title={`Abrir a aula no admin: ${comment.path.label}`}
-          >
-            {comment.path.label}
-          </Link>
+          {comment.path.adminHref ? (
+            <Link
+              className={cn("w-fit max-w-full rounded-sm text-[13px] leading-5 text-[var(--text-secondary)] [overflow-wrap:anywhere] hover:text-[var(--text-primary)] md:truncate", adminTransition)}
+              data-navigation-feedback="false"
+              href={comment.path.adminHref}
+              title={`Abrir a aula no admin: ${comment.path.label}`}
+            >
+              {comment.path.label}
+            </Link>
+          ) : (
+            <span className="w-fit max-w-full text-[13px] leading-5 text-[var(--text-secondary)] [overflow-wrap:anywhere] md:truncate">{comment.path.label}</span>
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <StatusChip tone={state.open ? "warning" : "muted"}>{state.open ? "Aberta" : "Resolvida"}</StatusChip>

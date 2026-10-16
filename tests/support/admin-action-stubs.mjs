@@ -25,7 +25,7 @@ function stubModule(source) {
 }
 
 const STUBS = {
-  "@/server/auth/permissions": `export async function requireRole() { return globalThis.__adminActionStubs.role; }`,
+  "@/server/auth/permissions": `export async function requireRole() { return globalThis.__adminActionStubs.role; } export async function requireScope() {}`,
   "@/server/catalog/cache": `export function invalidateCatalog(input) { globalThis.__adminActionStubs.invalidations.push(input); }`,
   // Area de membros: mesma lista de invalidacoes, com o alvo ("login" ou "home") junto.
   "@/server/member-area/cache": `export function invalidateMemberArea(target, input) { globalThis.__adminActionStubs.invalidations.push({ target, ...input }); }`,
@@ -72,7 +72,8 @@ registerHooks({
 /**
  * Banco falso com a superficie que as actions usam: from(tabela) encadeia filtros (eq e in filtram;
  * os demais passam) sobre `tables[tabela]` e registra a tabela; rpc(nome, args) registra a chamada e
- * devolve `rpcResults[nome]`. Escritas diretas (insert/update/delete/upsert) ficam em `calls.writes`.
+ * devolve `rpcResults[nome]`. Escritas diretas (insert/update/delete/upsert) ficam em `calls.writes`,
+ * com a linha enviada em `payload`.
  */
 export function createFakeDb({ rpcResults = {}, tables = {} } = {}) {
   const calls = { from: [], rpc: [], writes: [] };
@@ -84,15 +85,16 @@ export function createFakeDb({ rpcResults = {}, tables = {} } = {}) {
       rows = rows.filter((row) => !(column in row) || test(row[column]));
       return chain;
     };
-    const write = (op) => {
-      calls.writes.push({ op, table });
+    // `payload` guarda o que foi gravado (linha do insert/update), para o teste conferir o conteudo.
+    const write = (op, payload) => {
+      calls.writes.push({ op, payload, table });
       return chain;
     };
     const chain = {
       delete: () => write("delete"),
       eq: (column, value) => keep(column, (current) => current === value),
       in: (column, values) => keep(column, (current) => values.includes(current)),
-      insert: () => write("insert"),
+      insert: (payload) => write("insert", payload),
       limit: () => chain,
       maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
       neq: () => chain,
@@ -100,8 +102,8 @@ export function createFakeDb({ rpcResults = {}, tables = {} } = {}) {
       order: () => chain,
       select: () => chain,
       then: (resolve, reject) => Promise.resolve({ data: rows, error: null }).then(resolve, reject),
-      update: () => write("update"),
-      upsert: () => write("upsert")
+      update: (payload) => write("update", payload),
+      upsert: (payload) => write("upsert", payload)
     };
 
     return chain;

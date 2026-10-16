@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { ErrorBanner } from "@/components/admin/v2/error-banner";
 import { HeroEditor } from "@/components/admin/v2/member-area/home-hero/hero-editor";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageArea } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getHomeHeroEditorData } from "@/server/member-area/home-hero-queries";
 
 export const metadata: Metadata = {
@@ -20,7 +20,7 @@ async function loadHomeHero() {
 
 // Area de membros > Destaque: o banner do topo da home do aluno (imagem ou video, textos e botao).
 export default async function AdminHomeHeroPage() {
-  const { role } = await requirePageAdmin();
+  const { access } = await requirePageArea("membros");
   const result = await loadHomeHero();
 
   if (!result.ok) {
@@ -31,5 +31,5 @@ export default async function AdminHomeHeroPage() {
     );
   }
 
-  return <HeroEditor canEdit={canRole(role, "storefront.write")} data={result.data} />;
+  return <HeroEditor canEdit={can(access, "storefront.write")} data={result.data} />;
 }

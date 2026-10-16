@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/admin/v2/page-header";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { NewProductView } from "@/components/admin/v2/products/new-product-view";
 import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { can } from "@/server/auth/roles";
 import { assertCatalogSchemaReady, getProductHeader } from "@/server/catalog/queries";
 import { catalogIdSchema } from "@/server/catalog/schemas";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
@@ -37,13 +37,15 @@ async function readParentFormation(raw: string | undefined) {
 
 // Novo produto em uma pagina (docs/17 §1.6.2). Sem permissao de editar o catalogo, volta para a lista.
 export default async function NewProductPage({ searchParams }: NewProductPageProps) {
-  const { role } = await requirePageAdmin();
+  const { access } = await requirePageAdmin();
 
-  if (!canRole(role, "catalog.write")) {
+  if (!can(access, "catalog.create")) {
     redirect("/admin/produtos");
   }
 
-  const formationParam = firstParam((await searchParams).formacao);
+  // "Criar curso aqui" dentro de uma Formação e de quem cuida de acesso e venda.
+  const canSetAccess = can(access, "catalog.access");
+  const formationParam = canSetAccess ? firstParam((await searchParams).formacao) : undefined;
   const loaded = await loadUnlessPendingMigration(async () => {
     await assertCatalogSchemaReady();
     return readParentFormation(formationParam);
@@ -60,7 +62,7 @@ export default async function NewProductPage({ searchParams }: NewProductPagePro
 
   return (
     <AdminPage className="gap-6">
-      <NewProductView parentFormation={loaded.data} />
+      <NewProductView canSetAccess={canSetAccess} parentFormation={loaded.data} />
     </AdminPage>
   );
 }

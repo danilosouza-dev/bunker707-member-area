@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import { ContentTab } from "@/components/admin/v2/content/content-tab";
 import { FormationCourses } from "@/components/admin/v2/content/formation-courses";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requireProductPage } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getLessonEditorData, getProductContent, listProductOptions } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
@@ -16,10 +16,12 @@ type ProductContentPageProps = {
 // Painel da aula = ?aula=<lessonId> (endereco proprio; voltar fecha). Formação mostra a lista de
 // cursos no lugar da arvore de modulos.
 export default async function ProductContentPage({ params, searchParams }: ProductContentPageProps) {
-  const { role } = await requirePageAdmin();
   const [{ id }, query] = await Promise.all([params, searchParams]);
+  const { access } = await requireProductPage(id);
   const lessonId = readLessonParam(query.aula);
-  const canWrite = canRole(role, "catalog.write");
+  // Modulos e aulas: catalog.content (o Professor tambem, nos cursos dele). Cursos da formacao: catalog.access.
+  const canEditContent = can(access, "catalog.content");
+  const canWrite = can(access, "catalog.access");
   const loaded = await loadUnlessPendingMigration(() =>
     Promise.all([getProductContent(id), lessonId ? getLessonEditorData(id, lessonId) : Promise.resolve(null)])
   );
@@ -49,7 +51,7 @@ export default async function ProductContentPage({ params, searchParams }: Produ
 
   return (
     <ContentTab
-      canWrite={canWrite}
+      canWrite={canEditContent}
       editor={editor}
       initialModules={content.modules}
       productId={content.header.id}

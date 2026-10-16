@@ -31,6 +31,11 @@ type FieldName = "cover" | "format" | "purchaseUrl" | "shortDescription" | "titl
 type FieldErrors = Partial<Record<FieldName, string>>;
 
 type NewProductFormProps = {
+  /**
+   * Pode decidir quem ve, o link de venda e criar Formação ("regras de acesso e venda"). Sem isso o
+   * produto nasce so para quem tiver acesso (o servidor confere de novo).
+   */
+  canSetAccess: boolean;
   /** "Criar curso aqui" dentro de uma Formação: o curso nasce incluido nela. */
   parentFormation: { id: string; title: string } | null;
 };
@@ -45,7 +50,7 @@ function firstIssue(result: { error?: { issues: { message: string }[] } }) {
   return result.error?.issues[0]?.message ?? null;
 }
 
-export function NewProductForm({ parentFormation }: NewProductFormProps) {
+export function NewProductForm({ canSetAccess, parentFormation }: NewProductFormProps) {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [format, setFormat] = useState<CreatableProductFormat>("curso");
@@ -59,7 +64,8 @@ export function NewProductForm({ parentFormation }: NewProductFormProps) {
   const [created, setCreated] = useState(false);
   const dirty = !created && Boolean(title.trim() || cover || shortDescription.trim() || purchaseUrl.trim());
   const effectiveFormat: CreatableProductFormat = parentFormation ? "curso" : format;
-  const showPurchaseUrl = audience === "with_access" && !parentFormation;
+  const showPurchaseUrl = canSetAccess && audience === "with_access" && !parentFormation;
+  const formats = canSetAccess ? CREATABLE_PRODUCT_FORMATS : CREATABLE_PRODUCT_FORMATS.filter((value) => value !== "formacao");
 
   useWarnBeforeUnload(dirty);
 
@@ -95,7 +101,7 @@ export function NewProductForm({ parentFormation }: NewProductFormProps) {
     setSubmitting(true);
     setFormError(null);
     const result = await createProduct({
-      audience,
+      audience: canSetAccess ? audience : "with_access",
       cover,
       format: effectiveFormat,
       parentFormationId: parentFormation?.id,
@@ -164,7 +170,7 @@ export function NewProductForm({ parentFormation }: NewProductFormProps) {
               setFieldError("title", null);
             }
           }}
-          placeholder={parentFormation ? "Ex.: Fundamentos de agentes" : "Ex.: Formação IA para Negócios"}
+          placeholder={parentFormation || !canSetAccess ? "Ex.: Fundamentos de agentes" : "Ex.: Formação IA para Negócios"}
           value={title}
         />
       </AdminField>
@@ -185,7 +191,7 @@ export function NewProductForm({ parentFormation }: NewProductFormProps) {
                 setFormat(value);
                 setFieldError("format", null);
               }}
-              options={CREATABLE_PRODUCT_FORMATS.map((value) => ({ label: PRODUCT_FORMAT_LABELS[value], value }))}
+              options={formats.map((value) => ({ label: PRODUCT_FORMAT_LABELS[value], value }))}
               value={format}
             />
             {errors.format ? (
@@ -237,7 +243,7 @@ export function NewProductForm({ parentFormation }: NewProductFormProps) {
         </span>
       </AdminField>
 
-      {parentFormation ? null : (
+      {parentFormation ? null : canSetAccess ? (
         <fieldset className="flex min-w-0 flex-col gap-1.5">
           <legend className="mb-2 text-[13px] leading-5 font-medium text-[var(--text-primary)]">Quem pode ver</legend>
           <PillGroup
@@ -249,6 +255,10 @@ export function NewProductForm({ parentFormation }: NewProductFormProps) {
           />
           <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{AUDIENCE_HINTS[audience]}</p>
         </fieldset>
+      ) : (
+        <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
+          {AUDIENCE_HINTS.with_access} Quem pode ver e o link de venda ficam com quem cuida de acesso e venda.
+        </p>
       )}
 
       {showPurchaseUrl ? (

@@ -2,6 +2,8 @@ import "server-only";
 
 import type { ReleaseRuleConfig } from "@/lib/platform-types";
 import { isReleaseRuleSatisfied } from "@/server/access/release-policy";
+import { loadAdminAccess } from "@/server/auth/admin-access";
+import { catalogScope, isProductInScope } from "@/server/auth/roles";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 
 type ContentRow = {
@@ -356,7 +358,7 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
   if (!normalizedUserId) throw new Error("Usuario obrigatorio para resolver o catalogo autorizado.");
   const supabase = getSupabaseAdminClient();
   const now = Date.now();
-  const [contentsResult, settingsResult, modulesResult, lessonsResult, adminRoleResult, entitlementsResult, progressResult] = await Promise.all([
+  const [contentsResult, settingsResult, modulesResult, lessonsResult, staff, entitlementsResult, progressResult] = await Promise.all([
     supabase
       .from("content_items")
       .select("id,kind,title,description,access_model,commerce_scope,is_locked,release_rule,publication_status,sort_order")
@@ -376,7 +378,7 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
       .eq("status", "published")
       .order("sort_order", { ascending: true })
       .order("id", { ascending: true }),
-    supabase.from("admin_roles").select("role").eq("user_id", normalizedUserId).maybeSingle(),
+    loadAdminAccess(normalizedUserId, supabase),
     supabase
       .from("entitlements")
       .select("target_id,target_type,starts_at,ends_at,status")
@@ -391,7 +393,7 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
   throwDatabaseError(settingsResult.error, "Nao foi possivel validar as formacoes dos conteudos");
   throwDatabaseError(modulesResult.error, "Nao foi possivel listar os modulos publicados");
   throwDatabaseError(lessonsResult.error, "Nao foi possivel listar as aulas publicadas");
-  throwDatabaseError(adminRoleResult.error, "Nao foi possivel validar o papel do usuario");
+
   throwDatabaseError(entitlementsResult.error, "Nao foi possivel validar o acesso do aluno");
   throwDatabaseError(progressResult.error, "Nao foi possivel carregar o progresso do aluno");
   const contents = (contentsResult.data ?? []) as ContentRow[];
@@ -400,7 +402,9 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
   const lessons = (lessonsResult.data ?? []) as LessonRow[];
   const entitlements = (entitlementsResult.data ?? []) as EntitlementRow[];
   const progressRows = (progressResult.data ?? []) as ProgressRow[];
-  const isAdmin = Boolean(adminRoleResult.data);
+  // Equipe que ve o catalogo da escola toda ve tudo (previa); quem ve so os proprios cursos, so eles (docs/17 §2.3).
+  const isAdmin = Boolean(staff && catalogScope(staff) === null);
+  const staffSees = (contentId: string) => Boolean(staff && isProductInScope(staff, contentId));
   const parentFormationByContent = new Map(
     settings.flatMap((row) => {
       const parentFormationId = getParentFormationId(row.settings);
@@ -425,12 +429,12 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
         : undefined
     });
     const hasOpenAccess = content.access_model === "free";
-    const hasAccess = isAdmin || hasOpenAccess || matchingEntitlements.length > 0;
+    const hasAccess = staffSees(content.id) || hasOpenAccess || matchingEntitlements.length > 0;
 
     if (!hasAccess) continue;
     const completedLessonIds = getCompletedLessonIds(progressRows, content.id);
 
-    if (!isAdmin && !isReleaseRuleSatisfied({
+    if (!staffSees(content.id) && !isReleaseRuleSatisfied({
       completedLessonIds,
       matchingEntitlements,
       now,
@@ -452,7 +456,7 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
       if (
         courseModule.status !== "published" ||
         courseModule.owner_id !== content.id ||
-        (!isAdmin && !isReleaseRuleSatisfied({
+        (!staffSees(content.id) && !isReleaseRuleSatisfied({
           completedLessonIds,
           matchingEntitlements: matchingEntitlementsByContent.get(content.id) ?? [],
           now,
@@ -479,7 +483,7 @@ export async function resolveAuthorizedLearningCatalog(userId: string): Promise<
         lesson.status !== "published" ||
         !courseModule ||
         courseModule.owner_id !== content.id ||
-        (!isAdmin && !isReleaseRuleSatisfied({
+        (!staffSees(content.id) && !isReleaseRuleSatisfied({
           completedLessonIds,
           matchingEntitlements: matchingEntitlementsByContent.get(content.id) ?? [],
           now,

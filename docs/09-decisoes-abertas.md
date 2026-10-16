@@ -174,7 +174,7 @@ Decisao tomada:
 - liberacao "X dias/horas depois da compra/inscricao" mostra ao aluno a data real (`Liberação em 08/01/2026`), calculada no servidor com a mesma conta que abre a aula: inicio do acesso ativo mais antigo (`entitlements.starts_at`) + atraso, no fuso de Sao Paulo. Sem acesso real (visitante, previa do produtor, gratuito sem compra) continua a frase generica;
 - garantia de 7 dias: por enquanto a conta usa a data da compra. A Hotmart informa o fim da garantia no webhook (`purchase.warranty_expire_date`); quando o pipeline de webhooks gravar esse campo no acesso, a regra podera contar a partir dele (`anchor: "warranty_end"`). A conta ja esta pronta; falta a coluna e a opcao no admin;
 - aula ainda nao liberada nao envia video ao navegador; a tela destrava sozinha quando a data passa ou quando a aula anterior e concluida;
-- comentarios mostram etiqueta de funcao para todos: `Professor` (owner/admin/editor), `Moderador` (support/analyst) e `Aluno`;
+- comentarios mostram etiqueta de funcao para todos: `Professor` (quem da equipe monta modulos e aulas: dono, admin, editor, professor ou funcao com essa permissao), `Moderador` (o resto da equipe) e `Aluno`;
 - o topo da area do aluno nao mostra sino nem trofeu ate existirem notificacoes e conquistas reais; o avatar abre o menu da conta;
 - Suporte sem formulario enquanto nao existir caixa de entrada no admin para responder; a pagina mostra os canais configurados e perguntas frequentes;
 - Perfil so leitura nesta fase; editar nome/telefone/foto depende de unificar as tres origens do nome (cadastro do aluno, `profiles` e conta);

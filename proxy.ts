@@ -93,7 +93,8 @@ function createContentSecurityPolicy(nonce: string) {
     "form-action 'self'",
     "frame-ancestors 'none'",
     "frame-src 'self' https:",
-    "img-src 'self' data: blob: https:",
+    // https cobre o Storage da nuvem; a origem http entra so quando o Supabase e a propria maquina (testes).
+    `img-src 'self' data: blob: https: ${getSupabaseConnectionSources().filter((source) => source.startsWith("http://")).join(" ")}`.trim(),
     "manifest-src 'self'",
     "media-src 'self' blob: https:",
     "object-src 'none'",

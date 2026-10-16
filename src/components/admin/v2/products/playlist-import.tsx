@@ -48,7 +48,8 @@ const ORGANIZATIONS: PlaylistOrganization[] = ["automatic", "single", "manual"];
 
 type Done = PlaylistImported & { hasCover: boolean; title: string };
 
-export function PlaylistImport() {
+/** canSetAccess: pode decidir quem ve ("regras de acesso e venda"); sem isso o curso nasce so para quem tiver acesso. */
+export function PlaylistImport({ canSetAccess }: { canSetAccess: boolean }) {
   const [url, setUrl] = useState("");
   const [urlError, setUrlError] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
@@ -151,9 +152,10 @@ export function PlaylistImport() {
       return;
     }
 
+    const chosenAudience: ProductAudience = canSetAccess ? audience : "with_access";
     const input = {
-      accessModel: audience === "all_students" ? ("free" as const) : ("closed" as const),
-      audience,
+      accessModel: chosenAudience === "all_students" ? ("free" as const) : ("closed" as const),
+      audience: chosenAudience,
       coursePresentationMode: "lesson_playlist" as const,
       description: description.trim(),
       image: cover ?? "",
@@ -398,18 +400,24 @@ export function PlaylistImport() {
               value={cover}
             />
 
-            <fieldset className="flex min-w-0 flex-col gap-1.5">
-              <FieldLegend>Quem pode ver</FieldLegend>
-              <PillGroup
-                ariaLabel="Quem pode ver"
-                disabled={importing}
-                name="importar-quem-pode-ver"
-                onChange={setAudience}
-                options={PRODUCT_AUDIENCES.map((value) => ({ label: PRODUCT_AUDIENCE_LABELS[value], value }))}
-                value={audience}
-              />
-              <p className="text-xs leading-5 text-[var(--text-secondary)]">{AUDIENCE_HINTS[audience]}</p>
-            </fieldset>
+            {canSetAccess ? (
+              <fieldset className="flex min-w-0 flex-col gap-1.5">
+                <FieldLegend>Quem pode ver</FieldLegend>
+                <PillGroup
+                  ariaLabel="Quem pode ver"
+                  disabled={importing}
+                  name="importar-quem-pode-ver"
+                  onChange={setAudience}
+                  options={PRODUCT_AUDIENCES.map((value) => ({ label: PRODUCT_AUDIENCE_LABELS[value], value }))}
+                  value={audience}
+                />
+                <p className="text-xs leading-5 text-[var(--text-secondary)]">{AUDIENCE_HINTS[audience]}</p>
+              </fieldset>
+            ) : (
+              <p className="text-xs leading-5 text-[var(--text-secondary)]">
+                {AUDIENCE_HINTS.with_access} Quem pode ver fica com quem cuida de acesso e venda.
+              </p>
+            )}
           </FormSection>
 
           <div className="flex min-w-0 flex-col gap-3 border-t border-[var(--border-subtle)] pt-6">

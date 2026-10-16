@@ -7,7 +7,8 @@ import { cache } from "react";
 import { unstable_noStore as noStore } from "next/cache";
 import { after } from "next/server";
 import type { AuthenticatedUser } from "@/server/auth/session";
-import { getAdminRoleForUser, getUserDisplayName } from "@/server/auth/session";
+import { catalogScope, hasCourseScope } from "@/server/auth/roles";
+import { getAdminAccessForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { persistImageAsset } from "@/server/db/media-assets";
 import type { AccessPreviewMode } from "@/lib/access-preview";
@@ -71,6 +72,7 @@ import type {
   SavedItemTargetType
 } from "@/lib/platform-types";
 import { getCourseProgressFromModules } from "@/lib/course-progress";
+import { isLessonResumable, resolveLessonWatchStatus } from "@/lib/lesson-progress";
 
 type PlatformStudent = {
   /** Foto do perfil (profiles.avatar_url), so no menu do topo; ausente = iniciais. */
@@ -110,6 +112,11 @@ type AccessEntitlementRecord = {
 
 type PlatformDatabase = {
   accessEntitlements: AccessEntitlementRecord[];
+  /**
+   * Professor (equipe com escopo por curso): os cursos dele contam como acesso liberado na area do aluno,
+   * sem virar compra (docs/17 §2.3). Vazio para quem nao e da equipe ou ve a escola toda.
+   */
+  staffProductIds?: readonly string[];
   aiAgents: AdminAIAgent[];
   blockedWordRules: AdminBlockedWordRule[];
   bootcamps: ContentItem[];
@@ -934,13 +941,33 @@ const readAdminDatabase = cache(async () => {
   return readSupabaseDatabase({ includeAdminData: true });
 });
 
+/** Cursos do Professor (so quem tem escopo por curso); falha de leitura = nenhum (o aluno segue como aluno). */
+async function readStaffProductIds(userId: string): Promise<string[]> {
+  if (!userId) {
+    return [];
+  }
+
+  try {
+    const access = await getAdminAccessForUser(userId);
+
+    return access && hasCourseScope(access) ? [...access.courseIds] : [];
+  } catch {
+    return [];
+  }
+}
+
 const readMemberDatabase = cache(async (userId: string, userEmail: string) => {
   noStore();
-  return readSupabaseDatabase({
-    includeAdminData: false,
-    userEmail: userEmail || undefined,
-    userId: userId || undefined
-  });
+  const [database, staffProductIds] = await Promise.all([
+    readSupabaseDatabase({
+      includeAdminData: false,
+      userEmail: userEmail || undefined,
+      userId: userId || undefined
+    }),
+    readStaffProductIds(userId)
+  ]);
+
+  return staffProductIds.length > 0 ? { ...database, staffProductIds } : database;
 });
 
 function readDatabaseForUser(user?: AuthenticatedUser | string) {
@@ -1022,6 +1049,17 @@ function getUserAccessKeys(database: PlatformDatabase, user?: AuthenticatedUser 
     for (const entitlement of database.accessEntitlements) {
       if (entitlement.userId === userId && isActiveEntitlement(entitlement)) {
         accessKeys.add(getAccessTargetKey(entitlement.targetType, entitlement.targetId));
+      }
+    }
+  }
+
+  // Professor: os cursos dele abrem como se tivessem sido liberados (mesma regra de lesson-access.ts).
+  if (database.staffProductIds?.length) {
+    const staffProducts = new Set(database.staffProductIds);
+
+    for (const item of getAllContentItems(database)) {
+      if (staffProducts.has(item.id)) {
+        accessKeys.add(getAccessTargetKey(getTargetType(item.kind), item.id));
       }
     }
   }
@@ -1698,8 +1736,12 @@ function getContinueWatchingFromProgress(
         return [];
       }
 
+      const completedLessonIds = new Set(Array.isArray(record.completedLessonIds) ? record.completedLessonIds : []);
+
       return Object.entries(normalizeLessonWatchStates(record.lessonWatchStates)).flatMap(([lessonId, watchState]) => {
-        if (watchState.status === "completed" || watchState.progressPercent <= 0 || watchState.progressPercent >= 100) {
+        // Aula concluida (completed_lesson_ids) nao e "em andamento", mesmo que o aluno a esteja revendo:
+        // a mesma regra da pagina /continue-assistindo (getMemberContinueWatching).
+        if (!isLessonResumable(lessonId, watchState, completedLessonIds)) {
           return [];
         }
 
@@ -2158,15 +2200,16 @@ function applyLessonProgress(database: PlatformDatabase, contentId: string, modu
 }
 
 export async function getAppShellData(user?: AuthenticatedUser) {
-  const [database, adminRole, profile] = await Promise.all([
+  const [database, adminAccess, profile] = await Promise.all([
     readDatabaseForUser(user),
-    user ? getAdminRoleForUser(user.id) : Promise.resolve(null),
+    user ? getAdminAccessForUser(user.id) : Promise.resolve(null),
     user ? getStudentProfileRecord(user) : Promise.resolve(null)
   ]);
 
   return {
     branding: database.branding,
-    canUseAccessPreview: Boolean(adminRole),
+    // "Ver como aluno com/sem acesso": so quem ve o catalogo da escola toda (o Professor ve os cursos dele de verdade).
+    canUseAccessPreview: Boolean(adminAccess && catalogScope(adminAccess) === null),
     // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam.
     student: { ...getStudentForUser(database, user, profile?.fullName), avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl) }
   };
@@ -2834,8 +2877,8 @@ export async function deleteContentItem(itemId: string) {
     await throwIfSupabaseError(deleteSavedResult.error, "Erro removendo favoritos do conteudo");
   }
 
-  const deleteStudentCoursesResult = await supabase.from("student_courses").delete().eq("target_id", itemId);
-  await throwIfSupabaseError(deleteStudentCoursesResult.error, "Erro removendo acessos do conteudo");
+  // A tabela student_courses (admin antigo) foi removida na migracao 202610140001; os acessos reais sao
+  // os entitlements, revogados logo abaixo. Apagar dela aqui derrubava "Excluir produto" com 500.
 
   // Entitlements apontando para o conteudo removido sao revogados (nao apagados) para manter trilha de auditoria
   // e impedir que um re-import com id deterministico (ex.: yt-course-<playlistId>) reanexe acessos antigos.
@@ -3081,7 +3124,13 @@ async function replaceCompletedLessonsUnsafe({
       0,
       100
     ));
-    const nextStatus = status === "completed" ? "completed" : "in_progress";
+    // A lista de concluidas e a verdade (docs/02): heartbeat ou flush em aula concluida mantem
+    // "completed" e 100%, so avancando a posicao (progressSeconds) e lastWatchedAt. Desmarcar
+    // chega com completedLessonIds sem a aula e ai o status volta a "in_progress" de verdade.
+    const nextStatus = resolveLessonWatchStatus({
+      isInCompletedList: uniqueLessonIds.includes(lessonId),
+      requestedStatus: status
+    });
     const nextProgressPercent = nextStatus === "completed"
       ? 100
       : Math.min(safeProgressSeconds > 0 ? Math.max(safeProgressPercent, 1) : safeProgressPercent, 99);

@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/admin/v2/page-header";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
 import { StudentListView } from "@/components/admin/v2/students/student-list-view";
 import { requirePageRole } from "@/server/auth/permissions";
-import { canRole } from "@/server/auth/roles";
+import { can } from "@/server/auth/roles";
 import { listProductOptions } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 import { STUDENT_SEGMENT_PRESETS, pickStudentListParams, splitStudentListParams } from "@/server/students/model";
@@ -31,7 +31,7 @@ function readNow() {
 // perfil. So quem le dados basicos de alunos entra (analista volta para o Hoje). Esta pagina so le; a
 // disposicao fica em StudentListView.
 export default async function AdminStudentsPage({ searchParams }: AdminStudentsPageProps) {
-  const { role } = await requirePageRole("students.read_basic", "/admin");
+  const { access } = await requirePageRole("students.read_basic", "/admin");
   const query = parseStudentListSearchParams(await searchParams);
   const params = pickStudentListParams(query);
   const { base } = splitStudentListParams(params);
@@ -67,9 +67,9 @@ export default async function AdminStudentsPage({ searchParams }: AdminStudentsP
   return (
     <AdminPage className="gap-6 pb-24">
       <StudentListView
-        canAccess={canRole(role, "students.access")}
-        canAdd={canRole(role, "students.access")}
-        canExport={canRole(role, "students.export")}
+        canAccess={can(access, "students.access")}
+        canAdd={can(access, "students.access")}
+        canExport={can(access, "students.export")}
         cohorts={loaded.data.cohorts}
         filters={{ ...params, page: query.page }}
         lifecycle={loaded.data.lifecycle}

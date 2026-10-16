@@ -114,6 +114,7 @@ Invariantes:
 - a leitura do aluno filtra `lesson_progress`, `saved_items` e `entitlements` pela identidade autenticada (entitlements sao a unica fonte de acesso; as tabelas `students`/`student_courses` do admin antigo foram removidas em 14/10/2026);
 - modulos e aulas da area do aluno carregam somente registros publicados;
 - chamadas repetidas durante a mesma renderizacao sao memoizadas com `cache`, evitando a segunda leitura integral antes causada pelo shell e pela pagina;
+- paginas por aluno (aula com progresso, perfil) nunca sao abertas por `<Link prefetch>`: o prefetch cheio do Next 16 guarda a pagina inteira por ate 5 min no navegador e o clique mostra estado velho (bug da aula "Concluida" por um caminho e "Concluir" por outro, 16/10/2026); usa-se o prefetch padrao (auto), que so aquece a rota, e `router.refresh()` quando uma acao do cliente muda o que a pagina mostra;
 - favoritos e progresso usam `upsert`/`delete` direcionados; mutacoes do CMS gravam somente as tabelas afetadas;
 - exclusoes de aulas e modulos sao mutacoes administrativas autenticadas; a camada server-side limpa favoritos e referencias de progresso e os triggers do Supabase repetem essa garantia na mesma transacao da exclusao, enquanto eventos comportamentais historicos permanecem append-only;
 - nao existe mais sincronizacao que leia e regrave toda a base para salvar uma unica interacao;
@@ -164,7 +165,7 @@ Implementacao atual:
 - apos autenticar, usuarios com papel em `admin_roles` sao direcionados para `/admin`; alunos sem papel administrativo seguem para a area de membros;
 - `/alterar-senha` permite que aluno autenticado defina nova senha quando `must_change_password` estiver ativo;
 - o `proxy.ts` redireciona usuarios com `must_change_password = true` para `/alterar-senha` antes de liberar a area de membros;
-- `/admin` exige papel em `admin_roles`;
+- `/admin` exige papel em `admin_roles`, e cada area, tela e acao exige a permissao dela (docs/17 §2.3): menu e busca mostram so o que a pessoa pode abrir, e permissao que vale so nos cursos da pessoa (a do Professor, por exemplo) fica presa aos cursos dela (`requireScope`, `src/server/auth/product-scope.ts`). As permissoes somam as funcoes da pessoa (prontas e personalizadas, `admin_functions`) e os extras dela, calculadas uma vez por requisicao (`loadAdminAccess`, `src/server/auth/admin-access.ts`);
 - APIs de progresso exigem usuario autenticado e APIs do CMS exigem permissao administrativa.
 
 Cadastro manual de aluno:
@@ -479,7 +480,7 @@ Para facilitar migracao futura para Hetzner:
 - `YOUTUBE_DATA_API_KEY` e `SUPABASE_SERVICE_ROLE_KEY` permanecem somente no servidor;
 - o backend rele a playlist no momento da gravacao e nao confia na arvore enviada pelo navegador;
 - o modo `automatic` deriva modulos e aulas dos titulos; o modo `manual_ranges` recebe somente nomes e intervalos de posicoes, relê a playlist no servidor e rejeita lacunas, sobreposicoes, intervalos vazios e posicoes invalidas;
-- a funcao Postgres `import_youtube_course(jsonb)` grava curso, configuracao, modulos, aulas e fonte em uma unica transacao;
+- a funcao Postgres `import_youtube_course(jsonb)` grava curso, configuracao, modulos, aulas e fonte em uma unica transacao; o admin chama por `admin_import_new_youtube_course(jsonb)`, que trava a playlist e recusa (`playlist_already_imported`) a que ja virou curso, para duas importacoes ao mesmo tempo nao regravarem o curso uma da outra;
 - IDs derivados da playlist e dos videos tornam o reenvio idempotente;
 - itens que desapareceram da playlist sao arquivados, nao apagados, preservando auditoria e progresso;
 - o caminho sem chave da API oficial e um fallback para playlists publicamente acessiveis e pode exigir manutencao se o HTML do YouTube mudar.

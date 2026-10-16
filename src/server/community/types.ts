@@ -63,8 +63,11 @@ export type CommunityAuthor = {
 
 /** "Produto › Módulo › Aula", com ids para os links "Abrir aula" e filtros. */
 export type CommunityLessonPath = {
-  /** Painel da aula no admin novo: /admin/produtos/{produto}?aula={aula}. */
-  adminHref: string;
+  /**
+   * Painel da aula no admin novo: /admin/produtos/{produto}?aula={aula}. null para quem nao abre a
+   * pagina do produto (ex.: Suporte): o "Abrir aula no admin" some (lessonPathFor em scope.ts).
+   */
+  adminHref: string | null;
   /** Produto em que o aluno comentou (content_id do comentario; pode ser a formacao). */
   contentId: string;
   label: string;

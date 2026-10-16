@@ -252,9 +252,9 @@ export type TodayCreateItem = {
 };
 
 export const TODAY_CREATE_ITEMS: readonly TodayCreateItem[] = [
-  { href: "/admin/produtos/novo", id: "produto", label: "Produto", permission: "catalog.write" },
-  { href: "/admin/produtos/importar", id: "playlist", label: "Produto a partir de uma playlist", permission: "catalog.write" },
-  { href: "/admin/produtos/pacotes", id: "pacote", label: "Pacote", permission: "catalog.write" },
+  { href: "/admin/produtos/novo", id: "produto", label: "Produto", permission: "catalog.create" },
+  { href: "/admin/produtos/importar", id: "playlist", label: "Produto a partir de uma playlist", permission: "catalog.create" },
+  { href: "/admin/produtos/pacotes", id: "pacote", label: "Pacote", permission: "catalog.access" },
   { href: newStudentHref(), id: "aluno", label: "Aluno", permission: "students.access" },
   { href: null, id: "aviso", label: "Aviso", meta: "Em breve", permission: "messaging.write" },
   { href: null, id: "webinario", label: "Webinário", meta: "Em breve", permission: "messaging.write" },

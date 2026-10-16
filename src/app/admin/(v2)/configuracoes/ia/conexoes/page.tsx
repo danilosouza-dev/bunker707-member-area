@@ -5,8 +5,8 @@ import { parseAiProviderParam } from "@/components/admin/v2/settings/ai-settings
 import { getAccountGatewayConfigurationStatus } from "@/server/ai/account-gateway";
 import { listAIProviderConfigs } from "@/server/ai/provider-config";
 import { listAIProviderConnections } from "@/server/ai/provider-connections";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageRole } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 
 export const metadata: Metadata = {
   title: "Tutor IA · Conexões"
@@ -45,7 +45,7 @@ async function loadConnectionsData() {
 }
 
 export default async function AdminAiConnectionsPage({ searchParams }: PageProps) {
-  const [{ role }, params] = await Promise.all([requirePageAdmin(), searchParams]);
+  const [{ access }, params] = await Promise.all([requirePageRole("settings.ai", "/admin/configuracoes"), searchParams]);
   const provider = parseAiProviderParam(params.provedor);
   const data = await loadConnectionsData();
 
@@ -62,7 +62,7 @@ export default async function AdminAiConnectionsPage({ searchParams }: PageProps
 
   return (
     <AiConnectionsManager
-      canEdit={canRole(role, "settings.ai")}
+      canEdit={can(access, "settings.ai")}
       configs={data.configs}
       connections={data.connections}
       gatewayConfigured={gateway.configured}

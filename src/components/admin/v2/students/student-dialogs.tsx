@@ -191,7 +191,8 @@ export function SendAccessEmailDialog({ onOpenChange, open, student }: DialogPro
  * Editar dados
  * ---------------------------------------------------------------------------------------------- */
 
-export function EditStudentDialog({ onOpenChange, open, student }: DialogProps) {
+/** `canEditPhone`: sem "ver dados pessoais" o telefone nao aparece (o servidor tambem nao o muda). */
+export function EditStudentDialog({ canEditPhone = true, onOpenChange, open, student }: DialogProps & { canEditPhone?: boolean }) {
   const router = useRouter();
   const [fullName, setFullName] = useState(student.fullName);
   const [phone, setPhone] = useState(student.phone ?? "");
@@ -218,7 +219,7 @@ export function EditStudentDialog({ onOpenChange, open, student }: DialogProps) 
 
   async function submit() {
     const nameCheck = studentNameSchema.safeParse(fullName);
-    const phoneCheck = studentPhoneSchema.safeParse(phone);
+    const phoneCheck = studentPhoneSchema.safeParse(canEditPhone ? phone : "");
 
     if (!nameCheck.success || !phoneCheck.success) {
       setNameError(nameCheck.success ? null : firstIssue(nameCheck));
@@ -289,23 +290,25 @@ export function EditStudentDialog({ onOpenChange, open, student }: DialogProps) 
             value={fullName}
           />
         </AdminField>
-        <AdminField error={phoneError} id="editar-aluno-telefone" label="Telefone" optional>
-          <Input
-            aria-describedby={fieldDescribedBy("editar-aluno-telefone", { error: phoneError })}
-            aria-invalid={phoneError ? true : undefined}
-            autoComplete="off"
-            className={adminInputClass}
-            disabled={pending}
-            id="editar-aluno-telefone"
-            inputMode="tel"
-            onChange={(event) => {
-              setPhone(event.target.value);
-              setPhoneError(null);
-            }}
-            type="tel"
-            value={phone}
-          />
-        </AdminField>
+        {canEditPhone ? (
+          <AdminField error={phoneError} id="editar-aluno-telefone" label="Telefone" optional>
+            <Input
+              aria-describedby={fieldDescribedBy("editar-aluno-telefone", { error: phoneError })}
+              aria-invalid={phoneError ? true : undefined}
+              autoComplete="off"
+              className={adminInputClass}
+              disabled={pending}
+              id="editar-aluno-telefone"
+              inputMode="tel"
+              onChange={(event) => {
+                setPhone(event.target.value);
+                setPhoneError(null);
+              }}
+              type="tel"
+              value={phone}
+            />
+          </AdminField>
+        ) : null}
       </form>
     </ProductDialog>
   );

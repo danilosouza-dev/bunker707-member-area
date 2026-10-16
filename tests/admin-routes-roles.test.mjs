@@ -9,6 +9,8 @@ import "./support/resolve-extensionless-ts.mjs";
 // - toda escrita passa por requireApiRole(acao) (ou requireApiAdmin({ roles }) nas de alunos) e o
 //   conjunto de papeis exclui "analyst": analista recebe 403 em qualquer escrita;
 // - toda leitura tem guarda;
+// - rotas de uma aula ou de um comentario dizem em que curso mexem (segundo argumento), para o
+//   Professor so alcancar os cursos dele (docs/17 §2.3);
 // - as rotas que mudam o catalogo invalidam o cache dele com { from: "route" } depois de gravar.
 
 const { ADMIN_ACTION_ROLES, rolesFor } = await import("../src/server/auth/roles.ts");
@@ -41,7 +43,7 @@ function handlers(source) {
 
 /** Papeis liberados pela guarda do handler; null quando nao ha guarda reconhecida. */
 function guardRoles(body) {
-  const role = /requireApiRole\("([a-z_.]+)"\)/.exec(body);
+  const role = /requireApiRole\("([a-z_.]+)"[,)]/.exec(body);
 
   if (role) {
     assert.ok(Object.hasOwn(ADMIN_ACTION_ROLES, role[1]), `acao desconhecida: ${role[1]}`);
@@ -93,9 +95,9 @@ test("cada escrita usa a acao certa do mapa da fase 1", () => {
   const expected = {
     appearance: { PUT: "storefront.write" },
     "home-sections": { PUT: "storefront.write" },
-    "lessons/[lessonId]/transcript": { PUT: "catalog.write" },
-    "lessons/[lessonId]/transcript/import-youtube": { POST: "catalog.write" },
-    "lessons/[lessonId]/tutor/process": { POST: "catalog.write" },
+    "lessons/[lessonId]/transcript": { PUT: "catalog.content" },
+    "lessons/[lessonId]/transcript/import-youtube": { POST: "catalog.content" },
+    "lessons/[lessonId]/tutor/process": { POST: "catalog.content" },
     "moderation/blocked-words": { POST: "community.moderate" },
     "moderation/blocked-words/[ruleId]": { DELETE: "community.moderate", PATCH: "community.moderate" },
     "moderation/comments/[commentId]": { PATCH: "community.moderate" }
@@ -108,15 +110,28 @@ test("cada escrita usa a acao certa do mapa da fase 1", () => {
     for (const [method, action] of Object.entries(methods)) {
       const handler = handlers(route.source).find((item) => item.method === method);
       assert.ok(handler, `${method} /api/admin/${name} existe`);
-      assert.match(handler.body, new RegExp(`requireApiRole\\("${action.replace(".", "\\.")}"\\)`), `${method} /api/admin/${name} -> ${action}`);
+      assert.match(handler.body, new RegExp(`requireApiRole\\("${action.replace(".", "\\.")}"[,)]`), `${method} /api/admin/${name} -> ${action}`);
     }
   }
 
+  // Tutor IA: leitura e escrita so com settings.ai (chaves e consumo nao sao para toda a equipe).
   for (const route of routes.filter((item) => item.name.startsWith("ai-"))) {
-    for (const handler of handlers(route.source).filter((item) => item.method !== "GET")) {
+    for (const handler of handlers(route.source)) {
       assert.match(handler.body, /requireApiRole\("settings\.ai"\)/, `${handler.method} /api/admin/${route.name}`);
     }
   }
+});
+
+test("rotas de uma aula ou de um comentario dizem o curso tocado (Professor so nos cursos dele)", () => {
+  for (const route of routes.filter((item) => item.name.startsWith("lessons/[lessonId]"))) {
+    for (const handler of handlers(route.source)) {
+      assert.match(handler.body, /requireApiRole\("catalog\.content", \{ lessonIds: \[lessonId\] \}\)/, `${handler.method} /api/admin/${route.name}`);
+      assert.ok(handler.body.indexOf("await context.params") < handler.body.indexOf("requireApiRole("), `${handler.method} /api/admin/${route.name}: id antes da guarda`);
+    }
+  }
+
+  const moderation = routes.find((item) => item.name === "moderation/comments/[commentId]");
+  assert.match(moderation.source, /requireApiRole\("community\.moderate", \{ commentIds: \[commentId\] \}\)/);
 });
 
 test("alunos: toda Server Action passa por runAdminAction com uma acao students.*", () => {

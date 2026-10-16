@@ -82,6 +82,8 @@ function InternalPosterCard({
   const lockedAccessibilityDetail =
     isLocked ? (lockedDetail ?? lockedTitle ?? "Conteudo bloqueado") : undefined;
 
+  // Sem prefetch cheio no Link: o destino e por aluno (aula com progresso) e o Next guardaria uma copia
+  // por ate 5 min no navegador, mostrando estado velho ao clicar. O router.prefetch abaixo so aquece a rota.
   function prefetchPosterDestination() {
     if (!isLocked) {
       router.prefetch(href);
@@ -102,7 +104,6 @@ function InternalPosterCard({
       onFocus={prefetchPosterDestination}
       onMouseEnter={prefetchPosterDestination}
       onTouchStart={prefetchPosterDestination}
-      prefetch
     >
       <div className="home-cover-card-surface absolute inset-0 z-0 w-full shadow-2xl shadow-black/35 group-hover:z-[120] group-hover:shadow-[0_42px_130px_rgba(0,0,0,0.82)]">
         <div className="relative h-full w-full">

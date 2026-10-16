@@ -8,8 +8,10 @@
 import type { ActionResult } from "@/lib/action-result";
 import { extractYouTubePlaylistId } from "@/lib/youtube-course-import";
 import { runAdminAction } from "@/server/actions/run-action";
+import { can } from "@/server/auth/roles";
 import { invalidateCatalog } from "@/server/catalog/cache";
 import { importYouTubePlaylistCourse, loadYouTubeCourseImportPreview } from "@/server/video/youtube-playlist-import";
+import { addCreatedCourseToScope, assertCreatorScopeRoom } from "./creator-scope";
 import { CatalogConflictError, CatalogFieldError, CatalogRuleError } from "./errors";
 import { productHrefFor } from "./mappers";
 import { playlistAlreadyImportedMessage } from "./model";
@@ -63,9 +65,9 @@ async function findImportedCourse(playlistUrl: string): Promise<ImportedPlaylist
   return row ? { href: productHrefFor(row.id), id: row.id, title: row.title?.trim() || "Sem nome" } : null;
 }
 
-/** [catalog.write] "Ler playlist". Avisa quando a playlist ja virou um curso (a tela bloqueia importar). */
+/** [catalog.create] "Ler playlist". Avisa quando a playlist ja virou um curso (a tela bloqueia importar). */
 export async function previewPlaylist(input: PreviewPlaylistInput): Promise<ActionResult<PlaylistPreview>> {
-  return runAdminAction("catalog.write", previewPlaylistSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.create", previewPlaylistSchema, input, async ({ input: data }) => {
     const existingCourse = await findImportedCourse(data.playlistUrl);
 
     try {
@@ -73,16 +75,22 @@ export async function previewPlaylist(input: PreviewPlaylistInput): Promise<Acti
     } catch (error) {
       throw toPlaylistError(error);
     }
-  });
+  }, { target: () => "any" });
 }
 
 /**
- * [catalog.write] "Importar como rascunho". Aceita `audience` (Quem pode ver) alem do `accessModel` do
+ * [catalog.create] "Importar como rascunho". Aceita `audience` (Quem pode ver) alem do `accessModel` do
  * contrato legado: "Oculto por enquanto" grava listing = 'hidden' depois da importacao.
  */
 export async function importPlaylist(input: ImportPlaylistActionInput): Promise<ActionResult<PlaylistImported>> {
-  return runAdminAction("catalog.write", importPlaylistSchema, input, async ({ input: data }) => {
-    // Reimportar regravaria o curso existente por cima do que o produtor fez nele: recusa (409).
+  return runAdminAction("catalog.create", importPlaylistSchema, input, async ({ access, input: requested, user }) => {
+    // Sem "regras de acesso e venda": o curso importado nasce so para quem tiver acesso.
+    const data = can(access, "catalog.access") ? requested : { ...requested, accessModel: "closed" as const, audience: undefined };
+
+    assertCreatorScopeRoom(access);
+
+    // Reimportar regravaria o curso existente por cima do que o produtor fez nele: recusa (409). A RPC
+    // confere de novo, com trava, para duas importacoes da mesma playlist ao mesmo tempo.
     const existingCourse = await findImportedCourse(data.playlistUrl);
 
     if (existingCourse) {
@@ -131,6 +139,11 @@ export async function importPlaylist(input: ImportPlaylistActionInput): Promise<
 
     invalidateCatalog({ from: "action" });
 
+    // Curso que ja existia nunca entra na lista de ninguem (a RPC so cria curso novo).
+    if (!imported.importResult.courseExisted) {
+      await addCreatedCourseToScope(access, user.id, courseId);
+    }
+
     return {
       courseId,
       href: productHrefFor(courseId),
@@ -138,5 +151,5 @@ export async function importPlaylist(input: ImportPlaylistActionInput): Promise<
       moduleCount: Number(imported.importResult.moduleCount ?? 0),
       warnings: imported.warnings
     };
-  });
+  }, { target: () => "any" });
 }

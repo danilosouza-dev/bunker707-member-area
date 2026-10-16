@@ -39,6 +39,7 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Deploy seguro na Vercel](docs/15-deploy-vercel-seguro.md)
 - [Auditoria tecnica de 01/10/2026](docs/16-auditoria-tecnica-2026-10-01.md)
 - [Admin do Produtor: especificacao do redesign (10/10/2026)](docs/17-admin-produtor-redesign.md)
+- [Padrao de testes e rotina de qualidade (16/10/2026)](docs/18-padrao-de-testes.md)
 
 ## Padroes de trabalho
 

@@ -6,8 +6,9 @@ import { EmptyState } from "./empty-state";
 type PendingMigrationNoticeProps = {
   className?: string;
   /**
-   * Numero da migracao que falta para esta parte da tela (ex.: "202610120001"). Com ele, o aviso fala
-   * so da parte: "Esta parte precisa da atualização do banco (migração 202610120001)."
+   * Numero da migracao que falta (ex.: "202610120001"). Com ele, o aviso cita so essa migracao, em vez
+   * da faixa inteira do admin v2: "Esta tela precisa da atualização do banco (migração 202610120001)."
+   * (no tamanho "compact", "Esta parte precisa...").
    */
   migration?: string;
   /** "default": estado vazio do tamanho da tela. "compact": faixa fina no lugar de uma secao; o resto da tela segue. */
@@ -18,12 +19,20 @@ export function pendingMigrationPartMessage(migration: string) {
   return `Esta parte precisa da atualização do banco (migração ${migration}).`;
 }
 
+export function pendingMigrationScreenMessage(migration: string) {
+  return `Esta tela precisa da atualização do banco (migração ${migration}).`;
+}
+
 /**
  * Aviso no lugar dos dados quando o banco ainda nao recebeu as migracoes do admin v2.
  * Ver src/server/db/pending-migration.ts. Nao quebra a pagina nem o menu.
  */
 export function PendingMigrationNotice({ className, migration, size = "default" }: PendingMigrationNoticeProps) {
-  const title = migration ? pendingMigrationPartMessage(migration) : PENDING_MIGRATION_MESSAGE;
+  const title = migration
+    ? size === "compact"
+      ? pendingMigrationPartMessage(migration)
+      : pendingMigrationScreenMessage(migration)
+    : PENDING_MIGRATION_MESSAGE;
 
   if (size === "compact") {
     return (
@@ -44,9 +53,8 @@ export function PendingMigrationNotice({ className, migration, size = "default" 
 
   return (
     <EmptyState
-      action={{ href: "/admin/legado", label: "Abrir o admin antigo" }}
       className={className}
-      description="A área do aluno e o admin antigo continuam funcionando normalmente. Depois da atualização, recarregue esta página."
+      description="A área do aluno continua funcionando normalmente. Depois da atualização, recarregue esta página."
       icon={Database}
       title={title}
     />

@@ -15,8 +15,9 @@ import { StatusChip, type StatusChipTone } from "../status-chip";
 import { adminCard, adminTransition } from "../styles";
 
 // Hub de Configuracoes (docs/17 §1.10; prototipo aprovado, tela 14): uma lista, uma linha por
-// grupo, com o estado honesto de cada um. So o Tutor IA ja tem tela; o resto diz "Em breve" e nao
-// e clicavel (nenhuma linha leva a uma tela vazia).
+// grupo, com o estado honesto de cada um. Equipe e Tutor IA ja tem tela; o resto diz "Em breve" e nao
+// e clicavel (nenhuma linha leva a uma tela vazia). Cada pessoa ve so as linhas que pode usar: Equipe
+// e Vendas so o dono; Tutor IA quem tem settings.ai.
 
 export type SettingsHubStatus = { label: string; tone: StatusChipTone };
 
@@ -29,15 +30,35 @@ type SettingsHubEntry = {
   title: string;
 };
 
+/** O que a pessoa pode abrir no hub (vem das permissoes dela, no servidor). */
+export type SettingsHubAccess = {
+  canAi: boolean;
+  canSales: boolean;
+  canTeam: boolean;
+  /** Pessoas na equipe (so para quem ve a Equipe); null = sem leitura. */
+  teamCount: number | null;
+};
+
 const comingSoon: SettingsHubStatus = { label: "Em breve", tone: "muted" };
 
-export function buildSettingsHubEntries(aiStatus: SettingsHubStatus | null): SettingsHubEntry[] {
-  return [
+const FULL_ACCESS: SettingsHubAccess = { canAi: true, canSales: true, canTeam: true, teamCount: null };
+
+function teamStatus(count: number | null): SettingsHubStatus | null {
+  if (count === null) {
+    return null;
+  }
+
+  return { label: count === 1 ? "1 pessoa" : `${count} pessoas`, tone: "neutral" };
+}
+
+export function buildSettingsHubEntries(aiStatus: SettingsHubStatus | null, access: SettingsHubAccess = FULL_ACCESS): SettingsHubEntry[] {
+  const entries: SettingsHubEntry[] = [
     {
-      description: "Quem acessa o admin e o que cada papel pode fazer: dono, admin, editor, suporte e analista.",
+      description: "Quem entra no admin e o que cada pessoa pode fazer: dono, administrador, editor, professor, suporte, analista ou personalizado.",
+      href: "/admin/configuracoes/equipe",
       icon: Users,
       id: "equipe",
-      status: comingSoon,
+      status: teamStatus(access.teamCount),
       title: "Equipe"
     },
     {
@@ -77,6 +98,11 @@ export function buildSettingsHubEntries(aiStatus: SettingsHubStatus | null): Set
       title: "Geral"
     }
   ];
+
+  // Linhas so de quem pode usar (as "Em breve" valem para todos que veem Configuracoes).
+  const visibility: Record<string, boolean> = { equipe: access.canTeam, ia: access.canAi, vendas: access.canSales };
+
+  return entries.filter((entry) => visibility[entry.id] ?? true);
 }
 
 function EntryBody({ entry }: { entry: SettingsHubEntry }) {
@@ -111,8 +137,8 @@ function EntryBody({ entry }: { entry: SettingsHubEntry }) {
   );
 }
 
-export function SettingsHub({ aiStatus }: { aiStatus: SettingsHubStatus | null }) {
-  const entries = buildSettingsHubEntries(aiStatus);
+export function SettingsHub({ access, aiStatus }: { access?: SettingsHubAccess; aiStatus: SettingsHubStatus | null }) {
+  const entries = buildSettingsHubEntries(aiStatus, access);
   const rowClass = "flex min-h-16 w-full items-center gap-4 px-4 py-3 text-left";
 
   return (

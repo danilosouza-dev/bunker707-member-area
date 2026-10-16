@@ -7,6 +7,7 @@ import { formatAdminRole } from "@/components/admin/v2/format";
 import { ADMIN_SIDEBAR_COOKIE, type AdminNavCounts } from "@/components/admin/v2/nav";
 import { readTodayAlertSummary } from "@/server/admin/today";
 import { requirePageAdmin } from "@/server/auth/guards";
+import { catalogScope, communityScope, toAccessSnapshot, type AdminAccess } from "@/server/auth/roles";
 import { getUserDisplayName } from "@/server/auth/session";
 import { PRODUCT_ACCENTS } from "@/server/catalog/model";
 import { listProductOptions } from "@/server/catalog/queries";
@@ -28,13 +29,16 @@ export const metadata: Metadata = {
 // renderizam em paralelo, entao cada page.tsx chama requirePageAdmin() de novo. Usuario e papel sao
 // memoizados por requisicao (React.cache em src/server/auth/session.ts).
 export default async function AdminV2Layout({ children }: { children: ReactNode }) {
-  const { role, user } = await requirePageAdmin();
+  const { access, role, user } = await requirePageAdmin();
   const { fullName } = getUserDisplayName(user);
-  const [counts, products, cookieStore] = await Promise.all([readNavCounts(), readProductFilterOptions(), cookies()]);
+  // Contadores valem para a escola toda: a Comunidade de quem responde so nos proprios cursos nao conta.
+  const [allCounts, products, cookieStore] = await Promise.all([readNavCounts(), readProductFilterOptions(access), cookies()]);
+  const counts = communityScope(access) === null ? allCounts : { ...allCounts, comunidade: undefined };
   const sidebarCollapsed = cookieStore.get(ADMIN_SIDEBAR_COOKIE)?.value === "collapsed";
 
   return (
     <AdminShellV2
+      access={toAccessSnapshot(access)}
       account={{ email: user.email ?? "", name: fullName, roleLabel: formatAdminRole(role) }}
       counts={counts}
       initialCollapsed={sidebarCollapsed}
@@ -68,12 +72,18 @@ async function readNavCounts(): Promise<AdminNavCounts> {
   }
 }
 
-/** Opcoes do filtro Produto (nome e cor). Sem catalogo legivel, o filtro mostra so "Todos os produtos". */
-async function readProductFilterOptions(): Promise<AdminFilterProduct[]> {
+/**
+ * Opcoes do filtro Produto (nome e cor). Sem catalogo legivel, o filtro mostra so "Todos os produtos".
+ * Quem ve so os proprios cursos (Professor): so os dele.
+ */
+async function readProductFilterOptions(access: AdminAccess): Promise<AdminFilterProduct[]> {
   try {
     const options = await listProductOptions();
+    const allowed = catalogScope(access);
 
-    return options.map((option) => ({ accent: PRODUCT_ACCENTS[option.accent], id: option.id, label: option.title }));
+    return options
+      .filter((option) => allowed === null || allowed.includes(option.id))
+      .map((option) => ({ accent: PRODUCT_ACCENTS[option.accent], id: option.id, label: option.title }));
   } catch (error) {
     if (!isPendingMigrationError(error)) {
       console.error("[admin] Produtos do filtro:", error instanceof Error ? error.message : error);

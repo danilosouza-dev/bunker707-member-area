@@ -7,10 +7,11 @@ import { QueueKeyboardHint } from "@/components/admin/v2/community/keyboard-hint
 import { CommunityPagination } from "@/components/admin/v2/community/pagination";
 import { QueueList } from "@/components/admin/v2/community/queue-list";
 import { EmptyState } from "@/components/admin/v2/empty-state";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageArea } from "@/server/auth/permissions";
+import { can, communityScope } from "@/server/auth/roles";
 import { getCommunityFilterOptions, getCommunityStats, listQuickReplies, listUnansweredQueue } from "@/server/community/queries";
 import { parseCommunitySearchParams } from "@/server/community/schemas";
+import { communityFilterKeys, lessonPathFor, scopeCommunityFilterOptions, scopeCommunityParams } from "@/server/community/scope";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
 export const metadata: Metadata = {
@@ -29,15 +30,15 @@ function readNow() {
 // Comunidade › Precisam de resposta (docs/17 §1.9): perguntas de alunos sem resposta do professor,
 // mais antigas primeiro, 20 por pagina. Sem ?periodo=, mostra tudo o que esta aberto.
 export default async function CommunityQueuePage({ searchParams }: CommunityPageProps) {
-  const { role } = await requirePageAdmin();
-  const params = await searchParams;
+  const { access } = await requirePageArea("comunidade");
+  const params = scopeCommunityParams(access, COMMUNITY_TAB_HREFS.fila, await searchParams);
   const query = parseCommunitySearchParams(params);
-  const canReply = canRole(role, "community.reply");
+  const canReply = can(access, "community.reply");
   const loaded = await loadUnlessPendingMigration(() =>
     Promise.all([
       getCommunityStats({ product: query.product }),
       listUnansweredQueue(query),
-      getCommunityFilterOptions(),
+      getCommunityFilterOptions().then((options) => scopeCommunityFilterOptions(access, options)),
       canReply ? listQuickReplies() : Promise.resolve([])
     ])
   );
@@ -47,13 +48,13 @@ export default async function CommunityQueuePage({ searchParams }: CommunityPage
   }
 
   const [stats, queue, options, quickReplies] = loaded.data;
-  const filtered = hasActiveFilters(params, ["produto", "aula", "periodo"]);
+  const filtered = hasActiveFilters(params, communityFilterKeys(access, ["produto", "aula", "periodo"]));
 
   return (
     <CommunityFrame
       stats={stats}
       toolbar={
-        <CommunityFilters aside={<QueueKeyboardHint />} options={options} periodMode="all-or-window" />
+        <CommunityFilters allowAllProducts={communityScope(access) === null} aside={<QueueKeyboardHint />} options={options} periodMode="all-or-window" />
       }
     >
       {queue.total === 0 ? (
@@ -74,9 +75,9 @@ export default async function CommunityQueuePage({ searchParams }: CommunityPage
       ) : (
         <>
           <QueueList
-            canModerate={canRole(role, "community.moderate")}
+            canModerate={can(access, "community.moderate")}
             canReply={canReply}
-            items={queue.items}
+            items={queue.items.map((item) => ({ ...item, path: lessonPathFor(access, item.path) }))}
             nowIso={readNow()}
             quickReplies={quickReplies}
           />

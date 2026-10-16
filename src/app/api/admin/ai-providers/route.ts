@@ -18,7 +18,7 @@ function noStore(response: NextResponse) {
 }
 
 export async function GET() {
-  const auth = await requireApiRole("admin.read");
+  const auth = await requireApiRole("settings.ai");
 
   if (auth.response) return noStore(auth.response);
 

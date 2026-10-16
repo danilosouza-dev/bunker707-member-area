@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 import { redirect } from "next/navigation";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import {
-  getAdminRoleForUser,
+  getAdminAccessForUser,
   getAuthenticatedUser
 } from "@/server/auth/session";
 
@@ -18,15 +18,16 @@ export async function requirePageUser(nextPath = "/") {
   return user;
 }
 
+/** Pessoa da equipe (qualquer papel). `access` traz as permissoes efetivas; `role`, o papel. */
 export async function requirePageAdmin() {
   const user = await requirePageUser("/admin");
-  const role = await getAdminRoleForUser(user.id);
+  const access = await getAdminAccessForUser(user.id);
 
-  if (!role) {
+  if (!access) {
     redirect("/");
   }
 
-  return { role, user };
+  return { access, role: access.role, user };
 }
 
 export async function requireApiUser() {
@@ -49,22 +50,25 @@ export async function requireApiAdmin(options?: { roles?: readonly string[] }) {
     return auth;
   }
 
-  const role = await getAdminRoleForUser(auth.user.id);
+  const access = await getAdminAccessForUser(auth.user.id);
 
-  if (!role) {
+  if (!access) {
     return {
       response: NextResponse.json({ error: "Permissao administrativa obrigatoria." }, { status: 403 }),
       user: auth.user
     };
   }
 
+  const role = access.role;
+
   if (options?.roles && !options.roles.includes(role)) {
     return {
+      access,
       response: NextResponse.json({ error: "Seu papel administrativo nao permite esta operacao." }, { status: 403 }),
       role,
       user: auth.user
     };
   }
 
-  return { response: null, role, user: auth.user };
+  return { access, response: null, role, user: auth.user };
 }

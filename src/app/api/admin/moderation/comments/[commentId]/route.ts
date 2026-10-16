@@ -13,13 +13,13 @@ type AdminCommentRouteContext = {
 };
 
 export async function PATCH(request: Request, context: AdminCommentRouteContext) {
-  const auth = await requireApiRole("community.moderate");
+  const { commentId } = await context.params;
+  const auth = await requireApiRole("community.moderate", { commentIds: [commentId] });
 
   if (auth.response || !auth.user) {
     return auth.response;
   }
 
-  const { commentId } = await context.params;
   let payload: { note?: unknown; status?: unknown };
 
   try {

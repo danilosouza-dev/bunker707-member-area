@@ -253,6 +253,7 @@ A excecao e a primeira fileira da home:
 
 - `Continue assistindo` usa thumbnails horizontais de video;
 - deve mostrar a barra de progresso no ponto em que o aluno parou, derivada do progresso real da aula;
+- nunca lista aula concluida (`completed_lesson_ids`), mesmo que o aluno a esteja revendo: a aula so volta a fileira se ele desmarcar `Concluída` na pagina da aula. A mesma regra vale para a pagina `/continue-assistindo` e para `Continue de onde parou` em Minha jornada (decisao de 16/10/2026; se o produtor preferir mostrar aula concluida em revisao, a regra fica em `isLessonResumable`, `src/lib/lesson-progress.ts`);
 - pode mostrar titulo, contexto, percentual assistido e aula abaixo da thumbnail;
 - pode ter um play discreto no centro da thumbnail durante o hover;
 - deve manter hover proprio de video, com superficie estavel, zoom interno minimo na imagem igual aos cards de modulo do modal e play aparente no centro; nao usar a expansao externa grande dos cards verticais;
@@ -422,7 +423,7 @@ Implementacao atual (aluno v2, `src/server/member-area/favorites-view.ts` + `src
 Todas leem a biblioteca do aluno (`getMemberLibrary` em `src/server/db/platform-store.ts`, tipos em `src/lib/member-library.ts`): so conteudo com acesso real (ou gratuito, ou previa do produtor para admin), com o progresso do proprio aluno. Nenhuma pagina mostra numero, curso ou material inventado; sem dado, aparece o estado vazio com o proximo passo.
 
 - Minha jornada: numeros reais (aulas concluidas, cursos em andamento e concluidos, ultima atividade), "Continue de onde parou", progresso por produto com a proxima aula e as aulas que ainda vao ser liberadas, e atividade recente. Sem pontos, ranking ou sequencia de dias nesta fase.
-- Continue assistindo: aulas comecadas e nao terminadas (mesma regra da fileira da home), da mais recente para a mais antiga.
+- Continue assistindo: aulas comecadas e nao terminadas e fora da lista de concluidas (mesma regra da fileira da home), da mais recente para a mais antiga.
 - Materiais: materiais de apoio de todas as aulas liberadas do aluno, com filtro por produto e tipo e busca; material com regra extra mostra o motivo do bloqueio.
 - Suporte: canais configurados pela escola (link de ajuda da tela de entrar: e-mail, WhatsApp ou pagina de ajuda) e perguntas frequentes. Sem formulario enquanto nao existir caixa de entrada no admin para responder.
 - Perfil: abas Dados, Acessos (data de inicio e fim de cada acesso ativo) e Segurança (alterar senha e sair). Edicao de nome/telefone fica para depois de unificar as tres origens do nome (cadastro do aluno, perfil e conta).
@@ -557,7 +558,8 @@ Desktop:
 - o aviso sobre o video mostra cadeado, `Esta aula será liberada`, a data e a linha discreta `Conta a partir da data da sua compra.`; na lista de aulas o selo curto e `Liberação em 08/01` (a frase completa fica no nome acessivel). Aula que depende da anterior mostra `Disponível depois que a aula anterior for concluída`;
 - se a data passar com a pagina aberta, a pagina se atualiza sozinha e o aviso oferece `Atualizar agora` como plano B. Ao concluir a aula anterior, a pagina busca de novo os dados e a proxima aula chega pronta para assistir;
 - aula ainda nao liberada nunca chega ao navegador com o video (nem o ID do YouTube); o modal da home e a pagina do conteudo nao enviam video de nenhuma aula, so a imagem ja resolvida;
-- botao principal abaixo do video marca/desmarca a aula como concluida, muda para estado verde `Concluida` e deve preservar esse estado quando o aluno voltar para a aula;
+- botao principal abaixo do video marca/desmarca a aula como concluida, muda para estado verde `Concluida` e deve preservar esse estado quando o aluno voltar para a aula. O verde aparece na hora (otimista) e so fica se o servidor gravar: se a gravacao falhar (rede, sessao expirada, conflito entre abas), o botao, a lista de aulas e o progresso voltam ao estado anterior e aparece o aviso `Não foi possível salvar. Tente de novo.` abaixo da linha de acoes, no mesmo padrao dos erros de comentario, sem travar o player; o aviso some sozinho em alguns segundos e o aluno clica de novo. O fim do video (ou da TV) segue a mesma regra;
+- aula concluida nao volta a `em andamento` por batida de progresso: continuar assistindo, rebobinar, pausar, trocar de aula ou sair da pagina (inclusive o envio por `sendBeacon`) so atualiza a posicao assistida e a hora; status e 100% ficam. Ela so deixa de ser concluida quando o aluno desmarca `Concluída`, e ai volta a `em andamento` na posicao real (segundos assistidos sobre a duracao, nunca 100%). A lista `completed_lesson_ids` e a verdade: o servidor aplica a regra em toda gravacao (`src/lib/lesson-progress.ts`, usado por `replaceCompletedLessons`), a pagina da aula aplica a mesma regra no estado local e ressincroniza a conclusao com o servidor sempre que recebe a pagina de novo (`router.refresh` ou nova navegacao), mantendo apenas o que ainda esta sendo gravado;
 - botoes secundarios como materiais, TV, salvar e avaliar devem ser circulares, iconograficos, com borda discreta no estado normal e feedback visual proprio no hover/foco, sem depender de tooltip nativo do navegador;
 - o botao de TV usa o nome acessivel e o tooltip `Assistir na TV`. Ao clicar, abre um modal compacto com endereco `/tv`, QR Code, codigo temporario de seis caracteres e estados explicitos de preparacao, espera, conexao, reconexao, expiracao, erro e encerramento;
 - o QR Code contem apenas o endereco Bunker707 `/tv` com o codigo temporario. Depois do pareamento, o mesmo modal vira um controle remoto com reproduzir/pausar, voltar 10 segundos, avancar 10 segundos e encerrar; o tempo assistido na TV atualiza o progresso real da aula;
@@ -575,7 +577,7 @@ Desktop:
 - tooltips desses botoes devem usar caixa branca com seta, fonte media/regular e sem peso excessivo;
 - avaliacao da aula deve seguir o padrao de reacao da Netflix: um botao de curtida abre tres opcoes (`Nao gostei`, `Gostei`, `Amei`) em uma pilula escura, com tooltip branco individual; opcoes selecionadas usam apenas contorno colorido, incluindo o coracao de `Amei`;
 - depois da selecao da reacao, a pilula deve fechar para nao conflitar com outros tooltips;
-- depois que o aluno assistir pelo menos 30% uma vez, o botao de avaliacao permanece disponivel nessa aula mesmo se ele arrastar o video de volta para o inicio; o percentual atual continua podendo regredir para alimentar `Continue assistindo` e progresso do modulo.
+- depois que o aluno assistir pelo menos 30% uma vez, o botao de avaliacao permanece disponivel nessa aula mesmo se ele arrastar o video de volta para o inicio; enquanto a aula nao estiver concluida, o percentual atual continua podendo regredir para alimentar `Continue assistindo` e progresso do modulo.
 - `Continue assistindo` deve priorizar imagem do ponto de retomada quando o provider/adapter fornecer um frame salvo; quando isso nao existir, usar thumbnail oficial do video; somente depois usar thumbnail cadastrada da aula ou imagem do modulo como fallback;
 - playlist lateral fixa a direita, alinhada ao topo do player e nao ao breadcrumb;
 - playlist lateral deve ter scroll interno proprio, com cabecalho fixo e area de aulas rolavel, garantindo que o ultimo modulo e a ultima aula fiquem totalmente acessiveis;
@@ -619,7 +621,7 @@ Desktop:
 - a lista padrao de reacoes de comentario deve ter mais opcoes que apenas curtir, por exemplo curtir, fogo, insight, coracao, aplausos, risada, surpresa, foguete, de olho e util;
 - menus de reacao e denuncia devem fechar quando o aluno clicar fora do menu;
 - o campo de novo comentario deve ser visualmente diferente da thread, usando uma caixa clara de digitacao com textarea e botao de envio alinhado dentro do mesmo bloco;
-- a caixa de escrever fica no topo da aba (aluno v2, `src/components/lesson/lesson-comment-composer.tsx`): avatar do aluno, campo que cresce, faixa `Respondendo a @usuario` com cancelar, contador a partir de 1.800 de 2.000 caracteres, `Ctrl/⌘ + Enter` publica e botao `Publicar` (ou `Responder`). Com a aula ainda bloqueada, a caixa fica desabilitada com o motivo e os comentarios nao sao buscados.
+- a caixa de escrever fica no topo da aba (aluno v2, `src/components/lesson/lesson-comment-composer.tsx`): foto do aluno (ou iniciais, a mesma do menu do topo), campo que cresce, faixa `Respondendo a @usuario` com cancelar, contador a partir de 1.800 de 2.000 caracteres, `Ctrl/⌘ + Enter` publica e botao `Publicar` (ou `Responder`). Com a aula ainda bloqueada, a caixa fica desabilitada com o motivo e os comentarios nao sao buscados.
 
 Mobile:
 
@@ -669,7 +671,7 @@ Estado vazio deve ser simples e util:
 
 Pagina `/perfil` (aluno v2), com abas no endereco (`?aba=dados|acessos|seguranca`):
 
-- foto do perfil (desde 14/10/2026): no cabecalho, clicar na foto ou em `Adicionar foto`/`Alterar foto` abre a escolha da imagem e um recorte redondo (arrastar, zoom, teclado); o navegador gera WebP quadrado de ate 512 px e o servidor confere de novo (`src/components/member/profile/profile-avatar-editor.tsx`, `PUT/DELETE /api/profile/avatar`). A foto fica no bucket publico `content-assets` em `avatars/{id}/`, o endereco vai para `profiles.avatar_url` com a sessao do aluno, a foto antiga e apagada, e ela aparece no menu do topo e nos comentarios novos. `Remover foto` volta para as iniciais;
+- foto do perfil (desde 14/10/2026): no cabecalho, clicar na foto ou em `Adicionar foto`/`Alterar foto` abre a escolha da imagem e um recorte redondo (arrastar, zoom, teclado); o navegador gera um quadrado de ate 512 px em WebP (ou JPEG no Safari, iPhone e iPad, que nao geram WebP pelo canvas; PNG so se nem JPEG sair) e o servidor confere de novo (`src/components/member/profile/profile-avatar-editor.tsx`, `PUT/DELETE /api/profile/avatar`). A foto fica no bucket publico `content-assets` em `avatars/{id}/` (extensao conforme o formato), o endereco vai para `profiles.avatar_url` com a sessao do aluno, os comentarios do aluno (`lesson_comments.author_avatar_url`) passam a apontar para a foto nova, a antiga e apagada, e ela aparece no menu do topo, na caixa de escrever comentario e nos comentarios. Um comentario cuja foto nao carrega mostra as iniciais. `Remover foto` volta para as iniciais, tambem nos comentarios;
 
 - `Dados`: nome, e-mail, telefone, aluno desde e ultimo acesso. Le so a linha do proprio usuario em `profiles` (com a sessao dele e RLS) e os dados da conta; o que nao existe aparece como `Não informado`;
 - `Acessos`: cada produto com acesso, com data de inicio e fim (ou vitalicio); gratuito e previa do produtor aparecem rotulados; sem acessos, estado vazio com o caminho para o Suporte;

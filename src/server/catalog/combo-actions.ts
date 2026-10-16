@@ -2,7 +2,7 @@
 
 // Escritas de Pacotes (frente E; mesmas assinaturas de SaveComboAction e DeleteComboAction em types.ts).
 // Granular, sem ler o banco inteiro:
-// uma linha em product_combos e a troca dos itens daquele pacote, numa transacao. Papel: catalog.write.
+// uma linha em product_combos e a troca dos itens daquele pacote, numa transacao. Papel: catalog.access.
 // Mudar os produtos de um pacote nao mexe no acesso de quem ja comprou (D7: nada retroativo).
 
 import { DEFAULT_COHORT_NAME, COMBO_PRODUCT_BUCKETS } from "./combo-model";
@@ -64,7 +64,7 @@ async function saveComboInSteps(
 }
 
 export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboListItem>> {
-  return runAdminAction("catalog.write", comboSchema, raw, async ({ input }) => {
+  return runAdminAction("catalog.access", comboSchema, raw, async ({ input }) => {
     const db = getSupabaseAdminClient();
     const productIds = Array.from(new Set(input.productIds));
 
@@ -132,7 +132,7 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
 }
 
 export async function deleteCombo(raw: DeleteComboInput): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("catalog.write", deleteComboSchema, raw, async ({ input }) => {
+  return runAdminAction("catalog.access", deleteComboSchema, raw, async ({ input }) => {
     // Os itens saem junto (on delete cascade). Acessos ja liberados continuam (nada retroativo).
     const { data, error } = await getSupabaseAdminClient().from("product_combos").delete().eq("id", input.id).select("id");
     failOnError(error, "Pacote");

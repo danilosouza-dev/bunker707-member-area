@@ -2,6 +2,8 @@ import "server-only";
 
 import type { LessonVideoConfig, ReleaseRuleConfig } from "@/lib/platform-types";
 import { isReleaseRuleSatisfied } from "@/server/access/release-policy";
+import { loadAdminAccess } from "@/server/auth/admin-access";
+import { isProductInScope } from "@/server/auth/roles";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 
 type AccessContentRow = {
@@ -164,7 +166,7 @@ export async function requireLessonsAccess({
   }
 
   const supabase = getSupabaseAdminClient();
-  const [lessonsResult, contentResult, contentSettingsResult, adminRoleResult] = await Promise.all([
+  const [lessonsResult, contentResult, contentSettingsResult, staff] = await Promise.all([
     supabase
       .from("lessons")
       .select("id,module_id,release_rule,status,video_config")
@@ -179,17 +181,13 @@ export async function requireLessonsAccess({
       .select("settings")
       .eq("content_id", contentId)
       .maybeSingle(),
-    supabase
-      .from("admin_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .maybeSingle()
+    // Funcoes da pessoa (inclusive as personalizadas): a equipe abre a aula sem compra, no que ela enxerga.
+    loadAdminAccess(userId, supabase)
   ]);
 
   throwDatabaseError(lessonsResult.error, "Nao foi possivel validar as aulas");
   throwDatabaseError(contentResult.error, "Nao foi possivel validar o conteudo");
   throwDatabaseError(contentSettingsResult.error, "Nao foi possivel validar a formacao do conteudo");
-  throwDatabaseError(adminRoleResult.error, "Nao foi possivel validar o papel do usuario");
 
   const lessons = lessonsResult.data ?? [];
 
@@ -218,7 +216,9 @@ export async function requireLessonsAccess({
   const parentFormationId = typeof contentSettings?.parentFormationId === "string"
     ? contentSettings.parentFormationId.trim() || undefined
     : undefined;
-  const isAdmin = Boolean(adminRoleResult.data);
+  // Equipe ve a aula sem compra (previa), mas o Professor so nos cursos dele (docs/17 §2.3): fora
+  // deles, vale a regra de aluno (compra, liberacao).
+  const isAdmin = Boolean(staff && isProductInScope(staff, contentId));
   const lessonVideoConfigs = Object.fromEntries(lessons.map((lesson) => [
     lesson.id,
     (lesson.video_config as LessonVideoConfig | null) ?? null

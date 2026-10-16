@@ -10,7 +10,8 @@ import { getMemberAccountMenuLinks } from "./member-shell-model";
 import { memberNavigationIcons } from "./member-navigation-icons";
 
 // Menu da conta no topo (avatar): Perfil, Minhas compras, Suporte e Sair. Fecha ao clicar fora, com
-// Esc (o foco volta ao avatar) ou quando o foco sai do menu. Setas para cima/baixo percorrem os itens.
+// Esc (o foco volta ao avatar) ou quando o foco vai pelo Tab para outro elemento da pagina. Setas para
+// cima/baixo percorrem os itens.
 //
 // O topo do app tem `overflow-hidden` (degrade + fundo que entra com a rolagem); por isso o painel e
 // `fixed`, ancorado no canto direito logo abaixo da barra de 64 px.
@@ -138,8 +139,14 @@ export function MemberAccountMenu({
     <div
       className={cn("relative shrink-0", className)}
       onBlur={(event) => {
-        // Tab para fora do menu fecha (sem puxar o foco de volta). Saindo, o menu fica aberto com "Saindo...".
-        if (open && !signingOut && !(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) {
+        // Tab para fora do menu fecha (sem puxar o foco de volta), mas so quando o foco foi para outro
+        // elemento da pagina. O Safari (macOS e iPhone) nao move o foco para um link ou botao no clique:
+        // o blur de um clique dentro do menu chega sem `relatedTarget`, e fechar aqui desmontava o item
+        // antes de o clique completar (a pagina nao mudava e Sair nao saia). Clique ou toque fora ja fecha
+        // pelo `pointerdown` no documento. Saindo, o menu fica aberto com "Saindo...".
+        const nextFocus = event.relatedTarget;
+
+        if (open && !signingOut && nextFocus instanceof Node && !event.currentTarget.contains(nextFocus)) {
           setOpen(false);
         }
       }}

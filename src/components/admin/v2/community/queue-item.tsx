@@ -56,7 +56,7 @@ export function QueueItemView({
         ]
       : []),
     { href: studentSearchHref(item.author.name), icon: UserRound, label: "Ver aluno", separatorBefore: canModerate },
-    { href: item.path.adminHref, icon: GraduationCap, label: "Abrir aula no admin" },
+    ...(item.path.adminHref ? [{ href: item.path.adminHref, icon: GraduationCap, label: "Abrir aula no admin" }] : []),
     ...(item.path.studentHref
       ? [{ external: true, href: item.path.studentHref, icon: MonitorPlay, label: "Ver na área do aluno" }]
       : [])
@@ -84,17 +84,21 @@ export function QueueItemView({
           <span className="truncate text-sm leading-5 font-semibold text-[var(--text-primary)]" id={nameId}>
             {item.author.name}
           </span>
-          <Link
-            className={cn(
-              "w-fit max-w-full rounded-sm text-[13px] leading-5 text-[var(--text-secondary)] [overflow-wrap:anywhere] hover:text-[var(--text-primary)] md:truncate",
-              adminTransition
-            )}
-            data-navigation-feedback="false"
-            href={item.path.adminHref}
-            title={`Abrir a aula no admin: ${item.path.label}`}
-          >
-            {item.path.label}
-          </Link>
+          {item.path.adminHref ? (
+            <Link
+              className={cn(
+                "w-fit max-w-full rounded-sm text-[13px] leading-5 text-[var(--text-secondary)] [overflow-wrap:anywhere] hover:text-[var(--text-primary)] md:truncate",
+                adminTransition
+              )}
+              data-navigation-feedback="false"
+              href={item.path.adminHref}
+              title={`Abrir a aula no admin: ${item.path.label}`}
+            >
+              {item.path.label}
+            </Link>
+          ) : (
+            <span className="w-fit max-w-full text-[13px] leading-5 text-[var(--text-secondary)] [overflow-wrap:anywhere] md:truncate">{item.path.label}</span>
+          )}
         </div>
         <span
           className={cn(

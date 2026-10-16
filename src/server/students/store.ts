@@ -154,6 +154,14 @@ export async function fetchProfileByEmail(db: StudentsDb, email: string): Promis
   return (data ?? null) as ProfileRow | null;
 }
 
+/** A conta e da equipe (admin_roles)? Senha, convite e dados da equipe nao mudam por Alunos. */
+export async function isStaffUser(db: StudentsDb, userId: string): Promise<boolean> {
+  const { data, error } = await db.from("admin_roles").select("user_id").eq("user_id", userId).maybeSingle();
+  failOnError(error, "Equipe");
+
+  return Boolean(data);
+}
+
 export async function fetchStaffUserIds(db: StudentsDb): Promise<Set<string>> {
   const { data, error } = await db.from("admin_roles").select("user_id");
   failOnError(error, "Equipe");
@@ -473,31 +481,8 @@ export async function deleteSegment(db: StudentsDb, segmentId: string) {
   failOnError(error, "Excluir segmento");
 }
 
-export type AuditInsert = {
-  action: string;
-  actorId: string | null;
-  count?: number | null;
-  entityId?: string | null;
-  entityType?: string | null;
-  /** So ids e contagens; nunca nome, e-mail (exceto a prova da exclusao) ou texto digitado. */
-  metadata?: Record<string, unknown>;
-};
-
-/** Registro de auditoria (append-only). Falha vira log: a acao ja aconteceu. */
-export async function recordAudit(db: StudentsDb, entry: AuditInsert) {
-  const { error } = await db.from("admin_audit_log").insert({
-    action: entry.action,
-    actor_id: entry.actorId,
-    count: entry.count ?? null,
-    entity_id: entry.entityId ?? null,
-    entity_type: entry.entityType ?? null,
-    metadata: entry.metadata ?? {}
-  });
-
-  if (error) {
-    console.error(`[auditoria] ${entry.action} nao gravada: ${error.message}`);
-  }
-}
+// Auditoria mora em src/server/audit/log.ts (tambem usada pela Equipe).
+export { recordAudit, type AuditInsert } from "@/server/audit/log";
 
 /** Linhas importadas por esta pessoa na ultima hora (teto no servidor). */
 export async function countImportedLastHour(db: StudentsDb, actorId: string) {

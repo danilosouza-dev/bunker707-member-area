@@ -47,7 +47,7 @@ export async function setProductOpensAs(
     invalidateCatalog({ from: "action" });
 
     return { mode: data.mode, productId: product.id };
-  });
+  }, { target: (data) => ({ productIds: [data.productId] }) });
 }
 
 /** Le a vitrine, aplica a fileira e grava com a versao lida. Devolve o estado novo. */

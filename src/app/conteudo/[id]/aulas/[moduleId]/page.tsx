@@ -53,6 +53,7 @@ export default async function LessonPage({ params, searchParams }: LessonPagePro
           accessPreviewMode={accessPreviewMode}
           allModules={allModules}
           currentUserId={user.id}
+          currentUserAvatarUrl={shellData.student.avatarUrl}
           currentUserName={shellData.student.fullName}
           initialLessonId={requestedLessonId}
           initialLessonReactions={initialLessonReactions}

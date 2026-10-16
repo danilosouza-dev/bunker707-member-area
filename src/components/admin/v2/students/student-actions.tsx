@@ -53,6 +53,12 @@ type StudentHeaderActionsProps = {
   alreadyGranted: readonly string[];
   canAccess: boolean;
   canDelete: boolean;
+  /** Telefone no "Editar dados" (so com "ver dados pessoais"). */
+  canEditPhone: boolean;
+  /** "Editar dados" (conta da equipe: so o dono). */
+  canEditProfile: boolean;
+  /** "Enviar e-mail de acesso" (nunca para a equipe). */
+  canSendAccessEmail: boolean;
   products: readonly PickerProduct[];
   student: StudentSummary;
   /** Hoje ("AAAA-MM-DD"), calculado no servidor. */
@@ -61,12 +67,24 @@ type StudentHeaderActionsProps = {
 
 type HeaderDialog = "grant" | "email" | "edit" | "delete" | null;
 
-export function StudentHeaderActions({ alreadyGranted, canAccess, canDelete, products, student, today }: StudentHeaderActionsProps) {
+export function StudentHeaderActions({
+  alreadyGranted,
+  canAccess,
+  canDelete,
+  canEditPhone,
+  canEditProfile,
+  canSendAccessEmail,
+  products,
+  student,
+  today
+}: StudentHeaderActionsProps) {
   const [dialog, setDialog] = useState<HeaderDialog>(null);
 
   if (!canAccess && !canDelete) {
     return null;
   }
+
+  const hasMenu = canSendAccessEmail || canEditProfile || canDelete;
 
   return (
     <>
@@ -76,32 +94,34 @@ export function StudentHeaderActions({ alreadyGranted, canAccess, canDelete, pro
           Liberar acesso
         </Button>
       ) : null}
-      <DropdownMenu>
-        <DropdownMenuTrigger aria-label="Mais ações" className={menuTrigger}>
-          <EllipsisVertical aria-hidden="true" className="size-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className={menuContent} sideOffset={6}>
-          {canAccess ? (
-            <>
+      {hasMenu ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger aria-label="Mais ações" className={menuTrigger}>
+            <EllipsisVertical aria-hidden="true" className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className={menuContent} sideOffset={6}>
+            {canSendAccessEmail ? (
               <DropdownMenuItem className={menuItem} disabled={!student.hasAccount} onClick={() => setDialog("email")}>
                 <Mail aria-hidden="true" className="size-4 text-[var(--text-secondary)]" />
                 Enviar e-mail de acesso
               </DropdownMenuItem>
+            ) : null}
+            {canEditProfile ? (
               <DropdownMenuItem className={menuItem} onClick={() => setDialog("edit")}>
                 <Pencil aria-hidden="true" className="size-4 text-[var(--text-secondary)]" />
                 Editar dados
               </DropdownMenuItem>
-            </>
-          ) : null}
-          {canAccess && canDelete ? <DropdownMenuSeparator className="bg-[var(--border-subtle)]" /> : null}
-          {canDelete ? (
-            <DropdownMenuItem className={menuItemDestructive} onClick={() => setDialog("delete")} variant="destructive">
-              <Trash2 aria-hidden="true" className="size-4" />
-              Excluir aluno
-            </DropdownMenuItem>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
+            ) : null}
+            {(canSendAccessEmail || canEditProfile) && canDelete ? <DropdownMenuSeparator className="bg-[var(--border-subtle)]" /> : null}
+            {canDelete ? (
+              <DropdownMenuItem className={menuItemDestructive} onClick={() => setDialog("delete")} variant="destructive">
+                <Trash2 aria-hidden="true" className="size-4" />
+                Excluir aluno
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
 
       <GrantAccessDialog
         alreadyGranted={alreadyGranted}
@@ -112,7 +132,7 @@ export function StudentHeaderActions({ alreadyGranted, canAccess, canDelete, pro
         today={today}
       />
       <SendAccessEmailDialog onOpenChange={(open) => setDialog(open ? "email" : null)} open={dialog === "email"} student={student} />
-      <EditStudentDialog onOpenChange={(open) => setDialog(open ? "edit" : null)} open={dialog === "edit"} student={student} />
+      <EditStudentDialog canEditPhone={canEditPhone} onOpenChange={(open) => setDialog(open ? "edit" : null)} open={dialog === "edit"} student={student} />
       <DeleteStudentDialog onOpenChange={(open) => setDialog(open ? "delete" : null)} open={dialog === "delete"} student={student} />
     </>
   );

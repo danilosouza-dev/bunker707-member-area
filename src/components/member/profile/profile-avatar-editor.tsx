@@ -14,36 +14,38 @@ import {
   type ReactNode
 } from "react";
 import {
-  chooseEncodedImage,
   cropRect,
-  dataUrlByteLength,
   initialCropState,
-  isWebpDataUrl,
   maxZoomFor,
   outputSizeFor,
   panCrop,
-  WEBP_QUALITY_STEPS,
   zoomCrop,
+  type CropRect,
   type CropSpec,
   type CropState
 } from "@/components/admin/v2/products/cover-crop";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { MemberButton } from "@/components/member/ui/member-button";
 import {
-  AVATAR_MAX_BYTES,
+  AVATAR_BACKGROUND_COLOR,
   AVATAR_MAX_DATA_URL_LENGTH,
   AVATAR_MAX_SOURCE_FILE_BYTES,
   AVATAR_MIN_SOURCE_SIZE,
   AVATAR_OUTPUT_SIZE,
-  AVATAR_TARGET_BYTES
+  AVATAR_SMALLER_SIZES,
+  AVATAR_TARGET_BYTES,
+  encodeAvatar,
+  type AvatarEncodingResult
 } from "@/lib/avatar-image";
 
 // Foto do perfil (Perfil, cabecalho): clicar na foto ou em "Alterar foto" escolhe uma imagem, o aluno
-// ajusta o recorte redondo (arrastar e zoom) e salva. O navegador recorta e comprime em WebP 512 px; o
-// servidor confere de novo (src/server/member-area/student-avatar-model.ts). A geometria do recorte e a
-// mesma do admin (cover-crop.ts), com a medida quadrada da foto. Visual pelas pecas da area do aluno
-// (docs/12): dialogo no formato do "Editar nome do chat" do Tutor, MemberButton, slider do player
-// (.bunker-player-timeline) e botao redondo translucido para a camera.
+// ajusta o recorte redondo (arrastar e zoom) e salva. O navegador recorta num quadrado de 512 px e
+// comprime no formato que consegue gerar (WebP; JPEG no Safari, iPhone e iPad, que nao geram WebP pelo
+// canvas; ver encodeAvatar em src/lib/avatar-image.ts); o servidor confere de novo
+// (src/server/member-area/student-avatar-model.ts). A geometria do recorte e a mesma do admin
+// (cover-crop.ts), com a medida quadrada da foto. Visual pelas pecas da area do aluno (docs/12): dialogo
+// no formato do "Editar nome do chat" do Tutor, MemberButton, slider do player (.bunker-player-timeline)
+// e botao redondo translucido para a camera.
 
 const AVATAR_CROP_SPEC: CropSpec = {
   label: "foto do perfil",
@@ -66,6 +68,27 @@ function cssUrl(url: string) {
 
 function nextFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+/** Desenha o recorte num canvas quadrado de `size` px sobre o fundo escuro (JPEG nao tem transparencia). */
+function drawCrop(image: HTMLImageElement, rect: CropRect, size: number) {
+  const canvas = document.createElement("canvas");
+
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("canvas");
+  }
+
+  context.fillStyle = AVATAR_BACKGROUND_COLOR;
+  context.fillRect(0, 0, size, size);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, size, size);
+
+  return canvas;
 }
 
 function loadImage(url: string) {
@@ -176,44 +199,33 @@ function AvatarCropDialog({
     await nextFrame();
 
     try {
-      const canvas = document.createElement("canvas");
+      // Medida da saida (ate 512 px, sem ampliar) e, se o arquivo nao couber nem na menor qualidade
+      // (so em PNG), medidas menores ate caber.
       const output = outputSizeFor(rect, spec);
-      canvas.width = output.width;
-      canvas.height = output.height;
-      const context = canvas.getContext("2d");
+      const sizes = [output.width, ...AVATAR_SMALLER_SIZES.filter((size) => size < output.width)];
+      let result: AvatarEncodingResult = { error: "too_large", ok: false };
 
-      if (!context) {
-        throw new Error("canvas");
-      }
+      for (const size of sizes) {
+        const canvas = drawCrop(source.element, rect, size);
 
-      context.imageSmoothingEnabled = true;
-      context.imageSmoothingQuality = "high";
-      context.drawImage(source.element, rect.x, rect.y, rect.width, rect.height, 0, 0, output.width, output.height);
+        result = encodeAvatar((type, quality) => canvas.toDataURL(type, quality));
 
-      const attempts: string[] = [];
-
-      for (const quality of WEBP_QUALITY_STEPS) {
-        const encoded = canvas.toDataURL("image/webp", quality);
-        attempts.push(encoded);
-
-        if (!isWebpDataUrl(encoded) || dataUrlByteLength(encoded) <= spec.maxBytes) {
+        if (result.ok || result.error !== "too_large") {
           break;
         }
       }
 
-      const choice = chooseEncodedImage(attempts, spec);
-
-      if (!choice.ok || dataUrlByteLength(choice.dataUrl) > AVATAR_MAX_BYTES) {
+      if (!result.ok) {
         setError(
-          !choice.ok && choice.error === "unsupported"
-            ? "Este navegador não consegue preparar a foto. Tente pelo Chrome, Edge ou Firefox."
+          result.error === "unsupported"
+            ? "Não conseguimos preparar esta foto. Escolha outra imagem."
             : "A foto ficou grande demais. Aumente o zoom ou escolha outra imagem."
         );
         setSaving(false);
         return;
       }
 
-      const problem = await onSave(choice.dataUrl);
+      const problem = await onSave(result.dataUrl);
 
       if (problem) {
         setError(problem);

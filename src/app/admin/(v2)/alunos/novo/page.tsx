@@ -7,7 +7,7 @@ import { studentListHref } from "@/components/admin/v2/students/hrefs";
 import { todayInputValue } from "@/components/admin/v2/students/format";
 import { NewStudentForm } from "@/components/admin/v2/students/new-student-form";
 import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { can } from "@/server/auth/roles";
 import { listProductOptions } from "@/server/catalog/queries";
 import { catalogIdSchema } from "@/server/catalog/schemas";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
@@ -32,9 +32,9 @@ function readNow() {
 }
 
 export default async function NewStudentPage({ searchParams }: NewStudentPageProps) {
-  const { role } = await requirePageAdmin();
+  const { access } = await requirePageAdmin();
 
-  if (!canRole(role, "students.access")) {
+  if (!can(access, "students.access")) {
     redirect(studentListHref());
   }
 

@@ -2,7 +2,8 @@ import "server-only";
 
 // Leitura da busca global do admin (Cmd/Ctrl+K): produtos, modulos e aulas pelo nome, 5 de cada.
 // Chamada so pela Server Action searchAdmin (src/server/admin/search-actions.ts), que ja passou pelo
-// guard de papel. Colunas explicitas; excluidos (status 'deleted') nunca aparecem.
+// guard de papel. Colunas explicitas; excluidos (status 'deleted') nunca aparecem. Quem tem acesso so
+// a alguns cursos (Professor) recebe so o que e desses cursos.
 
 import {
   ADMIN_SEARCH_GROUP_LIMIT,
@@ -19,16 +20,23 @@ type ProductHitRow = { id: string; kind: string; title: string };
 type ModuleHitRow = { id: string; owner_id: string | null; title: string };
 type LessonHitRow = { id: string; module_id: string; title: string };
 
-async function findProducts(pattern: string) {
-  const { data, error } = await catalogDb()
+/** Cursos que a busca pode mostrar: null = todos (escola toda). */
+type SearchScope = readonly string[] | null;
+
+async function findProducts(pattern: string, scope: SearchScope) {
+  let query = catalogDb()
     .from("content_items")
     .select("id,title,kind")
     .neq("kind", "Aula")
     .not("bucket", "in", PRODUCT_UNIVERSE.excludedBuckets)
     .or(PRODUCT_UNIVERSE.notIncluded)
-    .ilike("title", pattern)
-    .order("title", { ascending: true })
-    .limit(ADMIN_SEARCH_GROUP_LIMIT * 2);
+    .ilike("title", pattern);
+
+  if (scope) {
+    query = query.in("id", [...scope]);
+  }
+
+  const { data, error } = await query.order("title", { ascending: true }).limit(ADMIN_SEARCH_GROUP_LIMIT * 2);
   failOnError(error, "Busca de produtos");
 
   return ((data ?? []) as ProductHitRow[]).flatMap((row) => {
@@ -38,27 +46,41 @@ async function findProducts(pattern: string) {
   });
 }
 
-async function findModules(pattern: string) {
-  const { data, error } = await catalogDb()
-    .from("course_modules")
-    .select("id,owner_id,title")
-    .ilike("title", pattern)
-    .neq("status", "deleted")
-    .order("title", { ascending: true })
-    .limit(ADMIN_SEARCH_GROUP_LIMIT);
+async function findModules(pattern: string, scope: SearchScope) {
+  let query = catalogDb().from("course_modules").select("id,owner_id,title").ilike("title", pattern).neq("status", "deleted");
+
+  if (scope) {
+    query = query.in("owner_id", [...scope]);
+  }
+
+  const { data, error } = await query.order("title", { ascending: true }).limit(ADMIN_SEARCH_GROUP_LIMIT);
   failOnError(error, "Busca de módulos");
 
   return ((data ?? []) as ModuleHitRow[]).filter((row) => Boolean(row.owner_id));
 }
 
-async function findLessons(pattern: string) {
-  const { data, error } = await catalogDb()
-    .from("lessons")
-    .select("id,module_id,title")
-    .ilike("title", pattern)
-    .neq("status", "deleted")
-    .order("title", { ascending: true })
-    .limit(ADMIN_SEARCH_GROUP_LIMIT);
+/** Modulos dos cursos da pessoa (para limitar as aulas da busca). */
+async function fetchScopeModuleIds(scope: readonly string[]) {
+  const { data, error } = await catalogDb().from("course_modules").select("id").in("owner_id", [...scope]).neq("status", "deleted").limit(1000);
+  failOnError(error, "Módulos dos cursos da busca");
+
+  return ((data ?? []) as { id: string }[]).map((row) => row.id);
+}
+
+async function findLessons(pattern: string, scope: SearchScope) {
+  let query = catalogDb().from("lessons").select("id,module_id,title").ilike("title", pattern).neq("status", "deleted");
+
+  if (scope) {
+    const moduleIds = await fetchScopeModuleIds(scope);
+
+    if (moduleIds.length === 0) {
+      return [];
+    }
+
+    query = query.in("module_id", moduleIds);
+  }
+
+  const { data, error } = await query.order("title", { ascending: true }).limit(ADMIN_SEARCH_GROUP_LIMIT);
   failOnError(error, "Busca de aulas");
 
   return (data ?? []) as LessonHitRow[];
@@ -87,9 +109,13 @@ async function fetchProductTitles(ids: readonly string[]) {
 }
 
 /** Produtos, modulos e aulas cujo nome contem o texto (sem diferenciar maiusculas). */
-export async function searchAdminCatalog(query: string): Promise<AdminSearchResults> {
+export async function searchAdminCatalog(query: string, scope: SearchScope = null): Promise<AdminSearchResults> {
+  if (scope && scope.length === 0) {
+    return { lessons: [], modules: [], products: [] };
+  }
+
   const pattern = likeContains(query);
-  const [products, modules, lessons] = await Promise.all([findProducts(pattern), findModules(pattern), findLessons(pattern)]);
+  const [products, modules, lessons] = await Promise.all([findProducts(pattern, scope), findModules(pattern, scope), findLessons(pattern, scope)]);
 
   const lessonModules = await fetchModulesById([...new Set(lessons.map((lesson) => lesson.module_id))]);
   const moduleById = new Map(lessonModules.map((row) => [row.id, row]));

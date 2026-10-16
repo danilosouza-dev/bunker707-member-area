@@ -429,8 +429,9 @@ export type YouTubePlaylistCourseImportResult = {
 
 /**
  * Miolo da importacao, sem devolver o banco inteiro: valida, rele a playlist no servidor, envia a capa
- * ao Storage e grava pela RPC transacional import_youtube_course. Usado pela Server Action do admin
- * novo (src/server/catalog/import-actions.ts) e pela rota legada (importYouTubePlaylistAsCourse).
+ * ao Storage e grava pela RPC transacional admin_import_new_youtube_course (import_youtube_course so
+ * para playlist que ainda nao virou curso, com trava por playlist). Usado pela Server Action do admin
+ * (src/server/catalog/import-actions.ts).
  */
 export async function importYouTubePlaylistCourse(input: YouTubeCourseImportCommitInput): Promise<YouTubePlaylistCourseImportResult> {
   const title = input.title.trim();
@@ -480,9 +481,13 @@ export async function importYouTubePlaylistCourse(input: YouTubeCourseImportComm
     playlistUrl: preview.playlistUrl,
     title
   };
-  const result = await supabase.rpc("import_youtube_course", { course_import: manifest });
+  const result = await supabase.rpc("admin_import_new_youtube_course", { course_import: manifest });
 
   if (result.error) {
+    if (result.error.message?.includes("playlist_already_imported")) {
+      throw publicInputError("Esta playlist acabou de virar um curso. Abra o curso em Produtos.", 409);
+    }
+
     console.error("Erro importando playlist do YouTube", result.error);
     throw new Error("Nao foi possivel gravar o curso importado.");
   }

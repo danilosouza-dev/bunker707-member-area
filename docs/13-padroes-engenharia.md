@@ -47,6 +47,16 @@ Esse comando cobre lint, typecheck, testes automatizados e build.
 
 Alteracoes em acesso, persistencia ou navegacao devem incluir teste de regressao que prove a invariante afetada. Para mudancas perceptiveis no browser, o gate de codigo nao substitui uma validacao autenticada da rota, do console e da requisicao real.
 
+Como escrever esses testes, onde cada um fica, como rodar e a rotina de PR estao em `docs/18-padrao-de-testes.md`. Em resumo:
+
+- toda PR `feat` ou `fix` traz teste de comportamento do que mudou: unitario com dubles (`tests/*.test.mjs`), integracao contra o Supabase local (`tests/integration/`) ou ponta a ponta com Playwright (`tests/e2e/`), pela regra de bolso do docs/18;
+- correcao traz um teste que falhava antes e passa depois;
+- acesso, progresso, gravacao ou navegacao: integracao obrigatoria; tela ou fluxo novo do aluno ou do produtor: um ponta a ponta do caminho principal;
+- teste que so confere texto do codigo-fonte por expressao regular nao conta como teste de regressao de comportamento; so entra como guarda de regra de arquitetura, em `*.guard.test.mjs`;
+- sem teste, so com justificativa escrita na PR e pendencia anotada no mapa de cobertura do docs/18.
+
+O CI roda dois jobs em toda PR e push para `dev` e `main`: Verify (`npm run verify`) e Integracao e ponta a ponta (Supabase local em Docker, migracoes do zero, escola de teste, `npm run test:integration` e `npm run test:e2e`). `npm run verify:full` roda tudo isso localmente. Os testes com banco so rodam contra o Supabase local, nunca contra o projeto compartilhado.
+
 ## Organizacao de produto
 
 - A experiencia do aluno vem antes do admin/professor.
@@ -70,6 +80,8 @@ Alteracoes em acesso, persistencia ou navegacao devem incluir teste de regressao
 - Componentes e stores acima de aproximadamente 1.000 linhas devem ser tratados como candidatos a decomposicao por dominio, sem criar abstracoes vazias.
 - Novas regras nao devem aumentar `lesson-experience.tsx` ou `platform-store.ts` quando puderem viver em modulo de dominio testavel (ex.: `src/server/students/`).
 - Refatoracoes desses arquivos devem ser incrementais e acompanhadas por testes de contrato para evitar regressao visual ou de persistencia.
+
+- Links para paginas por aluno (aula, progresso, perfil) usam o prefetch padrao do Next; nunca `<Link prefetch>` (prefetch cheio), que guarda a pagina por ate 5 min no navegador e mostra estado velho. O teste `tests/member-area-link-prefetch.test.mjs` guarda essa regra nos cards que levam a aula.
 
 ## Desenvolvimento em volume externo
 

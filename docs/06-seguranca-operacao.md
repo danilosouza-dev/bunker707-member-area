@@ -28,10 +28,10 @@ Implementado no MVP atual:
 - Supabase Auth e usado como provedor de identidade;
 - o `proxy.ts` do Next.js (antigo `middleware.ts`) renova/valida sessao com `@supabase/ssr`: `getUser()` por padrao ou `getClaims()` com `AUTH_SESSION_STRATEGY=claims`; `getSession()` nunca decide acesso no servidor;
 - com `claims`, uma sessao revogada e um `must_change_password` marcado depois do login so aparecem no proxy quando o JWT for renovado (ate 1 h), mas as paginas protegidas seguem validando com `getUser()` (uma vez por request via `React.cache`) e, se o JWT ainda marca `must_change_password`, o proxy confirma com `getUser()` antes de redirecionar; ative `claims` primeiro no staging e so depois de migrar o projeto para signing keys assimetricas;
-- `profiles`, `entitlements`, `student_events`, `lesson_progress`, `admin_roles` e todas as tabelas de comentarios/moderacao possuem RLS;
+- `profiles`, `entitlements`, `student_events`, `lesson_progress`, `admin_roles`, `admin_functions` e todas as tabelas de comentarios/moderacao possuem RLS;
 - aluno pode ler/editar somente o proprio perfil, ler os proprios entitlements e gravar eventos proprios;
 - aluno nao possui policy para criar, alterar ou remover entitlements;
-- `/admin` e as APIs `/api/admin/*` exigem papel em `admin_roles`;
+- `/admin` e as APIs `/api/admin/*` exigem papel em `admin_roles`, e cada area, tela, Server Action e rota exige a permissao dela (tabela em docs/17 §2.3, secao "Equipe e permissoes" abaixo);
 - login, callback e reentrada em `/login` direcionam usuarios administrativos para `/admin` depois da autenticacao;
 - `/api/progress/lessons` grava progresso usando `auth.user.id`, nao um id vindo do cliente.
 - comentarios, reacoes, denuncias e progresso passam pela mesma autorizacao central de aula;
@@ -380,3 +380,31 @@ Desde 2026-10-11 o visual do `/login` e o topo da home sao editados no admin nov
 - imagens chegam ao banco so como URL: o recorte vira WebP no navegador, o servidor confere medida e peso pelo cabecalho do WebP e envia ao bucket `content-assets`; data URL, `http://` e `javascript:` sao recusados. Link de imagem colado (destaque, login, capa de produto, capa de modulo) tambem nao pode ter espaco, aspas, parenteses, `<`, `>` ou `\` (`imageLinkSchema`), e os cards do aluno desenham o fundo entre aspas e escapado (`cssImageUrl`): sem isso, uma capa `https://x/a.png);position:fixed;...` injetava CSS na home de todos os alunos;
 - `?template=` no endereco do `/login` nao muda mais nada (antes qualquer visitante trocava o modelo pelo endereco);
 - a previa do admin usa o proprio `LoginExperience` em modo `preview`: nao le nem cria sessao, nao envia formulario e nao redireciona. Quem esta logado e redirecionado ao abrir `/login`; para conferir o login publicado, use uma janela anonima.
+
+## Equipe e permissoes
+
+Desde 2026-10-15 o dono monta a equipe em Configuracoes > Equipe (`/admin/configuracoes/equipe`): funcoes prontas que se combinam, funcoes personalizadas e permissoes extras por pessoa. Tabela, regras e decisao de mercado em docs/17 §2.3.
+
+- **Uma conta por pessoa.** Ninguem compartilha senha. Conta existente (um aluno, por exemplo) so ganha as funcoes. Conta nova e criada sem e-mail, as funcoes sao gravadas e so entao sai o link para criar a senha, para nunca mandar convite a quem nao entrou na equipe.
+- **Menor privilegio e negar por padrao.** Cada area, tela, Server Action e rota confere a permissao no servidor. Permissao que vale so nos cursos da pessoa (a do Professor, por exemplo) so alcanca os cursos escolhidos: toda acao que pode valer por curso diz o que toca, e acao sem alvo e recusada. Permissao nova nunca entra sozinha numa funcao personalizada nem numa pessoa. Equipe e chaves de venda nunca entram numa funcao nem como extra.
+- **Funcao personalizada muda para todos.** Mudar uma funcao muda as permissoes de todo mundo que a tem, na proxima requisicao; a lista de funcoes mostra quantas pessoas cada uma tem, e funcao com alguem nela nao e excluida. Funcao que sumiu do banco nao da nada, e erro ao ler as funcoes deixa a pessoa sem admin ate a leitura voltar.
+- **Criar curso nao e vender curso.** Quem cria curso sem "Regras de acesso e venda" cria o curso fechado (so para quem tiver acesso), sem link de venda, fora de formacao e nao cria Formacao. Quem publica so nos proprios cursos nao publica uma formacao que levaria junto curso de fora da lista dele.
+- **O que se abre sem compra.** Na area do aluno, a pessoa da equipe abre sem compra o que enxerga no catalogo do admin. O alcance do catalogo (`catalogScope` em `src/server/auth/roles.ts`) segue esta regra:
+  - Alguma permissao de catalogo valendo na escola toda (montar aulas, criar cursos, editar os detalhes, acesso e venda, publicar, excluir ou ver os numeros): enxerga o catalogo inteiro no admin e abre todos os cursos sem compra.
+  - Permissao de catalogo so nos cursos e nenhuma na escola toda (o Professor sozinho, por exemplo): so os cursos dela.
+  - Nenhuma permissao de catalogo: quem so tem permissoes da escola toda (Suporte, por exemplo) enxerga tudo; quem tem alguma permissao so nos cursos (uma funcao so de comunidade por curso, por exemplo) ou ficou sem permissao porque a funcao nao abriu fica nos cursos dela.
+  - Exemplo: Professor + Analista ve o catalogo inteiro e abre todos os cursos, porque "ver os numeros" vale na escola toda; Professor + Suporte ve so os cursos dele, porque o Suporte nao traz permissao de catalogo.
+  - A Comunidade tem alcance proprio (`communityScope`), decidido so por responder e moderar: Professor + Suporte responde em todos os cursos, mas no catalogo continua so nos dele.
+- **Dados pessoais e dinheiro.** Exportar CSV, excluir aluno e ver telefone sao permissoes separadas de "ver a lista". Exportar exige ver dados pessoais, porque o CSV leva telefone. Sem essa permissao, telefone e historico nem saem do servidor. Chaves das plataformas de venda (`settings.sales`) e a Equipe (`settings.team`) ficam so com o dono.
+- **Conta da equipe nao muda por Alunos.** Adicionar aluno e "Enviar e-mail de acesso" recusam conta da equipe. Dados da equipe so o dono muda. Isso impede que alguem que libera acesso gere a senha do dono e entre como ele. Ao entrar na equipe, a senha antiga de uma conta que nunca entrou e trocada por uma aleatoria.
+- **Dono protegido.**
+  - Ninguem muda a propria funcao nem se remove.
+  - A escola nunca fica sem dono: o servidor confere, e o gatilho `guard_last_admin_owner` confere de novo, com trava.
+  - Apagar a conta do ultimo dono tambem falha.
+- **Saida de alguem da equipe.** Tirar da equipe corta o admin na proxima requisicao, porque as permissoes sao lidas a cada requisicao. A conta continua como aluno; nao e preciso derrubar a sessao.
+- **Area do aluno.** A equipe abre conteudo sem compra para conferir o que vende. Quem fica so nos proprios cursos pela regra acima (o Professor sozinho, por exemplo) so abre os cursos dele, e o "Ver como aluno" e so de quem ve o catalogo da escola toda.
+- **Auditoria.** Adicionar, mudar funcoes, extras e cursos (antes e depois), tirar da equipe, reenviar convite e criar, mudar (antes e depois) ou excluir funcao personalizada gravam em `admin_audit_log`.
+- **Recomendado antes de abrir a equipe para mais gente:**
+  - ligar a 2FA (Supabase TOTP) e exigir `aal2` no `/admin`;
+  - ligar a protecao contra senhas vazadas no Supabase Auth;
+  - revisar a equipe a cada trimestre (a lista mostra o ultimo acesso).

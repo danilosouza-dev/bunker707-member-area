@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ProductAccessForm } from "@/components/admin/v2/products/access-form";
 import { PendingMigrationNotice } from "@/components/admin/v2/pending-migration-notice";
-import { requirePageAdmin } from "@/server/auth/guards";
+import { requireProductPage } from "@/server/auth/permissions";
+import { canSeeProductAccess } from "@/server/auth/roles";
 import { getProductAccess } from "@/server/catalog/queries";
 import { loadUnlessPendingMigration } from "@/server/db/pending-migration";
 
@@ -16,8 +17,13 @@ type ProductAccessPageProps = {
 
 // Aba Acesso e venda (docs/17 §1.6.5). O cabecalho e as permissoes vem do layout do produto.
 export default async function ProductAccessPage({ params }: ProductAccessPageProps) {
-  await requirePageAdmin();
   const { id } = await params;
+  const session = await requireProductPage(id);
+
+  if (!canSeeProductAccess(session.access)) {
+    redirect(`/admin/produtos/${encodeURIComponent(id)}`);
+  }
+
   const loaded = await loadUnlessPendingMigration(() => getProductAccess(id));
 
   if (!loaded.ok) {

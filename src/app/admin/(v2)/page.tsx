@@ -14,8 +14,8 @@ import { buildTodayDemo } from "@/components/admin/v2/today/today-demo";
 import { TodayView } from "@/components/admin/v2/today/today-view";
 import { isAdminDemoEnabled } from "@/server/admin/demo";
 import { readTodayAttention, readTodayByProduct, readTodayNewAccesses } from "@/server/admin/today";
-import { requirePageAdmin } from "@/server/auth/guards";
-import { canRole } from "@/server/auth/roles";
+import { requirePageArea } from "@/server/auth/permissions";
+import { can } from "@/server/auth/roles";
 import { getUserDisplayName } from "@/server/auth/session";
 
 export const metadata: Metadata = {
@@ -34,7 +34,7 @@ function readNow() {
 // Hoje (docs/17 §1.5): esta pagina so le (periodo e produto da barra superior, cartoes de atencao, novos
 // acessos, por produto) e entrega tudo pronto para TodayView, que so desenha. Cada parte falha sozinha.
 export default async function AdminTodayPage({ searchParams }: AdminTodayPageProps) {
-  const [{ role, user }, params] = await Promise.all([requirePageAdmin(), searchParams]);
+  const [{ access, user }, params] = await Promise.all([requirePageArea("hoje"), searchParams]);
   const now = readNow();
   const resolved = readAdminPeriod(params, now);
   const productId = parseAdminProduct(params.produto);
@@ -54,7 +54,7 @@ export default async function AdminTodayPage({ searchParams }: AdminTodayPagePro
     byProduct,
     byProductMeta: getByProductMeta(resolved),
     comparisonLabel: resolved.comparisonLabel,
-    createItems: getTodayCreateItems((action) => canRole(role, action)),
+    createItems: getTodayCreateItems((action) => can(access, action)),
     dateLabel: formatTodayDate(now),
     demo,
     greeting: `${getGreeting(now)}, ${getUserDisplayName(user).name}`,

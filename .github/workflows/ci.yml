@@ -5,10 +5,9 @@ on:
     branches:
       - main
       - dev
+  # Toda PR, qualquer que seja a base: as PRs empilhadas (uma aberta sobre a outra) tambem passam
+  # pelos dois jobs antes de chegar na dev.
   pull_request:
-    branches:
-      - main
-      - dev
 
 jobs:
   verify:
@@ -30,3 +29,55 @@ jobs:
 
       - name: Verify
         run: npm run verify
+
+  integration:
+    name: Integração e ponta a ponta (Supabase local)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.11.0
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.121.0
+
+      # Sobe Postgres, Auth e Storage locais em Docker, aplica as 37 migracoes do zero e cria a escola
+      # de teste (docs/18 §2.5). Nunca toca no projeto Supabase compartilhado.
+      - name: Supabase local
+        run: node tests/support/db.mjs start --ci
+
+      - name: Testes de integração
+        run: npm run test:integration
+
+      - name: Navegadores do Playwright
+        run: npx playwright install --with-deps chromium webkit
+
+      # O Playwright builda o app e o sobe na porta 3100 com as variaveis de .env.test.local
+      # (tests/support/e2e-server.mjs); roda em Chromium e WebKit.
+      - name: Testes de ponta a ponta
+        run: npm run test:e2e
+
+      - name: Guardar traços, capturas e vídeos das falhas
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+      - name: Parar Supabase local
+        if: always()
+        run: node tests/support/db.mjs stop

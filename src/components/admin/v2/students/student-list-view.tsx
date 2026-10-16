@@ -149,9 +149,9 @@ export function StudentListView({
         {list.total > list.pageSize || filtered ? (
           <StudentListPagination hrefFor={(page) => studentListHref(filters, { page })} page={list.page} pageSize={list.pageSize} total={list.total} />
         ) : null}
+        {/* Dentro da coluna da tabela: a barra flutuante fica com a mesma largura dela. */}
+        {canAccess ? <BulkActionsBar canExport={canExport} cohorts={cohorts} labels={labels} products={pickerProducts} today={todayInputValue(now)} /> : null}
       </div>
-
-      {canAccess ? <BulkActionsBar canExport={canExport} cohorts={cohorts} labels={labels} products={pickerProducts} today={todayInputValue(now)} /> : null}
     </StudentSelectionProvider>
   );
 }

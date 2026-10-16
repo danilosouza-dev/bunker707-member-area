@@ -143,8 +143,8 @@ test("preview groups, orders and de-duplicates playlist lessons safely", () => {
 });
 
 test("import actions revalidate the playlist server-side and never trust a client manifest", () => {
-  assert.match(importActionsSource, /runAdminAction\("catalog\.write", previewPlaylistSchema/);
-  assert.match(importActionsSource, /runAdminAction\("catalog\.write", importPlaylistSchema/);
+  assert.match(importActionsSource, /runAdminAction\("catalog\.create", previewPlaylistSchema/);
+  assert.match(importActionsSource, /runAdminAction\("catalog\.create", importPlaylistSchema/);
   assert.match(importActionsSource, /importYouTubePlaylistCourse\(/);
   assert.match(importerSource, /loadYouTubeCourseImportPreview\(input\.playlistUrl/);
   assert.match(importerSource, /organizationMode: input\.organizationMode/);
