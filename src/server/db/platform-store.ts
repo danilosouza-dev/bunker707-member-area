@@ -2872,8 +2872,8 @@ export async function deleteContentItem(itemId: string) {
     await throwIfSupabaseError(deleteSavedResult.error, "Erro removendo favoritos do conteudo");
   }
 
-  const deleteStudentCoursesResult = await supabase.from("student_courses").delete().eq("target_id", itemId);
-  await throwIfSupabaseError(deleteStudentCoursesResult.error, "Erro removendo acessos do conteudo");
+  // A tabela student_courses (admin antigo) foi removida na migracao 202610140001; os acessos reais sao
+  // os entitlements, revogados logo abaixo. Apagar dela aqui derrubava "Excluir produto" com 500.
 
   // Entitlements apontando para o conteudo removido sao revogados (nao apagados) para manter trilha de auditoria
   // e impedir que um re-import com id deterministico (ex.: yt-course-<playlistId>) reanexe acessos antigos.
