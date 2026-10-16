@@ -1,6 +1,6 @@
 # 18. Padrão de testes e rotina de qualidade
 
-Data: 16/10/2026. Etapa 1 de 3 (diagnóstico e padrão). Documento vivo: as etapas 2 e 3 só começam depois do ok do produtor nas decisões da seção 6.
+Data: 16/10/2026. Etapa 1 (diagnóstico e padrão) aprovada pelo produtor em 16/10, com ok nas seis decisões da seção 6. Etapa 2 em andamento: a PR 2a (banco de teste local e primeiro teste de integração) está feita; 2b e 2c vêm em seguida. Documento vivo: cada PR das etapas 2 e 3 atualiza as seções 2.4, 3 e 4.
 
 Este documento existe por causa de um erro simples que escapou: a mesma aula aparecia como **Concluída** quando o aluno entrava pelo módulo do curso e como **Concluir** quando entrava pelo card "Continue assistindo" da home. Nenhum dos 789 testes do repositório pegou isso, porque nenhum deles abre a tela ou grava no banco de verdade. A partir daqui, toda funcionalidade nova ou correção vem com um teste que prova o comportamento, e a rotina (template de PR, CI e documentação) cobra isso.
 
@@ -189,20 +189,24 @@ Local:
 
 ```bash
 npm test                    # unitários, sem nada instalado além do npm ci
-npm run db:start            # sobe o Supabase local (Docker), aplica migrações e a escola de teste
+npm run db:start            # sobe o Supabase local (Docker), aplica migrações, escreve .env.test.local e cria a escola de teste
 npm run test:integration    # precisa do db:start
-npm run test:e2e            # precisa do db:start; o Playwright sobe o app sozinho (build + start na porta 3100)
-npm run test:e2e -- --ui    # modo visual para investigar
-npm run db:reset            # recria o banco local do zero
+npm run db:seed             # só recria a escola de teste (sem mexer no banco)
+npm run db:reset            # recria o banco local do zero (migrações + escola de teste)
 npm run db:stop
+npm run test:e2e            # (PR 2b) precisa do db:start; o Playwright sobe o app sozinho (build + start na porta 3100)
+npm run test:e2e -- --ui    # (PR 2b) modo visual para investigar
 npm run verify              # portão local: lint, typecheck, unitários, build (inalterado)
-npm run verify:full         # verify + integração + ponta a ponta (o que o CI faz)
+npm run verify:full         # (PR 2c) verify + integração + ponta a ponta (o que o CI faz)
 ```
+
+Os comandos marcados com a PR ainda não existem; os outros já funcionam. Primeira vez: `npm run db:start` baixa o CLI do Supabase (via `npx`) e as imagens do Docker, o que leva alguns minutos; depois, uns 20 segundos. O Docker Desktop precisa estar aberto. O que `db:start` faz está em `tests/support/db.mjs`.
 
 CI (`.github/workflows/ci.yml`), em toda PR e push para `dev` e `main`:
 
 - job **Verify** (como hoje): `npm run verify`, cerca de 2,5 min;
-- job **E2E** (novo, em paralelo): instala o Supabase CLI, `supabase start`, aplica migrações e a escola de teste, `next build`, `npm run test:integration`, `npm run test:e2e` em Chromium e WebKit; em falha, guarda traços, capturas de tela e vídeo como artefatos para baixar. Meta: menos de 8 min.
+- job **Integração (Supabase local)** (desde a PR 2a, em paralelo): instala o CLI do Supabase, sobe Postgres, Auth e Storage em Docker sem os serviços que os testes não usam (`db.mjs start --ci`), aplica as migrações do zero, cria a escola de teste e roda `npm run test:integration`;
+- a PR 2b acrescenta ao mesmo job o `next build` e `npm run test:e2e` em Chromium e WebKit, guardando traços, capturas de tela e vídeo como artefatos em caso de falha. Meta do job completo: menos de 8 min.
 
 Os dois precisam estar verdes para a PR entrar. Como o GitHub não bloqueia (seção 6, decisão 3), a regra fica no `CONTRIBUTING.md` e no template até a conta permitir proteção de branch.
 
@@ -221,18 +225,18 @@ Pre-commit (husky) não muda: lint, typecheck e unitários. Integração e ponta
 | Contas e escola de teste dentro do projeto compartilhado | criar "Aluno Teste" e "Curso Teste" no banco de produção | nenhuma instalação | escreve no banco dos alunos reais; risco de aparecer para aluno de verdade ou de apagar algo errado; e-mails reais disparados; nunca dá para resetar | **descartado** |
 | Supabase Branching | um banco por PR, criado pela própria Supabase | ideal em teoria | exige plano Pro da Supabase e integração com o GitHub | revisitar quando houver plano pago |
 
-**Escola de teste.** Um arquivo SQL (`tests/fixtures/escola-de-teste.sql`) cria uma escola fictícia pequena e previsível: 1 formação com 1 curso, 2 módulos e 3 aulas (vídeo do YouTube de placeholder), 1 aula com liberação futura, 1 produto bloqueado, materiais, 1 comentário. Contas (criadas pelo Auth local, com senha própria de teste): aluna com acesso, aluno sem acesso, produtor (dona), analista (só leitura), professor com alcance em um curso. E-mails em domínio reservado (`@bunker707.test`), que nunca entrega nada. Nenhum dado vem de pessoa real.
+**Escola de teste.** `tests/fixtures/escola-de-teste.mjs` cria, pelo cliente do Supabase (não por SQL solto, para passar pelas mesmas tabelas e gatilhos do app), uma escola fictícia pequena e previsível. Hoje: 1 curso comprado ("Curso de Teste: Agentes de IA", 2 módulos, 3 aulas com vídeo do YouTube de exemplo), 1 curso à venda que ninguém comprou (aparece bloqueado) e 4 contas criadas no Auth local com senha de teste: aluna com acesso, aluno sem acesso, produtor (dono) e analista (só leitura). E-mails em domínio reservado (`@bunker707.test`), que nunca entrega nada. Nenhum dado vem de pessoa real. Cada PR da etapa 3 acrescenta o que precisar (aula com liberação futura, materiais, comentário, professor com alcance por curso). A função é idempotente: rodar de novo deixa tudo igual, e `limparProgresso` zera progresso, favoritos e atividade das contas antes de cada arquivo de teste.
 
 **Sessão.**
 
 - Unitário: como hoje, `requireRole`/`getAuthenticatedUser` trocados por dublês pelo hook de `tests/support/admin-action-stubs.mjs`.
-- Integração: mesmo hook, mas só a **sessão** é dublê (devolve o id da conta de teste); o banco é o local, de verdade. Rotas `/api` são chamadas como função com um `Request` montado no teste.
+- Integração: `tests/support/integration-hooks.mjs` troca só a **sessão** (`src/server/auth/session.ts` vira `integration-session.mjs`; o teste diz quem está logado com `actAs(usuario)`) e os módulos que só existem dentro do Next (`server-only`, `next/navigation`). O cliente do banco, as regras de acesso e as gravações são as reais, contra o Supabase local. Rotas `/api` são chamadas como função com um `Request` montado no teste; as permissões da equipe continuam vindo de `admin_roles` no banco local.
 - Ponta a ponta: login real pela tela de entrar, uma vez por persona, com a sessão guardada e reaproveitada pelos testes (`storageState` do Playwright).
 
 **Travas de segurança.**
 
-- O cliente de banco dos testes de integração e o `webServer` do Playwright recebem as variáveis explicitamente (lidas de `npx supabase status`), nunca de `.env.local`. Se a URL não for `127.0.0.1`/`localhost`, o teste **recusa rodar** antes de qualquer consulta.
-- Nada de chave de produção em arquivo de teste. As chaves do Supabase local são as de demonstração do CLI e ficam em `.env.test.local` (ignorado pelo git), geradas pelo `npm run db:start`.
+- `npm run db:start` escreve `.env.test.local` (ignorado pelo git) a partir de `supabase status`, e só se o endereço devolvido for local. Os testes de integração carregam esse arquivo (`node --env-file-if-exists=.env.test.local`), nunca `.env.local`. Variável já exportada no terminal tem prioridade sobre o arquivo, e por isso a segunda trava existe: `tests/support/local-db.mjs` **recusa rodar** antes de qualquer consulta se a URL não for `127.0.0.1`/`localhost`, com uma mensagem dizendo o que fazer.
+- Nada de chave de produção em arquivo de teste. As chaves do Supabase local são as de demonstração do CLI, iguais em qualquer máquina, e não dão acesso a nada fora do computador.
 - Serviços externos não são chamados: YouTube bloqueado por `page.route` (o espaço do player continua renderizando), Tutor IA com gateway falso em HTTP local, PostHog e Sentry desligados por variável, e-mail fica na caixa local.
 
 ### 2.6 Ferramenta de ponta a ponta: Playwright
@@ -290,7 +294,7 @@ Legenda da coluna "Hoje": **C** = teste de comportamento, **T** = só texto do c
 | Continue assistindo (fileira e página) | aulas começadas e não terminadas, da mais recente | C (modelo da página) | — | — | mesma regra nos dois lugares com banco; **regressão: concluída no módulo = concluída no card** | A |
 | Curso, formação e módulos | página do produto, módulos, liberação por data, conteúdo bloqueado redireciona | C (regras de data; módulos/vitrine do lado do admin) | — | — | `getContentPageData` com banco; bloqueado redireciona; abrir curso → módulo → aula no navegador | A |
 | Aula com player | YouTube oficial em Full HD, legendas, playlist, descrição, atalhos | C (medidas do embed, detecção de vídeo, legendas, faixas) + T (layout: 22 testes) | — | — | abrir aula no navegador (player presente, playlist, trocar de aula); `getLessonPageData` com estados iniciais | A |
-| Concluir aula e progresso | botão Concluir/Concluída/Desmarcar, % no card, barra do módulo, Minha jornada | T (rota e componente) + C (1 cálculo de %) | — | — | PUT grava e lê igual; recusa sem acesso; limite de 500 ids; os três lugares leem o mesmo estado; concluir e desmarcar pelo módulo e pelo card, no navegador | **A** (bug aberto) |
+| Concluir aula e progresso | botão Concluir/Concluída/Desmarcar, % no card, barra do módulo, Minha jornada | T (rota e componente) + C (1 cálculo de %) | C (`progresso-aula`: PUT grava, 401/400/403/404, página da aula e fileira Continue assistindo leem o mesmo estado ao concluir e ao desmarcar) | — | Minha jornada lê o mesmo estado (integração); concluir e desmarcar pelo módulo e pelo card, no navegador (ponta a ponta, PR 3a) | **A** (bug aberto) |
 | Comentários | publicar, responder, reagir, denunciar, papel (Professor/Moderador), foto | C (validação e moderação de texto) + T (store, rotas, tela) | — | — | store e rotas com banco (só aula com acesso, criar, reagir, denunciar); publicar e ver aparecer com foto, no navegador | A |
 | Materiais (aba e página) | lista real por aula, filtro, bloqueio com motivo | C (recarregar) + T (rota) | — | — | rota só devolve de aula com acesso; aba mostra os materiais da escola de teste | M |
 | Tutor IA | pergunta sobre a aula, citações com tempo, contexto só da transcrição | C (citações, intenção de pular) + T (rotas, painel) | — | — | rotas com provedor falso (sessão, dono da conversa, contexto só da aula autorizada); enviar pergunta no navegador com gateway falso | M |
@@ -328,11 +332,11 @@ Legenda da coluna "Hoje": **C** = teste de comportamento, **T** = só texto do c
 ### Etapa 1 — Diagnóstico e padrão (esta PR)
 
 - Este documento, ligado em `README.md`, `CONTRIBUTING.md`, `docs/13` e `AGENTS.md`.
-- Pronto quando: o produtor leu e decidiu os itens da seção 6.
+- Pronto quando: o produtor leu e decidiu os itens da seção 6. Feito em 16/10 (ok nas seis decisões).
 
 ### Etapa 2 — Base da rotina (3 PRs)
 
-**2a. Banco de teste e integração.** Supabase local configurado (`supabase/config.toml` já existe); `tests/fixtures/escola-de-teste.sql`; scripts `db:start`, `db:stop`, `db:reset`, `test:integration`; trava de URL local; cliente de banco de teste em `tests/support/`; **um teste de integração de verdade**: gravar progresso pelo `PUT /api/progress/lessons` e ler de volta pelo `getLessonPageData` e pela fileira da home. Job E2E no CI subindo o Supabase. Pronto quando: `npm run db:start && npm run test:integration` passa no Mac e no CI; as 37 migrações sobem do zero (se alguma não subir, a correção entra nesta PR ou vira pendência explícita).
+**2a. Banco de teste e integração (feita).** Supabase local pelo CLI (`supabase/config.toml` já existia); `tests/fixtures/escola-de-teste.mjs`; scripts `db:start`, `db:stop`, `db:reset`, `db:seed`, `test:integration` (`tests/support/db.mjs`); trava de URL local (`tests/support/local-db.mjs`); sessão simulada para integração (`tests/support/integration-hooks.mjs`); **o primeiro teste de integração de verdade** (`tests/integration/progresso-aula.test.mjs`, 9 testes): gravar progresso pelo `PUT /api/progress/lessons` e ler de volta pelo `getLessonPageData` e pela fileira Continue assistindo de `getHomePageData`, ao concluir e ao desmarcar; 401, 400, 403 e 404. Job **Integração (Supabase local)** no CI. As 37 migrações sobem do zero.
 
 **2b. Navegador.** Playwright instalado (Chromium e WebKit), `playwright.config.ts` com `webServer` na porta 3100 e variáveis explícitas, `auth.setup.ts` com login por persona, bloqueio de YouTube/PostHog/Sentry; **um fluxo de verdade**: aluna entra com senha, cai na home, abre o curso, abre a aula e vê o player e a playlist. Artefatos de falha no CI. Pronto quando: `npm run test:e2e` verde no Mac e no CI, em menos de 8 min.
 
@@ -358,8 +362,8 @@ Cada PR da etapa 3 atualiza as tabelas da seção 3.
 
 ### Riscos conhecidos
 
-- **Migrações do zero.** Nunca rodaram em banco vazio. `202610100001_jobs_cron.sql` cria `pg_cron`, `pg_net` e `vault` (existem no Supabase local); 12 migrações referenciam `auth.users` (existe no local). Se alguma quebrar, a 2a corrige e isso já é um ganho para a produção.
-- **Docker no Mac.** Instalado, mas desligado. Sem ele, integração e ponta a ponta só rodam no CI. É aceitável para começar.
+- **Migrações do zero.** Resolvido na PR 2a: as 37 migrações sobem em banco vazio sem erro (Supabase CLI 2.121, Postgres 17), inclusive `202610100001_jobs_cron.sql` com `pg_cron`, `pg_net` e `vault`. A partir de agora o CI prova isso em toda PR.
+- **Docker no Mac.** Instalado; precisa estar aberto para `npm run db:start`. Sem ele, integração e ponta a ponta só rodam no CI. É aceitável para começar.
 - **Tempo do CI.** O job E2E deve ficar abaixo de 8 min. Se passar, cortamos WebKit para só os fluxos que dependem dele (foto, player) e mantemos Chromium no resto.
 - **Testes intermitentes.** Player com vídeo externo e animações são as fontes clássicas. Mitigação: bloquear rede externa, esperar por estado e não por tempo, e a regra 8 da rotina.
 - **Versão do Node.** `package.json` pede Node 24; o CI usa 24.11; o Mac está no 26. Os scripts novos não podem depender de nada fora do 24.

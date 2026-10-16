@@ -30,3 +30,37 @@ jobs:
 
       - name: Verify
         run: npm run verify
+
+  integration:
+    name: Integração (Supabase local)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.11.0
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.121.0
+
+      # Sobe Postgres, Auth e Storage locais em Docker, aplica as 37 migracoes do zero e cria a escola
+      # de teste (docs/18 §2.5). Nunca toca no projeto Supabase compartilhado.
+      - name: Supabase local
+        run: node tests/support/db.mjs start --ci
+
+      - name: Testes de integração
+        run: npm run test:integration
+
+      - name: Parar Supabase local
+        if: always()
+        run: node tests/support/db.mjs stop
