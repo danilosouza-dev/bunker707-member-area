@@ -5,6 +5,7 @@ export type ContaDeTesteCriada = ContaDeTeste & { id: string };
 
 export const SENHA_DE_TESTE: string;
 export const DATA_DE_LIBERACAO_FUTURA: string;
+export const INICIO_DO_ACESSO: string;
 
 export const ESCOLA_DE_TESTE: {
   contas: {
@@ -22,6 +23,7 @@ export const ESCOLA_DE_TESTE: {
     titulo: string;
   };
   cursoBloqueado: { aulas: { aula1: string }; id: string; modulos: { modulo1: string }; titulo: string };
+  materiais: { apostila: string; checklist: string; daAulaFutura: string; rascunho: string };
   cursoLiberacao: {
     aulas: { futura: string; liberada: string; rascunho: string };
     id: string;

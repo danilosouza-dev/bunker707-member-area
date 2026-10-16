@@ -40,6 +40,13 @@ export const ESCOLA_DE_TESTE = {
     modulos: { modulo1: "teste-modulo-bloqueado-1" },
     titulo: "Curso de Teste: Bloqueado"
   },
+  /** Materiais de apoio (lesson_materials) das aulas de teste. */
+  materiais: {
+    apostila: "aaaaaaaa-0000-4000-8000-000000000001",
+    checklist: "aaaaaaaa-0000-4000-8000-000000000002",
+    daAulaFutura: "aaaaaaaa-0000-4000-8000-000000000004",
+    rascunho: "aaaaaaaa-0000-4000-8000-000000000003"
+  },
   /** Curso que a aluna tambem comprou: 1 aula liberada, 1 com data futura e 1 em rascunho. */
   cursoLiberacao: {
     aulas: {
@@ -55,6 +62,9 @@ export const ESCOLA_DE_TESTE = {
 
 /** Data fixa de liberacao da aula futura (bem longe, para o teste nunca virar). */
 export const DATA_DE_LIBERACAO_FUTURA = "2099-01-01T12:00:00.000Z";
+
+/** Inicio dos acessos de teste: meio-dia UTC, para cair em 01/01/2026 tambem no fuso da escola (Sao Paulo). */
+export const INICIO_DO_ACESSO = "2026-01-01T12:00:00.000Z";
 
 const VIDEO_DE_TESTE = { provider: "youtube", url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ" };
 
@@ -273,6 +283,59 @@ function lessonRows() {
   ];
 }
 
+function materialRows() {
+  const { curso, cursoLiberacao, materiais } = ESCOLA_DE_TESTE;
+
+  return [
+    {
+      description: "Resumo da aula em PDF.",
+      file_size_bytes: 120_000,
+      file_type: "pdf",
+      file_url: "https://exemplo.test/materiais/apostila-aula-1.pdf",
+      id: materiais.apostila,
+      lesson_id: curso.aulas.aula1,
+      sort_order: 1,
+      status: "published",
+      title: "Apostila da aula 1",
+      unlock_rule: "none"
+    },
+    {
+      description: "Libera depois de assistir metade da aula.",
+      file_type: "document",
+      file_url: "https://exemplo.test/materiais/checklist-aula-1.docx",
+      id: materiais.checklist,
+      lesson_id: curso.aulas.aula1,
+      sort_order: 2,
+      status: "published",
+      title: "Checklist da aula 1",
+      unlock_rule: "lesson_progress",
+      unlock_threshold: 50
+    },
+    {
+      description: "Ainda em rascunho: o aluno nao ve.",
+      file_type: "link",
+      file_url: "https://exemplo.test/materiais/rascunho",
+      id: materiais.rascunho,
+      lesson_id: curso.aulas.aula1,
+      sort_order: 3,
+      status: "draft",
+      title: "Material em rascunho",
+      unlock_rule: "none"
+    },
+    {
+      description: "Material de uma aula que ainda nao foi liberada.",
+      file_type: "pdf",
+      file_url: "https://exemplo.test/materiais/aula-futura.pdf",
+      id: materiais.daAulaFutura,
+      lesson_id: cursoLiberacao.aulas.futura,
+      sort_order: 1,
+      status: "published",
+      title: "Material da aula futura",
+      unlock_rule: "none"
+    }
+  ];
+}
+
 async function findAccountByEmail(db, email) {
   const { users } = unwrap(await db.auth.admin.listUsers({ page: 1, perPage: 1000 }), "Lendo contas de teste");
 
@@ -379,6 +442,7 @@ export async function seedEscolaDeTeste(db) {
   unwrap(await db.from("content_items").upsert(contentItemRows(), { onConflict: "id" }), "Gravando cursos de teste");
   unwrap(await db.from("course_modules").upsert(moduleRows(), { onConflict: "id" }), "Gravando modulos de teste");
   unwrap(await db.from("lessons").upsert(lessonRows(), { onConflict: "id" }), "Gravando aulas de teste");
+  unwrap(await db.from("lesson_materials").upsert(materialRows(), { onConflict: "id" }), "Gravando materiais de teste");
 
   // Acesso: a aluna comprou dois cursos; a aluna expirada comprou o curso, mas o acesso acabou ontem;
   // o aluno sem acesso nao tem nada.
@@ -390,7 +454,7 @@ export async function seedEscolaDeTeste(db) {
           ends_at: null,
           source_event_id: "escola-de-teste:aluna:curso-agentes",
           source_provider: "manual",
-          starts_at: "2026-01-01T00:00:00.000Z",
+          starts_at: INICIO_DO_ACESSO,
           status: "active",
           target_id: ESCOLA_DE_TESTE.curso.id,
           target_type: "standalone_course",
@@ -400,7 +464,7 @@ export async function seedEscolaDeTeste(db) {
           ends_at: null,
           source_event_id: "escola-de-teste:aluna:curso-liberacao",
           source_provider: "manual",
-          starts_at: "2026-01-01T00:00:00.000Z",
+          starts_at: INICIO_DO_ACESSO,
           status: "active",
           target_id: ESCOLA_DE_TESTE.cursoLiberacao.id,
           target_type: "standalone_course",
@@ -410,7 +474,7 @@ export async function seedEscolaDeTeste(db) {
           ends_at: ontem,
           source_event_id: "escola-de-teste:expirada:curso-agentes",
           source_provider: "manual",
-          starts_at: "2026-01-01T00:00:00.000Z",
+          starts_at: INICIO_DO_ACESSO,
           status: "active",
           target_id: ESCOLA_DE_TESTE.curso.id,
           target_type: "standalone_course",
