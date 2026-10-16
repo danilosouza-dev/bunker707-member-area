@@ -31,3 +31,16 @@ setup("aluno sem acesso entra com e-mail e senha", async ({ page }) => {
   await expect(page).toHaveURL("/");
   await page.context().storageState({ path: "tests/e2e/.auth/aluno-sem-acesso.json" });
 });
+
+// Equipe: depois de entrar, quem e da equipe cai no admin.
+for (const [chave, arquivo] of [["produtor", "produtor"], ["analista", "analista"]] as const) {
+  setup(`${chave} de teste entra e cai no admin`, async ({ page }) => {
+    await page.goto("/login");
+    await page.locator('input[type="email"]').fill(ESCOLA_DE_TESTE.contas[chave].email);
+    await page.locator('input[type="password"]').fill(SENHA_DE_TESTE);
+    await page.getByRole("button", { exact: true, name: "Entrar" }).click();
+
+    await expect(page).toHaveURL(/\/admin/);
+    await page.context().storageState({ path: `tests/e2e/.auth/${arquivo}.json` });
+  });
+}

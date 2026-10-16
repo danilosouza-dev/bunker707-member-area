@@ -493,6 +493,16 @@ export async function seedEscolaDeTeste(db) {
   return contas;
 }
 
+/** Apaga uma conta criada por um teste (por e-mail), se existir: sai da equipe e some do Auth. */
+export async function apagarContaDeTeste(db, email) {
+  const existing = await findAccountByEmail(db, email.toLowerCase());
+
+  if (existing) {
+    unwrap(await db.from("admin_roles").delete().eq("user_id", existing.id), "Tirando a conta de teste da equipe");
+    unwrap(await db.auth.admin.deleteUser(existing.id), `Apagando a conta ${email}`);
+  }
+}
+
 /** Tira a foto do perfil das contas informadas: limpa profiles.avatar_url e apaga os arquivos do bucket. */
 export async function limparFotoDoPerfil(db, userIds) {
   unwrap(await db.from("profiles").update({ avatar_url: null }).in("id", userIds), "Limpando foto do perfil");
