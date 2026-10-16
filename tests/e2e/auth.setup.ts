@@ -1,0 +1,23 @@
+import { expect, test as setup } from "./fixtures";
+import { ESCOLA_DE_TESTE, SENHA_DE_TESTE, limparProgresso, seedEscolaDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { createLocalAdminClient } from "../support/local-db.mjs";
+
+// Garante a escola de teste no banco local, zera o progresso das contas de aluno e entra uma vez como
+// a aluna; os testes dos projetos chromium e webkit comecam ja logados (storageState em
+// playwright.config.ts).
+
+setup("escola de teste pronta e aluna entra com e-mail e senha", async ({ page }) => {
+  const db = createLocalAdminClient();
+  const contas = await seedEscolaDeTeste(db);
+  await limparProgresso(db, [contas.aluna.id, contas.alunoSemAcesso.id]);
+
+  await page.goto("/login");
+  await page.locator('input[type="email"]').fill(ESCOLA_DE_TESTE.contas.aluna.email);
+  await page.locator('input[type="password"]').fill(SENHA_DE_TESTE);
+  await page.getByRole("button", { exact: true, name: "Entrar" }).click();
+
+  await expect(page).toHaveURL("/");
+  await expect(page.getByRole("link", { name: `Abrir ${ESCOLA_DE_TESTE.curso.titulo}` })).toBeVisible();
+
+  await page.context().storageState({ path: "tests/e2e/.auth/aluna.json" });
+});

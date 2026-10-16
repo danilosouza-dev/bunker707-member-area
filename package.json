@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
     "test:integration": "node --env-file-if-exists=.env.test.local --test tests/integration/*.test.mjs",
+    "test:e2e": "playwright test",
     "db:start": "node tests/support/db.mjs start",
     "db:reset": "node tests/support/db.mjs reset",
     "db:seed": "node tests/support/db.mjs seed",
@@ -61,6 +62,7 @@
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4.3.1",
     "@types/node": "^25.9.3",
     "@types/react": "^19.2.17",

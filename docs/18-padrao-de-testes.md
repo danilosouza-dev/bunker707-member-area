@@ -1,6 +1,6 @@
 # 18. Padrão de testes e rotina de qualidade
 
-Data: 16/10/2026. Etapa 1 (diagnóstico e padrão) aprovada pelo produtor em 16/10, com ok nas seis decisões da seção 6. Etapa 2 em andamento: a PR 2a (banco de teste local e primeiro teste de integração) está feita; 2b e 2c vêm em seguida. Documento vivo: cada PR das etapas 2 e 3 atualiza as seções 2.4, 3 e 4.
+Data: 16/10/2026. Etapa 1 (diagnóstico e padrão) aprovada pelo produtor em 16/10, com ok nas seis decisões da seção 6. Etapa 2 em andamento: PR 2a (banco de teste local e primeiro teste de integração) e PR 2b (Playwright e primeiro fluxo no navegador) feitas; 2c vem em seguida. Documento vivo: cada PR das etapas 2 e 3 atualiza as seções 2.4, 3 e 4.
 
 Este documento existe por causa de um erro simples que escapou: a mesma aula aparecia como **Concluída** quando o aluno entrava pelo módulo do curso e como **Concluir** quando entrava pelo card "Continue assistindo" da home. Nenhum dos 789 testes do repositório pegou isso, porque nenhum deles abre a tela ou grava no banco de verdade. A partir daqui, toda funcionalidade nova ou correção vem com um teste que prova o comportamento, e a rotina (template de PR, CI e documentação) cobra isso.
 
@@ -194,19 +194,19 @@ npm run test:integration    # precisa do db:start
 npm run db:seed             # só recria a escola de teste (sem mexer no banco)
 npm run db:reset            # recria o banco local do zero (migrações + escola de teste)
 npm run db:stop
-npm run test:e2e            # (PR 2b) precisa do db:start; o Playwright sobe o app sozinho (build + start na porta 3100)
-npm run test:e2e -- --ui    # (PR 2b) modo visual para investigar
+npm run test:e2e            # precisa do db:start; o Playwright builda e sobe o app sozinho na porta 3100
+npm run test:e2e -- --ui    # modo visual para investigar
+E2E_SKIP_BUILD=1 npm run test:e2e   # reaproveita o build anterior (iterar localmente)
 npm run verify              # portão local: lint, typecheck, unitários, build (inalterado)
 npm run verify:full         # (PR 2c) verify + integração + ponta a ponta (o que o CI faz)
 ```
 
-Os comandos marcados com a PR ainda não existem; os outros já funcionam. Primeira vez: `npm run db:start` baixa o CLI do Supabase (via `npx`) e as imagens do Docker, o que leva alguns minutos; depois, uns 20 segundos. O Docker Desktop precisa estar aberto. O que `db:start` faz está em `tests/support/db.mjs`.
+O comando marcado com a PR ainda não existe; os outros já funcionam. Primeira vez: `npm run db:start` baixa o CLI do Supabase (via `npx`) e as imagens do Docker, o que leva alguns minutos; depois, uns 20 segundos. O Docker Desktop precisa estar aberto. O que `db:start` faz está em `tests/support/db.mjs`. Para os testes de ponta a ponta, uma vez por máquina: `npx playwright install chromium webkit` (baixa os dois navegadores). O `npm run test:e2e` builda o app (`next build`, 1 a 2 minutos) e o sobe na porta 3100 com as variáveis de `.env.test.local` (`tests/support/e2e-server.mjs`); com o app já no ar nessa porta, ele reaproveita.
 
 CI (`.github/workflows/ci.yml`), em toda PR e push para `dev` e `main`:
 
 - job **Verify** (como hoje): `npm run verify`, cerca de 2,5 min;
-- job **Integração (Supabase local)** (desde a PR 2a, em paralelo): instala o CLI do Supabase, sobe Postgres, Auth e Storage em Docker sem os serviços que os testes não usam (`db.mjs start --ci`), aplica as migrações do zero, cria a escola de teste e roda `npm run test:integration`;
-- a PR 2b acrescenta ao mesmo job o `next build` e `npm run test:e2e` em Chromium e WebKit, guardando traços, capturas de tela e vídeo como artefatos em caso de falha. Meta do job completo: menos de 8 min.
+- job **Integração e ponta a ponta (Supabase local)** (desde as PRs 2a e 2b, em paralelo com o Verify): instala o CLI do Supabase, sobe Postgres, Auth e Storage em Docker sem os serviços que os testes não usam (`db.mjs start --ci`), aplica as migrações do zero, cria a escola de teste, roda `npm run test:integration`, instala Chromium e WebKit e roda `npm run test:e2e` (que builda e sobe o app). Em falha, traços, capturas de tela e vídeos ficam como artefato "playwright" por 7 dias. Meta do job: menos de 8 min.
 
 Os dois precisam estar verdes para a PR entrar. Como o GitHub não bloqueia (seção 6, decisão 3), a regra fica no `CONTRIBUTING.md` e no template até a conta permitir proteção de branch.
 
@@ -231,13 +231,14 @@ Pre-commit (husky) não muda: lint, typecheck e unitários. Integração e ponta
 
 - Unitário: como hoje, `requireRole`/`getAuthenticatedUser` trocados por dublês pelo hook de `tests/support/admin-action-stubs.mjs`.
 - Integração: `tests/support/integration-hooks.mjs` troca só a **sessão** (`src/server/auth/session.ts` vira `integration-session.mjs`; o teste diz quem está logado com `actAs(usuario)`) e os módulos que só existem dentro do Next (`server-only`, `next/navigation`). O cliente do banco, as regras de acesso e as gravações são as reais, contra o Supabase local. Rotas `/api` são chamadas como função com um `Request` montado no teste; as permissões da equipe continuam vindo de `admin_roles` no banco local.
-- Ponta a ponta: login real pela tela de entrar, uma vez por persona, com a sessão guardada e reaproveitada pelos testes (`storageState` do Playwright).
+- Ponta a ponta: `tests/e2e/auth.setup.ts` garante a escola de teste, zera o progresso das contas de aluno e entra de verdade pela tela de entrar como a aluna; a sessão fica em `tests/e2e/.auth/` (ignorado pelo git) e os projetos `chromium` e `webkit` começam logados (`storageState`). Teste que precisa começar sem sessão declara `test.use({ storageState: { cookies: [], origins: [] } })`. O navegador só fala com a máquina: `tests/e2e/fixtures.ts` corta qualquer pedido para fora (YouTube, PostHog, Sentry, CDNs); o espaço do player continua desenhado, só o vídeo não carrega.
 
 **Travas de segurança.**
 
 - `npm run db:start` escreve `.env.test.local` (ignorado pelo git) a partir de `supabase status`, e só se o endereço devolvido for local. Os testes de integração carregam esse arquivo (`node --env-file-if-exists=.env.test.local`), nunca `.env.local`. Variável já exportada no terminal tem prioridade sobre o arquivo, e por isso a segunda trava existe: `tests/support/local-db.mjs` **recusa rodar** antes de qualquer consulta se a URL não for `127.0.0.1`/`localhost`, com uma mensagem dizendo o que fazer.
 - Nada de chave de produção em arquivo de teste. As chaves do Supabase local são as de demonstração do CLI, iguais em qualquer máquina, e não dão acesso a nada fora do computador.
-- Serviços externos não são chamados: YouTube bloqueado por `page.route` (o espaço do player continua renderizando), Tutor IA com gateway falso em HTTP local, PostHog e Sentry desligados por variável, e-mail fica na caixa local.
+- Serviços externos não são chamados: tudo o que não é `127.0.0.1`/`localhost` é cortado no navegador (`fixtures.ts`); o app de teste é buildado com todas as outras variáveis do `.env.example` vazias (PostHog, Sentry e gateway de IA desligados, mesmo que `.env.local` as tenha); e-mail fica na caixa local (Mailpit em `http://127.0.0.1:55324`). Tutor IA com gateway falso entra na PR da etapa 3.
+- `supabase/config.toml` (só vale para o Supabase local) precisou de `[auth.email] enable_signup = true`: com `false`, o Auth local responde "Email logins are disabled" até para contas criadas pelo admin, e o login por senha não funciona. O cadastro público continua bloqueado por `[auth] enable_signup = false`. Esse arquivo não é enviado para a nuvem por nenhum comando da rotina.
 
 ### 2.6 Ferramenta de ponta a ponta: Playwright
 
@@ -289,11 +290,11 @@ Legenda da coluna "Hoje": **C** = teste de comportamento, **T** = só texto do c
 
 | Funcionalidade | O que faz hoje | Unit | Integ | E2E | Falta | Prior. |
 |---|---|---|---|---|---|---|
-| Entrar | senha, Google, esqueci a senha, volta para a página pedida (`?next=`), visual publicado pelo admin | C (destino seguro, erro do link, configuração da tela) + T (tela) | — | — | entrar com senha e cair na home; senha errada mostra erro; rota protegida manda para `/login` e volta; equipe cai em `/admin` | A |
-| Home | hero/destaque, fileiras por acesso, "Continue assistindo", cards verticais, card bloqueado, modal de detalhes | C (destaque, vitrine, indisponíveis) + T (fileiras, cards, modal: 24 testes) | — | — | `getHomePageData` com banco: só o que tem acesso, fileira "Continue assistindo" só com aula começada e não terminada; home abre com hero, fileira e modal no navegador | A |
+| Entrar | senha, Google, esqueci a senha, volta para a página pedida (`?next=`), visual publicado pelo admin | C (destino seguro, erro do link, configuração da tela) + T (tela) | — | C (`aluno-entra-e-abre-aula`: entrar com senha e cair na home; rota protegida manda para `/login` e volta para ela; senha errada mostra o aviso) | equipe cai em `/admin` (integração ou ponta a ponta com o produtor, PR 3g); Google e esqueci a senha ficam de fora (dependem de serviço externo) | A |
+| Home | hero/destaque, fileiras por acesso, "Continue assistindo", cards verticais, card bloqueado, modal de detalhes | C (destaque, vitrine, indisponíveis) + T (fileiras, cards, modal: 24 testes) | C (fileira Continue assistindo em `progresso-aula`) | C (home abre com a fileira Minhas compras e o card do curso comprado) | `getHomePageData` com banco para as outras fileiras e o card bloqueado; modal de detalhes no navegador | A |
 | Continue assistindo (fileira e página) | aulas começadas e não terminadas, da mais recente | C (modelo da página) | — | — | mesma regra nos dois lugares com banco; **regressão: concluída no módulo = concluída no card** | A |
 | Curso, formação e módulos | página do produto, módulos, liberação por data, conteúdo bloqueado redireciona | C (regras de data; módulos/vitrine do lado do admin) | — | — | `getContentPageData` com banco; bloqueado redireciona; abrir curso → módulo → aula no navegador | A |
-| Aula com player | YouTube oficial em Full HD, legendas, playlist, descrição, atalhos | C (medidas do embed, detecção de vídeo, legendas, faixas) + T (layout: 22 testes) | — | — | abrir aula no navegador (player presente, playlist, trocar de aula); `getLessonPageData` com estados iniciais | A |
+| Aula com player | YouTube oficial em Full HD, legendas, playlist, descrição, atalhos | C (medidas do embed, detecção de vídeo, legendas, faixas) + T (layout: 22 testes) | C (estados iniciais em `progresso-aula`) | C (`aluno-entra-e-abre-aula`: home → curso → módulo → aula com título, player, playlist e botão Concluir, em Chromium e WebKit) | trocar de aula pela playlist; legendas e qualidade no navegador | A |
 | Concluir aula e progresso | botão Concluir/Concluída/Desmarcar, % no card, barra do módulo, Minha jornada | T (rota e componente) + C (1 cálculo de %) | C (`progresso-aula`: PUT grava, 401/400/403/404, página da aula e fileira Continue assistindo leem o mesmo estado ao concluir e ao desmarcar) | — | Minha jornada lê o mesmo estado (integração); concluir e desmarcar pelo módulo e pelo card, no navegador (ponta a ponta, PR 3a) | **A** (bug aberto) |
 | Comentários | publicar, responder, reagir, denunciar, papel (Professor/Moderador), foto | C (validação e moderação de texto) + T (store, rotas, tela) | — | — | store e rotas com banco (só aula com acesso, criar, reagir, denunciar); publicar e ver aparecer com foto, no navegador | A |
 | Materiais (aba e página) | lista real por aula, filtro, bloqueio com motivo | C (recarregar) + T (rota) | — | — | rota só devolve de aula com acesso; aba mostra os materiais da escola de teste | M |
@@ -338,7 +339,7 @@ Legenda da coluna "Hoje": **C** = teste de comportamento, **T** = só texto do c
 
 **2a. Banco de teste e integração (feita).** Supabase local pelo CLI (`supabase/config.toml` já existia); `tests/fixtures/escola-de-teste.mjs`; scripts `db:start`, `db:stop`, `db:reset`, `db:seed`, `test:integration` (`tests/support/db.mjs`); trava de URL local (`tests/support/local-db.mjs`); sessão simulada para integração (`tests/support/integration-hooks.mjs`); **o primeiro teste de integração de verdade** (`tests/integration/progresso-aula.test.mjs`, 9 testes): gravar progresso pelo `PUT /api/progress/lessons` e ler de volta pelo `getLessonPageData` e pela fileira Continue assistindo de `getHomePageData`, ao concluir e ao desmarcar; 401, 400, 403 e 404. Job **Integração (Supabase local)** no CI. As 37 migrações sobem do zero.
 
-**2b. Navegador.** Playwright instalado (Chromium e WebKit), `playwright.config.ts` com `webServer` na porta 3100 e variáveis explícitas, `auth.setup.ts` com login por persona, bloqueio de YouTube/PostHog/Sentry; **um fluxo de verdade**: aluna entra com senha, cai na home, abre o curso, abre a aula e vê o player e a playlist. Artefatos de falha no CI. Pronto quando: `npm run test:e2e` verde no Mac e no CI, em menos de 8 min.
+**2b. Navegador (feita).** Playwright instalado (Chromium e WebKit), `playwright.config.ts` com `webServer` na porta 3100 e variáveis de `.env.test.local`, `auth.setup.ts` com login da aluna e sessão guardada, `fixtures.ts` cortando qualquer pedido para fora; **o primeiro fluxo de verdade** (`tests/e2e/aluno-entra-e-abre-aula.spec.ts`, 3 testes × 2 navegadores): rota protegida manda para entrar e volta; senha errada avisa; aluna abre o curso pela home, o módulo e a aula com título, player, playlist e botão Concluir. Job de CI com navegadores e artefatos de falha. No Mac: 7 testes em cerca de 10 s depois do build.
 
 **2c. Rotina escrita.** Template de PR com o checklist da seção 2.7; `CONTRIBUTING.md` e `docs/13` com a regra e os comandos; `verify:full`. Pronto quando: a próxima PR de qualquer pessoa já nasce com o checklist.
 
