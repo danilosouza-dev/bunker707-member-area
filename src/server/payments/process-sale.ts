@@ -376,6 +376,23 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
   // transacao fechou. Acesso que a equipe revogou, suspendeu ou reabriu depois (vinculo fechado por
   // admin), ou sem cancelamento registrado aqui, fica como esta, com o motivo escrito.
   if (event.reactivatesSubscription) {
+    // Assinatura com reembolso ou chargeback em qualquer cobranca (vinculo fechado por eles, ou o evento
+    // registrado): a compra foi desfeita na plataforma e a reativacao nao a refaz.
+    if (event.subscriptionCode) {
+      const subscriptionGrants = await fetchSaleGrantsBySubscription(db, event.provider, event.subscriptionCode);
+      const transactions = Array.from(new Set(subscriptionGrants.map((grant) => grant.transaction_id)));
+      const undone =
+        subscriptionGrants.some((grant) => grant.closed_by === "refund" || grant.closed_by === "chargeback") ||
+        (await Promise.all(transactions.map((transactionId) => hasClosingEventForTransaction(db, event.provider, transactionId)))).some(Boolean);
+
+      if (undone) {
+        return ignored(
+          `A assinatura ${event.subscriptionCode} já tem reembolso ou chargeback registrado na ${providerLabel}; a reativação não reabre o acesso. Revise em Alunos se for o caso.`,
+          { ...base, userId: account?.id ?? null }
+        );
+      }
+    }
+
     const grantsOfSale = await fetchSaleGrantsByTransaction(db, event.provider, saleSourceEventId(event));
     const reopenable: string[] = [];
     const reasons = new Set<string>();
@@ -384,7 +401,11 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
       const previous = beforeByTarget.get(productId);
       const grant = previous ? grantsOfSale.find((candidate) => candidate.entitlement_id === previous.id) : undefined;
 
-      if (grant?.closed_by === "subscription_canceled") {
+      // Vinculo ja reaberto por uma tentativa anterior desta reativacao que falhou antes de liberar (o
+      // acesso continua fechado): o reprocesso termina o que ela comecou.
+      const reopenedBefore = grant !== undefined && grant.closed_at === null && previous !== undefined && !isOpenRow(previous, now);
+
+      if (grant?.closed_by === "subscription_canceled" || reopenedBefore) {
         reopenable.push(productId);
         continue;
       }
@@ -614,7 +635,9 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
       continue;
     }
 
-    if (row.status === closedStatus) {
+    // Ja fechado do jeito pedido, ou revogado (reembolso, chargeback, equipe): um cancelamento de
+    // assinatura depois nao rebaixa a revogacao para suspensao.
+    if (row.status === closedStatus || (action === "suspend" && row.status === "revoked")) {
       continue;
     }
 

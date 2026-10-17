@@ -50,6 +50,8 @@ const COMPRADOR_MISTO = { email: "comprador.misto.ticto@bunker707.test", nome: "
 const COMPRADOR_REATIVA = { email: "comprador.reativa.ticto@bunker707.test", nome: "Comprador que Reativou" };
 const COMPRADOR_EQUIPE = { email: "comprador.equipe.ticto@bunker707.test", nome: "Comprador Revogado pela Equipe" };
 const COMPRADOR_ASSINA_BUMP = { email: "comprador.assina.bump.ticto@bunker707.test", nome: "Assinante com Bump" };
+const COMPRADOR_REPROCESSO = { email: "comprador.reprocesso.ticto@bunker707.test", nome: "Assinante do Reprocesso" };
+const COMPRADOR_CHARGEBACK = { email: "comprador.chargeback.ticto@bunker707.test", nome: "Assinante com Chargeback" };
 const TOKEN_HOTMART = "hottok-integracao-ticto-0123456789abcdef";
 const PREFIXO = "teste-ticto-";
 
@@ -139,9 +141,9 @@ async function limpar() {
   await desconectarVendas(db);
   // "7001" e o codigo da Hotmart que o teste do Acesso e venda grava junto, para provar que um nao mexe no outro.
   await limparVendasDeTeste(db, { codigos: [...Object.values(CODIGOS), "7001"], prefixoDoEvento: PREFIXO });
-  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email, COMPRADOR_BUMP.email, COMPRADOR_MISTO.email, COMPRADOR_REATIVA.email, COMPRADOR_EQUIPE.email, COMPRADOR_ASSINA_BUMP.email]), "Limpando a fila de e-mail de teste");
+  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email, COMPRADOR_BUMP.email, COMPRADOR_MISTO.email, COMPRADOR_REATIVA.email, COMPRADOR_EQUIPE.email, COMPRADOR_ASSINA_BUMP.email, COMPRADOR_REPROCESSO.email, COMPRADOR_CHARGEBACK.email]), "Limpando a fila de e-mail de teste");
 
-  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE, COMPRADOR_BUMP, COMPRADOR_MISTO, COMPRADOR_REATIVA, COMPRADOR_EQUIPE, COMPRADOR_ASSINA_BUMP]) {
+  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE, COMPRADOR_BUMP, COMPRADOR_MISTO, COMPRADOR_REATIVA, COMPRADOR_EQUIPE, COMPRADOR_ASSINA_BUMP, COMPRADOR_REPROCESSO, COMPRADOR_CHARGEBACK]) {
     await apagarContaDeTeste(db, conta.email);
   }
 }
@@ -476,6 +478,51 @@ test("order bump numa compra de assinatura e cobranca unica: o cancelamento susp
   const reembolso = await (await post(payload({ ...comum, status: "refunded", statusDate: "2026-11-25 10:00:00" }))).json();
   assert.equal(reembolso.outcome, "access_revoked", JSON.stringify(reembolso));
   assert.deepEqual(await status(), { [curso.id]: "revoked", [cursoBloqueado.id]: "revoked" }, "o reembolso da compra tira o principal e o bump");
+});
+
+test("reativacao que falhou depois de reabrir o vinculo e antes de liberar: o Reprocessar termina e o acesso volta", async () => {
+  const comum = { assinatura: "7401", email: COMPRADOR_REPROCESSO.email, nome: COMPRADOR_REPROCESSO.nome, transacao: "T-REPRO-0001" };
+  const statusDoCurso = async () => Object.fromEntries((await acessosDe(COMPRADOR_REPROCESSO.email)).acessos.map((row) => [row.target_id, row.status]))[curso.id];
+
+  assert.equal((await (await post(payload(comum))).json()).outcome, "access_granted");
+  assert.equal((await (await post(payload({ ...comum, status: "subscription_canceled", statusDate: "2026-11-20 10:00:00" }))).json()).outcome, "access_suspended");
+  assert.equal((await (await post(payload({ ...comum, status: "uncanceled", statusDate: "2026-11-21 10:00:00" }))).json()).outcome, "access_granted");
+
+  // Falha simulada no meio: o vinculo ja foi reaberto, mas a liberacao nao chegou ao acesso e o evento ficou com erro.
+  const { conta } = await acessosDe(COMPRADOR_REPROCESSO.email);
+  unwrap(await db.from("entitlements").update({ status: "suspended" }).eq("user_id", conta.id).eq("target_id", curso.id), "Voltando o acesso a suspenso");
+  const evento = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T-REPRO-0001:${CODIGOS.curso}:uncanceled`));
+  unwrap(
+    await db.from("webhook_events").update({ error_message: "Falha simulada na liberação.", outcome: "failed", processing_status: "failed" }).eq("id", evento.id),
+    "Marcando a reativacao como falha"
+  );
+  assert.deepEqual((await vinculosDe(["T-REPRO-0001"])).map((row) => row.closed_by), [null], "o vinculo ficou reaberto pela tentativa que falhou");
+  assert.equal(await statusDoCurso(), "suspended");
+
+  actAs(produtor);
+  const reprocessado = await salesActions.reprocessSalesEvent({ id: evento.id });
+  assert.equal(reprocessado.ok, true, JSON.stringify(reprocessado));
+  assert.equal(reprocessado.data.ok, true, JSON.stringify(reprocessado.data));
+  assert.equal(reprocessado.data.outcome, "access_granted", JSON.stringify(reprocessado.data));
+  assert.equal(await statusDoCurso(), "active", "o acesso pago nao fica suspenso para sempre");
+});
+
+test("reativacao de assinatura com chargeback registrado em outra cobranca e ignorada: o acesso nao volta", async () => {
+  const comum = { assinatura: "7501", email: COMPRADOR_CHARGEBACK.email, nome: COMPRADOR_CHARGEBACK.nome };
+  const statusDoCurso = async () => Object.fromEntries((await acessosDe(COMPRADOR_CHARGEBACK.email)).acessos.map((row) => [row.target_id, row.status]))[curso.id];
+
+  assert.equal((await (await post(payload({ ...comum, transacao: "T-CB-0001" }))).json()).outcome, "access_granted");
+  assert.equal((await (await post(payload({ ...comum, statusDate: "2026-11-17 09:00:00", transacao: "T-CB-0002" }))).json()).outcome, "access_granted", "renovacao");
+
+  // Chargeback da primeira cobranca: revoga (as cobrancas da assinatura nao se sustentam).
+  assert.equal((await (await post(payload({ ...comum, status: "chargeback", statusDate: "2026-11-18 10:00:00", transacao: "T-CB-0001" }))).json()).outcome, "access_revoked");
+  // Cancelamento trazendo a segunda cobranca, depois a reativacao dela.
+  await post(payload({ ...comum, status: "subscription_canceled", statusDate: "2026-11-20 10:00:00", transacao: "T-CB-0002" }));
+  const reativada = await (await post(payload({ ...comum, status: "uncanceled", statusDate: "2026-11-21 10:00:00", transacao: "T-CB-0002" }))).json();
+  assert.equal(reativada.outcome, "ignored", JSON.stringify(reativada));
+  assert.equal(await statusDoCurso(), "revoked", "o chargeback da assinatura vale");
+  const linha = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T-CB-0002:${CODIGOS.curso}:uncanceled`));
+  assert.match(linha.outcome_detail, /assinatura 7501 já tem reembolso ou chargeback registrado na Ticto/);
 });
 
 /* ------------------------------------------------------------ Pacote */
