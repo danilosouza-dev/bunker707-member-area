@@ -1346,6 +1346,21 @@ Indices unicos: (provider, external_product_id), (provider, product_id) e (provi
 
 Compra pela plataforma grava `source_provider = hotmart` e `source_event_id` = id da compra (`purchase.transaction`; sem ele, o id do evento). Quando um evento libera mais de um produto (pacote), cada linha leva o sufixo `:<produto>` (indice unico `(user_id, source_event_id)`). `warranty_expire_date` chega normalizado (`warrantyEndsAt`) mas ainda nao e gravado: a coluna `warranty_ends_at` continua o ponto de extensao descrito em §entitlements.
 
+### sale_grants
+
+Migracao `202610170008_sale_grants.sql`. Vinculo venda -> acesso: um acesso (um por aluno e produto) pode ser sustentado por mais de uma venda, ou ter nascido da equipe e so ganhado prazo numa venda; `source_event_id` guarda uma origem so.
+
+- id uuid;
+- provider; transaction_id (a compra; igual a `entitlements.source_event_id` da venda, sem o sufixo do produto);
+- subscription_code (Hotmart: `subscriber.code`; cobrancas da mesma assinatura nao sustentam o acesso umas das outras);
+- user_id -> auth.users (cascade); entitlement_id -> entitlements (cascade); product_id;
+- opened: true quando a venda abriu o acesso (nao existia ou estava fechado); false quando so estendeu um acesso aberto;
+- previous_ends_at: prazo que o acesso tinha antes (so quando estendeu), para o reembolso devolver;
+- webhook_event_id -> webhook_events (set null); closed_at, closed_by (refund, chargeback, subscription_canceled);
+- created_at.
+
+Indices: unico (provider, transaction_id, entitlement_id); (entitlement_id); (provider, subscription_code). So `service_role`. Nenhum dado pessoal (so ids). Regras de decisao em `decideOnClosedGrant` (`src/server/payments/model.ts`) e em docs/04. A mesma migracao acrescenta o resultado `access_restored` ("Prazo devolvido") em `webhook_events.outcome`.
+
 ### admin_access_origins(p_start, p_end, p_content_id)
 
 RPC `security invoker`, so `service_role`: acessos criados na janela por `source_provider` (hotmart, manual...), sem a equipe, com as mesmas regras de `admin_access_buckets`. Alimenta o rodape de "Novos acessos" no Hoje ("3 pela Hotmart · 2 pela equipe").
@@ -1426,7 +1441,7 @@ Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `doc
 | `email_outbox` | 90 dias depois de `created_at` se `sent`; 180 dias nos demais status (falha, bounce, reclamacao e o que ainda estava na fila, que vira `failed` com o motivo) | `to_email`, `html`, `text`, `last_error` | `kind`, `user_id`, `subject`, `idempotency_key`, `status`, datas, `metadata`; `anonymized_at` marcado |
 | `email_webhook_events` | 90 dias depois de `received_at` | a linha inteira | nada (entrega, bounce e motivo ja estao em `email_outbox`) |
 
-Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta anula `user_id` nas duas tabelas (`on delete set null`), e "Excluir aluno" ja anonimiza na hora as vendas do aluno (`anonymizeWebhookEventsFor`); prazos novos sao mudanca de migracao, com o teste ajustado.
+Fora da rotina de proposito: `sale_grants` (migracao `202610170008`) so guarda ids (transacao, codigo da assinatura, aluno, acesso, produto) e datas, sem dado pessoal; sai junto com a conta (`on delete cascade`). Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta anula `user_id` nas duas tabelas (`on delete set null`), e "Excluir aluno" ja anonimiza na hora as vendas do aluno (`anonymizeWebhookEventsFor`); prazos novos sao mudanca de migracao, com o teste ajustado.
 
 ## Suporte
 

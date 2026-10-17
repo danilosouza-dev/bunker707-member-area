@@ -38,6 +38,13 @@ export function getSafeRedirectPath(value?: string | null) {
     return "/";
   }
 
+  // Depois de resolver "." e ".." o caminho pode comecar com "//" ("/.//evil.com", "/..//evil.com",
+  // "/%2e//evil.com", "/a/..//evil.com/x"): quem montar `new URL(caminho, origem)` ou responder
+  // `Location: //evil.com` mandaria a pessoa para outro site. Nunca devolva caminho que comece com "//".
+  if (url.pathname.startsWith("//")) {
+    return "/";
+  }
+
   if (url.pathname.startsWith("/login") || url.pathname.startsWith("/auth/callback")) {
     return "/";
   }

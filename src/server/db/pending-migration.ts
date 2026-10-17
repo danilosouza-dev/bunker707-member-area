@@ -10,7 +10,7 @@
 import { INVALID_SUPABASE_KEY_MESSAGE, isInvalidSupabaseKeyError } from "./supabase-key-error";
 import { redactSecrets } from "../../lib/env-value";
 
-export const PENDING_MIGRATION_RANGE = "202610110010-202610170004";
+export const PENDING_MIGRATION_RANGE = "202610110010-202610170008";
 export const PENDING_MIGRATION_MESSAGE = `Esta tela precisa da atualização do banco (migrações ${PENDING_MIGRATION_RANGE}).`;
 
 /**

@@ -25,6 +25,12 @@ export const metadata: Metadata = {
   description: "Area de membros da escola de IA Bunker707"
 };
 
+// A CSP de src/proxy.ts usa um nonce por pedido, e o Next so carimba esse nonce nos scripts de uma
+// pagina renderizada no pedido. Pagina pre-renderizada no build sai sem nonce, o navegador bloqueia os
+// scripts que revelam e hidratam o conteudo e a tela fica em branco (aconteceu com /tv ao ligar o proxy).
+// Por isso nenhuma pagina deste app e pre-renderizada.
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children
 }: Readonly<{

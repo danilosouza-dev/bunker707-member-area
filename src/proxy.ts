@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import { getAuthSessionStrategy } from "@/lib/auth/session-strategy";
 import { cleanEnvValue } from "@/lib/env-value";
+import { getSentryCspReportUri } from "@/lib/sentry-csp-report-uri";
 
 const supabaseUrl = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? cleanEnvValue(process.env.SUPABASE_URL);
 const supabasePublicKey =
@@ -83,8 +84,20 @@ function getSentryConnectionSources() {
 const postHogSources = getPostHogSources();
 const observabilityConnectionSources = [...postHogSources.connect, ...getSentryConnectionSources()];
 const observabilityScriptSources = postHogSources.script;
+// Violacao de CSP so aparece no console do aluno; com o DSN do Sentry o navegador tambem a envia ao
+// endpoint de seguranca do Sentry (`report-uri`), que a mostra como evento "CSP".
+const sentryCspReportUri = getSentryCspReportUri(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
-function createContentSecurityPolicy(nonce: string) {
+// `upgrade-insecure-requests` so faz sentido numa pagina servida em https. Numa pagina http (next start
+// na propria maquina, testes de ponta a ponta) o WebKit/Safari aplica a diretiva ate em 127.0.0.1 e busca
+// scripts, CSS e fontes por https, o que deixa a pagina sem hidratar; o Chromium isenta a propria maquina.
+function isHttpsRequest(request: NextRequest) {
+  const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+
+  return forwardedProtocol ? forwardedProtocol === "https" : request.nextUrl.protocol === "https:";
+}
+
+function createContentSecurityPolicy(nonce: string, upgradeInsecureRequests: boolean) {
   const directives = [
     "default-src 'self'",
     "base-uri 'self'",
@@ -104,8 +117,12 @@ function createContentSecurityPolicy(nonce: string) {
     "worker-src 'self' blob:"
   ];
 
-  if (process.env.NODE_ENV === "production") {
+  if (upgradeInsecureRequests) {
     directives.push("upgrade-insecure-requests");
+  }
+
+  if (sentryCspReportUri) {
+    directives.push(`report-uri ${sentryCspReportUri}`);
   }
 
   return directives.join("; ");
@@ -215,11 +232,23 @@ async function getProxySessionUser(supabase: ProxySupabaseClient): Promise<Proxy
 
 export async function proxy(request: NextRequest) {
   const nonce = btoa(crypto.randomUUID());
-  const contentSecurityPolicy = createContentSecurityPolicy(nonce);
+  const contentSecurityPolicy = createContentSecurityPolicy(
+    nonce,
+    process.env.NODE_ENV === "production" && isHttpsRequest(request)
+  );
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("Content-Security-Policy", contentSecurityPolicy);
   requestHeaders.set("x-nonce", nonce);
   const pathname = request.nextUrl.pathname;
+
+  // Rota de API sai daqui so com a CSP e o nonce: cada handler valida (e renova) a sessao por conta
+  // propria (requireApiUser, requireApiRole, createSupabaseServerClient) ou usa token proprio (TV,
+  // tick de jobs, webhooks). Consultar o Auth aqui dobrava as chamadas nas rotas mais frequentes
+  // (poll e heartbeat do Modo TV, progresso, comentarios, tutor) sem decidir nada.
+  if (pathname.startsWith("/api/")) {
+    return secureResponse(NextResponse.next({ request: { headers: requestHeaders } }), contentSecurityPolicy);
+  }
+
   const needsUser = isProtectedPage(pathname);
   const publicPage = isPublicPage(pathname);
   const authConfigured = hasAuthConfig();
@@ -255,7 +284,10 @@ export async function proxy(request: NextRequest) {
     return redirectToLogin(request, contentSecurityPolicy);
   }
 
-  if (publicPage && user) {
+  // Link com ?code= (recuperacao de senha, magic link, OAuth) passa mesmo com sessao aberta: /login e
+  // /auth/callback trocam o codigo pela sessao nova, em vez de o proxy mandar para a home. O convite
+  // chega por #access_token (fragmento, invisivel ao servidor) e nao e coberto aqui (docs/06).
+  if (publicPage && user && !request.nextUrl.searchParams.has("code")) {
     const safeRedirectPath = getSafeRedirectPath(request.nextUrl.searchParams.get("next"));
 
     if (userMustChangePassword(user.user_metadata)) {
@@ -280,9 +312,17 @@ export async function proxy(request: NextRequest) {
       }
     }
 
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = adminRoleResult.data?.role ? "/admin" : safeRedirectPath;
-    redirectUrl.search = "";
+    // Pelo parser de URL, nunca por `pathname =`: o destino pode ter query (?lessonId=), e o setter de
+    // pathname codificaria o "?" como %3F, quebrando o link. getSafeRedirectPath recusa outro site,
+    // barra invertida e caminho que vira "//" depois de resolver "." e ".."; mesmo assim, se o destino
+    // montado sair da origem do pedido, vai para a home: redirecionamento aberto nunca.
+    const redirectTarget = adminRoleResult.data?.role ? "/admin" : safeRedirectPath;
+    let redirectUrl = new URL(redirectTarget, request.nextUrl.origin);
+
+    if (redirectUrl.origin !== request.nextUrl.origin) {
+      redirectUrl = new URL("/", request.nextUrl.origin);
+    }
+
     return secureResponse(NextResponse.redirect(redirectUrl), contentSecurityPolicy, true);
   }
 

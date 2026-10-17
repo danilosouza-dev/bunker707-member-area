@@ -53,6 +53,7 @@ test("compra aprovada: evento normalizado com comprador, produto, compra e datas
     purchasedAt: "2025-10-17T12:01:00.000Z",
     rawType: "PURCHASE_APPROVED",
     reopenClosedAccess: true,
+    subscriptionCode: null,
     transactionId: "HP-TESTE-0001",
     type: "purchase_approved",
     warrantyEndsAt: "2025-10-24T12:00:00.000Z"
@@ -94,7 +95,11 @@ test("assinatura cancelada: o comprador vem de data.subscriber e nao ha compra",
   assert.equal(event.type, "subscription_canceled");
   assert.deepEqual(event.buyer, { email: "assinante@bunker707.test", name: "Assinante", phone: null });
   assert.equal(event.transactionId, null);
+  assert.equal(event.subscriptionCode, "SUB-1", "o codigo da assinatura liga o cancelamento as cobrancas");
   assert.equal(event.externalProductId, "7001");
+
+  const cobranca = hotmart.normalizeHotmartEvent(compraAprovada({ data: { ...compraAprovada().data, subscription: { plan: { name: "Mensal" }, status: "ACTIVE", subscriber: { code: "SUB-1" } } } }));
+  assert.equal(cobranca.subscriptionCode, "SUB-1", "a cobranca da assinatura traz o mesmo codigo");
 });
 
 test("payload sem nome de evento ou sem identificador nao vira evento; sem `id`, a compra identifica", () => {
@@ -194,6 +199,7 @@ test("modelo da tela: situacao por plataforma, resumo do hub, mascara do e-mail 
   assert.equal(model.saleEventLabel("purchase_refunded"), "Reembolso");
   assert.equal(model.saleEventLabel("EVENTO_NOVO", "other"), "evento novo");
   assert.equal(model.saleOutcomeChip({ outcome: "access_granted", status: "processed" }).label, "Acesso liberado");
+  assert.equal(model.saleOutcomeChip({ outcome: "access_restored", status: "processed" }).label, "Prazo devolvido");
   assert.equal(model.saleOutcomeChip({ outcome: null, status: "received" }).label, "Recebido");
   assert.equal(model.saleOutcomeChip({ outcome: "failed", status: "failed" }).label, "Erro");
   assert.equal(model.canReprocessSaleEvent("failed"), true);
@@ -210,6 +216,30 @@ test("modelo da tela: situacao por plataforma, resumo do hub, mascara do e-mail 
   assert.equal(model.buyerLabel({ anonymizedAt: "2025-10-17T06:23:00.000Z", buyerEmail: null }), "Dados apagados (12 meses)");
   assert.equal(model.describeSecretState({ secretUpdatedAt: null, status: "configured" }, () => "x"), "Nenhum token guardado.");
   assert.equal(model.describeSecretState({ secretUpdatedAt: "2026-10-17T12:00:00.000Z", status: "configured" }, () => "17/10/2026 09:00"), "Token guardado em 17/10/2026 09:00.");
+});
+
+test("vinculo venda -> acesso: o que acontece com o acesso quando a venda e desfeita", () => {
+  const grant = (overrides) => ({ closed_at: null, opened: true, previous_ends_at: null, subscription_code: null, transaction_id: "T2", ...overrides });
+
+  // A compra que abriu o acesso e a unica: fecha.
+  assert.equal(model.decideOnClosedGrant(grant({}), [grant({})]), "close");
+  // Produto comprado sozinho (T1) e depois num pacote (T2): o reembolso do pacote mantem o produto.
+  assert.equal(model.decideOnClosedGrant(grant({ opened: false }), [grant({ transaction_id: "T1" }), grant({ opened: false })]), "keep_sustained");
+  // T1 ja reembolsada (vinculo fechado) nao sustenta mais.
+  assert.equal(model.decideOnClosedGrant(grant({}), [grant({ closed_at: "2026-10-17T00:00:00Z", transaction_id: "T1" }), grant({})]), "close");
+  // Venda que so estendeu um acesso da equipe com prazo: o prazo volta.
+  assert.equal(model.decideOnClosedGrant(grant({ opened: false, previous_ends_at: "2099-06-30T12:00:00Z" }), [grant({ opened: false, previous_ends_at: "2099-06-30T12:00:00Z" })]), "restore_deadline");
+  // Venda que so estendeu um acesso da equipe sem prazo: nada a desfazer.
+  assert.equal(model.decideOnClosedGrant(grant({ opened: false }), [grant({ opened: false })]), "keep_other_origin");
+  // Renovacao de assinatura (T2, mesma assinatura S de T1): cobrancas da mesma assinatura nao se sustentam; fecha.
+  const s1 = grant({ subscription_code: "S", transaction_id: "T1" });
+  const s2 = grant({ opened: false, subscription_code: "S", transaction_id: "T2" });
+  assert.equal(model.isSustainedByAnotherSale(s2, [s1, s2]), false);
+  assert.equal(model.decideOnClosedGrant(s2, [s1, s2]), "close");
+  // Outra assinatura (S2) ou compra avulsa sustentam.
+  assert.equal(model.decideOnClosedGrant(s2, [grant({ subscription_code: "S2", transaction_id: "T0" }), s1, s2]), "keep_sustained");
+  // Assinatura que so estendeu um acesso da equipe sem prazo (primeira cobranca): fica com a equipe.
+  assert.equal(model.decideOnClosedGrant(grant({ opened: false, subscription_code: "S9" }), [grant({ opened: false, subscription_code: "S9" })]), "keep_other_origin");
 });
 
 test("Hoje > Novos acessos: o rodape diz de onde vieram os acessos, maiores primeiro", () => {

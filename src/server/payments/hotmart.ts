@@ -136,7 +136,10 @@ export function normalizeHotmartEvent(payload: unknown): NormalizedSaleEvent | n
 
   const product = asObject(parsed.data?.product);
   const purchase = asObject(parsed.data?.purchase);
+  const subscription = asObject(parsed.data?.subscription);
   const transactionId = shortString(purchase?.transaction, MAX_ID_LENGTH);
+  // Compras de assinatura trazem data.subscription.subscriber.code; o cancelamento, data.subscriber.code.
+  const subscriptionCode = shortString(asObject(subscription?.subscriber)?.code, 120) ?? shortString(asObject(parsed.data?.subscriber)?.code, 120);
   // Sem `id` (payload antigo ou de teste), a compra + o evento identificam a entrega.
   const eventId = parsed.id ?? (transactionId ? `${transactionId}:${parsed.event}` : null);
 
@@ -154,6 +157,7 @@ export function normalizeHotmartEvent(payload: unknown): NormalizedSaleEvent | n
     purchasedAt: hotmartDateToIso(purchase?.approved_date) ?? hotmartDateToIso(purchase?.order_date) ?? parsed.creationDate,
     rawType: parsed.event,
     reopenClosedAccess: parsed.event !== "PURCHASE_COMPLETE",
+    subscriptionCode,
     transactionId,
     type: EVENT_TYPES[parsed.event] ?? "other",
     warrantyEndsAt: hotmartDateToIso(purchase?.warranty_expire_date)

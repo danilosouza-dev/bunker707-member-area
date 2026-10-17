@@ -19,13 +19,15 @@ import { requestOriginOf } from "@/server/http/request-origin";
 import { getPaymentAdapter } from "./adapters";
 import { SALES_PROVIDER_LABELS, canReprocessSaleEvent } from "./model";
 import { SaleProcessingError, processSaleEvent, type SaleProcessingResult } from "./process-sale";
+import { isSalesSecretHash } from "./secret";
 import {
+  claimEventForProcessing,
   claimStaleReceivedEvent,
   fetchIntegrationSecret,
   fetchWebhookEvent,
+  fetchWebhookEventByExternalId,
   insertWebhookEvent,
   markIntegrationSync,
-  markProcessingStarted,
   salesDb,
   updateWebhookEventResult,
   type SalesDb
@@ -33,8 +35,11 @@ import {
 import type { NormalizedSaleEvent, SalesProvider } from "./types";
 
 const noStoreHeaders = { "Cache-Control": "no-store" };
-/** Reenvio da plataforma reivindica a linha presa em `received` depois disto (bem acima do maxDuration de 30 s). */
-export const STALE_RECEIVED_CLAIM_MS = 2 * 60_000;
+/**
+ * Janela em que um processamento ainda pode estar rodando (maxDuration da rota e 30 s): depois dela um
+ * reenvio da plataforma ou o botao Reprocessar reivindicam a linha; antes, o pedido espera.
+ */
+export const STALE_RECEIVED_CLAIM_MS = 45_000;
 
 function reply(body: Record<string, unknown>, status: number) {
   return NextResponse.json(body, { headers: noStoreHeaders, status });
@@ -50,7 +55,7 @@ async function runSaleProcessing(
   input: { event: NormalizedSaleEvent; eventRowId: string; siteOrigin: string | null }
 ): Promise<{ ok: true; result: SaleProcessingResult } | { ok: false; error: string }> {
   try {
-    const result = await processSaleEvent(db, { event: input.event, siteOrigin: input.siteOrigin });
+    const result = await processSaleEvent(db, { event: input.event, siteOrigin: input.siteOrigin, webhookEventId: input.eventRowId });
 
     await updateWebhookEventResult(db, input.eventRowId, {
       comboId: result.comboId,
@@ -116,6 +121,14 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
     return reply({ error: `Webhook indisponível: a ${label} ainda não foi conectada em Configurações › Vendas.`, ok: false }, 503);
   }
 
+  // Token guardado num formato antigo (texto puro, antes do hash): nao e um 401 silencioso. Avisa no
+  // cartao ("Precisa de atencao") e responde 503 para a plataforma tentar de novo depois da troca.
+  if (!isSalesSecretHash(secretHash)) {
+    await markIntegrationSync(db, provider, { error: `O token da ${label} está guardado num formato antigo. Troque o token em Configurações › Vendas para as vendas voltarem a entrar.` });
+
+    return reply({ error: "Webhook indisponível: troque o token da plataforma em Configurações › Vendas.", ok: false }, 503);
+  }
+
   let body: string;
 
   try {
@@ -152,7 +165,8 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
 
   try {
     stored = await insertWebhookEvent(db, {
-      buyerEmail: event.buyer.email,
+      // Evento que nao muda acesso nao guarda o e-mail do comprador (nem o payload alem do envelope).
+      buyerEmail: event.type === "other" ? null : event.buyer.email,
       eventType: event.rawType,
       externalEventId: event.eventId,
       externalProductId: event.externalProductId,
@@ -180,6 +194,14 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
     });
 
     if (!claimedId) {
+      // Ainda em `received` e recente demais para reivindicar (pode estar rodando): a plataforma deve
+      // tentar de novo, nunca dar como entregue. Processado, ignorado ou com erro: entregue (200).
+      const existing = await fetchWebhookEventByExternalId(db, provider, event.eventId).catch(() => null);
+
+      if (existing?.processing_status === "received") {
+        return reply({ error: "Evento ainda em processamento. Tente de novo em instantes.", ok: false, processing: true }, 409);
+      }
+
       return reply({ duplicate: true, ok: true }, 200);
     }
 
@@ -248,7 +270,13 @@ export async function reprocessWebhookEvent(db: SalesDb, input: { id: string; si
     throw new WebhookEventNotReprocessableError(409, "Não foi possível ler o evento guardado.");
   }
 
-  await markProcessingStarted(db, row.id);
+  // Mesma trava do reenvio: um segundo clique, outra aba ou um reenvio ao mesmo tempo nao processam junto.
+  const claimed = await claimEventForProcessing(db, { expectedStatus: row.processing_status, id: row.id, staleAfterMs: STALE_RECEIVED_CLAIM_MS });
+
+  if (!claimed) {
+    throw new WebhookEventNotReprocessableError(409, "Essa venda já está sendo processada. Tente de novo em instantes.");
+  }
+
   const processed = await runSaleProcessing(db, { event, eventRowId: row.id, siteOrigin: input.siteOrigin });
 
   if (!processed.ok) {

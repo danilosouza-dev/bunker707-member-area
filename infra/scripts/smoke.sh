@@ -31,8 +31,8 @@ check() {
 
 log "App em $app_url"
 check "app /api/health" 200 "$app_url/api/health"
-# 307 para /login quando o proxy.ts do app estiver ativo; hoje o app responde 200 (ver docs/20, "Diferencas").
-check "app / responde" "307|200" "$app_url/"
+# Sem sessao, o proxy do app (src/proxy.ts) manda `/` para /login na borda: 307, nunca 200.
+check "app / redireciona para /login" 307 "$app_url/"
 version=$(curl -sS --max-time 15 "$app_url/api/health" 2>/dev/null | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("version","?"))' 2>/dev/null || echo "?")
 printf '  versao no ar: %s\n' "$version"
 

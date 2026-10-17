@@ -76,7 +76,7 @@ O repositorio ja possui a base inicial do app:
 - cards verticais;
 - pagina propria de formacao/curso com breadcrumb;
 - pagina `Minhas compras` em `/minhas-compras`;
-- login real com Supabase Auth, proxy de sessao (proxy.ts) e callback OAuth;
+- login real com Supabase Auth, proxy de sessao (`src/proxy.ts`) e callback OAuth;
 - paginas autenticadas protegidas por sessao;
 - CMS/admin em `/admin` protegido por papel em `admin_roles`;
 - hero de conteudo configuravel por backend persistido;

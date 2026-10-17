@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
-// Deploy antes da migracao (202610110010-202610170004): as telas novas do admin mostram o aviso em vez de
+// Deploy antes da migracao (202610110010-202610170008): as telas novas do admin mostram o aviso em vez de
 // quebrar, e a area do aluno e o admin legado nao dependem do que a migracao cria.
 
 const pending = await import("../src/server/db/pending-migration.ts");
@@ -59,7 +59,7 @@ test("loadUnlessPendingMigration devolve o aviso so para migracao pendente", asy
 });
 
 test("o aviso cita as migracoes no vocabulario do produtor", () => {
-  assert.equal(pending.PENDING_MIGRATION_MESSAGE, "Esta tela precisa da atualização do banco (migrações 202610110010-202610170004).");
+  assert.equal(pending.PENDING_MIGRATION_MESSAGE, "Esta tela precisa da atualização do banco (migrações 202610110010-202610170008).");
 });
 
 async function listFiles(dir) {
