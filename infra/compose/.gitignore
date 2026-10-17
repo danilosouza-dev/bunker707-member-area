@@ -1,0 +1,12 @@
+# Segredos e dados do stack: nunca no repositorio (AGENTS.md, docs/13).
+.env
+.env.*
+!.env.example
+volumes/db/data/
+volumes/storage/*
+!volumes/storage/.gitkeep
+volumes/snippets/*
+!volumes/snippets/.gitkeep
+volumes/api/envoy/lds.yaml
+caddy/data/
+.deploy-history

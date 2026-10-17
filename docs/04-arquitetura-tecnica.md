@@ -458,19 +458,26 @@ Sem esses passos o agendamento existe mas nao chama nada, o que e o estado esper
 
 ## Deploy
 
-Fase inicial:
+Fase inicial (hoje):
 
 - Vercel para app Next.js;
 - Supabase para banco;
 - Mux/Bunny para video.
 
-Para facilitar migracao futura para Hetzner:
+Producao propria na Hetzner (preparada em 17/10/2026, ainda nao criada; decisao do produtor em docs/19):
 
-- manter variaveis de ambiente organizadas;
+- `Dockerfile` na raiz gera a imagem do app em modo standalone (Node 24, usuario sem privilegio, `HEALTHCHECK` em `GET /api/health`); `output: "standalone"` so entra com `NEXT_OUTPUT=standalone`, entao Vercel, `npm run build` e os testes nao mudam;
+- `.github/workflows/build-image.yml` publica a imagem no ghcr.io a cada push na `main` (sem deploy automatico);
+- `infra/compose/docker-compose.yml` sobe o Supabase self-hosted (Postgres 17, Envoy, GoTrue, PostgREST, Realtime, Storage, imgproxy, postgres-meta, Supavisor, Edge Runtime, Studio) com o app e o Caddy num servidor so; portas do Supabase so em 127.0.0.1;
+- o app fala com o Supabase pelo mesmo endereco publico que o navegador usa (cookie `sb-<host>-auth-token` e URLs do Storage dependem disso), resolvido para o proprio servidor por `extra_hosts`;
+- scripts em `infra/scripts/` (bootstrap, firewall da Hetzner, migracoes, deploy, backup/restore, atualizacao do stack) e o passo a passo completo em `docs/20-runbook-hetzner.md`.
+
+Regras que continuam valendo em qualquer hospedagem:
+
+- manter variaveis de ambiente organizadas (`.env.example` na raiz e `infra/compose/.env.example`);
 - evitar dependencia forte de Edge Functions da Vercel;
 - usar Route Handlers padrao;
-- criar Dockerfile quando a implementacao comecar;
-- nao guardar arquivos importantes no filesystem local do servidor.
+- nao guardar arquivos importantes no filesystem local do servidor (Storage do Supabase, com backup).
 
 ## Importador de playlists do YouTube
 

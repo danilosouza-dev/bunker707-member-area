@@ -1,0 +1,7 @@
+# Copie para terraform.tfvars (ignorado pelo git) e preencha. O token tambem pode vir de TF_VAR_hcloud_token.
+hcloud_token   = "cole-aqui-o-token-da-api"
+ssh_public_key = "ssh-ed25519 AAAA... produtor@bunker707"
+admin_ip       = "203.0.113.10"
+server_type    = "cpx32"
+location       = "fsn1"
+data_volume_gb = 0

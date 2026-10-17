@@ -292,10 +292,12 @@ Eventos criticos:
 
 Responsabilidades:
 
-- Supabase Postgres: backup automatico do plano escolhido;
+- Supabase Postgres: backup automatico do plano escolhido (nuvem) ou `infra/scripts/backup.sh` (Hetzner);
 - exports periodicos para seguranca;
 - assets e materiais em storage com politica de backup;
 - videos no provedor com estrategia de recuperacao.
+
+Na Hetzner (docs/20, secao 10): backup diario as 03:30 UTC pelo timer `infra/systemd/bunker707-backup.timer`, criptografado pelo restic num Storage Box via SFTP, com retencao de 30 snapshots diarios. Cada snapshot leva o banco inteiro (`pg_dump` por partes e em formato custom, de dentro do container do Postgres), a chave raiz do Vault, o `.env` do stack e os arquivos do Storage. `infra/scripts/restore.sh` restaura num servidor limpo e termina no teste de fumaca; a regra e ensaiar a restauracao a cada trimestre e depois de toda mudanca no stack.
 
 Capas publicas em `content-assets` usam nomes deterministas por hash e cache longo. Isso reduz duplicacao, mas nao substitui politica de backup/versionamento do Storage.
 
@@ -326,6 +328,10 @@ Checklist de producao:
 - webhooks com segredo;
 - pagina de erro amigavel;
 - suporte funcional.
+
+Servidor proprio na Hetzner: o runbook `docs/20-runbook-hetzner.md` cobre criacao do servidor, `bootstrap.sh` (SSH so com chave, ufw com Docker, fail2ban, atualizacoes automaticas), firewall da Hetzner (22 so do produtor, 80/443 so da Cloudflare), Studio atras de allowlist de IP e usuario/senha, primeiro deploy, deploy de nova versao, monitoramento externo (Better Stack ou Uptime Kuma fora do servidor), incidentes e a lista de diferencas para a nuvem (sem MCP do Supabase, sem previews, sem PITR). O checklist de seguranca do servidor esta na secao 16 do runbook.
+
+Achado de 17/10/2026 (ensaio da infra): o `proxy.ts` na raiz nao e compilado pelo Next 16.4 quando o app esta em `src/app` (o Next so procura `src/proxy.ts`); a CSP com nonce e o redirecionamento na borda descritos na secao CSP nao estao ativos em nenhum build hoje. Correcao pendente em PR propria (mover para `src/proxy.ts` com teste de comportamento do cabecalho).
 
 ## Importacao de playlist
 
