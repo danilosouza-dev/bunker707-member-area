@@ -39,6 +39,8 @@ learning_task_submissions
 saved_items
 student_events
 webhook_events
+email_outbox
+email_webhook_events
 integration_settings
 ai_agents
 ai_agent_scopes
@@ -1335,6 +1337,46 @@ Seguranca: RLS ligada sem policies e `revoke all` de `anon` e `authenticated`; s
 Retencao: `public.prune_job_history()`, agendada diariamente, apaga linhas com sucesso apos 30 dias e com falha apos 90 dias.
 
 Agendamentos (`cron.job`): `bunker707-jobs-tick` (a cada minuto, chama `public.enqueue_jobs_tick()`) e `bunker707-jobs-history-prune` (diario). Segredos no Vault: `jobs_tick_url` e `jobs_tick_token`.
+
+## E-mail transacional
+
+Migracao `202610170002_email_outbox.sql`. Fluxo e regras em `docs/04-arquitetura-tecnica.md`, secao E-mail transacional.
+
+### email_outbox
+
+Fila de saida: quem dispara (venda por webhook, Adicionar aluno, importacao) insere uma linha; o job `email-outbox` do tick envia.
+
+- id uuid, chave primaria;
+- kind: `welcome` (boas-vindas) ou `purchase` (acesso liberado por compra);
+- user_id -> auth.users (set null ao excluir a conta);
+- to_email, subject, html, text: o e-mail pronto, montado pelo template na hora de enfileirar;
+- idempotency_key: unica (`welcome:<user_id>`, `purchase:<provedor>:<evento>:<user_id>`); a mesma chave vai ao provedor;
+- status: queued, sending (reservada por um tick), sent, failed, bounced, complained;
+- attempts: tentativas feitas; na quinta falha passageira a linha vira `failed`;
+- next_attempt_at: quando pode sair (espera crescente depois de uma falha passageira);
+- last_error: motivo da ultima falha, do bounce ou da reclamacao (ate 2.000 caracteres);
+- provider, provider_message_id: quem enviou e o id devolvido (o webhook localiza a linha por ele);
+- sent_at, delivered_at, bounced_at;
+- metadata jsonb (<= 4 KB): so ids e rotulos curtos (`password_hint`, `product_ids`, `source_provider`, `source_event_id`);
+- created_at, updated_at (gatilho `set_updated_at`).
+
+Indices: parcial em `next_attempt_at` para `status in (queued, sending)` (o que o job busca), parcial em `sent_at` (limite diario), parcial em `provider_message_id` (webhook) e `(user_id, created_at desc)`.
+
+Seguranca: RLS ligada sem policies, `revoke all` de `anon` e `authenticated`; so o servidor (service role) le e grava. O HTML guardado tem o e-mail e o nome do aluno: e dado pessoal e segue a retencao da conta (some com `user_id` nulo na exclusao, mas a linha fica; limpeza por idade fica como pendencia).
+
+### email_webhook_events
+
+Payload bruto de cada evento do provedor, para auditoria e reprocesso.
+
+- id uuid;
+- provider (`resend`) + event_id (cabecalho `svix-id`): unicos; o mesmo evento entregue de novo nao e aplicado duas vezes;
+- event_type (`email.delivered`, `email.bounced`, `email.complained`, `email.failed`, ...);
+- provider_message_id: `data.email_id` do payload;
+- payload jsonb (<= 64 KB), received_at, processed_at;
+- outbox_id -> email_outbox (set null): a linha que o evento alterou, quando havia;
+- error: falha ao aplicar, se houve.
+
+Seguranca: RLS ligada sem policies, nada para `anon`/`authenticated`; so o servidor insere e atualiza. Eventos de e-mails que nao sairam da fila (Auth do Supabase pelo mesmo Resend) ficam so registrados.
 
 ## Suporte
 

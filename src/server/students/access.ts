@@ -6,6 +6,7 @@ import "server-only";
 // Nao conhece HTTP nem React; quem chama ja validou a entrada e a permissao.
 
 import type { User } from "@supabase/supabase-js";
+import { enqueuePurchaseEmail, enqueueWelcomeEmail, originOfUrl } from "@/server/email/transactional";
 import {
   EmailRateLimitError,
   createAccountWithPassword,
@@ -38,6 +39,7 @@ import {
   fetchContentKinds,
   fetchEntitlement,
   fetchEntitlements,
+  fetchProfile,
   fetchProfileByEmail,
   fetchStaffUserIds,
   fillProfileGaps,
@@ -76,6 +78,8 @@ type AccessContext = {
   sourceProvider: string;
   /** Id do evento da venda; a equipe nao tem. */
   sourceEventId?: string | null;
+  /** Origem publica do site (`https://host`) para os links dos e-mails; sem ela, NEXT_PUBLIC_SITE_URL. */
+  siteOrigin?: string | null;
 };
 
 function eventMetadata(context: AccessContext, extra: Record<string, unknown> = {}) {
@@ -134,6 +138,8 @@ export async function grantResolvedProducts(
   const granted: EntitlementRow[] = [];
   const alreadyOpenProductIds: string[] = [];
   const events: StudentEventInsert[] = [];
+  /** Acessos que acabaram de abrir (novos ou de volta); quem so ganhou prazo nao recebe e-mail de compra. */
+  const opened: { content: ContentKindRow; row: EntitlementRow }[] = [];
 
   for (const productId of uniqueIds) {
     const content = contentById.get(productId);
@@ -176,6 +182,11 @@ export async function grantResolvedProducts(
     }
 
     granted.push(row);
+
+    if (!wasOpen) {
+      opened.push({ content, row });
+    }
+
     events.push({
       entity_id: row.id,
       entity_type: "entitlement",
@@ -187,7 +198,33 @@ export async function grantResolvedProducts(
 
   await recordEvents(db, events);
 
+  // Venda por webhook: um e-mail por compra com o que acabou de abrir. Acoes da equipe nao avisam o aluno.
+  if (input.source === "webhook" && opened.length > 0) {
+    await notifyPurchase(db, input, opened);
+  }
+
   return { alreadyOpenProductIds, granted, missingProductIds: uniqueIds.filter((id) => !contentById.has(id)) };
+}
+
+async function notifyPurchase(db: StudentsDb, input: GrantProductAccessInput, opened: { content: ContentKindRow; row: EntitlementRow }[]) {
+  const profile = await fetchProfile(db, input.userId);
+  const email = normalizeEmail(profile?.email ?? (await getAccountById(db, input.userId))?.email ?? "");
+
+  if (!email) {
+    console.error(`[e-mail] acesso liberado sem destinatário: a conta ${input.userId} não tem e-mail.`);
+    return;
+  }
+
+  await enqueuePurchaseEmail(db, {
+    email,
+    entitlementIds: opened.map((item) => item.row.id),
+    fullName: profile?.full_name ?? null,
+    products: opened.map((item) => ({ id: item.content.id, title: item.content.title })),
+    siteOrigin: input.siteOrigin,
+    sourceEventId: input.sourceEventId,
+    sourceProvider: input.sourceProvider,
+    userId: input.userId
+  });
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -287,6 +324,8 @@ export async function provisionStudentAccess(input: ProvisionStudentAccessInput,
     await upsertProfile(db, { email, fullName: input.fullName, id: user.id, phone: input.phone });
   }
 
+  const siteOrigin = input.siteOrigin ?? originOfUrl(input.redirectTo);
+
   if (!existing) {
     await recordEvent(db, {
       entity_id: user.id,
@@ -295,6 +334,12 @@ export async function provisionStudentAccess(input: ProvisionStudentAccessInput,
       metadata: eventMetadata(input, { delivery: input.delivery }),
       user_id: user.id
     });
+  }
+
+  // Boas-vindas so na primeira vez que a conta nasce: sempre numa venda; pelo admin, quando a equipe
+  // escolheu convite ou senha temporaria ("Nao enviar agora" nao manda nada).
+  if (!existing && !staff && (input.source === "webhook" || input.delivery !== "none")) {
+    await enqueueWelcomeEmail(db, { email, fullName: input.fullName, passwordHint: input.delivery, siteOrigin, userId: user.id });
   }
 
   if (input.delivery === "invite" && !staff) {
@@ -320,6 +365,7 @@ export async function provisionStudentAccess(input: ProvisionStudentAccessInput,
       actorId: input.actorId,
       endsAt: accessEndDateToIso(input.endsAt),
       productIds: input.productIds,
+      siteOrigin,
       source: input.source,
       sourceEventId: input.sourceEventId,
       sourceProvider: input.sourceProvider,
@@ -509,6 +555,18 @@ export async function importStudentRow(
       event_type: "access_email_sent",
       metadata: eventMetadata(input, { delivery: "invite", via: "import" }),
       user_id: userId
+    });
+  }
+
+  // Importacao com convite: boas-vindas para a conta nova. Se o convite bateu no limite, o e-mail diz
+  // como criar a senha por "Esqueci minha senha"; "Nao enviar agora" nao manda nada.
+  if (created && input.delivery === "invite") {
+    await enqueueWelcomeEmail(db, {
+      email,
+      fullName: input.row.fullName,
+      passwordHint: emailSent ? "invite" : "none",
+      siteOrigin: input.siteOrigin ?? originOfUrl(input.redirectTo),
+      userId
     });
   }
 

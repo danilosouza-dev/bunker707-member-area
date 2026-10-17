@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { emailOutboxJob } from "./email-outbox-job";
 
 // Ponto de extensao dos jobs leves executados pelo tick de minuto.
 //
@@ -25,8 +26,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 //   import { sendDueReminders } from "@/server/communications/reminders";
 //
 //   export const jobRegistry: readonly Job[] = [
+//     emailOutboxJob,
 //     { name: "lembretes-de-webinario", run: (ctx) => sendDueReminders(ctx) }
 //   ];
+//
+// Jobs registrados hoje: `email-outbox` (fila de e-mails transacionais, src/server/jobs/email-outbox-job.ts).
 
 export type JobContext = {
   // Cliente administrativo do Supabase (service role); usar somente no servidor.
@@ -45,4 +49,4 @@ export type Job = {
   run(ctx: JobContext): Promise<void>;
 };
 
-export const jobRegistry: readonly Job[] = [];
+export const jobRegistry: readonly Job[] = [emailOutboxJob];

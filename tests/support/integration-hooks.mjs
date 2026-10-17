@@ -10,6 +10,8 @@ import "./resolve-extensionless-ts.mjs";
 //   `actAsSignedIn` (login real no Auth local, para o codigo que grava com a sessao do aluno);
 // - o provedor de IA (src/server/ai/provider-adapter.ts) vira integration-ai-provider.mjs, um
 //   provedor falso controlado pelo teste (`provedorFalso`); o pool, os limites e o banco seguem reais;
+// - o provedor de e-mail (src/server/email/provider.ts) vira integration-email-provider.mjs
+//   (`provedorDeEmailFalso`); a fila email_outbox, o limite diario e o job do tick seguem reais;
 // - "server-only", "next/navigation", "next/cache" e "next/headers" viram dubles inofensivos (nao ha
 //   request do Next aqui; a invalidacao de cache fica anotada em integration-next-cache.mjs e os
 //   cabecalhos sao os de um request local, em integration-next-headers.mjs).
@@ -21,9 +23,11 @@ const supabaseSessionStubUrl = new URL("./integration-supabase-session.mjs", imp
 const nextCacheStubUrl = new URL("./integration-next-cache.mjs", import.meta.url).href;
 const nextHeadersStubUrl = new URL("./integration-next-headers.mjs", import.meta.url).href;
 const aiProviderStubUrl = new URL("./integration-ai-provider.mjs", import.meta.url).href;
+const emailProviderStubUrl = new URL("./integration-email-provider.mjs", import.meta.url).href;
 
 export { actAs, actAsSignedIn, integrationSession } from "./integration-session.mjs";
 export { provedorFalso } from "./integration-ai-provider.mjs";
+export { provedorDeEmailFalso } from "./integration-email-provider.mjs";
 
 function stubModule(source) {
   return { shortCircuit: true, url: `data:text/javascript,${encodeURIComponent(source)}` };
@@ -60,6 +64,11 @@ registerHooks({
     // A chamada HTTP ao provedor de IA vira o provedor falso; pool, limites e banco seguem de verdade.
     if (specifier === "@/server/ai/provider-adapter") {
       return { shortCircuit: true, url: aiProviderStubUrl };
+    }
+
+    // A chamada HTTP ao Resend vira o provedor de e-mail falso; fila, limite diario e job seguem de verdade.
+    if (specifier === "@/server/email/provider") {
+      return { shortCircuit: true, url: emailProviderStubUrl };
     }
 
     // Invalidacao de cache do Next (revalidatePath etc.) so existe dentro de um request: vira anotacao.
