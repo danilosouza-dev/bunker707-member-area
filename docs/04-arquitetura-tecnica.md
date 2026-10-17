@@ -159,7 +159,7 @@ Motivos:
 Implementacao atual:
 
 - `@supabase/ssr` cria clientes de browser, servidor e proxy;
-- o `proxy.ts` na raiz (convencao do Next 16 que substitui `middleware.ts`, runtime Node) protege home, `Minhas compras`, `Favoritos`, paginas de conteudo/aula e `/admin`;
+- o `src/proxy.ts` (convencao do Next 16 que substitui `middleware.ts`, runtime Node; precisa ficar em `src/` porque o app esta em `src/app`, senao o Next o ignora no build) protege home, `Minhas compras`, `Favoritos`, paginas de conteudo/aula e `/admin`;
 - o `proxy.ts` valida a sessao com `getUser()` por padrao ou com `getClaims()` quando `AUTH_SESSION_STRATEGY=claims` (verificacao local do JWT via JWKS so com signing keys assimetricas no Supabase; sem elas o `getClaims()` ainda consulta o Auth); nas paginas, `getAuthenticatedUser` e `getAdminRoleForUser` usam `React.cache`, entao layout, pagina, guards e loaders fazem uma unica chamada ao Supabase por request;
 - `/login` autentica por email/senha e provedores sociais habilitados no Supabase;
 - `/auth/callback` troca o codigo OAuth por sessao no servidor;
