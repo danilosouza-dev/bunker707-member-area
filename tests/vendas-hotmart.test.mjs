@@ -212,6 +212,8 @@ test("modelo da tela: situacao por plataforma, resumo do hub, mascara do e-mail 
   assert.equal(model.webhookOriginWarning({ configuredOrigin: null, requestOrigin: "https://x.vercel.app" }), "O endereço acima é o desta página, porque NEXT_PUBLIC_SITE_URL não está definida. Conecte a plataforma só pelo endereço de produção.");
   assert.match(model.webhookOriginWarning({ configuredOrigin: "https://app.exemplo.test", requestOrigin: "https://previa.vercel.app" }), /aberto por https:\/\/previa\.vercel\.app/);
   assert.equal(model.webhookOriginWarning({ configuredOrigin: "https://app.exemplo.test", requestOrigin: "https://app.exemplo.test" }), null);
+  assert.equal(model.buyerLabel({ anonymizedAt: null, buyerEmail: "Comprador@Exemplo.com" }), "c***@exemplo.com");
+  assert.equal(model.buyerLabel({ anonymizedAt: "2025-10-17T06:23:00.000Z", buyerEmail: null }), "Dados apagados (12 meses)");
   assert.equal(model.describeSecretState({ secretUpdatedAt: null, status: "configured" }, () => "x"), "Nenhum token guardado.");
   assert.equal(model.describeSecretState({ secretUpdatedAt: "2026-10-17T12:00:00.000Z", status: "configured" }, () => "17/10/2026 09:00"), "Token guardado em 17/10/2026 09:00.");
 });

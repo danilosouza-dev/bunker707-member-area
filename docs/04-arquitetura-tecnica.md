@@ -230,7 +230,7 @@ Combos devem ser tratados como pacotes internos: o adapter normaliza a venda ext
 
 ### Implementado (17/10/2026): Hotmart, webhook 2.0
 
-Modulo `src/server/payments/` (migracao `202610170003_sales_webhooks.sql`; tela em `docs/17` §1.10). Ticto e Kiwify entram pelo mesmo caminho quando tiverem adaptador; ate la aparecem como "Em configuracao".
+Modulo `src/server/payments/` (migracao `202610170003_sales_webhooks.sql`; tela em `docs/17` §1.10). Ticto e Kiwify entram pelo mesmo caminho quando tiverem adaptador; ate la aparecem como "Em configuracao". Retencao: 12 meses depois, `public.prune_personal_data()` (migracao `202610170004`) tira payload, e-mail e erro de `webhook_events`; a linha fica para historico e idempotencia e `reprocessWebhookEvent` recusa com 409 (`docs/06`, secao LGPD).
 
 - `types.ts`: contrato `PaymentProviderAdapter` (`verify`, `normalize`, `redact`, `handledEvents`, `maxPayloadBytes`) e o evento normalizado `{ provider, eventId, type: purchase_approved | refund | chargeback | subscription_canceled | other, rawType, buyer { email, name, phone }, externalProductId, externalProductName, transactionId, purchasedAt, warrantyEndsAt, occurredAt }`;
 - `hotmart.ts` (puro): le o envelope 2.0 (`id`, `event`, `creation_date` em epoch ms, `data.product/buyer/purchase/subscriber`), traduz `PURCHASE_APPROVED` e `PURCHASE_COMPLETE` para `purchase_approved` (o segundo com `reopenClosedAccess: false`: fim da garantia confirma uma compra anterior e so libera para quem nunca teve acesso ao produto, nunca reabre acesso suspenso ou revogado), `PURCHASE_REFUNDED` para `refund`, `PURCHASE_CHARGEBACK` para `chargeback`, `SUBSCRIPTION_CANCELLATION` para `subscription_canceled` e o resto para `other`; confere o hottok (cabecalho `X-HOTMART-HOTTOK`, ou `hottok` no corpo) em tempo constante contra o **SHA-256** guardado em `integration_settings.secret` (`secret.ts`: o token em si nunca vai para o banco), nunca contra variavel de ambiente; `redact` guarda so os campos permitidos do payload (envelope; `product.id/name`; `purchase.transaction/status/approved_date/order_date/warranty_expire_date`; `subscription.status/subscriber.code`; do comprador so e-mail, nome e telefone). Documento, endereco, produtor, afiliados, comissoes e o token nunca sao gravados; evento que nao muda acesso guarda so o envelope;
@@ -475,7 +475,7 @@ Regras para um job novo no registro:
 - recomputos pesados (por exemplo `student_facts`) rodam a noite em agendamento proprio, nunca por minuto no banco primario;
 - dead-letter apos 3 falhas e retentativas com `attempts` ficam com o job que precisar delas (a coluna ja existe em `job_runs`).
 
-Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias.
+Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias. Na mesma linha, `public.prune_personal_data()` roda as 06:23 UTC (`bunker707-personal-data-prune`, migracao `202610170004`) e anonimiza `webhook_events` (12 meses) e `email_outbox` (90/180 dias) e apaga `email_webhook_events` (90 dias): regras em `docs/06`, secao LGPD.
 
 Configuracao por ambiente (passos completos no topo de `supabase/migrations/202610100001_jobs_cron.sql`):
 
@@ -498,6 +498,7 @@ Regras:
 - idempotencia em duas camadas: a chave `idempotency_key` e unica na fila (`welcome:<user_id>` e `purchase:<provedor>:<evento>:<user_id>`; sem id de evento, os ids dos acessos abertos) e vai ao Resend, que nao envia duas vezes a mesma chave em 24 h. Um webhook de venda reprocessado nao duplica e-mail;
 - retentativa: erro passageiro (rede, 5xx, chave ainda em uso) volta para a fila com espera crescente (1 min, 5 min, 30 min, 2 h, 12 h) e vira `failed` na quinta falha; limite do provedor (429, cota do dia) devolve a linha sem contar tentativa e para o lote ate a proxima janela; erro definitivo (remetente invalido, dominio nao verificado, chave recusada) vira `failed` na hora com o motivo em `last_error`;
 - cada linha e reservada (`sending`) antes do envio: dois ticks no mesmo minuto nao enviam a mesma linha; linha presa em `sending` ha mais de 10 minutos volta para a fila; no maximo 25 envios por tick, com pausa de 550 ms entre eles (o Resend aceita 2 pedidos por segundo), respeitando `ctx.signal`.
+- o job le so as colunas que a migracao `202610170002` criou (`EMAIL_OUTBOX_COLUMNS`): o deploy pode sair antes de uma migracao posterior, e uma coluna nova na lista pararia a fila inteira. A retencao (`202610170004`) so deixa `to_email` e `html` nulos em linha que ja saiu da fila; se uma dessas for reservada, vira `failed` com o motivo em vez de sair vazia;
 
 Pontos de disparo (`src/server/students/access.ts`, a mesma rotina do admin e dos webhooks de venda):
 
@@ -520,6 +521,9 @@ pg_cron tick (* * * * *) -> POST /api/jobs/tick -> job email-outbox
 Resend -> POST /api/webhooks/resend (assinatura Svix com RESEND_WEBHOOK_SECRET)
   -> email_webhook_events (payload bruto, unico por svix-id)
   -> email_outbox: delivered_at | bounced | complained | failed
+pg_cron 'bunker707-personal-data-prune' (06:23 UTC) -> public.prune_personal_data()
+  -> email_outbox: 90 dias (enviado) / 180 dias (falha, bounce, fila) sem destinatario, HTML, texto e erro
+  -> email_webhook_events: apagados depois de 90 dias
 ```
 
 Codigo:

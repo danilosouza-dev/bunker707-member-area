@@ -255,6 +255,10 @@ export async function reprocessWebhookEvent(db: SalesDb, input: { id: string; si
     throw new WebhookEventNotReprocessableError(404, "Essa venda não está mais na lista.");
   }
 
+  if (row.anonymized_at) {
+    throw new WebhookEventNotReprocessableError(409, "Essa venda passou de 12 meses: os dados do comprador já foram apagados e ela não pode ser reprocessada.");
+  }
+
   if (!canReprocessSaleEvent(row.processing_status, row.received_at)) {
     throw new WebhookEventNotReprocessableError(409, "Essa venda já foi processada; não há o que reprocessar.");
   }
