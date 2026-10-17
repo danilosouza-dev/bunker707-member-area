@@ -1,0 +1,60 @@
+# Borda da Bunker707 (infra/compose/docker-compose.yml, servico caddy). Tres sites, um por hostname:
+#   APP_SITE_ADDRESS       o app Next.js (app:3000)
+#   SUPABASE_SITE_ADDRESS  so os caminhos da API do Supabase (api-gw:8000); o resto responde 404
+#   STUDIO_SITE_ADDRESS    Studio e postgres-meta pelo Envoy, so para STUDIO_ALLOWED_IPS; o Envoy exige
+#                          o basic auth (DASHBOARD_USERNAME / DASHBOARD_PASSWORD)
+# Dominio puro no endereco = HTTPS automatico (Let's Encrypt, desafio HTTP-01, que passa pela Cloudflare
+# em modo Full (strict)). http:// no endereco = sem TLS (ensaio local).
+#
+# A CSP com nonce por request, HSTS e os demais cabecalhos de seguranca do app vem do proprio Next
+# (proxy.ts e next.config.ts): aqui nada e reescrito, so o cabecalho Server sai.
+
+{
+	email {$ACME_EMAIL}
+	servers {
+		# Atras da Cloudflare: o IP real vem em CF-Connecting-IP, aceito so das faixas dela.
+		import /etc/caddy/cloudflare-trusted-proxies.caddyfile
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
+}
+
+(sem_server) {
+	header -Server
+}
+
+{$APP_SITE_ADDRESS} {
+	import sem_server
+	encode zstd gzip
+	reverse_proxy app:3000
+}
+
+{$SUPABASE_SITE_ADDRESS} {
+	import sem_server
+	header X-Content-Type-Options nosniff
+	header Referrer-Policy no-referrer
+
+	@api path /auth/v1/* /rest/v1/* /graphql/v1 /realtime/v1/* /storage/v1/* /functions/v1/* /.well-known/oauth-authorization-server/auth/v1
+	handle @api {
+		reverse_proxy api-gw:8000
+	}
+
+	# Studio, /pg (postgres-meta) e qualquer outro caminho: nao existem neste hostname.
+	handle {
+		respond 404
+	}
+}
+
+{$STUDIO_SITE_ADDRESS} {
+	import sem_server
+	header X-Robots-Tag "noindex, nofollow"
+
+	@permitido client_ip {$STUDIO_ALLOWED_IPS}
+	handle @permitido {
+		# O Envoy aplica o basic auth do painel (DASHBOARD_*) e encaminha / ao Studio e /pg ao meta.
+		reverse_proxy api-gw:8000
+	}
+
+	handle {
+		respond 403
+	}
+}

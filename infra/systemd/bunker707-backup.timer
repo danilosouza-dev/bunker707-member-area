@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup diario da Bunker707 as 03:30 UTC (00:30 em Brasilia)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

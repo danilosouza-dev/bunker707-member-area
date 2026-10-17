@@ -30,6 +30,7 @@ Before making product, UX, architecture, or implementation decisions, read the r
 - `docs/16-auditoria-tecnica-2026-10-01.md`
 - `docs/17-admin-produtor-redesign.md` (proposta de reconstrucao da area do produtor; vale para qualquer trabalho em `/admin`)
 - `docs/18-padrao-de-testes.md` (padrao de testes, dados de teste e rotina: toda PR de funcionalidade ou correcao traz teste de comportamento)
+- `docs/20-runbook-hetzner.md` (servidor proprio na Hetzner: `infra/`, Dockerfile, deploy, backup, incidentes; nada cobrado e criado sem ok do produtor no chat)
 
 Update docs when decisions change.
 

@@ -1,0 +1,17 @@
+# Backup diario da Bunker707 (infra/scripts/backup.sh). Instalado por `sudo sh infra/scripts/backup.sh
+# --install-timer`, que troca __REPO_ROOT__ e __RUN_AS__ pelos valores do servidor.
+[Unit]
+Description=Backup da Bunker707 (Postgres, Storage, .env) para o Storage Box via restic
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__RUN_AS__
+WorkingDirectory=__REPO_ROOT__
+ExecStart=/usr/bin/env bash __REPO_ROOT__/infra/scripts/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# Sem o .env e a chave do restic nao ha backup: falhar alto e melhor do que em silencio.
+SuccessExitStatus=0

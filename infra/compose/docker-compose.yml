@@ -1,0 +1,500 @@
+# Bunker707 na Hetzner: Supabase self-hosted + app Next.js + Caddy, num servidor so.
+#
+# Baseado no compose oficial do Supabase (supabase/supabase, pasta docker/; origem em UPSTREAM.md), com:
+#   - imagens pinadas (Postgres 17, Envoy como gateway, GoTrue, PostgREST, Realtime, Storage, imgproxy,
+#     postgres-meta, Supavisor, Edge Runtime); sem Logflare e Vector (Studio sem a aba de logs);
+#   - toda porta do Supabase publicada so em 127.0.0.1 (o compose oficial publica em 0.0.0.0 e o Docker
+#     ignora o ufw); so o Caddy escuta na rede;
+#   - o app (servico `app`) ligado ao gateway, e o Caddy na frente com TLS automatico;
+#   - chaves novas (sb_publishable_/sb_secret_, JWT assimetrico) ligadas, como em generate-secrets.sh.
+#
+# Uso (docs/20-runbook-hetzner.md):
+#   sh infra/compose/generate-secrets.sh --local      # ou --domain ... em producao: escreve o .env
+#   docker compose -f infra/compose/docker-compose.yml up -d --build
+#   sh infra/scripts/migrate.sh                       # aplica supabase/migrations
+#
+# O .env fica nesta pasta (o compose le sozinho) e nunca vai para o repositorio.
+
+name: bunker707
+
+services:
+
+  studio:
+    container_name: bunker707-studio
+    image: supabase/studio:2026.10.12-sha-3699278
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://localhost:3000/api/platform/profile').then((r) => {if (r.status !== 200) throw new Error(r.status)})\""
+        ]
+      timeout: 10s
+      interval: 5s
+      retries: 3
+      start_period: 20s
+    environment:
+      HOSTNAME: "0.0.0.0"
+
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER_READ_WRITE: postgres
+
+      PG_META_CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public}
+
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+      SUPABASE_URL: http://api-gw:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+
+      # Sem Logflare/Vector neste stack: a aba de logs do Studio fica desligada.
+      ENABLED_FEATURES_LOGS_ALL: "false"
+
+      SNIPPETS_MANAGEMENT_FOLDER: /app/snippets
+      EDGE_FUNCTIONS_MANAGEMENT_FOLDER: /app/edge-functions
+    volumes:
+      - ./volumes/snippets:/app/snippets:z
+      - ./volumes/functions:/app/edge-functions:ro,z
+
+  # Gateway da API (Envoy). Em producao o Caddy e quem fala com ele; a porta em 127.0.0.1 serve ao
+  # ensaio local e a depuracao no servidor (curl http://127.0.0.1:8000/auth/v1/health).
+  api-gw:
+    container_name: bunker707-envoy
+    image: envoyproxy/envoy:v1.39.1
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - envoy
+          - kong
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/127.0.0.1/8000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      studio:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:${API_GW_HTTP_PORT:-8000}:8000/tcp
+    volumes:
+      - ./volumes/api/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./volumes/api/envoy/cds.yaml:/etc/envoy/cds.yaml:ro
+      - ./volumes/api/envoy/lds.template.yaml:/etc/envoy/lds.template.yaml:ro
+      - ./volumes/api/envoy/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      ANON_KEY_ASYMMETRIC: ${ANON_KEY_ASYMMETRIC:-}
+      SERVICE_ROLE_KEY_ASYMMETRIC: ${SERVICE_ROLE_KEY_ASYMMETRIC:-}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    entrypoint: ["/bin/sh", "/docker-entrypoint.sh"]
+
+  auth:
+    container_name: bunker707-auth
+    image: supabase/gotrue:v2.197.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      # Plataforma fechada (AGENTS.md): sem cadastro publico. Contas entram pelo admin ou por convite.
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP}
+
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      # Chaves de assinatura (EC P-256 + a simetrica legada), geradas por generate-secrets.sh. Com elas o
+      # JWKS em /auth/v1/.well-known/jwks.json permite AUTH_SESSION_STRATEGY=claims no app.
+      GOTRUE_JWT_KEYS: ${JWT_KEYS:-[]}
+      GOTRUE_JWT_ISSUER: ${API_EXTERNAL_URL}
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS}
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM}
+      GOTRUE_PASSWORD_MIN_LENGTH: ${AUTH_PASSWORD_MIN_LENGTH:-8}
+      GOTRUE_RATE_LIMIT_EMAIL_SENT: ${AUTH_RATE_LIMIT_EMAIL_SENT:-30}
+
+      # E-mail transacional pelo Resend (SMTP na 587; a Hetzner bloqueia 25 e 465 de saida).
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
+      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
+
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+
+  rest:
+    container_name: bunker707-rest
+    image: postgrest/postgrest:v14.18
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "postgrest", "--ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_MAX_ROWS: ${PGRST_DB_MAX_ROWS:-1000}
+      PGRST_DB_EXTRA_SEARCH_PATH: ${PGRST_DB_EXTRA_SEARCH_PATH:-public}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_ADMIN_SERVER_PORT: 3001
+      PGRST_ADMIN_SERVER_HOST: localhost
+      # JWKS (chave publica EC + a simetrica legada); sem JWT_JWKS cai no segredo simetrico.
+      PGRST_JWT_SECRET: ${JWT_JWKS:-${JWT_SECRET}}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
+    command: ["postgrest"]
+
+  realtime:
+    # O nome do container e assim de proposito: o Realtime monta o tenant a partir do subdominio.
+    container_name: realtime-dev.bunker707-realtime
+    image: supabase/realtime:v2.143.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sSfL --head -o /dev/null -H \"Authorization: Bearer ${ANON_KEY}\" http://localhost:4000/api/tenants/realtime-dev/health"
+        ]
+      timeout: 5s
+      interval: 30s
+      retries: 3
+      start_period: 10s
+    environment:
+      PORT: 4000
+      DB_HOST: ${POSTGRES_HOST}
+      DB_PORT: ${POSTGRES_PORT}
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:-supabaserealtime}
+      API_JWT_SECRET: ${JWT_SECRET}
+      API_JWT_JWKS: ${JWT_JWKS:-{"keys":[]}}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+      DISABLE_HEALTHCHECK_LOGGING: "true"
+
+  # Arquivos em disco (./volumes/storage), no backup diario (infra/scripts/backup.sh).
+  storage:
+    container_name: bunker707-storage
+    image: supabase/storage-api:v1.81.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+      imgproxy:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://storage:5000/status"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+      start_period: 10s
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      JWT_JWKS: ${JWT_JWKS:-{"keys":[]}}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      STORAGE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      # 50 MiB, igual a supabase/config.toml; o bucket content-assets limita a 8 MB na migracao.
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      GLOBAL_S3_BUCKET: ${GLOBAL_S3_BUCKET}
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: ${STORAGE_TENANT_ID}
+      REGION: ${REGION}
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://imgproxy:5001
+      S3_PROTOCOL_ACCESS_KEY_ID: ${S3_PROTOCOL_ACCESS_KEY_ID}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: ${S3_PROTOCOL_ACCESS_KEY_SECRET}
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+
+  imgproxy:
+    container_name: bunker707-imgproxy
+    image: darthsim/imgproxy:v3.31.4
+    restart: unless-stopped
+    volumes:
+      - ./volumes/storage:/var/lib/storage:z
+    healthcheck:
+      test: ["CMD", "imgproxy", "health"]
+      timeout: 5s
+      interval: 5s
+      retries: 3
+    environment:
+      IMGPROXY_BIND: ":5001"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_AUTO_WEBP: ${IMGPROXY_AUTO_WEBP}
+      IMGPROXY_MAX_SRC_RESOLUTION: 16.8
+
+  meta:
+    container_name: bunker707-meta
+    image: supabase/postgres-meta:v0.100.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: ${POSTGRES_HOST}
+      PG_META_DB_PORT: ${POSTGRES_PORT}
+      PG_META_DB_NAME: ${POSTGRES_DB}
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      CRYPTO_KEY: ${PG_META_CRYPTO_KEY}
+
+  functions:
+    container_name: bunker707-edge-functions
+    image: supabase/edge-runtime:v1.77.4
+    restart: unless-stopped
+    volumes:
+      - ./volumes/functions:/home/deno/functions:z
+      - deno-cache:/root/.cache/deno
+    depends_on:
+      api-gw:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/127.0.0.1/9000'"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_JWKS: ${JWT_JWKS:-{"keys":[]}}
+      SUPABASE_URL: http://api-gw:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_PUBLISHABLE_KEYS: "{\"default\":\"${SUPABASE_PUBLISHABLE_KEY:-}\"}"
+      SUPABASE_SECRET_KEYS: "{\"default\":\"${SUPABASE_SECRET_KEY:-}\"}"
+      SUPABASE_DB_URL: postgresql://postgres:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+      VERIFY_JWT: "${FUNCTIONS_VERIFY_JWT}"
+    command:
+      ["start", "--user-worker-request-idle-timeout", "150000", "--main-service", "/home/deno/functions/main"]
+
+  # Postgres 17 da imagem oficial do Supabase (pg_cron, pg_net, vault, pgsodium...). Porta direta so em
+  # 127.0.0.1 (POSTGRES_DIRECT_PORT, padrao 5433) para migrate.sh, psql e restauracao no proprio servidor,
+  # sem passar pelo pooler. De fora, so por tunel SSH.
+  db:
+    container_name: bunker707-db
+    image: supabase/postgres:17.6.1.136
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${POSTGRES_DIRECT_PORT:-5433}:${POSTGRES_PORT}
+    volumes:
+      - ./volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:Z
+      - ./volumes/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:Z
+      - ./volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:Z
+      - ./volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:Z
+      - ./volumes/db/data:/var/lib/postgresql/data:Z
+      - ./volumes/db/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:Z
+      - ./volumes/db/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:Z
+      - ./volumes/db/pooler.sql:/docker-entrypoint-initdb.d/migrations/99-pooler.sql:Z
+      # Chave raiz do pgsodium/Vault (segredos dos provedores de IA). Entra no backup; sem ela o Vault
+      # restaurado nao abre.
+      - db-config:/etc/postgresql-custom
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: ${POSTGRES_PORT}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB}
+      JWT_EXP: ${JWT_EXPIRY}
+    command:
+      ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "log_min_messages=fatal"]
+
+  # Pooler. Sessao em 5432 e transacao em 6543, so em 127.0.0.1 (psql no proprio servidor:
+  # usuario postgres.<POOLER_TENANT_ID>). O app nao usa: fala com o banco pelo PostgREST.
+  supavisor:
+    container_name: bunker707-pooler
+    image: supabase/supavisor:2.9.13
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${POSTGRES_PORT}:5432
+      - 127.0.0.1:${POOLER_PROXY_PORT_TRANSACTION}:6543
+    volumes:
+      - ./volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro,z
+    healthcheck:
+      test: ["CMD", "curl", "-sSfL", "--head", "-o", "/dev/null", "http://127.0.0.1:4000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_URL: ecto://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/_supabase
+      CLUSTER_POSTGRES: "true"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      REGION: local
+      ERL_AFLAGS: -proto_dist inet_tcp
+      POOLER_TENANT_ID: ${POOLER_TENANT_ID}
+      POOLER_DEFAULT_POOL_SIZE: ${POOLER_DEFAULT_POOL_SIZE}
+      POOLER_MAX_CLIENT_CONN: ${POOLER_MAX_CLIENT_CONN}
+      POOLER_POOL_MODE: transaction
+      DB_POOL_SIZE: ${POOLER_DB_POOL_SIZE}
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "/app/bin/migrate && /app/bin/supavisor eval \"$$(cat /etc/pooler/pooler.exs)\" && /app/bin/server"
+      ]
+
+  # O app Next.js (Dockerfile na raiz do repositorio). `docker compose build app` constroi aqui;
+  # em producao APP_IMAGE aponta para a imagem publicada no ghcr.io pelo workflow build-image.yml.
+  # Sem porta publicada: so o Caddy chega nele (app:3000).
+  app:
+    container_name: bunker707-app
+    image: ${APP_IMAGE:-bunker707-app:local}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* entram no JavaScript do navegador no build; por isso sao args, nao env.
+        NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
+        NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-}
+        NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+        APP_VERSION: ${APP_VERSION:-local}
+    restart: unless-stopped
+    depends_on:
+      api-gw:
+        condition: service_healthy
+    # O servidor do app precisa falar com o Supabase pelo MESMO endereco que o navegador usa (o cookie
+    # de sessao do @supabase/ssr chama-se sb-<primeiro rotulo do host>-auth-token e as URLs publicas do
+    # Storage saem do servidor). host-gateway leva esse nome ao proprio servidor: ao Caddy em producao
+    # (TLS valido, sem sair pela Cloudflare) e a porta 8000 do Envoy no ensaio local.
+    extra_hosts:
+      - "${SUPABASE_PUBLIC_HOST}:host-gateway"
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      JOBS_TICK_TOKEN: ${JOBS_TICK_TOKEN}
+      AUTH_SESSION_STRATEGY: ${AUTH_SESSION_STRATEGY:-user}
+      YOUTUBE_UNOFFICIAL_STREAMS: ${YOUTUBE_UNOFFICIAL_STREAMS:-}
+      ADMIN_DEMO_DATA: ${ADMIN_DEMO_DATA:-off}
+      BUNKER_AI_GATEWAY_URL: ${BUNKER_AI_GATEWAY_URL:-}
+      BUNKER_AI_GATEWAY_API_KEY: ${BUNKER_AI_GATEWAY_API_KEY:-}
+      BUNKER_AI_GATEWAY_MANAGEMENT_KEY: ${BUNKER_AI_GATEWAY_MANAGEMENT_KEY:-}
+      NEXT_PUBLIC_POSTHOG_KEY: ${NEXT_PUBLIC_POSTHOG_KEY:-}
+      NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      # E-mail transacional pela API do Resend (PR #80): fila email_outbox + webhook /api/webhooks/resend.
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+      NEXT_PUBLIC_SITE_URL: ${APP_PUBLIC_URL}
+
+  # Borda: TLS automatico (Let's Encrypt), app, API do Supabase e Studio em hostnames separados.
+  # E o unico servico que escuta fora de 127.0.0.1 (CADDY_BIND=0.0.0.0 em producao; a Hetzner so deixa
+  # a Cloudflare chegar nas portas 80/443, infra/scripts/hetzner-firewall.sh).
+  caddy:
+    container_name: bunker707-caddy
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    ports:
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTP_PORT:-80}:80
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443/udp
+    depends_on:
+      api-gw:
+        condition: service_healthy
+      app:
+        condition: service_started
+    environment:
+      APP_SITE_ADDRESS: ${APP_SITE_ADDRESS}
+      SUPABASE_SITE_ADDRESS: ${SUPABASE_SITE_ADDRESS}
+      STUDIO_SITE_ADDRESS: ${STUDIO_SITE_ADDRESS}
+      STUDIO_ALLOWED_IPS: ${STUDIO_ALLOWED_IPS}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/cloudflare-trusted-proxies.caddyfile:/etc/caddy/cloudflare-trusted-proxies.caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  db-config:
+  deno-cache:
+  caddy-data:
+  caddy-config:
