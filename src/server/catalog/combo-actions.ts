@@ -10,6 +10,7 @@ import { runAdminAction } from "@/server/actions/run-action";
 import { invalidateCatalog } from "@/server/catalog/cache";
 import { isMissingSchemaObjectError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
+import { setSalesLink } from "@/server/payments/store";
 import { getCombo } from "./combos";
 import { CatalogNotFoundError, CatalogRuleError } from "./errors";
 import { makeCatalogId } from "./model";
@@ -64,7 +65,7 @@ async function saveComboInSteps(
 }
 
 export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboListItem>> {
-  return runAdminAction("catalog.access", comboSchema, raw, async ({ input }) => {
+  return runAdminAction("catalog.access", comboSchema, raw, async ({ input, user }) => {
     const db = getSupabaseAdminClient();
     const productIds = Array.from(new Set(input.productIds));
 
@@ -118,6 +119,12 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
     }
 
     failOnError(error, "Pacote");
+
+    // Codigo na Hotmart (sales_product_links): fora da transacao do pacote, depois dela. Codigo
+    // repetido vira erro do campo; "" tira a ligacao.
+    if (input.hotmartProductId !== undefined) {
+      await setSalesLink(db, { comboId, createdBy: user.id, externalProductId: input.hotmartProductId, provider: "hotmart" });
+    }
 
     invalidateCatalog({ from: "action" });
 

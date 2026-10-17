@@ -227,6 +227,31 @@ Fluxo:
 
 Combos devem ser tratados como pacotes internos: o adapter normaliza a venda externa, o backend encontra o combo/produto correspondente e a camada de acesso cria entitlements para todos os produtos incluidos. O dado do provider nao autoriza conteudo diretamente.
 
+### Implementado (17/10/2026): Hotmart, webhook 2.0
+
+Modulo `src/server/payments/` (migracao `202610170003_sales_webhooks.sql`; tela em `docs/17` §1.10). Ticto e Kiwify entram pelo mesmo caminho quando tiverem adaptador; ate la aparecem como "Em configuracao".
+
+- `types.ts`: contrato `PaymentProviderAdapter` (`verify`, `normalize`, `redact`, `handledEvents`, `maxPayloadBytes`) e o evento normalizado `{ provider, eventId, type: purchase_approved | refund | chargeback | subscription_canceled | other, rawType, buyer { email, name, phone }, externalProductId, externalProductName, transactionId, purchasedAt, warrantyEndsAt, occurredAt }`;
+- `hotmart.ts` (puro): le o envelope 2.0 (`id`, `event`, `creation_date` em epoch ms, `data.product/buyer/purchase/subscriber`), traduz `PURCHASE_APPROVED` e `PURCHASE_COMPLETE` para `purchase_approved`, `PURCHASE_REFUNDED` para `refund`, `PURCHASE_CHARGEBACK` para `chargeback`, `SUBSCRIPTION_CANCELLATION` para `subscription_canceled` e o resto para `other`; confere o hottok (cabecalho `X-HOTMART-HOTTOK`, ou `hottok` no corpo) em tempo constante (SHA-256 dos dois lados + `timingSafeEqual`) contra o segredo salvo em `integration_settings`, nunca contra variavel de ambiente; `redact` tira o `hottok` do payload guardado;
+- `adapters.ts`: registro (`getPaymentAdapter`, `isSalesProviderSupported`);
+- `process-sale.ts`: a regra de acesso, separada do parser. Resolve `sales_product_links` (codigo da plataforma -> produto ou pacote); compra aprovada chama `provisionStudentAccess` de `src/server/students/access.ts` com `source: "webhook"`, `sourceProvider: "hotmart"`, `sourceEventId` = `purchase.transaction` (ou o id do evento), `delivery: "none"` e `siteOrigin` do request (a mesma rotina do admin: conta, perfil, boas-vindas e e-mail de compra saem dali); reembolso e chargeback chamam `applyAccessAction` com `revoke` e assinatura cancelada com `suspend`, produto a produto (pacote = todos). O que nao da para fazer (evento `other`, codigo sem ligacao, pacote em rascunho ou pausado, aluno sem conta, acesso ja fechado) e **ignorado com o motivo escrito**; erro de verdade (sem e-mail valido, banco) vira `failed`;
+- `webhook-handler.ts`: fluxo comum de `POST /api/webhooks/<plataforma>`: plataforma conectada (senao 503) -> corpo ate 256 KB (413) -> JSON (400) -> token (401, nada gravado) -> evento normalizado (400) -> `webhook_events` com o payload bruto, unico por (`provider`, `external_event_id`) (repetido responde 200 `duplicate` sem reprocessar) -> regra de acesso -> resultado na linha (`processed`/`ignored`/`failed`, `outcome`, `outcome_detail`, `error_message`, alvo e aluno resolvidos) e em `integration_settings` (`last_sync_at`; `needs_attention` + `last_error` quando o ultimo evento falhou). Falha responde 500 e o evento fica guardado; `reprocessWebhookEvent` roda a regra de novo a partir do payload guardado (falhou ou ignorado);
+- `store.ts`, `queries.ts`, `actions.ts` (`saveSalesSecret`, `disconnectSalesProvider`, `reprocessSalesEvent`, todas `settings.sales`, com `admin_audit_log` sem o token), `schemas.ts`, `model.ts` (rotulos, mascara do e-mail, situacao);
+- `src/app/api/webhooks/hotmart/route.ts` (runtime Node) chama `receiveSaleWebhook("hotmart", request)`;
+- um evento de venda pode liberar varios produtos: `grantResolvedProducts` grava `source_event_id` com o sufixo `:<produto>` quando ha mais de um produto no mesmo evento (indice unico `(user_id, source_event_id)`); o e-mail de compra continua um por venda.
+
+```txt
+Hotmart -> POST /api/webhooks/hotmart (X-HOTMART-HOTTOK)
+  -> integration_settings.secret (503 sem) -> token conferido (401) -> webhook_events (payload bruto, idempotente)
+  -> sales_product_links (codigo -> produto | pacote) -> src/server/students/access.ts -> entitlements + email_outbox
+  -> webhook_events.outcome + integration_settings.last_sync_at/status
+Configuracoes > Vendas (settings.sales): token, endereco, eventos, vendas recebidas, Reprocessar
+Produtos > Acesso e venda / Pacotes: "Codigo do produto na Hotmart" (sales_product_links)
+Hoje > Novos acessos: origem por admin_access_origins (Hotmart x equipe)
+```
+
+Processamento sincrono na rota (a Hotmart espera a resposta e reenvia em erro): um job em background fica para quando o volume pedir.
+
 ## Comentarios e moderacao
 
 Comentarios de aula entram pela API autenticada do aluno e devem passar por validacoes antes de aparecer:

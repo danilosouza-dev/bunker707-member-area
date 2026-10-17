@@ -94,6 +94,21 @@ Regras:
 - criar ou revogar somente entitlements internos, nunca liberar conteudo direto pelo payload do provider;
 - guardar segredos de webhook somente no servidor ou gerenciador de segredos.
 
+### Vendas pela Hotmart (17/10/2026)
+
+`POST /api/webhooks/hotmart` (fluxo em `docs/04`, secao Webhooks externos; tabelas em `docs/05`, secao Webhooks):
+
+- o token da Hotmart (hottok) nao e variavel de ambiente: o dono cola em Configuracoes > Vendas (`settings.sales`, so o dono) e ele fica em `integration_settings.secret`, tabela so de `service_role`. A tela nunca recebe o token de volta (so `secret_status` e a data); trocar grava por cima; Desconectar apaga. Nenhuma variavel nova em `.env.example` nem na Vercel;
+- sem token guardado a rota responde 503 e nao grava nada; token errado ou ausente responde 401 e nao grava nada. A conferencia e em tempo constante (SHA-256 dos dois lados + `timingSafeEqual`), pelo cabecalho `X-HOTMART-HOTTOK` ou pelo `hottok` do corpo;
+- o payload bruto e guardado em `webhook_events` sem o `hottok` (o corpo das versoes antigas repete o token) e com o e-mail do comprador; a tela mostra o e-mail mascarado (`c***@dominio`). E dado pessoal: retencao de 12 meses pendente, junto com `email_outbox`;
+- idempotencia por (`provider`, `external_event_id`); evento repetido responde 200 sem reprocessar. Entitlements usam `source_provider = hotmart` e `source_event_id` = id da compra;
+- a regra de acesso (`src/server/payments/process-sale.ts`) so libera o que `sales_product_links` liga ao codigo da plataforma, pela mesma rotina do admin (`src/server/students/access.ts`). Codigo sem ligacao, pacote em rascunho ou pausado, evento que nao muda acesso e aluno sem conta sao ignorados com o motivo, nunca liberam nada. Reembolso e chargeback revogam o produto (ou todos os produtos do pacote) de quem tem o e-mail da compra, qualquer que seja a origem do acesso; assinatura cancelada suspende;
+- falha de verdade (evento sem e-mail valido, banco) responde 500, fica `failed` com o motivo e marca a plataforma como "Precisa de atencao"; o dono reprocessa pela tela (`reprocessSalesEvent`, auditado). Reprocessar tambem vale para o que foi ignorado (ex.: codigo ligado depois da venda);
+- toda mudanca na tela vai para `admin_audit_log` (`sales.secret_saved`, `sales.disconnected`, `sales.event_reprocessed`) sem o token;
+- corpo limitado a 256 KB (413 acima), runtime Node. Processamento sincrono: a Hotmart reenvia quando a resposta nao e 2xx, e o evento repetido para no 200 `duplicate`.
+
+Configuracao por ambiente, uma vez: em Configuracoes > Vendas, copiar o endereco mostrado (origem do site + `/api/webhooks/hotmart`), cadastrar na Hotmart (Ferramentas > Webhook, versao 2.0.0) com os eventos listados na tela (compra aprovada, compra concluida, reembolso, chargeback, assinatura cancelada), colar o hottok e salvar; informar o codigo da Hotmart em cada produto (Acesso e venda) ou pacote. Diagnostico: `select provider, status, secret_status, last_sync_at, last_error from public.integration_settings;` e `select event_type, processing_status, outcome, outcome_detail, received_at from public.webhook_events order by received_at desc limit 20;`.
+
 ## Comentarios e moderacao
 
 Regras:

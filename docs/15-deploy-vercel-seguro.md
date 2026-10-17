@@ -50,6 +50,8 @@ Configurar no minimo no ambiente `Production`, sem copiar valores para logs ou P
 | `EMAIL_DAILY_LIMIT` | servidor | nao (padrao 90, abaixo dos 100/dia do Resend Free) |
 | `NEXT_PUBLIC_SITE_URL` | navegador e servidor | recomendada: origem dos links de convite e dos e-mails |
 
+O token da Hotmart (hottok) nao e variavel de ambiente: fica em `integration_settings.secret` (tabela so de `service_role`), gravado pelo dono em Configuracoes > Vendas (`docs/06`, secao Vendas pela Hotmart). Nada a configurar na Vercel para a integracao de vendas alem do deploy com a migracao `202610170003` aplicada.
+
 Usar apenas uma chave publica Supabase e apenas uma chave privilegiada por ambiente quando possivel. Se as chaves novas publishable/secret estiverem disponiveis, preferi-las e manter as legadas apenas durante a migracao.
 
 ## Configuracao Vercel

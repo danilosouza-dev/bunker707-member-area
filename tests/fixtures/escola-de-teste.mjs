@@ -563,6 +563,75 @@ export async function limparSessoesDeTv(db, userIds) {
   unwrap(await db.from("tv_sessions").delete().in("user_id", userIds), "Limpando sessoes de TV de teste");
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * Vendas (Configuracoes > Vendas, migracao 202610170003)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Pacote de teste vendido pela Hotmart: libera o curso de liberacao e o curso bloqueado de uma vez. */
+export const PACOTE_DE_TESTE = {
+  id: "teste-pacote-vendas",
+  nome: "Pacote de Teste: Vendas",
+  produtos: [ESCOLA_DE_TESTE.cursoLiberacao.id, ESCOLA_DE_TESTE.cursoBloqueado.id]
+};
+
+/** Desconecta todas as plataformas (token apagado, situacao "nao conectada"), como no banco recem-migrado. */
+export async function desconectarVendas(db) {
+  unwrap(
+    await db
+      .from("integration_settings")
+      .update({ events: [], last_error: null, last_sync_at: null, secret: null, secret_status: "missing", secret_updated_at: null, status: "not_configured", webhook_url: null })
+      .in("provider", ["hotmart", "ticto", "kiwify"]),
+    "Desconectando plataformas de venda de teste"
+  );
+}
+
+/** Liga um codigo da Hotmart a um produto da escola (arranjo direto no banco, sem passar pela tela). */
+export async function ligarProdutoNaHotmart(db, { codigo, produtoId }) {
+  unwrap(await db.from("sales_product_links").delete().eq("provider", "hotmart").eq("product_id", produtoId), "Tirando codigo antigo do produto");
+  unwrap(await db.from("sales_product_links").delete().eq("provider", "hotmart").eq("external_product_id", codigo), "Tirando codigo repetido");
+  unwrap(
+    await db.from("sales_product_links").insert({ external_product_id: codigo, product_id: produtoId, provider: "hotmart" }),
+    "Ligando produto de teste a Hotmart"
+  );
+}
+
+/** Garante o pacote de teste (ativo, com os dois cursos) ligado ao codigo da Hotmart informado. */
+export async function garantirPacoteDeTeste(db, codigoHotmart) {
+  unwrap(
+    await db
+      .from("product_combos")
+      .upsert({ cohort_name: "Turma A", description: "Pacote ficticio da escola de teste.", id: PACOTE_DE_TESTE.id, name: PACOTE_DE_TESTE.nome, status: "active" }, { onConflict: "id" }),
+    "Gravando pacote de teste"
+  );
+  unwrap(await db.from("product_combo_items").delete().eq("combo_id", PACOTE_DE_TESTE.id), "Limpando produtos do pacote de teste");
+  unwrap(
+    await db.from("product_combo_items").insert(PACOTE_DE_TESTE.produtos.map((productId, index) => ({ combo_id: PACOTE_DE_TESTE.id, product_id: productId, sort_order: index }))),
+    "Gravando produtos do pacote de teste"
+  );
+  unwrap(await db.from("sales_product_links").delete().eq("provider", "hotmart").eq("external_product_id", codigoHotmart), "Tirando codigo repetido do pacote");
+  unwrap(
+    await db
+      .from("sales_product_links")
+      .upsert({ combo_id: PACOTE_DE_TESTE.id, external_product_id: codigoHotmart, provider: "hotmart" }, { onConflict: "provider,combo_id" }),
+    "Ligando pacote de teste a Hotmart"
+  );
+}
+
+/**
+ * Apaga o que os testes de vendas criaram: eventos recebidos com o prefixo, ligacoes de codigo dos
+ * produtos de teste e o pacote de teste. As contas dos compradores saem por apagarContaDeTeste.
+ */
+export async function limparVendasDeTeste(db, { prefixoDoEvento = "teste-", codigos = [] } = {}) {
+  unwrap(await db.from("webhook_events").delete().like("external_event_id", `${prefixoDoEvento}%`), "Limpando vendas recebidas de teste");
+
+  if (codigos.length > 0) {
+    unwrap(await db.from("sales_product_links").delete().eq("provider", "hotmart").in("external_product_id", codigos), "Limpando codigos de teste");
+  }
+
+  unwrap(await db.from("sales_product_links").delete().eq("combo_id", PACOTE_DE_TESTE.id), "Limpando codigo do pacote de teste");
+  unwrap(await db.from("product_combos").delete().eq("id", PACOTE_DE_TESTE.id), "Apagando pacote de teste");
+}
+
 /** Apaga progresso, favoritos e atividade das contas informadas (os testes comecam do zero). */
 export async function limparProgresso(db, userIds) {
   for (const table of ["lesson_progress", "saved_items", "student_daily_activity"]) {

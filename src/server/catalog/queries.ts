@@ -7,6 +7,7 @@ import "server-only";
 import { cache } from "react";
 import { normalizeLessonVideoConfig } from "@/lib/video-embed";
 import { PendingMigrationError, isMissingSchemaObjectError } from "@/server/db/pending-migration";
+import { fetchSalesLinksFor } from "@/server/payments/store";
 import { CatalogNotFoundError } from "./errors";
 import {
   audienceFromColumns,
@@ -417,10 +418,11 @@ export const getProductAccess: GetProductAccess = async (productId) => {
   }
 
   const { header, row } = loaded;
-  const [cohorts, combos, studentsWithAccess] = await Promise.all([
+  const [cohorts, combos, studentsWithAccess, salesLinks] = await Promise.all([
     loadCohorts(productId),
     loadCombosFor(productId),
-    countActiveAccess(productId)
+    countActiveAccess(productId),
+    fetchSalesLinksFor(catalogDb(), { productIds: [productId], provider: "hotmart" })
   ]);
 
   return {
@@ -428,6 +430,7 @@ export const getProductAccess: GetProductAccess = async (productId) => {
     cohorts,
     combos,
     header,
+    hotmartProductId: salesLinks[0]?.external_product_id ?? null,
     maxStudents: typeof row.max_students === "number" && row.max_students > 0 ? row.max_students : null,
     purchaseLabel: customPurchaseLabelOf(row.purchase_label),
     purchaseTarget: row.purchase_target === "new_tab" ? "new_tab" : "same_tab",

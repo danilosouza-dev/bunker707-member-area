@@ -137,6 +137,8 @@ export function describeDurationTotal(label: string | null) {
 
 export type AccessDraft = {
   audience: ProductAudience;
+  /** Codigo do produto na Hotmart; "" = sem ligacao. */
+  hotmartProductId: string;
   /** Texto do campo; "" = sem limite. */
   maxStudents: string;
   purchaseLabel: string;
@@ -148,9 +150,10 @@ export type AccessDraft = {
 export function accessDraftFrom(access: Pick<
   ProductAccess,
   "audience" | "maxStudents" | "purchaseLabel" | "purchaseTarget" | "purchaseUrl" | "release"
->): AccessDraft {
+> & Partial<Pick<ProductAccess, "hotmartProductId">>): AccessDraft {
   return {
     audience: access.audience,
+    hotmartProductId: access.hotmartProductId ?? "",
     maxStudents: access.maxStudents ? String(access.maxStudents) : "",
     purchaseLabel: access.purchaseLabel ?? "",
     purchaseTarget: access.purchaseTarget,
@@ -207,6 +210,7 @@ export function maxStudentsProblem(text: string): string | null {
 
 export type AccessPatch = {
   audience?: ProductAudience;
+  hotmartProductId?: string | null;
   maxStudents?: number | null;
   purchaseLabel?: string | null;
   purchaseTarget?: "same_tab" | "new_tab";
@@ -218,6 +222,7 @@ export function buildAccessPatch(initial: AccessDraft, draft: AccessDraft): Acce
   const patch: AccessPatch = {};
 
   if (draft.audience !== initial.audience) patch.audience = draft.audience;
+  if (draft.hotmartProductId.trim() !== initial.hotmartProductId.trim()) patch.hotmartProductId = emptyToNull(draft.hotmartProductId);
   if (draft.maxStudents.trim() !== initial.maxStudents.trim()) patch.maxStudents = parseMaxStudents(draft.maxStudents);
   if (draft.purchaseLabel.trim() !== initial.purchaseLabel.trim()) patch.purchaseLabel = emptyToNull(draft.purchaseLabel);
   if (draft.purchaseTarget !== initial.purchaseTarget) patch.purchaseTarget = draft.purchaseTarget;

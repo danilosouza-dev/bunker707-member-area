@@ -383,21 +383,24 @@ Regras:
 
 ### integration_settings
 
-- id;
-- provider: hotmart, ticto, tiktok, kiwify, manual;
-- webhook_url;
-- secret_status;
+Implementada na migracao `202610170003_sales_webhooks.sql` (17/10/2026), uma linha por plataforma (as tres ja inseridas pela migracao).
+
+- id uuid;
+- provider: hotmart, ticto, kiwify (unico);
 - status: not_configured, configured, needs_attention;
-- events jsonb;
-- last_sync_at;
-- created_at;
-- updated_at.
+- webhook_url (o endereco mostrado ao produtor, informativo);
+- secret (o token que a plataforma manda em cada pedido; Hotmart: hottok. So o servidor le, por `fetchIntegrationSecret`; a tela nunca recebe a coluna);
+- secret_status: missing, set (consistente com `secret` por check);
+- secret_updated_at;
+- events jsonb (lista dos eventos da plataforma que mudam acesso, para a tela dizer o que marcar la);
+- last_sync_at, last_error;
+- created_at, updated_at.
 
 Regras:
 
-- segredos reais de webhook ficam somente no servidor ou gerenciador de segredos;
+- segredos reais de webhook ficam somente no servidor: a coluna `secret` esta numa tabela so de `service_role`, e `saveSalesSecret` (settings.sales) grava sem devolver; depois de salvo, a tela mostra apenas "Token guardado em <data>" e o botao Trocar;
 - dados de plataforma externa sao entrada para processamento, nao fonte de autorizacao;
-- cada provider deve ter adapter proprio.
+- cada provider deve ter adapter proprio (`src/server/payments/adapters.ts`); plataforma sem adaptador aparece como "Em configuracao", nunca "Conectada".
 
 ## Agentes de IA
 
@@ -1294,26 +1297,55 @@ O admin antigo (`/admin/legado`, `src/components/admin-dashboard.tsx`, rotas `/a
 
 ## Webhooks
 
+Migracao `202610170003_sales_webhooks.sql` (17/10/2026). Fluxo em `docs/04-arquitetura-tecnica.md`, secao Webhooks externos; tela em `docs/17` §1.10. Nada aqui e lido pelo navegador: RLS ligado, nada para `anon`/`authenticated`, so `service_role`.
+
 ### webhook_events
 
-Guarda o evento bruto de plataformas externas.
+Guarda o evento bruto de plataformas externas (so depois do token conferido) e o resultado do processamento.
 
-- id;
-- provider;
-- external_event_id;
-- event_type;
-- payload jsonb;
+- id uuid;
+- provider: hotmart, ticto, kiwify;
+- external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele);
+- event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED`);
+- normalized_type: purchase_approved, refund, chargeback, subscription_canceled, other;
+- payload jsonb (<= 256 KB; o token da plataforma e tirado antes de gravar);
 - signature_valid;
 - processing_status: received, processed, failed, ignored;
-- processed_at;
-- error_message;
-- created_at.
+- outcome: access_granted, access_revoked, access_suspended, ignored, failed;
+- outcome_detail (motivo escrito, <= 500);
+- buyer_email, external_product_id, external_product_name (para a lista da tela, mesmo sem ligacao);
+- product_id, combo_id (alvo resolvido, sem chave estrangeira: o historico fica se o produto sair);
+- user_id -> auth.users (set null);
+- received_at, processed_at;
+- error_message (<= 2.000).
 
 Obrigatorio:
 
-- idempotencia por provider + external_event_id;
+- idempotencia por provider + external_event_id (indice unico; repetido responde 200 sem reprocessar);
 - guardar payload bruto;
-- nao confiar no payload sem validacao.
+- nao confiar no payload sem validacao: o acesso so muda por `entitlements`, via `src/server/students/access.ts`.
+
+Retencao: 12 meses (docs/17 §2.4); a rotina de limpeza fica pendente.
+
+### sales_product_links
+
+Codigo do produto na plataforma de venda ligado a um produto ou a um pacote da escola.
+
+- id uuid;
+- provider: hotmart, ticto, kiwify;
+- external_product_id (Hotmart: o numero do produto, `data.product.id`);
+- product_id -> content_items (cascade) ou combo_id -> product_combos (cascade), exatamente um;
+- created_by, created_at, updated_at.
+
+Indices unicos: (provider, external_product_id), (provider, product_id) e (provider, combo_id), inteiros (nulos nao conflitam) para o upsert do servidor. Gravado por "Codigo do produto na Hotmart" em Produtos > Acesso e venda (`updateProductAccess`, `catalog.access`) e em Pacotes (`saveCombo`). Venda de pacote libera todos os produtos dele; reembolso ou chargeback de pacote tira todos (docs/17 §1.6.8); pacote em rascunho ou pausado nao libera nada.
+
+### entitlements.source_event_id nas vendas
+
+Compra pela plataforma grava `source_provider = hotmart` e `source_event_id` = id da compra (`purchase.transaction`; sem ele, o id do evento). Quando um evento libera mais de um produto (pacote), cada linha leva o sufixo `:<produto>` (indice unico `(user_id, source_event_id)`). `warranty_expire_date` chega normalizado (`warrantyEndsAt`) mas ainda nao e gravado: a coluna `warranty_ends_at` continua o ponto de extensao descrito em §entitlements.
+
+### admin_access_origins(p_start, p_end, p_content_id)
+
+RPC `security invoker`, so `service_role`: acessos criados na janela por `source_provider` (hotmart, manual...), sem a equipe, com as mesmas regras de `admin_access_buckets`. Alimenta o rodape de "Novos acessos" no Hoje ("3 pela Hotmart · 2 pela equipe").
 
 ## Jobs
 

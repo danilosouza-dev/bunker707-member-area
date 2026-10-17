@@ -171,7 +171,9 @@ export async function grantResolvedProducts(
       row = await insertEntitlement(db, {
         ends_at: input.endsAt,
         product_id: productId,
-        source_event_id: input.sourceEventId ?? `admin:${productId}`,
+        // Um evento de venda pode liberar varios produtos (pacote): o id do evento e unico por (aluno,
+        // source_event_id), entao cada produto a mais leva o proprio id no sufixo.
+        source_event_id: input.sourceEventId ? (uniqueIds.length > 1 ? `${input.sourceEventId}:${productId}` : input.sourceEventId) : `admin:${productId}`,
         source_provider: input.sourceProvider,
         starts_at: nowIso,
         status: "active",

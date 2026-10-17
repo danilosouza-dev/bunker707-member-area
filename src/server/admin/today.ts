@@ -22,6 +22,7 @@ import {
   sumSeries,
   type BucketRow,
   type TodayAccessKpiState,
+  type TodayAccessOrigin,
   type TodayAttentionState,
   type TodayByProductState,
   type TodayProductStat
@@ -175,6 +176,28 @@ async function readAccessBuckets(
   return (data ?? []) as BucketRow[];
 }
 
+/** Acessos criados em [start, end) por origem (admin_access_origins, 202610170003). Janela vazia = nada. */
+async function readAccessOrigins(window: { end: Date; start: Date }, productId: string | null): Promise<TodayAccessOrigin[]> {
+  if (window.end.getTime() <= window.start.getTime()) {
+    return [];
+  }
+
+  const { data, error } = await getSupabaseAdminClient().rpc("admin_access_origins", {
+    p_content_id: productId,
+    p_end: window.end.toISOString(),
+    p_start: window.start.toISOString()
+  });
+
+  if (error) {
+    throw toDbError(error, "Hoje: origem dos acessos");
+  }
+
+  return ((data ?? []) as { source_provider: string | null; total: unknown }[]).map((row) => ({
+    provider: row.source_provider ?? "manual",
+    total: toCount(row.total)
+  }));
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Partes da tela
  * ---------------------------------------------------------------------------------------------- */
@@ -231,8 +254,11 @@ export async function readTodayNewAccesses(resolved: ResolvedAdminPeriod, produc
 
   const [currentRows, previousRows] = result.data;
   const series = fillBucketSeries(listAdminPeriodBuckets(resolved), currentRows);
+  // A origem e um detalhe do rodape: sem a migracao 202610170003 (ou com erro), o numero segue sem ela.
+  const origins = await settle("origem dos acessos", () => readAccessOrigins(resolved, productId));
 
   return {
+    origins: origins.ok ? origins.data : [],
     previousTotal: sumSeries(previousRows.map((row) => toCount(row.total))),
     series: compressSeries(series),
     status: "ready",
