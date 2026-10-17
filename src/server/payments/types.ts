@@ -60,6 +60,12 @@ export type NormalizedSaleEvent = {
    * quem nunca teve acesso registrado ao produto.
    */
   reopenClosedAccess: boolean;
+  /**
+   * So em `purchase_approved`: true quando o evento reativa uma assinatura cancelada (Ticto: uncanceled),
+   * sem pagamento novo. So reabre o que o cancelamento DESTA transacao fechou; o que a equipe decidiu
+   * depois (vinculo fechado por admin) ou o que nao tem cancelamento registrado fica como esta.
+   */
+  reactivatesSubscription?: boolean;
   purchasedAt: string | null;
   warrantyEndsAt: string | null;
   /** Quando o evento aconteceu na plataforma. */

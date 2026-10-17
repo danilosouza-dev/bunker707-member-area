@@ -222,7 +222,9 @@ export function normalizeTictoEvent(payload: unknown): NormalizedSaleEvent | nul
     provider: "ticto",
     purchasedAt,
     rawType: parsed.status,
-    // Pagamento novo (compra aprovada) ou assinatura reativada: os dois reabrem o acesso fechado.
+    // Compra aprovada reabre o acesso fechado. A assinatura reativada (uncanceled) nao e pagamento novo: so
+    // reabre o que o cancelamento desta transacao fechou (reactivatesSubscription, em process-sale.ts).
+    reactivatesSubscription: parsed.status === "uncanceled",
     reopenClosedAccess: true,
     subscriptionCode: readTictoSubscriptionCode(parsed.root),
     transactionId,

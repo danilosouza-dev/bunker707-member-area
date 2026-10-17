@@ -55,6 +55,7 @@ test("compra aprovada: evento normalizado com comprador, produto, transacao e da
     provider: "ticto",
     purchasedAt: "2026-10-17T12:00:06.000Z",
     rawType: "authorized",
+    reactivatesSubscription: false,
     reopenClosedAccess: true,
     subscriptionCode: null,
     transactionId: "TPC-TESTE-0001",
@@ -69,6 +70,8 @@ test("cada situacao da Ticto vira o que ela significa para o acesso; o resto e '
   assert.equal(typeOf("authorized"), "purchase_approved");
   assert.equal(typeOf("AUTHORIZED"), "purchase_approved", "caixa nao importa");
   assert.equal(typeOf("uncanceled"), "purchase_approved", "assinatura reativada devolve o acesso");
+  assert.equal(ticto.normalizeTictoEvent(compraAprovada({ status: "uncanceled" })).reactivatesSubscription, true, "mas so o que o cancelamento fechou (process-sale)");
+  assert.equal(ticto.normalizeTictoEvent(compraAprovada()).reactivatesSubscription, false);
   assert.equal(typeOf("refunded"), "refund");
   assert.equal(typeOf("chargeback"), "chargeback");
   assert.equal(typeOf("subscription_canceled"), "subscription_canceled");

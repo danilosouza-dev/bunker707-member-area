@@ -35,6 +35,7 @@ const comboActions = await import("../../src/server/catalog/combo-actions.ts");
 const catalogQueries = await import("../../src/server/catalog/queries.ts");
 const combosQueries = await import("../../src/server/catalog/combos.ts");
 const studentQueries = await import("../../src/server/students/queries.ts");
+const studentActions = await import("../../src/server/students/actions.ts");
 
 const { curso, cursoBloqueado, cursoLiberacao } = ESCOLA_DE_TESTE;
 const produtor = usuarioDeTeste(contas.produtor);
@@ -47,6 +48,8 @@ const COMPRADOR_PACOTE = { email: "comprador.pacote.ticto@bunker707.test", nome:
 const COMPRADOR_BUMP = { email: "comprador.bump.ticto@bunker707.test", nome: "Comprador do Bump" };
 const COMPRADOR_MISTO = { email: "comprador.misto.ticto@bunker707.test", nome: "Comprador das Duas Plataformas" };
 const COMPRADOR_REATIVA = { email: "comprador.reativa.ticto@bunker707.test", nome: "Comprador que Reativou" };
+const COMPRADOR_EQUIPE = { email: "comprador.equipe.ticto@bunker707.test", nome: "Comprador Revogado pela Equipe" };
+const COMPRADOR_ASSINA_BUMP = { email: "comprador.assina.bump.ticto@bunker707.test", nome: "Assinante com Bump" };
 const TOKEN_HOTMART = "hottok-integracao-ticto-0123456789abcdef";
 const PREFIXO = "teste-ticto-";
 
@@ -136,9 +139,9 @@ async function limpar() {
   await desconectarVendas(db);
   // "7001" e o codigo da Hotmart que o teste do Acesso e venda grava junto, para provar que um nao mexe no outro.
   await limparVendasDeTeste(db, { codigos: [...Object.values(CODIGOS), "7001"], prefixoDoEvento: PREFIXO });
-  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email, COMPRADOR_BUMP.email, COMPRADOR_MISTO.email, COMPRADOR_REATIVA.email]), "Limpando a fila de e-mail de teste");
+  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email, COMPRADOR_BUMP.email, COMPRADOR_MISTO.email, COMPRADOR_REATIVA.email, COMPRADOR_EQUIPE.email, COMPRADOR_ASSINA_BUMP.email]), "Limpando a fila de e-mail de teste");
 
-  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE, COMPRADOR_BUMP, COMPRADOR_MISTO, COMPRADOR_REATIVA]) {
+  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE, COMPRADOR_BUMP, COMPRADOR_MISTO, COMPRADOR_REATIVA, COMPRADOR_EQUIPE, COMPRADOR_ASSINA_BUMP]) {
     await apagarContaDeTeste(db, conta.email);
   }
 }
@@ -423,6 +426,56 @@ test("order bump com o produto principal fora da escola: o bump ligado e liberad
   assert.equal(linha.product_id, cursoBloqueado.id);
   assert.match(linha.outcome_detail, /O produto principal 8999 \(Produto 8999 na Ticto\) da Ticto não está ligado a nenhum produto ou pacote da escola e não foi liberado\./);
   assert.doesNotMatch(linha.outcome_detail, /Reprocessar/, "a venda foi processada: nao manda reprocessar");
+  assert.match(linha.outcome_detail, /libere o principal à mão em Alunos/, "o detalhe diz o que fazer com o principal");
+});
+
+test("reativacao depois de a equipe revogar nao reabre o acesso: fica ignorada com o motivo, e o reembolso depois nao mexe em nada", async () => {
+  const comum = { assinatura: "7101", email: COMPRADOR_EQUIPE.email, nome: COMPRADOR_EQUIPE.nome, transacao: "T-EQUIPE-0001" };
+  const statusDoCurso = async () => Object.fromEntries((await acessosDe(COMPRADOR_EQUIPE.email)).acessos.map((row) => [row.target_id, row.status]))[curso.id];
+
+  assert.equal((await (await post(payload(comum))).json()).outcome, "access_granted");
+  assert.equal((await (await post(payload({ ...comum, status: "subscription_canceled", statusDate: "2026-11-20 10:00:00" }))).json()).outcome, "access_suspended");
+
+  // A equipe revoga o curso em Alunos: os vinculos da venda passam a ser da equipe (admin).
+  actAs(produtor);
+  const { conta } = await acessosDe(COMPRADOR_EQUIPE.email);
+  const acesso = unwrap(await db.from("entitlements").select("id").eq("user_id", conta.id).eq("target_id", curso.id).single(), "Lendo o acesso do curso");
+  const revogado = await studentActions.updateStudentAccess({ action: "revoke", entitlementId: acesso.id, userId: conta.id });
+  assert.equal(revogado.ok, true, JSON.stringify(revogado));
+  assert.deepEqual((await vinculosDe(["T-EQUIPE-0001"])).map((row) => row.closed_by), ["admin"]);
+
+  // Reativacao na Ticto: nao e compra nova; a decisao da equipe vale.
+  const reativada = await (await post(payload({ ...comum, status: "uncanceled", statusDate: "2026-11-21 10:00:00" }))).json();
+  assert.equal(reativada.outcome, "ignored", JSON.stringify(reativada));
+  assert.equal(await statusDoCurso(), "revoked", "a reativacao nao desfaz a revogacao da equipe");
+  const linha = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T-EQUIPE-0001:${CODIGOS.curso}:uncanceled`));
+  assert.match(linha.outcome_detail, /a equipe já decidiu sobre esse acesso depois do cancelamento/);
+  assert.deepEqual((await vinculosDe(["T-EQUIPE-0001"])).map((row) => row.closed_by), ["admin"], "o vinculo continua da equipe");
+
+  // Reembolso depois: nada a desfazer, a equipe ja decidiu.
+  const reembolso = await (await post(payload({ ...comum, status: "refunded", statusDate: "2026-11-25 10:00:00" }))).json();
+  assert.equal(reembolso.outcome, "ignored", JSON.stringify(reembolso));
+  assert.equal(await statusDoCurso(), "revoked");
+});
+
+test("order bump numa compra de assinatura e cobranca unica: o cancelamento suspende o principal e mantem o bump; o reembolso da compra tira os dois", async () => {
+  const comum = { assinatura: "7201", bumps: [{ product_id: Number(CODIGOS.bump), product_name: "Bonus na Ticto" }], email: COMPRADOR_ASSINA_BUMP.email, nome: COMPRADOR_ASSINA_BUMP.nome, transacao: "T-ASSBUMP-0001" };
+  const status = async () => Object.fromEntries((await acessosDe(COMPRADOR_ASSINA_BUMP.email)).acessos.map((row) => [row.target_id, row.status]));
+
+  assert.equal((await (await post(payload(comum))).json()).outcome, "access_granted");
+  assert.deepEqual(
+    Object.fromEntries((await vinculosDe(["T-ASSBUMP-0001"])).map((row) => [row.product_id, row.subscription_code])),
+    { [curso.id]: "7201", [cursoBloqueado.id]: null },
+    "so o item principal leva o codigo da assinatura"
+  );
+
+  const cancelada = await (await post(payload({ ...comum, status: "subscription_canceled", statusDate: "2026-11-20 10:00:00" }))).json();
+  assert.equal(cancelada.outcome, "access_suspended", JSON.stringify(cancelada));
+  assert.deepEqual(await status(), { [curso.id]: "suspended", [cursoBloqueado.id]: "active" }, "o bump pago uma vez continua aberto");
+
+  const reembolso = await (await post(payload({ ...comum, status: "refunded", statusDate: "2026-11-25 10:00:00" }))).json();
+  assert.equal(reembolso.outcome, "access_revoked", JSON.stringify(reembolso));
+  assert.deepEqual(await status(), { [curso.id]: "revoked", [cursoBloqueado.id]: "revoked" }, "o reembolso da compra tira o principal e o bump");
 });
 
 /* ------------------------------------------------------------ Pacote */
