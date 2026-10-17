@@ -26,7 +26,10 @@ test("boas-vindas: saudacao pelo primeiro nome, e-mail da conta, botao para /log
 });
 
 test("boas-vindas muda a instrucao da senha conforme a entrega: convite, senha temporaria ou nada", () => {
-  assert.match(renderWelcomeEmail({ email: "a@b.test", fullName: null, loginUrl, passwordHint: "invite" }).text, /outro e-mail com o link para você criar a sua senha/);
+  const invite = renderWelcomeEmail({ email: "a@b.test", fullName: null, loginUrl, passwordHint: "invite" }).text;
+  assert.match(invite, /abra o e-mail “Crie sua senha da Bunker707”/, "convite: cita o assunto do e-mail do Supabase");
+  assert.doesNotMatch(invite, /Em instantes|ainda vai chegar/, "convite chega antes das boas-vindas: o texto nao promete um e-mail futuro");
+  assert.match(invite, /Esqueci minha senha/, "convite: saida se o e-mail do convite nao aparecer");
   assert.match(renderWelcomeEmail({ email: "a@b.test", fullName: null, loginUrl, passwordHint: "temporary_password" }).text, /senha temporária/);
   assert.match(renderWelcomeEmail({ email: "a@b.test", fullName: null, loginUrl, passwordHint: "none" }).text, /Esqueci minha senha/);
   assert.match(renderWelcomeEmail({ email: "a@b.test", fullName: "  ", loginUrl, passwordHint: "none" }).html, /Olá, aluno!/);
