@@ -367,7 +367,36 @@ Regras e armadilhas (verificadas em 2026-10-11 no projeto `hrtnqcznhdmodjikvddm`
 - o SMTP embutido do Supabase envia no maximo **2 e-mails por hora** por projeto (campo travado no painel) e so entrega para membros da organizacao. Estourar o limite devolve `429 over_email_send_rate_limit`. Antes de liberar alunos reais, configurar SMTP proprio em Authentication > Emails > SMTP Settings e ajustar o limite em Authentication > Rate Limits;
 - convites gerados pelo painel do Supabase ou por `inviteUserByEmail` chegam com `#access_token=` (fluxo implicito), que o cliente PKCE do app recusa; ate o fluxo de convite migrar para `token_hash` + `verifyOtp`, contas de admin devem ser criadas em Authentication > Users > Create new user, e alunos convidados usam "Esqueci minha senha".
 
-- Envio em massa (Reenviar convite na lista de Alunos, importacao com convite): depende de SMTP proprio (Amazon SES) com limite conhecido; sem ele, o Supabase hospedado entrega so para a equipe e poucos por hora. As rotinas param no primeiro 429 e marcam os e-mails como pendentes em vez de falhar as contas (`src/server/students/access.ts`).
+- Envio em massa (Reenviar convite na lista de Alunos, importacao com convite): depende de SMTP proprio com limite conhecido (hoje o Resend, configurado no painel do Supabase com a mesma chave de envio; Amazon SES na segunda rodada); sem ele, o Supabase hospedado entrega so para a equipe e poucos por hora. As rotinas param no primeiro 429 e marcam os e-mails como pendentes em vez de falhar as contas (`src/server/students/access.ts`). Os e-mails do proprio app (boas-vindas, compra) nao passam pelo Auth: saem pela fila da secao E-mail transacional.
+
+## E-mail transacional (Resend)
+
+Provedor atual: Resend (plano Free, decisao em `docs/19-infra-hetzner-e-email.md`, secao 2), atras do adaptador `src/server/email` (`docs/04`, secao E-mail transacional). Amazon SES fica para a segunda rodada, como outra implementacao do mesmo adaptador; o Resend continua como fallback. Dominio de envio `mail.bunker707.com.br` (subdominio proprio, para a reputacao transacional nao se misturar com a da raiz), remetente `Bunker707 <equipe@mail.bunker707.com.br>` e Reply-To em uma caixa real da raiz.
+
+Regras:
+
+- a chave do Resend tem so permissao de envio ("Sending access") e fica apenas no servidor (`RESEND_API_KEY` na Vercel e em `.env.local`); nunca em codigo, PR, log ou prefixo `NEXT_PUBLIC_`. Mensagens de erro guardadas em `email_outbox.last_error` sao curtas e vem da resposta do provedor, nunca do pedido;
+- nenhum envio acontece na hora: tudo passa pela fila `email_outbox` e pelo job do tick, com limite diario (`EMAIL_DAILY_LIMIT`, padrao 90) para nao estourar os 100/dia do Free e com chave de idempotencia (um webhook de venda reprocessado nao manda o mesmo e-mail duas vezes);
+- sem `EMAIL_PROVIDER=resend` e `RESEND_API_KEY`, nada sai: a fila espera com aviso no log e expira em 7 dias. Desenvolvimento local, previews e testes ficam assim; os testes usam um provedor falso e nunca enviam e-mail;
+- o webhook do Resend (`POST /api/webhooks/resend`) exige `RESEND_WEBHOOK_SECRET` (sem ele responde 503) e verifica a assinatura Svix (`svix-id`, `svix-timestamp`, `svix-signature`, HMAC-SHA256 sobre o corpo bruto, janela de 5 minutos contra replay) antes de ler qualquer coisa; pedido sem assinatura valida responde 401 e nao grava nada. O payload bruto fica em `email_webhook_events`, unico por `svix-id`; bounce, reclamacao e falha marcam a linha da fila e nunca voltam atras. O Free tem 1 endpoint de webhook: apontar para o ambiente de producao;
+- e-mails sao dado pessoal: a fila guarda e-mail, nome e o HTML montado. Retencao por idade e um item pendente (hoje a linha fica; a exclusao da conta so anula `user_id`);
+- o texto dos e-mails diz como criar a senha, mas nunca carrega senha, link de sessao ou token: o link de criar senha continua saindo so pelo Supabase Auth.
+
+### Variaveis de ambiente
+
+Todas em `.env.example`, sem valores.
+
+| Variavel | Onde e lida | Vazia |
+|---|---|---|
+| `EMAIL_PROVIDER` | `src/server/email/config.ts` | `none`: nada e enviado, a fila espera com aviso no log |
+| `RESEND_API_KEY` | `src/server/email/provider.ts` (job do tick) | provedor vira `none` mesmo com `EMAIL_PROVIDER=resend` |
+| `RESEND_WEBHOOK_SECRET` | `src/app/api/webhooks/resend/route.ts` | a rota responde 503 e nao grava nada |
+| `EMAIL_FROM` | `src/server/email/config.ts` | `Bunker707 <equipe@mail.bunker707.com.br>` |
+| `EMAIL_REPLY_TO` | `src/server/email/config.ts` | `contato@bunker707.com.br` (`none` desliga) |
+| `EMAIL_DAILY_LIMIT` | `src/server/email/config.ts` | 90 por dia UTC (invalido volta ao padrao; `0` pausa o envio) |
+| `NEXT_PUBLIC_SITE_URL` | `src/server/auth/site-origin.ts`, `src/server/email/transactional.ts` | links de convite e dos e-mails usam a origem do request |
+
+Configuracao por ambiente, uma vez: criar a chave de envio e o endpoint de webhook no painel do Resend (eventos `email.delivered`, `email.bounced`, `email.complained`, `email.failed`, `email.delivery_delayed`) apontando para `https://<dominio>/api/webhooks/resend`; colar `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET` e `EMAIL_PROVIDER=resend` na Vercel (Production; Preview so se quiser e-mail saindo de previews); o tick de jobs precisa estar ligado (secao Jobs de `docs/04`). Diagnostico: `select status, count(*) from public.email_outbox group by status;` e `select event_type, received_at, outbox_id, error from public.email_webhook_events order by received_at desc limit 20;`.
 
 ## Login e destaque configuraveis (Area de membros)
 

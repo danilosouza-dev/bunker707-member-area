@@ -169,7 +169,7 @@ test("tick route authenticates first, bounds the body and records job_runs", () 
   const jobTypeBody = registrySource.match(/export type Job = \{([^}]*)\}/)?.[1] ?? "";
   assert.match(jobTypeBody, /\bname: string;/);
   assert.match(jobTypeBody, /\brun\(ctx: JobContext\): Promise<void>;/);
-  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[\];/);
+  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob\];/);
   assert.match(jobRunsSource, /\.from\("job_runs"\)/);
 });
 
