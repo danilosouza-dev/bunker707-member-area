@@ -85,8 +85,30 @@ test("a tela de entrar carrega com o nonce da CSP no HTML, sem violacao e com to
   await expect(page.getByText("E-mail ou senha inválidos.")).toBeVisible();
 });
 
+test("rota /api sem sessao sai pelo proxy com a CSP, e e o handler (nao o proxy) que responde 401 na rota que exige sessao", async ({ request }) => {
+  // Desde 17/10/2026 o proxy nao consulta o Supabase Auth em /api/*: a CSP continua, e a decisao de
+  // acesso fica no handler. Sem sessao, /api/health responde 200 e a rota da IA Diretor responde 401.
+  const saude = await request.get("/api/health");
+  expect(saude.status()).toBe(200);
+  expect(saude.headers()["content-security-policy"]).toMatch(/'nonce-/);
+
+  const conversas = await request.get("/api/guide/conversations", { maxRedirects: 0 });
+  expect(conversas.status()).toBe(401);
+  expect(conversas.headers()["content-security-policy"]).toMatch(/'nonce-/);
+});
+
 test.describe("com a sessao da aluna", () => {
   test.use({ storageState: "tests/e2e/.auth/aluna.json" });
+
+  test("logada, rota /api que exige sessao continua respondendo 200 (o handler valida o cookie sozinho) e traz a CSP", async ({ request }) => {
+    // Regressao: o proxy deixou de validar a sessao em /api/*; o cookie segue intacto para o handler,
+    // que valida com requireApiUser. Se o handler deixasse de enxergar a sessao, isto viraria 401.
+    const resposta = await request.get("/api/guide/conversations", { maxRedirects: 0 });
+
+    expect(resposta.status()).toBe(200);
+    expect(resposta.headers()["content-security-policy"]).toMatch(/'nonce-/);
+    expect(await resposta.json()).toHaveProperty("data");
+  });
 
   test("logada, abrir /login com ?next= que tem query volta para o caminho com a query intacta (sem %3F)", async ({ request }) => {
     // Regressao: o destino era montado por `pathname =`, que codifica o "?" como %3F e quebrava links de
