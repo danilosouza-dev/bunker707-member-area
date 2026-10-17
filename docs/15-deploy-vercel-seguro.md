@@ -43,6 +43,12 @@ Configurar no minimo no ambiente `Production`, sem copiar valores para logs ou P
 | `BUNKER_AI_GATEWAY_URL` | servidor | para agentes por conta |
 | `BUNKER_AI_GATEWAY_API_KEY` | servidor | para runtime do gateway |
 | `BUNKER_AI_GATEWAY_MANAGEMENT_KEY` | servidor | para gestao do gateway |
+| `EMAIL_PROVIDER` | servidor | `resend` para o app enviar e-mail (vazio = nada sai, a fila espera) |
+| `RESEND_API_KEY` | servidor | para o envio de boas-vindas e compra (so permissao de envio) |
+| `RESEND_WEBHOOK_SECRET` | servidor | para `POST /api/webhooks/resend` (bounce, reclamacao, entrega) |
+| `EMAIL_FROM`, `EMAIL_REPLY_TO` | servidor | nao (padrao `Bunker707 <equipe@mail.bunker707.com.br>` e `contato@bunker707.com.br`) |
+| `EMAIL_DAILY_LIMIT` | servidor | nao (padrao 90, abaixo dos 100/dia do Resend Free) |
+| `NEXT_PUBLIC_SITE_URL` | navegador e servidor | recomendada: origem dos links de convite e dos e-mails |
 
 Usar apenas uma chave publica Supabase e apenas uma chave privilegiada por ambiente quando possivel. Se as chaves novas publishable/secret estiverem disponiveis, preferi-las e manter as legadas apenas durante a migracao.
 

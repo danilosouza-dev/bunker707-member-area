@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     "playwright-report/**",
     "test-results/**",
     ".claude/**",
+    // Infraestrutura (compose, Caddy, Edge Functions do Deno vendidas do Supabase): nao e codigo do app.
+    "infra/**",
     ".codex/**",
     ".codex-backups/**",
     ".gemini-scratch/**",

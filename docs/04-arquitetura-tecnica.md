@@ -93,6 +93,7 @@ src/
     moderation/
     ai/
     jobs/
+    email/
 ```
 
 ## Arquitetura de dados implementada
@@ -434,7 +435,7 @@ Codigo:
 
 - `src/app/api/jobs/tick/route.ts`: autenticacao, leitura do corpo e resposta;
 - `src/server/jobs/tick-auth.ts`: validacao do token, modulo puro coberto por `tests/jobs-tick.test.mjs`;
-- `src/server/jobs/registry.ts`: ponto de extensao. `Job = { name, run(ctx) }`; `ctx` traz o cliente administrativo do Supabase, um `AbortSignal` com o prazo do tick, o instante do tick e os ids de `job_runs`. Hoje o registro esta vazio;
+- `src/server/jobs/registry.ts`: ponto de extensao. `Job = { name, run(ctx) }`; `ctx` traz o cliente administrativo do Supabase, um `AbortSignal` com o prazo do tick, o instante do tick e os ids de `job_runs`. Registrado hoje: `email-outbox` (`src/server/jobs/email-outbox-job.ts`, fila de e-mails transacionais; secao E-mail transacional);
 - `src/server/jobs/run-tick.ts`: executa os jobs em sequencia com orcamento de 45 s; um job que lanca erro ou estoura o prazo vira `failed` sem derrubar os demais; jobs que nao couberem no prazo ficam para o proximo tick (`skipped`);
 - `src/server/jobs/job-runs.ts`: gravacao de `public.job_runs`.
 
@@ -456,21 +457,72 @@ Configuracao por ambiente (passos completos no topo de `supabase/migrations/2026
 
 Sem esses passos o agendamento existe mas nao chama nada, o que e o estado esperado em desenvolvimento local e em branches de preview. Para pausar: `select cron.unschedule('bunker707-jobs-tick');`. Diagnostico: `cron.job_run_details` (execucao do agendamento), `net._http_response` (status HTTP da chamada) e `public.job_runs` (resultado na aplicacao). Vercel Cron fica apenas como redundancia diaria, se necessario.
 
+## E-mail transacional
+
+Decisao em `docs/19-infra-hetzner-e-email.md` (secao 2): Resend agora (plano Free: 3.000 e-mails/mes, 100 por dia, 1 endpoint de webhook), Amazon SES na segunda rodada, atras do mesmo adaptador. Os e-mails do Supabase Auth (convite, recuperacao de senha) continuam saindo pelo SMTP configurado no painel do Supabase, nao por este modulo.
+
+Regras:
+
+- quem dispara nunca envia na hora: enfileira uma linha em `email_outbox` e segue; o envio acontece no job `email-outbox` do tick de minuto. Falha ao enfileirar vira log, porque o acesso ja foi dado e e o que importa;
+- o provedor fica atras de `EmailProvider` (`src/server/email/types.ts`): `send(mensagem) -> { ok, providerMessageId } | { ok: false, outcome: retry | throttle | fail }`. Hoje existe `providers/resend.ts` (HTTP direto em `https://api.resend.com/emails`, `Authorization: Bearer RESEND_API_KEY`, cabecalho `Idempotency-Key`); o SES entra como outra implementacao sem mudar quem dispara;
+- `EMAIL_PROVIDER=resend|none` escolhe o provedor (`src/server/email/config.ts`). Vazio, `none`, sem `RESEND_API_KEY` ou com remetente invalido: nenhum envio, a fila espera com um aviso no log e cada linha expira em 7 dias. E o estado de desenvolvimento local, previews e testes;
+- limite diario `EMAIL_DAILY_LIMIT` (padrao 90, por dia do calendario UTC, contado em `email_outbox.sent_at`) abaixo dos 100/dia do Free. Os e-mails do Auth pelo SMTP consomem a mesma cota do Resend, mas nao entram nesta conta: ao abrir vagas para muitos alunos num dia, ou o plano vai para Pro ou a fila drena em varios dias;
+- idempotencia em duas camadas: a chave `idempotency_key` e unica na fila (`welcome:<user_id>` e `purchase:<provedor>:<evento>:<user_id>`; sem id de evento, os ids dos acessos abertos) e vai ao Resend, que nao envia duas vezes a mesma chave em 24 h. Um webhook de venda reprocessado nao duplica e-mail;
+- retentativa: erro passageiro (rede, 5xx, chave ainda em uso) volta para a fila com espera crescente (1 min, 5 min, 30 min, 2 h, 12 h) e vira `failed` na quinta falha; limite do provedor (429, cota do dia) devolve a linha sem contar tentativa e para o lote ate a proxima janela; erro definitivo (remetente invalido, dominio nao verificado, chave recusada) vira `failed` na hora com o motivo em `last_error`;
+- cada linha e reservada (`sending`) antes do envio: dois ticks no mesmo minuto nao enviam a mesma linha; linha presa em `sending` ha mais de 10 minutos volta para a fila; no maximo 25 envios por tick, com pausa de 550 ms entre eles (o Resend aceita 2 pedidos por segundo), respeitando `ctx.signal`.
+
+Pontos de disparo (`src/server/students/access.ts`, a mesma rotina do admin e dos webhooks de venda):
+
+- **boas-vindas** (`welcome`): na primeira vez que a conta nasce. Numa venda por webhook, sempre; pelo admin (Adicionar aluno, importacao), so quando a equipe escolheu convite ou senha temporaria, porque "Nao enviar agora" significa isso. O texto diz com qual e-mail entrar e como criar a senha conforme a entrega: convite (chega outro e-mail com o link), senha temporaria (a equipe passa) ou nada (usar "Esqueci minha senha" na tela de entrar);
+- **acesso liberado por compra** (`purchase`): quando `grantProductAccess` vem de `source = "webhook"` e abre um acesso que estava fechado (novo, revogado, suspenso ou expirado). Um e-mail por compra, com os produtos abertos e o link de cada um (`/conteudo/<id>`). Prazo a mais num acesso ja aberto e acoes da equipe (liberar, em massa, importacao) nao avisam o aluno; envio em massa a partir da lista de alunos fica para o modulo Comunicacao.
+
+Links nos e-mails usam `NEXT_PUBLIC_SITE_URL`; sem ela, a origem do request que disparou (`redirectTo` do admin ou `siteOrigin` informado pelo webhook); por ultimo, `http://localhost:3000`.
+
+Fluxo:
+
+```txt
+venda por webhook / Adicionar aluno / importacao
+  -> src/server/students/access.ts
+  -> src/server/email/transactional.ts   (template em portugues + chave de idempotencia)
+  -> email_outbox (queued)
+pg_cron tick (* * * * *) -> POST /api/jobs/tick -> job email-outbox
+  -> src/server/email/outbox.ts: expira > 7 dias, recupera `sending` orfas, conta o dia (UTC),
+     busca ate 25 linhas vencidas, reserva cada uma, provider.send(...) com Idempotency-Key
+  -> sent (provider_message_id) | queued com next_attempt_at | failed
+Resend -> POST /api/webhooks/resend (assinatura Svix com RESEND_WEBHOOK_SECRET)
+  -> email_webhook_events (payload bruto, unico por svix-id)
+  -> email_outbox: delivered_at | bounced | complained | failed
+```
+
+Codigo:
+
+- `src/server/email/types.ts`, `config.ts`, `providers/resend.ts`, `outbox-rules.ts`, `webhook-signature.ts`, `webhook-events.ts`, `templates/*`: modulos puros, cobertos por `tests/email-*.test.mjs`;
+- `src/server/email/outbox.ts` (fila no banco), `provider.ts` (escolha pelo ambiente), `transactional.ts` (os dois e-mails), `src/server/jobs/email-outbox-job.ts` e `src/app/api/webhooks/resend/route.ts`: cobertos por `tests/integration/email-transacional.test.mjs` com o banco local e o provedor falso de `tests/support/integration-email-provider.mjs`. Nenhum teste envia e-mail de verdade.
+
+Variaveis: `EMAIL_PROVIDER`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `EMAIL_DAILY_LIMIT` e `NEXT_PUBLIC_SITE_URL` (`.env.example`; tabela em `docs/06-seguranca-operacao.md`, secao E-mail transacional).
+
 ## Deploy
 
-Fase inicial:
+Fase inicial (hoje):
 
 - Vercel para app Next.js;
 - Supabase para banco;
 - Mux/Bunny para video.
 
-Para facilitar migracao futura para Hetzner:
+Producao propria na Hetzner (preparada em 17/10/2026, ainda nao criada; decisao do produtor em docs/19):
 
-- manter variaveis de ambiente organizadas;
+- `Dockerfile` na raiz gera a imagem do app em modo standalone (Node 24, usuario sem privilegio, `HEALTHCHECK` em `GET /api/health`); `output: "standalone"` so entra com `NEXT_OUTPUT=standalone`, entao Vercel, `npm run build` e os testes nao mudam;
+- `.github/workflows/build-image.yml` publica a imagem no ghcr.io a cada push na `main` (sem deploy automatico);
+- `infra/compose/docker-compose.yml` sobe o Supabase self-hosted (Postgres 17, Envoy, GoTrue, PostgREST, Realtime, Storage, imgproxy, postgres-meta, Supavisor, Edge Runtime, Studio) com o app e o Caddy num servidor so; portas do Supabase so em 127.0.0.1;
+- o app fala com o Supabase pelo mesmo endereco publico que o navegador usa (cookie `sb-<host>-auth-token` e URLs do Storage dependem disso), resolvido para o proprio servidor por `extra_hosts`;
+- scripts em `infra/scripts/` (bootstrap, firewall da Hetzner, migracoes, deploy, backup/restore, atualizacao do stack) e o passo a passo completo em `docs/20-runbook-hetzner.md`.
+
+Regras que continuam valendo em qualquer hospedagem:
+
+- manter variaveis de ambiente organizadas (`.env.example` na raiz e `infra/compose/.env.example`);
 - evitar dependencia forte de Edge Functions da Vercel;
 - usar Route Handlers padrao;
-- criar Dockerfile quando a implementacao comecar;
-- nao guardar arquivos importantes no filesystem local do servidor.
+- nao guardar arquivos importantes no filesystem local do servidor (Storage do Supabase, com backup).
 
 ## Importador de playlists do YouTube
 

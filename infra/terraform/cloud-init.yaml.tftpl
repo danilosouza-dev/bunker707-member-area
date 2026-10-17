@@ -1,0 +1,15 @@
+#cloud-config
+# Minimo para o primeiro acesso: usuario de deploy com a chave do produtor. O resto (ufw, Docker,
+# fail2ban...) e o infra/scripts/bootstrap.sh, para o procedimento ser o mesmo com ou sem Terraform.
+users:
+  - name: ${deploy_user}
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+package_update: true
+packages:
+  - git
+  - curl

@@ -89,6 +89,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: localDevOrigins,
+  // NEXT_OUTPUT=standalone so no build da imagem Docker (Dockerfile): gera .next/standalone com o servidor
+  // e as dependencias minimas. Fora dele (Vercel, `npm run build`, testes de ponta a ponta) nada muda.
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   async headers() {
     return [{
       headers: securityHeaders,
