@@ -64,7 +64,7 @@ Portas publicadas no servidor:
 
 Por que o app fala com o Supabase pelo endereco publico e nao por `http://api-gw:8000`: o cookie de sessao do `@supabase/ssr` se chama `sb-<primeiro rotulo do host>-auth-token` e as URLs publicas do Storage saem do servidor; navegador e servidor precisam usar o MESMO endereco. O `extra_hosts: <host>:host-gateway` do compose faz esse nome resolver para o proprio servidor (Caddy em producao, Envoy no ensaio local), sem sair pela Cloudflare.
 
-Chaves: o stack usa as chaves novas (`sb_publishable_` no navegador, `sb_secret_` no servidor) com tokens assinados em ES256 e JWKS em `/auth/v1/.well-known/jwks.json`; as chaves legadas (`anon`/`service_role`, HS256) continuam no `.env` so para uso interno dos servicos. Com isso `AUTH_SESSION_STRATEGY=claims` (validacao local do JWT no `proxy.ts`) fica possivel quando o proxy estiver ativo (secao 15).
+Chaves: o stack usa as chaves novas (`sb_publishable_` no navegador, `sb_secret_` no servidor) com tokens assinados em ES256 e JWKS em `/auth/v1/.well-known/jwks.json`; as chaves legadas (`anon`/`service_role`, HS256) continuam no `.env` so para uso interno dos servicos. Com isso `AUTH_SESSION_STRATEGY=claims` (validacao local do JWT no `src/proxy.ts`) fica possivel; ative primeiro no ensaio local.
 
 ---
 
@@ -440,7 +440,7 @@ Quando chegar a hora (decisao do produtor), com janela de manutencao de ~1 h:
 | E-mail do Auth pelo SMTP da Supabase | SMTP do Resend na 587 | remetente do dominio verificado |
 | Chaves anon/service_role no `.env` da Vercel | `sb_publishable_` / `sb_secret_` do stack | mesmas variaveis do app |
 
-**Achado do ensaio (17/10/2026), fora do escopo desta infra mas urgente**: o `proxy.ts` do repositorio fica na raiz, ao lado de `src/`, e o Next 16.4 so procura `proxy.ts` dentro de `src/` quando o app esta em `src/app`. Resultado: o proxy nao e compilado em nenhum build (manifesto de middleware vazio no Mac, no Docker e, por consequencia, na Vercel): CSP com nonce, `no-store` e o redirecionamento de pagina protegida na borda nao estao ativos; as paginas se protegem sozinhas no servidor (por isso os testes de ponta a ponta passam). O `smoke.sh` aceita 200 ou 307 em `/` por isso. Correcao em PR propria: mover para `src/proxy.ts`, ajustar os dois testes que leem o caminho e acrescentar um teste de comportamento do cabecalho CSP.
+**Achado do ensaio (17/10/2026), corrigido no mesmo dia**: o `proxy.ts` ficava na raiz do repositorio e o Next 16.4 so compila `src/proxy.ts` quando o app esta em `src/app`, entao nenhum build (Mac, Docker, Vercel) tinha o proxy: sem CSP com nonce, sem `no-store` e sem redirecionamento na borda. O arquivo foi movido para `src/proxy.ts`, com teste de ponta a ponta do 307 e do cabecalho (`tests/e2e/visitante-barrado-na-borda.spec.ts`). Desde entao o `smoke.sh` exige 307 em `/`; a imagem Docker nao precisou de mudanca, so de rebuild. Se um smoke voltar a ver 200 em `/`, o proxy saiu do build: dentro da imagem, `.next/server/functions-config-manifest.json` precisa ter a entrada `/_middleware` (runtime `nodejs`), e o resumo do `next build` a linha `ƒ Proxy (Middleware)`; o `middleware-manifest.json` fica vazio mesmo com o proxy no ar (so lista proxies no runtime Edge).
 
 ---
 
