@@ -41,22 +41,25 @@ const { curso, cursoBloqueado, cursoLiberacao } = ESCOLA_DE_TESTE;
 const produtor = usuarioDeTeste(contas.produtor);
 const analista = usuarioDeTeste(contas.analista);
 const TOKEN = "hottok-integracao-0123456789abcdef";
-const CODIGOS = { curso: "7001", foraDeOrdem: "7998", pacote: "7002", semLigacao: "7999" };
+const CODIGOS = { avulso: "7997", curso: "7001", foraDeOrdem: "7998", pacote: "7002", semLigacao: "7999" };
 const COMPRADOR = { email: "comprador.hotmart@bunker707.test", nome: "Comprador da Hotmart" };
 const COMPRADOR_PACOTE = { email: "comprador.pacote@bunker707.test", nome: "Comprador do Pacote" };
 const ASSINANTE = { email: "assinante.hotmart@bunker707.test", nome: "Assinante da Hotmart" };
 const COMPRADOR_ANTIGO = { email: "comprador.antigo@bunker707.test", nome: "Comprador Antes do Webhook" };
 const REEMBOLSADO = { email: "reembolsado.hotmart@bunker707.test", nome: "Reembolsado Antes de Ligar" };
 const PRESO = { email: "comprador.preso@bunker707.test", nome: "Comprador Preso" };
-const COMPRADORES = [COMPRADOR, COMPRADOR_PACOTE, ASSINANTE, COMPRADOR_ANTIGO, REEMBOLSADO, PRESO];
+const AVULSO = { email: "comprador.avulso@bunker707.test", nome: "Comprador Avulso e Pacote" };
+const RENOVACAO = { email: "assinante.renovacao@bunker707.test", nome: "Assinante com Renovação" };
+const COMPRADORES = [COMPRADOR, COMPRADOR_PACOTE, ASSINANTE, COMPRADOR_ANTIGO, REEMBOLSADO, PRESO, AVULSO, RENOVACAO];
 const PREFIXO = "teste-hotmart-";
 const PACOTE_DUPLICADO = "Pacote de Teste: Código Repetido";
 
 /** Payload ficticio de compra no formato do webhook 2.0 da Hotmart (com os campos que NAO podem ser guardados). */
-function payload({ email = COMPRADOR.email, event = "PURCHASE_APPROVED", id, nome = COMPRADOR.nome, produto = CODIGOS.curso, transaction = "HP-TESTE-0001" }) {
+function payload({ assinatura = null, email = COMPRADOR.email, event = "PURCHASE_APPROVED", id, nome = COMPRADOR.nome, produto = CODIGOS.curso, transaction = "HP-TESTE-0001" }) {
   return {
     creation_date: Date.now(),
     data: {
+      ...(assinatura ? { subscription: { plan: { name: "Mensal" }, status: "ACTIVE", subscriber: { code: assinatura } } } : {}),
       affiliates: [{ name: "Afiliado Ficticio" }],
       buyer: {
         address: { city: "Cidade Ficticia", zipcode: "00000000" },
@@ -78,13 +81,13 @@ function payload({ email = COMPRADOR.email, event = "PURCHASE_APPROVED", id, nom
 }
 
 /** Payload ficticio de assinatura cancelada (comprador em data.subscriber, sem compra). */
-function cancelamento({ email, id, nome, produto = CODIGOS.curso }) {
+function cancelamento({ assinatura = "SUB-TESTE", email, id, nome, produto = CODIGOS.curso }) {
   return {
     creation_date: Date.now(),
     data: {
       cancellation_date: Date.now(),
       product: { id: Number(produto), name: `Produto ${produto} na Hotmart` },
-      subscriber: { code: "SUB-TESTE", email, name: nome },
+      subscriber: { code: assinatura, email, name: nome },
       subscription: { plan: { name: "Mensal" }, status: "CANCELLED_BY_CUSTOMER" }
     },
     event: "SUBSCRIPTION_CANCELLATION",
@@ -131,11 +134,15 @@ async function acessosDe(email) {
   }
 
   const acessos = unwrap(
-    await db.from("entitlements").select("id,target_id,status,source_provider,source_event_id").eq("user_id", conta.id).order("target_id"),
+    await db.from("entitlements").select("id,target_id,status,source_provider,source_event_id,ends_at").eq("user_id", conta.id).order("target_id"),
     "Lendo acessos"
   );
 
   return { acessos, conta };
+}
+
+async function vinculosDe(transaction) {
+  return unwrap(await db.from("sale_grants").select("transaction_id,subscription_code,product_id,opened,previous_ends_at,closed_by").eq("transaction_id", transaction).order("product_id"), "Lendo vínculos");
 }
 
 async function filaDe(email) {
@@ -158,6 +165,8 @@ async function limpar() {
   unwrap(await db.from("product_combos").delete().eq("name", PACOTE_DUPLICADO), "Apagando pacote duplicado de teste");
   unwrap(await db.from("email_outbox").delete().in("to_email", COMPRADORES.map((conta) => conta.email)), "Limpando a fila de e-mail de teste");
   unwrap(await db.from("entitlements").delete().eq("source_event_id", "HP-OUTRA-0001"), "Limpando acesso de outra origem");
+  unwrap(await db.from("entitlements").delete().eq("user_id", contas.alunoSemAcesso.id), "Limpando acessos do aluno sem acesso");
+  unwrap(await db.from("entitlements").update({ ends_at: null, source_event_id: "escola-de-teste:aluna:curso-agentes", source_provider: "manual", status: "active" }).eq("user_id", contas.aluna.id).eq("target_id", curso.id), "Devolvendo o acesso da aluna");
 
   for (const conta of COMPRADORES) {
     await apagarContaDeTeste(db, conta.email);
@@ -342,16 +351,83 @@ test("reembolso revoga o acesso que nasceu da compra; reembolso repetido nao mud
   assert.match((await evento("reembolso-2")).outcome_detail, /já estava fechado/);
 });
 
-test("reembolso de uma compra com o e-mail de quem ja tinha acesso por outra origem nao tira esse acesso", async () => {
-  const antes = unwrap(await db.from("entitlements").select("status,source_provider").eq("user_id", contas.aluna.id).eq("target_id", curso.id).single(), "Acesso da aluna");
-  assert.equal(antes.source_provider, "manual");
+test("compra, reembolso e cancelamento com o e-mail de quem ja tinha acesso pela equipe nao tiram esse acesso", async () => {
+  const lerAluna = async () => unwrap(await db.from("entitlements").select("status,source_provider,ends_at").eq("user_id", contas.aluna.id).eq("target_id", curso.id).single(), "Acesso da aluna");
+  assert.deepEqual(await lerAluna(), { ends_at: null, source_provider: "manual", status: "active" });
 
-  const { body } = await postJson(payload({ email: contas.aluna.email, event: "PURCHASE_REFUNDED", id: "reembolso-outra-origem", nome: contas.aluna.nome, transaction: "HP-OUTRA-0001" }));
-  assert.equal(body.outcome, "ignored");
-  assert.match((await evento("reembolso-outra-origem")).outcome_detail, /veio de outra origem/);
+  // Alguem compra (assinatura) com o e-mail da aluna: o acesso aberto dela continua da equipe; a venda so fica registrada como vinculo.
+  const compra = await postJson(payload({ assinatura: "SUB-ABUSO", email: contas.aluna.email, id: "abuso-compra", nome: contas.aluna.nome, transaction: "HP-OUTRA-0001" }));
+  assert.equal(compra.body.outcome, "access_granted");
+  assert.deepEqual(await lerAluna(), { ends_at: null, source_provider: "manual", status: "active" }, "a origem continua a equipe");
+  assert.deepEqual((await vinculosDe("HP-OUTRA-0001")).map((row) => [row.opened, row.previous_ends_at, row.subscription_code]), [[false, null, "SUB-ABUSO"]], "a venda so estendeu um acesso que ja estava aberto");
 
-  const depois = unwrap(await db.from("entitlements").select("status,source_provider").eq("user_id", contas.aluna.id).eq("target_id", curso.id).single(), "Acesso da aluna");
-  assert.deepEqual(depois, { source_provider: "manual", status: "active" }, "o acesso dado pela equipe continua");
+  const reembolso = await postJson(payload({ email: contas.aluna.email, event: "PURCHASE_REFUNDED", id: "abuso-reembolso", nome: contas.aluna.nome, transaction: "HP-OUTRA-0001" }));
+  assert.equal(reembolso.body.outcome, "ignored");
+  assert.match((await evento("abuso-reembolso")).outcome_detail, /outra origem/);
+  assert.deepEqual(await lerAluna(), { ends_at: null, source_provider: "manual", status: "active" }, "o acesso dado pela equipe continua");
+
+  const cancelada = await postJson(cancelamento({ assinatura: "SUB-ABUSO", email: contas.aluna.email, id: "abuso-cancelamento", nome: contas.aluna.nome }));
+  assert.equal(cancelada.body.outcome, "ignored", JSON.stringify(cancelada.body));
+  assert.deepEqual(await lerAluna(), { ends_at: null, source_provider: "manual", status: "active" }, "cancelar a assinatura alheia nao suspende o acesso da aluna");
+});
+
+test("acesso da equipe com prazo: a compra libera sem prazo e o reembolso devolve o prazo que havia", async () => {
+  actAs(produtor);
+  const prazo = "2099-06-30T12:00:00.000Z";
+  const concedido = await access.grantProductAccess({ actorId: contas.produtor.id, endsAt: prazo, productIds: [curso.id], source: "admin", sourceProvider: "manual", userId: contas.alunoSemAcesso.id });
+  assert.equal(concedido.granted.length, 1);
+
+  const compra = await postJson(payload({ email: contas.alunoSemAcesso.email, id: "prazo-compra", nome: contas.alunoSemAcesso.nome, transaction: "HP-PRAZO-0001" }));
+  assert.equal(compra.body.outcome, "access_granted");
+  const semPrazo = (await acessosDe(contas.alunoSemAcesso.email)).acessos[0];
+  assert.equal(semPrazo.ends_at, null, "quem pagou fica sem prazo");
+  assert.equal(semPrazo.source_provider, "manual", "a origem continua a equipe");
+  assert.deepEqual((await vinculosDe("HP-PRAZO-0001")).map((row) => [row.opened, new Date(row.previous_ends_at).toISOString()]), [[false, prazo]]);
+
+  const reembolso = await postJson(payload({ email: contas.alunoSemAcesso.email, event: "PURCHASE_REFUNDED", id: "prazo-reembolso", nome: contas.alunoSemAcesso.nome, transaction: "HP-PRAZO-0001" }));
+  assert.equal(reembolso.body.outcome, "access_restored", JSON.stringify(reembolso.body));
+  const devolvido = (await acessosDe(contas.alunoSemAcesso.email)).acessos[0];
+  assert.deepEqual([devolvido.status, new Date(devolvido.ends_at).toISOString()], ["active", prazo], "o prazo da equipe volta; o acesso continua");
+  assert.match((await evento("prazo-reembolso")).outcome_detail, /prazo anterior devolvido/);
+});
+
+test("produto comprado sozinho e depois num pacote: o reembolso do pacote revoga so o que o pacote abriu", async () => {
+  actAs(produtor);
+  await garantirPacoteDeTeste(db, CODIGOS.pacote);
+  await ligarCodigo(cursoLiberacao.id, CODIGOS.avulso);
+
+  const avulsa = await postJson(payload({ email: AVULSO.email, id: "avulso-compra", nome: AVULSO.nome, produto: CODIGOS.avulso, transaction: "HP-AVULSO-0001" }));
+  assert.equal(avulsa.body.outcome, "access_granted");
+  const pacote = await postJson(payload({ email: AVULSO.email, id: "avulso-pacote", nome: AVULSO.nome, produto: CODIGOS.pacote, transaction: "HP-AVULSO-0002" }));
+  assert.equal(pacote.body.outcome, "access_granted");
+  assert.deepEqual(
+    (await vinculosDe("HP-AVULSO-0002")).map((row) => [row.product_id, row.opened]),
+    [[cursoBloqueado.id, true], [cursoLiberacao.id, false]],
+    "o pacote abriu um produto e so estendeu o outro"
+  );
+
+  const reembolso = await postJson(payload({ email: AVULSO.email, event: "PURCHASE_REFUNDED", id: "avulso-reembolso-pacote", nome: AVULSO.nome, produto: CODIGOS.pacote, transaction: "HP-AVULSO-0002" }));
+  assert.equal(reembolso.body.outcome, "access_revoked");
+  assert.deepEqual(
+    (await acessosDe(AVULSO.email)).acessos.map((row) => [row.target_id, row.status]),
+    [[cursoBloqueado.id, "revoked"], [cursoLiberacao.id, "active"]],
+    "o produto pago a parte continua"
+  );
+  assert.match((await evento("avulso-reembolso-pacote")).outcome_detail, /1 produto mantido \(outra compra paga sustenta o acesso\)/);
+});
+
+test("assinatura: a renovacao chega como compra nova e o chargeback dela revoga, mesmo com o acesso nascido na primeira cobranca", async () => {
+  const primeira = await postJson(payload({ assinatura: "SUB-RENOVA", email: RENOVACAO.email, id: "renovacao-1", nome: RENOVACAO.nome, transaction: "HP-RENOVA-0001" }));
+  assert.equal(primeira.body.outcome, "access_granted");
+  const segunda = await postJson(payload({ assinatura: "SUB-RENOVA", email: RENOVACAO.email, id: "renovacao-2", nome: RENOVACAO.nome, transaction: "HP-RENOVA-0002" }));
+  assert.equal(segunda.body.outcome, "access_granted");
+  const [acesso] = (await acessosDe(RENOVACAO.email)).acessos;
+  assert.deepEqual([acesso.status, acesso.source_event_id], ["active", "HP-RENOVA-0001"], "o acesso continua da primeira cobranca");
+  assert.deepEqual((await vinculosDe("HP-RENOVA-0002")).map((row) => [row.opened, row.subscription_code]), [[false, "SUB-RENOVA"]]);
+
+  const chargeback = await postJson(payload({ assinatura: "SUB-RENOVA", email: RENOVACAO.email, event: "PURCHASE_CHARGEBACK", id: "renovacao-chargeback", nome: RENOVACAO.nome, transaction: "HP-RENOVA-0002" }));
+  assert.equal(chargeback.body.outcome, "access_revoked", JSON.stringify(chargeback.body));
+  assert.equal((await acessosDe(RENOVACAO.email)).acessos[0].status, "revoked", "cobrancas da mesma assinatura nao sustentam o acesso umas das outras");
 });
 
 test("acesso fechado reaberto por uma venda passa a pertencer a venda: o reembolso dela fecha de novo", async () => {
@@ -420,7 +496,7 @@ test("pacote pausado: a compra chega, fica ignorada com o motivo e nao libera na
 /* ------------------------------------------------------------ Fim da garantia */
 
 test("fim da garantia (PURCHASE_COMPLETE) nao reabre acesso suspenso por cancelamento nem revogado pela equipe; libera so para quem nunca teve", async () => {
-  const compra = await postJson(payload({ email: ASSINANTE.email, id: "assinatura-compra", nome: ASSINANTE.nome, transaction: "HP-ASSINATURA-0001" }));
+  const compra = await postJson(payload({ assinatura: "SUB-TESTE", email: ASSINANTE.email, id: "assinatura-compra", nome: ASSINANTE.nome, transaction: "HP-ASSINATURA-0001" }));
   assert.equal(compra.body.outcome, "access_granted");
 
   const cancelada = await postJson(cancelamento({ email: ASSINANTE.email, id: "assinatura-cancelada", nome: ASSINANTE.nome }));
@@ -527,6 +603,29 @@ test("evento preso em 'received' (a funcao morreu depois de gravar): o reenvio d
   const deNovo = await postJson(compra);
   assert.deepEqual(deNovo.body, { duplicate: true, ok: true }, "processado, o reenvio volta a ser so duplicado");
 
+  // Preso, mas recente demais para reivindicar (pode estar rodando): a plataforma precisa tentar de novo, nao dar como entregue.
+  const recente = payload({ email: PRESO.email, id: "preso-recente", nome: PRESO.nome, transaction: "HP-PRESO-0003" });
+  unwrap(
+    await db.from("webhook_events").insert({
+      buyer_email: PRESO.email,
+      event_type: "PURCHASE_APPROVED",
+      external_event_id: recente.id,
+      external_product_id: String(recente.data.product.id),
+      normalized_type: "purchase_approved",
+      payload: recente,
+      processing_started_at: new Date().toISOString(),
+      processing_status: "received",
+      provider: "hotmart",
+      signature_valid: true,
+      transaction_id: recente.data.purchase.transaction
+    }),
+    "Gravando evento recem-recebido"
+  );
+  const cedo = await postJson(recente);
+  assert.equal(cedo.status, 409, JSON.stringify(cedo.body));
+  assert.equal(cedo.body.processing, true);
+  unwrap(await db.from("webhook_events").delete().eq("external_event_id", recente.id), "Apagando evento recem-recebido");
+
   // Pelo botao: o outro preso e reprocessado e libera o segundo produto.
   actAs(produtor);
   const result = await salesActions.reprocessSalesEvent({ id: (await evento("preso-2")).id });
@@ -553,9 +652,16 @@ test("evento sem e-mail valido falha: 500, linha guardada com o motivo; 'Precisa
   assert.equal(certa.status, 200);
   const aindaComErro = await integracao();
   assert.equal(aindaComErro.status, "needs_attention", "um evento certo depois nao esconde a venda com erro");
-  assert.match(aindaComErro.last_error, /1 venda com erro aguardando reprocesso/);
+  assert.match(aindaComErro.last_error, /1 venda com erro ou presa aguardando reprocesso/);
 
   actAs(produtor);
+  // Outro processamento acabou de comecar (segundo clique, outra aba, reenvio): o botao espera.
+  unwrap(await db.from("webhook_events").update({ processing_started_at: new Date().toISOString() }).eq("id", linha.id), "Simulando reprocesso em andamento");
+  const ocupado = await salesActions.reprocessSalesEvent({ id: linha.id });
+  assert.equal(ocupado.status, 409, JSON.stringify(ocupado));
+  assert.match(ocupado.error, /já está sendo processada/);
+  unwrap(await db.from("webhook_events").update({ processing_started_at: new Date(Date.now() - 10 * 60_000).toISOString() }).eq("id", linha.id), "Liberando a trava");
+
   const result = await salesActions.reprocessSalesEvent({ id: linha.id });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.data.ok, false);
@@ -579,6 +685,7 @@ test("eventos que nao mudam acesso ficam guardados so com o envelope; JSON inval
   assert.equal(boleto.outcome, "ignored");
   assert.match(boleto.outcome_detail, /não muda o acesso/);
   assert.equal("data" in boleto.payload, false, "evento que nao muda acesso nao guarda dados do comprador");
+  assert.equal(boleto.buyer_email, null, "nem o e-mail na coluna");
   assert.deepEqual(Object.keys(boleto.payload).sort(), ["creation_date", "event", "id", "version"]);
 
   const invalido = await route.POST(
@@ -616,6 +723,20 @@ test("Hoje: a origem dos acessos do periodo separa Hotmart de equipe", async () 
   assert.equal(error, null, error?.message);
   const hotmart = data.find((row) => row.source_provider === "hotmart");
   assert.ok(hotmart && Number(hotmart.total) >= 3, JSON.stringify(data));
+});
+
+test("token guardado em texto puro (formato antigo): o webhook responde 503 e o cartao pede para trocar o token", async () => {
+  unwrap(await db.from("integration_settings").update({ secret: TOKEN }).eq("provider", "hotmart"), "Simulando token antigo");
+
+  const response = await post(payload({ id: "token-antigo" }));
+  assert.equal(response.status, 503);
+  const row = await integracao();
+  assert.equal(row.status, "needs_attention");
+  assert.match(row.last_error, /formato antigo/);
+
+  actAs(produtor);
+  assert.equal((await salesActions.saveSalesSecret({ provider: "hotmart", secret: TOKEN })).ok, true);
+  assert.equal((await integracao()).secret, hashSalesSecret(TOKEN));
 });
 
 test("desconectar apaga o hash do token e o webhook volta a responder 503", async () => {

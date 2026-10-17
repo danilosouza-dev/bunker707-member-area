@@ -2,27 +2,31 @@ import "server-only";
 
 // Regra de acesso de uma venda ja normalizada (docs/04, secao Webhooks externos; docs/17 §1.6.8).
 // Separada do parser da plataforma de proposito: aqui so existe o evento normalizado, o codigo do produto
-// ligado em sales_product_links e a rotina de acesso de Alunos (src/server/students/access.ts), a mesma
-// do admin. Nada do payload libera conteudo por si.
+// ligado em sales_product_links, o vinculo venda -> acesso (sale_grants) e a rotina de acesso de Alunos
+// (src/server/students/access.ts), a mesma do admin. Nada do payload libera conteudo por si.
 //
 // Resultados:
-// - compra aprovada: conta criada ou encontrada pelo e-mail e produto(s) liberados sem prazo
-//   (pacote = todos os produtos dele, de uma vez, num e-mail so; produtos vendidos junto no mesmo
-//   pedido, os order bumps da Ticto, entram na mesma liberacao quando o codigo deles esta ligado, e o
-//   que nao esta ligado fica escrito no detalhe sem bloquear o resto). Compra que ja tem reembolso ou
-//   chargeback registrado nao libera (reprocesso ou reenvio fora de ordem). Confirmacao de compra
-//   anterior (Hotmart: fim da garantia) so libera para quem nunca teve acesso ao produto: nunca reabre
-//   acesso suspenso ou revogado;
-// - reembolso e chargeback: revogam SO os acessos que nasceram desta compra (mesma plataforma e mesma
-//   transacao, o que inclui os produtos vendidos junto), qualquer que seja a situacao atual do pacote; acesso que veio da equipe ou de outra
-//   compra fica como esta, com o motivo escrito para a equipe decidir. Assinatura cancelada suspende
-//   os acessos dessa plataforma nos produtos da assinatura;
+// - compra aprovada: conta criada ou encontrada pelo e-mail e produto(s) liberados sem prazo (pacote =
+//   todos os produtos dele, de uma vez, num e-mail so; produtos vendidos junto no mesmo pedido, os order
+//   bumps da Ticto, entram na mesma liberacao quando o codigo deles esta ligado, e o que nao esta ligado
+//   fica escrito no detalhe sem bloquear o resto); cada (venda, acesso) vira um vinculo em
+//   sale_grants dizendo se a venda ABRIU o acesso ou so ESTENDEU um acesso aberto (e que prazo ele
+//   tinha). Compra que ja tem reembolso ou chargeback registrado nao libera (reprocesso ou reenvio fora
+//   de ordem). Confirmacao de compra anterior (Hotmart: fim da garantia) so libera para quem nunca teve
+//   acesso ao produto: nunca reabre acesso suspenso ou revogado;
+// - reembolso e chargeback fecham os vinculos daquela venda (pela transacao) e so entao decidem cada
+//   acesso: outra compra paga que o sustenta (outra transacao, de outra assinatura ou avulsa) -> fica;
+//   a venda tinha so estendido um acesso de outra origem com prazo -> o prazo volta; a venda abriu o
+//   acesso, ou e uma cobranca de assinatura -> revogado. Assinatura cancelada faz o mesmo pelos vinculos
+//   da assinatura (Hotmart: subscriber.code; Ticto: subscriptions[].id), suspendendo; a reativacao
+//   (Ticto: uncanceled) reabre o vinculo que o cancelamento fechou. Acesso que a equipe reabriu depois
+//   fica com a equipe;
 // - o que nao da para fazer (evento que nao muda acesso, produto sem codigo ligado, pacote em rascunho
 //   na compra, aluno sem conta) e IGNORADO com o motivo escrito, nunca erro;
 // - erro de verdade (payload sem e-mail, falha do banco) sobe para quem chamou marcar `failed`.
 
 import { findAccountByEmail, normalizeEmail } from "@/server/students/accounts";
-import { applyAccessAction, provisionStudentAccess } from "@/server/students/access";
+import { applyAccessAction, provisionStudentAccess, restoreEntitlements } from "@/server/students/access";
 import { accessStateOf, isAccessOpen, targetTypeForContentKind } from "@/server/students/model";
 import {
   fetchContentKinds,
@@ -32,8 +36,18 @@ import {
   type EntitlementRow,
   type StudentsDb
 } from "@/server/students/store";
-import { SALES_PROVIDER_LABELS, type SaleOutcome } from "./model";
-import { fetchSalesLinkByExternalId, hasClosingEventForTransaction, type SalesDb } from "./store";
+import { SALES_PROVIDER_LABELS, decideOnClosedGrant, type SaleOutcome } from "./model";
+import {
+  closeSaleGrants,
+  fetchSaleGrantsBySubscription,
+  fetchSaleGrantsByTransaction,
+  fetchSaleGrantsForEntitlements,
+  fetchSalesLinkByExternalId,
+  hasClosingEventForTransaction,
+  insertSaleGrants,
+  reopenSubscriptionCanceledGrants,
+  type SalesDb
+} from "./store";
 import type { NormalizedSaleEvent, SalesProvider } from "./types";
 
 export class SaleProcessingError extends Error {
@@ -68,6 +82,10 @@ function ignored(detail: string, extra: Partial<SaleProcessingResult> = {}): Sal
 
 function plural(count: number, singular: string, pluralForm: string) {
   return count === 1 ? `1 ${singular}` : `${count} ${pluralForm}`;
+}
+
+function isOpenRow(row: EntitlementRow, now: number) {
+  return isAccessOpen(accessStateOf({ endsAt: row.ends_at, now, startsAt: row.starts_at, status: row.status }));
 }
 
 async function resolveTarget(db: SalesDb, provider: SalesProvider, externalProductId: string | null): Promise<ResolvedTarget | null> {
@@ -125,6 +143,8 @@ export type ProcessSaleInput = {
   event: NormalizedSaleEvent;
   /** Origem publica do site (`https://host`) para os links dos e-mails. */
   siteOrigin: string | null;
+  /** Linha de webhook_events que esta sendo processada (vai para o vinculo da venda). */
+  webhookEventId?: string | null;
 };
 
 export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Promise<SaleProcessingResult> {
@@ -142,8 +162,8 @@ export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Pr
     return grantPurchase(db, { ...input, lines: saleLines(event) });
   }
 
-  // Reembolso, chargeback e cancelamento acham os acessos pela transacao (removeAccess): os produtos
-  // vendidos junto na mesma compra entram sozinhos, pelo sufixo `:<produto>` de source_event_id.
+  // Reembolso, chargeback e cancelamento fecham os vinculos da venda (sale_grants): os produtos vendidos
+  // junto na mesma compra tem vinculo da mesma transacao e entram sozinhos.
   return removeAccess(db, { ...input, target: await resolveTarget(db, event.provider, event.externalProductId) });
 }
 
@@ -278,6 +298,10 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
   }
 
   const account = await findAccountByEmail(studentsDb, email);
+  const now = Date.now();
+  // Retrato dos acessos ANTES da venda: diz se ela abriu ou so estendeu cada um (e que prazo havia).
+  const before = account ? await fetchEntitlements(studentsDb, { userId: account.id }) : [];
+  const beforeByTarget = new Map(before.map((row) => [row.target_id, row] as const));
 
   // Confirmacao de compra anterior (fim da garantia): libera so o que o aluno nunca teve; nunca reabre
   // acesso revogado pela equipe ou suspenso por assinatura cancelada.
@@ -324,6 +348,38 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
     studentsDb
   );
 
+  // Vinculo venda -> acesso: por produto liberado, se a venda abriu o acesso ou so o estendeu.
+  const after = await fetchEntitlements(studentsDb, { userId: result.id });
+  const grants = result.grantedProductIds.flatMap((productId) => {
+    const row = after.find((candidate) => candidate.target_id === productId);
+
+    if (!row) {
+      return [];
+    }
+
+    const previous = beforeByTarget.get(productId);
+    const wasOpen = previous ? isOpenRow(previous, now) : false;
+
+    return [
+      {
+        entitlementId: row.id,
+        opened: !wasOpen,
+        previousEndsAt: wasOpen ? (previous?.ends_at ?? null) : null,
+        productId,
+        provider: event.provider,
+        subscriptionCode: event.subscriptionCode,
+        transactionId: saleSourceEventId(event),
+        userId: result.id,
+        webhookEventId: input.webhookEventId ?? null
+      }
+    ];
+  });
+  await insertSaleGrants(db, grants);
+  // Reativacao da assinatura com a mesma transacao (Ticto: uncanceled): o vinculo que o cancelamento
+  // fechou volta a valer, para um reembolso depois achar o acesso reaberto. Reembolso e chargeback nunca
+  // reabrem (a compra ja desfeita nem chega aqui, por hasClosingEventForTransaction).
+  await reopenSubscriptionCanceledGrants(db, grants);
+
   const granted = result.grantedProductIds.length;
   const what = target.kind === "combo" ? `pacote ${target.name} (${plural(granted, "produto", "produtos")})` : plural(granted, "produto liberado", "produtos liberados");
   const accountNote = result.existingAccount ? "conta que já existia" : "conta nova";
@@ -361,12 +417,8 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
   const studentsDb = db as StudentsDb;
   const base: TargetRef = { comboId: target?.comboId ?? null, productId: target?.productId ?? null };
   const action = event.type === "subscription_canceled" ? "suspend" : "revoke";
-
-  // Reembolso e chargeback acham o acesso pela transacao: nao precisam do pacote estar ativo, nem de o
-  // codigo continuar ligado. So a assinatura cancelada (sem transacao) depende do produto ligado.
-  if (!event.transactionId && !target) {
-    return ignored(unlinkedMessage(event), base);
-  }
+  const closedBy = event.type === "subscription_canceled" ? "subscription_canceled" : event.type === "chargeback" ? "chargeback" : "refund";
+  const context = { actorId: null, source: "webhook" as const, sourceEventId: saleSourceEventId(event), sourceProvider: event.provider };
 
   if (!event.buyer.email) {
     throw new SaleProcessingError(`O evento ${event.rawType} veio sem um e-mail válido do comprador.`, base);
@@ -375,77 +427,136 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
   const email = normalizeEmail(event.buyer.email);
   const account = await findAccountByEmail(studentsDb, email);
 
-  if (!account) {
-    return ignored("Nenhum aluno com o e-mail da compra; nada a revogar.", base);
+  // Vinculos desta venda: pela transacao (reembolso, chargeback) ou pela assinatura (cancelamento). O
+  // cancelamento da Ticto tambem traz a transacao; com o codigo da assinatura, vale a assinatura inteira
+  // (todas as cobrancas), como na Hotmart.
+  const bySubscription = event.subscriptionCode && (event.type === "subscription_canceled" || !event.transactionId);
+  const saleGrants = bySubscription
+    ? await fetchSaleGrantsBySubscription(db, event.provider, event.subscriptionCode as string)
+    : event.transactionId
+      ? await fetchSaleGrantsByTransaction(db, event.provider, event.transactionId)
+      : [];
+  const openGrants = saleGrants.filter((grant) => grant.closed_at === null);
+
+  if (saleGrants.length === 0 && !account) {
+    return ignored(event.transactionId || event.subscriptionCode ? "Nenhuma venda registrada com essa compra e nenhum aluno com o e-mail dela; nada a revogar." : unlinkedMessage(event), base);
   }
 
-  const rows = await fetchEntitlements(studentsDb, { userId: account.id });
+  const userId = openGrants[0]?.user_id ?? saleGrants[0]?.user_id ?? account?.id ?? null;
+  const rows = userId ? await fetchEntitlements(studentsDb, { userId }) : [];
+  const rowById = new Map(rows.map((row) => [row.id, row] as const));
   const now = Date.now();
-  const targetIds = new Set(target?.productIds ?? []);
-  const fromThisSale = event.transactionId
-    ? rows.filter((row) => entitlementBelongsToSale(row, event))
-    : rows.filter((row) => row.source_provider === event.provider && targetIds.has(row.target_id));
-  const wantedStatus = action === "revoke" ? "revoked" : "suspended";
   const changed: string[] = [];
+  const restored: string[] = [];
+  const kept: string[] = [];
+  const reasons = new Set<string>();
 
-  for (const row of fromThisSale) {
-    if (row.status === wantedStatus) {
+  // Sem vinculo gravado (venda anterior ao registro, ou cancelamento sem codigo): acesso que a propria
+  // venda abriu, pelo source_event_id; no cancelamento sem codigo, os acessos desta plataforma no produto.
+  const legacyRows =
+    saleGrants.length > 0
+      ? []
+      : event.transactionId
+        ? rows.filter((row) => entitlementBelongsToSale(row, event))
+        : rows.filter((row) => row.source_provider === event.provider && (target?.productIds ?? []).includes(row.target_id));
+
+  if (openGrants.length > 0) {
+    await closeSaleGrants(db, openGrants.map((grant) => grant.id), closedBy);
+    const allGrants = await fetchSaleGrantsForEntitlements(db, Array.from(new Set(openGrants.map((grant) => grant.entitlement_id))));
+
+    for (const grant of openGrants) {
+      const row = rowById.get(grant.entitlement_id);
+
+      if (!row) {
+        continue;
+      }
+
+      // A venda tinha aberto o acesso, mas a equipe o reabriu depois (origem manual): fica com a equipe.
+      if (grant.opened && row.source_provider !== event.provider) {
+        kept.push(row.target_id);
+        reasons.add("reaberto pela equipe");
+        continue;
+      }
+
+      const decision = decideOnClosedGrant(grant, allGrants.filter((candidate) => candidate.entitlement_id === grant.entitlement_id));
+
+      if (decision === "keep_sustained") {
+        kept.push(row.target_id);
+        reasons.add("outra compra paga sustenta o acesso");
+        continue;
+      }
+
+      if (decision === "keep_other_origin") {
+        kept.push(row.target_id);
+        reasons.add("o acesso veio de outra origem (equipe ou outra compra)");
+        continue;
+      }
+
+      if (decision === "restore_deadline") {
+        // A venda tinha estendido um acesso de outra origem: o prazo anterior volta, o acesso continua.
+        await restoreEntitlements({ ...context, snapshots: [{ endsAt: grant.previous_ends_at, id: row.id, startsAt: row.starts_at, status: row.status }] }, studentsDb);
+        restored.push(row.target_id);
+        continue;
+      }
+
+      if (row.status === (action === "revoke" ? "revoked" : "suspended")) {
+        continue;
+      }
+
+      await applyAccessAction({ ...context, action, entitlementId: row.id, userId: row.user_id }, studentsDb);
+      changed.push(row.target_id);
+    }
+  }
+
+  for (const row of legacyRows) {
+    if (row.status === (action === "revoke" ? "revoked" : "suspended")) {
       continue;
     }
 
-    await applyAccessAction(
-      {
-        action,
-        actorId: null,
-        entitlementId: row.id,
-        source: "webhook",
-        sourceEventId: saleSourceEventId(event),
-        sourceProvider: event.provider,
-        userId: account.id
-      },
-      studentsDb
-    );
+    await applyAccessAction({ ...context, action, entitlementId: row.id, userId: row.user_id }, studentsDb);
     changed.push(row.target_id);
   }
 
-  if (changed.length === 0) {
-    const otherOriginOpen = rows.some(
-      (row) =>
-        !fromThisSale.includes(row) &&
-        (targetIds.size === 0 || targetIds.has(row.target_id)) &&
-        isAccessOpen(accessStateOf({ endsAt: row.ends_at, now, startsAt: row.starts_at, status: row.status }))
-    );
-    const detail = otherOriginOpen
-      ? "O acesso desse aluno veio de outra origem (equipe ou outra compra), não desta venda; nada mudou. Revise em Alunos se for o caso."
-      : fromThisSale.length > 0
-        ? "O acesso desta compra já estava fechado; nada mudou."
-        : "O aluno não tinha acesso desta compra; nada mudou.";
+  if (changed.length === 0 && restored.length === 0) {
+    if (kept.length > 0) {
+      return ignored(`Nada mudou: ${[...reasons].join("; ")}. Revise em Alunos se for o caso.`, { ...base, userId });
+    }
 
-    return ignored(detail, { ...base, userId: account.id });
+    const otherOriginOpen = rows.some((row) => (target ? target.productIds.includes(row.target_id) : true) && isOpenRow(row, now));
+
+    return ignored(
+      otherOriginOpen
+        ? "O acesso desse aluno veio de outra origem (equipe ou outra compra), não desta venda; nada mudou. Revise em Alunos se for o caso."
+        : saleGrants.length > 0 || legacyRows.length > 0
+          ? "O acesso desta compra já estava fechado; nada mudou."
+          : "O aluno não tinha acesso desta compra; nada mudou.",
+      { ...base, userId }
+    );
   }
 
   const verb = action === "revoke" ? "revogado" : "suspenso";
-  const what =
-    target?.kind === "combo"
-      ? `pacote ${target.name}: acesso ${verb} em ${plural(changed.length, "produto", "produtos")}`
-      : changed.length > 1
-        ? `acesso ${verb} em ${plural(changed.length, "produto", "produtos")}`
-        : `acesso ${verb}`;
+  const parts = [
+    ...(changed.length > 0 ? [changed.length > 1 ? `acesso ${verb} em ${plural(changed.length, "produto", "produtos")}` : `acesso ${verb}`] : []),
+    ...(restored.length > 0 ? [`prazo anterior devolvido em ${plural(restored.length, "produto", "produtos")} (a venda só tinha estendido um acesso de outra origem)`] : []),
+    ...(kept.length > 0 ? [`${plural(kept.length, "produto mantido", "produtos mantidos")} (${[...reasons].join("; ")})`] : [])
+  ];
+  const what = target?.kind === "combo" ? `pacote ${target.name}: ${parts.join("; ")}` : parts.join("; ");
+  const touched = [...changed, ...restored];
 
   return {
     comboId: target?.comboId ?? null,
     detail: `${what}.`,
-    outcome: action === "revoke" ? "access_revoked" : "access_suspended",
-    productId: target?.productId ?? (changed.length === 1 ? changed[0] : null),
-    productIds: changed,
-    userId: account.id
+    outcome: changed.length === 0 ? "access_restored" : action === "revoke" ? "access_revoked" : "access_suspended",
+    productId: target?.productId ?? (touched.length === 1 ? touched[0] : null),
+    productIds: touched,
+    userId
   };
 }
 
 /**
- * Id que vai para entitlements.source_event_id e para a chave do e-mail de compra (que ja leva o nome
- * da plataforma): a compra (transaction), estavel entre os eventos da mesma venda; sem ela, o id do
- * evento. A origem fica em source_provider.
+ * Id que vai para entitlements.source_event_id, para sale_grants.transaction_id e para a chave do e-mail
+ * de compra (que ja leva o nome da plataforma): a compra (transaction), estavel entre os eventos da mesma
+ * venda; sem ela, o id do evento. A origem fica em source_provider.
  */
 export function saleSourceEventId(event: NormalizedSaleEvent) {
   return event.transactionId ?? event.eventId;

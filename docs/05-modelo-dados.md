@@ -1345,6 +1345,21 @@ Indices unicos: (provider, external_product_id), (provider, product_id) e (provi
 
 Compra pela plataforma grava `source_provider` = `hotmart` ou `ticto` e `source_event_id` = id da compra (Hotmart: `purchase.transaction`; Ticto: `transaction.hash`; sem ele, o id do evento). Quando um evento libera mais de um produto (pacote), cada linha leva o sufixo `:<produto>` (indice unico `(user_id, source_event_id)`). `warranty_expire_date` chega normalizado (`warrantyEndsAt`) mas ainda nao e gravado: a coluna `warranty_ends_at` continua o ponto de extensao descrito em §entitlements.
 
+### sale_grants
+
+Migracao `202610170008_sale_grants.sql`. Vinculo venda -> acesso: um acesso (um por aluno e produto) pode ser sustentado por mais de uma venda, ou ter nascido da equipe e so ganhado prazo numa venda; `source_event_id` guarda uma origem so.
+
+- id uuid;
+- provider; transaction_id (a compra; igual a `entitlements.source_event_id` da venda, sem o sufixo do produto);
+- subscription_code (Hotmart: `subscriber.code`; Ticto: `subscriptions[0].id`; cobrancas da mesma assinatura nao sustentam o acesso umas das outras; o cancelamento fecha todos os vinculos da assinatura e a reativacao da Ticto, `uncanceled`, reabre o vinculo que ele fechou);
+- user_id -> auth.users (cascade); entitlement_id -> entitlements (cascade); product_id;
+- opened: true quando a venda abriu o acesso (nao existia ou estava fechado); false quando so estendeu um acesso aberto;
+- previous_ends_at: prazo que o acesso tinha antes (so quando estendeu), para o reembolso devolver;
+- webhook_event_id -> webhook_events (set null); closed_at, closed_by (refund, chargeback, subscription_canceled);
+- created_at.
+
+Indices: unico (provider, transaction_id, entitlement_id); (entitlement_id); (provider, subscription_code). So `service_role`. Nenhum dado pessoal (so ids). Regras de decisao em `decideOnClosedGrant` (`src/server/payments/model.ts`) e em docs/04. A mesma migracao acrescenta o resultado `access_restored` ("Prazo devolvido") em `webhook_events.outcome`.
+
 ### admin_access_origins(p_start, p_end, p_content_id)
 
 RPC `security invoker`, so `service_role`: acessos criados na janela por `source_provider` (hotmart, manual...), sem a equipe, com as mesmas regras de `admin_access_buckets`. Alimenta o rodape de "Novos acessos" no Hoje ("3 pela Hotmart · 2 pela equipe").

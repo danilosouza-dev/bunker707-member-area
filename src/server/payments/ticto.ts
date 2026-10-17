@@ -154,6 +154,16 @@ export function readTictoBumps(root: Record<string, unknown>, mainProductId: str
   return extras;
 }
 
+/**
+ * Codigo da assinatura: o `id` da primeira assinatura em `subscriptions` (o mesmo em todas as cobrancas
+ * dela e no cancelamento). Venda avulsa nao tem assinatura: null.
+ */
+export function readTictoSubscriptionCode(root: Record<string, unknown>): string | null {
+  const first = Array.isArray(root.subscriptions) ? asObject(root.subscriptions[0]) : null;
+
+  return shortString(first?.id, 120);
+}
+
 function sha256Hex(value: string) {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
@@ -214,6 +224,7 @@ export function normalizeTictoEvent(payload: unknown): NormalizedSaleEvent | nul
     rawType: parsed.status,
     // Pagamento novo (compra aprovada) ou assinatura reativada: os dois reabrem o acesso fechado.
     reopenClosedAccess: true,
+    subscriptionCode: readTictoSubscriptionCode(parsed.root),
     transactionId,
     type: EVENT_TYPES[parsed.status] ?? "other",
     warrantyEndsAt: warrantyEnd(purchasedAt, parsed.item?.refund_deadline)

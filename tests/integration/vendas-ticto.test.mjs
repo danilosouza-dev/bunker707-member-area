@@ -50,8 +50,9 @@ const TOKEN_HOTMART = "hottok-integracao-ticto-0123456789abcdef";
 const PREFIXO = "teste-ticto-";
 
 /** Payload ficticio no formato do webhook 2.0 da Ticto; a transacao leva o prefixo (vira o id do evento e a origem do acesso). */
-function payload({ bumps, email = COMPRADOR.email, nome = COMPRADOR.nome, produto = CODIGOS.curso, status = "authorized", statusDate = "2026-10-17 10:00:00", transacao }) {
+function payload({ assinatura, bumps, email = COMPRADOR.email, nome = COMPRADOR.nome, produto = CODIGOS.curso, status = "authorized", statusDate = "2026-10-17 10:00:00", transacao }) {
   return {
+    ...(assinatura ? { subscriptions: [{ canceled_at: status === "subscription_canceled" ? statusDate : null, id: Number(assinatura), interval: 1 }] } : {}),
     ...(bumps ? { bumps } : {}),
     commission_type: "producer",
     customer: { cpf: "00000000000", email, name: nome, phone: { ddd: "11", ddi: "55", number: "999990000" }, type: "person" },
@@ -107,6 +108,19 @@ async function acessosDe(email) {
   const acessos = unwrap(await db.from("entitlements").select("target_id,status,source_provider,source_event_id").eq("user_id", conta.id).order("target_id"), "Lendo acessos");
 
   return { acessos, conta };
+}
+
+/** Vinculos venda -> acesso (sale_grants) das vendas de teste da Ticto, por transacao. */
+async function vinculosDe(transacoes) {
+  return unwrap(
+    await db
+      .from("sale_grants")
+      .select("transaction_id,product_id,opened,subscription_code,closed_by")
+      .eq("provider", "ticto")
+      .in("transaction_id", transacoes.map((transacao) => `${PREFIXO}${transacao}`))
+      .order("created_at"),
+    "Lendo os vinculos das vendas"
+  );
 }
 
 async function filaDe(email) {
@@ -295,22 +309,47 @@ test("reembolso revoga o acesso ao curso e fica registrado como revogado", async
 
 /* ------------------------------------------------------------ Assinatura */
 
-test("assinatura cancelada suspende o acesso; assinatura reativada (uncanceled) devolve", async () => {
-  const compra = await post(payload({ email: ASSINANTE.email, nome: ASSINANTE.nome, transacao: "T0002" }));
-  assert.equal((await compra.json()).outcome, "access_granted");
+test("assinatura: renovacao vira outro vinculo da mesma assinatura; o cancelamento fecha a assinatura inteira e suspende; a reativacao reabre o vinculo e um reembolso depois revoga", async () => {
+  const comum = { assinatura: "5001", email: ASSINANTE.email, nome: ASSINANTE.nome };
 
-  const cancelada = await post(payload({ email: ASSINANTE.email, nome: ASSINANTE.nome, status: "subscription_canceled", statusDate: "2026-11-17 10:00:00", transacao: "T0002" }));
+  const compra = await post(payload({ ...comum, transacao: "T0002" }));
+  assert.equal((await compra.json()).outcome, "access_granted");
+  // Cobranca do mes seguinte: outra transacao da mesma assinatura (o acesso ja estava aberto).
+  const renovacao = await post(payload({ ...comum, statusDate: "2026-11-17 09:00:00", transacao: "T0003" }));
+  assert.equal((await renovacao.json()).outcome, "access_granted");
+  assert.deepEqual(
+    (await vinculosDe(["T0002", "T0003"])).map((row) => [row.transaction_id, row.opened, row.subscription_code, row.closed_by]),
+    [
+      [`${PREFIXO}T0002`, true, "5001", null],
+      [`${PREFIXO}T0003`, false, "5001", null]
+    ],
+    "a compra abriu o acesso; a renovacao so o manteve"
+  );
+
+  // O cancelamento da Ticto traz a transacao da ultima cobranca, mas fecha a assinatura inteira.
+  const cancelada = await post(payload({ ...comum, status: "subscription_canceled", statusDate: "2026-11-20 10:00:00", transacao: "T0003" }));
   assert.equal((await cancelada.json()).outcome, "access_suspended");
   assert.deepEqual((await acessosDe(ASSINANTE.email)).acessos.map((row) => [row.target_id, row.status]), [[curso.id, "suspended"]]);
+  assert.deepEqual((await vinculosDe(["T0002", "T0003"])).map((row) => row.closed_by), ["subscription_canceled", "subscription_canceled"]);
 
-  const reativada = await post(payload({ email: ASSINANTE.email, nome: ASSINANTE.nome, status: "uncanceled", statusDate: "2026-11-18 10:00:00", transacao: "T0002" }));
+  const reativada = await post(payload({ ...comum, status: "uncanceled", statusDate: "2026-11-21 10:00:00", transacao: "T0003" }));
   assert.equal((await reativada.json()).outcome, "access_granted");
   assert.deepEqual((await acessosDe(ASSINANTE.email)).acessos.map((row) => [row.target_id, row.status]), [[curso.id, "active"]]);
   assert.deepEqual(
-    (await filaDe(ASSINANTE.email)).map((row) => row.kind),
-    ["welcome", "purchase"],
-    "a reativacao e da mesma compra: a chave de idempotencia do e-mail de compra nao manda de novo"
+    (await vinculosDe(["T0003"])).map((row) => [row.opened, row.closed_by]),
+    [[true, null]],
+    "a reativacao reabre o vinculo da cobranca, agora como quem abriu o acesso"
   );
+
+  const fila = await filaDe(ASSINANTE.email);
+  assert.deepEqual(fila.slice(0, 2).map((row) => row.kind), ["welcome", "purchase"]);
+  assert.equal(new Set(fila.map((row) => row.idempotency_key)).size, fila.length, "nenhum e-mail repetido");
+
+  // Reembolso da cobranca reativada: o vinculo reaberto e achado e o acesso sai.
+  const reembolso = await post(payload({ ...comum, status: "refunded", statusDate: "2026-11-25 10:00:00", transacao: "T0003" }));
+  const reembolsoBody = await reembolso.json();
+  assert.equal(reembolsoBody.outcome, "access_revoked", JSON.stringify(reembolsoBody));
+  assert.deepEqual((await acessosDe(ASSINANTE.email)).acessos.map((row) => [row.target_id, row.status]), [[curso.id, "revoked"]]);
 });
 
 /* ------------------------------------------------------------ Order bump */
@@ -347,6 +386,15 @@ test("order bump: o produto vendido junto com codigo ligado e liberado na mesma 
   assert.match(linha.outcome_detail, /Inclui 1 produto vendido junto\./);
   assert.match(linha.outcome_detail, /8998 \(Ebook na Ticto\) da Ticto não está ligado a nenhum produto ou pacote da escola e não foi liberado/);
 
+  assert.deepEqual(
+    (await vinculosDe(["T-BUMP-0001"])).map((row) => [row.product_id, row.opened, row.closed_by]).sort((left, right) => left[0].localeCompare(right[0])),
+    [
+      [curso.id, true, null],
+      [cursoBloqueado.id, true, null]
+    ].sort((left, right) => left[0].localeCompare(right[0])),
+    "o principal e o bump viram vinculos da mesma venda"
+  );
+
   const reembolso = await post(payload({ bumps, email: COMPRADOR_BUMP.email, status: "refunded", statusDate: "2026-10-19 10:00:00", transacao: "T-BUMP-0001" }));
   assert.equal((await reembolso.json()).outcome, "access_revoked");
   assert.deepEqual(
@@ -354,6 +402,7 @@ test("order bump: o produto vendido junto com codigo ligado e liberado na mesma 
     [[curso.id, "revoked"], [cursoBloqueado.id, "revoked"]].sort((left, right) => left[0].localeCompare(right[0])),
     "o reembolso do pedido tira o principal e o bump"
   );
+  assert.deepEqual((await vinculosDe(["T-BUMP-0001"])).map((row) => row.closed_by), ["refund", "refund"], "os dois vinculos da venda fecham pelo reembolso");
 });
 
 test("order bump com o produto principal fora da escola: o bump ligado e liberado e o detalhe diz que o principal nao foi", async () => {

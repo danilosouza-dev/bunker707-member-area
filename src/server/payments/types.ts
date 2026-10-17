@@ -50,6 +50,11 @@ export type NormalizedSaleEvent = {
   /** Id da compra na plataforma (Hotmart: transaction). Estavel entre os eventos da mesma compra. */
   transactionId: string | null;
   /**
+   * Codigo da assinatura na plataforma (Hotmart: subscriber.code), igual em todas as cobrancas dela e
+   * no cancelamento. Cobrancas da mesma assinatura nao sustentam o acesso umas das outras.
+   */
+  subscriptionCode: string | null;
+  /**
    * So em `purchase_approved`: true quando e um pagamento novo (reabre acesso revogado ou suspenso);
    * false quando so confirma uma compra anterior (Hotmart: fim da garantia), que entao libera apenas
    * quem nunca teve acesso registrado ao produto.

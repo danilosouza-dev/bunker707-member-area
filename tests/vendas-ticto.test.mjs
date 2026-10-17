@@ -56,6 +56,7 @@ test("compra aprovada: evento normalizado com comprador, produto, transacao e da
     purchasedAt: "2026-10-17T12:00:06.000Z",
     rawType: "authorized",
     reopenClosedAccess: true,
+    subscriptionCode: null,
     transactionId: "TPC-TESTE-0001",
     type: "purchase_approved",
     warrantyEndsAt: "2026-10-24T12:00:06.000Z"
@@ -148,6 +149,17 @@ test("chave de idempotencia: o produto separa postback de bump; chave longa vira
     ticto.tictoEventKey({ anchor: "T1", payload: { token: "b" }, productId: null, status: "authorized", statusDate: null }),
     "o token nao entra no digest (a chave nao depende do segredo)"
   );
+});
+
+test("assinatura: o codigo e o id da primeira assinatura em `subscriptions`, igual nas cobrancas e no cancelamento; venda avulsa nao tem", () => {
+  const codigo = (subscriptions) => ticto.normalizeTictoEvent(compraAprovada({ subscriptions })).subscriptionCode;
+
+  assert.equal(codigo([{ id: 119, interval: 1 }]), "119");
+  assert.equal(codigo([{ id: "SUB-1" }, { id: "SUB-2" }]), "SUB-1");
+  assert.equal(codigo([]), null);
+  assert.equal(codigo(undefined), null);
+  assert.equal(codigo([{ interval: 1 }]), null);
+  assert.equal(ticto.normalizeTictoEvent(compraAprovada({ status: "subscription_canceled", subscriptions: [{ canceled_at: "2026-11-17 10:00:00", id: 119 }] })).subscriptionCode, "119");
 });
 
 test("comprador: e-mail invalido vira null; telefone em objeto, em texto, nos campos soltos ou ausente", () => {

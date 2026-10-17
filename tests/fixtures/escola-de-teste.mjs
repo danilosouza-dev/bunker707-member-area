@@ -628,6 +628,8 @@ export async function garantirPacoteDeTeste(db, codigoNaPlataforma, plataforma =
  */
 export async function limparVendasDeTeste(db, { prefixoDoEvento = "teste-", codigos = [] } = {}) {
   unwrap(await db.from("webhook_events").delete().like("external_event_id", `${prefixoDoEvento}%`), "Limpando vendas recebidas de teste");
+  // Vinculos venda -> acesso das compras ficticias (transacoes de teste comecam com HP-).
+  unwrap(await db.from("sale_grants").delete().like("transaction_id", "HP-%"), "Limpando vínculos de venda de teste");
 
   if (codigos.length > 0) {
     unwrap(await db.from("sales_product_links").delete().in("external_product_id", codigos), "Limpando codigos de teste (qualquer plataforma)");
