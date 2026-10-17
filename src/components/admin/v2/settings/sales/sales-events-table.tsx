@@ -22,7 +22,7 @@ import { ResponsiveTable, SectionCard } from "../kit";
 // no celular (ResponsiveTable).
 
 const EMPTY_TITLE = "Nenhuma venda recebida ainda";
-const EMPTY_DESCRIPTION = "Quando a Hotmart avisar uma compra, um reembolso ou um chargeback, ele aparece aqui com o que aconteceu com o acesso.";
+const EMPTY_DESCRIPTION = "Quando a Hotmart ou a Ticto avisar uma compra, um reembolso ou um chargeback, ele aparece aqui com o que aconteceu com o acesso.";
 
 function Outcome({ row }: { row: SalesEventListItem }) {
   const chip = saleOutcomeChip({ outcome: row.outcome, status: row.processingStatus });
@@ -32,6 +32,16 @@ function Outcome({ row }: { row: SalesEventListItem }) {
     <span className="flex min-w-0 flex-col items-start gap-1">
       <StatusChip tone={chip.tone}>{chip.label}</StatusChip>
       {detail ? <span className="line-clamp-3 text-xs leading-4 text-[var(--text-secondary)]">{detail}</span> : null}
+    </span>
+  );
+}
+
+/** Nome do evento e, embaixo, de qual plataforma veio (com duas conectadas, a origem precisa aparecer). */
+function EventCell({ row }: { row: SalesEventListItem }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="text-[var(--text-primary)]">{saleEventLabel(row.eventType, row.normalizedType)}</span>
+      <span className="text-xs leading-4 text-[var(--text-tertiary)]">{SALES_PROVIDER_LABELS[row.provider]}</span>
     </span>
   );
 }
@@ -107,7 +117,7 @@ export function SalesEventsTable({ events }: { events: readonly SalesEventListIt
 
   const columns: DataTableColumn<SalesEventListItem>[] = [
     { cell: (row) => <span className="whitespace-nowrap tabular-nums">{formatDateTime(row.receivedAt)}</span>, header: "Quando", id: "quando" },
-    { cell: (row) => <span className="text-[var(--text-primary)]">{saleEventLabel(row.eventType, row.normalizedType)}</span>, emphasis: true, header: "Evento", id: "evento" },
+    { cell: (row) => <EventCell row={row} />, emphasis: true, header: "Evento", id: "evento" },
     { cell: (row) => <Buyer row={row} />, header: "Comprador", id: "comprador" },
     { cell: (row) => <ProductCell row={row} />, className: "min-w-[200px]", header: "Produto", id: "produto" },
     { cell: (row) => <Outcome row={row} />, className: "min-w-[220px]", header: "Resultado", id: "resultado" },
@@ -135,7 +145,10 @@ export function SalesEventsTable({ events }: { events: readonly SalesEventListIt
         renderCard={(row) => (
           <div className="flex min-w-0 flex-col gap-2">
             <div className="flex items-start justify-between gap-3">
-              <span className="text-sm font-medium text-[var(--text-primary)]">{saleEventLabel(row.eventType, row.normalizedType)}</span>
+              <span className="text-sm font-medium text-[var(--text-primary)]">
+                {saleEventLabel(row.eventType, row.normalizedType)}
+                <span className="ml-1.5 text-xs font-normal text-[var(--text-tertiary)]">{SALES_PROVIDER_LABELS[row.provider]}</span>
+              </span>
               <span className="text-xs text-[var(--text-tertiary)] tabular-nums">{formatDateTime(row.receivedAt)}</span>
             </div>
             <div className="text-[13px] text-[var(--text-secondary)]">

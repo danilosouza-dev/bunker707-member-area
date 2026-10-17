@@ -87,10 +87,11 @@ test("formulario: ida e volta sem perder nada, turma padrao fica em branco", () 
     hotmartProductId: "",
     name: "Pacote IA",
     productIds: ["form-a", "curso-b"],
-    status: "active"
+    status: "active",
+    tictoProductId: ""
   });
   assert.equal(combos.comboToForm({ ...ia, cohortName: "Turma A" }).cohortName, "", "turma padrao aparece como placeholder");
-  assert.deepEqual(combos.comboToForm(null), { cohortName: "", description: "", hotmartProductId: "", name: "", productIds: [], status: "draft" });
+  assert.deepEqual(combos.comboToForm(null), { cohortName: "", description: "", hotmartProductId: "", name: "", productIds: [], status: "draft", tictoProductId: "" });
 
   const input = combos.formToComboInput({ ...form, name: "  Pacote IA 2 ", productIds: ["form-a", "form-a", "curso-b"] }, "combo-ia");
   assert.deepEqual(input, {
@@ -100,22 +101,32 @@ test("formulario: ida e volta sem perder nada, turma padrao fica em branco", () 
     id: "combo-ia",
     name: "Pacote IA 2",
     productIds: ["form-a", "curso-b"],
-    status: "active"
+    status: "active",
+    tictoProductId: ""
   });
 
-  // Codigo da Hotmart: vem da ligacao gravada e volta no pedido; vazio tira a ligacao (null no schema).
+  // Codigos da Hotmart e da Ticto: vem da ligacao gravada (uma por plataforma) e voltam no pedido; vazio
+  // tira a ligacao (null no schema). Linha sem `provider` (arranjo antigo) vale como Hotmart.
   const [ligado] = combos.mapComboRows({
     accents: [],
     combos: [comboRows[0]],
     items: itemRows,
     products: productRows,
-    salesLinks: [{ combo_id: comboRows[0].id, external_product_id: "7002" }]
+    salesLinks: [
+      { combo_id: comboRows[0].id, external_product_id: "7002" },
+      { combo_id: comboRows[0].id, external_product_id: "268", provider: "ticto" }
+    ]
   });
   assert.equal(ligado.hotmartProductId, "7002");
+  assert.equal(ligado.tictoProductId, "268");
   assert.equal(combos.comboToForm(ligado).hotmartProductId, "7002");
+  assert.equal(combos.comboToForm(ligado).tictoProductId, "268");
   assert.equal(comboSchema.parse(combos.formToComboInput(combos.comboToForm(ligado))).hotmartProductId, "7002");
+  assert.equal(comboSchema.parse(combos.formToComboInput(combos.comboToForm(ligado))).tictoProductId, "268");
   assert.equal(comboSchema.parse(combos.formToComboInput({ ...combos.comboToForm(ligado), hotmartProductId: " " })).hotmartProductId, null);
+  assert.equal(comboSchema.parse(combos.formToComboInput({ ...combos.comboToForm(ligado), tictoProductId: "" })).tictoProductId, null);
   assert.equal(comboSchema.safeParse({ hotmartProductId: "12 34", name: "IA", productIds: ["a"] }).success, false, "codigo com espaco e recusado");
+  assert.equal(comboSchema.safeParse({ name: "IA", productIds: ["a"], tictoProductId: "12 34" }).success, false, "codigo da Ticto com espaco tambem");
   assert.equal("id" in combos.formToComboInput(form), false, "pacote novo nao manda id");
   assert.equal(combos.isComboFormDirty(form, { ...form }), false);
   assert.equal(combos.isComboFormDirty(form, { ...form, status: "paused" }), true);

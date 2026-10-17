@@ -1305,10 +1305,10 @@ Guarda o evento bruto de plataformas externas (so depois do token conferido) e o
 
 - id uuid;
 - provider: hotmart, ticto, kiwify;
-- external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele);
-- event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED`);
+- external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele; Ticto, que nao manda id de evento: `transaction.hash:item.product_id:status:status_date`, ou `order.hash` no lugar da transacao; sem `status_date`, um digest do payload sem o token; acima de 200 caracteres, `sha256:<hex>` da chave inteira);
+- event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED` na Hotmart, `authorized` na Ticto);
 - normalized_type: purchase_approved, refund, chargeback, subscription_canceled, other;
-- payload jsonb (<= 512 KB; so os campos permitidos: envelope, produto, compra, assinatura e e-mail, nome e telefone do comprador; token, documento, endereco, afiliados e comissoes nunca entram; evento que nao muda acesso guarda so o envelope; exclusao do aluno deixa so o envelope com `anonymized: true`);
+- payload jsonb (<= 512 KB; so os campos permitidos: envelope, produto, compra, assinatura e e-mail, nome e telefone do comprador; token, documento, endereco, afiliados e comissoes nunca entram; evento que nao muda acesso guarda so o envelope; exclusao do aluno deixa so o envelope com `anonymized: true`; na Ticto, a mesma regra: envelope, pedido, transacao, produto e oferta, bumps, assinaturas e nome, e-mail e telefone do comprador, sem token, link de login direto, CPF/CNPJ, endereco, cartao, produtor, afiliados e comissoes);
 - transaction_id (migracao `202610170005`; id da compra na plataforma, igual em todos os eventos da mesma venda; indice (provider, transaction_id); a migracao preenche as linhas anteriores a ela a partir de `payload.data.purchase.transaction`);
 - processing_started_at (migracao `202610170005`; inicio do processamento ou do reprocesso; reenvio de evento preso em `received` reivindica a linha por update condicional nesta coluna);
 - signature_valid;
@@ -1336,15 +1336,15 @@ Codigo do produto na plataforma de venda ligado a um produto ou a um pacote da e
 
 - id uuid;
 - provider: hotmart, ticto, kiwify;
-- external_product_id (Hotmart: o numero do produto, `data.product.id`);
+- external_product_id (Hotmart: o numero do produto, `data.product.id`; Ticto: o id do produto, `item.product_id`, qualquer que seja a oferta; os order bumps da Ticto, `bumps[].product_id`, sao ligados do mesmo jeito, cada um ao proprio produto ou pacote);
 - product_id -> content_items (cascade) ou combo_id -> product_combos (cascade), exatamente um;
 - created_by, created_at, updated_at.
 
-Indices unicos: (provider, external_product_id), (provider, product_id) e (provider, combo_id), inteiros (nulos nao conflitam) para o upsert do servidor. Gravado por "Codigo do produto na Hotmart" em Produtos > Acesso e venda (`updateProductAccess`, `catalog.access`) e em Pacotes (`saveCombo`). Venda de pacote libera todos os produtos dele; reembolso ou chargeback de pacote tira todos (docs/17 §1.6.8); pacote em rascunho ou pausado nao libera nada.
+Indices unicos: (provider, external_product_id), (provider, product_id) e (provider, combo_id), inteiros (nulos nao conflitam) para o upsert do servidor. Gravado por "Codigo do produto na Hotmart" e "Codigo do produto na Ticto" em Produtos > Acesso e venda (`updateProductAccess`, `catalog.access`) e em Pacotes (`saveCombo`); um codigo por plataforma em cada alvo, e o mesmo numero pode existir nas duas plataformas. Codigo ja ligado a outro alvo e recusado no campo antes de gravar o produto ou o pacote (`assertSalesLinksAvailable`). Venda de pacote libera todos os produtos dele; reembolso ou chargeback de pacote tira todos (docs/17 §1.6.8); pacote em rascunho ou pausado nao libera nada.
 
 ### entitlements.source_event_id nas vendas
 
-Compra pela plataforma grava `source_provider = hotmart` e `source_event_id` = id da compra (`purchase.transaction`; sem ele, o id do evento). Quando um evento libera mais de um produto (pacote), cada linha leva o sufixo `:<produto>` (indice unico `(user_id, source_event_id)`). `warranty_expire_date` chega normalizado (`warrantyEndsAt`) mas ainda nao e gravado: a coluna `warranty_ends_at` continua o ponto de extensao descrito em §entitlements.
+Compra pela plataforma grava `source_provider` = `hotmart` ou `ticto` e `source_event_id` = id da compra (Hotmart: `purchase.transaction`; Ticto: `transaction.hash`; sem ele, o id do evento). Quando um evento libera mais de um produto (pacote), cada linha leva o sufixo `:<produto>` (indice unico `(user_id, source_event_id)`). `warranty_expire_date` chega normalizado (`warrantyEndsAt`) mas ainda nao e gravado: a coluna `warranty_ends_at` continua o ponto de extensao descrito em §entitlements.
 
 ### sale_grants
 
@@ -1352,7 +1352,7 @@ Migracao `202610170008_sale_grants.sql`. Vinculo venda -> acesso: um acesso (um 
 
 - id uuid;
 - provider; transaction_id (a compra; igual a `entitlements.source_event_id` da venda, sem o sufixo do produto);
-- subscription_code (Hotmart: `subscriber.code`; cobrancas da mesma assinatura nao sustentam o acesso umas das outras);
+- subscription_code (Hotmart: `subscriber.code`; Ticto: `subscriptions[0].id`; cobrancas da mesma assinatura nao sustentam o acesso umas das outras; o cancelamento fecha todos os vinculos da assinatura e a reativacao da Ticto, `uncanceled`, reabre o vinculo que ele fechou);
 - user_id -> auth.users (cascade); entitlement_id -> entitlements (cascade); product_id;
 - opened: true quando a venda abriu o acesso (nao existia ou estava fechado); false quando so estendeu um acesso aberto;
 - previous_ends_at: prazo que o acesso tinha antes (so quando estendeu), para o reembolso devolver;

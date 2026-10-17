@@ -81,7 +81,7 @@ export function buildSettingsHubEntries(
       title: "Tutor IA"
     },
     {
-      description: "Hotmart liberando o acesso sozinha quando a venda chega; Ticto e Kiwify em configuração. O que chegou aparece aqui.",
+      description: "Hotmart e Ticto liberando o acesso sozinhas quando a venda chega; Kiwify em configuração. O que chegou aparece aqui.",
       href: "/admin/configuracoes/vendas",
       icon: Tag,
       id: "vendas",

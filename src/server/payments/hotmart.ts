@@ -7,6 +7,7 @@
 // `X-HOTMART-HOTTOK` (nas versoes antigas tambem no corpo, em `hottok`). A conferencia e em tempo
 // constante contra o segredo salvo em integration_settings, nunca contra variavel de ambiente.
 
+import { asObject, normalizeBuyerEmail, pick, shortString } from "./adapter-helpers";
 import { isSalesSecretHash, isValidSalesToken } from "./secret";
 import {
   type NormalizedSaleEvent,
@@ -15,6 +16,9 @@ import {
   type SaleBuyer,
   type SaleVerification
 } from "./types";
+
+// Ajudante comum aos adaptadores (adapter-helpers.ts), reexportado para quem ja o importava daqui.
+export { normalizeBuyerEmail };
 
 export const HOTMART_HOTTOK_HEADER = "x-hotmart-hottok";
 export const HOTMART_MAX_PAYLOAD_BYTES = 256 * 1024;
@@ -41,19 +45,6 @@ const EVENT_TYPES: Record<string, NormalizedSaleType> = {
 
 const MAX_ID_LENGTH = 200;
 const MAX_NAME_LENGTH = 200;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function shortString(value: unknown, maximumLength: number) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  return typeof value === "string" && value.trim().length > 0 ? value.trim().slice(0, maximumLength) : null;
-}
 
 /** Datas da Hotmart vem em epoch de milissegundos; aceitamos tambem texto ISO. */
 export function hotmartDateToIso(value: unknown): string | null {
@@ -70,12 +61,6 @@ export function hotmartDateToIso(value: unknown): string | null {
   }
 
   return null;
-}
-
-export function normalizeBuyerEmail(value: unknown): string | null {
-  const email = typeof value === "string" ? value.trim().toLowerCase() : "";
-
-  return email.length > 0 && email.length <= 320 && EMAIL_PATTERN.test(email) ? email : null;
 }
 
 function buyerPhone(source: Record<string, unknown> | null): string | null {
@@ -190,29 +175,6 @@ export function verifyHotmartRequest(input: { headers: Headers; payload: unknown
   }
 
   return isValidSalesToken(token, input.secretHash) ? { ok: true } : { ok: false, reason: "mismatch" };
-}
-
-/** Copia so das chaves listadas de um objeto (valores escalares ou objetos tratados por `nested`). */
-function pick(source: Record<string, unknown> | null, keys: readonly string[], nested: Record<string, (value: unknown) => unknown> = {}) {
-  if (!source) {
-    return undefined;
-  }
-
-  const result: Record<string, unknown> = {};
-
-  for (const key of keys) {
-    if (!(key in source)) {
-      continue;
-    }
-
-    const value = nested[key] ? nested[key](source[key]) : source[key];
-
-    if (value !== undefined && (value === null || typeof value !== "object" || Object.keys(value as object).length > 0)) {
-      result[key] = value;
-    }
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 const BUYER_KEYS = ["email", "name", "checkout_phone", "checkout_phone_code", "code"] as const;

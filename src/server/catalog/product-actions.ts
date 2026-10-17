@@ -10,7 +10,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
 import { can, isActionScoped } from "@/server/auth/roles";
 import { invalidateCatalog } from "@/server/catalog/cache";
-import { assertSalesLinkAvailable, setSalesLink } from "@/server/payments/store";
+import { assertSalesLinksAvailable, setSalesLink } from "@/server/payments/store";
 import { deleteContentItem } from "@/server/db/platform-store";
 import { addCreatedCourseToScope, assertCreatorScopeRoom } from "./creator-scope";
 import { CatalogFieldError, CatalogNotFoundError, CatalogRuleError } from "./errors";
@@ -305,11 +305,9 @@ export async function updateProductAccess(input: UpdateProductAccessInput): Prom
     const db = catalogDb();
     const current = await requireProductRow(data.id, db);
 
-    // Codigo da Hotmart ja usado por outro alvo: recusa ANTES de gravar a linha do produto (senao o resto
-    // do formulario ficaria gravado e o proximo Salvar cairia em "versao velha").
-    if (data.hotmartProductId) {
-      await assertSalesLinkAvailable(db, { externalProductId: data.hotmartProductId, productId: data.id, provider: "hotmart" });
-    }
+    // Codigo da Hotmart ou da Ticto ja usado por outro alvo: recusa ANTES de gravar a linha do produto
+    // (senao o resto do formulario ficaria gravado e o proximo Salvar cairia em "versao velha").
+    await assertSalesLinksAvailable(db, { codes: { hotmart: data.hotmartProductId, ticto: data.tictoProductId }, productId: data.id });
 
     const audience = data.audience ?? audienceFromColumns({ accessModel: current.access_model, listing: current.listing });
     const purchaseUrl = data.purchaseUrl !== undefined ? data.purchaseUrl : current.purchase_url?.trim() || null;
@@ -343,10 +341,14 @@ export async function updateProductAccess(input: UpdateProductAccessInput): Prom
       table: "content_items"
     });
 
-    // Codigo na Hotmart (sales_product_links): depois da linha do produto, para uma versao velha (409)
-    // nao trocar a ligacao. Codigo repetido vira erro do campo.
+    // Codigo na Hotmart e na Ticto (sales_product_links): depois da linha do produto, para uma versao
+    // velha (409) nao trocar a ligacao. Codigo repetido vira erro do campo da plataforma.
     if (data.hotmartProductId !== undefined) {
       await setSalesLink(db, { createdBy: user.id, externalProductId: data.hotmartProductId, productId: data.id, provider: "hotmart" });
+    }
+
+    if (data.tictoProductId !== undefined) {
+      await setSalesLink(db, { createdBy: user.id, externalProductId: data.tictoProductId, productId: data.id, provider: "ticto" });
     }
 
     invalidateCatalog({ from: "action" });

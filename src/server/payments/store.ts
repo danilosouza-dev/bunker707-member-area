@@ -10,7 +10,7 @@ import "server-only";
 
 import { PENDING_MIGRATION_MESSAGE, isMissingSchemaObjectError, toDbError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
-import { STUCK_RECEIVED_MINUTES, type IntegrationStatus, type SaleOutcome, type WebhookProcessingStatus, pendingAttentionMessage } from "./model";
+import { SALES_CODE_FIELDS, STUCK_RECEIVED_MINUTES, type IntegrationStatus, type SaleOutcome, type WebhookProcessingStatus, pendingAttentionMessage } from "./model";
 import type { NormalizedSaleType, SalesProvider } from "./types";
 
 export type SalesDb = ReturnType<typeof getSupabaseAdminClient>;
@@ -477,6 +477,24 @@ export async function insertSaleGrants(db: SalesDb, grants: readonly SaleGrantIn
   failOnError(error, "Registrar o vínculo da venda com o acesso");
 }
 
+/**
+ * Reativacao de assinatura (Ticto: uncanceled) com a mesma transacao da compra: o vinculo que o
+ * cancelamento fechou volta a valer, com o que a venda fez agora (abriu de novo ou so estendeu). So
+ * reabre o que foi fechado por `subscription_canceled`: reembolso e chargeback sao definitivos.
+ */
+export async function reopenSubscriptionCanceledGrants(db: SalesDb, grants: readonly SaleGrantInsert[]) {
+  for (const grant of grants) {
+    const { error } = await db
+      .from("sale_grants")
+      .update({ closed_at: null, closed_by: null, opened: grant.opened, previous_ends_at: grant.previousEndsAt, webhook_event_id: grant.webhookEventId })
+      .eq("provider", grant.provider)
+      .eq("transaction_id", grant.transactionId)
+      .eq("entitlement_id", grant.entitlementId)
+      .eq("closed_by", "subscription_canceled");
+    failOnError(error, "Reabrir o vínculo da venda com o acesso");
+  }
+}
+
 export async function fetchSaleGrantsByTransaction(db: SalesDb, provider: SalesProvider, transactionId: string): Promise<SaleGrantRow[]> {
   const { data, error } = await db.from("sale_grants").select(SALE_GRANT_COLUMNS).eq("provider", provider).eq("transaction_id", transactionId).order("created_at");
   failOnError(error, "Vínculos da venda");
@@ -593,16 +611,16 @@ export class SalesLinkConflictError extends Error {
   issues: { message: string; path: string[] }[];
   status = 400 as const;
 
-  constructor(message: string, field = "hotmartProductId") {
+  constructor(message: string, fields: string | readonly string[]) {
     super(message);
     this.name = "ZodError";
-    this.issues = [{ message, path: [field] }];
+    this.issues = (typeof fields === "string" ? [fields] : fields).map((field) => ({ message, path: [field] }));
   }
 }
 
-export type SalesLinkTarget = { comboId: string; productId?: undefined } | { comboId?: undefined; productId: string };
+const SALES_LINK_CONFLICT_MESSAGE = "Esse código já está ligado a outro produto ou pacote. Cada código da plataforma libera um alvo só.";
 
-const LINK_CONFLICT_MESSAGE = "Esse código já está ligado a outro produto ou pacote. Cada código da plataforma libera um alvo só.";
+export type SalesLinkTarget = { comboId: string; productId?: undefined } | { comboId?: undefined; productId: string };
 
 /** Banco sem a tabela de ligacoes: o campo nao pode ser gravado ainda (422 com a frase da migracao). */
 class SalesLinksUnavailableError extends Error {
@@ -615,43 +633,44 @@ class SalesLinksUnavailableError extends Error {
 }
 
 /**
- * Antes de gravar o produto ou criar o pacote: o codigo ja esta em OUTRO alvo? Lanca o erro do campo
- * sem ter escrito nada (a linha do produto nao fica gravada com o resto do formulario, e o pacote novo
- * nao nasce sem codigo). Codigo vazio nao precisa de nada.
+ * Antes de gravar o produto ou criar o pacote: algum dos codigos informados (um por plataforma) ja esta
+ * em OUTRO alvo? Recusa no campo daquela plataforma sem ter escrito nada (a linha do produto nao fica
+ * gravada com o resto do formulario, e o pacote novo nao nasce sem codigo). Codigo vazio ou ausente nao
+ * e conferido. O indice unico continua sendo a garantia final em setSalesLink.
  */
-export async function assertSalesLinkAvailable(
+export async function assertSalesLinksAvailable(
   db: SalesDb,
-  input: SalesLinkTarget & { externalProductId: string | null | undefined; provider: SalesProvider }
+  input: SalesLinkTarget & { codes: Partial<Record<SalesProvider, string | null | undefined>> }
 ) {
-  const external = input.externalProductId?.trim() ?? "";
+  const wanted = (Object.entries(input.codes) as [SalesProvider, string | null | undefined][])
+    .map(([provider, code]) => [provider, code?.trim() ?? ""] as const)
+    .filter(([, code]) => code.length > 0);
+  const conflicts: string[] = [];
 
-  if (!external) {
-    return;
+  for (const [provider, external] of wanted) {
+    const { data, error } = await db
+      .from("sales_product_links")
+      .select("product_id,combo_id")
+      .eq("provider", provider)
+      .eq("external_product_id", external)
+      .maybeSingle();
+
+    if (error && isMissingSchemaObjectError(error)) {
+      throw new SalesLinksUnavailableError();
+    }
+
+    failOnError(error, "Código da plataforma");
+
+    const row = (data ?? null) as { combo_id: string | null; product_id: string | null } | null;
+    const sameTarget = row && (input.productId ? row.product_id === input.productId : row.combo_id === input.comboId);
+
+    if (row && !sameTarget) {
+      conflicts.push(SALES_CODE_FIELDS[provider]);
+    }
   }
 
-  const { data, error } = await db
-    .from("sales_product_links")
-    .select("product_id,combo_id")
-    .eq("provider", input.provider)
-    .eq("external_product_id", external)
-    .maybeSingle();
-
-  if (error && isMissingSchemaObjectError(error)) {
-    throw new SalesLinksUnavailableError();
-  }
-
-  failOnError(error, "Código da plataforma");
-
-  const row = (data ?? null) as { combo_id: string | null; product_id: string | null } | null;
-
-  if (!row) {
-    return;
-  }
-
-  const sameTarget = input.productId ? row.product_id === input.productId : row.combo_id === input.comboId;
-
-  if (!sameTarget) {
-    throw new SalesLinkConflictError(LINK_CONFLICT_MESSAGE);
+  if (conflicts.length > 0) {
+    throw new SalesLinkConflictError(SALES_LINK_CONFLICT_MESSAGE, conflicts);
   }
 }
 
@@ -693,7 +712,7 @@ export async function setSalesLink(
     );
 
   if (error?.code === "23505") {
-    throw new SalesLinkConflictError(LINK_CONFLICT_MESSAGE);
+    throw new SalesLinkConflictError(SALES_LINK_CONFLICT_MESSAGE, SALES_CODE_FIELDS[input.provider]);
   }
 
   if (error && isMissingSchemaObjectError(error)) {

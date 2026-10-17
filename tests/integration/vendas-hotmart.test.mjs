@@ -252,7 +252,8 @@ test("so o dono guarda o token: analista recebe 403; no banco fica so o hash e a
   assert.ok(hotmart.secretUpdatedAt, "a tela recebe a data em que o token foi guardado");
   assert.equal("secret" in hotmart, false, "a tela nunca recebe o token nem o hash");
   assert.match(hotmart.originWarning ?? "", /NEXT_PUBLIC_SITE_URL não está definida/, "sem a variavel, a tela avisa que o endereco e o da pagina");
-  assert.deepEqual(data.providers.filter((card) => !card.supported).map((card) => card.provider), ["ticto", "kiwify"]);
+  assert.deepEqual(data.providers.filter((card) => !card.supported).map((card) => card.provider), ["kiwify"]);
+  assert.equal(data.providers.find((card) => card.provider === "ticto").status, "not_configured", "a Ticto e conectavel, mas ainda nao foi conectada aqui");
 });
 
 test("token errado ou ausente responde 401 e nao grava o evento; mandar o hash tambem nao vale", async () => {
@@ -271,7 +272,9 @@ test("codigo da Hotmart no Acesso e venda; codigo repetido e recusado no campo A
 
   const saved = await productActions.updateProductAccess({ expectedUpdatedAt: access.header.updatedAt, hotmartProductId: CODIGOS.curso, id: curso.id });
   assert.equal(saved.ok, true, JSON.stringify(saved));
-  assert.equal((await catalogQueries.getProductAccess(curso.id)).hotmartProductId, CODIGOS.curso);
+  const gravado = await catalogQueries.getProductAccess(curso.id);
+  assert.equal(gravado.hotmartProductId, CODIGOS.curso);
+  assert.equal(gravado.tictoProductId, null, "o codigo da Hotmart nao mexe no da Ticto");
 
   const outro = await catalogQueries.getProductAccess(cursoBloqueado.id);
   const repetido = await productActions.updateProductAccess({ expectedUpdatedAt: outro.header.updatedAt, hotmartProductId: CODIGOS.curso, id: cursoBloqueado.id, purchaseLabel: "Quero" });

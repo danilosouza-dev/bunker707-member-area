@@ -198,6 +198,8 @@ export const updateProductAccessSchema = z.object({
   purchaseLabel: z.string().trim().max(40, "Use no máximo 40 caracteres.").nullish(),
   purchaseTarget: z.enum(["same_tab", "new_tab"]).optional(),
   purchaseUrl: purchaseUrlSchema.optional(),
+  /** Codigo do produto na Ticto (sales_product_links); "" ou null tira a ligacao. */
+  tictoProductId: externalProductIdSchema.optional(),
   release: releasePhraseSchema.optional()
 });
 
@@ -402,7 +404,9 @@ export const comboSchema = z.object({
   id: catalogIdSchema.optional(),
   name: z.string().trim().min(2, "Dê um nome ao pacote.").max(80, "Use no máximo 80 caracteres."),
   productIds: z.array(catalogIdSchema).min(1, "Escolha pelo menos um produto.").max(50),
-  status: z.enum(["active", "draft", "paused"]).default("draft")
+  status: z.enum(["active", "draft", "paused"]).default("draft"),
+  /** Codigo do pacote na Ticto (sales_product_links); "" ou null tira a ligacao. */
+  tictoProductId: externalProductIdSchema.optional()
 });
 
 export const deleteComboSchema = z.object({ id: catalogIdSchema });

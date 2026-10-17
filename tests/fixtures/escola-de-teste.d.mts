@@ -35,8 +35,9 @@ export const ESCOLA_DE_TESTE: {
 export const PACOTE_DE_TESTE: { id: string; nome: string; produtos: string[] };
 
 export function desconectarVendas(db: unknown): Promise<void>;
+export function ligarProdutoNaPlataforma(db: unknown, input: { codigo: string; plataforma?: "hotmart" | "ticto" | "kiwify"; produtoId: string }): Promise<void>;
 export function ligarProdutoNaHotmart(db: unknown, input: { codigo: string; produtoId: string }): Promise<void>;
-export function garantirPacoteDeTeste(db: unknown, codigoHotmart: string): Promise<void>;
+export function garantirPacoteDeTeste(db: unknown, codigoNaPlataforma: string, plataforma?: "hotmart" | "ticto" | "kiwify"): Promise<void>;
 export function limparVendasDeTeste(db: unknown, input?: { codigos?: string[]; prefixoDoEvento?: string }): Promise<void>;
 
 export function usuarioDeTeste(conta: ContaDeTesteCriada): {

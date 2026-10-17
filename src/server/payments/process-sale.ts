@@ -7,21 +7,26 @@ import "server-only";
 //
 // Resultados:
 // - compra aprovada: conta criada ou encontrada pelo e-mail e produto(s) liberados sem prazo (pacote =
-//   todos os produtos dele, de uma vez, num e-mail so). Cada (venda, acesso) vira um vinculo em
+//   todos os produtos dele, de uma vez, num e-mail so; produtos vendidos junto no mesmo pedido, os order
+//   bumps da Ticto, entram na mesma liberacao quando o codigo deles esta ligado, e o que nao esta ligado
+//   fica escrito no detalhe sem bloquear o resto). Cada (venda, acesso) vira um vinculo em
 //   sale_grants dizendo se a venda ABRIU o acesso ou so ESTENDEU um acesso aberto (e que prazo ele
 //   tinha). Sem a tabela de vinculos no banco nenhuma venda libera acesso (erro, nao liberacao sem
 //   registro). Acesso que ja existia ganha o vinculo ANTES da liberacao; acesso novo, logo depois; o
 //   reprocesso de uma falha no meio reconhece o acesso que a propria venda abriu (source_event_id) e
 //   grava o vinculo certo. Compra que ja tem reembolso ou chargeback registrado nao libera (reprocesso
 //   ou reenvio fora de ordem). Confirmacao de compra anterior (Hotmart: fim da garantia) so libera para
-//   quem nunca teve acesso ao produto: nunca reabre acesso suspenso ou revogado;
+//   quem nunca teve acesso ao produto: nunca reabre acesso suspenso ou revogado. Reativacao de assinatura
+//   com a mesma transacao (Ticto: uncanceled) reabre o vinculo que o cancelamento fechou, para ele voltar
+//   a sustentar o acesso;
 // - reembolso, chargeback e assinatura cancelada decidem cada acesso olhando o HISTORICO INTEIRO dos
 //   vinculos dele (decideEntitlementAfterSale em model.ts), nao so o vinculo que esta sendo desfeito:
 //   assim a ordem dos reembolsos nao muda o resultado. Outra compra paga sustenta -> fica; o vinculo
 //   mais antigo abriu o acesso -> revoga (ou suspende, no cancelamento); so estendeu um acesso de outra
 //   origem com prazo -> o prazo volta; sem prazo -> fica; a equipe ja revogou, suspendeu ou reabriu o
 //   acesso depois (vinculos fechados por `admin`) -> fica com a equipe. Primeiro age, e so depois fecha
-//   os vinculos da venda: uma falha no meio deixa tudo para o reprocesso refazer;
+//   os vinculos da venda: uma falha no meio deixa tudo para o reprocesso refazer. O cancelamento com o
+//   codigo da assinatura desfaz a assinatura inteira, mesmo quando tambem traz a transacao (Ticto);
 // - o que nao da para fazer (evento que nao muda acesso, produto sem codigo ligado, pacote em rascunho
 //   na compra, aluno sem conta, assinatura sem cobranca registrada) e IGNORADO com o motivo escrito;
 // - erro de verdade (payload sem e-mail, falha do banco, banco sem a tabela de vinculos) sobe para quem
@@ -49,11 +54,12 @@ import {
   fetchSalesLinkByExternalId,
   hasClosingEventForTransaction,
   insertSaleGrants,
+  reopenSubscriptionCanceledGrants,
   type SaleGrantInsert,
   type SaleGrantRow,
   type SalesDb
 } from "./store";
-import type { NormalizedSaleEvent } from "./types";
+import type { NormalizedSaleEvent, SalesProvider } from "./types";
 
 export class SaleProcessingError extends Error {
   /** Alvo ja resolvido quando a regra falhou, para a lista mostrar o produto mesmo no erro. */
@@ -93,12 +99,12 @@ function isOpenRow(row: EntitlementRow, now: number) {
   return isAccessOpen(accessStateOf({ endsAt: row.ends_at, now, startsAt: row.starts_at, status: row.status }));
 }
 
-async function resolveTarget(db: SalesDb, event: NormalizedSaleEvent): Promise<ResolvedTarget | null> {
-  if (!event.externalProductId) {
+async function resolveTarget(db: SalesDb, provider: SalesProvider, externalProductId: string | null): Promise<ResolvedTarget | null> {
+  if (!externalProductId) {
     return null;
   }
 
-  const link = await fetchSalesLinkByExternalId(db, event.provider, event.externalProductId);
+  const link = await fetchSalesLinkByExternalId(db, provider, externalProductId);
 
   if (!link) {
     return null;
@@ -163,13 +169,105 @@ export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Pr
     return ignored("O evento não informa qual produto foi vendido.");
   }
 
-  const target = await resolveTarget(db, event);
-
   if (event.type === "purchase_approved") {
-    return target ? grantPurchase(db, { ...input, target }) : ignored(unlinkedMessage(event));
+    return grantPurchase(db, { ...input, lines: saleLines(event) });
   }
 
-  return removeAccess(db, { ...input, target });
+  // Reembolso, chargeback e cancelamento decidem pelos vinculos da venda (sale_grants): os produtos
+  // vendidos junto na mesma compra tem vinculo da mesma transacao e entram sozinhos.
+  return removeAccess(db, { ...input, target: await resolveTarget(db, event.provider, event.externalProductId) });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Codigos do pedido: o produto principal e os vendidos junto (order bumps)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Um codigo vendido no evento: o produto principal ou um produto vendido junto (order bump). */
+type SaleLine = { externalProductId: string; externalProductName: string | null; extra: boolean };
+
+type LineResolution =
+  | { contents: { id: string; kind: string }[]; extra: boolean; ok: true; productIds: string[]; target: ResolvedTarget }
+  /** `reason`: o motivo quando nada foi liberado; `note`: a frase quando outro produto do pedido foi. */
+  | { base: TargetRef | null; note: string; ok: false; reason: string };
+
+function saleLines(event: NormalizedSaleEvent): SaleLine[] {
+  const lines: SaleLine[] = event.externalProductId
+    ? [{ externalProductId: event.externalProductId, externalProductName: event.externalProductName, extra: false }]
+    : [];
+
+  for (const extra of event.extraProducts ?? []) {
+    if (!lines.some((line) => line.externalProductId === extra.externalProductId)) {
+      lines.push({ ...extra, extra: true });
+    }
+  }
+
+  return lines;
+}
+
+function skippedLine(base: TargetRef | null, reason: string, note = reason): LineResolution {
+  return { base, note, ok: false, reason };
+}
+
+/**
+ * Resolve um codigo vendido em sales_product_links e confere que o alvo libera algum produto do
+ * catalogo (so na compra: pacote pausado ou em rascunho nao libera).
+ */
+async function resolveLine(db: SalesDb, event: NormalizedSaleEvent, line: SaleLine): Promise<LineResolution> {
+  const providerLabel = SALES_PROVIDER_LABELS[event.provider];
+  const code = `${line.externalProductId}${line.externalProductName ? ` (${line.externalProductName})` : ""}`;
+  const target = await resolveTarget(db, event.provider, line.externalProductId);
+
+  if (!target) {
+    return line.extra
+      ? skippedLine(null, `O produto vendido junto ${code} da ${providerLabel} não está ligado a nenhum produto ou pacote da escola e não foi liberado.`)
+      : skippedLine(
+          null,
+          unlinkedMessage(event),
+          `O produto principal ${code} da ${providerLabel} não está ligado a nenhum produto ou pacote da escola e não foi liberado. Esta venda já foi processada pelo produto vendido junto: depois de ligar o código, libere o principal à mão em Alunos.`
+        );
+  }
+
+  const base: TargetRef = { comboId: target.comboId, productId: target.productId };
+
+  if (target.kind === "combo" && target.status !== "active") {
+    const situation = target.status === "paused" ? "pausado" : "em rascunho";
+
+    return line.extra
+      ? skippedLine(base, `O pacote ${target.name}, vendido junto, está ${situation} e não foi liberado.`)
+      : skippedLine(base, `O pacote ${target.name} está ${situation}: vendas dele não liberam acesso até ser ativado.`);
+  }
+
+  if (target.productIds.length === 0) {
+    return line.extra
+      ? skippedLine(base, `O pacote ${target.kind === "combo" ? target.name : ""}, vendido junto, não tem produtos.`)
+      : skippedLine(base, `O pacote ${target.kind === "combo" ? target.name : ""} não tem produtos.`);
+  }
+
+  const contents = await fetchContentKinds(db as StudentsDb, target.productIds);
+  const productIds = target.productIds.filter((id) => contents.some((content) => content.id === id));
+
+  if (productIds.length === 0) {
+    return line.extra
+      ? skippedLine(base, `O produto vendido junto ${code} está ligado a um produto que não existe mais no catálogo.`)
+      : skippedLine(base, "O produto ligado a esse código não existe mais no catálogo.");
+  }
+
+  return { contents, extra: line.extra, ok: true, productIds, target };
+}
+
+/**
+ * Pedido com produtos vendidos junto (order bumps): o detalhe diz quantos entraram e o que ficou de
+ * fora. Pedido de um produto so fica igual (Hotmart e Ticto sem bump).
+ */
+function withSaleNotes(result: SaleProcessingResult, input: { notes: string[]; released: number }): SaleProcessingResult {
+  if (input.notes.length === 0 && input.released <= 1) {
+    return result;
+  }
+
+  const included = input.released > 1 ? ` Inclui ${plural(input.released - 1, "produto vendido junto", "produtos vendidos junto")}.` : "";
+  const notes = input.notes.length > 0 ? ` ${input.notes.join(" ")}` : "";
+
+  return { ...result, detail: `${result.detail}${included}${notes}` };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -201,28 +299,36 @@ function saleGrantFor(
   };
 }
 
-async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { target: ResolvedTarget }): Promise<SaleProcessingResult> {
-  const { event, target } = input;
+async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: SaleLine[] }): Promise<SaleProcessingResult> {
+  const { event } = input;
   const studentsDb = db as StudentsDb;
+
+  // Cada codigo do pedido (o principal e os vendidos junto) libera o proprio alvo; o que nao da para
+  // liberar fica escrito no detalhe e nao bloqueia o resto. So a compra e barrada pela situacao do
+  // pacote: reembolso e chargeback passam sempre (removeAccess).
+  const resolutions: LineResolution[] = [];
+
+  for (const line of input.lines) {
+    resolutions.push(await resolveLine(db, event, line));
+  }
+
+  const released = resolutions.filter((item): item is Extract<LineResolution, { ok: true }> => item.ok);
+  const skipped = resolutions.filter((item): item is Extract<LineResolution, { ok: false }> => !item.ok);
+
+  if (released.length === 0) {
+    return ignored(skipped.map((item) => item.reason).join(" "), skipped[0]?.base ?? {});
+  }
+
+  const target = released[0].target;
   const base: TargetRef = { comboId: target.comboId, productId: target.productId };
-
-  // So a compra e barrada pela situacao do pacote: reembolso e chargeback passam sempre (removeAccess).
-  if (target.kind === "combo" && target.status !== "active") {
-    const situation = target.status === "paused" ? "pausado" : "em rascunho";
-
-    return ignored(`O pacote ${target.name} está ${situation}: vendas dele não liberam acesso até ser ativado.`, base);
-  }
-
-  if (target.productIds.length === 0) {
-    return ignored(`O pacote ${target.kind === "combo" ? target.name : ""} não tem produtos.`, base);
-  }
-
-  const contents = await fetchContentKinds(studentsDb, target.productIds);
-  let productIds = target.productIds.filter((id) => contents.some((content) => content.id === id));
-
-  if (productIds.length === 0) {
-    return ignored("O produto ligado a esse código não existe mais no catálogo.", base);
-  }
+  const contents = Array.from(new Map(released.flatMap((item) => item.contents).map((content) => [content.id, content])).values());
+  let productIds = Array.from(new Set(released.flatMap((item) => item.productIds)));
+  const saleNotes = { notes: skipped.map((item) => item.note), released: released.length };
+  // So os produtos do item principal herdam o codigo da assinatura; o vendido junto (order bump) e
+  // cobranca unica: o cancelamento da assinatura nao o suspende (reembolso e chargeback da compra, sim).
+  const subscriptionProductIds = new Set(released.filter((item) => !item.extra).flatMap((item) => item.productIds));
+  const withLineSubscription = (grant: SaleGrantInsert): SaleGrantInsert =>
+    subscriptionProductIds.has(grant.productId) ? grant : { ...grant, subscriptionCode: null };
 
   if (!event.buyer.email) {
     throw new SaleProcessingError(`O evento ${event.rawType} veio sem um e-mail válido do comprador.`, base);
@@ -266,6 +372,58 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { target: Re
     productIds = withoutAccess;
   }
 
+  // Reativacao de assinatura (Ticto: uncanceled) nao e compra nova: so reabre o que o cancelamento DESTA
+  // transacao fechou. Acesso que a equipe revogou, suspendeu ou reabriu depois (vinculo fechado por
+  // admin), ou sem cancelamento registrado aqui, fica como esta, com o motivo escrito.
+  if (event.reactivatesSubscription) {
+    // Assinatura com reembolso ou chargeback em qualquer cobranca (vinculo fechado por eles, ou o evento
+    // registrado): a compra foi desfeita na plataforma e a reativacao nao a refaz.
+    if (event.subscriptionCode) {
+      const subscriptionGrants = await fetchSaleGrantsBySubscription(db, event.provider, event.subscriptionCode);
+      const transactions = Array.from(new Set(subscriptionGrants.map((grant) => grant.transaction_id)));
+      const undone =
+        subscriptionGrants.some((grant) => grant.closed_by === "refund" || grant.closed_by === "chargeback") ||
+        (await Promise.all(transactions.map((transactionId) => hasClosingEventForTransaction(db, event.provider, transactionId)))).some(Boolean);
+
+      if (undone) {
+        return ignored(
+          `A assinatura ${event.subscriptionCode} já tem reembolso ou chargeback registrado na ${providerLabel}; a reativação não reabre o acesso. Revise em Alunos se for o caso.`,
+          { ...base, userId: account?.id ?? null }
+        );
+      }
+    }
+
+    const grantsOfSale = await fetchSaleGrantsByTransaction(db, event.provider, saleSourceEventId(event));
+    const reopenable: string[] = [];
+    const reasons = new Set<string>();
+
+    for (const productId of productIds) {
+      const previous = beforeByTarget.get(productId);
+      const grant = previous ? grantsOfSale.find((candidate) => candidate.entitlement_id === previous.id) : undefined;
+
+      // Vinculo ja reaberto por uma tentativa anterior desta reativacao que falhou antes de liberar (o
+      // acesso continua fechado): o reprocesso termina o que ela comecou.
+      const reopenedBefore = grant !== undefined && grant.closed_at === null && previous !== undefined && !isOpenRow(previous, now);
+
+      if (grant?.closed_by === "subscription_canceled" || reopenedBefore) {
+        reopenable.push(productId);
+        continue;
+      }
+
+      reasons.add(grant?.closed_by === "admin" ? "a equipe já decidiu sobre esse acesso depois do cancelamento" : "não há cancelamento desta assinatura registrado aqui para esse produto");
+    }
+
+    if (reopenable.length === 0) {
+      return ignored(`A reativação da assinatura não reabre o acesso: ${[...reasons].join("; ")}. Revise em Alunos se for o caso.`, { ...base, userId: account?.id ?? null });
+    }
+
+    if (reopenable.length < productIds.length) {
+      saleNotes.notes.push(`${plural(productIds.length - reopenable.length, "produto ficou", "produtos ficaram")} como estava: ${[...reasons].join("; ")}.`);
+    }
+
+    productIds = reopenable;
+  }
+
   const webhookEventId = input.webhookEventId ?? null;
 
   // Acesso que ja existe (aberto ou fechado) ganha o vinculo ANTES da liberacao: se a liberacao falhar no
@@ -274,9 +432,14 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { target: Re
     const existingGrants = productIds.flatMap((productId) => {
       const previous = beforeByTarget.get(productId);
 
-      return previous ? [saleGrantFor(event, { entitlementId: previous.id, now, previous, productId, userId: account.id, webhookEventId })] : [];
+      return previous ? [withLineSubscription(saleGrantFor(event, { entitlementId: previous.id, now, previous, productId, userId: account.id, webhookEventId }))] : [];
     });
     await insertSaleGrants(db, existingGrants);
+    // Reativacao da assinatura com a mesma transacao (Ticto: uncanceled): o vinculo que o cancelamento
+    // fechou volta a valer, para sustentar o acesso de novo (ex.: um reembolso de OUTRA compra depois
+    // nao tira o acesso que a assinatura reativada paga). Fechado pela equipe (admin), por reembolso ou
+    // por chargeback nao reabre.
+    await reopenSubscriptionCanceledGrants(db, existingGrants);
   }
 
   // Conta que ja existe: nome e telefone so preenchem o que estiver vazio (a venda nao apaga o cadastro).
@@ -309,7 +472,7 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { target: Re
     const row = after.find((candidate) => candidate.target_id === productId);
 
     return row && !beforeByTarget.has(productId)
-      ? [saleGrantFor(event, { entitlementId: row.id, now, previous: null, productId, userId: result.id, webhookEventId })]
+      ? [withLineSubscription(saleGrantFor(event, { entitlementId: row.id, now, previous: null, productId, userId: result.id, webhookEventId }))]
       : [];
   });
   await insertSaleGrants(db, newGrants);
@@ -318,14 +481,17 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { target: Re
   const what = target.kind === "combo" ? `pacote ${target.name} (${plural(granted, "produto", "produtos")})` : plural(granted, "produto liberado", "produtos liberados");
   const accountNote = result.existingAccount ? "conta que já existia" : "conta nova";
 
-  return {
-    comboId: target.comboId,
-    detail: `${what}; ${accountNote}.`,
-    outcome: "access_granted",
-    productId: target.productId,
-    productIds: result.grantedProductIds,
-    userId: result.id
-  };
+  return withSaleNotes(
+    {
+      comboId: target.comboId,
+      detail: `${what}; ${accountNote}.`,
+      outcome: "access_granted",
+      productId: target.productId,
+      productIds: result.grantedProductIds,
+      userId: result.id
+    },
+    saleNotes
+  );
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -384,16 +550,20 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
   const account = await findAccountByEmail(studentsDb, email);
 
   // Vinculos desta venda: pela transacao (reembolso, chargeback) ou pela assinatura (cancelamento), em
-  // qualquer situacao: um vinculo ja fechado numa tentativa que falhou no meio ainda manda no acesso.
-  const saleGrants: SaleGrantRow[] = event.transactionId
-    ? await fetchSaleGrantsByTransaction(db, event.provider, event.transactionId)
-    : event.subscriptionCode
+  // qualquer situacao: um vinculo ja fechado numa tentativa que falhou no meio ainda manda no acesso. O
+  // cancelamento da Ticto traz a transacao da ultima cobranca e o codigo da assinatura: vale a assinatura
+  // inteira (todas as cobrancas); sem cobranca registrada com o codigo, a transacao.
+  const bySubscription =
+    event.subscriptionCode && (event.type === "subscription_canceled" || !event.transactionId)
       ? await fetchSaleGrantsBySubscription(db, event.provider, event.subscriptionCode)
       : [];
+  const saleGrants: SaleGrantRow[] =
+    bySubscription.length > 0 ? bySubscription : event.transactionId ? await fetchSaleGrantsByTransaction(db, event.provider, event.transactionId) : [];
 
-  // Cancelamento com o codigo da assinatura, mas nenhuma cobranca dela registrada: nao adivinha pelo
-  // produto (poderia suspender um acesso pago a parte); quem sabe de qual venda se trata e a plataforma.
-  if (saleGrants.length === 0 && event.type === "subscription_canceled" && event.subscriptionCode) {
+  // Cancelamento com o codigo da assinatura e sem a transacao, mas nenhuma cobranca dela registrada: nao
+  // adivinha pelo produto (poderia suspender um acesso pago a parte); quem sabe de qual venda se trata e a
+  // plataforma. Com a transacao (Ticto), o acesso que nasceu dela ainda e achado (legacyRows).
+  if (saleGrants.length === 0 && event.type === "subscription_canceled" && event.subscriptionCode && !event.transactionId) {
     return ignored(`Nenhuma cobrança da assinatura ${event.subscriptionCode} está registrada aqui; nada a suspender. Revise em Alunos se for o caso.`, { ...base, userId: account?.id ?? null });
   }
 
@@ -404,12 +574,16 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
   const userId = saleGrants[0]?.user_id ?? account?.id ?? null;
   const userRows = userId ? await fetchEntitlements(studentsDb, { userId }) : [];
   const grantEntitlementIds = Array.from(new Set(saleGrants.map((grant) => grant.entitlement_id)));
+  // Cancelamento pela assinatura que tambem traz a transacao (Ticto): os acessos com vinculo desta
+  // transacao fora da assinatura (o order bump, cobranca unica) nao sao "acesso sem vinculo" e ficam.
+  const transactionGrants = bySubscription.length > 0 && event.transactionId ? await fetchSaleGrantsByTransaction(db, event.provider, event.transactionId) : [];
+  const knownEntitlementIds = new Set([...grantEntitlementIds, ...transactionGrants.map((grant) => grant.entitlement_id)]);
 
   // Acessos desta venda sem vinculo gravado: com a compra, o que nasceu dela (source_event_id); no
   // cancelamento sem codigo, os acessos desta plataforma nos produtos do pacote ou produto cancelado.
   const legacyRows = userRows.filter(
     (row) =>
-      !grantEntitlementIds.includes(row.id) &&
+      !knownEntitlementIds.has(row.id) &&
       (event.transactionId ? entitlementBelongsToSale(row, event) : row.source_provider === event.provider && (target?.productIds ?? []).includes(row.target_id))
   );
 
@@ -461,7 +635,9 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
       continue;
     }
 
-    if (row.status === closedStatus) {
+    // Ja fechado do jeito pedido, ou revogado (reembolso, chargeback, equipe): um cancelamento de
+    // assinatura depois nao rebaixa a revogacao para suspensao.
+    if (row.status === closedStatus || (action === "suspend" && row.status === "revoked")) {
       continue;
     }
 

@@ -10,7 +10,7 @@ import { runAdminAction } from "@/server/actions/run-action";
 import { invalidateCatalog } from "@/server/catalog/cache";
 import { isMissingSchemaObjectError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
-import { assertSalesLinkAvailable, setSalesLink } from "@/server/payments/store";
+import { assertSalesLinksAvailable, setSalesLink } from "@/server/payments/store";
 import { getCombo } from "./combos";
 import { CatalogNotFoundError, CatalogRuleError } from "./errors";
 import { makeCatalogId } from "./model";
@@ -88,11 +88,9 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
     // uma falha no meio nao deixa o pacote sem produtos.
     const comboId = input.id ?? makeCatalogId("combo", input.name);
 
-    // Codigo da Hotmart ja usado por outro alvo: recusa ANTES de criar ou gravar o pacote (senao o pacote
-    // novo nasceria sem codigo e o proximo Salvar criaria outro).
-    if (input.hotmartProductId) {
-      await assertSalesLinkAvailable(db, { comboId, externalProductId: input.hotmartProductId, provider: "hotmart" });
-    }
+    // Codigo da Hotmart ou da Ticto ja usado por outro alvo: recusa ANTES de criar ou gravar o pacote
+    // (senao o pacote novo nasceria sem codigo e o proximo Salvar criaria outro).
+    await assertSalesLinksAvailable(db, { codes: { hotmart: input.hotmartProductId, ticto: input.tictoProductId }, comboId });
     const fields = {
       cohort_name: input.cohortName || DEFAULT_COHORT_NAME,
       description: input.description,
@@ -126,12 +124,21 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
 
     failOnError(error, "Pacote");
 
-    // Codigo na Hotmart (sales_product_links): fora da transacao do pacote, depois dela. Codigo
-    // repetido vira erro do campo; "" tira a ligacao. Se falhar num pacote recem-criado (corrida entre
-    // dois salvamentos), o pacote e desfeito para nao sobrar um duplicado sem codigo.
-    if (input.hotmartProductId !== undefined) {
+    // Codigo na Hotmart e na Ticto (sales_product_links): fora da transacao do pacote, depois dela.
+    // Codigo repetido vira erro do campo da plataforma; "" tira a ligacao. Se falhar num pacote
+    // recem-criado (corrida entre dois salvamentos), o pacote e desfeito para nao sobrar um duplicado.
+    const codes = [
+      { externalProductId: input.hotmartProductId, provider: "hotmart" as const },
+      { externalProductId: input.tictoProductId, provider: "ticto" as const }
+    ];
+
+    for (const code of codes) {
+      if (code.externalProductId === undefined) {
+        continue;
+      }
+
       try {
-        await setSalesLink(db, { comboId, createdBy: user.id, externalProductId: input.hotmartProductId, provider: "hotmart" });
+        await setSalesLink(db, { comboId, createdBy: user.id, externalProductId: code.externalProductId, provider: code.provider });
       } catch (linkError) {
         if (!input.id) {
           await db.from("product_combos").delete().eq("id", comboId);

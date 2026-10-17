@@ -422,21 +422,23 @@ export const getProductAccess: GetProductAccess = async (productId) => {
     loadCohorts(productId),
     loadCombosFor(productId),
     countActiveAccess(productId),
-    fetchSalesLinksFor(catalogDb(), { productIds: [productId], provider: "hotmart" })
+    fetchSalesLinksFor(catalogDb(), { productIds: [productId] })
   ]);
+  const codeOn = (provider: "hotmart" | "ticto") => salesLinks.find((link) => link.provider === provider)?.external_product_id ?? null;
 
   return {
     audience: header.audience,
     cohorts,
     combos,
     header,
-    hotmartProductId: salesLinks[0]?.external_product_id ?? null,
+    hotmartProductId: codeOn("hotmart"),
     maxStudents: typeof row.max_students === "number" && row.max_students > 0 ? row.max_students : null,
     purchaseLabel: customPurchaseLabelOf(row.purchase_label),
     purchaseTarget: row.purchase_target === "new_tab" ? "new_tab" : "same_tab",
     purchaseUrl: row.purchase_url?.trim() || null,
     release: releaseRuleToPhrase(row.release_rule),
-    studentsWithAccess
+    studentsWithAccess,
+    tictoProductId: codeOn("ticto")
   };
 };
 

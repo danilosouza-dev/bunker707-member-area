@@ -1,11 +1,13 @@
-// Registro dos adaptadores das plataformas de venda. Modulo puro. Ticto e Kiwify entram aqui quando
-// existirem; ate la, a tela mostra as duas como "Em configuracao" (docs/17 §1.10).
+// Registro dos adaptadores das plataformas de venda. Modulo puro. A Kiwify entra aqui quando existir;
+// ate la, a tela mostra a Kiwify como "Em configuracao" (docs/17 §1.10).
 
 import { hotmartAdapter } from "./hotmart";
+import { tictoAdapter } from "./ticto";
 import type { PaymentProviderAdapter, SalesProvider } from "./types";
 
 const ADAPTERS: Partial<Record<SalesProvider, PaymentProviderAdapter>> = {
-  hotmart: hotmartAdapter
+  hotmart: hotmartAdapter,
+  ticto: tictoAdapter
 };
 
 export function getPaymentAdapter(provider: SalesProvider): PaymentProviderAdapter | null {

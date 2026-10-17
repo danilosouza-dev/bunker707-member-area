@@ -145,12 +145,14 @@ export type AccessDraft = {
   purchaseTarget: "same_tab" | "new_tab";
   purchaseUrl: string;
   release: ReleasePhrase;
+  /** Codigo do produto na Ticto; "" = sem ligacao. */
+  tictoProductId: string;
 };
 
 export function accessDraftFrom(access: Pick<
   ProductAccess,
   "audience" | "maxStudents" | "purchaseLabel" | "purchaseTarget" | "purchaseUrl" | "release"
-> & Partial<Pick<ProductAccess, "hotmartProductId">>): AccessDraft {
+> & Partial<Pick<ProductAccess, "hotmartProductId" | "tictoProductId">>): AccessDraft {
   return {
     audience: access.audience,
     hotmartProductId: access.hotmartProductId ?? "",
@@ -158,7 +160,8 @@ export function accessDraftFrom(access: Pick<
     purchaseLabel: access.purchaseLabel ?? "",
     purchaseTarget: access.purchaseTarget,
     purchaseUrl: access.purchaseUrl ?? "",
-    release: access.release
+    release: access.release,
+    tictoProductId: access.tictoProductId ?? ""
   };
 }
 
@@ -216,6 +219,7 @@ export type AccessPatch = {
   purchaseTarget?: "same_tab" | "new_tab";
   purchaseUrl?: string | null;
   release?: ReleasePhrase;
+  tictoProductId?: string | null;
 };
 
 export function buildAccessPatch(initial: AccessDraft, draft: AccessDraft): AccessPatch {
@@ -223,6 +227,7 @@ export function buildAccessPatch(initial: AccessDraft, draft: AccessDraft): Acce
 
   if (draft.audience !== initial.audience) patch.audience = draft.audience;
   if (draft.hotmartProductId.trim() !== initial.hotmartProductId.trim()) patch.hotmartProductId = emptyToNull(draft.hotmartProductId);
+  if (draft.tictoProductId.trim() !== initial.tictoProductId.trim()) patch.tictoProductId = emptyToNull(draft.tictoProductId);
   if (draft.maxStudents.trim() !== initial.maxStudents.trim()) patch.maxStudents = parseMaxStudents(draft.maxStudents);
   if (draft.purchaseLabel.trim() !== initial.purchaseLabel.trim()) patch.purchaseLabel = emptyToNull(draft.purchaseLabel);
   if (draft.purchaseTarget !== initial.purchaseTarget) patch.purchaseTarget = draft.purchaseTarget;

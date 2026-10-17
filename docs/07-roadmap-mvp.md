@@ -98,8 +98,8 @@ Objetivo: liberar acesso com venda terceirizada.
 Entregas:
 
 - webhook manual/fake para testes;
-- adaptador Hotmart;
-- adaptador Ticto;
+- adaptador Hotmart (feito em 17/10/2026, `src/server/payments/hotmart.ts`);
+- adaptador Ticto (feito em 17/10/2026, `src/server/payments/ticto.ts`);
 - adaptador TikTok/Kiwify quando entrar no fluxo comercial;
 - mapeamento de provider para produto ou combo interno;
 - idempotencia;

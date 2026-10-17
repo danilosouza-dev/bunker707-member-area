@@ -265,6 +265,8 @@ export type ProductAccess = {
   purchaseUrl: string | null;
   release: ReleasePhrase;
   studentsWithAccess: number;
+  /** Codigo do produto na Ticto; mesma regra, para vendas pela Ticto. */
+  tictoProductId: string | null;
 };
 
 export type ComboListItem = {
@@ -276,6 +278,8 @@ export type ComboListItem = {
   name: string;
   products: { accent: ProductAccent; coverUrl: string | null; id: string; title: string }[];
   status: "active" | "draft" | "paused";
+  /** Codigo do pacote na Ticto; mesma regra, para vendas pela Ticto. */
+  tictoProductId: string | null;
   updatedAt: string;
 };
 
