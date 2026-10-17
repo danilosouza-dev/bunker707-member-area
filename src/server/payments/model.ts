@@ -76,6 +76,13 @@ export function maskEmail(email: string | null | undefined) {
   return `${value.slice(0, 1)}***${value.slice(at)}`;
 }
 
+export const ANONYMIZED_BUYER_LABEL = "Dados apagados (12 meses)";
+
+/** Coluna Comprador: o e-mail mascarado ou, depois da retencao de 12 meses, o aviso de que os dados sairam. */
+export function buyerLabel(input: { anonymizedAt: string | null; buyerEmail: string | null }) {
+  return input.anonymizedAt ? ANONYMIZED_BUYER_LABEL : maskEmail(input.buyerEmail);
+}
+
 export const SALE_TYPE_LABELS: Record<NormalizedSaleType, string> = {
   chargeback: "Chargeback",
   other: "Outro evento",
@@ -145,9 +152,12 @@ export function saleOutcomeChip(input: { outcome: SaleOutcome | null; status: We
   }
 }
 
-/** Reprocessar vale para o que falhou e para o que foi ignorado (ex.: produto ligado depois da venda). */
-export function canReprocessSaleEvent(status: WebhookProcessingStatus) {
-  return status === "failed" || status === "ignored";
+/**
+ * Reprocessar vale para o que falhou e para o que foi ignorado (ex.: produto ligado depois da venda),
+ * enquanto o payload existir: depois da retencao de 12 meses (`anonymized_at`) nao ha o que reler.
+ */
+export function canReprocessSaleEvent(status: WebhookProcessingStatus, anonymizedAt: string | null = null) {
+  return anonymizedAt === null && (status === "failed" || status === "ignored");
 }
 
 /** Texto do rodape do cartao de cada plataforma. */

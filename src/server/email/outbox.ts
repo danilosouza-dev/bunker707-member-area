@@ -25,14 +25,17 @@ import { outboxPatchFor, type ResendWebhookEvent } from "./webhook-events";
 export type EmailOutboxDb = SupabaseClient;
 
 export const EMAIL_OUTBOX_COLUMNS =
-  "id,kind,user_id,to_email,subject,html,text,idempotency_key,status,attempts,next_attempt_at,last_error,provider,provider_message_id,sent_at,delivered_at,bounced_at,metadata,created_at,updated_at";
+  "id,kind,user_id,to_email,subject,html,text,idempotency_key,status,attempts,next_attempt_at,last_error,provider,provider_message_id,sent_at,delivered_at,bounced_at,metadata,created_at,updated_at,anonymized_at";
 
 export type EmailOutboxRow = {
+  /** Marcada pela retencao (migracao 202610170004): to_email, html, text e last_error ja sairam. */
+  anonymized_at: string | null;
   attempts: number;
   bounced_at: string | null;
   created_at: string;
   delivered_at: string | null;
-  html: string;
+  /** Nulo so em linha anonimizada pela retencao (check no banco). */
+  html: string | null;
   id: string;
   idempotency_key: string;
   kind: string;
@@ -45,7 +48,8 @@ export type EmailOutboxRow = {
   status: EmailOutboxStatus;
   subject: string;
   text: string | null;
-  to_email: string;
+  /** Nulo so em linha anonimizada pela retencao (check no banco). */
+  to_email: string | null;
   updated_at: string;
   user_id: string | null;
 };
@@ -284,6 +288,14 @@ export async function processEmailOutbox(input: ProcessEmailOutboxInput): Promis
     }
 
     if (!(await claimEmail(db, row.id))) {
+      continue;
+    }
+
+    // Sem destinatario ou sem corpo so existe linha anonimizada pela retencao, que ja sai da fila como
+    // failed; se uma aparecer mesmo assim, encerra com o motivo em vez de mandar um e-mail vazio.
+    if (row.to_email === null || row.html === null) {
+      await updateOutbox(db, row.id, { last_error: "Sem destinatário ou sem conteúdo: linha anonimizada pela retenção.", status: "failed" satisfies EmailOutboxStatus });
+      result.failed += 1;
       continue;
     }
 

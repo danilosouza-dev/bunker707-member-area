@@ -229,7 +229,7 @@ Combos devem ser tratados como pacotes internos: o adapter normaliza a venda ext
 
 ### Implementado (17/10/2026): Hotmart, webhook 2.0
 
-Modulo `src/server/payments/` (migracao `202610170003_sales_webhooks.sql`; tela em `docs/17` §1.10). Ticto e Kiwify entram pelo mesmo caminho quando tiverem adaptador; ate la aparecem como "Em configuracao".
+Modulo `src/server/payments/` (migracao `202610170003_sales_webhooks.sql`; tela em `docs/17` §1.10). Ticto e Kiwify entram pelo mesmo caminho quando tiverem adaptador; ate la aparecem como "Em configuracao". Retencao: 12 meses depois, `public.prune_personal_data()` (migracao `202610170004`) tira payload, e-mail e erro de `webhook_events`; a linha fica para historico e idempotencia e `reprocessWebhookEvent` recusa com 409 (`docs/06`, secao LGPD).
 
 - `types.ts`: contrato `PaymentProviderAdapter` (`verify`, `normalize`, `redact`, `handledEvents`, `maxPayloadBytes`) e o evento normalizado `{ provider, eventId, type: purchase_approved | refund | chargeback | subscription_canceled | other, rawType, buyer { email, name, phone }, externalProductId, externalProductName, transactionId, purchasedAt, warrantyEndsAt, occurredAt }`;
 - `hotmart.ts` (puro): le o envelope 2.0 (`id`, `event`, `creation_date` em epoch ms, `data.product/buyer/purchase/subscriber`), traduz `PURCHASE_APPROVED` e `PURCHASE_COMPLETE` para `purchase_approved`, `PURCHASE_REFUNDED` para `refund`, `PURCHASE_CHARGEBACK` para `chargeback`, `SUBSCRIPTION_CANCELLATION` para `subscription_canceled` e o resto para `other`; confere o hottok (cabecalho `X-HOTMART-HOTTOK`, ou `hottok` no corpo) em tempo constante (SHA-256 dos dois lados + `timingSafeEqual`) contra o segredo salvo em `integration_settings`, nunca contra variavel de ambiente; `redact` tira o `hottok` do payload guardado;
@@ -472,7 +472,7 @@ Regras para um job novo no registro:
 - recomputos pesados (por exemplo `student_facts`) rodam a noite em agendamento proprio, nunca por minuto no banco primario;
 - dead-letter apos 3 falhas e retentativas com `attempts` ficam com o job que precisar delas (a coluna ja existe em `job_runs`).
 
-Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias.
+Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias. Na mesma linha, `public.prune_personal_data()` roda as 06:23 UTC (`bunker707-personal-data-prune`, migracao `202610170004`) e anonimiza `webhook_events` (12 meses) e `email_outbox` (90/180 dias) e apaga `email_webhook_events` (90 dias): regras em `docs/06`, secao LGPD.
 
 Configuracao por ambiente (passos completos no topo de `supabase/migrations/202610100001_jobs_cron.sql`):
 
@@ -517,6 +517,9 @@ pg_cron tick (* * * * *) -> POST /api/jobs/tick -> job email-outbox
 Resend -> POST /api/webhooks/resend (assinatura Svix com RESEND_WEBHOOK_SECRET)
   -> email_webhook_events (payload bruto, unico por svix-id)
   -> email_outbox: delivered_at | bounced | complained | failed
+pg_cron 'bunker707-personal-data-prune' (06:23 UTC) -> public.prune_personal_data()
+  -> email_outbox: 90 dias (enviado) / 180 dias (falha, bounce, fila) sem destinatario, HTML, texto e erro
+  -> email_webhook_events: apagados depois de 90 dias
 ```
 
 Codigo:

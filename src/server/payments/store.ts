@@ -132,9 +132,11 @@ export async function markIntegrationSync(db: SalesDb, provider: SalesProvider, 
  * ---------------------------------------------------------------------------------------------- */
 
 export const WEBHOOK_EVENT_COLUMNS =
-  "id,provider,external_event_id,event_type,normalized_type,signature_valid,processing_status,outcome,outcome_detail,buyer_email,external_product_id,external_product_name,product_id,combo_id,user_id,received_at,processed_at,error_message";
+  "id,provider,external_event_id,event_type,normalized_type,signature_valid,processing_status,outcome,outcome_detail,buyer_email,external_product_id,external_product_name,product_id,combo_id,user_id,received_at,processed_at,error_message,anonymized_at";
 
 export type WebhookEventRow = {
+  /** Marcada pela retencao de 12 meses: sem payload, sem e-mail, sem Reprocessar (migracao 202610170004). */
+  anonymized_at: string | null;
   buyer_email: string | null;
   combo_id: string | null;
   error_message: string | null;

@@ -35,6 +35,8 @@ export type SalesProviderCard = {
 };
 
 export type SalesEventListItem = {
+  /** Depois da retencao de 12 meses: sem e-mail, sem payload e sem Reprocessar. */
+  anonymizedAt: string | null;
   buyerEmail: string | null;
   canReprocess: boolean;
   detail: string | null;
@@ -123,8 +125,9 @@ export function toSalesEventListItem(row: WebhookEventRow, titles: { combos: Map
     null;
 
   return {
+    anonymizedAt: row.anonymized_at,
     buyerEmail: row.buyer_email,
-    canReprocess: canReprocessSaleEvent(row.processing_status),
+    canReprocess: canReprocessSaleEvent(row.processing_status, row.anonymized_at),
     detail: row.outcome_detail,
     errorMessage: row.error_message,
     eventType: row.event_type,

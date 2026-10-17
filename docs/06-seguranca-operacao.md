@@ -100,7 +100,7 @@ Regras:
 
 - o token da Hotmart (hottok) nao e variavel de ambiente: o dono cola em Configuracoes > Vendas (`settings.sales`, so o dono) e ele fica em `integration_settings.secret`, tabela so de `service_role`. A tela nunca recebe o token de volta (so `secret_status` e a data); trocar grava por cima; Desconectar apaga. Nenhuma variavel nova em `.env.example` nem na Vercel;
 - sem token guardado a rota responde 503 e nao grava nada; token errado ou ausente responde 401 e nao grava nada. A conferencia e em tempo constante (SHA-256 dos dois lados + `timingSafeEqual`), pelo cabecalho `X-HOTMART-HOTTOK` ou pelo `hottok` do corpo;
-- o payload bruto e guardado em `webhook_events` sem o `hottok` (o corpo das versoes antigas repete o token) e com o e-mail do comprador; a tela mostra o e-mail mascarado (`c***@dominio`). E dado pessoal: retencao de 12 meses pendente, junto com `email_outbox`;
+- o payload bruto e guardado em `webhook_events` sem o `hottok` (o corpo das versoes antigas repete o token) e com o e-mail do comprador; a tela mostra o e-mail mascarado (`c***@dominio`). E dado pessoal: 12 meses depois, a rotina de retencao (secao LGPD) troca o payload por `{}` e anula o e-mail e o erro; a linha fica com o resultado, a tela mostra "Dados apagados (12 meses)" e nao oferece Reprocessar;
 - idempotencia por (`provider`, `external_event_id`); evento repetido responde 200 sem reprocessar. Entitlements usam `source_provider = hotmart` e `source_event_id` = id da compra;
 - a regra de acesso (`src/server/payments/process-sale.ts`) so libera o que `sales_product_links` liga ao codigo da plataforma, pela mesma rotina do admin (`src/server/students/access.ts`). Codigo sem ligacao, pacote em rascunho ou pausado, evento que nao muda acesso e aluno sem conta sao ignorados com o motivo, nunca liberam nada. Reembolso e chargeback revogam o produto (ou todos os produtos do pacote) de quem tem o e-mail da compra, qualquer que seja a origem do acesso; assinatura cancelada suspende;
 - falha de verdade (evento sem e-mail valido, banco) responde 500, fica `failed` com o motivo e marca a plataforma como "Precisa de atencao"; o dono reprocessa pela tela (`reprocessSalesEvent`, auditado). Reprocessar tambem vale para o que foi ignorado (ex.: codigo ligado depois da venda);
@@ -204,6 +204,17 @@ Pontos de atencao:
 - distinguir a organizacao do historico (`Excluir chat`, soft delete) do exercicio do direito de exclusao: o segundo precisa apagar ou anonimizar tambem conversas retidas para analise quando aplicavel;
 - mascarar dados sensiveis em logs;
 - cuidado com session replay e campos pessoais.
+
+### Retencao por idade (17/10/2026)
+
+O que guarda dado pessoal fora do perfil do aluno perde esse dado sozinho, por idade, sem depender do tick de jobs: `public.prune_personal_data()` (migracao `202610170004`; tabelas em `docs/05`, secao Retencao de dados pessoais) roda todo dia as 06:23 UTC pelo pg_cron (`bunker707-personal-data-prune`), logo depois da limpeza do historico de jobs.
+
+- vendas recebidas (`webhook_events`): 12 meses depois de recebidas (prazo de `docs/17` §2.4), a linha perde o payload, o e-mail do comprador e a mensagem de erro e ganha `anonymized_at`. Fica o resultado (plataforma, evento, acesso liberado/revogado, motivo, produto, aluno, datas) e o id do evento, para o mesmo evento entregue de novo continuar barrado. A tela de Vendas lista a linha como "Dados apagados (12 meses)" e nao oferece Reprocessar; reprocessar pela acao responde 409 com o motivo;
+- fila de e-mail (`email_outbox`): 90 dias depois de criada, a linha enviada perde destinatario, HTML, texto e erro; falha, bounce e reclamacao ficam 180 dias para diagnostico e depois perdem o mesmo. Linha ainda na fila depois de 180 dias vira `failed` ("Expirado pela retenção") e e anonimizada; o job nunca envia uma linha sem destinatario. Ficam tipo, aluno, assunto (fixo ou com o nome do produto), chave de idempotencia (um webhook reprocessado nao manda o e-mail de novo), status, datas e metadata (ids e rotulos);
+- eventos brutos do Resend (`email_webhook_events`): apagados 90 dias depois de recebidos (o payload traz o destinatario; entrega, bounce e motivo ja ficaram na linha da fila);
+- a funcao e idempotente e so o servidor (`service_role`) ou o proprio pg_cron a executam; `anon` e `authenticated` recebem `permission denied`. Nenhuma tela chama por enquanto. A exclusao da conta continua anulando `user_id` nas duas tabelas e nao antecipa a anonimizacao (fica para o "Excluir aluno" de `docs/17` §2.4).
+
+Operacao: `select public.prune_personal_data();` roda agora e devolve quantas linhas mudaram; `select jobname, schedule, active from cron.job where jobname = 'bunker707-personal-data-prune';` confere o agendamento; `select cron.unschedule('bunker707-personal-data-prune');` pausa (rodar a migracao de novo agenda outra vez). Prazos novos sao mudanca de migracao, com o teste `tests/integration/retencao-de-dados-pessoais.test.mjs` ajustado.
 
 ## Observabilidade
 
@@ -400,7 +411,7 @@ Regras:
 - nenhum envio acontece na hora: tudo passa pela fila `email_outbox` e pelo job do tick, com limite diario (`EMAIL_DAILY_LIMIT`, padrao 90) para nao estourar os 100/dia do Free e com chave de idempotencia (um webhook de venda reprocessado nao manda o mesmo e-mail duas vezes);
 - sem `EMAIL_PROVIDER=resend` e `RESEND_API_KEY`, nada sai: a fila espera com aviso no log e expira em 7 dias. Desenvolvimento local, previews e testes ficam assim; os testes usam um provedor falso e nunca enviam e-mail;
 - o webhook do Resend (`POST /api/webhooks/resend`) exige `RESEND_WEBHOOK_SECRET` (sem ele responde 503) e verifica a assinatura Svix (`svix-id`, `svix-timestamp`, `svix-signature`, HMAC-SHA256 sobre o corpo bruto, janela de 5 minutos contra replay) antes de ler qualquer coisa; pedido sem assinatura valida responde 401 e nao grava nada. O payload bruto fica em `email_webhook_events`, unico por `svix-id`; bounce, reclamacao e falha marcam a linha da fila e nunca voltam atras. O Free tem 1 endpoint de webhook: apontar para o ambiente de producao;
-- e-mails sao dado pessoal: a fila guarda e-mail, nome e o HTML montado. Retencao por idade e um item pendente (hoje a linha fica; a exclusao da conta so anula `user_id`);
+- e-mails sao dado pessoal: a fila guarda e-mail, nome e o HTML montado. A exclusao da conta anula `user_id`; a retencao por idade (secao LGPD) anula destinatario, HTML, texto e erro 90 dias depois de criada a linha enviada (180 dias para falha, bounce, reclamacao e o que ficou na fila) e apaga os eventos brutos do Resend em 90 dias;
 - o texto dos e-mails diz como criar a senha, mas nunca carrega senha, link de sessao ou token: o link de criar senha continua saindo so pelo Supabase Auth.
 
 ### Variaveis de ambiente
