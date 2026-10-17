@@ -17,12 +17,19 @@ export type WelcomeEmailInput = {
 
 export const WELCOME_EMAIL_SUBJECT = "Seu acesso à Bunker707 está pronto";
 
+/**
+ * Assunto do convite que o Supabase Auth envia (modelo "Invite user" no painel; docs/19, secao 2.4).
+ * O convite sai na hora e estas boas-vindas saem no proximo tick, entao o convite chega antes:
+ * o texto cita o assunto dele em vez de prometer que "ainda vai chegar".
+ */
+export const INVITE_EMAIL_SUBJECT = "Crie sua senha da Bunker707";
+
 const FOOTER = "Você recebeu este e-mail porque uma conta foi criada para você na área de membros da Bunker707. Precisa de ajuda? Responda esta mensagem.";
 
 function passwordParagraph(hint: WelcomePasswordHint) {
   switch (hint) {
     case "invite":
-      return "Em instantes chega outro e-mail com o link para você criar a sua senha. Depois disso, é só entrar.";
+      return `Para criar a sua senha, abra o e-mail “${INVITE_EMAIL_SUBJECT}”, enviado junto com este, e clique no link. Se não encontrar, confira o spam ou use “Esqueci minha senha” na página de entrar.`;
     case "temporary_password":
       return "A equipe vai te passar uma senha temporária. No primeiro acesso, a plataforma pede para você criar a sua.";
     case "none":
