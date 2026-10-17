@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import { getAuthSessionStrategy } from "@/lib/auth/session-strategy";
 import { cleanEnvValue } from "@/lib/env-value";
+import { getSentryCspReportUri } from "@/lib/sentry-csp-report-uri";
 
 const supabaseUrl = cleanEnvValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ?? cleanEnvValue(process.env.SUPABASE_URL);
 const supabasePublicKey =
@@ -83,6 +84,9 @@ function getSentryConnectionSources() {
 const postHogSources = getPostHogSources();
 const observabilityConnectionSources = [...postHogSources.connect, ...getSentryConnectionSources()];
 const observabilityScriptSources = postHogSources.script;
+// Violacao de CSP so aparece no console do aluno; com o DSN do Sentry o navegador tambem a envia ao
+// endpoint de seguranca do Sentry (`report-uri`), que a mostra como evento "CSP".
+const sentryCspReportUri = getSentryCspReportUri(process.env.NEXT_PUBLIC_SENTRY_DSN);
 
 // `upgrade-insecure-requests` so faz sentido numa pagina servida em https. Numa pagina http (next start
 // na propria maquina, testes de ponta a ponta) o WebKit/Safari aplica a diretiva ate em 127.0.0.1 e busca
@@ -115,6 +119,10 @@ function createContentSecurityPolicy(nonce: string, upgradeInsecureRequests: boo
 
   if (upgradeInsecureRequests) {
     directives.push("upgrade-insecure-requests");
+  }
+
+  if (sentryCspReportUri) {
+    directives.push(`report-uri ${sentryCspReportUri}`);
   }
 
   return directives.join("; ");
@@ -267,7 +275,9 @@ export async function proxy(request: NextRequest) {
     return redirectToLogin(request, contentSecurityPolicy);
   }
 
-  if (publicPage && user) {
+  // Link com ?code= (convite, recuperacao de senha, magic link, OAuth) passa mesmo com sessao aberta:
+  // /login e /auth/callback trocam o codigo pela sessao nova, em vez de o proxy mandar para a home.
+  if (publicPage && user && !request.nextUrl.searchParams.has("code")) {
     const safeRedirectPath = getSafeRedirectPath(request.nextUrl.searchParams.get("next"));
 
     if (userMustChangePassword(user.user_metadata)) {
@@ -292,10 +302,15 @@ export async function proxy(request: NextRequest) {
       }
     }
 
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = adminRoleResult.data?.role ? "/admin" : safeRedirectPath;
-    redirectUrl.search = "";
-    return secureResponse(NextResponse.redirect(redirectUrl), contentSecurityPolicy, true);
+    // Pelo parser de URL, nunca por `pathname =`: o destino pode ter query (?lessonId=), e o setter de
+    // pathname codificaria o "?" como %3F, quebrando o link. getSafeRedirectPath ja garante que e um
+    // caminho interno (uma barra so, sem barra invertida), entao a origem continua a do proprio site.
+    const redirectTarget = adminRoleResult.data?.role ? "/admin" : safeRedirectPath;
+    return secureResponse(
+      NextResponse.redirect(new URL(redirectTarget, request.nextUrl.origin)),
+      contentSecurityPolicy,
+      true
+    );
   }
 
   if (needsUser && user && pathname !== "/alterar-senha" && userMustChangePassword(user.user_metadata)) {
