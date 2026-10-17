@@ -153,48 +153,91 @@ export function saleOutcomeChip(input: { outcome: SaleOutcome | null; status: We
 
 export type SaleGrantLike = {
   closed_at: string | null;
+  closed_by: "refund" | "chargeback" | "subscription_canceled" | "admin" | null;
+  created_at: string;
   opened: boolean;
   previous_ends_at: string | null;
   subscription_code: string | null;
   transaction_id: string;
 };
 
+export type EntitlementAfterSaleDecision =
+  /** Outra compra paga (outra transacao, de outra assinatura ou avulsa) ainda sustenta o acesso. */
+  | { kind: "keep_sustained" }
+  /** A equipe ja mexeu nesse acesso depois das vendas (revogou, suspendeu ou reabriu): fica com ela. */
+  | { kind: "keep_team" }
+  /** As vendas so estenderam um acesso de outra origem sem prazo: nada a desfazer. */
+  | { kind: "keep_other_origin" }
+  /** As vendas so estenderam um acesso de outra origem que tinha prazo: o prazo volta. */
+  | { kind: "restore_deadline"; endsAt: string }
+  /** Uma venda abriu o acesso e nada mais o sustenta: fecha (revoga ou suspende). */
+  | { kind: "close" };
+
 /**
- * Outra compra paga sustenta o acesso? Conta vinculo aberto de OUTRA transacao que nao seja cobranca
- * da mesma assinatura (as cobrancas de uma assinatura nao se sustentam entre si).
+ * O que fazer com UM acesso quando uma venda e desfeita (reembolso, chargeback ou cancelamento), olhando
+ * o historico inteiro dos vinculos dele, e nao so o vinculo que acabou de fechar (assim a ordem dos
+ * reembolsos nao muda o resultado):
+ * 1. vinculos que a equipe fechou (closed_by admin) nao contam: a equipe decidiu por cima das vendas;
+ * 2. se sobra vinculo aberto de OUTRA compra (outra transacao, que nao seja cobranca das assinaturas
+ *    sendo desfeitas), o acesso fica;
+ * 3. senao, manda o vinculo mais antigo: se ele abriu o acesso e a origem ainda e a plataforma, fecha;
+ *    se so estendeu um acesso de outra origem com prazo, devolve esse prazo; se estendeu um acesso de
+ *    outra origem sem prazo, fica. Cobrancas de uma assinatura nao se sustentam entre si: a renovacao
+ *    reembolsada fecha o acesso que a primeira cobranca abriu, mas nunca o que a equipe deu.
  */
-export function isSustainedByAnotherSale(grant: Pick<SaleGrantLike, "subscription_code" | "transaction_id">, allGrantsOfEntitlement: readonly SaleGrantLike[]) {
-  return allGrantsOfEntitlement.some(
-    (other) =>
-      other.closed_at === null &&
-      other.transaction_id !== grant.transaction_id &&
-      (other.subscription_code === null || other.subscription_code !== grant.subscription_code)
+export function decideEntitlementAfterSale(input: {
+  /** Assinaturas que o evento desfaz (codigo do evento e das transacoes desfeitas). */
+  closingSubscriptionCodes: ReadonlySet<string>;
+  /** Transacoes que o evento desfaz. */
+  closingTransactionIds: ReadonlySet<string>;
+  /** Plataforma do evento. */
+  eventProvider: string;
+  /** Todos os vinculos deste acesso, em qualquer situacao. */
+  grants: readonly SaleGrantLike[];
+  /** Origem atual do acesso (entitlements.source_provider). */
+  rowSourceProvider: string;
+}): EntitlementAfterSaleDecision {
+  const live = input.grants.filter((grant) => grant.closed_by !== "admin");
+
+  if (live.length === 0) {
+    return input.grants.length > 0 ? { kind: "keep_team" } : { kind: "keep_other_origin" };
+  }
+
+  const isClosing = (grant: SaleGrantLike) =>
+    input.closingTransactionIds.has(grant.transaction_id) ||
+    (grant.subscription_code !== null && input.closingSubscriptionCodes.has(grant.subscription_code));
+  const closingSubscriptions = new Set(input.closingSubscriptionCodes);
+
+  for (const grant of live) {
+    if (isClosing(grant) && grant.subscription_code !== null) {
+      closingSubscriptions.add(grant.subscription_code);
+    }
+  }
+
+  const sustaining = live.some(
+    (grant) => !isClosing(grant) && grant.closed_at === null && (grant.subscription_code === null || !closingSubscriptions.has(grant.subscription_code))
   );
+
+  if (sustaining) {
+    return { kind: "keep_sustained" };
+  }
+
+  const oldest = [...live].sort((left, right) => left.created_at.localeCompare(right.created_at))[0];
+
+  if (oldest.opened) {
+    return input.rowSourceProvider === input.eventProvider ? { kind: "close" } : { kind: "keep_team" };
+  }
+
+  return oldest.previous_ends_at !== null ? { endsAt: oldest.previous_ends_at, kind: "restore_deadline" } : { kind: "keep_other_origin" };
 }
 
-export type ClosedGrantDecision = "keep_sustained" | "keep_other_origin" | "restore_deadline" | "close";
-
-/**
- * O que fazer com um acesso quando o vinculo de uma venda fecha (reembolso, chargeback, cancelamento):
- * - outra compra paga o sustenta -> fica;
- * - a venda so estendeu um acesso de outra origem que tinha prazo -> o prazo volta;
- * - a venda abriu o acesso, ou e uma cobranca de uma assinatura que ja o sustentava antes -> fecha;
- * - a venda so estendeu um acesso de outra origem sem prazo (equipe, outra compra) -> fica.
- */
-export function decideOnClosedGrant(grant: SaleGrantLike, allGrantsOfEntitlement: readonly SaleGrantLike[]): ClosedGrantDecision {
-  if (isSustainedByAnotherSale(grant, allGrantsOfEntitlement)) {
-    return "keep_sustained";
+/** Texto de "Precisa de atencao" enquanto houver venda com erro ou presa aguardando reprocesso. */
+export function pendingAttentionMessage(count: number): string | null {
+  if (count <= 0) {
+    return null;
   }
 
-  if (!grant.opened && grant.previous_ends_at !== null) {
-    return "restore_deadline";
-  }
-
-  const renewalOfSameSubscription =
-    grant.subscription_code !== null &&
-    allGrantsOfEntitlement.some((other) => other.transaction_id !== grant.transaction_id && other.subscription_code === grant.subscription_code);
-
-  return grant.opened || renewalOfSameSubscription ? "close" : "keep_other_origin";
+  return `${count === 1 ? "1 venda" : `${count} vendas`} com erro ou presa aguardando reprocesso.`;
 }
 
 /** Depois de quanto tempo um evento ainda em `received` conta como preso (a funcao estourou o tempo). */

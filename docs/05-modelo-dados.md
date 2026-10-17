@@ -1309,11 +1309,11 @@ Guarda o evento bruto de plataformas externas (so depois do token conferido) e o
 - event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED`);
 - normalized_type: purchase_approved, refund, chargeback, subscription_canceled, other;
 - payload jsonb (<= 512 KB; so os campos permitidos: envelope, produto, compra, assinatura e e-mail, nome e telefone do comprador; token, documento, endereco, afiliados e comissoes nunca entram; evento que nao muda acesso guarda so o envelope; exclusao do aluno deixa so o envelope com `anonymized: true`);
-- transaction_id (migracao `202610170005`; id da compra na plataforma, igual em todos os eventos da mesma venda; indice (provider, transaction_id));
+- transaction_id (migracao `202610170005`; id da compra na plataforma, igual em todos os eventos da mesma venda; indice (provider, transaction_id); a migracao preenche as linhas anteriores a ela a partir de `payload.data.purchase.transaction`);
 - processing_started_at (migracao `202610170005`; inicio do processamento ou do reprocesso; reenvio de evento preso em `received` reivindica a linha por update condicional nesta coluna);
 - signature_valid;
 - processing_status: received, processed, failed, ignored;
-- outcome: access_granted, access_revoked, access_suspended, ignored, failed;
+- outcome: access_granted, access_revoked, access_suspended, access_restored (migracao `202610170008`), ignored, failed;
 - outcome_detail (motivo escrito, <= 500);
 - buyer_email, external_product_id, external_product_name (para a lista da tela, mesmo sem ligacao);
 - product_id, combo_id (alvo resolvido, sem chave estrangeira: o historico fica se o produto sair);
@@ -1355,10 +1355,12 @@ Migracao `202610170008_sale_grants.sql`. Vinculo venda -> acesso: um acesso (um 
 - user_id -> auth.users (cascade); entitlement_id -> entitlements (cascade); product_id;
 - opened: true quando a venda abriu o acesso (nao existia ou estava fechado); false quando so estendeu um acesso aberto;
 - previous_ends_at: prazo que o acesso tinha antes (so quando estendeu), para o reembolso devolver;
-- webhook_event_id -> webhook_events (set null); closed_at, closed_by (refund, chargeback, subscription_canceled);
-- created_at.
+- webhook_event_id -> webhook_events (set null); closed_at, closed_by (refund, chargeback, subscription_canceled, admin);
+- created_at (o vinculo mais antigo do acesso e o que manda na decisao).
 
-Indices: unico (provider, transaction_id, entitlement_id); (entitlement_id); (provider, subscription_code). So `service_role`. Nenhum dado pessoal (so ids). Regras de decisao em `decideOnClosedGrant` (`src/server/payments/model.ts`) e em docs/04. A mesma migracao acrescenta o resultado `access_restored` ("Prazo devolvido") em `webhook_events.outcome`.
+`closed_by = admin`: a equipe revogou, suspendeu, reativou ou reabriu o acesso (`src/server/students/access.ts`); TODOS os vinculos dele, abertos ou ja fechados por uma venda, passam a `admin` e deixam de mandar nos reembolsos (o reembolso repetido de uma compra antiga nao fecha o que a equipe acabou de reabrir).
+
+Indices: unico (provider, transaction_id, entitlement_id); (entitlement_id); (provider, subscription_code). So `service_role`. Nenhum dado pessoal (so ids). Regras de decisao em `decideEntitlementAfterSale` (`src/server/payments/model.ts`) e em docs/04. A mesma migracao acrescenta o resultado `access_restored` ("Prazo devolvido") em `webhook_events.outcome` e preenche um vinculo (`opened = true`) para cada acesso ativo que uma compra aprovada ja registrada em `webhook_events` liberou antes da tabela existir (pelo `transaction_id` da 0005; nada em producao hoje).
 
 ### admin_access_origins(p_start, p_end, p_content_id)
 

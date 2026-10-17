@@ -17,7 +17,7 @@ import {
   type SaleOutcome,
   type WebhookProcessingStatus
 } from "./model";
-import { countSalesLinks, fetchIntegrationRows, listWebhookEvents, salesDb, type IntegrationRow, type WebhookEventRow } from "./store";
+import { countSalesLinks, fetchIntegrationRows, listWebhookEvents, markIntegrationAttention, salesDb, type IntegrationRow, type WebhookEventRow } from "./store";
 import { SALES_PROVIDERS, type NormalizedSaleType, type SalesProvider } from "./types";
 
 export type SalesProviderCard = {
@@ -72,13 +72,39 @@ function eventsOf(row: IntegrationRow | undefined, provider: SalesProvider) {
   return stored.length > 0 ? stored : [...(adapter?.handledEvents ?? [])];
 }
 
-async function loadProviderCards(origin: { configured: string | null; request: string }, rows: IntegrationRow[]): Promise<SalesProviderCard[]> {
+/**
+ * Situacao de cada plataforma como esta AGORA: uma venda que ficou presa em `received` (a funcao morreu
+ * depois de gravar) nao gera evento nenhum, entao a linha de integration_settings so saberia dela no
+ * proximo webhook. A tela conta ao vivo e grava "Precisa de atencao" na linha quando for o caso.
+ */
+async function refreshAttention(rows: IntegrationRow[]): Promise<IntegrationRow[]> {
+  const db = salesDb();
+
+  return Promise.all(
+    rows.map(async (row) => {
+      if (!isSalesProviderSupported(row.provider) || row.secret_status !== "set") {
+        return row;
+      }
+
+      const refreshed = await markIntegrationAttention(db, row.provider, row).catch((error: unknown) => {
+        console.error(`[vendas] situacao da ${row.provider} nao conferida: ${error instanceof Error ? error.message : String(error)}`);
+
+        return null;
+      });
+
+      return refreshed ?? row;
+    })
+  );
+}
+
+async function loadProviderCards(origin: { configured: string | null; request: string }, storedRows: IntegrationRow[]): Promise<SalesProviderCard[]> {
   const db = salesDb();
   const webhookOrigin = origin.configured ?? origin.request;
   const originWarning = webhookOriginWarning({ configuredOrigin: origin.configured, requestOrigin: origin.request });
-  const linkCounts = await Promise.all(
-    SALES_PROVIDERS.map((provider) => (isSalesProviderSupported(provider) ? countSalesLinks(db, provider) : Promise.resolve(0)))
-  );
+  const [rows, linkCounts] = await Promise.all([
+    refreshAttention(storedRows),
+    Promise.all(SALES_PROVIDERS.map((provider) => (isSalesProviderSupported(provider) ? countSalesLinks(db, provider) : Promise.resolve(0))))
+  ]);
 
   return SALES_PROVIDERS.map((provider, index): SalesProviderCard => {
     const row = rows.find((candidate) => candidate.provider === provider);
@@ -163,7 +189,7 @@ export async function getSalesSettingsData(): Promise<SalesSettingsData> {
 
 /** Situacao das plataformas para a linha "Vendas" do hub (sem o token, sem a lista). */
 export async function getSalesProviderStatuses(): Promise<{ status: IntegrationStatus; supported: boolean }[]> {
-  const rows = await fetchIntegrationRows(salesDb());
+  const rows = await refreshAttention(await fetchIntegrationRows(salesDb()));
 
   return SALES_PROVIDERS.map((provider) => {
     const supported = isSalesProviderSupported(provider);

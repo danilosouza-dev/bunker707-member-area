@@ -36,6 +36,7 @@ const permissions = await import("../../src/server/auth/permissions.ts");
 const studentQueries = await import("../../src/server/students/queries.ts");
 const studentActions = await import("../../src/server/students/actions.ts");
 const access = await import("../../src/server/students/access.ts");
+const { accessEndDateToIso } = await import("../../src/server/students/model.ts");
 
 const { curso, cursoBloqueado, cursoLiberacao } = ESCOLA_DE_TESTE;
 const produtor = usuarioDeTeste(contas.produtor);
@@ -50,7 +51,16 @@ const REEMBOLSADO = { email: "reembolsado.hotmart@bunker707.test", nome: "Reembo
 const PRESO = { email: "comprador.preso@bunker707.test", nome: "Comprador Preso" };
 const AVULSO = { email: "comprador.avulso@bunker707.test", nome: "Comprador Avulso e Pacote" };
 const RENOVACAO = { email: "assinante.renovacao@bunker707.test", nome: "Assinante com Renovação" };
-const COMPRADORES = [COMPRADOR, COMPRADOR_PACOTE, ASSINANTE, COMPRADOR_ANTIGO, REEMBOLSADO, PRESO, AVULSO, RENOVACAO];
+const ORDEM = { email: "comprador.ordem@bunker707.test", nome: "Comprador na Ordem Inversa" };
+const VITALICIO = { email: "assinante.vitalicio@bunker707.test", nome: "Assinante com Acesso Vitalício da Equipe" };
+const COM_PRAZO = { email: "assinante.prazo@bunker707.test", nome: "Assinante com Prazo da Equipe" };
+const EQUIPE = { email: "comprador.equipe@bunker707.test", nome: "Comprador que a Equipe Revogou" };
+const SEGURANCA = { email: "comprador.seguranca@bunker707.test", nome: "Comprador da Rede de Segurança" };
+const FALHA = { email: "comprador.falha@bunker707.test", nome: "Comprador com Falha no Meio" };
+const FALHA_PRAZO = { email: "comprador.falha.prazo@bunker707.test", nome: "Comprador com Falha e Prazo" };
+const PARCIAL = { email: "comprador.parcial@bunker707.test", nome: "Comprador de Pacote pela Metade" };
+const SEM_COBRANCA = { email: "comprador.sem.cobranca@bunker707.test", nome: "Comprador sem Cobrança da Assinatura" };
+const COMPRADORES = [COMPRADOR, COMPRADOR_PACOTE, ASSINANTE, COMPRADOR_ANTIGO, REEMBOLSADO, PRESO, AVULSO, RENOVACAO, ORDEM, VITALICIO, COM_PRAZO, EQUIPE, SEGURANCA, FALHA, FALHA_PRAZO, PARCIAL, SEM_COBRANCA];
 const PREFIXO = "teste-hotmart-";
 const PACOTE_DUPLICADO = "Pacote de Teste: Código Repetido";
 
@@ -143,6 +153,34 @@ async function acessosDe(email) {
 
 async function vinculosDe(transaction) {
   return unwrap(await db.from("sale_grants").select("transaction_id,subscription_code,product_id,opened,previous_ends_at,closed_by").eq("transaction_id", transaction).order("product_id"), "Lendo vínculos");
+}
+
+/** Acesso dado pela equipe (conta criada se preciso), com ou sem prazo ("AAAA-MM-DD"), como em Alunos > Liberar acesso. */
+async function acessoDaEquipe({ email, nome, prazo = null, produtoId = curso.id }) {
+  return access.provisionStudentAccess({
+    actorId: contas.produtor.id,
+    delivery: "none",
+    email,
+    endsAt: prazo,
+    fullName: nome,
+    phone: null,
+    productIds: [produtoId],
+    redirectTo: "http://127.0.0.1:3100/auth/callback",
+    siteOrigin: "http://127.0.0.1:3100",
+    source: "admin",
+    sourceProvider: "manual"
+  });
+}
+
+/** Deixa um evento como uma falha no meio do processamento deixaria: `failed`, sem trava, pronto para Reprocessar. */
+async function simularFalha(sufixo) {
+  const linha = await evento(sufixo);
+  unwrap(
+    await db.from("webhook_events").update({ error_message: "falha simulada", outcome: "failed", processing_started_at: null, processing_status: "failed" }).eq("id", linha.id),
+    "Simulando falha no meio"
+  );
+
+  return linha.id;
 }
 
 async function filaDe(email) {
@@ -411,6 +449,28 @@ test("produto comprado sozinho e depois num pacote: o reembolso do pacote revoga
     "o produto pago a parte continua"
   );
   assert.match((await evento("avulso-reembolso-pacote")).outcome_detail, /1 produto mantido \(outra compra paga sustenta o acesso\)/);
+
+  // Depois, o reembolso da compra avulsa: nada mais sustenta o produto; fecha.
+  const reembolsoAvulsa = await postJson(payload({ email: AVULSO.email, event: "PURCHASE_REFUNDED", id: "avulso-reembolso-avulsa", nome: AVULSO.nome, produto: CODIGOS.avulso, transaction: "HP-AVULSO-0001" }));
+  assert.equal(reembolsoAvulsa.body.outcome, "access_revoked", JSON.stringify(reembolsoAvulsa.body));
+  assert.deepEqual((await acessosDe(AVULSO.email)).acessos.map((row) => row.status), ["revoked", "revoked"]);
+});
+
+test("a ordem inversa da o mesmo resultado: reembolso da avulsa primeiro (o pacote sustenta), depois o do pacote fecha os dois", async () => {
+  const avulsa = await postJson(payload({ email: ORDEM.email, id: "ordem-avulsa", nome: ORDEM.nome, produto: CODIGOS.avulso, transaction: "HP-ORDEM-0001" }));
+  assert.equal(avulsa.body.outcome, "access_granted");
+  const pacote = await postJson(payload({ email: ORDEM.email, id: "ordem-pacote", nome: ORDEM.nome, produto: CODIGOS.pacote, transaction: "HP-ORDEM-0002" }));
+  assert.equal(pacote.body.outcome, "access_granted");
+
+  const primeiro = await postJson(payload({ email: ORDEM.email, event: "PURCHASE_REFUNDED", id: "ordem-reembolso-avulsa", nome: ORDEM.nome, produto: CODIGOS.avulso, transaction: "HP-ORDEM-0001" }));
+  assert.equal(primeiro.body.outcome, "ignored", JSON.stringify(primeiro.body));
+  assert.match((await evento("ordem-reembolso-avulsa")).outcome_detail, /outra compra paga sustenta o acesso/);
+  assert.deepEqual((await acessosDe(ORDEM.email)).acessos.map((row) => row.status), ["active", "active"], "o pacote ainda paga o produto");
+
+  const segundo = await postJson(payload({ email: ORDEM.email, event: "PURCHASE_REFUNDED", id: "ordem-reembolso-pacote", nome: ORDEM.nome, produto: CODIGOS.pacote, transaction: "HP-ORDEM-0002" }));
+  assert.equal(segundo.body.outcome, "access_revoked", JSON.stringify(segundo.body));
+  assert.match((await evento("ordem-reembolso-pacote")).outcome_detail, /acesso revogado em 2 produtos/);
+  assert.deepEqual((await acessosDe(ORDEM.email)).acessos.map((row) => row.status), ["revoked", "revoked"], "a avulsa ja reembolsada nao sustenta mais");
 });
 
 test("assinatura: a renovacao chega como compra nova e o chargeback dela revoga, mesmo com o acesso nascido na primeira cobranca", async () => {
@@ -425,6 +485,120 @@ test("assinatura: a renovacao chega como compra nova e o chargeback dela revoga,
   const chargeback = await postJson(payload({ assinatura: "SUB-RENOVA", email: RENOVACAO.email, event: "PURCHASE_CHARGEBACK", id: "renovacao-chargeback", nome: RENOVACAO.nome, transaction: "HP-RENOVA-0002" }));
   assert.equal(chargeback.body.outcome, "access_revoked", JSON.stringify(chargeback.body));
   assert.equal((await acessosDe(RENOVACAO.email)).acessos[0].status, "revoked", "cobrancas da mesma assinatura nao sustentam o acesso umas das outras");
+});
+
+test("assinatura que so estendeu um acesso da equipe: reembolso da renovacao e cancelamento mantem o vitalicio e devolvem o prazo", async () => {
+  // Acesso vitalicio dado pela equipe; duas cobrancas da assinatura S so o estenderam (nenhuma o abriu).
+  await acessoDaEquipe({ email: VITALICIO.email, nome: VITALICIO.nome });
+  assert.equal((await postJson(payload({ assinatura: "SUB-VITALICIO", email: VITALICIO.email, id: "vitalicio-1", nome: VITALICIO.nome, transaction: "HP-VITALICIO-0001" }))).body.outcome, "access_granted");
+  assert.equal((await postJson(payload({ assinatura: "SUB-VITALICIO", email: VITALICIO.email, id: "vitalicio-2", nome: VITALICIO.nome, transaction: "HP-VITALICIO-0002" }))).body.outcome, "access_granted");
+  assert.deepEqual((await vinculosDe("HP-VITALICIO-0001")).map((row) => row.opened), [false]);
+
+  const reembolso = await postJson(payload({ assinatura: "SUB-VITALICIO", email: VITALICIO.email, event: "PURCHASE_REFUNDED", id: "vitalicio-reembolso", nome: VITALICIO.nome, transaction: "HP-VITALICIO-0002" }));
+  assert.equal(reembolso.body.outcome, "ignored", JSON.stringify(reembolso.body));
+  assert.match((await evento("vitalicio-reembolso")).outcome_detail, /outra origem/);
+  const cancelada = await postJson(cancelamento({ assinatura: "SUB-VITALICIO", email: VITALICIO.email, id: "vitalicio-cancelamento", nome: VITALICIO.nome }));
+  assert.equal(cancelada.body.outcome, "ignored", JSON.stringify(cancelada.body));
+  const [vitalicio] = (await acessosDe(VITALICIO.email)).acessos;
+  assert.deepEqual([vitalicio.status, vitalicio.ends_at, vitalicio.source_provider], ["active", null, "manual"], "a renovacao reembolsada nao e 'renovacao' de um acesso que nenhuma cobranca abriu");
+
+  // Acesso da equipe COM prazo: a primeira cobranca guardou o prazo; o cancelamento o devolve.
+  const prazo = accessEndDateToIso("2099-03-31");
+  await acessoDaEquipe({ email: COM_PRAZO.email, nome: COM_PRAZO.nome, prazo: "2099-03-31" });
+  assert.equal((await postJson(payload({ assinatura: "SUB-PRAZO", email: COM_PRAZO.email, id: "prazo-assinatura-1", nome: COM_PRAZO.nome, transaction: "HP-PRAZOASS-0001" }))).body.outcome, "access_granted");
+  assert.equal((await postJson(payload({ assinatura: "SUB-PRAZO", email: COM_PRAZO.email, id: "prazo-assinatura-2", nome: COM_PRAZO.nome, transaction: "HP-PRAZOASS-0002" }))).body.outcome, "access_granted");
+  assert.equal((await acessosDe(COM_PRAZO.email)).acessos[0].ends_at, null, "quem paga fica sem prazo");
+
+  const canceladaComPrazo = await postJson(cancelamento({ assinatura: "SUB-PRAZO", email: COM_PRAZO.email, id: "prazo-assinatura-cancelamento", nome: COM_PRAZO.nome }));
+  assert.equal(canceladaComPrazo.body.outcome, "access_restored", JSON.stringify(canceladaComPrazo.body));
+  const devolvido = (await acessosDe(COM_PRAZO.email)).acessos[0];
+  assert.deepEqual([devolvido.status, new Date(devolvido.ends_at).toISOString()], ["active", prazo], "o prazo da equipe volta, uma vez so, mesmo com duas cobrancas");
+  assert.deepEqual((await vinculosDe("HP-PRAZOASS-0001")).map((row) => row.closed_by), ["subscription_canceled"]);
+  assert.deepEqual((await vinculosDe("HP-PRAZOASS-0002")).map((row) => row.closed_by), ["subscription_canceled"]);
+});
+
+test("a equipe que revoga ou reabre um acesso fecha os vinculos das vendas (admin): a compra nova e que manda, e o que a equipe reabriu fica", async () => {
+  const compra = await postJson(payload({ email: EQUIPE.email, id: "equipe-compra-0", nome: EQUIPE.nome, transaction: "HP-EQUIPE-0000" }));
+  assert.equal(compra.body.outcome, "access_granted");
+  const { acessos, conta } = await acessosDe(EQUIPE.email);
+
+  // A equipe revoga: o vinculo da compra fecha por admin.
+  await access.applyAccessAction({ action: "revoke", actorId: contas.produtor.id, entitlementId: acessos[0].id, source: "admin", sourceProvider: "manual", userId: conta.id });
+  assert.deepEqual((await vinculosDe("HP-EQUIPE-0000")).map((row) => row.closed_by), ["admin"]);
+
+  // Compra nova reabre; o reembolso DELA revoga (a compra antiga, fechada pela equipe, nao sustenta nada).
+  const nova = await postJson(payload({ email: EQUIPE.email, id: "equipe-compra-1", nome: EQUIPE.nome, transaction: "HP-EQUIPE-0001" }));
+  assert.equal(nova.body.outcome, "access_granted");
+  assert.deepEqual((await vinculosDe("HP-EQUIPE-0001")).map((row) => row.opened), [true]);
+  const reembolso = await postJson(payload({ email: EQUIPE.email, event: "PURCHASE_REFUNDED", id: "equipe-reembolso-1", nome: EQUIPE.nome, transaction: "HP-EQUIPE-0001" }));
+  assert.equal(reembolso.body.outcome, "access_revoked", JSON.stringify(reembolso.body));
+  assert.equal((await acessosDe(EQUIPE.email)).acessos[0].status, "revoked");
+
+  // A equipe reabre em Alunos > Liberar acesso: todos os vinculos (ate os ja fechados por reembolso) passam a admin...
+  await access.grantProductAccess({ actorId: contas.produtor.id, endsAt: null, productIds: [curso.id], source: "admin", sourceProvider: "manual", userId: conta.id });
+  assert.equal((await acessosDe(EQUIPE.email)).acessos[0].status, "active");
+  assert.deepEqual((await vinculosDe("HP-EQUIPE-0001")).map((row) => row.closed_by), ["admin"]);
+
+  // ...e um chargeback da compra reembolsada nao tira o que a equipe reabriu.
+  const chargeback = await postJson(payload({ email: EQUIPE.email, event: "PURCHASE_CHARGEBACK", id: "equipe-chargeback-1", nome: EQUIPE.nome, transaction: "HP-EQUIPE-0001" }));
+  assert.equal(chargeback.body.outcome, "ignored", JSON.stringify(chargeback.body));
+  assert.match((await evento("equipe-chargeback-1")).outcome_detail, /a equipe já decidiu/);
+  assert.equal((await acessosDe(EQUIPE.email)).acessos[0].status, "active");
+});
+
+test("vinculo ja fechado por uma tentativa que falhou antes de agir: o reembolso (ou o reprocesso) ainda revoga", async () => {
+  const compra = await postJson(payload({ email: SEGURANCA.email, id: "seguranca-compra", nome: SEGURANCA.nome, transaction: "HP-SEGURANCA-0001" }));
+  assert.equal(compra.body.outcome, "access_granted");
+  // O que a versao antiga deixava: vinculo fechado, acesso ainda aberto.
+  unwrap(await db.from("sale_grants").update({ closed_at: new Date().toISOString(), closed_by: "refund" }).eq("transaction_id", "HP-SEGURANCA-0001"), "Fechando o vínculo antes de agir");
+
+  const reembolso = await postJson(payload({ email: SEGURANCA.email, event: "PURCHASE_REFUNDED", id: "seguranca-reembolso", nome: SEGURANCA.nome, transaction: "HP-SEGURANCA-0001" }));
+  assert.equal(reembolso.body.outcome, "access_revoked", JSON.stringify(reembolso.body));
+  assert.equal((await acessosDe(SEGURANCA.email)).acessos[0].status, "revoked");
+});
+
+test("reprocesso depois de uma falha no meio: o vinculo nasce certo ('abriu'), o prazo guardado antes da liberacao vale, e o pacote pela metade fecha inteiro", async () => {
+  actAs(produtor);
+
+  // 1) Acesso novo liberado, vinculo nao gravado (a falha veio depois da liberacao): o reprocesso ve que o acesso e desta compra.
+  assert.equal((await postJson(payload({ email: FALHA.email, id: "falha-compra", nome: FALHA.nome, transaction: "HP-FALHA-0001" }))).body.outcome, "access_granted");
+  unwrap(await db.from("sale_grants").delete().eq("transaction_id", "HP-FALHA-0001"), "Apagando o vínculo que a falha não gravou");
+  const falhaId = await simularFalha("falha-compra");
+  const reprocesso = await salesActions.reprocessSalesEvent({ id: falhaId });
+  assert.equal(reprocesso.ok, true, JSON.stringify(reprocesso));
+  assert.equal(reprocesso.data.outcome, "access_granted");
+  assert.deepEqual((await vinculosDe("HP-FALHA-0001")).map((row) => [row.opened, row.previous_ends_at]), [[true, null]], "a compra ABRIU o acesso, mesmo que ele ja existisse no reprocesso");
+  assert.equal((await filaDe(FALHA.email)).length, 2, "o reprocesso nao manda o e-mail de compra de novo");
+  const reembolso = await postJson(payload({ email: FALHA.email, event: "PURCHASE_REFUNDED", id: "falha-reembolso", nome: FALHA.nome, transaction: "HP-FALHA-0001" }));
+  assert.equal(reembolso.body.outcome, "access_revoked", JSON.stringify(reembolso.body));
+
+  // 2) Acesso da equipe com prazo: o vinculo e gravado ANTES da liberacao, entao a falha no meio nao perde o prazo.
+  const prazo = accessEndDateToIso("2099-09-30");
+  await acessoDaEquipe({ email: FALHA_PRAZO.email, nome: FALHA_PRAZO.nome, prazo: "2099-09-30" });
+  assert.equal((await postJson(payload({ email: FALHA_PRAZO.email, id: "falha-prazo-compra", nome: FALHA_PRAZO.nome, transaction: "HP-FALHAPRAZO-0001" }))).body.outcome, "access_granted");
+  const prazoId = await simularFalha("falha-prazo-compra");
+  const reprocessoPrazo = await salesActions.reprocessSalesEvent({ id: prazoId });
+  assert.equal(reprocessoPrazo.data.outcome, "access_granted", JSON.stringify(reprocessoPrazo));
+  assert.deepEqual((await vinculosDe("HP-FALHAPRAZO-0001")).map((row) => [row.opened, new Date(row.previous_ends_at).toISOString()]), [[false, prazo]], "o vinculo da primeira tentativa, com o prazo, e o que fica");
+  const reembolsoPrazo = await postJson(payload({ email: FALHA_PRAZO.email, event: "PURCHASE_REFUNDED", id: "falha-prazo-reembolso", nome: FALHA_PRAZO.nome, transaction: "HP-FALHAPRAZO-0001" }));
+  assert.equal(reembolsoPrazo.body.outcome, "access_restored", JSON.stringify(reembolsoPrazo.body));
+  assert.equal(new Date((await acessosDe(FALHA_PRAZO.email)).acessos[0].ends_at).toISOString(), prazo);
+
+  // 3) Pacote pela metade: a falha veio depois de liberar A e antes de B (e sem vinculo). O reprocesso libera B e ve que A tambem e da compra.
+  await garantirPacoteDeTeste(db, CODIGOS.pacote);
+  unwrap(await db.from("product_combos").update({ status: "active" }).eq("id", PACOTE_DE_TESTE.id), "Reativando o pacote de teste");
+  assert.equal((await postJson(payload({ email: PARCIAL.email, id: "parcial-compra", nome: PARCIAL.nome, produto: CODIGOS.pacote, transaction: "HP-PARCIAL-0001" }))).body.outcome, "access_granted");
+  const { acessos: metade } = await acessosDe(PARCIAL.email);
+  assert.equal(metade.length, 2);
+  unwrap(await db.from("sale_grants").delete().eq("transaction_id", "HP-PARCIAL-0001"), "Apagando os vínculos");
+  unwrap(await db.from("entitlements").delete().eq("id", metade.find((row) => row.target_id === cursoLiberacao.id).id), "Apagando o segundo produto, que a falha não liberou");
+  const parcialId = await simularFalha("parcial-compra");
+  const reprocessoParcial = await salesActions.reprocessSalesEvent({ id: parcialId });
+  assert.equal(reprocessoParcial.data.outcome, "access_granted", JSON.stringify(reprocessoParcial));
+  assert.deepEqual((await vinculosDe("HP-PARCIAL-0001")).map((row) => [row.product_id, row.opened]), [[cursoBloqueado.id, true], [cursoLiberacao.id, true]], "os dois produtos foram abertos pela compra");
+  const reembolsoParcial = await postJson(payload({ email: PARCIAL.email, event: "PURCHASE_REFUNDED", id: "parcial-reembolso", nome: PARCIAL.nome, produto: CODIGOS.pacote, transaction: "HP-PARCIAL-0001" }));
+  assert.equal(reembolsoParcial.body.outcome, "access_revoked", JSON.stringify(reembolsoParcial.body));
+  assert.deepEqual((await acessosDe(PARCIAL.email)).acessos.map((row) => row.status), ["revoked", "revoked"]);
 });
 
 test("acesso fechado reaberto por uma venda passa a pertencer a venda: o reembolso dela fecha de novo", async () => {
@@ -488,6 +662,16 @@ test("pacote pausado: a compra chega, fica ignorada com o motivo e nao libera na
   assert.equal(body.outcome, "ignored");
   assert.match((await evento("pacote-pausado")).outcome_detail, /está pausado/);
   assert.deepEqual((await acessosDe(COMPRADOR_PACOTE.email)).acessos.map((row) => row.status), ["revoked", "revoked"]);
+});
+
+test("cancelamento com codigo de assinatura sem nenhuma cobranca registrada nao adivinha pelo produto: ignorado, o acesso pago a parte fica", async () => {
+  const avulsa = await postJson(payload({ email: SEM_COBRANCA.email, id: "sem-cobranca-avulsa", nome: SEM_COBRANCA.nome, produto: CODIGOS.avulso, transaction: "HP-SEMCOBRANCA-0001" }));
+  assert.equal(avulsa.body.outcome, "access_granted");
+
+  const cancelada = await postJson(cancelamento({ assinatura: "SUB-DESCONHECIDA", email: SEM_COBRANCA.email, id: "sem-cobranca-cancelamento", nome: SEM_COBRANCA.nome, produto: CODIGOS.pacote }));
+  assert.equal(cancelada.body.outcome, "ignored", JSON.stringify(cancelada.body));
+  assert.match((await evento("sem-cobranca-cancelamento")).outcome_detail, /Nenhuma cobrança da assinatura SUB-DESCONHECIDA/);
+  assert.deepEqual((await acessosDe(SEM_COBRANCA.email)).acessos.map((row) => [row.target_id, row.status]), [[cursoLiberacao.id, "active"]], "o produto do pacote cancelado que foi pago a parte continua");
 });
 
 /* ------------------------------------------------------------ Fim da garantia */
@@ -585,9 +769,10 @@ test("evento preso em 'received' (a funcao morreu depois de gravar): o reenvio d
     );
   }
 
-  const data = await salesQueries.getSalesSettingsData();
+  // A tela lista as 50 vendas mais recentes (o preso de 10 minutos atras ja ficou atras das vendas desta suite): a linha dele, do jeito que a tela a monta, oferece Reprocessar.
   const presoId = (await evento("preso-1")).id;
-  assert.equal(data.events.find((item) => item.id === presoId)?.canReprocess, true, "preso ha 10 minutos aparece com Reprocessar");
+  const linhaPresa = unwrap(await db.from("webhook_events").select("*").eq("id", presoId).single(), "Lendo o evento preso");
+  assert.equal(salesQueries.toSalesEventListItem(linhaPresa, { combos: new Map(), products: new Map() }).canReprocess, true, "preso ha 10 minutos aparece com Reprocessar");
 
   // Reenvio do mesmo evento: em vez de "duplicate", a linha e retomada e processada.
   const reenvio = await postJson(compra);
@@ -675,6 +860,43 @@ test("evento sem e-mail valido falha: 500, linha guardada com o motivo; 'Precisa
   assert.equal(ignorado.ok, true, JSON.stringify(ignorado));
   assert.equal(ignorado.data.processingStatus, "ignored");
   assert.equal((await integracao()).status, "configured", "sem vendas com erro, a situacao volta sozinha");
+});
+
+test("venda presa em 'received' sem ninguem para marcar: a tela e o hub mostram 'Precisa de atencao' ao vivo e gravam na plataforma", async () => {
+  assert.equal((await integracao()).status, "configured");
+  const antigo = new Date(Date.now() - 10 * 60_000).toISOString();
+  const presa = payload({ email: PRESO.email, id: "presa-ao-vivo", nome: PRESO.nome, transaction: "HP-PRESO-0010" });
+  unwrap(
+    await db.from("webhook_events").insert({
+      buyer_email: PRESO.email,
+      event_type: "PURCHASE_APPROVED",
+      external_event_id: presa.id,
+      external_product_id: String(presa.data.product.id),
+      normalized_type: "purchase_approved",
+      payload: presa,
+      processing_started_at: antigo,
+      processing_status: "received",
+      provider: "hotmart",
+      received_at: antigo,
+      signature_valid: true,
+      transaction_id: presa.data.purchase.transaction
+    }),
+    "Gravando evento preso"
+  );
+
+  const data = await salesQueries.getSalesSettingsData();
+  const hotmart = data.providers.find((card) => card.provider === "hotmart");
+  assert.equal(hotmart.status, "needs_attention");
+  assert.match(hotmart.lastError, /1 venda com erro ou presa aguardando reprocesso/);
+  const gravada = await integracao();
+  assert.equal(gravada.status, "needs_attention", "a linha da plataforma tambem fica marcada");
+  assert.match(gravada.last_error, /presa/);
+  assert.equal((await salesQueries.getSalesProviderStatuses())[0].status, "needs_attention", "o hub le a mesma situacao");
+
+  // Resolvida (aqui: apagada), a tela nao volta sozinha; o proximo evento processado volta a 'Conectada'.
+  unwrap(await db.from("webhook_events").delete().eq("external_event_id", presa.id), "Apagando evento preso");
+  assert.equal((await postJson(payload({ event: "PURCHASE_BILLET_PRINTED", id: "boleto-depois-da-presa", transaction: "HP-TESTE-0301" }))).status, 200);
+  assert.equal((await integracao()).status, "configured");
 });
 
 test("eventos que nao mudam acesso ficam guardados so com o envelope; JSON invalido e 400", async () => {
