@@ -10,7 +10,7 @@ import "server-only";
 
 import { PENDING_MIGRATION_MESSAGE, isMissingSchemaObjectError, toDbError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
-import { SALES_CODE_FIELDS, STUCK_RECEIVED_MINUTES, type IntegrationStatus, type SaleOutcome, type WebhookProcessingStatus } from "./model";
+import { SALES_CODE_FIELDS, STUCK_RECEIVED_MINUTES, type IntegrationStatus, type SaleOutcome, type WebhookProcessingStatus, pendingAttentionMessage } from "./model";
 import type { NormalizedSaleType, SalesProvider } from "./types";
 
 export type SalesDb = ReturnType<typeof getSupabaseAdminClient>;
@@ -138,7 +138,7 @@ export async function markIntegrationSync(db: SalesDb, provider: SalesProvider, 
     console.error(`[vendas] vendas com erro da ${provider} nao contadas: ${countError instanceof Error ? countError.message : String(countError)}`);
   }
 
-  const pendingMessage = failedCount > 0 ? `${failedCount === 1 ? "1 venda" : `${failedCount} vendas`} com erro ou presa aguardando reprocesso.` : null;
+  const pendingMessage = pendingAttentionMessage(failedCount);
   const { error } = await db
     .from("integration_settings")
     .update({
@@ -152,6 +152,26 @@ export async function markIntegrationSync(db: SalesDb, provider: SalesProvider, 
   if (error) {
     console.error(`[vendas] situacao da ${provider} nao atualizada: ${error.message}`);
   }
+}
+
+/**
+ * Confere AGORA se a plataforma precisa de atencao (venda com erro, ou presa em `received` sem ninguem
+ * para marcar). So muda a linha de "Conectada" para "Precisa de atencao", nunca o contrario: um aviso
+ * gravado pelo webhook (token em formato antigo, ultimo erro) continua ate o proximo evento ou troca.
+ * Devolve a linha como ficou (ou a mesma, quando nada mudou).
+ */
+export async function markIntegrationAttention(db: SalesDb, provider: SalesProvider, row: IntegrationRow, now: number = Date.now()): Promise<IntegrationRow> {
+  const count = await countEventsNeedingAttention(db, provider, now);
+  const message = pendingAttentionMessage(count);
+
+  if (!message || (row.status === "needs_attention" && row.last_error)) {
+    return row;
+  }
+
+  const { error } = await db.from("integration_settings").update({ last_error: message, status: "needs_attention" }).eq("provider", provider).eq("secret_status", "set");
+  failOnError(error, "Situação da plataforma");
+
+  return { ...row, last_error: message, status: "needs_attention" };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -394,11 +414,12 @@ export async function listWebhookEvents(db: SalesDb, input: { limit: number; pro
  * sale_grants: vinculo venda -> acesso (migracao 202610170008)
  * ---------------------------------------------------------------------------------------------- */
 
-const SALE_GRANT_COLUMNS = "id,provider,transaction_id,subscription_code,user_id,entitlement_id,product_id,opened,previous_ends_at,closed_at,closed_by";
+const SALE_GRANT_COLUMNS = "id,provider,transaction_id,subscription_code,user_id,entitlement_id,product_id,opened,previous_ends_at,closed_at,closed_by,created_at";
 
 export type SaleGrantRow = {
   closed_at: string | null;
-  closed_by: "refund" | "chargeback" | "subscription_canceled" | null;
+  closed_by: "refund" | "chargeback" | "subscription_canceled" | "admin" | null;
+  created_at: string;
   entitlement_id: string;
   id: string;
   opened: boolean;
@@ -421,6 +442,15 @@ export type SaleGrantInsert = {
   userId: string;
   webhookEventId: string | null;
 };
+
+/** Banco com a tabela de vinculos (migracao 202610170008)? Sem ela, nenhuma venda pode liberar acesso. */
+export async function assertSaleGrantsAvailable(db: SalesDb) {
+  const { error } = await db.from("sale_grants").select("id", { count: "exact", head: true }).limit(1);
+
+  if (error) {
+    throw toDbError(error, "Vínculos de venda");
+  }
+}
 
 /** Grava o vinculo de uma venda com um acesso; a mesma venda reprocessada nao duplica. */
 export async function insertSaleGrants(db: SalesDb, grants: readonly SaleGrantInsert[]) {
@@ -489,7 +519,7 @@ export async function fetchSaleGrantsForEntitlements(db: SalesDb, entitlementIds
   return (data ?? []) as SaleGrantRow[];
 }
 
-export async function closeSaleGrants(db: SalesDb, ids: readonly string[], closedBy: NonNullable<SaleGrantRow["closed_by"]>) {
+export async function closeSaleGrants(db: SalesDb, ids: readonly string[], closedBy: Exclude<NonNullable<SaleGrantRow["closed_by"]>, "admin">) {
   if (ids.length === 0) {
     return;
   }

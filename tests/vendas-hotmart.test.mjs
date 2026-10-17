@@ -217,28 +217,69 @@ test("modelo da tela: situacao por plataforma, resumo do hub, mascara do e-mail 
   assert.equal(model.describeSecretState({ secretUpdatedAt: "2026-10-17T12:00:00.000Z", status: "configured" }, () => "17/10/2026 09:00"), "Token guardado em 17/10/2026 09:00.");
 });
 
-test("vinculo venda -> acesso: o que acontece com o acesso quando a venda e desfeita", () => {
-  const grant = (overrides) => ({ closed_at: null, opened: true, previous_ends_at: null, subscription_code: null, transaction_id: "T2", ...overrides });
+test("vinculo venda -> acesso: a decisao olha o historico inteiro do acesso, e a ordem dos reembolsos nao muda o resultado", () => {
+  let seq = 0;
+  const grant = (overrides) => ({
+    closed_at: null,
+    closed_by: null,
+    created_at: `2026-10-${String(10 + seq++).padStart(2, "0")}T00:00:00Z`,
+    opened: true,
+    previous_ends_at: null,
+    subscription_code: null,
+    transaction_id: "T2",
+    ...overrides
+  });
+  const decide = (grants, { subscriptions = [], transactions = ["T2"], provider = "hotmart", rowProvider = "hotmart" } = {}) =>
+    model.decideEntitlementAfterSale({
+      closingSubscriptionCodes: new Set(subscriptions),
+      closingTransactionIds: new Set(transactions),
+      eventProvider: provider,
+      grants,
+      rowSourceProvider: rowProvider
+    });
 
   // A compra que abriu o acesso e a unica: fecha.
-  assert.equal(model.decideOnClosedGrant(grant({}), [grant({})]), "close");
-  // Produto comprado sozinho (T1) e depois num pacote (T2): o reembolso do pacote mantem o produto.
-  assert.equal(model.decideOnClosedGrant(grant({ opened: false }), [grant({ transaction_id: "T1" }), grant({ opened: false })]), "keep_sustained");
-  // T1 ja reembolsada (vinculo fechado) nao sustenta mais.
-  assert.equal(model.decideOnClosedGrant(grant({}), [grant({ closed_at: "2026-10-17T00:00:00Z", transaction_id: "T1" }), grant({})]), "close");
-  // Venda que so estendeu um acesso da equipe com prazo: o prazo volta.
-  assert.equal(model.decideOnClosedGrant(grant({ opened: false, previous_ends_at: "2099-06-30T12:00:00Z" }), [grant({ opened: false, previous_ends_at: "2099-06-30T12:00:00Z" })]), "restore_deadline");
-  // Venda que so estendeu um acesso da equipe sem prazo: nada a desfazer.
-  assert.equal(model.decideOnClosedGrant(grant({ opened: false }), [grant({ opened: false })]), "keep_other_origin");
-  // Renovacao de assinatura (T2, mesma assinatura S de T1): cobrancas da mesma assinatura nao se sustentam; fecha.
+  assert.deepEqual(decide([grant({})]), { kind: "close" });
+  // Produto comprado sozinho (T1) e depois num pacote (T2), em qualquer ordem de reembolso: o que sobra sustenta; o ultimo fecha.
+  const t1 = grant({ transaction_id: "T1" });
+  const t2 = grant({ opened: false });
+  assert.deepEqual(decide([t1, t2]), { kind: "keep_sustained" }, "reembolso do pacote: a compra avulsa sustenta");
+  assert.deepEqual(decide([t1, t2], { transactions: ["T1"] }), { kind: "keep_sustained" }, "reembolso da avulsa: o pacote sustenta");
+  assert.deepEqual(decide([{ ...t1, closed_at: "2026-10-17T00:00:00Z", closed_by: "refund" }, t2]), { kind: "close" }, "T1 ja reembolsada nao sustenta; T1 abriu -> fecha");
+  assert.deepEqual(decide([t1, { ...t2, closed_at: "2026-10-17T00:00:00Z", closed_by: "refund" }], { transactions: ["T1"] }), { kind: "close" }, "ordem inversa: mesmo resultado");
+  // Venda que so estendeu um acesso da equipe com prazo: o prazo volta; sem prazo: nada a desfazer.
+  assert.deepEqual(decide([grant({ opened: false, previous_ends_at: "2099-06-30T12:00:00Z" })]), { endsAt: "2099-06-30T12:00:00Z", kind: "restore_deadline" });
+  assert.deepEqual(decide([grant({ opened: false })]), { kind: "keep_other_origin" });
+  // Duas compras sobre um acesso da equipe com prazo D: a primeira guardou D, a segunda ja achou o acesso sem prazo. Qualquer ordem devolve D no fim.
+  const d1 = grant({ opened: false, previous_ends_at: "2099-06-30T12:00:00Z", transaction_id: "T1" });
+  const d2 = grant({ opened: false });
+  assert.deepEqual(decide([d1, d2], { transactions: ["T1"] }), { kind: "keep_sustained" });
+  assert.deepEqual(decide([{ ...d1, closed_at: "2026-10-17T00:00:00Z", closed_by: "refund" }, d2]), { endsAt: "2099-06-30T12:00:00Z", kind: "restore_deadline" });
+  assert.deepEqual(decide([d1, { ...d2, closed_at: "2026-10-17T00:00:00Z", closed_by: "refund" }], { transactions: ["T1"] }), { endsAt: "2099-06-30T12:00:00Z", kind: "restore_deadline" });
+  // Assinatura S: cobrancas nao se sustentam entre si. A renovacao (T2) reembolsada fecha o acesso que a primeira cobranca abriu...
   const s1 = grant({ subscription_code: "S", transaction_id: "T1" });
-  const s2 = grant({ opened: false, subscription_code: "S", transaction_id: "T2" });
-  assert.equal(model.isSustainedByAnotherSale(s2, [s1, s2]), false);
-  assert.equal(model.decideOnClosedGrant(s2, [s1, s2]), "close");
+  const s2 = grant({ opened: false, subscription_code: "S" });
+  assert.deepEqual(decide([s1, s2]), { kind: "close" });
+  assert.deepEqual(decide([s1, s2], { subscriptions: ["S"], transactions: ["T1", "T2"] }), { kind: "close" }, "cancelamento da assinatura");
+  // ...mas NUNCA o que a equipe deu: assinatura que so estendeu um acesso da equipe (nenhuma cobranca abriu) mantem ou devolve o prazo.
+  const e1 = grant({ opened: false, subscription_code: "S", transaction_id: "T1" });
+  const e2 = grant({ opened: false, subscription_code: "S" });
+  assert.deepEqual(decide([e1, e2]), { kind: "keep_other_origin" }, "reembolso da renovacao sobre acesso vitalicio da equipe");
+  assert.deepEqual(decide([e1, e2], { subscriptions: ["S"], transactions: ["T1", "T2"] }), { kind: "keep_other_origin" }, "cancelamento");
+  assert.deepEqual(decide([{ ...e1, previous_ends_at: "2099-06-30T12:00:00Z" }, e2], { subscriptions: ["S"], transactions: ["T1", "T2"] }), { endsAt: "2099-06-30T12:00:00Z", kind: "restore_deadline" }, "a equipe tinha dado prazo: volta");
   // Outra assinatura (S2) ou compra avulsa sustentam.
-  assert.equal(model.decideOnClosedGrant(s2, [grant({ subscription_code: "S2", transaction_id: "T0" }), s1, s2]), "keep_sustained");
-  // Assinatura que so estendeu um acesso da equipe sem prazo (primeira cobranca): fica com a equipe.
-  assert.equal(model.decideOnClosedGrant(grant({ opened: false, subscription_code: "S9" }), [grant({ opened: false, subscription_code: "S9" })]), "keep_other_origin");
+  assert.deepEqual(decide([grant({ subscription_code: "S2", transaction_id: "T0" }), s1, s2]), { kind: "keep_sustained" });
+  // A equipe revogou e fechou os vinculos (admin); uma compra nova (T3) reabriu: o reembolso dela fecha, o vinculo antigo nao sustenta.
+  const a0 = grant({ closed_at: "2026-10-17T00:00:00Z", closed_by: "admin", transaction_id: "T0" });
+  assert.deepEqual(decide([a0, grant({ transaction_id: "T3" })], { transactions: ["T3"] }), { kind: "close" });
+  // Reembolso de uma venda cujos vinculos a equipe ja fechou (reabriu, revogou ou suspendeu): fica com a equipe.
+  assert.deepEqual(decide([a0], { transactions: ["T0"] }), { kind: "keep_team" });
+  // Acesso que a venda abriu, mas cuja origem hoje e outra (a equipe o reabriu antes de os vinculos serem fechados por admin): fica com a equipe.
+  assert.deepEqual(decide([grant({})], { rowProvider: "manual" }), { kind: "keep_team" });
+  // Sem vinculo nenhum, nao ha o que decidir pela venda.
+  assert.deepEqual(decide([]), { kind: "keep_other_origin" });
+  assert.equal(model.pendingAttentionMessage(0), null);
+  assert.equal(model.pendingAttentionMessage(2), "2 vendas com erro ou presa aguardando reprocesso.");
 });
 
 test("Hoje > Novos acessos: o rodape diz de onde vieram os acessos, maiores primeiro", () => {

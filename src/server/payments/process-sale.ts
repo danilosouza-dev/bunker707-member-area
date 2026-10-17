@@ -9,21 +9,28 @@ import "server-only";
 // - compra aprovada: conta criada ou encontrada pelo e-mail e produto(s) liberados sem prazo (pacote =
 //   todos os produtos dele, de uma vez, num e-mail so; produtos vendidos junto no mesmo pedido, os order
 //   bumps da Ticto, entram na mesma liberacao quando o codigo deles esta ligado, e o que nao esta ligado
-//   fica escrito no detalhe sem bloquear o resto); cada (venda, acesso) vira um vinculo em
+//   fica escrito no detalhe sem bloquear o resto). Cada (venda, acesso) vira um vinculo em
 //   sale_grants dizendo se a venda ABRIU o acesso ou so ESTENDEU um acesso aberto (e que prazo ele
-//   tinha). Compra que ja tem reembolso ou chargeback registrado nao libera (reprocesso ou reenvio fora
-//   de ordem). Confirmacao de compra anterior (Hotmart: fim da garantia) so libera para quem nunca teve
-//   acesso ao produto: nunca reabre acesso suspenso ou revogado;
-// - reembolso e chargeback fecham os vinculos daquela venda (pela transacao) e so entao decidem cada
-//   acesso: outra compra paga que o sustenta (outra transacao, de outra assinatura ou avulsa) -> fica;
-//   a venda tinha so estendido um acesso de outra origem com prazo -> o prazo volta; a venda abriu o
-//   acesso, ou e uma cobranca de assinatura -> revogado. Assinatura cancelada faz o mesmo pelos vinculos
-//   da assinatura (Hotmart: subscriber.code; Ticto: subscriptions[].id), suspendendo; a reativacao
-//   (Ticto: uncanceled) reabre o vinculo que o cancelamento fechou. Acesso que a equipe reabriu depois
-//   fica com a equipe;
+//   tinha). Sem a tabela de vinculos no banco nenhuma venda libera acesso (erro, nao liberacao sem
+//   registro). Acesso que ja existia ganha o vinculo ANTES da liberacao; acesso novo, logo depois; o
+//   reprocesso de uma falha no meio reconhece o acesso que a propria venda abriu (source_event_id) e
+//   grava o vinculo certo. Compra que ja tem reembolso ou chargeback registrado nao libera (reprocesso
+//   ou reenvio fora de ordem). Confirmacao de compra anterior (Hotmart: fim da garantia) so libera para
+//   quem nunca teve acesso ao produto: nunca reabre acesso suspenso ou revogado. Reativacao de assinatura
+//   com a mesma transacao (Ticto: uncanceled) reabre o vinculo que o cancelamento fechou, para ele voltar
+//   a sustentar o acesso;
+// - reembolso, chargeback e assinatura cancelada decidem cada acesso olhando o HISTORICO INTEIRO dos
+//   vinculos dele (decideEntitlementAfterSale em model.ts), nao so o vinculo que esta sendo desfeito:
+//   assim a ordem dos reembolsos nao muda o resultado. Outra compra paga sustenta -> fica; o vinculo
+//   mais antigo abriu o acesso -> revoga (ou suspende, no cancelamento); so estendeu um acesso de outra
+//   origem com prazo -> o prazo volta; sem prazo -> fica; a equipe ja revogou, suspendeu ou reabriu o
+//   acesso depois (vinculos fechados por `admin`) -> fica com a equipe. Primeiro age, e so depois fecha
+//   os vinculos da venda: uma falha no meio deixa tudo para o reprocesso refazer. O cancelamento com o
+//   codigo da assinatura desfaz a assinatura inteira, mesmo quando tambem traz a transacao (Ticto);
 // - o que nao da para fazer (evento que nao muda acesso, produto sem codigo ligado, pacote em rascunho
-//   na compra, aluno sem conta) e IGNORADO com o motivo escrito, nunca erro;
-// - erro de verdade (payload sem e-mail, falha do banco) sobe para quem chamou marcar `failed`.
+//   na compra, aluno sem conta, assinatura sem cobranca registrada) e IGNORADO com o motivo escrito;
+// - erro de verdade (payload sem e-mail, falha do banco, banco sem a tabela de vinculos) sobe para quem
+//   chamou marcar `failed`.
 
 import { findAccountByEmail, normalizeEmail } from "@/server/students/accounts";
 import { applyAccessAction, provisionStudentAccess, restoreEntitlements } from "@/server/students/access";
@@ -31,13 +38,15 @@ import { accessStateOf, isAccessOpen, targetTypeForContentKind } from "@/server/
 import {
   fetchContentKinds,
   fetchEntitlements,
+  fetchEntitlementsByIds,
   fetchProfileByEmail,
   findEntitlementForTarget,
   type EntitlementRow,
   type StudentsDb
 } from "@/server/students/store";
-import { SALES_PROVIDER_LABELS, decideOnClosedGrant, type SaleOutcome } from "./model";
+import { SALES_PROVIDER_LABELS, decideEntitlementAfterSale, type EntitlementAfterSaleDecision, type SaleGrantLike, type SaleOutcome } from "./model";
 import {
+  assertSaleGrantsAvailable,
   closeSaleGrants,
   fetchSaleGrantsBySubscription,
   fetchSaleGrantsByTransaction,
@@ -46,6 +55,8 @@ import {
   hasClosingEventForTransaction,
   insertSaleGrants,
   reopenSubscriptionCanceledGrants,
+  type SaleGrantInsert,
+  type SaleGrantRow,
   type SalesDb
 } from "./store";
 import type { NormalizedSaleEvent, SalesProvider } from "./types";
@@ -162,8 +173,8 @@ export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Pr
     return grantPurchase(db, { ...input, lines: saleLines(event) });
   }
 
-  // Reembolso, chargeback e cancelamento fecham os vinculos da venda (sale_grants): os produtos vendidos
-  // junto na mesma compra tem vinculo da mesma transacao e entram sozinhos.
+  // Reembolso, chargeback e cancelamento decidem pelos vinculos da venda (sale_grants): os produtos
+  // vendidos junto na mesma compra tem vinculo da mesma transacao e entram sozinhos.
   return removeAccess(db, { ...input, target: await resolveTarget(db, event.provider, event.externalProductId) });
 }
 
@@ -259,6 +270,31 @@ function withSaleNotes(result: SaleProcessingResult, input: { notes: string[]; r
  * Compra aprovada
  * ---------------------------------------------------------------------------------------------- */
 
+/**
+ * O vinculo de UMA venda com UM acesso, a partir do acesso como estava antes dela (ou de nada, quando o
+ * acesso nasce agora). Acesso fechado que a propria venda abriu numa tentativa anterior (reprocesso
+ * depois de uma falha no meio) continua "aberto por ela", e nao "estendido".
+ */
+function saleGrantFor(
+  event: NormalizedSaleEvent,
+  input: { entitlementId: string; previous: EntitlementRow | null; now: number; productId: string; userId: string; webhookEventId: string | null }
+): SaleGrantInsert {
+  const wasOpen = input.previous ? isOpenRow(input.previous, input.now) : false;
+  const ownedBySale = input.previous ? entitlementBelongsToSale(input.previous, event) : false;
+
+  return {
+    entitlementId: input.entitlementId,
+    opened: !wasOpen || ownedBySale,
+    previousEndsAt: wasOpen && !ownedBySale ? (input.previous?.ends_at ?? null) : null,
+    productId: input.productId,
+    provider: event.provider,
+    subscriptionCode: event.subscriptionCode,
+    transactionId: saleSourceEventId(event),
+    userId: input.userId,
+    webhookEventId: input.webhookEventId
+  };
+}
+
 async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: SaleLine[] }): Promise<SaleProcessingResult> {
   const { event } = input;
   const studentsDb = db as StudentsDb;
@@ -297,6 +333,9 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
     return ignored(`A compra ${event.transactionId} já tem reembolso ou chargeback registrado na ${providerLabel}; acesso não liberado.`, base);
   }
 
+  // Nenhuma venda libera acesso sem poder registrar o vinculo (banco sem a migracao 202610170008).
+  await assertSaleGrantsAvailable(db);
+
   const account = await findAccountByEmail(studentsDb, email);
   const now = Date.now();
   // Retrato dos acessos ANTES da venda: diz se ela abriu ou so estendeu cada um (e que prazo havia).
@@ -324,6 +363,24 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
     productIds = withoutAccess;
   }
 
+  const webhookEventId = input.webhookEventId ?? null;
+
+  // Acesso que ja existe (aberto ou fechado) ganha o vinculo ANTES da liberacao: se a liberacao falhar no
+  // meio, o reprocesso encontra o vinculo com o prazo que havia (a mesma venda nao duplica o vinculo).
+  if (account) {
+    const existingGrants = productIds.flatMap((productId) => {
+      const previous = beforeByTarget.get(productId);
+
+      return previous ? [saleGrantFor(event, { entitlementId: previous.id, now, previous, productId, userId: account.id, webhookEventId })] : [];
+    });
+    await insertSaleGrants(db, existingGrants);
+    // Reativacao da assinatura com a mesma transacao (Ticto: uncanceled): o vinculo que o cancelamento
+    // fechou volta a valer, para sustentar o acesso de novo (ex.: um reembolso de OUTRA compra depois
+    // nao tira o acesso que a assinatura reativada paga). Fechado pela equipe (admin), por reembolso ou
+    // por chargeback nao reabre.
+    await reopenSubscriptionCanceledGrants(db, existingGrants);
+  }
+
   // Conta que ja existe: nome e telefone so preenchem o que estiver vazio (a venda nao apaga o cadastro).
   const profile = await fetchProfileByEmail(studentsDb, email);
   const fullName = profile?.full_name?.trim() || event.buyer.name?.trim() || email.split("@")[0];
@@ -348,37 +405,16 @@ async function grantPurchase(db: SalesDb, input: ProcessSaleInput & { lines: Sal
     studentsDb
   );
 
-  // Vinculo venda -> acesso: por produto liberado, se a venda abriu o acesso ou so o estendeu.
+  // Acessos que nasceram agora: o vinculo vem logo depois (a venda abriu cada um deles).
   const after = await fetchEntitlements(studentsDb, { userId: result.id });
-  const grants = result.grantedProductIds.flatMap((productId) => {
+  const newGrants = result.grantedProductIds.flatMap((productId) => {
     const row = after.find((candidate) => candidate.target_id === productId);
 
-    if (!row) {
-      return [];
-    }
-
-    const previous = beforeByTarget.get(productId);
-    const wasOpen = previous ? isOpenRow(previous, now) : false;
-
-    return [
-      {
-        entitlementId: row.id,
-        opened: !wasOpen,
-        previousEndsAt: wasOpen ? (previous?.ends_at ?? null) : null,
-        productId,
-        provider: event.provider,
-        subscriptionCode: event.subscriptionCode,
-        transactionId: saleSourceEventId(event),
-        userId: result.id,
-        webhookEventId: input.webhookEventId ?? null
-      }
-    ];
+    return row && !beforeByTarget.has(productId)
+      ? [saleGrantFor(event, { entitlementId: row.id, now, previous: null, productId, userId: result.id, webhookEventId })]
+      : [];
   });
-  await insertSaleGrants(db, grants);
-  // Reativacao da assinatura com a mesma transacao (Ticto: uncanceled): o vinculo que o cancelamento
-  // fechou volta a valer, para um reembolso depois achar o acesso reaberto. Reembolso e chargeback nunca
-  // reabrem (a compra ja desfeita nem chega aqui, por hasClosingEventForTransaction).
-  await reopenSubscriptionCanceledGrants(db, grants);
+  await insertSaleGrants(db, newGrants);
 
   const granted = result.grantedProductIds.length;
   const what = target.kind === "combo" ? `pacote ${target.name} (${plural(granted, "produto", "produtos")})` : plural(granted, "produto liberado", "produtos liberados");
@@ -412,12 +448,37 @@ export function entitlementBelongsToSale(row: Pick<EntitlementRow, "source_event
   return row.source_event_id === sourceId || Boolean(row.source_event_id?.startsWith(`${sourceId}:`));
 }
 
+const CLOSED_BY_BY_TYPE = { chargeback: "chargeback", refund: "refund", subscription_canceled: "subscription_canceled" } as const;
+
+const KEEP_REASONS: Record<Exclude<EntitlementAfterSaleDecision["kind"], "close" | "restore_deadline">, string> = {
+  keep_other_origin: "o acesso veio de outra origem (equipe ou outra compra)",
+  keep_sustained: "outra compra paga sustenta o acesso",
+  keep_team: "a equipe já decidiu sobre esse acesso depois da venda"
+};
+
+/**
+ * Vinculo "virtual" de um acesso que nasceu desta venda mas nao tem vinculo gravado (venda anterior ao
+ * registro, ou cancelamento sem o codigo da assinatura): entra na decisao como se a venda o tivesse aberto.
+ */
+function legacyGrantFor(row: EntitlementRow, event: NormalizedSaleEvent): SaleGrantLike {
+  return {
+    closed_at: null,
+    closed_by: null,
+    created_at: row.created_at,
+    opened: true,
+    previous_ends_at: null,
+    subscription_code: event.subscriptionCode,
+    transaction_id: saleSourceEventId(event)
+  };
+}
+
 async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: ResolvedTarget | null }): Promise<SaleProcessingResult> {
   const { event, target } = input;
   const studentsDb = db as StudentsDb;
   const base: TargetRef = { comboId: target?.comboId ?? null, productId: target?.productId ?? null };
   const action = event.type === "subscription_canceled" ? "suspend" : "revoke";
-  const closedBy = event.type === "subscription_canceled" ? "subscription_canceled" : event.type === "chargeback" ? "chargeback" : "refund";
+  const closedStatus = action === "revoke" ? "revoked" : "suspended";
+  const closedBy = CLOSED_BY_BY_TYPE[event.type as keyof typeof CLOSED_BY_BY_TYPE];
   const context = { actorId: null, source: "webhook" as const, sourceEventId: saleSourceEventId(event), sourceProvider: event.provider };
 
   if (!event.buyer.email) {
@@ -427,89 +488,89 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
   const email = normalizeEmail(event.buyer.email);
   const account = await findAccountByEmail(studentsDb, email);
 
-  // Vinculos desta venda: pela transacao (reembolso, chargeback) ou pela assinatura (cancelamento). O
-  // cancelamento da Ticto tambem traz a transacao; com o codigo da assinatura, vale a assinatura inteira
-  // (todas as cobrancas), como na Hotmart.
-  const bySubscription = event.subscriptionCode && (event.type === "subscription_canceled" || !event.transactionId);
-  const saleGrants = bySubscription
-    ? await fetchSaleGrantsBySubscription(db, event.provider, event.subscriptionCode as string)
-    : event.transactionId
-      ? await fetchSaleGrantsByTransaction(db, event.provider, event.transactionId)
+  // Vinculos desta venda: pela transacao (reembolso, chargeback) ou pela assinatura (cancelamento), em
+  // qualquer situacao: um vinculo ja fechado numa tentativa que falhou no meio ainda manda no acesso. O
+  // cancelamento da Ticto traz a transacao da ultima cobranca e o codigo da assinatura: vale a assinatura
+  // inteira (todas as cobrancas); sem cobranca registrada com o codigo, a transacao.
+  const bySubscription =
+    event.subscriptionCode && (event.type === "subscription_canceled" || !event.transactionId)
+      ? await fetchSaleGrantsBySubscription(db, event.provider, event.subscriptionCode)
       : [];
-  const openGrants = saleGrants.filter((grant) => grant.closed_at === null);
+  const saleGrants: SaleGrantRow[] =
+    bySubscription.length > 0 ? bySubscription : event.transactionId ? await fetchSaleGrantsByTransaction(db, event.provider, event.transactionId) : [];
 
-  if (saleGrants.length === 0 && !account) {
-    return ignored(event.transactionId || event.subscriptionCode ? "Nenhuma venda registrada com essa compra e nenhum aluno com o e-mail dela; nada a revogar." : unlinkedMessage(event), base);
+  // Cancelamento com o codigo da assinatura e sem a transacao, mas nenhuma cobranca dela registrada: nao
+  // adivinha pelo produto (poderia suspender um acesso pago a parte); quem sabe de qual venda se trata e a
+  // plataforma. Com a transacao (Ticto), o acesso que nasceu dela ainda e achado (legacyRows).
+  if (saleGrants.length === 0 && event.type === "subscription_canceled" && event.subscriptionCode && !event.transactionId) {
+    return ignored(`Nenhuma cobrança da assinatura ${event.subscriptionCode} está registrada aqui; nada a suspender. Revise em Alunos se for o caso.`, { ...base, userId: account?.id ?? null });
   }
 
-  const userId = openGrants[0]?.user_id ?? saleGrants[0]?.user_id ?? account?.id ?? null;
-  const rows = userId ? await fetchEntitlements(studentsDb, { userId }) : [];
-  const rowById = new Map(rows.map((row) => [row.id, row] as const));
+  if (saleGrants.length === 0 && !account) {
+    return ignored(event.transactionId ? "Nenhuma venda registrada com essa compra e nenhum aluno com o e-mail dela; nada a revogar." : unlinkedMessage(event), base);
+  }
+
+  const userId = saleGrants[0]?.user_id ?? account?.id ?? null;
+  const userRows = userId ? await fetchEntitlements(studentsDb, { userId }) : [];
+  const grantEntitlementIds = Array.from(new Set(saleGrants.map((grant) => grant.entitlement_id)));
+
+  // Acessos desta venda sem vinculo gravado: com a compra, o que nasceu dela (source_event_id); no
+  // cancelamento sem codigo, os acessos desta plataforma nos produtos do pacote ou produto cancelado.
+  const legacyRows = userRows.filter(
+    (row) =>
+      !grantEntitlementIds.includes(row.id) &&
+      (event.transactionId ? entitlementBelongsToSale(row, event) : row.source_provider === event.provider && (target?.productIds ?? []).includes(row.target_id))
+  );
+
+  // Os acessos em jogo vem pelos ids dos vinculos (mesmo que o aluno tenha trocado o e-mail), mais os sem vinculo.
+  const rows = [...(await fetchEntitlementsByIds(studentsDb, grantEntitlementIds)), ...legacyRows];
+  const allGrants = await fetchSaleGrantsForEntitlements(db, rows.map((row) => row.id));
+  const closingTransactionIds = new Set([...saleGrants.map((grant) => grant.transaction_id), saleSourceEventId(event)]);
+  const closingSubscriptionCodes = new Set(event.subscriptionCode ? [event.subscriptionCode] : []);
   const now = Date.now();
   const changed: string[] = [];
   const restored: string[] = [];
   const kept: string[] = [];
   const reasons = new Set<string>();
 
-  // Sem vinculo gravado (venda anterior ao registro, ou cancelamento sem codigo): acesso que a propria
-  // venda abriu, pelo source_event_id; no cancelamento sem codigo, os acessos desta plataforma no produto.
-  const legacyRows =
-    saleGrants.length > 0
-      ? []
-      : event.transactionId
-        ? rows.filter((row) => entitlementBelongsToSale(row, event))
-        : rows.filter((row) => row.source_provider === event.provider && (target?.productIds ?? []).includes(row.target_id));
+  // Decide tudo primeiro, depois age; os vinculos da venda so fecham no fim, quando tudo deu certo.
+  for (const row of rows) {
+    const history: SaleGrantLike[] = allGrants.filter((grant) => grant.entitlement_id === row.id);
+    // Acesso desta venda sem vinculo dela (venda anterior ao registro), talvez com vinculos de outras
+    // compras depois: a venda entra no historico como a que abriu o acesso, na data do acesso.
+    const coversSale = history.some(
+      (grant) => closingTransactionIds.has(grant.transaction_id) || (grant.subscription_code !== null && closingSubscriptionCodes.has(grant.subscription_code))
+    );
+    const decision = decideEntitlementAfterSale({
+      closingSubscriptionCodes,
+      closingTransactionIds,
+      eventProvider: event.provider,
+      grants: coversSale ? history : [legacyGrantFor(row, event), ...history],
+      rowSourceProvider: row.source_provider
+    });
 
-  if (openGrants.length > 0) {
-    await closeSaleGrants(db, openGrants.map((grant) => grant.id), closedBy);
-    const allGrants = await fetchSaleGrantsForEntitlements(db, Array.from(new Set(openGrants.map((grant) => grant.entitlement_id))));
+    if (decision.kind === "restore_deadline") {
+      const alreadyBack = row.status === "active" && row.ends_at !== null && Date.parse(row.ends_at) === Date.parse(decision.endsAt);
 
-    for (const grant of openGrants) {
-      const row = rowById.get(grant.entitlement_id);
-
-      if (!row) {
-        continue;
-      }
-
-      // A venda tinha aberto o acesso, mas a equipe o reabriu depois (origem manual): fica com a equipe.
-      if (grant.opened && row.source_provider !== event.provider) {
+      if (alreadyBack) {
         kept.push(row.target_id);
-        reasons.add("reaberto pela equipe");
+        reasons.add("o prazo anterior já estava de volta");
         continue;
       }
 
-      const decision = decideOnClosedGrant(grant, allGrants.filter((candidate) => candidate.entitlement_id === grant.entitlement_id));
-
-      if (decision === "keep_sustained") {
-        kept.push(row.target_id);
-        reasons.add("outra compra paga sustenta o acesso");
-        continue;
-      }
-
-      if (decision === "keep_other_origin") {
-        kept.push(row.target_id);
-        reasons.add("o acesso veio de outra origem (equipe ou outra compra)");
-        continue;
-      }
-
-      if (decision === "restore_deadline") {
-        // A venda tinha estendido um acesso de outra origem: o prazo anterior volta, o acesso continua.
-        await restoreEntitlements({ ...context, snapshots: [{ endsAt: grant.previous_ends_at, id: row.id, startsAt: row.starts_at, status: row.status }] }, studentsDb);
-        restored.push(row.target_id);
-        continue;
-      }
-
-      if (row.status === (action === "revoke" ? "revoked" : "suspended")) {
-        continue;
-      }
-
-      await applyAccessAction({ ...context, action, entitlementId: row.id, userId: row.user_id }, studentsDb);
-      changed.push(row.target_id);
+      // A venda tinha estendido um acesso de outra origem: o prazo anterior volta, o acesso continua.
+      await restoreEntitlements({ ...context, snapshots: [{ endsAt: decision.endsAt, id: row.id, startsAt: row.starts_at, status: row.status }] }, studentsDb);
+      restored.push(row.target_id);
+      continue;
     }
-  }
 
-  for (const row of legacyRows) {
-    if (row.status === (action === "revoke" ? "revoked" : "suspended")) {
+    if (decision.kind !== "close") {
+      kept.push(row.target_id);
+      reasons.add(KEEP_REASONS[decision.kind]);
+      continue;
+    }
+
+    if (row.status === closedStatus) {
       continue;
     }
 
@@ -517,17 +578,23 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
     changed.push(row.target_id);
   }
 
+  const openGrantIds = saleGrants.filter((grant) => grant.closed_at === null).map((grant) => grant.id);
+
+  if (openGrantIds.length > 0) {
+    await closeSaleGrants(db, openGrantIds, closedBy);
+  }
+
   if (changed.length === 0 && restored.length === 0) {
     if (kept.length > 0) {
       return ignored(`Nada mudou: ${[...reasons].join("; ")}. Revise em Alunos se for o caso.`, { ...base, userId });
     }
 
-    const otherOriginOpen = rows.some((row) => (target ? target.productIds.includes(row.target_id) : true) && isOpenRow(row, now));
+    const otherOriginOpen = userRows.some((row) => (target ? target.productIds.includes(row.target_id) : true) && isOpenRow(row, now));
 
     return ignored(
-      otherOriginOpen
+      otherOriginOpen && rows.length === 0
         ? "O acesso desse aluno veio de outra origem (equipe ou outra compra), não desta venda; nada mudou. Revise em Alunos se for o caso."
-        : saleGrants.length > 0 || legacyRows.length > 0
+        : rows.length > 0
           ? "O acesso desta compra já estava fechado; nada mudou."
           : "O aluno não tinha acesso desta compra; nada mudou.",
       { ...base, userId }

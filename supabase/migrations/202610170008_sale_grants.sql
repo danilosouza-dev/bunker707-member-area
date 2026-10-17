@@ -31,7 +31,9 @@ create table if not exists public.sale_grants (
   previous_ends_at timestamptz,
   webhook_event_id uuid references public.webhook_events(id) on delete set null,
   closed_at timestamptz,
-  closed_by text check (closed_by is null or closed_by in ('refund', 'chargeback', 'subscription_canceled')),
+  -- admin: a equipe revogou, suspendeu, reativou ou reabriu o acesso; as vendas de antes (abertas ou ja
+  -- fechadas por reembolso) deixam de mandar nele.
+  closed_by text check (closed_by is null or closed_by in ('refund', 'chargeback', 'subscription_canceled', 'admin')),
   created_at timestamptz not null default now()
 );
 
@@ -52,6 +54,30 @@ alter table public.webhook_events drop constraint if exists webhook_events_outco
 alter table public.webhook_events
   add constraint webhook_events_outcome_check
   check (outcome is null or outcome in ('access_granted', 'access_revoked', 'access_suspended', 'access_restored', 'ignored', 'failed'));
+
+-- Acessos abertos por venda antes desta tabela (se houver): um vinculo por (compra aprovada, acesso),
+-- com o codigo da assinatura lido do payload guardado. Precisa de webhook_events.transaction_id (0005).
+insert into public.sale_grants (provider, transaction_id, subscription_code, user_id, entitlement_id, product_id, opened, webhook_event_id)
+select distinct on (w.provider, w.transaction_id, e.id)
+       w.provider,
+       w.transaction_id,
+       left(nullif(btrim(w.payload #>> '{data,subscription,subscriber,code}'), ''), 120),
+       e.user_id,
+       e.id,
+       e.target_id,
+       true,
+       w.id
+  from public.webhook_events w
+  join public.entitlements e
+    on e.user_id = w.user_id
+   and e.source_provider = w.provider
+   and (e.source_event_id = w.transaction_id or starts_with(e.source_event_id, w.transaction_id || ':'))
+ where w.normalized_type = 'purchase_approved'
+   and w.outcome = 'access_granted'
+   and w.transaction_id is not null
+   and e.status = 'active'
+ order by w.provider, w.transaction_id, e.id, w.received_at
+on conflict (provider, transaction_id, entitlement_id) do nothing;
 
 comment on table public.sale_grants is
   'Vinculo venda -> acesso: que compra (ou cobranca de assinatura) abriu ou estendeu cada entitlement. Reembolso, chargeback e cancelamento fecham o vinculo antes de mexer no acesso. Escrita somente pelo servidor.';

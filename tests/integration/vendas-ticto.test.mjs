@@ -46,6 +46,7 @@ const ASSINANTE = { email: "assinante.ticto@bunker707.test", nome: "Assinante da
 const COMPRADOR_PACOTE = { email: "comprador.pacote.ticto@bunker707.test", nome: "Comprador do Pacote" };
 const COMPRADOR_BUMP = { email: "comprador.bump.ticto@bunker707.test", nome: "Comprador do Bump" };
 const COMPRADOR_MISTO = { email: "comprador.misto.ticto@bunker707.test", nome: "Comprador das Duas Plataformas" };
+const COMPRADOR_REATIVA = { email: "comprador.reativa.ticto@bunker707.test", nome: "Comprador que Reativou" };
 const TOKEN_HOTMART = "hottok-integracao-ticto-0123456789abcdef";
 const PREFIXO = "teste-ticto-";
 
@@ -135,9 +136,9 @@ async function limpar() {
   await desconectarVendas(db);
   // "7001" e o codigo da Hotmart que o teste do Acesso e venda grava junto, para provar que um nao mexe no outro.
   await limparVendasDeTeste(db, { codigos: [...Object.values(CODIGOS), "7001"], prefixoDoEvento: PREFIXO });
-  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email, COMPRADOR_BUMP.email, COMPRADOR_MISTO.email]), "Limpando a fila de e-mail de teste");
+  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email, COMPRADOR_BUMP.email, COMPRADOR_MISTO.email, COMPRADOR_REATIVA.email]), "Limpando a fila de e-mail de teste");
 
-  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE, COMPRADOR_BUMP, COMPRADOR_MISTO]) {
+  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE, COMPRADOR_BUMP, COMPRADOR_MISTO, COMPRADOR_REATIVA]) {
     await apagarContaDeTeste(db, conta.email);
   }
 }
@@ -523,6 +524,59 @@ test("reembolso da Ticto so tira o que nasceu da compra na Ticto: o curso pago a
   const chargeback = await post(payload({ bumps, email: COMPRADOR_MISTO.email, status: "chargeback", statusDate: "2026-10-21 10:00:00", transacao: "T-MISTO-0001" }));
   assert.equal((await chargeback.json()).outcome, "ignored");
   assert.equal(Object.fromEntries((await acessosDe(COMPRADOR_MISTO.email)).acessos.map((row) => [row.target_id, row.status]))[curso.id], "active");
+});
+
+/** Evento ficticio da Hotmart (webhook 2.0) para o comprador informado, pela rota de verdade. */
+async function postHotmart({ email, event, id, nome, transaction }) {
+  const response = await hotmartRoute.POST(
+    new Request("http://127.0.0.1:3100/api/webhooks/hotmart", {
+      body: JSON.stringify({
+        creation_date: Date.now(),
+        data: {
+          buyer: { email, name: nome },
+          product: { id: 7001, name: "Curso na Hotmart" },
+          purchase: { approved_date: Date.now(), status: event === "PURCHASE_APPROVED" ? "APPROVED" : "REFUNDED", transaction }
+        },
+        event,
+        id,
+        version: "2.0.0"
+      }),
+      headers: { "content-type": "application/json", host: "127.0.0.1:3100", "x-hotmart-hottok": TOKEN_HOTMART },
+      method: "POST"
+    })
+  );
+
+  return { body: await response.json(), status: response.status };
+}
+
+test("assinatura da Ticto reativada volta a sustentar o acesso: o reembolso da compra da Hotmart depois nao tira o curso", async () => {
+  // A Hotmart ja foi conectada no teste das duas plataformas; o curso tem o codigo 7001 na Hotmart e 8001 na Ticto.
+  const transacaoHotmart = `${PREFIXO}HP-REATIVA-0001`;
+  const comum = { assinatura: "6001", email: COMPRADOR_REATIVA.email, nome: COMPRADOR_REATIVA.nome, transacao: "T-REATIVA-0001" };
+  const statusDoCurso = async () => Object.fromEntries((await acessosDe(COMPRADOR_REATIVA.email)).acessos.map((row) => [row.target_id, row.status]))[curso.id];
+
+  // 1) Compra avulsa na Hotmart abre o curso.
+  const compraHotmart = await postHotmart({ email: COMPRADOR_REATIVA.email, event: "PURCHASE_APPROVED", id: `${PREFIXO}hotmart-reativa-1`, nome: COMPRADOR_REATIVA.nome, transaction: transacaoHotmart });
+  assert.equal(compraHotmart.body.outcome, "access_granted", JSON.stringify(compraHotmart.body));
+
+  // 2) Assinatura do mesmo curso na Ticto: o acesso ja estava aberto, a assinatura passa a sustenta-lo tambem.
+  assert.equal((await (await post(payload(comum))).json()).outcome, "access_granted");
+
+  // 3) Cancelamento da assinatura: a compra da Hotmart sustenta, o curso fica.
+  const cancelada = await (await post(payload({ ...comum, status: "subscription_canceled", statusDate: "2026-11-20 10:00:00" }))).json();
+  assert.equal(cancelada.outcome, "ignored", JSON.stringify(cancelada));
+  assert.equal(await statusDoCurso(), "active");
+  assert.deepEqual((await vinculosDe(["T-REATIVA-0001"])).map((row) => row.closed_by), ["subscription_canceled"]);
+
+  // 4) Reativacao: o vinculo da assinatura volta a valer.
+  assert.equal((await (await post(payload({ ...comum, status: "uncanceled", statusDate: "2026-11-21 10:00:00" }))).json()).outcome, "access_granted");
+  assert.deepEqual((await vinculosDe(["T-REATIVA-0001"])).map((row) => [row.opened, row.closed_by]), [[false, null]], "reaberto, como venda que so manteve um acesso ja aberto");
+
+  // 5) Reembolso da compra da Hotmart: a assinatura reativada da Ticto sustenta o curso.
+  const reembolsoHotmart = await postHotmart({ email: COMPRADOR_REATIVA.email, event: "PURCHASE_REFUNDED", id: `${PREFIXO}hotmart-reativa-2`, nome: COMPRADOR_REATIVA.nome, transaction: transacaoHotmart });
+  assert.equal(reembolsoHotmart.status, 200, JSON.stringify(reembolsoHotmart.body));
+  assert.equal(reembolsoHotmart.body.outcome, "ignored", JSON.stringify(reembolsoHotmart.body));
+  assert.equal(await statusDoCurso(), "active", "sem reabrir o vinculo na reativacao, este reembolso revogaria o curso que a assinatura paga");
 });
 
 /* ------------------------------------------------------------ Outros eventos e desconectar */
