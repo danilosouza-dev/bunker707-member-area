@@ -24,6 +24,13 @@ create index if not exists webhook_events_transaction_idx
   on public.webhook_events (provider, transaction_id)
   where transaction_id is not null;
 
+-- Eventos gravados antes desta coluna (se houver): a compra fica no payload guardado.
+update public.webhook_events
+   set transaction_id = left(btrim(payload #>> '{data,purchase,transaction}'), 200)
+ where provider = 'hotmart'
+   and transaction_id is null
+   and nullif(btrim(payload #>> '{data,purchase,transaction}'), '') is not null;
+
 comment on column public.webhook_events.transaction_id is
   'Id da compra na plataforma (Hotmart: purchase.transaction), igual em todos os eventos da mesma venda.';
 comment on column public.webhook_events.processing_started_at is

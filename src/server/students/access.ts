@@ -35,6 +35,7 @@ import {
 } from "./model";
 import type { AccessAction, BulkActionInput, ImportRowInput } from "./schemas";
 import {
+  closeSaleGrantsByTeam,
   deleteCohortMembership,
   fetchContentKinds,
   fetchEntitlement,
@@ -173,6 +174,12 @@ export async function grantResolvedProducts(
         starts_at: wasOpen ? existing.starts_at : nowIso,
         status: "active"
       });
+
+      // A equipe reabriu um acesso fechado: as vendas antigas dele deixam de mandar (um reembolso delas
+      // nao fecha o que a equipe acabou de liberar).
+      if (!wasOpen && input.source === "admin") {
+        await closeSaleGrantsByTeam(db, [existing.id]);
+      }
     } else {
       row = await insertEntitlement(db, {
         ends_at: input.endsAt,
@@ -461,6 +468,12 @@ export async function applyAccessAction(input: ApplyAccessActionInput, db: Stude
   }
 
   const row = await updateEntitlement(db, current.id, patch);
+
+  // A equipe revogou, suspendeu ou reativou: os vinculos de venda deste acesso deixam de contar. Uma
+  // compra nova depois disso abre um vinculo novo; o reembolso dela fecha so o que ela abriu.
+  if (input.source === "admin" && (input.action === "revoke" || input.action === "suspend" || input.action === "reactivate")) {
+    await closeSaleGrantsByTeam(db, [row.id]);
+  }
 
   await recordEvent(db, {
     entity_id: row.id,
