@@ -19,8 +19,9 @@ export async function createSupabaseServerClient() {
             cookieStore.set(name, value, options);
           });
         } catch {
-          // Server Components can read cookies but cannot always write them.
-          // Proxy (proxy.ts) refreshes sessions and applies Set-Cookie headers.
+          // Server Component le cookies mas nao pode grava-los: nas paginas, quem renova a sessao e grava o
+          // Set-Cookie e o proxy (src/proxy.ts). Em Route Handler e Server Action a gravacao funciona, e e
+          // este setAll que devolve o cookie renovado nas rotas /api, que o proxy nao valida (docs/06).
         }
       }
     }
