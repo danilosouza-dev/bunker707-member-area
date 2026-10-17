@@ -74,7 +74,7 @@ O produtor recebeu o e-mail de recuperacao em ingles (modelos padrao do Supabase
 | Modelo | Assunto |
 | --- | --- |
 | Confirm sign up | Confirme seu e-mail na Bunker707 |
-| Invite user | Seu acesso a Bunker707 esta pronto |
+| Invite user | Crie sua senha da Bunker707 (ate 17/10 a tarde era "Seu acesso a Bunker707 esta pronto", igual as boas-vindas do app, e o Gmail juntava os dois na mesma conversa) |
 | Magic link or OTP | Seu link de acesso a Bunker707 |
 | Change email address | Confirme a troca de e-mail na Bunker707 |
 | Reset password | Redefina sua senha da Bunker707 |
@@ -120,6 +120,8 @@ Corpos (HTML), na mesma ordem:
 <p><strong>{{ .Token }}</strong></p>
 <p>Se você não pediu este código, ignore esta mensagem.</p>
 ```
+
+Teste real em producao (17/10, aluno `gtd.danilosouza+teste@gmail.com`, entrega "Convite por e-mail"): chegam dois e-mails, o convite do Supabase (na hora) e as boas-vindas do app (no proximo tick, cerca de 1 minuto depois). Por isso o texto das boas-vindas cita o assunto do convite (`INVITE_EMAIL_SUBJECT` em `src/server/email/templates/welcome.ts`) em vez de dizer que ele "ainda vai chegar". Se o assunto do convite mudar no painel, mudar tambem essa constante.
 
 ### 2.5 O que vive so no painel do Supabase cloud e precisa ser recriado na migracao para a Hetzner
 
