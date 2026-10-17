@@ -240,6 +240,15 @@ export async function proxy(request: NextRequest) {
   requestHeaders.set("Content-Security-Policy", contentSecurityPolicy);
   requestHeaders.set("x-nonce", nonce);
   const pathname = request.nextUrl.pathname;
+
+  // Rota de API sai daqui so com a CSP e o nonce: cada handler valida (e renova) a sessao por conta
+  // propria (requireApiUser, requireApiRole, createSupabaseServerClient) ou usa token proprio (TV,
+  // tick de jobs, webhooks). Consultar o Auth aqui dobrava as chamadas nas rotas mais frequentes
+  // (poll e heartbeat do Modo TV, progresso, comentarios, tutor) sem decidir nada.
+  if (pathname.startsWith("/api/")) {
+    return secureResponse(NextResponse.next({ request: { headers: requestHeaders } }), contentSecurityPolicy);
+  }
+
   const needsUser = isProtectedPage(pathname);
   const publicPage = isPublicPage(pathname);
   const authConfigured = hasAuthConfig();

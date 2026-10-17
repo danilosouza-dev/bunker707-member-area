@@ -26,7 +26,7 @@ Politicas iniciais:
 Implementado no MVP atual:
 
 - Supabase Auth e usado como provedor de identidade;
-- o `proxy.ts` do Next.js (antigo `middleware.ts`) renova/valida sessao com `@supabase/ssr`: `getUser()` por padrao ou `getClaims()` com `AUTH_SESSION_STRATEGY=claims`; `getSession()` nunca decide acesso no servidor;
+- o `proxy.ts` do Next.js (antigo `middleware.ts`) renova/valida sessao com `@supabase/ssr` nas paginas: `getUser()` por padrao ou `getClaims()` com `AUTH_SESSION_STRATEGY=claims`; `getSession()` nunca decide acesso no servidor. Em `/api/*` o proxy nao consulta o Auth: o handler valida e renova a sessao sozinho (`requireApiUser`/`requireApiRole`, que gravam o cookie renovado porque Route Handlers podem escrever cookies) ou exige token proprio (receptor da TV, tick de jobs, webhooks);
 - com `claims`, uma sessao revogada e um `must_change_password` marcado depois do login so aparecem no proxy quando o JWT for renovado (ate 1 h), mas as paginas protegidas seguem validando com `getUser()` (uma vez por request via `React.cache`) e, se o JWT ainda marca `must_change_password`, o proxy confirma com `getUser()` antes de redirecionar; ative `claims` primeiro no staging e so depois de migrar o projeto para signing keys assimetricas;
 - `profiles`, `entitlements`, `student_events`, `lesson_progress`, `admin_roles`, `admin_functions` e todas as tabelas de comentarios/moderacao possuem RLS;
 - aluno pode ler/editar somente o proprio perfil, ler os proprios entitlements e gravar eventos proprios;
@@ -258,6 +258,8 @@ Custo conhecido com o PostHog ligado: como o layout raiz le a sessao, paginas pu
 ### CSP
 
 A CSP e montada por request em `src/proxy.ts` (nonce novo a cada pedido, `script-src 'self' 'nonce-...' 'strict-dynamic'`, `frame-ancestors 'none'`, `object-src 'none'`), que tambem manda pagina protegida sem sessao para `/login?next=` com `Cache-Control: private, no-store`. O arquivo precisa ficar em `src/`: com o app em `src/app`, o Next 16 so compila `src/proxy.ts` e ignora em silencio um `proxy.ts` na raiz. Como saber se o proxy entrou no build: o resumo do `next build` traz a linha `ƒ Proxy (Middleware)` e `.next/server/functions-config-manifest.json` tem a entrada `/_middleware` com `runtime: "nodejs"` e o matcher (o `middleware-manifest.json` fica vazio mesmo com o proxy, porque so lista proxies no runtime Edge).
+
+Em `/api/*` o proxy so acrescenta a CSP e o nonce e devolve o pedido, sem criar o cliente de sessao nem consultar o Supabase Auth (desde 17/10/2026; antes, cada pedido de API com cookie fazia um `getUser()` a mais que nao decidia nada, dobrando as chamadas ao Auth no poll e no heartbeat do Modo TV, no progresso, nos comentarios e no tutor). A decisao de acesso e, se preciso, a renovacao do cookie ficam no handler. `tests/proxy-rotas-de-api.test.mjs` chama o proxy com um cliente do Supabase falso e confere que nenhuma rota de API dispara `getUser()`/`getClaims()` enquanto uma pagina protegida com o mesmo cookie continua validando; o teste de ponta a ponta confere que rota de API com a sessao da aluna segue 200 com a CSP e que, sem sessao, e o handler quem responde 401.
 
 `upgrade-insecure-requests` entra so em producao e so quando o pedido chegou em https (`x-forwarded-proto` ou o protocolo do pedido): numa pagina http (next start na propria maquina, testes de ponta a ponta) o WebKit/Safari aplica a diretiva ate em `127.0.0.1` e busca scripts, CSS e fontes por https, e a pagina fica sem hidratar; o Chromium isenta a propria maquina, por isso o problema so aparecia no WebKit.
 
