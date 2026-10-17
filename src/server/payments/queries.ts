@@ -7,8 +7,8 @@ import { getConfiguredSiteOrigin, getHeadersOrigin } from "@/server/auth/site-or
 import { isSalesProviderSupported, getPaymentAdapter } from "./adapters";
 import {
   buildSalesWebhookUrl,
+  buyerLabel,
   canReprocessSaleEvent,
-  maskEmail,
   normalizeIntegrationStatus,
   normalizeSaleOutcome,
   SALES_PROVIDER_LABELS,
@@ -39,7 +39,9 @@ export type SalesProviderCard = {
 };
 
 export type SalesEventListItem = {
-  /** E-mail do comprador ja mascarado no servidor (`c***@dominio`): o inteiro nunca vai para o navegador. */
+  /** Depois da retencao de 12 meses: sem e-mail, sem payload e sem Reprocessar. */
+  anonymizedAt: string | null;
+  /** E-mail do comprador ja mascarado no servidor (`c***@dominio`): o inteiro nunca vai para o navegador. Depois da retencao, "Dados apagados (12 meses)". */
   buyerEmailMasked: string;
   canReprocess: boolean;
   detail: string | null;
@@ -161,8 +163,10 @@ export function toSalesEventListItem(
     null;
 
   return {
-    buyerEmailMasked: maskEmail(row.buyer_email),
-    canReprocess: canReprocessSaleEvent(row.processing_status, row.received_at, now),
+    anonymizedAt: row.anonymized_at,
+    buyerEmailMasked: buyerLabel({ anonymizedAt: row.anonymized_at, buyerEmail: row.buyer_email }),
+    // Venda anonimizada pela retencao nao tem payload para reler.
+    canReprocess: row.anonymized_at === null && canReprocessSaleEvent(row.processing_status, row.received_at, now),
     detail: row.outcome_detail,
     errorMessage: row.error_message,
     eventType: row.event_type,

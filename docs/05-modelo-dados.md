@@ -1319,7 +1319,8 @@ Guarda o evento bruto de plataformas externas (so depois do token conferido) e o
 - product_id, combo_id (alvo resolvido, sem chave estrangeira: o historico fica se o produto sair);
 - user_id -> auth.users (set null);
 - received_at, processed_at;
-- error_message (<= 2.000).
+- error_message (<= 2.000);
+- anonymized_at: quando a retencao de 12 meses apagou payload, buyer_email e error_message (migracao 202610170004).
 
 Obrigatorio:
 
@@ -1327,7 +1328,7 @@ Obrigatorio:
 - guardar payload bruto;
 - nao confiar no payload sem validacao: o acesso so muda por `entitlements`, via `src/server/students/access.ts`.
 
-Retencao: 12 meses (docs/17 §2.4); a rotina de limpeza entra na PR da retencao (migracao `202610170004`/`202610170006`).
+Retencao: 12 meses depois de `received_at` (docs/17 §2.4), `public.prune_personal_data()` (secao Retencao de dados pessoais) troca `payload` por `{}`, anula `buyer_email` e `error_message` e marca `anonymized_at`. A linha fica: `provider` + `external_event_id` continuam barrando o evento repetido, `transaction_id` e `normalized_type` (migracao `202610170005`) continuam barrando a compra reenviada depois de reembolso ou chargeback (`hasClosingEventForTransaction`), e a tela de Vendas mostra "Dados apagados (12 meses)" sem o botao Reprocessar (`canReprocessSaleEvent` olha `anonymized_at`; a acao responde 409).
 
 ### sales_product_links
 
@@ -1387,7 +1388,7 @@ Seguranca: RLS ligada sem policies e `revoke all` de `anon` e `authenticated`; s
 
 Retencao: `public.prune_job_history()`, agendada diariamente, apaga linhas com sucesso apos 30 dias e com falha apos 90 dias.
 
-Agendamentos (`cron.job`): `bunker707-jobs-tick` (a cada minuto, chama `public.enqueue_jobs_tick()`) e `bunker707-jobs-history-prune` (diario). Segredos no Vault: `jobs_tick_url` e `jobs_tick_token`.
+Agendamentos (`cron.job`): `bunker707-jobs-tick` (a cada minuto, chama `public.enqueue_jobs_tick()`), `bunker707-jobs-history-prune` (diario) e `bunker707-personal-data-prune` (diario, chama `public.prune_personal_data()`; secao Retencao de dados pessoais). Segredos no Vault: `jobs_tick_url` e `jobs_tick_token`.
 
 ## E-mail transacional
 
@@ -1400,7 +1401,7 @@ Fila de saida: quem dispara (venda por webhook, Adicionar aluno, importacao) ins
 - id uuid, chave primaria;
 - kind: `welcome` (boas-vindas) ou `purchase` (acesso liberado por compra);
 - user_id -> auth.users (set null ao excluir a conta);
-- to_email, subject, html, text: o e-mail pronto, montado pelo template na hora de enfileirar;
+- to_email, subject, html, text: o e-mail pronto, montado pelo template na hora de enfileirar (`to_email` e `html` ficam nulos so depois da retencao; check no banco);
 - idempotency_key: unica (`welcome:<user_id>`, `purchase:<provedor>:<evento>:<user_id>`); a mesma chave vai ao provedor;
 - status: queued, sending (reservada por um tick), sent, failed, bounced, complained;
 - attempts: tentativas feitas; na quinta falha passageira a linha vira `failed`;
@@ -1409,11 +1410,12 @@ Fila de saida: quem dispara (venda por webhook, Adicionar aluno, importacao) ins
 - provider, provider_message_id: quem enviou e o id devolvido (o webhook localiza a linha por ele);
 - sent_at, delivered_at, bounced_at;
 - metadata jsonb (<= 4 KB): so ids e rotulos curtos (`password_hint`, `product_ids`, `source_provider`, `source_event_id`);
-- created_at, updated_at (gatilho `set_updated_at`).
+- created_at, updated_at (gatilho `set_updated_at`);
+- anonymized_at: quando a retencao apagou to_email, html, text e last_error (migracao 202610170004).
 
 Indices: parcial em `next_attempt_at` para `status in (queued, sending)` (o que o job busca), parcial em `sent_at` (limite diario), parcial em `provider_message_id` (webhook) e `(user_id, created_at desc)`.
 
-Seguranca: RLS ligada sem policies, `revoke all` de `anon` e `authenticated`; so o servidor (service role) le e grava. O HTML guardado tem o e-mail e o nome do aluno: e dado pessoal e segue a retencao da conta (some com `user_id` nulo na exclusao, mas a linha fica; limpeza por idade fica como pendencia).
+Seguranca: RLS ligada sem policies, `revoke all` de `anon` e `authenticated`; so o servidor (service role) le e grava. O HTML guardado tem o e-mail e o nome do aluno: e dado pessoal. A exclusao da conta anula `user_id`; a retencao por idade (secao Retencao de dados pessoais) anula `to_email`, `html`, `text` e `last_error` 90 dias depois de criada a linha enviada e 180 dias nos demais casos, mantendo `kind`, `status`, `idempotency_key`, datas e `metadata`.
 
 ### email_webhook_events
 
@@ -1427,7 +1429,21 @@ Payload bruto de cada evento do provedor, para auditoria e reprocesso.
 - outbox_id -> email_outbox (set null): a linha que o evento alterou, quando havia;
 - error: falha ao aplicar, se houve.
 
-Seguranca: RLS ligada sem policies, nada para `anon`/`authenticated`; so o servidor insere e atualiza. Eventos de e-mails que nao sairam da fila (Auth do Supabase pelo mesmo Resend) ficam so registrados.
+Seguranca: RLS ligada sem policies, nada para `anon`/`authenticated`; so o servidor insere e atualiza. Eventos de e-mails que nao sairam da fila (Auth do Supabase pelo mesmo Resend) ficam so registrados. Retencao: apagados 90 dias depois de `received_at` pela mesma rotina (secao Retencao de dados pessoais); o payload traz o destinatario, e `delivered_at`, `bounced_at` e `last_error` ja ficaram em `email_outbox`.
+
+## Retencao de dados pessoais
+
+Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.
+
+`public.prune_personal_data()` (security definer, `search_path` fixo; so `service_role` executa, `anon`/`authenticated` recebem `permission denied`) roda todo dia as 06:23 UTC pelo agendamento `bunker707-personal-data-prune` e devolve quantas linhas mudou em cada tabela:
+
+| Tabela | Quando | O que sai | O que fica |
+|---|---|---|---|
+| `webhook_events` | 12 meses depois de `received_at` | `payload` (vira `{}`), `buyer_email`, `error_message` | provider, `external_event_id` (idempotencia), `transaction_id` e tipo (reembolso antigo segue barrando a compra reenviada), resultado, motivo, alvo, `user_id`, datas; `anonymized_at` marcado |
+| `email_outbox` | 90 dias depois de `created_at` se `sent`; 180 dias nos demais status (falha, bounce, reclamacao e o que ainda estava na fila, que vira `failed` com o motivo) | `to_email`, `html`, `text`, `last_error` | `kind`, `user_id`, `subject`, `idempotency_key`, `status`, datas, `metadata`; `anonymized_at` marcado |
+| `email_webhook_events` | 90 dias depois de `received_at` | a linha inteira | nada (entrega, bounce e motivo ja estao em `email_outbox`) |
+
+Fora da rotina de proposito: `sale_grants` (migracao `202610170008`) so guarda ids (transacao, codigo da assinatura, aluno, acesso, produto) e datas, sem dado pessoal; sai junto com a conta (`on delete cascade`). Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta anula `user_id` nas duas tabelas (`on delete set null`), e "Excluir aluno" ja anonimiza na hora as vendas do aluno (`anonymizeWebhookEventsFor`); prazos novos sao mudanca de migracao, com o teste ajustado.
 
 ## Suporte
 

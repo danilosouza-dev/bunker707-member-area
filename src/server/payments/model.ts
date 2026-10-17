@@ -76,6 +76,13 @@ export function maskEmail(email: string | null | undefined) {
   return `${value.slice(0, 1)}***${value.slice(at)}`;
 }
 
+export const ANONYMIZED_BUYER_LABEL = "Dados apagados (12 meses)";
+
+/** Coluna Comprador: o e-mail mascarado ou, depois da retencao de 12 meses, o aviso de que os dados sairam. */
+export function buyerLabel(input: { anonymizedAt: string | null; buyerEmail: string | null }) {
+  return input.anonymizedAt ? ANONYMIZED_BUYER_LABEL : maskEmail(input.buyerEmail);
+}
+
 export const SALE_TYPE_LABELS: Record<NormalizedSaleType, string> = {
   chargeback: "Chargeback",
   other: "Outro evento",
