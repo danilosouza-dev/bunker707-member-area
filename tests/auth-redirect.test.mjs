@@ -32,16 +32,35 @@ test("vazio, outro site e endereco que o navegador leria como outro site viram a
     "/%09/evil.com",
     "/%0A/evil.com",
     "/%00",
-    "/%E0%A4%A"
+    "/%E0%A4%A",
+    // Segmento de ponto que, resolvido, deixa o caminho comecando com "//" (regressao de 17/10/2026).
+    "/.//evil.com",
+    "/..//evil.com",
+    "/%2e//evil.com",
+    "/./%2fevil.com",
+    "/a/..//evil.com/x",
+    "/.//evil.com?next=/x#y"
   ]) {
     assert.equal(getSafeRedirectPath(value), "/", JSON.stringify(value));
   }
 });
 
-test("o resultado nunca sai da origem quando montado como o /auth/callback monta", () => {
-  for (const value of ["/%5Cevil.com", "/\\\\evil.com", "/%255Cevil.com", "/a/..%2F..%2F%5Cevil.com", "/ok"]) {
+test("o resultado nunca sai da origem quando montado como o /auth/callback e o proxy montam", () => {
+  for (const value of [
+    "/%5Cevil.com",
+    "/\\\\evil.com",
+    "/%255Cevil.com",
+    "/a/..%2F..%2F%5Cevil.com",
+    "/.//evil.com",
+    "/..//evil.com",
+    "/%2e//evil.com",
+    "/./%2fevil.com",
+    "/a/..//evil.com/x",
+    "/ok"
+  ]) {
     const url = new URL(getSafeRedirectPath(value), "https://membros.bunker707.com");
     assert.equal(url.origin, "https://membros.bunker707.com", JSON.stringify(value));
+    assert.doesNotMatch(getSafeRedirectPath(value), /^\/\//, JSON.stringify(value));
   }
 });
 

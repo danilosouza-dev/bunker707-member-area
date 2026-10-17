@@ -98,7 +98,22 @@ test.describe("com a sessao da aluna", () => {
     expect(`${destino.pathname}${destino.search}`).toBe("/?x=1");
   });
 
-  test("logada, um link com ?code= (convite, recuperacao, magic link) chega ao callback em vez de ser engolido pelo proxy", async ({ page }) => {
+  test("logada, ?next= que vira //outro-site depois de resolver os pontos fica na propria origem (sem redirecionamento aberto)", async ({ request }, testInfo) => {
+    // Regressao de 17/10/2026: "/.//evil.com" passava no filtro (uma barra so), virava "//evil.com" ao
+    // resolver o "." e, montado com new URL, mandava a aluna logada para https://evil.com/.
+    const origem = new URL(testInfo.project.use.baseURL ?? "").origin;
+
+    for (const destino of ["%2F.%2F%2Fevil.com", "%2F..%2F%2Fevil.com", "%2F%252e%2F%2Fevil.com", "%2Fa%2F..%2F%2Fevil.com%2Fx"]) {
+      const resposta = await request.get(`/login?next=${destino}`, { maxRedirects: 0 });
+
+      expect(resposta.status(), destino).toBe(307);
+      const location = new URL(resposta.headers()["location"] ?? "", origem);
+      expect(location.origin, destino).toBe(origem);
+      expect(location.pathname, destino).toBe("/");
+    }
+  });
+
+  test("logada, um link com ?code= (recuperacao de senha, magic link) chega ao callback em vez de ser engolido pelo proxy", async ({ page }) => {
     // Antes, o proxy respondia 307 para a home e o navegador nunca pedia o callback. Agora a tela de
     // entrar encaminha o codigo (pelo roteador do Next, nao por 307 da borda: o layout raiz tem
     // loading.tsx e a pagina chega em streaming), por isso o que se confere e o pedido ao callback.
@@ -107,5 +122,18 @@ test.describe("com a sessao da aluna", () => {
 
     const pedido = await pedidoAoCallback;
     expect(new URL(pedido.url()).pathname).toBe("/auth/callback");
+  });
+
+  test("logada, o callback com ?code= roda a troca do codigo (codigo invalido volta para /login com o aviso) em vez de o proxy mandar para o destino", async ({ request }) => {
+    // Caminho real da recuperacao pelo login e do OAuth: a pessoa chega direto em /auth/callback. Antes,
+    // o proxy respondia 307 para o `next` (/perfil) sem o callback rodar.
+    const resposta = await request.get("/auth/callback?code=codigo-invalido&next=%2Fperfil&provider=email", { maxRedirects: 0 });
+
+    expect(resposta.status()).toBe(307);
+    const location = new URL(resposta.headers()["location"] ?? "", "http://127.0.0.1");
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.get("next")).toBe("/perfil");
+    // O callback marca o link rejeitado com ?erro= (AUTH_LINK_ERROR_PARAM): prova que a troca rodou.
+    expect(location.searchParams.has("erro")).toBe(true);
   });
 });

@@ -275,8 +275,9 @@ export async function proxy(request: NextRequest) {
     return redirectToLogin(request, contentSecurityPolicy);
   }
 
-  // Link com ?code= (convite, recuperacao de senha, magic link, OAuth) passa mesmo com sessao aberta:
-  // /login e /auth/callback trocam o codigo pela sessao nova, em vez de o proxy mandar para a home.
+  // Link com ?code= (recuperacao de senha, magic link, OAuth) passa mesmo com sessao aberta: /login e
+  // /auth/callback trocam o codigo pela sessao nova, em vez de o proxy mandar para a home. O convite
+  // chega por #access_token (fragmento, invisivel ao servidor) e nao e coberto aqui (docs/06).
   if (publicPage && user && !request.nextUrl.searchParams.has("code")) {
     const safeRedirectPath = getSafeRedirectPath(request.nextUrl.searchParams.get("next"));
 
@@ -303,14 +304,17 @@ export async function proxy(request: NextRequest) {
     }
 
     // Pelo parser de URL, nunca por `pathname =`: o destino pode ter query (?lessonId=), e o setter de
-    // pathname codificaria o "?" como %3F, quebrando o link. getSafeRedirectPath ja garante que e um
-    // caminho interno (uma barra so, sem barra invertida), entao a origem continua a do proprio site.
+    // pathname codificaria o "?" como %3F, quebrando o link. getSafeRedirectPath recusa outro site,
+    // barra invertida e caminho que vira "//" depois de resolver "." e ".."; mesmo assim, se o destino
+    // montado sair da origem do pedido, vai para a home: redirecionamento aberto nunca.
     const redirectTarget = adminRoleResult.data?.role ? "/admin" : safeRedirectPath;
-    return secureResponse(
-      NextResponse.redirect(new URL(redirectTarget, request.nextUrl.origin)),
-      contentSecurityPolicy,
-      true
-    );
+    let redirectUrl = new URL(redirectTarget, request.nextUrl.origin);
+
+    if (redirectUrl.origin !== request.nextUrl.origin) {
+      redirectUrl = new URL("/", request.nextUrl.origin);
+    }
+
+    return secureResponse(NextResponse.redirect(redirectUrl), contentSecurityPolicy, true);
   }
 
   if (needsUser && user && pathname !== "/alterar-senha" && userMustChangePassword(user.user_metadata)) {
