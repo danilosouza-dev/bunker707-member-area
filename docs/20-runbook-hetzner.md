@@ -403,7 +403,7 @@ Quando chegar a hora (decisao do produtor), com janela de manutencao de ~1 h:
 
 1. Servidor pronto (secoes 5 a 8) e **testado com dados falsos**; `.env` gerado; imagem do app publicada com `NEXT_PUBLIC_SUPABASE_URL=https://api.bunker707.com.br`.
 2. Avisar alunos; colocar a Vercel em manutencao (ou deixar no ar so leitura).
-3. Na sua maquina, dump do projeto da nuvem com a CLI (e para isso que ela serve), com a URL direta do projeto (Settings > Database, sessao):
+3. Na sua maquina, dump do projeto da nuvem com a CLI (e para isso que ela serve), com a URL direta do projeto (Settings > Database, sessao). O dump leva o hash do hottok da Hotmart (`integration_settings`) e as vendas recebidas (`webhook_events`):
    ```bash
    supabase db dump --db-url "$CLOUD_DB_URL" -f roles.sql --role-only
    supabase db dump --db-url "$CLOUD_DB_URL" -f schema.sql
@@ -420,6 +420,12 @@ Quando chegar a hora (decisao do produtor), com janela de manutencao de ~1 h:
 6. Vault: as chaves dos provedores de IA nao migram (criptografadas com a chave da nuvem): recadastrar no admin.
 7. Senhas dos alunos migram (hashes em `auth.users`); sessoes nao (JWT novo): todos entram de novo.
 8. DNS: `membros` para a Hetzner; Vercel desligada depois de 24 h de observacao; `jobs_tick_url` no Vault do servidor (secao 8).
+9. Webhooks de venda e de e-mail, nesta ordem (uma venda que chegar na nuvem durante a janela grava acesso num banco que nao vai migrar; depois de desligar a Vercel, a Hotmart continuaria mandando para `vercel.app` e todas as vendas falhariam):
+   - **logo depois do dump do passo 3, e nunca antes** (Desconectar apaga o hash do token e ele precisa estar no dump): em Configuracoes > Vendas da nuvem, clicar em **Desconectar** na Hotmart. Vendas novas passam a receber 503 e nao sao gravadas;
+   - no painel da Hotmart (Ferramentas > Webhook), trocar a URL para `https://membros.bunker707.com.br/api/webhooks/hotmart`. O hash do hottok vem no dump; o token continua o mesmo na Hotmart, entao nada a colar de novo;
+   - no Resend, trocar o endpoint para `https://membros.bunker707.com.br/api/webhooks/resend` (o segredo e o mesmo, `RESEND_WEBHOOK_SECRET` no `.env` do app);
+   - depois da virada, comparar `select external_event_id from public.webhook_events` dos dois bancos; o que ficou so na nuvem e reenviado pela Hotmart (Ferramentas > Webhook > Historico) ou reprocessado pela tela.
+   Alternativa: ligar `membros.bunker707.com.br` a Vercel antes da janela e usar esse dominio em `NEXT_PUBLIC_SITE_URL`; a virada vira so DNS e nenhum endereco de webhook muda.
 
 ---
 

@@ -9,12 +9,13 @@
 // mesmo pedido, cada um com product_id e product_name; viram `extraProducts`). Nao ha id de evento: a
 // chave de idempotencia e transacao + produto + situacao + data da situacao. A autenticacao e o
 // `token` no corpo, gerado pela Ticto ao cadastrar o webhook; sem cabecalho. A conferencia e em tempo
-// constante contra o segredo salvo em integration_settings, nunca contra variavel de ambiente.
+// constante contra o SHA-256 do token guardado em integration_settings (secret.ts, o mesmo da Hotmart),
+// nunca contra variavel de ambiente.
 
 import { createHash } from "node:crypto";
-import { asObject, isValidSalesToken, normalizeBuyerEmail, shortString } from "./adapter-helpers";
+import { asObject, normalizeBuyerEmail, pick, shortString } from "./adapter-helpers";
+import { isSalesSecretHash, isValidSalesToken } from "./secret";
 import {
-  MIN_SALES_SECRET_LENGTH,
   type NormalizedSaleEvent,
   type NormalizedSaleType,
   type PaymentProviderAdapter,
@@ -211,6 +212,8 @@ export function normalizeTictoEvent(payload: unknown): NormalizedSaleEvent | nul
     provider: "ticto",
     purchasedAt,
     rawType: parsed.status,
+    // Pagamento novo (compra aprovada) ou assinatura reativada: os dois reabrem o acesso fechado.
+    reopenClosedAccess: true,
     transactionId,
     type: EVENT_TYPES[parsed.status] ?? "other",
     warrantyEndsAt: warrantyEnd(purchasedAt, parsed.item?.refund_deadline)
@@ -224,8 +227,8 @@ export function readTictoToken(payload: unknown): string | null {
   return typeof token === "string" && token.trim() ? token.trim() : null;
 }
 
-export function verifyTictoRequest(input: { headers: Headers; payload: unknown; secret: string | null | undefined }): SaleVerification {
-  if (typeof input.secret !== "string" || input.secret.trim().length < MIN_SALES_SECRET_LENGTH) {
+export function verifyTictoRequest(input: { headers: Headers; payload: unknown; secretHash: string | null | undefined }): SaleVerification {
+  if (!isSalesSecretHash(input.secretHash)) {
     return { ok: false, reason: "missing_secret" };
   }
 
@@ -235,15 +238,34 @@ export function verifyTictoRequest(input: { headers: Headers; payload: unknown; 
     return { ok: false, reason: "missing_token" };
   }
 
-  return isValidSalesToken(token, input.secret) ? { ok: true } : { ok: false, reason: "mismatch" };
+  return isValidSalesToken(token, input.secretHash) ? { ok: true } : { ok: false, reason: "mismatch" };
 }
 
-const HIDDEN = "[oculto]";
+const PHONE_KEYS = ["ddi", "ddd", "number"] as const;
+const BUMP_KEYS = ["product_id", "product_name", "offer_id", "offer_code"] as const;
+const SUBSCRIPTION_KEYS = ["id", "interval", "canceled_at", "next_charge"] as const;
+
+function pickList(value: unknown, keys: readonly string[]) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const items = value.slice(0, MAX_BUMPS).flatMap((item) => {
+    const kept = pick(asObject(item), keys);
+
+    return kept ? [kept] : [];
+  });
+
+  return items.length > 0 ? items : undefined;
+}
 
 /**
- * O payload guardado perde o token da conta, o link de login direto na area da Ticto e o CPF/CNPJ do
- * comprador (dado pessoal que a escola nao precisa para liberar acesso). O resto fica para auditoria e
- * reprocesso.
+ * O que fica guardado do payload da Ticto (lista de campos permitidos, como na Hotmart): envelope
+ * (versao, situacao e data), pedido (ids, data e valor), transacao (hash), produto e oferta, os bumps
+ * (produto e oferta), as assinaturas (id, intervalo, cancelamento e proxima cobranca) e, do comprador,
+ * so nome, e-mail, telefone e codigo. Token, link de login direto, CPF/CNPJ, endereco, cartao, rastreio,
+ * produtor, afiliados, coprodutores e comissoes nunca sao gravados. E o que o reprocesso relê: tudo o
+ * que normalizeTictoEvent usa esta aqui.
  */
 export function redactTictoPayload(payload: unknown): unknown {
   const root = asObject(payload);
@@ -252,29 +274,16 @@ export function redactTictoPayload(payload: unknown): unknown {
     return payload;
   }
 
-  const copy: Record<string, unknown> = { ...root };
-
-  for (const key of ["token", "direct_login_url"]) {
-    if (key in copy) {
-      copy[key] = HIDDEN;
-    }
-  }
-
-  const customer = asObject(copy.customer);
-
-  if (customer) {
-    const safe = { ...customer };
-
-    for (const key of ["cpf", "cnpj"]) {
-      if (typeof safe[key] === "string" && safe[key]) {
-        safe[key] = HIDDEN;
-      }
-    }
-
-    copy.customer = safe;
-  }
-
-  return copy;
+  return (
+    pick(root, ["version", "status", "status_date", "payment_method", "order", "transaction", "item", "bumps", "subscriptions", "customer", "phone_local_code_customer", "phone_number_customer"], {
+      bumps: (value) => pickList(value, BUMP_KEYS),
+      customer: (value) => pick(asObject(value), ["name", "email", "phone", "code"], { phone: (inner) => (asObject(inner) ? pick(asObject(inner), PHONE_KEYS) : inner) }),
+      item: (value) => pick(asObject(value), ["product_id", "product_name", "offer_id", "offer_code", "offer_name", "refund_deadline"]),
+      order: (value) => pick(asObject(value), ["id", "hash", "transaction_hash", "order_date", "paid_amount"]),
+      subscriptions: (value) => pickList(value, SUBSCRIPTION_KEYS),
+      transaction: (value) => pick(asObject(value), ["hash"])
+    }) ?? {}
+  );
 }
 
 export const tictoAdapter: PaymentProviderAdapter = {

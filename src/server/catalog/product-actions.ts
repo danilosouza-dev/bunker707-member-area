@@ -304,8 +304,11 @@ export async function updateProductAccess(input: UpdateProductAccessInput): Prom
   return runAdminAction("catalog.access", updateProductAccessSchema, input, async ({ input: data, user }) => {
     const db = catalogDb();
     const current = await requireProductRow(data.id, db);
-    // Codigo de venda ja usado por outro alvo: recusa no campo antes de gravar a linha do produto.
+
+    // Codigo da Hotmart ou da Ticto ja usado por outro alvo: recusa ANTES de gravar a linha do produto
+    // (senao o resto do formulario ficaria gravado e o proximo Salvar cairia em "versao velha").
     await assertSalesLinksAvailable(db, { codes: { hotmart: data.hotmartProductId, ticto: data.tictoProductId }, productId: data.id });
+
     const audience = data.audience ?? audienceFromColumns({ accessModel: current.access_model, listing: current.listing });
     const purchaseUrl = data.purchaseUrl !== undefined ? data.purchaseUrl : current.purchase_url?.trim() || null;
     const purchaseLabel = data.purchaseLabel !== undefined

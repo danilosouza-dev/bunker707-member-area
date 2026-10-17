@@ -7,9 +7,9 @@
 // `X-HOTMART-HOTTOK` (nas versoes antigas tambem no corpo, em `hottok`). A conferencia e em tempo
 // constante contra o segredo salvo em integration_settings, nunca contra variavel de ambiente.
 
-import { asObject, isValidSalesToken, normalizeBuyerEmail, shortString } from "./adapter-helpers";
+import { asObject, normalizeBuyerEmail, pick, shortString } from "./adapter-helpers";
+import { isSalesSecretHash, isValidSalesToken } from "./secret";
 import {
-  MIN_SALES_SECRET_LENGTH,
   type NormalizedSaleEvent,
   type NormalizedSaleType,
   type PaymentProviderAdapter,
@@ -17,8 +17,8 @@ import {
   type SaleVerification
 } from "./types";
 
-// Ajudantes comuns aos adaptadores (adapter-helpers.ts), reexportados para quem ja os importava daqui.
-export { isValidSalesToken, normalizeBuyerEmail };
+// Ajudante comum aos adaptadores (adapter-helpers.ts), reexportado para quem ja o importava daqui.
+export { normalizeBuyerEmail };
 
 export const HOTMART_HOTTOK_HEADER = "x-hotmart-hottok";
 export const HOTMART_MAX_PAYLOAD_BYTES = 256 * 1024;
@@ -34,8 +34,9 @@ export const HOTMART_HANDLED_EVENTS = [
 
 const EVENT_TYPES: Record<string, NormalizedSaleType> = {
   PURCHASE_APPROVED: "purchase_approved",
-  // Fim da garantia: a compra ja foi aprovada antes; tratar como aprovada e inofensivo (quem ja tem
-  // acesso continua igual) e cobre a venda que aconteceu antes do webhook ser ligado.
+  // Fim da garantia: confirma uma compra aprovada antes. Vale como compra so para quem nunca teve acesso
+  // registrado ao produto (venda anterior ao webhook); nunca reabre acesso suspenso ou revogado
+  // (reopenClosedAccess = false).
   PURCHASE_COMPLETE: "purchase_approved",
   PURCHASE_REFUNDED: "refund",
   PURCHASE_CHARGEBACK: "chargeback",
@@ -137,11 +138,14 @@ export function normalizeHotmartEvent(payload: unknown): NormalizedSaleEvent | n
     provider: "hotmart",
     purchasedAt: hotmartDateToIso(purchase?.approved_date) ?? hotmartDateToIso(purchase?.order_date) ?? parsed.creationDate,
     rawType: parsed.event,
+    reopenClosedAccess: parsed.event !== "PURCHASE_COMPLETE",
     transactionId,
     type: EVENT_TYPES[parsed.event] ?? "other",
     warrantyEndsAt: hotmartDateToIso(purchase?.warranty_expire_date)
   };
 }
+
+export { hashSalesSecret, isValidSalesToken } from "./secret";
 
 export function readHotmartToken(headers: Headers, payload: unknown): string | null {
   const fromHeader = headers.get(HOTMART_HOTTOK_HEADER)?.trim();
@@ -155,8 +159,8 @@ export function readHotmartToken(headers: Headers, payload: unknown): string | n
   return typeof fromBody === "string" && fromBody.trim() ? fromBody.trim() : null;
 }
 
-export function verifyHotmartRequest(input: { headers: Headers; payload: unknown; secret: string | null | undefined }): SaleVerification {
-  if (typeof input.secret !== "string" || input.secret.trim().length < MIN_SALES_SECRET_LENGTH) {
+export function verifyHotmartRequest(input: { headers: Headers; payload: unknown; secretHash: string | null | undefined }): SaleVerification {
+  if (!isSalesSecretHash(input.secretHash)) {
     return { ok: false, reason: "missing_secret" };
   }
 
@@ -166,18 +170,34 @@ export function verifyHotmartRequest(input: { headers: Headers; payload: unknown
     return { ok: false, reason: "missing_token" };
   }
 
-  return isValidSalesToken(token, input.secret) ? { ok: true } : { ok: false, reason: "mismatch" };
+  return isValidSalesToken(token, input.secretHash) ? { ok: true } : { ok: false, reason: "mismatch" };
 }
 
-/** O payload guardado nao pode carregar o token da conta (a Hotmart o repete no corpo nas versoes antigas). */
+const BUYER_KEYS = ["email", "name", "checkout_phone", "checkout_phone_code", "code"] as const;
+
+/**
+ * O que fica guardado do payload da Hotmart: envelope, produto (id e nome), compra (transacao, situacao
+ * e datas), assinatura (situacao e codigo do assinante) e, do comprador, so e-mail, nome e telefone.
+ * Token (hottok), documento, endereco, produtor, afiliados e comissoes nunca sao gravados.
+ */
 export function redactHotmartPayload(payload: unknown): unknown {
   const root = asObject(payload);
 
-  if (!root || !("hottok" in root)) {
+  if (!root) {
     return payload;
   }
 
-  return { ...root, hottok: "[oculto]" };
+  const data = asObject(root.data);
+  const kept = pick(root, ["id", "event", "version", "creation_date"]) ?? {};
+  const keptData = pick(data, ["product", "buyer", "subscriber", "purchase", "subscription"], {
+    buyer: (value) => pick(asObject(value), BUYER_KEYS),
+    product: (value) => pick(asObject(value), ["id", "name"]),
+    purchase: (value) => pick(asObject(value), ["transaction", "status", "approved_date", "order_date", "warranty_expire_date"]),
+    subscriber: (value) => pick(asObject(value), BUYER_KEYS),
+    subscription: (value) => pick(asObject(value), ["status", "subscriber"], { subscriber: (inner) => pick(asObject(inner), ["code"]) })
+  });
+
+  return keptData ? { ...kept, data: keptData } : kept;
 }
 
 export const hotmartAdapter: PaymentProviderAdapter = {

@@ -4,10 +4,12 @@ import "server-only";
 // por POST /api/webhooks/<plataforma>:
 //   plataforma conectada? (senao 503) -> corpo limitado (413) -> JSON (400) -> token conferido em tempo
 //   constante contra o segredo salvo (senao 401, nada gravado) -> evento normalizado (400 sem nome)
-//   -> payload bruto gravado, unico por (provider, external_event_id) (repetido = 200 sem reprocessar)
+//   -> payload (so os campos permitidos) gravado, unico por (provider, external_event_id)
 //   -> regra de acesso (process-sale.ts) -> resultado na linha e na situacao da plataforma.
+// Evento repetido: 200 sem reprocessar, salvo quando a linha ficou presa em `received` (o processamento
+// morreu depois de gravar): ai o reenvio da plataforma reivindica a linha e processa de novo.
 // Erro na regra de acesso: a linha fica `failed` com o motivo e a resposta e 500; a tela do produtor
-// mostra o motivo e oferece Reprocessar.
+// mostra o motivo e oferece Reprocessar (tambem para ignorados e para presos em `received`).
 
 import { NextResponse } from "next/server";
 import { hasSupabaseConfig } from "@/server/db/supabase/client";
@@ -18,10 +20,12 @@ import { getPaymentAdapter } from "./adapters";
 import { SALES_PROVIDER_LABELS, canReprocessSaleEvent } from "./model";
 import { SaleProcessingError, processSaleEvent, type SaleProcessingResult } from "./process-sale";
 import {
+  claimStaleReceivedEvent,
   fetchIntegrationSecret,
   fetchWebhookEvent,
   insertWebhookEvent,
   markIntegrationSync,
+  markProcessingStarted,
   salesDb,
   updateWebhookEventResult,
   type SalesDb
@@ -29,6 +33,8 @@ import {
 import type { NormalizedSaleEvent, SalesProvider } from "./types";
 
 const noStoreHeaders = { "Cache-Control": "no-store" };
+/** Reenvio da plataforma reivindica a linha presa em `received` depois disto (bem acima do maxDuration de 30 s). */
+export const STALE_RECEIVED_CLAIM_MS = 2 * 60_000;
 
 function reply(body: Record<string, unknown>, status: number) {
   return NextResponse.json(body, { headers: noStoreHeaders, status });
@@ -92,10 +98,10 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
   }
 
   const db = salesDb();
-  let secret: string | null;
+  let secretHash: string | null;
 
   try {
-    secret = await fetchIntegrationSecret(db, provider);
+    secretHash = await fetchIntegrationSecret(db, provider);
   } catch (error) {
     if (isPendingMigrationError(error)) {
       console.error(`[vendas] webhook da ${label} recusado: ${error.message}`);
@@ -106,7 +112,7 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
     throw error;
   }
 
-  if (!secret) {
+  if (!secretHash) {
     return reply({ error: `Webhook indisponível: a ${label} ainda não foi conectada em Configurações › Vendas.`, ok: false }, 503);
   }
 
@@ -128,7 +134,7 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
     return reply({ error: "JSON inválido.", ok: false }, 400);
   }
 
-  const verification = adapter.verify({ headers: request.headers, payload, secret });
+  const verification = adapter.verify({ headers: request.headers, payload, secretHash });
 
   if (!verification.ok) {
     console.warn(`[vendas] webhook da ${label} recusado: ${verification.reason}.`);
@@ -152,9 +158,11 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
       externalProductId: event.externalProductId,
       externalProductName: event.externalProductName,
       normalizedType: event.type,
-      payload: adapter.redact(payload),
+      // Evento que nao muda acesso: so o envelope (sem dados do comprador).
+      payload: event.type === "other" ? withoutData(adapter.redact(payload)) : adapter.redact(payload),
       provider,
-      signatureValid: true
+      signatureValid: true,
+      transactionId: event.transactionId
     });
   } catch (error) {
     // Sem a linha gravada nao ha o que reprocessar: 500 para a plataforma reenviar.
@@ -164,7 +172,22 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
   }
 
   if (stored.duplicate || !stored.id) {
-    return reply({ duplicate: true, ok: true }, 200);
+    // Linha presa em `received` (a funcao morreu depois de gravar): o reenvio processa de novo.
+    const claimedId = await claimStaleReceivedEvent(db, { externalEventId: event.eventId, provider, staleAfterMs: STALE_RECEIVED_CLAIM_MS }).catch((error) => {
+      console.error(`[vendas] reenvio da ${label} nao reivindicado: ${errorMessageOf(error)}`);
+
+      return null;
+    });
+
+    if (!claimedId) {
+      return reply({ duplicate: true, ok: true }, 200);
+    }
+
+    const reprocessed = await runSaleProcessing(db, { event, eventRowId: claimedId, siteOrigin: requestOriginOf(request) });
+
+    return reprocessed.ok
+      ? reply({ eventId: claimedId, ok: true, outcome: reprocessed.result.outcome, resumed: true, type: event.type }, 200)
+      : reply({ error: "Não foi possível processar a venda. O evento ficou guardado para reprocesso.", ok: false }, 500);
   }
 
   const processed = await runSaleProcessing(db, { event, eventRowId: stored.id, siteOrigin: requestOriginOf(request) });
@@ -174,6 +197,15 @@ export async function receiveSaleWebhook(provider: SalesProvider, request: Reque
   }
 
   return reply({ eventId: stored.id, ok: true, outcome: processed.result.outcome, type: event.type }, 200);
+}
+
+/** Payload sem a parte `data` (o envelope: id, evento, data, versao). */
+function withoutData(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+
+  return Object.fromEntries(Object.entries(payload as Record<string, unknown>).filter(([key]) => key !== "data"));
 }
 
 export class WebhookEventNotReprocessableError extends Error {
@@ -191,8 +223,8 @@ export type ReprocessOutcome =
   | { error: string; ok: false; processingStatus: "failed" };
 
 /**
- * Reprocessa um evento guardado (falhou ou foi ignorado) a partir do payload bruto, com o mesmo
- * adaptador; o token nao e conferido de novo (ja foi, na chegada).
+ * Reprocessa um evento guardado (falhou, foi ignorado ou ficou preso em `received`) a partir do payload
+ * guardado, com o mesmo adaptador; o token nao e conferido de novo (ja foi, na chegada).
  */
 export async function reprocessWebhookEvent(db: SalesDb, input: { id: string; siteOrigin: string | null }): Promise<ReprocessOutcome> {
   const row = await fetchWebhookEvent(db, input.id);
@@ -201,7 +233,7 @@ export async function reprocessWebhookEvent(db: SalesDb, input: { id: string; si
     throw new WebhookEventNotReprocessableError(404, "Essa venda não está mais na lista.");
   }
 
-  if (!canReprocessSaleEvent(row.processing_status)) {
+  if (!canReprocessSaleEvent(row.processing_status, row.received_at)) {
     throw new WebhookEventNotReprocessableError(409, "Essa venda já foi processada; não há o que reprocessar.");
   }
 
@@ -212,6 +244,7 @@ export async function reprocessWebhookEvent(db: SalesDb, input: { id: string; si
     throw new WebhookEventNotReprocessableError(409, "Não foi possível ler o evento guardado.");
   }
 
+  await markProcessingStarted(db, row.id);
   const processed = await runSaleProcessing(db, { event, eventRowId: row.id, siteOrigin: input.siteOrigin });
 
   if (!processed.ok) {

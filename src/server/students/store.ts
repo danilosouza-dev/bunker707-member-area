@@ -324,7 +324,7 @@ export async function insertEntitlement(db: StudentsDb, row: EntitlementInsert):
 export async function updateEntitlement(
   db: StudentsDb,
   entitlementId: string,
-  patch: Partial<Pick<EntitlementRow, "ends_at" | "starts_at" | "status">>
+  patch: Partial<Pick<EntitlementRow, "ends_at" | "source_event_id" | "source_provider" | "starts_at" | "status">>
 ): Promise<EntitlementRow> {
   const { data, error } = await db
     .from("entitlements")

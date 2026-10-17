@@ -192,6 +192,9 @@ export function ProviderConnectCard({ card, now }: { card: SalesProviderCard; no
         <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.steps}</p>
 
         <CopyField label={`Endereço para colar na ${card.label}`} value={card.webhookUrl} />
+        {card.originWarning ? (
+          <p className="rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-2.5 text-[13px] leading-5 text-[var(--warning)]">{card.originWarning}</p>
+        ) : null}
 
         <div className="flex min-w-0 flex-col gap-1.5">
           <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Eventos para marcar na {card.label}</span>

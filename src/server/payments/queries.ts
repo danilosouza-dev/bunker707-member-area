@@ -3,14 +3,16 @@ import "server-only";
 // Leituras de Configuracoes > Vendas e da linha "Vendas" do hub. Quem chama ja passou por
 // requirePageRole("settings.sales"). Nada aqui devolve o token: so a situacao e a data em que foi salvo.
 
-import { getRequestOrigin } from "@/server/auth/site-origin";
+import { getConfiguredSiteOrigin, getHeadersOrigin } from "@/server/auth/site-origin";
 import { isSalesProviderSupported, getPaymentAdapter } from "./adapters";
 import {
   buildSalesWebhookUrl,
   canReprocessSaleEvent,
+  maskEmail,
   normalizeIntegrationStatus,
   normalizeSaleOutcome,
   SALES_PROVIDER_LABELS,
+  webhookOriginWarning,
   type IntegrationStatus,
   type SaleOutcome,
   type WebhookProcessingStatus
@@ -26,6 +28,8 @@ export type SalesProviderCard = {
   lastSyncAt: string | null;
   /** Produtos e pacotes com codigo desta plataforma. */
   linkedTargets: number;
+  /** Aviso sobre o endereco mostrado (sem NEXT_PUBLIC_SITE_URL, ou admin aberto por outro endereco). */
+  originWarning: string | null;
   provider: SalesProvider;
   secretUpdatedAt: string | null;
   status: IntegrationStatus;
@@ -35,7 +39,8 @@ export type SalesProviderCard = {
 };
 
 export type SalesEventListItem = {
-  buyerEmail: string | null;
+  /** E-mail do comprador ja mascarado no servidor (`c***@dominio`): o inteiro nunca vai para o navegador. */
+  buyerEmailMasked: string;
   canReprocess: boolean;
   detail: string | null;
   errorMessage: string | null;
@@ -67,8 +72,10 @@ function eventsOf(row: IntegrationRow | undefined, provider: SalesProvider) {
   return stored.length > 0 ? stored : [...(adapter?.handledEvents ?? [])];
 }
 
-async function loadProviderCards(origin: string, rows: IntegrationRow[]): Promise<SalesProviderCard[]> {
+async function loadProviderCards(origin: { configured: string | null; request: string }, rows: IntegrationRow[]): Promise<SalesProviderCard[]> {
   const db = salesDb();
+  const webhookOrigin = origin.configured ?? origin.request;
+  const originWarning = webhookOriginWarning({ configuredOrigin: origin.configured, requestOrigin: origin.request });
   const linkCounts = await Promise.all(
     SALES_PROVIDERS.map((provider) => (isSalesProviderSupported(provider) ? countSalesLinks(db, provider) : Promise.resolve(0)))
   );
@@ -83,11 +90,12 @@ async function loadProviderCards(origin: string, rows: IntegrationRow[]): Promis
       lastError: row?.last_error ?? null,
       lastSyncAt: row?.last_sync_at ?? null,
       linkedTargets: linkCounts[index],
+      originWarning: supported ? originWarning : null,
       provider,
       secretUpdatedAt: row?.secret_updated_at ?? null,
       status: supported ? normalizeIntegrationStatus(row?.status) : "not_configured",
       supported,
-      webhookUrl: buildSalesWebhookUrl(origin, provider)
+      webhookUrl: buildSalesWebhookUrl(webhookOrigin, provider)
     };
   });
 }
@@ -115,7 +123,11 @@ async function loadTitles(rows: WebhookEventRow[]) {
   };
 }
 
-export function toSalesEventListItem(row: WebhookEventRow, titles: { combos: Map<string, string>; products: Map<string, string> }): SalesEventListItem {
+export function toSalesEventListItem(
+  row: WebhookEventRow,
+  titles: { combos: Map<string, string>; products: Map<string, string> },
+  now: number = Date.now()
+): SalesEventListItem {
   const productTitle =
     (row.combo_id ? titles.combos.get(row.combo_id) : null) ??
     (row.product_id ? titles.products.get(row.product_id) : null) ??
@@ -123,8 +135,8 @@ export function toSalesEventListItem(row: WebhookEventRow, titles: { combos: Map
     null;
 
   return {
-    buyerEmail: row.buyer_email,
-    canReprocess: canReprocessSaleEvent(row.processing_status),
+    buyerEmailMasked: maskEmail(row.buyer_email),
+    canReprocess: canReprocessSaleEvent(row.processing_status, row.received_at, now),
     detail: row.outcome_detail,
     errorMessage: row.error_message,
     eventType: row.event_type,
@@ -142,10 +154,11 @@ export function toSalesEventListItem(row: WebhookEventRow, titles: { combos: Map
 
 export async function getSalesSettingsData(): Promise<SalesSettingsData> {
   const db = salesDb();
-  const [origin, rows, eventRows] = await Promise.all([getRequestOrigin(), fetchIntegrationRows(db), listWebhookEvents(db, { limit: RECENT_EVENTS_LIMIT })]);
-  const [providers, titles] = await Promise.all([loadProviderCards(origin, rows), loadTitles(eventRows)]);
+  const [requestOrigin, rows, eventRows] = await Promise.all([getHeadersOrigin(), fetchIntegrationRows(db), listWebhookEvents(db, { limit: RECENT_EVENTS_LIMIT })]);
+  const [providers, titles] = await Promise.all([loadProviderCards({ configured: getConfiguredSiteOrigin(), request: requestOrigin }, rows), loadTitles(eventRows)]);
+  const now = Date.now();
 
-  return { events: eventRows.map((row) => toSalesEventListItem(row, titles)), providers };
+  return { events: eventRows.map((row) => toSalesEventListItem(row, titles, now)), providers };
 }
 
 /** Situacao das plataformas para a linha "Vendas" do hub (sem o token, sem a lista). */

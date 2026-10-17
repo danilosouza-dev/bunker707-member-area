@@ -26,6 +26,8 @@ import {
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
 const route = await import("../../src/app/api/webhooks/ticto/route.ts");
+const hotmartRoute = await import("../../src/app/api/webhooks/hotmart/route.ts");
+const { hashSalesSecret } = await import("../../src/server/payments/secret.ts");
 const salesActions = await import("../../src/server/payments/actions.ts");
 const salesQueries = await import("../../src/server/payments/queries.ts");
 const productActions = await import("../../src/server/catalog/product-actions.ts");
@@ -43,6 +45,8 @@ const COMPRADOR = { email: "comprador.ticto@bunker707.test", nome: "Comprador da
 const ASSINANTE = { email: "assinante.ticto@bunker707.test", nome: "Assinante da Ticto" };
 const COMPRADOR_PACOTE = { email: "comprador.pacote.ticto@bunker707.test", nome: "Comprador do Pacote" };
 const COMPRADOR_BUMP = { email: "comprador.bump.ticto@bunker707.test", nome: "Comprador do Bump" };
+const COMPRADOR_MISTO = { email: "comprador.misto.ticto@bunker707.test", nome: "Comprador das Duas Plataformas" };
+const TOKEN_HOTMART = "hottok-integracao-ticto-0123456789abcdef";
 const PREFIXO = "teste-ticto-";
 
 /** Payload ficticio no formato do webhook 2.0 da Ticto; a transacao leva o prefixo (vira o id do evento e a origem do acesso). */
@@ -117,9 +121,9 @@ async function limpar() {
   await desconectarVendas(db);
   // "7001" e o codigo da Hotmart que o teste do Acesso e venda grava junto, para provar que um nao mexe no outro.
   await limparVendasDeTeste(db, { codigos: [...Object.values(CODIGOS), "7001"], prefixoDoEvento: PREFIXO });
-  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email, COMPRADOR_BUMP.email]), "Limpando a fila de e-mail de teste");
+  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email, COMPRADOR_BUMP.email, COMPRADOR_MISTO.email]), "Limpando a fila de e-mail de teste");
 
-  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE, COMPRADOR_BUMP]) {
+  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE, COMPRADOR_BUMP, COMPRADOR_MISTO]) {
     await apagarContaDeTeste(db, conta.email);
   }
 }
@@ -150,7 +154,8 @@ test("so o dono guarda o token da Ticto; a tela mostra a Ticto conectavel, com o
   const row = await integracao();
   assert.equal(row.status, "configured");
   assert.equal(row.secret_status, "set");
-  assert.equal(row.secret, TOKEN, "o segredo fica no banco, so para o servidor");
+  assert.equal(row.secret, hashSalesSecret(TOKEN), "no banco fica so o SHA-256 do token, como na Hotmart");
+  assert.notEqual(row.secret, TOKEN, "o token em texto puro nunca e gravado");
   assert.deepEqual(row.events, ["authorized", "uncanceled", "refunded", "chargeback", "subscription_canceled"]);
 
   const data = await salesQueries.getSalesSettingsData();
@@ -241,9 +246,10 @@ test("compra aprovada cria a conta, libera o curso com origem ticto, enfileira b
   assert.equal(evento.product_id, curso.id);
   assert.equal(evento.user_id, conta.id);
   assert.equal(evento.buyer_email, COMPRADOR.email);
-  assert.equal(evento.payload.token, "[oculto]", "o token nao fica no payload guardado");
-  assert.equal(evento.payload.direct_login_url, "[oculto]");
-  assert.equal(evento.payload.customer.cpf, "[oculto]", "o CPF nao fica no payload guardado");
+  assert.equal("token" in evento.payload, false, "o token nao fica no payload guardado");
+  assert.equal("direct_login_url" in evento.payload, false, "o link de login direto nao fica");
+  assert.equal("cpf" in evento.payload.customer, false, "o CPF nao fica no payload guardado");
+  assert.equal(JSON.stringify(evento.payload).includes(TOKEN), false);
   assert.equal(evento.payload.customer.email, COMPRADOR.email);
   assert.equal(evento.payload.item.product_id, Number(CODIGOS.curso));
 
@@ -415,6 +421,59 @@ test("pacote: o dono informa o codigo da Ticto em Pacotes; a compra libera todos
   const chargeback = await post(payload({ email: COMPRADOR_PACOTE.email, produto: CODIGOS.pacote, status: "chargeback", statusDate: "2026-10-20 10:00:00", transacao: "T-PACOTE-0001" }));
   assert.equal((await chargeback.json()).outcome, "access_revoked");
   assert.deepEqual((await acessosDe(COMPRADOR_PACOTE.email)).acessos.map((row) => row.status), ["revoked", "revoked"], "o chargeback do pacote tira todos os produtos");
+});
+
+/* ------------------------------------------------------------ Duas plataformas */
+
+test("reembolso da Ticto so tira o que nasceu da compra na Ticto: o curso pago antes na Hotmart continua aberto", async () => {
+  actAs(produtor);
+  const conectada = await salesActions.saveSalesSecret({ provider: "hotmart", secret: TOKEN_HOTMART });
+  assert.equal(conectada.ok, true, JSON.stringify(conectada));
+
+  // 1) Compra avulsa do curso na Hotmart (codigo 7001, gravado no teste do Acesso e venda).
+  const naHotmart = await hotmartRoute.POST(
+    new Request("http://127.0.0.1:3100/api/webhooks/hotmart", {
+      body: JSON.stringify({
+        creation_date: Date.now(),
+        data: {
+          buyer: { email: COMPRADOR_MISTO.email, name: COMPRADOR_MISTO.nome },
+          product: { id: 7001, name: "Curso na Hotmart" },
+          purchase: { approved_date: Date.now(), status: "APPROVED", transaction: `${PREFIXO}HP-MISTO-0001` }
+        },
+        event: "PURCHASE_APPROVED",
+        id: `${PREFIXO}hotmart-misto-1`,
+        version: "2.0.0"
+      }),
+      headers: { "content-type": "application/json", host: "127.0.0.1:3100", "x-hotmart-hottok": TOKEN_HOTMART },
+      method: "POST"
+    })
+  );
+  const naHotmartBody = await naHotmart.json();
+  assert.equal(naHotmart.status, 200, JSON.stringify(naHotmartBody));
+  assert.equal(naHotmartBody.outcome, "access_granted");
+
+  // 2) Pedido na Ticto com o mesmo curso como principal e o curso bloqueado como bump.
+  const bumps = [{ product_id: Number(CODIGOS.bump), product_name: "Bonus na Ticto" }];
+  const naTicto = await post(payload({ bumps, email: COMPRADOR_MISTO.email, nome: COMPRADOR_MISTO.nome, transacao: "T-MISTO-0001" }));
+  assert.equal((await naTicto.json()).outcome, "access_granted");
+
+  const antes = Object.fromEntries((await acessosDe(COMPRADOR_MISTO.email)).acessos.map((row) => [row.target_id, row]));
+  assert.equal(antes[curso.id].source_provider, "hotmart", "o curso que ja estava aberto continua com a origem da Hotmart");
+  assert.equal(antes[cursoBloqueado.id].source_provider, "ticto");
+
+  // 3) Reembolso do pedido na Ticto.
+  const reembolso = await post(payload({ bumps, email: COMPRADOR_MISTO.email, status: "refunded", statusDate: "2026-10-20 10:00:00", transacao: "T-MISTO-0001" }));
+  const reembolsoBody = await reembolso.json();
+  assert.equal(reembolsoBody.outcome, "access_revoked", JSON.stringify(reembolsoBody));
+
+  const depois = Object.fromEntries((await acessosDe(COMPRADOR_MISTO.email)).acessos.map((row) => [row.target_id, row.status]));
+  assert.equal(depois[curso.id], "active", "o curso pago na Hotmart nao e revogado pelo reembolso da Ticto");
+  assert.equal(depois[cursoBloqueado.id], "revoked", "o que nasceu da compra na Ticto sai");
+
+  // 4) Chargeback repetido na Ticto tambem nao alcanca o acesso da Hotmart.
+  const chargeback = await post(payload({ bumps, email: COMPRADOR_MISTO.email, status: "chargeback", statusDate: "2026-10-21 10:00:00", transacao: "T-MISTO-0001" }));
+  assert.equal((await chargeback.json()).outcome, "ignored");
+  assert.equal(Object.fromEntries((await acessosDe(COMPRADOR_MISTO.email)).acessos.map((row) => [row.target_id, row.status]))[curso.id], "active");
 });
 
 /* ------------------------------------------------------------ Outros eventos e desconectar */

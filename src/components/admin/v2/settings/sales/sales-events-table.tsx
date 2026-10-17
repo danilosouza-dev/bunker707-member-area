@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { reprocessSalesEvent } from "@/server/payments/actions";
-import { maskEmail, saleEventLabel, saleOutcomeChip, SALES_PROVIDER_LABELS } from "@/server/payments/model";
+import { saleEventLabel, saleOutcomeChip, SALES_PROVIDER_LABELS } from "@/server/payments/model";
 import type { SalesEventListItem } from "@/server/payments/queries";
 import type { DataTableColumn } from "../../data-table";
 import { ErrorBanner } from "../../error-banner";
@@ -47,7 +47,7 @@ function EventCell({ row }: { row: SalesEventListItem }) {
 }
 
 function Buyer({ row }: { row: SalesEventListItem }) {
-  const masked = maskEmail(row.buyerEmail);
+  const masked = row.buyerEmailMasked;
 
   if (!row.userId) {
     return <span className="tabular-nums">{masked}</span>;

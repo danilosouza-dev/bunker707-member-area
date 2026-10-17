@@ -10,8 +10,11 @@ import "./support/resolve-extensionless-ts.mjs";
 const ticto = await import("../src/server/payments/ticto.ts");
 const model = await import("../src/server/payments/model.ts");
 const adapters = await import("../src/server/payments/adapters.ts");
+const { hashSalesSecret } = await import("../src/server/payments/secret.ts");
 
 const TOKEN = "token-ticto-de-teste-0123456789abcdef";
+/** O banco guarda so o SHA-256 do token (src/server/payments/secret.ts), como na Hotmart. */
+const TOKEN_HASH = hashSalesSecret(TOKEN);
 
 /** Payload ficticio no formato do webhook 2.0 da Ticto (datas "AAAA-MM-DD HH:MM:SS" no horario de Brasilia). */
 function compraAprovada(overrides = {}) {
@@ -52,6 +55,7 @@ test("compra aprovada: evento normalizado com comprador, produto, transacao e da
     provider: "ticto",
     purchasedAt: "2026-10-17T12:00:06.000Z",
     rawType: "authorized",
+    reopenClosedAccess: true,
     transactionId: "TPC-TESTE-0001",
     type: "purchase_approved",
     warrantyEndsAt: "2026-10-24T12:00:06.000Z"
@@ -172,42 +176,77 @@ test("datas: 'AAAA-MM-DD HH:MM[:SS]' vale em Brasilia (-03:00); ISO com fuso e a
   assert.equal(ticto.tictoDateToIso(""), null);
 });
 
-test("token: so o `token` do corpo, conferido contra o segredo salvo; errado, ausente ou sem segredo recusam; cabecalho nao vale", () => {
+test("token: so o `token` do corpo, conferido contra o hash salvo (mesmo formato da Hotmart); errado, ausente, o proprio hash ou sem segredo recusam; cabecalho nao vale", () => {
   const payload = compraAprovada();
   const semCabecalho = new Headers();
+  const verify = (body, secretHash = TOKEN_HASH, headers = semCabecalho) => ticto.verifyTictoRequest({ headers, payload: body, secretHash });
 
-  assert.deepEqual(ticto.verifyTictoRequest({ headers: semCabecalho, payload, secret: TOKEN }), { ok: true });
-  assert.deepEqual(ticto.verifyTictoRequest({ headers: semCabecalho, payload: compraAprovada({ token: ` ${TOKEN} ` }), secret: TOKEN }), { ok: true }, "espaco nas pontas nao atrapalha");
-  assert.deepEqual(ticto.verifyTictoRequest({ headers: semCabecalho, payload: compraAprovada({ token: "outro-token-errado-0123456789" }), secret: TOKEN }), { ok: false, reason: "mismatch" });
-  assert.deepEqual(ticto.verifyTictoRequest({ headers: semCabecalho, payload: compraAprovada({ token: `${TOKEN}x` }), secret: TOKEN }), { ok: false, reason: "mismatch" }, "tamanho diferente nao lanca erro");
-  assert.deepEqual(ticto.verifyTictoRequest({ headers: semCabecalho, payload: compraAprovada({ token: undefined }), secret: TOKEN }), { ok: false, reason: "missing_token" });
+  assert.deepEqual(verify(payload), { ok: true });
+  assert.deepEqual(verify(compraAprovada({ token: ` ${TOKEN} ` })), { ok: true }, "espaco nas pontas nao atrapalha");
+  assert.deepEqual(verify(compraAprovada({ token: "outro-token-errado-0123456789" })), { ok: false, reason: "mismatch" });
+  assert.deepEqual(verify(compraAprovada({ token: `${TOKEN}x` })), { ok: false, reason: "mismatch" }, "tamanho diferente nao lanca erro");
+  assert.deepEqual(verify(compraAprovada({ token: TOKEN_HASH })), { ok: false, reason: "mismatch" }, "mandar o proprio hash nao vale");
+  assert.deepEqual(verify(compraAprovada({ token: undefined })), { ok: false, reason: "missing_token" });
   assert.deepEqual(
-    ticto.verifyTictoRequest({ headers: new Headers({ "x-ticto-token": TOKEN }), payload: compraAprovada({ token: undefined }), secret: TOKEN }),
+    verify(compraAprovada({ token: undefined }), TOKEN_HASH, new Headers({ "x-ticto-token": TOKEN })),
     { ok: false, reason: "missing_token" },
     "a Ticto nao autentica por cabecalho"
   );
-  assert.deepEqual(ticto.verifyTictoRequest({ headers: semCabecalho, payload, secret: null }), { ok: false, reason: "missing_secret" });
-  assert.deepEqual(ticto.verifyTictoRequest({ headers: semCabecalho, payload: compraAprovada({ token: "curto" }), secret: "curto" }), { ok: false, reason: "missing_secret" }, "segredo curto e configuracao ausente");
+  assert.deepEqual(verify(payload, null), { ok: false, reason: "missing_secret" });
+  assert.deepEqual(verify(payload, TOKEN), { ok: false, reason: "missing_secret" }, "token em texto puro no banco nao e um hash: configuracao invalida");
   assert.equal(ticto.readTictoToken({ token: 123 }), null);
 });
 
-test("o payload guardado perde o token, o link de login direto e o CPF/CNPJ; o resto fica", () => {
-  const guardado = ticto.redactTictoPayload(compraAprovada());
+test("o payload guardado fica so com os campos permitidos: sem token, link de login, CPF, endereco, cartao, produtor e afiliados; o reprocesso le o mesmo evento", () => {
+  const completo = compraAprovada({
+    affiliates: [{ document: "11111111111", email: "afiliado@exemplo.test", name: "Afiliado" }],
+    bumps: [{ offer_code: "BUMP01", offer_id: 173, offer_price: "47.00", product_id: 244, product_name: "Bonus Ficticio", product_support_email: "suporte@exemplo.test" }],
+    checkout_url: "https://exemplo.test/checkout",
+    coproducers: [{ document: "22222222222", name: "Coprodutor" }],
+    customer: {
+      address: { city: "Cidade", street: "Rua Ficticia", zip_code: "00000000" },
+      cnpj: null,
+      code: "UE-TESTE",
+      cpf: "00000000000",
+      email: "comprador@bunker707.test",
+      name: "Comprador de Teste",
+      phone: { ddd: "11", ddi: "55", number: "999990000" },
+      type: "person"
+    },
+    marketplace_commission: 699,
+    producer: { document: "33333333333", email: "produtor@exemplo.test", name: "Produtor" },
+    subscriptions: [{ canceled_at: null, change_card_url: "https://exemplo.test/cartao", id: 119, interval: 1, next_charge: "2026-11-17 00:00:00" }],
+    tracking: { sck: "Não Informado" },
+    transaction: { cards: [{ first_digits: "453962", holder: "Comprador", last_digits: "2097" }], hash: "TPC-TESTE-0001" },
+    url_params: { query_params: { code: "X" } }
+  });
+  const guardado = ticto.redactTictoPayload(completo);
 
-  assert.equal(guardado.token, "[oculto]");
-  assert.equal(guardado.direct_login_url, "[oculto]");
-  assert.equal(guardado.customer.cpf, "[oculto]");
-  assert.equal(guardado.customer.cnpj, null, "o que e nulo continua nulo");
-  assert.equal(guardado.customer.email, "  Comprador.Teste@Bunker707.test ");
-  assert.equal(guardado.customer.name, "Comprador de Teste");
-  assert.equal(guardado.item.product_id, 268);
-  assert.equal(guardado.transaction.hash, "TPC-TESTE-0001");
+  assert.deepEqual(guardado, {
+    bumps: [{ offer_code: "BUMP01", offer_id: 173, product_id: 244, product_name: "Bonus Ficticio" }],
+    customer: { code: "UE-TESTE", email: "comprador@bunker707.test", name: "Comprador de Teste", phone: { ddd: "11", ddi: "55", number: "999990000" } },
+    item: { offer_code: "OFERTA01", offer_id: 262, offer_name: "Oferta 1", product_id: 268, product_name: "Curso Ficticio", refund_deadline: 7 },
+    order: { hash: "TOC-TESTE-0001", id: 710, order_date: "2026-10-17 09:00:06", paid_amount: 19700, transaction_hash: "TPC-TESTE-0001" },
+    payment_method: "pix",
+    status: "authorized",
+    status_date: "2026-10-17 09:00:14",
+    subscriptions: [{ canceled_at: null, id: 119, interval: 1, next_charge: "2026-11-17 00:00:00" }],
+    transaction: { hash: "TPC-TESTE-0001" },
+    version: "2.0"
+  });
+  for (const segredo of [TOKEN, "00000000000", "11111111111", "33333333333", "453962", "Rua Ficticia", "entrar-direto"]) {
+    assert.equal(JSON.stringify(guardado).includes(segredo), false, `${segredo} nunca e gravado`);
+  }
+
+  assert.deepEqual(ticto.normalizeTictoEvent(guardado), ticto.normalizeTictoEvent(completo), "o que fica guardado da o mesmo evento no reprocesso");
+  assert.deepEqual(ticto.redactTictoPayload(guardado), guardado, "guardar de novo nao muda nada");
+  assert.equal(ticto.redactTictoPayload(compraAprovada({ customer: { email: "a@b.co", phone: "+55 11 99999-0000" } })).customer.phone, "+55 11 99999-0000", "telefone em texto fica");
 
   const original = compraAprovada();
   ticto.redactTictoPayload(original);
   assert.equal(original.token, TOKEN, "o payload original nao e alterado");
 
-  assert.deepEqual(ticto.redactTictoPayload({ status: "authorized" }), { status: "authorized" });
+  assert.deepEqual(ticto.redactTictoPayload({ status: "authorized", token: TOKEN }), { status: "authorized" });
   assert.equal(ticto.redactTictoPayload("texto"), "texto");
 });
 

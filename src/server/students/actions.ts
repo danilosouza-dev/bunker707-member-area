@@ -10,6 +10,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
 import { can } from "@/server/auth/roles";
 import { getAccessEmailRedirectTo } from "@/server/auth/site-origin";
+import { anonymizeWebhookEventsFor } from "@/server/payments/store";
 import {
   StudentAccessError,
   applyAccessAction,
@@ -274,6 +275,8 @@ export async function deleteStudent(raw: unknown): Promise<ActionResult<{ delete
     await recordAudit(db, { action: "students.delete", actorId: user.id, entityId: input.userId, entityType: "student", metadata: { email } });
     await removeAvatarFiles(db, input.userId);
     await deleteStudentRows(db, input.userId);
+    // Vendas recebidas do aluno (webhook_events) perdem e-mail e dados do comprador; o historico da venda fica.
+    await anonymizeWebhookEventsFor(db, { email, userId: input.userId });
 
     if (account) {
       await deleteAccount(db, input.userId);

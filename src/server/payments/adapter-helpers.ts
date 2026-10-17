@@ -1,9 +1,6 @@
 // Ajudantes comuns dos adaptadores das plataformas de venda (hotmart.ts, ticto.ts): leitura tolerante
-// do payload e a conferencia do token em tempo constante. Modulo puro, sem "server-only": os testes
-// carregam direto pelo Node.
-
-import { createHash, timingSafeEqual } from "node:crypto";
-import { MIN_SALES_SECRET_LENGTH } from "./types";
+// do payload e a copia so dos campos permitidos para guardar. A conferencia do token fica em secret.ts
+// (o banco guarda so o SHA-256). Modulo puro, sem "server-only": os testes carregam direto pelo Node.
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -26,20 +23,28 @@ export function normalizeBuyerEmail(value: unknown): string | null {
   return email.length > 0 && email.length <= 320 && EMAIL_PATTERN.test(email) ? email : null;
 }
 
-function digest(value: string) {
-  return createHash("sha256").update(value, "utf8").digest();
-}
-
 /**
- * Compara o token recebido com o segredo salvo em tempo constante: os dois viram digests SHA-256 de
- * 32 bytes antes do timingSafeEqual (nem o tamanho do segredo vaza pelo tempo de resposta).
+ * Copia so das chaves listadas de um objeto (valores escalares ou objetos tratados por `nested`), para o
+ * payload guardado levar apenas o que a regra de acesso e a tela usam. Objeto vazio some.
  */
-export function isValidSalesToken(providedToken: string | null | undefined, secret: string | null | undefined) {
-  if (typeof secret !== "string" || secret.trim().length < MIN_SALES_SECRET_LENGTH) {
-    return false;
+export function pick(source: Record<string, unknown> | null, keys: readonly string[], nested: Record<string, (value: unknown) => unknown> = {}) {
+  if (!source) {
+    return undefined;
   }
 
-  const provided = typeof providedToken === "string" ? providedToken.trim() : "";
+  const result: Record<string, unknown> = {};
 
-  return timingSafeEqual(digest(provided), digest(secret.trim())) && provided.length > 0;
+  for (const key of keys) {
+    if (!(key in source)) {
+      continue;
+    }
+
+    const value = nested[key] ? nested[key](source[key]) : source[key];
+
+    if (value !== undefined && (value === null || typeof value !== "object" || Object.keys(value as object).length > 0)) {
+      result[key] = value;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }

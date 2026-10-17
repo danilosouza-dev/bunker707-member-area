@@ -87,7 +87,9 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
     // Dados do pacote e troca dos produtos na mesma transacao (admin_save_combo, 202610110012):
     // uma falha no meio nao deixa o pacote sem produtos.
     const comboId = input.id ?? makeCatalogId("combo", input.name);
-    // Codigo de venda ja usado por outro alvo: recusa no campo antes de gravar o pacote.
+
+    // Codigo da Hotmart ou da Ticto ja usado por outro alvo: recusa ANTES de criar ou gravar o pacote
+    // (senao o pacote novo nasceria sem codigo e o proximo Salvar criaria outro).
     await assertSalesLinksAvailable(db, { codes: { hotmart: input.hotmartProductId, ticto: input.tictoProductId }, comboId });
     const fields = {
       cohort_name: input.cohortName || DEFAULT_COHORT_NAME,
@@ -123,13 +125,27 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
     failOnError(error, "Pacote");
 
     // Codigo na Hotmart e na Ticto (sales_product_links): fora da transacao do pacote, depois dela.
-    // Codigo repetido vira erro do campo da plataforma; "" tira a ligacao.
-    if (input.hotmartProductId !== undefined) {
-      await setSalesLink(db, { comboId, createdBy: user.id, externalProductId: input.hotmartProductId, provider: "hotmart" });
-    }
+    // Codigo repetido vira erro do campo da plataforma; "" tira a ligacao. Se falhar num pacote
+    // recem-criado (corrida entre dois salvamentos), o pacote e desfeito para nao sobrar um duplicado.
+    const codes = [
+      { externalProductId: input.hotmartProductId, provider: "hotmart" as const },
+      { externalProductId: input.tictoProductId, provider: "ticto" as const }
+    ];
 
-    if (input.tictoProductId !== undefined) {
-      await setSalesLink(db, { comboId, createdBy: user.id, externalProductId: input.tictoProductId, provider: "ticto" });
+    for (const code of codes) {
+      if (code.externalProductId === undefined) {
+        continue;
+      }
+
+      try {
+        await setSalesLink(db, { comboId, createdBy: user.id, externalProductId: code.externalProductId, provider: code.provider });
+      } catch (linkError) {
+        if (!input.id) {
+          await db.from("product_combos").delete().eq("id", comboId);
+        }
+
+        throw linkError;
+      }
     }
 
     invalidateCatalog({ from: "action" });
