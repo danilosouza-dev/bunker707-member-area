@@ -208,10 +208,10 @@ Todas estao em `.env.example`, sem valores. Variaveis `NEXT_PUBLIC_*` entram no 
 
 | Variavel | Onde e lida | Vazia |
 |---|---|---|
-| `NEXT_PUBLIC_POSTHOG_KEY` | `src/app/layout.tsx`, `src/components/analytics/posthog-analytics.tsx`, `proxy.ts` (CSP) | PostHog desligado: o layout nao le a sessao para analytics e `posthog-js` nunca e baixado |
-| `NEXT_PUBLIC_POSTHOG_HOST` | `src/components/analytics/posthog-analytics.tsx`, `proxy.ts` (CSP) | `https://us.i.posthog.com` (UE: `https://eu.i.posthog.com`) |
+| `NEXT_PUBLIC_POSTHOG_KEY` | `src/app/layout.tsx`, `src/components/analytics/posthog-analytics.tsx`, `src/proxy.ts` (CSP) | PostHog desligado: o layout nao le a sessao para analytics e `posthog-js` nunca e baixado |
+| `NEXT_PUBLIC_POSTHOG_HOST` | `src/components/analytics/posthog-analytics.tsx`, `src/proxy.ts` (CSP) | `https://us.i.posthog.com` (UE: `https://eu.i.posthog.com`) |
 | `SENTRY_DSN` | `src/instrumentation.ts`, `src/sentry.server.config.ts`, `src/sentry.edge.config.ts` | usa `NEXT_PUBLIC_SENTRY_DSN`; as duas vazias = SDK nem e importado no servidor |
-| `NEXT_PUBLIC_SENTRY_DSN` | `src/instrumentation-client.ts`, `proxy.ts` (CSP) | Sentry desligado no navegador e fora da CSP |
+| `NEXT_PUBLIC_SENTRY_DSN` | `src/instrumentation-client.ts`, `src/proxy.ts` (CSP) | Sentry desligado no navegador e fora da CSP |
 | `SENTRY_ENVIRONMENT` | configs de servidor e edge | `VERCEL_ENV` ou `NODE_ENV` (no navegador: `NEXT_PUBLIC_VERCEL_ENV` ou `NODE_ENV`) |
 | `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | ainda nao usadas | reservadas para `withSentryConfig` e upload de source maps; o token e segredo de build e nunca leva prefixo `NEXT_PUBLIC_` |
 
@@ -253,11 +253,17 @@ A chave do PostHog e o DSN do Sentry sao publicos por natureza (vao para o naveg
 - no projeto do PostHog: ligar "Discard client IP data" e alinhar a retencao a decisao D8 de `docs/17` (24 meses);
 - eventos de dominio (catalogo tipado em `src/server/events`, espelhados com `$insert_id`) e `posthog-node` no servidor entram com o catalogo de eventos; o heartbeat de video nunca vai ao PostHog.
 
-Custo conhecido com o PostHog ligado: como o layout raiz le a sessao, `/tv` deixa de ser pre-renderizada e paginas publicas (`/login`, `/tv`) fazem um `getUser()` a mais. A leitura fica em `<Suspense>` e nao atrasa o HTML inicial.
+Custo conhecido com o PostHog ligado: como o layout raiz le a sessao, paginas publicas (`/login`, `/tv`) fazem um `getUser()` a mais (nenhuma pagina e pre-renderizada de qualquer forma, por causa do nonce da CSP; ver a secao CSP). A leitura fica em `<Suspense>` e nao atrasa o HTML inicial.
 
 ### CSP
 
-O `proxy.ts` so acrescenta hosts quando a variavel correspondente existe:
+A CSP e montada por request em `src/proxy.ts` (nonce novo a cada pedido, `script-src 'self' 'nonce-...' 'strict-dynamic'`, `frame-ancestors 'none'`, `object-src 'none'`), que tambem manda pagina protegida sem sessao para `/login?next=` com `Cache-Control: private, no-store`. O arquivo precisa ficar em `src/`: com o app em `src/app`, o Next 16 so compila `src/proxy.ts` e ignora em silencio um `proxy.ts` na raiz. Como saber se o proxy entrou no build: o resumo do `next build` traz a linha `ƒ Proxy (Middleware)` e `.next/server/functions-config-manifest.json` tem a entrada `/_middleware` com `runtime: "nodejs"` e o matcher (o `middleware-manifest.json` fica vazio mesmo com o proxy, porque so lista proxies no runtime Edge).
+
+`upgrade-insecure-requests` entra so em producao e so quando o pedido chegou em https (`x-forwarded-proto` ou o protocolo do pedido): numa pagina http (next start na propria maquina, testes de ponta a ponta) o WebKit/Safari aplica a diretiva ate em `127.0.0.1` e busca scripts, CSS e fontes por https, e a pagina fica sem hidratar; o Chromium isenta a propria maquina, por isso o problema so aparecia no WebKit.
+
+Nonce por pedido exige renderizacao por pedido: o Next so carimba o nonce nos scripts de uma pagina renderizada na hora; uma pagina pre-renderizada no build sai sem nonce, o navegador bloqueia os scripts que revelam e hidratam o conteudo e a tela fica em branco (foi o que aconteceu com `/tv`, a unica pagina estatica, ao ligar o proxy). Por isso `src/app/layout.tsx` exporta `dynamic = "force-dynamic"` e o resumo do build nao pode ter nenhuma rota `○ (Static)`; o teste de ponta a ponta confere que `/tv` sai com o nonce do pedido no HTML. Foi o que aconteceu ate 17/10/2026; desde a correcao, `tests/e2e/visitante-barrado-na-borda.spec.ts` confere o 307 de `/` anonima e o cabecalho `Content-Security-Policy` com nonce em toda resposta, e `tests/deployment-security.test.mjs` recusa `proxy.ts` ou `middleware.ts` fora de `src/`.
+
+O `src/proxy.ts` so acrescenta hosts quando a variavel correspondente existe:
 
 - `connect-src`: origem de `NEXT_PUBLIC_POSTHOG_HOST` (padrao `https://us.i.posthog.com`) e, nas regioes gerenciadas, o host de assets (`https://us-assets.i.posthog.com` ou `https://eu-assets.i.posthog.com`); origem de ingestao derivada do `NEXT_PUBLIC_SENTRY_DSN` (por exemplo `https://o123.ingest.us.sentry.io`, sem a chave);
 - `script-src`: host de assets do PostHog. Com `'strict-dynamic'`, navegadores modernos ignoram a lista de hosts e confiam nos scripts carregados pelo bundle com nonce; o host fica listado para navegadores sem CSP 3;
@@ -331,7 +337,7 @@ Checklist de producao:
 
 Servidor proprio na Hetzner: o runbook `docs/20-runbook-hetzner.md` cobre criacao do servidor, `bootstrap.sh` (SSH so com chave, ufw com Docker, fail2ban, atualizacoes automaticas), firewall da Hetzner (22 so do produtor, 80/443 so da Cloudflare), Studio atras de allowlist de IP e usuario/senha, primeiro deploy, deploy de nova versao, monitoramento externo (Better Stack ou Uptime Kuma fora do servidor), incidentes e a lista de diferencas para a nuvem (sem MCP do Supabase, sem previews, sem PITR). O checklist de seguranca do servidor esta na secao 16 do runbook.
 
-Achado de 17/10/2026 (ensaio da infra): o `proxy.ts` na raiz nao e compilado pelo Next 16.4 quando o app esta em `src/app` (o Next so procura `src/proxy.ts`); a CSP com nonce e o redirecionamento na borda descritos na secao CSP nao estao ativos em nenhum build hoje. Correcao pendente em PR propria (mover para `src/proxy.ts` com teste de comportamento do cabecalho).
+Achado de 17/10/2026 (ensaio da infra), corrigido no mesmo dia: o `proxy.ts` ficava na raiz e o Next 16.4 nao o compilava com o app em `src/app`, entao a CSP com nonce e o redirecionamento na borda da secao CSP nao estavam ativos em nenhum build (Mac, Docker e Vercel). O arquivo foi movido para `src/proxy.ts`; o teste de ponta a ponta `visitante-barrado-na-borda` e a conferencia de caminho em `deployment-security.test.mjs` impedem a volta. O `infra/scripts/smoke.sh` voltou a exigir 307 em `/`. Ao promover para a `main`, conferir num Preview da Vercel que `/` anonima redireciona e que a resposta traz `Content-Security-Policy`; uma violacao de CSP que nunca apareceu antes (script inline de terceiro, por exemplo) aparece no console do navegador e no Sentry.
 
 ## Importacao de playlist
 

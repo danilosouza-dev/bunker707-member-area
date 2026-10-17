@@ -3,7 +3,9 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import { sanitizeUrl, stripSensitiveUrlData } from "../src/components/analytics/posthog-privacy.ts";
 
-const proxySource = await readFile(new URL("../proxy.ts", import.meta.url), "utf8");
+// O app fica em src/app, e o Next 16 so compila o proxy que esta em src/ (rootDir = pai do app). O
+// comportamento (307 de `/` anonima e CSP com nonce) e provado em tests/e2e/visitante-barrado-na-borda.spec.ts.
+const proxySource = await readFile(new URL("../src/proxy.ts", import.meta.url), "utf8");
 const nextConfigSource = await readFile(new URL("../next.config.ts", import.meta.url), "utf8");
 const supabaseConfigSource = await readFile(new URL("../supabase/config.toml", import.meta.url), "utf8");
 const lessonExperienceSource = await readFile(new URL("../src/components/lesson-experience.tsx", import.meta.url), "utf8");
@@ -39,8 +41,12 @@ test("proxy issues a per-request nonce and an enforced CSP", () => {
   assert.doesNotMatch(proxySource, /script-src[^\n]*'unsafe-inline'/);
 });
 
-test("proxy uses the Next 16 file convention and keeps protected pages behind login", async () => {
-  await assert.rejects(access(new URL("../middleware.ts", import.meta.url)));
+test("proxy lives in src/ (the only place Next 16 compiles it with the app in src/app), uses the Next 16 file convention and keeps protected pages behind login", async () => {
+  // Fora de src/ o Next ignora o arquivo em silencio: o resumo do build sai sem a linha "Proxy" e nem a
+  // CSP nem o redirecionamento na borda existem (achado de 17/10/2026).
+  for (const strayFile of ["../proxy.ts", "../middleware.ts", "../src/middleware.ts"]) {
+    await assert.rejects(access(new URL(strayFile, import.meta.url)), `${strayFile} must not exist`);
+  }
   assert.match(proxySource, /export async function proxy\(request: NextRequest\)/);
   assert.doesNotMatch(proxySource, /export (async )?function middleware/);
   assert.doesNotMatch(proxySource, /export const runtime/);

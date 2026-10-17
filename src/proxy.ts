@@ -84,7 +84,16 @@ const postHogSources = getPostHogSources();
 const observabilityConnectionSources = [...postHogSources.connect, ...getSentryConnectionSources()];
 const observabilityScriptSources = postHogSources.script;
 
-function createContentSecurityPolicy(nonce: string) {
+// `upgrade-insecure-requests` so faz sentido numa pagina servida em https. Numa pagina http (next start
+// na propria maquina, testes de ponta a ponta) o WebKit/Safari aplica a diretiva ate em 127.0.0.1 e busca
+// scripts, CSS e fontes por https, o que deixa a pagina sem hidratar; o Chromium isenta a propria maquina.
+function isHttpsRequest(request: NextRequest) {
+  const forwardedProtocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+
+  return forwardedProtocol ? forwardedProtocol === "https" : request.nextUrl.protocol === "https:";
+}
+
+function createContentSecurityPolicy(nonce: string, upgradeInsecureRequests: boolean) {
   const directives = [
     "default-src 'self'",
     "base-uri 'self'",
@@ -104,7 +113,7 @@ function createContentSecurityPolicy(nonce: string) {
     "worker-src 'self' blob:"
   ];
 
-  if (process.env.NODE_ENV === "production") {
+  if (upgradeInsecureRequests) {
     directives.push("upgrade-insecure-requests");
   }
 
@@ -215,7 +224,10 @@ async function getProxySessionUser(supabase: ProxySupabaseClient): Promise<Proxy
 
 export async function proxy(request: NextRequest) {
   const nonce = btoa(crypto.randomUUID());
-  const contentSecurityPolicy = createContentSecurityPolicy(nonce);
+  const contentSecurityPolicy = createContentSecurityPolicy(
+    nonce,
+    process.env.NODE_ENV === "production" && isHttpsRequest(request)
+  );
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("Content-Security-Policy", contentSecurityPolicy);
   requestHeaders.set("x-nonce", nonce);
