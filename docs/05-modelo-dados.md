@@ -389,7 +389,7 @@ Implementada na migracao `202610170003_sales_webhooks.sql` (17/10/2026), uma lin
 - provider: hotmart, ticto, kiwify (unico);
 - status: not_configured, configured, needs_attention;
 - webhook_url (o endereco mostrado ao produtor, informativo);
-- secret (o token que a plataforma manda em cada pedido; Hotmart: hottok. So o servidor le, por `fetchIntegrationSecret`; a tela nunca recebe a coluna);
+- secret (o SHA-256 em hexadecimal do token que a plataforma manda em cada pedido; Hotmart: hottok. O token em si nunca e gravado: um dump nao permite forjar uma venda. So o servidor le, por `fetchIntegrationSecret`; a tela nunca recebe a coluna);
 - secret_status: missing, set (consistente com `secret` por check);
 - secret_updated_at;
 - events jsonb (lista dos eventos da plataforma que mudam acesso, para a tela dizer o que marcar la);
@@ -398,7 +398,7 @@ Implementada na migracao `202610170003_sales_webhooks.sql` (17/10/2026), uma lin
 
 Regras:
 
-- segredos reais de webhook ficam somente no servidor: a coluna `secret` esta numa tabela so de `service_role`, e `saveSalesSecret` (settings.sales) grava sem devolver; depois de salvo, a tela mostra apenas "Token guardado em <data>" e o botao Trocar;
+- segredos reais de webhook ficam somente no servidor: a coluna `secret` guarda o hash do token numa tabela so de `service_role`, e `saveSalesSecret` (settings.sales) grava sem devolver; depois de salvo, a tela mostra apenas "Token guardado em <data>" e o botao Trocar;
 - dados de plataforma externa sao entrada para processamento, nao fonte de autorizacao;
 - cada provider deve ter adapter proprio (`src/server/payments/adapters.ts`); plataforma sem adaptador aparece como "Em configuracao", nunca "Conectada".
 
@@ -1308,7 +1308,9 @@ Guarda o evento bruto de plataformas externas (so depois do token conferido) e o
 - external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele);
 - event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED`);
 - normalized_type: purchase_approved, refund, chargeback, subscription_canceled, other;
-- payload jsonb (<= 256 KB; o token da plataforma e tirado antes de gravar);
+- payload jsonb (<= 512 KB; so os campos permitidos: envelope, produto, compra, assinatura e e-mail, nome e telefone do comprador; token, documento, endereco, afiliados e comissoes nunca entram; evento que nao muda acesso guarda so o envelope; exclusao do aluno deixa so o envelope com `anonymized: true`);
+- transaction_id (migracao `202610170005`; id da compra na plataforma, igual em todos os eventos da mesma venda; indice (provider, transaction_id));
+- processing_started_at (migracao `202610170005`; inicio do processamento ou do reprocesso; reenvio de evento preso em `received` reivindica a linha por update condicional nesta coluna);
 - signature_valid;
 - processing_status: received, processed, failed, ignored;
 - outcome: access_granted, access_revoked, access_suspended, ignored, failed;
@@ -1325,7 +1327,7 @@ Obrigatorio:
 - guardar payload bruto;
 - nao confiar no payload sem validacao: o acesso so muda por `entitlements`, via `src/server/students/access.ts`.
 
-Retencao: 12 meses (docs/17 §2.4); a rotina de limpeza fica pendente.
+Retencao: 12 meses (docs/17 §2.4); a rotina de limpeza entra na PR da retencao (migracao `202610170004`/`202610170006`).
 
 ### sales_product_links
 

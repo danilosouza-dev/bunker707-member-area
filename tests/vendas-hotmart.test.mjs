@@ -14,6 +14,8 @@ const todayModel = await import("../src/components/admin/v2/today/today-model.ts
 const { requestOriginOf } = await import("../src/server/http/request-origin.ts");
 
 const TOKEN = "hottok-de-teste-0123456789abcdef";
+/** O banco guarda so o SHA-256 do token (src/server/payments/secret.ts). */
+const TOKEN_HASH = hotmart.hashSalesSecret(TOKEN);
 
 /** Payload ficticio no formato do webhook 2.0 da Hotmart (datas em epoch de milissegundos). */
 function compraAprovada(overrides = {}) {
@@ -50,6 +52,7 @@ test("compra aprovada: evento normalizado com comprador, produto, compra e datas
     provider: "hotmart",
     purchasedAt: "2025-10-17T12:01:00.000Z",
     rawType: "PURCHASE_APPROVED",
+    reopenClosedAccess: true,
     transactionId: "HP-TESTE-0001",
     type: "purchase_approved",
     warrantyEndsAt: "2025-10-24T12:00:00.000Z"
@@ -61,6 +64,8 @@ test("cada evento da Hotmart vira o que ele significa para o acesso; o resto e '
 
   assert.equal(typeOf("PURCHASE_APPROVED"), "purchase_approved");
   assert.equal(typeOf("purchase_complete"), "purchase_approved", "fim da garantia conta como aprovada (caixa nao importa)");
+  assert.equal(hotmart.normalizeHotmartEvent(compraAprovada({ event: "PURCHASE_COMPLETE" })).reopenClosedAccess, false, "fim da garantia nao reabre acesso fechado");
+  assert.equal(hotmart.normalizeHotmartEvent(compraAprovada()).reopenClosedAccess, true);
   assert.equal(typeOf("PURCHASE_REFUNDED"), "refund");
   assert.equal(typeOf("PURCHASE_CHARGEBACK"), "chargeback");
   assert.equal(typeOf("SUBSCRIPTION_CANCELLATION"), "subscription_canceled");
@@ -105,25 +110,54 @@ test("payload sem nome de evento ou sem identificador nao vira evento; sem `id`,
   assert.equal(semEmail.purchasedAt, "2025-10-17T12:00:00.000Z", "sem data da compra, vale a data do evento");
 });
 
-test("token: cabecalho X-HOTMART-HOTTOK ou `hottok` do corpo, conferido contra o segredo salvo; errado, ausente ou sem segredo recusam", () => {
+test("token: cabecalho X-HOTMART-HOTTOK ou `hottok` do corpo, conferido contra o HASH salvo; errado, ausente ou sem hash recusam", () => {
   const payload = compraAprovada();
   const headers = (token) => new Headers(token ? { "x-hotmart-hottok": token } : {});
 
-  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(TOKEN), payload: {}, secret: TOKEN }), { ok: true });
-  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(null), payload, secret: TOKEN }), { ok: true }, "token so no corpo tambem vale");
-  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers("outro-token-errado-0123456789"), payload: {}, secret: TOKEN }), { ok: false, reason: "mismatch" });
-  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(`${TOKEN}x`), payload: {}, secret: TOKEN }), { ok: false, reason: "mismatch" }, "tamanho diferente nao lanca erro");
-  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(null), payload: {}, secret: TOKEN }), { ok: false, reason: "missing_token" });
-  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(TOKEN), payload, secret: null }), { ok: false, reason: "missing_secret" });
-  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers("curto"), payload: {}, secret: "curto" }), { ok: false, reason: "missing_secret" }, "segredo curto e configuracao ausente");
+  assert.match(TOKEN_HASH, /^[0-9a-f]{64}$/, "o que vai para o banco e o SHA-256 em hexadecimal");
+  assert.notEqual(TOKEN_HASH, TOKEN);
+  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(TOKEN), payload: {}, secretHash: TOKEN_HASH }), { ok: true });
+  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(null), payload, secretHash: TOKEN_HASH }), { ok: true }, "token so no corpo tambem vale");
+  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers("outro-token-errado-0123456789"), payload: {}, secretHash: TOKEN_HASH }), { ok: false, reason: "mismatch" });
+  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(`${TOKEN}x`), payload: {}, secretHash: TOKEN_HASH }), { ok: false, reason: "mismatch" }, "tamanho diferente nao lanca erro");
+  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(TOKEN_HASH), payload: {}, secretHash: TOKEN_HASH }), { ok: false, reason: "mismatch" }, "mandar o proprio hash nao vale");
+  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(null), payload: {}, secretHash: TOKEN_HASH }), { ok: false, reason: "missing_token" });
+  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(TOKEN), payload, secretHash: null }), { ok: false, reason: "missing_secret" });
+  assert.deepEqual(hotmart.verifyHotmartRequest({ headers: headers(TOKEN), payload, secretHash: TOKEN }), { ok: false, reason: "missing_secret" }, "token em texto puro no banco nao e um hash: configuracao invalida");
 
-  assert.equal(hotmart.isValidSalesToken("", TOKEN), false);
-  assert.equal(hotmart.isValidSalesToken(` ${TOKEN} `, TOKEN), true, "espaco nas pontas nao atrapalha");
+  assert.equal(hotmart.isValidSalesToken("", TOKEN_HASH), false);
+  assert.equal(hotmart.isValidSalesToken(` ${TOKEN} `, TOKEN_HASH), true, "espaco nas pontas nao atrapalha");
 });
 
-test("o payload guardado perde o token; o adaptador registrado e so o da Hotmart", () => {
-  assert.deepEqual(hotmart.redactHotmartPayload(compraAprovada()).hottok, "[oculto]");
-  assert.equal(hotmart.redactHotmartPayload({ event: "X" }).hottok, undefined);
+test("o payload guardado fica so com os campos permitidos (sem token, documento, endereco e comissoes); o adaptador registrado e so o da Hotmart", () => {
+  const completo = compraAprovada({
+    data: {
+      affiliates: [{ name: "Afiliado" }],
+      buyer: { address: { city: "Cidade", zipcode: "00000000" }, checkout_phone: "11999990000", checkout_phone_code: "55", document: "00000000000", email: "comprador@bunker707.test", name: "Comprador" },
+      commissions: [{ value: 10 }],
+      producer: { name: "Produtor" },
+      product: { id: 7001, name: "Curso", ucode: "abc" },
+      purchase: { approved_date: 1, full_price: { value: 100 }, order_date: 1, status: "APPROVED", transaction: "HP-1", warranty_expire_date: 2 },
+      subscription: { plan: { name: "Mensal" }, status: "ACTIVE", subscriber: { code: "SUB-1" } }
+    }
+  });
+  const guardado = hotmart.redactHotmartPayload(completo);
+
+  assert.deepEqual(guardado, {
+    creation_date: 1760702400000,
+    data: {
+      buyer: { checkout_phone: "11999990000", checkout_phone_code: "55", email: "comprador@bunker707.test", name: "Comprador" },
+      product: { id: 7001, name: "Curso" },
+      purchase: { approved_date: 1, order_date: 1, status: "APPROVED", transaction: "HP-1", warranty_expire_date: 2 },
+      subscription: { status: "ACTIVE", subscriber: { code: "SUB-1" } }
+    },
+    event: "PURCHASE_APPROVED",
+    id: "evento-teste-1",
+    version: "2.0.0"
+  });
+  assert.equal(JSON.stringify(guardado).includes("00000000000"), false, "documento nunca e gravado");
+  assert.equal(hotmart.normalizeHotmartEvent(guardado).buyer.email, "comprador@bunker707.test", "o que fica guardado ainda da para reprocessar");
+  assert.deepEqual(hotmart.redactHotmartPayload({ event: "X", hottok: TOKEN }), { event: "X" });
   assert.equal(adapters.getPaymentAdapter("hotmart")?.provider, "hotmart");
   assert.equal(adapters.getPaymentAdapter("ticto"), null);
   assert.equal(adapters.isSalesProviderSupported("kiwify"), false);
@@ -165,6 +199,13 @@ test("modelo da tela: situacao por plataforma, resumo do hub, mascara do e-mail 
   assert.equal(model.canReprocessSaleEvent("failed"), true);
   assert.equal(model.canReprocessSaleEvent("ignored"), true);
   assert.equal(model.canReprocessSaleEvent("processed"), false);
+  const agora = Date.parse("2026-10-17T12:10:00.000Z");
+  assert.equal(model.canReprocessSaleEvent("received", "2026-10-17T12:09:00.000Z", agora), false, "recem-recebido ainda esta rodando");
+  assert.equal(model.canReprocessSaleEvent("received", "2026-10-17T12:04:00.000Z", agora), true, "preso ha mais de 5 minutos reprocessa");
+  assert.equal(model.canReprocessSaleEvent("received"), false);
+  assert.equal(model.webhookOriginWarning({ configuredOrigin: null, requestOrigin: "https://x.vercel.app" }), "O endereço acima é o desta página, porque NEXT_PUBLIC_SITE_URL não está definida. Conecte a plataforma só pelo endereço de produção.");
+  assert.match(model.webhookOriginWarning({ configuredOrigin: "https://app.exemplo.test", requestOrigin: "https://previa.vercel.app" }), /aberto por https:\/\/previa\.vercel\.app/);
+  assert.equal(model.webhookOriginWarning({ configuredOrigin: "https://app.exemplo.test", requestOrigin: "https://app.exemplo.test" }), null);
   assert.equal(model.describeSecretState({ secretUpdatedAt: null, status: "configured" }, () => "x"), "Nenhum token guardado.");
   assert.equal(model.describeSecretState({ secretUpdatedAt: "2026-10-17T12:00:00.000Z", status: "configured" }, () => "17/10/2026 09:00"), "Token guardado em 17/10/2026 09:00.");
 });

@@ -41,6 +41,12 @@ export type NormalizedSaleEvent = {
   externalProductName: string | null;
   /** Id da compra na plataforma (Hotmart: transaction). Estavel entre os eventos da mesma compra. */
   transactionId: string | null;
+  /**
+   * So em `purchase_approved`: true quando e um pagamento novo (reabre acesso revogado ou suspenso);
+   * false quando so confirma uma compra anterior (Hotmart: fim da garantia), que entao libera apenas
+   * quem nunca teve acesso registrado ao produto.
+   */
+  reopenClosedAccess: boolean;
   purchasedAt: string | null;
   warrantyEndsAt: string | null;
   /** Quando o evento aconteceu na plataforma. */
@@ -55,10 +61,17 @@ export type PaymentProviderAdapter = {
   maxPayloadBytes: number;
   /** Nomes dos eventos da plataforma que mudam acesso (para a tela dizer o que marcar la). */
   handledEvents: readonly string[];
-  /** Confere que o pedido veio da plataforma (token no cabecalho ou no corpo), em tempo constante. */
-  verify(input: { headers: Headers; payload: unknown; secret: string | null | undefined }): SaleVerification;
+  /**
+   * Confere que o pedido veio da plataforma (token no cabecalho ou no corpo), em tempo constante, contra
+   * o SHA-256 do token guardado em integration_settings (secret.ts).
+   */
+  verify(input: { headers: Headers; payload: unknown; secretHash: string | null | undefined }): SaleVerification;
   /** Traduz o payload; null quando nem o nome do evento da para ler. */
   normalize(payload: unknown): NormalizedSaleEvent | null;
-  /** Copia do payload para guardar: sem o token da plataforma, que e segredo. */
+  /**
+   * O que fica guardado do payload: so a lista de campos que a regra de acesso e a tela usam (envelope,
+   * produto, compra, assinatura e e-mail, nome e telefone do comprador). Token, documento, endereco,
+   * comissoes e afiliados nunca sao gravados.
+   */
   redact(payload: unknown): unknown;
 };

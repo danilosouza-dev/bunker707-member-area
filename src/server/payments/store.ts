@@ -8,7 +8,7 @@ import "server-only";
 // O segredo de cada plataforma so sai daqui por fetchIntegrationSecret, usada pelo webhook; a tela le
 // fetchIntegrationRows, que nao traz a coluna.
 
-import { toDbError } from "@/server/db/pending-migration";
+import { PENDING_MIGRATION_MESSAGE, isMissingSchemaObjectError, toDbError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import type { IntegrationStatus, SaleOutcome, WebhookProcessingStatus } from "./model";
 import type { NormalizedSaleType, SalesProvider } from "./types";
@@ -60,7 +60,7 @@ export async function fetchIntegrationRow(db: SalesDb, provider: SalesProvider):
   return (data ?? null) as IntegrationRow | null;
 }
 
-/** So o webhook: o segredo para conferir o token do pedido. null = plataforma nao conectada. */
+/** So o webhook: o SHA-256 do token (secret.ts) para conferir o pedido. null = plataforma nao conectada. */
 export async function fetchIntegrationSecret(db: SalesDb, provider: SalesProvider): Promise<string | null> {
   const { data, error } = await db.from("integration_settings").select("secret,secret_status").eq("provider", provider).maybeSingle();
   failOnError(error, "Segredo da plataforma de venda");
@@ -70,9 +70,10 @@ export async function fetchIntegrationSecret(db: SalesDb, provider: SalesProvide
   return row?.secret_status === "set" && row.secret ? row.secret : null;
 }
 
+/** Grava o HASH do token (hashSalesSecret em secret.ts), nunca o token. */
 export async function saveIntegrationSecret(
   db: SalesDb,
-  input: { events: readonly string[]; provider: SalesProvider; secret: string; webhookUrl: string }
+  input: { events: readonly string[]; provider: SalesProvider; secretHash: string; webhookUrl: string }
 ) {
   const now = new Date().toISOString();
   const { error } = await db.from("integration_settings").upsert(
@@ -80,7 +81,7 @@ export async function saveIntegrationSecret(
       events: [...input.events],
       last_error: null,
       provider: input.provider,
-      secret: input.secret,
+      secret: input.secretHash,
       secret_status: "set",
       secret_updated_at: now,
       status: "configured",
@@ -110,14 +111,35 @@ export async function clearIntegration(db: SalesDb, provider: SalesProvider) {
   failOnError(error, "Desconectar a plataforma");
 }
 
-/** Depois de cada evento processado: hora do ultimo e situacao (erro no ultimo = precisa de atencao). */
+/** Quantas vendas da plataforma estao com erro (aguardando reprocesso). */
+export async function countFailedWebhookEvents(db: SalesDb, provider: SalesProvider): Promise<number> {
+  const { count, error } = await db.from("webhook_events").select("id", { count: "exact", head: true }).eq("provider", provider).eq("processing_status", "failed");
+  failOnError(error, "Vendas com erro");
+
+  return count ?? 0;
+}
+
+/**
+ * Depois de cada evento processado: hora do ultimo e situacao. "Precisa de atencao" enquanto houver
+ * QUALQUER venda com erro aguardando reprocesso, nao so quando a ultima falhou: um evento que da certo
+ * logo depois nao esconde a venda que falhou.
+ */
 export async function markIntegrationSync(db: SalesDb, provider: SalesProvider, result: { error: string | null }) {
+  let failedCount = 0;
+
+  try {
+    failedCount = await countFailedWebhookEvents(db, provider);
+  } catch (countError) {
+    console.error(`[vendas] vendas com erro da ${provider} nao contadas: ${countError instanceof Error ? countError.message : String(countError)}`);
+  }
+
+  const pendingMessage = failedCount > 0 ? `${failedCount === 1 ? "1 venda" : `${failedCount} vendas`} com erro aguardando reprocesso.` : null;
   const { error } = await db
     .from("integration_settings")
     .update({
-      last_error: result.error ? result.error.slice(0, 2000) : null,
+      last_error: result.error ? result.error.slice(0, 2000) : pendingMessage,
       last_sync_at: new Date().toISOString(),
-      status: result.error ? "needs_attention" : "configured"
+      status: result.error || failedCount > 0 ? "needs_attention" : "configured"
     })
     .eq("provider", provider)
     .eq("secret_status", "set");
@@ -132,10 +154,11 @@ export async function markIntegrationSync(db: SalesDb, provider: SalesProvider, 
  * ---------------------------------------------------------------------------------------------- */
 
 export const WEBHOOK_EVENT_COLUMNS =
-  "id,provider,external_event_id,event_type,normalized_type,signature_valid,processing_status,outcome,outcome_detail,buyer_email,external_product_id,external_product_name,product_id,combo_id,user_id,received_at,processed_at,error_message";
+  "id,provider,external_event_id,event_type,normalized_type,signature_valid,processing_status,outcome,outcome_detail,buyer_email,external_product_id,external_product_name,transaction_id,product_id,combo_id,user_id,received_at,processed_at,error_message";
 
 export type WebhookEventRow = {
   buyer_email: string | null;
+  transaction_id: string | null;
   combo_id: string | null;
   error_message: string | null;
   event_type: string;
@@ -165,6 +188,7 @@ export type WebhookEventInsert = {
   payload: unknown;
   provider: SalesProvider;
   signatureValid: boolean;
+  transactionId: string | null;
 };
 
 /** Grava o evento bruto; o mesmo (provider, external_event_id) de novo devolve `duplicate`. */
@@ -179,9 +203,11 @@ export async function insertWebhookEvent(db: SalesDb, input: WebhookEventInsert)
       external_product_name: input.externalProductName,
       normalized_type: input.normalizedType,
       payload: input.payload,
+      processing_started_at: new Date().toISOString(),
       processing_status: "received",
       provider: input.provider,
-      signature_valid: input.signatureValid
+      signature_valid: input.signatureValid,
+      transaction_id: input.transactionId
     })
     .select("id")
     .single();
@@ -193,6 +219,88 @@ export async function insertWebhookEvent(db: SalesDb, input: WebhookEventInsert)
   failOnError(error, "Registrar a venda recebida");
 
   return { duplicate: false, id: (data as { id: string }).id };
+}
+
+/**
+ * Reenvio de um evento que ficou preso em `received` (o processamento morreu depois de gravar): reivindica
+ * a linha com um update condicional, para so um processamento rodar por vez. Devolve o id reivindicado
+ * ou null (evento ja processado, ou ainda rodando).
+ */
+export async function claimStaleReceivedEvent(
+  db: SalesDb,
+  input: { externalEventId: string; provider: SalesProvider; staleAfterMs: number }
+): Promise<string | null> {
+  const cutoff = new Date(Date.now() - input.staleAfterMs).toISOString();
+  const { data, error } = await db
+    .from("webhook_events")
+    .update({ processing_started_at: new Date().toISOString() })
+    .eq("provider", input.provider)
+    .eq("external_event_id", input.externalEventId)
+    .eq("processing_status", "received")
+    .or(`processing_started_at.is.null,processing_started_at.lt.${cutoff}`)
+    .lt("received_at", cutoff)
+    .select("id");
+  failOnError(error, "Reivindicar a venda presa");
+
+  return ((data ?? []) as { id: string }[])[0]?.id ?? null;
+}
+
+/** Marca o inicio de um reprocesso (mesma trava do reenvio). */
+export async function markProcessingStarted(db: SalesDb, id: string) {
+  const { error } = await db.from("webhook_events").update({ processing_started_at: new Date().toISOString() }).eq("id", id);
+  failOnError(error, "Reprocessar a venda");
+}
+
+/** A compra ja tem reembolso ou chargeback registrado (em qualquer situacao de processamento)? */
+export async function hasClosingEventForTransaction(db: SalesDb, provider: SalesProvider, transactionId: string): Promise<boolean> {
+  const { count, error } = await db
+    .from("webhook_events")
+    .select("id", { count: "exact", head: true })
+    .eq("provider", provider)
+    .eq("transaction_id", transactionId)
+    .in("normalized_type", ["refund", "chargeback"]);
+  failOnError(error, "Reembolsos da compra");
+
+  return (count ?? 0) > 0;
+}
+
+/**
+ * Exclusao do aluno (LGPD): os eventos de venda dele perdem o e-mail e o payload fica so com o envelope
+ * (id, evento, data). Tabela ausente (banco sem a migracao) nao impede a exclusao.
+ */
+export async function anonymizeWebhookEventsFor(db: SalesDb, input: { email: string | null; userId: string }) {
+  const filters = [`user_id.eq.${input.userId}`];
+
+  if (input.email) {
+    filters.push(`buyer_email.eq.${input.email.replace(/[,()]/g, "")}`);
+  }
+
+  const { data, error } = await db
+    .from("webhook_events")
+    .select("id,payload")
+    .or(filters.join(","));
+
+  if (error) {
+    if (isMissingSchemaObjectError(error)) {
+      return 0;
+    }
+
+    failOnError(error, "Vendas do aluno");
+  }
+
+  const rows = (data ?? []) as { id: string; payload: unknown }[];
+
+  for (const row of rows) {
+    const payload = row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? (row.payload as Record<string, unknown>) : {};
+    const envelope = Object.fromEntries(Object.entries(payload).filter(([key]) => key !== "data"));
+    const { error: updateError } = await db
+      .from("webhook_events")
+      .update({ buyer_email: null, payload: { ...envelope, anonymized: true } })
+      .eq("id", row.id);
+    failOnError(updateError, "Anonimizar vendas do aluno");
+  }
+
+  return rows.length;
 }
 
 export type WebhookEventResultPatch = {
@@ -292,6 +400,12 @@ export async function fetchSalesLinksFor(db: SalesDb, filter: { comboIds?: reado
   }
 
   const { data, error } = await query;
+
+  // Banco sem a migracao 202610170003: as telas do catalogo seguem sem o codigo (nada a ligar ainda).
+  if (error && isMissingSchemaObjectError(error)) {
+    return [];
+  }
+
   failOnError(error, "Produtos ligados à plataforma");
 
   return (data ?? []) as SalesLinkRow[];
@@ -326,9 +440,62 @@ export class SalesLinkConflictError extends Error {
 
 export type SalesLinkTarget = { comboId: string; productId?: undefined } | { comboId?: undefined; productId: string };
 
+const LINK_CONFLICT_MESSAGE = "Esse código já está ligado a outro produto ou pacote. Cada código da plataforma libera um alvo só.";
+
+/** Banco sem a tabela de ligacoes: o campo nao pode ser gravado ainda (422 com a frase da migracao). */
+class SalesLinksUnavailableError extends Error {
+  readonly status = 422 as const;
+
+  constructor() {
+    super(PENDING_MIGRATION_MESSAGE);
+    this.name = "SalesLinksUnavailableError";
+  }
+}
+
+/**
+ * Antes de gravar o produto ou criar o pacote: o codigo ja esta em OUTRO alvo? Lanca o erro do campo
+ * sem ter escrito nada (a linha do produto nao fica gravada com o resto do formulario, e o pacote novo
+ * nao nasce sem codigo). Codigo vazio nao precisa de nada.
+ */
+export async function assertSalesLinkAvailable(
+  db: SalesDb,
+  input: SalesLinkTarget & { externalProductId: string | null | undefined; provider: SalesProvider }
+) {
+  const external = input.externalProductId?.trim() ?? "";
+
+  if (!external) {
+    return;
+  }
+
+  const { data, error } = await db
+    .from("sales_product_links")
+    .select("product_id,combo_id")
+    .eq("provider", input.provider)
+    .eq("external_product_id", external)
+    .maybeSingle();
+
+  if (error && isMissingSchemaObjectError(error)) {
+    throw new SalesLinksUnavailableError();
+  }
+
+  failOnError(error, "Código da plataforma");
+
+  const row = (data ?? null) as { combo_id: string | null; product_id: string | null } | null;
+
+  if (!row) {
+    return;
+  }
+
+  const sameTarget = input.productId ? row.product_id === input.productId : row.combo_id === input.comboId;
+
+  if (!sameTarget) {
+    throw new SalesLinkConflictError(LINK_CONFLICT_MESSAGE);
+  }
+}
+
 /**
  * Grava o codigo da plataforma de um produto ou pacote (vazio = tira a ligacao). Codigo ja usado por
- * outro alvo vira 409 com a frase para a tela.
+ * outro alvo vira erro do campo. Sem a tabela (banco sem a migracao), tirar nao faz nada e gravar recusa.
  */
 export async function setSalesLink(
   db: SalesDb,
@@ -340,6 +507,11 @@ export async function setSalesLink(
 
   if (!external) {
     const { error } = await db.from("sales_product_links").delete().eq("provider", input.provider).eq(targetColumn, targetId);
+
+    if (error && isMissingSchemaObjectError(error)) {
+      return;
+    }
+
     failOnError(error, "Tirar o código da plataforma");
 
     return;
@@ -359,7 +531,11 @@ export async function setSalesLink(
     );
 
   if (error?.code === "23505") {
-    throw new SalesLinkConflictError("Esse código já está ligado a outro produto ou pacote. Cada código da plataforma libera um alvo só.");
+    throw new SalesLinkConflictError(LINK_CONFLICT_MESSAGE);
+  }
+
+  if (error && isMissingSchemaObjectError(error)) {
+    throw new SalesLinksUnavailableError();
   }
 
   failOnError(error, "Guardar o código da plataforma");
