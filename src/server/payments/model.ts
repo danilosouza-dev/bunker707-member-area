@@ -120,7 +120,7 @@ export function saleEventLabel(rawType: string | null | undefined, normalizedTyp
 export const WEBHOOK_PROCESSING_STATUSES = ["received", "processed", "failed", "ignored"] as const;
 export type WebhookProcessingStatus = (typeof WEBHOOK_PROCESSING_STATUSES)[number];
 
-export const SALE_OUTCOMES = ["access_granted", "access_revoked", "access_suspended", "ignored", "failed"] as const;
+export const SALE_OUTCOMES = ["access_granted", "access_revoked", "access_suspended", "access_restored", "ignored", "failed"] as const;
 export type SaleOutcome = (typeof SALE_OUTCOMES)[number];
 
 export function normalizeSaleOutcome(value: unknown): SaleOutcome | null {
@@ -136,6 +136,8 @@ export function saleOutcomeChip(input: { outcome: SaleOutcome | null; status: We
       return { label: "Acesso revogado", tone: "warning" };
     case "access_suspended":
       return { label: "Acesso suspenso", tone: "warning" };
+    case "access_restored":
+      return { label: "Prazo devolvido", tone: "neutral" };
     case "ignored":
       return { label: "Ignorado", tone: "muted" };
     case "failed":
@@ -143,6 +145,56 @@ export function saleOutcomeChip(input: { outcome: SaleOutcome | null; status: We
     default:
       return input.status === "failed" ? { label: "Erro", tone: "warning" } : { label: "Recebido", tone: "neutral" };
   }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Vinculo venda -> acesso (sale_grants): o que fazer com um acesso quando a venda e desfeita
+ * ---------------------------------------------------------------------------------------------- */
+
+export type SaleGrantLike = {
+  closed_at: string | null;
+  opened: boolean;
+  previous_ends_at: string | null;
+  subscription_code: string | null;
+  transaction_id: string;
+};
+
+/**
+ * Outra compra paga sustenta o acesso? Conta vinculo aberto de OUTRA transacao que nao seja cobranca
+ * da mesma assinatura (as cobrancas de uma assinatura nao se sustentam entre si).
+ */
+export function isSustainedByAnotherSale(grant: Pick<SaleGrantLike, "subscription_code" | "transaction_id">, allGrantsOfEntitlement: readonly SaleGrantLike[]) {
+  return allGrantsOfEntitlement.some(
+    (other) =>
+      other.closed_at === null &&
+      other.transaction_id !== grant.transaction_id &&
+      (other.subscription_code === null || other.subscription_code !== grant.subscription_code)
+  );
+}
+
+export type ClosedGrantDecision = "keep_sustained" | "keep_other_origin" | "restore_deadline" | "close";
+
+/**
+ * O que fazer com um acesso quando o vinculo de uma venda fecha (reembolso, chargeback, cancelamento):
+ * - outra compra paga o sustenta -> fica;
+ * - a venda so estendeu um acesso de outra origem que tinha prazo -> o prazo volta;
+ * - a venda abriu o acesso, ou e uma cobranca de uma assinatura que ja o sustentava antes -> fecha;
+ * - a venda so estendeu um acesso de outra origem sem prazo (equipe, outra compra) -> fica.
+ */
+export function decideOnClosedGrant(grant: SaleGrantLike, allGrantsOfEntitlement: readonly SaleGrantLike[]): ClosedGrantDecision {
+  if (isSustainedByAnotherSale(grant, allGrantsOfEntitlement)) {
+    return "keep_sustained";
+  }
+
+  if (!grant.opened && grant.previous_ends_at !== null) {
+    return "restore_deadline";
+  }
+
+  const renewalOfSameSubscription =
+    grant.subscription_code !== null &&
+    allGrantsOfEntitlement.some((other) => other.transaction_id !== grant.transaction_id && other.subscription_code === grant.subscription_code);
+
+  return grant.opened || renewalOfSameSubscription ? "close" : "keep_other_origin";
 }
 
 /** Depois de quanto tempo um evento ainda em `received` conta como preso (a funcao estourou o tempo). */

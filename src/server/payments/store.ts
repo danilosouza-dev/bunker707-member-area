@@ -10,7 +10,7 @@ import "server-only";
 
 import { PENDING_MIGRATION_MESSAGE, isMissingSchemaObjectError, toDbError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
-import type { IntegrationStatus, SaleOutcome, WebhookProcessingStatus } from "./model";
+import { STUCK_RECEIVED_MINUTES, type IntegrationStatus, type SaleOutcome, type WebhookProcessingStatus } from "./model";
 import type { NormalizedSaleType, SalesProvider } from "./types";
 
 export type SalesDb = ReturnType<typeof getSupabaseAdminClient>;
@@ -111,9 +111,14 @@ export async function clearIntegration(db: SalesDb, provider: SalesProvider) {
   failOnError(error, "Desconectar a plataforma");
 }
 
-/** Quantas vendas da plataforma estao com erro (aguardando reprocesso). */
-export async function countFailedWebhookEvents(db: SalesDb, provider: SalesProvider): Promise<number> {
-  const { count, error } = await db.from("webhook_events").select("id", { count: "exact", head: true }).eq("provider", provider).eq("processing_status", "failed");
+/** Quantas vendas da plataforma precisam de alguem: com erro, ou presas em `received` ha mais de STUCK_RECEIVED_MINUTES. */
+export async function countEventsNeedingAttention(db: SalesDb, provider: SalesProvider, now: number = Date.now()): Promise<number> {
+  const cutoff = new Date(now - STUCK_RECEIVED_MINUTES * 60_000).toISOString();
+  const { count, error } = await db
+    .from("webhook_events")
+    .select("id", { count: "exact", head: true })
+    .eq("provider", provider)
+    .or(`processing_status.eq.failed,and(processing_status.eq.received,received_at.lt.${cutoff})`);
   failOnError(error, "Vendas com erro");
 
   return count ?? 0;
@@ -121,19 +126,19 @@ export async function countFailedWebhookEvents(db: SalesDb, provider: SalesProvi
 
 /**
  * Depois de cada evento processado: hora do ultimo e situacao. "Precisa de atencao" enquanto houver
- * QUALQUER venda com erro aguardando reprocesso, nao so quando a ultima falhou: um evento que da certo
- * logo depois nao esconde a venda que falhou.
+ * QUALQUER venda com erro ou presa aguardando reprocesso, nao so quando a ultima falhou: um evento que
+ * da certo logo depois nao esconde a venda que falhou.
  */
 export async function markIntegrationSync(db: SalesDb, provider: SalesProvider, result: { error: string | null }) {
   let failedCount = 0;
 
   try {
-    failedCount = await countFailedWebhookEvents(db, provider);
+    failedCount = await countEventsNeedingAttention(db, provider);
   } catch (countError) {
     console.error(`[vendas] vendas com erro da ${provider} nao contadas: ${countError instanceof Error ? countError.message : String(countError)}`);
   }
 
-  const pendingMessage = failedCount > 0 ? `${failedCount === 1 ? "1 venda" : `${failedCount} vendas`} com erro aguardando reprocesso.` : null;
+  const pendingMessage = failedCount > 0 ? `${failedCount === 1 ? "1 venda" : `${failedCount} vendas`} com erro ou presa aguardando reprocesso.` : null;
   const { error } = await db
     .from("integration_settings")
     .update({
@@ -245,10 +250,43 @@ export async function claimStaleReceivedEvent(
   return ((data ?? []) as { id: string }[])[0]?.id ?? null;
 }
 
-/** Marca o inicio de um reprocesso (mesma trava do reenvio). */
-export async function markProcessingStarted(db: SalesDb, id: string) {
-  const { error } = await db.from("webhook_events").update({ processing_started_at: new Date().toISOString() }).eq("id", id);
+/**
+ * Reivindica a linha para um reprocesso (botao ou reenvio): update condicional na situacao lida e em
+ * processing_started_at (nulo ou mais velho que a janela). Devolve false quando outro processamento
+ * acabou de comecar (segundo clique, duas abas, reenvio da plataforma ao mesmo tempo).
+ */
+export async function claimEventForProcessing(
+  db: SalesDb,
+  input: { expectedStatus: WebhookProcessingStatus; id: string; staleAfterMs: number }
+): Promise<boolean> {
+  const cutoff = new Date(Date.now() - input.staleAfterMs).toISOString();
+  const { data, error } = await db
+    .from("webhook_events")
+    .update({ processing_started_at: new Date().toISOString() })
+    .eq("id", input.id)
+    .eq("processing_status", input.expectedStatus)
+    .or(`processing_started_at.is.null,processing_started_at.lt.${cutoff}`)
+    .select("id");
   failOnError(error, "Reprocessar a venda");
+
+  return ((data ?? []) as { id: string }[]).length > 0;
+}
+
+/** A linha de um evento pelo id da plataforma (reenvio): situacao e quando chegou. */
+export async function fetchWebhookEventByExternalId(
+  db: SalesDb,
+  provider: SalesProvider,
+  externalEventId: string
+): Promise<Pick<WebhookEventRow, "id" | "processing_status" | "received_at"> | null> {
+  const { data, error } = await db
+    .from("webhook_events")
+    .select("id,processing_status,received_at")
+    .eq("provider", provider)
+    .eq("external_event_id", externalEventId)
+    .maybeSingle();
+  failOnError(error, "Venda recebida");
+
+  return (data ?? null) as Pick<WebhookEventRow, "id" | "processing_status" | "received_at"> | null;
 }
 
 /** A compra ja tem reembolso ou chargeback registrado (em qualquer situacao de processamento)? */
@@ -322,6 +360,8 @@ export async function updateWebhookEventResult(db: SalesDb, id: string, patch: W
       outcome: patch.outcome,
       outcome_detail: patch.outcomeDetail ? patch.outcomeDetail.slice(0, 500) : null,
       processed_at: new Date().toISOString(),
+      // Processamento terminou: a trava (processing_started_at) e solta; o proximo reprocesso a reivindica.
+      processing_started_at: null,
       processing_status: patch.processingStatus,
       product_id: patch.productId ?? null,
       user_id: patch.userId ?? null
@@ -348,6 +388,96 @@ export async function listWebhookEvents(db: SalesDb, input: { limit: number; pro
   failOnError(error, "Vendas recebidas");
 
   return (data ?? []) as WebhookEventRow[];
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * sale_grants: vinculo venda -> acesso (migracao 202610170008)
+ * ---------------------------------------------------------------------------------------------- */
+
+const SALE_GRANT_COLUMNS = "id,provider,transaction_id,subscription_code,user_id,entitlement_id,product_id,opened,previous_ends_at,closed_at,closed_by";
+
+export type SaleGrantRow = {
+  closed_at: string | null;
+  closed_by: "refund" | "chargeback" | "subscription_canceled" | null;
+  entitlement_id: string;
+  id: string;
+  opened: boolean;
+  previous_ends_at: string | null;
+  product_id: string;
+  provider: SalesProvider;
+  subscription_code: string | null;
+  transaction_id: string;
+  user_id: string;
+};
+
+export type SaleGrantInsert = {
+  entitlementId: string;
+  opened: boolean;
+  previousEndsAt: string | null;
+  productId: string;
+  provider: SalesProvider;
+  subscriptionCode: string | null;
+  transactionId: string;
+  userId: string;
+  webhookEventId: string | null;
+};
+
+/** Grava o vinculo de uma venda com um acesso; a mesma venda reprocessada nao duplica. */
+export async function insertSaleGrants(db: SalesDb, grants: readonly SaleGrantInsert[]) {
+  if (grants.length === 0) {
+    return;
+  }
+
+  const { error } = await db.from("sale_grants").upsert(
+    grants.map((grant) => ({
+      entitlement_id: grant.entitlementId,
+      opened: grant.opened,
+      previous_ends_at: grant.previousEndsAt,
+      product_id: grant.productId,
+      provider: grant.provider,
+      subscription_code: grant.subscriptionCode,
+      transaction_id: grant.transactionId,
+      user_id: grant.userId,
+      webhook_event_id: grant.webhookEventId
+    })),
+    { ignoreDuplicates: true, onConflict: "provider,transaction_id,entitlement_id" }
+  );
+  failOnError(error, "Registrar o vínculo da venda com o acesso");
+}
+
+export async function fetchSaleGrantsByTransaction(db: SalesDb, provider: SalesProvider, transactionId: string): Promise<SaleGrantRow[]> {
+  const { data, error } = await db.from("sale_grants").select(SALE_GRANT_COLUMNS).eq("provider", provider).eq("transaction_id", transactionId).order("created_at");
+  failOnError(error, "Vínculos da venda");
+
+  return (data ?? []) as SaleGrantRow[];
+}
+
+export async function fetchSaleGrantsBySubscription(db: SalesDb, provider: SalesProvider, subscriptionCode: string): Promise<SaleGrantRow[]> {
+  const { data, error } = await db.from("sale_grants").select(SALE_GRANT_COLUMNS).eq("provider", provider).eq("subscription_code", subscriptionCode).order("created_at");
+  failOnError(error, "Vínculos da assinatura");
+
+  return (data ?? []) as SaleGrantRow[];
+}
+
+/** Todos os vinculos (de qualquer venda) dos acessos informados, para saber se outra compra os sustenta. */
+export async function fetchSaleGrantsForEntitlements(db: SalesDb, entitlementIds: readonly string[]): Promise<SaleGrantRow[]> {
+  if (entitlementIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await db.from("sale_grants").select(SALE_GRANT_COLUMNS).in("entitlement_id", [...entitlementIds]).order("created_at");
+  failOnError(error, "Vínculos dos acessos");
+
+  return (data ?? []) as SaleGrantRow[];
+}
+
+export async function closeSaleGrants(db: SalesDb, ids: readonly string[], closedBy: NonNullable<SaleGrantRow["closed_by"]>) {
+  if (ids.length === 0) {
+    return;
+  }
+
+  const { error } = await db.from("sale_grants").update({ closed_at: new Date().toISOString(), closed_by: closedBy }).in("id", [...ids]).is("closed_at", null);
+  failOnError(error, "Fechar o vínculo da venda");
 }
 
 /* ------------------------------------------------------------------------------------------------
