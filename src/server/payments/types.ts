@@ -28,6 +28,9 @@ export type SaleBuyer = {
   phone: string | null;
 };
 
+/** Produto vendido junto no mesmo pedido (order bump). */
+export type SaleExtraProduct = { externalProductId: string; externalProductName: string | null };
+
 export type NormalizedSaleEvent = {
   provider: SalesProvider;
   /** Id do evento na plataforma (idempotencia). */
@@ -39,6 +42,11 @@ export type NormalizedSaleEvent = {
   /** Codigo do produto na plataforma (texto), ligado ao produto ou pacote interno por sales_product_links. */
   externalProductId: string | null;
   externalProductName: string | null;
+  /**
+   * Outros produtos vendidos no mesmo pedido (Ticto: order bumps em `bumps`), sem repetir o principal.
+   * Cada um e resolvido em sales_product_links como o principal. Ausente ou vazio = so o principal.
+   */
+  extraProducts?: SaleExtraProduct[];
   /** Id da compra na plataforma (Hotmart: transaction). Estavel entre os eventos da mesma compra. */
   transactionId: string | null;
   purchasedAt: string | null;

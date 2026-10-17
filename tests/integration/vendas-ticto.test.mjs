@@ -8,6 +8,7 @@ import {
   apagarContaDeTeste,
   desconectarVendas,
   garantirPacoteDeTeste,
+  ligarProdutoNaPlataforma,
   limparVendasDeTeste,
   seedEscolaDeTeste,
   usuarioDeTeste
@@ -37,15 +38,17 @@ const { curso, cursoBloqueado, cursoLiberacao } = ESCOLA_DE_TESTE;
 const produtor = usuarioDeTeste(contas.produtor);
 const analista = usuarioDeTeste(contas.analista);
 const TOKEN = "token-ticto-integracao-0123456789abcdef";
-const CODIGOS = { curso: "8001", pacote: "8002", semLigacao: "8999" };
+const CODIGOS = { bump: "8004", bumpSemLigacao: "8998", curso: "8001", pacote: "8002", semLigacao: "8999" };
 const COMPRADOR = { email: "comprador.ticto@bunker707.test", nome: "Comprador da Ticto" };
 const ASSINANTE = { email: "assinante.ticto@bunker707.test", nome: "Assinante da Ticto" };
 const COMPRADOR_PACOTE = { email: "comprador.pacote.ticto@bunker707.test", nome: "Comprador do Pacote" };
+const COMPRADOR_BUMP = { email: "comprador.bump.ticto@bunker707.test", nome: "Comprador do Bump" };
 const PREFIXO = "teste-ticto-";
 
 /** Payload ficticio no formato do webhook 2.0 da Ticto; a transacao leva o prefixo (vira o id do evento e a origem do acesso). */
-function payload({ email = COMPRADOR.email, nome = COMPRADOR.nome, produto = CODIGOS.curso, status = "authorized", statusDate = "2026-10-17 10:00:00", transacao }) {
+function payload({ bumps, email = COMPRADOR.email, nome = COMPRADOR.nome, produto = CODIGOS.curso, status = "authorized", statusDate = "2026-10-17 10:00:00", transacao }) {
   return {
+    ...(bumps ? { bumps } : {}),
     commission_type: "producer",
     customer: { cpf: "00000000000", email, name: nome, phone: { ddd: "11", ddi: "55", number: "999990000" }, type: "person" },
     direct_login_url: "https://exemplo.test/entrar-direto",
@@ -114,9 +117,9 @@ async function limpar() {
   await desconectarVendas(db);
   // "7001" e o codigo da Hotmart que o teste do Acesso e venda grava junto, para provar que um nao mexe no outro.
   await limparVendasDeTeste(db, { codigos: [...Object.values(CODIGOS), "7001"], prefixoDoEvento: PREFIXO });
-  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email]), "Limpando a fila de e-mail de teste");
+  unwrap(await db.from("email_outbox").delete().in("to_email", [COMPRADOR.email, ASSINANTE.email, COMPRADOR_PACOTE.email, COMPRADOR_BUMP.email]), "Limpando a fila de e-mail de teste");
 
-  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE]) {
+  for (const conta of [COMPRADOR, ASSINANTE, COMPRADOR_PACOTE, COMPRADOR_BUMP]) {
     await apagarContaDeTeste(db, conta.email);
   }
 }
@@ -230,7 +233,7 @@ test("compra aprovada cria a conta, libera o curso com origem ticto, enfileira b
 
   const [evento] = await eventos();
   assert.equal(evento.provider, "ticto");
-  assert.equal(evento.external_event_id, `${PREFIXO}T0001:authorized:2026-10-17 10:00:00`);
+  assert.equal(evento.external_event_id, `${PREFIXO}T0001:${CODIGOS.curso}:authorized:2026-10-17 10:00:00`);
   assert.equal(evento.event_type, "authorized");
   assert.equal(evento.normalized_type, "purchase_approved");
   assert.equal(evento.processing_status, "processed");
@@ -268,7 +271,7 @@ test("o mesmo postback entregue de novo responde 200 sem reprocessar: um acesso,
 
   assert.equal((await acessosDe(COMPRADOR.email)).acessos.length, 1);
   assert.equal((await filaDe(COMPRADOR.email)).length, 2);
-  assert.equal((await eventos()).filter((row) => row.external_event_id.startsWith(`${PREFIXO}T0001:authorized`)).length, 1);
+  assert.equal((await eventos()).filter((row) => row.external_event_id.startsWith(`${PREFIXO}T0001:${CODIGOS.curso}:authorized`)).length, 1);
 });
 
 test("reembolso revoga o acesso ao curso e fica registrado como revogado", async () => {
@@ -278,7 +281,7 @@ test("reembolso revoga o acesso ao curso e fica registrado como revogado", async
 
   const { acessos } = await acessosDe(COMPRADOR.email);
   assert.deepEqual(acessos.map((row) => [row.target_id, row.status]), [[curso.id, "revoked"]]);
-  assert.equal((await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T0001:refunded`)).outcome, "access_revoked");
+  assert.equal((await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T0001:${CODIGOS.curso}:refunded`)).outcome, "access_revoked");
 
   const repetido = await post(payload({ status: "refunded", statusDate: "2026-10-18 09:00:00", transacao: "T0001" }));
   assert.equal((await repetido.json()).outcome, "ignored", "revogar de novo nao muda nada");
@@ -302,6 +305,68 @@ test("assinatura cancelada suspende o acesso; assinatura reativada (uncanceled) 
     ["welcome", "purchase"],
     "a reativacao e da mesma compra: a chave de idempotencia do e-mail de compra nao manda de novo"
   );
+});
+
+/* ------------------------------------------------------------ Order bump */
+
+function porProduto(acessos) {
+  return acessos.map((row) => [row.target_id, row.status, row.source_event_id]).sort((left, right) => left[0].localeCompare(right[0]));
+}
+
+test("order bump: o produto vendido junto com codigo ligado e liberado na mesma compra (um e-mail so); o bump sem ligacao fica escrito; o reembolso do pedido revoga os dois", async () => {
+  await ligarProdutoNaPlataforma(db, { codigo: CODIGOS.bump, plataforma: "ticto", produtoId: cursoBloqueado.id });
+  const bumps = [
+    { offer_code: "BUMP01", offer_id: 173, product_id: Number(CODIGOS.bump), product_name: "Bonus na Ticto" },
+    { offer_code: "BUMP02", offer_id: 174, product_id: Number(CODIGOS.bumpSemLigacao), product_name: "Ebook na Ticto" }
+  ];
+
+  const compra = await post(payload({ bumps, email: COMPRADOR_BUMP.email, nome: COMPRADOR_BUMP.nome, transacao: "T-BUMP-0001" }));
+  const body = await compra.json();
+  assert.equal(compra.status, 200, JSON.stringify(body));
+  assert.equal(body.outcome, "access_granted");
+
+  const { acessos } = await acessosDe(COMPRADOR_BUMP.email);
+  assert.deepEqual(
+    porProduto(acessos),
+    [
+      [curso.id, "active", `${PREFIXO}T-BUMP-0001:${curso.id}`],
+      [cursoBloqueado.id, "active", `${PREFIXO}T-BUMP-0001:${cursoBloqueado.id}`]
+    ].sort((left, right) => left[0].localeCompare(right[0])),
+    "o principal e o bump ligado ficam abertos, cada um com o proprio id de origem"
+  );
+  assert.deepEqual((await filaDe(COMPRADOR_BUMP.email)).map((row) => row.kind), ["welcome", "purchase"], "um e-mail de compra para o pedido inteiro");
+
+  const linha = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T-BUMP-0001:${CODIGOS.curso}:authorized`));
+  assert.equal(linha.product_id, curso.id, "a linha mostra o produto principal");
+  assert.match(linha.outcome_detail, /Inclui 1 produto vendido junto\./);
+  assert.match(linha.outcome_detail, /8998 \(Ebook na Ticto\) da Ticto não está ligado a nenhum produto ou pacote da escola e não foi liberado/);
+
+  const reembolso = await post(payload({ bumps, email: COMPRADOR_BUMP.email, status: "refunded", statusDate: "2026-10-19 10:00:00", transacao: "T-BUMP-0001" }));
+  assert.equal((await reembolso.json()).outcome, "access_revoked");
+  assert.deepEqual(
+    porProduto((await acessosDe(COMPRADOR_BUMP.email)).acessos).map(([target, status]) => [target, status]),
+    [[curso.id, "revoked"], [cursoBloqueado.id, "revoked"]].sort((left, right) => left[0].localeCompare(right[0])),
+    "o reembolso do pedido tira o principal e o bump"
+  );
+});
+
+test("order bump com o produto principal fora da escola: o bump ligado e liberado e o detalhe diz que o principal nao foi", async () => {
+  const response = await post(
+    payload({ bumps: [{ product_id: Number(CODIGOS.bump), product_name: "Bonus na Ticto" }], email: COMPRADOR_BUMP.email, produto: CODIGOS.semLigacao, transacao: "T-BUMP-0002" })
+  );
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.outcome, "access_granted");
+
+  const status = Object.fromEntries((await acessosDe(COMPRADOR_BUMP.email)).acessos.map((row) => [row.target_id, row.status]));
+  assert.equal(status[cursoBloqueado.id], "active", "o bump ligado volta a ser liberado pela compra nova");
+  assert.equal(status[curso.id], "revoked", "o principal nao ligado nao libera nada");
+
+  const linha = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T-BUMP-0002:${CODIGOS.semLigacao}:authorized`));
+  assert.equal(linha.processing_status, "processed");
+  assert.equal(linha.product_id, cursoBloqueado.id);
+  assert.match(linha.outcome_detail, /O produto principal 8999 \(Produto 8999 na Ticto\) da Ticto não está ligado a nenhum produto ou pacote da escola e não foi liberado\./);
+  assert.doesNotMatch(linha.outcome_detail, /Reprocessar/, "a venda foi processada: nao manda reprocessar");
 });
 
 /* ------------------------------------------------------------ Pacote */
@@ -343,7 +408,7 @@ test("pacote: o dono informa o codigo da Ticto em Pacotes; a compra libera todos
   );
   assert.deepEqual((await filaDe(COMPRADOR_PACOTE.email)).map((row) => row.kind), ["welcome", "purchase"], "um e-mail de compra para o pacote inteiro");
 
-  const linha = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T-PACOTE-0001:authorized`));
+  const linha = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T-PACOTE-0001:${CODIGOS.pacote}:authorized`));
   assert.equal(linha.combo_id, PACOTE_DE_TESTE.id);
   assert.equal(linha.user_id, conta.id);
 
@@ -357,7 +422,7 @@ test("pacote: o dono informa o codigo da Ticto em Pacotes; a compra libera todos
 test("situacoes que nao mudam acesso (pix gerado, boleto) ficam guardadas como ignoradas; sem status e 400; JSON invalido e 400", async () => {
   const pix = await post(payload({ status: "pix_created", transacao: "T0300" }));
   assert.equal((await pix.json()).outcome, "ignored");
-  const linha = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T0300:pix_created`));
+  const linha = (await eventos()).find((row) => row.external_event_id.startsWith(`${PREFIXO}T0300:${CODIGOS.curso}:pix_created`));
   assert.equal(linha.event_type, "pix_created");
   assert.match(linha.outcome_detail, /pix_created não muda o acesso/);
 

@@ -44,9 +44,10 @@ test("compra aprovada: evento normalizado com comprador, produto, transacao e da
 
   assert.deepEqual(event, {
     buyer: { email: "comprador.teste@bunker707.test", name: "Comprador de Teste", phone: "+55 11999990000" },
-    eventId: "TPC-TESTE-0001:authorized:2026-10-17 09:00:14",
+    eventId: "TPC-TESTE-0001:268:authorized:2026-10-17 09:00:14",
     externalProductId: "268",
     externalProductName: "Curso Ficticio",
+    extraProducts: [],
     occurredAt: "2026-10-17T12:00:14.000Z",
     provider: "ticto",
     purchasedAt: "2026-10-17T12:00:06.000Z",
@@ -75,13 +76,13 @@ test("cada situacao da Ticto vira o que ela significa para o acesso; o resto e '
   assert.deepEqual([...ticto.TICTO_HANDLED_EVENTS], ["authorized", "uncanceled", "refunded", "chargeback", "subscription_canceled"]);
 });
 
-test("sem id de evento, a transacao (ou o pedido) + situacao + data identificam a entrega; sem nada disso nao vira evento", () => {
+test("sem id de evento, a transacao (ou o pedido) + produto + situacao + data identificam a entrega; sem nada disso nao vira evento", () => {
   assert.equal(ticto.normalizeTictoEvent(null), null);
   assert.equal(ticto.normalizeTictoEvent({ order: {} }), null, "sem status nao da para saber o que aconteceu");
   assert.equal(ticto.normalizeTictoEvent({ status: "authorized", item: { product_id: 1 } }), null, "sem transacao nem pedido nao da para deduplicar");
 
   const soPedido = ticto.normalizeTictoEvent(compraAprovada({ order: { hash: "TOC-TESTE-0002" }, transaction: null }));
-  assert.equal(soPedido.eventId, "TOC-TESTE-0002:authorized:2026-10-17 09:00:14");
+  assert.equal(soPedido.eventId, "TOC-TESTE-0002:268:authorized:2026-10-17 09:00:14");
   assert.equal(soPedido.transactionId, null);
   assert.equal(soPedido.purchasedAt, "2026-10-17T12:00:14.000Z", "sem data do pedido, vale a data da situacao");
 
@@ -89,13 +90,60 @@ test("sem id de evento, a transacao (ou o pedido) + situacao + data identificam 
   assert.equal(pelaOrdem.transactionId, "TPC-TESTE-0001", "order.transaction_hash cobre a falta de transaction.hash");
 
   const semData = ticto.normalizeTictoEvent(compraAprovada({ status_date: undefined }));
-  assert.equal(semData.eventId, "TPC-TESTE-0001:authorized");
+  assert.match(semData.eventId, /^TPC-TESTE-0001:268:authorized:sem-data-[0-9a-f]{16}$/, "sem data, um digest do payload guardado entra no lugar");
   assert.equal(semData.occurredAt, null);
   assert.equal(semData.warrantyEndsAt, "2026-10-24T12:00:06.000Z", "a garantia e refund_deadline dias depois do pedido");
 
   const reenvio = ticto.normalizeTictoEvent(compraAprovada());
   assert.equal(reenvio.eventId, ticto.normalizeTictoEvent(compraAprovada()).eventId, "o mesmo postback de novo tem a mesma chave");
   assert.notEqual(reenvio.eventId, ticto.normalizeTictoEvent(compraAprovada({ status: "refunded" })).eventId, "outra situacao da mesma compra e outro evento");
+});
+
+test("order bumps: cada produto vendido junto vira um produto extra, sem repetir o principal nem um ao outro", () => {
+  const event = ticto.normalizeTictoEvent(
+    compraAprovada({
+      bumps: [
+        { offer_code: "BUMP01", offer_id: 173, offer_price: "47.00", product_id: 244, product_name: "Bonus Ficticio" },
+        { product_id: 268, product_name: "Repete o principal" },
+        { product_id: "244", product_name: "Repete o bump" },
+        { product_id: 245 },
+        { product_name: "Sem id" },
+        "lixo"
+      ]
+    })
+  );
+
+  assert.deepEqual(event.extraProducts, [
+    { externalProductId: "244", externalProductName: "Bonus Ficticio" },
+    { externalProductId: "245", externalProductName: null }
+  ]);
+  assert.equal(event.externalProductId, "268", "o principal continua sendo o item");
+  assert.deepEqual(ticto.normalizeTictoEvent(compraAprovada({ bumps: null })).extraProducts, []);
+  assert.equal(ticto.readTictoBumps({ bumps: Array.from({ length: 30 }, (_, index) => ({ product_id: 1000 + index })) }, null).length, 20, "no maximo 20 bumps");
+});
+
+test("chave de idempotencia: o produto separa postback de bump; chave longa vira sha256 inteira, nunca cortada; sem data, o payload decide", () => {
+  const principal = ticto.normalizeTictoEvent(compraAprovada());
+  const postbackDoBump = ticto.normalizeTictoEvent(compraAprovada({ item: { product_id: 244, product_name: "Bonus Ficticio" } }));
+  assert.equal(postbackDoBump.eventId, "TPC-TESTE-0001:244:authorized:2026-10-17 09:00:14");
+  assert.notEqual(postbackDoBump.eventId, principal.eventId, "postback separado do bump nao vira repetido");
+
+  const longa = "T".repeat(195);
+  const aprovada = ticto.normalizeTictoEvent(compraAprovada({ transaction: { hash: longa } }));
+  const reembolso = ticto.normalizeTictoEvent(compraAprovada({ status: "refunded", transaction: { hash: longa } }));
+  assert.match(aprovada.eventId, /^sha256:[0-9a-f]{64}$/);
+  assert.notEqual(aprovada.eventId, reembolso.eventId, "transacao longa nao junta compra e reembolso numa chave so");
+  assert.equal(aprovada.transactionId.length, 195);
+
+  const cancelada = (canceledAt) =>
+    ticto.normalizeTictoEvent(compraAprovada({ status: "subscription_canceled", status_date: undefined, subscriptions: [{ canceled_at: canceledAt, id: 1 }] })).eventId;
+  assert.equal(cancelada("2026-11-17 10:00:00"), cancelada("2026-11-17 10:00:00"), "o mesmo postback reenviado tem a mesma chave");
+  assert.notEqual(cancelada("2026-11-17 10:00:00"), cancelada("2026-12-17 10:00:00"), "outro cancelamento da mesma transacao e outro evento");
+  assert.equal(
+    ticto.tictoEventKey({ anchor: "T1", payload: { token: "a" }, productId: null, status: "authorized", statusDate: null }),
+    ticto.tictoEventKey({ anchor: "T1", payload: { token: "b" }, productId: null, status: "authorized", statusDate: null }),
+    "o token nao entra no digest (a chave nao depende do segredo)"
+  );
 });
 
 test("comprador: e-mail invalido vira null; telefone em objeto, em texto, nos campos soltos ou ausente", () => {

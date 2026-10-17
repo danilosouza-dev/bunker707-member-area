@@ -7,7 +7,9 @@ import "server-only";
 //
 // Resultados:
 // - compra aprovada: conta criada ou encontrada pelo e-mail e produto(s) liberados sem prazo
-//   (pacote = todos os produtos dele, de uma vez, num e-mail so);
+//   (pacote = todos os produtos dele, de uma vez, num e-mail so; produtos vendidos junto no mesmo
+//   pedido, os order bumps da Ticto, entram na mesma liberacao quando o codigo deles esta ligado, e o
+//   que nao esta ligado fica escrito no detalhe sem bloquear o resto);
 // - reembolso e chargeback: acesso revogado em cada produto; assinatura cancelada: suspenso;
 // - o que nao da para fazer (evento que nao muda acesso, produto sem codigo ligado, pacote em rascunho,
 //   aluno sem conta) e IGNORADO com o motivo escrito, nunca erro;
@@ -19,7 +21,7 @@ import { targetTypeForContentKind } from "@/server/students/model";
 import { fetchContentKinds, fetchProfileByEmail, findEntitlementForTarget, type StudentsDb } from "@/server/students/store";
 import { SALES_PROVIDER_LABELS, type SaleOutcome } from "./model";
 import { fetchSalesLinkByExternalId, type SalesDb } from "./store";
-import type { NormalizedSaleEvent } from "./types";
+import type { NormalizedSaleEvent, SalesProvider } from "./types";
 
 export class SaleProcessingError extends Error {
   /** Alvo ja resolvido quando a regra falhou, para a lista mostrar o produto mesmo no erro. */
@@ -53,12 +55,8 @@ function plural(count: number, singular: string, pluralForm: string) {
   return count === 1 ? `1 ${singular}` : `${count} ${pluralForm}`;
 }
 
-async function resolveTarget(db: SalesDb, event: NormalizedSaleEvent): Promise<ResolvedTarget | null> {
-  if (!event.externalProductId) {
-    return null;
-  }
-
-  const link = await fetchSalesLinkByExternalId(db, event.provider, event.externalProductId);
+async function resolveTarget(db: SalesDb, provider: SalesProvider, externalProductId: string): Promise<ResolvedTarget | null> {
+  const link = await fetchSalesLinkByExternalId(db, provider, externalProductId);
 
   if (!link) {
     return null;
@@ -104,26 +102,48 @@ export type ProcessSaleInput = {
   siteOrigin: string | null;
 };
 
-export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Promise<SaleProcessingResult> {
-  const { event } = input;
+/** Um codigo vendido no evento: o produto principal ou um produto vendido junto (order bump). */
+type SaleLine = { externalProductId: string; externalProductName: string | null; extra: boolean };
+
+type SaleTargetBase = { comboId: string | null; productId: string | null };
+
+type LineResolution =
+  | { contents: { id: string; kind: string }[]; ok: true; productIds: string[]; target: ResolvedTarget }
+  /** `reason`: o motivo quando nada foi liberado; `note`: a frase quando outro produto do pedido foi. */
+  | { base: SaleTargetBase | null; note: string; ok: false; reason: string };
+
+function saleLines(event: NormalizedSaleEvent): SaleLine[] {
+  const lines: SaleLine[] = event.externalProductId
+    ? [{ externalProductId: event.externalProductId, externalProductName: event.externalProductName, extra: false }]
+    : [];
+
+  for (const extra of event.extraProducts ?? []) {
+    if (!lines.some((line) => line.externalProductId === extra.externalProductId)) {
+      lines.push({ ...extra, extra: true });
+    }
+  }
+
+  return lines;
+}
+
+function skippedLine(base: SaleTargetBase | null, reason: string, note = reason): LineResolution {
+  return { base, note, ok: false, reason };
+}
+
+/** Resolve um codigo vendido em sales_product_links e confere que o alvo libera algum produto do catalogo. */
+async function resolveLine(db: SalesDb, event: NormalizedSaleEvent, line: SaleLine): Promise<LineResolution> {
   const providerLabel = SALES_PROVIDER_LABELS[event.provider];
-
-  if (event.type === "other") {
-    return ignored(`Evento ${event.rawType} não muda o acesso de ninguém.`);
-  }
-
-  if (!event.externalProductId) {
-    return ignored("O evento não informa qual produto foi vendido.");
-  }
-
-  const target = await resolveTarget(db, event);
+  const code = `${line.externalProductId}${line.externalProductName ? ` (${line.externalProductName})` : ""}`;
+  const target = await resolveTarget(db, event.provider, line.externalProductId);
 
   if (!target) {
-    const name = event.externalProductName ? ` (${event.externalProductName})` : "";
-
-    return ignored(
-      `O produto ${event.externalProductId}${name} da ${providerLabel} não está ligado a nenhum produto ou pacote da escola. Informe o código em Produtos › Acesso e venda ou em Pacotes e use Reprocessar.`
-    );
+    return line.extra
+      ? skippedLine(null, `O produto vendido junto ${code} da ${providerLabel} não está ligado a nenhum produto ou pacote da escola e não foi liberado.`)
+      : skippedLine(
+          null,
+          `O produto ${code} da ${providerLabel} não está ligado a nenhum produto ou pacote da escola. Informe o código em Produtos › Acesso e venda ou em Pacotes e use Reprocessar.`,
+          `O produto principal ${code} da ${providerLabel} não está ligado a nenhum produto ou pacote da escola e não foi liberado.`
+        );
   }
 
   const base = { comboId: target.comboId, productId: target.productId };
@@ -131,19 +151,77 @@ export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Pr
   if (target.kind === "combo" && target.status !== "active") {
     const situation = target.status === "paused" ? "pausado" : "em rascunho";
 
-    return ignored(`O pacote ${target.name} está ${situation}: vendas dele não mudam acesso até ser ativado.`, base);
+    return line.extra
+      ? skippedLine(base, `O pacote ${target.name}, vendido junto, está ${situation} e não foi liberado.`)
+      : skippedLine(base, `O pacote ${target.name} está ${situation}: vendas dele não mudam acesso até ser ativado.`);
   }
 
   if (target.productIds.length === 0) {
-    return ignored(`O pacote ${target.kind === "combo" ? target.name : ""} não tem produtos.`, base);
+    return line.extra
+      ? skippedLine(base, `O pacote ${target.kind === "combo" ? target.name : ""}, vendido junto, não tem produtos.`)
+      : skippedLine(base, `O pacote ${target.kind === "combo" ? target.name : ""} não tem produtos.`);
   }
 
   const contents = await fetchContentKinds(db as StudentsDb, target.productIds);
   const productIds = target.productIds.filter((id) => contents.some((content) => content.id === id));
 
   if (productIds.length === 0) {
-    return ignored("O produto ligado a esse código não existe mais no catálogo.", base);
+    return line.extra
+      ? skippedLine(base, `O produto vendido junto ${code} está ligado a um produto que não existe mais no catálogo.`)
+      : skippedLine(base, "O produto ligado a esse código não existe mais no catálogo.");
   }
+
+  return { contents, ok: true, productIds, target };
+}
+
+/**
+ * Pedido com produtos vendidos junto (order bumps): o detalhe diz quantos entraram e o que ficou de
+ * fora. Pedido de um produto so fica igual (Hotmart e Ticto sem bump).
+ */
+function withSaleNotes(result: SaleProcessingResult, input: { notes: string[]; released: number }): SaleProcessingResult {
+  if (input.notes.length === 0 && input.released <= 1) {
+    return result;
+  }
+
+  const included = input.released > 1 ? ` Inclui ${plural(input.released - 1, "produto vendido junto", "produtos vendidos junto")}.` : "";
+  const notes = input.notes.length > 0 ? ` ${input.notes.join(" ")}` : "";
+
+  return { ...result, detail: `${result.detail}${included}${notes}` };
+}
+
+export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Promise<SaleProcessingResult> {
+  const { event } = input;
+
+  if (event.type === "other") {
+    return ignored(`Evento ${event.rawType} não muda o acesso de ninguém.`);
+  }
+
+  const lines = saleLines(event);
+
+  if (lines.length === 0) {
+    return ignored("O evento não informa qual produto foi vendido.");
+  }
+
+  // Cada codigo do pedido (o principal e os vendidos junto) libera o proprio alvo; o que nao esta ligado
+  // fica escrito no detalhe e nao bloqueia o resto.
+  const resolutions: LineResolution[] = [];
+
+  for (const line of lines) {
+    resolutions.push(await resolveLine(db, event, line));
+  }
+
+  const released = resolutions.filter((item): item is Extract<LineResolution, { ok: true }> => item.ok);
+  const skipped = resolutions.filter((item): item is Extract<LineResolution, { ok: false }> => !item.ok);
+
+  if (released.length === 0) {
+    return ignored(skipped.map((item) => item.reason).join(" "), skipped[0]?.base ?? {});
+  }
+
+  const target = released[0].target;
+  const base = { comboId: target.comboId, productId: target.productId };
+  const productIds = Array.from(new Set(released.flatMap((item) => item.productIds)));
+  const contents = Array.from(new Map(released.flatMap((item) => item.contents).map((content) => [content.id, content])).values());
+  const notes = { notes: skipped.map((item) => item.note), released: released.length };
 
   if (!event.buyer.email) {
     throw new SaleProcessingError(`O evento ${event.rawType} veio sem um e-mail válido do comprador.`, base);
@@ -152,10 +230,13 @@ export async function processSaleEvent(db: SalesDb, input: ProcessSaleInput): Pr
   const email = normalizeEmail(event.buyer.email);
 
   if (event.type === "purchase_approved") {
-    return grantPurchase(db, { ...input, email, productIds, target });
+    return withSaleNotes(await grantPurchase(db, { ...input, email, productIds, target }), notes);
   }
 
-  return removeAccess(db, { action: event.type === "subscription_canceled" ? "suspend" : "revoke", contents, email, event, productIds, target });
+  return withSaleNotes(
+    await removeAccess(db, { action: event.type === "subscription_canceled" ? "suspend" : "revoke", contents, email, event, productIds, target }),
+    notes
+  );
 }
 
 async function grantPurchase(

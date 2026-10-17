@@ -5,11 +5,13 @@
 // do evento: authorized, refunded, chargeback, subscription_canceled...), `status_date` e `order_date`
 // em "AAAA-MM-DD HH:MM:SS" no horario de Brasilia, `order` (id, hash, transaction_hash), `transaction`
 // (hash), `item` (product_id, product_name, offer_id, offer_code, refund_deadline em dias), `customer`
-// (name, email, phone { ddi, ddd, number }, cpf...) e `bumps` (produtos vendidos junto). Nao ha id de
-// evento: a chave de idempotencia e hash da transacao + situacao + data da situacao. A autenticacao e
-// o `token` no corpo, gerado pela Ticto ao cadastrar o webhook; sem cabecalho. A conferencia e em tempo
+// (name, email, phone { ddi, ddd, number }, cpf...) e `bumps` (order bumps: produtos vendidos junto no
+// mesmo pedido, cada um com product_id e product_name; viram `extraProducts`). Nao ha id de evento: a
+// chave de idempotencia e transacao + produto + situacao + data da situacao. A autenticacao e o
+// `token` no corpo, gerado pela Ticto ao cadastrar o webhook; sem cabecalho. A conferencia e em tempo
 // constante contra o segredo salvo em integration_settings, nunca contra variavel de ambiente.
 
+import { createHash } from "node:crypto";
 import { asObject, isValidSalesToken, normalizeBuyerEmail, shortString } from "./adapter-helpers";
 import {
   MIN_SALES_SECRET_LENGTH,
@@ -17,6 +19,7 @@ import {
   type NormalizedSaleType,
   type PaymentProviderAdapter,
   type SaleBuyer,
+  type SaleExtraProduct,
   type SaleVerification
 } from "./types";
 
@@ -39,6 +42,8 @@ const TICTO_UTC_OFFSET = "-03:00";
 const MAX_ID_LENGTH = 200;
 const MAX_NAME_LENGTH = 200;
 const DAY_MS = 86_400_000;
+/** Bumps lidos por pedido: o checkout da Ticto oferece poucos; o limite so protege contra payload estranho. */
+const MAX_BUMPS = 20;
 
 /** "AAAA-MM-DD HH:MM:SS" (Brasilia) ou texto ISO -> ISO em UTC. */
 export function tictoDateToIso(value: unknown): string | null {
@@ -127,6 +132,46 @@ export function parseTictoPayload(payload: unknown): TictoPayload | null {
   };
 }
 
+/** Order bumps (`bumps`): cada produto vendido junto, sem repetir o principal nem um ao outro. */
+export function readTictoBumps(root: Record<string, unknown>, mainProductId: string | null): SaleExtraProduct[] {
+  const list = Array.isArray(root.bumps) ? root.bumps : [];
+  const seen = new Set(mainProductId ? [mainProductId] : []);
+  const extras: SaleExtraProduct[] = [];
+
+  for (const raw of list.slice(0, MAX_BUMPS)) {
+    const bump = asObject(raw);
+    const id = shortString(bump?.product_id, 120);
+
+    if (!id || seen.has(id)) {
+      continue;
+    }
+
+    seen.add(id);
+    extras.push({ externalProductId: id, externalProductName: shortString(bump?.product_name, MAX_NAME_LENGTH) });
+  }
+
+  return extras;
+}
+
+function sha256Hex(value: string) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+/**
+ * Chave de idempotencia (webhook_events.external_event_id): `<transacao>:<produto>:<situacao>:<data>`.
+ * O produto separa um postback proprio de bump do postback do produto principal. Sem `status_date`, um
+ * digest do payload guardado (sem o token) entra no lugar da data: o reenvio do mesmo postback continua
+ * igual, e uma situacao que se repete depois (cancelada -> reativada -> cancelada) nao vira repetida.
+ * Chave acima de 200 caracteres vira `sha256:<hex>` inteira, nunca cortada (cortar podia juntar duas
+ * situacoes da mesma transacao numa chave so).
+ */
+export function tictoEventKey(input: { anchor: string; payload: unknown; productId: string | null; status: string; statusDate: string | null }) {
+  const when = input.statusDate ?? `sem-data-${sha256Hex(JSON.stringify(redactTictoPayload(input.payload))).slice(0, 16)}`;
+  const key = `${input.anchor}:${input.productId ?? "-"}:${input.status}:${when}`;
+
+  return key.length <= MAX_ID_LENGTH ? key : `sha256:${sha256Hex(key)}`;
+}
+
 function warrantyEnd(purchasedAt: string | null, refundDeadlineDays: unknown): string | null {
   if (!purchasedAt || typeof refundDeadlineDays !== "number" || !Number.isFinite(refundDeadlineDays) || refundDeadlineDays <= 0) {
     return null;
@@ -143,23 +188,25 @@ export function normalizeTictoEvent(payload: unknown): NormalizedSaleEvent | nul
   }
 
   const transactionId = shortString(parsed.transaction?.hash, MAX_ID_LENGTH) ?? shortString(parsed.order?.transaction_hash, MAX_ID_LENGTH);
-  // Sem id de evento na Ticto: a transacao (ou o pedido), a situacao e a data da situacao identificam a
-  // entrega. O mesmo postback de novo (reenvio) tem a mesma chave; uma situacao nova, outra.
+  // Sem id de evento na Ticto: a transacao (ou o pedido), o produto, a situacao e a data da situacao
+  // identificam a entrega. O mesmo postback de novo (reenvio) tem a mesma chave; uma situacao nova, outra.
   const anchor = transactionId ?? shortString(parsed.order?.hash, MAX_ID_LENGTH);
 
   if (!anchor) {
     return null;
   }
 
-  const eventId = `${anchor}:${parsed.status}${parsed.statusDate ? `:${parsed.statusDate}` : ""}`.slice(0, MAX_ID_LENGTH);
+  const externalProductId = shortString(parsed.item?.product_id, 120);
+  const eventId = tictoEventKey({ anchor, payload, productId: externalProductId, status: parsed.status, statusDate: parsed.statusDate });
   const occurredAt = tictoDateToIso(parsed.statusDate);
   const purchasedAt = tictoDateToIso(parsed.order?.order_date) ?? occurredAt;
 
   return {
     buyer: readBuyer(parsed.root),
     eventId,
-    externalProductId: shortString(parsed.item?.product_id, 120),
+    externalProductId,
     externalProductName: shortString(parsed.item?.product_name, MAX_NAME_LENGTH),
+    extraProducts: readTictoBumps(parsed.root, externalProductId),
     occurredAt,
     provider: "ticto",
     purchasedAt,

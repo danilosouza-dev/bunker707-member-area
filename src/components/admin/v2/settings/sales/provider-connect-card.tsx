@@ -48,7 +48,7 @@ const PROVIDER_COPY: Partial<Record<SalesProvider, ProviderCopy>> = {
   ticto: {
     description: "A Ticto avisa cada compra, reembolso e chargeback; o acesso do aluno muda sozinho.",
     eventsHint:
-      "Compra aprovada e assinatura reativada liberam o acesso; reembolso e chargeback tiram; assinatura cancelada suspende. Outros eventos chegam, ficam guardados e não mudam nada.",
+      "Compra aprovada e assinatura reativada liberam o acesso; reembolso e chargeback tiram; assinatura cancelada suspende. Produto vendido junto (order bump) entra na mesma compra quando também tem o código da Ticto. Outros eventos chegam, ficam guardados e não mudam nada.",
     steps:
       "Na Ticto, abra Tictools › Webhooks e adicione um webhook. Cole o endereço abaixo, escolha a versão 2.0 e o formato JSON, marque os eventos listados e copie o token que a Ticto gera nessa tela.",
     tokenLabel: "Token da Ticto",

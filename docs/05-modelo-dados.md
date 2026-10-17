@@ -1305,7 +1305,7 @@ Guarda o evento bruto de plataformas externas (so depois do token conferido) e o
 
 - id uuid;
 - provider: hotmart, ticto, kiwify;
-- external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele; Ticto, que nao manda id de evento: `transaction.hash:status:status_date`, ou `order.hash` no lugar da transacao);
+- external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele; Ticto, que nao manda id de evento: `transaction.hash:item.product_id:status:status_date`, ou `order.hash` no lugar da transacao; sem `status_date`, um digest do payload sem o token; acima de 200 caracteres, `sha256:<hex>` da chave inteira);
 - event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED` na Hotmart, `authorized` na Ticto);
 - normalized_type: purchase_approved, refund, chargeback, subscription_canceled, other;
 - payload jsonb (<= 256 KB; o token da plataforma e tirado antes de gravar; na Ticto tambem o `direct_login_url` e o CPF/CNPJ do comprador);
@@ -1333,7 +1333,7 @@ Codigo do produto na plataforma de venda ligado a um produto ou a um pacote da e
 
 - id uuid;
 - provider: hotmart, ticto, kiwify;
-- external_product_id (Hotmart: o numero do produto, `data.product.id`; Ticto: o id do produto, `item.product_id`, qualquer que seja a oferta);
+- external_product_id (Hotmart: o numero do produto, `data.product.id`; Ticto: o id do produto, `item.product_id`, qualquer que seja a oferta; os order bumps da Ticto, `bumps[].product_id`, sao ligados do mesmo jeito, cada um ao proprio produto ou pacote);
 - product_id -> content_items (cascade) ou combo_id -> product_combos (cascade), exatamente um;
 - created_by, created_at, updated_at.
 
