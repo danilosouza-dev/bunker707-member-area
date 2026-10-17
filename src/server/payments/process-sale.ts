@@ -427,11 +427,16 @@ async function removeAccess(db: SalesDb, input: ProcessSaleInput & { target: Res
   // Decide tudo primeiro, depois age; os vinculos da venda so fecham no fim, quando tudo deu certo.
   for (const row of rows) {
     const history: SaleGrantLike[] = allGrants.filter((grant) => grant.entitlement_id === row.id);
+    // Acesso desta venda sem vinculo dela (venda anterior ao registro), talvez com vinculos de outras
+    // compras depois: a venda entra no historico como a que abriu o acesso, na data do acesso.
+    const coversSale = history.some(
+      (grant) => closingTransactionIds.has(grant.transaction_id) || (grant.subscription_code !== null && closingSubscriptionCodes.has(grant.subscription_code))
+    );
     const decision = decideEntitlementAfterSale({
       closingSubscriptionCodes,
       closingTransactionIds,
       eventProvider: event.provider,
-      grants: history.length > 0 ? history : [legacyGrantFor(row, event)],
+      grants: coversSale ? history : [legacyGrantFor(row, event), ...history],
       rowSourceProvider: row.source_provider
     });
 

@@ -60,7 +60,8 @@ const FALHA = { email: "comprador.falha@bunker707.test", nome: "Comprador com Fa
 const FALHA_PRAZO = { email: "comprador.falha.prazo@bunker707.test", nome: "Comprador com Falha e Prazo" };
 const PARCIAL = { email: "comprador.parcial@bunker707.test", nome: "Comprador de Pacote pela Metade" };
 const SEM_COBRANCA = { email: "comprador.sem.cobranca@bunker707.test", nome: "Comprador sem Cobrança da Assinatura" };
-const COMPRADORES = [COMPRADOR, COMPRADOR_PACOTE, ASSINANTE, COMPRADOR_ANTIGO, REEMBOLSADO, PRESO, AVULSO, RENOVACAO, ORDEM, VITALICIO, COM_PRAZO, EQUIPE, SEGURANCA, FALHA, FALHA_PRAZO, PARCIAL, SEM_COBRANCA];
+const LEGADO = { email: "comprador.legado@bunker707.test", nome: "Comprador de Antes dos Vínculos" };
+const COMPRADORES = [COMPRADOR, COMPRADOR_PACOTE, ASSINANTE, COMPRADOR_ANTIGO, REEMBOLSADO, PRESO, AVULSO, RENOVACAO, ORDEM, VITALICIO, COM_PRAZO, EQUIPE, SEGURANCA, FALHA, FALHA_PRAZO, PARCIAL, SEM_COBRANCA, LEGADO];
 const PREFIXO = "teste-hotmart-";
 const PACOTE_DUPLICADO = "Pacote de Teste: Código Repetido";
 
@@ -555,6 +556,21 @@ test("vinculo ja fechado por uma tentativa que falhou antes de agir: o reembolso
   const reembolso = await postJson(payload({ email: SEGURANCA.email, event: "PURCHASE_REFUNDED", id: "seguranca-reembolso", nome: SEGURANCA.nome, transaction: "HP-SEGURANCA-0001" }));
   assert.equal(reembolso.body.outcome, "access_revoked", JSON.stringify(reembolso.body));
   assert.equal((await acessosDe(SEGURANCA.email)).acessos[0].status, "revoked");
+});
+
+test("venda de antes dos vinculos (so source_event_id) que depois ganhou vinculo de outra compra: com a outra ja reembolsada, o reembolso da antiga ainda revoga", async () => {
+  assert.equal((await postJson(payload({ email: LEGADO.email, id: "legado-compra", nome: LEGADO.nome, transaction: "HP-LEGADO-0001" }))).body.outcome, "access_granted");
+  unwrap(await db.from("sale_grants").delete().eq("transaction_id", "HP-LEGADO-0001"), "Simulando venda de antes da tabela de vínculos");
+  // Outra compra do mesmo produto so estende o acesso (vinculo opened = false) e e reembolsada: o acesso continua, a venda antiga paga.
+  assert.equal((await postJson(payload({ email: LEGADO.email, id: "legado-compra-2", nome: LEGADO.nome, transaction: "HP-LEGADO-0002" }))).body.outcome, "access_granted");
+  assert.deepEqual((await vinculosDe("HP-LEGADO-0002")).map((row) => row.opened), [false]);
+  const reembolsoNova = await postJson(payload({ email: LEGADO.email, event: "PURCHASE_REFUNDED", id: "legado-reembolso-2", nome: LEGADO.nome, transaction: "HP-LEGADO-0002" }));
+  assert.equal(reembolsoNova.body.outcome, "ignored", JSON.stringify(reembolsoNova.body));
+  assert.equal((await acessosDe(LEGADO.email)).acessos[0].status, "active");
+
+  const reembolsoAntiga = await postJson(payload({ email: LEGADO.email, event: "PURCHASE_REFUNDED", id: "legado-reembolso-1", nome: LEGADO.nome, transaction: "HP-LEGADO-0001" }));
+  assert.equal(reembolsoAntiga.body.outcome, "access_revoked", JSON.stringify(reembolsoAntiga.body));
+  assert.equal((await acessosDe(LEGADO.email)).acessos[0].status, "revoked");
 });
 
 test("reprocesso depois de uma falha no meio: o vinculo nasce certo ('abriu'), o prazo guardado antes da liberacao vale, e o pacote pela metade fecha inteiro", async () => {

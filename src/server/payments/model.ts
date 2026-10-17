@@ -222,7 +222,7 @@ export function decideEntitlementAfterSale(input: {
     return { kind: "keep_sustained" };
   }
 
-  const oldest = [...live].sort((left, right) => left.created_at.localeCompare(right.created_at))[0];
+  const oldest = [...live].sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at))[0];
 
   if (oldest.opened) {
     return input.rowSourceProvider === input.eventProvider ? { kind: "close" } : { kind: "keep_team" };
