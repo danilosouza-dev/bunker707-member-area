@@ -7,12 +7,18 @@ import { headers } from "next/headers";
 // O Supabase so redireciona para URLs da lista permitida, entao um Host forjado nao leva a lugar algum.
 
 export async function getRequestOrigin() {
+  return getConfiguredSiteOrigin() ?? getHeadersOrigin();
+}
+
+/** NEXT_PUBLIC_SITE_URL sem a barra final, ou null quando nao esta definida. */
+export function getConfiguredSiteOrigin() {
   const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
 
-  if (configured) {
-    return configured.replace(/\/+$/, "");
-  }
+  return configured ? configured.replace(/\/+$/, "") : null;
+}
 
+/** Origem do pedido atual pelos cabecalhos (ignora NEXT_PUBLIC_SITE_URL): a pagina que o navegador abriu. */
+export async function getHeadersOrigin() {
   const requestHeaders = await headers();
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
 

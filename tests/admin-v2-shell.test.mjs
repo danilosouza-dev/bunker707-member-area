@@ -197,7 +197,8 @@ test("menu tem sete areas, na ordem do mapa, e so a area certa fica ativa", () =
   assert.deepEqual(childrenOf("configuracoes"), [
     ["Todas as configurações", "/admin/configuracoes"],
     ["Equipe", "/admin/configuracoes/equipe"],
-    ["Tutor IA", "/admin/configuracoes/ia"]
+    ["Tutor IA", "/admin/configuracoes/ia"],
+    ["Vendas", "/admin/configuracoes/vendas"]
   ]);
 
   const active = (pathname) => adminNavItems.filter((item) => isAdminNavSectionActive(pathname, item)).map((item) => item.id);
@@ -225,7 +226,7 @@ test("menu de cada funcao: so as areas que ela abre, e a primeira tela e a prime
     "Área de membros[Vitrine|Destaque|Módulos|Login|Marca]",
     "Comunicação[Avisos e pop-ups|Webinários|Promoções]",
     "Comunidade",
-    "Configurações[Todas as configurações|Equipe|Tutor IA]"
+    "Configurações[Todas as configurações|Equipe|Tutor IA|Vendas]"
   ]);
   assert.deepEqual(menu("admin").at(-1), "Configurações[Todas as configurações|Tutor IA]", "admin nao ve Equipe");
   assert.deepEqual(menu("editor"), [
@@ -417,9 +418,11 @@ test("admin novo nao carrega o painel antigo nem usa cores nomeadas do Tailwind"
 
 test("textos do admin novo evitam o vocabulario tecnico proibido", () => {
   const forbidden = /\b(?:entitlements?|rbac|assets?|escopo|persistid[oa]s?|crm|drip|webhooks?|supabase)\b/i;
+  // docs/17 §1.3: "webhook" so em Configuracoes > Vendas, onde e o nome do menu da Hotmart que o produtor precisa achar.
+  const forbiddenInSales = /\b(?:entitlements?|rbac|assets?|escopo|persistid[oa]s?|crm|drip|supabase)\b/i;
 
   for (const { path, source } of v2Sources) {
-    assert.doesNotMatch(stripComments(source), forbidden, path);
+    assert.doesNotMatch(stripComments(source), path.includes("/settings/sales/") ? forbiddenInSales : forbidden, path);
   }
 });
 

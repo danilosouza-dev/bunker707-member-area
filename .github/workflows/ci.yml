@@ -52,7 +52,7 @@ jobs:
         with:
           version: 2.121.0
 
-      # Sobe Postgres, Auth e Storage locais em Docker, aplica as 37 migracoes do zero e cria a escola
+      # Sobe Postgres, Auth e Storage locais em Docker, aplica todas as migracoes do zero e cria a escola
       # de teste (docs/18 §2.5). Nunca toca no projeto Supabase compartilhado.
       - name: Supabase local
         run: node tests/support/db.mjs start --ci

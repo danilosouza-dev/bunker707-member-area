@@ -34,6 +34,9 @@ export type ComboProductRow = {
 
 export type ComboAccentRow = { accent: unknown; content_id: string };
 
+/** Linha de sales_product_links de um pacote (so o provedor pedido). */
+export type ComboSalesLinkRow = { combo_id: string | null; external_product_id: string };
+
 /* ------------------------------------------------------------------------------------------------
  * Situacao do pacote
  * ---------------------------------------------------------------------------------------------- */
@@ -81,9 +84,12 @@ export function mapComboRows(input: {
   combos: readonly ComboRow[];
   items: readonly ComboItemRow[];
   products: readonly ComboProductRow[];
+  /** Codigos na Hotmart (sales_product_links com provider hotmart). Ausente = nenhum pacote ligado. */
+  salesLinks?: readonly ComboSalesLinkRow[];
 }): ComboListItem[] {
   const productsById = new Map(input.products.map((product) => [product.id, product]));
   const accentById = new Map(input.accents.map((row) => [row.content_id, row.accent]));
+  const hotmartByCombo = new Map((input.salesLinks ?? []).flatMap((row) => (row.combo_id ? [[row.combo_id, row.external_product_id] as const] : [])));
   const itemsByCombo = new Map<string, ComboItemRow[]>();
 
   for (const item of input.items) {
@@ -99,6 +105,7 @@ export function mapComboRows(input: {
       return {
         cohortName: combo.cohort_name?.trim() || DEFAULT_COHORT_NAME,
         description: combo.description ?? "",
+        hotmartProductId: hotmartByCombo.get(combo.id) ?? null,
         id: combo.id,
         name: combo.name,
         products: items.flatMap((item) => {
@@ -153,6 +160,8 @@ export function mapComboProductOptions(products: readonly ComboProductRow[], acc
 export type ComboFormState = {
   cohortName: string;
   description: string;
+  /** Codigo do pacote na Hotmart; "" = sem ligacao. */
+  hotmartProductId: string;
   name: string;
   productIds: string[];
   status: ComboStatus;
@@ -163,11 +172,12 @@ export function comboToForm(combo?: ComboListItem | null): ComboFormState {
     ? {
         cohortName: combo.cohortName === DEFAULT_COHORT_NAME ? "" : combo.cohortName,
         description: combo.description,
+        hotmartProductId: combo.hotmartProductId ?? "",
         name: combo.name,
         productIds: combo.products.map((product) => product.id),
         status: combo.status
       }
-    : { cohortName: "", description: "", name: "", productIds: [], status: "draft" };
+    : { cohortName: "", description: "", hotmartProductId: "", name: "", productIds: [], status: "draft" };
 }
 
 /** Entrada de saveCombo (comboSchema): turma vazia vira a turma padrao no servidor. */
@@ -175,6 +185,7 @@ export function formToComboInput(form: ComboFormState, id?: string) {
   return {
     cohortName: form.cohortName.trim(),
     description: form.description.trim(),
+    hotmartProductId: form.hotmartProductId.trim(),
     ...(id ? { id } : {}),
     name: form.name.trim(),
     productIds: Array.from(new Set(form.productIds)),

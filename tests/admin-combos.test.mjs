@@ -84,22 +84,38 @@ test("formulario: ida e volta sem perder nada, turma padrao fica em branco", () 
   assert.deepEqual(form, {
     cohortName: "Turma B",
     description: "Tudo de IA",
+    hotmartProductId: "",
     name: "Pacote IA",
     productIds: ["form-a", "curso-b"],
     status: "active"
   });
   assert.equal(combos.comboToForm({ ...ia, cohortName: "Turma A" }).cohortName, "", "turma padrao aparece como placeholder");
-  assert.deepEqual(combos.comboToForm(null), { cohortName: "", description: "", name: "", productIds: [], status: "draft" });
+  assert.deepEqual(combos.comboToForm(null), { cohortName: "", description: "", hotmartProductId: "", name: "", productIds: [], status: "draft" });
 
   const input = combos.formToComboInput({ ...form, name: "  Pacote IA 2 ", productIds: ["form-a", "form-a", "curso-b"] }, "combo-ia");
   assert.deepEqual(input, {
     cohortName: "Turma B",
     description: "Tudo de IA",
+    hotmartProductId: "",
     id: "combo-ia",
     name: "Pacote IA 2",
     productIds: ["form-a", "curso-b"],
     status: "active"
   });
+
+  // Codigo da Hotmart: vem da ligacao gravada e volta no pedido; vazio tira a ligacao (null no schema).
+  const [ligado] = combos.mapComboRows({
+    accents: [],
+    combos: [comboRows[0]],
+    items: itemRows,
+    products: productRows,
+    salesLinks: [{ combo_id: comboRows[0].id, external_product_id: "7002" }]
+  });
+  assert.equal(ligado.hotmartProductId, "7002");
+  assert.equal(combos.comboToForm(ligado).hotmartProductId, "7002");
+  assert.equal(comboSchema.parse(combos.formToComboInput(combos.comboToForm(ligado))).hotmartProductId, "7002");
+  assert.equal(comboSchema.parse(combos.formToComboInput({ ...combos.comboToForm(ligado), hotmartProductId: " " })).hotmartProductId, null);
+  assert.equal(comboSchema.safeParse({ hotmartProductId: "12 34", name: "IA", productIds: ["a"] }).success, false, "codigo com espaco e recusado");
   assert.equal("id" in combos.formToComboInput(form), false, "pacote novo nao manda id");
   assert.equal(combos.isComboFormDirty(form, { ...form }), false);
   assert.equal(combos.isComboFormDirty(form, { ...form, status: "paused" }), true);

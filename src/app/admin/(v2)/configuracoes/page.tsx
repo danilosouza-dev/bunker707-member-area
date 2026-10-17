@@ -7,6 +7,8 @@ import { listAIProviderConfigs } from "@/server/ai/provider-config";
 import { listAIProviderConnections } from "@/server/ai/provider-connections";
 import { requirePageArea } from "@/server/auth/permissions";
 import { can } from "@/server/auth/roles";
+import { summarizeSalesSetup } from "@/server/payments/model";
+import { getSalesProviderStatuses } from "@/server/payments/queries";
 import { listTeamMembers } from "@/server/team/queries";
 
 export const metadata: Metadata = {
@@ -37,16 +39,31 @@ async function loadTeamCount(): Promise<number | null> {
   }
 }
 
+/** Situacao das plataformas de venda (linha Vendas). Sem leitura, a linha fica sem estado (nunca um palpite). */
+async function loadSalesStatus(): Promise<SettingsHubStatus | null> {
+  try {
+    return summarizeSalesSetup(await getSalesProviderStatuses());
+  } catch (error) {
+    console.error("[admin/configuracoes] estado das vendas", error);
+    return null;
+  }
+}
+
 export default async function AdminSettingsPage() {
   const { access } = await requirePageArea("configuracoes");
   const canAi = can(access, "settings.ai");
+  const canSales = can(access, "settings.sales");
   const canTeam = can(access, "settings.team");
-  const [aiStatus, teamCount] = await Promise.all([canAi ? loadAiStatus() : Promise.resolve(null), canTeam ? loadTeamCount() : Promise.resolve(null)]);
+  const [aiStatus, teamCount, salesStatus] = await Promise.all([
+    canAi ? loadAiStatus() : Promise.resolve(null),
+    canTeam ? loadTeamCount() : Promise.resolve(null),
+    canSales ? loadSalesStatus() : Promise.resolve(null)
+  ]);
 
   return (
     <AdminPage className="gap-6">
       <PageHeader description="Equipe, vídeo, Tutor IA, vendas, canais de envio e dados da escola." title="Configurações" />
-      <SettingsHub access={{ canAi, canSales: can(access, "settings.sales"), canTeam, teamCount }} aiStatus={aiStatus} />
+      <SettingsHub access={{ canAi, canSales, canTeam, teamCount }} aiStatus={aiStatus} salesStatus={salesStatus} />
     </AdminPage>
   );
 }

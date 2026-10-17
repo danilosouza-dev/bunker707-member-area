@@ -1,6 +1,6 @@
 import { KpiTile } from "../kpi-tile";
 import type { TodayDemoData } from "./today-demo";
-import { computePercentDelta, computePointsDelta, type TodayAccessKpiState } from "./today-model";
+import { computePercentDelta, computePointsDelta, describeAccessOrigins, type TodayAccessKpiState } from "./today-model";
 import { TodaySectionHeading } from "./today-section-heading";
 
 type TodayKpisProps = {
@@ -78,6 +78,7 @@ export function TodayKpis({ comparisonLabel, demo, heading, newAccesses, periodL
   }
 
   const ready = newAccesses.status === "ready" ? newAccesses : null;
+  const origins = ready ? describeAccessOrigins(ready.origins) : null;
 
   return (
     <section aria-labelledby="hoje-numeros" className="flex min-w-0 flex-col gap-3">
@@ -86,8 +87,8 @@ export function TodayKpis({ comparisonLabel, demo, heading, newAccesses, periodL
         <KpiTile comparisonLabel={comparisonLabel} label="Alunos estudando" periodLabel={periodLabel} value={null} />
         <KpiTile
           comparisonLabel={comparisonLabel}
-          definition={ready ? "acessos liberados no período" : undefined}
-          definitionShort={ready ? "liberados no período" : undefined}
+          definition={origins?.definition}
+          definitionShort={origins?.definitionShort}
           delta={ready ? computePercentDelta(ready.total, ready.previousTotal) : null}
           deltaUnit="percent"
           emptyLabel={ready ? undefined : NEW_ACCESSES_EMPTY[newAccesses.status as keyof typeof NEW_ACCESSES_EMPTY]}

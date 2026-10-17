@@ -257,6 +257,8 @@ export type ProductAccess = {
   cohorts: ProductCohortSummary[];
   combos: { id: string; name: string; status: "active" | "draft" | "paused" }[];
   header: ProductHeader;
+  /** Codigo do produto na Hotmart; a venda aprovada com esse codigo libera o produto. */
+  hotmartProductId: string | null;
   maxStudents: number | null;
   purchaseLabel: string | null;
   purchaseTarget: "same_tab" | "new_tab";
@@ -268,6 +270,8 @@ export type ProductAccess = {
 export type ComboListItem = {
   cohortName: string;
   description: string;
+  /** Codigo do pacote na Hotmart; a venda aprovada com esse codigo libera todos os produtos. */
+  hotmartProductId: string | null;
   id: string;
   name: string;
   products: { accent: ProductAccent; coverUrl: string | null; id: string; title: string }[];

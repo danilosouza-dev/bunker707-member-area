@@ -47,6 +47,9 @@ type SaveFailure = { message: string; status: number };
 
 const comboTone = { active: "success", draft: "neutral", paused: "muted" } as const;
 
+const HOTMART_CODE_HINT =
+  "O número do produto em Hotmart › Produtos (aparece no endereço da página dele). Com ele, a venda aprovada libera este produto sozinha; reembolso e chargeback tiram o acesso. A Hotmart precisa estar conectada em Configurações › Vendas.";
+
 /** Chip simples do prototipo (`.chip`): 22 px, raio 6, fundo branco a 6 %, borda sutil, 12/500. */
 const plainChip =
   "inline-flex h-[22px] max-w-full min-w-0 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] bg-white/[0.06] px-2 text-xs leading-none font-medium whitespace-nowrap text-[var(--text-primary)]";
@@ -201,6 +204,22 @@ export function ProductAccessForm({ access }: { access: ProductAccess }) {
                 Sem link, o aluno verá “Em breve”.
               </p>
             ) : null}
+          </AdminField>
+
+          <AdminField error={errors.hotmartProductId} hint={HOTMART_CODE_HINT} id="acesso-codigo-hotmart" label="Código do produto na Hotmart" optional>
+            <Input
+              aria-describedby={fieldDescribedBy("acesso-codigo-hotmart", { error: errors.hotmartProductId, hint: HOTMART_CODE_HINT })}
+              aria-invalid={errors.hotmartProductId ? true : undefined}
+              autoComplete="off"
+              className={cn(adminInputClass, "w-[240px] max-w-full tabular-nums")}
+              disabled={readOnly}
+              id="acesso-codigo-hotmart"
+              inputMode="numeric"
+              maxLength={120}
+              onChange={(event) => update("hotmartProductId", event.target.value)}
+              placeholder="Ex.: 1234567"
+              value={draft.hotmartProductId}
+            />
           </AdminField>
 
           <AdminField

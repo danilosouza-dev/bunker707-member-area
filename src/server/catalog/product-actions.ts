@@ -10,6 +10,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
 import { can, isActionScoped } from "@/server/auth/roles";
 import { invalidateCatalog } from "@/server/catalog/cache";
+import { assertSalesLinkAvailable, setSalesLink } from "@/server/payments/store";
 import { deleteContentItem } from "@/server/db/platform-store";
 import { addCreatedCourseToScope, assertCreatorScopeRoom } from "./creator-scope";
 import { CatalogFieldError, CatalogNotFoundError, CatalogRuleError } from "./errors";
@@ -300,9 +301,16 @@ export async function updateProductDetails(input: UpdateProductDetailsInput): Pr
 
 /** [catalog.access] Aba Acesso e venda. */
 export async function updateProductAccess(input: UpdateProductAccessInput): Promise<ActionResult<ProductSaved>> {
-  return runAdminAction("catalog.access", updateProductAccessSchema, input, async ({ input: data }) => {
+  return runAdminAction("catalog.access", updateProductAccessSchema, input, async ({ input: data, user }) => {
     const db = catalogDb();
     const current = await requireProductRow(data.id, db);
+
+    // Codigo da Hotmart ja usado por outro alvo: recusa ANTES de gravar a linha do produto (senao o resto
+    // do formulario ficaria gravado e o proximo Salvar cairia em "versao velha").
+    if (data.hotmartProductId) {
+      await assertSalesLinkAvailable(db, { externalProductId: data.hotmartProductId, productId: data.id, provider: "hotmart" });
+    }
+
     const audience = data.audience ?? audienceFromColumns({ accessModel: current.access_model, listing: current.listing });
     const purchaseUrl = data.purchaseUrl !== undefined ? data.purchaseUrl : current.purchase_url?.trim() || null;
     const purchaseLabel = data.purchaseLabel !== undefined
@@ -334,6 +342,12 @@ export async function updateProductAccess(input: UpdateProductAccessInput): Prom
       patch,
       table: "content_items"
     });
+
+    // Codigo na Hotmart (sales_product_links): depois da linha do produto, para uma versao velha (409)
+    // nao trocar a ligacao. Codigo repetido vira erro do campo.
+    if (data.hotmartProductId !== undefined) {
+      await setSalesLink(db, { createdBy: user.id, externalProductId: data.hotmartProductId, productId: data.id, provider: "hotmart" });
+    }
 
     invalidateCatalog({ from: "action" });
 
