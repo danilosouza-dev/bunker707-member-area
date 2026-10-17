@@ -111,7 +111,8 @@ async function vendas() {
 
 async function emails() {
   return unwrap(
-    await db.from("email_outbox").select(outbox.EMAIL_OUTBOX_COLUMNS).like("idempotency_key", `${CHAVE}%`).order("idempotency_key"),
+    // A lista do job nao traz anonymized_at de proposito (funciona antes da 0004); aqui o teste pede a mais.
+    await db.from("email_outbox").select(`${outbox.EMAIL_OUTBOX_COLUMNS},anonymized_at`).like("idempotency_key", `${CHAVE}%`).order("idempotency_key"),
     "Lendo e-mails de teste"
   );
 }

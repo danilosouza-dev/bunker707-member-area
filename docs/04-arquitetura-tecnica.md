@@ -495,6 +495,7 @@ Regras:
 - idempotencia em duas camadas: a chave `idempotency_key` e unica na fila (`welcome:<user_id>` e `purchase:<provedor>:<evento>:<user_id>`; sem id de evento, os ids dos acessos abertos) e vai ao Resend, que nao envia duas vezes a mesma chave em 24 h. Um webhook de venda reprocessado nao duplica e-mail;
 - retentativa: erro passageiro (rede, 5xx, chave ainda em uso) volta para a fila com espera crescente (1 min, 5 min, 30 min, 2 h, 12 h) e vira `failed` na quinta falha; limite do provedor (429, cota do dia) devolve a linha sem contar tentativa e para o lote ate a proxima janela; erro definitivo (remetente invalido, dominio nao verificado, chave recusada) vira `failed` na hora com o motivo em `last_error`;
 - cada linha e reservada (`sending`) antes do envio: dois ticks no mesmo minuto nao enviam a mesma linha; linha presa em `sending` ha mais de 10 minutos volta para a fila; no maximo 25 envios por tick, com pausa de 550 ms entre eles (o Resend aceita 2 pedidos por segundo), respeitando `ctx.signal`.
+- o job le so as colunas que a migracao `202610170002` criou (`EMAIL_OUTBOX_COLUMNS`): o deploy pode sair antes de uma migracao posterior, e uma coluna nova na lista pararia a fila inteira. A retencao (`202610170004`) so deixa `to_email` e `html` nulos em linha que ja saiu da fila; se uma dessas for reservada, vira `failed` com o motivo em vez de sair vazia;
 
 Pontos de disparo (`src/server/students/access.ts`, a mesma rotina do admin e dos webhooks de venda):
 
