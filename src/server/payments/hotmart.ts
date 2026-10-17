@@ -7,7 +7,7 @@
 // `X-HOTMART-HOTTOK` (nas versoes antigas tambem no corpo, em `hottok`). A conferencia e em tempo
 // constante contra o segredo salvo em integration_settings, nunca contra variavel de ambiente.
 
-import { createHash, timingSafeEqual } from "node:crypto";
+import { asObject, isValidSalesToken, normalizeBuyerEmail, shortString } from "./adapter-helpers";
 import {
   MIN_SALES_SECRET_LENGTH,
   type NormalizedSaleEvent,
@@ -16,6 +16,9 @@ import {
   type SaleBuyer,
   type SaleVerification
 } from "./types";
+
+// Ajudantes comuns aos adaptadores (adapter-helpers.ts), reexportados para quem ja os importava daqui.
+export { isValidSalesToken, normalizeBuyerEmail };
 
 export const HOTMART_HOTTOK_HEADER = "x-hotmart-hottok";
 export const HOTMART_MAX_PAYLOAD_BYTES = 256 * 1024;
@@ -41,19 +44,6 @@ const EVENT_TYPES: Record<string, NormalizedSaleType> = {
 
 const MAX_ID_LENGTH = 200;
 const MAX_NAME_LENGTH = 200;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function shortString(value: unknown, maximumLength: number) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  return typeof value === "string" && value.trim().length > 0 ? value.trim().slice(0, maximumLength) : null;
-}
 
 /** Datas da Hotmart vem em epoch de milissegundos; aceitamos tambem texto ISO. */
 export function hotmartDateToIso(value: unknown): string | null {
@@ -70,12 +60,6 @@ export function hotmartDateToIso(value: unknown): string | null {
   }
 
   return null;
-}
-
-export function normalizeBuyerEmail(value: unknown): string | null {
-  const email = typeof value === "string" ? value.trim().toLowerCase() : "";
-
-  return email.length > 0 && email.length <= 320 && EMAIL_PATTERN.test(email) ? email : null;
 }
 
 function buyerPhone(source: Record<string, unknown> | null): string | null {
@@ -157,24 +141,6 @@ export function normalizeHotmartEvent(payload: unknown): NormalizedSaleEvent | n
     type: EVENT_TYPES[parsed.event] ?? "other",
     warrantyEndsAt: hotmartDateToIso(purchase?.warranty_expire_date)
   };
-}
-
-function digest(value: string) {
-  return createHash("sha256").update(value, "utf8").digest();
-}
-
-/**
- * Compara o token recebido com o segredo salvo em tempo constante: os dois viram digests SHA-256 de
- * 32 bytes antes do timingSafeEqual (nem o tamanho do segredo vaza pelo tempo de resposta).
- */
-export function isValidSalesToken(providedToken: string | null | undefined, secret: string | null | undefined) {
-  if (typeof secret !== "string" || secret.trim().length < MIN_SALES_SECRET_LENGTH) {
-    return false;
-  }
-
-  const provided = typeof providedToken === "string" ? providedToken.trim() : "";
-
-  return timingSafeEqual(digest(provided), digest(secret.trim())) && provided.length > 0;
 }
 
 export function readHotmartToken(headers: Headers, payload: unknown): string | null {

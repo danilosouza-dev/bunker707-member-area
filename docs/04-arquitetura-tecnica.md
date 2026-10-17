@@ -229,7 +229,7 @@ Combos devem ser tratados como pacotes internos: o adapter normaliza a venda ext
 
 ### Implementado (17/10/2026): Hotmart, webhook 2.0
 
-Modulo `src/server/payments/` (migracao `202610170003_sales_webhooks.sql`; tela em `docs/17` §1.10). Ticto e Kiwify entram pelo mesmo caminho quando tiverem adaptador; ate la aparecem como "Em configuracao".
+Modulo `src/server/payments/` (migracao `202610170003_sales_webhooks.sql`; tela em `docs/17` §1.10). A Ticto entrou pelo mesmo caminho (secao seguinte); a Kiwify entra quando tiver adaptador e ate la aparece como "Em configuracao".
 
 - `types.ts`: contrato `PaymentProviderAdapter` (`verify`, `normalize`, `redact`, `handledEvents`, `maxPayloadBytes`) e o evento normalizado `{ provider, eventId, type: purchase_approved | refund | chargeback | subscription_canceled | other, rawType, buyer { email, name, phone }, externalProductId, externalProductName, transactionId, purchasedAt, warrantyEndsAt, occurredAt }`;
 - `hotmart.ts` (puro): le o envelope 2.0 (`id`, `event`, `creation_date` em epoch ms, `data.product/buyer/purchase/subscriber`), traduz `PURCHASE_APPROVED` e `PURCHASE_COMPLETE` para `purchase_approved`, `PURCHASE_REFUNDED` para `refund`, `PURCHASE_CHARGEBACK` para `chargeback`, `SUBSCRIPTION_CANCELLATION` para `subscription_canceled` e o resto para `other`; confere o hottok (cabecalho `X-HOTMART-HOTTOK`, ou `hottok` no corpo) em tempo constante (SHA-256 dos dois lados + `timingSafeEqual`) contra o segredo salvo em `integration_settings`, nunca contra variavel de ambiente; `redact` tira o `hottok` do payload guardado;
@@ -251,6 +251,24 @@ Hoje > Novos acessos: origem por admin_access_origins (Hotmart x equipe)
 ```
 
 Processamento sincrono na rota (a Hotmart espera a resposta e reenvia em erro): um job em background fica para quando o volume pedir.
+
+### Implementado (17/10/2026): Ticto, webhook 2.0
+
+Mesmo modulo, mesma tabela, mesma regra de acesso e mesmo fluxo de `webhook-handler.ts`; o que e da Ticto fica so no adaptador. Fonte do formato: https://webhook.ticto.dev/docs/v2 (referencia oficial do webhook 2.0, conferida em 17/10/2026); onde cadastrar no painel (Tictools > Webhooks, versao 2, formato JSON, token gerado pela Ticto) vem de guias de integradores (Nemu, Voxuy), porque a referencia oficial nao descreve o painel.
+
+- `ticto.ts` (puro): le o envelope 2.0 (`version` "2.0", `status`, `status_date` e `order.order_date` em "AAAA-MM-DD HH:MM:SS" no horario de Brasilia, convertidos para UTC com -03:00; `order` com `id`, `hash` e `transaction_hash`; `transaction.hash`; `item` com `product_id`, `product_name`, `offer_id`, `offer_code` e `refund_deadline` em dias; `customer` com `name`, `email`, `phone { ddi, ddd, number }`, `cpf`/`cnpj`). Traduz `authorized` e `uncanceled` (assinatura reativada) para `purchase_approved`, `refunded` para `refund`, `chargeback` para `chargeback`, `subscription_canceled` para `subscription_canceled` e o resto (pix/boleto gerado, aguardando pagamento, recusado, reclamacao, trial, carrinho abandonado...) para `other`. Comprador em `customer`; telefone do objeto `customer.phone` (ou dos campos soltos `phone_local_code_customer` + `phone_number_customer`) no formato `+55 11999990000`. Codigo do produto = `item.product_id` (o da oferta, `offer_id`/`offer_code`, nao e usado: uma venda de qualquer oferta do produto libera o mesmo produto). `transactionId` = `transaction.hash` (ou `order.transaction_hash`). Fim da garantia = data do pedido + `refund_deadline` dias (normalizado, ainda nao gravado, como na Hotmart);
+- a Ticto **nao manda id de evento**: a chave de idempotencia (`external_event_id`) e `<transacao>:<status>:<status_date>` (sem transacao, o `order.hash`). O mesmo postback reenviado tem a mesma chave e para no 200 `duplicate`; outra situacao da mesma compra (reembolso, cancelamento) e outro evento;
+- autenticacao: o `token` vem **so no corpo** (a referencia chama de "principal garantia" de que o post vem da Ticto; nao ha cabecalho nem assinatura). `verify` confere esse campo em tempo constante contra `integration_settings.secret`, com o mesmo `isValidSalesToken` da Hotmart, agora em `adapter-helpers.ts` (junto de `asObject`, `shortString` e `normalizeBuyerEmail`, comuns aos dois adaptadores). Um cabecalho com o token nao vale;
+- `redact` troca por `[oculto]` o `token`, o `direct_login_url` (link de entrada direta na area da Ticto) e o `customer.cpf`/`cnpj` antes de gravar o payload: a escola nao precisa do documento para liberar acesso;
+- `adapters.ts` registra `ticto`; `src/app/api/webhooks/ticto/route.ts` (runtime Node) chama `receiveSaleWebhook("ticto", request)`; eventos que a tela pede para marcar: `authorized`, `uncanceled`, `refunded`, `chargeback`, `subscription_canceled`;
+- catalogo: "Codigo do produto na Ticto" ao lado do da Hotmart em Produtos > Acesso e venda (`updateProductAccess.tictoProductId`) e em Pacotes (`saveCombo.tictoProductId`), gravado em `sales_product_links` com `provider = ticto`. Cada plataforma tem o proprio codigo (o mesmo numero pode existir nas duas). `assertSalesLinksAvailable` (`store.ts`) confere os codigos **antes** de gravar o produto ou o pacote: codigo de outro alvo e recusado no campo da plataforma (`SALES_CODE_FIELDS` em `model.ts`) e nada e gravado. Antes, a linha do produto era gravada e o codigo recusado depois, e o Salvar seguinte, com o codigo corrigido, respondia 409.
+
+```txt
+Ticto -> POST /api/webhooks/ticto (token no corpo)
+  -> o mesmo fluxo da Hotmart (503 / 413 / 400 / 401 / duplicate / 200 / 500)
+  -> webhook_events (provider ticto, chave transacao:status:data, payload sem token nem CPF)
+Produtos > Acesso e venda / Pacotes: "Codigo do produto na Ticto" (sales_product_links, provider ticto)
+```
 
 ## Comentarios e moderacao
 

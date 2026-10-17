@@ -34,8 +34,8 @@ export type ComboProductRow = {
 
 export type ComboAccentRow = { accent: unknown; content_id: string };
 
-/** Linha de sales_product_links de um pacote (so o provedor pedido). */
-export type ComboSalesLinkRow = { combo_id: string | null; external_product_id: string };
+/** Linha de sales_product_links de um pacote; sem `provider` (linhas antigas dos testes), vale como Hotmart. */
+export type ComboSalesLinkRow = { combo_id: string | null; external_product_id: string; provider?: string };
 
 /* ------------------------------------------------------------------------------------------------
  * Situacao do pacote
@@ -84,12 +84,15 @@ export function mapComboRows(input: {
   combos: readonly ComboRow[];
   items: readonly ComboItemRow[];
   products: readonly ComboProductRow[];
-  /** Codigos na Hotmart (sales_product_links com provider hotmart). Ausente = nenhum pacote ligado. */
+  /** Codigos nas plataformas (sales_product_links, Hotmart e Ticto). Ausente = nenhum pacote ligado. */
   salesLinks?: readonly ComboSalesLinkRow[];
 }): ComboListItem[] {
   const productsById = new Map(input.products.map((product) => [product.id, product]));
   const accentById = new Map(input.accents.map((row) => [row.content_id, row.accent]));
-  const hotmartByCombo = new Map((input.salesLinks ?? []).flatMap((row) => (row.combo_id ? [[row.combo_id, row.external_product_id] as const] : [])));
+  const codesByProvider = (provider: string) =>
+    new Map((input.salesLinks ?? []).flatMap((row) => (row.combo_id && (row.provider ?? "hotmart") === provider ? [[row.combo_id, row.external_product_id] as const] : [])));
+  const hotmartByCombo = codesByProvider("hotmart");
+  const tictoByCombo = codesByProvider("ticto");
   const itemsByCombo = new Map<string, ComboItemRow[]>();
 
   for (const item of input.items) {
@@ -123,6 +126,7 @@ export function mapComboRows(input: {
             : [];
         }),
         status: normalizeComboStatus(combo.status),
+        tictoProductId: tictoByCombo.get(combo.id) ?? null,
         updatedAt: combo.updated_at ?? ""
       };
     })
@@ -165,6 +169,8 @@ export type ComboFormState = {
   name: string;
   productIds: string[];
   status: ComboStatus;
+  /** Codigo do pacote na Ticto; "" = sem ligacao. */
+  tictoProductId: string;
 };
 
 export function comboToForm(combo?: ComboListItem | null): ComboFormState {
@@ -175,9 +181,10 @@ export function comboToForm(combo?: ComboListItem | null): ComboFormState {
         hotmartProductId: combo.hotmartProductId ?? "",
         name: combo.name,
         productIds: combo.products.map((product) => product.id),
-        status: combo.status
+        status: combo.status,
+        tictoProductId: combo.tictoProductId ?? ""
       }
-    : { cohortName: "", description: "", hotmartProductId: "", name: "", productIds: [], status: "draft" };
+    : { cohortName: "", description: "", hotmartProductId: "", name: "", productIds: [], status: "draft", tictoProductId: "" };
 }
 
 /** Entrada de saveCombo (comboSchema): turma vazia vira a turma padrao no servidor. */
@@ -189,7 +196,8 @@ export function formToComboInput(form: ComboFormState, id?: string) {
     ...(id ? { id } : {}),
     name: form.name.trim(),
     productIds: Array.from(new Set(form.productIds)),
-    status: form.status
+    status: form.status,
+    tictoProductId: form.tictoProductId.trim()
   };
 }
 

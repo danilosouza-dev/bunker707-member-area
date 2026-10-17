@@ -4,8 +4,9 @@ import { ESCOLA_DE_TESTE, desconectarVendas, ligarProdutoNaHotmart, limparVendas
 import { createLocalAdminClient } from "../support/local-db.mjs";
 
 // Admin: Configuracoes > Vendas no navegador (docs/17 §1.10; docs/18 §3.2): o produtor abre a tela, ve a
-// Hotmart "Nao conectada" e Ticto/Kiwify "Em configuracao", cola o token e salva; uma venda FICTICIA chega
-// pelo endereco mostrado na tela e aparece na lista como "Acesso liberado". O analista nao chega na tela.
+// Hotmart e a Ticto "Nao conectada" e a Kiwify "Em configuracao", cola o token da Hotmart e salva; uma
+// venda FICTICIA chega pelo endereco mostrado na tela e aparece na lista como "Acesso liberado". O
+// analista nao chega na tela. A Ticto tem o proprio teste (produtor-conecta-ticto).
 
 const { cursoBloqueado } = ESCOLA_DE_TESTE;
 const TOKEN = "hottok-navegador-0123456789abcdef";
@@ -42,22 +43,24 @@ test.describe("produtor", () => {
 
   test.afterAll(limpar);
 
-  test("abre Vendas: Hotmart nao conectada, Ticto e Kiwify em configuracao; cola o token e a Hotmart fica conectada", async ({ page }) => {
+  test("abre Vendas: Hotmart e Ticto nao conectadas, Kiwify em configuracao; cola o token e a Hotmart fica conectada", async ({ page }) => {
     await page.goto("/admin/configuracoes/vendas");
     await expect(page).toHaveURL(/\/admin\/configuracoes\/vendas$/);
     await expect(page.getByRole("heading", { level: 1, name: "Vendas" })).toBeVisible();
-    await expect(page.getByText("Não conectada", { exact: true })).toBeVisible();
-    await expect(page.getByText("Em configuração", { exact: true })).toHaveCount(2);
+    await expect(page.getByText("Não conectada", { exact: true })).toHaveCount(2);
+    await expect(page.getByText("Em configuração", { exact: true })).toHaveCount(1);
     await expect(page.getByLabel("Endereço para colar na Hotmart")).toHaveValue(/\/api\/webhooks\/hotmart$/);
 
+    const cartao = page.getByRole("region", { name: "Hotmart" });
     await page.waitForLoadState("networkidle");
-    await preencher(page.getByLabel("Token da Hotmart (Hottok)"), TOKEN);
-    await page.getByRole("button", { name: "Salvar token" }).click();
+    await preencher(cartao.getByLabel("Token da Hotmart (Hottok)"), TOKEN);
+    await cartao.getByRole("button", { name: "Salvar token" }).click();
 
-    await expect(page.getByText("Conectada", { exact: true })).toBeVisible();
-    await expect(page.getByText(/Token guardado em/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Trocar token" })).toBeVisible();
-    await expect(page.getByLabel("Token da Hotmart (Hottok)")).toHaveCount(0);
+    await expect(cartao.getByText("Conectada", { exact: true })).toBeVisible();
+    await expect(cartao.getByText(/Token guardado em/)).toBeVisible();
+    await expect(cartao.getByRole("button", { name: "Trocar token" })).toBeVisible();
+    await expect(cartao.getByLabel("Token da Hotmart (Hottok)")).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Ticto" }).getByText("Não conectada", { exact: true })).toBeVisible();
   });
 
   test("uma venda chega pelo endereco da tela e aparece na lista como acesso liberado", async ({ page, request }) => {

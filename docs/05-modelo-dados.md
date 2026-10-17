@@ -1305,10 +1305,10 @@ Guarda o evento bruto de plataformas externas (so depois do token conferido) e o
 
 - id uuid;
 - provider: hotmart, ticto, kiwify;
-- external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele);
-- event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED`);
+- external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele; Ticto, que nao manda id de evento: `transaction.hash:status:status_date`, ou `order.hash` no lugar da transacao);
+- event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED` na Hotmart, `authorized` na Ticto);
 - normalized_type: purchase_approved, refund, chargeback, subscription_canceled, other;
-- payload jsonb (<= 256 KB; o token da plataforma e tirado antes de gravar);
+- payload jsonb (<= 256 KB; o token da plataforma e tirado antes de gravar; na Ticto tambem o `direct_login_url` e o CPF/CNPJ do comprador);
 - signature_valid;
 - processing_status: received, processed, failed, ignored;
 - outcome: access_granted, access_revoked, access_suspended, ignored, failed;
@@ -1333,15 +1333,15 @@ Codigo do produto na plataforma de venda ligado a um produto ou a um pacote da e
 
 - id uuid;
 - provider: hotmart, ticto, kiwify;
-- external_product_id (Hotmart: o numero do produto, `data.product.id`);
+- external_product_id (Hotmart: o numero do produto, `data.product.id`; Ticto: o id do produto, `item.product_id`, qualquer que seja a oferta);
 - product_id -> content_items (cascade) ou combo_id -> product_combos (cascade), exatamente um;
 - created_by, created_at, updated_at.
 
-Indices unicos: (provider, external_product_id), (provider, product_id) e (provider, combo_id), inteiros (nulos nao conflitam) para o upsert do servidor. Gravado por "Codigo do produto na Hotmart" em Produtos > Acesso e venda (`updateProductAccess`, `catalog.access`) e em Pacotes (`saveCombo`). Venda de pacote libera todos os produtos dele; reembolso ou chargeback de pacote tira todos (docs/17 §1.6.8); pacote em rascunho ou pausado nao libera nada.
+Indices unicos: (provider, external_product_id), (provider, product_id) e (provider, combo_id), inteiros (nulos nao conflitam) para o upsert do servidor. Gravado por "Codigo do produto na Hotmart" e "Codigo do produto na Ticto" em Produtos > Acesso e venda (`updateProductAccess`, `catalog.access`) e em Pacotes (`saveCombo`); um codigo por plataforma em cada alvo, e o mesmo numero pode existir nas duas plataformas. Codigo ja ligado a outro alvo e recusado no campo antes de gravar o produto ou o pacote (`assertSalesLinksAvailable`). Venda de pacote libera todos os produtos dele; reembolso ou chargeback de pacote tira todos (docs/17 §1.6.8); pacote em rascunho ou pausado nao libera nada.
 
 ### entitlements.source_event_id nas vendas
 
-Compra pela plataforma grava `source_provider = hotmart` e `source_event_id` = id da compra (`purchase.transaction`; sem ele, o id do evento). Quando um evento libera mais de um produto (pacote), cada linha leva o sufixo `:<produto>` (indice unico `(user_id, source_event_id)`). `warranty_expire_date` chega normalizado (`warrantyEndsAt`) mas ainda nao e gravado: a coluna `warranty_ends_at` continua o ponto de extensao descrito em §entitlements.
+Compra pela plataforma grava `source_provider` = `hotmart` ou `ticto` e `source_event_id` = id da compra (Hotmart: `purchase.transaction`; Ticto: `transaction.hash`; sem ele, o id do evento). Quando um evento libera mais de um produto (pacote), cada linha leva o sufixo `:<produto>` (indice unico `(user_id, source_event_id)`). `warranty_expire_date` chega normalizado (`warrantyEndsAt`) mas ainda nao e gravado: a coluna `warranty_ends_at` continua o ponto de extensao descrito em §entitlements.
 
 ### admin_access_origins(p_start, p_end, p_content_id)
 

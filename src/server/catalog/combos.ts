@@ -80,7 +80,7 @@ async function readCombos(db: Db, comboId?: string): Promise<ComboListItem[]> {
 
   const [accents, salesLinks] = await Promise.all([
     readAccents(db, productIds),
-    fetchSalesLinksFor(db, { comboIds: combos.map((combo) => combo.id), provider: "hotmart" })
+    fetchSalesLinksFor(db, { comboIds: combos.map((combo) => combo.id) })
   ]);
 
   return mapComboRows({ accents, combos, items, products, salesLinks });

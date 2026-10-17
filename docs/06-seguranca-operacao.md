@@ -109,6 +109,17 @@ Regras:
 
 Configuracao por ambiente, uma vez: em Configuracoes > Vendas, copiar o endereco mostrado (origem do site + `/api/webhooks/hotmart`), cadastrar na Hotmart (Ferramentas > Webhook, versao 2.0.0) com os eventos listados na tela (compra aprovada, compra concluida, reembolso, chargeback, assinatura cancelada), colar o hottok e salvar; informar o codigo da Hotmart em cada produto (Acesso e venda) ou pacote. Diagnostico: `select provider, status, secret_status, last_sync_at, last_error from public.integration_settings;` e `select event_type, processing_status, outcome, outcome_detail, received_at from public.webhook_events order by received_at desc limit 20;`.
 
+### Vendas pela Ticto (17/10/2026)
+
+`POST /api/webhooks/ticto`, pelo mesmo fluxo e com as mesmas regras da Hotmart acima (token no banco e nunca em variavel de ambiente, 503 sem conexao, 401 sem gravar, idempotencia, regra de acesso unica, ignorado com motivo, `failed` + Reprocessar, auditoria, 256 KB, processamento sincrono). O que muda:
+
+- o token da Ticto vem **so no corpo**, no campo `token` (referencia oficial: https://webhook.ticto.dev/docs/v2). Nao ha cabecalho nem assinatura HMAC: a protecao e o segredo do token, conferido em tempo constante. Por isso o endereco do webhook so deve ser cadastrado na Ticto, e o token trocado (Trocar token) se vazar;
+- o payload guardado perde o `token`, o `direct_login_url` (link de entrada direta na area da Ticto, que funciona como credencial do comprador) e o CPF/CNPJ (`customer.cpf`/`cnpj`), que a escola nao precisa para liberar acesso; o e-mail e o nome ficam, com a mesma retencao pendente de 12 meses;
+- a Ticto nao manda id de evento: a idempotencia usa `transacao:status:status_date`. O mesmo postback reenviado para no 200 `duplicate`;
+- entitlements usam `source_provider = ticto` e `source_event_id` = `transaction.hash`; assinatura reativada (`uncanceled`) devolve o acesso suspenso pelo cancelamento, sem novo e-mail de compra (mesma chave de idempotencia da compra).
+
+Configuracao por ambiente, uma vez: em Configuracoes > Vendas, no cartao da Ticto, copiar o endereco mostrado (origem do site + `/api/webhooks/ticto`); na Ticto, em Tictools > Webhooks, adicionar um webhook com esse endereco, versao 2.0 e formato JSON, marcar os eventos listados na tela (compra aprovada, assinatura reativada, reembolso, chargeback, assinatura cancelada), copiar o token que a Ticto gera e colar no cartao; informar o codigo da Ticto (id do produto) em cada produto (Acesso e venda) ou pacote. O caminho do menu vem de guias de integradores e pode mudar no painel da Ticto; a referencia oficial nao o descreve.
+
 ## Comentarios e moderacao
 
 Regras:

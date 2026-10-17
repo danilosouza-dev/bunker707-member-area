@@ -367,6 +367,8 @@ Geral (nome da escola, fuso, domínio); **Equipe** (funções prontas que se com
 
 > **Atualização (17/10/2026): Vendas com a Hotmart existe** (`/admin/configuracoes/vendas`, só o dono, `settings.sales`). Cartão da Hotmart com o endereço para colar na Hotmart (origem do site + `/api/webhooks/hotmart`, com Copiar), a instrução de onde cadastrar (Ferramentas › Webhook, versão 2.0.0, aba Autenticação para o token), os eventos a marcar, o campo do token (guardado só no servidor: depois de salvo a tela mostra "Token guardado em <data>", Trocar token e Desconectar), a última venda recebida e quantos produtos/pacotes têm código. Ticto e Kiwify aparecem como "Em configuração". A lista **Vendas recebidas** (50 últimas) mostra data, evento ("Compra aprovada", "Reembolso", "Chargeback", "Assinatura cancelada"…), e-mail mascarado com link para o aluno, produto ou pacote da escola (ou o nome que veio da plataforma) e o resultado (Acesso liberado / revogado / suspenso / Ignorado / Erro) com o motivo escrito e **Reprocessar** para o que falhou ou foi ignorado. A ligação da venda ao catálogo é o campo **Código do produto na Hotmart** em Produtos › Acesso e venda e em Pacotes (`sales_product_links`); venda de pacote libera todos os produtos de uma vez, reembolso ou chargeback tiram todos, pacote em rascunho ou pausado não libera. "Novos acessos" do Hoje passou a dizer a origem no rodapé ("3 pela Hotmart · 2 pela equipe"), e o histórico do aluno já mostrava "(Hotmart)". Módulo `src/server/payments/`; regras em `docs/04` (Webhooks externos), `docs/05` (Webhooks) e `docs/06` (Vendas pela Hotmart). Fica para depois: Ticto e Kiwify, gravar `warranty_ends_at`, processamento em job, retenção de 12 meses.
 
+> **Atualização (17/10/2026): a Ticto também conecta.** O cartão da Hotmart virou um cartão por plataforma conectável: a Ticto ganhou o dela, embaixo do da Hotmart, com o endereço para colar na Ticto (origem do site + `/api/webhooks/ticto`), a instrução de onde cadastrar (Tictools › Webhooks, versão 2.0, formato JSON, token gerado pela Ticto na mesma tela), os eventos a marcar ("Compra aprovada", "Assinatura reativada", "Reembolso", "Chargeback", "Assinatura cancelada"), o campo "Token da Ticto" e o mesmo Trocar token / Desconectar. Só a Kiwify continua "Em configuração". A lista **Vendas recebidas** passou a dizer, embaixo do evento, de qual plataforma ele veio, e rotula as situações da Ticto em português (pix gerado, boleto vencido, assinatura atrasada…). Produtos › Acesso e venda e Pacotes ganharam **Código do produto na Ticto** ao lado do da Hotmart; cada plataforma guarda o próprio código, e código já usado por outro produto é recusado no campo antes de salvar qualquer coisa (antes, o Salvar seguinte com o código corrigido dava "Alterado em outro lugar"). Regras em `docs/04` (Implementado: Ticto) e `docs/06` (Vendas pela Ticto). Fica para depois: Kiwify, gravar `warranty_ends_at`, processamento em job, retenção de 12 meses.
+
 ### 1.11 Métricas: o que o produtor precisa, com fórmula e ação
 
 Regra de corte: **nenhuma métrica entra sem (a) fórmula e janela visíveis ao passar o mouse, (b) uma ação a um clique e (c) um resultado mensurável.** O que não passa vira exportação ou sai. Todas excluem a equipe e contas de teste. Todas mostram "Atualizado às HH:MM".
@@ -914,7 +916,7 @@ Pedido do produtor: "Quero poder editar login, escolher algum template de login 
 | Em breve / Novo / Bloqueado | derivados no servidor; nunca gravados |
 | Liberação ("7 dias depois de ganhar acesso") | `release_rule` (`ReleaseRuleConfig`; modos `immediate`, `fixed_date`, `after_access` = antigos `after_enrollment` + `after_purchase`, `after_previous_lesson`) |
 | Acesso | `entitlements` (`starts_at`, `ends_at`, `status`, `source_event_id`) |
-| Origem (Hotmart, Ticto, manual) | prefixo de `source_event_id` / `webhook_events.provider` |
+| Origem (Hotmart, Ticto, manual) | `entitlements.source_provider` / `webhook_events.provider` |
 | Aluno / Sem conta | `profiles` (`auth.users`) / `students` sem `user_id` |
 | Turma | `cohorts` + `cohort_memberships` |
 | Pacote | `product_combos` + `product_combo_items` |
@@ -926,8 +928,8 @@ Pedido do produtor: "Quero poder editar login, escolher algum template de login 
 | Notificação (sino) | `notifications` |
 | Desfecho de um aviso | `campaigns.goal_event_type` + janela de atribuição |
 | Vendas recebidas | `webhook_events` (Hotmart/Ticto) |
-| Código do produto na Hotmart | `sales_product_links` (provider, external_product_id → product_id ou combo_id) |
-| Hotmart conectada / Precisa de atenção / Em configuração | `integration_settings.status` (+ plataforma sem adaptador = "Em configuração") |
+| Código do produto na Hotmart / na Ticto | `sales_product_links` (provider, external_product_id → product_id ou combo_id) |
+| Hotmart ou Ticto conectada / Precisa de atenção / Em configuração | `integration_settings.status` (+ plataforma sem adaptador = "Em configuração") |
 | Cor do produto | `content_page_settings.settings->>'accent'` |
 | Vídeo pronto / processando / com erro; vídeo protegido | `video_assets.status`; token de playback de curta duração (Bunny SHA256, Mux JWT) |
 | Cole o link do vídeo | detecção de provedor por host + `POST /api/admin/video/resolve` |

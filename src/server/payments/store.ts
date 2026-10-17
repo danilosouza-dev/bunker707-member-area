@@ -10,7 +10,7 @@ import "server-only";
 
 import { toDbError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
-import type { IntegrationStatus, SaleOutcome, WebhookProcessingStatus } from "./model";
+import { SALES_CODE_FIELDS, type IntegrationStatus, type SaleOutcome, type WebhookProcessingStatus } from "./model";
 import type { NormalizedSaleType, SalesProvider } from "./types";
 
 export type SalesDb = ReturnType<typeof getSupabaseAdminClient>;
@@ -317,14 +317,45 @@ export class SalesLinkConflictError extends Error {
   issues: { message: string; path: string[] }[];
   status = 400 as const;
 
-  constructor(message: string, field = "hotmartProductId") {
+  constructor(message: string, fields: string | readonly string[]) {
     super(message);
     this.name = "ZodError";
-    this.issues = [{ message, path: [field] }];
+    this.issues = (typeof fields === "string" ? [fields] : fields).map((field) => ({ message, path: [field] }));
   }
 }
 
+const SALES_LINK_CONFLICT_MESSAGE = "Esse código já está ligado a outro produto ou pacote. Cada código da plataforma libera um alvo só.";
+
 export type SalesLinkTarget = { comboId: string; productId?: undefined } | { comboId?: undefined; productId: string };
+
+/**
+ * Antes de gravar o produto ou o pacote: algum dos codigos informados ja esta ligado a OUTRO alvo na
+ * mesma plataforma? Se estiver, recusa no campo daquela plataforma e nada e gravado (sem isso, a linha
+ * do produto mudava de versao e o proximo Salvar, com o codigo corrigido, respondia 409). Codigo vazio
+ * ou ausente nao e conferido. O indice unico continua sendo a garantia final em setSalesLink.
+ */
+export async function assertSalesLinksAvailable(
+  db: SalesDb,
+  input: SalesLinkTarget & { codes: Partial<Record<SalesProvider, string | null | undefined>> }
+) {
+  const wanted = (Object.entries(input.codes) as [SalesProvider, string | null | undefined][])
+    .map(([provider, code]) => [provider, code?.trim() ?? ""] as const)
+    .filter(([, code]) => code.length > 0);
+  const conflicts: string[] = [];
+
+  for (const [provider, code] of wanted) {
+    const link = await fetchSalesLinkByExternalId(db, provider, code);
+    const sameTarget = link && (input.productId ? link.product_id === input.productId : link.combo_id === input.comboId);
+
+    if (link && !sameTarget) {
+      conflicts.push(SALES_CODE_FIELDS[provider]);
+    }
+  }
+
+  if (conflicts.length > 0) {
+    throw new SalesLinkConflictError(SALES_LINK_CONFLICT_MESSAGE, conflicts);
+  }
+}
 
 /**
  * Grava o codigo da plataforma de um produto ou pacote (vazio = tira a ligacao). Codigo ja usado por
@@ -359,7 +390,7 @@ export async function setSalesLink(
     );
 
   if (error?.code === "23505") {
-    throw new SalesLinkConflictError("Esse código já está ligado a outro produto ou pacote. Cada código da plataforma libera um alvo só.");
+    throw new SalesLinkConflictError(SALES_LINK_CONFLICT_MESSAGE, SALES_CODE_FIELDS[input.provider]);
   }
 
   failOnError(error, "Guardar o código da plataforma");

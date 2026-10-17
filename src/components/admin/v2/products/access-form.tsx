@@ -49,6 +49,8 @@ const comboTone = { active: "success", draft: "neutral", paused: "muted" } as co
 
 const HOTMART_CODE_HINT =
   "O número do produto em Hotmart › Produtos (aparece no endereço da página dele). Com ele, a venda aprovada libera este produto sozinha; reembolso e chargeback tiram o acesso. A Hotmart precisa estar conectada em Configurações › Vendas.";
+const TICTO_CODE_HINT =
+  "O número (ID) do produto no painel da Ticto. Com ele, a venda aprovada libera este produto sozinha; reembolso e chargeback tiram o acesso. A Ticto precisa estar conectada em Configurações › Vendas.";
 
 /** Chip simples do prototipo (`.chip`): 22 px, raio 6, fundo branco a 6 %, borda sutil, 12/500. */
 const plainChip =
@@ -219,6 +221,22 @@ export function ProductAccessForm({ access }: { access: ProductAccess }) {
               onChange={(event) => update("hotmartProductId", event.target.value)}
               placeholder="Ex.: 1234567"
               value={draft.hotmartProductId}
+            />
+          </AdminField>
+
+          <AdminField error={errors.tictoProductId} hint={TICTO_CODE_HINT} id="acesso-codigo-ticto" label="Código do produto na Ticto" optional>
+            <Input
+              aria-describedby={fieldDescribedBy("acesso-codigo-ticto", { error: errors.tictoProductId, hint: TICTO_CODE_HINT })}
+              aria-invalid={errors.tictoProductId ? true : undefined}
+              autoComplete="off"
+              className={cn(adminInputClass, "w-[240px] max-w-full tabular-nums")}
+              disabled={readOnly}
+              id="acesso-codigo-ticto"
+              inputMode="numeric"
+              maxLength={120}
+              onChange={(event) => update("tictoProductId", event.target.value)}
+              placeholder="Ex.: 268"
+              value={draft.tictoProductId}
             />
           </AdminField>
 

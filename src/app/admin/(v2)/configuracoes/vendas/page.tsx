@@ -19,8 +19,8 @@ function readNow() {
   return Date.now();
 }
 
-// Configuracoes > Vendas (docs/17 §1.10): so o dono (settings.sales). Conectar a Hotmart (endereco,
-// eventos e token), Ticto e Kiwify em configuracao, e a lista das vendas recebidas com o resultado.
+// Configuracoes > Vendas (docs/17 §1.10): so o dono (settings.sales). Conectar a Hotmart e a Ticto
+// (endereco, eventos e token), Kiwify em configuracao, e a lista das vendas recebidas com o resultado.
 export default async function SalesSettingsPage() {
   await requirePageRole("settings.sales", "/admin/configuracoes");
   const loaded = await loadUnlessPendingMigration(getSalesSettingsData);

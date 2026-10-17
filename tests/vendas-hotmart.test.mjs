@@ -121,11 +121,12 @@ test("token: cabecalho X-HOTMART-HOTTOK ou `hottok` do corpo, conferido contra o
   assert.equal(hotmart.isValidSalesToken(` ${TOKEN} `, TOKEN), true, "espaco nas pontas nao atrapalha");
 });
 
-test("o payload guardado perde o token; o adaptador registrado e so o da Hotmart", () => {
+test("o payload guardado perde o token; Hotmart e Ticto tem adaptador, a Kiwify ainda nao", () => {
   assert.deepEqual(hotmart.redactHotmartPayload(compraAprovada()).hottok, "[oculto]");
   assert.equal(hotmart.redactHotmartPayload({ event: "X" }).hottok, undefined);
   assert.equal(adapters.getPaymentAdapter("hotmart")?.provider, "hotmart");
-  assert.equal(adapters.getPaymentAdapter("ticto"), null);
+  assert.equal(adapters.getPaymentAdapter("ticto")?.provider, "ticto");
+  assert.equal(adapters.getPaymentAdapter("kiwify"), null);
   assert.equal(adapters.isSalesProviderSupported("kiwify"), false);
 });
 

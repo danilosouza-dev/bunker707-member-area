@@ -585,18 +585,23 @@ export async function desconectarVendas(db) {
   );
 }
 
-/** Liga um codigo da Hotmart a um produto da escola (arranjo direto no banco, sem passar pela tela). */
-export async function ligarProdutoNaHotmart(db, { codigo, produtoId }) {
-  unwrap(await db.from("sales_product_links").delete().eq("provider", "hotmart").eq("product_id", produtoId), "Tirando codigo antigo do produto");
-  unwrap(await db.from("sales_product_links").delete().eq("provider", "hotmart").eq("external_product_id", codigo), "Tirando codigo repetido");
+/** Liga um codigo de uma plataforma (hotmart, ticto) a um produto da escola (arranjo direto no banco, sem passar pela tela). */
+export async function ligarProdutoNaPlataforma(db, { codigo, plataforma = "hotmart", produtoId }) {
+  unwrap(await db.from("sales_product_links").delete().eq("provider", plataforma).eq("product_id", produtoId), "Tirando codigo antigo do produto");
+  unwrap(await db.from("sales_product_links").delete().eq("provider", plataforma).eq("external_product_id", codigo), "Tirando codigo repetido");
   unwrap(
-    await db.from("sales_product_links").insert({ external_product_id: codigo, product_id: produtoId, provider: "hotmart" }),
-    "Ligando produto de teste a Hotmart"
+    await db.from("sales_product_links").insert({ external_product_id: codigo, product_id: produtoId, provider: plataforma }),
+    `Ligando produto de teste a ${plataforma}`
   );
 }
 
-/** Garante o pacote de teste (ativo, com os dois cursos) ligado ao codigo da Hotmart informado. */
-export async function garantirPacoteDeTeste(db, codigoHotmart) {
+/** Liga um codigo da Hotmart a um produto da escola. */
+export async function ligarProdutoNaHotmart(db, { codigo, produtoId }) {
+  return ligarProdutoNaPlataforma(db, { codigo, plataforma: "hotmart", produtoId });
+}
+
+/** Garante o pacote de teste (ativo, com os dois cursos) ligado ao codigo informado na plataforma (Hotmart por padrao). */
+export async function garantirPacoteDeTeste(db, codigoNaPlataforma, plataforma = "hotmart") {
   unwrap(
     await db
       .from("product_combos")
@@ -608,12 +613,12 @@ export async function garantirPacoteDeTeste(db, codigoHotmart) {
     await db.from("product_combo_items").insert(PACOTE_DE_TESTE.produtos.map((productId, index) => ({ combo_id: PACOTE_DE_TESTE.id, product_id: productId, sort_order: index }))),
     "Gravando produtos do pacote de teste"
   );
-  unwrap(await db.from("sales_product_links").delete().eq("provider", "hotmart").eq("external_product_id", codigoHotmart), "Tirando codigo repetido do pacote");
+  unwrap(await db.from("sales_product_links").delete().eq("provider", plataforma).eq("external_product_id", codigoNaPlataforma), "Tirando codigo repetido do pacote");
   unwrap(
     await db
       .from("sales_product_links")
-      .upsert({ combo_id: PACOTE_DE_TESTE.id, external_product_id: codigoHotmart, provider: "hotmart" }, { onConflict: "provider,combo_id" }),
-    "Ligando pacote de teste a Hotmart"
+      .upsert({ combo_id: PACOTE_DE_TESTE.id, external_product_id: codigoNaPlataforma, provider: plataforma }, { onConflict: "provider,combo_id" }),
+    `Ligando pacote de teste a ${plataforma}`
   );
 }
 
@@ -625,7 +630,7 @@ export async function limparVendasDeTeste(db, { prefixoDoEvento = "teste-", codi
   unwrap(await db.from("webhook_events").delete().like("external_event_id", `${prefixoDoEvento}%`), "Limpando vendas recebidas de teste");
 
   if (codigos.length > 0) {
-    unwrap(await db.from("sales_product_links").delete().eq("provider", "hotmart").in("external_product_id", codigos), "Limpando codigos de teste");
+    unwrap(await db.from("sales_product_links").delete().in("external_product_id", codigos), "Limpando codigos de teste (qualquer plataforma)");
   }
 
   unwrap(await db.from("sales_product_links").delete().eq("combo_id", PACOTE_DE_TESTE.id), "Limpando codigo do pacote de teste");

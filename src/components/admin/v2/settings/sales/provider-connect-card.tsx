@@ -10,6 +10,7 @@ import { disconnectSalesProvider, saveSalesSecret } from "@/server/payments/acti
 import { describeSecretState, saleEventLabel, salesProviderChip } from "@/server/payments/model";
 import type { SalesProviderCard } from "@/server/payments/queries";
 import { salesSecretSchema } from "@/server/payments/schemas";
+import type { SalesProvider } from "@/server/payments/types";
 import { ErrorBanner } from "../../error-banner";
 import { AdminField, adminInputClass, fieldDescribedBy } from "../../form";
 import { AdminLinkButton } from "../../link-button";
@@ -19,12 +20,53 @@ import { adminTransition } from "../../styles";
 import { adminToast } from "../../toast";
 import { ConfirmDialog, SectionCard } from "../kit";
 
-// Cartao da Hotmart em Configuracoes > Vendas (docs/17 §1.10): o endereco para colar na Hotmart, os
-// eventos para marcar la, o token (guardado so no servidor: depois de salvo a tela mostra apenas a data
-// e o botao Trocar), Desconectar e o estado da ultima venda. Texto sem jargao: "webhook" so aqui.
+// Cartao de uma plataforma conectavel (Hotmart, Ticto) em Configuracoes > Vendas (docs/17 §1.10): o
+// endereco para colar na plataforma, os eventos para marcar la, o token (guardado so no servidor: depois
+// de salvo a tela mostra apenas a data e o botao Trocar), Desconectar e o estado da ultima venda. O que
+// muda de uma plataforma para a outra e so o texto (PROVIDER_COPY). "webhook" so aqui.
 
-const HOTMART_STEPS =
-  "Na Hotmart, abra Ferramentas › Webhook › Cadastrar webhook. Cole o endereço abaixo, escolha a versão 2.0.0 e marque os eventos listados. O token (Hottok) fica na aba Autenticação da mesma tela.";
+type ProviderCopy = {
+  /** Frase do cabecalho do cartao. */
+  description: string;
+  /** O que cada evento faz com o acesso (abaixo da lista de eventos). */
+  eventsHint: string;
+  /** Onde cadastrar o webhook e pegar o token, na linguagem da plataforma. */
+  steps: string;
+  tokenLabel: string;
+  tokenPlaceholder: string;
+};
+
+const PROVIDER_COPY: Partial<Record<SalesProvider, ProviderCopy>> = {
+  hotmart: {
+    description: "A Hotmart avisa cada compra, reembolso e chargeback; o acesso do aluno muda sozinho.",
+    eventsHint: "Compra aprovada libera o acesso; reembolso e chargeback tiram; assinatura cancelada suspende. Outros eventos chegam, ficam guardados e não mudam nada.",
+    steps:
+      "Na Hotmart, abra Ferramentas › Webhook › Cadastrar webhook. Cole o endereço abaixo, escolha a versão 2.0.0 e marque os eventos listados. O token (Hottok) fica na aba Autenticação da mesma tela.",
+    tokenLabel: "Token da Hotmart (Hottok)",
+    tokenPlaceholder: "Cole o token da aba Autenticação"
+  },
+  ticto: {
+    description: "A Ticto avisa cada compra, reembolso e chargeback; o acesso do aluno muda sozinho.",
+    eventsHint:
+      "Compra aprovada e assinatura reativada liberam o acesso; reembolso e chargeback tiram; assinatura cancelada suspende. Outros eventos chegam, ficam guardados e não mudam nada.",
+    steps:
+      "Na Ticto, abra Tictools › Webhooks e adicione um webhook. Cole o endereço abaixo, escolha a versão 2.0 e o formato JSON, marque os eventos listados e copie o token que a Ticto gera nessa tela.",
+    tokenLabel: "Token da Ticto",
+    tokenPlaceholder: "Cole o token gerado pela Ticto"
+  }
+};
+
+function copyFor(card: SalesProviderCard): ProviderCopy {
+  return (
+    PROVIDER_COPY[card.provider] ?? {
+      description: `A ${card.label} avisa cada compra, reembolso e chargeback; o acesso do aluno muda sozinho.`,
+      eventsHint: "Compra aprovada libera o acesso; reembolso e chargeback tiram; assinatura cancelada suspende. Outros eventos chegam, ficam guardados e não mudam nada.",
+      steps: `Na ${card.label}, cadastre um webhook com o endereço abaixo, marque os eventos listados e copie o token gerado.`,
+      tokenLabel: `Token da ${card.label}`,
+      tokenPlaceholder: "Cole o token da plataforma"
+    }
+  );
+}
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [state, setState] = useState<"idle" | "copied" | "error">("idle");
@@ -63,8 +105,10 @@ function CopyField({ label, value }: { label: string; value: string }) {
 }
 
 /** `now`: instante lido no servidor (a pagina), para o "ha 2 h" da ultima venda. */
-export function HotmartConnectCard({ card, now }: { card: SalesProviderCard; now: number }) {
+export function ProviderConnectCard({ card, now }: { card: SalesProviderCard; now: number }) {
   const router = useRouter();
+  const copy = copyFor(card);
+  const tokenFieldId = `${card.provider}-token`;
   const connected = card.status !== "not_configured";
   const [editing, setEditing] = useState(!connected);
   const [secret, setSecret] = useState("");
@@ -113,7 +157,7 @@ export function HotmartConnectCard({ card, now }: { card: SalesProviderCard; now
     setSecret("");
     setSavedAt(result.data.secretUpdatedAt);
     setEditing(false);
-    adminToast.success(connected ? "Token trocado" : "Hotmart conectada");
+    adminToast.success(connected ? "Token trocado" : `${card.label} conectada`);
     router.refresh();
   }
 
@@ -130,16 +174,12 @@ export function HotmartConnectCard({ card, now }: { card: SalesProviderCard; now
 
     setSavedAt(null);
     setEditing(true);
-    adminToast.success("Hotmart desconectada");
+    adminToast.success(`${card.label} desconectada`);
     router.refresh();
   }
 
   return (
-    <SectionCard
-      actions={<StatusChip tone={chip.tone}>{chip.label}</StatusChip>}
-      description="A Hotmart avisa cada compra, reembolso e chargeback; o acesso do aluno muda sozinho."
-      title={card.label}
-    >
+    <SectionCard actions={<StatusChip tone={chip.tone}>{chip.label}</StatusChip>} description={copy.description} title={card.label}>
       <div className="flex min-w-0 flex-col gap-5">
         {formError ? <ErrorBanner>{formError}</ErrorBanner> : null}
 
@@ -149,22 +189,20 @@ export function HotmartConnectCard({ card, now }: { card: SalesProviderCard; now
           </ErrorBanner>
         ) : null}
 
-        <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{HOTMART_STEPS}</p>
+        <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.steps}</p>
 
-        <CopyField label="Endereço para colar na Hotmart" value={card.webhookUrl} />
+        <CopyField label={`Endereço para colar na ${card.label}`} value={card.webhookUrl} />
 
         <div className="flex min-w-0 flex-col gap-1.5">
-          <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Eventos para marcar na Hotmart</span>
-          <ul aria-label="Eventos para marcar na Hotmart" className="flex min-w-0 flex-wrap gap-1.5">
+          <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Eventos para marcar na {card.label}</span>
+          <ul aria-label={`Eventos para marcar na ${card.label}`} className="flex min-w-0 flex-wrap gap-1.5">
             {card.events.map((event) => (
               <li key={event}>
                 <StatusChip tone="neutral">{saleEventLabel(event)}</StatusChip>
               </li>
             ))}
           </ul>
-          <p className="text-xs leading-5 text-[var(--text-secondary)]">
-            Compra aprovada libera o acesso; reembolso e chargeback tiram; assinatura cancelada suspende. Outros eventos chegam, ficam guardados e não mudam nada.
-          </p>
+          <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.eventsHint}</p>
         </div>
 
         {editing ? (
@@ -172,21 +210,21 @@ export function HotmartConnectCard({ card, now }: { card: SalesProviderCard; now
             <AdminField
               error={fieldError}
               hint="Fica guardado só no servidor. Depois de salvar, ninguém vê o token de novo; dá para trocar quando quiser."
-              id="hotmart-token"
-              label="Token da Hotmart (Hottok)"
+              id={tokenFieldId}
+              label={copy.tokenLabel}
             >
               <Input
-                aria-describedby={fieldDescribedBy("hotmart-token", { error: fieldError, hint: true })}
+                aria-describedby={fieldDescribedBy(tokenFieldId, { error: fieldError, hint: true })}
                 aria-invalid={fieldError ? true : undefined}
                 autoComplete="off"
                 className={cn(adminInputClass, "max-w-[520px] font-mono text-[13px]")}
                 disabled={saving}
-                id="hotmart-token"
+                id={tokenFieldId}
                 onChange={(event) => {
                   setSecret(event.target.value);
                   setFieldError(null);
                 }}
-                placeholder="Cole o token da aba Autenticação"
+                placeholder={copy.tokenPlaceholder}
                 spellCheck={false}
                 type="password"
                 value={secret}
@@ -231,7 +269,7 @@ export function HotmartConnectCard({ card, now }: { card: SalesProviderCard; now
             <dd className="text-sm text-[var(--text-primary)]">{card.lastSyncAt ? formatRelativeDate(card.lastSyncAt, now, "Nenhuma ainda") : "Nenhuma ainda"}</dd>
           </div>
           <div className="flex min-w-0 flex-col gap-0.5">
-            <dt className="text-xs font-medium text-[var(--text-tertiary)]">Produtos e pacotes com código da Hotmart</dt>
+            <dt className="text-xs font-medium text-[var(--text-tertiary)]">Produtos e pacotes com código da {card.label}</dt>
             <dd className="text-sm text-[var(--text-primary)]">{card.linkedTargets === 1 ? "1 ligado" : `${card.linkedTargets} ligados`}</dd>
           </div>
         </dl>
@@ -239,8 +277,8 @@ export function HotmartConnectCard({ card, now }: { card: SalesProviderCard; now
         {card.linkedTargets === 0 ? (
           <div className="flex flex-col gap-3 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-2)] px-3 py-3 text-[13px] leading-5 text-[var(--text-secondary)]">
             <p>
-              <span className="font-medium text-[var(--warning)]">Falta ligar os produtos.</span> Sem o código da Hotmart em cada produto ou pacote, a venda chega e fica como
-              “Ignorado”. Informe o código em Produtos › Acesso e venda ou em Pacotes.
+              <span className="font-medium text-[var(--warning)]">Falta ligar os produtos.</span> Sem o código da {card.label} em cada produto ou pacote, a venda chega e fica
+              como “Ignorado”. Informe o código em Produtos › Acesso e venda ou em Pacotes.
             </p>
             <div className="flex flex-wrap gap-2">
               <AdminLinkButton href="/admin/produtos" variant="secondary">
@@ -257,12 +295,12 @@ export function HotmartConnectCard({ card, now }: { card: SalesProviderCard; now
       <ConfirmDialog
         busy={disconnecting}
         confirmLabel="Desconectar"
-        description="O token é apagado e as vendas novas da Hotmart deixam de chegar até você colar um token de novo. Os acessos já liberados continuam."
+        description={`O token é apagado e as vendas novas da ${card.label} deixam de chegar até você colar um token de novo. Os acessos já liberados continuam.`}
         destructive
         onConfirm={() => void disconnect()}
         onOpenChange={setConfirmDisconnect}
         open={confirmDisconnect}
-        title="Desconectar a Hotmart?"
+        title={`Desconectar a ${card.label}?`}
       />
     </SectionCard>
   );

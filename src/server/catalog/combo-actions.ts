@@ -10,7 +10,7 @@ import { runAdminAction } from "@/server/actions/run-action";
 import { invalidateCatalog } from "@/server/catalog/cache";
 import { isMissingSchemaObjectError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
-import { setSalesLink } from "@/server/payments/store";
+import { assertSalesLinksAvailable, setSalesLink } from "@/server/payments/store";
 import { getCombo } from "./combos";
 import { CatalogNotFoundError, CatalogRuleError } from "./errors";
 import { makeCatalogId } from "./model";
@@ -87,6 +87,8 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
     // Dados do pacote e troca dos produtos na mesma transacao (admin_save_combo, 202610110012):
     // uma falha no meio nao deixa o pacote sem produtos.
     const comboId = input.id ?? makeCatalogId("combo", input.name);
+    // Codigo de venda ja usado por outro alvo: recusa no campo antes de gravar o pacote.
+    await assertSalesLinksAvailable(db, { codes: { hotmart: input.hotmartProductId, ticto: input.tictoProductId }, comboId });
     const fields = {
       cohort_name: input.cohortName || DEFAULT_COHORT_NAME,
       description: input.description,
@@ -120,10 +122,14 @@ export async function saveCombo(raw: ComboInput): Promise<ActionResult<ComboList
 
     failOnError(error, "Pacote");
 
-    // Codigo na Hotmart (sales_product_links): fora da transacao do pacote, depois dela. Codigo
-    // repetido vira erro do campo; "" tira a ligacao.
+    // Codigo na Hotmart e na Ticto (sales_product_links): fora da transacao do pacote, depois dela.
+    // Codigo repetido vira erro do campo da plataforma; "" tira a ligacao.
     if (input.hotmartProductId !== undefined) {
       await setSalesLink(db, { comboId, createdBy: user.id, externalProductId: input.hotmartProductId, provider: "hotmart" });
+    }
+
+    if (input.tictoProductId !== undefined) {
+      await setSalesLink(db, { comboId, createdBy: user.id, externalProductId: input.tictoProductId, provider: "ticto" });
     }
 
     invalidateCatalog({ from: "action" });

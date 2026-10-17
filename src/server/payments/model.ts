@@ -84,8 +84,18 @@ export const SALE_TYPE_LABELS: Record<NormalizedSaleType, string> = {
   subscription_canceled: "Assinatura cancelada"
 };
 
-/** Nomes dos eventos como a plataforma manda, em portugues (os que nao mudam acesso tambem). */
-const RAW_EVENT_LABELS: Record<string, string> = {
+/**
+ * Nome do campo "Codigo do produto na <plataforma>" nas acoes do catalogo (updateProductAccess,
+ * saveCombo): o erro de codigo repetido cai embaixo do campo certo.
+ */
+export const SALES_CODE_FIELDS = {
+  hotmart: "hotmartProductId",
+  kiwify: "kiwifyProductId",
+  ticto: "tictoProductId"
+} as const satisfies Record<SalesProvider, string>;
+
+/** Nomes dos eventos como a Hotmart manda, em portugues (os que nao mudam acesso tambem). */
+const HOTMART_EVENT_LABELS: Record<string, string> = {
   CLUB_FIRST_ACCESS: "Primeiro acesso no Club",
   CLUB_MODULE_COMPLETED: "Módulo concluído no Club",
   PURCHASE_APPROVED: "Compra aprovada",
@@ -102,6 +112,33 @@ const RAW_EVENT_LABELS: Record<string, string> = {
   SWITCH_PLAN: "Troca de plano",
   UPDATE_SUBSCRIPTION_CHARGE_DATE: "Data de cobrança alterada"
 };
+
+/** Situacoes (status) do webhook 2.0 da Ticto, em portugues; chaves em maiusculas como as da Hotmart. */
+const TICTO_EVENT_LABELS: Record<string, string> = {
+  ABANDONED_CART: "Carrinho abandonado",
+  ALL_CHARGES_PAID: "Assinatura concluída (todas as cobranças pagas)",
+  AUTHORIZED: "Compra aprovada",
+  BANK_SLIP_CREATED: "Boleto gerado",
+  BANK_SLIP_DELAYED: "Boleto vencido",
+  CARD_EXCHANGED: "Cartão da assinatura trocado",
+  CHARGEBACK: "Chargeback",
+  CLAIMED: "Reclamação aberta",
+  CLOSE: "Venda encerrada",
+  EXTENDED: "Assinatura estendida",
+  PIX_CREATED: "Pix gerado",
+  PIX_EXPIRED: "Pix expirado",
+  REFUNDED: "Reembolso",
+  REFUSED: "Pagamento recusado",
+  SUBSCRIPTION_CANCELED: "Assinatura cancelada",
+  SUBSCRIPTION_DELAYED: "Assinatura atrasada",
+  TRIAL: "Período de teste",
+  TRIAL_ENDED: "Período de teste encerrado",
+  TRIAL_STARTED: "Período de teste iniciado",
+  UNCANCELED: "Assinatura reativada",
+  WAITING_PAYMENT: "Aguardando pagamento"
+};
+
+const RAW_EVENT_LABELS: Record<string, string> = { ...HOTMART_EVENT_LABELS, ...TICTO_EVENT_LABELS };
 
 export function saleEventLabel(rawType: string | null | undefined, normalizedType?: NormalizedSaleType | null) {
   const raw = rawType?.trim().toUpperCase() ?? "";
