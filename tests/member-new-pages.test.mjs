@@ -59,7 +59,7 @@ test("cada pagina nova exige sessao, so aceita previa de admin e tem esqueleto p
 });
 
 test("proxy protege as cinco rotas novas e o rodape leva ao suporte", () => {
-  const proxy = read("proxy.ts");
+  const proxy = read("src/proxy.ts");
   const prefixes = proxy.match(/const protectedPagePrefixes = \[([^\]]*)\]/)?.[1] ?? "";
 
   for (const { route } of routes) {
