@@ -152,12 +152,41 @@ export function saleOutcomeChip(input: { outcome: SaleOutcome | null; status: We
   }
 }
 
+/** Depois de quanto tempo um evento ainda em `received` conta como preso (a funcao estourou o tempo). */
+export const STUCK_RECEIVED_MINUTES = 5;
+
 /**
- * Reprocessar vale para o que falhou e para o que foi ignorado (ex.: produto ligado depois da venda),
- * enquanto o payload existir: depois da retencao de 12 meses (`anonymized_at`) nao ha o que reler.
+ * Reprocessar vale para o que falhou, para o que foi ignorado (ex.: produto ligado depois da venda) e
+ * para o que ficou preso em `received` ha mais de STUCK_RECEIVED_MINUTES (o processamento morreu no meio).
  */
-export function canReprocessSaleEvent(status: WebhookProcessingStatus, anonymizedAt: string | null = null) {
-  return anonymizedAt === null && (status === "failed" || status === "ignored");
+export function canReprocessSaleEvent(status: WebhookProcessingStatus, receivedAt?: string | null, now: number = Date.now()) {
+  if (status === "failed" || status === "ignored") {
+    return true;
+  }
+
+  if (status !== "received" || !receivedAt) {
+    return false;
+  }
+
+  const received = Date.parse(receivedAt);
+
+  return Number.isFinite(received) && now - received > STUCK_RECEIVED_MINUTES * 60_000;
+}
+
+/**
+ * Aviso sobre o endereco mostrado para colar na plataforma: sem NEXT_PUBLIC_SITE_URL o endereco e o da
+ * pagina aberta (pode ser uma previa); com ela, avisa quando o admin esta aberto por outro endereco.
+ */
+export function webhookOriginWarning(input: { configuredOrigin: string | null; requestOrigin: string | null }) {
+  if (!input.configuredOrigin) {
+    return "O endereço acima é o desta página, porque NEXT_PUBLIC_SITE_URL não está definida. Conecte a plataforma só pelo endereço de produção.";
+  }
+
+  if (input.requestOrigin && input.requestOrigin !== input.configuredOrigin) {
+    return `Você está com o admin aberto por ${input.requestOrigin}; o endereço acima é o do site configurado e é ele que vale na plataforma.`;
+  }
+
+  return null;
 }
 
 /** Texto do rodape do cartao de cada plataforma. */

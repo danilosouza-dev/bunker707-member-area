@@ -160,10 +160,16 @@ export async function grantResolvedProducts(
     }
 
     let row: EntitlementRow;
+    // Um evento de venda pode liberar varios produtos (pacote): o id do evento e unico por (aluno,
+    // source_event_id), entao cada produto a mais leva o proprio id no sufixo.
+    const sourceEventId = input.sourceEventId ? (uniqueIds.length > 1 ? `${input.sourceEventId}:${productId}` : input.sourceEventId) : `admin:${productId}`;
 
     if (existing) {
       row = await updateEntitlement(db, existing.id, {
         ends_at: nextAccessEndOnGrant({ existingEndsAt: existing.ends_at, requestedEndsAt: input.endsAt, wasOpen }),
+        // Acesso fechado reaberto por uma venda passa a pertencer a essa venda: o reembolso dela o fecha de
+        // novo, e um acesso aberto (da equipe ou de outra compra) que so ganhou prazo continua da origem antiga.
+        ...(!wasOpen && input.source === "webhook" ? { source_event_id: sourceEventId, source_provider: input.sourceProvider } : {}),
         starts_at: wasOpen ? existing.starts_at : nowIso,
         status: "active"
       });
@@ -171,9 +177,7 @@ export async function grantResolvedProducts(
       row = await insertEntitlement(db, {
         ends_at: input.endsAt,
         product_id: productId,
-        // Um evento de venda pode liberar varios produtos (pacote): o id do evento e unico por (aluno,
-        // source_event_id), entao cada produto a mais leva o proprio id no sufixo.
-        source_event_id: input.sourceEventId ? (uniqueIds.length > 1 ? `${input.sourceEventId}:${productId}` : input.sourceEventId) : `admin:${productId}`,
+        source_event_id: sourceEventId,
         source_provider: input.sourceProvider,
         starts_at: nowIso,
         status: "active",

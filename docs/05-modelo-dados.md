@@ -389,7 +389,7 @@ Implementada na migracao `202610170003_sales_webhooks.sql` (17/10/2026), uma lin
 - provider: hotmart, ticto, kiwify (unico);
 - status: not_configured, configured, needs_attention;
 - webhook_url (o endereco mostrado ao produtor, informativo);
-- secret (o token que a plataforma manda em cada pedido; Hotmart: hottok. So o servidor le, por `fetchIntegrationSecret`; a tela nunca recebe a coluna);
+- secret (o SHA-256 em hexadecimal do token que a plataforma manda em cada pedido; Hotmart: hottok. O token em si nunca e gravado: um dump nao permite forjar uma venda. So o servidor le, por `fetchIntegrationSecret`; a tela nunca recebe a coluna);
 - secret_status: missing, set (consistente com `secret` por check);
 - secret_updated_at;
 - events jsonb (lista dos eventos da plataforma que mudam acesso, para a tela dizer o que marcar la);
@@ -398,7 +398,7 @@ Implementada na migracao `202610170003_sales_webhooks.sql` (17/10/2026), uma lin
 
 Regras:
 
-- segredos reais de webhook ficam somente no servidor: a coluna `secret` esta numa tabela so de `service_role`, e `saveSalesSecret` (settings.sales) grava sem devolver; depois de salvo, a tela mostra apenas "Token guardado em <data>" e o botao Trocar;
+- segredos reais de webhook ficam somente no servidor: a coluna `secret` guarda o hash do token numa tabela so de `service_role`, e `saveSalesSecret` (settings.sales) grava sem devolver; depois de salvo, a tela mostra apenas "Token guardado em <data>" e o botao Trocar;
 - dados de plataforma externa sao entrada para processamento, nao fonte de autorizacao;
 - cada provider deve ter adapter proprio (`src/server/payments/adapters.ts`); plataforma sem adaptador aparece como "Em configuracao", nunca "Conectada".
 
@@ -1308,7 +1308,9 @@ Guarda o evento bruto de plataformas externas (so depois do token conferido) e o
 - external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele);
 - event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED`);
 - normalized_type: purchase_approved, refund, chargeback, subscription_canceled, other;
-- payload jsonb (<= 256 KB; o token da plataforma e tirado antes de gravar);
+- payload jsonb (<= 512 KB; so os campos permitidos: envelope, produto, compra, assinatura e e-mail, nome e telefone do comprador; token, documento, endereco, afiliados e comissoes nunca entram; evento que nao muda acesso guarda so o envelope; exclusao do aluno deixa so o envelope com `anonymized: true`);
+- transaction_id (migracao `202610170005`; id da compra na plataforma, igual em todos os eventos da mesma venda; indice (provider, transaction_id));
+- processing_started_at (migracao `202610170005`; inicio do processamento ou do reprocesso; reenvio de evento preso em `received` reivindica a linha por update condicional nesta coluna);
 - signature_valid;
 - processing_status: received, processed, failed, ignored;
 - outcome: access_granted, access_revoked, access_suspended, ignored, failed;
@@ -1326,7 +1328,7 @@ Obrigatorio:
 - guardar payload bruto;
 - nao confiar no payload sem validacao: o acesso so muda por `entitlements`, via `src/server/students/access.ts`.
 
-Retencao: 12 meses depois de `received_at` (docs/17 §2.4), `public.prune_personal_data()` (secao Retencao de dados pessoais) troca `payload` por `{}`, anula `buyer_email` e `error_message` e marca `anonymized_at`. A linha fica: `provider` + `external_event_id` continuam barrando o evento repetido, e a tela de Vendas mostra "Dados apagados (12 meses)" sem o botao Reprocessar (`canReprocessSaleEvent` olha `anonymized_at`; a acao responde 409).
+Retencao: 12 meses depois de `received_at` (docs/17 §2.4), `public.prune_personal_data()` (secao Retencao de dados pessoais) troca `payload` por `{}`, anula `buyer_email` e `error_message` e marca `anonymized_at`. A linha fica: `provider` + `external_event_id` continuam barrando o evento repetido, `transaction_id` e `normalized_type` (migracao `202610170005`) continuam barrando a compra reenviada depois de reembolso ou chargeback (`hasClosingEventForTransaction`), e a tela de Vendas mostra "Dados apagados (12 meses)" sem o botao Reprocessar (`canReprocessSaleEvent` olha `anonymized_at`; a acao responde 409).
 
 ### sales_product_links
 
@@ -1420,11 +1422,11 @@ Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `doc
 
 | Tabela | Quando | O que sai | O que fica |
 |---|---|---|---|
-| `webhook_events` | 12 meses depois de `received_at` | `payload` (vira `{}`), `buyer_email`, `error_message` | provider, `external_event_id` (idempotencia), tipo, resultado, motivo, alvo, `user_id`, datas; `anonymized_at` marcado |
+| `webhook_events` | 12 meses depois de `received_at` | `payload` (vira `{}`), `buyer_email`, `error_message` | provider, `external_event_id` (idempotencia), `transaction_id` e tipo (reembolso antigo segue barrando a compra reenviada), resultado, motivo, alvo, `user_id`, datas; `anonymized_at` marcado |
 | `email_outbox` | 90 dias depois de `created_at` se `sent`; 180 dias nos demais status (falha, bounce, reclamacao e o que ainda estava na fila, que vira `failed` com o motivo) | `to_email`, `html`, `text`, `last_error` | `kind`, `user_id`, `subject`, `idempotency_key`, `status`, datas, `metadata`; `anonymized_at` marcado |
 | `email_webhook_events` | 90 dias depois de `received_at` | a linha inteira | nada (entrega, bounce e motivo ja estao em `email_outbox`) |
 
-Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta continua anulando `user_id` nas duas tabelas (`on delete set null`); prazos novos sao mudanca de migracao, com o teste ajustado.
+Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta anula `user_id` nas duas tabelas (`on delete set null`), e "Excluir aluno" ja anonimiza na hora as vendas do aluno (`anonymizeWebhookEventsFor`); prazos novos sao mudanca de migracao, com o teste ajustado.
 
 ## Suporte
 

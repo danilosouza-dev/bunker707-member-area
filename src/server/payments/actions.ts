@@ -11,6 +11,7 @@ import { recordAudit } from "@/server/audit/log";
 import { getRequestOrigin } from "@/server/auth/site-origin";
 import { getPaymentAdapter } from "./adapters";
 import { buildSalesWebhookUrl, SALES_PROVIDER_LABELS } from "./model";
+import { hashSalesSecret } from "./secret";
 import { reprocessSalesEventSchema, salesProviderInputSchema, saveSalesSecretSchema } from "./schemas";
 import { clearIntegration, saveIntegrationSecret, salesDb } from "./store";
 import { reprocessWebhookEvent, type ReprocessOutcome } from "./webhook-handler";
@@ -43,7 +44,8 @@ export async function saveSalesSecret(raw: unknown): Promise<ActionResult<{ secr
     const db = salesDb();
     const webhookUrl = buildSalesWebhookUrl(await getRequestOrigin(), input.provider);
 
-    await saveIntegrationSecret(db, { events: adapter.handledEvents, provider: input.provider, secret: input.secret, webhookUrl });
+    // So o SHA-256 vai para o banco: um dump nao entrega o token.
+    await saveIntegrationSecret(db, { events: adapter.handledEvents, provider: input.provider, secretHash: hashSalesSecret(input.secret), webhookUrl });
     await recordAudit(db, {
       action: "sales.secret_saved",
       actorId: user.id,

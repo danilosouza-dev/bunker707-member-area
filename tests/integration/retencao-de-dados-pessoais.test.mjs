@@ -4,20 +4,23 @@ import { after, before, test } from "node:test";
 import { createClient } from "@supabase/supabase-js";
 import { actAs } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient, readLocalSupabaseConfig, unwrap } from "../support/local-db.mjs";
-import { ESCOLA_DE_TESTE, SENHA_DE_TESTE, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { ESCOLA_DE_TESTE, SENHA_DE_TESTE, ligarProdutoNaHotmart, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
 // Retencao de dados pessoais por idade (docs/06, secao LGPD; migracao 202610170004) contra o banco LOCAL
 // de verdade: `public.prune_personal_data()` anonimiza vendas recebidas com mais de 12 meses e e-mails da
 // fila com mais de 90 dias (enviados) ou 180 dias (falhas, bounces e o que ficou na fila), apaga os eventos
 // brutos do Resend com mais de 90 dias, deixa o recente inteiro, nao muda nada na segunda rodada e so o
 // servidor pode chama-la. A tela de Vendas continua listando a venda anonimizada, sem e-mail e sem
-// Reprocessar. Nenhum e-mail sai e nenhum webhook e chamado: as linhas antigas sao gravadas pelo teste.
+// Reprocessar, e o reembolso anonimizado continua barrando a compra reenviada da mesma transacao (o id da
+// transacao, da migracao 202610170005, nao e dado pessoal e fica). Nenhum e-mail sai e nenhum webhook e
+// chamado: as linhas antigas sao gravadas pelo teste.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
 const salesQueries = await import("../../src/server/payments/queries.ts");
 const salesActions = await import("../../src/server/payments/actions.ts");
 const salesStore = await import("../../src/server/payments/store.ts");
+const processSale = await import("../../src/server/payments/process-sale.ts");
 const outbox = await import("../../src/server/email/outbox.ts");
 
 const produtor = usuarioDeTeste(contas.produtor);
@@ -26,9 +29,11 @@ const CHAVE = "teste-retencao:";
 const DIA_MS = 24 * 60 * 60 * 1000;
 const haDias = (dias) => new Date(Date.now() - dias * DIA_MS).toISOString();
 const SEM_TITULOS = { combos: new Map(), products: new Map() };
+const CODIGO_DA_HOTMART = "7801";
+const DADOS_APAGADOS = "Dados apagados (12 meses)";
 
 /** Venda recebida FICTICIA, gravada direto na tabela com a data que o teste quiser. */
-async function gravarVenda({ sufixo, diasAtras, status = "processed", outcome = "access_granted" }) {
+async function gravarVenda({ sufixo, diasAtras, status = "processed", outcome = "access_granted", tipo = "purchase_approved", evento = "PURCHASE_APPROVED", transacao = null }) {
   const email = `${sufixo}@bunker707.test`;
   const row = unwrap(
     await db
@@ -36,19 +41,20 @@ async function gravarVenda({ sufixo, diasAtras, status = "processed", outcome = 
       .insert({
         buyer_email: email,
         error_message: status === "failed" ? "Falha fictícia ao processar" : null,
-        event_type: "PURCHASE_APPROVED",
+        event_type: evento,
         external_event_id: `${PREFIXO}${sufixo}`,
         external_product_id: "7001",
         external_product_name: "Produto fictício na Hotmart",
-        normalized_type: "purchase_approved",
+        normalized_type: tipo,
         outcome,
         outcome_detail: "1 produto liberado; conta nova.",
-        payload: { data: { buyer: { email, name: "Comprador Fictício" }, product: { id: 7001 } }, event: "PURCHASE_APPROVED" },
+        payload: { data: { buyer: { email, name: "Comprador Fictício" }, product: { id: 7001 }, purchase: { transaction: transacao } }, event: evento },
         processed_at: haDias(diasAtras),
         processing_status: status,
         provider: "hotmart",
         received_at: haDias(diasAtras),
-        signature_valid: true
+        signature_valid: true,
+        transaction_id: transacao
       })
       .select("id")
       .single(),
@@ -126,6 +132,7 @@ async function podar() {
 }
 
 async function limpar() {
+  unwrap(await db.from("sales_product_links").delete().eq("provider", "hotmart").eq("external_product_id", CODIGO_DA_HOTMART), "Limpando codigo da Hotmart de teste");
   unwrap(await db.from("webhook_events").delete().like("external_event_id", `${PREFIXO}%`), "Limpando vendas de teste");
   unwrap(await db.from("email_outbox").delete().like("idempotency_key", `${CHAVE}%`), "Limpando e-mails de teste");
   unwrap(await db.from("email_webhook_events").delete().like("event_id", `${PREFIXO}%`), "Limpando eventos do Resend de teste");
@@ -175,14 +182,14 @@ test("a tela de Vendas lista a venda anonimizada sem e-mail e sem Reprocessar; r
   const linhas = await salesStore.listWebhookEvents(db, { limit: 10000 });
   const antiga = salesQueries.toSalesEventListItem(linhas.find((row) => row.id === ids.vendaIgnoradaAntiga), SEM_TITULOS);
   assert.ok(antiga.anonymizedAt);
-  assert.equal(antiga.buyerEmail, null);
+  assert.equal(antiga.buyerEmailMasked, DADOS_APAGADOS, "a tela diz que os dados sairam, sem e-mail");
   assert.equal(antiga.canReprocess, false, "sem payload nao ha o que reprocessar");
   assert.equal(antiga.outcome, "ignored");
   assert.equal(antiga.productTitle, "Produto fictício na Hotmart");
 
   const recente = salesQueries.toSalesEventListItem(linhas.find((row) => row.id === ids.vendaIgnoradaRecente), SEM_TITULOS);
   assert.equal(recente.anonymizedAt, null);
-  assert.equal(recente.buyerEmail, "ignorada-recente@bunker707.test");
+  assert.equal(recente.buyerEmailMasked, "i***@bunker707.test", "a recente segue com o e-mail mascarado");
   assert.equal(recente.canReprocess, true, "a venda ignorada recente continua reprocessavel");
 
   // A tela inteira carrega com a linha anonimizada no meio das outras.
@@ -190,7 +197,7 @@ test("a tela de Vendas lista a venda anonimizada sem e-mail e sem Reprocessar; r
   assert.ok(Array.isArray(tela.events) && tela.events.length > 0);
 
   for (const item of tela.events.filter((event) => event.anonymizedAt)) {
-    assert.equal(item.buyerEmail, null, `venda anonimizada sem e-mail na tela: ${item.id}`);
+    assert.equal(item.buyerEmailMasked, DADOS_APAGADOS, `venda anonimizada sem e-mail na tela: ${item.id}`);
     assert.equal(item.canReprocess, false, `venda anonimizada sem Reprocessar na tela: ${item.id}`);
   }
 
@@ -200,6 +207,42 @@ test("a tela de Vendas lista a venda anonimizada sem e-mail e sem Reprocessar; r
   assert.equal(resultado.status, 409);
   assert.match(resultado.error, /12 meses/);
   assert.equal((await vendas()).find((row) => row.id === ids.vendaIgnoradaAntiga).processing_status, "ignored", "a linha nao muda ao recusar");
+});
+
+test("reembolso com mais de 12 meses perde o e-mail, mas o id da transação fica e a compra reenviada continua barrada", async () => {
+  const transacao = "HP-RETENCAO-0001";
+  await ligarProdutoNaHotmart(db, { codigo: CODIGO_DA_HOTMART, produtoId: ESCOLA_DE_TESTE.curso.id });
+  await gravarVenda({ diasAtras: 400, evento: "PURCHASE_REFUNDED", outcome: "access_revoked", sufixo: "reembolso-antigo", tipo: "refund", transacao });
+  await podar();
+
+  const reembolso = (await vendas()).find((row) => row.external_event_id === `${PREFIXO}reembolso-antigo`);
+  assert.ok(reembolso.anonymized_at, "o reembolso antigo foi anonimizado");
+  assert.equal(reembolso.buyer_email, null);
+  assert.deepEqual(reembolso.payload, {});
+  const marcas = unwrap(await db.from("webhook_events").select("transaction_id,normalized_type").eq("id", reembolso.id).single(), "Lendo a transacao");
+  assert.deepEqual(marcas, { normalized_type: "refund", transaction_id: transacao }, "transacao e tipo nao sao dado pessoal e ficam");
+
+  // A plataforma reenvia a compra aprovada da mesma transacao: a regra de venda de verdade, com o banco local.
+  const resultado = await processSale.processSaleEvent(db, {
+    event: {
+      buyer: { email: "compra-reenviada@bunker707.test", name: "Comprador Reenviado", phone: null },
+      eventId: `${PREFIXO}compra-reenviada`,
+      externalProductId: CODIGO_DA_HOTMART,
+      externalProductName: "Produto fictício na Hotmart",
+      occurredAt: null,
+      provider: "hotmart",
+      purchasedAt: null,
+      rawType: "PURCHASE_APPROVED",
+      reopenClosedAccess: true,
+      transactionId: transacao,
+      type: "purchase_approved",
+      warrantyEndsAt: null
+    },
+    siteOrigin: null
+  });
+
+  assert.equal(resultado.outcome, "ignored");
+  assert.match(resultado.detail, /já tem reembolso ou chargeback registrado/);
 });
 
 test("e-mail enviado com mais de 90 dias perde destinatário, HTML, texto e erro; o recente e a falha com menos de 180 dias ficam", async () => {
