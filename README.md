@@ -40,7 +40,8 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Auditoria tecnica de 01/10/2026](docs/16-auditoria-tecnica-2026-10-01.md)
 - [Admin do Produtor: especificacao do redesign (10/10/2026)](docs/17-admin-produtor-redesign.md)
 - [Padrao de testes e rotina de qualidade (16/10/2026)](docs/18-padrao-de-testes.md)
-- [Runbook: Bunker707 na Hetzner (17/10/2026)](docs/20-runbook-hetzner.md)
+- [Infra propria (Hetzner) e e-mail (Resend): numeros e decisao de 18/10/2026](docs/19-infra-hetzner-e-email.md)
+- [Runbook: Bunker707 na Hetzner, dois servidores (membros e marketing) operados pelo workflow Infra (Hetzner) (17/10/2026, atualizado em 18/10/2026)](docs/20-runbook-hetzner.md)
 
 ## Padroes de trabalho
 
@@ -50,7 +51,8 @@ Este projeto usa um unico repositorio privado para a area de membros e o CMS.
 - commits: Conventional Commits, como `feat: adicionar pagina de aula` ou `fix: corrigir card bloqueado`;
 - verificacao local: `npm run verify`;
 - pull requests: usar o template em `.github/pull_request_template.md`;
-- segredos: nunca commitar `.env`, chaves de servico, tokens ou payloads sensiveis.
+- segredos: nunca commitar `.env`, chaves de servico, tokens ou payloads sensiveis;
+- infra: os servidores da Hetzner (`bunker707-membros` e `bunker707-marketing`) sao operados pelo workflow `Infra (Hetzner)` (`.github/workflows/infra.yml`, disparo manual de uma etapa por vez, scripts em `infra/cloud/`), com `HCLOUD_TOKEN` e `CLOUDFLARE_API_TOKEN` nos segredos do repositorio; chaves externas chegam ao servidor so por envelope cifrado, nunca nos inputs. Passo a passo em docs/20.
 
 Veja [CONTRIBUTING.md](CONTRIBUTING.md) para o fluxo completo.
 
@@ -59,7 +61,7 @@ Veja [CONTRIBUTING.md](CONTRIBUTING.md) para o fluxo completo.
 - A venda sera terceirizada; a plataforma controla somente acesso, conteudo e experiencia do aluno.
 - O core do backend deve ser orientado por acesso e eventos, nao por ecommerce.
 - A stack do MVP usa Next.js, TypeScript, Supabase Postgres/RLS, Supabase Auth, Mux/Bunny Stream, PostHog, Sentry e Trigger.dev/Inngest.
-- O app pode comecar na Vercel e ser migrado para Hetzner depois se o projeto for construindo com Docker, variaveis de ambiente limpas e pouca dependencia especifica da Vercel.
+- O app pode comecar na Vercel e ser migrado para Hetzner depois se o projeto for construindo com Docker, variaveis de ambiente limpas e pouca dependencia especifica da Vercel. Em 18/10/2026 a migracao foi decidida: dois servidores proprios na Hetzner, banco junto com o app e Mautic separado (docs/19, secao 0).
 
 ## Estado atual
 

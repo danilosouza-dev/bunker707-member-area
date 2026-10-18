@@ -1,6 +1,6 @@
 # 20. Runbook: Bunker707 na Hetzner (servidor proprio)
 
-Data: 17/10/2026. Estado: **nada foi criado na Hetzner**. Este documento e a pasta `infra/` existem para a infraestrutura estar escrita e ensaiada antes de qualquer servidor ser pago. A decisao "ir agora ou montar em paralelo e migrar no lancamento" e do produtor (docs/19). Quando ele disser "vai", o caminho e o da secao 5 em diante, na ordem.
+Data: 17/10/2026; atualizado em 18/10/2026. Estado em 18/10/2026: **decisao tomada de migrar agora** (docs/19, secao 0), em dois servidores (membros e marketing), executada pela IA pelo workflow do GitHub Actions (secao 4A). Nada e criado na Hetzner ate a etapa `provision` rodar com o ok do produtor no chat; a partir dela custa dinheiro. As secoes 5 a 8 dizem o que as etapas fazem e mantem o caminho manual como referencia. As secoes 4A e 8A foram acrescentadas em 18/10/2026 sem renumerar as demais.
 
 Linguagem: o texto evita jargao; os poucos termos tecnicos estao explicados na secao 17.
 
@@ -8,7 +8,7 @@ Linguagem: o texto evita jargao; os poucos termos tecnicos estao explicados na s
 
 ## 1. Resumo em uma pagina
 
-**O que e.** Um servidor Ubuntu 24.04 de 8 GB na Hetzner (Alemanha) rodando, em Docker, o Supabase self-hosted (Postgres 17, Auth, API, Storage, Realtime, Functions, Studio e pooler), o app Next.js da area de membros e o Caddy na frente com HTTPS automatico. A Cloudflare fica na frente do dominio; so ela chega nas portas 80/443 do servidor; o SSH so abre para o IP do produtor. Backup diario criptografado para um Storage Box da Hetzner. Tudo operado por scripts que uma IA ou o produtor rodam.
+**O que e.** Dois servidores Ubuntu 24.04 na Hetzner (Alemanha), em Docker. **Servidor A, `bunker707-membros` (8 GB ou mais)**: Supabase self-hosted (Postgres 17, Auth, API, Storage, Realtime, Functions, Studio e pooler), o app Next.js da area de membros e o Caddy na frente com HTTPS automatico. **Servidor B, `bunker707-marketing` (4 GB ou mais)**: Mautic 7.2.1, MySQL 8.4.11 e o proprio Caddy (secao 8A). A Cloudflare fica na frente dos quatro nomes; so ela chega nas portas 80/443; a porta 22 fica fechada e abre so durante cada etapa do workflow, para o IP do runner. Backup diario criptografado dos dois para um Storage Box da Hetzner. Tudo operado por etapas do workflow `Infra (Hetzner)` que a IA dispara (secao 4A); nenhum passo na maquina do produtor.
 
 **O que ja esta pronto (neste repositorio).**
 
@@ -20,26 +20,31 @@ Linguagem: o texto evita jargao; os poucos termos tecnicos estao explicados na s
 | Segredos | `infra/compose/generate-secrets.sh` + `.env.example` | gera `.env` completo (JWT, chaves `sb_`, senhas, Vault, restic) |
 | Borda | `infra/compose/caddy/Caddyfile` | TLS automatico, 3 hostnames, Studio so por allowlist de IP |
 | Servidor | `infra/scripts/bootstrap.sh` | usuario deploy, SSH so com chave, ufw + Docker, fail2ban, atualizacoes automaticas, Docker CE, swap, CLI do Supabase |
-| Firewall da Hetzner | `infra/scripts/hetzner-firewall.sh` | 22 so do produtor, 80/443 so da Cloudflare |
+| Firewall da Hetzner | `infra/scripts/hetzner-firewall.sh` | 22 so do produtor, 80/443 so da Cloudflare (caminho manual de 17/10; em 18/10/2026 o firewall passou a ser feito por `infra/cloud/lib.sh`, secao 4A.4) |
 | Migracoes | `infra/scripts/migrate.sh` | `supabase db push --db-url` no Postgres do stack |
 | Deploy | `infra/scripts/deploy.sh` | troca a imagem, migra, recria o app, smoke, volta atras |
 | Backup / restore | `infra/scripts/backup.sh`, `restore.sh`, `infra/systemd/` | restic -> Storage Box (SFTP), retencao 30 dias, restauracao em servidor limpo com smoke |
 | Atualizacao do stack | `infra/scripts/update.sh` | compara e reescreve as imagens com o compose oficial do Supabase |
 | Teste de fumaca | `infra/scripts/smoke.sh` | app, Auth, REST, Storage, Realtime, Studio fechado |
-| Servidor como codigo (opcional) | `infra/terraform/` | servidor + firewall + volume; validado, nao aplicado |
+| Servidor como codigo (opcional) | `infra/terraform/` | servidor + firewall + volume; validado, nao aplicado; substituido por `infra/cloud` em 18/10/2026 (fica como referencia) |
+| Provisionamento e operacao pela nuvem (18/10/2026) | `infra/cloud/` (`run.sh`, `plan.sh`, `provision.sh`, `deploy.sh`, `secrets.sh`, `envelope.sh`, `equipe.sh`, `status.sh`, `lib.sh`, `deploy-key.mjs`, `cloud-init.yaml`) | cria servidores, firewalls, Storage Box e DNS pela API; bootstrap, deploy, segredos por envelope, equipe e status por SSH, com a porta 22 aberta so durante a etapa |
+| Workflow (18/10/2026) | `.github/workflows/infra.yml` | `Infra (Hetzner)`: disparo manual por etapa, com `HCLOUD_TOKEN` e `CLOUDFLARE_API_TOKEN` dos segredos do repositorio; uma etapa por vez |
+| Mautic (18/10/2026) | `infra/mautic/` (`docker-compose.yml`, `compose.colocado.yml`, `.env.example`, `generate-secrets.sh/.mjs`, `caddy/Caddyfile`, `cron/mautic`, `scripts/{install,smoke,backup,restore}.sh`) | Mautic 7.2.1 + MySQL 8.4.11 + Caddy no servidor B; instalacao sem instalador web; cron e worker; backup proprio |
 
 **Ensaio local feito em 17/10/2026** (Mac M-series, Docker Desktop): `docker compose up` sobe os 13 containers em cerca de 25 s, as 37 migracoes do repositorio aplicam em 3,5 s no Postgres 17, a escola de teste entra pelo gateway, a aluna de teste faz login pelo navegador e abre a home com "Minhas compras". RAM ociosa: **1,27 GiB** no total (secao 4.3).
 
-**Custo estimado por mes** (precos de 17/10/2026, docs/19): servidor CPX32 EUR 35,49 ou CCX13 EUR 42,99 (CX33 quando voltar ao estoque), Storage Box BX11 (1 TB) cerca de EUR 3,81, IPv4 incluso. Servidor desligado continua cobrando; o jeito barato de "pausar" e snapshot + apagar.
+**Custo estimado por mes** (precos de referencia de 17/10/2026, docs/19, secao 0.6; conferir no `plan`): com estoque da linha CX, CX33 (EUR 8,49) + CX23 (EUR 5,49) + 2 IPv4 (EUR 1,00) + Storage Box bx11 (EUR 3,20) = EUR 18,18. Sem estoque, CPX32 (EUR 35,49) ou CCX13 (EUR 42,99) para o servidor A e o menor tipo com 4 GB que o `plan` listar para o B. Servidor desligado continua cobrando; o jeito barato de "pausar" e snapshot + apagar.
 
 ---
 
-## 2. Arquitetura num servidor so
+## 2. Arquitetura do servidor A (app e Supabase num servidor so)
+
+O servidor B (Mautic) tem o mesmo firewall, o mesmo bootstrap e o mesmo esquema de Caddy na frente; esta descrito na secao 8A. Nada do servidor B fala com o A: o Mautic nao acessa o Postgres do Supabase.
 
 ```txt
 Aluno / produtor
   -> Cloudflare (DNS proxied, WAF, cache de estaticos)
-    -> Hetzner Cloud Firewall (80/443 so da Cloudflare; 22 so do produtor)
+    -> Hetzner Cloud Firewall (80/443 so da Cloudflare; 22 fechada fora das etapas)
       -> ufw do servidor (+ regras DOCKER-USER)
         -> Caddy (TLS Let's Encrypt)
              membros.bunker707.com.br  -> app:3000        (Next.js standalone)
@@ -60,7 +65,7 @@ Portas publicadas no servidor:
 | 8000 | Envoy (API e Studio com basic auth) | 127.0.0.1 |
 | 5432, 6543 | Supavisor (sessao e transacao) | 127.0.0.1 |
 | 5433 | Postgres direto | 127.0.0.1 |
-| 22 | SSH | so do IP do produtor (firewall da Hetzner) |
+| 22 | SSH | fechada; aberta so durante cada etapa do workflow para o IP do runner (e `PRODUCER_IP`, se informado), secao 4A.4 |
 
 Por que o app fala com o Supabase pelo endereco publico e nao por `http://api-gw:8000`: o cookie de sessao do `@supabase/ssr` se chama `sb-<primeiro rotulo do host>-auth-token` e as URLs publicas do Storage saem do servidor; navegador e servidor precisam usar o MESMO endereco. O `extra_hosts: <host>:host-gateway` do compose faz esse nome resolver para o proprio servidor (Caddy em producao, Envoy no ensaio local), sem sair pela Cloudflare.
 
@@ -74,7 +79,8 @@ Chaves: o stack usa as chaves novas (`sb_publishable_` no navegador, `sb_secret_
 Dockerfile                      imagem do app (3 estagios: deps, build, runner)
 .dockerignore                   so o necessario para o build entra na imagem
 src/app/api/health/route.ts     GET /api/health -> {ok, version}; HEALTHCHECK e monitor
-.github/workflows/build-image.yml  build (PR) e publicacao (main) no ghcr.io
+.github/workflows/build-image.yml  build (PR) e publicacao (main) no ghcr.io (conferencia do build; a imagem de producao sai do deploy-membros)
+.github/workflows/infra.yml     Infra (Hetzner): disparo manual de uma etapa de infra/cloud/run.sh com os tokens (18/10/2026)
 infra/
   compose/
     docker-compose.yml          o stack inteiro
@@ -96,7 +102,26 @@ infra/
     update.sh                   compara/reescreve as imagens com o compose oficial
     lib.sh                      funcoes comuns (le o .env chave a chave, espera healthcheck...)
   systemd/                      timer do backup (03:30 UTC)
-  terraform/                    servidor + firewall + volume como codigo (opcional, nao aplicado)
+  terraform/                    servidor + firewall + volume como codigo (opcional, nao aplicado; referencia)
+  cloud/                        (18/10/2026) operacao pela API da Hetzner e da Cloudflare, a partir do runner
+    run.sh                      ponto de entrada: bash infra/cloud/run.sh <etapa> (OPCOES, PAYLOAD, COMANDO)
+    lib.sh                      hcloud (versao pinada, checksum), firewall que abre a 22 so durante a etapa, SSH, Cloudflare
+    plan.sh                     tipos e precos do dia; escolhe o mais barato por papel; nao cria nada
+    provision.sh                chave SSH, firewalls, servidores, Storage Box, bootstrap, transfer.key, DNS e TLS
+    deploy.sh                   deploy de um papel (membros: imagem no GHCR + stack + migracoes + backup; marketing: Mautic)
+    secrets.sh                  aplica um envelope cifrado no .env do papel e recria os servicos
+    envelope.sh                 encrypt (na sessao) / decrypt (no servidor) de CHAVE=VALOR para a transfer.key
+    equipe.sh                   contas da equipe por convite + papel em admin_roles
+    status.sh                   servidores, Storage Box, DNS, respostas publicas; com SSH=1, o interior de cada servidor
+    deploy-key.mjs              chave SSH Ed25519 derivada do HCLOUD_TOKEN (HKDF), formato OpenSSH
+    cloud-init.yaml             primeiro boot: so o usuario deploy com a chave; o resto e o bootstrap.sh
+  mautic/                       (18/10/2026) stack do Mautic (secao 8A)
+    docker-compose.yml          MySQL 8.4.11, Mautic 7.2.1 (web, cron, worker) e Caddy (perfil borda)
+    compose.colocado.yml        plano B: entra na rede do compose principal, sem Caddy proprio
+    .env.example                variaveis comentadas; generate-secrets.sh/.mjs gera o .env
+    caddy/Caddyfile             HTTPS automatico; /installer so para MAUTIC_ADMIN_IPS
+    cron/mautic                 crontab versionado (segmentos, campanhas, broadcasts, importacao)
+    scripts/                    _env.sh, install.sh (sem instalador web), smoke.sh, backup.sh, restore.sh
 ```
 
 ---
@@ -168,9 +193,107 @@ docker compose -f infra/compose/docker-compose.yml down -v && rm -rf infra/compo
 
 ---
 
-## 5. Criar o servidor (quando o produtor autorizar)
+## 4A. Sessao na nuvem: execucao pelo GitHub Actions (18/10/2026)
+
+### 4A.1 Por que o GitHub Actions e o braco
+
+A sessao do Claude na nuvem nao chega na Hetzner: o proxy de saida reencripta o TLS e so deixa HTTPS para hosts de uma lista; `api.hetzner.cloud` e `api.cloudflare.com` estao fora dela e SSH nao passa. O que a sessao alcanca e a API do GitHub. Por isso o repositorio ganhou o workflow `.github/workflows/infra.yml` (nome `Infra (Hetzner)`), disparado a mao (`workflow_dispatch`), que roda `bash infra/cloud/run.sh <etapa>` num runner do GitHub com os segredos do repositorio. A IA dispara a etapa e le o log; o produtor acompanha em Actions. Nada roda em push.
+
+O que o produtor faz uma vez so: cola `HCLOUD_TOKEN` e `CLOUDFLARE_API_TOKEN` em Settings > Secrets and variables > Actions (permissoes exatas em docs/19, secao 8) e liga o 2FA na Hetzner. O workflow precisa existir no branch que a IA escolher (push antes do primeiro disparo).
+
+### 4A.2 Como a IA dispara e le
+
+- Disparo: `POST /repos/<dono>/<repositorio>/actions/workflows/infra.yml/dispatches` com `ref` (o branch) e `inputs` (`etapa`, `opcoes`, `payload`); pelo MCP do GitHub, `actions_run_trigger`.
+- Leitura: lista de execucoes do workflow e log do job (`get_job_logs`). O runner mascara os segredos do repositorio; os scripts nunca imprimem valores, so nomes de chaves. O `provision` imprime a `transfer.pub` (chave publica, pode ser vista) e mascara a senha do Storage Box.
+- Uma etapa por vez: o workflow tem `concurrency: infra-hetzner`; um segundo disparo espera o primeiro terminar (duas etapas juntas disputariam o firewall e o `.env`).
+- Limite de 60 minutos por etapa. Permissoes do job: `contents: read`, `packages: write` (GHCR).
+
+Inputs do workflow:
+
+| Input | Para que |
+|---|---|
+| `etapa` | uma das etapas da tabela 4A.3 |
+| `opcoes` | `CHAVE=VALOR` separados por espaco, exportados para os scripts: `MEMBROS_TYPE=cx33`, `MARKETING_TYPE=cx23`, `LOCATION=nbg1`, `PRODUCER_IP=203.0.113.10`, `SKIP_MARKETING=1`, `EQUIPE=...` |
+| `payload` | nas etapas `secrets-*`, o envelope cifrado (base64); nas `exec-*`, o comando a rodar no servidor como `deploy`, em `/opt/bunker707`. As demais etapas o ignoram |
+
+Valores padrao de `infra/cloud/lib.sh`: zona `bunker707.com.br`; local `fsn1` com `nbg1` e `hel1` de reserva; servidores `bunker707-membros` e `bunker707-marketing`; Storage Box `bunker707-backups` (bx11); chave SSH `bunker707-deploy`; usuario `deploy`; pasta `/opt/bunker707`; nomes `membros`, `api`, `studio` e `marketing`; e-mail do produtor para Let's Encrypt e admin do Mautic (`PRODUCER_EMAIL`).
+
+### 4A.3 As etapas, na ordem
+
+| Etapa | O que faz (segundo o script) | Precisa |
+|---|---|---|
+| `plan` | `plan.sh`: lista pela API os tipos x86 com preco mensal em `fsn1`, `nbg1` e `hel1` e a disponibilidade quando a API informa; escolhe o mais barato com 8 GB ou mais para `membros` e 4 GB ou mais para `marketing` (`MEMBROS_TYPE` e `MARKETING_TYPE` forcam). Lista os tipos de Storage Box. Nao cria nada. | `HCLOUD_TOKEN` |
+| `provision` | `provision.sh`, idempotente, em 7 passos: (1) cadastra a chave publica de deploy no projeto da Hetzner como `bunker707-deploy` (para se ja existir uma diferente); (2) roda o `plan` se nenhum tipo foi forcado; (3) para cada papel, cria o firewall `<servidor>-fw` e o servidor (Ubuntu 24.04, IPv4 + IPv6, labels `app=bunker707` e `papel=...`) com um cloud-init que so cria o usuario `deploy` com a chave; se o tipo estiver indisponivel no local, tenta `nbg1` e `hel1`; (4) cria o Storage Box `bunker707-backups` (bx11) com SSH ligado, acessivel de fora, senha aleatoria (mascarada, nao guardada) e uma chave de backup gerada no runner; (5) por SSH como root, copia e roda `infra/scripts/bootstrap.sh` em cada servidor, cria a chave RSA de transferencia (`/etc/bunker707/transfer.key` e `transfer.pub`), instala a chave de backup em `~deploy/.ssh/id_ed25519_storagebox` e imprime a `transfer.pub` em base64 no log; (6) cria ou atualiza na Cloudflare os registros `membros`, `api`, `studio` (servidor A) e `marketing` (servidor B), A e AAAA, proxied, e poe a zona em SSL Full (strict) e Always Use HTTPS; (7) resumo. A chave privada de backup e apagada do runner ao final. | os dois tokens |
+| `deploy-membros` | `deploy.sh membros`: envia o commit atual (`git archive`, sem `git clone` nem chave do GitHub no servidor) para `/opt/bunker707`, sem tocar em `.env` e volumes; na primeira vez gera `infra/compose/.env` no servidor (`generate-secrets.sh --domain membros... --api-domain api... --studio-domain studio... --studio-ips PRODUCER_IP`); grava usuario e host do Storage Box; constroi a imagem do app no runner (buildx, linux/amd64) com as `NEXT_PUBLIC_*` lidas do `.env` do servidor e publica `ghcr.io/<repositorio>:sha-<commit>` e `:main`; o servidor faz `docker login` no GHCR com o `GITHUB_TOKEN` efemero do job, puxa e sobe o stack (ou, se o banco ja existe, roda `infra/scripts/deploy.sh --image`), aplica as migracoes, espera os healthchecks, roda o smoke e faz `docker logout`; grava `jobs_tick_url` e `jobs_tick_token` no Vault se ainda nao existem; `backup.sh --init`, instala o timer e faz o primeiro backup. | `HCLOUD_TOKEN`, `GITHUB_TOKEN` (automatico), Buildx |
+| `deploy-marketing` | `deploy.sh marketing`: envia o repositorio; na primeira vez gera `infra/mautic/.env` (`generate-secrets.sh --domain marketing... --email PRODUCER_EMAIL --admin-ips PRODUCER_IP`); grava o Storage Box; sobe o stack com o perfil `borda` (Caddy proprio); `install.sh` (instala o Mautic sem o instalador web), `smoke.sh`, `backup.sh --init`, timer e primeiro backup. Com `SKIP_MARKETING=1`, faz tudo no servidor A com `compose.colocado.yml` (secao 8A.7). | `HCLOUD_TOKEN` |
+| `secrets-membros`, `secrets-marketing` | `secrets.sh`: recebe o envelope em `payload`, decifra no servidor com `/etc/bunker707/transfer.key`, grava cada `CHAVE=VALOR` no `.env` do papel (troca a linha ou acrescenta), apaga o arquivo decifrado, `docker compose up -d` (recria so o que mudou) e smoke. O log lista so os nomes das chaves. | `HCLOUD_TOKEN`, `payload` |
+| `equipe` | `equipe.sh`: para cada `email:papel` em `EQUIPE` (padrao: a equipe atual, um owner e um admin), procura o usuario no Auth pela API administrativa do GoTrue (gateway local, chave secreta do `.env`); se nao existe, manda convite (`/auth/v1/invite`, que sai pelo SMTP do Resend); grava o papel em `public.admin_roles`. Idempotente. | `HCLOUD_TOKEN` (depois do `secrets-membros`, senao o convite nao sai) |
+| `status` | `status.sh`: servidores (tipo, local, IP, estado), Storage Box (uso), registros DNS de `membros`, `api`, `studio` e `marketing` e o codigo HTTP de `/api/health`, `/`, `/auth/v1/health` e `/s/login`. Nao abre SSH. | `HCLOUD_TOKEN` (DNS so com o da Cloudflare) |
+| `status-ssh` | o mesmo, mais por SSH em cada servidor: commit implantado (`.deployed-commit`), containers, memoria, disco, data do ultimo backup e a `transfer.pub` em base64. | `HCLOUD_TOKEN` |
+| `backup-membros`, `backup-marketing` | roda `backup.sh --check` no servidor (backup completo + `restic check` de 10% dos dados). | `HCLOUD_TOKEN` |
+| `exec-membros`, `exec-marketing` | roda o comando de `payload` como `deploy` em `/opt/bunker707` (logs, `docker compose ps`, `psql`, correcoes pontuais). Nunca passar segredo no comando: ele fica no historico do workflow. | `HCLOUD_TOKEN`, `payload` |
+
+Ordem na migracao: `plan` -> `provision` -> `deploy-membros` -> `deploy-marketing` -> `secrets-membros` -> `secrets-marketing` -> `equipe` -> `status`. Todas sao idempotentes: rodar de novo completa o que faltou ou atualiza (um `deploy-membros` repetido e um deploy de nova versao). O `generate-secrets.sh` so roda quando o `.env` ainda nao existe: para mudar `STUDIO_ALLOWED_IPS` ou `MAUTIC_ADMIN_IPS` depois, editar o `.env` por `exec-*` e recriar o Caddy (`docker compose ... up -d caddy`).
+
+### 4A.4 Firewall: a porta 22 so abre durante a etapa
+
+Fora das etapas, o firewall de cada servidor (`bunker707-membros-fw`, `bunker707-marketing-fw`) so aceita 80 e 443 (TCP, e 443 UDP para HTTP/3) das faixas da Cloudflare (`infra/scripts/cloudflare-ips.sh`) e ICMP; a porta 22 nao esta em regra alguma, ou so para `PRODUCER_IP` se ele foi informado em `opcoes`. Cada etapa que precisa de SSH descobre o IP de saida do runner (`checkip.amazonaws.com`), reescreve as regras com a 22 aberta para esse IP (e `PRODUCER_IP`), trabalha e, ao terminar, mesmo com erro, reescreve de novo sem ele (`trap EXIT` em `lib.sh`). Se um job for cancelado pelo botao no meio, a porta pode ficar aberta para aquele IP: rodar `status-ssh` abre e fecha de novo e deixa o estado certo.
+
+Dentro do servidor continuam o ufw, o fail2ban e o SSH so por chave do bootstrap (secao 6).
+
+### 4A.5 Chave de deploy derivada do token
+
+`infra/cloud/deploy-key.mjs` deriva uma chave Ed25519 do `HCLOUD_TOKEN` (HKDF-SHA256, sal `bunker707-deploy-key-v1`), escreve no formato OpenSSH (`chmod 600`) e imprime so a impressao digital. A mesma chave nasce igual em todo runner enquanto o token for o mesmo. Nao ha segredo novo para guardar: quem tem o token ja controla o servidor pela API (console, reinstalacao, apagar). O `provision` cadastra a publica no projeto da Hetzner, o cloud-init a coloca em `~deploy/.ssh/authorized_keys` e o bootstrap a repete.
+
+**Se o token for trocado** (vazou, ou foi apagado na Hetzner), a chave muda e os servidores deixam de aceitar o runner. Ordem certa, antes de trocar o segredo no GitHub:
+
+1. Criar o token novo na Hetzner sem apagar o antigo.
+2. Derivar a chave publica nova em qualquer maquina com Node (a chave publica nao e segredo; a privada fica no `--out` e pode ser apagada em seguida):
+   ```bash
+   HCLOUD_TOKEN='<token novo>' node infra/cloud/deploy-key.mjs --out /tmp/nova --print-public
+   ```
+3. Ainda com o token antigo no segredo `HCLOUD_TOKEN`, rodar `exec-membros` e depois `exec-marketing` com este `payload` (a linha inteira impressa no passo 2):
+   ```bash
+   echo 'ssh-ed25519 AAAA...nova... bunker707-deploy' >> ~/.ssh/authorized_keys
+   ```
+4. Na Hetzner (console > Security > SSH keys), apagar a chave `bunker707-deploy` antiga: o `provision` recusa continuar se a chave cadastrada com esse nome for diferente da derivada do token atual.
+5. Trocar `HCLOUD_TOKEN` no GitHub, rodar `provision` (recadastra a chave; servidores, Storage Box e DNS ja existem, ele so confere) e `status-ssh`.
+6. Apagar o token antigo na Hetzner e, por `exec-*`, tirar a linha antiga do `authorized_keys`: `sed -i '/<trecho unico da chave antiga>/d' ~/.ssh/authorized_keys`.
+
+Sem o passo 3, o jeito de voltar e pelo console da Hetzner (acesso de emergencia), o que o produtor faria a mao.
+
+### 4A.6 Segredos externos: o envelope
+
+Chave de envio do Resend, segredo do webhook e, mais tarde, credenciais do SES nunca entram em texto em `opcoes` nem em `payload` aberto. O caminho:
+
+1. Pegar a `transfer.pub` do servidor certo (base64 numa linha): esta no log do `provision` (passo 5) e do `status-ssh`. Cada servidor tem a sua; a chave privada (`/etc/bunker707/transfer.key`, RSA 4096) nunca sai do servidor.
+2. Escrever um arquivo `CHAVE=VALOR` (uma por linha) na sessao da IA, fora do repositorio. Para o servidor A: `SMTP_PASS=re_...`, `EMAIL_PROVIDER=resend`, `RESEND_API_KEY=re_...`, `RESEND_WEBHOOK_SECRET=whsec_...`. Para o B: `MAUTIC_MAILER_DSN=smtp://resend:re_...@smtp.resend.com:587`.
+3. Cifrar: `bash infra/cloud/envelope.sh encrypt '<transfer.pub em base64>' segredos.txt` imprime o payload (base64). Por dentro: uma chave AES de 32 bytes aleatoria, cifrada com RSA-OAEP (SHA-256) para a `transfer.pub`, e o arquivo em AES-256-CBC (PBKDF2, 200 mil iteracoes) com essa chave; os dois num tar em base64. So a `transfer.key` abre; o payload pode aparecer no log sem risco.
+4. Disparar `secrets-membros` (ou `secrets-marketing`) com o payload. Apagar `segredos.txt`.
+
+Como a chave do Resend chega a sessao da IA sem passar pelo chat, a combinar com o produtor: (a) a IA cria uma chave nova de envio no Resend pelo conector (permissao so de envio, restrita a `mail.bunker707.com.br`); o valor existe so na sessao e vai direto para o envelope; ou (b) o produtor coloca a chave como segredo do ambiente da sessao na nuvem e a IA le a variavel. Nunca no chat, nunca no repositorio, nunca em `opcoes`.
+
+---
+
+## 5. Criar os servidores (etapa `provision`; atualizado em 18/10/2026)
 
 Nada abaixo acontece sem o ok no chat. Custa dinheiro a partir do minuto em que o servidor existe.
+
+Em 18/10/2026 este passo deixou de ser manual: a etapa `provision` (secao 4A.3) faz tudo, idempotente. O que ela cria, com os padroes de `infra/cloud/lib.sh`:
+
+| Recurso | Valor |
+|---|---|
+| Servidor A | `bunker707-membros`, tipo escolhido pelo `plan` (8 GB ou mais; `MEMBROS_TYPE` forca), Ubuntu 24.04, `fsn1` (cai para `nbg1`, `hel1`), IPv4 + IPv6, labels `app=bunker707` e `papel=membros` |
+| Servidor B | `bunker707-marketing`, 4 GB ou mais (`MARKETING_TYPE`), idem, `papel=marketing`; nao existe com `SKIP_MARKETING=1` |
+| Chave SSH no projeto | `bunker707-deploy`, derivada do token (secao 4A.5) |
+| Firewalls | `bunker707-membros-fw` e `bunker707-marketing-fw` (secao 4A.4) |
+| Storage Box | `bunker707-backups`, bx11 (1 TB), SSH ligado, acessivel de fora, chave de backup instalada nos dois servidores |
+| Bootstrap | `infra/scripts/bootstrap.sh` por SSH em cada servidor (secao 6) e a chave de transferencia `/etc/bunker707/transfer.key` |
+| DNS e TLS | secao 7 |
+
+Sem backups automaticos da Hetzner (20% a mais; o backup e o nosso). Antes do `provision`: o produtor ligou o 2FA na Hetzner e colou `HCLOUD_TOKEN` e `CLOUDFLARE_API_TOKEN` nos segredos do repositorio (docs/19, secao 8). A IA roda `plan` primeiro e mostra no chat os tipos e precos do dia; o `provision` so e disparado com o ok.
+
+Caminho manual de 17/10/2026 (referencia, se o workflow nao estiver disponivel):
 
 1. **Conta e projeto** na Hetzner Cloud (conta criada em 17/10; ative o 2FA antes de criar qualquer coisa).
 2. **Chave SSH**: no Mac do produtor, `ssh-keygen -t ed25519 -C "produtor@bunker707"`; cadastre a `.pub` no projeto (Security > SSH keys).
@@ -189,6 +312,8 @@ Nada abaixo acontece sem o ok no chat. Custa dinheiro a partir do minuto em que 
 
 ## 6. Preparar o servidor (bootstrap)
 
+Em 18/10/2026: o `provision` copia e roda este script por SSH como root em cada um dos dois servidores (`SSH_PUBLIC_KEY` = chave de deploy derivada, `DEPLOY_USER=deploy`, `REPO_DIR=/opt/bunker707`), logo depois do primeiro boot. O texto abaixo vale para rodar a mao.
+
 Primeiro acesso como root (a Hetzner manda a senha por e-mail se nao houver chave; com chave, entra direto):
 
 ```bash
@@ -204,13 +329,16 @@ O script e idempotente (pode rodar de novo). Ele cria o usuario `deploy` (sudo s
 
 ## 7. DNS e Cloudflare
 
-Zona `bunker707.com.br` na Cloudflare (a zona ainda nao esta la em 17/10: o registro esta no Registro.br; mover os nameservers e passo do produtor).
+A zona `bunker707.com.br` ja esta na Cloudflare (servidores de nome `tadeo` e `vera.ns.cloudflare.com`; o Registro.br so guarda o nome; docs/19, secao 2.1). Em 18/10/2026 os registros passaram a ser criados pela etapa `provision` (passo 6) com `CLOUDFLARE_API_TOKEN`:
 
 | Registro | Tipo | Valor | Proxy |
 |---|---|---|---|
-| `membros` | A / AAAA | IPv4 / IPv6 do servidor | laranja (proxied) |
+| `membros` | A / AAAA | IPv4 / IPv6 do servidor A | laranja (proxied) |
 | `api` | A / AAAA | idem | laranja |
 | `studio` | A / AAAA | idem | laranja |
+| `marketing` | A / AAAA | IPv4 / IPv6 do servidor B (ou do A, com `SKIP_MARKETING=1`) | laranja |
+
+O `provision` tambem poe a zona em SSL/TLS Full (strict) e deixa "Always Use HTTPS" DESLIGADO (`PATCH /zones/<id>/settings/ssl` e `.../always_use_https`): o Let's Encrypt valida o dominio por HTTP (porta 80) passando pela Cloudflare, e um redirecionamento na borda para HTTPS faria a validacao bater num origin ainda sem certificado (erro 526). O Caddy redireciona HTTP para HTTPS no origin e o app manda HSTS; para o visitante o resultado e o mesmo. Registro que ja existe com o mesmo valor fica como esta; com valor diferente e atualizado (TTL automatico). Os registros do Resend em `mail.` nao sao tocados. `status` lista os quatro registros.
 
 Configuracao da zona: SSL/TLS em **Full (strict)** (o Caddy tem certificado valido do Let's Encrypt); "Always Use HTTPS" ligado; HSTS pode ficar desligado na Cloudflare (o app ja manda). O desafio HTTP-01 do Let's Encrypt passa pela Cloudflare em modo proxied; se a emissao falhar na primeira vez, coloque os tres registros em "DNS only" por alguns minutos, deixe o Caddy emitir (`docker compose logs caddy`) e volte para proxied. Alternativa sem Let's Encrypt: certificado Origin CA da Cloudflare montado no Caddy (`tls /certs/origin.pem /certs/origin.key` no site), valido 15 anos.
 
@@ -221,6 +349,8 @@ Realtime usa websocket (`wss://api.../realtime/v1/websocket`): a Cloudflare repa
 ---
 
 ## 8. Primeiro deploy
+
+Em 18/10/2026: a etapa `deploy-membros` (secao 4A.3) faz os passos 1 a 5 abaixo, com duas diferencas: sem `git clone` (o runner envia o commit por `git archive`) e sem token classico do GitHub (o servidor usa o `GITHUB_TOKEN` do job e faz logout ao final). Ela tambem grava o tick de jobs no Vault. O que fica para outras etapas: a chave do Resend (`secrets-membros`) e as contas da equipe (`equipe`, por convite). O texto abaixo vale para fazer a mao.
 
 Como `deploy`, no servidor:
 
@@ -260,19 +390,100 @@ Passos que o compose nao faz:
   select vault.create_secret('<JOBS_TICK_TOKEN do .env>', 'jobs_tick_token', 'Token do tick');
   ```
   `http://app:3000` funciona porque o Postgres e o app estao na mesma rede do compose. Conferir: `select * from public.job_runs order by started_at desc limit 5;`.
-- **Primeira conta da equipe**: criar o usuario no Studio (Authentication > Users > Add user, com senha) e inserir o papel em `public.admin_roles` (`insert into public.admin_roles (user_id, role) values ('<uuid>', 'owner')`), como no projeto da nuvem; depois os demais entram pelo admin > Equipe.
-- **E-mail**: o Auth (convites, recuperacao de senha) sai pelo SMTP do Resend (`smtp.resend.com:587`, usuario `resend`, senha = chave de envio); o remetente `SMTP_ADMIN_EMAIL` precisa ser do dominio verificado (`mail.bunker707.com.br`). O e-mail transacional do app (PR #80) usa a API do Resend com `EMAIL_PROVIDER=resend`.
+- **Primeira conta da equipe** (em 18/10/2026: etapa `equipe`, por convite): criar o usuario no Studio (Authentication > Users > Add user, com senha) e inserir o papel em `public.admin_roles` (`insert into public.admin_roles (user_id, role) values ('<uuid>', 'owner')`), como no projeto da nuvem; depois os demais entram pelo admin > Equipe.
+- **E-mail** (em 18/10/2026: a chave chega pela etapa `secrets-membros`): o Auth (convites, recuperacao de senha) sai pelo SMTP do Resend (`smtp.resend.com:587`, usuario `resend`, senha = chave de envio); o remetente `SMTP_ADMIN_EMAIL` precisa ser do dominio verificado (`mail.bunker707.com.br`). O e-mail transacional do app (PR #80) usa a API do Resend com `EMAIL_PROVIDER=resend`.
+- **Modelos de e-mail do Auth em portugues** (18/10/2026): os seis HTML de docs/19, secao 2.4, estao em `infra/compose/volumes/auth-templates/`; o Caddy os serve em `https://api.bunker707.com.br/auth-templates/*.html` e o compose aponta o Auth para eles (`GOTRUE_MAILER_TEMPLATES_*`), com os assuntos em `GOTRUE_MAILER_SUBJECTS_*` (padrao do compose; `AUTH_SUBJECT_*` no `.env` para mudar). O Auth baixa o modelo pela URL na hora de enviar (o nome publico resolve para o proprio servidor, por `extra_hosts`); se nao conseguir, usa o texto padrao dele, em ingles. O remetente do Auth (`SMTP_ADMIN_EMAIL`) e o mesmo do app, `equipe@mail.bunker707.com.br`.
+- **E-mail transacional do app**: `EMAIL_FROM`, `EMAIL_REPLY_TO` e `EMAIL_DAILY_LIMIT` passam pelo compose (vazios = `Bunker707 <equipe@mail.bunker707.com.br>`, `contato@bunker707.com.br` e 90 por dia).
 - **Rotas de callback**: `ADDITIONAL_REDIRECT_URLS` ja aponta para `https://membros.../auth/callback`; se houver login com Google, cadastrar `https://api.bunker707.com.br/auth/v1/callback` no console do Google e as variaveis `GOTRUE_EXTERNAL_GOOGLE_*` no compose (comentadas no compose oficial).
 
 Como entrar no Postgres no servidor: `docker compose -f infra/compose/docker-compose.yml exec db psql -U postgres` (ou pelo pooler em `127.0.0.1:5432` com usuario `postgres.bunker707`). De fora, so por tunel: `ssh -L 5433:127.0.0.1:5433 deploy@<ip>` e `psql postgresql://postgres:<senha>@127.0.0.1:5433/postgres`.
 
 ---
 
+## 8A. Mautic (servidor de marketing, 18/10/2026)
+
+### 8A.1 Stack (`infra/mautic/docker-compose.yml`, projeto `bunker707-mautic`)
+
+| Container | Imagem | Papel |
+|---|---|---|
+| `bunker707-mautic-db` | `mysql:8.4.11` | banco proprio do Mautic (utf8mb4, buffer pool de 256 MB, `performance_schema` desligado, healthcheck); sem porta publicada |
+| `bunker707-mautic` | `mautic/mautic:7.2.1-apache` | interface web e API (`DOCKER_MAUTIC_ROLE=mautic_web`); so o Caddy chega nele, em `mautic:80` |
+| `bunker707-mautic-cron` | a mesma | tarefas agendadas (`mautic_cron`), com o crontab versionado em `infra/mautic/cron/mautic` |
+| `bunker707-mautic-worker` | a mesma | consumidores das filas de e-mail, hits e falhas (`mautic_worker`; `MAUTIC_WORKERS` processos por fila, padrao 1) |
+| `bunker707-mautic-caddy` | `caddy:2.11.7-alpine`, perfil `borda` | HTTPS automatico em `marketing.bunker707.com.br`; unica porta publica (80 e 443, TCP e UDP); IP real do visitante via `CF-Connecting-IP` |
+
+Volumes em `infra/mautic/volumes/` (ignorados pelo git): `config/` (o `local.php`), `logs/`, `media/files`, `media/images`; o MySQL num volume nomeado (`mautic-db-data`; nunca `docker compose down -v`). As filas de envio e de hits ficam no proprio MySQL (`MAUTIC_MESSENGER_DSN_EMAIL` e `_HIT` = `doctrine://default`).
+
+Configuracao sem mexer em PHP: `MAUTIC_CONFIG_PARAMETERS` e um JSON que o Mautic mescla por cima do `config/local.php` (ParameterLoader oficial). Hoje leva `site_url`, `mailer_dsn`, `mailer_from_email`, `mailer_from_name`, `trusted_proxies` (a rede do compose, para o Mautic ler o IP real em `X-Forwarded-For`) e `default_timezone` (`America/Sao_Paulo`; dados em UTC). Memoria do PHP por processo: `MAUTIC_PHP_MEMORY_LIMIT` (512M).
+
+### 8A.2 Instalacao sem o instalador web
+
+O instalador web do Mautic (`/installer`) aceita o primeiro visitante como administrador. Por isso o Caddy responde 403 nele fora de `MAUTIC_ADMIN_IPS` (padrao `127.0.0.1/32`, isto e, ninguem de fora) e `infra/mautic/scripts/install.sh` instala por linha de comando: espera os healthchecks, roda `php bin/console mautic:install --force --no-interaction ...` como `www-data` (banco, `site_url` e conta do administrador vindos do `.env`), limpa o cache e confere que `config/local.php` ficou com banco e `site_url`. Idempotente: se ja esta instalado, nao faz nada. O `deploy-marketing` chama este script; cron e worker esperam a instalacao e destravam sozinhos.
+
+Conta do administrador: usuario `bunker707` (`MAUTIC_ADMIN_USERNAME`), e-mail `PRODUCER_EMAIL`, senha gerada em `MAUTIC_ADMIN_PASSWORD` no `infra/mautic/.env` do servidor (`chmod 600`, dono `deploy`). Nao ler a senha por `exec-marketing`: o valor apareceria no log do workflow. Depois do `secrets-marketing`, o produtor usa "Esqueci a senha" em `https://marketing.bunker707.com.br/s/login` com o e-mail do administrador (o link chega pelo Resend) e define a propria senha; ela passa a valer no lugar da gerada.
+
+### 8A.3 E-mail: Resend agora, SES depois
+
+`MAUTIC_MAILER_DSN` (DSN do Symfony Mailer) no `infra/mautic/.env`, entregue pela etapa `secrets-marketing` (envelope, secao 4A.6):
+
+| Quando | DSN |
+|---|---|
+| Hoje: Resend, porta 587 (a Hetzner bloqueia 25 e 465 de saida) | `smtp://resend:<chave de envio do Resend>@smtp.resend.com:587` |
+| Depois: Amazon SES, credenciais SMTP do SES em `sa-east-1` (senha codificada para URL) | `smtp://<SMTP_USER>:<SMTP_PASS>@email-smtp.sa-east-1.amazonaws.com:587` |
+| Ensaio local, ou ate a chave chegar | `null://null` (nao envia nada) |
+
+Remetente: `MAUTIC_MAILER_FROM_EMAIL=equipe@mail.bunker707.com.br` (dominio verificado no Resend), nome `Bunker707`. Trocar de provedor e trocar a linha e recriar `mautic`, `mautic-cron` e `mautic-worker` (`docker compose ... up -d` faz isso; a etapa `secrets-marketing` tambem). Limite do Resend Free: 100 e-mails por dia somando Auth, app e Mautic; campanha de verdade so com Resend Pro ou SES (docs/19, secao 0.8).
+
+### 8A.4 Cron e worker
+
+Crontab em `infra/mautic/cron/mautic` (montado em `/opt/mautic/cron`; a imagem usa este arquivo no lugar do modelo dela), usuario `www-data` no container `mautic-cron`:
+
+| Comando | Quando |
+|---|---|
+| `mautic:segments:update` | a cada 15 min (minutos 0, 15, 30, 45) |
+| `mautic:campaigns:update` | a cada 15 min, 5 min depois dos segmentos |
+| `mautic:campaigns:trigger` | a cada 15 min, 10 min depois dos segmentos |
+| `mautic:broadcasts:send` | a cada 5 min (o envio em si sai pelo worker) |
+| `mautic:import` | a cada 3 min |
+
+Desligados (comentados no arquivo): webhooks de saida, caixa IMAP de bounces (Resend e SES avisam por webhook), GeoLite2 e limpeza de dados antigos. Mudou o arquivo: `docker compose -f infra/mautic/docker-compose.yml restart mautic-cron`.
+
+O worker consome tres filas (e-mail, hits, falhas) com 1 processo cada; `MAUTIC_WORKERS` no `.env` sobe o numero quando o volume de envio crescer.
+
+### 8A.5 Backup e restauracao
+
+`infra/mautic/scripts/backup.sh` (timer `bunker707-mautic-backup`, 03:50 UTC, usuario `deploy`): `mysqldump --single-transaction` do banco inteiro (gz), o `.env`, `volumes/config` e `volumes/media`, pelo restic para `sftp:storagebox:/bunker707/restic-mautic` (mesmo Storage Box e mesma chave SSH do servidor A, repositorio separado), retencao de 30 dias, dois ultimos exports em `/var/backups/bunker707-mautic/stage`, `--check` le 10% dos dados, heartbeat opcional (`BACKUP_HEARTBEAT_URL`). A etapa `backup-marketing` roda `--check`.
+
+`infra/mautic/scripts/restore.sh --snapshot latest [--yes]`: baixa o snapshot, poe o `.env` no lugar, copia `config/` e `media/`, sobe so o MySQL, importa o dump (recusa sobrescrever um volume existente sem `--yes`), confere o numero de tabelas, sobe o resto e roda o smoke. Precisa de `RESTIC_REPOSITORY` e `RESTIC_PASSWORD` (do gerenciador de senhas) quando o `.env` nao existe.
+
+`infra/mautic/scripts/smoke.sh`: `/s/login` 200, `/mtc.js` 200, `/installer` fechado (403, 302 ou 404), `mautic-db` e `mautic` healthy, cron e worker rodando. Os scripts usam `infra/scripts/lib.sh` apontado para o compose do Mautic (`infra/mautic/scripts/_env.sh`).
+
+### 8A.6 Memoria
+
+Num servidor de 4 GB: MySQL com buffer pool de 256 MB e `performance_schema` desligado, PHP com limite de 512 MB por processo, 1 processo por fila no worker, Apache e Caddy. Se faltar memoria, manter `MAUTIC_WORKERS=1` e `MAUTIC_PHP_MEMORY_LIMIT=512M` e fazer rescale do servidor; nao desligar o worker (sem ele nenhum e-mail sai).
+
+### 8A.7 Plano B: Mautic no servidor A (colocacao)
+
+`SKIP_MARKETING=1` em `opcoes` de todas as etapas: `plan` e `provision` nao criam o servidor B e apontam `marketing` para o A; `deploy-marketing` sobe o stack com `-f infra/mautic/compose.colocado.yml` (entra na rede `bunker707_default` do compose principal, sem Caddy proprio) e grava `MAUTIC_SITE_ADDRESS` no `infra/compose/.env`, para o Caddy principal atender `marketing.bunker707.com.br` em `mautic:80` (`/installer` restrito a `STUDIO_ALLOWED_IPS`). Nos scripts, `BUNKER707_COMPOSE_OVERRIDE=infra/mautic/compose.colocado.yml`. Num servidor de 8 GB fica apertado (docs/19, secao 5, pede 16 GB com Mautic): so se faltar estoque de um segundo tipo, e com `MEMBROS_TYPE` maior.
+
+### 8A.8 Ensaio local
+
+```bash
+sh infra/mautic/generate-secrets.sh --local
+docker compose -f infra/mautic/docker-compose.yml --profile borda up -d
+sh infra/mautic/scripts/install.sh
+sh infra/mautic/scripts/smoke.sh      # http://mautic.127.0.0.1.sslip.io:3080/s/login, usuario bunker707
+```
+
+Em 18/10/2026 o ensaio com Docker nao foi feito (a sessao nao tem daemon Docker); `docker compose config` dos tres composes e a validacao do Caddyfile passaram. O primeiro `docker compose up` de verdade sera o do `deploy-marketing`.
+
+---
+
 ## 9. Deploy de nova versao do app
 
-A imagem nasce no GitHub: todo push na `main` roda `build-image.yml` e publica `ghcr.io/danilosouza-dev/bunker707-member-area:sha-<7 chars>` (tambem `:main` e `:latest`). As variaveis `NEXT_PUBLIC_*` entram no JavaScript do navegador na hora do build, por isso vem de **variaveis** do repositorio no GitHub (Settings > Secrets and variables > Actions > Variables): `NEXT_PUBLIC_SUPABASE_URL=https://api.bunker707.com.br`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...` (valor publico, do `.env` do servidor) e, se usados, `NEXT_PUBLIC_POSTHOG_KEY/HOST` e `NEXT_PUBLIC_SENTRY_DSN`. Sem elas a imagem sobe mas o app pede configuracao. Em PR que mexe no build (Dockerfile, package.json, next.config) o workflow so constroi, sem publicar.
+Em 18/10/2026 o caminho de producao passou a ser a etapa `deploy-membros` (secao 4A.3): ela constroi a imagem no runner com as `NEXT_PUBLIC_*` lidas do `.env` do servidor (`SUPABASE_PUBLIC_URL`, `SUPABASE_PUBLISHABLE_KEY` e, se preenchidos, PostHog e Sentry), publica `ghcr.io/<repositorio>:sha-<commit>` e `:main` e, no servidor, roda o `infra/scripts/deploy.sh --image` descrito abaixo. Nao ha variaveis `NEXT_PUBLIC_*` no GitHub. O `build-image.yml` continua rodando a cada push na `main` e em PR que mexe no build (Dockerfile, package.json, next.config) para conferir que o build passa; a imagem que ele publica nao leva as `NEXT_PUBLIC_*` do servidor e nao e a de producao.
 
-No servidor:
+Caminho manual de 17/10/2026 (o mesmo script que a etapa roda), no servidor:
 
 ```bash
 cd /opt/bunker707
@@ -289,6 +500,8 @@ Sem GitHub no caminho (emergencia): `deploy.sh --build` constroi no proprio serv
 
 ### 10.1 O que entra, quando, onde
 
+Em 18/10/2026: o Storage Box (`bunker707-backups`, bx11) e criado pela etapa `provision`, que gera a chave de backup, a cadastra no box (`--ssh-key` do `hcloud storage-box create`, com SSH ligado e acesso externo) e a instala nos dois servidores em `~deploy/.ssh/id_ed25519_storagebox`; `deploy-membros` e `deploy-marketing` gravam usuario e host no `.env` e rodam `--init` e o timer. Sao dois repositorios restic no mesmo box: `/bunker707/restic` (servidor A, 03:30 UTC) e `/bunker707/restic-mautic` (servidor B, 03:50 UTC, secao 8A.5), cada um com a propria `RESTIC_PASSWORD` (gerada no `.env` de cada servidor; guardar as duas no gerenciador de senhas). As etapas `backup-membros` e `backup-marketing` fazem um backup com `--check` a qualquer hora.
+
 `backup.sh` roda todo dia as 03:30 UTC (timer do systemd, usuario `deploy`) e guarda, criptografado pelo restic num Storage Box via SFTP (porta 23):
 
 - `roles.sql` (papeis e senhas), `schema.sql`, `data.sql.gz` e `postgres.dump` (formato custom, e o que a restauracao usa), todos gerados pelo `pg_dump` de dentro do container do Postgres (mesma versao, sem imagem extra);
@@ -303,7 +516,7 @@ Por que nao `supabase db dump`: o dump da CLI exclui de proposito os esquemas qu
 ### 10.2 Restaurar num servidor limpo
 
 1. Secoes 5 e 6 (servidor, firewall, bootstrap), clone do repositorio.
-2. `export RESTIC_REPOSITORY=sftp:storagebox:/bunker707/restic RESTIC_PASSWORD=<do gerenciador de senhas>` e `STORAGE_BOX_USER=... STORAGE_BOX_HOST=...` no ambiente; `sh infra/scripts/backup.sh --init` so para gravar o alias SSH (a chave nova precisa ser instalada no Storage Box).
+2. `export RESTIC_REPOSITORY=sftp:storagebox:/bunker707/restic RESTIC_PASSWORD=<do gerenciador de senhas>` e `STORAGE_BOX_USER=... STORAGE_BOX_HOST=...` no ambiente; `sh infra/scripts/backup.sh --init` so para gravar o alias SSH. Atencao: o `provision` so gera e instala a chave de backup quando cria o Storage Box; num servidor novo criado depois, o `--init` gera uma chave nova e imprime o comando `install-ssh-key` para cadastra-la no box, o que exige a senha do box (redefinir no painel da Hetzner) ou o cadastro da chave pelo painel.
 3. `sh infra/scripts/restore.sh --snapshot latest` (ou um id de `restic snapshots`). O script: baixa o snapshot, poe o `.env` no lugar, sobe so o Postgres, devolve a chave do Vault e reinicia, aplica papeis e `pg_restore --clean` do banco inteiro, copia os arquivos do Storage, sobe o resto e roda o smoke. Avisos do `pg_restore` sobre objetos que a imagem ja tinha sao normais; o script imprime o numero de contas no Auth e a ultima migracao para conferencia.
 4. DNS: apontar `membros`, `api` e `studio` para o IP novo. Sessoes dos alunos continuam valendo (mesmo `JWT_SECRET`/`JWT_KEYS` no `.env` restaurado).
 
@@ -377,7 +590,7 @@ Continuam valendo Sentry (erros do app, `SENTRY_DSN`) e PostHog (produto). Logs 
 
 ## 13. Incidentes: o que fazer
 
-Primeiro minuto, sempre: `ssh deploy@<ip>`, `cd /opt/bunker707`, `docker compose -f infra/compose/docker-compose.yml ps` e `sh infra/scripts/smoke.sh`. Depois, pelo sintoma:
+Primeiro minuto, sempre: `ssh deploy@<ip>`, `cd /opt/bunker707`, `docker compose -f infra/compose/docker-compose.yml ps` e `sh infra/scripts/smoke.sh`. Pela sessao na nuvem (18/10/2026): etapa `status-ssh` (containers, memoria, disco, ultimo backup) e `exec-membros` com `docker compose -f infra/compose/docker-compose.yml ps && sh infra/scripts/smoke.sh`; os comandos da tabela abaixo rodam do mesmo jeito, por `exec-membros` ou `exec-marketing`. Depois, pelo sintoma:
 
 | Sintoma | Verificar | Acao |
 |---|---|---|
@@ -399,7 +612,16 @@ Registro: todo incidente ganha uma linha em docs/06 (secao Operacao) com data, s
 
 ## 14. Migrar da nuvem (Supabase cloud + Vercel) para a Hetzner
 
-Quando chegar a hora (decisao do produtor), com janela de manutencao de ~1 h:
+**Decisao de 18/10/2026: deploy limpo.** Os dados da nuvem sao de teste (4 contas, 2 na equipe, 1 curso, 8 arquivos, 0 vendas). Nada e exportado nem restaurado. O roteiro, pela IA:
+
+1. `plan`, `provision`, `deploy-membros`, `deploy-marketing`, `secrets-membros`, `secrets-marketing` (secao 4A.3). O `deploy-membros` aplica as migracoes do repositorio num banco vazio e grava o tick de jobs no Vault; o compose ja serve os modelos de e-mail do Auth em portugues e os assuntos (docs/19, secao 2.4), e o `generate-secrets.sh` ja grava `SITE_URL`, redirect, SMTP (host, porta 587, usuario) e limites; a chave `SMTP_PASS` vem no envelope.
+2. `equipe`: as contas da equipe sao recriadas por convite por e-mail (sai pelo SMTP do Resend); cada um cria a senha pelo link e entra em `/admin`. Papeis em `public.admin_roles`.
+3. Conteudo de teste (1 curso, 8 arquivos): opcional e manual, recadastrado pelo admin se fizer falta; nao ha script de copia.
+4. `status` com os quatro enderecos respondendo; teste de "Esqueci minha senha" e de convite; login de um membro da equipe; Studio so de `PRODUCER_IP`.
+5. Webhooks: no Resend, trocar o endpoint para `https://membros.bunker707.com.br/api/webhooks/resend` (o segredo `RESEND_WEBHOOK_SECRET` vai no envelope do `secrets-membros`). Hotmart e Ticto: se houver webhook cadastrado apontando para `vercel.app`, trocar para `https://membros.bunker707.com.br/api/webhooks/hotmart` e `.../ticto` e reconectar em Configuracoes > Vendas do servidor novo (o token nao migra).
+6. 24 h de observacao: monitor da secao 12, backup diario dos dois servidores rodando, `status-ssh` limpo. Depois: apagar o projeto da Vercel (ou tirar o dominio e pausar) e pausar ou apagar o projeto do Supabase cloud (`hrtnqcznhdmodjikvddm`); revogar no Resend as chaves "Supabase Integration" e "Vercel Integration" e as autorizacoes OAuth (docs/19, secao 2.2).
+
+Roteiro com dados reais (referencia de 17/10/2026, caso um dia haja alunos na nuvem antes de migrar), com janela de manutencao de ~1 h:
 
 1. Servidor pronto (secoes 5 a 8) e **testado com dados falsos**; `.env` gerado; imagem do app publicada com `NEXT_PUBLIC_SUPABASE_URL=https://api.bunker707.com.br`.
 2. Avisar alunos; colocar a Vercel em manutencao (ou deixar no ar so leitura).
@@ -433,13 +655,13 @@ Quando chegar a hora (decisao do produtor), com janela de manutencao de ~1 h:
 
 | Na nuvem hoje | Na Hetzner | O que muda no dia a dia |
 |---|---|---|
-| MCP do Supabase (a IA consulta e migra pelo chat) | nao existe | banco se acessa por `psql` via tunel SSH, pelo Studio ou por scripts; migracoes so por `migrate.sh` |
+| MCP do Supabase (a IA consulta e migra pelo chat) | nao existe | banco se acessa por `psql` via tunel SSH ou pela etapa `exec-membros`, pelo Studio ou por scripts; migracoes so por `migrate.sh` (o `deploy-membros` as aplica) |
 | Branches/previews de banco e da Vercel | nao existem | todo teste e no ensaio local (secao 4) ou num servidor temporario |
 | Management API, Advisors, logs no painel | nao existem | `docker compose logs`; checagem de RLS continua nos testes do repositorio |
 | Backup e PITR do plano | backup proprio diario (10) | restauracao = secao 10.2, sem "voltar para as 14h03" |
 | Studio na web com login Supabase | Studio atras de allowlist de IP + usuario/senha | abrir so da maquina do produtor (ou Cloudflare Access) |
 | Logflare (aba de logs) | desligado | logs nos containers |
-| Deploy automatico da Vercel por push | imagem automatica, deploy manual (`deploy.sh`) | um comando no servidor por versao |
+| Deploy automatico da Vercel por push | etapa `deploy-membros` do workflow (imagem + deploy + migracoes + smoke) | um disparo do workflow por versao, pela IA |
 | `VERCEL_ENV` no Sentry | `SENTRY_ENVIRONMENT=production` no `.env` | |
 | Vercel Speed Insights | nao existe | PostHog e Sentry seguem |
 | Regiao `gru1` (Sao Paulo) perto do banco | tudo em Falkenstein; aluno no Brasil tem ~200 ms ate la | Cloudflare guarda estaticos perto do aluno; paginas dinamicas vao a Alemanha |
@@ -453,7 +675,7 @@ Quando chegar a hora (decisao do produtor), com janela de manutencao de ~1 h:
 ## 16. Seguranca: checklist do servidor
 
 - [ ] 2FA na conta da Hetzner e no GitHub.
-- [ ] SSH so com chave; `PermitRootLogin prohibit-password`; porta 22 so do IP do produtor (firewall da Hetzner); fail2ban ativo.
+- [ ] SSH so com chave; `PermitRootLogin prohibit-password`; porta 22 fechada fora das etapas do workflow (so `PRODUCER_IP`, se informado; conferir no console da Hetzner > Firewalls depois de um job cancelado); fail2ban ativo.
 - [ ] ufw com regras DOCKER-USER (`sudo ufw status`; `sudo iptables -L DOCKER-USER -n` mostra as regras).
 - [ ] Nenhuma porta do Supabase em 0.0.0.0: `ss -ltnp` so mostra 22, 80 e 443 fora de 127.0.0.1.
 - [ ] `.env` com `chmod 600`, dono `deploy`; nunca no git; `RESTIC_PASSWORD` tambem no gerenciador de senhas.
@@ -462,6 +684,11 @@ Quando chegar a hora (decisao do produtor), com janela de manutencao de ~1 h:
 - [ ] Backup diario rodando (`systemctl list-timers`), heartbeat no monitor, ultimo `--check` com menos de 7 dias, ultimo teste de restauracao com menos de 3 meses.
 - [ ] Atualizacoes automaticas ligadas; `update.sh --check` uma vez por mes.
 - [ ] Segredos girados ao sair alguem da equipe com acesso ao servidor.
+- [ ] (18/10/2026) `HCLOUD_TOKEN` e `CLOUDFLARE_API_TOKEN` so nos segredos do repositorio; token da Cloudflare restrito a zona `bunker707.com.br` e as tres permissoes (docs/19, secao 8); troca do token da Hetzner pelo procedimento da secao 4A.5.
+- [ ] (18/10/2026) Nenhum segredo em `opcoes` ou em `payload` de `exec-*`; chaves externas so por envelope (`secrets-*`).
+- [ ] (18/10/2026) Branch protection na `main` e revisao em toda mudanca de `.github/workflows/infra.yml` e `infra/cloud/` (o workflow roda com os tokens).
+- [ ] (18/10/2026) Mautic: `/installer` respondendo 403 de fora (`smoke.sh`); senha do administrador trocada pelo produtor no primeiro login; `MAUTIC_MAILER_DSN` com a chave de envio, nunca a chave com permissao total.
+- [ ] (18/10/2026) Dois timers de backup ativos (`bunker707-backup` e `bunker707-mautic-backup`); as duas `RESTIC_PASSWORD` no gerenciador de senhas.
 
 ---
 
@@ -476,6 +703,10 @@ Quando chegar a hora (decisao do produtor), com janela de manutencao de ~1 h:
 - **JWKS**: lista publica das chaves que assinam os tokens de login; permite ao app conferir um token sem perguntar ao Auth.
 - **Healthcheck**: pergunta periodica do Docker ao container ("esta bem?"); `docker compose ps` mostra `healthy`.
 - **sslip.io**: servico de DNS publico em que `127.0.0.1.sslip.io` responde 127.0.0.1; usado so no ensaio local.
+- **Runner (GitHub Actions)**: a maquina temporaria do GitHub em que o workflow roda; e de la que saem as chamadas a Hetzner, a Cloudflare e o SSH para os servidores.
+- **Envelope**: arquivo `CHAVE=VALOR` cifrado para a chave publica de um servidor (`transfer.pub`); so a chave privada dele (`transfer.key`) abre.
+- **DSN (mailer)**: endereco numa linha que diz ao Mautic como enviar e-mail (`smtp://usuario:senha@host:porta`).
+- **Storage Box (hcloud)**: o mesmo "HD na nuvem", agora criado e consultado pela CLI `hcloud storage-box`.
 
 ---
 
@@ -492,4 +723,4 @@ Stack local da secao 4 (escola de teste carregada, aluna logada), restic 0.19 em
 | sessao da aluna | continuou valida depois da restauracao (mesmas chaves JWT); a home abriu com os cursos |
 | primeira tentativa de restore | smoke reprovou: `anon` lendo `job_runs` (200 em vez de 401), causa e correcao descritas na secao 10.2 |
 
-Nao ensaiado ainda (precisa de servidor e Storage Box reais): SFTP para o Storage Box, timer do systemd, `bootstrap.sh`, firewall da Hetzner, Caddy com TLS de verdade e Cloudflare na frente.
+Nao ensaiado ainda (precisa de servidor e Storage Box reais): SFTP para o Storage Box, timer do systemd, `bootstrap.sh`, firewall da Hetzner, Caddy com TLS de verdade e Cloudflare na frente. Em 18/10/2026 tambem nao ensaiados: `infra/cloud/*` contra a API real da Hetzner e da Cloudflare, e o stack do Mautic com Docker. O que foi conferido em 18/10/2026 sem Docker: `docker compose config` nos tres composes, Caddy 2.11.7 validando os dois Caddyfiles, ida e volta do envelope (`envelope.sh encrypt` e `decrypt`) e a chave derivada aceita pelo `ssh-keygen`. O primeiro ensaio real e o proprio `provision` + `deploy-*`, com os logs lidos pela IA.
