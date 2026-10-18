@@ -97,6 +97,32 @@ test("rota /api sem sessao sai pelo proxy com a CSP, e e o handler (nao o proxy)
   expect(conversas.headers()["content-security-policy"]).toMatch(/'nonce-/);
 });
 
+test.describe("com a sessao do produtor", () => {
+  test.use({ storageState: "tests/e2e/.auth/produtor.json" });
+
+  test("a tela de Vendas, que valida os formularios com zod no navegador, abre sem nenhuma violacao de CSP", async ({ page }) => {
+    // Regressao de 17/10/2026: o zod testa `new Function("")` (dentro de um try/catch) para saber se
+    // pode compilar a validacao. A CSP sem 'unsafe-eval' bloqueia, o erro e engolido, mas o navegador
+    // registra a violacao e manda para o report-uri do Sentry. O coletor entra antes de qualquer script
+    // da pagina, para pegar ate a sonda que roda na carga dos modulos.
+    await page.addInitScript(() => {
+      const violacoes: string[] = [];
+      Object.assign(window, { __violacoesDeCsp: violacoes });
+      document.addEventListener("securitypolicyviolation", (evento) => {
+        violacoes.push(`${evento.effectiveDirective} bloqueou ${evento.blockedURI || "(inline)"}`);
+      });
+    });
+
+    await page.goto("/admin/configuracoes/vendas");
+    await expect(page.getByRole("heading", { level: 1, name: "Vendas" })).toBeVisible();
+    await page.waitForLoadState("networkidle");
+
+    const violacoes = await page.evaluate(() => (window as typeof window & { __violacoesDeCsp?: string[] }).__violacoesDeCsp);
+    expect(violacoes, "o coletor de violacoes precisa ter rodado antes da pagina").toBeDefined();
+    expect(violacoes).toEqual([]);
+  });
+});
+
 test.describe("com a sessao da aluna", () => {
   test.use({ storageState: "tests/e2e/.auth/aluna.json" });
 
