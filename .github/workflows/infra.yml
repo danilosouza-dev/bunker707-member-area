@@ -1,0 +1,84 @@
+name: Infra (Hetzner)
+
+# Bracos da operacao na Hetzner e na Cloudflare, disparados a mao (ou pela IA, pela API do GitHub) com os
+# tokens guardados como segredos do repositorio: HCLOUD_TOKEN e CLOUDFLARE_API_TOKEN. Cada etapa e um
+# script idempotente de infra/cloud (docs/20, "Sessao na nuvem"). Nada roda em push.
+#
+# Segredos nunca entram pelos inputs: a chave do Resend e afins viajam num envelope cifrado para a chave
+# RSA do servidor (infra/cloud/envelope.sh), que so ele abre.
+
+on:
+  workflow_dispatch:
+    inputs:
+      etapa:
+        description: "Etapa de infra/cloud/run.sh"
+        type: choice
+        required: true
+        default: status
+        options:
+          - plan
+          - provision
+          - deploy-membros
+          - deploy-marketing
+          - secrets-membros
+          - secrets-marketing
+          - equipe
+          - status
+          - status-ssh
+          - backup-membros
+          - backup-marketing
+          - exec-membros
+          - exec-marketing
+      opcoes:
+        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1)"
+        type: string
+        required: false
+        default: ""
+      payload:
+        description: "secrets-*: envelope cifrado (base64). exec-*: comando a rodar no servidor, como deploy, em /opt/bunker707."
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+# Uma etapa por vez: duas rodando juntas disputariam o firewall e o .env.
+concurrency:
+  group: infra-hetzner
+  cancel-in-progress: false
+
+jobs:
+  infra:
+    name: ${{ inputs.etapa }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OPCOES: ${{ inputs.opcoes }}
+      PAYLOAD: ${{ (startsWith(inputs.etapa, 'secrets-') && inputs.payload) || '' }}
+      COMANDO: ${{ (startsWith(inputs.etapa, 'exec-') && inputs.payload) || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.11.0
+
+      - name: Buildx
+        if: inputs.etapa == 'deploy-membros'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Segredos presentes?
+        run: |
+          [ -n "$HCLOUD_TOKEN" ] || { echo "::error::Segredo HCLOUD_TOKEN ausente (Settings > Secrets and variables > Actions)."; exit 1; }
+          if [ "${{ inputs.etapa }}" = "provision" ] && [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; fi
+
+      - name: ${{ inputs.etapa }}
+        run: bash infra/cloud/run.sh "${{ inputs.etapa }}"

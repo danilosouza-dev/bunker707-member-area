@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Ponto de entrada do workflow .github/workflows/infra.yml (e de qualquer terminal com os tokens):
+#   bash infra/cloud/run.sh <etapa>
+# com OPCOES="CHAVE=VALOR ..." (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1) e, nas
+# etapas que precisam, PAYLOAD (envelope cifrado) ou COMANDO (exec-*). Etapas:
+#   plan, provision, deploy-membros, deploy-marketing, secrets-membros, secrets-marketing, equipe,
+#   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing
+set -euo pipefail
+here=$(cd -- "$(dirname -- "$0")" && pwd)
+etapa="${1:-}"
+for kv in ${OPCOES:-}; do
+    case "$kv" in
+        [A-Z_]*=*) export "$kv" ;;
+        *) echo "opcao ignorada (formato CHAVE=VALOR): $kv" >&2 ;;
+    esac
+done
+exec_remote() {  # exec_remote membros|marketing: roda COMANDO como deploy em REMOTE_DIR
+    . "$here/lib.sh"
+    need HCLOUD_TOKEN COMANDO; install_hcloud; deploy_key
+    if [ "$1" = "membros" ] || [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi
+    ip=$(server_ip4 "$server"); fw_open_ssh "$server"; wait_ssh "$DEPLOY_USER@$ip"
+    rsh "$DEPLOY_USER@$ip" "cd '$REMOTE_DIR' && $COMANDO"
+}
+case "$etapa" in
+    plan) bash "$here/plan.sh" ;;
+    provision) bash "$here/provision.sh" ;;
+    deploy-membros) bash "$here/deploy.sh" membros ;;
+    deploy-marketing) bash "$here/deploy.sh" marketing ;;
+    secrets-membros) bash "$here/secrets.sh" membros ;;
+    secrets-marketing) bash "$here/secrets.sh" marketing ;;
+    equipe) bash "$here/equipe.sh" ;;
+    status) bash "$here/status.sh" ;;
+    status-ssh) SSH=1 bash "$here/status.sh" ;;
+    backup-membros) COMANDO="sh infra/scripts/backup.sh --check" exec_remote membros ;;
+    backup-marketing) COMANDO="sh infra/mautic/scripts/backup.sh --check" exec_remote marketing ;;
+    exec-membros) exec_remote membros ;;
+    exec-marketing) exec_remote marketing ;;
+    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,8p "$0"; exit 2 ;;
+esac

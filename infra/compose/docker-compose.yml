@@ -159,9 +159,27 @@ services:
       GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION}
       GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY}
       GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE}
+      # Modelos em portugues (volumes/auth-templates, servidos pelo Caddy no host da API) e assuntos.
+      # O Auth baixa o modelo pela URL na hora de enviar; se falhar, usa o padrao dele (ingles).
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: ${SUPABASE_PUBLIC_URL}/auth-templates/confirmation.html
+      GOTRUE_MAILER_TEMPLATES_INVITE: ${SUPABASE_PUBLIC_URL}/auth-templates/invite.html
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: ${SUPABASE_PUBLIC_URL}/auth-templates/magic_link.html
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: ${SUPABASE_PUBLIC_URL}/auth-templates/email_change.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: ${SUPABASE_PUBLIC_URL}/auth-templates/recovery.html
+      GOTRUE_MAILER_TEMPLATES_REAUTHENTICATION: ${SUPABASE_PUBLIC_URL}/auth-templates/reauthentication.html
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: ${AUTH_SUBJECT_CONFIRMATION:-Confirme seu e-mail na Bunker707}
+      GOTRUE_MAILER_SUBJECTS_INVITE: ${AUTH_SUBJECT_INVITE:-Crie sua senha da Bunker707}
+      GOTRUE_MAILER_SUBJECTS_MAGIC_LINK: ${AUTH_SUBJECT_MAGIC_LINK:-Seu link de acesso a Bunker707}
+      GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: ${AUTH_SUBJECT_EMAIL_CHANGE:-Confirme a troca de e-mail na Bunker707}
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: ${AUTH_SUBJECT_RECOVERY:-Redefina sua senha da Bunker707}
+      GOTRUE_MAILER_SUBJECTS_REAUTHENTICATION: ${AUTH_SUBJECT_REAUTHENTICATION:-Seu codigo de confirmacao da Bunker707}
 
       GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP}
       GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM}
+    # O nome publico da API resolve para o proprio servidor (Caddy), para o Auth baixar os modelos de e-mail
+    # sem sair pela Cloudflare; mesmo mecanismo do servico app.
+    extra_hosts:
+      - "${SUPABASE_PUBLIC_HOST}:host-gateway"
 
   rest:
     container_name: bunker707-rest
@@ -463,6 +481,9 @@ services:
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_WEBHOOK_SECRET: ${RESEND_WEBHOOK_SECRET:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
+      EMAIL_DAILY_LIMIT: ${EMAIL_DAILY_LIMIT:-}
       NEXT_PUBLIC_SITE_URL: ${APP_PUBLIC_URL}
 
   # Borda: TLS automatico (Let's Encrypt), app, API do Supabase e Studio em hostnames separados.
@@ -485,11 +506,15 @@ services:
       APP_SITE_ADDRESS: ${APP_SITE_ADDRESS}
       SUPABASE_SITE_ADDRESS: ${SUPABASE_SITE_ADDRESS}
       STUDIO_SITE_ADDRESS: ${STUDIO_SITE_ADDRESS}
+      # Colocacao do Mautic neste servidor (infra/mautic/compose.colocado.yml); sem ela, um hostname que
+      # nenhum pedido usa, para o Caddyfile continuar valido.
+      MAUTIC_SITE_ADDRESS: ${MAUTIC_SITE_ADDRESS:-http://mautic.invalid}
       STUDIO_ALLOWED_IPS: ${STUDIO_ALLOWED_IPS}
       ACME_EMAIL: ${ACME_EMAIL}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/cloudflare-trusted-proxies.caddyfile:/etc/caddy/cloudflare-trusted-proxies.caddyfile:ro
+      - ./volumes/auth-templates:/srv/auth-templates:ro
       - caddy-data:/data
       - caddy-config:/config
 

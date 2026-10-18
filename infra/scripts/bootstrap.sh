@@ -33,6 +33,8 @@ AUTO_REBOOT="${AUTO_REBOOT:-true}"
 SUPABASE_CLI_VERSION="${SUPABASE_CLI_VERSION:-2.121.0}"
 REPO_DIR="${REPO_DIR:-/opt/bunker707}"
 export DEBIAN_FRONTEND=noninteractive
+# Sem perguntas do needrestart ("quais servicos reiniciar?") quando o script roda por SSH sem terminal.
+export NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
 
 log() { printf '\n==> %s\n' "$*"; }
 
