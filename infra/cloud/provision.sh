@@ -117,20 +117,7 @@ rm -f "$backup_key" "$backup_key.pub"
 
 # ---- 6. DNS e TLS na Cloudflare ------------------------------------------------------------------------
 log "6/7 DNS em $ZONE_NAME (proxied) e TLS"
-m4=$(server_ip4 "$MEMBROS_NAME"); m6=$(server_ip6 "$MEMBROS_NAME")
-for sub in "${APP_DOMAIN%%.*}" "${API_DOMAIN%%.*}" "${STUDIO_DOMAIN%%.*}"; do
-    cf_dns_upsert "$sub" A "$m4" true
-    [ -n "$m6" ] && cf_dns_upsert "$sub" AAAA "$m6" true
-done
-if [ -n "${SKIP_MARKETING:-}" ]; then k4="$m4"; k6="$m6"; else k4=$(server_ip4 "$MARKETING_NAME"); k6=$(server_ip6 "$MARKETING_NAME"); fi
-cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" A "$k4" true
-[ -n "$k6" ] && cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" AAAA "$k6" true
-cf_zone_setting ssl strict
-# "Always Use HTTPS" fica DESLIGADO na Cloudflare de proposito: o Let's Encrypt valida o dominio por HTTP
-# (porta 80) passando pela Cloudflare, e um redirecionamento na borda para HTTPS faria a validacao bater
-# num origin ainda sem certificado (erro 526). O Caddy redireciona HTTP para HTTPS no origin e o app manda
-# HSTS; o resultado para o visitante e o mesmo.
-cf_zone_setting always_use_https off
+cf_apply_dns
 
 # ---- 7. resumo -----------------------------------------------------------------------------------
 log "7/7 Resumo"

@@ -233,6 +233,9 @@ Valores padrao de `infra/cloud/lib.sh`: zona `bunker707.com.br`; local `fsn1` co
 | `backup-membros`, `backup-marketing` | roda `backup.sh --check` no servidor (backup completo + `restic check` de 10% dos dados). | `HCLOUD_TOKEN` |
 | `exec-membros`, `exec-marketing` | roda o comando de `payload` como `deploy` em `/opt/bunker707` (logs, `docker compose ps`, `psql`, correcoes pontuais). Nunca passar segredo no comando: ele fica no historico do workflow. | `HCLOUD_TOKEN`, `payload` |
 
+| `snapshot` | `snapshot.sh`: desliga cada servidor, tira um snapshot (imagem do disco inteiro: banco, `.env`, certificados, chave de transferencia), espera ficar disponivel, APAGA o servidor e apaga os registros A/AAAA dos quatro nomes. Firewalls, chave SSH e Storage Box ficam (`APAGAR_STORAGE_BOX=1` apaga o box e os backups). Exige `CONFIRMAR=apagar` em `opcoes`. | `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN` |
+| `restaurar` | `restaurar.sh`: para cada papel sem servidor, cria um novo a partir do snapshot mais recente daquele papel (tipo do `plan` ou `MEMBROS_TYPE`/`MARKETING_TYPE`), aplica o firewall, confere os containers por SSH e refaz o DNS. Tudo volta como estava, so com IP novo; nao precisa de deploy. | `HCLOUD_TOKEN`, `CLOUDFLARE_API_TOKEN` |
+
 Ordem na migracao: `plan` -> `provision` -> `deploy-membros` -> `deploy-marketing` -> `secrets-membros` -> `secrets-marketing` -> `equipe` -> `status`. Todas sao idempotentes: rodar de novo completa o que faltou ou atualiza (um `deploy-membros` repetido e um deploy de nova versao). O `generate-secrets.sh` so roda quando o `.env` ainda nao existe: para mudar `STUDIO_ALLOWED_IPS` ou `MAUTIC_ADMIN_IPS` depois, editar o `.env` por `exec-*` e recriar o Caddy (`docker compose ... up -d caddy`).
 
 ### 4A.4 Firewall: a porta 22 so abre durante a etapa
@@ -272,6 +275,16 @@ Chave de envio do Resend, segredo do webhook e, mais tarde, credenciais do SES n
 4. Disparar `secrets-membros` (ou `secrets-marketing`) com o payload. Apagar `segredos.txt`.
 
 Como a chave do Resend chega a sessao da IA sem passar pelo chat, a combinar com o produtor: (a) a IA cria uma chave nova de envio no Resend pelo conector (permissao so de envio, restrita a `mail.bunker707.com.br`); o valor existe so na sessao e vai direto para o envelope; ou (b) o produtor coloca a chave como segredo do ambiente da sessao na nuvem e a IA le a variavel. Nunca no chat, nunca no repositorio, nunca em `opcoes`.
+
+### 4A.7 Guardar a producao sem pagar servidor parado (snapshot)
+
+Decisao de 18/10/2026: a Vercel + Supabase cloud continuam como ambiente de desenvolvimento (staging) e a Hetzner e a producao, mas a producao so fica ligada quando o produtor disser "vai". Na Hetzner, servidor desligado e cobrado por inteiro (docs/19, secao 3.4); o jeito barato de guardar e snapshot + apagar: EUR 0,0143 por GB comprimido por mes (uns 10 GB usados dao cerca de EUR 0,15). O roteiro:
+
+1. Migracao completa como ensaio real: `plan`, `provision`, `deploy-membros`, `deploy-marketing`, `secrets-*`, `equipe`, `status`. A cobranca e por hora: algumas horas de CX33 + CX23 custam centavos.
+2. `snapshot` com `CONFIRMAR=apagar`: os dois servidores viram imagens (labels `app=bunker707`, `papel=membros|marketing`) e sao apagados; os registros DNS somem (os nomes param de responder). A Storage Box fica por padrao (EUR 3,20 por mes, com os backups); `APAGAR_STORAGE_BOX=1` apaga tudo e o custo mensal vira so os snapshots.
+3. Quando for a hora: `restaurar` (servidores novos a partir dos snapshots, DNS refeito) e `status`. Os certificados do Caddy, o banco, o `.env` e a chave de transferencia vem no snapshot. Se o snapshot tiver mais de alguns dias, rodar `deploy-membros` e `deploy-marketing` em seguida para subir o commit atual.
+
+Sem snapshot (por exemplo, se a producao ainda nao tiver nada de valor), o caminho equivalente e `provision` + `deploy-*` do zero, que leva uns 20 minutos.
 
 ---
 

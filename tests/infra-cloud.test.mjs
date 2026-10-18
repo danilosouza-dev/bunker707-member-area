@@ -70,7 +70,7 @@ function yamlChildren(source, topKey) {
 }
 
 test("scripts de infra/cloud passam na conferencia de sintaxe do bash", () => {
-  assert.deepEqual(shellScripts, ["deploy.sh", "envelope.sh", "equipe.sh", "lib.sh", "plan.sh", "provision.sh", "run.sh", "secrets.sh", "status.sh"]);
+  assert.deepEqual(shellScripts, ["deploy.sh", "envelope.sh", "equipe.sh", "lib.sh", "plan.sh", "provision.sh", "restaurar.sh", "run.sh", "secrets.sh", "snapshot.sh", "status.sh"]);
   for (const file of shellScripts) {
     const result = run("bash", ["-n", join(cloudDir, file)]);
     assert.equal(result.status, 0, `${file}: ${result.stderr}`);

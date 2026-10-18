@@ -4,7 +4,8 @@
 # com OPCOES="CHAVE=VALOR ..." (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1) e, nas
 # etapas que precisam, PAYLOAD (envelope cifrado) ou COMANDO (exec-*). Etapas:
 #   plan, provision, deploy-membros, deploy-marketing, secrets-membros, secrets-marketing, equipe,
-#   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing
+#   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing,
+#   snapshot (guarda e apaga os servidores; CONFIRMAR=apagar), restaurar (recria dos snapshots)
 set -euo pipefail
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 etapa="${1:-}"
@@ -35,5 +36,7 @@ case "$etapa" in
     backup-marketing) COMANDO="sh infra/mautic/scripts/backup.sh --check" exec_remote marketing ;;
     exec-membros) exec_remote membros ;;
     exec-marketing) exec_remote marketing ;;
+    snapshot) bash "$here/snapshot.sh" ;;
+    restaurar) bash "$here/restaurar.sh" ;;
     *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,8p "$0"; exit 2 ;;
 esac

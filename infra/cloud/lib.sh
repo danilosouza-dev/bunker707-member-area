@@ -212,5 +212,33 @@ cf_zone_setting() {  # cf_zone_setting CHAVE VALOR
     printf '  %s = %s\n' "$1" "$2"
 }
 
+# cf_apply_dns: os quatro nomes (membros, api, studio -> servidor A; marketing -> B ou A) apontando para os
+# IPs atuais, proxied; SSL Full (strict); "Always Use HTTPS" desligado (o Let's Encrypt valida por HTTP
+# atraves da Cloudflare; um redirecionamento na borda faria a validacao bater num origin sem certificado).
+cf_apply_dns() {
+    local m4 m6 k4 k6 sub
+    m4=$(server_ip4 "$MEMBROS_NAME"); m6=$(server_ip6 "$MEMBROS_NAME")
+    for sub in "${APP_DOMAIN%%.*}" "${API_DOMAIN%%.*}" "${STUDIO_DOMAIN%%.*}"; do
+        cf_dns_upsert "$sub" A "$m4" true
+        [ -n "$m6" ] && cf_dns_upsert "$sub" AAAA "$m6" true
+    done
+    if [ -n "${SKIP_MARKETING:-}" ] || ! server_exists "$MARKETING_NAME"; then k4="$m4"; k6="$m6"; else k4=$(server_ip4 "$MARKETING_NAME"); k6=$(server_ip6 "$MARKETING_NAME"); fi
+    cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" A "$k4" true
+    [ -n "$k6" ] && cf_dns_upsert "${MAUTIC_DOMAIN%%.*}" AAAA "$k6" true
+    cf_zone_setting ssl strict
+    cf_zone_setting always_use_https off
+}
+# cf_remove_dns: apaga os registros A/AAAA dos quatro nomes (servidores guardados em snapshot).
+cf_remove_dns() {
+    local zone sub fqdn ids id
+    zone=$(cf_zone_id)
+    for sub in "${APP_DOMAIN%%.*}" "${API_DOMAIN%%.*}" "${STUDIO_DOMAIN%%.*}" "${MAUTIC_DOMAIN%%.*}"; do
+        fqdn="$sub.$ZONE_NAME"
+        ids=$(cf_api GET "/zones/$zone/dns_records?name=$fqdn" | jq -r '.result[] | select(.type=="A" or .type=="AAAA") | .id')
+        for id in $ids; do cf_api DELETE "/zones/$zone/dns_records/$id" >/dev/null; done
+        printf '  %-28s %s registro(s) apagado(s)\n' "$fqdn" "$(printf '%s' "$ids" | grep -c . || true)"
+    done
+}
+
 # ---- Storage Box ------------------------------------------------------------------------------------
 storage_box_json() { hzj storage-box describe "$STORAGE_BOX_NAME" 2>/dev/null || true; }

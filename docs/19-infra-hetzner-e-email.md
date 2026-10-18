@@ -22,6 +22,7 @@ Esta secao resume a decisao tomada em 18/10/2026 e substitui a recomendacao da s
 | Backup | Storage Box bx11 (1 TB), restic por SFTP (porta 23), um repositorio por servidor (`/bunker707/restic` e `/bunker707/restic-mautic`). |
 | E-mail | Resend (dominio `mail.bunker707.com.br`, verificado em 17/10/2026) ate o Amazon SES existir. SMTP na porta 587 para o Auth e para o Mautic; API para o app. |
 | Quem executa | A IA, pelo workflow `Infra (Hetzner)` do GitHub Actions. O produtor cola dois tokens nos segredos do repositorio e liga o 2FA; nenhum passo na maquina dele. |
+| Staging e producao | Vercel + Supabase cloud seguem como ambiente de desenvolvimento (staging). A Hetzner e a producao: migrada por completo como ensaio real, guardada em snapshot (centavos por mes) com os servidores apagados, e recriada dos snapshots quando o produtor disser "vai" (docs/20, secao 4A.7). Servidor desligado na Hetzner continua sendo cobrado; por isso snapshot, nao desligar. |
 
 ### 0.2 Por que o banco fica junto com o app (servidor A)
 
@@ -77,7 +78,11 @@ Regras que decorrem disso:
 - A imagem do app e construida no runner e publicada no GHCR; `NEXT_PUBLIC_*` vem do `.env` gerado no servidor. Nao ha variaveis no GitHub.
 - Nada roda em push: so disparo manual, uma etapa por vez.
 
-### 0.8 E-mail: Resend ate o SES
+### 0.8 Custo do Mautic: fixo
+
+O Mautic e software livre: sem licenca, sem cobranca por contato nem por envio. O custo e o servidor B (fixo por mes) mais os e-mails no provedor (Amazon SES: US$ 0,10 por mil envios depois do periodo gratis; Resend Free ate 100 por dia, Pro US$ 20 por mes). Usar mais nao muda a conta ate a lista pedir um servidor maior, o que acontece com dezenas de milhares de contatos. O ActiveCampaign cobra por faixa de contatos e sobe conforme a lista cresce; o Mautic e mais barato por uma margem grande, e o preco disso e a operacao (atualizacoes, entregabilidade) ficar com a gente, ja automatizada nos scripts.
+
+### 0.9 E-mail: Resend ate o SES
 
 Resend Free: 100 e-mails por dia, compartilhados por Auth (convite, senha), app (boas-vindas, compra) e Mautic. Suficiente para a equipe e os primeiros alunos; antes de qualquer campanha, Resend Pro (US$ 20) ou Amazon SES (secao 6, item 4). No Mautic a troca e so o `MAUTIC_MAILER_DSN` (docs/20, secao 8A.3).
 

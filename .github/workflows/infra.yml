@@ -34,6 +34,8 @@ on:
           - backup-marketing
           - exec-membros
           - exec-marketing
+          - snapshot
+          - restaurar
       opcoes:
         description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1)"
         type: string
@@ -91,7 +93,7 @@ jobs:
       - name: Segredos presentes?
         run: |
           [ -n "$HCLOUD_TOKEN" ] || { echo "::error::Segredo HCLOUD_TOKEN ausente (Settings > Secrets and variables > Actions)."; exit 1; }
-          if [ "${{ inputs.etapa }}" = "provision" ] && [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; fi
+          case "${{ inputs.etapa }}" in provision|snapshot|restaurar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; } ;; esac
 
       - name: ${{ inputs.etapa }}
         run: bash infra/cloud/run.sh "${{ inputs.etapa }}"
