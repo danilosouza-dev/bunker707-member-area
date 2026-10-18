@@ -4,6 +4,8 @@
 # Tipo: MEMBROS_TYPE/MARKETING_TYPE nas opcoes, ou o mais barato do plan. O servidor volta com tudo
 # (banco, .env, certificados, chave de transferencia); so o IP muda, e os quatro registros sao refeitos.
 # Depois: etapa status (e status-ssh). Nao precisa de deploy de novo.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN

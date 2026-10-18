@@ -5,6 +5,8 @@
 # os backups vao junto).
 #   CONFIRMAR=apagar bash infra/cloud/snapshot.sh
 # Para voltar: restaurar.sh (servidor novo a partir do snapshot mais recente de cada papel, DNS refeito).
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN

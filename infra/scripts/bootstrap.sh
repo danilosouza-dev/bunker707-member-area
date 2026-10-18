@@ -9,7 +9,7 @@
 #   1. apt: atualizacoes, ufw, fail2ban, unattended-upgrades, restic, git, jq, curl;
 #   2. usuario `deploy` (sudo sem senha, grupo docker) com a chave SSH informada (ou a do root);
 #   3. SSH so com chave: sem senha, root so com chave (PermitRootLogin prohibit-password);
-#   4. ufw: tudo fechado menos SSH (com rate limit), 80 e 443; regras DOCKER-USER para o Docker respeitar
+#   4. ufw: tudo fechado menos SSH, 80 e 443; regras DOCKER-USER para o Docker respeitar
 #      o ufw (o Docker, por padrao, abre as portas publicadas direto no iptables);
 #   5. fail2ban no sshd; unattended-upgrades com reinicio automatico as 05:30 UTC quando preciso;
 #   6. Docker CE (repositorio oficial), log rotation e live-restore;
@@ -19,6 +19,8 @@
 # Variaveis: SSH_PUBLIC_KEY, DEPLOY_USER (deploy), SSH_PORT (22), SWAP_GB (2), AUTO_REBOOT (true),
 #            SUPABASE_CLI_VERSION (2.121.0), REPO_DIR (/opt/bunker707).
 # Depois dele: docs/20-runbook-hetzner.md, "Primeiro deploy".
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 set -euo pipefail
 
@@ -39,9 +41,11 @@ export NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1
 log() { printf '\n==> %s\n' "$*"; }
 
 log "1/9 Pacotes"
-apt-get update -q
-apt-get upgrade -y -q
-apt-get install -y -q ca-certificates curl gnupg git jq ufw fail2ban unattended-upgrades apt-listchanges restic rsync python3 openssh-client
+# Espera a trava do dpkg (cloud-init e unattended-upgrades do primeiro boot) em vez de falhar na hora.
+apt_opts=(-o DPkg::Lock::Timeout=600)
+apt-get "${apt_opts[@]}" update -q
+apt-get "${apt_opts[@]}" upgrade -y -q
+apt-get "${apt_opts[@]}" install -y -q ca-certificates curl gnupg git jq ufw fail2ban unattended-upgrades apt-listchanges restic rsync python3 openssh-client
 
 log "2/9 Usuario $DEPLOY_USER"
 if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
@@ -93,7 +97,9 @@ log "4/9 ufw (+ regras DOCKER-USER)"
 ufw --force reset >/dev/null
 ufw default deny incoming
 ufw default allow outgoing
-ufw limit "$SSH_PORT/tcp" comment "SSH"
+# allow, nao limit: o firewall da Hetzner ja restringe quem chega na 22, e o deploy abre dezenas de
+# comandos SSH em sequencia (o limit do ufw recusaria a sexta conexao em 30 s). Senha errada e com o fail2ban.
+ufw allow "$SSH_PORT/tcp" comment "SSH"
 ufw allow 80/tcp comment "HTTP (Caddy)"
 ufw allow 443/tcp comment "HTTPS (Caddy)"
 ufw allow 443/udp comment "HTTP/3 (Caddy)"
@@ -163,8 +169,8 @@ if ! command -v docker >/dev/null 2>&1; then
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list
-    apt-get update -q
-    apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    apt-get "${apt_opts[@]}" update -q
+    apt-get "${apt_opts[@]}" install -y -q docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 fi
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<'CONF'

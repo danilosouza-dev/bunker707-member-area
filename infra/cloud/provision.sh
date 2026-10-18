@@ -7,6 +7,8 @@
 # Etapas: chave SSH no projeto -> firewalls -> servidores (cloud-init) -> Storage Box -> bootstrap por SSH
 # (infra/scripts/bootstrap.sh) + chave de transferencia de segredos -> DNS e TLS na Cloudflare -> resumo.
 # Custa dinheiro a partir do minuto em que o servidor existe (docs/19).
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN
@@ -74,17 +76,19 @@ done
 
 # ---- 4. Storage Box ------------------------------------------------------------------------------
 log "4/7 Storage Box $STORAGE_BOX_NAME ($STORAGE_BOX_TYPE)"
+# A chave de backup (SFTP no Storage Box) e derivada do mesmo token, como a de deploy, com outro proposito:
+# nasce igual em toda rodada, entra no box na criacao e e instalada nos servidores sempre (um servidor
+# recriado depois tambem a recebe).
 backup_key="$WORK_DIR/storagebox_key"
+node "$CLOUD_DIR/deploy-key.mjs" --out "$backup_key" --info bunker707-backup-key-v1 >/dev/null
 if [ -z "$(storage_box_json)" ]; then
-    ssh-keygen -q -t ed25519 -N "" -C "bunker707-backup" -f "$backup_key"
     box_password=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24); mask "$box_password"
     hz storage-box create --name "$STORAGE_BOX_NAME" --type "$STORAGE_BOX_TYPE" --location "$LOCATION" \
         --password "$box_password" --enable-ssh --reachable-externally --ssh-key "$(cat "$backup_key.pub")" \
         --label app=bunker707 >/dev/null
     echo "  criado (SSH ligado, acessivel de fora, chave de backup instalada)."
-    NEW_BACKUP_KEY=1
 else
-    echo "  ja existe."
+    echo "  ja existe (a chave de backup e a derivada do token; se o box foi criado com outra, veja docs/20 §10)."
 fi
 box=$(storage_box_json)
 STORAGE_BOX_USER=$(printf '%s' "$box" | jq -r '.username // .user // empty'); STORAGE_BOX_HOST=$(printf '%s' "$box" | jq -r '.server // .host // empty')
@@ -98,16 +102,17 @@ for role in $roles; do
     ip=$(server_ip4 "$name")
     fw_open_ssh "$name"
     wait_ssh "root@$ip"
+    # O cloud-init do primeiro boot ainda esta instalando pacotes quando o SSH abre: esperar, senao o apt
+    # do bootstrap disputa a trava do dpkg.
+    rsh "root@$ip" "cloud-init status --wait >/dev/null 2>&1 || true"
     rcopy "$REPO_ROOT/infra/scripts/bootstrap.sh" "root@$ip:/root/bootstrap.sh"
     rsh "root@$ip" "SSH_PUBLIC_KEY='$pub' DEPLOY_USER='$DEPLOY_USER' REPO_DIR='$REMOTE_DIR' bash /root/bootstrap.sh" | tail -n 15
     # Chave RSA para receber segredos (chave do Resend etc.) cifrados pela sessao do Claude: so o servidor abre.
     rsh "root@$ip" "install -d -m 700 /etc/bunker707 && [ -f /etc/bunker707/transfer.key ] || { openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /etc/bunker707/transfer.key && chmod 600 /etc/bunker707/transfer.key && openssl pkey -in /etc/bunker707/transfer.key -pubout -out /etc/bunker707/transfer.pub; }"
     rsh "root@$ip" "chown -R '$DEPLOY_USER:$DEPLOY_USER' '$REMOTE_DIR'"
-    if [ -f "$backup_key" ]; then
-        rsh "root@$ip" "install -d -m 700 -o '$DEPLOY_USER' -g '$DEPLOY_USER' /home/$DEPLOY_USER/.ssh && cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chmod 600 /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox" < "$backup_key"
-        rsh "root@$ip" "cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub" < "$backup_key.pub"
-        echo "  chave de backup instalada em ~$DEPLOY_USER/.ssh/id_ed25519_storagebox"
-    fi
+    rsh "root@$ip" "install -d -m 700 -o '$DEPLOY_USER' -g '$DEPLOY_USER' /home/$DEPLOY_USER/.ssh && cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chmod 600 /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox" < "$backup_key"
+    rsh "root@$ip" "cat > /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub && chown '$DEPLOY_USER:$DEPLOY_USER' /home/$DEPLOY_USER/.ssh/id_ed25519_storagebox.pub" < "$backup_key.pub"
+    echo "  chave de backup instalada em ~$DEPLOY_USER/.ssh/id_ed25519_storagebox"
     wait_ssh "$DEPLOY_USER@$ip" 10
     echo "  transfer.pub ($name), base64 numa linha (para infra/cloud/envelope.sh):"
     rsh "root@$ip" "base64 -w0 /etc/bunker707/transfer.pub"; echo

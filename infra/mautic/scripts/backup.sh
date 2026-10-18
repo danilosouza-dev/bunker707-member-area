@@ -7,6 +7,8 @@
 # Entra em cada snapshot: mautic.sql.gz (mysqldump --single-transaction do banco inteiro), o .env e os
 # volumes config/ (local.php) e media/ (imagens e arquivos enviados). Retencao: BACKUP_KEEP_DAILY dias.
 # Mesmo Storage Box e mesma chave SSH do stack principal (infra/scripts/backup.sh); outro repositorio.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/_env.sh"
 
@@ -27,7 +29,9 @@ RESTIC_REPOSITORY=$(require_env_value RESTIC_REPOSITORY)
 RESTIC_PASSWORD=$(require_env_value RESTIC_PASSWORD)
 keep_daily=$(env_value BACKUP_KEEP_DAILY 30)
 heartbeat_url=$(env_value BACKUP_HEARTBEAT_URL)
-if [ "$(id -u)" = "0" ]; then backup_root="${BUNKER707_BACKUP_DIR:-/var/backups/bunker707-mautic}"; else backup_root="${BUNKER707_BACKUP_DIR:-$HOME/.bunker707-mautic-backups}"; fi
+if [ -n "${BUNKER707_BACKUP_DIR:-}" ]; then backup_root="$BUNKER707_BACKUP_DIR"
+elif [ "$(id -u)" = "0" ] || [ -w /var/backups/bunker707-mautic ]; then backup_root=/var/backups/bunker707-mautic
+else backup_root="$HOME/.bunker707-mautic-backups"; fi
 
 restic_bin() {
     if command -v restic >/dev/null 2>&1; then restic "$@"
@@ -56,6 +60,7 @@ ssh_config_alias() {
 install_timer() {
     [ "$(id -u)" = "0" ] || die "--install-timer precisa de root (sudo)."
     local unit=/etc/systemd/system/bunker707-mautic-backup
+    install -d -m 700 -o "${SUDO_USER:-deploy}" -g "${SUDO_USER:-deploy}" /var/backups/bunker707-mautic
     cat > "$unit.service" <<UNIT
 [Unit]
 Description=Backup do Mautic da Bunker707 (MySQL, config, media, .env) para o Storage Box via restic
@@ -66,6 +71,7 @@ Wants=network-online.target
 Type=oneshot
 User=${SUDO_USER:-deploy}
 WorkingDirectory=$REPO_ROOT
+Environment=BUNKER707_BACKUP_DIR=/var/backups/bunker707-mautic
 ExecStart=/usr/bin/env bash $REPO_ROOT/infra/mautic/scripts/backup.sh
 Nice=10
 IOSchedulingClass=best-effort

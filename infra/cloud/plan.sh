@@ -3,6 +3,8 @@
 #   bash infra/cloud/plan.sh            (precisa so de HCLOUD_TOKEN; nao cria nada)
 # Papel "membros" (app + Supabase): MEMBROS_MIN_RAM_GB (8). Papel "marketing" (Mautic): MARKETING_MIN_RAM_GB (4).
 # Forcar um tipo: MEMBROS_TYPE=cx33 MARKETING_TYPE=cx23. Grava a escolha em $GITHUB_OUTPUT quando existir.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 need HCLOUD_TOKEN

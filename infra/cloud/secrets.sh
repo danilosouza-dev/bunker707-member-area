@@ -3,6 +3,8 @@
 # para o servidor (infra/cloud/envelope.sh encrypt), e recria os servicos que mudaram:
 #   PAYLOAD='<base64>' bash infra/cloud/secrets.sh membros|marketing
 # O payload nunca e legivel fora do servidor; as chaves aplicadas sao listadas sem os valores.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 role="${1:-}"; [ "$role" = "membros" ] || [ "$role" = "marketing" ] || die "uso: secrets.sh membros|marketing"
@@ -42,10 +44,10 @@ os.chmod(tmp, 0o600); os.replace(tmp, path)
 os.remove(kvpath)
 PY
 if [ "$role" = "membros" ]; then
-    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml up -d && sh infra/scripts/smoke.sh"
+    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml up -d && bash infra/scripts/smoke.sh"
 else
     extra=""; [ -n "${SKIP_MARKETING:-}" ] && extra="-f infra/mautic/compose.colocado.yml"
     profile=""; [ -n "${SKIP_MARKETING:-}" ] || profile="--profile borda"
-    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/mautic/docker-compose.yml $extra $profile up -d && ${SKIP_MARKETING:+BUNKER707_COMPOSE_OVERRIDE=$REMOTE_DIR/infra/mautic/compose.colocado.yml} sh infra/mautic/scripts/smoke.sh"
+    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/mautic/docker-compose.yml $extra $profile up -d && ${SKIP_MARKETING:+BUNKER707_COMPOSE_OVERRIDE=$REMOTE_DIR/infra/mautic/compose.colocado.yml} bash infra/mautic/scripts/smoke.sh"
 fi
 log "Segredos aplicados e servicos recriados."

@@ -4,6 +4,8 @@
 #   sh infra/mautic/scripts/restore.sh --snapshot latest [--yes]
 # Ordem: restic restore -> .env -> volumes config/ e media/ -> sobe so o MySQL -> importa o dump -> sobe o
 # resto -> smoke. O MySQL precisa estar vazio (o script recusa sobrescrever sem --yes).
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/_env.sh"
 

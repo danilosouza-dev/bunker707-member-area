@@ -6,6 +6,8 @@
 # Passos: atualiza APP_IMAGE no .env (guardando a anterior em .deploy-history) -> pull/build -> migracoes
 # (migrate.sh) -> recria o app -> espera saudavel -> smoke.sh. Se falhar, mostra o comando de volta.
 # Versao antiga continua no disco: `deploy.sh --image <anterior>` desfaz em segundos.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 

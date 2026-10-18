@@ -6,6 +6,8 @@
 #   plan, provision, deploy-membros, deploy-marketing, secrets-membros, secrets-marketing, equipe,
 #   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing,
 #   snapshot (guarda e apaga os servidores; CONFIRMAR=apagar), restaurar (recria dos snapshots)
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
 here=$(cd -- "$(dirname -- "$0")" && pwd)
 etapa="${1:-}"
@@ -32,8 +34,8 @@ case "$etapa" in
     equipe) bash "$here/equipe.sh" ;;
     status) bash "$here/status.sh" ;;
     status-ssh) SSH=1 bash "$here/status.sh" ;;
-    backup-membros) COMANDO="sh infra/scripts/backup.sh --check" exec_remote membros ;;
-    backup-marketing) COMANDO="sh infra/mautic/scripts/backup.sh --check" exec_remote marketing ;;
+    backup-membros) COMANDO="bash infra/scripts/backup.sh --check" exec_remote membros ;;
+    backup-marketing) COMANDO="bash infra/mautic/scripts/backup.sh --check" exec_remote marketing ;;
     exec-membros) exec_remote membros ;;
     exec-marketing) exec_remote marketing ;;
     snapshot) bash "$here/snapshot.sh" ;;

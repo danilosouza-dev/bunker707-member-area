@@ -334,7 +334,7 @@ scp infra/scripts/bootstrap.sh root@<ip>:/root/
 ssh root@<ip> 'SSH_PUBLIC_KEY="ssh-ed25519 AAAA... produtor@bunker707" bash /root/bootstrap.sh'
 ```
 
-O script e idempotente (pode rodar de novo). Ele cria o usuario `deploy` (sudo sem senha, grupo docker), fecha o SSH para senha, liga ufw (so 22 com rate limit, 80 e 443) com as regras `DOCKER-USER` para o Docker respeitar o ufw, fail2ban no sshd, atualizacoes automaticas (reinicio as 05:30 UTC se um kernel pedir), Docker CE com rotacao de logs, swap de 2 GB, a CLI do Supabase 2.121.0 e a pasta `/opt/bunker707`.
+O script e idempotente (pode rodar de novo). Ele cria o usuario `deploy` (sudo sem senha, grupo docker), fecha o SSH para senha, liga ufw (so 22, 80 e 443; sem rate limit na 22 desde 18/10/2026, porque o firewall da Hetzner ja restringe a origem e o deploy abre dezenas de comandos SSH em sequencia) com as regras `DOCKER-USER` para o Docker respeitar o ufw, fail2ban no sshd, atualizacoes automaticas (reinicio as 05:30 UTC se um kernel pedir), Docker CE com rotacao de logs, swap de 2 GB, a CLI do Supabase 2.121.0 e a pasta `/opt/bunker707`.
 
 **Antes de fechar a sessao de root**, confirme em outro terminal que `ssh deploy@<ip>` entra. Depois disso, trabalhe sempre como `deploy`.
 

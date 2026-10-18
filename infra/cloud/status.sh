@@ -2,6 +2,8 @@
 # Estado da infraestrutura (nao muda nada alem de, com SSH=1, abrir e fechar a porta 22 para ler o servidor):
 #   bash infra/cloud/status.sh            servidores, Storage Box, DNS, respostas publicas
 #   SSH=1 bash infra/cloud/status.sh      + containers, disco, memoria, ultimo backup, transfer.pub
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 . "$(dirname -- "$0")/lib.sh"
 need HCLOUD_TOKEN; install_hcloud
 log "Servidores"

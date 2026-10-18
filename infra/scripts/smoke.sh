@@ -3,6 +3,8 @@
 #   sh infra/scripts/smoke.sh
 # Confere, pelos enderecos publicos do .env: o app (/api/health e redirecionamento para /login), o Auth,
 # o PostgREST, o Storage e o Realtime do Supabase. Sai com erro no primeiro problema.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 

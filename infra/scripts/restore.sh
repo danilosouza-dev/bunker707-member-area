@@ -7,6 +7,8 @@
 # Ordem: restic restore -> .env -> sobe so o Postgres -> devolve a chave do Vault e reinicia -> papeis ->
 # pg_restore do banco inteiro -> arquivos do Storage -> stack completo -> smoke.sh.
 # Um ensaio de restauracao faz parte do runbook (docs/20): backup que nunca foi restaurado nao e backup.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 

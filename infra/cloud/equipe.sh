@@ -2,6 +2,8 @@
 # Contas da equipe no Auth do servidor (convite por e-mail, que sai pelo SMTP do Resend) e papel em
 # public.admin_roles. Idempotente. Formato: EQUIPE="email1:owner email2:admin" (padrao: equipe atual).
 #   bash infra/cloud/equipe.sh
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 . "$(dirname -- "$0")/lib.sh"
 need HCLOUD_TOKEN; install_hcloud; deploy_key
 EQUIPE="${EQUIPE:-ferramentas.bunker707@gmail.com:owner bertoldomolina8@gmail.com:admin}"

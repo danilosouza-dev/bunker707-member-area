@@ -380,3 +380,67 @@ test("cloud-init.yaml comeca com #cloud-config e provision.sh troca os marcadore
   assert.match(rendered.stdout, new RegExp(`^\\s+- ${publicKey.replace(/[+/]/g, "\\$&")}\\s*$`, "m"));
   assert.doesNotMatch(rendered.stdout, /__[A-Z_]+__/, "marcador sem troca");
 });
+
+// Achados da revisao de 18/10/2026 (lente de shell): o valor do set_env viajava por um pipe que o heredoc
+// descartava; os scripts bash chamados com `sh` morriam no dash; a senha do envelope era binaria (o openssl
+// le so a primeira linha de `-pass file:`).
+test("set_env (lib.sh): o valor chega por base64 e sobrevive a espaco, $ e #; nenhuma linha vazia sobra no fim", () => {
+  const start = libSource.indexOf("python3 -I - '$file' '$key' '$b64'\" <<'PY'");
+  assert.ok(start > 0, "set_env passa o valor como argumento em base64, nao por pipe");
+  const block = libSource.slice(libSource.indexOf("\n", start) + 1, libSource.indexOf("\nPY\n", start));
+  const dir = mkdtempSync(join(tmpdir(), "bunker707-set-env-"));
+  try {
+    const envFile = join(dir, "env");
+    writeFileSync(envFile, "A=1\nB=\n\n");
+    const script = join(dir, "set_env.py");
+    writeFileSync(script, block);
+    const value = "valor com espaco, $cifrao e #cerquilha";
+    const b64 = Buffer.from(value).toString("base64");
+    const first = spawnSync("python3", ["-I", script, envFile, "B", b64], { encoding: "utf8" });
+    assert.equal(first.status, 0, first.stderr);
+    const second = spawnSync("python3", ["-I", script, envFile, "NOVA", Buffer.from("x").toString("base64")], { encoding: "utf8" });
+    assert.equal(second.status, 0, second.stderr);
+    assert.equal(readFileSync(envFile, "utf8"), `A=1\nB=${value}\nNOVA=x\n`);
+    assert.equal(statSync(envFile).mode & 0o777, 0o600);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("scripts bash executaveis voltam para o bash quando chamados com sh (dash)", () => {
+  const scriptsDir = fileURLToPath(new URL("../infra/scripts/", import.meta.url));
+  const mauticDir = fileURLToPath(new URL("../infra/mautic/scripts/", import.meta.url));
+  const executables = [
+    ...shellScripts.map((name) => join(cloudDir, name)),
+    ...readdirSync(scriptsDir).filter((name) => name.endsWith(".sh")).map((name) => join(scriptsDir, name)),
+    ...readdirSync(mauticDir).filter((name) => name.endsWith(".sh")).map((name) => join(mauticDir, name))
+  ].filter((file) => !file.endsWith("lib.sh") && !file.endsWith("_env.sh"));
+  assert.ok(executables.length >= 20);
+  for (const file of executables) {
+    const source = readFileSync(file, "utf8");
+    assert.match(source, /^#!\/usr\/bin\/env bash\n/, `${file}: shebang bash`);
+    assert.ok(source.includes('[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"'), `${file}: sem a guarda do dash`);
+    const guardAt = source.indexOf("BASH_VERSION");
+    const firstCode = source.search(/^(?!#)(?!\s*$).+$/m);
+    assert.ok(guardAt <= firstCode + 80, `${file}: a guarda precisa vir antes de qualquer comando`);
+  }
+  const dash = spawnSync("dash", ["--version"], { encoding: "utf8" });
+  if (dash.error) return;
+  // Com o dash de verdade: run.sh sem etapa chega ao bash e responde como o bash responderia (codigo 2).
+  const result = spawnSync("dash", [runPath], { encoding: "utf8", env: cleanEnv() });
+  assert.equal(result.status, 2, result.stderr);
+  assert.match(result.stderr, /etapa desconhecida/);
+});
+
+test("envelope.sh: a senha do AES e texto hex de uma linha (o openssl le so a primeira linha de -pass file:)", () => {
+  const source = readFileSync(join(cloudDir, "envelope.sh"), "utf8");
+  assert.match(source, /openssl rand -hex 32 > "\$tmp\/k"/);
+  assert.doesNotMatch(source, /openssl rand -out/);
+});
+
+test("bootstrap.sh: apt espera a trava do dpkg e o ufw nao limita a porta do SSH (o firewall da Hetzner ja restringe a origem)", () => {
+  const source = readFileSync(new URL("../infra/scripts/bootstrap.sh", import.meta.url), "utf8");
+  assert.match(source, /DPkg::Lock::Timeout=600/);
+  assert.match(source, /ufw allow "\$SSH_PORT\/tcp"/);
+  assert.doesNotMatch(source, /ufw limit/);
+});

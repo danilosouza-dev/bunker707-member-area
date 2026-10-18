@@ -6,6 +6,8 @@
 #   bash infra/cloud/deploy.sh marketing    Mautic: .env gerado, compose up, instalacao, smoke, backup
 # Idempotente: a segunda rodada vira atualizacao (nova imagem, migracoes novas). Precisa de HCLOUD_TOKEN
 # (abre e fecha o SSH no firewall), GITHUB_TOKEN com packages:write (GHCR) e Docker (buildx) na maquina.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 role="${1:-}"; [ "$role" = "membros" ] || [ "$role" = "marketing" ] || die "uso: deploy.sh membros|marketing"
@@ -55,13 +57,13 @@ if [ "$role" = "membros" ]; then
     log "Servidor: login no GHCR (token efemero), imagem, stack, migracoes, smoke"
     printf '%s' "$GITHUB_TOKEN" | rsh "$target" "docker login ghcr.io -u '${GITHUB_ACTOR:-danilosouza-dev}' --password-stdin >/dev/null"
     if remote "docker compose -f infra/compose/docker-compose.yml ps -q db | grep -q ."; then
-        remote "sh infra/scripts/deploy.sh --image '$image'"
+        remote "bash infra/scripts/deploy.sh --image '$image'"
     else
         set_env "$target" "$envf" APP_IMAGE "$image"
         remote "docker compose -f infra/compose/docker-compose.yml pull --quiet && docker compose -f infra/compose/docker-compose.yml up -d"
-        remote "sh infra/scripts/migrate.sh"
+        remote "bash infra/scripts/migrate.sh"
         for s in auth rest storage api-gw app; do remote "bash -c '. infra/scripts/lib.sh; wait_healthy $s 300'"; done
-        remote "sh infra/scripts/smoke.sh"
+        remote "bash infra/scripts/smoke.sh"
     fi
     remote "docker logout ghcr.io >/dev/null 2>&1 || true"
 
@@ -73,8 +75,9 @@ select vault.create_secret('$tick_token', 'jobs_tick_token', 'Token do tick') wh
 SQL
 
     log "Backup: repositorio restic no Storage Box, timer diario e primeiro backup"
-    remote "sh infra/scripts/backup.sh --init"
-    remote "sudo sh infra/scripts/backup.sh --install-timer >/dev/null && sudo systemctl start bunker707-backup.service && tail -n 3 /var/backups/bunker707/ultimo-sucesso 2>/dev/null || true"
+    remote "bash infra/scripts/backup.sh --init"
+    remote "sudo bash infra/scripts/backup.sh --install-timer >/dev/null && sudo systemctl start bunker707-backup.service"
+    remote "cat /var/backups/bunker707/ultimo-sucesso 2>/dev/null || true"
     remote "sudo journalctl -u bunker707-backup -n 5 --no-pager"
     echo
     echo "App no ar: https://$APP_DOMAIN (versao sha-$commit). Supabase: https://$API_DOMAIN. Studio: https://$STUDIO_DOMAIN (so STUDIO_ALLOWED_IPS)."
@@ -93,11 +96,12 @@ else
     else
         remote "docker compose -f infra/mautic/docker-compose.yml --profile borda pull --quiet && docker compose -f infra/mautic/docker-compose.yml --profile borda up -d"
     fi
-    remote "$extra sh infra/mautic/scripts/install.sh"
-    remote "$extra sh infra/mautic/scripts/smoke.sh"
+    remote "$extra bash infra/mautic/scripts/install.sh"
+    remote "$extra bash infra/mautic/scripts/smoke.sh"
     log "Backup do Mautic: repositorio restic, timer e primeiro backup"
-    remote "$extra sh infra/mautic/scripts/backup.sh --init"
-    remote "sudo $extra sh infra/mautic/scripts/backup.sh --install-timer >/dev/null && sudo systemctl start bunker707-mautic-backup.service; sudo journalctl -u bunker707-mautic-backup -n 5 --no-pager"
+    remote "$extra bash infra/mautic/scripts/backup.sh --init"
+    remote "sudo $extra bash infra/mautic/scripts/backup.sh --install-timer >/dev/null && sudo systemctl start bunker707-mautic-backup.service"
+    remote "sudo journalctl -u bunker707-mautic-backup -n 5 --no-pager"
     echo
     echo "Mautic no ar: https://$MAUTIC_DOMAIN/s/login (usuario bunker707; senha MAUTIC_ADMIN_PASSWORD no .env do servidor)."
     echo "Falta: secrets-marketing (MAUTIC_MAILER_DSN com a chave do Resend)."

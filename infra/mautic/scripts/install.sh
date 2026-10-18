@@ -3,6 +3,8 @@
 # administrador): cria o esquema no MySQL e a conta do administrador com os valores do .env.
 #   sh infra/mautic/scripts/install.sh
 # Idempotente: se o Mautic ja esta instalado, nao faz nada. O compose precisa estar no ar (up -d).
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/_env.sh"
 

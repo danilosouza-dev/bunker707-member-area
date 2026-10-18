@@ -76,7 +76,10 @@ server_ip6() {
 # ---- firewall da Hetzner ----------------------------------------------------------------------------
 # fw_rules [cidr ...]: regras JSON = 80/443 so da Cloudflare, ICMP, e 22 so dos CIDRs informados (nenhum = sem SSH).
 fw_rules() {
-    local cf_json; cf_json=$(bash "$REPO_ROOT/infra/scripts/cloudflare-ips.sh" --json)
+    # A lista da Cloudflare e baixada uma vez por execucao e reaproveitada (o fechamento do SSH no trap
+    # nao pode depender da rede naquele instante).
+    if [ -z "${CF_IPS_JSON:-}" ]; then CF_IPS_JSON=$(bash "$REPO_ROOT/infra/scripts/cloudflare-ips.sh" --json); export CF_IPS_JSON; fi
+    local cf_json="$CF_IPS_JSON"
     python3 -I - "$cf_json" "$@" <<'PY'
 import json, sys
 cf = json.loads(sys.argv[1]); ssh = [c for c in sys.argv[2:] if c]
@@ -119,11 +122,13 @@ fw_open_ssh() {  # fw_open_ssh SERVER_NAME
     fw_rules "$(cidr_or_empty "$me")" "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-open-$name.json"
     hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-open-$name.json"
     FW_OPENED="${FW_OPENED:-} $1"
-    trap 'fw_close_all' EXIT
+    trap 'set +e; fw_close_all' EXIT
 }
 fw_close_all() {
     local s name
     for s in ${FW_OPENED:-}; do
+        ssh -o "ControlPath=$WORK_DIR/cm-%C" -O exit "$DEPLOY_USER@$(server_ip4 "$s")" 2>/dev/null || true
+        ssh -o "ControlPath=$WORK_DIR/cm-%C" -O exit "root@$(server_ip4 "$s")" 2>/dev/null || true
         name=$(fw_name "$s")
         fw_rules "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-close-$name.json"
         hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-close-$name.json" && printf 'SSH do %s fechado.\n' "$s" || warn "nao consegui fechar o SSH do $s; rode a etapa status."
@@ -138,7 +143,10 @@ deploy_key() {
     node "$CLOUD_DIR/deploy-key.mjs" --out "$KEY_PATH" >/dev/null
 }
 deploy_public_key() { deploy_key; cat "$KEY_PATH.pub"; }
-SSH_OPTS=(-i "$KEY_PATH" -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$KNOWN_HOSTS" -o ConnectTimeout=20 -o BatchMode=yes -o ServerAliveInterval=30 -o LogLevel=ERROR)
+# ControlMaster: uma conexao TCP por host, reaproveitada por rsh, rcopy e wait_ssh (dezenas de comandos
+# em sequencia sem abrir dezenas de conexoes; o sshd e o fail2ban veriam isso como ataque).
+SSH_OPTS=(-i "$KEY_PATH" -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$KNOWN_HOSTS" -o ConnectTimeout=20 -o BatchMode=yes -o ServerAliveInterval=30 -o LogLevel=ERROR
+          -o ControlMaster=auto -o "ControlPath=$WORK_DIR/cm-%C" -o ControlPersist=10m)
 rsh()   { local target="$1"; shift; ssh "${SSH_OPTS[@]}" "$target" "$@"; }
 rcopy() { scp "${SSH_OPTS[@]}" "$@"; }
 wait_ssh() {  # wait_ssh user@host [tentativas]
@@ -156,12 +164,14 @@ sync_repo() {  # sync_repo user@host
     rsh "$target" "cd '$REMOTE_DIR' && git rev-parse HEAD >/dev/null 2>&1 || true; echo '$(git -C "$REPO_ROOT" rev-parse HEAD)' > '$REMOTE_DIR/.deployed-commit'"
 }
 # set_env user@host ARQUIVO CHAVE VALOR: grava CHAVE=VALOR no .env remoto (troca a linha ou acrescenta).
+# O valor vai como argumento em base64 (aguenta qualquer caractere); o stdin fica so com o programa.
 set_env() {
-    local target="$1" file="$2" key="$3" value="$4"
-    printf '%s' "$value" | rsh "$target" "python3 -I - '$file' '$key'" <<'PY'
-import sys, re, os
+    local target="$1" file="$2" key="$3" value="$4" b64
+    b64=$(printf '%s' "$value" | base64 -w0)
+    rsh "$target" "python3 -I - '$file' '$key' '$b64'" <<'PY'
+import base64, os, re, sys
 path, key = sys.argv[1], sys.argv[2]
-value = sys.stdin.read()
+value = base64.b64decode(sys.argv[3]).decode("utf-8")
 lines = open(path, encoding="utf-8").read().split("\n") if os.path.exists(path) else []
 pattern = re.compile(r"^%s=" % re.escape(key))
 done = False
@@ -169,7 +179,8 @@ for i, line in enumerate(lines):
     if pattern.match(line):
         lines[i] = f"{key}={value}"; done = True; break
 if not done:
-    if lines and lines[-1] != "": lines.append("")
+    while lines and lines[-1] == "":
+        lines.pop()
     lines.append(f"{key}={value}")
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as fh: fh.write("\n".join(lines).rstrip("\n") + "\n")

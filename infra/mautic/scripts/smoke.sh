@@ -3,6 +3,8 @@
 #   sh infra/mautic/scripts/smoke.sh
 # Confere pelo endereco publico: tela de login (200), script de rastreio (200), instalador fechado para
 # quem nao esta na allowlist (403; ou 302/404 se o Mautic ja instalado o redireciona) e o worker/cron no ar.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/_env.sh"
 
