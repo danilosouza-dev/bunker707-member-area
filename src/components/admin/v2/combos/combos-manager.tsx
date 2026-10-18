@@ -71,8 +71,10 @@ function fieldErrorsFrom(failure: ActionFailure): FieldErrors {
   return {
     cohortName: pick("cohortName"),
     description: pick("description"),
+    hotmartProductId: pick("hotmartProductId"),
     name: pick("name"),
-    productIds: pick("productIds") ?? pick("productIds.0")
+    productIds: pick("productIds") ?? pick("productIds.0"),
+    tictoProductId: pick("tictoProductId")
   };
 }
 
@@ -415,6 +417,8 @@ function ComboForm({ canEdit, cohorts, combo, onDirtyChange, onSaved, onSavingCh
   const cohortListId = `${FORM_ID}-turmas`;
   const descriptionHint = `${form.description.length}/300`;
   const cohortHint = `Quem chega por este pacote entra nesta turma. Vazio: ${DEFAULT_COHORT_NAME}.`;
+  const hotmartHint = "O número do produto em Hotmart › Produtos. Com ele, a venda aprovada libera todos os produtos do pacote; reembolso e chargeback tiram o acesso a todos.";
+  const tictoHint = "O número (ID) do produto no painel da Ticto. Com ele, a venda aprovada libera todos os produtos do pacote; reembolso e chargeback tiram o acesso a todos.";
   const productsHint = "Só produtos vendidos sozinhos entram num pacote.";
 
   function update<Key extends keyof ComboFormState>(field: Key, value: ComboFormState[Key]) {
@@ -424,7 +428,7 @@ function ComboForm({ canEdit, cohorts, combo, onDirtyChange, onSaved, onSavingCh
     setErrors((current) => ({ ...current, [field]: undefined }));
   }
 
-  function validateField(field: "cohortName" | "description" | "name") {
+  function validateField(field: "cohortName" | "description" | "hotmartProductId" | "name" | "tictoProductId") {
     const result = comboSchema.shape[field].safeParse(form[field]);
     setErrors((current) => ({ ...current, [field]: result.success ? undefined : result.error.issues[0]?.message }));
   }
@@ -552,6 +556,36 @@ function ComboForm({ canEdit, cohorts, combo, onDirtyChange, onSaved, onSavingCh
               <option key={cohort} value={cohort} />
             ))}
           </datalist>
+          <AdminField error={errors.hotmartProductId} hint={hotmartHint} id="pacote-hotmart" label="Código do pacote na Hotmart" optional>
+            <Input
+              aria-describedby={fieldDescribedBy("pacote-hotmart", { error: errors.hotmartProductId, hint: hotmartHint })}
+              aria-invalid={errors.hotmartProductId ? true : undefined}
+              autoComplete="off"
+              className={cn(adminInputClass, "max-w-80 tabular-nums")}
+              id="pacote-hotmart"
+              inputMode="numeric"
+              maxLength={120}
+              onBlur={() => validateField("hotmartProductId")}
+              onChange={(event) => update("hotmartProductId", event.target.value)}
+              placeholder="Ex.: 1234567"
+              value={form.hotmartProductId}
+            />
+          </AdminField>
+          <AdminField error={errors.tictoProductId} hint={tictoHint} id="pacote-ticto" label="Código do pacote na Ticto" optional>
+            <Input
+              aria-describedby={fieldDescribedBy("pacote-ticto", { error: errors.tictoProductId, hint: tictoHint })}
+              aria-invalid={errors.tictoProductId ? true : undefined}
+              autoComplete="off"
+              className={cn(adminInputClass, "max-w-80 tabular-nums")}
+              id="pacote-ticto"
+              inputMode="numeric"
+              maxLength={120}
+              onBlur={() => validateField("tictoProductId")}
+              onChange={(event) => update("tictoProductId", event.target.value)}
+              placeholder="Ex.: 268"
+              value={form.tictoProductId}
+            />
+          </AdminField>
           <AdminField hint={COMBO_STATUS_HINTS[form.status]} id="pacote-situacao" label="Situação">
             <PillGroup
               ariaLabel="Situação do pacote"

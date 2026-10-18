@@ -6,7 +6,7 @@ import "server-only";
 // (historico). Sempre com a chave de servico, so a partir de Server Actions e paginas do admin que
 // ja passaram por requireRole/requirePageAdmin.
 
-import { toDbError } from "@/server/db/pending-migration";
+import { isMissingSchemaObjectError, toDbError } from "@/server/db/pending-migration";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import type { EntitlementStatus, EntitlementTargetType } from "./model";
 
@@ -189,6 +189,41 @@ export function fetchEntitlements(db: StudentsDb, filter: { targetId?: string; u
   });
 }
 
+export async function fetchEntitlementsByIds(db: StudentsDb, entitlementIds: readonly string[]): Promise<EntitlementRow[]> {
+  if (entitlementIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await db.from("entitlements").select(ENTITLEMENT_COLUMNS).in("id", [...entitlementIds]);
+  failOnError(error, "Acessos");
+
+  return (data ?? []) as EntitlementRow[];
+}
+
+/**
+ * A equipe mexeu num acesso (revogou, suspendeu, reativou ou reabriu): TODOS os vinculos de venda dele
+ * (sale_grants, migracao 202610170008) passam a closed_by = admin e deixam de mandar nos reembolsos, os
+ * abertos e tambem os que uma venda ja tinha fechado (senao o reembolso repetido de uma compra antiga
+ * fecharia o que a equipe acabou de reabrir). Banco sem a tabela nao impede a acao da equipe.
+ */
+export async function closeSaleGrantsByTeam(db: StudentsDb, entitlementIds: readonly string[]) {
+  if (entitlementIds.length === 0) {
+    return;
+  }
+
+  const ids = [...entitlementIds];
+  const [open, closed] = await Promise.all([
+    db.from("sale_grants").update({ closed_at: new Date().toISOString(), closed_by: "admin" }).in("entitlement_id", ids).is("closed_at", null),
+    db.from("sale_grants").update({ closed_by: "admin" }).in("entitlement_id", ids).not("closed_at", "is", null).neq("closed_by", "admin")
+  ]);
+
+  for (const { error } of [open, closed]) {
+    if (error && !isMissingSchemaObjectError(error)) {
+      console.error(`[alunos] vinculos de venda nao fechados pela equipe: ${error.message}`);
+    }
+  }
+}
+
 export async function fetchEntitlement(db: StudentsDb, entitlementId: string): Promise<EntitlementRow | null> {
   const { data, error } = await db.from("entitlements").select(ENTITLEMENT_COLUMNS).eq("id", entitlementId).maybeSingle();
   failOnError(error, "Acesso");
@@ -324,7 +359,7 @@ export async function insertEntitlement(db: StudentsDb, row: EntitlementInsert):
 export async function updateEntitlement(
   db: StudentsDb,
   entitlementId: string,
-  patch: Partial<Pick<EntitlementRow, "ends_at" | "starts_at" | "status">>
+  patch: Partial<Pick<EntitlementRow, "ends_at" | "source_event_id" | "source_provider" | "starts_at" | "status">>
 ): Promise<EntitlementRow> {
   const { data, error } = await db
     .from("entitlements")

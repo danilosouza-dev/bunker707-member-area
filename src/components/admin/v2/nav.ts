@@ -103,7 +103,8 @@ export const adminNavItems: readonly AdminNavItem[] = [
     children: [
       { exact: true, href: "/admin/configuracoes", label: "Todas as configurações" },
       { href: "/admin/configuracoes/equipe", label: "Equipe", requires: ["settings.team"] },
-      { href: "/admin/configuracoes/ia", label: "Tutor IA", requires: ["settings.ai"] }
+      { href: "/admin/configuracoes/ia", label: "Tutor IA", requires: ["settings.ai"] },
+      { href: "/admin/configuracoes/vendas", label: "Vendas", requires: ["settings.sales"] }
     ],
     href: "/admin/configuracoes",
     id: "configuracoes",
@@ -236,7 +237,8 @@ const mobileTitleOverrides: readonly AdminNavChild[] = [
   { href: "/admin/produtos/importar", label: "Importar" },
   { href: "/admin/produtos/pacotes", label: "Pacotes" },
   { href: "/admin/configuracoes/equipe", label: "Equipe" },
-  { href: "/admin/configuracoes/ia", label: "Tutor IA" }
+  { href: "/admin/configuracoes/ia", label: "Tutor IA" },
+  { href: "/admin/configuracoes/vendas", label: "Vendas" }
 ];
 
 /**

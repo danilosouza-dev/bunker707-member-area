@@ -7,6 +7,7 @@ import "server-only";
 import { cache } from "react";
 import { normalizeLessonVideoConfig } from "@/lib/video-embed";
 import { PendingMigrationError, isMissingSchemaObjectError } from "@/server/db/pending-migration";
+import { fetchSalesLinksFor } from "@/server/payments/store";
 import { CatalogNotFoundError } from "./errors";
 import {
   audienceFromColumns,
@@ -417,23 +418,27 @@ export const getProductAccess: GetProductAccess = async (productId) => {
   }
 
   const { header, row } = loaded;
-  const [cohorts, combos, studentsWithAccess] = await Promise.all([
+  const [cohorts, combos, studentsWithAccess, salesLinks] = await Promise.all([
     loadCohorts(productId),
     loadCombosFor(productId),
-    countActiveAccess(productId)
+    countActiveAccess(productId),
+    fetchSalesLinksFor(catalogDb(), { productIds: [productId] })
   ]);
+  const codeOn = (provider: "hotmart" | "ticto") => salesLinks.find((link) => link.provider === provider)?.external_product_id ?? null;
 
   return {
     audience: header.audience,
     cohorts,
     combos,
     header,
+    hotmartProductId: codeOn("hotmart"),
     maxStudents: typeof row.max_students === "number" && row.max_students > 0 ? row.max_students : null,
     purchaseLabel: customPurchaseLabelOf(row.purchase_label),
     purchaseTarget: row.purchase_target === "new_tab" ? "new_tab" : "same_tab",
     purchaseUrl: row.purchase_url?.trim() || null,
     release: releaseRuleToPhrase(row.release_rule),
-    studentsWithAccess
+    studentsWithAccess,
+    tictoProductId: codeOn("ticto")
   };
 };
 

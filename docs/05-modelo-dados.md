@@ -383,21 +383,24 @@ Regras:
 
 ### integration_settings
 
-- id;
-- provider: hotmart, ticto, tiktok, kiwify, manual;
-- webhook_url;
-- secret_status;
+Implementada na migracao `202610170003_sales_webhooks.sql` (17/10/2026), uma linha por plataforma (as tres ja inseridas pela migracao).
+
+- id uuid;
+- provider: hotmart, ticto, kiwify (unico);
 - status: not_configured, configured, needs_attention;
-- events jsonb;
-- last_sync_at;
-- created_at;
-- updated_at.
+- webhook_url (o endereco mostrado ao produtor, informativo);
+- secret (o SHA-256 em hexadecimal do token que a plataforma manda em cada pedido; Hotmart: hottok. O token em si nunca e gravado: um dump nao permite forjar uma venda. So o servidor le, por `fetchIntegrationSecret`; a tela nunca recebe a coluna);
+- secret_status: missing, set (consistente com `secret` por check);
+- secret_updated_at;
+- events jsonb (lista dos eventos da plataforma que mudam acesso, para a tela dizer o que marcar la);
+- last_sync_at, last_error;
+- created_at, updated_at.
 
 Regras:
 
-- segredos reais de webhook ficam somente no servidor ou gerenciador de segredos;
+- segredos reais de webhook ficam somente no servidor: a coluna `secret` guarda o hash do token numa tabela so de `service_role`, e `saveSalesSecret` (settings.sales) grava sem devolver; depois de salvo, a tela mostra apenas "Token guardado em <data>" e o botao Trocar;
 - dados de plataforma externa sao entrada para processamento, nao fonte de autorizacao;
-- cada provider deve ter adapter proprio.
+- cada provider deve ter adapter proprio (`src/server/payments/adapters.ts`); plataforma sem adaptador aparece como "Em configuracao", nunca "Conectada".
 
 ## Agentes de IA
 
@@ -1294,26 +1297,75 @@ O admin antigo (`/admin/legado`, `src/components/admin-dashboard.tsx`, rotas `/a
 
 ## Webhooks
 
+Migracao `202610170003_sales_webhooks.sql` (17/10/2026). Fluxo em `docs/04-arquitetura-tecnica.md`, secao Webhooks externos; tela em `docs/17` §1.10. Nada aqui e lido pelo navegador: RLS ligado, nada para `anon`/`authenticated`, so `service_role`.
+
 ### webhook_events
 
-Guarda o evento bruto de plataformas externas.
+Guarda o evento bruto de plataformas externas (so depois do token conferido) e o resultado do processamento.
 
-- id;
-- provider;
-- external_event_id;
-- event_type;
-- payload jsonb;
+- id uuid;
+- provider: hotmart, ticto, kiwify;
+- external_event_id (id do evento na plataforma; Hotmart: `id` do payload, ou `transaction:evento` sem ele; Ticto, que nao manda id de evento: `transaction.hash:item.product_id:status:status_date`, ou `order.hash` no lugar da transacao; sem `status_date`, um digest do payload sem o token; acima de 200 caracteres, `sha256:<hex>` da chave inteira);
+- event_type (nome como a plataforma manda, ex.: `PURCHASE_APPROVED` na Hotmart, `authorized` na Ticto);
+- normalized_type: purchase_approved, refund, chargeback, subscription_canceled, other;
+- payload jsonb (<= 512 KB; so os campos permitidos: envelope, produto, compra, assinatura e e-mail, nome e telefone do comprador; token, documento, endereco, afiliados e comissoes nunca entram; evento que nao muda acesso guarda so o envelope; exclusao do aluno deixa so o envelope com `anonymized: true`; na Ticto, a mesma regra: envelope, pedido, transacao, produto e oferta, bumps, assinaturas e nome, e-mail e telefone do comprador, sem token, link de login direto, CPF/CNPJ, endereco, cartao, produtor, afiliados e comissoes);
+- transaction_id (migracao `202610170005`; id da compra na plataforma, igual em todos os eventos da mesma venda; indice (provider, transaction_id); a migracao preenche as linhas anteriores a ela a partir de `payload.data.purchase.transaction`);
+- processing_started_at (migracao `202610170005`; inicio do processamento ou do reprocesso; reenvio de evento preso em `received` reivindica a linha por update condicional nesta coluna);
 - signature_valid;
 - processing_status: received, processed, failed, ignored;
-- processed_at;
-- error_message;
-- created_at.
+- outcome: access_granted, access_revoked, access_suspended, access_restored (migracao `202610170008`), ignored, failed;
+- outcome_detail (motivo escrito, <= 500);
+- buyer_email, external_product_id, external_product_name (para a lista da tela, mesmo sem ligacao);
+- product_id, combo_id (alvo resolvido, sem chave estrangeira: o historico fica se o produto sair);
+- user_id -> auth.users (set null);
+- received_at, processed_at;
+- error_message (<= 2.000);
+- anonymized_at: quando a retencao de 12 meses apagou payload, buyer_email e error_message (migracao 202610170004).
 
 Obrigatorio:
 
-- idempotencia por provider + external_event_id;
+- idempotencia por provider + external_event_id (indice unico; repetido responde 200 sem reprocessar);
 - guardar payload bruto;
-- nao confiar no payload sem validacao.
+- nao confiar no payload sem validacao: o acesso so muda por `entitlements`, via `src/server/students/access.ts`.
+
+Retencao: 12 meses depois de `received_at` (docs/17 §2.4), `public.prune_personal_data()` (secao Retencao de dados pessoais) troca `payload` por `{}`, anula `buyer_email` e `error_message` e marca `anonymized_at`. A linha fica: `provider` + `external_event_id` continuam barrando o evento repetido, `transaction_id` e `normalized_type` (migracao `202610170005`) continuam barrando a compra reenviada depois de reembolso ou chargeback (`hasClosingEventForTransaction`), e a tela de Vendas mostra "Dados apagados (12 meses)" sem o botao Reprocessar (`canReprocessSaleEvent` olha `anonymized_at`; a acao responde 409).
+
+### sales_product_links
+
+Codigo do produto na plataforma de venda ligado a um produto ou a um pacote da escola.
+
+- id uuid;
+- provider: hotmart, ticto, kiwify;
+- external_product_id (Hotmart: o numero do produto, `data.product.id`; Ticto: o id do produto, `item.product_id`, qualquer que seja a oferta; os order bumps da Ticto, `bumps[].product_id`, sao ligados do mesmo jeito, cada um ao proprio produto ou pacote);
+- product_id -> content_items (cascade) ou combo_id -> product_combos (cascade), exatamente um;
+- created_by, created_at, updated_at.
+
+Indices unicos: (provider, external_product_id), (provider, product_id) e (provider, combo_id), inteiros (nulos nao conflitam) para o upsert do servidor. Gravado por "Codigo do produto na Hotmart" e "Codigo do produto na Ticto" em Produtos > Acesso e venda (`updateProductAccess`, `catalog.access`) e em Pacotes (`saveCombo`); um codigo por plataforma em cada alvo, e o mesmo numero pode existir nas duas plataformas. Codigo ja ligado a outro alvo e recusado no campo antes de gravar o produto ou o pacote (`assertSalesLinksAvailable`). Venda de pacote libera todos os produtos dele; reembolso ou chargeback de pacote tira todos (docs/17 §1.6.8); pacote em rascunho ou pausado nao libera nada.
+
+### entitlements.source_event_id nas vendas
+
+Compra pela plataforma grava `source_provider` = `hotmart` ou `ticto` e `source_event_id` = id da compra (Hotmart: `purchase.transaction`; Ticto: `transaction.hash`; sem ele, o id do evento). Quando um evento libera mais de um produto (pacote), cada linha leva o sufixo `:<produto>` (indice unico `(user_id, source_event_id)`). `warranty_expire_date` chega normalizado (`warrantyEndsAt`) mas ainda nao e gravado: a coluna `warranty_ends_at` continua o ponto de extensao descrito em §entitlements.
+
+### sale_grants
+
+Migracao `202610170008_sale_grants.sql`. Vinculo venda -> acesso: um acesso (um por aluno e produto) pode ser sustentado por mais de uma venda, ou ter nascido da equipe e so ganhado prazo numa venda; `source_event_id` guarda uma origem so.
+
+- id uuid;
+- provider; transaction_id (a compra; igual a `entitlements.source_event_id` da venda, sem o sufixo do produto);
+- subscription_code (Hotmart: `subscriber.code`; Ticto: `subscriptions[0].id`; cobrancas da mesma assinatura nao sustentam o acesso umas das outras; o cancelamento fecha todos os vinculos da assinatura e a reativacao da Ticto, `uncanceled`, reabre o vinculo que ele fechou);
+- user_id -> auth.users (cascade); entitlement_id -> entitlements (cascade); product_id;
+- opened: true quando a venda abriu o acesso (nao existia ou estava fechado); false quando so estendeu um acesso aberto;
+- previous_ends_at: prazo que o acesso tinha antes (so quando estendeu), para o reembolso devolver;
+- webhook_event_id -> webhook_events (set null); closed_at, closed_by (refund, chargeback, subscription_canceled, admin);
+- created_at (o vinculo mais antigo do acesso e o que manda na decisao).
+
+`closed_by = admin`: a equipe revogou, suspendeu, reativou ou reabriu o acesso (`src/server/students/access.ts`); TODOS os vinculos dele, abertos ou ja fechados por uma venda, passam a `admin` e deixam de mandar nos reembolsos (o reembolso repetido de uma compra antiga nao fecha o que a equipe acabou de reabrir).
+
+Indices: unico (provider, transaction_id, entitlement_id); (entitlement_id); (provider, subscription_code). So `service_role`. Nenhum dado pessoal (so ids). Regras de decisao em `decideEntitlementAfterSale` (`src/server/payments/model.ts`) e em docs/04. A mesma migracao acrescenta o resultado `access_restored` ("Prazo devolvido") em `webhook_events.outcome` e preenche um vinculo (`opened = true`) para cada acesso ativo que uma compra aprovada ja registrada em `webhook_events` liberou antes da tabela existir (pelo `transaction_id` da 0005; nada em producao hoje).
+
+### admin_access_origins(p_start, p_end, p_content_id)
+
+RPC `security invoker`, so `service_role`: acessos criados na janela por `source_provider` (hotmart, manual...), sem a equipe, com as mesmas regras de `admin_access_buckets`. Alimenta o rodape de "Novos acessos" no Hoje ("3 pela Hotmart · 2 pela equipe").
 
 ## Jobs
 
@@ -1336,7 +1388,7 @@ Seguranca: RLS ligada sem policies e `revoke all` de `anon` e `authenticated`; s
 
 Retencao: `public.prune_job_history()`, agendada diariamente, apaga linhas com sucesso apos 30 dias e com falha apos 90 dias.
 
-Agendamentos (`cron.job`): `bunker707-jobs-tick` (a cada minuto, chama `public.enqueue_jobs_tick()`) e `bunker707-jobs-history-prune` (diario). Segredos no Vault: `jobs_tick_url` e `jobs_tick_token`.
+Agendamentos (`cron.job`): `bunker707-jobs-tick` (a cada minuto, chama `public.enqueue_jobs_tick()`), `bunker707-jobs-history-prune` (diario) e `bunker707-personal-data-prune` (diario, chama `public.prune_personal_data()`; secao Retencao de dados pessoais). Segredos no Vault: `jobs_tick_url` e `jobs_tick_token`.
 
 ## E-mail transacional
 
@@ -1349,7 +1401,7 @@ Fila de saida: quem dispara (venda por webhook, Adicionar aluno, importacao) ins
 - id uuid, chave primaria;
 - kind: `welcome` (boas-vindas) ou `purchase` (acesso liberado por compra);
 - user_id -> auth.users (set null ao excluir a conta);
-- to_email, subject, html, text: o e-mail pronto, montado pelo template na hora de enfileirar;
+- to_email, subject, html, text: o e-mail pronto, montado pelo template na hora de enfileirar (`to_email` e `html` ficam nulos so depois da retencao; check no banco);
 - idempotency_key: unica (`welcome:<user_id>`, `purchase:<provedor>:<evento>:<user_id>`); a mesma chave vai ao provedor;
 - status: queued, sending (reservada por um tick), sent, failed, bounced, complained;
 - attempts: tentativas feitas; na quinta falha passageira a linha vira `failed`;
@@ -1358,11 +1410,12 @@ Fila de saida: quem dispara (venda por webhook, Adicionar aluno, importacao) ins
 - provider, provider_message_id: quem enviou e o id devolvido (o webhook localiza a linha por ele);
 - sent_at, delivered_at, bounced_at;
 - metadata jsonb (<= 4 KB): so ids e rotulos curtos (`password_hint`, `product_ids`, `source_provider`, `source_event_id`);
-- created_at, updated_at (gatilho `set_updated_at`).
+- created_at, updated_at (gatilho `set_updated_at`);
+- anonymized_at: quando a retencao apagou to_email, html, text e last_error (migracao 202610170004).
 
 Indices: parcial em `next_attempt_at` para `status in (queued, sending)` (o que o job busca), parcial em `sent_at` (limite diario), parcial em `provider_message_id` (webhook) e `(user_id, created_at desc)`.
 
-Seguranca: RLS ligada sem policies, `revoke all` de `anon` e `authenticated`; so o servidor (service role) le e grava. O HTML guardado tem o e-mail e o nome do aluno: e dado pessoal e segue a retencao da conta (some com `user_id` nulo na exclusao, mas a linha fica; limpeza por idade fica como pendencia).
+Seguranca: RLS ligada sem policies, `revoke all` de `anon` e `authenticated`; so o servidor (service role) le e grava. O HTML guardado tem o e-mail e o nome do aluno: e dado pessoal. A exclusao da conta anula `user_id`; a retencao por idade (secao Retencao de dados pessoais) anula `to_email`, `html`, `text` e `last_error` 90 dias depois de criada a linha enviada e 180 dias nos demais casos, mantendo `kind`, `status`, `idempotency_key`, datas e `metadata`.
 
 ### email_webhook_events
 
@@ -1376,7 +1429,21 @@ Payload bruto de cada evento do provedor, para auditoria e reprocesso.
 - outbox_id -> email_outbox (set null): a linha que o evento alterou, quando havia;
 - error: falha ao aplicar, se houve.
 
-Seguranca: RLS ligada sem policies, nada para `anon`/`authenticated`; so o servidor insere e atualiza. Eventos de e-mails que nao sairam da fila (Auth do Supabase pelo mesmo Resend) ficam so registrados.
+Seguranca: RLS ligada sem policies, nada para `anon`/`authenticated`; so o servidor insere e atualiza. Eventos de e-mails que nao sairam da fila (Auth do Supabase pelo mesmo Resend) ficam so registrados. Retencao: apagados 90 dias depois de `received_at` pela mesma rotina (secao Retencao de dados pessoais); o payload traz o destinatario, e `delivered_at`, `bounced_at` e `last_error` ja ficaram em `email_outbox`.
+
+## Retencao de dados pessoais
+
+Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.
+
+`public.prune_personal_data()` (security definer, `search_path` fixo; so `service_role` executa, `anon`/`authenticated` recebem `permission denied`) roda todo dia as 06:23 UTC pelo agendamento `bunker707-personal-data-prune` e devolve quantas linhas mudou em cada tabela:
+
+| Tabela | Quando | O que sai | O que fica |
+|---|---|---|---|
+| `webhook_events` | 12 meses depois de `received_at` | `payload` (vira `{}`), `buyer_email`, `error_message` | provider, `external_event_id` (idempotencia), `transaction_id` e tipo (reembolso antigo segue barrando a compra reenviada), resultado, motivo, alvo, `user_id`, datas; `anonymized_at` marcado |
+| `email_outbox` | 90 dias depois de `created_at` se `sent`; 180 dias nos demais status (falha, bounce, reclamacao e o que ainda estava na fila, que vira `failed` com o motivo) | `to_email`, `html`, `text`, `last_error` | `kind`, `user_id`, `subject`, `idempotency_key`, `status`, datas, `metadata`; `anonymized_at` marcado |
+| `email_webhook_events` | 90 dias depois de `received_at` | a linha inteira | nada (entrega, bounce e motivo ja estao em `email_outbox`) |
+
+Fora da rotina de proposito: `sale_grants` (migracao `202610170008`) so guarda ids (transacao, codigo da assinatura, aluno, acesso, produto) e datas, sem dado pessoal; sai junto com a conta (`on delete cascade`). Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta anula `user_id` nas duas tabelas (`on delete set null`), e "Excluir aluno" ja anonimiza na hora as vendas do aluno (`anonymizeWebhookEventsFor`); prazos novos sao mudanca de migracao, com o teste ajustado.
 
 ## Suporte
 

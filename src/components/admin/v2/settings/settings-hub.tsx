@@ -15,9 +15,9 @@ import { StatusChip, type StatusChipTone } from "../status-chip";
 import { adminCard, adminTransition } from "../styles";
 
 // Hub de Configuracoes (docs/17 §1.10; prototipo aprovado, tela 14): uma lista, uma linha por
-// grupo, com o estado honesto de cada um. Equipe e Tutor IA ja tem tela; o resto diz "Em breve" e nao
-// e clicavel (nenhuma linha leva a uma tela vazia). Cada pessoa ve so as linhas que pode usar: Equipe
-// e Vendas so o dono; Tutor IA quem tem settings.ai.
+// grupo, com o estado honesto de cada um. Equipe, Tutor IA e Vendas ja tem tela; o resto diz "Em breve"
+// e nao e clicavel (nenhuma linha leva a uma tela vazia). Cada pessoa ve so as linhas que pode usar:
+// Equipe e Vendas so o dono; Tutor IA quem tem settings.ai.
 
 export type SettingsHubStatus = { label: string; tone: StatusChipTone };
 
@@ -51,7 +51,11 @@ function teamStatus(count: number | null): SettingsHubStatus | null {
   return { label: count === 1 ? "1 pessoa" : `${count} pessoas`, tone: "neutral" };
 }
 
-export function buildSettingsHubEntries(aiStatus: SettingsHubStatus | null, access: SettingsHubAccess = FULL_ACCESS): SettingsHubEntry[] {
+export function buildSettingsHubEntries(
+  aiStatus: SettingsHubStatus | null,
+  access: SettingsHubAccess = FULL_ACCESS,
+  salesStatus: SettingsHubStatus | null = null
+): SettingsHubEntry[] {
   const entries: SettingsHubEntry[] = [
     {
       description: "Quem entra no admin e o que cada pessoa pode fazer: dono, administrador, editor, professor, suporte, analista ou personalizado.",
@@ -77,10 +81,11 @@ export function buildSettingsHubEntries(aiStatus: SettingsHubStatus | null, acce
       title: "Tutor IA"
     },
     {
-      description: "Hotmart e Ticto liberando o acesso sozinhas quando a venda chega. Até lá, o acesso é liberado à mão.",
+      description: "Hotmart e Ticto liberando o acesso sozinhas quando a venda chega; Kiwify em configuração. O que chegou aparece aqui.",
+      href: "/admin/configuracoes/vendas",
       icon: Tag,
       id: "vendas",
-      status: comingSoon,
+      status: salesStatus,
       title: "Vendas"
     },
     {
@@ -137,8 +142,16 @@ function EntryBody({ entry }: { entry: SettingsHubEntry }) {
   );
 }
 
-export function SettingsHub({ access, aiStatus }: { access?: SettingsHubAccess; aiStatus: SettingsHubStatus | null }) {
-  const entries = buildSettingsHubEntries(aiStatus, access);
+export function SettingsHub({
+  access,
+  aiStatus,
+  salesStatus = null
+}: {
+  access?: SettingsHubAccess;
+  aiStatus: SettingsHubStatus | null;
+  salesStatus?: SettingsHubStatus | null;
+}) {
+  const entries = buildSettingsHubEntries(aiStatus, access, salesStatus);
   const rowClass = "flex min-h-16 w-full items-center gap-4 px-4 py-3 text-left";
 
   return (

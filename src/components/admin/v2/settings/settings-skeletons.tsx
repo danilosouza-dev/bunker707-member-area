@@ -115,3 +115,21 @@ export function AiUsageSkeleton() {
     </div>
   );
 }
+
+/** Vendas: cabecalho, o cartao da Hotmart com os dois menores ao lado e a lista de vendas recebidas. */
+export function SalesSettingsSkeleton() {
+  return (
+    <AdminPage className="gap-6">
+      <LoadingStatus label="Carregando as plataformas de venda" />
+      <PageHeaderSkeleton />
+      <div aria-hidden="true" className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <SectionCardSkeleton rows={3} />
+        <div className="flex min-w-0 flex-col gap-6">
+          <SectionCardSkeleton rows={0} />
+          <SectionCardSkeleton rows={0} />
+        </div>
+      </div>
+      <SectionCardSkeleton rows={3} />
+    </AdminPage>
+  );
+}

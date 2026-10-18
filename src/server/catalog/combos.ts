@@ -14,6 +14,7 @@ import {
   type ComboRow
 } from "./combo-model";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
+import { fetchSalesLinksFor } from "@/server/payments/store";
 import type { ComboListItem, ListCombos, ProductOption } from "./types";
 
 type DbError = { message: string } | null;
@@ -77,7 +78,12 @@ async function readCombos(db: Db, comboId?: string): Promise<ComboListItem[]> {
     products = (productData ?? []) as ComboProductRow[];
   }
 
-  return mapComboRows({ accents: await readAccents(db, productIds), combos, items, products });
+  const [accents, salesLinks] = await Promise.all([
+    readAccents(db, productIds),
+    fetchSalesLinksFor(db, { comboIds: combos.map((combo) => combo.id) })
+  ]);
+
+  return mapComboRows({ accents, combos, items, products, salesLinks });
 }
 
 /** Todos os pacotes, mais recentes primeiro, com os produtos na ordem gravada. */

@@ -366,10 +366,48 @@ export type TodayAttentionState =
     }
   | { status: "error" };
 
+/** De onde vieram os acessos do periodo (Hotmart, equipe...), para o rodape do numero. */
+export type TodayAccessOrigin = { provider: string; total: number };
+
 export type TodayAccessKpiState =
-  | { previousTotal: number; series: number[]; status: "ready"; total: number }
+  | { origins: TodayAccessOrigin[]; previousTotal: number; series: number[]; status: "ready"; total: number }
   | { status: "pending-migration" }
   | { status: "error" };
+
+const ACCESS_ORIGIN_LABELS: Record<string, { long: string; short: string }> = {
+  hotmart: { long: "pela Hotmart", short: "Hotmart" },
+  kiwify: { long: "pela Kiwify", short: "Kiwify" },
+  manual: { long: "pela equipe", short: "equipe" },
+  ticto: { long: "pela Ticto", short: "Ticto" },
+  tiktok: { long: "pelo TikTok", short: "TikTok" }
+};
+
+/**
+ * Rodape de "Novos acessos" (docs/17 §1.5: a origem aparece ao passar o mouse): "3 pela Hotmart · 2 pela
+ * equipe". Sem origem lida (migracao pendente ou nada no periodo), a frase padrao.
+ */
+export function describeAccessOrigins(origins: readonly TodayAccessOrigin[]): { definition: string; definitionShort: string } {
+  const rows = origins.filter((origin) => isCount(origin.total) && origin.total > 0).sort((left, right) => right.total - left.total);
+
+  if (rows.length === 0) {
+    return { definition: "acessos liberados no período", definitionShort: "liberados no período" };
+  }
+
+  const part = (origin: TodayAccessOrigin, size: "long" | "short") => {
+    const label = ACCESS_ORIGIN_LABELS[origin.provider] ?? { long: `por ${origin.provider}`, short: origin.provider };
+
+    return `${formatCount(origin.total)} ${label[size]}`;
+  };
+
+  return {
+    definition: rows.map((origin) => part(origin, "long")).join(" · "),
+    definitionShort: rows.map((origin) => part(origin, "short")).join(" · ")
+  };
+}
+
+function formatCount(value: number) {
+  return new Intl.NumberFormat("pt-BR").format(value);
+}
 
 export type TodayByProductState =
   | { rows: TodayByProductRow[]; status: "ready" }

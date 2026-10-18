@@ -24,6 +24,10 @@ import { outboxPatchFor, type ResendWebhookEvent } from "./webhook-events";
 
 export type EmailOutboxDb = SupabaseClient;
 
+// So as colunas criadas na 202610170002. O job do tick le esta lista a cada minuto: uma coluna de migracao
+// posterior (ex.: anonymized_at, da retencao 202610170004) faria a fila inteira parar num banco que ainda
+// nao recebeu a migracao, e o deploy pode sair antes dela. Quem precisa de outra coluna pede a mais no
+// proprio select (tests/email-fila-antes-da-retencao.test.mjs confere contra o arquivo da 0002).
 export const EMAIL_OUTBOX_COLUMNS =
   "id,kind,user_id,to_email,subject,html,text,idempotency_key,status,attempts,next_attempt_at,last_error,provider,provider_message_id,sent_at,delivered_at,bounced_at,metadata,created_at,updated_at";
 
@@ -32,7 +36,8 @@ export type EmailOutboxRow = {
   bounced_at: string | null;
   created_at: string;
   delivered_at: string | null;
-  html: string;
+  /** Nulo so em linha anonimizada pela retencao (migracao 202610170004, check no banco). */
+  html: string | null;
   id: string;
   idempotency_key: string;
   kind: string;
@@ -45,7 +50,8 @@ export type EmailOutboxRow = {
   status: EmailOutboxStatus;
   subject: string;
   text: string | null;
-  to_email: string;
+  /** Nulo so em linha anonimizada pela retencao (migracao 202610170004, check no banco). */
+  to_email: string | null;
   updated_at: string;
   user_id: string | null;
 };
@@ -284,6 +290,14 @@ export async function processEmailOutbox(input: ProcessEmailOutboxInput): Promis
     }
 
     if (!(await claimEmail(db, row.id))) {
+      continue;
+    }
+
+    // Sem destinatario ou sem corpo so existe linha anonimizada pela retencao, que ja sai da fila como
+    // failed; se uma aparecer mesmo assim, encerra com o motivo em vez de mandar um e-mail vazio.
+    if (row.to_email === null || row.html === null) {
+      await updateOutbox(db, row.id, { last_error: "Sem destinatário ou sem conteúdo: linha anonimizada pela retenção.", status: "failed" satisfies EmailOutboxStatus });
+      result.failed += 1;
       continue;
     }
 

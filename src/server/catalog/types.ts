@@ -257,21 +257,29 @@ export type ProductAccess = {
   cohorts: ProductCohortSummary[];
   combos: { id: string; name: string; status: "active" | "draft" | "paused" }[];
   header: ProductHeader;
+  /** Codigo do produto na Hotmart; a venda aprovada com esse codigo libera o produto. */
+  hotmartProductId: string | null;
   maxStudents: number | null;
   purchaseLabel: string | null;
   purchaseTarget: "same_tab" | "new_tab";
   purchaseUrl: string | null;
   release: ReleasePhrase;
   studentsWithAccess: number;
+  /** Codigo do produto na Ticto; mesma regra, para vendas pela Ticto. */
+  tictoProductId: string | null;
 };
 
 export type ComboListItem = {
   cohortName: string;
   description: string;
+  /** Codigo do pacote na Hotmart; a venda aprovada com esse codigo libera todos os produtos. */
+  hotmartProductId: string | null;
   id: string;
   name: string;
   products: { accent: ProductAccent; coverUrl: string | null; id: string; title: string }[];
   status: "active" | "draft" | "paused";
+  /** Codigo do pacote na Ticto; mesma regra, para vendas pela Ticto. */
+  tictoProductId: string | null;
   updatedAt: string;
 };
 

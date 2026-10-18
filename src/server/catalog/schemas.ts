@@ -3,6 +3,7 @@
 // tests/catalog-schemas.test.mjs carrega direto pelo Node. Mensagens em portugues do produtor.
 
 import { z } from "zod";
+import { externalProductIdSchema } from "../payments/schemas";
 import { extractYouTubePlaylistId } from "../../lib/youtube-course-import";
 import { detectLessonVideo } from "../../lib/video-detect";
 import { describeVideoFileLinkProblem } from "../../lib/video-file-link";
@@ -190,11 +191,15 @@ export const updateProductDetailsSchema = z.object({
 export const updateProductAccessSchema = z.object({
   audience: productAudienceSchema.optional(),
   expectedUpdatedAt: expectedUpdatedAtSchema,
+  /** Codigo do produto na Hotmart (sales_product_links); "" ou null tira a ligacao. */
+  hotmartProductId: externalProductIdSchema.optional(),
   id: catalogIdSchema,
   maxStudents: z.number().int().min(1, "Use pelo menos 1.").max(1_000_000).nullish(),
   purchaseLabel: z.string().trim().max(40, "Use no máximo 40 caracteres.").nullish(),
   purchaseTarget: z.enum(["same_tab", "new_tab"]).optional(),
   purchaseUrl: purchaseUrlSchema.optional(),
+  /** Codigo do produto na Ticto (sales_product_links); "" ou null tira a ligacao. */
+  tictoProductId: externalProductIdSchema.optional(),
   release: releasePhraseSchema.optional()
 });
 
@@ -394,10 +399,14 @@ export const reorderFormationCoursesSchema = z.object({
 export const comboSchema = z.object({
   cohortName: z.string().trim().max(80, "Use no máximo 80 caracteres.").default(""),
   description: z.string().trim().max(300, "Use no máximo 300 caracteres.").default(""),
+  /** Codigo do pacote na Hotmart (sales_product_links); "" ou null tira a ligacao. */
+  hotmartProductId: externalProductIdSchema.optional(),
   id: catalogIdSchema.optional(),
   name: z.string().trim().min(2, "Dê um nome ao pacote.").max(80, "Use no máximo 80 caracteres."),
   productIds: z.array(catalogIdSchema).min(1, "Escolha pelo menos um produto.").max(50),
-  status: z.enum(["active", "draft", "paused"]).default("draft")
+  status: z.enum(["active", "draft", "paused"]).default("draft"),
+  /** Codigo do pacote na Ticto (sales_product_links); "" ou null tira a ligacao. */
+  tictoProductId: externalProductIdSchema.optional()
 });
 
 export const deleteComboSchema = z.object({ id: catalogIdSchema });
