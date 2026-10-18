@@ -17,7 +17,8 @@ for entry in $EQUIPE; do
     # 1. usuario existe? (admin API do GoTrue pelo gateway, com a chave secreta)
     uid=$(rsh "$target" "curl -fsS '$api/auth/v1/admin/users?page=1&per_page=1000' -H 'apikey: $secret' -H 'Authorization: Bearer $secret' | jq -r --arg e '$email' '.users[]? | select(.email==\$e) | .id' | head -n1")
     if [ -z "$uid" ]; then
-        uid=$(rsh "$target" "curl -fsS -X POST '$api/auth/v1/invite' -H 'apikey: $secret' -H 'Authorization: Bearer $secret' -H 'Content-Type: application/json' -d '{\"email\":\"$email\"}' | jq -r '.id'")
+        uid=$(rsh "$target" "curl -fsS -X POST '$api/auth/v1/invite' -H 'apikey: $secret' -H 'Authorization: Bearer $secret' -H 'Content-Type: application/json' -d '{\"email\":\"$email\"}' | jq -r '.id'" || true)
+        [ -n "$uid" ] && [ "$uid" != "null" ] || die "Convite para $email nao foi aceito pelo Auth (SMTP configurado? rode secrets-membros antes; veja: docker compose logs auth)."
         echo "  convite enviado (id $uid)"
     else
         echo "  ja existe (id $uid)"

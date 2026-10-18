@@ -15,7 +15,7 @@ failures=0
 check() {
     local name="$1" expected="$2" path="$3"; shift 3
     local code
-    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$@" "$url$path" 2>/dev/null || echo "000")
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$@" "$url$path" 2>/dev/null || true); [ -n "$code" ] || code=000
     if printf '%s' "$code" | grep -qE "^(${expected})$"; then
         printf '  ok   %-30s %s\n' "$name" "$code"
     else

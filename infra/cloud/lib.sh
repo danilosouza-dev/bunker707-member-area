@@ -65,7 +65,12 @@ hz() { HCLOUD_TOKEN="$HCLOUD_TOKEN" hcloud --quiet --no-experimental-warnings "$
 hzj() { HCLOUD_TOKEN="$HCLOUD_TOKEN" hcloud --no-experimental-warnings "$@" -o json; }
 
 server_exists() { hz server describe "$1" >/dev/null 2>&1; }
-server_ip4() { hz server ip "$1"; }
+# Pelo JSON: `hz` passa --quiet, que na CLI 1.70.1 descarta a saida de `server ip`.
+server_ip4() {
+    local ip; ip=$(hzj server describe "$1" | jq -r '.public_net.ipv4.ip // empty')
+    [ -n "$ip" ] || die "Servidor $1 sem IPv4 publico (hcloud server describe $1)."
+    printf '%s' "$ip"
+}
 server_ip6() {
     # A Hetzner entrega um /64; o servidor responde em ::1 dele.
     local prefix; prefix=$(hzj server describe "$1" | jq -r '.public_net.ipv6.ip // empty')
@@ -108,9 +113,10 @@ fw_ensure() {  # fw_ensure SERVER_NAME
     fw_rules "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-$name.json"
     hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-$name.json"
 }
-fw_apply() {  # fw_apply SERVER_NAME (idempotente)
-    local name; name=$(fw_name "$1")
-    if hzj firewall describe "$name" | jq -e --arg s "$1" '.applied_to[]? | select(.type=="server" and .server.name==$s)' >/dev/null; then return 0; fi
+fw_apply() {  # fw_apply SERVER_NAME (idempotente; a API recusa aplicar duas vezes)
+    local name sid; name=$(fw_name "$1"); sid=$(hzj server describe "$1" | jq -r '.id')
+    # No JSON do firewall, applied_to[].server traz so o id.
+    if hzj firewall describe "$name" | jq -e --argjson id "$sid" '.applied_to[]? | select(.type=="server" and .server.id==$id)' >/dev/null; then return 0; fi
     hz firewall apply-to-resource "$name" --type server --server "$1"
 }
 cidr_or_empty() { case "${1:-}" in "") ;; */*) printf '%s' "$1" ;; *:*) printf '%s/128' "$1" ;; *) printf '%s/32' "$1" ;; esac; }

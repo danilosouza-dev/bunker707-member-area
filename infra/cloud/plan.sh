@@ -33,15 +33,14 @@ def price_at(t, loc):
     return None
 
 def available_at(t, loc):
-    # A API nova traz a disponibilidade por location dentro do tipo; sem o campo, assume-se possivel e o
-    # provision tenta criar (a API recusa com resource_unavailable e o script passa ao proximo).
-    for key in ("locations", "availability"):
-        for entry in t.get(key, []) or []:
-            name = entry.get("name") if isinstance(entry, dict) else entry
-            if name == loc and isinstance(entry, dict):
-                for k, v in entry.items():
-                    if "avail" in k and isinstance(v, bool):
-                        return v
+    # Campo da API: server_types[].locations[] = {name, available, recommended, deprecation}. Sem o campo,
+    # a disponibilidade fica desconhecida e o provision tenta criar (a API recusa com resource_unavailable
+    # e o script passa ao proximo local).
+    for entry in t.get("locations") or []:
+        if isinstance(entry, dict) and entry.get("name") == loc:
+            if entry.get("deprecation"):
+                return False
+            return entry.get("available") if isinstance(entry.get("available"), bool) else None
     return None
 
 rows = []

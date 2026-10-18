@@ -27,6 +27,11 @@ for line in open(kvpath, encoding="utf-8"):
     line = line.rstrip("\n")
     if "=" in line and re.match(r"^[A-Z0-9_]+=", line):
         k, v = line.split("=", 1); updates[k] = v
+# O compose interpola os valores dentro de JSON (MAUTIC_CONFIG_PARAMETERS) e sem aspas: aspas, barra
+# invertida, $ e quebra de linha quebrariam o stack. Senha SMTP com esses caracteres vai codificada na URL.
+bad = [k for k, v in updates.items() if re.search(r'["\\$\n\r]', v)]
+if bad:
+    sys.exit("ERRO: valor com aspas, barra invertida, $ ou quebra de linha em " + ", ".join(bad) + "; codifique na URL (senha SMTP: urlencode) e gere o envelope de novo.")
 lines = open(path, encoding="utf-8").read().split("\n")
 seen = set()
 for i, line in enumerate(lines):

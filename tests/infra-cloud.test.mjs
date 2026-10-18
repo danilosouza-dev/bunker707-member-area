@@ -444,3 +444,48 @@ test("bootstrap.sh: apt espera a trava do dpkg e o ufw nao limita a porta do SSH
   assert.match(source, /ufw allow "\$SSH_PORT\/tcp"/);
   assert.doesNotMatch(source, /ufw limit/);
 });
+
+// Achados da revisao de 18/10/2026 (lente de APIs): `hcloud --quiet` descarta a saida de `server ip`; o JSON
+// do firewall traz so o id do servidor em applied_to; `server create-image` nao aceita -o json; valores
+// com aspas quebrariam o JSON de MAUTIC_CONFIG_PARAMETERS.
+test("lib.sh: IP e firewall lidos pelo JSON da API (nao pela saida silenciada do hcloud)", () => {
+  assert.match(libSource, /server_ip4\(\) \{\n\s+local ip; ip=\$\(hzj server describe "\$1" \| jq -r '\.public_net\.ipv4\.ip \/\/ empty'\)/);
+  assert.doesNotMatch(libSource, /hz server ip "\$1"/);
+  assert.match(libSource, /select\(\.type=="server" and \.server\.id==\$id\)/);
+  assert.doesNotMatch(libSource, /\.server\.name==/);
+});
+
+test("snapshot.sh: cria a imagem sem -o json e a encontra pela descricao na lista", () => {
+  const source = readFileSync(join(cloudDir, "snapshot.sh"), "utf8");
+  assert.match(source, /^\s+hz server create-image "\$name" --type snapshot --description "\$desc"/m);
+  assert.doesNotMatch(source, /hzj server create-image/);
+  assert.match(source, /hzj image list --type snapshot --selector "app=bunker707,papel=\$role"/);
+});
+
+test("secrets.sh: recusa valores com aspas, barra invertida, $ ou quebra de linha antes de gravar o .env", () => {
+  const source = readFileSync(join(cloudDir, "secrets.sh"), "utf8");
+  const start = source.indexOf("python3 -I - '$envf' /tmp/payload.kv\" <<'PY'");
+  assert.ok(start > 0);
+  const block = source.slice(source.indexOf("\n", start) + 1, source.indexOf("\nPY\n", start));
+  const dir = mkdtempSync(join(tmpdir(), "bunker707-secrets-"));
+  try {
+    const script = join(dir, "s.py");
+    writeFileSync(script, block);
+    const envFile = join(dir, "env");
+    writeFileSync(envFile, "A=1\nSMTP_PASS=\n");
+    const bad = join(dir, "bad.kv");
+    writeFileSync(bad, 'MAUTIC_MAILER_FROM_NAME=Equipe "Bunker707"\n');
+    const rejected = spawnSync("python3", ["-I", script, envFile, bad], { encoding: "utf8" });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr + rejected.stdout, /MAUTIC_MAILER_FROM_NAME/);
+    assert.equal(readFileSync(envFile, "utf8"), "A=1\nSMTP_PASS=\n", "nada gravado quando ha valor invalido");
+    const good = join(dir, "good.kv");
+    writeFileSync(good, "SMTP_PASS=re_abc\nRESEND_API_KEY=re_abc\n");
+    const accepted = spawnSync("python3", ["-I", script, envFile, good], { encoding: "utf8" });
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.equal(readFileSync(envFile, "utf8"), "A=1\nSMTP_PASS=re_abc\nRESEND_API_KEY=re_abc\n");
+    assert.equal(existsSync(good), false, "o arquivo de segredos e apagado depois de aplicado");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

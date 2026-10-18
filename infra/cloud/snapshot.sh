@@ -19,8 +19,12 @@ for role in membros marketing; do
     server_exists "$name" || { echo "  $name nao existe; nada a guardar."; continue; }
     log "Snapshot de $name"
     hz server poweroff "$name" >/dev/null 2>&1 || true
-    img=$(hzj server create-image "$name" --type snapshot --description "bunker707-$role-$stamp" --label app=bunker707 --label papel="$role" --label origem="$name" | jq -r '.image.id // .id // empty')
-    [ -n "$img" ] || die "Snapshot de $name nao retornou id."
+    # `server create-image` nao aceita -o json na CLI 1.70.1: cria (a CLI espera a acao) e acha a imagem
+    # pela descricao na lista.
+    desc="bunker707-$role-$stamp"
+    hz server create-image "$name" --type snapshot --description "$desc" --label app=bunker707 --label papel="$role" --label origem="$name"
+    img=$(hzj image list --type snapshot --selector "app=bunker707,papel=$role" | jq -r --arg d "$desc" '.[] | select(.description==$d) | .id' | head -n1)
+    [ -n "$img" ] || die "Snapshot de $name nao apareceu em 'hcloud image list --type snapshot' (descricao $desc). O servidor esta desligado: ligue com 'hcloud server poweron $name' ou tente de novo."
     for ((i = 0; i < 120; i++)); do
         st=$(hzj image describe "$img" | jq -r .status); [ "$st" = "available" ] && break; sleep 10
     done
