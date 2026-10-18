@@ -2,6 +2,16 @@ import type { RouterTransitionType } from "next";
 
 type SentryClient = typeof import("@sentry/nextjs");
 
+// A CSP com nonce (src/proxy.ts) nao tem 'unsafe-eval'. Sem isto, o zod tenta `new Function("")` para
+// compilar a validacao; o navegador bloqueia, o zod cai no caminho sem compilacao (mesmo resultado) e a
+// tentativa vira violacao de CSP no console e no Sentry. Este arquivo roda antes de qualquer modulo do
+// app, entao todo schema do navegador ja nasce sem compilacao. E o mesmo que `z.config({ jitless: true })`:
+// o zod guarda a configuracao em globalThis.__zod_globalConfig. Gravar ali sem importar o zod evita
+// baixar 7 KB de zod em toda tela do aluno, que nao usa zod no navegador (so o admin usa).
+// tests/zod-sem-eval-no-navegador.test.mjs quebra se o zod mudar esse nome. No servidor nao ha CSP.
+const zodGlobal = globalThis as typeof globalThis & { __zod_globalConfig?: { jitless?: boolean } };
+zodGlobal.__zod_globalConfig = Object.assign(zodGlobal.__zod_globalConfig ?? {}, { jitless: true });
+
 // Variavel NEXT_PUBLIC_* entra no bundle no build. Sem DSN, o chunk do Sentry nunca e baixado.
 const sentryDsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
