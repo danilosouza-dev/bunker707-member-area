@@ -224,8 +224,9 @@ export function TeamMemberForm({ courses, customFunctions, member }: TeamMemberF
       return;
     }
 
+    // A action ja revalida a equipe. Atualizar /novo aqui deixa uma requisicao pendente que pode
+    // recarregar o cadastro quando a pessoa sai para a lista (fallback do Next, visto no WebKit).
     setAdded({ email: email.trim().toLowerCase(), result: response.data as TeamMemberAdded });
-    router.refresh();
   }
 
   if (added) {

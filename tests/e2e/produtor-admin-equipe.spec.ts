@@ -1,4 +1,4 @@
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { apagarConta, expect, test } from "./fixtures";
 import { ESCOLA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
 
@@ -23,6 +23,18 @@ async function preencher(campo: Locator, valor: string) {
     await campo.fill(valor);
     await expect(campo).toHaveValue(valor);
   }
+}
+
+async function adicionarSuporte(page: Page) {
+  // O WebKit pode hidratar os campos controlados depois da primeira navegacao.
+  await page.waitForLoadState("networkidle");
+  await preencher(page.getByPlaceholder("pessoa@exemplo.com"), NOVA_PESSOA.email);
+  await preencher(page.getByPlaceholder("Nome completo"), NOVA_PESSOA.nome);
+  // A funcao e um cartao (label) com a caixa escondida: clicar no cartao marca a funcao.
+  await page.locator("label", { hasText: "Suporte" }).first().click();
+  await expect(page.getByRole("checkbox", { name: /Suporte/ })).toBeChecked();
+  await page.getByRole("button", { name: "Adicionar à equipe" }).click();
+  await expect(page.getByRole("heading", { name: "Pessoa adicionada à equipe" })).toBeVisible();
 }
 
 test.describe("aluno", () => {
@@ -57,21 +69,14 @@ test.describe("produtor", () => {
     await expect(page.getByRole("link", { name: "Adicionar pessoa" })).toBeVisible();
   });
 
-  test("adiciona uma pessoa como Suporte e ela aparece na lista", async ({ page }) => {
+  test("apos adicionar Suporte, navegar para a lista nao e interrompido pelo cadastro", async ({ page }) => {
     await page.goto("/admin/configuracoes/equipe/novo");
-    // Espera o JavaScript da pagina terminar de carregar antes de digitar: no WebKit a hidratacao do
-    // React chega depois e zera os campos controlados preenchidos cedo demais.
-    await page.waitForLoadState("networkidle");
-    await preencher(page.getByPlaceholder("pessoa@exemplo.com"), NOVA_PESSOA.email);
-    await preencher(page.getByPlaceholder("Nome completo"), NOVA_PESSOA.nome);
-    // A funcao e um cartao (label) com a caixa escondida: clicar no cartao marca a funcao.
-    await page.locator("label", { hasText: "Suporte" }).first().click();
-    await expect(page.getByRole("checkbox", { name: /Suporte/ })).toBeChecked();
-    await page.getByRole("button", { name: "Adicionar à equipe" }).click();
+    await adicionarSuporte(page);
 
-    await expect(page.getByRole("heading", { name: "Pessoa adicionada à equipe" })).toBeVisible();
-
+    // Regressao do WebKit: manter a navegacao completa, pois ela interrompia o refresh pendente
+    // de /novo e o fallback do Next recarregava o cadastro em vez de abrir a lista.
     await page.goto("/admin/configuracoes/equipe");
+    await expect(page).toHaveURL(/\/admin\/configuracoes\/equipe$/);
     await expect(page.getByText(NOVA_PESSOA.nome, { exact: true })).toBeVisible();
   });
 
@@ -86,6 +91,19 @@ test.describe("produtor", () => {
 
     await expect(page).toHaveURL(/\/admin\/configuracoes\/equipe$/);
     await expect(page.getByText(NOVA_PESSOA.nome, { exact: true })).toHaveCount(0);
+  });
+
+  test("apos adicionar Suporte, Voltar para a equipe abre a lista atualizada", async ({ page }) => {
+    // A lista ja visitada deve refletir a nova gravacao tambem na navegacao interna.
+    await page.goto("/admin/configuracoes/equipe");
+    await expect(page.getByText(NOVA_PESSOA.nome, { exact: true })).toHaveCount(0);
+    await page.getByRole("link", { name: "Adicionar pessoa" }).click();
+    await expect(page).toHaveURL(/\/admin\/configuracoes\/equipe\/novo$/);
+    await adicionarSuporte(page);
+
+    await page.getByRole("link", { name: "Voltar para a equipe" }).click();
+    await expect(page).toHaveURL(/\/admin\/configuracoes\/equipe$/);
+    await expect(page.getByText(NOVA_PESSOA.nome, { exact: true })).toBeVisible();
   });
 });
 
