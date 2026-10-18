@@ -8,6 +8,11 @@ name: Infra (Hetzner)
 # RSA do servidor (infra/cloud/envelope.sh), que so ele abre.
 
 on:
+  # Push que muda este arquivo so REGISTRA o workflow no GitHub (um workflow novo numa branch nao aparece
+  # para disparo manual antes de ter rodado uma vez); o job de infra so roda por workflow_dispatch.
+  push:
+    paths:
+      - .github/workflows/infra.yml
   workflow_dispatch:
     inputs:
       etapa:
@@ -50,8 +55,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  registrar:
+    name: Registrar o workflow
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Workflow registrado para disparo manual (workflow_dispatch)."
+
   infra:
     name: ${{ inputs.etapa }}
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
