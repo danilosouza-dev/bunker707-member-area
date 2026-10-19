@@ -1,5 +1,9 @@
 # 21. Retomada: migracao para a Hetzner (estado em 19/10/2026)
 
+> **Atualizacao de 19/10/2026 (segunda sessao):** a revisao da secao 4.1 foi feita (secao 7) e a execucao da
+> 4.3 comecou. O produtor decidiu CX23 (4 GB) para os dois servidores, mantidos ligados (secao 8). Leia as
+> secoes 7 e 8 antes da 4.
+
 Documento de passagem de sessao. Quem continuar (outra conta, outra sessao do Claude Code na nuvem) le este
 arquivo primeiro e segue a secao 4, na ordem. Tudo que esta aqui foi verificado na sessao de 18 e 19/10/2026.
 Contexto completo: docs/19 (secao 0, decisao) e docs/20 (secoes 4A e 8A, operacao).
@@ -11,9 +15,9 @@ Contexto completo: docs/19 (secao 0, decisao) e docs/20 (secoes 4A e 8A, operaca
 | Arquitetura | Dois servidores proprios na Hetzner Cloud: `bunker707-membros` (app Next.js + Supabase self-hosted + Caddy, banco junto com o app) e `bunker707-marketing` (Mautic 7.2.1 + MySQL 8.4.11 + Caddy). Cloudflare na frente. Backup no Storage Box. |
 | Por que assim | Banco junto: o Supabase e uma unidade e a latencia app/banco pesa; escala pequena. Mautic separado: PHP publico com mais falhas de seguranca, carga em rajada, ciclo de vida proprio. Detalhe em docs/19 §0.2 e §0.3. |
 | Disponibilidade | Queda de 15 a 20 minutos e aceitavel para o produtor. Sem alta disponibilidade; crescimento por rescale e, depois, banco separado (docs/19 §0.5). |
-| Staging e producao | Vercel + Supabase cloud continuam como staging (desenvolvimento). A Hetzner e a producao: migrar tudo como ensaio real, guardar em snapshot, APAGAR os servidores (servidor desligado e cobrado por inteiro) e recriar dos snapshots quando o produtor disser "vai" (docs/20 §4A.7). |
+| Staging e producao | Vercel + Supabase cloud continuam como staging (desenvolvimento). A Hetzner e a producao. Em 19/10/2026 o plano de "snapshot e apagar" foi revisto: com o estoque da linha CX intermitente, apagar o servidor arrisca nao conseguir recriar o tipo barato. Os servidores ficam ligados (secao 8). |
 | E-mail | Resend (dominio `mail.bunker707.com.br`, verificado) ate a conta do Amazon SES existir. Mautic ja instalado e enviando pelo Resend; a troca para o SES e so `MAUTIC_MAILER_DSN`. |
-| Custo | O mais barato que atenda: CX33 (8 GB) + CX23 (4 GB) se houver estoque; o `plan` escolhe pelo preco do dia. Mautic tem custo fixo (servidor) e nao cobra por contato (docs/19 §0.8). |
+| Custo | Ate US$ 10 por mes no servidor da area de membros. Em 19/10/2026: CX23 (2 vCPU, 4 GB, EUR 6,49) nos dois servidores, porque o CX33 estava sem estoque e subiu para EUR 9,99 (acima de US$ 10). Ver secao 8. Mautic tem custo fixo (servidor) e nao cobra por contato (docs/19 §0.8). |
 | Execucao | 100% pela IA, sem nada na maquina do produtor (ele so tem creditos na nuvem). |
 
 ## 2. Por que a execucao e pelo GitHub Actions
@@ -136,3 +140,32 @@ confira se os segredos HCLOUD_TOKEN e CLOUDFLARE_API_TOKEN ja estao no GitHub (d
 workflow Infra (Hetzner)) e execute as etapas da secao 4.3, me reportando o custo do plan antes do
 provision e o resultado de cada etapa. Tudo pela IA; eu nao tenho maquina local.
 ```
+
+## 7. Revisao da secao 4.1 (feita em 19/10/2026)
+
+Tres revisores, um por lente, com verificacao de cada achado. Correcoes no commit `593ae6d` (lentes 2 e 3);
+a lente 1 (Docker/Compose/Caddy/Mautic) esta na secao 8.
+
+- Bloqueante: sem Node no servidor, o `generate-secrets.sh` rodava o Node num container como root e o `.env`
+  nascia `root:root 0600`, ilegivel para o `deploy` (quebraria `deploy-*` e `secrets-*`). Agora o container
+  roda com o usuario de quem chamou.
+- Porta 22: trap armado antes de abrir; falha ao fechar vira erro; cancelamento ou timeout (que nao rodam o
+  trap) sao cobertos pelo passo final `Fechar o SSH (sempre)` e pela etapa nova `fechar-ssh`.
+- Workflow: tokens so no `env` dos passos que rodam os scripts, actions fixadas por commit, `ETAPA` por env,
+  permissoes e fila so no job `infra`.
+- Envelope: so os dois membros esperados, sem link simbolico, nada impresso se a decifragem falhar; texto
+  claro em 0600 e apagado em qualquer desfecho. AES-CBC sem autenticacao ficou: quem pode mandar payload ja
+  tem `exec-*` (root), entao cifra autenticada nao muda o risco.
+- `equipe.sh`: a chave `sb_secret_` fica no servidor (curl le os cabecalhos do stdin); `EQUIPE` separada por
+  virgula; e-mail e papel validados.
+- Imagem de producao com tag `hetzner-sha-<commit>` (a `sha-<commit>` do `build-image.yml` e de staging);
+  rollback sem pull quando a imagem ja esta no disco.
+- Storage Box: senha com caractere especial (a API recusava), local proprio (`STORAGE_BOX_LOCATION`, hel1)
+  e snapshots diarios do box (um servidor comprometido nao apaga os backups do outro).
+- `PRODUCER_IP` validado (no maximo /24 ou /48); `SKIP_MARKETING` normalizado; CLI do Supabase conferida por
+  sha256; `restaurar` so escolhe tipos com disco que comporta o snapshot; migracoes trocadas inteiras no
+  `sync_repo`.
+- Aceito sem mudar: `StrictHostKeyChecking=accept-new` (known_hosts novo a cada job); `OPCOES` sem allowlist
+  (quem preenche ja tem `exec-*`).
+- Para o produtor decidir: quem tem escrita no repositorio tem, na pratica, os tokens e root nos servidores
+  (docs/20 §16). Em 19/10/2026: `danilosouza-dev`, `marketingLendario` e `bertoldomolina8-cpu`.
