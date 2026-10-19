@@ -11,12 +11,22 @@
 need HCLOUD_TOKEN CLOUDFLARE_API_TOKEN
 install_hcloud; deploy_key
 
+roles="membros"; [ -n "${SKIP_MARKETING:-}" ] || roles="membros marketing"
+latest_snapshot() {  # latest_snapshot PAPEL -> id do snapshot disponivel mais recente
+    hzj image list --type snapshot | jq -r --arg r "$1" '[.[] | select(.labels.app=="bunker707" and .labels.papel==$r and .status=="available")] | sort_by(.created) | last | .id // empty'
+}
+# Um snapshot so cabe num disco do mesmo tamanho ou maior que o do servidor de origem: o plan escolhe com isso.
+for role in $roles; do
+    img=$(latest_snapshot "$role")
+    [ -n "$img" ] || continue
+    disk=$(hzj image describe "$img" | jq -r '.disk_size // 0')
+    case "$role" in membros) export MEMBROS_MIN_DISK_GB="$disk" ;; marketing) export MARKETING_MIN_DISK_GB="$disk" ;; esac
+done
 if [ -z "${MEMBROS_TYPE:-}" ] || { [ -z "${SKIP_MARKETING:-}" ] && [ -z "${MARKETING_TYPE:-}" ]; }; then
     bash "$CLOUD_DIR/plan.sh"
     # shellcheck disable=SC1091
     . "$WORK_DIR/plan.env"
 fi
-roles="membros"; [ -n "${SKIP_MARKETING:-}" ] || roles="membros marketing"
 for role in $roles; do
     case "$role" in
         membros) name="$MEMBROS_NAME"; type="$MEMBROS_TYPE"; loc="${MEMBROS_LOCATION:-$LOCATION}" ;;
@@ -24,9 +34,9 @@ for role in $roles; do
     esac
     log "Servidor $name"
     if server_exists "$name"; then echo "  ja existe; nada a restaurar."; continue; fi
-    img=$(hzj image list --type snapshot | jq -r --arg r "$role" '[.[] | select(.labels.app=="bunker707" and .labels.papel==$r and .status=="available")] | sort_by(.created) | last | .id // empty')
+    img=$(latest_snapshot "$role")
     [ -n "$img" ] || die "Nenhum snapshot do papel $role (labels app=bunker707, papel=$role). Sem snapshot, o caminho e provision + deploy."
-    echo "  snapshot $img: $(hzj image describe "$img" | jq -r .description)"
+    echo "  snapshot $img: $(hzj image describe "$img" | jq -r '"\(.description), disco de \(.disk_size) GB"')"
     fw_ensure "$name"
     created=0
     for l in "$loc" $FALLBACK_LOCATIONS; do

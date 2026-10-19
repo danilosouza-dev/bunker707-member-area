@@ -15,13 +15,17 @@ ip=$(server_ip4 "$server"); target="$DEPLOY_USER@$ip"
 if [ "$role" = "membros" ]; then envf="$REMOTE_DIR/infra/compose/.env"; else envf="$REMOTE_DIR/infra/mautic/.env"; fi
 
 fw_open_ssh "$server"; wait_ssh "$target"
-printf '%s' "$PAYLOAD" | rsh "$target" "cat > /tmp/payload.b64"
-rsh "$target" "cd '$REMOTE_DIR' && sudo bash infra/cloud/envelope.sh decrypt /etc/bunker707/transfer.key /tmp/payload.b64 > /tmp/payload.kv && chmod 600 /tmp/payload.kv && rm -f /tmp/payload.b64"
+printf '%s' "$PAYLOAD" | rsh "$target" "umask 077 && cat > /tmp/payload.b64"
+# Texto claro so em 0600 e so se a decifragem fechou; em erro, nada fica em /tmp (nem no snapshot).
+rsh "$target" "umask 077; cd '$REMOTE_DIR' && sudo bash infra/cloud/envelope.sh decrypt /etc/bunker707/transfer.key /tmp/payload.b64 > /tmp/payload.kv; rc=\$?; rm -f /tmp/payload.b64; [ \$rc -eq 0 ] || rm -f /tmp/payload.kv; exit \$rc"
 keys=$(rsh "$target" "grep -oE '^[A-Z0-9_]+=' /tmp/payload.kv | tr -d = | tr '\n' ' '")
 log "Aplicando em $envf: $keys"
 rsh "$target" "python3 -I - '$envf' /tmp/payload.kv" <<'PY'
-import os, re, sys
+import atexit, os, re, sys
 path, kvpath = sys.argv[1], sys.argv[2]
+os.umask(0o077)
+# O texto claro sai do disco em qualquer desfecho (valor recusado, .env ilegivel).
+atexit.register(lambda: os.path.exists(kvpath) and os.remove(kvpath))
 updates = {}
 for line in open(kvpath, encoding="utf-8"):
     line = line.rstrip("\n")
@@ -46,7 +50,6 @@ for k, v in updates.items():
 tmp = path + ".tmp"
 with open(tmp, "w", encoding="utf-8") as fh: fh.write("\n".join(lines).rstrip("\n") + "\n")
 os.chmod(tmp, 0o600); os.replace(tmp, path)
-os.remove(kvpath)
 PY
 if [ "$role" = "membros" ]; then
     rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml up -d && bash infra/scripts/smoke.sh"

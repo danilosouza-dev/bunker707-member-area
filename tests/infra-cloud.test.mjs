@@ -251,13 +251,13 @@ const serverTypes = [
     locations: [{ name: "fsn1", available: true }] }
 ];
 
-function runPlan(t, { preferred = "fsn1", fallbacks = "nbg1 hel1", membrosRam = "8", marketingRam = "4", membrosType = "", marketingType = "", skip = "", githubOutput } = {}) {
+function runPlan(t, { preferred = "fsn1", fallbacks = "nbg1 hel1", membrosRam = "8", marketingRam = "4", membrosType = "", marketingType = "", skip = "", membrosDisk = "0", marketingDisk = "0", githubOutput } = {}) {
   const dir = tempDir("bunker707-plan-");
   const jsonPath = join(dir, "server-types.json");
   writeFileSync(jsonPath, JSON.stringify(serverTypes));
   const env = cleanEnv();
   if (githubOutput) env.GITHUB_OUTPUT = githubOutput;
-  const result = run("python3", ["-I", "-", jsonPath, preferred, fallbacks, membrosRam, marketingRam, membrosType, marketingType, skip], { input: planPythonBlock(), env });
+  const result = run("python3", ["-I", "-", jsonPath, preferred, fallbacks, membrosRam, marketingRam, membrosType, marketingType, skip, membrosDisk, marketingDisk], { input: planPythonBlock(), env });
   const planEnv = existsSync(join(dir, "plan.env")) ? readFileSync(join(dir, "plan.env"), "utf8") : null;
   return { ...result, dir, planEnv };
 }
@@ -303,6 +303,14 @@ test("plan.sh respeita MEMBROS_TYPE e MARKETING_TYPE forcados, SKIP_MARKETING ti
   const forcedUnavailable = runPlan(t, { membrosType: "cx33", fallbacks: "" });
   assert.equal(forcedUnavailable.status, 1, "cx33 forcado so em fsn1 (esgotado) nao tem como");
   assert.match(forcedUnavailable.stdout, /forcado: cx33/);
+
+  // restaurar: snapshot de um disco de 160 GB nao cabe no cx33 (80 GB), mesmo mais barato.
+  const bigDisk = runPlan(t, { membrosDisk: "160" });
+  assert.equal(bigDisk.status, 0, bigDisk.stderr);
+  assert.match(bigDisk.planEnv, /^MEMBROS_TYPE=cpx32\nMEMBROS_LOCATION=fsn1\n/);
+  const noDisk = runPlan(t, { marketingDisk: "500" });
+  assert.equal(noDisk.status, 1);
+  assert.match(noDisk.stdout, /Nenhum tipo com >= 4\.0 GB para 'marketing' e disco >= 500 GB/);
 });
 
 test("o workflow de infra so executa etapas por workflow_dispatch: um push apenas registra o arquivo, sem segredos nem run.sh", () => {
@@ -328,17 +336,26 @@ test("o workflow de infra so executa etapas por workflow_dispatch: um push apena
   }
   assert.match(infraJob, /HCLOUD_TOKEN: \$\{\{ secrets\.HCLOUD_TOKEN \}\}/);
   assert.match(infraJob, /CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/);
-  assert.match(infraJob, /run: bash infra\/cloud\/run\.sh "\$\{\{ inputs\.etapa \}\}"/);
+  // A etapa entra por variavel de ambiente, nunca interpolada no script do passo.
+  assert.match(infraJob, /^      ETAPA: \$\{\{ inputs\.etapa \}\}\s*$/m);
+  assert.match(infraJob, /run: bash infra\/cloud\/run\.sh "\$ETAPA"/);
+  assert.doesNotMatch(infraJob, /run:[^\n]*\$\{\{/, "nenhum run: interpola expressao");
+  // Os tokens nunca ficam no env do job inteiro (as actions de terceiros nao os veem), e as actions sao
+  // fixadas por commit.
+  const jobEnv = infraJob.slice(infraJob.indexOf("\n    env:"), infraJob.indexOf("\n    steps:"));
+  assert.doesNotMatch(jobEnv, /secrets\./, "segredo no env do job");
+  for (const uses of infraJob.matchAll(/uses: (\S+)/g)) assert.match(uses[1], /@[0-9a-f]{40}$/, `${uses[1]} sem commit fixo`);
+  // O passo final fecha a porta 22 mesmo com cancelamento ou timeout.
+  assert.match(infraJob, /- name: Fechar o SSH \(sempre\)\n\s+if: always\(\)[\s\S]*run\.sh fechar-ssh/);
   // O input payload so vira PAYLOAD nas etapas secrets-* e COMANDO nas exec-*.
   assert.match(infraJob, /PAYLOAD: \$\{\{ \(startsWith\(inputs\.etapa, 'secrets-'\) && inputs\.payload\) \|\| '' \}\}/);
   assert.match(infraJob, /COMANDO: \$\{\{ \(startsWith\(inputs\.etapa, 'exec-'\) && inputs\.payload\) \|\| '' \}\}/);
 
-  const { block: permissions } = yamlChildren(workflowSource, "permissions");
-  assert.match(permissions, /^  packages: write\s*$/m, "publicar a imagem no GHCR precisa de packages: write");
-  assert.match(permissions, /^  contents: read\s*$/m);
-  const { block: concurrency } = yamlChildren(workflowSource, "concurrency");
-  assert.match(concurrency, /^  group: \S+/m, "uma etapa por vez: duas juntas disputariam o firewall e o .env");
-  assert.match(concurrency, /^  cancel-in-progress: false\s*$/m, "uma etapa no meio nunca e cancelada por outra");
+  // Permissoes e fila so no job da infra: o registrar (push) nao ganha nada nem cancela disparo na fila.
+  assert.match(workflowSource, /^permissions: \{\}\s*$/m);
+  assert.match(infraJob, /^    permissions:\n      contents: read\n      packages: write\s*$/m, "publicar a imagem no GHCR precisa de packages: write");
+  assert.doesNotMatch(workflowSource, /^concurrency:/m);
+  assert.match(infraJob, /^    concurrency:\n      group: \S+\n      cancel-in-progress: false\s*$/m, "uma etapa por vez, e uma no meio nunca e cancelada");
 });
 
 test("lib.sh nunca liga o rastreio do shell e nenhum script imprime os tokens com echo ou printf", () => {

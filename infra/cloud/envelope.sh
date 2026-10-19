@@ -20,8 +20,18 @@ case "$mode" in
         tar -C "$tmp" -cf - k.enc env.enc | base64 -w0; echo ;;
     decrypt)
         key="${1:?transfer.key}"; payload="${2:?payload.b64}"
-        base64 -d < "$payload" | tar -C "$tmp" -xf -
-        openssl pkeyutl -decrypt -inkey "$key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$tmp/k.enc" -out "$tmp/k"
-        openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$tmp/k" -in "$tmp/env.enc" ;;
+        umask 077
+        # So os dois membros esperados, como arquivos comuns: um link simbolico no tar faria o openssl (root)
+        # escrever fora de $tmp.
+        base64 -d < "$payload" | tar -C "$tmp" --no-same-owner -xf - k.enc env.enc 2>/dev/null || { echo "envelope invalido" >&2; exit 1; }
+        for f in k.enc env.enc; do [ -f "$tmp/$f" ] && [ ! -L "$tmp/$f" ] || { echo "envelope invalido" >&2; exit 1; }; done
+        # Decifra para arquivo e so imprime se tudo deu certo: o `openssl enc -d` solta o texto menos o ultimo
+        # bloco antes de acusar "bad decrypt", e texto parcial nao pode chegar ao .env.
+        if openssl pkeyutl -decrypt -inkey "$key" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$tmp/k.enc" -out "$tmp/k" 2>/dev/null &&
+           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$tmp/k" -in "$tmp/env.enc" -out "$tmp/env" 2>/dev/null; then
+            cat "$tmp/env"
+        else
+            echo "envelope invalido (transfer.pub de outro servidor, ou payload truncado/alterado)" >&2; exit 1
+        fi ;;
     *) echo "uso: envelope.sh encrypt <transfer.pub> <arquivo> | decrypt <transfer.key> <payload.b64>" >&2; exit 2 ;;
 esac

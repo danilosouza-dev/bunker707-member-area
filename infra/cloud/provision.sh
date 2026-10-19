@@ -40,7 +40,8 @@ roles="membros"; [ -n "${SKIP_MARKETING:-}" ] || roles="membros marketing"
 
 # ---- 3. firewalls e servidores -----------------------------------------------------------------------
 create_server() {  # create_server NOME TIPO LOCAL PAPEL
-    local name="$1" type="$2" loc="$3" role="$4" ud="$WORK_DIR/cloud-init-$name.yaml" l
+    local name="$1" type="$2" loc="$3" role="$4" ud l
+    ud="$WORK_DIR/cloud-init-$name.yaml"
     sed -e "s|__DEPLOY_USER__|$DEPLOY_USER|" -e "s|__SSH_PUBLIC_KEY__|$pub|" "$CLOUD_DIR/cloud-init.yaml" > "$ud"
     for l in "$loc" $FALLBACK_LOCATIONS; do
         echo "  criando $name ($type) em $l..."
@@ -82,14 +83,19 @@ log "4/7 Storage Box $STORAGE_BOX_NAME ($STORAGE_BOX_TYPE)"
 backup_key="$WORK_DIR/storagebox_key"
 node "$CLOUD_DIR/deploy-key.mjs" --out "$backup_key" --info bunker707-backup-key-v1 >/dev/null
 if [ -z "$(storage_box_json)" ]; then
-    box_password=$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24); mask "$box_password"
-    hz storage-box create --name "$STORAGE_BOX_NAME" --type "$STORAGE_BOX_TYPE" --location "$LOCATION" \
+    # A API exige maiuscula, minuscula, numero e um especial (lista da Hetzner, que inclui o hifen).
+    box_password="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-20)Aa1-"; mask "$box_password"
+    hz storage-box create --name "$STORAGE_BOX_NAME" --type "$STORAGE_BOX_TYPE" --location "$STORAGE_BOX_LOCATION" \
         --password "$box_password" --enable-ssh --reachable-externally --ssh-key "$(cat "$backup_key.pub")" \
         --label app=bunker707 >/dev/null
     echo "  criado (SSH ligado, acessivel de fora, chave de backup instalada)."
 else
     echo "  ja existe (a chave de backup e a derivada do token; se o box foi criado com outra, veja docs/20 §10)."
 fi
+# Snapshots diarios do proprio box: a chave SFTP esta nos dois servidores, e um deles comprometido poderia
+# apagar os backups do outro; snapshot do box nao se apaga por SFTP.
+hz storage-box enable-snapshot-plan "$STORAGE_BOX_NAME" --max-snapshots 7 --hour 5 --minute 20 >/dev/null \
+    && echo "  plano de snapshots do box: diario, 7 guardados." || warn "plano de snapshots do Storage Box nao ativado."
 box=$(storage_box_json)
 STORAGE_BOX_USER=$(printf '%s' "$box" | jq -r '.username // .user // empty'); STORAGE_BOX_HOST=$(printf '%s' "$box" | jq -r '.server // .host // empty')
 [ -n "$STORAGE_BOX_USER" ] && [ -n "$STORAGE_BOX_HOST" ] || warn "nao li usuario/host do Storage Box no JSON; anote de 'hcloud storage-box describe $STORAGE_BOX_NAME'."
@@ -131,5 +137,6 @@ for role in $roles; do
     hzj server describe "$name" | jq -r '"  \(.name): \(.server_type.name) em \(.datacenter.location.name), \(.public_net.ipv4.ip), \(.status)"'
 done
 echo "  Storage Box: $STORAGE_BOX_USER@$STORAGE_BOX_HOST"
-echo "  DNS: $APP_DOMAIN, $API_DOMAIN, $STUDIO_DOMAIN -> $MEMBROS_NAME; $MAUTIC_DOMAIN -> ${SKIP_MARKETING:+$MEMBROS_NAME}${SKIP_MARKETING:-$MARKETING_NAME}"
+if [ -n "${SKIP_MARKETING:-}" ]; then mautic_host="$MEMBROS_NAME"; else mautic_host="$MARKETING_NAME"; fi
+echo "  DNS: $APP_DOMAIN, $API_DOMAIN, $STUDIO_DOMAIN -> $MEMBROS_NAME; $MAUTIC_DOMAIN -> $mautic_host"
 echo "Proximo: etapa deploy-membros (e deploy-marketing), depois secrets-* com o envelope da chave do Resend."

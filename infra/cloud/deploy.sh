@@ -43,10 +43,11 @@ if [ "$role" = "membros" ]; then
     log "Construindo a imagem do app (NEXT_PUBLIC_* do .env do servidor) e publicando no GHCR"
     supabase_url=$(get_env "$target" "$envf" SUPABASE_PUBLIC_URL); publishable=$(get_env "$target" "$envf" SUPABASE_PUBLISHABLE_KEY)
     [ -n "$supabase_url" ] && [ -n "$publishable" ] || die "SUPABASE_PUBLIC_URL/SUPABASE_PUBLISHABLE_KEY vazios no .env do servidor."
-    image="ghcr.io/$repo_slug:sha-$commit"
+    # Prefixo proprio: o build-image.yml publica sha-<commit> no mesmo pacote com as variaveis de staging.
+    image="ghcr.io/$repo_slug:hetzner-sha-$commit"
     need GITHUB_TOKEN
     printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "${GITHUB_ACTOR:-danilosouza-dev}" --password-stdin >/dev/null
-    docker buildx build --platform linux/amd64 --push -t "$image" -t "ghcr.io/$repo_slug:main" \
+    docker buildx build --platform linux/amd64 --push -t "$image" \
         --build-arg "APP_VERSION=sha-$commit" --build-arg "NEXT_PUBLIC_SUPABASE_URL=$supabase_url" \
         --build-arg "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$publishable" \
         --build-arg "NEXT_PUBLIC_POSTHOG_KEY=$(get_env "$target" "$envf" NEXT_PUBLIC_POSTHOG_KEY)" \
@@ -68,7 +69,7 @@ if [ "$role" = "membros" ]; then
     remote "docker logout ghcr.io >/dev/null 2>&1 || true"
 
     log "Tick de jobs no Vault (pg_cron -> POST /api/jobs/tick)"
-    tick_token=$(get_env "$target" "$envf" JOBS_TICK_TOKEN)
+    tick_token=$(get_env "$target" "$envf" JOBS_TICK_TOKEN); mask "$tick_token"
     remote "docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -v ON_ERROR_STOP=1 -q" <<SQL
 select vault.create_secret('http://app:3000/api/jobs/tick', 'jobs_tick_url', 'URL do tick') where not exists (select 1 from vault.secrets where name = 'jobs_tick_url');
 select vault.create_secret('$tick_token', 'jobs_tick_token', 'Token do tick') where not exists (select 1 from vault.secrets where name = 'jobs_tick_token');

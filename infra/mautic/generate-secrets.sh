@@ -29,4 +29,5 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 echo "Node >= 20 nao encontrado: gerando dentro de node:24-alpine (Docker)."
-exec docker run --rm -v "$here:/work" -w /work node:24.11.1-alpine3.22 node generate-secrets.mjs "$@"
+# Com o usuario de quem chamou: o Docker e rootful, e um .env de root (0600) ficaria ilegivel para o deploy.
+exec docker run --rm --user "$(id -u):$(id -g)" -v "$here:/work" -w /work node:24.11.1-alpine3.22 node generate-secrets.mjs "$@"

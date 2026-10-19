@@ -7,6 +7,7 @@
 #   CLOUDFLARE_API_TOKEN   token da API da Cloudflare (DNS e configuracoes da zona)      provision/status
 #   ZONE_NAME              zona na Cloudflare (bunker707.com.br)
 #   LOCATION               datacenter preferido (fsn1); FALLBACK_LOCATIONS tenta os outros
+#   STORAGE_BOX_LOCATION   local do Storage Box (fsn1), independente do dos servidores
 #   PRODUCER_EMAIL         e-mail do produtor (Let's Encrypt, admin do Mautic)
 #   PRODUCER_IP            opcional: IP do produtor, mantido no firewall (SSH e Studio)
 #   SKIP_MARKETING=1       Mautic no mesmo servidor do app (colocacao), sem o segundo servidor
@@ -29,7 +30,10 @@ MEMBROS_NAME="${MEMBROS_NAME:-bunker707-membros}"
 MARKETING_NAME="${MARKETING_NAME:-bunker707-marketing}"
 STORAGE_BOX_NAME="${STORAGE_BOX_NAME:-bunker707-backups}"
 STORAGE_BOX_TYPE="${STORAGE_BOX_TYPE:-bx11}"
+STORAGE_BOX_LOCATION="${STORAGE_BOX_LOCATION:-fsn1}"
 SSH_KEY_NAME="${SSH_KEY_NAME:-bunker707-deploy}"
+# Um so sentido em todos os scripts: vazio, 0, false ou no = dois servidores.
+case "${SKIP_MARKETING:-}" in ""|0|false|no) SKIP_MARKETING="" ;; *) SKIP_MARKETING=1 ;; esac
 
 APP_DOMAIN="${APP_DOMAIN:-membros.$ZONE_NAME}"
 API_DOMAIN="${API_DOMAIN:-api.$ZONE_NAME}"
@@ -120,26 +124,41 @@ fw_apply() {  # fw_apply SERVER_NAME (idempotente; a API recusa aplicar duas vez
     hz firewall apply-to-resource "$name" --type server --server "$1"
 }
 cidr_or_empty() { case "${1:-}" in "") ;; */*) printf '%s' "$1" ;; *:*) printf '%s/128' "$1" ;; *) printf '%s/32' "$1" ;; esac; }
+# PRODUCER_IP vai para o firewall (SSH e Studio) e para comandos remotos: so um IP ou rede pequena valida.
+if [ -n "$PRODUCER_IP" ]; then
+    python3 -I -c 'import ipaddress, sys; n = ipaddress.ip_network(sys.argv[1], strict=False); sys.exit(0 if n.prefixlen >= (24 if n.version == 4 else 48) else 1)' \
+        "$(cidr_or_empty "$PRODUCER_IP")" 2>/dev/null || die "PRODUCER_IP invalido ou amplo demais (no minimo /24 ou /48): $PRODUCER_IP"
+fi
 runner_ip() { curl -fsS --max-time 15 https://checkip.amazonaws.com | tr -d '[:space:]'; }
 # Abre a porta 22 para esta maquina (e o produtor, se PRODUCER_IP) e fecha de novo ao sair do script.
+# O trap e armado ANTES de abrir, e uma falha ao fechar vira falha da etapa (nunca verde com a 22 aberta).
+# Cancelamento ou timeout do job matam o script sem trap: o servidor fica anotado em fw-abertos, e o passo
+# final do workflow (run.sh fechar-ssh, `if: always()`) fecha o que ficou.
 fw_open_ssh() {  # fw_open_ssh SERVER_NAME
     local name me; name=$(fw_name "$1"); me=$(runner_ip)
     log "Abrindo SSH do $1 para $me"
     fw_rules "$(cidr_or_empty "$me")" "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-open-$name.json"
-    hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-open-$name.json"
     FW_OPENED="${FW_OPENED:-} $1"
-    trap 'set +e; fw_close_all' EXIT
+    printf '%s\n' "$1" >> "$WORK_DIR/fw-abertos"
+    trap 'rc=$?; set +e; fw_close_all || rc=1; exit $rc' EXIT
+    hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-open-$name.json"
 }
 fw_close_all() {
-    local s name
+    local s name failed=0
     for s in ${FW_OPENED:-}; do
         ssh -o "ControlPath=$WORK_DIR/cm-%C" -O exit "$DEPLOY_USER@$(server_ip4 "$s")" 2>/dev/null || true
         ssh -o "ControlPath=$WORK_DIR/cm-%C" -O exit "root@$(server_ip4 "$s")" 2>/dev/null || true
         name=$(fw_name "$s")
         fw_rules "$(cidr_or_empty "$PRODUCER_IP")" > "$WORK_DIR/rules-close-$name.json"
-        hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-close-$name.json" && printf 'SSH do %s fechado.\n' "$s" || warn "nao consegui fechar o SSH do $s; rode a etapa status."
+        if hz firewall replace-rules "$name" --rules-file "$WORK_DIR/rules-close-$name.json"; then
+            printf 'SSH do %s fechado.\n' "$s"
+            [ -f "$WORK_DIR/fw-abertos" ] && sed -i "/^$s\$/d" "$WORK_DIR/fw-abertos"
+        else
+            printf '::error::SSH do %s continua aberto; rode a etapa fechar-ssh.\n' "$s"; failed=1
+        fi
     done
     FW_OPENED=""
+    return "$failed"
 }
 
 # ---- SSH --------------------------------------------------------------------------------------------
@@ -164,10 +183,12 @@ wait_ssh() {  # wait_ssh user@host [tentativas]
     die "SSH nao respondeu em $target."
 }
 # Envia o repositorio (o commit atual) para REMOTE_DIR, sem tocar em .env, volumes e dados.
+# As migracoes sao trocadas inteiras: uma renomeada ou removida no repositorio nao pode sobrar no servidor
+# para o migrate.sh aplicar.
 sync_repo() {  # sync_repo user@host
     local target="$1"
-    git -C "$REPO_ROOT" archive --format=tar HEAD | rsh "$target" "mkdir -p '$REMOTE_DIR' && tar -x -C '$REMOTE_DIR'"
-    rsh "$target" "cd '$REMOTE_DIR' && git rev-parse HEAD >/dev/null 2>&1 || true; echo '$(git -C "$REPO_ROOT" rev-parse HEAD)' > '$REMOTE_DIR/.deployed-commit'"
+    git -C "$REPO_ROOT" archive --format=tar HEAD | rsh "$target" "mkdir -p '$REMOTE_DIR' && rm -rf '$REMOTE_DIR/supabase/migrations' && tar -x -C '$REMOTE_DIR'"
+    rsh "$target" "echo '$(git -C "$REPO_ROOT" rev-parse HEAD)' > '$REMOTE_DIR/.deployed-commit'"
 }
 # set_env user@host ARQUIVO CHAVE VALOR: grava CHAVE=VALOR no .env remoto (troca a linha ou acrescenta).
 # O valor vai como argumento em base64 (aguenta qualquer caractere); o stdin fica so com o programa.
@@ -177,6 +198,7 @@ set_env() {
     rsh "$target" "python3 -I - '$file' '$key' '$b64'" <<'PY'
 import base64, os, re, sys
 path, key = sys.argv[1], sys.argv[2]
+os.umask(0o077)
 value = base64.b64decode(sys.argv[3]).decode("utf-8")
 lines = open(path, encoding="utf-8").read().split("\n") if os.path.exists(path) else []
 pattern = re.compile(r"^%s=" % re.escape(key))

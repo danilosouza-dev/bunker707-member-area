@@ -5,7 +5,8 @@
 # etapas que precisam, PAYLOAD (envelope cifrado) ou COMANDO (exec-*). Etapas:
 #   plan, provision, deploy-membros, deploy-marketing, secrets-membros, secrets-marketing, equipe,
 #   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing,
-#   snapshot (guarda e apaga os servidores; CONFIRMAR=apagar), restaurar (recria dos snapshots)
+#   snapshot (guarda e apaga os servidores; CONFIRMAR=apagar), restaurar (recria dos snapshots),
+#   fechar-ssh (passo final do workflow: fecha a 22 que um passo cancelado deixou aberta)
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
@@ -40,5 +41,11 @@ case "$etapa" in
     exec-marketing) exec_remote marketing ;;
     snapshot) bash "$here/snapshot.sh" ;;
     restaurar) bash "$here/restaurar.sh" ;;
-    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,8p "$0"; exit 2 ;;
+    fechar-ssh)
+        . "$here/lib.sh"
+        [ -s "$WORK_DIR/fw-abertos" ] || { echo "Nenhuma porta 22 aberta por esta execucao."; exit 0; }
+        need HCLOUD_TOKEN; install_hcloud
+        FW_OPENED=$(sort -u "$WORK_DIR/fw-abertos" | tr '\n' ' ')
+        fw_close_all ;;
+    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,9p "$0"; exit 2 ;;
 esac

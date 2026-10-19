@@ -202,6 +202,13 @@ if ! supabase --version 2>/dev/null | grep -q "$SUPABASE_CLI_VERSION"; then
     arch=$(dpkg --print-architecture)
     deb="/tmp/supabase_${SUPABASE_CLI_VERSION}_linux_${arch}.deb"
     curl -fsSL -o "$deb" "https://github.com/supabase/cli/releases/download/v${SUPABASE_CLI_VERSION}/supabase_${SUPABASE_CLI_VERSION}_linux_${arch}.deb"
+    # O .deb entra como root: so com o sha256 do checksums.txt do release (trocar junto com a versao).
+    case "$SUPABASE_CLI_VERSION/$arch" in
+        2.121.0/amd64) sum=f6e10fc4086390ca386127bb4fd1a5e578625f95e7db84255a6bb82a159f973f ;;
+        2.121.0/arm64) sum=c7f58ceeac60c38a6a72d7835e1157f2bcd55b40349964f9234c324b6c4733b8 ;;
+        *) sum="${SUPABASE_CLI_SHA256:?informe SUPABASE_CLI_SHA256 para a versao $SUPABASE_CLI_VERSION ($arch)}" ;;
+    esac
+    echo "$sum  $deb" | sha256sum -c - >/dev/null || { rm -f "$deb"; echo "Checksum da CLI do Supabase nao bate." >&2; exit 1; }
     dpkg -i "$deb" >/dev/null
     rm -f "$deb"
 fi

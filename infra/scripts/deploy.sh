@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy de uma versao do app no servidor (stack ja no ar):
-#   sh infra/scripts/deploy.sh --image ghcr.io/danilosouza-dev/bunker707-member-area:sha-1a2b3c4
+#   sh infra/scripts/deploy.sh --image ghcr.io/danilosouza-dev/bunker707-member-area:hetzner-sha-1a2b3c4
 #   sh infra/scripts/deploy.sh --build                 constroi a imagem aqui em vez de puxar do ghcr.io
 #   ... [--ref main] [--no-migrate]                    --ref faz git fetch/checkout antes (infra e migracoes)
 # Passos: atualiza APP_IMAGE no .env (guardando a anterior em .deploy-history) -> pull/build -> migracoes
@@ -42,8 +42,14 @@ if [ "$build" = "1" ]; then
     log "Construindo $image..."
     APP_IMAGE="$image" APP_VERSION="${image#bunker707-app:}" compose build app
 else
-    log "Baixando $image..."
-    APP_IMAGE="$image" compose pull app
+    # Imagem ja no disco (voltar para a anterior): sem pull, que fora do job do Actions nao tem credencial
+    # do GHCR e derrubaria o script.
+    if docker image inspect "$image" >/dev/null 2>&1; then
+        log "$image ja esta no servidor."
+    else
+        log "Baixando $image..."
+        APP_IMAGE="$image" compose pull app
+    fi
 fi
 
 # Grava a imagem no .env (o compose le de la) e o historico para voltar atras.

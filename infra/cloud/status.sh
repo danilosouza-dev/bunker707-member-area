@@ -17,7 +17,8 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
 fi
 log "Respostas publicas"
 for u in "https://$APP_DOMAIN/api/health" "https://$APP_DOMAIN/" "https://$API_DOMAIN/auth/v1/health" "https://$MAUTIC_DOMAIN/s/login"; do
-    printf '  %-55s %s\n' "$u" "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$u" 2>/dev/null || echo 000)"
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$u" 2>/dev/null) || true
+    printf '  %-55s %s\n' "$u" "${code:-000}"
 done
 if [ -n "${SSH:-}" ]; then
     deploy_key
