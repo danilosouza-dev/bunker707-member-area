@@ -89,6 +89,9 @@ if [ "$SSH_PORT" != "22" ]; then
     printf '[Socket]\nListenStream=\nListenStream=%s\n' "$SSH_PORT" > /etc/systemd/system/ssh.socket.d/listen.conf
     systemctl daemon-reload
 fi
+# Com socket activation, /run/sshd so existe depois que o ssh.service subiu uma vez; sem ele o `sshd -t`
+# recusa ("Missing privilege separation directory") e sai com 255.
+install -d -m 0755 /run/sshd
 sshd -t
 systemctl restart ssh.socket 2>/dev/null || true
 systemctl restart ssh

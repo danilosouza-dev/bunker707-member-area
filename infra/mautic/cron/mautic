@@ -1,7 +1,7 @@
 # Crontab do Mautic (usuario www-data no container mautic-cron). Montado em /opt/mautic/cron pelo compose;
 # a imagem oficial usa este arquivo no lugar do modelo dela. Baseado em docker-mautic/common/templates/
 # mautic_cron, com o envio de e-mails agendados (broadcasts) e a importacao ligados. Os comandos sao os da
-# documentacao do Mautic (Cron jobs). Para desligar algo, comente a linha; depois: docker compose restart mautic-cron.
+# documentacao do Mautic (Cron jobs). Para desligar algo, comente a linha; o deploy-marketing recarrega o crontab.
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 BASH_ENV=/tmp/cron.env
@@ -17,6 +17,9 @@ BASH_ENV=/tmp/cron.env
 
 # E-mails de segmento agendados (broadcasts) - a cada 5 min; o envio em si sai pelo mautic-worker
 */5 * * * * php /var/www/html/bin/console mautic:broadcasts:send 2>&1 | tee /tmp/stdout
+
+# Fila de mensagens adiadas pelas regras de frequencia (limite de envios por contato) - a cada 5 min
+2,7,12,17,22,27,32,37,42,47,52,57 * * * * php /var/www/html/bin/console mautic:messages:send 2>&1 | tee /tmp/stdout
 
 # Importacoes de contatos em segundo plano (CSV grande) - a cada 3 min
 */3 * * * * php /var/www/html/bin/console mautic:import 2>&1 | tee /tmp/stdout

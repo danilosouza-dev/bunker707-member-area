@@ -95,14 +95,13 @@ UNIT
 }
 
 run_backup() {
-    local stamp stage db_name db_user db_pass
+    local stamp stage
     stamp=$(date -u +%Y%m%dT%H%M%SZ); stage="$backup_root/stage/$stamp"
     mkdir -p "$stage"; chmod 700 "$backup_root" "$stage"
-    db_name=$(env_value MAUTIC_DB_DATABASE mautic); db_user=$(env_value MAUTIC_DB_USER mautic); db_pass=$(require_env_value MAUTIC_DB_PASSWORD)
     wait_healthy mautic-db 60
     log "Exportando o MySQL para $stage..."
-    # A senha vai por variavel de ambiente do processo, nunca na linha de comando.
-    compose exec -T -e MYSQL_PWD="$db_pass" mautic-db mysqldump --single-transaction --quick --triggers --no-tablespaces -u "$db_user" "$db_name" | gzip -1 > "$stage/mautic.sql.gz"
+    # Usuario, senha e banco vem do ambiente do proprio container: nada de segredo na linha de comando (ps).
+    compose exec -T mautic-db sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysqldump --single-transaction --quick --triggers --no-tablespaces -u "$MYSQL_USER" "$MYSQL_DATABASE"' | gzip -1 > "$stage/mautic.sql.gz"
     cp "$ENV_FILE" "$stage/env"; chmod 600 "$stage"/*
     [ "$(stat -c %s "$stage/mautic.sql.gz")" -gt 1000 ] || die "mautic.sql.gz saiu vazio."
     du -sh "$stage" | sed 's/^/  /'

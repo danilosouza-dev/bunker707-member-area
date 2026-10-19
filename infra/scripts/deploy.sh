@@ -64,9 +64,9 @@ if [ "$migrate" = "1" ]; then
     bash "$INFRA_SCRIPTS_DIR/migrate.sh"
 fi
 
-log "Recriando o app..."
-compose up -d --no-deps app
-compose up -d caddy
+# Todo o stack: recria o app (imagem nova) e so o que mudou no compose (auth, caddy...); o resto fica.
+log "Recriando o app e o que mudou..."
+compose up -d
 if wait_healthy app 180 && bash "$INFRA_SCRIPTS_DIR/smoke.sh"; then
     log "Deploy de $image concluido."
     docker image prune -f >/dev/null 2>&1 || true

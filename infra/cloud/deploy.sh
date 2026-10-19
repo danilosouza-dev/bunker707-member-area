@@ -98,6 +98,8 @@ else
         remote "docker compose -f infra/mautic/docker-compose.yml --profile borda pull --quiet && docker compose -f infra/mautic/docker-compose.yml --profile borda up -d"
     fi
     remote "$extra bash infra/mautic/scripts/install.sh"
+    # O crontab so e instalado na partida do mautic-cron: recarregar pega mudancas em cron/mautic.
+    remote "docker compose -f infra/mautic/docker-compose.yml ${SKIP_MARKETING:+-f infra/mautic/compose.colocado.yml} exec -T mautic-cron crontab -u www-data /opt/mautic/cron/mautic" || warn "crontab do Mautic nao recarregado"
     remote "$extra bash infra/mautic/scripts/smoke.sh"
     log "Backup do Mautic: repositorio restic, timer e primeiro backup"
     remote "$extra bash infra/mautic/scripts/backup.sh --init"

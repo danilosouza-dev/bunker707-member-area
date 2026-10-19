@@ -58,10 +58,10 @@ fi
 log "Subindo so o MySQL..."
 compose up -d mautic-db
 wait_healthy mautic-db 180
-db_name=$(env_value MAUTIC_DB_DATABASE mautic); db_user=$(env_value MAUTIC_DB_USER mautic); db_pass=$(require_env_value MAUTIC_DB_PASSWORD)
 log "Importando o dump..."
-gunzip -c "$dump" | compose exec -T -e MYSQL_PWD="$db_pass" mautic-db mysql -u "$db_user" "$db_name"
-tables=$(compose exec -T -e MYSQL_PWD="$db_pass" mautic-db mysql -N -u "$db_user" -e "select count(*) from information_schema.tables where table_schema='$db_name'" | tr -d '[:space:]')
+# Usuario, senha e banco do ambiente do container (o .env restaurado): nada de segredo na linha de comando.
+gunzip -c "$dump" | compose exec -T mautic-db sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql -u "$MYSQL_USER" "$MYSQL_DATABASE"'
+tables=$(compose exec -T mautic-db sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" exec mysql -N -u "$MYSQL_USER" "$MYSQL_DATABASE" -e "select count(*) from information_schema.tables where table_schema = database()"' | tr -d '[:space:]')
 log "Tabelas restauradas: $tables."
 [ "${tables:-0}" -gt 50 ] || die "Poucas tabelas depois da importacao; veja o dump."
 

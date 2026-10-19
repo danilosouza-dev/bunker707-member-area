@@ -1,6 +1,7 @@
 # Mautic 7 (marketing: captura, segmentos, campanhas, e-mails) da Bunker707, num servidor proprio
 # (docs/19 §5 e docs/20, "Mautic"): MySQL proprio, os tres papeis do Mautic (web, cron, worker) e o Caddy
-# na frente com HTTPS automatico. Nenhuma porta alem de 80/443 do Caddy sai do servidor.
+# na frente com HTTPS automatico. Nenhuma porta alem de 80/443 do Caddy sai do servidor. MySQL sem binlog
+# (sem replica nem PITR; o backup e o dump diario).
 #
 # Uso (servidor proprio ou ensaio local):
 #   sh infra/mautic/generate-secrets.sh --local                                   # ou --domain ... em producao
@@ -12,7 +13,8 @@
 # A configuracao do Mautic entra por MAUTIC_CONFIG_PARAMETERS (JSON que o Mautic mescla por cima do
 # config/local.php; e o mecanismo do ParameterLoader oficial): endereco publico, remetente, DSN do mailer
 # (Resend por SMTP na 587 hoje; Amazon SES depois trocando so MAUTIC_MAILER_DSN no .env) e os proxies
-# confiaveis (o Caddy, na rede do compose, repassa o IP real do visitante em X-Forwarded-For).
+# confiaveis (o Caddy, na rede do compose, repassa o IP real do visitante em X-Forwarded-For). Os proxies
+# so valem em config/parameters_local.php, que scripts/install.sh grava a partir deste JSON.
 
 name: bunker707-mautic
 
@@ -30,9 +32,11 @@ x-mautic-env: &mautic-env
   MAUTIC_DB_DATABASE: ${MAUTIC_DB_DATABASE:-mautic}
   MAUTIC_DB_USER: ${MAUTIC_DB_USER:-mautic}
   MAUTIC_DB_PASSWORD: ${MAUTIC_DB_PASSWORD}
-  # Filas de envio e de hits no proprio MySQL (Doctrine); o container mautic-worker consome.
-  MAUTIC_MESSENGER_DSN_EMAIL: doctrine://default
-  MAUTIC_MESSENGER_DSN_HIT: doctrine://default
+  # Filas de envio e de hits no proprio MySQL (Doctrine), separadas; o container mautic-worker consome.
+  # A fila failed guarda o que esgotou as tentativas (sem ela o Mautic usa null:// e o e-mail some).
+  MAUTIC_MESSENGER_DSN_EMAIL: doctrine://default?queue_name=email
+  MAUTIC_MESSENGER_DSN_HIT: doctrine://default?queue_name=hit
+  MAUTIC_MESSENGER_DSN_FAILED: doctrine://default?queue_name=failed
   # JSON numa linha so (aspas simples do YAML; o compose interpola as variaveis dentro dele).
   MAUTIC_CONFIG_PARAMETERS: '{"site_url":"${MAUTIC_PUBLIC_URL}","mailer_dsn":"${MAUTIC_MAILER_DSN:-null://null}","mailer_from_email":"${MAUTIC_MAILER_FROM_EMAIL}","mailer_from_name":"${MAUTIC_MAILER_FROM_NAME:-Bunker707}","trusted_proxies":${MAUTIC_TRUSTED_PROXIES:-["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]},"default_timezone":"${MAUTIC_DEFAULT_TIMEZONE:-America/Sao_Paulo}"}'
   PHP_INI_VALUE_DATE_TIMEZONE: UTC
@@ -52,7 +56,8 @@ services:
         "--character-set-server=utf8mb4",
         "--collation-server=utf8mb4_unicode_ci",
         "--innodb-buffer-pool-size=256M",
-        "--performance-schema=OFF"
+        "--performance-schema=OFF",
+        "--disable-log-bin"
       ]
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysqladmin ping -h 127.0.0.1 -u $$MYSQL_USER --silent"]
@@ -78,7 +83,7 @@ services:
       mautic-db:
         condition: service_healthy
     healthcheck:
-      # Antes da instalacao a raiz redireciona para /installer (302); depois, para /s/login. Os dois valem.
+      # A raiz responde com redirecionamento (302) antes e depois da instalacao.
       test: ["CMD-SHELL", "curl -sS -o /dev/null -w '%{http_code}' http://localhost/ | grep -qE '^(200|30[0-9])$'"]
       interval: 15s
       timeout: 10s
