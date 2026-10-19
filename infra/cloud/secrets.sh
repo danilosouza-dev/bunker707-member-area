@@ -57,10 +57,13 @@ with open(tmp, "w", encoding="utf-8") as fh: fh.write("\n".join(lines).rstrip("\
 os.chmod(tmp, 0o600); os.replace(tmp, path)
 PY
 if [ "$role" = "membros" ]; then
-    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml up -d && bash infra/scripts/smoke.sh"
+    # Os servicos recriados (auth, app) precisam ficar saudaveis antes do smoke: sem a espera, o primeiro
+    # /api/health pega o app ainda subindo (502).
+    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml up -d && bash -c '. infra/scripts/lib.sh; for s in auth app; do wait_healthy \$s 180; done' && bash infra/scripts/smoke.sh"
 else
     extra=""; [ -n "${SKIP_MARKETING:-}" ] && extra="-f infra/mautic/compose.colocado.yml"
     profile=""; [ -n "${SKIP_MARKETING:-}" ] || profile="--profile borda"
-    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/mautic/docker-compose.yml $extra $profile up -d && ${SKIP_MARKETING:+BUNKER707_COMPOSE_OVERRIDE=$REMOTE_DIR/infra/mautic/compose.colocado.yml} bash infra/mautic/scripts/smoke.sh"
+    override="${SKIP_MARKETING:+BUNKER707_COMPOSE_OVERRIDE=$REMOTE_DIR/infra/mautic/compose.colocado.yml}"
+    rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/mautic/docker-compose.yml $extra $profile up -d && $override bash -c '. infra/mautic/scripts/_env.sh; wait_healthy mautic 300' && $override bash infra/mautic/scripts/smoke.sh"
 fi
 log "Segredos aplicados e servicos recriados."
