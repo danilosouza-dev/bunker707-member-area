@@ -87,3 +87,19 @@ supabase_cli() {
 
 # Caminho do repositorio como o compose ve (para mensagens).
 project_name() { compose config --format json 2>/dev/null | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["name"])' 2>/dev/null || echo bunker707; }
+
+# Cadastra no repositorio restic (RESTIC_REPOSITORY, aberto com RESTIC_PASSWORD) uma segunda senha, lida do
+# arquivo: a de recuperacao derivada do HCLOUD_TOKEN (infra/cloud/deploy-key.mjs --secret), que abre o backup
+# mesmo sem o .env do servidor. Idempotente: se a senha ja abre o repositorio, nao faz nada.
+restic_add_recovery_key() {
+    local file="$1"
+    [ -s "$file" ] || die "Arquivo da senha de recuperacao vazio ou ausente: $file"
+    command -v restic >/dev/null 2>&1 || die "restic nao encontrado (bootstrap.sh instala no servidor)."
+    if env -u RESTIC_PASSWORD restic --password-file "$file" cat config >/dev/null 2>&1; then
+        log "Senha de recuperacao ja cadastrada em $RESTIC_REPOSITORY."
+    else
+        restic key add --new-password-file "$file" >/dev/null
+        env -u RESTIC_PASSWORD restic --password-file "$file" cat config >/dev/null 2>&1 || die "A senha de recuperacao nao abriu $RESTIC_REPOSITORY depois de cadastrada."
+        log "Senha de recuperacao cadastrada em $RESTIC_REPOSITORY."
+    fi
+}

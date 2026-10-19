@@ -115,6 +115,26 @@ test("run.sh despacha a etapa e para na checagem do HCLOUD_TOKEN antes de chamar
   assert.doesNotMatch(opcoes.stderr, /opcao ignorada.*MEMBROS_TYPE/);
 });
 
+test("deploy-key.mjs --secret: senha de recuperacao dos backups derivada do token, 0600, sem saida, nunca da semente de deploy", () => {
+  const dir = tempDir("bunker707-recovery-");
+  const script = join(cloudDir, "deploy-key.mjs");
+  const env = cleanEnv({ HCLOUD_TOKEN: "token-de-teste-com-mais-de-32-caracteres-0001" });
+  const args = (out) => [script, "--secret", "--info", "bunker707-restic-recovery-v1", "--out", out];
+  const first = run(process.execPath, args(join(dir, "a")), { env });
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(first.stdout, "", "a senha nunca vai para a saida (log do Actions)");
+  const secret = readFileSync(join(dir, "a"), "utf8");
+  assert.match(secret, /^[0-9a-f]{64}\n$/);
+  assert.equal(statSync(join(dir, "a")).mode & 0o777, 0o600);
+  assert.equal(run(process.execPath, args(join(dir, "b")), { env }).status, 0);
+  assert.equal(readFileSync(join(dir, "b"), "utf8"), secret, "mesmo token, mesma senha: recuperavel em qualquer sessao");
+  const otherToken = run(process.execPath, args(join(dir, "c")), { env: cleanEnv({ HCLOUD_TOKEN: "outro-token-de-teste-com-mais-de-32-caracteres" }) });
+  assert.equal(otherToken.status, 0);
+  assert.notEqual(readFileSync(join(dir, "c"), "utf8"), secret);
+  const deploySeed = run(process.execPath, [script, "--secret", "--out", join(dir, "d")], { env });
+  assert.equal(deploySeed.status, 2, "sem --info proprio seria a semente da chave SSH de deploy");
+});
+
 test("deploy-key.mjs: chave OpenSSH Ed25519 derivada do HCLOUD_TOKEN, determinista, 0600, e sem token nada sai", () => {
   const dir = tempDir("bunker707-deploy-key-");
   const script = join(cloudDir, "deploy-key.mjs");

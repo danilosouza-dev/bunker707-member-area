@@ -4,6 +4,7 @@
 #   sh infra/scripts/backup.sh --init          cria chave SSH, alias `storagebox` e o repositorio restic
 #   sh infra/scripts/backup.sh --check         backup + `restic check` (integridade; rode toda semana)
 #   sh infra/scripts/backup.sh --install-timer instala infra/systemd/bunker707-backup.{service,timer}
+#   sh infra/scripts/backup.sh --add-key=ARQ  cadastra a senha do arquivo como segunda chave do repositorio (recuperacao)
 #
 # O que entra em cada snapshot:
 #   roles.sql           pg_dumpall --roles-only (papeis e senhas; so por partes mesmo, como o dump da CLI)
@@ -29,7 +30,8 @@ for arg in "$@"; do
         --init) mode="init" ;;
         --install-timer) mode="timer" ;;
         --check) do_check=1 ;;
-        -h|--help) sed -n 2,22p "$0"; exit 0 ;;
+        --add-key=*) mode="add-key"; recovery_key_file="${arg#*=}" ;;
+        -h|--help) sed -n 2,23p "$0"; exit 0 ;;
         *) die "opcao desconhecida: $arg" ;;
     esac
 done
@@ -156,6 +158,7 @@ run_backup() {
 }
 
 case "$mode" in
+    add-key) restic_add_recovery_key "$recovery_key_file" ;;
     init) init_repo ;;
     timer) install_timer ;;
     backup) run_backup ;;

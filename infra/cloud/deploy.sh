@@ -84,6 +84,7 @@ SQL
 
     log "Backup: repositorio restic no Storage Box, timer diario e primeiro backup"
     remote "bash infra/scripts/backup.sh --init"
+    backup_recovery_key "$target" membros
     remote "sudo bash infra/scripts/backup.sh --install-timer >/dev/null && sudo systemctl start bunker707-backup.service"
     remote "cat /var/backups/bunker707/ultimo-sucesso 2>/dev/null || true"
     remote "sudo journalctl -u bunker707-backup -n 5 --no-pager"
@@ -111,6 +112,7 @@ else
     remote "$extra bash infra/mautic/scripts/smoke.sh"
     log "Backup do Mautic: repositorio restic, timer e primeiro backup"
     remote "$extra bash infra/mautic/scripts/backup.sh --init"
+    backup_recovery_key "$target" marketing
     remote "sudo $extra bash infra/mautic/scripts/backup.sh --install-timer >/dev/null && sudo systemctl start bunker707-mautic-backup.service"
     remote "sudo journalctl -u bunker707-mautic-backup -n 5 --no-pager"
     echo

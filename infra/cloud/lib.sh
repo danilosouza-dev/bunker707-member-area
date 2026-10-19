@@ -217,6 +217,17 @@ PY
 }
 get_env() { rsh "$1" "grep -E '^$3=' '$2' | head -n1 | cut -d= -f2-"; }
 
+# Senha de recuperacao dos backups: derivada do HCLOUD_TOKEN e cadastrada como segunda chave do repositorio
+# restic do papel. Sem o .env do servidor (servidor perdido), quem tem o token abre o backup (docs/20 §10.2).
+# A senha vai pelo stdin do SSH para um arquivo temporario 0600 no servidor, apagado em seguida.
+backup_recovery_key() {  # backup_recovery_key user@host membros|marketing
+    local target="$1" script f="$WORK_DIR/restic-recovery"
+    case "$2" in membros) script=infra/scripts/backup.sh ;; marketing) script=infra/mautic/scripts/backup.sh ;; *) die "papel invalido: $2" ;; esac
+    node "$CLOUD_DIR/deploy-key.mjs" --secret --info bunker707-restic-recovery-v1 --out "$f" 2>/dev/null
+    rsh "$target" "umask 077; k=\$(mktemp); cat > \"\$k\"; cd '$REMOTE_DIR' && bash $script --add-key=\"\$k\"; rc=\$?; rm -f \"\$k\"; exit \$rc" < "$f"
+    rm -f "$f"
+}
+
 # ---- Cloudflare -------------------------------------------------------------------------------------
 cf_api() {  # cf_api METODO CAMINHO [JSON]
     local method="$1" path="$2" data="${3:-}" out

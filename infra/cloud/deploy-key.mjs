@@ -1,6 +1,9 @@
 // Chave SSH de deploy derivada do token da Hetzner (HKDF-SHA256 -> Ed25519), em formato OpenSSH.
 //
 //   node infra/cloud/deploy-key.mjs [--out ~/.ssh/bunker707_deploy] [--print-public]
+//   node infra/cloud/deploy-key.mjs --secret --info bunker707-restic-recovery-v1 --out <arquivo>
+//     (--secret: em vez de chave SSH, uma senha de 64 hex no arquivo, 0600; e a senha de recuperacao dos
+//     backups, cadastrada como segunda chave de cada repositorio restic. Nada vai para a saida.)
 //
 // Por que derivar em vez de guardar: a sessao do Claude na nuvem e descartavel (nada sobrevive entre
 // sessoes alem dos segredos do ambiente), e quem tem HCLOUD_TOKEN ja controla o servidor por inteiro
@@ -17,6 +20,7 @@ import { dirname, join } from "node:path";
 const args = process.argv.slice(2);
 let outPath = join(homedir(), ".ssh", "bunker707_deploy");
 let printPublic = false;
+let secretOnly = false;
 // --info muda o "proposito" na derivacao: outra chave, do mesmo token (ex.: bunker707-backup-key-v1 para o
 // Storage Box). O padrao e a chave de deploy.
 let info = "bunker707-deploy-key-v1";
@@ -25,7 +29,8 @@ for (let i = 0; i < args.length; i += 1) {
   if (args[i] === "--out") { i += 1; outPath = args[i]; }
   else if (args[i] === "--info") { i += 1; info = args[i]; comment = info.replace(/-key-v\d+$/, ""); }
   else if (args[i] === "--print-public") printPublic = true;
-  else if (args[i] === "-h" || args[i] === "--help") { console.log("uso: node infra/cloud/deploy-key.mjs [--out <arquivo>] [--info <proposito>] [--print-public]"); process.exit(0); }
+  else if (args[i] === "--secret") secretOnly = true;
+  else if (args[i] === "-h" || args[i] === "--help") { console.log("uso: node infra/cloud/deploy-key.mjs [--out <arquivo>] [--info <proposito>] [--print-public | --secret]"); process.exit(0); }
   else { console.error(`opcao desconhecida: ${args[i]}`); process.exit(2); }
 }
 
@@ -37,6 +42,14 @@ if (token.length < 32) {
 
 // ---- derivacao -------------------------------------------------------------------------------
 const seed = Buffer.from(hkdfSync("sha256", token, info, "ssh-ed25519", 32));
+if (secretOnly) {
+  if (info === "bunker707-deploy-key-v1") { console.error("--secret precisa de --info proprio (nunca a semente da chave de deploy)."); process.exit(2); }
+  mkdirSync(dirname(outPath), { recursive: true, mode: 0o700 });
+  writeFileSync(outPath, `${seed.toString("hex")}\n`, { mode: 0o600 });
+  chmodSync(outPath, 0o600);
+  console.error(`Senha derivada (${info}) em ${outPath}`);
+  process.exit(0);
+}
 const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 const privateKey = createPrivateKey({ key: Buffer.concat([PKCS8_ED25519_PREFIX, seed]), format: "der", type: "pkcs8" });
 const spki = createPublicKey(privateKey).export({ format: "der", type: "spki" });

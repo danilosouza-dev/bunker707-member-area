@@ -6,7 +6,8 @@
 #   plan, provision, deploy-membros, deploy-marketing, secrets-membros, secrets-marketing, equipe,
 #   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing,
 #   snapshot (guarda e apaga os servidores; CONFIRMAR=apagar), restaurar (recria dos snapshots),
-#   fechar-ssh (passo final do workflow: fecha a 22 que um passo cancelado deixou aberta)
+#   fechar-ssh (passo final do workflow: fecha a 22 que um passo cancelado deixou aberta),
+#   chave-backup (cadastra a senha de recuperacao derivada do token nos repositorios de backup)
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
@@ -41,11 +42,21 @@ case "$etapa" in
     exec-marketing) exec_remote marketing ;;
     snapshot) bash "$here/snapshot.sh" ;;
     restaurar) bash "$here/restaurar.sh" ;;
+    chave-backup)
+        . "$here/lib.sh"; need HCLOUD_TOKEN; install_hcloud; deploy_key
+        for role in membros marketing; do
+            if [ "$role" = "membros" ] || [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi
+            server_exists "$server" || { echo "  $server nao existe; pulando $role."; continue; }
+            ip=$(server_ip4 "$server"); fw_open_ssh "$server"; wait_ssh "$DEPLOY_USER@$ip"
+            log "Senha de recuperacao do backup ($role)"
+            backup_recovery_key "$DEPLOY_USER@$ip" "$role"
+            fw_close_all
+        done ;;
     fechar-ssh)
         . "$here/lib.sh"
         [ -s "$WORK_DIR/fw-abertos" ] || { echo "Nenhuma porta 22 aberta por esta execucao."; exit 0; }
         need HCLOUD_TOKEN; install_hcloud
         FW_OPENED=$(sort -u "$WORK_DIR/fw-abertos" | tr '\n' ' ')
         fw_close_all ;;
-    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,9p "$0"; exit 2 ;;
+    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,10p "$0"; exit 2 ;;
 esac

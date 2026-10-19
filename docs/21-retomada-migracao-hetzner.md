@@ -196,8 +196,9 @@ dos cabecalhos (o `request.url` do Next no container vinha como `0.0.0.0:3000`).
 
 Pendente, para o produtor decidir:
 
-1. Copia do `RESTIC_PASSWORD` dos dois servidores fora deles. Hoje so existe no `.env` de cada servidor (e
-   dentro do proprio backup, que ele cifra): se o servidor se perder, o backup nao abre.
+1. (Feito em 19/10/2026, a pedido do produtor.) Senha de recuperacao dos backups: segunda chave de cada
+   repositorio restic, derivada do `HCLOUD_TOKEN` (etapa `chave-backup`; docs/20 §10.2). Sem o `.env` do
+   servidor, o token guardado no GitHub abre o backup.
 2. Acesso de escrita ao repositorio (docs/20 §16): quem tem escrita tem os tokens e root nos servidores.
 3. Teste de carga com 100 alunos simultaneos antes de abrir para turmas grandes (o produtor perguntou;
    proposto rodar pelo Actions e decidir rescale com numeros).

@@ -4,6 +4,7 @@
 #   sh infra/mautic/scripts/backup.sh --init          chave SSH, alias `storagebox` e repositorio restic
 #   sh infra/mautic/scripts/backup.sh --check         backup + `restic check`
 #   sh infra/mautic/scripts/backup.sh --install-timer instala o timer (03:50 UTC) do systemd
+#   sh infra/mautic/scripts/backup.sh --add-key=ARQ  cadastra a senha do arquivo como segunda chave do repositorio (recuperacao)
 # Entra em cada snapshot: mautic.sql.gz (mysqldump --single-transaction do banco inteiro), o .env e os
 # volumes config/ (local.php) e media/ (imagens e arquivos enviados). Retencao: BACKUP_KEEP_DAILY dias.
 # Mesmo Storage Box e mesma chave SSH do stack principal (infra/scripts/backup.sh); outro repositorio.
@@ -18,7 +19,8 @@ for arg in "$@"; do
         --init) mode="init" ;;
         --install-timer) mode="timer" ;;
         --check) do_check=1 ;;
-        -h|--help) sed -n 2,9p "$0"; exit 0 ;;
+        --add-key=*) mode="add-key"; recovery_key_file="${arg#*=}" ;;
+        -h|--help) sed -n 2,10p "$0"; exit 0 ;;
         *) die "opcao desconhecida: $arg" ;;
     esac
 done
@@ -118,6 +120,7 @@ run_backup() {
 }
 
 case "$mode" in
+    add-key) restic_add_recovery_key "$recovery_key_file" ;;
     init) ssh_config_alias; if restic_bin cat config >/dev/null 2>&1; then log "Repositorio restic ja existe."; else log "Criando o repositorio restic em $RESTIC_REPOSITORY..."; restic_bin init; fi; log "Guarde RESTIC_PASSWORD fora do servidor." ;;
     timer) install_timer ;;
     backup) run_backup ;;
