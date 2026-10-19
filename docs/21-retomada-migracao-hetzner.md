@@ -200,11 +200,11 @@ Pendente, para o produtor decidir:
    repositorio restic, derivada do `HCLOUD_TOKEN` (etapa `chave-backup`; docs/20 §10.2). Sem o `.env` do
    servidor, o token guardado no GitHub abre o backup.
 2. Acesso de escrita ao repositorio (docs/20 §16): quem tem escrita tem os tokens e root nos servidores.
-3. (Feito em 19/10/2026.) Teste de carga, etapa `carga` (docs/20 §12.1): o CX23 atende cerca de 8 paginas
-   por segundo sem erro. Os ajustes de servidor (Studio e meta no perfil `studio`, `AUTH_SESSION_STRATEGY=claims`,
-   Envoy checando o PostgREST pela porta) baixaram a mediana pela metade com 100 alunos (14,3 s para 7,5 s) e
-   para um terco com 30 (2,4 s para 0,75 s). Proximo passo proposto ao produtor, nao iniciado: cache do catalogo e menos
-   chamadas ao PostgREST e ao Auth por pagina no app.
+3. (Feito em 19/10/2026.) Teste de carga, etapa `carga` (docs/20 §12.1): o CX23 atende cerca de 18 paginas
+   por segundo sem erro, mais de 3 vezes o inicio. Ajustes de servidor (Studio e meta no perfil `studio`,
+   `AUTH_SESSION_STRATEGY=claims`, Envoy checando o PostgREST pela porta) e do app, aprovado pelo produtor
+   (catalogo publicado em cache com a tag `catalog`; paginas de conteudo validando so o JWT, docs/06). Mediana com
+   100 alunos: 14,3 s -> 7,5 s -> 1,9 s; com 30: 2,4 s -> 0,75 s -> 0,33 s. O gargalo agora e a renderizacao do app.
 4. A virada de producao (docs/20 §14): webhook do Resend para `https://membros.bunker707.com.br/api/webhooks/resend`
    e `RESEND_WEBHOOK_SECRET` por `secrets-membros`; Hotmart e Ticto; conteudo (nada e copiado da nuvem).
 5. Opcional: igualar os modelos de e-mail do Supabase cloud (staging) ao `/auth/confirm` (docs/06).

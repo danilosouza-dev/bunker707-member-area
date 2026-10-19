@@ -631,8 +631,10 @@ Cenario pior que o real: cada aluno virtual abre home, curso, aula e minhas comp
 | Antes | 100 | 14,3 s | 15,8 s | 5,5 | 0 |
 | Studio fora e sessao por `claims` | 30 | 0,75 s | 2,1 s | 6,9 | 0 |
 | Os dois mais o Envoy checando o PostgREST pela porta | 100 | 7,5 s | 13,6 s | 8,4 | 0 |
+| Mais o app: catalogo em cache e paginas de conteudo so pelo JWT | 30 | 0,33 s | 0,5 a 0,8 s | 8,1 | 0 |
+| Idem | 100 | 1,9 s | 3,9 s | 18,2 | 0 |
 
-Leitura: o servidor atende cerca de 8 paginas por segundo; acima disso a fila cresce (carga 16 a 18 nos 2 vCPU com 100 alunos). Nenhum erro e nenhuma sessao perdida em todas as rodadas. Pico de CPU por container com 100 alunos, depois dos ajustes: Postgres 79%, app 63%, Auth 35%, Caddy 26%, PostgREST 23%, Envoy 17%. Cada pagina ainda faz cerca de 9 chamadas ao PostgREST (catalogo igual para todos e dados do aluno) e uma ao Auth (`getUser` das paginas protegidas, 5 consultas no banco); as consultas em si levam menos de 1 ms cada, o custo e o volume. Proximo ganho e no app (cache do catalogo e menos chamadas por pagina), nao no servidor.
+Leitura: depois dos ajustes de servidor (Studio fora, `claims`, Envoy pela porta) e do app (catalogo publicado em `unstable_cache` com a tag `catalog` e paginas de conteudo validando so o JWT, docs/06), o servidor atende cerca de 18 paginas por segundo, mais de 3 vezes as 5,5 do inicio. Com 30 alunos todas as paginas ficam abaixo do limite de 2 s do roteiro (p95 ate 0,8 s); com 100 clicando sem parar a fila ainda cresce (carga 7 a 9 nos 2 vCPU, antes 16 a 18). Nenhum erro e nenhuma sessao perdida em todas as rodadas. Pico de CPU por container na ultima rodada de 100: app 124% (renderizacao do Next, agora o gargalo), Postgres 74%, Auth 27% (so Minhas compras, que segue no `getUser`), Caddy 18%, Envoy 15%, PostgREST 15%. Cada pagina faz 5 chamadas ao PostgREST, todas do aluno (perfil, acessos, favoritos, progresso, papel na equipe); o catalogo so e relido quando o produtor publica ou a cada 60 s. Proximo ganho, se um dia for preciso: renderizacao do app ou um servidor com mais vCPU.
 
 Como repetir: etapa `carga` com `opcoes` `VUS=30 DURACAO=2m PAUSA_MIN=1 PAUSA_MAX=4` ou `VUS=100 DURACAO=3m`. O k6 marca a etapa como falha quando o p95 passa de 2 s (o limite do roteiro); o resumo no fim do log vale mesmo assim.
 
