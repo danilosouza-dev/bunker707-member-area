@@ -19,10 +19,9 @@ name: bunker707
 
 services:
 
-  # Studio e meta so sobem com o perfil `studio` (COMPOSE_PROFILES=studio): o healthcheck do Studio chama o
-  # meta a cada 5 s, e o meta faz consultas pesadas ao catalogo do banco (172 ms cada). No teste de carga de
-  # 19/10/2026 os dois comiam cerca de 35% de 1 vCPU sem ninguem usar o painel. Ligar so quando precisar
-  # (docs/20, "Studio").
+  # Studio e meta so sobem com o perfil `studio` (COMPOSE_PROFILES=studio): no teste de carga de 19/10/2026
+  # os dois somavam cerca de 35% de 1 vCPU sem ninguem usar o painel (healthchecks do compose e do Envoy a
+  # cada 5 s). Ligar so quando precisar (docs/20, 8.1).
   studio:
     container_name: bunker707-studio
     image: supabase/studio:2026.10.12-sha-3699278

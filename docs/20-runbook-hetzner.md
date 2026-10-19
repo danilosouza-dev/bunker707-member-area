@@ -417,7 +417,7 @@ Como entrar no Postgres no servidor: `docker compose -f infra/compose/docker-com
 
 ### 8.1 Studio (painel do banco): desligado, ligar so quando precisar (19/10/2026)
 
-Studio e meta (o servico que le o catalogo do banco para o Studio) ficam no perfil `studio` do compose e nao sobem com `docker compose up -d` nem com o `deploy-membros`. Motivo, medido no teste de carga de 19/10/2026 (secao 12.1): o healthcheck do Studio chama o meta a cada 5 s, o meta roda a consulta de tipos do catalogo (`WITH base_types`, 172 ms cada), e os dois somavam cerca de 35% de 1 vCPU e 300 MiB sem ninguem usar o painel. O app nao depende deles; o gateway sobe sem eles (sem o Studio, `/` e `/pg` do Envoy respondem 503), e o host `studio` continua barrado pelo Caddy para quem esta fora de `STUDIO_ALLOWED_IPS`.
+Studio e meta (o servico que le o catalogo do banco para o Studio) ficam no perfil `studio` do compose e nao sobem com `docker compose up -d` nem com o `deploy-membros`. Motivo, medido no teste de carga de 19/10/2026 (secao 12.1): os dois somavam cerca de 35% de 1 vCPU e 300 MiB sem ninguem usar o painel (os healthchecks do compose e do Envoy os acordam a cada 5 s). O app nao depende deles; o gateway sobe sem eles (sem o Studio, `/` e `/pg` do Envoy respondem 503), e o host `studio` continua barrado pelo Caddy para quem esta fora de `STUDIO_ALLOWED_IPS`.
 
 Ligar (etapa `exec-membros` com este `payload`, ou por SSH em `/opt/bunker707`):
 
