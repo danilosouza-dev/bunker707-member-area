@@ -28,6 +28,12 @@ wait_ssh "$target"
 log "Enviando o repositorio ($commit) para $server:$REMOTE_DIR"
 sync_repo "$target"
 remote() { rsh "$target" "cd '$REMOTE_DIR' && $*"; }
+# .env gerado antes de 19/10/2026 apontava o restic para a raiz do Storage Box, que nao aceita escrita:
+# o caminho passa a ser relativo a pasta pessoal do box.
+fix_restic_path() {
+    local repo; repo=$(get_env "$target" "$1" RESTIC_REPOSITORY)
+    case "$repo" in sftp:storagebox:/bunker707/*) set_env "$target" "$1" RESTIC_REPOSITORY "sftp:storagebox:${repo#sftp:storagebox:/}" ;; esac
+}
 
 if [ "$role" = "membros" ]; then
     envf="$REMOTE_DIR/infra/compose/.env"
@@ -36,6 +42,7 @@ if [ "$role" = "membros" ]; then
         remote "sh infra/compose/generate-secrets.sh --domain '$APP_DOMAIN' --api-domain '$API_DOMAIN' --studio-domain '$STUDIO_DOMAIN' --email '$PRODUCER_EMAIL' --studio-ips '$(cidr_or_empty "${PRODUCER_IP:-127.0.0.1}")'"
     fi
     [ -n "$sb_user" ] && { set_env "$target" "$envf" STORAGE_BOX_USER "$sb_user"; set_env "$target" "$envf" STORAGE_BOX_HOST "$sb_host"; }
+    fix_restic_path "$envf"
     [ -n "${SKIP_MARKETING:-}" ] && set_env "$target" "$envf" MAUTIC_SITE_ADDRESS "$MAUTIC_DOMAIN"
     # Studio so para o produtor: PRODUCER_IP nas opcoes atualiza a allowlist a qualquer momento.
     [ -n "$PRODUCER_IP" ] && set_env "$target" "$envf" STUDIO_ALLOWED_IPS "$(cidr_or_empty "$PRODUCER_IP")"
@@ -91,6 +98,7 @@ else
         remote "sh infra/mautic/generate-secrets.sh --domain '$MAUTIC_DOMAIN' --email '$PRODUCER_EMAIL' --admin-ips '$(cidr_or_empty "${PRODUCER_IP:-127.0.0.1}")'"
     fi
     [ -n "$sb_user" ] && { set_env "$target" "$envf" STORAGE_BOX_USER "$sb_user"; set_env "$target" "$envf" STORAGE_BOX_HOST "$sb_host"; }
+    fix_restic_path "$envf"
     log "Stack do Mautic: imagens, compose up, instalacao, smoke"
     if [ -n "${SKIP_MARKETING:-}" ]; then
         remote "docker compose -f infra/mautic/docker-compose.yml -f infra/mautic/compose.colocado.yml pull --quiet && docker compose -f infra/mautic/docker-compose.yml -f infra/mautic/compose.colocado.yml up -d && docker compose -f infra/compose/docker-compose.yml up -d caddy"

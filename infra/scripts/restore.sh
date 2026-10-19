@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Restaura um backup (backup.sh) num servidor limpo e roda o teste de fumaca:
-#   export RESTIC_REPOSITORY=sftp:storagebox:/bunker707/restic RESTIC_PASSWORD=...   # ou um .env ja no lugar
+#   export RESTIC_REPOSITORY=sftp:storagebox:bunker707/restic RESTIC_PASSWORD=...   # ou um .env ja no lugar
 #   sh infra/scripts/restore.sh --snapshot latest [--yes]
 # Pre-requisitos: bootstrap.sh feito, repositorio clonado, alias SSH `storagebox` (backup.sh --init) e
 # NENHUM dado em infra/compose/volumes/db/data (o script recusa sobrescrever sem --yes).

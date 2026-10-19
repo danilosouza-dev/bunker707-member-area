@@ -214,7 +214,7 @@ test("generate-secrets em producao exige --domain e --email e deriva os endereco
   assert.equal(env.get("MAUTIC_ADMIN_EMAIL"), "equipe@exemplo.com.br");
   assert.equal(env.get("MAUTIC_ADMIN_IPS"), "203.0.113.10/32");
   assert.equal(env.get("CADDY_BIND"), "0.0.0.0");
-  assert.equal(env.get("RESTIC_REPOSITORY"), "sftp:storagebox:/bunker707/restic-mautic");
+  assert.equal(env.get("RESTIC_REPOSITORY"), "sftp:storagebox:bunker707/restic-mautic");
   assert.ok((env.get("MAUTIC_ADMIN_PASSWORD") ?? "").length >= 16);
   assert.match(ok.stdout, /MAUTIC_MAILER_DSN/, "lembra o que ainda precisa ser preenchido a mao");
 });

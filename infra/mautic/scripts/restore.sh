@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Restaura um backup do Mautic (backup.sh) num servidor limpo e roda o smoke:
-#   export RESTIC_REPOSITORY=sftp:storagebox:/bunker707/restic-mautic RESTIC_PASSWORD=...   # ou um .env no lugar
+#   export RESTIC_REPOSITORY=sftp:storagebox:bunker707/restic-mautic RESTIC_PASSWORD=...   # ou um .env no lugar
 #   sh infra/mautic/scripts/restore.sh --snapshot latest [--yes]
 # Ordem: restic restore -> .env -> volumes config/ e media/ -> sobe so o MySQL -> importa o dump -> sobe o
 # resto -> smoke. O MySQL precisa estar vazio (o script recusa sobrescrever sem --yes).
