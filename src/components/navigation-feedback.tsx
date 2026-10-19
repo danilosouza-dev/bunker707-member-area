@@ -37,8 +37,10 @@ type NavigationFeedbackContextValue = {
 
 const NavigationFeedbackContext = createContext<NavigationFeedbackContextValue | null>(null);
 
+// Mesmo formato do routeSignature do provider (usePathname + useSearchParams), para as comparacoes com a
+// rota ja desenhada (lastCommittedRouteRef) baterem tambem com caracteres codificados na query.
 function getRouteSignature(url: URL) {
-  return `${url.pathname}${url.search}`;
+  return `${url.pathname}${url.searchParams.size > 0 ? `?${url.searchParams.toString()}` : ""}`;
 }
 
 function getCurrentRouteSignature() {
@@ -332,6 +334,13 @@ export function NavigationFeedbackProvider({ children }: { children: ReactNode }
     }
 
     function handleHistoryNavigation() {
+      // Voltar/avancar: o Next costuma restaurar a pagina do cache de historico ja dentro do proprio evento.
+      // Se a rota desenhada ja e a do endereco novo, nao ha o que esperar; ligar o aviso aqui deixava o spinner
+      // por cima da pagina pronta ate o timeout (15 s + 4 s), medido no ambiente de teste em 19/10/2026.
+      if (getCurrentRouteSignature() === lastCommittedRouteRef.current) {
+        return;
+      }
+
       startNavigation(window.location.href, {
         force: true,
         fromRoute: lastCommittedRouteRef.current,
