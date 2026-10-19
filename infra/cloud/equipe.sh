@@ -20,14 +20,16 @@ for entry in ${EQUIPE//,/ }; do
     [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || die "e-mail invalido em EQUIPE: $email"
     case "$papel" in owner|admin|editor|instructor|support|analyst) ;; *) die "papel invalido em EQUIPE: $papel" ;; esac
     log "$email ($papel)"
-    # 1. usuario existe? (admin API do GoTrue pelo gateway, com a chave secreta)
-    uid=$(rsh "$target" "$auth_curl '$api/auth/v1/admin/users?page=1&per_page=1000' | jq -r --arg e '$email' '.users[]? | select(.email==\$e) | .id' | head -n1")
-    if [ -z "$uid" ]; then
+    # 1. usuario existe? (admin API do GoTrue pelo gateway, com a chave secreta). Quem existe mas ainda nao
+    # confirmou o e-mail (convite nao usado) recebe o convite de novo, com o modelo atual.
+    found=$(rsh "$target" "$auth_curl '$api/auth/v1/admin/users?page=1&per_page=1000' | jq -r --arg e '$email' '.users[]? | select(.email==\$e) | \"\\(.id) \\(.email_confirmed_at // \"pendente\")\"' | head -n1")
+    uid="${found%% *}"; confirmed="${found#* }"
+    if [ -z "$uid" ] || [ "$confirmed" = "pendente" ]; then
         uid=$(rsh "$target" "$auth_curl -X POST '$api/auth/v1/invite' -H 'Content-Type: application/json' -d '{\"email\":\"$email\"}' | jq -r '.id'" || true)
         [ -n "$uid" ] && [ "$uid" != "null" ] || die "Convite para $email nao foi aceito pelo Auth (SMTP configurado? rode secrets-membros antes; veja: docker compose logs auth)."
-        echo "  convite enviado (id $uid)"
+        if [ -z "$found" ]; then echo "  convite enviado (id $uid)"; else echo "  convite reenviado: ainda nao tinha confirmado (id $uid)"; fi
     else
-        echo "  ja existe (id $uid)"
+        echo "  ja existe e ja entrou (id $uid)"
     fi
     # 2. papel
     rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -v ON_ERROR_STOP=1 -q -c \"insert into public.admin_roles (user_id, role) values ('$uid', '$papel') on conflict (user_id) do update set role = excluded.role\""

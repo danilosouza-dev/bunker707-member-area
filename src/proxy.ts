@@ -23,7 +23,7 @@ const protectedPagePrefixes = [
   "/perfil",
   "/suporte"
 ];
-const publicPagePrefixes = ["/login", "/auth/callback"];
+const publicPagePrefixes = ["/login", "/auth/callback", "/auth/confirm"];
 
 function getSupabaseConnectionSources() {
   if (!supabaseUrl) {
@@ -284,10 +284,11 @@ export async function proxy(request: NextRequest) {
     return redirectToLogin(request, contentSecurityPolicy);
   }
 
-  // Link com ?code= (recuperacao de senha, magic link, OAuth) passa mesmo com sessao aberta: /login e
-  // /auth/callback trocam o codigo pela sessao nova, em vez de o proxy mandar para a home. O convite
-  // chega por #access_token (fragmento, invisivel ao servidor) e nao e coberto aqui (docs/06).
-  if (publicPage && user && !request.nextUrl.searchParams.has("code")) {
+  // Link com ?code= (recuperacao de senha, magic link, OAuth) ou ?token_hash= (convite e recuperacao pelos
+  // modelos do servidor proprio, /auth/confirm) passa mesmo com sessao aberta: a pagina troca pela sessao
+  // nova, em vez de o proxy mandar para a home.
+  const emailLink = request.nextUrl.searchParams.has("code") || request.nextUrl.searchParams.has("token_hash");
+  if (publicPage && user && !emailLink) {
     const safeRedirectPath = getSafeRedirectPath(request.nextUrl.searchParams.get("next"));
 
     if (userMustChangePassword(user.user_metadata)) {
