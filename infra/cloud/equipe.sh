@@ -11,9 +11,8 @@ EQUIPE="${EQUIPE:-ferramentas.bunker707@gmail.com:owner,bertoldomolina8@gmail.co
 ip=$(server_ip4 "$MEMBROS_NAME"); target="$DEPLOY_USER@$ip"
 fw_open_ssh "$MEMBROS_NAME"; wait_ssh "$target"
 envf="$REMOTE_DIR/infra/compose/.env"; api="http://127.0.0.1:8000"
-# A chave secreta nunca sai do servidor nem entra em argv (ps, /proc): o shell remoto le do .env e entrega os
-# cabecalhos ao curl por um config no stdin (-K -).
-auth_curl="k=\$(grep -E '^SUPABASE_SECRET_KEY=' '$envf' | head -n1 | cut -d= -f2-) && [ -n \"\$k\" ] && printf 'header = \"apikey: %s\"\nheader = \"Authorization: Bearer %s\"\n' \"\$k\" \"\$k\" | curl -fsS -K -"
+# A chave secreta nunca sai do servidor nem entra em argv (remote_auth_curl em lib.sh).
+auth_curl=$(remote_auth_curl "$envf")
 for entry in ${EQUIPE//,/ }; do
     email="${entry%%:*}"; papel="${entry##*:}"
     # Os dois vao para o comando remoto e para o SQL: so formatos conhecidos.

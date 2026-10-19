@@ -217,6 +217,13 @@ PY
 }
 get_env() { rsh "$1" "grep -E '^$3=' '$2' | head -n1 | cut -d= -f2-"; }
 
+# remote_auth_curl ENV_FILE: comando (para rodar NO servidor) que chama a API administrativa do Auth com a
+# chave secreta do .env. A chave nunca sai do servidor nem entra em argv (ps, /proc): o shell remoto le do
+# .env e entrega os cabecalhos ao curl por um config no stdin (-K -). Use como prefixo: "$cmd 'URL' ...".
+remote_auth_curl() {
+    printf '%s' "k=\$(grep -E '^SUPABASE_SECRET_KEY=' '$1' | head -n1 | cut -d= -f2-) && [ -n \"\$k\" ] && printf 'header = \"apikey: %s\"\\nheader = \"Authorization: Bearer %s\"\\n' \"\$k\" \"\$k\" | curl -fsS -K -"
+}
+
 # Senha de recuperacao dos backups: derivada do HCLOUD_TOKEN e cadastrada como segunda chave do repositorio
 # restic do papel. Sem o .env do servidor (servidor perdido), quem tem o token abre o backup (docs/20 §10.2).
 # A senha vai pelo stdin do SSH para um arquivo temporario 0600 no servidor, apagado em seguida.

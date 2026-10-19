@@ -7,7 +7,8 @@
 #   status, status-ssh, backup-membros, backup-marketing, exec-membros, exec-marketing,
 #   snapshot (guarda e apaga os servidores; CONFIRMAR=apagar), restaurar (recria dos snapshots),
 #   fechar-ssh (passo final do workflow: fecha a 22 que um passo cancelado deixou aberta),
-#   chave-backup (cadastra a senha de recuperacao derivada do token nos repositorios de backup)
+#   chave-backup (cadastra a senha de recuperacao derivada do token nos repositorios de backup),
+#   carga (teste de carga: VUS alunos navegando pelo dominio publico; dados de teste apagados no fim)
 # Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
@@ -42,6 +43,7 @@ case "$etapa" in
     exec-marketing) exec_remote marketing ;;
     snapshot) bash "$here/snapshot.sh" ;;
     restaurar) bash "$here/restaurar.sh" ;;
+    carga) bash "$here/carga.sh" ;;
     chave-backup)
         . "$here/lib.sh"; need HCLOUD_TOKEN; install_hcloud; deploy_key
         for role in membros marketing; do
@@ -60,5 +62,5 @@ case "$etapa" in
         need HCLOUD_TOKEN; install_hcloud
         FW_OPENED=$(sort -u "$WORK_DIR/fw-abertos" | tr '\n' ' ')
         fw_close_all ;;
-    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,10p "$0"; exit 2 ;;
+    *) echo "etapa desconhecida: '$etapa'" >&2; sed -n 2,11p "$0"; exit 2 ;;
 esac

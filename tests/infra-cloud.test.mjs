@@ -70,7 +70,7 @@ function yamlChildren(source, topKey) {
 }
 
 test("scripts de infra/cloud passam na conferencia de sintaxe do bash", () => {
-  assert.deepEqual(shellScripts, ["deploy.sh", "envelope.sh", "equipe.sh", "lib.sh", "plan.sh", "provision.sh", "restaurar.sh", "run.sh", "secrets.sh", "snapshot.sh", "status.sh"]);
+  assert.deepEqual(shellScripts, ["carga.sh", "deploy.sh", "envelope.sh", "equipe.sh", "lib.sh", "plan.sh", "provision.sh", "restaurar.sh", "run.sh", "secrets.sh", "snapshot.sh", "status.sh"]);
   for (const file of shellScripts) {
     const result = run("bash", ["-n", join(cloudDir, file)]);
     assert.equal(result.status, 0, `${file}: ${result.stderr}`);
@@ -526,4 +526,19 @@ test("secrets.sh: recusa valores com aspas, barra invertida, $ ou quebra de linh
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("carga.sh: aluno e curso de teste apagados no trap, k6 fixado por digest, senha derivada nunca impressa", () => {
+  const source = readFileSync(join(cloudDir, "carga.sh"), "utf8");
+  // A limpeza roda no inicio (sobra de rodada interrompida) e no trap de saida, antes de fechar a 22.
+  assert.match(source, /trap 'rc=\$\?; set \+e; log "Limpando os dados de teste"; limpar; .*fw_close_all \|\| rc=1; exit \$rc' EXIT/);
+  assert.match(source, /^limpar$/m);
+  assert.match(source, /grafana\/k6:[0-9.]+@sha256:[0-9a-f]{64}/);
+  assert.match(source, /deploy-key\.mjs" --secret --info bunker707-carga-v1/);
+  assert.match(source, /mask "\$\(cat "\$senha"\)"/);
+  // Dados de teste so com ids carga-* e e-mail no dominio reservado .test.
+  assert.match(source, /EMAIL="carga@bunker707\.test"/);
+  const sql = readFileSync(join(cloudDir, "carga-dados.sql"), "utf8");
+  for (const id of sql.matchAll(/'(carga-[a-z0-9-]+)'/g)) assert.match(id[1], /^carga-(curso|modulo-[12]|modulo-|aula-)$/);
+  assert.doesNotMatch(sql, /\b(delete|drop|truncate)\b/i, "o seed so insere");
 });
