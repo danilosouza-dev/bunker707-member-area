@@ -61,7 +61,7 @@ Use `docs/11-inventario-coleta-astron.md` as the detailed UX/functionality refer
 - PostHog for product analytics
 - Sentry for monitoring
 - Trigger.dev or Inngest for background jobs
-- Vercel initially, with portability to Hetzner
+- Hetzner in production (`main`, `deploy-membros`); Vercel + Supabase cloud as the test environment (`dev`, team-created accounts only). Flow: task branch -> PR to `dev` -> producer tests -> PR `dev` -> `main` -> deploy (`CONTRIBUTING.md`)
 
 ## Engineering Conventions
 

@@ -206,5 +206,12 @@ Pendente, para o produtor decidir:
    (catalogo publicado em cache com a tag `catalog`; paginas de conteudo validando so o JWT, docs/06). Mediana com
    100 alunos: 14,3 s -> 7,5 s -> 1,9 s; com 30: 2,4 s -> 0,75 s -> 0,33 s. O gargalo agora e a renderizacao do app.
 4. A virada de producao (docs/20 §14): webhook do Resend para `https://membros.bunker707.com.br/api/webhooks/resend`
-   e `RESEND_WEBHOOK_SECRET` por `secrets-membros`; Hotmart e Ticto; conteudo (nada e copiado da nuvem).
+   e `RESEND_WEBHOOK_SECRET` por `secrets-membros`; Hotmart e Ticto; conteudo (nada e copiado da nuvem). A Vercel e
+   o Supabase da nuvem ficam como ambiente de teste (item 6).
 5. Opcional: igualar os modelos de e-mail do Supabase cloud (staging) ao `/auth/confirm` (docs/06).
+6. (Decidido em 19/10/2026.) Ambientes: `dev` = teste na Vercel com o Supabase da nuvem, so contas da equipe;
+   `main` = producao na Hetzner, e `deploy-membros` recusa outra branch (`CONTRIBUTING.md`). Pendente do produtor:
+   na Vercel (projeto `bunker707-member-area`, conta do Bertoldo, plano Hobby), Settings > Environments >
+   Production > Branch Tracking de `main` para `dev`; o conector da Vercel nao tem essa opcao. Esta branch
+   (`claude/hopeful-franklin-04s7wt`) roda na producao sem ter passado pela `dev`: PR aberta para a `dev`, depois
+   promocao para a `main`; ate la nao ha deploy novo (a trava ja vale).

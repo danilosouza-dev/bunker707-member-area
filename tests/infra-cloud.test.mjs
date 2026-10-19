@@ -379,6 +379,24 @@ test("o workflow de infra so executa etapas por workflow_dispatch: um push apena
   assert.match(infraJob, /^    concurrency:\n      group: \S+\n      cancel-in-progress: false\s*$/m, "uma etapa por vez, e uma no meio nunca e cancelada");
 });
 
+test("deploy-membros e deploy-marketing so rodam na main; as outras etapas rodam de qualquer branch", () => {
+  const { children: jobs } = yamlChildren(workflowSource, "jobs");
+  const infraJob = jobs.get("infra");
+  const guard = infraJob.match(/- name: Deploy so da main\n\s+if: (.+)\n\s+run: \|\n\s+(.+)\n/);
+  assert.ok(guard, "passo de trava antes das etapas");
+  assert.equal(guard[1], "startsWith(inputs.etapa, 'deploy-')");
+  assert.ok(infraJob.indexOf("Deploy so da main") < infraJob.indexOf("Segredos presentes?"), "a trava vem antes de qualquer segredo");
+
+  // O script do passo, executado como o runner faria: so a main passa.
+  const run = (etapa, ref) => spawnSync("bash", ["-e", "-c", guard[2]], { encoding: "utf8", env: { ...process.env, ETAPA: etapa, GITHUB_REF: ref } });
+  assert.equal(run("deploy-membros", "refs/heads/main").status, 0);
+  for (const ref of ["refs/heads/dev", "refs/heads/claude/hopeful-franklin-04s7wt", "refs/tags/v1"]) {
+    const result = run("deploy-membros", ref);
+    assert.equal(result.status, 1, ref);
+    assert.match(result.stdout, /::error::deploy-membros so roda na main/);
+  }
+});
+
 test("lib.sh nunca liga o rastreio do shell e nenhum script imprime os tokens com echo ou printf", () => {
   const xtrace = /^\s*set\s+(-[a-zA-Z]*x[a-zA-Z]*|-o\s+xtrace)\b/m;
   assert.doesNotMatch(libSource, xtrace, "set -x levaria os tokens para o log do Actions");

@@ -97,6 +97,13 @@ jobs:
         if: inputs.etapa == 'deploy-membros'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
+      # Fluxo (CONTRIBUTING.md): tarefa -> dev (teste na Vercel) -> main -> servidor. Codigo so vai para o
+      # servidor a partir da main; as outras etapas (status, exec, backup, carga) rodam de qualquer branch.
+      - name: Deploy so da main
+        if: startsWith(inputs.etapa, 'deploy-')
+        run: |
+          [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "::error::$ETAPA so roda na main (recebido: $GITHUB_REF). Fluxo: tarefa -> dev (teste na Vercel) -> main -> servidor."; exit 1; }
+
       - name: Segredos presentes?
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
