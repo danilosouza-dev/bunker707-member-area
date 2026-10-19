@@ -181,8 +181,8 @@ test("envelope.sh: segredo cifrado para a chave RSA do servidor volta igual ao d
     t.skip("openssl nao esta nesta maquina");
     return;
   }
-  if (run("sh", ["-c", "printf x | base64 -w0 >/dev/null && tar --version >/dev/null"]).status !== 0) {
-    t.skip("envelope.sh precisa do base64 com -w0 e do tar (GNU coreutils, como no servidor e no runner)");
+  if (run("sh", ["-c", "printf x | base64 -w0 >/dev/null"]).status !== 0) {
+    t.skip("envelope.sh precisa do base64 com -w0 (GNU coreutils, como no servidor e no runner)");
     return;
   }
   const dir = tempDir("bunker707-envelope-");
@@ -196,8 +196,9 @@ test("envelope.sh: segredo cifrado para a chave RSA do servidor volta igual ao d
   const encrypted = run("bash", [envelope, "encrypt", join(dir, "transfer.pub"), join(dir, "segredos.kv")]);
   assert.equal(encrypted.status, 0, encrypted.stderr);
   const payload = encrypted.stdout.trim();
-  assert.match(payload, /^[A-Za-z0-9+/=]+$/, "o payload e base64 numa linha (cabe no input do workflow)");
-  assert.ok(!Buffer.from(payload, "base64").includes("re_valor_secreto_de_teste_123"), "o conteudo vai cifrado");
+  assert.match(payload, /^[A-Za-z0-9+/]+=*\.[A-Za-z0-9+/]+=*$/, "o payload e base64.base64 numa linha (cabe no input do workflow)");
+  assert.ok(payload.length < 1200, `o payload e curto para ser copiado no disparo (${payload.length} caracteres)`);
+  for (const part of payload.split(".")) assert.ok(!Buffer.from(part, "base64").includes("re_valor_secreto_de_teste_123"), "o conteudo vai cifrado");
   writeFileSync(join(dir, "payload.b64"), `${payload}\n`);
 
   const decrypted = run("bash", [envelope, "decrypt", join(dir, "transfer.key"), join(dir, "payload.b64")]);

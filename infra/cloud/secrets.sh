@@ -14,10 +14,15 @@ if [ "$role" = "membros" ] || [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBRO
 ip=$(server_ip4 "$server"); target="$DEPLOY_USER@$ip"
 if [ "$role" = "membros" ]; then envf="$REMOTE_DIR/infra/compose/.env"; else envf="$REMOTE_DIR/infra/mautic/.env"; fi
 
+# Conferencia de que o payload chegou inteiro (e cifrado: o hash nao revela nada).
+log "Payload: ${#PAYLOAD} caracteres, sha256 $(printf '%s' "$PAYLOAD" | tr -d '[:space:]' | sha256sum | cut -c1-16)"
 fw_open_ssh "$server"; wait_ssh "$target"
 printf '%s' "$PAYLOAD" | rsh "$target" "umask 077 && cat > /tmp/payload.b64"
+# O envelope.sh deste commit vai junto: decifra no mesmo formato em que a sessao cifrou, mesmo que o
+# servidor ainda tenha uma versao anterior do repositorio.
+rsh "$target" "umask 077 && cat > /tmp/envelope.sh" < "$CLOUD_DIR/envelope.sh"
 # Texto claro so em 0600 e so se a decifragem fechou; em erro, nada fica em /tmp (nem no snapshot).
-rsh "$target" "umask 077; cd '$REMOTE_DIR' && sudo bash infra/cloud/envelope.sh decrypt /etc/bunker707/transfer.key /tmp/payload.b64 > /tmp/payload.kv; rc=\$?; rm -f /tmp/payload.b64; [ \$rc -eq 0 ] || rm -f /tmp/payload.kv; exit \$rc"
+rsh "$target" "umask 077; sudo bash /tmp/envelope.sh decrypt /etc/bunker707/transfer.key /tmp/payload.b64 > /tmp/payload.kv; rc=\$?; rm -f /tmp/payload.b64 /tmp/envelope.sh; [ \$rc -eq 0 ] || rm -f /tmp/payload.kv; exit \$rc"
 keys=$(rsh "$target" "grep -oE '^[A-Z0-9_]+=' /tmp/payload.kv | tr -d = | tr '\n' ' '")
 log "Aplicando em $envf: $keys"
 rsh "$target" "python3 -I - '$envf' /tmp/payload.kv" <<'PY'
