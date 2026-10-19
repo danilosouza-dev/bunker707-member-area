@@ -20,7 +20,7 @@ test("/auth/confirm confirma o token_hash no servidor e nunca troca codigo PKCE"
 
 test("convite e recuperacao terminam em definir a senha; destino sempre passa pelo filtro de redirecionamento", () => {
   assert.match(routeSource, /new Set<EmailOtpType>\(\["invite", "recovery"\]\)/);
-  assert.match(routeSource, /new URL\("\/alterar-senha", requestUrl\.origin\)/);
+  assert.match(routeSource, /new URL\("\/alterar-senha", origin\)/);
   assert.match(routeSource, /getSafeRedirectPath\(requestUrl\.searchParams\.get\("next"\)\)/);
   // Link invalido volta ao login com o aviso de link (?erro=link), que oferece "Esqueci minha senha".
   assert.match(routeSource, /loginUrl\.searchParams\.set\(AUTH_LINK_ERROR_PARAM, AUTH_LINK_ERROR_VALUE\)/);
@@ -37,5 +37,16 @@ test("os modelos de convite, recuperacao e link magico apontam para /auth/confir
     const html = await template(name);
     assert.ok(html.includes(`href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=${type}"`), `${name}.html`);
     assert.doesNotMatch(html, /ConfirmationURL/, `${name}.html nao pode voltar ao fluxo implicito`);
+  }
+});
+
+test("redirecionamentos de /auth/confirm, /auth/callback e o link da TV usam a origem dos cabecalhos", async () => {
+  // No servidor proprio o request.url do Next vem com o endereco interno do container (0.0.0.0:3000): o
+  // primeiro teste de /auth/confirm na Hetzner mandou para https://0.0.0.0:3000/login.
+  const callbackSource = await readFile(new URL("../src/app/auth/callback/route.ts", import.meta.url), "utf8");
+  const tvSource = await readFile(new URL("../src/app/api/tv/sessions/route.ts", import.meta.url), "utf8");
+  for (const [name, source] of [["confirm", routeSource], ["callback", callbackSource], ["tv", tvSource]]) {
+    assert.match(source, /await getHeadersOrigin\(\)/, name);
+    assert.doesNotMatch(source, /requestUrl\.origin|new URL\("\/tv", request\.url\)/, name);
   }
 });

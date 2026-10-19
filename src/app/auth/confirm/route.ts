@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { AUTH_LINK_ERROR_PARAM, AUTH_LINK_ERROR_VALUE } from "@/lib/auth/password-reset";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import { getPostAuthRedirectPath } from "@/server/auth/redirect";
+import { getHeadersOrigin } from "@/server/auth/site-origin";
 import { createSupabaseServerClient } from "@/server/auth/supabase";
 
 // Links de e-mail do Auth com ?token_hash= (modelos de infra/compose/volumes/auth-templates): o servidor
@@ -18,6 +19,8 @@ export async function GET(request: NextRequest) {
   const tokenHash = requestUrl.searchParams.get("token_hash");
   const type = requestUrl.searchParams.get("type");
   const redirectPath = getSafeRedirectPath(requestUrl.searchParams.get("next"));
+  // Origem pelos cabecalhos: no servidor proprio o request.url vem com o endereco interno (0.0.0.0:3000).
+  const origin = await getHeadersOrigin();
 
   if (tokenHash && type && emailOtpTypes.has(type)) {
     const supabase = await createSupabaseServerClient();
@@ -35,17 +38,17 @@ export async function GET(request: NextRequest) {
       });
 
       if (setPasswordTypes.has(type)) {
-        const passwordUrl = new URL("/alterar-senha", requestUrl.origin);
+        const passwordUrl = new URL("/alterar-senha", origin);
         passwordUrl.searchParams.set("next", redirectPath);
         return NextResponse.redirect(passwordUrl);
       }
 
-      return NextResponse.redirect(new URL(await getPostAuthRedirectPath(data.user, redirectPath), requestUrl.origin));
+      return NextResponse.redirect(new URL(await getPostAuthRedirectPath(data.user, redirectPath), origin));
     }
   }
 
   // Link expirado, ja usado ou incompleto: o login explica e oferece "Esqueci minha senha".
-  const loginUrl = new URL("/login", requestUrl.origin);
+  const loginUrl = new URL("/login", origin);
   loginUrl.searchParams.set("next", redirectPath);
   loginUrl.searchParams.set(AUTH_LINK_ERROR_PARAM, AUTH_LINK_ERROR_VALUE);
   return NextResponse.redirect(loginUrl);

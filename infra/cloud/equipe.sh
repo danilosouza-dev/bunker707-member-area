@@ -29,7 +29,7 @@ for entry in ${EQUIPE//,/ }; do
         [ -n "$uid" ] && [ "$uid" != "null" ] || die "Convite para $email nao foi aceito pelo Auth (SMTP configurado? rode secrets-membros antes; veja: docker compose logs auth)."
         if [ -z "$found" ]; then echo "  convite enviado (id $uid)"; else echo "  convite reenviado: ainda nao tinha confirmado (id $uid)"; fi
     else
-        echo "  ja existe e ja entrou (id $uid)"
+        echo "  ja existe com e-mail confirmado (id $uid); sem senha ainda? \"Esqueci minha senha\" no login"
     fi
     # 2. papel
     rsh "$target" "cd '$REMOTE_DIR' && docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -v ON_ERROR_STOP=1 -q -c \"insert into public.admin_roles (user_id, role) values ('$uid', '$papel') on conflict (user_id) do update set role = excluded.role\""
