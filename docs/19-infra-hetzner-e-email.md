@@ -1,9 +1,92 @@
 # Infra propria (Hetzner) e e-mail transacional (Resend): estado, numeros e decisao
 
 Data: 2026-10-17 (madrugada; DNS e verificacao na manha do mesmo dia). Status: proposta para o produtor decidir pela manha.
+
+**Atualizacao de 18/10/2026: decisao tomada (secao 0).** A proposta da secao 1 e os fatos das secoes 2 a 5 e 7 ficam como registro do que foi verificado em 17/10/2026; as secoes 6 e 8 foram atualizadas em 18/10/2026.
 Fontes: pesquisa com verificacao independente feita em 17/10/2026 (lista no fim). Precos sem IVA, cambio PTAX de 16/10/2026 (USD R$ 5,0826 / EUR R$ 5,7088). Sobre pagamentos em cartao brasileiro incide IOF de 3,5% e spread do banco, nao incluidos nas tabelas.
 
-## 1. Resumo para decidir pela manha
+## 0. Decisao de 18/10/2026: migrar agora, em dois servidores proprios
+
+Esta secao resume a decisao tomada em 18/10/2026 e substitui a recomendacao da secao 1 ("continuar na Vercel e montar em paralelo"), que fica abaixo como historico. Os numeros e fatos das secoes 2 a 5 continuam valendo. O passo a passo da execucao esta em docs/20 (secoes 4A e 8A).
+
+### 0.1 O que foi decidido
+
+| Tema | Decisao |
+| --- | --- |
+| Quando | Agora. Os dados da nuvem sao de teste (4 contas, 2 na equipe, 1 curso, 8 arquivos, 0 vendas): a migracao e um deploy limpo, nao uma mudanca de dados. |
+| Onde | Hetzner Cloud, Falkenstein (`fsn1`; `nbg1` ou `hel1` se faltar estoque), Ubuntu 24.04, Docker. |
+| Servidor A: `bunker707-membros` | Next.js + Supabase self-hosted (Postgres 17, Auth, API, Storage, Realtime, Studio) + Caddy. Tipo com 8 GB ou mais. Stack em `infra/compose` (ja existia). |
+| Servidor B: `bunker707-marketing` | Mautic 7.2.1 + MySQL 8.4.11 + Caddy. Tipo com 4 GB ou mais. Stack em `infra/mautic` (novo). |
+| Borda | Cloudflare Free na frente dos quatro nomes (`membros`, `api`, `studio`, `marketing`): DNS proxied, SSL Full (strict). "Always Use HTTPS" fica desligado na Cloudflare de proposito: o Let's Encrypt valida o dominio por HTTP passando pela Cloudflare, e um redirecionamento na borda faria a validacao bater num origin ainda sem certificado. O Caddy redireciona para HTTPS no origin e o app manda HSTS; para o visitante da no mesmo. |
+| Firewall | Hetzner Cloud Firewall em cada servidor: 80/443 so das faixas da Cloudflare, ICMP; porta 22 fechada, aberta so durante cada etapa para o IP do runner do GitHub Actions (e `PRODUCER_IP`, se informado). |
+| Backup | Storage Box bx11 (1 TB), restic por SFTP (porta 23), um repositorio por servidor (`/bunker707/restic` e `/bunker707/restic-mautic`). |
+| E-mail | Resend (dominio `mail.bunker707.com.br`, verificado em 17/10/2026) ate o Amazon SES existir. SMTP na porta 587 para o Auth e para o Mautic; API para o app. |
+| Quem executa | A IA, pelo workflow `Infra (Hetzner)` do GitHub Actions. O produtor cola dois tokens nos segredos do repositorio e liga o 2FA; nenhum passo na maquina dele. |
+| Staging e producao | Vercel + Supabase cloud seguem como ambiente de desenvolvimento (staging). A Hetzner e a producao: migrada por completo como ensaio real, guardada em snapshot (centavos por mes) com os servidores apagados, e recriada dos snapshots quando o produtor disser "vai" (docs/20, secao 4A.7). Servidor desligado na Hetzner continua sendo cobrado; por isso snapshot, nao desligar. |
+
+### 0.2 Por que o banco fica junto com o app (servidor A)
+
+- O Supabase e uma unidade: Postgres, Auth, PostgREST, Storage, Realtime e o gateway conversam entre si o tempo todo, e o compose oficial e um so. Separar o banco em outra maquina separa um conjunto desenhado para andar junto e cria uma segunda coisa para operar.
+- Latencia: uma pagina da area de membros faz varias consultas em sequencia (sessao, catalogo, acesso, progresso). Na mesma maquina, cada ida e volta custa menos de um milissegundo; entre duas maquinas da mesma rede, perto de um milissegundo cada; entre regioes, dezenas. O aluno no Brasil ja paga cerca de 200 ms ate a Alemanha (secao 3.3); nao faz sentido somar saltos internos.
+- Escala pequena: o stack inteiro ocioso mede 1,27 GiB (docs/20, secao 4.3). Um servidor de 8 GB cabe app, Supabase e cache do Postgres com folga.
+- E o padrao de mercado para este porte. App e banco separados fazem sentido quando o banco precisa de hardware proprio (CPU constante, memoria grande), de alta disponibilidade (replica) ou de uma equipe que o administre a parte. Nada disso existe hoje; o caminho para chegar la esta em 0.5.
+
+### 0.3 Por que o Mautic fica separado (servidor B)
+
+- Perfil de risco: o Mautic e um app PHP exposto ao publico (formularios, paginas de captura, rastreio, descadastro), com historico de falhas de seguranca mais frequente que o do Supabase. Se for comprometido ou cair, a area de membros nao e afetada; a chave do Supabase e os dados dos alunos nao estao na mesma maquina.
+- Carga em rajada: campanhas e broadcasts disparam milhares de e-mails e recalculos de segmentos em poucos minutos. Os picos de CPU e memoria nao disputam com a aula que o aluno esta assistindo.
+- Ciclo de vida proprio: Mautic e MySQL sao atualizados em outro ritmo que o do Supabase; backup e restauracao sao independentes (um repositorio restic por servidor); um pode ser recriado sem tocar no outro.
+- Memoria: Mautic + MySQL pedem de 2 a 4 GB. Juntar tudo num servidor exige 16 GB (secao 5); dois servidores pequenos custam menos que um grande.
+
+Plano B (so se faltar estoque de um segundo tipo pequeno): Mautic no mesmo servidor do app, com `SKIP_MARKETING=1` nas etapas e `infra/mautic/compose.colocado.yml`; o Caddy principal atende `marketing.bunker707.com.br`. Nesse caso escolher um tipo maior para o servidor A (docs/20, secao 8A.7).
+
+### 0.4 Maquina virtual e "servidor nosso"
+
+Na Hetzner Cloud todo servidor e uma maquina virtual em hardware compartilhado (secao 3.1). Isso e o padrao de mercado: AWS, Google Cloud e Azure vendem a mesma coisa. O que e nosso: o disco, a memoria, o sistema, as chaves, os dados e o acesso; ninguem mais entra na maquina. "Compartilhado" aqui nao e hospedagem compartilhada (um painel com sites de outras pessoas no mesmo sistema); e so a CPU fisica dividida pelo hypervisor entre maquinas virtuais isoladas. Bare metal (linha AX) so compensa com CPU constante (transcodificacao de video, banco muito grande); a area de membros, com video na Bunny, fica ociosa quase o tempo todo.
+
+### 0.5 O que este desenho nao entrega, e o caminho de crescimento
+
+Nao entrega alta disponibilidade: cada papel tem um servidor so. Se o servidor A morrer, a area de membros fica fora ate a restauracao do backup num servidor novo (30 a 60 min, docs/20, secao 10.2), e as gravacoes desde o ultimo backup diario se perdem. Atualizacoes maiores (Postgres, Supabase) pedem janela de manutencao.
+
+Caminho de crescimento, na ordem, cada passo so com demanda real:
+
+1. Rescale vertical do mesmo servidor (mais vCPU e memoria), com alguns minutos de parada. Cobre o primeiro ano.
+2. Backup mais frequente (a cada hora) ou arquivamento continuo do WAL (pgBackRest ou WAL-G) quando perder um dia de dados deixar de ser aceitavel.
+3. Postgres em servidor proprio (ou gerenciado) quando o banco pedir hardware ou memoria que o app nao usa.
+4. Replica e balanceamento so com volume que justifique (milhares de alunos simultaneos).
+
+### 0.6 Custo estimado por mes (sem IVA; precos de referencia de 17/10/2026; conferir no `plan`)
+
+| Item | Com estoque da linha CX | Sem estoque da linha CX |
+| --- | --- | --- |
+| Servidor A (membros, 8 GB) | CX33: EUR 8,49 | CPX32: EUR 35,49 (ou CCX13, vCPU dedicada: EUR 42,99) |
+| Servidor B (marketing, 4 GB) | CX23: EUR 5,49 | o menor tipo com 4 GB que o `plan` listar: conferir no plan |
+| 2 IPv4 | EUR 1,00 | EUR 1,00 |
+| Storage Box bx11 | EUR 3,20 | EUR 3,20 |
+| Total | EUR 18,18 (cerca de R$ 104 no cambio de 16/10/2026, sem IOF) | EUR 39,69 mais o servidor B: conferir no plan |
+
+A linha CX tem estoque intermitente para contas novas (secao 3.2); a etapa `plan` le os precos e a disponibilidade do dia pela API e escolhe o tipo mais barato por papel. Sem backups automaticos da Hetzner (20% do servidor): o backup e o nosso, no Storage Box. Cloudflare Free e Resend Free custam zero.
+
+### 0.7 Execucao 100% pela IA, pelo GitHub Actions
+
+A sessao do Claude na nuvem nao alcanca a Hetzner nem os servidores: o proxy de saida reencripta o TLS e so deixa HTTPS para uma lista de hosts; `api.hetzner.cloud` e `api.cloudflare.com` estao bloqueados e SSH nao passa. Por isso os "bracos" sao o GitHub Actions: o workflow `.github/workflows/infra.yml` roda `infra/cloud/run.sh <etapa>` num runner do GitHub, com os segredos do repositorio `HCLOUD_TOKEN` e `CLOUDFLARE_API_TOKEN`. A IA dispara cada etapa e le o log pela API do GitHub; o produtor acompanha em Actions. Etapas, na ordem: `plan`, `provision`, `deploy-membros`, `deploy-marketing`, `secrets-membros`, `secrets-marketing`, `equipe`, `status` (docs/20, secao 4A).
+
+Regras que decorrem disso:
+
+- A chave SSH de deploy e derivada do `HCLOUD_TOKEN` (`infra/cloud/deploy-key.mjs`): nao ha segredo novo para guardar, e quem tem o token ja controla o servidor pela API.
+- Segredos externos (chave de envio do Resend, segredo do webhook) nunca entram em texto no workflow: viajam num envelope cifrado para a chave RSA do servidor (`infra/cloud/envelope.sh`), que so ele abre.
+- A imagem do app e construida no runner e publicada no GHCR; `NEXT_PUBLIC_*` vem do `.env` gerado no servidor. Nao ha variaveis no GitHub.
+- Nada roda em push: so disparo manual, uma etapa por vez.
+
+### 0.8 Custo do Mautic: fixo
+
+O Mautic e software livre: sem licenca, sem cobranca por contato nem por envio. O custo e o servidor B (fixo por mes) mais os e-mails no provedor (Amazon SES: US$ 0,10 por mil envios depois do periodo gratis; Resend Free ate 100 por dia, Pro US$ 20 por mes). Usar mais nao muda a conta ate a lista pedir um servidor maior, o que acontece com dezenas de milhares de contatos. O ActiveCampaign cobra por faixa de contatos e sobe conforme a lista cresce; o Mautic e mais barato por uma margem grande, e o preco disso e a operacao (atualizacoes, entregabilidade) ficar com a gente, ja automatizada nos scripts.
+
+### 0.9 E-mail: Resend ate o SES
+
+Resend Free: 100 e-mails por dia, compartilhados por Auth (convite, senha), app (boas-vindas, compra) e Mautic. Suficiente para a equipe e os primeiros alunos; antes de qualquer campanha, Resend Pro (US$ 20) ou Amazon SES (secao 6, item 4). No Mautic a troca e so o `MAUTIC_MAILER_DSN` (docs/20, secao 8A.3).
+
+## 1. Resumo para decidir pela manha (proposta de 17/10/2026, superada pela secao 0)
 
 Pergunta do produtor: vamos agora para a Hetzner ou continuamos em Vercel + Supabase durante o desenvolvimento?
 
@@ -129,7 +212,7 @@ Decisao do produtor (17/10): nao versionar isso agora; seguir desenvolvendo e, n
 
 1. **SMTP do Auth** -> variaveis do GoTrue no `.env` do compose: `SMTP_HOST=smtp.resend.com`, `SMTP_PORT=587` (a Hetzner bloqueia a 465 de saida), `SMTP_USER=resend`, `SMTP_PASS=<chave Resend de envio>`, `SMTP_ADMIN_EMAIL=equipe@mail.bunker707.com.br`, `SMTP_SENDER_NAME=Bunker707`. A chave "Supabase Integration" criada pelo Resend serve so ao cloud; criar uma chave nova de envio para o self-hosted (ou reaproveitar `bunker707-member-area-envio`).
 2. **Site URL e Redirect URLs** -> `SITE_URL=https://<dominio final da area de membros>` e `ADDITIONAL_REDIRECT_URLS` (sem os previews da Vercel).
-3. **Modelos de e-mail** (secao 2.4) -> `GOTRUE_MAILER_TEMPLATES_{CONFIRMATION,INVITE,MAGIC_LINK,EMAIL_CHANGE,RECOVERY,REAUTHENTICATION}` apontando para os HTML servidos por URL (volume estatico no Caddy) e `GOTRUE_MAILER_SUBJECTS_*` com os assuntos da tabela.
+3. **Modelos de e-mail** (secao 2.4) -> `GOTRUE_MAILER_TEMPLATES_{CONFIRMATION,INVITE,MAGIC_LINK,EMAIL_CHANGE,RECOVERY,REAUTHENTICATION}` apontando para os HTML servidos por URL (volume estatico no Caddy) e `GOTRUE_MAILER_SUBJECTS_*` com os assuntos da tabela. Feito em 18/10/2026: os seis HTML estao em `infra/compose/volumes/auth-templates/`, o Caddy os serve em `https://api.bunker707.com.br/auth-templates/*.html` e o compose ja aponta o Auth para eles, com os assuntos da tabela como padrao (`AUTH_SUBJECT_*` no `.env` para mudar).
 4. **Rate Limits** -> `GOTRUE_RATE_LIMIT_EMAIL_SENT=25` (ou o valor da epoca), demais limites conforme o painel.
 5. **Cadastro publico desligado**, senha minima, protecao contra senhas vazadas -> `GOTRUE_DISABLE_SIGNUP=true`, `GOTRUE_PASSWORD_MIN_LENGTH`, `GOTRUE_PASSWORD_HIBP_ENABLED`.
 6. **Provedores de login** (hoje so e-mail + senha) e **Auth Hooks** (nenhum ativo) -> conferir no painel na hora e replicar por variavel.
@@ -218,12 +301,14 @@ Observacoes:
 - Migracao cloud -> self-hosted: `supabase db dump` traz schema, dados, roles, RLS, funcoes e `auth.users` com os hashes bcrypt; JWT secret e chaves sao novos (todo mundo loga de novo); provedores sociais, redirect URLs, Edge Functions e objetos do Storage sao manuais. Como nao ha aluno, o caminho e deploy limpo.
 - Paineis: **Coolify** v4.4.6 (09/10/2026; preview por PR via GitHub App com DNS wildcard; rolling update nao vale para compose) tem template Supabase **defasado** (Postgres 15, Kong, erro de imagem MinIO em issues de set-out/2026). **Dokploy** v0.30.8 (ainda 0.x; CVE critico de RCE em previews publicos corrigido em 2025) tem template atualizado (Postgres 17 + Envoy). Alternativa sem painel: compose oficial do Supabase + Caddy (TLS automatico), sem preview por PR.
 
-## 6. Cronograma recomendado
+## 6. Cronograma recomendado (atualizado em 18/10/2026)
 
-1. **Agora (desenvolvimento)**: Vercel + Supabase cloud como esta. Resend: concluir DNS, SMTP do Auth, variavel na Vercel, adaptador de e-mail no app (boas-vindas e compra). Codigo continua portavel (Docker, nada exclusivo da Vercel; `@vercel/speed-insights` opcional).
-2. **Em paralelo (quando a conta conseguir criar servidor)**: infra como codigo em `infra/` no repositorio (compose do Supabase pinado, Next standalone, Caddy ou Coolify, scripts de backup/restore, firewall, Cloudflare), ensaio completo de deploy num servidor de teste, teste de restore, documentacao do runbook. O servidor pode ficar ligado como staging (CPX32 € 36/mes) ou virar snapshot + apagar (centavos) depois do ensaio.
-3. **Lancamento (antes do primeiro aluno)**: decidir producao com os precos daquele dia: Hetzner (CX33 se voltou; senao CPX32/CCX13) ou Vercel Pro + Supabase Pro (A'). Cutover = deploy limpo + migracoes + usuarios de equipe + teste de restore. Cloudflare Tunnel ou proxy na frente.
-4. **Segunda rodada (captura e marketing)**: Amazon SES (conta AWS so na hora: o free tier atual sao creditos de ate US$ 200 que expiram em 6 meses; conta nova nasce no plano Essentials US$ 0,16/1.000 e deve ser trocada para a la carte US$ 0,10/1.000; sandbox 200/dia por regiao; pedido de producao em sa-east-1, aprovacao tipica de 1 a 3 dias uteis). Mautic 7.2 (PHP 8.2+, MySQL 8.4+/MariaDB 10.11+, tag Docker `7.2-apache`, tem e-mails transacionais proprios; o plugin comunitario de bounce do SES so instala no Mautic 5). Resend fica como fallback: dois DKIM no mesmo subdominio (seletores diferentes) e SPF/Return-Path em subdominios separados nao conflitam.
+O item 1 esta feito, o item 2 virou a migracao de verdade (secao 0) e o item 3 deixou de existir.
+
+1. ~~**Agora (desenvolvimento)**: Vercel + Supabase cloud como esta. Resend: concluir DNS, SMTP do Auth, variavel na Vercel, adaptador de e-mail no app (boas-vindas e compra).~~ Feito em 17/10/2026: DNS, SMTP do Auth e variavel na Vercel (secao 2); adaptador de e-mail na PR #80, promovido na PR #83. O codigo continua portavel (Docker, nada exclusivo da Vercel).
+2. ~~**Em paralelo (quando a conta conseguir criar servidor)**: infra como codigo em `infra/` no repositorio, ensaio completo num servidor de teste, teste de restore, runbook.~~ Feito em 17/10/2026 (`infra/compose`, scripts, ensaio local, docs/20). Em 18/10/2026 virou a migracao: `infra/cloud` (provisionamento e operacao pelo GitHub Actions), `infra/mautic` (stack do Mautic) e `.github/workflows/infra.yml`.
+3. **Migracao (18/10/2026 em diante)**, pela IA, na ordem das etapas de docs/20, secao 4A: `plan` -> `provision` -> `deploy-membros` -> `deploy-marketing` -> `secrets-membros` e `secrets-marketing` -> `equipe` -> `status`. Deploy limpo, migracoes do repositorio, equipe por convite. Depois de 24 h de observacao, desligar Vercel e Supabase cloud (docs/20, secao 14).
+4. **Segunda rodada (captura e marketing)**: o Mautic ja sobe na migracao (servidor B), enviando pelo Resend; o Amazon SES fica para quando o volume pedir, e no Mautic a troca e so o `MAUTIC_MAILER_DSN`. Amazon SES (conta AWS so na hora: o free tier atual sao creditos de ate US$ 200 que expiram em 6 meses; conta nova nasce no plano Essentials US$ 0,16/1.000 e deve ser trocada para a la carte US$ 0,10/1.000; sandbox 200/dia por regiao; pedido de producao em sa-east-1, aprovacao tipica de 1 a 3 dias uteis). Mautic 7.2 (PHP 8.2+, MySQL 8.4+/MariaDB 10.11+, tag Docker `7.2-apache`, tem e-mails transacionais proprios; o plugin comunitario de bounce do SES so instala no Mautic 5). Resend fica como fallback: dois DKIM no mesmo subdominio (seletores diferentes) e SPF/Return-Path em subdominios separados nao conflitam.
 
 ## 7. Seguranca e backup (checklist da "camada de seguranca")
 
@@ -232,23 +317,26 @@ Contas: 2FA na Hetzner (hoje desligado), Cloudflare, Resend, GitHub, Supabase, V
 Servidor (quando existir):
 
 - Ubuntu 24.04 LTS, usuario nao-root com sudo, SSH so por chave (sem senha), `unattended-upgrades`, `fail2ban`.
-- Hetzner Cloud Firewall (gratis): 22 so do seu IP; 80/443 so dos ranges da Cloudflare (ou nada, se usar Cloudflare Tunnel); resto fechado. Firewall do host (ufw) como segunda camada, lembrando que o Docker passa por cima dele: publicar portas em `127.0.0.1` e deixar so o proxy em 0.0.0.0:80/443.
+- Hetzner Cloud Firewall (gratis): 22 so do seu IP (em 18/10/2026: 22 fechada fora das etapas do workflow, secao 0.1); 80/443 so dos ranges da Cloudflare (ou nada, se usar Cloudflare Tunnel); resto fechado. Firewall do host (ufw) como segunda camada, lembrando que o Docker passa por cima dele: publicar portas em `127.0.0.1` e deixar so o proxy em 0.0.0.0:80/443.
 - Cloudflare na frente: proxy (WAF basico, DDoS, TLS, cache de `_next/static`), 1 regra de rate limiting no Free, limite de upload de 100 MB por requisicao (uploads grandes vao direto para Bunny/Storage). Cloudflare Access protegendo Studio e paineis.
 - Segredos em `.env` com permissao 600, fora do git; chaves do Supabase geradas no servidor; Postgres e Studio nunca publicos.
 - Backups: Hetzner Backups (20%) para o servidor inteiro + dump diario do Postgres + `volumes/storage` + chave pgsodium + `.env` enviados criptografados (restic) para Storage Box (SFTP na porta 23, com "External Reachability" ligado na Storage Box); snapshot manual antes de cada upgrade; **restore testado todo mes** num servidor temporario.
 - Monitoramento: Sentry (ja existe) + Uptime Kuma no proprio servidor ou Better Stack free (10 monitores externos) com alerta no celular; rotacao de logs do Docker no `daemon.json`.
 - Cloudflare: modo TLS Full (strict) com certificado Let's Encrypt na origem; WebSockets do Realtime passam pelo proxy; HTML nao e cacheado; IP real do aluno vem em `CF-Connecting-IP`; limite de 125 s por requisicao.
-- Ferramentas: `hcloud` CLI v1.70.1 e provider Terraform 1.70.0 sao oficiais; nao ha MCP oficial da Hetzner (os comunitarios funcionam; se usar, token somente leitura por projeto). Token com escrita so para o Claude operar com o ok do produtor, guardado em arquivo local ignorado pelo git.
+- Ferramentas: `hcloud` CLI v1.70.1 e provider Terraform 1.70.0 sao oficiais; nao ha MCP oficial da Hetzner (os comunitarios funcionam; se usar, token somente leitura por projeto). Token com escrita so para o Claude operar com o ok do produtor, guardado em arquivo local ignorado pelo git (em 18/10/2026: o token fica so nos segredos do repositorio no GitHub e e usado pelo runner, secao 0.7).
 - LGPD: dados de alunos guardados na Alemanha (e logs do Resend nos EUA) sao transferencia internacional (art. 33); precisa constar na politica de privacidade.
 
-## 8. Checklist para a manha (ordem sugerida)
+## 8. Checklist (atualizado em 18/10/2026)
 
-1. ~~Fazer login na Cloudflare no Chrome e avisar -> Claude cria DKIM + 2 CNAMEs e verifica o dominio no Resend.~~ Feito em 17/10 (manha); conferir em Resend > Domains se o status ja esta "Verified".
-2. ~~Colar a `RESEND_API_KEY` no Supabase (SMTP) e na Vercel. Testar "Esqueci minha senha".~~ Feito em 17/10 (manha) pelas integracoes oficiais; teste entregue (secao 2.2).
-3. Ligar 2FA na Hetzner.
-4. No console da Hetzner, abrir Create Server so para ver quais tipos a conta consegue criar hoje (CX33? CPX32? CCX13?) e cancelar. Com isso a tabela da secao 4 vira decisao.
-5. Decidir a trilha (secao 6). Se for montar a Hetzner em paralelo: criar um API token (projeto Default > Security > API tokens, Read & Write) e colar em `.env.hetzner.local` (git-ignored) para o Claude operar via `hcloud`; nunca no chat.
-6. Autorizar as duas PRs seguintes: adaptador de e-mail (secao 2.3) e `infra/` como codigo (secao 6, item 2).
+1. ~~Fazer login na Cloudflare no Chrome e avisar -> Claude cria DKIM + 2 CNAMEs e verifica o dominio no Resend.~~ Feito em 17/10/2026 (manha); dominio "Verified".
+2. ~~Colar a `RESEND_API_KEY` no Supabase (SMTP) e na Vercel. Testar "Esqueci minha senha".~~ Feito em 17/10/2026 (manha) pelas integracoes oficiais; teste entregue (secao 2.2).
+3. **Produtor: ligar 2FA na Hetzner** (console > conta > Security). Pendente em 18/10/2026; fazer antes do item 4.
+4. **Produtor: token da Hetzner.** Console > projeto Default > Security > API tokens > Generate API token, permissao **Read & Write**. Colar no GitHub: repositorio > Settings > Secrets and variables > Actions > New repository secret, nome `HCLOUD_TOKEN`. O token aparece uma vez so; nunca no chat, nunca em arquivo do repositorio. (Substitui o `.env.hetzner.local` do checklist de 17/10.)
+5. **Produtor: token da Cloudflare.** dash.cloudflare.com > My Profile > API Tokens > Create Token > Create Custom Token, com exatamente estas permissoes: **Zone > DNS > Edit**, **Zone > Zone Settings > Edit**, **Zone > Zone > Read**. Zone Resources: Include > Specific zone > `bunker707.com.br`. Sem outras permissoes e sem outras zonas. Colar no GitHub como `CLOUDFLARE_API_TOKEN`.
+6. ~~No console da Hetzner, abrir Create Server so para ver quais tipos a conta consegue criar hoje.~~ Substituido pela etapa `plan`, que le tipos, precos e disponibilidade pela API e nao cria nada.
+7. ~~Decidir a trilha (secao 6).~~ Decidido em 18/10/2026 (secao 0).
+8. ~~Autorizar as duas PRs seguintes: adaptador de e-mail e `infra/` como codigo.~~ Feito (PR #83). Agora: autorizar a PR da infra nova (`infra/cloud`, `infra/mautic`, workflow) e dizer "vai" no chat para a IA disparar `plan` e, com o resultado aprovado, `provision` (a partir dai custa dinheiro).
+9. **IA**: as etapas na ordem (secao 6, item 3), com o resultado de cada uma reportado no chat; envelope da chave do Resend (docs/20, secao 4A.6); `equipe` por convite; 24 h de observacao; desligar a nuvem (docs/20, secao 14).
 
 ## 9. Fontes principais
 

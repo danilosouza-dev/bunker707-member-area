@@ -1,0 +1,16 @@
+#cloud-config
+# Primeiro boot dos servidores da Bunker707 (infra/cloud/provision.sh troca os marcadores): so o usuario
+# de deploy com a chave. O resto (ufw, Docker, fail2ban, swap...) e o infra/scripts/bootstrap.sh, rodado
+# por SSH logo depois, para o procedimento ser o mesmo com ou sem este arquivo.
+users:
+  - name: __DEPLOY_USER__
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - __SSH_PUBLIC_KEY__
+package_update: true
+packages:
+  - git
+  - curl

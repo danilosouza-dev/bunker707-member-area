@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Restaura um backup (backup.sh) num servidor limpo e roda o teste de fumaca:
-#   export RESTIC_REPOSITORY=sftp:storagebox:/bunker707/restic RESTIC_PASSWORD=...   # ou um .env ja no lugar
+#   export RESTIC_REPOSITORY=sftp:storagebox:bunker707/restic RESTIC_PASSWORD=...   # ou um .env ja no lugar
 #   sh infra/scripts/restore.sh --snapshot latest [--yes]
 # Pre-requisitos: bootstrap.sh feito, repositorio clonado, alias SSH `storagebox` (backup.sh --init) e
 # NENHUM dado em infra/compose/volumes/db/data (o script recusa sobrescrever sem --yes).
 # Ordem: restic restore -> .env -> sobe so o Postgres -> devolve a chave do Vault e reinicia -> papeis ->
 # pg_restore do banco inteiro -> arquivos do Storage -> stack completo -> smoke.sh.
 # Um ensaio de restauracao faz parte do runbook (docs/20): backup que nunca foi restaurado nao e backup.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 

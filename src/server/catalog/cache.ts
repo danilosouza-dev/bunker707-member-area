@@ -19,8 +19,8 @@ import type {
 export { CATALOG_TAG } from "@/server/catalog/cache-policy";
 
 // Cache do catalogo publicado (docs/17 §2.3), fase 1: unstable_cache por tag, sem `cacheComponents`.
-// Ninguem le daqui ainda; a area do aluno passa a ler na fase de performance. O que importa agora e
-// que TODA mutacao de catalogo chame invalidateCatalog(), para o cache nascer correto.
+// A area do aluno le as linhas publicadas pelo cache proprio do platform-store, com a mesma tag (desde
+// 19/10/2026); este snapshot ainda nao tem leitor. TODA mutacao de catalogo chama invalidateCatalog().
 //
 // Restricoes do unstable_cache (Next 16.4): a funcao nao pode ler cookies/headers nem chamar
 // revalidateTag/updateTag; o resultado e gravado em JSON. Por isso o loader usa o cliente de servico

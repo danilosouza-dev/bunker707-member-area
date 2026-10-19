@@ -5,7 +5,7 @@ import { FeaturedStructureHomeSection } from "@/components/featured-structure-ho
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { getAppShellData, getHomePageData } from "@/server/db/platform-store";
-import { requirePageUser } from "@/server/auth/guards";
+import { requireStudentPageUser } from "@/server/auth/guards";
 import { isHeroVisible, resolveHomeHero } from "@/server/member-area/home-hero-model";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ type HomeProps = {
 export default async function Home({ searchParams }: HomeProps) {
   const resolvedSearchParams = await searchParams;
   const requestedAccessPreviewMode = normalizeAccessPreviewMode(resolvedSearchParams?.accessPreview);
-  const user = await requirePageUser("/");
+  const user = await requireStudentPageUser("/");
   const shellData = await getAppShellData(user);
   const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
   const { hero: storedHero, homeRows, modalStructures } = await getHomePageData(accessPreviewMode, user);

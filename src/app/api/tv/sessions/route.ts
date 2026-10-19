@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireApiUser } from "@/server/auth/guards";
+import { getHeadersOrigin } from "@/server/auth/site-origin";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import { createTvSession } from "@/server/video/tv-sessions";
@@ -47,7 +48,8 @@ export async function POST(request: Request) {
       lessonId,
       userId: auth.user.id
     });
-    const tvUrl = new URL("/tv", request.url);
+    // Origem pelos cabecalhos: no servidor proprio o request.url vem com o endereco interno do container.
+    const tvUrl = new URL("/tv", await getHeadersOrigin());
     tvUrl.searchParams.set("code", session.pairingCode);
 
     return noStore(NextResponse.json({

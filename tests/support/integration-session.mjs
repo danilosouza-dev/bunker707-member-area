@@ -35,6 +35,11 @@ export async function getAuthenticatedUser() {
   return integrationSession.user;
 }
 
+// Paginas de conteudo (getSessionUser: claims do JWT no app): aqui e a mesma pessoa simulada.
+export async function getSessionUser() {
+  return integrationSession.user;
+}
+
 // Import dinamico: o alias "@/" so existe depois que integration-hooks.mjs registra os ganchos.
 export async function getAdminAccessForUser(userId) {
   const { loadAdminAccess } = await import("@/server/auth/admin-access");

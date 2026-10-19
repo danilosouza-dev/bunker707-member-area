@@ -8,6 +8,8 @@
 # Roda na sua maquina, nunca direto no servidor: depois do --apply, ensaie local (docs/20), commite, abra
 # PR; no servidor, o passo e backup.sh -> git pull -> compose pull -> compose up -d -> smoke.sh.
 # O Postgres (db) NUNCA muda de versao maior por aqui: upgrade de major e procedimento proprio no runbook.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 

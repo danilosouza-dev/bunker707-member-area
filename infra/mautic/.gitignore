@@ -1,0 +1,7 @@
+# Segredos e dados do Mautic: nunca no repositorio (AGENTS.md, docs/13).
+.env
+.env.*
+!.env.example
+volumes/*
+!volumes/.gitkeep
+caddy/data/

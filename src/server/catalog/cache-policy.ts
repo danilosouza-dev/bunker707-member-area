@@ -30,3 +30,15 @@ export function planCatalogInvalidation(source: CatalogInvalidationSource): Cata
 
   throw new Error(`Origem de invalidacao do catalogo desconhecida: ${String(source)}`);
 }
+
+/**
+ * Leitura da area do aluno (platform-store): catalogo publicado e platform_settings, iguais para todos os
+ * alunos, em unstable_cache com CATALOG_TAG. Mude o sufixo quando o formato das linhas mudar.
+ */
+export const MEMBER_CATALOG_CACHE_KEY = ["member-area", "published-rows", "v1"] as const;
+
+/**
+ * Rede de seguranca do cache da area do aluno: toda gravacao de catalogo, Vitrine, Destaque ou Marca ja
+ * invalida pela tag; se alguma escapar, o aluno ve a mudanca em ate 60 s.
+ */
+export const MEMBER_CATALOG_REVALIDATE_SECONDS = 60;

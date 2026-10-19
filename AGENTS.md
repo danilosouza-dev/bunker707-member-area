@@ -32,6 +32,7 @@ Before making product, UX, architecture, or implementation decisions, read the r
 - `docs/18-padrao-de-testes.md` (padrao de testes, dados de teste e rotina: toda PR de funcionalidade ou correcao traz teste de comportamento)
 - `docs/19-infra-hetzner-e-email.md` (infra propria na Hetzner, custos verificados, e-mail transacional no Resend e cronograma; vale para qualquer trabalho de deploy, e-mail ou infra)
 - `docs/20-runbook-hetzner.md` (servidor proprio na Hetzner: `infra/`, Dockerfile, deploy, backup, incidentes; nada cobrado e criado sem ok do produtor no chat)
+- `docs/21-retomada-migracao-hetzner.md` (estado da migracao para a Hetzner e proximos passos, na ordem; ler primeiro ao retomar esse trabalho)
 
 Update docs when decisions change.
 
@@ -60,7 +61,7 @@ Use `docs/11-inventario-coleta-astron.md` as the detailed UX/functionality refer
 - PostHog for product analytics
 - Sentry for monitoring
 - Trigger.dev or Inngest for background jobs
-- Vercel initially, with portability to Hetzner
+- Hetzner in production (`main`, `deploy-membros`); Vercel + Supabase cloud as the test environment (`dev`, team-created accounts only). Flow: task branch -> PR to `dev` -> producer tests -> PR `dev` -> `main` -> deploy (`CONTRIBUTING.md`)
 
 ## Engineering Conventions
 

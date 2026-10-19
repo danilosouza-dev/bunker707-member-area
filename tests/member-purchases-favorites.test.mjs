@@ -401,14 +401,15 @@ test("favoritos: aula concluida e lista vazia", () => {
 });
 
 test("paginas: usuario logado, previa so para admin, biblioteca do aluno e esqueleto proprio", () => {
-  for (const [route, page, loading] of [
-    ["/minhas-compras", "src/app/minhas-compras/page.tsx", "src/app/minhas-compras/loading.tsx"],
-    ["/favoritos", "src/app/favoritos/page.tsx", "src/app/favoritos/loading.tsx"]
+  // Minhas compras confirma a sessao no Auth; Favoritos e pagina de conteudo (claims do JWT, docs/06).
+  for (const [route, page, loading, guard] of [
+    ["/minhas-compras", "src/app/minhas-compras/page.tsx", "src/app/minhas-compras/loading.tsx", "requirePageUser"],
+    ["/favoritos", "src/app/favoritos/page.tsx", "src/app/favoritos/loading.tsx", "requireStudentPageUser"]
   ]) {
     const pageSource = read(page);
     const loadingSource = read(loading);
 
-    assert.match(pageSource, new RegExp(`requirePageUser\\("${route}"\\)`));
+    assert.match(pageSource, new RegExp(`\\b${guard}\\("${route}"\\)`));
     assert.match(pageSource, /shellData\.canUseAccessPreview \? requestedAccessPreviewMode : undefined/);
     assert.match(pageSource, /getMemberLibrary\(accessPreviewMode, user\)/);
     assert.match(pageSource, /view=\{view\}/);

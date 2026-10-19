@@ -3,6 +3,8 @@
 #   sh infra/scripts/cloudflare-ips.sh            uma faixa por linha (v4 e v6)
 #   sh infra/scripts/cloudflare-ips.sh --caddy    linha `trusted_proxies static ...` para o Caddyfile
 #   sh infra/scripts/cloudflare-ips.sh --json     array JSON
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -euo pipefail
 
 v4=$(curl -fsS --max-time 20 https://www.cloudflare.com/ips-v4)

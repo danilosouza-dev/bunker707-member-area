@@ -10,6 +10,8 @@
 #   - ICMP de qualquer lugar (ping do monitor).
 # Idempotente: cria o firewall se nao existir, SUBSTITUI o conjunto de regras e aplica ao servidor.
 # Quando o IP do produtor mudar, rode de novo. Nao cria servidor e nao mexe em nada cobrado.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 set -euo pipefail
 here=$(cd -- "$(dirname -- "$0")" && pwd)

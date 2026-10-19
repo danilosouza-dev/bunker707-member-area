@@ -2,14 +2,25 @@
 
 Este repositorio privado concentra a area de membros Bunker707 e o CMS. O padrao e tratar cada mudanca como entrega de produto: pequena, revisavel, testavel e documentada quando mudar uma decisao duravel.
 
+## Ambientes (decisao do produtor em 19/10/2026)
+
+| Ambiente | Branch | Onde roda | Banco | Quem usa |
+|---|---|---|---|---|
+| Teste | `dev` | Vercel, ambiente "Production" do projeto (`https://bunker707-member-area.vercel.app`) | Supabase da nuvem (`hrtnqcznhdmodjikvddm`) | produtor e equipe, so com contas criadas por eles |
+| Producao | `main` | Hetzner (`https://membros.bunker707.com.br`), etapa `deploy-membros` | Supabase proprio no servidor (docs/20) | alunos |
+
+Regras do ambiente de teste: nenhum aluno real (so contas criadas pela equipe); o banco da nuvem recebe as mesmas migracoes, antes da producao; webhooks de venda reais (Hotmart, Ticto) apontam so para a producao. Cada PR tambem ganha uma previa da Vercel (protegida por login da Vercel) ligada ao mesmo banco de teste. O que so existe no servidor (Auth proprio, Caddy, Envoy) nao passa pela Vercel: para isso ficam o smoke do deploy e a volta para a imagem anterior (docs/20 §9).
+
 ## Fluxo
 
 1. Criar uma branch a partir de `dev` (a `main` so recebe a promocao da `dev`, por PR, depois do ok no chat).
 2. Manter o escopo pequeno e alinhado ao MVP atual.
 3. Escrever o teste de comportamento do que mudou (secao Testes abaixo).
 4. Rodar `npm run verify` antes de abrir PR ou pedir merge. O CI roda tambem integracao e ponta a ponta; para rodar tudo local, `npm run verify:full` (precisa do Docker aberto e de `npm run db:start`).
-5. Abrir PR para `dev` usando o template do repositorio, com o checklist de testes preenchido.
-6. Atualizar `README.md`, `docs/` ou `AGENTS.md` quando uma regra, decisao ou fluxo mudar.
+5. Abrir PR para `dev` usando o template do repositorio, com o checklist de testes preenchido. Depois do ok no chat e do merge, a Vercel publica a `dev` no ambiente de teste sozinha. Se a PR traz migracao, quem fez o merge a aplica no Supabase da nuvem na mesma hora (MCP do Supabase, `apply_migration`, e confere com `list_migrations`); o CI ja a testou do zero no Supabase local.
+6. O produtor testa no ambiente de teste.
+7. Promocao: PR `dev` -> `main` depois do ok no chat; em seguida a etapa `deploy-membros` do workflow Infra (Hetzner), disparada a partir da `main`, leva ao servidor (aplica as migracoes novas, troca o app e roda o smoke). O workflow recusa `deploy-*` de qualquer outra branch.
+8. Atualizar `README.md`, `docs/` ou `AGENTS.md` quando uma regra, decisao ou fluxo mudar.
 
 GitHub branch protection deve ser habilitado para `main` quando o plano da conta permitir. Enquanto isso, trate PR + CI + `npm run verify` como regra operacional obrigatoria.
 
