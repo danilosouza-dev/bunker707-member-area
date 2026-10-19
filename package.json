@@ -34,7 +34,7 @@
   "dependencies": {
     "@atlaskit/pragmatic-drag-and-drop": "^4.0.0",
     "@atlaskit/pragmatic-drag-and-drop-hitbox": "^3.0.0",
-    "@base-ui/react": "^1.6.0",
+    "@base-ui/react": "^1.9.0",
     "@sentry/nextjs": "^11.6.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.3",
