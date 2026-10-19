@@ -63,7 +63,7 @@ if [ "$role" = "membros" ]; then
         set_env "$target" "$envf" APP_IMAGE "$image"
         remote "docker compose -f infra/compose/docker-compose.yml pull --quiet && docker compose -f infra/compose/docker-compose.yml up -d"
         remote "bash infra/scripts/migrate.sh"
-        for s in auth rest storage api-gw app; do remote "bash -c '. infra/scripts/lib.sh; wait_healthy $s 300'"; done
+        for s in auth rest storage realtime api-gw app; do remote "bash -c '. infra/scripts/lib.sh; wait_healthy $s 300'"; done
         remote "bash infra/scripts/smoke.sh"
     fi
     remote "docker logout ghcr.io >/dev/null 2>&1 || true"

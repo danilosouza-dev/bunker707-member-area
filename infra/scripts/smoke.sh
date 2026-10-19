@@ -48,8 +48,13 @@ check "rest nega anon em tabela interna" 401 "$supabase_url/rest/v1/job_runs?sel
 check "rest le com a chave do servidor" 200 "$supabase_url/rest/v1/job_runs?select=id&limit=1" -H "apikey: $secret_key" -H "Authorization: Bearer $secret_key"
 check "storage /status" 200 "$supabase_url/storage/v1/status"
 # O gateway fecha /realtime/v1/api/tenants para todo mundo (correcao de seguranca do self-hosted 0.6.0):
-# o Realtime e conferido pelo healthcheck do proprio container.
+# o Realtime e conferido pelo healthcheck do proprio container. O primeiro teste dele so roda 30 s depois
+# da partida: recem-criado, "starting" ganha ate 90 s antes de virar falha.
 realtime_health=$(compose ps --format '{{.Health}}' realtime 2>/dev/null | head -n1)
+for _ in $(seq 30); do
+    [ "$realtime_health" = "starting" ] || break
+    sleep 3; realtime_health=$(compose ps --format '{{.Health}}' realtime 2>/dev/null | head -n1)
+done
 if [ "$realtime_health" = "healthy" ]; then
     printf '  ok   %-28s %s\n' "realtime (healthcheck)" "$realtime_health"
 else
