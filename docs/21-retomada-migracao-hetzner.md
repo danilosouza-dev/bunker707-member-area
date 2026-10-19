@@ -169,3 +169,38 @@ a lente 1 (Docker/Compose/Caddy/Mautic) esta na secao 8.
   (quem preenche ja tem `exec-*`).
 - Para o produtor decidir: quem tem escrita no repositorio tem, na pratica, os tokens e root nos servidores
   (docs/20 §16). Em 19/10/2026: `danilosouza-dev`, `marketingLendario` e `bertoldomolina8-cpu`.
+
+## 8. Estado da producao na Hetzner (19/10/2026, fim da segunda sessao)
+
+Decisao do produtor: o servidor da area de membros tem de custar ate US$ 10 por mes. Com o CX33 sem estoque
+(e a EUR 9,99, acima disso), ficou o CX23 (2 vCPU, 4 GB, EUR 6,49) nos dois papeis. Os servidores ficam
+LIGADOS: o estoque da linha CX e intermitente, e apagar para recriar depois arrisca nao conseguir o tipo
+barato. O "snapshot e apagar" da secao 4.3 (passos 8 e 9) nao foi feito.
+
+| Item | Estado |
+|---|---|
+| `bunker707-membros` | CX23 em fsn1, 2.28.47.222; app + Supabase, 13 containers saudaveis, 1,7 de 3,7 GB de RAM |
+| `bunker707-marketing` | CX23 em fsn1, 91.99.219.220; Mautic 7.2.1 instalado por linha de comando |
+| Storage Box | `bunker707-backups` (bx11) em hel1, separado do datacenter dos servidores; snapshots diarios do box |
+| Backups | restic em `bunker707/restic` e `bunker707/restic-mautic`, timers diarios, primeiro backup feito |
+| DNS | `membros`, `api`, `studio` e `marketing` proxied na Cloudflare, SSL Full (strict) |
+| E-mail | chave `bunker707-hetzner-envio` no Resend (so envio, restrita a `mail.bunker707.com.br`), nos dois servidores |
+| Equipe | `ferramentas.bunker707@gmail.com` (owner) e `bertoldomolina8@gmail.com` (admin) convidados; os dois ja com e-mail confirmado, criam a senha por "Esqueci minha senha" |
+| Custo | cerca de EUR 18 por mes (2 x EUR 6,49 + IPv4 + Storage Box EUR 4,00), sem IVA |
+
+O que a primeira rodada real corrigiu (alem da revisao da secao 7): senha do Storage Box com especial;
+`/run/sshd` antes do `sshd -t`; caminho do restic relativo a `/home` do box; smoke esperando o Realtime e os
+servicos recriados; envelope compacto (o de tar tinha 13 mil caracteres); convite e recuperacao por
+`token_hash` em `/auth/confirm` (o `ConfirmationURL` caia no login, docs/06); redirecionamentos pela origem
+dos cabecalhos (o `request.url` do Next no container vinha como `0.0.0.0:3000`).
+
+Pendente, para o produtor decidir:
+
+1. Copia do `RESTIC_PASSWORD` dos dois servidores fora deles. Hoje so existe no `.env` de cada servidor (e
+   dentro do proprio backup, que ele cifra): se o servidor se perder, o backup nao abre.
+2. Acesso de escrita ao repositorio (docs/20 §16): quem tem escrita tem os tokens e root nos servidores.
+3. Teste de carga com 100 alunos simultaneos antes de abrir para turmas grandes (o produtor perguntou;
+   proposto rodar pelo Actions e decidir rescale com numeros).
+4. A virada de producao (docs/20 §14): webhook do Resend para `https://membros.bunker707.com.br/api/webhooks/resend`
+   e `RESEND_WEBHOOK_SECRET` por `secrets-membros`; Hotmart e Ticto; conteudo (nada e copiado da nuvem).
+5. Opcional: igualar os modelos de e-mail do Supabase cloud (staging) ao `/auth/confirm` (docs/06).
