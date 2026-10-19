@@ -69,7 +69,7 @@ Portas publicadas no servidor:
 
 Por que o app fala com o Supabase pelo endereco publico e nao por `http://api-gw:8000`: o cookie de sessao do `@supabase/ssr` se chama `sb-<primeiro rotulo do host>-auth-token` e as URLs publicas do Storage saem do servidor; navegador e servidor precisam usar o MESMO endereco. O `extra_hosts: <host>:host-gateway` do compose faz esse nome resolver para o proprio servidor (Caddy em producao, Envoy no ensaio local), sem sair pela Cloudflare.
 
-Chaves: o stack usa as chaves novas (`sb_publishable_` no navegador, `sb_secret_` no servidor) com tokens assinados em ES256 e JWKS em `/auth/v1/.well-known/jwks.json`; as chaves legadas (`anon`/`service_role`, HS256) continuam no `.env` so para uso interno dos servicos. Com isso `AUTH_SESSION_STRATEGY=claims` (validacao local do JWT no `src/proxy.ts`) fica possivel; ative primeiro no ensaio local.
+Chaves: o stack usa as chaves novas (`sb_publishable_` no navegador, `sb_secret_` no servidor) com tokens assinados em ES256 e JWKS em `/auth/v1/.well-known/jwks.json`; as chaves legadas (`anon`/`service_role`, HS256) continuam no `.env` so para uso interno dos servicos. Com isso o servidor usa `AUTH_SESSION_STRATEGY=claims` (validacao local do JWT no `src/proxy.ts`, sem ir ao Auth a cada pagina; as paginas protegidas ainda confirmam com `getUser`): padrao do `infra/compose/.env.example` desde 19/10/2026, depois do teste de carga (secao 12.1), em que o Auth gastava 40% de 1 vCPU com duas validacoes por pagina.
 
 ---
 
@@ -135,12 +135,12 @@ Precisa de Docker Desktop (8 GB para o Docker ja basta), Node 24 e internet (o n
 ```bash
 sh infra/compose/generate-secrets.sh --local          # escreve infra/compose/.env (chmod 600)
 docker compose -f infra/compose/docker-compose.yml up -d --build
-docker compose -f infra/compose/docker-compose.yml ps  # 13 containers "healthy" (o Caddy nao tem healthcheck)
+docker compose -f infra/compose/docker-compose.yml ps  # 11 containers "healthy" (13 com o perfil studio; o Caddy nao tem healthcheck)
 sh infra/scripts/migrate.sh                            # 37 migracoes via npx supabase, ~4 s
 sh infra/scripts/smoke.sh
 ```
 
-Enderecos do ensaio: app em `http://localhost:3080`, Supabase em `http://127.0.0.1.sslip.io:8000`, Studio em `http://127.0.0.1:8000/` (usuario `bunker707`, senha `DASHBOARD_PASSWORD` do `.env`).
+Enderecos do ensaio: app em `http://localhost:3080`, Supabase em `http://127.0.0.1.sslip.io:8000`, Studio em `http://127.0.0.1:8000/` (so com o perfil `studio`, secao 8.1; usuario `bunker707`, senha `DASHBOARD_PASSWORD` do `.env`).
 
 ### 4.2 Entrar com um usuario de teste
 
@@ -178,7 +178,7 @@ Depois, em `http://localhost:3080/login`: `aluna.teste@bunker707.test` / `bunker
 | caddy | 26 MiB |
 | **Total** | **1.271 MiB** |
 
-Leitura: num servidor de 8 GB sobram mais de 6 GB para o Postgres crescer (shared_buffers, cache do sistema), para o app sob carga e para o build ocasional. O app em uso real tende a 150 a 300 MiB; o Postgres usa o que o sistema deixar de cache. Studio, meta e pooler (480 MiB) sao dispensaveis se um dia faltar memoria: `docker compose stop studio meta supavisor` (o app nao depende deles).
+Leitura: num servidor de 8 GB sobram mais de 6 GB para o Postgres crescer (shared_buffers, cache do sistema), para o app sob carga e para o build ocasional. O app em uso real tende a 150 a 300 MiB; o Postgres usa o que o sistema deixar de cache. Studio e meta (~300 MiB) ficam desligados desde 19/10/2026 (perfil `studio`, secao 8.1); o pooler (186 MiB) tambem e dispensavel se um dia faltar memoria: `docker compose stop supavisor` (o app nao depende dele).
 
 ### 4.4 Backup e restauracao em disco (ensaio)
 
@@ -389,7 +389,7 @@ echo "<token>" | docker login ghcr.io -u danilosouza-dev --password-stdin
 # 4. subir e migrar
 docker compose -f infra/compose/docker-compose.yml pull
 docker compose -f infra/compose/docker-compose.yml up -d
-docker compose -f infra/compose/docker-compose.yml ps        # tudo healthy (Studio demora ~20 s)
+docker compose -f infra/compose/docker-compose.yml ps        # tudo healthy (Studio e meta so com o perfil studio, 8.1)
 sh infra/scripts/migrate.sh
 sh infra/scripts/smoke.sh
 
@@ -414,6 +414,24 @@ Passos que o compose nao faz:
 - **Rotas de callback**: `ADDITIONAL_REDIRECT_URLS` ja aponta para `https://membros.../auth/callback`; se houver login com Google, cadastrar `https://api.bunker707.com.br/auth/v1/callback` no console do Google e as variaveis `GOTRUE_EXTERNAL_GOOGLE_*` no compose (comentadas no compose oficial).
 
 Como entrar no Postgres no servidor: `docker compose -f infra/compose/docker-compose.yml exec db psql -U postgres` (ou pelo pooler em `127.0.0.1:5432` com usuario `postgres.bunker707`). De fora, so por tunel: `ssh -L 5433:127.0.0.1:5433 deploy@<ip>` e `psql postgresql://postgres:<senha>@127.0.0.1:5433/postgres`.
+
+### 8.1 Studio (painel do banco): desligado, ligar so quando precisar (19/10/2026)
+
+Studio e meta (o servico que le o catalogo do banco para o Studio) ficam no perfil `studio` do compose e nao sobem com `docker compose up -d` nem com o `deploy-membros`. Motivo, medido no teste de carga de 19/10/2026 (secao 12.1): o healthcheck do Studio chama o meta a cada 5 s, o meta roda a consulta de tipos do catalogo (`WITH base_types`, 172 ms cada), e os dois somavam cerca de 35% de 1 vCPU e 300 MiB sem ninguem usar o painel. O app nao depende deles; o gateway sobe sem eles (sem o Studio, `/` e `/pg` do Envoy respondem 503), e o host `studio` continua barrado pelo Caddy para quem esta fora de `STUDIO_ALLOWED_IPS`.
+
+Ligar (etapa `exec-membros` com este `payload`, ou por SSH em `/opt/bunker707`):
+
+```sh
+COMPOSE_PROFILES=studio docker compose -f infra/compose/docker-compose.yml up -d studio meta
+```
+
+Abrir `https://studio.bunker707.com.br` da maquina cujo IP esta em `STUDIO_ALLOWED_IPS` (o `deploy-membros` grava o `PRODUCER_IP` de `opcoes`), usuario `bunker707` e `DASHBOARD_PASSWORD` do `.env`. Para SQL pontual nao precisa do Studio: `exec-membros` com `docker compose -f infra/compose/docker-compose.yml exec -T db psql -U postgres -c "..."`. Desligar ao terminar (um deploy nao desliga o Studio ligado):
+
+```sh
+COMPOSE_PROFILES=studio docker compose -f infra/compose/docker-compose.yml rm -sf studio meta
+```
+
+No ensaio local, o mesmo `COMPOSE_PROFILES=studio` antes do `up -d`.
 
 ---
 
@@ -613,7 +631,7 @@ Primeiro minuto, sempre: `ssh deploy@<ip>`, `cd /opt/bunker707`, `docker compose
 |---|---|---|
 | App fora (health 5xx/timeout), Supabase ok | `docker compose logs --tail=200 app` | `docker compose restart app`; se e deploy recente, `deploy.sh --image <anterior> --no-migrate` |
 | Ninguem consegue entrar | `logs auth`; `smoke.sh` (auth 200?) | `restart auth`; conferir `SMTP_*` se for e-mail; conferir relogio (`timedatectl`) |
-| Tudo lento | `docker stats`, `free -h`, `df -h` | memoria: `stop studio meta`; disco cheio: `docker system prune -f`, logs, `stage/` antigos |
+| Tudo lento | `docker stats`, `free -h`, `df -h` | memoria: Studio desligado? (8.1); `stop supavisor`; disco cheio: `docker system prune -f`, logs, `stage/` antigos |
 | Disco cheio | `df -h`, `du -sh infra/compose/volumes/*` | prune de imagens, apagar `/var/backups/bunker707/stage` antigos, ampliar (volume da Hetzner) |
 | Certificado invalido | `logs caddy` | DNS/Cloudflare em Full (strict)? porta 80 aberta? `docker compose restart caddy` |
 | Postgres nao sobe | `logs db` | NAO apagar `volumes/db/data`; snapshot do servidor na Hetzner antes de mexer; restaurar do backup num servidor novo (10.2) se preciso |
@@ -696,7 +714,7 @@ Roteiro com dados reais (referencia de 17/10/2026, caso um dia haja alunos na nu
 - [ ] ufw com regras DOCKER-USER (`sudo ufw status`; `sudo iptables -L DOCKER-USER -n` mostra as regras).
 - [ ] Nenhuma porta do Supabase em 0.0.0.0: `ss -ltnp` so mostra 22, 80 e 443 fora de 127.0.0.1.
 - [ ] `.env` com `chmod 600`, dono `deploy`; nunca no git; `RESTIC_PASSWORD` tambem no gerenciador de senhas.
-- [ ] Studio: allowlist de IP valida (`STUDIO_ALLOWED_IPS`), senha longa.
+- [ ] Studio: allowlist de IP valida (`STUDIO_ALLOWED_IPS`), senha longa, desligado fora de uso (8.1).
 - [ ] Cloudflare: Full (strict), WAF ligado, registros proxied; o IP do servidor nao aparece em lugar nenhum publico.
 - [ ] Backup diario rodando (`systemctl list-timers`), heartbeat no monitor, ultimo `--check` com menos de 7 dias, ultimo teste de restauracao com menos de 3 meses.
 - [ ] Atualizacoes automaticas ligadas; `update.sh --check` uma vez por mes.
