@@ -61,6 +61,10 @@ echo "  aluno $uid com acesso ao curso de teste"
 publishable=$(get_env "$target" "$envf" SUPABASE_PUBLISHABLE_KEY)
 api_publica=$(get_env "$target" "$envf" SUPABASE_PUBLIC_URL)
 
+# Consultas do banco durante o teste (pg_stat_statements, que a imagem da Supabase ja carrega): zera antes
+# e mostra as que mais somaram tempo no fim. O texto sai normalizado ($1, $2), sem valores.
+rsh "$target" "$psql_remote -c \"create extension if not exists pg_stat_statements with schema extensions; set search_path to public, extensions; select pg_stat_statements_reset();\"" >/dev/null || warn "pg_stat_statements indisponivel: sem a lista de consultas."
+
 log "Medindo o servidor durante o teste (a cada 15 s)"
 rsh "$target" "for i in \$(seq 400); do echo \"== \$(date -u +%H:%M:%S) carga \$(cut -d' ' -f1-3 /proc/loadavg) | mem livre \$(free -m | awk '/Mem:/{print \$7}') MB\"; docker stats --no-stream --format '{{.CPUPerc}} {{.MemUsage}} {{.Name}}' | sort -rn | head -n 5; sleep 15; done" > "$WORK_DIR/carga-servidor.txt" 2>&1 &
 medidor=$!
@@ -80,6 +84,9 @@ log "Servidor durante o teste (carga = load average de 1, 5 e 15 min; 2 vCPU)"
 grep -E '^==' "$WORK_DIR/carga-servidor.txt" | sed 's/^/  /'
 echo "  pico de CPU por container:"
 grep -vE '^==' "$WORK_DIR/carga-servidor.txt" | awk '{gsub("%","",$1); if ($1+0 > max[$NF]) max[$NF]=$1+0} END {for (c in max) printf "    %-36s %5.1f%%\n", c, max[c]}' | sort -k2 -rn | head -n 8
+
+log "Consultas que mais somaram tempo no banco durante o teste"
+rsh "$target" "$psql_remote -P pager=off -c \"set search_path to public, extensions; select round(total_exec_time)::int as total_ms, calls as vezes, round(mean_exec_time::numeric, 1) as media_ms, left(regexp_replace(query, '\\\\s+', ' ', 'g'), 140) as consulta from pg_stat_statements where query not ilike '%pg_stat_statements%' order by total_exec_time desc limit 15;\"" | sed 's/^/  /' || warn "nao li o pg_stat_statements"
 
 log "Resumo"
 python3 -I - "$WORK_DIR/carga-resumo.json" <<'PY'
