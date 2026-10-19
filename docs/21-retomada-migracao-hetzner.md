@@ -3,6 +3,10 @@
 > **Atualizacao de 19/10/2026 (segunda sessao):** a revisao da secao 4.1 foi feita (secao 7) e a execucao da
 > 4.3 comecou. O produtor decidiu CX23 (4 GB) para os dois servidores, mantidos ligados (secao 8). Leia as
 > secoes 7 e 8 antes da 4.
+>
+> **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
+> `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a
+> `dev` (teste na Vercel), promocao para a `main` e `deploy-membros` disparado da `main` (secao 8, item 6).
 
 Documento de passagem de sessao. Quem continuar (outra conta, outra sessao do Claude Code na nuvem) le este
 arquivo primeiro e segue a secao 4, na ordem. Tudo que esta aqui foi verificado na sessao de 18 e 19/10/2026.
@@ -30,7 +34,8 @@ e `checkip.amazonaws.com` passam.
 
 Por isso os "bracos" sao o workflow `Infra (Hetzner)` (`.github/workflows/infra.yml`, id 388832203 no
 GitHub), disparado pela ferramenta MCP do GitHub `actions_run_trigger` (metodo `run_workflow`,
-`workflow_id: infra.yml`, `ref: claude/hopeful-franklin-04s7wt`, inputs `etapa`, `opcoes`, `payload`) e lido
+`workflow_id: infra.yml`, `ref: main`, inputs `etapa`, `opcoes`, `payload`; `deploy-*` so roda da `main`, as
+outras etapas rodam de qualquer branch) e lido
 por `actions_list` (`list_workflow_runs`) e `get_job_logs` (`run_id`, `failed_only`, `return_content: true`).
 Teste feito em 18/10/2026: a execucao 39174505182 (etapa `status`) rodou e parou em "Segredo HCLOUD_TOKEN
 ausente", como esperado. O caminho funciona; faltam os segredos.
@@ -133,12 +138,12 @@ plano B se faltar estoque).
 ## 6. Texto para colar na nova sessao
 
 ```txt
-Continue a migracao da Bunker707 para a Hetzner de onde parou. Trabalhe na branch
-claude/hopeful-franklin-04s7wt do repositorio danilosouza-dev/bunker707-member-area. Leia primeiro
-docs/21-retomada-migracao-hetzner.md e siga a secao 4 na ordem: termine a revisao da secao 4.1, depois
-confira se os segredos HCLOUD_TOKEN e CLOUDFLARE_API_TOKEN ja estao no GitHub (dispare a etapa status do
-workflow Infra (Hetzner)) e execute as etapas da secao 4.3, me reportando o custo do plan antes do
-provision e o resultado de cada etapa. Tudo pela IA; eu nao tenho maquina local.
+Continue a migracao da Bunker707 para a Hetzner de onde parou. Trabalhe numa branch criada a partir da
+dev do repositorio danilosouza-dev/bunker707-member-area (fluxo do CONTRIBUTING.md). Leia primeiro
+docs/21-retomada-migracao-hetzner.md: os servidores ja estao no ar (secao 8). Confira o estado com a etapa
+status do workflow Infra (Hetzner) e siga os pendentes da secao 8 (a virada de producao, item 4), me
+reportando o resultado de cada etapa. Codigo novo vai para o servidor so pela main, depois do teste na dev.
+Tudo pela IA; eu nao tenho maquina local.
 ```
 
 ## 7. Revisao da secao 4.1 (feita em 19/10/2026)
@@ -210,8 +215,8 @@ Pendente, para o produtor decidir:
    o Supabase da nuvem ficam como ambiente de teste (item 6).
 5. Opcional: igualar os modelos de e-mail do Supabase cloud (staging) ao `/auth/confirm` (docs/06).
 6. (Decidido em 19/10/2026.) Ambientes: `dev` = teste na Vercel com o Supabase da nuvem, so contas da equipe;
-   `main` = producao na Hetzner, e `deploy-membros` recusa outra branch (`CONTRIBUTING.md`). Pendente do produtor:
-   na Vercel (projeto `bunker707-member-area`, conta do Bertoldo, plano Hobby), Settings > Environments >
-   Production > Branch Tracking de `main` para `dev`; o conector da Vercel nao tem essa opcao. Esta branch
-   (`claude/hopeful-franklin-04s7wt`) roda na producao sem ter passado pela `dev`: PR aberta para a `dev`, depois
-   promocao para a `main`; ate la nao ha deploy novo (a trava ja vale).
+   `main` = producao na Hetzner, e `deploy-membros` recusa outra branch (`CONTRIBUTING.md`). Feito no mesmo dia:
+   o produtor trocou na Vercel (projeto `bunker707-member-area`, conta do Bertoldo, plano Hobby) o Branch
+   Tracking de Production de `main` para `dev`; a branch da migracao entrou na `dev` (#105, com a #106) e foi
+   promovida para a `main` (#107); `deploy-membros` da `main` (execucao 39313206338) pos no ar
+   `hetzner-sha-5e44340`, smoke verde, `AUTH_SESSION_STRATEGY=claims` conferido no container.
