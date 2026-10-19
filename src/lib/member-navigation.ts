@@ -2,7 +2,8 @@
 // topo, o rodape e as paginas novas. Modulo puro (sem React e sem icones): o app-shell associa o
 // icone Lucide pela chave `key`.
 //
-// Toda pagina listada aqui exige sessao (requirePageUser na pagina e o prefixo em proxy.ts).
+// Toda pagina listada aqui exige sessao (requireStudentPageUser ou requirePageUser na pagina e o prefixo
+// em proxy.ts).
 
 export const MEMBER_ROUTES = {
   changePassword: "/alterar-senha",

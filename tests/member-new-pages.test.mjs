@@ -15,12 +15,14 @@ const materialsFilter = await import("../src/components/member/pages/materials-f
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const exists = (path) => existsSync(new URL(`../${path}`, import.meta.url));
 
+// guard: paginas de conteudo validam a sessao pelos claims do JWT (requireStudentPageUser); Suporte e Perfil
+// (conta, e-mail, data de criacao) confirmam no Auth (requirePageUser). docs/06.
 const routes = [
-  { dir: "minha-jornada", loader: "getJourneyPageData", route: "/minha-jornada", usesLibrary: true },
-  { dir: "continue-assistindo", loader: "getContinueWatchingPageData", route: "/continue-assistindo", usesLibrary: true },
-  { dir: "materiais", loader: "getMaterialsPageData", route: "/materiais", usesLibrary: true },
-  { dir: "suporte", loader: "getSupportPageData", route: "/suporte", usesLibrary: false },
-  { dir: "perfil", loader: "getProfilePageData", route: "/perfil", usesLibrary: true }
+  { dir: "minha-jornada", guard: "requireStudentPageUser", loader: "getJourneyPageData", route: "/minha-jornada", usesLibrary: true },
+  { dir: "continue-assistindo", guard: "requireStudentPageUser", loader: "getContinueWatchingPageData", route: "/continue-assistindo", usesLibrary: true },
+  { dir: "materiais", guard: "requireStudentPageUser", loader: "getMaterialsPageData", route: "/materiais", usesLibrary: true },
+  { dir: "suporte", guard: "requirePageUser", loader: "getSupportPageData", route: "/suporte", usesLibrary: false },
+  { dir: "perfil", guard: "requirePageUser", loader: "getProfilePageData", route: "/perfil", usesLibrary: true }
 ];
 
 function functionBody(source, name) {
@@ -33,12 +35,12 @@ function functionBody(source, name) {
 test("cada pagina nova exige sessao, so aceita previa de admin e tem esqueleto proprio", () => {
   const loaders = read("src/server/member-area/student-pages.ts");
 
-  for (const { dir, loader, route, usesLibrary } of routes) {
+  for (const { dir, guard, loader, route, usesLibrary } of routes) {
     assert.ok(exists(`src/app/${dir}/page.tsx`), `${route} tem page.tsx`);
     assert.ok(exists(`src/app/${dir}/loading.tsx`), `${route} tem loading.tsx`);
 
     const page = read(`src/app/${dir}/page.tsx`);
-    assert.match(page, new RegExp(`requirePageUser\\("${route}"\\)`), `${route} chama requirePageUser`);
+    assert.match(page, new RegExp(`\\b${guard}\\("${route}"\\)`), `${route} chama ${guard}`);
     assert.match(page, /export const dynamic = "force-dynamic";/);
     assert.match(page, /const accessPreviewMode = shellData\.canUseAccessPreview \? requestedAccessPreviewMode : undefined;/);
     assert.match(page, /<AppShell[\s\S]*accessPreviewMode=\{accessPreviewMode\}[\s\S]*canUseAccessPreview=\{shellData\.canUseAccessPreview\}/);

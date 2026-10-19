@@ -5,14 +5,31 @@ import { redirect } from "next/navigation";
 import { getSafeRedirectPath } from "@/lib/auth/redirect";
 import {
   getAdminAccessForUser,
-  getAuthenticatedUser
+  getAuthenticatedUser,
+  getSessionUser
 } from "@/server/auth/session";
 
+function redirectToLogin(nextPath: string): never {
+  redirect(`/login?next=${encodeURIComponent(getSafeRedirectPath(nextPath))}`);
+}
+
+/** Usuario confirmado no Auth (getUser): admin, compras, perfil, suporte, troca de senha. */
 export async function requirePageUser(nextPath = "/") {
   const user = await getAuthenticatedUser();
 
   if (!user) {
-    redirect(`/login?next=${encodeURIComponent(getSafeRedirectPath(nextPath))}`);
+    redirectToLogin(nextPath);
+  }
+
+  return user;
+}
+
+/** Paginas de conteudo do aluno: sessao pelos claims do JWT quando AUTH_SESSION_STRATEGY=claims (session.ts). */
+export async function requireStudentPageUser(nextPath = "/") {
+  const user = await getSessionUser();
+
+  if (!user) {
+    redirectToLogin(nextPath);
   }
 
   return user;

@@ -2,9 +2,10 @@ import "server-only";
 
 // Dados das paginas novas da barra lateral do aluno (Minha jornada, Continue assistindo, Materiais,
 // Suporte e Perfil). Cada pagina:
-//   requirePageUser(rota) -> getAppShellData(user) -> previa so para admin -> loader daqui.
-// getAppShellData e getMemberLibrary usam a mesma leitura do banco em cache por requisicao, entao a
-// biblioteca nao repete consulta; leituras independentes rodam em paralelo (Promise.all).
+//   requireStudentPageUser(rota) (Suporte e Perfil: requirePageUser) -> getAppShellData(user) -> previa so
+//   para admin -> loader daqui.
+// getAppShellData e getMemberLibrary usam a mesma leitura do banco em cache por requisicao (o catalogo
+// publicado vem do cache compartilhado, platform-store), entao a biblioteca nao repete consulta; leituras independentes rodam em paralelo (Promise.all).
 //
 // Os loaders devolvem modelos pequenos (student-pages-model.ts): o navegador nunca recebe a
 // biblioteca inteira, linhas cruas do banco nem endereco de material bloqueado.
@@ -12,7 +13,7 @@ import "server-only";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { redactSecrets } from "@/lib/env-value";
 import { getMemberSupportChannels, type MemberSupportChannel } from "@/lib/member-support";
-import type { AuthenticatedUser } from "@/server/auth/session";
+import type { AuthenticatedUser, SessionUser } from "@/server/auth/session";
 import { getMemberLibrary } from "@/server/db/platform-store";
 import { hasSupabaseConfig } from "@/server/db/supabase/client";
 import { listStudentLessonMaterials } from "@/server/member-area/lesson-materials";
@@ -32,14 +33,14 @@ import {
 } from "@/server/member-area/student-pages-model";
 import type { StudentProfileRecord } from "@/server/member-area/student-profile";
 
-export async function getJourneyPageData(accessPreviewMode: AccessPreviewMode | undefined, user: AuthenticatedUser): Promise<JourneyView> {
+export async function getJourneyPageData(accessPreviewMode: AccessPreviewMode | undefined, user: SessionUser): Promise<JourneyView> {
   const library = await getMemberLibrary(accessPreviewMode, user);
   return buildJourneyView(library, Date.now());
 }
 
 export async function getContinueWatchingPageData(
   accessPreviewMode: AccessPreviewMode | undefined,
-  user: AuthenticatedUser
+  user: SessionUser
 ): Promise<ContinueWatchingView> {
   const library = await getMemberLibrary(accessPreviewMode, user);
   return buildContinueWatchingView(library, Date.now());
@@ -62,7 +63,7 @@ export type MaterialsPageData =
  */
 export async function getMaterialsPageData(
   accessPreviewMode: AccessPreviewMode | undefined,
-  user: AuthenticatedUser
+  user: SessionUser
 ): Promise<MaterialsPageData> {
   const library = await getMemberLibrary(accessPreviewMode, user);
   const targets = getStudentMaterialTargets(library);
