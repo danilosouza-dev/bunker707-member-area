@@ -179,7 +179,7 @@ barato. O "snapshot e apagar" da secao 4.3 (passos 8 e 9) nao foi feito.
 
 | Item | Estado |
 |---|---|
-| `bunker707-membros` | CX23 em fsn1, 2.28.47.222; app + Supabase, 13 containers saudaveis, 1,7 de 3,7 GB de RAM |
+| `bunker707-membros` | CX23 em fsn1, 2.28.47.222; app + Supabase, 11 containers saudaveis (Studio e meta so quando ligados, docs/20 §8.1) |
 | `bunker707-marketing` | CX23 em fsn1, 91.99.219.220; Mautic 7.2.1 instalado por linha de comando |
 | Storage Box | `bunker707-backups` (bx11) em hel1, separado do datacenter dos servidores; snapshots diarios do box |
 | Backups | restic em `bunker707/restic` e `bunker707/restic-mautic`, timers diarios, primeiro backup feito |
@@ -200,8 +200,11 @@ Pendente, para o produtor decidir:
    repositorio restic, derivada do `HCLOUD_TOKEN` (etapa `chave-backup`; docs/20 §10.2). Sem o `.env` do
    servidor, o token guardado no GitHub abre o backup.
 2. Acesso de escrita ao repositorio (docs/20 §16): quem tem escrita tem os tokens e root nos servidores.
-3. Teste de carga com 100 alunos simultaneos antes de abrir para turmas grandes (o produtor perguntou;
-   proposto rodar pelo Actions e decidir rescale com numeros).
+3. (Feito em 19/10/2026.) Teste de carga, etapa `carga` (docs/20 §12.1): o CX23 atende cerca de 8 paginas
+   por segundo sem erro. Os ajustes de servidor (Studio e meta no perfil `studio`, `AUTH_SESSION_STRATEGY=claims`,
+   Envoy checando o PostgREST pela porta) baixaram a mediana pela metade com 100 alunos (14,3 s para 7,5 s) e
+   para um terco com 30 (2,4 s para 0,75 s). Proximo passo proposto ao produtor, nao iniciado: cache do catalogo e menos
+   chamadas ao PostgREST e ao Auth por pagina no app.
 4. A virada de producao (docs/20 §14): webhook do Resend para `https://membros.bunker707.com.br/api/webhooks/resend`
    e `RESEND_WEBHOOK_SECRET` por `secrets-membros`; Hotmart e Ticto; conteudo (nada e copiado da nuvem).
 5. Opcional: igualar os modelos de e-mail do Supabase cloud (staging) ao `/auth/confirm` (docs/06).

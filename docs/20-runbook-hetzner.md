@@ -621,6 +621,21 @@ Monitores minimos (em qualquer um dos dois):
 
 Continuam valendo Sentry (erros do app, `SENTRY_DSN`) e PostHog (produto). Logs no servidor: `docker compose logs --since 1h app`, `... auth`, etc.; a Cloudflare mostra trafego e ataques no painel. O stack nao tem Logflare (aba de logs do Studio desligada): os logs ficam nos containers (rotacao 5 x 20 MB por container, configurada pelo bootstrap).
 
+### 12.1 Teste de carga (etapa `carga`, 19/10/2026, CX23 de 2 vCPU)
+
+Cenario pior que o real: cada aluno virtual abre home, curso, aula e minhas compras em ciclo, com 1 a 4 s entre uma pagina e outra (so o HTML; video e estaticos ficam na Bunny e na Cloudflare). Um aluno de verdade assistindo aula pede uma pagina a cada dezenas de segundos.
+
+| Rodada | Alunos | Mediana | p95 | Paginas/s | Erros |
+|---|---|---|---|---|---|
+| Antes (Studio ligado, sessao por `getUser`) | 30 | 2,4 s | 3,6 s | 4,9 | 0 |
+| Antes | 100 | 14,3 s | 15,8 s | 5,5 | 0 |
+| Studio fora e sessao por `claims` | 30 | 0,75 s | 2,1 s | 6,9 | 0 |
+| Os dois mais o Envoy checando o PostgREST pela porta | 100 | 7,5 s | 13,6 s | 8,4 | 0 |
+
+Leitura: o servidor atende cerca de 8 paginas por segundo; acima disso a fila cresce (carga 16 a 18 nos 2 vCPU com 100 alunos). Nenhum erro e nenhuma sessao perdida em todas as rodadas. Pico de CPU por container com 100 alunos, depois dos ajustes: Postgres 79%, app 63%, Auth 35%, Caddy 26%, PostgREST 23%, Envoy 17%. Cada pagina ainda faz cerca de 9 chamadas ao PostgREST (catalogo igual para todos e dados do aluno) e uma ao Auth (`getUser` das paginas protegidas, 5 consultas no banco); as consultas em si levam menos de 1 ms cada, o custo e o volume. Proximo ganho e no app (cache do catalogo e menos chamadas por pagina), nao no servidor.
+
+Como repetir: etapa `carga` com `opcoes` `VUS=30 DURACAO=2m PAUSA_MIN=1 PAUSA_MAX=4` ou `VUS=100 DURACAO=3m`. O k6 marca a etapa como falha quando o p95 passa de 2 s (o limite do roteiro); o resumo no fim do log vale mesmo assim.
+
 ---
 
 ## 13. Incidentes: o que fazer
