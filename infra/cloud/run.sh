@@ -48,6 +48,8 @@ case "$etapa" in
             if [ "$role" = "membros" ] || [ -n "${SKIP_MARKETING:-}" ]; then server="$MEMBROS_NAME"; else server="$MARKETING_NAME"; fi
             server_exists "$server" || { echo "  $server nao existe; pulando $role."; continue; }
             ip=$(server_ip4 "$server"); fw_open_ssh "$server"; wait_ssh "$DEPLOY_USER@$ip"
+            # Os scripts de backup do commit atual (o --add-key pode ser mais novo que o deploy no servidor).
+            sync_repo "$DEPLOY_USER@$ip"
             log "Senha de recuperacao do backup ($role)"
             backup_recovery_key "$DEPLOY_USER@$ip" "$role"
             fw_close_all
