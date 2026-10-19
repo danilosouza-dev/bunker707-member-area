@@ -3,6 +3,8 @@
 #   sh infra/scripts/smoke.sh
 # Confere, pelos enderecos publicos do .env: o app (/api/health e redirecionamento para /login), o Auth,
 # o PostgREST, o Storage e o Realtime do Supabase. Sai com erro no primeiro problema.
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 
@@ -19,7 +21,7 @@ check() {
     # check "nome" codigo-esperado url [curl args...]
     local name="$1" expected="$2" url="$3"; shift 3
     local code
-    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$@" "$url" 2>/dev/null || echo "000")
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$@" "$url" 2>/dev/null || true); [ -n "$code" ] || code=000
     # expected pode ter alternativas separadas por |
     if printf '%s' "$code" | grep -qE "^(${expected})$"; then
         printf '  ok   %-28s %s\n' "$name" "$code"
@@ -46,8 +48,13 @@ check "rest nega anon em tabela interna" 401 "$supabase_url/rest/v1/job_runs?sel
 check "rest le com a chave do servidor" 200 "$supabase_url/rest/v1/job_runs?select=id&limit=1" -H "apikey: $secret_key" -H "Authorization: Bearer $secret_key"
 check "storage /status" 200 "$supabase_url/storage/v1/status"
 # O gateway fecha /realtime/v1/api/tenants para todo mundo (correcao de seguranca do self-hosted 0.6.0):
-# o Realtime e conferido pelo healthcheck do proprio container.
+# o Realtime e conferido pelo healthcheck do proprio container. O primeiro teste dele so roda 30 s depois
+# da partida: recem-criado, "starting" ganha ate 90 s antes de virar falha.
 realtime_health=$(compose ps --format '{{.Health}}' realtime 2>/dev/null | head -n1)
+for _ in $(seq 30); do
+    [ "$realtime_health" = "starting" ] || break
+    sleep 3; realtime_health=$(compose ps --format '{{.Health}}' realtime 2>/dev/null | head -n1)
+done
 if [ "$realtime_health" = "healthy" ]; then
     printf '  ok   %-28s %s\n' "realtime (healthcheck)" "$realtime_health"
 else

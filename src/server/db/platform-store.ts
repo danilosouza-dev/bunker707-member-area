@@ -4,10 +4,11 @@ import "server-only";
 import { redactSecrets } from "@/lib/env-value";
 
 import { cache } from "react";
-import { unstable_noStore as noStore } from "next/cache";
+import { unstable_cache, unstable_noStore as noStore } from "next/cache";
 import { after } from "next/server";
-import type { AuthenticatedUser } from "@/server/auth/session";
+import type { SessionUser } from "@/server/auth/session";
 import { catalogScope, hasCourseScope } from "@/server/auth/roles";
+import { CATALOG_TAG, MEMBER_CATALOG_CACHE_KEY, MEMBER_CATALOG_REVALIDATE_SECONDS } from "@/server/catalog/cache-policy";
 import { getAdminAccessForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { persistImageAsset } from "@/server/db/media-assets";
@@ -761,28 +762,81 @@ function emptySupabaseResult() {
   return Promise.resolve({ data: [], error: null });
 }
 
+type MemberCatalogRows = {
+  contentItems: ContentItemRow[];
+  contentPageSettings: Array<{ content_id: string; settings: ContentPageSettings }>;
+  courseModules: CourseModuleRow[];
+  lessons: LessonRow[];
+  platformSettings: Array<{ key: string; updated_at?: string | null; value: unknown }>;
+};
+
+/** Linhas iguais para todos os alunos (so o publicado). So JSON sai daqui; erro de banco lanca e nao vai ao cache. */
+async function loadMemberCatalogRows(): Promise<MemberCatalogRows> {
+  const supabase = getSupabaseAdminClient();
+  const [contentItemsResult, contentSettingsResult, modulesResult, lessonsResult, settingsResult] = await Promise.all([
+    supabase
+      .from("content_items")
+      .select("*")
+      .eq("publication_status", "published")
+      .order("sort_order", { ascending: true }),
+    supabase.from("content_page_settings").select("*"),
+    supabase.from("course_modules").select("*").eq("status", "published").order("sort_order", { ascending: true }),
+    supabase.from("lessons").select("*").eq("status", "published").order("sort_order", { ascending: true }),
+    supabase.from("platform_settings").select("*")
+  ]);
+
+  await throwIfSupabaseError(contentItemsResult.error, "Erro lendo content_items");
+  await throwIfSupabaseError(contentSettingsResult.error, "Erro lendo content_page_settings");
+  await throwIfSupabaseError(modulesResult.error, "Erro lendo course_modules");
+  await throwIfSupabaseError(lessonsResult.error, "Erro lendo lessons");
+  await throwIfSupabaseError(settingsResult.error, "Erro lendo platform_settings");
+
+  return {
+    contentItems: (contentItemsResult.data ?? []) as ContentItemRow[],
+    contentPageSettings: (contentSettingsResult.data ?? []) as MemberCatalogRows["contentPageSettings"],
+    courseModules: (modulesResult.data ?? []) as CourseModuleRow[],
+    lessons: (lessonsResult.data ?? []) as LessonRow[],
+    platformSettings: (settingsResult.data ?? []) as MemberCatalogRows["platformSettings"]
+  };
+}
+
+// Cache do catalogo na area do aluno (docs/17 §2.3): eram 5 das 10 consultas de cada pagina no teste de
+// carga de 19/10/2026 (docs/20 §12.1). Toda gravacao de produto, modulo, aula, Vitrine, Destaque ou Marca
+// chama invalidateCatalog; o admin continua lendo direto do banco (includeAdminData). Acima de 2 MB o Next
+// nao guarda o item (aviso "items over 2MB" no log) e cada pagina volta a ler do banco: no staging, em
+// 19/10/2026, cada aula publicada pesava ~2 KB, entao o teto fica perto de 900 aulas.
+const loadMemberCatalogRowsCached = unstable_cache(loadMemberCatalogRows, [...MEMBER_CATALOG_CACHE_KEY], {
+  revalidate: MEMBER_CATALOG_REVALIDATE_SECONDS,
+  tags: [CATALOG_TAG]
+});
+
 async function readSupabaseDatabase({
   includeAdminData = true,
   userId
 }: ReadSupabaseDatabaseOptions = {}) {
   const supabase = getSupabaseAdminClient();
+  const memberCatalog = includeAdminData ? null : loadMemberCatalogRowsCached();
+  const memberCatalogResult = <Key extends keyof MemberCatalogRows>(key: Key) =>
+    memberCatalog!.then((rows) => ({ data: rows[key], error: null }));
   const cohortsQuery = includeAdminData
     ? supabase.from("cohorts").select("name").order("created_at", { ascending: true })
     : emptySupabaseResult();
   const contentItemsQuery = includeAdminData
     ? supabase.from("content_items").select("*").order("sort_order", { ascending: true })
-    : supabase
-      .from("content_items")
-      .select("*")
-      .eq("publication_status", "published")
-      .order("sort_order", { ascending: true });
+    : memberCatalogResult("contentItems");
+  const contentSettingsQuery = includeAdminData
+    ? supabase.from("content_page_settings").select("*")
+    : memberCatalogResult("contentPageSettings");
   // Admin le rascunhos, mas nunca o que foi excluido com "Desfazer" no admin v2 (status 'deleted').
   const modulesQuery = includeAdminData
     ? supabase.from("course_modules").select("*").neq("status", "deleted").order("sort_order", { ascending: true })
-    : supabase.from("course_modules").select("*").eq("status", "published").order("sort_order", { ascending: true });
+    : memberCatalogResult("courseModules");
   const lessonsQuery = includeAdminData
     ? supabase.from("lessons").select("*").neq("status", "deleted").order("sort_order", { ascending: true })
-    : supabase.from("lessons").select("*").eq("status", "published").order("sort_order", { ascending: true });
+    : memberCatalogResult("lessons");
+  const settingsQuery = includeAdminData
+    ? supabase.from("platform_settings").select("*")
+    : memberCatalogResult("platformSettings");
   const progressQuery = !includeAdminData && userId
     ? supabase.from("lesson_progress").select("*").eq("user_id", userId)
     : supabase.from("lesson_progress").select("*");
@@ -812,7 +866,7 @@ async function readSupabaseDatabase({
     settingsResult
   ] = await Promise.all([
     contentItemsQuery,
-    supabase.from("content_page_settings").select("*"),
+    contentSettingsQuery,
     modulesQuery,
     lessonsQuery,
     cohortsQuery,
@@ -821,7 +875,7 @@ async function readSupabaseDatabase({
     productCombosQuery,
     productComboItemsQuery,
     accessEntitlementsQuery,
-    supabase.from("platform_settings").select("*")
+    settingsQuery
   ]);
 
   for (const [result, context] of [
@@ -970,7 +1024,7 @@ const readMemberDatabase = cache(async (userId: string, userEmail: string) => {
   return staffProductIds.length > 0 ? { ...database, staffProductIds } : database;
 });
 
-function readDatabaseForUser(user?: AuthenticatedUser | string) {
+function readDatabaseForUser(user?: SessionUser | string) {
   const { email, userId } = getUserIdentity(user);
   return readMemberDatabase(userId ?? "", email ?? "");
 }
@@ -987,7 +1041,7 @@ function getAllContentItems(database: PlatformDatabase) {
   ];
 }
 
-function getUserIdentity(user?: AuthenticatedUser | string) {
+function getUserIdentity(user?: SessionUser | string) {
   if (!user) {
     return {};
   }
@@ -1041,7 +1095,7 @@ function isActiveEntitlement(entitlement: AccessEntitlementRecord) {
 }
 
 /** Entitlements sao a unica fonte de autorizacao (AGENTS.md): nada mais libera conteudo fechado. */
-function getUserAccessKeys(database: PlatformDatabase, user?: AuthenticatedUser | string) {
+function getUserAccessKeys(database: PlatformDatabase, user?: SessionUser | string) {
   const { userId } = getUserIdentity(user);
   const accessKeys = new Set<string>();
 
@@ -1296,7 +1350,7 @@ const emptyCompletedLessonIds: ReadonlySet<string> = new Set();
 
 function createMemberReleaseContext(
   database: PlatformDatabase,
-  user: AuthenticatedUser | string | undefined,
+  user: SessionUser | string | undefined,
   accessPreviewMode: AccessPreviewMode | undefined
 ): MemberReleaseContext {
   const { userId } = getUserIdentity(user);
@@ -1709,7 +1763,7 @@ function formatWatchProgressLabel(watchState: LessonWatchState, lesson: { durati
 function getContinueWatchingFromProgress(
   database: PlatformDatabase,
   accessPreviewMode: AccessPreviewMode | undefined,
-  user: AuthenticatedUser | string | undefined,
+  user: SessionUser | string | undefined,
   userAccessKeys: Set<string>
 ) {
   const { userId } = getUserIdentity(user);
@@ -1784,7 +1838,7 @@ function getContinueWatchingFromProgress(
 function getHomeRows(
   database: PlatformDatabase,
   accessPreviewMode?: AccessPreviewMode,
-  user?: AuthenticatedUser | string
+  user?: SessionUser | string
 ): HomeRow[] {
   const { userId } = getUserIdentity(user);
   const savedItems = getSavedItemSet(database, userId);
@@ -1807,7 +1861,7 @@ function resolveConfiguredHomeRows(
   database: PlatformDatabase,
   sections: HomeSectionConfig[],
   accessPreviewMode: AccessPreviewMode | undefined,
-  user: AuthenticatedUser | string | undefined,
+  user: SessionUser | string | undefined,
   context?: {
     continueWatchingItems: ContentItem[];
     savedItems: Set<string>;
@@ -1959,7 +2013,7 @@ function getHomeModalStructures(
   database: PlatformDatabase,
   rows: HomeRow[],
   accessPreviewMode: AccessPreviewMode | undefined,
-  user: AuthenticatedUser | string | undefined,
+  user: SessionUser | string | undefined,
   release: MemberReleaseContext
 ): Record<string, ContentModalStructure> {
   // Inclui os cursos internos da fileira de modulos (structureItems): eles tambem abrem o modal.
@@ -2012,7 +2066,7 @@ function getModulesForContent(database: PlatformDatabase, item: ContentItem) {
 }
 
 /** Nome do aluno: o do perfil (profiles.full_name, editavel no admin) e, sem perfil, o da conta. */
-function getStudentForUser(database: PlatformDatabase, user?: AuthenticatedUser, profileFullName?: string | null): PlatformStudent {
+function getStudentForUser(database: PlatformDatabase, user?: SessionUser, profileFullName?: string | null): PlatformStudent {
   if (!user) {
     return database.student;
   }
@@ -2199,7 +2253,7 @@ function applyLessonProgress(database: PlatformDatabase, contentId: string, modu
   });
 }
 
-export async function getAppShellData(user?: AuthenticatedUser) {
+export async function getAppShellData(user?: SessionUser) {
   const [database, adminAccess, profile] = await Promise.all([
     readDatabaseForUser(user),
     user ? getAdminAccessForUser(user.id) : Promise.resolve(null),
@@ -2215,7 +2269,7 @@ export async function getAppShellData(user?: AuthenticatedUser) {
   };
 }
 
-export async function getHomePageData(accessPreviewMode?: AccessPreviewMode, user?: AuthenticatedUser | string) {
+export async function getHomePageData(accessPreviewMode?: AccessPreviewMode, user?: SessionUser | string) {
   const database = await readDatabaseForUser(user);
   const release = createMemberReleaseContext(database, user, accessPreviewMode);
   const homeRows = getHomeRows(database, accessPreviewMode, user).filter((row) => row.items.length > 0)
@@ -2245,14 +2299,14 @@ function withStudentProgress(row: HomeRow, structures: Record<string, ContentMod
   };
 }
 
-export async function getPurchasesPageData(accessPreviewMode?: AccessPreviewMode, user?: AuthenticatedUser | string) {
+export async function getPurchasesPageData(accessPreviewMode?: AccessPreviewMode, user?: SessionUser | string) {
   const database = await readDatabaseForUser(user);
   return {
     purchasedProducts: getPurchasedProducts(database, accessPreviewMode, getUserAccessKeys(database, user))
   };
 }
 
-export async function getFavoritesPageData(accessPreviewMode?: AccessPreviewMode, user?: AuthenticatedUser | string) {
+export async function getFavoritesPageData(accessPreviewMode?: AccessPreviewMode, user?: SessionUser | string) {
   const database = await readDatabaseForUser(user);
   const { userId } = getUserIdentity(user);
   const savedItems = getSavedItemSet(database, userId);
@@ -2390,7 +2444,7 @@ function toMemberLibraryModules(
 
 export async function getMemberLibrary(
   accessPreviewMode?: AccessPreviewMode,
-  user?: AuthenticatedUser | string
+  user?: SessionUser | string
 ): Promise<MemberLibrary> {
   const database = await readDatabaseForUser(user);
   const { userId } = getUserIdentity(user);
@@ -2467,7 +2521,7 @@ export async function getLessonRouteParams() {
 
 export async function getContentPageData(
   contentId: string,
-  user?: AuthenticatedUser | string,
+  user?: SessionUser | string,
   accessPreviewMode?: AccessPreviewMode
 ) {
   const database = await readDatabaseForUser(user);
@@ -2526,7 +2580,7 @@ export async function getContentPageData(
 export async function getLessonPageData(
   contentId: string,
   moduleId: string,
-  user?: AuthenticatedUser | string,
+  user?: SessionUser | string,
   accessPreviewMode?: AccessPreviewMode
 ) {
   const database = await readDatabaseForUser(user);

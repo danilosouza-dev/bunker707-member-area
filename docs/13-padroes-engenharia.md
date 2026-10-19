@@ -6,7 +6,8 @@ O projeto deve viver em um unico repositorio privado no GitHub, contendo a area 
 
 ## Branch principal
 
-- `main` e a branch principal.
+- `main` e a branch principal e e a producao: so ela vai para o servidor da Hetzner (etapa `deploy-membros`, que recusa outra branch).
+- `dev` e o ambiente de teste: a Vercel a publica com o Supabase da nuvem, so com contas criadas pela equipe; tudo passa por ela antes da `main` (ambientes e fluxo em `CONTRIBUTING.md`, decisao de 19/10/2026).
 - Mudancas devem entrar por branches curtas e pull requests.
 - A branch `main` deve estar sempre em estado publicavel.
 - GitHub branch protection deve ser habilitado quando o plano da conta permitir; ate la, a protecao fica no processo operacional de PR, CI e verificacao local.

@@ -1,0 +1,156 @@
+# Mautic 7 (marketing: captura, segmentos, campanhas, e-mails) da Bunker707, num servidor proprio
+# (docs/19 §5 e docs/20, "Mautic"): MySQL proprio, os tres papeis do Mautic (web, cron, worker) e o Caddy
+# na frente com HTTPS automatico. Nenhuma porta alem de 80/443 do Caddy sai do servidor. MySQL sem binlog
+# (sem replica nem PITR; o backup e o dump diario).
+#
+# Uso (servidor proprio ou ensaio local):
+#   sh infra/mautic/generate-secrets.sh --local                                   # ou --domain ... em producao
+#   docker compose -f infra/mautic/docker-compose.yml --profile borda up -d
+#   sh infra/mautic/scripts/install.sh                                            # cria o admin sem o instalador web
+#   sh infra/mautic/scripts/smoke.sh
+# Ao lado do stack principal (mesmo servidor, sem Caddy proprio): compose.colocado.yml, ver .env.example.
+#
+# A configuracao do Mautic entra por MAUTIC_CONFIG_PARAMETERS (JSON que o Mautic mescla por cima do
+# config/local.php; e o mecanismo do ParameterLoader oficial): endereco publico, remetente, DSN do mailer
+# (Resend por SMTP na 587 hoje; Amazon SES depois trocando so MAUTIC_MAILER_DSN no .env) e os proxies
+# confiaveis (o Caddy, na rede do compose, repassa o IP real do visitante em X-Forwarded-For). Os proxies
+# so valem em config/parameters_local.php, que scripts/install.sh grava a partir deste JSON.
+
+name: bunker707-mautic
+
+x-mautic-volumes: &mautic-volumes
+  - ./volumes/config:/var/www/html/config:z
+  - ./volumes/logs:/var/www/html/var/logs:z
+  - ./volumes/media/files:/var/www/html/docroot/media/files:z
+  - ./volumes/media/images:/var/www/html/docroot/media/images:z
+  # Crontab versionado (cron/mautic): a imagem usa este arquivo no lugar do modelo dela.
+  - ./cron:/opt/mautic/cron:z
+
+x-mautic-env: &mautic-env
+  MAUTIC_DB_HOST: mautic-db
+  MAUTIC_DB_PORT: "3306"
+  MAUTIC_DB_DATABASE: ${MAUTIC_DB_DATABASE:-mautic}
+  MAUTIC_DB_USER: ${MAUTIC_DB_USER:-mautic}
+  MAUTIC_DB_PASSWORD: ${MAUTIC_DB_PASSWORD}
+  # Filas de envio e de hits no proprio MySQL (Doctrine), separadas; o container mautic-worker consome.
+  # A fila failed guarda o que esgotou as tentativas (sem ela o Mautic usa null:// e o e-mail some).
+  MAUTIC_MESSENGER_DSN_EMAIL: doctrine://default?queue_name=email
+  MAUTIC_MESSENGER_DSN_HIT: doctrine://default?queue_name=hit
+  MAUTIC_MESSENGER_DSN_FAILED: doctrine://default?queue_name=failed
+  # JSON numa linha so (aspas simples do YAML; o compose interpola as variaveis dentro dele).
+  MAUTIC_CONFIG_PARAMETERS: '{"site_url":"${MAUTIC_PUBLIC_URL}","mailer_dsn":"${MAUTIC_MAILER_DSN:-null://null}","mailer_from_email":"${MAUTIC_MAILER_FROM_EMAIL}","mailer_from_name":"${MAUTIC_MAILER_FROM_NAME:-Bunker707}","trusted_proxies":${MAUTIC_TRUSTED_PROXIES:-["10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]},"default_timezone":"${MAUTIC_DEFAULT_TIMEZONE:-America/Sao_Paulo}"}'
+  PHP_INI_VALUE_DATE_TIMEZONE: UTC
+  PHP_INI_VALUE_MEMORY_LIMIT: ${MAUTIC_PHP_MEMORY_LIMIT:-512M}
+
+services:
+
+  # Banco proprio do Mautic (ele so roda em MySQL/MariaDB). Sem porta publicada: scripts/backup.sh exporta
+  # por `docker compose exec`. performance_schema desligado e buffer pool de 256 MB: instancia pequena.
+  mautic-db:
+    container_name: bunker707-mautic-db
+    image: mysql:8.4.11
+    restart: unless-stopped
+    command:
+      [
+        "mysqld",
+        "--character-set-server=utf8mb4",
+        "--collation-server=utf8mb4_unicode_ci",
+        "--innodb-buffer-pool-size=256M",
+        "--performance-schema=OFF",
+        "--disable-log-bin"
+      ]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysqladmin ping -h 127.0.0.1 -u $$MYSQL_USER --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MAUTIC_DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MAUTIC_DB_DATABASE:-mautic}
+      MYSQL_USER: ${MAUTIC_DB_USER:-mautic}
+      MYSQL_PASSWORD: ${MAUTIC_DB_PASSWORD}
+    volumes:
+      - mautic-db-data:/var/lib/mysql
+
+  # Interface web e API (Apache + PHP). Sem porta publicada: so o Caddy chega nele (mautic:80). Primeiro
+  # acesso: scripts/install.sh (o instalador web fica fechado no Caddy fora de MAUTIC_ADMIN_IPS).
+  mautic:
+    container_name: bunker707-mautic
+    image: mautic/mautic:7.2.1-apache
+    restart: unless-stopped
+    depends_on:
+      mautic-db:
+        condition: service_healthy
+    healthcheck:
+      # A raiz responde com redirecionamento (302) antes e depois da instalacao.
+      test: ["CMD-SHELL", "curl -sS -o /dev/null -w '%{http_code}' http://localhost/ | grep -qE '^(200|30[0-9])$'"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    environment:
+      <<: *mautic-env
+      DOCKER_MAUTIC_ROLE: mautic_web
+      DOCKER_MAUTIC_LOAD_TEST_DATA: "false"
+    volumes: *mautic-volumes
+
+  # Tarefas agendadas (segmentos, campanhas, envios agendados, importacoes): crontab em cron/mautic.
+  mautic-cron:
+    container_name: bunker707-mautic-cron
+    image: mautic/mautic:7.2.1-apache
+    restart: unless-stopped
+    depends_on:
+      mautic:
+        condition: service_healthy
+    environment:
+      <<: *mautic-env
+      DOCKER_MAUTIC_ROLE: mautic_cron
+    volumes: *mautic-volumes
+
+  # Consumidores das filas (e-mail, hits, falhas). Um processo por fila cabe em 4 GB; MAUTIC_WORKERS sobe
+  # quando o volume de envio crescer.
+  mautic-worker:
+    container_name: bunker707-mautic-worker
+    image: mautic/mautic:7.2.1-apache
+    restart: unless-stopped
+    depends_on:
+      mautic:
+        condition: service_healthy
+    environment:
+      <<: *mautic-env
+      DOCKER_MAUTIC_ROLE: mautic_worker
+      DOCKER_MAUTIC_WORKERS_CONSUME_EMAIL: ${MAUTIC_WORKERS:-1}
+      DOCKER_MAUTIC_WORKERS_CONSUME_HIT: ${MAUTIC_WORKERS:-1}
+      DOCKER_MAUTIC_WORKERS_CONSUME_FAILED: ${MAUTIC_WORKERS:-1}
+    volumes: *mautic-volumes
+
+  # Borda do servidor de marketing (perfil `borda`): TLS automatico e o unico servico com porta publica.
+  # Na colocacao com o stack principal o Caddy de la faz esse papel e este perfil fica desligado.
+  caddy:
+    container_name: bunker707-mautic-caddy
+    image: caddy:2.11.7-alpine
+    profiles: ["borda"]
+    restart: unless-stopped
+    ports:
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTP_PORT:-80}:80
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443
+      - ${CADDY_BIND:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443/udp
+    depends_on:
+      mautic:
+        condition: service_started
+    environment:
+      MAUTIC_SITE_ADDRESS: ${MAUTIC_SITE_ADDRESS}
+      MAUTIC_ADMIN_IPS: ${MAUTIC_ADMIN_IPS:-127.0.0.1/32}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../compose/caddy/cloudflare-trusted-proxies.caddyfile:/etc/caddy/cloudflare-trusted-proxies.caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  # Dados do MySQL (scripts/backup.sh exporta por mysqldump; nunca `docker compose down -v`).
+  mautic-db-data:
+  caddy-data:
+  caddy-config:

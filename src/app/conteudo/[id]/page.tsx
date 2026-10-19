@@ -21,7 +21,7 @@ import {
   getAppShellData,
   getContentPageData
 } from "@/server/db/platform-store";
-import { requirePageUser } from "@/server/auth/guards";
+import { requireStudentPageUser } from "@/server/auth/guards";
 import type {
   ContentItem,
   ContentPageHeroConfig,
@@ -173,7 +173,7 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
   const { id } = await params;
   const resolvedSearchParams = await searchParams;
   const requestedAccessPreviewMode = normalizeAccessPreviewMode(resolvedSearchParams?.accessPreview);
-  const user = await requirePageUser(`/conteudo/${id}`);
+  const user = await requireStudentPageUser(`/conteudo/${id}`);
   const shellData = await getAppShellData(user);
   const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
   const contentPageData = await getContentPageData(id, user, accessPreviewMode);

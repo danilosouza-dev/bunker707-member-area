@@ -1,0 +1,9 @@
+# Mautic no MESMO servidor do stack principal (plano B de docs/19 §5, quando nao houver um servidor pequeno
+# disponivel para ele): entra na rede do compose principal, para o Caddy de la (MAUTIC_SITE_ADDRESS no
+# infra/compose/.env) chegar em mautic:80, e o perfil `borda` (Caddy proprio) fica desligado.
+#   docker compose -f infra/mautic/docker-compose.yml -f infra/mautic/compose.colocado.yml up -d
+# Nos scripts: BUNKER707_COMPOSE_OVERRIDE=infra/mautic/compose.colocado.yml sh infra/mautic/scripts/install.sh
+networks:
+  default:
+    name: bunker707_default
+    external: true

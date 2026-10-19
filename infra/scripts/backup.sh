@@ -4,6 +4,7 @@
 #   sh infra/scripts/backup.sh --init          cria chave SSH, alias `storagebox` e o repositorio restic
 #   sh infra/scripts/backup.sh --check         backup + `restic check` (integridade; rode toda semana)
 #   sh infra/scripts/backup.sh --install-timer instala infra/systemd/bunker707-backup.{service,timer}
+#   sh infra/scripts/backup.sh --add-key=ARQ  cadastra a senha do arquivo como segunda chave do repositorio (recuperacao)
 #
 # O que entra em cada snapshot:
 #   roles.sql           pg_dumpall --roles-only (papeis e senhas; so por partes mesmo, como o dump da CLI)
@@ -17,6 +18,8 @@
 # pelo restic (criptografado antes de deixar o servidor). Retencao: BACKUP_KEEP_DAILY snapshots diarios.
 # Por que nao `supabase db dump`: ele exclui os esquemas que o Auth e o Storage administram (pensado para
 # migrar entre projetos da nuvem); num servidor proprio queremos o banco inteiro. docs/20, "Backup".
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 
@@ -27,7 +30,8 @@ for arg in "$@"; do
         --init) mode="init" ;;
         --install-timer) mode="timer" ;;
         --check) do_check=1 ;;
-        -h|--help) sed -n 2,22p "$0"; exit 0 ;;
+        --add-key=*) mode="add-key"; recovery_key_file="${arg#*=}" ;;
+        -h|--help) sed -n 2,23p "$0"; exit 0 ;;
         *) die "opcao desconhecida: $arg" ;;
     esac
 done
@@ -38,11 +42,11 @@ RESTIC_REPOSITORY=$(require_env_value RESTIC_REPOSITORY)
 RESTIC_PASSWORD=$(require_env_value RESTIC_PASSWORD)
 keep_daily=$(env_value BACKUP_KEEP_DAILY 30)
 heartbeat_url=$(env_value BACKUP_HEARTBEAT_URL)
-if [ "$(id -u)" = "0" ]; then
-    backup_root="${BUNKER707_BACKUP_DIR:-/var/backups/bunker707}"
-else
-    backup_root="${BUNKER707_BACKUP_DIR:-$HOME/.bunker707-backups}"
-fi
+# Pasta das exportacoes: /var/backups/bunker707 (criada pelo --install-timer, dona = usuario do timer) ou,
+# fora do servidor, uma pasta no HOME. Os scripts de infra/cloud leem /var/backups/bunker707/ultimo-sucesso.
+if [ -n "${BUNKER707_BACKUP_DIR:-}" ]; then backup_root="$BUNKER707_BACKUP_DIR"
+elif [ "$(id -u)" = "0" ] || [ -w /var/backups/bunker707 ]; then backup_root=/var/backups/bunker707
+else backup_root="$HOME/.bunker707-backups"; fi
 
 # restic instalado, ou a imagem oficial (so para repositorio em disco local, como no ensaio).
 restic_bin() {
@@ -104,6 +108,7 @@ init_repo() {
 install_timer() {
     [ "$(id -u)" = "0" ] || die "--install-timer precisa de root (sudo)."
     local unit_dir="$REPO_ROOT/infra/systemd"
+    install -d -m 700 -o "${SUDO_USER:-deploy}" -g "${SUDO_USER:-deploy}" /var/backups/bunker707
     sed "s|__REPO_ROOT__|$REPO_ROOT|g; s|__RUN_AS__|${SUDO_USER:-deploy}|g" "$unit_dir/bunker707-backup.service" > /etc/systemd/system/bunker707-backup.service
     cp "$unit_dir/bunker707-backup.timer" /etc/systemd/system/bunker707-backup.timer
     systemctl daemon-reload
@@ -153,6 +158,7 @@ run_backup() {
 }
 
 case "$mode" in
+    add-key) restic_add_recovery_key "$recovery_key_file" ;;
     init) init_repo ;;
     timer) install_timer ;;
     backup) run_backup ;;

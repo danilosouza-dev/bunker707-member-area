@@ -65,3 +65,24 @@ test("aluna abre o curso pela home e chega na aula com player, playlist e botao 
   await page.getByRole("button", { name: "Abrir materiais" }).click();
   await expect(page.getByRole("tab", { name: /Materiais/ })).toHaveAttribute("aria-selected", "true");
 });
+
+test("voltar do navegador da aula ate a home: cada pagina volta sem deixar o aviso de carregamento por cima", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { level: 2, name: "Minhas compras" })).toBeVisible();
+  await page.getByRole("link", { name: `Abrir ${curso.titulo}` }).click();
+  await expect(page).toHaveURL(`/conteudo/${curso.id}`);
+  await page.getByRole("link", { name: "Abrir Módulo 1: Fundamentos" }).first().click();
+  await expect(page.getByRole("heading", { level: 1, name: "Aula 1: O que é um agente" })).toBeVisible();
+
+  // O Next restaura a pagina anterior do cache de historico; o aviso de navegacao do app tem de sumir junto.
+  // Antes da correcao de 19/10/2026 ele ficava por cima da pagina pronta ate o timeout (15 s + 4 s).
+  const aviso = page.locator("[data-navigation-feedback]");
+  await page.goBack();
+  await expect(page).toHaveURL(`/conteudo/${curso.id}`);
+  await expect(aviso).toBeHidden({ timeout: 3_000 });
+
+  await page.goBack();
+  await expect(page).toHaveURL("/");
+  await expect(page.getByRole("heading", { level: 2, name: "Minhas compras" })).toBeVisible();
+  await expect(aviso).toBeHidden({ timeout: 3_000 });
+});

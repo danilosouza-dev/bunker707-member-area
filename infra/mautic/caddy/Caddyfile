@@ -1,0 +1,43 @@
+# Borda do servidor de marketing (infra/mautic/docker-compose.yml, servico caddy, perfil `borda`).
+#   MAUTIC_SITE_ADDRESS  hostname do Mautic (dominio puro = HTTPS automatico; http:// = ensaio local)
+#   MAUTIC_ADMIN_IPS     quem pode abrir /installer; o resto do site e publico (formularios, rastreio,
+#                        descadastro, paginas) e o login do Mautic tem a propria senha
+# O Mautic (Symfony) le o IP do visitante em X-Forwarded-For e confia no Caddy (trusted_proxies = rede do
+# compose, em MAUTIC_CONFIG_PARAMETERS). O Caddy manda o IP real ({client_ip}, que atras da Cloudflare vem
+# de CF-Connecting-IP) em vez de encadear o IP da Cloudflare; X-Forwarded-Proto https ja vai por padrao.
+
+{
+	email {$ACME_EMAIL}
+	servers {
+		import /etc/caddy/cloudflare-trusted-proxies.caddyfile
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
+}
+
+(mautic_upstream) {
+	reverse_proxy mautic:80 {
+		header_up X-Forwarded-For {client_ip}
+	}
+}
+
+{$MAUTIC_SITE_ADDRESS} {
+	header -Server
+	encode zstd gzip
+
+	# O instalador web aceitaria o primeiro visitante como administrador. Fica fechado fora da allowlist;
+	# a instalacao e feita por infra/mautic/scripts/install.sh, sem passar por ele.
+	@instalador_permitido {
+		path /installer /installer/*
+		client_ip {$MAUTIC_ADMIN_IPS}
+	}
+	@instalador path /installer /installer/*
+	handle @instalador_permitido {
+		import mautic_upstream
+	}
+	handle @instalador {
+		respond 403
+	}
+	handle {
+		import mautic_upstream
+	}
+}

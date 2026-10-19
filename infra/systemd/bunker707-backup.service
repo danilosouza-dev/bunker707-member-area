@@ -9,6 +9,7 @@ Wants=network-online.target
 Type=oneshot
 User=__RUN_AS__
 WorkingDirectory=__REPO_ROOT__
+Environment=BUNKER707_BACKUP_DIR=/var/backups/bunker707
 ExecStart=/usr/bin/env bash __REPO_ROOT__/infra/scripts/backup.sh
 Nice=10
 IOSchedulingClass=best-effort

@@ -30,3 +30,7 @@ tests/e2e/.auth/
 
 # backups locais
 *.bundle
+
+# Python (scripts de infra)
+__pycache__/
+*.pyc

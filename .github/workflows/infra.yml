@@ -1,0 +1,137 @@
+name: Infra (Hetzner)
+
+# Bracos da operacao na Hetzner e na Cloudflare, disparados a mao (ou pela IA, pela API do GitHub) com os
+# tokens guardados como segredos do repositorio: HCLOUD_TOKEN e CLOUDFLARE_API_TOKEN. Cada etapa e um
+# script idempotente de infra/cloud (docs/20, "Sessao na nuvem"). Nada roda em push.
+#
+# Segredos nunca entram pelos inputs: a chave do Resend e afins viajam num envelope cifrado para a chave
+# RSA do servidor (infra/cloud/envelope.sh), que so ele abre.
+
+on:
+  # Push que muda este arquivo so REGISTRA o workflow no GitHub (um workflow novo numa branch nao aparece
+  # para disparo manual antes de ter rodado uma vez); o job de infra so roda por workflow_dispatch.
+  push:
+    # Sem `branches`, um push de tag ignora o filtro de paths e registraria o workflow a toa.
+    branches: ["**"]
+    paths:
+      - .github/workflows/infra.yml
+  workflow_dispatch:
+    inputs:
+      etapa:
+        description: "Etapa de infra/cloud/run.sh"
+        type: choice
+        required: true
+        default: status
+        options:
+          - plan
+          - provision
+          - deploy-membros
+          - deploy-marketing
+          - secrets-membros
+          - secrets-marketing
+          - equipe
+          - status
+          - status-ssh
+          - backup-membros
+          - backup-marketing
+          - exec-membros
+          - exec-marketing
+          - snapshot
+          - restaurar
+          - fechar-ssh
+          - chave-backup
+          - carga
+      opcoes:
+        description: "CHAVE=VALOR separados por espaco (ex.: MEMBROS_TYPE=cx33 PRODUCER_IP=203.0.113.10 SKIP_MARKETING=1)"
+        type: string
+        required: false
+        default: ""
+      payload:
+        description: "secrets-*: envelope cifrado (base64). exec-*: comando a rodar no servidor, como deploy, em /opt/bunker707."
+        type: string
+        required: false
+        default: ""
+
+# Nada no nivel do workflow: o job `registrar` (push) nao recebe permissao nem entra na fila da infra.
+permissions: {}
+
+jobs:
+  registrar:
+    name: Registrar o workflow
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Workflow registrado para disparo manual (workflow_dispatch)."
+
+  infra:
+    name: ${{ inputs.etapa }}
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    # Uma etapa por vez: duas rodando juntas disputariam o firewall e o .env. No job (e nao no workflow) para
+    # um push deste arquivo nao cancelar um disparo que esta na fila.
+    concurrency:
+      group: infra-hetzner
+      cancel-in-progress: false
+    # Os tokens ficam so nos passos que rodam os scripts deste repositorio; as actions de terceiros (fixadas
+    # por commit) nunca os veem.
+    env:
+      ETAPA: ${{ inputs.etapa }}
+      OPCOES: ${{ inputs.opcoes }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.11.0
+
+      - name: Buildx
+        if: inputs.etapa == 'deploy-membros'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Fluxo (CONTRIBUTING.md): tarefa -> dev (teste na Vercel) -> main -> servidor. Codigo so vai para o
+      # servidor a partir da main; as outras etapas (status, exec, backup, carga) rodam de qualquer branch.
+      - name: Deploy so da main
+        if: startsWith(inputs.etapa, 'deploy-')
+        run: |
+          [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "::error::$ETAPA so roda na main (recebido: $GITHUB_REF). Fluxo: tarefa -> dev (teste na Vercel) -> main -> servidor."; exit 1; }
+
+      - name: Segredos presentes?
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          [ -n "$HCLOUD_TOKEN" ] || { echo "::error::Segredo HCLOUD_TOKEN ausente (Settings > Secrets and variables > Actions)."; exit 1; }
+          case "$ETAPA" in provision|snapshot|restaurar) [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Segredo CLOUDFLARE_API_TOKEN ausente."; exit 1; } ;; esac
+
+      - name: ${{ inputs.etapa }}
+        # Abaixo dos 60 minutos do job, para o passo final sempre ter tempo de rodar.
+        timeout-minutes: 50
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAYLOAD: ${{ (startsWith(inputs.etapa, 'secrets-') && inputs.payload) || '' }}
+          COMANDO: ${{ (startsWith(inputs.etapa, 'exec-') && inputs.payload) || '' }}
+        run: bash infra/cloud/run.sh "$ETAPA"
+
+      # Cancelamento ou timeout matam o script sem rodar o trap que fecha a porta 22 (o runner so sinaliza o
+      # shell do passo). Aqui: TERM nos orfaos (o trap deles fecha) e fechar-ssh para o que ficou anotado.
+      - name: Fechar o SSH (sempre)
+        if: always()
+        timeout-minutes: 5
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          if pkill -TERM -f 'infra/cloud/'; then
+              for _ in $(seq 30); do pgrep -f 'infra/cloud/' >/dev/null || break; sleep 1; done
+          fi
+          bash infra/cloud/run.sh fechar-ssh

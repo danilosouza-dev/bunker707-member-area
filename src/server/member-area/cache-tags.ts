@@ -4,8 +4,9 @@
 // - Login (/login): leitura em unstable_cache com MEMBER_AREA_LOGIN_TAG. O loader tambem leva a tag
 //   do catalogo ("catalog"), porque a logo do login vem da Marca e a rota da Marca
 //   (PUT /api/admin/appearance) ja invalida o catalogo.
-// - Home do aluno (destaque e vitrine): hoje e lida sem cache (force-dynamic); toda gravacao chama
-//   invalidateCatalog para o dia em que a area do aluno passar a ler do cache do catalogo.
+// - Home do aluno (destaque e vitrine) e demais paginas de conteudo: o catalogo publicado e o
+//   platform_settings vem do cache com a tag do catalogo (platform-store, desde 19/10/2026); toda
+//   gravacao chama invalidateCatalog.
 
 import { CATALOG_TAG } from "../catalog/cache-policy";
 

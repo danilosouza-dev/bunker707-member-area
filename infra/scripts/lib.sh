@@ -7,8 +7,10 @@ set -euo pipefail
 
 INFRA_SCRIPTS_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$INFRA_SCRIPTS_DIR/../.." && pwd)
-COMPOSE_DIR="$REPO_ROOT/infra/compose"
-COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"
+# Por padrao o stack principal (infra/compose). Os scripts do Mautic (infra/mautic/scripts) apontam
+# BUNKER707_COMPOSE_FILE para o compose deles; BUNKER707_COMPOSE_OVERRIDE acrescenta um -f (colocacao).
+COMPOSE_FILE="${BUNKER707_COMPOSE_FILE:-$REPO_ROOT/infra/compose/docker-compose.yml}"
+COMPOSE_DIR=$(cd -- "$(dirname -- "$COMPOSE_FILE")" && pwd)
 ENV_FILE="${BUNKER707_ENV_FILE:-$COMPOSE_DIR/.env}"
 SUPABASE_CLI_VERSION="${SUPABASE_CLI_VERSION:-2.121.0}"
 
@@ -16,10 +18,10 @@ log()  { printf '==> %s\n' "$*"; }
 warn() { printf 'AVISO: %s\n' "$*" >&2; }
 die()  { printf 'ERRO: %s\n' "$*" >&2; exit 1; }
 
-compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+compose() { docker compose -f "$COMPOSE_FILE" ${BUNKER707_COMPOSE_OVERRIDE:+-f "$BUNKER707_COMPOSE_OVERRIDE"} "$@"; }
 
 require_env_file() {
-    [ -f "$ENV_FILE" ] || die "Nao achei $ENV_FILE. Gere com: sh infra/compose/generate-secrets.sh (--local ou --domain ...)."
+    [ -f "$ENV_FILE" ] || die "Nao achei $ENV_FILE. Gere com: sh $(basename "$COMPOSE_DIR")/generate-secrets.sh (--local ou --domain ...) em infra/."
 }
 
 # env_value CHAVE [padrao]: valor da chave no .env (sem aspas externas), ou o padrao.
@@ -85,3 +87,19 @@ supabase_cli() {
 
 # Caminho do repositorio como o compose ve (para mensagens).
 project_name() { compose config --format json 2>/dev/null | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["name"])' 2>/dev/null || echo bunker707; }
+
+# Cadastra no repositorio restic (RESTIC_REPOSITORY, aberto com RESTIC_PASSWORD) uma segunda senha, lida do
+# arquivo: a de recuperacao derivada do HCLOUD_TOKEN (infra/cloud/deploy-key.mjs --secret), que abre o backup
+# mesmo sem o .env do servidor. Idempotente: se a senha ja abre o repositorio, nao faz nada.
+restic_add_recovery_key() {
+    local file="$1"
+    [ -s "$file" ] || die "Arquivo da senha de recuperacao vazio ou ausente: $file"
+    command -v restic >/dev/null 2>&1 || die "restic nao encontrado (bootstrap.sh instala no servidor)."
+    if env -u RESTIC_PASSWORD restic --password-file "$file" cat config >/dev/null 2>&1; then
+        log "Senha de recuperacao ja cadastrada em $RESTIC_REPOSITORY."
+    else
+        restic key add --new-password-file "$file" >/dev/null
+        env -u RESTIC_PASSWORD restic --password-file "$file" cat config >/dev/null 2>&1 || die "A senha de recuperacao nao abriu $RESTIC_REPOSITORY depois de cadastrada."
+        log "Senha de recuperacao cadastrada em $RESTIC_REPOSITORY."
+    fi
+}

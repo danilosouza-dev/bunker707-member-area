@@ -1,10 +1,10 @@
 import { PostHogAnalytics } from "@/components/analytics/posthog-analytics";
-import { getAuthenticatedUser } from "@/server/auth/session";
+import { getSessionUser } from "@/server/auth/session";
 
-// Server Component: reaproveita o getUser() memoizado por request (React.cache), entao paginas protegidas
-// nao pagam uma segunda validacao. So o id interno vai ao navegador; e-mail e nome ficam no servidor.
+// Server Component: reaproveita a sessao memoizada por request (React.cache, getSessionUser: claims do JWT
+// ou getUser), entao paginas protegidas nao pagam outra validacao. So o id interno vai ao navegador.
 export async function PostHogIdentity() {
-  const user = await getAuthenticatedUser();
+  const user = await getSessionUser();
 
   return <PostHogAnalytics userId={user?.id ?? null} />;
 }

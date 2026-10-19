@@ -5,6 +5,8 @@
 # Conecta direto no banco (127.0.0.1:POSTGRES_DIRECT_PORT, usuario postgres), como `supabase db push`
 # faz no projeto da nuvem; o historico fica em supabase_migrations.schema_migrations. Roda em qualquer
 # maquina onde o stack esteja no ar (servidor ou ensaio local).
+# Rodou com `sh` (dash no Ubuntu)? Volta para o bash: os scripts usam pipefail, arrays e BASH_SOURCE.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 
 . "$(dirname -- "$0")/lib.sh"
 

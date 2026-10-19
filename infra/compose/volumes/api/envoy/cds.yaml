@@ -49,13 +49,15 @@ resources:
                   socket_address:
                     address: rest
                     port_value: 3000
+    # Desvio do upstream (UPSTREAM.md): checagem so de porta. O GET / do PostgREST monta o OpenAPI com
+    # consultas ao catalogo (~150 ms de banco cada); a cada 5 s era a consulta mais cara do teste de carga
+    # de 19/10/2026, e com o banco ocupado passaria do timeout de 2 s e tiraria a API do ar (503).
     health_checks:
       - timeout: 2s
         interval: 5s
         unhealthy_threshold: 3
         healthy_threshold: 2
-        http_health_check:
-          path: /
+        tcp_health_check: {}
     circuit_breakers:
       thresholds:
         - priority: DEFAULT

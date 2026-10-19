@@ -4,7 +4,7 @@ import { LessonExperience } from "@/components/lesson-experience";
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { getAppShellData, getLessonPageData } from "@/server/db/platform-store";
-import { requirePageUser } from "@/server/auth/guards";
+import { requireStudentPageUser } from "@/server/auth/guards";
 
 type LessonPageProps = {
   params: Promise<{
@@ -26,7 +26,7 @@ export default async function LessonPage({ params, searchParams }: LessonPagePro
   const requestedLessonId = Array.isArray(resolvedSearchParams?.lessonId)
     ? resolvedSearchParams.lessonId[0]
     : resolvedSearchParams?.lessonId;
-  const user = await requirePageUser(`/conteudo/${id}/aulas/${moduleId}`);
+  const user = await requireStudentPageUser(`/conteudo/${id}/aulas/${moduleId}`);
   const shellData = await getAppShellData(user);
   const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
   const lessonPageData = await getLessonPageData(id, moduleId, user, accessPreviewMode);

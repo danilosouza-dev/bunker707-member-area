@@ -3,6 +3,9 @@
 #   SUPABASE_SITE_ADDRESS  so os caminhos da API do Supabase (api-gw:8000); o resto responde 404
 #   STUDIO_SITE_ADDRESS    Studio e postgres-meta pelo Envoy, so para STUDIO_ALLOWED_IPS; o Envoy exige
 #                          o basic auth (DASHBOARD_USERNAME / DASHBOARD_PASSWORD)
+#   MAUTIC_SITE_ADDRESS    so na colocacao do Mautic neste servidor (infra/mautic/compose.colocado.yml):
+#                          o Mautic (mautic:80) com /installer restrito a STUDIO_ALLOWED_IPS. Sem Mautic
+#                          aqui, o compose deixa http://mautic.invalid e o site nunca casa com pedido algum.
 # Dominio puro no endereco = HTTPS automatico (Let's Encrypt, desafio HTTP-01, que passa pela Cloudflare
 # em modo Full (strict)). http:// no endereco = sem TLS (ensaio local).
 #
@@ -38,6 +41,12 @@
 		reverse_proxy api-gw:8000
 	}
 
+	# Modelos de e-mail do Auth em portugues (volumes/auth-templates): o GoTrue baixa pela URL ao enviar.
+	handle_path /auth-templates/* {
+		root * /srv/auth-templates
+		file_server
+	}
+
 	# Studio, /pg (postgres-meta) e qualquer outro caminho: nao existem neste hostname.
 	handle {
 		respond 404
@@ -56,5 +65,32 @@
 
 	handle {
 		respond 403
+	}
+}
+
+{$MAUTIC_SITE_ADDRESS} {
+	import sem_server
+	encode zstd gzip
+
+	# O instalador web do Mautic aceitaria o primeiro visitante como administrador: fechado fora da
+	# allowlist (a instalacao e por infra/mautic/scripts/install.sh). O Mautic le o IP real em
+	# X-Forwarded-For e confia no Caddy (trusted_proxies = rede do compose).
+	@instalador_permitido {
+		path /installer /installer/*
+		client_ip {$STUDIO_ALLOWED_IPS}
+	}
+	@instalador path /installer /installer/*
+	handle @instalador_permitido {
+		reverse_proxy mautic:80 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle @instalador {
+		respond 403
+	}
+	handle {
+		reverse_proxy mautic:80 {
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 }
