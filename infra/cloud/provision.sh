@@ -67,7 +67,7 @@ for role in $roles; do
     log "3/7 Servidor $name"
     fw_ensure "$name"
     if server_exists "$name"; then
-        echo "  ja existe: $(hzj server describe "$name" | jq -r '"\(.server_type.name) em \(.datacenter.location.name), \(.status)"')"
+        echo "  ja existe: $(hzj server describe "$name" | jq -r '"\(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.status)"')"
     else
         create_server "$name" "$type" "$loc" "$role"
     fi
@@ -134,7 +134,7 @@ cf_apply_dns
 log "7/7 Resumo"
 for role in $roles; do
     case "$role" in membros) name="$MEMBROS_NAME" ;; marketing) name="$MARKETING_NAME" ;; esac
-    hzj server describe "$name" | jq -r '"  \(.name): \(.server_type.name) em \(.datacenter.location.name), \(.public_net.ipv4.ip), \(.status)"'
+    hzj server describe "$name" | jq -r '"  \(.name): \(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.public_net.ipv4.ip), \(.status)"'
 done
 echo "  Storage Box: $STORAGE_BOX_USER@$STORAGE_BOX_HOST"
 if [ -n "${SKIP_MARKETING:-}" ]; then mautic_host="$MEMBROS_NAME"; else mautic_host="$MARKETING_NAME"; fi

@@ -7,7 +7,7 @@
 . "$(dirname -- "$0")/lib.sh"
 need HCLOUD_TOKEN; install_hcloud
 log "Servidores"
-hzj server list | jq -r '.[] | select(.labels.app=="bunker707") | "  \(.name): \(.server_type.name) em \(.datacenter.location.name), \(.public_net.ipv4.ip), \(.status), criado \(.created[:10])"'
+hzj server list | jq -r '.[] | select(.labels.app=="bunker707") | "  \(.name): \(.server_type.name) em \((.location.name // .datacenter.location.name)), \(.public_net.ipv4.ip), \(.status), criado \(.created[:10])"'
 log "Storage Box"
 box=$(storage_box_json); [ -n "$box" ] && printf '%s' "$box" | jq -r '"  \(.name): \(.storage_box_type.name // .type // "?"), \(.username // .user // "?")@\(.server // .host // "?"), usado \((.stats.size // 0)/1024/1024/1024*100|round/100) GB"' || echo "  (nenhum)"
 if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
