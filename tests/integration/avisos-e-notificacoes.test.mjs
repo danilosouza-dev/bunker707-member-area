@@ -512,6 +512,12 @@ test("duplicar cria outro rascunho com o mesmo conteudo; excluir tira da lista; 
   assert.ok(!lista.items.some((item) => item.id === copia.data.id));
   assert.ok(lista.items.some((item) => item.id === salvo.data.id));
 
+  // ?pagina= depois do fim: o PostgREST responde 416 (PGRST103); a lista vem vazia, sem derrubar a tela.
+  const depoisDoFim = await listNotices({ page: 5_000 });
+  assert.deepEqual(depoisDoFim.items, []);
+  assert.equal(depoisDoFim.page, 5_000);
+  assert.ok(Number.isInteger(depoisDoFim.total) && depoisDoFim.total >= 0);
+
   const enviado = await salvarEPublicar(produtor, rascunho({ title: "Enviado nao se exclui" }));
   actAs(produtor);
   assert.equal((await actions.deleteNotice({ id: enviado.id })).status, 409);

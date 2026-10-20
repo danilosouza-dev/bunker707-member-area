@@ -8,8 +8,8 @@ import { KpiTileSkeleton } from "../skeletons";
 import { adminCard, adminDelayedReveal } from "../styles";
 
 // Skeletons de Avisos e pop-ups na forma final (docs/17 §2.7): lista (cabecalho e abas estaticos,
-// quatro numeros, filtro e linhas), editor (formulario a esquerda, previa a direita) e relatorio
-// (cabecalho, funil, conteudo e detalhes). Nunca o spinner de tela cheia.
+// quatro numeros, filtro e linhas), editor novo (formulario a esquerda, previa a direita) e um aviso
+// (cabecalho e duas colunas, neutro entre o editor e o relatorio). Nunca o spinner de tela cheia.
 
 const bar = "bg-[var(--surface-2)] motion-reduce:animate-none";
 const ROW_KEYS = ["a", "b", "c", "d", "e"] as const;
@@ -117,27 +117,25 @@ export function NoticeEditorSkeleton() {
   );
 }
 
-export function NoticeReportSkeleton() {
+/**
+ * Um aviso (/avisos/[id]): o endereco abre o editor ou o relatorio, entao o skeleton e neutro. So o
+ * cabecalho (trilha, titulo e situacao) e duas colunas de blocos, sem a linha de numeros do relatorio.
+ */
+export function NoticeDetailSkeleton() {
   return (
     <AdminPage className="gap-6">
-      <LoadingStatus label="Carregando o relatório do aviso" />
+      <LoadingStatus label="Carregando o aviso" />
       <div aria-hidden="true" className={cn("flex flex-col gap-2", adminDelayedReveal)}>
         <Skeleton className={cn("h-4 w-40", bar)} />
         <Skeleton className={cn("h-8 w-72 max-w-full", bar)} />
         <Skeleton className={cn("h-5 w-48", bar)} />
       </div>
-      <div aria-hidden="true" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiTileSkeleton />
-        <KpiTileSkeleton />
-        <KpiTileSkeleton />
-        <KpiTileSkeleton />
-      </div>
-      <div aria-hidden="true" className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
-        <div className={cn(adminCard, "flex flex-col gap-3 p-4")}>
+      <div aria-hidden="true" className="grid min-w-0 items-start gap-6 lg:grid-cols-2">
+        <CardSkeleton fields={["field", "tall", "field"]} />
+        <div className={cn(adminCard, "flex min-w-0 flex-col gap-3 p-4")}>
           <Skeleton className={cn("h-5 w-24", bar, adminDelayedReveal)} />
           <Skeleton className={cn("aspect-[520/480] w-full rounded-lg", bar, adminDelayedReveal)} />
         </div>
-        <CardSkeleton fields={["field", "field", "field"]} />
       </div>
     </AdminPage>
   );

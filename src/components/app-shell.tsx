@@ -17,6 +17,7 @@ import { PlatformBrandingProvider } from "@/components/platform-branding";
 import type { PlatformDirectorChat as PlatformDirectorChatComponent } from "@/components/platform-director-chat";
 import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
 import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
+import { isAdminPath } from "@/lib/auth/redirect";
 import { signOutAndLeave } from "@/lib/auth/sign-out";
 import { normalizeMemberStyle } from "@/lib/member-style";
 import { cn } from "@/lib/utils";
@@ -218,6 +219,14 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
     void (async () => {
       await window.__bunker707FlushLessonProgress?.();
       await flushPendingSavedItemChanges();
+
+      // Admin: carregamento inteiro, depois de salvar progresso e favoritos (o microfone dos avisos so
+      // e liberado num documento carregado em /admin; isAdminPath).
+      if (isAdminPath(href)) {
+        window.location.assign(href);
+        return;
+      }
+
       router.push(href);
     })();
   }

@@ -378,3 +378,123 @@ test("relatorio: funil passo a passo e alerta de quem fecha sem clicar acima de 
   assert.equal(model.isHighCloseRate(40), false, "40% ainda nao e alerta");
   assert.equal(model.isHighCloseRate(null), false);
 });
+
+test("lista: pagina depois do fim volta para a ultima com avisos (ou para a primeira), com os outros filtros", () => {
+  const fallback = (input) => model.noticesPageFallbackHref({ itemCount: 0, page: 5, pageSize: 20, searchParams: { pagina: "5" }, total: 41, ...input });
+
+  assert.equal(fallback({}), "/admin/comunicacao/avisos?pagina=3", "41 avisos: ultima pagina e a 3");
+  assert.equal(
+    fallback({ searchParams: { pagina: "5", periodo: "7d", tipo: "popup" } }),
+    "/admin/comunicacao/avisos?pagina=3&periodo=7d&tipo=popup",
+    "filtro e periodo continuam"
+  );
+  assert.equal(fallback({ total: 20 }), "/admin/comunicacao/avisos", "tudo cabe na primeira: sem ?pagina=");
+  assert.equal(fallback({ searchParams: { pagina: "2", tipo: "notificacao" }, total: 0 }), "/admin/comunicacao/avisos?tipo=notificacao", "sem nenhum aviso");
+  assert.equal(fallback({ itemCount: 3 }), null, "pagina com linhas fica");
+  assert.equal(fallback({ page: 1, total: 0 }), null, "a primeira nunca redireciona");
+  assert.equal(fallback({ page: 3, total: 41 }), null, "a pagina existe (a lista mudou no meio): sem laco de redirecionamento");
+});
+
+test("aviso: editor ou relatorio; ?editar=1 so abre o editor do pop-up no ar para quem pode editar", () => {
+  const opens = (input) => model.opensNoticeEditor({ actions: ["edit"], kind: "inbox", situation: "draft", status: "draft", wantsEditor: false, ...input });
+
+  assert.equal(opens({}), true, "rascunho");
+  assert.equal(opens({ situation: "pending_approval", status: "pending_approval" }), true);
+  assert.equal(opens({ situation: "scheduled", status: "scheduled" }), true, "notificacao agendada");
+  assert.equal(opens({ situation: "sent", status: "sent" }), false, "enviada: relatorio");
+  assert.equal(opens({ kind: "popup", situation: "active", status: "active" }), false, "pop-up no ar abre no relatorio");
+  assert.equal(opens({ kind: "popup", situation: "active", status: "active", wantsEditor: true }), true, "Editar do relatorio");
+  assert.equal(opens({ actions: ["duplicate"], kind: "popup", situation: "paused", status: "paused", wantsEditor: true }), false, "sem messaging.publish: link antigo nao abre o editor");
+  assert.equal(opens({ kind: "popup", situation: "ended", status: "active", wantsEditor: true }), false, "janela terminou");
+});
+
+test("lista: Vistos e Cliques de aviso que nunca saiu mostram \"—\"", () => {
+  const row = (situation, extra = {}) => model.noticeRowNumbers({ clickRate: null, situation, stats: { clicked: 0, seen: 0 }, ...extra });
+
+  for (const situation of ["draft", "pending_approval", "scheduled"]) {
+    assert.deepEqual(row(situation), { clicks: "—", seen: "—" }, situation);
+  }
+
+  assert.deepEqual(row("sent"), { clicks: "0", seen: "0" }, "enviada sem ninguem ver: zero de verdade");
+  assert.deepEqual(row("canceled", { clickRate: 8, stats: { clicked: 12, seen: 150 } }), { clicks: "12 · 8%", seen: "150" }, "retirada do sino guarda os numeros");
+  assert.deepEqual(row("active", { clickRate: 12.5, stats: { clicked: 1, seen: 1200 } }), { clicks: "1 · 12,5%", seen: "1.200" });
+});
+
+test("editor: salvar sem mudanca nao grava; com mudanca, o toast conta o que foi cancelado; situacao depois de publicar", () => {
+  assert.equal(model.NOTHING_TO_SAVE_MESSAGE, "Nenhuma mudança para salvar.");
+  assert.equal(model.savedNoticeToast("inbox", "draft"), "Rascunho salvo.");
+  assert.equal(model.savedNoticeToast("inbox", null), "Rascunho salvo.", "aviso novo");
+  assert.equal(model.savedNoticeToast("inbox", "scheduled"), "Rascunho salvo. O envio agendado foi cancelado: agende de novo.");
+  assert.equal(model.savedNoticeToast("popup", "pending_approval"), "Rascunho salvo. O pedido de aprovação foi cancelado.");
+  assert.equal(model.savedNoticeToast("popup", "active"), "Pop-up atualizado. Quem já fechou não vê de novo.");
+  assert.equal(model.savedNoticeToast("popup", "paused"), "Pop-up salvo. Ele continua pausado.");
+  assert.equal(model.testSentToast(false, "scheduled"), "Enviamos a notificação para o seu sino.", "teste sem mudanca nao grava nada");
+  assert.equal(model.testSentToast(true, "scheduled"), "Enviamos a notificação para o seu sino. O envio agendado foi cancelado: agende de novo.");
+
+  assert.equal(model.noticeStatusAfterPublish("inbox", "scheduled"), "scheduled");
+  assert.equal(model.noticeStatusAfterPublish("inbox", "sending"), "sending");
+  assert.equal(model.noticeStatusAfterPublish("inbox", "pending_approval"), "pending_approval");
+  assert.equal(model.noticeStatusAfterPublish("popup", "pending_approval"), "pending_approval");
+  assert.equal(model.noticeStatusAfterPublish("popup", "scheduled"), "active", "janela que ainda nao comecou: gravado como no ar");
+  assert.equal(model.noticeStatusAfterPublish("popup", "active"), "active");
+
+  assert.equal(model.noticeFailureTitle({ savedDraft: false, status: 400, step: "save" }), "O aviso não foi salvo");
+  assert.equal(model.noticeFailureTitle({ savedDraft: true, status: 422, step: "publish" }), "O rascunho foi salvo, mas o aviso não saiu");
+  assert.equal(model.noticeFailureTitle({ savedDraft: true, status: 500, step: "test" }), "O rascunho foi salvo, mas o teste não saiu");
+  assert.equal(model.noticeFailureTitle({ savedDraft: false, status: 500, step: "test" }), "O teste não saiu");
+  assert.equal(model.noticeFailureTitle({ savedDraft: false, status: 0, step: "approve" }), "Há mudanças sem salvar");
+  assert.equal(model.noticeFailureTitle({ savedDraft: true, status: 409, step: "publish" }), "Este aviso mudou em outra tela");
+
+  for (const text of [model.savedNoticeToast("inbox", "scheduled"), model.savedNoticeToast("inbox", "pending_approval"), model.noticeFailureTitle({ savedDraft: true, status: 422, step: "publish" })]) {
+    assert.doesNotMatch(text, FORBIDDEN_COPY, text);
+  }
+});
+
+test("construtor de segmento: foco depois de remover e nome do botao com o tipo da regra", () => {
+  const root = {
+    items: [
+      model.defaultAudienceRule("product"),
+      { items: [model.defaultAudienceRule("pace"), model.defaultAudienceRule("last_study")], match: "any" },
+      model.defaultAudienceRule("comments")
+    ],
+    match: "all"
+  };
+
+  assert.equal(model.audienceFocusAfterRemoval(root, [2]), "1", "a anterior");
+  assert.equal(model.audienceFocusAfterRemoval(root, [0]), "0", "a primeira sai: a seguinte assume a posicao");
+  assert.equal(model.audienceFocusAfterRemoval(root, [1, 1]), "1.0", "dentro do grupo");
+  assert.equal(model.audienceFocusAfterRemoval(root, [1, 0]), "1.0");
+  assert.equal(model.audienceFocusAfterRemoval({ items: [{ items: [model.defaultAudienceRule("pace")], match: "any" }], match: "all" }, [0, 0]), "0", "grupo vazio fica com o foco");
+  assert.equal(model.audienceFocusAfterRemoval({ items: [model.defaultAudienceRule("pace")], match: "all" }, [0]), null, "sem regra nenhuma: Adicionar regra");
+  assert.equal(model.audienceFocusAfterRemoval(root, [7]), null);
+
+  assert.equal(model.removeAudienceRuleLabel("product"), "Remover regra: Produto");
+  assert.equal(model.removeAudienceRuleLabel("last_study"), "Remover regra: Último estudo");
+});
+
+test("gravacao: para meio segundo antes de 5 min, aceita o atraso da parada e reconhece o microfone bloqueado pela pagina", () => {
+  assert.equal(model.RECORDING_AUTO_STOP_SECONDS, 299.5);
+  assert.equal(model.settleRecordedDuration(57.3), 58);
+  assert.equal(model.settleRecordedDuration(299.6), 300);
+  assert.equal(model.settleRecordedDuration(300.4), 300, "atraso da parada automatica: fica no limite");
+  assert.equal(model.settleRecordedDuration(302), 300);
+  assert.equal(model.settleRecordedDuration(302.5), null, "bem acima do limite: recusa");
+
+  assert.equal(model.MIC_RELOAD_MESSAGE, "Para gravar, recarregue a página. Salve o rascunho antes.");
+  const policy = (allowed) => ({ allowsFeature: (feature) => (feature === "microphone" ? allowed : true) });
+  assert.equal(model.isMicrophoneBlockedByPolicy({ featurePolicy: policy(false) }), true, "Chrome com microphone=()");
+  assert.equal(model.isMicrophoneBlockedByPolicy({ permissionsPolicy: policy(false) }), true);
+  assert.equal(model.isMicrophoneBlockedByPolicy({ featurePolicy: policy(true) }), false, "carregado em /admin");
+  assert.equal(model.isMicrophoneBlockedByPolicy({}), false, "Firefox e Safari: sem a API, segue o pedido normal");
+  assert.equal(model.isMicrophoneBlockedByPolicy(null), false);
+  assert.equal(
+    model.isMicrophoneBlockedByPolicy({
+      featurePolicy: {
+        allowsFeature() {
+          throw new Error("indisponivel");
+        }
+      }
+    }),
+    false
+  );
+});

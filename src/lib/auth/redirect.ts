@@ -51,3 +51,21 @@ export function getSafeRedirectPath(value?: string | null) {
 
   return `${url.pathname}${url.search}${url.hash}`;
 }
+
+/**
+ * Caminho interno do admin (/admin, /admin/..., com busca ou ancora). Quem leva para o admin vindo de
+ * fora dele (login, troca de senha, area do aluno) faz um carregamento inteiro da pagina, nunca uma troca
+ * de rota do Next: o cabecalho Permissions-Policy (next.config.ts) libera o microfone so em /admin, e o
+ * navegador aplica a politica do documento que carregou ("Gravar agora" dos avisos, docs/22 §4.5).
+ */
+export function isAdminPath(value: string) {
+  let url: URL;
+
+  try {
+    url = new URL(value, INTERNAL_ORIGIN);
+  } catch {
+    return false;
+  }
+
+  return url.origin === INTERNAL_ORIGIN && (url.pathname === "/admin" || url.pathname.startsWith("/admin/"));
+}

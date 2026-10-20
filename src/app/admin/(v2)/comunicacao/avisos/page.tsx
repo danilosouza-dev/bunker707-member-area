@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { NoticesListView } from "@/components/admin/v2/communication/notices-list-view";
-import { parseNoticeKindParam, parseNoticesPage } from "@/components/admin/v2/communication/notices-view-model";
+import { noticesPageFallbackHref, parseNoticeKindParam, parseNoticesPage } from "@/components/admin/v2/communication/notices-view-model";
 import { CommunicationTabs } from "@/components/admin/v2/frames/communication-frame";
 import { COMMUNICATION_TAB_META, COMMUNICATION_TITLE } from "@/components/admin/v2/frames/communication-model";
 import { AdminPage } from "@/components/admin/v2/page-container";
@@ -24,7 +25,8 @@ type PageProps = {
 };
 
 // Comunicação › Avisos e pop-ups (docs/22 §2.1): os quatro numeros do periodo da barra superior, filtro
-// por tipo (?tipo=notificacao|popup) e a lista paginada (?pagina=), com as acoes de cada aviso.
+// por tipo (?tipo=notificacao|popup) e a lista paginada (?pagina=), com as acoes de cada aviso. Pagina
+// depois da ultima volta para a ultima que tem avisos (ou para a primeira).
 export default async function AdminAnnouncementsPage({ searchParams }: PageProps) {
   const [{ access }, params] = await Promise.all([requirePageArea("comunicacao"), searchParams]);
   const period = readAdminPeriod(params, new Date());
@@ -54,6 +56,18 @@ export default async function AdminAnnouncementsPage({ searchParams }: PageProps
         <PendingMigrationNotice migration="202610200001" />
       </AdminPage>
     );
+  }
+
+  const fallback = noticesPageFallbackHref({
+    itemCount: loaded.data.page.items.length,
+    page: pageNumber,
+    pageSize: loaded.data.page.pageSize,
+    searchParams: params,
+    total: loaded.data.page.total
+  });
+
+  if (fallback) {
+    redirect(fallback);
   }
 
   return (

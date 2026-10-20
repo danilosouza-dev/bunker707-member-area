@@ -17,6 +17,7 @@ import {
 } from "../../../../server/communications/audience-model";
 import {
   AUDIO_LIMITS,
+  isEditableStatus,
   isoToSaoPauloLocal,
   publishDecision,
   saoPauloLocalToIso,
@@ -62,11 +63,73 @@ export function parseNoticesPage(value: ParamValue) {
   return Number.isInteger(page) && page > 1 && page <= 10_000 ? page : 1;
 }
 
+/**
+ * ?pagina= depois da ultima pagina (endereco antigo ou digitado, ou avisos excluidos em outra tela):
+ * o endereco da ultima pagina com avisos (ou da primeira, sem ?pagina=, quando nao ha nenhum), com os
+ * outros filtros. Pagina que existe ou que ainda tem linhas: null (nada a corrigir).
+ */
+export function noticesPageFallbackHref(input: {
+  itemCount: number;
+  page: number;
+  pageSize: number;
+  searchParams: Record<string, ParamValue>;
+  total: number;
+}): string | null {
+  if (input.page <= 1 || input.itemCount > 0) {
+    return null;
+  }
+
+  const lastPage = Math.max(1, Math.ceil(Math.max(0, input.total) / Math.max(1, input.pageSize)));
+
+  if (lastPage >= input.page) {
+    return null;
+  }
+
+  const params = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(input.searchParams)) {
+    for (const item of Array.isArray(value) ? value : [value]) {
+      if (typeof item === "string") {
+        params.append(key, item);
+      }
+    }
+  }
+
+  if (lastPage > 1) {
+    params.set(NOTICE_PAGE_PARAM, String(lastPage));
+  } else {
+    params.delete(NOTICE_PAGE_PARAM);
+  }
+
+  const query = params.toString();
+
+  return query ? `${NOTICES_HREF}?${query}` : NOTICES_HREF;
+}
+
 /** Editor ou relatorio de um aviso (`edit` abre o editor de um pop-up no ar). */
 export function noticeHref(id: string, options: { edit?: boolean } = {}) {
   const base = `${NOTICES_HREF}/${encodeURIComponent(id)}`;
 
   return options.edit ? `${base}?${NOTICE_EDIT_PARAM}=1` : base;
+}
+
+/**
+ * /avisos/[id] abre o editor ou o relatorio? Rascunho, aguardando aprovacao e notificacao agendada abrem
+ * no editor. Pop-up no ar ou pausado abre no relatorio; no editor so com ?editar=1 e se a pessoa pode
+ * editar ("edit" nas acoes, a mesma regra do servidor: editar pop-up no ar pede messaging.publish).
+ */
+export function opensNoticeEditor(input: {
+  actions: readonly NoticeAction[];
+  kind: CampaignKind;
+  situation: CampaignSituation;
+  status: CampaignStatus;
+  wantsEditor: boolean;
+}) {
+  if (!isEditableStatus(input.kind, input.status) || input.situation === "ended") {
+    return false;
+  }
+
+  return !isLivePopupStatus(input.kind, input.status) || (input.wantsEditor && input.actions.includes("edit"));
 }
 
 export function newNoticeHref(kind?: CampaignKind) {
@@ -147,6 +210,20 @@ export function formatPercent(value: number | null | undefined) {
 /** Coluna Cliques: "12 · 8%" (so o numero quando ninguem viu ainda). */
 export function formatClicks(clicked: number, rate: number | null) {
   return rate === null ? integerFormat.format(clicked) : `${integerFormat.format(clicked)} · ${formatPercent(rate)}`;
+}
+
+/** Rascunho, aguardando aprovacao e agendado nunca chegaram aos alunos: nao ha numero para mostrar. */
+export function noticeNeverSent(situation: CampaignSituation) {
+  return situation === "draft" || situation === "pending_approval" || situation === "scheduled";
+}
+
+/** Vistos e Cliques de uma linha da lista; aviso que nunca saiu mostra "—" (sem dado, docs/17). */
+export function noticeRowNumbers(item: { clickRate: number | null; situation: CampaignSituation; stats: { clicked: number; seen: number } }) {
+  if (noticeNeverSent(item.situation)) {
+    return { clicks: "—", seen: "—" };
+  }
+
+  return { clicks: formatClicks(item.stats.clicked, item.clickRate), seen: formatInteger(item.stats.seen) };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -331,6 +408,70 @@ export function primaryIntentFor(input: {
   }
 
   return input.scheduleMode === "at" ? "schedule" : "send_now";
+}
+
+/**
+ * Situacao gravada depois de publicar pelo editor: na notificacao, a que o servidor devolveu (agendado,
+ * enviando, enviado ou aguardando aprovacao); no pop-up, aguardando aprovacao ou no ar ("Agendado" do
+ * pop-up e so a janela que ainda nao comecou: a situacao gravada e "active").
+ */
+export function noticeStatusAfterPublish(kind: CampaignKind, situation: CampaignSituation): CampaignStatus {
+  if (kind === "inbox" || situation === "pending_approval") {
+    return situation;
+  }
+
+  return "active";
+}
+
+export const NOTHING_TO_SAVE_MESSAGE = "Nenhuma mudança para salvar.";
+
+/** Salvar uma mudanca volta agendado e aguardando aprovacao para rascunho: a frase que conta isso. */
+export function draftSaveSideEffect(previousStatus: CampaignStatus | null | undefined) {
+  if (previousStatus === "scheduled") {
+    return "O envio agendado foi cancelado: agende de novo.";
+  }
+
+  if (previousStatus === "pending_approval") {
+    return "O pedido de aprovação foi cancelado.";
+  }
+
+  return null;
+}
+
+/** Toast de "Salvar rascunho" (ou "Salvar alterações" no pop-up no ar), pela situacao antes de salvar. */
+export function savedNoticeToast(kind: CampaignKind, previousStatus: CampaignStatus | null | undefined) {
+  if (isLivePopupStatus(kind, previousStatus)) {
+    return previousStatus === "paused" ? "Pop-up salvo. Ele continua pausado." : "Pop-up atualizado. Quem já fechou não vê de novo.";
+  }
+
+  const sideEffect = draftSaveSideEffect(previousStatus);
+
+  return sideEffect ? `Rascunho salvo. ${sideEffect}` : "Rascunho salvo.";
+}
+
+/** Toast de "Enviar teste para mim"; se o teste salvou uma mudanca antes, conta o que isso desfez. */
+export function testSentToast(savedChange: boolean, previousStatus: CampaignStatus | null | undefined) {
+  const sideEffect = savedChange ? draftSaveSideEffect(previousStatus) : null;
+
+  return sideEffect ? `Enviamos a notificação para o seu sino. ${sideEffect}` : "Enviamos a notificação para o seu sino.";
+}
+
+/** Titulo do banner de erro do editor: o que ficou gravado e o que nao saiu. */
+export function noticeFailureTitle(input: { savedDraft: boolean; status: number; step: "approve" | "publish" | "save" | "test" }) {
+  if (input.status === 409) {
+    return "Este aviso mudou em outra tela";
+  }
+
+  switch (input.step) {
+    case "approve":
+      return "Há mudanças sem salvar";
+    case "publish":
+      return input.savedDraft ? "O rascunho foi salvo, mas o aviso não saiu" : "O aviso não foi salvo";
+    case "test":
+      return input.savedDraft ? "O rascunho foi salvo, mas o teste não saiu" : "O teste não saiu";
+    default:
+      return "O aviso não foi salvo";
+  }
 }
 
 /** Pop-up publicado (no ar, agendado pela janela ou pausado): editar salva sem sair do ar. */
@@ -706,6 +847,56 @@ export function appendAudienceNode(root: AudienceGroup, groupPath: AudiencePath,
   return mapGroupAt(root, groupPath, (group) => ({ ...group, items: [...group.items, node] }));
 }
 
+function audienceGroupAt(root: AudienceGroup, path: AudiencePath): AudienceGroup | null {
+  let group = root;
+
+  for (const index of path) {
+    const child = group.items[index];
+
+    if (!child || !isAudienceGroup(child)) {
+      return null;
+    }
+
+    group = child;
+  }
+
+  return group;
+}
+
+/**
+ * Para onde vai o foco depois de remover a regra ou o grupo na posicao (o botao focado some junto):
+ * o item anterior, o seguinte (que passa a ocupar a posicao), o grupo que ficou vazio ou null, que e o
+ * botao "Adicionar regra". Devolve a chave do item (audienceNodeKey), calculada antes de remover.
+ */
+export function audienceFocusAfterRemoval(root: AudienceGroup, path: AudiencePath): string | null {
+  if (path.length === 0) {
+    return null;
+  }
+
+  const parentPath = path.slice(0, -1);
+  const position = path[path.length - 1];
+  const parent = audienceGroupAt(root, parentPath);
+
+  if (!parent || position >= parent.items.length) {
+    return null;
+  }
+
+  if (position > 0) {
+    return audienceNodeKey([...parentPath, position - 1]);
+  }
+
+  if (parent.items.length > 1) {
+    return audienceNodeKey([...parentPath, 0]);
+  }
+
+  return parentPath.length > 0 ? audienceNodeKey(parentPath) : null;
+}
+
+/** Nome do botao de lixeira da regra, com o tipo ("Remover regra: Produto"). */
+export function removeAudienceRuleLabel(type: AudienceRuleType) {
+  return `Remover regra: ${AUDIENCE_RULE_LABELS[type]}`;
+}
+
 /** Ainda cabe mais uma regra (no maximo 20 no segmento inteiro). */
 export function canAddAudienceRule(definition: AudienceDefinition) {
   return countAudienceRules(definition) < AUDIENCE_LIMITS.maxRules;
@@ -727,6 +918,50 @@ export const RECORDING_LIMIT_SECONDS = AUDIO_LIMITS.maxSeconds;
 
 export const AUDIO_TOO_LONG_MESSAGE = "Use um áudio de até 5 minutos.";
 export const AUDIO_TOO_BIG_MESSAGE = "O áudio deve ter no máximo 10 MB.";
+
+/**
+ * A gravacao para sozinha meio segundo antes do limite: o cronometro do navegador atrasa (aba em segundo
+ * plano chega a 1 s) e o formato acrescenta alguns milissegundos no fim.
+ */
+export const RECORDING_AUTO_STOP_SECONDS = RECORDING_LIMIT_SECONDS - 0.5;
+
+/** Passar do limite em ate 2 s e atraso da parada automatica: a gravacao fica, com a duracao no limite. */
+const RECORDING_OVERSHOOT_SECONDS = 2;
+
+/** Duracao da gravacao feita aqui (segundos inteiros, no maximo o limite); bem acima do limite, null. */
+export function settleRecordedDuration(seconds: number): number | null {
+  if (Number.isFinite(seconds) && seconds > RECORDING_LIMIT_SECONDS + RECORDING_OVERSHOOT_SECONDS) {
+    return null;
+  }
+
+  return Math.min(audioDurationSeconds(seconds), RECORDING_LIMIT_SECONDS);
+}
+
+export const MIC_RELOAD_MESSAGE = "Para gravar, recarregue a página. Salve o rascunho antes.";
+
+type PolicyReader = { allowsFeature?: (feature: string) => boolean } | null | undefined;
+
+/** O que o navegador expoe da politica do documento (Chrome: featurePolicy; a API nova: permissionsPolicy). */
+export type PolicyDocument = { featurePolicy?: PolicyReader; permissionsPolicy?: PolicyReader };
+
+/**
+ * O documento foi carregado com o microfone bloqueado pelo Permissions-Policy (veio da area do aluno
+ * ou do login por troca de rota, sem recarregar): so recarregar em /admin libera. Navegador sem a API
+ * (Firefox, Safari) ou erro na leitura: false (segue o pedido normal do microfone).
+ */
+export function isMicrophoneBlockedByPolicy(doc: PolicyDocument | null | undefined) {
+  const policy = doc?.permissionsPolicy ?? doc?.featurePolicy;
+
+  if (!policy || typeof policy.allowsFeature !== "function") {
+    return false;
+  }
+
+  try {
+    return policy.allowsFeature("microphone") === false;
+  } catch {
+    return false;
+  }
+}
 
 export function pickRecorderMimeType(isTypeSupported: (type: string) => boolean): string | null {
   for (const type of RECORDER_MIME_TYPES) {

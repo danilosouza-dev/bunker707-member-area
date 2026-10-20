@@ -16,6 +16,9 @@ import type { NoticeDraft } from "./schemas";
  * Linhas
  * ---------------------------------------------------------------------------------------------- */
 
+/** PostgREST: `.range()` depois da ultima linha (HTTP 416). */
+const RANGE_NOT_SATISFIABLE = "PGRST103";
+
 export const CAMPAIGN_COLUMNS =
   "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by";
 
@@ -200,7 +203,11 @@ export async function fetchCampaignsByIds(db: CommunicationsDb, ids: readonly st
   return rows;
 }
 
-/** Lista da equipe: mais novos primeiro, sem os excluidos. */
+/**
+ * Lista da equipe: mais novos primeiro, sem os excluidos. Pagina depois do fim: o PostgREST responde 416
+ * (PGRST103) em vez de lista vazia; aqui vira pagina vazia (o total pode nao vir, e a tela volta para uma
+ * pagina que existe).
+ */
 export async function listCampaignRows(
   db: CommunicationsDb,
   input: { kind?: CampaignKind; page: number; pageSize: number }
@@ -216,6 +223,11 @@ export async function listCampaignRows(
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .range(from, from + input.pageSize - 1);
+
+  if (error?.code === RANGE_NOT_SATISFIABLE) {
+    return { rows: [], total: count ?? 0 };
+  }
+
   assertNoDbError(error, "Comunicacao: lista de avisos");
 
   return { rows: (data ?? []) as CampaignRow[], total: count ?? 0 };

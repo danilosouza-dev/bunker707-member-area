@@ -1,36 +1,50 @@
 "use client";
 
-import { AlertCircle, LoaderCircle, Mic, RotateCcw, Square, Upload } from "lucide-react";
+import { AlertCircle, LoaderCircle, Mic, RotateCcw, RotateCw, Square, Upload } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { NoticeAudioPlayer } from "@/components/member/notifications/notice-audio-player";
 import { Button } from "@/components/ui/button";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import {
   AUDIO_TOO_LONG_MESSAGE,
+  MIC_RELOAD_MESSAGE,
+  RECORDING_AUTO_STOP_SECONDS,
   RECORDING_LIMIT_SECONDS,
   audioDurationSeconds,
   audioFileExtension,
   computeAudioPeaks,
   describeAudioProblem,
   formatAudioClock,
-  pickRecorderMimeType
+  isMicrophoneBlockedByPolicy,
+  pickRecorderMimeType,
+  settleRecordedDuration,
+  type PolicyDocument
 } from "./notices-view-model";
 
 // Audio do aviso (docs/22 §4.5): "Enviar arquivo" (MP3, M4A, OGG, WEBM ou WAV) ou "Gravar agora" no
 // proprio navegador (MediaRecorder; webm/opus no Chrome e no Firefox, mp4 no Safari), com cronometro,
-// medidor do microfone e parada automatica em 5 minutos. Antes de enviar, o navegador decodifica o
-// audio (AudioContext.decodeAudioData) para saber a duracao e desenhar a forma de onda (48 barras);
-// arquivo acima de 5 min ou 10 MB e recusado aqui mesmo. O envio vai para a rota
+// medidor do microfone e parada automatica meio segundo antes dos 5 minutos (passar um pouco do limite
+// pelo atraso da parada nao descarta a gravacao). Antes de enviar, o navegador decodifica o audio
+// (AudioContext.decodeAudioData) para saber a duracao e desenhar a forma de onda (48 barras); arquivo
+// acima de 5 min ou 10 MB e recusado aqui mesmo. O envio vai para a rota
 // /api/admin/communications/audio (multipart: o audio passa do limite das Server Actions) e so o
-// endereco, a duracao e a forma de onda entram no rascunho. Sem MediaRecorder, so "Enviar arquivo".
+// endereco, a duracao e a forma de onda entram no rascunho; se o envio da gravacao falhar, ela continua
+// na tela para tentar de novo. Sem MediaRecorder, so "Enviar arquivo".
+//
+// Microfone bloqueado pela pagina (o documento foi carregado fora de /admin e entrou por troca de rota):
+// pede para recarregar, com "Recarregar a página", em vez de mandar para as configuracoes do navegador.
+// O foco segue o controle da vez (Parar, Usar gravação, Trocar áudio, Enviar arquivo) quando o botao
+// focado some.
 
 export type NoticeAudio = NonNullable<NoticeDraft["audio"]>;
+
+type RecordedPhase = { durationSeconds: number; kind: "recorded"; mimeType: string; peaks: number[]; url: string };
 
 type Phase =
   | { kind: "idle" }
   | { kind: "requesting" }
   | { kind: "recording" }
-  | { durationSeconds: number; kind: "recorded"; mimeType: string; peaks: number[]; url: string }
+  | RecordedPhase
   | { kind: "processing"; label: string };
 
 type NoticeAudioFieldProps = {
@@ -106,7 +120,15 @@ async function uploadAudio(blob: Blob, mimeType: string): Promise<{ mimeType: st
   const form = new FormData();
   form.append("file", new File([blob], `aviso.${audioFileExtension(type)}`, { type }));
 
-  const response = await fetch("/api/admin/communications/audio", { body: form, credentials: "same-origin", method: "POST" });
+  let response: Response;
+
+  try {
+    response = await fetch("/api/admin/communications/audio", { body: form, credentials: "same-origin", method: "POST" });
+  } catch {
+    // Sem conexao: o navegador lanca TypeError em ingles ("Failed to fetch").
+    throw new Error(UPLOAD_FAILED_MESSAGE);
+  }
+
   const payload = (await response.json().catch(() => null)) as { data?: { mimeType: string | null; url: string }; error?: string } | null;
 
   if (!response.ok || !payload?.data?.url) {
@@ -135,7 +157,11 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
   const [phase, setPhaseState] = useState<Phase>({ kind: "idle" });
   const [replacing, setReplacing] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  // Microfone bloqueado pelo Permissions-Policy do documento: so recarregar resolve.
+  const [reloadToRecord, setReloadToRecord] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const container = useRef<HTMLDivElement>(null);
+  const focusWithin = useRef(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const meter = useRef<HTMLSpanElement>(null);
   const session = useRef<{
@@ -151,10 +177,31 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
   const recordedUrl = useRef<string | null>(null);
   const pendingBlob = useRef<Blob | null>(null);
   const onBusyChangeRef = useRef(onBusyChange);
+  const view = phase.kind === "idle" ? (value && !replacing ? "value" : "chooser") : phase.kind;
+  const lastView = useRef(view);
 
   useEffect(() => {
     onBusyChangeRef.current = onBusyChange;
   }, [onBusyChange]);
+
+  // Troca de etapa desmonta o botao focado (Gravar agora, Parar, Usar gravação, Trocar áudio, Remover):
+  // o foco vai para o controle da etapa nova ([data-audio-focus]) ou para o proprio campo. So quando o
+  // foco estava no campo e caiu no body (ou continua no campo); foco em outro lugar da tela fica onde esta.
+  useEffect(() => {
+    if (lastView.current === view) {
+      return;
+    }
+
+    lastView.current = view;
+    const root = container.current;
+    const active = document.activeElement;
+
+    if (!root || !focusWithin.current || (active && active !== document.body && !root.contains(active))) {
+      return;
+    }
+
+    (root.querySelector<HTMLElement>("[data-audio-focus]") ?? root).focus({ preventScroll: true });
+  }, [view]);
 
   function setPhase(next: Phase) {
     setPhaseState(next);
@@ -220,7 +267,8 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
     []
   );
 
-  async function finishWith(blob: Blob, mimeType: string, analyzed?: { durationSeconds: number; peaks: number[] }) {
+  /** Envia e poe no rascunho; `recorded` = a gravacao na tela, que volta se o envio falhar. */
+  async function finishWith(blob: Blob, mimeType: string, analyzed?: { durationSeconds: number; peaks: number[] }, recorded?: RecordedPhase) {
     setPhase({ kind: "processing", label: analyzed ? "Enviando o áudio..." : "Preparando o áudio..." });
 
     try {
@@ -236,12 +284,22 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
     } catch (failure) {
       const message = failure instanceof Error && failure.message !== "decode" ? failure.message : DECODE_FAILED_MESSAGE;
       setLocalError(message);
+
+      // Gravacao nao se escolhe de novo: fica na tela (o endereco temporario continua valendo) para
+      // "Usar gravação" tentar outra vez.
+      if (recorded) {
+        pendingBlob.current = blob;
+        setPhase(recorded);
+        return;
+      }
+
       setPhase({ kind: "idle" });
     }
   }
 
   async function chooseFile(file: File) {
     setLocalError(null);
+    setReloadToRecord(false);
     const sizeProblem = describeAudioProblem({ bytes: file.size });
 
     if (sizeProblem) {
@@ -282,6 +340,14 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
 
   async function startRecording() {
     setLocalError(null);
+    setReloadToRecord(false);
+
+    if (isMicrophoneBlockedByPolicy(document as Document & PolicyDocument)) {
+      setLocalError(MIC_RELOAD_MESSAGE);
+      setReloadToRecord(true);
+      return;
+    }
+
     releaseRecordedUrl();
     setElapsed(0);
 
@@ -329,7 +395,10 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
 
       analyzeAudio(blob)
         .then((analyzed) => {
-          if (analyzed.durationSeconds > RECORDING_LIMIT_SECONDS) {
+          // Um pouco acima do limite e o atraso da parada automatica: fica, com a duracao no limite.
+          const durationSeconds = settleRecordedDuration(analyzed.seconds);
+
+          if (durationSeconds === null) {
             setLocalError(AUDIO_TOO_LONG_MESSAGE);
             setPhase({ kind: "idle" });
             return;
@@ -338,7 +407,7 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
           const url = URL.createObjectURL(blob);
           recordedUrl.current = url;
           pendingBlob.current = blob;
-          setPhase({ durationSeconds: analyzed.durationSeconds, kind: "recorded", mimeType: current.mimeType, peaks: analyzed.peaks, url });
+          setPhase({ durationSeconds, kind: "recorded", mimeType: current.mimeType, peaks: analyzed.peaks, url });
         })
         .catch(() => {
           setLocalError(DECODE_FAILED_MESSAGE);
@@ -380,7 +449,7 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
       const seconds = (Date.now() - current.startedAt) / 1000;
       setElapsed(seconds);
 
-      if (seconds >= RECORDING_LIMIT_SECONDS) {
+      if (seconds >= RECORDING_AUTO_STOP_SECONDS) {
         stopRecording();
       }
     }, 250);
@@ -392,6 +461,7 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
   function discardRecording() {
     releaseRecordedUrl();
     pendingBlob.current = null;
+    setLocalError(null);
     setPhase({ kind: "idle" });
   }
 
@@ -402,14 +472,29 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
 
     const blob = pendingBlob.current;
     pendingBlob.current = null;
-    void finishWith(blob, phase.mimeType, { durationSeconds: phase.durationSeconds, peaks: phase.peaks });
+    setLocalError(null);
+    void finishWith(blob, phase.mimeType, { durationSeconds: phase.durationSeconds, peaks: phase.peaks }, phase);
   }
 
   const shownError = localError ?? error ?? null;
   const showChooser = (!value || replacing) && phase.kind === "idle";
 
   return (
-    <div className="flex min-w-0 flex-col gap-2" id={id} tabIndex={-1}>
+    <div
+      className="flex min-w-0 flex-col gap-2 outline-none"
+      id={id}
+      onBlur={(event) => {
+        // Saiu para outro controle da tela; sumir com o botao focado (relatedTarget null) nao conta.
+        if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
+          focusWithin.current = false;
+        }
+      }}
+      onFocus={() => {
+        focusWithin.current = true;
+      }}
+      ref={container}
+      tabIndex={-1}
+    >
       <input
         accept="audio/*"
         className="sr-only"
@@ -433,7 +518,7 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
             <NoticeAudioPlayer audio={value} label="Áudio do aviso" />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button className="px-3" disabled={disabled} onClick={() => setReplacing(true)} type="button" variant="secondary">
+            <Button className="px-3" data-audio-focus="" disabled={disabled} onClick={() => setReplacing(true)} type="button" variant="secondary">
               Trocar áudio
             </Button>
             <Button
@@ -455,7 +540,7 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
       {showChooser ? (
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex flex-wrap gap-2">
-            <Button className="px-3" disabled={disabled} onClick={() => fileInput.current?.click()} type="button" variant="secondary">
+            <Button className="px-3" data-audio-focus="" disabled={disabled} onClick={() => fileInput.current?.click()} type="button" variant="secondary">
               <Upload aria-hidden="true" className="size-4" />
               Enviar arquivo
             </Button>
@@ -496,7 +581,7 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
           </span>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs leading-5 text-[var(--text-secondary)]">A gravação para sozinha em 5 minutos.</p>
-            <Button className="px-3" onClick={stopRecording} type="button">
+            <Button className="px-3" data-audio-focus="" onClick={stopRecording} type="button">
               <Square aria-hidden="true" className="size-3.5 fill-current" />
               Parar
             </Button>
@@ -516,7 +601,7 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
             />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button className="px-3" onClick={acceptRecording} type="button">
+            <Button className="px-3" data-audio-focus="" onClick={acceptRecording} type="button">
               Usar gravação
             </Button>
             <Button className="px-3" onClick={() => void startRecording()} type="button" variant="secondary">
@@ -542,6 +627,15 @@ export function NoticeAudioField({ disabled = false, error, id, onBusyChange, on
           <AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           {shownError}
         </p>
+      ) : null}
+
+      {reloadToRecord && localError === MIC_RELOAD_MESSAGE ? (
+        <div>
+          <Button className="px-3" onClick={() => window.location.reload()} type="button" variant="secondary">
+            <RotateCw aria-hidden="true" className="size-4" />
+            Recarregar a página
+          </Button>
+        </div>
       ) : null}
     </div>
   );

@@ -32,6 +32,7 @@ import {
   AUDIENCE_RULE_ORDER,
   COMMENT_WINDOW_OPTIONS,
   appendAudienceNode,
+  audienceFocusAfterRemoval,
   audienceNodeKey,
   canAddAudienceRule,
   commentWindowDays,
@@ -41,6 +42,7 @@ import {
   formatStudentCount,
   newAudienceGroup,
   removeAudienceNode,
+  removeAudienceRuleLabel,
   replaceAudienceNode,
   starterAudience,
   type AudiencePath
@@ -51,7 +53,8 @@ import {
 // grupo dentro dele, com a propria escolha de E/OU. No maximo 20 regras (o botao explica o limite em
 // vez de sumir). "Usar um segmento salvo" traz os segmentos prontos e os salvos em Alunos ja
 // convertidos em regras (o que nao vira regra, como a busca por nome, aparece numa nota). A contagem
-// ao vivo fica em AudienceCount (o editor pede ao servidor com 500 ms de espera).
+// ao vivo fica em AudienceCount (o editor pede ao servidor com 500 ms de espera). Remover uma regra ou
+// um grupo leva o foco para o item anterior (ou para "Adicionar regra"), nunca para o body.
 
 type AudienceBuilderProps = {
   cohorts: readonly { id: string; name: string }[];
@@ -490,7 +493,7 @@ function RuleRow({
           value={rule.type}
         />
         <Button
-          aria-label="Remover regra"
+          aria-label={removeAudienceRuleLabel(rule.type)}
           className="ml-auto size-10! px-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           disabled={context.disabled}
           onClick={onRemove}
@@ -525,6 +528,7 @@ export function AudienceBuilder({ cohorts, disabled, errors, onChange, products,
   ];
   const context: RuleContext = { cohorts, disabled, productOptions, products, productsLoaded };
   const root = value.kind === "rules" ? value.root : null;
+  const addRuleButton = useRef<HTMLButtonElement>(null);
 
   function changeRoot(next: AudienceGroup) {
     setNote(null);
@@ -544,6 +548,21 @@ export function AudienceBuilder({ cohorts, disabled, errors, onChange, products,
     }
 
     onChange(rememberedRules.current ?? starterAudience());
+  }
+
+  function removeNode(path: AudiencePath) {
+    if (!root) {
+      return;
+    }
+
+    const focusKey = audienceFocusAfterRemoval(root, path);
+    changeRoot(removeAudienceNode(root, path));
+
+    // O botao de lixeira focado some com o item: o foco vai para o item anterior (o bloco tem tabIndex -1).
+    window.requestAnimationFrame(() => {
+      const target = focusKey === null ? addRuleButton.current : document.getElementById(`aviso-regra-${focusKey.replace(/\./g, "-")}`);
+      target?.focus();
+    });
   }
 
   function addRule(groupPath: AudiencePath) {
@@ -595,7 +614,7 @@ export function AudienceBuilder({ cohorts, disabled, errors, onChange, products,
           context={context}
           error={errors[audienceNodeKey(path)]}
           onChange={(rule) => changeRoot(replaceAudienceNode(root, path, rule))}
-          onRemove={() => changeRoot(removeAudienceNode(root, path))}
+          onRemove={() => removeNode(path)}
           path={path}
           rule={node}
         />
@@ -621,7 +640,7 @@ export function AudienceBuilder({ cohorts, disabled, errors, onChange, products,
             aria-label="Remover grupo"
             className="ml-auto size-10! px-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             disabled={disabled}
-            onClick={() => changeRoot(removeAudienceNode(root, path))}
+            onClick={() => removeNode(path)}
             title="Remover grupo"
             type="button"
             variant="ghost"
@@ -727,7 +746,7 @@ export function AudienceBuilder({ cohorts, disabled, errors, onChange, products,
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <Button className="px-3" disabled={disabled} onClick={() => addRule([])} type="button" variant="secondary">
+            <Button className="px-3" disabled={disabled} onClick={() => addRule([])} ref={addRuleButton} type="button" variant="secondary">
               <Plus aria-hidden="true" className="size-4" />
               Adicionar regra
             </Button>

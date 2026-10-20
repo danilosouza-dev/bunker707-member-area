@@ -7,11 +7,12 @@ import type { NoticeListItem } from "@/server/communications/queries";
 import { DataTable, type DataTableColumn } from "../data-table";
 import { StatusChip } from "../status-chip";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
-import { formatClicks, formatInteger, formatStudentCount, noticeHref } from "./notices-view-model";
+import { formatStudentCount, noticeHref, noticeRowNumbers } from "./notices-view-model";
 
 // Tabela de Avisos e pop-ups (docs/22 §2.1): linha inteira abre o aviso (editor no rascunho, relatorio
 // depois de enviado), menu "…" com as acoes da situacao por cima do link. No celular vira um cartao
-// por aviso (o menu fica no canto, dá para pausar um pop-up a 375 px; docs/17 §1.13).
+// por aviso (o menu fica no canto, dá para pausar um pop-up a 375 px; docs/17 §1.13). Vistos e Cliques
+// de aviso que nunca saiu (rascunho, aguardando aprovacao, agendado) mostram "—".
 
 export function toNoticeActionTarget(item: NoticeListItem): NoticeActionTarget {
   return {
@@ -93,14 +94,14 @@ export function NoticesTable({ items }: { items: readonly NoticeListItem[] }) {
     },
     {
       align: "right",
-      cell: (item) => formatInteger(item.stats.seen),
+      cell: (item) => noticeRowNumbers(item).seen,
       header: "Vistos",
       id: "vistos",
       mobileLabel: "Vistos"
     },
     {
       align: "right",
-      cell: (item) => formatClicks(item.stats.clicked, item.clickRate),
+      cell: (item) => noticeRowNumbers(item).clicks,
       header: "Cliques",
       id: "cliques",
       mobileLabel: "Cliques"

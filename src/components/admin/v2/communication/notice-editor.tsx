@@ -40,6 +40,7 @@ import { NoticePreview } from "./notice-preview";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
 import { NoticeWhenFields } from "./notice-when-fields";
 import {
+  NOTHING_TO_SAVE_MESSAGE,
   NOTICES_HREF,
   PRIMARY_INTENT_LABELS,
   audienceErrorsFrom,
@@ -50,10 +51,14 @@ import {
   noticeDraftForKind,
   noticeErrorsFrom,
   noticeErrorsFromAction,
+  noticeFailureTitle,
   noticeHref,
+  noticeStatusAfterPublish,
   primaryIntentFor,
   publishedNoticeToast,
   rebaseNoticeDraft,
+  savedNoticeToast,
+  testSentToast,
   type NoticeFieldErrors
 } from "./notices-view-model";
 
@@ -62,7 +67,8 @@ import {
 // componentes reais do aluno. Modelo: o editor do Destaque (member-area/home-hero/hero-editor.tsx).
 //
 // - "Salvar rascunho" grava pela Server Action saveNoticeDraft com a versao lida (409 -> banner
-//   "Este aviso mudou em outra tela" com Recarregar, mantendo o rascunho). Cmd/Ctrl+Enter salva.
+//   "Este aviso mudou em outra tela" com Recarregar, mantendo o rascunho). Cmd/Ctrl+Enter salva. Sem
+//   mudanca, nao grava (gravar volta agendado e aguardando aprovacao para rascunho).
 // - O botao principal salva e publica com a versao devolvida: "Enviar agora", "Agendar envio",
 //   "Publicar pop-up" ou "Enviar para aprovação" (publishDecision com a contagem ao vivo; o servidor
 //   decide de novo e conta outra vez).
@@ -80,7 +86,7 @@ type NoticeEditorProps = {
   permissions: NoticePermissions;
 };
 
-type Failure = { message: string; status: number };
+type Failure = { message: string; status: number; title: string };
 type Busy = "publish" | "save" | "test" | null;
 type SavedVersion = { id: string; status: CampaignStatus; updatedAt: string };
 
@@ -361,8 +367,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     clearServerErrors(["image"]);
   }
 
-  function showFailure(next: Failure) {
-    setFailure(next);
+  function showFailure(next: Omit<Failure, "title"> & { title?: string }) {
+    setFailure({ ...next, title: next.title ?? noticeFailureTitle({ savedDraft: false, status: next.status, step: "save" }) });
     window.requestAnimationFrame(() => bannerRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" }));
   }
 
@@ -424,13 +430,20 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       return;
     }
 
+    // Nada mudou: gravar de novo cancelaria o agendamento ou o pedido de aprovacao sem motivo.
+    if (savedVersion && !dirty && !uploading && !audioBusy) {
+      adminToast.info(NOTHING_TO_SAVE_MESSAGE);
+      return;
+    }
+
     const wasNew = !savedVersion;
+    const previousStatus = status;
     setBusy("save");
     const version = await persist();
     setBusy(null);
 
     if (version) {
-      adminToast.success(livePopup ? (status === "paused" ? "Pop-up salvo. Ele continua pausado." : "Pop-up atualizado. Quem já fechou não vê de novo.") : "Rascunho salvo.");
+      adminToast.success(savedNoticeToast(draft.kind, previousStatus));
       openSavedNotice(version.id, wasNew);
     }
   }
@@ -457,12 +470,14 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     if (!result.ok) {
       const fieldErrors = noticeErrorsFromAction(result.fieldErrors);
       setServerErrors(fieldErrors);
-      showFailure({ message: result.error, status: result.status });
+      // O rascunho ja foi gravado: o banner diz isso e a tela fica (sem trocar de endereco, que remontaria
+      // o editor e levaria o banner junto).
+      showFailure({ message: result.error, status: result.status, title: noticeFailureTitle({ savedDraft: true, status: result.status, step: "publish" }) });
       focusFirstError(fieldErrors);
       return;
     }
 
-    setSavedVersion({ id: result.data.id, status: result.data.situation === "sent" ? "sent" : version.status, updatedAt: result.data.updatedAt });
+    setSavedVersion({ id: result.data.id, status: noticeStatusAfterPublish(draft.kind, result.data.situation), updatedAt: result.data.updatedAt });
     adminToast.success(publishedNoticeToast(result.data, draft.kind));
     router.push(noticeHref(result.data.id));
   }
@@ -473,8 +488,10 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }
 
     const wasNew = !savedVersion;
+    const previousStatus = status;
+    const saves = dirty || !savedVersion;
     setBusy("test");
-    const version = dirty || !savedVersion ? await persist() : savedVersion;
+    const version = saves ? await persist() : savedVersion;
 
     if (!version) {
       setBusy(null);
@@ -485,12 +502,12 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     setBusy(null);
 
     if (!result.ok) {
-      showFailure({ message: result.error, status: result.status });
-      openSavedNotice(version.id, wasNew);
+      // Sem trocar de endereco: remontar o editor levaria o banner. "Abrir rascunho" fica no banner.
+      showFailure({ message: result.error, status: result.status, title: noticeFailureTitle({ savedDraft: saves, status: result.status, step: "test" }) });
       return;
     }
 
-    adminToast.success("Enviamos a notificação para o seu sino.");
+    adminToast.success(testSentToast(saves, previousStatus));
     openSavedNotice(version.id, wasNew);
   }
 
@@ -574,7 +591,11 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                   <Button
                     className="px-3"
                     disabled={locked}
-                    onClick={() => (dirty ? showFailure({ message: "Salve ou descarte as mudanças antes de aprovar.", status: 0 }) : noticeActions.request("approve", actionTarget))}
+                    onClick={() =>
+                      dirty
+                        ? showFailure({ message: "Salve as mudanças antes de aprovar.", status: 0, title: noticeFailureTitle({ savedDraft: false, status: 0, step: "approve" }) })
+                        : noticeActions.request("approve", actionTarget)
+                    }
                     type="button"
                   >
                     Aprovar e publicar
@@ -625,12 +646,28 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                       Recarregar
                     </Button>
                   ) : (
-                    <Button className="px-3 text-[var(--text-secondary)]" onClick={() => setFailure(null)} type="button" variant="ghost">
-                      Fechar
-                    </Button>
+                    <>
+                      {/* Ainda em "Novo aviso", mas o rascunho ja foi gravado: abre o endereco dele. */}
+                      {!initial && savedVersion ? (
+                        <Button
+                          className="px-3"
+                          onClick={() => {
+                            setFailure(null);
+                            router.replace(noticeHref(savedVersion.id), { scroll: false });
+                          }}
+                          type="button"
+                          variant="secondary"
+                        >
+                          Abrir rascunho
+                        </Button>
+                      ) : null}
+                      <Button className="px-3 text-[var(--text-secondary)]" onClick={() => setFailure(null)} type="button" variant="ghost">
+                        Fechar
+                      </Button>
+                    </>
                   )
                 }
-                title={conflict ? "Este aviso mudou em outra tela" : "O aviso não foi salvo"}
+                title={failure.title}
               >
                 {conflict ? `${failure.message} O que você mudou aqui continua no rascunho.` : failure.message}
               </ErrorBanner>
@@ -665,7 +702,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                 error={errorFor("body")}
                 hint={draft.kind === "inbox" ? "Textos longos ficam com “Ver mais” no sino." : undefined}
                 id="aviso-texto"
-                label="Texto"
+                label="Texto (opcional)"
                 max={limits.body}
                 multiline
                 onBlur={() => touch("body")}
