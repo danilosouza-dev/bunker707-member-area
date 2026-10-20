@@ -3,6 +3,8 @@
 // /api/notifications, o painel do sino, a previa do admin e tests/comunicacao-avisos-modelo.test.mjs
 // usam os mesmos tipos.
 
+import { INBOX_HISTORY_DAYS } from "./campaign-model";
+
 export type NotificationKind = "comment_mention" | "comment_reply" | "notice";
 
 export type NotificationAudio = { durationSeconds: number; mimeType: string | null; peaks: number[]; url: string };
@@ -34,6 +36,11 @@ export type NotificationItem = {
 export type NotificationsFilter = "all" | "unread";
 
 export type NotificationsPage = {
+  /**
+   * Hora do servidor na leitura (ISO): o painel guarda a da primeira pagina e manda junto em "abriu o
+   * sino" e "Marcar todas", que entao nao mexem no que so apareceu depois (parseNotificationsAsOf).
+   */
+  asOf: string;
   items: NotificationItem[];
   nextCursor: string | null;
   /** Nao lidas (bolinha vermelha). */
@@ -124,6 +131,23 @@ export function decodeCursor(value: string | null | undefined): { createdAt: str
   }
 
   return { createdAt, id: id.toLowerCase() };
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * `asOf` do "abriu o sino" e do "Marcar todas" (a hora do servidor que veio com a lista): vale so um
+ * instante em UTC que nao esta no futuro nem passa dos 90 dias da caixa; fora disso, null (a rota
+ * ignora e marca tudo o que aparece agora, como antes).
+ */
+export function parseNotificationsAsOf(value: unknown, now: number): string | null {
+  if (typeof value !== "string" || value.length > 40 || !UTC_INSTANT.test(value)) {
+    return null;
+  }
+
+  const time = Date.parse(value);
+
+  return Number.isFinite(time) && time <= now && time >= now - INBOX_HISTORY_DAYS * DAY_MS ? value : null;
 }
 
 /** Barras da forma de onda: inteiros 0..100, reamostrados para `bars` (vazio -> barras baixas). */

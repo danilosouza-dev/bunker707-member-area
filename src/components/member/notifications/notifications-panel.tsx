@@ -36,9 +36,12 @@ import {
 // botao registra o clique, marca como lida, fecha o painel e navega pelo AppShell (salva progresso e
 // favoritos antes). Sem toast: erros ficam no proprio painel. Foco: quando o controle usado some
 // ("Marcar todas como lidas", o ultimo "Carregar mais"), o foco vai para o titulo ou para o fim da
-// lista, e uma frase para o leitor de tela confirma o que aconteceu.
+// lista, e uma frase para o leitor de tela confirma o que aconteceu. "Visto" ao abrir e "Marcar todas"
+// levam a hora do servidor da primeira pagina (asOf): o que chegou com o painel aberto continua novo.
 
 type ListState = {
+  /** Hora do servidor na primeira pagina (limite do "visto" e do "Marcar todas"); "" antes de carregar. */
+  asOf: string;
   /** Status HTTP da falha ao carregar (401 = sessao encerrada); 0 sem falha ou falha de rede. */
   errorStatus: number;
   items: NotificationItem[];
@@ -51,6 +54,7 @@ type ListState = {
 };
 
 const LOADING_LIST: ListState = {
+  asOf: "",
   errorStatus: 0,
   items: [],
   loadingMore: false,
@@ -140,6 +144,7 @@ export function NotificationsPanel({
     fetchNotificationsPage({ filter, signal: controller.signal })
       .then((page) => {
         setList({
+          asOf: page.asOf,
           errorStatus: 0,
           items: page.items,
           loadingMore: false,
@@ -155,7 +160,7 @@ export function NotificationsPanel({
         if (page.unseen > 0 && !seenSentRef.current) {
           seenSentRef.current = true;
           setSummaryUnseen(0);
-          postRead({ seen: true })
+          postRead({ asOf: page.asOf, seen: true })
             .then((counts) => {
               setSummaryUnseen(counts.unseen);
               setUnread(counts.unread);
@@ -196,7 +201,8 @@ export function NotificationsPanel({
     }
 
     loadMoreRef.current?.abort();
-    setList(LOADING_LIST);
+    // Ate a lista nova chegar, "Marcar todas" vale para o que a lista anterior mostrou.
+    setList((current) => ({ ...LOADING_LIST, asOf: current.asOf }));
     setActionError(null);
     setFilter(next);
   }
@@ -263,7 +269,7 @@ export function NotificationsPanel({
     setStatusMessage("");
 
     try {
-      const counts = await postRead({ all: true });
+      const counts = await postRead({ all: true, asOf: list.asOf || undefined });
       setList((current) => ({ ...current, items: markNotificationsRead(current.items, "all", new Date().toISOString()) }));
       setUnread(counts.unread);
       setSummaryUnseen(counts.unseen);

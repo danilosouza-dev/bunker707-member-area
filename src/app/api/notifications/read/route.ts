@@ -1,19 +1,22 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/server/auth/guards";
 import { markAllSeen, markRead, readNotificationCounts } from "@/server/communications/inbox";
+import { parseNotificationsAsOf } from "@/server/communications/notification-model";
 import { isUuid, noStore, recordCommunicationEvents } from "@/server/communications/route-support";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 // Sino do aluno: { seen: true } = abriu o sino (o numero zera, as bolinhas ficam); { ids: [...] } =
 // marcou essas como lidas; { all: true } = "Marcar todas como lidas". Devolve os contadores novos.
+// Os dois de "todas" aceitam `asOf` (a hora do servidor que veio com a lista): so mexem no que ja
+// aparecia naquela hora. asOf invalido, no futuro ou de mais de 90 dias e ignorado (tudo o que aparece agora).
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const MAX_IDS = 50;
 
-type ReadPayload = { all?: unknown; ids?: unknown; seen?: unknown };
+type ReadPayload = { all?: unknown; asOf?: unknown; ids?: unknown; seen?: unknown };
 
 export async function POST(request: Request) {
   const auth = await requireApiUser();
@@ -43,6 +46,7 @@ export async function POST(request: Request) {
 
   try {
     const userId = auth.user.id;
+    const asOf = parseNotificationsAsOf(body.asOf, Date.now());
 
     if (ids) {
       const unique = Array.from(new Set(ids.map((id) => id.toLowerCase())));
@@ -51,10 +55,10 @@ export async function POST(request: Request) {
         unique.map((id) => ({ entity_id: id, entity_type: "notification", event_type: "notification_read", metadata: { notification_id: id }, user_id: userId }))
       );
     } else if (body.all === true) {
-      await markRead(userId, "all");
+      await markRead(userId, "all", { asOf });
       await recordCommunicationEvents([{ entity_type: "notification", event_type: "notification_read", metadata: { all: true }, user_id: userId }]);
     } else {
-      await markAllSeen(userId);
+      await markAllSeen(userId, { asOf });
     }
 
     return noStore(NextResponse.json({ data: await readNotificationCounts(userId) }));

@@ -6,7 +6,8 @@ import { ESCOLA_DE_TESTE, SENHA_DE_TESTE } from "../fixtures/escola-de-teste.mjs
 // fecha e devolve o foco ao botao; o avatar abre o menu da conta (Perfil, Minhas compras, Suporte,
 // Sair), que funciona pelo teclado e pelo clique do mouse (regressao do Safari); e o botao flutuante
 // abre a IA Diretor com a saudacao pelo nome e, sem provedor configurado nesta escola de teste, o
-// motivo no lugar das sugestoes.
+// motivo no lugar das sugestoes. Se o codigo do painel do sino nao baixa (deploy novo), o erro fica no
+// painel e a pagina continua.
 
 const { aluna } = ESCOLA_DE_TESTE.contas;
 const primeiroNome = aluna.nome.split(" ")[0];
@@ -98,6 +99,30 @@ test("IA Diretor: o botao flutuante abre o painel com a saudacao pelo nome; sem 
   // Ha dois "Fechar IA Diretor" (o botao flutuante, que vira "fechar" enquanto aberto, e o do cabecalho do painel).
   await painel.getByRole("button", { name: "Fechar IA Diretor" }).click();
   await expect(painel).toBeHidden();
+});
+
+test("sino: se o codigo do painel nao baixa (deploy novo trocou os arquivos), o erro fica no painel e a pagina continua; recarregar resolve", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+
+  // Depois de um deploy, os arquivos de JavaScript antigos que a pagina ainda nao baixou dao 404.
+  const arquivos = "**/_next/static/chunks/**";
+  await page.route(arquivos, (route) => route.fulfill({ body: "", status: 404 }));
+
+  await page.getByRole("button", { name: /^Notificações/ }).click();
+  const painel = page.getByRole("dialog", { name: "Notificações" });
+  await expect(painel.getByRole("alert")).toHaveText(/Não foi possível abrir as notificações\./);
+  // Sem a tela de erro geral: o topo da pagina continua ali.
+  await expect(page.getByRole("heading", { name: "Algo deu errado" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Abrir menu" })).toBeVisible();
+
+  await page.unroute(arquivos);
+  const recarregou = page.waitForEvent("load");
+  await painel.getByRole("button", { name: "Recarregar a página" }).click();
+  await recarregou;
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: /^Notificações/ }).click();
+  await expect(page.getByRole("dialog", { name: "Notificações" }).getByRole("group", { name: "Filtrar notificações" })).toBeVisible();
 });
 
 // Sair com o mouse (mesma regressao do Safari: o botao nao recebe foco no clique). Entra como a aluna

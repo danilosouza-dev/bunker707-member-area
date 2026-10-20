@@ -37,7 +37,7 @@ export const ALREADY_RESPONDED = "Você já respondeu.";
 const NOTIFICATION_COLUMNS = "id,user_id,kind,campaign_id,is_test,actor_id,title,body,href,payload,seen_at,read_at,clicked_at,response,responded_at,created_at";
 const CAMPAIGN_EMBED =
   "campaign:campaigns(id,status,deleted_at,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label)";
-const VISIBILITY_COLUMNS = "id,kind,is_test,payload,campaign:campaigns(status,deleted_at)";
+const VISIBILITY_COLUMNS = "id,kind,is_test,payload,campaign:campaigns(status,deleted_at,sent_at)";
 
 type EmbeddedCampaign = {
   accept_label: string | null;
@@ -55,6 +55,7 @@ type EmbeddedCampaign = {
   image_alt: string | null;
   image_url: string | null;
   response_mode: "accept_decline" | "none";
+  sent_at?: string | null;
   status: string;
   title: string;
 };
@@ -80,7 +81,7 @@ type NotificationRow = {
 };
 
 type VisibilityRow = Pick<NotificationRow, "id" | "is_test" | "kind" | "payload"> & {
-  campaign: Pick<EmbeddedCampaign, "deleted_at" | "status"> | Pick<EmbeddedCampaign, "deleted_at" | "status">[] | null;
+  campaign: Pick<EmbeddedCampaign, "deleted_at" | "sent_at" | "status"> | Pick<EmbeddedCampaign, "deleted_at" | "sent_at" | "status">[] | null;
 };
 
 type CommentInfo = { author_avatar_url: string | null; author_name: string; deleted_at: string | null; id: string; status: string };
@@ -273,6 +274,8 @@ export async function listNotifications(input: {
 }): Promise<NotificationsPage> {
   const db = communicationsDb();
   const now = input.now ?? Date.now();
+  // Antes das leituras: o que for gravado durante a leitura fica fora do "Marcar todas" (continua nova).
+  const asOf = new Date(now).toISOString();
   const limit = Math.min(50, Math.max(1, input.limit ?? NOTIFICATIONS_PAGE_SIZE));
   const batchSize = (limit + 1) * 2;
   let after = decodeCursor(input.cursor);
@@ -333,10 +336,10 @@ export async function listNotifications(input: {
 
     const counts = await readCounts(db, input.userId, now);
 
-    return { items: page.map((entry) => toItem(entry.row, comments, actors)), nextCursor, ...counts };
+    return { asOf, items: page.map((entry) => toItem(entry.row, comments, actors)), nextCursor, ...counts };
   } catch (error) {
     if (isMissingCommunicationSchema(error)) {
-      return { items: [], nextCursor: null, unread: 0, unseen: 0 };
+      return { asOf, items: [], nextCursor: null, unread: 0, unseen: 0 };
     }
 
     throw error;
@@ -385,20 +388,41 @@ const VISIBLE_IDS_PAGE = 1_000;
 const MARK_CHUNK = 150;
 
 /**
+ * Aviso da escola que ja aparecia no sino em `asOf`: enviado ate la (o envio grava as linhas antes e so
+ * no fim passa a "Enviada"). O teste da equipe aparece na hora; o created_at ja vem filtrado no banco.
+ */
+function wasVisibleAt(row: VisibilityRow, asOf: string) {
+  if (row.kind !== "notice" || row.is_test) {
+    return true;
+  }
+
+  const sentAt = single(row.campaign)?.sent_at;
+
+  return Boolean(sentAt && Date.parse(sentAt) <= Date.parse(asOf));
+}
+
+/**
  * Ids das notificacoes do aluno, nos ultimos 90 dias, ainda sem `column` e que aparecem no sino agora.
  * "Marcar todas" e "abriu o sino" so mexem nestas: aviso ainda sendo enviado, ou resposta escondida pela
- * moderacao, continua nova para quando aparecer.
+ * moderacao, continua nova para quando aparecer. Com `asOf` (a hora da lista que o painel mostrou), so
+ * o que ja aparecia naquela hora: o que chegou ou foi enviado com o painel aberto continua novo.
  */
-async function visibleIdsWithout(db: CommunicationsDb, userId: string, column: "read_at" | "seen_at", now: number) {
+async function visibleIdsWithout(db: CommunicationsDb, userId: string, column: "read_at" | "seen_at", now: number, asOf: string | null) {
   const ids: string[] = [];
 
   for (let from = 0; ; from += VISIBLE_IDS_PAGE) {
-    const { data, error } = await db
+    let query = db
       .from("notifications")
       .select(VISIBILITY_COLUMNS)
       .eq("user_id", userId)
       .is(column, null)
-      .gte("created_at", sinceIso(now))
+      .gte("created_at", sinceIso(now));
+
+    if (asOf) {
+      query = query.lte("created_at", asOf);
+    }
+
+    const { data, error } = await query
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .range(from, from + VISIBLE_IDS_PAGE - 1);
@@ -406,7 +430,7 @@ async function visibleIdsWithout(db: CommunicationsDb, userId: string, column: "
 
     const rows = (data ?? []) as unknown as VisibilityRow[];
     const comments = await loadComments(db, rows);
-    ids.push(...rows.filter((row) => isVisible(row, comments)).map((row) => row.id));
+    ids.push(...rows.filter((row) => isVisible(row, comments) && (!asOf || wasVisibleAt(row, asOf))).map((row) => row.id));
 
     if (rows.length < VISIBLE_IDS_PAGE) {
       return ids;
@@ -434,12 +458,19 @@ async function markIds(db: CommunicationsDb, userId: string, ids: readonly strin
   }
 }
 
+type MarkAllOptions = {
+  /** Hora da lista que o painel mostrou (ja conferida por parseNotificationsAsOf); null = tudo o que aparece agora. */
+  asOf?: string | null;
+  now?: Date;
+};
+
 /** Abriu o sino: tudo que aparece na lista conta como visto (o numero zera; as bolinhas ficam). */
-export async function markAllSeen(userId: string, now = new Date()) {
+export async function markAllSeen(userId: string, options: MarkAllOptions = {}) {
   const db = communicationsDb();
+  const now = options.now ?? new Date();
 
   try {
-    const ids = await visibleIdsWithout(db, userId, "seen_at", now.getTime());
+    const ids = await visibleIdsWithout(db, userId, "seen_at", now.getTime(), options.asOf ?? null);
     await markIds(db, userId, ids, { nowIso: now.toISOString(), read: false });
   } catch (error) {
     if (!isMissingCommunicationSchema(error)) {
@@ -448,12 +479,16 @@ export async function markAllSeen(userId: string, now = new Date()) {
   }
 }
 
-/** Marca como lidas as notificacoes pedidas (ou todas as que aparecem no sino). Lida tambem conta como vista. */
-export async function markRead(userId: string, ids: readonly string[] | "all", now = new Date()) {
+/**
+ * Marca como lidas as notificacoes pedidas (ou todas as que aparecem no sino; `asOf` vale so para "all").
+ * Lida tambem conta como vista.
+ */
+export async function markRead(userId: string, ids: readonly string[] | "all", options: MarkAllOptions = {}) {
   const db = communicationsDb();
+  const now = options.now ?? new Date();
 
   try {
-    const targets = ids === "all" ? await visibleIdsWithout(db, userId, "read_at", now.getTime()) : ids;
+    const targets = ids === "all" ? await visibleIdsWithout(db, userId, "read_at", now.getTime(), options.asOf ?? null) : ids;
     await markIds(db, userId, targets, { nowIso: now.toISOString(), read: true });
   } catch (error) {
     if (!isMissingCommunicationSchema(error)) {

@@ -298,6 +298,30 @@ test("cursor do sino: guarda os microssegundos do banco (nenhuma notificacao do 
   }
 });
 
+test("asOf do 'Marcar todas': vale a hora do servidor em UTC ate 90 dias atras; futuro, antiga demais ou texto qualquer e ignorado", () => {
+  const agora = Date.parse("2026-10-20T15:00:00.000Z");
+  const dia = 86_400_000;
+
+  assert.equal(notification.parseNotificationsAsOf("2026-10-20T14:59:59.123Z", agora), "2026-10-20T14:59:59.123Z");
+  assert.equal(notification.parseNotificationsAsOf("2026-10-20T15:00:00.000Z", agora), "2026-10-20T15:00:00.000Z", "a propria hora vale");
+  assert.equal(notification.parseNotificationsAsOf(new Date(agora - 90 * dia).toISOString(), agora), new Date(agora - 90 * dia).toISOString(), "90 dias ainda vale");
+
+  for (const invalido of [
+    "2026-10-20T15:00:00.001Z",
+    new Date(agora - 90 * dia - 1).toISOString(),
+    "2026-10-20T12:00:00-03:00",
+    "2026-10-20",
+    "ontem",
+    "",
+    null,
+    undefined,
+    agora,
+    { asOf: "2026-10-20T14:00:00.000Z" }
+  ]) {
+    assert.equal(notification.parseNotificationsAsOf(invalido, agora), null, String(invalido));
+  }
+});
+
 test("forma de onda: inteiros de 0 a 100 reamostrados para 48 barras; sem dado, barras baixas", () => {
   const padrao = notification.normalizePeaks(null);
   assert.equal(padrao.length, 48);

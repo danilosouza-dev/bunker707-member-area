@@ -415,12 +415,14 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   }
 
   /**
-   * Aviso novo acabou de ser gravado: a tela passa para o endereco do aviso (recarregar, "Recarregar"
-   * depois de um 409 e o menu de acoes valem para ele). Nada se perde: o que esta na tela e o que foi
-   * gravado.
+   * Ainda no endereco de "Novo aviso" com o rascunho gravado: a tela passa para o endereco do aviso
+   * (recarregar, "Recarregar" depois de um 409 e o menu de acoes valem para ele). Depende so do
+   * endereco: um teste que falhou antes (rascunho gravado, banner na tela) nao impede que o proximo
+   * sucesso troque o endereco. So os caminhos de sucesso chamam (trocar remonta o editor e levaria o
+   * banner de erro). Nada se perde: o que esta na tela e o que foi gravado.
    */
-  function openSavedNotice(id: string, wasNew: boolean) {
-    if (wasNew && !initial) {
+  function openSavedNotice(id: string) {
+    if (!initial) {
       router.replace(noticeHref(id), { scroll: false });
     }
   }
@@ -433,10 +435,10 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     // Nada mudou: gravar de novo cancelaria o agendamento ou o pedido de aprovacao sem motivo.
     if (savedVersion && !dirty && !uploading && !audioBusy) {
       adminToast.info(NOTHING_TO_SAVE_MESSAGE);
+      openSavedNotice(savedVersion.id);
       return;
     }
 
-    const wasNew = !savedVersion;
     const previousStatus = status;
     setBusy("save");
     const version = await persist();
@@ -444,7 +446,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
     if (version) {
       adminToast.success(savedNoticeToast(draft.kind, previousStatus));
-      openSavedNotice(version.id, wasNew);
+      openSavedNotice(version.id);
     }
   }
 
@@ -487,7 +489,6 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       return;
     }
 
-    const wasNew = !savedVersion;
     const previousStatus = status;
     const saves = dirty || !savedVersion;
     setBusy("test");
@@ -508,7 +509,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }
 
     adminToast.success(testSentToast(saves, previousStatus));
-    openSavedNotice(version.id, wasNew);
+    openSavedNotice(version.id);
   }
 
   function discard() {

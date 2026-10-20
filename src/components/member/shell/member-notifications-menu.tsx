@@ -1,11 +1,13 @@
 "use client";
 
 import { Popover } from "@base-ui/react/popover";
-import { Bell } from "lucide-react";
+import { Bell, RotateCw } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useRef, useState, type MouseEvent } from "react";
+import { useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
 import { useEscapeToClose, useNotificationsSummary } from "@/components/member/notifications/notifications-client";
 import { bellLabel, formatBadgeCount } from "@/components/member/notifications/notifications-model";
+import type { NotificationsPanel as NotificationsPanelComponent } from "@/components/member/notifications/notifications-panel";
+import { MemberButton } from "@/components/member/ui/member-button";
 import { MemberSkeletonBlock } from "@/components/member/ui/member-skeletons";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cn } from "@/lib/utils";
@@ -15,7 +17,8 @@ import { cn } from "@/lib/utils";
 // avisos da escola e respostas/mencoes nos comentarios. O painel vai em portal (o topo tem
 // `overflow-hidden`) e so monta aberto; o numero vem de uma memoria fora do React que sobrevive a
 // troca de pagina (notifications-client.ts). O codigo do painel (lista, cartoes, player) so e baixado
-// quando o aluno chega perto do sino (mouse em cima ou foco), como a IA Diretor.
+// quando o aluno chega perto do sino (mouse em cima ou foco), como a IA Diretor; se o download falha
+// (rede, ou deploy novo que trocou os arquivos), o erro fica dentro do painel e a pagina continua.
 //
 // O painel fica acima da IA Diretor aberta (z-180) e abaixo do pop-up da home (z-200), que espera o sino
 // fechar.
@@ -42,10 +45,37 @@ function PanelLoading() {
   );
 }
 
-const NotificationsPanel = dynamic(() => loadNotificationsPanel().then((module) => module.NotificationsPanel), {
-  loading: () => <PanelLoading />,
-  ssr: false
-});
+type NotificationsPanelProps = ComponentProps<typeof NotificationsPanelComponent>;
+
+/** O painel nao baixou: o aviso fica no proprio painel (sem a tela de erro geral) e recarregar resolve. */
+function PanelLoadFailed() {
+  return (
+    <div className="flex flex-col">
+      <div className="flex min-h-[3.75rem] items-center px-4 pb-3 pt-4">
+        <Popover.Title className="text-base font-semibold text-white">Notificações</Popover.Title>
+      </div>
+      <div className="mx-4 mb-4 flex flex-col items-start gap-3 rounded-[12px] border border-red-400/20 bg-red-500/[0.07] px-4 py-4" role="alert">
+        <p className="text-sm font-medium text-red-100">Não foi possível abrir as notificações.</p>
+        <MemberButton onClick={() => window.location.reload()} size="sm" variant="secondary">
+          <RotateCw aria-hidden="true" />
+          Recarregar a página
+        </MemberButton>
+      </div>
+    </div>
+  );
+}
+
+const NotificationsPanel = dynamic(
+  () =>
+    loadNotificationsPanel()
+      .then((module) => module.NotificationsPanel)
+      // Sem o catch, a falha do download subiria ate a tela de erro geral (global-error) e a pagina inteira sumiria.
+      .catch((): ComponentType<NotificationsPanelProps> => PanelLoadFailed),
+  {
+    loading: () => <PanelLoading />,
+    ssr: false
+  }
+);
 
 /** Comeca a baixar o painel antes do clique (falha aqui nao importa: o clique tenta de novo). */
 function preloadPanel() {

@@ -864,3 +864,51 @@ test("abrir o sino e 'Marcar todas' so mexem no que aparece: aviso ainda sendo e
   const item = (await sino(aluna)).items.find((notificacao) => notificacao.title === "Ainda sendo enviado");
   assert.ok(item && item.seenAt === null && item.readAt === null, JSON.stringify(item));
 });
+
+test("com a hora da lista (asOf), abrir o sino e 'Marcar todas' nao mexem no que apareceu depois: envio terminado e aviso novo com o painel aberto continuam novos", async () => {
+  await marcar(aluna, { all: true });
+
+  // Aviso em envio quando o painel le a lista: a linha da aluna ja esta gravada, mas o sino nao mostra.
+  actAs(produtor);
+  const emEnvio = await actions.saveNoticeDraft({ draft: rascunho({ title: "Enviado com o painel aberto" }) });
+  unwrap(
+    await db.from("campaigns").update({ dispatch_started_at: new Date().toISOString(), status: "sending" }).eq("id", emEnvio.data.id),
+    "Simulando o envio em andamento"
+  );
+  unwrap(
+    await db.from("notifications").insert({ campaign_id: emEnvio.data.id, dedupe_key: `campaign:${emEnvio.data.id}`, kind: "notice", user_id: aluna.id }),
+    "Gravando a linha da aluna"
+  );
+
+  const lista = await sino(aluna);
+  assert.match(lista.asOf, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "a hora do servidor vem com a lista");
+  assert.ok(Date.parse(lista.asOf) <= Date.now());
+  assert.ok(!lista.items.some((item) => item.title === "Enviado com o painel aberto"));
+
+  // Com o painel aberto: o envio termina e outro aviso chega.
+  unwrap(await db.from("campaigns").update({ sent_at: new Date().toISOString(), status: "sent" }).eq("id", emEnvio.data.id), "Terminando o envio");
+  const novo = await salvarEPublicar(produtor, rascunho({ title: "Chegou com o painel aberto" }));
+
+  const linhaDe = async (campaignId) => {
+    const [linha] = unwrap(
+      await db.from("notifications").select("seen_at,read_at").eq("campaign_id", campaignId).eq("user_id", aluna.id),
+      "Lendo a linha da aluna"
+    );
+    return linha;
+  };
+
+  const vista = await marcar(aluna, { asOf: lista.asOf, seen: true });
+  assert.equal(vista.status, 200);
+  assert.deepEqual((await vista.json()).data, { unread: 2, unseen: 2 }, "o numero do sino mostra as duas que chegaram depois");
+
+  const todas = await marcar(aluna, { all: true, asOf: lista.asOf });
+  assert.equal(todas.status, 200);
+  assert.deepEqual((await todas.json()).data, { unread: 2, unseen: 2 });
+  assert.deepEqual(await linhaDe(emEnvio.data.id), { read_at: null, seen_at: null }, "enviado depois da lista: continua novo");
+  assert.deepEqual(await linhaDe(novo.id), { read_at: null, seen_at: null }, "gravado depois da lista: continua novo");
+
+  // asOf no futuro (ou invalido) e ignorado: marca tudo o que aparece agora, como sem asOf.
+  const futuro = await marcar(aluna, { all: true, asOf: new Date(Date.now() + 60_000).toISOString() });
+  assert.deepEqual((await futuro.json()).data, { unread: 0, unseen: 0 });
+  assert.ok((await linhaDe(novo.id)).read_at);
+});

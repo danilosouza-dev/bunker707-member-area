@@ -295,6 +295,7 @@ Painel (Base UI `Popover` em portal, porque o topo tem `overflow-hidden`; `z-[19
 - filtros `Todas` e `Não lidas` com `MemberFilterPills` (a de nao lidas com a contagem quando passa de zero);
 - lista com rolagem propria (ate `min(70vh, 36rem)`, sem rolar a pagina por tras), grupos por dia com rotulo `Hoje`, `Ontem`, `Últimos 7 dias`, `Mais antigas` (12 px, semibold, zinc 400: o zinc 500 ficava abaixo de 4,5:1 sobre o fundo do painel) e itens separados por linha `white/[0.06]`;
 - rodape `Carregar mais` (botao secundario pequeno, `Carregando...`) ou, no fim, `As notificações ficam aqui por 90 dias.` (12 px, zinc 400);
+- enquanto o codigo do painel baixa, esqueleto (titulo e 3 linhas); se o download falha (rede, ou deploy novo com outros arquivos), o painel mostra o titulo `Notificações` e a mesma caixa de erro da lista (borda `red-400/20`, fundo `red-500/[0.07]`, `role="alert"`) com `Não foi possível abrir as notificações.` e o botao secundario pequeno `Recarregar a página` (`RotateCw`), como o lancador da IA Diretor; nunca a tela de erro geral;
 - foco no painel ao abrir; `Esc` fecha so o painel e devolve o foco ao sino. Quando o controle usado some, o foco nunca cai no corpo da pagina: `Marcar todas como lidas` passa o foco para o titulo `Notificações` (com `Todas as notificações foram marcadas como lidas.` numa regiao `status` para o leitor de tela) e o ultimo `Carregar mais` passa para o rodape `As notificações ficam aqui por 90 dias.`.
 
 Cartao da notificacao (`notification-card.tsx`), grade de 40 px + texto, `px-4 py-3.5`:

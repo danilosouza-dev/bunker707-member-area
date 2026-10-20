@@ -6,13 +6,20 @@ import "./support/resolve-extensionless-ts.mjs";
 // docs/22 §1.1 e §4.3): na home, o pedido do pop-up e o unico (traz o numero junto) e o topo nao pede o
 // seu enquanto ele vai sair; pedido comum aproveita o que esta em andamento; e uma falha conta como
 // tentativa (troca de pagina e volta para a aba esperam o mesmo minuto, sem um pedido por pagina numa
-// queda). O fetch e o relogio sao trocados aqui; nada de rede.
+// queda). Abrir o sino e "Marcar todas" levam a hora da lista (asOf) no corpo. O fetch e o relogio sao
+// trocados aqui; nada de rede.
 
 const pedidos = [];
+const corpos = [];
 let responder = () => ({ body: { data: { popup: null, unseen: 2 } }, status: 200 });
 
-globalThis.fetch = async (url) => {
+globalThis.fetch = async (url, init) => {
   pedidos.push(String(url));
+
+  if (init?.body) {
+    corpos.push(JSON.parse(String(init.body)));
+  }
+
   const { body, status } = responder(String(url));
 
   return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" }, status });
@@ -77,4 +84,16 @@ test("falha conta como tentativa: dentro do mesmo minuto ninguem pede de novo; d
   responder = () => ({ body: { error: "Sessao obrigatoria." }, status: 401 });
   assert.equal(await client.refreshNotificationsSummary({ force: true }), null);
   assert.equal(pedidos.length, 3, "force pede mesmo dentro do minuto");
+});
+
+test("abrir o sino e 'Marcar todas' mandam a hora da lista (asOf) que veio do servidor", async () => {
+  pedidos.length = 0;
+  responder = () => ({ body: { data: { unread: 2, unseen: 1 } }, status: 200 });
+  const asOf = "2026-10-20T15:00:00.000Z";
+
+  assert.deepEqual(await client.postRead({ asOf, seen: true }), { unread: 2, unseen: 1 });
+  await client.postRead({ all: true, asOf });
+
+  assert.deepEqual(pedidos, ["/api/notifications/read", "/api/notifications/read"]);
+  assert.deepEqual(corpos, [{ asOf, seen: true }, { all: true, asOf }]);
 });

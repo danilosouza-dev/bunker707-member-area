@@ -111,7 +111,9 @@ export async function dispatchInboxCampaign(input: {
         last_error: null,
         recipients_count: recipients,
         send_at: campaign.send_at ?? now.toISOString(),
-        sent_at: now.toISOString(),
+        // Hora real em que passa a aparecer no sino (o lote acima pode levar segundos): o "Marcar todas"
+        // do painel aberto antes disso nao mexe neste aviso (inbox.ts, asOf).
+        sent_at: new Date().toISOString(),
         status: "sent"
       },
       { expectedStatuses: ["sending"] }

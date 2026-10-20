@@ -112,7 +112,11 @@ export function fetchSummary(input: { popup?: boolean; signal?: AbortSignal } = 
   );
 }
 
-export type ReadRequest = { seen: true } | { ids: string[] } | { all: true };
+/**
+ * `asOf` (a hora do servidor que veio com a primeira pagina): "abriu o sino" e "Marcar todas" so mexem
+ * no que ja aparecia quando a lista foi lida.
+ */
+export type ReadRequest = { asOf?: string; seen: true } | { ids: string[] } | { all: true; asOf?: string };
 
 export function postRead(body: ReadRequest) {
   return postJson<{ unread: number; unseen: number }>("/api/notifications/read", body, "Não foi possível marcar como lida.");
