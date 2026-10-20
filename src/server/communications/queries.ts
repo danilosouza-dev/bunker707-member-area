@@ -340,6 +340,13 @@ export type NoticeEditorOptions = {
   segments: NoticeSegmentOption[];
 };
 
+/** Nome e logo da escola para a previa (relatorio sem o resto das opcoes do editor). */
+export async function loadNoticeBranding(): Promise<NoticeEditorOptions["branding"]> {
+  const settings = await readPlatformSettings(["branding"]);
+
+  return { logoUrl: normalizeLogo(settings.branding.value, settings.branding.exists), name: SCHOOL_NAME };
+}
+
 export async function loadNoticeEditorOptions(): Promise<NoticeEditorOptions> {
   const db = communicationsDb();
   const [productsResult, cohortsResult, savedSegments, settings] = await Promise.all([

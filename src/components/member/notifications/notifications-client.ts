@@ -10,7 +10,7 @@ import type {
 import type { PopupEvent } from "@/server/communications/campaign-model";
 import { isSummaryFresh } from "./notifications-model";
 
-// Conversa do sino e do pop-up com /api/notifications e /api/popups (docs/22 §4), mais o numero do
+// Conversa do sino e do pop-up com /api/notifications e /api/popups (docs/22 §4.4), mais o numero do
 // sino guardado na memoria do navegador. O topo (AppShell) remonta a cada pagina; o numero fica aqui,
 // fora do React, vale por 1 minuto (SUMMARY_TTL_MS) e e buscado de novo quando a aba volta a ficar
 // visivel e ja passou desse tempo. Cada chamada a API custa uma conferencia de sessao no Auth, entao

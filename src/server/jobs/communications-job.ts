@@ -1,6 +1,6 @@
 import "server-only";
 
-// Job do tick de minuto da Comunicacao (docs/22 §5; docs/04, secao Jobs): envia as notificacoes do sino
+// Job do tick de minuto da Comunicacao (docs/22 §4.2 e §4.3; docs/04, secao Jobs): envia as notificacoes do sino
 // agendadas que venceram (ate 3 por tick, em lotes de 500 alunos, retomavel) e recalcula quem ve cada
 // pop-up no ar (ate 5 por tick, a cada 15 minutos). Idempotente: cada aviso e reservado antes do envio
 // e o mesmo aluno nunca recebe a mesma notificacao duas vezes. Banco vazio ou sem a migracao

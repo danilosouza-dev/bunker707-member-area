@@ -542,7 +542,9 @@ Em 18/10/2026: o Storage Box (`bunker707-backups`, bx11) e criado pela etapa `pr
 - `roles.sql` (papeis e senhas), `schema.sql`, `data.sql.gz` e `postgres.dump` (formato custom, e o que a restauracao usa), todos gerados pelo `pg_dump` de dentro do container do Postgres (mesma versao, sem imagem extra);
 - `pgsodium_root.key`, a chave raiz do Vault (segredos dos provedores de IA): sem ela o Vault restaurado nao abre;
 - o `infra/compose/.env` (todos os segredos do stack);
-- `infra/compose/volumes/storage` (capas, materiais, fotos de perfil).
+- `infra/compose/volumes/storage` (capas, materiais, fotos de perfil e, desde 20/10/2026, as imagens dos avisos em `content-assets/communications/images` e os audios dos avisos no bucket `communication-audio`).
+
+Disco dos avisos (Comunicacao v1, `docs/22` §4.5): cada audio vai ate 10 MB e cada imagem ate 420 KB; um aviso por semana com audio da cerca de 0,5 GB por ano no Storage, e o mesmo no repositorio restic (o restic deduplica entre snapshots, entao os 30 diarios nao multiplicam isso). O bucket nasce pela migracao `202610200001` (sem passo manual nem variavel nova; o limite global `FILE_SIZE_LIMIT` de 50 MiB fica acima dos 10 MB). Audio ou imagem trocados no editor ficam no Storage sem referencia; se o disco apertar (monitor da secao 12), olhar primeiro os arquivos do bucket `communication-audio` em `infra/compose/volumes/storage`.
 
 Retencao: um snapshot por dia pelos ultimos 30 dias (`BACKUP_KEEP_DAILY`). Os dois ultimos exports ficam tambem em `/var/backups/bunker707/stage` para restauracao rapida. `backup.sh --check` (semanal, a mao ou num segundo timer) le 10% dos dados do repositorio para conferir integridade. `BACKUP_HEARTBEAT_URL` no `.env` recebe um GET a cada backup bom (monitor de "push" do Uptime Kuma ou Better Stack: se nao chegar, alerta).
 

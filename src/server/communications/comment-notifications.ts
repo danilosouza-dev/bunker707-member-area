@@ -1,6 +1,6 @@
 import "server-only";
 
-// Notificacoes automaticas de comentario (docs/22 §2): quem escreveu o comentario principal recebe
+// Notificacoes automaticas de comentario (docs/22 §1.2): quem escreveu o comentario principal recebe
 // "{Nome} respondeu seu comentário"; quem foi citado no comeco da resposta ("@ana.souza ...", formato que
 // a tela da aula escreve ao responder a uma resposta) recebe "{Nome} mencionou você". A mencao so vale
 // para quem ja escreveu naquela conversa (o @usuario nao e unico na escola) e so quando um unico autor

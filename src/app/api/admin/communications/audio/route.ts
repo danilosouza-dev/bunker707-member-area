@@ -5,7 +5,7 @@ import { CommunicationError } from "@/server/communications/db";
 import { NOTICE_AUDIO_SIZE_MESSAGE, persistNoticeAudio } from "@/server/communications/media";
 import { jsonRouteError } from "@/server/http/route-errors";
 
-// Audio do aviso (Comunicacao > Avisos e pop-ups, docs/22 §3): arquivo enviado ou gravado no navegador,
+// Audio do aviso (Comunicacao > Avisos e pop-ups, docs/22 §4.5): arquivo enviado ou gravado no navegador,
 // em multipart (campo "file"). Rota, e nao Server Action, porque o audio passa do 1 MB das acoes. O
 // servidor confere o tipo pelos primeiros bytes e o tamanho (ate 10 MB) e devolve o endereco publico;
 // duracao e forma de onda chegam depois, com o rascunho.

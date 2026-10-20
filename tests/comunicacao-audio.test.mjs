@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { actionStubs } from "./support/admin-action-stubs.mjs";
 
-// Audio dos avisos (docs/22 §3): o servidor nao confia no tipo que o navegador informa. Le os primeiros
+// Audio dos avisos (docs/22 §4.5): o servidor nao confia no tipo que o navegador informa. Le os primeiros
 // bytes, aceita MP3, M4A, OGG, WEBM e WAV (e AAC puro), recusa o resto e o que passa de 10 MB, e guarda
 // no bucket publico pelo hash do conteudo. Storage falso; a rota com o Storage local de verdade esta em
 // tests/integration/avisos-e-notificacoes.test.mjs.

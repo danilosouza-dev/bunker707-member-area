@@ -447,7 +447,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
 
       <main>{children}</main>
 
-      {/* Pop-up dos avisos: so na home e fora do modo "ver como" do produtor (docs/22 §5). */}
+      {/* Pop-up dos avisos: so na home e fora do modo "ver como" do produtor (docs/22 §1.3). */}
       <MemberPopupHost
         enabled={pathname === "/" && !accessPreviewMode}
         onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}

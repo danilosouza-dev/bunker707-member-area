@@ -98,7 +98,8 @@ Decisao atual:
 
 - comunidade completa nao entra no MVP essencial;
 - o CRM pode exibir item `Comunidade` como placeholder operacional para manter a arquitetura de navegacao;
-- a area do aluno so deve receber comunidade quando categorias, topicos, notificacoes e moderacao estiverem persistidos.
+- a area do aluno so deve receber comunidade quando categorias, topicos, notificacoes e moderacao estiverem persistidos;
+- o pre-requisito de notificacoes foi atendido em 20/10/2026 (sino com avisos, respostas e mencoes; o pedido de resposta `Aceitar`/`Recusar` ja serve para convites; secao Notificacoes e pop-ups abaixo). Faltam categorias, topicos e a moderacao propria da comunidade.
 
 ### Ranking no MVP
 
@@ -175,10 +176,37 @@ Decisao tomada:
 - garantia de 7 dias: por enquanto a conta usa a data da compra. A Hotmart informa o fim da garantia no webhook (`purchase.warranty_expire_date`); quando o pipeline de webhooks gravar esse campo no acesso, a regra podera contar a partir dele (`anchor: "warranty_end"`). A conta ja esta pronta; falta a coluna e a opcao no admin;
 - aula ainda nao liberada nao envia video ao navegador; a tela destrava sozinha quando a data passa ou quando a aula anterior e concluida;
 - comentarios mostram etiqueta de funcao para todos: `Professor` (quem da equipe monta modulos e aulas: dono, admin, editor, professor ou funcao com essa permissao), `Moderador` (o resto da equipe) e `Aluno`;
-- o topo da area do aluno nao mostra sino nem trofeu ate existirem notificacoes e conquistas reais; o avatar abre o menu da conta;
+- o topo da area do aluno nao mostra trofeu ate existirem conquistas reais; o avatar abre o menu da conta. O sino seguia a mesma regra e voltou em 20/10/2026, com notificacoes reais (secao Notificacoes e pop-ups abaixo);
 - Suporte sem formulario enquanto nao existir caixa de entrada no admin para responder; a pagina mostra os canais configurados e perguntas frequentes;
 - Perfil so leitura nesta fase; editar nome/telefone/foto depende de unificar as tres origens do nome (cadastro do aluno, `profiles` e conta);
 - materiais de aula vem da tabela `lesson_materials` (migracao `202610130001`); a lista fixa de exemplo saiu. O cadastro de materiais no admin e a proxima etapa.
+
+### Notificacoes e pop-ups (20/10/2026)
+
+Pedido do produtor: notificacoes no sino com imagem, audio que toca ali mesmo, botao para dentro ou para fora da plataforma e convites que o aluno aceita ou recusa; a equipe cria, envia na hora ou agenda; pop-ups para grupos de alunos escolhidos por regras combinadas. Construido como Comunicacao v1 (fase 5 do `docs/17`, sem webinarios e promocoes); detalhes em `docs/22`.
+
+Decisao tomada (tabela C1-C11 em `docs/22` §5):
+
+- o sino se chama `Notificações` (nao "Lembretes"), como no vocabulario do `docs/17` §1.3; o numero conta as novas nao vistas e some ao abrir o sino, e a bolinha de cada item marca o que o aluno ainda nao abriu;
+- a notificacao de aviso aponta para o aviso (uma linha pequena por aluno; retirar do sino e uma acao so); as automaticas de comentario guardam o trecho e o link da aula;
+- o segmento ("Para quem") e avaliado no servidor, em TypeScript, com as mesmas leituras e regras da lista de Alunos (produto, progresso, comentarios, tempo de acesso, acesso terminando, ultimo estudo, entrada na plataforma, ritmo e turma), em grupos E/OU com um nivel, ate 20 regras. A equipe nunca entra. Vai para uma RPC quando a escola passar de alguns milhares de alunos (o mesmo aviso de escala da lista de Alunos);
+- envio da notificacao agendada e recalculo do segmento dos pop-ups no tick de minuto (job `comunicacao`), excecao a regra do `docs/04` que manda envio em massa para a fila de jobs: a fila ainda nao existe, e a linha do sino e minuscula, gravada em lotes de 500, com teto de 20.000 por rodada e retomavel sem duplicar. E-mail, push e WhatsApp em massa continuam fora do tick;
+- pop-up so na home, nunca numa aula, 3 s depois de abrir, no maximo 1 por sessao e 1 a cada 24 h, sem excecao para nenhum tipo (o tipo "critico" do sistema fica para depois); `Lembrar depois` volta em 24 h, no maximo 2 vezes; `Não mostrar de novo` vale para sempre (`docs/17` §1.8.1 e D12);
+- aprovacao acima de 500 alunos como no `docs/17` D4: editor publica ate 500; dono e admin publicam acima e aprovam o pedido de outra pessoa;
+- o pedido de resposta (`Aceitar`/`Recusar`) ja existe nos avisos da equipe e e o mecanismo que os convites da comunidade vao usar;
+- audio em bucket publico proprio (`communication-audio`, ate 10 MB, nome pelo hash), como as imagens: aviso nao e conteudo pago. Gravar no navegador exige o microfone, liberado so no `/admin`;
+- o desfecho de cada aviso e fixo, "voltou a estudar em 7 dias"; o seletor de desfecho ("Como medir") fica para depois;
+- mencao so avisa quando um unico autor da conversa tem o `@usuario`, porque o nome de usuario nao e unico na escola;
+- sem tempo real: o numero do sino e lido depois que a pagina aparece, vale 1 minuto entre paginas e e relido ao voltar para a aba; nada roda em intervalo (cada chamada custa uma conferencia de sessao no Auth);
+- eventos: `notification_read`, `notification_clicked`, `notification_responded` no sino e `message_impressed`, `message_clicked`, `message_closed`, `message_dismissed`, `message_snoozed` no pop-up, so com ids (`docs/05`, secao Eventos).
+
+Fica em aberto:
+
+- convites entre membros e a comunidade (posts de texto, texto com audio, video, resultados, gamificacao): o pedido de resposta esta pronto; falta quem cria o convite. Video de aluno vai para Bunny ou Mux, nunca para o servidor da area;
+- salas ao vivo e webinarios "tipo Zoom" dentro da area, com comentarios e numeros de retencao (momento de saida, retencao media e maxima, quem mais comentou): pede um estudo proprio (provedor de video ao vivo, custo e escala) antes do desenho;
+- outros tipos e canais: faixa no topo, card na home, destaque, toast, e-mail (pela fila `email_outbox`), push e WhatsApp;
+- central de preferencias `/perfil/notificacoes` e descadastro sem login, que chegam junto com o primeiro canal fora da plataforma;
+- seletor de desfecho, "Salvar quem converteu como segmento", aba "Avisos recebidos" no perfil do aluno e "Enviar aviso" a partir de Alunos, Comunidade e Hoje.
 
 ## Design
 

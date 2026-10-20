@@ -30,7 +30,7 @@ import {
   type NotificationLink
 } from "./notifications-model";
 
-// Painel do sino (docs/22 §5), montado so com o sino aberto. Ao abrir: carrega a primeira pagina do
+// Painel do sino (docs/22 §1.1; desenho em docs/12), montado so com o sino aberto. Ao abrir: carrega a primeira pagina do
 // filtro e, se havia novidades, marca todas como vistas (o numero do sino some; as bolinhas de nao
 // lida ficam). Clique num link ou botao registra o clique, marca como lida, fecha o painel e navega
 // pelo AppShell (salva progresso e favoritos antes). Sem toast: erros ficam no proprio painel.

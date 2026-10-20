@@ -119,6 +119,7 @@ test("barra superior mostra so os filtros que a tela usa (prototipo aprovado)", 
     "/admin/comunidade",
     "/admin/comunidade/denuncias",
     "/admin/comunicacao/avisos/novo",
+    "/admin/comunicacao/avisos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70",
     "/admin/area-de-membros",
     "/admin/area-de-membros/modulos",
     "/admin/configuracoes",
@@ -142,6 +143,8 @@ test("titulo da barra do celular: area ou tela interna", () => {
   assert.equal(getAdminMobileTitle("/admin/area-de-membros/marca"), "Área de membros");
   assert.equal(getAdminMobileTitle("/admin/home"), "Área de membros");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/webinarios"), "Comunicação");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/avisos/novo"), "Novo aviso");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/avisos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70"), "Comunicação", "a pagina troca pelo titulo do aviso");
   assert.equal(getAdminMobileTitle("/admin/comunidade/denuncias"), "Comunidade");
   assert.equal(getAdminMobileTitle("/admin/configuracoes"), "Configurações");
   assert.equal(getAdminMobileTitle("/admin/configuracoes/ia/consumo"), "Tutor IA");
@@ -298,6 +301,8 @@ test("cada destino do menu que pertence a esta fase tem uma pagina", () => {
   for (const href of [
     "/admin/alunos",
     "/admin/alunos/novo",
+    "/admin/comunicacao/avisos",
+    "/admin/comunicacao/avisos/novo",
     "/admin/produtos/pacotes",
     "/admin/area-de-membros",
     "/admin/area-de-membros/destaque",

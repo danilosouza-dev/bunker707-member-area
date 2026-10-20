@@ -4,7 +4,7 @@ import { actAs } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
-// Pop-ups da home (docs/22 §4; docs/17 §1.8.1) contra o banco LOCAL de verdade: o produtor publica pelas
+// Pop-ups da home (docs/22 §1.3 e §4.3; docs/17 §1.8.1) contra o banco LOCAL de verdade: o produtor publica pelas
 // Server Actions; a aluna pede o resumo do sino com ?popup=1 e registra os eventos pela rota (como o
 // navegador faria, inclusive com o corpo em text/plain do sendBeacon). Limites fixos: no maximo 1 a cada
 // 24 h; "Uma vez" some depois de visto; "Até o aluno clicar" volta no dia seguinte; "Lembrar depois" ate

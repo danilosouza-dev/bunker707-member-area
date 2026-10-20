@@ -1,6 +1,6 @@
 import "server-only";
 
-// Pop-up da home do aluno (docs/22 §4; docs/17 §1.8.1): no maximo 1 a cada 24 h (o limite de 1 por
+// Pop-up da home do aluno (docs/22 §1.3 e §4.3; docs/17 §1.8.1): no maximo 1 a cada 24 h (o limite de 1 por
 // sessao fica no navegador), so para quem esta no segmento (linha elegivel em campaign_deliveries,
 // mantida pelo job), nunca de novo depois de clicar ou de "Não mostrar de novo". A lista curta de
 // pop-ups no ar fica em cache (60 s, tag "communications"); o estado do aluno e lido na hora, em duas

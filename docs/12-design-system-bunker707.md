@@ -192,7 +192,7 @@ Comportamento:
 - Respostas aparecem indentadas dentro do comentario principal, com recuo e divisor vertical discreto para deixar clara a hierarquia da conversa.
 - Todo comentario e resposta deve ter acao `Responder`; ao clicar, o composer entra em modo resposta e preenche automaticamente `@nickname` da pessoa respondida.
 - O composer em modo resposta deve mostrar uma faixa de contexto com a mencao ativa e opcao de cancelar antes do envio.
-- Mencoes e respostas devem alimentar notificacoes futuras no sininho da plataforma para a pessoa mencionada ou dona do comentario respondido.
+- Respostas e mencoes geram notificacao no sino para a dona do comentario respondido e para a pessoa mencionada (desde 20/10/2026; desenho na secao Sino de notificacoes e pop-up).
 - Reacoes de comentario usam chips compactos com emoji/curtida e contador; o estado selecionado reforca a borda/acento sem dominar a leitura.
 - O menu `Reagir` deve oferecer uma lista padrao ampla de emojis, como curtir, fogo, insight, coracao, aplausos, risada, surpresa, foguete, de olho e util.
 - O menu de tres pontos deve oferecer denuncia de comentario para moderacao.
@@ -277,7 +277,52 @@ Datas mostradas ao aluno usam `src/lib/member-format.ts` (fuso America/Sao_Paulo
 - Item com 48 px de altura, texto 15 px e icone Lucide proprio de 24 px com traco 1,5 (Inicio `House`, Minha jornada `Route`, Continue assistindo `CirclePlay`, Minhas compras `LibraryBig`, Favoritos `Bookmark`, Materiais `FolderOpen`, Suporte `LifeBuoy`, Perfil `CircleUser`; a `Compass` e so da IA Diretor). Normal em peso regular `zinc-300`, hover `white/[0.06]`; ativo com fundo `white/[0.1]`, texto branco em negrito e icone preenchido a 18 %. Sem barra nem icone vermelho (decisao de 13/10/2026: o vermelho fica para a marca e para "ao vivo"); foco visivel.
 - Sem rodape de conta: perfil e `Sair` ficam so no menu da conta do topo. Produtor/admin ve no topo da gaveta o cartao `Área do produtor` com `Ir para o admin` e `Modo de visualização`.
 - Menu da conta no avatar do topo (`member-account-menu.tsx`, so o avatar, sem nome nem seta, como no YouTube; o nome aparece no painel): `Perfil`, `Minhas compras`, `Suporte` e `Sair`; fecha ao clicar fora, com `Esc` ou ao perder o foco; setas percorrem os itens.
-- Topo, a direita: busca, sino de lembretes (`member-notifications-menu.tsx`) e conta. Ate o modulo Comunicacao (docs/17, fase 5) entregar avisos, webinarios e promocoes, o sino abre "Nenhum lembrete por enquanto" com o que vai aparecer ali; nunca lembrete ou contador inventado. Sem trofeu ate existirem conquistas reais.
+- Topo, a direita: busca, sino de notificacoes (`member-notifications-menu.tsx`) e conta. Desde 20/10/2026 o sino tem notificacoes reais (Comunicacao v1, `docs/22`; desenho na secao seguinte); o numero so aparece quando ha notificacao nova, nunca um contador inventado. Sem trofeu ate existirem conquistas reais.
+
+## Sino de notificacoes e pop-up (aluno, 20/10/2026)
+
+Componentes em `src/components/member/notifications/` (regras puras em `notifications-model.ts`) e o botao em `src/components/member/shell/member-notifications-menu.tsx`. Usam so os tokens e as pecas da area do aluno (`MemberAvatar`, `memberButtonClassName`, `MemberChip`, `MemberEmptyState`, `MemberFilterPills`, `MemberSkeletonBlock`), nunca os do admin, como pede o `docs/17` §1.8.5. Regras de produto em `docs/22` §1.
+
+Botao do sino:
+
+- `Bell` de 20 px num circulo de 40 px (`hover:bg-white/10`, o mesmo do menu da conta), foco visivel branco; aberto, fica com o fundo `white/10`. Nome acessivel `Notificações`, `Notificações, 1 nova` ou `Notificações, 3 novas`; sem `title` nativo;
+- numero: pilula vermelha `bg-[var(--accent)]` de 18 px no canto superior direito, `text-[11px]` em negrito, `ring-2 ring-[#141414]` separando do fundo; `1` a `9` e `9+`; fora do leitor de tela (o nome acessivel ja diz). Sem novidade, nenhum numero.
+
+Painel (Base UI `Popover` em portal, porque o topo tem `overflow-hidden`):
+
+- largura `min(25rem, 100vw - 1.5rem)`, alinhado a direita do sino, `rounded-[14px]`, borda `white/10`, fundo `#1b1b1b` a 95 % com `backdrop-blur-xl`, sombra longa; entra e sai com fade e escala (desligado para quem pede menos movimento);
+- cabecalho `Notificações` (16 px, semibold) e, a direita, `Marcar todas como lidas` (`CheckCheck`, 12 px, zinc 300 ate o hover branco; `Marcando...` enquanto marca; some quando nao ha nada para ler, sem pular a altura do cabecalho);
+- filtros `Todas` e `Não lidas` com `MemberFilterPills` (a de nao lidas com a contagem quando passa de zero);
+- lista com rolagem propria (ate `min(70vh, 36rem)`, sem rolar a pagina por tras), grupos por dia com rotulo `Hoje`, `Ontem`, `Últimos 7 dias`, `Mais antigas` (12 px, semibold, zinc 500) e itens separados por linha `white/[0.06]`;
+- rodape `Carregar mais` (botao secundario pequeno, `Carregando...`) ou, no fim, `As notificações ficam aqui por 90 dias.` (12 px, zinc 500);
+- foco no painel ao abrir; `Esc` fecha so o painel e devolve o foco ao sino.
+
+Cartao da notificacao (`notification-card.tsx`), grade de 40 px + texto, `px-4 py-3.5`:
+
+- nao lida: fundo `white/[0.035]` e bolinha vermelha de 8 px no canto superior direito (`Não lida` para o leitor de tela);
+- avatar de 40 px. Aviso da escola: circulo `#262626` com a logo da escola em `object-contain`, so quando a logo e quase quadrada (largura ate 1,6 vez a altura); logo larga (a marca escrita) ou sem logo vira o `Megaphone`, sem o selo, que repetiria o mesmo icone. Comentario: `MemberAvatar` (foto ou iniciais) de quem respondeu;
+- selo do tipo de 18 px no canto inferior direito do avatar, com borda `#1b1b1b`: aviso `Megaphone` no vermelho da marca, resposta `MessageCircle` em emerald 600, mencao `AtSign` em amber 500 (as cores de sucesso e de aviso da paleta, sem cor nova);
+- aviso: titulo 14 px semibold branco; texto 14 px zinc 300 com quebras de linha, recolhido em 4 linhas com `Ver mais`/`Ver menos` quando passa de 180 caracteres; `Bunker707 · há 2 horas` (12 px, zinc 500); imagem 16:9 com cantos de 10 px; o player de audio; o botao do aviso (secundario pequeno, `ArrowRight` para pagina da area, `ExternalLink` e "(abre em nova aba)" para link externo); a resposta: `Recusar` (secundario) e `Aceitar` (primario claro), so o botao clicado mostra `Enviando...`, erro logo abaixo em vermelho claro; respondido, `MemberChip` verde com `Você aceitou` ou neutro com `Você recusou`;
+- comentario: o cartao inteiro e um link para a aula, sem nada clicavel dentro: nome em negrito + `respondeu seu comentário` ou `mencionou você`, `em {aula}` (12 px, zinc 400), o trecho entre aspas em ate 3 linhas e o tempo relativo.
+
+Player de audio (`notice-audio-player.tsx`):
+
+- pilula `rounded-[14px]` com borda `white/[0.08]` e fundo `white/[0.05]`; botao de tocar branco de 36 px com `Play`/`Pause` preenchidos em preto (`Tocar áudio`/`Pausar áudio`);
+- forma de onda de 32 px de altura com barras de 3 px (2 px de espaco), tocado em branco e o resto em `white/30`; o numero de barras acompanha a largura, de 12 a 48. E uma barra de posicao para o teclado (`Posição do áudio`, setas de 5 s, Home, End, "0:12 de 0:58") e aceita clique e arraste;
+- tempo em 12 px com numeros tabulares (`0:58` antes de tocar, `0:12 / 0:58` depois), com largura fixa para a onda nao pular; velocidade `1x`, `1,5x`, `2x` numa pilula pequena;
+- so um audio toca por vez; `preload="none"`; sem o arquivo, `Não foi possível tocar o áudio.` com `Tentar de novo`.
+
+Estados do painel: carregando (3 linhas de esqueleto com `MemberSkeletonBlock` e `Carregando notificações` para o leitor de tela); vazio (`MemberEmptyState` compacto, `BellOff`, `Nenhuma notificação por enquanto`, `Avisos da escola e respostas aos seus comentários aparecem aqui.`); em dia na aba `Não lidas` (`CheckCheck`, `Você está em dia`, `Nenhuma notificação nova.`); erro (caixa vermelha discreta com `Não foi possível carregar as notificações.` e `Tentar de novo`). Erros de acao (marcar, carregar mais, responder) aparecem no lugar, nunca em toast.
+
+Pop-up da home (`member-popup.tsx`, Base UI `Dialog`):
+
+- veu `bg-black/70` com blur leve sobre tudo (acima do topo e da gaveta) e janela centralizada, `min(28rem, 100% - 2rem)`, `rounded-[16px]`, borda `white/10`, fundo `#181818`, sombra longa; fade e escala na entrada e na saida (desligados para quem pede menos movimento);
+- imagem 16:9 no topo; fechar (`X`, `Fechar`) num circulo de 36 px `bg-black/55` com blur no canto superior direito;
+- titulo 20 px em negrito, texto 14 px zinc 300, o player de audio, o botao do aviso como botao primario claro grande (48 px, largura toda) e, embaixo, `Lembrar depois` a esquerda (fantasma, so quando o aviso permite) e `Não mostrar de novo` a direita (fantasma, zinc 400);
+- respiro de 20 px, 24 px quando o proprio cartao passa de 26rem (consulta de container, para a previa do admin desenhar igual);
+- 3 s depois de abrir a home, espera outras janelas e a aba visivel; pausa o video do destaque enquanto esta aberto; `Esc`, X ou clique fora fecham.
+
+Previa do admin: o editor de avisos desenha o mesmo `NotificationCard` dentro de uma moldura do painel do sino e o mesmo `MemberPopupCard` sobre o veu, com `preview` (sem links, sem audio tocando, botoes sem acao). Nada nesses componentes depende da largura da janela: so de container.
 
 ## Modal de detalhes
 

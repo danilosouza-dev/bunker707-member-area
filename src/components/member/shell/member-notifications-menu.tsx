@@ -9,7 +9,7 @@ import { bellLabel, formatBadgeCount } from "@/components/member/notifications/n
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cn } from "@/lib/utils";
 
-// Sino do aluno no topo, entre a busca e a conta (docs/22 §5): o numero vermelho conta o que chegou
+// Sino do aluno no topo, entre a busca e a conta (docs/22 §1.1; desenho em docs/12): o numero vermelho conta o que chegou
 // desde a ultima abertura (nunca um numero inventado) e o painel mostra a caixa dos ultimos 90 dias:
 // avisos da escola e respostas/mencoes nos comentarios. O painel vai em portal (o topo tem
 // `overflow-hidden`) e so monta aberto; o numero vem de uma memoria fora do React que sobrevive a

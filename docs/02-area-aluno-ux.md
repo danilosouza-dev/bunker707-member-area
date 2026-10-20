@@ -10,10 +10,11 @@ Todas as telas autenticadas devem compartilhar uma estrutura consistente:
 - menu hamburguer no inicio do header;
 - logo Bunker707 clicavel, levando para a home;
 - busca global;
+- sino de notificacoes (`Notificações`), entre a busca e o avatar (desde 20/10/2026; secao Header);
 - avatar do aluno com menu da conta (`Perfil`, `Minhas compras`, `Suporte` e `Sair`);
 - sidebar aberta pelo menu hamburguer.
 
-Notificacoes e conquistas ficam para a fase 2. Ate la o topo nao mostra sino, trofeu ou qualquer icone sem funcao (decisao de 2026-10-11, aluno v2).
+Conquistas ficam para a fase 2: ate la o topo nao mostra trofeu nem qualquer icone sem funcao (decisao de 2026-10-11, aluno v2). O sino, que seguia a mesma regra, voltou em 20/10/2026 com notificacoes reais (Comunicacao v1, `docs/22`).
 
 Toda mudanca de pagina deve ser reconhecida no mesmo instante do clique ou comando. O app shell mantem um unico spinner circular vermelho ancorado no centro do viewport, sobre uma camada preta mais escura e desfocada que preserva as cores da pagina, no estilo Netflix, ate a nova tela assumir. O mesmo posicionamento e usado pelo fallback do App Router e os dois indicadores nunca aparecem ao mesmo tempo. O comportamento cobre links, cards, navegacao programatica, redirecionamentos e voltar/avancar. O destino contextual continua anunciado para leitores de tela, sem caixa de texto visivel. Esse feedback tambem deve aparecer em rotas rapidas, cacheadas ou pre-carregadas; nenhum fluxo pode depender apenas do fallback `loading.tsx` do App Router.
 
@@ -91,9 +92,16 @@ Elementos recomendados:
 - menu hamburguer;
 - logo Bunker707 clicavel, levando para a home;
 - busca global em icone expansivel, alinhada aos icones da direita;
+- sino de notificacoes (abaixo);
 - avatar do aluno, que abre o menu da conta com `Perfil`, `Minhas compras`, `Suporte` e `Sair` (`Saindo...` enquanto sai). O menu fecha ao clicar fora, com `Esc` ou quando o foco sai dele, e as setas percorrem os itens (`src/components/member/shell/member-account-menu.tsx`).
 
-O sino de notificacoes volta quando existirem notificacoes reais (fase 2).
+Sino de notificacoes (desde 20/10/2026, `src/components/member/shell/member-notifications-menu.tsx`; regras em `docs/22` §1.1 e desenho em `docs/12`):
+
+- numero vermelho com as notificacoes novas (`9+` acima de 9), so quando existe notificacao real; o nome acessivel diz quantas sao (`Notificações, 3 novas`);
+- o painel abre por cima da pagina com abas `Todas` e `Não lidas`, lista agrupada por dia (`Hoje`, `Ontem`, `Últimos 7 dias`, `Mais antigas`), 20 por vez com `Carregar mais`, e `Marcar todas como lidas`. Abrir o sino zera o numero; cada item continua com a bolinha de nao lida ate o aluno abrir, responder ou ouvir;
+- cada item e um aviso da escola (titulo, texto, imagem 16:9, audio que toca ali mesmo com forma de onda e velocidade, botao para uma pagina da area ou link externo em nova aba, e `Aceitar`/`Recusar` quando o aviso pede resposta) ou uma resposta/mencao num comentario, que leva para a aula;
+- 90 dias de historico; `Esc` fecha so o painel e devolve o foco ao sino;
+- o numero e lido pelo navegador depois que a pagina aparece e vale 1 minuto entre paginas; a lista so e buscada ao abrir o sino.
 
 Na home, o header deve ficar praticamente transparente sobre a hero, com apenas um degrade sutil de cima para baixo para manter menu e icones legiveis. Apos o aluno fazer scroll, o header deve assumir fundo preto/solido, como no comportamento da Netflix.
 
@@ -215,6 +223,17 @@ Regra de produto da vitrine:
 - bootcamps tambem podem aparecer na vitrine como produto proprio.
 
 O footer deve ser discreto, em uma linha sempre que houver espaco: logo, copyright/texto curto de acesso e links de suporte/documentos. Nao deve exibir subtitulo como `Area do aluno` abaixo da logo nem linguagem de venda publica. A logo oficial da Bunker707 deve ser usada no header, sidebar e footer, preservando a proporcao horizontal do asset.
+
+### Pop-up de aviso na home (desde 20/10/2026)
+
+A equipe pode publicar pop-ups para um segmento de alunos (Comunicacao > Avisos e pop-ups; regras em `docs/22` §1.3, desenho em `docs/12`):
+
+- aparece so na home (`/`), nunca durante uma aula nem no modo de visualizacao do produtor, 3 s depois que a home abre, e espera enquanto outra janela (modal de detalhes, sino, menu) estiver aberta por cima ou a aba estiver escondida;
+- no maximo 1 por sessao do navegador e 1 a cada 24 h por aluno; esses limites sao fixos;
+- janela centralizada com imagem 16:9, titulo, texto, audio, o botao do aviso, `Lembrar depois` (volta em 24 h, ate 2 vezes, quando o aviso permite), `Não mostrar de novo` e fechar (X, `Esc` ou clique fora);
+- `Uma vez` some depois de visto; `Até o aluno clicar` volta no maximo 1 vez por dia ate o aluno clicar ou escolher `Não mostrar de novo`;
+- enquanto o pop-up esta aberto, o video do destaque da home pausa e volta ao fechar;
+- a equipe nunca ve pop-up na area do aluno; confere pela previa do editor.
 
 ## Hero
 
@@ -616,7 +635,7 @@ Desktop:
 - toda pessoa tem etiqueta de funcao ao lado do nome: `Aluno` (discreta), `Professor` (vermelha, para produtor/equipe de conteudo) e `Moderador` (neutra, para os papeis de suporte e analista). O papel e gravado no comentario no momento do envio; comentarios antigos mantem o papel gravado;
 - respostas a um comentario devem aparecer indentadas dentro do comentario principal, com a mesma etiqueta de funcao;
 - cada comentario e resposta deve ter acao `Responder`; ao clicar, o composer deve entrar em modo resposta e preencher automaticamente a mencao `@nickname` da pessoa respondida;
-- mencoes em comentarios/respostas devem gerar notificacao futura no sininho da plataforma para a pessoa mencionada ou dona do comentario respondido;
+- respostas e mencoes geram notificacao no sino (desde 20/10/2026, `docs/22` §1.2): o dono do comentario respondido recebe `Nome respondeu seu comentário` e quem foi citado no comeco da resposta (o `@nickname` que o `Responder` preenche, quando um unico autor da conversa tem esse nome) recebe `Nome mencionou você`, com o trecho, o nome da aula e o link da aula. Ninguem e avisado da propria resposta; resposta escondida pela moderacao ou excluida some do sino. Vale tambem para a resposta da equipe pela Comunidade do admin;
 - avatares dos comentarios usam cor solida ou foto do perfil, sem degrade; o indicador de presenca fica na intersecao inferior direita do circulo, com borda na cor do fundo da pagina e sem brilho/esfumacado; online usa ponto verde, offline usa ponto cinza com centro na cor do fundo;
 - a lista padrao de reacoes de comentario deve ter mais opcoes que apenas curtir, por exemplo curtir, fogo, insight, coracao, aplausos, risada, surpresa, foguete, de olho e util;
 - menus de reacao e denuncia devem fechar quando o aluno clicar fora do menu;
@@ -677,7 +696,7 @@ Pagina `/perfil` (aluno v2), com abas no endereco (`?aba=dados|acessos|seguranca
 - `Acessos`: cada produto com acesso, com data de inicio e fim (ou vitalicio); gratuito e previa do produtor aparecem rotulados; sem acessos, estado vazio com o caminho para o Suporte;
 - `Segurança`: `Alterar senha` (leva a `/alterar-senha` e volta para o perfil) e `Sair da conta`.
 
-Fica para depois: editar nome/telefone (antes e preciso unificar as tres origens do nome: cadastro do aluno, perfil e conta), preferencias e dispositivos/sessoes.
+Fica para depois: editar nome/telefone (antes e preciso unificar as tres origens do nome: cadastro do aluno, perfil e conta), preferencias (inclusive a central de notificacoes `/perfil/notificacoes`, com canais, temas e descadastro sem login, que chega com e-mail, push e WhatsApp; `docs/22` §6) e dispositivos/sessoes.
 
 ## Suporte
 
@@ -697,9 +716,10 @@ Formulario (nome, e-mail, assunto, mensagem, categoria e anexos no futuro) fica 
 - Conversas;
 - Ranking;
 - Certificados;
-- Notificacoes;
 - IA dentro da aula;
 - recomendacoes personalizadas.
+
+Notificacoes sairam desta lista em 20/10/2026: o sino e os pop-ups da home entraram com a Comunicacao v1 (`docs/22`). Faixa no topo, card de aviso na home, toast, e-mail, push e WhatsApp continuam para depois.
 
 ## Curso importado por playlist
 

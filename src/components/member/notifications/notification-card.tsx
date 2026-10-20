@@ -23,7 +23,7 @@ import {
   type NotificationLink
 } from "./notifications-model";
 
-// Uma notificacao do sino (docs/22 §5): aviso da escola (titulo, texto, imagem 16:9, audio, botao e
+// Uma notificacao do sino (docs/22 §1.1; desenho em docs/12): aviso da escola (titulo, texto, imagem 16:9, audio, botao e
 // resposta Aceitar/Recusar) ou resposta/mencao em comentario (o cartao inteiro e um link para a aula,
 // sem nada clicavel dentro). So desenha: quem busca, marca como lida e navega e o painel. A previa do
 // admin desenha o mesmo cartao com `preview` (sem links, sem audio, sem efeitos) dentro de moldura

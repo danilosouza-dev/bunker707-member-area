@@ -1,6 +1,6 @@
 import "server-only";
 
-// Sino do aluno (docs/22 §2): lista dos ultimos 90 dias, contadores (nao vistas = numero do sino; nao
+// Sino do aluno (docs/22 §1.1 e §4.4): lista dos ultimos 90 dias, contadores (nao vistas = numero do sino; nao
 // lidas = bolinha), marcar como vista/lida, clique e resposta "Aceitar / Recusar". Sempre do proprio
 // aluno (userId vem da sessao conferida na rota). O que nao deve aparecer some na leitura: aviso
 // excluido ou ainda nao enviado (o teste da equipe aparece), resposta ou comentario que deixou de estar

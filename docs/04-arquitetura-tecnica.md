@@ -58,7 +58,12 @@ Aluno comentando aula
   -> bloqueio por palavra proibida
   -> comentario pendente/aprovado
   -> fila de moderacao
-  -> notificacoes futuras
+  -> notificacao no sino de quem foi respondido ou mencionado (desde 20/10/2026)
+
+Equipe criando aviso (Comunicacao > Avisos e pop-ups)
+  -> segmento por regras sobre os dados dos alunos
+  -> notificacao no sino (agora ou agendada pelo tick) ou pop-up na home
+  -> vistos, cliques e quem voltou a estudar
 
 Aluno perguntando para IA
   -> checagem de entitlement
@@ -94,6 +99,7 @@ src/
     ai/
     jobs/
     email/
+    communications/   (avisos, sino e pop-ups; secao Comunicacao abaixo)
 ```
 
 ## Arquitetura de dados implementada
@@ -144,6 +150,8 @@ Capas e thumbnails nao devem ser persistidas como Data URL/Base64 em colunas do 
 - URL publica persistida nas tabelas de conteudo.
 
 O bucket e publico porque as capas sao arte de exibicao, nao material protegido. Videos, materiais privados e arquivos originais continuam fora desse bucket e exigem autorizacao/token proprio.
+
+Avisos da Comunicacao (desde 20/10/2026, `docs/22` §4.5): a imagem 16:9 do aviso usa o mesmo fluxo (recorte WebP de 1280 x 720 no navegador, servidor confere medida e peso, ate 420 KB) e vai para `content-assets/communications/images`. O audio do aviso fica no bucket publico proprio `communication-audio` (migracao `202610200001`: so tipos de audio, ate 10 MB), em `campaigns/{hash}.{ext}` com `Cache-Control` de um ano. Ele sobe por rota (`POST /api/admin/communications/audio`, multipart), nao por Server Action (limite de 1 MB), e o servidor confere o formato pelos primeiros bytes. Duracao e forma de onda sao medidas no navegador da equipe e gravadas com o aviso; so a URL vai para o banco. Publico pelo mesmo motivo das capas: aviso nao e conteudo pago e o nome por hash nao e adivinhavel.
 
 ## Autenticacao
 
@@ -295,7 +303,8 @@ Implementacao atual:
 - moderacao: `/api/admin/moderation/comments/[commentId]`;
 - palavras bloqueadas: `/api/admin/moderation/blocked-words`;
 - tabelas de comentarios ficam com RLS habilitado e sem acesso direto de `anon`/`authenticated`; as regras de sessao, entitlement e moderacao rodam nas APIs server-side;
-- `analysis_status`, `analysis_result` e `analyzed_at` deixam cada comentario pronto para jobs futuros de sentimento, temas, intencao, duvidas e oportunidades de conteudo.
+- `analysis_status`, `analysis_result` e `analyzed_at` deixam cada comentario pronto para jobs futuros de sentimento, temas, intencao, duvidas e oportunidades de conteudo;
+- desde 20/10/2026 toda resposta (pela aula em `createLessonComment` ou pela Comunidade do admin em `replyToComment`) chama `scheduleCommentReplyNotification` (`src/server/communications/comment-notifications.ts`), que roda depois da resposta HTTP (`after()` do Next; fora de um pedido, na hora) e grava no sino a notificacao de resposta para o dono do comentario e a de mencao para o `@usuario` do comeco da resposta. Melhor esforco: falha vira log `[notificacoes]` e nunca derruba a publicacao. O sino so mostra a notificacao enquanto a resposta e o comentario respondido estao aprovados e nao excluidos.
 
 ## Agentes de IA
 
@@ -432,6 +441,8 @@ Eventos iniciais:
 
 Esses eventos alimentarao dashboards, automacoes e IA no futuro.
 
+Comunicacao v1 (20/10/2026) grava, pelas rotas do sino e do pop-up, `notification_read`, `notification_clicked`, `notification_responded`, `message_impressed`, `message_clicked`, `message_closed`, `message_dismissed` e `message_snoozed`, so com ids no metadata (`docs/05`, secao Eventos).
+
 No MVP, a avaliacao da aula em formato de reacao (`Nao gostei`, `Gostei`, `Amei`) e persistida junto do progresso autenticado da aula em `lesson_progress.lesson_reactions`, para sobreviver a refresh e futuras telas de CRM. A elegibilidade da avaliacao usa o maior percentual ja alcancado na aula, nao apenas a posicao atual do player.
 
 ## Favoritos e minha lista
@@ -462,6 +473,8 @@ Dois mecanismos, com papeis diferentes (ver `docs/17-admin-produtor-redesign.md`
 - **Tick de minuto** (implementado na fase 0): `pg_cron` + `pg_net` no Supabase chamam `POST /api/jobs/tick` a cada minuto. Serve para trabalho leve e frequente: lembretes, envios agendados, liberacoes vencidas, rollups horarios pequenos.
 - **Fila de jobs** (Inngest ou Trigger.dev, a partir da fase 1): importacoes, transcricoes, exportacoes, calculo de audiencias e envios em massa, com retomada e retentativas. Nada disso roda dentro do tick.
 
+Excecao decidida em 20/10/2026 (Comunicacao v1; `docs/09`, secao Notificacoes e pop-ups): a notificacao do sino agendada e o segmento dos pop-ups no ar rodam no tick, no job `comunicacao`. A fila de jobs ainda nao esta instalada e o trabalho cabe nas regras do tick: cada notificacao e uma linha pequena (dois ids e uma chave unica por aluno), gravada em lotes de 500, com teto de 20.000 linhas e 3 avisos por rodada, retomavel sem duplicar (o tick cortado continua no seguinte), e o recalculo de quem ve cada pop-up le os dados dos alunos uma vez por rodada (ate 5 pop-ups, cada um a cada 15 minutos). Envio em massa de e-mail, push e WhatsApp continua fora do tick.
+
 Fluxo do tick:
 
 ```txt
@@ -483,7 +496,7 @@ Codigo:
 
 - `src/app/api/jobs/tick/route.ts`: autenticacao, leitura do corpo e resposta;
 - `src/server/jobs/tick-auth.ts`: validacao do token, modulo puro coberto por `tests/jobs-tick.test.mjs`;
-- `src/server/jobs/registry.ts`: ponto de extensao. `Job = { name, run(ctx) }`; `ctx` traz o cliente administrativo do Supabase, um `AbortSignal` com o prazo do tick, o instante do tick e os ids de `job_runs`. Registrado hoje: `email-outbox` (`src/server/jobs/email-outbox-job.ts`, fila de e-mails transacionais; secao E-mail transacional);
+- `src/server/jobs/registry.ts`: ponto de extensao. `Job = { name, run(ctx) }`; `ctx` traz o cliente administrativo do Supabase, um `AbortSignal` com o prazo do tick, o instante do tick e os ids de `job_runs`. Registrados hoje, nesta ordem: `email-outbox` (`src/server/jobs/email-outbox-job.ts`, fila de e-mails transacionais; secao E-mail transacional) e `comunicacao` (`src/server/jobs/communications-job.ts`, notificacoes do sino agendadas e quem ve cada pop-up; secao Comunicacao);
 - `src/server/jobs/run-tick.ts`: executa os jobs em sequencia com orcamento de 45 s; um job que lanca erro ou estoura o prazo vira `failed` sem derrubar os demais; jobs que nao couberem no prazo ficam para o proximo tick (`skipped`);
 - `src/server/jobs/job-runs.ts`: gravacao de `public.job_runs`.
 
@@ -495,7 +508,7 @@ Regras para um job novo no registro:
 - recomputos pesados (por exemplo `student_facts`) rodam a noite em agendamento proprio, nunca por minuto no banco primario;
 - dead-letter apos 3 falhas e retentativas com `attempts` ficam com o job que precisar delas (a coluna ja existe em `job_runs`).
 
-Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias. Na mesma linha, `public.prune_personal_data()` roda as 06:23 UTC (`bunker707-personal-data-prune`, migracao `202610170004`) e anonimiza `webhook_events` (12 meses) e `email_outbox` (90/180 dias) e apaga `email_webhook_events` (90 dias): regras em `docs/06`, secao LGPD.
+Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias. Na mesma linha, `public.prune_personal_data()` roda as 06:23 UTC (`bunker707-personal-data-prune`, migracao `202610170004`) e anonimiza `webhook_events` (12 meses) e `email_outbox` (90/180 dias) e apaga `email_webhook_events` (90 dias): regras em `docs/06`, secao LGPD. Depois, as 06:41 UTC, `public.prune_communication_history()` (`bunker707-communication-prune`, migracao `202610200001`) apaga notificacoes e estados de pop-up com mais de 24 meses.
 
 Configuracao por ambiente (passos completos no topo de `supabase/migrations/202610100001_jobs_cron.sql`):
 
@@ -523,7 +536,7 @@ Regras:
 Pontos de disparo (`src/server/students/access.ts`, a mesma rotina do admin e dos webhooks de venda):
 
 - **boas-vindas** (`welcome`): na primeira vez que a conta nasce. Numa venda por webhook, sempre; pelo admin (Adicionar aluno, importacao), so quando a equipe escolheu convite ou senha temporaria, porque "Nao enviar agora" significa isso. O texto diz com qual e-mail entrar e como criar a senha conforme a entrega: convite (chega outro e-mail com o link), senha temporaria (a equipe passa) ou nada (usar "Esqueci minha senha" na tela de entrar);
-- **acesso liberado por compra** (`purchase`): quando `grantProductAccess` vem de `source = "webhook"` e abre um acesso que estava fechado (novo, revogado, suspenso ou expirado). Um e-mail por compra, com os produtos abertos e o link de cada um (`/conteudo/<id>`). Prazo a mais num acesso ja aberto e acoes da equipe (liberar, em massa, importacao) nao avisam o aluno; envio em massa a partir da lista de alunos fica para o modulo Comunicacao.
+- **acesso liberado por compra** (`purchase`): quando `grantProductAccess` vem de `source = "webhook"` e abre um acesso que estava fechado (novo, revogado, suspenso ou expirado). Um e-mail por compra, com os produtos abertos e o link de cada um (`/conteudo/<id>`). Prazo a mais num acesso ja aberto e acoes da equipe (liberar, em massa, importacao) nao avisam o aluno; envio em massa a partir da lista de alunos fica para o modulo Comunicacao (a v1 de 20/10/2026 manda so para o sino e o pop-up; e-mail e um canal da proxima etapa, `docs/22` §6).
 
 Links nos e-mails usam `NEXT_PUBLIC_SITE_URL`; sem ela, a origem do request que disparou (`redirectTo` do admin ou `siteOrigin` informado pelo webhook); por ultimo, `http://localhost:3000`.
 
@@ -552,6 +565,55 @@ Codigo:
 - `src/server/email/outbox.ts` (fila no banco), `provider.ts` (escolha pelo ambiente), `transactional.ts` (os dois e-mails), `src/server/jobs/email-outbox-job.ts` e `src/app/api/webhooks/resend/route.ts`: cobertos por `tests/integration/email-transacional.test.mjs` com o banco local e o provedor falso de `tests/support/integration-email-provider.mjs`. Nenhum teste envia e-mail de verdade.
 
 Variaveis: `EMAIL_PROVIDER`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `EMAIL_DAILY_LIMIT` e `NEXT_PUBLIC_SITE_URL` (`.env.example`; tabela em `docs/06-seguranca-operacao.md`, secao E-mail transacional).
+
+## Comunicacao (sino e pop-ups)
+
+### Implementado (20/10/2026): Comunicacao v1
+
+Produto, regras e decisoes em `docs/22`; tabelas em `docs/05` (secao Comunicacao); seguranca em `docs/06` (secao Comunicacao); admin em `docs/17` §1.8. Migracao `202610200001_communication_v1.sql`. Nenhuma variavel de ambiente nova.
+
+Modulo `src/server/communications/`:
+
+- modulos puros (sem `server-only`, carregados direto pelo Node nos testes unitarios e importados pelo editor do admin): `audience-model.ts` (regras do segmento, grupos E/OU com um nivel, `evaluateAudience`, `normalizeAudience`, `describeAudience` com a frase "Alunos que ...", conversao dos segmentos salvos de Alunos), `schemas.ts` (zod do rascunho, do segmento e das acoes, com as mensagens em portugues; `publishProblems` para o que so vale ao publicar), `campaign-model.ts` (tipos, limites fixos, situacao, acoes por situacao e permissao, `publishDecision` acima de 500, agenda no fuso de Sao Paulo, frase de revisao, `pickPopup` e `popupEventPatch`) e `notification-model.ts` (contratos da API do sino, titulo das notificacoes de comentario, mencao, trecho, cursor e forma de onda);
+- `db.ts` (cliente de servico, `CommunicationError` com status HTTP, `NoticeFieldError` para erro de campo no formato do zod, deteccao da migracao pendente), `store.ts` (colunas explicitas, gravacao condicional por `updated_at` e situacao com 409, reserva das notificacoes vencidas, gravacao em lotes de 500, estados do pop-up, RPCs dos numeros), `audience-facts.ts` (os dados de cada aluno com as mesmas leituras de `src/server/students/store.ts` e a mesma conta de `buildStudentIndex`, sem a equipe, mais os comentarios por janela), `audience.ts` (quem esta no segmento e a amostra de 5 nomes);
+- `dispatch.ts` (`dispatchInboxCampaign`, `refreshPopupDeliveries`, `processCommunications`), `actions.ts` (Server Actions do admin, todas por `runAdminAction` e com `admin_audit_log`), `queries.ts` (lista, detalhe, os quatro numeros e as opcoes do editor), `cache.ts` (tag `communications` da lista de pop-ups no ar), `media.ts` (audio), `inbox.ts` e `popups.ts` (lado do aluno), `comment-notifications.ts` (resposta e mencao) e `route-support.ts` (resposta sem cache e eventos do aluno);
+- `src/server/jobs/communications-job.ts`: job `comunicacao`, registrado depois do `email-outbox` (secao Jobs).
+
+Rotas:
+
+- aluno (todas com `requireApiUser` e `Cache-Control: private, no-store`; as que recebem corpo usam `readBoundedJson` de 8 KB): `GET /api/notifications` (`?filter=all|unread`, `?cursor=`), `GET /api/notifications/summary` (`?popup=1` so na home), `POST /api/notifications/read` (`{ seen: true }`, `{ ids }` ou `{ all: true }`), `POST /api/notifications/[id]/click` (sem corpo, aceita `sendBeacon`), `POST /api/notifications/[id]/response` e `POST /api/popups/[id]/events` (aceita `text/plain`, como o `sendBeacon` manda);
+- admin: `POST /api/admin/communications/audio` (`requireApiRole("messaging.write")`, multipart, `maxDuration` 60). O resto do admin sao Server Actions: `saveNoticeDraft`, `previewNoticeAudience`, `publishNotice`, `approveNotice`, `rejectNotice`, `cancelScheduledNotice`, `pauseNotice`, `resumeNotice`, `endNotice`, `withdrawNotice`, `duplicateNotice`, `deleteNotice`, `sendNoticeTestToMe` e `uploadNoticeImage`;
+- telas: `/admin/comunicacao/avisos` (lista), `/avisos/novo` e `/avisos/[id]` (editor ou relatorio), atras de `requirePageArea("comunicacao")` (`messaging.write`). Lado do aluno: `MemberNotificationsMenu` no topo do `AppShell` e `MemberPopupHost` montado uma vez, ligado so em `/` e fora do modo "ver como" (`src/components/member/notifications/`).
+
+```txt
+Equipe (messaging.write) -> Server Action -> runAdminAction -> campaigns (rascunho, updated_at = versao)
+  publicar -> conta o segmento (audience-facts + audience-model; 0 alunos = 422)
+           -> publishDecision: sem messaging.publish ou > 500 sem messaging.publish_large -> pending_approval
+  notificacao agora   -> sending -> dispatchInboxCampaign na propria acao -> notifications (lotes de 500) -> sent
+  notificacao agendada -> scheduled
+  pop-up              -> active -> refreshPopupDeliveries -> campaign_deliveries -> invalidateLivePopups
+pg_cron tick (* * * * *) -> POST /api/jobs/tick -> job comunicacao (processCommunications)
+  1. claimDueInbox: ate 3 avisos (scheduled vencido, ou sending com reserva vazia ou de mais de 2 min), update condicional
+     -> dispatchInboxCampaign: so quem ainda nao recebeu, ate 20.000 por rodada; cortado -> solta a reserva;
+        falha -> attempts + 1, a terceira cancela com last_error
+  2. fetchPopupsToRefresh: ate 5 pop-ups active (no ar ou com janela futura) sem recalculo ha 15 min -> refreshPopupDeliveries
+  fatos dos alunos lidos uma vez por rodada e so se houver trabalho; sem a migracao: registra e termina
+Resposta a comentario (aula ou Comunidade) -> after() -> notifyCommentReply -> notifications (comment_reply / comment_mention)
+Aluno: AppShell (depois da hidratacao) -> GET /api/notifications/summary -> numero do sino (60 s em memoria)
+  abre o sino -> GET /api/notifications -> POST read { seen: true }
+  home -> GET /api/notifications/summary?popup=1 (1,5 s) -> pop-ups no ar (unstable_cache 60 s, tag communications)
+       + campaign_deliveries do aluno + ultimo pop-up visto -> pickPopup -> POST /api/popups/[id]/events
+pg_cron 'bunker707-communication-prune' (06:41 UTC) -> public.prune_communication_history() (24 meses)
+```
+
+Invariantes:
+
+- nada da Comunicacao e lido pelo navegador: RLS ligado e nada para `anon`/`authenticated`; as rotas usam o `user_id` da sessao e devolvem 404 para o que nao e do aluno;
+- a lista de pop-ups no ar e o unico cache compartilhado e so tem os avisos; o estado de cada aluno e lido a cada pedido em duas consultas pequenas, e o numero do sino nunca entra no carregamento da pagina (`getAppShellData` nao mudou);
+- notificacao de aviso nao copia o conteudo: o sino junta o aviso por chave estrangeira e esconde aviso excluido, nao enviado (o teste da equipe aparece) ou retirado;
+- link do botao conferido ao gravar (`isSafeHeroCtaHref` no schema), ao ler no servidor e ao desenhar; imagem e audio so de `https` (ou do Supabase na propria maquina);
+- toda escrita do admin confere a versao lida (`updated_at`) e a situacao no proprio UPDATE; o gatilho `touch_campaign_version` nao muda a versao quando so a contagem do segmento muda;
+- deploy antes da migracao nao quebra: o sino responde vazio, marcar como vista ou lida nao faz nada, clique, resposta e eventos do pop-up respondem 404, o job registra e termina e as telas do admin mostram o aviso de atualizacao do banco.
 
 ## Deploy
 

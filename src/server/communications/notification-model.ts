@@ -1,4 +1,4 @@
-// Sino do aluno (docs/22 §2): contratos que a API devolve e o navegador desenha, e regras puras das
+// Sino do aluno (docs/22 §1.1 e §4.4): contratos que a API devolve e o navegador desenha, e regras puras das
 // notificacoes automaticas de comentario. Modulo puro (sem "server-only", imports relativos): as rotas
 // /api/notifications, o painel do sino, a previa do admin e tests/comunicacao-avisos-modelo.test.mjs
 // usam os mesmos tipos.

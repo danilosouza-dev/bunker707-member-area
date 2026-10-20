@@ -1,0 +1,201 @@
+"use client";
+
+import { Bell, CheckCheck } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { MemberPopupCard } from "@/components/member/notifications/member-popup";
+import { NotificationCard } from "@/components/member/notifications/notification-card";
+import { MemberFilterPills } from "@/components/member/ui/member-filters";
+import { cn } from "@/lib/utils";
+import type { NoticeDraft } from "@/server/communications/schemas";
+import { MEMBER_PREVIEW_VH_VAR, type PreviewDevice } from "../member-area/preview-frame";
+import { draftToNotificationItem, draftToPopupItem } from "./notices-view-model";
+
+// Previa do aviso (docs/22 §2.2): os componentes REAIS do aluno (NotificationCard dentro do painel do
+// sino; MemberPopupCard sobre a home escurecida) em modo `preview` (sem rede, audio parado, inert).
+//
+// Mesmo contrato do PreviewFrame da Area de membros (member-area/preview-frame.tsx: tokens do aluno de
+// volta, container query, `inert`), mas a "tela" e o recorte onde o aviso aparece, em tamanho real: no
+// computador, o canto do sino (o painel tem 400 px) ou o centro da home (o pop-up tem 448 px); no
+// celular, a tela de 390 px. A tela inteira de 1280 px reduzida deixaria o texto ilegivel. A moldura so
+// reduz quando a coluna e mais estreita que o recorte. Nada de exemplo em volta: so o aviso.
+
+/** Tokens de :root que o admin sobrescreve e a area do aluno usa (os mesmos do PreviewFrame). */
+const STUDENT_TOKENS: Record<string, string> = {
+  "--accent": "#e50914",
+  "--accent-foreground": "#ffffff",
+  "--accent-warm": "#ff7a1a",
+  "--background": "#141414",
+  "--border": "rgba(255, 255, 255, 0.1)",
+  "--card": "#171717",
+  "--card-foreground": "#f7f7f4",
+  "--foreground": "#f7f7f4",
+  "--input": "rgba(255, 255, 255, 0.15)",
+  "--muted": "#a8a8a2",
+  "--muted-foreground": "#a8a8a2",
+  "--popover": "#202020",
+  "--popover-foreground": "#f7f7f4",
+  "--primary": "#e50914",
+  "--primary-foreground": "#ffffff",
+  "--ring": "rgba(229, 9, 20, 0.65)",
+  "--secondary": "#202020",
+  "--secondary-foreground": "#f7f7f4"
+};
+
+const STAGES: Record<PreviewDevice, { caption: string; minHeight: number; width: number }> = {
+  desktop: { caption: "Computador · tamanho real", minHeight: 560, width: 520 },
+  mobile: { caption: "Celular · 390 px", minHeight: 720, width: 390 }
+};
+
+type StageProps = {
+  ariaLabel: string;
+  children: ReactNode;
+  className?: string;
+  device: PreviewDevice;
+};
+
+/** Recorte da tela do aluno, reduzido so quando nao cabe na coluna. */
+function PreviewStage({ ariaLabel, children, className, device }: StageProps) {
+  const stage = STAGES[device];
+  const outer = useRef<HTMLDivElement>(null);
+  const screen = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<{ available: number; height: number } | null>(null);
+
+  useEffect(() => {
+    const outerElement = outer.current;
+    const screenElement = screen.current;
+
+    if (!outerElement || !screenElement) {
+      return;
+    }
+
+    const measure = () => setSize({ available: outerElement.clientWidth, height: screenElement.offsetHeight });
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(outerElement);
+    observer.observe(screenElement);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const scale = size ? Math.min(1, size.available / stage.width) : 1;
+  const height = Math.max(stage.minHeight, size?.height ?? stage.minHeight);
+  const screenStyle: CSSProperties & Record<string, string | number> = {
+    ...STUDENT_TOKENS,
+    [MEMBER_PREVIEW_VH_VAR]: `${stage.minHeight}px`,
+    background: "#141414",
+    color: "#f7f7f4",
+    minHeight: stage.minHeight,
+    transform: `scale(${scale})`,
+    transformOrigin: "top left",
+    width: stage.width
+  };
+
+  return (
+    <figure aria-label={ariaLabel} className={cn("m-0 flex min-w-0 flex-col items-center gap-2", className)}>
+      <div className="flex w-full min-w-0 justify-center [contain:inline-size]" ref={outer}>
+        <div
+          className="relative max-w-full overflow-hidden rounded-lg border border-[var(--border-strong)] bg-black"
+          style={{
+            height: Math.round(height * scale),
+            visibility: size ? undefined : "hidden",
+            width: Math.round(stage.width * scale)
+          }}
+        >
+          <div className="@container absolute top-0 left-0" inert ref={screen} style={screenStyle}>
+            {children}
+          </div>
+        </div>
+      </div>
+      <figcaption className="text-xs leading-5 text-[var(--text-secondary)]">{stage.caption}</figcaption>
+    </figure>
+  );
+}
+
+/** Barra do topo da area do aluno, so com o sino (e o 1 do aviso novo). */
+function BellBar() {
+  return (
+    <div className="flex h-14 items-center justify-end px-3">
+      <span className="relative grid size-10 place-items-center rounded-full bg-white/10 text-white">
+        <Bell className="size-5" />
+        <span className="absolute top-1 right-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[var(--accent)] px-1 text-[11px] leading-none font-bold text-white tabular-nums ring-2 ring-[#141414]">
+          1
+        </span>
+      </span>
+    </div>
+  );
+}
+
+type NoticePreviewProps = {
+  branding: { logoUrl: string | null; name: string };
+  className?: string;
+  device: PreviewDevice;
+  draft: NoticeDraft;
+  /** Imagem recortada ainda subindo (data URL): a previa mostra antes do envio terminar. */
+  imageUrl?: string | null;
+  /** Instante de referencia do "agora" no cartao. */
+  now: number;
+};
+
+export function NoticePreview({ branding, className, device, draft, imageUrl, now }: NoticePreviewProps) {
+  const emptyTitle = !draft.title.trim();
+
+  if (draft.kind === "popup") {
+    return (
+      <PreviewStage
+        ariaLabel={`Prévia do pop-up no ${device === "mobile" ? "celular" : "computador"}`}
+        className={cn(className, emptyTitle && "[&_h2]:font-semibold [&_h2]:text-white/40")}
+        device={device}
+      >
+        <div className="relative grid place-items-center p-4" style={{ minHeight: STAGES[device].minHeight }}>
+          <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" />
+          <div className="relative">
+            <MemberPopupCard popup={draftToPopupItem(draft, { imageUrl })} preview />
+          </div>
+        </div>
+      </PreviewStage>
+    );
+  }
+
+  const item = draftToNotificationItem(draft, { createdAt: new Date(now).toISOString(), imageUrl });
+
+  return (
+    <PreviewStage
+      ariaLabel={`Prévia da notificação no sino, no ${device === "mobile" ? "celular" : "computador"}`}
+      className={cn(className, emptyTitle && "[&_article>div>p:first-child]:font-medium [&_article>div>p:first-child]:text-white/40")}
+      device={device}
+    >
+      <div className="pb-6">
+        <BellBar />
+        <div
+          className={cn(
+            "overflow-hidden rounded-[14px] border border-white/10 bg-[#1b1b1b] text-white shadow-[0_24px_70px_rgba(0,0,0,0.65)]",
+            device === "mobile" ? "mx-3" : "mr-3 ml-auto w-[25rem]"
+          )}
+        >
+          <div className="flex min-h-[3.75rem] items-center justify-between gap-3 px-4 pt-4 pb-3">
+            <p className="text-base font-semibold text-white">Notificações</p>
+            <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs font-semibold text-[#d4d4d8]">
+              <CheckCheck aria-hidden="true" className="size-4" />
+              Marcar todas como lidas
+            </span>
+          </div>
+          <MemberFilterPills
+            ariaLabel="Filtrar notificações"
+            className="mx-0 px-4 pb-3 sm:mx-0 sm:px-4"
+            onChange={() => undefined}
+            options={[
+              { id: "all", label: "Todas" },
+              { count: 1, id: "unread", label: "Não lidas" }
+            ]}
+            value="all"
+          />
+          <div className="border-t border-white/[0.06]">
+            <p className="px-4 pt-3 pb-1 text-xs font-semibold text-[#71717a]">Hoje</p>
+            <NotificationCard item={item} now={now} preview schoolLogoUrl={branding.logoUrl} schoolName={branding.name} />
+          </div>
+        </div>
+      </div>
+    </PreviewStage>
+  );
+}

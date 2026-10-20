@@ -70,9 +70,10 @@ test("telas e acoes estaticas apontam so para destinos que existem", () => {
   }
 
   const titles = items.map((item) => item.title);
-  for (const missing of ["Novo aviso", "Novo webinário", "Nova promoção"]) {
+  for (const missing of ["Novo webinário", "Nova promoção"]) {
     assert.ok(!titles.includes(missing), `${missing} ainda nao existe`);
   }
+  assert.equal(items.find((item) => item.title === "Novo aviso")?.href, "/admin/comunicacao/avisos/novo", "o editor de avisos ja existe");
 
   assert.equal(new Set(items.map((item) => item.id)).size, items.length, "ids unicos");
 });
@@ -120,8 +121,21 @@ test("texto casa com telas e acoes sem acento e por palavras", () => {
   assert.ok(titles("tutor").includes("Tutor IA"));
   assert.ok(titles("youtube").includes("Importar playlist do YouTube"));
   assert.ok(titles("area membros").includes("Área de membros"));
+  assert.ok(titles("aviso").includes("Novo aviso"));
+  assert.ok(titles("pop-up").includes("Novo aviso"), "acha pelo tipo do aviso");
   assert.deepEqual(titles("x"), [], "1 letra sem nada parecido: lista vazia (o campo mostra 'Nada encontrado')");
   assert.ok(!titles("x").some((title) => title.includes("em alunos")), "busca de alunos so com 2 letras");
+});
+
+test("Novo aviso so aparece para quem cria avisos", async () => {
+  const roles = await import("../src/server/auth/roles.ts");
+  const actionsFor = (role) =>
+    model.listAdminStaticSearchItems(roles.resolveAdminAccess(role, {})).filter((item) => item.group === "actions").map((item) => item.title);
+
+  assert.ok(actionsFor("owner").includes("Novo aviso"));
+  assert.ok(actionsFor("editor").includes("Novo aviso"));
+  assert.ok(!actionsFor("support").includes("Novo aviso"));
+  assert.ok(!actionsFor("analyst").includes("Novo aviso"));
 });
 
 test("Server Action valida o texto e usa o papel de leitura; a leitura so traz nome, contexto e endereco", async () => {

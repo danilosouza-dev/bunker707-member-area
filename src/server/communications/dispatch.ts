@@ -1,6 +1,6 @@
 import "server-only";
 
-// Envio das notificacoes do sino e atualizacao do segmento dos pop-ups (docs/22 §5; docs/04, Jobs).
+// Envio das notificacoes do sino e atualizacao do segmento dos pop-ups (docs/22 §4.2 e §4.3; docs/04, Jobs).
 //
 // Notificacao: o aviso so e enviado reservado em `sending` (publicar agora reserva na propria acao; o
 // job reserva as agendadas). O envio grava uma linha pequena por aluno (aviso + aluno + dedupe_key

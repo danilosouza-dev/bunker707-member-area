@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import "./support/admin-action-stubs.mjs";
 
-// Job "comunicacao" do tick de minuto (docs/22 §5): sem trabalho, termina rapido sem ler os alunos; banco
+// Job "comunicacao" do tick de minuto (docs/22 §4.2): sem trabalho, termina rapido sem ler os alunos; banco
 // sem a migracao 202610200001 nao derruba o tick (o job registra e termina). O envio e o recalculo de
 // verdade estao em tests/integration/avisos-e-notificacoes.test.mjs e tests/integration/pop-ups.test.mjs.
 

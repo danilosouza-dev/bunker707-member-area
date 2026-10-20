@@ -15,16 +15,25 @@ import {
   type CommunicationTab
 } from "./communication-model";
 
-// Moldura de Comunicacao na disposicao do prototipo aprovado: cabecalho com a frase da aba, abas
-// sublinhadas (Avisos e pop-ups · Webinários · Promoções, cada uma com endereco proprio), os quatro
-// numeros da aba e, no lugar da lista, o aviso honesto de tela em construcao. Os numeros seguem o
-// periodo da barra superior (?periodo=) e ficam em "—": nada aqui e simulado. Nao ha botao "Novo
-// aviso" porque o editor ainda nao existe (seria um botao que finge funcionar).
+// Moldura de Comunicacao na disposicao do prototipo aprovado para as abas que ainda estao sendo
+// construidas (Webinários e Promoções): cabecalho com a frase da aba, abas sublinhadas (Avisos e
+// pop-ups · Webinários · Promoções, cada uma com endereco proprio), os quatro numeros da aba e, no
+// lugar da lista, o aviso honesto de tela em construcao. Os numeros seguem o periodo da barra superior
+// (?periodo=) e ficam em "—": nada aqui e simulado. Sem botao de criar: seria um botao que finge
+// funcionar. Avisos e pop-ups ja tem a tela de verdade (communication/notices-list-view.tsx), que usa
+// as mesmas abas (CommunicationTabs).
 
 const TAB_ICONS: Record<CommunicationTab, LucideIcon> = {
   avisos: BellRing,
   promocoes: TicketPercent,
   webinarios: CalendarClock
+};
+
+/** Complemento do aviso de construcao: o que chega com a tela. */
+const TAB_NOTES: Record<CommunicationTab, string> = {
+  avisos: " Os avisos chegam com esta tela.",
+  promocoes: " As promoções chegam com esta tela.",
+  webinarios: " Os webinários chegam com esta tela."
 };
 
 const TAB_ITEMS = COMMUNICATION_TABS.map((tab) => ({
@@ -54,7 +63,7 @@ type CommunicationFrameProps = {
 
 export function CommunicationFrame({ "data-phase": phase, period, tab }: CommunicationFrameProps) {
   const meta = COMMUNICATION_TAB_META[tab];
-  const note = " Avisos, webinários e promoções chegam com esta tela.";
+  const note = TAB_NOTES[tab];
   const periodLabel = period.label.toLocaleLowerCase("pt-BR");
 
   return (

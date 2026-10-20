@@ -5,7 +5,7 @@ import { decodeCursor } from "@/server/communications/notification-model";
 import { noStore } from "@/server/communications/route-support";
 import { jsonRouteError } from "@/server/http/route-errors";
 
-// Sino do aluno (docs/22 §2): pagina das notificacoes do proprio aluno, ultimos 90 dias, mais novas
+// Sino do aluno (docs/22 §1.1 e §4.4): pagina das notificacoes do proprio aluno, ultimos 90 dias, mais novas
 // primeiro. ?filter=unread so as nao lidas; ?cursor= continua de onde a pagina anterior parou.
 
 export const dynamic = "force-dynamic";

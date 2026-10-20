@@ -1,6 +1,6 @@
 import "server-only";
 
-// Audio dos avisos (arquivo enviado ou gravado no navegador do admin; docs/22 §3). O servidor nao confia
+// Audio dos avisos (arquivo enviado ou gravado no navegador do admin; docs/22 §4.5). O servidor nao confia
 // no tipo informado: confere os primeiros bytes (MP3, M4A, OGG, WEBM, WAV) e recusa o que nao bate.
 // Bucket publico `communication-audio` (migracao 202610200001, ate 10 MB, so audio), nome pelo hash do
 // conteudo: reenviar o mesmo audio nao duplica. Duracao e forma de onda sao medidas no navegador e

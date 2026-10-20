@@ -41,6 +41,9 @@ student_events
 webhook_events
 email_outbox
 email_webhook_events
+campaigns
+notifications
+campaign_deliveries
 integration_settings
 ai_agents
 ai_agent_scopes
@@ -1108,8 +1111,14 @@ Exemplos de event_type:
 - lesson_comment_reacted;
 - lesson_comment_reaction_removed;
 - lesson_comment_reported;
-- notification_created;
 - notification_read;
+- notification_clicked;
+- notification_responded;
+- message_impressed;
+- message_clicked;
+- message_closed;
+- message_dismissed;
+- message_snoozed;
 - saved_item_created;
 - saved_item_removed;
 - material_access_blocked;
@@ -1127,10 +1136,12 @@ Metadados importantes para CRM/dashboard:
 - tipo de reacao escolhida/removida em aula ou comentario;
 - comentario pai quando a interacao for resposta;
 - usuarios mencionados por `@nickname` em comentario ou resposta;
-- destino e motivo da notificacao: mencao, resposta ao comentario ou moderacao;
+- notificacoes e pop-ups: so ids e rotulos curtos (`notification_id`, `campaign_id`, `kind`, `response`, `all`), nunca o texto do aviso ou do comentario;
 - origem do item salvo/removido: card, pagina de aula, pagina de conteudo ou material;
 - frequencia de login e sessoes;
 - cliques relevantes em aula, materiais, TV, salvar, comentarios e avaliacoes.
+
+Nomes da Comunicacao (decisao de 20/10/2026, `docs/22` §4.4): o sino usa `notification_*` com `entity_type = notification` (o id da linha em `notifications`) e o pop-up usa os `message_*` previstos no `docs/17` §2.5 com `entity_type = campaign` (o id do aviso). Quem grava sao as rotas do aluno (`src/app/api/notifications/**`, `src/app/api/popups/**`), em melhor esforco: falha vira log e a resposta nao muda. `notification_created` nao existe: a propria linha em `notifications` (com `created_at`) e o registro da entrega. Abrir o sino (marcar como vistas) nao grava evento.
 
 ## youtube_course_imports
 
@@ -1431,6 +1442,74 @@ Payload bruto de cada evento do provedor, para auditoria e reprocesso.
 
 Seguranca: RLS ligada sem policies, nada para `anon`/`authenticated`; so o servidor insere e atualiza. Eventos de e-mails que nao sairam da fila (Auth do Supabase pelo mesmo Resend) ficam so registrados. Retencao: apagados 90 dias depois de `received_at` pela mesma rotina (secao Retencao de dados pessoais); o payload traz o destinatario, e `delivered_at`, `bounced_at` e `last_error` ja ficaram em `email_outbox`.
 
+## Comunicacao (avisos, sino e pop-ups)
+
+Migracao `202610200001_communication_v1.sql` (20/10/2026). Produto e regras em `docs/22`; fluxo em `docs/04` (Implementado: Comunicacao v1); seguranca em `docs/06` (secao Comunicacao). Nada aqui e lido pelo navegador: RLS ligado nas tres tabelas, `revoke all` de `anon`/`authenticated`, so `service_role` le e grava, depois de o TypeScript conferir sessao (rotas do aluno) ou permissao (Server Actions do admin). Sem enum: texto + check.
+
+Substitui o desenho de `docs/17` §2.4 para a fase 5 (comparacao em `docs/17` §2.4, Atualizacao de 20/10/2026): sem `audiences`/`student_facts` (o segmento fica em `campaigns.audience` e e avaliado em TypeScript), sem `message_events` (os eventos vao para `student_events`) e sem `campaign_daily_stats` (os numeros saem de RPC).
+
+### campaigns
+
+Cada aviso da equipe: notificacao no sino (`kind = inbox`) ou pop-up na home (`kind = popup`).
+
+- id uuid;
+- kind (`inbox` | `popup`) e status. Notificacao: `draft`, `pending_approval`, `scheduled`, `sending`, `sent`, `canceled`; pop-up: `draft`, `pending_approval`, `active`, `paused`, `ended` (check `campaigns_status_by_kind`). "Agendado" e "Encerrado" de um pop-up `active` antes ou depois da janela sao derivados na leitura (`situationOf`);
+- conteudo: `title` (1 a 80; o pop-up para em 60 no schema), `body` (ate 600; pop-up 240), `image_url` + `image_alt` (ate 160), `audio_url` + `audio_mime` + `audio_duration_seconds` (1 a 600 no banco; 300 no schema) + `audio_peaks` (jsonb, lista de ate 96), `cta_label` (ate 30) + `cta_href` + `cta_target` (`same_tab` | `new_tab`), `response_mode` (`none` | `accept_decline`) + `accept_label`/`decline_label` (ate 24). Checks: URL de imagem e audio `https?://` sem espaco; audio completo (`campaigns_audio_complete`), botao completo (`campaigns_cta_complete`), resposta so na notificacao (`campaigns_response_inbox_only`);
+- `audience` jsonb (<= 16 KB; padrao `{"kind":"everyone"}`): o segmento, `{ kind: "rules", root: { match: "all" | "any", items: [...] } }` com um nivel de grupo dentro do principal, ate 20 regras (formato em `src/server/communications/audience-model.ts`); `audience_count`, `audience_counted_at` e `audience_refreshed_at` (ultimo recalculo do pop-up pelo job);
+- agenda: `send_at` (notificacao: quando sai ou saiu), `starts_at`/`ends_at` (janela do pop-up; nula = desde a publicacao / sem fim; check `ends_at > starts_at`), `popup_repeat` (`once` | `until_action`), `allow_snooze`;
+- envio: `dispatch_started_at` (reserva do envio), `dispatch_attempts`, `last_error` (ate 2.000), `sent_at` (envio da notificacao; no pop-up, a primeira publicacao), `recipients_count`;
+- aprovacao e autoria: `requested_by`/`requested_at`, `approved_by`/`approved_at`, `created_by`, `updated_by`, `deleted_by` (todos -> auth.users set null);
+- `created_at`, `updated_at` (versao do editor), `deleted_at` (exclusao logica).
+
+Indices: `campaigns_due_idx (send_at)` parcial nas notificacoes `scheduled`/`sending` nao excluidas (o job), `campaigns_live_popups_idx (starts_at)` parcial nos pop-ups `active` nao excluidos e `campaigns_list_idx (created_at desc)` nao excluidos. Gatilho `set_campaigns_updated_at` com a funcao `touch_campaign_version()`: muda `updated_at` so quando algo alem de `audience_count`, `audience_counted_at` e `audience_refreshed_at` muda, para o recalculo do job nao derrubar com 409 quem esta com o editor aberto (funcao sem execute para ninguem).
+
+### notifications
+
+Caixa do sino, uma linha por aluno.
+
+- id uuid; `user_id` -> auth.users (cascade);
+- kind: `notice` (aviso da equipe), `comment_reply`, `comment_mention`; `campaign_id` -> campaigns (cascade) so no `notice` (check `notifications_notice_has_campaign`); `is_test` (teste da equipe, fora dos numeros);
+- `actor_id` -> auth.users (set null): quem respondeu, nas automaticas;
+- `title` (ate 200), `body` (ate 600), `href` (ate 2.048), `payload` jsonb (<= 4 KB). O `notice` nao guarda conteudo: o sino junta o aviso pela chave. As automaticas guardam o trecho da resposta (ate 280, espacos colapsados), o link da aula (`/conteudo/{conteudo}/aulas/{modulo}?lessonId={aula}`) e o payload `{ contentId, lessonId, moduleId, commentId, parentCommentId, lessonTitle }`;
+- `dedupe_key` (1 a 200): `campaign:<aviso>`, `campaign-test:<aviso>`, `comment-reply:<resposta>`, `comment-mention:<resposta>`; unica por aluno (`notifications_user_dedupe_idx`, sem filtro parcial para o `upsert ... onConflict "user_id,dedupe_key"` com `ignoreDuplicates`);
+- `seen_at` (abriu o sino com ela na lista; zera o numero), `read_at` (abriu ou marcou como lida), `clicked_at`, `response` (`accepted` | `declined`) + `responded_at`; checks: lida so depois de vista, clicada so depois de lida, resposta completa e so depois de vista;
+- `created_at`.
+
+Indices: `(user_id, created_at desc, id desc)` (a lista e o cursor), parcial `(user_id) where seen_at is null` (o numero), parcial `(campaign_id)` e parcial `(seen_at)` nas de aviso que nao sao teste (os numeros do periodo).
+
+### campaign_deliveries
+
+Estado do pop-up por aluno; chave `(campaign_id, user_id)`, os dois com cascade.
+
+- `eligible`: o aluno esta no segmento agora (o job recalcula a cada 15 minutos enquanto o pop-up esta no ar; quem sai vira `false`, a linha fica);
+- `impressions`, `first_seen_at`, `last_seen_at` (check: primeira vez so com ultima), `clicked_at`, `dismissed_at` ("Nao mostrar de novo"), `snoozed_until` + `snooze_count` (0 a 10 no banco; o servidor para em 2);
+- `created_at`, `updated_at` (gatilho `set_updated_at`).
+
+Indices: `(user_id, last_seen_at desc)` (o limite de 24 h) e parcial `(first_seen_at)` (os numeros do periodo). A equipe nunca tem linha aqui.
+
+### RPCs (security invoker, `search_path` fixo, so `service_role`)
+
+- `communication_comment_counts()`: comentarios aprovados e nao excluidos de alunos (`author_role = student`, fora quem esta em `admin_roles`) por autor, em 7, 30 e 90 dias e no total. Alimenta a regra "Comentarios" do segmento; sem ela (banco sem a migracao) todos contam zero;
+- `communication_campaign_stats(p_campaign_ids uuid[])`: por aviso, para quem, viram, clicaram, fecharam sem clicar, Nao mostrar de novo, Lembrar depois, aceitaram, recusaram e voltaram a estudar em 7 dias. Notificacao: linhas de `notifications` sem teste (viram = `seen_at`); pop-up: `campaign_deliveries` (para quem = elegivel ou ja viu; viram = `first_seen_at`). "Voltaram a estudar": viu e, em `student_daily_activity` do dia em que viu ate 7 dias depois (fuso de Sao Paulo), somou pelo menos 600 s assistidos ou 1 aula concluida (`docs/17` §1.11);
+- `communication_overview(p_start, p_end)`: os quatro numeros do topo da lista. Ativos agora (pop-ups `active` dentro da janela + notificacoes `scheduled`/`sending`), vistos no periodo (notificacoes de aviso sem teste com `seen_at` no periodo + pop-ups com `first_seen_at` no periodo, avisos excluidos fora), cliques entre eles e quem voltou a estudar. A taxa de clique e calculada no TypeScript (nula sem vistos).
+
+### Storage
+
+- bucket publico `communication-audio` (criado pela migracao, `on conflict` atualiza): ate 10 MB, so `audio/mpeg`, `audio/mp4`, `audio/x-m4a`, `audio/aac`, `audio/ogg`, `audio/webm`, `audio/wav`, `audio/x-wav`; arquivos em `campaigns/{sha256 24}.{ext}`, enviados pela chave de servico (sem policy em `storage.objects`);
+- imagens dos avisos: pasta `communications/images` no `content-assets` (WebP 1280 x 720, ate 420 KB, nome pelo hash, como as outras pastas da secao Area de membros);
+- audio ou imagem trocados no editor ficam sem referencia (limpeza fica para depois).
+
+### Retencao e exclusao
+
+- o sino mostra so os ultimos 90 dias (filtro na leitura);
+- `public.prune_communication_history()` (security definer, `search_path` fixo; `service_role` executa, `anon`/`authenticated` nao) apaga `notifications` com `created_at` de mais de 24 meses e `campaign_deliveries` com `updated_at` de mais de 24 meses (`docs/17` D8) e devolve `{ notifications, campaign_deliveries }`. Agendada todo dia as 06:41 UTC (`bunker707-communication-prune`), depois das limpezas de jobs e de dados pessoais;
+- conta excluida leva as linhas dela em `notifications` e `campaign_deliveries` (cascade); como autora de resposta (`actor_id`) ou de aviso (`created_by` etc.), vira nula;
+- `campaigns` nao entra na retencao: aviso nao tem dado pessoal de aluno (exclusao logica pela equipe).
+
+### Deploy antes da migracao
+
+Pode: o sino responde vazio, marcar como vista ou lida nao faz nada, clique, resposta e eventos do pop-up respondem 404, o pop-up nao aparece, o job `comunicacao` registra "migracao 202610200001 pendente" e termina sem erro, e as telas de Comunicacao mostram o aviso de atualizacao do banco (`src/server/db/pending-migration.ts`).
+
 ## Retencao de dados pessoais
 
 Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.
@@ -1444,6 +1523,8 @@ Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `doc
 | `email_webhook_events` | 90 dias depois de `received_at` | a linha inteira | nada (entrega, bounce e motivo ja estao em `email_outbox`) |
 
 Fora da rotina de proposito: `sale_grants` (migracao `202610170008`) so guarda ids (transacao, codigo da assinatura, aluno, acesso, produto) e datas, sem dado pessoal; sai junto com a conta (`on delete cascade`). Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta anula `user_id` nas duas tabelas (`on delete set null`), e "Excluir aluno" ja anonimiza na hora as vendas do aluno (`anonymizeWebhookEventsFor`); prazos novos sao mudanca de migracao, com o teste ajustado.
+
+A Comunicacao (migracao `202610200001`) tem rotina propria, `public.prune_communication_history()` as 06:41 UTC: notificacoes e estados de pop-up saem inteiros depois de 24 meses (secao Comunicacao, Retencao e exclusao). Elas so guardam ids, datas e, nas notificacoes de comentario, o trecho da resposta que ja esta na aula.
 
 ## Suporte
 

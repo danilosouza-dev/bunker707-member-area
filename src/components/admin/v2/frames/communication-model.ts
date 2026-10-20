@@ -1,9 +1,10 @@
-// Regras puras da moldura de Comunicacao (prototipo aprovado, telas "Avisos e pop-ups", "Webinários" e
+// Regras puras de Comunicacao (prototipo aprovado, telas "Avisos e pop-ups", "Webinários" e
 // "Promoções"). Sem React: tests/admin-frames.test.mjs carrega este arquivo direto pelo Node.
 //
-// Comunicacao ainda nao existe (docs/17 §1.8). A moldura mostra o cabecalho, as abas e os quatro
-// numeros de cada aba na disposicao do prototipo, todos em "—", e um aviso honesto no lugar da lista.
-// Nenhum numero, aviso, webinario ou promocao de exemplo.
+// Avisos e pop-ups ja e a tela de verdade (docs/22): os quatro numeros vem do banco
+// (communication_overview). Webinarios e Promocoes ainda nao existem (docs/17 §1.8): a moldura mostra
+// o cabecalho, as abas e os quatro numeros em "—", e um aviso honesto no lugar da lista. Nenhum
+// numero, webinario ou promocao de exemplo.
 
 import type { KpiValueFormat } from "../format";
 import type { ResolvedAdminPeriod } from "../period";
@@ -29,7 +30,7 @@ type CommunicationTabMeta = {
 
 export const COMMUNICATION_TAB_META: Record<CommunicationTab, CommunicationTabMeta> = {
   avisos: {
-    description: "Pop-ups, faixas e cards na home do aluno, cada um para um segmento.",
+    description: "Notificações no sino e pop-ups na home do aluno, cada um para um segmento.",
     href: "/admin/comunicacao/avisos",
     label: "Avisos e pop-ups",
     phase: 5,
@@ -52,6 +53,10 @@ export const COMMUNICATION_TAB_META: Record<CommunicationTab, CommunicationTabMe
 };
 
 export type CommunicationKpi = {
+  /** O que o numero conta, na linha de baixo do cartao (so nas abas com numero de verdade). */
+  definition?: string;
+  /** Versao curta da definicao, para o cartao estreito. */
+  definitionShort?: string;
   format: KpiValueFormat;
   label: string;
 };
@@ -75,15 +80,29 @@ export function describeCommunicationPeriod(period: Pick<ResolvedAdminPeriod, "d
   }
 }
 
-/** Os quatro numeros de cada aba, com os rotulos do prototipo. Sem dado, o cartao mostra "—". */
+/**
+ * Os quatro numeros de cada aba, com os rotulos do prototipo. Sem dado, o cartao mostra "—". Avisos
+ * traz a definicao de cada um (docs/22 §2.1): ativos = pop-ups no ar + notificacoes agendadas ou
+ * enviando; vistos e cliques no periodo; voltaram a estudar = viram e estudaram em 7 dias.
+ */
 export function getCommunicationKpis(tab: CommunicationTab, period: Pick<ResolvedAdminPeriod, "days" | "period">): CommunicationKpi[] {
   switch (tab) {
     case "avisos":
       return [
-        { format: "number", label: "Avisos ativos" },
-        { format: "number", label: `Vistos ${describeCommunicationPeriod(period)}` },
-        { format: "percent", label: "Taxa de clique" },
-        { format: "number", label: "Voltaram a estudar" }
+        { definition: "Pop-ups no ar e notificações agendadas", definitionShort: "No ar e agendados", format: "number", label: "Avisos ativos" },
+        {
+          definition: "No sino e nos pop-ups",
+          definitionShort: "Sino e pop-ups",
+          format: "number",
+          label: `Vistos ${describeCommunicationPeriod(period)}`
+        },
+        { definition: "Cliques ÷ vistos no período", definitionShort: "Cliques ÷ vistos", format: "percent", label: "Taxa de clique" },
+        {
+          definition: "Viram e estudaram em até 7 dias",
+          definitionShort: "Estudaram em 7 dias",
+          format: "number",
+          label: "Voltaram a estudar"
+        }
       ];
     case "webinarios":
       return [
