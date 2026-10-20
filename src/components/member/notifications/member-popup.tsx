@@ -1,32 +1,26 @@
 "use client";
 
-import { Dialog } from "@base-ui/react/dialog";
 import { ArrowRight, ExternalLink, X } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
+import type { MouseEvent } from "react";
 import { memberButtonClassName } from "@/components/member/ui/member-button";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import { cn } from "@/lib/utils";
-import { POPUP_RULES } from "@/server/communications/campaign-model";
 import type { PopupItem } from "@/server/communications/notification-model";
 import { NoticeAudioPlayer } from "./notice-audio-player";
-import { fetchSummary, postPopupEvent, setSummaryUnseen, useEscapeToClose } from "./notifications-client";
-import {
-  POPUP_SESSION_KEY,
-  resolveNotificationLink,
-  SUMMARY_TTL_MS,
-  type NotificationLink
-} from "./notifications-model";
+import { resolveNotificationLink, type NotificationLink } from "./notifications-model";
 
 // Pop-up da home do aluno (docs/22 §1.3; limites fixos em docs/17 §1.8.1): so na home (nunca na aula),
 // no maximo um por sessao do navegador e um a cada 24 h (o servidor escolhe qual e quando), 3 s depois
 // de abrir a pagina e so quando nada mais esta aberto por cima e a aba esta visivel. "Lembrar depois"
 // (24 h, ate 2 vezes, se o aviso permitir), "Não mostrar de novo" e fechar (X, Esc ou fora).
 //
-// MemberPopupCard so desenha (a previa do admin usa o mesmo cartao com `preview`, dentro de moldura
-// inert reduzida; por isso a largura usa `cqw` e o respiro interno responde ao proprio cartao, nunca a
-// janela). MemberPopupHost busca, decide a hora de mostrar e registra o que o aluno fez.
+// Tres partes: MemberPopupCard (aqui) so desenha; a previa do admin usa o mesmo cartao com `preview`,
+// dentro de moldura inert reduzida, por isso a largura usa `cqw` e o respiro interno responde ao
+// proprio cartao, nunca a janela. MemberPopupHost (member-popup-host.tsx, em toda pagina do aluno) busca
+// e decide a hora de mostrar; MemberPopupDialog (member-popup-dialog.tsx) e a janela, baixada so quando
+// existe um pop-up para mostrar.
 
 export type MemberPopupCardProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -161,207 +155,5 @@ export function MemberPopupCard({
         </button>
       )}
     </div>
-  );
-}
-
-// --- Quando mostrar ------------------------------------------------------------------------------
-
-/** O resumo com pop-up e buscado depois que a home assenta (nao disputa com a pagina). */
-const POPUP_FETCH_DELAY_MS = 1_500;
-/** Enquanto algo esta aberto por cima (ou a aba escondida), confere de novo a cada segundo. */
-const POPUP_RETRY_MS = 1_000;
-
-// Memoria da pagina (sobrevive a troca de pagina, nao ao recarregar): sem sessionStorage (aba
-// anonima, bloqueio), vale ao menos ate recarregar; e sem pop-up na ultima conferencia, a volta para a
-// home dentro de 1 minuto nao pergunta de novo.
-let shownInThisPage = false;
-let lastEmptyCheckAt: number | null = null;
-
-function wasShownThisSession() {
-  if (shownInThisPage) {
-    return true;
-  }
-
-  try {
-    return window.sessionStorage.getItem(POPUP_SESSION_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function rememberShown() {
-  shownInThisPage = true;
-
-  try {
-    window.sessionStorage.setItem(POPUP_SESSION_KEY, "1");
-  } catch {
-    // Sem sessionStorage: fica a memoria da pagina.
-  }
-}
-
-/** Outro dialogo, gaveta, painel ou modal aberto (ou a rolagem travada por um deles)? */
-function hasBlockingLayer() {
-  if (document.body.style.overflow === "hidden" || document.documentElement.style.overflow === "hidden") {
-    return true;
-  }
-
-  return Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"], [role="dialog"], [role="alertdialog"]')).some(
-    (element) => !element.closest("[inert], [hidden], [data-member-popup]") && element.getClientRects().length > 0
-  );
-}
-
-type PopupOutcome = "clicked" | "closed" | "dismissed" | "snoozed";
-
-export function MemberPopupHost({
-  enabled,
-  onNavigate
-}: {
-  /** So na home e fora do modo "ver como" do produtor (AppShell decide). */
-  enabled: boolean;
-  /** Navegacao do AppShell (salva progresso e favoritos antes de trocar de pagina). */
-  onNavigate?: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
-}) {
-  const [popup, setPopup] = useState<PopupItem | null>(null);
-  const [open, setOpen] = useState(false);
-  const popupRef = useRef<HTMLDivElement>(null);
-  const outcomeRef = useRef<PopupOutcome | null>(null);
-  const titleId = useId();
-  const bodyId = useId();
-
-  useEffect(() => {
-    if (!enabled || wasShownThisSession() || (lastEmptyCheckAt !== null && Date.now() - lastEmptyCheckAt < SUMMARY_TTL_MS)) {
-      return;
-    }
-
-    const controller = new AbortController();
-    const mountedAt = Date.now();
-    const timers = new Set<number>();
-
-    function later(callback: () => void, delay: number) {
-      const timer = window.setTimeout(() => {
-        timers.delete(timer);
-        callback();
-      }, delay);
-      timers.add(timer);
-    }
-
-    function tryShow(item: PopupItem) {
-      if (controller.signal.aborted || wasShownThisSession()) {
-        return;
-      }
-
-      if (document.visibilityState !== "visible" || hasBlockingLayer()) {
-        later(() => tryShow(item), POPUP_RETRY_MS);
-        return;
-      }
-
-      rememberShown();
-      outcomeRef.current = null;
-      setPopup(item);
-      setOpen(true);
-      postPopupEvent(item.id, "impressed");
-    }
-
-    later(() => {
-      fetchSummary({ popup: true, signal: controller.signal })
-        .then((summary) => {
-          setSummaryUnseen(summary.unseen);
-
-          if (!summary.popup) {
-            lastEmptyCheckAt = Date.now();
-            return;
-          }
-
-          const item = summary.popup;
-          later(() => tryShow(item), Math.max(0, mountedAt + POPUP_RULES.delayMs - Date.now()));
-        })
-        .catch(() => undefined);
-    }, POPUP_FETCH_DELAY_MS);
-
-    return () => {
-      controller.abort();
-      timers.forEach((timer) => window.clearTimeout(timer));
-      timers.clear();
-    };
-  }, [enabled]);
-
-  // Video tocando atras (o destaque da home) pausa enquanto o pop-up esta aberto e volta ao fechar.
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const pausedByPopup = Array.from(document.querySelectorAll("video")).filter(
-      (video) => !popupRef.current?.contains(video) && !video.paused
-    );
-
-    pausedByPopup.forEach((video) => video.pause());
-
-    return () => {
-      pausedByPopup.forEach((video) => {
-        if (video.isConnected) {
-          void video.play().catch(() => undefined);
-        }
-      });
-    };
-  }, [open]);
-
-  function finish(outcome: PopupOutcome) {
-    if (!popup || outcomeRef.current) {
-      return;
-    }
-
-    outcomeRef.current = outcome;
-    postPopupEvent(popup.id, outcome);
-    setOpen(false);
-  }
-
-  useEscapeToClose(open, () => finish("closed"), (target) => Boolean(popupRef.current?.contains(target)));
-
-  if (!popup) {
-    return null;
-  }
-
-  return (
-    <Dialog.Root
-      onOpenChange={(next) => {
-        if (!next) {
-          finish("closed");
-        }
-      }}
-      open={open}
-    >
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-[2px] transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none" />
-        <Dialog.Viewport className="fixed inset-0 z-[201] grid place-items-center overflow-y-auto p-4">
-          <Dialog.Popup
-            aria-describedby={popup.body ? bodyId : undefined}
-            aria-labelledby={titleId}
-            aria-modal="true"
-            className="outline-none transition-[opacity,transform] duration-200 ease-out data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
-            data-member-popup=""
-            initialFocus={popupRef}
-            ref={popupRef}
-          >
-            <MemberPopupCard
-              bodyId={bodyId}
-              onClose={() => finish("closed")}
-              onCta={(event, link) => {
-                finish("clicked");
-
-                // Link de fora ou em nova aba: o navegador abre sozinho.
-                if (link.internal && !link.newTab) {
-                  onNavigate?.(event, link.href);
-                }
-              }}
-              onDismiss={() => finish("dismissed")}
-              onSnooze={() => finish("snoozed")}
-              popup={popup}
-              titleId={titleId}
-            />
-          </Dialog.Popup>
-        </Dialog.Viewport>
-      </Dialog.Portal>
-    </Dialog.Root>
   );
 }

@@ -381,15 +381,66 @@ export async function readNotificationCounts(userId: string, now = Date.now()) {
   }
 }
 
-/** Abriu o sino: tudo que estava na lista conta como visto (o numero zera; as bolinhas ficam). */
-export async function markAllSeen(userId: string, now = new Date()) {
-  try {
-    const { error } = await communicationsDb()
+const VISIBLE_IDS_PAGE = 1_000;
+const MARK_CHUNK = 150;
+
+/**
+ * Ids das notificacoes do aluno, nos ultimos 90 dias, ainda sem `column` e que aparecem no sino agora.
+ * "Marcar todas" e "abriu o sino" so mexem nestas: aviso ainda sendo enviado, ou resposta escondida pela
+ * moderacao, continua nova para quando aparecer.
+ */
+async function visibleIdsWithout(db: CommunicationsDb, userId: string, column: "read_at" | "seen_at", now: number) {
+  const ids: string[] = [];
+
+  for (let from = 0; ; from += VISIBLE_IDS_PAGE) {
+    const { data, error } = await db
       .from("notifications")
-      .update({ seen_at: now.toISOString() })
+      .select(VISIBILITY_COLUMNS)
       .eq("user_id", userId)
-      .is("seen_at", null);
-    assertNoDbError(error, "Sino: marcar como vistas");
+      .is(column, null)
+      .gte("created_at", sinceIso(now))
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + VISIBLE_IDS_PAGE - 1);
+    assertNoDbError(error, "Sino: notificacoes para marcar");
+
+    const rows = (data ?? []) as unknown as VisibilityRow[];
+    const comments = await loadComments(db, rows);
+    ids.push(...rows.filter((row) => isVisible(row, comments)).map((row) => row.id));
+
+    if (rows.length < VISIBLE_IDS_PAGE) {
+      return ids;
+    }
+  }
+}
+
+/** Visto e depois lido (o banco exige "lida" so depois de "vista"), em lotes de ids. */
+async function markIds(db: CommunicationsDb, userId: string, ids: readonly string[], input: { nowIso: string; read: boolean }) {
+  for (const part of chunksOf(Array.from(new Set(ids)), MARK_CHUNK)) {
+    const seen = await db.from("notifications").update({ seen_at: input.nowIso }).eq("user_id", userId).in("id", part).is("seen_at", null);
+    assertNoDbError(seen.error, "Sino: marcar como vistas");
+
+    if (input.read) {
+      // So o que ja esta visto: uma linha que nao passou pelo update acima nunca quebra a regra do banco.
+      const read = await db
+        .from("notifications")
+        .update({ read_at: input.nowIso })
+        .eq("user_id", userId)
+        .in("id", part)
+        .is("read_at", null)
+        .not("seen_at", "is", null);
+      assertNoDbError(read.error, "Sino: marcar como lidas");
+    }
+  }
+}
+
+/** Abriu o sino: tudo que aparece na lista conta como visto (o numero zera; as bolinhas ficam). */
+export async function markAllSeen(userId: string, now = new Date()) {
+  const db = communicationsDb();
+
+  try {
+    const ids = await visibleIdsWithout(db, userId, "seen_at", now.getTime());
+    await markIds(db, userId, ids, { nowIso: now.toISOString(), read: false });
   } catch (error) {
     if (!isMissingCommunicationSchema(error)) {
       throw error;
@@ -397,23 +448,13 @@ export async function markAllSeen(userId: string, now = new Date()) {
   }
 }
 
-/** Marca como lidas as notificacoes pedidas (ou todas). Lida tambem conta como vista. */
+/** Marca como lidas as notificacoes pedidas (ou todas as que aparecem no sino). Lida tambem conta como vista. */
 export async function markRead(userId: string, ids: readonly string[] | "all", now = new Date()) {
   const db = communicationsDb();
-  const nowIso = now.toISOString();
 
   try {
-    let seen = db.from("notifications").update({ seen_at: nowIso }).eq("user_id", userId).is("seen_at", null);
-    let read = db.from("notifications").update({ read_at: nowIso }).eq("user_id", userId).is("read_at", null);
-
-    if (ids !== "all") {
-      seen = seen.in("id", [...ids]);
-      read = read.in("id", [...ids]);
-    }
-
-    // Nesta ordem: o banco exige "lida" so depois de "vista".
-    assertNoDbError((await seen).error, "Sino: marcar como vistas");
-    assertNoDbError((await read).error, "Sino: marcar como lidas");
+    const targets = ids === "all" ? await visibleIdsWithout(db, userId, "read_at", now.getTime()) : ids;
+    await markIds(db, userId, targets, { nowIso: now.toISOString(), read: true });
   } catch (error) {
     if (!isMissingCommunicationSchema(error)) {
       throw error;

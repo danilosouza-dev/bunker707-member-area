@@ -5,17 +5,20 @@
 // 409) e grava na auditoria (admin_audit_log, so ids e contagens). Permissoes:
 // - messaging.write: salvar rascunho, previa do segmento, publicar (ou pedir aprovacao), duplicar,
 //   excluir, teste para mim, imagem;
-// - messaging.publish: cancelar agendamento, pausar, retomar, encerrar, retirar;
+// - messaging.publish: cancelar agendamento, pausar, retomar, encerrar, retirar; editar pop-up no ar;
 // - messaging.publish_large: aprovar ou devolver o pedido de outra pessoa.
 // Publicar: sem messaging.publish, ou acima de 500 alunos sem messaging.publish_large, o aviso fica
-// "Aguardando aprovação" (publishDecision). A equipe nunca entra na contagem nem recebe aviso.
+// "Aguardando aprovação" (publishDecision). Editar ou retomar pop-up no ar segue a mesma regra, mas
+// sem pedido: quem nao pode publicar para aquele segmento recebe 403. Publicar e aprovar contam e
+// gravam a mesma versao (updated_at da linha lida). A equipe nunca entra na contagem nem recebe aviso.
+// Os 5 nomes da previa do segmento so vao para quem tem students.read_basic (a lista de Alunos).
 
 import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/lib/action-result";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { runAdminAction } from "@/server/actions/run-action";
 import { recordAudit } from "@/server/audit/log";
-import { can } from "@/server/auth/roles";
+import { can, type AdminAccess } from "@/server/auth/roles";
 import { checkProductImage, decodeWebpDataUrl } from "@/server/catalog/webp";
 import { persistImageAsset } from "@/server/db/media-assets";
 import { previewAudience, resolveAudienceUserIds, type AudienceSamplePerson } from "./audience";
@@ -24,6 +27,7 @@ import { describeAudience, normalizeAudience, type AudienceDefinition } from "./
 import { invalidateLivePopups } from "./cache";
 import {
   isEditableStatus,
+  isSameVersion,
   publishDecision,
   situationOf,
   type CampaignSituation,
@@ -48,6 +52,7 @@ import {
   draftToColumns,
   fetchCampaign,
   insertCampaign,
+  NOTICE_CHANGED_MESSAGE,
   NOTICE_MISSING_MESSAGE,
   rowToDraft,
   softDeleteCampaign,
@@ -59,6 +64,9 @@ import {
 const LIST_PATH = "/admin/comunicacao/avisos";
 const NOT_EDITABLE = "Este aviso não pode mais ser editado. Duplique para criar outro.";
 const EMPTY_AUDIENCE = "Nenhum aluno está neste segmento agora.";
+const LIVE_EDIT_NEEDS_PUBLISH = "Só quem pode publicar muda um pop-up no ar. Duplique para criar outro.";
+const LIVE_EDIT_NEEDS_APPROVAL = "Para mudar um pop-up no ar para este segmento, peça a um dono ou administrador.";
+const RESUME_NEEDS_APPROVAL = "Este pop-up passou de 500 alunos. Para retomar, peça a um dono ou administrador.";
 
 export type SavedNotice = { id: string; status: CampaignStatus; updatedAt: string };
 export type PublishedNotice = {
@@ -92,6 +100,23 @@ async function requireCampaign(db: CommunicationsDb, id: string) {
   }
 
   return row;
+}
+
+/** A tela leu outra versao (updated_at) do que esta no banco agora: 409 antes de contar ou gravar. */
+function assertSameVersion(row: CampaignRow, expectedUpdatedAt: string | undefined) {
+  if (expectedUpdatedAt && !isSameVersion(expectedUpdatedAt, row.updated_at)) {
+    throw new CommunicationError(NOTICE_CHANGED_MESSAGE, 409);
+  }
+}
+
+function canPublishTo(access: AdminAccess, audienceCount: number) {
+  return (
+    publishDecision({
+      audienceCount,
+      canPublish: can(access, "messaging.publish"),
+      canPublishLarge: can(access, "messaging.publish_large")
+    }) === "publish"
+  );
 }
 
 function situationNow(row: CampaignRow, now: number) {
@@ -146,6 +171,9 @@ function countAudience(row: CampaignRow, loaded: LoadedAudience) {
 /**
  * Coloca o aviso no ar: notificacao agendada fica `scheduled`; notificacao para agora e reservada
  * (`sending`) e enviada aqui mesmo; pop-up fica `active` e a lista de quem ve e montada na hora.
+ * `approved`: quem aprovou o pedido, ou quem publica com messaging.publish_large; grava approved_at
+ * (a notificacao agendada sai mesmo que o segmento passe de 500 ate a hora). Sem isso, approved_at
+ * fica vazio e o envio confere o limite de novo.
  */
 async function goLive(input: {
   actorId: string;
@@ -153,21 +181,22 @@ async function goLive(input: {
   count: number;
   db: CommunicationsDb;
   expectedStatuses: readonly CampaignStatus[];
-  expectedUpdatedAt?: string;
   loaded: LoadedAudience;
   now: Date;
   row: CampaignRow;
 }): Promise<PublishedNotice> {
   const { db, now, row } = input;
   const nowIso = now.toISOString();
-  const guard = { expectedStatuses: input.expectedStatuses, expectedUpdatedAt: input.expectedUpdatedAt };
+  // Sempre a versao contada (a linha lida): um segmento salvo depois da contagem da 409.
+  const guard = { expectedStatuses: input.expectedStatuses, expectedUpdatedAt: row.updated_at };
   const common: CampaignPatch = {
+    approved_at: input.approved ? nowIso : null,
+    approved_by: input.approved ? input.actorId : null,
     audience_count: input.count,
     audience_counted_at: nowIso,
     dispatch_attempts: 0,
     last_error: null,
-    updated_by: input.actorId,
-    ...(input.approved ? { approved_at: nowIso, approved_by: input.actorId } : {})
+    updated_by: input.actorId
   };
 
   if (row.kind === "inbox") {
@@ -207,10 +236,12 @@ async function goLive(input: {
 
 /**
  * [messaging.write] Cria ou atualiza o aviso. Agendado ou aguardando aprovacao volta a rascunho;
- * pop-up no ar ou pausado continua como esta (e recalcula quem ve se o segmento mudou).
+ * pop-up no ar ou pausado continua como esta (e recalcula quem ve se o segmento mudou). Mudar o pop-up
+ * no ar vale como publicar: precisa de messaging.publish e, acima de 500 alunos (o segmento novo, ou a
+ * contagem gravada quando o segmento nao mudou), de messaging.publish_large; senao, 403.
  */
 export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionResult<SavedNotice>> {
-  return runAdminAction("messaging.write", saveNoticeSchema, input, async ({ input: data, user }) => {
+  return runAdminAction("messaging.write", saveNoticeSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
     const columns = draftToColumns(data.draft);
 
@@ -230,20 +261,36 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     }
 
     const live = current.kind === "popup" && (current.status === "active" || current.status === "paused");
+    const audienceChanged = stableJson(normalizeAudience(audienceOfRow(current))) !== stableJson(columns.audience);
+    const now = new Date();
+    let loaded: LoadedAudience | undefined;
 
     if (live) {
       if (columns.kind !== current.kind) {
         throw new NoticeFieldError("kind", "O tipo não muda depois de publicado.");
       }
 
-      const [problem] = publishProblems(data.draft, Date.now());
+      const [problem] = publishProblems(data.draft, now.getTime());
 
       if (problem) {
         throw new NoticeFieldError(problem.path, problem.message);
       }
+
+      if (!can(access, "messaging.publish")) {
+        throw new CommunicationError(LIVE_EDIT_NEEDS_PUBLISH, 403);
+      }
+
+      if (audienceChanged) {
+        loaded = await loadAudienceFacts(db, now);
+      }
+
+      const count = loaded ? resolveAudienceUserIds(columns.audience, loaded).length : (current.audience_count ?? 0);
+
+      if (!canPublishTo(access, count)) {
+        throw new CommunicationError(LIVE_EDIT_NEEDS_APPROVAL, 403);
+      }
     }
 
-    const audienceChanged = stableJson(normalizeAudience(audienceOfRow(current))) !== stableJson(columns.audience);
     const patch: CampaignPatch = {
       ...columns,
       updated_by: user.id,
@@ -253,7 +300,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
 
     if (live) {
       if (audienceChanged) {
-        await refreshPopupDeliveries({ campaign: saved, db, now: new Date() });
+        await refreshPopupDeliveries({ campaign: saved, db, loaded, now });
         saved = (await fetchCampaign(db, saved.id)) ?? saved;
       }
 
@@ -273,14 +320,23 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
   });
 }
 
-/** [messaging.write] Contagem ao vivo do segmento: quantos alunos, 5 nomes e a frase "Alunos que ...". */
+/**
+ * [messaging.write] Contagem ao vivo do segmento: quantos alunos, 5 nomes e a frase "Alunos que ...".
+ * Os nomes so vao para quem pode ver a lista de Alunos (students.read_basic); para os demais, a amostra
+ * vem vazia (combinar regras e ler nomes revelaria progresso, estudo e acesso de alunos com nome).
+ */
 export async function previewNoticeAudience(input: { audience: AudienceDefinition }): Promise<ActionResult<AudiencePreview>> {
-  return runAdminAction("messaging.write", previewAudienceSchema, input, async ({ input: data }) => {
+  return runAdminAction("messaging.write", previewAudienceSchema, input, async ({ access, input: data }) => {
     const db = communicationsDb();
     const definition = normalizeAudience(data.audience);
     const [loaded, names] = await Promise.all([loadAudienceFacts(db, new Date()), loadAudienceNames(db, [definition])]);
+    const preview = previewAudience(definition, loaded);
 
-    return { ...previewAudience(definition, loaded), description: describeAudience(definition, names) };
+    return {
+      count: preview.count,
+      description: describeAudience(definition, names),
+      sample: can(access, "students.read_basic") ? preview.sample : []
+    };
   });
 }
 
@@ -302,23 +358,19 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
       );
     }
 
+    assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
 
     const loaded = await loadAudienceFacts(db, now);
     const count = countAudience(row, loaded);
-    const decision = publishDecision({
-      audienceCount: count,
-      canPublish: can(access, "messaging.publish"),
-      canPublishLarge: can(access, "messaging.publish_large")
-    });
 
-    if (decision === "needs_approval") {
+    if (!canPublishTo(access, count)) {
       const nowIso = now.toISOString();
       const pending = await updateCampaign(
         db,
         row.id,
         { audience_count: count, audience_counted_at: nowIso, requested_at: nowIso, requested_by: user.id, status: "pending_approval", updated_by: user.id },
-        { expectedStatuses: ["draft"], expectedUpdatedAt: data.expectedUpdatedAt }
+        { expectedStatuses: ["draft"], expectedUpdatedAt: row.updated_at }
       );
 
       await recordAudit(db, { action: "communication.approval_requested", actorId: user.id, count, entityId: row.id, entityType: "campaign", metadata: { kind: row.kind } });
@@ -329,11 +381,10 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
 
     const published = await goLive({
       actorId: user.id,
-      approved: false,
+      approved: can(access, "messaging.publish_large"),
       count,
       db,
       expectedStatuses: ["draft"],
-      expectedUpdatedAt: data.expectedUpdatedAt,
       loaded,
       now,
       row
@@ -353,7 +404,10 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
   });
 }
 
-/** [messaging.publish_large] Aprova o pedido: publica como se a pessoa que aprova tivesse publicado. */
+/**
+ * [messaging.publish_large] Aprova o pedido: publica como se a pessoa que aprova tivesse publicado, na
+ * versao que ela revisou (a mesma que e contada e gravada).
+ */
 export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<PublishedNotice>> {
   return runAdminAction("messaging.publish_large", noticeIdSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
@@ -364,6 +418,7 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
       throw new CommunicationError("Este aviso não está aguardando aprovação.", 409);
     }
 
+    assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
 
     const loaded = await loadAudienceFacts(db, now);
@@ -374,7 +429,6 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
       count,
       db,
       expectedStatuses: ["pending_approval"],
-      expectedUpdatedAt: data.expectedUpdatedAt,
       loaded,
       now,
       row
@@ -436,7 +490,12 @@ export async function cancelScheduledNotice(input: NoticeIdInput): Promise<Actio
   });
 }
 
+/**
+ * Pausar, retomar ou encerrar o pop-up, na versao lida. Retomar recoloca no ar para o segmento de agora:
+ * acima de 500 alunos, so com messaging.publish_large (senao 403, sem pedido de aprovacao).
+ */
 async function changePopupStatus(input: {
+  access: AdminAccess;
   actorId: string;
   audit: "communication.ended" | "communication.paused" | "communication.resumed";
   expectedUpdatedAt?: string;
@@ -452,6 +511,22 @@ async function changePopupStatus(input: {
     throw new CommunicationError("Esta ação vale só para pop-ups.", 422);
   }
 
+  if (!input.from.includes(row.status)) {
+    throw new CommunicationError(NOTICE_CHANGED_MESSAGE, 409);
+  }
+
+  assertSameVersion(row, input.expectedUpdatedAt);
+
+  let loaded: LoadedAudience | undefined;
+
+  if (input.to === "active") {
+    loaded = await loadAudienceFacts(db, now);
+
+    if (!canPublishTo(input.access, resolveAudienceUserIds(audienceOfRow(row), loaded).length)) {
+      throw new CommunicationError(RESUME_NEEDS_APPROVAL, 403);
+    }
+  }
+
   const patch: CampaignPatch = { status: input.to, updated_by: input.actorId };
 
   if (input.to === "ended") {
@@ -464,10 +539,10 @@ async function changePopupStatus(input: {
     }
   }
 
-  let updated = await updateCampaign(db, row.id, patch, { expectedStatuses: input.from, expectedUpdatedAt: input.expectedUpdatedAt });
+  let updated = await updateCampaign(db, row.id, patch, { expectedStatuses: input.from, expectedUpdatedAt: row.updated_at });
 
   if (input.to === "active") {
-    await refreshPopupDeliveries({ campaign: updated, db, now });
+    await refreshPopupDeliveries({ campaign: updated, db, loaded, now });
     updated = (await fetchCampaign(db, updated.id)) ?? updated;
   }
 
@@ -480,22 +555,22 @@ async function changePopupStatus(input: {
 
 /** [messaging.publish] Pausa o pop-up no ar (some da home ate retomar). */
 export async function pauseNotice(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, ({ input: data, user }) =>
-    changePopupStatus({ actorId: user.id, audit: "communication.paused", expectedUpdatedAt: data.expectedUpdatedAt, from: ["active"], id: data.id, to: "paused" })
+  return runAdminAction("messaging.publish", noticeIdSchema, input, ({ access, input: data, user }) =>
+    changePopupStatus({ access, actorId: user.id, audit: "communication.paused", expectedUpdatedAt: data.expectedUpdatedAt, from: ["active"], id: data.id, to: "paused" })
   );
 }
 
-/** [messaging.publish] Retoma o pop-up pausado (recalcula quem ve). */
+/** [messaging.publish] Retoma o pop-up pausado (recalcula quem ve; acima de 500, messaging.publish_large). */
 export async function resumeNotice(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, ({ input: data, user }) =>
-    changePopupStatus({ actorId: user.id, audit: "communication.resumed", expectedUpdatedAt: data.expectedUpdatedAt, from: ["paused"], id: data.id, to: "active" })
+  return runAdminAction("messaging.publish", noticeIdSchema, input, ({ access, input: data, user }) =>
+    changePopupStatus({ access, actorId: user.id, audit: "communication.resumed", expectedUpdatedAt: data.expectedUpdatedAt, from: ["paused"], id: data.id, to: "active" })
   );
 }
 
 /** [messaging.publish] Encerra o pop-up de vez (no ar ou pausado). */
 export async function endNotice(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, ({ input: data, user }) =>
-    changePopupStatus({ actorId: user.id, audit: "communication.ended", expectedUpdatedAt: data.expectedUpdatedAt, from: ["active", "paused"], id: data.id, to: "ended" })
+  return runAdminAction("messaging.publish", noticeIdSchema, input, ({ access, input: data, user }) =>
+    changePopupStatus({ access, actorId: user.id, audit: "communication.ended", expectedUpdatedAt: data.expectedUpdatedAt, from: ["active", "paused"], id: data.id, to: "ended" })
   );
 }
 

@@ -64,9 +64,14 @@ test("acoes do pop-up: no ar, agendado pela janela, encerrado pela janela, pausa
   assert.deepEqual(acoes({ status: "active" }), ["edit", "pause", "end", "duplicate"]);
   assert.deepEqual(acoes({ startsAt: iso(now + HOUR), status: "active" }), ["edit", "pause", "end", "duplicate"]);
   assert.deepEqual(acoes({ endsAt: iso(now - HOUR), status: "active" }), ["duplicate", "delete"]);
-  assert.deepEqual(acoes({ status: "active" }, soEscreve), ["edit", "duplicate"]);
   assert.deepEqual(acoes({ status: "paused" }), ["edit", "resume", "end", "duplicate"]);
   assert.deepEqual(acoes({ status: "ended" }), ["duplicate", "delete"]);
+
+  // Editar o pop-up no ar muda o que o aluno ve agora: so quem pode publicar (o servidor confere os 500).
+  assert.deepEqual(acoes({ status: "active" }, soEscreve), ["duplicate"], "quem so escreve nao edita o pop-up no ar");
+  assert.deepEqual(acoes({ status: "paused" }, soEscreve), ["duplicate"]);
+  assert.deepEqual(acoes({ status: "active" }, { ...todas, canPublishLarge: false }), ["edit", "pause", "end", "duplicate"]);
+  assert.deepEqual(acoes({ status: "draft" }, soEscreve), ["edit", "publish", "duplicate", "delete"], "rascunho continua com quem escreve");
 
   assert.equal(campaign.isEditableStatus("popup", "active"), true);
   assert.equal(campaign.isEditableStatus("popup", "ended"), false);
@@ -173,6 +178,55 @@ test("pop-up: clicado, 'Não mostrar de novo' e 'Lembrar depois' ainda valendo f
   const ateClicar = [noAr("a", { repeat: "until_action" })];
   assert.equal(escolhe({ deliveries: [entrega("a", { impressions: 3, lastSeenAt: now - 25 * HOUR })], live: ateClicar }), "a");
   assert.equal(escolhe({ deliveries: [entrega("a", { impressions: 3, lastSeenAt: now - 2 * HOUR })], live: ateClicar }), null);
+});
+
+test("pop-up 'Uma vez' com 'Lembrar depois': volta quando o lembrete vence; cada lembrete vale uma vez a mais; fechar sem lembrar some", () => {
+  const live = [noAr("a")];
+  const visto = (extra) => entrega("a", { impressions: 1, lastSeenAt: now - 25 * HOUR, ...extra });
+
+  assert.equal(escolhe({ deliveries: [visto({ snoozeCount: 1, snoozedUntil: now - HOUR })], live }), "a", "viu, pediu para lembrar, o lembrete venceu");
+  assert.equal(escolhe({ deliveries: [visto({ snoozeCount: 1, snoozedUntil: now + HOUR })], live }), null, "o lembrete ainda vale");
+  assert.equal(
+    escolhe({ deliveries: [visto({ impressions: 2, snoozeCount: 1, snoozedUntil: now - 2 * HOUR })], live }),
+    null,
+    "lembrou uma vez e ja viu de novo: some"
+  );
+  assert.equal(
+    escolhe({ deliveries: [visto({ impressions: 2, snoozeCount: 2, snoozedUntil: now - HOUR })], live }),
+    "a",
+    "segundo lembrete vencido: mais uma vez"
+  );
+  assert.equal(escolhe({ deliveries: [visto({ impressions: 3, snoozeCount: 2, snoozedUntil: now - HOUR })], live }), null, "no maximo 2 lembretes");
+  assert.equal(escolhe({ deliveries: [visto({})], live }), null, "fechou sem lembrar depois: nao volta");
+  assert.equal(
+    escolhe({ deliveries: [visto({ snoozeCount: 1, snoozedUntil: now - HOUR })], lastAnyPopupSeenAt: now - 2 * HOUR, live }),
+    null,
+    "o limite de 1 pop-up a cada 24 h continua valendo"
+  );
+});
+
+test("versao do editor: o mesmo instante em qualquer formato ISO, ate o microssegundo", () => {
+  assert.equal(campaign.isSameVersion("2026-10-20T15:09:00.123456+00:00", "2026-10-20T15:09:00.123456+00:00"), true);
+  assert.equal(campaign.isSameVersion("2026-10-20T15:09:00.123456Z", "2026-10-20T15:09:00.123456+00:00"), true);
+  assert.equal(campaign.isSameVersion("2026-10-20T12:09:00.1234560-03:00", "2026-10-20T15:09:00.123456+00:00"), true);
+  assert.equal(campaign.isSameVersion("2026-10-20T15:09:00.123+00:00", "2026-10-20T15:09:00.123000+00:00"), true);
+  assert.equal(campaign.isSameVersion("2026-10-20T15:09:00+00:00", "2026-10-20T15:09:00.000000+00:00"), true);
+  assert.equal(campaign.isSameVersion("2026-10-20T15:09:00.123457+00:00", "2026-10-20T15:09:00.123456+00:00"), false, "um microssegundo depois e outra versao");
+  assert.equal(campaign.isSameVersion("2026-10-20T15:09:01.123456+00:00", "2026-10-20T15:09:00.123456+00:00"), false);
+  assert.equal(campaign.isSameVersion("ontem", "2026-10-20T15:09:00.123456+00:00"), false);
+});
+
+test("recalculo dos pop-ups: relogio alinhado em faixas de 15 minutos (os vencidos caem no mesmo tick)", () => {
+  const QUINZE = 15 * 60 * 1000;
+  const faixa = (hora) => campaign.popupRefreshDueBefore(Date.parse(hora), QUINZE);
+
+  assert.equal(faixa("2026-10-20T15:07:42.000Z"), Date.parse("2026-10-20T15:00:00.000Z"));
+  assert.equal(faixa("2026-10-20T15:15:00.000Z"), Date.parse("2026-10-20T15:15:00.000Z"));
+  assert.equal(faixa("2026-10-20T15:29:59.999Z"), Date.parse("2026-10-20T15:15:00.000Z"));
+  // Dois pop-ups recalculados em minutos diferentes da mesma faixa vencem juntos no comeco da proxima.
+  const proxima = faixa("2026-10-20T15:16:00.000Z");
+  assert.ok(Date.parse("2026-10-20T15:02:00.000Z") < proxima && Date.parse("2026-10-20T15:13:00.000Z") < proxima);
+  assert.ok(!(Date.parse("2026-10-20T15:15:30.000Z") < proxima), "recalculado nesta faixa: so na proxima");
 });
 
 test("eventos do pop-up: impressao conta e marca a primeira vez; clique e 'Não mostrar de novo' gravam uma vez; fechar nao muda nada", () => {

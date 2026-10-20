@@ -9,12 +9,21 @@ import "server-only";
 // em docs/09 e docs/04: envio em massa de e-mail/push fica fora do tick; estas linhas do sino sao
 // minusculas, em lote e retomaveis. Tres falhas seguidas cancelam o envio com o erro gravado.
 //
+// Aprovacao (docs/17 D4; docs/22 §2.3): o limite de 500 alunos e conferido ao publicar e de novo na hora
+// do envio. Notificacao agendada sem aprovacao (approved_at vazio: publicada por quem nao tem
+// messaging.publish_large) cujo segmento passou de 500 ate a hora de sair volta para "Aguardando
+// aprovação" em vez de ser enviada; aprovada, sai na hora.
+//
 // Pop-up: enquanto esta no ar, o job recalcula a cada 15 minutos quem esta no segmento (elegivel) e
-// quem saiu (deixa de ver). Impressoes, cliques e "Nao mostrar de novo" nunca sao apagados.
+// quem saiu (deixa de ver). Impressoes, cliques e "Nao mostrar de novo" nunca sao apagados. O segmento
+// do pop-up no ar pode crescer alem de 500 sem nova aprovacao (decisao em docs/22 §2.3); editar ou
+// retomar o pop-up confere o limite de novo.
 
+import { recordAudit } from "@/server/audit/log";
 import { resolveAudienceUserIds } from "./audience";
 import { loadAudienceFacts, type LoadedAudience } from "./audience-facts";
-import { describeError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
+import { APPROVAL_THRESHOLD } from "./campaign-model";
+import { CommunicationError, describeError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
 import {
   audienceOfRow,
   claimDueInbox,
@@ -37,12 +46,13 @@ export const POPUP_REFRESH_EVERY_MS = 15 * 60 * 1000;
 
 type LoadedInput = LoadedAudience | Promise<LoadedAudience> | undefined;
 
-export type DispatchResult = { recipients: number; status: "canceled" | "sending" | "sent" };
+export type DispatchResult = { recipients: number; status: "canceled" | "pending_approval" | "sending" | "sent" };
 
 /**
  * Envia uma notificacao ja reservada (status `sending`). Devolve a situacao no fim: `sent` (todos
  * gravados), `sending` (parou no meio: orcamento do tick, teto da rodada ou falha que sera tentada de
- * novo) ou `canceled` (terceira falha).
+ * novo), `pending_approval` (sem aprovacao e o segmento passou de 500 desde que foi agendada) ou
+ * `canceled` (terceira falha).
  */
 export async function dispatchInboxCampaign(input: {
   campaign: CampaignRow;
@@ -61,6 +71,11 @@ export async function dispatchInboxCampaign(input: {
   try {
     const loaded = (await input.loaded) ?? (await loadAudienceFacts(db, now));
     const audienceIds = resolveAudienceUserIds(audienceOfRow(campaign), loaded);
+
+    if (!campaign.approved_at && audienceIds.length > APPROVAL_THRESHOLD) {
+      return await holdForApproval({ audienceCount: audienceIds.length, campaign, db, now });
+    }
+
     // Envio retomado (tick cortado, falha anterior): so grava quem ainda nao recebeu.
     const already = await fetchCampaignRecipientIds(db, campaign.id);
     const pending = audienceIds.filter((userId) => !already.has(userId));
@@ -122,8 +137,43 @@ export async function dispatchInboxCampaign(input: {
 }
 
 /**
+ * Notificacao sem aprovacao que passou de 500 alunos ate a hora do envio: nada sai; volta para
+ * "Aguardando aprovação" pedida em nome de quem publicou (updated_by), sem data (aprovada, sai na hora).
+ */
+async function holdForApproval(input: { audienceCount: number; campaign: CampaignRow; db: CommunicationsDb; now: Date }): Promise<DispatchResult> {
+  const { campaign, db } = input;
+  const nowIso = input.now.toISOString();
+
+  await updateCampaign(
+    db,
+    campaign.id,
+    {
+      audience_count: input.audienceCount,
+      audience_counted_at: nowIso,
+      dispatch_started_at: null,
+      requested_at: nowIso,
+      requested_by: campaign.updated_by,
+      send_at: null,
+      status: "pending_approval"
+    },
+    { expectedStatuses: ["sending"] }
+  );
+  await recordAudit(db, {
+    action: "communication.approval_requested",
+    actorId: campaign.updated_by,
+    count: input.audienceCount,
+    entityId: campaign.id,
+    entityType: "campaign",
+    metadata: { kind: campaign.kind, reason: "grew_after_schedule" }
+  });
+
+  return { recipients: campaign.recipients_count ?? 0, status: "pending_approval" };
+}
+
+/**
  * Recalcula quem ve o pop-up: quem entrou no segmento passa a elegivel (linha nova ou reativada), quem
- * saiu deixa de ser elegivel. Grava a contagem e a hora do recalculo no aviso.
+ * saiu deixa de ser elegivel. Grava a contagem e a hora do recalculo no aviso, so se o aviso nao foi
+ * editado no meio (senao a hora fica vazia e o job do minuto seguinte refaz com o segmento atual).
  */
 export async function refreshPopupDeliveries(input: {
   campaign: CampaignRow;
@@ -141,20 +191,33 @@ export async function refreshPopupDeliveries(input: {
 
   await upsertDeliveries(db, campaign.id, toEnable);
   await setDeliveryEligibility(db, campaign.id, toDisable, false);
-  await updateCampaign(
-    db,
-    campaign.id,
-    { audience_count: matching.size, audience_counted_at: now.toISOString(), audience_refreshed_at: now.toISOString() },
-    { expectedStatuses: [campaign.status] }
-  ).catch((error: unknown) => {
-    // O aviso mudou no meio (pausado, encerrado, editado): o proximo recalculo acerta a contagem.
+
+  try {
+    // updated_at so muda com edicao da equipe (o gatilho ignora a contagem e a hora do recalculo).
+    await updateCampaign(
+      db,
+      campaign.id,
+      { audience_count: matching.size, audience_counted_at: now.toISOString(), audience_refreshed_at: now.toISOString() },
+      { expectedStatuses: [campaign.status], expectedUpdatedAt: campaign.updated_at }
+    );
+  } catch (error) {
     console.error(`[comunicacao] contagem do pop-up ${campaign.id} nao gravada: ${describeError(error)}`);
-  });
+
+    if (error instanceof CommunicationError && error.status === 409) {
+      // Editado (ou pausado) no meio: a lista acima pode ser do segmento antigo. Sem a hora do
+      // recalculo, o job do minuto seguinte refaz com o que esta gravado agora.
+      await updateCampaign(db, campaign.id, { audience_refreshed_at: null }).catch((clearError: unknown) =>
+        console.error(`[comunicacao] recalculo do pop-up ${campaign.id} nao reaberto: ${describeError(clearError)}`)
+      );
+    }
+  }
 
   return { added: toEnable.length, audienceCount: matching.size, removed: toDisable.length };
 }
 
 export type ProcessCommunicationsResult = {
+  /** Notificacoes que passaram de 500 alunos sem aprovacao e voltaram para "Aguardando aprovação". */
+  awaitingApproval: number;
   dispatched: number;
   failed: number;
   pendingMigration: boolean;
@@ -164,13 +227,14 @@ export type ProcessCommunicationsResult = {
 
 /**
  * Trabalho do job "comunicacao" no tick de minuto: (1) envia ate 3 notificacoes vencidas; (2) recalcula
- * ate 5 pop-ups no ar com segmento de mais de 15 minutos. Os fatos dos alunos sao lidos uma vez por
- * rodada e so se houver trabalho. Banco vazio ou sem a migracao: registra e volta sem erro.
+ * ate 5 pop-ups no ar cujo segmento venceu (faixas de 15 minutos). Os fatos dos alunos sao lidos uma
+ * vez por rodada e so se houver trabalho. Banco vazio ou sem a migracao: registra e volta sem erro.
+ * Recalculo que falha marca a hora mesmo assim: tenta de novo na faixa seguinte, nao a cada minuto.
  */
 export async function processCommunications(input: { db: CommunicationsDb; now?: Date; signal?: AbortSignal }): Promise<ProcessCommunicationsResult> {
   const { db, signal } = input;
   const now = input.now ?? new Date();
-  const result: ProcessCommunicationsResult = { dispatched: 0, failed: 0, pendingMigration: false, refreshed: 0, sending: 0 };
+  const result: ProcessCommunicationsResult = { awaitingApproval: 0, dispatched: 0, failed: 0, pendingMigration: false, refreshed: 0, sending: 0 };
   let loadedPromise: Promise<LoadedAudience> | null = null;
   const loaded = () => (loadedPromise ??= loadAudienceFacts(db, now));
 
@@ -195,6 +259,8 @@ export async function processCommunications(input: { db: CommunicationsDb; now?:
         result.dispatched += 1;
       } else if (outcome.status === "sending") {
         result.sending += 1;
+      } else if (outcome.status === "pending_approval") {
+        result.awaitingApproval += 1;
       } else {
         result.failed += 1;
       }
@@ -221,6 +287,11 @@ export async function processCommunications(input: { db: CommunicationsDb; now?:
 
         result.failed += 1;
         console.error(`[comunicacao] pop-up ${campaign.id} nao recalculado: ${describeError(error)}`);
+        // Grava so a hora do recalculo (o gatilho nao a conta como edicao, entao quem esta com o editor
+        // aberto nao recebe 409; last_error contaria): a proxima tentativa fica para a faixa seguinte.
+        await updateCampaign(db, campaign.id, { audience_refreshed_at: now.toISOString() }, { expectedStatuses: [campaign.status] }).catch(
+          () => undefined
+        );
       }
     }
   } catch (error) {

@@ -14,7 +14,8 @@ import { isSummaryFresh } from "./notifications-model";
 // sino guardado na memoria do navegador. O topo (AppShell) remonta a cada pagina; o numero fica aqui,
 // fora do React, vale por 1 minuto (SUMMARY_TTL_MS) e e buscado de novo quando a aba volta a ficar
 // visivel e ja passou desse tempo. Cada chamada a API custa uma conferencia de sessao no Auth, entao
-// nada aqui roda em intervalo.
+// nada aqui roda em intervalo, uma falha tambem conta como tentativa (espera o mesmo minuto) e, na
+// home, o resumo com o pop-up (MemberPopupHost) e a unica leitura: o numero do sino vem junto.
 //
 // Envios que podem sair junto com a pagina (clique num link, eventos do pop-up) vao por
 // navigator.sendBeacon, com fetch keepalive de reserva.
@@ -137,7 +138,7 @@ export function postPopupEvent(id: string, event: PopupEvent) {
 // --- Numero do sino (memoria do navegador) ---------------------------------------------------------
 
 export type NotificationsSummaryState = {
-  /** Momento da ultima resposta valida (ou atualizacao local); null antes da primeira. */
+  /** Momento da ultima tentativa (resposta, falha ou atualizacao local); null antes da primeira. */
   fetchedAt: number | null;
   status: "error" | "idle" | "ready";
   unseen: number;
@@ -146,7 +147,9 @@ export type NotificationsSummaryState = {
 const INITIAL_SUMMARY: NotificationsSummaryState = { fetchedAt: null, status: "idle", unseen: 0 };
 
 let summaryState: NotificationsSummaryState = INITIAL_SUMMARY;
-let summaryRequest: Promise<void> | null = null;
+let summaryRequest: { popup: boolean; promise: Promise<NotificationsSummary | null> } | null = null;
+/** A home vai pedir o resumo junto com o pop-up: ate la, o topo nao pede o seu (um pedido so). */
+let summaryHeldForPopup = false;
 const summaryListeners = new Set<() => void>();
 
 function setSummaryState(next: NotificationsSummaryState) {
@@ -175,35 +178,70 @@ export function setSummaryUnseen(unseen: number) {
   setSummaryState({ fetchedAt: Date.now(), status: "ready", unseen: safe });
 }
 
-/** Busca o numero do sino se o guardado ja passou do prazo (ou com `force`). Nunca lanca. */
-export function refreshNotificationsSummary(options: { force?: boolean } = {}) {
-  if (summaryRequest) {
-    return summaryRequest;
-  }
-
-  if (!options.force && isSummaryFresh(summaryState.fetchedAt, Date.now())) {
-    return Promise.resolve();
-  }
-
-  summaryRequest = fetchSummary()
-    .then((summary) => setSummaryUnseen(summary.unseen))
-    .catch(() => {
-      // Sem numero novo: mantem o que havia (ou nenhum). Sessao encerrada (401) zera.
-      setSummaryState({ ...summaryState, status: summaryState.status === "ready" ? "ready" : "error" });
-    })
-    .finally(() => {
-      summaryRequest = null;
-    });
-
-  return summaryRequest;
+/**
+ * O pop-up da home (MemberPopupHost) vai pedir o resumo com `popup`: enquanto `held`, o pedido comum do
+ * topo (ao voltar para a aba, por exemplo) espera por ele em vez de sair sozinho.
+ */
+export function holdSummaryForPopup(held: boolean) {
+  summaryHeldForPopup = held;
 }
 
-/** Numero do sino para o topo: busca depois da hidratacao e ao voltar para a aba, respeitando o prazo. */
-export function useNotificationsSummary() {
+/**
+ * Busca o numero do sino se o guardado ja passou do prazo (ou com `force`); com `popup`, busca sempre,
+ * trazendo junto o pop-up da vez (so a home pede). Um pedido comum aproveita o que ja esta em andamento.
+ * Devolve o resumo, ou null quando nao buscou ou falhou. Nunca lanca.
+ */
+export function refreshNotificationsSummary(options: { force?: boolean; popup?: boolean } = {}): Promise<NotificationsSummary | null> {
+  const popup = Boolean(options.popup);
+
+  if (summaryRequest && (summaryRequest.popup || !popup)) {
+    return summaryRequest.promise;
+  }
+
+  if (!popup && !options.force && (summaryHeldForPopup || isSummaryFresh(summaryState.fetchedAt, Date.now()))) {
+    return Promise.resolve(null);
+  }
+
+  const promise: Promise<NotificationsSummary | null> = fetchSummary({ popup })
+    .then((summary) => {
+      setSummaryUnseen(summary.unseen);
+      return summary;
+    })
+    .catch((error: unknown) => {
+      // A falha conta como tentativa: troca de pagina e volta para a aba esperam o mesmo minuto (numa
+      // queda, nao sai um pedido por pagina). Sessao encerrada (401) zera o numero; o resto mantem.
+      const sessionEnded = error instanceof NotificationsRequestError && error.status === 401;
+
+      setSummaryState({
+        fetchedAt: Date.now(),
+        status: summaryState.status === "ready" && !sessionEnded ? "ready" : "error",
+        unseen: sessionEnded ? 0 : summaryState.unseen
+      });
+      return null;
+    })
+    .finally(() => {
+      if (summaryRequest?.promise === promise) {
+        summaryRequest = null;
+      }
+    });
+
+  summaryRequest = { popup, promise };
+
+  return promise;
+}
+
+/**
+ * Numero do sino para o topo: busca depois da hidratacao e ao voltar para a aba, respeitando o prazo.
+ * `refreshOnMount: false` na home, onde o resumo vem com o pedido do pop-up.
+ */
+export function useNotificationsSummary(options: { refreshOnMount?: boolean } = {}) {
   const state = useSyncExternalStore(subscribeSummary, getSummarySnapshot, getServerSummarySnapshot);
+  const refreshOnMount = options.refreshOnMount ?? true;
 
   useEffect(() => {
-    void refreshNotificationsSummary();
+    if (refreshOnMount) {
+      void refreshNotificationsSummary();
+    }
 
     function handleVisibilityChange() {
       if (document.visibilityState === "visible") {
@@ -213,7 +251,7 @@ export function useNotificationsSummary() {
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, []);
+  }, [refreshOnMount]);
 
   return state;
 }

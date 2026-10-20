@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
+import { SupabaseClient } from "@supabase/supabase-js";
 import { actAs } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import {
@@ -716,4 +717,144 @@ test("audio do aviso: o servidor confere o tipo pelos bytes, guarda no bucket pu
   assert.equal((await enviarAudio(produtor, wav(), "audio/wav", { "content-length": String(12 * 1024 * 1024) })).status, 413);
 
   unwrap(await db.storage.from("communication-audio").remove([corpo.data.url.split("/communication-audio/")[1]]), "Apagando o audio de teste");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Versao conferida, nomes da previa e o que o sino marca
+ * ---------------------------------------------------------------------------------------------- */
+
+const MUDOU_EM_OUTRA_TELA = "Este aviso mudou em outra tela há instantes. Recarregue a página para ver a versão atual.";
+
+test("publicar e aprovar valem para a versao que a tela leu: outra versao e 409 antes de contar, e nada sai", async () => {
+  actAs(produtor);
+  const salvo = await actions.saveNoticeDraft({ draft: rascunho({ title: "Versão conferida" }) });
+  assert.equal(salvo.ok, true, JSON.stringify(salvo));
+
+  const velha = await actions.publishNotice({ expectedUpdatedAt: "2020-01-01T00:00:00.000Z", id: salvo.data.id });
+  assert.equal(velha.status, 409);
+  assert.equal(velha.error, MUDOU_EM_OUTRA_TELA);
+  assert.equal((await linhasDoAviso(salvo.data.id)).length, 0, "nada sai");
+  assert.equal((await getNoticeDetail(salvo.data.id)).situation, "draft");
+
+  // A mesma versao escrita com "Z" vale (o instante e comparado ate o microssegundo).
+  const publicado = await actions.publishNotice({ expectedUpdatedAt: salvo.data.updatedAt.replace(/\+00:00$/, "Z"), id: salvo.data.id });
+  assert.equal(publicado.ok, true, JSON.stringify(publicado));
+  assert.equal(publicado.data.situation, "sent");
+
+  // Quem publica com messaging.publish_large fica como aprovado no banco (o agendado nao volta para
+  // aprovacao se o segmento crescer); o relatorio so mostra "Aprovado" quando houve pedido.
+  const [linha] = unwrap(await db.from("campaigns").select("approved_at,approved_by,requested_at").eq("id", salvo.data.id), "Lendo a aprovacao");
+  assert.equal(linha.approved_by, produtor.id);
+  assert.ok(linha.approved_at);
+  assert.equal(linha.requested_at, null);
+  const detalhe = await getNoticeDetail(salvo.data.id);
+  assert.equal(detalhe.approvedAt, null);
+  assert.equal(detalhe.approvedBy, null);
+
+  const redatora = await criarRedatora();
+  const pedido = await salvarEPublicar(redatora, rascunho({ title: "Pedido revisado" }));
+  assert.equal(pedido.situation, "pending_approval");
+  const [semAprovacao] = unwrap(await db.from("campaigns").select("approved_at").eq("id", pedido.id), "Lendo o pedido");
+  assert.equal(semAprovacao.approved_at, null, "pedido de aprovacao nao conta como aprovado");
+
+  actAs(produtor);
+  const aprovarVelha = await actions.approveNotice({ expectedUpdatedAt: "2020-01-01T00:00:00.000Z", id: pedido.id });
+  assert.equal(aprovarVelha.status, 409, "quem aprova aprova a versao que revisou");
+  assert.equal((await getNoticeDetail(pedido.id)).situation, "pending_approval");
+  assert.ok(!(await sino(aluna)).items.some((item) => item.title === "Pedido revisado"));
+
+  actAs(produtor);
+  const aprovado = await actions.approveNotice({ expectedUpdatedAt: pedido.updatedAt, id: pedido.id });
+  assert.equal(aprovado.ok, true, JSON.stringify(aprovado));
+  assert.equal((await getNoticeDetail(pedido.id)).approvedBy?.id, produtor.id, "com pedido, o relatorio mostra quem aprovou");
+});
+
+test("publicar sem a versao da tela grava so a versao contada: segmento salvo no meio da contagem da 409 e nada sai", async () => {
+  actAs(produtor);
+  const salvo = await actions.saveNoticeDraft({ draft: rascunho({ title: "Segmento trocado no meio" }) });
+  assert.equal(salvo.ok, true, JSON.stringify(salvo));
+
+  // Outra tela salva "todos os alunos" enquanto o servidor conta o segmento (a contagem le os
+  // comentarios por aluno pela RPC; o teste segura essa leitura ate a outra gravacao terminar).
+  const rpcOriginal = SupabaseClient.prototype.rpc;
+  let trocado = false;
+  SupabaseClient.prototype.rpc = function (name, ...args) {
+    const builder = rpcOriginal.call(this, name, ...args);
+
+    if (name === "communication_comment_counts" && !trocado) {
+      trocado = true;
+      const then = builder.then.bind(builder);
+      builder.then = (ok, fail) =>
+        db.from("campaigns").update({ audience: { kind: "everyone" } }).eq("id", salvo.data.id).then(() => then(ok, fail), fail);
+    }
+
+    return builder;
+  };
+
+  try {
+    const publicado = await actions.publishNotice({ id: salvo.data.id });
+    assert.equal(publicado.status, 409, JSON.stringify(publicado));
+    assert.equal(publicado.error, MUDOU_EM_OUTRA_TELA);
+  } finally {
+    SupabaseClient.prototype.rpc = rpcOriginal;
+  }
+
+  assert.ok(trocado, "a outra gravacao aconteceu durante a contagem");
+  assert.equal((await linhasDoAviso(salvo.data.id)).length, 0, "ninguem recebe: nem o segmento contado, nem o novo");
+  actAs(produtor);
+  assert.equal((await getNoticeDetail(salvo.data.id)).situation, "draft");
+});
+
+test("previa do segmento: os 5 nomes so para quem ve a lista de Alunos; quem so cria avisos ve a contagem e a frase", async () => {
+  actAs(produtor);
+  const completa = await actions.previewNoticeAudience({ audience: quemTemOCurso });
+  assert.equal(completa.ok, true, JSON.stringify(completa));
+  assert.ok(completa.data.sample.length > 0 && completa.data.sample.every((pessoa) => pessoa.name), "o dono ve os nomes");
+
+  const redatora = await criarRedatora();
+  actAs(redatora);
+  const semNomes = await actions.previewNoticeAudience({ audience: quemTemOCurso });
+  assert.equal(semNomes.ok, true, JSON.stringify(semNomes));
+  assert.equal(semNomes.data.count, completa.data.count);
+  assert.equal(semNomes.data.description, completa.data.description);
+  assert.deepEqual(semNomes.data.sample, [], "sem students.read_basic, nenhum nome de aluno");
+});
+
+test("abrir o sino e 'Marcar todas' so mexem no que aparece: aviso ainda sendo enviado continua novo para quando aparecer", async () => {
+  await marcar(aluna, { all: true });
+
+  // Aviso em envio (o sino ainda nao mostra), com a linha da aluna ja gravada.
+  actAs(produtor);
+  const emEnvio = await actions.saveNoticeDraft({ draft: rascunho({ title: "Ainda sendo enviado" }) });
+  unwrap(
+    await db.from("campaigns").update({ dispatch_started_at: new Date().toISOString(), status: "sending" }).eq("id", emEnvio.data.id),
+    "Simulando o envio em andamento"
+  );
+  unwrap(
+    await db.from("notifications").insert({ campaign_id: emEnvio.data.id, dedupe_key: `campaign:${emEnvio.data.id}`, kind: "notice", user_id: aluna.id }),
+    "Gravando a linha da aluna"
+  );
+  await salvarEPublicar(produtor, rascunho({ title: "Já enviado" }));
+
+  const linhaDe = async (campaignId) => {
+    const [linha] = unwrap(
+      await db.from("notifications").select("seen_at,read_at").eq("campaign_id", campaignId).eq("user_id", aluna.id),
+      "Lendo a linha da aluna"
+    );
+    return linha;
+  };
+
+  const vista = await marcar(aluna, { seen: true });
+  assert.equal(vista.status, 200);
+  assert.equal((await linhaDe(emEnvio.data.id)).seen_at, null, "abrir o sino nao ve o que nao aparece");
+
+  const todas = await marcar(aluna, { all: true });
+  assert.deepEqual((await todas.json()).data, { unread: 0, unseen: 0 });
+  assert.deepEqual(await linhaDe(emEnvio.data.id), { read_at: null, seen_at: null }, "'Marcar todas' tambem nao");
+
+  // O envio termina: a notificacao aparece como nova, com o numero do sino.
+  unwrap(await db.from("campaigns").update({ sent_at: new Date().toISOString(), status: "sent" }).eq("id", emEnvio.data.id), "Terminando o envio");
+  assert.equal((await resumo(aluna)).unseen, 1);
+  const item = (await sino(aluna)).items.find((notificacao) => notificacao.title === "Ainda sendo enviado");
+  assert.ok(item && item.seenAt === null && item.readAt === null, JSON.stringify(item));
 });

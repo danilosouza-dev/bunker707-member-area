@@ -6,7 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
-import { MemberPopupHost } from "@/components/member/notifications/member-popup";
+import { MemberPopupHost } from "@/components/member/notifications/member-popup-host";
 import { DirectorIcon } from "@/components/member/shell/director-parts";
 import { MemberAccountMenu } from "@/components/member/shell/member-account-menu";
 import { MemberNotificationsMenu } from "@/components/member/shell/member-notifications-menu";
@@ -155,6 +155,8 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
   // quando so o banner desta pagina e arredondado (escolha do produto): logo e perfil seguem o banner.
   const rounded = style.corners === "rounded" || bannerCorners === "rounded";
   const pathname = usePathname();
+  // Home fora do "ver como": o pop-up dos avisos pode aparecer, e o pedido dele traz o numero do sino.
+  const popupHome = pathname === "/" && !accessPreviewMode;
   const headerLinks = menuInHeader
     ? (getMemberSidebarSections(pathname, accessPreviewMode).find((section) => section.id === "estudar")?.items ?? [])
     : [];
@@ -391,6 +393,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
               accessPreviewMode={accessPreviewMode}
               className={searchOpen ? "max-sm:hidden" : undefined}
               onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
+              refreshSummaryOnMount={!popupHome}
               schoolLogoUrl={logoImage}
               schoolName="Bunker707"
             />
@@ -448,10 +451,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
       <main>{children}</main>
 
       {/* Pop-up dos avisos: so na home e fora do modo "ver como" do produtor (docs/22 §1.3). */}
-      <MemberPopupHost
-        enabled={pathname === "/" && !accessPreviewMode}
-        onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
-      />
+      <MemberPopupHost enabled={popupHome} onNavigate={(event, href) => handleProgressAwareNavigation(event, href)} />
 
       {!sidebarOpen ? (
         directorRequested ? (

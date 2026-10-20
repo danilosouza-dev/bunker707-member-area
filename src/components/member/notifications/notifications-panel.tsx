@@ -1,9 +1,9 @@
 "use client";
 
 import { Popover } from "@base-ui/react/popover";
-import { BellOff, CheckCheck, RotateCw } from "lucide-react";
+import { BellOff, CheckCheck, LogIn, RotateCw } from "lucide-react";
 import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
-import { MemberButton } from "@/components/member/ui/member-button";
+import { MemberButton, memberButtonClassName } from "@/components/member/ui/member-button";
 import { MemberEmptyState } from "@/components/member/ui/member-empty-state";
 import { MemberFilterPills } from "@/components/member/ui/member-filters";
 import { MemberSkeletonBlock } from "@/components/member/ui/member-skeletons";
@@ -30,12 +30,17 @@ import {
   type NotificationLink
 } from "./notifications-model";
 
-// Painel do sino (docs/22 §1.1; desenho em docs/12), montado so com o sino aberto. Ao abrir: carrega a primeira pagina do
-// filtro e, se havia novidades, marca todas como vistas (o numero do sino some; as bolinhas de nao
-// lida ficam). Clique num link ou botao registra o clique, marca como lida, fecha o painel e navega
-// pelo AppShell (salva progresso e favoritos antes). Sem toast: erros ficam no proprio painel.
+// Painel do sino (docs/22 §1.1; desenho em docs/12), montado so com o sino aberto (e baixado so quando o
+// aluno chega perto do sino). Ao abrir: carrega a primeira pagina do filtro e, se havia novidades,
+// marca todas como vistas (o numero do sino some; as bolinhas de nao lida ficam). Clique num link ou
+// botao registra o clique, marca como lida, fecha o painel e navega pelo AppShell (salva progresso e
+// favoritos antes). Sem toast: erros ficam no proprio painel. Foco: quando o controle usado some
+// ("Marcar todas como lidas", o ultimo "Carregar mais"), o foco vai para o titulo ou para o fim da
+// lista, e uma frase para o leitor de tela confirma o que aconteceu.
 
 type ListState = {
+  /** Status HTTP da falha ao carregar (401 = sessao encerrada); 0 sem falha ou falha de rede. */
+  errorStatus: number;
   items: NotificationItem[];
   loadingMore: boolean;
   loadMoreFailed: boolean;
@@ -45,7 +50,17 @@ type ListState = {
   status: "error" | "loading" | "ready";
 };
 
-const LOADING_LIST: ListState = { items: [], loadingMore: false, loadMoreFailed: false, nextCursor: null, now: 0, status: "loading" };
+const LOADING_LIST: ListState = {
+  errorStatus: 0,
+  items: [],
+  loadingMore: false,
+  loadMoreFailed: false,
+  nextCursor: null,
+  now: 0,
+  status: "loading"
+};
+
+const SESSION_ENDED = "Sua sessão terminou. Entre de novo para continuar.";
 
 const FILTER_LABELS: Record<NotificationsFilter, string> = { all: "Todas", unread: "Não lidas" };
 
@@ -53,11 +68,16 @@ const FILTER_LABELS: Record<NotificationsFilter, string> = { all: "Todas", unrea
 // de sessao encerrada viram texto para o aluno.
 function errorMessage(error: unknown, fallback: string) {
   if (error instanceof NotificationsRequestError) {
-    if (error.status === 401) return "Sua sessão terminou. Entre de novo para continuar.";
+    if (error.status === 401) return SESSION_ENDED;
     if (error.status === 409) return error.message;
   }
 
   return fallback;
+}
+
+/** Entrar de novo e voltar para esta pagina (navegacao completa: a sessao do navegador recomeca). */
+function loginHref() {
+  return `/login?next=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`;
 }
 
 function PanelSkeleton() {
@@ -104,16 +124,30 @@ export function NotificationsPanel({
   const [actionError, setActionError] = useState<string | null>(null);
   const [responding, setResponding] = useState<{ id: string; value: NotificationResponseValue } | null>(null);
   const [responseErrors, setResponseErrors] = useState<Record<string, string>>({});
+  const [statusMessage, setStatusMessage] = useState("");
+  const [markedAll, setMarkedAll] = useState(0);
   const seenSentRef = useRef(false);
   const loadMoreRef = useRef<AbortController | null>(null);
   const readRequestedRef = useRef(new Set<string>());
+  const rootRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const endRef = useRef<HTMLParagraphElement>(null);
+  const focusEndRef = useRef(false);
 
   useEffect(() => {
     const controller = new AbortController();
 
     fetchNotificationsPage({ filter, signal: controller.signal })
       .then((page) => {
-        setList({ items: page.items, loadingMore: false, loadMoreFailed: false, nextCursor: page.nextCursor, now: Date.now(), status: "ready" });
+        setList({
+          errorStatus: 0,
+          items: page.items,
+          loadingMore: false,
+          loadMoreFailed: false,
+          nextCursor: page.nextCursor,
+          now: Date.now(),
+          status: "ready"
+        });
         setUnread(page.unread);
         setSummaryUnseen(page.unseen);
 
@@ -129,9 +163,9 @@ export function NotificationsPanel({
             .catch(() => undefined);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          setList((current) => ({ ...current, status: "error" }));
+          setList((current) => ({ ...current, errorStatus: error instanceof NotificationsRequestError ? error.status : 0, status: "error" }));
         }
       });
 
@@ -139,6 +173,22 @@ export function NotificationsPanel({
   }, [filter, reloadToken]);
 
   useEffect(() => () => loadMoreRef.current?.abort(), []);
+
+  // "Marcar todas como lidas" some quando nao sobra nada para ler: o foco que estava nele vai para o
+  // titulo (senao cairia no corpo da pagina ou no painel inteiro).
+  useEffect(() => {
+    if (markedAll > 0 && !rootRef.current?.contains(document.activeElement)) {
+      titleRef.current?.focus();
+    }
+  }, [markedAll]);
+
+  // O ultimo "Carregar mais" vira o rodape: o foco que estava no botao vai para ele.
+  useEffect(() => {
+    if (focusEndRef.current && !list.nextCursor && endRef.current) {
+      focusEndRef.current = false;
+      endRef.current.focus();
+    }
+  }, [list.nextCursor, list.items]);
 
   function changeFilter(next: NotificationsFilter) {
     if (next === filter) {
@@ -156,7 +206,7 @@ export function NotificationsPanel({
     setReloadToken((token) => token + 1);
   }
 
-  function loadMore() {
+  function loadMore(buttonHadFocus: boolean) {
     const cursor = list.nextCursor;
 
     if (!cursor || list.loadingMore) {
@@ -170,6 +220,7 @@ export function NotificationsPanel({
 
     fetchNotificationsPage({ cursor, filter, signal: controller.signal })
       .then((page) => {
+        focusEndRef.current = buttonHadFocus && !page.nextCursor;
         setList((current) => ({
           ...current,
           items: appendNotifications(current.items, page.items),
@@ -209,12 +260,15 @@ export function NotificationsPanel({
 
     setMarkingAll(true);
     setActionError(null);
+    setStatusMessage("");
 
     try {
       const counts = await postRead({ all: true });
       setList((current) => ({ ...current, items: markNotificationsRead(current.items, "all", new Date().toISOString()) }));
       setUnread(counts.unread);
       setSummaryUnseen(counts.unseen);
+      setStatusMessage("Todas as notificações foram marcadas como lidas.");
+      setMarkedAll((count) => count + 1);
     } catch (error) {
       setActionError(errorMessage(error, "Não foi possível marcar como lidas. Tente de novo."));
     } finally {
@@ -271,11 +325,22 @@ export function NotificationsPanel({
     label: FILTER_LABELS[id]
   }));
 
+  const sessionEnded = list.status === "error" && list.errorStatus === 401;
+
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" ref={rootRef}>
+      <p className="sr-only" role="status">
+        {statusMessage}
+      </p>
       {/* Altura fixa: o cabecalho nao pula quando "Marcar todas como lidas" some. */}
       <div className="flex min-h-[3.75rem] items-center justify-between gap-3 px-4 pb-3 pt-4">
-        <Popover.Title className="text-base font-semibold text-white">Notificações</Popover.Title>
+        <Popover.Title
+          className="rounded-[4px] text-base font-semibold text-white outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          ref={titleRef}
+          tabIndex={-1}
+        >
+          Notificações
+        </Popover.Title>
         {unread > 0 ? (
           <button
             aria-busy={markingAll}
@@ -308,11 +373,19 @@ export function NotificationsPanel({
 
         {list.status === "error" ? (
           <div className="m-4 flex flex-col items-start gap-3 rounded-[12px] border border-red-400/20 bg-red-500/[0.07] px-4 py-4" role="alert">
-            <p className="text-sm font-medium text-red-100">Não foi possível carregar as notificações.</p>
-            <MemberButton onClick={retry} size="sm" variant="secondary">
-              <RotateCw aria-hidden="true" />
-              Tentar de novo
-            </MemberButton>
+            <p className="text-sm font-medium text-red-100">{sessionEnded ? SESSION_ENDED : "Não foi possível carregar as notificações."}</p>
+            {sessionEnded ? (
+              // Tentar de novo daria 401 outra vez: o caminho e entrar de novo.
+              <a className={memberButtonClassName({ size: "sm", variant: "secondary" })} href={loginHref()}>
+                <LogIn aria-hidden="true" />
+                Entrar de novo
+              </a>
+            ) : (
+              <MemberButton onClick={retry} size="sm" variant="secondary">
+                <RotateCw aria-hidden="true" />
+                Tentar de novo
+              </MemberButton>
+            )}
           </div>
         ) : null}
 
@@ -360,7 +433,13 @@ export function NotificationsPanel({
         {list.status === "ready" && list.items.length > 0 ? (
           list.nextCursor ? (
             <div className="border-t border-white/[0.06] px-4 py-3">
-              <MemberButton aria-busy={list.loadingMore} className="w-full" onClick={loadMore} size="sm" variant="secondary">
+              <MemberButton
+                aria-busy={list.loadingMore}
+                className="w-full"
+                onClick={(event) => loadMore(document.activeElement === event.currentTarget)}
+                size="sm"
+                variant="secondary"
+              >
                 {list.loadingMore ? "Carregando..." : "Carregar mais"}
               </MemberButton>
               {list.loadMoreFailed ? (
@@ -370,7 +449,7 @@ export function NotificationsPanel({
               ) : null}
             </div>
           ) : (
-            <p className="border-t border-white/[0.06] px-4 py-3 text-center text-xs text-zinc-500">
+            <p className="border-t border-white/[0.06] px-4 py-3 text-center text-xs text-zinc-500 outline-none" ref={endRef} tabIndex={-1}>
               As notificações ficam aqui por 90 dias.
             </p>
           )

@@ -2,7 +2,7 @@
 
 import { ArrowRight, AtSign, Check, ExternalLink, Megaphone, MessageCircle, type LucideIcon } from "lucide-react";
 import Image from "next/image";
-import { useId, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { memberButtonClassName } from "@/components/member/ui/member-button";
 import { MemberChip } from "@/components/member/ui/member-chip";
@@ -242,6 +242,11 @@ function NoticeCta({
   );
 }
 
+/**
+ * Resposta Aceitar/Recusar. Enquanto envia, os botoes ficam aria-disabled (nao `disabled`: o foco
+ * ficaria sem lugar); respondido agora, o foco que estava nos botoes (ou perdido) vai para a frase
+ * "Você aceitou"/"Você recusou", que o leitor de tela le. Item que ja chega respondido nao puxa foco.
+ */
 function NoticeResponse({
   item,
   onRespond,
@@ -250,6 +255,28 @@ function NoticeResponse({
   responseError
 }: Pick<NotificationCardProps, "item" | "onRespond" | "preview" | "responding" | "responseError">) {
   const response = item.response;
+  const value = response?.value ?? null;
+  const answerRef = useRef<HTMLDivElement>(null);
+  const previousValueRef = useRef(value);
+
+  useEffect(() => {
+    const previous = previousValueRef.current;
+    previousValueRef.current = value;
+
+    if (preview || previous !== null || value === null) {
+      return;
+    }
+
+    const answer = answerRef.current;
+    const card = answer?.closest("article") ?? null;
+    const active = document.activeElement;
+    // Foco nos botoes que sumiram: o navegador manda para o corpo da pagina ou para o painel inteiro.
+    const focusLost = !active || active === document.body || (card !== null && (card.contains(active) || active.contains(card)));
+
+    if (answer && focusLost) {
+      answer.focus();
+    }
+  }, [preview, value]);
 
   if (!response) {
     return null;
@@ -257,13 +284,13 @@ function NoticeResponse({
 
   if (response.value) {
     return (
-      <div className="mt-3">
+      <div className={cn("mt-3 w-fit rounded-full", focusRing)} ref={answerRef} tabIndex={-1}>
         {response.value === "accepted" ? (
           <MemberChip icon={Check} size="md" tone="success">
             Você aceitou
           </MemberChip>
         ) : (
-          <MemberChip size="md" tone="muted">
+          <MemberChip size="md" tone="neutral">
             Você recusou
           </MemberChip>
         )}
@@ -287,10 +314,28 @@ function NoticeResponse({
   return (
     <div className="mt-3">
       <div aria-busy={busy} className="flex flex-wrap gap-2">
-        <button className={declineClassName} disabled={busy} onClick={() => onRespond?.("declined")} type="button">
+        <button
+          aria-disabled={busy || undefined}
+          className={declineClassName}
+          onClick={() => {
+            if (!busy) {
+              onRespond?.("declined");
+            }
+          }}
+          type="button"
+        >
           {responding === "declined" ? "Enviando..." : response.declineLabel}
         </button>
-        <button className={acceptClassName} disabled={busy} onClick={() => onRespond?.("accepted")} type="button">
+        <button
+          aria-disabled={busy || undefined}
+          className={acceptClassName}
+          onClick={() => {
+            if (!busy) {
+              onRespond?.("accepted");
+            }
+          }}
+          type="button"
+        >
           {responding === "accepted" ? "Enviando..." : response.acceptLabel}
         </button>
       </div>

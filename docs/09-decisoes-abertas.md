@@ -185,14 +185,14 @@ Decisao tomada:
 
 Pedido do produtor: notificacoes no sino com imagem, audio que toca ali mesmo, botao para dentro ou para fora da plataforma e convites que o aluno aceita ou recusa; a equipe cria, envia na hora ou agenda; pop-ups para grupos de alunos escolhidos por regras combinadas. Construido como Comunicacao v1 (fase 5 do `docs/17`, sem webinarios e promocoes); detalhes em `docs/22`.
 
-Decisao tomada (tabela C1-C11 em `docs/22` §5):
+Decisao tomada (tabela C1-C13 em `docs/22` §5):
 
 - o sino se chama `Notificações` (nao "Lembretes"), como no vocabulario do `docs/17` §1.3; o numero conta as novas nao vistas e some ao abrir o sino, e a bolinha de cada item marca o que o aluno ainda nao abriu;
 - a notificacao de aviso aponta para o aviso (uma linha pequena por aluno; retirar do sino e uma acao so); as automaticas de comentario guardam o trecho e o link da aula;
 - o segmento ("Para quem") e avaliado no servidor, em TypeScript, com as mesmas leituras e regras da lista de Alunos (produto, progresso, comentarios, tempo de acesso, acesso terminando, ultimo estudo, entrada na plataforma, ritmo e turma), em grupos E/OU com um nivel, ate 20 regras. A equipe nunca entra. Vai para uma RPC quando a escola passar de alguns milhares de alunos (o mesmo aviso de escala da lista de Alunos);
 - envio da notificacao agendada e recalculo do segmento dos pop-ups no tick de minuto (job `comunicacao`), excecao a regra do `docs/04` que manda envio em massa para a fila de jobs: a fila ainda nao existe, e a linha do sino e minuscula, gravada em lotes de 500, com teto de 20.000 por rodada e retomavel sem duplicar. E-mail, push e WhatsApp em massa continuam fora do tick;
 - pop-up so na home, nunca numa aula, 3 s depois de abrir, no maximo 1 por sessao e 1 a cada 24 h, sem excecao para nenhum tipo (o tipo "critico" do sistema fica para depois); `Lembrar depois` volta em 24 h, no maximo 2 vezes; `Não mostrar de novo` vale para sempre (`docs/17` §1.8.1 e D12);
-- aprovacao acima de 500 alunos como no `docs/17` D4: editor publica ate 500; dono e admin publicam acima e aprovam o pedido de outra pessoa;
+- aprovacao acima de 500 alunos como no `docs/17` D4: editor publica ate 500; dono e admin publicam acima e aprovam o pedido de outra pessoa. O limite vale de novo na hora do envio da notificacao agendada (sem aprovacao e acima de 500, volta para aprovacao em vez de sair) e ao editar ou retomar um pop-up no ar (sem a permissao, 403, sem pedido); o pop-up no ar pode crescer alem de 500 sem nova aprovacao (`docs/22` §2.3, C12 e C13);
 - o pedido de resposta (`Aceitar`/`Recusar`) ja existe nos avisos da equipe e e o mecanismo que os convites da comunidade vao usar;
 - audio em bucket publico proprio (`communication-audio`, ate 10 MB, nome pelo hash), como as imagens: aviso nao e conteudo pago. Gravar no navegador exige o microfone, liberado so no `/admin`;
 - o desfecho de cada aviso e fixo, "voltou a estudar em 7 dias"; o seletor de desfecho ("Como medir") fica para depois;

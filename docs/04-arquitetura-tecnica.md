@@ -508,7 +508,7 @@ Regras para um job novo no registro:
 - recomputos pesados (por exemplo `student_facts`) rodam a noite em agendamento proprio, nunca por minuto no banco primario;
 - dead-letter apos 3 falhas e retentativas com `attempts` ficam com o job que precisar delas (a coluna ja existe em `job_runs`).
 
-Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias. Na mesma linha, `public.prune_personal_data()` roda as 06:23 UTC (`bunker707-personal-data-prune`, migracao `202610170004`) e anonimiza `webhook_events` (12 meses) e `email_outbox` (90/180 dias) e apaga `email_webhook_events` (90 dias): regras em `docs/06`, secao LGPD. Depois, as 06:41 UTC, `public.prune_communication_history()` (`bunker707-communication-prune`, migracao `202610200001`) apaga notificacoes e estados de pop-up com mais de 24 meses.
+Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias. Na mesma linha, `public.prune_personal_data()` roda as 06:23 UTC (`bunker707-personal-data-prune`, migracao `202610170004`) e anonimiza `webhook_events` (12 meses) e `email_outbox` (90/180 dias) e apaga `email_webhook_events` (90 dias): regras em `docs/06`, secao LGPD. Depois, as 06:41 UTC, `public.prune_communication_history()` (`bunker707-communication-prune`, migracao `202610200001`) apaga notificacoes e estados de pop-up com mais de 24 meses (menos os de pop-up ainda no ar ou pausado).
 
 Configuracao por ambiente (passos completos no topo de `supabase/migrations/202610100001_jobs_cron.sql`):
 
@@ -587,8 +587,10 @@ Rotas:
 
 ```txt
 Equipe (messaging.write) -> Server Action -> runAdminAction -> campaigns (rascunho, updated_at = versao)
-  publicar -> conta o segmento (audience-facts + audience-model; 0 alunos = 422)
+  publicar -> conta o segmento (audience-facts + audience-model; 0 alunos = 422) na versao lida (grava so ela, senao 409)
            -> publishDecision: sem messaging.publish ou > 500 sem messaging.publish_large -> pending_approval
+           -> com messaging.publish_large (ou aprovado): approved_at
+  editar/retomar pop-up no ar -> publishDecision de novo; sem permissao -> 403 (sem pedido)
   notificacao agora   -> sending -> dispatchInboxCampaign na propria acao -> notifications (lotes de 500) -> sent
   notificacao agendada -> scheduled
   pop-up              -> active -> refreshPopupDeliveries -> campaign_deliveries -> invalidateLivePopups
@@ -596,14 +598,18 @@ pg_cron tick (* * * * *) -> POST /api/jobs/tick -> job comunicacao (processCommu
   1. claimDueInbox: ate 3 avisos (scheduled vencido, ou sending com reserva vazia ou de mais de 2 min), update condicional
      -> dispatchInboxCampaign: so quem ainda nao recebeu, ate 20.000 por rodada; cortado -> solta a reserva;
         falha -> attempts + 1, a terceira cancela com last_error
-  2. fetchPopupsToRefresh: ate 5 pop-ups active (no ar ou com janela futura) sem recalculo ha 15 min -> refreshPopupDeliveries
+     -> sem approved_at e o segmento passou de 500: volta para pending_approval (sem data), nada sai
+  2. fetchPopupsToRefresh: ate 5 pop-ups active (no ar ou com janela futura) sem recalculo desde o comeco da faixa de
+     15 min (:00, :15, :30, :45) -> refreshPopupDeliveries (grava so se updated_at nao mudou; senao limpa a hora);
+     falha -> grava so a hora (tenta na faixa seguinte)
   fatos dos alunos lidos uma vez por rodada e so se houver trabalho; sem a migracao: registra e termina
 Resposta a comentario (aula ou Comunidade) -> after() -> notifyCommentReply -> notifications (comment_reply / comment_mention)
-Aluno: AppShell (depois da hidratacao) -> GET /api/notifications/summary -> numero do sino (60 s em memoria)
-  abre o sino -> GET /api/notifications -> POST read { seen: true }
-  home -> GET /api/notifications/summary?popup=1 (1,5 s) -> pop-ups no ar (unstable_cache 60 s, tag communications)
-       + campaign_deliveries do aluno + ultimo pop-up visto -> pickPopup -> POST /api/popups/[id]/events
-pg_cron 'bunker707-communication-prune' (06:41 UTC) -> public.prune_communication_history() (24 meses)
+Aluno: AppShell (depois da hidratacao) -> GET /api/notifications/summary -> numero do sino (60 s em memoria, falha tambem)
+  abre o sino (painel baixado ao chegar perto) -> GET /api/notifications -> POST read { seen: true } (so o que aparece)
+  home -> GET /api/notifications/summary?popup=1 (1,5 s; unico pedido do resumo na home) -> pop-ups no ar
+       (unstable_cache 60 s, tag communications) + campaign_deliveries do aluno + ultimo pop-up visto -> pickPopup
+       -> janela baixada so com pop-up -> POST /api/popups/[id]/events
+pg_cron 'bunker707-communication-prune' (06:41 UTC) -> public.prune_communication_history() (24 meses; pop-up no ar fica)
 ```
 
 Invariantes:

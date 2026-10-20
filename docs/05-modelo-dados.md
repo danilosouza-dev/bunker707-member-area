@@ -1458,7 +1458,7 @@ Cada aviso da equipe: notificacao no sino (`kind = inbox`) ou pop-up na home (`k
 - `audience` jsonb (<= 16 KB; padrao `{"kind":"everyone"}`): o segmento, `{ kind: "rules", root: { match: "all" | "any", items: [...] } }` com um nivel de grupo dentro do principal, ate 20 regras (formato em `src/server/communications/audience-model.ts`); `audience_count`, `audience_counted_at` e `audience_refreshed_at` (ultimo recalculo do pop-up pelo job);
 - agenda: `send_at` (notificacao: quando sai ou saiu), `starts_at`/`ends_at` (janela do pop-up; nula = desde a publicacao / sem fim; check `ends_at > starts_at`), `popup_repeat` (`once` | `until_action`), `allow_snooze`;
 - envio: `dispatch_started_at` (reserva do envio), `dispatch_attempts`, `last_error` (ate 2.000), `sent_at` (envio da notificacao; no pop-up, a primeira publicacao), `recipients_count`;
-- aprovacao e autoria: `requested_by`/`requested_at`, `approved_by`/`approved_at`, `created_by`, `updated_by`, `deleted_by` (todos -> auth.users set null);
+- aprovacao e autoria: `requested_by`/`requested_at`, `approved_by`/`approved_at`, `created_by`, `updated_by`, `deleted_by` (todos -> auth.users set null). `approved_at` fica preenchido quando um dono ou admin aprovou o pedido ou publicou direto com `messaging.publish_large`, e vazio nas outras publicacoes: sem ele, a notificacao agendada que passou de 500 alunos na hora do envio volta para `pending_approval` (com `requested_by` = quem agendou, `requested_at` = agora e `send_at` vazio) em vez de sair (`docs/22` §2.3); `audience_refreshed_at` vazio pede o recalculo do pop-up no proximo tick;
 - `created_at`, `updated_at` (versao do editor), `deleted_at` (exclusao logica).
 
 Indices: `campaigns_due_idx (send_at)` parcial nas notificacoes `scheduled`/`sending` nao excluidas (o job), `campaigns_live_popups_idx (starts_at)` parcial nos pop-ups `active` nao excluidos e `campaigns_list_idx (created_at desc)` nao excluidos. Gatilho `set_campaigns_updated_at` com a funcao `touch_campaign_version()`: muda `updated_at` so quando algo alem de `audience_count`, `audience_counted_at` e `audience_refreshed_at` muda, para o recalculo do job nao derrubar com 409 quem esta com o editor aberto (funcao sem execute para ninguem).
@@ -1502,7 +1502,7 @@ Indices: `(user_id, last_seen_at desc)` (o limite de 24 h) e parcial `(first_see
 ### Retencao e exclusao
 
 - o sino mostra so os ultimos 90 dias (filtro na leitura);
-- `public.prune_communication_history()` (security definer, `search_path` fixo; `service_role` executa, `anon`/`authenticated` nao) apaga `notifications` com `created_at` de mais de 24 meses e `campaign_deliveries` com `updated_at` de mais de 24 meses (`docs/17` D8) e devolve `{ notifications, campaign_deliveries }`. Agendada todo dia as 06:41 UTC (`bunker707-communication-prune`), depois das limpezas de jobs e de dados pessoais;
+- `public.prune_communication_history()` (security definer, `search_path` fixo; `service_role` executa, `anon`/`authenticated` nao) apaga `notifications` com `created_at` de mais de 24 meses e `campaign_deliveries` com `updated_at` de mais de 24 meses de pop-up que nao esta mais no ar (encerrado, inclusive pelo fim da janela, excluido ou que nunca foi publicado; o estado de pop-up `active` ou `paused` fica, senao o recalculo recriaria a linha e o "Não mostrar de novo" deixaria de valer) (`docs/17` D8) e devolve `{ notifications, campaign_deliveries }`. Agendada todo dia as 06:41 UTC (`bunker707-communication-prune`), depois das limpezas de jobs e de dados pessoais;
 - conta excluida leva as linhas dela em `notifications` e `campaign_deliveries` (cascade); como autora de resposta (`actor_id`) ou de aviso (`created_by` etc.), vira nula;
 - `campaigns` nao entra na retencao: aviso nao tem dado pessoal de aluno (exclusao logica pela equipe).
 
@@ -1524,7 +1524,7 @@ Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `doc
 
 Fora da rotina de proposito: `sale_grants` (migracao `202610170008`) so guarda ids (transacao, codigo da assinatura, aluno, acesso, produto) e datas, sem dado pessoal; sai junto com a conta (`on delete cascade`). Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta anula `user_id` nas duas tabelas (`on delete set null`), e "Excluir aluno" ja anonimiza na hora as vendas do aluno (`anonymizeWebhookEventsFor`); prazos novos sao mudanca de migracao, com o teste ajustado.
 
-A Comunicacao (migracao `202610200001`) tem rotina propria, `public.prune_communication_history()` as 06:41 UTC: notificacoes e estados de pop-up saem inteiros depois de 24 meses (secao Comunicacao, Retencao e exclusao). Elas so guardam ids, datas e, nas notificacoes de comentario, o trecho da resposta que ja esta na aula.
+A Comunicacao (migracao `202610200001`) tem rotina propria, `public.prune_communication_history()` as 06:41 UTC: notificacoes e estados de pop-up saem inteiros depois de 24 meses, menos os de pop-up ainda no ar ou pausado (secao Comunicacao, Retencao e exclusao). Elas so guardam ids, datas e, nas notificacoes de comentario, o trecho da resposta que ja esta na aula.
 
 ## Suporte
 

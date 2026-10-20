@@ -16,10 +16,10 @@ export const communicationsJob: Job = {
   async run(ctx) {
     const result = await processCommunications({ db: ctx.supabase, now: new Date(), signal: ctx.signal });
 
-    if (result.dispatched || result.sending || result.failed || result.refreshed) {
+    if (result.dispatched || result.sending || result.awaitingApproval || result.failed || result.refreshed) {
       console.info(
         `[comunicacao] tick ${ctx.tickRunId}: ${result.dispatched} notificacao(oes) enviada(s), ${result.sending} em andamento, ` +
-          `${result.failed} falha(s), ${result.refreshed} pop-up(s) recalculado(s).`
+          `${result.awaitingApproval} de volta para aprovacao, ${result.failed} falha(s), ${result.refreshed} pop-up(s) recalculado(s).`
       );
     }
   }

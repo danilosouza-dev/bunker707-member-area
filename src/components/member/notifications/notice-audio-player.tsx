@@ -20,9 +20,14 @@ import {
 // Audio curto do aviso (sino, pop-up e previa do admin): pilula com tocar/pausar, forma de onda que
 // tambem e a barra de posicao (clique, arraste e setas), tempo e velocidade 1x/1,5x/2x. O arquivo so e
 // baixado no primeiro play (preload="none") e so um audio toca por vez na pagina. Em `preview` (previa
-// do admin, dentro de moldura inert) desenha o mesmo visual parado, sem <audio> nem rede.
+// do admin, dentro de moldura inert) desenha o mesmo visual parado, sem <audio> nem rede. No toque
+// (celular), so pula com um toque parado ou um arraste para o lado: rolar a lista com o dedo em cima da
+// onda nao mexe na posicao.
 
 let currentlyPlaying: HTMLAudioElement | null = null;
+
+/** Quanto o dedo anda (px) antes de decidir entre arrastar a posicao e rolar a pagina. */
+const TOUCH_SLOP_PX = 8;
 
 function claimPlayback(element: HTMLAudioElement) {
   if (currentlyPlaying && currentlyPlaying !== element) {
@@ -106,6 +111,8 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
   const audioRef = useRef<HTMLAudioElement>(null);
   const pendingSeekRef = useRef<number | null>(null);
   const draggingRef = useRef(false);
+  /** Toque ou caneta que ainda nao virou arraste (pode ser o comeco de uma rolagem). */
+  const touchStartRef = useRef<{ id: number; x: number; y: number } | null>(null);
   const playNotifiedRef = useRef(false);
   const barCount = useWaveformBars(waveRef);
   const [playing, setPlaying] = useState(false);
@@ -221,20 +228,67 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
     return ((clientX - rect.left) / rect.width) * duration;
   }
 
-  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 || duration <= 0) {
-      return;
-    }
-
+  function startDragging(event: PointerEvent<HTMLDivElement>) {
     draggingRef.current = true;
     event.currentTarget.setPointerCapture?.(event.pointerId);
     seekTo(secondsAt(event.clientX));
   }
 
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || duration <= 0) {
+      return;
+    }
+
+    // Mouse pula na hora; toque e caneta esperam para saber se e toque, arraste para o lado ou rolagem.
+    if (event.pointerType === "mouse") {
+      startDragging(event);
+      return;
+    }
+
+    touchStartRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  }
+
   function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
     if (draggingRef.current) {
       seekTo(secondsAt(event.clientX));
+      return;
     }
+
+    const start = touchStartRef.current;
+
+    if (!start || start.id !== event.pointerId) {
+      return;
+    }
+
+    const dx = Math.abs(event.clientX - start.x);
+    const dy = Math.abs(event.clientY - start.y);
+
+    if (dx > TOUCH_SLOP_PX && dx > dy) {
+      touchStartRef.current = null;
+      startDragging(event);
+    } else if (dy > TOUCH_SLOP_PX) {
+      // Rolagem: o navegador fica com o gesto (touch-pan-y) e a posicao nao muda.
+      touchStartRef.current = null;
+    }
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+
+    // Toque parado: pula para onde o dedo tocou.
+    if (start && start.id === event.pointerId) {
+      seekTo(secondsAt(event.clientX));
+      return;
+    }
+
+    handlePointerEnd(event);
+  }
+
+  function handlePointerCancel(event: PointerEvent<HTMLDivElement>) {
+    // O navegador tomou o gesto (rolagem): nada de pular.
+    touchStartRef.current = null;
+    handlePointerEnd(event);
   }
 
   function handlePointerEnd(event: PointerEvent<HTMLDivElement>) {
@@ -314,10 +368,10 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
           onLostPointerCapture={() => {
             draggingRef.current = false;
           }}
-          onPointerCancel={handlePointerEnd}
+          onPointerCancel={handlePointerCancel}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerEnd}
+          onPointerUp={handlePointerUp}
           ref={waveRef}
           role="slider"
           tabIndex={0}

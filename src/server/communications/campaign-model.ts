@@ -237,13 +237,14 @@ export function availableNoticeActions(campaign: CampaignTiming, now: number, pe
         break;
       }
 
-      add("edit");
+      // Editar o pop-up no ar muda o que os alunos veem agora: vale como publicar (docs/22 §2.3).
+      add("edit", permissions.canPublish);
       add("pause", permissions.canPublish);
       add("end", permissions.canPublish);
       add("duplicate");
       break;
     case "paused":
-      add("edit");
+      add("edit", permissions.canPublish);
       add("resume", permissions.canPublish);
       add("end", permissions.canPublish);
       add("duplicate");
@@ -259,7 +260,8 @@ export function availableNoticeActions(campaign: CampaignTiming, now: number, pe
 
 /**
  * Publicar direto ou pedir aprovacao (docs/17 D4): sem "messaging.publish", sempre aprovacao; acima de
- * 500 alunos, so quem tem "messaging.publish_large" publica direto.
+ * 500 alunos, so quem tem "messaging.publish_large" publica direto. Vale tambem para editar ou retomar
+ * um pop-up no ar (sem a permissao, a acao e recusada em vez de virar pedido).
  */
 export function publishDecision(input: { audienceCount: number; canPublish: boolean; canPublishLarge: boolean }): "needs_approval" | "publish" {
   if (!input.canPublish) {
@@ -267,6 +269,46 @@ export function publishDecision(input: { audienceCount: number; canPublish: bool
   }
 
   return input.audienceCount > APPROVAL_THRESHOLD && !input.canPublishLarge ? "needs_approval" : "publish";
+}
+
+/** Instante em microssegundos de um timestamp ISO (o banco grava ate o microssegundo); invalido -> null. */
+function versionMicros(value: string) {
+  const match = /^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(.*)$/.exec(value.trim());
+
+  if (!match) {
+    return null;
+  }
+
+  const seconds = Date.parse(`${match[1]}${match[3]}`);
+
+  if (!Number.isFinite(seconds)) {
+    return null;
+  }
+
+  return seconds * 1000 + Number((match[2] ?? "").padEnd(6, "0").slice(0, 6));
+}
+
+/**
+ * A versao lida pela tela (`updated_at`) e a mesma do banco? Compara o instante ate o microssegundo,
+ * qualquer que seja o formato ("Z" ou "+00:00", com ou sem fracao).
+ */
+export function isSameVersion(left: string, right: string) {
+  if (left === right) {
+    return true;
+  }
+
+  const leftMicros = versionMicros(left);
+
+  return leftMicros !== null && leftMicros === versionMicros(right);
+}
+
+/**
+ * Pop-up no ar com recalculo anterior a este instante esta vencido. O relogio e alinhado em faixas de
+ * `everyMs` (15 minutos): todos os pop-ups vencidos caem no mesmo tick e dividem uma leitura dos alunos,
+ * em vez de cada um ter o proprio relogio.
+ */
+export function popupRefreshDueBefore(now: number, everyMs: number) {
+  return Math.floor(now / everyMs) * everyMs;
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -390,8 +432,9 @@ export function describeNoticeReview(input: NoticeReviewInput) {
 
 /* ------------------------------------------------------------------------------------------------
  * Pop-up de cada aluno (docs/17 §1.8.1): no maximo 1 a cada 24 h; o limite de 1 por sessao fica no
- * navegador. "Uma vez" = some depois da primeira vez; "ate o aluno clicar" = volta no dia seguinte
- * enquanto ele nao clicar nem escolher "Nao mostrar de novo".
+ * navegador. "Uma vez" = some depois que o aluno ve (cada "Lembrar depois" vale mais uma vez, depois
+ * das 24 h); "ate o aluno clicar" = volta no dia seguinte enquanto ele nao clicar nem escolher "Nao
+ * mostrar de novo".
  * ---------------------------------------------------------------------------------------------- */
 
 const HOUR_MS = 3_600_000;
@@ -437,7 +480,8 @@ export function pickPopup(input: {
       continue;
     }
 
-    if (popup.repeat === "once" ? delivery.impressions > 0 : delivery.lastSeenAt !== null && now - delivery.lastSeenAt < gap) {
+    // "Uma vez": cada "Lembrar depois" pede mais uma vez (visto 1 vez e adiado 1 vez = volta; visto 2 vezes = some).
+    if (popup.repeat === "once" ? delivery.impressions > delivery.snoozeCount : delivery.lastSeenAt !== null && now - delivery.lastSeenAt < gap) {
       continue;
     }
 

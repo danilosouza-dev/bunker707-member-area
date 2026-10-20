@@ -51,33 +51,49 @@ type CommentCountRow = {
 
 const count = (value: number | string | null) => Number(value ?? 0) || 0;
 
-/** Comentarios por janela; banco sem a migracao 202610200001 conta zero para todo mundo. */
-async function fetchCommentCounts(db: CommunicationsDb): Promise<Map<string, AudienceCommentCounts>> {
-  const { data, error } = await db.rpc("communication_comment_counts");
+/** Linhas por pedido: o teto do PostgREST (max_rows = 1000) tambem corta o resultado de RPC, sem erro. */
+export const COMMENT_COUNTS_PAGE = 1_000;
 
-  if (error) {
-    if (isMissingCommunicationSchema(error)) {
-      console.error("[comunicacao] contagem de comentarios indisponivel (migracao 202610200001 pendente).");
-      return new Map();
-    }
-
-    throw new Error(`Comunicacao: comentarios por aluno: ${error.message}`);
-  }
-
+/**
+ * Comentarios por janela, uma linha por aluno que comentou, lidos em paginas de 1000 em ordem de autor
+ * (sem paginar, quem passasse do teto contaria zero e o ranking sairia errado). Banco sem a migracao
+ * 202610200001 conta zero para todo mundo.
+ */
+export async function fetchCommentCounts(db: CommunicationsDb): Promise<Map<string, AudienceCommentCounts>> {
   const counts = new Map<string, AudienceCommentCounts>();
 
-  for (const row of (data ?? []) as CommentCountRow[]) {
-    if (row.author_id) {
-      counts.set(row.author_id, {
-        d7: count(row.comments_7d),
-        d30: count(row.comments_30d),
-        d90: count(row.comments_90d),
-        total: count(row.comments_total)
-      });
+  for (let from = 0; ; from += COMMENT_COUNTS_PAGE) {
+    const { data, error } = await db
+      .rpc("communication_comment_counts")
+      .order("author_id")
+      .range(from, from + COMMENT_COUNTS_PAGE - 1);
+
+    if (error) {
+      if (isMissingCommunicationSchema(error)) {
+        console.error("[comunicacao] contagem de comentarios indisponivel (migracao 202610200001 pendente).");
+        return new Map();
+      }
+
+      throw new Error(`Comunicacao: comentarios por aluno: ${error.message}`);
+    }
+
+    const rows = (data ?? []) as CommentCountRow[];
+
+    for (const row of rows) {
+      if (row.author_id) {
+        counts.set(row.author_id, {
+          d7: count(row.comments_7d),
+          d30: count(row.comments_30d),
+          d90: count(row.comments_90d),
+          total: count(row.comments_total)
+        });
+      }
+    }
+
+    if (rows.length < COMMENT_COUNTS_PAGE) {
+      return counts;
     }
   }
-
-  return counts;
 }
 
 function groupBy<Row>(rows: readonly Row[], key: (row: Row) => string) {

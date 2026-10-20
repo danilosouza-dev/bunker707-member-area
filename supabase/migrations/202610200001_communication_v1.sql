@@ -18,7 +18,8 @@
 -- - nada aqui e lido pelo navegador: RLS ligado, nada para anon/authenticated e so o servidor
 --   (service_role) le e grava, depois de conferir sessao e permissao no TypeScript;
 -- - retencao: o sino mostra 90 dias; `prune_communication_history()` apaga, todo dia, notificacoes e
---   estados de pop-up com mais de 24 meses (docs/17 D8). Conta excluida leva as linhas junto (cascade).
+--   estados de pop-up com mais de 24 meses (docs/17 D8), menos os de pop-up ainda no ar ou pausado (la
+--   ficam "Nao mostrar de novo" e "Uma vez" de quem ja viu). Conta excluida leva as linhas junto (cascade).
 --
 -- Verificacao manual depois de aplicar:
 --   select kind, status, count(*) from public.campaigns group by kind, status order by kind, status;
@@ -472,8 +473,14 @@ begin
   where created_at < now() - interval '24 months';
   get diagnostics inbox_rows = row_count;
 
-  delete from public.campaign_deliveries
-  where updated_at < now() - interval '24 months';
+  -- Pop-up no ar ou pausado guarda o que o aluno ja fez (visto, "Nao mostrar de novo"): apagar faria o
+  -- proximo recalculo criar a linha de novo e o pop-up voltar. So sai o estado de pop-up encerrado
+  -- (tambem pelo fim da janela), excluido ou que nunca chegou ao ar.
+  delete from public.campaign_deliveries d
+  using public.campaigns c
+  where c.id = d.campaign_id
+    and (c.status not in ('active', 'paused') or c.deleted_at is not null or c.ends_at <= now())
+    and d.updated_at < now() - interval '24 months';
   get diagnostics popup_rows = row_count;
 
   return jsonb_build_object('notifications', inbox_rows, 'campaign_deliveries', popup_rows);
@@ -481,7 +488,7 @@ end;
 $$;
 
 comment on function public.prune_communication_history() is
-  'Retencao da Comunicacao (docs/17 D8): apaga notificacoes e estados de pop-up com mais de 24 meses. Idempotente; agendada todo dia pelo pg_cron.';
+  'Retencao da Comunicacao (docs/17 D8): apaga notificacoes e estados de pop-up com mais de 24 meses (menos os de pop-up no ar ou pausado). Idempotente; agendada todo dia pelo pg_cron.';
 
 revoke all on function public.prune_communication_history() from public, anon, authenticated;
 grant execute on function public.prune_communication_history() to service_role;

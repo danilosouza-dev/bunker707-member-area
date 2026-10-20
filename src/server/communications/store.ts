@@ -7,7 +7,7 @@ import "server-only";
 // nunca enviam o mesmo aviso ao mesmo tempo (e o envio e idempotente pelo dedupe_key).
 
 import { normalizeAudience, type AudienceDefinition } from "./audience-model";
-import type { CampaignKind, CampaignStatus, PopupRepeat } from "./campaign-model";
+import { popupRefreshDueBefore, type CampaignKind, type CampaignStatus, type PopupRepeat } from "./campaign-model";
 import { assertNoDbError, chunksOf, CommunicationError, type CommunicationsDb } from "./db";
 import { normalizePeaks } from "./notification-model";
 import type { NoticeDraft } from "./schemas";
@@ -335,10 +335,13 @@ export async function claimDueInbox(db: CommunicationsDb, now: Date, limit: numb
   return claimed;
 }
 
-/** Pop-ups no ar (ou com janela futura) cujo segmento nao e recalculado ha `staleMs`. */
+/**
+ * Pop-ups no ar (ou com janela futura) cujo segmento nao foi recalculado desde o comeco da faixa atual
+ * de `staleMs` (relogio alinhado: os vencidos caem juntos e dividem a leitura dos alunos do tick).
+ */
 export async function fetchPopupsToRefresh(db: CommunicationsDb, now: Date, staleMs: number, limit: number): Promise<CampaignRow[]> {
   const nowIso = now.toISOString();
-  const staleIso = new Date(now.getTime() - staleMs).toISOString();
+  const staleIso = new Date(popupRefreshDueBefore(now.getTime(), staleMs)).toISOString();
   const { data, error } = await db
     .from("campaigns")
     .select(CAMPAIGN_COLUMNS)

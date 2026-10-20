@@ -290,11 +290,14 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
     loadPeople(db, [row.created_by, row.requested_by, row.approved_by])
   ]);
   const item = toListItem(row, { names, now, people, permissions: input.permissions ?? NO_PERMISSIONS, stats });
+  // approved_at tambem marca quem publicou direto com messaging.publish_large (o envio agendado nao volta
+  // para aprovacao); o relatorio so mostra "Aprovado" quando houve pedido.
+  const approved = Boolean(row.requested_at && row.approved_at);
 
   return {
     ...item,
-    approvedAt: row.approved_at,
-    approvedBy: row.approved_by ? (people.get(row.approved_by) ?? null) : null,
+    approvedAt: approved ? row.approved_at : null,
+    approvedBy: approved && row.approved_by ? (people.get(row.approved_by) ?? null) : null,
     audienceCountedAt: row.audience_counted_at,
     draft: rowToDraft(row),
     lastError: row.last_error,
