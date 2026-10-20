@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
+import { MemberPopupHost } from "@/components/member/notifications/member-popup";
 import { DirectorIcon } from "@/components/member/shell/director-parts";
 import { MemberAccountMenu } from "@/components/member/shell/member-account-menu";
 import { MemberNotificationsMenu } from "@/components/member/shell/member-notifications-menu";
@@ -386,7 +387,13 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
                 placeholder="Pesquisar aulas, cursos, formações e bootcamps..."
               />
             </div>
-            <MemberNotificationsMenu className={searchOpen ? "max-sm:hidden" : undefined} />
+            <MemberNotificationsMenu
+              accessPreviewMode={accessPreviewMode}
+              className={searchOpen ? "max-sm:hidden" : undefined}
+              onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
+              schoolLogoUrl={logoImage}
+              schoolName="Bunker707"
+            />
             <MemberAccountMenu
               accessPreviewMode={accessPreviewMode}
               className={searchOpen ? "max-sm:hidden" : undefined}
@@ -439,6 +446,12 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
       />
 
       <main>{children}</main>
+
+      {/* Pop-up dos avisos: so na home e fora do modo "ver como" do produtor (docs/22 §5). */}
+      <MemberPopupHost
+        enabled={pathname === "/" && !accessPreviewMode}
+        onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
+      />
 
       {!sidebarOpen ? (
         directorRequested ? (
