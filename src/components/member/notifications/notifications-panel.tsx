@@ -406,7 +406,7 @@ export function NotificationsPanel({
 
         {groups.map((group) => (
           <section aria-labelledby={`${headingId}-${group.key}`} key={group.key}>
-            <h3 className="px-4 pb-1 pt-3 text-xs font-semibold text-zinc-500" id={`${headingId}-${group.key}`}>
+            <h3 className="px-4 pb-1 pt-3 text-xs font-semibold text-zinc-400" id={`${headingId}-${group.key}`}>
               {group.label}
             </h3>
             <ul>
@@ -449,7 +449,7 @@ export function NotificationsPanel({
               ) : null}
             </div>
           ) : (
-            <p className="border-t border-white/[0.06] px-4 py-3 text-center text-xs text-zinc-500 outline-none" ref={endRef} tabIndex={-1}>
+            <p className="border-t border-white/[0.06] px-4 py-3 text-center text-xs text-zinc-400 outline-none" ref={endRef} tabIndex={-1}>
               As notificações ficam aqui por 90 dias.
             </p>
           )

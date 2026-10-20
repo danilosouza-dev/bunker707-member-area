@@ -114,7 +114,7 @@ function RelativeTime({ createdAt, now, prefix }: { createdAt: string; now: numb
   const relative = formatMemberRelativeTime(createdAt, now);
 
   return (
-    <p className="mt-1 text-xs text-zinc-500" suppressHydrationWarning>
+    <p className="mt-1 text-xs text-zinc-400" suppressHydrationWarning>
       {prefix ? `${prefix} · ` : null}
       <time dateTime={createdAt} suppressHydrationWarning>
         {relative}
@@ -167,7 +167,7 @@ function CommentCard({ accessPreviewMode, item, now, onOpenLink, preview = false
         {item.body ? (
           <span className="mt-1 line-clamp-3 text-sm leading-5 text-zinc-300 [overflow-wrap:anywhere]">“{item.body}”</span>
         ) : null}
-        <span className="mt-1 block text-xs text-zinc-500" suppressHydrationWarning>
+        <span className="mt-1 block text-xs text-zinc-400" suppressHydrationWarning>
           <time dateTime={item.createdAt} suppressHydrationWarning>
             {formatMemberRelativeTime(item.createdAt, now)}
           </time>
@@ -375,7 +375,8 @@ function NoticeBody({ body, onRead, preview }: { body: string; onRead?: () => vo
           <button
             aria-controls={bodyId}
             aria-expanded={expanded}
-            className={cn("mt-1 rounded-[4px] text-xs font-semibold text-white hover:underline", focusRing)}
+            // Area de toque de 24 px de altura sem mudar o desenho (o texto tem 16 px).
+            className={cn("relative mt-1 rounded-[4px] text-xs font-semibold text-white after:absolute after:-inset-x-2 after:-inset-y-1 hover:underline", focusRing)}
             onClick={() => {
               setExpanded((current) => !current);
               onRead?.();

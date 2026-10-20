@@ -1,5 +1,16 @@
 import { test as base, expect, type BrowserContext } from "@playwright/test";
-import { apagarContaDeTeste, apagarProdutosDeTeste, contasDeTeste, definirCapaDoProduto, limparComentarios, limparConfiguracoesDeTeste, limparFotoDoPerfil, limparProgresso, limparSessoesDeTv } from "../fixtures/escola-de-teste.mjs";
+import {
+  apagarContaDeTeste,
+  apagarProdutosDeTeste,
+  contasDeTeste,
+  definirCapaDoProduto,
+  limparComentarios,
+  limparComunicacao,
+  limparConfiguracoesDeTeste,
+  limparFotoDoPerfil,
+  limparProgresso,
+  limparSessoesDeTv
+} from "../fixtures/escola-de-teste.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 
 // Base dos testes de ponta a ponta: o navegador so fala com a maquina. Qualquer pedido para fora
@@ -73,4 +84,79 @@ export async function definirCapa(tituloDoProduto: string) {
 /** Volta o destaque, as fileiras e a tela de entrar ao padrao (apaga o que um teste publicou). */
 export async function zerarAreaDeMembros() {
   await limparConfiguracoesDeTeste(createLocalAdminClient(), ["hero", "homeSections", "loginPage"]);
+}
+
+/**
+ * Apaga avisos, pop-ups e notificacoes das contas de teste (docs/22). Use em `test.beforeAll` E em
+ * `test.afterAll` de quem publica algo: um pop-up esquecido abre na home dos outros arquivos (e um
+ * dialogo a mais confunde quem procura "o" dialogo da pagina); uma notificacao muda o nome do sino.
+ */
+export async function zerarComunicacao() {
+  await limparComunicacao(createLocalAdminClient());
+}
+
+export type EstadoDoPopUp = {
+  dismissedAt: string | null;
+  impressions: number;
+  snoozeCount: number;
+  snoozedUntil: string | null;
+};
+
+/** O que a aluna fez com o pop-up de titulo dado, lido do banco (null: o pop-up nao existe ou ela nao esta no segmento). */
+export async function estadoDoPopUpDaAluna(titulo: string): Promise<EstadoDoPopUp | null> {
+  const db = createLocalAdminClient();
+  const contas = await contasDeTeste(db);
+  const campanha = await db.from("campaigns").select("id").eq("kind", "popup").eq("title", titulo).is("deleted_at", null).maybeSingle();
+
+  if (campanha.error) {
+    throw new Error(`Lendo o pop-up "${titulo}": ${campanha.error.message}`);
+  }
+
+  if (!campanha.data) {
+    return null;
+  }
+
+  const entrega = await db
+    .from("campaign_deliveries")
+    .select("dismissed_at,impressions,snooze_count,snoozed_until")
+    .eq("campaign_id", campanha.data.id)
+    .eq("user_id", contas.aluna.id)
+    .maybeSingle();
+
+  if (entrega.error) {
+    throw new Error(`Lendo o estado do pop-up da aluna: ${entrega.error.message}`);
+  }
+
+  return entrega.data
+    ? {
+        dismissedAt: entrega.data.dismissed_at,
+        impressions: entrega.data.impressions,
+        snoozeCount: entrega.data.snooze_count,
+        snoozedUntil: entrega.data.snoozed_until
+      }
+    : null;
+}
+
+/**
+ * Devolve o pop-up para a aluna como se ela nunca o tivesse visto (arranjo para testar outra saida do
+ * mesmo pop-up: o limite de 24 h conta a ultima vez que ela viu qualquer pop-up).
+ */
+export async function reabrirPopUpParaAluna(titulo: string) {
+  const db = createLocalAdminClient();
+  const contas = await contasDeTeste(db);
+  const campanha = await db.from("campaigns").select("id").eq("kind", "popup").eq("title", titulo).is("deleted_at", null).single();
+
+  if (campanha.error) {
+    throw new Error(`Lendo o pop-up "${titulo}": ${campanha.error.message}`);
+  }
+
+  const result = await db
+    .from("campaign_deliveries")
+    .update({ clicked_at: null, dismissed_at: null, first_seen_at: null, impressions: 0, last_seen_at: null, snooze_count: 0, snoozed_until: null })
+    .eq("campaign_id", campanha.data.id)
+    .eq("user_id", contas.aluna.id);
+
+  if (result.error) {
+    throw new Error(`Reabrindo o pop-up para a aluna: ${result.error.message}`);
+  }
 }
