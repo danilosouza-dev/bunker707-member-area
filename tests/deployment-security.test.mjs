@@ -30,6 +30,51 @@ test("application responses include baseline browser security headers", () => {
   }
 });
 
+test("microfone so no admin: a Permissions-Policy efetiva libera microphone=(self) nas telas do admin e bloqueia no resto do app", async () => {
+  // next.config.ts importa ./src/lib/image-hosts sem extensao (como o Next resolve); aqui o Node precisa do ".ts".
+  const { registerHooks } = await import("node:module");
+  const configUrl = new URL("../next.config.ts", import.meta.url).href;
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (context.parentURL === configUrl && /^\.\.?\//.test(specifier) && !/\.[cm]?[jt]sx?$/.test(specifier)) {
+        return nextResolve(`${specifier}.ts`, context);
+      }
+
+      return nextResolve(specifier, context);
+    }
+  });
+  const { createRequire } = await import("node:module");
+  const { getPathMatch } = createRequire(import.meta.url)("next/dist/shared/lib/router/utils/path-match.js");
+  const { default: nextConfig } = await import(configUrl);
+  const rules = await nextConfig.headers();
+
+  // Mesma regra do Next: todas as regras que casam com o caminho valem, e a ultima que define a chave vence.
+  function effective(pathname, key) {
+    let value;
+
+    for (const rule of rules) {
+      if (getPathMatch(rule.source)(pathname)) {
+        value = rule.headers.find((header) => header.key === key)?.value ?? value;
+      }
+    }
+
+    return value;
+  }
+
+  for (const pathname of ["/admin", "/admin/comunicacao/avisos/novo", "/admin/comunicacao/avisos/0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e1f"]) {
+    const policy = effective(pathname, "Permissions-Policy");
+    assert.match(policy, /(^|, )microphone=\(self\)(,|$)/, pathname);
+    assert.match(policy, /camera=\(\)/, `${pathname}: o resto continua bloqueado`);
+    assert.match(policy, /geolocation=\(\)/);
+  }
+
+  for (const pathname of ["/", "/conteudo/teste-curso-agentes", "/perfil", "/administrar", "/login"]) {
+    assert.match(effective(pathname, "Permissions-Policy"), /(^|, )microphone=\(\)(,|$)/, pathname);
+  }
+
+  assert.equal(effective("/admin/comunicacao/avisos/novo", "X-Frame-Options"), "DENY", "o resto dos cabecalhos continua valendo no admin");
+});
+
 test("proxy issues a per-request nonce and an enforced CSP", () => {
   assert.match(proxySource, /const nonce = btoa\(crypto\.randomUUID\(\)\)/);
   assert.match(proxySource, /requestHeaders\.set\("x-nonce", nonce\)/);

@@ -87,10 +87,29 @@ export function commentSnippet(body: string, max = COMMENT_SNIPPET_MAX) {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Instante em UTC com ate microssegundos ("2026-10-20T12:00:00.123456Z"), como o Postgres grava. */
+const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
 
-/** Cursor da paginacao: "<created_at ISO>|<id>" da ultima linha entregue. */
+/**
+ * Instante do cursor sem perder os microssegundos do created_at: com milissegundos, duas notificacoes
+ * no mesmo milissegundo fariam a proxima pagina pular uma delas. "+00:00" vira "Z" (o "+" se perde na
+ * URL). Outro fuso ou texto invalido cai para o ISO do Date.
+ */
+function cursorInstant(value: string) {
+  const trimmed = value.trim().replace(" ", "T").replace(/\+00(?::?00)?$/, "Z");
+
+  if (UTC_INSTANT.test(trimmed) && Number.isFinite(Date.parse(trimmed))) {
+    return trimmed;
+  }
+
+  const time = Date.parse(value);
+
+  return Number.isFinite(time) ? new Date(time).toISOString() : null;
+}
+
+/** Cursor da paginacao: "<created_at em UTC>|<id>" da ultima linha entregue. */
 export function encodeCursor(row: { createdAt: string; id: string }) {
-  return `${new Date(row.createdAt).toISOString()}|${row.id}`;
+  return `${cursorInstant(row.createdAt) ?? new Date(0).toISOString()}|${row.id}`;
 }
 
 export function decodeCursor(value: string | null | undefined): { createdAt: string; id: string } | null {
@@ -100,13 +119,11 @@ export function decodeCursor(value: string | null | undefined): { createdAt: str
 
   const [createdAt, id, extra] = value.split("|");
 
-  if (extra !== undefined || !createdAt || !id || !UUID.test(id)) {
+  if (extra !== undefined || !createdAt || !id || !UUID.test(id) || !UTC_INSTANT.test(createdAt) || !Number.isFinite(Date.parse(createdAt))) {
     return null;
   }
 
-  const time = Date.parse(createdAt);
-
-  return Number.isFinite(time) ? { createdAt: new Date(time).toISOString(), id: id.toLowerCase() } : null;
+  return { createdAt, id: id.toLowerCase() };
 }
 
 /** Barras da forma de onda: inteiros 0..100, reamostrados para `bars` (vazio -> barras baixas). */

@@ -14,6 +14,7 @@ import { requireLessonAccess } from "@/server/access/lesson-access";
 import { can, type AdminAccess } from "@/server/auth/roles";
 import { getAdminAccessForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
+import { scheduleCommentReplyNotification } from "@/server/communications/comment-notifications";
 import {
   containsBlockedTerm,
   lessonCommentBurstLimit,
@@ -388,6 +389,19 @@ export async function createLessonComment({
     .single();
   throwDatabaseError(insertResult.error, "Nao foi possivel salvar o comentario");
   const row = insertResult.data as LessonCommentRow;
+
+  // Resposta: avisa no sino quem escreveu o comentario principal e quem foi citado (depois da resposta
+  // HTTP, sem nunca derrubar a publicacao).
+  if (row.parent_comment_id) {
+    scheduleCommentReplyNotification({
+      actorId: user.id,
+      body: row.body,
+      contentId: row.content_id,
+      lessonId: row.lesson_id,
+      parentCommentId: row.parent_comment_id,
+      replyId: row.id
+    });
+  }
 
   return {
     authorAvatarUrl: row.author_avatar_url ?? undefined,

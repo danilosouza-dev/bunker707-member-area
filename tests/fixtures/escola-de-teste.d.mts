@@ -78,3 +78,4 @@ export function apagarContaDeTeste(db: unknown, email: string): Promise<void>;
 export function limparConfiguracoesDeTeste(db: unknown, keys: string[]): Promise<void>;
 export function apagarProdutosDeTeste(db: unknown, prefixoDoTitulo: string): Promise<void>;
 export function definirCapaDoProduto(db: unknown, titulo: string, image?: string): Promise<void>;
+export function limparComunicacao(db: unknown): Promise<void>;

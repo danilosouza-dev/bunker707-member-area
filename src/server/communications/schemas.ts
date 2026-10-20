@@ -78,8 +78,10 @@ const groupSchema: z.ZodType<AudienceGroup> = z.lazy(() =>
   })
 );
 
+// discriminatedUnion (e nao union): o erro de dentro do grupo (ex.: mais de 20 regras) chega ao
+// produtor com a propria mensagem, em vez de "Escolha para quem vai o aviso.".
 export const audienceDefinitionSchema: z.ZodType<AudienceDefinition> = z
-  .union([z.object({ kind: z.literal("everyone") }), z.object({ kind: z.literal("rules"), root: groupSchema })], {
+  .discriminatedUnion("kind", [z.object({ kind: z.literal("everyone") }), z.object({ kind: z.literal("rules"), root: groupSchema })], {
     error: "Escolha para quem vai o aviso."
   })
   .superRefine((definition, context) => {

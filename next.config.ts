@@ -39,6 +39,20 @@ function getTurbopackRoot() {
   }
 }
 
+// Microfone bloqueado em todo o app; so o admin libera para a propria origem (gravar o audio de um aviso
+// em Comunicacao > Avisos e pop-ups, docs/22). A regra de /admin vem depois da global e o Next usa a
+// ultima que define a mesma chave (tests/deployment-security.test.mjs confere o valor efetivo).
+function permissionsPolicy(microphone: "()" | "(self)") {
+  return [
+    "camera=()",
+    "display-capture=()",
+    "geolocation=()",
+    `microphone=${microphone}`,
+    "payment=()",
+    'fullscreen=(self "https://www.youtube.com" "https://www.youtube-nocookie.com" "https://player.vimeo.com")'
+  ].join(", ");
+}
+
 const securityHeaders = [
   {
     key: "Cross-Origin-Opener-Policy",
@@ -50,14 +64,7 @@ const securityHeaders = [
   },
   {
     key: "Permissions-Policy",
-    value: [
-      "camera=()",
-      "display-capture=()",
-      "geolocation=()",
-      "microphone=()",
-      "payment=()",
-      'fullscreen=(self "https://www.youtube.com" "https://www.youtube-nocookie.com" "https://player.vimeo.com")'
-    ].join(", ")
+    value: permissionsPolicy("()")
   },
   {
     key: "Referrer-Policy",
@@ -93,10 +100,16 @@ const nextConfig: NextConfig = {
   // e as dependencias minimas. Fora dele (Vercel, `npm run build`, testes de ponta a ponta) nada muda.
   output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   async headers() {
-    return [{
-      headers: securityHeaders,
-      source: "/:path*"
-    }];
+    return [
+      {
+        headers: securityHeaders,
+        source: "/:path*"
+      },
+      {
+        headers: [{ key: "Permissions-Policy", value: permissionsPolicy("(self)") }],
+        source: "/admin/:path*"
+      }
+    ];
   },
   images: {
     formats: ["image/avif", "image/webp"],

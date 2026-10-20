@@ -102,10 +102,35 @@ create index if not exists campaigns_live_popups_idx
 
 create index if not exists campaigns_list_idx on public.campaigns (created_at desc) where deleted_at is null;
 
+-- updated_at e a versao do aviso para a checagem de conflito do editor (409 "mudou em outra tela"). O
+-- recalculo periodico de quem ve o pop-up (job do tick, a cada 15 minutos) so mexe na contagem e na hora
+-- do recalculo: isso nao conta como edicao, senao quem esta com o editor aberto perderia a versao.
+create or replace function public.touch_campaign_version()
+returns trigger
+language plpgsql
+set search_path = pg_catalog, public
+as $$
+begin
+  if (to_jsonb(new) - array['audience_count', 'audience_counted_at', 'audience_refreshed_at', 'updated_at'])
+    is distinct from (to_jsonb(old) - array['audience_count', 'audience_counted_at', 'audience_refreshed_at', 'updated_at']) then
+    new.updated_at = now();
+  else
+    new.updated_at = old.updated_at;
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.touch_campaign_version() from public, anon, authenticated, service_role;
+
+comment on function public.touch_campaign_version() is
+  'Trigger de campaigns: muda updated_at (versao do editor) so quando algo alem da contagem do segmento muda.';
+
 drop trigger if exists set_campaigns_updated_at on public.campaigns;
 create trigger set_campaigns_updated_at
   before update on public.campaigns
-  for each row execute function public.set_updated_at();
+  for each row execute function public.touch_campaign_version();
 
 alter table public.campaigns enable row level security;
 revoke all on public.campaigns from anon, authenticated;

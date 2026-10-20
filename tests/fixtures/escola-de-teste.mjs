@@ -649,3 +649,45 @@ export async function limparProgresso(db, userIds) {
     }
   }
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Comunicacao (avisos, sino e pop-ups; migracao 202610200001)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Contas da escola de teste e as criadas pelos testes (todas com e-mail @bunker707.test). */
+async function idsDasContasDeTeste(db) {
+  const result = await db.from("profiles").select("id").ilike("email", "%@bunker707.test");
+
+  if (result.error) {
+    throw new Error(`Lendo contas de teste: ${result.error.message}`);
+  }
+
+  return (result.data ?? []).map((row) => row.id);
+}
+
+/**
+ * Apaga o que os testes gravaram na Comunicacao: avisos criados pelas contas de teste (com o sino e os
+ * pop-ups deles, por cascata) e as notificacoes e estados de pop-up das contas de teste. Banco sem a
+ * migracao: nada a limpar.
+ */
+export async function limparComunicacao(db) {
+  const ids = await idsDasContasDeTeste(db);
+
+  if (ids.length === 0) {
+    return;
+  }
+
+  const etapas = [
+    ["Apagando avisos de teste", () => db.from("campaigns").delete().in("created_by", ids)],
+    ["Apagando notificacoes de teste", () => db.from("notifications").delete().in("user_id", ids)],
+    ["Apagando estados de pop-up de teste", () => db.from("campaign_deliveries").delete().in("user_id", ids)]
+  ];
+
+  for (const [contexto, etapa] of etapas) {
+    const result = await etapa();
+
+    if (result.error && !/does not exist|Could not find/i.test(result.error.message)) {
+      throw new Error(`${contexto}: ${result.error.message}`);
+    }
+  }
+}

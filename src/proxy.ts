@@ -109,7 +109,8 @@ function createContentSecurityPolicy(nonce: string, upgradeInsecureRequests: boo
     // https cobre o Storage da nuvem; a origem http entra so quando o Supabase e a propria maquina (testes).
     `img-src 'self' data: blob: https: ${getSupabaseConnectionSources().filter((source) => source.startsWith("http://")).join(" ")}`.trim(),
     "manifest-src 'self'",
-    "media-src 'self' blob: https:",
+    // Audio dos avisos no Storage: mesma regra do img-src (http so com o Supabase na propria maquina).
+    `media-src 'self' blob: https: ${getSupabaseConnectionSources().filter((source) => source.startsWith("http://")).join(" ")}`.trim(),
     "object-src 'none'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${["https://www.youtube.com", ...observabilityScriptSources].join(" ")}${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
     "script-src-attr 'none'",
