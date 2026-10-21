@@ -354,12 +354,15 @@ test("rascunho vazio de cada tipo: todos os alunos, agora, sem janela, uma vez e
     audio: null,
     body: "",
     cta: null,
+    icon: null,
     image: null,
     kind: "popup",
     repeat: "once",
     response: null,
     schedule: { mode: "now" },
+    sender: null,
     title: "",
+    validity: { mode: "default" },
     window: { endsAt: null, startsAt: null }
   });
   assert.deepEqual(problemas(notificacao()), []);

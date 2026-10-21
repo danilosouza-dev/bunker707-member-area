@@ -494,7 +494,7 @@ export function noticeDraftForKind(draft: NoticeDraft): NoticeDraft {
     return { ...draft, allowSnooze: true, repeat: "once", window: { endsAt: null, startsAt: null } };
   }
 
-  return { ...draft, response: null, schedule: { mode: "now" } };
+  return { ...draft, response: null, schedule: { mode: "now" }, sender: null, validity: { mode: "default" } };
 }
 
 function isoOrRaw(value: string) {
@@ -516,12 +516,21 @@ export function canonicalNoticeDraft(draft: NoticeDraft): NoticeDraft {
     audio: draft.audio ? { ...draft.audio, peaks: [...draft.audio.peaks] } : null,
     body: draft.body.trim(),
     cta: draft.cta ? { href: draft.cta.href.trim(), label: draft.cta.label.trim(), target: draft.cta.target } : null,
+    icon: draft.icon ? { color: draft.icon.color, id: draft.icon.id } : null,
     image: draft.image ? { alt: draft.image.alt.trim(), url: draft.image.url.trim() } : null,
     kind: draft.kind,
     repeat: inbox ? "once" : draft.repeat,
     response: inbox && draft.response ? { acceptLabel: draft.response.acceptLabel.trim(), declineLabel: draft.response.declineLabel.trim() } : null,
     schedule: inbox && draft.schedule.mode === "at" ? { mode: "at", sendAt: isoOrRaw(draft.schedule.sendAt) } : { mode: "now" },
+    sender: inbox && draft.sender ? { userId: draft.sender.userId } : null,
     title: draft.title.trim(),
+    validity: !inbox
+      ? { mode: "default" }
+      : draft.validity.mode === "until"
+        ? { endsAt: isoOrRaw(draft.validity.endsAt), mode: "until" }
+        : draft.validity.mode === "duration"
+          ? { minutes: draft.validity.minutes, mode: "duration" }
+          : { mode: "default" },
     window: inbox
       ? { endsAt: null, startsAt: null }
       : {
@@ -687,14 +696,18 @@ export function draftToNotificationItem(draft: NoticeDraft, input: { createdAt: 
   return {
     actor: null,
     audio: draft.audio ? { ...draft.audio } : null,
+    audioProgress: null,
     body: draft.body.trim(),
     context: null,
     createdAt: input.createdAt,
     cta: previewCta(draft.cta),
+    expiresAt: null,
     href: null,
+    icon: draft.icon,
     id: "previa",
     image: imageUrl ? { alt: draft.image?.alt.trim() ?? "", url: imageUrl } : null,
     kind: "notice",
+    openedAt: null,
     readAt: null,
     response:
       draft.kind === "inbox" && draft.response
@@ -718,6 +731,7 @@ export function draftToPopupItem(draft: NoticeDraft, input: { imageUrl?: string 
     body: draft.body.trim(),
     canSnooze: draft.allowSnooze,
     cta: previewCta(draft.cta),
+    icon: draft.icon,
     id: "previa",
     image: imageUrl ? { alt: draft.image?.alt.trim() ?? "", url: imageUrl } : null,
     title: draft.title.trim() || PREVIEW_TITLE_PLACEHOLDER

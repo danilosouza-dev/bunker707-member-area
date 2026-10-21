@@ -169,9 +169,13 @@ function safeMediaUrl(value: string | null) {
 
 function toItem(row: NotificationRow, comments: Map<string, CommentInfo>, actors: Map<string, { avatarUrl: string | null; name: string | null }>): NotificationItem {
   const base = {
+    audioProgress: null,
     createdAt: row.created_at,
+    expiresAt: null,
+    icon: null,
     id: row.id,
     kind: row.kind,
+    openedAt: null,
     readAt: row.read_at,
     seenAt: row.seen_at
   };

@@ -490,10 +490,10 @@ function RuleRow({
             }
           }}
           options={AUDIENCE_RULE_ORDER.map((type) => ({ label: AUDIENCE_RULE_LABELS[type], value: type }))}
-          value={rule.type}
+          value={rule.type as AudienceRuleType}
         />
         <Button
-          aria-label={removeAudienceRuleLabel(rule.type)}
+          aria-label={removeAudienceRuleLabel(rule.type as AudienceRuleType)}
           className="ml-auto size-10! px-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           disabled={context.disabled}
           onClick={onRemove}

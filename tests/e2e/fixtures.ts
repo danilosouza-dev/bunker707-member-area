@@ -87,9 +87,10 @@ export async function zerarAreaDeMembros() {
 }
 
 /**
- * Apaga avisos, pop-ups e notificacoes das contas de teste (docs/22). Use em `test.beforeAll` E em
- * `test.afterAll` de quem publica algo: um pop-up esquecido abre na home dos outros arquivos (e um
- * dialogo a mais confunde quem procura "o" dialogo da pagina); uma notificacao muda o nome do sino.
+ * Apaga fluxos, avisos, pop-ups, notificacoes e visitas de pagina das contas de teste (docs/22 e docs/23;
+ * os fluxos primeiro, como em limparComunicacao). Use em `test.beforeAll` E em `test.afterAll` de quem
+ * publica algo: um pop-up esquecido abre na home dos outros arquivos (e um dialogo a mais confunde quem
+ * procura "o" dialogo da pagina); uma notificacao muda o nome do sino.
  */
 export async function zerarComunicacao() {
   await limparComunicacao(createLocalAdminClient());

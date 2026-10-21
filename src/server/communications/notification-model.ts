@@ -1,11 +1,21 @@
-// Sino do aluno (docs/22 §1.1 e §4.4): contratos que a API devolve e o navegador desenha, e regras puras das
-// notificacoes automaticas de comentario. Modulo puro (sem "server-only", imports relativos): as rotas
-// /api/notifications, o painel do sino, a previa do admin e tests/comunicacao-avisos-modelo.test.mjs
-// usam os mesmos tipos.
+// Sino do aluno (docs/22 §1.1 e §4.4; v2 em docs/23): contratos que a API devolve e o navegador desenha, e
+// regras puras das notificacoes automaticas de comentario. Modulo puro (sem "server-only", imports
+// relativos): as rotas /api/notifications, o painel do sino, a previa do admin e
+// tests/comunicacao-avisos-modelo.test.mjs usam os mesmos tipos.
 
 import { INBOX_HISTORY_DAYS } from "./campaign-model";
+import type { NoticeIconColor, NoticeIconId } from "./message-meta";
 
 export type NotificationKind = "comment_mention" | "comment_reply" | "notice";
+
+/** Icone ao lado do titulo (catalogo em message-meta.ts). */
+export type NotificationIcon = { color: NoticeIconColor; id: NoticeIconId };
+
+/**
+ * Audio ouvido (docs/23): `heard` sao 48 trechos "0"/"1" (ouvido pelos trechos tocados de verdade,
+ * acumulado por OU no servidor), `percent` 0..100 e `completed` = 44 trechos ou mais.
+ */
+export type NotificationAudioProgress = { completed: boolean; heard: string; percent: number };
 
 export type NotificationAudio = { durationSeconds: number; mimeType: string | null; peaks: number[]; url: string };
 export type NotificationCta = { href: string; label: string; target: "new_tab" | "same_tab" };
@@ -13,20 +23,27 @@ export type NotificationImage = { alt: string; url: string };
 export type NotificationResponseValue = "accepted" | "declined";
 
 export type NotificationItem = {
-  /** Quem gerou (comentario); null = a escola (aviso da equipe). */
+  /** Quem gerou (comentario) ou quem envia (notificacao da equipe); null = a escola. */
   actor: { avatarUrl: string | null; name: string } | null;
   audio: NotificationAudio | null;
+  /** Audio ouvido por este aluno; null quando a notificacao nao tem audio. */
+  audioProgress: NotificationAudioProgress | null;
   /** Texto do aviso ou o trecho da resposta. */
   body: string;
   /** Contexto curto: o titulo da aula, nas notificacoes de comentario. */
   context: string | null;
   createdAt: string;
   cta: NotificationCta | null;
+  /** Some do sino depois disto (ISO); null so na previa sem fim calculado. */
+  expiresAt: string | null;
   /** Link da notificacao inteira (comentario -> aula); aviso usa o botao. */
   href: string | null;
+  icon: NotificationIcon | null;
   id: string;
   image: NotificationImage | null;
   kind: NotificationKind;
+  /** Interacao de verdade (cartao, Ver mais, audio, botao, resposta); "Marcar todas" nao conta. */
+  openedAt: string | null;
   readAt: string | null;
   response: { acceptLabel: string; declineLabel: string; value: NotificationResponseValue | null } | null;
   seenAt: string | null;
@@ -54,6 +71,11 @@ export type PopupItem = {
   body: string;
   canSnooze: boolean;
   cta: NotificationCta | null;
+  /**
+   * Icone ao lado do titulo. A API so manda a chave quando o pop-up tem icone: sem icone, a resposta do
+   * resumo continua exatamente a da v1.
+   */
+  icon?: NotificationIcon | null;
   id: string;
   image: NotificationImage | null;
   title: string;
@@ -64,6 +86,9 @@ export type NotificationsSummary = { popup: PopupItem | null; unseen: number };
 export const NOTIFICATIONS_PAGE_SIZE = 20;
 export const COMMENT_SNIPPET_MAX = 280;
 export const NOTICE_PEAK_BARS = 48;
+/** Trechos do audio ouvido (notifications.audio_heard) e quantos contam como "ouvido" (90 %). */
+export const AUDIO_HEARD_SLOTS = 48;
+export const AUDIO_COMPLETE_SLOTS = 44;
 
 /** "Ana Souza respondeu seu comentário" / "Ana Souza mencionou você" (sem nome: "Alguém"). */
 export function commentNotificationTitle(kind: "comment_mention" | "comment_reply", actorName: string | null | undefined) {

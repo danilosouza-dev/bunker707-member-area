@@ -5,7 +5,12 @@
 // pelo Node; o editor do admin importa os mesmos tipos e frases.
 //
 // A equipe (admin_roles) nunca entra: quem monta os fatos ja tira a equipe antes de avaliar.
+//
+// v2 (docs/23): tres regras novas. "message" (o que o aluno fez com uma notificacao) vale no segmento,
+// apontando para um aviso enviado, e nos fluxos, apontando para um passo acima; "page_visit" e
+// "access_gained" valem so dentro de um fluxo (so ha visita gravada enquanto um fluxo no ar usa a pagina).
 
+import type { FixedPageKey } from "../member-area/page-visit-model";
 import { STUDENT_PACE_LABELS, STUDENT_PACES, type StudentListParams, type StudentPace } from "../students/model";
 
 export const AUDIENCE_RULE_TYPES = [
@@ -34,7 +39,43 @@ export type AudienceRule =
   | { days: number; op: "within" | "not_within"; type: "last_study" }
   | { days: number; op: "never" | "within" | "not_within"; type: "sign_in" }
   | { paces: StudentPace[]; type: "pace" }
-  | { cohortIds: string[]; type: "cohort" };
+  | { cohortIds: string[]; type: "cohort" }
+  | { action: MessageAction; negate: boolean; ref: MessageRef; type: "message" }
+  /** So dentro de um fluxo. */
+  | { negate: boolean; page: PageTarget; since: FlowSince; type: "page_visit" }
+  /** So dentro de um fluxo. */
+  | { negate: boolean; productIds: string[]; since: FlowSince; type: "access_gained" };
+
+/** Notificacao de uma regra "message": um passo do fluxo (acima deste) ou um aviso enviado (segmento). */
+export type MessageRef = { kind: "node"; nodeId: string } | { campaignId: string; kind: "campaign" };
+
+/**
+ * O que o aluno fez com a notificacao. "interacted" = abriu, comecou o audio, clicou ou respondeu.
+ * Negada ("nao abriu"), a regra so vale para quem recebeu.
+ */
+export const MESSAGE_ACTIONS = [
+  "received",
+  "seen",
+  "opened",
+  "audio_started",
+  "audio_completed",
+  "clicked",
+  "accepted",
+  "declined",
+  "responded",
+  "interacted"
+] as const;
+export type MessageAction = (typeof MESSAGE_ACTIONS)[number];
+
+/** Pagina de uma regra "page_visit"; "message_cta" = a pagina do botao de um passo acima. */
+export type PageTarget =
+  | { kind: "content"; productId: string }
+  | { kind: "checkout"; productId: string }
+  | { key: FixedPageKey; kind: "fixed" }
+  | { kind: "message_cta"; nodeId: string };
+
+/** Desde quando conta: a entrada do aluno no fluxo ou o recebimento de uma notificacao acima. */
+export type FlowSince = { kind: "entered" } | { kind: "message"; nodeId: string };
 
 export type AudienceGroup = { items: AudienceNode[]; match: "all" | "any" };
 export type AudienceNode = AudienceGroup | AudienceRule;
@@ -62,8 +103,24 @@ export function isAudienceGroup(node: AudienceNode): node is AudienceGroup {
  * Fatos de cada aluno (montados no servidor) e contexto da avaliacao
  * ---------------------------------------------------------------------------------------------- */
 
-/** Acesso aberto agora. O acesso a plataforma inteira usa productId "platform". */
-export type AudienceAccessFact = { endsAt: number | null; productId: string; startsAt: number };
+/**
+ * Acesso aberto agora. O acesso a plataforma inteira usa productId "platform". `gainedAt` =
+ * greatest(created_at, starts_at) (regra "access_gained"; importacao pode ter starts_at no passado).
+ */
+export type AudienceAccessFact = { endsAt: number | null; gainedAt?: number; productId: string; startsAt: number };
+
+/** O que um aluno fez com uma notificacao (linha do sino), em ms. */
+export type MessageFact = {
+  audioCompletedAt: number | null;
+  audioStartedAt: number | null;
+  clickedAt: number | null;
+  expiresAt: number;
+  openedAt: number | null;
+  response: "accepted" | "declined" | null;
+  seenAt: number | null;
+  /** Quando passou a aparecer no sino: greatest(created_at, sent_at do aviso). */
+  visibleAt: number;
+};
 
 export type AudienceCommentCounts = { d7: number; d30: number; d90: number; total: number };
 
@@ -80,6 +137,13 @@ export type AudienceStudentFacts = {
   pace: StudentPace;
   totalLessons: number;
   userId: string;
+  /**
+   * Notificacoes recebidas, pela chave da regra: "node:<passo>" (fluxo) ou "campaign:<aviso>" (segmento).
+   * Chave carregada sem linha deste aluno = nao recebeu (AudienceContext.messageKeys).
+   */
+  messages?: Record<string, MessageFact>;
+  /** So no motor dos fluxos: entrada no fluxo (passagem) e ultima visita por chave de pagina, em ms. */
+  flow?: { enteredAt: number; pageVisits: Record<string, number> };
 };
 
 export type CommentRankWindow = "7" | "30" | "90" | "all";
@@ -90,6 +154,13 @@ export type AudienceContext = {
   /** Aulas publicadas por conteudo. */
   lessonTotals: Record<string, number>;
   now: number;
+  /** So no motor dos fluxos: passo -> chave da pagina do botao (null = externo ou nao acompanhado). */
+  flow?: { ctaPageKeys: Record<string, string | null> };
+  /**
+   * Chaves de mensagem ("campaign:<id>", "node:<id>") carregadas para todos os avaliados. Regra com chave
+   * fora daqui nunca combina (negada ou nao): o aviso nao foi lido, entao nao da para saber.
+   */
+  messageKeys?: ReadonlySet<string>;
 };
 
 function windowKey(days: AudienceWindow): CommentRankWindow {
@@ -267,6 +338,42 @@ export function evaluateAudience(definition: AudienceDefinition, facts: Audience
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Regras de mensagem: chave dos fatos e avisos que o carregador precisa ler
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Chave dos fatos de uma notificacao: "node:<passo>" (fluxo) ou "campaign:<aviso>" (segmento). */
+export function messageRefKey(ref: MessageRef) {
+  return ref.kind === "node" ? `node:${ref.nodeId}` : `campaign:${ref.campaignId}`;
+}
+
+function collectCampaignIdsIn(node: AudienceNode, ids: Set<string>) {
+  if (isAudienceGroup(node)) {
+    node.items.forEach((item) => collectCampaignIdsIn(item, ids));
+  } else if (node.type === "message" && node.ref.kind === "campaign" && node.ref.campaignId) {
+    ids.add(node.ref.campaignId);
+  }
+}
+
+/**
+ * Avisos cujas linhas do sino o carregador de fatos precisa ler para avaliar estas regras (cada regra
+ * "message" que aponta para um aviso), sem repeticao e em ordem. Sem regra de mensagem -> [].
+ */
+export function collectMessageCampaignIds(
+  definitions: AudienceDefinition | null | undefined | readonly (AudienceDefinition | null | undefined)[]
+): string[] {
+  const ids = new Set<string>();
+  const list = Array.isArray(definitions) ? definitions : [definitions as AudienceDefinition | null | undefined];
+
+  for (const definition of list) {
+    if (definition && definition.kind === "rules" && definition.root) {
+      collectCampaignIdsIn(definition.root, ids);
+    }
+  }
+
+  return Array.from(ids).sort();
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Tamanho, profundidade e normalizacao
  * ---------------------------------------------------------------------------------------------- */
 
@@ -362,7 +469,12 @@ export function normalizeAudience(definition: AudienceDefinition): AudienceDefin
  * Frase do segmento ("Alunos que ...")
  * ---------------------------------------------------------------------------------------------- */
 
-export type AudienceNames = { cohorts: Record<string, string>; products: Record<string, string> };
+export type AudienceNames = {
+  cohorts: Record<string, string>;
+  /** Chave da notificacao ("campaign:<id>" ou "node:<id>") -> titulo. */
+  messages?: Record<string, string>;
+  products: Record<string, string>;
+};
 
 const MISSING_PRODUCT = "um produto removido";
 const MISSING_COHORT = "uma turma removida";

@@ -9,6 +9,7 @@ import "server-only";
 import { normalizeAudience, type AudienceDefinition } from "./audience-model";
 import { popupRefreshDueBefore, type CampaignKind, type CampaignStatus, type PopupRepeat } from "./campaign-model";
 import { assertNoDbError, chunksOf, CommunicationError, type CommunicationsDb } from "./db";
+import { noticeIconOfColumns, validityOfRow, validityToColumns } from "./message-meta";
 import { normalizePeaks } from "./notification-model";
 import type { NoticeDraft } from "./schemas";
 
@@ -19,8 +20,9 @@ import type { NoticeDraft } from "./schemas";
 /** PostgREST: `.range()` depois da ultima linha (HTTP 416). */
 const RANGE_NOT_SATISFIABLE = "PGRST103";
 
+// v2 (migracao 202610200002): quem envia, icone, validade no sino e o passo do fluxo.
 export const CAMPAIGN_COLUMNS =
-  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by";
+  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by,sender_user_id,icon,icon_color,validity_minutes,valid_until,flow_id,flow_node_id";
 
 export type CampaignRow = {
   accept_label: string | null;
@@ -47,6 +49,12 @@ export type CampaignRow = {
   dispatch_attempts: number;
   dispatch_started_at: string | null;
   ends_at: string | null;
+  /** Conteudo de um passo de fluxo (fora da lista de avisos); null = aviso comum. */
+  flow_id: string | null;
+  flow_node_id: string | null;
+  /** Icone ao lado do titulo (ids do catalogo de message-meta.ts); os dois nulos = sem icone. */
+  icon: string | null;
+  icon_color: string | null;
   id: string;
   image_alt: string | null;
   image_url: string | null;
@@ -58,12 +66,17 @@ export type CampaignRow = {
   requested_by: string | null;
   response_mode: "accept_decline" | "none";
   send_at: string | null;
+  /** Quem envia (pessoa da equipe); null = a escola. */
+  sender_user_id: string | null;
   sent_at: string | null;
   starts_at: string | null;
   status: CampaignStatus;
   title: string;
   updated_at: string;
   updated_by: string | null;
+  /** Quanto tempo fica no sino: ate a data ou minutos depois de chegar (os dois nulos = 90 dias). */
+  valid_until: string | null;
+  validity_minutes: number | null;
 };
 
 /** Colunas que a equipe escreve (conteudo, segmento e agenda), a partir do rascunho do editor. */
@@ -80,14 +93,19 @@ export type CampaignContentColumns = Pick<
   | "cta_target"
   | "decline_label"
   | "ends_at"
+  | "icon"
+  | "icon_color"
   | "image_alt"
   | "image_url"
   | "kind"
   | "popup_repeat"
   | "response_mode"
   | "send_at"
+  | "sender_user_id"
   | "starts_at"
   | "title"
+  | "valid_until"
+  | "validity_minutes"
 > & { audience: AudienceDefinition; audio_peaks: number[] | null };
 
 export type CampaignPatch = Partial<Omit<CampaignRow, "audience" | "audio_peaks" | "created_at" | "id" | "updated_at">> & {
@@ -117,6 +135,8 @@ function peaksOf(value: unknown): number[] {
 
 export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
   const isInbox = draft.kind === "inbox";
+  // Quem envia e o tempo no sino sao da notificacao (check campaigns_inbox_only_v2); o pop-up so tem o icone.
+  const validity = isInbox ? validityToColumns(draft.validity) : { valid_until: null, validity_minutes: null };
 
   return {
     accept_label: isInbox && draft.response ? draft.response.acceptLabel : null,
@@ -132,14 +152,19 @@ export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
     cta_target: draft.cta ? draft.cta.target : null,
     decline_label: isInbox && draft.response ? draft.response.declineLabel : null,
     ends_at: isInbox ? null : draft.window.endsAt,
+    icon: draft.icon ? draft.icon.id : null,
+    icon_color: draft.icon ? draft.icon.color : null,
     image_alt: draft.image ? draft.image.alt || null : null,
     image_url: draft.image ? draft.image.url : null,
     kind: draft.kind,
     popup_repeat: isInbox ? "once" : draft.repeat,
     response_mode: isInbox && draft.response ? "accept_decline" : "none",
     send_at: isInbox && draft.schedule.mode === "at" ? draft.schedule.sendAt : null,
+    sender_user_id: isInbox && draft.sender ? draft.sender.userId : null,
     starts_at: isInbox ? null : draft.window.startsAt,
-    title: draft.title
+    title: draft.title,
+    valid_until: validity.valid_until,
+    validity_minutes: validity.validity_minutes
   };
 }
 
@@ -158,6 +183,7 @@ export function rowToDraft(row: CampaignRow): NoticeDraft {
         : null,
     body: row.body,
     cta: row.cta_href && row.cta_label && row.cta_target ? { href: row.cta_href, label: row.cta_label, target: row.cta_target } : null,
+    icon: noticeIconOfColumns(row.icon, row.icon_color),
     image: row.image_url ? { alt: row.image_alt ?? "", url: row.image_url } : null,
     kind: row.kind,
     repeat: row.popup_repeat,
@@ -166,7 +192,9 @@ export function rowToDraft(row: CampaignRow): NoticeDraft {
         ? { acceptLabel: row.accept_label ?? "Aceitar", declineLabel: row.decline_label ?? "Recusar" }
         : null,
     schedule: row.kind === "inbox" && row.send_at ? { mode: "at", sendAt: row.send_at } : { mode: "now" },
+    sender: row.kind === "inbox" && row.sender_user_id ? { userId: row.sender_user_id } : null,
     title: row.title,
+    validity: row.kind === "inbox" ? validityOfRow(row) : { mode: "default" },
     window: { endsAt: row.kind === "popup" ? row.ends_at : null, startsAt: row.kind === "popup" ? row.starts_at : null }
   };
 }
@@ -204,16 +232,16 @@ export async function fetchCampaignsByIds(db: CommunicationsDb, ids: readonly st
 }
 
 /**
- * Lista da equipe: mais novos primeiro, sem os excluidos. Pagina depois do fim: o PostgREST responde 416
- * (PGRST103) em vez de lista vazia; aqui vira pagina vazia (o total pode nao vir, e a tela volta para uma
- * pagina que existe).
+ * Lista da equipe: mais novos primeiro, sem os excluidos e sem o conteudo dos passos de fluxo (esse fica
+ * no fluxo). Pagina depois do fim: o PostgREST responde 416 (PGRST103) em vez de lista vazia; aqui vira
+ * pagina vazia (o total pode nao vir, e a tela volta para uma pagina que existe).
  */
 export async function listCampaignRows(
   db: CommunicationsDb,
   input: { kind?: CampaignKind; page: number; pageSize: number }
 ): Promise<{ rows: CampaignRow[]; total: number }> {
   const from = (Math.max(1, input.page) - 1) * input.pageSize;
-  let query = db.from("campaigns").select(CAMPAIGN_COLUMNS, { count: "exact" }).is("deleted_at", null);
+  let query = db.from("campaigns").select(CAMPAIGN_COLUMNS, { count: "exact" }).is("deleted_at", null).is("flow_id", null);
 
   if (input.kind) {
     query = query.eq("kind", input.kind);
@@ -378,6 +406,8 @@ export type NotificationInsert = {
   body?: string | null;
   campaign_id?: string | null;
   dedupe_key: string;
+  /** Fim no sino (computeExpiresAt); sem valor, o gatilho do banco poe created_at + 90 dias. */
+  expires_at?: string | null;
   href?: string | null;
   is_test?: boolean;
   kind: "comment_mention" | "comment_reply" | "notice";
