@@ -529,6 +529,58 @@ test("números de cada seguinte no relatório: o que a notificação tem e o por
   assert.deepEqual(rows.map((row) => row.label), ["Chegaram", "Esperando", "Receberam", "Viram no sino", "Abriram", "Começaram o áudio", "Ouviram até o fim", "Clicaram no botão", "Não receberam"]);
   assert.equal(rows.at(-1).value, "24 (fora do filtro 12 · atingiram o objetivo antes 6 · venceu o prazo 4 · limite do dia 2)");
   assert.deepEqual(model.followUpNumberRows(null, conteudo()).map((row) => row.value), ["—", "—", "—", "—", "—"]);
+
+  // Encerrar e Retirar caem no mesmo "removido" de 7.8 (nao so "passo removido"); as que falharam tambem
+  // contam: Chegaram = Esperando + Receberam + Não receberam.
+  const comFalha = { ...stats, failed: 3, filtered: 0, goal: 0, expired: 0, cap: 0, removed: 13, reached: 40 };
+  assert.equal(model.followUpNumberRows(comFalha, conteudo()).at(-1).value, "16 (passo removido, retirado ou fluxo encerrado 13 · falharam 3)");
+});
+
+test("escolha rápida que a notificação de cima não oferece mais: erro no 'Para quem' (e a regra que ninguém satisfaz não grava)", () => {
+  const comAudio = principal({ audio });
+  const item = { ...model.changeQuickChoice(model.newFollowUpItem(S1, comAudio), "audio_not_started", comAudio), content: conteudo({ title: "Ouça o áudio" }) };
+  assert.deepEqual(model.followUpChoiceErrors([item], comAudio), {}, "com audio: vale");
+
+  // O produtor tira o audio da principal depois.
+  const semAudio = principal();
+  assert.deepEqual(model.followUpChoiceErrors([item], semAudio), { "followUps.0.who": model.FOLLOW_UPS_COPY.staleChoice });
+  const drafts = model.followUpsToSave("inbox", [item], semAudio);
+  assert.deepEqual(model.followUpTreeErrors({ drafts, entryId: ENTRADA, notice: conteudo() }), {
+    "followUps.0.who": "A notificação escolhida não tem áudio. Escolha outra regra."
+  });
+
+  // "não abriu" sobre uma principal que passou a nao ter nada para abrir: so o cartao sabe (a arvore nao tem o texto).
+  const longo = principal({ body: "Texto longo. ".repeat(40) });
+  const naoAbriu = { ...model.changeQuickChoice(model.newFollowUpItem(S2, longo), "not_opened", longo), content: conteudo({ title: "Abra" }) };
+  assert.deepEqual(model.followUpChoiceErrors([naoAbriu], principal({ body: "Curta." })), { "followUps.0.who": model.FOLLOW_UPS_COPY.staleChoice });
+
+  // Na seguinte de uma seguinte, a de cima e a seguinte.
+  const filho = { ...model.changeQuickChoice(model.newFollowUpItem(S11, model.followUpParentOf(S1, "previous", conteudo({ cta: botaoProduto }))), "not_clicked", model.followUpParentOf(S1, "previous", conteudo({ cta: botaoProduto }))), content: conteudo({ title: "Clique" }) };
+  const pai = { ...model.newFollowUpItem(S1, semAudio), children: [filho], content: conteudo({ title: "Sem botão agora" }) };
+  assert.deepEqual(model.followUpChoiceErrors([pai], semAudio), { "followUps.0.children.0.who": model.FOLLOW_UPS_COPY.staleChoice });
+
+  assert.equal(model.FOLLOW_UPS_COPY.sheetDraftNote, "As mudanças ficam no rascunho até você salvar.");
+  assert.equal(model.FOLLOW_UPS_COPY.sheetLiveNote, "As mudanças valem quando você aplicar.");
+});
+
+test("relatório: as seguintes gravadas só se redesenham com a entrada do servidor (a provisória vira 'escolher por regras' com erro)", () => {
+  // O primeiro "Aplicar" sem regra que cite a principal sorteia a entrada no servidor (E); a tela tinha uma
+  // provisória (R). Por isso o relatorio passa a usar a entrada gravada depois de aplicar e na releitura.
+  const E = "55555555-5555-4555-8555-555555555555";
+  const longo = { audio: null, body: "Texto longo. ".repeat(40), cta: null, response: null, title: "Aviso", validity: { mode: "default" } };
+  const gravadas = [{ campaignId: "c1", children: [], content: conteudo({ title: "Seg" }), id: S1, when: { anchor: "sent", minutes: DIA }, who: model.quickChoiceRules("not_opened", { nodeId: E }) }];
+
+  const comAProvisoria = model.followUpParentOf(ENTRADA, "main", longo);
+  const velhas = model.followUpFormItemsOf(gravadas, comAProvisoria);
+  assert.equal(velhas[0].choice, "rules");
+  assert.deepEqual(model.followUpTreeErrors({ drafts: model.followUpDraftsOf(velhas, comAProvisoria), entryId: ENTRADA, notice: longo }), {
+    "followUps.0.who": "Esta regra confere uma notificação que não vem antes dela no caminho."
+  });
+
+  const comAGravada = model.followUpParentOf(E, "main", longo);
+  const certas = model.followUpFormItemsOf(gravadas, comAGravada);
+  assert.equal(certas[0].choice, "not_opened");
+  assert.deepEqual(model.followUpTreeErrors({ drafts: model.followUpDraftsOf(certas, comAGravada), entryId: E, notice: longo }), {});
 });
 
 test("apoio do cartão: erro pelo caminho (ou o primeiro de dentro), chip da lista, fim da principal na prévia e a entrada provisória", () => {

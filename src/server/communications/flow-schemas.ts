@@ -343,7 +343,8 @@ const flowIdSchema = z.uuid({ error: "Fluxo inválido." });
 
 export const saveNoticeFollowUpsSchema = z
   .object({
-    expectedFlowUpdatedAt: expectedUpdatedAtSchema.optional(),
+    /** Versao do fluxo lida pela tela; null = a tela nao viu fluxo nenhum (outra que criou um no meio da 409). */
+    expectedFlowUpdatedAt: expectedUpdatedAtSchema.nullable().optional(),
     expectedNoticeUpdatedAt: expectedUpdatedAtSchema,
     followUps: z.array(followUpDraftSchema).max(FLOW_LIMITS.followUpsPerNotice, FOLLOW_UPS_PER_LEVEL_MESSAGE),
     /** "Parar as notificacoes seguintes para quem tiver acesso a [produto]" (o Objetivo do fluxo do aviso). */

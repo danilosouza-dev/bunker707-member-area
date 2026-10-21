@@ -46,7 +46,10 @@ import {
 } from "./flow-store";
 import { pageKeyOfHref } from "../member-area/page-visit-model";
 
-/** Cache de um tick: o que nao muda entre um lote e outro do mesmo minuto. */
+/**
+ * Cache de um tick: o que nao muda entre um lote e outro do mesmo minuto. Fluxo com tarefa devolvida como
+ * stale_version sai do cache (forgetFlows) e o proximo lote rele a arvore atual.
+ */
 export type FlowTickCache = {
   commentCounts: Promise<Map<string, AudienceCommentCounts>> | null;
   flows: Map<string, FlowRow>;
@@ -60,8 +63,19 @@ export function createFlowTickCache(): FlowTickCache {
   return { commentCounts: null, flows: new Map(), lessonIndex: null, metas: new Map(), trees: new Map() };
 }
 
-/** Tarefa do lote com tudo o que a decisao precisa; `input` null = passo ou fluxo que nao esta mais vivo. */
-export type FlowBatchItem = { input: DecideInput | null; task: FlowTaskRow };
+/** O fluxo mudou no meio do tick (stale_version): o proximo lote rele o fluxo e a arvore. */
+export function forgetFlows(cache: FlowTickCache, flowIds: Iterable<string>) {
+  for (const id of flowIds) {
+    cache.flows.delete(id);
+    cache.trees.delete(id);
+  }
+}
+
+/**
+ * Tarefa do lote com tudo o que a decisao precisa; `input` null = passo ou fluxo que nao esta mais vivo.
+ * `revision`: a do fluxo lida antes da arvore (vai junto com a decisao; 7.4 recusa se mudou).
+ */
+export type FlowBatchItem = { input: DecideInput | null; revision: number | null; task: FlowTaskRow };
 
 const ZERO_COMMENTS: AudienceCommentCounts = { d7: 0, d30: 0, d90: 0, total: 0 };
 
@@ -80,7 +94,11 @@ function guarded<T>(promise: Promise<T>): Promise<T> {
   return promise;
 }
 
-/** Fluxos e arvores do lote no cache; fluxo com passo que o cache nao conhece e relido (passo novo no meio do tick). */
+/**
+ * Fluxos e arvores do lote no cache; fluxo com passo que o cache nao conhece e relido (passo novo no meio do
+ * tick). O fluxo e lido ANTES dos passos: a revision guardada nunca e mais nova que a arvore (uma gravacao no
+ * meio deixa a revision velha, e 7.4 devolve a tarefa como stale_version em vez de aplicar a arvore velha).
+ */
 async function ensureFlows(db: CommunicationsDb, tasks: readonly FlowTaskRow[], cache: FlowTickCache) {
   const flowIds = Array.from(new Set(tasks.map((task) => task.flow_id)));
   const stale = new Set(flowIds.filter((id) => !cache.flows.has(id)));
@@ -98,7 +116,8 @@ async function ensureFlows(db: CommunicationsDb, tasks: readonly FlowTaskRow[], 
   }
 
   const ids = Array.from(stale);
-  const [flows, nodes] = await Promise.all([fetchFlowsByIds(db, ids), fetchFlowNodes(db, ids)]);
+  const flows = await fetchFlowsByIds(db, ids);
+  const nodes = await fetchFlowNodes(db, ids);
 
   for (const flow of flows) {
     cache.flows.set(flow.id, flow);
@@ -359,7 +378,7 @@ export async function loadFlowBatchContext(
     const node = plan?.tree.nodes.find((item) => item.id === task.node_id);
 
     if (!plan || !node) {
-      return { input: null, task };
+      return { input: null, revision: plan?.flow.revision ?? null, task };
     }
 
     const base = baseFacts.get(task.user_id) ?? minimalFacts(task.user_id, accessesByUser.get(task.user_id) ?? [], nowMs);
@@ -382,6 +401,7 @@ export async function loadFlowBatchContext(
         task: taskInputOf(task),
         tree: plan.tree
       },
+      revision: plan.flow.revision,
       task
     };
   });

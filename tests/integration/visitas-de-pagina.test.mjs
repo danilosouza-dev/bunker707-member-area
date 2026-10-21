@@ -9,13 +9,13 @@ import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste }
 // As paginas .tsx nao carregam no Node (o carregador so tira os tipos), entao trackMemberPageVisit e
 // chamada direto, como cada pagina chama (a chamada nas 10 paginas fica em
 // tests/visitas-de-pagina.guard.test.mjs). Fora de um pedido do Next, after() lanca e a gravacao roda na
-// hora; settlePageVisits() espera por ela. O relogio do registro e simulado por `now` (a trava de 60 s
+// hora; settlePageVisits() espera por ela. O relogio do registro e simulado por `now` (a trava de 10 s
 // fica na memoria do processo). So grava para pagina que um fluxo ativo ou pausado acompanha; nunca
 // para a equipe, no "ver como" ou num prefetch do Next; e a rota do beacon confere a chave.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
-const { settlePageVisits, trackMemberPageVisit } = await import("../../src/server/member-area/page-visits.ts");
+const { PAGE_VISIT_THROTTLE_MS, settlePageVisits, trackMemberPageVisit } = await import("../../src/server/member-area/page-visits.ts");
 const pageVisitsRoute = await import("../../src/app/api/page-visits/route.ts");
 
 const { curso, cursoBloqueado } = ESCOLA_DE_TESTE;
@@ -28,7 +28,7 @@ const HORA = 60 * 60 * SEGUNDO;
 const PAGINA_DO_CURSO = `content:${curso.id}`;
 const COMPRAR_O_BLOQUEADO = `checkout:${cursoBloqueado.id}`;
 
-// Cada teste usa a propria hora (bem separadas), para a trava de 60 s de um nao valer no outro.
+// Cada teste usa a propria hora (bem separadas), para a trava de um nao valer no outro.
 let horaDoTeste = Date.now();
 
 function novaHora() {
@@ -147,25 +147,31 @@ test("equipe, \"ver como\" e prefetch do Next nao gravam visita", async () => {
   definirCabecalhosDoPedido(null);
   assert.deepEqual(await visitas(aluna.id), [], "prefetch do Next");
 
-  // O mesmo pedido sem prefetch grava (a trava de 60 s nao foi gasta pelos casos acima).
+  // O mesmo pedido sem prefetch grava (a trava nao foi gasta pelos casos acima).
   const hora = novaHora();
   await visitar(aluna, PAGINA_DO_CURSO, hora);
   assert.deepEqual((await visitas(aluna.id)).map((visita) => Date.parse(visita.last_visited_at)), [hora]);
 });
 
-test("a mesma visita so grava de novo depois de 60 s; a primeira visita fica guardada", async () => {
+test("a mesma visita so grava de novo depois de 10 s (recarga e redirecionamento); a primeira visita fica guardada", async () => {
   await fluxo({ keys: [PAGINA_DO_CURSO], status: "active" });
   const hora = novaHora();
+  assert.equal(PAGE_VISIT_THROTTLE_MS, 10 * SEGUNDO);
 
   await visitar(aluna, PAGINA_DO_CURSO, hora);
-  await visitar(aluna, PAGINA_DO_CURSO, hora + 30 * SEGUNDO);
+  await visitar(aluna, PAGINA_DO_CURSO, hora + 5 * SEGUNDO);
   let [visita] = await visitas(aluna.id);
-  assert.equal(Date.parse(visita.last_visited_at), hora, "30 s depois: dentro da trava, nada muda");
+  assert.equal(Date.parse(visita.last_visited_at), hora, "5 s depois: dentro da trava, nada muda");
+
+  // A notificacao ficou visivel 30 s depois e a aluna tocou no botao 50 s depois: essa visita conta.
+  await visitar(aluna, PAGINA_DO_CURSO, hora + 50 * SEGUNDO);
+  [visita] = await visitas(aluna.id);
+  assert.equal(Date.parse(visita.last_visited_at), hora + 50 * SEGUNDO, "50 s depois: grava (o motor compara a hora exata)");
+  assert.equal(Date.parse(visita.first_visited_at), hora, "a primeira visita nao muda");
 
   await visitar(aluna, PAGINA_DO_CURSO, hora + 61 * SEGUNDO);
   [visita] = await visitas(aluna.id);
-  assert.equal(Date.parse(visita.last_visited_at), hora + 61 * SEGUNDO, "61 s depois: grava");
-  assert.equal(Date.parse(visita.first_visited_at), hora, "a primeira visita nao muda");
+  assert.equal(Date.parse(visita.last_visited_at), hora + 61 * SEGUNDO, "11 s depois da ultima: grava");
 
   // Outra aluna na mesma pagina tem a propria trava.
   await visitar(alunoSemAcesso, PAGINA_DO_CURSO, hora + 62 * SEGUNDO);

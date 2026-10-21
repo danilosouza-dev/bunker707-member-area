@@ -418,3 +418,79 @@ test("retirar um passo do sino: as linhas saem e quem esperava para ali; o teste
   const teste = unwrap(await db.from("notifications").select("user_id,is_test,dedupe_key").eq("campaign_id", versao.id), "Lendo o teste");
   assert.deepEqual(teste, [{ dedupe_key: `campaign-test:${versao.id}`, is_test: true, user_id: produtor.id }]);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * Revisao da v2: aprovacao que nao pode ser contornada e a contagem dos 500
+ * ---------------------------------------------------------------------------------------------- */
+
+const noticeActions = await import("../../src/server/communications/actions.ts");
+const { emptyNoticeDraft } = await import("../../src/server/communications/schemas.ts");
+const avisoParaOProduto = (extra = {}) => ({ ...emptyNoticeDraft("inbox"), audience: quemTemOProduto, body: "Corpo do aviso de teste.", title: "Aviso com seguintes", ...extra });
+const seguinte = (title, id = randomUUID()) => ({ children: [], content: conteudo(title), id, when: { anchor: "sent", minutes: 1_440 }, who: { kind: "everyone" } });
+
+test("aguardando aprovacao: uma gravacao que o banco recusa ja cancelou o pedido (quem aprova com a versao revisada recebe 409)", async () => {
+  const outro = rascunho({ name: "Outro fluxo" });
+  ok(await salvar(produtor, outro.flow));
+
+  const { flow, ids } = rascunho({ name: "Fluxo para aprovar" });
+  const salvo = ok(await salvar(redatora, flow));
+  actAs(redatora);
+  const pedido = ok(await actions.activateFlow({ expectedUpdatedAt: salvo.updatedAt, id: salvo.id }));
+  assert.equal(pedido.situation, "pending_approval");
+
+  // Conteudo trocado + um passo de outro fluxo: o RPC recusa (422) depois do conteudo.
+  const forjado = structuredClone(flow);
+  forjado.messages[ids.primeira] = conteudo("Primeira TROCADA");
+  forjado.messages[outro.ids.primeira] = conteudo("isca");
+  forjado.nodes.push({ anchor: "previous", anchorNodeId: null, branch: null, filter: null, id: outro.ids.primeira, kind: "message", offsetMinutes: 0, parentId: ids.entrada, position: 1 });
+  const falhou = await salvar(redatora, forjado, { expectedUpdatedAt: pedido.updatedAt, id: salvo.id });
+  assert.equal(falhou.status, 422, JSON.stringify(falhou));
+
+  const noBanco = await fluxoNoBanco(salvo.id);
+  assert.equal(noBanco.status, "draft", "o pedido foi cancelado antes de qualquer conteudo mudar");
+  assert.notEqual(noBanco.updated_at, pedido.updatedAt);
+
+  actAs(produtor);
+  const aprovado = await actions.approveFlow({ expectedUpdatedAt: pedido.updatedAt, id: salvo.id });
+  assert.equal(aprovado.status, 409, JSON.stringify(aprovado));
+  assert.ok(!(await versoes(salvo.id)).some((row) => row.status === "sent"), "nada foi para o ar");
+});
+
+test("fluxo de uma notificacao aguardando aprovacao: o construtor nao grava (409) e a aprovacao leva o que foi revisado", async () => {
+  actAs(redatora);
+  const aviso = ok(await noticeActions.saveNoticeDraft({ draft: avisoParaOProduto() }));
+  const seguintes = ok(await noticeActions.saveNoticeFollowUps({ expectedNoticeUpdatedAt: aviso.updatedAt, followUps: [seguinte("Seguinte revisada")], goal: null, noticeId: aviso.id }));
+  const pedido = ok(await noticeActions.publishNotice({ expectedUpdatedAt: aviso.updatedAt, id: aviso.id }));
+  assert.equal(pedido.situation, "pending_approval");
+
+  const detalhe = await queries.getFlowDetail(seguintes.flowId, { permissions: { canPublish: false, canPublishLarge: false, canWrite: true } });
+  assert.deepEqual(detalhe.actions, ["open_notice"], "nem Editar: a notificacao aguarda aprovacao");
+  const passo = detalhe.draft.nodes.find((node) => node.kind === "message");
+  const trocado = { ...detalhe.draft, messages: { ...detalhe.draft.messages, [passo.id]: { ...detalhe.draft.messages[passo.id], title: "TROCADA DEPOIS DO PEDIDO" } } };
+  const gravado = await salvar(redatora, trocado, { expectedUpdatedAt: detalhe.updatedAt, id: seguintes.flowId });
+  assert.equal(gravado.status, 409, JSON.stringify(gravado));
+  assert.equal(gravado.error, "Salve a notificação antes de mudar as notificações seguintes.");
+  assert.equal((await fluxoNoBanco(seguintes.flowId)).status, "pending_approval");
+
+  actAs(produtor);
+  const aprovado = ok(await noticeActions.approveNotice({ expectedUpdatedAt: pedido.updatedAt, id: aviso.id }));
+  assert.equal(aprovado.situation, "sent");
+  assert.deepEqual((await versoes(seguintes.flowId)).map((row) => [row.status, row.title]), [["sent", "Seguinte revisada"]]);
+});
+
+test("notificacao ainda 'enviando' com a contagem parcial: a regra dos 500 vale para quem vai receber (editora recebe 403)", async () => {
+  actAs(produtor);
+  const aviso = ok(await noticeActions.saveNoticeDraft({ draft: avisoParaOProduto() }));
+  const publicado = ok(await noticeActions.publishNotice({ expectedUpdatedAt: aviso.updatedAt, id: aviso.id }));
+  assert.equal(publicado.situation, "sent");
+  // Envio grande aprovado pelo dono e cortado pelo orcamento do tick: 2 de 600 gravados.
+  const parcial = unwrap(
+    await db.from("campaigns").update({ approved_at: new Date().toISOString(), audience_count: 600, recipients_count: 2, status: "sending" }).eq("id", aviso.id).select("updated_at").single(),
+    "Envio parcial"
+  );
+
+  actAs(editora);
+  const seguintes = await noticeActions.saveNoticeFollowUps({ expectedNoticeUpdatedAt: parcial.updated_at, followUps: [seguinte("Seguinte grande")], goal: null, noticeId: aviso.id });
+  assert.equal(seguintes.status, 403, JSON.stringify(seguintes));
+  assert.equal(unwrap(await db.from("communication_flows").select("id").eq("source_campaign_id", aviso.id), "Fluxo do aviso").length, 0, "nenhum fluxo criado");
+});

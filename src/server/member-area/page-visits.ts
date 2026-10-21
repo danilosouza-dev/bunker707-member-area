@@ -9,7 +9,8 @@ import "server-only";
 //   acao de fluxo chama invalidateLivePopups, que ja atualiza essa tag);
 // - no "ver como" da equipe, para a equipe e num prefetch do Next (que para no loading.tsx; a conferencia
 //   do cabecalho e so por garantia);
-// - de novo para o mesmo aluno e pagina antes de 60 s (memoria do processo; um servidor so).
+// - de novo para o mesmo aluno e pagina antes de 10 s (PAGE_VISIT_THROTTLE_MS; memoria do processo; um
+//   servidor so): so absorve recarga e redirecionamento, porque o motor compara a hora exata.
 // A gravacao roda depois da resposta (after() do Next); fora de um pedido, roda na hora e fica guardada
 // para settlePageVisits() (testes de integracao, scripts). Falha vira log e nunca derruba a pagina.
 
@@ -20,7 +21,7 @@ import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getAdminAccessForUser } from "@/server/auth/session";
 import { COMMUNICATIONS_TAG } from "@/server/communications/cache";
 import { assertNoDbError, communicationsDb, describeError, isMissingCommunicationSchema } from "@/server/communications/db";
-import { isPageKey } from "./page-visit-model";
+import { isPageKey, PAGE_VISIT_THROTTLE_MS } from "./page-visit-model";
 
 export type TrackMemberPageVisitInput = {
   /** "Ver como" da equipe: nunca grava. */
@@ -32,8 +33,7 @@ export type TrackMemberPageVisitInput = {
   userId: string;
 };
 
-/** Mesma visita (aluno e pagina) so grava de novo depois disto. Bate com a folga de ±1 min do motor. */
-export const PAGE_VISIT_THROTTLE_MS = 60_000;
+export { PAGE_VISIT_THROTTLE_MS };
 const THROTTLE_MAX_ENTRIES = 10_000;
 // Fluxos ativos e pausados sao poucos; o limite so protege a consulta.
 const WATCHED_FLOWS_LIMIT = 1_000;
@@ -86,7 +86,7 @@ function isPrefetchRequest(requestHeaders: Headers) {
   return Boolean(requestHeaders.get("next-router-prefetch")) || /prefetch/i.test(requestHeaders.get("sec-purpose") ?? requestHeaders.get("purpose") ?? "");
 }
 
-/** Reserva a gravacao; false quando a ultima do mesmo aluno e pagina tem menos de 60 s. */
+/** Reserva a gravacao; false quando a ultima do mesmo aluno e pagina e mais nova que PAGE_VISIT_THROTTLE_MS. */
 function claimWriteSlot(userId: string, pageKey: string, nowMs: number) {
   const slot = `${userId}|${pageKey}`;
   const last = lastWrites.get(slot);

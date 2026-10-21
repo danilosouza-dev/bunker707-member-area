@@ -349,20 +349,34 @@ test("fluxos sem trabalho: tres consultas pequenas, nenhuma RPC e nenhum aluno l
   assert.equal(naFaixa.queries.length, 4);
 });
 
-test("aviso com seguintes ainda agendado: so mais uma leitura pequena de campaigns, nada de alunos nem de RPC", async () => {
-  const db = scriptedDb((query) => {
-    if (query.table === "communication_flows" && temFiltro(query, "eq", "origin", "notice")) {
-      return { data: [{ id: FLUXO, source_campaign_id: AVISO }], error: null };
+test("seguintes: a sondagem filtra o aviso enviado na mesma consulta (fluxos de avisos agendados nunca escondem um que saiu)", async () => {
+  // O PostgREST de verdade aplica o filtro do embed (!inner + source.status = sent): aviso agendado nao volta.
+  const db = scriptedDb(() => ({ count: 0, data: [], error: null }));
+  const result = await processFlows({ db, now: FORA_DA_FAIXA });
+
+  assert.equal(result.worked, false);
+  assert.deepEqual(db.queries.map((query) => query.table).sort(), ["communication_flow_tasks", "communication_flows", "communication_flows"], "nenhuma leitura a mais de campaigns");
+  const sonda = db.queries.find((query) => query.table === "communication_flows" && temFiltro(query, "eq", "origin", "notice"));
+  assert.match(sonda.payload, /source:campaigns!communication_flows_source_campaign_id_fkey!inner\(status\)/, "embed com a dica da FK");
+  assert.ok(temFiltro(sonda, "eq", "source.status", "sent"));
+  assert.ok(sonda.filters.some(([method, column]) => method === "order" && column === "created_at"), "os mais antigos primeiro");
+  assert.ok(temFiltro(sonda, "limit", 3), "o limite e o de fluxos por tick, depois do filtro");
+
+  // Sonda que acha um aviso enviado: a entrada roda (RPC 7.3).
+  const comEnviado = scriptedDb((query) => {
+    if (query.table === "communication_flows" && temFiltro(query, "eq", "source.status", "sent")) {
+      return { data: [{ id: FLUXO, source: { status: "sent" }, source_campaign_id: AVISO }], error: null };
+    }
+
+    if (query.op === "rpc") {
+      return { data: { backfilled: 0, done: true, entered: 1, waiting: false }, error: null };
     }
 
     return { count: 0, data: [], error: null };
   });
-  const result = await processFlows({ db, now: FORA_DA_FAIXA });
-
-  assert.equal(result.worked, false);
-  assert.deepEqual(db.queries.map((query) => query.table).sort(), ["campaigns", "communication_flow_tasks", "communication_flows", "communication_flows"]);
-  const avisos = db.queries.find((query) => query.table === "campaigns");
-  assert.ok(temFiltro(avisos, "eq", "status", "sent"));
+  const entrou = await processFlows({ db: comEnviado, now: FORA_DA_FAIXA });
+  assert.equal(entrou.entered, 1);
+  assert.equal(comEnviado.queries.find((query) => query.op === "rpc" && query.table === "communication_enroll_notice_recipients")?.args.p_flow_id, FLUXO);
 });
 
 test("as duas fases dividem os fatos do tick: alunos lidos uma vez, e as linhas do aviso citado uma vez (dois pop-ups e a entrada de um fluxo)", async () => {
@@ -607,6 +621,95 @@ test("bisseccao: uma tarefa ruim (erro 23xxx) termina sozinha como 'failed'; as 
   assert.equal(db.queries[0].args.p_max_deferrals, 7);
   assert.equal(db.queries[0].args.p_day_start, "2026-10-20T03:00:00.000Z", "dia de Sao Paulo");
   assert.equal(db.queries[0].args.p_results[0].claimed_at, tarefas[0].claimed_at, "carimbo da reserva exatamente como veio");
+});
+
+test("cada decisao leva a revision do fluxo lida com a arvore; a falha isolada pela bisseccao vai sem ela (aplica de qualquer jeito)", async () => {
+  const tarefas = [tarefaReservada(1), tarefaReservada(2)];
+  const ruim = tarefas[1].node_id;
+  const db = scriptedDb((query) => {
+    const results = query.args.p_results;
+
+    if (results.some((item) => item.node_id === ruim && item.action === "send")) {
+      return { data: null, error: { code: "23514", message: "check" } };
+    }
+
+    return { data: results.map((item) => ({ outcome: item.action, sent_notification_id: null, task_node_id: item.node_id, task_user_id: item.user_id })), error: null };
+  });
+  const decisao = { action: "send", campaignId: AVISO, children: [], deadlineAt: null, expiresAt: Date.parse("2026-10-21T15:00:00.000Z") };
+  const original = console.error;
+  console.error = () => undefined;
+
+  try {
+    await flowStore.applyFlowResults(db, { now: FORA_DA_FAIXA, results: tarefas.map((task) => ({ decision: decisao, revision: 7, task })) });
+  } finally {
+    console.error = original;
+  }
+
+  assert.deepEqual(db.queries[0].args.p_results.map((item) => item.revision), [7, 7]);
+  const falha = db.queries.at(-1).args.p_results;
+  assert.deepEqual(falha.map((item) => [item.action, item.revision]), [["finish", null]]);
+  assert.equal(flowStore.resultPayload({ decision: decisao, task: tarefas[0] }).revision, null, "sem revision: o RPC nao confere");
+});
+
+test("cache do tick: o fluxo e lido antes dos passos; fluxo esquecido (stale_version) e relido no lote seguinte", async () => {
+  const { createFlowTickCache, forgetFlows, loadFlowBatchContext } = await import("../src/server/communications/flow-facts.ts");
+  const entrada = "4e5f6071-3b1a-4c55-9d7e-2a6b8c9d0e01";
+  const tarefa = { ...tarefaReservada(1), node_id: "3d4e5f60-3b1a-4c55-9d7e-2a6b8c9d0e01" };
+  let revision = 3;
+  const db = scriptedDb((query) => {
+    if (query.table === "communication_flows") {
+      return { data: [fluxoDoConstrutor({ entry_audience: { kind: "everyone" }, revision })], error: null };
+    }
+
+    if (query.table === "communication_flow_nodes") {
+      return {
+        data: [
+          { anchor: "previous", anchor_node_id: null, branch: null, campaign_id: null, condition: null, expire_with_anchor: false, filter: null, flow_id: FLUXO, id: entrada, kind: "entry", max_wait_minutes: null, offset_minutes: 0, parent_id: null, position: 0, wait_until_true: false },
+          { anchor: "previous", anchor_node_id: null, branch: null, campaign_id: AVISO, condition: null, expire_with_anchor: false, filter: null, flow_id: FLUXO, id: tarefa.node_id, kind: "message", max_wait_minutes: null, offset_minutes: 0, parent_id: entrada, position: 0, wait_until_true: false }
+        ],
+        error: null
+      };
+    }
+
+    if (query.op === "rpc") {
+      return { data: {}, error: null };
+    }
+
+    return { count: 0, data: [], error: null };
+  });
+  const cache = createFlowTickCache();
+  const leiturasDoFluxo = () => db.queries.filter((query) => query.table === "communication_flows").length;
+
+  const [primeiro] = await loadFlowBatchContext(db, [tarefa], FORA_DA_FAIXA, cache);
+  assert.equal(primeiro.revision, 3);
+  const ordem = db.queries.map((query) => query.table).filter((table) => table === "communication_flows" || table === "communication_flow_nodes");
+  assert.deepEqual(ordem, ["communication_flows", "communication_flow_nodes"], "o fluxo antes da arvore: a revision nunca e mais nova que os passos");
+
+  revision = 4;
+  assert.equal((await loadFlowBatchContext(db, [tarefa], FORA_DA_FAIXA, cache))[0].revision, 3, "no mesmo tick, do cache");
+  assert.equal(leiturasDoFluxo(), 1);
+
+  forgetFlows(cache, [FLUXO]);
+  assert.equal((await loadFlowBatchContext(db, [tarefa], FORA_DA_FAIXA, cache))[0].revision, 4, "esquecido: relido com a arvore atual");
+  assert.equal(leiturasDoFluxo(), 2);
+});
+
+test("faixa de 15 minutos: a sondagem pega so quem nao foi conferido nesta faixa, os mais esquecidos primeiro", async () => {
+  const db = scriptedDb(() => ({ count: 0, data: [], error: null }));
+  await flowStore.probeSlotWork(db, new Date("2026-10-20T15:15:00.000Z"));
+  const [sonda] = db.queries;
+  const ors = sonda.filters.filter(([method]) => method === "or").map(([, value]) => value);
+
+  assert.equal(ors.length, 2, "as duas condicoes valem juntas (o PostgREST junta com E)");
+  assert.ok(ors[0].startsWith("goal.not.is.null,"), "objetivo, ou pode ter terminado");
+  assert.equal(ors[1], 'goal_swept_at.is.null,goal_swept_at.lt."2026-10-20T15:15:00.000Z"');
+  assert.deepEqual(
+    sonda.filters.filter(([method]) => method === "order").map(([, column, options]) => [column, options?.nullsFirst ?? null]),
+    [
+      ["goal_swept_at", true],
+      ["id", null]
+    ]
+  );
 });
 
 test("bisseccao nao engole erro de conexao ou de tempo: o lote inteiro falha (o job aparece em job_runs)", async () => {

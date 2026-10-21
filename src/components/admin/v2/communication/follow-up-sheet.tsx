@@ -32,6 +32,8 @@ type FollowUpSheetProps = {
   /** Prefixo unico dos ids dos campos (o editor ja usa "aviso-..."). */
   idPrefix: string;
   level: FollowUpLevel;
+  /** No relatorio da notificacao enviada: as mudancas valem com "Aplicar alterações" (nao ha rascunho). */
+  live?: boolean;
   now: number;
   onAudioBusyChange: (reason: string | null) => void;
   onBlurField: (key: string) => void;
@@ -61,6 +63,7 @@ export function FollowUpSheet({
   errorFor,
   idPrefix,
   level,
+  live = false,
   now,
   onAudioBusyChange,
   onBlurField,
@@ -84,7 +87,7 @@ export function FollowUpSheet({
       footer={
         <div className="flex w-full flex-wrap items-center justify-between gap-3">
           <p aria-live="polite" className="text-xs leading-5 text-[var(--text-secondary)]">
-            {audioBusy ?? (imageUpload ? "Enviando a imagem…" : "As mudanças ficam no rascunho até você salvar.")}
+            {audioBusy ?? (imageUpload ? "Enviando a imagem…" : live ? FOLLOW_UPS_COPY.sheetLiveNote : FOLLOW_UPS_COPY.sheetDraftNote)}
           </p>
           <Button className="px-4" disabled={audioBusy !== null || imageUpload !== null} onClick={() => onOpenChange(false)} type="button">
             {FOLLOW_UPS_COPY.done}

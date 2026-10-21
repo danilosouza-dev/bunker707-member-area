@@ -296,7 +296,9 @@ export function FollowUpCard({
   const count = useFollowUpCount({ enabled: countEnabled, filter: who, noticeId, parentNodeId: parent.level === "main" ? null : parent.nodeId, parentSent });
   const sentence = whenSentence(item.when, parent);
   const minutesError = errorFor("when.minutes") ?? (sentence?.tone === "error" ? sentence.text : undefined);
-  const whoError = errorFor("who");
+  // Escolha que a notificacao de cima nao oferece mais (o audio, o botao ou o texto saiu): aparece ja,
+  // continua marcada para o produtor ver qual era, e o editor nao grava ate trocar.
+  const whoError = errorFor("who") ?? (choices.includes(item.choice) ? undefined : FOLLOW_UPS_COPY.staleChoice);
   const sender = previewSender(item.content.sender, options.senders);
   const productOptions = options.products.map((product) => ({ label: product.title, value: product.id }));
   const productName = (productId: string | null) =>

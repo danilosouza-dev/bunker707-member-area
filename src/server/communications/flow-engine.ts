@@ -21,7 +21,7 @@ import { collectMessageCampaignIds } from "./audience-model";
 import { popupRefreshDueBefore } from "./campaign-model";
 import { describeError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
 import { createFactsLoader, type FactsLoader } from "./facts-loader";
-import { createFlowTickCache, loadFlowBatchContext } from "./flow-facts";
+import { createFlowTickCache, forgetFlows, loadFlowBatchContext } from "./flow-facts";
 import { childTasksOf, decideFlowTask, entryOf, FLOW_LIMITS, type FlowDecision } from "./flow-model";
 import {
   applyFlowResults,
@@ -178,15 +178,15 @@ export async function processFlows(input: {
       await runDueTasks({ db, now, result, stop });
     }
 
-    // 5 e 6. Uma vez por faixa: varredura do objetivo e fim automatico.
+    // 5 e 6. Uma vez por faixa: varredura do objetivo e fim automatico. goal_swept_at marca o fluxo como
+    // conferido nesta faixa (com ou sem objetivo): quem o orcamento deixou de fora vem primeiro na proxima.
     for (const flow of slotFlows) {
       if (stop()) {
         break;
       }
 
-      if (flow.goal && (!flow.goal_swept_at || Date.parse(flow.goal_swept_at) < slot.getTime())) {
+      if (flow.goal) {
         result.woken += await wakeFlowTasks(db, { flowId: flow.id, limit: FLOW_LIMITS.goalSweepPerSlot, now });
-        await updateFlowJobColumns(db, flow.id, { goal_swept_at: slot.toISOString() });
       }
 
       if (await mayFinish(db, flow, now)) {
@@ -196,6 +196,8 @@ export async function processFlows(input: {
           },
           (error: unknown) => console.error(`[comunicacao] fluxo ${flow.id} nao concluido: ${describeError(error)}`)
         );
+      } else {
+        await updateFlowJobColumns(db, flow.id, { goal_swept_at: slot.toISOString() });
       }
     }
   } catch (error) {
@@ -236,10 +238,10 @@ async function enterBuilderFlow(input: { budget: number; db: CommunicationsDb; f
     const tasks = entry && !baseline ? childTasksOf(entry, null, tree, { completedAt: nowMs, expiresAt: () => null, sentAt: () => null }) : [];
     const entries: FlowEntry[] = batch.map((userId) => ({ baseline, enteredAt: nowMs, tasks, userId }));
 
-    active = await enrollFlow(db, flow.id, entries);
+    active = await enrollFlow(db, flow.id, entries, flow.revision);
 
     if (active === 0 && !baseline) {
-      // Fluxo pausado, encerrado ou excluido entre a avaliacao e agora: ninguem entrou.
+      // Fluxo pausado, encerrado, excluido ou gravado de novo entre a avaliacao e agora: ninguem entrou.
       return { active: 0, written: batch.length };
     }
   }
@@ -274,7 +276,7 @@ async function runDueTasks(input: { db: CommunicationsDb; now: Date; result: Flo
 
     try {
       const items = await loadFlowBatchContext(db, tasks, now, cache);
-      decisions = items.map((item) => ({ decision: item.input ? decideFlowTask(item.input) : MISSING_STEP, task: item.task }));
+      decisions = items.map((item) => ({ decision: item.input ? decideFlowTask(item.input) : MISSING_STEP, revision: item.revision, task: item.task }));
     } catch (error) {
       // Nada foi aplicado: as reservas voltam para a fila e a tentativa e devolvida (so queda de tick conta).
       console.error(`[comunicacao] lote de ${tasks.length} tarefa(s) dos fluxos devolvido: ${describeError(error)}`);
@@ -290,7 +292,15 @@ async function runDueTasks(input: { db: CommunicationsDb; now: Date; result: Flo
       return;
     }
 
-    tally(result, await applyFlowResults(db, { now, results: decisions }));
+    const outcomes = await applyFlowResults(db, { now, results: decisions });
+    tally(result, outcomes);
+
+    // Fluxo gravado no meio do tick (7.4 devolveu stale_version): o proximo lote rele a arvore atual.
+    const flowOf = new Map(tasks.map((task) => [`${task.node_id}|${task.user_id}`, task.flow_id]));
+    forgetFlows(
+      cache,
+      outcomes.filter((item) => item.outcome === "stale_version").map((item) => flowOf.get(`${item.nodeId}|${item.userId}`) ?? "")
+    );
 
     if (tasks.length < FLOW_LIMITS.batchSize) {
       return;

@@ -6,7 +6,7 @@ import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
 // Guarda das visitas de pagina (Comunicacao v2, docs/23 §5.2; docs/18 §1.2). O comportamento (so pagina
-// acompanhada, nunca equipe, "ver como" nem prefetch, 60 s, a rota do beacon) esta em
+// acompanhada, nunca equipe, "ver como" nem prefetch, 10 s, a rota do beacon) esta em
 // tests/integration/visitas-de-pagina.test.mjs, que chama trackMemberPageVisit direto: as paginas .tsx
 // nao carregam no Node, entao aqui se confere que cada uma chama o registro no lugar certo.
 // - as 10 paginas da area do aluno chamam trackMemberPageVisit uma vez, depois do notFound() e antes de

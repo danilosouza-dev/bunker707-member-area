@@ -44,6 +44,7 @@ import {
   followUpPreviewOptions,
   followUpsStateKey,
   followUpsToSave,
+  followUpChoiceErrors,
   followUpErrorAt,
   followUpTreeErrors,
   goalOfStopLine,
@@ -338,7 +339,11 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     const drafts = followUpsToSave("inbox", followUps.items, mainFollowUpParent);
     const parsed = saveNoticeFollowUpsSchema.safeParse({ ...FOLLOW_UPS_CHECK_INPUT, followUps: drafts, goal: goalOfStopLine(followUps.stop) });
 
-    return { ...followUpTreeErrors({ drafts, entryId, notice: draft }), ...(parsed.success ? {} : noticeErrorsFrom(parsed.error.issues)) };
+    return {
+      ...followUpTreeErrors({ drafts, entryId, notice: draft }),
+      ...followUpChoiceErrors(followUps.items, mainFollowUpParent),
+      ...(parsed.success ? {} : noticeErrorsFrom(parsed.error.issues))
+    };
   }, [draft, entryId, followUps, followUpsEditable, mainFollowUpParent]);
   const audienceKey = JSON.stringify(normalizeAudience(draft.audience));
   const audienceValid = useMemo(() => audienceDefinitionSchema.safeParse(JSON.parse(audienceKey)).success, [audienceKey]);
@@ -546,13 +551,20 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }
 
     const version = { id: result.data.id, status: result.data.status, updatedAt: result.data.updatedAt };
+    const movedFlowVersion = result.data.flowUpdatedAt ?? null;
     setSavedVersion(version);
     setSaved(canonicalNoticeDraft(sent));
+
+    if (movedFlowVersion) {
+      setFlowVersion((current) => ({ ...current, updatedAt: movedFlowVersion }));
+    }
 
     // v2: logo depois do aviso, as seguintes (pop-up grava "followUps: []": o fluxo do aviso sai).
     if (followUpsDirty) {
       const savedFollowUps = await saveNoticeFollowUps({
-        expectedFlowUpdatedAt: flowVersion.updatedAt ?? undefined,
+        // Salvar o aviso agendado ou aguardando aprovacao tambem mudou o fluxo (voltou a rascunho): vale a
+        // versao nova. null = esta tela nao viu fluxo nenhum (outra tela que criou um no meio da 409).
+        expectedFlowUpdatedAt: movedFlowVersion ?? flowVersion.updatedAt,
         expectedNoticeUpdatedAt: version.updatedAt,
         followUps: followUpsToSave(draft.kind, followUps.items, mainFollowUpParent),
         goal: draft.kind === "inbox" ? goalOfStopLine(followUps.stop) : null,
@@ -562,8 +574,10 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       if (!savedFollowUps.ok) {
         const fieldErrors = noticeErrorsFromAction(savedFollowUps.fieldErrors);
         setServerErrors(fieldErrors);
-        // O aviso ficou gravado: o banner diz que as seguintes nao, e o que foi escrito continua na tela.
-        showFailure({ message: FOLLOW_UPS_COPY.partialSaveText, status: savedFollowUps.status, title: FOLLOW_UPS_COPY.partialSaveTitle });
+        // O aviso ficou gravado: o banner diz que as seguintes nao, e o que foi escrito continua na tela. Sem
+        // erro de campo (409, 403...), a frase do servidor diz o que fazer.
+        const message = Object.keys(fieldErrors).length > 0 ? FOLLOW_UPS_COPY.partialSaveText : savedFollowUps.error;
+        showFailure({ message, status: savedFollowUps.status, title: FOLLOW_UPS_COPY.partialSaveTitle });
         focusFirstError(fieldErrors);
         return null;
       }

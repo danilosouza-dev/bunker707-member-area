@@ -6,7 +6,8 @@
 >
 > **Atualizacao de 21/10/2026:** a Comunicacao v2 traz a migracao `202610200002` (com a RPC 7.15 e as correcoes
 > M1 a M4), que precisa estar aplicada antes do deploy que a usa: no Supabase da nuvem antes do merge na `dev`;
-> na producao o `deploy-membros` aplica sozinho. Passos na secao 9.
+> na producao o `deploy-membros` aplica sozinho. Passos na secao 9. As correcoes da revisao vem na
+> `202610210001` (a 0002 ja esta aplicada na nuvem de teste e nao muda): mesma regra, secao 9.1.
 >
 > **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
 > `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a
@@ -267,3 +268,25 @@ publica a `dev` sozinha no merge):
 
 **Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam as migracoes novas
 antes de trocar o app (`deploy.sh`, docs/20 §9). Depois, a rodada do `carga` com um fluxo no ar (docs/20 §12.1).
+
+### 9.1 Correcoes da revisao: migracao `202610210001` (21/10/2026)
+
+A 0002 ja foi aplicada no Supabase da nuvem de teste e **nao muda mais**. O que a revisao corrigiu no banco
+vem em `supabase/migrations/202610210001_communication_v2_fixes.sql`, idempotente, sem `drop` e sem `delete`:
+
+1. coluna `communication_flow_nodes.born_first_level` + gatilho `set_communication_flow_nodes_first_level`
+   (passo criado como filho da entrada);
+2. 7.1 `communication_claim_flow_tasks`: a tarefa presa que vira falha fecha a passagem sem nada aberto;
+3. 7.2 `communication_enroll_flow`: confere a `revision` de cada entrada;
+4. 7.3 `communication_enroll_notice_recipients`: complemento so de passo que nasceu de primeiro nivel, criado
+   depois da passagem (nunca o passo que subiu de nivel para quem foi pelo outro caminho);
+5. 7.4 `communication_apply_flow_results`: confere a `revision` de cada decisao (`stale_version`);
+6. permissoes e descricoes (mesmas assinaturas).
+
+Ambiente de teste: secoes 1 a 6 pelo MCP do Supabase (`apply_migration`, nome `communication_v2_fixes`), de uma
+vez ou em partes, **antes** do merge da correcao na `dev` (o app novo manda `revision`; a migracao sozinha nao
+atrapalha o app anterior, que nao manda e nao e conferido). Conferir:
+`select tgname from pg_trigger where tgrelid = 'public.communication_flow_nodes'::regclass;` (com
+`set_communication_flow_nodes_first_level`) e `list_migrations` com `202610210001`. Passos ja existentes ficam com
+`born_first_level = false` (o complemento so vale para seguintes criadas depois de aplicar). Producao: nada
+manual (o `deploy-membros` aplica).

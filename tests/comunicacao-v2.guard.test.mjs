@@ -161,3 +161,57 @@ test("guarda: o motor dos fluxos nao muda o contrato dos jobs (tipo Job e ordem 
   assert.match(jobTypeBody, /\brun\(ctx: JobContext\): Promise<void>;/);
   assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob\];/);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * 202610210001 (correcoes da revisao): a 0002 ja esta aplicada na nuvem de teste e nunca muda; o que
+ * muda no banco vem na 0003, aplicavel pelo MCP secao por secao.
+ * ---------------------------------------------------------------------------------------------- */
+
+const V2_SHA256 = "8731688444b80cba7d94849908cf460496cb9975d28a8e2e73b89280b7d1c496";
+const fixes = await readFile(new URL("../supabase/migrations/202610210001_communication_v2_fixes.sql", import.meta.url), "utf8");
+const fixFunctions = functionsOf(fixes);
+
+test("guarda: a 0002 (ja aplicada na nuvem de teste) nao muda; as correcoes vem na 202610210001", () => {
+  assert.equal(createHash("sha256").update(v2).digest("hex"), V2_SHA256);
+});
+
+test("guarda: 202610210001 aplicavel em partes pelo MCP (sem drop, sem delete, gatilho com create or replace)", () => {
+  assert.doesNotMatch(fixes, /\bdrop\s+/i, "nada de drop");
+  assert.doesNotMatch(fixes, /\bdelete\s+from\b/i, "nada de delete");
+  assert.doesNotMatch(fixes, /\bcreate\s+trigger\b/i, "gatilho so com create or replace trigger");
+  assert.match(fixes, /alter table public\.communication_flow_nodes add column if not exists born_first_level boolean not null default false;/);
+  assert.match(fixes, /create or replace trigger set_communication_flow_nodes_first_level\s+before insert on public\.communication_flow_nodes/);
+  assert.doesNotMatch(fixes, /\bgrant\b[^;]*\bto\s+(public|anon|authenticated)\b/i);
+});
+
+test("guarda: 202610210001 troca as RPCs com a mesma assinatura, so para service_role, security invoker", () => {
+  const rpcs = fixFunctions.filter((fn) => fn.returns !== "trigger");
+  const triggers = fixFunctions.filter((fn) => fn.returns === "trigger");
+
+  assert.deepEqual(rpcs.map((fn) => fn.name).sort(), [
+    "communication_apply_flow_results",
+    "communication_claim_flow_tasks",
+    "communication_enroll_flow",
+    "communication_enroll_notice_recipients"
+  ]);
+  assert.deepEqual(triggers.map((fn) => fn.name), ["mark_flow_node_first_level"]);
+  assert.ok(fixes.includes("revoke all on function public.mark_flow_node_first_level() from public, anon, authenticated, service_role;"));
+
+  for (const fn of rpcs) {
+    assert.ok(functions.some((old) => old.signature === fn.signature), `mesma assinatura da 0002: ${fn.signature}`);
+    assert.ok(fixes.includes(`revoke all on function public.${fn.signature} from public, anon, authenticated;`), `revoke ${fn.signature}`);
+    assert.ok(fixes.includes(`grant execute on function public.${fn.signature} to service_role;`), `grant ${fn.signature}`);
+
+    const start = fixes.indexOf(`create or replace function public.${fn.name}(`);
+    const header = fixes.slice(start, fixes.indexOf("$$", start));
+    assert.match(header, /security invoker/, fn.name);
+    assert.match(header, /set search_path = pg_catalog, public/, fn.name);
+  }
+
+  // O que cada correcao promete, na propria funcao.
+  const body = (name) => fixFunctions.find((fn) => fn.name === name).body;
+  assert.equal((body("communication_enroll_notice_recipients").match(/c\.born_first_level and c\.created_at > (fr\.created_at|m\.run_created_at)/g) ?? []).length, 3, "complemento: missing, added e v_more");
+  assert.match(body("communication_apply_flow_results"), /r\.revision is not null and r\.revision is distinct from v_flow\.revision/);
+  assert.match(body("communication_enroll_flow"), /\(e->>'revision'\)::integer is distinct from v_revision/);
+  assert.match(body("communication_claim_flow_tasks"), /update public\.communication_flow_runs fr\s+set status = 'done'/);
+});

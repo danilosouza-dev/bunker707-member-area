@@ -66,7 +66,17 @@ import {
 } from "./campaign-model";
 import { assertNoDbError, communicationsDb, CommunicationError, NoticeFieldError, type CommunicationsDb } from "./db";
 import { dispatchInboxCampaign, refreshPopupDeliveries } from "./dispatch";
-import { entryOf, followUpsFromTree, treeFromFollowUps, validateFlowGoal, validateFlowTree, type FlowMessageMeta, type FlowNode, type FlowStatus } from "./flow-model";
+import {
+  entryOf,
+  followUpsFromTree,
+  treeFromFollowUps,
+  validateFlowGoal,
+  validateFlowTree,
+  watchedPageKeysOf,
+  type FlowMessageMeta,
+  type FlowNode,
+  type FlowStatus
+} from "./flow-model";
 import {
   previewFollowUpAudienceSchema,
   saveNoticeFollowUpsSchema,
@@ -131,7 +141,16 @@ const FLOW_MESSAGE = "Esta notificação faz parte de um fluxo. Abra o fluxo par
 const SENDER_NOT_ON_TEAM = "Escolha alguém da equipe.";
 const HOUR_MS = 3_600_000;
 
-export type SavedNotice = { id: string; status: CampaignStatus; updatedAt: string };
+export type SavedNotice = {
+  /**
+   * A versao nova do fluxo das seguintes quando salvar o aviso tambem mudou o fluxo (agendado ou aguardando
+   * aprovacao volta a rascunho junto); null = nao mudou. O editor manda esta para saveNoticeFollowUps.
+   */
+  flowUpdatedAt?: string | null;
+  id: string;
+  status: CampaignStatus;
+  updatedAt: string;
+};
 export type PublishedNotice = {
   audienceCount: number;
   id: string;
@@ -213,22 +232,37 @@ async function assertSenderForPublish(db: CommunicationsDb, row: CampaignRow) {
 }
 
 /**
- * Notificacao que saiu ou vai sair (enviada, enviando ou agendada): avisa quem envia por e-mail. v2: quem
- * envia alguma notificacao seguinte tambem (`followUpSenders`), um e-mail por pessoa, com a chave do aviso.
+ * Notificacao que saiu ou vai sair (enviada, enviando ou agendada): avisa quem envia por e-mail (chave do
+ * aviso). v2: quem envia alguma notificacao seguinte recebe o e-mail do fluxo (docs/23 §1.6: chave
+ * sent-as:flow:<fluxo>:<pessoa>, com o nome do fluxo), nunca o do aviso, que diria que a pessoa mandou a
+ * notificacao principal para todos com a foto dela. Quem envia as duas recebe so o do aviso.
  */
-async function notifyNoticeSenders(db: CommunicationsDb, row: CampaignRow, published: PublishedNotice, actorId: string, followUpSenders: readonly string[] = []) {
+async function notifyNoticeSenders(
+  db: CommunicationsDb,
+  row: CampaignRow,
+  published: PublishedNotice,
+  actorId: string,
+  followUps: { flow: FlowRow; senders: readonly string[] } | null = null
+) {
   if (row.kind !== "inbox" || !["scheduled", "sending", "sent"].includes(published.situation)) {
     return;
   }
 
+  const count = published.recipients ?? published.audienceCount;
+  const describe = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
   // Melhor esforco: o aviso ja saiu; uma falha aqui so vai para o log.
-  await notifySendersOnBehalf(db, {
-    actorId,
-    campaignId: row.id,
-    count: published.recipients ?? published.audienceCount,
-    senders: [row.sender_user_id, ...followUpSenders],
-    title: row.title
-  }).catch((error: unknown) => console.error(`[comunicacao] "enviada em seu nome" de ${row.id} nao agendado: ${error instanceof Error ? error.message : String(error)}`));
+  await notifySendersOnBehalf(db, { actorId, campaignId: row.id, count, senders: [row.sender_user_id], title: row.title }).catch((error: unknown) =>
+    console.error(`[comunicacao] "enviada em seu nome" de ${row.id} nao agendado: ${describe(error)}`)
+  );
+
+  const followUpSenders = (followUps?.senders ?? []).filter((id) => id !== row.sender_user_id);
+
+  if (followUps && followUpSenders.length > 0) {
+    await notifySendersOnBehalf(db, { actorId, count, flowId: followUps.flow.id, senders: followUpSenders, title: followUps.flow.name }).catch((error: unknown) =>
+      console.error(`[comunicacao] "enviada em seu nome" do fluxo ${followUps.flow.id} nao agendado: ${describe(error)}`)
+    );
+  }
 }
 
 /** A tela leu outra versao (updated_at) do que esta no banco agora: 409 antes de contar ou gravar. */
@@ -385,9 +419,12 @@ function noticeFlowName(title: string) {
   return name.length <= FLOW_NAME_MAX ? name : `Seguintes de “${clean.slice(0, FLOW_NAME_MAX - 16).trimEnd()}…”`;
 }
 
-/** Quantos receberam a notificacao (a regra dos 500 das seguintes, docs/23 §2.9). */
+/**
+ * Quantos receberam ou vao receber a notificacao (a regra dos 500 das seguintes, docs/23 §2.9). O maior dos
+ * dois: num envio cortado pelo orcamento do tick (ainda "sending"), recipients_count e so o parcial.
+ */
 function noticeRecipientsOf(row: CampaignRow) {
-  return row.recipients_count ?? row.audience_count ?? 0;
+  return Math.max(row.recipients_count ?? 0, row.audience_count ?? 0);
 }
 
 /** O fluxo das seguintes do aviso, so a linha (sem os passos). */
@@ -505,6 +542,25 @@ async function followUpsForPublish(db: CommunicationsDb, row: CampaignRow): Prom
     if (!state.onTeam) {
       throw new CommunicationError(`${state.name ?? "A pessoa escolhida"} não está mais na equipe. Escolha quem envia.`, 422);
     }
+  }
+
+  // Paginas acompanhadas com o botao do aviso de agora: trocar o botao depois de gravar as seguintes (ou
+  // seguintes feitas so no construtor) nao re-grava o fluxo, e a visita a pagina nova nunca seria gravada
+  // ("não visitou a página do botão" valeria para todos).
+  const watched = watchedPageKeysOf(loaded.tree, goal, metas, row.cta_href);
+  const saved = [...(loaded.flow.watched_page_keys ?? [])].sort();
+
+  if (JSON.stringify([...watched].sort()) !== JSON.stringify(saved)) {
+    const { data, error } = await db
+      .from("communication_flows")
+      .update({ watched_page_keys: watched })
+      .eq("id", loaded.flow.id)
+      .is("deleted_at", null)
+      .select(FLOW_COLUMNS)
+      .maybeSingle();
+    assertNoDbError(error, "Comunicacao: paginas acompanhadas das seguintes");
+
+    return { flow: (data as FlowRow | null) ?? loaded.flow, senders };
   }
 
   return { flow: loaded.flow, senders };
@@ -625,8 +681,12 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     }
 
     // v2: agendado ou aguardando aprovacao voltou a rascunho; o fluxo das seguintes volta junto (nada saiu).
+    // A versao nova do fluxo volta para o editor gravar as seguintes logo em seguida sem 409.
+    let flowUpdatedAt: string | null = null;
+
     if (!live && current.status !== "draft") {
-      await moveNoticeFlow(db, current.id, { actorId: user.id, from: ["active", "pending_approval"], now, to: "draft" });
+      const moved = await moveNoticeFlow(db, current.id, { actorId: user.id, from: ["active", "pending_approval"], now, to: "draft" });
+      flowUpdatedAt = moved?.updated_at ?? null;
     }
 
     await recordAudit(db, {
@@ -638,7 +698,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     });
     revalidateNotices(saved.id);
 
-    return { id: saved.id, status: saved.status, updatedAt: saved.updated_at };
+    return { flowUpdatedAt, id: saved.id, status: saved.status, updatedAt: saved.updated_at };
   });
 }
 
@@ -750,7 +810,7 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
         situation: published.situation
       }
     });
-    await notifyNoticeSenders(db, row, published, user.id, followUps?.senders);
+    await notifyNoticeSenders(db, row, published, user.id, followUps);
     revalidateNotices(row.id);
 
     return published;
@@ -807,7 +867,7 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
         situation: published.situation
       }
     });
-    await notifyNoticeSenders(db, row, published, user.id, followUps?.senders);
+    await notifyNoticeSenders(db, row, published, user.id, followUps);
     revalidateNotices(row.id);
 
     return published;
@@ -1212,6 +1272,29 @@ async function newEntryId(db: CommunicationsDb, drafts: readonly FollowUpDraft[]
   return crypto.randomUUID();
 }
 
+/**
+ * Quem envia cada seguinte esta na equipe agora (400 no campo "Quem envia" da seguinte, como no aviso e no
+ * construtor). Depois do envio a versao ja sai "sent": sem isto, um id qualquer iria para o sino.
+ */
+async function assertFollowUpSenders(db: CommunicationsDb, drafts: readonly FollowUpDraft[]) {
+  const paths = followUpPaths(drafts);
+  const senders = Object.entries(contentsOfDrafts(drafts)).flatMap(([nodeId, content]) => (content.sender ? [[nodeId, content.sender.userId] as const] : []));
+
+  if (senders.length === 0) {
+    return;
+  }
+
+  const { data, error } = await db.from("admin_roles").select("user_id").in("user_id", Array.from(new Set(senders.map(([, userId]) => userId))));
+  assertNoDbError(error, "Comunicacao: equipe de quem envia as seguintes");
+
+  const team = new Set(((data ?? []) as { user_id: string }[]).map((row) => row.user_id));
+  const outside = senders.find(([, userId]) => !team.has(userId));
+
+  if (outside) {
+    throw new NoticeFieldError(`${paths.get(outside[0]) ?? "followUps"}.content.sender`, SENDER_NOT_ON_TEAM);
+  }
+}
+
 /** A conferencia da arvore (a mesma de saveFlowTree), com o erro no campo do cartao ("followUps.0.when.minutes"). */
 function assertFollowUpTree(input: { drafts: readonly FollowUpDraft[]; entryId: string; goal: AudienceDefinition | null; nodes: FlowNode[]; notice: CampaignRow }) {
   const metas: Record<string, FlowMessageMeta> = { [input.entryId]: messageMetaOfRow(input.notice) };
@@ -1275,7 +1358,14 @@ export async function saveNoticeFollowUps(input: SaveNoticeFollowUpsInput): Prom
       throw new CommunicationError(loaded.flow.ended_reason === "finished" ? FOLLOW_UPS_GONE : FOLLOW_UPS_WITHDRAWN, 409);
     }
 
-    if (data.expectedFlowUpdatedAt && (!loaded || !isSameVersion(data.expectedFlowUpdatedAt, loaded.flow.updated_at))) {
+    // A versao do fluxo lida pela tela; null = a tela nao viu fluxo nenhum (outra tela criou um no meio:
+    // gravar por cima tiraria as seguintes dela em silencio).
+    const flowChanged =
+      data.expectedFlowUpdatedAt === null
+        ? loaded !== null
+        : Boolean(data.expectedFlowUpdatedAt) && (!loaded || !isSameVersion(data.expectedFlowUpdatedAt as string, loaded.flow.updated_at));
+
+    if (flowChanged) {
       throw new CommunicationError(FLOW_CHANGED_MESSAGE, 409);
     }
 
@@ -1319,6 +1409,7 @@ export async function saveNoticeFollowUps(input: SaveNoticeFollowUpsInput): Prom
     const goal = data.goal ? stopGoalDefinition(data.goal.productId) : savedGoal && stopLineOfGoal(savedGoal).kind === "other" ? savedGoal : null;
 
     assertFollowUpTree({ drafts, entryId, goal, nodes, notice });
+    await assertFollowUpSenders(db, drafts);
 
     const previousSenders = new Set<string>(notice.sender_user_id ? [notice.sender_user_id] : []);
 

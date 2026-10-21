@@ -250,9 +250,12 @@ test("enrollFlow num fluxo encerrado depois da avaliacao: ninguem entra (0 passa
   const { flow, ids } = await fluxoDeDuas({ now });
   await store.changeFlowState(db, { actorId: produtor.id, expectedUpdatedAt: flow.updated_at, flowId: flow.id, now: new Date(now), to: "ended" });
 
-  const entered = await store.enrollFlow(db, flow.id, [
-    { baseline: false, enteredAt: now, tasks: [{ anchorAt: now, deadlineAt: null, dueAt: now, nodeId: ids.primeira }], userId: aluna.id }
-  ]);
+  const entered = await store.enrollFlow(
+    db,
+    flow.id,
+    [{ baseline: false, enteredAt: now, tasks: [{ anchorAt: now, deadlineAt: null, dueAt: now, nodeId: ids.primeira }], userId: aluna.id }],
+    flow.revision
+  );
 
   assert.equal(entered, 0);
   assert.equal((await passagens(flow.id)).length, 0);
@@ -304,8 +307,10 @@ test("condicao com os fatos da notificacao: quem abriu vai pelo Sim, quem nao ab
 test("'esperar ate ser Sim' confere a cada 15 minutos e, no fim da espera, segue pelo Nao", async () => {
   const now = meioDia(8);
   const ids = { cond: randomUUID(), entrada: randomUUID(), nao: randomUUID(), primeira: randomUUID() };
+  // "clicou no botão" so vale para notificacao com botao (a arvore recusa a regra que ninguem satisfaz).
+  const comBotao = { cta: { href: "/minhas-compras", label: "Ver", target: "same_tab" } };
   const saved = await gravar({
-    contents: { [ids.primeira]: conteudo("Primeira"), [ids.nao]: conteudo("Não clicou") },
+    contents: { [ids.primeira]: conteudo("Primeira", comBotao), [ids.nao]: conteudo("Não clicou") },
     nodes: [
       entrada(ids.entrada),
       passo({ id: ids.primeira, parentId: ids.entrada }),
@@ -1004,4 +1009,290 @@ test("fim automatico do fluxo de aviso: so depois que todas as linhas do aviso d
 
   await tick(meioDia(32) + 180 * MIN);
   assert.deepEqual([(await fluxo(flow.id)).status, (await fluxo(flow.id)).ended_reason], ["ended", "finished"]);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Revisao da v2: complemento das seguintes, sondagens, versao do lote e tarefas presas
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Aviso ja enviado (1 h antes de `now`) com uma linha no sino para cada aluno, 2 dias de validade. */
+async function avisoEnviadoPara(now, userIds, title = "Principal") {
+  const aviso = unwrap(
+    await db
+      .from("campaigns")
+      .insert({ audience: { kind: "everyone" }, body: "", created_by: produtor.id, kind: "inbox", sent_at: new Date(now - HORA).toISOString(), status: "sent", title, updated_by: produtor.id, validity_minutes: 4_320 })
+      .select("id")
+      .single(),
+    "Aviso de origem"
+  );
+
+  for (const userId of userIds) {
+    unwrap(
+      await db.from("notifications").insert({
+        campaign_id: aviso.id,
+        created_at: new Date(now - HORA).toISOString(),
+        dedupe_key: `campaign:${aviso.id}`,
+        expires_at: new Date(now + 2 * DIA).toISOString(),
+        kind: "notice",
+        user_id: userId
+      }),
+      "Linha do aviso"
+    );
+  }
+
+  return aviso;
+}
+
+function gravarSeguintes({ aviso, contents, expectedUpdatedAt, flowId, nodes, now }) {
+  return store.saveFlowTree(db, {
+    actorId: produtor.id,
+    contents,
+    expectedUpdatedAt,
+    flow: { goal: null, name: "Seguintes de teste", origin: "notice", sourceCampaignId: aviso.id },
+    flowId,
+    now: new Date(now),
+    tree: { nodes, origin: "notice" }
+  });
+}
+
+test("seguinte nova num aviso enviado: o passo que subiu de nivel (condicao removida) nao vai para quem foi pelo outro caminho; a nova vai para todos", async () => {
+  const now = meioDia(41);
+  const aviso = await avisoEnviadoPara(now, [aluna.id, aluno.id]);
+  const abriuEm = new Date(now - 30 * MIN).toISOString();
+  unwrap(await db.from("notifications").update({ opened_at: abriuEm, read_at: abriuEm, seen_at: abriuEm }).eq("campaign_id", aviso.id).eq("user_id", aluna.id), "A aluna abriu");
+
+  const ids = { cond: randomUUID(), entrada: randomUUID(), nao: randomUUID(), nova: randomUUID(), sim: randomUUID(), simDepois: randomUUID() };
+  const contents = { [ids.sim]: conteudo("Sim"), [ids.nao]: conteudo("Não"), [ids.simDepois]: conteudo("Sim, depois"), [ids.nova]: conteudo("Nova") };
+  const saved = await gravarSeguintes({
+    aviso,
+    contents: { [ids.sim]: contents[ids.sim], [ids.nao]: contents[ids.nao] },
+    nodes: [
+      entrada(ids.entrada),
+      passo({ condition: regras(fez("opened", ids.entrada)), id: ids.cond, kind: "condition", offsetMinutes: 5, parentId: ids.entrada }),
+      passo({ branch: "yes", id: ids.sim, parentId: ids.cond }),
+      passo({ branch: "no", id: ids.nao, parentId: ids.cond })
+    ],
+    now
+  });
+  const flow = await ativar(saved.flow, now);
+  await tick(now);
+  await tick(now + 10 * MIN);
+  assert.deepEqual(quem(await linhas({ flow_node_id: ids.sim })), [aluna.id], "so quem abriu vai pelo Sim");
+  assert.deepEqual(quem(await linhas({ flow_node_id: ids.nao })), [aluno.id], "so quem nao abriu vai pelo Nao");
+
+  // No ar: a condicao ganha outro passo no Sim (nasce embaixo da condicao, depois de todos entrarem)...
+  await gravarSeguintes({
+    aviso,
+    contents: { [ids.sim]: contents[ids.sim], [ids.nao]: contents[ids.nao], [ids.simDepois]: contents[ids.simDepois] },
+    expectedUpdatedAt: (await fluxo(flow.id)).updated_at,
+    flowId: flow.id,
+    nodes: [
+      entrada(ids.entrada),
+      passo({ condition: regras(fez("opened", ids.entrada)), id: ids.cond, kind: "condition", offsetMinutes: 5, parentId: ids.entrada }),
+      passo({ branch: "yes", id: ids.sim, parentId: ids.cond }),
+      passo({ branch: "yes", id: ids.simDepois, parentId: ids.cond, position: 1 }),
+      passo({ branch: "no", id: ids.nao, parentId: ids.cond })
+    ],
+    now: now + 15 * MIN
+  });
+
+  // ...e depois a condicao sai mantendo o Sim (os dois passos sobem) e entra uma seguinte nova de primeiro nivel.
+  await gravarSeguintes({
+    aviso,
+    contents: { [ids.sim]: contents[ids.sim], [ids.simDepois]: contents[ids.simDepois], [ids.nova]: contents[ids.nova] },
+    expectedUpdatedAt: (await fluxo(flow.id)).updated_at,
+    flowId: flow.id,
+    nodes: [
+      entrada(ids.entrada),
+      passo({ id: ids.sim, parentId: ids.entrada }),
+      passo({ id: ids.simDepois, parentId: ids.entrada, position: 1 }),
+      passo({ id: ids.nova, offsetMinutes: 60, parentId: ids.entrada, position: 2 })
+    ],
+    now: now + 20 * MIN
+  });
+  assert.equal((await fluxo(flow.id)).entry_completed_at, null, "a seguinte nova reabre o complemento");
+
+  await tick(now + 30 * MIN);
+  await tick(now + 3 * HORA);
+
+  assert.deepEqual(quem(await linhas({ flow_node_id: ids.sim })), [aluna.id], "o aluno que foi pelo Nao nunca recebe o caminho Sim");
+  assert.deepEqual(await linhas({ flow_node_id: ids.simDepois }), [], "passo que nasceu embaixo da condicao nunca vira complemento");
+  assert.deepEqual((await tarefas(flow.id)).filter((row) => row.node_id === ids.sim || row.node_id === ids.simDepois).map((row) => row.user_id), [aluna.id]);
+  assert.deepEqual(quem(await linhas({ flow_node_id: ids.nova })), alunos, "a seguinte nova chega a todos que receberam");
+  assert.notEqual((await fluxo(flow.id)).entry_completed_at, null, "quem nunca vai ganhar a tarefa nao segura o complemento aberto");
+});
+
+test("sondagem das seguintes: 20 fluxos de avisos agendados nao escondem o aviso que acabou de sair", async () => {
+  const now = meioDia(42);
+
+  for (let index = 0; index < 20; index += 1) {
+    const agendado = unwrap(
+      await db
+        .from("campaigns")
+        .insert({ audience: { kind: "everyone" }, body: "", created_by: produtor.id, kind: "inbox", send_at: new Date(now + 30 * DIA).toISOString(), status: "scheduled", title: `Agendado ${index}`, updated_by: produtor.id })
+        .select("id")
+        .single(),
+      "Aviso agendado"
+    );
+    unwrap(
+      await db.from("communication_flows").insert({ activated_at: new Date(now).toISOString(), created_by: produtor.id, name: `Seguintes ${index}`, origin: "notice", source_campaign_id: agendado.id, status: "active" }),
+      "Fluxo do agendado"
+    );
+  }
+
+  const aviso = await avisoEnviadoPara(now, [aluna.id]);
+  const ids = { entrada: randomUUID(), seguinte: randomUUID() };
+  const saved = await gravarSeguintes({
+    aviso,
+    contents: { [ids.seguinte]: conteudo("Seguinte") },
+    nodes: [entrada(ids.entrada), passo({ anchor: "sent", anchorNodeId: ids.entrada, id: ids.seguinte, offsetMinutes: 5, parentId: ids.entrada })],
+    now
+  });
+  await ativar(saved.flow, now);
+
+  const sonda = await store.probeNoticeEntry(db, 3);
+  assert.deepEqual(sonda.map((item) => item.flowId), [saved.flow.id], "so o fluxo cujo aviso saiu");
+
+  await tick(now);
+  assert.deepEqual(quem(await passagens(saved.flow.id)), [aluna.id]);
+});
+
+test("decisoes de uma arvore que mudou no meio do lote voltam para a fila (stale_version) e saem com a arvore nova", async () => {
+  const now = meioDia(43);
+  const ids = { entrada: randomUUID(), m1: randomUUID(), m2: randomUUID() };
+  const contents = { [ids.m1]: conteudo("M1"), [ids.m2]: conteudo("M2") };
+  const saved = await gravar({
+    contents,
+    nodes: [entrada(ids.entrada), passo({ id: ids.m1, offsetMinutes: 5, parentId: ids.entrada }), passo({ id: ids.m2, offsetMinutes: 60, parentId: ids.m1 })],
+    now
+  });
+  const flow = await ativar(saved.flow, now);
+  await tick(now);
+
+  // Um lote reserva, le a arvore e decide...
+  const t10 = new Date(now + 10 * MIN);
+  const reservadas = await store.claimFlowTasks(db, { limit: 150, now: t10 });
+  const { createFlowTickCache, loadFlowBatchContext } = await import("../../src/server/communications/flow-facts.ts");
+  const { decideFlowTask } = await import("../../src/server/communications/flow-model.ts");
+  const itens = await loadFlowBatchContext(db, reservadas, t10, createFlowTickCache());
+  assert.ok(itens.every((item) => item.revision === flow.revision), "a decisao leva a revision lida com a arvore");
+  const decisoes = itens.map((item) => ({ decision: decideFlowTask(item.input), revision: item.revision, task: item.task }));
+
+  // ...enquanto a equipe muda M2 para "3 h antes de M1 vencer" (ninguem espera M2: permitido).
+  await gravar({
+    contents,
+    expectedUpdatedAt: (await fluxo(flow.id)).updated_at,
+    flowId: flow.id,
+    nodes: [
+      entrada(ids.entrada),
+      passo({ id: ids.m1, offsetMinutes: 5, parentId: ids.entrada }),
+      passo({ anchor: "expires", anchorNodeId: ids.m1, id: ids.m2, offsetMinutes: 180, parentId: ids.m1 })
+    ],
+    now: now + 10 * MIN
+  });
+
+  const aplicadas = await store.applyFlowResults(db, { now: t10, results: decisoes });
+  assert.deepEqual([...new Set(aplicadas.map((item) => item.outcome))], ["stale_version"]);
+  assert.equal(await tarefa(ids.m2, aluna.id), null, "nenhum filho com a referencia de tempo antiga");
+  const devolvida = await tarefa(ids.m1, aluna.id);
+  assert.deepEqual([devolvida.status, devolvida.attempts], ["pending", 0], "volta sem gastar tentativa");
+
+  await tick(now + 75 * MIN);
+  const [linha] = await linhas({ flow_node_id: ids.m1, user_id: aluna.id });
+  const m2 = await tarefa(ids.m2, aluna.id);
+  assert.equal(m2.status, "pending", "M2 espera 3 h antes de M1 vencer (nao venceu agora)");
+  assert.equal(Date.parse(m2.anchor_at), Date.parse(linha.expires_at), "a base e o fim de M1 no sino");
+
+  // A entrada do construtor tambem confere a revision: avaliada numa versao velha, ninguem entra.
+  const velha = await store.enrollFlow(db, flow.id, [{ baseline: false, enteredAt: now, tasks: [], userId: professor.id }], flow.revision);
+  assert.equal(velha, 0);
+});
+
+test("faixa de 15 minutos: mais de 100 fluxos que nao terminam nao escondem o fluxo com objetivo (a fila gira)", async () => {
+  const now = meioDia(44);
+  const avisos = unwrap(
+    await db
+      .from("campaigns")
+      .insert(
+        Array.from({ length: 100 }, (_, index) => ({
+          audience: { kind: "everyone" },
+          body: "",
+          created_by: produtor.id,
+          kind: "inbox",
+          sent_at: new Date(now - HORA).toISOString(),
+          status: "sent",
+          title: `Enviado ${index}`,
+          updated_by: produtor.id
+        }))
+      )
+      .select("id"),
+    "Avisos enviados"
+  );
+  // Cada aviso ainda esta no sino de alguem: o fluxo dele nao termina (fim automatico so depois disso).
+  unwrap(
+    await db.from("notifications").insert(
+      avisos.map((row) => ({ campaign_id: row.id, dedupe_key: `campaign:${row.id}`, expires_at: new Date(now + 30 * DIA).toISOString(), kind: "notice", user_id: aluna.id }))
+    ),
+    "Linhas dos avisos"
+  );
+  unwrap(
+    await db.from("communication_flows").insert(
+      avisos.map((row, index) => ({
+        activated_at: new Date(now).toISOString(),
+        created_by: produtor.id,
+        entry_completed_at: new Date(now).toISOString(),
+        name: `Seguintes ${index}`,
+        origin: "notice",
+        source_campaign_id: row.id,
+        status: "active"
+      }))
+    ),
+    "Fluxos dos avisos"
+  );
+  const comObjetivo = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+  unwrap(
+    await db.from("communication_flows").insert({
+      activated_at: new Date(now).toISOString(),
+      created_by: produtor.id,
+      entry_mode: "current_and_new",
+      entry_refreshed_at: new Date(now + DIA).toISOString(),
+      goal: quemTemOProduto,
+      id: comObjetivo,
+      name: "Construtor com objetivo",
+      origin: "builder",
+      status: "active"
+    }),
+    "Fluxo com objetivo"
+  );
+
+  const faixa1 = Math.floor(now / (15 * MIN)) * 15 * MIN;
+  assert.equal((await store.probeSlotWork(db, new Date(faixa1))).length, 100, "a faixa pega no maximo 100");
+  await tick(faixa1 + 10_000);
+  const conferidos = unwrap(await db.from("communication_flows").select("id").eq("goal_swept_at", new Date(faixa1).toISOString()), "Conferidos na faixa");
+  assert.equal(conferidos.length, 100, "todo fluxo conferido fica marcado na faixa");
+
+  const faixa2 = faixa1 + 15 * MIN;
+  const sonda = await store.probeSlotWork(db, new Date(faixa2));
+  assert.equal(sonda[0].id, comObjetivo, "quem ficou de fora vem primeiro na faixa seguinte");
+  await tick(faixa2 + 10_000);
+  assert.equal(Date.parse((await fluxo(comObjetivo)).goal_swept_at), faixa2, "o objetivo foi varrido");
+});
+
+test("tarefa presa que sai como falha fecha a passagem sem nada pendente (nao fica 'No fluxo agora')", async () => {
+  const now = meioDia(45);
+  const ids = { entrada: randomUUID(), m1: randomUUID() };
+  const saved = await gravar({ contents: { [ids.m1]: conteudo("M1") }, mode: "current_and_new", nodes: [entrada(ids.entrada), passo({ id: ids.m1, offsetMinutes: 5, parentId: ids.entrada })], now });
+  const flow = await ativar(saved.flow, now);
+  await tick(now);
+  assert.deepEqual((await passagens(flow.id)).map((run) => run.status), ["active", "active"]);
+
+  unwrap(await db.from("communication_flow_tasks").update({ attempts: 5 }).eq("node_id", ids.m1).eq("user_id", aluna.id), "Cinco quedas");
+  await store.claimFlowTasks(db, { limit: 150, now: new Date(now + 10 * MIN) });
+
+  const presa = await tarefa(ids.m1, aluna.id);
+  assert.deepEqual([presa.status, presa.result], ["skipped", "failed"]);
+  const passagem = (await passagens(flow.id)).find((run) => run.user_id === aluna.id);
+  assert.equal(passagem.status, "done", "a passagem sem tarefa aberta termina");
+  const [numeros] = unwrap(await db.rpc("communication_flow_stats", { p_flow_ids: [flow.id], p_since: new Date(now - DIA).toISOString() }), "Numeros do fluxo");
+  assert.equal(Number(numeros.active), 1, "so o aluno, que ainda espera, conta no fluxo agora");
 });

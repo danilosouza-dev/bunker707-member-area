@@ -10,6 +10,13 @@
 export const PAGE_KEY_PATTERN =
   /^(home|purchases|saved|materials|journey|continue|profile|support|content:[A-Za-z0-9_-]{1,240}|checkout:[A-Za-z0-9_-]{1,240})$/;
 
+/**
+ * Mesma visita (aluno e pagina) so grava de novo depois disto, no servidor; o beacon dos detalhes manda de
+ * novo depois do mesmo tempo. Curta de proposito: o motor compara a hora exata ("visitou depois da
+ * notificacao"), entao a trava so absorve recarga e a cadeia de redirecionamento (/conteudo/x -> aula).
+ */
+export const PAGE_VISIT_THROTTLE_MS = 10_000;
+
 /** Chaves que o navegador pode mandar pelo beacon (abrir os detalhes do produto e clicar em Comprar). */
 export const BEACON_PAGE_KEY_PATTERN = /^(content|checkout):[A-Za-z0-9_-]{1,240}$/;
 

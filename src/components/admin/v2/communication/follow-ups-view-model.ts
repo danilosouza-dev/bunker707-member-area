@@ -33,6 +33,7 @@ import type { FlowNoticeContent, FollowUpDraft } from "../../../../server/commun
 import { describeValidity, validityDurationLabel, validityToColumns, VALIDITY_LIMITS, type FlowValidity } from "../../../../server/communications/message-meta";
 import { pageKeyOfHref } from "../../../../server/member-area/page-visit-model";
 import { shouldClampNotificationBody } from "../../../member/notifications/notifications-model";
+import { REMOVED_REASON_LABEL } from "./flows/flows-view-model";
 import { formatInteger } from "./notices-view-model";
 
 /* ------------------------------------------------------------------------------------------------
@@ -64,6 +65,11 @@ export const FOLLOW_UPS_COPY = {
   pending: "Alterações não aplicadas",
   remove: "Remover",
   sendTest: "Enviar teste para mim",
+  /** A escolha rapida ja feita que a notificacao de cima nao oferece mais (audio, botao ou texto saiu). */
+  staleChoice: "Esta escolha não vale mais para a notificação de cima. Escolha outra.",
+  /** Rodape da folha da seguinte: no editor (rascunho) e no relatorio da notificacao enviada. */
+  sheetDraftNote: "As mudanças ficam no rascunho até você salvar.",
+  sheetLiveNote: "As mudanças valem quando você aplicar.",
   stopLabel: "Parar as notificações seguintes para quem tiver acesso a",
   test: "O teste chega só no seu sino e não conta nos números.",
   title: "Depois desta notificação",
@@ -916,6 +922,29 @@ export function parentOfItem(location: Pick<FollowUpLocation, "parentItem">, mai
   return location.parentItem ? followUpParentOf(location.parentItem.id, "previous", location.parentItem.content) : main;
 }
 
+/**
+ * Escolha rapida que a notificacao de cima nao oferece mais (o audio, o botao ou o texto longo sairam
+ * depois): erro no "Para quem" em vez de gravar uma regra que ninguem satisfaz (ou que vale para todos).
+ */
+export function followUpChoiceErrors(items: readonly FollowUpFormItem[], main: FollowUpParent): Record<string, string> {
+  const errors: Record<string, string> = {};
+  const walk = (list: readonly FollowUpFormItem[], parent: FollowUpParent, prefix: string) => {
+    list.forEach((item, index) => {
+      const path = `${prefix}.${index}`;
+
+      if (!quickChoicesFor(parent).includes(item.choice)) {
+        errors[`${path}.who`] = FOLLOW_UPS_COPY.staleChoice;
+      }
+
+      walk(item.children, followUpParentOf(item.id, "previous", item.content), `${path}.children`);
+    });
+  };
+
+  walk(items, main, "followUps");
+
+  return errors;
+}
+
 /** As seguintes como saveNoticeFollowUps recebe (o "Para quem" ja em regras). */
 export function followUpDraftsOf(items: readonly FollowUpFormItem[], main: FollowUpParent): FollowUpDraft[] {
   const toDraft = (item: FollowUpFormItem, parent: FollowUpParent): FollowUpDraft => ({
@@ -1239,6 +1268,7 @@ export type FollowUpStats = {
   clicked: number;
   declined: number;
   expired: number;
+  failed: number;
   filtered: number;
   goal: number;
   opened: number;
@@ -1272,7 +1302,9 @@ export function followUpNumberRows(stats: FollowUpStats | null | undefined, cont
     rows.push({ label: "Aceitaram", value: value("accepted") }, { label: "Recusaram", value: value("declined") });
   }
 
-  const missed = stats ? stats.filtered + stats.goal + stats.expired + stats.cap + stats.removed : 0;
+  // Chegaram = Esperando + Receberam + Não receberam: as que falharam tambem contam aqui.
+  const failed = stats?.failed ?? 0;
+  const missed = stats ? stats.filtered + stats.goal + stats.expired + stats.cap + stats.removed + failed : 0;
 
   if (stats && missed > 0) {
     const parts = [
@@ -1280,7 +1312,8 @@ export function followUpNumberRows(stats: FollowUpStats | null | undefined, cont
       stats.goal > 0 ? `atingiram o objetivo antes ${formatInteger(stats.goal)}` : null,
       stats.expired > 0 ? `venceu o prazo ${formatInteger(stats.expired)}` : null,
       stats.cap > 0 ? `limite do dia ${formatInteger(stats.cap)}` : null,
-      stats.removed > 0 ? `passo removido ${formatInteger(stats.removed)}` : null
+      stats.removed > 0 ? `${REMOVED_REASON_LABEL} ${formatInteger(stats.removed)}` : null,
+      failed > 0 ? `falharam ${formatInteger(failed)}` : null
     ].filter(Boolean);
 
     rows.push({ label: "Não receberam", value: `${formatInteger(missed)} (${parts.join(" · ")})` });

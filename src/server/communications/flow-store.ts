@@ -8,8 +8,8 @@ import "server-only";
 // Duas relacoes ligam campaigns e communication_flows (communication_flows.source_campaign_id e
 // campaigns.flow_id): todo embed entre as duas tabelas precisa da dica da FK
 // (campaigns!communication_flows_source_campaign_id_fkey ou communication_flows!campaigns_flow_id_fkey),
-// senao o PostgREST responde PGRST201 (relacao ambigua) e o job cairia todo minuto. Aqui nao ha embed: as
-// sondagens do passo 0 sao consultas simples (tests/comunicacao-job.test.mjs confere as strings).
+// senao o PostgREST responde PGRST201 (relacao ambigua) e o job cairia todo minuto. O unico embed daqui e o
+// da sondagem das seguintes (probeNoticeEntry), com a dica (tests/comunicacao-job.test.mjs confere as strings).
 
 import { normalizeAudience, type AudienceDefinition } from "./audience-model";
 import { toDbError } from "@/server/db/pending-migration";
@@ -386,47 +386,32 @@ export async function probeBuilderEntry(db: CommunicationsDb, slot: Date, limit:
 
 /**
  * Fluxos de aviso no ar ainda sem todos os que receberam (entry_completed_at nulo), so os cujo aviso de
- * origem ja saiu ("sent"). Aviso agendado custa so a leitura pequena de campaigns.
+ * origem ja saiu ("sent"), filtrado na mesma consulta (embed com a dica da FK): fluxos de avisos agendados
+ * nunca ocupam o lugar de um aviso que acabou de sair. Os mais antigos primeiro.
  */
 export async function probeNoticeEntry(db: CommunicationsDb, limit: number): Promise<{ flowId: string; sourceCampaignId: string }[]> {
-  const flows = await db
+  const { data, error } = await db
     .from("communication_flows")
-    .select("id,source_campaign_id")
+    .select("id,source_campaign_id,source:campaigns!communication_flows_source_campaign_id_fkey!inner(status)")
     .eq("origin", "notice")
     .eq("status", "active")
     .is("deleted_at", null)
     .is("entry_completed_at", null)
-    .limit(20);
-  assertNoDbError(flows.error, "Comunicacao: entrada das notificacoes seguintes");
-
-  const rows = ((flows.data ?? []) as { id: string; source_campaign_id: string | null }[]).filter((row) => row.source_campaign_id);
-
-  if (rows.length === 0) {
-    return [];
-  }
-
-  const sent = await db
-    .from("campaigns")
-    .select("id")
-    .in(
-      "id",
-      rows.map((row) => row.source_campaign_id as string)
-    )
-    .eq("status", "sent")
+    .eq("source.status", "sent")
+    .order("created_at", { ascending: true })
     .limit(limit);
-  assertNoDbError(sent.error, "Comunicacao: avisos de origem enviados");
+  assertNoDbError(error, "Comunicacao: entrada das notificacoes seguintes");
 
-  const sentIds = new Set(((sent.data ?? []) as { id: string }[]).map((row) => row.id));
-
-  return rows
-    .filter((row) => sentIds.has(row.source_campaign_id as string))
-    .slice(0, limit)
+  return ((data ?? []) as { id: string; source_campaign_id: string | null }[])
+    .filter((row) => row.source_campaign_id)
     .map((row) => ({ flowId: row.id, sourceCampaignId: row.source_campaign_id as string }));
 }
 
 /**
- * Na faixa de 15 minutos: fluxos no ar com objetivo ainda nao varrido nesta faixa, e os que podem ter
- * terminado (construtor "so quem esta agora" com a entrada feita; aviso com todos dentro).
+ * Na faixa de 15 minutos: fluxos no ar com objetivo, e os que podem ter terminado (construtor "so quem esta
+ * agora" com a entrada feita; aviso com todos dentro), ainda nao conferidos nesta faixa. goal_swept_at e o
+ * carimbo de "conferido nesta faixa" de todos eles (o job grava; nao muda a versao do editor): quem nao coube
+ * numa faixa vem primeiro na seguinte, entao a fila gira mesmo com mais de 100 fluxos que nao terminam.
  */
 export async function probeSlotWork(db: CommunicationsDb, slot: Date): Promise<FlowRow[]> {
   const slotIso = slot.toISOString();
@@ -436,10 +421,12 @@ export async function probeSlotWork(db: CommunicationsDb, slot: Date): Promise<F
     .eq("status", "active")
     .is("deleted_at", null)
     .or(
-      `and(goal.not.is.null,or(goal_swept_at.is.null,goal_swept_at.lt."${slotIso}")),` +
+      "goal.not.is.null," +
         "and(origin.eq.builder,entry_mode.eq.current,entry_refreshed_at.not.is.null)," +
         "and(origin.eq.notice,entry_completed_at.not.is.null)"
     )
+    .or(`goal_swept_at.is.null,goal_swept_at.lt."${slotIso}"`)
+    .order("goal_swept_at", { ascending: true, nullsFirst: true })
     .order("id")
     .limit(FLOW_LIMITS.activeFlows * 5);
   assertNoDbError(error, "Comunicacao: fluxos da faixa");
@@ -544,8 +531,11 @@ export type FlowEntry = {
 const iso = (time: number) => new Date(time).toISOString();
 const isoOrNull = (time: number | null | undefined) => (typeof time === "number" && Number.isFinite(time) ? iso(time) : null);
 
-/** 7.2 Entrada num fluxo do construtor (em pedacos de 500); 0 quando o fluxo deixou de estar no ar. */
-export async function enrollFlow(db: CommunicationsDb, flowId: string, entries: readonly FlowEntry[]): Promise<number> {
+/**
+ * 7.2 Entrada num fluxo do construtor (em pedacos de 500); 0 quando o fluxo deixou de estar no ar ou mudou
+ * desde a versao avaliada (`revision`, lida junto com "quem entra" e a arvore: o proximo tick refaz).
+ */
+export async function enrollFlow(db: CommunicationsDb, flowId: string, entries: readonly FlowEntry[], revision: number): Promise<number> {
   let entered = 0;
 
   for (const part of chunksOf(entries, 500)) {
@@ -556,6 +546,7 @@ export async function enrollFlow(db: CommunicationsDb, flowId: string, entries: 
         p_entries: part.map((entry) => ({
           baseline: entry.baseline,
           entered_at: iso(entry.enteredAt),
+          revision,
           tasks: entry.tasks.map((task) => ({ anchor_at: iso(task.anchorAt), deadline_at: isoOrNull(task.deadlineAt), due_at: iso(task.dueAt), node_id: task.nodeId })),
           user_id: entry.userId
         })),
@@ -589,11 +580,15 @@ export async function enrollNoticeRecipients(db: CommunicationsDb, input: { flow
   };
 }
 
-export type FlowResult = { decision: FlowDecision; task: Pick<FlowTaskRow, "claimed_at" | "node_id" | "user_id"> };
+/**
+ * `revision`: a do fluxo lida junto com a arvore que decidiu (cache do tick). Mudou no banco = a tarefa volta
+ * para a fila como stale_version (7.4); null = aplica sem conferir (a falha isolada pela bisseccao).
+ */
+export type FlowResult = { decision: FlowDecision; revision?: number | null; task: Pick<FlowTaskRow, "claimed_at" | "node_id" | "user_id"> };
 export type FlowOutcome = { nodeId: string; notificationId: string | null; outcome: string; userId: string };
 
 /** Uma decisao no formato de p_results do 7.4 (tempos em ISO; o carimbo da reserva como veio). */
-export function resultPayload({ decision, task }: FlowResult) {
+export function resultPayload({ decision, revision, task }: FlowResult) {
   const children = "children" in decision ? decision.children : [];
 
   return {
@@ -607,6 +602,7 @@ export function resultPayload({ decision, task }: FlowResult) {
     expires_at: decision.action === "send" ? iso(decision.expiresAt) : null,
     node_id: task.node_id,
     result: decision.action === "finish" ? decision.result : null,
+    revision: revision ?? null,
     user_id: task.user_id
   };
 }
@@ -988,12 +984,43 @@ function nodePayload(node: FlowNode, campaignId: string | null) {
 }
 
 /**
+ * Toma a versao de um fluxo fora do ar antes de editar o conteudo no lugar: aguardando aprovacao volta a
+ * rascunho (7.13, cancela o pedido); rascunho ganha revision + 1 so se ninguem mudou desde a leitura (o
+ * gatilho muda updated_at). 409 se mudou.
+ */
+async function claimFlowVersion(db: CommunicationsDb, flow: FlowRow, input: { actorId: string; expectedUpdatedAt: string; now: Date }): Promise<FlowRow> {
+  if (flow.status === "pending_approval") {
+    return changeFlowState(db, { actorId: input.actorId, expectedUpdatedAt: input.expectedUpdatedAt, flowId: flow.id, now: input.now, to: "draft" });
+  }
+
+  const { data, error } = await db
+    .from("communication_flows")
+    .update({ revision: flow.revision + 1, updated_by: input.actorId })
+    .eq("id", flow.id)
+    .eq("status", "draft")
+    .eq("updated_at", input.expectedUpdatedAt)
+    .is("deleted_at", null)
+    .select(FLOW_COLUMNS);
+  assertNoDbError(error, "Comunicacao: versao do fluxo");
+
+  const claimed = ((data ?? []) as FlowRow[])[0];
+
+  if (!claimed) {
+    throw new CommunicationError(FLOW_CHANGED_MESSAGE, 409);
+  }
+
+  return claimed;
+}
+
+/**
  * Grava a arvore na ordem de §6.2: (1) fluxo novo nasce rascunho; (2) cada notificacao cujo conteudo
  * mudou: no ar ou pausado, sempre versao nova ("sent", sent_at agora; versao enviada nunca e editada no
  * lugar), em rascunho ou aguardando aprovacao, a versao rascunho e editada no lugar (ou criada para passo
  * novo); (3) communication_save_flow com a versao conferida e as paginas acompanhadas. Se (3) falhar, as
  * versoes de (2) ficam orfas e invisiveis (nenhum passo aponta para elas; a lista filtra flow_id) e saem
- * com o fluxo. Invalidar o cache (invalidateLivePopups), a auditoria e o revalidatePath ficam com a acao.
+ * com o fluxo; a versao rascunho editada no lugar so muda depois de tomar a versao do fluxo
+ * (claimFlowVersion), entao uma falha em (3) nunca deixa conteudo trocado na versao que alguem revisou.
+ * Invalidar o cache (invalidateLivePopups), a auditoria e o revalidatePath ficam com a acao.
  */
 export async function saveFlowTree(db: CommunicationsDb, input: SaveFlowTreeInput): Promise<SaveFlowTreeResult> {
   const nowIso = input.now.toISOString();
@@ -1080,6 +1107,20 @@ export async function saveFlowTree(db: CommunicationsDb, input: SaveFlowTreeInpu
   const current = new Map((await fetchCampaignsByIds(db, currentIds)).map((row) => [row.id, row]));
   const versions: Record<string, string> = {};
   const toInsert: { columns: CampaignContentColumns; nodeId: string }[] = [];
+  let expectedUpdatedAt = input.flowId ? (input.expectedUpdatedAt ?? flow.updated_at) : flow.updated_at;
+  const editsInPlace = Array.from(columnsByNode).some(([nodeId, columns]) => {
+    const row = current.get(existing.get(nodeId)?.campaign_id ?? "");
+
+    return Boolean(row && row.flow_id === flow.id && !live && row.status === "draft" && !sameContent(row, columns));
+  });
+
+  // Rascunho editado no lugar so depois de tomar a versao: se o RPC (3) recusar, a versao ja mudou (quem
+  // aprovar ou ativar com a versao que revisou recebe 409, nunca o conteudo trocado) e um pedido de
+  // aprovacao ja foi cancelado (o fluxo volta a rascunho antes de qualquer conteudo mudar).
+  if (input.flowId && editsInPlace) {
+    flow = await claimFlowVersion(db, flow, { actorId: input.actorId, expectedUpdatedAt: flow.updated_at, now: input.now });
+    expectedUpdatedAt = flow.updated_at;
+  }
 
   for (const [nodeId, columns] of columnsByNode) {
     const row = current.get(existing.get(nodeId)?.campaign_id ?? "");
@@ -1153,7 +1194,7 @@ export async function saveFlowTree(db: CommunicationsDb, input: SaveFlowTreeInpu
     "communication_save_flow",
     {
       p_actor: input.actorId,
-      p_expected_updated_at: input.flowId ? (input.expectedUpdatedAt ?? flow.updated_at) : flow.updated_at,
+      p_expected_updated_at: expectedUpdatedAt,
       p_flow: flowPayload,
       p_flow_id: flow.id,
       p_nodes: nodes.map((node) => nodePayload(node, versions[node.id] ?? null)),

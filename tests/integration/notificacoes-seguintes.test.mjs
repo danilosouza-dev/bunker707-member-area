@@ -135,6 +135,7 @@ async function tarefas(flowId) {
 }
 
 const alunos = () => [aluna.id, aluno.id].sort();
+const TODAS = { canPublish: true, canPublishLarge: true, canWrite: true };
 
 /* ------------------------------------------------------------------------------------------------
  * Envio, abertura e "Marcar todas"
@@ -270,15 +271,34 @@ test("linha de parar: quem já tinha o produto não recebe nada; quem compra ent
   assert.deepEqual(await quemRecebeu(s2), [], "comprou entre as duas");
 });
 
-test("quem envia uma seguinte recebe o e-mail 'enviada em seu nome' uma vez, com a chave do aviso; quem publicou, nunca", async () => {
+test("quem envia uma seguinte recebe o e-mail 'enviada em seu nome' do fluxo (nunca o da principal), uma vez; quem publicou, nunca", async () => {
   const aviso = await avisoComSeguintes({
     draft: { sender: { userId: produtor.id } },
     followUps: [seguinte("Do professor", { content: { sender: { userId: professor.id } } })]
   });
   await settleSenderNotices();
 
-  const emails = unwrap(await db.from("email_outbox").select("user_id,idempotency_key").eq("kind", "sent_as").in("user_id", [professor.id, produtor.id]), "Lendo os e-mails");
-  assert.deepEqual(emails, [{ idempotency_key: `sent-as:campaign:${aviso.id}:${professor.id}`, user_id: professor.id }]);
+  const emails = unwrap(await db.from("email_outbox").select("user_id,idempotency_key,metadata,subject").eq("kind", "sent_as").in("user_id", [professor.id, produtor.id]), "Lendo os e-mails");
+  assert.deepEqual(
+    emails.map((email) => [email.user_id, email.idempotency_key]),
+    [[professor.id, `sent-as:flow:${aviso.flowId}:${professor.id}`]],
+    "o professor nao enviou a principal: recebe o e-mail do fluxo (docs/23 §1.6)"
+  );
+  assert.equal(emails[0].metadata.flow_id, aviso.flowId);
+
+  // Aplicar de novo depois do envio nao repete (quem ja envia uma seguinte nao e "novo").
+  const detalhe = await getNoticeDetail(aviso.id, { permissions: TODAS });
+  actAs(produtor);
+  const reaplicado = await actions.saveNoticeFollowUps({
+    expectedFlowUpdatedAt: detalhe.followUps.updatedAt,
+    expectedNoticeUpdatedAt: detalhe.updatedAt,
+    followUps: [seguinte("Do professor, editada", { content: { sender: { userId: professor.id } }, id: detalhe.followUps.items[0].id })],
+    goal: null,
+    noticeId: aviso.id
+  });
+  assert.equal(reaplicado.ok, true, JSON.stringify(reaplicado));
+  await settleSenderNotices();
+  assert.equal(unwrap(await db.from("email_outbox").select("id").eq("kind", "sent_as").eq("user_id", professor.id), "Lendo os e-mails").length, 1);
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -623,4 +643,189 @@ test("fluxo mudado no construtor para algo que o cartão não desenha: só leitu
   const pop = await actions.saveNoticeFollowUps({ expectedNoticeUpdatedAt: aviso.updatedAt, followUps: [], goal: null, noticeId: aviso.id });
   assert.equal(pop.ok, true, JSON.stringify(pop));
   assert.ok((await fluxo(aviso.flowId)).deleted_at);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Revisao da v2: o fluxo do aviso antes do envio, duas telas, paginas do botao, quem envia e numeros
+ * ---------------------------------------------------------------------------------------------- */
+
+test("editar as seguintes de uma notificação agendada: salvar o aviso devolve a versão nova do fluxo e as seguintes gravam sem 409", async () => {
+  const sendAt = new Date(Date.now() + 2 * DIA).toISOString();
+  const id = randomUUID();
+  const aviso = await avisoComSeguintes({ draft: { schedule: { mode: "at", sendAt } }, followUps: [seguinte("A", { id })] });
+  assert.equal(aviso.published.situation, "scheduled");
+
+  // O editor abre aqui (versao do aviso e do fluxo) e grava como o persist(): o aviso, depois as seguintes.
+  const lido = await getNoticeDetail(aviso.id, { permissions: TODAS });
+  actAs(produtor);
+  const regravado = await actions.saveNoticeDraft({ draft: rascunho({ schedule: { mode: "at", sendAt } }), expectedUpdatedAt: lido.updatedAt, id: aviso.id });
+  assert.equal(regravado.ok, true, JSON.stringify(regravado));
+  assert.ok(regravado.data.flowUpdatedAt, "o fluxo voltou a rascunho junto: a versao nova volta para o editor");
+  assert.equal((await fluxo(aviso.flowId)).status, "draft");
+
+  const comAVelha = await actions.saveNoticeFollowUps({
+    expectedFlowUpdatedAt: lido.followUps.updatedAt,
+    expectedNoticeUpdatedAt: regravado.data.updatedAt,
+    followUps: [seguinte("A editada", { id })],
+    goal: null,
+    noticeId: aviso.id
+  });
+  assert.equal(comAVelha.status, 409, "a versao lida antes de salvar o aviso nao vale mais");
+
+  const comANova = await actions.saveNoticeFollowUps({
+    expectedFlowUpdatedAt: regravado.data.flowUpdatedAt,
+    expectedNoticeUpdatedAt: regravado.data.updatedAt,
+    followUps: [seguinte("A editada", { id })],
+    goal: null,
+    noticeId: aviso.id
+  });
+  assert.equal(comANova.ok, true, JSON.stringify(comANova));
+
+  // Rascunho que ja era rascunho: o fluxo nao muda, nada de versao nova.
+  const deNovo = await actions.saveNoticeDraft({ draft: rascunho({ schedule: { mode: "at", sendAt } }), expectedUpdatedAt: regravado.data.updatedAt, id: aviso.id });
+  assert.equal(deNovo.data.flowUpdatedAt, null);
+});
+
+test("notificação agendada: Pausar e Encerrar o fluxo dela são recusados (409) e a tela só oferece Abrir a notificação; cancelada, as seguintes gravam", async () => {
+  const flowActions = await import("../../src/server/communications/flow-actions.ts");
+  const { getFlowDetail } = await import("../../src/server/communications/flow-queries.ts");
+  const sendAt = new Date(Date.now() + 2 * DIA).toISOString();
+  const id = randomUUID();
+  const aviso = await avisoComSeguintes({ draft: { schedule: { mode: "at", sendAt } }, followUps: [seguinte("A", { id })] });
+  const antes = await fluxo(aviso.flowId);
+
+  actAs(produtor);
+  const encerrar = await flowActions.endFlow({ expectedUpdatedAt: antes.updated_at, id: aviso.flowId });
+  assert.equal(encerrar.status, 409, JSON.stringify(encerrar));
+  assert.match(encerrar.error, /ele começa quando ela sai/);
+  assert.equal((await flowActions.pauseFlow({ expectedUpdatedAt: antes.updated_at, id: aviso.flowId })).status, 409);
+  assert.equal((await fluxo(aviso.flowId)).status, "active", "nada mudou");
+
+  const detalhe = await getFlowDetail(aviso.flowId, { permissions: TODAS });
+  assert.equal(detalhe.situation, "waiting_notice");
+  assert.deepEqual(detalhe.actions, ["open_notice"]);
+
+  const cancelado = await actions.cancelScheduledNotice({ expectedUpdatedAt: aviso.updatedAt, id: aviso.id });
+  assert.equal(cancelado.ok, true, JSON.stringify(cancelado));
+  const lido = await getNoticeDetail(aviso.id, { permissions: TODAS });
+  assert.deepEqual(lido.followUps.mode, { kind: "edit" });
+  const gravado = await actions.saveNoticeFollowUps({
+    expectedFlowUpdatedAt: lido.followUps.updatedAt,
+    expectedNoticeUpdatedAt: lido.updatedAt,
+    followUps: [seguinte("A de novo", { id })],
+    goal: null,
+    noticeId: aviso.id
+  });
+  assert.equal(gravado.ok, true, JSON.stringify(gravado));
+});
+
+test("relatório de uma notificação enviada ainda sem seguintes: a segunda tela (que não viu fluxo nenhum) recebe 409 e a primeira fica", async () => {
+  actAs(produtor);
+  const salvo = await actions.saveNoticeDraft({ draft: rascunho() });
+  const publicado = await actions.publishNotice({ expectedUpdatedAt: salvo.data.updatedAt, id: salvo.data.id });
+  assert.equal(publicado.data.situation, "sent");
+  const a = randomUUID();
+
+  const primeira = await actions.saveNoticeFollowUps({ expectedFlowUpdatedAt: null, expectedNoticeUpdatedAt: publicado.data.updatedAt, followUps: [seguinte("Tela A", { id: a })], goal: null, noticeId: salvo.data.id });
+  assert.equal(primeira.ok, true, JSON.stringify(primeira));
+
+  const segunda = await actions.saveNoticeFollowUps({
+    expectedFlowUpdatedAt: null,
+    expectedNoticeUpdatedAt: publicado.data.updatedAt,
+    followUps: [seguinte("Tela B")],
+    goal: null,
+    noticeId: salvo.data.id
+  });
+  assert.equal(segunda.status, 409, JSON.stringify(segunda));
+  const passos = unwrap(await db.from("communication_flow_nodes").select("id,removed_at").eq("flow_id", primeira.data.flowId).eq("kind", "message"), "Passos");
+  assert.deepEqual(passos, [{ id: a, removed_at: null }], "a seguinte da tela A continua");
+});
+
+test("trocar o botão da notificação depois de gravar as seguintes: publicar acompanha a página do botão novo", async () => {
+  const OUTRO = ESCOLA_DE_TESTE.curso.id;
+  const entrada = randomUUID();
+  const naoVisitou = regras({ negate: true, page: { kind: "message_cta", nodeId: entrada }, since: { kind: "message", nodeId: entrada }, type: "page_visit" });
+  const aviso = await avisoComSeguintes({
+    draft: { cta: { href: `/conteudo/${PRODUTO}`, label: "Ver", target: "same_tab" } },
+    followUps: [seguinte("Não visitou", { who: naoVisitou })],
+    publish: false
+  });
+  assert.ok((await fluxo(aviso.flowId)).watched_page_keys.includes(`content:${PRODUTO}`));
+
+  actAs(produtor);
+  const trocado = await actions.saveNoticeDraft({ draft: rascunho({ cta: { href: `/conteudo/${OUTRO}`, label: "Ver", target: "same_tab" } }), expectedUpdatedAt: aviso.updatedAt, id: aviso.id });
+  const publicado = await actions.publishNotice({ expectedUpdatedAt: trocado.data.updatedAt, id: aviso.id });
+  assert.equal(publicado.ok, true, JSON.stringify(publicado));
+
+  const noAr = await fluxo(aviso.flowId);
+  assert.equal(noAr.status, "active");
+  assert.ok(noAr.watched_page_keys.includes(`content:${OUTRO}`), "a visita a pagina nova passa a ser gravada");
+  assert.ok(!noAr.watched_page_keys.includes(`content:${PRODUTO}`), "a pagina antiga sai");
+});
+
+test("seguinte com quem envia fora da equipe: 400 no campo da seguinte, antes e depois do envio; nada é gravado", async () => {
+  const daAluna = (title) => seguinte(title, { content: { sender: { userId: aluna.id } } });
+  actAs(produtor);
+  const salvo = await actions.saveNoticeDraft({ draft: rascunho() });
+  const antes = await actions.saveNoticeFollowUps({ expectedNoticeUpdatedAt: salvo.data.updatedAt, followUps: [seguinte("Da escola", { children: [daAluna("Da aluna")] })], goal: null, noticeId: salvo.data.id });
+  assert.equal(antes.status, 400, JSON.stringify(antes));
+  assert.deepEqual(Object.keys(antes.fieldErrors ?? {}), ["followUps.0.children.0.content.sender"]);
+  assert.equal(antes.fieldErrors["followUps.0.children.0.content.sender"][0], "Escolha alguém da equipe.");
+
+  const publicado = await actions.publishNotice({ expectedUpdatedAt: salvo.data.updatedAt, id: salvo.data.id });
+  assert.equal(publicado.data.situation, "sent");
+  const depois = await actions.saveNoticeFollowUps({ expectedNoticeUpdatedAt: publicado.data.updatedAt, followUps: [daAluna("Da aluna")], goal: null, noticeId: salvo.data.id });
+  assert.equal(depois.status, 400, JSON.stringify(depois));
+  assert.equal(unwrap(await db.from("campaigns").select("id").eq("sender_user_id", aluna.id), "Versoes").length, 0, "nenhuma versao em nome da aluna");
+});
+
+test("retirar também as que já saíram (n): o número é o das linhas que saem, inclusive de uma seguinte removida depois de sair", async () => {
+  const s1 = randomUUID();
+  const s2 = randomUUID();
+  const aviso = await avisoComSeguintes({ followUps: [seguinte("Primeira", { id: s1, minutes: 60 }), seguinte("Segunda", { id: s2, minutes: 180 })] });
+  const now = Date.now();
+  await tick(now + MIN);
+  await tick(now + 2 * HORA);
+  await tick(now + 4 * HORA);
+  assert.deepEqual(await quemRecebeu(s2), alunos());
+
+  // A segunda sai do fluxo depois de enviada (no ar): as linhas dela ficam no sino.
+  const lido = await getNoticeDetail(aviso.id, { permissions: TODAS });
+  actAs(produtor);
+  const semASegunda = await actions.saveNoticeFollowUps({
+    expectedFlowUpdatedAt: lido.followUps.updatedAt,
+    expectedNoticeUpdatedAt: lido.updatedAt,
+    followUps: [seguinte("Primeira", { id: s1, minutes: 60 })],
+    goal: null,
+    noticeId: aviso.id
+  });
+  assert.equal(semASegunda.ok, true, JSON.stringify(semASegunda));
+
+  const detalhe = await getNoticeDetail(aviso.id, { permissions: TODAS });
+  const item = (await listNotices({})).items.find((row) => row.id === aviso.id);
+  assert.equal(detalhe.followUps.sent, 4, "as quatro linhas no sino (duas de um passo removido)");
+  assert.equal(item.followUpsSent, 4, "a lista diz o mesmo");
+
+  const retirado = await actions.withdrawNotice({ expectedUpdatedAt: detalhe.updatedAt, id: aviso.id });
+  assert.equal(retirado.ok, true, JSON.stringify(retirado));
+  const [auditoria] = unwrap(await db.from("admin_audit_log").select("metadata").eq("entity_id", aviso.id).eq("action", "communication.withdrawn"), "Auditoria");
+  assert.equal(auditoria.metadata.follow_ups_removed, 4, "sai exatamente o que a caixa prometeu");
+});
+
+test("o job cancela a notificação agendada (venceria antes de chegar): o fluxo das seguintes termina junto, em vez de ficar 'Ativo'", async () => {
+  const { dispatchInboxCampaign } = await import("../../src/server/communications/dispatch.ts");
+  const { fetchCampaign } = await import("../../src/server/communications/store.ts");
+  const sendAt = Date.now() + HORA;
+  const aviso = await avisoComSeguintes({
+    draft: { schedule: { mode: "at", sendAt: new Date(sendAt).toISOString() }, validity: { endsAt: new Date(sendAt + 2 * HORA).toISOString(), mode: "until" } },
+    followUps: [seguinte("Você viu?")]
+  });
+  assert.equal(aviso.published.situation, "scheduled");
+
+  unwrap(await db.from("campaigns").update({ dispatch_started_at: new Date().toISOString(), status: "sending" }).eq("id", aviso.id), "Reservando o envio");
+  const resultado = await dispatchInboxCampaign({ campaign: await fetchCampaign(db, aviso.id), db, now: new Date(sendAt + 90 * MIN) });
+  assert.equal(resultado.status, "canceled");
+
+  const encerrado = await fluxo(aviso.flowId);
+  assert.deepEqual([encerrado.status, encerrado.ended_reason], ["ended", "source_withdrawn"]);
 });

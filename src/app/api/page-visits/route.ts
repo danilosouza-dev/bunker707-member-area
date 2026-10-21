@@ -9,7 +9,7 @@ import { trackMemberPageVisit } from "@/server/member-area/page-visits";
 // Beacon das duas acoes do aluno que nao sao navegacao (docs/23 §5.2): { key: "content:<id>" } ao abrir
 // os detalhes de um produto e { key: "checkout:<id>" } ao clicar em Comprar. Mesmo registro das paginas
 // (trackMemberPageVisit): so grava para pagina que um fluxo acompanha, nunca para a equipe e no maximo
-// uma vez por minuto; nos outros casos responde 204 do mesmo jeito, sem gravar. Escrita de telemetria,
+// uma vez a cada 10 s; nos outros casos responde 204 do mesmo jeito, sem gravar. Escrita de telemetria,
 // idempotente: sessao pelas claims do JWT (requireApiSessionUser, sem ida ao Auth). Aceita text/plain
 // (navigator.sendBeacon manda assim).
 

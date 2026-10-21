@@ -238,10 +238,24 @@ export function flowFilterOfSituation(situation: FlowSituation): FlowFilter {
 
 export type FlowAction = "activate" | "approve" | "delete" | "duplicate" | "edit" | "end" | "open_notice" | "pause" | "reject" | "resume";
 export type FlowPermissions = NoticePermissions;
-export type FlowActionInput = { origin: FlowOrigin; status: FlowStatus };
+export type FlowActionInput = {
+  origin: FlowOrigin;
+  /** Situacao do aviso de origem (so no fluxo de aviso). */
+  sourceStatus?: CampaignStatus | null;
+  status: FlowStatus;
+};
 
 function isLive(status: FlowStatus) {
   return status === "active" || status === "paused";
+}
+
+/**
+ * Fluxo de aviso cuja notificacao esta agendada ou aguardando aprovacao: ele segue a notificacao (as
+ * seguintes mudam nela, que volta a rascunho junto com o fluxo; a aprovacao cobre o que foi revisado).
+ * Aqui so "Abrir a notificação": nada de editar, pausar, retomar ou encerrar (o servidor recusa com 409).
+ */
+export function isNoticeFlowWaiting(flow: Pick<FlowActionInput, "origin" | "sourceStatus">) {
+  return flow.origin === "notice" && (flow.sourceStatus === "scheduled" || flow.sourceStatus === "pending_approval");
 }
 
 /**
@@ -252,6 +266,10 @@ export function availableFlowActions(flow: FlowActionInput, permissions: FlowPer
   const actions: FlowAction[] = [];
   const builder = flow.origin === "builder";
   const live = isLive(flow.status);
+
+  if (isNoticeFlowWaiting(flow)) {
+    return ["open_notice"];
+  }
 
   if (permissions.canWrite && (flow.status === "draft" || flow.status === "pending_approval" || (live && permissions.canPublish))) {
     actions.push("edit");
@@ -407,16 +425,31 @@ export type BuilderBar = {
 };
 
 export const PUBLISH_ONLY_NOTE = "Só quem pode publicar muda um fluxo no ar. Duplique para criar outro.";
+/** Fluxo de aviso com a notificacao agendada ou aguardando aprovacao: so leitura, com esta frase. */
+export const NOTICE_WAITING_NOTE = "A notificação ainda não saiu: as notificações seguintes mudam na própria notificação.";
 
 /**
  * Botoes do topo (docs/23 §2.5 e §2.6). Rascunho: Salvar rascunho + Ativar fluxo (ou Enviar para
  * aprovacao, pela contagem de agora). No ar: Aplicar alterações e o menu. Fluxo de aviso antes de a
- * notificacao sair: so Salvar e Abrir a notificação (quem ativa e a publicacao do aviso).
+ * notificacao sair: com ela em rascunho, so Salvar e Abrir a notificação (quem ativa e a publicacao do
+ * aviso); agendada ou aguardando aprovacao, so leitura (as seguintes mudam na notificacao).
  */
-export function builderBarFor(input: { count: number | null; origin: FlowOrigin; permissions: FlowPermissions; saved: boolean; status: FlowStatus }): BuilderBar {
+export function builderBarFor(input: {
+  count: number | null;
+  origin: FlowOrigin;
+  permissions: FlowPermissions;
+  saved: boolean;
+  /** Situacao do aviso de origem (so no fluxo de aviso). */
+  sourceStatus?: CampaignStatus | null;
+  status: FlowStatus;
+}): BuilderBar {
   const live = isLive(input.status);
-  const actions = input.saved ? availableFlowActions({ origin: input.origin, status: input.status }, input.permissions) : [];
+  const actions = input.saved ? availableFlowActions({ origin: input.origin, sourceStatus: input.sourceStatus, status: input.status }, input.permissions) : [];
   const menu = actions.filter((action) => action !== "edit" && action !== "open_notice" && action !== "activate" && action !== "approve" && action !== "reject");
+
+  if (input.saved && isNoticeFlowWaiting(input)) {
+    return { applyBar: false, menu: [], openNotice: true, primary: null, readOnly: NOTICE_WAITING_NOTE, saveDraft: false };
+  }
 
   if (live && !input.permissions.canPublish) {
     return { applyBar: false, menu: [], openNotice: input.origin === "notice", primary: null, readOnly: PUBLISH_ONLY_NOTE, saveDraft: false };
@@ -725,11 +758,12 @@ export type NewStepKind = "condition" | "message";
  * "Logo depois" depois de Quem entra ou de uma condicao. Num rascunho, inserir no meio poe o que vinha
  * depois embaixo do passo novo (na condicao, no caminho Sim). Num fluxo no ar a ordem nao muda: o passo
  * novo entra ao lado, como outro caminho. A condicao nova comeca conferindo se abriu a notificacao logo
- * acima (ou sem regra, quando nao ha). Passou de 20 passos: null.
+ * acima; se ela nao tem nada para abrir (texto curto, sem audio, botao ou resposta: V7), se viu; sem
+ * notificacao acima, sem regra. Passou de 20 passos: null.
  */
 export function insertFlowStep(
   draft: FlowDraft,
-  input: { branch: FlowBranch | null; id: string; kind: NewStepKind; live: boolean; parentId: string }
+  input: { branch: FlowBranch | null; id: string; kind: NewStepKind; live: boolean; parentId: string; source?: FlowSourceNotice | null }
 ): { draft: FlowDraft; movedToYes: boolean } | null {
   const parent = draft.nodes.find((node) => node.id === input.parentId);
 
@@ -744,6 +778,9 @@ export function insertFlowStep(
   const position = moves ? (siblings[0]?.position ?? 0) : siblings.reduce((max, node) => Math.max(max, node.position + 1), 0);
   const above = [...pathAbove(draft.nodes, parent.id), parent].filter((node) => node.kind === "message" || (node.kind === "entry" && draft.origin === "notice"));
   const lastMessage = above.at(-1)?.id ?? null;
+  // O que a notificacao de cima tem para abrir (a principal sem os dados dela: supoe que sim).
+  const lastChoice = lastMessage ? choicesOf(draft, draft.nodes.filter((item) => item.id === lastMessage), input.source ?? null)[0] : undefined;
+  const firstAction = lastChoice?.canOpen === false ? "seen" : "opened";
   const node: DraftNode =
     input.kind === "message"
       ? { anchor: "previous", anchorNodeId: null, branch, filter: null, id: input.id, kind: "message", offsetMinutes, parentId: parent.id, position }
@@ -752,7 +789,7 @@ export function insertFlowStep(
           anchorNodeId: null,
           branch,
           condition: lastMessage
-            ? { kind: "rules", root: { items: [{ action: "opened", negate: false, ref: { kind: "node", nodeId: lastMessage }, type: "message" }], match: "all" } }
+            ? { kind: "rules", root: { items: [{ action: firstAction, negate: false, ref: { kind: "node", nodeId: lastMessage }, type: "message" }], match: "all" } }
             : { kind: "rules", root: { items: [], match: "all" } },
           id: input.id,
           kind: "condition",
@@ -1418,7 +1455,13 @@ export function messageReportLines(stats: FlowStepStats | null, meta: { ctaTrack
   return lines;
 }
 
-/** "Não receberam 28" e os motivos: fora do filtro · atingiram o objetivo antes · venceu o prazo · limite do dia · passo removido. */
+/**
+ * Rotulo do "removido" de 7.8, que junta passo removido, passo retirado do sino, fluxo encerrado e
+ * notificacao principal retirada (nao so "passo removido": Encerrar e Retirar tambem caem aqui).
+ */
+export const REMOVED_REASON_LABEL = "passo removido, retirado ou fluxo encerrado";
+
+/** "Não receberam 28" e os motivos: fora do filtro · atingiram o objetivo antes · venceu o prazo · limite do dia · passo removido... */
 export function notReceivedLines(stats: FlowStepStats | null) {
   if (!stats) {
     return { deferred: null, parts: [], total: null };
@@ -1429,7 +1472,7 @@ export function notReceivedLines(stats: FlowStepStats | null) {
     { id: "goal", label: "atingiram o objetivo antes", value: stats.goal },
     { id: "expired", label: "venceu o prazo", value: stats.expired },
     { help: CAP_HELP, id: "cap", label: "limite do dia", value: stats.cap },
-    { id: "removed", label: "passo removido", value: stats.removed },
+    { id: "removed", label: REMOVED_REASON_LABEL, value: stats.removed },
     ...(stats.failed > 0 ? [{ id: "failed", label: "falharam", value: stats.failed }] : [])
   ];
 

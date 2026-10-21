@@ -27,6 +27,7 @@ import {
   canNestFollowUp,
   duplicateFollowUp,
   findFollowUp,
+  followUpChoiceErrors,
   followUpErrorAt,
   followUpFormItemsOf,
   followUpNumbers,
@@ -329,6 +330,7 @@ export function NoticeFollowUps({
           errorFor={(key) => fieldErrorFor(`${paths.get(editing.item.id) ?? "followUps"}.content.${key}`)}
           idPrefix={`seguinte-${(numbers.get(editing.item.id) ?? "x").replace(/\./g, "-")}`}
           level={editingParent.level}
+          live={mode.kind === "live"}
           now={now}
           onAudioBusyChange={(reason) => onAudioBusyChange?.(reason)}
           onBlurField={() => undefined}
@@ -419,7 +421,9 @@ type Failure = { message: string; status: number };
 export function NoticeFollowUpsReport({ detail, now }: { detail: NoticeDetail; now: number }) {
   const router = useRouter();
   const followUps = detail.followUps;
-  const [entryId] = useState(() => followUps?.entryNodeId ?? crypto.randomUUID());
+  // A entrada do fluxo (a principal nas regras): a gravada no servidor assim que existe (depois de aplicar
+  // ou de outra tela), para "Descartar" e a releitura desenharem as escolhas com o mesmo id das regras.
+  const [entryId, setEntryId] = useState(() => followUps?.entryNodeId ?? crypto.randomUUID());
   const [state, setState] = useState(() => stateOf(detail, entryId));
   const [serverVersion, setServerVersion] = useState<string | null>(followUps?.updatedAt ?? null);
   const [flowVersion, setFlowVersion] = useState<string | null>(followUps?.updatedAt ?? null);
@@ -436,15 +440,18 @@ export function NoticeFollowUpsReport({ detail, now }: { detail: NoticeDetail; n
   const key = followUpsStateKey(state.items, state.stop, main);
   const dirty = key !== savedKey;
 
-  // Nova leitura do servidor (depois de aplicar, ou "Recarregar"): sem mudanca local, segue o banco.
+  // Nova leitura do servidor (depois de aplicar, ou "Recarregar"): sem mudanca local, segue o banco (e a
+  // entrada gravada).
   if (followUps && followUps.updatedAt !== serverVersion) {
     setServerVersion(followUps.updatedAt);
     setFlowVersion(followUps.updatedAt);
 
     if (!dirty) {
-      const next = stateOf(detail, entryId);
+      const nextEntry = followUps.entryNodeId ?? entryId;
+      const next = stateOf(detail, nextEntry);
+      setEntryId(nextEntry);
       setState(next);
-      setSavedKey(followUpsStateKey(next.items, next.stop, main));
+      setSavedKey(followUpsStateKey(next.items, next.stop, { ...main, nodeId: nextEntry }));
     }
   }
 
@@ -483,7 +490,11 @@ export function NoticeFollowUpsReport({ detail, now }: { detail: NoticeDetail; n
     const drafts = followUpsToSave("inbox", state.items, main);
     const parsed = saveNoticeFollowUpsSchema.safeParse({ ...FOLLOW_UPS_CHECK, followUps: drafts, goal: goalOfStopLine(state.stop) });
 
-    return { ...followUpTreeErrors({ drafts, entryId, notice: detail.draft }), ...(parsed.success ? {} : noticeErrorsFrom(parsed.error.issues)) };
+    return {
+      ...followUpTreeErrors({ drafts, entryId, notice: detail.draft }),
+      ...followUpChoiceErrors(state.items, main),
+      ...(parsed.success ? {} : noticeErrorsFrom(parsed.error.issues))
+    };
   }, [detail.draft, entryId, main, mode.kind, state]);
   const shown = { ...(submitted ? clientErrors : {}), ...serverErrors };
 
@@ -517,7 +528,8 @@ export function NoticeFollowUpsReport({ detail, now }: { detail: NoticeDetail; n
     setFailure(null);
     setServerErrors({});
     const result = await saveNoticeFollowUps({
-      expectedFlowUpdatedAt: flowVersion ?? undefined,
+      // null = esta tela nao viu fluxo nenhum: se outra criou um no meio, 409 em vez de gravar por cima.
+      expectedFlowUpdatedAt: flowVersion,
       expectedNoticeUpdatedAt: detail.updatedAt,
       followUps: followUpsToSave("inbox", state.items, main),
       goal: goalOfStopLine(state.stop),
@@ -531,9 +543,13 @@ export function NoticeFollowUpsReport({ detail, now }: { detail: NoticeDetail; n
       return;
     }
 
+    // A entrada gravada pode ser outra (o primeiro "Aplicar" sem regra que cite a principal sorteia uma):
+    // nenhuma regra local cita a antiga nesse caso, entao so o id muda.
+    const nextEntry = result.data.entryNodeId ?? entryId;
+    setEntryId(nextEntry);
     setFlowVersion(result.data.flowUpdatedAt);
     setServerVersion(result.data.flowUpdatedAt);
-    setSavedKey(key);
+    setSavedKey(followUpsStateKey(state.items, state.stop, { ...main, nodeId: nextEntry }));
     setSubmitted(false);
     adminToast.success("Alterações aplicadas.");
     router.refresh();

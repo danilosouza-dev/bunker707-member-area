@@ -49,7 +49,7 @@ import {
 import { assertNoDbError, chunksOf, communicationsDb, type CommunicationsDb } from "./db";
 import { entryOf, followUpsFromTree, type FlowEndedReason, type FlowNode, type FlowStatus, type FollowUp } from "./flow-model";
 import type { FlowNoticeContent } from "./flow-schemas";
-import { definitionOf, fetchFlowNodeStats, fetchFlowStats, fetchFlowTree, lastSourceExpiry, type LoadedFlowTree } from "./flow-store";
+import { definitionOf, fetchFlowNodeStats, fetchFlowTree, lastSourceExpiry, type LoadedFlowTree } from "./flow-store";
 import { noticeIconOfColumns, normalizeSchoolIcon, SCHOOL_NAME_FALLBACK_TEAM, type NoticeIconColor, type NoticeIconId } from "./message-meta";
 import { emptyNoticeDraft, type NoticeDraft } from "./schemas";
 import {
@@ -738,9 +738,20 @@ export function followUpContentOf(node: Pick<FlowNode, "expireWithAnchor">, row:
 }
 
 /**
+ * Linhas das seguintes no sino (sem os testes): exatamente o que "Retirar também as notificações seguintes
+ * que já saíram (n)" apaga (withdrawNotice), inclusive as de um passo removido depois de sair.
+ */
+async function countFollowUpRows(db: CommunicationsDb, flowId: string): Promise<number> {
+  const { count, error } = await db.from("notifications").select("id", { count: "exact", head: true }).eq("flow_id", flowId).eq("is_test", false);
+  assertNoDbError(error, "Comunicacao: linhas das seguintes");
+
+  return count ?? 0;
+}
+
+/**
  * Seguintes por aviso na lista (o chip "+2 seguintes" e o "Retirar também ... (n)"): os passos de
- * notificacao vivos de cada fluxo e quantas ja sairam (7.7). Consultas simples: nenhum embed entre
- * campaigns e communication_flows (duas FKs ligam as tabelas).
+ * notificacao vivos de cada fluxo e quantas linhas ja chegaram ao sino. Consultas simples: nenhum embed
+ * entre campaigns e communication_flows (duas FKs ligam as tabelas).
  */
 async function loadFollowUpCounts(db: CommunicationsDb, campaignIds: readonly string[]): Promise<Map<string, { count: number; sent: number }>> {
   const result = new Map<string, { count: number; sent: number }>();
@@ -768,10 +779,10 @@ async function loadFollowUpCounts(db: CommunicationsDb, campaignIds: readonly st
   }
 
   const live = flows.filter((flow) => flow.status !== "draft" && flow.status !== "pending_approval").map((flow) => flow.id);
-  const stats = live.length > 0 ? await fetchFlowStats(db, live, new Date(0)) : new Map<string, { sent: number }>();
+  const rows = new Map(await Promise.all(live.map(async (flowId) => [flowId, await countFollowUpRows(db, flowId)] as const)));
 
   for (const flow of flows) {
-    result.set(flow.source_campaign_id, { count: counts.get(flow.id) ?? 0, sent: stats.get(flow.id)?.sent ?? 0 });
+    result.set(flow.source_campaign_id, { count: counts.get(flow.id) ?? 0, sent: rows.get(flow.id) ?? 0 });
   }
 
   return result;
@@ -785,6 +796,7 @@ const FOLLOW_UP_STAT_FIELDS = [
   "clicked",
   "declined",
   "expired",
+  "failed",
   "filtered",
   "goal",
   "opened",
@@ -806,7 +818,8 @@ async function loadNoticeFollowUps(
   permissions: NoticePermissions
 ): Promise<{ detail: NoticeFollowUpsDetail; options: NoticeEditorOptions | null }> {
   const loaded = await loadNoticeFlow(db, row.id);
-  const recipients = row.recipients_count ?? row.audience_count;
+  // O maior dos dois (a mesma conta de saveNoticeFollowUps): num envio cortado, recipients_count e parcial.
+  const recipients = row.recipients_count === null && row.audience_count === null ? null : Math.max(row.recipients_count ?? 0, row.audience_count ?? 0);
   const sentNotice = row.status === "sending" || row.status === "sent";
   const modeFor = (input: { drawable: boolean; flowEndedReason: FlowEndedReason | null; flowStatus: FlowStatus | null }) =>
     followUpsModeOf({ ...input, canPublish: permissions.canPublish, canPublishLarge: permissions.canPublishLarge, noticeStatus: row.status, recipients });
@@ -866,7 +879,11 @@ async function loadNoticeFollowUps(
   const live = flow.status !== "draft" && flow.status !== "pending_approval";
   const ctaKeys = Object.fromEntries(messageNodes.map((node) => [node.id, pageKeyOfHref(versions.get(node.campaignId ?? "")?.cta_href ?? null)]));
   const definitions = [...messageNodes.map((node) => node.filter), ...tree.nodes.map((node) => node.condition), goal].filter((item): item is AudienceDefinition => Boolean(item));
-  const [nodeStats, ruleNames] = await Promise.all([live ? fetchFlowNodeStats(db, flow.id, ctaKeys) : Promise.resolve(new Map()), loadAudienceNames(db, definitions)]);
+  const [nodeStats, ruleNames, sent] = await Promise.all([
+    live ? fetchFlowNodeStats(db, flow.id, ctaKeys) : Promise.resolve(new Map()),
+    loadAudienceNames(db, definitions),
+    live ? countFollowUpRows(db, flow.id) : Promise.resolve(0)
+  ]);
   const titles: Record<string, string> = { ...(entry ? { [messageRefKey({ kind: "node", nodeId: entry.id })]: row.title } : {}) };
 
   for (const node of messageNodes) {
@@ -875,14 +892,12 @@ async function loadNoticeFollowUps(
 
   const names: AudienceNames = { ...ruleNames, messages: { ...ruleNames.messages, ...titles } };
   const stats: Record<string, FollowUpStats> = {};
-  let sent = 0;
 
   for (const node of messageNodes) {
     const values = nodeStats.get(node.id);
 
     if (values) {
       stats[node.id] = Object.fromEntries(FOLLOW_UP_STAT_FIELDS.map((field) => [field, values[field] ?? 0])) as FollowUpStats;
-      sent += values.received ?? 0;
     }
   }
 

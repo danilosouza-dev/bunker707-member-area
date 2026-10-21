@@ -247,7 +247,7 @@ export async function listFlows(input: { filter?: FlowFilter; page?: number; per
       const source = flow.source_campaign_id ? (sources.get(flow.source_campaign_id) ?? null) : null;
 
       return {
-        actions: availableFlowActions({ origin: flow.origin, status: flow.status }, permissions),
+        actions: availableFlowActions({ origin: flow.origin, sourceStatus: source?.status ?? null, status: flow.status }, permissions),
         entryCount: flow.entry_count,
         entryDescription: describeAudience(entryAudienceOf(flow), names),
         entryMode: flow.entry_mode,
@@ -469,7 +469,7 @@ export async function getFlowDetail(id: string, input: { now?: number; permissio
   const person = (userId: string | null) => (userId ? (people.get(userId) ?? null) : null);
 
   return {
-    actions: availableFlowActions({ origin: flow.origin, status: flow.status }, input.permissions ?? NO_PERMISSIONS),
+    actions: availableFlowActions({ origin: flow.origin, sourceStatus: source?.status ?? null, status: flow.status }, input.permissions ?? NO_PERMISSIONS),
     activatedAt: flow.activated_at,
     approvedAt: flow.approved_at,
     approvedBy: person(flow.approved_by),

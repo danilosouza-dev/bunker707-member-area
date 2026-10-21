@@ -26,6 +26,7 @@ import { collectMessageCampaignIds, type AudienceDefinition } from "./audience-m
 import { APPROVAL_THRESHOLD } from "./campaign-model";
 import { CommunicationError, describeError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
 import { createFactsLoader, type FactsLoader } from "./facts-loader";
+import { changeFlowState } from "./flow-store";
 import { computeExpiresAt } from "./message-meta";
 import {
   audienceOfRow,
@@ -64,6 +65,34 @@ function loadDispatchFacts(db: CommunicationsDb, now: Date, definition: Audience
 }
 
 /**
+ * Aviso cancelado pelo envio (venceria antes de chegar, terceira falha): as seguintes nunca vao sair. O
+ * fluxo do aviso termina (source_withdrawn, como "Retirar"), em vez de ficar "Ativo" para sempre sem ninguem
+ * para entrar. Melhor esforco: o aviso ja esta cancelado; uma falha aqui so vai para o log.
+ */
+async function endNoticeFlow(db: CommunicationsDb, campaignId: string, now: Date) {
+  try {
+    const { data, error } = await db
+      .from("communication_flows")
+      .select("id")
+      .eq("source_campaign_id", campaignId)
+      .in("status", ["active", "paused"])
+      .is("deleted_at", null);
+
+    if (error) {
+      throw error;
+    }
+
+    for (const { id } of (data ?? []) as { id: string }[]) {
+      await changeFlowState(db, { actorId: null, expectedUpdatedAt: null, flowId: id, now, reason: "source_withdrawn", to: "ended" });
+    }
+  } catch (error) {
+    if (!isMissingCommunicationSchema(error)) {
+      console.error(`[comunicacao] seguintes do aviso cancelado ${campaignId} nao encerradas: ${describeError(error)}`);
+    }
+  }
+}
+
+/**
  * Envia uma notificacao ja reservada (status `sending`). Devolve a situacao no fim: `sent` (todos
  * gravados), `sending` (parou no meio: orcamento do tick, teto da rodada ou falha que sera tentada de
  * novo), `pending_approval` (sem aprovacao e o segmento passou de 500 desde que foi agendada) ou
@@ -93,6 +122,7 @@ export async function dispatchInboxCampaign(input: {
         { dispatch_started_at: null, last_error: EXPIRED_BEFORE_DISPATCH_MESSAGE, status: "canceled" },
         { expectedStatuses: ["sending"] }
       );
+      await endNoticeFlow(db, campaign.id, now);
 
       return { recipients: campaign.recipients_count ?? 0, status: "canceled" };
     }
@@ -160,12 +190,22 @@ export async function dispatchInboxCampaign(input: {
 
     console.error(`[comunicacao] envio do aviso ${campaign.id} falhou (tentativa ${attempts}): ${message}`);
 
-    await updateCampaign(
+    const recorded = await updateCampaign(
       db,
       campaign.id,
       { dispatch_attempts: attempts, dispatch_started_at: null, last_error: message, ...(giveUp ? { status: "canceled" as const } : {}) },
       { expectedStatuses: ["sending"] }
-    ).catch((updateError: unknown) => console.error(`[comunicacao] falha do envio ${campaign.id} nao gravada: ${describeError(updateError)}`));
+    ).then(
+      () => true,
+      (updateError: unknown) => {
+        console.error(`[comunicacao] falha do envio ${campaign.id} nao gravada: ${describeError(updateError)}`);
+        return false;
+      }
+    );
+
+    if (giveUp && recorded) {
+      await endNoticeFlow(db, campaign.id, now);
+    }
 
     return { recipients: campaign.recipients_count ?? 0, status: giveUp ? "canceled" : "sending" };
   }

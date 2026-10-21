@@ -453,6 +453,29 @@ test("arvore: 'pagina do botao' recusada em botao externo ou em pagina nao acomp
   assert.deepEqual(soGravar(tree, { [id(2)]: conteudo({ ctaHref: `/conteudo/${PRODUTO}?de=aviso`, hasCta: true }) }), []);
 });
 
+test("arvore: regra de mensagem que a notificacao citada nunca satisfaz (sem audio, botao ou resposta) nao grava", () => {
+  const regra = (action, negate = true) => ({ action, negate, ref: { kind: "node", nodeId: id(2) }, type: "message" });
+  const filtroDa = (rule) => ({ nodes: [entrada(), passo(), passo({ filter: regras(rule), id: id(3), parentId: id(2) })], origin: "builder" });
+  const semNada = { [id(2)]: conteudo() };
+
+  assert.deepEqual(soGravar(filtroDa(regra("audio_started")), semNada), [["save", id(3), "filter", "A notificação escolhida não tem áudio. Escolha outra regra."]]);
+  assert.deepEqual(soGravar(filtroDa(regra("audio_completed", false)), semNada), [["save", id(3), "filter", "A notificação escolhida não tem áudio. Escolha outra regra."]]);
+  assert.deepEqual(soGravar(filtroDa(regra("clicked")), semNada), [["save", id(3), "filter", "A notificação escolhida não tem botão. Escolha outra regra."]]);
+  assert.deepEqual(soGravar(filtroDa(regra("declined")), semNada), [["save", id(3), "filter", "A notificação escolhida não pede resposta. Escolha outra regra."]]);
+  assert.deepEqual(soGravar(filtroDa(regra("audio_started")), { [id(2)]: conteudo({ hasAudio: true }) }), [], "com audio: vale");
+  assert.deepEqual(soGravar(filtroDa(regra("clicked")), { [id(2)]: conteudo({ ctaHref: "/", hasCta: true }) }), []);
+  assert.deepEqual(soGravar(filtroDa(regra("seen")), semNada), [], "recebeu e viu valem sempre");
+  assert.deepEqual(soGravar(filtroDa(regra("audio_started")), {}), [], "sem o conteudo da notificacao, nao confere");
+
+  // Fluxo de aviso: a entrada e a notificacao principal; o objetivo passa pela mesma conferencia.
+  const doAviso = { nodes: [entrada(), passo({ filter: regras({ action: "clicked", negate: true, ref: { kind: "node", nodeId: ENTRADA }, type: "message" }) })], origin: "notice" };
+  assert.deepEqual(soGravar(doAviso, { [ENTRADA]: conteudo() }), [["save", id(2), "filter", "A notificação escolhida não tem botão. Escolha outra regra."]]);
+  assert.deepEqual(
+    validateFlowGoal({ nodes: [entrada(), passo()], origin: "builder" }, regras(regra("responded", false)), semNada).map((issue) => [issue.level, issue.message]),
+    [["save", "A notificação escolhida não pede resposta. Escolha outra regra."]]
+  );
+});
+
 test("arvore: sem notificacao nao ativa; caminho que termina sem notificacao so avisa", () => {
   assert.deepEqual(problemas({ nodes: [entrada()], origin: "builder" }), [["activation", null, "nodes", "Adicione pelo menos uma notificação."]]);
 

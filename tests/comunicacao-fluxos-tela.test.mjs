@@ -194,6 +194,25 @@ test("barra do construtor: rascunho ativa ou pede aprovacao pela contagem; no ar
   assert.deepEqual([avisoNoAr.primary, avisoNoAr.menu], ["apply", ["resume", "end"]]);
 });
 
+test("fluxo de aviso com a notificacao agendada ou aguardando aprovacao: so Abrir a notificação (nada de editar, pausar ou encerrar)", () => {
+  const acoes = (status, sourceStatus) => vm.availableFlowActions({ origin: "notice", sourceStatus, status }, ALL);
+
+  assert.deepEqual(acoes("active", "scheduled"), ["open_notice"], "agendada: o fluxo ativo espera a notificacao");
+  assert.deepEqual(acoes("pending_approval", "pending_approval"), ["open_notice"], "aguardando aprovacao: muda pela notificacao");
+  assert.deepEqual(acoes("active", "sent"), ["edit", "pause", "end", "open_notice"], "depois do envio, como antes");
+  assert.deepEqual(acoes("active", "sending"), ["edit", "pause", "end", "open_notice"]);
+  assert.deepEqual(acoes("draft", "draft"), ["edit", "open_notice"], "rascunho: Salvar no construtor");
+  assert.deepEqual(vm.availableFlowActions({ origin: "builder", sourceStatus: "scheduled", status: "active" }, EDITOR), ["edit", "pause", "end", "duplicate"]);
+
+  const bar = (input) => vm.builderBarFor({ count: null, origin: "notice", permissions: ALL, saved: true, ...input });
+  const esperando = bar({ sourceStatus: "scheduled", status: "active" });
+  assert.deepEqual([esperando.primary, esperando.applyBar, esperando.menu, esperando.openNotice], [null, false, [], true]);
+  assert.equal(esperando.readOnly, vm.NOTICE_WAITING_NOTE);
+  assert.equal(bar({ sourceStatus: "pending_approval", status: "pending_approval" }).readOnly, vm.NOTICE_WAITING_NOTE);
+  assert.equal(bar({ sourceStatus: "draft", status: "draft" }).primary, "save");
+  assert.equal(bar({ sourceStatus: "sent", status: "active" }).primary, "apply");
+});
+
 test("Quem entra: no de aviso fica so leitura; depois de ativar o jeito de entrar nao muda e, em 'Quem está no segmento agora', nem as regras", () => {
   assert.deepEqual(vm.entryLock({ live: false, mode: "current", origin: "notice" }), { modeLocked: true, note: null, rulesLocked: true });
   assert.deepEqual(vm.entryLock({ live: false, mode: "current", origin: "builder" }), { modeLocked: false, note: null, rulesLocked: false });
@@ -369,6 +388,22 @@ test("inserir: espera padrao pelo passo de cima; no meio, o que vinha depois des
   // Ordem da gravacao: pai antes do filho.
   const { tree } = flowTreeOfDraft(depoisDaPrimeira.draft);
   assert.deepEqual(validateFlowTree(tree, {}).filter((issue) => issue.level === "save" && issue.message === "Passo inválido."), []);
+});
+
+test("inserir: a condicao nova confere 'viu' quando a notificacao de cima nao tem nada para abrir (V7)", () => {
+  const draft = templates.buildFlowTemplate("unopened", sequence());
+  const [entrada, primeira] = draft.nodes;
+  const curta = { ...draft, messages: { ...draft.messages, [primeira.id]: { ...draft.messages[primeira.id], audio: null, body: "Curta.", cta: null, response: null } } };
+  const regraDa = (result) => result.draft.nodes.find((node) => node.id === id(70)).condition.root.items[0];
+
+  assert.equal(regraDa(vm.insertFlowStep(curta, { branch: null, id: id(70), kind: "condition", live: true, parentId: primeira.id })).action, "seen", "texto curto sem nada: 'abriu' nunca acontece");
+  assert.equal(regraDa(vm.insertFlowStep(draft, { branch: null, id: id(70), kind: "condition", live: true, parentId: primeira.id })).action, "opened");
+
+  // Fluxo de aviso: a principal (a entrada) decide pelo que ela tem.
+  const doAviso = { ...draft, origin: "notice" };
+  const aviso = (extra) => ({ body: "Curta.", ctaHref: null, hasAudio: false, hasResponse: false, id: id(900), title: "Principal", ...extra });
+  assert.equal(regraDa(vm.insertFlowStep(doAviso, { branch: null, id: id(70), kind: "condition", live: true, parentId: entrada.id, source: aviso() })).action, "seen");
+  assert.equal(regraDa(vm.insertFlowStep(doAviso, { branch: null, id: id(70), kind: "condition", live: true, parentId: entrada.id, source: aviso({ hasAudio: true }) })).action, "opened");
 });
 
 test("inserir: no maximo 20 passos", () => {
@@ -606,7 +641,11 @@ test("relatorio: funil da notificacao com a parte do anterior, so o que ela tem;
   const naoReceberam = vm.notReceivedLines(STATS);
   assert.equal(naoReceberam.total, 28);
   assert.equal(naoReceberam.deferred, 3);
-  assert.equal(vm.describeNotReceived(naoReceberam.parts), "fora do filtro 12 · atingiram o objetivo antes 6 · venceu o prazo 4 · limite do dia 2 · passo removido 4");
+  // "removido" de 7.8 junta passo removido, retirado do sino, Encerrar e a principal retirada: o rotulo diz isso.
+  assert.equal(
+    vm.describeNotReceived(naoReceberam.parts),
+    "fora do filtro 12 · atingiram o objetivo antes 6 · venceu o prazo 4 · limite do dia 2 · passo removido, retirado ou fluxo encerrado 4"
+  );
   assert.equal(naoReceberam.parts.find((part) => part.id === "cap").help, vm.CAP_HELP);
   assert.match(vm.CAP_HELP, /^Não saiu por causa do limite de 3 por dia/);
 });

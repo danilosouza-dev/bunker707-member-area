@@ -75,6 +75,9 @@ const TOO_MANY_ACTIVE = `Já há ${FLOW_LIMITS.activeFlows} fluxos ativos. Encer
 const END_BEFORE_DELETE = "Encerre o fluxo antes de excluir.";
 const NOTICE_FLOW_OWNED = "Este fluxo é da notificação: duplique ou exclua a notificação.";
 const SENDER_NOT_ON_TEAM = "Escolha alguém da equipe.";
+/** As mesmas frases de saveNoticeFollowUps (actions.ts). */
+const NOTICE_SAVE_FIRST = "Salve a notificação antes de mudar as notificações seguintes.";
+const NOTICE_WITHDRAWN = "Esta notificação foi retirada do sino.";
 const NAME_MAX = 80;
 const COPY_SUFFIX = " (cópia)";
 const HOUR_MS = 3_600_000;
@@ -147,7 +150,10 @@ async function countEntry(db: CommunicationsDb, now: Date, audience: AudienceDef
   return resolveAudienceUserIds(audience, loaded).length;
 }
 
-/** Fluxo de aviso: a contagem e a do aviso (a aprovacao do aviso cobre as seguintes). */
+/**
+ * Fluxo de aviso: a contagem e a do aviso (a aprovacao do aviso cobre as seguintes). O maior dos dois: num
+ * envio cortado pelo orcamento do tick (ainda "sending"), recipients_count e so o parcial.
+ */
 async function noticeRecipients(db: CommunicationsDb, flow: FlowRow) {
   if (!flow.source_campaign_id) {
     return 0;
@@ -155,7 +161,18 @@ async function noticeRecipients(db: CommunicationsDb, flow: FlowRow) {
 
   const [row] = await fetchCampaignsByIds(db, [flow.source_campaign_id]);
 
-  return row?.recipients_count ?? row?.audience_count ?? 0;
+  return Math.max(row?.recipients_count ?? 0, row?.audience_count ?? 0);
+}
+
+/**
+ * O aviso de origem de um fluxo de aviso. Antes do envio (agendado ou aguardando aprovacao) as seguintes
+ * so mudam pela notificacao (docs/23 §2.2: o editor salva o aviso, que volta a rascunho junto com o
+ * fluxo, e a aprovacao cobre o que foi revisado): nada de gravar, pausar, retomar ou encerrar por aqui.
+ */
+async function noticeSourceOf(db: CommunicationsDb, flow: FlowRow) {
+  const [source] = flow.source_campaign_id ? await fetchCampaignsByIds(db, [flow.source_campaign_id]) : [];
+
+  return source && !source.deleted_at ? source : null;
 }
 
 /** Contagem para o limite de 500: entrada agora (construtor) ou quem recebeu o aviso. */
@@ -350,6 +367,20 @@ export async function saveFlow(input: SaveFlowInput): Promise<ActionResult<Saved
       assertSameVersion(existing.flow, data.expectedUpdatedAt);
     }
 
+    // Fluxo de aviso: so com a notificacao em rascunho (antes do envio) ou depois que ela saiu. Agendada ou
+    // aguardando aprovacao, gravar aqui mudaria o que foi agendado ou revisado sem voltar o aviso a rascunho.
+    if (existing?.flow.origin === "notice") {
+      const source = await noticeSourceOf(db, existing.flow);
+
+      if (!source || source.status === "canceled") {
+        throw new CommunicationError(NOTICE_WITHDRAWN, 409);
+      }
+
+      if (!["draft", "sending", "sent"].includes(source.status)) {
+        throw new CommunicationError(NOTICE_SAVE_FIRST, 409);
+      }
+    }
+
     await assertSendersForSave(db, draft);
 
     const live = existing ? isLive(existing.flow.status) : false;
@@ -531,6 +562,16 @@ async function changeLiveState(input: {
   }
 
   assertSameVersion(flow, input.expectedUpdatedAt);
+
+  // Fluxo de aviso antes de a notificacao sair: ele segue a notificacao (cancelar o agendamento, recusar ou
+  // salvar o aviso o voltam a rascunho). Pausar ou encerrar aqui deixaria os dois fora de sincronia.
+  if (flow.origin === "notice") {
+    const source = await noticeSourceOf(db, flow);
+
+    if (!source || (source.status !== "sending" && source.status !== "sent")) {
+      throw new CommunicationError(noticeOriginBanner(source?.title ?? ""), 409);
+    }
+  }
 
   let count: number | null = null;
 

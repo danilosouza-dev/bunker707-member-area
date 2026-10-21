@@ -484,6 +484,9 @@ const ISSUE_COPY = {
   maxDepth: `O fluxo vai até ${FLOW_LIMITS.maxDepth} passos em sequência.`,
   maxNodes: `Use no máximo ${FLOW_LIMITS.maxNodes} passos (notificações e condições).`,
   maxWait: "Escolha de 15 minutos a 30 dias.",
+  messageNoAudio: "A notificação escolhida não tem áudio. Escolha outra regra.",
+  messageNoCta: "A notificação escolhida não tem botão. Escolha outra regra.",
+  messageNoResponse: "A notificação escolhida não pede resposta. Escolha outra regra.",
   noMessage: "Adicione pelo menos uma notificação.",
   pathWithoutMessage: "Este caminho termina sem nenhuma notificação.",
   pickNotification: "Escolha a notificação.",
@@ -523,7 +526,31 @@ function offsetProblem(node: FlowNode): string | null {
 
 type IssueSink = (level: FlowIssue["level"], nodeId: string | null, field: string | null, message: string) => void;
 
-/** Regras de um filtro, condicao ou objetivo: referencias permitidas, "pagina do botao" acompanhada, produto escolhido. */
+/**
+ * Regra de mensagem que a notificacao citada nunca satisfaz (o audio, o botao ou a resposta sairam depois
+ * da escolha): sem isto, "não começou a ouvir o áudio" valeria para todos. Abriu fica de fora (o conteudo
+ * daqui nao traz o texto para saber se ha o que abrir).
+ */
+function impossibleActionProblem(action: string, meta: FlowMessageMeta): string | null {
+  switch (action) {
+    case "audio_started":
+    case "audio_completed":
+      return meta.hasAudio ? null : ISSUE_COPY.messageNoAudio;
+    case "clicked":
+      return meta.hasCta ? null : ISSUE_COPY.messageNoCta;
+    case "accepted":
+    case "declined":
+    case "responded":
+      return meta.hasResponse ? null : ISSUE_COPY.messageNoResponse;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Regras de um filtro, condicao ou objetivo: referencias permitidas, a acao possivel na notificacao citada,
+ * "pagina do botao" acompanhada, produto escolhido.
+ */
 function addRuleIssues(
   add: IssueSink,
   input: { allowed: ReadonlySet<string>; definition: AudienceDefinition | null; field: string; messages: Record<string, FlowMessageMeta>; nodeId: string | null }
@@ -532,6 +559,15 @@ function addRuleIssues(
     if (nodeRefsOf(rule).some((ref) => !input.allowed.has(ref))) {
       add("save", input.nodeId, input.field, ISSUE_COPY.ruleNotAbove);
       continue;
+    }
+
+    if (rule.type === "message" && rule.ref.kind === "node") {
+      const meta = input.messages[rule.ref.nodeId];
+      const problem = meta ? impossibleActionProblem(rule.action, meta) : null;
+
+      if (problem) {
+        add("save", input.nodeId, input.field, problem);
+      }
     }
 
     if (rule.type === "page_visit" && rule.page.kind === "message_cta") {

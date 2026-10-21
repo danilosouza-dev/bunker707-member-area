@@ -284,7 +284,7 @@ export function FlowBuilder({ initial, initialStep = null, now, onChangeTemplate
   const audienceValid = useMemo(() => origin === "builder" && audienceDefinitionSchema.safeParse(JSON.parse(audienceKey)).success, [audienceKey, origin]);
   const countView: AudienceCountState = audienceValid ? count : { status: "incomplete" };
   const liveCount = countView.status === "ready" ? countView.count : countView.status === "loading" ? (countView.previous?.count ?? null) : null;
-  const bar = builderBarFor({ count: liveCount, origin, permissions, saved: Boolean(version), status });
+  const bar = builderBarFor({ count: liveCount, origin, permissions, saved: Boolean(version), sourceStatus: source?.status ?? null, status });
   const readOnly = bar.readOnly !== null;
   const locked = busy !== null;
   const disabled = locked || readOnly;
@@ -401,7 +401,7 @@ export function FlowBuilder({ initial, initialStep = null, now, onChangeTemplate
 
   function insert(input: { branch: FlowBranch | null; kind: NewStepKind; parentId: string }) {
     const id = crypto.randomUUID();
-    const result = insertFlowStep(draft, { ...input, id, live });
+    const result = insertFlowStep(draft, { ...input, id, live, source });
 
     if (!result) {
       adminToast.info(MAX_STEPS_MESSAGE);
@@ -935,7 +935,7 @@ export function FlowBuilder({ initial, initialStep = null, now, onChangeTemplate
       ) : null}
       {live && !readOnly ? <Banner>{LIVE_EDIT_BANNER}</Banner> : null}
       {readOnly ? <Banner>{bar.readOnly}</Banner> : null}
-      {status === "pending_approval" ? (
+      {status === "pending_approval" && origin === "builder" ? (
         <Banner icon={<Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-[var(--warning)]" />}>
           <p className="font-medium text-[var(--text-primary)]">{PENDING_APPROVAL_BANNER}</p>
           <p>
