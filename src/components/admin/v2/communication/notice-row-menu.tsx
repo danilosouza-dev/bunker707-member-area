@@ -276,6 +276,12 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
       destructive={copy?.destructive}
       onConfirm={() => {
         if (confirming) {
+          // Excluir e Retirar do sino: o dialogo fecha na hora (o toast confirma quando terminar; um erro
+          // aparece no banner da tela, como nas outras acoes).
+          if (confirming.action === "delete" || confirming.action === "withdraw") {
+            setConfirming(null);
+          }
+
           void execute(confirming.action, confirming.notice);
         }
       }}

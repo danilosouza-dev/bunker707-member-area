@@ -185,18 +185,9 @@ export async function getEligiblePopup(userId: string, now = Date.now()): Promis
     }
 
     const db = communicationsDb();
-    const [deliveries, lastSeen] = await Promise.all([
-      db.from("campaign_deliveries").select(DELIVERY_COLUMNS).eq("user_id", userId).in("campaign_id", live.map((row) => row.id)),
-      db
-        .from("campaign_deliveries")
-        .select("last_seen_at")
-        .eq("user_id", userId)
-        .not("last_seen_at", "is", null)
-        .order("last_seen_at", { ascending: false })
-        .limit(1)
-    ]);
+    // Sem limite entre pop-ups (docs/24 §10): basta a linha de cada pop-up no ar.
+    const deliveries = await db.from("campaign_deliveries").select(DELIVERY_COLUMNS).eq("user_id", userId).in("campaign_id", live.map((row) => row.id));
     assertNoDbError(deliveries.error, "Pop-up do aluno");
-    assertNoDbError(lastSeen.error, "Ultimo pop-up do aluno");
 
     const states = ((deliveries.data ?? []) as DeliveryRow[]).map(toDeliveryState);
     const livePopups: LivePopup[] = live.map((row) => ({
@@ -207,7 +198,6 @@ export async function getEligiblePopup(userId: string, now = Date.now()): Promis
     }));
     const chosen = pickPopup({
       deliveries: states,
-      lastAnyPopupSeenAt: timeOf(((lastSeen.data ?? []) as { last_seen_at: string | null }[])[0]?.last_seen_at),
       live: livePopups,
       now
     });

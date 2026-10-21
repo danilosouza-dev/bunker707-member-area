@@ -156,7 +156,6 @@ test("titulo de comentario separa o nome (negrito) do resto; texto longo comeca 
   assert.deepEqual(model.splitActorTitle("Alguém mencionou você", null), { actor: null, rest: "Alguém mencionou você" });
   assert.equal(model.shouldClampNotificationBody("a".repeat(180)), false);
   assert.equal(model.shouldClampNotificationBody("a".repeat(181)), true);
-  assert.equal(model.POPUP_SESSION_KEY, "bunker707:popup-shown");
 });
 
 /* ------------------------------------------------------------------------------------------------

@@ -170,7 +170,7 @@ test("Mostrar de novo: dialogo sem numero e toasts com quantos voltam a ver (ou 
   assert.deepEqual(model.noticeActionConfirm("reshow", notice({ kind: "popup", situation: "active", title: "Turma nova" })), {
     confirmLabel: "Mostrar de novo",
     description:
-      "O pop-up volta a aparecer para quem já viu e não clicou, respeitando o limite de 1 pop-up por dia. Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver.",
+      "O pop-up volta a aparecer para quem já viu e não clicou. Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver.",
     destructive: false,
     title: "Mostrar “Turma nova” de novo?"
   });
@@ -265,7 +265,7 @@ test("pop-up no ar: banner, toasts pela regra salva e quantos voltam a ver", () 
   assert.equal(model.livePopupBanner("paused"), "Este pop-up está pausado. As mudanças valem quando ele voltar ao ar.");
 
   assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once" }), "Pop-up atualizado. Quem já viu não vê de novo.");
-  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "until_action" }), "Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois do último pop-up que viu.");
+  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "until_action" }), "Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois de ter visto este pop-up.");
   assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once", reshown: 120 }), "Pop-up atualizado. Ele volta a aparecer para 120 alunos que já tinham visto.");
   assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once", reshown: 1 }), "Pop-up atualizado. Ele volta a aparecer para 1 aluno que já tinha visto.");
   assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once", reshown: 0 }), "Pop-up atualizado. Quem já viu não vê de novo.", "ninguem para mostrar de novo");
@@ -286,12 +286,12 @@ test("Mostrar de novo no editor: so no pop-up no ar em Uma vez, com a contagem e
   assert.equal(model.RESHOW_SWITCH_LABEL, "Mostrar de novo para quem já viu");
 
   assert.deepEqual(model.reshowSwitchCopy(120), {
-    description: "Para os 120 alunos que já viram e não clicaram. Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver. Vale o limite de 1 pop-up por dia.",
+    description: "Para os 120 alunos que já viram e não clicaram. Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver.",
     disabled: false
   });
   assert.equal(
     model.reshowSwitchCopy(1).description,
-    "Para 1 aluno que já viu e não clicou. Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver. Vale o limite de 1 pop-up por dia."
+    "Para 1 aluno que já viu e não clicou. Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver."
   );
   assert.deepEqual(model.reshowSwitchCopy(0), {
     description: "Ninguém precisa ver de novo agora: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.",
@@ -302,7 +302,7 @@ test("Mostrar de novo no editor: so no pop-up no ar em Uma vez, com a contagem e
 
   assert.equal(
     model.popupRepeatChangeHint({ saved: "once", shown: "until_action", status: "active" }),
-    "Quem só fechou volta a ver 24 horas depois do último pop-up que viu, até clicar. Quem clicou ou escolheu “Não mostrar de novo” não vê mais."
+    "Quem só fechou volta a ver 24 horas depois de ter visto este pop-up, até clicar. Quem clicou ou escolheu “Não mostrar de novo” não vê mais."
   );
   assert.equal(
     model.popupRepeatChangeHint({ saved: "until_action", shown: "once", status: "paused" }),

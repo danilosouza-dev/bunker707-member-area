@@ -310,7 +310,7 @@ export function NoticeWhenFields({ disabled, draft, errors, live, onChange }: No
 
       <p className="flex items-start gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2.5 text-[13px] leading-5 text-[var(--text-secondary)]">
         <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        Para não cansar o aluno, mostramos no máximo 1 pop-up por dia, só na home e nunca durante uma aula.
+        Por enquanto o pop-up aparece só na home, nunca durante uma aula, e um de cada vez.
       </p>
     </div>
   );

@@ -584,6 +584,27 @@ test("excluir o pop-up no ar ou pausado: sai da home na hora e da lista; so com 
   assert.ok(!(await listNotices({ page: 1, permissions: TODAS })).items.some((item) => [noAr.id, pausado.id].includes(item.id)));
 });
 
+test("sem limite entre pop-ups (docs/24 §10.8): quem acabou de ver um pop-up ve o proximo; o mesmo 'Até o aluno clicar' so volta 24 h depois", async () => {
+  const primeiro = await publicar(popup({ repeat: "until_action", title: "Primeiro pop-up do dia" }));
+  assert.equal((await popupDe(aluna))?.id, primeiro.id);
+  assert.equal((await evento(aluna, primeiro.id, "impressed")).status, 200);
+  assert.equal((await evento(aluna, primeiro.id, "closed")).status, 200);
+
+  const segundo = await publicar(popup({ title: "Segundo pop-up do dia" }));
+  assert.equal((await popupDe(aluna))?.id, segundo.id, "viu outro pop-up agora e mesmo assim ve este");
+  assert.equal((await evento(aluna, segundo.id, "impressed")).status, 200);
+
+  actAs(produtor);
+  ok(await actions.deleteNotice({ id: segundo.id }));
+  assert.notEqual((await popupDe(aluna))?.id, primeiro.id, "o primeiro (Até o aluno clicar) espera 24 h depois de visto");
+  await passaram(aluna.id, 25);
+  const depois = await popupDe(aluna);
+  assert.ok(depois, "depois de 24 h ha pop-up de novo");
+
+  actAs(produtor);
+  ok(await actions.deleteNotice({ id: primeiro.id }));
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Regras que citam a notificacao (docs/24 §0 T23)
  * ---------------------------------------------------------------------------------------------- */
@@ -682,13 +703,13 @@ test("mostrar de novo (menu), so em 'Uma vez': quem fechou ha 25 h nao ve antes,
   const [registro] = await auditoria(publicado.id, "communication.popup_reshown");
   assert.deepEqual(registro.metadata, { count: 1, via: "menu" });
 
-  // Viu de novo agora: o limite de 1 pop-up por dia vale; mostrar de novo conta ela outra vez, mas so 24 h depois.
+  // Viu de novo agora e "Uma vez" a pula; mostrar de novo conta ela outra vez, na hora: sem limite entre
+  // pop-ups (docs/24 §10).
   await evento(aluna, publicado.id, "impressed");
+  assert.equal(await popupDe(aluna), null, "Uma vez: ja viu depois do ultimo mostrar de novo");
   actAs(produtor);
   assert.equal(ok(await actions.reshowPopup({ id: publicado.id })).reshown, 1);
-  assert.equal(await popupDe(aluna), null, "viu ha instantes: o intervalo de 24 h continua");
-  await passaram(aluna.id, 25);
-  assert.equal((await popupDe(aluna))?.id, publicado.id);
+  assert.equal((await popupDe(aluna))?.id, publicado.id, "volta na hora");
 });
 
 test("mostrar de novo: 'Lembrar depois' volta a valer duas vezes; conta so quem esta no segmento, viu e nao clicou nem tem um 'Lembrar depois' por ver", async () => {

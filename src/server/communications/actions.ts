@@ -1397,7 +1397,7 @@ export async function withdrawNotice(input: WithdrawNoticeInput): Promise<Action
 /**
  * [messaging.publish] "Mostrar de novo para quem já viu" pelo menu (docs/24 §2.4 e §4.9): so pop-up no ar ou
  * pausado em "Uma vez". Quem ainda esta no segmento, viu e nao clicou nem escolheu "Não mostrar de novo"
- * volta a contar como novo (o limite de 1 pop-up por dia continua). Acima de 500, messaging.publish_large.
+ * volta a contar como novo. Acima de 500, messaging.publish_large.
  * O aviso nao muda (a versao devolvida e a mesma).
  */
 export async function reshowPopup(input: NoticeIdInput): Promise<ActionResult<{ reshown: number; updatedAt: string }>> {
@@ -1648,9 +1648,8 @@ export async function deleteNotice(input: DeleteNoticeInput): Promise<ActionResu
 
       citations = cited;
 
-      if (row.kind === "popup") {
-        invalidateLivePopups({ from: "action" });
-      }
+      // Pop-up fora do ar (rascunho, agendado, encerrado): a lista em cache so tem os no ar e a leitura ja
+      // descarta os encerrados, entao nao ha o que invalidar (e a resposta nao volta com a pagina renderizada).
 
       // v2: as seguintes saem junto (no ar ou pausado, encerradas antes: source_deleted).
       if (flow) {

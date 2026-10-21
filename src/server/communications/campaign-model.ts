@@ -26,12 +26,14 @@ export const NOTICE_LIMITS = {
 /** Acima disto, quem nao tem "messaging.publish_large" envia para aprovacao (docs/17 D4). */
 export const APPROVAL_THRESHOLD = 500;
 
-/** Limites fixos do pop-up (docs/17 §1.8.1): aparecem no editor como texto, nunca como campo. */
+/**
+ * Regras fixas de cada pop-up (docs/17 §1.8.1). Sem limite entre pop-ups (decisao do produtor, docs/24 §10):
+ * cada um segue a sua regra; "Ate o aluno clicar" volta 24 h depois de o aluno ter visto este pop-up.
+ */
 export const POPUP_RULES = {
   delayMs: 3_000,
   maxSnoozes: 2,
   minHoursBetween: 24,
-  perSession: 1,
   snoozeHours: 24
 } as const;
 
@@ -566,17 +568,11 @@ export function reshowSkipped(delivery: PopupDeliveryState) {
 
 export function pickPopup(input: {
   deliveries: readonly PopupDeliveryState[];
-  /** Ultima vez que o aluno viu qualquer pop-up. */
-  lastAnyPopupSeenAt: number | null;
   live: readonly LivePopup[];
   now: number;
 }): string | null {
   const { now } = input;
   const gap = POPUP_RULES.minHoursBetween * HOUR_MS;
-
-  if (input.lastAnyPopupSeenAt !== null && now - input.lastAnyPopupSeenAt < gap) {
-    return null;
-  }
 
   const byCampaign = new Map(input.deliveries.map((delivery) => [delivery.campaignId, delivery] as const));
   const candidates = [...input.live].sort((left, right) => right.startsAt - left.startsAt || (left.id < right.id ? -1 : 1));
@@ -592,8 +588,7 @@ export function pickPopup(input: {
       continue;
     }
 
-    // "Uma vez" conta desde o ultimo "mostrar de novo"; "Ate o aluno clicar" volta 24 h depois (o intervalo
-    // de todos os pop-ups, contado do ultimo visto, este incluido, ja cobre isso).
+    // "Uma vez" conta desde o ultimo "mostrar de novo"; "Ate o aluno clicar" volta 24 h depois de ter visto este.
     if (popup.repeat === "once" ? onceSkips(delivery) : delivery.lastSeenAt !== null && now - delivery.lastSeenAt < gap) {
       continue;
     }

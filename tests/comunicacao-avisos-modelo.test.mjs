@@ -200,15 +200,18 @@ const entrega = (campaignId, extra = {}) => ({
   ...extra
 });
 const noAr = (id, extra = {}) => ({ allowSnooze: true, id, repeat: "once", startsAt: now - 10 * HOUR, ...extra });
-const escolhe = (input) => campaign.pickPopup({ deliveries: [], lastAnyPopupSeenAt: null, live: [], now, ...input });
+const escolhe = (input) => campaign.pickPopup({ deliveries: [], live: [], now, ...input });
 
-test("pop-up: no maximo 1 a cada 24 h; so com linha elegivel; o mais recente primeiro (empate pelo id)", () => {
+test("pop-up: sem limite entre pop-ups (docs/24 §10); so com linha elegivel; o mais recente primeiro (empate pelo id)", () => {
   const live = [noAr("a", { startsAt: now - 30 * HOUR }), noAr("c", { startsAt: now - HOUR }), noAr("b", { startsAt: now - HOUR })];
   const deliveries = [entrega("a"), entrega("b"), entrega("c")];
 
   assert.equal(escolhe({ deliveries, live }), "b", "c e b comecaram juntos: b antes pelo id");
-  assert.equal(escolhe({ deliveries, lastAnyPopupSeenAt: now - 23 * HOUR, live }), null, "viu um pop-up ha 23 h");
-  assert.equal(escolhe({ deliveries, lastAnyPopupSeenAt: now - 24 * HOUR, live }), "b");
+  assert.equal(
+    escolhe({ deliveries: [entrega("a"), entrega("b", { impressions: 1, lastSeenAt: now - HOUR }), entrega("c")], live }),
+    "c",
+    "viu outro pop-up ha 1 h: o proximo aparece mesmo assim"
+  );
   assert.equal(escolhe({ deliveries: [entrega("a")], live }), "a", "sem linha nao ha pop-up");
   assert.equal(escolhe({ deliveries: [entrega("a", { eligible: false })], live }), null, "saiu do segmento");
   assert.equal(escolhe({ deliveries, live: [] }), null);
@@ -246,11 +249,6 @@ test("pop-up 'Uma vez' com 'Lembrar depois': volta quando o lembrete vence; cada
   );
   assert.equal(escolhe({ deliveries: [visto({ impressions: 3, snoozeCount: 2, snoozedUntil: now - HOUR })], live }), null, "no maximo 2 lembretes");
   assert.equal(escolhe({ deliveries: [visto({})], live }), null, "fechou sem lembrar depois: nao volta");
-  assert.equal(
-    escolhe({ deliveries: [visto({ snoozeCount: 1, snoozedUntil: now - HOUR })], lastAnyPopupSeenAt: now - 2 * HOUR, live }),
-    null,
-    "o limite de 1 pop-up a cada 24 h continua valendo"
-  );
 });
 
 test("versao do editor: o mesmo instante em qualquer formato ISO, ate o microssegundo", () => {
@@ -297,25 +295,24 @@ test("eventos do pop-up: impressao conta e marca a primeira vez; clique e 'Não 
 const escolheComoNoServidor = ({ deliveries, live }) =>
   campaign.pickPopup({
     deliveries,
-    lastAnyPopupSeenAt: deliveries.reduce((latest, delivery) => (delivery.lastSeenAt !== null && (latest === null || delivery.lastSeenAt > latest) ? delivery.lastSeenAt : latest), null),
     live,
     now
   });
 const zerado = (extra) => ({ ...extra, impressionsBeforeReshow: extra.impressions ?? 0, snoozesBeforeReshow: Math.min(extra.snoozeCount ?? 0, 1), snoozeCount: Math.min(extra.snoozeCount ?? 0, 1), snoozedUntil: null });
 
-test("mostrar de novo: 'Uma vez' visto ha 25 h nao volta; depois de zerado volta; visto ha 2 h e zerado espera as 24 h", () => {
+test("mostrar de novo: 'Uma vez' visto ha 25 h nao volta; depois de zerado volta, ate visto ha 2 h (sem limite entre pop-ups)", () => {
   const live = [noAr("a")];
   const fechou25h = { impressions: 1, lastSeenAt: now - 25 * HOUR };
 
   assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", fechou25h)], live }), null, "uma vez: quem fechou nao ve de novo");
   assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado(fechou25h))], live }), "a", "zerado: conta como novo");
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ impressions: 1, lastSeenAt: now - 2 * HOUR }))], live }), null, "o intervalo de 24 h vale");
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ impressions: 1, lastSeenAt: now - 2 * HOUR }))], live }), "a", "zerado volta na hora (docs/24 §10)");
   assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { ...zerado(fechou25h), impressions: 2, lastSeenAt: now - 25 * HOUR })], live }), null, "viu de novo depois de zerado: some");
   assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ ...fechou25h, clickedAt: now - 25 * HOUR }))], live }), null, "clicou: nunca");
   assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ ...fechou25h, dismissedAt: now - 25 * HOUR }))], live }), null, "Não mostrar de novo: nunca");
 });
 
-test("mostrar de novo: 'Até o aluno clicar' volta 24 h depois do ultimo pop-up visto, sem zerar nada", () => {
+test("mostrar de novo: 'Até o aluno clicar' volta 24 h depois de ter visto este pop-up, sem zerar nada", () => {
   const ateClicar = [noAr("a", { repeat: "until_action" })];
 
   assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { impressions: 1, lastSeenAt: now - 2 * HOUR })], live: ateClicar }), null);
@@ -347,7 +344,7 @@ test("mostrar de novo: 'Lembrar depois' conta desde o zerar (mais 2 vezes); sem 
     const v1 = entrega("a", { lastSeenAt: extra.impressions ? now - 25 * HOUR : null, ...extra });
     const v3 = { ...v1, impressionsBeforeReshow: 0, snoozesBeforeReshow: 0 };
 
-    assert.equal(campaign.pickPopup({ deliveries: [v3], lastAnyPopupSeenAt: null, live, now }), campaign.pickPopup({ deliveries: [v1], lastAnyPopupSeenAt: null, live, now }), JSON.stringify(extra));
+    assert.equal(campaign.pickPopup({ deliveries: [v3], live, now }), campaign.pickPopup({ deliveries: [v1], live, now }), JSON.stringify(extra));
     assert.equal(campaign.canSnooze(v3, true), campaign.canSnooze(v1, true));
   }
 });

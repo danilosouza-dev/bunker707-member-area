@@ -490,7 +490,7 @@ export function noticeActionConfirm(
       return {
         confirmLabel: "Mostrar de novo",
         description:
-          "O pop-up volta a aparecer para quem já viu e não clicou, respeitando o limite de 1 pop-up por dia. Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver.",
+          "O pop-up volta a aparecer para quem já viu e não clicou. Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver.",
         destructive: false,
         title: `Mostrar “${title}” de novo?`
       };
@@ -656,7 +656,7 @@ export function savedNoticeToast(
     }
 
     return result.repeat === "until_action"
-      ? "Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois do último pop-up que viu."
+      ? "Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois de ter visto este pop-up."
       : "Pop-up atualizado. Quem já viu não vê de novo.";
   }
 
@@ -691,7 +691,7 @@ export const RESHOW_SWITCH_LABEL = "Mostrar de novo para quem já viu";
  * (o switch fica desligado e travado). Sem a contagem, a frase sem numero.
  */
 export function reshowSwitchCopy(count: number | null | undefined): { description: string; disabled: boolean } {
-  const rest = "Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver. Vale o limite de 1 pop-up por dia.";
+  const rest = "Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver.";
 
   if (count === 0) {
     return { description: "Ninguém precisa ver de novo agora: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.", disabled: true };
@@ -717,7 +717,7 @@ export function popupRepeatChangeHint(input: { saved: NoticeDraft["repeat"]; sho
   }
 
   return input.shown === "until_action"
-    ? "Quem só fechou volta a ver 24 horas depois do último pop-up que viu, até clicar. Quem clicou ou escolheu “Não mostrar de novo” não vê mais."
+    ? "Quem só fechou volta a ver 24 horas depois de ter visto este pop-up, até clicar. Quem clicou ou escolheu “Não mostrar de novo” não vê mais."
     : "Quem já viu não vê de novo, a não ser que você ligue “Mostrar de novo para quem já viu”.";
 }
 

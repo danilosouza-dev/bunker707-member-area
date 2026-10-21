@@ -25,9 +25,6 @@ import { isSafeHeroCtaHref } from "../../../server/member-area/home-hero-links";
 /** O numero do sino vale por 1 minuto entre trocas de pagina (o topo remonta a cada pagina). */
 export const SUMMARY_TTL_MS = 60_000;
 
-/** O pop-up aparece no maximo uma vez por sessao do navegador (alem do limite de 24 h do servidor). */
-export const POPUP_SESSION_KEY = "bunker707:popup-shown";
-
 /** Texto do aviso acima disto comeca recolhido em 4 linhas, com "Ver mais". */
 export const NOTIFICATION_BODY_CLAMP_CHARS = 180;
 

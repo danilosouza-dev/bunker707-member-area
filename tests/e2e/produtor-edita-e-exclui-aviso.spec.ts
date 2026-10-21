@@ -149,7 +149,7 @@ test.describe("produtor edita e mostra de novo", () => {
     await page.getByRole("menuitem", { name: "Mostrar de novo para quem já viu" }).click();
     const dialogo = page.getByRole("dialog", { name: `Mostrar “${POPUP}” de novo?` });
     await expect(dialogo).toBeVisible();
-    await expect(dialogo).toContainText("O pop-up volta a aparecer para quem já viu e não clicou, respeitando o limite de 1 pop-up por dia.");
+    await expect(dialogo).toContainText("O pop-up volta a aparecer para quem já viu e não clicou.");
     await dialogo.getByRole("button", { exact: true, name: "Mostrar de novo" }).click();
     await expect(page.getByText("O pop-up volta a aparecer para 1 aluno.", { exact: true })).toBeVisible();
   });
@@ -216,9 +216,9 @@ test.describe("produtor exclui e muda para Até o aluno clicar", () => {
     await page.getByRole("radiogroup", { name: "Quantas vezes o pop-up aparece" }).getByText("Até o aluno clicar").click();
     await expect(page.getByRole("radio", { name: "Até o aluno clicar" })).toBeChecked();
     await expect(mostrarDeNovo).toHaveCount(0);
-    await expect(page.getByText("Quem só fechou volta a ver 24 horas depois do último pop-up que viu, até clicar.", { exact: false })).toBeVisible();
+    await expect(page.getByText("Quem só fechou volta a ver 24 horas depois de ter visto este pop-up, até clicar.", { exact: false })).toBeVisible();
     await page.getByRole("button", { exact: true, name: "Salvar alterações" }).click();
-    await expect(page.getByText("Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois do último pop-up que viu.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois de ter visto este pop-up.", { exact: true })).toBeVisible();
 
     const depois = await abrirMenuDaLinha(page, POPUP);
     await expect(depois.filter({ hasText: "Editar" })).toHaveCount(1);
