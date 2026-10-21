@@ -25,6 +25,7 @@ import {
 import {
   AUDIO_LIMITS,
   isEditableStatus,
+  isLiveNoticeStatus,
   isoToSaoPauloLocal,
   publishDecision,
   saoPauloLocalToIso,
@@ -34,6 +35,7 @@ import {
   type NoticeAction,
   type NoticePermissions
 } from "../../../../server/communications/campaign-model";
+import { notificationPollOf } from "../../../../server/communications/interactions-model";
 import type { NotificationItem, PopupItem } from "../../../../server/communications/notification-model";
 import type { NoticeDraft } from "../../../../server/communications/schemas";
 // v2 (docs/23): quem envia, icone ao lado do titulo e quanto tempo fica no sino.
@@ -148,7 +150,8 @@ export function opensNoticeEditor(input: {
     return false;
   }
 
-  return !isLivePopupStatus(input.kind, input.status) || (input.wantsEditor && input.actions.includes("edit"));
+  // v3a: a notificacao enviada (isEditableStatus) abre como o pop-up no ar: relatorio, e editor so com ?editar=1.
+  return !isLiveNoticeStatus(input.kind, input.status) || (input.wantsEditor && input.actions.includes("edit"));
 }
 
 export function newNoticeHref(kind?: CampaignKind) {
@@ -259,8 +262,11 @@ export const NOTICE_ACTION_LABELS: Record<NoticeAction, string> = {
   pause: "Pausar",
   publish: "Publicar",
   reject: "Recusar pedido",
+  // v3a (docs/24 §2.1)
+  reshow: "Mostrar de novo para quem já viu",
   resume: "Retomar",
   send_test: "Enviar teste para mim",
+  view_report: "Ver relatório",
   withdraw: "Retirar do sino"
 };
 
@@ -508,22 +514,31 @@ export function isLivePopupStatus(kind: CampaignKind, status: CampaignStatus | n
   return kind === "popup" && (status === "active" || status === "paused");
 }
 
-/** Tipo travado depois de publicado (notificacao agendada, pop-up no ar ou pausado). */
+/** Tipo travado depois de publicado (notificacao agendada ou enviada, pop-up no ar ou pausado). */
 export function isNoticeKindLocked(status: CampaignStatus | null | undefined) {
-  return status === "scheduled" || status === "active" || status === "paused";
+  return status === "scheduled" || status === "sent" || status === "active" || status === "paused";
 }
 
 /**
  * O que vai para o servidor: so os campos do tipo escolhido. O editor guarda o resto (trocar de tipo e
- * voltar nao perde a janela do pop-up nem a resposta da notificacao), mas nada disso e validado nem
- * gravado no outro tipo.
+ * voltar nao perde a janela do pop-up nem a resposta, a enquete e as reacoes da notificacao), mas nada
+ * disso e validado nem gravado no outro tipo. O pop-up abre o destino pelo botao (v3a).
  */
 export function noticeDraftForKind(draft: NoticeDraft): NoticeDraft {
   if (draft.kind === "inbox") {
     return { ...draft, allowSnooze: true, repeat: "once", window: { endsAt: null, startsAt: null } };
   }
 
-  return { ...draft, response: null, schedule: { mode: "now" }, sender: null, validity: { mode: "default" } };
+  return {
+    ...draft,
+    cta: draft.cta ? { ...draft.cta, display: "button" } : null,
+    poll: null,
+    reactions: false,
+    response: null,
+    schedule: { mode: "now" },
+    sender: null,
+    validity: { mode: "default" }
+  };
 }
 
 function isoOrRaw(value: string) {
@@ -544,10 +559,24 @@ export function canonicalNoticeDraft(draft: NoticeDraft): NoticeDraft {
     audience: normalizeAudience(draft.audience),
     audio: draft.audio ? { ...draft.audio, peaks: [...draft.audio.peaks] } : null,
     body: draft.body.trim(),
-    cta: draft.cta ? { href: draft.cta.href.trim(), label: draft.cta.label.trim(), target: draft.cta.target } : null,
+    cta: draft.cta
+      ? { display: inbox ? (draft.cta.display ?? "button") : "button", href: draft.cta.href.trim(), label: draft.cta.label.trim(), target: draft.cta.target }
+      : null,
     icon: draft.icon ? { color: draft.icon.color, id: draft.icon.id } : null,
     image: draft.image ? { alt: draft.image.alt.trim(), url: draft.image.url.trim() } : null,
     kind: draft.kind,
+    // v3a: enquete com textos aparados e o fim em ISO (como pollSchema grava); reacoes so na notificacao.
+    poll:
+      inbox && draft.poll
+        ? {
+            closesAt: draft.poll.closesAt === null ? null : isoOrRaw(draft.poll.closesAt),
+            multiple: draft.poll.multiple,
+            options: draft.poll.options.map((option) => ({ id: option.id, label: option.label.trim() })),
+            question: draft.poll.question.trim(),
+            showResults: draft.poll.showResults
+          }
+        : null,
+    reactions: inbox ? (draft.reactions ?? false) : false,
     repeat: inbox ? "once" : draft.repeat,
     response: inbox && draft.response ? { acceptLabel: draft.response.acceptLabel.trim(), declineLabel: draft.response.declineLabel.trim() } : null,
     schedule: inbox && draft.schedule.mode === "at" ? { mode: "at", sendAt: isoOrRaw(draft.schedule.sendAt) } : { mode: "now" },
@@ -961,32 +990,57 @@ export function previewExpiresAt(content: Pick<PreviewContent, "kind" | "validit
   return Number.isFinite(expiresAt) && expiresAt > created ? new Date(expiresAt).toISOString() : null;
 }
 
+/** Pilulas "Enquete na prévia" (v3a): antes do voto, ou com a primeira opção como o voto do próprio aluno. */
+export type PreviewPoll = "after" | "before";
+
+/** Enquete da previa: so o voto do proprio aluno (1 voto, 100%), nunca numero inventado. */
+function previewPollOf(draft: Pick<NoticeDraft, "kind" | "poll">, mode: PreviewPoll | undefined): NotificationItem["poll"] {
+  const poll = draft.kind === "inbox" ? draft.poll : null;
+
+  if (!poll || poll.options.length === 0) {
+    return null;
+  }
+
+  const options = poll.options.map((option) => ({ id: option.id, label: option.label.trim() }));
+  const first = options[0].id;
+  const voted = mode === "after";
+
+  return notificationPollOf(
+    { ...poll, options, question: poll.question.trim() },
+    { choice: voted ? [first] : [], closed: false, tally: voted ? { counts: { [first]: 1 }, voters: 1 } : null }
+  );
+}
+
 /**
  * Notificacao do sino como o aluno recebe (nao lida, criada agora): de quem envia (a pessoa da equipe;
- * sem ela, a escola), com o icone, o fim no sino (o "Termina em") e o audio no estado das pilulas.
+ * sem ela, a escola), com o icone, o fim no sino (o "Termina em") e o audio no estado das pilulas. v3a: como
+ * o aluno chega ao destino, o botao de reagir (sem reacao) e a enquete antes ou depois do voto (`pollPreview`).
  */
 export function draftToNotificationItem(
-  draft: PreviewContent,
+  draft: PreviewContent & Partial<Pick<NoticeDraft, "poll" | "reactions">>,
   input: {
     /** Fim da notificacao de referencia (seguinte "ate a principal sumir"). */
     anchorExpiresAt?: number | null;
     createdAt: string;
     imageUrl?: string | null;
     listen?: PreviewListen;
+    pollPreview?: PreviewPoll;
     sender?: { avatarUrl: string | null; name: string } | null;
   }
 ): NotificationItem {
   const imageUrl = input.imageUrl ?? draft.image?.url ?? null;
   const heard = input.listen === "heard";
+  const cta = previewCta(draft.cta);
+  const inbox = draft.kind === "inbox";
 
   return {
-    actor: draft.kind === "inbox" && input.sender ? { avatarUrl: input.sender.avatarUrl, name: input.sender.name } : null,
+    actor: inbox && input.sender ? { avatarUrl: input.sender.avatarUrl, name: input.sender.name } : null,
     audio: draft.audio ? { ...draft.audio } : null,
     audioProgress: draft.audio ? { completed: heard, heard: (heard ? "1" : "0").repeat(AUDIO_HEARD_SLOTS), percent: heard ? 100 : 0 } : null,
     body: draft.body.trim(),
     context: null,
     createdAt: input.createdAt,
-    cta: previewCta(draft.cta),
+    cta: cta ? { ...cta, display: inbox ? (draft.cta?.display ?? "button") : "button" } : null,
     expiresAt: previewExpiresAt(draft, input.createdAt, input.anchorExpiresAt),
     href: null,
     icon: draft.icon ? { color: draft.icon.color, id: draft.icon.id } : null,
@@ -994,9 +1048,11 @@ export function draftToNotificationItem(
     image: imageUrl ? { alt: draft.image?.alt.trim() ?? "", url: imageUrl } : null,
     kind: "notice",
     openedAt: null,
+    poll: previewPollOf({ kind: draft.kind, poll: draft.poll ?? null }, input.pollPreview),
+    reactions: inbox && draft.reactions ? { value: null } : null,
     readAt: null,
     response:
-      draft.kind === "inbox" && draft.response
+      inbox && draft.response
         ? {
             acceptLabel: draft.response.acceptLabel.trim() || "Aceitar",
             declineLabel: draft.response.declineLabel.trim() || "Recusar",
@@ -1090,7 +1146,11 @@ export const MESSAGE_ACTION_LABELS: Record<MessageAction, string> = {
   opened: "abriu",
   received: "recebeu",
   responded: "respondeu",
-  seen: "viu no sino"
+  seen: "viu no sino",
+  // v3a (docs/24 §6)
+  hidden: "excluiu do sino",
+  reacted: "reagiu",
+  voted: "votou na enquete"
 };
 
 /**
@@ -1215,6 +1275,11 @@ export function messageActionsFor(
       case "declined":
       case "responded":
         return option?.hasResponse ?? false;
+      // v3a (P0): reagiu, votou e excluiu do sino entram no seletor com o pacote de regras (docs/24 §2.7).
+      case "hidden":
+      case "reacted":
+      case "voted":
+        return false;
       default:
         return true;
     }

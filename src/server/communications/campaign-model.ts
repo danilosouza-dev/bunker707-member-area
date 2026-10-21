@@ -3,6 +3,8 @@
 // pop-up de cada aluno. Modulo puro: sem "server-only", imports relativos; os testes
 // (tests/comunicacao-avisos-modelo.test.mjs) carregam direto pelo Node e o editor do admin usa as
 // mesmas regras e frases.
+// v3a (docs/24 §2.1 e §4.9): o menu com Ver relatorio, Editar a notificacao enviada, Excluir em toda
+// situacao e "Mostrar de novo para quem ja viu" no pop-up "Uma vez" (a regra conta so o que veio depois).
 
 export const CAMPAIGN_KINDS = ["inbox", "popup"] as const;
 export type CampaignKind = (typeof CAMPAIGN_KINDS)[number];
@@ -168,34 +170,86 @@ export type NoticeAction =
   | "pause"
   | "publish"
   | "reject"
+  | "reshow"
   | "resume"
   | "send_test"
+  | "view_report"
   | "withdraw";
 
 export type NoticePermissions = { canPublish: boolean; canPublishLarge: boolean; canWrite: boolean };
 
-/** Rascunho, aguardando aprovacao, notificacao agendada e pop-up publicado ou pausado podem ser editados. */
+/**
+ * Rascunho, aguardando aprovacao, notificacao agendada, notificacao enviada (v3a: so o conteudo, docs/24
+ * §2.2) e pop-up publicado ou pausado podem ser editados.
+ */
 export function isEditableStatus(kind: CampaignKind, status: CampaignStatus) {
   if (status === "draft" || status === "pending_approval") {
     return true;
   }
 
-  return kind === "inbox" ? status === "scheduled" : status === "active" || status === "paused";
+  return kind === "inbox" ? status === "scheduled" || status === "sent" : status === "active" || status === "paused";
 }
 
-/** O que a pessoa pode fazer com o aviso agora (o servidor confere de novo em cada acao). */
-export function availableNoticeActions(campaign: CampaignTiming, now: number, permissions: NoticePermissions): NoticeAction[] {
+/** O que os alunos ja veem: pop-up publicado ou pausado, ou notificacao enviada (editar vale como publicar). */
+export function isLiveNoticeStatus(kind: CampaignKind, status: CampaignStatus | null | undefined) {
+  return kind === "popup" ? status === "active" || status === "paused" : status === "sent";
+}
+
+/**
+ * Quantos alunos a notificacao alcancou (ou alcanca): o maior entre quem recebeu e a contagem do segmento.
+ * A mesma conta no menu (Editar acima de 500) e nas Server Actions.
+ */
+export function noticeRecipients(row: { audience_count: number | null; recipients_count: number | null }) {
+  return Math.max(row.recipients_count ?? 0, row.audience_count ?? 0);
+}
+
+/** O que mais o menu precisa saber: a regra "Quantas vezes" do pop-up e quantos alunos a notificacao alcancou. */
+export type NoticeActionsExtra = { popupRepeat?: PopupRepeat | null; recipients?: number | null };
+
+/**
+ * Ordem do menu "…" (a mesma de MENU_ORDER em notices-view-model.ts; "Publicar" fica no editor, logo
+ * depois de Editar).
+ */
+const ACTION_ORDER: readonly NoticeAction[] = [
+  "view_report",
+  "edit",
+  "publish",
+  "approve",
+  "reject",
+  "pause",
+  "resume",
+  "reshow",
+  "send_test",
+  "duplicate",
+  "cancel_schedule",
+  "end",
+  "withdraw",
+  "delete"
+];
+
+/**
+ * O que a pessoa pode fazer com o aviso agora, na ordem do menu (o servidor confere de novo em cada acao).
+ * Sem `extra` (chamadas antigas), "Mostrar de novo" nunca aparece e Editar a notificacao enviada segue so
+ * "messaging.publish".
+ */
+export function availableNoticeActions(
+  campaign: CampaignTiming,
+  now: number,
+  permissions: NoticePermissions,
+  extra: NoticeActionsExtra = {}
+): NoticeAction[] {
   if (!permissions.canWrite) {
     return [];
   }
 
   const situation = situationOf(campaign, now);
-  const actions: NoticeAction[] = [];
-  const add = (action: NoticeAction, allowed = true) => {
-    if (allowed) {
-      actions.push(action);
+  const allowed = new Set<NoticeAction>();
+  const add = (action: NoticeAction, ok = true) => {
+    if (ok) {
+      allowed.add(action);
     }
   };
+  const { canPublish, canPublishLarge } = permissions;
 
   switch (campaign.status) {
     case "draft":
@@ -207,55 +261,72 @@ export function availableNoticeActions(campaign: CampaignTiming, now: number, pe
       break;
     case "pending_approval":
       add("edit");
-      add("approve", permissions.canPublishLarge);
-      add("reject", permissions.canPublishLarge);
+      add("approve", canPublishLarge);
+      add("reject", canPublishLarge);
       add("send_test", campaign.kind === "inbox");
       add("duplicate");
       add("delete");
       break;
     case "scheduled":
       add("edit");
-      add("cancel_schedule", permissions.canPublish);
       add("send_test");
       add("duplicate");
+      add("cancel_schedule", canPublish);
+      add("delete", canPublish);
       break;
     case "sending":
+      add("view_report");
       add("duplicate");
       break;
-    case "sent":
-      add("withdraw", permissions.canPublish);
+    case "sent": {
+      // Editar a notificacao enviada vale como publicar; acima de 500 alunos, so com publish_large.
+      const recipients = extra.recipients ?? null;
+
+      add("view_report");
+      add("edit", canPublish && (recipients === null || recipients <= APPROVAL_THRESHOLD || canPublishLarge));
       add("duplicate");
+      add("withdraw", canPublish);
+      add("delete", canPublish);
       break;
+    }
     case "canceled":
+      add("view_report");
       add("duplicate");
       add("delete");
       break;
     case "active":
+      add("view_report");
+      add("duplicate");
+
       if (situation === "ended") {
-        add("duplicate");
         add("delete");
         break;
       }
 
       // Editar o pop-up no ar muda o que os alunos veem agora: vale como publicar (docs/22 §2.3).
-      add("edit", permissions.canPublish);
-      add("pause", permissions.canPublish);
-      add("end", permissions.canPublish);
-      add("duplicate");
+      add("edit", canPublish);
+      add("pause", canPublish);
+      add("reshow", canPublish && situation === "active" && extra.popupRepeat === "once");
+      add("end", canPublish);
+      add("delete", canPublish);
       break;
     case "paused":
-      add("edit", permissions.canPublish);
-      add("resume", permissions.canPublish);
-      add("end", permissions.canPublish);
+      add("view_report");
+      add("edit", canPublish);
+      add("resume", canPublish);
+      add("reshow", canPublish && extra.popupRepeat === "once");
       add("duplicate");
+      add("end", canPublish);
+      add("delete", canPublish);
       break;
     case "ended":
+      add("view_report");
       add("duplicate");
       add("delete");
       break;
   }
 
-  return actions;
+  return ACTION_ORDER.filter((action) => allowed.has(action));
 }
 
 /**
@@ -472,7 +543,26 @@ export type PopupDeliveryState = {
   lastSeenAt: number | null;
   snoozeCount: number;
   snoozedUntil: number | null;
+  /** v3a: impressoes e "Lembrar depois" antes do ultimo "mostrar de novo" (a regra "Uma vez" conta so as de depois). */
+  impressionsBeforeReshow?: number;
+  snoozesBeforeReshow?: number;
 };
+
+/**
+ * "Uma vez" pula este aluno? Cada "Lembrar depois" pede mais uma vez (visto 1 vez e adiado 1 vez = volta;
+ * visto 2 vezes = some), contando so o que veio depois do ultimo "mostrar de novo".
+ */
+function onceSkips(delivery: PopupDeliveryState) {
+  return delivery.impressions - (delivery.impressionsBeforeReshow ?? 0) > delivery.snoozeCount - (delivery.snoozesBeforeReshow ?? 0);
+}
+
+/**
+ * Quem "Mostrar de novo para quem já viu" zera (a mesma regra que communication_reshow_popup conta): ainda no
+ * segmento, nao clicou, nao escolheu "Não mostrar de novo" e "Uma vez" o pularia.
+ */
+export function reshowSkipped(delivery: PopupDeliveryState) {
+  return delivery.eligible && delivery.clickedAt === null && delivery.dismissedAt === null && onceSkips(delivery);
+}
 
 export function pickPopup(input: {
   deliveries: readonly PopupDeliveryState[];
@@ -502,8 +592,9 @@ export function pickPopup(input: {
       continue;
     }
 
-    // "Uma vez": cada "Lembrar depois" pede mais uma vez (visto 1 vez e adiado 1 vez = volta; visto 2 vezes = some).
-    if (popup.repeat === "once" ? delivery.impressions > delivery.snoozeCount : delivery.lastSeenAt !== null && now - delivery.lastSeenAt < gap) {
+    // "Uma vez" conta desde o ultimo "mostrar de novo"; "Ate o aluno clicar" volta 24 h depois (o intervalo
+    // de todos os pop-ups, contado do ultimo visto, este incluido, ja cobre isso).
+    if (popup.repeat === "once" ? onceSkips(delivery) : delivery.lastSeenAt !== null && now - delivery.lastSeenAt < gap) {
       continue;
     }
 
@@ -516,8 +607,9 @@ export function pickPopup(input: {
 export const POPUP_EVENTS = ["impressed", "clicked", "closed", "dismissed", "snoozed"] as const;
 export type PopupEvent = (typeof POPUP_EVENTS)[number];
 
-export function canSnooze(state: Pick<PopupDeliveryState, "snoozeCount">, allowSnooze: boolean) {
-  return allowSnooze && state.snoozeCount < POPUP_RULES.maxSnoozes;
+/** "Lembrar depois" ate 2 vezes, contadas desde o ultimo "mostrar de novo" (v3a). */
+export function canSnooze(state: Pick<PopupDeliveryState, "snoozeCount" | "snoozesBeforeReshow">, allowSnooze: boolean) {
+  return allowSnooze && state.snoozeCount - (state.snoozesBeforeReshow ?? 0) < POPUP_RULES.maxSnoozes;
 }
 
 /** Colunas de campaign_deliveries que mudam com o evento. */

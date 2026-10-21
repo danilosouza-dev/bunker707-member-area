@@ -746,9 +746,9 @@ export function stepCounts(nodes: readonly Pick<DraftNode, "kind">[]) {
   };
 }
 
-/** Conteudo vazio de uma notificacao nova (sem icone, a escola envia, 90 dias). */
+/** Conteudo vazio de uma notificacao nova (sem icone, a escola envia, 90 dias; v3a: com reacoes). */
 export function newMessageContent(): FlowNoticeContent {
-  return { audio: null, body: "", cta: null, icon: null, image: null, response: null, sender: null, title: "", validity: { mode: "default" } };
+  return { audio: null, body: "", cta: null, icon: null, image: null, reactions: true, response: null, sender: null, title: "", validity: { mode: "default" } };
 }
 
 export type NewStepKind = "condition" | "message";

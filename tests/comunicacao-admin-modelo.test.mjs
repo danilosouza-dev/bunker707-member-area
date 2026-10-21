@@ -140,6 +140,7 @@ test("botao principal: mesma regra do servidor (aprovacao acima de 500 sem a per
   assert.equal(model.isNoticeKindLocked("pending_approval"), false);
   assert.equal(model.isNoticeKindLocked("scheduled"), true);
   assert.equal(model.isNoticeKindLocked("active"), true);
+  assert.equal(model.isNoticeKindLocked("sent"), true, "v3a: a enviada muda o conteudo, nunca o tipo");
 });
 
 test("rascunho: so os campos do tipo vao ao servidor e a comparacao ignora o que o banco reescreve", () => {
@@ -155,6 +156,17 @@ test("rascunho: so os campos do tipo vao ao servidor e a comparacao ignora o que
   const popup = model.noticeDraftForKind(draft({ kind: "popup", response: { acceptLabel: "Vou", declineLabel: "Não vou" }, schedule: { mode: "at", sendAt: "" } }));
   assert.equal(popup.response, null);
   assert.deepEqual(popup.schedule, { mode: "now" });
+
+  // v3a: o pop-up deixa reacoes e enquete e abre o destino pelo botao; a notificacao guarda o que tem.
+  const enquete = { closesAt: null, multiple: false, options: [{ id: "a1", label: "Sim" }, { id: "b2", label: "Não" }], question: "Vem?", showResults: true };
+  const comTudo = draft({ cta: { display: "card", href: "/minhas-compras", label: "Ver", target: "same_tab" }, poll: enquete, reactions: true });
+  const comoPopup = model.noticeDraftForKind({ ...comTudo, kind: "popup" });
+  assert.equal(comoPopup.reactions, false);
+  assert.equal(comoPopup.poll, null);
+  assert.equal(comoPopup.cta.display, "button");
+  assert.equal(schemas.noticeDraftSchema.safeParse(comoPopup).success, true);
+  assert.deepEqual(model.noticeDraftForKind(comTudo).poll, enquete);
+  assert.equal(model.noticeDraftForKind(comTudo).cta.display, "card");
 
   // Banco devolve +00:00, ids ordenados e texto aparado: continua "sem mudanca".
   const local = draft({
@@ -242,6 +254,13 @@ test("previa: notificacao nao lida da escola, titulo vazio vira dica e botao inc
   assert.equal(item.cta, null, "sem destino o botao nao aparece");
   assert.deepEqual(item.image, { alt: "Professora", url: "https://cdn.test/a.webp" });
   assert.deepEqual(item.response, { acceptLabel: "Aceitar", declineLabel: "Não vou", value: null });
+  assert.deepEqual(item.reactions, { value: null }, "v3a: notificacao nova com reacoes mostra o botao de reagir");
+  assert.equal(item.poll, null);
+  assert.equal(
+    model.draftToNotificationItem(draft({ cta: { href: "/minhas-compras", label: "Ver", target: "same_tab" } }), { createdAt: "2026-10-20T15:00:00.000Z" }).cta.display,
+    "button",
+    "rascunho sem display: pelo botao"
+  );
 
   const uploading = model.draftToNotificationItem(draft(), { createdAt: "2026-10-20T15:00:00.000Z", imageUrl: "data:image/webp;base64,AAAA" });
   assert.equal(uploading.image.url, "data:image/webp;base64,AAAA", "imagem ainda subindo ja aparece");

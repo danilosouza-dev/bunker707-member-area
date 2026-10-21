@@ -2,9 +2,13 @@
 // regras puras das notificacoes automaticas de comentario. Modulo puro (sem "server-only", imports
 // relativos): as rotas /api/notifications, o painel do sino, a previa do admin e
 // tests/comunicacao-avisos-modelo.test.mjs usam os mesmos tipos.
+// v3a (docs/24): como o aluno chega ao destino, a reacao do aluno e a enquete do aviso.
 
 import { INBOX_HISTORY_DAYS } from "./campaign-model";
+import type { NotificationPoll, ReactionId } from "./interactions-model";
 import type { NoticeIconColor, NoticeIconId } from "./message-meta";
+
+export type { NotificationPoll } from "./interactions-model";
 
 export type NotificationKind = "comment_mention" | "comment_reply" | "notice";
 
@@ -18,7 +22,17 @@ export type NotificationIcon = { color: NoticeIconColor; id: NoticeIconId };
 export type NotificationAudioProgress = { completed: boolean; heard: string; percent: number };
 
 export type NotificationAudio = { durationSeconds: number; mimeType: string | null; peaks: number[]; url: string };
-export type NotificationCta = { href: string; label: string; target: "new_tab" | "same_tab" };
+/**
+ * Como o aluno chega ao destino (v3a, campaigns.cta_display): pelo botao; pelo botao ou tocando na
+ * notificacao; so tocando na notificacao (sem botao: o texto fica ao lado da seta, no pe do cartao).
+ */
+export const CTA_DISPLAYS = ["button", "button_and_card", "card"] as const;
+export type CtaDisplay = (typeof CTA_DISPLAYS)[number];
+
+/** Destino da notificacao; sem `display` = "button" (a v2 inteira). */
+export type NotificationCta = { display?: CtaDisplay; href: string; label: string; target: "new_tab" | "same_tab" };
+/** Botao do pop-up: o formato da v1 (o pop-up sempre abre pelo botao). */
+export type PopupCta = { href: string; label: string; target: "new_tab" | "same_tab" };
 export type NotificationImage = { alt: string; url: string };
 export type NotificationResponseValue = "accepted" | "declined";
 
@@ -42,8 +56,12 @@ export type NotificationItem = {
   id: string;
   image: NotificationImage | null;
   kind: NotificationKind;
-  /** Interacao de verdade (cartao, Ver mais, audio, botao, resposta); "Marcar todas" nao conta. */
+  /** Interacao de verdade (cartao, Ver mais, audio, botao, resposta, reacao, voto); "Marcar todas" nao conta. */
   openedAt: string | null;
+  /** Enquete (v3a); a API manda a chave em todo aviso, null sem enquete e em comentario. */
+  poll?: NotificationPoll | null;
+  /** Reacao deste aluno (v3a); null quando a equipe nao permitiu reacoes e em comentario. */
+  reactions?: { value: ReactionId | null } | null;
   readAt: string | null;
   response: { acceptLabel: string; declineLabel: string; value: NotificationResponseValue | null } | null;
   seenAt: string | null;
@@ -70,7 +88,7 @@ export type PopupItem = {
   audio: NotificationAudio | null;
   body: string;
   canSnooze: boolean;
-  cta: NotificationCta | null;
+  cta: PopupCta | null;
   /**
    * Icone ao lado do titulo. A API so manda a chave quando o pop-up tem icone: sem icone, a resposta do
    * resumo continua exatamente a da v1.

@@ -415,11 +415,14 @@ test("rascunho do construtor -> arvore e conteudo para o motor conferir", () => 
   });
   assert.equal(tree.nodes[1].expireWithAnchor, true, "'ate a principal sumir' vira expire_with_anchor");
   assert.deepEqual(messages[PASSO_2], {
+    allowsReactions: true,
     campaignId: "",
     ctaHref: "/conteudo/curso-ia",
     hasAudio: false,
     hasCta: true,
+    hasPoll: false,
     hasResponse: false,
+    pollOptionIds: [],
     title: "Oferta especial!",
     validUntil: null,
     validityMinutes: null

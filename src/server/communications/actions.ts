@@ -629,6 +629,12 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
 
     const current = await requireCampaign(db, data.id);
 
+    // v3a (P0): isEditableStatus ja aceita a notificacao enviada; ate o ramo que muda so o conteudo dela
+    // (docs/24 §4.7, pacote C) chegar aqui, ela continua sem mudar (o caminho abaixo voltaria a rascunho).
+    if (current.kind === "inbox" && current.status === "sent") {
+      throw new CommunicationError(NOT_EDITABLE, 409);
+    }
+
     if (!isEditableStatus(current.kind, current.status)) {
       throw new CommunicationError(NOT_EDITABLE, 409);
     }

@@ -31,6 +31,7 @@ import {
   type FlowTree
 } from "./flow-model";
 import type { FlowNoticeContent } from "./flow-schemas";
+import { parsePoll } from "./interactions-model";
 import { emptyNoticeDraft } from "./schemas";
 import { draftToColumns, fetchCampaign, fetchCampaignsByIds, type CampaignContentColumns, type CampaignRow } from "./store";
 
@@ -174,13 +175,21 @@ export function taskInputOf(row: FlowTaskRow): FlowTaskInput {
 }
 
 /** Conteudo atual de um passo (ou do aviso de origem) como a decisao e a conferencia da arvore usam. */
-export function messageMetaOfRow(row: Pick<CampaignRow, "audio_url" | "cta_href" | "id" | "response_mode" | "title" | "valid_until" | "validity_minutes">): FlowMessageMeta {
+export function messageMetaOfRow(
+  row: Pick<CampaignRow, "allow_reactions" | "audio_url" | "cta_href" | "id" | "poll" | "response_mode" | "title" | "valid_until" | "validity_minutes">
+): FlowMessageMeta {
+  const poll = parsePoll(row.poll);
+
   return {
+    // v3a: reacoes e enquete (regras "reagiu" e "votou na enquete").
+    allowsReactions: row.allow_reactions === true,
     campaignId: row.id,
     ctaHref: row.cta_href,
     hasAudio: Boolean(row.audio_url),
     hasCta: Boolean(row.cta_href),
+    hasPoll: poll !== null,
     hasResponse: row.response_mode === "accept_decline",
+    pollOptionIds: poll?.options.map((option) => option.id) ?? [],
     title: row.title,
     validUntil: row.valid_until,
     validityMinutes: row.validity_minutes
@@ -807,6 +816,10 @@ export type FlowBatchFactsRow = {
     seen_at: string | null;
     u: string;
     visible_at: string;
+    // v3a (7.9 da 202610220001): reacao, voto e se o aluno excluiu do sino. Opcionais: a 7.9 da 0002 nao manda.
+    hidden_at?: string | null;
+    poll_choice?: string[] | null;
+    reaction?: string | null;
   }[];
   runs: { entered_at: string; f: string; u: string }[];
   staff: string[];
@@ -926,11 +939,13 @@ export function flowContentColumns(content: FlowNoticeContent): CampaignContentC
 
 const CONTENT_COMPARE_FIELDS = [
   "accept_label",
+  "allow_reactions",
   "audio_duration_seconds",
   "audio_mime",
   "audio_peaks",
   "audio_url",
   "body",
+  "cta_display",
   "cta_href",
   "cta_label",
   "cta_target",
@@ -939,6 +954,7 @@ const CONTENT_COMPARE_FIELDS = [
   "icon_color",
   "image_alt",
   "image_url",
+  "poll",
   "response_mode",
   "sender_user_id",
   "title",
@@ -946,7 +962,25 @@ const CONTENT_COMPARE_FIELDS = [
   "validity_minutes"
 ] as const;
 
-/** O conteudo gravado e o mesmo que o da tela? (datas comparadas pelo instante) */
+/** JSON com as chaves em ordem: o jsonb volta do banco com outra ordem de chaves. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value ?? null);
+}
+
+/** O conteudo gravado e o mesmo que o da tela? (datas comparadas pelo instante; a enquete pelo JSON) */
 function sameContent(row: CampaignRow, columns: CampaignContentColumns) {
   return CONTENT_COMPARE_FIELDS.every((field) => {
     const saved = (row as unknown as Record<string, unknown>)[field] ?? null;
@@ -958,6 +992,10 @@ function sameContent(row: CampaignRow, columns: CampaignContentColumns) {
 
     if (field === "audio_peaks") {
       return JSON.stringify(Array.isArray(saved) && saved.length > 0 ? saved : null) === JSON.stringify(Array.isArray(next) && next.length > 0 ? next : null);
+    }
+
+    if (field === "poll") {
+      return stableJson(parsePoll(saved)) === stableJson(parsePoll(next));
     }
 
     return saved === next;

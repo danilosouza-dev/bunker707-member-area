@@ -404,7 +404,8 @@ export type FollowUpFormItem = {
 
 /** Conteudo de uma seguinte nova: so o titulo por escrever, quem envia a escola, 90 dias no sino. */
 export function emptyFollowUpContent(): FlowNoticeContent {
-  return { audio: null, body: "", cta: null, icon: null, image: null, response: null, sender: null, title: "", validity: { mode: "default" } };
+  // v3a: a seguinte nova ja permite reacoes (como a notificacao nova).
+  return { audio: null, body: "", cta: null, icon: null, image: null, reactions: true, response: null, sender: null, title: "", validity: { mode: "default" } };
 }
 
 /** Seguinte nova: 1 dia depois do envio, para a primeira escolha rapida da notificacao de cima. */

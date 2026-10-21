@@ -108,11 +108,17 @@ export type FlowTree = { nodes: FlowNode[]; origin: FlowOrigin };
 
 /** Versao atual do conteudo de um passo de notificacao (ou o aviso de origem, para a entrada). */
 export type FlowMessageMeta = {
+  /** v3a: a notificacao aceita reacoes (ausente = nao). */
+  allowsReactions?: boolean;
   campaignId: string;
   ctaHref: string | null;
   hasAudio: boolean;
   hasCta: boolean;
+  /** v3a: a notificacao tem enquete (ausente = nao). */
+  hasPoll?: boolean;
   hasResponse: boolean;
+  /** v3a: ids das opcoes da enquete (ausente = nenhuma). */
+  pollOptionIds?: readonly string[];
   title: string;
   validUntil: string | null;
   validityMinutes: number | null;

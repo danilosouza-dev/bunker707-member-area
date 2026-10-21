@@ -58,8 +58,9 @@ function rules(...items: AudienceRule[]): AudienceDefinition {
   return { kind: "rules", root: { items, match: "all" } };
 }
 
+// v3a: toda mensagem de modelo nasce com reacoes, como a notificacao nova.
 function content(title: string, extra: Partial<FlowNoticeContent> = {}): FlowNoticeContent {
-  return { audio: null, body: "", cta: null, icon: null, image: null, response: null, sender: null, title, validity: { mode: "default" }, ...extra };
+  return { audio: null, body: "", cta: null, icon: null, image: null, reactions: true, response: null, sender: null, title, validity: { mode: "default" }, ...extra };
 }
 
 function icon(id: NoticeIconId): FlowNoticeContent["icon"] {

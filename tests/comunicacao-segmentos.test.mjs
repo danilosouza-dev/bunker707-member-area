@@ -442,8 +442,10 @@ test("mensagem: cada acao conta pelo que a linha do sino tem; recebeu = a linha 
     seenAt: daysAgo(9)
   });
   const nada = recebeu();
+  // As acoes da v3a (reagiu, votou, excluiu do sino) tem os proprios casos (docs/24 §6).
+  const v2Actions = model.MESSAGE_ACTIONS.filter((action) => !["hidden", "reacted", "voted"].includes(action));
 
-  for (const action of model.MESSAGE_ACTIONS) {
+  for (const action of v2Actions) {
     assert.equal(avalia(todas(mensagem(action)), action === "declined" ? recebeu({ response: "declined", seenAt: daysAgo(9) }) : tudo, ctx), true, action);
     assert.equal(avalia(todas(mensagem(action)), nada, ctx), action === "received", `${action} sem nada feito`);
   }
@@ -641,7 +643,11 @@ test("frase da regra de notificacao: cada acao, no plural, com e sem 'não'", ()
     opened: "abriram a notificação “Oferta especial!”",
     received: "receberam a notificação “Oferta especial!”",
     responded: "responderam a notificação “Oferta especial!”",
-    seen: "viram a notificação “Oferta especial!” no sino"
+    seen: "viram a notificação “Oferta especial!” no sino",
+    // v3a (docs/24 §6), sem a reacao ou a opcao escolhida
+    hidden: "excluíram do sino a notificação “Oferta especial!”",
+    reacted: "reagiram à notificação “Oferta especial!”",
+    voted: "votaram na enquete da notificação “Oferta especial!”"
   };
 
   for (const action of model.MESSAGE_ACTIONS) {

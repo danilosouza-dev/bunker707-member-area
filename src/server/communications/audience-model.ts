@@ -43,7 +43,8 @@ export type AudienceRule =
   | { days: number; op: "never" | "within" | "not_within"; type: "sign_in" }
   | { paces: StudentPace[]; type: "pace" }
   | { cohortIds: string[]; type: "cohort" }
-  | { action: MessageAction; negate: boolean; ref: MessageRef; type: "message" }
+  /** v3a: `choice` = a reacao (reacted) ou a opcao da enquete (voted); ausente = qualquer uma. */
+  | { action: MessageAction; choice?: string; negate: boolean; ref: MessageRef; type: "message" }
   /** So dentro de um fluxo. */
   | { negate: boolean; page: PageTarget; since: FlowSince; type: "page_visit" }
   /** So dentro de um fluxo. */
@@ -54,7 +55,8 @@ export type MessageRef = { kind: "node"; nodeId: string } | { campaignId: string
 
 /**
  * O que o aluno fez com a notificacao. "interacted" = abriu, comecou o audio, clicou ou respondeu.
- * Negada ("nao abriu"), a regra so vale para quem recebeu.
+ * Negada ("nao abriu"), a regra so vale para quem recebeu. v3a (docs/24 §6): reagiu, votou na enquete e
+ * excluiu do sino, no fim (a ordem da v2 fica).
  */
 export const MESSAGE_ACTIONS = [
   "received",
@@ -66,7 +68,10 @@ export const MESSAGE_ACTIONS = [
   "accepted",
   "declined",
   "responded",
-  "interacted"
+  "interacted",
+  "reacted",
+  "voted",
+  "hidden"
 ] as const;
 export type MessageAction = (typeof MESSAGE_ACTIONS)[number];
 
@@ -123,6 +128,12 @@ export type MessageFact = {
   seenAt: number | null;
   /** Quando passou a aparecer no sino: greatest(created_at, sent_at do aviso). */
   visibleAt: number;
+  /** v3a: o aluno excluiu do proprio sino (ausente = nao). */
+  hiddenAt?: number | null;
+  /** v3a: ids das opcoes votadas (ausente ou vazio = nao votou). */
+  pollChoice?: readonly string[] | null;
+  /** v3a: id da reacao (ausente = sem reacao). */
+  reaction?: string | null;
 };
 
 export type AudienceCommentCounts = { d7: number; d30: number; d90: number; total: number };
@@ -706,6 +717,8 @@ export type AudienceNames = {
   cohorts: Record<string, string>;
   /** Chave da notificacao ("campaign:<id>" ou "node:<id>") -> titulo. */
   messages?: Record<string, string>;
+  /** v3a: chave da notificacao -> id da opcao da enquete -> texto da opcao. */
+  pollOptions?: Record<string, Record<string, string>>;
   products: Record<string, string>;
 };
 
@@ -830,15 +843,15 @@ export function describeAudienceRule(rule: AudienceRule, names: AudienceNames): 
 
 const MISSING_MESSAGE = "uma notificação removida";
 
-/** "a notificação “X”" / "da notificação “X”" (titulo que nao veio: "uma notificação removida"). */
-type NoticePhrase = { of: string; the: string; with: string };
+/** "a notificação “X”" / "da notificação “X”" / "à notificação “X”" (titulo que nao veio: "uma notificação removida"). */
+type NoticePhrase = { of: string; the: string; to: string; with: string };
 
 function noticePhrase(names: AudienceNames, ref: MessageRef): NoticePhrase {
   const title = names.messages?.[messageRefKey(ref)]?.trim();
 
   return title
-    ? { of: `da notificação “${title}”`, the: `a notificação “${title}”`, with: `com a notificação “${title}”` }
-    : { of: `de ${MISSING_MESSAGE}`, the: MISSING_MESSAGE, with: `com ${MISSING_MESSAGE}` };
+    ? { of: `da notificação “${title}”`, the: `a notificação “${title}”`, to: `à notificação “${title}”`, with: `com a notificação “${title}”` }
+    : { of: `de ${MISSING_MESSAGE}`, the: MISSING_MESSAGE, to: `a ${MISSING_MESSAGE}`, with: `com ${MISSING_MESSAGE}` };
 }
 
 /** Frase de cada acao, no plural depois de "Alunos que" (a negacao poe "não " na frente). */
@@ -852,7 +865,11 @@ const MESSAGE_ACTION_SENTENCES: Record<MessageAction, (notice: NoticePhrase) => 
   opened: (notice) => `abriram ${notice.the}`,
   received: (notice) => `receberam ${notice.the}`,
   responded: (notice) => `responderam ${notice.the}`,
-  seen: (notice) => `viram ${notice.the} no sino`
+  seen: (notice) => `viram ${notice.the} no sino`,
+  // v3a (docs/24 §6): sem a reacao ou a opcao escolhida (as frases com `choice` sao do pacote de regras).
+  hidden: (notice) => `excluíram do sino ${notice.the}`,
+  reacted: (notice) => `reagiram ${notice.to}`,
+  voted: (notice) => `votaram na enquete ${notice.of}`
 };
 
 /** Pagina fixa com o artigo da frase ("visitaram o Início", "visitaram Minhas compras"). */

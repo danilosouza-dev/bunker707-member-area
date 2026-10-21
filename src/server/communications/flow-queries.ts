@@ -350,6 +350,9 @@ export function flowContentOfRow(row: CampaignRow, expireWithAnchor: boolean): F
     cta: draft.cta,
     icon: draft.icon,
     image: draft.image,
+    // v3a: a enquete e as reacoes do passo (sem elas, salvar de novo criaria uma versao sem enquete).
+    poll: draft.poll ?? null,
+    reactions: draft.reactions ?? false,
     response: draft.response,
     sender: draft.sender,
     title: draft.title,
