@@ -20,6 +20,16 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import {
+  followUpNumbers,
+  followUpPaths,
+  followUpsOfDrafts,
+  foreignNodeRefs,
+  remapEntryRefs,
+  remapNodeRefs,
+  stopGoalDefinition,
+  stopLineOfGoal
+} from "@/components/admin/v2/communication/follow-ups-view-model";
 import type { ActionResult } from "@/lib/action-result";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { runAdminAction } from "@/server/actions/run-action";
@@ -27,9 +37,24 @@ import { recordAudit } from "@/server/audit/log";
 import { can, type AdminAccess } from "@/server/auth/roles";
 import { checkProductImage, decodeWebpDataUrl } from "@/server/catalog/webp";
 import { persistImageAsset } from "@/server/db/media-assets";
+import { pageKeyOfHref, pageKeyOfTarget } from "@/server/member-area/page-visit-model";
 import { previewAudience, resolveAudienceUserIds, type AudienceSamplePerson } from "./audience";
-import { loadAudienceFacts, type LoadedAudience } from "./audience-facts";
-import { collectMessageCampaignIds, describeAudience, normalizeAudience, type AudienceDefinition } from "./audience-model";
+import { accessFactsOf, loadAudienceFacts, messageFactOf, openAccessRows, type AudienceEntitlementRow, type LoadedAudience } from "./audience-facts";
+import {
+  audienceFactNeeds,
+  buildCommentRanks,
+  collectMessageCampaignIds,
+  describeAudience,
+  evaluateAudience,
+  isAudienceGroup,
+  messageRefKey,
+  normalizeAudience,
+  type AudienceContext,
+  type AudienceDefinition,
+  type AudienceNode,
+  type AudienceStudentFacts,
+  type MessageFact
+} from "./audience-model";
 import { invalidateLivePopups } from "./cache";
 import {
   isEditableStatus,
@@ -39,10 +64,31 @@ import {
   type CampaignSituation,
   type CampaignStatus
 } from "./campaign-model";
-import { communicationsDb, CommunicationError, NoticeFieldError, type CommunicationsDb } from "./db";
+import { assertNoDbError, communicationsDb, CommunicationError, NoticeFieldError, type CommunicationsDb } from "./db";
 import { dispatchInboxCampaign, refreshPopupDeliveries } from "./dispatch";
-import { testSendExpiresAt } from "./message-meta";
-import { loadAudienceNames, loadNoticeSenders, type NoticeSenderOption } from "./queries";
+import { entryOf, followUpsFromTree, treeFromFollowUps, validateFlowGoal, validateFlowTree, type FlowMessageMeta, type FlowNode, type FlowStatus } from "./flow-model";
+import {
+  previewFollowUpAudienceSchema,
+  saveNoticeFollowUpsSchema,
+  type FlowNoticeContent,
+  type FollowUpDraft,
+  type PreviewFollowUpAudienceInput,
+  type SaveNoticeFollowUpsInput
+} from "./flow-schemas";
+import {
+  changeFlowState,
+  definitionOf,
+  fetchFlowBatchFacts,
+  FLOW_CHANGED_MESSAGE,
+  FLOW_COLUMNS,
+  flowContentColumns,
+  lastSourceExpiry,
+  messageMetaOfRow,
+  saveFlowTree,
+  type FlowRow,
+  type FlowStateChange
+} from "./flow-store";
+import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
 import {
   noticeDraftSchema,
@@ -51,21 +97,26 @@ import {
   publishProblems,
   saveNoticeSchema,
   uploadNoticeImageSchema,
+  withdrawNoticeSchema,
   type NoticeDraft,
   type NoticeIdInput,
-  type SaveNoticeInput
+  type SaveNoticeInput,
+  type WithdrawNoticeInput
 } from "./schemas";
 import {
   audienceOfRow,
   deleteCampaignNotifications,
   draftToColumns,
   fetchCampaign,
+  fetchCampaignRecipientIds,
+  fetchCampaignsByIds,
   insertCampaign,
   NOTICE_CHANGED_MESSAGE,
   NOTICE_MISSING_MESSAGE,
   rowToDraft,
   softDeleteCampaign,
   updateCampaign,
+  upsertTestNotification,
   type CampaignPatch,
   type CampaignRow
 } from "./store";
@@ -161,8 +212,11 @@ async function assertSenderForPublish(db: CommunicationsDb, row: CampaignRow) {
   }
 }
 
-/** Notificacao que saiu ou vai sair (enviada, enviando ou agendada): avisa quem envia por e-mail. */
-async function notifyNoticeSenders(db: CommunicationsDb, row: CampaignRow, published: PublishedNotice, actorId: string) {
+/**
+ * Notificacao que saiu ou vai sair (enviada, enviando ou agendada): avisa quem envia por e-mail. v2: quem
+ * envia alguma notificacao seguinte tambem (`followUpSenders`), um e-mail por pessoa, com a chave do aviso.
+ */
+async function notifyNoticeSenders(db: CommunicationsDb, row: CampaignRow, published: PublishedNotice, actorId: string, followUpSenders: readonly string[] = []) {
   if (row.kind !== "inbox" || !["scheduled", "sending", "sent"].includes(published.situation)) {
     return;
   }
@@ -172,7 +226,7 @@ async function notifyNoticeSenders(db: CommunicationsDb, row: CampaignRow, publi
     actorId,
     campaignId: row.id,
     count: published.recipients ?? published.audienceCount,
-    senders: [row.sender_user_id],
+    senders: [row.sender_user_id, ...followUpSenders],
     title: row.title
   }).catch((error: unknown) => console.error(`[comunicacao] "enviada em seu nome" de ${row.id} nao agendado: ${error instanceof Error ? error.message : String(error)}`));
 }
@@ -306,6 +360,186 @@ async function goLive(input: {
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Notificacoes seguintes (v2, docs/23 §2.2 e §6.2): o fluxo do aviso (origin "notice") segue o aviso.
+ * Publicar ou aprovar ativa o fluxo (ou o poe em aprovacao junto), cancelar o agendamento, devolver o
+ * pedido ou salvar de novo o volta para rascunho, retirar do sino o encerra (source_withdrawn), excluir o
+ * tira (source_deleted) e duplicar o copia. Toda mudanca de situacao passa pelo RPC 7.13; os passos so
+ * mudam por saveFlowTree (RPC 7.5), nunca pelas acoes da v1 (requireCampaign recusa passo de fluxo).
+ * ---------------------------------------------------------------------------------------------- */
+
+const FOLLOW_UPS_INBOX_ONLY = "As notificações seguintes valem só para notificações no sino.";
+const FOLLOW_UPS_WITHDRAWN = "Esta notificação foi retirada do sino.";
+const FOLLOW_UPS_GONE = "Esta notificação já saiu do sino de todos.";
+const FOLLOW_UPS_SAVE_NOTICE_FIRST = "Salve a notificação antes de mudar as notificações seguintes.";
+const FOLLOW_UPS_BUILDER_ONLY = "Esta notificação tem passos que só aparecem no fluxo. Use Editar no fluxo.";
+const FOLLOW_UPS_NEED_PUBLISH = "Só quem pode publicar muda as notificações seguintes depois do envio.";
+const LIVE_FLOW_NEEDS_APPROVAL = "Para mudar um fluxo ativo para este segmento, peça a um dono ou administrador.";
+const FOLLOW_UP_MISSING = "Esta notificação seguinte não existe mais. Recarregue a página.";
+const FLOW_NAME_MAX = 80;
+
+/** "Seguintes de “Oferta especial!”" (so a equipe ve; ate 80 caracteres). */
+function noticeFlowName(title: string) {
+  const clean = title.trim() || "Sem título";
+  const name = `Seguintes de “${clean}”`;
+
+  return name.length <= FLOW_NAME_MAX ? name : `Seguintes de “${clean.slice(0, FLOW_NAME_MAX - 16).trimEnd()}…”`;
+}
+
+/** Quantos receberam a notificacao (a regra dos 500 das seguintes, docs/23 §2.9). */
+function noticeRecipientsOf(row: CampaignRow) {
+  return row.recipients_count ?? row.audience_count ?? 0;
+}
+
+/** O fluxo das seguintes do aviso, so a linha (sem os passos). */
+async function noticeFlowRow(db: CommunicationsDb, noticeId: string): Promise<FlowRow | null> {
+  const { data, error } = await db
+    .from("communication_flows")
+    .select(FLOW_COLUMNS)
+    .eq("source_campaign_id", noticeId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  assertNoDbError(error, "Comunicacao: fluxo do aviso");
+
+  return ((data ?? []) as FlowRow[])[0] ?? null;
+}
+
+/**
+ * O fluxo do aviso acompanha a situacao do aviso (7.13 sem versao: quem manda e o aviso). So quando a
+ * situacao atual esta em `from`; nada a fazer = devolve o fluxo como esta (ou null sem fluxo).
+ */
+async function moveNoticeFlow(
+  db: CommunicationsDb,
+  noticeId: string,
+  input: { actorId: string | null; entryCount?: number | null; from: readonly FlowStatus[]; now: Date; reason?: string | null; to: FlowStateChange["to"] }
+): Promise<FlowRow | null> {
+  const flow = await noticeFlowRow(db, noticeId);
+
+  if (!flow || !input.from.includes(flow.status)) {
+    return flow;
+  }
+
+  return changeFlowState(db, {
+    actorId: input.actorId,
+    entryCount: input.entryCount ?? null,
+    expectedUpdatedAt: null,
+    flowId: flow.id,
+    now: input.now,
+    reason: input.reason ?? null,
+    to: input.to
+  });
+}
+
+/** Fluxo do aviso tirado da lista (exclusao logica); no ar ou pausado, encerrado antes com `reason`. */
+async function removeNoticeFlow(db: CommunicationsDb, flow: FlowRow, input: { actorId: string; now: Date; reason: "source_deleted" | "source_withdrawn" | null }) {
+  if (input.reason && (flow.status === "active" || flow.status === "paused")) {
+    await changeFlowState(db, { actorId: input.actorId, expectedUpdatedAt: null, flowId: flow.id, now: input.now, reason: input.reason, to: "ended" });
+  }
+
+  const { error } = await db
+    .from("communication_flows")
+    .update({ deleted_at: input.now.toISOString(), deleted_by: input.actorId, updated_by: input.actorId })
+    .eq("id", flow.id)
+    .is("deleted_at", null);
+  assertNoDbError(error, "Comunicacao: tirar o fluxo do aviso");
+  invalidateLivePopups({ from: "action" });
+}
+
+/** Campo do passo (validateFlowTree) -> campo do cartao "Depois desta notificação". */
+const FOLLOW_UP_ISSUE_FIELDS: Record<string, string> = { anchorNodeId: "when.anchor", filter: "who", offsetMinutes: "when.minutes" };
+
+function followUpIssuePath(base: string | undefined, field: string | null) {
+  if (!base) {
+    return field === "goal" ? "goal" : "followUps";
+  }
+
+  return field && FOLLOW_UP_ISSUE_FIELDS[field] ? `${base}.${FOLLOW_UP_ISSUE_FIELDS[field]}` : base;
+}
+
+/**
+ * Publicar ou aprovar: as seguintes gravadas estao boas para sair (a arvore, 400 "A notificação seguinte 1
+ * tem um problema: ..."), e quem envia cada uma ainda esta na equipe (422). Devolve o fluxo e quem envia;
+ * null = o aviso nao tem seguintes.
+ */
+async function followUpsForPublish(db: CommunicationsDb, row: CampaignRow): Promise<{ flow: FlowRow; senders: string[] } | null> {
+  if (row.kind !== "inbox") {
+    return null;
+  }
+
+  const loaded = await loadNoticeFlow(db, row.id);
+  const messageNodes = loaded?.tree.nodes.filter((node) => node.kind === "message") ?? [];
+
+  if (!loaded || messageNodes.length === 0) {
+    return null;
+  }
+
+  const versions = new Map((await fetchCampaignsByIds(db, messageNodes.map((node) => node.campaignId ?? "").filter(Boolean))).map((version) => [version.id, version]));
+  const entry = entryOf(loaded.tree);
+  const metas: Record<string, FlowMessageMeta> = entry ? { [entry.id]: messageMetaOfRow(row) } : {};
+
+  for (const node of messageNodes) {
+    const version = versions.get(node.campaignId ?? "");
+
+    if (version) {
+      metas[node.id] = messageMetaOfRow(version);
+    }
+  }
+
+  const goal = definitionOf(loaded.flow.goal);
+  const [issue] = [...validateFlowTree(loaded.tree, metas), ...validateFlowGoal(loaded.tree, goal, metas)].filter((item) => item.level !== "warning");
+
+  if (issue) {
+    const drawn = followUpsFromTree(loaded.tree);
+    const numbers = drawn ? followUpNumbers(drawn) : new Map(messageNodes.map((node, index) => [node.id, String(index + 1)]));
+    const number = issue.nodeId ? numbers.get(issue.nodeId) : undefined;
+    const path = followUpIssuePath(issue.nodeId && drawn ? followUpPaths(drawn).get(issue.nodeId) : undefined, issue.field);
+
+    throw new NoticeFieldError(path, number ? `A notificação seguinte ${number} tem um problema: ${issue.message.replace(/\.$/, "")}.` : issue.message);
+  }
+
+  const senders = Array.from(new Set(Array.from(versions.values(), (version) => version.sender_user_id).filter((id): id is string => Boolean(id))));
+
+  for (const userId of senders) {
+    const state = await senderState(db, userId);
+
+    if (!state.onTeam) {
+      throw new CommunicationError(`${state.name ?? "A pessoa escolhida"} não está mais na equipe. Escolha quem envia.`, 422);
+    }
+  }
+
+  return { flow: loaded.flow, senders };
+}
+
+/**
+ * Publicar direto: o fluxo do aviso vai para o ar antes do envio (o conteudo vira "sent" pelo 7.13), entao
+ * nenhum aviso sai sem as seguintes. O motor so faz entrar depois que o aviso esta "sent" (7.3). Se o envio
+ * falhar, o fluxo volta para rascunho.
+ */
+async function goLiveWithFollowUps(
+  input: Parameters<typeof goLive>[0] & { followUps: { flow: FlowRow; senders: string[] } | null; reason: "approved" | null }
+): Promise<PublishedNotice> {
+  const { db, now } = input;
+  const flow = input.followUps?.flow ?? null;
+  const activate = flow !== null && (flow.status === "draft" || flow.status === "pending_approval");
+
+  if (activate) {
+    await changeFlowState(db, { actorId: input.actorId, entryCount: input.count, expectedUpdatedAt: null, flowId: flow.id, now, reason: input.reason, to: "active" });
+  }
+
+  try {
+    return await goLive(input);
+  } catch (error) {
+    if (activate) {
+      await changeFlowState(db, { actorId: input.actorId, expectedUpdatedAt: null, flowId: flow.id, now, to: "draft" }).catch((revertError: unknown) =>
+        console.error(`[comunicacao] fluxo do aviso ${input.row.id} nao voltou a rascunho: ${revertError instanceof Error ? revertError.message : String(revertError)}`)
+      );
+    }
+
+    throw error;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Rascunho, previa e publicacao
  * ---------------------------------------------------------------------------------------------- */
 
@@ -390,6 +624,11 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
       invalidateLivePopups({ from: "action" });
     }
 
+    // v2: agendado ou aguardando aprovacao voltou a rascunho; o fluxo das seguintes volta junto (nada saiu).
+    if (!live && current.status !== "draft") {
+      await moveNoticeFlow(db, current.id, { actorId: user.id, from: ["active", "pending_approval"], now, to: "draft" });
+    }
+
     await recordAudit(db, {
       action: "communication.saved",
       actorId: user.id,
@@ -452,6 +691,7 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
     await assertSenderForPublish(db, row);
+    const followUps = await followUpsForPublish(db, row);
 
     const loaded = await loadFactsFor(db, now, audienceOfRow(row));
     const count = countAudience(row, loaded);
@@ -464,6 +704,11 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
         { audience_count: count, audience_counted_at: nowIso, requested_at: nowIso, requested_by: user.id, status: "pending_approval", updated_by: user.id },
         { expectedStatuses: ["draft"], expectedUpdatedAt: row.updated_at }
       );
+
+      // A aprovacao do aviso cobre as seguintes: o fluxo espera a aprovacao junto.
+      if (followUps) {
+        await moveNoticeFlow(db, row.id, { actorId: user.id, entryCount: count, from: ["draft"], now, to: "pending_approval" });
+      }
 
       await recordAudit(db, {
         action: "communication.approval_requested",
@@ -478,14 +723,16 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
       return { audienceCount: count, id: row.id, recipients: null, situation: "pending_approval", updatedAt: pending.updated_at };
     }
 
-    const published = await goLive({
+    const published = await goLiveWithFollowUps({
       actorId: user.id,
       approved: can(access, "messaging.publish_large"),
       count,
       db,
       expectedStatuses: ["draft"],
+      followUps,
       loaded,
       now,
+      reason: null,
       row
     });
 
@@ -495,9 +742,15 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
       count,
       entityId: row.id,
       entityType: "campaign",
-      metadata: { kind: row.kind, recipients: published.recipients, sender_user_id: row.sender_user_id, situation: published.situation }
+      metadata: {
+        follow_ups_flow_id: followUps?.flow.id ?? null,
+        kind: row.kind,
+        recipients: published.recipients,
+        sender_user_id: row.sender_user_id,
+        situation: published.situation
+      }
     });
-    await notifyNoticeSenders(db, row, published, user.id);
+    await notifyNoticeSenders(db, row, published, user.id, followUps?.senders);
     revalidateNotices(row.id);
 
     return published;
@@ -521,17 +774,21 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
     await assertSenderForPublish(db, row);
+    const followUps = await followUpsForPublish(db, row);
 
     const loaded = await loadFactsFor(db, now, audienceOfRow(row));
     const count = countAudience(row, loaded);
-    const published = await goLive({
+    // A aprovacao do aviso cobre as seguintes (docs/23 §2.9): o fluxo vai para o ar como aprovado.
+    const published = await goLiveWithFollowUps({
       actorId: user.id,
       approved: true,
       count,
       db,
       expectedStatuses: ["pending_approval"],
+      followUps,
       loaded,
       now,
+      reason: "approved",
       row
     });
 
@@ -542,6 +799,7 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
       entityId: row.id,
       entityType: "campaign",
       metadata: {
+        follow_ups_flow_id: followUps?.flow.id ?? null,
         kind: row.kind,
         recipients: published.recipients,
         requested_by: row.requested_by,
@@ -549,7 +807,7 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
         situation: published.situation
       }
     });
-    await notifyNoticeSenders(db, row, published, user.id);
+    await notifyNoticeSenders(db, row, published, user.id, followUps?.senders);
     revalidateNotices(row.id);
 
     return published;
@@ -567,6 +825,9 @@ export async function rejectNotice(input: NoticeIdInput): Promise<ActionResult<N
       { requested_at: null, requested_by: null, status: "draft", updated_by: user.id },
       { expectedStatuses: ["pending_approval"], expectedUpdatedAt: data.expectedUpdatedAt }
     );
+
+    // As seguintes voltam a rascunho junto (nada saiu).
+    await moveNoticeFlow(db, row.id, { actorId: user.id, from: ["pending_approval", "active"], now: new Date(), to: "draft" });
 
     await recordAudit(db, { action: "communication.rejected", actorId: user.id, entityId: row.id, entityType: "campaign", metadata: { kind: row.kind, requested_by: row.requested_by } });
     revalidateNotices(row.id);
@@ -590,6 +851,9 @@ export async function cancelScheduledNotice(input: NoticeIdInput): Promise<Actio
       { status: "draft", updated_by: user.id },
       { expectedStatuses: ["scheduled"], expectedUpdatedAt: data.expectedUpdatedAt }
     );
+
+    // O fluxo das seguintes esperava o envio (ninguem entrou): volta a rascunho junto.
+    await moveNoticeFlow(db, row.id, { actorId: user.id, from: ["active", "pending_approval"], now: new Date(), to: "draft" });
 
     await recordAudit(db, { action: "communication.canceled", actorId: user.id, entityId: row.id, entityType: "campaign", metadata: { kind: row.kind } });
     revalidateNotices(row.id);
@@ -682,10 +946,15 @@ export async function endNotice(input: NoticeIdInput): Promise<ActionResult<Noti
   );
 }
 
-/** [messaging.publish] Retira a notificacao enviada: some do sino dos alunos (fica como cancelada). */
-export async function withdrawNotice(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange & { removed: number }>> {
-  return runAdminAction("messaging.publish", noticeIdSchema, input, async ({ input: data, user }) => {
+/**
+ * [messaging.publish] Retira a notificacao enviada: some do sino dos alunos (fica como cancelada). v2: as
+ * seguintes deixam de sair (o fluxo do aviso termina, source_withdrawn) e, com `alsoFollowUps` (padrao),
+ * as que ja sairam tambem somem do sino.
+ */
+export async function withdrawNotice(input: WithdrawNoticeInput): Promise<ActionResult<NoticeStateChange & { removed: number }>> {
+  return runAdminAction("messaging.publish", withdrawNoticeSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
+    const now = new Date();
     const row = await requireCampaign(db, data.id);
 
     if (row.kind !== "inbox") {
@@ -699,18 +968,90 @@ export async function withdrawNotice(input: NoticeIdInput): Promise<ActionResult
       { status: "canceled", updated_by: user.id },
       { expectedStatuses: ["sent"], expectedUpdatedAt: data.expectedUpdatedAt }
     );
+    // As seguintes param antes de qualquer linha sair: pendentes e reservadas canceladas (7.13).
+    const flow = await moveNoticeFlow(db, row.id, { actorId: user.id, from: ["active", "paused"], now, reason: "source_withdrawn", to: "ended" });
+    let followUpsRemoved = 0;
+
+    if (flow && data.alsoFollowUps) {
+      const canceled = await db.from("campaigns").update({ status: "canceled", updated_by: user.id }).eq("flow_id", flow.id).in("status", ["draft", "sent"]);
+      assertNoDbError(canceled.error, "Comunicacao: retirar as seguintes");
+
+      const deleted = await db.from("notifications").delete({ count: "exact" }).eq("flow_id", flow.id).eq("is_test", false);
+      assertNoDbError(deleted.error, "Comunicacao: tirar as seguintes do sino");
+      followUpsRemoved = deleted.count ?? 0;
+    }
+
     const removed = await deleteCampaignNotifications(db, row.id);
 
-    await recordAudit(db, { action: "communication.withdrawn", actorId: user.id, count: removed, entityId: row.id, entityType: "campaign", metadata: { kind: row.kind } });
+    if (flow) {
+      invalidateLivePopups({ from: "action" });
+    }
+
+    await recordAudit(db, {
+      action: "communication.withdrawn",
+      actorId: user.id,
+      count: removed,
+      entityId: row.id,
+      entityType: "campaign",
+      metadata: { also_follow_ups: Boolean(flow) && data.alsoFollowUps, follow_ups_removed: followUpsRemoved, kind: row.kind }
+    });
     revalidateNotices(row.id);
 
-    return { ...stateChange(updated, Date.now()), removed };
+    return { ...stateChange(updated, now.getTime()), removed };
   });
 }
 
 /* ------------------------------------------------------------------------------------------------
  * Duplicar, excluir, teste e imagem
  * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * Copia as seguintes do aviso para a copia (duplicar): passos com ids novos, conteudo como rascunho novo,
+ * referencias de tempo, regras e a linha "Parar ..." remapeadas; "fica no sino ate uma data" que ja passou
+ * (ou a menos de 1 hora) volta para 90 dias, como no aviso. Devolve quantas seguintes foram copiadas.
+ */
+async function duplicateNoticeFollowUps(db: CommunicationsDb, input: { actorId: string; notice: CampaignRow; now: number; sourceId: string }): Promise<number> {
+  const loaded = await loadNoticeFlow(db, input.sourceId);
+  const messageNodes = loaded?.tree.nodes.filter((node) => node.kind === "message") ?? [];
+
+  if (!loaded || messageNodes.length === 0) {
+    return 0;
+  }
+
+  const versions = new Map((await fetchCampaignsByIds(db, messageNodes.map((node) => node.campaignId ?? "").filter(Boolean))).map((version) => [version.id, version]));
+  const ids = new Map(loaded.tree.nodes.map((node) => [node.id, crypto.randomUUID()]));
+  const remap = (definition: AudienceDefinition | null) => (definition ? remapNodeRefs(definition, ids) : null);
+  const nodes: FlowNode[] = loaded.tree.nodes.map((node) => ({
+    ...node,
+    anchorNodeId: node.anchorNodeId ? (ids.get(node.anchorNodeId) ?? null) : null,
+    campaignId: null,
+    condition: remap(node.condition),
+    filter: remap(node.filter),
+    id: ids.get(node.id) ?? node.id,
+    parentId: node.parentId ? (ids.get(node.parentId) ?? null) : null
+  }));
+  const contents: Record<string, FlowNoticeContent> = {};
+
+  for (const node of messageNodes) {
+    const content = followUpContentOf(node, versions.get(node.campaignId ?? ""));
+
+    if (content.validity.mode === "until" && !(Date.parse(content.validity.endsAt) > input.now + HOUR_MS)) {
+      content.validity = { mode: "default" };
+    }
+
+    contents[ids.get(node.id) ?? node.id] = content;
+  }
+
+  await saveFlowTree(db, {
+    actorId: input.actorId,
+    contents,
+    flow: { goal: remap(definitionOf(loaded.flow.goal)), name: noticeFlowName(input.notice.title), origin: "notice", sourceCampaignId: input.notice.id },
+    now: new Date(input.now),
+    tree: { nodes, origin: "notice" }
+  });
+
+  return messageNodes.length;
+}
 
 /**
  * [messaging.write] Novo rascunho com o mesmo conteudo e segmento (data que ja passou fica para "agora";
@@ -736,8 +1077,15 @@ export async function duplicateNotice(input: NoticeIdInput): Promise<ActionResul
     }
 
     const created = await insertCampaign(db, { ...draftToColumns(draft), created_by: user.id, status: "draft", updated_by: user.id });
+    const followUps = created.kind === "inbox" ? await duplicateNoticeFollowUps(db, { actorId: user.id, notice: created, now, sourceId: row.id }) : 0;
 
-    await recordAudit(db, { action: "communication.duplicated", actorId: user.id, entityId: created.id, entityType: "campaign", metadata: { kind: created.kind, source_id: row.id } });
+    await recordAudit(db, {
+      action: "communication.duplicated",
+      actorId: user.id,
+      entityId: created.id,
+      entityType: "campaign",
+      metadata: { follow_ups: followUps, kind: created.kind, source_id: row.id }
+    });
     revalidateNotices();
 
     return { id: created.id, updatedAt: created.updated_at };
@@ -766,6 +1114,13 @@ export async function deleteNotice(input: NoticeIdInput): Promise<ActionResult<{
       invalidateLivePopups({ from: "action" });
     }
 
+    // v2: as seguintes saem junto (no ar ou pausado, encerradas antes: source_deleted).
+    const flow = row.kind === "inbox" ? await noticeFlowRow(db, row.id) : null;
+
+    if (flow) {
+      await removeNoticeFlow(db, flow, { actorId: user.id, now, reason: "source_deleted" });
+    }
+
     await recordAudit(db, { action: "communication.deleted", actorId: user.id, entityId: row.id, entityType: "campaign", metadata: { kind: row.kind, status: row.status } });
     revalidateNotices();
 
@@ -786,44 +1141,7 @@ export async function sendNoticeTestToMe(input: NoticeIdInput): Promise<ActionRe
       throw new CommunicationError("O teste vale só para notificações. Veja o pop-up na prévia.", 422);
     }
 
-    const dedupeKey = `campaign-test:${row.id}`;
-    const now = Date.now();
-    const nowIso = new Date(now).toISOString();
-    // O teste fica pelo menos 1 hora no sino: o de um rascunho com "ate uma data" que ja passou tambem aparece.
-    const expiresAt = new Date(testSendExpiresAt({ validUntil: row.valid_until, validityMinutes: row.validity_minutes }, now)).toISOString();
-    const existing = await db.from("notifications").select("id").eq("user_id", user.id).eq("dedupe_key", dedupeKey).maybeSingle();
-
-    if (existing.error) {
-      throw new Error(`Comunicacao: teste: ${existing.error.message}`);
-    }
-
-    // Repetir traz de volta como nova: chega agora, com o fim recalculado e o audio sem nada ouvido.
-    const result = existing.data
-      ? await db
-          .from("notifications")
-          .update({
-            audio_completed_at: null,
-            audio_heard: null,
-            audio_heard_percent: null,
-            audio_started_at: null,
-            clicked_at: null,
-            created_at: nowIso,
-            expires_at: expiresAt,
-            opened_at: null,
-            read_at: null,
-            responded_at: null,
-            response: null,
-            seen_at: null
-          })
-          .eq("id", (existing.data as { id: string }).id)
-      : await db
-          .from("notifications")
-          .insert({ campaign_id: row.id, created_at: nowIso, dedupe_key: dedupeKey, expires_at: expiresAt, is_test: true, kind: "notice", user_id: user.id });
-
-    if (result.error) {
-      throw new Error(`Comunicacao: teste: ${result.error.message}`);
-    }
-
+    await upsertTestNotification(db, row, user.id, Date.now());
     await recordAudit(db, { action: "communication.test_sent", actorId: user.id, entityId: row.id, entityType: "campaign", metadata: { kind: row.kind } });
 
     return { sent: true as const };
@@ -846,5 +1164,495 @@ export async function uploadNoticeImage(input: { image: string }): Promise<Actio
     }
 
     return { url };
+  });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * "Depois desta notificação": gravar as seguintes, contar ao vivo e o teste (v2, docs/23 §2.2 e §6.2)
+ * ---------------------------------------------------------------------------------------------- */
+
+export type SavedNoticeFollowUps = {
+  /** Entrada do fluxo (a notificacao principal nas regras); null = o fluxo saiu (pop-up ou nenhuma seguinte). */
+  entryNodeId: string | null;
+  flowId: string | null;
+  flowUpdatedAt: string | null;
+  nodeIds: Record<string, string>;
+};
+
+export type FollowUpAudiencePreview = { qualified: number | null; recipients: number };
+
+/** Conteudo de cada seguinte pelo id do passo (o que saveFlowTree grava como versao). */
+function contentsOfDrafts(drafts: readonly FollowUpDraft[], into: Record<string, FlowNoticeContent> = {}) {
+  for (const draft of drafts) {
+    into[draft.id] = draft.content;
+    contentsOfDrafts(draft.children, into);
+  }
+
+  return into;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Entrada de um fluxo de aviso novo: o id que o navegador ja usou nas regras para a notificacao principal
+ * (o cartao continua igual depois de gravar), desde que nenhum passo tenha esse id; senao, um novo.
+ */
+async function newEntryId(db: CommunicationsDb, drafts: readonly FollowUpDraft[]) {
+  const [candidate] = foreignNodeRefs(drafts).filter((ref) => UUID_PATTERN.test(ref));
+
+  if (candidate) {
+    const { data, error } = await db.from("communication_flow_nodes").select("id").eq("id", candidate).limit(1);
+    assertNoDbError(error, "Comunicacao: entrada do fluxo do aviso");
+
+    if ((data ?? []).length === 0) {
+      return candidate;
+    }
+  }
+
+  return crypto.randomUUID();
+}
+
+/** A conferencia da arvore (a mesma de saveFlowTree), com o erro no campo do cartao ("followUps.0.when.minutes"). */
+function assertFollowUpTree(input: { drafts: readonly FollowUpDraft[]; entryId: string; goal: AudienceDefinition | null; nodes: FlowNode[]; notice: CampaignRow }) {
+  const metas: Record<string, FlowMessageMeta> = { [input.entryId]: messageMetaOfRow(input.notice) };
+
+  for (const [nodeId, content] of Object.entries(contentsOfDrafts(input.drafts))) {
+    metas[nodeId] = { ...messageMetaOfRow({ ...flowContentColumns(content), id: "" }), campaignId: "" };
+  }
+
+  const tree = { nodes: input.nodes, origin: "notice" as const };
+  const [issue] = [...validateFlowTree(tree, metas), ...validateFlowGoal(tree, input.goal, metas)].filter((item) => item.level === "save");
+
+  if (issue) {
+    throw new NoticeFieldError(followUpIssuePath(issue.nodeId ? followUpPaths(input.drafts).get(issue.nodeId) : undefined, issue.field), issue.message);
+  }
+}
+
+/**
+ * [messaging.write; depois do envio messaging.publish e, acima de 500, messaging.publish_large] Grava as
+ * notificacoes seguintes do aviso, logo depois de saveNoticeDraft (o editor mostra o banner de "salvo pela
+ * metade" se falhar). Cria o fluxo do aviso no primeiro uso (origin "notice", rascunho enquanto o aviso e
+ * rascunho) e grava pelo mesmo caminho do construtor (saveFlowTree, RPC 7.5). Depois do envio as mudancas
+ * valem na hora ("Aplicar alterações"): um fluxo criado agora ja nasce no ar (7.13) e a seguinte nova de
+ * primeiro nivel chega a todos que receberam o aviso, contando de quando cada um recebeu (7.3).
+ * `followUps: []` num rascunho tira o fluxo (a troca para pop-up). Recusa aviso retirado do sino (409) e
+ * aviso que ja saiu do sino de todos (409).
+ */
+export async function saveNoticeFollowUps(input: SaveNoticeFollowUpsInput): Promise<ActionResult<SavedNoticeFollowUps>> {
+  return runAdminAction("messaging.write", saveNoticeFollowUpsSchema, input, async ({ access, input: data, user }) => {
+    const db = communicationsDb();
+    const now = new Date();
+    const notice = await requireCampaign(db, data.noticeId);
+
+    assertSameVersion(notice, data.expectedNoticeUpdatedAt);
+
+    if (notice.kind !== "inbox" && data.followUps.length > 0) {
+      throw new CommunicationError(FOLLOW_UPS_INBOX_ONLY, 422);
+    }
+
+    if (notice.status === "canceled") {
+      throw new CommunicationError(FOLLOW_UPS_WITHDRAWN, 409);
+    }
+
+    const sent = notice.status === "sending" || notice.status === "sent";
+
+    // Antes do envio, as seguintes mudam junto com o aviso salvo (que volta a rascunho).
+    if (!sent && notice.status !== "draft") {
+      throw new CommunicationError(FOLLOW_UPS_SAVE_NOTICE_FIRST, 409);
+    }
+
+    if (sent && !can(access, "messaging.publish")) {
+      throw new CommunicationError(FOLLOW_UPS_NEED_PUBLISH, 403);
+    }
+
+    if (sent && !canPublishTo(access, noticeRecipientsOf(notice))) {
+      throw new CommunicationError(LIVE_FLOW_NEEDS_APPROVAL, 403);
+    }
+
+    const loaded = await loadNoticeFlow(db, notice.id);
+
+    if (loaded?.flow.status === "ended") {
+      throw new CommunicationError(loaded.flow.ended_reason === "finished" ? FOLLOW_UPS_GONE : FOLLOW_UPS_WITHDRAWN, 409);
+    }
+
+    if (data.expectedFlowUpdatedAt && (!loaded || !isSameVersion(data.expectedFlowUpdatedAt, loaded.flow.updated_at))) {
+      throw new CommunicationError(FLOW_CHANGED_MESSAGE, 409);
+    }
+
+    // Rascunho sem seguintes (ou trocado para pop-up): o fluxo do aviso sai (nada foi enviado).
+    if (data.followUps.length === 0 && !sent) {
+      if (loaded) {
+        await removeNoticeFlow(db, loaded.flow, { actorId: user.id, now, reason: null });
+        await recordAudit(db, {
+          action: "communication.follow_ups_saved",
+          actorId: user.id,
+          count: 0,
+          entityId: notice.id,
+          entityType: "campaign",
+          metadata: { flow_id: loaded.flow.id, removed: true }
+        });
+        revalidateNotices(notice.id);
+      }
+
+      return { entryNodeId: null, flowId: null, flowUpdatedAt: null, nodeIds: {} };
+    }
+
+    // O construtor mudou o fluxo para algo que o cartao nao desenha: so pelo construtor.
+    if (loaded && followUpsFromTree(loaded.tree) === null) {
+      throw new CommunicationError(FOLLOW_UPS_BUILDER_ONLY, 409);
+    }
+
+    // Depois do envio sem fluxo ainda: so enquanto alguma linha do aviso continua no sino.
+    if (sent && !loaded) {
+      const last = await lastSourceExpiry(db, notice.id);
+
+      if (last === null || last <= now.getTime()) {
+        throw new CommunicationError(FOLLOW_UPS_GONE, 409);
+      }
+    }
+
+    const entryId = (loaded ? entryOf(loaded.tree)?.id : null) ?? (await newEntryId(db, data.followUps));
+    const drafts = remapEntryRefs(data.followUps, entryId);
+    const nodes = treeFromFollowUps(entryId, followUpsOfDrafts(drafts));
+    const savedGoal = loaded ? definitionOf(loaded.flow.goal) : null;
+    // Objetivo mudado no construtor (nao e um "têm acesso a" so): o cartao nao mexe nele.
+    const goal = data.goal ? stopGoalDefinition(data.goal.productId) : savedGoal && stopLineOfGoal(savedGoal).kind === "other" ? savedGoal : null;
+
+    assertFollowUpTree({ drafts, entryId, goal, nodes, notice });
+
+    const previousSenders = new Set<string>(notice.sender_user_id ? [notice.sender_user_id] : []);
+
+    if (loaded && sent) {
+      const versionIds = loaded.tree.nodes.map((node) => node.campaignId ?? "").filter(Boolean);
+
+      for (const version of await fetchCampaignsByIds(db, versionIds)) {
+        if (version.sender_user_id) {
+          previousSenders.add(version.sender_user_id);
+        }
+      }
+    }
+
+    const saved = await saveFlowTree(db, {
+      actorId: user.id,
+      contents: contentsOfDrafts(drafts),
+      expectedUpdatedAt: loaded ? (data.expectedFlowUpdatedAt ?? loaded.flow.updated_at) : null,
+      flow: { goal, name: noticeFlowName(notice.title), origin: "notice", sourceCampaignId: notice.id },
+      flowId: loaded?.flow.id ?? null,
+      now,
+      tree: { nodes, origin: "notice" }
+    });
+    let flow = saved.flow;
+
+    // A primeira seguinte de uma notificacao que ja saiu: o fluxo nasce no ar (o conteudo vira "sent").
+    if (sent && flow.status === "draft") {
+      flow = await changeFlowState(db, { actorId: user.id, entryCount: noticeRecipientsOf(notice), expectedUpdatedAt: flow.updated_at, flowId: flow.id, now, to: "active" });
+    }
+
+    invalidateLivePopups({ from: "action" });
+
+    // No ar, quem passou a enviar agora recebe o e-mail "enviada em seu nome" (uma vez por fluxo).
+    const newSenders = sent ? saved.senderIds.filter((id) => !previousSenders.has(id)) : [];
+
+    if (newSenders.length > 0) {
+      await notifySendersOnBehalf(db, { actorId: user.id, count: noticeRecipientsOf(notice), flowId: flow.id, senders: newSenders, title: flow.name }).catch((error: unknown) =>
+        console.error(`[comunicacao] "enviada em seu nome" do fluxo ${flow.id} nao agendado: ${error instanceof Error ? error.message : String(error)}`)
+      );
+    }
+
+    await recordAudit(db, {
+      action: "communication.follow_ups_saved",
+      actorId: user.id,
+      count: Object.keys(contentsOfDrafts(drafts)).length,
+      entityId: notice.id,
+      entityType: "campaign",
+      metadata: {
+        flow_id: flow.id,
+        live: sent,
+        new_versions: saved.newVersions.length,
+        revision: flow.revision,
+        sender_user_ids: saved.senderIds,
+        stop_product: data.goal?.productId ?? null
+      }
+    });
+    revalidateNotices(notice.id);
+
+    return { entryNodeId: entryId, flowId: flow.id, flowUpdatedAt: flow.updated_at, nodeIds: saved.nodeIds };
+  });
+}
+
+/** Quem recebeu a notificacao de um passo (seguinte), sem os testes. */
+async function nodeRecipientIds(db: CommunicationsDb, nodeId: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const page = 1_000;
+
+  for (let from = 0; ; from += page) {
+    const { data, error } = await db
+      .from("notifications")
+      .select("user_id")
+      .eq("flow_node_id", nodeId)
+      .eq("is_test", false)
+      .order("user_id")
+      .range(from, from + page - 1);
+    assertNoDbError(error, "Comunicacao: quem recebeu a seguinte");
+
+    const rows = (data ?? []) as { user_id: string }[];
+    rows.forEach((row) => ids.add(row.user_id));
+
+    if (rows.length < page) {
+      return ids;
+    }
+  }
+}
+
+/** Passos citados pelas regras (notificacao, pagina do botao e "desde"). */
+function nodeRefsOf(definition: AudienceDefinition): Set<string> {
+  const refs = new Set<string>();
+  const visit = (node: AudienceNode) => {
+    if (isAudienceGroup(node)) {
+      node.items.forEach(visit);
+      return;
+    }
+
+    if (node.type === "message" && node.ref.kind === "node") {
+      refs.add(node.ref.nodeId);
+    } else if (node.type === "page_visit") {
+      if (node.page.kind === "message_cta") {
+        refs.add(node.page.nodeId);
+      }
+
+      if (node.since.kind === "message") {
+        refs.add(node.since.nodeId);
+      }
+    } else if (node.type === "access_gained" && node.since.kind === "message") {
+      refs.add(node.since.nodeId);
+    }
+  };
+
+  if (definition.kind === "rules") {
+    visit(definition.root);
+  }
+
+  return refs;
+}
+
+const FOLLOW_UP_PREVIEW_CHUNK = 1_000;
+const ZERO_COMMENTS = { d7: 0, d30: 0, d90: 0, total: 0 };
+
+/**
+ * [messaging.write] Contagem ao vivo de uma seguinte (so numeros, nunca nomes): quem recebeu a notificacao
+ * de cima (o aviso, `parentNodeId` null, ou a seguinte de cima) e combina agora com `filter`. Fatos do lote
+ * (RPC 7.9) em pedacos de 1.000 alunos; os fatos completos (progresso, comentarios...) so uma vez, e so se
+ * alguma regra pede. `qualified: null` enquanto a de cima nao saiu.
+ */
+export async function previewFollowUpAudience(input: PreviewFollowUpAudienceInput): Promise<ActionResult<FollowUpAudiencePreview>> {
+  return runAdminAction("messaging.write", previewFollowUpAudienceSchema, input, async ({ input: data }) => {
+    const db = communicationsDb();
+    const now = new Date();
+    const nowMs = now.getTime();
+    const notice = await requireCampaign(db, data.noticeId);
+
+    if (notice.kind !== "inbox" || (notice.status !== "sent" && notice.status !== "sending")) {
+      return { qualified: null, recipients: 0 };
+    }
+
+    const loaded = await loadNoticeFlow(db, notice.id);
+    const followUpNodes = new Map((loaded?.tree.nodes ?? []).filter((node) => node.kind === "message").map((node) => [node.id, node]));
+    const entryId = loaded ? (entryOf(loaded.tree)?.id ?? null) : null;
+    const parentIsNotice = data.parentNodeId === null || data.parentNodeId === entryId;
+
+    // A seguinte de cima ainda nao foi gravada: ninguem a recebeu.
+    if (!parentIsNotice && !followUpNodes.has(data.parentNodeId ?? "")) {
+      return { qualified: null, recipients: 0 };
+    }
+
+    const recipients = parentIsNotice ? await fetchCampaignRecipientIds(db, notice.id) : await nodeRecipientIds(db, data.parentNodeId ?? "");
+
+    if (recipients.size === 0) {
+      return { qualified: null, recipients: 0 };
+    }
+
+    const filter = normalizeAudience(data.filter);
+    const refs = nodeRefsOf(filter);
+    // Toda referencia que nao e uma seguinte gravada e a notificacao principal (a entrada do fluxo).
+    const noticeAliases = Array.from(refs).filter((ref) => !followUpNodes.has(ref));
+    const versionIds = Array.from(refs, (ref) => followUpNodes.get(ref)?.campaignId ?? "").filter(Boolean);
+    const versions = new Map((await fetchCampaignsByIds(db, versionIds)).map((version) => [version.id, version]));
+    const ctaPageKeys: Record<string, string | null> = {};
+
+    for (const ref of refs) {
+      const node = followUpNodes.get(ref);
+
+      ctaPageKeys[ref] = pageKeyOfHref(node ? (versions.get(node.campaignId ?? "")?.cta_href ?? null) : notice.cta_href);
+    }
+
+    const noticeKey = messageRefKey({ campaignId: notice.id, kind: "campaign" });
+    const campaignIds = collectMessageCampaignIds(filter);
+    const dedupeKeys = new Set<string>([`campaign:${notice.id}`, ...campaignIds.map((id) => `campaign:${id}`)]);
+    const messageKeys = new Set<string>([noticeKey, ...campaignIds.map((campaignId) => messageRefKey({ campaignId, kind: "campaign" }))]);
+    const pageKeys = new Set<string>();
+
+    for (const ref of refs) {
+      messageKeys.add(messageRefKey({ kind: "node", nodeId: ref }));
+
+      if (followUpNodes.has(ref)) {
+        dedupeKeys.add(`flow:${ref}`);
+      }
+    }
+
+    const collectPages = (node: AudienceNode) => {
+      if (isAudienceGroup(node)) {
+        node.items.forEach(collectPages);
+        return;
+      }
+
+      if (node.type === "page_visit") {
+        const key = node.page.kind === "message_cta" ? ctaPageKeys[node.page.nodeId] : pageKeyOfTarget(node.page);
+
+        if (key) {
+          pageKeys.add(key);
+        }
+      }
+    };
+
+    if (filter.kind === "rules") {
+      collectPages(filter.root);
+    }
+
+    // Progresso, comentarios, entrada, ritmo ou turma: os fatos completos, uma vez so.
+    const needs = audienceFactNeeds([filter]);
+    const full = needs.students ? await loadAudienceFacts(db, now) : null;
+    const fullFacts = new Map((full?.facts ?? []).map((fact) => [fact.userId, fact]));
+    const context: AudienceContext = {
+      commentRanks: full?.context.commentRanks ?? buildCommentRanks([]),
+      flow: { ctaPageKeys },
+      lessonTotals: full?.context.lessonTotals ?? {},
+      messageKeys,
+      now: nowMs
+    };
+    let qualified = 0;
+    let counted = 0;
+    const userIds = Array.from(recipients).sort();
+
+    for (let index = 0; index < userIds.length; index += FOLLOW_UP_PREVIEW_CHUNK) {
+      const chunk = userIds.slice(index, index + FOLLOW_UP_PREVIEW_CHUNK);
+      const batch = await fetchFlowBatchFacts(db, {
+        dedupeKeys: Array.from(dedupeKeys).sort(),
+        flowIds: loaded ? [loaded.flow.id] : [],
+        pageKeys: Array.from(pageKeys).sort(),
+        userIds: chunk
+      });
+      const staff = new Set(batch.staff);
+      const accesses = new Map<string, AudienceEntitlementRow[]>();
+      const messages = new Map<string, Record<string, MessageFact>>();
+      const visits = new Map<string, Record<string, number>>();
+      const entered = new Map(batch.runs.map((run) => [run.u, Date.parse(run.entered_at)]));
+
+      for (const row of batch.accesses) {
+        const list = accesses.get(row.u) ?? [];
+        list.push({
+          created_at: row.created_at,
+          ends_at: row.ends_at,
+          starts_at: row.starts_at,
+          status: row.status as AudienceEntitlementRow["status"],
+          target_id: row.target_id,
+          target_type: row.target_type as AudienceEntitlementRow["target_type"],
+          user_id: row.u
+        });
+        accesses.set(row.u, list);
+      }
+
+      for (const row of batch.messages) {
+        if (row.live === false) {
+          continue;
+        }
+
+        const fact = messageFactOf(row);
+        const own = messages.get(row.u) ?? {};
+
+        if (row.k.startsWith("flow:")) {
+          own[messageRefKey({ kind: "node", nodeId: row.k.slice("flow:".length) })] = fact;
+        } else {
+          own[row.k] = fact;
+
+          if (row.k === `campaign:${notice.id}`) {
+            noticeAliases.forEach((alias) => (own[messageRefKey({ kind: "node", nodeId: alias })] = fact));
+          }
+        }
+
+        messages.set(row.u, own);
+      }
+
+      for (const row of batch.visits) {
+        const time = Date.parse(row.at);
+
+        if (Number.isFinite(time)) {
+          visits.set(row.u, { ...(visits.get(row.u) ?? {}), [row.k]: time });
+        }
+      }
+
+      for (const userId of chunk) {
+        if (staff.has(userId)) {
+          continue;
+        }
+
+        const base: AudienceStudentFacts | undefined = full
+          ? fullFacts.get(userId)
+          : {
+              accesses: accessFactsOf(openAccessRows(accesses.get(userId) ?? [], nowMs)),
+              cohortIds: [],
+              comments: ZERO_COMMENTS,
+              completedByContent: {},
+              completedLessons: 0,
+              lastSignInAt: null,
+              lastStudiedAt: null,
+              pace: "never_started",
+              totalLessons: 0,
+              userId
+            };
+
+        if (!base) {
+          continue;
+        }
+
+        const own = messages.get(userId) ?? {};
+        // "desde que entrou": a passagem no fluxo; sem passagem ainda, quando recebeu o aviso.
+        const enteredAt = entered.get(userId) ?? own[noticeKey]?.visibleAt ?? nowMs;
+        const facts: AudienceStudentFacts = { ...base, flow: { enteredAt, pageVisits: visits.get(userId) ?? {} }, messages: own };
+
+        counted += 1;
+
+        if (evaluateAudience(filter, facts, context)) {
+          qualified += 1;
+        }
+      }
+    }
+
+    return { qualified, recipients: counted };
+  });
+}
+
+const followUpTestSchema = z.object({ nodeId: z.uuid({ error: "Passo inválido." }), noticeId: noticeIdSchema.shape.id });
+
+/**
+ * [messaging.write] "Enviar teste para mim" de uma notificacao seguinte (no cartao; o editor grava antes):
+ * a versao atual do passo vai para o sino de quem pediu, como teste (fora dos numeros). O construtor de
+ * fluxos tem o proprio (sendFlowMessageTest).
+ */
+export async function sendFollowUpTestToMe(input: { nodeId: string; noticeId: string }): Promise<ActionResult<{ sent: true }>> {
+  return runAdminAction("messaging.write", followUpTestSchema, input, async ({ input: data, user }) => {
+    const db = communicationsDb();
+    const notice = await requireCampaign(db, data.noticeId);
+    const loaded = await loadNoticeFlow(db, notice.id);
+    const node = loaded?.tree.nodes.find((item) => item.id === data.nodeId && item.kind === "message");
+    const version = node?.campaignId ? await fetchCampaign(db, node.campaignId) : null;
+
+    if (!loaded || !version) {
+      throw new CommunicationError(FOLLOW_UP_MISSING, 404);
+    }
+
+    await upsertTestNotification(db, version, user.id, Date.now());
+    await recordAudit(db, { action: "communication.test_sent", actorId: user.id, entityId: version.id, entityType: "campaign", metadata: { flow_id: loaded.flow.id, kind: "inbox", source_id: notice.id } });
+
+    return { sent: true as const };
   });
 }

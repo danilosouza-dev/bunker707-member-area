@@ -307,10 +307,20 @@ export function noticeActionNeedsConfirm(action: NoticeAction) {
 
 export type NoticeConfirmCopy = { confirmLabel: string; description: string; destructive: boolean; title: string };
 
-/** Textos do dialogo de confirmacao (nunca window.confirm). */
+/**
+ * Textos do dialogo de confirmacao (nunca window.confirm). v2 (docs/23 §2.2): retirar uma notificacao com
+ * seguintes (`followUps.count` > 0) avisa que elas deixam de sair; a caixa "Retirar também as notificações
+ * seguintes que já saíram (n)" fica no dialogo (notice-row-menu.tsx).
+ */
 export function noticeActionConfirm(
   action: NoticeAction,
-  notice: { audienceCount: number | null; kind: CampaignKind; recipients?: number | null; title: string }
+  notice: {
+    audienceCount: number | null;
+    followUps?: { count: number; sent: number } | null;
+    kind: CampaignKind;
+    recipients?: number | null;
+    title: string;
+  }
 ): NoticeConfirmCopy {
   const title = notice.title.trim() || "este aviso";
 
@@ -344,7 +354,7 @@ export function noticeActionConfirm(
         confirmLabel: "Retirar do sino",
         description: `A notificação some do sino ${
           typeof notice.recipients === "number" && notice.recipients > 0 ? `dos ${formatStudentCount(notice.recipients)} que receberam` : "de quem recebeu"
-        }. Os números continuam no relatório.`,
+        }. Os números continuam no relatório.${notice.followUps && notice.followUps.count > 0 ? " As notificações seguintes deixam de sair." : ""}`,
         destructive: true,
         title: `Retirar “${title}” do sino?`
       };

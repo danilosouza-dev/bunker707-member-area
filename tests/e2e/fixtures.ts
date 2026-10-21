@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
 import { test as base, expect, type BrowserContext } from "@playwright/test";
 import {
+  ESCOLA_DE_TESTE,
+  SENHA_DE_TESTE,
   apagarContaDeTeste,
   apagarProdutosDeTeste,
   contasDeTeste,
@@ -11,7 +14,8 @@ import {
   limparProgresso,
   limparSessoesDeTv
 } from "../fixtures/escola-de-teste.mjs";
-import { createLocalAdminClient } from "../support/local-db.mjs";
+import { pngQuadrado } from "../support/imagem-de-teste.mjs";
+import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 
 // Base dos testes de ponta a ponta: o navegador so fala com a maquina. Qualquer pedido para fora
 // (YouTube, PostHog, Sentry, fontes, CDNs) e cortado antes de sair. O player do YouTube continua
@@ -160,4 +164,259 @@ export async function reabrirPopUpParaAluna(titulo: string) {
   if (result.error) {
     throw new Error(`Reabrindo o pop-up para a aluna: ${result.error.message}`);
   }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Comunicacao v2 (docs/23 §8.3): tick, fluxos, foto de quem envia, audio e validade
+ * ---------------------------------------------------------------------------------------------- */
+
+const enderecoDoApp = `http://127.0.0.1:${process.env.E2E_PORT ?? "3100"}`;
+
+/**
+ * Roda o tick de minuto do app agora (POST /api/jobs/tick com o token local de tests/support/db.mjs), como o
+ * pg_cron faria: envia o que venceu, matricula quem recebeu a notificacao de origem e decide as tarefas dos
+ * fluxos. Falha alta se o tick nao terminar verde.
+ */
+export async function rodarTick() {
+  const token = process.env.JOBS_TICK_TOKEN;
+
+  if (!token) {
+    throw new Error("JOBS_TICK_TOKEN vazio: o playwright.config.ts carrega o token local por loadEnvFile().");
+  }
+
+  const resposta = await fetch(`${enderecoDoApp}/api/jobs/tick`, { headers: { authorization: `Bearer ${token}` }, method: "POST" });
+  const corpo = (await resposta.json().catch(() => null)) as { failed?: string[]; ok?: boolean; ran?: string[] } | null;
+
+  if (!resposta.ok || !corpo?.ok) {
+    throw new Error(`O tick falhou (${resposta.status}): ${JSON.stringify(corpo)}`);
+  }
+
+  return corpo;
+}
+
+/** Id do fluxo pelo nome (construtor) ou pelo titulo da notificacao de origem (notificacoes seguintes). */
+export async function idDoFluxo(input: { aviso: string } | { nome: string }) {
+  const db = createLocalAdminClient();
+
+  if ("nome" in input) {
+    const fluxo = unwrap(await db.from("communication_flows").select("id").eq("name", input.nome).is("deleted_at", null).maybeSingle(), `Lendo o fluxo "${input.nome}"`);
+
+    if (!fluxo) {
+      throw new Error(`O fluxo "${input.nome}" nao existe.`);
+    }
+
+    return (fluxo as { id: string }).id;
+  }
+
+  const aviso = unwrap(
+    await db.from("campaigns").select("id").eq("title", input.aviso).is("flow_id", null).is("deleted_at", null).maybeSingle(),
+    `Lendo o aviso "${input.aviso}"`
+  );
+
+  if (!aviso) {
+    throw new Error(`O aviso "${input.aviso}" nao existe.`);
+  }
+
+  const fluxo = unwrap(
+    await db.from("communication_flows").select("id").eq("source_campaign_id", (aviso as { id: string }).id).is("deleted_at", null).maybeSingle(),
+    `Lendo as notificacoes seguintes de "${input.aviso}"`
+  );
+
+  if (!fluxo) {
+    throw new Error(`O aviso "${input.aviso}" nao tem notificacoes seguintes.`);
+  }
+
+  return (fluxo as { id: string }).id;
+}
+
+type TarefaPendente = { anchor_at: string; deadline_at: string | null; due_at: string; node_id: string; user_id: string };
+
+/**
+ * Traz para agora as tarefas pendentes do fluxo (docs/23 §8.3). Mexer so em due_at nao adianta: o motor
+ * recalcula o horario a partir de anchor_at e so adiaria de novo. Cada tarefa volta no tempo pela propria
+ * distancia ate agora (anchor_at e deadline_at juntos, not_before limpo), entao o horario recalculado e agora
+ * e o prazo guarda a distancia. A ordem e sempre: tick (matricula ou envia) -> adiantarFluxo -> tick.
+ * Devolve quantas tarefas adiantou.
+ */
+export async function adiantarFluxo(flowId: string) {
+  const db = createLocalAdminClient();
+  const agora = Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const tarefas = unwrap(
+    await db
+      .from("communication_flow_tasks")
+      .select("node_id,user_id,anchor_at,deadline_at,due_at")
+      .eq("flow_id", flowId)
+      .eq("status", "pending")
+      .gt("due_at", iso(agora)),
+    "Lendo as tarefas pendentes do fluxo"
+  ) as TarefaPendente[];
+
+  for (const tarefa of tarefas) {
+    const distancia = Date.parse(tarefa.due_at) - agora;
+
+    unwrap(
+      await db
+        .from("communication_flow_tasks")
+        .update({
+          anchor_at: iso(Date.parse(tarefa.anchor_at) - distancia),
+          deadline_at: tarefa.deadline_at ? iso(Date.parse(tarefa.deadline_at) - distancia) : null,
+          due_at: iso(agora),
+          not_before: null
+        })
+        .eq("node_id", tarefa.node_id)
+        .eq("user_id", tarefa.user_id)
+        .eq("status", "pending"),
+      "Adiantando uma tarefa do fluxo"
+    );
+  }
+
+  return tarefas.length;
+}
+
+/**
+ * Da ao produtor de teste uma foto de perfil, como o /perfil grava: um PNG pequeno no bucket publico
+ * (avatars/{id}/{hash}.png) e o endereco em profiles.avatar_url. Devolve o endereco (o src que o sino desenha:
+ * o Supabase local e http, fora do otimizador do next/image). Desfaca com tirarFotoDoProdutor.
+ */
+export async function fotoDoProdutor() {
+  const db = createLocalAdminClient();
+  const contas = await contasDeTeste(db);
+  const bytes = pngQuadrado(200);
+  const caminho = `avatars/${contas.produtor.id}/${createHash("sha256").update(bytes).digest("hex").slice(0, 24)}.png`;
+
+  unwrap(await db.storage.from("content-assets").upload(caminho, bytes, { contentType: "image/png", upsert: true }), "Enviando a foto do produtor");
+  const endereco = db.storage.from("content-assets").getPublicUrl(caminho).data.publicUrl;
+  unwrap(await db.from("profiles").update({ avatar_url: endereco }).eq("id", contas.produtor.id), "Gravando a foto do produtor");
+
+  return endereco;
+}
+
+/** Tira a foto do perfil do produtor de teste (perfil e bucket). */
+export async function tirarFotoDoProdutor() {
+  const db = createLocalAdminClient();
+  const contas = await contasDeTeste(db);
+  await limparFotoDoPerfil(db, [contas.produtor.id]);
+}
+
+/**
+ * Audio de teste em memoria: WAV PCM de 16 bits, mono, 8 kHz, com `segundos` de um tom que sobe e desce (a
+ * forma de onda nao sai reta). O produtor envia pela tela ("Enviar arquivo"), que grava no bucket
+ * communication-audio.
+ */
+export function gerarAudioDeTeste(segundos = 2) {
+  const taxa = 8_000;
+  const amostras = Math.round(taxa * segundos);
+  const wav = Buffer.alloc(44 + amostras * 2);
+
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36 + amostras * 2, 4);
+  wav.write("WAVE", 8, "ascii");
+  wav.write("fmt ", 12, "ascii");
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20); // PCM
+  wav.writeUInt16LE(1, 22); // mono
+  wav.writeUInt32LE(taxa, 24);
+  wav.writeUInt32LE(taxa * 2, 28);
+  wav.writeUInt16LE(2, 32);
+  wav.writeUInt16LE(16, 34);
+  wav.write("data", 36, "ascii");
+  wav.writeUInt32LE(amostras * 2, 40);
+
+  for (let index = 0; index < amostras; index += 1) {
+    const tempo = index / taxa;
+    const volume = 0.25 + 0.6 * Math.abs(Math.sin(Math.PI * tempo * 1.5));
+    wav.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 440 * tempo) * volume * 32_767), 44 + index * 2);
+  }
+
+  return { buffer: wav, mimeType: "audio/wav", name: "aviso-de-teste.wav" };
+}
+
+/**
+ * Volta no tempo as notificacoes de um aviso (todas as contas): created_at e expires_at juntos, pela mesma
+ * distancia, entao expires_at > created_at continua valendo. Com 2 dias, uma notificacao de "1 dia" vence.
+ */
+export async function envelhecerNotificacao(tituloDoAviso: string, milissegundos: number) {
+  const db = createLocalAdminClient();
+  const avisos = unwrap(await db.from("campaigns").select("id").eq("title", tituloDoAviso).is("deleted_at", null), `Lendo o aviso "${tituloDoAviso}"`) as {
+    id: string;
+  }[];
+
+  if (avisos.length === 0) {
+    throw new Error(`O aviso "${tituloDoAviso}" nao existe.`);
+  }
+
+  const linhas = unwrap(
+    await db
+      .from("notifications")
+      .select("id,created_at,expires_at")
+      .in(
+        "campaign_id",
+        avisos.map((aviso) => aviso.id)
+      ),
+    "Lendo as notificacoes do aviso"
+  ) as { created_at: string; expires_at: string; id: string }[];
+
+  for (const linha of linhas) {
+    unwrap(
+      await db
+        .from("notifications")
+        .update({
+          created_at: new Date(Date.parse(linha.created_at) - milissegundos).toISOString(),
+          expires_at: new Date(Date.parse(linha.expires_at) - milissegundos).toISOString()
+        })
+        .eq("id", linha.id),
+      "Envelhecendo uma notificacao"
+    );
+  }
+
+  return linhas.length;
+}
+
+/** Pessoa da equipe com nome comprido (o nome encurta na linha de quem envia, a 375 px). */
+export const PROFESSOR_DE_NOME_LONGO = { email: "prof.carlos.albuquerque@bunker707.test", nome: "Prof. Carlos Lima de Albuquerque" } as const;
+
+/** Cria (ou reaproveita) a conta do professor de nome comprido e o coloca na equipe (Professor do curso de teste). */
+export async function garantirProfessorDeNomeLongo() {
+  const db = createLocalAdminClient();
+  const lista = await db.auth.admin.listUsers({ page: 1, perPage: 1000 });
+
+  if (lista.error) {
+    throw new Error(`Lendo contas: ${lista.error.message}`);
+  }
+
+  let id = lista.data.users.find((user) => user.email?.toLowerCase() === PROFESSOR_DE_NOME_LONGO.email)?.id ?? null;
+
+  if (!id) {
+    const criado = await db.auth.admin.createUser({
+      email: PROFESSOR_DE_NOME_LONGO.email,
+      email_confirm: true,
+      password: SENHA_DE_TESTE,
+      user_metadata: { full_name: PROFESSOR_DE_NOME_LONGO.nome }
+    });
+
+    if (criado.error || !criado.data.user) {
+      throw new Error(`Criando o professor de nome comprido: ${criado.error?.message ?? "sem usuario"}`);
+    }
+
+    id = criado.data.user.id;
+  }
+
+  unwrap(
+    await db.from("profiles").upsert({ email: PROFESSOR_DE_NOME_LONGO.email, full_name: PROFESSOR_DE_NOME_LONGO.nome, id }, { onConflict: "id" }),
+    "Gravando o perfil do professor de nome comprido"
+  );
+  unwrap(
+    await db
+      .from("admin_roles")
+      .upsert({ permissions: { productIds: [ESCOLA_DE_TESTE.curso.id] }, role: "instructor", user_id: id }, { onConflict: "user_id" }),
+    "Colocando o professor de nome comprido na equipe"
+  );
+
+  return { ...PROFESSOR_DE_NOME_LONGO, id };
+}
+
+/** Tira o professor de nome comprido da equipe e apaga a conta (depois de zerarComunicacao). */
+export async function apagarProfessorDeNomeLongo() {
+  await apagarContaDeTeste(createLocalAdminClient(), PROFESSOR_DE_NOME_LONGO.email);
 }

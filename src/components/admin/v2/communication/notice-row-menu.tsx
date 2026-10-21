@@ -17,6 +17,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { ActionResult } from "@/lib/action-result";
 import {
   approveNotice,
@@ -34,6 +35,7 @@ import type { CampaignKind, CampaignStatus, NoticeAction } from "@/server/commun
 import { ErrorBanner } from "../error-banner";
 import { ConfirmDialog, RowMenu } from "../settings/kit";
 import { adminToast } from "../toast";
+import { withdrawFollowUpsLabel } from "./follow-ups-view-model";
 import {
   NOTICE_ACTION_TOASTS,
   isLivePopupStatus,
@@ -49,11 +51,15 @@ import {
 // servidor confere de novo), Retirar do sino, Encerrar, Excluir, Aprovar e Recusar pedem confirmacao
 // (ConfirmDialog, nunca window.confirm), sucesso vira toast e erro fica num banner na tela. Cada acao
 // leva a versao lida (updatedAt): se o aviso mudou em outra tela, volta 409 e o banner oferece
-// "Recarregar". Pausar tem "Desfazer" no toast.
+// "Recarregar". Pausar tem "Desfazer" no toast. v2: "Retirar do sino" de uma notificacao com seguintes
+// avisa que elas deixam de sair e traz a caixa "Retirar também as notificações seguintes que já saíram (n)",
+// marcada (docs/23 §2.2).
 
 export type NoticeActionTarget = {
   actions: readonly NoticeAction[];
   audienceCount: number | null;
+  /** Notificacoes seguintes (v2): quantas e quantas ja sairam (o "Retirar do sino" oferece retirar essas). */
+  followUps?: { count: number; sent: number } | null;
   id: string;
   kind: CampaignKind;
   /** Notificacao enviada: quantos receberam (texto do "Retirar do sino"). */
@@ -98,6 +104,8 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
   const router = useRouter();
   const [confirming, setConfirming] = useState<{ action: NoticeAction; notice: NoticeActionTarget } | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  // "Retirar também as notificações seguintes que já saíram" (marcada a cada vez que o dialogo abre).
+  const [alsoFollowUps, setAlsoFollowUps] = useState(true);
   const [failure, setFailure] = useState<Failure | null>(null);
 
   function fail(result: Extract<ActionResult<unknown>, { ok: false }>) {
@@ -146,6 +154,16 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
           router.push(noticeHref(result.data.id));
           return;
         }
+        case "withdraw": {
+          const result = await withdrawNotice({ ...input, alsoFollowUps });
+
+          if (!result.ok) {
+            return fail(result);
+          }
+
+          adminToast.success(NOTICE_ACTION_TOASTS.withdraw ?? "");
+          return;
+        }
         case "delete": {
           const result = await deleteNotice(input);
 
@@ -187,6 +205,7 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
 
     if (noticeActionNeedsConfirm(action)) {
       setFailure(null);
+      setAlsoFollowUps(true);
       setConfirming({ action, notice });
       return;
     }
@@ -196,6 +215,7 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
 
   const copy = confirming ? noticeActionConfirm(confirming.action, confirming.notice) : null;
   const conflict = failure?.status === 409;
+  const sentFollowUps = confirming?.action === "withdraw" ? (confirming.notice.followUps?.sent ?? 0) : 0;
 
   const confirmDialog = (
     <ConfirmDialog
@@ -215,7 +235,18 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
       }}
       open={confirming !== null}
       title={copy?.title ?? ""}
-    />
+    >
+      {sentFollowUps > 0 ? (
+        <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-sm leading-5 text-[var(--text-primary)]">
+          <Checkbox
+            checked={alsoFollowUps}
+            className="size-[18px] rounded border-[var(--border-stronger)] data-checked:border-[var(--text-primary)] data-checked:bg-[var(--text-primary)] data-checked:text-[var(--surface-1)]"
+            onCheckedChange={(checked) => setAlsoFollowUps(checked === true)}
+          />
+          {withdrawFollowUpsLabel(sentFollowUps)}
+        </label>
+      ) : null}
+    </ConfirmDialog>
   );
 
   const errorBanner: ReactNode = failure ? (
@@ -256,8 +287,7 @@ const SIMPLE_ACTIONS: Partial<Record<NoticeAction, SimpleAction>> = {
   reject: rejectNotice,
   resume: resumeNotice,
   send_test: sendNoticeTestToMe,
-  end: endNotice,
-  withdraw: withdrawNotice
+  end: endNotice
 };
 
 type NoticeRowMenuProps = {

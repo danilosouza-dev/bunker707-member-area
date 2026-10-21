@@ -1,7 +1,7 @@
 "use client";
 
 import { Bell, CheckCheck } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { MemberPopupCard } from "@/components/member/notifications/member-popup";
 import { NotificationCard } from "@/components/member/notifications/notification-card";
 import { MemberFilterPills } from "@/components/member/ui/member-filters";
@@ -158,12 +158,13 @@ type NoticePreviewProps = {
 
 /** "Áudio na prévia": Não ouvido | Ouvido (so com audio; o pop-up nao guarda o ouvido). */
 function ListenPills({ onChange, value }: { onChange: (value: PreviewListen) => void; value: PreviewListen }) {
+  // Nome proprio por previa: o editor, a folha da seguinte e o painel do passo podem estar na tela juntos.
+  const name = useId();
+
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-      <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]" id="aviso-previa-audio">
-        Áudio na prévia
-      </span>
-      <PillGroup ariaLabel="Áudio na prévia" name="aviso-previa-audio" onChange={onChange} options={PREVIEW_LISTEN_OPTIONS} value={value} />
+      <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Áudio na prévia</span>
+      <PillGroup ariaLabel="Áudio na prévia" name={name} onChange={onChange} options={PREVIEW_LISTEN_OPTIONS} value={value} />
     </div>
   );
 }

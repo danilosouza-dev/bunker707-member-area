@@ -173,7 +173,7 @@ export function NoticeContentFields({
 
   return (
     <>
-      <Block description="O tipo e o texto que o aluno lê." layout={layout} title="O que">
+      <Block description={leading ? "O tipo e o texto que o aluno lê." : "O texto que o aluno lê."} layout={layout} title="O que">
         <div className="flex min-w-0 flex-col gap-5">
           {leading}
           <HeroTextField
@@ -262,6 +262,7 @@ export function NoticeContentFields({
         <NoticeCtaField
           disabled={disabled}
           errors={{ href: errorFor("cta.href"), label: errorFor("cta.label") }}
+          idPrefix={idPrefix}
           key={resetKey}
           onBlurField={onBlurField}
           onChange={(cta) => onChange({ cta })}

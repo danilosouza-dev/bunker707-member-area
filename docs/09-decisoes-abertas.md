@@ -208,6 +208,38 @@ Fica em aberto:
 - central de preferencias `/perfil/notificacoes` e descadastro sem login, que chegam junto com o primeiro canal fora da plataforma;
 - seletor de desfecho, "Salvar quem converteu como segmento", aba "Avisos recebidos" no perfil do aluno e "Enviar aviso" a partir de Alunos, Comunidade e Hoje.
 
+### Comunicacao v2: quem envia, tempo no sino, notificacoes seguintes e fluxos (21/10/2026)
+
+Pedido explicito do produtor (20/10/2026): mudar o icone do circulo (a escola, a propria foto ou a de um professor) e por um icone de assunto junto com o titulo; escolher quanto tempo a notificacao fica no sino; uma "automacaozinha de notificacoes" (segunda notificacao para quem nao abriu, nao ouviu, nao clicou, ou visitou e nao comprou, depois de X horas ou faltando X horas para vencer); e a onda do audio verde quando o aluno ouviu tudo. Detalhes em `docs/23`; migracao `202610200002`. Muda a decisao do `docs/17` §1.14 ("automacoes encadeadas" fora do MVP), so no sino.
+
+Decisao tomada (tabela V1-V20 em `docs/23` §8; resumo em `docs/22` §5, C14-C20):
+
+- V1 o circulo e quem envia: o Icone da escola da Marca (padrao `/brand/icon-bunker.svg`) ou a foto (ou as iniciais) de alguem da equipe; sem megafone e sem selo no aviso;
+- V2 **enviada em seu nome**: so pessoas da equipe (`admin_roles`) podem ser escolhidas, sem nome digitado nem foto avulsa; quem envia e resolvido na hora de ler o sino (quem sai da equipe vira a escola, tambem nas notificacoes antigas); a pessoa escolhida recebe o e-mail `sent_as` (`Uma notificação saiu em seu nome` / `Um fluxo de notificações usa o seu nome`), uma vez por aviso ou por fluxo, nunca para quem publicou; auditoria com `sender_user_id` e a linha `Criada por … · em nome de …` no relatorio. Sem permissao nova: publicar ja pede `messaging.publish` ou aprovacao. Sem linha no sino da equipe (a equipe entra direto no `/admin`, que nao tem sino);
+- V3 icone opcional antes do titulo (16 ids, 5 cores da paleta), decorativo, no sino, no pop-up e nos fluxos; sem rotulo "Novo"/"Urgente" ate as referencias do produtor;
+- V4 **Fica no sino por**: 1, 3, 7, 30 ou 90 dias (padrao e maximo), de 1 hora a 90 dias ou ate uma data; fim por linha (`notifications.expires_at`); vencida some da lista, dos numeros e do "Marcar todas"; comentarios continuam com 90 dias;
+- V5 `Termina em 3 h` com 24 h ou menos e tempo total ate 30 dias; rodape `As notificações ficam aqui por até 90 dias.`;
+- V6 audio ouvido = 44 de 48 trechos tocados de verdade, somados no servidor entre visitas e aparelhos; quatro estados, nunca so pela cor; audio do pop-up sem estado;
+- V7 `opened_at` (abriu de verdade) separado de `read_at`: "Marcar todas" e abrir o sino nao abrem; numa notificacao sem nada para abrir so se oferece "viu no sino";
+- V8 um modelo so: fluxo e uma arvore de Notificacao e Condicao (Sim/Nao); as notificacoes seguintes do editor sao um fluxo `origin = notice`; uma linha de trabalho por (passo, aluno);
+- V9 e V10 seguintes no proprio editor (card "Depois desta notificação", ate 5 por nivel e 3 niveis) e a aba Fluxos com quatro modelos e construtor;
+- V11 e V12 motor seguro para recalcular e aplicacao atomica por lote (pausar, encerrar, editar, ticks sobrepostos e quedas nao causam envio indevido);
+- V13 **limite diario**: no maximo 3 notificacoes de fluxos e notificacoes seguintes por aluno por dia de Sao Paulo, com pelo menos 1 hora entre elas (tambem na virada do dia); passou do limite do dia, sai as 8h do dia seguinte; nao sai depois do prazo ou de 7 adiamentos; avisos avulsos da equipe e comentarios nao contam; sem horario de silencio no sino (nao toca nem manda push). Muda a linha "Notificação (sino)" do `docs/17` §1.8.1 (era "sem limite");
+- V14 fatos numa RPC por lote de 150; progresso e comentarios so quando uma regra pede;
+- V15 visitas de pagina gravadas no servidor, so das paginas que um fluxo ativo ou pausado usa; beacon so para abrir detalhes de um produto e clicar em Comprar;
+- V16 regra "O que fez com uma notificação" nos segmentos e nos fluxos; visita de pagina e "ganhou acesso desde" so nos fluxos; negacao implica "recebeu";
+- V17 permissoes com o mesmo sentido: ativar, retomar e aplicar mudancas valem como publicar; os 500 contam o segmento de entrada agora; a aprovacao da notificacao cobre as seguintes; fluxo continuo pode crescer (C12); mudanca no ar nunca vira pedido (C13);
+- V18 mudancas num fluxo no ar sao preparadas e aplicadas juntas (`Aplicar alterações`); conteudo vira versao nova; mover e recusado;
+- V19 vocabulario: Fluxos, Notificação seguinte, Depois desta notificação, Quem envia, Ícone ao lado do título, Fica no sino por, Quem entra, Condição, Esperar, Objetivo; nunca "automação", "gatilho" ou "lembrete" na tela;
+- V20 o motor e a fase 2 do job `comunicacao` no tick (mesma excecao de C5 ao `docs/04`: sem fila nova), com 25 s proprios e numeros em `job_runs.metadata`.
+
+Fica em aberto:
+
+- passos por e-mail, push e WhatsApp e o disparo na hora por evento ("concluiu a aula X" agora): hoje a entrada continua chega em ate 15 minutos;
+- rotulo curto ou cartao colorido, quando chegarem as referencias visuais do produtor (o catalogo de icones ja tem lugar);
+- JPEG no Icone da escola (hoje PNG, WebP ou SVG);
+- A/B, seletor de desfecho e linha do tempo do aluno nos fluxos.
+
 ## Design
 
 ### Login

@@ -6,7 +6,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PRODUCT_FORMAT_LABELS, PRODUCT_SITUATION_LABELS } from "@/server/catalog/model";
-import { previewNoticeAudience, publishNotice, saveNoticeDraft, sendNoticeTestToMe } from "@/server/communications/actions";
+import { MemberFilterPills } from "@/components/member/ui/member-filters";
+import { previewNoticeAudience, publishNotice, saveNoticeDraft, saveNoticeFollowUps, sendFollowUpTestToMe, sendNoticeTestToMe } from "@/server/communications/actions";
 import { describeAudience, normalizeAudience, type AudienceDefinition } from "@/server/communications/audience-model";
 import {
   APPROVAL_THRESHOLD,
@@ -17,6 +18,7 @@ import {
   type NoticePermissions
 } from "@/server/communications/campaign-model";
 import { describeValidity, type Validity } from "@/server/communications/message-meta";
+import { saveNoticeFollowUpsSchema } from "@/server/communications/flow-schemas";
 import type { NoticeDetail, NoticeEditorOptions } from "@/server/communications/queries";
 import { audienceDefinitionSchema, emptyNoticeDraft, noticeDraftSchema, publishProblems, type NoticeDraft } from "@/server/communications/schemas";
 import { ErrorBanner } from "../error-banner";
@@ -25,14 +27,36 @@ import type { PreviewDevice } from "../member-area/preview-frame";
 import { AdminPage } from "../page-container";
 import { PageHeader } from "../page-header";
 import { useWarnBeforeUnload } from "../products/use-warn-before-unload";
-import { SectionCard } from "../settings/kit";
+import { ConfirmDialog, SectionCard } from "../settings/kit";
 import { StatusChip } from "../status-chip";
 import type { ProductPickerItem } from "../storefront/product-picker";
 import { adminCard } from "../styles";
 import { adminToast } from "../toast";
 import { useAdminTopbarTitle } from "../topbar-title";
 import { AudienceBuilder, AudienceCount, type AudienceCountState } from "./audience-builder";
+import {
+  FOLLOW_UPS_COPY,
+  countFollowUps,
+  findFollowUp,
+  followUpFormItemsOf,
+  followUpParentOf,
+  followUpPreviewAnchorExpiry,
+  followUpPreviewOptions,
+  followUpsStateKey,
+  followUpsToSave,
+  followUpErrorAt,
+  followUpTreeErrors,
+  goalOfStopLine,
+  parentOfItem,
+  popupSwitchConfirm,
+  stopLineOfGoal,
+  stopProductName,
+  type FollowUpFormItem,
+  type FollowUpPreviewChoice,
+  type FollowUpStopLine
+} from "./follow-ups-view-model";
 import { NoticeContentFields } from "./notice-content-fields";
+import { NoticeFollowUps, ViewAsFlowLink } from "./notice-follow-ups";
 import { NoticePreview } from "./notice-preview";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
 import { NoticeValidityField } from "./notice-validity-field";
@@ -126,7 +150,10 @@ const FIELD_FOCUS: readonly [string, string][] = [
   ["validity.minutes", "#aviso-validade-numero"],
   ["validity", "[name='aviso-validade']"],
   ["window.startsAt", "#aviso-inicio-data"],
-  ["window", "#aviso-fim-data"]
+  ["window", "#aviso-fim-data"],
+  // v2: "Depois desta notificação" (o cartao recebe o foco; o campo com erro fica marcado nele).
+  ["goal", "#aviso-seguintes-parar"],
+  ["followUps", "#aviso-seguintes"]
 ];
 
 function scrollBehavior(): ScrollBehavior {
@@ -167,6 +194,19 @@ function toPickerItems(products: NoticeEditorOptions["products"]): ProductPicker
     title: product.title
   }));
 }
+
+/** As seguintes como o servidor gravou, no formato do cartao (v2, "Depois desta notificação"). */
+function followUpsStateOf(detail: NoticeDetail | null, entryId: string): { items: FollowUpFormItem[]; stop: FollowUpStopLine } {
+  const followUps = detail?.followUps ?? null;
+
+  return {
+    items: detail && followUps?.items ? followUpFormItemsOf(followUps.items, followUpParentOf(entryId, "main", detail.draft)) : [],
+    stop: stopLineOfGoal(followUps?.goal ?? null)
+  };
+}
+
+/** Placeholders validos para conferir as seguintes no navegador com o mesmo schema da Server Action. */
+const FOLLOW_UPS_CHECK_INPUT = { expectedNoticeUpdatedAt: "2026-01-01T00:00:00.000Z", noticeId: "00000000-0000-4000-8000-000000000000" } as const;
 
 function Note({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
   return (
@@ -209,6 +249,26 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const rememberedResponse = useRef<NoticeDraft["response"]>(null);
   const bannerRef = useRef<HTMLDivElement>(null);
   const saveShortcut = useRef<() => void>(() => undefined);
+  // v2 "Depois desta notificação": as seguintes (estado do formulario: trocar para pop-up e voltar antes de
+  // salvar traz de volta), a versao do fluxo do aviso e o que foi gravado por ultimo (dirty).
+  const [entryId, setEntryId] = useState(() => initial?.followUps?.entryNodeId ?? crypto.randomUUID());
+  const [followUps, setFollowUps] = useState(() => followUpsStateOf(initial, initial?.followUps?.entryNodeId ?? ""));
+  const [flowVersion, setFlowVersion] = useState<{ flowId: string | null; updatedAt: string | null }>(() => ({
+    flowId: initial?.followUps?.flowId ?? null,
+    updatedAt: initial?.followUps?.updatedAt ?? null
+  }));
+  const [serverFlowVersion, setServerFlowVersion] = useState<string | null>(initial?.followUps?.updatedAt ?? null);
+  const [savedFollowUpsKey, setSavedFollowUpsKey] = useState(() => {
+    const entry = initial?.followUps?.entryNodeId ?? "";
+    const state = followUpsStateOf(initial, entry);
+
+    return initial ? followUpsStateKey(state.items, state.stop, followUpParentOf(entry, "main", initial.draft)) : followUpsStateKey([], state.stop, followUpParentOf("", "main", emptyNoticeDraft(defaultKind)));
+  });
+  const [followUpUpload, setFollowUpUpload] = useState<string | null>(null);
+  const [followUpAudioBusy, setFollowUpAudioBusy] = useState<string | null>(null);
+  const [testBusyId, setTestBusyId] = useState<string | null>(null);
+  const [kindConfirm, setKindConfirm] = useState(false);
+  const [previewTarget, setPreviewTarget] = useState<FollowUpPreviewChoice>("main");
 
   if (initial && initial.updatedAt !== serverVersion) {
     setServerVersion(initial.updatedAt);
@@ -226,8 +286,41 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const status = savedVersion?.status ?? null;
   const livePopup = isLivePopupStatus(draft.kind, status);
   const kindLocked = isNoticeKindLocked(status);
-  const dirty = !isSameNoticeDraft(saved, draft);
-  const uploading = imageUpload !== null;
+  // v2: as seguintes so mudam aqui antes do envio (depois, no relatorio); arvore do construtor = so leitura.
+  const followUpsMode = initial?.followUps?.mode ?? { kind: "edit" as const };
+  const followUpsEditable = followUpsMode.kind === "edit";
+  const mainFollowUpParent = useMemo(
+    () => followUpParentOf(entryId, "main", draft, draft.schedule.mode === "at" ? Date.parse(draft.schedule.sendAt) : now),
+    [draft, entryId, now]
+  );
+  const followUpsKey = followUpsStateKey(followUps.items, followUps.stop, mainFollowUpParent);
+  // Pop-up com fluxo gravado: salvar tira o fluxo (tambem o que so o construtor desenha).
+  const followUpsDirty =
+    draft.kind === "popup"
+      ? flowVersion.flowId !== null
+      : followUpsEditable && (followUpsKey !== savedFollowUpsKey || (flowVersion.flowId === null && followUps.items.length > 0));
+  const followUpsCount = followUps.items.length > 0 ? countFollowUps(followUps.items) : flowVersion.flowId ? (initial?.followUps?.count ?? 0) : 0;
+  const dirty = !isSameNoticeDraft(saved, draft) || followUpsDirty;
+  const uploading = imageUpload !== null || followUpUpload !== null;
+
+  // O fluxo do aviso mudou no servidor (outra tela, "Recarregar"): a versao segue o banco; sem mudanca
+  // local, as seguintes tambem (com mudanca, o que o produtor escreveu fica e grava por cima).
+  if (initial?.followUps && initial.followUps.updatedAt !== serverFlowVersion) {
+    setServerFlowVersion(initial.followUps.updatedAt);
+
+    if (initial.followUps.updatedAt !== flowVersion.updatedAt) {
+      setFlowVersion({ flowId: initial.followUps.flowId, updatedAt: initial.followUps.updatedAt });
+
+      if (!followUpsDirty) {
+        const entry = initial.followUps.entryNodeId ?? entryId;
+        const state = followUpsStateOf(initial, entry);
+        setEntryId(entry);
+        setFollowUps(state);
+        setSavedFollowUpsKey(followUpsStateKey(state.items, state.stop, followUpParentOf(entry, "main", initial.draft)));
+      }
+    }
+  }
+
   const locked = busy !== null;
   const pickerItems = useMemo(() => toPickerItems(options.products), [options.products]);
   const payload = useMemo(() => noticeDraftForKind(draft), [draft]);
@@ -236,6 +329,17 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
     return parsed.success ? {} : noticeErrorsFrom(parsed.error.issues);
   }, [payload]);
+  // As seguintes conferidas no navegador com o mesmo schema e a mesma arvore do servidor.
+  const followUpErrors = useMemo(() => {
+    if (draft.kind !== "inbox" || !followUpsEditable || followUps.items.length === 0) {
+      return {};
+    }
+
+    const drafts = followUpsToSave("inbox", followUps.items, mainFollowUpParent);
+    const parsed = saveNoticeFollowUpsSchema.safeParse({ ...FOLLOW_UPS_CHECK_INPUT, followUps: drafts, goal: goalOfStopLine(followUps.stop) });
+
+    return { ...followUpTreeErrors({ drafts, entryId, notice: draft }), ...(parsed.success ? {} : noticeErrorsFrom(parsed.error.issues)) };
+  }, [draft, entryId, followUps, followUpsEditable, mainFollowUpParent]);
   const audienceKey = JSON.stringify(normalizeAudience(draft.audience));
   const audienceValid = useMemo(() => audienceDefinitionSchema.safeParse(JSON.parse(audienceKey)).success, [audienceKey]);
 
@@ -304,6 +408,10 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     ? `Escolha a data e a hora ${draft.kind === "inbox" ? "do envio" : "da janela"} para ver o resumo.`
     : describeNoticeReview({
         audienceCount: liveCount,
+        followUps:
+          draft.kind === "inbox" && followUps.items.length > 0
+            ? { count: countFollowUps(followUps.items), stopProductName: stopProductName(followUps.stop, options.names) }
+            : null,
         kind: draft.kind,
         repeat: draft.repeat,
         schedule: payload.schedule,
@@ -316,6 +424,38 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     [options.names, options.notices]
   );
   const audienceDescription = describeAudience(normalizeAudience(draft.audience), audienceNames);
+  // Nomes das frases das seguintes: a principal e cada seguinte pelo passo ("node:<id>").
+  const followUpNames = useMemo(() => {
+    const messages: Record<string, string> = { ...audienceNames.messages, ...initial?.followUps?.names.messages, [`node:${entryId}`]: draft.title.trim() || "Sem título" };
+    const walk = (items: readonly FollowUpFormItem[]) =>
+      items.forEach((item) => {
+        messages[`node:${item.id}`] = item.content.title.trim() || "Sem título";
+        walk(item.children);
+      });
+
+    walk(followUps.items);
+
+    return { ...audienceNames, messages, products: { ...initial?.followUps?.names.products, ...audienceNames.products } };
+  }, [audienceNames, draft.title, entryId, followUps.items, initial?.followUps?.names]);
+  const followUpOptions = useMemo(
+    () => ({
+      branding: options.branding,
+      canEditBrand: options.canEditBrand,
+      cohorts: options.cohorts,
+      notices: options.notices,
+      products: pickerItems,
+      productsLoaded: options.productsLoaded,
+      segments: options.segments,
+      senders
+    }),
+    [options, pickerItems, senders]
+  );
+  const shownFollowUpErrors = useMemo(() => {
+    const fromServer = Object.fromEntries(Object.entries(serverErrors).filter(([key]) => key === "goal" || key.startsWith("goal.") || key === "followUps" || key.startsWith("followUps.")));
+
+    return { ...(submitted ? followUpErrors : {}), ...fromServer };
+  }, [followUpErrors, serverErrors, submitted]);
+  const previewLocation = draft.kind === "inbox" && previewTarget !== "main" ? findFollowUp(followUps.items, previewTarget) : null;
   const sendAtTime = draft.schedule.mode === "at" ? Date.parse(draft.schedule.sendAt) : now;
   const savedSender = initial?.sender ? { id: initial.sender.id, name: initial.sender.name } : null;
 
@@ -377,13 +517,13 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       return null;
     }
 
-    if (audioBusy) {
-      showFailure({ message: audioBusy, status: 0 });
+    if (audioBusy || followUpAudioBusy) {
+      showFailure({ message: audioBusy ?? followUpAudioBusy ?? "", status: 0 });
       return null;
     }
 
     setSubmitted(true);
-    const errors = { ...clientErrors, ...extraErrors };
+    const errors = { ...clientErrors, ...extraErrors, ...followUpErrors };
 
     if (Object.keys(errors).length > 0) {
       setServerErrors(extraErrors);
@@ -408,6 +548,32 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     const version = { id: result.data.id, status: result.data.status, updatedAt: result.data.updatedAt };
     setSavedVersion(version);
     setSaved(canonicalNoticeDraft(sent));
+
+    // v2: logo depois do aviso, as seguintes (pop-up grava "followUps: []": o fluxo do aviso sai).
+    if (followUpsDirty) {
+      const savedFollowUps = await saveNoticeFollowUps({
+        expectedFlowUpdatedAt: flowVersion.updatedAt ?? undefined,
+        expectedNoticeUpdatedAt: version.updatedAt,
+        followUps: followUpsToSave(draft.kind, followUps.items, mainFollowUpParent),
+        goal: draft.kind === "inbox" ? goalOfStopLine(followUps.stop) : null,
+        noticeId: version.id
+      });
+
+      if (!savedFollowUps.ok) {
+        const fieldErrors = noticeErrorsFromAction(savedFollowUps.fieldErrors);
+        setServerErrors(fieldErrors);
+        // O aviso ficou gravado: o banner diz que as seguintes nao, e o que foi escrito continua na tela.
+        showFailure({ message: FOLLOW_UPS_COPY.partialSaveText, status: savedFollowUps.status, title: FOLLOW_UPS_COPY.partialSaveTitle });
+        focusFirstError(fieldErrors);
+        return null;
+      }
+
+      const nextEntry = savedFollowUps.data.entryNodeId ?? crypto.randomUUID();
+      setEntryId(nextEntry);
+      setFlowVersion({ flowId: savedFollowUps.data.flowId, updatedAt: savedFollowUps.data.flowUpdatedAt });
+      setServerFlowVersion(savedFollowUps.data.flowUpdatedAt);
+      setSavedFollowUpsKey(followUpsStateKey(followUps.items, followUps.stop, { ...mainFollowUpParent, nodeId: nextEntry }));
+    }
 
     return version;
   }
@@ -508,6 +674,47 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
     adminToast.success(testSentToast(saves, previousStatus));
     openSavedNotice(version.id);
+  }
+
+  /** "Enviar teste para mim" de uma seguinte: grava antes (como o teste do aviso) e manda a versao gravada. */
+  async function sendFollowUpTest(nodeId: string) {
+    if (busy) {
+      return;
+    }
+
+    const previousStatus = status;
+    const saves = dirty || !savedVersion;
+    setBusy("test");
+    setTestBusyId(nodeId);
+    const version = saves ? await persist() : savedVersion;
+
+    if (!version) {
+      setBusy(null);
+      setTestBusyId(null);
+      return;
+    }
+
+    const result = await sendFollowUpTestToMe({ nodeId, noticeId: version.id });
+    setBusy(null);
+    setTestBusyId(null);
+
+    if (!result.ok) {
+      showFailure({ message: result.error, status: result.status, title: noticeFailureTitle({ savedDraft: saves, status: result.status, step: "test" }) });
+      return;
+    }
+
+    adminToast.success(testSentToast(saves, previousStatus));
+    openSavedNotice(version.id);
+  }
+
+  /** Trocar o Tipo para pop-up com seguintes pergunta antes (elas saem ao salvar). */
+  function requestKind(kind: CampaignKind) {
+    if (kind === "popup" && draft.kind === "inbox" && followUpsCount > 0) {
+      setKindConfirm(true);
+      return;
+    }
+
+    changeKind(kind);
   }
 
   function discard() {
@@ -681,7 +888,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             leading={
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Tipo</span>
-                <PillGroup ariaLabel="Tipo do aviso" disabled={locked || kindLocked} name="aviso-tipo" onChange={changeKind} options={KIND_OPTIONS} value={draft.kind} />
+                <PillGroup ariaLabel="Tipo do aviso" disabled={locked || kindLocked} name="aviso-tipo" onChange={requestKind} options={KIND_OPTIONS} value={draft.kind} />
                 <p className="text-xs leading-5 text-[var(--text-secondary)]">
                   {kindLocked
                     ? "O tipo não muda depois de publicado. Para trocar, duplique o aviso."
@@ -753,6 +960,45 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             </div>
           </SectionCard>
 
+          {draft.kind === "inbox" ? (
+            <NoticeFollowUps
+              actions={flowVersion.flowId ? <ViewAsFlowLink flowId={flowVersion.flowId} /> : undefined}
+              contentErrorOf={(path) => followUpErrorAt(shownFollowUpErrors, `${path}.content`)}
+              disabled={locked}
+              errorFor={(path) => followUpErrorAt(shownFollowUpErrors, path)}
+              fieldErrorFor={(path) => shownFollowUpErrors[path]}
+              flowId={flowVersion.flowId}
+              flowLive={false}
+              id="aviso-seguintes"
+              items={followUps.items}
+              lines={initial?.followUps?.lines ?? []}
+              main={mainFollowUpParent}
+              mainSent={false}
+              mode={followUpsMode}
+              names={followUpNames}
+              noticeCtaHref={draft.cta?.href ?? null}
+              noticeId={savedVersion?.id ?? null}
+              now={now}
+              onAudioBusyChange={setFollowUpAudioBusy}
+              onChange={(next) => {
+                setFollowUps(next);
+                clearServerErrors(["followUps", "goal"]);
+
+                if (failure && failure.status !== 409) {
+                  setFailure(null);
+                }
+              }}
+              onImageUploadChange={setFollowUpUpload}
+              onSendersChange={setSenders}
+              onSendTest={(nodeId) => void sendFollowUpTest(nodeId)}
+              options={followUpOptions}
+              stats={{}}
+              stop={followUps.stop}
+              testBusyId={testBusyId}
+              title={FOLLOW_UPS_COPY.title}
+            />
+          ) : null}
+
           <SectionCard title="Revisão">
             <div className="flex min-w-0 flex-col gap-4">
               <p aria-live="polite" className="text-sm leading-6 text-[var(--text-primary)]">
@@ -810,11 +1056,47 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             </div>
             <PillGroup ariaLabel="Aparelho da prévia" name="aviso-previa-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
           </div>
-          <NoticePreview branding={options.branding} device={device} draft={draft} imageUrl={previewImage} now={now} senders={senders} />
+          {draft.kind === "inbox" && followUps.items.length > 0 ? (
+            <MemberFilterPills
+              ariaLabel="Qual notificação a prévia mostra"
+              // 44 px no toque, como as pilulas do aparelho logo acima.
+              className="mx-0 px-0 sm:mx-0 sm:px-0 pointer-coarse:[&>button]:h-11"
+              onChange={setPreviewTarget}
+              options={followUpPreviewOptions(followUps.items)}
+              value={previewLocation ? previewTarget : "main"}
+            />
+          ) : null}
+          {previewLocation ? (
+            <NoticePreview
+              anchorExpiresAt={followUpPreviewAnchorExpiry(previewLocation.item.when, parentOfItem(previewLocation, mainFollowUpParent), now)}
+              branding={options.branding}
+              device={device}
+              draft={{ ...previewLocation.item.content, kind: "inbox" }}
+              imageUrl={followUpUpload}
+              key={previewLocation.item.id}
+              now={now}
+              senders={senders}
+            />
+          ) : (
+            <NoticePreview branding={options.branding} device={device} draft={draft} imageUrl={previewImage} now={now} senders={senders} />
+          )}
         </section>
       </div>
 
       {noticeActions.confirmDialog}
+
+      <ConfirmDialog
+        confirmLabel={popupSwitchConfirm(followUpsCount).confirmLabel}
+        description={popupSwitchConfirm(followUpsCount).description}
+        onConfirm={() => {
+          setKindConfirm(false);
+          setPreviewTarget("main");
+          changeKind("popup");
+        }}
+        onOpenChange={setKindConfirm}
+        open={kindConfirm}
+        title={popupSwitchConfirm(followUpsCount).title}
+      />
     </AdminPage>
   );
 }

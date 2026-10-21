@@ -17,6 +17,7 @@ import { SectionCard } from "../settings/kit";
 import { StatusChip } from "../status-chip";
 import { adminCard } from "../styles";
 import { useAdminTopbarTitle } from "../topbar-title";
+import { NoticeFollowUpsReport } from "./notice-follow-ups";
 import { NoticePreview } from "./notice-preview";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
 import {
@@ -42,6 +43,8 @@ import {
 // v2 (docs/23): na notificacao, "Abriram" entra no funil (interacao de verdade; "Marcar todas" nao
 // conta) e, com audio, "Começaram o áudio" e "Ouviram até o fim" sobre quem abriu
 // (communication_campaign_engagement); quando quem envia e uma pessoa, "Criada por … · em nome de …".
+// No fim, "Notificações seguintes" (NoticeFollowUpsReport): as seguintes com os numeros de cada uma e, para
+// quem pode publicar, as mudancas em etapas com "Aplicar alterações".
 
 type NoticeReportProps = {
   branding: NoticeEditorOptions["branding"];
@@ -60,6 +63,8 @@ function toTarget(detail: NoticeDetail): NoticeActionTarget {
   return {
     actions: detail.actions,
     audienceCount: detail.audienceCount,
+    // v2: "Retirar do sino" avisa das seguintes e oferece retirar as que ja sairam.
+    followUps: detail.followUps ? { count: detail.followUps.count, sent: detail.followUps.sent } : null,
     id: detail.id,
     kind: detail.kind,
     recipients: detail.stats.recipients,
@@ -329,6 +334,9 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
           </dl>
         </SectionCard>
       </div>
+
+      {/* v2 (docs/23 §2.2): as notificacoes seguintes, no ar para quem pode publicar ("Aplicar alterações"). */}
+      {detail.kind === "inbox" && detail.followUps ? <NoticeFollowUpsReport detail={detail} now={now} /> : null}
 
       {confirmDialog}
     </AdminPage>

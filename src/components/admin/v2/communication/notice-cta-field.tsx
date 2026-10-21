@@ -29,6 +29,8 @@ export type NoticeCta = NonNullable<NoticeDraft["cta"]>;
 type NoticeCtaFieldProps = {
   disabled: boolean;
   errors: { href?: string; label?: string };
+  /** Prefixo dos ids e nomes ("aviso" no editor: "aviso-botao-texto"); unico em cada formulario na tela. */
+  idPrefix?: string;
   onBlurField: (field: "cta.href" | "cta.label") => void;
   onChange: (cta: NoticeCta | null) => void;
   products: readonly ProductPickerItem[];
@@ -64,8 +66,9 @@ function Note({ children, tone = "neutral" }: { children: string; tone?: "neutra
   );
 }
 
-export function NoticeCtaField({ disabled, errors, onBlurField, onChange, products, productsLoaded, value }: NoticeCtaFieldProps) {
+export function NoticeCtaField({ disabled, errors, idPrefix = "aviso", onBlurField, onChange, products, productsLoaded, value }: NoticeCtaFieldProps) {
   const cta = value ?? EMPTY_CTA;
+  const id = (suffix: string) => `${idPrefix}-botao-${suffix}`;
   const [mode, setMode] = useState<HeroCtaDestinationMode>(() => describeCtaDestination(cta.href).mode);
   // Ultimo endereco escolhido em cada modo (voltar a ele ao trocar) e o botao inteiro ao desligar.
   const remembered = useRef<Partial<Record<HeroCtaDestinationMode, string>>>({ [mode]: cta.href });
@@ -107,7 +110,7 @@ export function NoticeCtaField({ disabled, errors, onBlurField, onChange, produc
         checked={value !== null}
         description={value ? "O botão aparece embaixo do texto do aviso." : "Sem botão, o aviso só informa."}
         disabled={disabled}
-        id="aviso-botao-mostrar"
+        id={id("mostrar")}
         label="Mostrar um botão"
         onCheckedChange={(checked) => onChange(checked ? { ...lastCta.current } : null)}
       />
@@ -117,7 +120,7 @@ export function NoticeCtaField({ disabled, errors, onBlurField, onChange, produc
           <HeroTextField
             disabled={disabled}
             error={errors.label}
-            id="aviso-botao-texto"
+            id={id("texto")}
             label="Texto do botão"
             max={NOTICE_LIMITS.ctaLabel}
             onBlur={() => onBlurField("cta.label")}
@@ -128,18 +131,18 @@ export function NoticeCtaField({ disabled, errors, onBlurField, onChange, produc
 
           <div className="flex min-w-0 flex-col gap-1.5">
             <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Para onde leva</span>
-            <PillGroup ariaLabel="Para onde o botão leva" disabled={disabled} name="aviso-botao-destino" onChange={changeMode} options={MODE_OPTIONS} value={mode} />
+            <PillGroup ariaLabel="Para onde o botão leva" disabled={disabled} name={id("destino")} onChange={changeMode} options={MODE_OPTIONS} value={mode} />
           </div>
 
           {mode === "product" ? (
             productsLoaded ? (
               <div className="flex min-w-0 flex-col gap-2">
-                <AdminField error={errors.href} id="aviso-botao-produto" label="Produto">
+                <AdminField error={errors.href} id={id("produto")} label="Produto">
                   <ProductPicker
                     disabled={disabled}
                     emptyText="Nenhum produto ainda. Crie um em Produtos."
                     error={errors.href}
-                    id="aviso-botao-produto"
+                    id={id("produto")}
                     items={products}
                     mode="single"
                     onChange={(ids) => setHref(ids[0] ? productHref(ids[0]) : "")}
@@ -164,20 +167,20 @@ export function NoticeCtaField({ disabled, errors, onBlurField, onChange, produc
           {mode === "page" ? (
             <div className="flex min-w-0 flex-col gap-1.5">
               <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Página</span>
-              <PillGroup ariaLabel="Página da área do aluno" disabled={disabled} name="aviso-botao-pagina" onChange={setHref} options={pageOptions} value={cta.href} />
+              <PillGroup ariaLabel="Página da área do aluno" disabled={disabled} name={id("pagina")} onChange={setHref} options={pageOptions} value={cta.href} />
               {errors.href ? <p className="text-[13px] leading-5 text-[var(--error)]">{errors.href}</p> : null}
             </div>
           ) : null}
 
           {mode === "external" ? (
-            <AdminField error={errors.href} hint={EXTERNAL_HINT} id="aviso-botao-link" label="Link">
+            <AdminField error={errors.href} hint={EXTERNAL_HINT} id={id("link")} label="Link">
               <Input
-                aria-describedby={fieldDescribedBy("aviso-botao-link", { error: errors.href, hint: errors.href ? undefined : EXTERNAL_HINT })}
+                aria-describedby={fieldDescribedBy(id("link"), { error: errors.href, hint: errors.href ? undefined : EXTERNAL_HINT })}
                 aria-invalid={errors.href ? true : undefined}
                 autoComplete="off"
                 className={adminInputClass}
                 disabled={disabled}
-                id="aviso-botao-link"
+                id={id("link")}
                 inputMode="url"
                 onBlur={() => onBlurField("cta.href")}
                 onChange={(event) => setHref(event.target.value)}
@@ -194,7 +197,7 @@ export function NoticeCtaField({ disabled, errors, onBlurField, onChange, produc
             <PillGroup
               ariaLabel="Onde o link abre"
               disabled={disabled}
-              name="aviso-botao-aba"
+              name={id("aba")}
               onChange={(target) => update({ target })}
               options={TARGET_OPTIONS}
               value={cta.target}

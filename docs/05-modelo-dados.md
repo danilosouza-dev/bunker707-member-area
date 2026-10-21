@@ -1114,6 +1114,8 @@ Exemplos de event_type:
 - notification_read;
 - notification_clicked;
 - notification_responded;
+- notification_audio_started;
+- notification_audio_completed;
 - message_impressed;
 - message_clicked;
 - message_closed;
@@ -1141,7 +1143,7 @@ Metadados importantes para CRM/dashboard:
 - frequencia de login e sessoes;
 - cliques relevantes em aula, materiais, TV, salvar, comentarios e avaliacoes.
 
-Nomes da Comunicacao (decisao de 20/10/2026, `docs/22` §4.4): o sino usa `notification_*` com `entity_type = notification` (o id da linha em `notifications`) e o pop-up usa os `message_*` previstos no `docs/17` §2.5 com `entity_type = campaign` (o id do aviso). Quem grava sao as rotas do aluno (`src/app/api/notifications/**`, `src/app/api/popups/**`), em melhor esforco: falha vira log e a resposta nao muda. `notification_created` nao existe: a propria linha em `notifications` (com `created_at`) e o registro da entrega. Abrir o sino (marcar como vistas) nao grava evento.
+Nomes da Comunicacao (decisao de 20/10/2026, `docs/22` §4.4): o sino usa `notification_*` com `entity_type = notification` (o id da linha em `notifications`) e o pop-up usa os `message_*` previstos no `docs/17` §2.5 com `entity_type = campaign` (o id do aviso). Quem grava sao as rotas do aluno (`src/app/api/notifications/**`, `src/app/api/popups/**`), em melhor esforco: falha vira log e a resposta nao muda. `notification_created` nao existe: a propria linha em `notifications` (com `created_at`) e o registro da entrega. Abrir o sino (marcar como vistas) nao grava evento. Comunicacao v2 (21/10/2026, `docs/23` §5.1): `notification_audio_started` (primeiro play; substitui o `notification_read` que o play gravava) e `notification_audio_completed` (44 de 48 trechos ouvidos), uma vez cada por notificacao, `entity_type = notification`, `metadata.campaign_id`; o progresso do audio nao grava evento. Visitas de pagina nao sao eventos: ficam em `member_page_visits` (secao Comunicacao).
 
 ## youtube_course_imports
 
@@ -1510,6 +1512,61 @@ Indices: `(user_id, last_seen_at desc)` (o limite de 24 h) e parcial `(first_see
 
 Pode: o sino responde vazio, marcar como vista ou lida nao faz nada, clique, resposta e eventos do pop-up respondem 404, o pop-up nao aparece, o job `comunicacao` registra "migracao 202610200001 pendente" e termina sem erro, e as telas de Comunicacao mostram o aviso de atualizacao do banco (`src/server/db/pending-migration.ts`).
 
+### Comunicacao v2 (migracao `202610200002`, 21/10/2026)
+
+Produto e regras em `docs/23`. Idempotente, sem `drop ... if exists` nem `drop constraint`; gatilhos com `create or replace trigger`; checks novos em blocos `if not exists`. Todas as tabelas novas com RLS ligado, `revoke all` de `anon`/`authenticated` e escrita so do servidor.
+
+**campaigns** (colunas novas, todas nulas = comportamento da v1):
+
+- `sender_user_id` -> auth.users (set null): quem envia (pessoa da equipe); nulo = a escola. Fora de `admin_roles` na hora de ler = a escola;
+- `icon` + `icon_color`: ids do catalogo do app (`message-meta.ts`); o banco confere so o formato (`campaigns_icon_v2`: os dois juntos, `^[a-z][a-z0-9_]{1,23}$` e `^[a-z]{3,12}$`), para o catalogo mudar sem migracao;
+- `validity_minutes` (60 a 129.600) ou `valid_until` (exclusivos, `campaigns_validity_v2`); os dois nulos = 90 dias;
+- `flow_id` -> communication_flows (cascade) + `flow_node_id` (sem FK de proposito: a versao nasce antes do passo): conteudo de um passo de fluxo, situacao so `draft`, `sent` ou `canceled` (`campaigns_flow_message_v2`), fora da lista de avisos (`campaigns_notice_list_idx` parcial em `flow_id is null`). Num fluxo no ar, mudar o conteudo cria outra linha (versao) ja `sent`, com `sent_at`;
+- `campaigns_inbox_only_v2`: quem envia, tempo no sino e passo de fluxo so na notificacao (`inbox`); o pop-up ganha so o icone.
+
+**notifications** (colunas novas):
+
+- `expires_at` NOT NULL: fim no sino desta linha. O app calcula (menor entre a data, a chegada + o tempo, a chegada + 90 dias e, com `expire_with_anchor`, o fim da notificacao de referencia daquele aluno); o gatilho `set_notifications_expiry` poe `created_at + 90 dias` quando a linha chega sem ele (comentarios e codigo da v1); check `notifications_expires_v2` (`expires_at > created_at`; o teste para mim usa pelo menos agora + 1 h). As linhas existentes ganharam `created_at + 90 dias` na migracao;
+- `opened_at`: abriu de verdade (cartao, Ver mais, audio, botao, resposta, leitura por id); "Marcar todas" e abrir o sino nao gravam;
+- `audio_started_at`, `audio_heard` (48 caracteres `0`/`1`, OU acumulado), `audio_heard_percent` (0 a 100), `audio_completed_at` (44 trechos ou mais). Check `notifications_engagement_v2`: audio comecado so com aberta, ouvido so com comecado, mascara e porcentagem juntas. **Sem** "aberta implica lida": o app sempre grava `read_at` junto com `opened_at`, e a linha aberta pode voltar a nao lida (os testes da v1 fazem isso direto na tabela);
+- `flow_id` -> communication_flows (**cascade**: com `set null`, apagar de verdade um fluxo com linhas entregues deixava `flow_node_id` sem `flow_id` por um instante e o check `notifications_flow_v2` recusava; o app nunca apaga fluxo, so exclui com `deleted_at`) + `flow_node_id` -> communication_flow_nodes (set null); check `notifications_flow_v2` (passo so com fluxo e `kind = notice`). `dedupe_key = flow:<passo>`: uma vez por aluno, dividida pelas versoes do passo;
+- indices: `notifications_user_auto_idx (user_id, created_at desc)` parcial nas de fluxo sem teste (o limite diario), parciais `(flow_node_id)` e `(flow_id)` (relatorio).
+
+**communication_flows**: o fluxo.
+
+- `name` (1 a 80); `origin` (`builder` = Comunicacao > Fluxos; `notice` = as notificacoes seguintes de um aviso, com `source_campaign_id` -> campaigns cascade, unico entre os nao excluidos; check `communication_flows_origin`);
+- `status` (`draft`, `pending_approval`, `active`, `paused`, `ended`; `ended_at` junto, check `communication_flows_ended`) e `ended_reason` (`team`, `finished`, `source_withdrawn`, `source_deleted`);
+- `entry_audience` jsonb (o formato de `campaigns.audience`, <= 16 KB; ignorado no `notice`) e `entry_mode` (`current`, `current_and_new`, `new_only`); `goal` jsonb (Objetivo; nulo = sem); `watched_page_keys text[]` (ate 50; calculadas pelo app ao salvar);
+- colunas do job: `entry_count`, `entry_counted_at`, `entry_refreshed_at` (ultima faixa de 15 min conferida; nula = entrada pendente), `entry_completed_at` (`notice`: todos os que receberam ja entraram), `goal_swept_at`, `last_error`;
+- `revision` (muda a cada gravacao da tela), `activated_at`, `paused_at`, aprovacao (`requested_by/_at`, `approved_by/_at`), autoria (`created_by`, `updated_by`, `deleted_by`, todos set null), `created_at`, `updated_at` (versao do editor), `deleted_at`;
+- gatilho `set_communication_flows_version` (`touch_flow_version()`): o que o job grava (contagem, faixas, varredura, erro) nao muda `updated_at`, para o editor aberto nao levar 409. Indices: fonte unica, `communication_flows_live_idx (entry_refreshed_at nulls first)` nos ativos e a lista do construtor.
+
+**communication_flow_nodes**: a arvore de passos.
+
+- `flow_id` (cascade), `parent_id` (cascade), `branch` (`yes`/`no` abaixo de Condicao), `kind` (`entry`, `message`, `condition`; uma entrada por fluxo), `position`;
+- quando: `anchor` (`previous`, `sent`, `expires`), `anchor_node_id` (a notificacao de referencia), `offset_minutes` (0 a 86.400, de 5 em 5; `expires` a partir de 15);
+- notificacao: `campaign_id` (a versao atual do conteudo), `filter` jsonb ("So para quem..."), `expire_with_anchor` ("Ate a notificacao principal sumir", so com `sent`/`expires`);
+- condicao: `condition` jsonb, `wait_until_true` + `max_wait_minutes` (15 a 43.200);
+- `removed_at` (passo removido; os numeros ficam), `created_at`, `updated_at`. Checks de coerencia em `communication_flow_nodes_*`.
+
+**communication_flow_runs**: a passagem de cada aluno, chave `(flow_id, user_id)` (uma vez por fluxo); `status` (`active`, `done`, `goal`, `ended`, `baseline` = ja combinava ao ativar um fluxo "so quem entrar depois" e nunca entra), `entered_at`, `finished_at`.
+
+**communication_flow_tasks**: o trabalho do motor, chave `(node_id, user_id)` (nunca roda duas vezes).
+
+- `status` (`pending`, `running`, `done`, `skipped`, `canceled`) e `result` (`sent`, `yes`, `no`, `filtered`, `goal`, `expired`, `cap`, `failed`, `removed`, `withdrawn`, `flow_ended`, `source_withdrawn`);
+- `anchor_at` (base do "quando" deste aluno; o horario real e sempre recalculado dele), `due_at` (proxima conferencia), `deadline_at`, `not_before` (para onde o limite diario ou o intervalo de 1 h empurrou o envio; so a aplicacao grava), `deferrals` (adiamentos pelo limite), `flow_active` (copia de "o fluxo esta ativo", mantida pela RPC de situacao para as sondagens lerem so o indice parcial), `attempts`, `claimed_at` (reserva), `last_error`, `notification_id` (set null), `finished_at`;
+- indices parciais: vencidas e reservadas so de fluxo ativo, abertas por (fluxo, aluno), varredura do Objetivo e presas.
+
+**member_page_visits**: chave `(user_id, page_key)`; `page_key` normalizada (`home`, `purchases`, `saved`, `materials`, `journey`, `continue`, `profile`, `support`, `content:<id>`, `checkout:<id>`; check com a mesma expressao do app), `first_visited_at`, `last_visited_at` (check `member_page_visits_order`: a ultima nunca antes da primeira; o app grava as duas com a propria hora na primeira visita e depois so avanca a ultima). Gravada so para as chaves de fluxos ativos ou pausados; indice `(page_key, last_visited_at desc)`.
+
+**RPCs** (security invoker, `search_path` fixo, so `service_role`; numeracao do `docs/23` §3): 7.1 `communication_claim_flow_tasks` (reserva com `skip locked` e carimbo `greatest(p_now, clock_timestamp())`; a que caiu 5 vezes vira falha), 7.2 `communication_enroll_flow`, 7.3 `communication_enroll_notice_recipients` (entrada das seguintes depois de o aviso estar `sent` e complemento de uma seguinte nova), 7.4 `communication_apply_flow_results` (aplica um lote numa transacao: envio uma vez, limite diario com trava por aluno, filhos), 7.5 `communication_save_flow` (arvore com versao conferida e as regras de edicao no ar; recusa pai ou ancora fora da arvore enviada), 7.6 `communication_wake_flow_tasks`, 7.7 `communication_flow_stats`, 7.8 `communication_flow_node_stats`, 7.9 `communication_flow_batch_facts` (um jsonb por lote: notificacoes, visitas, acessos, passagens e equipe), 7.10 `communication_campaign_engagement` (abriram, comecaram o audio, ouviram ate o fim), 7.11 `communication_record_notification_audio`, 7.12 `communication_overview` (mesmo retorno; ativos contam os fluxos no ar), 7.13 `communication_change_flow_state`, 7.14 `communication_withdraw_flow_step` e 7.15 `communication_release_flow_tasks` (devolve um lote que falhou antes de aplicar, devolvendo a tentativa). `communication_campaign_stats` nao muda. Embed entre `campaigns` e `communication_flows` so com a dica da FK (`campaigns!communication_flows_source_campaign_id_fkey(...)` ou `communication_flows!campaigns_flow_id_fkey(...)`): sao duas relacoes.
+
+**Retencao**: `prune_communication_history()` (mesmo agendamento das 06:41 UTC) passa a apagar tambem tarefas terminadas ha mais de 24 meses (as pendentes ficam), passagens de fluxos encerrados ou excluidos terminadas ha mais de 24 meses (no fluxo no ar, a passagem garante "uma vez por aluno") e visitas com a ultima ha mais de 24 meses, e devolve `{ notifications, campaign_deliveries, flow_tasks, flow_runs, page_visits }`. Conta excluida leva passagens, tarefas e visitas (cascade).
+
+**Branding**: `platform_settings.branding.schoolIcon` (texto; ausente = `/brand/icon-bunker.svg`): o Icone da escola da Marca. Toda gravacao da aparencia espalha o branding atual, para trocar a logo ou o estilo nao apagar o icone.
+
+**Deploy**: a 0002 vai **antes** do deploy que a usa (no Supabase da nuvem antes do merge na `dev`; na Hetzner o `deploy-membros` aplica as migracoes antes de trocar o app). Nao ha caminho de volta para as colunas da v1: sem ela, o sino e o pop-up respondem vazio, a rota do audio responde 404, o job registra "migracao 202610200001 pendente ou 202610200002 pendente" e termina, as telas mostram o aviso (`202610200002`), e envios, cliques e respostas nao funcionam. A migracao sozinha nao quebra o app da v1 (colunas novas nulas, `expires_at` pelo gatilho).
+
 ## Retencao de dados pessoais
 
 Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.
@@ -1524,7 +1581,7 @@ Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `doc
 
 Fora da rotina de proposito: `sale_grants` (migracao `202610170008`) so guarda ids (transacao, codigo da assinatura, aluno, acesso, produto) e datas, sem dado pessoal; sai junto com a conta (`on delete cascade`). Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta anula `user_id` nas duas tabelas (`on delete set null`), e "Excluir aluno" ja anonimiza na hora as vendas do aluno (`anonymizeWebhookEventsFor`); prazos novos sao mudanca de migracao, com o teste ajustado.
 
-A Comunicacao (migracao `202610200001`) tem rotina propria, `public.prune_communication_history()` as 06:41 UTC: notificacoes e estados de pop-up saem inteiros depois de 24 meses, menos os de pop-up ainda no ar ou pausado (secao Comunicacao, Retencao e exclusao). Elas so guardam ids, datas e, nas notificacoes de comentario, o trecho da resposta que ja esta na aula.
+A Comunicacao (migracao `202610200001`) tem rotina propria, `public.prune_communication_history()` as 06:41 UTC: notificacoes e estados de pop-up saem inteiros depois de 24 meses, menos os de pop-up ainda no ar ou pausado (secao Comunicacao, Retencao e exclusao). Elas so guardam ids, datas e, nas notificacoes de comentario, o trecho da resposta que ja esta na aula. Desde a `202610200002` a mesma rotina apaga tarefas e passagens antigas de fluxos e visitas de pagina (secao Comunicacao v2).
 
 ## Suporte
 

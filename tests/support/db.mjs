@@ -14,6 +14,11 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const envFile = `${root}.env.test.local`;
 export const envFilePath = envFile;
+/**
+ * Token do tick de jobs do app de teste (so na maquina, nunca em servidor de verdade): os testes de ponta a
+ * ponta chamam POST /api/jobs/tick com ele para rodar a Comunicacao na hora (tests/e2e/fixtures.ts, rodarTick).
+ */
+export const LOCAL_JOBS_TICK_TOKEN = "bunker707-tick-local-dos-testes-e2e-0001";
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 const command = isMain ? process.argv[2] : null;
 const ci = process.argv.includes("--ci");
@@ -76,6 +81,7 @@ function writeEnvFile() {
   const testValues = {
     ADMIN_DEMO_DATA: "off",
     AUTH_SESSION_STRATEGY: "user",
+    JOBS_TICK_TOKEN: LOCAL_JOBS_TICK_TOKEN,
     NEXT_PUBLIC_SUPABASE_ANON_KEY: anonKey,
     NEXT_PUBLIC_SUPABASE_URL: url,
     SUPABASE_SERVICE_ROLE_KEY: serviceKey,
@@ -119,6 +125,11 @@ export function loadEnvFile() {
     if (match && process.env[match[1]] === undefined) {
       process.env[match[1]] = match[2];
     }
+  }
+
+  // .env.test.local escrito antes do token: o app de teste e o Playwright usam o mesmo token local.
+  if (!process.env.JOBS_TICK_TOKEN) {
+    process.env.JOBS_TICK_TOKEN = LOCAL_JOBS_TICK_TOKEN;
   }
 }
 

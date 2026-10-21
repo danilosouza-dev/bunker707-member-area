@@ -120,8 +120,8 @@ function buildScreens(items: readonly AdminNavItem[]): StaticEntry[] {
 
 /**
  * Acoes: so destinos que existem. Webinarios e promocoes ainda nao tem tela de criar; Pacotes aparece em
- * Telas (o "Novo pacote" fica dentro da propria tela). "Novo aviso" aparece ao digitar (nao entra nas
- * principais do campo vazio).
+ * Telas (o "Novo pacote" fica dentro da propria tela). "Novo aviso" e "Novo fluxo" aparecem ao digitar
+ * (nao entram nas principais do campo vazio).
  */
 const ACTIONS: readonly StaticEntry[] = [
   {
@@ -158,6 +158,14 @@ const ACTIONS: readonly StaticEntry[] = [
     keywords: "criar notificacao sino pop-up popup comunicar",
     requires: ["messaging.write"],
     title: "Novo aviso"
+  },
+  {
+    group: "actions",
+    href: "/admin/comunicacao/fluxos/novo",
+    id: "acao:novo-fluxo",
+    keywords: "criar fluxo sequencia notificacoes seguintes regras automacao comunicar",
+    requires: ["messaging.write"],
+    title: "Novo fluxo"
   },
   { group: "actions", href: STUDENT_AREA_HREF, id: "acao:area-do-aluno", keywords: "ver como aluno", title: "Ver área do aluno" }
 ];

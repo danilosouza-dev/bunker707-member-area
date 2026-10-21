@@ -85,6 +85,8 @@ type AudienceBuilderProps = {
   errors: Record<string, string>;
   /** So no modo "flow": as notificacoes acima deste passo (ou o aviso de origem), de cima para baixo. */
   flowContext?: AudienceFlowContext | null;
+  /** Prefixo dos ids e nomes ("aviso" no editor do aviso); unico quando ha mais de um construtor na tela. */
+  idPrefix?: string;
   /** "segment" (padrao) ou "flow". */
   mode?: AudienceBuilderMode;
   /** So no modo "segment": avisos enviados nos ultimos 90 dias, mais recentes primeiro (loadAudienceNoticeOptions). */
@@ -137,7 +139,10 @@ function InlineSelect<Value extends string | null>({
   return (
     <Select disabled={disabled} items={options as Option<Value>[]} onValueChange={(next) => onChange(next as Value)} value={value}>
       <SelectTrigger aria-label={ariaLabel} className={cn(selectTriggerClass, className)} id={id}>
-        <SelectValue className="min-w-0 truncate" />
+        {/* O valor e um flex: o "…" so aparece num span proprio (senao o texto longo e cortado no meio da letra). */}
+        <SelectValue className="min-w-0">
+          {(current: Value) => <span className="min-w-0 truncate">{options.find((option) => option.value === current)?.label ?? current ?? ""}</span>}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent className={selectContentClass}>
         {options.map((option) => (
@@ -240,6 +245,7 @@ function TogglePills({
 type RuleContext = {
   cohorts: readonly { id: string; name: string }[];
   disabled: boolean;
+  idPrefix: string;
   /** Notificacoes que as regras v2 podem citar (avisos enviados ou passos acima, conforme o modo). */
   messageOptions: readonly AudienceMessageOption[];
   mode: AudienceBuilderMode;
@@ -404,7 +410,7 @@ function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext
             <ProductPicker
               disabled={disabled}
               emptyText="Nenhum produto ainda. Crie um em Produtos."
-              id={`aviso-regra-${ruleKey}-produtos`}
+              id={`${context.idPrefix}-regra-${ruleKey}-produtos`}
               items={context.products}
               mode="multiple"
               onChange={(productIds) => onChange({ ...rule, productIds })}
@@ -702,7 +708,7 @@ function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext
             <ProductPicker
               disabled={disabled}
               emptyText="Nenhum produto ainda. Crie um em Produtos."
-              id={`aviso-regra-${ruleKey}-produtos`}
+              id={`${context.idPrefix}-regra-${ruleKey}-produtos`}
               items={context.products}
               mode="multiple"
               onChange={(productIds) => onChange({ ...rule, productIds })}
@@ -748,7 +754,7 @@ function RuleRow({
   return (
     <div
       className={cn("flex min-w-0 flex-col gap-3 rounded-lg border bg-[var(--surface-1)] p-3", error ? "border-[var(--error-border)]" : "border-[var(--border-subtle)]")}
-      id={`aviso-regra-${key}`}
+      id={`${context.idPrefix}-regra-${key}`}
       tabIndex={-1}
     >
       <div className="flex min-w-0 items-center gap-2">
@@ -795,6 +801,7 @@ export function AudienceBuilder({
   disabled,
   errors,
   flowContext = null,
+  idPrefix = "aviso",
   mode = "segment",
   notices = null,
   onChange,
@@ -811,7 +818,7 @@ export function AudienceBuilder({
     ...products.map((product) => ({ label: product.title, value: product.id }))
   ];
   const messageOptions = audienceMessageOptions(mode, { flowContext, notices });
-  const context: RuleContext = { cohorts, disabled, messageOptions, mode, productOptions, products, productsLoaded };
+  const context: RuleContext = { cohorts, disabled, idPrefix, messageOptions, mode, productOptions, products, productsLoaded };
   const root = value.kind === "rules" ? value.root : null;
   const addRuleButton = useRef<HTMLButtonElement>(null);
 
@@ -845,7 +852,7 @@ export function AudienceBuilder({
 
     // O botao de lixeira focado some com o item: o foco vai para o item anterior (o bloco tem tabIndex -1).
     window.requestAnimationFrame(() => {
-      const target = focusKey === null ? addRuleButton.current : document.getElementById(`aviso-regra-${focusKey.replace(/\./g, "-")}`);
+      const target = focusKey === null ? addRuleButton.current : document.getElementById(`${idPrefix}-regra-${focusKey.replace(/\./g, "-")}`);
       target?.focus();
     });
   }
@@ -910,13 +917,13 @@ export function AudienceBuilder({
     const groupError = errors[audienceNodeKey(path)];
 
     return (
-      <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-dashed border-[var(--border-stronger)] p-3" id={`aviso-regra-${groupKey}`} tabIndex={-1}>
+      <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-dashed border-[var(--border-stronger)] p-3" id={`${idPrefix}-regra-${groupKey}`} tabIndex={-1}>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Grupo: atender a</span>
           <PillGroup
             ariaLabel="Como juntar as regras do grupo"
             disabled={disabled}
-            name={`aviso-grupo-${groupKey}-juntar`}
+            name={`${idPrefix}-grupo-${groupKey}-juntar`}
             onChange={(match) => changeRoot(replaceAudienceNode(root, path, { ...node, match }))}
             options={MATCH_OPTIONS}
             value={node.match}
@@ -957,7 +964,7 @@ export function AudienceBuilder({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-        <PillGroup ariaLabel="Para quem" disabled={disabled} name="aviso-para-quem" onChange={changeMode} options={MODE_OPTIONS} value={value.kind} />
+        <PillGroup ariaLabel="Para quem" disabled={disabled} name={`${idPrefix}-para-quem`} onChange={changeMode} options={MODE_OPTIONS} value={value.kind} />
         <DropdownMenu>
           <DropdownMenuTrigger
             className={cn(
@@ -1012,7 +1019,7 @@ export function AudienceBuilder({
             <PillGroup
               ariaLabel="Como juntar as regras"
               disabled={disabled}
-              name="aviso-regras-juntar"
+              name={`${idPrefix}-regras-juntar`}
               onChange={(match) => changeRoot({ ...root, match })}
               options={MATCH_OPTIONS}
               value={root.match}
@@ -1048,7 +1055,7 @@ export function AudienceBuilder({
           {note.text}
         </p>
       ) : null}
-      {topError ? <FieldError id="aviso-para-quem-error">{topError}</FieldError> : null}
+      {topError ? <FieldError id={`${idPrefix}-para-quem-error`}>{topError}</FieldError> : null}
     </div>
   );
 }

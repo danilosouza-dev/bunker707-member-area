@@ -144,7 +144,8 @@ export function NoticeSenderField({
         </SelectTrigger>
         <SelectContent className={contentClass}>
           {options.map((option) => (
-            <SelectItem className="min-h-10" key={option.value} value={option.value}>
+            // O texto da opcao encolhe (nome comprido termina em "…" dentro da lista); 44 px no toque.
+            <SelectItem className="min-h-10 pointer-coarse:min-h-11 [&>*:first-child]:min-w-0 [&>*:first-child]:shrink" key={option.value} value={option.value}>
               <OptionLabel option={option} />
             </SelectItem>
           ))}

@@ -640,6 +640,12 @@ Leitura: depois dos ajustes de servidor (Studio fora, `claims`, Envoy pela porta
 
 Como repetir: etapa `carga` com `opcoes` `VUS=30 DURACAO=2m PAUSA_MIN=1 PAUSA_MAX=4` ou `VUS=100 DURACAO=3m`. O k6 marca a etapa como falha quando o p95 passa de 2 s (o limite do roteiro); o resumo no fim do log vale mesmo assim.
 
+**Rodada pendente: Comunicacao v2 (`docs/23`, 21/10/2026).** Depois que a `202610200002` e o app da v2 estiverem na producao (o `deploy-membros` aplica a migracao antes de trocar o app), repetir a etapa `carga` com as mesmas duas rodadas e **um fluxo no ar acompanhando uma pagina que os alunos virtuais abrem**, para medir a gravacao de visitas (`after()`, so para paginas acompanhadas, uma por aluno e pagina a cada 60 s) e o filtro do fim no sino. Aceite: p95 de cada pagina e do resumo do sino dentro dos numeros da ultima rodada acima (30 alunos ate 0,8 s; 100 alunos na mesma faixa), nenhum erro, e a fase de fluxos do job `comunicacao` parada em 3 leituras por minuto (`job_runs.metadata.flows` so aparece quando ha trabalho). Montagem segura, sem mandar nada para alunos reais:
+
+1. em Comunicacao > Fluxos, **Começar do zero**, Quem entra com o modo `Só quem entrar no segmento a partir de agora` (ninguem entra ao ativar) e uma Notificacao qualquer; no Objetivo, a regra `Visitou o Início desde que entrou no fluxo` (o curso `carga-*` nasce e morre a cada rodada, entao a pagina dele nao serve sem mudar o `carga.sh`; o Inicio e aberto por todo aluno virtual). Ativar e **Pausar** logo em seguida: pausado, ninguem entra e nada sai, mas a pagina continua acompanhada;
+2. rodar a `carga`; conferir `select count(*) from public.member_page_visits where page_key = 'home';` durante a rodada (o aluno `carga@` grava; a conta e apagada no fim e leva as visitas junto);
+3. **Encerrar** o fluxo no fim (para de acompanhar a pagina) e anotar os numeros nesta secao.
+
 ---
 
 ## 13. Incidentes: o que fazer

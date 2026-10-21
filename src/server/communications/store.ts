@@ -9,7 +9,7 @@ import "server-only";
 import { normalizeAudience, type AudienceDefinition } from "./audience-model";
 import { popupRefreshDueBefore, type CampaignKind, type CampaignStatus, type PopupRepeat } from "./campaign-model";
 import { assertNoDbError, chunksOf, CommunicationError, type CommunicationsDb } from "./db";
-import { noticeIconOfColumns, validityOfRow, validityToColumns } from "./message-meta";
+import { noticeIconOfColumns, testSendExpiresAt, validityOfRow, validityToColumns } from "./message-meta";
 import { normalizePeaks } from "./notification-model";
 import type { NoticeDraft } from "./schemas";
 
@@ -481,6 +481,48 @@ export async function deleteCampaignNotifications(db: CommunicationsDb, campaign
   assertNoDbError(error, "Comunicacao: retirar notificacoes");
 
   return count ?? 0;
+}
+
+/**
+ * "Enviar teste para mim" (o aviso, uma notificacao seguinte ou um passo do fluxo): a versao vai para o
+ * sino de quem pediu, marcada como teste (fora dos numeros), e fica pelo menos 1 hora (o rascunho com
+ * "ate uma data" que ja passou tambem aparece). Repetir traz de volta como nova: chega agora, com o fim
+ * recalculado e o audio sem nada ouvido.
+ */
+export async function upsertTestNotification(
+  db: CommunicationsDb,
+  campaign: Pick<CampaignRow, "id" | "valid_until" | "validity_minutes">,
+  userId: string,
+  now: number
+) {
+  const dedupeKey = `campaign-test:${campaign.id}`;
+  const nowIso = new Date(now).toISOString();
+  const expiresAt = new Date(testSendExpiresAt({ validUntil: campaign.valid_until, validityMinutes: campaign.validity_minutes }, now)).toISOString();
+  const existing = await db.from("notifications").select("id").eq("user_id", userId).eq("dedupe_key", dedupeKey).maybeSingle();
+  assertNoDbError(existing.error, "Comunicacao: teste");
+
+  const result = existing.data
+    ? await db
+        .from("notifications")
+        .update({
+          audio_completed_at: null,
+          audio_heard: null,
+          audio_heard_percent: null,
+          audio_started_at: null,
+          clicked_at: null,
+          created_at: nowIso,
+          expires_at: expiresAt,
+          opened_at: null,
+          read_at: null,
+          responded_at: null,
+          response: null,
+          seen_at: null
+        })
+        .eq("id", (existing.data as { id: string }).id)
+    : await db
+        .from("notifications")
+        .insert({ campaign_id: campaign.id, created_at: nowIso, dedupe_key: dedupeKey, expires_at: expiresAt, is_test: true, kind: "notice", user_id: userId });
+  assertNoDbError(result.error, "Comunicacao: teste");
 }
 
 /* ------------------------------------------------------------------------------------------------

@@ -102,6 +102,7 @@ test("barra superior mostra so os filtros que a tela usa (prototipo aprovado)", 
   assert.deepEqual(getAdminTopbarScope("/admin/produtos/curso-ia/desempenho"), periodOnly, "Desempenho do produto");
   assert.deepEqual(getAdminTopbarScope("/admin/comunicacao"), periodOnly);
   assert.deepEqual(getAdminTopbarScope("/admin/comunicacao/avisos?periodo=hoje"), periodOnly);
+  assert.deepEqual(getAdminTopbarScope("/admin/comunicacao/fluxos?situacao=ativos"), periodOnly, "Fluxos: os numeros seguem o periodo");
   assert.deepEqual(getAdminTopbarScope("/admin/comunicacao/webinarios"), periodOnly);
   assert.deepEqual(getAdminTopbarScope("/admin/comunicacao/promocoes"), periodOnly);
   assert.deepEqual(getAdminTopbarScope("/admin/configuracoes/ia/consumo"), periodOnly, "Consumo do Tutor IA");
@@ -120,6 +121,8 @@ test("barra superior mostra so os filtros que a tela usa (prototipo aprovado)", 
     "/admin/comunidade/denuncias",
     "/admin/comunicacao/avisos/novo",
     "/admin/comunicacao/avisos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70",
+    "/admin/comunicacao/fluxos/novo",
+    "/admin/comunicacao/fluxos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70",
     "/admin/area-de-membros",
     "/admin/area-de-membros/modulos",
     "/admin/configuracoes",
@@ -144,6 +147,8 @@ test("titulo da barra do celular: area ou tela interna", () => {
   assert.equal(getAdminMobileTitle("/admin/home"), "Área de membros");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/webinarios"), "Comunicação");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/avisos/novo"), "Novo aviso");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/fluxos/novo"), "Novo fluxo");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/fluxos"), "Comunicação");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/avisos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70"), "Comunicação", "a pagina troca pelo titulo do aviso");
   assert.equal(getAdminMobileTitle("/admin/comunidade/denuncias"), "Comunidade");
   assert.equal(getAdminMobileTitle("/admin/configuracoes"), "Configurações");
@@ -156,6 +161,7 @@ test("links do menu levam o periodo so para as telas que usam o Periodo da barra
   assert.equal(buildAdminNavHref("/admin", "7d"), "/admin?periodo=7d");
   assert.equal(buildAdminNavHref("/admin", "2026-10-01..2026-10-10"), "/admin?periodo=2026-10-01..2026-10-10");
   assert.equal(buildAdminNavHref("/admin/comunicacao/avisos", "hoje"), "/admin/comunicacao/avisos?periodo=hoje");
+  assert.equal(buildAdminNavHref("/admin/comunicacao/fluxos", "7d"), "/admin/comunicacao/fluxos?periodo=7d");
   assert.equal(buildAdminNavHref("/admin/produtos", "7d"), "/admin/produtos", "Produtos nao usa o Periodo");
   assert.equal(buildAdminNavHref("/admin/comunidade", "7d"), "/admin/comunidade", "Comunidade tem o filtro na pagina");
   assert.equal(buildAdminNavHref("/admin/configuracoes/ia", "7d"), "/admin/configuracoes/ia");
@@ -227,7 +233,7 @@ test("menu de cada funcao: so as areas que ela abre, e a primeira tela e a prime
     "Alunos",
     "Produtos[Todos os produtos|Pacotes|Importar]",
     "Área de membros[Vitrine|Destaque|Módulos|Login|Marca]",
-    "Comunicação[Avisos e pop-ups|Webinários|Promoções]",
+    "Comunicação[Avisos e pop-ups|Fluxos|Webinários|Promoções]",
     "Comunidade",
     "Configurações[Todas as configurações|Equipe|Tutor IA|Vendas]"
   ]);
@@ -237,7 +243,7 @@ test("menu de cada funcao: so as areas que ela abre, e a primeira tela e a prime
     "Alunos",
     "Produtos[Todos os produtos|Pacotes|Importar]",
     "Área de membros[Vitrine|Destaque|Módulos|Login|Marca]",
-    "Comunicação[Avisos e pop-ups|Webinários|Promoções]",
+    "Comunicação[Avisos e pop-ups|Fluxos|Webinários|Promoções]",
     "Comunidade"
   ]);
   assert.deepEqual(menu("instructor", { productIds: ["curso-1"] }), ["Meus cursos", "Comunidade"]);
@@ -303,6 +309,8 @@ test("cada destino do menu que pertence a esta fase tem uma pagina", () => {
     "/admin/alunos/novo",
     "/admin/comunicacao/avisos",
     "/admin/comunicacao/avisos/novo",
+    "/admin/comunicacao/fluxos",
+    "/admin/comunicacao/fluxos/novo",
     "/admin/produtos/pacotes",
     "/admin/area-de-membros",
     "/admin/area-de-membros/destaque",

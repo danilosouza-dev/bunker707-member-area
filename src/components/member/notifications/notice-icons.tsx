@@ -45,12 +45,16 @@ export const NOTICE_ICON_GLYPHS: Record<NoticeIconId, LucideIcon> = {
   trophy: Trophy
 };
 
-/** Paleta (docs/12): pelo menos 3:1 sobre o fundo do cartao (#1b1b1b), lido ou nao. */
+/**
+ * Paleta (docs/12): pelo menos 3:1 sobre o fundo do cartao (#1b1b1b), lido ou nao. O vermelho e o valor do
+ * --accent do aluno escrito direto: o admin troca o --accent por cinza, e o icone some nos cartoes dos fluxos,
+ * das notificacoes seguintes e da lista de Avisos.
+ */
 export const NOTICE_ICON_COLOR_CLASSES: Record<NoticeIconColor, string> = {
   amber: "text-amber-400",
   green: "text-emerald-500",
   orange: "text-[var(--accent-warm)]",
-  red: "text-[var(--accent)]",
+  red: "text-[#e50914]",
   white: "text-zinc-100"
 };
 

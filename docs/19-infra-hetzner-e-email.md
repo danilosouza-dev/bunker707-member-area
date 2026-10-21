@@ -228,6 +228,16 @@ Ordem sugerida na migracao: subir o compose (PR #81) -> `.env` com os itens 1 a 
 
 Ate 17/10 de manha nao existia nenhum codigo de envio em `src/`. A PR #80 (feat/email, aberta para a dev em 17/10) traz `src/server/email/` com provedor atras de interface (Resend agora; SES depois por configuracao), fila `email_outbox` processada pelo tick de jobs respeitando 100/dia, templates de boas-vindas e de compra, disparo no acesso do aluno, webhook assinado do Resend e testes de comportamento (docs/18). Nao mesclada ate o produtor autorizar.
 
+### 2.7 Tipos de e-mail do app (atualizado em 21/10/2026)
+
+| Tipo (`email_outbox.kind`) | Para quem | Quando | Chave de idempotencia |
+|---|---|---|---|
+| `welcome` | aluno | a conta nasce (venda ou equipe com convite/senha temporaria) | `welcome:<user_id>` |
+| `purchase` | aluno | uma venda abre um acesso fechado | `purchase:<provedor>:<evento>:<user_id>` |
+| `sent_as` (Comunicacao v2, `docs/23` §1.6) | pessoa da equipe escolhida em "Quem envia" | a notificacao sai (agora, agendada ou aprovada) ou o fluxo e ativado, aprovado ou ganha esse remetente | `sent-as:campaign:<aviso>:<pessoa>` / `sent-as:flow:<fluxo>:<pessoa>` |
+
+`sent_as`: template `src/server/email/templates/sent-as.ts` no layout das boas-vindas; assunto `Uma notificação saiu em seu nome` (aviso) ou `Um fluxo de notificações usa o seu nome` (fluxo); texto com quem publicou (sem nome: `Alguém da equipe`), o titulo e quantos alunos; botao `Ver a notificação` / `Ver o fluxo` so para quem tem `messaging.write`. Nunca para quem publicou nem para quem saiu da equipe; endereco pelo `auth.admin.getUserById` (conta sem e-mail fica no log); enfileirado depois da resposta (`after()`), em melhor esforco. O banco so confere o tamanho do tipo (nenhuma migracao para o tipo novo). Entra no mesmo limite diario (`EMAIL_DAILY_LIMIT`, padrao 90 por dia UTC, abaixo dos 100 do Free): o que passar sai no dia seguinte. Volume esperado: um e-mail por pessoa escolhida por aviso ou fluxo, bem abaixo do limite; nao e envio em massa.
+
 ## 3. Hetzner: fatos verificados em 17/10/2026
 
 ### 3.1 Compartilhado x individual
