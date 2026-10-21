@@ -3,6 +3,7 @@
 import { Lock, Play, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { CourseModulesHomeSection, ContentRow } from "@/components/content-row";
+import { trackCheckoutClick } from "@/components/member/page-visit-beacon";
 import { withAccessPreviewParam } from "@/lib/access-preview";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cssImageUrl } from "@/lib/css-url";
@@ -58,6 +59,8 @@ export function FeaturedStructureHomeSection({ accessPreviewMode, media, modalSt
 
   const courseHref = withAccessPreviewParam(`/conteudo/${course.id}`, accessPreviewMode);
   const actionHref = course.isLocked && course.purchaseUrl ? course.purchaseUrl : courseHref;
+  // Comprar (o link leva ao purchaseUrl): o clique conta para "clicou em Comprar" e a navegacao segue.
+  const trackActionClick = course.isLocked && course.purchaseUrl ? () => trackCheckoutClick(course.id) : undefined;
   const actionLabel = course.isLocked ? course.purchaseLabel ?? "Comprar" : "Acessar";
   const ActionIcon = course.isLocked ? ShoppingCart : Play;
   const backgroundImage = row.backgroundImage ?? course.image;
@@ -112,6 +115,7 @@ export function FeaturedStructureHomeSection({ accessPreviewMode, media, modalSt
           <Link
             className={`mt-6 inline-flex min-h-11 items-center gap-2 rounded-[7px] px-5 text-sm font-black transition ${course.isLocked ? "bg-emerald-600 text-white hover:bg-emerald-500" : "bg-white text-black hover:bg-zinc-200"}`}
             href={actionHref}
+            onClick={trackActionClick}
             target={course.isLocked && course.purchaseTarget === "new_tab" ? "_blank" : undefined}
           >
             <ActionIcon className="h-4 w-4 fill-current" />

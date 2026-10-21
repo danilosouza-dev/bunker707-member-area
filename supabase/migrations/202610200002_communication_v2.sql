@@ -299,10 +299,11 @@ begin
     alter table public.notifications add constraint notifications_expires_v2 check (expires_at > created_at);
   end if;
 
+  -- Sem "aberta implica lida": o app sempre grava read_at junto com opened_at (coalesce), e a linha aberta pode
+  -- voltar a "nao lida" sem perder o "abriu" (os testes da v1 fazem isso direto na tabela).
   if not exists (select 1 from pg_constraint where conname = 'notifications_engagement_v2') then
     alter table public.notifications add constraint notifications_engagement_v2 check (
-      (opened_at is null or read_at is not null)
-      and (audio_started_at is null or opened_at is not null)
+      (audio_started_at is null or opened_at is not null)
       and (audio_completed_at is null or audio_started_at is not null)
       and (audio_heard is null or audio_heard ~ '^[01]{48}$')
       and (audio_heard_percent is null or audio_heard_percent between 0 and 100)
@@ -483,8 +484,10 @@ begin
     for update of t skip locked
   )
   update public.communication_flow_tasks t
-  -- clock_timestamp: cada reserva tem um carimbo unico; a aplicacao confere esse carimbo exato.
-  set status = 'running', claimed_at = clock_timestamp(), attempts = t.attempts + 1
+  -- clock_timestamp: cada reserva tem um carimbo unico; a aplicacao confere esse carimbo exato. Nunca antes
+  -- de p_now: a reserva velha (p_stale_before) e contada pelo mesmo relogio do tick (os testes simulam o
+  -- tempo por p_now; em producao o relogio ja passou de p_now e o carimbo e o do relogio).
+  set status = 'running', claimed_at = greatest(p_now, clock_timestamp()), attempts = t.attempts + 1
   from candidates c
   where t.node_id = c.node_id and t.user_id = c.user_id
   returning t.*;
@@ -1008,6 +1011,11 @@ begin
       expire_with_anchor boolean
     )
   loop
+    -- Pai e referencia de tempo sempre dentro da arvore gravada: nunca um passo de outro fluxo.
+    if (n.parent_id is not null and n.parent_id <> all(v_ids)) or (n.anchor_node_id is not null and n.anchor_node_id <> all(v_ids)) then
+      raise exception 'Passo invalido.' using errcode = 'BK422';
+    end if;
+
     select * into v_old from public.communication_flow_nodes o where o.id = n.id;
 
     if v_old.id is not null then
@@ -1602,6 +1610,39 @@ begin
 end;
 $$;
 
+-- 7.15 Devolve para a fila as tarefas de um lote que falhou antes de aplicar (fatos do lote fora do ar, erro
+--      do motor): so as que continuam reservadas com aquele carimbo exato, devolvendo a tentativa (so a queda
+--      de um tick conta como tentativa; secao 4.3, passo 4e). Trava os fluxos for share antes, na mesma
+--      ordem de 7.4. p_claims: [{ node_id, user_id, claimed_at }]. Retorna quantas voltaram.
+create or replace function public.communication_release_flow_tasks(p_claims jsonb)
+returns integer
+language plpgsql
+security invoker
+set search_path = pg_catalog, public
+as $$
+declare
+  v_count integer;
+begin
+  perform 1
+  from public.communication_flows f
+  where f.id in (
+    select t.flow_id
+    from jsonb_to_recordset(coalesce(p_claims, '[]'::jsonb)) as x(node_id uuid, user_id uuid)
+    join public.communication_flow_tasks t on t.node_id = x.node_id and t.user_id = x.user_id
+  )
+  order by f.id
+  for share of f;
+
+  update public.communication_flow_tasks t
+  set status = 'pending', claimed_at = null, attempts = greatest(0, t.attempts - 1)
+  from jsonb_to_recordset(coalesce(p_claims, '[]'::jsonb)) as c(node_id uuid, user_id uuid, claimed_at timestamptz)
+  where t.node_id = c.node_id and t.user_id = c.user_id and t.status = 'running' and t.claimed_at = c.claimed_at;
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
 
 /* ------------------------------------------------------------------------------------------------
  * 8. Permissoes das funcoes (assinatura exata) e descricoes
@@ -1676,6 +1717,11 @@ revoke all on function public.communication_withdraw_flow_step(uuid, timestamptz
 grant execute on function public.communication_withdraw_flow_step(uuid, timestamptz, uuid, uuid, timestamptz) to service_role;
 comment on function public.communication_withdraw_flow_step(uuid, timestamptz, uuid, uuid, timestamptz) is
   'Retira um passo do sino: versoes canceladas e tarefas do passo e de baixo dele como withdrawn; devolve quantas linhas apagar.';
+
+revoke all on function public.communication_release_flow_tasks(jsonb) from public, anon, authenticated;
+grant execute on function public.communication_release_flow_tasks(jsonb) to service_role;
+comment on function public.communication_release_flow_tasks(jsonb) is
+  'Devolve para a fila as tarefas reservadas de um lote que falhou antes de aplicar, devolvendo a tentativa.';
 
 /* ------------------------------------------------------------------------------------------------
  * 9. Retencao (docs/17 D8: 24 meses). Tem delete dentro da funcao: pelo SQL Editor ou psql se o MCP

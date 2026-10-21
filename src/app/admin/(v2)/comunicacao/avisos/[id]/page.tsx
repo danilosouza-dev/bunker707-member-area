@@ -23,6 +23,13 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
+/** Conteudo de um passo de fluxo: o fluxo, aberto no passo (docs/23). */
+function flowStepHref(flowId: string, nodeId: string | null) {
+  const base = `/admin/comunicacao/fluxos/${encodeURIComponent(flowId)}`;
+
+  return nodeId ? `${base}?passo=${encodeURIComponent(nodeId)}` : base;
+}
+
 /** Hora da leitura (renderizado no servidor): situacao do pop-up e o "agora" da previa. */
 function readNow() {
   return Date.now();
@@ -30,7 +37,8 @@ function readNow() {
 
 // Comunicação › Avisos e pop-ups › um aviso (docs/22 §2.2 e §2.4). Rascunho, aguardando aprovação e
 // notificação agendada abrem no editor; enviado, cancelado e encerrado, no relatório. Pop-up no ar ou
-// pausado abre no relatório, com "Editar" (?editar=1) para o editor so para quem pode edita-lo.
+// pausado abre no relatório, com "Editar" (?editar=1) para o editor so para quem pode edita-lo. O
+// conteudo de um passo de fluxo (v2) nao e aviso da lista: o endereco leva para o fluxo, no passo.
 export default async function AdminNoticePage({ params, searchParams }: PageProps) {
   const [{ access }, { id }, query] = await Promise.all([requirePageArea("comunicacao"), params, searchParams]);
 
@@ -52,11 +60,15 @@ export default async function AdminNoticePage({ params, searchParams }: PageProp
       return null;
     }
 
-    if (opensNoticeEditor({ ...detail, wantsEditor })) {
-      return { detail, editor: true as const, options: await loadNoticeEditorOptions() };
+    if (detail.flowId) {
+      return { href: flowStepHref(detail.flowId, detail.flowNodeId), view: "flow" as const };
     }
 
-    return { branding: await loadNoticeBranding(), detail, editor: false as const };
+    if (opensNoticeEditor({ ...detail, wantsEditor })) {
+      return { detail, options: await loadNoticeEditorOptions({ audiences: [detail.draft.audience] }), view: "editor" as const };
+    }
+
+    return { branding: await loadNoticeBranding(), detail, view: "report" as const };
   });
 
   if (!loaded.ok) {
@@ -74,7 +86,11 @@ export default async function AdminNoticePage({ params, searchParams }: PageProp
 
   const data = loaded.data;
 
-  if (data.editor) {
+  if (data.view === "flow") {
+    redirect(data.href);
+  }
+
+  if (data.view === "editor") {
     return <NoticeEditor defaultKind={data.detail.kind} initial={data.detail} now={now} options={data.options} permissions={permissions} />;
   }
 

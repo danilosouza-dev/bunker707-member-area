@@ -22,8 +22,11 @@ import "server-only";
 import { recordAudit } from "@/server/audit/log";
 import { resolveAudienceUserIds } from "./audience";
 import { loadAudienceFacts, type LoadedAudience } from "./audience-facts";
+import { collectMessageCampaignIds, type AudienceDefinition } from "./audience-model";
 import { APPROVAL_THRESHOLD } from "./campaign-model";
 import { CommunicationError, describeError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
+import { createFactsLoader, type FactsLoader } from "./facts-loader";
+import { computeExpiresAt } from "./message-meta";
 import {
   audienceOfRow,
   claimDueInbox,
@@ -48,11 +51,25 @@ type LoadedInput = LoadedAudience | Promise<LoadedAudience> | undefined;
 
 export type DispatchResult = { recipients: number; status: "canceled" | "pending_approval" | "sending" | "sent" };
 
+/** "Ate uma data" que ja passou ou fica a menos disto da hora do envio: nada sai (a linha nem caberia). */
+const MIN_VALIDITY_LEFT_MS = 60 * 60 * 1000;
+export const EXPIRED_BEFORE_DISPATCH_MESSAGE = "A notificação venceria antes de chegar.";
+
+/**
+ * Fatos dos alunos para o segmento do aviso, com as linhas dos avisos citados por regras "o que fez com
+ * a notificacao X" (docs/23 §7).
+ */
+function loadDispatchFacts(db: CommunicationsDb, now: Date, definition: AudienceDefinition) {
+  return loadAudienceFacts(db, now, { messageCampaignIds: collectMessageCampaignIds(definition) });
+}
+
 /**
  * Envia uma notificacao ja reservada (status `sending`). Devolve a situacao no fim: `sent` (todos
  * gravados), `sending` (parou no meio: orcamento do tick, teto da rodada ou falha que sera tentada de
  * novo), `pending_approval` (sem aprovacao e o segmento passou de 500 desde que foi agendada) ou
- * `canceled` (terceira falha).
+ * `canceled` (terceira falha, ou "ate uma data" que venceria antes de chegar).
+ *
+ * Cada linha leva o proprio fim no sino (expires_at = computeExpiresAt do aviso, contado da chegada).
  */
 export async function dispatchInboxCampaign(input: {
   campaign: CampaignRow;
@@ -69,7 +86,18 @@ export async function dispatchInboxCampaign(input: {
   }
 
   try {
-    const loaded = (await input.loaded) ?? (await loadAudienceFacts(db, now));
+    if (campaign.valid_until && Date.parse(campaign.valid_until) <= now.getTime() + MIN_VALIDITY_LEFT_MS) {
+      await updateCampaign(
+        db,
+        campaign.id,
+        { dispatch_started_at: null, last_error: EXPIRED_BEFORE_DISPATCH_MESSAGE, status: "canceled" },
+        { expectedStatuses: ["sending"] }
+      );
+
+      return { recipients: campaign.recipients_count ?? 0, status: "canceled" };
+    }
+
+    const loaded = (await input.loaded) ?? (await loadDispatchFacts(db, now, audienceOfRow(campaign)));
     const audienceIds = resolveAudienceUserIds(audienceOfRow(campaign), loaded);
 
     if (!campaign.approved_at && audienceIds.length > APPROVAL_THRESHOLD) {
@@ -80,10 +108,15 @@ export async function dispatchInboxCampaign(input: {
     const already = await fetchCampaignRecipientIds(db, campaign.id);
     const pending = audienceIds.filter((userId) => !already.has(userId));
     const batch = pending.slice(0, DISPATCH_ROWS_PER_RUN);
+    // Chegada = agora (o banco grava created_at na hora do insert; com o tempo simulado dos testes no
+    // passado, o relogio real, para o fim nunca ficar antes de created_at).
+    const expiresAt = new Date(
+      computeExpiresAt({ validUntil: campaign.valid_until, validityMinutes: campaign.validity_minutes }, Math.max(now.getTime(), Date.now()))
+    ).toISOString();
 
     await insertNotificationRows(
       db,
-      batch.map((userId) => ({ campaign_id: campaign.id, dedupe_key: `campaign:${campaign.id}`, kind: "notice", user_id: userId })),
+      batch.map((userId) => ({ campaign_id: campaign.id, dedupe_key: `campaign:${campaign.id}`, expires_at: expiresAt, kind: "notice", user_id: userId })),
       input.signal
     );
 
@@ -180,13 +213,19 @@ async function holdForApproval(input: { audienceCount: number; campaign: Campaig
 export async function refreshPopupDeliveries(input: {
   campaign: CampaignRow;
   db: CommunicationsDb;
+  /** Carregador do tick (facts-loader.ts): le as linhas dos avisos citados pelo segmento uma vez por tick. */
+  facts?: FactsLoader;
   loaded?: LoadedInput;
   now?: Date;
 }): Promise<{ added: number; audienceCount: number; removed: number }> {
   const { campaign, db } = input;
   const now = input.now ?? new Date();
-  const loaded = (await input.loaded) ?? (await loadAudienceFacts(db, now));
-  const matching = new Set(resolveAudienceUserIds(audienceOfRow(campaign), loaded));
+  const audience = audienceOfRow(campaign);
+  // Regras "o que fez com a notificacao X" do segmento: as linhas de X entram nos fatos (docs/23 §7).
+  const messageCampaignIds = collectMessageCampaignIds(audience);
+  const loaded =
+    (await input.loaded) ?? (input.facts ? await input.facts.load(messageCampaignIds) : await loadAudienceFacts(db, now, { messageCampaignIds }));
+  const matching = new Set(resolveAudienceUserIds(audience, loaded));
   const current = await fetchDeliveryEligibility(db, campaign.id);
   const toEnable = Array.from(matching).filter((userId) => current.get(userId) !== true);
   const toDisable = Array.from(current).filter(([userId, eligible]) => eligible && !matching.has(userId)).map(([userId]) => userId);
@@ -230,22 +269,23 @@ export type ProcessCommunicationsResult = {
 /**
  * Trabalho do job "comunicacao" no tick de minuto: (1) envia ate 3 notificacoes vencidas; (2) recalcula
  * ate 5 pop-ups no ar cujo segmento venceu (faixas de 15 minutos). Os fatos dos alunos sao lidos uma
- * vez por rodada e so se houver trabalho. Banco vazio ou sem a migracao: registra e volta sem erro.
- * Recalculo que falha marca a hora mesmo assim: tenta de novo na faixa seguinte, nao a cada minuto.
+ * vez por rodada e so se houver trabalho, pelo carregador do tick (`facts`, dividido com a fase dos fluxos;
+ * sem ele, um proprio): cada envio e cada pop-up pedem as linhas dos avisos citados pelo proprio segmento.
+ * Banco vazio ou sem a migracao: registra e volta sem erro. Recalculo que falha marca a hora mesmo assim:
+ * tenta de novo na faixa seguinte, nao a cada minuto.
  */
-export async function processCommunications(input: { db: CommunicationsDb; now?: Date; signal?: AbortSignal }): Promise<ProcessCommunicationsResult> {
+export async function processCommunications(input: {
+  db: CommunicationsDb;
+  facts?: FactsLoader;
+  now?: Date;
+  signal?: AbortSignal;
+}): Promise<ProcessCommunicationsResult> {
   const { db, signal } = input;
   const now = input.now ?? new Date();
   const result: ProcessCommunicationsResult = { awaitingApproval: 0, dispatched: 0, failed: 0, pendingMigration: false, refreshed: 0, sending: 0 };
-  let loadedPromise: Promise<LoadedAudience> | null = null;
-  const loaded = () => (loadedPromise ??= loadAudienceFacts(db, now));
-
-  // Sem tratamento aqui, uma falha de leitura dos fatos viraria rejeicao solta quando ninguem a espera.
-  const guarded = () => {
-    const promise = loaded();
-    promise.catch(() => undefined);
-    return promise;
-  };
+  // Rejeicao guardada no carregador: falha de leitura dos fatos nunca vira rejeicao solta.
+  const facts = input.facts ?? createFactsLoader(db, now);
+  const loadedFor = (campaign: CampaignRow) => facts.load(collectMessageCampaignIds(audienceOfRow(campaign)));
 
   try {
     const claimed = await claimDueInbox(db, now, INBOX_PER_TICK);
@@ -255,7 +295,7 @@ export async function processCommunications(input: { db: CommunicationsDb; now?:
         break;
       }
 
-      const outcome = await dispatchInboxCampaign({ campaign, db, loaded: guarded(), now, signal });
+      const outcome = await dispatchInboxCampaign({ campaign, db, loaded: loadedFor(campaign), now, signal });
 
       if (outcome.status === "sent") {
         result.dispatched += 1;
@@ -280,7 +320,7 @@ export async function processCommunications(input: { db: CommunicationsDb; now?:
       }
 
       try {
-        await refreshPopupDeliveries({ campaign, db, loaded: guarded(), now });
+        await refreshPopupDeliveries({ campaign, db, loaded: loadedFor(campaign), now });
         result.refreshed += 1;
       } catch (error) {
         if (isMissingCommunicationSchema(error)) {
@@ -299,7 +339,7 @@ export async function processCommunications(input: { db: CommunicationsDb; now?:
   } catch (error) {
     if (isMissingCommunicationSchema(error)) {
       result.pendingMigration = true;
-      console.error("[comunicacao] tabelas da Comunicacao ausentes (migracao 202610200001 pendente); nada a fazer.");
+      console.error("[comunicacao] tabelas da Comunicacao ausentes (migracao 202610200001 pendente ou 202610200002 pendente); nada a fazer.");
       return result;
     }
 

@@ -3,17 +3,24 @@
 // previa montada a partir do rascunho, as pecas do construtor de segmento e as contas do audio
 // (forma de onda, duracao, formato da gravacao). Modulo puro (sem React, imports relativos):
 // tests/comunicacao-admin-modelo.test.mjs carrega direto pelo Node e as telas usam as mesmas regras.
+// v2 (docs/23): as dicas de "Quem envia", o icone com a cor sugerida, as pilulas de "Fica no sino por",
+// a previa com quem envia, o "Termina em" e o audio ouvido, e o funil com "Abriram" e o audio.
 
 import {
   AUDIENCE_LIMITS,
   countAudienceRules,
   isAudienceGroup,
+  MESSAGE_ACTIONS,
+  messageRefKey,
   normalizeAudience,
   type AudienceDefinition,
   type AudienceGroup,
+  type AudienceNames,
   type AudienceNode,
   type AudienceRule,
-  type AudienceRuleType
+  type AudienceRuleType,
+  type MessageAction,
+  type MessageRef
 } from "../../../../server/communications/audience-model";
 import {
   AUDIO_LIMITS,
@@ -29,6 +36,18 @@ import {
 } from "../../../../server/communications/campaign-model";
 import type { NotificationItem, PopupItem } from "../../../../server/communications/notification-model";
 import type { NoticeDraft } from "../../../../server/communications/schemas";
+// v2 (docs/23): quem envia, icone ao lado do titulo e quanto tempo fica no sino.
+import {
+  computeExpiresAt,
+  NOTICE_ICON_COLOR_LABELS,
+  NOTICE_ICON_LABELS,
+  NOTICE_ICON_SUGGESTED_COLOR,
+  validityToColumns,
+  VALIDITY_LIMITS,
+  type FlowValidity,
+  type NoticeIconId
+} from "../../../../server/communications/message-meta";
+import { AUDIO_HEARD_SLOTS } from "../../../../server/communications/notification-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Enderecos e filtros
@@ -675,6 +694,207 @@ export function defaultWindowEnd(startsAt: string | null, now: number) {
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Editor v2: quem envia, icone ao lado do titulo e quanto tempo fica no sino (docs/23)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Pessoa da equipe em "Quem envia" (o mesmo formato de NoticeEditorOptions.senders). */
+export type NoticeSenderChoice = { avatarUrl: string | null; id: string; isMe: boolean; name: string; roleLabel: string };
+
+/** Valor da escola no seletor "Quem envia" (o resto e o id da pessoa). */
+export const SCHOOL_SENDER_VALUE = "escola";
+export const PROFILE_PHOTO_HREF = "/perfil";
+export const BRAND_HREF = "/admin/area-de-membros/marca";
+const UNKNOWN_PUBLISHER = "Alguém da equipe";
+
+export type NoticeSenderOption = { avatarUrl: string | null; isSchool: boolean; label: string; name: string; value: string };
+
+/**
+ * Opcoes de "Quem envia": a escola (padrao), "Eu (...)" e o resto da equipe em ordem alfabetica
+ * ("Carlos Lima · Professor"). Quem ja estava gravado e saiu da equipe aparece no fim, para o seletor
+ * mostrar o valor (a dica explica que sai como a escola).
+ */
+export function noticeSenderOptions(input: {
+  saved?: { id: string; name: string } | null;
+  schoolIconUrl: string | null;
+  schoolName: string;
+  senders: readonly NoticeSenderChoice[];
+}): NoticeSenderOption[] {
+  const me = input.senders.find((person) => person.isMe);
+  const others = input.senders
+    .filter((person) => !person.isMe)
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR") || left.id.localeCompare(right.id));
+  const options: NoticeSenderOption[] = [
+    { avatarUrl: input.schoolIconUrl, isSchool: true, label: `${input.schoolName} (a escola)`, name: input.schoolName, value: SCHOOL_SENDER_VALUE },
+    ...(me ? [{ avatarUrl: me.avatarUrl, isSchool: false, label: `Eu (${me.name})`, name: me.name, value: me.id }] : []),
+    ...others.map((person) => ({ avatarUrl: person.avatarUrl, isSchool: false, label: `${person.name} · ${person.roleLabel}`, name: person.name, value: person.id }))
+  ];
+
+  if (input.saved && !input.senders.some((person) => person.id === input.saved?.id)) {
+    options.push({ avatarUrl: null, isSchool: false, label: `${input.saved.name} · fora da equipe`, name: input.saved.name, value: input.saved.id });
+  }
+
+  return options;
+}
+
+export type NoticeSenderHint = {
+  link: { href: string; label: string; newTab: boolean } | null;
+  text: string;
+  tone: "neutral" | "warning";
+  /** A dica pede a foto em Perfil: o editor rele a equipe quando a janela volta ao foco. */
+  watchesProfile: boolean;
+};
+
+/**
+ * A dica embaixo de "Quem envia", uma por vez (a primeira que vale): quem saiu da equipe; "Eu" sem
+ * foto (com o link para Perfil); outra pessoa (o e-mail que ela recebe, e o pedido de foto se nao
+ * tiver); a escola para quem mexe na Marca; e o padrao.
+ */
+export function noticeSenderHint(input: {
+  canEditBrand: boolean;
+  saved?: { id: string; name: string } | null;
+  schoolName: string;
+  sender: { userId: string } | null;
+  senders: readonly NoticeSenderChoice[];
+}): NoticeSenderHint {
+  const hint = (text: string, extra: Partial<NoticeSenderHint> = {}): NoticeSenderHint => ({ link: null, text, tone: "neutral", watchesProfile: false, ...extra });
+  const me = input.senders.find((person) => person.isMe);
+
+  if (input.sender) {
+    const userId = input.sender.userId;
+    const person = input.senders.find((item) => item.id === userId);
+
+    if (!person) {
+      const name = input.saved?.id === userId ? input.saved.name : "A pessoa escolhida";
+
+      return hint(`${name} não está mais na equipe: a notificação sai como ${input.schoolName}.`, { tone: "warning" });
+    }
+
+    if (person.isMe) {
+      if (!person.avatarUrl) {
+        return hint("Você ainda não tem foto: o aluno vê as suas iniciais.", {
+          link: { href: PROFILE_PHOTO_HREF, label: "Colocar a minha foto em Perfil", newTab: true },
+          watchesProfile: true
+        });
+      }
+    } else {
+      const email = `Quando sair, ${person.name} recebe um e-mail avisando: “${me?.name ?? UNKNOWN_PUBLISHER} enviou uma notificação em seu nome”.`;
+      const photo = person.avatarUrl
+        ? ""
+        : ` ${person.name} ainda não tem foto: o aluno vê as iniciais. Peça para ${person.name} colocar a foto no Perfil da área de membros.`;
+
+      return hint(`${email}${photo}`);
+    }
+  } else if (input.canEditBrand) {
+    return hint("O círculo mostra o ícone da escola.", { link: { href: BRAND_HREF, label: "Trocar em Área de membros › Marca", newTab: true } });
+  }
+
+  return hint("O aluno vê a foto e o nome de quem envia. Só pessoas da equipe aparecem aqui.");
+}
+
+/** Quem envia na previa: a pessoa da equipe (nome e foto de agora) ou a escola (null). */
+export function previewSender(sender: { userId: string } | null, senders: readonly NoticeSenderChoice[]) {
+  const person = sender ? senders.find((item) => item.id === sender.userId) : undefined;
+
+  return person ? { avatarUrl: person.avatarUrl, name: person.name } : null;
+}
+
+/** Escolher um icone ja marca a cor sugerida (o produtor pode trocar); "Sem ícone" = null. */
+export function pickNoticeIcon(id: NoticeIconId | null): NoticeDraft["icon"] {
+  return id ? { color: NOTICE_ICON_SUGGESTED_COLOR[id], id } : null;
+}
+
+/** "Ícone ao lado do título · Promoção" (a escolha sempre em texto, nunca so pelo desenho). */
+export function noticeIconFieldLabel(icon: NoticeDraft["icon"]) {
+  return `Ícone ao lado do título · ${icon ? NOTICE_ICON_LABELS[icon.id] : "Sem ícone"}`;
+}
+
+/** "Cor do ícone · Vermelho". */
+export function noticeIconColorLabel(icon: NonNullable<NoticeDraft["icon"]>) {
+  return `Cor do ícone · ${NOTICE_ICON_COLOR_LABELS[icon.color]}`;
+}
+
+/** Pilulas de "Fica no sino por": 1, 3, 7, 30 e 90 dias (padrao), "Outro" e, na seguinte, "Até a ... sumir". */
+export type ValidityChoice = "1" | "3" | "7" | "30" | "90" | "anchor" | "other";
+
+export const VALIDITY_CHOICE_OPTIONS: readonly { label: string; value: ValidityChoice }[] = [
+  { label: "1 dia", value: "1" },
+  { label: "3 dias", value: "3" },
+  { label: "7 dias", value: "7" },
+  { label: "30 dias", value: "30" },
+  { label: "90 dias", value: "90" },
+  { label: "Outro", value: "other" }
+];
+
+const PRESET_MINUTES: Record<"1" | "3" | "7" | "30", number> = { "1": 1_440, "3": 4_320, "7": 10_080, "30": 43_200 };
+
+export function validityChoiceOf(validity: FlowValidity): ValidityChoice {
+  switch (validity.mode) {
+    case "default":
+      return "90";
+    case "with_anchor":
+      return "anchor";
+    case "duration": {
+      const preset = (Object.keys(PRESET_MINUTES) as (keyof typeof PRESET_MINUTES)[]).find((key) => PRESET_MINUTES[key] === validity.minutes);
+
+      return preset ?? "other";
+    }
+    default:
+      return "other";
+  }
+}
+
+/** "Outro" abre em "Por um tempo" com 2 dias (o produtor troca o numero e a unidade). */
+export const DEFAULT_OTHER_VALIDITY: FlowValidity = { minutes: 2_880, mode: "duration" };
+
+/** Validade de uma pilula; "Outro" mantem o que ja estava em "Outro". */
+export function validityOfChoice(choice: ValidityChoice, current: FlowValidity): FlowValidity {
+  switch (choice) {
+    case "90":
+      return { mode: "default" };
+    case "anchor":
+      return { mode: "with_anchor" };
+    case "other":
+      return validityChoiceOf(current) === "other" ? current : DEFAULT_OTHER_VALIDITY;
+    default:
+      return { minutes: PRESET_MINUTES[choice], mode: "duration" };
+  }
+}
+
+export type ValidityUnit = "days" | "hours";
+
+/** Minutos -> [numero] [horas | dias] do "Por um tempo" (dias quando fecha em dias). */
+export function validityDurationParts(minutes: number): { amount: number; unit: ValidityUnit } {
+  if (Number.isFinite(minutes) && minutes > 0 && minutes % 1_440 === 0) {
+    return { amount: minutes / 1_440, unit: "days" };
+  }
+
+  return { amount: Number.isFinite(minutes) ? Math.round(minutes / 60) : Number.NaN, unit: "hours" };
+}
+
+/** [numero] [horas | dias] -> minutos (numero invalido fica invalido: o zod diz "Use de 1 hora a 90 dias."). */
+export function validityDurationMinutes(amount: number, unit: ValidityUnit) {
+  return Number.isFinite(amount) ? Math.round(amount * (unit === "days" ? 1_440 : 60)) : Number.NaN;
+}
+
+/**
+ * "Quando faltar menos de 1 dia, o aluno vê “Termina em 3 h”": so quando a notificacao fica no sino por
+ * 30 dias ou menos (o padrao de 90 dias nunca mostra). `sendAt` e a hora do envio (agora ou a agendada).
+ */
+export function showsUrgencyHint(validity: FlowValidity, sendAt: number) {
+  if (validity.mode === "duration") {
+    return Number.isFinite(validity.minutes) && validity.minutes * 60_000 <= VALIDITY_LIMITS.urgencyMaxTotalMs;
+  }
+
+  if (validity.mode === "until") {
+    const end = Date.parse(validity.endsAt);
+
+    return Number.isFinite(end) && Number.isFinite(sendAt) && end - sendAt <= VALIDITY_LIMITS.urgencyMaxTotalMs;
+  }
+
+  return false;
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Previa (os componentes reais do aluno, montados a partir do rascunho)
  * ---------------------------------------------------------------------------------------------- */
 
@@ -689,21 +909,77 @@ function previewCta(cta: NoticeDraft["cta"]) {
   return { href: cta.href.trim(), label: cta.label.trim(), target: cta.target };
 }
 
-/** Notificacao do sino como o aluno recebe (nao lida, da escola, criada agora). */
-export function draftToNotificationItem(draft: NoticeDraft, input: { createdAt: string; imageUrl?: string | null }): NotificationItem {
+/** O conteudo que a previa desenha: o do aviso ou o de uma notificacao seguinte (validade de fluxo). */
+export type PreviewContent = Pick<NoticeDraft, "audio" | "body" | "cta" | "icon" | "image" | "kind" | "response" | "title"> & {
+  validity?: FlowValidity;
+};
+
+/** Pilulas "Áudio na prévia": o player parado como nunca tocado ou como ouvido. */
+export type PreviewListen = "heard" | "not_heard";
+
+export const PREVIEW_LISTEN_OPTIONS: readonly { label: string; value: PreviewListen }[] = [
+  { label: "Não ouvido", value: "not_heard" },
+  { label: "Ouvido", value: "heard" }
+];
+
+/**
+ * A notificacao chegou ha instantes: o cartao diz "agora" e uma de "1 dia" mostra "Termina em 23 h",
+ * como o aluno ve logo depois do envio.
+ */
+export const PREVIEW_AGE_MS = 30_000;
+
+/**
+ * Fim no sino da notificacao da previa (o mesmo calculo do envio, contado de `createdAt`); pop-up e
+ * "ate a principal sumir" sem a hora da principal: null (sem "Termina em").
+ */
+export function previewExpiresAt(content: Pick<PreviewContent, "kind" | "validity">, createdAt: string, anchorExpiresAt?: number | null): string | null {
+  const created = Date.parse(createdAt);
+
+  if (content.kind !== "inbox" || !Number.isFinite(created)) {
+    return null;
+  }
+
+  const validity = content.validity ?? { mode: "default" };
+
+  if (validity.mode === "with_anchor" && typeof anchorExpiresAt !== "number") {
+    return null;
+  }
+
+  const columns = validityToColumns(validity);
+  const expiresAt = computeExpiresAt({ validUntil: columns.valid_until, validityMinutes: columns.validity_minutes }, created, anchorExpiresAt);
+
+  return Number.isFinite(expiresAt) && expiresAt > created ? new Date(expiresAt).toISOString() : null;
+}
+
+/**
+ * Notificacao do sino como o aluno recebe (nao lida, criada agora): de quem envia (a pessoa da equipe;
+ * sem ela, a escola), com o icone, o fim no sino (o "Termina em") e o audio no estado das pilulas.
+ */
+export function draftToNotificationItem(
+  draft: PreviewContent,
+  input: {
+    /** Fim da notificacao de referencia (seguinte "ate a principal sumir"). */
+    anchorExpiresAt?: number | null;
+    createdAt: string;
+    imageUrl?: string | null;
+    listen?: PreviewListen;
+    sender?: { avatarUrl: string | null; name: string } | null;
+  }
+): NotificationItem {
   const imageUrl = input.imageUrl ?? draft.image?.url ?? null;
+  const heard = input.listen === "heard";
 
   return {
-    actor: null,
+    actor: draft.kind === "inbox" && input.sender ? { avatarUrl: input.sender.avatarUrl, name: input.sender.name } : null,
     audio: draft.audio ? { ...draft.audio } : null,
-    audioProgress: null,
+    audioProgress: draft.audio ? { completed: heard, heard: (heard ? "1" : "0").repeat(AUDIO_HEARD_SLOTS), percent: heard ? 100 : 0 } : null,
     body: draft.body.trim(),
     context: null,
     createdAt: input.createdAt,
     cta: previewCta(draft.cta),
-    expiresAt: null,
+    expiresAt: previewExpiresAt(draft, input.createdAt, input.anchorExpiresAt),
     href: null,
-    icon: draft.icon,
+    icon: draft.icon ? { color: draft.icon.color, id: draft.icon.id } : null,
     id: "previa",
     image: imageUrl ? { alt: draft.image?.alt.trim() ?? "", url: imageUrl } : null,
     kind: "notice",
@@ -722,8 +998,11 @@ export function draftToNotificationItem(draft: NoticeDraft, input: { createdAt: 
   };
 }
 
-/** Pop-up da home como o aluno ve na primeira vez. */
-export function draftToPopupItem(draft: NoticeDraft, input: { imageUrl?: string | null } = {}): PopupItem {
+/** Pop-up da home como o aluno ve na primeira vez (o icone so quando escolhido, como a API manda). */
+export function draftToPopupItem(
+  draft: Pick<NoticeDraft, "allowSnooze" | "audio" | "body" | "cta" | "icon" | "image" | "title">,
+  input: { imageUrl?: string | null } = {}
+): PopupItem {
   const imageUrl = input.imageUrl ?? draft.image?.url ?? null;
 
   return {
@@ -731,7 +1010,7 @@ export function draftToPopupItem(draft: NoticeDraft, input: { imageUrl?: string 
     body: draft.body.trim(),
     canSnooze: draft.allowSnooze,
     cta: previewCta(draft.cta),
-    icon: draft.icon,
+    ...(draft.icon ? { icon: { color: draft.icon.color, id: draft.icon.id } } : {}),
     id: "previa",
     image: imageUrl ? { alt: draft.image?.alt.trim() ?? "", url: imageUrl } : null,
     title: draft.title.trim() || PREVIEW_TITLE_PLACEHOLDER
@@ -751,10 +1030,14 @@ export const AUDIENCE_RULE_LABELS: Record<AudienceRuleType, string> = {
   pace: "Ritmo",
   product: "Produto",
   progress: "Progresso nas aulas",
-  sign_in: "Entrada na plataforma"
+  sign_in: "Entrada na plataforma",
+  // v2 (docs/23 §7)
+  access_gained: "Ganhou acesso a um produto",
+  message: "O que fez com uma notificação",
+  page_visit: "Visitou uma página"
 };
 
-/** Ordem do seletor de tipo de regra. */
+/** Ordem do seletor de tipo de regra (as regras que valem em todo lugar; a v2 vem em audienceRuleTypesFor). */
 export const AUDIENCE_RULE_ORDER: readonly AudienceRuleType[] = [
   "product",
   "progress",
@@ -766,6 +1049,229 @@ export const AUDIENCE_RULE_ORDER: readonly AudienceRuleType[] = [
   "pace",
   "cohort"
 ];
+
+/**
+ * Onde o construtor esta: "segment" = segmento comum (Avisos, pop-ups, "Quem entra" de um fluxo);
+ * "flow" = dentro de um fluxo (condicao, "So para quem...", Objetivo, "Para quem" da seguinte).
+ */
+export type AudienceBuilderMode = "flow" | "segment";
+
+/**
+ * Tipos no seletor: no segmento, os de sempre mais "O que fez com uma notificação" (um aviso enviado);
+ * no fluxo, tambem "Visitou uma página" e "Ganhou acesso a um produto" (so ha dado dentro de um fluxo).
+ */
+export function audienceRuleTypesFor(mode: AudienceBuilderMode): readonly AudienceRuleType[] {
+  return mode === "flow" ? [...AUDIENCE_RULE_ORDER, "message", "page_visit", "access_gained"] : [...AUDIENCE_RULE_ORDER, "message"];
+}
+
+/** O tipo vale neste modo? (uma regra salva de fluxo aberta no segmento aparece como invalida). */
+export function isAudienceRuleTypeAllowed(type: AudienceRuleType, mode: AudienceBuilderMode) {
+  return audienceRuleTypesFor(mode).includes(type);
+}
+
+/** Acao da regra "O que fez com uma notificação", na linha "[Fez | Não fez] [acao]". */
+export const MESSAGE_ACTION_LABELS: Record<MessageAction, string> = {
+  accepted: "aceitou",
+  audio_completed: "ouviu o áudio até o fim",
+  audio_started: "começou a ouvir o áudio",
+  clicked: "clicou no botão",
+  declined: "recusou",
+  interacted: "interagiu",
+  opened: "abriu",
+  received: "recebeu",
+  responded: "respondeu",
+  seen: "viu no sino"
+};
+
+/**
+ * Notificacao que a regra pode citar: no segmento, um aviso enviado nos ultimos 90 dias; no fluxo, um
+ * passo acima (ou o aviso de origem). O que ela tem decide as acoes oferecidas.
+ */
+export type AudienceMessageOption = {
+  /**
+   * Ha o que abrir ("Ver mais", audio, botao ou resposta)? Aviso curto so de texto aparece inteiro no
+   * sino e nunca da "abriu" (docs/23 V7): sem "abriu" nem "interagiu" nas acoes.
+   */
+  canOpen: boolean;
+  /** Pagina do botao (page-visit-model.ts); null = sem botao, externo ou nao acompanhado. */
+  ctaPageKey: string | null;
+  hasAudio: boolean;
+  hasCta: boolean;
+  hasResponse: boolean;
+  /** Chave dos fatos (messageRefKey): "campaign:<id>" ou "node:<id>". */
+  key: string;
+  label: string;
+  ref: MessageRef;
+  title: string;
+};
+
+/** Aviso enviado que o segmento pode citar (queries.ts, loadAudienceNoticeOptions). Sem `canOpen` = tem o que abrir. */
+export type AudienceNoticeChoice = { canOpen?: boolean; hasAudio: boolean; hasCta: boolean; hasResponse: boolean; id: string; sentAt: string; title: string };
+
+/** Notificacao de um passo acima, no fluxo (o construtor de fluxos e o editor das seguintes mandam). */
+export type AudienceFlowMessageChoice = {
+  canOpen?: boolean;
+  ctaPageKey: string | null;
+  hasAudio: boolean;
+  hasCta: boolean;
+  hasResponse: boolean;
+  nodeId: string;
+  title: string;
+};
+
+export type AudienceFlowContext = { messages: readonly AudienceFlowMessageChoice[] };
+
+export const NO_SENT_NOTICES_MESSAGE = "Nenhuma notificação enviada nos últimos 90 dias.";
+export const NO_FLOW_MESSAGES_MESSAGE = "Nenhuma notificação antes deste passo.";
+export const MESSAGE_RULE_SEGMENT_HINT = "Só conta quem recebeu a notificação.";
+
+/** "Oferta especial! · 21/10" (dia e mes do envio, em Sao Paulo). */
+export function noticeChoiceLabel(notice: Pick<AudienceNoticeChoice, "sentAt" | "title">) {
+  const local = isoToSaoPauloLocal(notice.sentAt);
+  const title = notice.title.trim() || "Sem título";
+
+  return local ? `${title} · ${local.date.slice(8, 10)}/${local.date.slice(5, 7)}` : title;
+}
+
+/**
+ * As notificacoes do seletor da regra. No segmento, os avisos enviados; no fluxo, primeiro os passos
+ * acima (na ordem dada) e depois os avisos enviados, se vierem (um aviso de fora do fluxo tambem vale).
+ */
+export function audienceMessageOptions(
+  mode: AudienceBuilderMode,
+  input: { flowContext?: AudienceFlowContext | null; notices?: readonly AudienceNoticeChoice[] | null }
+): AudienceMessageOption[] {
+  const steps: AudienceMessageOption[] =
+    mode === "flow"
+      ? (input.flowContext?.messages ?? []).map((message) => {
+          const ref: MessageRef = { kind: "node", nodeId: message.nodeId };
+          const title = message.title.trim() || "Sem título";
+
+          return {
+            canOpen: message.canOpen !== false,
+            ctaPageKey: message.ctaPageKey,
+            hasAudio: message.hasAudio,
+            hasCta: message.hasCta,
+            hasResponse: message.hasResponse,
+            key: messageRefKey(ref),
+            label: title,
+            ref,
+            title
+          };
+        })
+      : [];
+
+  return [...steps, ...noticeMessageOptions(input.notices ?? [])];
+}
+
+function noticeMessageOptions(notices: readonly AudienceNoticeChoice[]): AudienceMessageOption[] {
+  return notices.map((notice) => {
+    const ref: MessageRef = { campaignId: notice.id, kind: "campaign" };
+
+    return {
+      canOpen: notice.canOpen !== false,
+      ctaPageKey: null,
+      hasAudio: notice.hasAudio,
+      hasCta: notice.hasCta,
+      hasResponse: notice.hasResponse,
+      key: messageRefKey(ref),
+      label: noticeChoiceLabel(notice),
+      ref,
+      title: notice.title.trim() || "Sem título"
+    };
+  });
+}
+
+/**
+ * Acoes que a notificacao escolhida tem: recebeu e viu sempre; abriu e interagiu quando ha o que abrir
+ * (`canOpen`, padrao sim); audio, botao e resposta so quando ela tem. A acao ja escolhida fica na lista
+ * (notificacao removida ou mudada depois).
+ */
+export function messageActionsFor(
+  option: (Pick<AudienceMessageOption, "hasAudio" | "hasCta" | "hasResponse"> & { canOpen?: boolean }) | null,
+  current?: MessageAction
+): MessageAction[] {
+  const supported = (action: MessageAction) => {
+    switch (action) {
+      case "opened":
+      case "interacted":
+        return option?.canOpen !== false;
+      case "audio_started":
+      case "audio_completed":
+        return option?.hasAudio ?? false;
+      case "clicked":
+        return option?.hasCta ?? false;
+      case "accepted":
+      case "declined":
+      case "responded":
+        return option?.hasResponse ?? false;
+      default:
+        return true;
+    }
+  };
+
+  return MESSAGE_ACTIONS.filter((action) => supported(action) || action === current);
+}
+
+/** Titulos das notificacoes do seletor nos nomes da frase do segmento ("Alunos que não abriram a notificação “X”"). */
+export function audienceNamesWithMessages(names: AudienceNames, options: readonly Pick<AudienceMessageOption, "key" | "title">[]): AudienceNames {
+  if (options.length === 0) {
+    return names;
+  }
+
+  return { ...names, messages: { ...names.messages, ...Object.fromEntries(options.map((option) => [option.key, option.title])) } };
+}
+
+/** Pagina da regra "Visitou uma página", na ordem do seletor. */
+export const PAGE_TARGET_CHOICES = [
+  { label: "a página do botão da notificação…", value: "message_cta" },
+  { label: "a página de um produto", value: "content" },
+  { label: "Comprar de um produto", value: "checkout" },
+  { label: "Início", value: "fixed:home" },
+  { label: "Minhas compras", value: "fixed:purchases" },
+  { label: "Favoritos", value: "fixed:saved" },
+  { label: "Materiais", value: "fixed:materials" },
+  { label: "Minha jornada", value: "fixed:journey" },
+  { label: "Continue assistindo", value: "fixed:continue" },
+  { label: "Perfil", value: "fixed:profile" },
+  { label: "Suporte", value: "fixed:support" }
+] as const;
+
+export type PageTargetChoice = (typeof PAGE_TARGET_CHOICES)[number]["value"];
+
+type PageVisitRule = Extract<AudienceRule, { type: "page_visit" }>;
+
+export function pageTargetChoiceOf(page: PageVisitRule["page"]): PageTargetChoice {
+  return page.kind === "fixed" ? (`fixed:${page.key}` as PageTargetChoice) : page.kind;
+}
+
+/** Trocar a pagina mantem o produto (pagina do produto <-> Comprar) e a notificacao do botao. */
+export function pageTargetOfChoice(choice: PageTargetChoice, previous: PageVisitRule["page"], options: readonly AudienceMessageOption[]): PageVisitRule["page"] {
+  const productId = previous.kind === "content" || previous.kind === "checkout" ? previous.productId : "";
+
+  switch (choice) {
+    case "message_cta": {
+      const first = pageButtonOptions(options)[0]?.ref;
+
+      return { kind: "message_cta", nodeId: previous.kind === "message_cta" ? previous.nodeId : first?.kind === "node" ? first.nodeId : "" };
+    }
+    case "content":
+    case "checkout":
+      return { kind: choice, productId };
+    default:
+      return { key: choice.slice("fixed:".length) as Extract<PageVisitRule["page"], { kind: "fixed" }>["key"], kind: "fixed" };
+  }
+}
+
+/** Notificacoes cujo botao leva a uma pagina acompanhada ("a página do botão da notificação…"). */
+export function pageButtonOptions(options: readonly AudienceMessageOption[]) {
+  return options.filter((option) => option.ref.kind === "node" && option.hasCta && option.ctaPageKey !== null);
+}
+
+export const FLOW_SINCE_CHOICES = [
+  { label: "desde que entrou no fluxo", value: "entered" },
+  { label: "depois de receber a notificação…", value: "message" }
+] as const;
 
 export const COMMENT_WINDOW_OPTIONS: readonly { label: string; value: "7" | "30" | "90" | "all" }[] = [
   { label: "nos últimos 7 dias", value: "7" },
@@ -782,9 +1288,24 @@ export function commentWindowDays(value: string): 7 | 30 | 90 | null {
   return value === "7" ? 7 : value === "30" ? 30 : value === "90" ? 90 : null;
 }
 
-/** Regra nova de cada tipo, com numeros que fazem sentido de cara. */
-export function defaultAudienceRule(type: AudienceRuleType): AudienceRule {
+/**
+ * Regra nova de cada tipo, com numeros que fazem sentido de cara. "O que fez com uma notificação" cita a
+ * notificacao dada (sem ela, fica para escolher, como o produto); no fluxo cita um passo, no segmento um
+ * aviso enviado.
+ */
+export function defaultAudienceRule(type: AudienceRuleType, input: { messageRef?: MessageRef | null; mode?: AudienceBuilderMode } = {}): AudienceRule {
   switch (type) {
+    case "message":
+      return {
+        action: "opened",
+        negate: false,
+        ref: input.messageRef ?? (input.mode === "flow" ? { kind: "node", nodeId: "" } : { campaignId: "", kind: "campaign" }),
+        type
+      };
+    case "page_visit":
+      return { negate: false, page: { key: "home", kind: "fixed" }, since: { kind: "entered" }, type };
+    case "access_gained":
+      return { negate: false, productIds: [], since: { kind: "entered" }, type };
     case "product":
       return { op: "has", productIds: [], type };
     case "progress":
@@ -1086,6 +1607,8 @@ export type NoticeStatsInput = {
   closedWithoutClick: number;
   declined: number;
   dismissed: number;
+  /** Abriram (v2, communication_campaign_engagement): so a notificacao do sino tem. */
+  opened?: number;
   recipients: number;
   seen: number;
   snoozed: number;
@@ -1095,14 +1618,19 @@ export type NoticeStatsInput = {
 export type FunnelStep = {
   /** "de quem recebeu", "de quem viu". */
   base: string;
-  id: "clicked" | "recipients" | "seen" | "studied";
+  id: "clicked" | "opened" | "recipients" | "seen" | "studied";
   label: string;
   percent: number | null;
   value: number;
 };
 
-/** Para quem -> Viram -> Clicaram -> Voltaram a estudar (7 dias), cada passo sobre o anterior. */
+/**
+ * Para quem -> Viram -> Abriram (so notificacao) -> Clicaram -> Voltaram a estudar (7 dias). Abrir e a
+ * interacao de verdade (cartao, "Ver mais", audio, botao, resposta); "Marcar todas" nao conta.
+ */
 export function noticeFunnel(stats: NoticeStatsInput, kind: CampaignKind): FunnelStep[] {
+  const opened = stats.opened ?? 0;
+
   return [
     { base: kind === "inbox" ? "receberam no sino" : "podem ver o pop-up", id: "recipients", label: "Para quem", percent: null, value: stats.recipients },
     {
@@ -1112,9 +1640,25 @@ export function noticeFunnel(stats: NoticeStatsInput, kind: CampaignKind): Funne
       percent: ratio(stats.seen, stats.recipients),
       value: stats.seen
     },
+    ...(kind === "inbox" ? [{ base: "de quem viu", id: "opened" as const, label: "Abriram", percent: ratio(opened, stats.seen), value: opened }] : []),
     { base: "de quem viu", id: "clicked", label: "Clicaram", percent: ratio(stats.clicked, stats.seen), value: stats.clicked },
     { base: "de quem viu", id: "studied", label: "Voltaram a estudar (7 dias)", percent: ratio(stats.studied7d, stats.seen), value: stats.studied7d }
   ];
+}
+
+export type NoticeAudioStep = { base: string; id: "audio_completed" | "audio_started"; label: string; percent: number | null; value: number };
+
+/** Notificacao com audio: "Começaram o áudio" e "Ouviram até o fim" (90 % ouvido), sobre quem abriu. */
+export function noticeAudioSteps(engagement: { audioCompleted: number; audioStarted: number; opened: number }): NoticeAudioStep[] {
+  return [
+    { base: "de quem abriu", id: "audio_started", label: "Começaram o áudio", percent: ratio(engagement.audioStarted, engagement.opened), value: engagement.audioStarted },
+    { base: "de quem abriu", id: "audio_completed", label: "Ouviram até o fim", percent: ratio(engagement.audioCompleted, engagement.opened), value: engagement.audioCompleted }
+  ];
+}
+
+/** "Criada por Ana Souza · em nome de Carlos Lima" quando quem envia e uma pessoa; da escola, null. */
+export function noticeAuthorLine(createdBy: { name: string } | null, sender: { name: string } | null) {
+  return sender ? `Criada por ${createdBy?.name ?? "Equipe"} · em nome de ${sender.name}` : null;
 }
 
 /** "Fecharam sem clicar" sobre quem viu o pop-up. */

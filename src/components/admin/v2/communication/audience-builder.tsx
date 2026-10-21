@@ -15,11 +15,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import {
   isAudienceGroup,
+  messageRefKey,
   type AudienceDefinition,
   type AudienceGroup,
   type AudienceNode,
   type AudienceRule,
-  type AudienceRuleType
+  type AudienceRuleType,
+  type MessageAction
 } from "@/server/communications/audience-model";
 import type { NoticeSegmentOption } from "@/server/communications/queries";
 import { STUDENT_PACE_LABELS, STUDENT_PACES } from "@/server/students/model";
@@ -29,22 +31,37 @@ import { StudentAvatar } from "../students/student-avatar";
 import { adminTransition } from "../styles";
 import {
   AUDIENCE_RULE_LABELS,
-  AUDIENCE_RULE_ORDER,
   COMMENT_WINDOW_OPTIONS,
+  FLOW_SINCE_CHOICES,
+  MESSAGE_ACTION_LABELS,
+  MESSAGE_RULE_SEGMENT_HINT,
+  NO_FLOW_MESSAGES_MESSAGE,
+  NO_SENT_NOTICES_MESSAGE,
+  PAGE_TARGET_CHOICES,
   appendAudienceNode,
   audienceFocusAfterRemoval,
+  audienceMessageOptions,
   audienceNodeKey,
+  audienceRuleTypesFor,
   canAddAudienceRule,
   commentWindowDays,
   commentWindowValue,
   defaultAudienceRule,
   describeSampleNames,
   formatStudentCount,
+  messageActionsFor,
   newAudienceGroup,
+  pageButtonOptions,
+  pageTargetChoiceOf,
+  pageTargetOfChoice,
   removeAudienceNode,
   removeAudienceRuleLabel,
   replaceAudienceNode,
   starterAudience,
+  type AudienceBuilderMode,
+  type AudienceFlowContext,
+  type AudienceMessageOption,
+  type AudienceNoticeChoice,
   type AudiencePath
 } from "./notices-view-model";
 
@@ -55,12 +72,23 @@ import {
 // convertidos em regras (o que nao vira regra, como a busca por nome, aparece numa nota). A contagem
 // ao vivo fica em AudienceCount (o editor pede ao servidor com 500 ms de espera). Remover uma regra ou
 // um grupo leva o foco para o item anterior (ou para "Adicionar regra"), nunca para o body.
+//
+// v2 (docs/23 §7): `mode`. No segmento ("segment") entra "O que fez com uma notificação", com o seletor
+// das notificacoes enviadas nos ultimos 90 dias (`notices`); dentro de um fluxo ("flow") a regra cita um
+// passo acima (`flowContext`), e entram "Visitou uma página" e "Ganhou acesso a um produto". As acoes
+// oferecidas sao so as que a notificacao escolhida tem (audio, botao, resposta).
 
 type AudienceBuilderProps = {
   cohorts: readonly { id: string; name: string }[];
   disabled: boolean;
   /** Erros por regra (chave "2" ou "1.0"); "" = o segmento inteiro. */
   errors: Record<string, string>;
+  /** So no modo "flow": as notificacoes acima deste passo (ou o aviso de origem), de cima para baixo. */
+  flowContext?: AudienceFlowContext | null;
+  /** "segment" (padrao) ou "flow". */
+  mode?: AudienceBuilderMode;
+  /** So no modo "segment": avisos enviados nos ultimos 90 dias, mais recentes primeiro (loadAudienceNoticeOptions). */
+  notices?: readonly AudienceNoticeChoice[] | null;
   onChange: (definition: AudienceDefinition) => void;
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
@@ -212,10 +240,137 @@ function TogglePills({
 type RuleContext = {
   cohorts: readonly { id: string; name: string }[];
   disabled: boolean;
+  /** Notificacoes que as regras v2 podem citar (avisos enviados ou passos acima, conforme o modo). */
+  messageOptions: readonly AudienceMessageOption[];
+  mode: AudienceBuilderMode;
   productOptions: readonly Option<string | null>[];
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
 };
+
+/**
+ * Notificacao de uma regra nova: no fluxo, o passo mais perto (o ultimo acima); no segmento (ou sem
+ * passo acima), o aviso enviado mais recente.
+ */
+function defaultMessageOption(context: Pick<RuleContext, "messageOptions" | "mode">) {
+  const steps = context.messageOptions.filter((option) => option.ref.kind === "node");
+
+  return (context.mode === "flow" ? steps[steps.length - 1] : undefined) ?? context.messageOptions.find((option) => option.ref.kind === "campaign") ?? null;
+}
+
+/** Tipos do seletor; uma regra que nao vale neste modo (colada de um fluxo) continua visivel. */
+function ruleTypeOptions(mode: AudienceBuilderMode, current: AudienceRuleType): Option<AudienceRuleType>[] {
+  const types = audienceRuleTypesFor(mode);
+
+  return (types.includes(current) ? types : [...types, current]).map((type) => ({ label: AUDIENCE_RULE_LABELS[type], value: type }));
+}
+
+const DID_OPTIONS = [
+  { label: "Fez", value: "did" },
+  { label: "Não fez", value: "not" }
+] as const;
+const VISITED_OPTIONS = [
+  { label: "Visitou", value: "did" },
+  { label: "Não visitou", value: "not" }
+] as const;
+const GAINED_OPTIONS = [
+  { label: "Ganhou", value: "did" },
+  { label: "Não ganhou", value: "not" }
+] as const;
+const PICK_NOTIFICATION = "Escolha a notificação";
+
+/**
+ * Seletor de notificacao (chave "campaign:<id>"/"node:<id>"). Sem nenhuma, fica desativado com o aviso;
+ * uma notificacao ja escolhida que nao esta mais na lista (mais antiga, ou removida) continua visivel.
+ */
+function MessagePicker({
+  ariaLabel,
+  context,
+  onChange,
+  options,
+  value
+}: {
+  ariaLabel: string;
+  context: RuleContext;
+  onChange: (option: AudienceMessageOption) => void;
+  options: readonly AudienceMessageOption[];
+  value: string | null;
+}) {
+  const empty = context.mode === "flow" ? NO_FLOW_MESSAGES_MESSAGE : NO_SENT_NOTICES_MESSAGE;
+  const known = value !== null && options.some((option) => option.key === value);
+  const items: Option<string | null>[] =
+    options.length === 0 && value === null
+      ? [{ label: empty, value: null }]
+      : [
+          ...(value === null ? [{ label: PICK_NOTIFICATION, value: null }] : []),
+          ...(value !== null && !known ? [{ label: "Notificação fora da lista", value }] : []),
+          ...options.map((option) => ({ label: option.label, value: option.key }))
+        ];
+
+  return (
+    <InlineSelect
+      ariaLabel={ariaLabel}
+      className="w-full sm:w-72"
+      disabled={context.disabled || options.length === 0}
+      onChange={(key) => {
+        const option = options.find((item) => item.key === key);
+
+        if (option) {
+          onChange(option);
+        }
+      }}
+      options={items}
+      value={value}
+    />
+  );
+}
+
+/** Chave da notificacao citada, ou null enquanto nao foi escolhida (id vazio). */
+function chosenKey(ref: { campaignId: string; kind: "campaign" } | { kind: "node"; nodeId: string }) {
+  return (ref.kind === "node" ? ref.nodeId : ref.campaignId) ? messageRefKey(ref) : null;
+}
+
+/** "[desde que entrou no fluxo | depois de receber a notificação…] [notificação]" das regras de fluxo. */
+function SinceFields({
+  context,
+  onChange,
+  since
+}: {
+  context: RuleContext;
+  onChange: (since: { kind: "entered" } | { kind: "message"; nodeId: string }) => void;
+  since: { kind: "entered" } | { kind: "message"; nodeId: string };
+}) {
+  const nodeOptions = context.messageOptions.filter((option) => option.ref.kind === "node");
+
+  return (
+    <>
+      <InlineSelect
+        ariaLabel="Desde quando"
+        className="w-full sm:w-64"
+        disabled={context.disabled}
+        onChange={(kind) => {
+          if (kind === "entered") {
+            onChange({ kind: "entered" });
+          } else {
+            const first = defaultMessageOption({ ...context, messageOptions: nodeOptions });
+            onChange({ kind: "message", nodeId: first?.ref.kind === "node" ? first.ref.nodeId : "" });
+          }
+        }}
+        options={FLOW_SINCE_CHOICES}
+        value={since.kind}
+      />
+      {since.kind === "message" ? (
+        <MessagePicker
+          ariaLabel="Notificação recebida"
+          context={context}
+          onChange={(option) => option.ref.kind === "node" && onChange({ kind: "message", nodeId: option.ref.nodeId })}
+          options={nodeOptions}
+          value={since.nodeId ? messageRefKey({ kind: "node", nodeId: since.nodeId }) : null}
+        />
+      ) : null}
+    </>
+  );
+}
 
 function productOptionsWith(base: readonly Option<string | null>[], emptyLabel: string): Option<string | null>[] {
   return [{ label: emptyLabel, value: null }, ...base.slice(1)];
@@ -444,6 +599,123 @@ function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext
           )}
         </div>
       );
+    case "message": {
+      const key = chosenKey(rule.ref);
+      const chosen = context.messageOptions.find((option) => option.key === key) ?? null;
+      // No segmento, so os avisos enviados; no fluxo, os passos acima (o aviso de origem tambem e um passo).
+      const options = context.messageOptions.filter((option) => (context.mode === "flow" ? true : option.ref.kind === "campaign"));
+
+      return (
+        <div className="flex min-w-0 flex-col gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <InlineSelect
+              ariaLabel="Fez ou não fez"
+              className="w-32"
+              disabled={disabled}
+              onChange={(value) => onChange({ ...rule, negate: value === "not" })}
+              options={DID_OPTIONS}
+              value={rule.negate ? "not" : "did"}
+            />
+            <InlineSelect
+              ariaLabel="O que fez com a notificação"
+              className="w-full sm:w-60"
+              disabled={disabled}
+              onChange={(action: MessageAction) => onChange({ ...rule, action })}
+              options={messageActionsFor(chosen, rule.action).map((action) => ({ label: MESSAGE_ACTION_LABELS[action], value: action }))}
+              value={rule.action}
+            />
+            <MessagePicker
+              ariaLabel="Notificação"
+              context={context}
+              onChange={(option) =>
+                onChange({ ...rule, action: messageActionsFor(option).includes(rule.action) ? rule.action : "opened", ref: option.ref })
+              }
+              options={options}
+              value={key}
+            />
+          </div>
+          {context.mode === "segment" ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{MESSAGE_RULE_SEGMENT_HINT}</p> : null}
+        </div>
+      );
+    }
+    case "page_visit": {
+      const page = rule.page;
+      const buttons = pageButtonOptions(context.messageOptions);
+
+      return (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <InlineSelect
+            ariaLabel="Visitou ou não"
+            className="w-36"
+            disabled={disabled}
+            onChange={(value) => onChange({ ...rule, negate: value === "not" })}
+            options={VISITED_OPTIONS}
+            value={rule.negate ? "not" : "did"}
+          />
+          <InlineSelect
+            ariaLabel="Página"
+            className="w-full sm:w-72"
+            disabled={disabled}
+            onChange={(choice) => onChange({ ...rule, page: pageTargetOfChoice(choice, page, context.messageOptions) })}
+            options={PAGE_TARGET_CHOICES}
+            value={pageTargetChoiceOf(page)}
+          />
+          {page.kind === "content" || page.kind === "checkout" ? (
+            <InlineSelect
+              ariaLabel="Produto da página"
+              className="w-full sm:w-56"
+              disabled={disabled || !context.productsLoaded}
+              onChange={(productId) => onChange({ ...rule, page: { kind: page.kind, productId: productId ?? "" } })}
+              options={productOptionsWith(context.productOptions, "Escolha o produto")}
+              value={page.productId || null}
+            />
+          ) : null}
+          {page.kind === "message_cta" ? (
+            <MessagePicker
+              ariaLabel="Notificação do botão"
+              context={context}
+              onChange={(option) => option.ref.kind === "node" && onChange({ ...rule, page: { kind: "message_cta", nodeId: option.ref.nodeId } })}
+              options={buttons}
+              value={page.nodeId ? messageRefKey({ kind: "node", nodeId: page.nodeId }) : null}
+            />
+          ) : null}
+          <SinceFields context={context} onChange={(since) => onChange({ ...rule, since })} since={rule.since} />
+          {!context.productsLoaded && (page.kind === "content" || page.kind === "checkout") ? <ProductsUnavailable /> : null}
+        </div>
+      );
+    }
+    case "access_gained":
+      return (
+        <div className="flex min-w-0 flex-col gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <InlineSelect
+              ariaLabel="Ganhou ou não"
+              className="w-36"
+              disabled={disabled}
+              onChange={(value) => onChange({ ...rule, negate: value === "not" })}
+              options={GAINED_OPTIONS}
+              value={rule.negate ? "not" : "did"}
+            />
+            <span className={textClass}>acesso a</span>
+          </div>
+          {context.productsLoaded ? (
+            <ProductPicker
+              disabled={disabled}
+              emptyText="Nenhum produto ainda. Crie um em Produtos."
+              id={`aviso-regra-${ruleKey}-produtos`}
+              items={context.products}
+              mode="multiple"
+              onChange={(productIds) => onChange({ ...rule, productIds })}
+              value={rule.productIds}
+            />
+          ) : (
+            <ProductsUnavailable />
+          )}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <SinceFields context={context} onChange={(since) => onChange({ ...rule, since })} since={rule.since} />
+          </div>
+        </div>
+      );
   }
 }
 
@@ -486,14 +758,14 @@ function RuleRow({
           disabled={context.disabled}
           onChange={(type: AudienceRuleType) => {
             if (type !== rule.type) {
-              onChange(defaultAudienceRule(type));
+              onChange(defaultAudienceRule(type, { messageRef: defaultMessageOption(context)?.ref ?? null, mode: context.mode }));
             }
           }}
-          options={AUDIENCE_RULE_ORDER.map((type) => ({ label: AUDIENCE_RULE_LABELS[type], value: type }))}
-          value={rule.type as AudienceRuleType}
+          options={ruleTypeOptions(context.mode, rule.type)}
+          value={rule.type}
         />
         <Button
-          aria-label={removeAudienceRuleLabel(rule.type as AudienceRuleType)}
+          aria-label={removeAudienceRuleLabel(rule.type)}
           className="ml-auto size-10! px-0 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           disabled={context.disabled}
           onClick={onRemove}
@@ -518,7 +790,19 @@ function Connector({ match }: { match: AudienceGroup["match"] }) {
   );
 }
 
-export function AudienceBuilder({ cohorts, disabled, errors, onChange, products, productsLoaded, segments, value }: AudienceBuilderProps) {
+export function AudienceBuilder({
+  cohorts,
+  disabled,
+  errors,
+  flowContext = null,
+  mode = "segment",
+  notices = null,
+  onChange,
+  products,
+  productsLoaded,
+  segments,
+  value
+}: AudienceBuilderProps) {
   const [note, setNote] = useState<{ text: string; tone: "info" | "warning" } | null>(null);
   // Regras guardadas ao voltar para "Todos os alunos" (voltam se escolher regras de novo).
   const rememberedRules = useRef<AudienceDefinition | null>(null);
@@ -526,7 +810,8 @@ export function AudienceBuilder({ cohorts, disabled, errors, onChange, products,
     { label: "", value: null },
     ...products.map((product) => ({ label: product.title, value: product.id }))
   ];
-  const context: RuleContext = { cohorts, disabled, productOptions, products, productsLoaded };
+  const messageOptions = audienceMessageOptions(mode, { flowContext, notices });
+  const context: RuleContext = { cohorts, disabled, messageOptions, mode, productOptions, products, productsLoaded };
   const root = value.kind === "rules" ? value.root : null;
   const addRuleButton = useRef<HTMLButtonElement>(null);
 

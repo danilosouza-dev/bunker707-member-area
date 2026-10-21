@@ -12,8 +12,14 @@
 // sem pedido: quem nao pode publicar para aquele segmento recebe 403. Publicar e aprovar contam e
 // gravam a mesma versao (updated_at da linha lida). A equipe nunca entra na contagem nem recebe aviso.
 // Os 5 nomes da previa do segmento so vao para quem tem students.read_basic (a lista de Alunos).
+//
+// v2 (docs/23): "Quem envia" so aceita a equipe (conferido ao salvar, 400, e ao publicar ou aprovar,
+// 422) e a pessoa escolhida recebe o e-mail "enviada em seu nome" quando a notificacao sai; o conteudo
+// de um passo de fluxo so muda pelo fluxo (409 em toda acao daqui); toda contagem le as linhas dos
+// avisos citados por regras "o que fez com a notificacao X"; o teste fica pelo menos 1 hora no sino.
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { runAdminAction } from "@/server/actions/run-action";
@@ -23,7 +29,7 @@ import { checkProductImage, decodeWebpDataUrl } from "@/server/catalog/webp";
 import { persistImageAsset } from "@/server/db/media-assets";
 import { previewAudience, resolveAudienceUserIds, type AudienceSamplePerson } from "./audience";
 import { loadAudienceFacts, type LoadedAudience } from "./audience-facts";
-import { describeAudience, normalizeAudience, type AudienceDefinition } from "./audience-model";
+import { collectMessageCampaignIds, describeAudience, normalizeAudience, type AudienceDefinition } from "./audience-model";
 import { invalidateLivePopups } from "./cache";
 import {
   isEditableStatus,
@@ -35,7 +41,9 @@ import {
 } from "./campaign-model";
 import { communicationsDb, CommunicationError, NoticeFieldError, type CommunicationsDb } from "./db";
 import { dispatchInboxCampaign, refreshPopupDeliveries } from "./dispatch";
-import { loadAudienceNames } from "./queries";
+import { testSendExpiresAt } from "./message-meta";
+import { loadAudienceNames, loadNoticeSenders, type NoticeSenderOption } from "./queries";
+import { notifySendersOnBehalf } from "./sender-notices";
 import {
   noticeDraftSchema,
   noticeIdSchema,
@@ -43,6 +51,7 @@ import {
   publishProblems,
   saveNoticeSchema,
   uploadNoticeImageSchema,
+  type NoticeDraft,
   type NoticeIdInput,
   type SaveNoticeInput
 } from "./schemas";
@@ -67,6 +76,9 @@ const EMPTY_AUDIENCE = "Nenhum aluno está neste segmento agora.";
 const LIVE_EDIT_NEEDS_PUBLISH = "Só quem pode publicar muda um pop-up no ar. Duplique para criar outro.";
 const LIVE_EDIT_NEEDS_APPROVAL = "Para mudar um pop-up no ar para este segmento, peça a um dono ou administrador.";
 const RESUME_NEEDS_APPROVAL = "Este pop-up passou de 500 alunos. Para retomar, peça a um dono ou administrador.";
+const FLOW_MESSAGE = "Esta notificação faz parte de um fluxo. Abra o fluxo para mudar.";
+const SENDER_NOT_ON_TEAM = "Escolha alguém da equipe.";
+const HOUR_MS = 3_600_000;
 
 export type SavedNotice = { id: string; status: CampaignStatus; updatedAt: string };
 export type PublishedNotice = {
@@ -92,6 +104,7 @@ function revalidateNotices(id?: string) {
   }
 }
 
+/** O aviso da tela; o conteudo de um passo de fluxo so muda pelo fluxo (409). */
 async function requireCampaign(db: CommunicationsDb, id: string) {
   const row = await fetchCampaign(db, id);
 
@@ -99,7 +112,69 @@ async function requireCampaign(db: CommunicationsDb, id: string) {
     throw new CommunicationError(NOTICE_MISSING_MESSAGE, 404);
   }
 
+  if (row.flow_id) {
+    throw new CommunicationError(FLOW_MESSAGE, 409);
+  }
+
   return row;
+}
+
+/**
+ * Fatos dos alunos para contar este segmento, com as linhas dos avisos citados por regras "o que fez
+ * com a notificacao X" (docs/23 §7): a previa, a publicacao e o envio contam igual.
+ */
+function loadFactsFor(db: CommunicationsDb, now: Date, definition: AudienceDefinition) {
+  return loadAudienceFacts(db, now, { messageCampaignIds: collectMessageCampaignIds(definition) });
+}
+
+/** A pessoa escolhida em "Quem envia" esta na equipe agora (admin_roles)? E o nome dela, para a mensagem. */
+async function senderState(db: CommunicationsDb, userId: string) {
+  const [role, profile] = await Promise.all([
+    db.from("admin_roles").select("user_id").eq("user_id", userId).maybeSingle(),
+    db.from("profiles").select("full_name").eq("id", userId).maybeSingle()
+  ]);
+
+  if (role.error || profile.error) {
+    throw new Error(`Comunicacao: quem envia: ${(role.error ?? profile.error)?.message}`);
+  }
+
+  return { name: (profile.data as { full_name: string | null } | null)?.full_name?.trim() || null, onTeam: Boolean(role.data) };
+}
+
+/** Salvar: so pessoas da equipe enviam em nome da escola (400 no campo "Quem envia"). */
+async function assertSenderForSave(db: CommunicationsDb, draft: NoticeDraft) {
+  if (draft.kind === "inbox" && draft.sender && !(await senderState(db, draft.sender.userId)).onTeam) {
+    throw new NoticeFieldError("sender", SENDER_NOT_ON_TEAM);
+  }
+}
+
+/** Publicar e aprovar (o aviso ainda nao saiu): quem saiu da equipe depois de salvo nao envia (422). */
+async function assertSenderForPublish(db: CommunicationsDb, row: CampaignRow) {
+  if (row.kind !== "inbox" || !row.sender_user_id) {
+    return;
+  }
+
+  const state = await senderState(db, row.sender_user_id);
+
+  if (!state.onTeam) {
+    throw new CommunicationError(`${state.name ?? "A pessoa escolhida"} não está mais na equipe. Escolha quem envia.`, 422);
+  }
+}
+
+/** Notificacao que saiu ou vai sair (enviada, enviando ou agendada): avisa quem envia por e-mail. */
+async function notifyNoticeSenders(db: CommunicationsDb, row: CampaignRow, published: PublishedNotice, actorId: string) {
+  if (row.kind !== "inbox" || !["scheduled", "sending", "sent"].includes(published.situation)) {
+    return;
+  }
+
+  // Melhor esforco: o aviso ja saiu; uma falha aqui so vai para o log.
+  await notifySendersOnBehalf(db, {
+    actorId,
+    campaignId: row.id,
+    count: published.recipients ?? published.audienceCount,
+    senders: [row.sender_user_id],
+    title: row.title
+  }).catch((error: unknown) => console.error(`[comunicacao] "enviada em seu nome" de ${row.id} nao agendado: ${error instanceof Error ? error.message : String(error)}`));
 }
 
 /** A tela leu outra versao (updated_at) do que esta no banco agora: 409 antes de contar ou gravar. */
@@ -245,10 +320,18 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     const db = communicationsDb();
     const columns = draftToColumns(data.draft);
 
+    await assertSenderForSave(db, data.draft);
+
     if (!data.id) {
       const created = await insertCampaign(db, { ...columns, created_by: user.id, status: "draft", updated_by: user.id });
 
-      await recordAudit(db, { action: "communication.saved", actorId: user.id, entityId: created.id, entityType: "campaign", metadata: { created: true, kind: created.kind } });
+      await recordAudit(db, {
+        action: "communication.saved",
+        actorId: user.id,
+        entityId: created.id,
+        entityType: "campaign",
+        metadata: { created: true, kind: created.kind, sender_user_id: created.sender_user_id }
+      });
       revalidateNotices();
 
       return { id: created.id, status: created.status, updatedAt: created.updated_at };
@@ -281,7 +364,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
       }
 
       if (audienceChanged) {
-        loaded = await loadAudienceFacts(db, now);
+        loaded = await loadFactsFor(db, now, columns.audience);
       }
 
       const count = loaded ? resolveAudienceUserIds(columns.audience, loaded).length : (current.audience_count ?? 0);
@@ -312,7 +395,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
       actorId: user.id,
       entityId: saved.id,
       entityType: "campaign",
-      metadata: { audience_changed: audienceChanged, from_status: current.status, kind: saved.kind, to_status: saved.status }
+      metadata: { audience_changed: audienceChanged, from_status: current.status, kind: saved.kind, sender_user_id: saved.sender_user_id, to_status: saved.status }
     });
     revalidateNotices(saved.id);
 
@@ -329,7 +412,7 @@ export async function previewNoticeAudience(input: { audience: AudienceDefinitio
   return runAdminAction("messaging.write", previewAudienceSchema, input, async ({ access, input: data }) => {
     const db = communicationsDb();
     const definition = normalizeAudience(data.audience);
-    const [loaded, names] = await Promise.all([loadAudienceFacts(db, new Date()), loadAudienceNames(db, [definition])]);
+    const [loaded, names] = await Promise.all([loadFactsFor(db, new Date(), definition), loadAudienceNames(db, [definition])]);
     const preview = previewAudience(definition, loaded);
 
     return {
@@ -338,6 +421,14 @@ export async function previewNoticeAudience(input: { audience: AudienceDefinitio
       sample: can(access, "students.read_basic") ? preview.sample : []
     };
   });
+}
+
+/**
+ * [messaging.write] A equipe de "Quem envia" de novo (nome e foto): o editor rele quando a janela volta
+ * ao foco depois de "Colocar a minha foto em Perfil", para a foto nova aparecer sem recarregar.
+ */
+export async function listNoticeSenders(): Promise<ActionResult<NoticeSenderOption[]>> {
+  return runAdminAction("messaging.write", z.undefined().or(z.object({})), undefined, async ({ user }) => loadNoticeSenders(communicationsDb(), user.id));
 }
 
 /**
@@ -360,8 +451,9 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
 
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
+    await assertSenderForPublish(db, row);
 
-    const loaded = await loadAudienceFacts(db, now);
+    const loaded = await loadFactsFor(db, now, audienceOfRow(row));
     const count = countAudience(row, loaded);
 
     if (!canPublishTo(access, count)) {
@@ -373,7 +465,14 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
         { expectedStatuses: ["draft"], expectedUpdatedAt: row.updated_at }
       );
 
-      await recordAudit(db, { action: "communication.approval_requested", actorId: user.id, count, entityId: row.id, entityType: "campaign", metadata: { kind: row.kind } });
+      await recordAudit(db, {
+        action: "communication.approval_requested",
+        actorId: user.id,
+        count,
+        entityId: row.id,
+        entityType: "campaign",
+        metadata: { kind: row.kind, sender_user_id: row.sender_user_id }
+      });
       revalidateNotices(row.id);
 
       return { audienceCount: count, id: row.id, recipients: null, situation: "pending_approval", updatedAt: pending.updated_at };
@@ -396,8 +495,9 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
       count,
       entityId: row.id,
       entityType: "campaign",
-      metadata: { kind: row.kind, recipients: published.recipients, situation: published.situation }
+      metadata: { kind: row.kind, recipients: published.recipients, sender_user_id: row.sender_user_id, situation: published.situation }
     });
+    await notifyNoticeSenders(db, row, published, user.id);
     revalidateNotices(row.id);
 
     return published;
@@ -420,8 +520,9 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
 
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
+    await assertSenderForPublish(db, row);
 
-    const loaded = await loadAudienceFacts(db, now);
+    const loaded = await loadFactsFor(db, now, audienceOfRow(row));
     const count = countAudience(row, loaded);
     const published = await goLive({
       actorId: user.id,
@@ -440,8 +541,15 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
       count,
       entityId: row.id,
       entityType: "campaign",
-      metadata: { kind: row.kind, recipients: published.recipients, requested_by: row.requested_by, situation: published.situation }
+      metadata: {
+        kind: row.kind,
+        recipients: published.recipients,
+        requested_by: row.requested_by,
+        sender_user_id: row.sender_user_id,
+        situation: published.situation
+      }
     });
+    await notifyNoticeSenders(db, row, published, user.id);
     revalidateNotices(row.id);
 
     return published;
@@ -520,7 +628,7 @@ async function changePopupStatus(input: {
   let loaded: LoadedAudience | undefined;
 
   if (input.to === "active") {
-    loaded = await loadAudienceFacts(db, now);
+    loaded = await loadFactsFor(db, now, audienceOfRow(row));
 
     if (!canPublishTo(input.access, resolveAudienceUserIds(audienceOfRow(row), loaded).length)) {
       throw new CommunicationError(RESUME_NEEDS_APPROVAL, 403);
@@ -604,7 +712,10 @@ export async function withdrawNotice(input: NoticeIdInput): Promise<ActionResult
  * Duplicar, excluir, teste e imagem
  * ---------------------------------------------------------------------------------------------- */
 
-/** [messaging.write] Novo rascunho com o mesmo conteudo e segmento (data que ja passou fica para "agora"). */
+/**
+ * [messaging.write] Novo rascunho com o mesmo conteudo e segmento (data que ja passou fica para "agora";
+ * "fica no sino ate uma data" que ja passou, ou a menos de 1 hora, volta para os 90 dias).
+ */
 export async function duplicateNotice(input: NoticeIdInput): Promise<ActionResult<{ id: string; updatedAt: string }>> {
   return runAdminAction("messaging.write", noticeIdSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
@@ -618,6 +729,10 @@ export async function duplicateNotice(input: NoticeIdInput): Promise<ActionResul
 
     if (draft.window.endsAt && Date.parse(draft.window.endsAt) <= now) {
       draft.window = { endsAt: null, startsAt: null };
+    }
+
+    if (draft.validity.mode === "until" && !(Date.parse(draft.validity.endsAt) > now + HOUR_MS)) {
+      draft.validity = { mode: "default" };
     }
 
     const created = await insertCampaign(db, { ...draftToColumns(draft), created_by: user.id, status: "draft", updated_by: user.id });
@@ -672,19 +787,38 @@ export async function sendNoticeTestToMe(input: NoticeIdInput): Promise<ActionRe
     }
 
     const dedupeKey = `campaign-test:${row.id}`;
-    const nowIso = new Date().toISOString();
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    // O teste fica pelo menos 1 hora no sino: o de um rascunho com "ate uma data" que ja passou tambem aparece.
+    const expiresAt = new Date(testSendExpiresAt({ validUntil: row.valid_until, validityMinutes: row.validity_minutes }, now)).toISOString();
     const existing = await db.from("notifications").select("id").eq("user_id", user.id).eq("dedupe_key", dedupeKey).maybeSingle();
 
     if (existing.error) {
       throw new Error(`Comunicacao: teste: ${existing.error.message}`);
     }
 
+    // Repetir traz de volta como nova: chega agora, com o fim recalculado e o audio sem nada ouvido.
     const result = existing.data
       ? await db
           .from("notifications")
-          .update({ clicked_at: null, created_at: nowIso, read_at: null, responded_at: null, response: null, seen_at: null })
+          .update({
+            audio_completed_at: null,
+            audio_heard: null,
+            audio_heard_percent: null,
+            audio_started_at: null,
+            clicked_at: null,
+            created_at: nowIso,
+            expires_at: expiresAt,
+            opened_at: null,
+            read_at: null,
+            responded_at: null,
+            response: null,
+            seen_at: null
+          })
           .eq("id", (existing.data as { id: string }).id)
-      : await db.from("notifications").insert({ campaign_id: row.id, dedupe_key: dedupeKey, is_test: true, kind: "notice", user_id: user.id });
+      : await db
+          .from("notifications")
+          .insert({ campaign_id: row.id, created_at: nowIso, dedupe_key: dedupeKey, expires_at: expiresAt, is_test: true, kind: "notice", user_id: user.id });
 
     if (result.error) {
       throw new Error(`Comunicacao: teste: ${result.error.message}`);

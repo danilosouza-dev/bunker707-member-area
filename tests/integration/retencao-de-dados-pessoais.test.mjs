@@ -4,7 +4,7 @@ import { after, before, test } from "node:test";
 import { createClient } from "@supabase/supabase-js";
 import { actAs } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient, readLocalSupabaseConfig, unwrap } from "../support/local-db.mjs";
-import { ESCOLA_DE_TESTE, SENHA_DE_TESTE, ligarProdutoNaHotmart, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { ESCOLA_DE_TESTE, SENHA_DE_TESTE, ligarProdutoNaHotmart, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
 // Retencao de dados pessoais por idade (docs/06, secao LGPD; migracao 202610170004) contra o banco LOCAL
 // de verdade: `public.prune_personal_data()` anonimiza vendas recebidas com mais de 12 meses e e-mails da
@@ -335,4 +335,77 @@ test("visitante e aluna não conseguem chamar a rotina; só o servidor", async (
   assert.ok(comoAluna.error, "authenticated nao executa a funcao");
   assert.match(comoAluna.error.message, /permission denied/i);
   await aluna.auth.signOut();
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Comunicacao v2 (docs/23 §5.5): prune_communication_history tambem poda tarefas, passagens e visitas
+ * ---------------------------------------------------------------------------------------------- */
+
+test("retencao da Comunicação: tarefas terminadas, passagens de fluxo encerrado e visitas com mais de 24 meses saem; o que um fluxo no ar usa fica", async () => {
+  const aluna = contas.aluna.id;
+  const antigo = haDias(30 * 31);
+  const recente = haDias(10);
+  const condicao = { kind: "rules", root: { items: [{ days: 7, op: "within", type: "last_study" }], match: "all" } };
+
+  await limparComunicacao(db);
+
+  try {
+    const [encerrado, noAr] = unwrap(
+      await db
+        .from("communication_flows")
+        .insert([
+          { created_by: produtor.id, ended_at: antigo, ended_reason: "team", name: "Fluxo encerrado de teste", status: "ended" },
+          { activated_at: antigo, created_by: produtor.id, name: "Fluxo no ar de teste", status: "active" }
+        ])
+        .select("id,name")
+        .order("name"),
+      "Gravando fluxos de teste"
+    );
+    const passo = async (flowId) => {
+      const entrada = unwrap(await db.from("communication_flow_nodes").insert({ flow_id: flowId, kind: "entry" }).select("id").single(), "Entrada");
+      return unwrap(
+        await db.from("communication_flow_nodes").insert({ condition: condicao, flow_id: flowId, kind: "condition", parent_id: entrada.id }).select("id").single(),
+        "Condicao"
+      ).id;
+    };
+    const passoEncerrado = await passo(encerrado.id);
+    const passoNoAr = await passo(noAr.id);
+    const tarefa = (flowId, nodeId, extra) => ({ anchor_at: antigo, due_at: antigo, flow_id: flowId, node_id: nodeId, user_id: aluna, ...extra });
+
+    unwrap(
+      await db.from("communication_flow_runs").insert([
+        { entered_at: antigo, finished_at: antigo, flow_id: encerrado.id, status: "ended", user_id: aluna },
+        { entered_at: antigo, flow_id: noAr.id, status: "active", user_id: aluna }
+      ]),
+      "Gravando passagens"
+    );
+    unwrap(
+      await db.from("communication_flow_tasks").insert([
+        tarefa(encerrado.id, passoEncerrado, { finished_at: antigo, result: "flow_ended", status: "canceled" }),
+        tarefa(noAr.id, passoNoAr, { status: "pending" })
+      ]),
+      "Gravando tarefas"
+    );
+    unwrap(
+      await db.from("member_page_visits").insert([
+        { first_visited_at: antigo, last_visited_at: antigo, page_key: "profile", user_id: aluna },
+        { first_visited_at: recente, last_visited_at: recente, page_key: "support", user_id: aluna }
+      ]),
+      "Gravando visitas"
+    );
+
+    const resultado = unwrap(await db.rpc("prune_communication_history"), "Rodando a retencao da Comunicacao");
+    assert.ok(resultado.flow_tasks >= 1 && resultado.flow_runs >= 1 && resultado.page_visits >= 1, JSON.stringify(resultado));
+
+    const tarefas = unwrap(await db.from("communication_flow_tasks").select("flow_id,status").eq("user_id", aluna).in("flow_id", [encerrado.id, noAr.id]), "Lendo tarefas");
+    assert.deepEqual(tarefas, [{ flow_id: noAr.id, status: "pending" }], "pendente nunca sai, por mais antiga que seja");
+
+    const passagens = unwrap(await db.from("communication_flow_runs").select("flow_id").eq("user_id", aluna).in("flow_id", [encerrado.id, noAr.id]), "Lendo passagens");
+    assert.deepEqual(passagens, [{ flow_id: noAr.id }], "no fluxo no ar a passagem garante 'uma vez por aluno'");
+
+    const visitas = unwrap(await db.from("member_page_visits").select("page_key").eq("user_id", aluna).order("page_key"), "Lendo visitas");
+    assert.deepEqual(visitas, [{ page_key: "support" }]);
+  } finally {
+    await limparComunicacao(db);
+  }
 });

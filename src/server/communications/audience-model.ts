@@ -10,7 +10,7 @@
 // apontando para um aviso enviado, e nos fluxos, apontando para um passo acima; "page_visit" e
 // "access_gained" valem so dentro de um fluxo (so ha visita gravada enquanto um fluxo no ar usa a pagina).
 
-import type { FixedPageKey } from "../member-area/page-visit-model";
+import { FIXED_PAGE_KEYS, FIXED_PAGE_LABELS, pageKeyOfTarget, type FixedPageKey } from "../member-area/page-visit-model";
 import { STUDENT_PACE_LABELS, STUDENT_PACES, type StudentListParams, type StudentPace } from "../students/model";
 
 export const AUDIENCE_RULE_TYPES = [
@@ -22,7 +22,10 @@ export const AUDIENCE_RULE_TYPES = [
   "last_study",
   "sign_in",
   "pace",
-  "cohort"
+  "cohort",
+  "message",
+  "page_visit",
+  "access_gained"
 ] as const;
 export type AudienceRuleType = (typeof AUDIENCE_RULE_TYPES)[number];
 
@@ -317,9 +320,164 @@ function evaluateRule(rule: AudienceRule, facts: AudienceStudentFacts, context: 
 
     case "cohort":
       return facts.cohortIds.some((id) => rule.cohortIds.includes(id));
+
+    case "message":
+      return evaluateMessageRule(rule, facts, context);
+
+    case "page_visit": {
+      const since = flowSinceAt(rule.since, facts);
+
+      if (since === null) {
+        return false;
+      }
+
+      const key = pageKeyOfRule(rule.page, context);
+      const visitedAt = key === null ? undefined : facts.flow?.pageVisits[key];
+      const visited = typeof visitedAt === "number" && visitedAt >= since;
+
+      return rule.negate ? !visited : visited;
+    }
+
+    case "access_gained": {
+      const since = flowSinceAt(rule.since, facts);
+
+      if (since === null) {
+        return false;
+      }
+
+      const gained = facts.accesses.some(
+        (access) =>
+          (access.productId === PLATFORM_ACCESS_ID || rule.productIds.includes(access.productId)) && (access.gainedAt ?? access.startsAt) >= since
+      );
+
+      return rule.negate ? !gained : gained;
+    }
   }
 
   return false;
+}
+
+/** O aluno fez isto com a notificacao? (a linha existe: "received" ja vale) */
+function messageDone(fact: MessageFact, action: MessageAction) {
+  switch (action) {
+    case "received":
+      return true;
+    case "seen":
+      return fact.seenAt !== null;
+    case "opened":
+      return fact.openedAt !== null;
+    case "audio_started":
+      return fact.audioStartedAt !== null;
+    case "audio_completed":
+      return fact.audioCompletedAt !== null;
+    case "clicked":
+      return fact.clickedAt !== null;
+    case "accepted":
+      return fact.response === "accepted";
+    case "declined":
+      return fact.response === "declined";
+    case "responded":
+      return fact.response !== null;
+    case "interacted":
+      return fact.openedAt !== null || fact.audioStartedAt !== null || fact.clickedAt !== null || fact.response !== null;
+  }
+
+  return false;
+}
+
+/**
+ * "O que fez com a notificacao": chave nao carregada -> nunca combina (negada ou nao); carregada sem
+ * linha deste aluno = nao recebeu. Negada, so vale para quem recebeu ("nao abriu" nunca inclui quem nem
+ * recebeu); "nao recebeu" e o unico caso sem a linha.
+ */
+function evaluateMessageRule(rule: Extract<AudienceRule, { type: "message" }>, facts: AudienceStudentFacts, context: AudienceContext) {
+  const key = messageRefKey(rule.ref);
+
+  if (!context.messageKeys?.has(key)) {
+    return false;
+  }
+
+  const fact = facts.messages?.[key];
+
+  if (rule.action === "received") {
+    return rule.negate ? !fact : Boolean(fact);
+  }
+
+  if (!fact) {
+    return false;
+  }
+
+  const done = messageDone(fact, rule.action);
+
+  return rule.negate ? !done : done;
+}
+
+/**
+ * Marco de "desde quando" das regras de fluxo, em ms: a entrada do aluno no fluxo ou quando a
+ * notificacao acima apareceu no sino. Fora de um fluxo (sem facts.flow), ou notificacao que o aluno nao
+ * recebeu -> null (a regra nao combina, negada ou nao).
+ */
+function flowSinceAt(since: FlowSince, facts: AudienceStudentFacts): number | null {
+  if (!facts.flow) {
+    return null;
+  }
+
+  if (since.kind === "entered") {
+    return facts.flow.enteredAt;
+  }
+
+  return facts.messages?.[messageRefKey({ kind: "node", nodeId: since.nodeId })]?.visibleAt ?? null;
+}
+
+/** Chave da pagina da regra; "pagina do botao" pelo passo (null = externo ou nao acompanhado: nunca visitou). */
+function pageKeyOfRule(page: PageTarget, context: AudienceContext): string | null {
+  if (page.kind === "message_cta") {
+    return context.flow?.ctaPageKeys[page.nodeId] ?? null;
+  }
+
+  return pageKeyOfTarget(page);
+}
+
+/**
+ * O que os fatos precisam ter para estas regras (o motor dos fluxos so le progresso, turmas e
+ * comentarios quando alguma regra pede): `students` = progresso, ultimo estudo, entrada, ritmo, turma
+ * ou comentarios; `comments` = "ranked" quando ha regra "top N" (o ranking e entre todos os alunos).
+ * Acessos e notificacoes vem sempre do lote.
+ */
+export function audienceFactNeeds(
+  definitions: AudienceDefinition | null | undefined | readonly (AudienceDefinition | null | undefined)[]
+): { comments: "counts" | "none" | "ranked"; students: boolean } {
+  let comments: "counts" | "none" | "ranked" = "none";
+  let students = false;
+  const visit = (node: AudienceNode) => {
+    if (isAudienceGroup(node)) {
+      node.items.forEach(visit);
+      return;
+    }
+
+    switch (node.type) {
+      case "comments":
+        students = true;
+        comments = node.op === "top" ? "ranked" : comments === "ranked" ? "ranked" : "counts";
+        return;
+      case "progress":
+      case "last_study":
+      case "sign_in":
+      case "pace":
+      case "cohort":
+        students = true;
+        return;
+    }
+  };
+  const list = Array.isArray(definitions) ? definitions : [definitions as AudienceDefinition | null | undefined];
+
+  for (const definition of list) {
+    if (definition && definition.kind === "rules" && definition.root) {
+      visit(definition.root);
+    }
+  }
+
+  return { comments, students };
 }
 
 function evaluateNode(node: AudienceNode, facts: AudienceStudentFacts, context: AudienceContext): boolean {
@@ -404,7 +562,71 @@ function uniqueSorted(values: readonly string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
 }
 
-function normalizeRule(rule: AudienceRule): AudienceRule {
+function normalizeMessageRef(ref: MessageRef): MessageRef | null {
+  if (ref?.kind === "node" && typeof ref.nodeId === "string") {
+    return { kind: "node", nodeId: ref.nodeId.trim() };
+  }
+
+  if (ref?.kind === "campaign" && typeof ref.campaignId === "string") {
+    return { campaignId: ref.campaignId.trim(), kind: "campaign" };
+  }
+
+  return null;
+}
+
+function normalizeSince(since: FlowSince): FlowSince | null {
+  if (since?.kind === "entered") {
+    return { kind: "entered" };
+  }
+
+  if (since?.kind === "message" && typeof since.nodeId === "string") {
+    return { kind: "message", nodeId: since.nodeId.trim() };
+  }
+
+  return null;
+}
+
+function normalizePage(page: PageTarget): PageTarget | null {
+  switch (page?.kind) {
+    case "content":
+    case "checkout":
+      return typeof page.productId === "string" ? { kind: page.kind, productId: page.productId.trim() } : null;
+    case "fixed":
+      return FIXED_PAGE_KEYS.includes(page.key) ? { key: page.key, kind: "fixed" } : null;
+    case "message_cta":
+      return typeof page.nodeId === "string" ? { kind: "message_cta", nodeId: page.nodeId.trim() } : null;
+  }
+
+  return null;
+}
+
+/** Regra das tres novas (v2) normalizada; acao, pagina ou marco desconhecido -> null (a regra sai). */
+function normalizeV2Rule(rule: Extract<AudienceRule, { type: "access_gained" | "message" | "page_visit" }>): AudienceRule | null {
+  const negate = rule.negate === true;
+
+  switch (rule.type) {
+    case "message": {
+      const ref = normalizeMessageRef(rule.ref);
+
+      return ref && MESSAGE_ACTIONS.includes(rule.action) ? { action: rule.action, negate, ref, type: "message" } : null;
+    }
+    case "page_visit": {
+      const page = normalizePage(rule.page);
+      const since = normalizeSince(rule.since);
+
+      return page && since ? { negate, page, since, type: "page_visit" } : null;
+    }
+    case "access_gained": {
+      const since = normalizeSince(rule.since);
+
+      return since ? { negate, productIds: uniqueSorted(rule.productIds ?? []), since, type: "access_gained" } : null;
+    }
+  }
+
+  return null;
+}
+
+function normalizeRule(rule: AudienceRule): AudienceRule | null {
   const days = (value: number) => clampInteger(value, 1, AUDIENCE_LIMITS.maxDays);
 
   switch (rule.type) {
@@ -431,6 +653,10 @@ function normalizeRule(rule: AudienceRule): AudienceRule {
       return { paces: STUDENT_PACES.filter((pace) => rule.paces.includes(pace)), type: "pace" };
     case "cohort":
       return { cohortIds: uniqueSorted(rule.cohortIds), type: "cohort" };
+    case "message":
+    case "page_visit":
+    case "access_gained":
+      return normalizeV2Rule(rule);
   }
 
   return rule;
@@ -447,14 +673,21 @@ function normalizeGroup(group: AudienceGroup): AudienceGroup {
         items.push(nested);
       }
     } else {
-      items.push(normalizeRule(item));
+      const rule = normalizeRule(item);
+
+      if (rule) {
+        items.push(rule);
+      }
     }
   }
 
   return { items, match: group.match };
 }
 
-/** Ids sem repeticao, numeros nos limites, grupos vazios fora. Segmento sem regra vira "todos os alunos". */
+/**
+ * Ids sem repeticao, numeros nos limites, grupos vazios fora, "negate" como booleano e regra com acao
+ * (ou pagina, ou marco) desconhecida fora. Segmento sem regra vira "todos os alunos".
+ */
 export function normalizeAudience(definition: AudienceDefinition): AudienceDefinition {
   if (definition.kind === "everyone") {
     return EVERYONE;
@@ -570,9 +803,88 @@ export function describeAudienceRule(rule: AudienceRule, names: AudienceNames): 
         ? `estão na turma ${cohorts[0]}`
         : `estão nas turmas ${joinWithOr(cohorts, (count) => `mais ${count} ${count === 1 ? "turma" : "turmas"}`)}`;
     }
+    case "message":
+      return `${rule.negate ? "não " : ""}${MESSAGE_ACTION_SENTENCES[rule.action]?.(noticePhrase(names, rule.ref)) ?? ""}`.trimEnd();
+    case "page_visit": {
+      const no = rule.negate ? "não " : "";
+      const since = sincePhrase(names, rule.since);
+
+      if (rule.page.kind === "checkout") {
+        return `${no}clicaram em Comprar de ${productName(names, rule.page.productId)} ${since}`;
+      }
+
+      return `${no}visitaram ${pagePhrase(names, rule.page)} ${since}`;
+    }
+    case "access_gained": {
+      const list = joinWithOr(
+        rule.productIds.map((id) => productName(names, id)),
+        (count) => `mais ${count} ${count === 1 ? "produto" : "produtos"}`
+      );
+
+      return `${rule.negate ? "não " : ""}ganharam acesso a ${list || MISSING_PRODUCT} ${sincePhrase(names, rule.since)}`;
+    }
   }
 
   return "";
+}
+
+const MISSING_MESSAGE = "uma notificação removida";
+
+/** "a notificação “X”" / "da notificação “X”" (titulo que nao veio: "uma notificação removida"). */
+type NoticePhrase = { of: string; the: string; with: string };
+
+function noticePhrase(names: AudienceNames, ref: MessageRef): NoticePhrase {
+  const title = names.messages?.[messageRefKey(ref)]?.trim();
+
+  return title
+    ? { of: `da notificação “${title}”`, the: `a notificação “${title}”`, with: `com a notificação “${title}”` }
+    : { of: `de ${MISSING_MESSAGE}`, the: MISSING_MESSAGE, with: `com ${MISSING_MESSAGE}` };
+}
+
+/** Frase de cada acao, no plural depois de "Alunos que" (a negacao poe "não " na frente). */
+const MESSAGE_ACTION_SENTENCES: Record<MessageAction, (notice: NoticePhrase) => string> = {
+  accepted: (notice) => `aceitaram ${notice.the}`,
+  audio_completed: (notice) => `ouviram até o fim o áudio ${notice.of}`,
+  audio_started: (notice) => `começaram a ouvir o áudio ${notice.of}`,
+  clicked: (notice) => `clicaram no botão ${notice.of}`,
+  declined: (notice) => `recusaram ${notice.the}`,
+  interacted: (notice) => `interagiram ${notice.with}`,
+  opened: (notice) => `abriram ${notice.the}`,
+  received: (notice) => `receberam ${notice.the}`,
+  responded: (notice) => `responderam ${notice.the}`,
+  seen: (notice) => `viram ${notice.the} no sino`
+};
+
+/** Pagina fixa com o artigo da frase ("visitaram o Início", "visitaram Minhas compras"). */
+const FIXED_PAGE_PHRASES: Record<FixedPageKey, string> = {
+  continue: FIXED_PAGE_LABELS.continue,
+  home: `o ${FIXED_PAGE_LABELS.home}`,
+  journey: FIXED_PAGE_LABELS.journey,
+  materials: FIXED_PAGE_LABELS.materials,
+  profile: `o ${FIXED_PAGE_LABELS.profile}`,
+  purchases: FIXED_PAGE_LABELS.purchases,
+  saved: FIXED_PAGE_LABELS.saved,
+  support: `o ${FIXED_PAGE_LABELS.support}`
+};
+
+function pagePhrase(names: AudienceNames, page: PageTarget) {
+  switch (page.kind) {
+    case "content":
+    case "checkout":
+      return `a página de ${productName(names, page.productId)}`;
+    case "fixed":
+      return FIXED_PAGE_PHRASES[page.key] ?? "uma página";
+    case "message_cta":
+      return `a página do botão ${noticePhrase(names, { kind: "node", nodeId: page.nodeId }).of}`;
+  }
+
+  return "uma página";
+}
+
+function sincePhrase(names: AudienceNames, since: FlowSince) {
+  return since.kind === "entered"
+    ? "desde que entraram no fluxo"
+    : `depois de receber ${noticePhrase(names, { kind: "node", nodeId: since.nodeId }).the}`;
 }
 
 function describeNode(node: AudienceNode, names: AudienceNames, nested: boolean): string {

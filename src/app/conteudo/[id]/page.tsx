@@ -22,6 +22,8 @@ import {
   getContentPageData
 } from "@/server/db/platform-store";
 import { requireStudentPageUser } from "@/server/auth/guards";
+import { contentPageKey } from "@/server/member-area/page-visit-model";
+import { trackMemberPageVisit } from "@/server/member-area/page-visits";
 import type {
   ContentItem,
   ContentPageHeroConfig,
@@ -186,6 +188,8 @@ export default async function ContentPage({ params, searchParams }: ContentPageP
   const coursePresentationMode = getCoursePresentationMode(settings);
   const isCourseLike = supportsCoursePresentationMode(item);
   const firstModule = courseModules[0];
+  // Antes do redirect para a primeira aula: a aluna chegou a pagina do produto (docs/23 §5.2).
+  await trackMemberPageVisit({ accessPreviewMode, pageKey: contentPageKey(item.id), userId: user.id });
 
   if (isCourseLike && !item.isLocked && coursePresentationMode === "lesson_playlist" && firstModule) {
     redirect(withAccessPreviewParam(`/conteudo/${item.id}/aulas/${firstModule.id}`, accessPreviewMode));

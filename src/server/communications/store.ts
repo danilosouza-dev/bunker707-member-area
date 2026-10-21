@@ -585,6 +585,33 @@ export async function fetchCampaignStats(db: CommunicationsDb, ids: readonly str
   return stats;
 }
 
+/** Abriram, comecaram o audio e ouviram ate o fim (v2): so as linhas dos alunos, nunca o teste da equipe. */
+export type CampaignEngagement = { audioCompleted: number; audioStarted: number; opened: number };
+
+export const EMPTY_CAMPAIGN_ENGAGEMENT: CampaignEngagement = { audioCompleted: 0, audioStarted: 0, opened: 0 };
+
+/** RPC communication_campaign_engagement (migracao 202610200002); communication_campaign_stats fica igual. */
+export async function fetchCampaignEngagement(db: CommunicationsDb, ids: readonly string[]): Promise<Map<string, CampaignEngagement>> {
+  const engagement = new Map<string, CampaignEngagement>();
+
+  if (ids.length === 0) {
+    return engagement;
+  }
+
+  const { data, error } = await db.rpc("communication_campaign_engagement", { p_campaign_ids: [...ids] });
+  assertNoDbError(error, "Comunicacao: aberturas e audio dos avisos");
+
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    engagement.set(String(row.campaign_id), {
+      audioCompleted: toNumber(row.audio_completed),
+      audioStarted: toNumber(row.audio_started),
+      opened: toNumber(row.opened)
+    });
+  }
+
+  return engagement;
+}
+
 export type CommunicationOverviewRow = { activeNow: number; clicked: number; seen: number; studied7d: number };
 
 export async function fetchOverview(db: CommunicationsDb, start: Date, end: Date): Promise<CommunicationOverviewRow> {

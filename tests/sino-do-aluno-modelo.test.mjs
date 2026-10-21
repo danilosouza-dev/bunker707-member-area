@@ -158,3 +158,221 @@ test("titulo de comentario separa o nome (negrito) do resto; texto longo comeca 
   assert.equal(model.shouldClampNotificationBody("a".repeat(181)), true);
   assert.equal(model.POPUP_SESSION_KEY, "bunker707:popup-shown");
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * v2 (docs/23): audio ouvido, "abriu", quem envia com o "Termina em" e o rodape
+ * ---------------------------------------------------------------------------------------------- */
+
+const zeros = "0".repeat(48);
+const uns = "1".repeat(48);
+const trechos = (quantos) => "1".repeat(quantos) + "0".repeat(48 - quantos);
+
+test("ouvido sai do que tocou de verdade: pular deixa os trechos pulados em 0, meio trecho conta, 2x conta", () => {
+  // Audio de 48 s: cada trecho tem 1 s.
+  assert.equal(model.heardSlotsFromRanges([], 48), zeros);
+  assert.equal(model.heardSlotsFromRanges([{ end: 48, start: 0 }], 48), uns);
+
+  // Ouviu os 3 primeiros segundos e pulou para o fim (ouviu 46..48): o meio nunca tocou.
+  const pulou = model.heardSlotsFromRanges(
+    [
+      { end: 3, start: 0 },
+      { end: 48, start: 46 }
+    ],
+    48
+  );
+  assert.equal(pulou, "111" + "0".repeat(43) + "11");
+  assert.equal(model.countHeard(pulou), 5);
+
+  // Meio trecho conta (0,5 s de 1 s); menos que isso nao.
+  assert.equal(model.heardSlotsFromRanges([{ end: 1.5, start: 0 }], 48).slice(0, 3), "110");
+  assert.equal(model.heardSlotsFromRanges([{ end: 1.49, start: 0 }], 48).slice(0, 3), "100");
+  // Dois pedacos de 0,25 s no mesmo trecho somam meio trecho.
+  assert.equal(
+    model.heardSlotsFromRanges(
+      [
+        { end: 0.25, start: 0 },
+        { end: 1, start: 0.75 }
+      ],
+      48
+    )[0],
+    "1"
+  );
+
+  // Em 2x o audio inteiro toca em metade do tempo de relogio: o que conta e o trecho tocado.
+  assert.equal(model.heardSlotsFromRanges([{ end: 120, start: 0 }], 120), uns);
+  // Pedacos sobrepostos, fora do audio ou invalidos nao quebram nem contam a mais.
+  assert.equal(
+    model.heardSlotsFromRanges(
+      [
+        { end: 30, start: 0 },
+        { end: 24, start: 10 },
+        { end: 99, start: 47.5 },
+        { end: Number.NaN, start: 2 },
+        { end: 5, start: 9 }
+      ],
+      48
+    ),
+    "1".repeat(30) + "0".repeat(17) + "1"
+  );
+  // Sem duracao (webm sem metadados e sem a medida gravada): nada ouvido.
+  assert.equal(model.heardSlotsFromRanges([{ end: 10, start: 0 }], 0), zeros);
+  assert.equal(model.heardSlotsFromRanges([{ end: 10, start: 0 }], Number.POSITIVE_INFINITY), zeros);
+  assert.equal(model.heardSlotsFromRanges([{ end: 12, start: 0 }], 12, 12), "1".repeat(12));
+});
+
+test("ouvido soma por OU (so cresce) e conta os trechos; mascara fora do formato vira nada ouvido", () => {
+  assert.equal(model.EMPTY_HEARD, zeros);
+  assert.equal(model.orHeard(trechos(10), "0".repeat(40) + "1".repeat(8)), "1".repeat(10) + "0".repeat(30) + "1".repeat(8));
+  assert.equal(model.orHeard(uns, zeros), uns);
+  assert.equal(model.orHeard("abc", null), zeros);
+  assert.equal(model.orHeard("1".repeat(47), trechos(2)), trechos(2), "47 trechos nao e mascara");
+  assert.equal(model.countHeard(trechos(44)), 44);
+  assert.equal(model.countHeard(undefined), 0);
+  assert.equal(model.heardPercent(trechos(44)), 91);
+  assert.equal(model.heardPercent(trechos(1)), 2);
+  assert.equal(model.heardPercent(uns), 100);
+  assert.equal(model.normalizeHeard(trechos(3)), trechos(3));
+  assert.equal(model.normalizeHeard("2".repeat(48)), zeros);
+});
+
+test("barras ouvidas da onda: cada barra cobre seus trechos e conta pela maioria, de 12 a 48 barras", () => {
+  const metade = trechos(24);
+
+  for (const barras of [12, 13, 25, 36, 47, 48]) {
+    const ouvidas = model.heardBars(metade, barras);
+    assert.equal(ouvidas.length, barras);
+    // Primeira metade ouvida, segunda nao (a barra do meio pode cair de qualquer lado).
+    assert.equal(ouvidas[0], true, `${barras} barras`);
+    assert.equal(ouvidas[barras - 1], false, `${barras} barras`);
+    assert.ok(Math.abs(ouvidas.filter(Boolean).length - barras / 2) <= 1, `${barras} barras`);
+  }
+
+  assert.deepEqual(model.heardBars(uns, 12), Array.from({ length: 12 }, () => true));
+  assert.deepEqual(model.heardBars(zeros, 12), Array.from({ length: 12 }, () => false));
+  // 12 barras: cada uma cobre 4 trechos; 2 de 4 nao e a maioria, 3 de 4 e.
+  assert.equal(model.heardBars("1100" + "0".repeat(44), 12)[0], false);
+  assert.equal(model.heardBars("1110" + "0".repeat(44), 12)[0], true);
+  // 48 barras: uma por trecho.
+  assert.deepEqual(model.heardBars("10" + "0".repeat(46), 48).slice(0, 3), [true, false, false]);
+  // Fora da faixa: no maximo 48 barras.
+  assert.equal(model.heardBars(uns, 200).length, 48);
+});
+
+test("estado do audio: nunca tocado, ouvido em parte e ouvido a partir de 44 de 48 trechos", () => {
+  assert.equal(model.listenState(zeros, false), "never");
+  assert.equal(model.listenState(zeros, true), "partial", "comecou nesta visita: nao e mais 'nunca'");
+  assert.equal(model.listenState(trechos(1), false), "partial");
+  assert.equal(model.listenState(trechos(43), false), "partial");
+  assert.equal(model.listenState(trechos(44), false), "completed");
+  assert.equal(model.listenState(uns, true), "completed");
+
+  assert.equal(model.audioGroupLabel("Áudio do aviso", { percent: 0, playing: false, state: "never" }), "Áudio do aviso, ainda não ouvido");
+  assert.equal(model.audioGroupLabel("Áudio do aviso", { percent: 37, playing: false, state: "partial" }), "Áudio do aviso, ouvido até 37%");
+  assert.equal(model.audioGroupLabel("Áudio do aviso", { percent: 100, playing: false, state: "completed" }), "Áudio do aviso, ouvido");
+  assert.equal(model.audioGroupLabel("Áudio do aviso", { percent: 37, playing: true, state: "partial" }), "Áudio do aviso", "tocando, a barra de posicao ja anuncia onde esta");
+
+  const audio = { durationSeconds: 30, mimeType: "audio/mpeg", peaks: [], url: "https://midia.test/a.mp3" };
+  assert.equal(model.audioListenOf({ audio: null, audioProgress: null }), null, "sem audio, o player nao guarda nada");
+  assert.deepEqual(model.audioListenOf({ audio, audioProgress: null }), { completed: false, heard: zeros });
+  assert.deepEqual(model.audioListenOf({ audio, audioProgress: { completed: true, heard: uns, percent: 100 } }), { completed: true, heard: uns });
+
+  assert.equal(model.needsAudioStart({ audioProgress: null }), true);
+  assert.equal(model.needsAudioStart({ audioProgress: { completed: false, heard: zeros, percent: 0 } }), true);
+  assert.equal(model.needsAudioStart({ audioProgress: { completed: false, heard: trechos(3), percent: 6 } }), false, "o servidor ja gravou o comeco");
+});
+
+test("quando mandar o ouvido: tocando so com 5 trechos a mais e 15 s, ou ao chegar em 44; pausa e fim por fetch; saindo por beacon", () => {
+  const tocando = (heard, known, ms) => model.shouldFlushAudio({ heard, known, msSinceLastSend: ms, reason: "timeupdate" });
+
+  assert.equal(model.AUDIO_FLUSH_MIN_SLOTS, 5);
+  assert.equal(model.AUDIO_FLUSH_MIN_MS, 15_000);
+  assert.equal(tocando(10, 5, 15_000), "fetch");
+  assert.equal(tocando(9, 5, 60_000), null, "4 trechos a mais ainda nao");
+  assert.equal(tocando(20, 5, 14_999), null, "antes de 15 s nao");
+  assert.equal(tocando(44, 43, 1_000), "fetch", "chegou a 44: confirma o verde na hora");
+  assert.equal(tocando(46, 44, 1_000), null, "ja ouvido: so com 5 a mais e 15 s");
+  assert.equal(tocando(5, 5, 60_000), null, "nao cresceu");
+
+  for (const reason of ["pause", "ended"]) {
+    assert.equal(model.shouldFlushAudio({ heard: 6, known: 5, msSinceLastSend: 0, reason }), "fetch", reason);
+    assert.equal(model.shouldFlushAudio({ heard: 5, known: 5, msSinceLastSend: 99_000, reason }), null, `${reason} sem crescer`);
+  }
+
+  for (const reason of ["hidden", "pagehide", "unmount"]) {
+    assert.equal(model.shouldFlushAudio({ heard: 6, known: 5, msSinceLastSend: 0, reason }), "beacon", reason);
+    assert.equal(model.shouldFlushAudio({ heard: 5, known: 5, msSinceLastSend: 0, reason }), null, `${reason} sem crescer`);
+  }
+});
+
+test("abrir marca lida e aberta, tambem um cartao ja lido pelo Marcar todas; Marcar todas nao abre", () => {
+  const at = "2026-10-20T15:00:00.000Z";
+  const antes = "2026-10-20T14:00:00.000Z";
+  const items = [
+    { id: "nova", openedAt: null, readAt: null },
+    { id: "lida", openedAt: null, readAt: antes },
+    { id: "aberta", openedAt: antes, readAt: antes }
+  ];
+
+  assert.deepEqual(model.markNotificationsOpened(items, ["nova", "lida", "aberta"], at), [
+    { id: "nova", openedAt: at, readAt: at },
+    { id: "lida", openedAt: at, readAt: antes },
+    { id: "aberta", openedAt: antes, readAt: antes }
+  ]);
+  assert.deepEqual(model.markNotificationsOpened(items, ["outra"], at), items);
+  assert.equal(model.markNotificationsRead(items, "all", at)[0].openedAt, null, "Marcar todas so le");
+});
+
+test("linha de quem envia: a pessoa ou a escola, e Termina em pela hora do servidor da lista", () => {
+  const serverNow = Date.parse("2026-10-20T15:00:00.000Z");
+  const aviso = {
+    actor: null,
+    createdAt: "2026-10-20T13:00:00.000Z",
+    expiresAt: "2026-10-21T13:00:00.000Z",
+    kind: "notice",
+    response: null
+  };
+
+  assert.deepEqual(model.noticeMeta(aviso, { schoolName: "Bunker707", serverNow }), { hint: "Termina em 22 h", sender: "Bunker707" });
+  assert.deepEqual(
+    model.noticeMeta({ ...aviso, actor: { avatarUrl: null, name: "  Prof. Carlos Lima " } }, { schoolName: "Bunker707", serverNow }).sender,
+    "Prof. Carlos Lima"
+  );
+  // 90 dias (o padrao): nunca mostra, nem no ultimo dia.
+  assert.equal(
+    model.noticeMeta(
+      { ...aviso, createdAt: "2026-07-23T16:00:00.000Z", expiresAt: "2026-10-21T13:00:00.000Z" },
+      { schoolName: "Bunker707", serverNow }
+    ).hint,
+    null
+  );
+  // Respondida: nunca; comentario: nunca.
+  assert.equal(model.noticeMeta({ ...aviso, response: { value: "accepted" } }, { schoolName: "Bunker707", serverNow }).hint, null);
+  assert.equal(model.noticeMeta({ ...aviso, kind: "comment_reply" }, { schoolName: "Bunker707", serverNow }).hint, null);
+  // Faltando 40 min.
+  assert.equal(
+    model.noticeMeta({ ...aviso, expiresAt: "2026-10-20T15:40:00.000Z" }, { schoolName: "Bunker707", serverNow }).hint,
+    "Termina em 40 min"
+  );
+});
+
+test("rodape da lista e a frase da notificacao que saiu do sino", () => {
+  assert.equal(model.NOTIFICATIONS_FOOTER, "As notificações ficam aqui por até 90 dias.");
+  assert.equal(model.NOTIFICATION_GONE_MESSAGE, "Esta notificação não está mais disponível.");
+});
+
+test("avisos mostrados ha menos de 15 s vao em shown (ate 50); comentarios e os mais antigos nao", () => {
+  const asOf = "2026-10-20T15:00:00.000Z";
+  const items = [
+    { createdAt: "2026-10-20T14:59:50.000Z", id: "recente", kind: "notice" },
+    { createdAt: "2026-10-20T14:59:45.000Z", id: "na-borda", kind: "notice" },
+    { createdAt: "2026-10-20T14:59:44.000Z", id: "antiga", kind: "notice" },
+    { createdAt: "2026-10-20T14:59:59.000Z", id: "comentario", kind: "comment_reply" }
+  ];
+
+  assert.deepEqual(model.recentFlowIds(items, asOf), ["recente"]);
+  assert.deepEqual(model.recentFlowIds(items, ""), []);
+  assert.equal(model.MAX_SHOWN_IDS, 50);
+
+  const muitas = Array.from({ length: 70 }, (_, index) => ({ createdAt: asOf, id: `n${index}`, kind: "notice" }));
+  assert.equal(model.recentFlowIds(muitas, asOf).length, 50);
+});

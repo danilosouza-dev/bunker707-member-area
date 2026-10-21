@@ -12,6 +12,7 @@ import { CATALOG_TAG, MEMBER_CATALOG_CACHE_KEY, MEMBER_CATALOG_REVALIDATE_SECOND
 import { getAdminAccessForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { persistImageAsset } from "@/server/db/media-assets";
+import { isDefaultSchoolIcon } from "@/server/communications/message-meta";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import type { MemberReleaseState } from "@/lib/release-state";
@@ -351,6 +352,10 @@ export type PlatformAppearanceInput = {
   logo?: {
     image: string | null;
   };
+  /** Icone da escola (Marca > Icone da escola): null = de volta ao simbolo padrao (a chave sai de branding). */
+  schoolIcon?: {
+    image: string | null;
+  };
   /** Estilo da area do aluno (Marca > Estilo); sempre completo. */
   style?: MemberStyleConfig;
 };
@@ -379,14 +384,25 @@ function normalizePlatformBranding(value: unknown): PlatformBrandingConfig {
 
   const branding = value as Partial<PlatformBrandingConfig>;
   const style = normalizeMemberStyle(value);
+  // Icone da escola: so fica na chave quando ha um; ausente = o simbolo padrao (normalizeSchoolIcon).
+  const schoolIcon = typeof branding.schoolIcon === "string" ? branding.schoolIcon.trim() : "";
+  const icon = schoolIcon ? { schoolIcon } : {};
 
   if (branding.logoImage === null) {
-    return { logoImage: null, style };
+    return { logoImage: null, ...icon, style };
   }
 
   const logoImage = typeof branding.logoImage === "string" ? branding.logoImage.trim() : "";
-  return { logoImage: logoImage || defaultLogoImage, style };
+  return { logoImage: logoImage || defaultLogoImage, ...icon, style };
 }
+
+/** Marca sem o icone da escola: o circulo das notificacoes volta ao simbolo padrao. */
+function withoutSchoolIcon(branding: PlatformBrandingConfig): PlatformBrandingConfig {
+  const next = { ...branding };
+  delete next.schoolIcon;
+  return next;
+}
+
 const defaultStudent: PlatformStudent = {
   fullName: "Aluno Bunker707",
   name: "Aluno"
@@ -2780,12 +2796,16 @@ function applyAppearanceToHero(stored: unknown, input: { enabled: boolean; image
 }
 
 export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
-  if (input.hero === undefined && input.logo === undefined && input.style === undefined) {
+  if (input.hero === undefined && input.logo === undefined && input.schoolIcon === undefined && input.style === undefined) {
     throw createAdminMutationError("Nenhuma alteracao de aparencia informada.", 400);
   }
 
   if (input.logo !== undefined && input.logo.image !== null && !input.logo.image.trim()) {
     throw createAdminMutationError("Envie uma imagem ou informe uma URL para a logo.", 400);
+  }
+
+  if (input.schoolIcon !== undefined && input.schoolIcon.image !== null && !input.schoolIcon.image.trim()) {
+    throw createAdminMutationError("Envie uma imagem ou informe uma URL para o ícone da escola.", 400);
   }
 
   const database = await readAdminDatabase();
@@ -2807,11 +2827,12 @@ export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
   }
 
   if (input.logo !== undefined) {
-    // Trocar a logo nunca apaga o estilo (cantos, botoes, menu) gravado na mesma chave.
+    // Trocar a logo nunca apaga o estilo (cantos, botoes, menu) nem o icone da escola gravados na mesma
+    // chave: parte sempre da marca gravada.
     const style = normalizeMemberStyle(database.branding);
 
     if (input.logo.image === null) {
-      database.branding = { logoImage: null, style };
+      database.branding = { ...database.branding, logoImage: null, style };
     } else {
       const providedLogo = input.logo.image.trim();
 
@@ -2820,12 +2841,31 @@ export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
       }
 
       database.branding = {
+        ...database.branding,
         logoImage: await persistAppearanceImage(providedLogo, "platform/logo", "A logo da plataforma"),
         style
       };
     }
 
     settingsKeys.push("branding");
+  }
+
+  if (input.schoolIcon !== undefined) {
+    // O circulo das notificacoes da escola. null (ou o proprio simbolo padrao) tira a chave: ausente = padrao.
+    const providedIcon = input.schoolIcon.image?.trim() ?? null;
+
+    if (providedIcon === null || isDefaultSchoolIcon(providedIcon)) {
+      database.branding = withoutSchoolIcon(database.branding);
+    } else {
+      database.branding = {
+        ...database.branding,
+        schoolIcon: await persistAppearanceImage(providedIcon, "platform/school-icon", "O ícone da escola")
+      };
+    }
+
+    if (!settingsKeys.includes("branding")) {
+      settingsKeys.push("branding");
+    }
   }
 
   if (input.style !== undefined) {

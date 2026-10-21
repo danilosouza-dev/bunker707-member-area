@@ -6,15 +6,20 @@ import "server-only";
 // requirePageArea("comunicacao"); banco sem a migracao 202610200001 -> PendingMigrationError (a pagina
 // mostra o aviso da migracao).
 
+import { shouldClampNotificationBody } from "@/components/member/notifications/notifications-model";
+import { ADMIN_ROLE_LABELS, can, type AdminRole } from "@/server/auth/roles";
+import { getAdminAccessForUser, getAuthenticatedUser } from "@/server/auth/session";
 import { listProductOptions } from "@/server/catalog/queries";
 import type { ProductOption } from "@/server/catalog/types";
-import { readPlatformSettings } from "@/server/member-area/settings-store";
+import { readPlatformSettings, type PlatformSettingSnapshot } from "@/server/member-area/settings-store";
+import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { normalizeLogo } from "@/server/storefront/model";
 import { STUDENT_SEGMENT_PRESETS } from "@/server/students/model";
 import { listSavedSegments } from "@/server/students/queries";
 import {
   describeAudience,
   isAudienceGroup,
+  messageRefKey,
   studentListParamsToAudience,
   type AudienceDefinition,
   type AudienceNames,
@@ -35,15 +40,19 @@ import {
   type SituationTone
 } from "./campaign-model";
 import { assertNoDbError, chunksOf, communicationsDb, type CommunicationsDb } from "./db";
+import { normalizeSchoolIcon, SCHOOL_NAME_FALLBACK_TEAM } from "./message-meta";
 import type { NoticeDraft } from "./schemas";
 import {
   audienceOfRow,
+  EMPTY_CAMPAIGN_ENGAGEMENT,
   EMPTY_CAMPAIGN_STATS,
   fetchCampaign,
+  fetchCampaignEngagement,
   fetchCampaignStats,
   fetchOverview,
   listCampaignRows,
   rowToDraft,
+  type CampaignEngagement,
   type CampaignRow,
   type CampaignStats
 } from "./store";
@@ -86,11 +95,21 @@ export type NoticeDetail = NoticeListItem & {
   approvedBy: NoticePerson | null;
   audienceCountedAt: string | null;
   draft: NoticeDraft;
+  /** Abriram, comecaram o audio e ouviram ate o fim (v2), sem os testes da equipe. */
+  engagement: CampaignEngagement;
+  /** Conteudo de um passo de fluxo: /avisos/[id] leva para o fluxo (null = aviso comum). */
+  flowId: string | null;
+  flowNodeId: string | null;
   lastError: string | null;
   recipientsCount: number | null;
   requestedAt: string | null;
   requestedBy: NoticePerson | null;
   sendAt: string | null;
+  /**
+   * Quem envia gravado (pessoa da equipe, com o nome e a foto que o aluno ve); null = a escola. `onTeam`
+   * false: saiu da equipe e a notificacao aparece como a escola.
+   */
+  sender: (NoticePerson & { avatarUrl: string | null; onTeam: boolean }) | null;
   sentAt: string | null;
 };
 
@@ -107,25 +126,54 @@ export type CommunicationOverview = {
  * Nomes (produtos, turmas, pessoas)
  * ---------------------------------------------------------------------------------------------- */
 
-function collectIds(definition: AudienceDefinition, products: Set<string>, cohorts: Set<string>) {
+/**
+ * Ids citados no segmento: produtos (tambem os da pagina visitada e do acesso ganho, v2), turmas e avisos
+ * das regras "o que fez com a notificacao X" (os passos de um fluxo tem o titulo no proprio fluxo).
+ */
+function collectIds(definition: AudienceDefinition, products: Set<string>, cohorts: Set<string>, campaigns: Set<string>) {
   const visit = (node: AudienceNode) => {
     if (isAudienceGroup(node)) {
       node.items.forEach(visit);
       return;
     }
 
-    if (node.type === "product") {
+    if (node.type === "product" || node.type === "access_gained") {
       node.productIds.forEach((id) => products.add(id));
     } else if (node.type === "cohort") {
       node.cohortIds.forEach((id) => cohorts.add(id));
     } else if ((node.type === "progress" || node.type === "access_age" || node.type === "access_ending") && node.productId) {
       products.add(node.productId);
+    } else if (node.type === "page_visit" && (node.page.kind === "content" || node.page.kind === "checkout") && node.page.productId) {
+      products.add(node.page.productId);
+    } else if (node.type === "message" && node.ref.kind === "campaign" && node.ref.campaignId) {
+      campaigns.add(node.ref.campaignId);
     }
   };
 
   if (definition.kind === "rules") {
     visit(definition.root);
   }
+}
+
+/** Titulo de cada aviso citado, pela chave da regra ("campaign:<id>"); aviso excluido fica sem titulo. */
+async function selectNoticeTitles(db: CommunicationsDb, ids: readonly string[]) {
+  const titles: Record<string, string> = {};
+  const valid = Array.from(new Set(ids)).filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
+
+  for (const part of chunksOf(valid, 150)) {
+    const { data, error } = await db.from("campaigns").select("id,title").in("id", part).is("deleted_at", null);
+    assertNoDbError(error, "Comunicacao: nomes (avisos)");
+
+    for (const row of (data ?? []) as { id: string; title: string | null }[]) {
+      const title = row.title?.trim();
+
+      if (title) {
+        titles[messageRefKey({ campaignId: row.id, kind: "campaign" })] = title;
+      }
+    }
+  }
+
+  return titles;
 }
 
 async function selectNames(db: CommunicationsDb, table: "cohorts" | "content_items", column: "name" | "title", ids: readonly string[]) {
@@ -147,18 +195,79 @@ async function selectNames(db: CommunicationsDb, table: "cohorts" | "content_ite
   return names;
 }
 
-/** Nomes dos produtos e turmas citados nos segmentos (produto removido cai no texto padrao da frase). */
+/**
+ * Nomes dos produtos, turmas e avisos citados nos segmentos (produto ou aviso removido cai no texto
+ * padrao da frase). `messages` so vem quando alguma regra cita um aviso.
+ */
 export async function loadAudienceNames(db: CommunicationsDb, definitions: readonly AudienceDefinition[]): Promise<AudienceNames> {
   const products = new Set<string>();
   const cohorts = new Set<string>();
-  definitions.forEach((definition) => collectIds(definition, products, cohorts));
+  const campaigns = new Set<string>();
+  definitions.forEach((definition) => collectIds(definition, products, cohorts, campaigns));
 
-  const [productNames, cohortNames] = await Promise.all([
+  const [productNames, cohortNames, messageTitles] = await Promise.all([
     selectNames(db, "content_items", "title", Array.from(products)),
-    selectNames(db, "cohorts", "name", Array.from(cohorts).filter((id) => /^[0-9a-f-]{36}$/i.test(id)))
+    selectNames(db, "cohorts", "name", Array.from(cohorts).filter((id) => /^[0-9a-f-]{36}$/i.test(id))),
+    campaigns.size > 0 ? selectNoticeTitles(db, Array.from(campaigns)) : Promise.resolve(null)
   ]);
 
-  return { cohorts: cohortNames, products: productNames };
+  return messageTitles ? { cohorts: cohortNames, messages: messageTitles, products: productNames } : { cohorts: cohortNames, products: productNames };
+}
+
+/** Aviso enviado que o segmento pode citar em "O que fez com uma notificação" (o seletor do construtor). */
+export type AudienceNoticeOption = {
+  /** Ha o que abrir ("Ver mais", audio, botao ou resposta); sem isso, nada de "abriu" na regra. */
+  canOpen: boolean;
+  hasAudio: boolean;
+  hasCta: boolean;
+  hasResponse: boolean;
+  id: string;
+  sentAt: string;
+  title: string;
+};
+
+/** Quantos avisos o seletor mostra (os mais recentes primeiro). */
+export const AUDIENCE_NOTICE_OPTIONS_LIMIT = 200;
+const AUDIENCE_NOTICE_DAYS = 90;
+
+/**
+ * Notificacoes enviadas nos ultimos 90 dias (fora as dos fluxos), mais recentes primeiro: o seletor da
+ * regra "O que fez com uma notificação" no segmento (docs/23 §7). O que cada uma tem (audio, botao,
+ * resposta) decide as acoes oferecidas.
+ */
+export async function loadAudienceNoticeOptions(db: CommunicationsDb, now = Date.now()): Promise<AudienceNoticeOption[]> {
+  const since = new Date(now - AUDIENCE_NOTICE_DAYS * 86_400_000).toISOString();
+  const { data, error } = await db
+    .from("campaigns")
+    .select("id,title,body,sent_at,audio_url,cta_href,response_mode")
+    .eq("kind", "inbox")
+    .eq("status", "sent")
+    .is("flow_id", null)
+    .is("deleted_at", null)
+    .gte("sent_at", since)
+    .order("sent_at", { ascending: false })
+    .order("id")
+    .limit(AUDIENCE_NOTICE_OPTIONS_LIMIT);
+  assertNoDbError(error, "Comunicacao: notificacoes enviadas");
+
+  type Row = { audio_url: string | null; body: string | null; cta_href: string | null; id: string; response_mode: string | null; sent_at: string; title: string | null };
+
+  return ((data ?? []) as Row[]).map((row) => {
+    const hasAudio = Boolean(row.audio_url);
+    const hasCta = Boolean(row.cta_href);
+    const hasResponse = row.response_mode === "accept_decline";
+
+    return {
+      // Aviso curto so de texto aparece inteiro no sino: nao ha o que abrir (docs/23 V7).
+      canOpen: hasAudio || hasCta || hasResponse || shouldClampNotificationBody(row.body ?? ""),
+      hasAudio,
+      hasCta,
+      hasResponse,
+      id: row.id,
+      sentAt: row.sent_at,
+      title: row.title?.trim() || "Sem título"
+    };
+  });
 }
 
 async function loadPeople(db: CommunicationsDb, ids: readonly (string | null)[]) {
@@ -284,10 +393,12 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
     return null;
   }
 
-  const [stats, names, people] = await Promise.all([
+  const [stats, engagement, names, people, sender] = await Promise.all([
     fetchCampaignStats(db, [row.id]),
+    fetchCampaignEngagement(db, [row.id]),
     loadAudienceNames(db, [audienceOfRow(row)]),
-    loadPeople(db, [row.created_by, row.requested_by, row.approved_by])
+    loadPeople(db, [row.created_by, row.requested_by, row.approved_by]),
+    row.sender_user_id ? loadSender(db, row.sender_user_id) : Promise.resolve(null)
   ]);
   const item = toListItem(row, { names, now, people, permissions: input.permissions ?? NO_PERMISSIONS, stats });
   // approved_at tambem marca quem publicou direto com messaging.publish_large (o envio agendado nao volta
@@ -300,12 +411,35 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
     approvedBy: approved && row.approved_by ? (people.get(row.approved_by) ?? null) : null,
     audienceCountedAt: row.audience_counted_at,
     draft: rowToDraft(row),
+    engagement: engagement.get(row.id) ?? EMPTY_CAMPAIGN_ENGAGEMENT,
+    flowId: row.flow_id,
+    flowNodeId: row.flow_node_id,
     lastError: row.last_error,
     recipientsCount: row.recipients_count,
     requestedAt: row.requested_at,
     requestedBy: row.requested_by ? (people.get(row.requested_by) ?? null) : null,
     sendAt: row.send_at,
+    sender,
     sentAt: row.sent_at
+  };
+}
+
+/** Quem envia gravado: o nome e a foto que o aluno ve e se ainda esta na equipe (quem saiu envia como a escola). */
+async function loadSender(db: CommunicationsDb, userId: string): Promise<NonNullable<NoticeDetail["sender"]>> {
+  const [role, profile] = await Promise.all([
+    db.from("admin_roles").select("user_id").eq("user_id", userId).maybeSingle(),
+    db.from("profiles").select("full_name,avatar_url").eq("id", userId).maybeSingle()
+  ]);
+  assertNoDbError(role.error, "Comunicacao: quem envia");
+  assertNoDbError(profile.error, "Comunicacao: perfil de quem envia");
+
+  const person = profile.data as { avatar_url: string | null; full_name: string | null } | null;
+
+  return {
+    avatarUrl: sanitizeProfileAvatarUrl(person?.avatar_url),
+    id: userId,
+    name: person?.full_name?.trim() || SCHOOL_NAME_FALLBACK_TEAM,
+    onTeam: Boolean(role.data)
   };
 }
 
@@ -333,26 +467,105 @@ export type NoticeSegmentOption = {
   unsupported: string[];
 };
 
+/** Pessoa da equipe que pode aparecer em "Quem envia" (o nome e a foto que o aluno ve). */
+export type NoticeSenderOption = {
+  avatarUrl: string | null;
+  id: string;
+  /** Quem esta com o editor aberto ("Eu (...)"). */
+  isMe: boolean;
+  /** profiles.full_name; sem nome, "Equipe Bunker707" (nunca o e-mail). */
+  name: string;
+  /** "Professor", "Dono"... */
+  roleLabel: string;
+};
+
 export type NoticeEditorOptions = {
-  branding: { logoUrl: string | null; name: string };
+  /** Icone da escola (Marca; o simbolo padrao sem nada configurado), nome e logo para a previa. */
+  branding: { iconUrl: string; logoUrl: string | null; name: string };
+  /** Quem esta com o editor aberto pode trocar o icone em Area de membros > Marca (storefront.write). */
+  canEditBrand: boolean;
   cohorts: { id: string; name: string }[];
+  /** Quem esta com o editor aberto (null fora de uma sessao). */
+  currentUserId: string | null;
   names: AudienceNames;
+  /** Notificacoes enviadas nos ultimos 90 dias: o seletor da regra "O que fez com uma notificação". */
+  notices: AudienceNoticeOption[];
   products: NoticeEditorProduct[];
   /** false: a lista de produtos nao carregou agora (o resto do editor funciona). */
   productsLoaded: boolean;
   segments: NoticeSegmentOption[];
+  /** Quem pode ser escolhido em "Quem envia": so a equipe (admin_roles), em ordem alfabetica. */
+  senders: NoticeSenderOption[];
 };
 
-/** Nome e logo da escola para a previa (relatorio sem o resto das opcoes do editor). */
-export async function loadNoticeBranding(): Promise<NoticeEditorOptions["branding"]> {
-  const settings = await readPlatformSettings(["branding"]);
-
-  return { logoUrl: normalizeLogo(settings.branding.value, settings.branding.exists), name: SCHOOL_NAME };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-export async function loadNoticeEditorOptions(): Promise<NoticeEditorOptions> {
+function brandingOf(settings: Record<"branding", PlatformSettingSnapshot>): NoticeEditorOptions["branding"] {
+  const value = settings.branding.value;
+
+  return {
+    iconUrl: normalizeSchoolIcon(settings.branding.exists && isRecord(value) ? value.schoolIcon : undefined),
+    logoUrl: normalizeLogo(value, settings.branding.exists),
+    name: SCHOOL_NAME
+  };
+}
+
+/** Icone, nome e logo da escola para a previa (relatorio sem o resto das opcoes do editor). */
+export async function loadNoticeBranding(): Promise<NoticeEditorOptions["branding"]> {
+  return brandingOf(await readPlatformSettings(["branding"]));
+}
+
+/**
+ * A equipe que pode enviar em nome da escola (admin_roles), com o nome e a foto do perfil. Relida pelo
+ * editor quando a janela volta ao foco (a pessoa acabou de colocar a foto em Perfil).
+ */
+export async function loadNoticeSenders(db: CommunicationsDb, currentUserId: string | null): Promise<NoticeSenderOption[]> {
+  const { data, error } = await db.from("admin_roles").select("user_id,role").limit(1_000);
+  assertNoDbError(error, "Comunicacao: equipe para quem envia");
+
+  const roles = new Map(((data ?? []) as { role: AdminRole; user_id: string }[]).map((row) => [row.user_id, row.role] as const));
+  const profiles = new Map<string, { avatar_url: string | null; full_name: string | null }>();
+
+  for (const part of chunksOf(Array.from(roles.keys()), 150)) {
+    const result = await db.from("profiles").select("id,full_name,avatar_url").in("id", part);
+    assertNoDbError(result.error, "Comunicacao: perfis da equipe");
+
+    for (const row of (result.data ?? []) as { avatar_url: string | null; full_name: string | null; id: string }[]) {
+      profiles.set(row.id, row);
+    }
+  }
+
+  return Array.from(roles, ([id, role]) => {
+    const profile = profiles.get(id);
+
+    return {
+      avatarUrl: sanitizeProfileAvatarUrl(profile?.avatar_url),
+      id,
+      isMe: id === currentUserId,
+      name: profile?.full_name?.trim() || SCHOOL_NAME_FALLBACK_TEAM,
+      roleLabel: ADMIN_ROLE_LABELS[role] ?? ADMIN_ROLE_LABELS.custom
+    };
+  }).sort((left, right) => left.name.localeCompare(right.name, "pt-BR") || left.id.localeCompare(right.id));
+}
+
+/** Quem esta com o editor aberto e se pode mexer na Marca (a sessao ja foi conferida pela pagina). */
+async function editorViewer() {
+  const user = await getAuthenticatedUser();
+  const access = user ? await getAdminAccessForUser(user.id) : null;
+
+  return { canEditBrand: can(access, "storefront.write"), currentUserId: user?.id ?? null };
+}
+
+/**
+ * Opcoes do editor. `audiences`: os segmentos ja gravados no aviso aberto, para a frase do "Para quem"
+ * ter o nome de um produto ou de uma notificacao fora das listas (aviso citado com mais de 90 dias).
+ */
+export async function loadNoticeEditorOptions(input: { audiences?: readonly AudienceDefinition[] } = {}): Promise<NoticeEditorOptions> {
   const db = communicationsDb();
-  const [productsResult, cohortsResult, savedSegments, settings] = await Promise.all([
+  const viewer = await editorViewer();
+  const [productsResult, cohortsResult, savedSegments, settings, senders, notices] = await Promise.all([
     listProductOptions()
       .then((items) => ({ items, loaded: true }))
       .catch((error: unknown) => {
@@ -364,7 +577,12 @@ export async function loadNoticeEditorOptions(): Promise<NoticeEditorOptions> {
       console.error("[admin/comunicacao] segmentos salvos", error);
       return [];
     }),
-    readPlatformSettings(["branding"])
+    readPlatformSettings(["branding"]),
+    loadNoticeSenders(db, viewer.currentUserId),
+    loadAudienceNoticeOptions(db).catch((error: unknown) => {
+      console.error("[admin/comunicacao] notificacoes enviadas do seletor", error);
+      return [] as AudienceNoticeOption[];
+    })
   ]);
   assertNoDbError(cohortsResult.error, "Comunicacao: turmas");
 
@@ -394,15 +612,24 @@ export async function loadNoticeEditorOptions(): Promise<NoticeEditorOptions> {
     products: Object.fromEntries(products.map((product) => [product.id, product.title]))
   };
 
-  // Segmentos podem citar produto fora da lista do seletor (curso incluido numa formacao).
-  const extra = await loadAudienceNames(db, segments.map((segment) => segment.definition));
+  // Segmentos podem citar produto fora da lista do seletor (curso incluido numa formacao) e aviso fora
+  // dos ultimos 90 dias.
+  const extra = await loadAudienceNames(db, [...segments.map((segment) => segment.definition), ...(input.audiences ?? [])]);
 
   return {
-    branding: { logoUrl: normalizeLogo(settings.branding.value, settings.branding.exists), name: SCHOOL_NAME },
+    branding: brandingOf(settings),
+    canEditBrand: viewer.canEditBrand,
     cohorts,
-    names: { cohorts: { ...extra.cohorts, ...names.cohorts }, products: { ...extra.products, ...names.products } },
+    currentUserId: viewer.currentUserId,
+    names: {
+      cohorts: { ...extra.cohorts, ...names.cohorts },
+      ...(extra.messages ? { messages: extra.messages } : {}),
+      products: { ...extra.products, ...names.products }
+    },
+    notices,
     products,
     productsLoaded: productsResult.loaded,
-    segments
+    segments,
+    senders
   };
 }

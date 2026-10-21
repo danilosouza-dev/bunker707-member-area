@@ -25,6 +25,8 @@ import {
   formatPercent,
   formatStudentCount,
   isHighCloseRate,
+  noticeAudioSteps,
+  noticeAuthorLine,
   noticeFunnel,
   noticeHref,
   ratio
@@ -36,6 +38,10 @@ import {
 // fechou sem clicar (alerta acima de 40 %), "Não mostrar de novo" e "Lembrar depois". Ao lado, o
 // conteudo na previa real do aluno, a frase do segmento e a linha do tempo. Pop-up no ar: Pausar,
 // Retomar e Editar ficam a mao (tambem no celular, docs/17 §1.13).
+//
+// v2 (docs/23): na notificacao, "Abriram" entra no funil (interacao de verdade; "Marcar todas" nao
+// conta) e, com audio, "Começaram o áudio" e "Ouviram até o fim" sobre quem abriu
+// (communication_campaign_engagement); quando quem envia e uma pessoa, "Criada por … · em nome de …".
 
 type NoticeReportProps = {
   branding: NoticeEditorOptions["branding"];
@@ -132,8 +138,10 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   const { busyKey, confirmDialog, errorBanner, request } = useNoticeActions({ onDeleted: () => router.push(NOTICES_HREF) });
   const target = toTarget(detail);
-  const { stats } = detail;
-  const funnel = noticeFunnel(stats, detail.kind);
+  const { engagement, stats } = detail;
+  const funnel = noticeFunnel({ ...stats, opened: engagement.opened }, detail.kind);
+  const audioSteps = detail.kind === "inbox" && detail.draft.audio ? noticeAudioSteps(engagement) : [];
+  const authorLine = detail.kind === "inbox" ? noticeAuthorLine(detail.createdBy, detail.sender) : null;
   const closeRate = closedWithoutClickRate(stats);
   const canEdit = detail.actions.includes("edit");
   const canPause = detail.actions.includes("pause");
@@ -200,7 +208,7 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
       ) : null}
       {detail.status === "paused" ? <Note>Pop-up pausado: os alunos não veem até você retomar.</Note> : null}
 
-      <section aria-label="Funil do aviso" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section aria-label="Funil do aviso" className={cn("grid grid-cols-2 gap-3", funnel.length > 4 ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
         {funnel.map((step) => (
           <KpiTile
             definition={step.percent === null ? step.base : `${formatPercent(step.percent)} ${step.base}`}
@@ -213,8 +221,24 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
         ))}
       </section>
       <p className="-mt-3 text-xs leading-5 text-[var(--text-tertiary)]">
+        {detail.kind === "inbox" ? "Abriram: tocaram no cartão, em “Ver mais”, no áudio, no botão ou responderam (“Marcar todas como lidas” não conta). " : ""}
         Voltaram a estudar: viram o aviso e estudaram nos 7 dias seguintes (pelo menos 10 min assistidos ou 1 aula concluída). A equipe e os testes não entram nos números.
       </p>
+
+      {audioSteps.length > 0 ? (
+        <section aria-label="Áudio do aviso" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {audioSteps.map((step) => (
+            <KpiTile
+              definition={step.percent === null ? step.base : `${formatPercent(step.percent)} ${step.base}`}
+              definitionShort={step.percent === null ? step.base : `${formatPercent(step.percent)} ${step.base}`}
+              emptyLabel={step.base}
+              key={step.id}
+              label={step.label}
+              value={step.value}
+            />
+          ))}
+        </section>
+      ) : null}
 
       {detail.kind === "inbox" && detail.draft.response ? (
         <section aria-label="Respostas" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -258,7 +282,13 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
             </div>
             <PillGroup ariaLabel="Aparelho da prévia" name="aviso-relatorio-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
           </div>
-          <NoticePreview branding={branding} device={device} draft={detail.draft} now={now} />
+          <NoticePreview
+            branding={branding}
+            device={device}
+            draft={detail.draft}
+            now={now}
+            senders={detail.sender?.onTeam ? [{ avatarUrl: detail.sender.avatarUrl, id: detail.sender.id, isMe: false, name: detail.sender.name, roleLabel: "" }] : []}
+          />
         </section>
 
         <SectionCard title="Detalhes">
@@ -272,6 +302,15 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
                   : `${formatStudentCount(detail.audienceCount)} na última contagem${detail.audienceCountedAt ? ` (${formatSaoPauloDateTime(detail.audienceCountedAt)})` : ""}.`}
               </dd>
             </div>
+            {authorLine && detail.sender ? (
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <dt className="text-xs font-medium text-[var(--text-tertiary)]">Quem envia</dt>
+                <dd className="text-[var(--text-primary)]">{authorLine}</dd>
+                {detail.sender.onTeam ? null : (
+                  <dd className="text-[13px] text-[var(--text-secondary)]">{`${detail.sender.name} não está mais na equipe: os alunos veem ${branding.name}.`}</dd>
+                )}
+              </div>
+            ) : null}
             <div className="flex min-w-0 flex-col gap-0.5">
               <dt className="text-xs font-medium text-[var(--text-tertiary)]">Quando</dt>
               <dd className="text-[var(--text-primary)]">{detail.whenLabel}</dd>

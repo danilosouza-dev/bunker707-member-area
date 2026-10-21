@@ -391,15 +391,36 @@ function audiencePhrase(count: number | null) {
 
 export type NoticeReviewInput = {
   audienceCount: number | null;
+  /** Notificacoes seguintes (v2): quantas e o produto da linha "Parar ... para quem tiver acesso a". */
+  followUps?: { count: number; stopProductName?: string | null } | null;
   kind: CampaignKind;
   repeat: PopupRepeat;
   schedule: { mode: "now" } | { mode: "at"; sendAt: string };
+  /**
+   * Quanto tempo fica no sino, ja em frase ("fica 3 dias no sino", describeValidity de message-meta.ts,
+   * que importa este modulo); sem valor, a frase da v1.
+   */
+  validity?: string | null;
   window: { endsAt: string | null; startsAt: string | null };
 };
 
+/** " Depois: 2 notificações seguintes, que param para quem tiver acesso a Formação IA." */
+function followUpsPhrase(followUps: NoticeReviewInput["followUps"]) {
+  const count = followUps ? Math.max(0, Math.floor(followUps.count)) : 0;
+
+  if (!followUps || count === 0) {
+    return "";
+  }
+
+  const label = count === 1 ? "1 notificação seguinte" : `${new Intl.NumberFormat("pt-BR").format(count)} notificações seguintes`;
+  const product = followUps.stopProductName?.trim();
+
+  return ` Depois: ${label}${product ? `, que param para quem tiver acesso a ${product}` : ""}.`;
+}
+
 /**
- * "Notificação para 318 alunos, enviada agora." / "Pop-up para 318 alunos, de 14/10/2026 às 09:00 a
- * 21/10/2026 às 23:59, no máximo 1 vez."
+ * "Notificação para 318 alunos, enviada agora, fica 3 dias no sino. Depois: 2 notificações seguintes." /
+ * "Pop-up para 318 alunos, de 14/10/2026 às 09:00 a 21/10/2026 às 23:59, no máximo 1 vez."
  */
 export function describeNoticeReview(input: NoticeReviewInput) {
   const audience = audiencePhrase(input.audienceCount);
@@ -409,8 +430,9 @@ export function describeNoticeReview(input: NoticeReviewInput) {
       input.schedule.mode === "at" && formatSaoPauloDateTime(input.schedule.sendAt)
         ? `agendada para ${formatSaoPauloDateTime(input.schedule.sendAt)}`
         : "enviada agora";
+    const validity = input.validity?.trim();
 
-    return `Notificação ${audience}, ${when}.`;
+    return `Notificação ${audience}, ${when}${validity ? `, ${validity}` : ""}.${followUpsPhrase(input.followUps)}`;
   }
 
   const start = formatSaoPauloDateTime(input.window.startsAt);

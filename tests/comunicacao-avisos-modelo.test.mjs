@@ -430,3 +430,75 @@ test("entradas das acoes: id do aviso e uuid; versao da tela e data ISO; imagem 
   assert.equal(schemas.uploadNoticeImageSchema.safeParse({ image: "data:image/png;base64,AAAA" }).success, false);
   assert.equal(schemas.saveNoticeSchema.safeParse({ draft: notificacao() }).success, true);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * v2 (docs/23): frase de revisao com o tempo no sino e as seguintes; e-mail "enviada em seu nome"
+ * ---------------------------------------------------------------------------------------------- */
+
+const messageMeta = await import("../src/server/communications/message-meta.ts");
+const sentAs = await import("../src/server/email/templates/sent-as.ts");
+const outboxRules = await import("../src/server/email/outbox-rules.ts");
+
+test("frase de revisao v2: quanto tempo fica no sino e as notificacoes seguintes (singular e plural, com a linha de parar)", () => {
+  const revisao = (extra) =>
+    campaign.describeNoticeReview({ audienceCount: 318, kind: "inbox", repeat: "once", schedule: { mode: "now" }, window: { endsAt: null, startsAt: null }, ...extra });
+
+  assert.equal(revisao({ validity: messageMeta.describeValidity({ minutes: 4_320, mode: "duration" }) }), "Notificação para 318 alunos, enviada agora, fica 3 dias no sino.");
+  assert.equal(revisao({ validity: messageMeta.describeValidity({ mode: "default" }) }), "Notificação para 318 alunos, enviada agora, fica 90 dias no sino.");
+  assert.equal(
+    revisao({ schedule: { mode: "at", sendAt: "2026-10-21T17:30:00.000Z" }, validity: messageMeta.describeValidity({ endsAt: "2026-10-25T02:59:00.000Z", mode: "until" }) }),
+    "Notificação para 318 alunos, agendada para 21/10/2026 às 14:30, fica no sino até 24/10/2026 às 23:59."
+  );
+  assert.equal(revisao({ validity: null }), "Notificação para 318 alunos, enviada agora.", "sem tempo (data incompleta): a frase da v1");
+  assert.equal(
+    revisao({ followUps: { count: 2 }, validity: "fica 3 dias no sino" }),
+    "Notificação para 318 alunos, enviada agora, fica 3 dias no sino. Depois: 2 notificações seguintes."
+  );
+  assert.equal(revisao({ followUps: { count: 1 }, validity: "fica 3 dias no sino" }), "Notificação para 318 alunos, enviada agora, fica 3 dias no sino. Depois: 1 notificação seguinte.");
+  assert.equal(
+    revisao({ followUps: { count: 2, stopProductName: "Formação IA" }, validity: "fica 3 dias no sino" }),
+    "Notificação para 318 alunos, enviada agora, fica 3 dias no sino. Depois: 2 notificações seguintes, que param para quem tiver acesso a Formação IA."
+  );
+  assert.equal(revisao({ followUps: { count: 0 } }), "Notificação para 318 alunos, enviada agora.", "sem seguintes, sem o 'Depois'");
+  assert.equal(
+    revisao({ followUps: { count: 2 }, kind: "popup", validity: "fica 3 dias no sino" }),
+    "Pop-up para 318 alunos, a partir de agora, sem data para acabar, no máximo 1 vez.",
+    "pop-up nao tem tempo no sino nem seguintes"
+  );
+});
+
+test("e-mail 'enviada em seu nome': assunto, texto com e sem o botao do admin e 'Alguém da equipe' sem nome", () => {
+  const aviso = sentAs.renderSentAsEmail({
+    count: 318,
+    link: "https://membros.test/admin/comunicacao/avisos/abc",
+    origin: "notice",
+    publisherName: " Ana Souza ",
+    title: "Oferta especial!"
+  });
+
+  assert.equal(aviso.subject, "Uma notificação saiu em seu nome");
+  assert.match(aviso.text, /Ana Souza enviou a notificação “Oferta especial!” para 318 alunos em seu nome, com a sua foto e o seu nome\./);
+  assert.match(aviso.text, /Se você não combinou isso, fale com Ana Souza ou com o dono da escola\./);
+  assert.match(aviso.text, /Ver a notificação: https:\/\/membros\.test\/admin\/comunicacao\/avisos\/abc/);
+  assert.match(aviso.html, /href="https:\/\/membros\.test\/admin\/comunicacao\/avisos\/abc"/);
+
+  const semLink = sentAs.renderSentAsEmail({ count: 1, link: null, origin: "notice", publisherName: null, title: "Aula <nova>" });
+  assert.match(semLink.text, /^Uma notificação saiu em seu nome/);
+  assert.match(semLink.text, /Alguém da equipe enviou a notificação “Aula <nova>” para 1 aluno em seu nome/);
+  assert.match(semLink.text, /fale com Alguém da equipe ou com o dono da escola/);
+  assert.doesNotMatch(semLink.text, /Ver a notificação/, "Professor, Suporte e Analista nao veem Comunicacao: sem link");
+  assert.doesNotMatch(semLink.html, /<a href/);
+  assert.match(semLink.html, /Aula &lt;nova&gt;/, "o titulo vai escapado no HTML");
+
+  const fluxo = sentAs.renderSentAsEmail({ count: 0, link: "https://membros.test/admin/comunicacao/fluxos/f1", origin: "flow", publisherName: "Ana Souza", title: "Boas-vindas" });
+  assert.equal(fluxo.subject, "Um fluxo de notificações usa o seu nome");
+  assert.match(fluxo.text, /Ana Souza ativou o fluxo “Boas-vindas”, que envia notificações em seu nome, com a sua foto e o seu nome\./);
+  assert.match(fluxo.text, /Ver o fluxo: https:\/\/membros\.test\/admin\/comunicacao\/fluxos\/f1/);
+});
+
+test("e-mail 'enviada em seu nome': o tipo sent_as na fila e uma chave por pessoa por aviso (ou por fluxo)", () => {
+  assert.ok(outboxRules.EMAIL_KINDS.includes("sent_as"));
+  assert.equal(outboxRules.sentAsIdempotencyKey({ campaignId: "c1", userId: "u1" }), "sent-as:campaign:c1:u1");
+  assert.equal(outboxRules.sentAsIdempotencyKey({ flowId: "f1", userId: "u1" }), "sent-as:flow:f1:u1");
+  assert.notEqual(outboxRules.sentAsIdempotencyKey({ campaignId: "c1", userId: "u1" }), outboxRules.sentAsIdempotencyKey({ campaignId: "c1", userId: "u2" }));
+});

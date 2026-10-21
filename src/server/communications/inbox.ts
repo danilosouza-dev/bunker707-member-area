@@ -1,22 +1,32 @@
 import "server-only";
 
-// Sino do aluno (docs/22 §1.1 e §4.4): lista dos ultimos 90 dias, contadores (nao vistas = numero do sino; nao
-// lidas = bolinha), marcar como vista/lida, clique e resposta "Aceitar / Recusar". Sempre do proprio
-// aluno (userId vem da sessao conferida na rota). O que nao deve aparecer some na leitura: aviso
-// excluido ou ainda nao enviado (o teste da equipe aparece), resposta ou comentario que deixou de estar
-// visivel na aula. Banco sem a migracao 202610200001: tudo vazio, nunca erro 500.
+// Sino do aluno (docs/22 §1.1 e §4.4; v2 em docs/23): lista dos ultimos 90 dias, contadores (nao vistas = numero do
+// sino; nao lidas = bolinha), marcar como vista/lida/aberta, clique, resposta "Aceitar / Recusar" e o
+// audio ouvido. Sempre do proprio aluno (userId vem da sessao conferida na rota). O que nao deve
+// aparecer some na leitura: aviso excluido ou ainda nao enviado (o teste da equipe aparece), resposta ou
+// comentario que deixou de estar visivel na aula, e toda linha depois do seu expires_at (some da lista,
+// dos numeros, do "Marcar todas" e do "abriu o sino"; clique, resposta e audio nela sao 404).
+//
+// v2: quem envia e resolvido na leitura (pessoa ainda em admin_roles; quem saiu da equipe vira a escola,
+// tambem nas linhas antigas); "abriu" (opened_at) so com interacao de verdade, nunca com "Marcar todas".
+// Sem caminho de volta para as colunas da v1: a 202610200002 e aplicada antes do deploy (coluna faltando
+// = isMissingCommunicationSchema: sino vazio, nunca erro 500).
 
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { isSafeHeroCtaHref } from "@/server/member-area/home-hero-links";
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
 import { INBOX_HISTORY_DAYS } from "./campaign-model";
 import { assertNoDbError, chunksOf, communicationsDb, CommunicationError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
+import { FLOW_LIMITS } from "./flow-model";
+import { noticeIconOfColumns, SCHOOL_NAME_FALLBACK_TEAM } from "./message-meta";
 import {
+  AUDIO_HEARD_SLOTS,
   commentNotificationTitle,
   decodeCursor,
   encodeCursor,
   normalizePeaks,
   NOTIFICATIONS_PAGE_SIZE,
+  type NotificationAudioProgress,
   type NotificationItem,
   type NotificationKind,
   type NotificationResponseValue,
@@ -34,10 +44,12 @@ const MAX_PAGE_ROUNDS = 5;
 export const NOTIFICATION_NOT_FOUND = "Notificacao nao encontrada.";
 export const ALREADY_RESPONDED = "Você já respondeu.";
 
-const NOTIFICATION_COLUMNS = "id,user_id,kind,campaign_id,is_test,actor_id,title,body,href,payload,seen_at,read_at,clicked_at,response,responded_at,created_at";
+const NOTIFICATION_COLUMNS =
+  "id,user_id,kind,campaign_id,is_test,actor_id,title,body,href,payload,seen_at,read_at,clicked_at,response,responded_at,created_at,expires_at,opened_at,audio_started_at,audio_heard,audio_heard_percent,audio_completed_at";
 const CAMPAIGN_EMBED =
-  "campaign:campaigns(id,status,deleted_at,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label)";
-const VISIBILITY_COLUMNS = "id,kind,is_test,payload,campaign:campaigns(status,deleted_at,sent_at)";
+  "campaign:campaigns(id,status,deleted_at,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,sender_user_id,icon,icon_color)";
+const VISIBILITY_COLUMNS = "id,kind,is_test,payload,created_at,flow_node_id,campaign:campaigns(status,deleted_at,sent_at)";
+const HEARD_MASK = /^[01]{48}$/;
 
 type EmbeddedCampaign = {
   accept_label: string | null;
@@ -51,10 +63,14 @@ type EmbeddedCampaign = {
   cta_target: "new_tab" | "same_tab" | null;
   decline_label: string | null;
   deleted_at: string | null;
+  icon: string | null;
+  icon_color: string | null;
   id: string;
   image_alt: string | null;
   image_url: string | null;
   response_mode: "accept_decline" | "none";
+  /** Quem envia (pessoa da equipe); nulo = a escola. */
+  sender_user_id: string | null;
   sent_at?: string | null;
   status: string;
   title: string;
@@ -62,15 +78,21 @@ type EmbeddedCampaign = {
 
 type NotificationRow = {
   actor_id: string | null;
+  audio_completed_at: string | null;
+  audio_heard: string | null;
+  audio_heard_percent: number | null;
+  audio_started_at: string | null;
   body: string | null;
   campaign: EmbeddedCampaign | EmbeddedCampaign[] | null;
   campaign_id: string | null;
   clicked_at: string | null;
   created_at: string;
+  expires_at: string;
   href: string | null;
   id: string;
   is_test: boolean;
   kind: NotificationKind;
+  opened_at: string | null;
   payload: Record<string, unknown> | null;
   read_at: string | null;
   response: NotificationResponseValue | null;
@@ -80,8 +102,10 @@ type NotificationRow = {
   user_id: string;
 };
 
-type VisibilityRow = Pick<NotificationRow, "id" | "is_test" | "kind" | "payload"> & {
+type VisibilityRow = Pick<NotificationRow, "created_at" | "id" | "is_test" | "kind" | "payload"> & {
   campaign: Pick<EmbeddedCampaign, "deleted_at" | "sent_at" | "status"> | Pick<EmbeddedCampaign, "deleted_at" | "sent_at" | "status">[] | null;
+  /** Passo do fluxo que gerou a linha (notificacoes seguintes e fluxos); nulo nas outras. */
+  flow_node_id: string | null;
 };
 
 type CommentInfo = { author_avatar_url: string | null; author_name: string; deleted_at: string | null; id: string; status: string };
@@ -167,15 +191,46 @@ function safeMediaUrl(value: string | null) {
   }
 }
 
-function toItem(row: NotificationRow, comments: Map<string, CommentInfo>, actors: Map<string, { avatarUrl: string | null; name: string | null }>): NotificationItem {
+type Person = { avatarUrl: string | null; name: string | null };
+/** Perfis citados na pagina (quem respondeu e quem envia) e quem, entre os que enviam, ainda e da equipe. */
+type People = { profiles: Map<string, Person>; team: Set<string> };
+
+/** Ouvido gravado (48 trechos, OU acumulado); sem nada ainda = nada ouvido. */
+function audioProgressOf(row: Pick<NotificationRow, "audio_completed_at" | "audio_heard" | "audio_heard_percent">): NotificationAudioProgress {
+  const heard = row.audio_heard && HEARD_MASK.test(row.audio_heard) ? row.audio_heard : "0".repeat(AUDIO_HEARD_SLOTS);
+
+  return {
+    completed: Boolean(row.audio_completed_at),
+    heard,
+    percent: typeof row.audio_heard_percent === "number" ? Math.min(100, Math.max(0, row.audio_heard_percent)) : 0
+  };
+}
+
+/**
+ * Quem envia o aviso, resolvido agora: a pessoa ainda na equipe (foto do perfil ou iniciais; sem nome,
+ * "Equipe Bunker707", nunca o e-mail). Quem saiu da equipe, conta apagada ou a escola = null.
+ */
+function noticeSender(campaign: Pick<EmbeddedCampaign, "sender_user_id">, people: People): NotificationItem["actor"] {
+  const senderId = campaign.sender_user_id;
+
+  if (!senderId || !people.team.has(senderId)) {
+    return null;
+  }
+
+  const person = people.profiles.get(senderId);
+
+  return { avatarUrl: person?.avatarUrl ?? null, name: person?.name ?? SCHOOL_NAME_FALLBACK_TEAM };
+}
+
+function toItem(row: NotificationRow, comments: Map<string, CommentInfo>, people: People): NotificationItem {
   const base = {
     audioProgress: null,
     createdAt: row.created_at,
-    expiresAt: null,
+    expiresAt: row.expires_at ?? null,
     icon: null,
     id: row.id,
     kind: row.kind,
-    openedAt: null,
+    openedAt: row.opened_at ?? null,
     readAt: row.read_at,
     seenAt: row.seen_at
   };
@@ -184,14 +239,16 @@ function toItem(row: NotificationRow, comments: Map<string, CommentInfo>, actors
     const campaign = single(row.campaign)!;
     const imageUrl = safeMediaUrl(campaign.image_url);
     const audioUrl = safeMediaUrl(campaign.audio_url);
+    const audio =
+      audioUrl && campaign.audio_duration_seconds
+        ? { durationSeconds: campaign.audio_duration_seconds, mimeType: campaign.audio_mime, peaks: normalizePeaks(campaign.audio_peaks), url: audioUrl }
+        : null;
 
     return {
       ...base,
-      actor: null,
-      audio:
-        audioUrl && campaign.audio_duration_seconds
-          ? { durationSeconds: campaign.audio_duration_seconds, mimeType: campaign.audio_mime, peaks: normalizePeaks(campaign.audio_peaks), url: audioUrl }
-          : null,
+      actor: noticeSender(campaign, people),
+      audio,
+      audioProgress: audio ? audioProgressOf(row) : null,
       body: campaign.body ?? "",
       context: null,
       cta:
@@ -199,6 +256,7 @@ function toItem(row: NotificationRow, comments: Map<string, CommentInfo>, actors
           ? { href: campaign.cta_href, label: campaign.cta_label, target: campaign.cta_target }
           : null,
       href: null,
+      icon: noticeIconOfColumns(campaign.icon, campaign.icon_color),
       image: imageUrl ? { alt: campaign.image_alt ?? "", url: imageUrl } : null,
       response:
         campaign.response_mode === "accept_decline"
@@ -209,7 +267,7 @@ function toItem(row: NotificationRow, comments: Map<string, CommentInfo>, actors
   }
 
   const reply = comments.get(payloadId(row.payload, "commentId") ?? "");
-  const actor = row.actor_id ? actors.get(row.actor_id) : undefined;
+  const actor = row.actor_id ? people.profiles.get(row.actor_id) : undefined;
   const name = actor?.name ?? reply?.author_name?.trim() ?? null;
   const avatarUrl = actor ? actor.avatarUrl : sanitizeProfileAvatarUrl(reply?.author_avatar_url);
 
@@ -227,19 +285,31 @@ function toItem(row: NotificationRow, comments: Map<string, CommentInfo>, actors
   };
 }
 
-async function loadActors(db: CommunicationsDb, ids: readonly string[]) {
-  const actors = new Map<string, { avatarUrl: string | null; name: string | null }>();
+/**
+ * Quem respondeu (comentarios) e quem envia (avisos) num so `profiles`; a equipe (admin_roles) so e
+ * lida quando a pagina tem aviso enviado em nome de alguem.
+ */
+async function loadPeople(db: CommunicationsDb, actorIds: readonly string[], senderIds: readonly string[]): Promise<People> {
+  const profiles = new Map<string, Person>();
+  const team = new Set<string>();
+  const senders = Array.from(new Set(senderIds));
 
-  for (const part of chunksOf(Array.from(new Set(ids)), 150)) {
+  for (const part of chunksOf(Array.from(new Set([...actorIds, ...senders])), 150)) {
     const { data, error } = await db.from("profiles").select("id,full_name,avatar_url").in("id", part);
-    assertNoDbError(error, "Sino: quem respondeu");
+    assertNoDbError(error, "Sino: quem respondeu e quem envia");
 
     for (const profile of (data ?? []) as { avatar_url: string | null; full_name: string | null; id: string }[]) {
-      actors.set(profile.id, { avatarUrl: sanitizeProfileAvatarUrl(profile.avatar_url), name: profile.full_name?.trim() || null });
+      profiles.set(profile.id, { avatarUrl: sanitizeProfileAvatarUrl(profile.avatar_url), name: profile.full_name?.trim() || null });
     }
   }
 
-  return actors;
+  for (const part of chunksOf(senders, 150)) {
+    const { data, error } = await db.from("admin_roles").select("user_id").in("user_id", part);
+    assertNoDbError(error, "Sino: quem envia na equipe");
+    ((data ?? []) as { user_id: string }[]).forEach((role) => team.add(role.user_id));
+  }
+
+  return { profiles, team };
 }
 
 async function countVisible(db: CommunicationsDb, userId: string, column: "read_at" | "seen_at", cap: number, now: number) {
@@ -249,6 +319,7 @@ async function countVisible(db: CommunicationsDb, userId: string, column: "read_
     .eq("user_id", userId)
     .is(column, null)
     .gte("created_at", sinceIso(now))
+    .gt("expires_at", new Date(now).toISOString())
     .order("created_at", { ascending: false })
     .limit(cap);
   assertNoDbError(error, "Sino: contagem");
@@ -293,7 +364,8 @@ export async function listNotifications(input: {
         .from("notifications")
         .select(`${NOTIFICATION_COLUMNS},${CAMPAIGN_EMBED}`)
         .eq("user_id", input.userId)
-        .gte("created_at", sinceIso(now));
+        .gte("created_at", sinceIso(now))
+        .gt("expires_at", asOf);
 
       if (input.filter === "unread") {
         query = query.is("read_at", null);
@@ -324,9 +396,12 @@ export async function listNotifications(input: {
     const comments = new Map<string, CommentInfo>();
     visible.forEach((entry) => entry.comments.forEach((comment, id) => comments.set(id, comment)));
 
-    const actors = await loadActors(
+    const people = await loadPeople(
       db,
-      page.map((entry) => entry.row.actor_id).filter((id): id is string => Boolean(id))
+      page.map((entry) => entry.row.actor_id).filter((id): id is string => Boolean(id)),
+      page
+        .map((entry) => (entry.row.kind === "notice" ? single(entry.row.campaign)?.sender_user_id : null))
+        .filter((id): id is string => Boolean(id))
     );
     let nextCursor: string | null = null;
 
@@ -340,7 +415,7 @@ export async function listNotifications(input: {
 
     const counts = await readCounts(db, input.userId, now);
 
-    return { asOf, items: page.map((entry) => toItem(entry.row, comments, actors)), nextCursor, ...counts };
+    return { asOf, items: page.map((entry) => toItem(entry.row, comments, people)), nextCursor, ...counts };
   } catch (error) {
     if (isMissingCommunicationSchema(error)) {
       return { asOf, items: [], nextCursor: null, unread: 0, unseen: 0 };
@@ -392,12 +467,21 @@ const VISIBLE_IDS_PAGE = 1_000;
 const MARK_CHUNK = 150;
 
 /**
- * Aviso da escola que ja aparecia no sino em `asOf`: enviado ate la (o envio grava as linhas antes e so
- * no fim passa a "Enviada"). O teste da equipe aparece na hora; o created_at ja vem filtrado no banco.
+ * Aviso que ja aparecia no sino em `asOf`: enviado ate la (o envio grava as linhas antes e so no fim
+ * passa a "Enviada"). O teste da equipe aparece na hora; o created_at ja vem filtrado no banco.
+ *
+ * Linha de fluxo (flow_node_id): vale o created_at dela, nao o sent_at do aviso (uma versao nova nasce
+ * "Enviada" e as linhas chegam uma a uma muito depois; e a linha e gravada dentro da transacao do
+ * motor, que so aparece para as outras leituras no commit, ate ~10 s depois do created_at). So conta
+ * com created_at ate asOf - 15 s, ou quando o painel diz que mostrou (`shown`).
  */
-function wasVisibleAt(row: VisibilityRow, asOf: string) {
+function wasVisibleAt(row: VisibilityRow, asOf: string, shown: ReadonlySet<string>) {
   if (row.kind !== "notice" || row.is_test) {
     return true;
+  }
+
+  if (row.flow_node_id) {
+    return shown.has(row.id) || Date.parse(row.created_at) <= Date.parse(asOf) - FLOW_LIMITS.flowRowSettleMs;
   }
 
   const sentAt = single(row.campaign)?.sent_at;
@@ -411,7 +495,14 @@ function wasVisibleAt(row: VisibilityRow, asOf: string) {
  * moderacao, continua nova para quando aparecer. Com `asOf` (a hora da lista que o painel mostrou), so
  * o que ja aparecia naquela hora: o que chegou ou foi enviado com o painel aberto continua novo.
  */
-async function visibleIdsWithout(db: CommunicationsDb, userId: string, column: "read_at" | "seen_at", now: number, asOf: string | null) {
+async function visibleIdsWithout(
+  db: CommunicationsDb,
+  userId: string,
+  column: "read_at" | "seen_at",
+  now: number,
+  asOf: string | null,
+  shown: ReadonlySet<string>
+) {
   const ids: string[] = [];
 
   for (let from = 0; ; from += VISIBLE_IDS_PAGE) {
@@ -420,7 +511,8 @@ async function visibleIdsWithout(db: CommunicationsDb, userId: string, column: "
       .select(VISIBILITY_COLUMNS)
       .eq("user_id", userId)
       .is(column, null)
-      .gte("created_at", sinceIso(now));
+      .gte("created_at", sinceIso(now))
+      .gt("expires_at", new Date(now).toISOString());
 
     if (asOf) {
       query = query.lte("created_at", asOf);
@@ -434,7 +526,7 @@ async function visibleIdsWithout(db: CommunicationsDb, userId: string, column: "
 
     const rows = (data ?? []) as unknown as VisibilityRow[];
     const comments = await loadComments(db, rows);
-    ids.push(...rows.filter((row) => isVisible(row, comments) && (!asOf || wasVisibleAt(row, asOf))).map((row) => row.id));
+    ids.push(...rows.filter((row) => isVisible(row, comments) && (!asOf || wasVisibleAt(row, asOf, shown))).map((row) => row.id));
 
     if (rows.length < VISIBLE_IDS_PAGE) {
       return ids;
@@ -442,10 +534,19 @@ async function visibleIdsWithout(db: CommunicationsDb, userId: string, column: "
   }
 }
 
-/** Visto e depois lido (o banco exige "lida" so depois de "vista"), em lotes de ids. */
-async function markIds(db: CommunicationsDb, userId: string, ids: readonly string[], input: { nowIso: string; read: boolean }) {
+/**
+ * Visto, depois lido e (pedido por id) aberto, em lotes de ids: o banco exige "lida" so depois de
+ * "vista" e "aberta" so depois de "lida". Linha que ja saiu do sino (expires_at) nao muda.
+ */
+async function markIds(db: CommunicationsDb, userId: string, ids: readonly string[], input: { nowIso: string; open: boolean; read: boolean }) {
   for (const part of chunksOf(Array.from(new Set(ids)), MARK_CHUNK)) {
-    const seen = await db.from("notifications").update({ seen_at: input.nowIso }).eq("user_id", userId).in("id", part).is("seen_at", null);
+    const seen = await db
+      .from("notifications")
+      .update({ seen_at: input.nowIso })
+      .eq("user_id", userId)
+      .in("id", part)
+      .is("seen_at", null)
+      .gt("expires_at", input.nowIso);
     assertNoDbError(seen.error, "Sino: marcar como vistas");
 
     if (input.read) {
@@ -456,8 +557,22 @@ async function markIds(db: CommunicationsDb, userId: string, ids: readonly strin
         .eq("user_id", userId)
         .in("id", part)
         .is("read_at", null)
-        .not("seen_at", "is", null);
+        .not("seen_at", "is", null)
+        .gt("expires_at", input.nowIso);
       assertNoDbError(read.error, "Sino: marcar como lidas");
+    }
+
+    if (input.open) {
+      // Aberta: interacao de verdade (cartao, "Ver mais"), tambem num cartao ja lido pelo "Marcar todas".
+      const opened = await db
+        .from("notifications")
+        .update({ opened_at: input.nowIso })
+        .eq("user_id", userId)
+        .in("id", part)
+        .is("opened_at", null)
+        .not("read_at", "is", null)
+        .gt("expires_at", input.nowIso);
+      assertNoDbError(opened.error, "Sino: marcar como abertas");
     }
   }
 }
@@ -466,7 +581,16 @@ type MarkAllOptions = {
   /** Hora da lista que o painel mostrou (ja conferida por parseNotificationsAsOf); null = tudo o que aparece agora. */
   asOf?: string | null;
   now?: Date;
+  /**
+   * Avisos que o painel mostrou e que chegaram ha menos de 15 s (ja conferidos como uuids pela rota):
+   * linhas de fluxo nessa folga contam mesmo assim (wasVisibleAt).
+   */
+  shown?: readonly string[];
 };
+
+function shownSet(options: MarkAllOptions) {
+  return new Set((options.shown ?? []).map((id) => id.toLowerCase()));
+}
 
 /** Abriu o sino: tudo que aparece na lista conta como visto (o numero zera; as bolinhas ficam). */
 export async function markAllSeen(userId: string, options: MarkAllOptions = {}) {
@@ -474,8 +598,8 @@ export async function markAllSeen(userId: string, options: MarkAllOptions = {}) 
   const now = options.now ?? new Date();
 
   try {
-    const ids = await visibleIdsWithout(db, userId, "seen_at", now.getTime(), options.asOf ?? null);
-    await markIds(db, userId, ids, { nowIso: now.toISOString(), read: false });
+    const ids = await visibleIdsWithout(db, userId, "seen_at", now.getTime(), options.asOf ?? null, shownSet(options));
+    await markIds(db, userId, ids, { nowIso: now.toISOString(), open: false, read: false });
   } catch (error) {
     if (!isMissingCommunicationSchema(error)) {
       throw error;
@@ -484,16 +608,17 @@ export async function markAllSeen(userId: string, options: MarkAllOptions = {}) 
 }
 
 /**
- * Marca como lidas as notificacoes pedidas (ou todas as que aparecem no sino; `asOf` vale so para "all").
- * Lida tambem conta como vista.
+ * Marca como lidas as notificacoes pedidas (ou todas as que aparecem no sino; `asOf` e `shown` valem so
+ * para "all"). Lida tambem conta como vista. Pedidas por id (o aluno abriu o cartao ou "Ver mais")
+ * tambem contam como abertas; "all" ("Marcar todas") nunca.
  */
 export async function markRead(userId: string, ids: readonly string[] | "all", options: MarkAllOptions = {}) {
   const db = communicationsDb();
   const now = options.now ?? new Date();
 
   try {
-    const targets = ids === "all" ? await visibleIdsWithout(db, userId, "read_at", now.getTime(), options.asOf ?? null) : ids;
-    await markIds(db, userId, targets, { nowIso: now.toISOString(), read: true });
+    const targets = ids === "all" ? await visibleIdsWithout(db, userId, "read_at", now.getTime(), options.asOf ?? null, shownSet(options)) : ids;
+    await markIds(db, userId, targets, { nowIso: now.toISOString(), open: ids !== "all", read: true });
   } catch (error) {
     if (!isMissingCommunicationSchema(error)) {
       throw error;
@@ -501,12 +626,19 @@ export async function markRead(userId: string, ids: readonly string[] | "all", o
   }
 }
 
-type OwnRow = Pick<NotificationRow, "campaign_id" | "clicked_at" | "id" | "is_test" | "kind" | "payload" | "read_at" | "response" | "seen_at"> & {
-  campaign: Pick<EmbeddedCampaign, "deleted_at" | "response_mode" | "status"> | Pick<EmbeddedCampaign, "deleted_at" | "response_mode" | "status">[] | null;
+type OwnCampaign = Pick<EmbeddedCampaign, "audio_url" | "deleted_at" | "response_mode" | "status">;
+type OwnRow = Pick<
+  NotificationRow,
+  "campaign_id" | "clicked_at" | "expires_at" | "id" | "is_test" | "kind" | "opened_at" | "payload" | "read_at" | "response" | "seen_at"
+> & {
+  campaign: OwnCampaign | OwnCampaign[] | null;
 };
 
-/** A notificacao do proprio aluno, visivel no sino; senao 404 (sem dizer se existe para outra pessoa). */
-async function fetchOwnVisible(db: CommunicationsDb, userId: string, id: string): Promise<OwnRow> {
+/**
+ * A notificacao do proprio aluno, visivel no sino e ainda dentro do expires_at (`requireAudio`: e o aviso
+ * tem audio); senao 404 (sem dizer se existe para outra pessoa).
+ */
+async function fetchOwnVisible(db: CommunicationsDb, userId: string, id: string, options: { now: Date; requireAudio?: boolean }): Promise<OwnRow> {
   if (!UUID.test(id)) {
     throw new CommunicationError(NOTIFICATION_NOT_FOUND, 404);
   }
@@ -514,15 +646,22 @@ async function fetchOwnVisible(db: CommunicationsDb, userId: string, id: string)
   try {
     const { data, error } = await db
       .from("notifications")
-      .select("id,kind,campaign_id,is_test,payload,seen_at,read_at,clicked_at,response,campaign:campaigns(status,deleted_at,response_mode)")
+      .select(
+        "id,kind,campaign_id,is_test,payload,seen_at,read_at,opened_at,clicked_at,response,expires_at,campaign:campaigns(status,deleted_at,response_mode,audio_url)"
+      )
       .eq("id", id)
       .eq("user_id", userId)
+      .gt("expires_at", options.now.toISOString())
       .maybeSingle();
     assertNoDbError(error, "Sino: notificacao");
 
     const row = (data ?? null) as unknown as OwnRow | null;
 
     if (!row || !isVisible(row as unknown as VisibilityRow, await loadComments(db, [row]))) {
+      throw new CommunicationError(NOTIFICATION_NOT_FOUND, 404);
+    }
+
+    if (options.requireAudio && (row.kind !== "notice" || !single(row.campaign)?.audio_url)) {
       throw new CommunicationError(NOTIFICATION_NOT_FOUND, 404);
     }
 
@@ -536,14 +675,19 @@ async function fetchOwnVisible(db: CommunicationsDb, userId: string, id: string)
   }
 }
 
-/** Seguiu o link da notificacao (ou o botao do aviso): conta como vista, lida e clicada. */
+/** Seguiu o link da notificacao (ou o botao do aviso): conta como vista, lida, aberta e clicada. */
 export async function markClicked(userId: string, id: string, now = new Date()) {
   const db = communicationsDb();
-  const row = await fetchOwnVisible(db, userId, id);
+  const row = await fetchOwnVisible(db, userId, id, { now });
   const nowIso = now.toISOString();
   const { error } = await db
     .from("notifications")
-    .update({ clicked_at: row.clicked_at ?? nowIso, read_at: row.read_at ?? nowIso, seen_at: row.seen_at ?? nowIso })
+    .update({
+      clicked_at: row.clicked_at ?? nowIso,
+      opened_at: row.opened_at ?? nowIso,
+      read_at: row.read_at ?? nowIso,
+      seen_at: row.seen_at ?? nowIso
+    })
     .eq("id", row.id)
     .eq("user_id", userId);
   assertNoDbError(error, "Sino: clique");
@@ -551,10 +695,10 @@ export async function markClicked(userId: string, id: string, now = new Date()) 
   return { campaignId: row.campaign_id, kind: row.kind };
 }
 
-/** "Aceitar" ou "Recusar" num aviso que pede resposta. A primeira resposta vale; a segunda e 409. */
+/** "Aceitar" ou "Recusar" num aviso que pede resposta (conta como aberta). A primeira vale; a segunda e 409. */
 export async function respondToNotification(userId: string, id: string, response: NotificationResponseValue, now = new Date()) {
   const db = communicationsDb();
-  const row = await fetchOwnVisible(db, userId, id);
+  const row = await fetchOwnVisible(db, userId, id, { now });
   const campaign = single(row.campaign);
 
   if (row.kind !== "notice" || campaign?.response_mode !== "accept_decline") {
@@ -568,7 +712,7 @@ export async function respondToNotification(userId: string, id: string, response
   const nowIso = now.toISOString();
   const { data, error } = await db
     .from("notifications")
-    .update({ read_at: row.read_at ?? nowIso, responded_at: nowIso, response, seen_at: row.seen_at ?? nowIso })
+    .update({ opened_at: row.opened_at ?? nowIso, read_at: row.read_at ?? nowIso, responded_at: nowIso, response, seen_at: row.seen_at ?? nowIso })
     .eq("id", row.id)
     .eq("user_id", userId)
     .is("response", null)
@@ -580,4 +724,53 @@ export async function respondToNotification(userId: string, id: string, response
   }
 
   return { campaignId: row.campaign_id, response };
+}
+
+type AudioRecord = { completed: boolean; completedNow: boolean; heard: string; percent: number; startedNow: boolean };
+
+/**
+ * Audio do aviso no sino (POST /api/notifications/[id]/audio): "started" no primeiro play (visto, lido,
+ * aberto e o comeco do audio) ou "progress" com os 48 trechos ouvidos, somados por OU no banco (so
+ * cresce; 44 ou mais = ouvido). So na propria linha, visivel, dentro do expires_at e com audio; senao
+ * 404. Banco sem a 202610200002: 404.
+ */
+export async function recordNotificationAudio(
+  userId: string,
+  id: string,
+  input: { event: "progress"; heard: string } | { event: "started" },
+  now = new Date()
+) {
+  const db = communicationsDb();
+  const row = await fetchOwnVisible(db, userId, id, { now, requireAudio: true });
+
+  try {
+    const { data, error } = await db.rpc("communication_record_notification_audio", {
+      p_event: input.event,
+      p_heard: input.event === "progress" ? input.heard : null,
+      p_notification_id: row.id,
+      p_now: now.toISOString(),
+      p_user_id: userId
+    });
+    assertNoDbError(error, "Sino: audio ouvido");
+
+    const result = (data ?? null) as AudioRecord | null;
+
+    if (!result) {
+      throw new CommunicationError(NOTIFICATION_NOT_FOUND, 404);
+    }
+
+    const audioProgress: NotificationAudioProgress = {
+      completed: Boolean(result.completed),
+      heard: HEARD_MASK.test(result.heard) ? result.heard : "0".repeat(AUDIO_HEARD_SLOTS),
+      percent: Math.min(100, Math.max(0, Math.trunc(Number(result.percent) || 0)))
+    };
+
+    return { audioProgress, campaignId: row.campaign_id, completedNow: Boolean(result.completedNow), startedNow: Boolean(result.startedNow) };
+  } catch (error) {
+    if (isMissingCommunicationSchema(error)) {
+      throw new CommunicationError(NOTIFICATION_NOT_FOUND, 404);
+    }
+
+    throw error;
+  }
 }

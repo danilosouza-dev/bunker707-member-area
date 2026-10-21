@@ -87,6 +87,7 @@ export function MemberNotificationsMenu({
   className,
   onNavigate,
   refreshSummaryOnMount = true,
+  schoolIconUrl,
   schoolLogoUrl,
   schoolName
 }: {
@@ -96,6 +97,9 @@ export function MemberNotificationsMenu({
   onNavigate?: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
   /** false na home: o numero vem no pedido do pop-up (MemberPopupHost), um pedido so. */
   refreshSummaryOnMount?: boolean;
+  /** Icone da escola (Marca): o circulo dos avisos enviados pela escola. */
+  schoolIconUrl?: string | null;
+  /** Logo do topo: reserva do circulo quando o icone nao carrega. */
   schoolLogoUrl?: string | null;
   schoolName: string;
 }) {
@@ -148,6 +152,7 @@ export function MemberNotificationsMenu({
               accessPreviewMode={accessPreviewMode}
               onClose={() => setOpen(false)}
               onNavigate={onNavigate}
+              schoolIconUrl={schoolIconUrl}
               schoolLogoUrl={schoolLogoUrl}
               schoolName={schoolName}
             />

@@ -498,3 +498,195 @@ test("gravacao: para meio segundo antes de 5 min, aceita o atraso da parada e re
     false
   );
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * v2 (docs/23): quem envia, icone ao lado do titulo, tempo no sino, previa e relatorio
+ * ---------------------------------------------------------------------------------------------- */
+
+const meta = await import("../src/server/communications/message-meta.ts");
+
+const EU = { avatarUrl: null, id: "11111111-1111-4111-8111-111111111111", isMe: true, name: "Ana Souza", roleLabel: "Dono" };
+const PROFESSOR = { avatarUrl: "https://cdn.test/carlos.webp", id: "22222222-2222-4222-8222-222222222222", isMe: false, name: "Carlos Lima", roleLabel: "Professor" };
+const SEM_FOTO = { avatarUrl: null, id: "33333333-3333-4333-8333-333333333333", isMe: false, name: "Bruna Alves", roleLabel: "Editor de conteúdo" };
+const EQUIPE = [PROFESSOR, EU, SEM_FOTO];
+
+test("previa v2: quem envia, icone, 'Termina em 23 h' de uma notificacao de 1 dia e o audio nas pilulas", () => {
+  const createdAt = new Date(NOW - model.PREVIEW_AGE_MS).toISOString();
+  const audio = { durationSeconds: 20, mimeType: "audio/webm", peaks: [10, 50], url: "https://cdn.test/a.webm" };
+  const item = model.draftToNotificationItem(
+    draft({ audio, icon: { color: "red", id: "promo" }, sender: { userId: PROFESSOR.id }, validity: { minutes: 1_440, mode: "duration" } }),
+    { createdAt, listen: "heard", sender: model.previewSender({ userId: PROFESSOR.id }, EQUIPE) }
+  );
+
+  assert.deepEqual(item.actor, { avatarUrl: PROFESSOR.avatarUrl, name: "Carlos Lima" }, "o circulo e a pessoa");
+  assert.deepEqual(item.icon, { color: "red", id: "promo" });
+  assert.equal(item.expiresAt, new Date(Date.parse(createdAt) + 86_400_000).toISOString());
+  assert.equal(meta.urgencyLabel(item, NOW), "Termina em 23 h", "chegou ha instantes: como o aluno ve logo depois do envio");
+  assert.equal(model.formatPercent(item.audioProgress.percent), "100%");
+  assert.deepEqual(item.audioProgress, { completed: true, heard: "1".repeat(48), percent: 100 });
+
+  const naoOuvido = model.draftToNotificationItem(draft({ audio }), { createdAt });
+  assert.deepEqual(naoOuvido.audioProgress, { completed: false, heard: "0".repeat(48), percent: 0 }, "padrao das pilulas: nao ouvido");
+  assert.equal(model.draftToNotificationItem(draft(), { createdAt }).audioProgress, null, "sem audio, sem estado");
+
+  const padrao = model.draftToNotificationItem(draft(), { createdAt });
+  assert.equal(padrao.actor, null, "sem pessoa: a escola");
+  assert.equal(padrao.icon, null);
+  assert.equal(padrao.expiresAt, new Date(Date.parse(createdAt) + 90 * 86_400_000).toISOString());
+  assert.equal(meta.urgencyLabel(padrao, NOW), null, "o padrao de 90 dias nunca mostra");
+
+  assert.equal(model.previewSender({ userId: "44444444-4444-4444-8444-444444444444" }, EQUIPE), null, "quem saiu da equipe aparece como a escola");
+  assert.equal(model.draftToNotificationItem(draft({ validity: { endsAt: new Date(NOW - 3_600_000).toISOString(), mode: "until" } }), { createdAt }).expiresAt, null, "data que ja passou: sem fim na previa");
+
+  const seguinte = { ...draft(), validity: { mode: "with_anchor" } };
+  assert.equal(model.draftToNotificationItem(seguinte, { createdAt }).expiresAt, null, "sem a hora da principal, sem fim");
+  assert.equal(
+    model.draftToNotificationItem(seguinte, { anchorExpiresAt: NOW + 3 * 3_600_000, createdAt }).expiresAt,
+    new Date(NOW + 3 * 3_600_000).toISOString(),
+    "ate a principal sumir: o fim da principal"
+  );
+
+  const popup = draft({ icon: null, kind: "popup", sender: { userId: PROFESSOR.id } });
+  assert.equal(model.draftToNotificationItem(popup, { createdAt, sender: { avatarUrl: null, name: "x" } }).actor, null, "pop-up nao tem quem envia");
+  assert.equal("icon" in model.draftToPopupItem(popup), false, "pop-up sem icone: a chave nem vai (como a API)");
+  assert.deepEqual(model.draftToPopupItem({ ...popup, icon: { color: "amber", id: "clock" } }).icon, { color: "amber", id: "clock" });
+});
+
+test("rascunho v2: canonicalNoticeDraft e isSameNoticeDraft veem quem envia, icone e validade (e nada quando nada mudou)", () => {
+  const base = draft({ icon: { color: "red", id: "promo" }, sender: { userId: PROFESSOR.id }, validity: { minutes: 4_320, mode: "duration" } });
+
+  assert.equal(model.isSameNoticeDraft(base, { ...base, icon: { color: "red", id: "promo" }, sender: { userId: PROFESSOR.id } }), true);
+  assert.equal(model.isSameNoticeDraft(base, { ...base, sender: null }), false, "quem envia");
+  assert.equal(model.isSameNoticeDraft(base, { ...base, icon: { color: "white", id: "promo" } }), false, "cor do icone");
+  assert.equal(model.isSameNoticeDraft(base, { ...base, icon: null }), false, "sem icone");
+  assert.equal(model.isSameNoticeDraft(base, { ...base, validity: { mode: "default" } }), false, "tempo no sino");
+  assert.equal(
+    model.isSameNoticeDraft(draft({ validity: { endsAt: "2026-10-25T14:30:00-03:00", mode: "until" } }), draft({ validity: { endsAt: "2026-10-25T17:30:00.000Z", mode: "until" } })),
+    true,
+    "a mesma data em outro fuso"
+  );
+  assert.deepEqual(model.canonicalNoticeDraft(draft({ kind: "popup", sender: { userId: PROFESSOR.id }, validity: { minutes: 60, mode: "duration" } })).sender, null, "pop-up nao grava quem envia");
+  assert.deepEqual(model.canonicalNoticeDraft(draft({ kind: "popup", validity: { minutes: 60, mode: "duration" } })).validity, { mode: "default" });
+});
+
+test("icone: escolher marca a cor sugerida (Promoção -> Vermelho) e os rotulos dizem a escolha em texto", () => {
+  assert.deepEqual(model.pickNoticeIcon("promo"), { color: "red", id: "promo" });
+  assert.deepEqual(model.pickNoticeIcon("gift"), { color: "green", id: "gift" });
+  assert.equal(model.pickNoticeIcon(null), null);
+
+  for (const id of meta.NOTICE_ICON_IDS) {
+    assert.equal(model.pickNoticeIcon(id).color, meta.NOTICE_ICON_SUGGESTED_COLOR[id]);
+    assert.ok(schemas.iconSchema.safeParse(model.pickNoticeIcon(id)).success, id);
+  }
+
+  assert.equal(model.noticeIconFieldLabel(null), "Ícone ao lado do título · Sem ícone");
+  assert.equal(model.noticeIconFieldLabel({ color: "red", id: "promo" }), "Ícone ao lado do título · Promoção");
+  assert.equal(model.noticeIconColorLabel({ color: "red", id: "promo" }), "Cor do ícone · Vermelho");
+  assert.equal(model.noticeIconColorLabel({ color: "amber", id: "promo" }), "Cor do ícone · Amarelo", "a cor pode ser trocada");
+});
+
+test("quem envia: a escola primeiro, 'Eu (...)' e a equipe em ordem alfabetica; quem saiu fica no fim", () => {
+  const options = model.noticeSenderOptions({ saved: null, schoolIconUrl: meta.SCHOOL_DEFAULT_ICON, schoolName: "Bunker707", senders: EQUIPE });
+
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ["Bunker707 (a escola)", "Eu (Ana Souza)", "Bruna Alves · Editor de conteúdo", "Carlos Lima · Professor"]
+  );
+  assert.equal(options[0].value, model.SCHOOL_SENDER_VALUE);
+  assert.equal(options[0].avatarUrl, meta.SCHOOL_DEFAULT_ICON);
+
+  const comSaida = model.noticeSenderOptions({ saved: { id: "55555555-5555-4555-8555-555555555555", name: "Dora Reis" }, schoolIconUrl: null, schoolName: "Bunker707", senders: EQUIPE });
+  assert.equal(comSaida.at(-1).label, "Dora Reis · fora da equipe");
+});
+
+test("quem envia: uma dica por vez, a primeira que vale", () => {
+  const dica = (sender, extra = {}) => model.noticeSenderHint({ canEditBrand: false, saved: null, schoolName: "Bunker707", sender, senders: EQUIPE, ...extra });
+
+  const saiu = dica({ userId: "55555555-5555-4555-8555-555555555555" }, { saved: { id: "55555555-5555-4555-8555-555555555555", name: "Dora Reis" } });
+  assert.equal(saiu.text, "Dora Reis não está mais na equipe: a notificação sai como Bunker707.");
+  assert.equal(saiu.tone, "warning");
+
+  const euSemFoto = dica({ userId: EU.id });
+  assert.equal(euSemFoto.text, "Você ainda não tem foto: o aluno vê as suas iniciais.");
+  assert.deepEqual(euSemFoto.link, { href: "/perfil", label: "Colocar a minha foto em Perfil", newTab: true });
+  assert.equal(euSemFoto.watchesProfile, true, "rele a equipe quando a janela volta ao foco");
+
+  const euComFoto = model.noticeSenderHint({ canEditBrand: false, schoolName: "Bunker707", sender: { userId: EU.id }, senders: [{ ...EU, avatarUrl: "https://cdn.test/ana.webp" }] });
+  assert.equal(euComFoto.text, "O aluno vê a foto e o nome de quem envia. Só pessoas da equipe aparecem aqui.");
+  assert.equal(euComFoto.watchesProfile, false);
+
+  assert.equal(dica({ userId: PROFESSOR.id }).text, "Quando sair, Carlos Lima recebe um e-mail avisando: “Ana Souza enviou uma notificação em seu nome”.");
+  assert.equal(
+    dica({ userId: SEM_FOTO.id }).text,
+    "Quando sair, Bruna Alves recebe um e-mail avisando: “Ana Souza enviou uma notificação em seu nome”. Bruna Alves ainda não tem foto: o aluno vê as iniciais. Peça para Bruna Alves colocar a foto no Perfil da área de membros."
+  );
+
+  assert.equal(dica(null).text, "O aluno vê a foto e o nome de quem envia. Só pessoas da equipe aparecem aqui.", "padrao");
+  const marca = dica(null, { canEditBrand: true });
+  assert.equal(marca.text, "O círculo mostra o ícone da escola.");
+  assert.deepEqual(marca.link, { href: "/admin/area-de-membros/marca", label: "Trocar em Área de membros › Marca", newTab: true });
+
+  for (const hint of [saiu, euSemFoto, dica({ userId: PROFESSOR.id }), marca]) {
+    assert.doesNotMatch(hint.text, FORBIDDEN_COPY);
+  }
+});
+
+test("fica no sino por: pilulas 1, 3, 7, 30 e 90 dias, 'Outro' por um tempo ou ate uma data, e a dica do 'Termina em'", () => {
+  assert.deepEqual(model.VALIDITY_CHOICE_OPTIONS.map((option) => option.label), ["1 dia", "3 dias", "7 dias", "30 dias", "90 dias", "Outro"]);
+  assert.equal(model.validityChoiceOf({ mode: "default" }), "90", "90 dias e o padrao");
+  assert.equal(model.validityChoiceOf({ minutes: 1_440, mode: "duration" }), "1");
+  assert.equal(model.validityChoiceOf({ minutes: 43_200, mode: "duration" }), "30");
+  assert.equal(model.validityChoiceOf({ minutes: 600, mode: "duration" }), "other");
+  assert.equal(model.validityChoiceOf({ endsAt: "2026-10-25T17:30:00.000Z", mode: "until" }), "other");
+  assert.equal(model.validityChoiceOf({ mode: "with_anchor" }), "anchor");
+
+  assert.deepEqual(model.validityOfChoice("3", { mode: "default" }), { minutes: 4_320, mode: "duration" });
+  assert.deepEqual(model.validityOfChoice("90", { minutes: 600, mode: "duration" }), { mode: "default" });
+  assert.deepEqual(model.validityOfChoice("other", { mode: "default" }), model.DEFAULT_OTHER_VALIDITY);
+  assert.deepEqual(model.validityOfChoice("other", { minutes: 600, mode: "duration" }), { minutes: 600, mode: "duration" }, "'Outro' guarda o que ja estava");
+  assert.deepEqual(model.validityOfChoice("anchor", { mode: "default" }), { mode: "with_anchor" });
+  assert.equal(schemas.validitySchema.safeParse(model.DEFAULT_OTHER_VALIDITY).success, true);
+
+  assert.deepEqual(model.validityDurationParts(2_880), { amount: 2, unit: "days" });
+  assert.deepEqual(model.validityDurationParts(600), { amount: 10, unit: "hours" });
+  assert.equal(model.validityDurationMinutes(5, "hours"), 300);
+  assert.equal(model.validityDurationMinutes(2, "days"), 2_880);
+  assert.ok(Number.isNaN(model.validityDurationMinutes(Number.NaN, "days")));
+  assert.equal(schemas.validitySchema.safeParse({ minutes: model.validityDurationMinutes(Number.NaN, "days"), mode: "duration" }).error.issues[0].message, "Use de 1 hora a 90 dias.");
+
+  assert.equal(model.showsUrgencyHint({ minutes: 43_200, mode: "duration" }, NOW), true, "30 dias ou menos");
+  assert.equal(model.showsUrgencyHint({ minutes: 43_260, mode: "duration" }, NOW), false);
+  assert.equal(model.showsUrgencyHint({ mode: "default" }, NOW), false, "o padrao de 90 dias nunca mostra");
+  assert.equal(model.showsUrgencyHint({ endsAt: new Date(NOW + 5 * 86_400_000).toISOString(), mode: "until" }, NOW), true);
+  assert.equal(model.showsUrgencyHint({ endsAt: new Date(NOW + 31 * 86_400_000).toISOString(), mode: "until" }, NOW), false);
+});
+
+test("relatorio v2: Abriram no funil da notificacao (sobre quem viu), o audio sobre quem abriu e 'Criada por … · em nome de …'", () => {
+  const stats = { accepted: 0, clicked: 30, closedWithoutClick: 0, declined: 0, dismissed: 0, opened: 80, recipients: 400, seen: 200, snoozed: 0, studied7d: 50 };
+
+  assert.deepEqual(
+    model.noticeFunnel(stats, "inbox").map((step) => [step.label, step.value, step.percent, step.base]),
+    [
+      ["Para quem", 400, null, "receberam no sino"],
+      ["Viram", 200, 50, "de quem recebeu"],
+      ["Abriram", 80, 40, "de quem viu"],
+      ["Clicaram", 30, 15, "de quem viu"],
+      ["Voltaram a estudar (7 dias)", 50, 25, "de quem viu"]
+    ]
+  );
+  assert.equal(model.noticeFunnel(stats, "popup").some((step) => step.id === "opened"), false, "pop-up nao tem Abriram");
+  assert.equal(model.noticeFunnel({ ...stats, opened: undefined }, "inbox")[2].value, 0);
+
+  assert.deepEqual(
+    model.noticeAudioSteps({ audioCompleted: 30, audioStarted: 60, opened: 80 }).map((step) => [step.label, step.value, step.percent, step.base]),
+    [
+      ["Começaram o áudio", 60, 75, "de quem abriu"],
+      ["Ouviram até o fim", 30, 37.5, "de quem abriu"]
+    ]
+  );
+  assert.equal(model.noticeAudioSteps({ audioCompleted: 0, audioStarted: 0, opened: 0 })[0].percent, null);
+
+  assert.equal(model.noticeAuthorLine({ name: "Ana Souza" }, { name: "Carlos Lima" }), "Criada por Ana Souza · em nome de Carlos Lima");
+  assert.equal(model.noticeAuthorLine({ name: "Ana Souza" }, null), null, "da escola, sem a linha");
+  assert.equal(model.noticeAuthorLine(null, { name: "Carlos Lima" }), "Criada por Equipe · em nome de Carlos Lima");
+});

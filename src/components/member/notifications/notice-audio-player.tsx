@@ -1,19 +1,32 @@
 "use client";
 
-import { LoaderCircle, Pause, Play, RotateCw } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { CheckCheck, LoaderCircle, Pause, Play, RotateCw } from "lucide-react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { NotificationAudio } from "@/server/communications/notification-model";
 import { cn } from "@/lib/utils";
 import {
   AUDIO_SEEK_STEP_SECONDS,
+  audioGroupLabel,
   clampAudioTime,
+  countHeard,
+  EMPTY_HEARD,
   formatAudioPosition,
   formatAudioRate,
   formatAudioTime,
+  heardBars,
+  heardPercent,
+  heardSlotsFromRanges,
+  listenState,
   nextAudioRate,
+  normalizeHeard,
+  orHeard,
+  shouldFlushAudio,
   waveformBarCount,
   waveformHeights,
   WAVEFORM_MAX_BARS,
+  type AudioFlushReason,
+  type AudioListenState,
+  type AudioProgressEvent,
   type AudioRate
 } from "./notifications-model";
 
@@ -23,6 +36,13 @@ import {
 // do admin, dentro de moldura inert) desenha o mesmo visual parado, sem <audio> nem rede. No toque
 // (celular), so pula com um toque parado ou um arraste para o lado: rolar a lista com o dedo em cima da
 // onda nao mexe na posicao.
+//
+// No sino (`listen`, docs/23), o player mostra o que o aluno ja ouviu, como o WhatsApp: nunca tocado
+// (bolinha branca antes do tempo), ouvido em parte (barras ouvidas mais claras), ouvido (44 de 48
+// trechos: onda verde e o CheckCheck). O ouvido sai do que tocou de verdade (audio.played), soma com o
+// que o servidor ja tem e vai por `onProgress`: fetch tocando (5 trechos a mais e 15 s), na pausa e no
+// fim; beacon com a aba escondida, na saida da pagina e quando o painel fecha. O pop-up nao passa
+// `listen`: desenha exatamente a v1 e nao guarda nada.
 
 let currentlyPlaying: HTMLAudioElement | null = null;
 
@@ -72,14 +92,45 @@ function useWaveformBars(ref: React.RefObject<HTMLElement | null>) {
   return count;
 }
 
-function Waveform({ heights, progress }: { heights: readonly number[]; progress: number }) {
+/** Cor de uma barra: antes da posicao (tocando) branca; depois, verde (ouvido), clara (ouvida) ou apagada. */
+function barClassName(input: { before: boolean; completed: boolean; heard: boolean; listening: boolean }) {
+  if (input.before) {
+    return "bg-white";
+  }
+
+  if (!input.listening) {
+    return "bg-white/30";
+  }
+
+  if (input.completed) {
+    return "bg-emerald-400";
+  }
+
+  return input.heard ? "bg-white/60" : "bg-white/30";
+}
+
+function Waveform({
+  completed = false,
+  heard = null,
+  heights,
+  progress
+}: {
+  completed?: boolean;
+  /** Barras ja ouvidas (heardBars); null = sem `listen` (pop-up, editor): so a posicao. */
+  heard?: readonly boolean[] | null;
+  heights: readonly number[];
+  progress: number;
+}) {
   const played = Math.round(progress * heights.length);
 
   return (
     <span aria-hidden="true" className="flex h-8 w-full items-center justify-between gap-[2px] overflow-hidden">
       {heights.map((height, index) => (
         <span
-          className={cn("w-[3px] shrink-0 rounded-full", index < played ? "bg-white" : "bg-white/30")}
+          className={cn(
+            "w-[3px] shrink-0 rounded-full",
+            barClassName({ before: index < played, completed, heard: Boolean(heard?.[index]), listening: heard !== null })
+          )}
           // Posicao fixa de cada barra: o indice e a identidade.
           key={index}
           style={{ height: `${height}%` }}
@@ -89,15 +140,43 @@ function Waveform({ heights, progress }: { heights: readonly number[]; progress:
   );
 }
 
+/** Sinal que nao e so cor, antes do tempo: bolinha branca (nunca tocado) ou CheckCheck (ouvido). */
+function ListenCue({ state }: { state: AudioListenState | null }) {
+  if (state === "never") {
+    return <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-zinc-100" />;
+  }
+
+  if (state === "completed") {
+    return (
+      <>
+        <CheckCheck aria-hidden="true" className="size-3.5 shrink-0 text-emerald-400" strokeWidth={2.4} />
+        <span className="sr-only">Áudio ouvido</span>
+      </>
+    );
+  }
+
+  return null;
+}
+
+/** O que o sino sabe do audio deste aluno (o servidor soma tudo, entre visitas e aparelhos). */
+export type NoticeAudioListen = { completed: boolean; heard: string };
+
 export type NoticeAudioPlayerProps = {
   audio: NotificationAudio;
   className?: string;
   /** Igual a `preview`: dentro de moldura inert nao ha o que tocar. */
   inert?: boolean;
-  /** Nome do grupo para o leitor de tela, ex.: "Áudio do aviso". */
+  /** Nome do grupo para o leitor de tela, ex.: "Áudio do aviso" (com `listen`, ganha o estado). */
   label: string;
-  /** Primeiro play (o painel marca a notificacao como lida). */
+  /**
+   * Sino: o ouvido gravado deste aluno. Desenha os quatro estados (tambem parado, na previa do admin) e
+   * liga `onProgress`. Sem ele (pop-up, editor), o player e exatamente o da v1.
+   */
+  listen?: NoticeAudioListen | null;
+  /** Primeiro play (v1: o painel marcava a notificacao como lida). */
   onPlay?: () => void;
+  /** Sino: "started" no primeiro play e a mascara ouvida quando cresce (shouldFlushAudio). */
+  onProgress?: (event: AudioProgressEvent) => void;
   preview?: boolean;
 };
 
@@ -106,7 +185,7 @@ export function NoticeAudioPlayer(props: NoticeAudioPlayerProps) {
   return <AudioPlayer key={props.audio.url} {...props} />;
 }
 
-function AudioPlayer({ audio, className, inert = false, label, onPlay, preview = false }: NoticeAudioPlayerProps) {
+function AudioPlayer({ audio, className, inert = false, label, listen = null, onPlay, onProgress, preview = false }: NoticeAudioPlayerProps) {
   const waveRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const pendingSeekRef = useRef<number | null>(null);
@@ -118,15 +197,31 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
   const [playing, setPlaying] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [started, setStarted] = useState(false);
+  /** Ja tocou nesta visita (pular pela onda sem tocar nao tira o "ainda nao ouvido"). */
+  const [hasPlayed, setHasPlayed] = useState(false);
   const [current, setCurrent] = useState(0);
   const [mediaDuration, setMediaDuration] = useState<number | null>(null);
   const [rate, setRate] = useState<AudioRate>(1);
   const [failed, setFailed] = useState(false);
+  /** Trechos tocados nesta visita (somados por OU; recarregar o arquivo nao apaga). */
+  const [localHeard, setLocalHeard] = useState(EMPTY_HEARD);
+  const localHeardRef = useRef(EMPTY_HEARD);
+  /** O que ja foi mandado ao servidor (OU de tudo) e quando. */
+  const sentHeardRef = useRef(EMPTY_HEARD);
+  const lastSentAtRef = useRef(0);
   const staticMode = preview || inert;
+  /** Sino de verdade: guarda o ouvido (a previa so desenha). */
+  const tracking = Boolean(listen) && !staticMode;
   // Gravacao do navegador (webm) costuma vir sem duracao; vale a medida gravada com o aviso.
   const duration = mediaDuration ?? Math.max(audio.durationSeconds, 0);
   const heights = waveformHeights(audio.peaks, barCount);
   const progress = duration > 0 ? Math.min(current / duration, 1) : 0;
+  // Ouvido: o do servidor somado ao desta visita (o verde aparece na hora, antes da resposta).
+  const heard = listen ? orHeard(listen.heard, staticMode ? EMPTY_HEARD : localHeard) : null;
+  const listened = heard ? listenState(heard, !staticMode && hasPlayed) : null;
+  const state: AudioListenState | null = listened && listen?.completed ? "completed" : listened;
+  const completed = state === "completed";
+  const groupLabel = state ? audioGroupLabel(label, { percent: heardPercent(heard), playing: !staticMode && playing, state }) : label;
 
   // Sai da pagina (ou troca de aviso): para de tocar e libera a vez.
   useEffect(() => {
@@ -139,6 +234,89 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
       }
     };
   }, [audio.url]);
+
+  /** Soma o que o elemento ja tocou (audio.played) ao ouvido desta visita. */
+  function collectHeard(element: HTMLAudioElement | null) {
+    let mask = localHeardRef.current;
+
+    if (element && element.played.length > 0) {
+      const ranges: { end: number; start: number }[] = [];
+
+      for (let index = 0; index < element.played.length; index += 1) {
+        ranges.push({ end: element.played.end(index), start: element.played.start(index) });
+      }
+
+      const total = Number.isFinite(element.duration) && element.duration > 0 ? element.duration : duration;
+      mask = orHeard(mask, heardSlotsFromRanges(ranges, total));
+    }
+
+    localHeardRef.current = mask;
+    return mask;
+  }
+
+  /** Manda o ouvido quando cresceu (o caminho e a hora vem de shouldFlushAudio). Nada antes do primeiro play. */
+  function flushHeard(reason: AudioFlushReason, element: HTMLAudioElement | null) {
+    if (!tracking || !listen || !onProgress || !playNotifiedRef.current) {
+      return;
+    }
+
+    const mask = orHeard(listen.heard, collectHeard(element));
+    const known = orHeard(listen.heard, sentHeardRef.current);
+    const via = shouldFlushAudio({
+      heard: countHeard(mask),
+      known: countHeard(known),
+      msSinceLastSend: Date.now() - lastSentAtRef.current,
+      reason
+    });
+
+    if (!via) {
+      return;
+    }
+
+    sentHeardRef.current = orHeard(sentHeardRef.current, mask);
+    lastSentAtRef.current = Date.now();
+    onProgress({ event: "progress", heard: normalizeHeard(mask), via });
+  }
+
+  function trackHeard(element: HTMLAudioElement, reason: AudioFlushReason) {
+    if (!tracking) {
+      return;
+    }
+
+    const mask = collectHeard(element);
+    setLocalHeard((previous) => (previous === mask ? previous : mask));
+    flushHeard(reason, element);
+  }
+
+  // Aba escondida, saida da pagina e o painel fechando: o ouvido vai por beacon (a resposta nao e lida).
+  const flushOnLeave = useEffectEvent((reason: AudioFlushReason, element: HTMLAudioElement | null) => flushHeard(reason, element));
+
+  useEffect(() => {
+    if (!tracking) {
+      return;
+    }
+
+    const element = audioRef.current;
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        flushOnLeave("hidden", element);
+      }
+    }
+
+    function handlePageHide() {
+      flushOnLeave("pagehide", element);
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+      flushOnLeave("unmount", element);
+    };
+  }, [tracking]);
 
   function seekTo(seconds: number) {
     const next = clampAudioTime(seconds, duration);
@@ -323,16 +501,22 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
   const timeLabel = formatAudioTime(current, duration, started);
   const rateLabel = formatAudioRate(rate);
 
+  const heardBarList = heard ? heardBars(heard, heights.length) : null;
+  const cueClassName = state === "never" || state === "completed" ? "inline-flex items-center justify-end gap-1.5" : undefined;
+
   if (staticMode) {
     return (
-      <div aria-label={label} className={cn(pillClassName, className)} role="group">
+      <div aria-label={groupLabel} className={cn(pillClassName, className)} role="group">
         <span aria-hidden="true" className={playButtonClassName}>
           <Play className="size-4 translate-x-px fill-current" strokeWidth={2.4} />
         </span>
         <div className="min-w-0 flex-1" ref={waveRef}>
-          <Waveform heights={heights} progress={0} />
+          <Waveform completed={completed} heard={heardBarList} heights={heights} progress={0} />
         </div>
-        <span className={timeClassName}>{formatAudioTime(0, duration, false)}</span>
+        <span className={cn(timeClassName, cueClassName)}>
+          <ListenCue state={state} />
+          {formatAudioTime(0, duration, false)}
+        </span>
         <span aria-hidden="true" className={speedClassName}>
           {formatAudioRate(1)}
         </span>
@@ -342,7 +526,7 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
 
   return (
     <div className={className}>
-      <div aria-label={label} className={pillClassName} role="group">
+      <div aria-label={groupLabel} className={pillClassName} role="group">
         <button
           aria-label={playing ? "Pausar áudio" : "Tocar áudio"}
           className={playButtonClassName}
@@ -376,9 +560,12 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
           role="slider"
           tabIndex={0}
         >
-          <Waveform heights={heights} progress={progress} />
+          <Waveform completed={completed} heard={heardBarList} heights={heights} progress={progress} />
         </div>
-        <span className={timeClassName}>{timeLabel}</span>
+        <span className={cn(timeClassName, cueClassName)}>
+          <ListenCue state={state} />
+          {timeLabel}
+        </span>
         <button aria-label={`Velocidade ${rateLabel}`} className={speedClassName} onClick={changeRate} type="button">
           {rateLabel}
         </button>
@@ -398,6 +585,7 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
       ) : null}
       <audio
         onEnded={(event) => {
+          trackHeard(event.currentTarget, "ended");
           setPlaying(false);
           setWaiting(false);
           setStarted(false);
@@ -428,14 +616,21 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
           setPlaying(false);
           setWaiting(false);
           releasePlayback(event.currentTarget);
+          trackHeard(event.currentTarget, "pause");
         }}
         onPlay={(event) => {
           claimPlayback(event.currentTarget);
           setPlaying(true);
+          setHasPlayed(true);
 
           if (!playNotifiedRef.current) {
             playNotifiedRef.current = true;
+            lastSentAtRef.current = Date.now();
             onPlay?.();
+
+            if (tracking) {
+              onProgress?.({ event: "started" });
+            }
           }
 
           setStarted(true);
@@ -445,6 +640,8 @@ function AudioPlayer({ audio, className, inert = false, label, onPlay, preview =
           if (!draggingRef.current) {
             setCurrent(event.currentTarget.currentTime);
           }
+
+          trackHeard(event.currentTarget, "timeupdate");
         }}
         onWaiting={() => setWaiting(true)}
         preload="none"

@@ -6,6 +6,8 @@ import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { getAppShellData, getHomePageData } from "@/server/db/platform-store";
 import { requireStudentPageUser } from "@/server/auth/guards";
+import { pageKeyOfRoute } from "@/server/member-area/page-visit-model";
+import { trackMemberPageVisit } from "@/server/member-area/page-visits";
 import { isHeroVisible, resolveHomeHero } from "@/server/member-area/home-hero-model";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +28,7 @@ export default async function Home({ searchParams }: HomeProps) {
   // Destaque gravado em Área de membros > Destaque: normalizado e com o botão conferido (link seguro).
   const hero = resolveHomeHero(storedHero);
   const heroVisible = isHeroVisible(hero);
+  await trackMemberPageVisit({ accessPreviewMode, pageKey: pageKeyOfRoute("/"), userId: user.id });
 
   return (
     <AppShell

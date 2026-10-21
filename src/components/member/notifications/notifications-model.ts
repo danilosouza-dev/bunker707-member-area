@@ -1,9 +1,17 @@
-// Regras puras do sino e do pop-up do aluno (docs/22): grupos por dia, numero do sino, nome acessivel,
-// relogio e forma de onda do audio, destino dos links e marcacao local de lidas. Modulo puro (sem
+// Regras puras do sino e do pop-up do aluno (docs/22; v2 em docs/23): grupos por dia, numero do sino,
+// nome acessivel, relogio e forma de onda do audio, audio ouvido (48 trechos, como o WhatsApp), linha de
+// quem envia com o "Termina em", destino dos links e marcacao local de lidas e abertas. Modulo puro (sem
 // React, imports relativos): tests/sino-do-aluno-modelo.test.mjs carrega direto pelo Node, e o painel,
 // o cartao, o pop-up e a previa do admin usam as mesmas regras.
 
-import type { NotificationCta, NotificationItem } from "../../../server/communications/notification-model";
+import { FLOW_LIMITS } from "../../../server/communications/flow-model";
+import { urgencyLabel } from "../../../server/communications/message-meta";
+import {
+  AUDIO_COMPLETE_SLOTS,
+  AUDIO_HEARD_SLOTS,
+  type NotificationCta,
+  type NotificationItem
+} from "../../../server/communications/notification-model";
 import { withAccessPreviewParam, type AccessPreviewMode } from "../../../lib/access-preview";
 import { getMemberDayDifference } from "../../../lib/member-format";
 import { isSafeHeroCtaHref } from "../../../server/member-area/home-hero-links";
@@ -97,6 +105,22 @@ export function markNotificationsRead<T extends Pick<NotificationItem, "id" | "r
   return items.map((item) => (item.readAt || (targets && !targets.has(item.id)) ? item : { ...item, readAt }));
 }
 
+/**
+ * Marca como abertas (localmente) as notificacoes dadas: aberta tambem conta como lida. Interacao de
+ * verdade (cartao, "Ver mais", audio, botao, resposta); "Marcar todas" so marca como lida.
+ */
+export function markNotificationsOpened<T extends Pick<NotificationItem, "id" | "openedAt" | "readAt">>(
+  items: readonly T[],
+  ids: readonly string[],
+  openedAt: string
+): T[] {
+  const targets = new Set(ids);
+
+  return items.map((item) =>
+    !targets.has(item.id) || (item.openedAt && item.readAt) ? item : { ...item, openedAt: item.openedAt ?? openedAt, readAt: item.readAt ?? openedAt }
+  );
+}
+
 /** Junta a pagina seguinte sem repetir itens (a mesma notificacao pode vir de novo apos uma escrita). */
 export function appendNotifications<T extends { id: string }>(current: readonly T[], next: readonly T[]): T[] {
   const seen = new Set(current.map((item) => item.id));
@@ -120,6 +144,47 @@ export function splitActorTitle(title: string, actorName: string | null | undefi
   }
 
   return { actor: null, rest: title };
+}
+
+// --- Quem envia, o fim no sino e o rodape ------------------------------------------------------------
+
+/** Rodape da lista: cada notificacao pode ficar menos que isso (Fica no sino por). */
+export const NOTIFICATIONS_FOOTER = "As notificações ficam aqui por até 90 dias.";
+
+/** Resposta (ou outra acao) numa notificacao que saiu do sino com o cartao ainda na tela (404). */
+export const NOTIFICATION_GONE_MESSAGE = "Esta notificação não está mais disponível.";
+
+/**
+ * Linha embaixo do texto do aviso: quem envia (a pessoa da equipe, resolvida na leitura, ou a escola) e
+ * "Termina em 3 h" (so perto do fim). `serverNow` e a hora do servidor da lista (asOf): nada conta no
+ * navegador; a previa do admin passa a hora da tela.
+ */
+export function noticeMeta(
+  item: Pick<NotificationItem, "actor" | "createdAt" | "expiresAt" | "kind" | "response">,
+  input: { schoolName: string; serverNow: number }
+) {
+  return { hint: urgencyLabel(item, input.serverNow), sender: item.actor?.name?.trim() || input.schoolName };
+}
+
+/** Quantos ids vao em `shown` no "abriu o sino" e no "Marcar todas" (o servidor aceita ate isto). */
+export const MAX_SHOWN_IDS = 50;
+
+/**
+ * Linhas que o painel mostrou e que ainda estao na folga de 15 s das linhas de fluxo (inbox.ts
+ * wasVisibleAt): vao em `shown` para serem marcadas mesmo assim. O item nao diz se veio de um fluxo,
+ * entao vao todos os avisos recentes; o servidor so usa a lista para as linhas de fluxo.
+ */
+export function recentFlowIds(items: readonly Pick<NotificationItem, "createdAt" | "id" | "kind">[], asOf: string): string[] {
+  const reference = Date.parse(asOf);
+
+  if (!Number.isFinite(reference)) {
+    return [];
+  }
+
+  return items
+    .filter((item) => item.kind === "notice" && Date.parse(item.createdAt) > reference - FLOW_LIMITS.flowRowSettleMs)
+    .slice(0, MAX_SHOWN_IDS)
+    .map((item) => item.id);
 }
 
 // --- Destino dos links ---------------------------------------------------------------------------
@@ -232,4 +297,194 @@ export function waveformHeights(peaks: readonly number[] | null | undefined, cou
 
     return Math.round(15 + (peak * 85) / 100);
   });
+}
+
+// --- Audio ouvido (48 trechos, como o WhatsApp) ----------------------------------------------------
+
+/** Nenhum trecho ouvido. */
+export const EMPTY_HEARD = "0".repeat(AUDIO_HEARD_SLOTS);
+const HEARD_MASK = /^[01]{48}$/;
+
+/** Mascara gravada lida sem confiar: fora do formato = nada ouvido. */
+export function normalizeHeard(mask: unknown): string {
+  return typeof mask === "string" && HEARD_MASK.test(mask) ? mask : EMPTY_HEARD;
+}
+
+/**
+ * Trechos ouvidos pelo que tocou de verdade (HTMLMediaElement.played, em segundos): o audio vira `slots`
+ * trechos iguais e um trecho conta quando os pedacos tocados cobrem pelo menos metade dele. Pular para
+ * o fim nao conta (o trecho pulado nunca tocou); 1,5x e 2x contam (o pedaco tocou).
+ */
+export function heardSlotsFromRanges(ranges: readonly { end: number; start: number }[], duration: number, slots = AUDIO_HEARD_SLOTS): string {
+  const count = Math.max(0, Math.trunc(slots));
+
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return "0".repeat(count);
+  }
+
+  // Pedacos dentro do audio, em ordem e sem sobreposicao (o navegador ja junta; aqui nao se confia).
+  const merged: { end: number; start: number }[] = [];
+  const sorted = ranges
+    .map((range) => ({ end: Math.min(duration, range.end), start: Math.max(0, range.start) }))
+    .filter((range) => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start)
+    .sort((left, right) => left.start - right.start);
+
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+
+    if (last && range.start <= last.end) {
+      last.end = Math.max(last.end, range.end);
+    } else {
+      merged.push({ ...range });
+    }
+  }
+
+  const slotLength = duration / count;
+  let mask = "";
+
+  for (let index = 0; index < count; index += 1) {
+    const start = index * slotLength;
+    const end = start + slotLength;
+    let covered = 0;
+
+    for (const range of merged) {
+      covered += Math.max(0, Math.min(end, range.end) - Math.max(start, range.start));
+    }
+
+    mask += covered >= slotLength / 2 - 1e-9 ? "1" : "0";
+  }
+
+  return mask;
+}
+
+/** OU de duas mascaras (o servidor faz o mesmo): o ouvido so cresce. */
+export function orHeard(left: unknown, right: unknown): string {
+  const a = normalizeHeard(left);
+  const b = normalizeHeard(right);
+  let mask = "";
+
+  for (let index = 0; index < AUDIO_HEARD_SLOTS; index += 1) {
+    mask += a[index] === "1" || b[index] === "1" ? "1" : "0";
+  }
+
+  return mask;
+}
+
+export function countHeard(mask: unknown): number {
+  let total = 0;
+
+  for (const slot of normalizeHeard(mask)) {
+    if (slot === "1") {
+      total += 1;
+    }
+  }
+
+  return total;
+}
+
+/** 0..100, como o servidor grava (audio_heard_percent = floor(trechos * 100 / 48)). */
+export function heardPercent(mask: unknown): number {
+  return Math.floor((countHeard(mask) * 100) / AUDIO_HEARD_SLOTS);
+}
+
+/**
+ * Barras da onda ouvidas: a barra `i` de `barCount` (12 a 48, pela largura) cobre os trechos
+ * [floor(i*48/n), floor((i+1)*48/n)) e conta como ouvida quando a maioria deles foi ouvida.
+ */
+export function heardBars(mask: unknown, barCount: number): boolean[] {
+  const heard = normalizeHeard(mask);
+  const bars = Math.min(AUDIO_HEARD_SLOTS, Math.max(1, Math.trunc(Number.isFinite(barCount) ? barCount : AUDIO_HEARD_SLOTS)));
+
+  return Array.from({ length: bars }, (_, index) => {
+    const start = Math.floor((index * AUDIO_HEARD_SLOTS) / bars);
+    const end = Math.floor(((index + 1) * AUDIO_HEARD_SLOTS) / bars);
+    let total = 0;
+
+    for (let slot = start; slot < end; slot += 1) {
+      if (heard[slot] === "1") {
+        total += 1;
+      }
+    }
+
+    return total * 2 > end - start;
+  });
+}
+
+export type AudioListenState = "completed" | "never" | "partial";
+
+/** Nunca tocado (nada ouvido e nao comecou nesta visita), ouvido em parte, ou ouvido (44 de 48). */
+export function listenState(mask: unknown, started: boolean): AudioListenState {
+  const total = countHeard(mask);
+
+  if (total >= AUDIO_COMPLETE_SLOTS) {
+    return "completed";
+  }
+
+  return total === 0 && !started ? "never" : "partial";
+}
+
+/** Nome do grupo do player para o leitor de tela (tocando, a barra de posicao ja anuncia onde esta). */
+export function audioGroupLabel(label: string, input: { percent: number; playing: boolean; state: AudioListenState }) {
+  if (input.playing) {
+    return label;
+  }
+
+  if (input.state === "never") {
+    return `${label}, ainda não ouvido`;
+  }
+
+  return input.state === "completed" ? `${label}, ouvido` : `${label}, ouvido até ${Math.max(0, Math.min(100, Math.round(input.percent)))}%`;
+}
+
+/** O que o player do sino recebe: o ouvido gravado (null = sem audio, ou o pop-up, que nao guarda). */
+export function audioListenOf(item: Pick<NotificationItem, "audio" | "audioProgress">): { completed: boolean; heard: string } | null {
+  if (!item.audio) {
+    return null;
+  }
+
+  return { completed: Boolean(item.audioProgress?.completed), heard: normalizeHeard(item.audioProgress?.heard) };
+}
+
+/**
+ * O primeiro play precisa avisar o servidor ("started")? Nao quando o servidor ja tem trecho ouvido
+ * (o "started" ja foi gravado): tocar de novo nao gasta pedido, como na v1.
+ */
+export function needsAudioStart(item: Pick<NotificationItem, "audioProgress">) {
+  return countHeard(item.audioProgress?.heard) === 0;
+}
+
+/** Evento do player do sino: o primeiro play, ou a mascara ouvida pelo caminho escolhido. */
+export type AudioProgressEvent = { event: "started" } | { event: "progress"; heard: string; via: "beacon" | "fetch" };
+
+export type AudioFlushReason = "ended" | "hidden" | "pagehide" | "pause" | "timeupdate" | "unmount";
+
+/** Tocando: manda quando a mascara cresceu pelo menos isto desde o ultimo envio... */
+export const AUDIO_FLUSH_MIN_SLOTS = 5;
+/** ...e passou pelo menos isto (no maximo cerca de 1 pedido a cada 15 s ouvindo). */
+export const AUDIO_FLUSH_MIN_MS = 15_000;
+
+/**
+ * Hora de mandar o ouvido? So quando a mascara cresceu alem do que o servidor ja tem (`known`, em
+ * trechos). Tocando: chegou a 44 (o verde ja aparece; confirma na hora) ou cresceu 5 trechos com 15 s
+ * desde o ultimo envio, por fetch. Pausa e fim: fetch. Aba escondida, saida da pagina e o painel
+ * fechando: beacon (a resposta nao e lida).
+ */
+export function shouldFlushAudio(input: { heard: number; known: number; msSinceLastSend: number; reason: AudioFlushReason }): "beacon" | "fetch" | null {
+  if (input.heard <= input.known) {
+    return null;
+  }
+
+  switch (input.reason) {
+    case "timeupdate":
+      if (input.heard >= AUDIO_COMPLETE_SLOTS && input.known < AUDIO_COMPLETE_SLOTS) {
+        return "fetch";
+      }
+
+      return input.heard - input.known >= AUDIO_FLUSH_MIN_SLOTS && input.msSinceLastSend >= AUDIO_FLUSH_MIN_MS ? "fetch" : null;
+    case "ended":
+    case "pause":
+      return "fetch";
+    default:
+      return "beacon";
+  }
 }

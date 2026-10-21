@@ -62,8 +62,11 @@ type DateTimeFieldProps = {
   value: string;
 };
 
-/** Data e hora de Sao Paulo; enquanto incompleta, o rascunho guarda "" (o zod pede "Escolha data e hora."). */
-function DateTimeField({ disabled, error, idPrefix, label, onChange, value }: DateTimeFieldProps) {
+/**
+ * Data e hora de Sao Paulo; enquanto incompleta, o rascunho guarda "" (o zod pede "Escolha data e hora.").
+ * Tambem o "Até uma data" de "Fica no sino por" (notice-validity-field.tsx).
+ */
+export function DateTimeField({ disabled, error, idPrefix, label, onChange, value }: DateTimeFieldProps) {
   const initial = isoToSaoPauloLocal(value);
   const [date, setDate] = useState(initial?.date ?? "");
   const [time, setTime] = useState(initial?.time ?? "");

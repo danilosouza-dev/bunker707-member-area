@@ -16,8 +16,10 @@ import type {
 } from "@/server/communications/notification-model";
 import { NotificationCard } from "./notification-card";
 import {
+  beaconAudio,
   fetchNotificationsPage,
   NotificationsRequestError,
+  postAudio,
   postClick,
   postRead,
   postResponse,
@@ -26,7 +28,13 @@ import {
 import {
   appendNotifications,
   groupNotificationsByDay,
+  markNotificationsOpened,
   markNotificationsRead,
+  needsAudioStart,
+  NOTIFICATION_GONE_MESSAGE,
+  NOTIFICATIONS_FOOTER,
+  recentFlowIds,
+  type AudioProgressEvent,
   type NotificationLink
 } from "./notifications-model";
 
@@ -37,7 +45,14 @@ import {
 // favoritos antes). Sem toast: erros ficam no proprio painel. Foco: quando o controle usado some
 // ("Marcar todas como lidas", o ultimo "Carregar mais"), o foco vai para o titulo ou para o fim da
 // lista, e uma frase para o leitor de tela confirma o que aconteceu. "Visto" ao abrir e "Marcar todas"
-// levam a hora do servidor da primeira pagina (asOf): o que chegou com o painel aberto continua novo.
+// levam a hora do servidor da primeira pagina (asOf): o que chegou com o painel aberto continua novo; os
+// avisos recem-chegados que a lista mostrou vao em `shown` (recentFlowIds).
+//
+// v2 (docs/23): "abriu" e diferente de "lida". O cartao, "Ver mais", o audio, o botao e a resposta abrem
+// (tambem num cartao ja lido pelo "Marcar todas"); "Marcar todas" so marca como lida. O primeiro play do
+// audio manda "started" (que tambem marca como lida e aberta e devolve os contadores, no lugar do POST
+// /read {ids}); o ouvido vai por fetch e a resposta atualiza a lista. "Termina em" usa a hora do
+// servidor da lista (asOf).
 
 type ListState = {
   /** Hora do servidor na primeira pagina (limite do "visto" e do "Marcar todas"); "" antes de carregar. */
@@ -68,11 +83,12 @@ const SESSION_ENDED = "Sua sessão terminou. Entre de novo para continuar.";
 
 const FILTER_LABELS: Record<NotificationsFilter, string> = { all: "Todas", unread: "Não lidas" };
 
-// As frases do servidor para 4xx de validacao sao tecnicas; so a de conflito ("Você já respondeu.") e a
-// de sessao encerrada viram texto para o aluno.
+// As frases do servidor para 4xx de validacao sao tecnicas; so a de conflito ("Você já respondeu."), a
+// de sessao encerrada e a da notificacao que saiu do sino (404) viram texto para o aluno.
 function errorMessage(error: unknown, fallback: string) {
   if (error instanceof NotificationsRequestError) {
     if (error.status === 401) return SESSION_ENDED;
+    if (error.status === 404) return NOTIFICATION_GONE_MESSAGE;
     if (error.status === 409) return error.message;
   }
 
@@ -108,6 +124,7 @@ export function NotificationsPanel({
   accessPreviewMode,
   onClose,
   onNavigate,
+  schoolIconUrl,
   schoolLogoUrl,
   schoolName
 }: {
@@ -116,6 +133,7 @@ export function NotificationsPanel({
   onClose: () => void;
   /** Navegacao do AppShell (salva progresso e favoritos antes de trocar de pagina). */
   onNavigate?: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
+  schoolIconUrl?: string | null;
   schoolLogoUrl?: string | null;
   schoolName: string;
 }) {
@@ -133,6 +151,7 @@ export function NotificationsPanel({
   const seenSentRef = useRef(false);
   const loadMoreRef = useRef<AbortController | null>(null);
   const readRequestedRef = useRef(new Set<string>());
+  const audioStartedRef = useRef(new Set<string>());
   const rootRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const endRef = useRef<HTMLParagraphElement>(null);
@@ -160,7 +179,8 @@ export function NotificationsPanel({
         if (page.unseen > 0 && !seenSentRef.current) {
           seenSentRef.current = true;
           setSummaryUnseen(0);
-          postRead({ asOf: page.asOf, seen: true })
+          const shown = recentFlowIds(page.items, page.asOf);
+          postRead({ asOf: page.asOf, seen: true, ...(shown.length > 0 ? { shown } : {}) })
             .then((counts) => {
               setSummaryUnseen(counts.unseen);
               setUnread(counts.unread);
@@ -242,15 +262,21 @@ export function NotificationsPanel({
       });
   }
 
-  /** Marca como lida aqui; `send` tambem avisa o servidor (o clique ja marca la). */
+  /**
+   * Marca como aberta (e lida) aqui; `send` tambem avisa o servidor (o clique, a resposta e o audio ja
+   * marcam la). Cartao lido pelo "Marcar todas" ainda abre (uma vez): a bolinha nao muda.
+   */
   function markRead(item: NotificationItem, send: boolean) {
-    if (item.readAt || readRequestedRef.current.has(item.id)) {
+    if (item.openedAt || readRequestedRef.current.has(item.id)) {
       return;
     }
 
     readRequestedRef.current.add(item.id);
-    setList((current) => ({ ...current, items: markNotificationsRead(current.items, [item.id], new Date().toISOString()) }));
-    setUnread((count) => Math.max(0, count - 1));
+    setList((current) => ({ ...current, items: markNotificationsOpened(current.items, [item.id], new Date().toISOString()) }));
+
+    if (!item.readAt) {
+      setUnread((count) => Math.max(0, count - 1));
+    }
 
     if (send) {
       postRead({ ids: [item.id] })
@@ -269,7 +295,8 @@ export function NotificationsPanel({
     setStatusMessage("");
 
     try {
-      const counts = await postRead({ all: true, asOf: list.asOf || undefined });
+      const shown = list.asOf ? recentFlowIds(list.items, list.asOf) : [];
+      const counts = await postRead({ all: true, asOf: list.asOf || undefined, ...(shown.length > 0 ? { shown } : {}) });
       setList((current) => ({ ...current, items: markNotificationsRead(current.items, "all", new Date().toISOString()) }));
       setUnread(counts.unread);
       setSummaryUnseen(counts.unseen);
@@ -291,6 +318,51 @@ export function NotificationsPanel({
     if (link.internal && !link.newTab) {
       onNavigate?.(event, link.href);
     }
+  }
+
+  /** O ouvido que o servidor devolveu substitui o da lista (o player soma com o desta visita). */
+  function setAudioProgress(id: string, audioProgress: NotificationItem["audioProgress"]) {
+    setList((current) => ({
+      ...current,
+      items: current.items.map((entry) => (entry.id === id && entry.audio ? { ...entry, audioProgress } : entry))
+    }));
+  }
+
+  function handleAudio(item: NotificationItem, event: AudioProgressEvent) {
+    if (event.event === "started") {
+      // O primeiro play abre a notificacao: o "started" grava visto, lido e aberto no servidor.
+      markRead(item, false);
+
+      if (audioStartedRef.current.has(item.id) || !needsAudioStart(item)) {
+        return;
+      }
+
+      audioStartedRef.current.add(item.id);
+      postAudio(item.id, { event: "started" })
+        .then((answer) => {
+          setAudioProgress(item.id, answer.audioProgress);
+
+          if (typeof answer.unread === "number") {
+            setUnread(answer.unread);
+          }
+
+          if (typeof answer.unseen === "number") {
+            setSummaryUnseen(answer.unseen);
+          }
+        })
+        .catch(() => undefined);
+      return;
+    }
+
+    // Saindo (aba escondida, painel fechando): beacon, a resposta nao e lida. A proxima leva tudo (OU).
+    if (event.via === "beacon") {
+      beaconAudio(item.id, { event: "progress", heard: event.heard });
+      return;
+    }
+
+    postAudio(item.id, { event: "progress", heard: event.heard })
+      .then((answer) => setAudioProgress(item.id, answer.audioProgress))
+      .catch(() => undefined);
   }
 
   async function respond(item: NotificationItem, value: NotificationResponseValue) {
@@ -325,6 +397,8 @@ export function NotificationsPanel({
   }
 
   const groups = list.status === "ready" ? groupNotificationsByDay(list.items, list.now) : [];
+  // "Termina em" pela hora do servidor da lista (nada conta no navegador); sem ela, a hora do carregamento.
+  const serverNow = list.asOf && Number.isFinite(Date.parse(list.asOf)) ? Date.parse(list.asOf) : list.now;
   const filterOptions = (["all", "unread"] as const).map((id) => ({
     count: id === "unread" && unread > 0 ? unread : undefined,
     id,
@@ -422,13 +496,16 @@ export function NotificationsPanel({
                     accessPreviewMode={accessPreviewMode}
                     item={item}
                     now={list.now}
+                    onAudioProgress={(event) => handleAudio(item, event)}
                     onOpenLink={(event, link) => openLink(event, item, link)}
                     onRead={() => markRead(item, true)}
                     onRespond={(value) => void respond(item, value)}
                     responding={responding?.id === item.id ? responding.value : null}
                     responseError={responseErrors[item.id] ?? null}
+                    schoolIconUrl={schoolIconUrl}
                     schoolLogoUrl={schoolLogoUrl}
                     schoolName={schoolName}
+                    serverNow={serverNow}
                   />
                 </li>
               ))}
@@ -456,7 +533,7 @@ export function NotificationsPanel({
             </div>
           ) : (
             <p className="border-t border-white/[0.06] px-4 py-3 text-center text-xs text-zinc-400 outline-none" ref={endRef} tabIndex={-1}>
-              As notificações ficam aqui por 90 dias.
+              {NOTIFICATIONS_FOOTER}
             </p>
           )
         ) : null}

@@ -9,6 +9,7 @@ import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import { cn } from "@/lib/utils";
 import type { PopupItem } from "@/server/communications/notification-model";
 import { NoticeAudioPlayer } from "./notice-audio-player";
+import { NoticeTitleIcon } from "./notice-icons";
 import { resolveNotificationLink, type NotificationLink } from "./notifications-model";
 
 // Pop-up da home do aluno (docs/22 §1.3; limites fixos em docs/17 §1.8.1): so na home (nunca na aula),
@@ -21,6 +22,9 @@ import { resolveNotificationLink, type NotificationLink } from "./notifications-
 // proprio cartao, nunca a janela. MemberPopupHost (member-popup-host.tsx, em toda pagina do aluno) busca
 // e decide a hora de mostrar; MemberPopupDialog (member-popup-dialog.tsx) e a janela, baixada so quando
 // existe um pop-up para mostrar.
+//
+// O icone do aviso (docs/23) vai antes do titulo, dentro do <h2> (20 px, aria-hidden: o nome do dialogo
+// continua sendo o titulo). O audio do pop-up nao guarda o ouvido (sem `listen`): e o player da v1.
 
 export type MemberPopupCardProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -114,6 +118,7 @@ export function MemberPopupCard({
         ) : null}
         <div className="p-5 @min-[26rem]:p-6">
           <h2 className={cn("text-xl font-bold leading-7 [overflow-wrap:anywhere]", !image && "pr-10")} id={titleId}>
+            <NoticeTitleIcon icon={popup.icon} size="popup" />
             {popup.title}
           </h2>
           {popup.body ? (

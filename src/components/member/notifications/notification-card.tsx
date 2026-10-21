@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, AtSign, Check, ExternalLink, Megaphone, MessageCircle, type LucideIcon } from "lucide-react";
+import { ArrowRight, AtSign, Check, ExternalLink, MessageCircle, type LucideIcon } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
@@ -10,33 +10,37 @@ import type { AccessPreviewMode } from "@/lib/access-preview";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import { formatMemberRelativeTime } from "@/lib/member-format";
 import { cn } from "@/lib/utils";
-import type {
-  NotificationItem,
-  NotificationKind,
-  NotificationResponseValue
-} from "@/server/communications/notification-model";
+import { isDefaultSchoolIcon, normalizeSchoolIcon } from "@/server/communications/message-meta";
+import type { NotificationItem, NotificationResponseValue } from "@/server/communications/notification-model";
 import { NoticeAudioPlayer } from "./notice-audio-player";
+import { NoticeTitleIcon } from "./notice-icons";
 import {
+  audioListenOf,
+  noticeMeta,
   resolveNotificationLink,
   shouldClampNotificationBody,
   splitActorTitle,
+  type AudioProgressEvent,
   type NotificationLink
 } from "./notifications-model";
 
-// Uma notificacao do sino (docs/22 §1.1; desenho em docs/12): aviso da escola (titulo, texto, imagem 16:9, audio, botao e
-// resposta Aceitar/Recusar) ou resposta/mencao em comentario (o cartao inteiro e um link para a aula,
-// sem nada clicavel dentro). So desenha: quem busca, marca como lida e navega e o painel. A previa do
-// admin desenha o mesmo cartao com `preview` (sem links, sem audio, sem efeitos) dentro de moldura
-// inert reduzida; por isso nada aqui depende da largura da janela.
+// Uma notificacao do sino (docs/22 §1.1; v2 em docs/23; desenho em docs/12): aviso da equipe (icone e titulo,
+// texto, quem envia com o "Termina em", imagem 16:9, audio com o ouvido, botao e resposta
+// Aceitar/Recusar) ou resposta/mencao em comentario (o cartao inteiro e um link para a aula, sem nada
+// clicavel dentro). O circulo e quem envia: a pessoa da equipe (foto ou iniciais) ou a escola (o Icone
+// da escola de Marca); o aviso nao tem selo, so os comentarios. So desenha: quem busca, marca como lida
+// e navega e o painel. A previa do admin desenha o mesmo cartao com `preview` (sem links, sem audio, sem
+// efeitos) dentro de moldura inert reduzida; por isso nada aqui depende da largura da janela.
 
-const KIND_BADGES: Record<NotificationKind, { className: string; icon: LucideIcon }> = {
+type CommentKind = "comment_mention" | "comment_reply";
+
+const KIND_BADGES: Record<CommentKind, { className: string; icon: LucideIcon }> = {
   comment_mention: { className: "bg-amber-500 text-black", icon: AtSign },
-  comment_reply: { className: "bg-emerald-600 text-white", icon: MessageCircle },
-  notice: { className: "bg-[var(--accent)] text-white", icon: Megaphone }
+  comment_reply: { className: "bg-emerald-600 text-white", icon: MessageCircle }
 };
 
-function KindBadge({ kind }: { kind: NotificationKind }) {
-  const badge = KIND_BADGES[kind] ?? KIND_BADGES.notice;
+function KindBadge({ kind }: { kind: CommentKind }) {
+  const badge = KIND_BADGES[kind] ?? KIND_BADGES.comment_reply;
   const Icon = badge.icon;
 
   return (
@@ -52,25 +56,33 @@ function KindBadge({ kind }: { kind: NotificationKind }) {
   );
 }
 
-// Logo larga (a marca escrita) some num circulo de 40 px: so entra a logo quase quadrada; as outras
-// ficam com o megafone (e sem o selo, que repetiria o mesmo icone). A medida de cada endereco vale
-// para todos os cartoes da pagina.
-const logoFitsCircle = new Map<string, boolean>();
+const circleClassName = "relative grid size-10 place-items-center overflow-hidden rounded-full bg-[#262626] text-white ring-1 ring-white/10";
 
-function SchoolAvatar({ kind, logoUrl }: { kind: NotificationKind; logoUrl?: string | null }) {
+// Logo larga (a marca escrita) some num circulo de 40 px: so entra a logo quase quadrada; as outras
+// ficam com a inicial da escola. A medida de cada endereco vale para todos os cartoes da pagina.
+const logoFitsCircle = new Map<string, boolean>();
+// Icone da escola que nao carregou (link colado quebrado): os outros cartoes ja vao direto para a logo.
+const brokenSchoolIcons = new Set<string>();
+
+/** Reserva do icone da escola: a logo quando cabe no circulo; senao a inicial (nunca o megafone). */
+function SchoolLogoAvatar({ logoUrl }: { logoUrl?: string | null }) {
   const src = logoUrl?.trim() || null;
   const [measured, setMeasured] = useState<{ fits: boolean; src: string } | null>(null);
   const fits = src ? (measured?.src === src ? measured.fits : logoFitsCircle.get(src)) : false;
 
   return (
     <span aria-hidden="true" className="relative block size-10 shrink-0">
-      <span className="relative grid size-10 place-items-center overflow-hidden rounded-full bg-[#262626] text-white ring-1 ring-white/10">
-        {fits ? null : <Megaphone className="size-[18px]" strokeWidth={2.2} />}
-        {src && fits !== false ? (
+      {fits ? null : <MemberAvatar className="absolute inset-0" name="Bunker707" size="md" />}
+      {src && fits !== false ? (
+        <span className={cn(circleClassName, "absolute inset-0", fits ? "opacity-100" : "opacity-0")}>
           <Image
             alt=""
-            className={cn("object-contain p-1.5", fits ? "opacity-100" : "opacity-0")}
+            className="object-contain p-1.5"
             fill
+            onError={() => {
+              logoFitsCircle.set(src, false);
+              setMeasured({ fits: false, src });
+            }}
             onLoad={(event) => {
               const image = event.currentTarget;
               const ratio = image.naturalHeight > 0 ? image.naturalWidth / image.naturalHeight : 0;
@@ -82,22 +94,61 @@ function SchoolAvatar({ kind, logoUrl }: { kind: NotificationKind; logoUrl?: str
             src={src}
             unoptimized={!canOptimizeImageSrc(src)}
           />
-        ) : null}
-      </span>
-      {fits ? <KindBadge kind={kind} /> : null}
+        </span>
+      ) : null}
     </span>
   );
 }
 
-function CardAvatar({ item, schoolLogoUrl }: { item: NotificationItem; schoolLogoUrl?: string | null }) {
-  if (!item.actor) {
-    return <SchoolAvatar kind={item.kind} logoUrl={schoolLogoUrl} />;
+/**
+ * A escola: o Icone da escola de Marca. O simbolo padrao fica centralizado no circulo; uma imagem
+ * enviada preenche o circulo como uma foto. Se nao carrega, a logo (quando cabe) ou a inicial.
+ */
+function SchoolAvatar({ iconUrl, logoUrl }: { iconUrl?: string | null; logoUrl?: string | null }) {
+  const icon = normalizeSchoolIcon(iconUrl);
+  const [failedIcon, setFailedIcon] = useState<string | null>(null);
+
+  if (failedIcon === icon || brokenSchoolIcons.has(icon)) {
+    return <SchoolLogoAvatar logoUrl={logoUrl} />;
   }
 
   return (
+    <span aria-hidden="true" className="relative block size-10 shrink-0">
+      <span className={circleClassName}>
+        <Image
+          alt=""
+          className={isDefaultSchoolIcon(icon) ? "object-contain p-2" : "object-cover"}
+          fill
+          onError={() => {
+            brokenSchoolIcons.add(icon);
+            setFailedIcon(icon);
+          }}
+          sizes="40px"
+          src={icon}
+          unoptimized={!canOptimizeImageSrc(icon)}
+        />
+      </span>
+    </span>
+  );
+}
+
+function CardAvatar({ item, schoolIconUrl, schoolLogoUrl }: { item: NotificationItem; schoolIconUrl?: string | null; schoolLogoUrl?: string | null }) {
+  const badge = item.kind === "notice" ? null : <KindBadge kind={item.kind} />;
+
+  if (!item.actor) {
+    return (
+      <span className="relative block size-10 shrink-0">
+        <SchoolAvatar iconUrl={schoolIconUrl} logoUrl={schoolLogoUrl} />
+        {badge}
+      </span>
+    );
+  }
+
+  // Aviso: a pessoa da equipe que envia (foto ou iniciais), sem selo. Comentario: quem respondeu, com o selo.
+  return (
     <span className="relative block size-10 shrink-0">
       <MemberAvatar imageSrc={item.actor.avatarUrl} name={item.actor.name} size="md" />
-      <KindBadge kind={item.kind} />
+      {badge}
     </span>
   );
 }
@@ -110,15 +161,21 @@ function UnreadDot() {
   );
 }
 
-function RelativeTime({ createdAt, now, prefix }: { createdAt: string; now: number; prefix?: string }) {
+/**
+ * Quem envia · há 2 horas · Termina em 3 h, numa linha so: o nome encurta com reticencias (o leitor de
+ * tela le inteiro) e o tempo e o aviso de fim nunca quebram nem encurtam, nem a 375 px.
+ */
+function NoticeMeta({ createdAt, hint, now, sender }: { createdAt: string; hint: string | null; now: number; sender: string }) {
   const relative = formatMemberRelativeTime(createdAt, now);
 
   return (
-    <p className="mt-1 text-xs text-zinc-400" suppressHydrationWarning>
-      {prefix ? `${prefix} · ` : null}
-      <time dateTime={createdAt} suppressHydrationWarning>
+    <p className="mt-1 flex min-w-0 items-baseline gap-1 text-xs text-zinc-400" suppressHydrationWarning>
+      <span className="min-w-0 truncate">{sender}</span>
+      <span aria-hidden="true">·</span>
+      <time className="shrink-0 whitespace-nowrap" dateTime={createdAt} suppressHydrationWarning>
         {relative}
       </time>
+      {hint ? <span className="shrink-0 whitespace-nowrap text-amber-400">· {hint}</span> : null}
     </p>
   );
 }
@@ -131,9 +188,11 @@ export type NotificationCardProps = {
   item: NotificationItem;
   /** Instante de referencia do "há 2 horas" (o painel guarda ao carregar; a previa usa o da tela). */
   now: number;
+  /** Audio do aviso no sino: "started" no primeiro play e o ouvido (o painel guarda no servidor). */
+  onAudioProgress?: (event: AudioProgressEvent) => void;
   /** Clique num link ou no botao: o painel registra, marca como lida, fecha e navega. */
   onOpenLink?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink) => void;
-  /** Interacao que conta como leitura sem sair (tocar o audio, "Ver mais", clicar no cartao). */
+  /** Interacao que abre sem sair ("Ver mais", clicar no cartao; o audio sem `onAudioProgress`). */
   onRead?: () => void;
   onRespond?: (response: NotificationResponseValue) => void;
   /** Resposta sendo enviada agora (mostra "Enviando..." no botao escolhido). */
@@ -141,8 +200,13 @@ export type NotificationCardProps = {
   responseError?: string | null;
   /** Previa do admin: mesmo visual, sem links, audio parado e botoes sem acao. */
   preview?: boolean;
+  /** Icone da escola (Marca); sem ele, o simbolo padrao. */
+  schoolIconUrl?: string | null;
+  /** Reserva quando o icone nao carrega (so se a logo couber no circulo). */
   schoolLogoUrl?: string | null;
   schoolName: string;
+  /** Hora do servidor da lista (asOf), base do "Termina em"; sem ela, `now`. */
+  serverNow?: number;
 };
 
 export function NotificationCard(props: NotificationCardProps) {
@@ -151,13 +215,13 @@ export function NotificationCard(props: NotificationCardProps) {
 
 const cardClassName = "relative grid grid-cols-[40px_minmax(0,1fr)] gap-3 px-4 py-3.5";
 
-function CommentCard({ accessPreviewMode, item, now, onOpenLink, preview = false, schoolLogoUrl }: NotificationCardProps) {
+function CommentCard({ accessPreviewMode, item, now, onOpenLink, preview = false, schoolIconUrl, schoolLogoUrl }: NotificationCardProps) {
   const unread = !item.readAt;
   const { actor, rest } = splitActorTitle(item.title, item.actor?.name);
   const link = preview ? null : resolveNotificationLink(item.href, "same_tab", accessPreviewMode);
   const content = (
     <>
-      <CardAvatar item={item} schoolLogoUrl={schoolLogoUrl} />
+      <CardAvatar item={item} schoolIconUrl={schoolIconUrl} schoolLogoUrl={schoolLogoUrl} />
       <span className="block min-w-0 pr-4">
         <span className="block text-sm leading-5 text-white">
           {actor ? <span className="font-semibold">{actor}</span> : null}
@@ -395,17 +459,21 @@ function NoticeCard({
   accessPreviewMode,
   item,
   now,
+  onAudioProgress,
   onOpenLink,
   onRead,
   onRespond,
   preview = false,
   responding,
   responseError,
+  schoolIconUrl,
   schoolLogoUrl,
-  schoolName
+  schoolName,
+  serverNow
 }: NotificationCardProps) {
   const unread = !item.readAt;
   const titleId = useId();
+  const meta = noticeMeta(item, { schoolName, serverNow: serverNow ?? now });
   const image = item.image?.url ? item.image : null;
   let media: ReactNode = null;
 
@@ -428,23 +496,34 @@ function NoticeCard({
     <article
       aria-labelledby={titleId}
       className={cn(cardClassName, unread && "bg-white/[0.035]")}
-      // Clique solto no cartao (fora de botao e link) conta como leitura.
+      // Clique solto no cartao (fora de botao e link) conta como abrir, tambem num cartao ja lido pelo
+      // "Marcar todas" (a bolinha segue a leitura; o "abriu" e outro).
       onClick={(event) => {
-        if (!preview && unread && !(event.target instanceof Element && event.target.closest("a, button, [role='slider']"))) {
+        if (!preview && !item.openedAt && !(event.target instanceof Element && event.target.closest("a, button, [role='slider']"))) {
           onRead?.();
         }
       }}
     >
-      <CardAvatar item={item} schoolLogoUrl={schoolLogoUrl} />
+      <CardAvatar item={item} schoolIconUrl={schoolIconUrl} schoolLogoUrl={schoolLogoUrl} />
       <div className="min-w-0">
+        {/* O icone e aria-hidden: o nome do cartao continua sendo exatamente o titulo. */}
         <p className="pr-4 text-sm font-semibold leading-5 text-white [overflow-wrap:anywhere]" id={titleId}>
+          <NoticeTitleIcon icon={item.icon} size="bell" />
           {item.title}
         </p>
         <NoticeBody body={item.body} onRead={onRead} preview={preview} />
-        <RelativeTime createdAt={item.createdAt} now={now} prefix={schoolName} />
+        <NoticeMeta createdAt={item.createdAt} hint={meta.hint} now={now} sender={meta.sender} />
         {media}
         {item.audio ? (
-          <NoticeAudioPlayer audio={item.audio} className="mt-3" label="Áudio do aviso" onPlay={onRead} preview={preview} />
+          <NoticeAudioPlayer
+            audio={item.audio}
+            className="mt-3"
+            label="Áudio do aviso"
+            listen={audioListenOf(item)}
+            onPlay={onAudioProgress ? undefined : onRead}
+            onProgress={onAudioProgress}
+            preview={preview}
+          />
         ) : null}
         <NoticeCta accessPreviewMode={accessPreviewMode} item={item} onOpenLink={onOpenLink} preview={preview} />
         <NoticeResponse

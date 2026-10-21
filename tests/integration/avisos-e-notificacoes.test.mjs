@@ -912,3 +912,327 @@ test("com a hora da lista (asOf), abrir o sino e 'Marcar todas' nao mexem no que
   assert.deepEqual((await futuro.json()).data, { unread: 0, unseen: 0 });
   assert.ok((await linhaDe(novo.id)).read_at);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * v2 (docs/23): quem envia, tempo no sino, passo de fluxo, numeros de abertura e audio
+ * ---------------------------------------------------------------------------------------------- */
+
+const { dispatchInboxCampaign, EXPIRED_BEFORE_DISPATCH_MESSAGE } = await import("../../src/server/communications/dispatch.ts");
+const { fetchCampaign } = await import("../../src/server/communications/store.ts");
+const { settleSenderNotices } = await import("../../src/server/communications/sender-notices.ts");
+
+const EX_EQUIPE = { email: "ex.equipe.comunicacao@bunker707.test", nome: "Dora Reis da Equipe" };
+const HORA = 60 * 60 * 1000;
+const DIA = 24 * HORA;
+
+async function criarExEquipe() {
+  const { data } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  let user = data?.users.find((item) => item.email === EX_EQUIPE.email);
+
+  if (!user) {
+    user = unwrap(
+      await db.auth.admin.createUser({ email: EX_EQUIPE.email, email_confirm: true, password: SENHA_DE_TESTE, user_metadata: { full_name: EX_EQUIPE.nome } }),
+      "Criando a pessoa que vai sair da equipe"
+    ).user;
+  }
+
+  unwrap(await db.from("profiles").update({ full_name: EX_EQUIPE.nome }).eq("id", user.id), "Dando nome a ela");
+  unwrap(await db.from("admin_roles").upsert({ role: "editor", user_id: user.id }, { onConflict: "user_id" }), "Colocando na equipe");
+
+  return usuarioDeTeste({ ...EX_EQUIPE, id: user.id });
+}
+
+async function emailsEmNomeDe(userId) {
+  return unwrap(
+    await db.from("email_outbox").select("id,kind,to_email,subject,text,metadata,idempotency_key").eq("kind", "sent_as").eq("user_id", userId),
+    "Lendo os e-mails 'enviada em seu nome'"
+  );
+}
+
+after(async () => {
+  unwrap(await db.from("email_outbox").delete().eq("kind", "sent_as").in("user_id", todasAsContas), "Apagando os e-mails 'enviada em seu nome'");
+  await apagarContaDeTeste(db, EX_EQUIPE.email);
+});
+
+test("quem envia: so a equipe (400 no campo para uma aluna), gravado, na auditoria e no detalhe", async () => {
+  actAs(produtor);
+  const aluno = await actions.saveNoticeDraft({ draft: rascunho({ sender: { userId: aluna.id }, title: "Em nome da aluna" }) });
+  assert.equal(aluno.status, 400);
+  assert.deepEqual(aluno.fieldErrors?.sender, ["Escolha alguém da equipe."]);
+
+  const pop = await actions.saveNoticeDraft({ draft: { ...emptyNoticeDraft("popup"), audience: quemTemOCurso, sender: { userId: professor.id }, title: "Pop-up com pessoa" } });
+  assert.equal(pop.status, 400, "pop-up nao tem quem envia");
+  assert.deepEqual(pop.fieldErrors?.["draft.sender"], ["Quem envia e o tempo no sino valem só para notificações."]);
+
+  const salvo = await actions.saveNoticeDraft({ draft: rascunho({ icon: { color: "red", id: "promo" }, sender: { userId: professor.id }, title: "Em nome do professor" }) });
+  assert.equal(salvo.ok, true, JSON.stringify(salvo));
+  const [linha] = unwrap(await db.from("campaigns").select("sender_user_id,icon,icon_color").eq("id", salvo.data.id), "Lendo o aviso");
+  assert.deepEqual(linha, { icon: "promo", icon_color: "red", sender_user_id: professor.id });
+
+  const [auditoria] = unwrap(
+    await db.from("admin_audit_log").select("metadata").eq("entity_id", salvo.data.id).eq("action", "communication.saved"),
+    "Lendo a auditoria"
+  );
+  assert.equal(auditoria.metadata.sender_user_id, professor.id);
+
+  const detalhe = await getNoticeDetail(salvo.data.id);
+  assert.equal(detalhe.sender.id, professor.id);
+  assert.equal(detalhe.sender.onTeam, true);
+  assert.deepEqual(detalhe.draft.sender, { userId: professor.id });
+  assert.deepEqual(detalhe.draft.icon, { color: "red", id: "promo" });
+});
+
+test("publicar com quem saiu da equipe depois de salvo: 422 com o nome; o detalhe mostra que saiu", async () => {
+  const exEquipe = await criarExEquipe();
+  actAs(produtor);
+  const salvo = await actions.saveNoticeDraft({ draft: rascunho({ sender: { userId: exEquipe.id }, title: "Em nome de quem saiu" }) });
+  assert.equal(salvo.ok, true, JSON.stringify(salvo));
+
+  unwrap(await db.from("admin_roles").delete().eq("user_id", exEquipe.id), "Tirando da equipe");
+
+  const publicado = await actions.publishNotice({ expectedUpdatedAt: salvo.data.updatedAt, id: salvo.data.id });
+  assert.equal(publicado.status, 422);
+  assert.equal(publicado.error, `${EX_EQUIPE.nome} não está mais na equipe. Escolha quem envia.`);
+  assert.equal((await linhasDoAviso(salvo.data.id)).length, 0, "nada saiu");
+
+  const detalhe = await getNoticeDetail(salvo.data.id);
+  assert.equal(detalhe.situation, "draft");
+  assert.deepEqual([detalhe.sender.name, detalhe.sender.onTeam], [EX_EQUIPE.nome, false]);
+
+  const deNovo = await actions.saveNoticeDraft({ draft: detalhe.draft, expectedUpdatedAt: detalhe.updatedAt, id: salvo.data.id });
+  assert.equal(deNovo.status, 400, "salvar de novo tambem pede alguem da equipe");
+});
+
+test("e-mail 'enviada em seu nome': uma vez para o professor escolhido, nunca para quem publicou nem para a escola", async () => {
+  const publicado = await salvarEPublicar(produtor, rascunho({ sender: { userId: professor.id }, title: "Aula especial do professor" }));
+  await settleSenderNotices();
+
+  assert.equal(publicado.situation, "sent");
+  const emails = await emailsEmNomeDe(professor.id);
+  const doAvisoPublicado = emails.filter((email) => email.metadata?.campaign_id === publicado.id);
+  assert.equal(doAvisoPublicado.length, 1, JSON.stringify(emails));
+  const [email] = doAvisoPublicado;
+  assert.equal(email.to_email, professor.email);
+  assert.equal(email.subject, "Uma notificação saiu em seu nome");
+  assert.equal(email.idempotency_key, `sent-as:campaign:${publicado.id}:${professor.id}`);
+  assert.match(email.text, /enviou a notificação “Aula especial do professor” para \d+ alunos? em seu nome/);
+  assert.doesNotMatch(email.text, /Ver a notificação/, "Professor nao ve Comunicacao: sem link");
+  assert.deepEqual(Object.keys(email.metadata).sort(), ["campaign_id", "count"], "so ids e contagens");
+
+  const eu = await salvarEPublicar(produtor, rascunho({ sender: { userId: produtor.id }, title: "Em meu proprio nome" }));
+  const escola = await salvarEPublicar(produtor, rascunho({ title: "Da escola, sem e-mail" }));
+  await settleSenderNotices();
+  assert.equal((await emailsEmNomeDe(produtor.id)).length, 0, "quem publica em nome proprio nao recebe");
+  assert.equal((await emailsEmNomeDe(professor.id)).filter((item) => [eu.id, escola.id].includes(item.metadata?.campaign_id)).length, 0);
+
+  // O sino da aluna mostra o professor (A resolve ao vivo); aqui so a linha gravada.
+  const [linha] = unwrap(await db.from("campaigns").select("sender_user_id").eq("id", publicado.id), "Lendo quem envia");
+  assert.equal(linha.sender_user_id, professor.id);
+});
+
+test("tempo no sino: cada linha leva o proprio fim (1 dia depois de chegar); o padrao e 90 dias", async () => {
+  const umDia = await salvarEPublicar(produtor, rascunho({ title: "Fica um dia", validity: { minutes: 1_440, mode: "duration" } }));
+  const padrao = await salvarEPublicar(produtor, rascunho({ title: "Fica o padrao" }));
+
+  for (const [aviso, duracao] of [
+    [umDia, DIA],
+    [padrao, 90 * DIA]
+  ]) {
+    const linhas = unwrap(await db.from("notifications").select("created_at,expires_at").eq("campaign_id", aviso.id), "Lendo o fim das linhas");
+    assert.ok(linhas.length >= 1);
+
+    for (const linha of linhas) {
+      const diferenca = Date.parse(linha.expires_at) - Date.parse(linha.created_at);
+      assert.ok(Math.abs(diferenca - duracao) < 60_000, `${aviso.id}: ${diferenca}`);
+    }
+  }
+});
+
+test("'ate uma data': publicar exige o fim 1 hora depois do envio; agendada cujo fim chega antes do envio e cancelada com o motivo", async () => {
+  actAs(produtor);
+  const cedo = await actions.saveNoticeDraft({ draft: rascunho({ title: "Vence ja", validity: { endsAt: new Date(Date.now() + 30 * 60_000).toISOString(), mode: "until" } }) });
+  assert.equal(cedo.ok, true, "rascunho aceita");
+  const recusado = await actions.publishNotice({ expectedUpdatedAt: cedo.data.updatedAt, id: cedo.data.id });
+  assert.equal(recusado.status, 400);
+  assert.deepEqual(recusado.fieldErrors?.["validity.endsAt"], ["A notificação venceria antes de sair. Escolha um fim pelo menos 1 hora depois do envio."]);
+
+  const longe = await actions.saveNoticeDraft({ draft: rascunho({ title: "Vence longe", validity: { endsAt: new Date(Date.now() + 91 * DIA).toISOString(), mode: "until" } }) });
+  const recusadoLonge = await actions.publishNotice({ expectedUpdatedAt: longe.data.updatedAt, id: longe.data.id });
+  assert.deepEqual(recusadoLonge.fieldErrors?.["validity.endsAt"], ["O fim pode ser no máximo 90 dias depois do envio."]);
+
+  const sendAt = Date.now() + HORA;
+  const agendado = await salvarEPublicar(
+    produtor,
+    rascunho({ schedule: { mode: "at", sendAt: new Date(sendAt).toISOString() }, title: "Agendada que venceria", validity: { endsAt: new Date(sendAt + 2 * HORA).toISOString(), mode: "until" } })
+  );
+  assert.equal(agendado.situation, "scheduled");
+
+  // O envio atrasou (tick parado): na hora de sair, falta menos de 1 hora para o fim.
+  unwrap(await db.from("campaigns").update({ dispatch_started_at: new Date().toISOString(), status: "sending" }).eq("id", agendado.id), "Reservando o envio");
+  const campanha = await fetchCampaign(db, agendado.id);
+  const resultado = await dispatchInboxCampaign({ campaign: campanha, db, now: new Date(sendAt + 90 * 60_000) });
+  assert.equal(resultado.status, "canceled");
+  assert.equal((await linhasDoAviso(agendado.id)).length, 0, "nada saiu");
+
+  const detalhe = await getNoticeDetail(agendado.id);
+  assert.equal(detalhe.status, "canceled");
+  assert.equal(detalhe.lastError, EXPIRED_BEFORE_DISPATCH_MESSAGE);
+  assert.equal(detalhe.lastError, "A notificação venceria antes de chegar.");
+});
+
+test("teste para mim de um rascunho com 'ate uma data' que ja passou: aparece por 1 hora; repetir zera abriu e audio", async () => {
+  actAs(produtor);
+  const salvo = await actions.saveNoticeDraft({ draft: rascunho({ title: "Teste vencido", validity: { endsAt: new Date(Date.now() - DIA).toISOString(), mode: "until" } }) });
+  assert.equal(salvo.ok, true, JSON.stringify(salvo));
+
+  const antes = Date.now();
+  const teste = await actions.sendNoticeTestToMe({ id: salvo.data.id });
+  assert.equal(teste.ok, true, JSON.stringify(teste));
+  const [linha] = unwrap(await db.from("notifications").select("id,created_at,expires_at,is_test").eq("campaign_id", salvo.data.id), "Lendo o teste");
+  assert.equal(linha.is_test, true);
+  assert.ok(Date.parse(linha.expires_at) >= antes + HORA - 1_000, linha.expires_at);
+  assert.ok(Date.parse(linha.expires_at) > Date.parse(linha.created_at));
+
+  const agora = new Date().toISOString();
+  unwrap(
+    await db
+      .from("notifications")
+      .update({ audio_heard: "1".repeat(48), audio_heard_percent: 100, audio_started_at: agora, opened_at: agora, read_at: agora, seen_at: agora })
+      .eq("id", linha.id),
+    "Ouvindo o teste"
+  );
+
+  await actions.sendNoticeTestToMe({ id: salvo.data.id });
+  const [deNovo] = unwrap(
+    await db.from("notifications").select("audio_heard,audio_heard_percent,audio_started_at,expires_at,opened_at,read_at,seen_at").eq("id", linha.id),
+    "Lendo o teste repetido"
+  );
+  assert.deepEqual(
+    { ...deNovo, expires_at: undefined },
+    { audio_heard: null, audio_heard_percent: null, audio_started_at: null, expires_at: undefined, opened_at: null, read_at: null, seen_at: null }
+  );
+  assert.ok(Date.parse(deNovo.expires_at) >= Date.parse(linha.expires_at));
+});
+
+test("duplicar volta um 'ate uma data' que ja passou (ou falta menos de 1 hora) para os 90 dias", async () => {
+  actAs(produtor);
+  const passado = await actions.saveNoticeDraft({ draft: rascunho({ title: "Fim passado", validity: { endsAt: new Date(Date.now() - HORA).toISOString(), mode: "until" } }) });
+  const quase = await actions.saveNoticeDraft({ draft: rascunho({ title: "Fim quase", validity: { endsAt: new Date(Date.now() + 30 * 60_000).toISOString(), mode: "until" } }) });
+  const futuro = new Date(Date.now() + 5 * DIA).toISOString();
+  const bom = await actions.saveNoticeDraft({ draft: rascunho({ title: "Fim bom", validity: { endsAt: futuro, mode: "until" } }) });
+
+  for (const salvo of [passado, quase]) {
+    const copia = await actions.duplicateNotice({ id: salvo.data.id });
+    assert.equal(copia.ok, true, JSON.stringify(copia));
+    assert.deepEqual((await getNoticeDetail(copia.data.id)).draft.validity, { mode: "default" });
+  }
+
+  const copiaBoa = await actions.duplicateNotice({ id: bom.data.id });
+  const validade = (await getNoticeDetail(copiaBoa.data.id)).draft.validity;
+  assert.equal(validade.mode, "until");
+  assert.equal(Date.parse(validade.endsAt), Date.parse(futuro));
+});
+
+test("numeros v2 (communication_campaign_engagement): abriram, comecaram e ouviram o audio, sem os testes", async () => {
+  const audio = { durationSeconds: 20, mimeType: "audio/webm", peaks: [10, 40, 90], url: "http://127.0.0.1:54321/storage/v1/object/public/communication-audio/teste.webm" };
+  const publicado = await salvarEPublicar(produtor, rascunho({ audio, title: "Aviso com audio" }));
+  const linhas = await linhasDoAviso(publicado.id);
+  const daAluna = linhas.find((linha) => linha.user_id === aluna.id);
+  assert.ok(daAluna);
+
+  const agora = new Date().toISOString();
+  unwrap(
+    await db
+      .from("notifications")
+      .update({
+        audio_completed_at: agora,
+        audio_heard: "1".repeat(48),
+        audio_heard_percent: 100,
+        audio_started_at: agora,
+        opened_at: agora,
+        read_at: agora,
+        seen_at: agora
+      })
+      .eq("id", daAluna.id),
+    "A aluna abre e ouve ate o fim"
+  );
+
+  // O teste da equipe (mesmo aberto e ouvido) nao entra nos numeros.
+  actAs(produtor);
+  assert.equal((await actions.sendNoticeTestToMe({ id: publicado.id })).ok, true);
+  unwrap(
+    await db
+      .from("notifications")
+      .update({ audio_completed_at: agora, audio_heard: "1".repeat(48), audio_heard_percent: 100, audio_started_at: agora, opened_at: agora, read_at: agora, seen_at: agora })
+      .eq("campaign_id", publicado.id)
+      .eq("is_test", true),
+    "O produtor ouve o proprio teste"
+  );
+
+  const detalhe = await getNoticeDetail(publicado.id);
+  assert.deepEqual(detalhe.engagement, { audioCompleted: 1, audioStarted: 1, opened: 1 });
+
+  const { data, error } = await db.rpc("communication_campaign_engagement", { p_campaign_ids: [publicado.id] });
+  assert.equal(error, null);
+  assert.deepEqual(data.map((row) => [row.campaign_id, Number(row.opened), Number(row.audio_started), Number(row.audio_completed)]), [[publicado.id, 1, 1, 1]]);
+});
+
+test("conteudo de um passo de fluxo nao e aviso da lista: toda acao recusa com 409 e o detalhe aponta para o fluxo", async () => {
+  const [fluxo] = unwrap(
+    await db.from("communication_flows").insert({ created_by: produtor.id, name: "Fluxo do teste de avisos", updated_by: produtor.id }).select("id"),
+    "Criando um fluxo"
+  );
+  const passo = randomUUID();
+  const [mensagem] = unwrap(
+    await db
+      .from("campaigns")
+      .insert({ created_by: produtor.id, flow_id: fluxo.id, flow_node_id: passo, kind: "inbox", status: "draft", title: "Mensagem do fluxo", updated_by: produtor.id })
+      .select("id,updated_at"),
+    "Criando a mensagem do passo"
+  );
+
+  actAs(produtor);
+  const recusas = [
+    await actions.saveNoticeDraft({ draft: rascunho({ title: "Mudando por fora" }), expectedUpdatedAt: mensagem.updated_at, id: mensagem.id }),
+    await actions.publishNotice({ id: mensagem.id }),
+    await actions.sendNoticeTestToMe({ id: mensagem.id }),
+    await actions.duplicateNotice({ id: mensagem.id }),
+    await actions.deleteNotice({ id: mensagem.id }),
+    await actions.withdrawNotice({ id: mensagem.id }),
+    await actions.cancelScheduledNotice({ id: mensagem.id })
+  ];
+
+  for (const recusa of recusas) {
+    assert.equal(recusa.status, 409, JSON.stringify(recusa));
+    assert.equal(recusa.error, "Esta notificação faz parte de um fluxo. Abra o fluxo para mudar.");
+  }
+
+  const detalhe = await getNoticeDetail(mensagem.id);
+  assert.equal(detalhe.flowId, fluxo.id);
+  assert.equal(detalhe.flowNodeId, passo);
+  assert.ok(!(await listNotices({ page: 1 })).items.some((item) => item.id === mensagem.id), "fora da lista de avisos");
+  const [linha] = unwrap(await db.from("campaigns").select("title,deleted_at").eq("id", mensagem.id), "Lendo a mensagem");
+  assert.deepEqual(linha, { deleted_at: null, title: "Mensagem do fluxo" }, "nada mudou");
+});
+
+test("opcoes do editor: a equipe de 'Quem envia' com quem esta com o editor aberto, o icone da escola e a Marca", async () => {
+  const { loadNoticeEditorOptions, loadNoticeBranding } = await import("../../src/server/communications/queries.ts");
+  actAs(produtor);
+  const opcoes = await loadNoticeEditorOptions();
+
+  assert.equal(opcoes.currentUserId, produtor.id);
+  assert.equal(opcoes.canEditBrand, true, "o produtor mexe na Marca");
+  assert.ok(opcoes.senders.some((pessoa) => pessoa.id === produtor.id && pessoa.isMe));
+  assert.ok(opcoes.senders.some((pessoa) => pessoa.id === professor.id && !pessoa.isMe && pessoa.roleLabel === "Professor"));
+  assert.ok(!opcoes.senders.some((pessoa) => pessoa.id === aluna.id), "so a equipe");
+  assert.ok(opcoes.senders.every((pessoa) => !pessoa.name.includes("@")), "nunca o e-mail");
+  assert.match(opcoes.branding.iconUrl, /^(\/brand\/icon-bunker\.svg|https?:\/\/)/);
+  assert.equal((await loadNoticeBranding()).iconUrl, opcoes.branding.iconUrl);
+
+  const sendersAction = await actions.listNoticeSenders();
+  assert.equal(sendersAction.ok, true, JSON.stringify(sendersAction));
+  assert.deepEqual(sendersAction.data.map((pessoa) => pessoa.id).sort(), opcoes.senders.map((pessoa) => pessoa.id).sort());
+
+  actAs(analista);
+  assert.equal((await actions.listNoticeSenders()).status, 403);
+});

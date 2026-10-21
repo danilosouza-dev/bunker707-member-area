@@ -2,6 +2,7 @@
 
 import { useEffect, useEffectEvent, useSyncExternalStore } from "react";
 import type {
+  NotificationAudioProgress,
   NotificationResponseValue,
   NotificationsFilter,
   NotificationsPage,
@@ -17,8 +18,9 @@ import { isSummaryFresh } from "./notifications-model";
 // nada aqui roda em intervalo, uma falha tambem conta como tentativa (espera o mesmo minuto) e, na
 // home, o resumo com o pop-up (MemberPopupHost) e a unica leitura: o numero do sino vem junto.
 //
-// Envios que podem sair junto com a pagina (clique num link, eventos do pop-up) vao por
-// navigator.sendBeacon, com fetch keepalive de reserva.
+// Envios que podem sair junto com a pagina (clique num link, eventos do pop-up, o ouvido do audio com a
+// aba escondida ou o painel fechando) vao por navigator.sendBeacon, com fetch keepalive de reserva. O
+// resto do audio (comecou, cresceu tocando, pausa e fim) vai por fetch: a resposta atualiza a lista.
 
 export class NotificationsRequestError extends Error {
   status: number;
@@ -59,8 +61,11 @@ async function postJson<T>(url: string, body: unknown, fallback: string) {
   return readData<T>(response, fallback);
 }
 
-/** POST que sobrevive a saida da pagina; nunca lanca (registro de clique e evento e melhor esforco). */
-function sendBeaconPost(url: string, body?: string) {
+/**
+ * POST que sobrevive a saida da pagina; nunca lanca (registro de clique, evento e visita e melhor esforco).
+ * Tambem usado pelo beacon das visitas de pagina (page-visit-beacon.ts).
+ */
+export function sendBeaconPost(url: string, body?: string) {
   try {
     const data = body === undefined ? undefined : new Blob([body], { type: "text/plain;charset=UTF-8" });
 
@@ -80,7 +85,7 @@ function sendBeaconPost(url: string, body?: string) {
   }).catch(() => undefined);
 }
 
-function notificationPath(id: string, action: "click" | "response") {
+function notificationPath(id: string, action: "audio" | "click" | "response") {
   return `/api/notifications/${encodeURIComponent(id)}/${action}`;
 }
 
@@ -114,9 +119,13 @@ export function fetchSummary(input: { popup?: boolean; signal?: AbortSignal } = 
 
 /**
  * `asOf` (a hora do servidor que veio com a primeira pagina): "abriu o sino" e "Marcar todas" so mexem
- * no que ja aparecia quando a lista foi lida.
+ * no que ja aparecia quando a lista foi lida. `shown`: avisos que o painel mostrou e que chegaram ha
+ * menos de 15 s (recentFlowIds), para as linhas de fluxo recem-gravadas tambem contarem.
  */
-export type ReadRequest = { asOf?: string; seen: true } | { ids: string[] } | { all: true; asOf?: string };
+export type ReadRequest =
+  | { asOf?: string; seen: true; shown?: string[] }
+  | { ids: string[] }
+  | { all: true; asOf?: string; shown?: string[] };
 
 export function postRead(body: ReadRequest) {
   return postJson<{ unread: number; unseen: number }>("/api/notifications/read", body, "Não foi possível marcar como lida.");
@@ -133,6 +142,21 @@ export function postResponse(id: string, response: NotificationResponseValue) {
     { response },
     "Não foi possível enviar sua resposta. Tente de novo."
   );
+}
+
+export type AudioRequest = { event: "started" } | { event: "progress"; heard: string };
+
+/** "started" tambem devolve os contadores (substitui o POST /read {ids} do primeiro play). */
+export type AudioAnswer = { audioProgress: NotificationAudioProgress; unread?: number; unseen?: number };
+
+/** Audio do aviso no sino: comecou ou o ouvido cresceu (a resposta substitui o estado da lista). */
+export function postAudio(id: string, body: AudioRequest) {
+  return postJson<AudioAnswer>(notificationPath(id, "audio"), body, "Não foi possível guardar o áudio ouvido.");
+}
+
+/** O ouvido quando a pagina pode sair (aba escondida, saida, painel fechando): a resposta nao e lida. */
+export function beaconAudio(id: string, body: AudioRequest) {
+  sendBeaconPost(notificationPath(id, "audio"), JSON.stringify(body));
 }
 
 export function postPopupEvent(id: string, event: PopupEvent) {

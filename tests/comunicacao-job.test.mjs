@@ -295,3 +295,371 @@ test("comentarios por aluno: a RPC e lida em paginas de 1000 na ordem do autor (
   assert.equal(exata.queries.length, 2, "pagina cheia: confere a seguinte (vazia) antes de parar");
 });
 
+
+/* ------------------------------------------------------------------------------------------------
+ * Comunicacao v2 (docs/23 §4.3): a fase dos fluxos no mesmo job, o carregador de fatos por chave, a
+ * bisseccao, o lote devolvido e as contagens em job_runs. O motor de verdade (banco local) esta em
+ * tests/integration/fluxos.test.mjs.
+ * ---------------------------------------------------------------------------------------------- */
+
+const { EMPTY_FLOWS, processFlows } = await import("../src/server/communications/flow-engine.ts");
+const { createFactsLoader } = await import("../src/server/communications/facts-loader.ts");
+const flowStore = await import("../src/server/communications/flow-store.ts");
+
+const FORA_DA_FAIXA = new Date("2026-10-20T15:07:00.000Z");
+const NA_FAIXA = new Date("2026-10-20T15:15:20.000Z");
+const AVISO = "7b2e8d1c-3b1a-4c55-9d7e-2a6b8c9d0e1f";
+const FLUXO = "1c2d3e4f-3b1a-4c55-9d7e-2a6b8c9d0e1f";
+const naoOuviuOAviso = {
+  kind: "rules",
+  root: { items: [{ action: "audio_completed", negate: true, ref: { campaignId: AVISO, kind: "campaign" }, type: "message" }], match: "all" }
+};
+const temFiltro = (query, method, column, value) => query.filters.some(([name, col, val]) => name === method && col === column && (value === undefined || val === value));
+
+function fluxoDoConstrutor(extra = {}) {
+  return {
+    entry_audience: naoOuviuOAviso,
+    entry_mode: "current",
+    entry_refreshed_at: null,
+    goal: null,
+    id: FLUXO,
+    origin: "builder",
+    source_campaign_id: null,
+    status: "active",
+    updated_at: "2026-10-20T10:00:00.000000+00:00",
+    watched_page_keys: [],
+    ...extra
+  };
+}
+
+test("fluxos sem trabalho: tres consultas pequenas, nenhuma RPC e nenhum aluno lido (no minuto da faixa, uma a mais)", async () => {
+  const db = scriptedDb(() => ({ count: 0, data: [], error: null }));
+  const result = await processFlows({ db, now: FORA_DA_FAIXA });
+
+  assert.equal(result.worked, false);
+  assert.deepEqual(db.queries.map((query) => query.table).sort(), ["communication_flow_tasks", "communication_flows", "communication_flows"]);
+  assert.ok(db.queries.every((query) => query.op === "select"), "so leitura");
+
+  const tarefas = db.queries.find((query) => query.table === "communication_flow_tasks");
+  assert.ok(temFiltro(tarefas, "eq", "flow_active", true), "so o indice parcial dos fluxos no ar (pausado nao custa nada)");
+  assert.ok(temFiltro(tarefas, "limit", 1));
+
+  const naFaixa = scriptedDb(() => ({ count: 0, data: [], error: null }));
+  await processFlows({ db: naFaixa, now: NA_FAIXA });
+  assert.equal(naFaixa.queries.length, 4);
+});
+
+test("aviso com seguintes ainda agendado: so mais uma leitura pequena de campaigns, nada de alunos nem de RPC", async () => {
+  const db = scriptedDb((query) => {
+    if (query.table === "communication_flows" && temFiltro(query, "eq", "origin", "notice")) {
+      return { data: [{ id: FLUXO, source_campaign_id: AVISO }], error: null };
+    }
+
+    return { count: 0, data: [], error: null };
+  });
+  const result = await processFlows({ db, now: FORA_DA_FAIXA });
+
+  assert.equal(result.worked, false);
+  assert.deepEqual(db.queries.map((query) => query.table).sort(), ["campaigns", "communication_flow_tasks", "communication_flows", "communication_flows"]);
+  const avisos = db.queries.find((query) => query.table === "campaigns");
+  assert.ok(temFiltro(avisos, "eq", "status", "sent"));
+});
+
+test("as duas fases dividem os fatos do tick: alunos lidos uma vez, e as linhas do aviso citado uma vez (dois pop-ups e a entrada de um fluxo)", async () => {
+  const popup = (id) => ({ ...POPUP, audience: naoOuviuOAviso, id });
+  const db = scriptedDb((query) => {
+    if (query.table === "campaigns" && query.op === "select") {
+      if (isPopupQuery(query)) {
+        return { data: [popup("0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e01"), popup("0f8f7c2e-3b1a-4c55-9d7e-2a6b8c9d0e02")], error: null };
+      }
+
+      if (query.payload === "id,status,sent_at,deleted_at") {
+        return { data: [{ deleted_at: null, id: AVISO, sent_at: "2026-10-19T12:00:00.000Z", status: "sent" }], error: null };
+      }
+    }
+
+    if (query.table === "campaigns" && query.op === "update") {
+      return { data: [{ ...POPUP, ...query.payload }], error: null };
+    }
+
+    if (query.table === "communication_flows" && query.op === "select" && temFiltro(query, "eq", "origin", "builder")) {
+      return { data: [fluxoDoConstrutor()], error: null };
+    }
+
+    if (query.table === "communication_flows" && query.op === "update") {
+      return { data: [{ id: FLUXO }], error: null };
+    }
+
+    return { count: 0, data: [], error: null };
+  });
+  const infos = [];
+  const original = console.info;
+  console.info = (...args) => infos.push(args.join(" "));
+
+  try {
+    await communicationsJob.run(contexto(db));
+  } finally {
+    console.info = original;
+  }
+
+  assert.equal(db.queries.filter((query) => query.table === "profiles").length, 1, "fatos base uma vez por tick");
+  assert.equal(db.queries.filter((query) => query.table === "notifications" && query.op === "select").length, 1, "linhas do aviso citado uma vez por tick");
+  assert.equal(db.queries.filter((query) => query.payload === "id,status,sent_at,deleted_at").length, 1);
+  assert.equal(db.queries.filter((query) => query.table === "campaigns" && query.op === "update").length, 2, "os dois pop-ups recalculados");
+
+  const fezEntrada = db.queries.find((query) => query.table === "communication_flows" && query.op === "update");
+  assert.deepEqual(Object.keys(fezEntrada.payload).sort(), ["entry_count", "entry_counted_at", "entry_refreshed_at"], "so colunas do job (nao mudam a versao do editor)");
+  assert.ok(temFiltro(fezEntrada, "eq", "updated_at", fluxoDoConstrutor().updated_at), "so se ninguem mudou o fluxo no meio");
+
+  const [metricas] = db.queries.filter((query) => query.table === "job_runs");
+  assert.ok(metricas, "houve trabalho de fluxo: as contagens vao para job_runs");
+  assert.equal(metricas.op, "update");
+  assert.equal(metricas.payload.metadata.tick_run_id, "tick", "o tick_run_id do run-tick.ts fica");
+  assert.deepEqual(Object.keys(metricas.payload.metadata.flows).sort(), [
+    "backfilled",
+    "claimed",
+    "decided",
+    "deferred",
+    "entered",
+    "failed",
+    "finished",
+    "job_ms",
+    "ms",
+    "sent",
+    "skipped",
+    "woken"
+  ]);
+  assert.ok(temFiltro(metricas, "eq", "id", "run"), "a linha do proprio job");
+  assert.ok(infos.some((line) => /^\[comunicacao\] fluxos: 0 conferidas, 0 enviadas, 0 adiadas, 0 puladas, 0 falha\(s\), 0 entraram, \d+ ms\.$/.test(line)), infos.join("\n"));
+});
+
+test("sem trabalho de fluxo, o job nao grava nada em job_runs (o run-tick.ts registra o inicio e o fim)", async () => {
+  const db = scriptedDb(() => ({ count: 0, data: [], error: null }));
+
+  await communicationsJob.run(contexto(db));
+  assert.ok(!db.queries.some((query) => query.table === "job_runs"));
+});
+
+test("o carregador por chave le os alunos uma vez e cada aviso uma vez, e marca so as chaves lidas", async () => {
+  const OUTRO = "8c3f9e2d-3b1a-4c55-9d7e-2a6b8c9d0e1f";
+  const db = scriptedDb((query) => {
+    if (query.table === "campaigns") {
+      return { data: (filterOf(query, "in")?.[2] ?? []).map((id) => ({ deleted_at: null, id, sent_at: "2026-10-19T12:00:00.000Z", status: "sent" })), error: null };
+    }
+
+    return { count: 0, data: [], error: null };
+  });
+  const facts = createFactsLoader(db, FORA_DA_FAIXA);
+  const base = await facts.load([]);
+  const comAviso = await facts.load([AVISO]);
+  await facts.load([AVISO]);
+  const comOsDois = await facts.load([OUTRO, AVISO]);
+
+  assert.equal(db.queries.filter((query) => query.table === "profiles").length, 1);
+  assert.deepEqual(
+    db.queries.filter((query) => query.table === "campaigns").map((query) => filterOf(query, "in")[2]),
+    [[AVISO], [OUTRO]]
+  );
+  assert.deepEqual([...base.context.messageKeys], []);
+  assert.deepEqual([...comAviso.context.messageKeys], [`campaign:${AVISO}`]);
+  assert.deepEqual([...comOsDois.context.messageKeys].sort(), [`campaign:${AVISO}`, `campaign:${OUTRO}`].sort());
+});
+
+test("o carregador guarda a falha: a leitura que cai nunca vira rejeicao solta, e quem espera recebe o erro", async () => {
+  const db = scriptedDb(() => ({ count: null, data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }));
+  const unhandled = [];
+  const listener = (reason) => unhandled.push(reason);
+  process.on("unhandledRejection", listener);
+
+  try {
+    const facts = createFactsLoader(db, FORA_DA_FAIXA);
+    facts.load([AVISO]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await assert.rejects(() => facts.load([]), /statement timeout/);
+  } finally {
+    process.off("unhandledRejection", listener);
+  }
+
+  assert.deepEqual(unhandled, []);
+});
+
+test("fase dos fluxos para no signal: com o tick abortado, nada e reservado", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const db = scriptedDb((query) => (query.table === "communication_flow_tasks" ? { data: [{ node_id: "x" }], error: null } : { count: 0, data: [], error: null }));
+  const result = await processFlows({ db, now: FORA_DA_FAIXA, signal: controller.signal });
+
+  assert.equal(result.claimed, 0);
+  assert.ok(!db.queries.some((query) => query.op === "rpc"), "nenhuma reserva");
+});
+
+test("banco sem a migracao 202610200002: a fase dos fluxos registra e volta (pendingMigration), o job continua verde", async () => {
+  const db = scriptedDb((query) =>
+    query.table.startsWith("communication_flow")
+      ? { data: null, error: { code: "42P01", message: 'relation "public.communication_flow_tasks" does not exist' } }
+      : { count: 0, data: [], error: null }
+  );
+  const errors = [];
+  const original = console.error;
+  console.error = (...args) => errors.push(args.join(" "));
+
+  try {
+    const result = await processFlows({ db, now: FORA_DA_FAIXA });
+    assert.equal(result.pendingMigration, true);
+    await assert.doesNotReject(() => communicationsJob.run(contexto(db)));
+  } finally {
+    console.error = original;
+  }
+
+  assert.ok(errors.some((line) => line.includes("migracao 202610200002 pendente")), errors.join("\n"));
+  assert.deepEqual(EMPTY_FLOWS.worked, false);
+});
+
+const tarefaReservada = (n) => ({
+  anchor_at: "2026-10-20T14:00:00.000+00:00",
+  attempts: 1,
+  claimed_at: `2026-10-20T15:07:00.00012${n}+00:00`,
+  deadline_at: null,
+  deferrals: 0,
+  due_at: "2026-10-20T15:00:00+00:00",
+  flow_active: true,
+  flow_id: FLUXO,
+  node_id: `3d4e5f60-3b1a-4c55-9d7e-2a6b8c9d0e0${n}`,
+  not_before: null,
+  status: "running",
+  user_id: `00000000-0000-4000-8000-00000000000${n}`
+});
+
+test("lote que falha antes de aplicar (fatos fora do ar) devolve as reservas e a tentativa; nada e aplicado", async () => {
+  const reservadas = [tarefaReservada(1), tarefaReservada(2)];
+  const db = scriptedDb((query) => {
+    if (query.table === "communication_flow_tasks") {
+      return { data: [{ node_id: "x" }], error: null };
+    }
+
+    if (query.op === "rpc" && query.table === "communication_claim_flow_tasks") {
+      return { data: reservadas, error: null };
+    }
+
+    if (query.op === "rpc" && query.table === "communication_release_flow_tasks") {
+      return { data: 2, error: null };
+    }
+
+    if (query.table === "communication_flows" && temFiltro(query, "in", "id")) {
+      return { data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } };
+    }
+
+    return { count: 0, data: [], error: null };
+  });
+  const errors = [];
+  const original = console.error;
+  console.error = (...args) => errors.push(args.join(" "));
+  let result;
+
+  try {
+    result = await processFlows({ db, now: FORA_DA_FAIXA });
+  } finally {
+    console.error = original;
+  }
+
+  const devolucao = db.queries.find((query) => query.table === "communication_release_flow_tasks");
+  assert.deepEqual(
+    devolucao.args.p_claims,
+    reservadas.map((task) => ({ claimed_at: task.claimed_at, node_id: task.node_id, user_id: task.user_id })),
+    "o carimbo exato de cada reserva"
+  );
+  assert.ok(!db.queries.some((query) => query.table === "communication_apply_flow_results"));
+  assert.equal(result.claimed, 2);
+  assert.ok(errors.some((line) => line.includes("devolvido")), errors.join("\n"));
+});
+
+test("bisseccao: uma tarefa ruim (erro 23xxx) termina sozinha como 'failed'; as outras do lote sao aplicadas", async () => {
+  const tarefas = [tarefaReservada(1), tarefaReservada(2), tarefaReservada(3)];
+  const ruim = tarefas[1].node_id;
+  const chamadas = [];
+  const db = scriptedDb((query) => {
+    const results = query.args.p_results;
+    chamadas.push(results.map((item) => [item.node_id === ruim ? "ruim" : "boa", item.action]));
+
+    if (results.some((item) => item.node_id === ruim && item.action === "send")) {
+      return { data: null, error: { code: "23514", message: 'new row for relation "notifications" violates check constraint "notifications_expires_v2"' } };
+    }
+
+    return { data: results.map((item) => ({ outcome: item.action === "send" ? "send" : item.result, sent_notification_id: null, task_node_id: item.node_id, task_user_id: item.user_id })), error: null };
+  });
+  const decisao = { action: "send", campaignId: AVISO, children: [], deadlineAt: null, expiresAt: Date.parse("2026-10-21T15:00:00.000Z") };
+  const original = console.error;
+  console.error = () => undefined;
+  let outcomes;
+
+  try {
+    outcomes = await flowStore.applyFlowResults(db, { now: FORA_DA_FAIXA, results: tarefas.map((task) => ({ decision: decisao, task })) });
+  } finally {
+    console.error = original;
+  }
+
+  assert.deepEqual(outcomes.map((row) => row.outcome), ["send", "failed", "send"]);
+  assert.ok(chamadas.some((call) => JSON.stringify(call) === JSON.stringify([["ruim", "finish"]])), "a ruim vai sozinha, como falha");
+  assert.deepEqual(chamadas[0].length, 3, "primeiro o lote inteiro");
+  assert.equal(chamadas.flat().filter(([tipo, action]) => tipo === "boa" && action === "send").length >= 2, true);
+  assert.equal(db.queries[0].args.p_daily_cap, 3);
+  assert.equal(db.queries[0].args.p_min_gap_minutes, 60);
+  assert.equal(db.queries[0].args.p_max_deferrals, 7);
+  assert.equal(db.queries[0].args.p_day_start, "2026-10-20T03:00:00.000Z", "dia de Sao Paulo");
+  assert.equal(db.queries[0].args.p_results[0].claimed_at, tarefas[0].claimed_at, "carimbo da reserva exatamente como veio");
+});
+
+test("bisseccao nao engole erro de conexao ou de tempo: o lote inteiro falha (o job aparece em job_runs)", async () => {
+  const db = scriptedDb(() => ({ data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } }));
+  const decisao = { action: "defer", deadlineAt: null, dueAt: Date.parse("2026-10-21T15:00:00.000Z") };
+
+  await assert.rejects(
+    () => flowStore.applyFlowResults(db, { now: FORA_DA_FAIXA, results: [tarefaReservada(1), tarefaReservada(2)].map((task) => ({ decision: decisao, task })) }),
+    /statement timeout/
+  );
+  assert.equal(db.queries.length, 1);
+});
+
+test("erros proprios dos RPCs dos fluxos viram a frase da tela com o status certo", () => {
+  const erro = (code, message) => flowStore.flowRpcError({ code, message }, "Comunicacao: gravar fluxo");
+
+  assert.deepEqual([erro("BK409", "Este fluxo mudou em outra tela.").status, erro("BK409", "Este fluxo mudou em outra tela.").message], [
+    409,
+    "Este fluxo mudou em outra tela há instantes. Recarregue a página para ver a versão atual."
+  ]);
+  assert.equal(erro("BK404", "Este fluxo nao existe mais.").status, 404);
+  assert.equal(erro("BK422", "Para mudar a ordem, remova e crie de novo.").message, "Para mudar a ordem, remova e crie de novo.");
+  assert.equal(erro("BK422", "Neste fluxo, quem entra foi decidido ao ativar.").message, "Neste fluxo, quem entra foi decidido ao ativar. Duplique para mudar.");
+  assert.equal(erro("BK422", "O jeito de entrar nao muda depois de ativar.").message, "O jeito de entrar não muda depois de ativar. Duplique para mudar.");
+  assert.equal(erro("BK422", "Para mudar a referencia de tempo, remova este passo e crie outro.").message, "Para mudar a referência de tempo, remova este passo e crie outro.");
+  assert.equal(erro("23514", "check").code, "23514", "erro de banco guarda o codigo (bisseccao)");
+});
+
+test("nenhum select embute campaigns em communication_flows (ou o contrario) sem a dica da FK (senao PGRST201)", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const files = ["flow-store.ts", "flow-queries.ts", "flow-facts.ts", "flow-engine.ts"];
+  let checked = 0;
+
+  for (const file of files) {
+    let source;
+
+    try {
+      source = await readFile(new URL(`../src/server/communications/${file}`, import.meta.url), "utf8");
+    } catch {
+      continue;
+    }
+
+    checked += 1;
+
+    for (const [, text] of source.matchAll(/select\(\s*[`"']([^`"']*)[`"']/g)) {
+      for (const [, name, hint] of text.matchAll(/\b(campaigns|communication_flows)(![a-z_]+)?\s*\(/g)) {
+        assert.ok(
+          hint === "!communication_flows_source_campaign_id_fkey" || hint === "!campaigns_flow_id_fkey",
+          `${file}: embed de ${name} sem a dica da FK em "${text}"`
+        );
+      }
+    }
+  }
+
+  assert.ok(checked >= 3);
+});

@@ -231,12 +231,26 @@ export async function fetchEntitlement(db: StudentsDb, entitlementId: string): P
   return (data ?? null) as EntitlementRow | null;
 }
 
-export function fetchProgressRows(db: StudentsDb, userId?: string) {
+/**
+ * Progresso dos alunos: todos, de um aluno (texto ou `userId`) ou de alguns (`userIds`, lote do motor
+ * dos fluxos; lista vazia = nenhuma linha, sem ir ao banco).
+ */
+export async function fetchProgressRows(db: StudentsDb, filter: string | { userId?: string; userIds?: readonly string[] } = {}) {
+  const { userId, userIds } = typeof filter === "string" ? { userId: filter, userIds: undefined } : filter;
+
+  if (userIds && userIds.length === 0) {
+    return [] as ProgressRow[];
+  }
+
   return fetchAll<ProgressRow>("Progresso dos alunos", (from, to, count) => {
     let query = db.from("lesson_progress").select("user_id,content_id,completed_lesson_ids,updated_at", count).order("id");
 
     if (userId) {
       query = query.eq("user_id", userId);
+    }
+
+    if (userIds) {
+      query = query.in("user_id", [...userIds]);
     }
 
     return query.range(from, to);

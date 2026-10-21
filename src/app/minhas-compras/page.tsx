@@ -3,6 +3,8 @@ import { MemberFooter } from "@/components/member-footer";
 import { PurchasesExperience } from "@/components/purchases-experience";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { requirePageUser } from "@/server/auth/guards";
+import { pageKeyOfRoute } from "@/server/member-area/page-visit-model";
+import { trackMemberPageVisit } from "@/server/member-area/page-visits";
 import { getAppShellData, getMemberLibrary } from "@/server/db/platform-store";
 import { buildPurchasesPageView } from "@/server/member-area/purchases-view";
 
@@ -24,6 +26,7 @@ export default async function PurchasesPage({ searchParams }: PurchasesPageProps
   // getAppShellData e getMemberLibrary leem a mesma consulta em cache desta requisicao.
   const library = await getMemberLibrary(accessPreviewMode, user);
   const view = buildPurchasesPageView(library);
+  await trackMemberPageVisit({ accessPreviewMode, pageKey: pageKeyOfRoute("/minhas-compras"), userId: user.id });
 
   return (
     <AppShell

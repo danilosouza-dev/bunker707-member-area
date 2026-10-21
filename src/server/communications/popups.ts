@@ -5,6 +5,8 @@ import "server-only";
 // mantida pelo job), nunca de novo depois de clicar ou de "Não mostrar de novo". A lista curta de
 // pop-ups no ar fica em cache (60 s, tag "communications"); o estado do aluno e lido na hora, em duas
 // consultas pequenas por chave primaria/indice. A equipe nunca tem linha de entrega: nunca ve pop-up.
+// v2 (docs/23): o icone ao lado do titulo vem junto; sem icone, a chave nem vai (o resumo fica igual ao
+// da v1).
 
 import { unstable_cache } from "next/cache";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
@@ -21,13 +23,14 @@ import {
   type PopupRepeat
 } from "./campaign-model";
 import { assertNoDbError, communicationsDb, CommunicationError, isMissingCommunicationSchema } from "./db";
+import { noticeIconOfColumns } from "./message-meta";
 import { normalizePeaks, type PopupItem } from "./notification-model";
 
 export const POPUP_NOT_FOUND = "Pop-up nao encontrado.";
 export const SNOOZE_REFUSED = "Não dá para lembrar depois de novo.";
 
 const LIVE_POPUP_COLUMNS =
-  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,popup_repeat,allow_snooze,starts_at,ends_at,sent_at,created_at";
+  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,popup_repeat,allow_snooze,starts_at,ends_at,sent_at,created_at,icon,icon_color";
 const DELIVERY_COLUMNS = "campaign_id,eligible,impressions,last_seen_at,clicked_at,dismissed_at,snoozed_until,snooze_count";
 
 type LivePopupRow = {
@@ -42,6 +45,9 @@ type LivePopupRow = {
   cta_label: string | null;
   cta_target: "new_tab" | "same_tab" | null;
   ends_at: string | null;
+  /** Icone ao lado do titulo (ids do catalogo; fora dele = sem icone). Ausente no cache anterior a v2. */
+  icon?: string | null;
+  icon_color?: string | null;
   id: string;
   image_alt: string | null;
   image_url: string | null;
@@ -142,8 +148,10 @@ function safeMediaUrl(value: string | null) {
 function toPopupItem(row: LivePopupRow, delivery: PopupDeliveryState): PopupItem {
   const imageUrl = safeMediaUrl(row.image_url);
   const audioUrl = safeMediaUrl(row.audio_url);
+  const icon = noticeIconOfColumns(row.icon, row.icon_color);
 
   return {
+    ...(icon ? { icon } : {}),
     audio:
       audioUrl && row.audio_duration_seconds
         ? { durationSeconds: row.audio_duration_seconds, mimeType: row.audio_mime, peaks: normalizePeaks(row.audio_peaks), url: audioUrl }

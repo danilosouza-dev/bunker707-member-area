@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { actAs } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient } from "../support/local-db.mjs";
 import { limparConfiguracoesDeTeste, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
+import { pngQuadradoDataUrl } from "../support/imagem-de-teste.mjs";
 
 // Admin: Area de membros (docs/18 §3.2) contra o banco LOCAL de verdade. A invariante do docs/13: cada
 // configuracao (destaque, fileiras da home, tela de entrar) e gravada com a versao que a tela leu, e a
@@ -17,16 +18,28 @@ const { DEFAULT_LOGIN_PAGE_SETTINGS } = await import("../../src/server/member-ar
 const { getLoginPageConfigForRequest } = await import("../../src/server/member-area/login-queries.ts");
 const { readPlatformSetting } = await import("../../src/server/member-area/settings-store.ts");
 const homeSectionsRoute = await import("../../src/app/api/admin/home-sections/route.ts");
-const { getHomePageData } = await import("../../src/server/db/platform-store.ts");
+const appearanceRoute = await import("../../src/app/api/admin/appearance/route.ts");
+const { getAppShellData, getHomePageData } = await import("../../src/server/db/platform-store.ts");
+const { getStorefrontBrand } = await import("../../src/server/storefront/queries.ts");
 
-const CHAVES = ["hero", "homeSections", "loginPage"];
+// "branding" nao vem da semente: ausente = logo, icone da escola e estilo padrao.
+const CHAVES = ["branding", "hero", "homeSections", "loginPage"];
+const SIMBOLO_PADRAO = "/brand/icon-bunker.svg";
+const arquivosEnviados = new Set();
 const produtor = usuarioDeTeste(contas.produtor);
 const analista = usuarioDeTeste(contas.analista);
 const aluna = usuarioDeTeste(contas.aluna);
 const destaque = { ...DEFAULT_HOME_HERO_DRAFT, showTitle: true, title: "Destaque de teste: bem-vinda ao Bunker" };
 
 before(() => limparConfiguracoesDeTeste(db, CHAVES));
-after(() => limparConfiguracoesDeTeste(db, CHAVES));
+after(async () => {
+  await limparConfiguracoesDeTeste(db, CHAVES);
+
+  if (arquivosEnviados.size > 0) {
+    const { error } = await db.storage.from("content-assets").remove([...arquivosEnviados]);
+    assert.equal(error, null, "apaga o icone enviado pelo teste");
+  }
+});
 
 function publicarFileiras(user, payload) {
   actAs(user);
@@ -35,6 +48,17 @@ function publicarFileiras(user, payload) {
     headers: { "content-type": "application/json" },
     method: "PUT"
   }));
+}
+
+async function publicarMarca(user, payload) {
+  actAs(user);
+  const response = await appearanceRoute.PUT(new Request("http://localhost/api/admin/appearance", {
+    body: JSON.stringify(payload),
+    headers: { "content-type": "application/json" },
+    method: "PUT"
+  }));
+
+  return { body: await response.json(), status: response.status };
 }
 
 const secao = (id, title, sectionType, contentSource, layout, order, visibility = "all") => ({
@@ -126,4 +150,88 @@ test("tela de entrar: a frase publicada pelo produtor aparece para quem vai entr
   const velha = await saveLoginPage({ expectedUpdatedAt: "2020-01-01T00:00:00.000Z", settings });
   assert.equal(velha.status, 409);
   assert.equal((await saveLoginPage({ expectedUpdatedAt: primeira.data.updatedAt, settings: { ...settings, quote: "Outra frase." } })).ok, true);
+});
+
+test("marca: o icone da escola enviado fica gravado, a aluna recebe, e trocar ou tirar a logo e mudar o estilo nao o apagam", async () => {
+  assert.equal((await getStorefrontBrand()).schoolIcon, SIMBOLO_PADRAO, "sem nada gravado, o simbolo padrao");
+
+  const envio = await publicarMarca(produtor, { schoolIcon: { image: pngQuadradoDataUrl(128) } });
+  assert.equal(envio.status, 200, JSON.stringify(envio.body));
+  const icone = envio.body.data.branding.schoolIcon;
+  const caminho = /\/content-assets\/(platform\/school-icon\/[0-9a-f]{24}\.png)$/.exec(icone)?.[1];
+  assert.ok(caminho, `o envio vai para o armazenamento, nunca como data URL no banco: ${icone}`);
+  arquivosEnviados.add(caminho);
+  assert.equal((await readPlatformSetting("branding")).value.schoolIcon, icone);
+  assert.equal((await getStorefrontBrand()).schoolIcon, icone, "a Marca le o icone gravado");
+  assert.equal((await getAppShellData(aluna)).branding.schoolIcon, icone, "a area do aluno recebe o icone (o sino usa)");
+
+  const logo = "https://cdn.exemplo.com/marca-de-teste/logo.webp";
+  const comLogo = await publicarMarca(produtor, { logo: { image: logo } });
+  assert.equal(comLogo.status, 200, JSON.stringify(comLogo.body));
+  assert.deepEqual(
+    { logoImage: comLogo.body.data.branding.logoImage, schoolIcon: comLogo.body.data.branding.schoolIcon },
+    { logoImage: logo, schoolIcon: icone },
+    "trocar a logo mantem o icone"
+  );
+
+  const semLogo = await publicarMarca(produtor, { logo: { image: null } });
+  assert.equal(semLogo.status, 200, JSON.stringify(semLogo.body));
+  assert.equal(semLogo.body.data.branding.logoImage, null);
+  assert.equal(semLogo.body.data.branding.schoolIcon, icone, "tirar a logo mantem o icone");
+
+  const estilo = { buttons: "pill", corners: "rounded", menu: "header" };
+  const comEstilo = await publicarMarca(produtor, { style: estilo });
+  assert.equal(comEstilo.status, 200, JSON.stringify(comEstilo.body));
+
+  const marca = await getStorefrontBrand();
+  assert.deepEqual(
+    { logoImage: marca.logoImage, schoolIcon: marca.schoolIcon, style: marca.style },
+    { logoImage: null, schoolIcon: icone, style: estilo },
+    "mudar o estilo mantem o icone (e a logo tirada)"
+  );
+});
+
+test("marca: link colado vira o icone; Usar o simbolo padrao tira a chave e mantem logo e estilo", async () => {
+  const link = "https://cdn.exemplo.com/marca-de-teste/icone.png";
+  const colado = await publicarMarca(produtor, { schoolIcon: { image: `  ${link}  ` } });
+  assert.equal(colado.status, 200, JSON.stringify(colado.body));
+  assert.equal((await getStorefrontBrand()).schoolIcon, link);
+
+  const antes = (await readPlatformSetting("branding")).value;
+  const padrao = await publicarMarca(produtor, { schoolIcon: { image: null } });
+  assert.equal(padrao.status, 200, JSON.stringify(padrao.body));
+
+  const gravado = (await readPlatformSetting("branding")).value;
+  assert.equal("schoolIcon" in gravado, false, "ausente = o simbolo padrao");
+  assert.deepEqual({ logoImage: gravado.logoImage, style: gravado.style }, { logoImage: antes.logoImage, style: antes.style });
+  assert.equal((await getStorefrontBrand()).schoolIcon, SIMBOLO_PADRAO);
+  assert.equal((await getAppShellData(aluna)).branding.schoolIcon, undefined, "o sino cai no simbolo padrao");
+
+  const pelaRota = await publicarMarca(produtor, { schoolIcon: { image: SIMBOLO_PADRAO } });
+  assert.equal(pelaRota.status, 200, JSON.stringify(pelaRota.body));
+  assert.equal("schoolIcon" in (await readPlatformSetting("branding")).value, false, "o proprio simbolo padrao tambem nao fica gravado");
+});
+
+test("marca: corpo sem nada, icone mal formado, vazio ou fora de http(s) e recusado com 400 sem gravar; analista 403", async () => {
+  const antes = await readPlatformSetting("branding");
+
+  const vazio = await publicarMarca(produtor, {});
+  assert.deepEqual(vazio, { body: { error: "Informe a capa da home, a logo, o ícone da escola ou o estilo." }, status: 400 });
+
+  for (const schoolIcon of ["https://cdn.exemplo.com/i.png", { image: 42 }, null, {}]) {
+    const ruim = await publicarMarca(produtor, { schoolIcon });
+    assert.deepEqual(ruim, { body: { error: "Configuracao de icone invalida." }, status: 400 }, JSON.stringify(schoolIcon));
+  }
+
+  const embranco = await publicarMarca(produtor, { schoolIcon: { image: "   " } });
+  assert.deepEqual(embranco, { body: { error: "Envie uma imagem ou informe uma URL para o ícone da escola." }, status: 400 });
+
+  const script = await publicarMarca(produtor, { schoolIcon: { image: "javascript:alert(1)" } });
+  assert.deepEqual(script, { body: { error: "O ícone da escola precisa ser um upload valido ou uma URL http(s)." }, status: 400 });
+
+  const analistaTenta = await publicarMarca(analista, { schoolIcon: { image: "https://cdn.exemplo.com/i.png" } });
+  assert.equal(analistaTenta.status, 403);
+
+  const depois = await readPlatformSetting("branding");
+  assert.deepEqual(depois.value, antes.value, "nada foi gravado");
 });

@@ -23,6 +23,7 @@ import { normalizeMemberStyle } from "@/lib/member-style";
 import { cn } from "@/lib/utils";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { ContentPageHeroCorners, PlatformBrandingConfig } from "@/lib/platform-types";
+import { SCHOOL_DEFAULT_ICON } from "@/server/communications/message-meta";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 
 type AppShellProps = {
@@ -403,6 +404,8 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
               className={searchOpen ? "max-sm:hidden" : undefined}
               onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
               refreshSummaryOnMount={!popupHome}
+              // O circulo dos avisos da escola e o Icone da escola (Marca); a logo fica no topo e de reserva.
+              schoolIconUrl={branding?.schoolIcon ?? SCHOOL_DEFAULT_ICON}
               schoolLogoUrl={logoImage}
               schoolName="Bunker707"
             />

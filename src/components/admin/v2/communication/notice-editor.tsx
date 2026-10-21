@@ -6,44 +6,44 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PRODUCT_FORMAT_LABELS, PRODUCT_SITUATION_LABELS } from "@/server/catalog/model";
-import { previewNoticeAudience, publishNotice, saveNoticeDraft, sendNoticeTestToMe, uploadNoticeImage } from "@/server/communications/actions";
+import { previewNoticeAudience, publishNotice, saveNoticeDraft, sendNoticeTestToMe } from "@/server/communications/actions";
 import { describeAudience, normalizeAudience, type AudienceDefinition } from "@/server/communications/audience-model";
 import {
   APPROVAL_THRESHOLD,
-  NOTICE_LIMITS,
   describeNoticeReview,
   formatSaoPauloDateTime,
   type CampaignKind,
   type CampaignStatus,
   type NoticePermissions
 } from "@/server/communications/campaign-model";
+import { describeValidity, type Validity } from "@/server/communications/message-meta";
 import type { NoticeDetail, NoticeEditorOptions } from "@/server/communications/queries";
 import { audienceDefinitionSchema, emptyNoticeDraft, noticeDraftSchema, publishProblems, type NoticeDraft } from "@/server/communications/schemas";
 import { ErrorBanner } from "../error-banner";
 import { PillGroup } from "../form";
-import { HeroTextField } from "../member-area/home-hero/fields";
 import type { PreviewDevice } from "../member-area/preview-frame";
 import { AdminPage } from "../page-container";
 import { PageHeader } from "../page-header";
-import { ImageField } from "../products/image-field";
 import { useWarnBeforeUnload } from "../products/use-warn-before-unload";
-import { AdminSwitch, SectionCard } from "../settings/kit";
+import { SectionCard } from "../settings/kit";
 import { StatusChip } from "../status-chip";
 import type { ProductPickerItem } from "../storefront/product-picker";
 import { adminCard } from "../styles";
 import { adminToast } from "../toast";
 import { useAdminTopbarTitle } from "../topbar-title";
 import { AudienceBuilder, AudienceCount, type AudienceCountState } from "./audience-builder";
-import { NoticeAudioField } from "./notice-audio-field";
-import { NoticeCtaField } from "./notice-cta-field";
+import { NoticeContentFields } from "./notice-content-fields";
 import { NoticePreview } from "./notice-preview";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
+import { NoticeValidityField } from "./notice-validity-field";
 import { NoticeWhenFields } from "./notice-when-fields";
 import {
   NOTHING_TO_SAVE_MESSAGE,
   NOTICES_HREF,
   PRIMARY_INTENT_LABELS,
   audienceErrorsFrom,
+  audienceMessageOptions,
+  audienceNamesWithMessages,
   canonicalNoticeDraft,
   isLivePopupStatus,
   isNoticeKindLocked,
@@ -59,12 +59,15 @@ import {
   rebaseNoticeDraft,
   savedNoticeToast,
   testSentToast,
-  type NoticeFieldErrors
+  type NoticeFieldErrors,
+  type NoticeSenderChoice
 } from "./notices-view-model";
 
-// Editor de aviso (docs/22 §2.2; docs/17 §1.8.2): uma pagina com o formulario a esquerda (O que,
-// Imagem e audio, Botao, Resposta, Para quem, Quando, Revisao) e a previa ao vivo a direita com os
-// componentes reais do aluno. Modelo: o editor do Destaque (member-area/home-hero/hero-editor.tsx).
+// Editor de aviso (docs/22 §2.2; docs/17 §1.8.2; v2 em docs/23): uma pagina com o formulario a esquerda
+// (O que, Imagem e audio, Botao, Resposta, Para quem, Quando, Revisao) e a previa ao vivo a direita com
+// os componentes reais do aluno. Modelo: o editor do Destaque (member-area/home-hero/hero-editor.tsx).
+// O conteudo (titulo ate a resposta, com quem envia e o icone) e o NoticeContentFields, o mesmo da
+// notificacao seguinte e do construtor de fluxos; "Fica no sino por" fica no cartao "Quando".
 //
 // - "Salvar rascunho" grava pela Server Action saveNoticeDraft com a versao lida (409 -> banner
 //   "Este aviso mudou em outra tela" com Recarregar, mantendo o rascunho). Cmd/Ctrl+Enter salva. Sem
@@ -107,6 +110,8 @@ const FIELD_FOCUS: readonly [string, string][] = [
   ["kind", "[name='aviso-tipo']"],
   ["title", "#aviso-titulo"],
   ["body", "#aviso-texto"],
+  ["sender", "#aviso-quem-envia"],
+  ["icon", "#aviso-icone [aria-checked='true']"],
   ["image", "[aria-labelledby='aviso-imagem-label']"],
   ["audio", "#aviso-audio"],
   ["cta.label", "#aviso-botao-texto"],
@@ -117,6 +122,9 @@ const FIELD_FOCUS: readonly [string, string][] = [
   ["response", "#aviso-resposta"],
   ["audience", "[name='aviso-para-quem']"],
   ["schedule", "#aviso-envio-data"],
+  ["validity.endsAt", "#aviso-validade-fim-data"],
+  ["validity.minutes", "#aviso-validade-numero"],
+  ["validity", "[name='aviso-validade']"],
   ["window.startsAt", "#aviso-inicio-data"],
   ["window", "#aviso-fim-data"]
 ];
@@ -185,8 +193,9 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
   const [submitted, setSubmitted] = useState(false);
   const [imageUpload, setImageUpload] = useState<string | null>(null);
-  const [imageError, setImageError] = useState<string | null>(null);
   const [audioBusy, setAudioBusy] = useState<string | null>(null);
+  // Equipe de "Quem envia" (relida quando a pessoa volta de Perfil com a foto nova).
+  const [senders, setSenders] = useState<NoticeSenderChoice[]>(() => options.senders);
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   const [count, setCount] = useState<AudienceCountState>(() =>
     initial?.audienceCount !== null && initial?.audienceCount !== undefined
@@ -229,7 +238,6 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   }, [payload]);
   const audienceKey = JSON.stringify(normalizeAudience(draft.audience));
   const audienceValid = useMemo(() => audienceDefinitionSchema.safeParse(JSON.parse(audienceKey)).success, [audienceKey]);
-  const limits = NOTICE_LIMITS[draft.kind];
 
   useWarnBeforeUnload(dirty || uploading || audioBusy !== null);
   useAdminTopbarTitle(initial ? initial.title : "Novo aviso");
@@ -294,8 +302,22 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       : incompleteDate(draft.window.startsAt) || incompleteDate(draft.window.endsAt);
   const reviewSentence = scheduleIncomplete
     ? `Escolha a data e a hora ${draft.kind === "inbox" ? "do envio" : "da janela"} para ver o resumo.`
-    : describeNoticeReview({ audienceCount: liveCount, kind: draft.kind, repeat: draft.repeat, schedule: payload.schedule, window: payload.window });
-  const audienceDescription = describeAudience(normalizeAudience(draft.audience), options.names);
+    : describeNoticeReview({
+        audienceCount: liveCount,
+        kind: draft.kind,
+        repeat: draft.repeat,
+        schedule: payload.schedule,
+        // "Ate uma data" ainda sem data e hora: a frase espera (o campo ja pede "Escolha data e hora.").
+        validity: draft.validity.mode === "until" && !Number.isFinite(Date.parse(draft.validity.endsAt)) ? null : describeValidity(payload.validity),
+        window: payload.window
+      });
+  const audienceNames = useMemo(
+    () => audienceNamesWithMessages(options.names, audienceMessageOptions("segment", { notices: options.notices })),
+    [options.names, options.notices]
+  );
+  const audienceDescription = describeAudience(normalizeAudience(draft.audience), audienceNames);
+  const sendAtTime = draft.schedule.mode === "at" ? Date.parse(draft.schedule.sendAt) : now;
+  const savedSender = initial?.sender ? { id: initial.sender.id, name: initial.sender.name } : null;
 
   function errorFor(key: string) {
     return serverErrors[key] ?? (submitted || touched.has(key) ? clientErrors[key] : undefined);
@@ -341,30 +363,6 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }
 
     change({ kind, response: rememberedResponse.current });
-  }
-
-  async function changeImage(value: string | null) {
-    setImageError(null);
-    touch("image.url");
-
-    // Remover ou link https colado (sem recorte): vai direto para o rascunho.
-    if (value === null || !value.startsWith("data:")) {
-      setDraft((current) => ({ ...current, image: value ? { alt: current.image?.alt ?? "", url: value } : null }));
-      clearServerErrors(["image"]);
-      return;
-    }
-
-    setImageUpload(value);
-    const result = await uploadNoticeImage({ image: value });
-    setImageUpload(null);
-
-    if (!result.ok) {
-      setImageError(result.fieldErrors?.image?.[0] ?? result.error);
-      return;
-    }
-
-    setDraft((current) => ({ ...current, image: { alt: current.image?.alt ?? "", url: result.data.url } }));
-    clearServerErrors(["image"]);
   }
 
   function showFailure(next: Omit<Failure, "title"> & { title?: string }) {
@@ -675,8 +673,12 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             </div>
           ) : null}
 
-          <SectionCard description="O tipo e o texto que o aluno lê." title="O que">
-            <div className="flex min-w-0 flex-col gap-5">
+          <NoticeContentFields
+            canEditBrand={options.canEditBrand}
+            disabled={locked}
+            errorFor={errorFor}
+            kind={draft.kind}
+            leading={
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Tipo</span>
                 <PillGroup ariaLabel="Tipo do aviso" disabled={locked || kindLocked} name="aviso-tipo" onChange={changeKind} options={KIND_OPTIONS} value={draft.kind} />
@@ -684,137 +686,28 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                   {kindLocked
                     ? "O tipo não muda depois de publicado. Para trocar, duplique o aviso."
                     : draft.kind === "inbox"
-                      ? "Fica no sino por 90 dias. O aluno vê quando abrir o sino."
+                      ? "O aluno vê quando abrir o sino."
                       : "Aparece no centro da home, 3 segundos depois de abrir. Nunca durante uma aula."}
                 </p>
               </div>
-              <HeroTextField
-                disabled={locked}
-                error={errorFor("title")}
-                id="aviso-titulo"
-                label="Título"
-                max={limits.title}
-                onBlur={() => touch("title")}
-                onChange={(title) => change({ title })}
-                value={draft.title}
-              />
-              <HeroTextField
-                disabled={locked}
-                error={errorFor("body")}
-                hint={draft.kind === "inbox" ? "Textos longos ficam com “Ver mais” no sino." : undefined}
-                id="aviso-texto"
-                label="Texto (opcional)"
-                max={limits.body}
-                multiline
-                onBlur={() => touch("body")}
-                onChange={(body) => change({ body })}
-                value={draft.body}
-              />
-            </div>
-          </SectionCard>
-
-          <SectionCard description="Uma imagem 16:9 e um áudio curto, para o aviso ganhar atenção." meta="opcional" title="Imagem e áudio">
-            <div className="flex min-w-0 flex-col gap-5">
-              <ImageField
-                error={imageError ?? errorFor("image.url")}
-                id="aviso-imagem"
-                label="Imagem"
-                onChange={(value) => void changeImage(value)}
-                optional
-                pending={uploading}
-                slot="notice"
-                value={previewImage}
-              />
-              {draft.image ? (
-                <HeroTextField
-                  disabled={locked}
-                  error={errorFor("image.alt")}
-                  hint="Ajuda quem usa leitor de tela. Ex.: Professora apresentando a aula nova."
-                  id="aviso-imagem-descricao"
-                  label="Descrição da imagem (opcional)"
-                  max={NOTICE_LIMITS.imageAlt}
-                  onBlur={() => touch("image.alt")}
-                  onChange={(alt) => setDraft((current) => (current.image ? { ...current, image: { ...current.image, alt } } : current))}
-                  value={draft.image.alt}
-                />
-              ) : null}
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-                  Áudio<span className="font-normal text-[var(--text-tertiary)]"> (opcional)</span>
-                </span>
-                <NoticeAudioField
-                  disabled={locked}
-                  error={errorFor("audio.url") ?? errorFor("audio.durationSeconds") ?? errorFor("audio")}
-                  id="aviso-audio"
-                  onBusyChange={setAudioBusy}
-                  onChange={(audio) => change({ audio })}
-                  value={draft.audio}
-                />
-              </div>
-            </div>
-          </SectionCard>
-
-          <SectionCard description="Leva o aluno para um produto, uma página da área ou um site." meta="opcional" title="Botão">
-            <NoticeCtaField
-              disabled={locked}
-              errors={{ href: errorFor("cta.href"), label: errorFor("cta.label") }}
-              key={resetKey}
-              onBlurField={touch}
-              onChange={(cta) => change({ cta })}
-              products={pickerItems}
-              productsLoaded={options.productsLoaded}
-              value={draft.cta}
-            />
-          </SectionCard>
-
-          {draft.kind === "inbox" ? (
-            <SectionCard description="Para convites e confirmações: o aluno responde direto no sino." meta="opcional" title="Resposta">
-              <div className="flex min-w-0 flex-col gap-5">
-                <AdminSwitch
-                  checked={draft.response !== null}
-                  description={draft.response ? "Aparecem dois botões no aviso. As respostas ficam no relatório." : "Sem resposta, o aviso só informa."}
-                  disabled={locked}
-                  id="aviso-resposta"
-                  label="Pedir uma resposta (Aceitar ou Recusar)"
-                  onCheckedChange={(checked) =>
-                    change({ response: checked ? (rememberedResponse.current ?? { acceptLabel: "Aceitar", declineLabel: "Recusar" }) : null })
-                  }
-                />
-                {draft.response ? (
-                  <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-                    <HeroTextField
-                      disabled={locked}
-                      error={errorFor("response.acceptLabel")}
-                      id="aviso-aceitar"
-                      label="Botão de aceitar"
-                      max={NOTICE_LIMITS.responseLabel}
-                      onBlur={() => touch("response.acceptLabel")}
-                      onChange={(acceptLabel) => {
-                        const response = { acceptLabel, declineLabel: draft.response?.declineLabel ?? "Recusar" };
-                        rememberedResponse.current = response;
-                        change({ response });
-                      }}
-                      value={draft.response.acceptLabel}
-                    />
-                    <HeroTextField
-                      disabled={locked}
-                      error={errorFor("response.declineLabel")}
-                      id="aviso-recusar"
-                      label="Botão de recusar"
-                      max={NOTICE_LIMITS.responseLabel}
-                      onBlur={() => touch("response.declineLabel")}
-                      onChange={(declineLabel) => {
-                        const response = { acceptLabel: draft.response?.acceptLabel ?? "Aceitar", declineLabel };
-                        rememberedResponse.current = response;
-                        change({ response });
-                      }}
-                      value={draft.response.declineLabel}
-                    />
-                  </div>
-                ) : null}
-              </div>
-            </SectionCard>
-          ) : null}
+            }
+            onAudioBusyChange={setAudioBusy}
+            onBlurField={touch}
+            // Sem "Fica no sino por" aqui (showValidity false): ele fica no cartao "Quando".
+            onChange={(patch) => change(patch as Partial<NoticeDraft>)}
+            onImageUploadChange={setImageUpload}
+            onSendersChange={setSenders}
+            products={pickerItems}
+            productsLoaded={options.productsLoaded}
+            resetKey={resetKey}
+            savedSender={savedSender}
+            schoolIconUrl={options.branding.iconUrl}
+            schoolName={options.branding.name}
+            sendAt={sendAtTime}
+            senders={senders}
+            showValidity={false}
+            value={draft}
+          />
 
           <SectionCard description="Todos os alunos ou só quem combina com as regras." title="Para quem">
             <div className="flex min-w-0 flex-col gap-4">
@@ -822,6 +715,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                 cohorts={options.cohorts}
                 disabled={locked}
                 errors={audienceErrors}
+                notices={options.notices}
                 onChange={(audience) => change({ audience })}
                 products={pickerItems}
                 productsLoaded={options.productsLoaded}
@@ -832,14 +726,31 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             </div>
           </SectionCard>
 
-          <SectionCard description={draft.kind === "inbox" ? "Agora ou numa data e hora." : "A janela em que o pop-up aparece e quantas vezes."} title="Quando">
-            <NoticeWhenFields
-              disabled={locked}
-              key={resetKey}
-              draft={draft}
-              errors={{ endsAt: errorFor("window.endsAt"), sendAt: errorFor("schedule.sendAt"), startsAt: errorFor("window.startsAt") }}
-              onChange={(patch) => change(patch)}
-            />
+          <SectionCard
+            description={draft.kind === "inbox" ? "Agora ou numa data e hora, e quanto tempo fica no sino." : "A janela em que o pop-up aparece e quantas vezes."}
+            title="Quando"
+          >
+            <div className="flex min-w-0 flex-col gap-6">
+              <NoticeWhenFields
+                disabled={locked}
+                key={resetKey}
+                draft={draft}
+                errors={{ endsAt: errorFor("window.endsAt"), sendAt: errorFor("schedule.sendAt"), startsAt: errorFor("window.startsAt") }}
+                onChange={(patch) => change(patch)}
+              />
+              {draft.kind === "inbox" ? (
+                <NoticeValidityField
+                  disabled={locked}
+                  errors={{ endsAt: errorFor("validity.endsAt"), minutes: errorFor("validity.minutes"), validity: errorFor("validity") }}
+                  idPrefix="aviso-validade"
+                  key={`validade-${resetKey}`}
+                  // O aviso nunca tem "Até a notificação principal sumir" (sem anchorLabel).
+                  onChange={(validity) => change({ validity: validity as Validity })}
+                  sendAt={sendAtTime}
+                  value={draft.validity}
+                />
+              ) : null}
+            </div>
           </SectionCard>
 
           <SectionCard title="Revisão">
@@ -899,7 +810,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             </div>
             <PillGroup ariaLabel="Aparelho da prévia" name="aviso-previa-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
           </div>
-          <NoticePreview branding={options.branding} device={device} draft={draft} imageUrl={previewImage} now={now} />
+          <NoticePreview branding={options.branding} device={device} draft={draft} imageUrl={previewImage} now={now} senders={senders} />
         </section>
       </div>
 

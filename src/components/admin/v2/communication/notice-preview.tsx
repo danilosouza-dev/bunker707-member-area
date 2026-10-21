@@ -7,8 +7,18 @@ import { NotificationCard } from "@/components/member/notifications/notification
 import { MemberFilterPills } from "@/components/member/ui/member-filters";
 import { cn } from "@/lib/utils";
 import type { NoticeDraft } from "@/server/communications/schemas";
+import { PillGroup } from "../form";
 import { MEMBER_PREVIEW_VH_VAR, type PreviewDevice } from "../member-area/preview-frame";
-import { draftToNotificationItem, draftToPopupItem } from "./notices-view-model";
+import {
+  PREVIEW_AGE_MS,
+  PREVIEW_LISTEN_OPTIONS,
+  draftToNotificationItem,
+  draftToPopupItem,
+  previewSender,
+  type NoticeSenderChoice,
+  type PreviewContent,
+  type PreviewListen
+} from "./notices-view-model";
 
 // Previa do aviso (docs/22 §2.2): os componentes REAIS do aluno (NotificationCard dentro do painel do
 // sino; MemberPopupCard sobre a home escurecida) em modo `preview` (sem rede, audio parado, inert).
@@ -18,6 +28,10 @@ import { draftToNotificationItem, draftToPopupItem } from "./notices-view-model"
 // computador, o canto do sino (o painel tem 400 px) ou o centro da home (o pop-up tem 448 px); no
 // celular, a tela de 390 px. A tela inteira de 1280 px reduzida deixaria o texto ilegivel. A moldura so
 // reduz quando a coluna e mais estreita que o recorte. Nada de exemplo em volta: so o aviso.
+//
+// v2 (docs/23): o circulo e quem envia (a pessoa da equipe, ou o icone da escola de Marca), o icone vai
+// antes do titulo, o "Termina em" aparece como o aluno ve logo depois do envio (chegou ha 30 s) e, com
+// audio, as pilulas "Áudio na prévia" trocam o player parado entre "Não ouvido" e "Ouvido".
 
 /** Tokens de :root que o admin sobrescreve e a area do aluno usa (os mesmos do PreviewFrame). */
 const STUDENT_TOKENS: Record<string, string> = {
@@ -127,17 +141,35 @@ function BellBar() {
 }
 
 type NoticePreviewProps = {
-  branding: { logoUrl: string | null; name: string };
+  /** Fim da notificacao de referencia (seguinte "Até a notificação principal sumir"). */
+  anchorExpiresAt?: number | null;
+  branding: { iconUrl?: string | null; logoUrl: string | null; name: string };
   className?: string;
   device: PreviewDevice;
-  draft: NoticeDraft;
+  /** O aviso inteiro (pop-up usa a janela e o "Lembrar depois") ou so o conteudo de uma notificacao. */
+  draft: PreviewContent & Partial<Pick<NoticeDraft, "allowSnooze" | "sender">>;
   /** Imagem recortada ainda subindo (data URL): a previa mostra antes do envio terminar. */
   imageUrl?: string | null;
   /** Instante de referencia do "agora" no cartao. */
   now: number;
+  /** Equipe de "Quem envia" (nome e foto de agora); sem ela, a notificacao sai como a escola. */
+  senders?: readonly NoticeSenderChoice[];
 };
 
-export function NoticePreview({ branding, className, device, draft, imageUrl, now }: NoticePreviewProps) {
+/** "Áudio na prévia": Não ouvido | Ouvido (so com audio; o pop-up nao guarda o ouvido). */
+function ListenPills({ onChange, value }: { onChange: (value: PreviewListen) => void; value: PreviewListen }) {
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]" id="aviso-previa-audio">
+        Áudio na prévia
+      </span>
+      <PillGroup ariaLabel="Áudio na prévia" name="aviso-previa-audio" onChange={onChange} options={PREVIEW_LISTEN_OPTIONS} value={value} />
+    </div>
+  );
+}
+
+export function NoticePreview({ anchorExpiresAt, branding, className, device, draft, imageUrl, now, senders = [] }: NoticePreviewProps) {
+  const [listen, setListen] = useState<PreviewListen>("not_heard");
   const emptyTitle = !draft.title.trim();
 
   if (draft.kind === "popup") {
@@ -150,52 +182,69 @@ export function NoticePreview({ branding, className, device, draft, imageUrl, no
         <div className="relative grid place-items-center p-4" style={{ minHeight: STAGES[device].minHeight }}>
           <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" />
           <div className="relative">
-            <MemberPopupCard popup={draftToPopupItem(draft, { imageUrl })} preview />
+            <MemberPopupCard popup={draftToPopupItem({ ...draft, allowSnooze: draft.allowSnooze ?? true }, { imageUrl })} preview />
           </div>
         </div>
       </PreviewStage>
     );
   }
 
-  const item = draftToNotificationItem(draft, { createdAt: new Date(now).toISOString(), imageUrl });
+  const item = draftToNotificationItem(draft, {
+    anchorExpiresAt,
+    createdAt: new Date(now - PREVIEW_AGE_MS).toISOString(),
+    imageUrl,
+    listen,
+    sender: previewSender(draft.sender ?? null, senders)
+  });
 
   return (
-    <PreviewStage
-      ariaLabel={`Prévia da notificação no sino, no ${device === "mobile" ? "celular" : "computador"}`}
-      className={cn(className, emptyTitle && "[&_article>div>p:first-child]:font-medium [&_article>div>p:first-child]:text-white/40")}
-      device={device}
-    >
-      <div className="pb-6">
-        <BellBar />
-        <div
-          className={cn(
-            "overflow-hidden rounded-[14px] border border-white/10 bg-[#1b1b1b] text-white shadow-[0_24px_70px_rgba(0,0,0,0.65)]",
-            device === "mobile" ? "mx-3" : "mr-3 ml-auto w-[25rem]"
-          )}
-        >
-          <div className="flex min-h-[3.75rem] items-center justify-between gap-3 px-4 pt-4 pb-3">
-            <p className="text-base font-semibold text-white">Notificações</p>
-            <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs font-semibold text-[#d4d4d8]">
-              <CheckCheck aria-hidden="true" className="size-4" />
-              Marcar todas como lidas
-            </span>
-          </div>
-          <MemberFilterPills
-            ariaLabel="Filtrar notificações"
-            className="mx-0 px-4 pb-3 sm:mx-0 sm:px-4"
-            onChange={() => undefined}
-            options={[
-              { id: "all", label: "Todas" },
-              { count: 1, id: "unread", label: "Não lidas" }
-            ]}
-            value="all"
-          />
-          <div className="border-t border-white/[0.06]">
-            <p className="px-4 pt-3 pb-1 text-xs font-semibold text-[#71717a]">Hoje</p>
-            <NotificationCard item={item} now={now} preview schoolLogoUrl={branding.logoUrl} schoolName={branding.name} />
+    <div className={cn("flex min-w-0 flex-col gap-3", className)}>
+      {draft.audio ? <ListenPills onChange={setListen} value={listen} /> : null}
+      <PreviewStage
+        ariaLabel={`Prévia da notificação no sino, no ${device === "mobile" ? "celular" : "computador"}`}
+        className={cn(emptyTitle && "[&_article>div>p:first-child]:font-medium [&_article>div>p:first-child]:text-white/40")}
+        device={device}
+      >
+        <div className="pb-6">
+          <BellBar />
+          <div
+            className={cn(
+              "overflow-hidden rounded-[14px] border border-white/10 bg-[#1b1b1b] text-white shadow-[0_24px_70px_rgba(0,0,0,0.65)]",
+              device === "mobile" ? "mx-3" : "mr-3 ml-auto w-[25rem]"
+            )}
+          >
+            <div className="flex min-h-[3.75rem] items-center justify-between gap-3 px-4 pt-4 pb-3">
+              <p className="text-base font-semibold text-white">Notificações</p>
+              <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs font-semibold text-[#d4d4d8]">
+                <CheckCheck aria-hidden="true" className="size-4" />
+                Marcar todas como lidas
+              </span>
+            </div>
+            <MemberFilterPills
+              ariaLabel="Filtrar notificações"
+              className="mx-0 px-4 pb-3 sm:mx-0 sm:px-4"
+              onChange={() => undefined}
+              options={[
+                { id: "all", label: "Todas" },
+                { count: 1, id: "unread", label: "Não lidas" }
+              ]}
+              value="all"
+            />
+            <div className="border-t border-white/[0.06]">
+              <p className="px-4 pt-3 pb-1 text-xs font-semibold text-[#71717a]">Hoje</p>
+              <NotificationCard
+                item={item}
+                now={now}
+                preview
+                schoolIconUrl={branding.iconUrl}
+                schoolLogoUrl={branding.logoUrl}
+                schoolName={branding.name}
+                serverNow={now}
+              />
+            </div>
           </div>
         </div>
-      </div>
-    </PreviewStage>
+      </PreviewStage>
+    </div>
   );
 }
