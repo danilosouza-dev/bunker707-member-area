@@ -291,7 +291,14 @@ export const iconSchema = z
   )
   .nullable();
 
-const VALIDITY_RANGE_MESSAGE = "Use de 1 hora a 90 dias.";
+/**
+ * "Por um tempo" a partir de 5 minutos (ajustes da v3a, check campaigns_validity_v3 da 202610220002); o teto
+ * continua 90 dias. Os dois numeros vem de VALIDITY_LIMITS (message-meta.ts), que segue o banco.
+ */
+export const VALIDITY_MIN_MINUTES = VALIDITY_LIMITS.minMinutes;
+export const VALIDITY_MIN_MESSAGE = "No mínimo 5 minutos.";
+const VALIDITY_MAX_MESSAGE = "No máximo 90 dias.";
+const VALIDITY_RANGE_MESSAGE = "Use de 5 minutos a 90 dias.";
 
 const validityOptions = [
   // 90 dias (o padrao: nada gravado).
@@ -300,8 +307,8 @@ const validityOptions = [
     minutes: z
       .number({ error: VALIDITY_RANGE_MESSAGE })
       .int(VALIDITY_RANGE_MESSAGE)
-      .min(VALIDITY_LIMITS.minMinutes, VALIDITY_RANGE_MESSAGE)
-      .max(VALIDITY_LIMITS.maxMinutes, VALIDITY_RANGE_MESSAGE),
+      .min(VALIDITY_MIN_MINUTES, VALIDITY_MIN_MESSAGE)
+      .max(VALIDITY_LIMITS.maxMinutes, VALIDITY_MAX_MESSAGE),
     mode: z.literal("duration")
   }),
   z.object({ endsAt: isoSchema, mode: z.literal("until") })
@@ -338,6 +345,11 @@ export type NoticeSender = { userId: string } | null;
 export type NoticeIconChoice = { color: NoticeIconColor; id: NoticeIconId } | null;
 
 export type NoticeDraft = {
+  /**
+   * "Permitir que o aluno exclua do sino" (ajustes da v3a, campaigns.allow_hide; so notificacao, o pop-up
+   * ignora); ausente = true (a lixeira de sempre).
+   */
+  allowHide?: boolean;
   allowSnooze: boolean;
   audience: AudienceDefinition;
   audio: { durationSeconds: number; mimeType: string | null; peaks: number[]; url: string } | null;
@@ -364,13 +376,19 @@ export type NoticeDraft = {
 };
 
 /** O conteudo de uma notificacao (titulo ate a validade): o mesmo do aviso e das mensagens dos fluxos. */
-export type NoticeContent = Pick<NoticeDraft, "audio" | "body" | "cta" | "icon" | "image" | "poll" | "reactions" | "response" | "sender" | "title" | "validity">;
+export type NoticeContent = Pick<
+  NoticeDraft,
+  "allowHide" | "audio" | "body" | "cta" | "icon" | "image" | "poll" | "reactions" | "response" | "sender" | "title" | "validity"
+>;
 
 /**
  * Campos do conteudo. Os tres da v2 tem padrao (escola, sem icone, 90 dias): um rascunho da v1 sem eles
- * continua valendo exatamente como antes. Os da v3a tambem (sem reacoes, sem enquete, pelo botao).
+ * continua valendo exatamente como antes. Os da v3a tambem (sem reacoes, sem enquete, pelo botao, com a
+ * lixeira).
  */
 export const NOTICE_CONTENT_FIELDS = {
+  // Rascunho antigo = o aluno pode excluir (a coluna nasce true para tudo o que ja existe).
+  allowHide: z.boolean({ error: "Escolha se o aluno pode excluir do sino." }).default(true),
   audio: audioSchema.nullable(),
   body: z.string({ error: "Escreva o texto." }).trim(),
   cta: ctaSchema.nullable(),
@@ -525,6 +543,7 @@ export function validityUntilProblem(endsAt: string, sendAt: number): string | n
 /** Rascunho vazio de cada tipo (o editor abre assim): a notificacao nova ja permite reacoes (v3a). */
 export function emptyNoticeDraft(kind: CampaignKind): NoticeDraft {
   return {
+    allowHide: true,
     allowSnooze: true,
     audience: EVERYONE,
     audio: null,
@@ -626,8 +645,8 @@ export const SENT_LOCKED_MESSAGES = {
 
 /**
  * Notificacao enviada: o que mudou e nao pode mudar (segmento, envio, tempo no sino, audio, ligar ou
- * desligar a resposta, enquete). Titulo, texto, imagem, icone, quem envia, destino, textos da resposta e
- * reacoes podem. Datas comparadas pelo instante. Vazio = pode salvar.
+ * desligar a resposta, enquete). Titulo, texto, imagem, icone, quem envia, destino, textos da resposta,
+ * reacoes e a lixeira do aluno (allowHide) podem. Datas comparadas pelo instante. Vazio = pode salvar.
  */
 export function sentNoticeLockedProblems(saved: NoticeDraft, next: NoticeDraft): { message: string; path: string }[] {
   const problems: { message: string; path: string }[] = [];

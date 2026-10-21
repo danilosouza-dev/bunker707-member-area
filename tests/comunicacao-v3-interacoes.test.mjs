@@ -529,7 +529,7 @@ test("rascunho <-> colunas: como o aluno chega la, reacoes e enquete vao e volta
 test("o que a notificacao enviada ainda muda e o passo de fluxo compara para criar versao nova", () => {
   assert.deepEqual(
     [...store.SENT_EDITABLE_COLUMNS],
-    ["title", "body", "image_url", "image_alt", "icon", "icon_color", "sender_user_id", "cta_label", "cta_href", "cta_target", "cta_display", "accept_label", "decline_label", "allow_reactions"]
+    ["title", "body", "image_url", "image_alt", "icon", "icon_color", "sender_user_id", "cta_label", "cta_href", "cta_target", "cta_display", "accept_label", "decline_label", "allow_reactions", "allow_hide"]
   );
 
   const meta = flowStore.messageMetaOfRow(linhaDe(store.draftToColumns(notificacao({ poll: enquete(), reactions: true }))));

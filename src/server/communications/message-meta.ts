@@ -105,11 +105,14 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
 
-/** De 1 hora a 90 dias (a janela do sino, INBOX_HISTORY_DAYS); sem escolha = 90 dias. */
+/**
+ * De 5 minutos a 90 dias (a janela do sino, INBOX_HISTORY_DAYS); sem escolha = 90 dias. O minimo segue o
+ * check campaigns_validity_v3 da 202610220002 (ajustes da v3a, docs/24 §10).
+ */
 export const VALIDITY_LIMITS = {
   defaultMinutes: INBOX_HISTORY_DAYS * 1_440,
   maxMinutes: INBOX_HISTORY_DAYS * 1_440,
-  minMinutes: 60,
+  minMinutes: 5,
   /** "Termina em" so aparece quando falta isto ou menos... */
   urgencyWindowMs: 24 * HOUR_MS,
   /** ...e a notificacao fica no sino por ate isto (o padrao de 90 dias nunca mostra). */

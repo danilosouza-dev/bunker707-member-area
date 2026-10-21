@@ -39,6 +39,11 @@ export type NotificationResponseValue = "accepted" | "declined";
 export type NotificationItem = {
   /** Quem gerou (comentario) ou quem envia (notificacao da equipe); null = a escola. */
   actor: { avatarUrl: string | null; name: string } | null;
+  /**
+   * O aluno pode excluir do proprio sino (ajustes da v3a, campaigns.allow_hide). A API manda em todo item
+   * (comentario: true); ausente = pode (a lixeira de sempre).
+   */
+  allowHide?: boolean;
   audio: NotificationAudio | null;
   /** Audio ouvido por este aluno; null quando a notificacao nao tem audio. */
   audioProgress: NotificationAudioProgress | null;

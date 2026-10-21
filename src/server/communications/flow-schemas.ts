@@ -30,6 +30,14 @@ export type FlowNoticeContent = Omit<NoticeContent, "validity"> & { validity: Fl
 export const FLOW_POLL_CLOSES_AT_MESSAGE = "Numa notificação seguinte ou num passo de fluxo, a enquete encerra quando a notificação sair do sino.";
 
 /**
+ * Ajustes da v3a: num fluxo no ar ou pausado, a enquete de um passo que ja chegou a algum aluno nao muda (o id
+ * da opcao renomeada fica: os votos antigos contariam para o texto novo no relatorio e na regra "votou em X").
+ * O servidor recusa (422, flow-store.ts) e a tela trava o campo com a mesma frase (LIVE_POLL_LOCKED_NOTE).
+ */
+export const FLOW_POLL_LOCKED_MESSAGE =
+  "A enquete não muda depois que esta notificação chegou a alguém: os votos já dados ficariam com outro texto. Para outra enquete, crie uma notificação seguinte nova.";
+
+/**
  * O conteudo do aviso com `validity` aceitando "Ate a notificacao principal sumir". Sempre notificacao. A
  * enquete (v3a) so encerra quando a notificacao sai do sino.
  */

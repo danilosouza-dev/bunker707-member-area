@@ -2,7 +2,7 @@
 
 Data: 22/10/2026. Pedido do produtor (21/10/2026), depois de testar a v2 na `dev`: o menu ⋯ dos avisos não tem o CRUD das notificações; o aluno precisa poder tirar uma notificação do próprio sino (um ícone de lixeira); a notificação inteira pode ser clicável, com ou sem botão, desde que o aluno perceba que é clicável; depois de Aceitar ou Recusar, poder voltar atrás; título mais destacado que o texto; reações como no WhatsApp; enquete direto nas mensagens; o sino demora um pouco para abrir a lista ("é normal?"); e, duas vezes, a pergunta sobre o pop-up "Uma vez" que o aluno fechou e que depois vira "Até o aluno clicar".
 
-Este documento registra o que foi construído sobre a v1 (`docs/22`) e a v2 (`docs/23`), as regras fixas, as decisões (T1 a T23) e o que fica de fora. Vale para qualquer trabalho em Comunicação, sino, avisos, reações ou enquetes. A entrega se divide em duas: a **v3a** (este documento) e a **v3b "Pop-ups sob medida"** (páginas e gatilhos do pop-up, frequência, limites globais editáveis, o construtor por blocos, enquete no pop-up e "Como fechar"), que terá documento próprio. Migração `202610220001_communication_v3a.sql` (as `202610200001`, `202610200002` e `202610210001`, já aplicadas na nuvem de teste, não mudam). Tabelas em `docs/05` (seção Comunicação v3a), segurança em `docs/06` (seção Comunicação v3a), desenho em `docs/12`, decisões em `docs/09` e admin em `docs/17` §1.8. Muda uma regra da v1: **notificação enviada agora muda e pode ser excluída** (`docs/22` §2.2).
+Este documento registra o que foi construído sobre a v1 (`docs/22`) e a v2 (`docs/23`), as regras fixas, as decisões (T1 a T23) e o que fica de fora. Vale para qualquer trabalho em Comunicação, sino, avisos, reações ou enquetes. A entrega se divide em duas: a **v3a** (este documento) e a **v3b "Pop-ups sob medida"** (páginas e gatilhos do pop-up, frequência, limites globais editáveis, o construtor por blocos, enquete no pop-up e "Como fechar"), que terá documento próprio. Migração `202610220001_communication_v3a.sql` (as `202610200001`, `202610200002` e `202610210001`, já aplicadas na nuvem de teste, não mudam); os ajustes depois do primeiro teste do produtor (lixeira opcional, minutos no tempo do sino, o cartão novo e as correções da revisão) estão na seção 10, com a `202610220002_communication_v3a_ajustes.sql`. Tabelas em `docs/05` (seção Comunicação v3a), segurança em `docs/06` (seção Comunicação v3a), desenho em `docs/12`, decisões em `docs/09` e admin em `docs/17` §1.8. Muda uma regra da v1: **notificação enviada agora muda e pode ser excluída** (`docs/22` §2.2).
 
 ---
 
@@ -13,7 +13,7 @@ Este documento registra o que foi construído sobre a v1 (`docs/22`) e a v2 (`do
 | **Menu ⋯ completo** | Ver relatório, Editar, Duplicar, Excluir e as ações de estado em toda situação em que fazem sentido; **Mostrar de novo para quem já viu** no pop-up "Uma vez" | lista, editor e relatório de `/admin/comunicacao/avisos` |
 | **Editar notificação enviada** | título, texto, imagem, ícone, Quem envia, destino e como o aluno chega lá, textos de Aceitar/Recusar e reações; chega a todos os sinos na hora, sem "editada" e sem marcar como nova | `/avisos/[id]?editar=1` |
 | **Excluir** | em qualquer situação menos "Enviando"; a enviada sai de todos os sinos e da lista | menu ⋯ |
-| **Lixeira do aluno** | **Excluir notificação** em cada cartão, com **Desfazer** até o painel fechar; some da lista, do número e das marcações só para ele | sino |
+| **Lixeira do aluno** | **Excluir notificação** no "⋯" do cartão (seção 10.3), com **Desfazer** até o painel fechar; some da lista, do número e das marcações só para ele; a equipe escolhe por notificação se o aluno pode excluir (seção 10.1) | sino; editor, card "Interação" |
 | **Cartão clicável** | **Como o aluno chega lá**: Pelo botão · Pelo botão ou tocando na notificação · Só tocando na notificação (sem botão, com o texto ao lado da seta) | sino; editor, card "Para onde leva" |
 | **Mudar resposta** | depois de Aceitar/Recusar, `Você aceitou` + **Mudar resposta** | sino |
 | **Título** | 15 px em negrito (o texto continua 14 px regular) | sino e prévia |
@@ -40,10 +40,10 @@ Tudo em `src/components/member/notifications/*`, só com as peças da área do a
 | **Enquete** | depois do áudio (seção 1.6) |
 | Botão ou o texto ao lado da seta | pelo modo (seção 1.2) |
 | Aceitar / Recusar | com **Mudar resposta** (seção 1.5) |
-| **Linha de ações** | à esquerda **Reagir** (quando a equipe permitiu), à direita a lixeira **Excluir notificação**; sempre presente. Com o seletor de reações aberto, ele ocupa a linha inteira (a lixeira some) |
-| Bolinha de não lida | igual |
+| ~~Linha de ações~~ | saiu nos ajustes (seção 10.3): o **Reagir** fica no fim da linha do botão, da resposta ou de quem envia, e **Excluir notificação** no "⋯" do canto de cima |
+| Bolinha de não lida | igual (nos ajustes, foi para a margem da esquerda: seção 10.3) |
 
-A ordem dos filhos é a ordem de leitura e de Tab: título (link no "Só tocando"), Ver mais, imagem, áudio, opções da enquete, botão, resposta, Reagir, Excluir. As notificações de comentário continuam com a frase (`Ana Souza respondeu seu comentário`), mas deixam de ser um `<a>` grande: o link acessível é a frase e a lixeira fica no fim da linha do tempo.
+A ordem dos filhos é a ordem de leitura e de Tab: título (link no "Só tocando"), Ver mais, imagem, áudio, opções da enquete, botão, resposta, Reagir, Excluir (nos ajustes, o Reagir vai junto da linha em que fica e o "⋯" é o último: seção 10.3). As notificações de comentário continuam com a frase (`Ana Souza respondeu seu comentário`), mas deixam de ser um `<a>` grande: o link acessível é a frase e o "⋯" fica no canto de cima.
 
 ### 1.2 Cartão clicável ("Como o aluno chega lá")
 
@@ -61,9 +61,9 @@ A ordem dos filhos é a ordem de leitura e de Tab: título (link no "Só tocando
 
 ### 1.3 Excluir notificação e Desfazer
 
-- Lixeira (`Trash2` 16 px, zinc 500 até o hover) num círculo de 32 px com área de toque de 40 px, nome `Excluir notificação “{título}”` (no comentário, a frase), sem `title` nativo.
+- Nos ajustes (seção 10.3) a lixeira foi para o "⋯" do canto de cima (`Mais opções da notificação “{título}”`) → **Excluir notificação**, e só aparece quando a equipe deixou o aluno excluir (seção 10.1). Antes: lixeira (`Trash2` 16 px) num círculo de 32 px, nome `Excluir notificação “{título}”`.
 - Excluir troca o cartão, no lugar, pela linha `Notificação excluída.` com **Desfazer**; o foco vai para **Desfazer** e o leitor ouve `Notificação excluída.`. A linha fica até o painel fechar, sem prazo (WCAG 2.2.1). A bolinha de não lida que o cartão tinha sai do número na hora.
-- **Desfazer** espera o servidor (`Desfazendo...`) e põe o cartão de volta no mesmo lugar, com o foco na lixeira dele (`A notificação voltou para o sino.`).
+- **Desfazer** espera o servidor (`Desfazendo...`) e põe o cartão de volta no mesmo lugar, com o foco no "⋯" dele (`A notificação voltou para o sino.`).
 - Erros: `Não foi possível excluir. Tente de novo.` (o cartão volta, com a frase embaixo) e `Não foi possível desfazer. Tente de novo.` (a linha fica).
 - Excluída: fora da lista, do número do sino, das não lidas, do "Marcar todas" e do "abriu o sino", também da memória do navegador e depois de recarregar. Continua contando como recebida (relatório e regras). **Enviar teste para mim** traz de volta um teste excluído.
 
@@ -72,7 +72,7 @@ A ordem dos filhos é a ordem de leitura e de Tab: título (link no "Só tocando
 Só nas notificações em que a equipe deixou **Permitir reações** ligado.
 
 - Sem reação: botão redondo de 32 px com `SmilePlus`, nome `Reagir à notificação “{título}”`. Com reação: pílula com o emoji, nome `Sua reação a “{título}”: Amei. Mudar reação`.
-- Tocar abre o seletor **no lugar da linha de ações** (a lixeira some até fechar; a linha passa de 32 para 40 px): `Escolha uma reação`, seis botões de 40 px (`Gostei`, `Amei`, `Incrível`, `Aplausos`, `Haha`, `Uau`, com `aria-pressed`), 260 px nos 267 px da coluna a 375 px. O foco vai para a reação atual (ou Gostei).
+- O botão e a pílula ficam no fim da linha do botão, da resposta ou de quem envia; a pílula tem 28 px (seção 10.3). Tocar abre o seletor **na linha logo abaixo** (o Reagir continua na tela, com `aria-expanded`): `Escolha uma reação`, seis botões de 40 px (`Gostei`, `Amei`, `Incrível`, `Aplausos`, `Haha`, `Uau`, com `aria-pressed`), 260 px nos 267 px da coluna a 375 px. O foco vai para a reação atual (ou Gostei).
 - Escolher põe ou troca; escolher a que já está tira. O seletor fecha e o foco volta para o botão ou a pílula (`Você reagiu com Amei.` / `Reação retirada.`). `Esc` fecha só o seletor (o painel continua aberto); tocar fora também fecha; Tab não fecha.
 - Otimista: a pílula muda na hora; com erro volta e aparece `Não foi possível reagir. Tente de novo.`. Reagir conta como abrir (a bolinha some, T15). O aluno nunca vê números (T12).
 
@@ -152,6 +152,7 @@ Pelo ⋯ **Editar** ou pelo botão **Editar** do relatório: `/avisos/[id]?edita
 | Para onde leva: destino, texto, aba, como o aluno chega lá; tirar o destino | muda, a não ser que uma seguinte precise do destino | — |
 | Textos de Aceitar e Recusar | muda | — |
 | Permitir reações | muda (desligar esconde o Reagir; as reações dadas ficam no relatório) | — |
+| Permitir que o aluno exclua do sino (seção 10.1) | muda (desligar tira o "⋯" do cartão; quem já excluiu continua sem ela) | — |
 | Pedir uma resposta (ligar/desligar) | não | `Pedir uma resposta não muda depois do envio. Os textos dos botões podem mudar.` |
 | Enquete | não; **Encerrar enquete** no relatório | `A enquete não muda depois do envio. Para parar a votação, use Encerrar enquete no relatório.` |
 | Áudio | não | `O áudio não muda depois do envio: quem já ouviu ficaria marcado como tendo ouvido o novo. Para trocar, duplique a notificação.` |
@@ -197,10 +198,10 @@ O conteúdo continua num componente só (`NoticeContentFields`): editor de aviso
 
 - **"Botão" vira "Para onde leva"** (`opcional`, `Um produto, uma página da área ou um site.`): chave `Levar o aluno a algum lugar` (era `Mostrar um botão`); na notificação, primeiro `Como o aluno chega lá` com as pílulas `Pelo botão` · `Pelo botão ou tocando na notificação` · `Só tocando na notificação` (quebram a 375 px; 44 px no toque) e a descrição de cada uma; o texto é `Texto do botão` (`Ex.: Assistir agora`) ou, sem botão, `Texto ao lado da seta` (`Ex.: Ver a aula nova`, `Aparece no pé da notificação, com uma seta: o aluno vê que pode tocar.`; erro `Escreva o texto.`). Acima das pílulas do destino o rótulo é `Destino` (o grupo continua `Para onde o botão leva`, ou `Para onde a notificação leva` sem botão). Pop-up: o destino abre sempre pelo botão.
 - **"Resposta" vira "Interação"** (só notificação; `O que o aluno pode fazer direto no sino.`):
-  1. **Permitir reações** (ligada em toda notificação, seguinte e passo de fluxo novos; desligada em tudo o que já existia e num rascunho antigo sem a chave): `O aluno pode reagir com 👍 ❤️ 🔥 👏 😂 😮. Ele vê só a própria reação; os números ficam no relatório.`
+  1. **Permitir reações** (ligada em toda notificação, seguinte e passo de fluxo novos; desligada em tudo o que já existia e num rascunho antigo sem a chave): `O aluno pode reagir com 👍 ❤️ 🔥 👏 😂 😮. Ele vê só a própria reação; os números ficam no relatório.` Logo depois, desde os ajustes, **Permitir que o aluno exclua do sino** (ligada por padrão; seção 10.1).
   2. **Pedir uma resposta (Aceitar ou Recusar)**, desligada enquanto há enquete (`Desligue a enquete para pedir uma resposta.`).
   3. **Fazer uma enquete**, desligada enquanto há resposta (`Desligue “Pedir uma resposta” para fazer uma enquete.`): `Pergunta` (até 120), `Opção 1` a `Opção 6` (até 60; começa com duas; **Remover** a partir da terceira, **Adicionar opção** até 6, depois `Até 6 opções.`), **Permitir marcar mais de uma**, **Mostrar o resultado para quem votar** (ligada) e `Encerra`: `Quando sair do sino` (padrão) ou `Numa data e hora` (`Depois disso ninguém mais vota.`). Na seguinte e no passo de fluxo não há data: `A enquete fica aberta enquanto a notificação estiver no sino.` (o envio é relativo, uma data fixa poderia cair antes dele). Erros: `Escreva a pergunta.`, `Use até 120 caracteres.`, `Escreva a opção.`, `Use até 60 caracteres.`, `Use pelo menos 2 opções.`, `Use no máximo 6 opções.`, `As opções precisam ser diferentes.`, `Escolha data e hora.`, e ao publicar `Escolha um fim no futuro.` / `A enquete encerraria antes de a notificação sair.`. Resposta e enquete juntas: `Use a resposta ou a enquete, não as duas.`
-- **Prévia**: título de 15 px, a linha da seta ou o hover, o Reagir e a lixeira parados e a enquete; com enquete, as pílulas `Enquete na prévia` · `Antes de votar` / `Depois de votar` ("depois" marca a primeira opção como o voto da própria pessoa, `1 voto` e `100%`, nunca números inventados).
+- **Prévia**: título de 15 px, a linha da seta ou o hover, o Reagir e o "⋯" parados (sem o "⋯" quando o aluno não pode excluir) e a enquete; com enquete, as pílulas `Enquete na prévia` · `Antes de votar` / `Depois de votar` ("depois" marca a primeira opção como o voto da própria pessoa, `1 voto` e `100%`, nunca números inventados).
 - Pop-up: o card Interação não aparece na v3a (enquete no pop-up é da v3b); o servidor recusa `A enquete vale só para notificações por enquanto.`, `Reações valem só para notificações.` e `No pop-up, o destino abre pelo botão.`.
 
 ### 2.6 Relatório
@@ -241,7 +242,7 @@ Colunas, índices e RPCs em `docs/05` (seção Comunicação v3a). Em resumo:
 - `notifications` ganha `hidden_at`, `reaction`/`reacted_at`, `response_changed_at`/`response_changes`, `poll_choice`/`poll_voted_at`/`poll_changes` e `interaction_writes`, mais o índice parcial `notifications_poll_tally_idx (campaign_id) where poll_choice is not null and not is_test`.
 - `campaign_deliveries` ganha `reshown_at`, `impressions_before_reshow` e `snoozes_before_reshow` (com zero, a regra do pop-up é exatamente a da v1).
 - RPCs novas (só `service_role`, `security invoker`): `communication_visible_notifications` (a regra de "aparece no sino", num lugar só), `communication_poll_tally`, `communication_inbox_page`, `communication_inbox_counts`, `communication_respond_notification`, `communication_vote_notification_poll`, `communication_reshow_popup`, `communication_message_interactions` e `communication_notice_citations`; a 7.9 `communication_flow_batch_facts` (mesma assinatura) passa a trazer reação, voto e excluída.
-- Nada de `drop` nem de `delete`: tudo pelo MCP do Supabase, seção por seção (seção 11). `communication_campaign_stats`, `communication_overview`, as estatísticas dos fluxos e `prune_communication_history` não mudam; excluída continua contando como recebida e vista.
+- Nada de `drop` nem de `delete`: tudo pelo MCP do Supabase, seção por seção (seção 12). `communication_campaign_stats`, `communication_overview`, as estatísticas dos fluxos e `prune_communication_history` não mudam; excluída continua contando como recebida e vista.
 - O app da v2 continua funcionando com a 0003 aplicada (colunas novas com padrão; o código da v2 não lê `hidden_at`, e nenhuma linha fica escondida antes das rotas novas). Sem ela, o app da v3a responde o sino vazio e as escritas novas 404 (`isMissingCommunicationSchema`): por isso ela vai **antes** do merge.
 
 ---
@@ -309,7 +310,7 @@ Todas com `Cache-Control: private, no-store` e `Vary: Cookie`, corpo por `readBo
 | `POST /api/notifications/[id]/response` | troca permitida; limite | `{ response }` | 200 `{ data: { changed, response } }`; 400 `Resposta invalida.` (também JSON malformado); 404; 429 (o 409 saiu) |
 | `POST /api/notifications/[id]/reaction` | novo; limite | `{ reaction: id \| null }` | 200 `{ data: { reaction } }`; 400 `Reacao invalida.`; 401; 404; 409 `Esta notificação não aceita reações.`; 413; 429 |
 | `POST /api/notifications/[id]/poll` | novo; limite | `{ optionIds: string[] }` (0 a 6) | 200 `{ data: { poll } }`; 400 `Voto invalido.`; 401; 404; 409 `A enquete foi encerrada.`; 413; 429 |
-| `POST /api/notifications/[id]/hide` | novo; limite | `{ hidden: boolean }` | 200 `{ data: { unread, unseen } }`; 400 `Pedido invalido.`; 401; 404; 413; 429 |
+| `POST /api/notifications/[id]/hide` | novo; limite | `{ hidden: boolean }` | 200 `{ data: { unread, unseen } }`; 400 `Pedido invalido.`; 401; 403 `Esta notificação não pode ser excluída.` (excluir com a opção desligada, seção 10.1; o Desfazer vale sempre); 404; 413; 429 |
 | `POST /api/popups/[id]/events` | sessão | igual | igual |
 
 ### 5.2 Server Actions (`actions.ts`)
@@ -452,7 +453,86 @@ O que a implementação decidiu onde o desenho era omisso ou não batia com o c�
 
 ---
 
-## 10. Testes
+## 10. Ajustes depois do primeiro teste
+
+Data: 22/10/2026. O produtor testou a v3a na `dev` e pediu: minutos no "Fica no sino por"; escolher se o aluno pode excluir a notificação ("todas têm a lixeira"); perguntou se o lugar das reações e da lixeira era o melhor; e por que o diálogo demorava a confirmar e fechar ao excluir uma notificação no painel. Entram também quatro correções da revisão (enquete de um passo que já chegou a alguém, contagem da enquete por passo, o sino por aluno no navegador e duas do salvar da enviada). As perguntas sobre pop-ups do mesmo teste (frequência escolhida pela equipe, construtor avançado, páginas onde aparece ou não e o pop-up que não apareceu logo depois de criado) não fazem parte destes ajustes: as três primeiras são da v3b (seção 9).
+
+Migração `202610220002_communication_v3a_ajustes.sql` (a `202610220001` já está na nuvem e não muda): `campaigns.allow_hide`, o mínimo do tempo no sino em 5 minutos (`campaigns_validity_v3`), a contagem da enquete por passo e `allow_hide` na página do sino. Seções 1 a 4 pelo MCP; a 5 (a única que tira alguma coisa: o check antigo `campaigns_validity_v2`, de 60 minutos) vai sozinha, depois (seção 12).
+
+### 10.1 "Permitir que o aluno exclua do sino"
+
+- Card **Interação**, logo depois de **Permitir reações**, no editor de avisos, na folha da notificação seguinte e no passo do construtor. **Ligada** em toda notificação, seguinte e passo novos e em tudo o que já existia (`campaigns.allow_hide`, padrão `true`; conteúdo salvo sem a chave conta como ligado). Descrição ligada: `Mostra a opção de excluir na notificação. O aluno exclui só do sino dele; nos relatórios continua como recebida.`; desligada: `Sem essa opção, a notificação fica no sino do aluno até o tempo dela acabar.`
+- **Muda depois do envio** (não é campo travado: entra em `SENT_EDITABLE_COLUMNS`); num passo de fluxo no ar, mudar só ela cria versão nova (`CONTENT_COMPARE_FIELDS`). Duplicar copia (aviso, seguintes e fluxo). O pop-up grava sempre `true` (não tem sino).
+- No sino, desligada: o cartão não tem o "⋯" (seção 10.3). O servidor confere: excluir um aviso com ela desligada é 403 `Esta notificação não pode ser excluída.`, sem gravar nada nem registrar evento; o **Desfazer** vale sempre (também quando a equipe desligou depois de o aluno excluir). Se o 403 chega com o cartão na tela (a equipe desligou depois que a lista chegou), o "⋯" some e a frase aparece no cartão. As notificações de comentário sempre podem ser excluídas.
+- Prévia: sem o "⋯" quando desligada.
+
+### 10.2 "Fica no sino por" em minutos
+
+- **Outro** → **Por um tempo**: `minutos` · `horas` · `dias`, de **5 minutos a 90 dias** (check `campaigns_validity_v3`; `VALIDITY_LIMITS.minMinutes` e o zod seguem o banco). Erros: `No mínimo 5 minutos.`, `No máximo 90 dias.` e `Use de 5 minutos a 90 dias.` (número quebrado ou vazio). Vale no editor, na folha da seguinte e no passo do construtor.
+- Um tempo salvo reabre na maior unidade exata: 1440 = `1 dia`, 120 = `2 horas`, 90 = `90 minutos` (antes, 90 minutos reabria como 2 horas).
+- **Até uma data** continua pedindo o fim pelo menos 1 hora depois do envio, e o **Enviar teste para mim** continua ficando pelo menos 1 hora. Com menos de 1 hora no sino o aluno vê `Termina em 4 min` (a regra do `Termina em` não mudou). O "Quando" das notificações seguintes (`2 horas depois do envio`) já tinha minutos.
+
+### 10.3 O cartão: Reagir no fim da linha e o "⋯"
+
+| Parte | Antes (seção 1.1) | Agora |
+|---|---|---|
+| Linha de ações | Reagir à esquerda, lixeira à direita, sempre presente | **saiu** |
+| **Reagir** | na linha de ações | no fim da linha do botão (Acessar), ou da linha Aceitar/Recusar (perguntando, respondida ou trocando), ou, sem nenhuma das duas, no fim da linha de quem envia (que passa a ter 32 px só quando leva o Reagir). Mesmo nome, `Reagir à notificação “{título}”` |
+| Reação escolhida | pílula na linha de ações | **pílula pequena** com o emoji (28 px, área de toque de 40 px) no mesmo lugar do Reagir; `Sua reação a “{título}”: Amei. Mudar reação` |
+| Seletor | no lugar da linha de ações (a lixeira sumia) | na linha logo abaixo da do Reagir, que continua na tela (`aria-expanded`); teclado igual (foco na atual ou em Gostei, `Esc` fecha só o seletor, tocar fora fecha) |
+| **Excluir** | lixeira de 32 px em todo cartão | **"⋯"** no canto de cima, à direita (`MoreHorizontal`, 32 px, área de toque de 40 px), nome `Mais opções da notificação “{título}”`, com o item **Excluir notificação**; sem o "⋯" quando a equipe desligou a opção (seção 10.1). No computador aparece com o mouse sobre o cartão, com o foco dentro dele ou com o menu aberto (só a opacidade muda: continua no Tab); no toque fica sempre à mostra. O título reserva 32 px à direita |
+| Bolinha de não lida | canto de cima, à direita | margem da esquerda, na altura do meio do círculo (o canto direito é do "⋯") |
+
+- Ordem de Tab: título (link no "Só tocando"), Ver mais, áudio, enquete, botão e o Reagir ao lado, resposta e o Reagir ao lado; num aviso sem linha de botões o Reagir vem logo depois do texto; o "⋯" é o último controle do cartão.
+- Menu do Base UI sem modo modal, em portal dentro do painel (tocar nele não fecha o painel). `Esc` fecha só o menu e o foco volta para o "⋯". **Excluir notificação** troca o cartão pela linha do Desfazer com o foco no **Desfazer** (como antes); depois do **Desfazer**, o foco vai para o "⋯" do cartão de volta.
+- Conferido a 1440 e a 375 px: o "⋯" nunca cobre o título, nada quebra a linha nem cria rolagem lateral, e o Reagir e o "⋯" têm pelo menos 32 px. A conferência pegou o "⋯" fora do lugar: o `relative` da classe do botão ganhava do `absolute` do canto (o `twMerge` fica com o último) e o botão caía numa linha nova da grade, na coluna do círculo, deixando um vão no pé do cartão; o ponta a ponta agora mede o canto.
+
+Resposta ao produtor (para colar):
+
+> Não era. A lixeira ocupava uma linha inteira só com ela e o Reagir, no pé de toda notificação, e ficava fácil de tocar sem querer. Agora o Reagir fica no fim da linha que já existe (ao lado do botão, de Aceitar/Recusar ou, sem eles, de quem envia), a reação escolhida aparece ali como uma pílula pequena, e excluir foi para os três pontinhos no canto de cima (o mesmo lugar do YouTube e do LinkedIn): no computador eles aparecem quando o mouse passa pela notificação, no celular ficam sempre à mostra. E agora você escolhe, em cada notificação, se o aluno pode excluir: card **Interação**, **Permitir que o aluno exclua do sino** (ligada por padrão; pode mudar depois do envio). Desligada, a notificação fica sem os três pontinhos e só sai do sino quando o tempo dela acabar.
+
+### 10.4 Enquete de um passo que já chegou a alguém
+
+- Num fluxo no ar ou pausado (as notificações seguintes também são um fluxo), a enquete de um passo que já chegou a algum aluno (fora os testes da equipe) **não muda**: o construtor e a folha da seguinte travam o campo com `A enquete não muda depois que esta notificação chegou a alguém: os votos já dados ficariam com outro texto. Para outra enquete, crie uma notificação seguinte nova.`, e o servidor recusa com 422 e a mesma frase antes de gravar qualquer coisa (renomear opção, mudar a pergunta, tirar ou pôr enquete). Passo novo, não salvo ou duplicado continua livre; mudar o título continua criando versão nova.
+- Por quê: o id da opção renomeada fica, então os votos antigos contariam para o texto novo no relatório e na regra `votou em “X”`.
+- **A contagem soma as versões do passo**: num passo de fluxo, `communication_poll_tally` soma os votos de todas as versões do passo (como o relatório), então quem recebeu a versão 1 e quem recebeu a 2 veem a mesma porcentagem. Fora de fluxo, a do aviso. Mesma assinatura: o sino e o voto não mudam.
+
+### 10.5 Excluir mais rápido no painel
+
+- **Por que demorava**: excluir uma notificação enviada com seguintes fazia cerca de 11 idas ao banco, uma depois da outra (conferir o aviso, as citações, cancelar, ler e encerrar o fluxo, cancelar e tirar as seguintes, tirar as linhas dos alunos, a exclusão lógica, ler o fluxo de novo, tirar o fluxo, a auditoria), e depois `revalidatePath` fazia o servidor desenhar a página inteira de novo na mesma resposta; no relatório, era a página de um aviso que já não existia. O diálogo só fechava no fim de tudo.
+- **Agora**: as leituras saem junto com a primeira escrita e os passos independentes em paralelo (cerca de 5 idas em sequência na enviada com seguintes; 2 ou 3 nas outras situações; o pop-up no ar encerra e exclui numa escrita só). Excluir e Retirar do sino não chamam mais `revalidatePath`: o toast aparece e o diálogo fecha assim que a ação volta, e a lista se atualiza logo depois por trás (`router.refresh()` numa transição; no relatório e no editor, Excluir volta para a lista, que chega nova).
+- **O que sobra**: excluir um pop-up no ar ou uma notificação com seguintes ainda limpa o cache dos pop-ups (`updateTag` em `cache.ts`), e o Next manda a página redesenhada na resposta; o toast não espera por ela.
+
+Resposta ao produtor (para colar):
+
+> Sei. Excluir uma notificação já enviada fazia umas 11 consultas ao banco, uma depois da outra, e depois o servidor desenhava a página inteira de novo antes de responder; o diálogo só fechava no fim de tudo. Agora as consultas que não dependem uma da outra saem juntas (umas 5 em sequência no pior caso), o diálogo fecha e a confirmação aparece assim que o servidor termina de excluir, e a lista se atualiza logo depois, sem segurar o diálogo.
+
+### 10.6 Sino por aluno no navegador e outras correções
+
+- **Memória com dono**: o número do sino e a página guardada (seção 4.4) passam a ser do aluno da sessão (`getAppShellData` manda `student.id`, o AppShell passa ao menu e ao painel). Com outra conta no mesmo navegador, nada da anterior aparece, nem a resposta atrasada de um pedido dela; o número da conta anterior não aparece nem por um quadro. Quem não sabe o id (o pop-up da home) não muda nada.
+- **Filtro "Não lidas"**: excluir, desfazer, abrir, reagir, votar, responder ou "Marcar todas" com o filtro ligado descarta a página guardada do "Todas" (e um pedido do "Todas" que já tinha saído não guarda a resposta). A próxima abertura mostra o esqueleto e busca antes de mostrar: uma notificação excluída nunca reaparece.
+- **Reagir e votar** só marcam o cartão como aberto (e tiram a bolinha) depois que o servidor aceita; numa falha (429, 409, rede) ele fica como estava.
+- **Quem envia uma seguinte saiu da equipe**: não impede mais salvar a enviada (corrigir um erro de digitação); a conferência continua ao salvar as seguintes e ao publicar ou aprovar.
+- **Páginas acompanhadas das seguintes** (`watched_page_keys`): a escrita só vale se o fluxo não mudou no meio (`updated_at`); se mudou, relê e recalcula uma vez (antes, salvar a enviada ao mesmo tempo que uma regra nova podia perder a página da regra). Salvar a enviada devolve a versão nova do fluxo quando as páginas mudam.
+
+### 10.7 Testes dos ajustes
+
+| Tipo | Arquivo | O que prova |
+|---|---|---|
+| Unitário | `tests/sino-ajustes-v3a.test.mjs` (11) | `allowHide` (mapeamento, comentário sempre), 403 tirando o "⋯", nome do "⋯", reagir e votar abrindo só depois do sucesso, memória por dono (página, resposta atrasada, número, pop-up sem id), descarte com o filtro "Não lidas" |
+| Unitário | `tests/comunicacao-ajustes-v3a-equipe.test.mjs` (7) | `allowHide` no rascunho, no conteúdo, nas seguintes e no fluxo (padrão, falso, pop-up), não travada depois do envio, colunas e comparação do passo; 5 minutos aceitos, 4 recusados, teto, número quebrado; a frase da enquete travada igual na tela e no servidor |
+| Unitário | `tests/comunicacao-ajustes-v3a-telas.test.mjs` (12) | ordem das unidades; a maior unidade exata ao reabrir; `No mínimo 5 minutos.` no aviso, na seguinte e no passo; a chave nova (padrões, prévia sem o "⋯", textos, vocabulário); `livePollLockedFields` |
+| Guarda | `tests/comunicacao-v3a-ajustes.guard.test.mjs` (6) | a 202610220001 sem mudança (hash); a 0002 sem `delete` nem gatilho, coluna e constraint com `if not exists`; o único `drop` é o check antigo, última instrução, sozinho na seção 5; as duas funções com a assinatura da 0001 e só para `service_role`; `allow_hide` na página e a soma por passo; o mínimo do banco igual ao do app |
+| Integração | `tests/integration/comunicacao-ajustes-v3a.test.mjs` (7) | `allow_hide` gravado, lido, duplicado e mudado depois do envio; 5 minutos no servidor e no banco (4 recusado pelos dois); enquete travada no passo que chegou a alguém (422, sem versão nova); contagem somando duas versões; quem envia fora da equipe; a corrida das páginas acompanhadas com uma transação de verdade; Excluir e Retirar sem `revalidatePath` |
+| Integração | `tests/integration/sino-lixeira-por-aviso.test.mjs` (3) | `allowHide` na página do sino; 403 sem escrita nem evento; o Desfazer sempre |
+| Ponta a ponta | `tests/e2e/aluno-interage-no-sino.spec.ts` (7) | excluir pelo "⋯" → **Excluir notificação**, `Esc` fecha só o menu, foco no Desfazer e depois no "⋯"; o aviso sem lixeira sem o "⋯" e o 403 pelo endereço; o Reagir no fim da linha certa em cada tipo de cartão, a pílula de 28 px no mesmo lugar, o seletor logo abaixo; a 1280 e a 375 px o "⋯" com 32 px sem cobrir o título, o menu dentro da tela |
+| Ponta a ponta | `tests/e2e/produtor-desliga-lixeira-e-usa-minutos.spec.ts` (2) | desligar a chave tira o "⋯" da prévia; `minutos` antes de horas e dias; 4 minutos param o envio com `No mínimo 5 minutos.`; 5 minutos enviam; no banco `allow_hide = false` e `validity_minutes = 5`; a aluna sem o "Mais opções" e a linha vencendo 5 minutos depois de chegar |
+
+Ajuda nova em `tests/e2e/fixtures.ts`: `enviarNotificacao({ podeExcluir })` e `avisoNoBanco(título)`; `linhaDoSino` traz também `created_at` e `expires_at`.
+
+---
+
+## 11. Testes
 
 | Tipo | Arquivo | O que prova |
 |---|---|---|
@@ -466,7 +546,7 @@ O que a implementação decidiu onde o desenho era omisso ou não batia com o c�
 | Integração | `tests/integration/sino-v3.test.mjs` (7) | a mesma regra de visibilidade em lista, números, "Marcar todas", leitura e cada rota de uma linha (12 tipos de linha); paginação com excluídas no meio; lixeira; reações; mudar resposta (primeira `responded_at`, estatística com a atual); enquete (uma, várias, tirar, 400, 409 pela data, contagem sem testes, sem resultado, página de quem não votou sem contagem); 21 mudanças = 20 eventos |
 | Integração | `tests/integration/avisos-crud.test.mjs` (16) | editar a enviada (título novo no sino, leitura mantida, enviada "agora", com enquete encerrada, com fim fixo, versão velha 409 antes do campo travado, fluxo das seguintes no ar); campos travados 400; 403 e os 500; auditoria; `sent_as`; destino que a seguinte usa 422; excluir em cada situação; citações; mostrar de novo (quem conta, quem não, depois do reinício, 2 h, Lembrar depois de novo, 500, menu e editor, Até o aluno clicar 409); encerrar enquete; duplicar |
 | Integração | `segmento-por-notificacao` (10), `fluxos` (36), `notificacoes-seguintes` (26), `avisos-e-notificacoes` (36), `pop-ups` (11, sem mudança) | a mesma contagem com as regras novas em toda parte; Condição `votou em “Sábado”`; seguinte `não reagiu`; "viu no sino, mas não abriu" pula quem excluiu; seguinte da v2 com as regras antigas; a segunda resposta agora 200 `{ changed: true }`; a enviada excluída sai do sino |
-| Ponta a ponta | `tests/e2e/aluno-interage-no-sino.spec.ts` (6) | reagir, trocar e tirar; votar (`100%`, `1 voto`) e mudar; aceitar, Mudar resposta (atual marcada, foco), recusar; tocar no texto do "Só tocando" (descrição `Ver a aula nova`) e do "Pelo botão ou tocando" e chegar à página (`clicked_at` gravado); excluir, Desfazer (foco na lixeira), excluir de novo, reabrir e recarregar; a 1280 e a 375 px sem rolagem lateral, seis emoji numa linha dentro da coluna, lixeira some com o seletor, opções com 44 px, título 15 px / 700; teclado (Tab, Enter, Esc só no seletor) |
+| Ponta a ponta | `tests/e2e/aluno-interage-no-sino.spec.ts` (7) | reagir, trocar e tirar; votar (`100%`, `1 voto`) e mudar; aceitar, Mudar resposta (atual marcada, foco), recusar; tocar no texto do "Só tocando" (descrição `Ver a aula nova`) e do "Pelo botão ou tocando" e chegar à página (`clicked_at` gravado); excluir pelo "⋯", Desfazer (foco no "⋯"), excluir de novo, reabrir e recarregar; o aviso sem lixeira (seção 10.7); a 1280 e a 375 px sem rolagem lateral, o Reagir no fim da linha, o "⋯" sem cobrir o título, seis emoji numa linha dentro da coluna, opções com 44 px, título 15 px / 700; teclado (Tab, Enter, Esc só no seletor) |
 | Ponta a ponta | `tests/e2e/produtor-edita-e-exclui-aviso.spec.ts` (11) | ⋯ da enviada exatamente `Ver relatório · Editar · Duplicar · Retirar do sino · Excluir`; Editar → título novo → `Notificação atualizada no sino de 1 aluno.`; a aluna vê o novo sem a bolinha; Excluir com o texto do diálogo e o toast; pop-up "Uma vez" fechado 25 h atrás não volta; ⋯ Mostrar de novo → `para 1 aluno` → volta; quem escolheu Não mostrar de novo não; em Até o aluno clicar a chave some, a dica aparece e o ⋯ não oferece Mostrar de novo |
 | Ponta a ponta | `tests/e2e/sino-rapido.spec.ts` (5) | os números de pedidos da seção 7 |
 | Ponta a ponta | os da v1 e da v2 | passam; a chave `Mostrar um botão` virou `Levar o aluno a algum lugar` em `produtor-envia-notificacao` e `produtor-cria-notificacao-seguinte` |
@@ -475,7 +555,7 @@ Ajudas novas em `tests/e2e/fixtures.ts`: `enviarNotificacao({ titulo, texto, par
 
 ---
 
-## 11. Roteiro de conferência no ambiente de teste
+## 12. Roteiro de conferência no ambiente de teste
 
 1. **Aplicar a `202610220001` no Supabase da nuvem antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha; o app da v3a sem a migração mostra o sino vazio e as escritas novas respondem 404; a migração sozinha não atrapalha o app da v2):
    - seções 1 a 6 pelo MCP (`apply_migration`, nome `communication_v3a`), de uma vez ou uma seção por chamada, **na ordem do arquivo** (a 4.2 `communication_poll_tally` existe antes da 4.3 e da 5.2, que a chamam). Não há `drop` nem `delete`: nenhuma parte precisa do SQL Editor. O índice parcial novo nasce vazio (ninguém votou ainda);
@@ -486,3 +566,14 @@ Ajudas novas em `tests/e2e/fixtures.ts`: `enviarNotificacao({ titulo, texto, par
 5. ⋯ da notificação enviada → **Editar** → trocar o título → **Salvar alterações**: a aluna vê o título novo, sem bolinha nova. Um pop-up com a regra "recebeu a notificação X" → ⋯ da X → **Excluir**: o diálogo avisa `Atenção: 1 aviso usa esta notificação nas regras…`; confirmar: some do sino dela.
 6. Pop-up no ar em **Uma vez**, a aluna fecha no X. (a) Mudar para **Até o aluno clicar** e salvar: o editor não mostra **Mostrar de novo**; 24 h depois do último pop-up que ela viu (ou voltando `last_seen_at` no banco de teste) ela vê de novo. (b) Noutro pop-up em **Uma vez**, 24 h depois ela não vê; ⋯ → **Mostrar de novo para quem já viu** → ela vê. Nos dois, outra que escolheu **Não mostrar de novo** não vê.
 7. Velocidade: passar o mouse no sino e abrir (a lista aparece sem esqueleto); fechar e abrir de novo (na hora). No celular, tocar no sino.
+
+**Ajustes (seção 10)**:
+
+8. **Aplicar a `202610220002` no Supabase da nuvem antes do merge da PR na `dev`** (o app novo lê `allow_hide` na página do sino e grava `validity_minutes` abaixo de 60):
+   - seções 1 a 4 pelo MCP (`apply_migration`, nome `communication_v3a_ajustes`), na ordem do arquivo; tudo idempotente;
+   - a seção 5 (`alter table public.campaigns drop constraint if exists campaigns_validity_v2;`) sozinha, pelo MCP ou pelo SQL Editor (é a única que tira alguma coisa). Antes dela o check antigo continua valendo e o banco recusa menos de 60 minutos;
+   - conferir: `select pg_get_constraintdef(oid) from pg_constraint where conname in ('campaigns_validity_v2', 'campaigns_validity_v3')` (só a v3, com `between 5 and 129600`), `select column_default from information_schema.columns where table_name = 'campaigns' and column_name = 'allow_hide'` (`true`) e `list_migrations` com `202610220002`.
+9. Nova notificação com **Permitir que o aluno exclua do sino** desligada e **Fica no sino por** → **Outro** → **Por um tempo** → `5` `minutos`: a prévia fica sem o "⋯"; com `4`, o envio para em `No mínimo 5 minutos.`. Enviar com 5: a aluna vê sem os três pontinhos, com `Termina em … min`, e a notificação some do sino depois de 5 minutos.
+10. Numa notificação com botão e outra só com texto: o Reagir fica no fim da linha do botão e no fim da linha de quem envia; reagir vira a pílula pequena no mesmo lugar. No computador, o "⋯" aparece ao passar o mouse; no celular, fica à mostra. **Mais opções** → **Excluir notificação** → **Desfazer**.
+11. No painel, ⋯ de uma notificação enviada com seguintes → **Excluir**: o diálogo fecha e o toast aparece logo, e a linha some da lista em seguida.
+12. Num fluxo no ar com um passo com enquete que já chegou a alguém: o campo da enquete fica travado com a frase da seção 10.4.

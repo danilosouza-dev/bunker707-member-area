@@ -19,6 +19,7 @@ import type { ProductPickerItem } from "../storefront/product-picker";
 import { adminToast } from "../toast";
 import { CardSelect, FollowUpCard, type FollowUpEditorOptions } from "./follow-up-card";
 import { FollowUpSheet } from "./follow-up-sheet";
+import { livePollLockedFields } from "./flows/flows-view-model";
 import {
   FOLLOW_UPS_COPY,
   FOLLOW_UPS_SECTION_TITLE,
@@ -337,6 +338,8 @@ export function NoticeFollowUps({
           idPrefix={`seguinte-${(numbers.get(editing.item.id) ?? "x").replace(/\./g, "-")}`}
           level={editingParent.level}
           live={mode.kind === "live"}
+          // Ajustes da v3a: no fluxo no ar, a enquete de uma seguinte que ja chegou a alguem nao muda.
+          lockedFields={livePollLockedFields({ live: flowLive, received: stats[editing.item.id]?.received })}
           now={now}
           onAudioBusyChange={(reason) => onAudioBusyChange?.(reason)}
           onBlurField={() => undefined}

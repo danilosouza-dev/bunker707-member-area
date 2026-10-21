@@ -435,7 +435,7 @@ export async function apagarProfessorDeNomeLongo() {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Comunicacao v3a (docs/24 §10): notificacao enviada com enquete, reacoes, resposta e cartao clicavel;
+ * Comunicacao v3a (docs/24 §11): notificacao enviada com enquete, reacoes, resposta e cartao clicavel;
  * pop-up visto ha mais tempo; contador de pedidos do navegador
  * ---------------------------------------------------------------------------------------------- */
 
@@ -466,6 +466,21 @@ export async function idDoAviso(titulo: string) {
   return aviso.id;
 }
 
+/** O que a equipe escolheu no aviso (fora de fluxo, nao excluido): a lixeira do sino e o tempo no sino. */
+export async function avisoNoBanco(titulo: string) {
+  const db = createLocalAdminClient();
+  const aviso = unwrap(
+    await db.from("campaigns").select("allow_hide,valid_until,validity_minutes").eq("title", titulo).is("flow_id", null).is("deleted_at", null).maybeSingle(),
+    `Lendo o aviso "${titulo}"`
+  ) as { allow_hide: boolean; valid_until: string | null; validity_minutes: number | null } | null;
+
+  if (!aviso) {
+    throw new Error(`O aviso "${titulo}" nao existe.`);
+  }
+
+  return aviso;
+}
+
 export type EnqueteDeTeste = {
   closesAt?: string | null;
   multiple?: boolean;
@@ -483,6 +498,8 @@ export type NotificacaoDeTeste = {
   minutosAtras?: number;
   /** Quem recebe (uma linha no sino de cada). Padrao: so a aluna. */
   para?: ChaveDaConta[];
+  /** "Permitir que o aluno exclua do sino" (campaigns.allow_hide). Padrao true (o padrao do banco). */
+  podeExcluir?: boolean;
   poll?: EnqueteDeTeste | null;
   /** Permitir reacoes. Padrao false (o padrao do banco; a tela liga nas notificacoes novas). */
   reactions?: boolean;
@@ -493,7 +510,7 @@ export type NotificacaoDeTeste = {
 };
 
 /**
- * Notificacao ja enviada pelo produtor de teste (docs/24 §10), gravada direto no banco como o envio deixa:
+ * Notificacao ja enviada pelo produtor de teste (docs/24 §11), gravada direto no banco como o envio deixa:
  * o aviso "Enviado" (sent_at, quantos receberam) e uma linha no sino de cada conta de `para`. Mais rapido
  * que montar na tela e cobre o que a tela ainda nao cria sozinha numa so passada (enquete, reacoes, modo do
  * cartao e resposta juntos). Devolve o id do aviso. Desfaca com zerarComunicacao.
@@ -518,6 +535,7 @@ export async function enviarNotificacao(input: NotificacaoDeTeste) {
       .from("campaigns")
       .insert({
         accept_label: input.response?.aceitar ?? null,
+        allow_hide: input.podeExcluir ?? true,
         allow_reactions: input.reactions ?? false,
         audience: { kind: "everyone" },
         audience_count: para.length,
@@ -627,6 +645,8 @@ export function contarPedidos(page: Page, padrao: RegExp, metodo = "GET"): Conta
 
 export type LinhaDoSino = {
   clicked_at: string | null;
+  created_at: string;
+  expires_at: string | null;
   hidden_at: string | null;
   opened_at: string | null;
   poll_choice: string[] | null;
@@ -649,7 +669,7 @@ export async function linhaDoSino(titulo: string, chave: ChaveDaConta = "aluna")
   return unwrap(
     await db
       .from("notifications")
-      .select("clicked_at,hidden_at,opened_at,poll_choice,reaction,read_at,response,seen_at")
+      .select("clicked_at,created_at,expires_at,hidden_at,opened_at,poll_choice,reaction,read_at,response,seen_at")
       .in(
         "campaign_id",
         avisos.map((aviso) => aviso.id)

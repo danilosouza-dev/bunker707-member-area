@@ -40,6 +40,8 @@ import {
 // clicavel, o botao de reagir e a lixeira (parados) e a enquete. Com enquete, as pilulas "Enquete na
 // prévia" trocam entre "Antes de votar" e "Depois de votar" (a primeira opcao como o voto do proprio
 // aluno: 1 voto, 100%, nunca numero inventado); quem monta a enquete do cartao e draftToNotificationItem.
+// Ajustes da v3a: com "Permitir que o aluno exclua do sino" desligado, o cartao sai sem o "⋯" de excluir
+// (allowHide no item; o NotificationCard decide por canHideNotification).
 
 /** Tokens de :root que o admin sobrescreve e a area do aluno usa (os mesmos do PreviewFrame). */
 const STUDENT_TOKENS: Record<string, string> = {

@@ -11,7 +11,7 @@ import {
   zerarComunicacao
 } from "./fixtures";
 
-// CRUD dos avisos no navegador (docs/24 §2.1 a §2.4 e §10; docs/18 §3.1): o ⋯ de uma notificacao enviada
+// CRUD dos avisos no navegador (docs/24 §2.1 a §2.4 e §11; docs/18 §3.1): o ⋯ de uma notificacao enviada
 // mostra Ver relatório, Editar, Duplicar, Retirar do sino e Excluir; Editar troca o titulo e a aluna ve o
 // novo sem a bolinha de nao lida voltar; Excluir tira da lista e do sino dela. Um pop-up no ar em "Uma vez"
 // que a aluna fechou (o que ela viu volta 25 h no tempo): ela nao ve de novo; ⋯ "Mostrar de novo para quem

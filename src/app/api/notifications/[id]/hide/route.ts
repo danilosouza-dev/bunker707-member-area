@@ -11,7 +11,8 @@ import { jsonRouteError } from "@/server/http/route-errors";
 // so para este aluno: da lista, dos numeros, do "Marcar todas" e do "abriu o sino"; continua "recebeu"
 // nos relatorios. Repetir e sucesso sem escrita. Devolve os numeros novos { unread, unseen }. Vale para
 // avisos e para as notificacoes de comentario. Sessao pelas claims do JWT; ate 30 escritas do aluno por
-// minuto (429).
+// minuto (429). Aviso em que a equipe desligou "Permitir que o aluno exclua" (campaigns.allow_hide): o
+// excluir e 403 com a frase para o aluno; o "Desfazer" vale sempre.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

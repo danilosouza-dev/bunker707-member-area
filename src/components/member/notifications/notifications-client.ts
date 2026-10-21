@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent, useSyncExternalStore } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useSyncExternalStore } from "react";
 import type { ReactionId } from "@/server/communications/interactions-model";
 import type {
   NotificationAudioProgress,
@@ -27,6 +27,11 @@ import { INBOX_KEEP_MS, INBOX_REUSE_MS, isSummaryFresh } from "./notifications-m
 //
 // v3a (docs/24 §5.1 e §7.3): reagir, votar e excluir do sino; a primeira pagina guardada entre aberturas
 // (busca por intencao, no maximo um pedido em andamento) e o Esc que fica dentro do seletor de reacoes.
+//
+// Ajustes da v3a: a memoria (o numero do sino e a primeira pagina) tem dono, o id do aluno que o topo
+// passa (AppShell -> MemberNotificationsMenu -> painel). O login troca de pagina sem recarregar
+// (router.replace): sem o dono, a conta seguinte via o numero e a pagina da anterior. Outro id = nada do
+// que estava guardado vale, e a resposta de um pedido feito para o dono anterior nao e guardada.
 
 export class NotificationsRequestError extends Error {
   status: number;
@@ -202,15 +207,50 @@ export type NotificationsSummaryState = {
   unseen: number;
 };
 
-const INITIAL_SUMMARY: NotificationsSummaryState = { fetchedAt: null, status: "idle", unseen: 0 };
+/** O numero guardado e de quem: o id do aluno (null antes do topo dizer, ou sem o id). */
+type SummaryMemory = NotificationsSummaryState & { owner: string | null };
 
-let summaryState: NotificationsSummaryState = INITIAL_SUMMARY;
-let summaryRequest: { popup: boolean; promise: Promise<NotificationsSummary | null> } | null = null;
+const INITIAL_SUMMARY: SummaryMemory = { fetchedAt: null, owner: null, status: "idle", unseen: 0 };
+
+// --- Dono da memoria (ajustes da v3a) ------------------------------------------------------------
+
+/** De quem e o que esta guardado aqui (numero do sino e primeira pagina); null = sem id (como antes). */
+let memoryOwner: string | null = null;
+
+function ownerOf(userId: string | null | undefined) {
+  return userId ? userId : null;
+}
+
+/**
+ * O topo diz de quem e a memoria (o id do aluno da sessao). Outro id = o numero, a pagina guardada e os
+ * pedidos em andamento deixam de valer (a resposta deles nao e guardada). `undefined` (quem nao sabe o
+ * id, como o pop-up da home) nao muda nada. Chamado fora do desenho (efeito ou evento): avisa o topo.
+ */
+export function claimNotificationsMemory(userId: string | null | undefined): void {
+  if (userId === undefined || ownerOf(userId) === memoryOwner) {
+    return;
+  }
+
+  memoryOwner = ownerOf(userId);
+  keptInbox = null;
+  inboxRequest = null;
+  inboxGeneration += 1;
+  summaryRequest = null;
+  setSummaryState({ ...INITIAL_SUMMARY, owner: memoryOwner });
+}
+
+/** O pedido ou a resposta e de outro dono (a conta mudou): nao vale aqui. */
+function isOtherOwner(userId: string | null | undefined) {
+  return userId !== undefined && ownerOf(userId) !== memoryOwner;
+}
+
+let summaryState: SummaryMemory = INITIAL_SUMMARY;
+let summaryRequest: { owner: string | null; popup: boolean; promise: Promise<NotificationsSummary | null> } | null = null;
 /** A home vai pedir o resumo junto com o pop-up: ate la, o topo nao pede o seu (um pedido so). */
 let summaryHeldForPopup = false;
 const summaryListeners = new Set<() => void>();
 
-function setSummaryState(next: NotificationsSummaryState) {
+function setSummaryState(next: SummaryMemory) {
   summaryState = next;
   summaryListeners.forEach((listener) => listener());
 }
@@ -230,10 +270,17 @@ function getServerSummarySnapshot() {
   return INITIAL_SUMMARY;
 }
 
-/** Numero vindo de outra resposta (pagina do painel, resumo do pop-up, marcar como vistas). */
-export function setSummaryUnseen(unseen: number) {
+/**
+ * Numero vindo de outra resposta (pagina do painel, resumo do pop-up, marcar como vistas). Com `userId`
+ * (o painel), a resposta que chega depois da troca de conta nao vira o numero da conta nova.
+ */
+export function setSummaryUnseen(unseen: number, userId?: string | null) {
+  if (isOtherOwner(userId)) {
+    return;
+  }
+
   const safe = Number.isFinite(unseen) ? Math.max(0, Math.trunc(unseen)) : 0;
-  setSummaryState({ fetchedAt: Date.now(), status: "ready", unseen: safe });
+  setSummaryState({ fetchedAt: Date.now(), owner: memoryOwner, status: "ready", unseen: safe });
 }
 
 /**
@@ -249,10 +296,14 @@ export function holdSummaryForPopup(held: boolean) {
  * trazendo junto o pop-up da vez (so a home pede). Um pedido comum aproveita o que ja esta em andamento.
  * Devolve o resumo, ou null quando nao buscou ou falhou. Nunca lanca.
  */
-export function refreshNotificationsSummary(options: { force?: boolean; popup?: boolean } = {}): Promise<NotificationsSummary | null> {
+export function refreshNotificationsSummary(
+  options: { force?: boolean; popup?: boolean; userId?: string | null } = {}
+): Promise<NotificationsSummary | null> {
   const popup = Boolean(options.popup);
 
-  if (summaryRequest && (summaryRequest.popup || !popup)) {
+  claimNotificationsMemory(options.userId);
+
+  if (summaryRequest && summaryRequest.owner === memoryOwner && (summaryRequest.popup || !popup)) {
     return summaryRequest.promise;
   }
 
@@ -260,18 +311,25 @@ export function refreshNotificationsSummary(options: { force?: boolean; popup?: 
     return Promise.resolve(null);
   }
 
+  // O dono de quando o pedido saiu: a resposta que volta depois da troca de conta nao e guardada.
+  const owner = memoryOwner;
   const promise: Promise<NotificationsSummary | null> = fetchSummary({ popup })
     .then((summary) => {
-      setSummaryUnseen(summary.unseen);
+      setSummaryUnseen(summary.unseen, owner);
       return summary;
     })
     .catch((error: unknown) => {
+      if (owner !== memoryOwner) {
+        return null;
+      }
+
       // A falha conta como tentativa: troca de pagina e volta para a aba esperam o mesmo minuto (numa
       // queda, nao sai um pedido por pagina). Sessao encerrada (401) zera o numero; o resto mantem.
       const sessionEnded = error instanceof NotificationsRequestError && error.status === 401;
 
       setSummaryState({
         fetchedAt: Date.now(),
+        owner,
         status: summaryState.status === "ready" && !sessionEnded ? "ready" : "error",
         unseen: sessionEnded ? 0 : summaryState.unseen
       });
@@ -283,35 +341,52 @@ export function refreshNotificationsSummary(options: { force?: boolean; popup?: 
       }
     });
 
-  summaryRequest = { popup, promise };
+  summaryRequest = { owner, popup, promise };
 
   return promise;
 }
 
 /**
  * Numero do sino para o topo: busca depois da hidratacao e ao voltar para a aba, respeitando o prazo.
- * `refreshOnMount: false` na home, onde o resumo vem com o pedido do pop-up.
+ * `refreshOnMount: false` na home, onde o resumo vem com o pedido do pop-up. `userId` (o aluno da
+ * sessao) diz de quem e a memoria: antes do efeito, o numero de outra conta nunca aparece (vale o zero).
  */
-export function useNotificationsSummary(options: { refreshOnMount?: boolean } = {}) {
+export function useNotificationsSummary(options: { refreshOnMount?: boolean; userId?: string | null } = {}): NotificationsSummaryState {
   const state = useSyncExternalStore(subscribeSummary, getSummarySnapshot, getServerSummarySnapshot);
   const refreshOnMount = options.refreshOnMount ?? true;
+  const userId = options.userId;
+
+  // No layout: o dono muda antes dos efeitos comuns da pagina (o pop-up da home pede o resumo num deles).
+  useLayoutEffect(() => {
+    claimNotificationsMemory(userId);
+  }, [userId]);
 
   useEffect(() => {
     if (refreshOnMount) {
-      void refreshNotificationsSummary();
+      void refreshNotificationsSummary({ userId });
     }
 
     function handleVisibilityChange() {
       if (document.visibilityState === "visible") {
-        void refreshNotificationsSummary();
+        void refreshNotificationsSummary({ userId });
       }
     }
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [refreshOnMount]);
+  }, [refreshOnMount, userId]);
 
-  return state;
+  return summaryFor(state, userId);
+}
+
+/** O numero guardado so vale para o seu dono; para outro id, o comeco (zero, sem pedido ainda). */
+export function summaryFor(state: NotificationsSummaryState & { owner?: string | null }, userId: string | null | undefined): NotificationsSummaryState {
+  return userId === undefined || (state.owner ?? null) === ownerOf(userId) ? state : INITIAL_SUMMARY;
+}
+
+/** O numero guardado para este aluno, fora do React (o mesmo que useNotificationsSummary devolve). */
+export function currentSummaryFor(userId: string | null | undefined): NotificationsSummaryState {
+  return summaryFor(summaryState, userId);
 }
 
 // --- Primeira pagina guardada (v3a, docs/24 §7.3) --------------------------------------------------
@@ -333,6 +408,11 @@ export type KeptInbox = {
 
 let keptInbox: KeptInbox | null = null;
 let inboxRequest: Promise<KeptInbox> | null = null;
+/**
+ * Sobe sempre que o guardado deixa de valer (outra conta, 401, mudanca feita com o filtro "Não lidas"):
+ * a resposta de um pedido que saiu antes disso volta para quem esperava, mas nao e guardada.
+ */
+let inboxGeneration = 0;
 
 /** Um pedido da primeira pagina por vez: quem chega depois entra no que esta em andamento. */
 function requestInboxFirstPage(): Promise<KeptInbox> {
@@ -340,6 +420,8 @@ function requestInboxFirstPage(): Promise<KeptInbox> {
     return inboxRequest;
   }
 
+  const generation = inboxGeneration;
+  const owner = memoryOwner;
   const promise: Promise<KeptInbox> = fetchNotificationsPage({ filter: "all" })
     .then((page) => {
       const kept: KeptInbox = {
@@ -351,14 +433,16 @@ function requestInboxFirstPage(): Promise<KeptInbox> {
         unseen: page.unseen
       };
 
-      keptInbox = kept;
-      // A pagina buscada antes do clique tambem acerta o numero do sino (nunca marca nada como visto).
-      setSummaryUnseen(page.unseen);
+      if (generation === inboxGeneration) {
+        keptInbox = kept;
+        // A pagina buscada antes do clique tambem acerta o numero do sino (nunca marca nada como visto).
+        setSummaryUnseen(page.unseen, owner);
+      }
 
       return kept;
     })
     .catch((error: unknown) => {
-      if (error instanceof NotificationsRequestError && error.status === 401) {
+      if (error instanceof NotificationsRequestError && error.status === 401 && generation === inboxGeneration) {
         forgetInbox();
       }
 
@@ -377,10 +461,13 @@ function requestInboxFirstPage(): Promise<KeptInbox> {
 
 /**
  * Busca por intencao: nada quando ja ha um pedido em andamento ou a pagina guardada e mais nova que
- * `minAgeMs` (5 s ao apertar o sino, 1 minuto ao passar o mouse ou o foco). Nunca lanca.
+ * `minAgeMs` (5 s ao apertar o sino, 1 minuto ao passar o mouse ou o foco). Nunca lanca. Com `userId`,
+ * o que estava guardado para outro id sai antes (e a busca vale para este).
  */
-export function prefetchInbox(input: { minAgeMs: number; now?: number }): void {
+export function prefetchInbox(input: { minAgeMs: number; now?: number; userId?: string | null }): void {
   const now = input.now ?? Date.now();
+
+  claimNotificationsMemory(input.userId);
 
   if (inboxRequest) {
     return;
@@ -397,8 +484,16 @@ export function prefetchInbox(input: { minAgeMs: number; now?: number }): void {
   void requestInboxFirstPage().catch(() => undefined);
 }
 
-/** A pagina guardada, se ainda vale (ate 10 min); `reuse` = mais nova que 5 s (abre sem pedir de novo). */
-export function takeKeptInbox(now: number = Date.now()): { kept: KeptInbox; reuse: boolean } | null {
+/**
+ * A pagina guardada, se ainda vale (ate 10 min); `reuse` = mais nova que 5 s (abre sem pedir de novo).
+ * Com `userId`: guardada para outro id nao vale (e sai). Chamada no desenho do painel: nao avisa o topo.
+ */
+export function takeKeptInbox(now: number = Date.now(), userId?: string | null): { kept: KeptInbox; reuse: boolean } | null {
+  if (isOtherOwner(userId)) {
+    keptInbox = null;
+    return null;
+  }
+
   if (!keptInbox) {
     return null;
   }
@@ -415,9 +510,12 @@ export function takeKeptInbox(now: number = Date.now()): { kept: KeptInbox; reus
 
 /**
  * Primeira pagina do filtro "Todas" para o painel: entra no pedido que ja saiu (a busca por intencao)
- * ou faz um. O `signal` so solta este painel da espera; o pedido segue e a pagina fica guardada.
+ * ou faz um. O `signal` so solta este painel da espera; o pedido segue e a pagina fica guardada. Com
+ * `userId`, um pedido feito para outro id nao serve (sai um novo).
  */
-export function loadInboxFirstPage(signal?: AbortSignal): Promise<KeptInbox> {
+export function loadInboxFirstPage(signal?: AbortSignal, userId?: string | null): Promise<KeptInbox> {
+  claimNotificationsMemory(userId);
+
   const request = requestInboxFirstPage();
 
   if (!signal) {
@@ -439,10 +537,11 @@ export function loadInboxFirstPage(signal?: AbortSignal): Promise<KeptInbox> {
 /**
  * Guarda o que o painel mostra (filtro "Todas"), a cada mudanca local e ao fechar: as linhas excluidas
  * saem (reabrir nunca mostra uma notificacao excluida) e o `fetchedAt` e o da pagina, nao o da mudanca.
- * Uma pagina mais nova que ja esta guardada (chegou depois) nao e trocada pela mais velha.
+ * Uma pagina mais nova que ja esta guardada (chegou depois) nao e trocada pela mais velha. Com `userId`,
+ * o painel de outra conta (a troca aconteceu) nao guarda nada.
  */
-export function keepInbox(next: KeptInbox & { hiddenIds?: Iterable<string> }): void {
-  if (keptInbox && keptInbox.fetchedAt > next.fetchedAt) {
+export function keepInbox(next: KeptInbox & { hiddenIds?: Iterable<string>; userId?: string | null }): void {
+  if (isOtherOwner(next.userId) || (keptInbox && keptInbox.fetchedAt > next.fetchedAt)) {
     return;
   }
 
@@ -458,9 +557,19 @@ export function keepInbox(next: KeptInbox & { hiddenIds?: Iterable<string> }): v
   };
 }
 
-/** Sessao encerrada (401): nada guardado vale. */
-export function forgetInbox(): void {
+/**
+ * Sessao encerrada (401), ou uma mudanca feita com o filtro "Não lidas" (que nao chega a pagina guardada do
+ * "Todas"): nada guardado vale, e um pedido que ja saiu nao guarda a resposta (a proxima abertura pede de
+ * novo antes de mostrar). Com `userId` de outra conta, nao mexe na memoria da conta atual.
+ */
+export function forgetInbox(userId?: string | null): void {
+  if (isOtherOwner(userId)) {
+    return;
+  }
+
   keptInbox = null;
+  inboxRequest = null;
+  inboxGeneration += 1;
 }
 
 // --- Esc que nao vaza ----------------------------------------------------------------------------

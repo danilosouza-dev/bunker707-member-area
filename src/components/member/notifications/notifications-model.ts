@@ -564,9 +564,42 @@ export function cardActionLabels(item: Pick<NotificationItem, "reactions" | "tit
 
   return {
     hide: `Excluir notificação “${title}”`,
+    /** O "⋯" do canto do cartao (ajustes da v3a): abre o menu com "Excluir notificação". */
+    more: `Mais opções da notificação “${title}”`,
     react: `Reagir à notificação “${title}”`,
     reaction: value ? `Sua reação a “${title}”: ${REACTION_LABELS[value]}. Mudar reação` : null
   };
+}
+
+/**
+ * "Permitir que o aluno exclua do sino" gravado no aviso (campaigns.allow_hide, ajustes da v3a): so o
+ * false desliga; ausente ou nulo (aviso de antes, banco sem a migracao) = pode, como sempre foi.
+ */
+export function allowHideOf(value: unknown): boolean {
+  return value !== false;
+}
+
+/** O cartao mostra o "⋯" com "Excluir notificação"? Comentario sempre; aviso pelo que a equipe escolheu. */
+export function canHideNotification(item: { allowHide?: boolean | null; kind?: NotificationItem["kind"] }): boolean {
+  return item.kind !== undefined && item.kind !== "notice" ? true : allowHideOf(item.allowHide);
+}
+
+/** O servidor recusou o excluir (403: a equipe desligou depois que a lista chegou): o "⋯" some do cartao. */
+export function withHideRefused<T extends object>(item: T): T {
+  return { ...item, allowHide: false };
+}
+
+/**
+ * Escrita que tambem abre a notificacao (reagir, votar): `open` roda so depois que o servidor aceitou.
+ * Numa falha (429, 409, rede) nada e marcado: o cartao continua nao lido e a abertura de verdade, depois,
+ * ainda vai para o servidor.
+ */
+export function openAfterWrite<T, R>(send: (value: T) => Promise<R>, open: (value: T, result: R) => void): (value: T) => Promise<R> {
+  return (value) =>
+    send(value).then((result) => {
+      open(value, result);
+      return result;
+    });
 }
 
 /** Escolher a reacao que ja estava tira a reacao; outra troca. */

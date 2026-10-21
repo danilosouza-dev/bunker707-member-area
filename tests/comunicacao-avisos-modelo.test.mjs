@@ -474,6 +474,7 @@ const popup = (extra = {}) => ({ ...schemas.emptyNoticeDraft("popup"), title: "T
 
 test("rascunho vazio de cada tipo: todos os alunos, agora, sem janela, uma vez e com 'Lembrar depois'", () => {
   assert.deepEqual(schemas.emptyNoticeDraft("popup"), {
+    allowHide: true,
     allowSnooze: true,
     audience: { kind: "everyone" },
     audio: null,

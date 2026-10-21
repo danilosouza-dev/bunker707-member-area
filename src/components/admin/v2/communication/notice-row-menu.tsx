@@ -17,7 +17,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { startTransition, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { ActionResult } from "@/lib/action-result";
@@ -63,6 +63,9 @@ import {
 // marcada (docs/23 §2.2). v3a (docs/24 §2.1): "Ver relatório", Editar a notificacao enviada (?editar=1),
 // Excluir pela situacao (a enviada com a caixa "Excluir também as notificações seguintes que já saíram (n)"),
 // a frase das regras que citam a notificacao e "Mostrar de novo para quem já viu" no pop-up "Uma vez".
+// Ajustes da v3a: Excluir e Retirar do sino nao revalidam a pagina na acao (o servidor desenhava a pagina
+// inteira de novo na mesma resposta): o dialogo fecha e o toast aparece assim que a acao volta, e a lista
+// atualiza logo depois (router.refresh numa transicao; na pagina do aviso, Excluir volta para a lista).
 
 export type NoticeActionTarget = {
   actions: readonly NoticeAction[];
@@ -107,7 +110,7 @@ export function NoticeActionIcon({ action, className = "size-4" }: { action: Not
 }
 
 type UseNoticeActionsOptions = {
-  /** Depois de excluir (o relatorio volta para a lista; a lista so atualiza). */
+  /** Depois de excluir (o relatorio volta para a lista); sem ele, a tela atual atualiza (a lista). */
   onDeleted?: () => void;
 };
 
@@ -125,6 +128,12 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
 
   function fail(result: Extract<ActionResult<unknown>, { ok: false }>) {
     setFailure({ message: result.error, status: result.status });
+  }
+
+  // Fora do caminho do dialogo: a pagina e buscada de novo numa transicao, que nao segura o toast nem o fechar
+  // do dialogo (o finally de execute fecha na mesma hora).
+  function refreshInBackground() {
+    startTransition(() => router.refresh());
   }
 
   async function execute(action: NoticeAction, notice: NoticeActionTarget) {
@@ -177,6 +186,7 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
           }
 
           adminToast.success(NOTICE_ACTION_TOASTS.withdraw ?? "");
+          refreshInBackground();
           return;
         }
         case "delete": {
@@ -187,7 +197,14 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
           }
 
           adminToast.success(deletedNoticeToast({ kind: notice.kind, removed: result.data.removed, situation: notice.situation }));
-          onDeleted?.();
+
+          // A pagina do aviso volta para a lista (que chega nova: a pagina e dinamica); a lista so atualiza.
+          if (onDeleted) {
+            onDeleted();
+          } else {
+            refreshInBackground();
+          }
+
           return;
         }
         case "reshow": {

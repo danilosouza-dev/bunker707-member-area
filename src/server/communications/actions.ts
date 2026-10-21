@@ -83,7 +83,8 @@ import {
   watchedPageKeysOf,
   type FlowMessageMeta,
   type FlowNode,
-  type FlowStatus
+  type FlowStatus,
+  type FlowTree
 } from "./flow-model";
 import { isPollClosed, parsePoll } from "./interactions-model";
 import {
@@ -526,14 +527,23 @@ async function noticeFlowRow(db: CommunicationsDb, noticeId: string): Promise<Fl
 
 /**
  * O fluxo do aviso acompanha a situacao do aviso (7.13 sem versao: quem manda e o aviso). So quando a
- * situacao atual esta em `from`; nada a fazer = devolve o fluxo como esta (ou null sem fluxo).
+ * situacao atual esta em `from`; nada a fazer = devolve o fluxo como esta (ou null sem fluxo). `flow` = a
+ * linha ja lida pela acao (null = sem fluxo); ausente, le agora.
  */
 async function moveNoticeFlow(
   db: CommunicationsDb,
   noticeId: string,
-  input: { actorId: string | null; entryCount?: number | null; from: readonly FlowStatus[]; now: Date; reason?: string | null; to: FlowStateChange["to"] }
+  input: {
+    actorId: string | null;
+    entryCount?: number | null;
+    flow?: FlowRow | null;
+    from: readonly FlowStatus[];
+    now: Date;
+    reason?: string | null;
+    to: FlowStateChange["to"];
+  }
 ): Promise<FlowRow | null> {
-  const flow = await noticeFlowRow(db, noticeId);
+  const flow = input.flow === undefined ? await noticeFlowRow(db, noticeId) : input.flow;
 
   if (!flow || !input.from.includes(flow.status)) {
     return flow;
@@ -579,13 +589,22 @@ function followUpIssuePath(base: string | undefined, field: string | null) {
 /** As seguintes conferidas contra o conteudo do aviso: o fluxo, quem envia e as paginas que ele acompanha. */
 type CheckedFollowUps = { flow: FlowRow; senders: string[]; watched: string[] };
 
+/** O fluxo das seguintes do aviso como esta gravado agora, com o conteudo atual de cada passo. */
+type NoticeFollowUpState = {
+  flow: FlowRow;
+  goal: AudienceDefinition | null;
+  messageNodes: FlowNode[];
+  metas: Record<string, FlowMessageMeta>;
+  tree: FlowTree;
+  versions: Map<string, CampaignRow>;
+};
+
 /**
- * As seguintes gravadas estao boas para sair com o conteudo `row` do aviso (a arvore e o objetivo contra os
- * metas de agora, 400 "A notificação seguinte 1 tem um problema: ..."), e quem envia cada uma ainda esta na
- * equipe (422). Nao grava nada (v3a: o editar depois do envio confere antes de gravar o conteudo novo).
- * null = o aviso nao tem seguintes, ou o fluxo ja terminou (nada mais sai).
+ * Le o fluxo das seguintes do aviso e a versao atual de cada passo; o meta da notificacao principal vem de
+ * `row` (no editar depois do envio, o conteudo novo ainda nao gravado). null = o aviso nao tem seguintes, ou
+ * o fluxo ja terminou (nada mais sai).
  */
-async function checkNoticeFollowUps(db: CommunicationsDb, row: CampaignRow): Promise<CheckedFollowUps | null> {
+async function loadNoticeFollowUps(db: CommunicationsDb, row: CampaignRow): Promise<NoticeFollowUpState | null> {
   if (row.kind !== "inbox") {
     return null;
   }
@@ -609,11 +628,30 @@ async function checkNoticeFollowUps(db: CommunicationsDb, row: CampaignRow): Pro
     }
   }
 
-  const goal = definitionOf(loaded.flow.goal);
-  const [issue] = [...validateFlowTree(loaded.tree, metas), ...validateFlowGoal(loaded.tree, goal, metas)].filter((item) => item.level !== "warning");
+  return { flow: loaded.flow, goal: definitionOf(loaded.flow.goal), messageNodes, metas, tree: loaded.tree, versions };
+}
+
+/**
+ * As seguintes gravadas estao boas para sair com o conteudo `row` do aviso (a arvore e o objetivo contra os
+ * metas de agora, 400 "A notificação seguinte 1 tem um problema: ..."), e quem envia cada uma ainda esta na
+ * equipe (422). Nao grava nada (v3a: o editar depois do envio confere antes de gravar o conteudo novo).
+ * `checkSenders: false` (editar a notificacao enviada) nao confere quem envia as seguintes: corrigir um erro
+ * de digitacao no aviso nao depende delas, e o sino ja mostra a escola quando quem envia saiu da equipe; a
+ * conferencia fica onde as seguintes sao salvas (assertFollowUpSenders) e ao publicar ou aprovar.
+ * null = o aviso nao tem seguintes, ou o fluxo ja terminou (nada mais sai).
+ */
+async function checkNoticeFollowUps(db: CommunicationsDb, row: CampaignRow, options: { checkSenders?: boolean } = {}): Promise<CheckedFollowUps | null> {
+  const state = await loadNoticeFollowUps(db, row);
+
+  if (!state) {
+    return null;
+  }
+
+  const { flow, goal, messageNodes, metas, tree, versions } = state;
+  const [issue] = [...validateFlowTree(tree, metas), ...validateFlowGoal(tree, goal, metas)].filter((item) => item.level !== "warning");
 
   if (issue) {
-    const drawn = followUpsFromTree(loaded.tree);
+    const drawn = followUpsFromTree(tree);
     const numbers = drawn ? followUpNumbers(drawn) : new Map(messageNodes.map((node, index) => [node.id, String(index + 1)]));
     const number = issue.nodeId ? numbers.get(issue.nodeId) : undefined;
     const path = followUpIssuePath(issue.nodeId && drawn ? followUpPaths(drawn).get(issue.nodeId) : undefined, issue.field);
@@ -623,39 +661,73 @@ async function checkNoticeFollowUps(db: CommunicationsDb, row: CampaignRow): Pro
 
   const senders = Array.from(new Set(Array.from(versions.values(), (version) => version.sender_user_id).filter((id): id is string => Boolean(id))));
 
-  for (const userId of senders) {
-    const state = await senderState(db, userId);
+  if (options.checkSenders !== false) {
+    const states = await Promise.all(senders.map((userId) => senderState(db, userId)));
+    const gone = states.find((sender) => !sender.onTeam);
 
-    if (!state.onTeam) {
-      throw new CommunicationError(`${state.name ?? "A pessoa escolhida"} não está mais na equipe. Escolha quem envia.`, 422);
+    if (gone) {
+      throw new CommunicationError(`${gone.name ?? "A pessoa escolhida"} não está mais na equipe. Escolha quem envia.`, 422);
     }
   }
 
-  return { flow: loaded.flow, senders, watched: watchedPageKeysOf(loaded.tree, goal, metas, row.cta_href) };
+  return { flow, senders, watched: watchedPageKeysOf(tree, goal, metas, row.cta_href) };
+}
+
+function sameKeys(left: readonly string[] | null | undefined, right: readonly string[]) {
+  return JSON.stringify([...(left ?? [])].sort()) === JSON.stringify([...right].sort());
 }
 
 /**
  * Paginas acompanhadas com o destino do aviso de agora: trocar o destino depois de gravar as seguintes (ou
  * seguintes feitas so no construtor) nao re-grava o fluxo, e a visita a pagina nova nunca seria gravada
  * ("não visitou a página do botão" valeria para todos). Devolve o fluxo e se as paginas mudaram.
+ * Grava so na versao do fluxo lida (updated_at): uma seguinte salva no meio (communication_save_flow grava
+ * outra arvore, talvez com "visitou a página X") nunca e sobrescrita por paginas de uma arvore antiga. Mudou
+ * no meio: le a arvore de novo e recalcula uma vez com o conteudo `row` do aviso (o fluxo sumiu ou terminou
+ * no meio = nada a gravar).
  */
-async function syncNoticeWatchedPages(db: CommunicationsDb, checked: CheckedFollowUps): Promise<{ changed: boolean; flow: FlowRow }> {
-  const saved = [...(checked.flow.watched_page_keys ?? [])].sort();
+async function syncNoticeWatchedPages(db: CommunicationsDb, checked: CheckedFollowUps, row: CampaignRow): Promise<{ changed: boolean; flow: FlowRow }> {
+  let flow = checked.flow;
+  let watched = checked.watched;
 
-  if (JSON.stringify([...checked.watched].sort()) === JSON.stringify(saved)) {
-    return { changed: false, flow: checked.flow };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (sameKeys(flow.watched_page_keys, watched)) {
+      return { changed: false, flow };
+    }
+
+    const { data, error } = await db
+      .from("communication_flows")
+      .update({ watched_page_keys: watched })
+      .eq("id", flow.id)
+      .eq("updated_at", flow.updated_at)
+      .is("deleted_at", null)
+      .select(FLOW_COLUMNS);
+    assertNoDbError(error, "Comunicacao: paginas acompanhadas das seguintes");
+
+    const [updated] = (data ?? []) as FlowRow[];
+
+    if (updated) {
+      return { changed: true, flow: updated };
+    }
+
+    if (attempt > 0) {
+      break;
+    }
+
+    const again = await loadNoticeFollowUps(db, row);
+
+    if (!again) {
+      return { changed: false, flow };
+    }
+
+    flow = again.flow;
+    watched = watchedPageKeysOf(again.tree, again.goal, again.metas, row.cta_href);
   }
 
-  const { data, error } = await db
-    .from("communication_flows")
-    .update({ watched_page_keys: checked.watched })
-    .eq("id", checked.flow.id)
-    .is("deleted_at", null)
-    .select(FLOW_COLUMNS)
-    .maybeSingle();
-  assertNoDbError(error, "Comunicacao: paginas acompanhadas das seguintes");
+  // Mudou duas vezes no meio: o aviso ja foi gravado; quem salvou por ultimo gravou as paginas da arvore dele.
+  console.error(`[comunicacao] paginas acompanhadas do fluxo ${flow.id} nao gravadas: o fluxo mudou duas vezes no meio`);
 
-  return { changed: true, flow: (data as FlowRow | null) ?? checked.flow };
+  return { changed: false, flow };
 }
 
 /**
@@ -669,7 +741,7 @@ async function followUpsForPublish(db: CommunicationsDb, row: CampaignRow): Prom
     return null;
   }
 
-  const { flow } = await syncNoticeWatchedPages(db, checked);
+  const { flow } = await syncNoticeWatchedPages(db, checked, row);
 
   return { flow, senders: checked.senders };
 }
@@ -755,9 +827,10 @@ async function saveSentNotice(input: {
   let checked: CheckedFollowUps | null;
 
   // As seguintes ainda valem com o conteudo novo (ex.: "foi para o destino" sem destino): 422, mudar antes no
-  // relatorio. Nada e gravado aqui.
+  // relatorio. Nada e gravado aqui. Quem envia as seguintes nao trava o aviso (ajustes da v3a): quem saiu da
+  // equipe aparece como a escola no sino, e a conferencia fica onde as seguintes sao salvas.
   try {
-    checked = await checkNoticeFollowUps(db, { ...current, ...content });
+    checked = await checkNoticeFollowUps(db, { ...current, ...content }, { checkSenders: false });
   } catch (error) {
     if (error instanceof NoticeFieldError) {
       throw new CommunicationError(`${error.message} ${SENT_EDIT_FOLLOW_UP_HINT}`, 422);
@@ -775,8 +848,11 @@ async function saveSentNotice(input: {
   );
 
   // Destino novo: as seguintes que olham "a página para onde a notificação leva" passam a olhar a nova (o
-  // cache das visitas de pagina divide a tag com o dos pop-ups no ar).
-  if (checked && (await syncNoticeWatchedPages(db, checked)).changed) {
+  // cache das visitas de pagina divide a tag com o dos pop-ups no ar). A versao nova do fluxo volta para o
+  // editor (salvar as seguintes logo depois nao leva 409).
+  const synced = checked ? await syncNoticeWatchedPages(db, checked, saved) : null;
+
+  if (synced?.changed) {
     invalidateLivePopups({ from: "action" });
   }
 
@@ -797,7 +873,7 @@ async function saveSentNotice(input: {
   });
   revalidateNotices(saved.id);
 
-  return { flowUpdatedAt: null, id: saved.id, status: "sent", updatedAt: saved.updated_at };
+  return { flowUpdatedAt: synced?.changed ? synced.flow.updated_at : null, id: saved.id, status: "sent", updatedAt: saved.updated_at };
 }
 
 /**
@@ -1230,43 +1306,56 @@ export async function endNotice(input: NoticeIdInput): Promise<ActionResult<Noti
   );
 }
 
+/** Retirar as seguintes que ja sairam: os passos ficam cancelados e as linhas dos alunos saem do sino (o teste fica). */
+async function withdrawFollowUpRows(db: CommunicationsDb, flowId: string, actorId: string): Promise<number> {
+  const [canceled, deleted] = await Promise.all([
+    db.from("campaigns").update({ status: "canceled", updated_by: actorId }).eq("flow_id", flowId).in("status", ["draft", "sent"]),
+    db.from("notifications").delete({ count: "exact" }).eq("flow_id", flowId).eq("is_test", false)
+  ]);
+  assertNoDbError(canceled.error, "Comunicacao: retirar as seguintes");
+  assertNoDbError(deleted.error, "Comunicacao: tirar as seguintes do sino");
+
+  return deleted.count ?? 0;
+}
+
 /**
  * Tira a notificacao enviada do sino (Retirar do sino e Excluir, docs/24 §4.8): primeiro a situacao
  * ("canceled", na versao lida; o sino ja esconde aviso que nao esta enviado), depois as seguintes param antes
  * de qualquer linha sair (o fluxo do aviso termina com `flowReason`: pendentes e reservadas canceladas, 7.13)
  * e, com `alsoFollowUps`, as que ja sairam somem do sino; por fim as linhas dos alunos (o teste fica).
+ * Ajustes da v3a (Excluir demorava): as leituras (o fluxo do aviso e as regras que citam a notificacao, para
+ * a auditoria) vao junto com a primeira gravacao, e o que nao depende um do outro vai junto (Promise.all).
  */
 async function withdrawSentNotice(
   db: CommunicationsDb,
   row: CampaignRow,
   input: { actorId: string; alsoFollowUps: boolean; expectedUpdatedAt?: string | null; flowReason: "source_deleted" | "source_withdrawn"; now: Date }
-): Promise<{ flow: FlowRow | null; followUpsRemoved: number; removed: number; updated: CampaignRow }> {
-  const updated = await updateCampaign(db, row.id, { status: "canceled", updated_by: input.actorId }, { expectedStatuses: ["sent"], expectedUpdatedAt: input.expectedUpdatedAt });
-  const flow = await moveNoticeFlow(db, row.id, { actorId: input.actorId, from: ["active", "paused"], now: input.now, reason: input.flowReason, to: "ended" });
-  let followUpsRemoved = 0;
-
-  if (flow && input.alsoFollowUps) {
-    const canceled = await db.from("campaigns").update({ status: "canceled", updated_by: input.actorId }).eq("flow_id", flow.id).in("status", ["draft", "sent"]);
-    assertNoDbError(canceled.error, "Comunicacao: retirar as seguintes");
-
-    const deleted = await db.from("notifications").delete({ count: "exact" }).eq("flow_id", flow.id).eq("is_test", false);
-    assertNoDbError(deleted.error, "Comunicacao: tirar as seguintes do sino");
-    followUpsRemoved = deleted.count ?? 0;
-  }
-
-  const removed = await deleteCampaignNotifications(db, row.id);
+): Promise<{ citations: { flows: number; notices: number }; flow: FlowRow | null; followUpsRemoved: number; removed: number; updated: CampaignRow }> {
+  const [updated, current, citations] = await Promise.all([
+    updateCampaign(db, row.id, { status: "canceled", updated_by: input.actorId }, { expectedStatuses: ["sent"], expectedUpdatedAt: input.expectedUpdatedAt }),
+    noticeFlowRow(db, row.id),
+    citationsOf(db, row)
+  ]);
+  const flow = await moveNoticeFlow(db, row.id, { actorId: input.actorId, flow: current, from: ["active", "paused"], now: input.now, reason: input.flowReason, to: "ended" });
+  const [followUpsRemoved, removed] = await Promise.all([
+    flow && input.alsoFollowUps ? withdrawFollowUpRows(db, flow.id, input.actorId) : Promise.resolve(0),
+    deleteCampaignNotifications(db, row.id)
+  ]);
 
   if (flow) {
     invalidateLivePopups({ from: "action" });
   }
 
-  return { flow, followUpsRemoved, removed, updated };
+  return { citations, flow, followUpsRemoved, removed, updated };
 }
 
 /**
  * [messaging.publish] Retira a notificacao enviada: some do sino dos alunos (fica como cancelada). v2: as
  * seguintes deixam de sair (o fluxo do aviso termina, source_withdrawn) e, com `alsoFollowUps` (padrao),
  * as que ja sairam tambem somem do sino. v3a: a auditoria conta as regras que citam a notificacao.
+ * Ajustes da v3a: sem revalidatePath (com ele, o servidor invalida o cache e desenha a pagina inteira de novo
+ * na mesma resposta da acao); a tela fecha o dialogo, mostra o toast e so entao atualiza (router.refresh numa
+ * transicao, useNoticeActions). O updateTag do fluxo encerrado continua (cache das visitas de pagina).
  */
 export async function withdrawNotice(input: WithdrawNoticeInput): Promise<ActionResult<NoticeStateChange & { removed: number }>> {
   return runAdminAction("messaging.publish", withdrawNoticeSchema, input, async ({ input: data, user }) => {
@@ -1278,8 +1367,7 @@ export async function withdrawNotice(input: WithdrawNoticeInput): Promise<Action
       throw new CommunicationError("Esta ação vale só para notificações.", 422);
     }
 
-    const citations = await citationsOf(db, row);
-    const { flow, followUpsRemoved, removed, updated } = await withdrawSentNotice(db, row, {
+    const { citations, flow, followUpsRemoved, removed, updated } = await withdrawSentNotice(db, row, {
       actorId: user.id,
       alsoFollowUps: data.alsoFollowUps,
       expectedUpdatedAt: data.expectedUpdatedAt,
@@ -1301,7 +1389,6 @@ export async function withdrawNotice(input: WithdrawNoticeInput): Promise<Action
         kind: row.kind
       }
     });
-    revalidateNotices(row.id);
 
     return { ...stateChange(updated, now.getTime()), removed };
   });
@@ -1493,6 +1580,12 @@ export async function duplicateNotice(input: NoticeIdInput): Promise<ActionResul
  * mais ninguem): agendado (o tick so reserva aviso nao excluido), enviado (sai de todo sino como Retirar do
  * sino, com as seguintes que ja sairam por padrao, e depois da lista) e pop-up no ar ou pausado (encerrado
  * agora e depois tirado da lista). Regras que citam a notificacao so avisam: a contagem vai para a auditoria.
+ * Ajustes da v3a (o dialogo demorava a fechar): as leituras vao junto com a primeira gravacao, o que nao
+ * depende um do outro vai junto (Promise.all), o fluxo ja lido nao e lido de novo (de ~11 idas ao banco em
+ * serie para ~5 na enviada com seguintes), e nada de revalidatePath (com ele, o servidor invalida o cache e
+ * desenha a pagina inteira de novo na mesma resposta; na pagina do aviso, a de um aviso que nao existe mais).
+ * A tela fecha o dialogo e mostra o toast assim que a acao volta e entao atualiza a lista (router.refresh numa
+ * transicao) ou volta para ela (onDeleted). O updateTag do pop-up e do fluxo continua (o cache deles).
  */
 export async function deleteNotice(input: DeleteNoticeInput): Promise<ActionResult<{ id: string; removed: number }>> {
   return runAdminAction("messaging.write", deleteNoticeSchema, input, async ({ access, input: data, user }) => {
@@ -1514,7 +1607,8 @@ export async function deleteNotice(input: DeleteNoticeInput): Promise<ActionResu
       throw new CommunicationError(DELETE_NEEDS_PUBLISH, 403);
     }
 
-    const citations = await citationsOf(db, row);
+    const nowIso = now.toISOString();
+    let citations = { flows: 0, notices: 0 };
     let removed = 0;
     let followUpsRemoved = 0;
 
@@ -1527,36 +1621,38 @@ export async function deleteNotice(input: DeleteNoticeInput): Promise<ActionResu
         now
       });
 
+      citations = withdrawn.citations;
       removed = withdrawn.removed;
       followUpsRemoved = withdrawn.followUpsRemoved;
-      await softDeleteCampaign(db, row.id, { actorId: user.id, expectedStatuses: ["canceled"], expectedUpdatedAt: withdrawn.updated.updated_at, now });
 
-      // O fluxo ja terminou (source_deleted) junto com a retirada: so sai da lista.
-      const flow = await noticeFlowRow(db, row.id);
-
-      if (flow) {
-        await removeNoticeFlow(db, flow, { actorId: user.id, now, reason: null });
-      }
+      // O fluxo ja terminou (source_deleted) junto com a retirada: so sai da lista, junto com o aviso.
+      await Promise.all([
+        softDeleteCampaign(db, row.id, { actorId: user.id, expectedStatuses: ["canceled"], expectedUpdatedAt: withdrawn.updated.updated_at, now }),
+        withdrawn.flow ? removeNoticeFlow(db, withdrawn.flow, { actorId: user.id, now, reason: null }) : Promise.resolve()
+      ]);
     } else if (livePopup) {
-      const ended = await updateCampaign(
+      // Encerrado e tirado da lista numa gravacao so (o mesmo resultado das duas de antes).
+      await updateCampaign(
         db,
         row.id,
-        { ...endingPatch(row, now), status: "ended", updated_by: user.id },
+        { ...endingPatch(row, now), deleted_at: nowIso, deleted_by: user.id, status: "ended", updated_by: user.id },
         { expectedStatuses: [row.status], expectedUpdatedAt: row.updated_at }
       );
-
-      await softDeleteCampaign(db, row.id, { actorId: user.id, expectedStatuses: ["ended"], expectedUpdatedAt: ended.updated_at, now });
       invalidateLivePopups({ from: "action" });
     } else {
-      await softDeleteCampaign(db, row.id, { actorId: user.id, expectedStatuses: [row.status], expectedUpdatedAt: row.updated_at, now });
+      const [, flow, cited] = await Promise.all([
+        softDeleteCampaign(db, row.id, { actorId: user.id, expectedStatuses: [row.status], expectedUpdatedAt: row.updated_at, now }),
+        row.kind === "inbox" ? noticeFlowRow(db, row.id) : Promise.resolve(null),
+        citationsOf(db, row)
+      ]);
+
+      citations = cited;
 
       if (row.kind === "popup") {
         invalidateLivePopups({ from: "action" });
       }
 
       // v2: as seguintes saem junto (no ar ou pausado, encerradas antes: source_deleted).
-      const flow = row.kind === "inbox" ? await noticeFlowRow(db, row.id) : null;
-
       if (flow) {
         await removeNoticeFlow(db, flow, { actorId: user.id, now, reason: "source_deleted" });
       }
@@ -1576,7 +1672,6 @@ export async function deleteNotice(input: DeleteNoticeInput): Promise<ActionResu
         status: row.status
       }
     });
-    revalidateNotices();
 
     return { id: row.id, removed };
   });

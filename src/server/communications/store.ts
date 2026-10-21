@@ -23,11 +23,14 @@ const RANGE_NOT_SATISFIABLE = "PGRST103";
 
 // v2 (migracao 202610200002): quem envia, icone, validade no sino e o passo do fluxo.
 // v3a (migracao 202610220001): como o aluno chega ao destino, reacoes, enquete e a ultima edicao no ar.
+// Ajustes da v3a (202610220002): a lixeira do aluno por notificacao (allow_hide).
 export const CAMPAIGN_COLUMNS =
-  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by,sender_user_id,icon,icon_color,validity_minutes,valid_until,flow_id,flow_node_id,cta_display,allow_reactions,poll,edited_at,edited_by";
+  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by,sender_user_id,icon,icon_color,validity_minutes,valid_until,flow_id,flow_node_id,cta_display,allow_reactions,poll,edited_at,edited_by,allow_hide";
 
 export type CampaignRow = {
   accept_label: string | null;
+  /** O aluno pode excluir a notificacao do proprio sino (so notificacao; o pop-up fica sempre true). */
+  allow_hide: boolean;
   /** O aluno pode reagir (so notificacao). */
   allow_reactions: boolean;
   allow_snooze: boolean;
@@ -94,6 +97,7 @@ export type CampaignRow = {
 export type CampaignContentColumns = Pick<
   CampaignRow,
   | "accept_label"
+  | "allow_hide"
   | "allow_reactions"
   | "allow_snooze"
   | "audio_duration_seconds"
@@ -128,8 +132,9 @@ export type CampaignPatch = Partial<Omit<CampaignRow, "audience" | "audio_peaks"
 };
 
 /**
- * O que uma notificacao enviada ainda pode mudar (v3a, docs/24 §2.2): o conteudo que o aluno le. Segmento,
- * envio, tempo no sino, audio, ligar ou desligar a resposta e a enquete ficam (sentNoticeLockedProblems).
+ * O que uma notificacao enviada ainda pode mudar (v3a, docs/24 §2.2): o conteudo que o aluno le e, nos
+ * ajustes da v3a, se o aluno pode excluir do sino (allow_hide). Segmento, envio, tempo no sino, audio,
+ * ligar ou desligar a resposta e a enquete ficam (sentNoticeLockedProblems).
  */
 export const SENT_EDITABLE_COLUMNS = [
   "title",
@@ -145,7 +150,8 @@ export const SENT_EDITABLE_COLUMNS = [
   "cta_display",
   "accept_label",
   "decline_label",
-  "allow_reactions"
+  "allow_reactions",
+  "allow_hide"
 ] as const satisfies readonly (keyof CampaignContentColumns)[];
 
 /* ------------------------------------------------------------------------------------------------
@@ -188,6 +194,8 @@ export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
     body: draft.body,
     // Cartao clicavel, reacoes e enquete sao da notificacao (checks campaigns_*_v3); o pop-up abre pelo botao.
     allow_reactions: isInbox ? draft.reactions ?? false : false,
+    // A lixeira tambem (o pop-up nao vai para o sino): o pop-up grava o padrao.
+    allow_hide: isInbox ? draft.allowHide ?? true : true,
     cta_display: isInbox && draft.cta ? draft.cta.display ?? "button" : "button",
     cta_href: draft.cta ? draft.cta.href : null,
     cta_label: draft.cta ? draft.cta.label : null,
@@ -213,6 +221,8 @@ export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
 
 export function rowToDraft(row: CampaignRow): NoticeDraft {
   return {
+    // Linha sem a coluna (leitura antiga) = a lixeira de sempre.
+    allowHide: row.kind !== "inbox" || row.allow_hide !== false,
     allowSnooze: row.allow_snooze,
     audience: audienceOfRow(row),
     audio:

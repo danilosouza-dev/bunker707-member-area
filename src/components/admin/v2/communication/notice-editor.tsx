@@ -124,7 +124,8 @@ import {
 //   "Mostrar de novo para quem já viu" (saveNoticeDraft com reshow; so o switch = reshowPopup).
 // - v3a, notificacao enviada (?editar=1, docs/24 §2.2): so o conteudo muda ("Salvar alterações" e volta para
 //   o relatorio); segmento, envio, tempo no sino, audio, ligar a resposta e a enquete ficam travados com o
-//   motivo, e as seguintes mudam no relatorio.
+//   motivo, e as seguintes mudam no relatorio. "Permitir que o aluno exclua do sino" (ajustes da v3a) nao
+//   trava: muda tambem depois do envio.
 // - A contagem do segmento vem do servidor (previewNoticeAudience) 500 ms depois da ultima mudanca.
 // - Imagem: recorte WebP no navegador e envio logo depois (uploadNoticeImage). Audio: NoticeAudioField.
 
@@ -169,6 +170,8 @@ const FIELD_FOCUS: readonly [string, string][] = [
   ["cta.display", "[name='aviso-botao-modo']"],
   ["cta", "#aviso-botao-mostrar"],
   ["reactions", "#aviso-reacoes"],
+  // Ajustes da v3a: "Permitir que o aluno exclua do sino".
+  ["allowHide", "#aviso-excluir"],
   ["response.acceptLabel", "#aviso-aceitar"],
   ["response.declineLabel", "#aviso-recusar"],
   ["response", "#aviso-resposta"],

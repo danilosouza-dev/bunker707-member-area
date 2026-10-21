@@ -450,6 +450,7 @@ test("comentario: o cartao inteiro leva para a aula e o link de verdade e a fras
 test("nomes da lixeira e das reacoes levam o titulo (ou a frase do comentario)", () => {
   assert.deepEqual(model.cardActionLabels(aviso(null, { reactions: { value: null } })), {
     hide: "Excluir notificação “Aula nova”",
+    more: "Mais opções da notificação “Aula nova”",
     react: "Reagir à notificação “Aula nova”",
     reaction: null
   });

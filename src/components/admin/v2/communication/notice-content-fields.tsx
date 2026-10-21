@@ -34,9 +34,13 @@ import { CTA_FIELD_COPY, NOTICE_INTERACTION_COPY, emptyPoll, type NoticeSenderCh
 // e enquete nao convivem: uma desliga a outra). `lockedFields` (notificacao ja enviada) trava o audio, a
 // enquete e ligar ou desligar a resposta, com o motivo embaixo; `pollCanEndAtDate` false (folha da
 // seguinte e passo do fluxo) tira o fim numa data.
+//
+// Ajustes da v3a: "Permitir que o aluno exclua do sino" (allowHide, ligado por padrao) logo depois de
+// "Permitir reações"; muda tambem depois do envio. Num passo de fluxo no ar que ja chegou a alguem, a
+// enquete chega travada (lockedFields.poll).
 
 /** O conteudo editado aqui: o do aviso, com a validade dos passos de fluxo ("with_anchor"). */
-export type NoticeContentValue = Pick<NoticeDraft, "audio" | "body" | "cta" | "icon" | "image" | "poll" | "reactions" | "response" | "sender" | "title"> & {
+export type NoticeContentValue = Pick<NoticeDraft, "allowHide" | "audio" | "body" | "cta" | "icon" | "image" | "poll" | "reactions" | "response" | "sender" | "title"> & {
   validity: FlowValidity;
 };
 
@@ -215,6 +219,8 @@ export function NoticeContentFields({
   }
 
   const poll = inbox ? (value.poll ?? null) : null;
+  // Rascunho de antes dos ajustes da v3a (sem a chave): o aluno pode excluir, como sempre foi.
+  const allowHide = value.allowHide !== false;
   const responseLocked = lockedFields.responseMode;
   const pollLocked = lockedFields.poll;
   const audioLocked = lockedFields.audio;
@@ -341,6 +347,15 @@ export function NoticeContentFields({
               id={id("reacoes")}
               label={NOTICE_INTERACTION_COPY.reactionsLabel}
               onCheckedChange={(reactions) => onChange({ reactions })}
+            />
+
+            <AdminSwitch
+              checked={allowHide}
+              description={allowHide ? NOTICE_INTERACTION_COPY.allowHideOn : NOTICE_INTERACTION_COPY.allowHideOff}
+              disabled={disabled}
+              id={id("excluir")}
+              label={NOTICE_INTERACTION_COPY.allowHideLabel}
+              onCheckedChange={(next) => onChange({ allowHide: next })}
             />
 
             <div className="flex min-w-0 flex-col gap-4">

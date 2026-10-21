@@ -1,15 +1,19 @@
 import type { Locator, Page } from "@playwright/test";
 import { enviarNotificacao, expect, linhaDoSino, test, zerarComunicacao } from "./fixtures";
 
-// Sino v3a no navegador (docs/24 §1 e §10; docs/18 §3.1): quatro notificacoes ja enviadas para a aluna (enquete
+// Sino v3a no navegador (docs/24 §1, §10 e §11; docs/18 §3.1): quatro notificacoes ja enviadas para a aluna (enquete
 // com reacoes; Aceitar/Recusar; "Só tocando na notificação" para Minhas compras; "Pelo botão ou tocando na
-// notificação" para Minha jornada) e uma quinta para a lixeira. A aluna reage, troca e tira a reacao; vota e
-// muda o voto (100%, 1 voto); aceita, muda a resposta e recusa; toca no texto dos dois cartoes clicaveis e chega
-// a pagina; exclui, desfaz, exclui de novo e a notificacao nao volta ao reabrir nem ao recarregar. A 1280 e a
-// 375 px: sem rolagem lateral, os seis emoji numa linha dentro do cartao, a lixeira some com o seletor aberto,
-// opcoes da enquete com 44 px; pelo teclado, Tab chega ao Reagir, Enter abre o seletor e Esc fecha so ele.
-// O beforeAll e o afterAll apagam tudo: uma notificacao esquecida muda o nome do sino nos outros arquivos.
-// Escritas da aluna neste arquivo: menos de 30 por minuto (o limite do servidor, docs/24 §4.14).
+// notificação" para Minha jornada), uma quinta para a lixeira e uma sexta em que a equipe desligou "Permitir
+// que o aluno exclua do sino". A aluna reage, troca e tira a reacao; vota e muda o voto (100%, 1 voto); aceita,
+// muda a resposta e recusa; toca no texto dos dois cartoes clicaveis e chega a pagina; exclui pelo "⋯" ("Mais
+// opções" -> "Excluir notificação"), desfaz, exclui de novo e a notificacao nao volta ao reabrir nem ao
+// recarregar. A sexta nao tem o "⋯" e o servidor recusa excluir (403). A 1280 e a 375 px (§10): sem rolagem
+// lateral, o Reagir no fim da linha dos botoes ou da linha de quem envia, o "⋯" no canto de cima sem cobrir o
+// titulo e com 32 px, que continua com o seletor aberto, os seis emoji numa linha dentro do cartao, a pilula da
+// reacao com 28 px e as opcoes da enquete com 44 px; pelo teclado, Tab chega ao Reagir, Enter abre o seletor e
+// Esc fecha so ele, e Esc no menu do "⋯" fecha so o menu. O beforeAll e o afterAll apagam tudo: uma notificacao
+// esquecida muda o nome do sino nos outros arquivos. Escritas da aluna neste arquivo: menos de 30 por minuto (o
+// limite do servidor, docs/24 §4.14).
 
 const ENQUETE = "Sino E2E: dia da live de dúvidas";
 const PERGUNTA = "Qual dia é melhor para a live?";
@@ -18,6 +22,8 @@ const CARTAO = "Sino E2E: suas compras num lugar só";
 const DICA_DO_CARTAO = "Ver a aula nova";
 const BOTAO_OU_TOQUE = "Sino E2E: sua jornada de estudos";
 const PARA_EXCLUIR = "Sino E2E: aviso para a lixeira";
+const SEM_LIXEIRA = "Sino E2E: aviso que fica no sino";
+/** As que o aluno pode excluir (todas menos a sem lixeira). */
 const TODAS = [ENQUETE, RESPOSTA, CARTAO, BOTAO_OU_TOQUE, PARA_EXCLUIR];
 
 test.describe.configure({ mode: "serial" });
@@ -62,6 +68,7 @@ test.beforeAll(async () => {
     titulo: BOTAO_OU_TOQUE
   });
   await enviarNotificacao({ minutosAtras: 50, texto: "Este aviso vai para a lixeira.", titulo: PARA_EXCLUIR });
+  await enviarNotificacao({ minutosAtras: 60, podeExcluir: false, texto: "Este aviso não sai pela lixeira.", titulo: SEM_LIXEIRA });
 });
 
 test.afterAll(zerarComunicacao);
@@ -84,7 +91,27 @@ async function esperarEscrita(page: Page, rota: "hide" | "poll" | "reaction" | "
   expect((await resposta).status()).toBe(200);
 }
 
+/** O "⋯" do cartao (o nome leva o titulo: nunca vinte botoes iguais). */
+function maisOpcoes(painel: Locator, titulo: string) {
+  return painel.getByRole("button", { exact: true, name: `Mais opções da notificação “${titulo}”` });
+}
+
+/** Caixa de um elemento na tela (falha quando nao esta desenhado). */
+async function caixaDe(alvo: Locator) {
+  const caixa = await alvo.boundingBox();
+
+  if (!caixa) {
+    throw new Error("O elemento nao esta na tela.");
+  }
+
+  return caixa;
+}
+
+/** Centro vertical de uma caixa (para dizer se dois elementos estao na mesma linha). */
+const meioVertical = (caixa: { height: number; y: number }) => caixa.y + caixa.height / 2;
+
 type ItemDoSino = {
+  id: string;
   poll: { choice: string[] } | null;
   reactions: { value: string | null } | null;
   response: { value: string | null } | null;
@@ -120,12 +147,20 @@ test("reage, troca e tira a reação; vota e muda o voto; aceita, muda a respost
   const seletor = enquete.getByRole("group", { name: "Escolha uma reação" });
   const pilula = (nome: string) => enquete.getByRole("button", { exact: true, name: `Sua reação a “${ENQUETE}”: ${nome}. Mudar reação` });
 
-  // Reagir: o seletor abre com o foco em Gostei; escolher fecha e o foco volta para a pilula.
+  // Reagir: sem linha de botoes, fica no fim da linha de quem envia (docs/24 §10); o seletor abre logo
+  // abaixo com o foco em Gostei e o Reagir continua na tela (aria-expanded); escolher fecha e o foco vai
+  // para a pilula, pequena (28 px) e no mesmo lugar.
+  const linhaDeQuemEnvia = enquete.locator("p:has(> time)");
+  expect(Math.abs(meioVertical(await caixaDe(reagir)) - meioVertical(await caixaDe(linhaDeQuemEnvia)))).toBeLessThanOrEqual(3);
   await reagir.click();
   await expect(seletor.getByRole("button", { name: "Gostei" })).toBeFocused();
+  await expect(reagir).toHaveAttribute("aria-expanded", "true");
+  expect((await caixaDe(seletor)).y).toBeGreaterThanOrEqual((await caixaDe(reagir)).y + (await caixaDe(reagir)).height - 0.5);
   await esperarEscrita(page, "reaction", () => seletor.getByRole("button", { name: "Amei" }).click());
   await expect(seletor).toHaveCount(0);
   await expect(pilula("Amei")).toBeFocused();
+  expect(Math.round((await caixaDe(pilula("Amei"))).height)).toBe(28);
+  expect(Math.abs(meioVertical(await caixaDe(pilula("Amei"))) - meioVertical(await caixaDe(linhaDeQuemEnvia)))).toBeLessThanOrEqual(3);
   await expect(status).toHaveText("Você reagiu com Amei.");
   expect((await itemDoSino(page, ENQUETE)).item?.reactions?.value).toBe("love");
 
@@ -204,16 +239,32 @@ test("tocar no texto do cartão clicável leva ao destino (só tocando e botão 
   await expect.poll(async () => (await linhaDoSino(BOTAO_OU_TOQUE))?.clicked_at ?? null).not.toBeNull();
 });
 
-test("Excluir notificação e Desfazer; excluída de novo, não volta ao reabrir nem ao recarregar", async ({ page }) => {
+/** "⋯" -> "Excluir notificação" (o item fica num portal, fora do cartao) e espera o servidor. */
+async function excluirPeloMenu(page: Page, painel: Locator, titulo: string) {
+  await maisOpcoes(painel, titulo).click();
+  const excluir = page.getByRole("menuitem", { exact: true, name: "Excluir notificação" });
+  await expect(excluir).toBeVisible();
+  await esperarEscrita(page, "hide", () => excluir.click());
+  await expect(excluir).toHaveCount(0);
+}
+
+test("Excluir notificação pelo ⋯ e Desfazer; excluída de novo, não volta ao reabrir nem ao recarregar", async ({ page }) => {
   await page.goto("/");
   let painel = await abrirSino(page);
   const status = painel.getByRole("status").first();
-  const lixeira = painel.getByRole("button", { exact: true, name: `Excluir notificação “${PARA_EXCLUIR}”` });
   const desfazer = painel.getByRole("button", { exact: true, name: "Desfazer" });
   const antes = await itemDoSino(page, PARA_EXCLUIR);
   expect(antes.item).not.toBeNull();
 
-  await esperarEscrita(page, "hide", () => lixeira.click());
+  // Esc no menu fecha so o menu: o painel fica e o foco volta para o "⋯".
+  await maisOpcoes(painel, PARA_EXCLUIR).click();
+  await expect(page.getByRole("menuitem", { exact: true, name: "Excluir notificação" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menuitem", { exact: true, name: "Excluir notificação" })).toHaveCount(0);
+  await expect(painel).toBeVisible();
+  await expect(maisOpcoes(painel, PARA_EXCLUIR)).toBeFocused();
+
+  await excluirPeloMenu(page, painel, PARA_EXCLUIR);
   await expect(painel.getByRole("list").getByText("Notificação excluída.")).toBeVisible();
   await expect(desfazer).toBeFocused();
   await expect(status).toHaveText("Notificação excluída.");
@@ -225,15 +276,15 @@ test("Excluir notificação e Desfazer; excluída de novo, não volta ao reabrir
 
   await esperarEscrita(page, "hide", () => desfazer.click());
   await expect(painel.getByRole("article", { name: PARA_EXCLUIR })).toBeVisible();
-  await expect(lixeira).toBeFocused();
-  // O popover devolve o foco ao painel um quadro depois de o Desfazer sumir: a lixeira continua com ele.
+  await expect(maisOpcoes(painel, PARA_EXCLUIR)).toBeFocused();
+  // O popover devolve o foco ao painel um quadro depois de o Desfazer sumir: o "⋯" continua com ele.
   await page.waitForTimeout(200);
-  await expect(lixeira).toBeFocused();
+  await expect(maisOpcoes(painel, PARA_EXCLUIR)).toBeFocused();
   await expect(status).toHaveText("A notificação voltou para o sino.");
   expect((await itemDoSino(page, PARA_EXCLUIR)).item).not.toBeNull();
 
   // Exclui de novo, fecha e reabre: a linha do Desfazer so vale com o painel aberto.
-  await esperarEscrita(page, "hide", () => lixeira.click());
+  await excluirPeloMenu(page, painel, PARA_EXCLUIR);
   await page.keyboard.press("Escape");
   await expect(painel).toHaveCount(0);
   painel = await abrirSino(page);
@@ -250,29 +301,102 @@ test("Excluir notificação e Desfazer; excluída de novo, não volta ao reabrir
   await expect(painel.getByRole("article", { name: ENQUETE })).toBeVisible();
 });
 
+test("sem “Permitir que o aluno exclua do sino”: o cartão não tem o ⋯ e o servidor recusa excluir", async ({ page }) => {
+  await page.goto("/");
+  const painel = await abrirSino(page);
+  const cartao = painel.getByRole("article", { name: SEM_LIXEIRA });
+  await expect(cartao).toBeVisible();
+  await expect(maisOpcoes(painel, SEM_LIXEIRA)).toHaveCount(0);
+  await expect(cartao.getByRole("button", { name: /Mais opções/ })).toHaveCount(0);
+  // As outras continuam com o "⋯".
+  await expect(maisOpcoes(painel, ENQUETE)).toHaveCount(1);
+
+  // Pelo endereco direto tambem nao sai: 403 com a frase, e continua no sino.
+  const { item } = await itemDoSino(page, SEM_LIXEIRA);
+  expect(item).not.toBeNull();
+  const recusa = await page.request.post(`/api/notifications/${item?.id}/hide`, { data: { hidden: true } });
+  expect(recusa.status()).toBe(403);
+  expect(((await recusa.json()) as { error: string }).error).toBe("Esta notificação não pode ser excluída.");
+  expect((await itemDoSino(page, SEM_LIXEIRA)).item).not.toBeNull();
+});
+
 for (const [nome, viewport] of [
   ["1280", { height: 900, width: 1280 }],
   ["375", { height: 812, width: 375 }]
 ] as const) {
-  test(`a ${nome} px: sem rolagem lateral, seis emoji numa linha dentro do cartão, lixeira some com o seletor, enquete com 44 px`, async ({ page }) => {
+  test(`a ${nome} px: sem rolagem lateral, Reagir no fim da linha, ⋯ no canto sem cobrir o título, seis emoji numa linha, enquete com 44 px`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto("/");
     const painel = await abrirSino(page);
     const largura = () => page.evaluate(() => document.documentElement.scrollWidth);
     expect(await largura()).toBeLessThanOrEqual(viewport.width);
 
-    // Uma lixeira por cartao, cada uma com o titulo no nome.
+    // Um "⋯" por cartao que pode sair do sino, cada um com o titulo no nome; o sem lixeira nao tem.
     for (const titulo of TODAS.filter((titulo) => titulo !== PARA_EXCLUIR)) {
-      await expect(painel.getByRole("button", { exact: true, name: `Excluir notificação “${titulo}”` })).toHaveCount(1);
+      await expect(maisOpcoes(painel, titulo)).toHaveCount(1);
     }
+    await expect(maisOpcoes(painel, SEM_LIXEIRA)).toHaveCount(0);
 
     const enquete = painel.getByRole("article", { name: ENQUETE });
-    const lixeira = enquete.getByRole("button", { exact: true, name: `Excluir notificação “${ENQUETE}”` });
-    await expect(lixeira).toBeVisible();
-    await enquete.getByRole("button", { exact: true, name: `Reagir à notificação “${ENQUETE}”` }).click();
+    const mais = maisOpcoes(painel, ENQUETE);
+    await expect(mais).toBeVisible();
+
+    // O "⋯": 32 px (area de toque maior pelo ::after), no canto de cima, e o titulo reserva o espaco dele.
+    const caixaDoMais = await caixaDe(mais);
+    expect(caixaDoMais.width).toBeGreaterThanOrEqual(32);
+    expect(caixaDoMais.height).toBeGreaterThanOrEqual(32);
+    const fimDoTitulo = await enquete.evaluate((artigo) => {
+      const id = artigo.getAttribute("aria-labelledby");
+      const elemento = id ? document.getElementById(id) : null;
+
+      if (!elemento) {
+        return null;
+      }
+
+      const caixa = elemento.getBoundingClientRect();
+      return { right: caixa.right - Number.parseFloat(getComputedStyle(elemento).paddingRight), top: caixa.top };
+    });
+    expect(fimDoTitulo).not.toBeNull();
+    expect(fimDoTitulo?.right ?? Infinity).toBeLessThanOrEqual(caixaDoMais.x + 0.5);
+    expect(caixaDoMais.y).toBeLessThanOrEqual((fimDoTitulo?.top ?? 0) + 0.5);
+    // No canto de cima a direita do cartao (fora da grade: nao cria linha nem ocupa a coluna do circulo).
+    const caixaDaEnquete = await caixaDe(enquete);
+    expect(caixaDaEnquete.x + caixaDaEnquete.width - (caixaDoMais.x + caixaDoMais.width)).toBeLessThanOrEqual(16);
+    expect(caixaDoMais.y - caixaDaEnquete.y).toBeLessThanOrEqual(16);
+
+    // O Reagir no fim da linha: dos botoes (Acessar; a resposta), ou de quem envia quando nao ha botoes.
+    const reagirDe = (titulo: string) => painel.getByRole("button", { exact: true, name: `Reagir à notificação “${titulo}”` });
+    const mesmaLinha = async (a: Locator, b: Locator) =>
+      expect(Math.abs(meioVertical(await caixaDe(a)) - meioVertical(await caixaDe(b)))).toBeLessThanOrEqual(3);
+    const botaoOuToque = painel.getByRole("article", { name: BOTAO_OU_TOQUE });
+    await mesmaLinha(reagirDe(BOTAO_OU_TOQUE), botaoOuToque.getByRole("link", { name: "Ver minha jornada" }));
+    await mesmaLinha(reagirDe(RESPOSTA), painel.getByRole("article", { name: RESPOSTA }).getByRole("button", { name: "Mudar resposta" }));
+    await mesmaLinha(reagirDe(CARTAO), painel.getByRole("article", { name: CARTAO }).locator("p:has(> time)"));
+    await mesmaLinha(reagirDe(ENQUETE), enquete.locator("p:has(> time)"));
+    for (const titulo of [ENQUETE, RESPOSTA, CARTAO, BOTAO_OU_TOQUE]) {
+      const caixa = await caixaDe(reagirDe(titulo));
+      const cartao = await caixaDe(painel.getByRole("article", { name: titulo }));
+      expect(caixa.x + caixa.width, titulo).toBeLessThanOrEqual(cartao.x + cartao.width);
+      expect(caixa.height, titulo).toBeGreaterThanOrEqual(32);
+    }
+
+    // O menu do "⋯" cabe na tela, com o item de 40 px.
+    await mais.click();
+    const excluir = page.getByRole("menuitem", { exact: true, name: "Excluir notificação" });
+    await expect(excluir).toBeVisible();
+    const caixaDoItem = await caixaDe(excluir);
+    expect(caixaDoItem.height).toBeGreaterThanOrEqual(40);
+    expect(caixaDoItem.x).toBeGreaterThanOrEqual(0);
+    expect(caixaDoItem.x + caixaDoItem.width).toBeLessThanOrEqual(viewport.width);
+    await page.keyboard.press("Escape");
+    await expect(excluir).toHaveCount(0);
+    await expect(painel).toBeVisible();
+
+    await reagirDe(ENQUETE).click();
     const seletor = enquete.getByRole("group", { name: "Escolha uma reação" });
     await expect(seletor).toBeVisible();
-    await expect(lixeira).toHaveCount(0);
+    // O "⋯" continua no canto com o seletor aberto (nao divide mais a linha com ele).
+    await expect(mais).toBeVisible();
 
     const botoes = await seletor.getByRole("button").evaluateAll((elementos) =>
       elementos.map((elemento) => {
@@ -295,7 +419,7 @@ for (const [nome, viewport] of [
     await page.keyboard.press("Escape");
     await expect(seletor).toHaveCount(0);
     await expect(painel).toBeVisible();
-    await expect(lixeira).toBeVisible();
+    await expect(mais).toBeVisible();
 
     const alturas = await enquete
       .getByRole("group", { name: PERGUNTA })

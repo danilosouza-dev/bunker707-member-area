@@ -16,6 +16,7 @@ import "server-only";
 // tambem nas linhas antigas); "abriu" (opened_at) so com interacao de verdade, nunca com "Marcar todas".
 // Banco sem a migracao = isMissingCommunicationSchema: sino vazio, escritas 404, nunca erro 500.
 
+import { allowHideOf } from "@/components/member/notifications/notifications-model";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { isSafeHeroCtaHref } from "@/server/member-area/home-hero-links";
 import { sanitizeProfileAvatarUrl } from "@/server/member-area/student-pages-model";
@@ -54,6 +55,8 @@ export const NOTIFICATION_NOT_FOUND = "Notificacao nao encontrada.";
 export const REACTIONS_NOT_ALLOWED = "Esta notificação não aceita reações.";
 export const POLL_CLOSED = "A enquete foi encerrada.";
 export const INVALID_VOTE = "Voto invalido.";
+/** Excluir do sino num aviso em que a equipe desligou "Permitir que o aluno exclua" (403; o Desfazer vale sempre). */
+export const HIDE_NOT_ALLOWED = "Esta notificação não pode ser excluída.";
 
 /** Teto dos contadores de escrita do aluno numa linha (o check do banco para em 1000). */
 const WRITES_CAP = 1_000;
@@ -61,6 +64,8 @@ const HEARD_MASK = /^[01]{48}$/;
 
 type PageCampaign = {
   accept_label: string | null;
+  /** O aluno pode excluir do sino (202610220002); ausente ou nulo = pode. */
+  allow_hide?: boolean | null;
   allow_reactions: boolean | null;
   audio_duration_seconds: number | null;
   audio_mime: string | null;
@@ -125,6 +130,12 @@ type PageRow = {
 };
 
 type InboxPage = { items: PageRow[] | null; unread: number | null; unseen: number | null };
+
+/**
+ * Item do sino com a lixeira por notificacao (ajustes da v3a): `allowHide` false = o cartao nao mostra o
+ * "Excluir notificação". Comentario sempre pode.
+ */
+type BellItem = NotificationItem & { allowHide: boolean };
 
 /** Linha de communication_visible_notifications (4.1): o que aparece no sino, com o que as rotas conferem. */
 type VisibleRow = {
@@ -215,7 +226,7 @@ function noticeSender(row: Pick<PageRow, "sender_on_team" | "sender_profile">): 
 }
 
 /** Item do sino a partir da linha da pagina (null = aviso sem a campanha, que a regra do banco ja tira). */
-function toItem(row: PageRow, now: number): NotificationItem | null {
+function toItem(row: PageRow, now: number): BellItem | null {
   const base = {
     audioProgress: null,
     createdAt: row.created_at,
@@ -245,6 +256,7 @@ function toItem(row: PageRow, now: number): NotificationItem | null {
     return {
       ...base,
       actor: noticeSender(row),
+      allowHide: allowHideOf(campaign.allow_hide),
       audio,
       audioProgress: audio ? audioProgressOf(row) : null,
       body: campaign.body ?? "",
@@ -276,6 +288,7 @@ function toItem(row: PageRow, now: number): NotificationItem | null {
   return {
     ...base,
     actor: name ? { avatarUrl, name } : null,
+    allowHide: true,
     audio: null,
     body: row.body ?? "",
     context: payloadText(row.payload, "lessonTitle"),
@@ -337,7 +350,7 @@ export async function listNotifications(input: {
     const page = rows.slice(0, limit);
     const last = page[page.length - 1];
     const nextCursor = rows.length > limit && last ? encodeCursor({ createdAt: last.created_at, id: last.id }) : null;
-    const items = page.map((row) => toItem(row, now)).filter((item): item is NotificationItem => item !== null);
+    const items = page.map((row) => toItem(row, now)).filter((item): item is BellItem => item !== null);
 
     return { asOf, items, nextCursor, unread: countOf(result?.unread), unseen: countOf(result?.unseen) };
   } catch (error) {
@@ -747,6 +760,10 @@ export async function setNotificationHidden(userId: string, id: string, hidden: 
       }
     }
 
+    if (row && row.kind === "notice" && row.campaign_id && !(await campaignAllowsHide(db, row.campaign_id))) {
+      throw new CommunicationError(HIDE_NOT_ALLOWED, 403);
+    }
+
     if (row) {
       const { data, error } = await db
         .from("notifications")
@@ -820,6 +837,23 @@ async function readOwnRow(db: CommunicationsDb, userId: string, id: string): Pro
 
 async function isOwnHidden(db: CommunicationsDb, userId: string, id: string) {
   return Boolean((await readOwnRow(db, userId, id))?.hidden_at);
+}
+
+/** A equipe deixou o aluno excluir este aviso do sino (campaigns.allow_hide; ausente = pode). */
+async function campaignAllowsHide(db: CommunicationsDb, campaignId: string) {
+  try {
+    const { data, error } = await db.from("campaigns").select("allow_hide").eq("id", campaignId).maybeSingle();
+    assertNoDbError(error, "Sino: aviso pode ser excluido");
+
+    return allowHideOf((data as { allow_hide?: unknown } | null)?.allow_hide);
+  } catch (error) {
+    // Banco sem a 202610220002: a lixeira continua como antes.
+    if (isMissingCommunicationSchema(error)) {
+      return true;
+    }
+
+    throw error;
+  }
 }
 
 type AudioRecord = { completed: boolean; completedNow: boolean; heard: string; percent: number; startedNow: boolean };

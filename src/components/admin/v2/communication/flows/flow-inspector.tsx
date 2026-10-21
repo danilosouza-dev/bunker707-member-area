@@ -35,6 +35,7 @@ import {
   GOAL_HINT,
   GOAL_INTRO,
   liveContentNote,
+  livePollLockedFields,
   messageStepLines,
   notReceivedLines,
   ONCE_PER_FLOW_TEXT,
@@ -344,6 +345,8 @@ export function MessageInspector({ content, context, draft, errors, imagePreview
         idPrefix={idPrefix}
         kind="inbox"
         layout="plain"
+        // Ajustes da v3a: no ar, a enquete de um passo que ja chegou a alguem nao muda (o servidor recusa igual).
+        lockedFields={livePollLockedFields({ live: context.live, received })}
         onAudioBusyChange={context.onAudioBusyChange}
         onBlurField={(key) => context.onTouch(`messages.${node.id}.${key}`)}
         onChange={(patch) => onChange({ content: { ...content, ...patch } as FlowNoticeContent })}

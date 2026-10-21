@@ -27,7 +27,13 @@ import {
   type FlowOrigin,
   type FlowStatus
 } from "../../../../../server/communications/flow-model";
-import { flowTreeOfDraft, type FlowDraft, type FlowNodeDraft, type FlowNoticeContent } from "../../../../../server/communications/flow-schemas";
+import {
+  FLOW_POLL_LOCKED_MESSAGE,
+  flowTreeOfDraft,
+  type FlowDraft,
+  type FlowNodeDraft,
+  type FlowNoticeContent
+} from "../../../../../server/communications/flow-schemas";
 import type { PollDefinition, PollOption } from "../../../../../server/communications/interactions-model";
 import { describeValidity, VALIDITY_LIMITS, type FlowValidity } from "../../../../../server/communications/message-meta";
 import { pageKeyOfHref } from "../../../../../server/member-area/page-visit-model";
@@ -539,6 +545,18 @@ export function liveContentNote(received: number) {
 }
 
 /**
+ * Ajustes da v3a (revisao): num fluxo no ar ou pausado, a enquete de um passo que ja chegou a algum aluno nao
+ * muda (o id da opcao renomeada fica e os votos antigos contariam para o texto novo). O servidor recusa (422,
+ * flow-store.ts) com a mesma frase; o construtor e a folha da seguinte travam o campo com este motivo.
+ */
+export const LIVE_POLL_LOCKED_NOTE = FLOW_POLL_LOCKED_MESSAGE;
+
+/** `lockedFields` do conteudo de um passo: a enquete trava no fluxo no ar (ou pausado) quando o passo ja chegou a alguem. */
+export function livePollLockedFields(input: { live: boolean; received: number | null | undefined }): { poll: string } | undefined {
+  return input.live && (input.received ?? 0) > 0 ? { poll: LIVE_POLL_LOCKED_NOTE } : undefined;
+}
+
+/**
  * "Quem entra" depois de ativar: o jeito de entrar nunca muda; em "Quem está no segmento agora" as
  * regras tambem nao (ninguem entra depois). No fluxo de um aviso, quem entra e quem recebeu o aviso.
  */
@@ -756,9 +774,21 @@ export function stepCounts(nodes: readonly Pick<DraftNode, "kind">[]) {
   };
 }
 
-/** Conteudo vazio de uma notificacao nova (sem icone, a escola envia, 90 dias; v3a: com reacoes). */
+/** Conteudo vazio de uma notificacao nova (sem icone, a escola envia, 90 dias; v3a: com reacoes e a lixeira do aluno). */
 export function newMessageContent(): FlowNoticeContent {
-  return { audio: null, body: "", cta: null, icon: null, image: null, reactions: true, response: null, sender: null, title: "", validity: { mode: "default" } };
+  return {
+    allowHide: true,
+    audio: null,
+    body: "",
+    cta: null,
+    icon: null,
+    image: null,
+    reactions: true,
+    response: null,
+    sender: null,
+    title: "",
+    validity: { mode: "default" }
+  };
 }
 
 export type NewStepKind = "condition" | "message";

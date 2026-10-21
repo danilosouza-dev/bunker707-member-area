@@ -217,7 +217,7 @@ Decisao tomada (tabela V1-V20 em `docs/23` §8; resumo em `docs/22` §5, C14-C20
 - V1 o circulo e quem envia: o Icone da escola da Marca (padrao `/brand/icon-bunker.svg`) ou a foto (ou as iniciais) de alguem da equipe; sem megafone e sem selo no aviso;
 - V2 **enviada em seu nome**: so pessoas da equipe (`admin_roles`) podem ser escolhidas, sem nome digitado nem foto avulsa; quem envia e resolvido na hora de ler o sino (quem sai da equipe vira a escola, tambem nas notificacoes antigas); a pessoa escolhida recebe o e-mail `sent_as` (`Uma notificação saiu em seu nome` / `Um fluxo de notificações usa o seu nome`), uma vez por aviso ou por fluxo, nunca para quem publicou; auditoria com `sender_user_id` e a linha `Criada por … · em nome de …` no relatorio. Sem permissao nova: publicar ja pede `messaging.publish` ou aprovacao. Sem linha no sino da equipe (a equipe entra direto no `/admin`, que nao tem sino);
 - V3 icone opcional antes do titulo (16 ids, 5 cores da paleta), decorativo, no sino, no pop-up e nos fluxos; sem rotulo "Novo"/"Urgente" ate as referencias do produtor;
-- V4 **Fica no sino por**: 1, 3, 7, 30 ou 90 dias (padrao e maximo), de 1 hora a 90 dias ou ate uma data; fim por linha (`notifications.expires_at`); vencida some da lista, dos numeros e do "Marcar todas"; comentarios continuam com 90 dias;
+- V4 **Fica no sino por**: 1, 3, 7, 30 ou 90 dias (padrao e maximo), de 5 minutos a 90 dias (1 hora ate os ajustes da v3a, `docs/24` §10) ou ate uma data; fim por linha (`notifications.expires_at`); vencida some da lista, dos numeros e do "Marcar todas"; comentarios continuam com 90 dias;
 - V5 `Termina em 3 h` com 24 h ou menos e tempo total ate 30 dias; rodape `As notificações ficam aqui por até 90 dias.`;
 - V6 audio ouvido = 44 de 48 trechos tocados de verdade, somados no servidor entre visitas e aparelhos; quatro estados, nunca so pela cor; audio do pop-up sem estado;
 - V7 `opened_at` (abriu de verdade) separado de `read_at`: "Marcar todas" e abrir o sino nao abrem; numa notificacao sem nada para abrir so se oferece "viu no sino";
@@ -266,6 +266,19 @@ Fica em aberto (v3b "Pop-ups sob medida", documento proprio):
 - paginas e exclusoes do pop-up, gatilhos (depois de uma aula, primeiro login, horario para todos, atraso), frequencia (a cada N minutos/horas/dias, no maximo N vezes, por sessao) e limites globais editaveis. **Vai mudar** C6 / `docs/17` §1.8.1 / D12 ("so na home, 1 por sessao e 1 a cada 24 h");
 - o construtor avancado do pop-up por blocos estruturados (nunca HTML cru: XSS guardado e a CSP com nonce), enquete no pop-up e "Como fechar" (so no X ou no X e fora);
 - e, da v3a: numeros de reacao para o aluno, "editada", resposta livre, mais de uma enquete, Desfazer depois de fechar o painel e "Limpar tudo" ficam fora (`docs/24` §9).
+
+### Comunicacao v3a, ajustes depois do primeiro teste (22/10/2026)
+
+O produtor testou a v3a na `dev`: minutos no tempo do sino; escolher se o aluno pode excluir; o lugar das reacoes e da lixeira; a demora do dialogo ao excluir. Detalhes em `docs/24` §10; migracao `202610220002`. **Muda decisoes**: T8 (lixeira em todo cartao) vira "lixeira quando a equipe deixa"; V4/C16 (tempo no sino a partir de 1 hora) vira a partir de 5 minutos.
+
+Decisao tomada:
+
+- **"Permitir que o aluno exclua do sino"** por notificacao (`campaigns.allow_hide`, ligada por padrao e em tudo o que ja existia), no card Interacao; muda depois do envio; desligada, o cartao fica sem o "⋯" e o servidor recusa excluir (403); o Desfazer vale sempre; comentarios sempre podem ser excluidos;
+- **tempo no sino em minutos**: "Por um tempo" de 5 minutos a 90 dias (minutos, horas ou dias); "Até uma data" continua pedindo pelo menos 1 hora depois do envio;
+- **cartao**: sai a linha de acoes; o Reagir fica no fim da linha do botao, da resposta ou de quem envia (a reacao vira uma pilula pequena no mesmo lugar) e excluir vai para o "⋯" do canto de cima (no computador aparece com o mouse; no toque, sempre);
+- **enquete de um passo de fluxo que ja chegou a alguem nao muda** (num fluxo no ar ou pausado; a tela trava e o servidor recusa com a mesma frase); a contagem que o aluno ve soma todas as versoes do passo;
+- **excluir mais rapido**: os passos independentes em paralelo e sem `revalidatePath` em Excluir e Retirar do sino; o dialogo fecha quando a acao volta e a lista atualiza depois;
+- **sino por aluno no navegador**: o numero e a pagina guardada tem dono (o id do aluno); o filtro "Não lidas" descarta a pagina guardada do "Todas"; reagir e votar so marcam aberto depois que o servidor aceita.
 
 ## Design
 

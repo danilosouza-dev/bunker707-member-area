@@ -473,8 +473,20 @@ export type FollowUpFormItem = {
 
 /** Conteudo de uma seguinte nova: so o titulo por escrever, quem envia a escola, 90 dias no sino. */
 export function emptyFollowUpContent(): FlowNoticeContent {
-  // v3a: a seguinte nova ja permite reacoes (como a notificacao nova).
-  return { audio: null, body: "", cta: null, icon: null, image: null, reactions: true, response: null, sender: null, title: "", validity: { mode: "default" } };
+  // v3a: a seguinte nova ja permite reacoes (como a notificacao nova); nos ajustes, a lixeira do aluno tambem.
+  return {
+    allowHide: true,
+    audio: null,
+    body: "",
+    cta: null,
+    icon: null,
+    image: null,
+    reactions: true,
+    response: null,
+    sender: null,
+    title: "",
+    validity: { mode: "default" }
+  };
 }
 
 /** Seguinte nova: 1 dia depois do envio, para a primeira escolha rapida da notificacao de cima. */
@@ -1070,7 +1082,10 @@ export type SavedFollowUp = {
   who: AudienceDefinition;
 };
 
-/** Gravado -> cartao: cada "Para quem" reabre na escolha rapida igual, ou em "escolher por regras". */
+/**
+ * Gravado -> cartao: cada "Para quem" reabre na escolha rapida igual, ou em "escolher por regras". Ajustes da
+ * v3a: conteudo sem `allowHide` (gravado antes) reabre com a lixeira ligada, como o aluno ja via.
+ */
 export function followUpFormItemsOf(saved: readonly SavedFollowUp[], main: FollowUpParent): FollowUpFormItem[] {
   const toItem = (followUp: SavedFollowUp, parent: FollowUpParent): FollowUpFormItem => {
     const { choice, productId } = quickChoiceOfRules(followUp.who, parent);
@@ -1079,7 +1094,7 @@ export function followUpFormItemsOf(saved: readonly SavedFollowUp[], main: Follo
       campaignId: followUp.campaignId,
       children: followUp.children.map((child) => toItem(child, followUpParentOf(followUp.id, "previous", followUp.content))),
       choice,
-      content: followUp.content,
+      content: { ...followUp.content, allowHide: followUp.content.allowHide !== false },
       id: followUp.id,
       productId,
       rules: followUp.who.kind === "rules" ? followUp.who : { kind: "rules", root: { items: [], match: "all" } },

@@ -376,6 +376,8 @@ export function flowContentOfRow(row: CampaignRow, expireWithAnchor: boolean): F
   const draft = rowToDraft(row);
 
   return {
+    // Ajustes da v3a: a lixeira do passo (sem ela, salvar de novo voltaria a permitir excluir).
+    allowHide: draft.allowHide ?? true,
     audio: draft.audio,
     body: draft.body,
     cta: draft.cta,

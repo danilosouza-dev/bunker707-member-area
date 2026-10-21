@@ -36,6 +36,8 @@ type AppShellProps = {
   student: {
     avatarUrl?: string | null;
     fullName: string;
+    /** Id do aluno da sessao: dono da memoria do sino (o login troca de pagina sem recarregar). */
+    id?: string | null;
     name: string;
   };
 };
@@ -408,6 +410,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
               schoolIconUrl={branding?.schoolIcon ?? SCHOOL_DEFAULT_ICON}
               schoolLogoUrl={logoImage}
               schoolName="Bunker707"
+              studentId={student.id}
             />
             <MemberAccountMenu
               accessPreviewMode={accessPreviewMode}

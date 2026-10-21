@@ -318,7 +318,13 @@ v2 (colunas novas com padrao; nenhuma linha fica excluida antes das rotas novas)
    `insert into supabase_migrations.schema_migrations (version, name) values ('202610220001', 'communication_v3a') on conflict do nothing;`
 4. a idempotencia foi conferida no banco local (segunda aplicacao sem erro, so "already exists, skipping"):
    reaplicar uma secao que travou no meio e seguro;
-5. fazer o merge e seguir o roteiro do `docs/24` §11.
+5. ajustes depois do primeiro teste (`docs/24` §10): `supabase/migrations/202610220002_communication_v3a_ajustes.sql`,
+   tambem **antes do merge** (o app novo le `allow_hide` na pagina do sino e grava menos de 60 minutos no tempo do
+   sino). Secoes 1 a 4 pelo MCP (`apply_migration`, nome `communication_v3a_ajustes`), na ordem do arquivo; a secao 5
+   (`alter table public.campaigns drop constraint if exists campaigns_validity_v2;`, a unica que tira alguma coisa)
+   sozinha, pelo MCP ou pelo SQL Editor. Conferir com `list_migrations` (`202610220002`) e as consultas do
+   `docs/24` §12, passo 8;
+6. fazer o merge e seguir o roteiro do `docs/24` §12.
 
 **Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
 trocar o app. Depois, a rodada do `carga` com o sino novo (docs/20 §12.1; meta de tempo de servidor ate 20 ms).

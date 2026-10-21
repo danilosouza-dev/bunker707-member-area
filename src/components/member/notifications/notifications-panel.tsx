@@ -48,6 +48,7 @@ import {
   needsAudioStart,
   NOTIFICATION_GONE_MESSAGE,
   NOTIFICATIONS_FOOTER,
+  openAfterWrite,
   openingPlan,
   REACTION_ERROR_MESSAGE,
   reactionStatus,
@@ -58,6 +59,7 @@ import {
   TOO_MANY_WRITES_MESSAGE,
   UNHIDE_ERROR_MESSAGE,
   VOTE_ERROR_MESSAGE,
+  withHideRefused,
   type AudioProgressEvent,
   type NotificationLink,
   type OpeningPlan
@@ -86,6 +88,13 @@ import {
 // Reagir e votar sao otimistas, com no maximo uma escrita em andamento por cartao e tipo (o ultimo
 // estado vai quando a anterior volta); reagir e votar abrem a notificacao. Cada mudanca local volta
 // para a memoria (sem as excluidas), para reabrir mostrar o mesmo.
+//
+// Ajustes da v3a: a memoria e do aluno da sessao (`studentId`, vindo do topo): outra conta nao ve a pagina
+// nem o numero da anterior. Mudanca feita com o filtro "Não lidas" (excluir, abrir, reagir, votar,
+// responder, "Marcar todas") nao chega a pagina guardada do "Todas": ela deixa de valer e a proxima
+// abertura pede de novo antes de mostrar (reabrir nunca mostra uma notificacao excluida nem a leitura
+// velha). Reagir e votar so marcam como aberta (e tiram a bolinha) depois que o servidor aceitou: numa
+// falha o cartao continua como estava. O aviso em que a equipe nao deixa excluir nao tem o "⋯".
 
 type ListState = {
   /** Hora do servidor na primeira pagina (limite do "visto" e do "Marcar todas"); "" antes de carregar. */
@@ -134,11 +143,13 @@ type CardInteractions = Partial<Record<"hide" | "reaction" | "vote", CardInterac
 type HiddenRow = { error: string | null; restoring: boolean };
 
 // As frases do servidor para 4xx de validacao sao tecnicas; so as de conflito (409, com acento), a de
-// sessao encerrada, a da notificacao que saiu do sino (404) e a de muitas tentativas (429) viram texto
-// para o aluno.
+// sessao encerrada, a do aviso que nao pode ser excluido (403), a da notificacao que saiu do sino (404)
+// e a de muitas tentativas (429) viram texto para o aluno.
 function errorMessage(error: unknown, fallback: string) {
   if (error instanceof NotificationsRequestError) {
     if (error.status === 401) return SESSION_ENDED;
+    // So o excluir da 403 aqui: "Esta notificação não pode ser excluída." (a equipe desligou a lixeira).
+    if (error.status === 403) return error.message;
     if (error.status === 404) return NOTIFICATION_GONE_MESSAGE;
     if (error.status === 409) return error.message;
     if (error.status === 429) return TOO_MANY_WRITES_MESSAGE;
@@ -155,9 +166,9 @@ function loginHref() {
 /** O que esta abertura faz com a memoria: decidido uma vez, ao montar (docs/24 §7.3). */
 type Opening = { kept: KeptInbox | null; plan: OpeningPlan };
 
-function planOpening(): Opening {
+function planOpening(studentId: string | null | undefined): Opening {
   const now = Date.now();
-  const taken = takeKeptInbox(now);
+  const taken = takeKeptInbox(now, studentId);
   const plan = openingPlan(taken ? taken.kept.fetchedAt : null, now);
 
   return { kept: plan.render === "kept" && taken ? taken.kept : null, plan };
@@ -236,7 +247,8 @@ export function NotificationsPanel({
   onNavigate,
   schoolIconUrl,
   schoolLogoUrl,
-  schoolName
+  schoolName,
+  studentId
 }: {
   accessPreviewMode?: AccessPreviewMode;
   /** Fecha o sino (antes de navegar). */
@@ -246,9 +258,11 @@ export function NotificationsPanel({
   schoolIconUrl?: string | null;
   schoolLogoUrl?: string | null;
   schoolName: string;
+  /** O aluno da sessao (dono da memoria do sino); sem ele, a memoria fica sem dono, como antes. */
+  studentId?: string | null;
 }) {
   const headingId = useId();
-  const [opening] = useState(planOpening);
+  const [opening] = useState(() => planOpening(studentId));
   const [filter, setFilter] = useState<NotificationsFilter>("all");
   const [reloadToken, setReloadToken] = useState(0);
   const [list, setList] = useState<ListState>(() =>
@@ -284,6 +298,27 @@ export function NotificationsPanel({
   const endRef = useRef<HTMLParagraphElement>(null);
   const focusEndRef = useRef(false);
 
+  /** O numero do sino, so se a memoria ainda for deste aluno (a resposta que chega depois da troca de conta nao vale). */
+  function setUnseen(unseen: number) {
+    setSummaryUnseen(unseen, studentId);
+  }
+
+  /**
+   * Mudanca local num cartao: a pagina atualizada por tras nao a desfaz e, com o filtro "Não lidas", a
+   * pagina guardada do "Todas" deixa de valer (a proxima abertura pede de novo antes de mostrar).
+   */
+  function touch(id: string) {
+    touchedRef.current.add(id);
+    forgetKeptPageUnderUnreadFilter();
+  }
+
+  /** O filtro "Não lidas" nao guarda nada: o que mudou nele nao chega a pagina guardada do "Todas". */
+  function forgetKeptPageUnderUnreadFilter() {
+    if (filter !== "all") {
+      forgetInbox(studentId);
+    }
+  }
+
   /** "Abriu o sino": uma vez por abertura, com a pagina que fica na tela (a hora dela e os avisos recentes). */
   function markSeen(page: { asOf: string; items: NotificationItem[]; unseen: number }) {
     if (seenSentRef.current || page.unseen <= 0) {
@@ -291,11 +326,11 @@ export function NotificationsPanel({
     }
 
     seenSentRef.current = true;
-    setSummaryUnseen(0);
+    setUnseen(0);
     const shown = recentFlowIds(page.items, page.asOf);
     postRead({ asOf: page.asOf, seen: true, ...(shown.length > 0 ? { shown } : {}) })
       .then((counts) => {
-        setSummaryUnseen(counts.unseen);
+        setUnseen(counts.unseen);
         setUnread(counts.unread);
         setList((current) => ({ ...current, unseen: counts.unseen }));
       })
@@ -321,7 +356,7 @@ export function NotificationsPanel({
 
   /** Primeira pagina do filtro "Todas" (entra no pedido da busca por intencao, se ja saiu). */
   function loadFirstPage(signal: AbortSignal, kept: KeptInbox | null) {
-    loadInboxFirstPage(signal)
+    loadInboxFirstPage(signal, studentId)
       .then((page) => {
         showFreshPage(page);
         markSeen(page);
@@ -341,7 +376,7 @@ export function NotificationsPanel({
         }
 
         if (status === 401) {
-          forgetInbox();
+          forgetInbox(studentId);
         }
 
         setList((current) => ({ ...LOADING_LIST, asOf: current.asOf, errorStatus: status, status: "error" }));
@@ -357,7 +392,7 @@ export function NotificationsPanel({
 
       // A pagina guardada tinha novidades: o numero do sino some na hora.
       if (kept.unseen > 0) {
-        setSummaryUnseen(0);
+        setUnseen(0);
       }
 
       if (opening.plan.fetch) {
@@ -378,7 +413,7 @@ export function NotificationsPanel({
       .then((page) => {
         setList({ ...LOADING_LIST, asOf: page.asOf, items: page.items, nextCursor: page.nextCursor, now: Date.now(), status: "ready", unseen: page.unseen });
         setUnread(page.unread);
-        setSummaryUnseen(page.unseen);
+        setUnseen(page.unseen);
         markSeen(page);
       })
       .catch((error: unknown) => {
@@ -401,7 +436,8 @@ export function NotificationsPanel({
   );
 
   // Cada mudanca local volta para a memoria (so o filtro "Todas"; as excluidas saem): reabrir o sino
-  // mostra o mesmo. O `fetchedAt` e o da pagina, nao o desta mudanca.
+  // mostra o mesmo. O `fetchedAt` e o da pagina, nao o desta mudanca. No "Não lidas", touch() e o
+  // "Marcar todas" esquecem a pagina guardada (a proxima abertura pede de novo).
   useEffect(() => {
     if (filter !== "all" || list.status !== "ready" || list.fetchedAt === 0) {
       return;
@@ -414,9 +450,10 @@ export function NotificationsPanel({
       items: list.items,
       nextCursor: list.nextCursor,
       unread,
-      unseen: list.unseen
+      unseen: list.unseen,
+      userId: studentId
     });
-  }, [filter, hiddenRows, list, unread]);
+  }, [filter, hiddenRows, list, studentId, unread]);
 
   // "Marcar todas como lidas" some quando nao sobra nada para ler: o foco que estava nele vai para o
   // titulo (senao cairia no corpo da pagina ou no painel inteiro). Os tres efeitos de foco abaixo rodam no
@@ -436,7 +473,8 @@ export function NotificationsPanel({
     }
   }, [list.nextCursor, list.items]);
 
-  // Excluiu: foco no Desfazer. Desfez (ou a exclusao falhou): foco na lixeira do cartao que voltou.
+  // Excluiu: foco no Desfazer. Desfez (ou a exclusao falhou): foco no "⋯" do cartao que voltou; sem ele
+  // (a equipe desligou a lixeira: 403), no link ou no primeiro botao do cartao, ou no titulo do painel.
   useLayoutEffect(() => {
     const target = focusAfterRef.current;
 
@@ -447,7 +485,10 @@ export function NotificationsPanel({
     const row = Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-notification-id]") ?? []).find(
       (element) => element.dataset.notificationId === target.id
     );
-    const control = row?.querySelector<HTMLElement>(target.target === "undo" ? "[data-undo-hide]" : "[data-card-hide]");
+    const control =
+      target.target === "undo"
+        ? row?.querySelector<HTMLElement>("[data-undo-hide]")
+        : (row?.querySelector<HTMLElement>("[data-card-more]") ?? row?.querySelector<HTMLElement>("[data-card-link], button") ?? (row ? titleRef.current : null));
 
     if (control) {
       focusAfterRef.current = null;
@@ -545,7 +586,7 @@ export function NotificationsPanel({
    * reacao e o voto ja marcam la). Cartao lido pelo "Marcar todas" ainda abre (uma vez): a bolinha nao muda.
    */
   function markRead(item: NotificationItem, send: boolean) {
-    touchedRef.current.add(item.id);
+    touch(item.id);
 
     if (item.openedAt || readRequestedRef.current.has(item.id)) {
       return;
@@ -573,13 +614,14 @@ export function NotificationsPanel({
     setMarkingAll(true);
     setActionError(null);
     setStatusMessage("");
+    forgetKeptPageUnderUnreadFilter();
 
     try {
       const shown = list.asOf ? recentFlowIds(list.items, list.asOf) : [];
       const counts = await postRead({ all: true, asOf: list.asOf || undefined, ...(shown.length > 0 ? { shown } : {}) });
       setList((current) => ({ ...current, items: markNotificationsRead(current.items, "all", new Date().toISOString()) }));
       setUnread(counts.unread);
-      setSummaryUnseen(counts.unseen);
+      setUnseen(counts.unseen);
       setStatusMessage("Todas as notificações foram marcadas como lidas.");
       setMarkedAll((count) => count + 1);
     } catch (error) {
@@ -627,7 +669,7 @@ export function NotificationsPanel({
           }
 
           if (typeof answer.unseen === "number") {
-            setSummaryUnseen(answer.unseen);
+            setUnseen(answer.unseen);
           }
         })
         .catch(() => undefined);
@@ -651,7 +693,7 @@ export function NotificationsPanel({
       return;
     }
 
-    touchedRef.current.add(item.id);
+    touch(item.id);
     setResponding({ id: item.id, value });
     setResponseErrors((current) => {
       const next = { ...current };
@@ -681,7 +723,7 @@ export function NotificationsPanel({
       return;
     }
 
-    markRead(item, false);
+    touch(item.id);
     updateItem(item.id, (entry) => (entry.reactions ? { ...entry, reactions: { value } } : entry));
     setStatusMessage(reactionStatus(value));
     setInteraction(item.id, "reaction", { busy: true, error: null });
@@ -689,7 +731,15 @@ export function NotificationsPanel({
     writes.push<ReactionId | null>(`reaction:${item.id}`, value, {
       confirmed: current.value,
       equal: (left, right) => left === right,
-      send: (next) => postReaction(item.id, next).then((answer) => answer.reaction),
+      // Aberta (e sem a bolinha) so quando o servidor gravou a reacao; tirar a reacao nao abre (como la).
+      send: openAfterWrite(
+        (next: ReactionId | null) => postReaction(item.id, next).then((answer) => answer.reaction),
+        (next) => {
+          if (next) {
+            markRead(item, false);
+          }
+        }
+      ),
       settle: (outcome) => {
         updateItem(item.id, (entry) => (entry.reactions ? { ...entry, reactions: { value: outcome.value } } : entry));
         setInteraction(
@@ -709,7 +759,7 @@ export function NotificationsPanel({
       return;
     }
 
-    markRead(item, false);
+    touch(item.id);
     const next = applyPollChoice(current, choice);
     updateItem(item.id, (entry) => (entry.poll ? { ...entry, poll: next } : entry));
     setInteraction(item.id, "vote", { busy: true, error: null });
@@ -717,7 +767,11 @@ export function NotificationsPanel({
     writes.push<NotificationPoll>(`vote:${item.id}`, next, {
       confirmed: current,
       equal: (left, right) => samePollChoice(left.choice, right.choice),
-      send: (poll) => postPollVote(item.id, poll.choice).then((answer) => answer.poll),
+      // Aberta (e sem a bolinha) so quando o servidor gravou o voto: numa falha o cartao fica como estava.
+      send: openAfterWrite(
+        (poll: NotificationPoll) => postPollVote(item.id, poll.choice).then((answer) => answer.poll),
+        () => markRead(item, false)
+      ),
       settle: (outcome) => {
         const closed = outcome.failed && outcome.error instanceof NotificationsRequestError && outcome.error.status === 409;
         const poll = closed ? { ...outcome.value, closed: true } : outcome.value;
@@ -732,7 +786,7 @@ export function NotificationsPanel({
     return postHide(item.id, hidden).then((counts) => {
       unreadTakenRef.current.delete(item.id);
       setUnread(counts.unread);
-      setSummaryUnseen(counts.unseen);
+      setUnseen(counts.unseen);
       return hidden;
     });
   }
@@ -763,6 +817,11 @@ export function NotificationsPanel({
     });
 
     if (outcome.failed) {
+      // A equipe desligou a lixeira depois que a lista chegou (403): o "⋯" some do cartao.
+      if (outcome.error instanceof NotificationsRequestError && outcome.error.status === 403) {
+        updateItem(item.id, withHideRefused);
+      }
+
       setInteraction(item.id, "hide", { busy: false, error: errorMessage(outcome.error, HIDE_ERROR_MESSAGE) });
     } else {
       setStatusMessage(RESTORED_STATUS);
@@ -775,7 +834,7 @@ export function NotificationsPanel({
       return;
     }
 
-    touchedRef.current.add(item.id);
+    touch(item.id);
     excludedRef.current.add(item.id);
     focusAfterRef.current = { id: item.id, target: "undo" };
     setHiddenRows((current) => ({ ...current, [item.id]: { error: null, restoring: false } }));
@@ -797,6 +856,7 @@ export function NotificationsPanel({
 
   /** Desfazer: a linha fica (com "Desfazendo...") ate o servidor confirmar; o erro aparece nela. */
   function undoHide(item: NotificationItem) {
+    forgetKeptPageUnderUnreadFilter();
     setHiddenRows((current) => (current[item.id] ? { ...current, [item.id]: { error: null, restoring: true } } : current));
 
     writes.push<boolean>(`hide:${item.id}`, false, {

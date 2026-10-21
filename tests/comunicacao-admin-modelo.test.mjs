@@ -672,7 +672,7 @@ test("fica no sino por: pilulas 1, 3, 7, 30 e 90 dias, 'Outro' por um tempo ou a
   assert.equal(model.validityDurationMinutes(5, "hours"), 300);
   assert.equal(model.validityDurationMinutes(2, "days"), 2_880);
   assert.ok(Number.isNaN(model.validityDurationMinutes(Number.NaN, "days")));
-  assert.equal(schemas.validitySchema.safeParse({ minutes: model.validityDurationMinutes(Number.NaN, "days"), mode: "duration" }).error.issues[0].message, "Use de 1 hora a 90 dias.");
+  assert.equal(schemas.validitySchema.safeParse({ minutes: model.validityDurationMinutes(Number.NaN, "days"), mode: "duration" }).error.issues[0].message, "Use de 5 minutos a 90 dias.");
 
   assert.equal(model.showsUrgencyHint({ minutes: 43_200, mode: "duration" }, NOW), true, "30 dias ou menos");
   assert.equal(model.showsUrgencyHint({ minutes: 43_260, mode: "duration" }, NOW), false);

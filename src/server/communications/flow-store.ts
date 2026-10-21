@@ -30,7 +30,7 @@ import {
   type FlowTaskInput,
   type FlowTree
 } from "./flow-model";
-import type { FlowNoticeContent } from "./flow-schemas";
+import { FLOW_POLL_LOCKED_MESSAGE, type FlowNoticeContent } from "./flow-schemas";
 import { parsePoll } from "./interactions-model";
 import { emptyNoticeDraft } from "./schemas";
 import { draftToColumns, fetchCampaign, fetchCampaignsByIds, type CampaignContentColumns, type CampaignRow } from "./store";
@@ -939,6 +939,7 @@ export function flowContentColumns(content: FlowNoticeContent): CampaignContentC
 
 const CONTENT_COMPARE_FIELDS = [
   "accept_label",
+  "allow_hide",
   "allow_reactions",
   "audio_duration_seconds",
   "audio_mime",
@@ -1019,6 +1020,14 @@ function nodePayload(node: FlowNode, campaignId: string | null) {
     position: node.position,
     wait_until_true: node.kind === "condition" ? node.waitUntilTrue : false
   };
+}
+
+/** O passo ja chegou a algum aluno (linha do sino de qualquer versao do passo, sem os testes da equipe)? */
+async function nodeReachedStudents(db: CommunicationsDb, nodeId: string): Promise<boolean> {
+  const { data, error } = await db.from("notifications").select("id").eq("flow_node_id", nodeId).eq("is_test", false).limit(1);
+  assertNoDbError(error, "Comunicacao: quem recebeu o passo");
+
+  return (data ?? []).length > 0;
 }
 
 /**
@@ -1146,6 +1155,25 @@ export async function saveFlowTree(db: CommunicationsDb, input: SaveFlowTreeInpu
   const versions: Record<string, string> = {};
   const toInsert: { columns: CampaignContentColumns; nodeId: string }[] = [];
   let expectedUpdatedAt = input.flowId ? (input.expectedUpdatedAt ?? flow.updated_at) : flow.updated_at;
+
+  // Ajustes da v3a: no ar ou pausado, a enquete de um passo que ja chegou a alguem nao muda (renomear uma opcao
+  // mantem o id, e os votos antigos contariam para o texto novo no relatorio e na regra "votou em X"). Antes de
+  // gravar qualquer coisa: 422 e nada muda.
+  if (live) {
+    const pollChanged = Array.from(columnsByNode)
+      .filter(([nodeId, columns]) => {
+        const row = current.get(existing.get(nodeId)?.campaign_id ?? "");
+
+        return Boolean(row && row.flow_id === flow.id && stableJson(parsePoll(row.poll)) !== stableJson(parsePoll(columns.poll)));
+      })
+      .map(([nodeId]) => nodeId);
+    const reached = await Promise.all(pollChanged.map((nodeId) => nodeReachedStudents(db, nodeId)));
+
+    if (reached.some(Boolean)) {
+      throw new CommunicationError(FLOW_POLL_LOCKED_MESSAGE, 422);
+    }
+  }
+
   const editsInPlace = Array.from(columnsByNode).some(([nodeId, columns]) => {
     const row = current.get(existing.get(nodeId)?.campaign_id ?? "");
 

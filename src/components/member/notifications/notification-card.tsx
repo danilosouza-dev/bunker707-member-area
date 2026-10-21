@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, AtSign, Check, ChevronRight, ExternalLink, MessageCircle, Trash2, type LucideIcon } from "lucide-react";
+import { ArrowRight, AtSign, Check, ChevronRight, ExternalLink, MessageCircle, type LucideIcon } from "lucide-react";
 import Image from "next/image";
 import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
@@ -16,9 +16,11 @@ import type { NotificationItem, NotificationResponseValue } from "@/server/commu
 import { NoticeAudioPlayer } from "./notice-audio-player";
 import { NoticeTitleIcon } from "./notice-icons";
 import { NoticePoll } from "./notice-poll";
-import { NoticeReactions } from "./notice-reactions";
+import { NoticeReactionPicker, NoticeReactionTrigger, useReactionPicker, type ReactionPicker } from "./notice-reactions";
+import { NotificationCardMenu } from "./notification-card-menu";
 import {
   audioListenOf,
+  canHideNotification,
   cardActionLabels,
   cardLinkOf,
   noticeMeta,
@@ -33,14 +35,20 @@ import {
 
 // Uma notificacao do sino (docs/22 §1.1; v2 em docs/23; v3a em docs/24; desenho em docs/12): aviso da
 // equipe (icone e titulo, texto, quem envia com o "Termina em", imagem 16:9, audio com o ouvido, enquete,
-// botao ou o texto ao lado da seta, resposta Aceitar/Recusar com "Mudar resposta", e a linha de acoes com
-// Reagir e a lixeira) ou resposta/mencao em comentario (o cartao inteiro leva para a aula; o link de
-// verdade e a frase, e a lixeira fica na linha do tempo). O circulo e quem envia: a pessoa da equipe
-// (foto ou iniciais) ou a escola (o Icone da escola de Marca); o aviso nao tem selo, so os comentarios.
+// botao ou o texto ao lado da seta, resposta Aceitar/Recusar com "Mudar resposta") ou resposta/mencao em
+// comentario (o cartao inteiro leva para a aula; o link de verdade e a frase). O circulo e quem envia: a
+// pessoa da equipe (foto ou iniciais) ou a escola (o Icone da escola de Marca); o aviso nao tem selo, so
+// os comentarios.
+//
+// Ajustes da v3a (o produtor testou): a linha de baixo so com Reagir e a lixeira saiu. Reagir (ou a
+// pilula com a reacao) fica no fim da linha dos botoes (Acessar, ou Aceitar/Recusar) ou, sem ela, no fim
+// da linha de quem envia; o seletor abre na linha logo abaixo. A lixeira foi para o "⋯" do canto de cima
+// (NotificationCardMenu), longe do dedo; sem o "⋯" quando a equipe nao deixa excluir (allowHide). A
+// bolinha de nao lida foi para a margem da esquerda (como no YouTube): o canto da direita e do "⋯".
 //
 // Cartao clicavel (docs/24 §1.2): um link decorativo (aria-hidden, fora do Tab) cobre o cartao por baixo
 // do conteudo; os dois filhos da grade deixam o toque passar e cada controle dentro (Ver mais, audio,
-// enquete, reacoes, resposta, lixeira) volta a receber o toque. O link acessivel e um so: o botao, ou o
+// enquete, reacoes, resposta, o "⋯") volta a receber o toque. O link acessivel e um so: o botao, ou o
 // titulo (no "Só tocando na notificação", descrito pelo texto ao lado da seta). Nada interativo dentro
 // de um link. So desenha: quem busca, grava, marca como lida e navega e o painel. A previa do admin
 // desenha o mesmo cartao com `preview` (sem links, sem audio, sem efeitos) dentro de moldura inert
@@ -167,9 +175,10 @@ function CardAvatar({ item, schoolIconUrl, schoolLogoUrl }: { item: Notification
   );
 }
 
+/** Na margem da esquerda, na altura do meio do circulo (o canto da direita e do "⋯"). */
 function UnreadDot() {
   return (
-    <span className="pointer-events-none absolute right-4 top-5 z-[1] size-2 rounded-full bg-[var(--accent)]">
+    <span className="pointer-events-none absolute left-[5px] top-[30px] z-[1] size-2 rounded-full bg-[var(--accent)]">
       <span className="sr-only">Não lida</span>
     </span>
   );
@@ -177,20 +186,53 @@ function UnreadDot() {
 
 /**
  * Quem envia · há 2 horas · Termina em 3 h, numa linha so: o nome encurta com reticencias (o leitor de
- * tela le inteiro) e o tempo e o aviso de fim nunca quebram nem encurtam, nem a 375 px.
+ * tela le inteiro) e o tempo e o aviso de fim nunca quebram nem encurtam, nem a 375 px. `trailing` (o
+ * Reagir, quando o cartao nao tem linha de botoes) fica no fim da linha, a direita.
  */
-function NoticeMeta({ createdAt, hint, now, sender }: { createdAt: string; hint: string | null; now: number; sender: string }) {
+function NoticeMeta({
+  className,
+  createdAt,
+  hint,
+  now,
+  sender,
+  trailing
+}: {
+  /** Margem de cima no lugar do mt-1 (com o Reagir logo abaixo do "⋯", num aviso so com titulo). */
+  className?: string;
+  createdAt: string;
+  hint: string | null;
+  now: number;
+  sender: string;
+  trailing?: ReactNode;
+}) {
   const relative = formatMemberRelativeTime(createdAt, now);
-
-  return (
-    <p className="mt-1 flex min-w-0 items-baseline gap-1 text-xs text-zinc-400" suppressHydrationWarning>
+  const lineClassName = "flex min-w-0 items-baseline gap-1 text-xs text-zinc-400";
+  const content = (
+    <>
       <span className="min-w-0 truncate">{sender}</span>
       <span aria-hidden="true">·</span>
       <time className="shrink-0 whitespace-nowrap" dateTime={createdAt} suppressHydrationWarning>
         {relative}
       </time>
       {hint ? <span className="shrink-0 whitespace-nowrap text-amber-400">· {hint}</span> : null}
-    </p>
+    </>
+  );
+
+  if (!trailing) {
+    return (
+      <p className={cn("mt-1", lineClassName)} suppressHydrationWarning>
+        {content}
+      </p>
+    );
+  }
+
+  return (
+    <div className={cn("mt-1 flex min-h-8 min-w-0 items-center justify-between gap-2", className)}>
+      <p className={lineClassName} suppressHydrationWarning>
+        {content}
+      </p>
+      {trailing}
+    </div>
   );
 }
 
@@ -239,7 +281,8 @@ export function NotificationCard(props: NotificationCardProps) {
   return props.item.kind === "notice" ? <NoticeCard {...props} /> : <CommentCard {...props} />;
 }
 
-const cardClassName = "relative grid grid-cols-[40px_minmax(0,1fr)] gap-3 px-4 py-3.5";
+/** `group/card`: o "⋯" aparece com o mouse sobre o cartao ou o foco dentro dele (ponteiro fino). */
+const cardClassName = "group/card relative grid grid-cols-[40px_minmax(0,1fr)] gap-3 px-4 py-3.5";
 
 /**
  * Cartao clicavel (docs/24 §1.2): fundo no hover e no toque, cursor do link e o anel de foco no cartao
@@ -253,29 +296,6 @@ const layerClassName = "pointer-events-none relative z-[1]";
 
 function newTabProps(link: NotificationLink) {
   return link.newTab ? { rel: "noopener noreferrer", target: "_blank" } : {};
-}
-
-/** Lixeira do cartao: 32 px, area de toque de 40 px, nome com o titulo (cardActionLabels). */
-function HideButton({ className, label, onHide, preview }: { className?: string; label: string; onHide?: () => void; preview: boolean }) {
-  const buttonClassName = cn(
-    "pointer-events-auto relative grid size-8 shrink-0 place-items-center rounded-full text-zinc-500 transition-colors after:absolute after:-inset-1 hover:text-zinc-200 motion-reduce:transition-none",
-    focusRing,
-    className
-  );
-
-  if (preview) {
-    return (
-      <span aria-hidden="true" className={buttonClassName}>
-        <Trash2 className="size-4" />
-      </span>
-    );
-  }
-
-  return (
-    <button aria-label={label} className={buttonClassName} data-card-hide="" onClick={onHide} type="button">
-      <Trash2 aria-hidden="true" className="size-4" />
-    </button>
-  );
 }
 
 function CardError({ message }: { message: string | null | undefined }) {
@@ -293,6 +313,7 @@ function CommentCard({ accessPreviewMode, interaction, item, now, onHide, onOpen
   const plan = cardLinkOf(item, { accessPreviewMode });
   const link = preview ? null : plan.link;
   const labels = cardActionLabels(item);
+  const hidable = canHideNotification(item);
   const sentence = (
     <>
       {actor ? <span className="font-semibold">{actor}</span> : null}
@@ -315,8 +336,9 @@ function CommentCard({ accessPreviewMode, interaction, item, now, onHide, onOpen
       <span className={cn(layerClassName, "block size-10")}>
         <CardAvatar item={item} schoolIconUrl={schoolIconUrl} schoolLogoUrl={schoolLogoUrl} />
       </span>
-      <div className={cn(layerClassName, "min-w-0 pr-4")}>
-        <p className="text-sm leading-5 text-white" id={titleId}>
+      <div className={cn(layerClassName, "min-w-0")}>
+        {/* O titulo reserva o canto do "⋯". */}
+        <p className={cn("text-sm leading-5 text-white", hidable && "pr-8")} id={titleId}>
           {link ? (
             <a
               className="pointer-events-auto rounded-[4px] outline-none"
@@ -333,16 +355,14 @@ function CommentCard({ accessPreviewMode, interaction, item, now, onHide, onOpen
         </p>
         {item.context ? <span className="mt-0.5 block truncate text-xs text-zinc-400">em {item.context}</span> : null}
         {item.body ? <span className="mt-1 line-clamp-3 text-sm leading-5 text-zinc-300 [overflow-wrap:anywhere]">“{item.body}”</span> : null}
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <span className="text-xs text-zinc-400" suppressHydrationWarning>
-            <time dateTime={item.createdAt} suppressHydrationWarning>
-              {formatMemberRelativeTime(item.createdAt, now)}
-            </time>
-          </span>
-          <HideButton label={labels.hide} onHide={onHide} preview={preview} />
-        </div>
+        <p className="mt-1 text-xs text-zinc-400" suppressHydrationWarning>
+          <time dateTime={item.createdAt} suppressHydrationWarning>
+            {formatMemberRelativeTime(item.createdAt, now)}
+          </time>
+        </p>
         <CardError message={interaction?.hide?.error} />
       </div>
+      {hidable ? <NotificationCardMenu label={labels.more} onHide={onHide} preview={preview} /> : null}
       {unread ? <UnreadDot /> : null}
     </article>
   );
@@ -353,7 +373,8 @@ function NoticeCta({
   link,
   label,
   onOpenLink,
-  preview
+  preview,
+  trailing
 }: {
   /** No cartao clicavel: o anel de foco e do cartao inteiro. */
   className?: string;
@@ -361,25 +382,39 @@ function NoticeCta({
   link: NotificationLink;
   onOpenLink?: NotificationCardProps["onOpenLink"];
   preview: boolean;
+  /** O Reagir, no fim da linha do botao (a direita). */
+  trailing?: ReactNode;
 }) {
   const Icon = link.newTab ? ExternalLink : ArrowRight;
-  const buttonClassName = memberButtonClassName({ className: cn("pointer-events-auto mt-3 max-w-full", className), size: "sm", variant: "secondary" });
+  const buttonClassName = memberButtonClassName({
+    className: cn("pointer-events-auto max-w-full", trailing ? "min-w-0" : "mt-3", className),
+    size: "sm",
+    variant: "secondary"
+  });
   const content = (
     <>
       <span className="min-w-0 truncate">{label}</span>
       <Icon aria-hidden="true" />
     </>
   );
-
-  if (preview) {
-    return <span className={buttonClassName}>{content}</span>;
-  }
-
-  return (
+  const button = preview ? (
+    <span className={buttonClassName}>{content}</span>
+  ) : (
     <a className={buttonClassName} data-card-link="" href={link.href} onClick={(event) => onOpenLink?.(event, link)} {...newTabProps(link)}>
       {content}
       {link.newTab ? <span className="sr-only"> (abre em nova aba)</span> : null}
     </a>
+  );
+
+  if (!trailing) {
+    return button;
+  }
+
+  return (
+    <div className="mt-3 flex min-w-0 items-center justify-between gap-2">
+      {button}
+      {trailing}
+    </div>
   );
 }
 
@@ -395,8 +430,12 @@ function NoticeResponse({
   onRespond,
   preview,
   responding,
-  responseError
-}: Pick<NotificationCardProps, "item" | "onRespond" | "preview" | "responding" | "responseError">) {
+  responseError,
+  trailing
+}: Pick<NotificationCardProps, "item" | "onRespond" | "preview" | "responding" | "responseError"> & {
+  /** O Reagir, no fim da linha da resposta (a direita; ja vem com ml-auto). */
+  trailing?: ReactNode;
+}) {
   const response = item.response;
   const value = response?.value ?? null;
   // A troca vale enquanto a resposta for a de quando "Mudar resposta" foi tocado: respondeu, fecha sozinha.
@@ -472,6 +511,7 @@ function NoticeResponse({
             Mudar resposta
           </button>
         )}
+        {trailing}
       </div>
     );
   }
@@ -482,9 +522,10 @@ function NoticeResponse({
 
   if (preview) {
     return (
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className={declineClassName}>{response.declineLabel}</span>
         <span className={acceptClassName}>{response.acceptLabel}</span>
+        {trailing}
       </div>
     );
   }
@@ -557,6 +598,7 @@ function NoticeResponse({
             Manter resposta
           </button>
         ) : null}
+        {trailing}
       </div>
       {responseError ? (
         <p className="mt-2 text-xs text-red-300" role="alert">
@@ -613,32 +655,25 @@ function NoticeBody({ body, onRead, preview }: { body: string; onRead?: () => vo
   );
 }
 
-/** Reagir (quando a equipe deixou) a esquerda e a lixeira a direita; o seletor de reacoes toma a linha. */
-function NoticeActionRow({
-  interaction,
-  item,
-  onHide,
-  onReact,
-  preview
-}: Pick<NotificationCardProps, "interaction" | "item" | "onHide" | "onReact"> & { preview: boolean }) {
-  const labels = cardActionLabels(item);
-  const trash = <HideButton className={item.reactions ? undefined : "ml-auto"} label={labels.hide} onHide={onHide} preview={preview} />;
+/** Onde fica o Reagir: no fim da ultima linha de botoes (a resposta vem depois do Acessar) ou, sem ela, no fim da linha de quem envia. */
+function reactionSlotOf(item: Pick<NotificationItem, "reactions" | "response">, ctaShown: boolean): "cta" | "meta" | "response" | null {
+  if (!item.reactions) {
+    return null;
+  }
 
+  if (item.response) {
+    return "response";
+  }
+
+  return ctaShown ? "cta" : "meta";
+}
+
+/** O seletor de reacoes (na linha abaixo da do Reagir) e o erro da ultima reacao. */
+function ReactionExtras({ error, picker, value }: { error: string | null | undefined; picker: ReactionPicker; value: ReactionId | null }) {
   return (
     <>
-      {item.reactions ? (
-        <NoticeReactions
-          error={interaction?.reaction?.error}
-          labels={labels}
-          onReact={onReact}
-          preview={preview}
-          trailing={trash}
-          value={item.reactions.value}
-        />
-      ) : (
-        <div className="mt-2 flex min-h-8 items-center justify-between">{trash}</div>
-      )}
-      <CardError message={interaction?.hide?.error} />
+      <NoticeReactionPicker picker={picker} value={value} />
+      <CardError message={error} />
     </>
   );
 }
@@ -671,6 +706,18 @@ function NoticeCard({
   const clickable = plan.wholeCard;
   const meta = noticeMeta(item, { schoolName, serverNow: serverNow ?? now });
   const image = item.image?.url ? item.image : null;
+  const labels = cardActionLabels(item);
+  const hidable = canHideNotification(item);
+  const reactionValue = item.reactions?.value ?? null;
+  const reactionPicker = useReactionPicker({ onReact, value: reactionValue });
+  const ctaShown = Boolean(plan.button && plan.link && item.cta);
+  const reactionSlot = reactionSlotOf(item, ctaShown);
+  const reactionTrigger = item.reactions ? (
+    <NoticeReactionTrigger className="ml-auto" labels={labels} picker={reactionPicker} preview={preview} value={reactionValue} />
+  ) : null;
+  const reactionExtras = item.reactions ? (
+    <ReactionExtras error={interaction?.reaction?.error} picker={reactionPicker} value={reactionValue} />
+  ) : null;
   let media: ReactNode = null;
 
   if (image) {
@@ -700,9 +747,16 @@ function NoticeCard({
       className={cn(cardClassName, unread && "bg-white/[0.035]", clickable && clickableCardClassName)}
       // Cartao "Pelo botão": clique solto (fora de botao e link) conta como abrir, tambem num cartao ja
       // lido pelo "Marcar todas" (a bolinha segue a leitura; o "abriu" e outro). No cartao clicavel o
-      // toque solto cai no link decorativo e vai para o destino.
+      // toque solto cai no link decorativo e vai para o destino. So o que esta dentro do cartao: o menu do
+      // "⋯" vai em portal e o clique nele ("Excluir notificação") sobe pelo React ate aqui.
       onClick={(event) => {
-        if (!clickable && !preview && !item.openedAt && !(event.target instanceof Element && event.target.closest("a, button, [role='slider']"))) {
+        const target = event.target;
+
+        if (!(target instanceof Element) || !event.currentTarget.contains(target)) {
+          return;
+        }
+
+        if (!clickable && !preview && !item.openedAt && !target.closest("a, button, [role='slider']")) {
           onRead?.();
         }
       }}
@@ -715,8 +769,8 @@ function NoticeCard({
         <CardAvatar item={item} schoolIconUrl={schoolIconUrl} schoolLogoUrl={schoolLogoUrl} />
       </span>
       <div className={cn(clickable && layerClassName, "min-w-0")}>
-        {/* O icone e aria-hidden: o nome do cartao continua sendo exatamente o titulo. */}
-        <p className="pr-4 text-[15px] font-bold leading-5 text-white [overflow-wrap:anywhere]" id={titleId}>
+        {/* O icone e aria-hidden: o nome do cartao continua sendo exatamente o titulo. O titulo reserva o canto do "⋯". */}
+        <p className={cn("text-[15px] font-bold leading-5 text-white [overflow-wrap:anywhere]", hidable && "pr-8")} id={titleId}>
           <NoticeTitleIcon icon={item.icon} size="bell" />
           {plan.accessibleLink === "title" && link ? (
             <a
@@ -735,7 +789,16 @@ function NoticeCard({
           )}
         </p>
         <NoticeBody body={item.body} onRead={onRead} preview={preview} />
-        <NoticeMeta createdAt={item.createdAt} hint={meta.hint} now={now} sender={meta.sender} />
+        <NoticeMeta
+          // Aviso so com titulo: o Reagir no fim desta linha ficaria colado no "⋯" do canto de cima.
+          className={reactionSlot === "meta" && hidable && !item.body.trim() ? "mt-3.5" : undefined}
+          createdAt={item.createdAt}
+          hint={meta.hint}
+          now={now}
+          sender={meta.sender}
+          trailing={reactionSlot === "meta" ? reactionTrigger : null}
+        />
+        {reactionSlot === "meta" ? reactionExtras : null}
         {media}
         {item.audio ? (
           <NoticeAudioPlayer
@@ -751,15 +814,17 @@ function NoticeCard({
         {item.poll ? (
           <NoticePoll busy={interaction?.vote?.busy} error={interaction?.vote?.error} onVote={onVote} poll={item.poll} preview={preview} />
         ) : null}
-        {plan.button && plan.link && item.cta ? (
+        {ctaShown && plan.link && item.cta ? (
           <NoticeCta
             className={clickable ? "focus-visible:outline-none" : undefined}
             label={item.cta.label}
             link={plan.link}
             onOpenLink={onOpenLink}
             preview={preview}
+            trailing={reactionSlot === "cta" ? reactionTrigger : null}
           />
         ) : null}
+        {reactionSlot === "cta" ? reactionExtras : null}
         {plan.cue ? (
           // So para quem ve: o leitor de tela ouve o texto como descricao do titulo (aria-describedby).
           <span aria-hidden="true" className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-white">
@@ -767,9 +832,18 @@ function NoticeCard({
             {plan.link?.newTab ? <ExternalLink className="size-4" /> : <ChevronRight className="size-4" />}
           </span>
         ) : null}
-        <NoticeResponse item={item} onRespond={onRespond} preview={preview} responding={responding} responseError={responseError} />
-        <NoticeActionRow interaction={interaction} item={item} onHide={onHide} onReact={onReact} preview={preview} />
+        <NoticeResponse
+          item={item}
+          onRespond={onRespond}
+          preview={preview}
+          responding={responding}
+          responseError={responseError}
+          trailing={reactionSlot === "response" ? reactionTrigger : null}
+        />
+        {reactionSlot === "response" ? reactionExtras : null}
+        <CardError message={interaction?.hide?.error} />
       </div>
+      {hidable ? <NotificationCardMenu label={labels.more} onHide={onHide} preview={preview} /> : null}
       {unread ? <UnreadDot /> : null}
     </article>
   );

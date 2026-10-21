@@ -856,7 +856,8 @@ export function isNoticeKindLocked(status: CampaignStatus | null | undefined) {
 /**
  * O que vai para o servidor: so os campos do tipo escolhido. O editor guarda o resto (trocar de tipo e
  * voltar nao perde a janela do pop-up nem a resposta, a enquete e as reacoes da notificacao), mas nada
- * disso e validado nem gravado no outro tipo. O pop-up abre o destino pelo botao (v3a).
+ * disso e validado nem gravado no outro tipo. O pop-up abre o destino pelo botao (v3a) e nao tem lixeira
+ * (allowHide, ajustes da v3a: o servidor grava true no pop-up).
  */
 export function noticeDraftForKind(draft: NoticeDraft): NoticeDraft {
   if (draft.kind === "inbox") {
@@ -865,6 +866,7 @@ export function noticeDraftForKind(draft: NoticeDraft): NoticeDraft {
 
   return {
     ...draft,
+    allowHide: true,
     cta: draft.cta ? { ...draft.cta, display: "button" } : null,
     poll: null,
     reactions: false,
@@ -889,6 +891,8 @@ export function canonicalNoticeDraft(draft: NoticeDraft): NoticeDraft {
   const inbox = draft.kind === "inbox";
 
   return {
+    // Ajustes da v3a: so o false desliga a lixeira do aluno (rascunho antigo sem a chave = pode excluir).
+    allowHide: inbox ? draft.allowHide !== false : true,
     allowSnooze: inbox ? true : draft.allowSnooze,
     audience: normalizeAudience(draft.audience),
     audio: draft.audio ? { ...draft.audio, peaks: [...draft.audio.peaks] } : null,
@@ -1233,20 +1237,46 @@ export function validityOfChoice(choice: ValidityChoice, current: FlowValidity):
   }
 }
 
-export type ValidityUnit = "days" | "hours";
+/** Unidade do "Por um tempo" (ajustes da v3a: minutos tambem, a partir de 5 minutos; o teto continua 90 dias). */
+export type ValidityUnit = "days" | "hours" | "minutes";
 
-/** Minutos -> [numero] [horas | dias] do "Por um tempo" (dias quando fecha em dias). */
+const VALIDITY_UNIT_MINUTES: Record<ValidityUnit, number> = { days: 1_440, hours: 60, minutes: 1 };
+
+/** Pilulas da unidade, da menor para a maior: minutos, horas, dias. */
+export const VALIDITY_UNIT_OPTIONS: readonly { label: string; value: ValidityUnit }[] = [
+  { label: "minutos", value: "minutes" },
+  { label: "horas", value: "hours" },
+  { label: "dias", value: "days" }
+];
+
+/**
+ * Minutos -> [numero] [minutos | horas | dias] do "Por um tempo": a maior unidade que fecha exato (1440 = 1
+ * dia, 120 = 2 horas, 90 = 90 minutos). Numero invalido fica invalido, em horas.
+ */
 export function validityDurationParts(minutes: number): { amount: number; unit: ValidityUnit } {
-  if (Number.isFinite(minutes) && minutes > 0 && minutes % 1_440 === 0) {
-    return { amount: minutes / 1_440, unit: "days" };
+  if (!Number.isFinite(minutes)) {
+    return { amount: Number.NaN, unit: "hours" };
   }
 
-  return { amount: Number.isFinite(minutes) ? Math.round(minutes / 60) : Number.NaN, unit: "hours" };
+  const value = Math.round(minutes);
+
+  if (value > 0 && value % VALIDITY_UNIT_MINUTES.days === 0) {
+    return { amount: value / VALIDITY_UNIT_MINUTES.days, unit: "days" };
+  }
+
+  if (value > 0 && value % VALIDITY_UNIT_MINUTES.hours === 0) {
+    return { amount: value / VALIDITY_UNIT_MINUTES.hours, unit: "hours" };
+  }
+
+  return { amount: value, unit: "minutes" };
 }
 
-/** [numero] [horas | dias] -> minutos (numero invalido fica invalido: o zod diz "Use de 1 hora a 90 dias."). */
+/**
+ * [numero] [minutos | horas | dias] -> minutos. Os limites ficam com o zod (validitySchema): abaixo de 5
+ * minutos "No mínimo 5 minutos.", acima de 90 dias "No máximo 90 dias."; numero invalido fica invalido.
+ */
 export function validityDurationMinutes(amount: number, unit: ValidityUnit) {
-  return Number.isFinite(amount) ? Math.round(amount * (unit === "days" ? 1_440 : 60)) : Number.NaN;
+  return Number.isFinite(amount) ? Math.round(amount * VALIDITY_UNIT_MINUTES[unit]) : Number.NaN;
 }
 
 /**
@@ -1283,7 +1313,7 @@ function previewCta(cta: NoticeDraft["cta"]) {
 }
 
 /** O conteudo que a previa desenha: o do aviso ou o de uma notificacao seguinte (validade de fluxo). */
-export type PreviewContent = Pick<NoticeDraft, "audio" | "body" | "cta" | "icon" | "image" | "kind" | "poll" | "reactions" | "response" | "title"> & {
+export type PreviewContent = Pick<NoticeDraft, "allowHide" | "audio" | "body" | "cta" | "icon" | "image" | "kind" | "poll" | "reactions" | "response" | "title"> & {
   validity?: FlowValidity;
 };
 
@@ -1349,6 +1379,7 @@ function previewPollOf(draft: Pick<NoticeDraft, "kind" | "poll">, mode: PreviewP
  * Notificacao do sino como o aluno recebe (nao lida, criada agora): de quem envia (a pessoa da equipe;
  * sem ela, a escola), com o icone, o fim no sino (o "Termina em") e o audio no estado das pilulas. v3a: como
  * o aluno chega ao destino, o botao de reagir (sem reacao) e a enquete antes ou depois do voto (`pollPreview`).
+ * Ajustes da v3a: sem "Permitir que o aluno exclua do sino", o cartao sai sem o "⋯" de excluir.
  */
 export function draftToNotificationItem(
   draft: PreviewContent & Partial<Pick<NoticeDraft, "poll" | "reactions">>,
@@ -1369,6 +1400,7 @@ export function draftToNotificationItem(
 
   return {
     actor: inbox && input.sender ? { avatarUrl: input.sender.avatarUrl, name: input.sender.name } : null,
+    allowHide: draft.allowHide !== false,
     audio: draft.audio ? { ...draft.audio } : null,
     audioProgress: draft.audio ? { completed: heard, heard: (heard ? "1" : "0").repeat(AUDIO_HEARD_SLOTS), percent: heard ? 100 : 0 } : null,
     body: draft.body.trim(),
@@ -2432,6 +2464,10 @@ export function ctaDestinationAriaLabel(display: CtaDisplay) {
 const REACTION_EMOJI_LIST = REACTION_IDS.map((id) => REACTION_EMOJI[id]).join(" ");
 
 export const NOTICE_INTERACTION_COPY = {
+  // Ajustes da v3a (campaigns.allow_hide): muda tambem depois do envio.
+  allowHideLabel: "Permitir que o aluno exclua do sino",
+  allowHideOff: "Sem essa opção, a notificação fica no sino do aluno até o tempo dela acabar.",
+  allowHideOn: "Mostra a opção de excluir na notificação. O aluno exclui só do sino dele; nos relatórios continua como recebida.",
   blockDescription: "O que o aluno pode fazer direto no sino.",
   blockTitle: "Interação",
   pollDisabledByResponse: "Desligue “Pedir uma resposta” para fazer uma enquete.",

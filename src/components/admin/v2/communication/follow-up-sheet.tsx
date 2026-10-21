@@ -8,7 +8,7 @@ import type { PreviewDevice } from "../member-area/preview-frame";
 import { AdminSheet, AdminSheetSection } from "../sheet";
 import type { ProductPickerItem } from "../storefront/product-picker";
 import { FOLLOW_UPS_COPY, followUpValidityAnchorLabel, type FollowUpLevel } from "./follow-ups-view-model";
-import { NoticeContentFields } from "./notice-content-fields";
+import { NoticeContentFields, type NoticeLockedFields } from "./notice-content-fields";
 import { NoticePreview } from "./notice-preview";
 import type { NoticeSenderChoice } from "./notices-view-model";
 
@@ -20,6 +20,8 @@ import type { NoticeSenderChoice } from "./notices-view-model";
 // O formulario e a previa ficam num <form> proprio, com ids e nomes de `idPrefix`: os campos e os grupos
 // de opcoes nao se misturam com os do editor aberto embaixo. v3a: a enquete da seguinte nao tem data de
 // fim (pollCanEndAtDate false): a hora de envio e relativa, entao uma data fixa poderia cair antes dela.
+// Ajustes da v3a: no fluxo no ar, a enquete de uma seguinte que ja chegou a alguem chega travada
+// (`lockedFields`, de livePollLockedFields em notice-follow-ups).
 
 type FollowUpSheetProps = {
   /** Fim da notificacao de cima na previa ("Até a notificação principal sumir"). */
@@ -35,6 +37,8 @@ type FollowUpSheetProps = {
   level: FollowUpLevel;
   /** No relatorio da notificacao enviada: as mudancas valem com "Aplicar alterações" (nao ha rascunho). */
   live?: boolean;
+  /** O que nao muda mais nesta seguinte, com o motivo (a enquete, quando ja chegou a alguem no fluxo no ar). */
+  lockedFields?: NoticeLockedFields;
   now: number;
   onAudioBusyChange: (reason: string | null) => void;
   onBlurField: (key: string) => void;
@@ -65,6 +69,7 @@ export function FollowUpSheet({
   idPrefix,
   level,
   live = false,
+  lockedFields,
   now,
   onAudioBusyChange,
   onBlurField,
@@ -109,6 +114,7 @@ export function FollowUpSheet({
           idPrefix={idPrefix}
           kind="inbox"
           layout="plain"
+          lockedFields={lockedFields}
           onAudioBusyChange={(reason) => {
             setAudioBusy(reason);
             onAudioBusyChange(reason);

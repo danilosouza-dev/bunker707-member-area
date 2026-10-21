@@ -34,6 +34,9 @@ import { cn } from "@/lib/utils";
 // painel: mouse parado 120 ms no sino ou foco pelo Tab (:focus-visible) buscam so sem pagina guardada ou
 // com ela mais velha que 1 minuto; o dedo ou Enter/Espaco no sino fechado buscam na hora quando ela tem
 // mais de 5 s. Nunca com o painel aberto nem no segundo depois de fechar (o foco volta para o sino).
+//
+// Ajustes da v3a: o numero e a pagina guardados sao do aluno da sessao (`studentId`, vindo do AppShell):
+// depois de entrar com outra conta sem recarregar, nada da conta anterior aparece.
 
 const loadNotificationsPanel = () => import("@/components/member/notifications/notifications-panel");
 
@@ -110,7 +113,8 @@ export function MemberNotificationsMenu({
   refreshSummaryOnMount = true,
   schoolIconUrl,
   schoolLogoUrl,
-  schoolName
+  schoolName,
+  studentId
 }: {
   accessPreviewMode?: AccessPreviewMode;
   className?: string;
@@ -123,6 +127,8 @@ export function MemberNotificationsMenu({
   /** Logo do topo: reserva do circulo quando o icone nao carrega. */
   schoolLogoUrl?: string | null;
   schoolName: string;
+  /** O aluno da sessao: dono do numero e da pagina guardados (sem ele, a memoria fica sem dono, como antes). */
+  studentId?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -131,7 +137,7 @@ export function MemberNotificationsMenu({
   /** Quando o painel fechou: foco e mouse logo depois nao sao intencao. */
   const closedAtRef = useRef<number | null>(null);
   const intentTimerRef = useRef<number | null>(null);
-  const { unseen } = useNotificationsSummary({ refreshOnMount: refreshSummaryOnMount });
+  const { unseen } = useNotificationsSummary({ refreshOnMount: refreshSummaryOnMount, userId: studentId });
   const badge = formatBadgeCount(unseen);
 
   function cancelIntent() {
@@ -160,7 +166,7 @@ export function MemberNotificationsMenu({
       intentTimerRef.current = null;
 
       if (intends(kind, focusVisible)) {
-        prefetchInbox({ minAgeMs: intentPrefetchMinAge(kind) });
+        prefetchInbox({ minAgeMs: intentPrefetchMinAge(kind), userId: studentId });
       }
     }, INBOX_PREFETCH_DWELL_MS);
   }
@@ -173,7 +179,7 @@ export function MemberNotificationsMenu({
 
     cancelIntent();
     preloadPanel();
-    prefetchInbox({ minAgeMs: intentPrefetchMinAge("press") });
+    prefetchInbox({ minAgeMs: intentPrefetchMinAge("press"), userId: studentId });
   }
 
   function changeOpen(next: boolean) {
@@ -245,6 +251,7 @@ export function MemberNotificationsMenu({
               schoolIconUrl={schoolIconUrl}
               schoolLogoUrl={schoolLogoUrl}
               schoolName={schoolName}
+              studentId={studentId}
             />
           </Popover.Popup>
         </Popover.Positioner>
