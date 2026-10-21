@@ -4,6 +4,8 @@ import { MemberFooter } from "@/components/member-footer";
 import { MaterialsView } from "@/components/member/pages/materials-view";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { requireStudentPageUser } from "@/server/auth/guards";
+import { pageKeyOfRoute } from "@/server/member-area/page-visit-model";
+import { trackMemberPageVisit } from "@/server/member-area/page-visits";
 import { getAppShellData } from "@/server/db/platform-store";
 import { getMaterialsPageData } from "@/server/member-area/student-pages";
 
@@ -26,6 +28,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
   const shellData = await getAppShellData(user);
   const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
   const data = await getMaterialsPageData(accessPreviewMode, user);
+  await trackMemberPageVisit({ accessPreviewMode, pageKey: pageKeyOfRoute("/materiais"), userId: user.id });
 
   return (
     <AppShell

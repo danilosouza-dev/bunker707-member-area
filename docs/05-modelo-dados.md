@@ -41,6 +41,9 @@ student_events
 webhook_events
 email_outbox
 email_webhook_events
+campaigns
+notifications
+campaign_deliveries
 integration_settings
 ai_agents
 ai_agent_scopes
@@ -1108,8 +1111,16 @@ Exemplos de event_type:
 - lesson_comment_reacted;
 - lesson_comment_reaction_removed;
 - lesson_comment_reported;
-- notification_created;
 - notification_read;
+- notification_clicked;
+- notification_responded;
+- notification_audio_started;
+- notification_audio_completed;
+- message_impressed;
+- message_clicked;
+- message_closed;
+- message_dismissed;
+- message_snoozed;
 - saved_item_created;
 - saved_item_removed;
 - material_access_blocked;
@@ -1127,10 +1138,12 @@ Metadados importantes para CRM/dashboard:
 - tipo de reacao escolhida/removida em aula ou comentario;
 - comentario pai quando a interacao for resposta;
 - usuarios mencionados por `@nickname` em comentario ou resposta;
-- destino e motivo da notificacao: mencao, resposta ao comentario ou moderacao;
+- notificacoes e pop-ups: so ids e rotulos curtos (`notification_id`, `campaign_id`, `kind`, `response`, `all`), nunca o texto do aviso ou do comentario;
 - origem do item salvo/removido: card, pagina de aula, pagina de conteudo ou material;
 - frequencia de login e sessoes;
 - cliques relevantes em aula, materiais, TV, salvar, comentarios e avaliacoes.
+
+Nomes da Comunicacao (decisao de 20/10/2026, `docs/22` §4.4): o sino usa `notification_*` com `entity_type = notification` (o id da linha em `notifications`) e o pop-up usa os `message_*` previstos no `docs/17` §2.5 com `entity_type = campaign` (o id do aviso). Quem grava sao as rotas do aluno (`src/app/api/notifications/**`, `src/app/api/popups/**`), em melhor esforco: falha vira log e a resposta nao muda. `notification_created` nao existe: a propria linha em `notifications` (com `created_at`) e o registro da entrega. Abrir o sino (marcar como vistas) nao grava evento. Comunicacao v2 (21/10/2026, `docs/23` §5.1): `notification_audio_started` (primeiro play; substitui o `notification_read` que o play gravava) e `notification_audio_completed` (44 de 48 trechos ouvidos), uma vez cada por notificacao, `entity_type = notification`, `metadata.campaign_id`; o progresso do audio nao grava evento. Visitas de pagina nao sao eventos: ficam em `member_page_visits` (secao Comunicacao).
 
 ## youtube_course_imports
 
@@ -1431,6 +1444,130 @@ Payload bruto de cada evento do provedor, para auditoria e reprocesso.
 
 Seguranca: RLS ligada sem policies, nada para `anon`/`authenticated`; so o servidor insere e atualiza. Eventos de e-mails que nao sairam da fila (Auth do Supabase pelo mesmo Resend) ficam so registrados. Retencao: apagados 90 dias depois de `received_at` pela mesma rotina (secao Retencao de dados pessoais); o payload traz o destinatario, e `delivered_at`, `bounced_at` e `last_error` ja ficaram em `email_outbox`.
 
+## Comunicacao (avisos, sino e pop-ups)
+
+Migracao `202610200001_communication_v1.sql` (20/10/2026). Produto e regras em `docs/22`; fluxo em `docs/04` (Implementado: Comunicacao v1); seguranca em `docs/06` (secao Comunicacao). Nada aqui e lido pelo navegador: RLS ligado nas tres tabelas, `revoke all` de `anon`/`authenticated`, so `service_role` le e grava, depois de o TypeScript conferir sessao (rotas do aluno) ou permissao (Server Actions do admin). Sem enum: texto + check.
+
+Substitui o desenho de `docs/17` §2.4 para a fase 5 (comparacao em `docs/17` §2.4, Atualizacao de 20/10/2026): sem `audiences`/`student_facts` (o segmento fica em `campaigns.audience` e e avaliado em TypeScript), sem `message_events` (os eventos vao para `student_events`) e sem `campaign_daily_stats` (os numeros saem de RPC).
+
+### campaigns
+
+Cada aviso da equipe: notificacao no sino (`kind = inbox`) ou pop-up na home (`kind = popup`).
+
+- id uuid;
+- kind (`inbox` | `popup`) e status. Notificacao: `draft`, `pending_approval`, `scheduled`, `sending`, `sent`, `canceled`; pop-up: `draft`, `pending_approval`, `active`, `paused`, `ended` (check `campaigns_status_by_kind`). "Agendado" e "Encerrado" de um pop-up `active` antes ou depois da janela sao derivados na leitura (`situationOf`);
+- conteudo: `title` (1 a 80; o pop-up para em 60 no schema), `body` (ate 600; pop-up 240), `image_url` + `image_alt` (ate 160), `audio_url` + `audio_mime` + `audio_duration_seconds` (1 a 600 no banco; 300 no schema) + `audio_peaks` (jsonb, lista de ate 96), `cta_label` (ate 30) + `cta_href` + `cta_target` (`same_tab` | `new_tab`), `response_mode` (`none` | `accept_decline`) + `accept_label`/`decline_label` (ate 24). Checks: URL de imagem e audio `https?://` sem espaco; audio completo (`campaigns_audio_complete`), botao completo (`campaigns_cta_complete`), resposta so na notificacao (`campaigns_response_inbox_only`);
+- `audience` jsonb (<= 16 KB; padrao `{"kind":"everyone"}`): o segmento, `{ kind: "rules", root: { match: "all" | "any", items: [...] } }` com um nivel de grupo dentro do principal, ate 20 regras (formato em `src/server/communications/audience-model.ts`); `audience_count`, `audience_counted_at` e `audience_refreshed_at` (ultimo recalculo do pop-up pelo job);
+- agenda: `send_at` (notificacao: quando sai ou saiu), `starts_at`/`ends_at` (janela do pop-up; nula = desde a publicacao / sem fim; check `ends_at > starts_at`), `popup_repeat` (`once` | `until_action`), `allow_snooze`;
+- envio: `dispatch_started_at` (reserva do envio), `dispatch_attempts`, `last_error` (ate 2.000), `sent_at` (envio da notificacao; no pop-up, a primeira publicacao), `recipients_count`;
+- aprovacao e autoria: `requested_by`/`requested_at`, `approved_by`/`approved_at`, `created_by`, `updated_by`, `deleted_by` (todos -> auth.users set null). `approved_at` fica preenchido quando um dono ou admin aprovou o pedido ou publicou direto com `messaging.publish_large`, e vazio nas outras publicacoes: sem ele, a notificacao agendada que passou de 500 alunos na hora do envio volta para `pending_approval` (com `requested_by` = quem agendou, `requested_at` = agora e `send_at` vazio) em vez de sair (`docs/22` §2.3); `audience_refreshed_at` vazio pede o recalculo do pop-up no proximo tick;
+- `created_at`, `updated_at` (versao do editor), `deleted_at` (exclusao logica).
+
+Indices: `campaigns_due_idx (send_at)` parcial nas notificacoes `scheduled`/`sending` nao excluidas (o job), `campaigns_live_popups_idx (starts_at)` parcial nos pop-ups `active` nao excluidos e `campaigns_list_idx (created_at desc)` nao excluidos. Gatilho `set_campaigns_updated_at` com a funcao `touch_campaign_version()`: muda `updated_at` so quando algo alem de `audience_count`, `audience_counted_at` e `audience_refreshed_at` muda, para o recalculo do job nao derrubar com 409 quem esta com o editor aberto (funcao sem execute para ninguem).
+
+### notifications
+
+Caixa do sino, uma linha por aluno.
+
+- id uuid; `user_id` -> auth.users (cascade);
+- kind: `notice` (aviso da equipe), `comment_reply`, `comment_mention`; `campaign_id` -> campaigns (cascade) so no `notice` (check `notifications_notice_has_campaign`); `is_test` (teste da equipe, fora dos numeros);
+- `actor_id` -> auth.users (set null): quem respondeu, nas automaticas;
+- `title` (ate 200), `body` (ate 600), `href` (ate 2.048), `payload` jsonb (<= 4 KB). O `notice` nao guarda conteudo: o sino junta o aviso pela chave. As automaticas guardam o trecho da resposta (ate 280, espacos colapsados), o link da aula (`/conteudo/{conteudo}/aulas/{modulo}?lessonId={aula}`) e o payload `{ contentId, lessonId, moduleId, commentId, parentCommentId, lessonTitle }`;
+- `dedupe_key` (1 a 200): `campaign:<aviso>`, `campaign-test:<aviso>`, `comment-reply:<resposta>`, `comment-mention:<resposta>`; unica por aluno (`notifications_user_dedupe_idx`, sem filtro parcial para o `upsert ... onConflict "user_id,dedupe_key"` com `ignoreDuplicates`);
+- `seen_at` (abriu o sino com ela na lista; zera o numero), `read_at` (abriu ou marcou como lida), `clicked_at`, `response` (`accepted` | `declined`) + `responded_at`; checks: lida so depois de vista, clicada so depois de lida, resposta completa e so depois de vista;
+- `created_at`.
+
+Indices: `(user_id, created_at desc, id desc)` (a lista e o cursor), parcial `(user_id) where seen_at is null` (o numero), parcial `(campaign_id)` e parcial `(seen_at)` nas de aviso que nao sao teste (os numeros do periodo).
+
+### campaign_deliveries
+
+Estado do pop-up por aluno; chave `(campaign_id, user_id)`, os dois com cascade.
+
+- `eligible`: o aluno esta no segmento agora (o job recalcula a cada 15 minutos enquanto o pop-up esta no ar; quem sai vira `false`, a linha fica);
+- `impressions`, `first_seen_at`, `last_seen_at` (check: primeira vez so com ultima), `clicked_at`, `dismissed_at` ("Nao mostrar de novo"), `snoozed_until` + `snooze_count` (0 a 10 no banco; o servidor para em 2);
+- `created_at`, `updated_at` (gatilho `set_updated_at`).
+
+Indices: `(user_id, last_seen_at desc)` (o limite de 24 h) e parcial `(first_seen_at)` (os numeros do periodo). A equipe nunca tem linha aqui.
+
+### RPCs (security invoker, `search_path` fixo, so `service_role`)
+
+- `communication_comment_counts()`: comentarios aprovados e nao excluidos de alunos (`author_role = student`, fora quem esta em `admin_roles`) por autor, em 7, 30 e 90 dias e no total. Alimenta a regra "Comentarios" do segmento; sem ela (banco sem a migracao) todos contam zero;
+- `communication_campaign_stats(p_campaign_ids uuid[])`: por aviso, para quem, viram, clicaram, fecharam sem clicar, Nao mostrar de novo, Lembrar depois, aceitaram, recusaram e voltaram a estudar em 7 dias. Notificacao: linhas de `notifications` sem teste (viram = `seen_at`); pop-up: `campaign_deliveries` (para quem = elegivel ou ja viu; viram = `first_seen_at`). "Voltaram a estudar": viu e, em `student_daily_activity` do dia em que viu ate 7 dias depois (fuso de Sao Paulo), somou pelo menos 600 s assistidos ou 1 aula concluida (`docs/17` §1.11);
+- `communication_overview(p_start, p_end)`: os quatro numeros do topo da lista. Ativos agora (pop-ups `active` dentro da janela + notificacoes `scheduled`/`sending`), vistos no periodo (notificacoes de aviso sem teste com `seen_at` no periodo + pop-ups com `first_seen_at` no periodo, avisos excluidos fora), cliques entre eles e quem voltou a estudar. A taxa de clique e calculada no TypeScript (nula sem vistos).
+
+### Storage
+
+- bucket publico `communication-audio` (criado pela migracao, `on conflict` atualiza): ate 10 MB, so `audio/mpeg`, `audio/mp4`, `audio/x-m4a`, `audio/aac`, `audio/ogg`, `audio/webm`, `audio/wav`, `audio/x-wav`; arquivos em `campaigns/{sha256 24}.{ext}`, enviados pela chave de servico (sem policy em `storage.objects`);
+- imagens dos avisos: pasta `communications/images` no `content-assets` (WebP 1280 x 720, ate 420 KB, nome pelo hash, como as outras pastas da secao Area de membros);
+- audio ou imagem trocados no editor ficam sem referencia (limpeza fica para depois).
+
+### Retencao e exclusao
+
+- o sino mostra so os ultimos 90 dias (filtro na leitura);
+- `public.prune_communication_history()` (security definer, `search_path` fixo; `service_role` executa, `anon`/`authenticated` nao) apaga `notifications` com `created_at` de mais de 24 meses e `campaign_deliveries` com `updated_at` de mais de 24 meses de pop-up que nao esta mais no ar (encerrado, inclusive pelo fim da janela, excluido ou que nunca foi publicado; o estado de pop-up `active` ou `paused` fica, senao o recalculo recriaria a linha e o "Não mostrar de novo" deixaria de valer) (`docs/17` D8) e devolve `{ notifications, campaign_deliveries }`. Agendada todo dia as 06:41 UTC (`bunker707-communication-prune`), depois das limpezas de jobs e de dados pessoais;
+- conta excluida leva as linhas dela em `notifications` e `campaign_deliveries` (cascade); como autora de resposta (`actor_id`) ou de aviso (`created_by` etc.), vira nula;
+- `campaigns` nao entra na retencao: aviso nao tem dado pessoal de aluno (exclusao logica pela equipe).
+
+### Deploy antes da migracao
+
+Pode: o sino responde vazio, marcar como vista ou lida nao faz nada, clique, resposta e eventos do pop-up respondem 404, o pop-up nao aparece, o job `comunicacao` registra "migracao 202610200001 pendente" e termina sem erro, e as telas de Comunicacao mostram o aviso de atualizacao do banco (`src/server/db/pending-migration.ts`).
+
+### Comunicacao v2 (migracao `202610200002`, 21/10/2026)
+
+Produto e regras em `docs/23`. Idempotente, sem `drop ... if exists` nem `drop constraint`; gatilhos com `create or replace trigger`; checks novos em blocos `if not exists`. Todas as tabelas novas com RLS ligado, `revoke all` de `anon`/`authenticated` e escrita so do servidor.
+
+**campaigns** (colunas novas, todas nulas = comportamento da v1):
+
+- `sender_user_id` -> auth.users (set null): quem envia (pessoa da equipe); nulo = a escola. Fora de `admin_roles` na hora de ler = a escola;
+- `icon` + `icon_color`: ids do catalogo do app (`message-meta.ts`); o banco confere so o formato (`campaigns_icon_v2`: os dois juntos, `^[a-z][a-z0-9_]{1,23}$` e `^[a-z]{3,12}$`), para o catalogo mudar sem migracao;
+- `validity_minutes` (60 a 129.600) ou `valid_until` (exclusivos, `campaigns_validity_v2`); os dois nulos = 90 dias;
+- `flow_id` -> communication_flows (cascade) + `flow_node_id` (sem FK de proposito: a versao nasce antes do passo): conteudo de um passo de fluxo, situacao so `draft`, `sent` ou `canceled` (`campaigns_flow_message_v2`), fora da lista de avisos (`campaigns_notice_list_idx` parcial em `flow_id is null`). Num fluxo no ar, mudar o conteudo cria outra linha (versao) ja `sent`, com `sent_at`;
+- `campaigns_inbox_only_v2`: quem envia, tempo no sino e passo de fluxo so na notificacao (`inbox`); o pop-up ganha so o icone.
+
+**notifications** (colunas novas):
+
+- `expires_at` NOT NULL: fim no sino desta linha. O app calcula (menor entre a data, a chegada + o tempo, a chegada + 90 dias e, com `expire_with_anchor`, o fim da notificacao de referencia daquele aluno); o gatilho `set_notifications_expiry` poe `created_at + 90 dias` quando a linha chega sem ele (comentarios e codigo da v1); check `notifications_expires_v2` (`expires_at > created_at`; o teste para mim usa pelo menos agora + 1 h). As linhas existentes ganharam `created_at + 90 dias` na migracao;
+- `opened_at`: abriu de verdade (cartao, Ver mais, audio, botao, resposta, leitura por id); "Marcar todas" e abrir o sino nao gravam;
+- `audio_started_at`, `audio_heard` (48 caracteres `0`/`1`, OU acumulado), `audio_heard_percent` (0 a 100), `audio_completed_at` (44 trechos ou mais). Check `notifications_engagement_v2`: audio comecado so com aberta, ouvido so com comecado, mascara e porcentagem juntas. **Sem** "aberta implica lida": o app sempre grava `read_at` junto com `opened_at`, e a linha aberta pode voltar a nao lida (os testes da v1 fazem isso direto na tabela);
+- `flow_id` -> communication_flows (**cascade**: com `set null`, apagar de verdade um fluxo com linhas entregues deixava `flow_node_id` sem `flow_id` por um instante e o check `notifications_flow_v2` recusava; o app nunca apaga fluxo, so exclui com `deleted_at`) + `flow_node_id` -> communication_flow_nodes (set null); check `notifications_flow_v2` (passo so com fluxo e `kind = notice`). `dedupe_key = flow:<passo>`: uma vez por aluno, dividida pelas versoes do passo;
+- indices: `notifications_user_auto_idx (user_id, created_at desc)` parcial nas de fluxo sem teste (o limite diario), parciais `(flow_node_id)` e `(flow_id)` (relatorio).
+
+**communication_flows**: o fluxo.
+
+- `name` (1 a 80); `origin` (`builder` = Comunicacao > Fluxos; `notice` = as notificacoes seguintes de um aviso, com `source_campaign_id` -> campaigns cascade, unico entre os nao excluidos; check `communication_flows_origin`);
+- `status` (`draft`, `pending_approval`, `active`, `paused`, `ended`; `ended_at` junto, check `communication_flows_ended`) e `ended_reason` (`team`, `finished`, `source_withdrawn`, `source_deleted`);
+- `entry_audience` jsonb (o formato de `campaigns.audience`, <= 16 KB; ignorado no `notice`) e `entry_mode` (`current`, `current_and_new`, `new_only`); `goal` jsonb (Objetivo; nulo = sem); `watched_page_keys text[]` (ate 50; calculadas pelo app ao salvar);
+- colunas do job: `entry_count`, `entry_counted_at`, `entry_refreshed_at` (ultima faixa de 15 min conferida; nula = entrada pendente), `entry_completed_at` (`notice`: todos os que receberam ja entraram), `goal_swept_at`, `last_error`;
+- `revision` (muda a cada gravacao da tela), `activated_at`, `paused_at`, aprovacao (`requested_by/_at`, `approved_by/_at`), autoria (`created_by`, `updated_by`, `deleted_by`, todos set null), `created_at`, `updated_at` (versao do editor), `deleted_at`;
+- gatilho `set_communication_flows_version` (`touch_flow_version()`): o que o job grava (contagem, faixas, varredura, erro) nao muda `updated_at`, para o editor aberto nao levar 409. Indices: fonte unica, `communication_flows_live_idx (entry_refreshed_at nulls first)` nos ativos e a lista do construtor.
+
+**communication_flow_nodes**: a arvore de passos.
+
+- `flow_id` (cascade), `parent_id` (cascade), `branch` (`yes`/`no` abaixo de Condicao), `kind` (`entry`, `message`, `condition`; uma entrada por fluxo), `position`;
+- quando: `anchor` (`previous`, `sent`, `expires`), `anchor_node_id` (a notificacao de referencia), `offset_minutes` (0 a 86.400, de 5 em 5; `expires` a partir de 15);
+- notificacao: `campaign_id` (a versao atual do conteudo), `filter` jsonb ("So para quem..."), `expire_with_anchor` ("Ate a notificacao principal sumir", so com `sent`/`expires`);
+- condicao: `condition` jsonb, `wait_until_true` + `max_wait_minutes` (15 a 43.200);
+- `removed_at` (passo removido; os numeros ficam), `created_at`, `updated_at`. Checks de coerencia em `communication_flow_nodes_*`;
+- `born_first_level` (migracao `202610210001`): o passo foi criado como filho da entrada (gatilho `set_communication_flow_nodes_first_level` no insert; subir de nivel depois, com a condicao-pai removida, nao muda). O complemento das notificacoes seguintes (7.3) so vale para esses passos, e so para quem entrou antes de o passo ser criado.
+
+**communication_flow_runs**: a passagem de cada aluno, chave `(flow_id, user_id)` (uma vez por fluxo); `status` (`active`, `done`, `goal`, `ended`, `baseline` = ja combinava ao ativar um fluxo "so quem entrar depois" e nunca entra), `entered_at`, `finished_at`.
+
+**communication_flow_tasks**: o trabalho do motor, chave `(node_id, user_id)` (nunca roda duas vezes).
+
+- `status` (`pending`, `running`, `done`, `skipped`, `canceled`) e `result` (`sent`, `yes`, `no`, `filtered`, `goal`, `expired`, `cap`, `failed`, `removed`, `withdrawn`, `flow_ended`, `source_withdrawn`);
+- `anchor_at` (base do "quando" deste aluno; o horario real e sempre recalculado dele), `due_at` (proxima conferencia), `deadline_at`, `not_before` (para onde o limite diario ou o intervalo de 1 h empurrou o envio; so a aplicacao grava), `deferrals` (adiamentos pelo limite), `flow_active` (copia de "o fluxo esta ativo", mantida pela RPC de situacao para as sondagens lerem so o indice parcial), `attempts`, `claimed_at` (reserva), `last_error`, `notification_id` (set null), `finished_at`;
+- indices parciais: vencidas e reservadas so de fluxo ativo, abertas por (fluxo, aluno), varredura do Objetivo e presas.
+
+**member_page_visits**: chave `(user_id, page_key)`; `page_key` normalizada (`home`, `purchases`, `saved`, `materials`, `journey`, `continue`, `profile`, `support`, `content:<id>`, `checkout:<id>`; check com a mesma expressao do app), `first_visited_at`, `last_visited_at` (check `member_page_visits_order`: a ultima nunca antes da primeira; o app grava as duas com a propria hora na primeira visita e depois so avanca a ultima). Gravada so para as chaves de fluxos ativos ou pausados; indice `(page_key, last_visited_at desc)`.
+
+**RPCs** (security invoker, `search_path` fixo, so `service_role`; numeracao do `docs/23` §3): 7.1 `communication_claim_flow_tasks` (reserva com `skip locked` e carimbo `greatest(p_now, clock_timestamp())`; a que caiu 5 vezes vira falha), 7.2 `communication_enroll_flow`, 7.3 `communication_enroll_notice_recipients` (entrada das seguintes depois de o aviso estar `sent` e complemento de uma seguinte nova), 7.4 `communication_apply_flow_results` (aplica um lote numa transacao: envio uma vez, limite diario com trava por aluno, filhos), 7.5 `communication_save_flow` (arvore com versao conferida e as regras de edicao no ar; recusa pai ou ancora fora da arvore enviada), 7.6 `communication_wake_flow_tasks`, 7.7 `communication_flow_stats`, 7.8 `communication_flow_node_stats`, 7.9 `communication_flow_batch_facts` (um jsonb por lote: notificacoes, visitas, acessos, passagens e equipe), 7.10 `communication_campaign_engagement` (abriram, comecaram o audio, ouviram ate o fim), 7.11 `communication_record_notification_audio`, 7.12 `communication_overview` (mesmo retorno; ativos contam os fluxos no ar), 7.13 `communication_change_flow_state`, 7.14 `communication_withdraw_flow_step` e 7.15 `communication_release_flow_tasks` (devolve um lote que falhou antes de aplicar, devolvendo a tentativa). `communication_campaign_stats` nao muda. A `202610210001` troca 7.1 (a tarefa presa que vira falha fecha a passagem sem nada aberto), 7.2 e 7.4 (`revision` do fluxo em cada entrada e decisao: mudou no meio, ninguem entra / a tarefa volta como `stale_version`) e 7.3 (complemento so de passo que nasceu de primeiro nivel, criado depois da passagem), com as mesmas assinaturas. Embed entre `campaigns` e `communication_flows` so com a dica da FK (`campaigns!communication_flows_source_campaign_id_fkey(...)` ou `communication_flows!campaigns_flow_id_fkey(...)`): sao duas relacoes.
+
+**Retencao**: `prune_communication_history()` (mesmo agendamento das 06:41 UTC) passa a apagar tambem tarefas terminadas ha mais de 24 meses (as pendentes ficam), passagens de fluxos encerrados ou excluidos terminadas ha mais de 24 meses (no fluxo no ar, a passagem garante "uma vez por aluno") e visitas com a ultima ha mais de 24 meses, e devolve `{ notifications, campaign_deliveries, flow_tasks, flow_runs, page_visits }`. Conta excluida leva passagens, tarefas e visitas (cascade).
+
+**Branding**: `platform_settings.branding.schoolIcon` (texto; ausente = `/brand/icon-bunker.svg`): o Icone da escola da Marca. Toda gravacao da aparencia espalha o branding atual, para trocar a logo ou o estilo nao apagar o icone.
+
+**Deploy**: a 0002 vai **antes** do deploy que a usa (no Supabase da nuvem antes do merge na `dev`; na Hetzner o `deploy-membros` aplica as migracoes antes de trocar o app). Nao ha caminho de volta para as colunas da v1: sem ela, o sino e o pop-up respondem vazio, a rota do audio responde 404, o job registra "migracao 202610200001 pendente ou 202610200002 pendente" e termina, as telas mostram o aviso (`202610200002`), e envios, cliques e respostas nao funcionam. A migracao sozinha nao quebra o app da v1 (colunas novas nulas, `expires_at` pelo gatilho).
+
 ## Retencao de dados pessoais
 
 Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.
@@ -1444,6 +1581,8 @@ Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `doc
 | `email_webhook_events` | 90 dias depois de `received_at` | a linha inteira | nada (entrega, bounce e motivo ja estao em `email_outbox`) |
 
 Fora da rotina de proposito: `sale_grants` (migracao `202610170008`) so guarda ids (transacao, codigo da assinatura, aluno, acesso, produto) e datas, sem dado pessoal; sai junto com a conta (`on delete cascade`). Idempotente: linha com `anonymized_at` nao e tocada de novo. Checks no banco garantem a coerencia (`webhook_events_anonymized_consistent`; `email_outbox_anonymized_consistent`: `to_email` e `html` so sao nulos em linha anonimizada). A exclusao da conta anula `user_id` nas duas tabelas (`on delete set null`), e "Excluir aluno" ja anonimiza na hora as vendas do aluno (`anonymizeWebhookEventsFor`); prazos novos sao mudanca de migracao, com o teste ajustado.
+
+A Comunicacao (migracao `202610200001`) tem rotina propria, `public.prune_communication_history()` as 06:41 UTC: notificacoes e estados de pop-up saem inteiros depois de 24 meses, menos os de pop-up ainda no ar ou pausado (secao Comunicacao, Retencao e exclusao). Elas so guardam ids, datas e, nas notificacoes de comentario, o trecho da resposta que ja esta na aula. Desde a `202610200002` a mesma rotina apaga tarefas e passagens antigas de fluxos e visitas de pagina (secao Comunicacao v2).
 
 ## Suporte
 

@@ -127,7 +127,7 @@ Funcionalidades:
 - ranking;
 - conversas;
 - certificados;
-- notificacoes;
+- Implementado antecipadamente (20/10/2026): notificacoes no sino (avisos da escola com imagem, audio, botao e `Aceitar`/`Recusar`; respostas e mencoes nos comentarios) e pop-ups na home, criados pela equipe em Comunicacao > Avisos e pop-ups com segmentos por regras (`docs/22`); faixa, card e toast na home, e-mail, push, WhatsApp e a central de preferencias continuam aqui;
 - analise automatizada de sentimento, temas e insights dos comentarios para produtores (a persistencia e a moderacao operacional ja estao implementadas);
 - Implementado antecipadamente: Tutor IA conectado a transcricoes versionadas, chunks, BYOK de Gemini/OpenAI/Anthropic, entitlement, citacoes e historico por aluno/aula/chat;
 - Implementado antecipadamente: IA Diretor global para localizar conteudos autorizados, recomendar caminhos e montar trilhas, com historico separado, referencias internas validadas e consumo auditado;

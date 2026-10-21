@@ -1,4 +1,4 @@
-import { BellRing, CalendarClock, TicketPercent, type LucideIcon } from "lucide-react";
+import { BellRing, CalendarClock, TicketPercent, Workflow, type LucideIcon } from "lucide-react";
 import { Suspense } from "react";
 import { EmptyState } from "../empty-state";
 import { KpiTile } from "../kpi-tile";
@@ -15,16 +15,28 @@ import {
   type CommunicationTab
 } from "./communication-model";
 
-// Moldura de Comunicacao na disposicao do prototipo aprovado: cabecalho com a frase da aba, abas
-// sublinhadas (Avisos e pop-ups · Webinários · Promoções, cada uma com endereco proprio), os quatro
-// numeros da aba e, no lugar da lista, o aviso honesto de tela em construcao. Os numeros seguem o
-// periodo da barra superior (?periodo=) e ficam em "—": nada aqui e simulado. Nao ha botao "Novo
-// aviso" porque o editor ainda nao existe (seria um botao que finge funcionar).
+// Moldura de Comunicacao na disposicao do prototipo aprovado para as abas que ainda estao sendo
+// construidas (Webinários e Promoções): cabecalho com a frase da aba, abas sublinhadas (Avisos e
+// pop-ups · Fluxos · Webinários · Promoções, cada uma com endereco proprio), os quatro numeros da aba
+// e, no lugar da lista, o aviso honesto de tela em construcao. Os numeros seguem o periodo da barra
+// superior (?periodo=) e ficam em "—": nada aqui e simulado. Sem botao de criar: seria um botao que
+// finge funcionar. Avisos e pop-ups e Fluxos ja tem a tela de verdade (communication/notices-list-view.tsx
+// e communication/flows/flows-list-view.tsx), que usam as mesmas abas (CommunicationTabs); nunca esta
+// moldura.
 
 const TAB_ICONS: Record<CommunicationTab, LucideIcon> = {
   avisos: BellRing,
+  fluxos: Workflow,
   promocoes: TicketPercent,
   webinarios: CalendarClock
+};
+
+/** Complemento do aviso de construcao: o que chega com a tela. */
+const TAB_NOTES: Record<CommunicationTab, string> = {
+  avisos: " Os avisos chegam com esta tela.",
+  fluxos: " Os fluxos chegam com esta tela.",
+  promocoes: " As promoções chegam com esta tela.",
+  webinarios: " Os webinários chegam com esta tela."
 };
 
 const TAB_ITEMS = COMMUNICATION_TABS.map((tab) => ({
@@ -54,7 +66,7 @@ type CommunicationFrameProps = {
 
 export function CommunicationFrame({ "data-phase": phase, period, tab }: CommunicationFrameProps) {
   const meta = COMMUNICATION_TAB_META[tab];
-  const note = " Avisos, webinários e promoções chegam com esta tela.";
+  const note = TAB_NOTES[tab];
   const periodLabel = period.label.toLocaleLowerCase("pt-BR");
 
   return (

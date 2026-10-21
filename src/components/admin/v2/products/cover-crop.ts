@@ -6,7 +6,7 @@
 // o desenho no canvas fica em image-crop-dialog.tsx. As mesmas medidas valem no servidor
 // (IMAGE_UPLOAD_SPECS em src/server/catalog/webp.ts); o teste confere que as duas listas batem.
 
-export type ImageSlot = "cover" | "hero" | "loginSide" | "loginBackground";
+export type ImageSlot = "cover" | "hero" | "loginSide" | "loginBackground" | "notice";
 
 export type CropSpec = {
   /** Nome no texto da tela ("capa", "imagem de destaque"). */
@@ -79,6 +79,18 @@ export const IMAGE_SPECS: Record<ImageSlot, CropSpec> = {
     outputHeight: 1500,
     outputWidth: 1200,
     ratioLabel: "4:5"
+  },
+  // Imagem dos avisos (Comunicacao: notificacao no sino e pop-up na home), 16:9 como a previa do aluno.
+  notice: {
+    label: "imagem do aviso",
+    maxBytes: MAX_LARGE_IMAGE_BYTES,
+    maxDataUrlLength: MAX_LARGE_IMAGE_DATA_URL_LENGTH,
+    minHeight: 540,
+    minWidth: 960,
+    orientation: "landscape",
+    outputHeight: 720,
+    outputWidth: 1280,
+    ratioLabel: "16:9"
   }
 };
 

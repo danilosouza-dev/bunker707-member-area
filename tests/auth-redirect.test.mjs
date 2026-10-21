@@ -6,7 +6,7 @@ import "./support/resolve-extensionless-ts.mjs";
 // interno: navegadores tratam "\" como "/" em endereco http, entao "/\evil.com" viraria "//evil.com"
 // no cabecalho Location e mandaria o aluno para outro site (redirecionamento aberto).
 
-const { getSafeRedirectPath } = await import("../src/lib/auth/redirect.ts");
+const { getSafeRedirectPath, isAdminPath } = await import("../src/lib/auth/redirect.ts");
 
 test("caminhos internos passam com busca e ancora", () => {
   assert.equal(getSafeRedirectPath("/minhas-compras"), "/minhas-compras");
@@ -69,4 +69,14 @@ test("login e callback nunca sao destino, nem por caminho com ponto", () => {
   assert.equal(getSafeRedirectPath("/login?next=/x"), "/");
   assert.equal(getSafeRedirectPath("/auth/callback?code=1"), "/");
   assert.equal(getSafeRedirectPath("/conteudo/../login"), "/");
+});
+
+test("caminho do admin: /admin e o que fica embaixo dele, nunca um nome parecido nem outro site", () => {
+  for (const value of ["/admin", "/admin/", "/admin/comunicacao/avisos?pagina=2", "/admin?aba=1", "/admin#topo"]) {
+    assert.equal(isAdminPath(value), true, value);
+  }
+
+  for (const value of ["/", "/administracao", "/adminx/a", "/conteudo/admin", "https://evil.com/admin", "//evil.com/admin", ""]) {
+    assert.equal(isAdminPath(value), false, value);
+  }
 });

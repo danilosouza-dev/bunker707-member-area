@@ -10,6 +10,7 @@ import {
   getCarouselMetrics
 } from "@/components/carousel-navigation";
 import { ContentDetailsModal } from "@/components/content-details-modal";
+import { trackCheckoutClick } from "@/components/member/page-visit-beacon";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { ContinueWatchingCard, VerticalCoverCard } from "@/components/content-card";
 import { savedItemChangedEvent } from "@/components/saved-item-button";
@@ -322,6 +323,8 @@ export function CourseModulesHomeSection({
       openCourseDetails();
       return;
     }
+
+    trackCheckoutClick(course.id);
 
     if (course.purchaseTarget === "new_tab") {
       window.open(course.purchaseUrl, "_blank", "noopener,noreferrer");

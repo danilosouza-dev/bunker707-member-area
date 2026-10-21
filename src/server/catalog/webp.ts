@@ -6,8 +6,8 @@
 // (src/components/admin/v2/products/cover-crop.ts); tests/member-area-foundation.test.mjs confere.
 
 export type ProductImageSlot = "cover" | "hero";
-/** Slots aceitos pelo servidor: os do produto e os da Area de membros (login). */
-export type ImageUploadSlot = ProductImageSlot | "loginSide" | "loginBackground";
+/** Slots aceitos pelo servidor: os do produto, os da Area de membros (login) e a imagem dos avisos (Comunicacao). */
+export type ImageUploadSlot = ProductImageSlot | "loginSide" | "loginBackground" | "notice";
 
 /** width × height = saida do recorte; minWidth = menor origem aceita (o cliente nunca amplia, entao a imagem pode chegar menor). */
 export type ImageUploadSpec = { height: number; label: string; maxBytes: number; minWidth: number; width: number };
@@ -21,7 +21,9 @@ export const IMAGE_UPLOAD_SPECS: Record<ImageUploadSlot, ImageUploadSpec> = {
   cover: { height: 1080, label: "thumbnail do card", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 284, width: 720 },
   hero: { height: 720, label: "imagem de topo", maxBytes: MAX_PRODUCT_IMAGE_BYTES, minWidth: 1440, width: 1920 },
   loginBackground: { height: 1080, label: "imagem de fundo", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 1280, width: 1920 },
-  loginSide: { height: 1500, label: "imagem lateral", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 800, width: 1200 }
+  loginSide: { height: 1500, label: "imagem lateral", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 800, width: 1200 },
+  // Imagem 16:9 da notificacao e do pop-up (docs/22): 1280×720, mesmo peso das imagens grandes do login.
+  notice: { height: 720, label: "imagem do aviso", maxBytes: MAX_LARGE_IMAGE_BYTES, minWidth: 960, width: 1280 }
 };
 
 export const PRODUCT_IMAGE_SPECS: Record<ProductImageSlot, ImageUploadSpec> = {

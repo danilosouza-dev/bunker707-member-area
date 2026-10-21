@@ -83,6 +83,7 @@ export const adminNavItems: readonly AdminNavItem[] = [
   {
     children: [
       { href: "/admin/comunicacao/avisos", label: "Avisos e pop-ups" },
+      { href: "/admin/comunicacao/fluxos", label: "Fluxos" },
       { href: "/admin/comunicacao/webinarios", label: "Webinários" },
       { href: "/admin/comunicacao/promocoes", label: "Promoções" }
     ],
@@ -222,7 +223,7 @@ export function getAdminTopbarScope(pathname: string | null | undefined): AdminT
 
   if (
     /^\/admin\/produtos\/[^/]+\/desempenho$/.test(path) ||
-    /^\/admin\/comunicacao(?:\/(?:avisos|webinarios|promocoes))?$/.test(path) ||
+    /^\/admin\/comunicacao(?:\/(?:avisos|fluxos|webinarios|promocoes))?$/.test(path) ||
     path === "/admin/configuracoes/ia/consumo"
   ) {
     return { period: true, product: false };
@@ -236,6 +237,8 @@ const mobileTitleOverrides: readonly AdminNavChild[] = [
   { href: "/admin/produtos/novo", label: "Novo produto" },
   { href: "/admin/produtos/importar", label: "Importar" },
   { href: "/admin/produtos/pacotes", label: "Pacotes" },
+  { href: "/admin/comunicacao/avisos/novo", label: "Novo aviso" },
+  { href: "/admin/comunicacao/fluxos/novo", label: "Novo fluxo" },
   { href: "/admin/configuracoes/equipe", label: "Equipe" },
   { href: "/admin/configuracoes/ia", label: "Tutor IA" },
   { href: "/admin/configuracoes/vendas", label: "Vendas" }

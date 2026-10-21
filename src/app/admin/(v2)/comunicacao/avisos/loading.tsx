@@ -1,5 +1,5 @@
-import { CommunicationFrameSkeleton } from "@/components/admin/v2/frames/frame-skeletons";
+import { NoticesListSkeleton } from "@/components/admin/v2/communication/notices-skeletons";
 
 export default function AdminAnnouncementsLoading() {
-  return <CommunicationFrameSkeleton tab="avisos" />;
+  return <NoticesListSkeleton />;
 }

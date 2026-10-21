@@ -36,3 +36,25 @@ test("guarda: o layout raiz monta o feedback de navegacao uma vez e o carregamen
   assert.match(loading, /aria-live="polite"/);
   assert.match(loading, /data-route-loading/);
 });
+
+test("guarda: entrar no admin vindo do login, da troca de senha ou da area do aluno recarrega a pagina", async () => {
+  // O Permissions-Policy libera o microfone so em /admin (next.config.ts) e vale para o documento
+  // carregado: numa troca de rota, "Gravar agora" dos avisos ficaria bloqueado (docs/22 §4.5).
+  const login = await source("../src/components/login-experience.tsx");
+  const passwordChange = await source("../src/components/password-change-experience.tsx");
+  const appShell = await source("../src/components/app-shell.tsx");
+  const support = await source("../src/components/member/pages/support-view.tsx");
+
+  assert.match(login, /if \(isAdminPath\(path\)\) \{\s*window\.location\.replace\(path\);/);
+  assert.equal(login.match(/leaveLogin\(router, await getPostLoginRedirectPath\(/g)?.length, 3, "sessao ja aberta, mudanca de sessao e e-mail e senha");
+  assert.doesNotMatch(login, /router\.replace\(await getPostLoginRedirectPath/);
+  assert.match(passwordChange, /if \(isAdminPath\(destination\)\) \{\s*window\.location\.replace\(destination\);/);
+
+  const navigation = appShell.match(/function handleProgressAwareNavigation[\s\S]*?\n  \}/u)?.[0] ?? "";
+  assert.match(
+    navigation,
+    /await flushPendingSavedItemChanges\(\);[\s\S]*if \(isAdminPath\(href\)\) \{\s*window\.location\.assign\(href\);\s*return;\s*\}\s*router\.push\(href\);/,
+    "salva progresso e favoritos antes de carregar o admin"
+  );
+  assert.match(support, /<a className=\{memberButtonClassName\(\{ size: "sm" \}\)\} href="\/admin\/area-de-membros\/login">/);
+});

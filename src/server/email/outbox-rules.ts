@@ -8,7 +8,8 @@ import type { EmailSendResult } from "./types";
 export const EMAIL_OUTBOX_STATUSES = ["queued", "sending", "sent", "failed", "bounced", "complained"] as const;
 export type EmailOutboxStatus = (typeof EMAIL_OUTBOX_STATUSES)[number];
 
-export const EMAIL_KINDS = ["welcome", "purchase"] as const;
+/** `sent_as`: a pessoa da equipe escolhida em "Quem envia" fica sabendo (docs/23, §1.6). */
+export const EMAIL_KINDS = ["welcome", "purchase", "sent_as"] as const;
 export type EmailKind = (typeof EMAIL_KINDS)[number];
 
 /** Depois desta quantidade de falhas passageiras a linha vira `failed` (dead-letter). */
@@ -105,4 +106,9 @@ export function purchaseIdempotencyKey(input: { entitlementIds: string[]; source
   }
 
   return idempotencyKeyOf("purchase", input.sourceProvider, input.userId, ...[...input.entitlementIds].sort());
+}
+
+/** Uma vez por pessoa por aviso ("sent-as:campaign:<id>:<pessoa>") ou por fluxo ("sent-as:flow:<id>:<pessoa>"). */
+export function sentAsIdempotencyKey(input: { campaignId?: string | null; flowId?: string | null; userId: string }) {
+  return input.flowId ? idempotencyKeyOf("sent-as", "flow", input.flowId, input.userId) : idempotencyKeyOf("sent-as", "campaign", input.campaignId, input.userId);
 }

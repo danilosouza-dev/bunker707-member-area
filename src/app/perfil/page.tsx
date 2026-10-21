@@ -4,6 +4,8 @@ import { MemberFooter } from "@/components/member-footer";
 import { ProfileView } from "@/components/member/pages/profile-view";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { requirePageUser } from "@/server/auth/guards";
+import { pageKeyOfRoute } from "@/server/member-area/page-visit-model";
+import { trackMemberPageVisit } from "@/server/member-area/page-visits";
 import { getAppShellData } from "@/server/db/platform-store";
 import { getProfilePageData } from "@/server/member-area/student-pages";
 import { normalizeProfileTab } from "@/server/member-area/student-pages-model";
@@ -31,6 +33,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   const [shellData, profile] = await Promise.all([getAppShellData(user), getStudentProfileRecord(user)]);
   const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
   const { accesses, details } = await getProfilePageData(accessPreviewMode, user, shellData.student.fullName, profile);
+  await trackMemberPageVisit({ accessPreviewMode, pageKey: pageKeyOfRoute("/perfil"), userId: user.id });
 
   return (
     <AppShell

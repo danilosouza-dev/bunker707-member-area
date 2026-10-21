@@ -60,6 +60,25 @@ export async function requireApiUser() {
   return { response: null, user };
 }
 
+/**
+ * Contraparte de requireApiUser com getSessionUser: com AUTH_SESSION_STRATEGY=claims o JWT vale pela
+ * assinatura, sem ida ao Auth. So para os beacons de telemetria que apenas gravam e sao idempotentes
+ * (audio ouvido do sino e visitas de pagina, docs/23): sessao revogada continua entrando ate o token
+ * vencer, a mesma troca que as paginas de conteudo aceitaram (docs/06).
+ */
+export async function requireApiSessionUser() {
+  const user = await getSessionUser();
+
+  if (!user) {
+    return {
+      response: NextResponse.json({ error: "Sessao obrigatoria." }, { status: 401 }),
+      user: null
+    };
+  }
+
+  return { response: null, user };
+}
+
 export async function requireApiAdmin(options?: { roles?: readonly string[] }) {
   const auth = await requireApiUser();
 

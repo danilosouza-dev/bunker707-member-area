@@ -122,6 +122,7 @@
 - Ranking.
 - Certificados.
 - Implementado antecipadamente: IA da aula; agentes gerais e de comentarios continuam como evolucoes separadas.
+- Implementado antecipadamente: notificacoes no sino e pop-ups na home (Comunicacao v1, 20/10/2026; secao Entregue abaixo); faixa, card, toast, e-mail, push, WhatsApp e preferencias continuam como evolucoes.
 - Dashboard administrativo.
 ## Entregue — importacao de cursos por playlist
 
@@ -134,3 +135,16 @@
 - capa opcional e card textual sem capa;
 - importacao transacional, idempotente e sempre em rascunho;
 - testes de contrato e seguranca.
+
+## Entregue — Comunicacao v1: notificacoes e pop-ups (20/10/2026)
+
+Detalhes em `docs/22`.
+
+- tabelas `campaigns`, `notifications` e `campaign_deliveries`, bucket `communication-audio` e retencao de 24 meses (migracao `202610200001`);
+- sino do aluno com numero de novas, abas `Todas` e `Não lidas`, lista por dia, marcar como lidas, 90 dias de historico e carregar mais;
+- notificacao de aviso com imagem 16:9, audio com forma de onda e velocidade, botao interno ou externo e resposta `Aceitar`/`Recusar`;
+- notificacao automatica de resposta e de mencao nos comentarios (aula e Comunidade do admin);
+- pop-up so na home, 1 por sessao e 1 a cada 24 h, `Lembrar depois` e `Não mostrar de novo`;
+- Comunicacao > Avisos e pop-ups no admin: lista com os numeros do periodo, editor com previa real, imagem, audio enviado ou gravado no navegador, segmento por regras E/OU com contagem ao vivo, enviar agora, agendar, teste para mim, aprovacao acima de 500 alunos, pausar, retomar, encerrar, retirar, duplicar, excluir e relatorio;
+- job `comunicacao` no tick de minuto (envio agendado retomavel e recalculo do segmento dos pop-ups);
+- testes unitarios, de integracao e de ponta a ponta (`docs/18`).

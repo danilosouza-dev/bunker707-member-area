@@ -24,6 +24,15 @@ function isValidLogoInput(logo: PlatformAppearanceInput["logo"]) {
   );
 }
 
+/** Icone da escola: endereco ou data URL do envio; null = de volta ao simbolo padrao. */
+function isValidSchoolIconInput(schoolIcon: PlatformAppearanceInput["schoolIcon"]) {
+  return (
+    typeof schoolIcon === "object" &&
+    schoolIcon !== null &&
+    (schoolIcon.image === null || typeof schoolIcon.image === "string")
+  );
+}
+
 /** Estilo valido = completo e so com valores conhecidos (normalizar nao muda nada). */
 function isValidStyleInput(style: PlatformAppearanceInput["style"]) {
   return (
@@ -41,11 +50,17 @@ export async function PUT(request: Request) {
   }
 
   try {
-    // Capa + logo podem ir juntas como data URLs base64 (ate 8 MB cada antes do encode).
+    // Capa + logo podem ir juntas como data URLs base64 (ate 8 MB cada antes do encode); o icone da escola
+    // chega reduzido a 512 × 512 no navegador.
     const payload = await readBoundedJson<Partial<PlatformAppearanceInput>>(request, 24_000_000);
 
-    if (payload.hero === undefined && payload.logo === undefined && payload.style === undefined) {
-      return NextResponse.json({ error: "Informe a capa da home, a logo ou o estilo." }, { status: 400 });
+    if (
+      payload.hero === undefined &&
+      payload.logo === undefined &&
+      payload.schoolIcon === undefined &&
+      payload.style === undefined
+    ) {
+      return NextResponse.json({ error: "Informe a capa da home, a logo, o ícone da escola ou o estilo." }, { status: 400 });
     }
 
     if (payload.hero !== undefined && !isValidHeroInput(payload.hero)) {
@@ -56,6 +71,10 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "Configuracao de logo invalida." }, { status: 400 });
     }
 
+    if (payload.schoolIcon !== undefined && !isValidSchoolIconInput(payload.schoolIcon)) {
+      return NextResponse.json({ error: "Configuracao de icone invalida." }, { status: 400 });
+    }
+
     if (payload.style !== undefined && !isValidStyleInput(payload.style)) {
       return NextResponse.json({ error: "Configuracao de estilo invalida." }, { status: 400 });
     }
@@ -63,6 +82,7 @@ export async function PUT(request: Request) {
     const data = await updatePlatformAppearance({
       hero: payload.hero,
       logo: payload.logo,
+      schoolIcon: payload.schoolIcon,
       style: payload.style
     });
     invalidateCatalog({ from: "route" });

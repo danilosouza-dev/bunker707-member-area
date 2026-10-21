@@ -4,6 +4,11 @@
 > 4.3 comecou. O produtor decidiu CX23 (4 GB) para os dois servidores, mantidos ligados (secao 8). Leia as
 > secoes 7 e 8 antes da 4.
 >
+> **Atualizacao de 21/10/2026:** a Comunicacao v2 traz a migracao `202610200002` (com a RPC 7.15 e as correcoes
+> M1 a M4), que precisa estar aplicada antes do deploy que a usa: no Supabase da nuvem antes do merge na `dev`;
+> na producao o `deploy-membros` aplica sozinho. Passos na secao 9. As correcoes da revisao vem na
+> `202610210001` (a 0002 ja esta aplicada na nuvem de teste e nao muda): mesma regra, secao 9.1.
+>
 > **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
 > `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a
 > `dev` (teste na Vercel), promocao para a `main` e `deploy-membros` disparado da `main` (secao 8, item 6).
@@ -220,3 +225,68 @@ Pendente, para o produtor decidir:
    Tracking de Production de `main` para `dev`; a branch da migracao entrou na `dev` (#105, com a #106) e foi
    promovida para a `main` (#107); `deploy-membros` da `main` (execucao 39313206338) pos no ar
    `hetzner-sha-5e44340`, smoke verde, `AUTH_SESSION_STRATEGY=claims` conferido no container.
+
+## 9. Comunicacao v2: migracao `202610200002` antes do deploy (21/10/2026)
+
+A PR da Comunicacao v2 (`docs/23`, branch `claude/notification-system-ymk02g`) traz a migracao
+`supabase/migrations/202610200002_communication_v2.sql`. A `202610200001` (v1) ja esta aplicada no Supabase da
+nuvem e nao muda.
+
+Regra: **a 0002 vai antes do deploy que a usa**. O app da v2 nao tem caminho de volta para as colunas da v1:
+sem a migracao o sino e o pop-up respondem vazio, a rota do audio responde 404, o job `comunicacao` registra
+"migracao 202610200001 pendente ou 202610200002 pendente" e termina, as telas mostram o aviso de atualizacao,
+e envios, cliques e respostas nao funcionam. O contrario e seguro: a migracao sozinha nao atrapalha o app da
+v1 (colunas novas nulas; `expires_at` preenchido pelo gatilho).
+
+A versao a aplicar e a do repositorio, que ja traz as correcoes feitas na implementacao:
+
+- M1: RPC 7.15 `communication_release_flow_tasks(jsonb)` (devolve um lote que falhou antes de aplicar, devolvendo a
+  tentativa), com revoke/grant/comment;
+- M2: a reserva (7.1) carimba `greatest(p_now, clock_timestamp())`;
+- M3: a 7.5 recusa pai ou ancora fora da arvore enviada (`Passo invalido.`);
+- M4: o check `notifications_engagement_v2` nao tem "aberta implica lida";
+- `notifications.flow_id` com `on delete cascade` (achado no teste do contrato, antes do M1).
+
+Se alguma versao anterior da 0002 tivesse sido aplicada em algum banco, os blocos `if not exists` manteriam o
+check antigo: confira antes (abaixo). Ate 21/10/2026 a 0002 nao foi aplicada em nenhum banco fora do local.
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**, antes do merge da PR na `dev` (a Vercel
+publica a `dev` sozinha no merge):
+
+1. secoes 1 a 8 pelo MCP do Supabase (`apply_migration`, nome `communication_v2`), de uma vez ou em partes, na
+   ordem do arquivo (fluxos -> passos -> `campaigns` -> `notifications` -> passagens e tarefas -> visitas ->
+   RPCs -> permissoes). O MCP trava (timeout) em comando que ele julga destrutivo; a 0002 nao tem `drop`, mas
+   se uma parte travar, mande-a pelo SQL Editor;
+2. secao 9 (retencao: `delete` dentro de `prune_communication_history()`) pelo SQL Editor (ou `psql`);
+3. conferir: as consultas do cabecalho da migracao (`sem_fim = 0`);
+   `select count(*) from pg_proc where proname = 'communication_release_flow_tasks';` = 1;
+   `select pg_get_constraintdef(oid) from pg_constraint where conname = 'notifications_engagement_v2';` sem
+   `read_at`; `list_migrations` com `202610200002`. Se partes foram pelo SQL Editor e a versao nao aparece:
+   `insert into supabase_migrations.schema_migrations (version, name) values ('202610200002', 'communication_v2') on conflict do nothing;`
+4. o tick do ambiente de teste ligado (secao 5: `jobs_tick_url` e `jobs_tick_token` no Vault); seguir o roteiro
+   do `docs/23` §11.
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam as migracoes novas
+antes de trocar o app (`deploy.sh`, docs/20 §9). Depois, a rodada do `carga` com um fluxo no ar (docs/20 §12.1).
+
+### 9.1 Correcoes da revisao: migracao `202610210001` (21/10/2026)
+
+A 0002 ja foi aplicada no Supabase da nuvem de teste e **nao muda mais**. O que a revisao corrigiu no banco
+vem em `supabase/migrations/202610210001_communication_v2_fixes.sql`, idempotente, sem `drop` e sem `delete`:
+
+1. coluna `communication_flow_nodes.born_first_level` + gatilho `set_communication_flow_nodes_first_level`
+   (passo criado como filho da entrada);
+2. 7.1 `communication_claim_flow_tasks`: a tarefa presa que vira falha fecha a passagem sem nada aberto;
+3. 7.2 `communication_enroll_flow`: confere a `revision` de cada entrada;
+4. 7.3 `communication_enroll_notice_recipients`: complemento so de passo que nasceu de primeiro nivel, criado
+   depois da passagem (nunca o passo que subiu de nivel para quem foi pelo outro caminho);
+5. 7.4 `communication_apply_flow_results`: confere a `revision` de cada decisao (`stale_version`);
+6. permissoes e descricoes (mesmas assinaturas).
+
+Ambiente de teste: secoes 1 a 6 pelo MCP do Supabase (`apply_migration`, nome `communication_v2_fixes`), de uma
+vez ou em partes, **antes** do merge da correcao na `dev` (o app novo manda `revision`; a migracao sozinha nao
+atrapalha o app anterior, que nao manda e nao e conferido). Conferir:
+`select tgname from pg_trigger where tgrelid = 'public.communication_flow_nodes'::regclass;` (com
+`set_communication_flow_nodes_first_level`) e `list_migrations` com `202610210001`. Passos ja existentes ficam com
+`born_first_level = false` (o complemento so vale para seguintes criadas depois de aplicar). Producao: nada
+manual (o `deploy-membros` aplica).

@@ -1,4 +1,5 @@
-// Area de membros (docs/17 §1.8): Vitrine (as fileiras da home do aluno) e Marca (banner e logo).
+// Area de membros (docs/17 §1.8): Vitrine (as fileiras da home do aluno) e Marca (banner, logo, icone da
+// escola e estilo).
 // Modulo puro, sem "server-only", sem React e so com imports de tipo por alias: o carregador
 // (queries.ts) usa para mapear as linhas do banco, os editores usam para validar e mover fileiras,
 // e tests/admin-storefront.test.mjs carrega direto pelo Node.
@@ -10,6 +11,7 @@
 // que saiu de venda (pruneHomeSectionRefs) e a mesma nos dois lados: o servidor importa daqui.
 
 import { isSameMemberStyle, normalizeMemberStyle, type MemberStyleConfig } from "../../lib/member-style";
+import { isDefaultSchoolIcon, normalizeSchoolIcon } from "../communications/message-meta";
 import type {
   ContentKind,
   HomeSectionConfig,
@@ -93,7 +95,13 @@ export type StorefrontEditorData = {
   sectionsUpdatedAt: string | null;
 };
 
-export type StorefrontBrand = { hero: StorefrontHero; logoImage: string | null; style: MemberStyleConfig };
+export type StorefrontBrand = {
+  hero: StorefrontHero;
+  logoImage: string | null;
+  /** Icone da escola (circulo das notificacoes da escola); sempre um endereco, o simbolo padrao quando ausente. */
+  schoolIcon: string;
+  style: MemberStyleConfig;
+};
 
 export const DEFAULT_HERO_IMAGE = "/hero/bunker-707-red-front-hero.png";
 export const DEFAULT_LOGO_IMAGE = "/brand/logo-bunker.svg";
@@ -104,7 +112,7 @@ const UPCOMING_BUCKET = "upcoming_products";
 const STRUCTURE_DEFAULT_KINDS = new Set(["Curso", "Bootcamp", "Mentoria", "Webinario", "Produto"]);
 
 /* ------------------------------------------------------------------------------------------------
- * Marca (hero e logo)
+ * Marca (hero, logo e icone da escola)
  * ---------------------------------------------------------------------------------------------- */
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -139,6 +147,11 @@ export function normalizeLogo(value: unknown, configured: boolean): string | nul
   const logo = typeof value.logoImage === "string" ? value.logoImage.trim() : "";
 
   return logo || DEFAULT_LOGO_IMAGE;
+}
+
+/** Icone da escola gravado em branding.schoolIcon: ausente, vazio ou sem marca gravada = o simbolo padrao. */
+export function normalizeBrandingSchoolIcon(branding: unknown): string {
+  return normalizeSchoolIcon(isRecord(branding) ? branding.schoolIcon : undefined);
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -474,6 +487,7 @@ export function mapStorefrontBrand(platformRows: readonly PlatformSettingRow[]):
   return {
     hero: normalizeHero(settings.get("hero")),
     logoImage: normalizeLogo(settings.get("branding"), settings.has("branding")),
+    schoolIcon: normalizeBrandingSchoolIcon(settings.get("branding")),
     style: normalizeMemberStyle(settings.get("branding"))
   };
 }
@@ -965,13 +979,21 @@ export function resolveSectionPreview(section: HomeSectionConfig, products: read
  * Marca: rascunho e corpo do PUT /api/admin/appearance
  * ---------------------------------------------------------------------------------------------- */
 
-export type BrandDraft = { heroEnabled: boolean; heroImage: string; logoImage: string | null; style: MemberStyleConfig };
+export type BrandDraft = {
+  heroEnabled: boolean;
+  heroImage: string;
+  logoImage: string | null;
+  /** Endereco do icone (ou data URL de um envio ainda nao publicado); o simbolo padrao quando nao ha icone. */
+  schoolIcon: string;
+  style: MemberStyleConfig;
+};
 
 export function brandToDraft(brand: StorefrontBrand): BrandDraft {
   return {
     heroEnabled: brand.hero.enabled,
     heroImage: brand.hero.image || DEFAULT_HERO_IMAGE,
     logoImage: brand.logoImage,
+    schoolIcon: normalizeSchoolIcon(brand.schoolIcon),
     style: brand.style
   };
 }
@@ -984,13 +1006,22 @@ export function isBrandDirty(published: BrandDraft, draft: BrandDraft) {
   return (
     isBrandHeroDirty(published, draft) ||
     draft.logoImage !== published.logoImage ||
+    normalizeSchoolIcon(draft.schoolIcon) !== normalizeSchoolIcon(published.schoolIcon) ||
     !isSameMemberStyle(draft.style, published.style)
   );
 }
 
+export type AppearancePayload = {
+  hero?: { enabled: boolean; image?: string };
+  logo?: { image: string | null };
+  /** null = de volta ao simbolo padrao (a chave sai de branding). */
+  schoolIcon?: { image: string | null };
+  style?: MemberStyleConfig;
+};
+
 /** So manda o que mudou; imagem so quando trocou. */
 export function buildAppearancePayload(published: BrandDraft, draft: BrandDraft) {
-  const payload: { hero?: { enabled: boolean; image?: string }; logo?: { image: string | null }; style?: MemberStyleConfig } = {};
+  const payload: AppearancePayload = {};
 
   if (isBrandHeroDirty(published, draft)) {
     payload.hero = draft.heroEnabled
@@ -1002,6 +1033,12 @@ export function buildAppearancePayload(published: BrandDraft, draft: BrandDraft)
     payload.logo = { image: draft.logoImage };
   }
 
+  const schoolIcon = normalizeSchoolIcon(draft.schoolIcon);
+
+  if (schoolIcon !== normalizeSchoolIcon(published.schoolIcon)) {
+    payload.schoolIcon = { image: isDefaultSchoolIcon(schoolIcon) ? null : schoolIcon };
+  }
+
   if (!isSameMemberStyle(draft.style, published.style)) {
     payload.style = draft.style;
   }
@@ -1009,7 +1046,52 @@ export function buildAppearancePayload(published: BrandDraft, draft: BrandDraft)
   return payload;
 }
 
-/** Link colado para banner ou logo: https (ou caminho do proprio site), sem espacos nem aspas. */
+/** Icone da escola (Marca): proporcao aceita, menor lado e a medida maxima depois de reduzir no navegador. */
+export const SCHOOL_ICON_RULES = { maxRatio: 1.1, maxSide: 512, minRatio: 0.9, minSide: 128 } as const;
+
+/**
+ * Icone da escola enviado ou colado: quadrado (proporcao de 0,9 a 1,1) e, se for imagem de pixels, com
+ * pelo menos 128 px de lado. Um SVG desenha em qualquer tamanho, entao so a proporcao conta. Sem largura
+ * ou altura legivel nao da para conferir: recusa como nao quadrada.
+ */
+export function schoolIconSizeProblem(size: { height: number; vector?: boolean; width: number }): string | null {
+  const { height, width } = size;
+
+  if (!(Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) {
+    return "Use uma imagem quadrada (mesma largura e altura).";
+  }
+
+  const ratio = width / height;
+
+  if (ratio < SCHOOL_ICON_RULES.minRatio || ratio > SCHOOL_ICON_RULES.maxRatio) {
+    return "Use uma imagem quadrada (mesma largura e altura).";
+  }
+
+  if (!size.vector && Math.min(width, height) < SCHOOL_ICON_RULES.minSide) {
+    return "Use uma imagem de pelo menos 128 × 128 px.";
+  }
+
+  return null;
+}
+
+/** Medida em px de um atributo width/height de SVG ("128" ou "128px"); porcentagem, unidade ou ausente = 0. */
+function svgLength(value: string | null) {
+  const match = /^\s*(\d+(?:\.\d+)?)(?:px)?\s*$/.exec(value ?? "");
+  return match ? Number(match[1]) : 0;
+}
+
+/** Medida de um SVG enviado pelos atributos da raiz: o viewBox, ou width e height em px (0 = sem medida). */
+export function svgSizeOf(attributes: { height: string | null; viewBox: string | null; width: string | null }) {
+  const box = (attributes.viewBox ?? "").trim().split(/[\s,]+/).map(Number);
+
+  if (box.length === 4 && box[2] > 0 && box[3] > 0) {
+    return { height: box[3], width: box[2] };
+  }
+
+  return { height: svgLength(attributes.height), width: svgLength(attributes.width) };
+}
+
+/** Link colado para banner, logo ou icone: https (ou caminho do proprio site), sem espacos nem aspas. */
 export function validateImageLink(value: string): string | null {
   const link = value.trim();
 

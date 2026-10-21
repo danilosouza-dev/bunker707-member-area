@@ -10,6 +10,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
 import { getUserDisplayName } from "@/server/auth/session";
 import { normalizeCommentForModeration, validateLessonCommentBody } from "@/server/comments/comment-validation";
+import { scheduleCommentReplyNotification } from "@/server/communications/comment-notifications";
 import { assertNoDbError, communityDb, CommunityError, loadLessonPathResolver } from "./db";
 import { COMMENT_COLUMNS, toCommentListItem, toQuickReply, type CommentRow, type QuickReplyRow } from "./mappers";
 import { QUICK_REPLY_LIMIT } from "./model";
@@ -157,6 +158,16 @@ export async function replyToComment(
 
     const resolvePath = await loadLessonPathResolver([{ contentId: parent.content_id, lessonId: parent.lesson_id }]);
     const row = insertResult.data as CommentRow;
+
+    // "Professor respondeu seu comentário" no sino do aluno (depois da resposta, melhor esforco).
+    scheduleCommentReplyNotification({
+      actorId: user.id,
+      body: row.body,
+      contentId: parent.content_id,
+      lessonId: parent.lesson_id,
+      parentCommentId: parent.id,
+      replyId: row.id
+    });
 
     refresh();
 

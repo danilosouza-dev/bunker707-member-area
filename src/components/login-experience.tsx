@@ -18,7 +18,7 @@ import {
   PASSWORD_RESET_MISSING_EMAIL,
   PASSWORD_RESET_SENT_NOTICE
 } from "@/lib/auth/password-reset";
-import { getSafeRedirectPath } from "@/lib/auth/redirect";
+import { getSafeRedirectPath, isAdminPath } from "@/lib/auth/redirect";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import {
   DEFAULT_LOGIN_VISUAL_POSITION,
@@ -192,6 +192,20 @@ async function getPostLoginRedirectPath(userMetadata: unknown, safeRedirectPath:
   return safeRedirectPath;
 }
 
+/**
+ * Depois de entrar: o admin abre com carregamento inteiro (o microfone so e liberado num documento
+ * carregado em /admin; isAdminPath); o resto, pelo roteador com feedback.
+ */
+function leaveLogin(router: ReturnType<typeof useNavigationFeedbackRouter>, path: string) {
+  if (isAdminPath(path)) {
+    window.location.replace(path);
+    return;
+  }
+
+  router.replace(path);
+  router.refresh();
+}
+
 function LoginFormPanel({
   authConfigured: authAvailable,
   config,
@@ -243,8 +257,7 @@ function LoginFormPanel({
         return;
       }
 
-      router.replace(await getPostLoginRedirectPath(data.session.user.user_metadata, safeRedirectPath));
-      router.refresh();
+      leaveLogin(router, await getPostLoginRedirectPath(data.session.user.user_metadata, safeRedirectPath));
     });
 
     const { data } = supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -252,8 +265,7 @@ function LoginFormPanel({
         return;
       }
 
-      router.replace(await getPostLoginRedirectPath(session.user.user_metadata, safeRedirectPath));
-      router.refresh();
+      leaveLogin(router, await getPostLoginRedirectPath(session.user.user_metadata, safeRedirectPath));
     });
 
     return () => {
@@ -315,8 +327,7 @@ function LoginFormPanel({
       }
 
       await recordLoginEvent(supabase, data.user.id, "password");
-      router.replace(await getPostLoginRedirectPath(data.user.user_metadata, safeRedirectPath));
-      router.refresh();
+      leaveLogin(router, await getPostLoginRedirectPath(data.user.user_metadata, safeRedirectPath));
     } catch {
       setErrorMessage("Não foi possível entrar agora. Tente de novo em instantes.");
     } finally {

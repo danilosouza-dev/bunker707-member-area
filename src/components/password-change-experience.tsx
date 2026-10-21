@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useNavigationFeedbackRouter } from "@/components/navigation-feedback";
-import { getSafeRedirectPath } from "@/lib/auth/redirect";
+import { getSafeRedirectPath, isAdminPath } from "@/lib/auth/redirect";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type PasswordChangeExperienceProps = {
@@ -104,7 +104,15 @@ export function PasswordChangeExperience({
         });
       }
 
-      router.replace(await getPostPasswordChangeRedirectPath());
+      const destination = await getPostPasswordChangeRedirectPath();
+
+      // Admin: carregamento inteiro (o microfone so e liberado num documento carregado em /admin).
+      if (isAdminPath(destination)) {
+        window.location.replace(destination);
+        return;
+      }
+
+      router.replace(destination);
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar a senha.");

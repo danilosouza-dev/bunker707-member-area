@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { HeroVideo } from "@/components/hero-video";
+import { trackCheckoutClick, trackProductDetails } from "@/components/member/page-visit-beacon";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { usePlatformLogoImage } from "@/components/platform-branding";
 import { SavedItemButton } from "@/components/saved-item-button";
@@ -440,6 +441,7 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
   const modalScrollerRef = useRef<HTMLDivElement>(null);
   const moduleSectionHeaderRef = useRef<HTMLDivElement>(null);
   const isClosing = item ? closingItemId === item.id : false;
+  const detailsItemId = item?.id ?? null;
 
   function handleClose() {
     if (!item || closingItemId === item.id) {
@@ -511,6 +513,13 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
       }
     };
   }, []);
+
+  // Abrir os detalhes conta como visita a pagina do produto (docs/23 §5.2): um beacon por produto.
+  useEffect(() => {
+    if (detailsItemId) {
+      trackProductDetails(detailsItemId);
+    }
+  }, [detailsItemId]);
 
   // Abrir um modulo nao rola o modal: a troca acontece no lugar, como a lista de episodios da Netflix
   // (rolagem suave somada a troca de conteudo parecia uma tremida). So quando o titulo da secao ja saiu
@@ -677,6 +686,8 @@ export function ContentDetailsModal({ accessPreviewMode, item, onClose, structur
     if (!currentItem.purchaseUrl) {
       return;
     }
+
+    trackCheckoutClick(currentItem.id);
 
     if (currentItem.purchaseTarget === "new_tab") {
       window.open(currentItem.purchaseUrl, "_blank", "noopener,noreferrer");

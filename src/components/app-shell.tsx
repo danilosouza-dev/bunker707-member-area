@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
+import { MemberPopupHost } from "@/components/member/notifications/member-popup-host";
 import { DirectorIcon } from "@/components/member/shell/director-parts";
 import { MemberAccountMenu } from "@/components/member/shell/member-account-menu";
 import { MemberNotificationsMenu } from "@/components/member/shell/member-notifications-menu";
@@ -16,11 +17,13 @@ import { PlatformBrandingProvider } from "@/components/platform-branding";
 import type { PlatformDirectorChat as PlatformDirectorChatComponent } from "@/components/platform-director-chat";
 import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
 import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
+import { isAdminPath } from "@/lib/auth/redirect";
 import { signOutAndLeave } from "@/lib/auth/sign-out";
 import { normalizeMemberStyle } from "@/lib/member-style";
 import { cn } from "@/lib/utils";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { ContentPageHeroCorners, PlatformBrandingConfig } from "@/lib/platform-types";
+import { SCHOOL_DEFAULT_ICON } from "@/server/communications/message-meta";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 
 type AppShellProps = {
@@ -154,6 +157,8 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
   // quando so o banner desta pagina e arredondado (escolha do produto): logo e perfil seguem o banner.
   const rounded = style.corners === "rounded" || bannerCorners === "rounded";
   const pathname = usePathname();
+  // Home fora do "ver como": o pop-up dos avisos pode aparecer, e o pedido dele traz o numero do sino.
+  const popupHome = pathname === "/" && !accessPreviewMode;
   const headerLinks = menuInHeader
     ? (getMemberSidebarSections(pathname, accessPreviewMode).find((section) => section.id === "estudar")?.items ?? [])
     : [];
@@ -215,6 +220,14 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
     void (async () => {
       await window.__bunker707FlushLessonProgress?.();
       await flushPendingSavedItemChanges();
+
+      // Admin: carregamento inteiro, depois de salvar progresso e favoritos (o microfone dos avisos so
+      // e liberado num documento carregado em /admin; isAdminPath).
+      if (isAdminPath(href)) {
+        window.location.assign(href);
+        return;
+      }
+
       router.push(href);
     })();
   }
@@ -386,7 +399,16 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
                 placeholder="Pesquisar aulas, cursos, formações e bootcamps..."
               />
             </div>
-            <MemberNotificationsMenu className={searchOpen ? "max-sm:hidden" : undefined} />
+            <MemberNotificationsMenu
+              accessPreviewMode={accessPreviewMode}
+              className={searchOpen ? "max-sm:hidden" : undefined}
+              onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
+              refreshSummaryOnMount={!popupHome}
+              // O circulo dos avisos da escola e o Icone da escola (Marca); a logo fica no topo e de reserva.
+              schoolIconUrl={branding?.schoolIcon ?? SCHOOL_DEFAULT_ICON}
+              schoolLogoUrl={logoImage}
+              schoolName="Bunker707"
+            />
             <MemberAccountMenu
               accessPreviewMode={accessPreviewMode}
               className={searchOpen ? "max-sm:hidden" : undefined}
@@ -439,6 +461,9 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
       />
 
       <main>{children}</main>
+
+      {/* Pop-up dos avisos: so na home e fora do modo "ver como" do produtor (docs/22 §1.3). */}
+      <MemberPopupHost enabled={popupHome} onNavigate={(event, href) => handleProgressAwareNavigation(event, href)} />
 
       {!sidebarOpen ? (
         directorRequested ? (

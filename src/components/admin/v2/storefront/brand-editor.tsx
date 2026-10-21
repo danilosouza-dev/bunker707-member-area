@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useState, type ChangeEvent } from "react";
+import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,13 +16,18 @@ import {
   type MemberStyleConfig
 } from "@/lib/member-style";
 import { cn } from "@/lib/utils";
+import { SCHOOL_DEFAULT_ICON, isDefaultSchoolIcon } from "@/server/communications/message-meta";
 import {
   DEFAULT_LOGO_IMAGE,
+  SCHOOL_ICON_RULES,
   brandToDraft,
   buildAppearancePayload,
   isBrandDirty,
+  normalizeBrandingSchoolIcon,
   normalizeHero,
   normalizeLogo,
+  schoolIconSizeProblem,
+  svgSizeOf,
   validateImageLink,
   type BrandDraft,
   type StorefrontBrand
@@ -32,10 +38,11 @@ import { SectionCard } from "../settings/kit";
 import { adminToast } from "../toast";
 import { IMAGE_ACCEPT, ImageFileError, prepareImageUpload } from "./image-file";
 
-// Marca (docs/17 §1.6.8): a logo e o estilo (cantos das capas, botoes, posicao do menu) da area do aluno. Rascunho local ate "Publicar marca", que manda so o
-// que mudou pela rota de sempre (PUT /api/admin/appearance). O banner do topo da home saiu daqui e foi
-// para Area de membros > Destaque: o rascunho do banner nunca muda nesta tela, entao a rota recebe so
-// a logo (e, do seu lado, preserva tudo o que esta gravado no destaque).
+// Marca (docs/17 §1.6.8): a logo, o icone da escola (o circulo das notificacoes que a escola envia, docs/23)
+// e o estilo (cantos das capas, botoes, posicao do menu) da area do aluno. Rascunho local ate "Publicar
+// marca", que manda so o que mudou pela rota de sempre (PUT /api/admin/appearance). O banner do topo da
+// home saiu daqui e foi para Area de membros > Destaque: o rascunho do banner nunca muda nesta tela, entao
+// a rota recebe so a logo, o icone e o estilo (e, do seu lado, preserva tudo o que esta gravado no destaque).
 
 type BrandEditorProps = {
   brand: StorefrontBrand;
@@ -43,6 +50,156 @@ type BrandEditorProps = {
 };
 
 const LOGO_LIMITS = { maxHeight: 400, maxWidth: 1200 };
+const SCHOOL_ICON_LIMITS = { maxHeight: SCHOOL_ICON_RULES.maxSide, maxWidth: SCHOOL_ICON_RULES.maxSide };
+const SVG_TYPE = "image/svg+xml";
+const SCHOOL_ICON_TYPES = ["image/png", "image/webp", SVG_TYPE];
+const SCHOOL_ICON_ACCEPT = SCHOOL_ICON_TYPES.join(",");
+/** O mesmo teto do envio da logo (prepareImageUpload). */
+const MAX_ICON_FILE_BYTES = 8 * 1024 * 1024;
+const OPEN_IMAGE_TIMEOUT_MS = 8000;
+
+/** Abre a imagem no navegador (para medir ou desenhar); null se nao abrir a tempo. */
+function openImage(src: string) {
+  return new Promise<HTMLImageElement | null>((resolve) => {
+    const image = new window.Image();
+    const timer = window.setTimeout(() => resolve(null), OPEN_IMAGE_TIMEOUT_MS);
+    image.addEventListener("load", () => {
+      window.clearTimeout(timer);
+      resolve(image);
+    });
+    image.addEventListener("error", () => {
+      window.clearTimeout(timer);
+      resolve(null);
+    });
+    image.src = src;
+  });
+}
+
+/**
+ * SVG enviado vira PNG de 512 × 512 desenhado no navegador: o armazenamento so aceita JPG, PNG e WebP,
+ * e um SVG nunca sai daqui como arquivo. A medida vai no proprio SVG porque, sem ela, alguns navegadores
+ * nao o desenham no canvas.
+ */
+async function rasterizeSvg(file: File) {
+  const parsed = new DOMParser().parseFromString(await file.text(), SVG_TYPE);
+  const root = parsed.documentElement;
+
+  if (root.localName !== "svg" || parsed.getElementsByTagName("parsererror").length > 0) {
+    throw new ImageFileError("Não foi possível abrir a imagem. Tente outro arquivo.");
+  }
+
+  const size = svgSizeOf({ height: root.getAttribute("height"), viewBox: root.getAttribute("viewBox"), width: root.getAttribute("width") });
+  const problem = schoolIconSizeProblem({ ...size, vector: true });
+
+  if (problem) {
+    throw new ImageFileError(problem);
+  }
+
+  const side = SCHOOL_ICON_RULES.maxSide;
+
+  if (!root.getAttribute("viewBox")) {
+    root.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
+  }
+
+  root.setAttribute("width", String(side));
+  root.setAttribute("height", String(side));
+  const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(parsed)], { type: SVG_TYPE }));
+
+  try {
+    const image = await openImage(url);
+    const canvas = document.createElement("canvas");
+    canvas.width = side;
+    canvas.height = side;
+    const context = canvas.getContext("2d");
+
+    if (!image || !context) {
+      throw new ImageFileError("Não foi possível abrir a imagem. Tente outro arquivo.");
+    }
+
+    context.drawImage(image, 0, 0, side, side);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+
+    if (!blob) {
+      throw new ImageFileError("Não foi possível preparar a imagem. Tente outro arquivo.");
+    }
+
+    return new File([blob], "icone-da-escola.png", { type: "image/png" });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Icone enviado: PNG, WebP ou SVG, quadrado e com 128 px ou mais; sai reduzido a 512 × 512 (WebP). */
+async function prepareSchoolIconUpload(file: File) {
+  if (!SCHOOL_ICON_TYPES.includes(file.type)) {
+    throw new ImageFileError("Formato não aceito. Use PNG, WebP ou SVG.");
+  }
+
+  if (file.size > MAX_ICON_FILE_BYTES) {
+    throw new ImageFileError("A imagem passa de 8 MB. Escolha um arquivo menor.");
+  }
+
+  if (file.type === SVG_TYPE) {
+    return prepareImageUpload(await rasterizeSvg(file), SCHOOL_ICON_LIMITS);
+  }
+
+  const url = URL.createObjectURL(file);
+
+  try {
+    const image = await openImage(url);
+
+    if (!image) {
+      throw new ImageFileError("Não foi possível abrir a imagem. Tente outro arquivo.");
+    }
+
+    const problem = schoolIconSizeProblem({ height: image.naturalHeight, width: image.naturalWidth });
+
+    if (problem) {
+      throw new ImageFileError(problem);
+    }
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+
+  return prepareImageUpload(file, SCHOOL_ICON_LIMITS);
+}
+
+type SchoolIconCircleProps = {
+  large?: boolean;
+  src: string;
+};
+
+/**
+ * O circulo como o sino desenha (40 px) e uma versao de 64 px: o simbolo padrao centralizado, uma imagem
+ * enviada preenchendo como foto de perfil. Imagem que nao abre (link quebrado): a inicial da escola.
+ */
+function SchoolIconCircle({ large = false, src }: SchoolIconCircleProps) {
+  const [failed, setFailed] = useState<string | null>(null);
+
+  if (failed === src) {
+    return <MemberAvatar className={large ? "size-16" : undefined} name="Bunker707" size={large ? "xl" : "md"} />;
+  }
+
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "relative grid shrink-0 place-items-center overflow-hidden rounded-full bg-[#262626] text-white ring-1 ring-white/10",
+        large ? "size-16" : "size-10"
+      )}
+    >
+      <Image
+        alt=""
+        className={isDefaultSchoolIcon(src) ? cn("object-contain", large ? "p-3" : "p-2") : "object-cover"}
+        fill
+        onError={() => setFailed(src)}
+        sizes={large ? "64px" : "40px"}
+        src={src}
+        unoptimized
+      />
+    </span>
+  );
+}
 
 type LinkFieldProps = {
   disabled: boolean;
@@ -144,13 +301,14 @@ function StyleChoice<Value extends string>({ disabled, label, name, onChange, op
 }
 
 type UploadButtonProps = {
+  accept?: string;
   disabled: boolean;
   label: string;
   onFile: (file: File) => void;
 };
 
 /** Botao de arquivo com a aparencia do Button secundario (o input fica escondido dentro do label). */
-function UploadButton({ disabled, label, onFile }: UploadButtonProps) {
+function UploadButton({ accept = IMAGE_ACCEPT, disabled, label, onFile }: UploadButtonProps) {
   const id = useId();
 
   return (
@@ -167,7 +325,7 @@ function UploadButton({ disabled, label, onFile }: UploadButtonProps) {
       <Upload aria-hidden="true" className="size-4" />
       {label}
       <input
-        accept={IMAGE_ACCEPT}
+        accept={accept}
         className="sr-only"
         disabled={disabled}
         id={id}
@@ -191,6 +349,8 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
   const [draft, setDraft] = useState<BrandDraft>(published);
   const [busy, setBusy] = useState(false);
   const [logoError, setLogoError] = useState<string | null>(null);
+  const [iconBusy, setIconBusy] = useState(false);
+  const [iconError, setIconError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const dirty = canEdit && isBrandDirty(published, draft);
@@ -231,6 +391,46 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
     }
   }
 
+  async function handleIconFile(file: File) {
+    setIconBusy(true);
+    setIconError(null);
+
+    try {
+      change({ schoolIcon: await prepareSchoolIconUpload(file) });
+    } catch (error) {
+      setIconError(error instanceof ImageFileError ? error.message : "Não foi possível preparar a imagem. Tente outro arquivo.");
+    } finally {
+      setIconBusy(false);
+    }
+  }
+
+  /**
+   * Link colado: confere a proporcao quando a imagem abre aqui. SVG nao e medido (sem largura e altura
+   * proprias o navegador inventa uma medida); link que nao abre fica na previa, e o sino cai na logo ou
+   * na inicial da escola.
+   */
+  async function handleIconLink(link: string) {
+    setIconBusy(true);
+    setIconError(null);
+
+    try {
+      const image = /\.svg([?#]|$)/i.test(link) ? null : await openImage(link);
+      const problem =
+        image && image.naturalWidth > 0 && image.naturalHeight > 0
+          ? schoolIconSizeProblem({ height: image.naturalHeight, width: image.naturalWidth })
+          : null;
+
+      if (problem) {
+        setIconError(problem);
+        return;
+      }
+
+      change({ schoolIcon: link });
+    } finally {
+      setIconBusy(false);
+    }
+  }
+
   async function save() {
     if (!canEdit || saving) {
       return;
@@ -255,6 +455,7 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
       const next = brandToDraft({
         hero: normalizeHero(payload.data.hero),
         logoImage: normalizeLogo(payload.data.branding, true),
+        schoolIcon: normalizeBrandingSchoolIcon(payload.data.branding),
         style: normalizeMemberStyle(payload.data.branding)
       });
       setPublished(next);
@@ -343,6 +544,58 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
         </div>
       </SectionCard>
 
+      <SectionCard description="Aparece no círculo das notificações que a escola envia. Use uma imagem quadrada." title="Ícone da escola">
+        <div className="flex flex-col gap-5">
+          <div
+            aria-label="Prévia do ícone da escola"
+            className="flex min-h-24 items-center gap-5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] px-5 py-4"
+            role="img"
+          >
+            <SchoolIconCircle src={draft.schoolIcon} />
+            <SchoolIconCircle large src={draft.schoolIcon} />
+          </div>
+
+          <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
+            A imagem preenche o círculo, como uma foto de perfil. O símbolo padrão fica centralizado.
+          </p>
+
+          {iconError ? (
+            <p className="text-[13px] leading-5 text-[var(--error)]" role="alert">
+              {iconError}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <UploadButton
+              accept={SCHOOL_ICON_ACCEPT}
+              disabled={locked || iconBusy}
+              label={iconBusy ? "Preparando…" : "Enviar imagem"}
+              onFile={(file) => void handleIconFile(file)}
+            />
+            <Button
+              className="px-3 text-[var(--text-secondary)]"
+              disabled={locked || iconBusy || isDefaultSchoolIcon(draft.schoolIcon)}
+              onClick={() => {
+                change({ schoolIcon: SCHOOL_DEFAULT_ICON });
+                setIconError(null);
+              }}
+              type="button"
+              variant="ghost"
+            >
+              <RotateCcw aria-hidden="true" className="size-4" />
+              Usar o símbolo padrão
+            </Button>
+          </div>
+
+          <LinkField
+            disabled={locked || iconBusy}
+            id="marca-icone-link"
+            label="Ou cole o link do ícone"
+            onApply={(link) => void handleIconLink(link)}
+          />
+        </div>
+      </SectionCard>
+
       <SectionCard description="Vale para toda a área do aluno. Publique para os alunos verem." title="Estilo">
         <div className="flex flex-col gap-6">
           <StyleChoice
@@ -379,6 +632,7 @@ export function BrandEditor({ brand, canEdit }: BrandEditorProps) {
           setDraft(published);
           setSaveError(null);
           setLogoError(null);
+          setIconError(null);
         }}
         onSave={() => void save()}
         open={dirty}
