@@ -229,31 +229,41 @@ export async function idDoFluxo(input: { aviso: string } | { nome: string }) {
   return (fluxo as { id: string }).id;
 }
 
-type TarefaPendente = { anchor_at: string; deadline_at: string | null; due_at: string; node_id: string; user_id: string };
+type TarefaPendente = { anchor_at: string; deadline_at: string | null; node_id: string; user_id: string };
+type PassoDoFluxo = { anchor: "expires" | "previous" | "sent"; id: string; offset_minutes: number };
 
 /**
  * Traz para agora as tarefas pendentes do fluxo (docs/23 §8.3). Mexer so em due_at nao adianta: o motor
  * recalcula o horario a partir de anchor_at e so adiaria de novo. Cada tarefa volta no tempo pela propria
  * distancia ate agora (anchor_at e deadline_at juntos, not_before limpo), entao o horario recalculado e agora
- * e o prazo guarda a distancia. A ordem e sempre: tick (matricula ou envia) -> adiantarFluxo -> tick.
- * Devolve quantas tarefas adiantou.
+ * e o prazo guarda a distancia. A distancia sai do horario de verdade (anchor_at + espera, ou anchor_at -
+ * espera no "antes de vencer", como dueFromAnchor), nunca do due_at: num minuto :00/:15/:30/:45 a varredura
+ * do objetivo poe due_at = agora nas pendentes de um fluxo com objetivo, e o due_at nao diz mais quando ela
+ * sai. A ordem e sempre: tick (matricula ou envia) -> adiantarFluxo -> tick. Devolve quantas tarefas adiantou.
  */
 export async function adiantarFluxo(flowId: string) {
   const db = createLocalAdminClient();
   const agora = Date.now();
   const iso = (ms: number) => new Date(ms).toISOString();
-  const tarefas = unwrap(
-    await db
-      .from("communication_flow_tasks")
-      .select("node_id,user_id,anchor_at,deadline_at,due_at")
-      .eq("flow_id", flowId)
-      .eq("status", "pending")
-      .gt("due_at", iso(agora)),
+  const pendentes = unwrap(
+    await db.from("communication_flow_tasks").select("node_id,user_id,anchor_at,deadline_at").eq("flow_id", flowId).eq("status", "pending"),
     "Lendo as tarefas pendentes do fluxo"
   ) as TarefaPendente[];
+  const passos = unwrap(
+    await db.from("communication_flow_nodes").select("id,anchor,offset_minutes").eq("flow_id", flowId),
+    "Lendo os passos do fluxo"
+  ) as PassoDoFluxo[];
+  const passoPorId = new Map(passos.map((passo) => [passo.id, passo]));
+  const horarioDe = (tarefa: TarefaPendente) => {
+    const passo = passoPorId.get(tarefa.node_id);
+    const espera = (passo?.offset_minutes ?? 0) * 60_000;
+
+    return Date.parse(tarefa.anchor_at) + (passo?.anchor === "expires" ? -espera : espera);
+  };
+  const tarefas = pendentes.filter((tarefa) => horarioDe(tarefa) > agora);
 
   for (const tarefa of tarefas) {
-    const distancia = Date.parse(tarefa.due_at) - agora;
+    const distancia = horarioDe(tarefa) - agora;
 
     unwrap(
       await db
