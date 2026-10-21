@@ -139,7 +139,9 @@ function RowMenuEntry({ action }: { action: RowMenuAction }) {
       {action.separated ? <DropdownMenuSeparator className="bg-[var(--border-subtle)]" /> : null}
       <DropdownMenuItem
         className={cn(
-          "h-9 gap-2 rounded-md px-2 text-sm",
+          // Altura minima de 36 px: um rotulo comprido ("Mostrar de novo para quem já viu") quebra em duas
+          // linhas dentro do item, sem passar por cima do vizinho.
+          "min-h-9 gap-2 rounded-md px-2 py-1.5 text-sm leading-5",
           action.destructive
             ? "text-[var(--error)] focus:bg-[var(--error-bg)] focus:text-[var(--error)]"
             : "text-[var(--text-primary)] focus:bg-[var(--surface-2)] focus:text-[var(--text-primary)]"

@@ -664,6 +664,35 @@ Invariantes:
 - nenhum embed entre `campaigns` e `communication_flows` sem a dica da FK (`PGRST201` derrubaria o job a cada minuto); teste confere;
 - a 0002 vai antes do deploy que a usa: nao ha caminho de volta para as colunas da v1 (sem ela, o sino responde vazio, o job registra "202610200002 pendente" e termina, e envios e cliques nao funcionam).
 
+### Implementado (22/10/2026): Comunicacao v3a
+
+Produto, regras e decisoes em `docs/24`; tabelas em `docs/05` (secao Comunicacao v3a); seguranca em `docs/06` (secao Comunicacao v3a). Migracao `202610220001_communication_v3a.sql` (aditiva, toda pelo MCP). Nenhuma variavel de ambiente nova e nenhum servico novo.
+
+Modulos novos ou mudados:
+
+- puros: `interactions-model.ts` (catalogo das reacoes, `pollSchema`, `parsePoll`, `normalizePollChoice`, resultado da enquete, `shouldRecordInteraction`), `student-write-limit.ts` (`takeStudentWrite`: 30 escritas por minuto por aluno, por processo), `campaign-model.ts` (`availableNoticeActions` com `{ popupRepeat, recipients }`, `noticeRecipients`, `pickPopup` com as bases do "Mostrar de novo"), `schemas.ts` (`sentNoticeLockedProblems`, corpos das rotas novas), `notifications-model.ts` (cartao clicavel, nomes, enquete, Mudar resposta, `openingPlan`, `shouldPrefetchOnIntent`, constantes `INBOX_*`);
+- servidor: `inbox.ts` (a lista e os numeros em uma RPC cada; `setNotificationHidden`, `reactToNotification`, `voteOnNotificationPoll`, `respondToNotification` com troca), `actions.ts` (editar a enviada, `deleteNotice` por situacao, `reshowPopup`, `closeNoticePoll`), `queries.ts` (citacoes, interacoes e `reshowable` no detalhe);
+- navegador: `notifications-client.ts` guarda a primeira pagina do sino numa memoria do modulo (5 s / 60 s / 10 min) e a busca na intencao (`prefetchInbox`), junto com o codigo do painel.
+
+Rotas novas: `POST /api/notifications/[id]/reaction`, `/poll` e `/hide`; `/response` aceita a troca. Toda rota do sino e o beacon do pop-up usam `requireApiSessionUser` (claims do JWT, sem ida ao Auth em producao).
+
+```txt
+Aluno: mouse 120 ms / foco pelo Tab / toque no sino -> codigo do painel + GET /api/notifications (uma vez)
+  -> requireApiSessionUser (claims) -> RPC communication_inbox_page (pagina, pessoas, numeros, contagem da
+     enquete so para quem votou ou encerrada) -> memoria do navegador (reabre na hora; > 5 s atualiza por tras)
+  reagir / votar / excluir / responder -> takeStudentWrite (30/min) -> communication_visible_notifications
+     (a mesma regra da lista) -> escrita (ou RPC 5.1 / 5.2) -> evento ate 20 por linha
+Equipe: Editar a enviada -> saveNoticeDraft (versao, campos travados, publish/500, seguintes) -> so as colunas editaveis
+  Excluir -> withdrawSentNotice + exclusao logica | Mostrar de novo -> RPC 5.3 (conta, 500, aplica)
+```
+
+Invariantes:
+
+- a regra de "aparece no sino" existe so em SQL (`communication_visible_notifications`): lista, numeros, marcacoes e cada conferencia de uma linha usam a mesma; teste de paridade;
+- editar a enviada nunca roda `publishProblems`, nunca move o fluxo das seguintes e nunca recalcula pop-ups;
+- sem polling (C11): pedidos do sino so na intencao ou na abertura, no maximo um por abertura, nenhum ao fechar;
+- a 0003 vai antes do deploy que a usa (sem ela, o sino responde vazio e as escritas novas 404); a migracao sozinha nao atrapalha o app da v2.
+
 ## Deploy
 
 Fase inicial (hoje):

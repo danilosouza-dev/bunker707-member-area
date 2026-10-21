@@ -2,7 +2,7 @@
 
 import { Popover } from "@base-ui/react/popover";
 import { BellOff, CheckCheck, LogIn, RotateCw } from "lucide-react";
-import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { MemberButton, memberButtonClassName } from "@/components/member/ui/member-button";
 import { MemberEmptyState } from "@/components/member/ui/member-empty-state";
 import { MemberFilterPills } from "@/components/member/ui/member-filters";
@@ -419,15 +419,17 @@ export function NotificationsPanel({
   }, [filter, hiddenRows, list, unread]);
 
   // "Marcar todas como lidas" some quando nao sobra nada para ler: o foco que estava nele vai para o
-  // titulo (senao cairia no corpo da pagina ou no painel inteiro).
-  useEffect(() => {
+  // titulo (senao cairia no corpo da pagina ou no painel inteiro). Os tres efeitos de foco abaixo rodam no
+  // commit (layout): o controle some quando a resposta do servidor chega, e um efeito comum perdia para a
+  // restauracao do popover, que devolve o foco ao painel no quadro seguinte.
+  useLayoutEffect(() => {
     if (markedAll > 0 && !rootRef.current?.contains(document.activeElement)) {
       titleRef.current?.focus();
     }
   }, [markedAll]);
 
   // O ultimo "Carregar mais" vira o rodape: o foco que estava no botao vai para ele.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (focusEndRef.current && !list.nextCursor && endRef.current) {
       focusEndRef.current = false;
       endRef.current.focus();
@@ -435,7 +437,7 @@ export function NotificationsPanel({
   }, [list.nextCursor, list.items]);
 
   // Excluiu: foco no Desfazer. Desfez (ou a exclusao falhou): foco na lixeira do cartao que voltou.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const target = focusAfterRef.current;
 
     if (!target) {

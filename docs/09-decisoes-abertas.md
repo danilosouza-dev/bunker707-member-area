@@ -240,6 +240,33 @@ Fica em aberto:
 - JPEG no Icone da escola (hoje PNG, WebP ou SVG);
 - A/B, seletor de desfecho e linha do tempo do aluno nos fluxos.
 
+### Comunicacao v3a: CRUD dos avisos, lixeira, cartao clicavel, reacoes, enquete e sino rapido (22/10/2026)
+
+Pedido do produtor (21/10/2026), depois de testar a v2 na `dev`: CRUD das notificacoes no menu ⋯; o aluno tirar a notificacao do proprio sino (lixeira); a notificacao inteira clicavel, com ou sem botao, com sinal de que e clicavel; voltar atras depois de Aceitar ou Recusar; titulo mais destacado; reacoes como no WhatsApp; enquete direto nas mensagens; o sino demorando para abrir a lista; e a pergunta (duas vezes) sobre o pop-up "Uma vez" que vira "Até o aluno clicar". Detalhes em `docs/24`; migracao `202610220001`. **Muda decisoes**: a regra da v1 "Notificação enviada não muda" (`docs/22` §2.2) e "Excluir so rascunho, aguardando, cancelado e encerrado" caem; reacoes e enquetes entram no sino (antes fora de qualquer fase); "limite de pedidos nas rotas do sino" (`docs/22` §6) entra para as quatro escritas do aluno.
+
+Decisao tomada (tabela T1-T23 em `docs/24` §8; resumo em `docs/22` §5, C21-C27):
+
+- T1-T5 **CRUD no ⋯**: Ver relatorio, Editar, Duplicar, Excluir e as acoes de estado em toda situacao em que fazem sentido. A **notificacao enviada pode ser editada** (titulo, texto, imagem, icone, Quem envia, destino e modo, textos de Aceitar/Recusar, reacoes), em silencio (sem "editada", sem marcar como nova); travados o tipo, o segmento, o envio, o tempo no sino, o audio, ligar/desligar a resposta e a enquete (menos Encerrar enquete). Editar a enviada vale como publicar (`messaging.publish`; acima de 500 que receberam, `publish_large`; 403, nunca pedido). **Excluir em qualquer situacao menos "Enviando"**; agendado, enviado e pop-up no ar/pausado pedem `messaging.publish`; a enviada sai de todos os sinos;
+- T6-T7 **pop-up**: "Mostrar de novo para quem já viu" so no pop-up "Uma vez" (no editor e no menu); quem escolheu "Não mostrar de novo" e quem clicou nunca voltam; em "Até o aluno clicar" quem so fechou ja volta 24 h depois do ultimo pop-up que viu (o limite global decide), entao ali nao ha reinicio. A resposta ao produtor esta no `docs/24` §2.4;
+- T8 **lixeira do aluno** em todo cartao, com Desfazer ate o painel fechar; excluida sai de tudo e continua "recebeu"; o relatorio mostra quantos excluiram;
+- T9 **cartao clicavel** em tres modos (Pelo botão; Pelo botão ou tocando; Só tocando, com o texto ao lado da seta), um link acessivel por cartao mais um link decorativo, todo controle dentro continua clicavel;
+- T10 **Mudar resposta** enquanto a notificacao esta no sino; os relatorios contam a atual e quantos mudaram; `responded_at` = a primeira;
+- T11 titulo de 15 px em negrito;
+- T12 **reacoes**: 6 emoji fixos, uma por aluno, o aluno ve so a propria (sem numeros para ele: privacidade e custo); ligadas por padrao no que e novo, desligadas no que ja existia; nem no pop-up nem no comentario;
+- T13 **enquetes** nas notificacoes, seguintes e passos de fluxo: 2 a 6 opcoes, uma ou varias, resultado para quem votar, fim por data ou quando sai do sino, exclusivas com Aceitar/Recusar, travadas depois do envio; o modelo puro e o que a v3b reaproveita no pop-up;
+- T14-T15 regras `reagiu`, `votou na enquete`, `excluiu do sino`; quem excluiu nao recebe as seguintes de "nao fez"; "foi para o destino" no lugar de "clicou no botão"; reagir e votar contam como abrir;
+- T16-T18 **sino rapido**: uma RPC por pagina com a regra de visibilidade num lugar so; sessao pelas claims do JWT em toda rota do sino; a primeira pagina buscada na intencao e guardada no navegador (5 s reabre como esta, 10 min mostra e atualiza), sem polling (C11 continua). Medido: lista p50 30 → 11 ms, 8 → 1 pedido ao banco (`docs/24` §7);
+- T19 eventos `notification_reacted`, `notification_voted`, `notification_hidden` e `changed` em `notification_responded`;
+- T20 migracao aditiva sem `drop` nem `delete`, toda pelo MCP, antes do deploy;
+- T22 no maximo 30 escritas por minuto por aluno nas quatro rotas de escrita e 20 eventos por linha;
+- T23 excluir ou retirar uma notificacao citada nas regras de outros avisos ou fluxos avisa com o numero, sem impedir.
+
+Fica em aberto (v3b "Pop-ups sob medida", documento proprio):
+
+- paginas e exclusoes do pop-up, gatilhos (depois de uma aula, primeiro login, horario para todos, atraso), frequencia (a cada N minutos/horas/dias, no maximo N vezes, por sessao) e limites globais editaveis. **Vai mudar** C6 / `docs/17` §1.8.1 / D12 ("so na home, 1 por sessao e 1 a cada 24 h");
+- o construtor avancado do pop-up por blocos estruturados (nunca HTML cru: XSS guardado e a CSP com nonce), enquete no pop-up e "Como fechar" (so no X ou no X e fora);
+- e, da v3a: numeros de reacao para o aluno, "editada", resposta livre, mais de uma enquete, Desfazer depois de fechar o painel e "Limpar tudo" ficam fora (`docs/24` §9).
+
 ## Design
 
 ### Login

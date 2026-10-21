@@ -35,6 +35,7 @@ Before making product, UX, architecture, or implementation decisions, read the r
 - `docs/21-retomada-migracao-hetzner.md` (estado da migracao para a Hetzner e proximos passos, na ordem; ler primeiro ao retomar esse trabalho)
 - `docs/22-comunicacao-notificacoes-e-pop-ups.md` (Comunicacao v1: sino do aluno, avisos e pop-ups criados pela equipe, segmentos por regras, envio pelo tick e limites fixos; vale para qualquer trabalho em Comunicacao, sino ou pop-ups)
 - `docs/23-comunicacao-v2-fluxos.md` (Comunicacao v2: quem envia e icone de cada notificacao, tempo no sino, audio ouvido, notificacoes seguintes no editor e Fluxos com regras num motor so no tick, visitas de pagina e o limite de 3 por dia; vale para qualquer trabalho em Comunicacao, sino, notificacoes seguintes ou fluxos)
+- `docs/24-comunicacao-v3a-sino-e-avisos.md` (Comunicacao v3a: CRUD dos avisos no menu, editar e excluir a notificacao enviada, "Mostrar de novo" no pop-up "Uma vez", lixeira do aluno, cartao clicavel, Mudar resposta, reacoes, enquetes, regras novas e o sino numa consulta so com a primeira pagina guardada no navegador; vale para qualquer trabalho em Comunicacao, sino, avisos, reacoes ou enquetes)
 
 Update docs when decisions change.
 

@@ -85,7 +85,8 @@ export function NoticePoll({
           );
         })}
       </div>
-      <p className="mt-2 text-xs leading-4 text-zinc-400" id={footerId}>
+      {/* text-pretty: o numero de votos nao fica sozinho na ultima linha a 375 px. */}
+      <p className="mt-2 text-xs leading-4 text-pretty text-zinc-400" id={footerId}>
         {view.footer}
       </p>
       {error ? (

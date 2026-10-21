@@ -155,6 +155,17 @@ test("regras que citam a notificacao: a frase de Excluir e Retirar do sino, sing
   assert.match(model.noticeActionConfirm("delete", notice({ citations: { flows: 1, notices: 0 } })).description, /Depois de excluir/);
 });
 
+test("Excluir e Retirar do sino com 1 aluno: \"do 1 aluno que recebeu\" (singular)", () => {
+  assert.equal(
+    model.noticeActionConfirm("delete", notice({ recipients: 1 })).description,
+    "A notificação some do sino do 1 aluno que recebeu e o aviso sai desta lista, com o relatório. Não dá para desfazer. Para tirar do sino e manter o relatório, use Retirar do sino."
+  );
+  assert.equal(
+    model.noticeActionConfirm("withdraw", notice({ recipients: 1 })).description,
+    "A notificação some do sino do 1 aluno que recebeu. Os números continuam no relatório."
+  );
+});
+
 test("Mostrar de novo: dialogo sem numero e toasts com quantos voltam a ver (ou por que ninguem)", () => {
   assert.deepEqual(model.noticeActionConfirm("reshow", notice({ kind: "popup", situation: "active", title: "Turma nova" })), {
     confirmLabel: "Mostrar de novo",

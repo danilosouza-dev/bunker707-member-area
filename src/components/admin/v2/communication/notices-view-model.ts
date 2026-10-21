@@ -366,9 +366,16 @@ export function citationsSentence(citations: NoticeCitationCounts | null | undef
   }, para ${total === 1 ? "ele" : "eles"} ninguém recebeu esta notificação.`;
 }
 
-/** "dos 318 alunos que receberam" ou, sem o numero, "de quem recebeu" (Retirar do sino e Excluir a enviada). */
+/**
+ * "dos 318 alunos que receberam", "do 1 aluno que recebeu" ou, sem o numero, "de quem recebeu" (Retirar do sino
+ * e Excluir a enviada).
+ */
 function receivedPhrase(recipients: number | null | undefined) {
-  return typeof recipients === "number" && recipients > 0 ? `dos ${formatStudentCount(recipients)} que receberam` : "de quem recebeu";
+  if (typeof recipients !== "number" || recipients <= 0) {
+    return "de quem recebeu";
+  }
+
+  return recipients === 1 ? "do 1 aluno que recebeu" : `dos ${formatStudentCount(recipients)} que receberam`;
 }
 
 function withSentence(text: string, sentence: string) {

@@ -290,3 +290,35 @@ atrapalha o app anterior, que nao manda e nao e conferido). Conferir:
 `set_communication_flow_nodes_first_level`) e `list_migrations` com `202610210001`. Passos ja existentes ficam com
 `born_first_level = false` (o complemento so vale para seguintes criadas depois de aplicar). Producao: nada
 manual (o `deploy-membros` aplica).
+
+### 9.2 Comunicacao v3a: migracao `202610220001` antes do deploy (22/10/2026)
+
+A PR da Comunicacao v3a "Sino e avisos" (`docs/24`, branch `claude/notification-system-ymk02g`) traz
+`supabase/migrations/202610220001_communication_v3a.sql`. As `202610200001`, `202610200002` e `202610210001` ja
+estao aplicadas no Supabase da nuvem de teste e nao mudam.
+
+Regra: **a 0003 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). O app da v3a sem ela mostra
+o sino vazio e as escritas novas (reagir, votar, excluir) respondem 404; a migracao sozinha nao atrapalha o app da
+v2 (colunas novas com padrao; nenhuma linha fica excluida antes das rotas novas).
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**:
+
+1. conferir que ela ainda nao esta la: `list_migrations` (sem `202610220001`);
+2. secoes 1 a 6 pelo MCP do Supabase (`apply_migration`, nome `communication_v3a`), de uma vez ou uma secao por
+   chamada, **na ordem do arquivo**: 1 `campaigns` (colunas e checks) -> 2 `notifications` (colunas, checks e o
+   indice parcial) -> 3 `campaign_deliveries` -> 4 leitura do sino (4.1 visibilidade, 4.2 contagem da enquete,
+   4.3 pagina, 4.4 numeros: a 4.2 precisa existir antes da 4.3 e da 5.2, que a chamam) -> 5 escritas (5.1 a 5.6,
+   com a 7.9 refeita com a mesma assinatura) -> 6 permissoes e descricoes. Nao ha `drop` nem `delete`: nenhuma
+   parte precisa do SQL Editor. O indice novo nasce vazio (ninguem votou);
+3. conferir: as consultas do cabecalho da migracao;
+   `select count(*) from pg_proc where proname = 'communication_inbox_page';` = 1;
+   `select pg_get_constraintdef(oid) from pg_constraint where conname = 'notifications_poll_v3';`;
+   `select indexname from pg_indexes where indexname = 'notifications_poll_tally_idx';`; `list_migrations` com
+   `202610220001`. Se alguma parte foi pelo SQL Editor e a versao nao aparece:
+   `insert into supabase_migrations.schema_migrations (version, name) values ('202610220001', 'communication_v3a') on conflict do nothing;`
+4. a idempotencia foi conferida no banco local (segunda aplicacao sem erro, so "already exists, skipping"):
+   reaplicar uma secao que travou no meio e seguro;
+5. fazer o merge e seguir o roteiro do `docs/24` §11.
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
+trocar o app. Depois, a rodada do `carga` com o sino novo (docs/20 §12.1; meta de tempo de servidor ate 20 ms).

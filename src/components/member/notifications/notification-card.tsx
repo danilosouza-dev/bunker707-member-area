@@ -2,7 +2,7 @@
 
 import { ArrowRight, AtSign, Check, ChevronRight, ExternalLink, MessageCircle, Trash2, type LucideIcon } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { MemberAvatar } from "@/components/member/ui/member-avatar";
 import { memberButtonClassName } from "@/components/member/ui/member-button";
 import { MemberChip } from "@/components/member/ui/member-chip";
@@ -406,7 +406,9 @@ function NoticeResponse({
   const previousValueRef = useRef(value);
   const focusNextRef = useRef<"change" | "first" | null>(null);
 
-  useEffect(() => {
+  // No commit (layout): a resposta chega do servidor fora do clique, os botoes somem e um efeito comum
+  // perdia o foco para a restauracao do popover (que devolve o foco ao painel no quadro seguinte).
+  useLayoutEffect(() => {
     const previous = previousValueRef.current;
     previousValueRef.current = value;
 
