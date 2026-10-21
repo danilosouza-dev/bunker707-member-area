@@ -108,17 +108,17 @@ export type FlowTree = { nodes: FlowNode[]; origin: FlowOrigin };
 
 /** Versao atual do conteudo de um passo de notificacao (ou o aviso de origem, para a entrada). */
 export type FlowMessageMeta = {
-  /** v3a: a notificacao aceita reacoes (ausente = nao). */
-  allowsReactions?: boolean;
+  /** v3a: a notificacao aceita reacoes. */
+  allowsReactions: boolean;
   campaignId: string;
   ctaHref: string | null;
   hasAudio: boolean;
   hasCta: boolean;
-  /** v3a: a notificacao tem enquete (ausente = nao). */
-  hasPoll?: boolean;
+  /** v3a: a notificacao tem enquete. */
+  hasPoll: boolean;
   hasResponse: boolean;
-  /** v3a: ids das opcoes da enquete (ausente = nenhuma). */
-  pollOptionIds?: readonly string[];
+  /** v3a: ids das opcoes da enquete (vazio sem enquete). */
+  pollOptionIds: readonly string[];
   title: string;
   validUntil: string | null;
   validityMinutes: number | null;
@@ -304,7 +304,7 @@ function rulesOf(definition: AudienceDefinition | null): AudienceRule[] {
   return rules;
 }
 
-/** Passos de notificacao que uma regra confere ("o que fez com", "desde que recebeu", "pagina do botao"). */
+/** Passos de notificacao que uma regra confere ("o que fez com", "desde que recebeu", "pagina do destino"). */
 function nodeRefsOf(rule: AudienceRule): string[] {
   const refs: string[] = [];
 
@@ -483,16 +483,19 @@ const ISSUE_COPY = {
   anchorNotAbove: "Escolha uma notificação que vem antes deste passo no caminho.",
   branch: "Escolha o caminho Sim ou Não.",
   conditionRules: "A condição precisa de pelo menos uma regra.",
-  ctaExternal: "O botão desta notificação leva para fora da área: use “clicou no botão”.",
-  ctaUntracked: "Esta página não é acompanhada: use “clicou no botão”.",
+  ctaExternal: "Esta notificação leva para fora da área: use “foi para o destino”.",
+  ctaUntracked: "Esta página não é acompanhada: use “foi para o destino”.",
   expiresWait: "Escolha de 15 minutos a 60 dias.",
   invalid: "Passo inválido.",
   maxDepth: `O fluxo vai até ${FLOW_LIMITS.maxDepth} passos em sequência.`,
   maxNodes: `Use no máximo ${FLOW_LIMITS.maxNodes} passos (notificações e condições).`,
   maxWait: "Escolha de 15 minutos a 30 dias.",
   messageNoAudio: "A notificação escolhida não tem áudio. Escolha outra regra.",
-  messageNoCta: "A notificação escolhida não tem botão. Escolha outra regra.",
+  messageNoCta: "A notificação escolhida não leva a lugar nenhum. Escolha outra regra.",
+  messageNoPoll: "A notificação escolhida não tem enquete. Escolha outra regra.",
+  messageNoReactions: "A notificação escolhida não aceita reações. Escolha outra regra.",
   messageNoResponse: "A notificação escolhida não pede resposta. Escolha outra regra.",
+  pollOptionGone: "Esta opção não existe mais na enquete. Escolha outra.",
   noMessage: "Adicione pelo menos uma notificação.",
   pathWithoutMessage: "Este caminho termina sem nenhuma notificação.",
   pickNotification: "Escolha a notificação.",
@@ -533,11 +536,12 @@ function offsetProblem(node: FlowNode): string | null {
 type IssueSink = (level: FlowIssue["level"], nodeId: string | null, field: string | null, message: string) => void;
 
 /**
- * Regra de mensagem que a notificacao citada nunca satisfaz (o audio, o botao ou a resposta sairam depois
- * da escolha): sem isto, "não começou a ouvir o áudio" valeria para todos. Abriu fica de fora (o conteudo
- * daqui nao traz o texto para saber se ha o que abrir).
+ * Regra de mensagem que a notificacao citada nunca satisfaz (o audio, o destino, a resposta, as reacoes ou
+ * a enquete sairam depois da escolha, ou a opcao escolhida saiu da enquete): sem isto, "não começou a
+ * ouvir o áudio" valeria para todos. Abriu fica de fora (o conteudo daqui nao traz o texto para saber se
+ * ha o que abrir); "excluiu do sino" vale para qualquer notificacao.
  */
-function impossibleActionProblem(action: string, meta: FlowMessageMeta): string | null {
+function impossibleActionProblem(action: string, meta: FlowMessageMeta, choice?: string): string | null {
   switch (action) {
     case "audio_started":
     case "audio_completed":
@@ -548,6 +552,14 @@ function impossibleActionProblem(action: string, meta: FlowMessageMeta): string 
     case "declined":
     case "responded":
       return meta.hasResponse ? null : ISSUE_COPY.messageNoResponse;
+    case "reacted":
+      return meta.allowsReactions ? null : ISSUE_COPY.messageNoReactions;
+    case "voted":
+      if (!meta.hasPoll) {
+        return ISSUE_COPY.messageNoPoll;
+      }
+
+      return choice && !(meta.pollOptionIds ?? []).includes(choice) ? ISSUE_COPY.pollOptionGone : null;
     default:
       return null;
   }
@@ -555,7 +567,7 @@ function impossibleActionProblem(action: string, meta: FlowMessageMeta): string 
 
 /**
  * Regras de um filtro, condicao ou objetivo: referencias permitidas, a acao possivel na notificacao citada,
- * "pagina do botao" acompanhada, produto escolhido.
+ * "pagina do destino" acompanhada, produto escolhido.
  */
 function addRuleIssues(
   add: IssueSink,
@@ -569,7 +581,7 @@ function addRuleIssues(
 
     if (rule.type === "message" && rule.ref.kind === "node") {
       const meta = input.messages[rule.ref.nodeId];
-      const problem = meta ? impossibleActionProblem(rule.action, meta) : null;
+      const problem = meta ? impossibleActionProblem(rule.action, meta, rule.choice) : null;
 
       if (problem) {
         add("save", input.nodeId, input.field, problem);
@@ -601,7 +613,7 @@ function countsAsMessage(node: FlowNode, origin: FlowOrigin) {
  * Problemas da arvore: uma entrada; todo passo com pai na arvore; Sim/Nao so sob condicao; ate 20 passos e
  * 8 em sequencia; esperas nos limites; "quando" e regras so com notificacoes acima no caminho (num fluxo
  * de aviso, a entrada e a notificacao principal); "antes de vencer" menor que o tempo no sino da notificacao
- * de referencia; "pagina do botao" so de botao acompanhado. `save` bloqueia gravar, `activation` bloqueia
+ * de referencia; "pagina do destino" so de destino acompanhado. `save` bloqueia gravar, `activation` bloqueia
  * ativar e `warning` so avisa. O objetivo fica fora da arvore: validateFlowGoal.
  */
 export function validateFlowTree(tree: FlowTree, messages: Record<string, FlowMessageMeta>): FlowIssue[] {
@@ -761,7 +773,7 @@ export function validateFlowTree(tree: FlowTree, messages: Record<string, FlowMe
 
 /**
  * Problemas do objetivo: vale para o fluxo inteiro, entao pode conferir qualquer notificacao do fluxo (num
- * fluxo de aviso, tambem a principal); "pagina do botao" so de botao acompanhado; produto escolhido.
+ * fluxo de aviso, tambem a principal); "pagina do destino" so de destino acompanhado; produto escolhido.
  */
 export function validateFlowGoal(tree: FlowTree, goal: AudienceDefinition | null, messages: Record<string, FlowMessageMeta>): FlowIssue[] {
   const issues: FlowIssue[] = [];
@@ -881,9 +893,9 @@ export function treeFromFollowUps(entryId: string, followUps: FollowUp[]): FlowN
 
 /**
  * Chaves de pagina que o fluxo usa (gravadas em communication_flows.watched_page_keys a cada gravacao): as
- * regras de visita dos filtros, das condicoes e do objetivo ("pagina do botao" pelo botao do passo) e a
- * pagina do botao de cada notificacao e do aviso de origem, quando da para acompanhar (o relatorio conta
- * "Visitaram a página do botão"). Sem repeticao, em ordem, no maximo 50 (o check da tabela).
+ * regras de visita dos filtros, das condicoes e do objetivo ("pagina do destino" pelo destino do passo) e a
+ * pagina do destino de cada notificacao e do aviso de origem, quando da para acompanhar (o relatorio conta
+ * "Visitaram a página do destino"). Sem repeticao, em ordem, no maximo 50 (o check da tabela).
  */
 export function watchedPageKeysOf(
   tree: FlowTree,

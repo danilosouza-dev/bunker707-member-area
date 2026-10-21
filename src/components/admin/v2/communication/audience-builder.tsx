@@ -50,6 +50,11 @@ import {
   describeSampleNames,
   formatStudentCount,
   messageActionsFor,
+  messageChoiceOptions,
+  messageChoiceProblem,
+  messageRuleWithAction,
+  messageRuleWithChoice,
+  messageRuleWithOption,
   newAudienceGroup,
   pageButtonOptions,
   pageTargetChoiceOf,
@@ -76,7 +81,8 @@ import {
 // v2 (docs/23 §7): `mode`. No segmento ("segment") entra "O que fez com uma notificação", com o seletor
 // das notificacoes enviadas nos ultimos 90 dias (`notices`); dentro de um fluxo ("flow") a regra cita um
 // passo acima (`flowContext`), e entram "Visitou uma página" e "Ganhou acesso a um produto". As acoes
-// oferecidas sao so as que a notificacao escolhida tem (audio, botao, resposta).
+// oferecidas sao so as que a notificacao escolhida tem (audio, destino, resposta; v3a: reacoes e enquete,
+// com o segundo seletor "com qualquer reação" / "em qualquer opção").
 
 type AudienceBuilderProps = {
   cohorts: readonly { id: string; name: string }[];
@@ -611,6 +617,10 @@ function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext
       // No segmento, so os avisos enviados; no fluxo, os passos acima (o aviso de origem tambem e um passo).
       const options = context.messageOptions.filter((option) => (context.mode === "flow" ? true : option.ref.kind === "campaign"));
 
+      // v3a: "reagiu" e "votou na enquete" tem o segundo seletor (qualquer uma ou uma reacao / opcao).
+      const choices = messageChoiceOptions(chosen, rule.action, rule.choice);
+      const choiceProblem = messageChoiceProblem(chosen, rule);
+
       return (
         <div className="flex min-w-0 flex-col gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -626,20 +636,29 @@ function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext
               ariaLabel="O que fez com a notificação"
               className="w-full sm:w-60"
               disabled={disabled}
-              onChange={(action: MessageAction) => onChange({ ...rule, action })}
+              onChange={(action: MessageAction) => onChange(messageRuleWithAction(rule, action))}
               options={messageActionsFor(chosen, rule.action).map((action) => ({ label: MESSAGE_ACTION_LABELS[action], value: action }))}
               value={rule.action}
             />
+            {choices ? (
+              <InlineSelect
+                ariaLabel={rule.action === "reacted" ? "Qual reação" : "Qual opção da enquete"}
+                className="w-full sm:w-56"
+                disabled={disabled}
+                onChange={(choice: string | null) => onChange(messageRuleWithChoice(rule, choice))}
+                options={choices}
+                value={rule.choice ?? null}
+              />
+            ) : null}
             <MessagePicker
               ariaLabel="Notificação"
               context={context}
-              onChange={(option) =>
-                onChange({ ...rule, action: messageActionsFor(option).includes(rule.action) ? rule.action : "opened", ref: option.ref })
-              }
+              onChange={(option) => onChange(messageRuleWithOption(rule, option))}
               options={options}
               value={key}
             />
           </div>
+          {choiceProblem ? <p className="text-[13px] leading-5 text-[var(--error)]">{choiceProblem}</p> : null}
           {context.mode === "segment" ? <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{MESSAGE_RULE_SEGMENT_HINT}</p> : null}
         </div>
       );
@@ -678,7 +697,7 @@ function RuleFields({ context, onChange, rule, ruleKey }: { context: RuleContext
           ) : null}
           {page.kind === "message_cta" ? (
             <MessagePicker
-              ariaLabel="Notificação do botão"
+              ariaLabel="Notificação que leva à página"
               context={context}
               onChange={(option) => option.ref.kind === "node" && onChange({ ...rule, page: { kind: "message_cta", nodeId: option.ref.nodeId } })}
               options={buttons}

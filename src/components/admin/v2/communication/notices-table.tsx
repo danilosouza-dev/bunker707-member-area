@@ -21,10 +21,13 @@ export function toNoticeActionTarget(item: NoticeListItem): NoticeActionTarget {
   return {
     actions: item.actions,
     audienceCount: item.audienceCount,
+    // v3a: Excluir e Retirar do sino avisam das regras que citam a notificacao; o texto segue a situacao.
+    citations: item.citations,
     followUps: item.followUpCount > 0 ? { count: item.followUpCount, sent: item.followUpsSent } : null,
     id: item.id,
     kind: item.kind,
     recipients: item.stats.recipients,
+    situation: item.situation,
     status: item.status,
     title: item.title,
     updatedAt: item.updatedAt

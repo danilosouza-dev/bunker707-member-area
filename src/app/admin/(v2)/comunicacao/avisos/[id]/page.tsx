@@ -39,6 +39,9 @@ function readNow() {
 // notificação agendada abrem no editor; enviado, cancelado e encerrado, no relatório. Pop-up no ar ou
 // pausado abre no relatório, com "Editar" (?editar=1) para o editor so para quem pode edita-lo. O
 // conteudo de um passo de fluxo (v2) nao e aviso da lista: o endereco leva para o fluxo, no passo.
+// v3a (docs/24 §2.2): a notificação enviada tambem abre no relatório; o editor (so o conteudo) so com
+// ?editar=1 e "edit" nas ações (messaging.publish e, acima de 500 alunos, messaging.publish_large), pela
+// mesma regra de opensNoticeEditor. Sem a permissao, o ?editar=1 abre o relatório.
 export default async function AdminNoticePage({ params, searchParams }: PageProps) {
   const [{ access }, { id }, query] = await Promise.all([requirePageArea("comunicacao"), params, searchParams]);
 

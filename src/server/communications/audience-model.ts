@@ -12,6 +12,7 @@
 
 import { FIXED_PAGE_KEYS, FIXED_PAGE_LABELS, pageKeyOfTarget, type FixedPageKey } from "../member-area/page-visit-model";
 import { STUDENT_PACE_LABELS, STUDENT_PACES, type StudentListParams, type StudentPace } from "../students/model";
+import { isReactionId, POLL_OPTION_ID, REACTION_EMOJI } from "./interactions-model";
 
 export const AUDIENCE_RULE_TYPES = [
   "product",
@@ -54,9 +55,9 @@ export type AudienceRule =
 export type MessageRef = { kind: "node"; nodeId: string } | { campaignId: string; kind: "campaign" };
 
 /**
- * O que o aluno fez com a notificacao. "interacted" = abriu, comecou o audio, clicou ou respondeu.
- * Negada ("nao abriu"), a regra so vale para quem recebeu. v3a (docs/24 §6): reagiu, votou na enquete e
- * excluiu do sino, no fim (a ordem da v2 fica).
+ * O que o aluno fez com a notificacao. "interacted" = abriu, comecou o audio, foi para o destino,
+ * respondeu, reagiu ou votou. Negada ("nao abriu"), a regra so vale para quem recebeu. v3a (docs/24 §6):
+ * reagiu, votou na enquete e excluiu do sino, no fim (a ordem da v2 fica).
  */
 export const MESSAGE_ACTIONS = [
   "received",
@@ -75,7 +76,7 @@ export const MESSAGE_ACTIONS = [
 ] as const;
 export type MessageAction = (typeof MESSAGE_ACTIONS)[number];
 
-/** Pagina de uma regra "page_visit"; "message_cta" = a pagina do botao de um passo acima. */
+/** Pagina de uma regra "page_visit"; "message_cta" = a pagina para onde leva um passo acima. */
 export type PageTarget =
   | { kind: "content"; productId: string }
   | { kind: "checkout"; productId: string }
@@ -168,7 +169,7 @@ export type AudienceContext = {
   /** Aulas publicadas por conteudo. */
   lessonTotals: Record<string, number>;
   now: number;
-  /** So no motor dos fluxos: passo -> chave da pagina do botao (null = externo ou nao acompanhado). */
+  /** So no motor dos fluxos: passo -> chave da pagina para onde ele leva (null = externo ou nao acompanhado). */
   flow?: { ctaPageKeys: Record<string, string | null> };
   /**
    * Chaves de mensagem ("campaign:<id>", "node:<id>") carregadas para todos os avaliados. Regra com chave
@@ -368,8 +369,11 @@ function evaluateRule(rule: AudienceRule, facts: AudienceStudentFacts, context: 
   return false;
 }
 
-/** O aluno fez isto com a notificacao? (a linha existe: "received" ja vale) */
-function messageDone(fact: MessageFact, action: MessageAction) {
+/**
+ * O aluno fez isto com a notificacao? (a linha existe: "received" ja vale). `choice` (v3a) = a reacao ou a
+ * opcao da enquete pedida; ausente = qualquer uma.
+ */
+function messageDone(fact: MessageFact, action: MessageAction, choice: string | undefined) {
   switch (action) {
     case "received":
       return true;
@@ -390,7 +394,20 @@ function messageDone(fact: MessageFact, action: MessageAction) {
     case "responded":
       return fact.response !== null;
     case "interacted":
-      return fact.openedAt !== null || fact.audioStartedAt !== null || fact.clickedAt !== null || fact.response !== null;
+      return (
+        fact.openedAt !== null ||
+        fact.audioStartedAt !== null ||
+        fact.clickedAt !== null ||
+        fact.response !== null ||
+        (fact.reaction ?? null) !== null ||
+        (fact.pollChoice?.length ?? 0) > 0
+      );
+    case "reacted":
+      return choice ? fact.reaction === choice : (fact.reaction ?? null) !== null;
+    case "voted":
+      return choice ? fact.pollChoice?.includes(choice) === true : (fact.pollChoice?.length ?? 0) > 0;
+    case "hidden":
+      return (fact.hiddenAt ?? null) !== null;
   }
 
   return false;
@@ -418,7 +435,7 @@ function evaluateMessageRule(rule: Extract<AudienceRule, { type: "message" }>, f
     return false;
   }
 
-  const done = messageDone(fact, rule.action);
+  const done = messageDone(fact, rule.action, rule.choice);
 
   return rule.negate ? !done : done;
 }
@@ -440,7 +457,7 @@ function flowSinceAt(since: FlowSince, facts: AudienceStudentFacts): number | nu
   return facts.messages?.[messageRefKey({ kind: "node", nodeId: since.nodeId })]?.visibleAt ?? null;
 }
 
-/** Chave da pagina da regra; "pagina do botao" pelo passo (null = externo ou nao acompanhado: nunca visitou). */
+/** Chave da pagina da regra; "pagina para onde leva" pelo passo (null = externo ou nao acompanhado: nunca visitou). */
 function pageKeyOfRule(page: PageTarget, context: AudienceContext): string | null {
   if (page.kind === "message_cta") {
     return context.flow?.ctaPageKeys[page.nodeId] ?? null;
@@ -611,6 +628,22 @@ function normalizePage(page: PageTarget): PageTarget | null {
   return null;
 }
 
+/**
+ * `choice` da regra "message" (v3a): so a reacao do catalogo (reacted) ou um id de opcao no formato
+ * (voted); qualquer outra coisa sai (= qualquer uma), para o JSON estavel comparar igual.
+ */
+function normalizeMessageChoice(action: MessageAction, choice: unknown): string | undefined {
+  if (typeof choice !== "string") {
+    return undefined;
+  }
+
+  if (action === "reacted") {
+    return isReactionId(choice) ? choice : undefined;
+  }
+
+  return action === "voted" && POLL_OPTION_ID.test(choice) ? choice : undefined;
+}
+
 /** Regra das tres novas (v2) normalizada; acao, pagina ou marco desconhecido -> null (a regra sai). */
 function normalizeV2Rule(rule: Extract<AudienceRule, { type: "access_gained" | "message" | "page_visit" }>): AudienceRule | null {
   const negate = rule.negate === true;
@@ -619,7 +652,13 @@ function normalizeV2Rule(rule: Extract<AudienceRule, { type: "access_gained" | "
     case "message": {
       const ref = normalizeMessageRef(rule.ref);
 
-      return ref && MESSAGE_ACTIONS.includes(rule.action) ? { action: rule.action, negate, ref, type: "message" } : null;
+      if (!ref || !MESSAGE_ACTIONS.includes(rule.action)) {
+        return null;
+      }
+
+      const choice = normalizeMessageChoice(rule.action, rule.choice);
+
+      return choice === undefined ? { action: rule.action, negate, ref, type: "message" } : { action: rule.action, choice, negate, ref, type: "message" };
     }
     case "page_visit": {
       const page = normalizePage(rule.page);
@@ -817,7 +856,7 @@ export function describeAudienceRule(rule: AudienceRule, names: AudienceNames): 
         : `estão nas turmas ${joinWithOr(cohorts, (count) => `mais ${count} ${count === 1 ? "turma" : "turmas"}`)}`;
     }
     case "message":
-      return `${rule.negate ? "não " : ""}${MESSAGE_ACTION_SENTENCES[rule.action]?.(noticePhrase(names, rule.ref)) ?? ""}`.trimEnd();
+      return `${rule.negate ? "não " : ""}${MESSAGE_ACTION_SENTENCES[rule.action]?.(noticePhrase(names, rule.ref), choicePhrase(names, rule)) ?? ""}`.trimEnd();
     case "page_visit": {
       const no = rule.negate ? "não " : "";
       const since = sincePhrase(names, rule.since);
@@ -854,22 +893,47 @@ function noticePhrase(names: AudienceNames, ref: MessageRef): NoticePhrase {
     : { of: `de ${MISSING_MESSAGE}`, the: MISSING_MESSAGE, to: `a ${MISSING_MESSAGE}`, with: `com ${MISSING_MESSAGE}` };
 }
 
+const MISSING_POLL_OPTION = "uma opção removida";
+
+/**
+ * v3a: a reacao ("com ❤️") ou a opcao ("em “Sábado”") da regra; null = qualquer uma. Opcao que nao veio
+ * em names.pollOptions = "uma opção removida"; reacao fora do catalogo conta como qualquer uma (a
+ * normalizacao ja a tira).
+ */
+function choicePhrase(names: AudienceNames, rule: Extract<AudienceRule, { type: "message" }>): string | null {
+  if (!rule.choice) {
+    return null;
+  }
+
+  if (rule.action === "reacted") {
+    return isReactionId(rule.choice) ? `com ${REACTION_EMOJI[rule.choice]}` : null;
+  }
+
+  if (rule.action === "voted") {
+    const label = names.pollOptions?.[messageRefKey(rule.ref)]?.[rule.choice]?.trim();
+
+    return label ? `em “${label}”` : `em ${MISSING_POLL_OPTION}`;
+  }
+
+  return null;
+}
+
 /** Frase de cada acao, no plural depois de "Alunos que" (a negacao poe "não " na frente). */
-const MESSAGE_ACTION_SENTENCES: Record<MessageAction, (notice: NoticePhrase) => string> = {
+const MESSAGE_ACTION_SENTENCES: Record<MessageAction, (notice: NoticePhrase, choice: string | null) => string> = {
   accepted: (notice) => `aceitaram ${notice.the}`,
   audio_completed: (notice) => `ouviram até o fim o áudio ${notice.of}`,
   audio_started: (notice) => `começaram a ouvir o áudio ${notice.of}`,
-  clicked: (notice) => `clicaram no botão ${notice.of}`,
+  clicked: (notice) => `foram para o destino ${notice.of}`,
   declined: (notice) => `recusaram ${notice.the}`,
   interacted: (notice) => `interagiram ${notice.with}`,
   opened: (notice) => `abriram ${notice.the}`,
   received: (notice) => `receberam ${notice.the}`,
   responded: (notice) => `responderam ${notice.the}`,
   seen: (notice) => `viram ${notice.the} no sino`,
-  // v3a (docs/24 §6): sem a reacao ou a opcao escolhida (as frases com `choice` sao do pacote de regras).
+  // v3a (docs/24 §6)
   hidden: (notice) => `excluíram do sino ${notice.the}`,
-  reacted: (notice) => `reagiram ${notice.to}`,
-  voted: (notice) => `votaram na enquete ${notice.of}`
+  reacted: (notice, choice) => (choice ? `reagiram ${choice} ${notice.to}` : `reagiram ${notice.to}`),
+  voted: (notice, choice) => (choice ? `votaram ${choice} na enquete ${notice.of}` : `votaram na enquete ${notice.of}`)
 };
 
 /** Pagina fixa com o artigo da frase ("visitaram o Início", "visitaram Minhas compras"). */
@@ -892,7 +956,7 @@ function pagePhrase(names: AudienceNames, page: PageTarget) {
     case "fixed":
       return FIXED_PAGE_PHRASES[page.key] ?? "uma página";
     case "message_cta":
-      return `a página do botão ${noticePhrase(names, { kind: "node", nodeId: page.nodeId }).of}`;
+      return `a página para onde leva ${noticePhrase(names, { kind: "node", nodeId: page.nodeId }).the}`;
   }
 
   return "uma página";

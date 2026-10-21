@@ -39,6 +39,7 @@ import {
   type MessageFact
 } from "./audience-model";
 import { assertNoDbError, chunksOf, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
+import { isReactionId, POLL_OPTION_ID } from "./interactions-model";
 
 export type AudiencePerson = { avatarUrl: string | null; name: string };
 
@@ -302,14 +303,18 @@ type MessageRow = {
   clicked_at: string | null;
   created_at: string;
   expires_at: string;
+  hidden_at: string | null;
   id: string;
   opened_at: string | null;
+  poll_choice: unknown;
+  reaction: string | null;
   response: string | null;
   seen_at: string | null;
   user_id: string;
 };
 
-const MESSAGE_ROW_COLUMNS = "id,user_id,campaign_id,created_at,expires_at,seen_at,opened_at,clicked_at,response,audio_started_at,audio_completed_at";
+const MESSAGE_ROW_COLUMNS =
+  "id,user_id,campaign_id,created_at,expires_at,seen_at,opened_at,clicked_at,response,audio_started_at,audio_completed_at,reaction,poll_choice,hidden_at";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Ids de aviso validos, sem repeticao e em ordem (o filtro `in` nao aceita id fora do formato). */
@@ -317,10 +322,23 @@ function campaignIdsOf(campaignIds: readonly string[] | undefined) {
   return Array.from(new Set((campaignIds ?? []).filter((id) => typeof id === "string" && UUID.test(id)))).sort();
 }
 
+/** v3a: ids das opcoes votadas (so texto no formato do id; outra coisa = nao votou). */
+function pollChoiceOf(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const choice = value.filter((id): id is string => typeof id === "string" && POLL_OPTION_ID.test(id));
+
+  return choice.length > 0 ? choice : null;
+}
+
 /**
  * Uma linha do sino como fato (datas em texto ISO). `visibleAt` = greatest(created_at, sent_at do aviso):
  * o envio grava em lotes enquanto o aviso esta "sending" e o sino so mostra depois do "sent". Linha que
- * ja traz `visible_at` (o RPC de fatos do lote do motor, 7.9) usa esse valor.
+ * ja traz `visible_at` (o RPC de fatos do lote do motor, 7.9) usa esse valor. v3a (docs/24 §6): reacao
+ * (so um id do catalogo), voto (so ids no formato) e exclusao do sino, lidos com tolerancia (a 7.9 da
+ * 0002 nao manda essas chaves: ausente = nao reagiu, nao votou, nao excluiu).
  */
 export function messageFactOf(row: {
   audio_completed_at: string | null;
@@ -328,7 +346,10 @@ export function messageFactOf(row: {
   clicked_at: string | null;
   created_at?: string | null;
   expires_at: string;
+  hidden_at?: string | null;
   opened_at: string | null;
+  poll_choice?: unknown;
+  reaction?: string | null;
   response: string | null;
   seen_at: string | null;
   sent_at?: string | null;
@@ -343,7 +364,10 @@ export function messageFactOf(row: {
     audioStartedAt: timeOf(row.audio_started_at),
     clickedAt: timeOf(row.clicked_at),
     expiresAt: timeOf(row.expires_at) ?? visibleAt,
+    hiddenAt: timeOf(row.hidden_at),
     openedAt: timeOf(row.opened_at),
+    pollChoice: pollChoiceOf(row.poll_choice),
+    reaction: isReactionId(row.reaction) ? row.reaction : null,
     response: row.response === "accepted" || row.response === "declined" ? row.response : null,
     seenAt: timeOf(row.seen_at),
     visibleAt

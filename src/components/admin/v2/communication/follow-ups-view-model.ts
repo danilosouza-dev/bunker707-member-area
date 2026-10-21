@@ -30,6 +30,7 @@ import {
   type FollowUp
 } from "../../../../server/communications/flow-model";
 import type { FlowNoticeContent, FollowUpDraft } from "../../../../server/communications/flow-schemas";
+import type { PollOption } from "../../../../server/communications/interactions-model";
 import { describeValidity, validityDurationLabel, validityToColumns, VALIDITY_LIMITS, type FlowValidity } from "../../../../server/communications/message-meta";
 import { pageKeyOfHref } from "../../../../server/member-area/page-visit-model";
 import { shouldClampNotificationBody } from "../../../member/notifications/notifications-model";
@@ -65,7 +66,7 @@ export const FOLLOW_UPS_COPY = {
   pending: "Alterações não aplicadas",
   remove: "Remover",
   sendTest: "Enviar teste para mim",
-  /** A escolha rapida ja feita que a notificacao de cima nao oferece mais (audio, botao ou texto saiu). */
+  /** A escolha rapida ja feita que a notificacao de cima nao oferece mais (audio, destino, enquete, reacoes ou texto saiu). */
   staleChoice: "Esta escolha não vale mais para a notificação de cima. Escolha outra.",
   /** Rodape da folha da seguinte: no editor (rascunho) e no relatorio da notificacao enviada. */
   sheetDraftNote: "As mudanças ficam no rascunho até você salvar.",
@@ -101,13 +102,19 @@ export type FollowUpLevel = "main" | "previous";
 
 /** O que a notificacao de cima tem: decide as escolhas rapidas e o tempo no sino de "antes de vencer". */
 export type FollowUpParent = {
+  /** v3a: aceita reacoes ("não reagiu"). */
+  allowsReactions: boolean;
   body: string;
   ctaHref: string | null;
   hasAudio: boolean;
+  /** v3a: tem enquete ("não votou na enquete"; e ha o que abrir). */
+  hasPoll: boolean;
   hasResponse: boolean;
   level: FollowUpLevel;
   /** Passo da notificacao de cima: a entrada do fluxo do aviso (a principal) ou a seguinte. */
   nodeId: string;
+  /** v3a: as opcoes da enquete (as regras "votou em “X”" das seguintes de baixo). */
+  pollOptions: readonly PollOption[];
   title: string;
   /**
    * Quanto tempo ela fica no sino, em minutos, contado de quando chega; null = depende de quando chega
@@ -116,7 +123,7 @@ export type FollowUpParent = {
   validityMinutes: number | null;
 };
 
-type ParentContent = Pick<FlowNoticeContent, "audio" | "body" | "cta" | "response" | "title" | "validity">;
+type ParentContent = Pick<FlowNoticeContent, "audio" | "body" | "cta" | "poll" | "reactions" | "response" | "title" | "validity">;
 
 /** Minutos no sino de um conteudo; "até uma data" so com a hora de envio. */
 export function validityMinutesOf(validity: FlowValidity, sendAt?: number | null): number | null {
@@ -137,26 +144,30 @@ export function validityMinutesOf(validity: FlowValidity, sendAt?: number | null
 
 export function followUpParentOf(nodeId: string, level: FollowUpLevel, content: ParentContent, sendAt?: number | null): FollowUpParent {
   return {
+    allowsReactions: content.reactions === true,
     body: content.body,
     ctaHref: content.cta?.href?.trim() || null,
     hasAudio: Boolean(content.audio),
+    hasPoll: Boolean(content.poll),
     hasResponse: Boolean(content.response),
     level,
     nodeId,
+    pollOptions: content.poll?.options ?? [],
     title: content.title,
     validityMinutes: validityMinutesOf(content.validity, sendAt)
   };
 }
 
 /**
- * Ha o que abrir ("Ver mais", audio, botao ou resposta)? O sino mostra um aviso curto so de texto inteiro,
- * entao nele "abriu" nunca acontece e nao e oferecido (docs/23 V7).
+ * Ha o que abrir ("Ver mais", audio, destino, resposta ou enquete)? O sino mostra um aviso curto so de texto
+ * inteiro, entao nele "abriu" nunca acontece e nao e oferecido (docs/23 V7). Votar conta como abrir; reagir
+ * tambem, mas reacao sozinha nao faz haver o que abrir (docs/24 T15).
  */
-export function hasSomethingToOpen(parent: Pick<FollowUpParent, "body" | "ctaHref" | "hasAudio" | "hasResponse">) {
-  return parent.hasAudio || Boolean(parent.ctaHref) || parent.hasResponse || shouldClampNotificationBody(parent.body);
+export function hasSomethingToOpen(parent: Pick<FollowUpParent, "body" | "ctaHref" | "hasAudio" | "hasResponse"> & { hasPoll?: boolean }) {
+  return parent.hasAudio || Boolean(parent.ctaHref) || parent.hasResponse || parent.hasPoll === true || shouldClampNotificationBody(parent.body);
 }
 
-/** Produto que o botao abre (/conteudo/<id>, tambem uma aula dele); senao null. */
+/** Produto que o destino abre (/conteudo/<id>, tambem uma aula dele); senao null. */
 export function ctaProductId(href: string | null | undefined): string | null {
   const key = pageKeyOfHref(href);
 
@@ -193,13 +204,18 @@ export const QUICK_CHOICE_IDS = [
   "not_responded",
   "accepted",
   "declined",
+  "not_voted",
+  "not_reacted",
   "everyone",
   "rules"
 ] as const;
 export type QuickChoiceId = (typeof QUICK_CHOICE_IDS)[number];
 
 export const NOTHING_TO_OPEN_NOTE =
-  "Esta notificação não tem áudio, botão, resposta nem texto longo: o aluno lê tudo no sino, então só dá para saber se ele viu.";
+  "Esta notificação não tem áudio, destino, resposta, enquete nem texto longo: o aluno lê tudo no sino, então só dá para saber se ele viu.";
+
+/** v3a: a linha embaixo das escolhas "não …" sobre a notificacao de cima (QUICK_CHOICES_SKIPPING_HIDDEN). */
+export const HIDDEN_SKIP_NOTE = "Quem excluiu a notificação de cima do sino não recebe esta.";
 
 /** Rotulo de cada escolha (depois de "Quem recebeu ... e…") e a dica, quando ha. */
 export const QUICK_CHOICE_COPY: Record<QuickChoiceId, { hint?: string; label: string }> = {
@@ -207,23 +223,49 @@ export const QUICK_CHOICE_COPY: Record<QuickChoiceId, { hint?: string; label: st
   audio_completed: { label: "ouviu o áudio até o fim" },
   audio_not_completed: { label: "não ouviu o áudio até o fim" },
   audio_not_started: { label: "não começou a ouvir o áudio" },
-  clicked_no_access: { label: "clicou no botão, mas ainda não tem acesso a" },
+  clicked_no_access: { label: "foi para o destino, mas ainda não tem acesso a" },
   declined: { label: "recusou" },
   everyone: { label: "todos que receberam" },
-  not_clicked: { label: "não clicou no botão" },
+  not_clicked: { label: "não foi para o destino" },
   not_opened: { hint: "Inclui quem ainda nem abriu o sino: essa pessoa vai ver as duas juntas.", label: "não abriu" },
+  not_reacted: { label: "não reagiu" },
   not_responded: { label: "não respondeu" },
   not_seen: { hint: "Quem ainda não abriu o sino vai ver as duas juntas quando abrir.", label: "nem viu no sino" },
-  not_visited: { label: "não visitou a página do botão" },
-  opened_not_clicked: { label: "abriu, mas não clicou no botão" },
+  not_visited: { label: "não visitou a página para onde a notificação leva" },
+  not_voted: { label: "não votou na enquete" },
+  opened_not_clicked: { label: "abriu, mas não foi para o destino" },
   rules: { label: "escolher por regras" },
   seen: { hint: NOTHING_TO_OPEN_NOTE, label: "viu no sino" },
   seen_not_opened: {
-    hint: "Abrir é tocar no cartão, em “Ver mais”, no áudio, no botão ou responder. “Marcar todas como lidas” não conta.",
+    hint: "Abrir é tocar na notificação, em “Ver mais”, no áudio ou no botão, reagir, votar ou responder. “Marcar todas como lidas” não conta.",
     label: "viu no sino, mas não abriu"
   },
-  visited_no_access: { label: "visitou a página do botão, mas ainda não tem acesso a" }
+  visited_no_access: { label: "visitou a página para onde a notificação leva, mas ainda não tem acesso a" }
 };
+
+/**
+ * v3a (docs/24 §2.7): as escolhas sobre NAO fazer algo com a notificacao de cima pulam quem a excluiu do
+ * sino (regra "não excluiu do sino"). Fora: "nem viu no sino" (excluida ja foi vista), "todos", as
+ * positivas e as de pagina e produto (sao sobre o produto, nao sobre a notificacao).
+ */
+export const QUICK_CHOICES_SKIPPING_HIDDEN: readonly QuickChoiceId[] = [
+  "not_opened",
+  "seen_not_opened",
+  "not_clicked",
+  "opened_not_clicked",
+  "not_responded",
+  "not_voted",
+  "not_reacted",
+  "audio_not_started",
+  "audio_not_completed"
+];
+
+/** As linhas embaixo da escolha marcada: a dica dela e, nas "não …", HIDDEN_SKIP_NOTE. */
+export function quickChoiceHints(choice: QuickChoiceId): string[] {
+  const hint = QUICK_CHOICE_COPY[choice].hint;
+
+  return [...(hint ? [hint] : []), ...(QUICK_CHOICES_SKIPPING_HIDDEN.includes(choice) ? [HIDDEN_SKIP_NOTE] : [])];
+}
 
 /** As escolhas que pedem um produto ("... mas ainda não tem acesso a [produto]"). */
 export function quickChoiceNeedsProduct(choice: QuickChoiceId) {
@@ -248,7 +290,7 @@ export function quickChoicesFor(parent: FollowUpParent): QuickChoiceId[] {
   if (parent.ctaHref) {
     choices.push("opened_not_clicked", "not_clicked", "clicked_no_access");
 
-    // Pagina da area acompanhada (docs/23 §5.2); botao externo ou pagina desconhecida: so "clicou".
+    // Pagina da area acompanhada (docs/23 §5.2); destino externo ou pagina desconhecida: so "foi para o destino".
     if (pageKeyOfHref(parent.ctaHref)) {
       choices.push("visited_no_access", "not_visited");
     }
@@ -260,6 +302,15 @@ export function quickChoicesFor(parent: FollowUpParent): QuickChoiceId[] {
 
   if (parent.hasResponse) {
     choices.push("not_responded", "accepted", "declined");
+  }
+
+  // v3a: depois das de resposta (enquete e resposta nao convivem na mesma notificacao).
+  if (parent.hasPoll) {
+    choices.push("not_voted");
+  }
+
+  if (parent.allowsReactions) {
+    choices.push("not_reacted");
   }
 
   choices.push("everyone", "rules");
@@ -277,10 +328,18 @@ const rulesOf = (...items: AudienceNode[]): AudienceDefinition => ({ kind: "rule
  * As regras de uma escolha rapida, sempre sobre a notificacao de cima (passo do fluxo). Negada, a regra
  * implica "recebeu" (docs/23 §7). "... mas ainda não tem acesso a Y" junta `product has_not [Y]`: quem ja
  * tem Y nunca recebe. "todos que receberam" = sem filtro. "escolher por regras" nao tem regra propria: null.
+ * v3a: as "não …" de QUICK_CHOICES_SKIPPING_HIDDEN terminam com "não excluiu do sino"; `v2` devolve a forma
+ * gravada pela v2 (sem essa regra), so para reconhecer uma seguinte antiga (quickChoiceOfRules).
  */
-export function quickChoiceRules(choice: QuickChoiceId, parent: Pick<FollowUpParent, "nodeId">, productId: string | null = null): AudienceDefinition | null {
+export function quickChoiceRules(
+  choice: QuickChoiceId,
+  parent: Pick<FollowUpParent, "nodeId">,
+  productId: string | null = null,
+  options: { v2?: boolean } = {}
+): AudienceDefinition | null {
   const ref: MessageRef = { kind: "node", nodeId: parent.nodeId };
   const did = (action: MessageAction, negate = false): AudienceRule => ({ action, negate, ref, type: "message" });
+  const skip = QUICK_CHOICES_SKIPPING_HIDDEN.includes(choice) && options.v2 !== true ? [did("hidden", true)] : [];
   const visited = (negate: boolean): AudienceRule => ({
     negate,
     page: { kind: "message_cta", nodeId: parent.nodeId },
@@ -293,15 +352,15 @@ export function quickChoiceRules(choice: QuickChoiceId, parent: Pick<FollowUpPar
     case "not_seen":
       return rulesOf(did("seen", true));
     case "seen_not_opened":
-      return rulesOf(did("seen"), did("opened", true));
+      return rulesOf(did("seen"), did("opened", true), ...skip);
     case "not_opened":
-      return rulesOf(did("opened", true));
+      return rulesOf(did("opened", true), ...skip);
     case "seen":
       return rulesOf(did("seen"));
     case "opened_not_clicked":
-      return rulesOf(did("opened"), did("clicked", true));
+      return rulesOf(did("opened"), did("clicked", true), ...skip);
     case "not_clicked":
-      return rulesOf(did("clicked", true));
+      return rulesOf(did("clicked", true), ...skip);
     case "clicked_no_access":
       return rulesOf(did("clicked"), noAccess);
     case "visited_no_access":
@@ -309,23 +368,30 @@ export function quickChoiceRules(choice: QuickChoiceId, parent: Pick<FollowUpPar
     case "not_visited":
       return rulesOf(visited(true));
     case "audio_not_started":
-      return rulesOf(did("audio_started", true));
+      return rulesOf(did("audio_started", true), ...skip);
     case "audio_not_completed":
-      return rulesOf(did("audio_completed", true));
+      return rulesOf(did("audio_completed", true), ...skip);
     case "audio_completed":
       return rulesOf(did("audio_completed"));
     case "not_responded":
-      return rulesOf(did("responded", true));
+      return rulesOf(did("responded", true), ...skip);
     case "accepted":
       return rulesOf(did("accepted"));
     case "declined":
       return rulesOf(did("declined"));
+    case "not_voted":
+      return rulesOf(did("voted", true), ...skip);
+    case "not_reacted":
+      return rulesOf(did("reacted", true), ...skip);
     case "everyone":
       return EVERYONE;
     default:
       return null;
   }
 }
+
+/** As escolhas que ja existiam na v2 (as unicas que podem estar gravadas na forma sem "não excluiu do sino"). */
+const V2_SHAPED_CHOICES: readonly QuickChoiceId[] = ["not_opened", "seen_not_opened", "not_clicked", "opened_not_clicked", "not_responded", "audio_not_started", "audio_not_completed"];
 
 /** JSON com chaves em ordem (comparar regras gravadas, que voltam do jsonb em outra ordem). */
 export function stableJson(value: unknown): string {
@@ -365,16 +431,19 @@ function noAccessProductOf(who: AudienceDefinition): string | null {
 
 /**
  * De volta: as regras gravadas sao exatamente uma escolha rapida (depois de normalizeAudience)? Entao o
- * cartao reabre nela; senao, "escolher por regras" com o construtor.
+ * cartao reabre nela; senao, "escolher por regras" com o construtor. v3a: uma "não …" gravada pela v2 (sem
+ * "não excluiu do sino") tambem reabre na escolha; a proxima gravacao escreve a forma nova.
  */
 export function quickChoiceOfRules(who: AudienceDefinition, parent: FollowUpParent): { choice: QuickChoiceId; productId: string | null } {
   const productId = noAccessProductOf(who);
 
   for (const choice of quickChoicesFor(parent)) {
-    const rules = quickChoiceRules(choice, parent, quickChoiceNeedsProduct(choice) ? productId : null);
+    const chosenProduct = quickChoiceNeedsProduct(choice) ? productId : null;
+    const rules = quickChoiceRules(choice, parent, chosenProduct);
+    const v2Rules = V2_SHAPED_CHOICES.includes(choice) ? quickChoiceRules(choice, parent, chosenProduct, { v2: true }) : null;
 
-    if (rules && sameAudience(rules, who)) {
-      return { choice, productId: quickChoiceNeedsProduct(choice) ? productId : null };
+    if ((rules && sameAudience(rules, who)) || (v2Rules && sameAudience(v2Rules, who))) {
+      return { choice, productId: chosenProduct };
     }
   }
 
@@ -424,6 +493,29 @@ export function newFollowUpItem(id: string, parent: FollowUpParent): FollowUpFor
   };
 }
 
+/**
+ * v3a: as opcoes das enquetes da principal e das seguintes nos nomes da frase ("node:<passo>"), para "votaram
+ * em “Sábado” na enquete …" das regras das seguintes.
+ */
+export function followUpAudienceNames(names: AudienceNames, main: Pick<FollowUpParent, "nodeId" | "pollOptions">, items: readonly Pick<FollowUpFormItem, "children" | "content" | "id">[]): AudienceNames {
+  const pollOptions: Record<string, Record<string, string>> = {};
+  const add = (nodeId: string, options: readonly PollOption[] | undefined) => {
+    if (nodeId && options && options.length > 0) {
+      pollOptions[`node:${nodeId}`] = Object.fromEntries(options.map((option) => [option.id, option.label]));
+    }
+  };
+  const walk = (list: readonly Pick<FollowUpFormItem, "children" | "content" | "id">[]) =>
+    list.forEach((item) => {
+      add(item.id, item.content.poll?.options);
+      walk(item.children);
+    });
+
+  add(main.nodeId, main.pollOptions);
+  walk(items);
+
+  return Object.keys(pollOptions).length === 0 ? names : { ...names, pollOptions: { ...names.pollOptions, ...pollOptions } };
+}
+
 /** "Para quem" de verdade: as regras da escolha rapida, ou as do construtor. */
 export function whoOfItem(item: Pick<FollowUpFormItem, "choice" | "productId" | "rules">, parent: Pick<FollowUpParent, "nodeId">): AudienceDefinition {
   return quickChoiceRules(item.choice, parent, item.productId) ?? normalizeAudience(item.rules);
@@ -432,7 +524,7 @@ export function whoOfItem(item: Pick<FollowUpFormItem, "choice" | "productId" | 
 /**
  * Trocar a escolha. Ir para "escolher por regras" abre o construtor com as regras da escolha marcada ate
  * agora ("não abriu E tem acesso a X" comeca de "não abriu"); uma escolha com produto comeca no produto do
- * botao.
+ * destino.
  */
 export function changeQuickChoice(item: FollowUpFormItem, choice: QuickChoiceId, parent: FollowUpParent): FollowUpFormItem {
   if (choice === item.choice) {
@@ -924,7 +1016,7 @@ export function parentOfItem(location: Pick<FollowUpLocation, "parentItem">, mai
 }
 
 /**
- * Escolha rapida que a notificacao de cima nao oferece mais (o audio, o botao ou o texto longo sairam
+ * Escolha rapida que a notificacao de cima nao oferece mais (o audio, o destino, a enquete, as reacoes ou o texto longo sairam
  * depois): erro no "Para quem" em vez de gravar uma regra que ninguem satisfaz (ou que vale para todos).
  */
 export function followUpChoiceErrors(items: readonly FollowUpFormItem[], main: FollowUpParent): Record<string, string> {
@@ -1015,16 +1107,19 @@ export function followUpsOfDrafts(drafts: readonly FollowUpDraft[]): FollowUp[] 
   }));
 }
 
-/** Conteudo -> o que validateFlowTree confere de cada notificacao. */
-export function flowMetaOfContent(content: Pick<FlowNoticeContent, "audio" | "cta" | "response" | "title" | "validity">): FlowMessageMeta {
+/** Conteudo -> o que validateFlowTree confere de cada notificacao (v3a: reacoes e enquete tambem). */
+export function flowMetaOfContent(content: Pick<FlowNoticeContent, "audio" | "cta" | "poll" | "reactions" | "response" | "title" | "validity">): FlowMessageMeta {
   const columns = validityToColumns(content.validity);
 
   return {
+    allowsReactions: content.reactions === true,
     campaignId: "",
     ctaHref: content.cta?.href ?? null,
     hasAudio: Boolean(content.audio),
     hasCta: Boolean(content.cta),
+    hasPoll: Boolean(content.poll),
     hasResponse: Boolean(content.response),
+    pollOptionIds: content.poll?.options.map((option) => option.id) ?? [],
     title: content.title,
     validUntil: columns.valid_until,
     validityMinutes: columns.validity_minutes
@@ -1071,7 +1166,7 @@ const ISSUE_FIELDS: Record<string, string> = { anchorNodeId: "when.anchor", filt
 export function followUpTreeErrors(input: {
   drafts: readonly FollowUpDraft[];
   entryId: string;
-  notice: Pick<FlowNoticeContent, "audio" | "cta" | "response" | "title" | "validity">;
+  notice: Pick<FlowNoticeContent, "audio" | "cta" | "poll" | "reactions" | "response" | "title" | "validity">;
 }): Record<string, string> {
   const nodes = treeFromFollowUps(input.entryId, followUpsOfDrafts(input.drafts));
   const messages: Record<string, FlowMessageMeta> = { [input.entryId]: flowMetaOfContent(input.notice) };
@@ -1149,7 +1244,7 @@ export function remapEntryRefs(drafts: readonly FollowUpDraft[], entryId: string
   return foreign.size === 0 ? [...drafts] : apply(drafts);
 }
 
-/** Passos citados por uma regra (notificacao, pagina do botao e "desde"). */
+/** Passos citados por uma regra (notificacao, pagina do destino e "desde"). */
 function nodeRefsOfRule(rule: AudienceRule): string[] {
   switch (rule.type) {
     case "message":
@@ -1274,15 +1369,21 @@ export type FollowUpStats = {
   goal: number;
   opened: number;
   reached: number;
+  /** v3a: reagiram e votaram (communication_message_interactions do passo; ausente = 0). */
+  reacted?: number;
   received: number;
   removed: number;
   seen: number;
+  voted?: number;
   waiting: number;
 };
 
-/** "Chegaram · Esperando · Receberam · Viram no sino · Abriram ..." (o que a notificacao tem), e "Não receberam". */
-export function followUpNumberRows(stats: FollowUpStats | null | undefined, content: Pick<FlowNoticeContent, "audio" | "cta" | "response">) {
-  const value = (key: keyof FollowUpStats) => (stats ? formatInteger(stats[key]) : "—");
+/**
+ * "Chegaram · Esperando · Receberam · Viram no sino · Abriram ..." (o que a notificacao tem: audio, destino,
+ * resposta, enquete e reacoes), e "Não receberam".
+ */
+export function followUpNumberRows(stats: FollowUpStats | null | undefined, content: Pick<FlowNoticeContent, "audio" | "cta" | "poll" | "reactions" | "response">) {
+  const value = (key: keyof FollowUpStats) => (stats ? formatInteger(stats[key] ?? 0) : "—");
   const rows: { label: string; value: string }[] = [
     { label: "Chegaram", value: value("reached") },
     { label: "Esperando", value: value("waiting") },
@@ -1296,11 +1397,19 @@ export function followUpNumberRows(stats: FollowUpStats | null | undefined, cont
   }
 
   if (content.cta) {
-    rows.push({ label: "Clicaram no botão", value: value("clicked") });
+    rows.push({ label: "Foram para o destino", value: value("clicked") });
   }
 
   if (content.response) {
     rows.push({ label: "Aceitaram", value: value("accepted") }, { label: "Recusaram", value: value("declined") });
+  }
+
+  if (content.poll) {
+    rows.push({ label: "Votaram", value: value("voted") });
+  }
+
+  if (content.reactions) {
+    rows.push({ label: "Reagiram", value: value("reacted") });
   }
 
   // Chegaram = Esperando + Receberam + Não receberam: as que falharam tambem contam aqui.

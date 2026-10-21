@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -178,10 +177,6 @@ test("guarda: a regra do que aparece no sino fica num lugar so (a pagina e os nu
   assert.match(v3a, /poll->>'closesAt' ~ '\^\[0-9\]\{4\}-/);
 });
 
-// Rotas e cartao dos pacotes A e B (docs/24): enquanto o pacote nao chegou, o teste fica como "todo".
-const routesReady = existsSync(new URL("../src/server/communications/student-write-limit.ts", import.meta.url));
-const cardReady = existsSync(new URL("../src/components/member/notifications/notice-reactions.tsx", import.meta.url));
-
 async function routeFiles(directory) {
   const files = [];
 
@@ -198,38 +193,30 @@ async function routeFiles(directory) {
   return files;
 }
 
-test(
-  "guarda: toda rota do sino e o beacon do pop-up leem a sessao pelas claims; as quatro escritas do aluno tem limite",
-  { todo: routesReady ? false : "chega com o pacote A (student-write-limit.ts e as rotas novas)" },
-  async () => {
-    const files = [...(await routeFiles(new URL("../src/app/api/notifications/", import.meta.url))), new URL("../src/app/api/popups/[id]/events/route.ts", import.meta.url)];
-    const relative = (url) => decodeURIComponent(url.pathname).replace(/^.*\/src\/app\//, "");
+test("guarda: toda rota do sino e o beacon do pop-up leem a sessao pelas claims; as quatro escritas do aluno tem limite", async () => {
+  const files = [...(await routeFiles(new URL("../src/app/api/notifications/", import.meta.url))), new URL("../src/app/api/popups/[id]/events/route.ts", import.meta.url)];
+  const relative = (url) => decodeURIComponent(url.pathname).replace(/^.*\/src\/app\//, "");
 
-    for (const name of ["notifications/[id]/reaction/route.ts", "notifications/[id]/poll/route.ts", "notifications/[id]/hide/route.ts"]) {
-      assert.ok(files.some((url) => relative(url) === `api/${name}`), name);
-    }
+  for (const name of ["notifications/[id]/reaction/route.ts", "notifications/[id]/poll/route.ts", "notifications/[id]/hide/route.ts"]) {
+    assert.ok(files.some((url) => relative(url) === `api/${name}`), name);
+  }
 
-    for (const url of files) {
-      const source = await readFile(url, "utf8");
+  for (const url of files) {
+    const source = await readFile(url, "utf8");
 
-      assert.match(source, /\brequireApiSessionUser\b/, relative(url));
-      assert.doesNotMatch(source, /\brequireApiUser\b/, relative(url));
+    assert.match(source, /\brequireApiSessionUser\b/, relative(url));
+    assert.doesNotMatch(source, /\brequireApiUser\b/, relative(url));
 
-      if (/\[id\]\/(reaction|poll|hide|response)\/route\.ts$/.test(relative(url))) {
-        assert.match(source, /\btakeStudentWrite\b/, relative(url));
-      }
+    if (/\[id\]\/(reaction|poll|hide|response)\/route\.ts$/.test(relative(url))) {
+      assert.match(source, /\btakeStudentWrite\b/, relative(url));
     }
   }
-);
+});
 
-test(
-  "guarda: o link decorativo do cartao clicavel fica fora do leitor de tela e do Tab",
-  { todo: cardReady ? false : "chega com o pacote B (notice-reactions.tsx e o cartao novo)" },
-  async () => {
-    const card = await readFile(new URL("../src/components/member/notifications/notification-card.tsx", import.meta.url), "utf8");
-    const decorative = /<a\s[^>]*aria-hidden="true"[^>]*>/.exec(card)?.[0] ?? "";
+test("guarda: o link decorativo do cartao clicavel fica fora do leitor de tela e do Tab", async () => {
+  const card = await readFile(new URL("../src/components/member/notifications/notification-card.tsx", import.meta.url), "utf8");
+  const decorative = /<a\s[^>]*aria-hidden="true"[^>]*>/.exec(card)?.[0] ?? "";
 
-    assert.ok(decorative, "existe um link com aria-hidden");
-    assert.match(decorative, /tabIndex=\{-1\}/);
-  }
-);
+  assert.ok(decorative, "existe um link com aria-hidden");
+  assert.match(decorative, /tabIndex=\{-1\}/);
+});

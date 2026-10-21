@@ -3,17 +3,23 @@
 // quem envia com o "Termina em", destino dos links e marcacao local de lidas e abertas. Modulo puro (sem
 // React, imports relativos): tests/sino-do-aluno-modelo.test.mjs carrega direto pelo Node, e o painel,
 // o cartao, o pop-up e a previa do admin usam as mesmas regras.
+// v3a (docs/24 §1 e §7.3): como o aluno chega ao destino, os nomes da lixeira e das reacoes, a enquete,
+// a troca da resposta, o plano de cada abertura e a busca por intencao (no fim do arquivo).
 
 import { FLOW_LIMITS } from "../../../server/communications/flow-model";
+import { pollPercent, REACTION_LABELS, type NotificationPoll, type ReactionId } from "../../../server/communications/interactions-model";
 import { urgencyLabel } from "../../../server/communications/message-meta";
 import {
   AUDIO_COMPLETE_SLOTS,
   AUDIO_HEARD_SLOTS,
+  CTA_DISPLAYS,
+  type CtaDisplay,
   type NotificationCta,
-  type NotificationItem
+  type NotificationItem,
+  type NotificationResponseValue
 } from "../../../server/communications/notification-model";
 import { withAccessPreviewParam, type AccessPreviewMode } from "../../../lib/access-preview";
-import { getMemberDayDifference } from "../../../lib/member-format";
+import { formatMemberCount, formatMemberDate, formatMemberTime, getMemberDayDifference } from "../../../lib/member-format";
 import { isSafeHeroCtaHref } from "../../../server/member-area/home-hero-links";
 
 /** O numero do sino vale por 1 minuto entre trocas de pagina (o topo remonta a cada pagina). */
@@ -487,4 +493,444 @@ export function shouldFlushAudio(input: { heard: number; known: number; msSinceL
     default:
       return "beacon";
   }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * v3a (docs/24): cartao clicavel, lixeira, reacoes, enquete e troca da resposta
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Como o cartao leva ao destino (docs/24 §1.2), com o link ja conferido. */
+export type CardLinkPlan = {
+  /** Onde fica o link acessivel do cartao: o botao, o titulo (ou a frase do comentario), ou nenhum. */
+  accessibleLink: "button" | "title" | null;
+  /** Desenha o botao (Pelo botão; Pelo botão ou tocando na notificação). */
+  button: boolean;
+  /** Texto ao lado da seta, no pe do cartao (Só tocando na notificação); null nos outros modos. */
+  cue: string | null;
+  /** aria-describedby do link do titulo (o id do texto ao lado da seta), so no modo "card". */
+  describedBy: string | null;
+  /** Modo do aviso; sem destino valido, "button" sem botao (o cartao so informa). */
+  display: CtaDisplay;
+  link: NotificationLink | null;
+  /** Link decorativo por baixo do conteudo: tocar no texto, na imagem ou no vazio leva ao destino. */
+  wholeCard: boolean;
+};
+
+function ctaDisplayOf(cta: Pick<NotificationCta, "display"> | null | undefined): CtaDisplay {
+  const display = cta?.display;
+
+  return display && (CTA_DISPLAYS as readonly string[]).includes(display) ? display : "button";
+}
+
+/**
+ * Comentario: o cartao inteiro leva para a aula, e o link acessivel e a frase ("Ana Souza respondeu seu
+ * comentário"). Aviso: pelo `cta.display` (ausente = "button", a v2). Destino que nao vale como esta
+ * (resolveNotificationLink) = sem link nenhum, como hoje.
+ */
+export function cardLinkOf(
+  item: Pick<NotificationItem, "cta" | "href" | "kind">,
+  input: { accessPreviewMode?: AccessPreviewMode; cueId?: string } = {}
+): CardLinkPlan {
+  if (item.kind !== "notice") {
+    const link = resolveNotificationLink(item.href, "same_tab", input.accessPreviewMode);
+
+    return { accessibleLink: link ? "title" : null, button: false, cue: null, describedBy: null, display: "card", link, wholeCard: link !== null };
+  }
+
+  const cta = item.cta;
+  const label = cta?.label.trim() ?? "";
+  const link = cta && label ? resolveNotificationLink(cta.href, cta.target, input.accessPreviewMode) : null;
+
+  if (!cta || !link) {
+    return { accessibleLink: null, button: false, cue: null, describedBy: null, display: "button", link: null, wholeCard: false };
+  }
+
+  const display = ctaDisplayOf(cta);
+
+  if (display === "card") {
+    return { accessibleLink: "title", button: false, cue: label, describedBy: input.cueId ?? null, display, link, wholeCard: true };
+  }
+
+  return { accessibleLink: "button", button: true, cue: null, describedBy: null, display, link, wholeCard: display === "button_and_card" };
+}
+
+/**
+ * Nomes acessiveis dos controles do cartao, com o titulo (ou a frase do comentario): numa lista de
+ * botoes ou no rotor, nunca vinte "Excluir notificação" iguais.
+ */
+export function cardActionLabels(item: Pick<NotificationItem, "reactions" | "title">) {
+  const title = item.title.trim();
+  const value = item.reactions?.value ?? null;
+
+  return {
+    hide: `Excluir notificação “${title}”`,
+    react: `Reagir à notificação “${title}”`,
+    reaction: value ? `Sua reação a “${title}”: ${REACTION_LABELS[value]}. Mudar reação` : null
+  };
+}
+
+/** Escolher a reacao que ja estava tira a reacao; outra troca. */
+export function nextReaction(current: ReactionId | null | undefined, picked: ReactionId): ReactionId | null {
+  return current === picked ? null : picked;
+}
+
+/** Frase da regiao de status depois de reagir. */
+export function reactionStatus(value: ReactionId | null) {
+  return value ? `Você reagiu com ${REACTION_LABELS[value]}.` : "Reação retirada.";
+}
+
+// --- Enquete -------------------------------------------------------------------------------------
+
+/** Toque numa opcao: uma resposta = vota, troca ou tira (a escolhida); varias = marca ou desmarca. */
+export function pollPressChoice(poll: Pick<NotificationPoll, "choice" | "multiple">, optionId: string): string[] {
+  const chosen = poll.choice.includes(optionId);
+
+  if (!poll.multiple) {
+    return chosen ? [] : [optionId];
+  }
+
+  const next = chosen ? poll.choice.filter((id) => id !== optionId) : [...poll.choice, optionId];
+
+  return [...new Set(next)].sort();
+}
+
+export function samePollChoice(left: readonly string[], right: readonly string[]) {
+  const a = [...new Set(left)].sort();
+  const b = [...new Set(right)].sort();
+
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+/**
+ * O voto na tela antes da resposta do servidor: troca a escolha e, com o resultado ja visivel, move os
+ * votos de lugar (e quem votou, ao votar ou tirar o voto). Enquete aberta sem voto nao mostra resultado
+ * (notificationPollOf): tirar o voto esconde as porcentagens.
+ */
+export function applyPollChoice(poll: NotificationPoll, choice: readonly string[]): NotificationPoll {
+  const known = new Set(poll.options.map((option) => option.id));
+  const next = [...new Set(choice.filter((id) => known.has(id)))].sort();
+  let results = poll.results;
+
+  if (results) {
+    const counts = { ...results.counts };
+
+    for (const id of poll.choice) {
+      counts[id] = Math.max(0, (counts[id] ?? 0) - 1);
+    }
+
+    for (const id of next) {
+      counts[id] = (counts[id] ?? 0) + 1;
+    }
+
+    const joined = poll.choice.length === 0 && next.length > 0 ? 1 : 0;
+    const left = poll.choice.length > 0 && next.length === 0 ? 1 : 0;
+    results = { counts, voters: Math.max(0, results.voters + joined - left) };
+  }
+
+  return { ...poll, choice: next, results: !poll.closed && next.length === 0 ? null : results };
+}
+
+/** "1 voto", "128 votos". */
+export function pollVotesLabel(count: number) {
+  return formatMemberCount(count, "voto");
+}
+
+/** "25/10 às 18:00" no fuso de Sao Paulo; data invalida = "". */
+export function formatPollEnd(closesAt: string | null) {
+  const date = formatMemberDate(closesAt);
+
+  return date ? `${date.slice(0, 5)} às ${formatMemberTime(closesAt)}` : "";
+}
+
+export type PollOptionView = {
+  chosen: boolean;
+  id: string;
+  label: string;
+  /** Nome acessivel do botao: o rotulo, e com o resultado "Sim, 42%, 54 votos". */
+  name: string;
+  /** Largura da barra e o numero a direita; null sem resultado. */
+  percent: number | null;
+  votes: number | null;
+};
+
+export type PollView = {
+  closed: boolean;
+  /** Linha de baixo (12 px): o que fazer, quantos votaram, quando encerra. */
+  footer: string;
+  options: PollOptionView[];
+  resultsVisible: boolean;
+  voted: boolean;
+};
+
+/** O que a enquete do cartao desenha (docs/24 §1.6). */
+export function pollView(poll: NotificationPoll): PollView {
+  const results = poll.results;
+  const voted = poll.choice.length > 0;
+  const options = poll.options.map((option) => {
+    const votes = results ? (results.counts[option.id] ?? 0) : null;
+    const percent = results && votes !== null ? pollPercent(votes, results.voters) : null;
+
+    return {
+      chosen: poll.choice.includes(option.id),
+      id: option.id,
+      label: option.label,
+      name: votes !== null && percent !== null ? `${option.label}, ${percent}%, ${pollVotesLabel(votes)}` : option.label,
+      percent,
+      votes
+    };
+  });
+  const several = results && poll.multiple ? "Cada pessoa pode marcar mais de uma" : null;
+  let footer: string;
+
+  if (poll.closed) {
+    footer = results ? [`Enquete encerrada`, pollVotesLabel(results.voters), several].filter(Boolean).join(" · ") : "Enquete encerrada.";
+  } else {
+    const hint = voted
+      ? poll.multiple
+        ? "Seu voto foi registrado. Toque para marcar ou desmarcar."
+        : "Seu voto foi registrado. Toque em outra opção para mudar, ou na sua para tirar o voto."
+      : poll.multiple
+        ? "Escolha uma ou mais opções."
+        : "Escolha uma opção.";
+    const end = formatPollEnd(poll.closesAt);
+    const extra = [results ? pollVotesLabel(results.voters) : null, end ? `Encerra em ${end}` : null, several].filter(Boolean);
+    footer = extra.length > 0 ? `${hint} ${extra.join(" · ")}` : hint;
+  }
+
+  return { closed: poll.closed, footer, options, resultsVisible: results !== null, voted };
+}
+
+// --- Aceitar/Recusar e Mudar resposta --------------------------------------------------------------
+
+export type ResponseStage = "answered" | "ask" | "changing";
+
+/** Sem resposta: os dois botoes; respondida: a frase e "Mudar resposta"; trocando: os dois de novo. */
+export function responseStage(value: NotificationResponseValue | null, changing: boolean): ResponseStage {
+  if (value === null) {
+    return "ask";
+  }
+
+  return changing ? "changing" : "answered";
+}
+
+/** Tocar na resposta que ja vale (ou em "Manter resposta") fecha a troca sem pedido; a outra manda. */
+export function responsePress(value: NotificationResponseValue | null, pressed: NotificationResponseValue): "keep" | "send" {
+  return value === pressed ? "keep" : "send";
+}
+
+export function responseAnswerLabel(value: NotificationResponseValue) {
+  return value === "accepted" ? "Você aceitou" : "Você recusou";
+}
+
+// --- Frases das escritas do aluno ----------------------------------------------------------------
+
+/** 429 das quatro escritas (reagir, votar, excluir/desfazer, responder). */
+export const TOO_MANY_WRITES_MESSAGE = "Muitas tentativas. Espere um pouco.";
+export const POLL_CLOSED_MESSAGE = "A enquete foi encerrada.";
+export const HIDE_ERROR_MESSAGE = "Não foi possível excluir. Tente de novo.";
+export const UNHIDE_ERROR_MESSAGE = "Não foi possível desfazer. Tente de novo.";
+export const REACTION_ERROR_MESSAGE = "Não foi possível reagir. Tente de novo.";
+export const VOTE_ERROR_MESSAGE = "Não foi possível registrar seu voto. Tente de novo.";
+export const HIDDEN_STATUS = "Notificação excluída.";
+export const RESTORED_STATUS = "A notificação voltou para o sino.";
+export const REFRESH_FAILED_MESSAGE = "Não foi possível atualizar. Estas são as notificações de antes.";
+
+/* ------------------------------------------------------------------------------------------------
+ * v3a (docs/24 §7.3): a pagina guardada entre aberturas e a busca por intencao
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Pagina com menos que isto: abre sem pedir de novo. */
+export const INBOX_REUSE_MS = 5_000;
+/** Ate isto: mostra na hora e atualiza por tras; depois, esqueleto. */
+export const INBOX_KEEP_MS = 10 * 60_000;
+/** Mouse parado no sino (ou foco pelo Tab) antes de buscar. */
+export const INBOX_PREFETCH_DWELL_MS = 120;
+/** Passar o mouse ou o foco so busca sem pagina guardada ou com mais que isto. */
+export const INBOX_INTENT_STALE_MS = 60_000;
+/** Depois de fechar o painel, foco e mouse no sino nao buscam (o foco volta para o sino ao fechar). */
+export const INBOX_CLOSE_QUIET_MS = 1_000;
+
+export type OpeningPlan = {
+  /** Pede a primeira pagina (ou entra no pedido que ja saiu). */
+  fetch: boolean;
+  render: "kept" | "skeleton";
+  /** "abriu o sino": na hora (com a pagina guardada) ou depois que a pagina da tela assentar. */
+  seen: "after_fetch" | "now";
+};
+
+/**
+ * Cada abertura com o filtro "Todas": pagina guardada ha menos de 5 s abre como esta; ate 10 min abre
+ * na hora e atualiza por tras; sem pagina (ou mais velha), esqueleto e pedido.
+ */
+export function openingPlan(fetchedAt: number | null, now: number): OpeningPlan {
+  const age = fetchedAt === null ? null : now - fetchedAt;
+
+  if (age === null || age > INBOX_KEEP_MS) {
+    return { fetch: true, render: "skeleton", seen: "after_fetch" };
+  }
+
+  if (age >= 0 && age < INBOX_REUSE_MS) {
+    return { fetch: false, render: "kept", seen: "now" };
+  }
+
+  return { fetch: true, render: "kept", seen: "after_fetch" };
+}
+
+export type InboxIntentKind = "focus" | "hover" | "press";
+
+/**
+ * Busca a lista antes do clique? Nunca com o painel aberto. Apertar (pointerdown, Enter, Espaco) num
+ * sino fechado sempre (vai abrir). Mouse e foco: nao no segundo depois de fechar (o foco volta para o
+ * sino sozinho) e o foco so quando veio do teclado (:focus-visible).
+ */
+export function shouldPrefetchOnIntent(input: {
+  closedAt: number | null;
+  focusVisible: boolean;
+  kind: InboxIntentKind;
+  now: number;
+  open: boolean;
+}): boolean {
+  if (input.open) {
+    return false;
+  }
+
+  if (input.kind === "press") {
+    return true;
+  }
+
+  const sinceClose = input.closedAt === null ? null : input.now - input.closedAt;
+
+  if (sinceClose !== null && sinceClose >= 0 && sinceClose < INBOX_CLOSE_QUIET_MS) {
+    return false;
+  }
+
+  return input.kind === "hover" || input.focusVisible;
+}
+
+/** Idade maxima da pagina guardada que dispensa a busca: apertar usa 5 s; mouse e foco, 1 minuto. */
+export function intentPrefetchMinAge(kind: InboxIntentKind) {
+  return kind === "press" ? INBOX_REUSE_MS : INBOX_INTENT_STALE_MS;
+}
+
+function itemOrder(left: Pick<NotificationItem, "createdAt" | "id">, right: Pick<NotificationItem, "createdAt" | "id">) {
+  const byTime = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+
+  if (Number.isFinite(byTime) && byTime !== 0) {
+    return byTime;
+  }
+
+  return right.id < left.id ? -1 : right.id > left.id ? 1 : 0;
+}
+
+/**
+ * A pagina nova que chegou com o painel aberto (atualizacao por tras): o que o aluno mexeu nesta
+ * abertura fica como esta na tela (abriu, reagiu, votou, respondeu) e as linhas excluidas continuam
+ * no lugar, com o Desfazer, ate o painel fechar.
+ */
+export function mergeRefreshedPage<T extends Pick<NotificationItem, "createdAt" | "id">>(
+  fresh: readonly T[],
+  local: readonly T[],
+  input: { excludedIds: ReadonlySet<string>; touchedIds: ReadonlySet<string> }
+): T[] {
+  const localById = new Map(local.map((item) => [item.id, item]));
+  const merged = fresh.map((item) => (input.touchedIds.has(item.id) ? (localById.get(item.id) ?? item) : item));
+  const present = new Set(merged.map((item) => item.id));
+  const kept = local.filter((item) => input.excludedIds.has(item.id) && !present.has(item.id));
+
+  return kept.length > 0 ? [...merged, ...kept].sort(itemOrder) : merged;
+}
+
+export type WriteOutcome<T> = { error: unknown; failed: boolean; value: T };
+
+type WriteOptions<T> = {
+  /** O que vale no servidor antes do primeiro toque desta fila. */
+  confirmed: T;
+  equal: (left: T, right: T) => boolean;
+  /** Manda o estado e devolve o que ficou valendo no servidor. */
+  send: (value: T) => Promise<T>;
+  /** A fila esvaziou: o que vale no servidor (a ultima resposta, ou o de antes) e o erro da ultima tentativa. */
+  settle: (outcome: WriteOutcome<T>) => void;
+};
+
+type WriteEntry = {
+  confirmed: unknown;
+  error: unknown;
+  failed: boolean;
+  inFlight: boolean;
+  next: { value: unknown } | null;
+  options: WriteOptions<unknown>;
+};
+
+/**
+ * Escritas do cartao (reacao, voto, excluir e desfazer; docs/24 §4.14): no maximo uma por cartao e tipo
+ * em andamento. Toques durante a espera so trocam o estado que vai depois: quando a resposta volta, sai o
+ * ultimo (se ainda for diferente do que vale no servidor). Estado igual ao do servidor nao manda nada.
+ */
+export function createWriteQueue() {
+  const entries = new Map<string, WriteEntry>();
+
+  function finish(key: string, entry: WriteEntry) {
+    entries.delete(key);
+    entry.options.settle({ error: entry.error, failed: entry.failed, value: entry.confirmed });
+  }
+
+  function run(key: string, entry: WriteEntry, value: unknown) {
+    if (entry.options.equal(value, entry.confirmed)) {
+      // Voltou para o que o servidor ja tem: nada a mandar, e um erro de antes nao vale mais.
+      entry.error = null;
+      entry.failed = false;
+      finish(key, entry);
+      return;
+    }
+
+    entry.inFlight = true;
+    entry.options
+      .send(value)
+      .then(
+        (confirmed) => {
+          entry.confirmed = confirmed;
+          entry.error = null;
+          entry.failed = false;
+        },
+        (error: unknown) => {
+          entry.error = error;
+          entry.failed = true;
+        }
+      )
+      .finally(() => {
+        entry.inFlight = false;
+        const next = entry.next;
+        entry.next = null;
+
+        if (next) {
+          run(key, entry, next.value);
+        } else {
+          finish(key, entry);
+        }
+      });
+  }
+
+  return {
+    /** Ha uma escrita desta chave em andamento? */
+    busy(key: string) {
+      return entries.get(key)?.inFlight ?? false;
+    },
+    push<T>(key: string, value: T, options: WriteOptions<T>) {
+      let entry = entries.get(key);
+
+      if (!entry) {
+        entry = { confirmed: options.confirmed, error: null, failed: false, inFlight: false, next: null, options: options as WriteOptions<unknown> };
+        entries.set(key, entry);
+      }
+
+      entry.options = options as WriteOptions<unknown>;
+
+      if (entry.inFlight) {
+        entry.next = { value };
+        return;
+      }
+
+      run(key, entry, value);
+    }
+  };
 }

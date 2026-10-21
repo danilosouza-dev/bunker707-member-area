@@ -23,7 +23,9 @@ import {
   type MessageRef
 } from "../../../../server/communications/audience-model";
 import {
+  APPROVAL_THRESHOLD,
   AUDIO_LIMITS,
+  formatSaoPauloDateTime,
   isEditableStatus,
   isLiveNoticeStatus,
   isoToSaoPauloLocal,
@@ -35,8 +37,19 @@ import {
   type NoticeAction,
   type NoticePermissions
 } from "../../../../server/communications/campaign-model";
-import { notificationPollOf } from "../../../../server/communications/interactions-model";
-import type { NotificationItem, PopupItem } from "../../../../server/communications/notification-model";
+import {
+  isPollClosed,
+  notificationPollOf,
+  POLL_LIMITS,
+  pollPercent,
+  REACTION_EMOJI,
+  REACTION_IDS,
+  REACTION_LABELS,
+  type PollDefinition,
+  type PollOption,
+  type ReactionId
+} from "../../../../server/communications/interactions-model";
+import type { CtaDisplay, NotificationItem, PopupItem } from "../../../../server/communications/notification-model";
 import type { NoticeDraft } from "../../../../server/communications/schemas";
 // v2 (docs/23): quem envia, icone ao lado do titulo e quanto tempo fica no sino.
 import {
@@ -127,7 +140,7 @@ export function noticesPageFallbackHref(input: {
   return query ? `${NOTICES_HREF}?${query}` : NOTICES_HREF;
 }
 
-/** Editor ou relatorio de um aviso (`edit` abre o editor de um pop-up no ar). */
+/** Editor ou relatorio de um aviso (`edit` abre o editor de um pop-up no ar ou de uma notificacao enviada). */
 export function noticeHref(id: string, options: { edit?: boolean } = {}) {
   const base = `${NOTICES_HREF}/${encodeURIComponent(id)}`;
 
@@ -135,9 +148,17 @@ export function noticeHref(id: string, options: { edit?: boolean } = {}) {
 }
 
 /**
+ * "Editar" do menu (v3a, docs/24 §2.1): o que os alunos ja veem (pop-up no ar ou pausado, notificacao
+ * enviada) abre o editor com ?editar=1 (sem ele, /avisos/[id] e o relatorio); o resto abre direto.
+ */
+export function noticeEditHref(notice: { id: string; kind: CampaignKind; status: CampaignStatus }) {
+  return noticeHref(notice.id, { edit: isLiveNoticeStatus(notice.kind, notice.status) });
+}
+
+/**
  * /avisos/[id] abre o editor ou o relatorio? Rascunho, aguardando aprovacao e notificacao agendada abrem
- * no editor. Pop-up no ar ou pausado abre no relatorio; no editor so com ?editar=1 e se a pessoa pode
- * editar ("edit" nas acoes, a mesma regra do servidor: editar pop-up no ar pede messaging.publish).
+ * no editor. Pop-up no ar ou pausado e notificacao enviada (v3a) abrem no relatorio; no editor so com
+ * ?editar=1 e se a pessoa pode editar ("edit" nas acoes, a mesma regra do servidor: vale como publicar).
  */
 export function opensNoticeEditor(input: {
   actions: readonly NoticeAction[];
@@ -270,13 +291,18 @@ export const NOTICE_ACTION_LABELS: Record<NoticeAction, string> = {
   withdraw: "Retirar do sino"
 };
 
-/** Ordem no menu "…": o que mais se usa primeiro, o que tira do ar e exclui por ultimo. */
+/**
+ * Ordem no menu "…": o que mais se usa primeiro, o que tira do ar e exclui por ultimo. v3a: "Ver relatório"
+ * abre o menu e "Mostrar de novo para quem já viu" fica com as acoes do pop-up no ar.
+ */
 const MENU_ORDER: readonly NoticeAction[] = [
+  "view_report",
   "edit",
   "approve",
   "reject",
   "pause",
   "resume",
+  "reshow",
   "send_test",
   "duplicate",
   "cancel_schedule",
@@ -286,7 +312,7 @@ const MENU_ORDER: readonly NoticeAction[] = [
 ];
 
 const DESTRUCTIVE_ACTIONS = new Set<NoticeAction>(["delete", "end", "withdraw"]);
-const CONFIRMED_ACTIONS = new Set<NoticeAction>(["approve", "delete", "end", "reject", "withdraw"]);
+const CONFIRMED_ACTIONS = new Set<NoticeAction>(["approve", "delete", "end", "reject", "reshow", "withdraw"]);
 
 export type NoticeMenuEntry = { action: NoticeAction; destructive: boolean; label: string; separated: boolean };
 
@@ -313,18 +339,102 @@ export function noticeActionNeedsConfirm(action: NoticeAction) {
 
 export type NoticeConfirmCopy = { confirmLabel: string; description: string; destructive: boolean; title: string };
 
+/** Quantos avisos e fluxos citam a notificacao nas regras (v3a: lista e detalhe trazem; so a enviada). */
+export type NoticeCitationCounts = { flows: number; notices: number };
+
+/**
+ * v3a (docs/24 §2.1): a frase de aviso dos dialogos de Excluir e Retirar do sino quando outros avisos ou
+ * fluxos citam a notificacao nas regras ("recebeu", "abriu"...): depois de sair, para eles ninguem recebeu.
+ * Vazia quando ninguem cita (nao impede nada).
+ */
+export function citationsSentence(citations: NoticeCitationCounts | null | undefined, action: "delete" | "withdraw") {
+  const notices = Math.max(0, Math.floor(citations?.notices ?? 0));
+  const flows = Math.max(0, Math.floor(citations?.flows ?? 0));
+  const total = notices + flows;
+
+  if (total === 0) {
+    return "";
+  }
+
+  const parts = [
+    notices > 0 ? (notices === 1 ? "1 aviso" : `${formatInteger(notices)} avisos`) : null,
+    flows > 0 ? (flows === 1 ? "1 fluxo" : `${formatInteger(flows)} fluxos`) : null
+  ].filter((part): part is string => part !== null);
+
+  return `Atenção: ${parts.join(" e ")} ${total === 1 ? "usa" : "usam"} esta notificação nas regras. Depois de ${
+    action === "delete" ? "excluir" : "retirar"
+  }, para ${total === 1 ? "ele" : "eles"} ninguém recebeu esta notificação.`;
+}
+
+/** "dos 318 alunos que receberam" ou, sem o numero, "de quem recebeu" (Retirar do sino e Excluir a enviada). */
+function receivedPhrase(recipients: number | null | undefined) {
+  return typeof recipients === "number" && recipients > 0 ? `dos ${formatStudentCount(recipients)} que receberam` : "de quem recebeu";
+}
+
+function withSentence(text: string, sentence: string) {
+  return sentence ? `${text} ${sentence}` : text;
+}
+
+/** Excluir (v3a, docs/24 §2.1): o texto pela situacao (o que acontece com quem ve ou vai ver). */
+function deleteConfirm(notice: {
+  citations?: NoticeCitationCounts | null;
+  followUps?: { count: number; sent: number } | null;
+  kind: CampaignKind;
+  recipients?: number | null;
+  situation?: CampaignSituation;
+  title: string;
+}): Omit<NoticeConfirmCopy, "title"> {
+  if (notice.kind === "inbox" && notice.situation === "sent") {
+    const followUps = notice.followUps && notice.followUps.count > 0 ? " As notificações seguintes deixam de sair." : "";
+
+    return {
+      confirmLabel: "Excluir notificação",
+      description: withSentence(
+        `A notificação some do sino ${receivedPhrase(notice.recipients)} e o aviso sai desta lista, com o relatório. Não dá para desfazer. Para tirar do sino e manter o relatório, use Retirar do sino.${followUps}`,
+        citationsSentence(notice.citations, "delete")
+      ),
+      destructive: true
+    };
+  }
+
+  if (notice.kind === "inbox" && notice.situation === "scheduled") {
+    return { confirmLabel: "Excluir aviso", description: "O envio agendado é cancelado e o aviso sai desta lista. Não dá para desfazer.", destructive: true };
+  }
+
+  if (notice.kind === "popup" && notice.situation === "active") {
+    return {
+      confirmLabel: "Excluir pop-up",
+      description: "O pop-up sai da home de todos os alunos agora e o aviso sai desta lista, com o relatório. Não dá para desfazer.",
+      destructive: true
+    };
+  }
+
+  if (notice.kind === "popup" && (notice.situation === "paused" || notice.situation === "scheduled")) {
+    return {
+      confirmLabel: "Excluir pop-up",
+      description: "O pop-up não volta para a home e o aviso sai desta lista, com o relatório. Não dá para desfazer.",
+      destructive: true
+    };
+  }
+
+  return { confirmLabel: "Excluir aviso", description: "O aviso sai desta lista. Não dá para desfazer.", destructive: true };
+}
+
 /**
  * Textos do dialogo de confirmacao (nunca window.confirm). v2 (docs/23 §2.2): retirar uma notificacao com
  * seguintes (`followUps.count` > 0) avisa que elas deixam de sair; a caixa "Retirar também as notificações
- * seguintes que já saíram (n)" fica no dialogo (notice-row-menu.tsx).
+ * seguintes que já saíram (n)" fica no dialogo (notice-row-menu.tsx). v3a (docs/24 §2.1): Excluir pela
+ * situacao (`situation`), a frase das regras que citam a notificacao (`citations`) e "Mostrar de novo".
  */
 export function noticeActionConfirm(
   action: NoticeAction,
   notice: {
     audienceCount: number | null;
+    citations?: NoticeCitationCounts | null;
     followUps?: { count: number; sent: number } | null;
     kind: CampaignKind;
     recipients?: number | null;
+    situation?: CampaignSituation;
     title: string;
   }
 ): NoticeConfirmCopy {
@@ -358,18 +468,24 @@ export function noticeActionConfirm(
     case "withdraw":
       return {
         confirmLabel: "Retirar do sino",
-        description: `A notificação some do sino ${
-          typeof notice.recipients === "number" && notice.recipients > 0 ? `dos ${formatStudentCount(notice.recipients)} que receberam` : "de quem recebeu"
-        }. Os números continuam no relatório.${notice.followUps && notice.followUps.count > 0 ? " As notificações seguintes deixam de sair." : ""}`,
+        description: withSentence(
+          `A notificação some do sino ${receivedPhrase(notice.recipients)}. Os números continuam no relatório.${
+            notice.followUps && notice.followUps.count > 0 ? " As notificações seguintes deixam de sair." : ""
+          }`,
+          citationsSentence(notice.citations, "withdraw")
+        ),
         destructive: true,
         title: `Retirar “${title}” do sino?`
       };
     case "delete":
+      return { ...deleteConfirm(notice), title: `Excluir “${title}”?` };
+    case "reshow":
       return {
-        confirmLabel: "Excluir aviso",
-        description: "O aviso sai desta lista. Não dá para desfazer.",
-        destructive: true,
-        title: `Excluir “${title}”?`
+        confirmLabel: "Mostrar de novo",
+        description:
+          "O pop-up volta a aparecer para quem já viu e não clicou, respeitando o limite de 1 pop-up por dia. Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver.",
+        destructive: false,
+        title: `Mostrar “${title}” de novo?`
       };
     default:
       return { confirmLabel: NOTICE_ACTION_LABELS[action], description: "", destructive: false, title: NOTICE_ACTION_LABELS[action] };
@@ -388,6 +504,38 @@ export const NOTICE_ACTION_TOASTS: Partial<Record<NoticeAction, string>> = {
   send_test: "Enviamos a notificação para o seu sino.",
   withdraw: "Notificação retirada do sino."
 };
+
+/**
+ * Toast de Excluir (v3a, docs/24 §2.1), pela situacao em que o aviso estava e quantas linhas sairam do sino
+ * (`removed`, a resposta do servidor).
+ */
+export function deletedNoticeToast(input: { kind: CampaignKind; removed?: number | null; situation?: CampaignSituation }) {
+  if (input.kind === "inbox" && input.situation === "sent") {
+    return typeof input.removed === "number" && input.removed > 0 ? `Notificação excluída do sino de ${formatStudentCount(input.removed)}.` : "Notificação excluída.";
+  }
+
+  if (input.kind === "popup" && input.situation === "active") {
+    return "Pop-up excluído. Ele saiu da home.";
+  }
+
+  if (input.kind === "popup" && (input.situation === "paused" || input.situation === "scheduled")) {
+    return "Pop-up excluído.";
+  }
+
+  return NOTICE_ACTION_TOASTS.delete ?? "Aviso excluído.";
+}
+
+/** A caixa do dialogo de Excluir a notificacao enviada com seguintes que ja sairam (marcada a cada vez). */
+export function deleteFollowUpsLabel(sent: number) {
+  return `Excluir também as notificações seguintes que já saíram (${formatInteger(sent)})`;
+}
+
+/** Toast de "Mostrar de novo para quem já viu" (v3a): quantos voltam a ver, ou por que ninguem. */
+export function reshownPopupToast(count: number) {
+  return count > 0
+    ? `O pop-up volta a aparecer para ${formatStudentCount(count)}.`
+    : "Ninguém precisava ver de novo: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.";
+}
 
 /** Toast depois de publicar ou aprovar, conforme o que o servidor decidiu. */
 export function publishedNoticeToast(result: { audienceCount: number; recipients: number | null; situation: CampaignSituation }, kind: CampaignKind) {
@@ -473,15 +621,194 @@ export function draftSaveSideEffect(previousStatus: CampaignStatus | null | unde
   return null;
 }
 
-/** Toast de "Salvar rascunho" (ou "Salvar alterações" no pop-up no ar), pela situacao antes de salvar. */
-export function savedNoticeToast(kind: CampaignKind, previousStatus: CampaignStatus | null | undefined) {
+/**
+ * Toast de "Salvar rascunho" (ou "Salvar alterações" no pop-up no ar), pela situacao antes de salvar. v3a
+ * (docs/24 §2.2 e §2.4): a notificacao enviada conta quantos ja veem a mudanca; o pop-up no ar diz o que
+ * acontece com quem ja viu pela regra "Quantas vezes" salva (`repeat`) e quantos voltam a ver (`reshown`).
+ */
+export function savedNoticeToast(
+  kind: CampaignKind,
+  previousStatus: CampaignStatus | null | undefined,
+  result: { recipients?: number | null; repeat?: NoticeDraft["repeat"]; reshown?: number | null } = {}
+) {
+  if (kind === "inbox" && previousStatus === "sent") {
+    return typeof result.recipients === "number" && result.recipients > 0
+      ? `Notificação atualizada no sino de ${formatStudentCount(result.recipients)}.`
+      : "Notificação atualizada no sino.";
+  }
+
   if (isLivePopupStatus(kind, previousStatus)) {
-    return previousStatus === "paused" ? "Pop-up salvo. Ele continua pausado." : "Pop-up atualizado. Quem já fechou não vê de novo.";
+    const reshown = typeof result.reshown === "number" && result.reshown > 0 ? result.reshown : 0;
+
+    if (previousStatus === "paused") {
+      return reshown > 0 ? "Pop-up salvo. Ele continua pausado. Ao retomar, volta a aparecer para quem já tinha visto." : "Pop-up salvo. Ele continua pausado.";
+    }
+
+    if (reshown > 0) {
+      return `Pop-up atualizado. Ele volta a aparecer para ${formatStudentCount(reshown)} que já ${reshown === 1 ? "tinha" : "tinham"} visto.`;
+    }
+
+    return result.repeat === "until_action"
+      ? "Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois do último pop-up que viu."
+      : "Pop-up atualizado. Quem já viu não vê de novo.";
   }
 
   const sideEffect = draftSaveSideEffect(previousStatus);
 
   return sideEffect ? `Rascunho salvo. ${sideEffect}` : "Rascunho salvo.";
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Editar o que os alunos ja veem (v3a, docs/24 §2.2 e §2.4): notificacao enviada e pop-up no ar
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Banner do editor do pop-up no ar ou pausado. */
+export function livePopupBanner(status: CampaignStatus | null | undefined) {
+  return status === "paused"
+    ? "Este pop-up está pausado. As mudanças valem quando ele voltar ao ar."
+    : "Este pop-up está no ar. As mudanças valem assim que você salvar.";
+}
+
+/**
+ * "Mostrar de novo para quem já viu" aparece no editor so do pop-up no ar ou pausado e so enquanto
+ * "Quantas vezes" mostra "Uma vez" (em "Até o aluno clicar", quem so fechou ja volta depois de 24 h).
+ */
+export function showsReshowSwitch(input: { kind: CampaignKind; repeat: NoticeDraft["repeat"]; status: CampaignStatus | null | undefined }) {
+  return isLivePopupStatus(input.kind, input.status) && input.repeat === "once";
+}
+
+export const RESHOW_SWITCH_LABEL = "Mostrar de novo para quem já viu";
+
+/**
+ * A descricao do switch, com quantos a regra "Uma vez" pula agora (`detail.reshowable`); 0 = ninguem precisa
+ * (o switch fica desligado e travado). Sem a contagem, a frase sem numero.
+ */
+export function reshowSwitchCopy(count: number | null | undefined): { description: string; disabled: boolean } {
+  const rest = "Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver. Vale o limite de 1 pop-up por dia.";
+
+  if (count === 0) {
+    return { description: "Ninguém precisa ver de novo agora: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.", disabled: true };
+  }
+
+  if (typeof count !== "number" || !Number.isFinite(count) || count < 0) {
+    return { description: `Para quem já viu e não clicou. ${rest}`, disabled: false };
+  }
+
+  return {
+    description: count === 1 ? `Para 1 aluno que já viu e não clicou. ${rest}` : `Para os ${formatStudentCount(count)} que já viram e não clicaram. ${rest}`,
+    disabled: false
+  };
+}
+
+/**
+ * A dica embaixo de "Quantas vezes" do pop-up no ar quando a escolha mudou do que esta salvo: o que acontece
+ * com quem ja viu. null = sem mudanca (ou pop-up que ainda nao saiu).
+ */
+export function popupRepeatChangeHint(input: { saved: NoticeDraft["repeat"]; shown: NoticeDraft["repeat"]; status: CampaignStatus | null | undefined }) {
+  if (!isLivePopupStatus("popup", input.status) || input.saved === input.shown) {
+    return null;
+  }
+
+  return input.shown === "until_action"
+    ? "Quem só fechou volta a ver 24 horas depois do último pop-up que viu, até clicar. Quem clicou ou escolheu “Não mostrar de novo” não vê mais."
+    : "Quem já viu não vê de novo, a não ser que você ligue “Mostrar de novo para quem já viu”.";
+}
+
+/** Notificacao enviada: o editor so muda o conteudo (sentNoticeLockedProblems no servidor). */
+export function isSentNotice(kind: CampaignKind, status: CampaignStatus | null | undefined) {
+  return kind === "inbox" && status === "sent";
+}
+
+/** "318 alunos" ou, sem o numero, "quem recebeu" (os textos do editor da notificacao enviada). */
+function recipientsPhrase(recipients: number | null | undefined) {
+  return typeof recipients === "number" && recipients > 0 ? formatStudentCount(recipients) : "quem recebeu";
+}
+
+export const SENT_NOTICE_COPY = {
+  destinationNote:
+    "As notificações seguintes que usam “visitou a página para onde a notificação leva” passam a olhar a página nova, contando a partir de agora.",
+  followUps: "As notificações seguintes mudam no relatório.",
+  followUpsLink: "Ir para o relatório",
+  /** Motivo embaixo de cada campo que nao muda depois do envio (NoticeContentFields `lockedFields`). */
+  locked: {
+    audio: "O áudio não muda depois do envio: quem já ouviu ficaria marcado como tendo ouvido o novo. Para trocar, duplique a notificação.",
+    poll: "A enquete não muda depois do envio. Para parar a votação, use Encerrar enquete no relatório.",
+    responseMode: "Pedir uma resposta não muda depois do envio. Os textos dos botões podem mudar."
+  },
+  previewClean: "Assim os alunos veem agora.",
+  previewDirty: "Mudanças não salvas: os alunos ainda veem a versão anterior.",
+  save: "Salvar alterações",
+  saveHint: "Ctrl+Enter (⌘+Enter no Mac) salva as alterações.",
+  title: "Editar notificação enviada",
+  viewReport: "Ver relatório"
+} as const;
+
+/** Banner do editor da notificacao enviada. */
+export function sentNoticeBanner(recipients: number | null | undefined) {
+  return `Esta notificação já está no sino de ${recipientsPhrase(recipients)}. O que você salvar aparece para todos na hora, sem avisar de novo e sem marcar como nova. Para avisar de novo, envie uma notificação nova.`;
+}
+
+/** Revisao do editor da notificacao enviada. */
+export function sentNoticeReview(input: { recipients: number | null | undefined; sentAt: string | null | undefined }) {
+  const when = formatSaoPauloDateTime(input.sentAt ?? null);
+
+  return `Notificação enviada para ${recipientsPhrase(input.recipients)}${when ? ` em ${when}` : ""}. Salvar muda o que eles veem agora.`;
+}
+
+/** "Para quem" da notificacao enviada (so leitura). */
+export function sentNoticeAudienceNote(recipients: number | null | undefined) {
+  return `Já enviada para ${recipientsPhrase(recipients)}. O segmento não muda depois do envio.`;
+}
+
+/** "Quando" da notificacao enviada (so leitura): `validityLabel` = describeValidity ("fica 3 dias no sino"). */
+export function sentNoticeWhenNote(input: { sentAt: string | null | undefined; validityLabel: string }) {
+  const when = formatSaoPauloDateTime(input.sentAt ?? null);
+
+  return `${when ? `Enviada em ${when} · ` : ""}${input.validityLabel}. Não muda depois do envio.`;
+}
+
+/**
+ * As seguintes olham "a página para onde a notificação leva" da principal (`entryId`) em alguma regra? O
+ * editor avisa que trocar o destino muda o que elas olham.
+ */
+export function usesNoticeDestinationPage(definitions: readonly AudienceDefinition[], entryId: string) {
+  const visit = (node: AudienceNode): boolean => {
+    if (isAudienceGroup(node)) {
+      return node.items.some(visit);
+    }
+
+    return node.type === "page_visit" && node.page.kind === "message_cta" && node.page.nodeId === entryId;
+  };
+
+  return definitions.some((definition) => definition.kind === "rules" && visit(definition.root));
+}
+
+/**
+ * A ultima linha dos Detalhes do relatorio quando nao ha Editar (docs/24 §2.2): na notificacao enviada, por
+ * que (sem messaging.publish, ou acima de 500 sem messaging.publish_large); no resto, "não muda mais".
+ */
+export function noticeReportLastLine(input: {
+  actions: readonly NoticeAction[];
+  kind: CampaignKind;
+  permissions: NoticePermissions;
+  recipients: number | null | undefined;
+  status: CampaignStatus;
+}) {
+  if (!input.permissions.canWrite || input.actions.includes("edit") || !input.actions.includes("duplicate")) {
+    return null;
+  }
+
+  if (isSentNotice(input.kind, input.status)) {
+    if (!input.permissions.canPublish) {
+      return "Só quem pode publicar muda uma notificação enviada. Para mandar de novo, use Duplicar no menu.";
+    }
+
+    if ((input.recipients ?? 0) > APPROVAL_THRESHOLD && !input.permissions.canPublishLarge) {
+      return "Esta notificação chegou a mais de 500 alunos: só um dono ou administrador muda depois do envio. Para mandar de novo, use Duplicar no menu.";
+    }
+  }
+
+  return "Este aviso não muda mais. Para mandar de novo ou ajustar, use Duplicar no menu.";
 }
 
 /** Toast de "Enviar teste para mim"; se o teste salvou uma mudanca antes, conta o que isso desfez. */
@@ -949,7 +1276,7 @@ function previewCta(cta: NoticeDraft["cta"]) {
 }
 
 /** O conteudo que a previa desenha: o do aviso ou o de uma notificacao seguinte (validade de fluxo). */
-export type PreviewContent = Pick<NoticeDraft, "audio" | "body" | "cta" | "icon" | "image" | "kind" | "response" | "title"> & {
+export type PreviewContent = Pick<NoticeDraft, "audio" | "body" | "cta" | "icon" | "image" | "kind" | "poll" | "reactions" | "response" | "title"> & {
   validity?: FlowValidity;
 };
 
@@ -1140,7 +1467,7 @@ export const MESSAGE_ACTION_LABELS: Record<MessageAction, string> = {
   accepted: "aceitou",
   audio_completed: "ouviu o áudio até o fim",
   audio_started: "começou a ouvir o áudio",
-  clicked: "clicou no botão",
+  clicked: "foi para o destino",
   declined: "recusou",
   interacted: "interagiu",
   opened: "abriu",
@@ -1158,34 +1485,57 @@ export const MESSAGE_ACTION_LABELS: Record<MessageAction, string> = {
  * passo acima (ou o aviso de origem). O que ela tem decide as acoes oferecidas.
  */
 export type AudienceMessageOption = {
+  /** v3a: aceita reacoes (oferece "reagiu"). */
+  allowsReactions: boolean;
   /**
-   * Ha o que abrir ("Ver mais", audio, botao ou resposta)? Aviso curto so de texto aparece inteiro no
-   * sino e nunca da "abriu" (docs/23 V7): sem "abriu" nem "interagiu" nas acoes.
+   * Ha o que abrir ("Ver mais", audio, destino, resposta ou enquete)? Aviso curto so de texto aparece
+   * inteiro no sino e nunca da "abriu" (docs/23 V7): sem "abriu" nem "interagiu" nas acoes.
    */
   canOpen: boolean;
-  /** Pagina do botao (page-visit-model.ts); null = sem botao, externo ou nao acompanhado. */
+  /** Pagina do destino (page-visit-model.ts); null = sem destino, externo ou nao acompanhado. */
   ctaPageKey: string | null;
   hasAudio: boolean;
   hasCta: boolean;
+  /** v3a: tem enquete (oferece "votou na enquete"). */
+  hasPoll: boolean;
   hasResponse: boolean;
   /** Chave dos fatos (messageRefKey): "campaign:<id>" ou "node:<id>". */
   key: string;
   label: string;
+  /** v3a: as opcoes da enquete, na ordem (o segundo seletor de "votou na enquete"). */
+  pollOptions: readonly PollOption[];
   ref: MessageRef;
   title: string;
 };
 
-/** Aviso enviado que o segmento pode citar (queries.ts, loadAudienceNoticeOptions). Sem `canOpen` = tem o que abrir. */
-export type AudienceNoticeChoice = { canOpen?: boolean; hasAudio: boolean; hasCta: boolean; hasResponse: boolean; id: string; sentAt: string; title: string };
+/**
+ * Aviso enviado que o segmento pode citar (queries.ts, loadAudienceNoticeOptions). Sem `canOpen` = tem o
+ * que abrir; sem os campos da v3a = sem reacoes e sem enquete.
+ */
+export type AudienceNoticeChoice = {
+  allowsReactions?: boolean;
+  canOpen?: boolean;
+  hasAudio: boolean;
+  hasCta: boolean;
+  hasPoll?: boolean;
+  hasResponse: boolean;
+  id: string;
+  pollOptions?: readonly PollOption[];
+  sentAt: string;
+  title: string;
+};
 
 /** Notificacao de um passo acima, no fluxo (o construtor de fluxos e o editor das seguintes mandam). */
 export type AudienceFlowMessageChoice = {
+  allowsReactions?: boolean;
   canOpen?: boolean;
   ctaPageKey: string | null;
   hasAudio: boolean;
   hasCta: boolean;
+  hasPoll?: boolean;
   hasResponse: boolean;
   nodeId: string;
+  pollOptions?: readonly PollOption[];
   title: string;
 };
 
@@ -1218,13 +1568,16 @@ export function audienceMessageOptions(
           const title = message.title.trim() || "Sem título";
 
           return {
+            allowsReactions: message.allowsReactions === true,
             canOpen: message.canOpen !== false,
             ctaPageKey: message.ctaPageKey,
             hasAudio: message.hasAudio,
             hasCta: message.hasCta,
+            hasPoll: message.hasPoll === true,
             hasResponse: message.hasResponse,
             key: messageRefKey(ref),
             label: title,
+            pollOptions: message.pollOptions ?? [],
             ref,
             title
           };
@@ -1239,13 +1592,16 @@ function noticeMessageOptions(notices: readonly AudienceNoticeChoice[]): Audienc
     const ref: MessageRef = { campaignId: notice.id, kind: "campaign" };
 
     return {
+      allowsReactions: notice.allowsReactions === true,
       canOpen: notice.canOpen !== false,
       ctaPageKey: null,
       hasAudio: notice.hasAudio,
       hasCta: notice.hasCta,
+      hasPoll: notice.hasPoll === true,
       hasResponse: notice.hasResponse,
       key: messageRefKey(ref),
       label: noticeChoiceLabel(notice),
+      pollOptions: notice.pollOptions ?? [],
       ref,
       title: notice.title.trim() || "Sem título"
     };
@@ -1253,12 +1609,14 @@ function noticeMessageOptions(notices: readonly AudienceNoticeChoice[]): Audienc
 }
 
 /**
- * Acoes que a notificacao escolhida tem: recebeu e viu sempre; abriu e interagiu quando ha o que abrir
- * (`canOpen`, padrao sim); audio, botao e resposta so quando ela tem. A acao ja escolhida fica na lista
- * (notificacao removida ou mudada depois).
+ * Acoes que a notificacao escolhida tem: recebeu, viu e excluiu do sino sempre; abriu e interagiu quando ha
+ * o que abrir (`canOpen`, padrao sim); audio, destino, resposta, reacoes e enquete so quando ela tem. A acao
+ * ja escolhida fica na lista (notificacao removida ou mudada depois).
  */
 export function messageActionsFor(
-  option: (Pick<AudienceMessageOption, "hasAudio" | "hasCta" | "hasResponse"> & { canOpen?: boolean }) | null,
+  option:
+    | (Pick<AudienceMessageOption, "hasAudio" | "hasCta" | "hasResponse"> & { allowsReactions?: boolean; canOpen?: boolean; hasPoll?: boolean })
+    | null,
   current?: MessageAction
 ): MessageAction[] {
   const supported = (action: MessageAction) => {
@@ -1275,11 +1633,10 @@ export function messageActionsFor(
       case "declined":
       case "responded":
         return option?.hasResponse ?? false;
-      // v3a (P0): reagiu, votou e excluiu do sino entram no seletor com o pacote de regras (docs/24 §2.7).
-      case "hidden":
       case "reacted":
+        return option?.allowsReactions ?? false;
       case "voted":
-        return false;
+        return option?.hasPoll ?? false;
       default:
         return true;
     }
@@ -1288,18 +1645,109 @@ export function messageActionsFor(
   return MESSAGE_ACTIONS.filter((action) => supported(action) || action === current);
 }
 
-/** Titulos das notificacoes do seletor nos nomes da frase do segmento ("Alunos que não abriram a notificação “X”"). */
-export function audienceNamesWithMessages(names: AudienceNames, options: readonly Pick<AudienceMessageOption, "key" | "title">[]): AudienceNames {
+/**
+ * Titulos das notificacoes do seletor nos nomes da frase do segmento ("Alunos que não abriram a notificação
+ * “X”"); v3a: tambem as opcoes das enquetes ("votaram em “Sábado” na enquete …").
+ */
+export function audienceNamesWithMessages(
+  names: AudienceNames,
+  options: readonly (Pick<AudienceMessageOption, "key" | "title"> & { pollOptions?: readonly PollOption[] })[]
+): AudienceNames {
   if (options.length === 0) {
     return names;
   }
 
-  return { ...names, messages: { ...names.messages, ...Object.fromEntries(options.map((option) => [option.key, option.title])) } };
+  const polls = options.filter((option) => (option.pollOptions?.length ?? 0) > 0);
+  const messages = { ...names.messages, ...Object.fromEntries(options.map((option) => [option.key, option.title])) };
+
+  if (polls.length === 0) {
+    return { ...names, messages };
+  }
+
+  const pollOptions = {
+    ...names.pollOptions,
+    ...Object.fromEntries(polls.map((option) => [option.key, Object.fromEntries((option.pollOptions ?? []).map((item) => [item.id, item.label]))]))
+  };
+
+  return { ...names, messages, pollOptions };
+}
+
+/* v3a (docs/24 §2.7): o segundo seletor de "reagiu" e "votou na enquete". */
+
+export const ANY_REACTION_LABEL = "com qualquer reação";
+export const ANY_POLL_OPTION_LABEL = "em qualquer opção";
+/** Opcao salva que saiu da enquete (a regra nao combina com ninguem ate escolher outra). */
+export const MESSAGE_CHOICE_GONE_MESSAGE = "Escolha uma opção.";
+const GONE_CHOICE_LABEL = "Opção removida";
+
+export type MessageChoiceOption = { label: string; value: string | null };
+
+/**
+ * Opcoes do segundo seletor: "reagiu" -> qualquer reacao ou uma das seis; "votou na enquete" -> qualquer
+ * opcao ou uma da enquete escolhida (a salva que saiu fica visivel como "Opção removida"). Outra acao: null
+ * (sem segundo seletor).
+ */
+export function messageChoiceOptions(
+  option: Pick<AudienceMessageOption, "pollOptions"> | null,
+  action: MessageAction,
+  current?: string
+): MessageChoiceOption[] | null {
+  if (action === "reacted") {
+    return [{ label: ANY_REACTION_LABEL, value: null }, ...REACTION_IDS.map((id) => ({ label: `com ${REACTION_EMOJI[id]} ${REACTION_LABELS[id]}`, value: id }))];
+  }
+
+  if (action !== "voted") {
+    return null;
+  }
+
+  const items: MessageChoiceOption[] = [
+    { label: ANY_POLL_OPTION_LABEL, value: null },
+    ...(option?.pollOptions ?? []).map((item) => ({ label: `em “${item.label.trim()}”`, value: item.id }))
+  ];
+
+  return current && !items.some((item) => item.value === current) ? [...items, { label: GONE_CHOICE_LABEL, value: current }] : items;
+}
+
+/** "Escolha uma opção." quando a opcao salva de "votou em …" nao esta mais na enquete da notificacao escolhida. */
+export function messageChoiceProblem(option: Pick<AudienceMessageOption, "pollOptions"> | null, rule: Pick<Extract<AudienceRule, { type: "message" }>, "action" | "choice">) {
+  if (rule.action !== "voted" || !rule.choice || !option) {
+    return null;
+  }
+
+  return option.pollOptions.some((item) => item.id === rule.choice) ? null : MESSAGE_CHOICE_GONE_MESSAGE;
+}
+
+type MessageRule = Extract<AudienceRule, { type: "message" }>;
+
+function withoutChoice(rule: MessageRule): MessageRule {
+  return { action: rule.action, negate: rule.negate, ref: rule.ref, type: "message" };
+}
+
+/** Trocar a acao: a escolha (reacao ou opcao) sai. */
+export function messageRuleWithAction(rule: MessageRule, action: MessageAction): MessageRule {
+  return action === rule.action ? rule : { ...withoutChoice(rule), action };
+}
+
+/** Trocar a reacao ou a opcao (null = qualquer uma). */
+export function messageRuleWithChoice(rule: MessageRule, choice: string | null): MessageRule {
+  return choice ? { ...rule, choice } : withoutChoice(rule);
+}
+
+/**
+ * Trocar a notificacao: a acao fica se a nova tiver (senao "abriu"); a reacao fica; a opcao da enquete so
+ * fica se a nova enquete tiver o mesmo id.
+ */
+export function messageRuleWithOption(rule: MessageRule, option: AudienceMessageOption): MessageRule {
+  const action = messageActionsFor(option).includes(rule.action) ? rule.action : "opened";
+  const next: MessageRule = { ...withoutChoice(rule), action, ref: option.ref };
+  const keep = action === rule.action && rule.choice && (action === "reacted" || option.pollOptions.some((item) => item.id === rule.choice));
+
+  return keep ? { ...next, choice: rule.choice } : next;
 }
 
 /** Pagina da regra "Visitou uma página", na ordem do seletor. */
 export const PAGE_TARGET_CHOICES = [
-  { label: "a página do botão da notificação…", value: "message_cta" },
+  { label: "a página para onde a notificação leva…", value: "message_cta" },
   { label: "a página de um produto", value: "content" },
   { label: "Comprar de um produto", value: "checkout" },
   { label: "Início", value: "fixed:home" },
@@ -1320,7 +1768,7 @@ export function pageTargetChoiceOf(page: PageVisitRule["page"]): PageTargetChoic
   return page.kind === "fixed" ? (`fixed:${page.key}` as PageTargetChoice) : page.kind;
 }
 
-/** Trocar a pagina mantem o produto (pagina do produto <-> Comprar) e a notificacao do botao. */
+/** Trocar a pagina mantem o produto (pagina do produto <-> Comprar) e a notificacao do destino. */
 export function pageTargetOfChoice(choice: PageTargetChoice, previous: PageVisitRule["page"], options: readonly AudienceMessageOption[]): PageVisitRule["page"] {
   const productId = previous.kind === "content" || previous.kind === "checkout" ? previous.productId : "";
 
@@ -1338,7 +1786,7 @@ export function pageTargetOfChoice(choice: PageTargetChoice, previous: PageVisit
   }
 }
 
-/** Notificacoes cujo botao leva a uma pagina acompanhada ("a página do botão da notificação…"). */
+/** Notificacoes que levam a uma pagina acompanhada ("a página para onde a notificação leva…"). */
 export function pageButtonOptions(options: readonly AudienceMessageOption[]) {
   return options.filter((option) => option.ref.kind === "node" && option.hasCta && option.ctaPageKey !== null);
 }
@@ -1743,4 +2191,390 @@ export function closedWithoutClickRate(stats: Pick<NoticeStatsInput, "closedWith
 
 export function isHighCloseRate(rate: number | null) {
   return rate !== null && rate > HIGH_CLOSE_RATE;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Relatorio v3a (docs/24 §2.6): mudaram de resposta, excluiram do sino, reacoes e enquete. Os numeros
+ * vem de communication_message_interactions (sem os testes da equipe); nunca nomes, nunca quem votou o que.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Um numero do relatorio pronto para o KpiTile. */
+export type ReportTile = { definition: string; definitionShort: string; label: string; value: number };
+
+/** Contagem que veio do banco: inteiro nao negativo (fora disso, 0). */
+function reportCount(value: unknown) {
+  const number = typeof value === "number" ? value : Number(value ?? 0);
+
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function reportTile(label: string, value: number, percent: number | null, base: string): ReportTile {
+  const definition = percent === null ? base : `${formatPercent(percent)} ${base}`;
+
+  return { definition, definitionShort: definition, label, value };
+}
+
+/** Rodape do funil (v3a): reagir e votar sao interacoes de verdade (docs/24 T15). */
+export const INTERACTIONS_OPEN_NOTE = "Reagir e votar também contam como abrir.";
+
+/** Terceiro cartao de "Respostas": quem trocou de resposta pelo menos uma vez, sobre quem respondeu (resposta atual). */
+export function responseChangedTile(stats: Pick<NoticeStatsInput, "accepted" | "declined">, responseChanged: number): ReportTile {
+  const changed = reportCount(responseChanged);
+
+  return reportTile("Mudaram de resposta", changed, ratio(changed, stats.accepted + stats.declined), "de quem respondeu");
+}
+
+/** "Excluíram do sino", ao lado de "Voltaram a estudar": so quando alguem excluiu; sobre quem recebeu. */
+export function hiddenFromBellTile(hidden: number, recipients: number): ReportTile | null {
+  const count = reportCount(hidden);
+
+  return count > 0 ? reportTile("Excluíram do sino", count, ratio(count, recipients), "de quem recebeu") : null;
+}
+
+export const NO_REACTIONS_MESSAGE = "Ninguém reagiu ainda.";
+
+export type ReactionReportTile = ReportTile & { id: ReactionId };
+
+export type ReactionReport = {
+  /** Ninguem reagiu ainda: a frase fica na secao, ao lado de "Reagiram". */
+  emptyMessage: string | null;
+  reacted: ReportTile;
+  /** Um cartao por emoji com pelo menos uma reacao, na ordem do catalogo (a do seletor do aluno). */
+  tiles: ReactionReportTile[];
+};
+
+/** A secao "Reações" aparece quando a notificacao permite reagir ou ja tem reacoes (desligar nao apaga as que existem). */
+export function showsReactionReport(input: { allowsReactions: boolean | null | undefined; kind: CampaignKind; reacted: number }) {
+  return input.kind === "inbox" && (input.allowsReactions === true || reportCount(input.reacted) > 0);
+}
+
+/** "Reagiram" sobre quem viu e cada emoji sobre o total de reacoes (cada aluno tem uma so). */
+export function reactionReport(input: { reacted: number; reactions: Partial<Record<ReactionId, number>>; seen: number }): ReactionReport {
+  const counts = REACTION_IDS.map((id) => ({ id, value: reportCount(input.reactions[id]) }));
+  const total = counts.reduce((sum, item) => sum + item.value, 0);
+  const reacted = reportCount(input.reacted);
+
+  return {
+    emptyMessage: total === 0 && reacted === 0 ? NO_REACTIONS_MESSAGE : null,
+    reacted: reportTile("Reagiram", reacted, ratio(reacted, input.seen), "de quem viu"),
+    tiles: counts
+      .filter((item) => item.value > 0)
+      .map((item) => ({ ...reportTile(`${REACTION_EMOJI[item.id]} ${REACTION_LABELS[item.id]}`, item.value, ratio(item.value, total), "das reações"), id: item.id }))
+  };
+}
+
+/** "1 voto", "54 votos". */
+export function formatVotes(count: number) {
+  return count === 1 ? "1 voto" : `${formatInteger(reportCount(count))} votos`;
+}
+
+/** Opcao com voto que nao existe mais na enquete atual (passo de fluxo que mudou entre versoes). */
+export const REMOVED_POLL_OPTION_LABEL = "Opção removida";
+
+export type PollReportRow = {
+  id: string;
+  label: string;
+  /** Parte de quem votou, 0..100 (com varias respostas, a soma passa de 100). */
+  percent: number;
+  removed: boolean;
+  /** "42% · 54 votos". */
+  summary: string;
+  votes: number;
+};
+
+/**
+ * Uma linha por opcao da enquete atual, na ordem dela, e depois os ids com voto que nao estao mais nela
+ * ("Opção removida"; o relatorio do fluxo junta as versoes de um passo pelo id da opcao).
+ */
+export function pollReportRows(poll: Pick<PollDefinition, "options">, tally: { options: Record<string, number>; voters: number }): PollReportRow[] {
+  const voters = reportCount(tally.voters);
+  const known = new Set(poll.options.map((option) => option.id));
+  const row = (id: string, label: string, removed: boolean): PollReportRow => {
+    const votes = Object.hasOwn(tally.options, id) ? reportCount(tally.options[id]) : 0;
+    const percent = pollPercent(votes, voters);
+
+    return { id, label, percent, removed, summary: `${percent}% · ${formatVotes(votes)}`, votes };
+  };
+  const removed = Object.keys(tally.options)
+    .filter((id) => !known.has(id) && reportCount(tally.options[id]) > 0)
+    .sort()
+    .map((id) => row(id, REMOVED_POLL_OPTION_LABEL, true));
+
+  return [...poll.options.map((option) => row(option.id, option.label.trim(), false)), ...removed];
+}
+
+export type PollReportLines = {
+  /** "Mudaram o voto 6". */
+  changed: string;
+  /** Com varias respostas, a nota das porcentagens; null com uma. */
+  multiple: string | null;
+  /** "Votaram 128 · 40% de quem viu". */
+  voted: string;
+};
+
+export function pollReportLines(input: { changed: number; multiple: boolean; seen: number; voters: number }): PollReportLines {
+  const voters = reportCount(input.voters);
+  const percent = ratio(voters, input.seen);
+
+  return {
+    changed: `Mudaram o voto ${formatInteger(reportCount(input.changed))}`,
+    multiple: input.multiple ? "Cada pessoa pode marcar mais de uma: as porcentagens somam mais de 100%." : null,
+    voted: percent === null ? `Votaram ${formatInteger(voters)}` : `Votaram ${formatInteger(voters)} · ${formatPercent(percent)} de quem viu`
+  };
+}
+
+/**
+ * Situacao da enquete no relatorio: "Encerra em …", "Encerra quando a notificação sair do sino." ou
+ * "Encerrada em ….". Notificacao retirada do sino sem data de fim: a enquete acabou junto com ela.
+ */
+export function pollStatusLine(poll: Pick<PollDefinition, "closesAt">, input: { now: number; status: CampaignStatus }): string {
+  const closesAt = poll.closesAt ? Date.parse(poll.closesAt) : Number.NaN;
+
+  if (Number.isFinite(closesAt) && closesAt <= input.now) {
+    return `Encerrada em ${formatSaoPauloDateTime(poll.closesAt)}.`;
+  }
+
+  if (input.status === "canceled") {
+    return "Encerrada: a notificação saiu do sino.";
+  }
+
+  return Number.isFinite(closesAt) ? `Encerra em ${formatSaoPauloDateTime(poll.closesAt)}` : "Encerra quando a notificação sair do sino.";
+}
+
+/**
+ * "Encerrar enquete" (closeNoticePoll): quem publica, notificacao enviada (aviso; passo de fluxo nao, a
+ * enquete dele acaba quando a notificacao sai do sino) e enquete ainda aberta.
+ */
+export function canCloseNoticePoll(input: {
+  canPublish: boolean;
+  flowNodeId?: string | null;
+  kind: CampaignKind;
+  now: number;
+  poll: PollDefinition | null | undefined;
+  status: CampaignStatus;
+}) {
+  return input.canPublish && input.kind === "inbox" && input.status === "sent" && !input.flowNodeId && !!input.poll && !isPollClosed(input.poll, input.now);
+}
+
+export const CLOSE_POLL_CONFIRM = {
+  confirmLabel: "Encerrar enquete",
+  description: "Ninguém mais vota. O resultado fica como está agora.",
+  destructive: true,
+  title: "Encerrar a enquete?"
+} as const;
+
+export const CLOSE_POLL_TOAST = "Enquete encerrada.";
+
+/* ------------------------------------------------------------------------------------------------
+ * Conteudo v3a no editor (docs/24 §2.5): "Para onde leva" (como o aluno chega la), "Interação"
+ * (reacoes, resposta ou enquete), os campos da enquete e as pilulas "Enquete na prévia"
+ * ---------------------------------------------------------------------------------------------- */
+
+export const CTA_FIELD_COPY = {
+  blockDescription: "Um produto, uma página da área ou um site.",
+  blockTitle: "Para onde leva",
+  /** Rotulo de cima das pilulas do destino (o titulo do bloco ja diz "Para onde leva"). */
+  destinationLabel: "Destino",
+  displayLabel: "Como o aluno chega lá",
+  switchLabel: "Levar o aluno a algum lugar"
+} as const;
+
+export const CTA_DISPLAY_OPTIONS: readonly { label: string; value: CtaDisplay }[] = [
+  { label: "Pelo botão", value: "button" },
+  { label: "Pelo botão ou tocando na notificação", value: "button_and_card" },
+  { label: "Só tocando na notificação", value: "card" }
+];
+
+const CTA_DISPLAY_DESCRIPTIONS: Record<CtaDisplay, string> = {
+  button: "O aluno chega lá pelo botão.",
+  button_and_card: "O aluno chega lá pelo botão ou tocando em qualquer parte da notificação.",
+  card: "O aluno chega lá tocando na notificação. No pé dela aparece o texto que você escrever, com uma seta."
+};
+
+/** Como o aluno chega ao destino; pop-up e rascunho antigo sem `display` = pelo botao. */
+export function ctaDisplayOf(kind: CampaignKind, cta: { display?: CtaDisplay } | null | undefined): CtaDisplay {
+  return kind === "inbox" && cta?.display ? cta.display : "button";
+}
+
+/** Efeito da chave "Levar o aluno a algum lugar", pelo modo escolhido (pop-up: sempre o botao). */
+export function ctaSwitchDescription(kind: CampaignKind, cta: { display?: CtaDisplay } | null | undefined) {
+  if (kind === "popup") {
+    return cta ? "O botão aparece embaixo do texto do pop-up." : "Sem botão, o pop-up só informa.";
+  }
+
+  return cta ? CTA_DISPLAY_DESCRIPTIONS[ctaDisplayOf(kind, cta)] : "Sem destino, a notificação só informa.";
+}
+
+/** O texto do destino: o do botao nos dois modos com botao; no "Só tocando", o que vai ao lado da seta. */
+export function ctaTextFieldCopy(display: CtaDisplay): { hint?: string; label: string; placeholder: string } {
+  return display === "card"
+    ? { hint: "Aparece no pé da notificação, com uma seta: o aluno vê que pode tocar.", label: "Texto ao lado da seta", placeholder: "Ex.: Ver a aula nova" }
+    : { label: "Texto do botão", placeholder: "Ex.: Assistir agora" };
+}
+
+/** Mensagem do zod para o texto vazio, sem falar de botao quando nao ha botao. */
+export function ctaLabelError(display: CtaDisplay, error: string | undefined) {
+  return display === "card" && error === "Escreva o texto do botão." ? "Escreva o texto." : error;
+}
+
+/** Nome do grupo de pilulas do destino (leitor de tela). */
+export function ctaDestinationAriaLabel(display: CtaDisplay) {
+  return display === "card" ? "Para onde a notificação leva" : "Para onde o botão leva";
+}
+
+const REACTION_EMOJI_LIST = REACTION_IDS.map((id) => REACTION_EMOJI[id]).join(" ");
+
+export const NOTICE_INTERACTION_COPY = {
+  blockDescription: "O que o aluno pode fazer direto no sino.",
+  blockTitle: "Interação",
+  pollDisabledByResponse: "Desligue “Pedir uma resposta” para fazer uma enquete.",
+  pollLabel: "Fazer uma enquete",
+  pollOff: "Uma pergunta com opções, que o aluno responde no sino.",
+  pollOn: "O aluno escolhe uma opção direto no sino.",
+  reactionsLabel: "Permitir reações",
+  reactionsOff: "Sem reações, a notificação não mostra o botão de reagir.",
+  reactionsOn: `O aluno pode reagir com ${REACTION_EMOJI_LIST}. Ele vê só a própria reação; os números ficam no relatório.`,
+  responseDisabledByPoll: "Desligue a enquete para pedir uma resposta.",
+  responseLabel: "Pedir uma resposta (Aceitar ou Recusar)",
+  responseOff: "Sem resposta, o aviso só informa.",
+  responseOn: "Aparecem dois botões no aviso. As respostas ficam no relatório."
+} as const;
+
+export const POLL_FIELD_COPY = {
+  addOption: "Adicionar opção",
+  endAtDate: "Numa data e hora",
+  endDateLabel: "Data e hora do fim",
+  endHint: "Depois disso ninguém mais vota.",
+  endLabel: "Encerra",
+  endOnLeave: "Quando sair do sino",
+  maxOptions: `Até ${POLL_LIMITS.maxOptions} opções.`,
+  multipleLabel: "Permitir marcar mais de uma",
+  multipleOff: "O aluno escolhe uma opção.",
+  multipleOn: "O aluno pode marcar várias opções.",
+  openWhileInBell: "A enquete fica aberta enquanto a notificação estiver no sino.",
+  questionLabel: "Pergunta",
+  questionPlaceholder: "Ex.: Qual horário é melhor para a aula ao vivo?",
+  remove: "Remover",
+  resultsLabel: "Mostrar o resultado para quem votar",
+  resultsOff: "O aluno só vê que votou. O resultado fica no relatório.",
+  resultsOn: "Depois de votar, o aluno vê as porcentagens. Quando a enquete encerrar, todos veem."
+} as const;
+
+/** "Opção 1" … "Opção 6". */
+export function pollOptionFieldLabel(index: number) {
+  return `Opção ${index + 1}`;
+}
+
+/** Nome do "Remover" de cada opcao depois da segunda: "Remover opção 3". */
+export function removePollOptionLabel(index: number) {
+  return `Remover opção ${index + 1}`;
+}
+
+function randomUuid() {
+  const source = globalThis.crypto;
+
+  if (source && typeof source.randomUUID === "function") {
+    return source.randomUUID();
+  }
+
+  // Sem randomUUID (pagina fora de https): so precisa nao repetir dentro da mesma enquete.
+  return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+}
+
+/** Id de opcao novo: 8 hexadecimais minusculos, fixo enquanto o rascunho e editado (o voto guarda o id). */
+export function newPollOptionId(randomUUID: () => string = randomUuid) {
+  return randomUUID().replaceAll("-", "").slice(0, 8).toLowerCase();
+}
+
+/** Id que ainda nao existe na enquete (gerador repetido, por azar ou num teste: muda o fim ate ficar unico). */
+function freshOptionId(taken: ReadonlySet<string>, newId: () => string) {
+  let id = newId();
+
+  for (let attempt = 0; taken.has(id) && attempt < 8; attempt += 1) {
+    id = newId();
+  }
+
+  for (let suffix = 0; taken.has(id); suffix += 1) {
+    id = `${id.slice(0, 6)}${suffix.toString(16).padStart(2, "0")}`;
+  }
+
+  return id;
+}
+
+/** Enquete nova ao ligar "Fazer uma enquete": duas opcoes vazias, uma resposta, resultado para quem votar, ate sair do sino. */
+export function emptyPoll(newId: () => string = newPollOptionId): PollDefinition {
+  const first = freshOptionId(new Set(), newId);
+  const second = freshOptionId(new Set([first]), newId);
+
+  return {
+    closesAt: null,
+    multiple: false,
+    options: [
+      { id: first, label: "" },
+      { id: second, label: "" }
+    ],
+    question: "",
+    showResults: true
+  };
+}
+
+export function canAddPollOption(poll: Pick<PollDefinition, "options">) {
+  return poll.options.length < POLL_LIMITS.maxOptions;
+}
+
+/** So as opcoes depois da segunda tem "Remover" (a enquete precisa de pelo menos duas). */
+export function canRemovePollOption(index: number) {
+  return Number.isInteger(index) && index >= POLL_LIMITS.minOptions;
+}
+
+/** "Adicionar opção": uma vazia no fim, com id novo; no limite, a enquete fica como esta. */
+export function addPollOption(poll: PollDefinition, newId: () => string = newPollOptionId): PollDefinition {
+  if (!canAddPollOption(poll)) {
+    return poll;
+  }
+
+  const id = freshOptionId(new Set(poll.options.map((option) => option.id)), newId);
+
+  return { ...poll, options: [...poll.options, { id, label: "" }] };
+}
+
+/** Tira a opcao; as outras mantem o id (e a ordem). */
+export function removePollOption(poll: PollDefinition, index: number): PollDefinition {
+  if (!canRemovePollOption(index) || index >= poll.options.length) {
+    return poll;
+  }
+
+  return { ...poll, options: poll.options.filter((_, position) => position !== index) };
+}
+
+export function setPollOptionLabel(poll: PollDefinition, index: number, label: string): PollDefinition {
+  return { ...poll, options: poll.options.map((option, position) => (position === index ? { ...option, label } : option)) };
+}
+
+export type PollEndMode = "at" | "leave";
+
+export const POLL_END_OPTIONS: readonly { label: string; value: PollEndMode }[] = [
+  { label: POLL_FIELD_COPY.endOnLeave, value: "leave" },
+  { label: POLL_FIELD_COPY.endAtDate, value: "at" }
+];
+
+/** Sem data = quando sair do sino; com data (tambem a incompleta, "") = numa data e hora. */
+export function pollEndMode(poll: Pick<PollDefinition, "closesAt">): PollEndMode {
+  return poll.closesAt === null ? "leave" : "at";
+}
+
+/** Primeira data sugerida para o fim da enquete: 7 dias depois do envio (ou de hoje), as 23:59 de Sao Paulo. */
+export function defaultPollClosesAt(sendAt: number, now: number) {
+  return defaultWindowEnd(Number.isFinite(sendAt) ? new Date(sendAt).toISOString() : null, now);
+}
+
+/** Pilulas "Enquete na prévia" (so com enquete): antes do voto, ou com a primeira opcao como o voto do proprio aluno. */
+export const PREVIEW_POLL_OPTIONS: readonly { label: string; value: PreviewPoll }[] = [
+  { label: "Antes de votar", value: "before" },
+  { label: "Depois de votar", value: "after" }
+];
+
+/** A previa mostra as pilulas quando o rascunho e uma notificacao com enquete. */
+export function hasPreviewPoll(draft: Pick<PreviewContent, "kind" | "poll">) {
+  return draft.kind === "inbox" && !!draft.poll;
 }

@@ -189,6 +189,78 @@ test("'viu no sino, mas não abriu' pula quem nunca abriu o sino", async () => {
   assert.deepEqual(await quemRecebeu(s1), [aluna.id], "o aluno nem abriu o sino");
 });
 
+test("v3a: 'viu no sino, mas não abriu' pula quem excluiu a principal do sino e ainda chega a quem só viu", async () => {
+  const vm = await import("../../src/components/admin/v2/communication/follow-ups-view-model.ts");
+  const { setNotificationHidden } = await import("../../src/server/communications/inbox.ts");
+  const entrada = randomUUID();
+  const s1 = randomUUID();
+  const who = vm.quickChoiceRules("seen_not_opened", { nodeId: entrada });
+  const aviso = await avisoComSeguintes({ followUps: [seguinte("Deu uma olhada?", { id: s1, minutes: 120, who })] });
+  const now = Date.now();
+
+  assert.ok(who.root.items.some((rule) => rule.action === "hidden" && rule.negate), "a forma da v3a");
+  await markAllSeen(aluna.id);
+  await markAllSeen(aluno.id);
+  const doAluno = await linhaDoAviso(aviso.id, aluno.id);
+  assert.equal((await setNotificationHidden(aluno.id, doAluno.id, true)).changed, true, "o aluno exclui a principal do sino");
+
+  await tick(now + MIN);
+  await tick(now + 3 * HORA);
+
+  assert.deepEqual(await quemRecebeu(s1), [aluna.id], "quem excluiu nao recebe a seguinte");
+});
+
+test("v3a: a seguinte gravada pela v2 continua saindo pelas regras dela; reaberta, a próxima gravação leva 'não excluiu do sino'", async () => {
+  const vm = await import("../../src/components/admin/v2/communication/follow-ups-view-model.ts");
+  const { setNotificationHidden } = await import("../../src/server/communications/inbox.ts");
+  const entrada = randomUUID();
+  const s1 = randomUUID();
+  const s2 = randomUUID();
+  const v2 = regras(fez("seen", entrada), fez("opened", entrada, true));
+  const aviso = await avisoComSeguintes({
+    followUps: [seguinte("Deu uma olhada?", { id: s1, minutes: 120, who: v2 }), seguinte("Último chamado", { id: s2, minutes: 3 * 1_440, who: v2 })]
+  });
+  const now = Date.now();
+
+  await markAllSeen(aluna.id);
+  await markAllSeen(aluno.id);
+  await setNotificationHidden(aluno.id, (await linhaDoAviso(aviso.id, aluno.id)).id, true);
+  await tick(now + MIN);
+  await tick(now + 3 * HORA);
+  assert.deepEqual(await quemRecebeu(s1), alunos(), "regras da v2: a exclusao nao conta");
+
+  // A aluna reage a primeira seguinte: o cartao do relatorio conta "Reagiram" pelo passo.
+  const reagiuEm = new Date(now + 3 * HORA).toISOString();
+  unwrap(
+    await db.from("notifications").update({ opened_at: reagiuEm, reacted_at: reagiuEm, reaction: "like", read_at: reagiuEm, seen_at: reagiuEm }).eq("flow_node_id", s1).eq("user_id", aluna.id),
+    "A aluna reage a seguinte"
+  );
+
+  // O relatorio reabre as duas na escolha rapida; aplicar grava a forma da v3a.
+  const detalhe = await getNoticeDetail(aviso.id, { permissions: TODAS });
+  assert.equal(detalhe.followUps.stats[s1].reacted, 1);
+  assert.equal(detalhe.followUps.stats[s1].voted, 0);
+  const principal = vm.followUpParentOf(detalhe.followUps.entryNodeId, "main", detalhe.draft);
+  const items = vm.followUpFormItemsOf(detalhe.followUps.items, principal);
+  assert.deepEqual(items.map((item) => item.choice), ["seen_not_opened", "seen_not_opened"]);
+
+  actAs(produtor);
+  const aplicado = await actions.saveNoticeFollowUps({
+    expectedFlowUpdatedAt: detalhe.followUps.updatedAt,
+    expectedNoticeUpdatedAt: detalhe.updatedAt,
+    followUps: vm.followUpDraftsOf(items, principal),
+    goal: null,
+    noticeId: aviso.id
+  });
+  assert.equal(aplicado.ok, true, JSON.stringify(aplicado));
+
+  const [no] = unwrap(await db.from("communication_flow_nodes").select("filter").eq("id", s2), "Lendo o filtro da segunda");
+  assert.ok(no.filter.root.items.some((rule) => rule.type === "message" && rule.action === "hidden" && rule.negate), "gravada na forma nova");
+
+  await tick(now + 3 * DIA + MIN);
+  assert.deepEqual(await quemRecebeu(s2), [aluna.id], "depois de gravada de novo, quem excluiu fica de fora");
+});
+
 test("'3 h antes de vencer' sai 3 h antes do fim e some junto com a principal; depois do fim, não sai", async () => {
   const s1 = randomUUID();
   const aviso = await avisoComSeguintes({

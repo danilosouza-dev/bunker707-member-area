@@ -1,8 +1,10 @@
 "use client";
 
+import { Lock } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { uploadNoticeImage } from "@/server/communications/actions";
 import { NOTICE_LIMITS, type CampaignKind } from "@/server/communications/campaign-model";
+import type { PollDefinition } from "@/server/communications/interactions-model";
 import type { FlowValidity } from "@/server/communications/message-meta";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import { HeroTextField } from "../member-area/home-hero/fields";
@@ -12,9 +14,10 @@ import type { ProductPickerItem } from "../storefront/product-picker";
 import { NoticeAudioField } from "./notice-audio-field";
 import { NoticeCtaField } from "./notice-cta-field";
 import { NoticeIconField } from "./notice-icon-field";
+import { NoticePollField } from "./notice-poll-field";
 import { NoticeSenderField } from "./notice-sender-field";
 import { NoticeValidityField } from "./notice-validity-field";
-import type { NoticeSenderChoice } from "./notices-view-model";
+import { CTA_FIELD_COPY, NOTICE_INTERACTION_COPY, emptyPoll, type NoticeSenderChoice } from "./notices-view-model";
 
 // Conteudo de uma notificacao (docs/23; docs/22 §2.2): titulo, texto, quem envia, icone ao lado do
 // titulo, imagem e audio, botao, resposta e, quando `showValidity`, quanto tempo fica no sino. O mesmo
@@ -25,11 +28,20 @@ import type { NoticeSenderChoice } from "./notices-view-model";
 // Quem chama guarda o conteudo e os erros (errorFor/onBlurField com as chaves do zod: "title",
 // "cta.href"...). A imagem recortada sobe aqui mesmo (uploadNoticeImage); enquanto sobe, a previa ja
 // mostra o recorte (onImageUploadChange) e quem chama nao deixa salvar.
+//
+// v3a (docs/24 §2.5): "Botão" vira "Para onde leva" (com "Como o aluno chega lá" na notificacao) e
+// "Resposta" vira "Interação": "Permitir reações", "Pedir uma resposta" e "Fazer uma enquete" (resposta
+// e enquete nao convivem: uma desliga a outra). `lockedFields` (notificacao ja enviada) trava o audio, a
+// enquete e ligar ou desligar a resposta, com o motivo embaixo; `pollCanEndAtDate` false (folha da
+// seguinte e passo do fluxo) tira o fim numa data.
 
 /** O conteudo editado aqui: o do aviso, com a validade dos passos de fluxo ("with_anchor"). */
-export type NoticeContentValue = Pick<NoticeDraft, "audio" | "body" | "cta" | "icon" | "image" | "response" | "sender" | "title"> & {
+export type NoticeContentValue = Pick<NoticeDraft, "audio" | "body" | "cta" | "icon" | "image" | "poll" | "reactions" | "response" | "sender" | "title"> & {
   validity: FlowValidity;
 };
+
+/** Campos travados depois do envio, cada um com o motivo que aparece embaixo dele (docs/24 §2.2). */
+export type NoticeLockedFields = Partial<Record<"audio" | "poll" | "responseMode", string>>;
 
 type NoticeContentFieldsProps = {
   /** Quem esta com o editor aberto pode trocar o icone da escola (Marca). */
@@ -43,6 +55,8 @@ type NoticeContentFieldsProps = {
   layout?: "cards" | "plain";
   /** Antes do titulo, no primeiro bloco (o Tipo do aviso, no editor). */
   leading?: ReactNode;
+  /** Notificacao ja enviada: o que nao muda mais e o motivo (o editor passa; o servidor confere de novo). */
+  lockedFields?: NoticeLockedFields;
   /** Motivo para nao salvar agora (audio gravando ou enviando); null = livre. */
   onAudioBusyChange?: (reason: string | null) => void;
   onBlurField: (key: string) => void;
@@ -51,6 +65,8 @@ type NoticeContentFieldsProps = {
   onImageUploadChange?: (preview: string | null) => void;
   /** Equipe relida (foto nova em Perfil). */
   onSendersChange?: (senders: NoticeSenderChoice[]) => void;
+  /** A enquete pode encerrar numa data (editor do aviso); false na folha da seguinte e no passo do fluxo. */
+  pollCanEndAtDate?: boolean;
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
   /** Muda para remontar os campos com memoria propria (botao) quando o conteudo e trocado de uma vez. */
@@ -70,6 +86,20 @@ type NoticeContentFieldsProps = {
 };
 
 type BlockProps = { children: ReactNode; description?: string; layout: "cards" | "plain"; meta?: string; title: string };
+
+/** Motivo de um campo travado depois do envio, embaixo dele. */
+function LockedNote({ children }: { children: string }) {
+  return (
+    <p className="flex items-start gap-1.5 text-[13px] leading-5 text-[var(--text-secondary)]">
+      <Lock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+      {children}
+    </p>
+  );
+}
+
+function FieldError({ children }: { children: ReactNode }) {
+  return <p className="text-[13px] leading-5 text-[var(--error)]">{children}</p>;
+}
 
 function Block({ children, description, layout, meta, title }: BlockProps) {
   if (layout === "cards") {
@@ -102,11 +132,13 @@ export function NoticeContentFields({
   kind,
   layout = "cards",
   leading,
+  lockedFields = {},
   onAudioBusyChange,
   onBlurField,
   onChange,
   onImageUploadChange,
   onSendersChange,
+  pollCanEndAtDate = true,
   products,
   productsLoaded,
   resetKey,
@@ -121,8 +153,9 @@ export function NoticeContentFields({
 }: NoticeContentFieldsProps) {
   const [imageUpload, setImageUpload] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
-  // Desligar e religar "Pedir uma resposta" volta com os textos de antes.
+  // Desligar e religar "Pedir uma resposta" (ou "Fazer uma enquete") volta com o que foi escrito antes.
   const rememberedResponse = useRef<NoticeDraft["response"]>(value.response);
+  const rememberedPoll = useRef<PollDefinition | null>(value.poll ?? null);
   // O envio da imagem termina depois: a descricao escrita no meio vem do conteudo mais novo.
   const latest = useRef(value);
   const limits = NOTICE_LIMITS[kind];
@@ -164,6 +197,30 @@ export function NoticeContentFields({
     rememberedResponse.current = response;
     onChange({ response });
   }
+
+  function changePoll(poll: PollDefinition) {
+    rememberedPoll.current = poll;
+    onChange({ poll });
+  }
+
+  function togglePoll(checked: boolean) {
+    if (!checked) {
+      onChange({ poll: null });
+      return;
+    }
+
+    const poll = rememberedPoll.current ?? emptyPoll();
+    rememberedPoll.current = poll;
+    onChange({ poll });
+  }
+
+  const poll = inbox ? (value.poll ?? null) : null;
+  const responseLocked = lockedFields.responseMode;
+  const pollLocked = lockedFields.poll;
+  const audioLocked = lockedFields.audio;
+  // Resposta e enquete nao convivem (docs/24 T13): com uma ligada, a chave da outra fica desligada e explica.
+  const responseBlockedByPoll = poll !== null && value.response === null;
+  const pollBlockedByResponse = value.response !== null && poll === null;
 
   const validityErrors = {
     endsAt: errorFor("validity.endsAt"),
@@ -247,23 +304,25 @@ export function NoticeContentFields({
               Áudio<span className="font-normal text-[var(--text-tertiary)]"> (opcional)</span>
             </span>
             <NoticeAudioField
-              disabled={disabled}
+              disabled={disabled || audioLocked !== undefined}
               error={errorFor("audio.url") ?? errorFor("audio.durationSeconds") ?? errorFor("audio")}
               id={id("audio")}
               onBusyChange={onAudioBusyChange}
               onChange={(audio) => onChange({ audio })}
               value={value.audio}
             />
+            {audioLocked ? <LockedNote>{audioLocked}</LockedNote> : null}
           </div>
         </div>
       </Block>
 
-      <Block description="Leva o aluno para um produto, uma página da área ou um site." layout={layout} meta="opcional" title="Botão">
+      <Block description={CTA_FIELD_COPY.blockDescription} layout={layout} meta="opcional" title={CTA_FIELD_COPY.blockTitle}>
         <NoticeCtaField
           disabled={disabled}
-          errors={{ href: errorFor("cta.href"), label: errorFor("cta.label") }}
+          errors={{ display: errorFor("cta.display"), href: errorFor("cta.href"), label: errorFor("cta.label") }}
           idPrefix={idPrefix}
           key={resetKey}
+          kind={kind}
           onBlurField={onBlurField}
           onChange={(cta) => onChange({ cta })}
           products={products}
@@ -273,40 +332,87 @@ export function NoticeContentFields({
       </Block>
 
       {inbox ? (
-        <Block description="Para convites e confirmações: o aluno responde direto no sino." layout={layout} meta="opcional" title="Resposta">
+        <Block description={NOTICE_INTERACTION_COPY.blockDescription} layout={layout} meta="opcional" title={NOTICE_INTERACTION_COPY.blockTitle}>
           <div className="flex min-w-0 flex-col gap-5">
             <AdminSwitch
-              checked={value.response !== null}
-              description={value.response ? "Aparecem dois botões no aviso. As respostas ficam no relatório." : "Sem resposta, o aviso só informa."}
+              checked={value.reactions === true}
+              description={value.reactions ? NOTICE_INTERACTION_COPY.reactionsOn : NOTICE_INTERACTION_COPY.reactionsOff}
               disabled={disabled}
-              id={id("resposta")}
-              label="Pedir uma resposta (Aceitar ou Recusar)"
-              onCheckedChange={(checked) => onChange({ response: checked ? (rememberedResponse.current ?? { acceptLabel: "Aceitar", declineLabel: "Recusar" }) : null })}
+              id={id("reacoes")}
+              label={NOTICE_INTERACTION_COPY.reactionsLabel}
+              onCheckedChange={(reactions) => onChange({ reactions })}
             />
-            {value.response ? (
-              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
-                <HeroTextField
-                  disabled={disabled}
-                  error={errorFor("response.acceptLabel")}
-                  id={id("aceitar")}
-                  label="Botão de aceitar"
-                  max={NOTICE_LIMITS.responseLabel}
-                  onBlur={() => onBlurField("response.acceptLabel")}
-                  onChange={(acceptLabel) => changeResponse({ acceptLabel, declineLabel: value.response?.declineLabel ?? "Recusar" })}
-                  value={value.response.acceptLabel}
+
+            <div className="flex min-w-0 flex-col gap-4">
+              <AdminSwitch
+                checked={value.response !== null}
+                description={
+                  responseLocked ??
+                  (responseBlockedByPoll
+                    ? NOTICE_INTERACTION_COPY.responseDisabledByPoll
+                    : value.response
+                      ? NOTICE_INTERACTION_COPY.responseOn
+                      : NOTICE_INTERACTION_COPY.responseOff)
+                }
+                disabled={disabled || responseLocked !== undefined || responseBlockedByPoll}
+                id={id("resposta")}
+                label={NOTICE_INTERACTION_COPY.responseLabel}
+                onCheckedChange={(checked) => onChange({ response: checked ? (rememberedResponse.current ?? { acceptLabel: "Aceitar", declineLabel: "Recusar" }) : null })}
+              />
+              {errorFor("response") ? <FieldError>{errorFor("response")}</FieldError> : null}
+              {value.response ? (
+                <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                  <HeroTextField
+                    disabled={disabled}
+                    error={errorFor("response.acceptLabel")}
+                    id={id("aceitar")}
+                    label="Botão de aceitar"
+                    max={NOTICE_LIMITS.responseLabel}
+                    onBlur={() => onBlurField("response.acceptLabel")}
+                    onChange={(acceptLabel) => changeResponse({ acceptLabel, declineLabel: value.response?.declineLabel ?? "Recusar" })}
+                    value={value.response.acceptLabel}
+                  />
+                  <HeroTextField
+                    disabled={disabled}
+                    error={errorFor("response.declineLabel")}
+                    id={id("recusar")}
+                    label="Botão de recusar"
+                    max={NOTICE_LIMITS.responseLabel}
+                    onBlur={() => onBlurField("response.declineLabel")}
+                    onChange={(declineLabel) => changeResponse({ acceptLabel: value.response?.acceptLabel ?? "Aceitar", declineLabel })}
+                    value={value.response.declineLabel}
+                  />
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex min-w-0 flex-col gap-4">
+              <AdminSwitch
+                checked={poll !== null}
+                description={
+                  pollLocked ??
+                  (pollBlockedByResponse ? NOTICE_INTERACTION_COPY.pollDisabledByResponse : poll ? NOTICE_INTERACTION_COPY.pollOn : NOTICE_INTERACTION_COPY.pollOff)
+                }
+                disabled={disabled || pollLocked !== undefined || pollBlockedByResponse}
+                id={id("enquete")}
+                label={NOTICE_INTERACTION_COPY.pollLabel}
+                onCheckedChange={togglePoll}
+              />
+              {errorFor("poll") ? <FieldError>{errorFor("poll")}</FieldError> : null}
+              {poll ? (
+                <NoticePollField
+                  canEndAtDate={pollCanEndAtDate}
+                  disabled={disabled || pollLocked !== undefined}
+                  errorFor={errorFor}
+                  idPrefix={idPrefix}
+                  key={resetKey}
+                  onBlurField={onBlurField}
+                  onChange={changePoll}
+                  sendAt={sendAt}
+                  value={poll}
                 />
-                <HeroTextField
-                  disabled={disabled}
-                  error={errorFor("response.declineLabel")}
-                  id={id("recusar")}
-                  label="Botão de recusar"
-                  max={NOTICE_LIMITS.responseLabel}
-                  onBlur={() => onBlurField("response.declineLabel")}
-                  onChange={(declineLabel) => changeResponse({ acceptLabel: value.response?.acceptLabel ?? "Aceitar", declineLabel })}
-                  value={value.response.declineLabel}
-                />
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         </Block>
       ) : null}

@@ -622,8 +622,8 @@ test("relatorio: funil da notificacao com a parte do anterior, so o que ela tem;
       "Abriram",
       "Começaram o áudio",
       "Ouviram até o fim",
-      "Clicaram no botão",
-      "Visitaram a página do botão",
+      "Foram para o destino",
+      "Visitaram a página do destino",
       "Aceitaram",
       "Recusaram",
       "Voltaram a estudar em 7 dias"
@@ -700,4 +700,87 @@ test("vocabulario: nada de campanha, publico, audiencia, evento, oferta, gatilho
   for (const text of texts) {
     assert.doesNotMatch(text, /campanha|público|audiência|evento|oferta|gatilho|automaç|lembrete/i, text);
   }
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * v3a (docs/24 §2.6 e §2.7): reacoes e enquete nas regras e no relatorio do fluxo
+ * ---------------------------------------------------------------------------------------------- */
+
+const SABADO = "a1b2c3d4";
+const DOMINGO = "e5f6a7b8";
+const enquete = { closesAt: null, multiple: false, options: [{ id: SABADO, label: "Sábado" }, { id: DOMINGO, label: "Domingo" }], question: "Qual dia?", showResults: true };
+
+test("v3a: as notificacoes acima trazem reacoes e enquete (do passo e da principal); as opcoes entram nos nomes", () => {
+  const draft = templates.buildFlowTemplate("deadline", sequence());
+  const [entrada, primeira, , lembrete] = draft.nodes;
+  const comEnquete = { ...draft, messages: { ...draft.messages, [primeira.id]: { ...draft.messages[primeira.id], body: "Curta.", cta: null, poll: enquete } } };
+  const [acima] = vm.flowContextAbove(comEnquete, lembrete.id).messages;
+
+  assert.equal(acima.allowsReactions, true, "passo novo ja permite reacoes");
+  assert.equal(acima.hasPoll, true);
+  assert.deepEqual(acima.pollOptions, enquete.options);
+  assert.equal(acima.canOpen, true, "enquete e algo para abrir");
+  assert.equal(vm.flowContextAbove({ ...comEnquete, messages: { ...comEnquete.messages, [primeira.id]: { ...comEnquete.messages[primeira.id], poll: null } } }, lembrete.id).messages[0].canOpen, false, "texto curto sem nada: nada a abrir");
+
+  const source = { allowsReactions: true, body: "", ctaHref: null, hasAudio: false, hasPoll: true, hasResponse: false, id: id(99), pollOptions: [{ id: "c0c0c0c0", label: "Manhã" }], title: "Oferta especial!", validUntil: null, validityMinutes: 1_440 };
+  const aviso = { ...comEnquete, origin: "notice" };
+  const [principal] = vm.flowContextAbove(aviso, primeira.id, source).messages;
+  assert.deepEqual([principal.nodeId, principal.allowsReactions, principal.hasPoll, principal.canOpen], [entrada.id, true, true, true]);
+  assert.deepEqual(vm.sourceMetaOf(source).pollOptionIds, ["c0c0c0c0"]);
+  assert.equal(vm.sourceMetaOf(source).allowsReactions, true);
+  assert.equal(vm.sourceMetaOf({ ...source, allowsReactions: undefined, hasPoll: undefined, pollOptions: undefined }).hasPoll, false, "principal sem os campos da v3a");
+
+  const nomes = vm.flowAudienceNames(names, aviso, source);
+  assert.deepEqual(nomes.pollOptions, { [`node:${entrada.id}`]: { c0c0c0c0: "Manhã" }, [`node:${primeira.id}`]: { [DOMINGO]: "Domingo", [SABADO]: "Sábado" } });
+  assert.equal("pollOptions" in vm.flowAudienceNames(names, draft), false, "sem enquete, sem a chave");
+});
+
+test("v3a: a conferencia do construtor recusa 'reagiu' sem reacoes e 'votou' numa opcao que saiu", () => {
+  const draft = templates.buildFlowTemplate("deadline", sequence());
+  const [entrada, primeira, condicao] = draft.nodes;
+  const comCondicao = (rule, messages = draft.messages, origin = draft.origin) => ({
+    ...draft,
+    messages,
+    nodes: draft.nodes.map((node) => (node.id === condicao.id ? { ...node, condition: regras(rule) } : node)),
+    origin
+  });
+  const saveIssues = (value, source = null) => vm.flowIssuesOf(value, source).filter((issue) => issue.level === "save" && issue.nodeId === condicao.id).map((issue) => issue.message);
+  const votou = (choice) => ({ action: "voted", choice, negate: false, ref: { kind: "node", nodeId: primeira.id }, type: "message" });
+  const comEnquete = { ...draft.messages, [primeira.id]: { ...draft.messages[primeira.id], poll: enquete } };
+
+  assert.deepEqual(saveIssues(comCondicao(votou(SABADO))), ["A notificação escolhida não tem enquete. Escolha outra regra."]);
+  assert.deepEqual(saveIssues(comCondicao(votou(SABADO), comEnquete)), []);
+  assert.deepEqual(saveIssues(comCondicao(votou("f0f0f0f0"), comEnquete)), ["Esta opção não existe mais na enquete. Escolha outra."]);
+
+  const reagiu = { action: "reacted", negate: false, ref: { kind: "node", nodeId: primeira.id }, type: "message" };
+  assert.deepEqual(saveIssues(comCondicao(reagiu)), [], "os modelos ja permitem reacoes");
+  assert.deepEqual(saveIssues(comCondicao(reagiu, { ...draft.messages, [primeira.id]: { ...draft.messages[primeira.id], reactions: false } })), ["A notificação escolhida não aceita reações. Escolha outra regra."]);
+
+  // Na principal (fluxo de aviso), pelo que o aviso de origem tem.
+  const source = { body: "", ctaHref: null, hasAudio: false, hasResponse: false, id: id(99), title: "Oferta", validUntil: null, validityMinutes: 1_440 };
+  const naPrincipal = comCondicao({ action: "voted", negate: true, ref: { kind: "node", nodeId: entrada.id }, type: "message" }, draft.messages, "notice");
+  assert.deepEqual(saveIssues(naPrincipal, source), ["A notificação escolhida não tem enquete. Escolha outra regra."]);
+  assert.deepEqual(saveIssues(naPrincipal, { ...source, hasPoll: true, pollOptions: enquete.options }), []);
+});
+
+test("v3a: relatorio do passo com 'Votaram' e 'Reagiram' (parte de quem abriu) e uma linha por opcao da enquete", () => {
+  const lines = vm.messageReportLines(STATS, { allowsReactions: true, ctaTracked: false, hasAudio: false, hasCta: false, hasPoll: true, hasResponse: false }, { reacted: 45, voters: 90 });
+
+  assert.deepEqual(lines.map((line) => line.label), ["Chegaram", "Esperando", "Receberam", "Viram no sino", "Abriram", "Votaram", "Reagiram", "Voltaram a estudar em 7 dias"]);
+  assert.deepEqual(lines.find((line) => line.id === "voted"), { id: "voted", label: "Votaram", share: "50%", value: 90 });
+  assert.deepEqual(lines.find((line) => line.id === "reacted"), { id: "reacted", label: "Reagiram", share: "25%", value: 45 });
+  assert.equal(vm.messageReportLines(STATS, { allowsReactions: true, ctaTracked: false, hasAudio: false, hasCta: false, hasResponse: false }).find((line) => line.id === "reacted").value, 0, "sem interacoes: 0");
+  assert.equal(vm.messageReportLines(null, { allowsReactions: true, ctaTracked: false, hasAudio: false, hasCta: false, hasResponse: false }, { reacted: 3, voters: 0 }).find((line) => line.id === "reacted").value, null, "nunca ativado: —");
+  assert.ok(!vm.messageReportLines(STATS, { ctaTracked: false, hasAudio: false, hasCta: false, hasResponse: false }).some((line) => line.id === "voted" || line.id === "reacted"), "forma da v2");
+
+  const content = { audio: null, cta: null, poll: enquete, reactions: true, response: null };
+  const interactions = { pollOptions: { [SABADO]: 60, [DOMINGO]: 30, f0f0f0f0: 4 }, pollVoters: 90, reacted: 45 };
+  const step = vm.messageStepLines(STATS, content, interactions);
+
+  assert.deepEqual(step.map((line) => line.label), ["Chegaram", "Esperando", "Receberam", "Viram no sino", "Abriram", "Votaram", "“Sábado”", "“Domingo”", "Opção removida", "Reagiram", "Voltaram a estudar em 7 dias"]);
+  assert.deepEqual(step.find((line) => line.id === `poll:${SABADO}`), { id: `poll:${SABADO}`, label: "“Sábado”", share: "67%", value: 60 });
+  assert.deepEqual(step.find((line) => line.id === "poll:f0f0f0f0"), { id: "poll:f0f0f0f0", label: "Opção removida", share: "4%", value: 4 }, "opcao de outra versao do passo");
+  assert.deepEqual(vm.stepPollLines(enquete, null).map((line) => [line.label, line.value, line.share]), [["“Sábado”", 0, "0%"], ["“Domingo”", 0, "0%"]]);
+  assert.deepEqual(vm.stepPollLines(null, interactions), []);
+  assert.deepEqual(vm.messageStepLines(STATS, { audio: null, cta: { href: "/minhas-compras", label: "Ver", target: "same_tab" }, response: null }).map((line) => line.label).slice(5), ["Foram para o destino", "Visitaram a página do destino", "Voltaram a estudar em 7 dias"]);
 });

@@ -263,3 +263,156 @@ test("'Quem entra' de um fluxo com a regra faz entrar exatamente quem está no s
   assert.deepEqual(passagens.map((linha) => linha.user_id).sort(), esperado);
   assert.ok(passagens.every((linha) => linha.status === "active"));
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * v3a (docs/24 §6): "reagiu", "votou na enquete" e "excluiu do sino", com e sem a escolha
+ * ---------------------------------------------------------------------------------------------- */
+
+const TITULO_Y = "Horário da live";
+const SABADO = "a1b2c3d4";
+const DOMINGO = "e5f6a7b8";
+let avisoY = null;
+let recebeuY = [];
+
+/** O que o aluno fez com a linha de Y (como as rotas do sino gravam: reagir e votar tambem abrem). */
+async function interagir(userId, { hidden = false, pollChoice = null, reaction = null } = {}) {
+  const at = new Date(Date.now() - HORA).toISOString();
+  const opened = reaction !== null || pollChoice !== null;
+
+  unwrap(
+    await db
+      .from("notifications")
+      .update({
+        hidden_at: hidden ? at : null,
+        opened_at: opened ? at : null,
+        poll_choice: pollChoice,
+        poll_voted_at: pollChoice ? at : null,
+        reacted_at: reaction ? at : null,
+        reaction,
+        read_at: opened ? at : null,
+        seen_at: at
+      })
+      .eq("campaign_id", avisoY.id)
+      .eq("user_id", userId),
+    "Marcando a interacao com Y"
+  );
+}
+
+/** Y: enquete (Sábado / Domingo) e reacoes; a aluna vota Sábado e reage ❤️, o aluno sem acesso vota Domingo, a outra aluna exclui do sino. */
+async function prepararY() {
+  if (avisoY) {
+    return;
+  }
+
+  avisoY = await salvarEPublicar(
+    rascunho({
+      poll: { closesAt: null, multiple: false, options: [{ id: SABADO, label: "Sábado" }, { id: DOMINGO, label: "Domingo" }], question: "Qual dia é melhor?", showResults: true },
+      reactions: true,
+      title: TITULO_Y
+    })
+  );
+  recebeuY = await destinatarios(avisoY.id);
+  await interagir(aluna.id, { pollChoice: [SABADO], reaction: "love" });
+  await interagir(alunoSemAcesso.id, { pollChoice: [DOMINGO] });
+  await interagir(outraAluna, { hidden: true });
+}
+
+const regraY = (action, extra = {}) => ({ kind: "rules", root: { items: [{ action, negate: false, ref: { campaignId: avisoY.id, kind: "campaign" }, type: "message", ...extra }], match: "all" } });
+
+test("v3a: 'não votaram', 'votaram em “Sábado”', 'reagiram com ❤️' e 'excluíram do sino' contam pelas linhas do sino, na prévia com a frase", async () => {
+  await prepararY();
+  assert.ok(recebeuY.includes(aluna.id) && recebeuY.includes(alunoSemAcesso.id) && recebeuY.includes(outraAluna));
+
+  const casos = [
+    [regraY("voted", { negate: true }), recebeuY.filter((userId) => userId !== aluna.id && userId !== alunoSemAcesso.id), `Alunos que não votaram na enquete da notificação “${TITULO_Y}”`],
+    [regraY("voted", { choice: SABADO }), [aluna.id], `Alunos que votaram em “Sábado” na enquete da notificação “${TITULO_Y}”`],
+    [regraY("reacted", { choice: "love" }), [aluna.id], `Alunos que reagiram com ❤️ à notificação “${TITULO_Y}”`],
+    [regraY("hidden"), [outraAluna], `Alunos que excluíram do sino a notificação “${TITULO_Y}”`]
+  ];
+  const fatos = await loadAudienceFacts(db, new Date(), { messageCampaignIds: [avisoY.id] });
+
+  actAs(produtor);
+
+  for (const [definicao, quem, frase] of casos) {
+    assert.deepEqual(resolveAudienceUserIds(definicao, fatos), [...quem].sort(), frase);
+
+    const previa = await actions.previewNoticeAudience({ audience: definicao });
+    assert.equal(previa.ok, true, JSON.stringify(previa));
+    assert.equal(previa.data.count, quem.length, frase);
+    assert.equal(previa.data.description, frase);
+  }
+
+  const nomes = await loadAudienceNames(db, [casos[1][0]]);
+  assert.deepEqual(nomes.pollOptions[`campaign:${avisoY.id}`], { [DOMINGO]: "Domingo", [SABADO]: "Sábado" });
+
+  const opcoes = await loadAudienceNoticeOptions(db);
+  const y = opcoes.find((opcao) => opcao.id === avisoY.id);
+  assert.deepEqual(
+    { allowsReactions: y.allowsReactions, canOpen: y.canOpen, hasPoll: y.hasPoll, pollOptions: y.pollOptions },
+    { allowsReactions: true, canOpen: true, hasPoll: true, pollOptions: [{ id: SABADO, label: "Sábado" }, { id: DOMINGO, label: "Domingo" }] },
+    "enquete e algo para abrir"
+  );
+  assert.equal(opcoes.find((opcao) => opcao.id === avisoX.id).allowsReactions, true, "X e nova: reacoes ligadas");
+});
+
+test("v3a: a publicação e o envio agendado que o tick faz saem para os mesmos alunos", async () => {
+  await prepararY();
+  const naoVotaram = regraY("voted", { negate: true });
+  const esperadoNaoVotaram = recebeuY.filter((userId) => userId !== aluna.id && userId !== alunoSemAcesso.id);
+
+  const publicado = await salvarEPublicar(rascunho({ audience: naoVotaram, title: "Ainda dá tempo de votar" }));
+  assert.deepEqual(await destinatarios(publicado.id), esperadoNaoVotaram);
+  assert.equal((await getNoticeDetail(publicado.id)).audienceDescription, `Alunos que não votaram na enquete da notificação “${TITULO_Y}”`);
+
+  const agendado = await salvarEPublicar(
+    rascunho({ audience: regraY("voted", { choice: SABADO }), schedule: { mode: "at", sendAt: new Date(Date.now() + HORA).toISOString() }, title: "Sábado, então!" })
+  );
+  unwrap(await db.from("campaigns").update({ send_at: new Date(Date.now() - 60_000).toISOString() }).eq("id", agendado.id), "Adiantando o envio");
+  await processCommunications({ db });
+  assert.deepEqual(await destinatarios(agendado.id), [aluna.id]);
+});
+
+test("v3a: o recálculo do pop-up segue 'excluíram do sino' (Desfazer tira) e a entrada do fluxo segue 'reagiram com ❤️'", async () => {
+  await prepararY();
+  const popup = await salvarEPublicar({ ...emptyNoticeDraft("popup"), audience: regraY("hidden"), body: "Quer ver de novo?", title: "A live é no sábado" });
+  const elegiveis = async () =>
+    unwrap(await db.from("campaign_deliveries").select("user_id").eq("campaign_id", popup.id).eq("eligible", true), "Lendo o pop-up")
+      .map((linha) => linha.user_id)
+      .sort();
+
+  assert.deepEqual(await elegiveis(), [outraAluna]);
+
+  // A outra aluna toca em Desfazer (hidden_at volta a null): o recalculo seguinte tira o pop-up dela.
+  await interagir(outraAluna, {});
+  unwrap(await db.from("campaigns").update({ audience_refreshed_at: new Date(Date.now() - HORA).toISOString() }).eq("id", popup.id), "Envelhecendo o recalculo");
+
+  try {
+    await processCommunications({ db });
+    assert.deepEqual(await elegiveis(), []);
+  } finally {
+    await interagir(outraAluna, { hidden: true });
+  }
+
+  const [fluxo] = unwrap(
+    await db
+      .from("communication_flows")
+      .insert({
+        activated_at: new Date().toISOString(),
+        created_by: produtor.id,
+        entry_audience: regraY("reacted", { choice: "love" }),
+        entry_mode: "current",
+        name: "Para quem amou a live",
+        origin: "builder",
+        status: "active"
+      })
+      .select("id"),
+    "Criando o fluxo"
+  );
+  unwrap(await db.from("communication_flow_nodes").insert({ flow_id: fluxo.id, kind: "entry" }), "Criando a entrada do fluxo");
+
+  const now = new Date();
+  await processFlows({ budgetMs: 25_000, db, facts: createFactsLoader(db, now), now, signal: new AbortController().signal });
+
+  const passagens = unwrap(await db.from("communication_flow_runs").select("user_id").eq("flow_id", fluxo.id), "Lendo quem entrou");
+  assert.deepEqual(passagens.map((linha) => linha.user_id), [aluna.id]);
+});

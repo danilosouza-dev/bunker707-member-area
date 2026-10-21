@@ -18,7 +18,8 @@ import type { NoticeSenderChoice } from "./notices-view-model";
 // conteudo fica no estado do cartao; quem grava e o editor (ou "Aplicar alterações" no relatorio).
 //
 // O formulario e a previa ficam num <form> proprio, com ids e nomes de `idPrefix`: os campos e os grupos
-// de opcoes nao se misturam com os do editor aberto embaixo.
+// de opcoes nao se misturam com os do editor aberto embaixo. v3a: a enquete da seguinte nao tem data de
+// fim (pollCanEndAtDate false): a hora de envio e relativa, entao uma data fixa poderia cair antes dela.
 
 type FollowUpSheetProps = {
   /** Fim da notificacao de cima na previa ("Até a notificação principal sumir"). */
@@ -119,6 +120,8 @@ export function FollowUpSheet({
             onImageUploadChange(preview);
           }}
           onSendersChange={onSendersChange}
+          // v3a: a seguinte sai numa hora relativa; a enquete dela so encerra quando sai do sino (docs/24 T13).
+          pollCanEndAtDate={false}
           products={products}
           productsLoaded={productsLoaded}
           schoolIconUrl={branding.iconUrl}

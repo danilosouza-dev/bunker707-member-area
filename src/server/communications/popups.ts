@@ -31,7 +31,9 @@ export const SNOOZE_REFUSED = "Não dá para lembrar depois de novo.";
 
 const LIVE_POPUP_COLUMNS =
   "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,popup_repeat,allow_snooze,starts_at,ends_at,sent_at,created_at,icon,icon_color";
-const DELIVERY_COLUMNS = "campaign_id,eligible,impressions,last_seen_at,clicked_at,dismissed_at,snoozed_until,snooze_count";
+// v3a: as bases do "mostrar de novo para quem ja viu" (so "Uma vez" conta as impressoes de depois).
+const DELIVERY_COLUMNS =
+  "campaign_id,eligible,impressions,last_seen_at,clicked_at,dismissed_at,snoozed_until,snooze_count,impressions_before_reshow,snoozes_before_reshow";
 
 type LivePopupRow = {
   allow_snooze: boolean;
@@ -65,9 +67,12 @@ type DeliveryRow = {
   dismissed_at: string | null;
   eligible: boolean;
   impressions: number;
+  /** v3a; ausente num banco sem a 202610220001 (= 0, a regra da v2). */
+  impressions_before_reshow?: number | null;
   last_seen_at: string | null;
   snooze_count: number;
   snoozed_until: string | null;
+  snoozes_before_reshow?: number | null;
 };
 
 function timeOf(value: string | null | undefined) {
@@ -116,9 +121,11 @@ function toDeliveryState(row: DeliveryRow): PopupDeliveryState {
     dismissedAt: timeOf(row.dismissed_at),
     eligible: row.eligible,
     impressions: row.impressions,
+    impressionsBeforeReshow: row.impressions_before_reshow ?? 0,
     lastSeenAt: timeOf(row.last_seen_at),
     snoozeCount: row.snooze_count,
-    snoozedUntil: timeOf(row.snoozed_until)
+    snoozedUntil: timeOf(row.snoozed_until),
+    snoozesBeforeReshow: row.snoozes_before_reshow ?? 0
   };
 }
 

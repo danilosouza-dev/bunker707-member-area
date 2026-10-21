@@ -3,9 +3,16 @@
 import { Popover } from "@base-ui/react/popover";
 import { Bell, RotateCw } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
-import { useEscapeToClose, useNotificationsSummary } from "@/components/member/notifications/notifications-client";
-import { bellLabel, formatBadgeCount } from "@/components/member/notifications/notifications-model";
+import { useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
+import { prefetchInbox, useEscapeToClose, useNotificationsSummary } from "@/components/member/notifications/notifications-client";
+import {
+  bellLabel,
+  formatBadgeCount,
+  INBOX_PREFETCH_DWELL_MS,
+  intentPrefetchMinAge,
+  shouldPrefetchOnIntent,
+  type InboxIntentKind
+} from "@/components/member/notifications/notifications-model";
 import type { NotificationsPanel as NotificationsPanelComponent } from "@/components/member/notifications/notifications-panel";
 import { MemberButton } from "@/components/member/ui/member-button";
 import { MemberSkeletonBlock } from "@/components/member/ui/member-skeletons";
@@ -22,6 +29,11 @@ import { cn } from "@/lib/utils";
 //
 // O painel fica acima da IA Diretor aberta (z-180) e abaixo do pop-up da home (z-200), que espera o sino
 // fechar.
+//
+// v3a (docs/24 §7.3): a primeira pagina da lista comeca a ser buscada na intencao, junto com o codigo do
+// painel: mouse parado 120 ms no sino ou foco pelo Tab (:focus-visible) buscam so sem pagina guardada ou
+// com ela mais velha que 1 minuto; o dedo ou Enter/Espaco no sino fechado buscam na hora quando ela tem
+// mais de 5 s. Nunca com o painel aberto nem no segundo depois de fechar (o foco volta para o sino).
 
 const loadNotificationsPanel = () => import("@/components/member/notifications/notifications-panel");
 
@@ -82,6 +94,15 @@ function preloadPanel() {
   void loadNotificationsPanel().catch(() => undefined);
 }
 
+/** Foco que veio do teclado (Tab), nao do clique nem do foco devolvido ao fechar o painel. */
+function isFocusVisible(element: Element) {
+  try {
+    return element.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}
+
 export function MemberNotificationsMenu({
   accessPreviewMode,
   className,
@@ -106,28 +127,97 @@ export function MemberNotificationsMenu({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
+  const openRef = useRef(false);
+  /** Quando o painel fechou: foco e mouse logo depois nao sao intencao. */
+  const closedAtRef = useRef<number | null>(null);
+  const intentTimerRef = useRef<number | null>(null);
   const { unseen } = useNotificationsSummary({ refreshOnMount: refreshSummaryOnMount });
   const badge = formatBadgeCount(unseen);
+
+  function cancelIntent() {
+    if (intentTimerRef.current !== null) {
+      window.clearTimeout(intentTimerRef.current);
+      intentTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => cancelIntent, []);
+
+  function intends(kind: InboxIntentKind, focusVisible = false) {
+    return shouldPrefetchOnIntent({ closedAt: closedAtRef.current, focusVisible, kind, now: Date.now(), open: openRef.current });
+  }
+
+  /** Mouse parado ou foco pelo Tab: o codigo do painel ja, a lista depois de 120 ms parado. */
+  function startIntent(kind: "focus" | "hover", focusVisible = false) {
+    preloadPanel();
+    cancelIntent();
+
+    if (!intends(kind, focusVisible)) {
+      return;
+    }
+
+    intentTimerRef.current = window.setTimeout(() => {
+      intentTimerRef.current = null;
+
+      if (intends(kind, focusVisible)) {
+        prefetchInbox({ minAgeMs: intentPrefetchMinAge(kind) });
+      }
+    }, INBOX_PREFETCH_DWELL_MS);
+  }
+
+  /** Dedo, clique ou Enter/Espaco no sino fechado: vai abrir, a lista sai junto com o codigo. */
+  function pressIntent() {
+    if (!intends("press")) {
+      return;
+    }
+
+    cancelIntent();
+    preloadPanel();
+    prefetchInbox({ minAgeMs: intentPrefetchMinAge("press") });
+  }
+
+  function changeOpen(next: boolean) {
+    openRef.current = next;
+    cancelIntent();
+
+    if (!next) {
+      closedAtRef.current = Date.now();
+    }
+
+    setOpen(next);
+  }
 
   useEscapeToClose(
     open,
     () => {
-      setOpen(false);
+      changeOpen(false);
       triggerRef.current?.focus();
     },
     (target) => Boolean(popupRef.current?.contains(target) || triggerRef.current?.contains(target))
   );
 
   return (
-    <Popover.Root onOpenChange={setOpen} open={open}>
+    <Popover.Root onOpenChange={changeOpen} open={open}>
       <Popover.Trigger
         aria-label={bellLabel(unseen)}
         className={cn(
           "relative grid size-10 shrink-0 place-items-center rounded-full text-white outline-none transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white data-popup-open:bg-white/10 motion-reduce:transition-none",
           className
         )}
-        onFocus={preloadPanel}
-        onPointerEnter={preloadPanel}
+        onBlur={cancelIntent}
+        onFocus={(event) => startIntent("focus", isFocusVisible(event.currentTarget))}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            pressIntent();
+          }
+        }}
+        onPointerDown={(event) => {
+          if (event.button === 0) {
+            pressIntent();
+          }
+        }}
+        onPointerEnter={() => startIntent("hover")}
+        onPointerLeave={cancelIntent}
         ref={triggerRef}
       >
         <Bell aria-hidden="true" className="size-5" />
@@ -150,7 +240,7 @@ export function MemberNotificationsMenu({
           >
             <NotificationsPanel
               accessPreviewMode={accessPreviewMode}
-              onClose={() => setOpen(false)}
+              onClose={() => changeOpen(false)}
               onNavigate={onNavigate}
               schoolIconUrl={schoolIconUrl}
               schoolLogoUrl={schoolLogoUrl}

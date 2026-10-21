@@ -30,6 +30,7 @@ import type { CampaignStatus } from "./campaign-model";
 import { assertNoDbError, chunksOf, communicationsDb, type CommunicationsDb } from "./db";
 import { saoPauloDayBounds, type FlowEndedReason, type FlowEntryMode, type FlowNode, type FlowOrigin, type FlowStatus } from "./flow-model";
 import type { FlowDraft, FlowNodeDraft, FlowNoticeContent } from "./flow-schemas";
+import { parsePoll } from "./interactions-model";
 import {
   definitionOf,
   fetchFlow,
@@ -44,7 +45,15 @@ import {
   type FlowStatsRow
 } from "./flow-store";
 import { loadAudienceNames } from "./queries";
-import { fetchCampaignEngagement, fetchCampaignsByIds, fetchCampaignStats, rowToDraft, type CampaignRow } from "./store";
+import {
+  fetchCampaignEngagement,
+  fetchCampaignsByIds,
+  fetchCampaignStats,
+  fetchMessageInteractions,
+  rowToDraft,
+  type CampaignRow,
+  type MessageInteractions
+} from "./store";
 
 const NO_PERMISSIONS: FlowPermissions = { canPublish: false, canPublishLarge: false, canWrite: false };
 /** Fluxos lidos para a lista e o topo (os de aviso tambem; os excluidos nunca). */
@@ -89,6 +98,8 @@ export type FlowReport = {
   nodes: Record<string, FlowStepStats>;
   /** Tarefas vencidas ha mais de 10 minutos (a linha de atraso). */
   overdue: number;
+  /** v3a: reacoes, votos e excluidas do sino de cada passo (vivos e removidos), pelo id; sem linha de aluno, sem chave. */
+  interactions: Record<string, MessageInteractions>;
   removed: FlowRemovedStep[];
   /** O funil do aviso de origem (fluxo de aviso). */
   sourceFunnel: { clicked: number; opened: number; recipients: number; seen: number } | null;
@@ -142,21 +153,41 @@ async function fetchAllFlows(db: CommunicationsDb): Promise<FlowRow[]> {
   return (data ?? []) as FlowRow[];
 }
 
-const SOURCE_COLUMNS = "id,title,status,body,cta_href,audio_url,response_mode,validity_minutes,valid_until,recipients_count,sent_at,deleted_at";
+const SOURCE_COLUMNS =
+  "id,title,status,body,cta_href,audio_url,response_mode,validity_minutes,valid_until,recipients_count,sent_at,deleted_at,allow_reactions,poll";
 
 type SourceRow = Pick<
   CampaignRow,
-  "audio_url" | "body" | "cta_href" | "deleted_at" | "id" | "recipients_count" | "response_mode" | "sent_at" | "status" | "title" | "valid_until" | "validity_minutes"
+  | "allow_reactions"
+  | "audio_url"
+  | "body"
+  | "cta_href"
+  | "deleted_at"
+  | "id"
+  | "poll"
+  | "recipients_count"
+  | "response_mode"
+  | "sent_at"
+  | "status"
+  | "title"
+  | "valid_until"
+  | "validity_minutes"
 >;
 
 function sourceOfRow(row: SourceRow): FlowSource {
+  const poll = parsePoll(row.poll);
+
   return {
+    // v3a: reacoes e enquete da principal (as regras "reagiu" e "votou na enquete" da entrada).
+    allowsReactions: row.allow_reactions === true,
     body: row.body ?? "",
     ctaHref: row.cta_href,
     deleted: Boolean(row.deleted_at),
     hasAudio: Boolean(row.audio_url),
+    hasPoll: poll !== null,
     hasResponse: row.response_mode === "accept_decline",
     id: row.id,
+    pollOptions: poll?.options ?? [],
     recipients: row.recipients_count,
     sentAt: row.sent_at,
     status: row.status,
@@ -388,7 +419,10 @@ export function flowDraftOf(flow: FlowRow, rows: readonly FlowNodeRow[], campaig
   return { draft, versions };
 }
 
-/** Numeros por passo (7.8, com a pagina do botao de cada notificacao) e do fluxo (7.7, com o dia de hoje). */
+/**
+ * Numeros por passo (7.8, com a pagina do destino de cada notificacao), do fluxo (7.7, com o dia de hoje) e,
+ * v3a, as reacoes e os votos de cada passo (5.4 da 202610220001, por fluxo).
+ */
 async function getFlowReport(
   db: CommunicationsDb,
   input: { campaigns: ReadonlyMap<string, CampaignRow>; flow: FlowRow; now: number; rows: readonly FlowNodeRow[]; source: FlowSource | null }
@@ -403,11 +437,12 @@ async function getFlowReport(
 
   const today = new Date(saoPauloDayBounds(input.now).start);
   const sourceId = input.source?.id ?? null;
-  const [nodeStats, stats, sourceStats, sourceEngagement] = await Promise.all([
+  const [nodeStats, stats, sourceStats, sourceEngagement, interactions] = await Promise.all([
     fetchFlowNodeStats(db, input.flow.id, ctaKeys),
     fetchFlowStats(db, [input.flow.id], today),
     sourceId ? fetchCampaignStats(db, [sourceId]) : Promise.resolve(null),
-    sourceId ? fetchCampaignEngagement(db, [sourceId]) : Promise.resolve(null)
+    sourceId ? fetchCampaignEngagement(db, [sourceId]) : Promise.resolve(null),
+    fetchMessageInteractions(db, { flowId: input.flow.id })
   ]);
   const row = stats.get(input.flow.id);
   const titleOf = (nodeRow: FlowNodeRow) => (nodeRow.campaign_id ? input.campaigns.get(nodeRow.campaign_id)?.title?.trim() : null) || "Condição";
@@ -415,6 +450,7 @@ async function getFlowReport(
 
   return {
     enteredToday: row?.enteredSince ?? 0,
+    interactions: Object.fromEntries(interactions),
     nodes: Object.fromEntries(nodeStats),
     overdue: row?.overdue ?? 0,
     removed: input.rows

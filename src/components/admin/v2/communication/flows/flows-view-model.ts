@@ -28,10 +28,20 @@ import {
   type FlowStatus
 } from "../../../../../server/communications/flow-model";
 import { flowTreeOfDraft, type FlowDraft, type FlowNodeDraft, type FlowNoticeContent } from "../../../../../server/communications/flow-schemas";
+import type { PollDefinition, PollOption } from "../../../../../server/communications/interactions-model";
 import { describeValidity, VALIDITY_LIMITS, type FlowValidity } from "../../../../../server/communications/message-meta";
 import { pageKeyOfHref } from "../../../../../server/member-area/page-visit-model";
 import { shouldClampNotificationBody } from "../../../../member/notifications/notifications-model";
-import { audienceErrorsFrom, formatInteger, formatPercent, formatStudentCount, ratio, type AudienceFlowContext, type AudienceFlowMessageChoice } from "../notices-view-model";
+import {
+  audienceErrorsFrom,
+  formatInteger,
+  formatPercent,
+  formatStudentCount,
+  pollReportRows,
+  ratio,
+  type AudienceFlowContext,
+  type AudienceFlowMessageChoice
+} from "../notices-view-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Enderecos e filtros
@@ -758,8 +768,8 @@ export type NewStepKind = "condition" | "message";
  * "Logo depois" depois de Quem entra ou de uma condicao. Num rascunho, inserir no meio poe o que vinha
  * depois embaixo do passo novo (na condicao, no caminho Sim). Num fluxo no ar a ordem nao muda: o passo
  * novo entra ao lado, como outro caminho. A condicao nova comeca conferindo se abriu a notificacao logo
- * acima; se ela nao tem nada para abrir (texto curto, sem audio, botao ou resposta: V7), se viu; sem
- * notificacao acima, sem regra. Passou de 20 passos: null.
+ * acima; se ela nao tem nada para abrir (texto curto, sem audio, destino, resposta ou enquete: V7), se
+ * viu; sem notificacao acima, sem regra. Passou de 20 passos: null.
  */
 export function insertFlowStep(
   draft: FlowDraft,
@@ -896,11 +906,17 @@ export function withdrawStepCopy(title: string, received: number): FlowConfirmCo
 
 /** O aviso de origem (fluxo de aviso): a "notificação principal" na entrada. */
 export type FlowSourceNotice = {
+  /** v3a: aceita reacoes (ausente = nao). */
+  allowsReactions?: boolean;
   body: string;
   ctaHref: string | null;
   hasAudio: boolean;
+  /** v3a: tem enquete (ausente = nao). */
+  hasPoll?: boolean;
   hasResponse: boolean;
   id: string;
+  /** v3a: as opcoes da enquete (ausente = nenhuma). */
+  pollOptions?: readonly PollOption[];
   title: string;
   validityMinutes: number | null;
   validUntil: string | null;
@@ -921,46 +937,73 @@ export function flowTitleOf(draft: Pick<FlowDraft, "messages" | "nodes" | "origi
   return (nodeId: string) => (draft.origin === "notice" && entry?.id === nodeId ? source?.title.trim() || "a notificação principal" : titleOfContent(draft.messages[nodeId]));
 }
 
-/** Nomes da frase das regras com os titulos dos passos ("node:<id>"). */
-export function flowAudienceNames(names: AudienceNames, draft: Pick<FlowDraft, "messages" | "nodes" | "origin">, source: Pick<FlowSourceNotice, "title"> | null = null): AudienceNames {
+function pollLabelsOf(options: readonly PollOption[] | undefined) {
+  return options && options.length > 0 ? Object.fromEntries(options.map((option) => [option.id, option.label])) : null;
+}
+
+/**
+ * Nomes da frase das regras com os titulos dos passos ("node:<id>"); v3a: tambem as opcoes das enquetes dos
+ * passos e da principal ("votaram em “Sábado” na enquete …").
+ */
+export function flowAudienceNames(
+  names: AudienceNames,
+  draft: Pick<FlowDraft, "messages" | "nodes" | "origin">,
+  source: Pick<FlowSourceNotice, "pollOptions" | "title"> | null = null
+): AudienceNames {
   const titleOf = flowTitleOf(draft, source);
   const messages: Record<string, string> = { ...names.messages };
+  const pollOptions: Record<string, Record<string, string>> = { ...names.pollOptions };
 
   for (const node of draft.nodes) {
     if (node.kind === "message" || (node.kind === "entry" && draft.origin === "notice")) {
-      messages[messageRefKey({ kind: "node", nodeId: node.id })] = titleOf(node.id);
+      const key = messageRefKey({ kind: "node", nodeId: node.id });
+      const labels = pollLabelsOf(node.kind === "message" ? draft.messages[node.id]?.poll?.options : source?.pollOptions);
+      messages[key] = titleOf(node.id);
+
+      if (labels) {
+        pollOptions[key] = labels;
+      }
     }
   }
 
-  return { ...names, messages };
+  return Object.keys(pollOptions).length > 0 ? { ...names, messages, pollOptions } : { ...names, messages };
 }
 
 function choiceOfContent(nodeId: string, content: FlowNoticeContent): AudienceFlowMessageChoice {
   const hasAudio = Boolean(content.audio);
   const hasCta = Boolean(content.cta);
+  const hasPoll = Boolean(content.poll);
   const hasResponse = Boolean(content.response);
 
   return {
-    canOpen: hasAudio || hasCta || hasResponse || shouldClampNotificationBody(content.body ?? ""),
+    allowsReactions: content.reactions === true,
+    // Votar conta como abrir; reacao sozinha nao faz haver o que abrir (docs/24 T15).
+    canOpen: hasAudio || hasCta || hasResponse || hasPoll || shouldClampNotificationBody(content.body ?? ""),
     ctaPageKey: pageKeyOfHref(content.cta?.href ?? null),
     hasAudio,
     hasCta,
+    hasPoll,
     hasResponse,
     nodeId,
+    pollOptions: content.poll?.options ?? [],
     title: titleOfContent(content)
   };
 }
 
 function choiceOfSource(nodeId: string, source: FlowSourceNotice): AudienceFlowMessageChoice {
   const hasCta = Boolean(source.ctaHref);
+  const hasPoll = source.hasPoll === true;
 
   return {
-    canOpen: source.hasAudio || hasCta || source.hasResponse || shouldClampNotificationBody(source.body),
+    allowsReactions: source.allowsReactions === true,
+    canOpen: source.hasAudio || hasCta || source.hasResponse || hasPoll || shouldClampNotificationBody(source.body),
     ctaPageKey: pageKeyOfHref(source.ctaHref),
     hasAudio: source.hasAudio,
     hasCta,
+    hasPoll,
     hasResponse: source.hasResponse,
     nodeId,
+    pollOptions: source.pollOptions ?? [],
     title: source.title.trim() || "Sem título"
   };
 }
@@ -1175,11 +1218,14 @@ export function applyGoalAccessFix(entry: AudienceDefinition, productId: string)
 export function sourceMetaOf(source: FlowSourceNotice | null): FlowMessageMeta | null {
   return source
     ? {
+        allowsReactions: source.allowsReactions === true,
         campaignId: source.id,
         ctaHref: source.ctaHref,
         hasAudio: source.hasAudio,
         hasCta: Boolean(source.ctaHref),
+        hasPoll: source.hasPoll === true,
         hasResponse: source.hasResponse,
+        pollOptionIds: (source.pollOptions ?? []).map((option) => option.id),
         title: source.title,
         validUntil: source.validUntil,
         validityMinutes: source.validityMinutes
@@ -1413,13 +1459,23 @@ function share(part: number | null, whole: number | null) {
   return part === null || whole === null ? null : formatPercent(ratio(part, whole));
 }
 
+/** v3a: reagiram e votaram de um passo (communication_message_interactions do fluxo). */
+export type FlowStepInteractions = { reacted: number; voters: number };
+
 /**
  * Funil de uma notificacao do fluxo (docs/23 §2.8), cada passo com a parte do anterior: Chegaram ·
- * Esperando · Receberam · Viram no sino · Abriram · áudio · Clicaram · Visitaram · respostas · Voltaram a
- * estudar em 7 dias. Sem numeros (nunca ativado), "—".
+ * Esperando · Receberam · Viram no sino · Abriram · áudio · Foram para o destino · Visitaram · respostas ·
+ * Votaram · Reagiram (v3a, parte de quem abriu) · Voltaram a estudar em 7 dias. Sem numeros (nunca
+ * ativado), "—".
  */
-export function messageReportLines(stats: FlowStepStats | null, meta: { ctaTracked: boolean; hasAudio: boolean; hasCta: boolean; hasResponse: boolean }): ReportLine[] {
+export function messageReportLines(
+  stats: FlowStepStats | null,
+  meta: { allowsReactions?: boolean; ctaTracked: boolean; hasAudio: boolean; hasCta: boolean; hasPoll?: boolean; hasResponse: boolean },
+  interactions: FlowStepInteractions | null = null
+): ReportLine[] {
   const value = (key: keyof FlowStepStats) => (stats ? stats[key] : null);
+  // Sem numeros do passo (nunca ativado), "—" tambem; com numeros e sem interacao, 0.
+  const interaction = (key: keyof FlowStepInteractions) => (stats ? (interactions?.[key] ?? 0) : null);
   const lines: ReportLine[] = [
     { id: "reached", label: "Chegaram", share: null, value: value("reached") },
     { id: "waiting", label: "Esperando", share: null, value: value("waiting") },
@@ -1436,11 +1492,11 @@ export function messageReportLines(stats: FlowStepStats | null, meta: { ctaTrack
   }
 
   if (meta.hasCta) {
-    lines.push({ id: "clicked", label: "Clicaram no botão", share: share(value("clicked"), value("opened")), value: value("clicked") });
+    lines.push({ id: "clicked", label: "Foram para o destino", share: share(value("clicked"), value("opened")), value: value("clicked") });
   }
 
   if (meta.hasCta && meta.ctaTracked) {
-    lines.push({ id: "visited_cta", label: "Visitaram a página do botão", share: share(value("visited_cta"), value("clicked")), value: value("visited_cta") });
+    lines.push({ id: "visited_cta", label: "Visitaram a página do destino", share: share(value("visited_cta"), value("clicked")), value: value("visited_cta") });
   }
 
   if (meta.hasResponse) {
@@ -1450,9 +1506,64 @@ export function messageReportLines(stats: FlowStepStats | null, meta: { ctaTrack
     );
   }
 
+  if (meta.hasPoll) {
+    lines.push({ id: "voted", label: "Votaram", share: share(interaction("voters"), value("opened")), value: interaction("voters") });
+  }
+
+  if (meta.allowsReactions) {
+    lines.push({ id: "reacted", label: "Reagiram", share: share(interaction("reacted"), value("opened")), value: interaction("reacted") });
+  }
+
   lines.push({ id: "studied_7d", label: "Voltaram a estudar em 7 dias", share: share(value("studied_7d"), value("seen")), value: value("studied_7d") });
 
   return lines;
+}
+
+/** v3a: reacoes e votos de um passo como o relatorio do fluxo recebe (FlowReport.interactions, por id do passo). */
+export type FlowStepInteractionCounts = { pollOptions: Record<string, number>; pollVoters: number; reacted: number };
+
+/**
+ * v3a: uma linha por opcao da enquete do passo (votos e a parte de quem votou), pelo id da opcao entre as
+ * versoes do passo; id com voto que nao esta na versao atual = "Opção removida".
+ */
+export function stepPollLines(poll: Pick<PollDefinition, "options"> | null | undefined, interactions: FlowStepInteractionCounts | null | undefined): ReportLine[] {
+  if (!poll) {
+    return [];
+  }
+
+  return pollReportRows(poll, { options: interactions?.pollOptions ?? {}, voters: interactions?.pollVoters ?? 0 }).map((row) => ({
+    id: `poll:${row.id}`,
+    label: row.removed ? row.label : `“${row.label}”`,
+    share: `${row.percent}%`,
+    value: row.votes
+  }));
+}
+
+/**
+ * As linhas de uma notificacao do fluxo pelo conteudo atual (o relatorio e o painel do passo): o funil de
+ * messageReportLines e, com enquete, as opcoes logo depois de "Votaram".
+ */
+export function messageStepLines(
+  stats: FlowStepStats | null,
+  content: Pick<FlowNoticeContent, "audio" | "cta" | "poll" | "reactions" | "response"> | null | undefined,
+  interactions: FlowStepInteractionCounts | null | undefined = null
+): ReportLine[] {
+  const lines = messageReportLines(
+    stats,
+    {
+      allowsReactions: content?.reactions === true,
+      ctaTracked: Boolean(pageKeyOfHref(content?.cta?.href ?? null)),
+      hasAudio: Boolean(content?.audio),
+      hasCta: Boolean(content?.cta),
+      hasPoll: Boolean(content?.poll),
+      hasResponse: Boolean(content?.response)
+    },
+    interactions ? { reacted: interactions.reacted, voters: interactions.pollVoters } : null
+  );
+  const poll = stepPollLines(content?.poll, interactions);
+  const at = lines.findIndex((line) => line.id === "voted");
+
+  return poll.length === 0 || at < 0 ? lines : [...lines.slice(0, at + 1), ...poll, ...lines.slice(at + 1)];
 }
 
 /**

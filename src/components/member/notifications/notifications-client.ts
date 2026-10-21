@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useEffectEvent, useSyncExternalStore } from "react";
+import type { ReactionId } from "@/server/communications/interactions-model";
 import type {
   NotificationAudioProgress,
+  NotificationItem,
+  NotificationPoll,
   NotificationResponseValue,
   NotificationsFilter,
   NotificationsPage,
   NotificationsSummary
 } from "@/server/communications/notification-model";
 import type { PopupEvent } from "@/server/communications/campaign-model";
-import { isSummaryFresh } from "./notifications-model";
+import { INBOX_KEEP_MS, INBOX_REUSE_MS, isSummaryFresh } from "./notifications-model";
 
 // Conversa do sino e do pop-up com /api/notifications e /api/popups (docs/22 §4.4), mais o numero do
 // sino guardado na memoria do navegador. O topo (AppShell) remonta a cada pagina; o numero fica aqui,
@@ -21,6 +24,9 @@ import { isSummaryFresh } from "./notifications-model";
 // Envios que podem sair junto com a pagina (clique num link, eventos do pop-up, o ouvido do audio com a
 // aba escondida ou o painel fechando) vao por navigator.sendBeacon, com fetch keepalive de reserva. O
 // resto do audio (comecou, cresceu tocando, pausa e fim) vai por fetch: a resposta atualiza a lista.
+//
+// v3a (docs/24 §5.1 e §7.3): reagir, votar e excluir do sino; a primeira pagina guardada entre aberturas
+// (busca por intencao, no maximo um pedido em andamento) e o Esc que fica dentro do seletor de reacoes.
 
 export class NotificationsRequestError extends Error {
   status: number;
@@ -85,7 +91,7 @@ export function sendBeaconPost(url: string, body?: string) {
   }).catch(() => undefined);
 }
 
-function notificationPath(id: string, action: "audio" | "click" | "response") {
+function notificationPath(id: string, action: "audio" | "click" | "hide" | "poll" | "reaction" | "response") {
   return `/api/notifications/${encodeURIComponent(id)}/${action}`;
 }
 
@@ -136,11 +142,35 @@ export function postClick(id: string) {
   sendBeaconPost(notificationPath(id, "click"));
 }
 
+/** Aceitar/Recusar, e a troca depois (v3a): `changed` diz se a resposta que valia mudou. */
 export function postResponse(id: string, response: NotificationResponseValue) {
-  return postJson<{ response: NotificationResponseValue }>(
+  return postJson<{ changed?: boolean; response: NotificationResponseValue }>(
     notificationPath(id, "response"),
     { response },
     "Não foi possível enviar sua resposta. Tente de novo."
+  );
+}
+
+/** Reacao do aluno (null = tirar). Devolve a que ficou valendo. */
+export function postReaction(id: string, reaction: ReactionId | null) {
+  return postJson<{ reaction: ReactionId | null }>(notificationPath(id, "reaction"), { reaction }, "Não foi possível reagir. Tente de novo.");
+}
+
+/** Voto na enquete ([] = tirar o voto). Devolve a enquete como o aluno pode ver agora. */
+export function postPollVote(id: string, optionIds: readonly string[]) {
+  return postJson<{ poll: NotificationPoll }>(
+    notificationPath(id, "poll"),
+    { optionIds },
+    "Não foi possível registrar seu voto. Tente de novo."
+  );
+}
+
+/** Excluir do sino (so para este aluno) ou desfazer. Devolve os contadores. */
+export function postHide(id: string, hidden: boolean) {
+  return postJson<{ unread: number; unseen: number }>(
+    notificationPath(id, "hide"),
+    { hidden },
+    hidden ? "Não foi possível excluir. Tente de novo." : "Não foi possível desfazer. Tente de novo."
   );
 }
 
@@ -284,17 +314,177 @@ export function useNotificationsSummary(options: { refreshOnMount?: boolean } = 
   return state;
 }
 
+// --- Primeira pagina guardada (v3a, docs/24 §7.3) --------------------------------------------------
+//
+// Memoria do modulo, fora do React (como o numero do sino): a primeira pagina do filtro "Todas" fica
+// guardada por ate 10 min entre aberturas, com o que o aluno mexeu nela. A busca comeca na intencao
+// (mouse parado ou foco pelo Tab no sino, dedo ou Enter no sino fechado), junto com o codigo do painel,
+// e o painel entra no pedido que ja saiu. Nada roda em intervalo; fechar o painel nao pede nada.
+
+export type KeptInbox = {
+  asOf: string;
+  /** Quando a pagina veio do servidor (mudancas locais nao mexem nisso). */
+  fetchedAt: number;
+  items: NotificationItem[];
+  nextCursor: string | null;
+  unread: number;
+  unseen: number;
+};
+
+let keptInbox: KeptInbox | null = null;
+let inboxRequest: Promise<KeptInbox> | null = null;
+
+/** Um pedido da primeira pagina por vez: quem chega depois entra no que esta em andamento. */
+function requestInboxFirstPage(): Promise<KeptInbox> {
+  if (inboxRequest) {
+    return inboxRequest;
+  }
+
+  const promise: Promise<KeptInbox> = fetchNotificationsPage({ filter: "all" })
+    .then((page) => {
+      const kept: KeptInbox = {
+        asOf: page.asOf,
+        fetchedAt: Date.now(),
+        items: page.items,
+        nextCursor: page.nextCursor,
+        unread: page.unread,
+        unseen: page.unseen
+      };
+
+      keptInbox = kept;
+      // A pagina buscada antes do clique tambem acerta o numero do sino (nunca marca nada como visto).
+      setSummaryUnseen(page.unseen);
+
+      return kept;
+    })
+    .catch((error: unknown) => {
+      if (error instanceof NotificationsRequestError && error.status === 401) {
+        forgetInbox();
+      }
+
+      throw error;
+    })
+    .finally(() => {
+      if (inboxRequest === promise) {
+        inboxRequest = null;
+      }
+    });
+
+  inboxRequest = promise;
+
+  return promise;
+}
+
+/**
+ * Busca por intencao: nada quando ja ha um pedido em andamento ou a pagina guardada e mais nova que
+ * `minAgeMs` (5 s ao apertar o sino, 1 minuto ao passar o mouse ou o foco). Nunca lanca.
+ */
+export function prefetchInbox(input: { minAgeMs: number; now?: number }): void {
+  const now = input.now ?? Date.now();
+
+  if (inboxRequest) {
+    return;
+  }
+
+  if (keptInbox) {
+    const age = now - keptInbox.fetchedAt;
+
+    if (age >= 0 && age < input.minAgeMs) {
+      return;
+    }
+  }
+
+  void requestInboxFirstPage().catch(() => undefined);
+}
+
+/** A pagina guardada, se ainda vale (ate 10 min); `reuse` = mais nova que 5 s (abre sem pedir de novo). */
+export function takeKeptInbox(now: number = Date.now()): { kept: KeptInbox; reuse: boolean } | null {
+  if (!keptInbox) {
+    return null;
+  }
+
+  const age = now - keptInbox.fetchedAt;
+
+  if (age > INBOX_KEEP_MS) {
+    keptInbox = null;
+    return null;
+  }
+
+  return { kept: keptInbox, reuse: age >= 0 && age < INBOX_REUSE_MS };
+}
+
+/**
+ * Primeira pagina do filtro "Todas" para o painel: entra no pedido que ja saiu (a busca por intencao)
+ * ou faz um. O `signal` so solta este painel da espera; o pedido segue e a pagina fica guardada.
+ */
+export function loadInboxFirstPage(signal?: AbortSignal): Promise<KeptInbox> {
+  const request = requestInboxFirstPage();
+
+  if (!signal) {
+    return request;
+  }
+
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+
+  return new Promise<KeptInbox>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+
+    signal.addEventListener("abort", onAbort, { once: true });
+    request.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+/**
+ * Guarda o que o painel mostra (filtro "Todas"), a cada mudanca local e ao fechar: as linhas excluidas
+ * saem (reabrir nunca mostra uma notificacao excluida) e o `fetchedAt` e o da pagina, nao o da mudanca.
+ * Uma pagina mais nova que ja esta guardada (chegou depois) nao e trocada pela mais velha.
+ */
+export function keepInbox(next: KeptInbox & { hiddenIds?: Iterable<string> }): void {
+  if (keptInbox && keptInbox.fetchedAt > next.fetchedAt) {
+    return;
+  }
+
+  const hidden = new Set(next.hiddenIds ?? []);
+
+  keptInbox = {
+    asOf: next.asOf,
+    fetchedAt: next.fetchedAt,
+    items: hidden.size > 0 ? next.items.filter((item) => !hidden.has(item.id)) : next.items,
+    nextCursor: next.nextCursor,
+    unread: next.unread,
+    unseen: next.unseen
+  };
+}
+
+/** Sessao encerrada (401): nada guardado vale. */
+export function forgetInbox(): void {
+  keptInbox = null;
+}
+
 // --- Esc que nao vaza ----------------------------------------------------------------------------
+
+/**
+ * Esc com escopo proprio (v3a): dentro de `[data-escape-scope="local"]` (o seletor de reacoes) o Esc e
+ * do controle, que fecha so ele no proprio onKeyDown; o painel nao fecha.
+ */
+export function isInLocalEscapeScope(target: unknown): boolean {
+  const element = target as { closest?: (selector: string) => unknown } | null;
+
+  return typeof element?.closest === "function" && Boolean(element.closest('[data-escape-scope="local"]'));
+}
 
 /**
  * Esc fecha so o painel ou o pop-up aberto. A IA Diretor escuta `keydown` no document e fecha com
  * qualquer Esc; o React tambem escuta no document (raiz do App Router), entao stopPropagation num
  * onKeyDown nao a impede. Por isso o Esc e interceptado na captura da window, antes de tudo, quando o
- * foco esta dentro de `isInside` (ou em lugar nenhum).
+ * foco esta dentro de `isInside` (ou em lugar nenhum). Dentro de um escopo local (isInLocalEscapeScope)
+ * passa reto: sem preventDefault nem stopPropagation, o controle trata.
  */
 export function useEscapeToClose(active: boolean, onEscape: () => void, isInside: (target: Node) => boolean) {
   const handleEscape = useEffectEvent((event: KeyboardEvent) => {
-    if (event.key !== "Escape" || event.isComposing || event.defaultPrevented) {
+    if (event.key !== "Escape" || event.isComposing || event.defaultPrevented || isInLocalEscapeScope(event.target)) {
       return;
     }
 

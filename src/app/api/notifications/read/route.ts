@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireApiUser } from "@/server/auth/guards";
+import { requireApiSessionUser } from "@/server/auth/guards";
 import { markAllSeen, markRead, readNotificationCounts } from "@/server/communications/inbox";
 import { parseNotificationsAsOf } from "@/server/communications/notification-model";
 import { isUuid, noStore, recordCommunicationEvents } from "@/server/communications/route-support";
@@ -12,7 +12,7 @@ import { jsonRouteError } from "@/server/http/route-errors";
 // que veio com a lista): so mexem no que ja aparecia naquela hora. asOf invalido, no futuro ou de mais
 // de 90 dias e ignorado (tudo o que aparece agora). E `shown` (ate 50 ids): avisos que o painel mostrou e
 // chegaram ha menos de 15 s, para as linhas de fluxo nessa folga contarem tambem (docs/23). Linha que
-// ja saiu do sino (expires_at) nunca muda.
+// ja saiu do sino (expires_at) nunca muda. Sessao pelas claims do JWT (v3a, docs/24).
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,7 +22,7 @@ const MAX_IDS = 50;
 type ReadPayload = { all?: unknown; asOf?: unknown; ids?: unknown; seen?: unknown; shown?: unknown };
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {
     return noStore(auth.response!);

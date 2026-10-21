@@ -445,7 +445,8 @@ test("editor: salvar sem mudanca nao grava; com mudanca, o toast conta o que foi
   assert.equal(model.savedNoticeToast("inbox", null), "Rascunho salvo.", "aviso novo");
   assert.equal(model.savedNoticeToast("inbox", "scheduled"), "Rascunho salvo. O envio agendado foi cancelado: agende de novo.");
   assert.equal(model.savedNoticeToast("popup", "pending_approval"), "Rascunho salvo. O pedido de aprovação foi cancelado.");
-  assert.equal(model.savedNoticeToast("popup", "active"), "Pop-up atualizado. Quem já fechou não vê de novo.");
+  // v3a (docs/24 §2.4): o toast diz o que acontece com quem ja viu pela regra salva ("Uma vez" por padrao).
+  assert.equal(model.savedNoticeToast("popup", "active"), "Pop-up atualizado. Quem já viu não vê de novo.");
   assert.equal(model.savedNoticeToast("popup", "paused"), "Pop-up salvo. Ele continua pausado.");
   assert.equal(model.testSentToast(false, "scheduled"), "Enviamos a notificação para o seu sino.", "teste sem mudanca nao grava nada");
   assert.equal(model.testSentToast(true, "scheduled"), "Enviamos a notificação para o seu sino. O envio agendado foi cancelado: agende de novo.");

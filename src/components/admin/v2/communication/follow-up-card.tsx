@@ -30,6 +30,7 @@ import {
   followUpSummary,
   followUpTitle,
   followUpValidityLine,
+  quickChoiceHints,
   quickChoiceNeedsProduct,
   quickChoicesFor,
   stableJson,
@@ -387,12 +388,14 @@ export function FollowUpCard({
               const copy = QUICK_CHOICE_COPY[choice];
               const checked = item.choice === choice;
               const hintId = `${base}-escolha-${choice}-dica`;
+              // v3a: a dica e, nas "não …", a linha de quem excluiu do sino.
+              const hints = quickChoiceHints(choice);
 
               return (
                 <div className="flex min-w-0 flex-col" key={choice}>
                   <label className={cn("flex min-h-11 min-w-0 cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-sm leading-5", checked ? "bg-[var(--surface-2)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--hover-overlay)]", adminTransition)}>
                     <Radio.Root
-                      aria-describedby={checked && copy.hint ? hintId : undefined}
+                      aria-describedby={checked && hints.length > 0 ? hintId : undefined}
                       className="grid size-4 shrink-0 place-items-center rounded-full border border-[var(--border-stronger)] outline-none data-[checked]:border-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]"
                       value={choice}
                     >
@@ -400,10 +403,12 @@ export function FollowUpCard({
                     </Radio.Root>
                     <span className="min-w-0">{quickChoiceNeedsProduct(choice) ? `${copy.label} ${productName(checked ? item.productId : null)}` : copy.label}</span>
                   </label>
-                  {checked && copy.hint ? (
-                    <p className="pb-1 pl-9 text-xs leading-5 text-[var(--text-secondary)]" id={hintId}>
-                      {copy.hint}
-                    </p>
+                  {checked && hints.length > 0 ? (
+                    <div className="flex min-w-0 flex-col gap-1 pb-1 pl-9 text-xs leading-5 text-[var(--text-secondary)]" id={hintId}>
+                      {hints.map((hint) => (
+                        <p key={hint}>{hint}</p>
+                      ))}
+                    </div>
                   ) : null}
                   {checked && quickChoiceNeedsProduct(choice) ? (
                     <div className="flex min-w-0 flex-col gap-1.5 pt-1 pb-2 pl-9">

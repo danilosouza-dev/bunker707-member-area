@@ -304,10 +304,77 @@ test("condicao com os fatos da notificacao: quem abriu vai pelo Sim, quem nao ab
   assert.equal(stats.get(ids.sim).sent, 1);
 });
 
+test("v3a: condicao 'votou em “Sábado”' decide Sim/Nao pelos fatos do lote (7.9); 'não reagiu' pula quem reagiu", async () => {
+  const now = meioDia(7) + 30 * MIN;
+  const SABADO = "a1b2c3d4";
+  const DOMINGO = "e5f6a7b8";
+  const enquete = { closesAt: null, multiple: false, options: [{ id: SABADO, label: "Sábado" }, { id: DOMINGO, label: "Domingo" }], question: "Qual dia?", showResults: true };
+  const ids = { cond: randomUUID(), entrada: randomUUID(), nao: randomUUID(), primeira: randomUUID(), seguinte: randomUUID(), sim: randomUUID() };
+  // "não reagiu" como a escolha rapida grava: nao reagiu E nao excluiu do sino.
+  const naoReagiu = regras(fez("reacted", ids.primeira, true), fez("hidden", ids.primeira, true));
+  const saved = await gravar({
+    contents: {
+      [ids.primeira]: conteudo("Qual dia para a live?", { poll: enquete, reactions: true }),
+      [ids.sim]: conteudo("Sábado, então"),
+      [ids.nao]: conteudo("Fica para domingo"),
+      [ids.seguinte]: conteudo("Gostou da ideia?")
+    },
+    nodes: [
+      entrada(ids.entrada),
+      passo({ id: ids.primeira, parentId: ids.entrada }),
+      passo({ condition: regras({ ...fez("voted", ids.primeira), choice: SABADO }), id: ids.cond, kind: "condition", offsetMinutes: 1_440, parentId: ids.primeira }),
+      passo({ branch: "yes", id: ids.sim, parentId: ids.cond }),
+      passo({ branch: "no", id: ids.nao, parentId: ids.cond }),
+      passo({ filter: naoReagiu, id: ids.seguinte, offsetMinutes: 1_440, parentId: ids.primeira, position: 1 })
+    ],
+    now
+  });
+  await ativar(saved.flow, now);
+  await tick(now);
+
+  // A aluna vota Sábado e reage; o aluno vota Domingo (e nao reage).
+  const at = new Date(now + HORA).toISOString();
+  const [daAluna] = await linhas({ flow_node_id: ids.primeira, user_id: aluna.id });
+  const [doAluno] = await linhas({ flow_node_id: ids.primeira, user_id: aluno.id });
+  unwrap(
+    await db.from("notifications").update({ opened_at: at, poll_choice: [SABADO], poll_voted_at: at, reacted_at: at, reaction: "love", read_at: at, seen_at: at }).eq("id", daAluna.id),
+    "A aluna vota e reage"
+  );
+  unwrap(await db.from("notifications").update({ opened_at: at, poll_choice: [DOMINGO], poll_voted_at: at, read_at: at, seen_at: at }).eq("id", doAluno.id), "O aluno vota");
+
+  await tick(now + DIA);
+  await tick(now + DIA + MIN);
+  await tick(now + DIA + HORA + 5 * MIN); // a segunda do mesmo aluno no mesmo minuto espera o intervalo de 1 h
+
+  assert.equal((await tarefa(ids.cond, aluna.id)).result, "yes");
+  assert.equal((await tarefa(ids.cond, aluno.id)).result, "no");
+  assert.deepEqual(quem(await linhas({ flow_node_id: ids.sim })), [aluna.id]);
+  assert.deepEqual(quem(await linhas({ flow_node_id: ids.nao })), [aluno.id]);
+  assert.deepEqual(quem(await linhas({ flow_node_id: ids.seguinte })), [aluno.id], "quem reagiu nao recebe 'Gostou da ideia?'");
+  assert.equal((await tarefa(ids.seguinte, aluna.id)).result, "filtered");
+
+  // O relatorio do fluxo le as reacoes e os votos de cada passo (5.4 por fluxo).
+  const { getFlowDetail } = await import("../../src/server/communications/flow-queries.ts");
+  const detalhe = await getFlowDetail(saved.flow.id, { now: now + DIA + 2 * HORA });
+  assert.deepEqual(detalhe.report.interactions[ids.primeira], {
+    hidden: 0,
+    pollChanged: 0,
+    pollOptions: { [DOMINGO]: 1, [SABADO]: 1 },
+    pollVoters: 2,
+    reacted: 1,
+    reactions: { love: 1 },
+    responseChanged: 0
+  });
+  assert.equal(detalhe.report.interactions[ids.sim].reacted, 0, "passo com linha e sem interacao: zeros");
+  assert.equal(detalhe.report.interactions[ids.cond], undefined, "condicao nao tem linha no sino: sem chave");
+  assert.equal(detalhe.draft.messages[ids.primeira].poll.options.length, 2, "o conteudo do passo volta com a enquete");
+  assert.equal(detalhe.draft.messages[ids.primeira].reactions, true);
+});
+
 test("'esperar ate ser Sim' confere a cada 15 minutos e, no fim da espera, segue pelo Nao", async () => {
   const now = meioDia(8);
   const ids = { cond: randomUUID(), entrada: randomUUID(), nao: randomUUID(), primeira: randomUUID() };
-  // "clicou no botão" so vale para notificacao com botao (a arvore recusa a regra que ninguem satisfaz).
+  // "foi para o destino" so vale para notificacao com destino (a arvore recusa a regra que ninguem satisfaz).
   const comBotao = { cta: { href: "/minhas-compras", label: "Ver", target: "same_tab" } };
   const saved = await gravar({
     contents: { [ids.primeira]: conteudo("Primeira", comBotao), [ids.nao]: conteudo("Não clicou") },

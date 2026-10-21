@@ -637,7 +637,7 @@ test("frase da regra de notificacao: cada acao, no plural, com e sem 'não'", ()
     accepted: "aceitaram a notificação “Oferta especial!”",
     audio_completed: "ouviram até o fim o áudio da notificação “Oferta especial!”",
     audio_started: "começaram a ouvir o áudio da notificação “Oferta especial!”",
-    clicked: "clicaram no botão da notificação “Oferta especial!”",
+    clicked: "foram para o destino da notificação “Oferta especial!”",
     declined: "recusaram a notificação “Oferta especial!”",
     interacted: "interagiram com a notificação “Oferta especial!”",
     opened: "abriram a notificação “Oferta especial!”",
@@ -668,7 +668,7 @@ test("frase de pagina visitada e de acesso ganho: o marco, Comprar e as paginas 
   assert.equal(fraseV2(visitou({ kind: "content", productId: "a" }, true, depois)), "Alunos que não visitaram a página de Formação IA depois de receber a notificação “Boas-vindas!”");
   assert.equal(fraseV2(visitou({ kind: "checkout", productId: "a" })), "Alunos que clicaram em Comprar de Formação IA desde que entraram no fluxo");
   assert.equal(fraseV2(visitou({ kind: "checkout", productId: "a" }, true)), "Alunos que não clicaram em Comprar de Formação IA desde que entraram no fluxo");
-  assert.equal(fraseV2(visitou({ kind: "message_cta", nodeId: PASSO_BOTAO })), "Alunos que visitaram a página do botão da notificação “Veja a condição” desde que entraram no fluxo");
+  assert.equal(fraseV2(visitou({ kind: "message_cta", nodeId: PASSO_BOTAO })), "Alunos que visitaram a página para onde leva a notificação “Veja a condição” desde que entraram no fluxo");
 
   const fixas = {
     continue: "Continue assistindo",
@@ -738,17 +738,18 @@ test("construtor: regra nova de cada tipo v2 (a notificacao dada ja vem escolhid
   assert.deepEqual(builder.defaultAudienceRule("access_gained"), { negate: false, productIds: [], since: { kind: "entered" }, type: "access_gained" });
 });
 
-test("construtor: acoes oferecidas conforme a notificacao (audio, botao, resposta); a escolhida continua na lista", () => {
+test("construtor: acoes oferecidas conforme a notificacao (audio, destino, resposta); a escolhida continua na lista", () => {
   const simples = { hasAudio: false, hasCta: false, hasResponse: false };
 
-  assert.deepEqual(builder.messageActionsFor(simples), ["received", "seen", "opened", "interacted"]);
-  assert.deepEqual(builder.messageActionsFor({ ...simples, hasAudio: true }), ["received", "seen", "opened", "audio_started", "audio_completed", "interacted"]);
-  assert.deepEqual(builder.messageActionsFor({ ...simples, hasCta: true }), ["received", "seen", "opened", "clicked", "interacted"]);
-  assert.deepEqual(builder.messageActionsFor({ ...simples, hasResponse: true }), ["received", "seen", "opened", "accepted", "declined", "responded", "interacted"]);
-  assert.deepEqual(builder.messageActionsFor(simples, "clicked"), ["received", "seen", "opened", "clicked", "interacted"], "acao ja salva");
-  assert.deepEqual(builder.messageActionsFor(null), ["received", "seen", "opened", "interacted"]);
-  assert.deepEqual(builder.messageActionsFor({ ...simples, canOpen: false }), ["received", "seen"], "aviso curto so de texto: nada a abrir");
-  assert.deepEqual(builder.messageActionsFor({ ...simples, canOpen: false }, "opened"), ["received", "seen", "opened"]);
+  // v3a: "excluiu do sino" vale para toda notificacao (no fim, depois das da v2).
+  assert.deepEqual(builder.messageActionsFor(simples), ["received", "seen", "opened", "interacted", "hidden"]);
+  assert.deepEqual(builder.messageActionsFor({ ...simples, hasAudio: true }), ["received", "seen", "opened", "audio_started", "audio_completed", "interacted", "hidden"]);
+  assert.deepEqual(builder.messageActionsFor({ ...simples, hasCta: true }), ["received", "seen", "opened", "clicked", "interacted", "hidden"]);
+  assert.deepEqual(builder.messageActionsFor({ ...simples, hasResponse: true }), ["received", "seen", "opened", "accepted", "declined", "responded", "interacted", "hidden"]);
+  assert.deepEqual(builder.messageActionsFor(simples, "clicked"), ["received", "seen", "opened", "clicked", "interacted", "hidden"], "acao ja salva");
+  assert.deepEqual(builder.messageActionsFor(null), ["received", "seen", "opened", "interacted", "hidden"]);
+  assert.deepEqual(builder.messageActionsFor({ ...simples, canOpen: false }), ["received", "seen", "hidden"], "aviso curto so de texto: nada a abrir");
+  assert.deepEqual(builder.messageActionsFor({ ...simples, canOpen: false }, "opened"), ["received", "seen", "opened", "hidden"]);
   assert.equal(builder.MESSAGE_ACTION_LABELS.audio_completed, "ouviu o áudio até o fim");
   assert.equal(builder.MESSAGE_ACTION_LABELS.seen, "viu no sino");
 });
@@ -760,7 +761,20 @@ test("construtor: seletor de notificacao com titulo e dia do envio; no fluxo, os
   // 02:30 UTC de 21/10 = 23:30 de 20/10 em Sao Paulo.
   assert.equal(builder.noticeChoiceLabel(avisos[0]), "Oferta especial! · 20/10");
   assert.deepEqual(segmento, [
-    { canOpen: true, ctaPageKey: null, hasAudio: true, hasCta: false, hasResponse: false, key: chaveAviso, label: "Oferta especial! · 20/10", ref: { campaignId: AVISO, kind: "campaign" }, title: "Oferta especial!" }
+    {
+      allowsReactions: false,
+      canOpen: true,
+      ctaPageKey: null,
+      hasAudio: true,
+      hasCta: false,
+      hasPoll: false,
+      hasResponse: false,
+      key: chaveAviso,
+      label: "Oferta especial! · 20/10",
+      pollOptions: [],
+      ref: { campaignId: AVISO, kind: "campaign" },
+      title: "Oferta especial!"
+    }
   ]);
   assert.deepEqual(builder.audienceMessageOptions("segment", { flowContext: { messages: [{ ctaPageKey: null, hasAudio: false, hasCta: false, hasResponse: false, nodeId: PASSO, title: "x" }] } }), [], "no segmento nao ha passos");
 
@@ -798,7 +812,7 @@ test("construtor: trocar a pagina da visita mantem o produto e escolhe o primeir
   assert.deepEqual(builder.pageTargetOfChoice("message_cta", conteudo, opcoes), { kind: "message_cta", nodeId: PASSO_BOTAO });
   assert.deepEqual(builder.pageTargetOfChoice("content", { key: "home", kind: "fixed" }, opcoes), { kind: "content", productId: "" });
   assert.deepEqual(builder.PAGE_TARGET_CHOICES.map((choice) => choice.label), [
-    "a página do botão da notificação…",
+    "a página para onde a notificação leva…",
     "a página de um produto",
     "Comprar de um produto",
     "Início",
@@ -825,7 +839,7 @@ function memoryDb(tables, rpcs = {}) {
   const log = [];
 
   function query(source, rows) {
-    const state = { count: false, filters: [], ins: [], limit: Infinity, order: [], range: null };
+    const state = { columns: "", count: false, filters: [], ins: [], limit: Infinity, order: [], range: null };
     const run = () => {
       let result = rows.filter((row) => state.filters.every((keep) => keep(row)));
 
@@ -840,7 +854,7 @@ function memoryDb(tables, rpcs = {}) {
       }
 
       result = result.slice(0, Math.min(state.limit, 1000));
-      log.push({ ins: state.ins, source });
+      log.push({ columns: state.columns, ins: state.ins, source });
 
       return { count: state.count ? total : null, data: result, error: null };
     };
@@ -854,7 +868,7 @@ function memoryDb(tables, rpcs = {}) {
       maybeSingle: async () => ({ data: run().data[0] ?? null, error: null }),
       order: (column, options) => (state.order.push([column, options?.ascending !== false]), api),
       range: (from, to) => ((state.range = [from, to]), api),
-      select: (_columns, options) => ((state.count = options?.count === "exact"), api),
+      select: (columns, options) => ((state.columns = columns ?? ""), (state.count = options?.count === "exact"), api),
       then: (resolve, reject) => Promise.resolve(run()).then(resolve, reject)
     };
 
@@ -948,7 +962,10 @@ test("carregador: le so as linhas dos avisos pedidos (enviados, fora os testes),
     audioStartedAt: daysAgo(2),
     clickedAt: null,
     expiresAt: inDays(87),
+    hiddenAt: null,
     openedAt: daysAgo(2),
+    pollChoice: null,
+    reaction: null,
     response: null,
     seenAt: daysAgo(2),
     visibleAt: daysAgo(2)
@@ -1063,7 +1080,10 @@ test("linha do sino como fato: visibleAt = greatest(created_at, sent_at), ou o v
     audioStartedAt: null,
     clickedAt: null,
     expiresAt: inDays(1),
+    hiddenAt: null,
     openedAt: null,
+    pollChoice: null,
+    reaction: null,
     response: null,
     seenAt: daysAgo(1),
     visibleAt: daysAgo(3)
@@ -1080,4 +1100,274 @@ test("o que as regras pedem dos fatos: progresso, estudo, entrada, ritmo, turma 
     "o ranking vence a contagem"
   );
   assert.deepEqual(model.audienceFactNeeds([null, model.EVERYONE, todas({ items: [{ paces: ["inactive"], type: "pace" }], match: "any" })]), { comments: "none", students: true });
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * v3a (docs/24 §6): reagiu, votou na enquete e excluiu do sino
+ * ---------------------------------------------------------------------------------------------- */
+
+const OPCAO_SABADO = "a1b2c3d4";
+const OPCAO_DOMINGO = "e5f6a7b8";
+const comEscolha = (action, choice, negate = false, ref = { campaignId: AVISO, kind: "campaign" }) => ({ action, choice, negate, ref, type: "message" });
+
+test("v3a: reagiu com qualquer reacao ou com uma; votou em qualquer opcao ou numa; excluiu do sino", () => {
+  const ctx = lidas(chaveAviso);
+  const amou = recebeu({ openedAt: daysAgo(1), reaction: "love", seenAt: daysAgo(1) });
+  const votou = recebeu({ openedAt: daysAgo(1), pollChoice: [OPCAO_SABADO], seenAt: daysAgo(1) });
+  const excluiu = recebeu({ hiddenAt: daysAgo(1), seenAt: daysAgo(1) });
+  const nada = recebeu({ seenAt: daysAgo(1) });
+
+  assert.equal(avalia(todas(mensagem("reacted")), amou, ctx), true);
+  assert.equal(avalia(todas(comEscolha("reacted", "love")), amou, ctx), true);
+  assert.equal(avalia(todas(comEscolha("reacted", "like")), amou, ctx), false, "outra reacao");
+  assert.equal(avalia(todas(mensagem("reacted")), nada, ctx), false);
+  assert.equal(avalia(todas(mensagem("voted")), votou, ctx), true);
+  assert.equal(avalia(todas(comEscolha("voted", OPCAO_SABADO)), votou, ctx), true);
+  assert.equal(avalia(todas(comEscolha("voted", OPCAO_DOMINGO)), votou, ctx), false, "outra opcao");
+  assert.equal(avalia(todas(mensagem("voted")), recebeu({ pollChoice: [] }), ctx), false, "voto tirado = nao votou");
+  assert.equal(avalia(todas(comEscolha("voted", OPCAO_DOMINGO)), recebeu({ pollChoice: [OPCAO_SABADO, OPCAO_DOMINGO] }), ctx), true, "varias respostas");
+  assert.equal(avalia(todas(mensagem("hidden")), excluiu, ctx), true);
+  assert.equal(avalia(todas(mensagem("hidden")), nada, ctx), false);
+  assert.equal(avalia(todas(mensagem("hidden")), recebeu({ hiddenAt: null }), ctx), false, "Desfazer volta hidden_at para null");
+
+  // Fato antigo (sem os campos da v3a): nao reagiu, nao votou, nao excluiu.
+  for (const action of ["reacted", "voted", "hidden"]) {
+    assert.equal(avalia(todas(mensagem(action)), recebeu(), ctx), false, `${action} sem o campo`);
+    assert.equal(avalia(todas(mensagem(action, true)), recebeu(), ctx), true, `não ${action} sem o campo`);
+  }
+
+  // Reagir e votar tambem sao interagir (abrem a notificacao).
+  assert.equal(avalia(todas(mensagem("interacted")), recebeu({ reaction: "wow" }), ctx), true);
+  assert.equal(avalia(todas(mensagem("interacted")), recebeu({ pollChoice: [OPCAO_SABADO] }), ctx), true);
+  assert.equal(avalia(todas(mensagem("interacted")), excluiu, ctx), false, "excluir nao e interagir");
+});
+
+test("v3a: negada implica 'recebeu'; chave nao lida nunca combina", () => {
+  const ctx = lidas(chaveAviso);
+
+  for (const regra of [mensagem("reacted", true), comEscolha("reacted", "love", true), mensagem("voted", true), comEscolha("voted", OPCAO_SABADO, true), mensagem("hidden", true)]) {
+    assert.equal(avalia(todas(regra), aluno(), ctx), false, `${regra.action} negada: quem nem recebeu nao entra`);
+    assert.equal(avalia(todas(regra), recebeu(), ctx), true, `${regra.action} negada: recebeu e nao fez`);
+    assert.equal(avalia(todas(regra), recebeu({ hiddenAt: daysAgo(1), pollChoice: [OPCAO_SABADO], reaction: "love" }), contexto()), false, "sem messageKeys");
+    assert.equal(avalia(todas({ ...regra, negate: false }), recebeu({ hiddenAt: daysAgo(1), pollChoice: [OPCAO_SABADO], reaction: "love" }), contexto()), false);
+  }
+
+  assert.equal(avalia(todas(comEscolha("reacted", "love", true)), recebeu({ reaction: "like" }), ctx), true, "reagiu com outra: 'não reagiu com ❤️'");
+  assert.equal(avalia(todas(comEscolha("voted", OPCAO_SABADO, true)), recebeu({ pollChoice: [OPCAO_DOMINGO] }), ctx), true);
+  assert.equal(avalia(todas(mensagem("hidden", true)), recebeu({ hiddenAt: daysAgo(1) }), ctx), false);
+});
+
+test("v3a: normalizar guarda a escolha so de reagiu (reacao do catalogo) e de votou (id no formato)", () => {
+  const ref = { campaignId: AVISO, kind: "campaign" };
+  const normalized = model.normalizeAudience(
+    todas(
+      comEscolha("reacted", "love"),
+      comEscolha("reacted", "coracao"),
+      comEscolha("voted", OPCAO_SABADO),
+      comEscolha("voted", "Sábado!"),
+      comEscolha("opened", "love"),
+      comEscolha("hidden", OPCAO_SABADO),
+      { action: "voted", choice: 7, negate: false, ref, type: "message" }
+    )
+  );
+
+  assert.deepEqual(normalized.root.items, [
+    { action: "reacted", choice: "love", negate: false, ref, type: "message" },
+    { action: "reacted", negate: false, ref, type: "message" },
+    { action: "voted", choice: OPCAO_SABADO, negate: false, ref, type: "message" },
+    { action: "voted", negate: false, ref, type: "message" },
+    { action: "opened", negate: false, ref, type: "message" },
+    { action: "hidden", negate: false, ref, type: "message" },
+    { action: "voted", negate: false, ref, type: "message" }
+  ]);
+  assert.equal("choice" in normalized.root.items[1], false, "a chave sai, nao fica undefined");
+  assert.equal(JSON.stringify(model.normalizeAudience(todas(comEscolha("reacted", "love")))), JSON.stringify(model.normalizeAudience(model.normalizeAudience(todas(comEscolha("reacted", "love"))))));
+
+  // O schema guarda a escolha (a regra salva chega ao motor com ela).
+  const parsed = audienceDefinitionSchema.parse(todas(comEscolha("voted", OPCAO_SABADO)));
+  assert.equal(parsed.root.items[0].choice, OPCAO_SABADO);
+  assert.deepEqual(mensagens(todas(comEscolha("reacted", "coracao"))), ["Escolha uma reação da lista."]);
+});
+
+const nomesV3 = {
+  ...nomesV2,
+  messages: { ...nomesV2.messages, [chaveAviso]: "Horário da live" },
+  pollOptions: { [chaveAviso]: { [OPCAO_DOMINGO]: "Domingo", [OPCAO_SABADO]: "Sábado" } }
+};
+const fraseV3 = (...items) => model.describeAudience(todas(...items), nomesV3);
+
+test("v3a: frases de reagiu, votou e excluiu do sino, com e sem a escolha (e a opcao removida)", () => {
+  assert.equal(fraseV3(mensagem("reacted")), "Alunos que reagiram à notificação “Horário da live”");
+  assert.equal(fraseV3(comEscolha("reacted", "love")), "Alunos que reagiram com ❤️ à notificação “Horário da live”");
+  assert.equal(fraseV3(comEscolha("reacted", "love", true)), "Alunos que não reagiram com ❤️ à notificação “Horário da live”");
+  assert.equal(fraseV3(mensagem("voted")), "Alunos que votaram na enquete da notificação “Horário da live”");
+  assert.equal(fraseV3(comEscolha("voted", OPCAO_SABADO)), "Alunos que votaram em “Sábado” na enquete da notificação “Horário da live”");
+  assert.equal(fraseV3(comEscolha("voted", "f0f0f0f0")), "Alunos que votaram em uma opção removida na enquete da notificação “Horário da live”");
+  assert.equal(fraseV3(mensagem("hidden")), "Alunos que excluíram do sino a notificação “Horário da live”");
+  assert.equal(fraseV3(mensagem("received"), mensagem("voted", true)), "Alunos que receberam a notificação “Horário da live” e não votaram na enquete da notificação “Horário da live”");
+  assert.equal(model.describeAudience(todas(comEscolha("voted", OPCAO_SABADO)), nomes), "Alunos que votaram em uma opção removida na enquete de uma notificação removida");
+  assert.equal(model.describeAudience(todas(comEscolha("reacted", "wow")), nomes), "Alunos que reagiram com 😮 a uma notificação removida");
+  assert.equal(fraseV3(comEscolha("reacted", "coracao")), "Alunos que reagiram à notificação “Horário da live”", "reacao fora do catalogo = qualquer uma");
+});
+
+test("v3a: a linha do sino como fato le reacao, voto e exclusao com tolerancia", () => {
+  const base = { audio_completed_at: null, audio_started_at: null, clicked_at: null, created_at: iso(daysAgo(3)), expires_at: iso(inDays(1)), opened_at: null, response: null, seen_at: null };
+  const fato = facts.messageFactOf({ ...base, hidden_at: iso(daysAgo(1)), poll_choice: [OPCAO_SABADO, OPCAO_DOMINGO], reaction: "clap" });
+
+  assert.equal(fato.hiddenAt, daysAgo(1));
+  assert.deepEqual(fato.pollChoice, [OPCAO_SABADO, OPCAO_DOMINGO]);
+  assert.equal(fato.reaction, "clap");
+
+  const estranho = facts.messageFactOf({ ...base, hidden_at: "ontem", poll_choice: ["Sábado!", 3, OPCAO_SABADO], reaction: "coracao" });
+  assert.equal(estranho.hiddenAt, null);
+  assert.deepEqual(estranho.pollChoice, [OPCAO_SABADO], "so ids no formato");
+  assert.equal(estranho.reaction, null, "so reacao do catalogo");
+  assert.equal(facts.messageFactOf({ ...base, poll_choice: "a1b2c3d4" }).pollChoice, null, "nao e lista");
+  assert.equal(facts.messageFactOf({ ...base, poll_choice: [] }).pollChoice, null, "lista vazia = nao votou");
+  assert.equal(facts.messageFactOf({ ...base, poll_choice: ["x!"] }).pollChoice, null);
+});
+
+test("v3a: o carregador pede reacao, voto e exclusao das linhas do sino e as regras contam por elas", async () => {
+  const tables = escola(3);
+  const db = memoryDb({
+    ...tables,
+    campaigns: [{ deleted_at: null, id: AVISO, sent_at: iso(daysAgo(2)), status: "sent" }],
+    notifications: [
+      linhaDoSino(1, 1, AVISO, { opened_at: iso(daysAgo(1)), poll_choice: [OPCAO_SABADO], reaction: "love", seen_at: iso(daysAgo(1)) }),
+      linhaDoSino(2, 3, AVISO, { hidden_at: iso(daysAgo(1)), seen_at: iso(daysAgo(1)) })
+    ]
+  });
+  const loaded = await facts.loadAudienceFacts(db, now, { messageCampaignIds: [AVISO] });
+  const colunas = db.log.find((entry) => entry.source === "notifications").columns.split(",");
+  const quem = (definition) => loaded.facts.filter((fact) => model.evaluateAudience(definition, fact, loaded.context)).map((fact) => fact.userId);
+
+  for (const column of ["reaction", "poll_choice", "hidden_at"]) {
+    assert.ok(colunas.includes(column), column);
+  }
+
+  assert.deepEqual(quem(todas(comEscolha("reacted", "love"))), [uid(1)]);
+  assert.deepEqual(quem(todas(comEscolha("voted", OPCAO_SABADO))), [uid(1)]);
+  assert.deepEqual(quem(todas(mensagem("voted", true))), [uid(3)], "não votou: quem recebeu e nao votou");
+  assert.deepEqual(quem(todas(mensagem("hidden"))), [uid(3)]);
+});
+
+test("v3a: construtor oferece reagiu so com reacoes e votou so com enquete; excluiu do sino sempre", () => {
+  const simples = { hasAudio: false, hasCta: false, hasResponse: false };
+
+  assert.deepEqual(builder.messageActionsFor({ ...simples, allowsReactions: true }), ["received", "seen", "opened", "interacted", "reacted", "hidden"]);
+  assert.deepEqual(builder.messageActionsFor({ ...simples, hasPoll: true }), ["received", "seen", "opened", "interacted", "voted", "hidden"]);
+  assert.deepEqual(builder.messageActionsFor(simples, "voted"), ["received", "seen", "opened", "interacted", "voted", "hidden"], "acao ja salva continua");
+  assert.equal(builder.MESSAGE_ACTION_LABELS.clicked, "foi para o destino");
+  assert.equal(builder.MESSAGE_ACTION_LABELS.reacted, "reagiu");
+  assert.equal(builder.MESSAGE_ACTION_LABELS.voted, "votou na enquete");
+  assert.equal(builder.MESSAGE_ACTION_LABELS.hidden, "excluiu do sino");
+  assert.equal("choice" in builder.defaultAudienceRule("message", { messageRef: { campaignId: AVISO, kind: "campaign" } }), false, "regra nova sem escolha");
+
+  const [opcao] = builder.audienceMessageOptions("segment", {
+    notices: [
+      {
+        allowsReactions: true,
+        hasAudio: false,
+        hasCta: false,
+        hasPoll: true,
+        hasResponse: false,
+        id: AVISO,
+        pollOptions: [{ id: OPCAO_SABADO, label: "Sábado" }, { id: OPCAO_DOMINGO, label: "Domingo" }],
+        sentAt: "2026-10-21T12:00:00.000Z",
+        title: "Horário da live"
+      }
+    ]
+  });
+
+  assert.equal(opcao.allowsReactions, true);
+  assert.equal(opcao.hasPoll, true);
+  assert.deepEqual(builder.messageActionsFor(opcao), ["received", "seen", "opened", "interacted", "reacted", "voted", "hidden"]);
+
+  const [passo] = builder.audienceMessageOptions("flow", { flowContext: { messages: [{ ctaPageKey: null, hasAudio: false, hasCta: false, hasResponse: false, nodeId: PASSO, title: "x" }] } });
+  assert.equal(passo.allowsReactions, false, "passo sem os campos: sem reacoes");
+  assert.deepEqual(passo.pollOptions, []);
+});
+
+test("v3a: o segundo seletor (qualquer reacao ou uma; qualquer opcao ou uma) e trocar acao, escolha e notificacao", () => {
+  const [opcao] = builder.audienceMessageOptions("segment", {
+    notices: [
+      {
+        allowsReactions: true,
+        hasAudio: false,
+        hasCta: false,
+        hasPoll: true,
+        hasResponse: false,
+        id: AVISO,
+        pollOptions: [{ id: OPCAO_SABADO, label: "Sábado" }, { id: OPCAO_DOMINGO, label: "Domingo" }],
+        sentAt: "2026-10-21T12:00:00.000Z",
+        title: "Horário da live"
+      }
+    ]
+  });
+  const [outra] = builder.audienceMessageOptions("segment", {
+    notices: [{ allowsReactions: true, hasAudio: false, hasCta: false, hasResponse: false, id: OUTRO_AVISO, sentAt: "2026-10-21T12:00:00.000Z", title: "Aula nova" }]
+  });
+
+  assert.deepEqual(builder.messageChoiceOptions(opcao, "reacted"), [
+    { label: "com qualquer reação", value: null },
+    { label: "com 👍 Gostei", value: "like" },
+    { label: "com ❤️ Amei", value: "love" },
+    { label: "com 🔥 Incrível", value: "fire" },
+    { label: "com 👏 Aplausos", value: "clap" },
+    { label: "com 😂 Haha", value: "laugh" },
+    { label: "com 😮 Uau", value: "wow" }
+  ]);
+  assert.deepEqual(builder.messageChoiceOptions(opcao, "voted"), [
+    { label: "em qualquer opção", value: null },
+    { label: "em “Sábado”", value: OPCAO_SABADO },
+    { label: "em “Domingo”", value: OPCAO_DOMINGO }
+  ]);
+  assert.deepEqual(builder.messageChoiceOptions(opcao, "voted", "f0f0f0f0").at(-1), { label: "Opção removida", value: "f0f0f0f0" }, "a salva que saiu fica visivel");
+  assert.equal(builder.messageChoiceOptions(opcao, "opened"), null, "outras acoes: sem segundo seletor");
+
+  const rule = comEscolha("voted", "f0f0f0f0");
+  assert.equal(builder.messageChoiceProblem(opcao, rule), "Escolha uma opção.");
+  assert.equal(builder.messageChoiceProblem(opcao, comEscolha("voted", OPCAO_SABADO)), null);
+  assert.equal(builder.messageChoiceProblem(null, rule), null, "notificacao fora da lista: nao da para saber");
+  assert.equal(builder.messageChoiceProblem(opcao, comEscolha("reacted", "love")), null);
+
+  assert.deepEqual(builder.messageRuleWithAction(comEscolha("reacted", "love"), "voted"), mensagem("voted"), "trocar a acao tira a escolha");
+  assert.deepEqual(builder.messageRuleWithChoice(mensagem("reacted"), "fire"), comEscolha("reacted", "fire"));
+  assert.deepEqual(builder.messageRuleWithChoice(comEscolha("reacted", "fire"), null), mensagem("reacted"));
+  assert.deepEqual(builder.messageRuleWithOption(comEscolha("reacted", "love"), outra), comEscolha("reacted", "love", false, { campaignId: OUTRO_AVISO, kind: "campaign" }), "a reacao fica");
+  assert.deepEqual(builder.messageRuleWithOption(comEscolha("voted", OPCAO_SABADO), outra), mensagem("opened", false, { campaignId: OUTRO_AVISO, kind: "campaign" }), "sem enquete: volta para abriu");
+  assert.deepEqual(builder.messageRuleWithOption(comEscolha("voted", OPCAO_SABADO, true), opcao), comEscolha("voted", OPCAO_SABADO, true), "mesma opcao na enquete nova fica");
+
+  const nomesComEnquete = builder.audienceNamesWithMessages(nomes, [opcao]);
+  assert.deepEqual(nomesComEnquete.pollOptions, { [chaveAviso]: { [OPCAO_DOMINGO]: "Domingo", [OPCAO_SABADO]: "Sábado" } });
+  assert.equal(model.describeAudience(todas(comEscolha("voted", OPCAO_DOMINGO)), nomesComEnquete), "Alunos que votaram em “Domingo” na enquete da notificação “Horário da live”");
+  assert.equal("pollOptions" in builder.audienceNamesWithMessages(nomes, [outra]), false, "sem enquete, sem a chave");
+});
+
+test("v3a: a copia neutra 'destino' no lugar de 'botão' nos modulos das regras", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const arquivos = [
+    "src/components/admin/v2/communication/notices-view-model.ts",
+    "src/server/communications/audience-model.ts",
+    "src/components/admin/v2/communication/follow-ups-view-model.ts",
+    "src/components/admin/v2/communication/flows/flows-view-model.ts",
+    "src/server/communications/flow-model.ts"
+  ];
+  // O pop-up tem botao de verdade: as frases do "Mostrar de novo" (docs/24 §2.4) falam de quem "clicou no botão" dele.
+  const frasesDoPopUp = ["Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver", "Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver"];
+
+  for (const arquivo of arquivos) {
+    let texto = await readFile(new URL(`../${arquivo}`, import.meta.url), "utf8");
+
+    for (const frase of frasesDoPopUp) {
+      texto = texto.replaceAll(frase, "");
+    }
+
+    for (const velho of ["clicou no botão", "clicaram no botão", "página do botão", "Clicaram no botão"]) {
+      assert.equal(texto.includes(velho), false, `${arquivo}: ${velho}`);
+    }
+  }
+
+  assert.equal(fraseV2(mensagem("clicked")), "Alunos que foram para o destino da notificação “Oferta especial!”");
+  assert.equal(builder.PAGE_TARGET_CHOICES[0].label, "a página para onde a notificação leva…");
 });

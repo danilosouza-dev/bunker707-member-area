@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireApiUser } from "@/server/auth/guards";
+import { requireApiSessionUser } from "@/server/auth/guards";
 import { POPUP_EVENTS, type PopupEvent } from "@/server/communications/campaign-model";
 import { recordPopupEvent } from "@/server/communications/popups";
 import { isUuid, noStore, recordCommunicationEvents } from "@/server/communications/route-support";
@@ -7,7 +7,8 @@ import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 // Evento do aluno no pop-up da home: { event: "impressed" | "clicked" | "closed" | "dismissed" |
-// "snoozed" }. Aceita o corpo em text/plain (sendBeacon na hora de sair da pagina manda assim).
+// "snoozed" }. Aceita o corpo em text/plain (sendBeacon na hora de sair da pagina manda assim). Sessao
+// pelas claims do JWT (v3a, docs/24): so mexe na linha do proprio aluno.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,7 +28,7 @@ function isPopupEvent(value: unknown): value is PopupEvent {
 }
 
 export async function POST(request: Request, context: RouteContext) {
-  const auth = await requireApiUser();
+  const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {
     return noStore(auth.response!);
