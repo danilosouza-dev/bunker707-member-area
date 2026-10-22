@@ -47,6 +47,9 @@ export function NotificationCardMenu({
   const [popup, setPopup] = useState<HTMLDivElement | null>(null);
   /** Excluiu: o cartao sai da tela e o painel leva o foco para o Desfazer (o menu nao devolve o foco). */
   const hidingRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  /** Fechou com Esc: o foco volta para o "⋯" depois que o menu some (ver onOpenChangeComplete). */
+  const escapedRef = useRef(false);
 
   // Esc no menu: fecha so ele. Ouvido no proprio elemento: o popover do sino e a IA Diretor escutam no
   // document e fechariam junto.
@@ -62,6 +65,7 @@ export function NotificationCardMenu({
 
       event.preventDefault();
       event.stopPropagation();
+      escapedRef.current = true;
       setOpen(false);
     }
 
@@ -78,8 +82,26 @@ export function NotificationCardMenu({
   }
 
   return (
-    <Menu.Root modal={false} onOpenChange={setOpen} open={open}>
-      <Menu.Trigger aria-label={label} className={cn(CARD_MENU_POSITION, buttonClassName, revealClassName, focusRing)} data-card-more="">
+    <Menu.Root
+      modal={false}
+      onOpenChange={setOpen}
+      // No Safari o item com foco perde o foco quando o menu some (blur na remocao) e o popover do sino puxa o
+      // foco para o painel um quadro depois: com Esc, devolve ao "⋯" depois disso (o finalFocus nao basta).
+      onOpenChangeComplete={(isOpen) => {
+        if (isOpen || !escapedRef.current) {
+          return;
+        }
+
+        escapedRef.current = false;
+        window.requestAnimationFrame(() => {
+          if (!hidingRef.current) {
+            triggerRef.current?.focus({ preventScroll: true });
+          }
+        });
+      }}
+      open={open}
+    >
+      <Menu.Trigger aria-label={label} className={cn(CARD_MENU_POSITION, buttonClassName, revealClassName, focusRing)} data-card-more="" ref={triggerRef}>
         <MoreHorizontal aria-hidden="true" className="size-4" />
       </Menu.Trigger>
       <Menu.Portal>
@@ -87,7 +109,7 @@ export function NotificationCardMenu({
           <Menu.Popup
             className="min-w-[13rem] origin-[var(--transform-origin)] rounded-[10px] border border-white/10 bg-[#262626] p-1 text-white shadow-[0_16px_40px_rgba(0,0,0,0.55)] outline-none transition-[opacity,transform] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
             data-escape-scope="local"
-            finalFocus={() => !hidingRef.current}
+            finalFocus={() => (hidingRef.current ? false : triggerRef.current)}
             ref={setPopup}
           >
             <Menu.Item
