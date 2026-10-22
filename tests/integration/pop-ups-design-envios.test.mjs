@@ -452,3 +452,30 @@ test("pop-up com video: endereco de fora do nosso bucket e recusado; o do nosso 
   const [linha] = unwrap(await db.from("campaigns").select("popup_design").eq("id", salvo.id), "Lendo o pop-up");
   assert.equal(linha.popup_design.media.video.url, video.url);
 });
+
+test("pop-up com video: objeto que nao passou pela conferencia do envio e conferido ao salvar (recusado e apagado)", async () => {
+  // Envio pelo endereco assinado com bytes que nao sao video (tipo declarado video/mp4, que o bucket aceita),
+  // sem chamar finishPopupVideoUpload: salvar o design apontando para ele confere ali mesmo.
+  actAs(produtor);
+  const ticket = ok(await designActions.startPopupVideoUpload({ mimeType: "video/mp4", sizeBytes: HTML.length }));
+  criados[model.POPUP_VIDEO_BUCKET].add(ticket.path);
+  unwrap(await navegador.storage.from(model.POPUP_VIDEO_BUCKET).uploadToSignedUrl(ticket.path, ticket.token, HTML, { contentType: "video/mp4" }), "Enviando sem conferir");
+  const naoConferido = { mimeType: "video/mp4", path: ticket.path, url: db.storage.from(model.POPUP_VIDEO_BUCKET).getPublicUrl(ticket.path).data.publicUrl };
+
+  const recusado = await salvar(popupComDesign({ video: naoConferido }));
+  assert.deepEqual([recusado.ok, recusado.status], [false, 400]);
+  assert.deepEqual(recusado.fieldErrors["design.media.video"], ["Use um vídeo MP4 (H.264) ou WEBM."], JSON.stringify(recusado.fieldErrors));
+  assert.equal(await existeNoBucket(model.POPUP_VIDEO_BUCKET, ticket.path), false, "o objeto recusado foi apagado");
+
+  // Caminho que nunca recebeu arquivo: "Envie o vídeo de novo."
+  const vazio = `videos/${randomUUID()}.mp4`;
+  const semArquivo = await salvar(popupComDesign({ video: { ...naoConferido, path: vazio, url: db.storage.from(model.POPUP_VIDEO_BUCKET).getPublicUrl(vazio).data.publicUrl } }));
+  assert.deepEqual(semArquivo.fieldErrors?.["design.media.video"], ["Envie o vídeo de novo."], JSON.stringify(semArquivo.fieldErrors));
+
+  // O video conferido continua entrando, e salvar de novo o mesmo pop-up (mesmo caminho) nao recusa.
+  const { result } = await enviarVideo({ bytes: MP4, contentType: "video/mp4", mimeType: "video/mp4" });
+  const video = ok(result);
+  const salvo = ok(await salvar(popupComDesign({ video })));
+  actAs(produtor);
+  ok(await actions.saveNoticeDraft({ draft: popupComDesign({ video }), id: salvo.id }));
+});

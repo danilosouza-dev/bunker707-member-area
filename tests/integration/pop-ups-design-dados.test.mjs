@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { after, before, beforeEach, test } from "node:test";
 import { actAs } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
@@ -52,11 +53,15 @@ before(async () => {
   // Sem created_by: limparComunicacao (a cada teste) apaga as fontes das contas de teste; estas vivem o arquivo todo.
   [fonte] = unwrap(await db.from("communication_fonts").insert({ ...FONTE, created_by: null }).select("*"), "Criando a fonte");
   [fonteExcluida] = unwrap(await db.from("communication_fonts").insert({ ...FONTE_EXCLUIDA, created_by: null }).select("*"), "Criando a fonte excluida");
+  // Um video de verdade no caminho: salvar confere o objeto (existe, tamanho e primeiros bytes).
+  const mp4 = readFileSync(new URL("../fixtures/popup-design/video-de-teste.mp4", import.meta.url));
+  unwrap(await db.storage.from(model.POPUP_VIDEO_BUCKET).upload(VIDEO_PATH, mp4, { contentType: "video/mp4", upsert: true }), "Enviando o video de teste");
 });
 
 after(async () => {
   await limpar();
   await apagarFontes();
+  unwrap(await db.storage.from(model.POPUP_VIDEO_BUCKET).remove([VIDEO_PATH]), "Apagando o video de teste");
 });
 
 beforeEach(async () => {

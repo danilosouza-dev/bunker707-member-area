@@ -127,7 +127,9 @@ import {
   type PopupFrequency
 } from "./popup-display-model";
 import { assertPopupDesignFonts, withOwnStorageUrls } from "./popup-fonts";
+import type { PopupDesign } from "./popup-design-model";
 import { parsePopupDesign, popupDesignContentProblems } from "./popup-design-schema";
+import { inspectPopupVideo } from "./popup-media";
 import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, noticeDraftOfRow, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
 import {
@@ -436,9 +438,10 @@ function withPopupSettings(draft: NoticeDraft, stored: CampaignRow | null): Noti
 
 /**
  * Design do pop-up (docs/26) antes de gravar: o endereco do video recalculado do caminho (nunca o que veio do
- * navegador) e as fontes enviadas conferidas na biblioteca (400 em design.fonts quando uma saiu).
+ * navegador), o video novo conferido de novo e as fontes enviadas conferidas na biblioteca (400 em
+ * design.fonts quando uma saiu). `row` = a linha gravada (null num aviso novo).
  */
-async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft): Promise<NoticeDraft> {
+async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: CampaignRow | null): Promise<NoticeDraft> {
   if (draft.kind !== "popup" || !draft.design) {
     return draft;
   }
@@ -451,8 +454,32 @@ async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft): Prom
   }
 
   await assertPopupDesignFonts(db, draft.design);
+  await assertPopupDesignVideo(db, draft.design, row);
 
   return { ...draft, design: withOwnStorageUrls(db, draft.design) };
+}
+
+/**
+ * O video so entra no design conferido pelo servidor: um caminho diferente do gravado passa de novo pela
+ * conferencia do envio (existe, ate 15 MB, os primeiros bytes e o tipo gravado batem; o recusado e apagado).
+ * Sem isso, um objeto enviado pelo endereco assinado sem passar por finishPopupVideoUpload seria aceito.
+ */
+async function assertPopupDesignVideo(db: CommunicationsDb, design: PopupDesign, row: CampaignRow | null) {
+  const video = design.media.video;
+
+  if (!video || (row && parsePopupDesign(row.popup_design)?.media.video?.path === video.path)) {
+    return;
+  }
+
+  try {
+    await inspectPopupVideo(db, video.path);
+  } catch (error) {
+    if (error instanceof CommunicationError) {
+      throw new NoticeFieldError("design.media.video", error.message);
+    }
+
+    throw error;
+  }
 }
 
 /** v3b-1: a auditoria do pop-up salvo ou publicado leva o momento, quantas paginas e o modo (so codigos e contagens). */
@@ -1001,7 +1028,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     await assertSenderForSave(db, data.draft);
 
     if (!data.id) {
-      const fresh = await withCheckedDesign(db, withPopupSettings(data.draft, null));
+      const fresh = await withCheckedDesign(db, withPopupSettings(data.draft, null), null);
       const created = await insertCampaign(db, { ...draftToColumns(fresh), created_by: user.id, status: "draft", updated_by: user.id });
 
       await recordAudit(db, {
@@ -1017,7 +1044,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     }
 
     const current = await requireCampaign(db, data.id);
-    const draft = await withCheckedDesign(db, withPopupSettings(data.draft, current));
+    const draft = await withCheckedDesign(db, withPopupSettings(data.draft, current), current);
     const columns = draftToColumns(draft);
 
     if (current.kind === "inbox" && current.status === "sent") {
