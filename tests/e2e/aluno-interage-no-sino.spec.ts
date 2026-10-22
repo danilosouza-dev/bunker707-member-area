@@ -5,13 +5,13 @@ import { enviarNotificacao, expect, linhaDoSino, test, zerarComunicacao } from "
 // com reacoes; Aceitar/Recusar; "Só tocando na notificação" para Minhas compras; "Pelo botão ou tocando na
 // notificação" para Minha jornada), uma quinta para a lixeira e uma sexta em que a equipe desligou "Permitir
 // que o aluno exclua do sino". A aluna reage, troca e tira a reacao; vota e muda o voto (100%, 1 voto); aceita,
-// muda a resposta e recusa; toca no texto dos dois cartoes clicaveis e chega a pagina; exclui pelo "⋯" ("Mais
-// opções" -> "Excluir notificação"), desfaz, exclui de novo e a notificacao nao volta ao reabrir nem ao
-// recarregar. A sexta nao tem o "⋯" e o servidor recusa excluir (403). A 1280 e a 375 px (§10): sem rolagem
-// lateral, o Reagir no fim da linha dos botoes ou da linha de quem envia, o "⋯" no canto de cima sem cobrir o
-// titulo e com 32 px, que continua com o seletor aberto, os seis emoji numa linha dentro do cartao, a pilula da
-// reacao com 28 px e as opcoes da enquete com 44 px; pelo teclado, Tab chega ao Reagir, Enter abre o seletor e
-// Esc fecha so ele, e Esc no menu do "⋯" fecha so o menu. O beforeAll e o afterAll apagam tudo: uma notificacao
+// muda a resposta e recusa; toca no texto dos dois cartoes clicaveis e chega a pagina; exclui pelo botao do
+// canto ("Excluir notificação “título”"), desfaz, exclui de novo e a notificacao nao volta ao reabrir nem ao
+// recarregar. A sexta nao tem o excluir e o servidor recusa excluir (403). A 1280 e a 375 px (§10): sem
+// rolagem lateral, o Reagir no fim da linha dos botoes ou da linha de quem envia, o excluir no canto de cima
+// sem cobrir o titulo e com 32 px, que continua com o seletor aberto, os seis emoji numa linha dentro do
+// cartao, a pilula da reacao com 28 px e as opcoes da enquete com 44 px; pelo teclado, Tab chega ao Reagir,
+// Enter abre o seletor e Esc fecha so ele, e o excluir funciona pelo Enter. O beforeAll e o afterAll apagam tudo: uma notificacao
 // esquecida muda o nome do sino nos outros arquivos. Escritas da aluna neste arquivo: menos de 30 por minuto (o
 // limite do servidor, docs/24 §4.14).
 
@@ -91,9 +91,9 @@ async function esperarEscrita(page: Page, rota: "hide" | "poll" | "reaction" | "
   expect((await resposta).status()).toBe(200);
 }
 
-/** O "⋯" do cartao (o nome leva o titulo: nunca vinte botoes iguais). */
-function maisOpcoes(painel: Locator, titulo: string) {
-  return painel.getByRole("button", { exact: true, name: `Mais opções da notificação “${titulo}”` });
+/** O excluir do canto do cartao (o nome leva o titulo: nunca vinte botoes iguais). */
+function excluirDe(painel: Locator, titulo: string) {
+  return painel.getByRole("button", { exact: true, name: `Excluir notificação “${titulo}”` });
 }
 
 /** Caixa de um elemento na tela (falha quando nao esta desenhado). */
@@ -239,16 +239,14 @@ test("tocar no texto do cartão clicável leva ao destino (só tocando e botão 
   await expect.poll(async () => (await linhaDoSino(BOTAO_OU_TOQUE))?.clicked_at ?? null).not.toBeNull();
 });
 
-/** "⋯" -> "Excluir notificação" (o item fica num portal, fora do cartao) e espera o servidor. */
-async function excluirPeloMenu(page: Page, painel: Locator, titulo: string) {
-  await maisOpcoes(painel, titulo).click();
-  const excluir = page.getByRole("menuitem", { exact: true, name: "Excluir notificação" });
-  await expect(excluir).toBeVisible();
+/** O excluir do canto (exclui na hora) e espera o servidor. */
+async function excluirPeloBotao(page: Page, painel: Locator, titulo: string) {
+  const excluir = excluirDe(painel, titulo);
   await esperarEscrita(page, "hide", () => excluir.click());
   await expect(excluir).toHaveCount(0);
 }
 
-test("Excluir notificação pelo ⋯ e Desfazer; excluída de novo, não volta ao reabrir nem ao recarregar", async ({ page }) => {
+test("Excluir notificação pelo botão do canto e Desfazer; excluída de novo, não volta ao reabrir nem ao recarregar", async ({ page }) => {
   await page.goto("/");
   let painel = await abrirSino(page);
   const status = painel.getByRole("status").first();
@@ -256,15 +254,9 @@ test("Excluir notificação pelo ⋯ e Desfazer; excluída de novo, não volta a
   const antes = await itemDoSino(page, PARA_EXCLUIR);
   expect(antes.item).not.toBeNull();
 
-  // Esc no menu fecha so o menu: o painel fica e o foco volta para o "⋯".
-  await maisOpcoes(painel, PARA_EXCLUIR).click();
-  await expect(page.getByRole("menuitem", { exact: true, name: "Excluir notificação" })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("menuitem", { exact: true, name: "Excluir notificação" })).toHaveCount(0);
-  await expect(painel).toBeVisible();
-  await expect(maisOpcoes(painel, PARA_EXCLUIR)).toBeFocused();
-
-  await excluirPeloMenu(page, painel, PARA_EXCLUIR);
+  // Pelo teclado: o excluir esta no Tab e o Enter exclui (o foco vai para o Desfazer).
+  await excluirDe(painel, PARA_EXCLUIR).focus();
+  await esperarEscrita(page, "hide", () => page.keyboard.press("Enter"));
   await expect(painel.getByRole("list").getByText("Notificação excluída.")).toBeVisible();
   await expect(desfazer).toBeFocused();
   await expect(status).toHaveText("Notificação excluída.");
@@ -276,15 +268,15 @@ test("Excluir notificação pelo ⋯ e Desfazer; excluída de novo, não volta a
 
   await esperarEscrita(page, "hide", () => desfazer.click());
   await expect(painel.getByRole("article", { name: PARA_EXCLUIR })).toBeVisible();
-  await expect(maisOpcoes(painel, PARA_EXCLUIR)).toBeFocused();
-  // O popover devolve o foco ao painel um quadro depois de o Desfazer sumir: o "⋯" continua com ele.
+  await expect(excluirDe(painel, PARA_EXCLUIR)).toBeFocused();
+  // O popover devolve o foco ao painel um quadro depois de o Desfazer sumir: o excluir continua com ele.
   await page.waitForTimeout(200);
-  await expect(maisOpcoes(painel, PARA_EXCLUIR)).toBeFocused();
+  await expect(excluirDe(painel, PARA_EXCLUIR)).toBeFocused();
   await expect(status).toHaveText("A notificação voltou para o sino.");
   expect((await itemDoSino(page, PARA_EXCLUIR)).item).not.toBeNull();
 
-  // Exclui de novo, fecha e reabre: a linha do Desfazer so vale com o painel aberto.
-  await excluirPeloMenu(page, painel, PARA_EXCLUIR);
+  // Exclui de novo (pelo mouse), fecha e reabre: a linha do Desfazer so vale com o painel aberto.
+  await excluirPeloBotao(page, painel, PARA_EXCLUIR);
   await page.keyboard.press("Escape");
   await expect(painel).toHaveCount(0);
   painel = await abrirSino(page);
@@ -301,15 +293,15 @@ test("Excluir notificação pelo ⋯ e Desfazer; excluída de novo, não volta a
   await expect(painel.getByRole("article", { name: ENQUETE })).toBeVisible();
 });
 
-test("sem “Permitir que o aluno exclua do sino”: o cartão não tem o ⋯ e o servidor recusa excluir", async ({ page }) => {
+test("sem “Permitir que o aluno exclua do sino”: o cartão não tem o excluir e o servidor recusa excluir", async ({ page }) => {
   await page.goto("/");
   const painel = await abrirSino(page);
   const cartao = painel.getByRole("article", { name: SEM_LIXEIRA });
   await expect(cartao).toBeVisible();
-  await expect(maisOpcoes(painel, SEM_LIXEIRA)).toHaveCount(0);
-  await expect(cartao.getByRole("button", { name: /Mais opções/ })).toHaveCount(0);
-  // As outras continuam com o "⋯".
-  await expect(maisOpcoes(painel, ENQUETE)).toHaveCount(1);
+  await expect(excluirDe(painel, SEM_LIXEIRA)).toHaveCount(0);
+  await expect(cartao.getByRole("button", { name: /Excluir notificação/ })).toHaveCount(0);
+  // As outras continuam com o excluir.
+  await expect(excluirDe(painel, ENQUETE)).toHaveCount(1);
 
   // Pelo endereco direto tambem nao sai: 403 com a frase, e continua no sino.
   const { item } = await itemDoSino(page, SEM_LIXEIRA);
@@ -324,24 +316,24 @@ for (const [nome, viewport] of [
   ["1280", { height: 900, width: 1280 }],
   ["375", { height: 812, width: 375 }]
 ] as const) {
-  test(`a ${nome} px: sem rolagem lateral, Reagir no fim da linha, ⋯ no canto sem cobrir o título, seis emoji numa linha, enquete com 44 px`, async ({ page }) => {
+  test(`a ${nome} px: sem rolagem lateral, Reagir no fim da linha, excluir no canto sem cobrir o título, seis emoji numa linha, enquete com 44 px`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto("/");
     const painel = await abrirSino(page);
     const largura = () => page.evaluate(() => document.documentElement.scrollWidth);
     expect(await largura()).toBeLessThanOrEqual(viewport.width);
 
-    // Um "⋯" por cartao que pode sair do sino, cada um com o titulo no nome; o sem lixeira nao tem.
+    // Um excluir por cartao que pode sair do sino, cada um com o titulo no nome; o sem lixeira nao tem.
     for (const titulo of TODAS.filter((titulo) => titulo !== PARA_EXCLUIR)) {
-      await expect(maisOpcoes(painel, titulo)).toHaveCount(1);
+      await expect(excluirDe(painel, titulo)).toHaveCount(1);
     }
-    await expect(maisOpcoes(painel, SEM_LIXEIRA)).toHaveCount(0);
+    await expect(excluirDe(painel, SEM_LIXEIRA)).toHaveCount(0);
 
     const enquete = painel.getByRole("article", { name: ENQUETE });
-    const mais = maisOpcoes(painel, ENQUETE);
+    const mais = excluirDe(painel, ENQUETE);
     await expect(mais).toBeVisible();
 
-    // O "⋯": 32 px (area de toque maior pelo ::after), no canto de cima, e o titulo reserva o espaco dele.
+    // O excluir: 32 px (area de toque maior pelo ::after), no canto de cima, e o titulo reserva o espaco dele.
     const caixaDoMais = await caixaDe(mais);
     expect(caixaDoMais.width).toBeGreaterThanOrEqual(32);
     expect(caixaDoMais.height).toBeGreaterThanOrEqual(32);
@@ -380,22 +372,14 @@ for (const [nome, viewport] of [
       expect(caixa.height, titulo).toBeGreaterThanOrEqual(32);
     }
 
-    // O menu do "⋯" cabe na tela, com o item de 40 px.
-    await mais.click();
-    const excluir = page.getByRole("menuitem", { exact: true, name: "Excluir notificação" });
-    await expect(excluir).toBeVisible();
-    const caixaDoItem = await caixaDe(excluir);
-    expect(caixaDoItem.height).toBeGreaterThanOrEqual(40);
-    expect(caixaDoItem.x).toBeGreaterThanOrEqual(0);
-    expect(caixaDoItem.x + caixaDoItem.width).toBeLessThanOrEqual(viewport.width);
-    await page.keyboard.press("Escape");
-    await expect(excluir).toHaveCount(0);
-    await expect(painel).toBeVisible();
+    // O excluir fica inteiro dentro da tela e do cartao.
+    expect(caixaDoMais.x).toBeGreaterThanOrEqual(0);
+    expect(caixaDoMais.x + caixaDoMais.width).toBeLessThanOrEqual(Math.min(viewport.width, caixaDaEnquete.x + caixaDaEnquete.width));
 
     await reagirDe(ENQUETE).click();
     const seletor = enquete.getByRole("group", { name: "Escolha uma reação" });
     await expect(seletor).toBeVisible();
-    // O "⋯" continua no canto com o seletor aberto (nao divide mais a linha com ele).
+    // O excluir continua no canto com o seletor aberto (nao divide a linha com ele).
     await expect(mais).toBeVisible();
 
     const botoes = await seletor.getByRole("button").evaluateAll((elementos) =>

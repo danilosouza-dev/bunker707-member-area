@@ -1,9 +1,9 @@
 import { avisoNoBanco, expect, linhaDoSino, test, zerarComunicacao } from "./fixtures";
 
 // Ajustes da v3a depois do primeiro teste do produtor (docs/24 §10; docs/18 §3.1): o produtor desliga
-// "Permitir que o aluno exclua do sino" (a previa perde o "⋯") e escolhe "Fica no sino por" > "Outro" >
+// "Permitir que o aluno exclua do sino" (a previa perde o botao de excluir) e escolhe "Fica no sino por" > "Outro" >
 // "Por um tempo" em minutos: 4 minutos e recusado com "No mínimo 5 minutos." e 5 minutos passa. A aluna ve a
-// notificacao no sino sem o "Mais opções" e a linha dela some 5 minutos depois de chegar. O beforeAll e o
+// notificacao no sino sem o botao de excluir e a linha dela some 5 minutos depois de chegar. O beforeAll e o
 // afterAll apagam o que foi enviado: um numero no sino mudaria o nome do botao nos outros arquivos.
 
 const TITULO = "Lixeira E2E: aviso rápido que fica no sino";
@@ -22,15 +22,15 @@ test.describe("produtor", () => {
     await page.waitForLoadState("networkidle");
     await page.getByLabel("Título", { exact: true }).fill(TITULO);
 
-    // "Permitir que o aluno exclua do sino": ligado por padrao, com o "⋯" na previa; desligar tira o "⋯".
+    // "Permitir que o aluno exclua do sino": ligado por padrao, com o excluir na previa; desligar tira o excluir.
     const previa = page.getByRole("figure", { name: /^Prévia da notificação no sino/ });
-    await expect(previa.locator("article [data-card-more]")).toHaveCount(1);
+    await expect(previa.locator("article [data-card-delete]")).toHaveCount(1);
     const lixeira = page.getByRole("switch", { name: "Permitir que o aluno exclua do sino" });
     await expect(lixeira).toHaveAttribute("aria-checked", "true");
     await lixeira.click();
     await expect(lixeira).toHaveAttribute("aria-checked", "false");
     await expect(page.getByText("Sem essa opção, a notificação fica no sino do aluno até o tempo dela acabar.", { exact: true })).toBeVisible();
-    await expect(previa.locator("article [data-card-more]")).toHaveCount(0);
+    await expect(previa.locator("article [data-card-delete]")).toHaveCount(0);
 
     // "Fica no sino por" > "Outro" > "Por um tempo": a unidade "minutos" vem antes de horas e dias.
     await page.getByRole("radiogroup", { name: "Fica no sino por" }).getByText("Outro", { exact: true }).click();
@@ -58,14 +58,14 @@ test.describe("produtor", () => {
 });
 
 test.describe("aluna", () => {
-  test("vê a notificação sem o “Mais opções” e ela sai do sino 5 minutos depois de chegar", async ({ page }) => {
+  test("vê a notificação sem o botão de excluir e ela sai do sino 5 minutos depois de chegar", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { exact: true, name: "Notificações, 1 nova" }).click();
     const painel = page.getByRole("dialog", { name: "Notificações" });
     const cartao = painel.getByRole("article", { name: TITULO });
     await expect(cartao).toBeVisible();
-    await expect(cartao.getByRole("button", { name: /Mais opções/ })).toHaveCount(0);
-    await expect(painel.getByRole("button", { name: /Mais opções/ })).toHaveCount(0);
+    await expect(cartao.getByRole("button", { name: /Excluir notificação/ })).toHaveCount(0);
+    await expect(painel.getByRole("button", { name: /Excluir notificação/ })).toHaveCount(0);
 
     // A linha do sino vence 5 minutos depois de chegar (o fim e contado no app e a chegada e gravada pelo
     // banco no insert: uns segundos de folga). O "Termina em" conta dela.

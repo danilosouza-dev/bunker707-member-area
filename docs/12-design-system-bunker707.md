@@ -347,13 +347,13 @@ Regras de produto em `docs/24` §1. A 375 px a coluna de texto do cartao tem cer
 
 Regras em `docs/24` §10.3. A linha de acoes saiu; conferido a 1440 e a 375 px (`aluno-interage-no-sino` mede o "⋯", o titulo e a linha do Reagir).
 
-- **"⋯" do cartao** (`notification-card-menu.tsx`): `absolute right-2 top-2 z-[2]`, `size-8` redondo com `MoreHorizontal` 16 px zinc 400 (branco e `white/[0.08]` no hover e aberto), area de toque de 40 px (`after:-inset-1`), foco branco; nome `Mais opções da notificação “{título}”`. Com ponteiro fino, `opacity-0` ate o mouse no cartao (`group/card`), o foco dentro dele ou o menu aberto (so a opacidade muda; continua no Tab); com ponteiro grosso, sempre a mostra. O titulo ganha `pr-8` so quando o cartao tem o "⋯". Sem o "⋯" quando a equipe nao deixa excluir.
+- **Excluir do cartao** (`notification-card-delete.tsx`): `absolute right-2 top-2 z-[2]`, `size-8` redondo com `Trash2` 16 px zinc 400 (branco e `white/[0.08]` no hover), area de toque de 40 px (`after:-inset-1`), foco branco; nome `Excluir notificação “{título}”`; exclui na hora (o Desfazer traz de volta). Com ponteiro fino, `opacity-0` ate o mouse no cartao (`group/card`) ou o foco dentro dele (so a opacidade muda; continua no Tab); com ponteiro grosso, sempre a mostra. O titulo ganha `pr-8` so quando o cartao tem o excluir. Sem ele quando a equipe nao deixa excluir. (Era um "⋯" com menu de um item so: saiu, docs/24 §10.3.)
 - **Menu**: Base UI Menu, `modal={false}`, em portal dentro do painel, `align="end"`, `sideOffset 4`; popup `min-w-[13rem] rounded-[10px] border border-white/10 bg-[#262626] p-1` com sombra; item `min-h-10 rounded-[6px] px-3 text-sm font-medium` com `Trash2` 16 px zinc 300, `data-highlighted:bg-white/10`.
 - **Reagir no fim da linha**: o gatilho leva `ml-auto` e entra no fim da linha do botao (`mt-3 flex items-center justify-between gap-2`, o botao com `min-w-0` e o texto truncado), da linha Aceitar/Recusar (`flex-wrap`) ou, sem elas, da linha de quem envia, que passa a `mt-1 flex min-h-8 items-center justify-between gap-2` (o texto continua numa linha, truncando o nome). Num aviso so com titulo e o "⋯", essa linha ganha `mt-3.5` para o Reagir nao colar no "⋯".
 - **Pilula da reacao**: `h-7 rounded-full border border-white/15 bg-white/[0.08] px-2` com o emoji a 16 px, area de toque de 40 px (`after:-inset-1.5`); aberta, `border-white/30 bg-white/[0.14]`.
 - **Seletor**: o mesmo (`flex h-10 gap-1`, seis botoes de 40 px), agora `mt-2` na linha logo abaixo da linha do Reagir.
 - **Bolinha de nao lida**: `absolute left-[5px] top-[30px] size-2` na margem da esquerda, na altura do meio do circulo.
-- **Previa**: o "⋯" parado (`aria-hidden`, `data-card-more`) quando o aluno pode excluir; sem ele quando nao.
+- **Previa**: o excluir parado (`aria-hidden`, `data-card-delete`) quando o aluno pode excluir; sem ele quando nao.
 
 ## Modal de detalhes
 

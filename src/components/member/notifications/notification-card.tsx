@@ -17,7 +17,7 @@ import { NoticeAudioPlayer } from "./notice-audio-player";
 import { NoticeTitleIcon } from "./notice-icons";
 import { NoticePoll } from "./notice-poll";
 import { NoticeReactionPicker, NoticeReactionTrigger, useReactionPicker, type ReactionPicker } from "./notice-reactions";
-import { NotificationCardMenu } from "./notification-card-menu";
+import { NotificationCardDelete } from "./notification-card-delete";
 import {
   audioListenOf,
   canHideNotification,
@@ -42,13 +42,13 @@ import {
 //
 // Ajustes da v3a (o produtor testou): a linha de baixo so com Reagir e a lixeira saiu. Reagir (ou a
 // pilula com a reacao) fica no fim da linha dos botoes (Acessar, ou Aceitar/Recusar) ou, sem ela, no fim
-// da linha de quem envia; o seletor abre na linha logo abaixo. A lixeira foi para o "⋯" do canto de cima
-// (NotificationCardMenu), longe do dedo; sem o "⋯" quando a equipe nao deixa excluir (allowHide). A
-// bolinha de nao lida foi para a margem da esquerda (como no YouTube): o canto da direita e do "⋯".
+// da linha de quem envia; o seletor abre na linha logo abaixo. Excluir foi para um botao pequeno no canto
+// de cima (NotificationCardDelete), que exclui na hora com o Desfazer; sem ele quando a equipe nao deixa
+// excluir (allowHide). A bolinha de nao lida foi para a margem da esquerda: o canto da direita e do botao.
 //
 // Cartao clicavel (docs/24 §1.2): um link decorativo (aria-hidden, fora do Tab) cobre o cartao por baixo
 // do conteudo; os dois filhos da grade deixam o toque passar e cada controle dentro (Ver mais, audio,
-// enquete, reacoes, resposta, o "⋯") volta a receber o toque. O link acessivel e um so: o botao, ou o
+// enquete, reacoes, resposta, excluir) volta a receber o toque. O link acessivel e um so: o botao, ou o
 // titulo (no "Só tocando na notificação", descrito pelo texto ao lado da seta). Nada interativo dentro
 // de um link. So desenha: quem busca, grava, marca como lida e navega e o painel. A previa do admin
 // desenha o mesmo cartao com `preview` (sem links, sem audio, sem efeitos) dentro de moldura inert
@@ -175,7 +175,7 @@ function CardAvatar({ item, schoolIconUrl, schoolLogoUrl }: { item: Notification
   );
 }
 
-/** Na margem da esquerda, na altura do meio do circulo (o canto da direita e do "⋯"). */
+/** Na margem da esquerda, na altura do meio do circulo (o canto da direita e do botao de excluir). */
 function UnreadDot() {
   return (
     <span className="pointer-events-none absolute left-[5px] top-[30px] z-[1] size-2 rounded-full bg-[var(--accent)]">
@@ -197,7 +197,7 @@ function NoticeMeta({
   sender,
   trailing
 }: {
-  /** Margem de cima no lugar do mt-1 (com o Reagir logo abaixo do "⋯", num aviso so com titulo). */
+  /** Margem de cima no lugar do mt-1 (com o Reagir logo abaixo do excluir, num aviso so com titulo). */
   className?: string;
   createdAt: string;
   hint: string | null;
@@ -281,7 +281,7 @@ export function NotificationCard(props: NotificationCardProps) {
   return props.item.kind === "notice" ? <NoticeCard {...props} /> : <CommentCard {...props} />;
 }
 
-/** `group/card`: o "⋯" aparece com o mouse sobre o cartao ou o foco dentro dele (ponteiro fino). */
+/** `group/card`: o excluir aparece com o mouse sobre o cartao ou o foco dentro dele (ponteiro fino). */
 const cardClassName = "group/card relative grid grid-cols-[40px_minmax(0,1fr)] gap-3 px-4 py-3.5";
 
 /**
@@ -337,7 +337,7 @@ function CommentCard({ accessPreviewMode, interaction, item, now, onHide, onOpen
         <CardAvatar item={item} schoolIconUrl={schoolIconUrl} schoolLogoUrl={schoolLogoUrl} />
       </span>
       <div className={cn(layerClassName, "min-w-0")}>
-        {/* O titulo reserva o canto do "⋯". */}
+        {/* O titulo reserva o canto do excluir. */}
         <p className={cn("text-sm leading-5 text-white", hidable && "pr-8")} id={titleId}>
           {link ? (
             <a
@@ -362,7 +362,7 @@ function CommentCard({ accessPreviewMode, interaction, item, now, onHide, onOpen
         </p>
         <CardError message={interaction?.hide?.error} />
       </div>
-      {hidable ? <NotificationCardMenu label={labels.more} onHide={onHide} preview={preview} /> : null}
+      {hidable ? <NotificationCardDelete label={labels.hide} onHide={onHide} preview={preview} /> : null}
       {unread ? <UnreadDot /> : null}
     </article>
   );
@@ -747,8 +747,8 @@ function NoticeCard({
       className={cn(cardClassName, unread && "bg-white/[0.035]", clickable && clickableCardClassName)}
       // Cartao "Pelo botão": clique solto (fora de botao e link) conta como abrir, tambem num cartao ja
       // lido pelo "Marcar todas" (a bolinha segue a leitura; o "abriu" e outro). No cartao clicavel o
-      // toque solto cai no link decorativo e vai para o destino. So o que esta dentro do cartao: o menu do
-      // "⋯" vai em portal e o clique nele ("Excluir notificação") sobe pelo React ate aqui.
+      // toque solto cai no link decorativo e vai para o destino. So o que esta dentro do cartao no DOM (um
+      // portal tambem sobe pelo React ate aqui).
       onClick={(event) => {
         const target = event.target;
 
@@ -769,7 +769,7 @@ function NoticeCard({
         <CardAvatar item={item} schoolIconUrl={schoolIconUrl} schoolLogoUrl={schoolLogoUrl} />
       </span>
       <div className={cn(clickable && layerClassName, "min-w-0")}>
-        {/* O icone e aria-hidden: o nome do cartao continua sendo exatamente o titulo. O titulo reserva o canto do "⋯". */}
+        {/* O icone e aria-hidden: o nome do cartao continua sendo exatamente o titulo. O titulo reserva o canto do excluir. */}
         <p className={cn("text-[15px] font-bold leading-5 text-white [overflow-wrap:anywhere]", hidable && "pr-8")} id={titleId}>
           <NoticeTitleIcon icon={item.icon} size="bell" />
           {plan.accessibleLink === "title" && link ? (
@@ -790,7 +790,7 @@ function NoticeCard({
         </p>
         <NoticeBody body={item.body} onRead={onRead} preview={preview} />
         <NoticeMeta
-          // Aviso so com titulo: o Reagir no fim desta linha ficaria colado no "⋯" do canto de cima.
+          // Aviso so com titulo: o Reagir no fim desta linha ficaria colado no excluir do canto de cima.
           className={reactionSlot === "meta" && hidable && !item.body.trim() ? "mt-3.5" : undefined}
           createdAt={item.createdAt}
           hint={meta.hint}
@@ -843,7 +843,7 @@ function NoticeCard({
         {reactionSlot === "response" ? reactionExtras : null}
         <CardError message={interaction?.hide?.error} />
       </div>
-      {hidable ? <NotificationCardMenu label={labels.more} onHide={onHide} preview={preview} /> : null}
+      {hidable ? <NotificationCardDelete label={labels.hide} onHide={onHide} preview={preview} /> : null}
       {unread ? <UnreadDot /> : null}
     </article>
   );

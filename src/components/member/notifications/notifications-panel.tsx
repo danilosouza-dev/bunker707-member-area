@@ -94,7 +94,7 @@ import {
 // responder, "Marcar todas") nao chega a pagina guardada do "Todas": ela deixa de valer e a proxima
 // abertura pede de novo antes de mostrar (reabrir nunca mostra uma notificacao excluida nem a leitura
 // velha). Reagir e votar so marcam como aberta (e tiram a bolinha) depois que o servidor aceitou: numa
-// falha o cartao continua como estava. O aviso em que a equipe nao deixa excluir nao tem o "⋯".
+// falha o cartao continua como estava. O aviso em que a equipe nao deixa excluir nao tem o botao de excluir.
 
 type ListState = {
   /** Hora do servidor na primeira pagina (limite do "visto" e do "Marcar todas"); "" antes de carregar. */
@@ -473,7 +473,7 @@ export function NotificationsPanel({
     }
   }, [list.nextCursor, list.items]);
 
-  // Excluiu: foco no Desfazer. Desfez (ou a exclusao falhou): foco no "⋯" do cartao que voltou; sem ele
+  // Excluiu: foco no Desfazer. Desfez (ou a exclusao falhou): foco no excluir do cartao que voltou; sem ele
   // (a equipe desligou a lixeira: 403), no link ou no primeiro botao do cartao, ou no titulo do painel.
   useLayoutEffect(() => {
     const target = focusAfterRef.current;
@@ -488,7 +488,7 @@ export function NotificationsPanel({
     const control =
       target.target === "undo"
         ? row?.querySelector<HTMLElement>("[data-undo-hide]")
-        : (row?.querySelector<HTMLElement>("[data-card-more]") ?? row?.querySelector<HTMLElement>("[data-card-link], button") ?? (row ? titleRef.current : null));
+        : (row?.querySelector<HTMLElement>("[data-card-delete]") ?? row?.querySelector<HTMLElement>("[data-card-link], button") ?? (row ? titleRef.current : null));
 
     if (control) {
       focusAfterRef.current = null;
@@ -817,7 +817,7 @@ export function NotificationsPanel({
     });
 
     if (outcome.failed) {
-      // A equipe desligou a lixeira depois que a lista chegou (403): o "⋯" some do cartao.
+      // A equipe desligou a lixeira depois que a lista chegou (403): o excluir some do cartao.
       if (outcome.error instanceof NotificationsRequestError && outcome.error.status === 403) {
         updateItem(item.id, withHideRefused);
       }

@@ -560,9 +560,8 @@ export function cardActionLabels(item: Pick<NotificationItem, "reactions" | "tit
   const value = item.reactions?.value ?? null;
 
   return {
+    /** O botao de excluir do canto do cartao (ajustes da v3a). */
     hide: `Excluir notificação “${title}”`,
-    /** O "⋯" do canto do cartao (ajustes da v3a): abre o menu com "Excluir notificação". */
-    more: `Mais opções da notificação “${title}”`,
     react: `Reagir à notificação “${title}”`,
     reaction: value ? `Sua reação a “${title}”: ${REACTION_LABELS[value]}. Mudar reação` : null
   };
@@ -576,12 +575,12 @@ export function allowHideOf(value: unknown): boolean {
   return value !== false;
 }
 
-/** O cartao mostra o "⋯" com "Excluir notificação"? Comentario sempre; aviso pelo que a equipe escolheu. */
+/** O cartao mostra o botao de excluir? Comentario sempre; aviso pelo que a equipe escolheu. */
 export function canHideNotification(item: { allowHide?: boolean | null; kind?: NotificationItem["kind"] }): boolean {
   return item.kind !== undefined && item.kind !== "notice" ? true : allowHideOf(item.allowHide);
 }
 
-/** O servidor recusou o excluir (403: a equipe desligou depois que a lista chegou): o "⋯" some do cartao. */
+/** O servidor recusou o excluir (403: a equipe desligou depois que a lista chegou): o excluir some do cartao. */
 export function withHideRefused<T extends object>(item: T): T {
   return { ...item, allowHide: false };
 }

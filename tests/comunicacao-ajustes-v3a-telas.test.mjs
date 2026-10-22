@@ -149,7 +149,7 @@ test("allowHide: muda depois do envio (nao trava como o audio e a enquete)", () 
   assert.equal("allowHide" in notices.SENT_NOTICE_COPY.locked, false);
 });
 
-test("allowHide: a previa mostra o '⋯' de excluir so quando o aluno pode excluir", () => {
+test("allowHide: a previa mostra o botao de excluir so quando o aluno pode excluir", () => {
   const ligado = notices.draftToNotificationItem(notificacao(), { createdAt });
   const desligado = notices.draftToNotificationItem(notificacao({ allowHide: false }), { createdAt });
   const antigo = notices.draftToNotificationItem(semLixeira(notificacao()), { createdAt });
@@ -157,7 +157,7 @@ test("allowHide: a previa mostra o '⋯' de excluir so quando o aluno pode exclu
   assert.equal(ligado.allowHide, true);
   assert.equal(bell.canHideNotification(ligado), true);
   assert.equal(desligado.allowHide, false);
-  assert.equal(bell.canHideNotification(desligado), false, "sem o '⋯' no cartao da previa");
+  assert.equal(bell.canHideNotification(desligado), false, "sem o excluir no cartao da previa");
   assert.equal(bell.canHideNotification(antigo), true, "conteudo sem o campo: como sempre foi");
 });
 

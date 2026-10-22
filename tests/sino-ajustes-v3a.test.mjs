@@ -3,7 +3,7 @@ import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
 // Ajustes da v3a no sino do aluno (docs/24; src/components/member/notifications/): a lixeira por
-// notificacao (allowHide: so o false desliga, comentario sempre pode, 403 tira o "⋯"), reagir e votar so
+// notificacao (allowHide: so o false desliga, comentario sempre pode, 403 tira o excluir), reagir e votar so
 // abrem a notificacao depois que o servidor aceitou, a memoria do sino com dono (o id do aluno: depois de
 // entrar com outra conta sem recarregar, nada da anterior aparece, nem a resposta atrasada de um pedido
 // dela) e a pagina guardada do "Todas" que deixa de valer quando algo muda com o filtro "Não lidas". O
@@ -73,11 +73,11 @@ test("lixeira por notificacao: so o false desliga; ausente ou nulo pode (aviso d
   assert.equal(model.canHideNotification({ allowHide: false, kind: "notice" }), false);
   assert.equal(model.canHideNotification({ allowHide: true, kind: "notice" }), true);
   assert.equal(model.canHideNotification({ kind: "notice" }), true, "aviso sem a chave (previa ou API antiga)");
-  assert.equal(model.canHideNotification({ allowHide: false, kind: "comment_reply" }), true, "comentario sempre tem o ⋯");
+  assert.equal(model.canHideNotification({ allowHide: false, kind: "comment_reply" }), true, "comentario sempre tem o excluir");
   assert.equal(model.canHideNotification({ allowHide: false, kind: "comment_mention" }), true);
 });
 
-test("o servidor recusou o excluir (403): o item perde o ⋯ sem mexer no resto", () => {
+test("o servidor recusou o excluir (403): o item perde o excluir sem mexer no resto", () => {
   const item = { allowHide: true, id: "n1", kind: "notice", readAt: null, title: "Aula nova" };
   const recusado = model.withHideRefused(item);
 
@@ -87,9 +87,9 @@ test("o servidor recusou o excluir (403): o item perde o ⋯ sem mexer no resto"
   assert.equal(item.allowHide, true, "o original nao muda");
 });
 
-test("o ⋯ leva o titulo no nome (numa lista de botoes, nunca vinte 'Mais opções' iguais)", () => {
-  assert.equal(model.cardActionLabels({ reactions: null, title: " Aula nova " }).more, "Mais opções da notificação “Aula nova”");
-  assert.equal(model.cardActionLabels({ reactions: null, title: "Aula nova" }).hide, "Excluir notificação “Aula nova”");
+test("o excluir do canto leva o titulo no nome (numa lista de botoes, nunca vinte 'Excluir notificação' iguais)", () => {
+  assert.equal(model.cardActionLabels({ reactions: null, title: " Aula nova " }).hide, "Excluir notificação “Aula nova”");
+  assert.equal("more" in model.cardActionLabels({ reactions: null, title: "Aula nova" }), false, "sem o menu de um item so");
 });
 
 // --- Reagir e votar abrem so depois do servidor ---------------------------------------------------
