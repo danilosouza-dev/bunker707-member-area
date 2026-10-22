@@ -83,14 +83,14 @@ test("acoes da notificacao enviada: Editar acima de 500 alunos so com messaging.
   assert.equal(campaign.noticeRecipients({ audience_count: null, recipients_count: null }), 0);
 });
 
-test("acoes do pop-up: no ar, agendado pela janela, encerrado pela janela, pausado e encerrado (com Mostrar de novo so em 'Uma vez')", () => {
+test("acoes do pop-up: no ar, agendado pela janela, encerrado pela janela, pausado e encerrado (v3b-1: Mostrar de novo em qualquer 'Quantas vezes')", () => {
   const acoes = (extra, perms = todas, more) => campaign.availableNoticeActions(timing({ kind: "popup", ...extra }), now, perms, more);
   const umaVez = { popupRepeat: "once" };
   const ateClicar = { popupRepeat: "until_action" };
 
-  assert.deepEqual(acoes({ status: "active" }), ["view_report", "edit", "pause", "duplicate", "end", "delete"], "sem extra: nada de Mostrar de novo");
+  assert.deepEqual(acoes({ status: "active" }), ["view_report", "edit", "pause", "reshow", "duplicate", "end", "delete"], "sem extra: Mostrar de novo tambem");
   assert.deepEqual(acoes({ status: "active" }, todas, umaVez), ["view_report", "edit", "pause", "reshow", "duplicate", "end", "delete"]);
-  assert.deepEqual(acoes({ status: "active" }, todas, ateClicar), ["view_report", "edit", "pause", "duplicate", "end", "delete"], "ate clicar: quem fechou ja volta em 24 h");
+  assert.deepEqual(acoes({ status: "active" }, todas, ateClicar), ["view_report", "edit", "pause", "reshow", "duplicate", "end", "delete"], "Mais de uma vez: a contagem recomeca");
   assert.deepEqual(acoes({ status: "active" }, publica, umaVez), ["view_report", "edit", "pause", "reshow", "duplicate", "end", "delete"], "os 500 o servidor confere");
   assert.deepEqual(
     acoes({ startsAt: iso(now + HOUR), status: "active" }, todas, umaVez),
@@ -98,9 +98,9 @@ test("acoes do pop-up: no ar, agendado pela janela, encerrado pela janela, pausa
     "janela ainda por comecar: ninguem viu"
   );
   assert.deepEqual(acoes({ endsAt: iso(now - HOUR), status: "active" }, todas, umaVez), ["view_report", "duplicate", "delete"], "janela terminou");
-  assert.deepEqual(acoes({ status: "paused" }), ["view_report", "edit", "resume", "duplicate", "end", "delete"]);
+  assert.deepEqual(acoes({ status: "paused" }), ["view_report", "edit", "resume", "reshow", "duplicate", "end", "delete"]);
   assert.deepEqual(acoes({ status: "paused" }, todas, umaVez), ["view_report", "edit", "resume", "reshow", "duplicate", "end", "delete"]);
-  assert.deepEqual(acoes({ status: "paused" }, todas, ateClicar), ["view_report", "edit", "resume", "duplicate", "end", "delete"]);
+  assert.deepEqual(acoes({ status: "paused" }, todas, ateClicar), ["view_report", "edit", "resume", "reshow", "duplicate", "end", "delete"]);
   assert.deepEqual(acoes({ status: "ended" }, todas, umaVez), ["view_report", "duplicate", "delete"]);
 
   // Editar, pausar, mostrar de novo, encerrar e excluir o pop-up no ar mudam o que o aluno ve: so quem publica.
@@ -185,7 +185,7 @@ test("frase de revisao: notificacao agora ou agendada; pop-up com e sem janela, 
 });
 
 /* ------------------------------------------------------------------------------------------------
- * Escolha do pop-up e eventos
+ * Eventos do pop-up (quando ele abre: popup-display-model.ts, tests/pop-ups-v3b1-modelo.test.mjs)
  * ---------------------------------------------------------------------------------------------- */
 
 const entrega = (campaignId, extra = {}) => ({
@@ -198,57 +198,6 @@ const entrega = (campaignId, extra = {}) => ({
   snoozeCount: 0,
   snoozedUntil: null,
   ...extra
-});
-const noAr = (id, extra = {}) => ({ allowSnooze: true, id, repeat: "once", startsAt: now - 10 * HOUR, ...extra });
-const escolhe = (input) => campaign.pickPopup({ deliveries: [], live: [], now, ...input });
-
-test("pop-up: sem limite entre pop-ups (docs/24 §10); so com linha elegivel; o mais recente primeiro (empate pelo id)", () => {
-  const live = [noAr("a", { startsAt: now - 30 * HOUR }), noAr("c", { startsAt: now - HOUR }), noAr("b", { startsAt: now - HOUR })];
-  const deliveries = [entrega("a"), entrega("b"), entrega("c")];
-
-  assert.equal(escolhe({ deliveries, live }), "b", "c e b comecaram juntos: b antes pelo id");
-  assert.equal(
-    escolhe({ deliveries: [entrega("a"), entrega("b", { impressions: 1, lastSeenAt: now - HOUR }), entrega("c")], live }),
-    "c",
-    "viu outro pop-up ha 1 h: o proximo aparece mesmo assim"
-  );
-  assert.equal(escolhe({ deliveries: [entrega("a")], live }), "a", "sem linha nao ha pop-up");
-  assert.equal(escolhe({ deliveries: [entrega("a", { eligible: false })], live }), null, "saiu do segmento");
-  assert.equal(escolhe({ deliveries, live: [] }), null);
-});
-
-test("pop-up: clicado, 'Não mostrar de novo' e 'Lembrar depois' ainda valendo ficam de fora; 'Uma vez' visto nao volta e 'Até o aluno clicar' volta em 24 h", () => {
-  const live = [noAr("a")];
-
-  assert.equal(escolhe({ deliveries: [entrega("a", { clickedAt: now - 48 * HOUR })], live }), null);
-  assert.equal(escolhe({ deliveries: [entrega("a", { dismissedAt: now - 48 * HOUR })], live }), null);
-  assert.equal(escolhe({ deliveries: [entrega("a", { snoozedUntil: now + HOUR })], live }), null);
-  assert.equal(escolhe({ deliveries: [entrega("a", { snoozedUntil: now })], live }), "a", "o lembrete venceu");
-  assert.equal(escolhe({ deliveries: [entrega("a", { impressions: 1, lastSeenAt: now - 72 * HOUR })], live }), null, "uma vez");
-
-  const ateClicar = [noAr("a", { repeat: "until_action" })];
-  assert.equal(escolhe({ deliveries: [entrega("a", { impressions: 3, lastSeenAt: now - 25 * HOUR })], live: ateClicar }), "a");
-  assert.equal(escolhe({ deliveries: [entrega("a", { impressions: 3, lastSeenAt: now - 2 * HOUR })], live: ateClicar }), null);
-});
-
-test("pop-up 'Uma vez' com 'Lembrar depois': volta quando o lembrete vence; cada lembrete vale uma vez a mais; fechar sem lembrar some", () => {
-  const live = [noAr("a")];
-  const visto = (extra) => entrega("a", { impressions: 1, lastSeenAt: now - 25 * HOUR, ...extra });
-
-  assert.equal(escolhe({ deliveries: [visto({ snoozeCount: 1, snoozedUntil: now - HOUR })], live }), "a", "viu, pediu para lembrar, o lembrete venceu");
-  assert.equal(escolhe({ deliveries: [visto({ snoozeCount: 1, snoozedUntil: now + HOUR })], live }), null, "o lembrete ainda vale");
-  assert.equal(
-    escolhe({ deliveries: [visto({ impressions: 2, snoozeCount: 1, snoozedUntil: now - 2 * HOUR })], live }),
-    null,
-    "lembrou uma vez e ja viu de novo: some"
-  );
-  assert.equal(
-    escolhe({ deliveries: [visto({ impressions: 2, snoozeCount: 2, snoozedUntil: now - HOUR })], live }),
-    "a",
-    "segundo lembrete vencido: mais uma vez"
-  );
-  assert.equal(escolhe({ deliveries: [visto({ impressions: 3, snoozeCount: 2, snoozedUntil: now - HOUR })], live }), null, "no maximo 2 lembretes");
-  assert.equal(escolhe({ deliveries: [visto({})], live }), null, "fechou sem lembrar depois: nao volta");
 });
 
 test("versao do editor: o mesmo instante em qualquer formato ISO, ate o microssegundo", () => {
@@ -288,47 +237,14 @@ test("eventos do pop-up: impressao conta e marca a primeira vez; clique e 'Não 
 });
 
 /* ------------------------------------------------------------------------------------------------
- * v3a (docs/24 §2.4 e §4.9): "Mostrar de novo para quem já viu", so no pop-up "Uma vez"
+ * v3a (docs/24 §2.4 e §4.9): "Mostrar de novo para quem já viu" (v3b-1: em qualquer "Quantas vezes"; quem
+ * a RPC zera e o que volta depois: tests/pop-ups-v3b1-modelo.test.mjs)
  * ---------------------------------------------------------------------------------------------- */
 
-// Como getEligiblePopup: o ultimo pop-up visto e o maior lastSeenAt das linhas do aluno (este incluido).
-const escolheComoNoServidor = ({ deliveries, live }) =>
-  campaign.pickPopup({
-    deliveries,
-    live,
-    now
-  });
-const zerado = (extra) => ({ ...extra, impressionsBeforeReshow: extra.impressions ?? 0, snoozesBeforeReshow: Math.min(extra.snoozeCount ?? 0, 1), snoozeCount: Math.min(extra.snoozeCount ?? 0, 1), snoozedUntil: null });
-
-test("mostrar de novo: 'Uma vez' visto ha 25 h nao volta; depois de zerado volta, ate visto ha 2 h (sem limite entre pop-ups)", () => {
-  const live = [noAr("a")];
-  const fechou25h = { impressions: 1, lastSeenAt: now - 25 * HOUR };
-
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", fechou25h)], live }), null, "uma vez: quem fechou nao ve de novo");
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado(fechou25h))], live }), "a", "zerado: conta como novo");
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ impressions: 1, lastSeenAt: now - 2 * HOUR }))], live }), "a", "zerado volta na hora (docs/24 §10)");
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { ...zerado(fechou25h), impressions: 2, lastSeenAt: now - 25 * HOUR })], live }), null, "viu de novo depois de zerado: some");
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ ...fechou25h, clickedAt: now - 25 * HOUR }))], live }), null, "clicou: nunca");
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ ...fechou25h, dismissedAt: now - 25 * HOUR }))], live }), null, "Não mostrar de novo: nunca");
-});
-
-test("mostrar de novo: 'Até o aluno clicar' volta 24 h depois de ter visto este pop-up, sem zerar nada", () => {
-  const ateClicar = [noAr("a", { repeat: "until_action" })];
-
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { impressions: 1, lastSeenAt: now - 2 * HOUR })], live: ateClicar }), null);
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { impressions: 1, lastSeenAt: now - 25 * HOUR })], live: ateClicar }), "a");
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { clickedAt: now - 30 * HOUR, impressions: 1, lastSeenAt: now - 30 * HOUR })], live: ateClicar }), null);
-  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { dismissedAt: now - 30 * HOUR, impressions: 1, lastSeenAt: now - 30 * HOUR })], live: ateClicar }), null);
-});
-
 test("mostrar de novo: 'Lembrar depois' conta desde o zerar (mais 2 vezes); sem zerar, a regra da v1 exatamente", () => {
-  const live = [noAr("a")];
   // Zerado com um lembrete antes: snoozeCount 1 e a base 1.
   const depoisDoZerar = (extra) => entrega("a", { impressions: 3, impressionsBeforeReshow: 3, lastSeenAt: now - 25 * HOUR, snoozeCount: 1, snoozesBeforeReshow: 1, ...extra });
 
-  assert.equal(escolheComoNoServidor({ deliveries: [depoisDoZerar({})], live }), "a");
-  assert.equal(escolheComoNoServidor({ deliveries: [depoisDoZerar({ impressions: 4 })], live }), null, "viu uma vez depois de zerado");
-  assert.equal(escolheComoNoServidor({ deliveries: [depoisDoZerar({ impressions: 4, snoozeCount: 2, snoozedUntil: now - HOUR })], live }), "a", "lembrou: mais uma vez");
   assert.equal(campaign.canSnooze(depoisDoZerar({}), true), true);
   assert.equal(campaign.canSnooze(depoisDoZerar({ snoozeCount: 2 }), true), true, "um lembrete desde o zerar");
   assert.equal(campaign.canSnooze(depoisDoZerar({ snoozeCount: 3 }), true), false, "dois desde o zerar: acabou");
@@ -344,23 +260,41 @@ test("mostrar de novo: 'Lembrar depois' conta desde o zerar (mais 2 vezes); sem 
     const v1 = entrega("a", { lastSeenAt: extra.impressions ? now - 25 * HOUR : null, ...extra });
     const v3 = { ...v1, impressionsBeforeReshow: 0, snoozesBeforeReshow: 0 };
 
-    assert.equal(campaign.pickPopup({ deliveries: [v3], live, now }), campaign.pickPopup({ deliveries: [v1], live, now }), JSON.stringify(extra));
     assert.equal(campaign.canSnooze(v3, true), campaign.canSnooze(v1, true));
   }
 });
 
-test("mostrar de novo: quem a RPC zera (no segmento, viu, nao clicou, nao dispensou e 'Uma vez' pularia)", () => {
-  const visto = (extra) => entrega("a", { impressions: 1, lastSeenAt: now - 25 * HOUR, ...extra });
+test("'Lembrar depois' (v3b-1): volta no 'Volta em' do pop-up; sem o valor, 24 h; fechar continua sem gravar nada", () => {
+  assert.deepEqual(campaign.popupEventPatch(entrega("a"), "snoozed", { allowSnooze: true, now, snoozeMinutes: 30 }), { snooze_count: 1, snoozed_until: iso(now + 30 * 60_000) });
+  assert.deepEqual(campaign.popupEventPatch(entrega("a", { snoozeCount: 1 }), "snoozed", { allowSnooze: true, now, snoozeMinutes: 10_080 }), {
+    snooze_count: 2,
+    snoozed_until: iso(now + 7 * 24 * HOUR)
+  });
+  assert.deepEqual(campaign.popupEventPatch(entrega("a"), "snoozed", { allowSnooze: true, now }), { snooze_count: 1, snoozed_until: iso(now + 24 * HOUR) }, "sem o valor: 24 h");
+  assert.equal(campaign.popupEventPatch(entrega("a", { snoozeCount: 2 }), "snoozed", { allowSnooze: true, now, snoozeMinutes: 5 }), null, "continua no maximo 2 vezes");
+  assert.deepEqual(campaign.popupEventPatch(entrega("a"), "closed", { allowSnooze: true, now, snoozeMinutes: 30 }), {});
+});
 
-  assert.equal(campaign.reshowSkipped(visto({})), true, "viu e fechou");
-  assert.equal(campaign.reshowSkipped(visto({ impressions: 2, snoozeCount: 1 })), true, "viu de novo depois do lembrete");
-  assert.equal(campaign.reshowSkipped(visto({ eligible: false })), false, "saiu do segmento");
-  assert.equal(campaign.reshowSkipped(visto({ snoozeCount: 1, snoozedUntil: now + HOUR })), false, "viu uma vez e lembrou: 'Uma vez' ainda mostra");
-  assert.equal(campaign.reshowSkipped(visto({ clickedAt: now - HOUR })), false, "clicou");
-  assert.equal(campaign.reshowSkipped(visto({ dismissedAt: now - HOUR })), false, "Não mostrar de novo");
-  assert.equal(campaign.reshowSkipped(entrega("a")), false, "ainda nao viu");
-  assert.equal(campaign.reshowSkipped(visto({ impressionsBeforeReshow: 1 })), false, "ja zerado e ainda nao viu de novo");
-  assert.equal(campaign.reshowSkipped(visto({ impressions: 2, impressionsBeforeReshow: 1 })), true, "zerado e viu de novo");
+test("frase de revisao (v3b-1): o pop-up padrao fica exatamente como antes; onde, quando e quantas vezes entram como partes", () => {
+  const revisao = (extra) =>
+    campaign.describeNoticeReview({ audienceCount: 318, kind: "popup", repeat: "once", schedule: { mode: "now" }, window: { endsAt: "2026-10-22T02:59:00.000Z", startsAt: "2026-10-14T12:00:00.000Z" }, ...extra });
+
+  assert.equal(revisao({}), "Pop-up para 318 alunos, de 14/10/2026 às 09:00 a 21/10/2026 às 23:59, no máximo 1 vez.");
+  assert.equal(revisao({ popup: { frequency: "no máximo 1 vez", placement: null } }), "Pop-up para 318 alunos, de 14/10/2026 às 09:00 a 21/10/2026 às 23:59, no máximo 1 vez.");
+  assert.equal(revisao({ popup: null }), "Pop-up para 318 alunos, de 14/10/2026 às 09:00 a 21/10/2026 às 23:59, no máximo 1 vez.", "null = a frase da v1");
+  assert.equal(
+    revisao({
+      popup: { frequency: "até 3 vezes por dia, com pelo menos 2 horas entre uma vez e outra, até o aluno clicar", placement: "em qualquer página, menos Perfil, logo ao abrir" },
+      repeat: "until_action",
+      window: { endsAt: null, startsAt: null }
+    }),
+    "Pop-up para 318 alunos, em qualquer página, menos Perfil, logo ao abrir, a partir de agora, sem data para acabar, até 3 vezes por dia, com pelo menos 2 horas entre uma vez e outra, até o aluno clicar."
+  );
+  assert.equal(
+    campaign.describeNoticeReview({ audienceCount: 318, kind: "inbox", popup: { frequency: "x", placement: "y" }, repeat: "once", schedule: { mode: "now" }, window: { endsAt: null, startsAt: null } }),
+    "Notificação para 318 alunos, enviada agora.",
+    "a notificacao ignora as partes do pop-up"
+  );
 });
 
 test("'Lembrar depois': 24 h, ate 2 vezes, e so quando o aviso permite", () => {
@@ -481,6 +415,7 @@ test("rascunho vazio de cada tipo: todos os alunos, agora, sem janela, uma vez e
     image: null,
     kind: "popup",
     poll: null,
+    popup: { close: "any", delaySeconds: 3, exclude: [], frequency: { mode: "once" }, pages: ["home"], snoozeMinutes: 1440, trigger: "page_load" },
     reactions: false,
     repeat: "once",
     response: null,
@@ -491,6 +426,10 @@ test("rascunho vazio de cada tipo: todos os alunos, agora, sem janela, uma vez e
     window: { endsAt: null, startsAt: null }
   });
   assert.equal(schemas.emptyNoticeDraft("inbox").reactions, true, "v3a: a notificacao nova ja permite reacoes");
+  assert.equal("popup" in schemas.emptyNoticeDraft("inbox"), false, "v3b-1: a notificacao nao leva a configuracao do pop-up");
+  const primeiro = schemas.emptyNoticeDraft("popup");
+  primeiro.popup.pages.push("profile");
+  assert.deepEqual(schemas.emptyNoticeDraft("popup").popup.pages, ["home"], "cada rascunho com as proprias listas");
   assert.equal(schemas.emptyNoticeDraft("inbox").poll, null);
   assert.deepEqual(problemas(notificacao()), []);
   assert.deepEqual(problemas(popup()), []);

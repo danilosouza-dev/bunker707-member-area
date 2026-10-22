@@ -9,7 +9,8 @@ import test from "node:test";
 // - a 202610220001 passa inteira pelo MCP: nada de drop, nada de delete, nenhum gatilho, toda constraint
 //   dentro de "if not exists" e a funcao chamada antes de quem a chama (o corpo SQL e conferido ao criar);
 // - nada para anon/authenticated: cada RPC nova so para service_role, com a assinatura exata;
-// - as rotas do sino leem a sessao pelas claims do JWT e as quatro escritas do aluno tem o limite por minuto.
+// - as rotas do sino leem a sessao pelas claims do JWT e as quatro escritas do aluno tem o limite por minuto;
+//   as do pop-up (show e eventos, v3b-1) tambem, com a cota propria "popup:".
 
 const migrations = new URL("../supabase/migrations/", import.meta.url);
 const read = (name) => readFile(new URL(name, migrations));
@@ -193,8 +194,12 @@ async function routeFiles(directory) {
   return files;
 }
 
-test("guarda: toda rota do sino e o beacon do pop-up leem a sessao pelas claims; as quatro escritas do aluno tem limite", async () => {
-  const files = [...(await routeFiles(new URL("../src/app/api/notifications/", import.meta.url))), new URL("../src/app/api/popups/[id]/events/route.ts", import.meta.url)];
+test("guarda: toda rota do sino e as do pop-up (show e eventos) leem a sessao pelas claims; as escritas do aluno tem limite", async () => {
+  const files = [
+    ...(await routeFiles(new URL("../src/app/api/notifications/", import.meta.url))),
+    new URL("../src/app/api/popups/[id]/events/route.ts", import.meta.url),
+    new URL("../src/app/api/popups/[id]/show/route.ts", import.meta.url)
+  ];
   const relative = (url) => decodeURIComponent(url.pathname).replace(/^.*\/src\/app\//, "");
 
   for (const name of ["notifications/[id]/reaction/route.ts", "notifications/[id]/poll/route.ts", "notifications/[id]/hide/route.ts"]) {
@@ -209,6 +214,15 @@ test("guarda: toda rota do sino e o beacon do pop-up leem a sessao pelas claims;
 
     if (/\[id\]\/(reaction|poll|hide|response)\/route\.ts$/.test(relative(url))) {
       assert.match(source, /\btakeStudentWrite\b/, relative(url));
+    }
+
+    // v3b-1 (docs/25 §5.1): o pop-up tem a sua cota de 30 por minuto (chave "popup:"), tirada antes de ler o corpo.
+    if (/popups\/\[id\]\/(show|events)\/route\.ts$/.test(relative(url))) {
+      const limit = source.indexOf("takeStudentWrite(`popup:${auth.user.id}`)");
+
+      assert.ok(limit > 0, `${relative(url)}: takeStudentWrite com a chave popup:`);
+      assert.ok(limit < source.search(/\breadBoundedJson[<(]/), `${relative(url)}: o limite vem antes de ler o corpo`);
+      assert.match(source, /"Retry-After"/, relative(url));
     }
   }
 });

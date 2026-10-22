@@ -104,7 +104,8 @@ test("guarda: a 202610220001 ja aplicada na nuvem nao muda; os ajustes sao um ar
   }
 
   const names = (await readdir(migrations)).filter((name) => name.startsWith("2026102200"));
-  assert.deepEqual(names.sort(), ["202610220001_communication_v3a.sql", "202610220002_communication_v3a_ajustes.sql"]);
+  // A v3b-1 (202610220003) vem depois, num arquivo proprio (tests/comunicacao-v3b1.guard.test.mjs).
+  assert.deepEqual(names.sort(), ["202610220001_communication_v3a.sql", "202610220002_communication_v3a_ajustes.sql", "202610220003_communication_v3b1.sql"]);
 });
 
 test("guarda: 202610220002 sem delete, sem gatilho; coluna e constraint dentro de if not exists", () => {

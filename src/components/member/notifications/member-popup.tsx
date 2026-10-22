@@ -12,10 +12,11 @@ import { NoticeAudioPlayer } from "./notice-audio-player";
 import { NoticeTitleIcon } from "./notice-icons";
 import { resolveNotificationLink, type NotificationLink } from "./notifications-model";
 
-// Pop-up da home do aluno (docs/22 §1.3; docs/24 §10): so na home (nunca na aula), um de cada vez e sem
-// limite entre pop-ups (cada um segue a sua regra; o servidor escolhe qual e quando), 3 s depois
-// de abrir a pagina e so quando nada mais esta aberto por cima e a aba esta visivel. "Lembrar depois"
-// (24 h, ate 2 vezes, se o aviso permitir), "Não mostrar de novo" e fechar (X, Esc ou fora).
+// Pop-up do aluno (docs/22 §1.3; v3b-1 em docs/25): nas paginas, no momento e na frequencia que a equipe
+// escolheu, um de cada vez, so quando nada mais esta aberto por cima e a aba esta visivel (na aula, nunca
+// com o nosso player tocando). "Lembrar depois" (volta no tempo escolhido, ate 2 vezes, se o aviso
+// permitir), "Não mostrar de novo" e fechar: no X, no Esc ou clicando fora, ou "Só no X" (o Esc continua
+// fechando; um toque fora so faz o X pulsar). O X tem 36 px visiveis e 44 px de toque.
 //
 // Tres partes: MemberPopupCard (aqui) so desenha; a previa do admin usa o mesmo cartao com `preview`,
 // dentro de moldura inert reduzida, por isso a largura usa `cqw` e o respiro interno responde ao
@@ -30,6 +31,8 @@ export type MemberPopupCardProps = {
   accessPreviewMode?: AccessPreviewMode;
   /** id do texto (aria-describedby do dialogo). */
   bodyId?: string;
+  /** "Só no X": o toque fora faz o X pulsar por 300 ms (nada sob prefers-reduced-motion). */
+  nudgeClose?: boolean;
   onClose?: () => void;
   onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink) => void;
   onDismiss?: () => void;
@@ -85,6 +88,7 @@ function PopupCta({
 export function MemberPopupCard({
   accessPreviewMode,
   bodyId,
+  nudgeClose = false,
   onClose,
   onCta,
   onDismiss,
@@ -96,8 +100,11 @@ export function MemberPopupCard({
   const image = popup.image?.url ? popup.image : null;
   const snoozeClassName = memberButtonClassName({ className: "-ml-3", size: "sm", variant: "ghost" });
   const dismissClassName = memberButtonClassName({ className: "-mr-3 ml-auto text-zinc-400", size: "sm", variant: "ghost" });
+  // 36 px visiveis e 44 px de toque (a caixa invisivel do before: passa 4 px de cada lado). O pulso usa a
+  // propriedade `scale` (Tailwind 4), por isso ela entra na transicao.
   const closeClassName = cn(
-    "absolute right-3 top-3 z-10 grid size-9 place-items-center rounded-full bg-black/55 text-white backdrop-blur transition-colors hover:bg-black/75 motion-reduce:transition-none",
+    "absolute right-3 top-3 z-10 grid size-9 place-items-center rounded-full bg-black/55 text-white backdrop-blur transition-[background-color,scale] duration-150 hover:bg-black/75 motion-reduce:transition-none before:absolute before:-inset-1 before:rounded-full before:content-['']",
+    nudgeClose && "motion-safe:scale-[1.12]",
     focusRing
   );
 

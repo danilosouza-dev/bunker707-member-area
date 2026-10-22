@@ -328,3 +328,37 @@ v2 (colunas novas com padrao; nenhuma linha fica excluida antes das rotas novas)
 
 **Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
 trocar o app. Depois, a rodada do `carga` com o sino novo (docs/20 §12.1; meta de tempo de servidor ate 20 ms).
+
+### 9.3 Comunicacao v3b-1: migracao `202610220003` antes do deploy (22/10/2026)
+
+A PR da Comunicacao v3b-1 "Pop-ups: frequencia, paginas e como fechar" (`docs/25`) traz
+`supabase/migrations/202610220003_communication_v3b1.sql`. As `202610200001`, `202610200002`, `202610210001`,
+`202610220001` e `202610220002` ja estao aplicadas no Supabase da nuvem de teste e nao mudam.
+
+Regra: **a 0003 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, o app novo para mais
+que os pop-ups: o admin mostra o aviso de banco desatualizado (as colunas novas estao em `CAMPAIGN_COLUMNS`), o resumo
+responde `popups: null`, o `show` responde 404 e **o job `comunicacao` do tick falha** (le as campanhas com
+`CAMPAIGN_COLUMNS`), parando notificacoes agendadas, seguintes e fluxos ate a migracao. O sino continua. A migracao
+sozinha nao atrapalha o app da v3a (colunas com padrao = o comportamento de antes; a funcao de reinicio mantem o
+contrato).
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**:
+
+1. conferir que ela ainda nao esta la: `list_migrations` (com `202610220002`, sem `202610220003`);
+2. secoes 1 a 6 pelo MCP do Supabase, **na ordem do arquivo**, `execute_sql` **uma secao por chamada** (a secao 2
+   usa a funcao da 1; a secao 4, que valida o check de `campaign_deliveries`, vai sozinha para a leitura da tabela
+   nao segurar o `add column` da 3), ou `apply_migration` com o arquivo inteiro, nome `communication_v3b1`. Nao ha
+   `drop`, `delete` nem gatilho: nenhuma parte precisa do SQL Editor;
+3. conferir com as consultas do cabecalho da migracao (os pop-ups de antes em `page_load`, `null`, `any`, `1440`;
+   7 constraints `campaign%v3b`, todas `convalidated = true`; 2 funcoes; `popup_repeat` fora da funcao de reinicio) e
+   `list_migrations` com `202610220003`. Se foi por `execute_sql` (que nao grava a versao):
+   `insert into supabase_migrations.schema_migrations (version, name) values ('202610220003', 'communication_v3b1') on conflict do nothing;`
+4. a idempotencia foi conferida no banco local (segunda aplicacao com `psql` sem erro, so "already exists,
+   skipping"): reaplicar uma secao que travou no meio e seguro;
+5. fazer o merge e seguir o roteiro do `docs/25` §10;
+6. **depois do merge, nao editar pop-ups pela previa de uma PR mais antiga** (criada antes da v3b-1): ela usa o mesmo
+   banco, e salvar um pop-up "Mais de uma vez" como o "Uma vez" da v3a fere `campaigns_popup_frequency_v3b` (a previa
+   antiga mostra o erro generico; o app novo sempre grava `popup_repeat` e `popup_frequency` juntos).
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
+trocar o app.

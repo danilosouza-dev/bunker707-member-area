@@ -5,6 +5,9 @@
 // tests/comunicacao-admin-modelo.test.mjs carrega direto pelo Node e as telas usam as mesmas regras.
 // v2 (docs/23): as dicas de "Quem envia", o icone com a cor sugerida, as pilulas de "Fica no sino por",
 // a previa com quem envia, o "Termina em" e o audio ouvido, e o funil com "Abriram" e o audio.
+// v3b-1 (docs/25 §2.1, §2.3 e §2.4): o pop-up deixa de ser "da home" nos textos, o rascunho leva a
+// configuracao do pop-up (`popup`), "Mostrar de novo" em qualquer "Quantas vezes" (textos por como para de
+// aparecer), os toasts com o "até 1 minuto" e as linhas de aviso do pop-up no ar.
 
 import {
   AUDIENCE_LIMITS,
@@ -63,6 +66,17 @@ import {
   type NoticeIconId
 } from "../../../../server/communications/message-meta";
 import { AUDIO_HEARD_SLOTS } from "../../../../server/communications/notification-model";
+// v3b-1 (docs/25): onde, quando e quantas vezes o pop-up aparece, "Lembrar depois" e como fecha.
+import {
+  canonicalPopupSettings,
+  canonicalPatterns,
+  repeatOfFrequency,
+  sameFrequency,
+  type PopupFrequency,
+  type PopupSettings,
+  type PopupStopOn
+} from "../../../../server/communications/popup-display-model";
+import { popupSettingsOfDraft } from "./popup-editor-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Enderecos e filtros
@@ -411,7 +425,7 @@ function deleteConfirm(notice: {
   if (notice.kind === "popup" && notice.situation === "active") {
     return {
       confirmLabel: "Excluir pop-up",
-      description: "O pop-up sai da home de todos os alunos agora e o aviso sai desta lista, com o relatório. Não dá para desfazer.",
+      description: "O pop-up para de aparecer para todos os alunos agora e o aviso sai desta lista, com o relatório. Não dá para desfazer.",
       destructive: true
     };
   }
@@ -419,7 +433,7 @@ function deleteConfirm(notice: {
   if (notice.kind === "popup" && (notice.situation === "paused" || notice.situation === "scheduled")) {
     return {
       confirmLabel: "Excluir pop-up",
-      description: "O pop-up não volta para a home e o aviso sai desta lista, com o relatório. Não dá para desfazer.",
+      description: "O pop-up não volta a aparecer e o aviso sai desta lista, com o relatório. Não dá para desfazer.",
       destructive: true
     };
   }
@@ -454,7 +468,7 @@ export function noticeActionConfirm(
         description:
           notice.kind === "inbox"
             ? `A notificação vai para o sino de ${formatStudentCount(notice.audienceCount)} (ou na data agendada). A contagem é refeita na hora de publicar.`
-            : `O pop-up entra na home de ${formatStudentCount(notice.audienceCount)}. A contagem é refeita na hora de publicar.`,
+            : `O pop-up passa a aparecer para ${formatStudentCount(notice.audienceCount)}, nas páginas e no momento escolhidos. A contagem é refeita na hora de publicar.`,
         destructive: false,
         title: `Aprovar “${title}”?`
       };
@@ -468,7 +482,7 @@ export function noticeActionConfirm(
     case "end":
       return {
         confirmLabel: "Encerrar pop-up",
-        description: "O pop-up sai da home de todos os alunos agora e não volta. Para mostrar de novo, duplique.",
+        description: "O pop-up para de aparecer para todos os alunos agora e não volta. Para mostrar de novo, duplique.",
         destructive: true,
         title: `Encerrar “${title}”?`
       };
@@ -489,8 +503,9 @@ export function noticeActionConfirm(
     case "reshow":
       return {
         confirmLabel: "Mostrar de novo",
+        // v3b-1: vale em qualquer "Quantas vezes" (quem clicou volta so nos pop-ups que param quando terminam).
         description:
-          "O pop-up volta a aparecer para quem já viu e não clicou. Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver.",
+          "O pop-up volta a contar como novo para quem já viu: a contagem de “Quantas vezes” começa de novo. Quem escolheu “Não mostrar de novo” continua como está, e quem clicou no botão também (menos nos pop-ups que só param quando terminam).",
         destructive: false,
         title: `Mostrar “${title}” de novo?`
       };
@@ -522,7 +537,7 @@ export function deletedNoticeToast(input: { kind: CampaignKind; removed?: number
   }
 
   if (input.kind === "popup" && input.situation === "active") {
-    return "Pop-up excluído. Ele saiu da home.";
+    return "Pop-up excluído. Ele não aparece mais para os alunos.";
   }
 
   if (input.kind === "popup" && (input.situation === "paused" || input.situation === "scheduled")) {
@@ -537,12 +552,22 @@ export function deleteFollowUpsLabel(sent: number) {
   return `Excluir também as notificações seguintes que já saíram (${formatInteger(sent)})`;
 }
 
-/** Toast de "Mostrar de novo para quem já viu" (v3a): quantos voltam a ver, ou por que ninguem. */
-export function reshownPopupToast(count: number) {
-  return count > 0
-    ? `O pop-up volta a aparecer para ${formatStudentCount(count)}.`
-    : "Ninguém precisava ver de novo: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.";
+/**
+ * Toast de "Mostrar de novo para quem já viu" (v3a): quantos voltam a ver, ou por que ninguem. v3b-1: em
+ * "Mais de uma vez" (`mode` "repeat", o NoticeListItem.popupMode) a contagem de "Quantas vezes" recomeca.
+ */
+export function reshownPopupToast(count: number, mode: "once" | "repeat" = "once") {
+  if (count <= 0) {
+    return "Ninguém precisava ver de novo: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.";
+  }
+
+  return mode === "repeat"
+    ? `A contagem de “Quantas vezes” recomeçou para ${formatStudentCount(count)}.`
+    : `O pop-up volta a aparecer para ${formatStudentCount(count)}.`;
 }
+
+/** v3b-1: quem ja esta com a area aberta guarda o pop-up por ate 1 minuto no navegador (docs/25 §5.6). */
+const POPUP_DELAY_SUFFIX = "Para quem já está com a área aberta, pode levar até 1 minuto.";
 
 /** Toast depois de publicar ou aprovar, conforme o que o servidor decidiu. */
 export function publishedNoticeToast(result: { audienceCount: number; recipients: number | null; situation: CampaignSituation }, kind: CampaignKind) {
@@ -551,6 +576,9 @@ export function publishedNoticeToast(result: { audienceCount: number; recipients
       return "Enviado para aprovação.";
     case "scheduled":
       return kind === "inbox" ? "Envio agendado." : "Pop-up publicado.";
+    case "active":
+      // v3b-1: o pop-up no ar agora chega na proxima pagina de cada aluno (ate 1 minuto numa aba aberta).
+      return kind === "popup" ? "Pop-up publicado. Em até 1 minuto ele começa a aparecer para quem já está na área." : "Aviso publicado.";
     case "sent":
       return `Notificação enviada para ${formatStudentCount(result.recipients ?? result.audienceCount)}.`;
     case "sending":
@@ -632,6 +660,8 @@ export function draftSaveSideEffect(previousStatus: CampaignStatus | null | unde
  * Toast de "Salvar rascunho" (ou "Salvar alterações" no pop-up no ar), pela situacao antes de salvar. v3a
  * (docs/24 §2.2 e §2.4): a notificacao enviada conta quantos ja veem a mudanca; o pop-up no ar diz o que
  * acontece com quem ja viu pela regra "Quantas vezes" salva (`repeat`) e quantos voltam a ver (`reshown`).
+ * v3b-1 (docs/25 §2.4): `repeat` "until_action" e "Mais de uma vez" (vale na hora, contando o que cada aluno
+ * ja viu); o pop-up no ar termina com o "até 1 minuto" de quem ja esta com a area aberta.
  */
 export function savedNoticeToast(
   kind: CampaignKind,
@@ -646,18 +676,23 @@ export function savedNoticeToast(
 
   if (isLivePopupStatus(kind, previousStatus)) {
     const reshown = typeof result.reshown === "number" && result.reshown > 0 ? result.reshown : 0;
+    const repeat = result.repeat === "until_action";
 
     if (previousStatus === "paused") {
       return reshown > 0 ? "Pop-up salvo. Ele continua pausado. Ao retomar, volta a aparecer para quem já tinha visto." : "Pop-up salvo. Ele continua pausado.";
     }
 
     if (reshown > 0) {
-      return `Pop-up atualizado. Ele volta a aparecer para ${formatStudentCount(reshown)} que já ${reshown === 1 ? "tinha" : "tinham"} visto.`;
+      const saw = `${formatStudentCount(reshown)} que já ${reshown === 1 ? "tinha" : "tinham"} visto`;
+
+      return repeat
+        ? `Pop-up atualizado. A contagem de “Quantas vezes” recomeçou para ${saw}. ${POPUP_DELAY_SUFFIX}`
+        : `Pop-up atualizado. Ele volta a aparecer para ${saw}. ${POPUP_DELAY_SUFFIX}`;
     }
 
-    return result.repeat === "until_action"
-      ? "Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois de ter visto este pop-up."
-      : "Pop-up atualizado. Quem já viu não vê de novo.";
+    return repeat
+      ? `Pop-up atualizado. Vale na hora, contando as vezes que cada aluno já viu. ${POPUP_DELAY_SUFFIX}`
+      : `Pop-up atualizado. Quem já viu não vê de novo. ${POPUP_DELAY_SUFFIX}`;
   }
 
   const sideEffect = draftSaveSideEffect(previousStatus);
@@ -677,48 +712,104 @@ export function livePopupBanner(status: CampaignStatus | null | undefined) {
 }
 
 /**
- * "Mostrar de novo para quem já viu" aparece no editor so do pop-up no ar ou pausado e so enquanto
- * "Quantas vezes" mostra "Uma vez" (em "Até o aluno clicar", quem so fechou ja volta depois de 24 h).
+ * "Mostrar de novo para quem já viu" aparece no editor so do pop-up no ar ou pausado (v3b-1: em qualquer
+ * "Quantas vezes"; na v3a era so em "Uma vez").
  */
-export function showsReshowSwitch(input: { kind: CampaignKind; repeat: NoticeDraft["repeat"]; status: CampaignStatus | null | undefined }) {
-  return isLivePopupStatus(input.kind, input.status) && input.repeat === "once";
+export function showsReshowSwitch(input: { kind: CampaignKind; status: CampaignStatus | null | undefined }) {
+  return isLivePopupStatus(input.kind, input.status);
 }
 
 export const RESHOW_SWITCH_LABEL = "Mostrar de novo para quem já viu";
 
 /**
- * A descricao do switch, com quantos a regra "Uma vez" pula agora (`detail.reshowable`); 0 = ninguem precisa
- * (o switch fica desligado e travado). Sem a contagem, a frase sem numero.
+ * A descricao do switch, com quantos voltam a contar como novo agora (`detail.reshowable`); 0 = ninguem
+ * precisa (o switch fica desligado e travado). Sem a contagem, a frase sem numero. v3b-1: pelo que faz o
+ * pop-up parar (`stopOn`; null = Uma vez): em "Só quando o pop-up terminar" quem clicou tambem volta.
  */
-export function reshowSwitchCopy(count: number | null | undefined): { description: string; disabled: boolean } {
-  const rest = "Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver.";
+export function reshowSwitchCopy(count: number | null | undefined, stopOn: PopupStopOn | null = null): { description: string; disabled: boolean } {
+  const known = typeof count === "number" && Number.isFinite(count) && count >= 0;
+
+  if (stopOn === "never") {
+    const rest = "Quem escolheu “Não mostrar de novo” continua como está.";
+
+    if (count === 0) {
+      return { description: "Ninguém precisa ver de novo agora: quem viu escolheu “Não mostrar de novo” ou ainda vai ver.", disabled: true };
+    }
+
+    if (!known) {
+      return { description: `Para quem já viu: a contagem de “Quantas vezes” recomeça. ${rest}`, disabled: false };
+    }
+
+    return {
+      description:
+        count === 1
+          ? `Para 1 aluno que já viu: a contagem de “Quantas vezes” recomeça para ele. ${rest}`
+          : `Para os ${formatStudentCount(count)} que já viram: a contagem de “Quantas vezes” recomeça para eles. ${rest}`,
+      disabled: false
+    };
+  }
+
+  const rest = "Quem clicou no botão ou escolheu “Não mostrar de novo” continua como está.";
 
   if (count === 0) {
     return { description: "Ninguém precisa ver de novo agora: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.", disabled: true };
   }
 
-  if (typeof count !== "number" || !Number.isFinite(count) || count < 0) {
-    return { description: `Para quem já viu e não clicou. ${rest}`, disabled: false };
+  if (!known) {
+    return { description: `Para quem já viu e não clicou: o pop-up volta a contar como novo. ${rest}`, disabled: false };
   }
 
   return {
-    description: count === 1 ? `Para 1 aluno que já viu e não clicou. ${rest}` : `Para os ${formatStudentCount(count)} que já viram e não clicaram. ${rest}`,
+    description:
+      count === 1
+        ? `Para 1 aluno que já viu e não clicou: o pop-up volta a contar como novo para ele. ${rest}`
+        : `Para os ${formatStudentCount(count)} que já viram e não clicaram: o pop-up volta a contar como novo para eles. ${rest}`,
     disabled: false
   };
 }
 
 /**
- * A dica embaixo de "Quantas vezes" do pop-up no ar quando a escolha mudou do que esta salvo: o que acontece
- * com quem ja viu. null = sem mudanca (ou pop-up que ainda nao saiu).
+ * v3b-1: a linha embaixo de "Quantas vezes" do pop-up no ar ou pausado quando a escolha mudou do que esta
+ * salvo (vale na hora, contando o que cada aluno ja viu). null = sem mudanca (ou pop-up que ainda nao saiu).
  */
-export function popupRepeatChangeHint(input: { saved: NoticeDraft["repeat"]; shown: NoticeDraft["repeat"]; status: CampaignStatus | null | undefined }) {
-  if (!isLivePopupStatus("popup", input.status) || input.saved === input.shown) {
+export function popupFrequencyChangeHint(input: { saved: PopupFrequency | null | undefined; shown: PopupFrequency; status: CampaignStatus | null | undefined }) {
+  if (!isLivePopupStatus("popup", input.status) || !input.saved || sameFrequency(input.saved, input.shown)) {
     return null;
   }
 
-  return input.shown === "until_action"
-    ? "Quem só fechou volta a ver 24 horas depois de ter visto este pop-up, até clicar. Quem clicou ou escolheu “Não mostrar de novo” não vê mais."
-    : "Quem já viu não vê de novo, a não ser que você ligue “Mostrar de novo para quem já viu”.";
+  return "Mudar “Quantas vezes” vale na hora para todos, contando as vezes que cada aluno já viu.";
+}
+
+type PopupPlacementSnapshot = { popup: Pick<PopupSettings, "exclude" | "pages" | "trigger">; window: NoticeDraft["window"] };
+
+/**
+ * v3b-1 (docs/25 §2.3): as linhas de aviso do card "Quando e onde aparece" no pop-up no ar ou pausado:
+ * paginas, excecoes ou momento diferentes do salvo (quem ja viu continua contando como visto) e, no ar, o
+ * "Começa" levado para o futuro (some para todos ate la).
+ */
+export function popupPlacementChangeNotes(input: { now: number; saved: PopupPlacementSnapshot; shown: PopupPlacementSnapshot; status: CampaignStatus | null | undefined }): string[] {
+  if (!isLivePopupStatus("popup", input.status)) {
+    return [];
+  }
+
+  const notes: string[] = [];
+  const { saved, shown } = input;
+  const samePatterns = (left: readonly string[], right: readonly string[]) => canonicalPatterns(left).join(" ") === canonicalPatterns(right).join(" ");
+
+  if (saved.popup.trigger !== shown.popup.trigger || !samePatterns(saved.popup.pages, shown.popup.pages) || !samePatterns(saved.popup.exclude, shown.popup.exclude)) {
+    notes.push(
+      "Mudar onde ou quando ele aparece vale na hora. Quem já viu continua contando como visto, também nas páginas novas. Para todos verem de novo, ligue “Mostrar de novo para quem já viu”."
+    );
+  }
+
+  const shownStart = shown.window.startsAt === null ? Number.NaN : Date.parse(shown.window.startsAt);
+  const savedStart = saved.window.startsAt === null ? Number.NaN : Date.parse(saved.window.startsAt);
+
+  if (input.status === "active" && Number.isFinite(shownStart) && shownStart > input.now && !(Number.isFinite(savedStart) && savedStart > input.now)) {
+    notes.push(`Com o início no futuro, o pop-up deixa de aparecer para todos até ${formatSaoPauloDateTime(new Date(shownStart).toISOString())}.`);
+  }
+
+  return notes;
 }
 
 /** Notificacao enviada: o editor so muda o conteudo (sentNoticeLockedProblems no servidor). */
@@ -857,24 +948,41 @@ export function isNoticeKindLocked(status: CampaignStatus | null | undefined) {
  * O que vai para o servidor: so os campos do tipo escolhido. O editor guarda o resto (trocar de tipo e
  * voltar nao perde a janela do pop-up nem a resposta, a enquete e as reacoes da notificacao), mas nada
  * disso e validado nem gravado no outro tipo. O pop-up abre o destino pelo botao (v3a) e nao tem lixeira
- * (allowHide, ajustes da v3a: o servidor grava true no pop-up).
+ * (allowHide, ajustes da v3a: o servidor grava true no pop-up). v3b-1: o pop-up leva a configuracao (`popup`,
+ * o padrao quando o rascunho comecou como notificacao) e `repeat` coerente com ela; a notificacao vai sem a chave.
  */
 export function noticeDraftForKind(draft: NoticeDraft): NoticeDraft {
   if (draft.kind === "inbox") {
-    return { ...draft, allowSnooze: true, repeat: "once", window: { endsAt: null, startsAt: null } };
+    return { ...withoutPopupKey(draft), allowSnooze: true, repeat: "once", window: { endsAt: null, startsAt: null } };
   }
+
+  const popup = popupSettingsOfDraft(draft);
 
   return {
     ...draft,
     allowHide: true,
     cta: draft.cta ? { ...draft.cta, display: "button" } : null,
     poll: null,
+    popup,
     reactions: false,
+    repeat: repeatOfFrequency(popup.frequency),
     response: null,
     schedule: { mode: "now" },
     sender: null,
     validity: { mode: "default" }
   };
+}
+
+/** O rascunho sem a chave `popup` (a notificacao nunca leva; comparacoes canonicas ficam iguais). */
+function withoutPopupKey(draft: NoticeDraft): NoticeDraft {
+  if (!("popup" in draft)) {
+    return draft;
+  }
+
+  const rest = { ...draft };
+  delete rest.popup;
+
+  return rest;
 }
 
 function isoOrRaw(value: string) {
@@ -885,12 +993,14 @@ function isoOrRaw(value: string) {
 
 /**
  * Forma canonica do rascunho, igual ao que o servidor grava (textos aparados, segmento normalizado,
- * datas em ISO, campos que nao valem para o tipo zerados): base do "tem mudanca nao salva".
+ * datas em ISO, campos que nao valem para o tipo zerados): base do "tem mudanca nao salva". v3b-1: o pop-up
+ * com a configuracao canonica (padroes em ordem); a notificacao sem a chave `popup`.
  */
 export function canonicalNoticeDraft(draft: NoticeDraft): NoticeDraft {
   const inbox = draft.kind === "inbox";
 
   return {
+    ...(inbox ? {} : { popup: canonicalPopupSettings(popupSettingsOfDraft(draft)) }),
     // Ajustes da v3a: so o false desliga a lixeira do aluno (rascunho antigo sem a chave = pode excluir).
     allowHide: inbox ? draft.allowHide !== false : true,
     allowSnooze: inbox ? true : draft.allowSnooze,
@@ -1430,9 +1540,12 @@ export function draftToNotificationItem(
   };
 }
 
-/** Pop-up da home como o aluno ve na primeira vez (o icone so quando escolhido, como a API manda). */
+/**
+ * Pop-up como o aluno ve na primeira vez (o icone so quando escolhido, como a API manda). v3b-1: "Só no X"
+ * leva `close` (sem a chave = fecha no X, no Esc ou clicando fora, como o show manda).
+ */
 export function draftToPopupItem(
-  draft: Pick<NoticeDraft, "allowSnooze" | "audio" | "body" | "cta" | "icon" | "image" | "title">,
+  draft: Pick<NoticeDraft, "allowSnooze" | "audio" | "body" | "cta" | "icon" | "image" | "title"> & Partial<Pick<NoticeDraft, "popup">>,
   input: { imageUrl?: string | null } = {}
 ): PopupItem {
   const imageUrl = input.imageUrl ?? draft.image?.url ?? null;
@@ -1441,6 +1554,7 @@ export function draftToPopupItem(
     audio: draft.audio ? { ...draft.audio } : null,
     body: draft.body.trim(),
     canSnooze: draft.allowSnooze,
+    ...(draft.popup?.close === "x_only" ? { close: "x_only" as const } : {}),
     cta: previewCta(draft.cta),
     ...(draft.icon ? { icon: { color: draft.icon.color, id: draft.icon.id } } : {}),
     id: "previa",

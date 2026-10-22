@@ -28,9 +28,9 @@ type NoticesListViewProps = {
 };
 
 const EMPTY_COPY: Record<"all" | CampaignKind, { description: string; title: string }> = {
-  all: { description: "Crie uma notificação para o sino ou um pop-up para a home.", title: "Nenhum aviso ainda" },
+  all: { description: "Crie uma notificação para o sino ou um pop-up para os alunos.", title: "Nenhum aviso ainda" },
   inbox: { description: "Crie uma notificação para o sino dos alunos.", title: "Nenhuma notificação ainda" },
-  popup: { description: "Crie um pop-up para a home dos alunos.", title: "Nenhum pop-up ainda" }
+  popup: { description: "Crie um pop-up para os alunos.", title: "Nenhum pop-up ainda" }
 };
 
 export function NoticesListView({ canWrite, kind, overview, page, period, searchParams }: NoticesListViewProps) {

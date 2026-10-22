@@ -523,6 +523,19 @@ Editar e excluir avisos em qualquer situacao, lixeira do aluno, cartao clicavel,
 - **Navegador.** A primeira pagina do sino fica numa memoria do modulo (ate 10 minutos, so na aba, some numa navegacao completa e no 401); nada vai para `localStorage`, IndexedDB ou service worker. O link decorativo do cartao clicavel e `aria-hidden` e fora do Tab, e o link de verdade passa pela mesma conferencia do botao (caminho interno ou `https://`). Enquete e reacoes nunca mostram nomes.
 - **LGPD.** Os campos novos ficam nas linhas que ja tinham retencao de 24 meses (`prune_communication_history` sem mudanca); conta excluida leva tudo (cascade).
 
+### Comunicacao v3b-1 (22/10/2026)
+
+Pop-ups com paginas, momento, frequencia escolhida pela equipe e como fechar (`docs/25`; migracao `202610220003`; tabelas em `docs/05`, secao Comunicacao v3b-1).
+
+- **Conteudo so depois de autorizar.** O resumo (`?page=`) leva o **mapa grosso** (onde algum pop-up no ar pode aparecer: `content:*`, `lesson:*`, as paginas fixas e `any`), que vai a todo aluno, inclusive fora do segmento, e por isso **nunca tem id de produto** (ids sao slugs legiveis dos titulos) nem id de pop-up; o **plano** (ids, paginas exatas, momento, quando pode de novo) vai so na pagina coberta e so com os pop-ups do segmento do aluno, sem conteudo. O conteudo so vem no `POST /api/popups/[id]/show`, depois de o servidor conferir no ar, segmento, pagina, momento e frequencia e gravar a abertura.
+- **Escrita atomica.** `communication_record_popup_impression` grava so se `updated_at` ainda e o lido (compare-and-set): duas abas nunca contam a mesma abertura, um clique noutra aba nunca e atropelado. "Nao mostrar de novo" e conferido no TypeScript e de novo no SQL. Sem trava consultiva.
+- **RPCs fechadas.** As duas funcoes novas e a de reinicio trocada sao `security invoker`, `search_path` fixo, revogadas de `public`/`anon`/`authenticated`, so `service_role`, com a assinatura exata (guarda `tests/comunicacao-v3b1.guard.test.mjs`); RLS sem mudanca.
+- **Limites contra abuso.** `show` e os eventos do pop-up tiram de uma cota propria de **30 por minuto por aluno** (`takeStudentWrite("popup:<id>")`, antes de ler o corpo; 429 com `Retry-After: 60`), separada da do sino (um nao esgota o outro); o mesmo pop-up nunca abre duas vezes para um aluno em menos de **5 s** (`decideShow`); as aberturas vao para `student_events` ate **100 por pop-up, aluno e dia** (a linha guarda a conta exata); corpos ate 1 KB (`show`) e 8 KB (eventos). Por processo, como o limite da v3a.
+- **Sinais do navegador nao sao confiaveis.** O evento `bunker707:lesson-media` e os atributos do palco da aula podem ser forjados por um script na pagina; o pior que conseguem e pedir o `show` de um pop-up que o aluno ja poderia ver (o servidor decide o resto).
+- **Sessao.** As duas rotas do pop-up usam `requireApiSessionUser` (claims do JWT); toda escrita usa o id da sessao; pop-up de outro aluno, fora do segmento, pausado, encerrado ou excluido responde 404 sem dizer se existe; a equipe nunca tem linha (404).
+- **CSP** sem mudanca (`src/proxy.ts`): nenhuma origem nova, nenhum script inline, nenhum iframe novo. Nenhum HTML novo: todo texto novo e texto do React; padroes de pagina conferidos pelo zod e pelo check do banco; ids de produto pela mesma expressao das rotas.
+- **Auditoria e eventos.** Salvar, pedir aprovacao, publicar e aprovar um pop-up gravam `{ popup_trigger, popup_pages: <quantos>, popup_frequency }`; `message_impressed` com `{ campaign_id, page, trigger }` e `message_closed` com `{ campaign_id, via }`: so ids e codigos curtos (LGPD; retencao sem mudanca).
+
 ## Equipe e permissoes
 
 Desde 2026-10-15 o dono monta a equipe em Configuracoes > Equipe (`/admin/configuracoes/equipe`): funcoes prontas que se combinam, funcoes personalizadas e permissoes extras por pessoa. Tabela, regras e decisao de mercado em docs/17 §2.3.

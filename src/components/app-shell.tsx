@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { ContentPageHeroCorners, PlatformBrandingConfig } from "@/lib/platform-types";
 import { SCHOOL_DEFAULT_ICON } from "@/server/communications/message-meta";
+import { popupPageKeyOf } from "@/server/communications/popup-display-model";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 
 type AppShellProps = {
@@ -159,8 +160,10 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
   // quando so o banner desta pagina e arredondado (escolha do produto): logo e perfil seguem o banner.
   const rounded = style.corners === "rounded" || bannerCorners === "rounded";
   const pathname = usePathname();
-  // Home fora do "ver como": o pop-up dos avisos pode aparecer, e o pedido dele traz o numero do sino.
-  const popupHome = pathname === "/" && !accessPreviewMode;
+  // Pagina do pop-up (docs/25 §1.2): a chave da pagina do aluno, fora do "ver como" (null = nunca um pop-up
+  // aqui). Na home, o pedido do pop-up traz o numero do sino (o topo nao pede o seu ao montar).
+  const popupPage = accessPreviewMode ? null : popupPageKeyOf(pathname);
+  const popupHome = popupPage === "home";
   const headerLinks = menuInHeader
     ? (getMemberSidebarSections(pathname, accessPreviewMode).find((section) => section.id === "estudar")?.items ?? [])
     : [];
@@ -405,6 +408,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
               accessPreviewMode={accessPreviewMode}
               className={searchOpen ? "max-sm:hidden" : undefined}
               onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
+              popupPage={popupPage}
               refreshSummaryOnMount={!popupHome}
               // O circulo dos avisos da escola e o Icone da escola (Marca); a logo fica no topo e de reserva.
               schoolIconUrl={branding?.schoolIcon ?? SCHOOL_DEFAULT_ICON}
@@ -465,8 +469,8 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
 
       <main>{children}</main>
 
-      {/* Pop-up dos avisos: so na home e fora do modo "ver como" do produtor (docs/22 §1.3). */}
-      <MemberPopupHost enabled={popupHome} onNavigate={(event, href) => handleProgressAwareNavigation(event, href)} />
+      {/* Pop-ups dos avisos: em toda pagina do aluno com chave, fora do modo "ver como" do produtor (docs/25 §4). */}
+      <MemberPopupHost onNavigate={(event, href) => handleProgressAwareNavigation(event, href)} pageKey={popupPage} />
 
       {!sidebarOpen ? (
         directorRequested ? (

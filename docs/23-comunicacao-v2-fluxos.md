@@ -532,7 +532,7 @@ Ordem do salvar (`saveFlowTree`, `flow-store.ts`): fluxo novo nasce rascunho; pa
 | V10 | **Fluxos** com aba, quatro modelos, construtor de dois blocos e uma coluna a 375 px; remover Condição pergunta qual caminho fica | o pedido de fluxos com regras; o caso comum fica no editor |
 | V11 | Decisão **segura para recalcular**: tarefa acordada cedo só reagenda; horário real = maior entre a âncora e `not_before` | mudanças no ar simples e certas |
 | V12 | **Aplicação atômica** por lote com os fluxos travados; mudanças de estado travam o fluxo antes; versão enviada nunca editada; lote dividido ao meio em erro de dado | pausar, encerrar, editar, ticks sobrepostos e quedas não causam envio indevido |
-| V13 | **Limite fixo**: 3 por dia de São Paulo por aluno, 1 h entre elas; o que passa vai às 8h do dia seguinte; não sai depois do prazo ou de 7 adiamentos; uma vez por fluxo e por notificação; sem horário de silêncio no sino | mesma regra de "limites como texto" do pop-up (`docs/17` §1.8.1) |
+| V13 | **Limite fixo**: 3 por dia de São Paulo por aluno, 1 h entre elas; o que passa vai às 8h do dia seguinte; não sai depois do prazo ou de 7 adiamentos; uma vez por fluxo e por notificação; sem horário de silêncio no sino | a regra de "limites como texto" que o pop-up tinha (`docs/17` §1.8.1); desde a v3b-1 o pop-up não tem mais limite fixo como texto (a frequência é escolhida pela equipe em cada um, `docs/25`), e o limite de 3 por dia dos fluxos continua |
 | V14 | **Fatos** numa RPC por lote de 150; progresso e comentários só se uma regra pedir; dados completos só na entrada, na faixa de 15 minutos | sem o corte de 1.000 linhas do PostgREST e parado custa 3 leituras |
 | V15 | **Visitas** gravadas no servidor, só das páginas acompanhadas; beacon só para detalhes do produto e Comprar, com guarda de sessão por claims | nada é gravado enquanto nenhum fluxo precisa |
 | V16 | **Regras**: `message` em segmentos (qualquer notificação enviada) e em fluxos (um passo acima); `page_visit` e `access_gained` só em fluxos; negação implica recebeu | "não ouviu o áudio da X" vale em qualquer lugar |
@@ -567,7 +567,7 @@ O que a implementação decidiu onde o desenho era omisso ou não batia com o c�
 | Rótulo curto ("Novo", "Urgente") ou cartão colorido | o ícone e o título já dizem; espera as referências visuais do produtor (o catálogo e `notice-icons.tsx` têm lugar para isso) |
 | Horário de silêncio | o sino só é visto quando abre (sem push e sem som); adiados nunca saem entre 0h e 8h; chega com push e e-mail |
 | Passos de push, e-mail e WhatsApp; `/perfil/notificacoes` | canais à parte (consentimento, descadastro, custo D6) |
-| Pop-up como passo de fluxo, seguintes de pop-up, "ouvido" no áudio do pop-up | o pop-up tem limites próprios e nenhuma linha por aluno com fim |
+| Pop-up como passo de fluxo, seguintes de pop-up, "ouvido" no áudio do pop-up | o pop-up tem a sua própria frequência, escolhida pela equipe (`docs/25`), e nenhuma linha por aluno com fim |
 | Entrar de novo num fluxo, voltas e junções | "uma vez por fluxo" é a regra anti-cansaço mais forte e mantém a árvore legível |
 | Disparo na hora por evento ("concluiu a aula X" agora) | a entrada contínua por regras chega em até 15 minutos, sem barramento de eventos |
 | Visita de página em segmento comum, histórico antes de um fluxo, visita por aula, contagem de visitas | só se grava enquanto um fluxo precisa; "visitou desde T" só precisa da última |

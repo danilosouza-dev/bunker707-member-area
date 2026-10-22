@@ -3,6 +3,7 @@
 // relativos): as rotas /api/notifications, o painel do sino, a previa do admin e
 // tests/comunicacao-avisos-modelo.test.mjs usam os mesmos tipos.
 // v3a (docs/24): como o aluno chega ao destino, a reacao do aluno e a enquete do aviso.
+// v3b-1 (docs/25): o pop-up "Só no X", o plano do aluno (sem conteudo) e a resposta do POST /show.
 
 import { INBOX_HISTORY_DAYS } from "./campaign-model";
 import type { NotificationPoll, ReactionId } from "./interactions-model";
@@ -93,6 +94,8 @@ export type PopupItem = {
   audio: NotificationAudio | null;
   body: string;
   canSnooze: boolean;
+  /** v3b-1: so quando "Só no X"; sem a chave = fecha no X, no Esc ou clicando fora (o objeto padrao fica igual ao da v1). */
+  close?: "x_only";
   cta: PopupCta | null;
   /**
    * Icone ao lado do titulo. A API so manda a chave quando o pop-up tem icone: sem icone, a resposta do
@@ -104,7 +107,37 @@ export type PopupItem = {
   title: string;
 };
 
-export type NotificationsSummary = { popup: PopupItem | null; unseen: number };
+/** Um pop-up do plano do aluno (sem conteudo: o conteudo so vem no POST /show). */
+export type PopupPlanItem = {
+  delaySeconds: number;
+  /** Nunca nestas paginas (padroes exatos ja expandidos: formacao -> cursos). So pop-ups do segmento do aluno. */
+  exclude: string[];
+  id: string;
+  /** Hora do servidor (ISO) antes da qual "Quantas vezes" ainda nao deixa; null = ja pode. */
+  notBefore: string | null;
+  pages: string[];
+  /** O que faz parar: null = Uma vez; "click" = quando clica no botao; "never" = so quando o pop-up termina. */
+  stopOn: "click" | "never" | null;
+  trigger: "lesson_completed" | "page_load";
+};
+
+export type PopupsAnswer = {
+  /** Hora do servidor da resposta (o navegador acerta o relogio por ela). */
+  asOf: string;
+  /** Onde algum pop-up no ar pode aparecer: padroes grossos, sem ids (content:*, lesson:*); ["any"] = qualquer pagina. */
+  pages: string[];
+  /** O plano do aluno (todos os pop-ups dele, qualquer pagina); null quando a pagina pedida nao esta em `pages`. */
+  plan: PopupPlanItem[] | null;
+};
+
+/** Resposta do POST /show. */
+export type PopupShowAnswer = { next: { notBefore: string | null } | null; popup: PopupItem };
+
+/**
+ * Resumo do sino (GET /api/notifications/summary). v3b-1: com `?page=`, `popups` (o mapa das paginas e, na
+ * pagina coberta, o plano do aluno); sem `page`, a chave nao vem (a resposta da v1).
+ */
+export type NotificationsSummary = { popup: PopupItem | null; popups?: PopupsAnswer | null; unseen: number };
 
 export const NOTIFICATIONS_PAGE_SIZE = 20;
 export const COMMENT_SNIPPET_MAX = 280;

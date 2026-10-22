@@ -62,7 +62,8 @@ import {
 // avisa que elas deixam de sair e traz a caixa "Retirar também as notificações seguintes que já saíram (n)",
 // marcada (docs/23 §2.2). v3a (docs/24 §2.1): "Ver relatório", Editar a notificacao enviada (?editar=1),
 // Excluir pela situacao (a enviada com a caixa "Excluir também as notificações seguintes que já saíram (n)"),
-// a frase das regras que citam a notificacao e "Mostrar de novo para quem já viu" no pop-up "Uma vez".
+// a frase das regras que citam a notificacao e "Mostrar de novo para quem já viu" no pop-up "Uma vez" (v3b-1:
+// em qualquer "Quantas vezes", com o toast pelo `popupMode` do alvo).
 // Ajustes da v3a: Excluir e Retirar do sino nao revalidam a pagina na acao (o servidor desenhava a pagina
 // inteira de novo na mesma resposta): o dialogo fecha e o toast aparece assim que a acao volta, e a lista
 // atualiza logo depois (router.refresh numa transicao; na pagina do aviso, Excluir volta para a lista).
@@ -76,6 +77,11 @@ export type NoticeActionTarget = {
   followUps?: { count: number; sent: number } | null;
   id: string;
   kind: CampaignKind;
+  /**
+   * v3b-1: "Quantas vezes" do pop-up (NoticeListItem.popupMode): o toast de "Mostrar de novo" muda em "Mais de
+   * uma vez". Sem ele, o texto de "Uma vez".
+   */
+  popupMode?: "once" | "repeat" | null;
   /** Notificacao enviada: quantos receberam (texto do "Retirar do sino"). */
   recipients?: number | null;
   /** v3a: a situacao de agora (o texto de Excluir muda: pop-up no ar, pausado, notificacao enviada...). */
@@ -214,7 +220,7 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
             return fail(result);
           }
 
-          adminToast.success(reshownPopupToast(result.data.reshown));
+          adminToast.success(reshownPopupToast(result.data.reshown, notice.popupMode ?? "once"));
           return;
         }
         default: {

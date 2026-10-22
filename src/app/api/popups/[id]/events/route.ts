@@ -1,14 +1,20 @@
 import { NextResponse } from "next/server";
 import { requireApiSessionUser } from "@/server/auth/guards";
 import { POPUP_EVENTS, type PopupEvent } from "@/server/communications/campaign-model";
+import { POPUP_CLOSE_VIAS, POPUP_V3B1_RULES, type PopupCloseVia } from "@/server/communications/popup-display-model";
 import { recordPopupEvent } from "@/server/communications/popups";
 import { isUuid, noStore, recordCommunicationEvents } from "@/server/communications/route-support";
+import { STUDENT_WRITE_LIMIT_MESSAGE, STUDENT_WRITE_RETRY_AFTER_SECONDS, takeStudentWrite } from "@/server/communications/student-write-limit";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
-// Evento do aluno no pop-up da home: { event: "impressed" | "clicked" | "closed" | "dismissed" |
-// "snoozed" }. Aceita o corpo em text/plain (sendBeacon na hora de sair da pagina manda assim). Sessao
-// pelas claims do JWT (v3a, docs/24): so mexe na linha do proprio aluno.
+// Evento do aluno no pop-up: { event: "clicked" | "closed" | "dismissed" | "snoozed", via? } (`via` so no
+// "closed": "x" | "outside" | "esc" | "page", padrao "x"; vai so para o historico). Aceita o corpo em
+// text/plain (sendBeacon na hora de sair da pagina manda assim). Sessao pelas claims do JWT (v3a, docs/24):
+// so mexe na linha do proprio aluno. v3b-1 (docs/25 §5.1): ate 30 chamadas de pop-up por minuto por aluno
+// (show e eventos, chave propria "popup:", separada das escritas do sino), 429 alem disso. O "impressed" da
+// v1 (aba aberta antes do deploy) grava a abertura pelo mesmo caminho do show; o historico guarda ate 100
+// aberturas por pop-up, aluno e dia.
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,11 +33,21 @@ function isPopupEvent(value: unknown): value is PopupEvent {
   return typeof value === "string" && (POPUP_EVENTS as readonly string[]).includes(value);
 }
 
+function isCloseVia(value: unknown): value is PopupCloseVia {
+  return typeof value === "string" && (POPUP_CLOSE_VIAS as readonly string[]).includes(value);
+}
+
 export async function POST(request: Request, context: RouteContext) {
   const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {
     return noStore(auth.response!);
+  }
+
+  if (!takeStudentWrite(`popup:${auth.user.id}`)) {
+    return noStore(
+      NextResponse.json({ error: STUDENT_WRITE_LIMIT_MESSAGE }, { headers: { "Retry-After": String(STUDENT_WRITE_RETRY_AFTER_SECONDS) }, status: 429 })
+    );
   }
 
   const { id } = await context.params;
@@ -40,28 +56,36 @@ export async function POST(request: Request, context: RouteContext) {
     return noStore(NextResponse.json({ error: "Pop-up invalido." }, { status: 400 }));
   }
 
-  let payload: { event?: unknown };
+  let payload: { event?: unknown; via?: unknown };
 
   try {
-    payload = await readBoundedJson<{ event?: unknown }>(request, 8_000);
+    payload = await readBoundedJson<{ event?: unknown; via?: unknown }>(request, 8_000);
   } catch (error) {
     return noStore(jsonRouteError(error, "Nao foi possivel ler o evento.", 400));
   }
 
   const event = payload && typeof payload === "object" ? payload.event : undefined;
+  const via = payload && typeof payload === "object" ? payload.via : undefined;
 
-  if (!isPopupEvent(event)) {
+  // `via` desconhecido e evento invalido; um `via` valido fora do "closed" nao conta.
+  if (!isPopupEvent(event) || (via !== undefined && !isCloseVia(via))) {
     return noStore(NextResponse.json({ error: "Evento invalido." }, { status: 400 }));
   }
 
   try {
     const userId = auth.user.id;
     const campaignId = id.toLowerCase();
+    const result = await recordPopupEvent(userId, campaignId, event);
+    const metadata =
+      event === "closed"
+        ? { campaign_id: campaignId, via: via ?? "x" }
+        : event === "impressed"
+          ? { campaign_id: campaignId, page: "home", trigger: "page_load" }
+          : { campaign_id: campaignId };
 
-    await recordPopupEvent(userId, campaignId, event);
-    await recordCommunicationEvents([
-      { entity_id: campaignId, entity_type: "campaign", event_type: EVENT_TYPES[event], metadata: { campaign_id: campaignId }, user_id: userId }
-    ]);
+    if (event !== "impressed" || (result.dayImpressions ?? 0) <= POPUP_V3B1_RULES.eventsPerDayMax) {
+      await recordCommunicationEvents([{ entity_id: campaignId, entity_type: "campaign", event_type: EVENT_TYPES[event], metadata, user_id: userId }]);
+    }
 
     return noStore(NextResponse.json({ data: { ok: true } }));
   } catch (error) {

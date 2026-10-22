@@ -7,6 +7,7 @@ import {
   expect,
   idDoAviso,
   linhaDoSino,
+  popUpsQueAbremNaHome,
   test,
   zerarComunicacao
 } from "./fixtures";
@@ -15,9 +16,10 @@ import {
 // mostra Ver relatório, Editar, Duplicar, Retirar do sino e Excluir; Editar troca o titulo e a aluna ve o
 // novo sem a bolinha de nao lida voltar; Excluir tira da lista e do sino dela. Um pop-up no ar em "Uma vez"
 // que a aluna fechou (o que ela viu volta 25 h no tempo): ela nao ve de novo; ⋯ "Mostrar de novo para quem
-// já viu" -> "para 1 aluno" -> ela ve; o aluno que escolheu "Não mostrar de novo" nao ve. Em "Até o aluno
-// clicar" o ⋯ nao tem "Mostrar de novo". O pop-up e publicado pela tela: a lista de pop-ups no ar fica 60 s
-// em cache no servidor e so a publicacao a renova (como em aluno-ve-pop-up).
+// já viu" -> "para 1 aluno" -> ela ve; o aluno que escolheu "Não mostrar de novo" nao ve. v3b-1 (docs/25
+// §2.4): em "Mais de uma vez" o editor e o ⋯ continuam com "Mostrar de novo" (vale em qualquer "Quantas
+// vezes"). O pop-up e publicado pela tela: a lista de pop-ups no ar fica 60 s em cache no servidor e so a
+// publicacao a renova (como em aluno-ve-pop-up).
 
 const ENVIADA = "Editar E2E: revisão no sábado";
 const EDITADA = "Editar E2E: revisão no domingo";
@@ -35,17 +37,6 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(zerarComunicacao);
-
-/** Abre a home numa sessao nova do navegador e devolve o pop-up que o servidor mandou (ou null). */
-async function abrirHomeEmSessaoNova(page: Page) {
-  // O limite de 1 por sessao fica no sessionStorage: sem ele, quem decide e o servidor.
-  await page.evaluate(() => window.sessionStorage.clear());
-  const resumo = page.waitForResponse((response) => response.url().includes("/api/notifications/summary?popup=1"));
-  await page.reload();
-  const { data } = (await (await resumo).json()) as { data: { popup: { title: string } | null } };
-
-  return data.popup;
-}
 
 /** O menu ⋯ da linha do aviso na lista (aberto). */
 async function abrirMenuDaLinha(page: Page, titulo: string) {
@@ -71,14 +62,14 @@ test.describe("produtor publica", () => {
   test("um pop-up para todos os alunos, em Uma vez", async ({ page }) => {
     await page.goto("/admin/comunicacao/avisos/novo?tipo=popup");
     await page.waitForLoadState("networkidle");
-    await expect(page.getByRole("radio", { name: "Pop-up na home" })).toBeChecked();
+    await expect(page.getByRole("radio", { exact: true, name: "Pop-up" })).toBeChecked();
     await page.getByLabel("Título", { exact: true }).fill(POPUP);
     await page.getByLabel("Texto (opcional)", { exact: true }).fill("Toda quarta, das 19h às 20h, com a equipe.");
-    await expect(page.getByRole("radio", { name: "Uma vez" })).toBeChecked();
+    await expect(page.getByRole("radio", { exact: true, name: "Uma vez" })).toBeChecked();
     await expect(page.getByText(/^≈ \d+ alunos? agora$/)).toBeVisible();
 
     await page.getByRole("button", { exact: true, name: "Publicar pop-up" }).click();
-    await expect(page.getByText("Pop-up publicado.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Pop-up publicado. Em até 1 minuto ele começa a aparecer para quem já está na área.", { exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { level: 1, name: POPUP })).toBeVisible();
   });
 });
@@ -125,7 +116,7 @@ test.describe("alunos veem", () => {
     expect(await envelhecerPopup(popupId, (await contaDeTeste("alunoSemAcesso")).id, 25)).toBe(1);
 
     await page.goto("/");
-    expect(await abrirHomeEmSessaoNova(page)).toBeNull();
+    expect(await popUpsQueAbremNaHome(page)).not.toContain(popupId);
     await expect(page.getByRole("dialog", { name: POPUP })).toHaveCount(0);
   });
 });
@@ -157,7 +148,7 @@ test.describe("produtor edita e mostra de novo", () => {
     await page.getByRole("menuitem", { name: "Mostrar de novo para quem já viu" }).click();
     const dialogo = page.getByRole("dialog", { name: `Mostrar “${POPUP}” de novo?` });
     await expect(dialogo).toBeVisible();
-    await expect(dialogo).toContainText("O pop-up volta a aparecer para quem já viu e não clicou.");
+    await expect(dialogo).toContainText("O pop-up volta a contar como novo para quem já viu: a contagem de “Quantas vezes” começa de novo.");
     await dialogo.getByRole("button", { exact: true, name: "Mostrar de novo" }).click();
     await expect(page.getByText("O pop-up volta a aparecer para 1 aluno.", { exact: true })).toBeVisible();
   });
@@ -165,10 +156,10 @@ test.describe("produtor edita e mostra de novo", () => {
 
 test.describe("depois de editar e mostrar de novo", () => {
   test("o pop-up volta para a aluna, e ela vê o título novo sem a bolinha de não lida", async ({ page }) => {
-    // Primeiro o pop-up: ele espera o sino fechar, e ver um pop-up agora conta para o limite de 24 h.
-    const resumo = page.waitForResponse((response) => response.url().includes("/api/notifications/summary?popup=1"));
+    // Primeiro o pop-up: ele espera o sino fechar. O conteudo vem no POST /show, logo antes de abrir.
+    const abertura = page.waitForResponse((response) => /\/api\/popups\/[^/]+\/show$/.test(new URL(response.url()).pathname));
     await page.goto("/");
-    expect(((await (await resumo).json()) as { data: { popup: { title: string } | null } }).data.popup?.title).toBe(POPUP);
+    expect(((await (await abertura).json()) as { data: { popup: { title: string } } }).data.popup.title).toBe(POPUP);
     const popUp = page.getByRole("dialog", { name: POPUP });
     await expect(popUp).toBeVisible();
     await popUp.getByRole("button", { name: "Fechar" }).click();
@@ -189,13 +180,13 @@ test.describe("depois de editar e mostrar de novo", () => {
 
     test("quem escolheu Não mostrar de novo continua sem ver", async ({ page }) => {
       await page.goto("/");
-      expect(await abrirHomeEmSessaoNova(page)).toBeNull();
+      expect(await popUpsQueAbremNaHome(page)).not.toContain(await idDoAviso(POPUP));
       await expect(page.getByRole("dialog", { name: POPUP })).toHaveCount(0);
     });
   });
 });
 
-test.describe("produtor exclui e muda para Até o aluno clicar", () => {
+test.describe("produtor exclui e muda para Mais de uma vez", () => {
   test.use({ storageState: SESSAO_DO_PRODUTOR });
 
   test("Excluir a notificação enviada: o diálogo explica, ela sai da lista", async ({ page }) => {
@@ -211,26 +202,34 @@ test.describe("produtor exclui e muda para Até o aluno clicar", () => {
     await expect(page.getByRole("row").filter({ hasText: EDITADA })).toHaveCount(0);
   });
 
-  test("o pop-up em Até o aluno clicar não oferece Mostrar de novo", async ({ page }) => {
+  test("o pop-up em Mais de uma vez continua com Mostrar de novo, no editor e no ⋯", async ({ page }) => {
     const itens = await abrirMenuDaLinha(page, POPUP);
     await expect(itens.filter({ hasText: "Mostrar de novo para quem já viu" })).toHaveCount(1);
     await page.getByRole("menuitem", { name: "Editar" }).click();
     await expect(page).toHaveURL(/\/admin\/comunicacao\/avisos\/[0-9a-f-]{36}\?editar=1$/);
     await page.waitForLoadState("networkidle");
 
-    // Em "Uma vez" o editor mostra o "Mostrar de novo"; em "Até o aluno clicar" ele some e a dica explica.
+    // v3b-1: o "Mostrar de novo" vale em qualquer "Quantas vezes". "Mais de uma vez" comeca em 1 por dia e,
+    // sem botao no pop-up, em "Só quando o pop-up terminar" (o "clica no botão" fica desligado).
     const mostrarDeNovo = page.getByRole("switch", { name: "Mostrar de novo para quem já viu" });
     await expect(mostrarDeNovo).toBeVisible();
-    await page.getByRole("radiogroup", { name: "Quantas vezes o pop-up aparece" }).getByText("Até o aluno clicar").click();
-    await expect(page.getByRole("radio", { name: "Até o aluno clicar" })).toBeChecked();
-    await expect(mostrarDeNovo).toHaveCount(0);
-    await expect(page.getByText("Quem só fechou volta a ver 24 horas depois de ter visto este pop-up, até clicar.", { exact: false })).toBeVisible();
+    await page.getByRole("radiogroup", { name: "Quantas vezes o pop-up aparece" }).getByText("Mais de uma vez").click();
+    await expect(page.getByRole("radio", { name: "Mais de uma vez" })).toBeChecked();
+    await expect(mostrarDeNovo).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Limitar por dia" })).toBeChecked();
+    await expect(page.getByLabel("Vezes por dia", { exact: true })).toHaveValue("1");
+    const parar = page.getByRole("radiogroup", { name: "O que faz o pop-up parar de aparecer" });
+    await expect(parar.getByRole("radio", { name: /^Só quando o pop-up terminar/ })).toBeChecked();
+    await expect(parar.getByRole("radio", { name: /^Quando o aluno clica no botão/ })).toBeDisabled();
+    await expect(page.getByText("Mudar “Quantas vezes” vale na hora para todos, contando as vezes que cada aluno já viu.", { exact: true })).toBeVisible();
     await page.getByRole("button", { exact: true, name: "Salvar alterações" }).click();
-    await expect(page.getByText("Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois de ter visto este pop-up.", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Pop-up atualizado. Vale na hora, contando as vezes que cada aluno já viu. Para quem já está com a área aberta, pode levar até 1 minuto.", { exact: true })
+    ).toBeVisible();
 
     const depois = await abrirMenuDaLinha(page, POPUP);
     await expect(depois.filter({ hasText: "Editar" })).toHaveCount(1);
-    await expect(depois.filter({ hasText: "Mostrar de novo para quem já viu" })).toHaveCount(0);
+    await expect(depois.filter({ hasText: "Mostrar de novo para quem já viu" })).toHaveCount(1);
     await page.keyboard.press("Escape");
   });
 });

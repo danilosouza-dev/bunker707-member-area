@@ -9,7 +9,9 @@ import { revalidateTag, updateTag } from "next/cache";
 // erro fora de Server Action no Next 16.4).
 
 export const COMMUNICATIONS_TAG = "communications";
-export const LIVE_POPUPS_CACHE_KEY = ["communications-live-popups"] as const;
+// v3b-1: a chave ganhou "v3b1" porque a entrada mudou de formato (configuracao de cada pop-up junto) e o
+// Data Cache da Vercel sobrevive ao deploy: uma entrada do formato da v3a nunca e lida.
+export const LIVE_POPUPS_CACHE_KEY = ["communications-live-popups", "v3b1"] as const;
 
 export function invalidateLivePopups({ from }: { from: "action" | "route" }) {
   if (from === "action") {

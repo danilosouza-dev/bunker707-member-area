@@ -12,6 +12,16 @@ import { assertNoDbError, chunksOf, CommunicationError, type CommunicationsDb } 
 import { isReactionId, parsePoll, POLL_OPTION_ID, type PollDefinition, type ReactionId } from "./interactions-model";
 import { noticeIconOfColumns, testSendExpiresAt, validityOfRow, validityToColumns } from "./message-meta";
 import { CTA_DISPLAYS, normalizePeaks, type CtaDisplay } from "./notification-model";
+import {
+  canonicalPopupSettings,
+  defaultPopupSettings,
+  POPUP_COLUMNS_FOR_INBOX,
+  popupSettingsOfRow,
+  popupSettingsToColumns,
+  reconcilePopupFrequency,
+  type PopupClose,
+  type PopupStopOn
+} from "./popup-display-model";
 import type { NoticeDraft } from "./schemas";
 
 /* ------------------------------------------------------------------------------------------------
@@ -24,8 +34,10 @@ const RANGE_NOT_SATISFIABLE = "PGRST103";
 // v2 (migracao 202610200002): quem envia, icone, validade no sino e o passo do fluxo.
 // v3a (migracao 202610220001): como o aluno chega ao destino, reacoes, enquete e a ultima edicao no ar.
 // Ajustes da v3a (202610220002): a lixeira do aluno por notificacao (allow_hide).
+// v3b-1 (202610220003): onde, quando e quantas vezes o pop-up aparece, "Lembrar depois" e como fecha. Lidas
+// tambem pelo tick (claimDueInbox, fetchPopupsToRefresh, updateCampaign): sem a migracao, o tick para.
 export const CAMPAIGN_COLUMNS =
-  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by,sender_user_id,icon,icon_color,validity_minutes,valid_until,flow_id,flow_node_id,cta_display,allow_reactions,poll,edited_at,edited_by,allow_hide";
+  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by,sender_user_id,icon,icon_color,validity_minutes,valid_until,flow_id,flow_node_id,cta_display,allow_reactions,poll,edited_at,edited_by,allow_hide,popup_pages,popup_exclude_pages,popup_trigger,popup_delay_seconds,popup_frequency,popup_every_minutes,popup_max_per_day,popup_max_total,popup_stop_on,popup_close,popup_snooze_minutes";
 
 export type CampaignRow = {
   accept_label: string | null;
@@ -74,7 +86,27 @@ export type CampaignRow = {
   last_error: string | null;
   /** Enquete (jsonb; ler com parsePoll). */
   poll: unknown;
+  /**
+   * v3b-1: como fecha (any = X, Esc ou fora; x_only = X e Esc), os segundos depois de abrir a pagina (ou de
+   * concluir a aula), as excecoes e as paginas (ler com popupSettingsOfRow). Notificacao fica com os padroes.
+   */
+  popup_close: PopupClose;
+  popup_delay_seconds: number;
+  /** Mais de uma vez: intervalo em minutos; nulo = sem intervalo. */
+  popup_every_minutes: number | null;
+  popup_exclude_pages: string[];
+  /** once | repeat; nulo = pop-up de antes da v3b-1 ("Quantas vezes" vem de popup_repeat). */
+  popup_frequency: "once" | "repeat" | null;
+  popup_max_per_day: number | null;
+  popup_max_total: number | null;
+  popup_pages: string[];
+  /** v1, sempre coerente com popup_frequency (once = Uma vez; until_action = Mais de uma vez). */
   popup_repeat: PopupRepeat;
+  /** "Lembrar depois": em quantos minutos volta (padrao 1440). */
+  popup_snooze_minutes: number;
+  popup_stop_on: PopupStopOn | null;
+  /** page_load | lesson_completed (a v3b-2 acrescenta outros; este app le um desconhecido como page_load). */
+  popup_trigger: string;
   recipients_count: number | null;
   requested_at: string | null;
   requested_by: string | null;
@@ -115,7 +147,18 @@ export type CampaignContentColumns = Pick<
   | "image_alt"
   | "image_url"
   | "kind"
+  | "popup_close"
+  | "popup_delay_seconds"
+  | "popup_every_minutes"
+  | "popup_exclude_pages"
+  | "popup_frequency"
+  | "popup_max_per_day"
+  | "popup_max_total"
+  | "popup_pages"
   | "popup_repeat"
+  | "popup_snooze_minutes"
+  | "popup_stop_on"
+  | "popup_trigger"
   | "response_mode"
   | "send_at"
   | "sender_user_id"
@@ -178,6 +221,23 @@ function peaksOf(value: unknown): number[] {
   return Array.isArray(value) ? value.filter((peak): peak is number => typeof peak === "number").map((peak) => Math.min(100, Math.max(0, Math.round(peak)))) : [];
 }
 
+/**
+ * Colunas popup_* do rascunho (v3b-1): a notificacao grava os padroes (check campaigns_popup_only_v3b); o
+ * pop-up grava a configuracao canonica, e sem `popup` (rascunho da v1/v3a) o padrao com "Quantas vezes" do
+ * `repeat`. popup_repeat sai daqui tambem, sempre coerente com popup_frequency (popup.frequency manda; so o
+ * `{ mode: "once" }` do rascunho vazio com `repeat: "until_action"` vira a regra da v1, reconcilePopupFrequency).
+ */
+function popupColumnsOfDraft(draft: NoticeDraft) {
+  if (draft.kind === "inbox") {
+    return { ...POPUP_COLUMNS_FOR_INBOX, popup_exclude_pages: [], popup_pages: ["home"] };
+  }
+
+  const base = draft.popup ?? defaultPopupSettings();
+  const frequency = reconcilePopupFrequency({ frequency: draft.popup?.frequency, repeat: draft.repeat, stored: null });
+
+  return popupSettingsToColumns(canonicalPopupSettings({ ...base, frequency }));
+}
+
 export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
   const isInbox = draft.kind === "inbox";
   // Quem envia e o tempo no sino sao da notificacao (check campaigns_inbox_only_v2); o pop-up so tem o icone.
@@ -208,7 +268,7 @@ export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
     image_url: draft.image ? draft.image.url : null,
     kind: draft.kind,
     poll: isInbox ? draft.poll ?? null : null,
-    popup_repeat: isInbox ? "once" : draft.repeat,
+    ...popupColumnsOfDraft(draft),
     response_mode: isInbox && draft.response ? "accept_decline" : "none",
     send_at: isInbox && draft.schedule.mode === "at" ? draft.schedule.sendAt : null,
     sender_user_id: isInbox && draft.sender ? draft.sender.userId : null,
@@ -243,6 +303,8 @@ export function rowToDraft(row: CampaignRow): NoticeDraft {
     image: row.image_url ? { alt: row.image_alt ?? "", url: row.image_url } : null,
     kind: row.kind,
     poll: parsePoll(row.poll),
+    // v3b-1: so o pop-up leva a configuracao (o rascunho da notificacao continua sem a chave).
+    ...(row.kind === "popup" ? { popup: popupSettingsOfRow(row) } : {}),
     reactions: row.kind === "inbox" && row.allow_reactions === true,
     repeat: row.popup_repeat,
     response:
@@ -639,7 +701,10 @@ export async function setDeliveryEligibility(db: CommunicationsDb, campaignId: s
 }
 
 export type PopupReshowResult = {
-  /** Quem a regra "Uma vez" pulava e volta a contar como novo (ainda no segmento, viu e nao clicou). */
+  /**
+   * Quem volta a contar como novo (ainda no segmento, viu mais vezes do que adiou, sem "Não mostrar de novo"
+   * e sem clique, menos nos pop-ups que so param quando terminam, onde quem clicou conta tambem).
+   */
   count: number;
   /** Acima de `max` (sem publish_large): nada mudou. */
   refused: boolean;
@@ -647,10 +712,9 @@ export type PopupReshowResult = {
 };
 
 /**
- * "Mostrar de novo para quem já viu" (RPC 5.3 da 202610220001, so pop-up "Uma vez"): `apply: false` so conta
- * (pela regra "Uma vez", mesmo com o pop-up em "Até o aluno clicar"); `apply: true` zera, a nao ser que a
- * contagem passe de `max` (refused, nada muda). null = o pop-up nao esta no ar nem pausado (ou, ao aplicar,
- * nao esta em "Uma vez").
+ * "Mostrar de novo para quem já viu" (RPC communication_reshow_popup; desde a 202610220003 em qualquer
+ * "Quantas vezes", reshowTarget de popup-display-model.ts): `apply: false` so conta; `apply: true` zera, a
+ * nao ser que a contagem passe de `max` (refused, nada muda). null = o pop-up nao esta no ar nem pausado.
  */
 export async function reshowPopupDeliveries(
   db: CommunicationsDb,
@@ -671,6 +735,29 @@ export async function reshowPopupDeliveries(
   }
 
   return { count: toNumber(row.count), refused: row.refused === true, reshown: toNumber(row.reshown) };
+}
+
+/**
+ * Pop-ups publicados agora (v3b-1, no maximo 50 ao mesmo tempo): ativos, nao excluidos e sem fim no passado,
+ * tambem os de janela futura; `excludeId` fica de fora (o que esta sendo publicado ou retomado).
+ */
+export async function countPublishedPopups(db: CommunicationsDb, input: { excludeId?: string | null; nowIso: string }): Promise<number> {
+  let query = db
+    .from("campaigns")
+    .select("id", { count: "exact", head: true })
+    .eq("kind", "popup")
+    .eq("status", "active")
+    .is("deleted_at", null)
+    .or(`ends_at.is.null,ends_at.gt."${input.nowIso}"`);
+
+  if (input.excludeId) {
+    query = query.neq("id", input.excludeId);
+  }
+
+  const { count, error } = await query;
+  assertNoDbError(error, "Comunicacao: pop-ups publicados");
+
+  return count ?? 0;
 }
 
 /* ------------------------------------------------------------------------------------------------

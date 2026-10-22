@@ -1,10 +1,13 @@
 // Avisos da equipe (Comunicacao > Avisos e pop-ups, docs/22): tipos, limites fixos, situacao, acoes
-// disponiveis, aprovacao acima de 500 alunos (docs/17 D4), agenda no fuso de Sao Paulo e a escolha do
-// pop-up de cada aluno. Modulo puro: sem "server-only", imports relativos; os testes
+// disponiveis, aprovacao acima de 500 alunos (docs/17 D4), agenda no fuso de Sao Paulo e o que cada
+// evento do pop-up grava. Modulo puro: sem "server-only", imports relativos; os testes
 // (tests/comunicacao-avisos-modelo.test.mjs) carregam direto pelo Node e o editor do admin usa as
 // mesmas regras e frases.
 // v3a (docs/24 §2.1 e §4.9): o menu com Ver relatorio, Editar a notificacao enviada, Excluir em toda
 // situacao e "Mostrar de novo para quem ja viu" no pop-up "Uma vez" (a regra conta so o que veio depois).
+// v3b-1 (docs/25): "Mostrar de novo" em qualquer "Quantas vezes", o "Lembrar depois" com o tempo do pop-up
+// e a frase de revisao com onde, quando e quantas vezes. Quando e onde cada pop-up abre para cada aluno
+// (paginas, momento e quantas vezes) mora em popup-display-model.ts.
 
 export const CAMPAIGN_KINDS = ["inbox", "popup"] as const;
 export type CampaignKind = (typeof CAMPAIGN_KINDS)[number];
@@ -27,13 +30,12 @@ export const NOTICE_LIMITS = {
 export const APPROVAL_THRESHOLD = 500;
 
 /**
- * Regras fixas de cada pop-up (docs/17 §1.8.1). Sem limite entre pop-ups (decisao do produtor, docs/24 §10):
- * cada um segue a sua regra; "Ate o aluno clicar" volta 24 h depois de o aluno ter visto este pop-up.
+ * "Lembrar depois" de cada pop-up (docs/17 §1.8.1): ate 2 vezes desde o ultimo "mostrar de novo"; volta
+ * depois do "Volta em" do pop-up (v3b-1), 24 h sem o valor. Sem limite entre pop-ups (decisao do produtor,
+ * docs/24 §10): a frequencia de cada um e escolhida pela equipe (popup-display-model.ts, docs/25).
  */
 export const POPUP_RULES = {
-  delayMs: 3_000,
   maxSnoozes: 2,
-  minHoursBetween: 24,
   snoozeHours: 24
 } as const;
 
@@ -205,7 +207,10 @@ export function noticeRecipients(row: { audience_count: number | null; recipient
   return Math.max(row.recipients_count ?? 0, row.audience_count ?? 0);
 }
 
-/** O que mais o menu precisa saber: a regra "Quantas vezes" do pop-up e quantos alunos a notificacao alcancou. */
+/**
+ * O que mais o menu precisa saber: quantos alunos a notificacao alcancou. `popupRepeat` continua aceito, mas
+ * desde a v3b-1 nao muda nada ("Mostrar de novo" vale em qualquer "Quantas vezes").
+ */
 export type NoticeActionsExtra = { popupRepeat?: PopupRepeat | null; recipients?: number | null };
 
 /**
@@ -231,8 +236,8 @@ const ACTION_ORDER: readonly NoticeAction[] = [
 
 /**
  * O que a pessoa pode fazer com o aviso agora, na ordem do menu (o servidor confere de novo em cada acao).
- * Sem `extra` (chamadas antigas), "Mostrar de novo" nunca aparece e Editar a notificacao enviada segue so
- * "messaging.publish".
+ * Sem `extra` (chamadas antigas), Editar a notificacao enviada segue so "messaging.publish". "Mostrar de
+ * novo" (v3b-1) aparece no pop-up no ar (dentro da janela) ou pausado, em qualquer "Quantas vezes".
  */
 export function availableNoticeActions(
   campaign: CampaignTiming,
@@ -308,7 +313,7 @@ export function availableNoticeActions(
       // Editar o pop-up no ar muda o que os alunos veem agora: vale como publicar (docs/22 §2.3).
       add("edit", canPublish);
       add("pause", canPublish);
-      add("reshow", canPublish && situation === "active" && extra.popupRepeat === "once");
+      add("reshow", canPublish && situation === "active");
       add("end", canPublish);
       add("delete", canPublish);
       break;
@@ -316,7 +321,7 @@ export function availableNoticeActions(
       add("view_report");
       add("edit", canPublish);
       add("resume", canPublish);
-      add("reshow", canPublish && extra.popupRepeat === "once");
+      add("reshow", canPublish);
       add("duplicate");
       add("end", canPublish);
       add("delete", canPublish);
@@ -467,6 +472,11 @@ export type NoticeReviewInput = {
   /** Notificacoes seguintes (v2): quantas e o produto da linha "Parar ... para quem tiver acesso a". */
   followUps?: { count: number; stopProductName?: string | null } | null;
   kind: CampaignKind;
+  /**
+   * v3b-1: as partes do pop-up ja em frase (popupReviewParts de popup-sentences.ts): onde e quando (null = o
+   * padrao, so no Inicio ao abrir) e quantas vezes; sem valor, a frase de `repeat` da v1.
+   */
+  popup?: { frequency: string; placement: string | null } | null;
   repeat: PopupRepeat;
   schedule: { mode: "now" } | { mode: "at"; sendAt: string };
   /**
@@ -522,19 +532,17 @@ export function describeNoticeReview(input: NoticeReviewInput) {
     period = "a partir de agora, sem data para acabar";
   }
 
-  return `Pop-up ${audience}, ${period}, ${POPUP_REPEAT_LABELS[input.repeat]}.`;
+  const placement = input.popup?.placement;
+
+  return `Pop-up ${audience}${placement ? `, ${placement}` : ""}, ${period}, ${input.popup?.frequency ?? POPUP_REPEAT_LABELS[input.repeat]}.`;
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Pop-up de cada aluno (docs/17 §1.8.1): no maximo 1 a cada 24 h; o limite de 1 por sessao fica no
- * navegador. "Uma vez" = some depois que o aluno ve (cada "Lembrar depois" vale mais uma vez, depois
- * das 24 h); "ate o aluno clicar" = volta no dia seguinte enquanto ele nao clicar nem escolher "Nao
- * mostrar de novo".
+ * Estado de cada aluno num pop-up (a linha de campaign_deliveries) e o que cada evento grava. Quando o
+ * pop-up abre (paginas, momento e quantas vezes) e decidido em popup-display-model.ts (docs/25).
  * ---------------------------------------------------------------------------------------------- */
 
-const HOUR_MS = 3_600_000;
-
-export type LivePopup = { allowSnooze: boolean; id: string; repeat: PopupRepeat; startsAt: number };
+const MINUTE_MS = 60_000;
 
 export type PopupDeliveryState = {
   campaignId: string;
@@ -549,55 +557,6 @@ export type PopupDeliveryState = {
   impressionsBeforeReshow?: number;
   snoozesBeforeReshow?: number;
 };
-
-/**
- * "Uma vez" pula este aluno? Cada "Lembrar depois" pede mais uma vez (visto 1 vez e adiado 1 vez = volta;
- * visto 2 vezes = some), contando so o que veio depois do ultimo "mostrar de novo".
- */
-function onceSkips(delivery: PopupDeliveryState) {
-  return delivery.impressions - (delivery.impressionsBeforeReshow ?? 0) > delivery.snoozeCount - (delivery.snoozesBeforeReshow ?? 0);
-}
-
-/**
- * Quem "Mostrar de novo para quem já viu" zera (a mesma regra que communication_reshow_popup conta): ainda no
- * segmento, nao clicou, nao escolheu "Não mostrar de novo" e "Uma vez" o pularia.
- */
-export function reshowSkipped(delivery: PopupDeliveryState) {
-  return delivery.eligible && delivery.clickedAt === null && delivery.dismissedAt === null && onceSkips(delivery);
-}
-
-export function pickPopup(input: {
-  deliveries: readonly PopupDeliveryState[];
-  live: readonly LivePopup[];
-  now: number;
-}): string | null {
-  const { now } = input;
-  const gap = POPUP_RULES.minHoursBetween * HOUR_MS;
-
-  const byCampaign = new Map(input.deliveries.map((delivery) => [delivery.campaignId, delivery] as const));
-  const candidates = [...input.live].sort((left, right) => right.startsAt - left.startsAt || (left.id < right.id ? -1 : 1));
-
-  for (const popup of candidates) {
-    const delivery = byCampaign.get(popup.id);
-
-    if (!delivery || !delivery.eligible || delivery.clickedAt !== null || delivery.dismissedAt !== null) {
-      continue;
-    }
-
-    if (delivery.snoozedUntil !== null && delivery.snoozedUntil > now) {
-      continue;
-    }
-
-    // "Uma vez" conta desde o ultimo "mostrar de novo"; "Ate o aluno clicar" volta 24 h depois de ter visto este.
-    if (popup.repeat === "once" ? onceSkips(delivery) : delivery.lastSeenAt !== null && now - delivery.lastSeenAt < gap) {
-      continue;
-    }
-
-    return popup.id;
-  }
-
-  return null;
-}
 
 export const POPUP_EVENTS = ["impressed", "clicked", "closed", "dismissed", "snoozed"] as const;
 export type PopupEvent = (typeof POPUP_EVENTS)[number];
@@ -620,12 +579,14 @@ export type PopupDeliveryPatch = {
 
 /**
  * O que gravar para o evento do aluno. `closed` (fechou no X, Esc ou fora) nao muda coluna: fica so no
- * historico. `snoozed` sem permissao ou depois de 2 vezes -> null (recusado).
+ * historico. `snoozed` sem permissao ou depois de 2 vezes -> null (recusado); volta depois de `snoozeMinutes`
+ * (v3b-1, o "Volta em" do pop-up), 24 h sem o valor. `impressed` fica para os testes da v1 (desde a v3b-1
+ * a abertura e gravada pela RPC communication_record_popup_impression).
  */
 export function popupEventPatch(
   state: PopupDeliveryState,
   event: PopupEvent,
-  input: { allowSnooze: boolean; now: number }
+  input: { allowSnooze: boolean; now: number; snoozeMinutes?: number }
 ): PopupDeliveryPatch | null {
   const nowIso = new Date(input.now).toISOString();
 
@@ -649,7 +610,7 @@ export function popupEventPatch(
 
       return {
         snooze_count: state.snoozeCount + 1,
-        snoozed_until: new Date(input.now + POPUP_RULES.snoozeHours * HOUR_MS).toISOString()
+        snoozed_until: new Date(input.now + (input.snoozeMinutes ?? POPUP_RULES.snoozeHours * 60) * MINUTE_MS).toISOString()
       };
   }
 

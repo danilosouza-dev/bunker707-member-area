@@ -110,7 +110,11 @@ test("toast depois de publicar segue o que o servidor decidiu", () => {
   assert.equal(model.publishedNoticeToast({ audienceCount: 320, recipients: 318, situation: "sent" }, "inbox"), "Notificação enviada para 318 alunos.");
   assert.equal(model.publishedNoticeToast({ audienceCount: 1, recipients: null, situation: "sent" }, "inbox"), "Notificação enviada para 1 aluno.");
   assert.equal(model.publishedNoticeToast({ audienceCount: 10, recipients: null, situation: "scheduled" }, "inbox"), "Envio agendado.");
-  assert.equal(model.publishedNoticeToast({ audienceCount: 10, recipients: null, situation: "active" }, "popup"), "Pop-up publicado.");
+  // v3b-1: no ar agora, cada aluno ve na proxima pagina (ate 1 minuto numa aba aberta); com a janela no futuro, o de antes.
+  assert.equal(
+    model.publishedNoticeToast({ audienceCount: 10, recipients: null, situation: "active" }, "popup"),
+    "Pop-up publicado. Em até 1 minuto ele começa a aparecer para quem já está na área."
+  );
   assert.equal(model.publishedNoticeToast({ audienceCount: 10, recipients: null, situation: "scheduled" }, "popup"), "Pop-up publicado.");
   assert.equal(model.publishedNoticeToast({ audienceCount: 900, recipients: null, situation: "pending_approval" }, "popup"), "Enviado para aprovação.");
 });
@@ -181,6 +185,12 @@ test("rascunho: so os campos do tipo vao ao servidor e a comparacao ignora o que
   assert.equal(model.isSameNoticeDraft(local, stored), true);
   assert.equal(model.isSameNoticeDraft(local, { ...stored, body: "Novo texto" }), false);
   assert.equal(model.isSameNoticeDraft(draft({ window: popupWindow }), draft()), true, "notificacao ignora a janela");
+
+  // v3b-1: o pop-up leva a configuracao (o padrao quando comecou como notificacao); a notificacao, nunca.
+  assert.equal("popup" in sent, false, "notificacao sem a chave popup");
+  assert.equal("popup" in model.noticeDraftForKind({ ...inbox, popup: { ...schemas.emptyNoticeDraft("popup").popup, pages: ["any"] } }), false);
+  assert.deepEqual(popup.popup, schemas.emptyNoticeDraft("popup").popup, "pop-up que comecou como notificacao: o padrao");
+  assert.equal(model.isSameNoticeDraft(draft({ popup: { ...schemas.emptyNoticeDraft("popup").popup, pages: ["any"] } }), draft()), true, "notificacao ignora o pop-up");
 });
 
 test("Recarregar depois de conflito: fica o que mudou aqui, o resto segue o banco", () => {
@@ -446,7 +456,7 @@ test("editor: salvar sem mudanca nao grava; com mudanca, o toast conta o que foi
   assert.equal(model.savedNoticeToast("inbox", "scheduled"), "Rascunho salvo. O envio agendado foi cancelado: agende de novo.");
   assert.equal(model.savedNoticeToast("popup", "pending_approval"), "Rascunho salvo. O pedido de aprovação foi cancelado.");
   // v3a (docs/24 §2.4): o toast diz o que acontece com quem ja viu pela regra salva ("Uma vez" por padrao).
-  assert.equal(model.savedNoticeToast("popup", "active"), "Pop-up atualizado. Quem já viu não vê de novo.");
+  assert.equal(model.savedNoticeToast("popup", "active"), "Pop-up atualizado. Quem já viu não vê de novo. Para quem já está com a área aberta, pode levar até 1 minuto.");
   assert.equal(model.savedNoticeToast("popup", "paused"), "Pop-up salvo. Ele continua pausado.");
   assert.equal(model.testSentToast(false, "scheduled"), "Enviamos a notificação para o seu sino.", "teste sem mudanca nao grava nada");
   assert.equal(model.testSentToast(true, "scheduled"), "Enviamos a notificação para o seu sino. O envio agendado foi cancelado: agende de novo.");

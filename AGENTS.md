@@ -36,6 +36,7 @@ Before making product, UX, architecture, or implementation decisions, read the r
 - `docs/22-comunicacao-notificacoes-e-pop-ups.md` (Comunicacao v1: sino do aluno, avisos e pop-ups criados pela equipe, segmentos por regras, envio pelo tick e limites fixos; vale para qualquer trabalho em Comunicacao, sino ou pop-ups)
 - `docs/23-comunicacao-v2-fluxos.md` (Comunicacao v2: quem envia e icone de cada notificacao, tempo no sino, audio ouvido, notificacoes seguintes no editor e Fluxos com regras num motor so no tick, visitas de pagina e o limite de 3 por dia; vale para qualquer trabalho em Comunicacao, sino, notificacoes seguintes ou fluxos)
 - `docs/24-comunicacao-v3a-sino-e-avisos.md` (Comunicacao v3a: CRUD dos avisos no menu, editar e excluir a notificacao enviada, "Mostrar de novo" no pop-up "Uma vez", lixeira do aluno, cartao clicavel, Mudar resposta, reacoes, enquetes, regras novas e o sino numa consulta so com a primeira pagina guardada no navegador; vale para qualquer trabalho em Comunicacao, sino, avisos, reacoes ou enquetes)
+- `docs/25-comunicacao-v3b1-pop-ups.md` (Comunicacao v3b-1: onde o pop-up aparece e onde nunca, ao abrir a pagina ou ao concluir uma aula, quantas vezes para cada aluno escolhido pela equipe sem limite fixo entre pop-ups, o "Volta em" do Lembrar depois, Como fechar, um de cada vez e nunca com o nosso player tocando, mapa + plano + `POST /api/popups/[id]/show` e a memoria de 1 minuto do navegador; vale para qualquer trabalho em pop-ups, Comunicacao ou no player da pagina da aula)
 
 Update docs when decisions change.
 

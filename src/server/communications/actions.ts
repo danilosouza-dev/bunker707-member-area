@@ -21,8 +21,13 @@
 // v3a (docs/24 §2 e §4.7–§4.10): a notificacao enviada muda o conteudo (messaging.publish; acima de 500
 // alunos, messaging.publish_large), num caminho proprio que nunca volta a rascunho nem mexe nas seguintes;
 // Excluir vale em toda situacao menos "Enviando" (agendado, enviado e pop-up no ar ou pausado pedem
-// messaging.publish); "Mostrar de novo para quem já viu" no pop-up "Uma vez" (menu e editor) e "Encerrar
-// enquete". As regras que citam a notificacao so avisam (contagem na auditoria), nunca impedem.
+// messaging.publish); "Mostrar de novo para quem já viu" no pop-up (menu e editor) e "Encerrar enquete". As
+// regras que citam a notificacao so avisam (contagem na auditoria), nunca impedem.
+//
+// v3b-1 (docs/25 §2 e §5.4): o pop-up grava onde, quando e quantas vezes aparece, o "Lembrar depois" e como
+// fecha (withPopupSettings completa o rascunho da v1/v3a a partir da linha gravada); "Mostrar de novo" vale
+// em qualquer "Quantas vezes"; no maximo 50 pop-ups publicados ao mesmo tempo (publicar, aprovar e retomar
+// recusam o 51o, 422); a auditoria do pop-up salvo ou publicado leva o momento, quantas paginas e o modo.
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -108,7 +113,16 @@ import {
   type FlowRow,
   type FlowStateChange
 } from "./flow-store";
-import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, type NoticeSenderOption } from "./queries";
+import {
+  defaultPopupSettings,
+  frequencyOfColumns,
+  popupSettingsOfRow,
+  POPUP_V3B1_RULES,
+  reconcilePopupFrequency,
+  repeatOfFrequency,
+  type PopupFrequency
+} from "./popup-display-model";
+import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, noticeDraftOfRow, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
 import {
   deleteNoticeSchema,
@@ -128,6 +142,7 @@ import {
 } from "./schemas";
 import {
   audienceOfRow,
+  countPublishedPopups,
   deleteCampaignNotifications,
   draftToColumns,
   fetchCampaign,
@@ -164,10 +179,12 @@ const SENT_EDIT_FOLLOW_UP_HINT = "Mude a notificação seguinte no relatório an
 const DELETE_NEEDS_PUBLISH = "Só quem pode publicar exclui um aviso que os alunos veem ou que está agendado.";
 const DELETE_WHILE_SENDING = "A notificação ainda está sendo enviada. Espere terminar para excluir.";
 const POPUP_NOT_LIVE = "Este pop-up não está no ar.";
-const RESHOW_ONLY_ONCE = "Mostrar de novo vale para pop-ups em “Uma vez”. Em “Até o aluno clicar”, quem fechou já volta a ver 24 horas depois.";
 const RESHOW_NEEDS_APPROVAL = "Para mostrar de novo a mais de 500 alunos, peça a um dono ou administrador.";
 const POLL_MISSING = "Esta notificação não tem enquete.";
 const POLL_ALREADY_CLOSED = "A enquete já está encerrada.";
+// v3b-1 (docs/25 §2.5 e D13)
+const POPUPS_FULL_TO_PUBLISH = "Já há 50 pop-ups no ar ou agendados. Encerre um antes de publicar outro.";
+const POPUPS_FULL_TO_RESUME = "Já há 50 pop-ups no ar ou agendados. Encerre um antes de retomar este.";
 
 export type SavedNotice = {
   /**
@@ -341,8 +358,10 @@ async function citationsOf(db: CommunicationsDb, row: CampaignRow) {
 }
 
 /**
- * "Mostrar de novo para quem já viu" (docs/24 §4.9), antes de gravar: quantos a regra "Uma vez" pula agora
- * (ainda no segmento, viram e nao clicaram nem escolheram "Não mostrar de novo"). Acima de 500 sem
+ * "Mostrar de novo para quem já viu" (docs/24 §4.9; v3b-1, docs/25 §4.7: em qualquer "Quantas vezes"), antes de
+ * gravar: quantos voltam a contar como novo (ainda no segmento, viram mais vezes do que adiaram, sem "Não
+ * mostrar de novo" e sem clique, menos no pop-up que so para quando termina). Conta pela regra gravada: quando
+ * o mesmo salvar muda o que faz parar, o toast usa a contagem aplicada depois. Acima de 500 sem
  * messaging.publish_large, 403; pop-up fora do ar, 409.
  */
 async function countPopupReshow(db: CommunicationsDb, access: AdminAccess, campaignId: string, now: Date) {
@@ -360,8 +379,9 @@ async function countPopupReshow(db: CommunicationsDb, access: AdminAccess, campa
 }
 
 /**
- * Aplica o "mostrar de novo" (RPC 5.3, com o teto de 500 de quem nao tem messaging.publish_large). null = o
- * pop-up saiu de "Uma vez" no meio (409); refused = passou de 500 no meio (403). Devolve quantos voltam a ver.
+ * Aplica o "mostrar de novo" (RPC communication_reshow_popup, com o teto de 500 de quem nao tem
+ * messaging.publish_large). null = o pop-up saiu do ar (nem no ar nem pausado) entre a leitura e a gravacao
+ * (409); refused = passou de 500 no meio (403). Devolve quantos voltam a contar como novo.
  */
 async function applyPopupReshow(db: CommunicationsDb, access: AdminAccess, campaignId: string, now: Date) {
   const applied = await reshowPopupDeliveries(db, {
@@ -372,7 +392,7 @@ async function applyPopupReshow(db: CommunicationsDb, access: AdminAccess, campa
   });
 
   if (!applied) {
-    throw new CommunicationError(RESHOW_ONLY_ONCE, 409);
+    throw new CommunicationError(POPUP_NOT_LIVE, 409);
   }
 
   if (applied.refused) {
@@ -380,6 +400,55 @@ async function applyPopupReshow(db: CommunicationsDb, access: AdminAccess, campa
   }
 
   return applied.reshown;
+}
+
+/**
+ * v3b-1 (docs/25 §5.4): o rascunho que vai ser gravado, com a configuracao do pop-up completa. `popup` manda
+ * quando vem; sem ele (rascunho da v1/v3a), a da linha gravada (ou o padrao). "Quantas vezes" fica coerente
+ * com `repeat` (reconcilePopupFrequency: quem mudou so o `repeat` da v1 grava a regra da v1 dele). A regra da
+ * v1 vinda so do `repeat` num pop-up sem botao ("Até o aluno clicar", que nunca parou por clique porque
+ * ninguem clica) vira "Só quando o pop-up terminar", o mesmo para o aluno; escolher "Quando o aluno clica no
+ * botão" sem botao continua recusado pelo zod (400 em popup.frequency.stopOn).
+ */
+function withPopupSettings(draft: NoticeDraft, stored: CampaignRow | null): NoticeDraft {
+  if (draft.kind !== "popup") {
+    return draft;
+  }
+
+  const row = stored?.kind === "popup" ? stored : null;
+  const base = draft.popup ?? (row ? popupSettingsOfRow(row) : defaultPopupSettings());
+  const reconciled = reconcilePopupFrequency({ frequency: draft.popup?.frequency, repeat: draft.repeat, stored: row ? frequencyOfColumns(row) : null });
+  const fromRepeat = reconciled !== draft.popup?.frequency;
+  const frequency: PopupFrequency =
+    fromRepeat && !draft.cta && reconciled.mode === "repeat" && reconciled.stopOn === "click" ? { ...reconciled, stopOn: "never" } : reconciled;
+
+  return { ...draft, popup: { ...base, frequency }, repeat: repeatOfFrequency(frequency) };
+}
+
+/** v3b-1: a auditoria do pop-up salvo ou publicado leva o momento, quantas paginas e o modo (so codigos e contagens). */
+function popupAuditOf(row: CampaignRow) {
+  if (row.kind !== "popup") {
+    return {};
+  }
+
+  const settings = popupSettingsOfRow(row);
+
+  return { popup_frequency: settings.frequency.mode, popup_pages: settings.pages.length, popup_trigger: settings.trigger };
+}
+
+/**
+ * v3b-1 (docs/25 D13): no maximo 50 pop-ups publicados ao mesmo tempo (no ar ou agendados, nao excluidos e sem
+ * fim no passado), este fora da conta: o 51o e recusado (422) ao publicar, aprovar e retomar. Nunca limita o
+ * que o aluno ve.
+ */
+async function assertPopupRoom(db: CommunicationsDb, row: CampaignRow, now: Date, message: string) {
+  if (row.kind !== "popup") {
+    return;
+  }
+
+  if ((await countPublishedPopups(db, { excludeId: row.id, nowIso: now.toISOString() })) >= POPUP_V3B1_RULES.publishedMax) {
+    throw new CommunicationError(message, 422);
+  }
 }
 
 /** JSON com chaves em ordem (o jsonb do banco devolve as chaves em outra ordem). */
@@ -398,9 +467,12 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-/** Regras do rascunho e as que so valem ao publicar (data no futuro); erro vira 400 com o campo. */
+/**
+ * Regras do rascunho e as que so valem ao publicar (data no futuro); erro vira 400 com o campo. v3b-1: o
+ * rascunho da linha como o editor abre (noticeDraftOfRow: o "Até o aluno clicar" antigo sem botao nao e recusado).
+ */
 function assertPublishable(row: CampaignRow, now: number) {
-  const parsed = noticeDraftSchema.safeParse(rowToDraft(row));
+  const parsed = noticeDraftSchema.safeParse(noticeDraftOfRow(row));
 
   if (!parsed.success) {
     throw parsed.error;
@@ -881,26 +953,26 @@ async function saveSentNotice(input: {
  * pop-up no ar ou pausado continua como esta (e recalcula quem ve se o segmento mudou). Mudar o pop-up
  * no ar vale como publicar: precisa de messaging.publish e, acima de 500 alunos (o segmento novo, ou a
  * contagem gravada quando o segmento nao mudou), de messaging.publish_large; senao, 403.
- * v3a: notificacao enviada muda so o conteudo (saveSentNotice); o pop-up no ar ou pausado em "Uma vez" pode
- * salvar com `reshow` ("Mostrar de novo para quem já viu": contado e conferido antes de gravar, aplicado
- * depois, com a regra nova ja gravada).
+ * v3a: notificacao enviada muda so o conteudo (saveSentNotice); o pop-up no ar ou pausado pode salvar com
+ * `reshow` ("Mostrar de novo para quem já viu", v3b-1 em qualquer "Quantas vezes": contado e conferido antes
+ * de gravar, aplicado depois, com a regra nova ja gravada).
+ * v3b-1: o pop-up grava a configuracao completa (withPopupSettings: o rascunho sem `popup` usa a da linha).
  */
 export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionResult<SavedNotice>> {
   return runAdminAction("messaging.write", saveNoticeSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
-    const columns = draftToColumns(data.draft);
 
     await assertSenderForSave(db, data.draft);
 
     if (!data.id) {
-      const created = await insertCampaign(db, { ...columns, created_by: user.id, status: "draft", updated_by: user.id });
+      const created = await insertCampaign(db, { ...draftToColumns(withPopupSettings(data.draft, null)), created_by: user.id, status: "draft", updated_by: user.id });
 
       await recordAudit(db, {
         action: "communication.saved",
         actorId: user.id,
         entityId: created.id,
         entityType: "campaign",
-        metadata: { created: true, kind: created.kind, sender_user_id: created.sender_user_id }
+        metadata: { created: true, kind: created.kind, sender_user_id: created.sender_user_id, ...popupAuditOf(created) }
       });
       revalidateNotices();
 
@@ -908,6 +980,8 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     }
 
     const current = await requireCampaign(db, data.id);
+    const draft = withPopupSettings(data.draft, current);
+    const columns = draftToColumns(draft);
 
     if (current.kind === "inbox" && current.status === "sent") {
       return saveSentNotice({ access, columns, current, data, db, userId: user.id });
@@ -929,18 +1003,15 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
         throw new NoticeFieldError("kind", "O tipo não muda depois de publicado.");
       }
 
-      const [problem] = publishProblems(data.draft, now.getTime());
+      const [problem] = publishProblems(draft, now.getTime());
 
       if (problem) {
         throw new NoticeFieldError(problem.path, problem.message);
       }
 
+      // Mudar onde, quando, quantas vezes, o "Volta em" ou como fecha tambem e mudar o que os alunos veem.
       if (!can(access, "messaging.publish")) {
         throw new CommunicationError(LIVE_EDIT_NEEDS_PUBLISH, 403);
-      }
-
-      if (reshow && data.draft.repeat !== "once") {
-        throw new NoticeFieldError("reshow", RESHOW_ONLY_ONCE);
       }
 
       if (audienceChanged) {
@@ -976,7 +1047,8 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
 
       invalidateLivePopups({ from: "action" });
 
-      // Depois de gravar (a regra "Uma vez" ja gravada) e de recalcular quem ve: so quem ainda esta no segmento.
+      // Depois de gravar ("Quantas vezes" ja gravado: no pop-up que so para quando termina, quem clicou conta)
+      // e de recalcular quem ve: so quem ainda esta no segmento.
       if (reshow) {
         reshown = await applyPopupReshow(db, access, saved.id, now);
         await recordAudit(db, {
@@ -1004,7 +1076,14 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
       actorId: user.id,
       entityId: saved.id,
       entityType: "campaign",
-      metadata: { audience_changed: audienceChanged, from_status: current.status, kind: saved.kind, sender_user_id: saved.sender_user_id, to_status: saved.status }
+      metadata: {
+        audience_changed: audienceChanged,
+        from_status: current.status,
+        kind: saved.kind,
+        sender_user_id: saved.sender_user_id,
+        to_status: saved.status,
+        ...popupAuditOf(saved)
+      }
     });
     revalidateNotices(saved.id);
 
@@ -1061,6 +1140,8 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
     await assertSenderForPublish(db, row);
+    // v3b-1: tambem antes do pedido de aprovacao (um pedido que nao caberia no ar nao fica esperando).
+    await assertPopupRoom(db, row, now, POPUPS_FULL_TO_PUBLISH);
     const followUps = await followUpsForPublish(db, row);
 
     const loaded = await loadFactsFor(db, now, audienceOfRow(row));
@@ -1086,7 +1167,7 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
         count,
         entityId: row.id,
         entityType: "campaign",
-        metadata: { kind: row.kind, sender_user_id: row.sender_user_id }
+        metadata: { kind: row.kind, sender_user_id: row.sender_user_id, ...popupAuditOf(row) }
       });
       revalidateNotices(row.id);
 
@@ -1117,7 +1198,8 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
         kind: row.kind,
         recipients: published.recipients,
         sender_user_id: row.sender_user_id,
-        situation: published.situation
+        situation: published.situation,
+        ...popupAuditOf(row)
       }
     });
     await notifyNoticeSenders(db, row, published, user.id, followUps);
@@ -1144,6 +1226,7 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
     await assertSenderForPublish(db, row);
+    await assertPopupRoom(db, row, now, POPUPS_FULL_TO_PUBLISH);
     const followUps = await followUpsForPublish(db, row);
 
     const loaded = await loadFactsFor(db, now, audienceOfRow(row));
@@ -1174,7 +1257,8 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
         recipients: published.recipients,
         requested_by: row.requested_by,
         sender_user_id: row.sender_user_id,
-        situation: published.situation
+        situation: published.situation,
+        ...popupAuditOf(row)
       }
     });
     await notifyNoticeSenders(db, row, published, user.id, followUps);
@@ -1262,6 +1346,8 @@ async function changePopupStatus(input: {
   let loaded: LoadedAudience | undefined;
 
   if (input.to === "active") {
+    // v3b-1: o pausado nao conta entre os 50 publicados; retomar o 51o e recusado (422).
+    await assertPopupRoom(db, row, now, POPUPS_FULL_TO_RESUME);
     loaded = await loadFactsFor(db, now, audienceOfRow(row));
 
     if (!canPublishTo(input.access, resolveAudienceUserIds(audienceOfRow(row), loaded).length)) {
@@ -1395,10 +1481,11 @@ export async function withdrawNotice(input: WithdrawNoticeInput): Promise<Action
 }
 
 /**
- * [messaging.publish] "Mostrar de novo para quem já viu" pelo menu (docs/24 §2.4 e §4.9): so pop-up no ar ou
- * pausado em "Uma vez". Quem ainda esta no segmento, viu e nao clicou nem escolheu "Não mostrar de novo"
- * volta a contar como novo. Acima de 500, messaging.publish_large.
- * O aviso nao muda (a versao devolvida e a mesma).
+ * [messaging.publish] "Mostrar de novo para quem já viu" pelo menu (docs/24 §2.4 e §4.9): pop-up no ar ou
+ * pausado, em qualquer "Quantas vezes" (v3b-1, docs/25 §4.7). Quem ainda esta no segmento, viu mais vezes do
+ * que adiou e nao escolheu "Não mostrar de novo" nem clicou (quem clicou conta no pop-up que so para quando
+ * termina) volta a contar como novo: a contagem de "Quantas vezes" recomeca. Acima de 500,
+ * messaging.publish_large. O aviso nao muda (a versao devolvida e a mesma).
  */
 export async function reshowPopup(input: NoticeIdInput): Promise<ActionResult<{ reshown: number; updatedAt: string }>> {
   return runAdminAction("messaging.publish", noticeIdSchema, input, async ({ access, input: data, user }) => {
@@ -1415,10 +1502,6 @@ export async function reshowPopup(input: NoticeIdInput): Promise<ActionResult<{ 
     }
 
     assertSameVersion(row, data.expectedUpdatedAt);
-
-    if (row.popup_repeat !== "once") {
-      throw new CommunicationError(RESHOW_ONLY_ONCE, 409);
-    }
 
     await countPopupReshow(db, access, row.id, now);
     const reshown = await applyPopupReshow(db, access, row.id, now);
@@ -1535,7 +1618,8 @@ export async function duplicateNotice(input: NoticeIdInput): Promise<ActionResul
     const db = communicationsDb();
     const now = Date.now();
     const row = await requireCampaign(db, data.id);
-    const draft = rowToDraft(row);
+    // v3b-1: o pop-up leva toda a configuracao (onde, quando, quantas vezes, "Volta em", como fecha).
+    const draft = noticeDraftOfRow(row);
 
     if (draft.schedule.mode === "at" && Date.parse(draft.schedule.sendAt) <= now) {
       draft.schedule = { mode: "now" };

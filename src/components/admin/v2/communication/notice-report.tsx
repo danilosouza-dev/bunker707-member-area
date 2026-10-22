@@ -6,6 +6,8 @@ import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatSaoPauloDateTime, type NoticePermissions } from "@/server/communications/campaign-model";
+import { POPUP_SETTINGS_DEFAULT } from "@/server/communications/popup-display-model";
+import { describeMinutes, popupSettingsLines } from "@/server/communications/popup-sentences";
 import type { NoticeDetail, NoticeEditorOptions } from "@/server/communications/queries";
 import { PillGroup } from "../form";
 import { KpiTile } from "../kpi-tile";
@@ -55,6 +57,9 @@ import {
 // acima de 500, messaging.publish_large; senao a ultima linha diz por que), "Editado" na linha do tempo, o
 // menu com Excluir pela situacao e as regras que citam a notificacao, e as reacoes, a enquete e quem excluiu
 // do sino (NoticeInteractionsReport, com "Encerrar enquete").
+//
+// v3b-1 (docs/25 §2.9): no pop-up, "Detalhes" ganha, depois de "Quando", Onde, Quando aparece, Quantas vezes e
+// Como fecha (popupSettingsLines, com os nomes dos produtos citados); "Lembrar depois" diz o "Volta em" dele.
 
 type NoticeReportProps = {
   branding: NoticeEditorOptions["branding"];
@@ -79,6 +84,8 @@ function toTarget(detail: NoticeDetail): NoticeActionTarget {
     followUps: detail.followUps ? { count: detail.followUps.count, sent: detail.followUps.sent } : null,
     id: detail.id,
     kind: detail.kind,
+    // v3b-1: o toast de "Mostrar de novo" muda em "Mais de uma vez".
+    popupMode: detail.popupMode,
     recipients: detail.stats.recipients,
     situation: detail.situation,
     status: detail.status,
@@ -108,6 +115,11 @@ function Note({ children, tone = "neutral" }: { children: ReactNode; tone?: "neu
 /** "12% de quem viu" (sem ninguem que viu, so "de quem viu"). */
 function ofSeen(percent: number | null) {
   return percent === null ? "de quem viu" : `${formatPercent(percent)} de quem viu`;
+}
+
+/** v3b-1: em quanto tempo o "Lembrar depois" traz o pop-up de volta ("24 h" no padrao, como antes). */
+function snoozeLabel(minutes: number) {
+  return minutes === POPUP_SETTINGS_DEFAULT.snoozeMinutes ? "24 h" : describeMinutes(minutes);
 }
 
 type TimelineEntry = { label: string; value: string };
@@ -181,6 +193,10 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
   const hiddenTile = detail.kind === "inbox" ? hiddenFromBellTile(detail.interactions.hidden, stats.recipients) : null;
   const funnelTiles = funnel.length + (hiddenTile ? 1 : 0);
   const changedTile = responseChangedTile(stats, detail.interactions.responseChanged);
+  // v3b-1: a configuracao do pop-up (a linha gravada; sem ela, o padrao de antes).
+  const popupSettings = detail.kind === "popup" ? (detail.draft.popup ?? POPUP_SETTINGS_DEFAULT) : null;
+  const popupLines = popupSettings ? popupSettingsLines(popupSettings, detail.popupNames) : [];
+  const snoozeBack = snoozeLabel(popupSettings?.snoozeMinutes ?? POPUP_SETTINGS_DEFAULT.snoozeMinutes);
 
   useAdminTopbarTitle(detail.title);
 
@@ -312,7 +328,7 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
         <section aria-label="O que fizeram com o pop-up" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <KpiTile definition={ofSeen(closeRate)} label="Fecharam sem clicar" value={stats.closedWithoutClick} />
           <KpiTile definition={ofSeen(ratio(stats.dismissed, stats.seen))} label="Não mostrar de novo" value={stats.dismissed} />
-          <KpiTile definition="pediram para ver de novo em 24 h" definitionShort="voltam em 24 h" label="Lembrar depois" value={stats.snoozed} />
+          <KpiTile definition={`pediram para ver de novo em ${snoozeBack}`} definitionShort={`voltam em ${snoozeBack}`} label="Lembrar depois" value={stats.snoozed} />
         </section>
       ) : null}
 
@@ -366,6 +382,12 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
               <dt className="text-xs font-medium text-[var(--text-tertiary)]">Quando</dt>
               <dd className="text-[var(--text-primary)]">{detail.whenLabel}</dd>
             </div>
+            {popupLines.map((line) => (
+              <div className="flex min-w-0 flex-col gap-0.5" key={line.label}>
+                <dt className="text-xs font-medium text-[var(--text-tertiary)]">{line.label}</dt>
+                <dd className="text-[var(--text-primary)]">{line.value}</dd>
+              </div>
+            ))}
             {timelineOf(detail).map((entry) => (
               <div className="flex min-w-0 flex-col gap-0.5" key={entry.label}>
                 <dt className="text-xs font-medium text-[var(--text-tertiary)]">{entry.label}</dt>
