@@ -1623,6 +1623,31 @@ Produto em `docs/24` §10. Arquivo novo (a `202610220001` ja esta na nuvem e nao
 
 **Deploy**: como a 0001, **antes** do deploy que a usa (no Supabase da nuvem antes do merge na `dev`, `docs/24` §12, passo 8). Sem ela, salvar avisos falha (o app grava `allow_hide` em todo aviso) e a pagina do sino sai sem `allow_hide` (todo cartao com o "⋯", como antes); sem a secao 5, o banco recusa menos de 60 minutos.
 
+### Comunicacao v3b-1 (migracao `202610220003`, 22/10/2026)
+
+Produto em `docs/25`. Pop-ups com paginas, momento, frequencia escolhida pela equipe, "Volta em" do Lembrar depois e como fechar. Arquivo novo (as `202610200001`, `202610200002`, `202610210001`, `202610220001` e `202610220002` ja estao na nuvem e nao mudam; o teste de guarda `comunicacao-v3b1.guard` confere os hashes). Seis secoes aditivas e idempotentes, todas pelo MCP: sem `drop`, sem `delete`, sem gatilho, toda constraint dentro de `if not exists`; nao ha secao para o SQL Editor.
+
+**campaigns** (padroes = o comportamento de antes; nenhuma linha e reescrita):
+
+- `popup_pages text[] default {home}` (onde aparece: `any`, `home`, `purchases`, `saved`, `materials`, `journey`, `continue`, `profile`, `support`, `content:*`/`content:<id>`, `lesson:*`/`lesson:<id>`; uma formacao vale tambem para os cursos dela, o app expande) e `popup_exclude_pages text[] default {}` (nunca nestas paginas, sem `any`; a excecao vence);
+- `popup_trigger text default 'page_load'` (`page_load`, `lesson_completed`; o check ja aceita `at_start`, `first_login` e `course_completed` para a v3b-2) e `popup_delay_seconds smallint default 3` (0 a 600);
+- `popup_frequency text` (`once` ou `repeat`; **nulo = pop-up de antes**, lido de `popup_repeat`: `once` = Uma vez, `until_action` = 1 dia entre uma vez e outra, ate clicar), `popup_every_minutes` (1 a 129.600), `popup_max_per_day` (1 a 100), `popup_max_total` (2 a 1.000) e `popup_stop_on` (`click` ou `never`);
+- `popup_close text default 'any'` (`any` ou `x_only`) e `popup_snooze_minutes integer default 1440` (5 a 10.080);
+- checks `campaigns_popup_pages_v3b` (ate 20 de cada, formato pela funcao `communication_popup_pages_ok`, so paginas de aula com `lesson_completed`), `campaigns_popup_trigger_v3b`, `campaigns_popup_frequency_v3b` (`popup_repeat` coerente: `once` so com Uma vez, `until_action` com Mais de uma vez; a v3a e as abas antigas leem essa coluna), `campaigns_popup_close_v3b`, `campaigns_popup_snooze_v3b` e `campaigns_popup_only_v3b` (notificacao e passo de fluxo sempre com os padroes: nada de pop-up vaza para o sino). O app grava `popup_repeat` e `popup_frequency` sempre juntos (`popupSettingsToColumns`); a linha passa para o formato novo quando e salva.
+
+**campaign_deliveries**: `day_impressions smallint default 0` (vezes no dia de Sao Paulo de `last_seen_at`; so vale quando `last_seen_at` e de hoje e depois do ultimo "mostrar de novo"; uma linha vista hoje antes da v3b-1 conta 1). O check `campaign_deliveries_popup_v3b` (0 a 1.000) entra `not valid` na secao 3 e e validado sozinho na secao 4 (le a tabela sem segurar leituras e escritas).
+
+**Funcoes** (so `service_role`, `security invoker`, assinatura exata):
+
+- `communication_popup_pages_ok(text[], boolean)`: formato das paginas (os checks chamam). A expressao e o mesmo texto de `POPUP_PAGE_PATTERN` (`popup-display-model.ts`; o teste de guarda compara);
+- `communication_record_popup_impression(p_user_id, p_campaign_id, p_expected_updated_at, p_now, p_day_start)`: uma abertura; atualiza `impressions`, `day_impressions`, `first_seen_at` e `last_seen_at` **so se** `updated_at` ainda e o lido (compare-and-set: clique, lembrete, dispensa, recalculo, reinicio ou outra abertura no meio recusam), a linha e elegivel, sem `dismissed_at`, e o pop-up esta no ar; devolve `{ impressions, day_impressions }` ou nulo. Nenhuma regra de frequencia no SQL (moram em `popup-display-model.ts`);
+- `communication_reshow_popup` (v3a, mesma assinatura e retorno): sai a trava `popup_repeat = 'once'` (vale em qualquer "Quantas vezes"); com `popup_stop_on = 'never'` entra tambem quem clicou.
+
+RLS como estava (ligada, nada para `anon`/`authenticated`). Nenhum indice novo: o plano le a chave primaria `(campaign_id, user_id)` com `user_id = ? and campaign_id in (<= 60)`; `show` e os eventos leem uma linha pela chave. `communication_campaign_stats`, `communication_overview` e `prune_communication_history` nao mudam; a coluna nova vive em linhas que ja saem aos 24 meses (menos pop-ups no ar). Eventos: `message_impressed` ganha `page` e `trigger`, `message_closed` ganha `via` (so ids e codigos).
+
+**Deploy**: **antes** do merge na `dev` (Supabase da nuvem, `docs/25` §10 passo 1; na Hetzner o `deploy-membros` aplica as migracoes antes de trocar o app). Sem ela, o app novo mostra o aviso de banco desatualizado no admin (as colunas novas estao em `CAMPAIGN_COLUMNS`), responde `popups: null` no resumo e 404 no `show`, e o job `comunicacao` do tick falha (para notificacoes agendadas, seguintes e fluxos). A migracao sozinha nao atrapalha o app da v3a. Depois do merge, nao editar pop-ups pela previa de uma PR mais antiga (salvar um "Mais de uma vez" como o "Uma vez" da v3a fere `campaigns_popup_frequency_v3b`).
+
+
 ## Retencao de dados pessoais
 
 Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.

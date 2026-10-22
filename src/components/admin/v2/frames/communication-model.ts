@@ -31,7 +31,7 @@ type CommunicationTabMeta = {
 
 export const COMMUNICATION_TAB_META: Record<CommunicationTab, CommunicationTabMeta> = {
   avisos: {
-    description: "Notificações no sino e pop-ups na home do aluno, cada um para um segmento.",
+    description: "Notificações no sino e pop-ups para os alunos, cada um para um segmento.",
     href: "/admin/comunicacao/avisos",
     label: "Avisos e pop-ups",
     phase: 5,

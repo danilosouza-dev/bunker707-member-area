@@ -1354,7 +1354,13 @@ test("v3a: a copia neutra 'destino' no lugar de 'botão' nos modulos das regras"
     "src/server/communications/flow-model.ts"
   ];
   // O pop-up tem botao de verdade: as frases do "Mostrar de novo" (docs/24 §2.4) falam de quem "clicou no botão" dele.
-  const frasesDoPopUp = ["Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver", "Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver"];
+  // v3b-1 (docs/25 §2.1 e §2.4): as mesmas frases com "continua como está".
+  const frasesDoPopUp = [
+    "Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver",
+    "Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver",
+    "Quem escolheu “Não mostrar de novo” continua como está, e quem clicou no botão também",
+    "Quem clicou no botão ou escolheu “Não mostrar de novo” continua como está"
+  ];
 
   for (const arquivo of arquivos) {
     let texto = await readFile(new URL(`../${arquivo}`, import.meta.url), "utf8");

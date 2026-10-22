@@ -28,8 +28,9 @@ import {
 } from "@/server/communications/campaign-model";
 import { describeValidity, type Validity } from "@/server/communications/message-meta";
 import { saveNoticeFollowUpsSchema } from "@/server/communications/flow-schemas";
+import { popupReviewParts } from "@/server/communications/popup-sentences";
 import type { NoticeDetail, NoticeEditorOptions } from "@/server/communications/queries";
-import { audienceDefinitionSchema, emptyNoticeDraft, noticeDraftSchema, publishProblems, type NoticeDraft } from "@/server/communications/schemas";
+import { audienceDefinitionSchema, emptyNoticeDraft, noticeDraftSchema, popupSettingsSchema, publishProblems, type NoticeDraft } from "@/server/communications/schemas";
 import { ErrorBanner } from "../error-banner";
 import { PillGroup } from "../form";
 import { AdminLinkButton } from "../link-button";
@@ -72,6 +73,9 @@ import { NoticePreview } from "./notice-preview";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
 import { NoticeValidityField } from "./notice-validity-field";
 import { NoticeWhenFields } from "./notice-when-fields";
+import { PopupFrequencyFields } from "./popup-frequency-fields";
+import { PopupPlacementFields } from "./popup-placement-fields";
+import { POPUP_EDITOR_COPY, placementUiOf, popupPlacementProblems, popupSettingsOfDraft, type PopupPlacementUi } from "./popup-editor-model";
 import {
   NOTHING_TO_SAVE_MESSAGE,
   NOTICES_HREF,
@@ -120,8 +124,12 @@ import {
 // - O botao principal salva e publica com a versao devolvida: "Enviar agora", "Agendar envio",
 //   "Publicar pop-up" ou "Enviar para aprovação" (publishDecision com a contagem ao vivo; o servidor
 //   decide de novo e conta outra vez).
-// - Pop-up no ar ou pausado: o botao principal so salva (continua no ar). v3a: em "Uma vez", o switch
-//   "Mostrar de novo para quem já viu" (saveNoticeDraft com reshow; so o switch = reshowPopup).
+// - Pop-up no ar ou pausado: o botao principal so salva (continua no ar). v3a: o switch "Mostrar de novo
+//   para quem já viu" (saveNoticeDraft com reshow; so o switch = reshowPopup); v3b-1: em qualquer "Quantas vezes".
+// - v3b-1, pop-up (docs/25 §2.2): no lugar do "Quando", os cards "Quando e onde aparece"
+//   (popup-placement-fields.tsx) e "Quantas vezes e como fecha" (popup-frequency-fields.tsx). O que a tela
+//   sabe e o padrao nao guarda (a escolha de "Onde aparece", a chave das excecoes, a linha de produto sem
+//   produto) fica em `popupUi`; os erros so do editor saem de popupPlacementProblems.
 // - v3a, notificacao enviada (?editar=1, docs/24 §2.2): so o conteudo muda ("Salvar alterações" e volta para
 //   o relatorio); segmento, envio, tempo no sino, audio, ligar a resposta e a enquete ficam travados com o
 //   motivo, e as seguintes mudam no relatorio. "Permitir que o aluno exclua do sino" (ajustes da v3a) nao
@@ -145,7 +153,7 @@ type SavedVersion = { id: string; status: CampaignStatus; updatedAt: string };
 
 const KIND_OPTIONS = [
   { label: "Notificação no sino", value: "inbox" },
-  { label: "Pop-up na home", value: "popup" }
+  { label: "Pop-up", value: "popup" }
 ] as const satisfies readonly { label: string; value: CampaignKind }[];
 
 const DEVICE_OPTIONS = [
@@ -184,9 +192,23 @@ const FIELD_FOCUS: readonly [string, string][] = [
   ["validity.endsAt", "#aviso-validade-fim-data"],
   ["validity.minutes", "#aviso-validade-numero"],
   ["validity", "[name='aviso-validade']"],
+  // v3b-1: "Quando e onde aparece" do pop-up (a janela fica no fim do card) e "Quantas vezes e como fecha".
+  ["popup.trigger", "[name='popup-momento']"],
+  ["popup.pages", "#popup-paginas, #popup-paginas-aulas"],
+  ["popup.exclude", "#popup-excecoes"],
+  ["popup.delaySeconds", "#popup-atraso-outro"],
   ["window.startsAt", "#aviso-inicio-data"],
   ["window", "#aviso-fim-data"],
+  ["popup.frequency.mode", "[name='popup-vezes']"],
+  ["popup.frequency.maxPerDay", "#popup-por-dia"],
+  ["popup.frequency.everyMinutes", "#popup-intervalo"],
+  ["popup.frequency.maxTotal", "#popup-total"],
+  ["popup.frequency.stopOn", "#popup-para input:not(:disabled)"],
+  ["popup.frequency", "[name='popup-vezes']"],
+  ["popup.snoozeMinutes", "#popup-lembrar-tempo"],
   ["reshow", "#aviso-mostrar-de-novo"],
+  ["popup.close", "#popup-fechar input"],
+  ["popup", "[name='popup-momento']"],
   // v2: "Depois desta notificação" (o cartao recebe o foco; o campo com erro fica marcado nele).
   ["goal", "#aviso-seguintes-parar"],
   ["followUps", "#aviso-seguintes"]
@@ -308,18 +330,23 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   // v3a: "Mostrar de novo para quem já viu" (pop-up no ar em "Uma vez"): desligado ao abrir, depois de cada
   // salvar e sempre que "Quantas vezes" muda.
   const [reshow, setReshow] = useState(false);
+  // v3b-1: o estado da tela do card "Quando e onde aparece" que nao vira padrao (volta ao gravado junto com
+  // o rascunho: Recarregar, Descartar).
+  const [popupUi, setPopupUi] = useState<PopupPlacementUi>(() => placementUiOf(popupSettingsOfDraft(initial?.draft ?? emptyNoticeDraft(defaultKind))));
 
   if (initial && initial.updatedAt !== serverVersion) {
     setServerVersion(initial.updatedAt);
 
     if (!savedVersion || Date.parse(initial.updatedAt) !== Date.parse(savedVersion.updatedAt)) {
-      setDraft(rebaseNoticeDraft(saved, draft, initial.draft));
+      const rebased = rebaseNoticeDraft(saved, draft, initial.draft);
+      setDraft(rebased);
       setSaved(initial.draft);
       setSavedVersion({ id: initial.id, status: initial.status, updatedAt: initial.updatedAt });
       setFailure(null);
       setServerErrors({});
       setResetKey((key) => key + 1);
       setReshow(false);
+      setPopupUi(placementUiOf(popupSettingsOfDraft(rebased)));
     }
   }
 
@@ -345,8 +372,9 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const followUpsCount = followUps.items.length > 0 ? countFollowUps(followUps.items) : flowVersion.flowId ? (initial?.followUps?.count ?? 0) : 0;
   const dirty = !isSameNoticeDraft(saved, draft) || followUpsDirty;
   const uploading = imageUpload !== null || followUpUpload !== null;
-  // v3a: o "Mostrar de novo" so vale enquanto aparece (pop-up no ar em "Uma vez") e ha alguem para mostrar.
-  const reshowRequested = reshow && showsReshowSwitch({ kind: draft.kind, repeat: draft.repeat, status }) && initial?.reshowable !== 0;
+  // v3a: o "Mostrar de novo" so vale enquanto aparece (pop-up no ar; v3b-1: qualquer "Quantas vezes") e ha
+  // alguem para mostrar.
+  const reshowRequested = reshow && showsReshowSwitch({ kind: draft.kind, status }) && initial?.reshowable !== 0;
   // Quantos tem a notificacao enviada no sino agora (banner, revisao, "Para quem" e o toast).
   const sentRecipients = initial ? initial.stats.recipients : null;
 
@@ -371,11 +399,14 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const locked = busy !== null;
   const pickerItems = useMemo(() => toPickerItems(options.products), [options.products]);
   const payload = useMemo(() => noticeDraftForKind(draft), [draft]);
+  const popupSettings = useMemo(() => popupSettingsOfDraft(draft), [draft]);
   const clientErrors = useMemo(() => {
     const parsed = noticeDraftSchema.safeParse(payload);
+    const errors = parsed.success ? {} : noticeErrorsFrom(parsed.error.issues);
 
-    return parsed.success ? {} : noticeErrorsFrom(parsed.error.issues);
-  }, [payload]);
+    // v3b-1: a linha de produto marcada sem produto (so o editor sabe) vence o "Escolha pelo menos uma página.".
+    return payload.kind === "popup" ? { ...errors, ...popupPlacementProblems(popupSettings, popupUi) } : errors;
+  }, [payload, popupSettings, popupUi]);
   // As seguintes conferidas no navegador com o mesmo schema e a mesma arvore do servidor.
   const followUpErrors = useMemo(() => {
     if (draft.kind !== "inbox" || !followUpsEditable || followUps.items.length === 0) {
@@ -456,21 +487,40 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     draft.kind === "inbox"
       ? draft.schedule.mode === "at" && incompleteDate(draft.schedule.sendAt)
       : incompleteDate(draft.window.startsAt) || incompleteDate(draft.window.endsAt);
+  // v3b-1: nomes dos produtos das frases do pop-up (a lista do editor; os do aviso salvo para produto que saiu).
+  const popupNames = useMemo(
+    () => ({ ...initial?.popupNames, ...Object.fromEntries(options.products.map((product) => [product.id, product.title])) }),
+    [initial?.popupNames, options.products]
+  );
+  // A frase de revisao do pop-up so com a configuracao valida (um numero pela metade espera).
+  const popupReview = useMemo(() => {
+    if (draft.kind !== "popup") {
+      return null;
+    }
+
+    const parsed = popupSettingsSchema.safeParse(popupSettings);
+
+    return parsed.success ? popupReviewParts(parsed.data, popupNames) : null;
+  }, [draft.kind, popupNames, popupSettings]);
   const reviewSentence = scheduleIncomplete
     ? `Escolha a data e a hora ${draft.kind === "inbox" ? "do envio" : "da janela"} para ver o resumo.`
-    : describeNoticeReview({
-        audienceCount: liveCount,
-        followUps:
-          draft.kind === "inbox" && followUps.items.length > 0
-            ? { count: countFollowUps(followUps.items), stopProductName: stopProductName(followUps.stop, options.names) }
-            : null,
-        kind: draft.kind,
-        repeat: draft.repeat,
-        schedule: payload.schedule,
-        // "Ate uma data" ainda sem data e hora: a frase espera (o campo ja pede "Escolha data e hora.").
-        validity: draft.validity.mode === "until" && !Number.isFinite(Date.parse(draft.validity.endsAt)) ? null : describeValidity(payload.validity),
-        window: payload.window
-      });
+    : draft.kind === "popup" && !popupReview
+      ? "Corrija os campos do pop-up para ver o resumo."
+      : describeNoticeReview({
+          audienceCount: liveCount,
+          followUps:
+            draft.kind === "inbox" && followUps.items.length > 0
+              ? { count: countFollowUps(followUps.items), stopProductName: stopProductName(followUps.stop, options.names) }
+              : null,
+          kind: draft.kind,
+          // v3b-1: onde, quando e quantas vezes (o pop-up padrao fica com a frase de antes).
+          popup: popupReview,
+          repeat: draft.repeat,
+          schedule: payload.schedule,
+          // "Ate uma data" ainda sem data e hora: a frase espera (o campo ja pede "Escolha data e hora.").
+          validity: draft.validity.mode === "until" && !Number.isFinite(Date.parse(draft.validity.endsAt)) ? null : describeValidity(payload.validity),
+          window: payload.window
+        });
   const audienceNames = useMemo(
     () => audienceNamesWithMessages(options.names, audienceMessageOptions("segment", { notices: options.notices })),
     [options.names, options.notices]
@@ -553,10 +603,13 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       return;
     }
 
-    // A resposta so vale para notificacao: guarda ao ir para pop-up e devolve ao voltar.
+    // A resposta so vale para notificacao: guarda ao ir para pop-up e devolve ao voltar. v3b-1: o pop-up
+    // ganha a configuracao padrao quando o rascunho comecou como notificacao (voltar e ir de novo mantem).
     if (kind === "popup") {
+      const popup = popupSettingsOfDraft(draft);
       rememberedResponse.current = draft.response;
-      change({ kind, response: null });
+      change({ kind, popup, response: null });
+      setPopupUi(placementUiOf(popup));
       return;
     }
 
@@ -828,6 +881,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   function discard() {
     setDraft(saved);
     setReshow(false);
+    setPopupUi(placementUiOf(popupSettingsOfDraft(saved)));
     setServerErrors({});
     setFailure(null);
     setSubmitted(false);
@@ -849,6 +903,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
           citations: initial.citations,
           id: savedVersion.id,
           kind: initial.kind,
+          // v3b-1: o toast de "Mostrar de novo" segue o "Quantas vezes" salvo.
+          popupMode: initial.kind === "popup" ? (saved.popup?.frequency.mode ?? initial.popupMode) : null,
           recipients: initial.stats.recipients,
           situation: situationOf({ endsAt: saved.window.endsAt, kind: initial.kind, sendAt: null, startsAt: saved.window.startsAt, status: savedVersion.status }, now),
           status: savedVersion.status,
@@ -921,7 +977,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
               <span>{initial.kindLabel}</span>
             </span>
           ) : (
-            "Uma notificação no sino ou um pop-up na home, para um segmento."
+            "Uma notificação no sino ou um pop-up, para um segmento."
           )
         }
         title={initial ? (sentMode ? SENT_NOTICE_COPY.title : initial.title) : "Novo aviso"}
@@ -1041,7 +1097,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                     ? "O tipo não muda depois de publicado. Para trocar, duplique o aviso."
                     : draft.kind === "inbox"
                       ? "O aluno vê quando abrir o sino."
-                      : "Aparece no centro da home, 3 segundos depois de abrir. Nunca durante uma aula."}
+                      : "Aparece por cima da página, onde e quando você escolher."}
                 </p>
               </div>
             }
@@ -1088,31 +1144,22 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             )}
           </SectionCard>
 
-          <SectionCard
-            description={draft.kind === "inbox" ? "Agora ou numa data e hora, e quanto tempo fica no sino." : "A janela em que o pop-up aparece e quantas vezes."}
-            title="Quando"
-          >
-            {sentMode ? (
-              // v3a: o envio e o tempo no sino nao mudam depois do envio (so leitura).
-              <p className="text-sm leading-6 text-[var(--text-primary)]">
-                {sentNoticeWhenNote({ sentAt: initial?.sentAt ?? null, validityLabel: describeValidity(saved.validity) })}
-              </p>
-            ) : (
-              <div className="flex min-w-0 flex-col gap-6">
-                <NoticeWhenFields
-                  disabled={locked}
-                  key={resetKey}
-                  draft={draft}
-                  errors={{ endsAt: errorFor("window.endsAt"), reshow: errorFor("reshow"), sendAt: errorFor("schedule.sendAt"), startsAt: errorFor("window.startsAt") }}
-                  // v3a: no pop-up no ar, "Mostrar de novo para quem já viu" e a dica de "Quantas vezes".
-                  live={
-                    livePopup && status
-                      ? { onReshowChange: setReshow, reshow, reshowable: initial?.reshowable ?? null, savedRepeat: saved.repeat, status }
-                      : null
-                  }
-                  onChange={(patch) => change(patch)}
-                />
-                {draft.kind === "inbox" ? (
+          {draft.kind === "inbox" ? (
+            <SectionCard description="Agora ou numa data e hora, e quanto tempo fica no sino." title="Quando">
+              {sentMode ? (
+                // v3a: o envio e o tempo no sino nao mudam depois do envio (so leitura).
+                <p className="text-sm leading-6 text-[var(--text-primary)]">
+                  {sentNoticeWhenNote({ sentAt: initial?.sentAt ?? null, validityLabel: describeValidity(saved.validity) })}
+                </p>
+              ) : (
+                <div className="flex min-w-0 flex-col gap-6">
+                  <NoticeWhenFields
+                    disabled={locked}
+                    key={resetKey}
+                    draft={draft}
+                    errors={{ endsAt: errorFor("window.endsAt"), sendAt: errorFor("schedule.sendAt"), startsAt: errorFor("window.startsAt") }}
+                    onChange={(patch) => change(patch)}
+                  />
                   <NoticeValidityField
                     disabled={locked}
                     errors={{ endsAt: errorFor("validity.endsAt"), minutes: errorFor("validity.minutes"), validity: errorFor("validity") }}
@@ -1123,10 +1170,46 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                     sendAt={sendAtTime}
                     value={draft.validity}
                   />
-                ) : null}
-              </div>
-            )}
-          </SectionCard>
+                </div>
+              )}
+            </SectionCard>
+          ) : (
+            <>
+              {/* v3b-1 (docs/25 §2.3 e §2.4): os dois cards do pop-up no lugar do "Quando". */}
+              <SectionCard description={POPUP_EDITOR_COPY.placement.description} title={POPUP_EDITOR_COPY.placement.title}>
+                <PopupPlacementFields
+                  disabled={locked}
+                  draft={draft}
+                  errorFor={errorFor}
+                  key={`onde-${resetKey}`}
+                  live={livePopup && status ? { saved, status } : null}
+                  names={popupNames}
+                  now={now}
+                  onChange={(patch) => change(patch)}
+                  onUiChange={setPopupUi}
+                  opensOnLesson={options.opensOnLesson}
+                  products={pickerItems}
+                  productsLoaded={options.productsLoaded}
+                  ui={popupUi}
+                />
+              </SectionCard>
+              <SectionCard description={POPUP_EDITOR_COPY.frequency.description} title={POPUP_EDITOR_COPY.frequency.title}>
+                <PopupFrequencyFields
+                  disabled={locked}
+                  draft={draft}
+                  errorFor={errorFor}
+                  key={`vezes-${resetKey}`}
+                  // No pop-up no ar ou pausado: "Mostrar de novo para quem já viu" e a linha de "Quantas vezes".
+                  live={
+                    livePopup && status
+                      ? { onReshowChange: setReshow, reshow, reshowable: initial?.reshowable ?? null, savedFrequency: saved.popup?.frequency ?? null, status }
+                      : null
+                  }
+                  onChange={(patch) => change(patch)}
+                />
+              </SectionCard>
+            </>
+          )}
 
           {/* v3a: depois do envio, as seguintes mudam no relatorio. */}
           {sentMode && savedVersion ? (

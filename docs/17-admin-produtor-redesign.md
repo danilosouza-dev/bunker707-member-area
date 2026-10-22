@@ -333,7 +333,7 @@ CSV do filtro atual: nome, e-mail, telefone, produtos, turma, situação, entrou
 >   - o fim por N conversões não entrou;
 >   - **Como medir** ficou fixo em "Voltaram a estudar (7 dias)", sem o seletor de desfecho;
 >   - fora desta rodada: "Salvar quem converteu como segmento" e a quebra por produto.
-> - **Limites**: os do pop-up seguem 1.8.1 (só na home; o limite de 1 por sessão e 1 a cada 24 h saiu por decisão do produtor, docs/24 §10.8), sem o tipo "crítico". Faixa, card, destaque, toast, e-mail e WhatsApp continuam no plano.
+> - **Limites**: os do pop-up seguem 1.8.1 (era só na home até a v3b-1, `docs/25`; o limite de 1 por sessão e 1 a cada 24 h saiu por decisão do produtor, docs/24 §10.8), sem o tipo "crítico". Faixa, card, destaque, toast, e-mail e WhatsApp continuam no plano.
 > - **Módulo** `src/server/communications/`, telas em `src/components/admin/v2/communication/` e no aluno `src/components/member/notifications/`; migração `202610200001`.
 
 > **Atualização (21/10/2026).** Entrou a **Comunicação v2**, por pedido explícito do produtor em 20/10/2026 (documento próprio: `docs/23`; registro desta rodada em 2.10). Migração `202610200002`.
@@ -350,11 +350,16 @@ CSV do filtro atual: nome, e-mail, telefone, produtos, turma, situação, entrou
 > - Pop-up: só o **Mostrar de novo para quem já viu** (no "Uma vez"). A **personalização do pop-up** (páginas e exclusões, gatilhos, frequência, limites globais editáveis, o construtor por blocos, enquete no pop-up e "Como fechar") fica para a **v3b "Pop-ups sob medida"**, que vai mudar a linha "Pop-up" de 1.8.1 (hoje 1 por sessão, 1 a cada 24 h, só na home) e D12. O "construtor de HTML" pedido pelo produtor vira blocos estruturados desenhados pelos componentes do app, nunca HTML cru (segurança da área do aluno e a CSP com nonce).
 > - Limite novo nas escritas do aluno (reação, voto, lixeira, resposta): 30 por minuto; as rotas de leitura continuam sem limite (2.3).
 
+> **Atualização (22/10/2026).** Entrou a **Comunicação v3b-1 "Pop-ups: frequência, páginas e como fechar"**, por decisão do produtor depois de testar a v3a (documento próprio: `docs/25`). Migração `202610220003`. **Mudam a linha "Pop-up" de 1.8.1 e D12**:
+> - O pop-up aparece **onde e quando a equipe escolher**: Só no Início (padrão), Em qualquer página ou as páginas marcadas, com **Nunca nestas páginas**; **Ao abrir a página** (0 a 600 s) ou **Ao concluir uma aula**. Nunca no login, no Modo TV, no admin nem no "ver como".
+> - **Frequência por pop-up, escolhida pela equipe**: Uma vez, ou Mais de uma vez com limite por dia, tempo entre uma vez e outra, limite total e o que faz parar; o **Volta em** do Lembrar depois (5 minutos a 7 dias); **Como fechar** (no X ou fora, ou só no X, com o Esc sempre fechando). Sem limite fixo entre pop-ups: as regras fixas são só **um de cada vez** e, na aula, **nunca com o vídeo do nosso player tocando**. Até 50 pop-ups publicados ao mesmo tempo.
+> - **Mostrar de novo para quem já viu** vale em qualquer "Quantas vezes". O relatório ganha as linhas Onde, Quando aparece, Quantas vezes e Como fecha no "Detalhes"; a tela de relatório por página e por jeito de fechar fica para a v3b-2, com os modelos de configuração.
+
 #### 1.8.1 Tipos e limites
 
 | Tipo | Onde o aluno vê | Para quê | Limite por aluno (fixo no sistema) |
 |---|---|---|---|
-| **Pop-up** | centro da home, após 3 s ou 1ª interação; nunca durante uma aula | decisão: webinário em < 72 h, promoção com prazo, aviso obrigatório | ~~1 por sessão e 1 a cada 24 h~~: saiu por decisão do produtor (docs/24 §10.8); um de cada vez, cada pop-up com a sua regra |
+| **Pop-up** | centro da tela, onde e quando a equipe escolher (Início, qualquer página ou as marcadas, menos as exceções; ao abrir a página ou ao concluir uma aula; `docs/25`); na aula, nunca com o vídeo do nosso player tocando | decisão: webinário em < 72 h, promoção com prazo, aviso obrigatório | ~~1 por sessão e 1 a cada 24 h~~: saiu por decisão do produtor (docs/24 §10.8); frequência por pop-up, escolhida pela equipe; um de cada vez |
 | **Faixa no topo** | abaixo do cabeçalho | estado persistente: contagem regressiva, "sua live começa em 2 h" | 1 ativa por vez; fechar vale 7 dias |
 | **Card na home** | fileira "Para você" ou card dentro de uma fileira | promoção ou webinário como item do catálogo | 1 fileira + 1 card por fileira; fechar vale 30 dias |
 | **Destaque da home** | o hero | lançamento ou evento da semana | 1 por vez |
@@ -363,7 +368,7 @@ CSV do filtro atual: nome, e-mail, telefone, produtos, turma, situação, entrou
 | **E-mail** (fase 5) | caixa de entrada do aluno | convite e lembretes de webinário, promoção com prazo | marketing 2 por semana, 08–21 h; o plano gratuito do serviço de envio limita a 100 e-mails por dia (D6) |
 | **WhatsApp** (fase 7) | WhatsApp oficial (API da Meta) | lembrete de webinário; marketing só com autorização explícita | 1 por semana |
 
-Os limites aparecem no editor como texto, não como campos (hoje: "Por enquanto o pop-up aparece só na home, nunca durante uma aula, e um de cada vez."; a frequência vira campo na v3b).
+Os limites aparecem no editor como texto, não como campos. Desde a v3b-1, a frequência do pop-up é um campo (card "Quantas vezes e como fecha", `docs/25` §2.4); o que continua como texto é a nota do card "Quando e onde aparece": `Um pop-up de cada vez: se dois tiverem que abrir juntos, o segundo espera o primeiro fechar. Na aula, nunca com o vídeo do nosso player tocando; nos vídeos do Bunny, do Vimeo e do Mux, só antes do play (no computador) ou depois do Concluir.`
 
 Nota (21/10/2026): a linha "Notificação (sino)" mudou de "sem limite" para o limite de fluxos e notificações seguintes acima, com a Comunicação v2 (`docs/23` §2.10 e V13; `docs/09`). O que passa do limite do dia sai às 8h do dia seguinte (São Paulo); o que o intervalo de 1 hora segura espera o intervalo; nenhum dos dois sai depois do prazo ou de 7 adiamentos. Sem horário de silêncio no sino (ele não toca nem manda push); os avisos avulsos da equipe e as notificações de comentário continuam sem limite. Texto no editor: `Para não cansar o aluno: no máximo 3 notificações de fluxos e notificações seguintes por dia para cada aluno, com pelo menos 1 hora entre elas. Se passar do limite do dia, sai às 8h do dia seguinte; se o prazo dela acabar antes, não sai.`
 
@@ -484,7 +489,7 @@ Nota (21/10/2026): "automações encadeadas" saiu de fora do MVP por pedido expl
 | D9 | Admin em tema claro também, ou só escuro? | Só escuro no MVP; a troca de tema já está preparada para depois |
 | D10 | Botão principal do admin: claro (branco com texto escuro) ou vermelho da marca? Hoje o design system manda usar o vermelho como primário no admin | Claro, como o botão primário da área do aluno; o vermelho sobra para marca, ações destrutivas e "ao vivo", sem colidir com erro nos gráficos |
 | D11 | Renomear o tipo "Produto" para "Material" também na área do aluno (hoje o rótulo aparece no modal de detalhes)? | Sim, com migração de rótulo |
-| D12 | Permitir ultrapassar o limite de 1 pop-up por dia em lançamentos? | Revista em 21/10/2026: o produtor tirou o limite fixo entre pop-ups (docs/24 §10.8); a frequência de cada pop-up é escolha da equipe (v3b) |
+| D12 | Permitir ultrapassar o limite de 1 pop-up por dia em lançamentos? | **Fechada** em 22/10/2026: sem limite fixo entre pop-ups (docs/24 §10.8); a frequência de cada pop-up é escolha da equipe, no editor (`docs/25`, v3b-1) |
 | D13 | Migrar do YouTube: tudo, só produtos pagos, ou só produtos novos daqui em diante? | Só pagos, começando pelo de maior receita; abertos e bônus ficam no YouTube |
 
 A ordem do roadmap tem um ponto negociável, descrito em 2.10: Comunicação pode vir antes do vídeo se um lançamento exigir.

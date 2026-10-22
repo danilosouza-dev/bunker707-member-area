@@ -53,7 +53,7 @@ test.describe("produtor", () => {
 
     await page.getByRole("radiogroup", { name: "Fica no sino por" }).getByText("1 dia", { exact: true }).click();
 
-    // Na prévia "Celular" (390 px), a mesma linha: o nome encurta e o tempo e o "Termina em" ficam inteiros.
+    // Na prévia "Celular" (375 px), a mesma linha: o nome encurta e o tempo e o "Termina em" ficam inteiros.
     await page.getByRole("radiogroup", { name: "Aparelho da prévia" }).getByText("Celular", { exact: true }).click();
     const previa = page.getByRole("figure", { name: "Prévia da notificação no sino, no celular" });
     const linhaDaPrevia = previa.locator("article p:has(> time)");

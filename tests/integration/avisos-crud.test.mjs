@@ -9,8 +9,8 @@ import { apagarContaDeTeste, ESCOLA_DE_TESTE, limparComunicacao, SENHA_DE_TESTE,
 // Comunicacao v3a "Avisos: CRUD e edicao" (docs/24 §2.1–§2.4 e §4.7–§4.10) contra o banco LOCAL: editar a
 // notificacao enviada (so o conteudo, para todos na hora, sem marcar como nova; os campos travados, as
 // permissoes e a regra dos 500), Excluir em cada situacao, as regras que citam a notificacao (so avisam),
-// "Mostrar de novo para quem já viu" no pop-up "Uma vez" (menu e editor), "Encerrar enquete" e Duplicar com
-// enquete. O produtor age pelas Server Actions; os alunos leem o sino e o pop-up pelas rotas chamadas como
+// "Mostrar de novo para quem já viu" no pop-up (menu e editor; v3b-1: em qualquer "Quantas vezes"), "Encerrar
+// enquete" e Duplicar com enquete. O produtor age pelas Server Actions; os alunos leem o sino e o pop-up pelas rotas chamadas como
 // funcao. Quem recebe: os tres alunos de teste, com um acesso a um curso de teste que este arquivo libera.
 
 const db = createLocalAdminClient();
@@ -669,7 +669,7 @@ test("regras que citam a notificacao: um pop-up no ar e um fluxo contam (o fluxo
  * "Mostrar de novo para quem já viu" (docs/24 §2.4 e §4.9)
  * ---------------------------------------------------------------------------------------------- */
 
-test("mostrar de novo (menu), so em 'Uma vez': quem fechou ha 25 h nao ve antes, ve depois; quem clicou ou escolheu 'Não mostrar de novo' continua sem ver", async () => {
+test("mostrar de novo (menu) em 'Uma vez': quem fechou ha 25 h nao ve antes, ve depois; quem clicou ou escolheu 'Não mostrar de novo' continua sem ver", async () => {
   const publicado = await publicar(popup({ repeat: "once", title: "Uma vez" }));
 
   // A aluna viu e fechou; o aluno clicou; a outra escolheu "Não mostrar de novo".
@@ -757,7 +757,7 @@ test("mostrar de novo: 'Lembrar depois' volta a valer duas vezes; conta so quem 
   assert.equal(visto.canSnooze, false, "depois de dois, acabou");
 });
 
-test("mostrar de novo acima de 500 so com publish_large; 'Até o aluno clicar' nao tem a opcao (409)", async () => {
+test("mostrar de novo acima de 500 so com publish_large; em 'Até o aluno clicar' (Mais de uma vez) tambem, com a mesma regra (v3b-1)", async () => {
   const publicado = await publicar(popup({ repeat: "once", title: "Para muitos" }));
   sql(`insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
     select '00000000-0000-0000-0000-000000000000', gen_random_uuid(), 'authenticated', 'authenticated',
@@ -788,42 +788,70 @@ test("mostrar de novo acima de 500 so com publish_large; 'Até o aluno clicar' n
 
   actAs(produtor);
   assert.equal(ok(await actions.reshowPopup({ id: publicado.id })).reshown, 501, "o dono passa");
-  apagarMuitosAlunos();
 
+  // v3b-1 (docs/25 §4.7): "Até o aluno clicar" (Mais de uma vez, 1 dia, ate clicar) tambem tem a opcao, e a
+  // contagem recomeca para quem ja viu; acima de 500, so com publish_large.
   const ateClicar = await publicar(popup({ repeat: "until_action", title: "Até clicar" }));
+  sql(`insert into public.campaign_deliveries (campaign_id, user_id, eligible, impressions, first_seen_at, last_seen_at)
+    select '${ateClicar.id}', u.id, true, 1, now() - interval '2 hours', now() - interval '2 hours'
+    from auth.users u where u.email like '${MUITOS.prefixo}%@${MUITOS.dominio}'
+    on conflict (campaign_id, user_id) do update set impressions = 1, eligible = true`);
   actAs(produtor);
   const detalhe = await getNoticeDetail(ateClicar.id, { permissions: TODAS });
-  assert.ok(!detalhe.actions.includes("reshow"), "sem a opcao no menu");
-  const recusado = await actions.reshowPopup({ id: ateClicar.id });
-  assert.equal(recusado.status, 409);
-  assert.equal(recusado.error, "Mostrar de novo vale para pop-ups em “Uma vez”. Em “Até o aluno clicar”, quem fechou já volta a ver 24 horas depois.");
+  assert.ok(detalhe.actions.includes("reshow"), "a opcao no menu em qualquer 'Quantas vezes'");
+  assert.equal(detalhe.reshowable, 501);
+
+  actAs(editora);
+  const grandeAteClicar = await actions.reshowPopup({ id: ateClicar.id });
+  assert.equal(grandeAteClicar.status, 403);
+  assert.equal(grandeAteClicar.error, "Para mostrar de novo a mais de 500 alunos, peça a um dono ou administrador.");
+
+  actAs(produtor);
+  assert.equal(ok(await actions.reshowPopup({ id: ateClicar.id })).reshown, 501, "o dono passa");
+  const [registro] = await auditoria(ateClicar.id, "communication.popup_reshown");
+  assert.deepEqual(registro.metadata, { count: 501, via: "menu" });
+  apagarMuitosAlunos();
 
   const naoPopup = await publicar(rascunho({ title: "Notificação" }));
   actAs(produtor);
   assert.equal((await actions.reshowPopup({ id: naoPopup.id })).status, 422);
 });
 
-test("mostrar de novo pelo editor: trocar 'Até o aluno clicar' para 'Uma vez' com o switch ligado salva e mostra de novo; com 'Até o aluno clicar' e 400 no campo", async () => {
+test("mostrar de novo pelo editor em 'Até o aluno clicar' (v3b-1: qualquer 'Quantas vezes') recomeca a contagem; trocar para 'Uma vez' com o switch ligado salva e mostra de novo", async () => {
   const publicado = await publicar(popup({ repeat: "until_action", title: "Pelo editor" }));
-  await mudarEntrega(publicado.id, aluna.id, { impressions: 1, last_seen_at: new Date(Date.now() - 30 * HORA).toISOString() });
+  await mudarEntrega(publicado.id, aluna.id, { impressions: 1, last_seen_at: new Date(Date.now() - 2 * HORA).toISOString() });
+  assert.equal(await popupDe(aluna), null, "vista ha 2 h: 'Até o aluno clicar' espera 1 dia");
 
   actAs(produtor);
   const detalhe = await getNoticeDetail(publicado.id, { permissions: TODAS });
-  assert.equal(detalhe.reshowable, 1, "contado pela regra 'Uma vez' mesmo em 'Até o aluno clicar'");
+  assert.equal(detalhe.reshowable, 1);
 
-  const errado = await actions.saveNoticeDraft({ draft: detalhe.draft, expectedUpdatedAt: detalhe.updatedAt, id: publicado.id, reshow: true });
-  assert.equal(errado.status, 400);
-  assert.deepEqual(errado.fieldErrors?.reshow, ["Mostrar de novo vale para pop-ups em “Uma vez”. Em “Até o aluno clicar”, quem fechou já volta a ver 24 horas depois."]);
+  // No mesmo "Quantas vezes": salva e a contagem recomeca (antes da v3b-1 era 400 no campo).
+  const mesmo = ok(await actions.saveNoticeDraft({ draft: detalhe.draft, expectedUpdatedAt: detalhe.updatedAt, id: publicado.id, reshow: true }));
+  assert.equal(mesmo.reshown, 1);
+  assert.equal((await aviso(publicado.id)).popup_repeat, "until_action", "continua em 'Até o aluno clicar'");
+  assert.equal((await entrega(publicado.id, aluna.id)).impressions_before_reshow, 1);
+  assert.equal((await popupDe(aluna))?.id, publicado.id, "a aluna ve de novo sem esperar o dia");
 
-  const salvo = ok(await actions.saveNoticeDraft({ draft: { ...detalhe.draft, repeat: "once" }, expectedUpdatedAt: detalhe.updatedAt, id: publicado.id, reshow: true }));
+  // A aluna viu de novo; trocar para "Uma vez" com o switch ligado grava "Uma vez" e mostra de novo.
+  assert.equal((await evento(aluna, publicado.id, "impressed")).status, 200);
+  actAs(produtor);
+  const lido = await getNoticeDetail(publicado.id, { permissions: TODAS });
+  const salvo = ok(await actions.saveNoticeDraft({ draft: { ...lido.draft, repeat: "once" }, expectedUpdatedAt: lido.updatedAt, id: publicado.id, reshow: true }));
   assert.equal(salvo.reshown, 1);
   assert.equal(salvo.status, "active");
   assert.equal((await aviso(publicado.id)).popup_repeat, "once");
-  assert.equal((await entrega(publicado.id, aluna.id)).impressions_before_reshow, 1);
+  assert.equal((await entrega(publicado.id, aluna.id)).impressions_before_reshow, 2);
   assert.equal((await popupDe(aluna))?.id, publicado.id, "a aluna ve de novo");
 
-  const [registro] = await auditoria(publicado.id, "communication.popup_reshown");
-  assert.deepEqual(registro.metadata, { count: 1, via: "editor" });
+  const registros = await auditoria(publicado.id, "communication.popup_reshown");
+  assert.deepEqual(
+    registros.map((registro) => registro.metadata),
+    [
+      { count: 1, via: "editor" },
+      { count: 1, via: "editor" }
+    ]
+  );
   assert.ok((await aviso(publicado.id)).edited_at, "a edicao do pop-up no ar fica no relatorio");
 
   // Pausado em "Uma vez": o menu tambem mostra de novo (ninguem mais para mostrar: 0).

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { test as base, expect, type BrowserContext, type Page, type Request } from "@playwright/test";
+import { test as base, expect, type Browser, type BrowserContext, type Page, type Request } from "@playwright/test";
 import {
   ESCOLA_DE_TESTE,
   SENHA_DE_TESTE,
@@ -101,8 +101,12 @@ export async function zerarComunicacao() {
 }
 
 export type EstadoDoPopUp = {
+  clickedAt: string | null;
+  /** v3b-1: vezes no dia de Sao Paulo de lastSeenAt ("Limitar por dia"). */
+  dayImpressions: number;
   dismissedAt: string | null;
   impressions: number;
+  lastSeenAt: string | null;
   snoozeCount: number;
   snoozedUntil: string | null;
 };
@@ -126,7 +130,7 @@ export async function estadoDoPopUpDaAluna(titulo: string, chave: ChaveDaConta =
 
   const entrega = await db
     .from("campaign_deliveries")
-    .select("dismissed_at,impressions,snooze_count,snoozed_until")
+    .select("clicked_at,day_impressions,dismissed_at,impressions,last_seen_at,snooze_count,snoozed_until")
     .eq("campaign_id", campanha.data.id)
     .eq("user_id", contas[chave].id)
     .maybeSingle();
@@ -137,8 +141,11 @@ export async function estadoDoPopUpDaAluna(titulo: string, chave: ChaveDaConta =
 
   return entrega.data
     ? {
+        clickedAt: entrega.data.clicked_at,
+        dayImpressions: entrega.data.day_impressions,
         dismissedAt: entrega.data.dismissed_at,
         impressions: entrega.data.impressions,
+        lastSeenAt: entrega.data.last_seen_at,
         snoozeCount: entrega.data.snooze_count,
         snoozedUntil: entrega.data.snoozed_until
       }
@@ -147,7 +154,7 @@ export async function estadoDoPopUpDaAluna(titulo: string, chave: ChaveDaConta =
 
 /**
  * Devolve o pop-up para a aluna como se ela nunca o tivesse visto (arranjo para testar outra saida do
- * mesmo pop-up: o limite de 24 h conta a ultima vez que ela viu qualquer pop-up).
+ * mesmo pop-up: sem isso, "Quantas vezes" do pop-up decide se ele volta).
  */
 export async function reabrirPopUpParaAluna(titulo: string) {
   const db = createLocalAdminClient();
@@ -160,7 +167,19 @@ export async function reabrirPopUpParaAluna(titulo: string) {
 
   const result = await db
     .from("campaign_deliveries")
-    .update({ clicked_at: null, dismissed_at: null, first_seen_at: null, impressions: 0, last_seen_at: null, snooze_count: 0, snoozed_until: null })
+    .update({
+      clicked_at: null,
+      day_impressions: 0,
+      dismissed_at: null,
+      first_seen_at: null,
+      impressions: 0,
+      impressions_before_reshow: 0,
+      last_seen_at: null,
+      reshown_at: null,
+      snooze_count: 0,
+      snoozed_until: null,
+      snoozes_before_reshow: 0
+    })
     .eq("campaign_id", campanha.data.id)
     .eq("user_id", contas.aluna.id);
 
@@ -679,4 +698,173 @@ export async function linhaDoSino(titulo: string, chave: ChaveDaConta = "aluna")
       .maybeSingle(),
     "Lendo a linha do sino"
   ) as LinhaDoSino | null;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Comunicacao v3b-1 (docs/25 §8): pop-up com paginas, momento, frequencia e como fechar; historico do
+ * pop-up; video da aula trocado para testar o player de fora (iframe)
+ * ---------------------------------------------------------------------------------------------- */
+
+const SESSAO_DO_PRODUTOR = "tests/e2e/.auth/produtor.json";
+
+export type FrequenciaDoPopUp =
+  | { mode: "once" }
+  | { everyMinutes?: number | null; maxPerDay?: number | null; maxTotal?: number | null; mode: "repeat"; stopOn?: "click" | "never" };
+
+export type PopUpDeTeste = {
+  /** Botao do pop-up (Para onde leva). Padrao: sem botao. */
+  botao?: { href: string; label: string } | null;
+  /** Segundos depois de abrir a pagina (ou de concluir a aula). Padrao 3. */
+  depoisDe?: number;
+  /** Nunca nestas paginas (padroes de popup-display-model.ts). Padrao: nenhuma. */
+  excecoes?: string[];
+  /** "Como fechar". Padrao "any" (no X ou clicando fora). */
+  fechar?: "any" | "x_only";
+  /** "Quantas vezes". Padrao: Uma vez. */
+  frequencia?: FrequenciaDoPopUp;
+  /** Comeca (ISO); null = ao publicar. */
+  inicio?: string | null;
+  /** "Volta em" do "Lembrar depois", em minutos; null = sem "Lembrar depois". Padrao 1.440 (24 h). */
+  lembrarEm?: number | null;
+  /** Onde aparece (padroes de popup-display-model.ts). Padrao ["home"]. */
+  paginas?: string[];
+  /** Quando aparece. Padrao "page_load". */
+  quando?: "lesson_completed" | "page_load";
+  texto?: string;
+  titulo: string;
+};
+
+/**
+ * Publica um pop-up para todos os alunos como o produtor faria (docs/25 §8): o rascunho entra no banco com
+ * as configuracoes (mais rapido que montar os dois cards na tela, e cobre combinacoes que a tela monta em
+ * varios passos) e a publicacao e feita pela tela, com a sessao do produtor: "Publicar pop-up" roda a Server
+ * Action, que conta o segmento, prepara as linhas dos alunos e renova a lista de pop-ups no ar (60 s em
+ * cache no servidor; gravar direto no banco nao a renova). Devolve o id do pop-up. Desfaca com
+ * zerarComunicacao.
+ */
+export async function publicarPopUp(browser: Browser, input: PopUpDeTeste) {
+  const db = createLocalAdminClient();
+  const contas = (await contasDeTeste(db)) as Record<ChaveDaConta, ContaDeTeste>;
+  const frequencia = input.frequencia ?? { mode: "once" };
+  const repete = frequencia.mode === "repeat";
+  const [rascunho] = unwrap(
+    await db
+      .from("campaigns")
+      .insert({
+        allow_snooze: input.lembrarEm !== null,
+        audience: { kind: "everyone" },
+        body: input.texto ?? "",
+        created_by: contas.produtor.id,
+        cta_href: input.botao?.href ?? null,
+        cta_label: input.botao?.label ?? null,
+        cta_target: input.botao ? "same_tab" : null,
+        kind: "popup",
+        popup_close: input.fechar ?? "any",
+        popup_delay_seconds: input.depoisDe ?? 3,
+        popup_every_minutes: repete ? (frequencia.everyMinutes ?? null) : null,
+        popup_exclude_pages: input.excecoes ?? [],
+        popup_frequency: frequencia.mode,
+        popup_max_per_day: repete ? (frequencia.maxPerDay ?? null) : null,
+        popup_max_total: repete ? (frequencia.maxTotal ?? null) : null,
+        popup_pages: input.paginas ?? ["home"],
+        popup_repeat: repete ? "until_action" : "once",
+        popup_snooze_minutes: input.lembrarEm ?? 1_440,
+        popup_stop_on: repete ? (frequencia.stopOn ?? (input.botao ? "click" : "never")) : null,
+        popup_trigger: input.quando ?? "page_load",
+        starts_at: input.inicio ?? null,
+        status: "draft",
+        title: input.titulo,
+        updated_by: contas.produtor.id
+      })
+      .select("id"),
+    `Gravando o rascunho do pop-up "${input.titulo}"`
+  ) as { id: string }[];
+
+  const contexto = await browser.newContext({ baseURL: enderecoDoApp, locale: "pt-BR", storageState: SESSAO_DO_PRODUTOR, timezoneId: "America/Sao_Paulo" });
+  await bloquearRedeExterna(contexto);
+
+  try {
+    const pagina = await contexto.newPage();
+    await pagina.goto(`/admin/comunicacao/avisos/${rascunho.id}`);
+    await pagina.waitForLoadState("networkidle");
+    await expect(pagina.getByLabel("Título", { exact: true })).toHaveValue(input.titulo);
+    await pagina.getByRole("button", { exact: true, name: "Publicar pop-up" }).click();
+    await expect(pagina.getByText(/^Pop-up publicado\./)).toBeVisible();
+    await expect(pagina).toHaveURL(new RegExp(`/admin/comunicacao/avisos/${rascunho.id}$`));
+  } finally {
+    await contexto.close();
+  }
+
+  return rascunho.id;
+}
+
+export type EventoDoPopUp = { event_type: string; metadata: Record<string, unknown> };
+
+/** O historico (student_events) de um pop-up para uma conta, na ordem em que aconteceu. */
+export async function eventosDoPopUp(campaignId: string, chave: ChaveDaConta = "aluna"): Promise<EventoDoPopUp[]> {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  return unwrap(
+    await db
+      .from("student_events")
+      .select("event_type,metadata")
+      .eq("entity_type", "campaign")
+      .eq("entity_id", campaignId)
+      .eq("user_id", conta.id)
+      .order("occurred_at", { ascending: true }),
+    "Lendo o historico do pop-up"
+  ) as EventoDoPopUp[];
+}
+
+/**
+ * Troca o video de uma aula de teste direto no banco (o player de fora, em iframe: Vimeo, Bunny, Mux) e
+ * devolve o que estava la, para voltar depois. A area do aluno le o catalogo de um cache de 60 s: quem chama
+ * espera a pagina da aula mostrar o player novo (esperarPlayerDaAula).
+ */
+export async function trocarVideoDaAula(lessonId: string, video: Record<string, unknown>) {
+  const db = createLocalAdminClient();
+  const antes = unwrap(await db.from("lessons").select("video_config").eq("id", lessonId).single(), "Lendo o video da aula") as {
+    video_config: Record<string, unknown> | null;
+  };
+
+  unwrap(await db.from("lessons").update({ video_config: video }).eq("id", lessonId), "Trocando o video da aula");
+
+  return antes.video_config;
+}
+
+/**
+ * Recarrega a pagina da aula ate o palco mostrar o tipo de player pedido (o catalogo da area do aluno fica
+ * 60 s em cache e se renova no pedido seguinte ao vencimento). Ate 2 minutos.
+ */
+export async function esperarPlayerDaAula(page: Page, endereco: string, tipo: "iframe" | "native" | "youtube") {
+  await expect
+    .poll(
+      async () => {
+        await page.goto(endereco);
+        return page.locator("[data-lesson-player-stage]").getAttribute("data-lesson-player-kind");
+      },
+      { intervals: [5_000], timeout: 120_000 }
+    )
+    .toBe(tipo);
+}
+
+type PlanoDoResumo = { asOf: string; plan: { id: string; notBefore: string | null; trigger: string }[] | null } | null;
+
+/**
+ * Recarrega a home (a memoria do navegador comeca vazia) e devolve os ids dos pop-ups que o plano da aluna
+ * deixa abrir agora (docs/25 §4.4: o resumo com `?page=home` traz o plano, sem conteudo; um pop-up adiado,
+ * dispensado ou ja visto em "Uma vez" nao entra ou vem com notBefore no futuro).
+ */
+export async function popUpsQueAbremNaHome(page: Page) {
+  // O resumo da home sai 1,5 s depois de carregar: esperar so depois de a pagina nova assumir nunca pega o da
+  // pagina anterior ainda no ar.
+  await page.reload({ waitUntil: "commit" });
+  const resumo = await page.waitForResponse((response) => response.url().includes("/api/notifications/summary?page=home"));
+  const { data } = (await resumo.json()) as { data: { popups?: PlanoDoResumo } };
+  const asOf = Date.parse(data.popups?.asOf ?? "");
+
+  return (data.popups?.plan ?? [])
+    .filter((item) => item.trigger === "page_load" && (item.notBefore === null || Date.parse(item.notBefore) <= asOf))
+    .map((item) => item.id);
 }

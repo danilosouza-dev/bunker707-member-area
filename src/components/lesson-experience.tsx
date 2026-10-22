@@ -65,6 +65,7 @@ import {
   mergeSavedLessonMaterialLearnerState,
   type LessonMaterialLearnerState
 } from "@/lib/lesson-materials";
+import { announceLessonMedia } from "@/lib/lesson-media-signal";
 import { shouldBlockLessonPageKeyboardShortcut } from "@/lib/lesson-page-deterrence";
 import {
   buildCompletionToggle,
@@ -1854,9 +1855,16 @@ export function LessonExperience({
       // A batida manda o status pedido; a lista de concluidas no servidor decide (src/lib/lesson-progress).
       status
     }, transport);
+    // Lido antes de settleOptimisticCompletion (que apaga a entrada): um clique mais novo decide.
+    const latest = requestId === 0 || pendingCompletionRef.current.get(lessonId) === requestId;
 
     if (requestId > 0) {
       settleOptimisticCompletion(lessonId, requestId, saved, snapshot);
+    }
+
+    if (saved && completesLesson && latest) {
+      // Conclusao gravada: o pop-up "ao concluir uma aula" pode abrir (docs/25 §1.4).
+      announceLessonMedia({ contentId: item.id, kind: "completed", lessonId });
     }
 
     if (saved && status === "completed") {
@@ -1872,6 +1880,9 @@ export function LessonExperience({
   ]);
 
   function handlePlayerStart() {
+    // Pop-up "ao abrir a página" (docs/25 §1.4): depois do play no nosso player, nao abre mais nesta pagina.
+    announceLessonMedia({ kind: "touched" });
+
     if (isActiveLessonLocked || !activeLessonKey) {
       return;
     }
@@ -2921,6 +2932,19 @@ export function LessonExperience({
     syncLessonWatchProgress
   ]);
 
+  // YouTube com os nossos controles tocando (ou carregando): o pop-up espera (docs/25 §1.4). Antes do
+  // retorno da aula vazia, como todo hook; a troca de aula zera o estado e anuncia "parado".
+  const youTubePlayingForPopup =
+    youTubeControlState.playbackState === "playing" || youTubeControlState.playbackState === "buffering";
+
+  useEffect(() => {
+    announceLessonMedia({ kind: "youtube", playing: youTubePlayingForPopup });
+
+    return () => {
+      announceLessonMedia({ kind: "youtube", playing: false });
+    };
+  }, [youTubePlayingForPopup]);
+
   if (!activeLesson) {
     return (
       <EmptyLessonState
@@ -3475,7 +3499,15 @@ export function LessonExperience({
       progressSeconds: toggle.watchState.progressSeconds,
       status: toggle.watchState.status
     }).then((saved) => {
+      // Lido antes de settleOptimisticCompletion: a conclusao desfeita antes da resposta nao e anunciada.
+      const latest = pendingCompletionRef.current.get(lessonId) === requestId;
+
       settleOptimisticCompletion(lessonId, requestId, saved, snapshot);
+
+      if (saved && toggle.willComplete && latest) {
+        // Concluir gravado: o pop-up "ao concluir uma aula" pode abrir (docs/25 §1.4).
+        announceLessonMedia({ contentId: item.id, kind: "completed", lessonId });
+      }
 
       if (saved && toggle.willComplete) {
         refreshAfterUnlockingLesson(lessonId);
@@ -4059,6 +4091,9 @@ export function LessonExperience({
               className={isPlayerFullscreen
                 ? "absolute left-1/2 top-1/2 aspect-video w-full max-w-[177.7778vh] -translate-x-1/2 -translate-y-1/2 overflow-hidden bg-black"
                 : "absolute inset-0 overflow-hidden rounded-[8px] bg-black"}
+              // A aula na tela e o tipo de player, lidos pelo pop-up (src/lib/lesson-media-signal.ts).
+              data-lesson-id={activeLessonKey || undefined}
+              data-lesson-player-kind={!activePlayerRenderConfig ? undefined : activePlayerRenderConfig.kind === "video" ? "native" : usesCustomYouTubeControls ? "youtube" : "iframe"}
               data-lesson-player-stage
               ref={playerStageRef}
             >

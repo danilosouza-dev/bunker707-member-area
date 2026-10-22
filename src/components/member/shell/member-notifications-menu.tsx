@@ -27,8 +27,8 @@ import { cn } from "@/lib/utils";
 // quando o aluno chega perto do sino (mouse em cima ou foco), como a IA Diretor; se o download falha
 // (rede, ou deploy novo que trocou os arquivos), o erro fica dentro do painel e a pagina continua.
 //
-// O painel fica acima da IA Diretor aberta (z-180) e abaixo do pop-up da home (z-200), que espera o sino
-// fechar.
+// O painel fica acima da IA Diretor aberta (z-180) e abaixo do pop-up (z-200), que espera o sino fechar.
+// v3b-1 (docs/25 §4): o pedido do numero leva a chave da pagina e traz junto os pop-ups dela.
 //
 // v3a (docs/24 §7.3): a primeira pagina da lista comeca a ser buscada na intencao, junto com o codigo do
 // painel: mouse parado 120 ms no sino ou foco pelo Tab (:focus-visible) buscam so sem pagina guardada ou
@@ -110,6 +110,7 @@ export function MemberNotificationsMenu({
   accessPreviewMode,
   className,
   onNavigate,
+  popupPage,
   refreshSummaryOnMount = true,
   schoolIconUrl,
   schoolLogoUrl,
@@ -120,6 +121,11 @@ export function MemberNotificationsMenu({
   className?: string;
   /** Navegacao do AppShell (salva progresso e favoritos antes de trocar de pagina). */
   onNavigate?: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
+  /**
+   * Chave da pagina para os pop-ups (v3b-1; null fora das paginas do aluno e no "ver como"): o pedido do
+   * numero traz junto os pop-ups dela, e o host do pop-up entra nesse pedido.
+   */
+  popupPage?: string | null;
   /** false na home: o numero vem no pedido do pop-up (MemberPopupHost), um pedido so. */
   refreshSummaryOnMount?: boolean;
   /** Icone da escola (Marca): o circulo dos avisos enviados pela escola. */
@@ -137,7 +143,7 @@ export function MemberNotificationsMenu({
   /** Quando o painel fechou: foco e mouse logo depois nao sao intencao. */
   const closedAtRef = useRef<number | null>(null);
   const intentTimerRef = useRef<number | null>(null);
-  const { unseen } = useNotificationsSummary({ refreshOnMount: refreshSummaryOnMount, userId: studentId });
+  const { unseen } = useNotificationsSummary({ page: popupPage, refreshOnMount: refreshSummaryOnMount, userId: studentId });
   const badge = formatBadgeCount(unseen);
 
   function cancelIntent() {

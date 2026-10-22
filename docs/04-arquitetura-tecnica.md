@@ -693,6 +693,36 @@ Invariantes:
 - sem polling (C11): pedidos do sino so na intencao ou na abertura, no maximo um por abertura, nenhum ao fechar;
 - a 0003 vai antes do deploy que a usa (sem ela, o sino responde vazio e as escritas novas 404); a migracao sozinha nao atrapalha o app da v2.
 
+### Implementado (22/10/2026): Comunicacao v3b-1
+
+Produto, regras e decisoes em `docs/25`; tabelas em `docs/05` (secao Comunicacao v3b-1); seguranca em `docs/06` (secao Comunicacao v3b-1). Migracao `202610220003_communication_v3b1.sql` (aditiva, toda pelo MCP, aplicada antes do merge). Nenhuma variavel de ambiente nova, nenhum servico novo, nenhum job novo nem fase nova do tick.
+
+Modulos novos ou mudados:
+
+- puros: `popup-display-model.ts` (chave da pagina, padroes e excecoes, formacao -> cursos, colunas <-> configuracao, `frequencyVerdict`, `showNext`, `decideShow`, `planPopups`, `pagesCovering`, dia de Sao Paulo), `popup-sentences.ts` (todas as frases da equipe), `popup-editor-model.ts` (os dois cards), `popup-host-model.ts` (o que o navegador arma e o que bloqueia), `src/lib/lesson-media-signal.ts` (o player da aula lido do DOM na hora); `campaign-model.ts` perdeu `pickPopup`, `reshowSkipped`, `LivePopup` e `POPUP_RULES.delayMs/minHoursBetween`;
+- servidor: `popups.ts` (lista no ar em cache com as regras, `getPopupsAnswer`, `showPopup`, `recordPopupEvent`, o caminho da v1), `popup-store.ts` (leituras, formacoes, RPC da abertura), `actions.ts` (`withPopupSettings`, teto de 50, Mostrar de novo em qualquer modo), `queries.ts` (`placementLabel`, `popupMode`, `popupNames`, `opensOnLesson`);
+- navegador: `notifications-client.ts` ganha a memoria dos pop-ups (1 minuto, mesmo dono do sino); `member-popup-host.tsx` vira uma fila por visualizacao de pagina, montada em toda pagina do aluno com chave; `lesson-experience.tsx` ganha cinco insercoes (os sinais do player).
+
+Rotas: `GET /api/notifications/summary?page=<chave>` (mapa grosso e plano), `POST /api/popups/[id]/show` (novo) e `POST /api/popups/[id]/events` com `via`; `?popup=1` e o `impressed` da v1 continuam para abas antigas.
+
+```txt
+Aluno abre uma pagina -> topo: GET /api/notifications/summary?page=<chave> (so se o numero ou a memoria passou de 1 min)
+  -> lista no ar (cache 60 s) -> mapa grosso; pagina coberta -> 1 leitura das linhas do aluno -> plano (sem conteudo)
+  host: arma pelo plano (ou pela conclusao da aula) -> fila, um de cada vez -> bloqueios (player, tela cheia, camada)
+  -> baixa a janela -> POST /api/popups/[id]/show -> decideShow -> RPC communication_record_popup_impression
+     (compare-and-set em updated_at) -> conteudo + next -> abre; resultado -> beacon /events (com via)
+Equipe: salvar -> withPopupSettings -> popup_* + popup_repeat juntos | publicar/aprovar/retomar -> teto de 50
+  Mostrar de novo -> RPC communication_reshow_popup (qualquer modo; clique zera so em "never")
+```
+
+Invariantes:
+
+- conteudo do pop-up so no `show`, depois de conferir e gravar; o mapa que vai a todo aluno nunca tem id de produto;
+- as regras de frequencia moram so em `popup-display-model.ts` (servidor, navegador e testes); o SQL so guarda a escrita atomica e os formatos;
+- sem polling (C11): nenhuma consulta por aluno nas paginas sem pop-up e nenhum pedido dentro do minuto; nada roda em intervalo alem da conferencia de 1 s enquanto algo bloqueia;
+- o pop-up nunca pausa nem retoma o video da aula e nunca abre com o nosso player tocando;
+- a 0003 vai antes do merge (sem ela, o job `comunicacao` do tick falha); a migracao sozinha nao atrapalha o app da v3a.
+
 ## Deploy
 
 Fase inicial (hoje):

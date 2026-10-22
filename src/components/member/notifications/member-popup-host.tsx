@@ -2,167 +2,471 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { POPUP_RULES } from "@/server/communications/campaign-model";
-import type { PopupItem } from "@/server/communications/notification-model";
+import {
+  LESSON_MEDIA_EVENT,
+  lessonMediaSnapshot,
+  readLessonMediaSignal,
+  resetLessonMedia,
+  waitLessonMediaStop,
+  watchLessonPlayerFocus
+} from "@/lib/lesson-media-signal";
+import type { PopupItem, PopupShowAnswer } from "@/server/communications/notification-model";
+import type { PopupCloseVia } from "@/server/communications/popup-display-model";
 import type { PopupOutcome } from "./member-popup-dialog";
-import { holdSummaryForPopup, postPopupEvent, refreshNotificationsSummary } from "./notifications-client";
-import { SUMMARY_TTL_MS } from "./notifications-model";
+import {
+  ensurePopupPlan,
+  holdSummaryForPopup,
+  NotificationsRequestError,
+  popupPlanFromMemory,
+  postPopupEvent,
+  postPopupShow,
+  refreshNotificationsSummary,
+  updatePopupAfterOutcome,
+  updatePopupInPlan,
+  type PopupPlan
+} from "./notifications-client";
+import {
+  blockAction,
+  blockReason,
+  completionOpenings,
+  givenUp,
+  hasBlockingLayer,
+  openingsForPageView,
+  POPUP_HOST_RULES,
+  shouldSendPageClose,
+  type ArmedPopup,
+  type BlockAction,
+  type BlockEnv
+} from "./popup-host-model";
 
-// Quando mostrar o pop-up da home (docs/22 §1.3): fica em toda pagina do aluno (AppShell), mas so age na
-// home. Pede o resumo com o pop-up 1,5 s depois de a home aparecer; esse pedido tambem traz o numero do
-// sino (o topo nao pede o seu na home, docs/22 §4.3). Mostra 3 s depois de abrir, com a aba visivel e
-// nada aberto por cima, e registra o que o aluno fez. A janela (MemberPopupDialog, com o Dialog, o
-// cartao e o player) so e baixada quando o servidor manda um pop-up.
+// Quando abrir os pop-ups (docs/25 §4.9): fica em toda pagina do aluno que tem chave (AppShell; nunca no
+// "ver como"), e cada montagem e uma visualizacao de pagina (a troca de aula pela playlist nao e). O plano
+// do aluno vem do resumo (notifications-client.ts): fora da home, entra no pedido que o topo ja fez; na
+// home, pede 1,5 s depois de abrir (esse pedido traz o numero do sino), a nao ser que a memoria de 1 minuto
+// ja saiba. Sem pop-up no ar para a pagina, nenhum pedido. O que o plano arma (popup-host-model.ts) entra
+// numa fila que abre um de cada vez: espera a aba visivel, a tela cheia acabar, o nosso player da aula
+// parar e nada aberto por cima; baixa a janela e so entao pede o POST /show, que confere tudo no servidor,
+// conta a abertura e devolve o conteudo. Registra o que o aluno fez (e como fechou) e acerta o plano.
+// Nada roda em intervalo alem da conferencia de 1 s enquanto algo bloqueia; nenhum pedido em laco.
 
 const loadPopupDialog = () => import("./member-popup-dialog");
 
 const MemberPopupDialog = dynamic(() => loadPopupDialog().then((module) => module.MemberPopupDialog), { ssr: false });
 
-/** O resumo com pop-up e buscado depois que a home assenta (nao disputa com a pagina). */
-const POPUP_FETCH_DELAY_MS = 1_500;
-/** Enquanto algo esta aberto por cima (ou a aba escondida), confere de novo a cada segundo. */
-const POPUP_RETRY_MS = 1_000;
+/** Comeca a baixar a janela quando algo foi armado, sem disputar com a pagina (falha aqui nao importa). */
+function preloadPopupDialog() {
+  const run = () => void loadPopupDialog().catch(() => undefined);
 
-// Sem limite entre pop-ups (decisao do produtor, docs/24 §10): um por visita a home, um de cada vez, e na
-// proxima visita o servidor escolhe de novo pela regra de cada pop-up. Memoria da pagina (sobrevive a troca
-// de pagina, nao ao recarregar): sem pop-up na ultima conferencia, a volta para a home dentro de 1 minuto nao
-// pergunta de novo.
-let lastEmptyCheckAt: number | null = null;
-
-/** Ainda vale perguntar pelo pop-up nesta visita a home? */
-function shouldAskForPopup(now: number) {
-  return !(lastEmptyCheckAt !== null && now - lastEmptyCheckAt < SUMMARY_TTL_MS);
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(run, { timeout: 2_000 });
+  } else {
+    window.setTimeout(run, 200);
+  }
 }
 
-/** Campo de texto com foco (o aluno esta digitando): o pop-up nao rouba o foco nem fecha o teclado. */
-const TYPING_TARGETS =
-  'input:not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="reset"]):not([type="submit"]), textarea, select, [contenteditable=""], [contenteditable="true"]';
-
-/**
- * Outro dialogo, gaveta, painel ou modal aberto (ou a rolagem travada por um deles)? Tambem conta um
- * controle do topo aberto (menu da conta, busca; eles marcam aria-expanded) e alguem digitando.
- */
-function hasBlockingLayer() {
-  if (document.body.style.overflow === "hidden" || document.documentElement.style.overflow === "hidden") {
-    return true;
-  }
-
-  if (document.querySelector('header [aria-expanded="true"]')) {
-    return true;
-  }
-
-  const active = document.activeElement;
-
-  if (active instanceof HTMLElement && active.matches(TYPING_TARGETS)) {
-    return true;
-  }
-
-  return Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"], [role="dialog"], [role="alertdialog"]')).some(
-    (element) => !element.closest("[inert], [hidden], [data-member-popup]") && element.getClientRects().length > 0
-  );
+function isFullscreen() {
+  return Boolean(document.fullscreenElement || (document as Document & { webkitFullscreenElement?: Element | null }).webkitFullscreenElement);
 }
+
+type Showing = { armed: ArmedPopup; popup: PopupItem };
 
 export function MemberPopupHost({
-  enabled,
-  onNavigate
+  onNavigate,
+  pageKey
 }: {
-  /** So na home e fora do modo "ver como" do produtor (AppShell decide; o topo nao busca o numero do sino nesse caso). */
-  enabled: boolean;
   /** Navegacao do AppShell (salva progresso e favoritos antes de trocar de pagina). */
   onNavigate?: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
+  /** Chave da pagina (popupPageKeyOf); null = nenhum pop-up aqui (sem chave ou "ver como"): nada e pedido. */
+  pageKey: string | null;
 }) {
-  const [popup, setPopup] = useState<PopupItem | null>(null);
+  const [showing, setShowing] = useState<Showing | null>(null);
   const [open, setOpen] = useState(false);
+  /** O que o aluno fez no pop-up aberto (marcado antes de tudo: um segundo fechamento nao conta de novo). */
   const outcomeRef = useRef<PopupOutcome | null>(null);
+  /** O pop-up aberto agora, fora do React (o fim da pagina e o pagehide leem na hora). */
+  const openRef = useRef<Showing | null>(null);
+  /** A fila desta visualizacao de pagina: o pop-up aberto fechou (o proximo em 1 s). */
+  const closedRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!pageKey) {
       return;
     }
 
-    if (!shouldAskForPopup(Date.now())) {
-      // Sem pop-up para pedir: o numero do sino segue a regra de sempre (o topo deixou para ca).
-      void refreshNotificationsSummary();
-      return;
-    }
-
-    let cancelled = false;
-    const mountedAt = Date.now();
+    const key = pageKey;
+    const contentId = key.startsWith("lesson:") ? key.slice("lesson:".length) : null;
+    const pageViewStart = Date.now();
+    // Fim desta visualizacao de pagina: o POST /show em andamento e abortado.
+    const pageView = new AbortController();
     const timers = new Set<number>();
+    /** Cada abertura (o id em "ao abrir a página", o id e a aula em "ao concluir") so uma vez aqui. */
+    const armedKeys = new Set<string>();
+    const queue: ArmedPopup[] = [];
+    let cancelled = false;
+    /** Um item da fila esta sendo conferido, pedido ou aberto (um de cada vez). */
+    let busy = false;
+    let held = false;
+    let stopWaiting: (() => void) | null = null;
+
+    resetLessonMedia();
+    const stopFocusWatch = contentId ? watchLessonPlayerFocus() : null;
 
     function later(callback: () => void, delay: number) {
       const timer = window.setTimeout(() => {
         timers.delete(timer);
         callback();
-      }, delay);
+      }, Math.max(0, delay));
       timers.add(timer);
     }
 
-    function tryShow(item: PopupItem) {
+    function env(): BlockEnv {
+      const media = contentId ? lessonMediaSnapshot() : null;
+
+      return {
+        fullscreen: isFullscreen() || Boolean(media?.fullscreen),
+        hidden: document.visibilityState !== "visible",
+        layer: hasBlockingLayer(document),
+        lesson: media ? { activeLessonId: media.activeLessonId, playing: media.playing, touched: media.touched } : null,
+        // O anterior ainda saindo (animacao) tambem conta: nunca dois na tela.
+        popupOpen: openRef.current !== null || document.querySelector("[data-member-popup]") !== null
+      };
+    }
+
+    function arm(openings: ArmedPopup[]) {
+      let armedAny = false;
+
+      for (const armed of openings) {
+        if (armedKeys.has(armed.key)) {
+          continue;
+        }
+
+        armedKeys.add(armed.key);
+        armedAny = true;
+        later(() => {
+          queue.push(armed);
+          pump();
+        }, armed.at - Date.now());
+      }
+
+      if (armedAny) {
+        preloadPopupDialog();
+      }
+    }
+
+    function pump() {
+      if (cancelled || busy) {
+        return;
+      }
+
+      const armed = queue.shift();
+
+      if (!armed) {
+        return;
+      }
+
+      busy = true;
+      attempt(armed);
+    }
+
+    /** Terminou com este item: o proximo da fila (depois de um pop-up que fechou, 1 s depois). */
+    function next(delay = 0) {
+      if (delay > 0) {
+        later(() => {
+          busy = false;
+          pump();
+        }, delay);
+        return;
+      }
+
+      busy = false;
+      pump();
+    }
+
+    function wait(action: Exclude<BlockAction, "drop">, retry: () => void) {
+      const resume = () => {
+        stopWaiting?.();
+        stopWaiting = null;
+
+        if (!cancelled) {
+          retry();
+        }
+      };
+
+      if (action === "wait_visible") {
+        const handleVisibility = () => {
+          if (document.visibilityState === "visible") {
+            resume();
+          }
+        };
+
+        document.addEventListener("visibilitychange", handleVisibility);
+        stopWaiting = () => document.removeEventListener("visibilitychange", handleVisibility);
+        return;
+      }
+
+      if (action === "wait_fullscreen") {
+        // webkitendfullscreen: o video da aula saindo da tela cheia propria do iPhone (nao sobe: captura).
+        const names = ["fullscreenchange", "webkitfullscreenchange", "webkitendfullscreen"];
+
+        names.forEach((name) => document.addEventListener(name, resume, true));
+        stopWaiting = () => names.forEach((name) => document.removeEventListener(name, resume, true));
+        return;
+      }
+
+      if (action === "wait_paused") {
+        stopWaiting = waitLessonMediaStop(resume);
+        return;
+      }
+
+      // Outro pop-up saindo, algo aberto por cima ou alguem digitando: confere de novo em 1 s.
+      const timer = window.setTimeout(resume, POPUP_HOST_RULES.blockedRecheckMs);
+      stopWaiting = () => window.clearTimeout(timer);
+    }
+
+    /** Antes do POST /show: desiste, descarta ou espera; senao, pede. */
+    function attempt(armed: ArmedPopup) {
       if (cancelled) {
         return;
       }
 
-      if (document.visibilityState !== "visible" || hasBlockingLayer()) {
-        later(() => tryShow(item), POPUP_RETRY_MS);
+      // 10 min depois da hora dele, desiste (nada registrado): a conferencia de 1 s nunca fica para sempre.
+      if (givenUp(armed, Date.now())) {
+        next();
+        return;
+      }
+
+      const reason = blockReason(env(), armed, "before_show");
+
+      if (reason) {
+        const action = blockAction(reason);
+
+        if (action === "drop") {
+          next();
+        } else {
+          wait(action, () => attempt(armed));
+        }
+
+        return;
+      }
+
+      void show(armed);
+    }
+
+    async function show(armed: ArmedPopup) {
+      try {
+        // A janela antes do show: sem o codigo dela (rede caiu, deploy novo), nada abre e nada conta como visto.
+        await loadPopupDialog();
+      } catch {
+        next();
+        return;
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      // O download pode ter demorado: confere de novo antes de contar (agora a janela ja esta na memoria).
+      if (blockReason(env(), armed, "before_show") !== null) {
+        attempt(armed);
+        return;
+      }
+
+      let answer: PopupShowAnswer;
+
+      try {
+        answer = await postPopupShow(armed.id, { page: key, trigger: armed.trigger }, pageView.signal);
+      } catch (error) {
+        // 409: o servidor disse quando ele pode voltar. 404, 429, rede ou tempo esgotado: sai do plano (o
+        // proximo plano traz de volta se for a vez dele). Nada aparece.
+        const refused = error instanceof NotificationsRequestError && error.status === 409;
+
+        updatePopupInPlan(armed.id, refused && error.nextAt ? { notBefore: error.nextAt } : null);
+
+        if (!cancelled) {
+          next();
+        }
+
+        return;
+      }
+
+      updatePopupInPlan(armed.id, answer.next);
+
+      // Saiu da pagina com o show no ar: contou e nao aparece (a unica perda aceita).
+      if (!cancelled) {
+        present(armed, answer.popup);
+      }
+    }
+
+    /** Depois do POST /show (ja contado): nada descarta, so espera; a pagina acabar antes perde a abertura. */
+    function present(armed: ArmedPopup, popup: PopupItem) {
+      if (cancelled) {
+        return;
+      }
+
+      const reason = blockReason(env(), armed, "after_show");
+
+      if (reason) {
+        const action = blockAction(reason);
+
+        wait(action === "drop" ? "recheck" : action, () => present(armed, popup));
         return;
       }
 
       outcomeRef.current = null;
-      setPopup(item);
+      openRef.current = { armed, popup };
+      setShowing({ armed, popup });
       setOpen(true);
-      postPopupEvent(item.id, "impressed");
     }
 
-    holdSummaryForPopup(true);
-    later(() => {
-      holdSummaryForPopup(false);
-      void refreshNotificationsSummary({ popup: true }).then((summary) => {
-        if (cancelled || !summary) {
-          return;
+    /** Saiu da pagina (ou recarregou) com o pop-up aberto e sem resposta: fechado pela pagina. */
+    function sendPageClose(persisted: boolean) {
+      const current = openRef.current;
+
+      if (!current || !shouldSendPageClose({ outcome: outcomeRef.current, persisted })) {
+        return;
+      }
+
+      outcomeRef.current = "closed";
+      postPopupEvent(current.popup.id, "closed", { via: "page" });
+    }
+
+    function handlePageHide(event: PageTransitionEvent) {
+      if (event.persisted) {
+        return;
+      }
+
+      sendPageClose(false);
+      // A pagina esta saindo: nada mais da fila sai daqui.
+      cancelled = true;
+      pageView.abort();
+    }
+
+    function handlePageShow(event: PageTransitionEvent) {
+      if (!event.persisted || !openRef.current) {
+        return;
+      }
+
+      // Voltou do cache do navegador com o pop-up aberto: fecha sem registrar nada.
+      outcomeRef.current = outcomeRef.current ?? "closed";
+      openRef.current = null;
+      setOpen(false);
+      next(POPUP_HOST_RULES.betweenPopupsMs);
+    }
+
+    function handleLessonMedia(event: Event) {
+      const signal = readLessonMediaSignal(event);
+
+      if (cancelled || !contentId || signal?.kind !== "completed" || signal.contentId !== contentId) {
+        return;
+      }
+
+      // O momento da conclusao: a hora e se o nosso player tocava (Concluir no meio do video).
+      const completedAt = Date.now();
+      const playing = lessonMediaSnapshot().playing;
+
+      // O plano pode ter mudado desde que a aula abriu: pede so se a memoria passou de 1 minuto.
+      void ensurePopupPlan(key).then((plan) => {
+        if (!cancelled && plan) {
+          arm(
+            completionOpenings({
+              contentId,
+              items: plan.items,
+              lessonId: signal.lessonId,
+              now: completedAt,
+              offsetMs: plan.offsetMs,
+              playing
+            })
+          );
         }
-
-        if (!summary.popup) {
-          lastEmptyCheckAt = Date.now();
-          return;
-        }
-
-        const item = summary.popup;
-
-        // Baixa a janela agora (bem antes dos 3 s); sem ela (rede caiu, deploy novo), nada aparece e
-        // nada e registrado como visto.
-        loadPopupDialog().then(
-          () => {
-            if (!cancelled) {
-              later(() => tryShow(item), Math.max(0, mountedAt + POPUP_RULES.delayMs - Date.now()));
-            }
-          },
-          () => undefined
-        );
       });
-    }, POPUP_FETCH_DELAY_MS);
+    }
+
+    async function start() {
+      let plan: PopupPlan | null;
+      const kept = key === "home" ? popupPlanFromMemory("home") : null;
+
+      if (key !== "home") {
+        // Entra no pedido que o topo acabou de fazer (ou usa a memoria; pagina nao coberta = nenhum pedido).
+        plan = await ensurePopupPlan(key);
+      } else if (kept && (!kept.covered || kept.plan)) {
+        // Home com a memoria de 1 minuto: arma na hora, sem pedido e sem segurar o topo.
+        plan = kept.covered && kept.plan ? { items: kept.plan, offsetMs: kept.offsetMs } : null;
+      } else {
+        // Home: o pedido sai 1,5 s depois de abrir (nao disputa com a pagina) e traz o numero do sino.
+        held = true;
+        holdSummaryForPopup(true);
+        await new Promise<void>((resolve) => later(resolve, POPUP_HOST_RULES.homeFetchDelayMs));
+
+        if (cancelled) {
+          return;
+        }
+
+        held = false;
+        holdSummaryForPopup(false);
+        void refreshNotificationsSummary({ page: "home" });
+        plan = await ensurePopupPlan("home");
+      }
+
+      if (!cancelled && plan) {
+        arm(openingsForPageView({ items: plan.items, offsetMs: plan.offsetMs, pageKey: key, pageViewStart }));
+      }
+    }
+
+    closedRef.current = () => next(POPUP_HOST_RULES.betweenPopupsMs);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("pageshow", handlePageShow);
+
+    if (contentId) {
+      window.addEventListener(LESSON_MEDIA_EVENT, handleLessonMedia);
+    }
+
+    void start();
 
     return () => {
       cancelled = true;
-      holdSummaryForPopup(false);
+      sendPageClose(false);
+
+      if (openRef.current) {
+        openRef.current = null;
+        setOpen(false);
+      }
+
+      pageView.abort();
+
+      if (held) {
+        holdSummaryForPopup(false);
+      }
+
+      stopWaiting?.();
       timers.forEach((timer) => window.clearTimeout(timer));
       timers.clear();
+      stopFocusWatch?.();
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener(LESSON_MEDIA_EVENT, handleLessonMedia);
+      closedRef.current = null;
     };
-  }, [enabled]);
+  }, [pageKey]);
 
-  function finish(outcome: PopupOutcome) {
-    if (!popup || outcomeRef.current) {
+  function finish(outcome: PopupOutcome, via?: PopupCloseVia) {
+    const current = openRef.current;
+
+    if (!current || outcomeRef.current) {
       return;
     }
 
+    // Primeiro a marca (sincrona): o Esc e o fechamento do Base UI no mesmo toque nao contam duas vezes.
     outcomeRef.current = outcome;
-    postPopupEvent(popup.id, outcome);
+    postPopupEvent(current.popup.id, outcome, outcome === "closed" && via ? { via } : {});
+    updatePopupAfterOutcome(current.armed.id, outcome);
+    openRef.current = null;
     setOpen(false);
+    closedRef.current?.();
   }
 
-  if (!popup) {
+  if (!showing) {
     return null;
   }
 
-  return <MemberPopupDialog onFinish={finish} onNavigate={onNavigate} open={open} popup={popup} />;
+  return <MemberPopupDialog key={showing.armed.key} onFinish={finish} onNavigate={onNavigate} open={open} popup={showing.popup} />;
 }

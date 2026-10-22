@@ -280,6 +280,22 @@ Decisao tomada:
 - **excluir mais rapido**: os passos independentes em paralelo e sem `revalidatePath` em Excluir e Retirar do sino; o dialogo fecha quando a acao volta e a lista atualiza depois;
 - **sino por aluno no navegador**: o numero e a pagina guardada tem dono (o id do aluno); o filtro "Não lidas" descarta a pagina guardada do "Todas"; reagir e votar so marcam aberto depois que o servidor aceita.
 
+### Comunicacao v3b-1: pop-ups com paginas, momentos, frequencia e como fechar (22/10/2026)
+
+Decisoes do produtor de 21/10/2026, depois de testar a v3a (`Eu que tenho que definir isso, não tem que ser pré-definido.`; `Não quero esse limite fixo de segurança`), mais o pedido de "Como fechar". Detalhes em `docs/25`; migracao `202610220003`. **Muda decisoes**: C6 (pop-up so na home) vira "onde e quando a equipe escolher, um de cada vez"; C23 e T6 (Mostrar de novo so em "Uma vez") viram "em qualquer Quantas vezes"; D12 (limite de 1 pop-up por dia) fica fechada: frequencia por pop-up, escolhida pela equipe; o "Lembrar depois" de 24 h fixas vira o **Volta em** de cada pop-up.
+
+Decisao tomada:
+
+- **sem limite fixo entre pop-ups**: cada pop-up segue a frequencia escolhida pela equipe (Uma vez, ou Mais de uma vez com limite por dia, tempo entre uma vez e outra, limite total e o que faz parar); as unicas regras fixas sao **um de cada vez** e, na aula, **nunca com o video do nosso player tocando**; os pisos tecnicos (5 s entre duas aberturas do mesmo pop-up, 30 chamadas por minuto, 100 eventos de abertura por dia) nunca sao vistos por uma pessoa;
+- **onde aparece**: Inicio, qualquer pagina ou as marcadas, com Nunca nestas paginas (a excecao vence); formacao conta os cursos; aula especifica fica para depois;
+- **quando aparece**: ao abrir a pagina (0 a 600 s) ou ao concluir uma aula; o horario e o `Começa: Em uma data`; hora marcada ao vivo, primeiro acesso e curso concluido na v3b-2; intencao de saida nunca;
+- **como fechar**: no X ou fora, ou so no X, com o Esc sempre fechando (padrao WAI-ARIA, dito na dica do editor);
+- **Mostrar de novo** em qualquer modo; nos pop-ups que so param quando terminam, zera tambem quem clicou;
+- **ate 50 pop-ups publicados ao mesmo tempo** (no ar ou agendados), por publicar, aprovar, pedir aprovacao e retomar; nao limita o que o aluno ve;
+- **pop-ups de antes sem reescrever dados**: "Ate o aluno clicar" = Mais de uma vez com 1 dia entre uma vez e outra, ate clicar; sem botao, abre e salva como "So quando o pop-up terminar".
+
+Em aberto: as acoes que o produtor quer como momento do pop-up (a resposta ao produtor pergunta, `docs/25` §10.1); os modelos de configuracao (v3b-2) e o construtor avancado com enquete (v3b-3).
+
 ## Design
 
 ### Login

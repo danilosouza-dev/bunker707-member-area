@@ -4,6 +4,8 @@ Data: 22/10/2026. Pedido do produtor (21/10/2026), depois de testar a v2 na `dev
 
 Este documento registra o que foi construído sobre a v1 (`docs/22`) e a v2 (`docs/23`), as regras fixas, as decisões (T1 a T23) e o que fica de fora. Vale para qualquer trabalho em Comunicação, sino, avisos, reações ou enquetes. A entrega se divide em duas: a **v3a** (este documento) e a **v3b "Pop-ups sob medida"** (páginas e gatilhos do pop-up, frequência, limites globais editáveis, o construtor por blocos, enquete no pop-up e "Como fechar"), que terá documento próprio. Migração `202610220001_communication_v3a.sql` (as `202610200001`, `202610200002` e `202610210001`, já aplicadas na nuvem de teste, não mudam); os ajustes depois do primeiro teste do produtor (lixeira opcional, minutos no tempo do sino, o cartão novo e as correções da revisão) estão na seção 10, com a `202610220002_communication_v3a_ajustes.sql`. Tabelas em `docs/05` (seção Comunicação v3a), segurança em `docs/06` (seção Comunicação v3a), desenho em `docs/12`, decisões em `docs/09` e admin em `docs/17` §1.8. Muda uma regra da v1: **notificação enviada agora muda e pode ser excluída** (`docs/22` §2.2).
 
+> **Atualização (22/10/2026): Comunicação v3b-1** (`docs/25`, migração `202610220003`). A primeira parte da v3b chegou: onde, quando e quantas vezes cada pop-up aparece, o **Volta em** do Lembrar depois e **Como fechar**, sem limite fixo entre pop-ups. Muda o que está aqui: **Mostrar de novo para quem já viu** vale em **qualquer "Quantas vezes"** (seção 2.4 e T6); "Até o aluno clicar" virou **Mais de uma vez** com 1 dia entre uma vez e outra, até clicar (editável); a resposta ao produtor da seção 2.4 foi substituída pela do `docs/25` §1.9; os itens de pop-up da seção 9 foram entregues ou têm lugar marcado no `docs/25` §8.
+
 ---
 
 ## Resumo em uma página
@@ -180,7 +182,9 @@ Sem a permissão: 403 `Só quem pode publicar exclui um aviso que os alunos veem
 
 ### 2.4 Pop-up: "Mostrar de novo para quem já viu"
 
-Resposta ao produtor (T7, para colar):
+> **Desde a v3b-1** (`docs/25`): o **Mostrar de novo para quem já viu** vale em **qualquer "Quantas vezes"** (no editor do pop-up no ar ou pausado e no menu ⋯), e nos pop-ups que só param quando terminam zera também quem clicou. A resposta ao produtor abaixo vale para a v3a; a atual, para colar, está no `docs/25` §1.9. O texto desta seção fica como registro do que a v3a entregou.
+
+Resposta ao produtor da v3a (T7, substituída pelo `docs/25` §1.9):
 
 > Hoje funciona assim: se o pop-up estava em **Uma vez** e você muda para **Até o aluno clicar**, quem só fechou (no X, no Esc ou clicando fora) **volta a ver**, 24 horas depois de ter visto este pop-up (até os ajustes da seção 10.8 contava também outro pop-up, pelo limite de 1 por sessão e 1 a cada 24 horas, que saiu). Quem clicou no botão ou escolheu **Não mostrar de novo** nunca mais vê esse pop-up, mesmo editado. E se você mantém **Uma vez**, quem já viu não vê de novo.
 >
@@ -390,7 +394,7 @@ Resposta ao produtor (para colar):
 | T3 | **Travado depois do envio**: tipo, segmento, envio, "Fica no sino por", áudio, ligar/desligar Aceitar/Recusar e a enquete (menos **Encerrar enquete**) | mudam quem recebe e quando, ou o sentido do que os alunos já fizeram |
 | T4 | Editar a enviada **vale como publicar** (`publish`; acima de 500, `publish_large`; senão 403, nunca pedido); quem levaria o 403 não vê **Editar**; auditoria só com os nomes dos campos; `Editado · …` no relatório | uma regra só para o que os alunos veem agora |
 | T5 | **Excluir em qualquer situação menos "Enviando"**; agendado, enviado e pop-up no ar ou pausado pedem `publish`; a enviada sai de todos os sinos (com as seguintes que já saíram, caixa marcada) | "delete (any status)"; tirar nunca é mais arriscado que mostrar, então sem regra dos 500 |
-| T6 | **Mostrar de novo só em "Uma vez"**, no editor e no menu; reinicia quem ainda está no segmento, viu, não veria de novo e não clicou nem escolheu Não mostrar de novo; sem limite entre pop-ups desde os ajustes (seção 10.8) | em "Até o aluno clicar" o limite global já decide quando quem fechou volta; "Não mostrar de novo" é pedido do aluno |
+| T6 | **Mostrar de novo** no editor e no menu; na v3a só em "Uma vez", **desde a v3b-1 em qualquer "Quantas vezes"** (`docs/25` P11); reinicia quem ainda está no segmento, viu mais vezes do que adiou e não escolheu Não mostrar de novo (quem clicou fica de fora, menos nos pop-ups que só param quando terminam); sem limite entre pop-ups desde os ajustes (seção 10.8) | com a frequência escolhida por pop-up, o reinício importa em todo modo; "Não mostrar de novo" é pedido do aluno |
 | T7 | A resposta ao produtor sobre o pop-up (seção 2.4) | perguntado duas vezes |
 | T8 | **Lixeira do aluno** em todo cartão, com Desfazer no lugar até o painel fechar; excluída sai de tudo e continua "recebeu"; **Excluíram do sino** no relatório | o pedido; sem prazo no Desfazer (WCAG 2.2.1) |
 | T9 | **Cartão clicável** em três modos; um link acessível por cartão mais um link decorativo por baixo; todo controle dentro continua clicável; sinal visual (hover, toque, cursor, anel de foco, a linha com a seta) | "toda a mensagem pode ser clicável … feedback visual", sem interativo dentro de link |
@@ -427,10 +431,10 @@ O que a implementação decidiu onde o desenho era omisso ou não batia com o c�
 
 | Fora da v3a | Por quê / onde vai |
 |---|---|
-| Páginas e exclusões do pop-up, gatilhos (depois de uma aula, primeiro login, horário para todos, atraso), frequência (a cada N minutos/horas/dias, no máximo N vezes, por sessão), limites globais editáveis | **v3b "Pop-ups sob medida"**; a v3a só traz o "Mostrar de novo" |
-| Construtor avançado do pop-up (blocos, layouts, vários botões, contagem regressiva, vídeo) e a pergunta do "construtor de HTML" | v3b, com blocos estruturados desenhados pelos componentes do app, nunca HTML cru (XSS guardado em página de aluno e a CSP com nonce de `src/proxy.ts`) |
-| Enquete no pop-up e o relatório dela | v3b; o modelo puro e `campaigns.poll` (sem trava de tipo) estão prontos; os votos vão na linha do pop-up por aluno |
-| "Como fechar" (só no X / no X ou fora) | v3b (pedido depois do desenho) |
+| Páginas e exclusões do pop-up, gatilhos (depois de uma aula, primeiro login, horário para todos, atraso), frequência (a cada N minutos/horas/dias, no máximo N vezes, por sessão), limites globais editáveis | **Entregue na v3b-1** (`docs/25`): páginas, exceções, ao abrir a página com atraso, ao concluir uma aula e a frequência por pop-up; sem limites globais (decisão do produtor); primeiro login e horário ao vivo na v3b-2, por sessão nunca (`docs/25` §8) |
+| Construtor avançado do pop-up (blocos, layouts, vários botões, contagem regressiva, vídeo) e a pergunta do "construtor de HTML" | v3b-3, com blocos estruturados desenhados pelos componentes do app, nunca HTML cru (XSS guardado em página de aluno e a CSP com nonce de `src/proxy.ts`) |
+| Enquete no pop-up e o relatório dela | v3b-3; o modelo puro e `campaigns.poll` (sem trava de tipo) estão prontos; os votos vão na linha do pop-up por aluno |
+| "Como fechar" (só no X / no X ou fora) | **Entregue na v3b-1** (`docs/25` §1.6) |
 | Números de reação para o aluno | privacidade e uma soma por cartão a cada abertura; a equipe vê no relatório |
 | "Editada" para o aluno ou avisar de novo ao editar | aviso da escola não é mensagem de conversa; mensagem nova é notificação nova (T2) |
 | Mudar áudio, segmento, envio, tempo no sino, resposta ligada ou a enquete depois do envio | muda quem recebe ou o sentido do que os alunos já fizeram (T3); Retirar e Duplicar cobrem |
@@ -521,7 +525,7 @@ Resposta ao produtor (para colar):
 
 - O produtor criou um pop-up, entrou como aluno e ele não apareceu: o aluno de teste já tinha visto outro pop-up naquele dia, e a regra da v1 era **no máximo 1 pop-up por sessão e 1 a cada 24 h** (docs/22 C6, docs/17 §1.8.1 e D12). Decisão do produtor: `Não quero esse limite fixo de segurança [...] Eu que tenho que definir isso manualmente.`
 - **Saiu** o limite entre pop-ups: nem 1 por sessão (`sessionStorage`) nem 1 a cada 24 h contando qualquer pop-up (a leitura do último visto saiu do servidor, uma ida ao banco a menos). Cada pop-up segue só a sua regra: **Uma vez** aparece uma vez (o **Mostrar de novo** zera e ele volta na hora); **Até o aluno clicar** volta 24 horas depois de o aluno ter visto **este** pop-up. Continua: só na home, nunca numa aula, 3 s depois de abrir, **um de cada vez** (um por visita à home; na visita seguinte o servidor escolhe de novo).
-- A frequência escolhida pela equipe em cada pop-up (N vezes por dia, a cada X minutos, horas ou dias, no máximo N vezes, até clicar ou fechar), as páginas e os modelos de configuração vêm na v3b, sem limite global fixo.
+- A frequência escolhida pela equipe em cada pop-up (N vezes por dia, a cada X minutos, horas ou dias, no máximo N vezes, até clicar ou só quando terminar) e as páginas chegaram na v3b-1, sem limite global fixo (`docs/25`); os modelos de configuração vêm na v3b-2.
 - Textos que mudaram: a dica do card Quando do pop-up (`Por enquanto o pop-up aparece só na home, nunca durante uma aula, e um de cada vez.`), o diálogo e a chave do **Mostrar de novo** (sem `respeitando o limite de 1 pop-up por dia` e sem `Vale o limite de 1 pop-up por dia.`), o toast e a dica de **Até o aluno clicar** (`... 24 horas depois de ter visto este pop-up ...`).
 
 ### 10.7 Testes dos ajustes

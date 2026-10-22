@@ -6,6 +6,7 @@ import { MemberPopupCard } from "@/components/member/notifications/member-popup"
 import { NotificationCard } from "@/components/member/notifications/notification-card";
 import { MemberFilterPills } from "@/components/member/ui/member-filters";
 import { cn } from "@/lib/utils";
+import { popupCloseCaption } from "@/server/communications/popup-sentences";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import { PillGroup } from "../form";
 import { MEMBER_PREVIEW_VH_VAR, type PreviewDevice } from "../member-area/preview-frame";
@@ -28,9 +29,10 @@ import {
 //
 // Mesmo contrato do PreviewFrame da Area de membros (member-area/preview-frame.tsx: tokens do aluno de
 // volta, container query, `inert`), mas a "tela" e o recorte onde o aviso aparece, em tamanho real: no
-// computador, o canto do sino (o painel tem 400 px) ou o centro da home (o pop-up tem 448 px); no
-// celular, a tela de 390 px. A tela inteira de 1280 px reduzida deixaria o texto ilegivel. A moldura so
-// reduz quando a coluna e mais estreita que o recorte. Nada de exemplo em volta: so o aviso.
+// computador, o canto do sino (o painel tem 400 px) ou o centro da pagina (o pop-up tem 448 px); no
+// celular, a tela de 375 px (v3b-1: a largura de aceite). A tela inteira de 1280 px reduzida deixaria o texto
+// ilegivel. A moldura so reduz quando a coluna e mais estreita que o recorte. Nada de exemplo em volta: so o aviso.
+// v3b-1 (docs/25 §2.6): embaixo do pop-up, a legenda de como ele fecha ("Fecha só no X (e no Esc).").
 //
 // v2 (docs/23): o circulo e quem envia (a pessoa da equipe, ou o icone da escola de Marca), o icone vai
 // antes do titulo, o "Termina em" aparece como o aluno ve logo depois do envio (chegou ha 30 s) e, com
@@ -67,7 +69,7 @@ const STUDENT_TOKENS: Record<string, string> = {
 
 const STAGES: Record<PreviewDevice, { caption: string; minHeight: number; width: number }> = {
   desktop: { caption: "Computador · tamanho real", minHeight: 560, width: 520 },
-  mobile: { caption: "Celular · 390 px", minHeight: 720, width: 390 }
+  mobile: { caption: "Celular · 375 px", minHeight: 720, width: 375 }
 };
 
 type StageProps = {
@@ -75,10 +77,12 @@ type StageProps = {
   children: ReactNode;
   className?: string;
   device: PreviewDevice;
+  /** Segunda linha da legenda (pop-up: como fecha). */
+  note?: string;
 };
 
 /** Recorte da tela do aluno, reduzido so quando nao cabe na coluna. */
-function PreviewStage({ ariaLabel, children, className, device }: StageProps) {
+function PreviewStage({ ariaLabel, children, className, device, note }: StageProps) {
   const stage = STAGES[device];
   const outer = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLDivElement>(null);
@@ -131,7 +135,10 @@ function PreviewStage({ ariaLabel, children, className, device }: StageProps) {
           </div>
         </div>
       </div>
-      <figcaption className="text-xs leading-5 text-[var(--text-secondary)]">{stage.caption}</figcaption>
+      <figcaption className="text-center text-xs leading-5 text-[var(--text-secondary)]">
+        {stage.caption}
+        {note ? <span className="block">{note}</span> : null}
+      </figcaption>
     </figure>
   );
 }
@@ -156,8 +163,8 @@ type NoticePreviewProps = {
   branding: { iconUrl?: string | null; logoUrl: string | null; name: string };
   className?: string;
   device: PreviewDevice;
-  /** O aviso inteiro (pop-up usa a janela e o "Lembrar depois") ou so o conteudo de uma notificacao. */
-  draft: PreviewContent & Partial<Pick<NoticeDraft, "allowSnooze" | "sender">>;
+  /** O aviso inteiro (pop-up usa o "Lembrar depois" e como fecha) ou so o conteudo de uma notificacao. */
+  draft: PreviewContent & Partial<Pick<NoticeDraft, "allowSnooze" | "popup" | "sender">>;
   /** Imagem recortada ainda subindo (data URL): a previa mostra antes do envio terminar. */
   imageUrl?: string | null;
   /** Instante de referencia do "agora" no cartao. */
@@ -202,6 +209,7 @@ export function NoticePreview({ anchorExpiresAt, branding, className, device, dr
         ariaLabel={`Prévia do pop-up no ${device === "mobile" ? "celular" : "computador"}`}
         className={cn(className, emptyTitle && "[&_h2]:font-semibold [&_h2]:text-white/40")}
         device={device}
+        note={popupCloseCaption(draft.popup?.close ?? "any")}
       >
         <div className="relative grid place-items-center p-4" style={{ minHeight: STAGES[device].minHeight }}>
           <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" />

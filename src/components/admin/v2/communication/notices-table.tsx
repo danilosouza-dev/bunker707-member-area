@@ -16,6 +16,8 @@ import { formatStudentCount, noticeHref, noticeRowNumbers } from "./notices-view
 // por aviso (o menu fica no canto, dá para pausar um pop-up a 375 px; docs/17 §1.13). Vistos e Cliques
 // de aviso que nunca saiu (rascunho, aguardando aprovacao, agendado) mostram "—". v2 (docs/23 §2.2): o
 // chip "+2 seguintes" ao lado do tipo e, sem imagem, o icone ao lado do titulo no lugar do icone do tipo.
+// v3b-1 (docs/25 §2.8): segunda linha na coluna "Quando" do pop-up que nao e o padrao (placementLabel) e o
+// "Quantas vezes" (popupMode) no alvo do menu.
 
 export function toNoticeActionTarget(item: NoticeListItem): NoticeActionTarget {
   return {
@@ -26,6 +28,8 @@ export function toNoticeActionTarget(item: NoticeListItem): NoticeActionTarget {
     followUps: item.followUpCount > 0 ? { count: item.followUpCount, sent: item.followUpsSent } : null,
     id: item.id,
     kind: item.kind,
+    // v3b-1: o toast de "Mostrar de novo" segue o "Quantas vezes" do pop-up.
+    popupMode: item.popupMode,
     recipients: item.stats.recipients,
     situation: item.situation,
     status: item.status,
@@ -94,7 +98,13 @@ export function NoticesTable({ items }: { items: readonly NoticeListItem[] }) {
       mobileLabel: "Para quem"
     },
     {
-      cell: (item) => <span className="block text-[13px] leading-5 whitespace-nowrap max-md:whitespace-normal">{item.whenLabel}</span>,
+      cell: (item) => (
+        <span className="block text-[13px] leading-5 whitespace-nowrap max-md:whitespace-normal">
+          {item.whenLabel}
+          {/* v3b-1: onde e quando o pop-up aparece, quando nao e o padrao (so no Inicio, ao abrir, 3 s). */}
+          {item.placementLabel ? <span className="block text-xs leading-4 text-[var(--text-secondary)]">{item.placementLabel}</span> : null}
+        </span>
+      ),
       className: "max-md:col-span-full max-xl:hidden",
       header: "Quando",
       headerClassName: "max-xl:hidden",

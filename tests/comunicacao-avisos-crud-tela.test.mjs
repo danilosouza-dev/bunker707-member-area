@@ -44,7 +44,11 @@ test("menu: Ver relatório primeiro, Mostrar de novo junto das acoes do pop-up n
     ["Ver relatório", "Editar", "Pausar", "Mostrar de novo para quem já viu", "Duplicar", "Encerrar", "Excluir"],
     "pop-up no ar em Uma vez"
   );
-  assert.deepEqual(menu("popup", "active", PUBLISH, { popupRepeat: "until_action" }), ["Ver relatório", "Editar", "Pausar", "Duplicar", "Encerrar", "Excluir"], "Até o aluno clicar: sem Mostrar de novo");
+  assert.deepEqual(
+    menu("popup", "active", PUBLISH, { popupRepeat: "until_action" }),
+    ["Ver relatório", "Editar", "Pausar", "Mostrar de novo para quem já viu", "Duplicar", "Encerrar", "Excluir"],
+    "v3b-1: Mostrar de novo em qualquer Quantas vezes"
+  );
   assert.deepEqual(
     menu("popup", "paused", PUBLISH, { popupRepeat: "once" }),
     ["Ver relatório", "Editar", "Retomar", "Mostrar de novo para quem já viu", "Duplicar", "Encerrar", "Excluir"]
@@ -117,15 +121,15 @@ test("Excluir: o texto do dialogo segue a situacao (enviada, agendada, pop-up no
   const popup = (situation) => model.noticeActionConfirm("delete", notice({ kind: "popup", situation, title: "Turma nova" }));
   assert.deepEqual(popup("active"), {
     confirmLabel: "Excluir pop-up",
-    description: "O pop-up sai da home de todos os alunos agora e o aviso sai desta lista, com o relatório. Não dá para desfazer.",
+    description: "O pop-up para de aparecer para todos os alunos agora e o aviso sai desta lista, com o relatório. Não dá para desfazer.",
     destructive: true,
     title: "Excluir “Turma nova”?"
   });
 
   for (const situation of ["paused", "scheduled"]) {
     const copy = popup(situation);
-    assert.equal(copy.description, "O pop-up não volta para a home e o aviso sai desta lista, com o relatório. Não dá para desfazer.", situation);
-    assert.doesNotMatch(copy.description, /sai da home/, "pausado ou por comecar nao diz que sai da home agora");
+    assert.equal(copy.description, "O pop-up não volta a aparecer e o aviso sai desta lista, com o relatório. Não dá para desfazer.", situation);
+    assert.doesNotMatch(copy.description, /agora/, "pausado ou por comecar nao diz que sai agora");
     assert.equal(copy.confirmLabel, "Excluir pop-up");
   }
 
@@ -170,20 +174,24 @@ test("Mostrar de novo: dialogo sem numero e toasts com quantos voltam a ver (ou 
   assert.deepEqual(model.noticeActionConfirm("reshow", notice({ kind: "popup", situation: "active", title: "Turma nova" })), {
     confirmLabel: "Mostrar de novo",
     description:
-      "O pop-up volta a aparecer para quem já viu e não clicou. Quem escolheu “Não mostrar de novo” ou clicou no botão continua sem ver.",
+      "O pop-up volta a contar como novo para quem já viu: a contagem de “Quantas vezes” começa de novo. Quem escolheu “Não mostrar de novo” continua como está, e quem clicou no botão também (menos nos pop-ups que só param quando terminam).",
     destructive: false,
     title: "Mostrar “Turma nova” de novo?"
   });
   assert.equal(model.reshownPopupToast(120), "O pop-up volta a aparecer para 120 alunos.");
   assert.equal(model.reshownPopupToast(1), "O pop-up volta a aparecer para 1 aluno.");
   assert.equal(model.reshownPopupToast(0), "Ninguém precisava ver de novo: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.");
+  // v3b-1: em "Mais de uma vez" a contagem recomeca (o NoticeListItem.popupMode decide).
+  assert.equal(model.reshownPopupToast(120, "repeat"), "A contagem de “Quantas vezes” recomeçou para 120 alunos.");
+  assert.equal(model.reshownPopupToast(120, "once"), "O pop-up volta a aparecer para 120 alunos.");
+  assert.equal(model.reshownPopupToast(0, "repeat"), "Ninguém precisava ver de novo: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.");
 });
 
 test("Excluir: o toast pela situacao e por quantos sairam do sino", () => {
   assert.equal(model.deletedNoticeToast({ kind: "inbox", removed: 318, situation: "sent" }), "Notificação excluída do sino de 318 alunos.");
   assert.equal(model.deletedNoticeToast({ kind: "inbox", removed: 1, situation: "sent" }), "Notificação excluída do sino de 1 aluno.");
   assert.equal(model.deletedNoticeToast({ kind: "inbox", removed: 0, situation: "sent" }), "Notificação excluída.");
-  assert.equal(model.deletedNoticeToast({ kind: "popup", removed: 0, situation: "active" }), "Pop-up excluído. Ele saiu da home.");
+  assert.equal(model.deletedNoticeToast({ kind: "popup", removed: 0, situation: "active" }), "Pop-up excluído. Ele não aparece mais para os alunos.");
   assert.equal(model.deletedNoticeToast({ kind: "popup", removed: 0, situation: "paused" }), "Pop-up excluído.");
   assert.equal(model.deletedNoticeToast({ kind: "popup", removed: 0, situation: "scheduled" }), "Pop-up excluído.");
 
@@ -264,11 +272,13 @@ test("pop-up no ar: banner, toasts pela regra salva e quantos voltam a ver", () 
   assert.equal(model.livePopupBanner("active"), "Este pop-up está no ar. As mudanças valem assim que você salvar.");
   assert.equal(model.livePopupBanner("paused"), "Este pop-up está pausado. As mudanças valem quando ele voltar ao ar.");
 
-  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once" }), "Pop-up atualizado. Quem já viu não vê de novo.");
-  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "until_action" }), "Pop-up atualizado. Quem fechou sem clicar volta a ver 24 horas depois de ter visto este pop-up.");
-  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once", reshown: 120 }), "Pop-up atualizado. Ele volta a aparecer para 120 alunos que já tinham visto.");
-  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once", reshown: 1 }), "Pop-up atualizado. Ele volta a aparecer para 1 aluno que já tinha visto.");
-  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once", reshown: 0 }), "Pop-up atualizado. Quem já viu não vê de novo.", "ninguem para mostrar de novo");
+  // v3b-1: o pop-up no ar termina com o "até 1 minuto" de quem ja esta com a area aberta.
+  const suffix = " Para quem já está com a área aberta, pode levar até 1 minuto.";
+  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once" }), `Pop-up atualizado. Quem já viu não vê de novo.${suffix}`);
+  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "until_action" }), `Pop-up atualizado. Vale na hora, contando as vezes que cada aluno já viu.${suffix}`);
+  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once", reshown: 120 }), `Pop-up atualizado. Ele volta a aparecer para 120 alunos que já tinham visto.${suffix}`);
+  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once", reshown: 1 }), `Pop-up atualizado. Ele volta a aparecer para 1 aluno que já tinha visto.${suffix}`);
+  assert.equal(model.savedNoticeToast("popup", "active", { repeat: "once", reshown: 0 }), `Pop-up atualizado. Quem já viu não vê de novo.${suffix}`, "ninguem para mostrar de novo");
   assert.equal(model.savedNoticeToast("popup", "paused", { repeat: "once" }), "Pop-up salvo. Ele continua pausado.");
   assert.equal(
     model.savedNoticeToast("popup", "paused", { repeat: "once", reshown: 4 }),
@@ -277,39 +287,38 @@ test("pop-up no ar: banner, toasts pela regra salva e quantos voltam a ver", () 
   assert.equal(model.savedNoticeToast("popup", "draft", { repeat: "once" }), "Rascunho salvo.", "rascunho nao muda");
 });
 
-test("Mostrar de novo no editor: so no pop-up no ar em Uma vez, com a contagem e as dicas de Quantas vezes", () => {
-  assert.equal(model.showsReshowSwitch({ kind: "popup", repeat: "once", status: "active" }), true);
-  assert.equal(model.showsReshowSwitch({ kind: "popup", repeat: "once", status: "paused" }), true);
-  assert.equal(model.showsReshowSwitch({ kind: "popup", repeat: "until_action", status: "active" }), false, "Até o aluno clicar: sem switch");
-  assert.equal(model.showsReshowSwitch({ kind: "popup", repeat: "once", status: "draft" }), false, "rascunho: ninguem viu");
-  assert.equal(model.showsReshowSwitch({ kind: "inbox", repeat: "once", status: "sent" }), false);
+test("Mostrar de novo no editor: no pop-up no ar ou pausado (v3b-1: qualquer Quantas vezes), com a contagem e a linha de Quantas vezes", () => {
+  assert.equal(model.showsReshowSwitch({ kind: "popup", status: "active" }), true);
+  assert.equal(model.showsReshowSwitch({ kind: "popup", status: "paused" }), true);
+  assert.equal(model.showsReshowSwitch({ kind: "popup", repeat: "until_action", status: "active" }), true, "v3b-1: Mais de uma vez tambem");
+  assert.equal(model.showsReshowSwitch({ kind: "popup", status: "draft" }), false, "rascunho: ninguem viu");
+  assert.equal(model.showsReshowSwitch({ kind: "inbox", status: "sent" }), false);
   assert.equal(model.RESHOW_SWITCH_LABEL, "Mostrar de novo para quem já viu");
 
   assert.deepEqual(model.reshowSwitchCopy(120), {
-    description: "Para os 120 alunos que já viram e não clicaram. Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver.",
+    description: "Para os 120 alunos que já viram e não clicaram: o pop-up volta a contar como novo para eles. Quem clicou no botão ou escolheu “Não mostrar de novo” continua como está.",
     disabled: false
   });
   assert.equal(
     model.reshowSwitchCopy(1).description,
-    "Para 1 aluno que já viu e não clicou. Quem clicou no botão ou escolheu “Não mostrar de novo” continua sem ver."
+    "Para 1 aluno que já viu e não clicou: o pop-up volta a contar como novo para ele. Quem clicou no botão ou escolheu “Não mostrar de novo” continua como está."
   );
   assert.deepEqual(model.reshowSwitchCopy(0), {
     description: "Ninguém precisa ver de novo agora: quem viu já clicou, escolheu “Não mostrar de novo” ou ainda vai ver.",
     disabled: true
   });
   assert.equal(model.reshowSwitchCopy(null).disabled, false, "sem a contagem, o servidor confere");
-  assert.match(model.reshowSwitchCopy(null).description, /^Para quem já viu e não clicou\./);
+  assert.match(model.reshowSwitchCopy(null).description, /^Para quem já viu e não clicou: o pop-up volta a contar como novo\./);
 
+  const repetir = { everyMinutes: 1_440, maxPerDay: null, maxTotal: null, mode: "repeat", stopOn: "click" };
   assert.equal(
-    model.popupRepeatChangeHint({ saved: "once", shown: "until_action", status: "active" }),
-    "Quem só fechou volta a ver 24 horas depois de ter visto este pop-up, até clicar. Quem clicou ou escolheu “Não mostrar de novo” não vê mais."
+    model.popupFrequencyChangeHint({ saved: { mode: "once" }, shown: repetir, status: "active" }),
+    "Mudar “Quantas vezes” vale na hora para todos, contando as vezes que cada aluno já viu."
   );
-  assert.equal(
-    model.popupRepeatChangeHint({ saved: "until_action", shown: "once", status: "paused" }),
-    "Quem já viu não vê de novo, a não ser que você ligue “Mostrar de novo para quem já viu”."
-  );
-  assert.equal(model.popupRepeatChangeHint({ saved: "once", shown: "once", status: "active" }), null, "sem mudanca");
-  assert.equal(model.popupRepeatChangeHint({ saved: "once", shown: "until_action", status: "draft" }), null, "rascunho: ninguem viu ainda");
+  assert.equal(model.popupFrequencyChangeHint({ saved: repetir, shown: { ...repetir, maxPerDay: 3 }, status: "paused" }) !== null, true, "mudou um numero");
+  assert.equal(model.popupFrequencyChangeHint({ saved: repetir, shown: { ...repetir }, status: "active" }), null, "sem mudanca");
+  assert.equal(model.popupFrequencyChangeHint({ saved: { mode: "once" }, shown: repetir, status: "draft" }), null, "rascunho: ninguem viu ainda");
+  assert.equal(model.popupRepeatChangeHint, undefined, "a dica das 24 horas da v3a saiu");
 });
 
 test("relatorio: a ultima linha diz por que a notificacao enviada nao muda (e some quando ha Editar)", () => {
@@ -340,8 +349,10 @@ test("vocabulario: nenhuma palavra proibida nos textos novos de CRUD e edicao", 
     model.livePopupBanner("paused"),
     model.reshowSwitchCopy(3).description,
     model.reshowSwitchCopy(0).description,
-    model.popupRepeatChangeHint({ saved: "once", shown: "until_action", status: "active" }),
-    model.popupRepeatChangeHint({ saved: "until_action", shown: "once", status: "active" }),
+    model.reshowSwitchCopy(3, "never").description,
+    model.reshowSwitchCopy(0, "never").description,
+    model.reshownPopupToast(3, "repeat"),
+    model.popupFrequencyChangeHint({ saved: { mode: "once" }, shown: { everyMinutes: 60, maxPerDay: null, maxTotal: null, mode: "repeat", stopOn: "never" }, status: "active" }),
     model.sentNoticeBanner(10),
     model.sentNoticeReview({ recipients: 10, sentAt: "2026-10-21T17:30:00.000Z" }),
     model.sentNoticeAudienceNote(10),

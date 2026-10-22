@@ -53,6 +53,8 @@ import type { FlowNoticeContent } from "./flow-schemas";
 import { definitionOf, fetchFlowNodeStats, fetchFlowTree, lastSourceExpiry, type LoadedFlowTree } from "./flow-store";
 import { parsePoll, type PollOption } from "./interactions-model";
 import { noticeIconOfColumns, normalizeSchoolIcon, SCHOOL_NAME_FALLBACK_TEAM, type NoticeIconColor, type NoticeIconId } from "./message-meta";
+import { popupSettingsOfRow } from "./popup-display-model";
+import { describePopupPlacementShort } from "./popup-sentences";
 import { emptyNoticeDraft, type NoticeDraft } from "./schemas";
 import {
   audienceOfRow,
@@ -107,6 +109,13 @@ export type NoticeListItem = {
   imageUrl: string | null;
   kind: CampaignKind;
   kindLabel: string;
+  /**
+   * v3b-1: a segunda linha da coluna "Quando" do pop-up ("Em qualquer página (com exceções)", "Ao concluir
+   * uma aula"); null quando e o padrao (so no Inicio, ao abrir, 3 s) e na notificacao.
+   */
+  placementLabel: string | null;
+  /** v3b-1: "Quantas vezes" do pop-up (o aviso de "Mostrar de novo" muda com ele); null na notificacao. */
+  popupMode: "once" | "repeat" | null;
   situation: CampaignSituation;
   situationLabel: string;
   situationTone: SituationTone;
@@ -146,12 +155,15 @@ export type NoticeDetail = NoticeListItem & {
    */
   interactions: MessageInteractions;
   lastError: string | null;
+  /** v3b-1: nomes dos produtos citados nas paginas e excecoes do pop-up (as frases de "Detalhes"); {} sem nenhum. */
+  popupNames: Record<string, string>;
   recipientsCount: number | null;
   requestedAt: string | null;
   /**
-   * v3a: pop-up no ar ou pausado: quantos a regra "Uma vez" pula agora (viram e nao clicaram nem escolheram
-   * "Não mostrar de novo"), contado pela regra "Uma vez" mesmo com o pop-up em "Até o aluno clicar" (o
-   * "Mostrar de novo para quem já viu" do editor); null nos outros casos.
+   * Pop-up no ar ou pausado: quantos voltam a contar como novo com "Mostrar de novo para quem já viu" (o switch
+   * do editor). v3b-1: em qualquer "Quantas vezes": ainda no segmento, viram mais vezes do que adiaram e nao
+   * escolheram "Não mostrar de novo" nem clicaram (quem clicou conta so no pop-up que para so quando termina);
+   * null nos outros casos.
    */
   reshowable: number | null;
   requestedBy: NoticePerson | null;
@@ -434,10 +446,11 @@ function toListItem(
   const situation = situationOf(timing, input.now);
   const stats = input.stats.get(row.id) ?? EMPTY_CAMPAIGN_STATS;
   const sentNotice = row.kind === "inbox" && row.status === "sent";
+  const popupSettings = row.kind === "popup" ? popupSettingsOfRow(row) : null;
 
   return {
-    // v3a: o menu sabe a regra "Quantas vezes" (Mostrar de novo so em "Uma vez") e quantos a notificacao
-    // alcancou (Editar a enviada acima de 500 so com messaging.publish_large), a mesma conta do servidor.
+    // v3a: o menu sabe quantos a notificacao alcancou (Editar a enviada acima de 500 so com
+    // messaging.publish_large), a mesma conta do servidor. v3b-1: Mostrar de novo em qualquer "Quantas vezes".
     actions: availableNoticeActions(timing, input.now, input.permissions, { popupRepeat: row.popup_repeat, recipients: noticeRecipients(row) }),
     audienceCount: row.audience_count,
     audienceDescription: describeAudience(audienceOfRow(row), input.names),
@@ -452,6 +465,8 @@ function toListItem(
     imageUrl: row.image_url,
     kind: row.kind,
     kindLabel: CAMPAIGN_KIND_LABELS[row.kind],
+    placementLabel: popupSettings ? describePopupPlacementShort(popupSettings) : null,
+    popupMode: popupSettings ? popupSettings.frequency.mode : null,
     situation,
     situationLabel: SITUATION_LABELS[situation],
     situationTone: situationTone(situation),
@@ -491,13 +506,53 @@ export async function listNotices(input: { kind?: CampaignKind; now?: number; pa
   };
 }
 
-/** Pop-up publicado ou pausado: quantos a regra "Uma vez" pula agora (docs/24 §2.4); null nos outros casos. */
+/**
+ * Pop-up publicado ou pausado: quantos o "Mostrar de novo para quem já viu" alcanca agora (docs/24 §2.4; v3b-1,
+ * docs/25 §4.7: a mesma contagem do RPC, certa em qualquer "Quantas vezes"); null nos outros casos.
+ */
 async function reshowableOf(db: CommunicationsDb, row: CampaignRow, now: number) {
   if (row.kind !== "popup" || (row.status !== "active" && row.status !== "paused")) {
     return null;
   }
 
   return (await reshowPopupDeliveries(db, { apply: false, campaignId: row.id, max: null, now: new Date(now) }))?.count ?? null;
+}
+
+/** v3b-1: produtos citados nas paginas e excecoes do pop-up (content:<id> e lesson:<id>; curingas nao contam). */
+function popupProductIds(row: CampaignRow) {
+  if (row.kind !== "popup") {
+    return [];
+  }
+
+  const settings = popupSettingsOfRow(row);
+  const ids = new Set<string>();
+
+  for (const pattern of [...settings.pages, ...settings.exclude]) {
+    const id = /^(?:content|lesson):(.+)$/.exec(pattern)?.[1];
+
+    if (id && id !== "*") {
+      ids.add(id);
+    }
+  }
+
+  return Array.from(ids);
+}
+
+/**
+ * O rascunho de um aviso gravado (editor, relatorio, publicar, aprovar e duplicar). v3b-1: o "Até o aluno
+ * clicar" gravado antes da migracao 202610220003 (popup_frequency nulo) num pop-up sem botao nunca parou por
+ * clique, porque ninguem clica; abre como "Só quando o pop-up terminar", o mesmo para o aluno, em vez de uma
+ * recusa no campo "Para de aparecer" que ninguem escolheu.
+ */
+export function noticeDraftOfRow(row: CampaignRow): NoticeDraft {
+  const draft = rowToDraft(row);
+  const frequency = draft.popup?.frequency;
+
+  if (row.kind !== "popup" || row.popup_frequency !== null || draft.cta || !draft.popup || frequency?.mode !== "repeat" || frequency.stopOn !== "click") {
+    return draft;
+  }
+
+  return { ...draft, popup: { ...draft.popup, frequency: { ...frequency, stopOn: "never" } } };
 }
 
 /** Um aviso para o editor ou o relatorio; null se nao existe (ou foi excluido). */
@@ -517,7 +572,8 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
   const permissions = input.permissions ?? NO_PERMISSIONS;
   // v3a: reacoes, votos e excluidas so existem nas linhas dos alunos (notificacao que saiu).
   const hasStudentRows = row.kind === "inbox" && !row.flow_id && (row.status === "sending" || row.status === "sent" || row.status === "canceled");
-  const [stats, engagement, names, people, sender, followUps, interactions, citations, reshowable] = await Promise.all([
+  const popupProducts = popupProductIds(row);
+  const [stats, engagement, names, people, sender, followUps, interactions, citations, reshowable, popupNames] = await Promise.all([
     fetchCampaignStats(db, [row.id]),
     fetchCampaignEngagement(db, [row.id]),
     loadAudienceNames(db, [audienceOfRow(row)]),
@@ -526,7 +582,9 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
     row.kind === "inbox" && !row.flow_id ? loadNoticeFollowUps(db, row, permissions) : Promise.resolve({ detail: null, options: null }),
     hasStudentRows ? fetchMessageInteractions(db, { campaignIds: [row.id] }) : Promise.resolve(new Map<string, MessageInteractions>()),
     row.flow_id ? Promise.resolve(new Map<string, NoticeCitations>()) : fetchNoticeCitations(db, sentNoticeIds([row])),
-    row.flow_id ? Promise.resolve(null) : reshowableOf(db, row, now)
+    row.flow_id ? Promise.resolve(null) : reshowableOf(db, row, now),
+    // v3b-1: os nomes das frases de "Detalhes" (uma leitura, so quando o pop-up cita produtos).
+    popupProducts.length > 0 ? selectNames(db, "content_items", "title", popupProducts) : Promise.resolve({} as Record<string, string>)
   ]);
   const counts = followUps.detail ? new Map([[row.id, { count: followUps.detail.count, sent: followUps.detail.sent }]]) : undefined;
   const item = toListItem(row, { citations, followUps: counts, names, now, people, permissions, stats });
@@ -539,7 +597,7 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
     approvedAt: approved ? row.approved_at : null,
     approvedBy: approved && row.approved_by ? (people.get(row.approved_by) ?? null) : null,
     audienceCountedAt: row.audience_counted_at,
-    draft: rowToDraft(row),
+    draft: noticeDraftOfRow(row),
     editedAt: row.edited_at,
     editedBy: row.edited_by ? (people.get(row.edited_by) ?? null) : null,
     engagement: engagement.get(row.id) ?? EMPTY_CAMPAIGN_ENGAGEMENT,
@@ -549,6 +607,7 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
     followUps: followUps.detail,
     interactions: interactions.get(row.id) ?? emptyMessageInteractions(),
     lastError: row.last_error,
+    popupNames,
     recipientsCount: row.recipients_count,
     requestedAt: row.requested_at,
     requestedBy: row.requested_by ? (people.get(row.requested_by) ?? null) : null,
@@ -625,6 +684,11 @@ export type NoticeEditorOptions = {
   names: AudienceNames;
   /** Notificacoes enviadas nos ultimos 90 dias: o seletor da regra "O que fez com uma notificação". */
   notices: AudienceNoticeOption[];
+  /**
+   * v3b-1: produtos que abrem direto na primeira aula (coursePresentationMode "lesson_playlist"): a frase do
+   * card "Quando e onde aparece" avisa quando um deles esta so em "Página do produto".
+   */
+  opensOnLesson: string[];
   products: NoticeEditorProduct[];
   /** false: a lista de produtos nao carregou agora (o resto do editor funciona). */
   productsLoaded: boolean;
@@ -685,6 +749,18 @@ export async function loadNoticeSenders(db: CommunicationsDb, currentUserId: str
   }).sort((left, right) => left.name.localeCompare(right.name, "pt-BR") || left.id.localeCompare(right.id));
 }
 
+/**
+ * v3b-1: produtos que abrem direto na primeira aula (content_page_settings.settings.coursePresentationMode =
+ * "lesson_playlist", o redirect de /conteudo/[id]): neles so "Páginas de aula" vale, e a frase do card
+ * "Quando e onde aparece" avisa quando um deles esta so em "Página do produto".
+ */
+async function loadOpensOnLesson(db: CommunicationsDb): Promise<string[]> {
+  const { data, error } = await db.from("content_page_settings").select("content_id").eq("settings->>coursePresentationMode", "lesson_playlist");
+  assertNoDbError(error, "Comunicacao: produtos que abrem direto na aula");
+
+  return ((data ?? []) as { content_id: string }[]).map((row) => row.content_id).sort();
+}
+
 /** Quem esta com o editor aberto e se pode mexer na Marca (a sessao ja foi conferida pela pagina). */
 async function editorViewer() {
   const user = await getAuthenticatedUser();
@@ -700,7 +776,7 @@ async function editorViewer() {
 export async function loadNoticeEditorOptions(input: { audiences?: readonly AudienceDefinition[] } = {}): Promise<NoticeEditorOptions> {
   const db = communicationsDb();
   const viewer = await editorViewer();
-  const [productsResult, cohortsResult, savedSegments, settings, senders, notices] = await Promise.all([
+  const [productsResult, cohortsResult, savedSegments, settings, senders, notices, opensOnLesson] = await Promise.all([
     listProductOptions()
       .then((items) => ({ items, loaded: true }))
       .catch((error: unknown) => {
@@ -717,6 +793,11 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
     loadAudienceNoticeOptions(db).catch((error: unknown) => {
       console.error("[admin/comunicacao] notificacoes enviadas do seletor", error);
       return [] as AudienceNoticeOption[];
+    }),
+    // So o aviso da frase depende disto: uma falha nao tira o editor do ar.
+    loadOpensOnLesson(db).catch((error: unknown) => {
+      console.error("[admin/comunicacao] produtos que abrem direto na aula", error);
+      return [] as string[];
     })
   ]);
   assertNoDbError(cohortsResult.error, "Comunicacao: turmas");
@@ -764,6 +845,7 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
       products: { ...extra.products, ...names.products }
     },
     notices,
+    opensOnLesson,
     products,
     productsLoaded: productsResult.loaded,
     segments,

@@ -1,79 +1,75 @@
 import "server-only";
 
-// Pop-up da home do aluno (docs/22 §1.3 e §4.3; docs/17 §1.8.1): no maximo 1 a cada 24 h (o limite de 1 por
-// sessao fica no navegador), so para quem esta no segmento (linha elegivel em campaign_deliveries,
-// mantida pelo job), nunca de novo depois de clicar ou de "Não mostrar de novo". A lista curta de
-// pop-ups no ar fica em cache (60 s, tag "communications"); o estado do aluno e lido na hora, em duas
-// consultas pequenas por chave primaria/indice. A equipe nunca tem linha de entrega: nunca ve pop-up.
-// v2 (docs/23): o icone ao lado do titulo vem junto; sem icone, a chave nem vai (o resumo fica igual ao
-// da v1).
+// Pop-ups do aluno (docs/22 §1.3; v3b-1, docs/25 §4.3 a §4.8): nas paginas, no momento e quantas vezes a
+// equipe escolheu, so para quem esta no segmento (linha elegivel em campaign_deliveries, mantida pelo job) e
+// nunca de novo depois de "Não mostrar de novo". Sem limite entre pop-ups (decisao do produtor, docs/24
+// §10.8): cada um segue a propria frequencia; o navegador mostra um de cada vez. Mapa + plano + show:
+// - a lista curta de pop-ups no ar fica em cache (60 s, tag "communications"), com o conteudo e a
+//   configuracao de cada um (formacao ja expandida para os cursos); nunca dado de aluno;
+// - o resumo do sino leva o mapa grosso das paginas (sem id de produto, sai do cache sem ir ao banco) e, so
+//   na pagina coberta, o plano do aluno (ids e horarios, sem conteudo) numa consulta;
+// - o show confere tudo de novo, grava a abertura de forma atomica (RPC com o updated_at lido) e so entao
+//   devolve o conteudo e quando o pop-up pode voltar.
+// A equipe nunca tem linha de entrega: nunca ve pop-up. Os caminhos da v1 (?popup=1 e o evento "impressed")
+// continuam para as abas abertas antes do deploy. v2 (docs/23): sem icone, a chave nem vai; v3b-1: `close`
+// so vai no "Só no X" (o pop-up padrao fica igual ao da v1).
 
 import { unstable_cache } from "next/cache";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { isSafeHeroCtaHref } from "@/server/member-area/home-hero-links";
 import { COMMUNICATIONS_TAG, LIVE_POPUPS_CACHE_KEY } from "./cache";
-import {
-  canSnooze,
-  isPopupLive,
-  pickPopup,
-  popupEventPatch,
-  type LivePopup,
-  type PopupDeliveryState,
-  type PopupEvent,
-  type PopupRepeat
-} from "./campaign-model";
-import { assertNoDbError, communicationsDb, CommunicationError, isMissingCommunicationSchema } from "./db";
+import { canSnooze, isPopupLive, popupEventPatch, type PopupEvent } from "./campaign-model";
+import { assertNoDbError, communicationsDb, CommunicationError, describeError, isMissingCommunicationSchema } from "./db";
 import { noticeIconOfColumns } from "./message-meta";
-import { normalizePeaks, type PopupItem } from "./notification-model";
+import { normalizePeaks, type PopupItem, type PopupsAnswer } from "./notification-model";
+import {
+  coversPage,
+  decideShow,
+  expandFormationPatterns,
+  pagesCovering,
+  planPopups,
+  popupAllowsPage,
+  popupDayBounds,
+  popupSettingsOfRow,
+  popupWindowOpen,
+  showNext,
+  type LivePopupRules,
+  type PopupCountState,
+  type PopupNext
+} from "./popup-display-model";
+import {
+  fetchFormationCourses,
+  fetchPopupDeliveries,
+  fetchPopupDelivery,
+  loadLivePopupRows,
+  recordPopupImpression,
+  type LivePopupRow,
+  type PopupDeliveryRow
+} from "./popup-store";
 
 export const POPUP_NOT_FOUND = "Pop-up nao encontrado.";
+export const POPUP_REFUSED = "Pop-up fora da vez.";
 export const SNOOZE_REFUSED = "Não dá para lembrar depois de novo.";
 
-const LIVE_POPUP_COLUMNS =
-  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,popup_repeat,allow_snooze,starts_at,ends_at,sent_at,created_at,icon,icon_color";
-// v3a: as bases do "mostrar de novo para quem ja viu" (so "Uma vez" conta as impressoes de depois).
-const DELIVERY_COLUMNS =
-  "campaign_id,eligible,impressions,last_seen_at,clicked_at,dismissed_at,snoozed_until,snooze_count,impressions_before_reshow,snoozes_before_reshow";
+/** O show recusou (409): a pagina, o momento ou a frequencia nao deixam agora, ou a linha mudou no meio. */
+export class PopupRefusedError extends CommunicationError {
+  /** Hora do servidor (ISO) em que a frequencia deixa de novo; null = nunca mais ou nao se sabe. */
+  nextAt: string | null;
+  reason: "changed" | "frequency" | "page" | "trigger";
 
-type LivePopupRow = {
-  allow_snooze: boolean;
-  audio_duration_seconds: number | null;
-  audio_mime: string | null;
-  audio_peaks: unknown;
-  audio_url: string | null;
-  body: string;
-  created_at: string;
-  cta_href: string | null;
-  cta_label: string | null;
-  cta_target: "new_tab" | "same_tab" | null;
-  ends_at: string | null;
-  /** Icone ao lado do titulo (ids do catalogo; fora dele = sem icone). Ausente no cache anterior a v2. */
-  icon?: string | null;
-  icon_color?: string | null;
-  id: string;
-  image_alt: string | null;
-  image_url: string | null;
-  kind: "popup";
-  popup_repeat: PopupRepeat;
-  sent_at: string | null;
-  starts_at: string | null;
-  status: "active";
-  title: string;
-};
+  constructor(reason: "changed" | "frequency" | "page" | "trigger", nextAt: string | null) {
+    super(POPUP_REFUSED, 409);
+    this.name = "PopupRefusedError";
+    this.nextAt = nextAt;
+    this.reason = reason;
+  }
+}
 
-type DeliveryRow = {
-  campaign_id: string;
-  clicked_at: string | null;
-  dismissed_at: string | null;
-  eligible: boolean;
-  impressions: number;
-  /** v3a; ausente num banco sem a 202610220001 (= 0, a regra da v2). */
-  impressions_before_reshow?: number | null;
-  last_seen_at: string | null;
-  snooze_count: number;
-  snoozed_until: string | null;
-  snoozes_before_reshow?: number | null;
-};
+/** Um pop-up da lista no ar: o conteudo (so sai no show) e as regras (paginas, momento, quantas vezes). */
+type LivePopupEntry = { row: LivePopupRow; rules: LivePopupRules };
+
+/** Resposta do show: o conteudo, quando pode voltar e as vezes no dia (o historico grava ate 100 por dia). */
+export type PopupShowResult = { dayImpressions: number; next: PopupNext; popup: PopupItem };
 
 function timeOf(value: string | null | undefined) {
   if (!value) {
@@ -85,48 +81,8 @@ function timeOf(value: string | null | undefined) {
   return Number.isFinite(time) ? time : null;
 }
 
-/** Pop-ups publicados que ainda nao acabaram (o filtro fino da janela usa a hora de cada pedido). */
-async function loadLivePopupRows(): Promise<LivePopupRow[]> {
-  const nowIso = new Date().toISOString();
-  const { data, error } = await communicationsDb()
-    .from("campaigns")
-    .select(LIVE_POPUP_COLUMNS)
-    .eq("kind", "popup")
-    .eq("status", "active")
-    .is("deleted_at", null)
-    .or(`ends_at.is.null,ends_at.gt."${nowIso}"`)
-    .order("starts_at", { ascending: false, nullsFirst: false })
-    .limit(50);
-
-  if (error) {
-    if (isMissingCommunicationSchema(error)) {
-      return [];
-    }
-
-    assertNoDbError(error, "Pop-ups no ar");
-  }
-
-  return (data ?? []) as LivePopupRow[];
-}
-
-const getLivePopupRows = unstable_cache(loadLivePopupRows, [...LIVE_POPUPS_CACHE_KEY], {
-  revalidate: 60,
-  tags: [COMMUNICATIONS_TAG]
-});
-
-function toDeliveryState(row: DeliveryRow): PopupDeliveryState {
-  return {
-    campaignId: row.campaign_id,
-    clickedAt: timeOf(row.clicked_at),
-    dismissedAt: timeOf(row.dismissed_at),
-    eligible: row.eligible,
-    impressions: row.impressions,
-    impressionsBeforeReshow: row.impressions_before_reshow ?? 0,
-    lastSeenAt: timeOf(row.last_seen_at),
-    snoozeCount: row.snooze_count,
-    snoozedUntil: timeOf(row.snoozed_until),
-    snoozesBeforeReshow: row.snoozes_before_reshow ?? 0
-  };
+function iso(time: number) {
+  return new Date(time).toISOString();
 }
 
 /** Ordem dos pop-ups: o inicio da janela; sem inicio, quando foi publicado. */
@@ -134,8 +90,79 @@ function popupStart(row: Pick<LivePopupRow, "created_at" | "sent_at" | "starts_a
   return timeOf(row.starts_at) ?? timeOf(row.sent_at) ?? timeOf(row.created_at) ?? 0;
 }
 
-function isLiveRow(row: LivePopupRow, now: number) {
-  return isPopupLive({ endsAt: row.ends_at, kind: "popup", sendAt: null, startsAt: row.starts_at, status: row.status }, now);
+/** Ids de produto nomeados nas paginas e excecoes (content:<id> / lesson:<id>): candidatos a formacao. */
+function namedProductIds(patterns: readonly string[]) {
+  const ids = new Set<string>();
+
+  for (const pattern of patterns) {
+    const match = /^(?:content|lesson):([A-Za-z0-9_-]{1,240})$/.exec(pattern);
+
+    if (match) {
+      ids.add(match[1]);
+    }
+  }
+
+  return [...ids].sort();
+}
+
+/**
+ * A lista no ar com a configuracao de cada pop-up. Uma formacao escolhida vale tambem para as paginas dos
+ * cursos dela; se a leitura dos cursos falhar, os pop-ups seguem com as paginas sem expandir (nunca caem).
+ */
+async function loadLivePopupEntries(): Promise<LivePopupEntry[]> {
+  const db = communicationsDb();
+  const rows = await loadLivePopupRows(db, new Date().toISOString());
+  const settings = rows.map((row) => popupSettingsOfRow(row));
+  const named = namedProductIds(settings.flatMap((item) => [...item.pages, ...item.exclude]));
+  let coursesOf = new Map<string, string[]>();
+
+  if (named.length > 0) {
+    try {
+      coursesOf = await fetchFormationCourses(db, named);
+    } catch (error) {
+      console.error(`[comunicacao] cursos das formacoes: ${describeError(error)}`);
+      coursesOf = new Map();
+    }
+  }
+
+  return rows.map((row, index) => {
+    const own = settings[index];
+
+    return {
+      row,
+      rules: {
+        allowSnooze: row.allow_snooze,
+        endsAt: timeOf(row.ends_at),
+        id: row.id,
+        rank: popupStart(row),
+        settings: { ...own, exclude: expandFormationPatterns(own.exclude, coursesOf), pages: expandFormationPatterns(own.pages, coursesOf) },
+        startsAt: timeOf(row.starts_at)
+      }
+    };
+  });
+}
+
+/** Cache de 60 s (tag "communications": toda acao de pop-up invalida). Conteudo e configuracao, nunca aluno. */
+const getLivePopups = unstable_cache(loadLivePopupEntries, [...LIVE_POPUPS_CACHE_KEY], {
+  revalidate: 60,
+  tags: [COMMUNICATIONS_TAG]
+});
+
+function toCountState(row: PopupDeliveryRow): PopupCountState {
+  return {
+    campaignId: row.campaign_id,
+    clickedAt: timeOf(row.clicked_at),
+    dayImpressions: row.day_impressions ?? 0,
+    dismissedAt: timeOf(row.dismissed_at),
+    eligible: row.eligible,
+    impressions: row.impressions,
+    impressionsBeforeReshow: row.impressions_before_reshow ?? 0,
+    lastSeenAt: timeOf(row.last_seen_at),
+    reshownAt: timeOf(row.reshown_at),
+    snoozeCount: row.snooze_count,
+    snoozedUntil: timeOf(row.snoozed_until),
+    snoozesBeforeReshow: row.snoozes_before_reshow ?? 0
+  };
 }
 
 function safeMediaUrl(value: string | null) {
@@ -152,13 +179,15 @@ function safeMediaUrl(value: string | null) {
   }
 }
 
-function toPopupItem(row: LivePopupRow, delivery: PopupDeliveryState): PopupItem {
+function toPopupItem(entry: LivePopupEntry, delivery: PopupCountState): PopupItem {
+  const { row } = entry;
   const imageUrl = safeMediaUrl(row.image_url);
   const audioUrl = safeMediaUrl(row.audio_url);
   const icon = noticeIconOfColumns(row.icon, row.icon_color);
 
   return {
     ...(icon ? { icon } : {}),
+    ...(entry.rules.settings.close === "x_only" ? { close: "x_only" as const } : {}),
     audio:
       audioUrl && row.audio_duration_seconds
         ? { durationSeconds: row.audio_duration_seconds, mimeType: row.audio_mime, peaks: normalizePeaks(row.audio_peaks), url: audioUrl }
@@ -175,41 +204,33 @@ function toPopupItem(row: LivePopupRow, delivery: PopupDeliveryState): PopupItem
   };
 }
 
-/** O pop-up que o aluno deve ver agora na home, ou null. */
+/**
+ * Caminho da v1 (GET /api/notifications/summary?popup=1: abas abertas antes do deploy e os testes da v1): o
+ * primeiro pop-up do plano que vale no Inicio ao abrir a pagina e ja pode abrir, ou null. Nada e gravado (a
+ * aba da v1 grava pelo evento "impressed", que passa pelo show).
+ */
 export async function getEligiblePopup(userId: string, now = Date.now()): Promise<PopupItem | null> {
   try {
-    const live = (await getLivePopupRows()).filter((row) => isLiveRow(row, now));
+    const live = (await getLivePopups()).filter((entry) => popupWindowOpen(entry.rules, now));
 
     if (live.length === 0) {
       return null;
     }
 
-    const db = communicationsDb();
-    // Sem limite entre pop-ups (docs/24 §10): basta a linha de cada pop-up no ar.
-    const deliveries = await db.from("campaign_deliveries").select(DELIVERY_COLUMNS).eq("user_id", userId).in("campaign_id", live.map((row) => row.id));
-    assertNoDbError(deliveries.error, "Pop-up do aluno");
-
-    const states = ((deliveries.data ?? []) as DeliveryRow[]).map(toDeliveryState);
-    const livePopups: LivePopup[] = live.map((row) => ({
-      allowSnooze: row.allow_snooze,
-      id: row.id,
-      repeat: row.popup_repeat,
-      startsAt: popupStart(row)
-    }));
-    const chosen = pickPopup({
-      deliveries: states,
-      live: livePopups,
-      now
-    });
+    const rows = await fetchPopupDeliveries(communicationsDb(), userId, live.map((entry) => entry.rules.id));
+    const states = rows.map(toCountState);
+    const chosen = planPopups({ deliveries: states, live: live.map((entry) => entry.rules), now }).find(
+      (item) => item.trigger === "page_load" && item.notBefore === null && popupAllowsPage(item, "home")
+    );
 
     if (!chosen) {
       return null;
     }
 
-    const row = live.find((item) => item.id === chosen)!;
-    const delivery = states.find((state) => state.campaignId === chosen)!;
+    const entry = live.find((item) => item.rules.id === chosen.id)!;
+    const delivery = states.find((state) => state.campaignId === chosen.id)!;
 
-    return toPopupItem(row, delivery);
+    return toPopupItem(entry, delivery);
   } catch (error) {
     if (isMissingCommunicationSchema(error)) {
       return null;
@@ -220,24 +241,136 @@ export async function getEligiblePopup(userId: string, now = Date.now()): Promis
 }
 
 /**
- * Evento do aluno no pop-up (impressao, clique, fechar, "Não mostrar de novo", "Lembrar depois"). So
- * vale para pop-up no ar com linha elegivel do proprio aluno; "Lembrar depois" alem do limite e 409.
+ * O pedaco dos pop-ups no resumo do sino (GET /api/notifications/summary?page=). O mapa grosso das paginas sai
+ * do cache, sem ir ao banco; o plano do aluno so na pagina coberta, numa consulta pela chave primaria. Sem
+ * migracao ou com erro -> null (o numero do sino nunca quebra por causa de um pop-up).
  */
-export async function recordPopupEvent(userId: string, campaignId: string, event: PopupEvent, now = Date.now()) {
+export async function getPopupsAnswer(userId: string, pageKey: string, now = Date.now()): Promise<PopupsAnswer | null> {
+  try {
+    const live = await getLivePopups();
+    const rules = live.map((entry) => entry.rules);
+    const pages = pagesCovering(rules, now);
+    const asOf = iso(now);
+
+    if (!coversPage(pages, pageKey)) {
+      return { asOf, pages, plan: null };
+    }
+
+    const relevant = rules.filter((rule) => popupWindowOpen(rule, now));
+
+    if (relevant.length === 0) {
+      return { asOf, pages, plan: [] };
+    }
+
+    const rows = await fetchPopupDeliveries(communicationsDb(), userId, relevant.map((rule) => rule.id));
+
+    return { asOf, pages, plan: planPopups({ deliveries: rows.map(toCountState), live: relevant, now }) };
+  } catch (error) {
+    if (!isMissingCommunicationSchema(error)) {
+      console.error(`[comunicacao] plano de pop-ups: ${describeError(error)}`);
+    }
+
+    return null;
+  }
+}
+
+/**
+ * Abre o pop-up agora (POST /api/popups/[id]/show): confere no ar, segmento, pagina, momento e quantas vezes
+ * sobre a linha lida e grava a abertura pela RPC com o updated_at dessa leitura (um clique, adiamento,
+ * recalculo ou outra aba no meio recusa: 409 "changed"). So depois devolve o conteudo e quando pode voltar.
+ * Fora do ar, de outro aluno ou fora do segmento: 404 sem dizer se existe.
+ */
+export async function showPopup(userId: string, campaignId: string, input: { page: string; trigger: string }, now = Date.now()): Promise<PopupShowResult> {
+  try {
+    const entry = (await getLivePopups()).find((item) => item.rules.id === campaignId);
+
+    if (!entry) {
+      throw new CommunicationError(POPUP_NOT_FOUND, 404);
+    }
+
+    const db = communicationsDb();
+    const row = await fetchPopupDelivery(db, userId, campaignId);
+    const state = row ? toCountState(row) : null;
+    const decision = decideShow({ delivery: state, now, pageKey: input.page, popup: entry.rules, trigger: input.trigger });
+
+    if (!decision.ok) {
+      if (decision.reason === "not_live" || decision.reason === "not_eligible") {
+        throw new CommunicationError(POPUP_NOT_FOUND, 404);
+      }
+
+      throw new PopupRefusedError(decision.reason, decision.nextAt === null ? null : iso(decision.nextAt));
+    }
+
+    // O updated_at vai como o PostgREST devolveu (microssegundos): por new Date() a comparacao nunca bateria.
+    const counts = await recordPopupImpression(db, {
+      campaignId,
+      dayStart: iso(popupDayBounds(now).start),
+      expectedUpdatedAt: row!.updated_at,
+      now: iso(now),
+      userId
+    });
+
+    if (!counts) {
+      throw new PopupRefusedError("changed", null);
+    }
+
+    const after: PopupCountState = { ...state!, dayImpressions: counts.day_impressions, impressions: counts.impressions, lastSeenAt: now };
+
+    return {
+      dayImpressions: counts.day_impressions,
+      next: showNext(entry.rules.settings.frequency, after, now),
+      popup: toPopupItem(entry, after)
+    };
+  } catch (error) {
+    if (isMissingCommunicationSchema(error)) {
+      throw new CommunicationError(POPUP_NOT_FOUND, 404);
+    }
+
+    throw error;
+  }
+}
+
+/** O que o evento mudou; no "impressed" da v1, as vezes no dia (o historico grava ate 100). */
+export type PopupEventResult = { changed: boolean; dayImpressions?: number };
+
+/**
+ * Evento do aluno no pop-up (clique, fechar, "Não mostrar de novo", "Lembrar depois"). So vale para pop-up no
+ * ar com linha elegivel do proprio aluno; "Lembrar depois" alem do limite e 409 e volta no "Volta em" do
+ * pop-up. Fechar nao muda a linha (o jeito de fechar fica so no historico). O "impressed" da v1 (aba aberta
+ * antes do deploy) passa pelo show do Inicio: fora da vez e 409 "Pop-up fora da vez.".
+ */
+export async function recordPopupEvent(userId: string, campaignId: string, event: PopupEvent, now = Date.now()): Promise<PopupEventResult> {
+  if (event === "impressed") {
+    const shown = await showPopup(userId, campaignId, { page: "home", trigger: "page_load" }, now);
+
+    return { changed: true, dayImpressions: shown.dayImpressions };
+  }
+
   const db = communicationsDb();
 
   try {
-    const [campaignResult, deliveryResult] = await Promise.all([
-      db.from("campaigns").select("id,kind,status,starts_at,ends_at,allow_snooze,deleted_at").eq("id", campaignId).is("deleted_at", null).maybeSingle(),
-      db.from("campaign_deliveries").select(DELIVERY_COLUMNS).eq("campaign_id", campaignId).eq("user_id", userId).maybeSingle()
+    const [campaignResult, delivery] = await Promise.all([
+      db
+        .from("campaigns")
+        .select("id,kind,status,starts_at,ends_at,allow_snooze,deleted_at,popup_snooze_minutes")
+        .eq("id", campaignId)
+        .is("deleted_at", null)
+        .maybeSingle(),
+      fetchPopupDelivery(db, userId, campaignId)
     ]);
     assertNoDbError(campaignResult.error, "Pop-up");
-    assertNoDbError(deliveryResult.error, "Pop-up do aluno");
 
     const campaign = campaignResult.data as
-      | { allow_snooze: boolean; ends_at: string | null; id: string; kind: string; starts_at: string | null; status: string }
+      | {
+          allow_snooze: boolean;
+          ends_at: string | null;
+          id: string;
+          kind: string;
+          popup_snooze_minutes?: number | null;
+          starts_at: string | null;
+          status: string;
+        }
       | null;
-    const delivery = deliveryResult.data as DeliveryRow | null;
 
     if (
       !campaign ||
@@ -249,8 +382,9 @@ export async function recordPopupEvent(userId: string, campaignId: string, event
       throw new CommunicationError(POPUP_NOT_FOUND, 404);
     }
 
-    const state = toDeliveryState(delivery);
-    const patch = popupEventPatch(state, event, { allowSnooze: campaign.allow_snooze, now });
+    const state = toCountState(delivery);
+    const { snoozeMinutes } = popupSettingsOfRow({ popup_snooze_minutes: campaign.popup_snooze_minutes });
+    const patch = popupEventPatch(state, event, { allowSnooze: campaign.allow_snooze, now, snoozeMinutes });
 
     if (!patch) {
       throw new CommunicationError(SNOOZE_REFUSED, 409);
@@ -262,11 +396,9 @@ export async function recordPopupEvent(userId: string, campaignId: string, event
 
     let update = db.from("campaign_deliveries").update(patch).eq("campaign_id", campaignId).eq("user_id", userId);
 
-    // Contadores mudam so sobre o valor lido (duas abas ao mesmo tempo nao passam do limite).
+    // "Lembrar depois" muda so sobre o valor lido (duas abas ao mesmo tempo nao passam do limite).
     if (event === "snoozed") {
       update = update.eq("snooze_count", state.snoozeCount);
-    } else if (event === "impressed") {
-      update = update.eq("impressions", state.impressions);
     }
 
     const { data, error } = await update.select("campaign_id");

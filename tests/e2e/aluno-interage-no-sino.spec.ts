@@ -283,10 +283,11 @@ test("Excluir notificação pelo botão do canto e Desfazer; excluída de novo, 
   await expect(painel.getByRole("article", { name: PARA_EXCLUIR })).toHaveCount(0);
   await expect(painel.getByRole("list").getByText("Notificação excluída.")).toHaveCount(0);
 
-  // Recarregar prova que vem do servidor: fora da lista e do numero do sino.
-  const resumo = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/notifications/summary");
-  await page.reload();
-  expect(((await (await resumo).json()) as { data: { unseen: number } }).data.unseen).toBe(0);
+  // Recarregar prova que vem do servidor: fora da lista e do numero do sino. Na home o resumo sai 1,5 s depois de
+  // carregar (docs/25 §4.3): esperar so depois de a pagina nova assumir pega o dela, nunca o da anterior ainda no ar.
+  await page.reload({ waitUntil: "commit" });
+  const resumo = await page.waitForResponse((response) => new URL(response.url()).pathname === "/api/notifications/summary");
+  expect(((await resumo.json()) as { data: { unseen: number } }).data.unseen).toBe(0);
   await expect(page.getByRole("button", { exact: true, name: "Notificações" })).toBeVisible();
   painel = await abrirSino(page);
   await expect(painel.getByRole("article", { name: PARA_EXCLUIR })).toHaveCount(0);

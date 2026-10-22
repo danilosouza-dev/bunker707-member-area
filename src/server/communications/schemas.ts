@@ -10,6 +10,9 @@
 // v3a (docs/24 §5.3): como o aluno chega ao destino (cta.display), reacoes e enquete no conteudo; o que
 // trava depois do envio (sentNoticeLockedProblems); excluir com as seguintes; e os corpos das rotas novas
 // do sino (reagir, votar, excluir do sino).
+//
+// v3b-1 (docs/25 §2.5): a configuracao do pop-up (popupSettingsSchema: onde, quando, quantas vezes,
+// "Lembrar depois" e como fecha), com as regras em popup-display-model.ts.
 
 import { z } from "zod";
 import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
@@ -41,6 +44,16 @@ import {
   type Validity
 } from "./message-meta";
 import { CTA_DISPLAYS, type CtaDisplay } from "./notification-model";
+import {
+  canonicalPopupSettings,
+  defaultPopupSettings,
+  placementCoversNothing,
+  POPUP_CLOSE_MODES,
+  POPUP_PAGE_PATTERN,
+  POPUP_STOP_ON,
+  POPUP_TRIGGERS,
+  type PopupSettings
+} from "./popup-display-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Segmento
@@ -334,6 +347,68 @@ export const flowValiditySchema: z.ZodType<FlowValidity> = z.discriminatedUnion(
 /** "Quem envia e o tempo no sino valem só para notificações." (o pop-up so ganha o icone). */
 export const POPUP_SENDER_VALIDITY_MESSAGE = "Quem envia e o tempo no sino valem só para notificações.";
 
+/* ------------------------------------------------------------------------------------------------
+ * Pop-up: onde, quando, quantas vezes, "Lembrar depois" e como fecha (v3b-1, docs/25 §2.5)
+ * ---------------------------------------------------------------------------------------------- */
+
+const PICK_FROM_LIST_MESSAGE = "Escolha páginas da lista.";
+export const POPUP_NO_BUTTON_STOP_MESSAGE = "Este pop-up não tem botão: escolha quando ele para de aparecer.";
+
+const popupPageSchema = z.string({ error: PICK_FROM_LIST_MESSAGE }).regex(POPUP_PAGE_PATTERN, PICK_FROM_LIST_MESSAGE);
+const intIn = (min: number, max: number, message: string) => z.number({ error: message }).int(message).min(min, message).max(max, message);
+
+export const popupFrequencySchema = z.discriminatedUnion(
+  "mode",
+  [
+    z.object({ mode: z.literal("once") }),
+    z.object({
+      everyMinutes: intIn(1, 129_600, "Use de 1 minuto a 90 dias.").nullable(),
+      maxPerDay: intIn(1, 100, "Use de 1 a 100 vezes por dia.").nullable(),
+      maxTotal: intIn(2, 1_000, "Use de 2 a 1.000 vezes. Para uma vez só, escolha “Uma vez”.").nullable(),
+      mode: z.literal("repeat"),
+      stopOn: z.enum(POPUP_STOP_ON, { error: "Escolha quando o pop-up para de aparecer." })
+    })
+  ],
+  { error: "Escolha quantas vezes o pop-up aparece." }
+);
+
+/**
+ * Excecoes e paginas que nao convivem: "qualquer página" nunca e excecao, a mesma pagina nas duas listas,
+ * excecoes que tiram tudo e, ao concluir uma aula, so paginas de aula. ("Escolha pelo menos um produto." e
+ * do editor, antes de existir padrao.)
+ */
+function addPopupSettingsIssues(settings: PopupSettings, context: z.RefinementCtx) {
+  const pages = Array.isArray(settings.pages) ? settings.pages : [];
+  const exclude = Array.isArray(settings.exclude) ? settings.exclude : [];
+
+  if (exclude.includes("any")) {
+    context.addIssue({ code: "custom", message: PICK_FROM_LIST_MESSAGE, path: ["exclude"] });
+  }
+
+  if (exclude.some((pattern) => pages.includes(pattern))) {
+    context.addIssue({ code: "custom", message: "Esta página está em “Onde aparece” e em “Nunca nestas páginas”.", path: ["exclude"] });
+  } else if (placementCoversNothing({ exclude, pages })) {
+    context.addIssue({ code: "custom", message: "Com essas exceções, o pop-up não aparece em nenhuma página.", path: ["exclude"] });
+  }
+
+  if (settings.trigger === "lesson_completed" && pages.some((pattern) => !pattern.startsWith("lesson:"))) {
+    context.addIssue({ code: "custom", message: "Ao concluir uma aula vale só para páginas de aula.", path: ["pages"] });
+  }
+}
+
+export const popupSettingsSchema = z
+  .object({
+    close: z.enum(POPUP_CLOSE_MODES, { error: "Escolha como o aluno fecha o pop-up." }).default("any"),
+    delaySeconds: intIn(0, 600, "Use de 0 a 600 segundos.").default(3),
+    exclude: z.array(popupPageSchema).max(20, "Use até 20 páginas.").default([]),
+    frequency: popupFrequencySchema.default({ mode: "once" }),
+    pages: z.array(popupPageSchema).min(1, "Escolha pelo menos uma página.").max(20, "Use até 20 páginas.").default(["home"]),
+    snoozeMinutes: intIn(5, 10_080, "Use de 5 minutos a 7 dias.").default(1_440),
+    trigger: z.enum(POPUP_TRIGGERS, { error: "Escolha quando o pop-up aparece." }).default("page_load")
+  })
+  .superRefine(addPopupSettingsIssues)
+  .transform(canonicalPopupSettings);
+
 const scheduleSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("now") }),
   z.object({ mode: z.literal("at"), sendAt: isoSchema })
@@ -362,8 +437,15 @@ export type NoticeDraft = {
   kind: CampaignKind;
   /** Enquete (v3a, so notificacao); ausente = sem enquete. */
   poll?: PollDefinition | null;
+  /**
+   * Onde, quando e quantas vezes o pop-up aparece, "Lembrar depois" e como fecha (v3b-1, so pop-up; a
+   * notificacao nunca leva a chave). Ausente (rascunhos e testes da v1/v3a) = o servidor completa a partir
+   * da linha gravada ou do padrao, com "Quantas vezes" vindo de `repeat`.
+   */
+  popup?: PopupSettings;
   /** Permitir reacoes (v3a, so notificacao); ausente = nao. */
   reactions?: boolean;
+  /** "Quantas vezes" da v1 (once | until_action), sempre coerente com `popup.frequency`. */
   repeat: PopupRepeat;
   response: { acceptLabel: string; declineLabel: string } | null;
   schedule: { mode: "now" } | { mode: "at"; sendAt: string };
@@ -453,18 +535,36 @@ export const noticeContentSchema: z.ZodType<NoticeContent> = z
   .object(NOTICE_CONTENT_FIELDS)
   .superRefine((content, context) => addNoticeContentIssues(content, "inbox", context));
 
-export const noticeDraftSchema: z.ZodType<NoticeDraft> = z
+/** Notificacao nunca leva `popup` (o editor nao mostra; o servidor grava os padroes): a chave sai antes de validar. */
+function withoutInboxPopup(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || (value as { kind?: unknown }).kind !== "inbox" || !("popup" in value)) {
+    return value;
+  }
+
+  const rest: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  delete rest.popup;
+
+  return rest;
+}
+
+const noticeDraftObjectSchema = z
   .object({
     ...NOTICE_CONTENT_FIELDS,
     allowSnooze: z.boolean(),
     audience: audienceDefinitionSchema,
     kind: z.enum(CAMPAIGN_KINDS, { error: "Escolha o tipo do aviso." }),
+    popup: popupSettingsSchema.optional(),
     repeat: z.enum(["once", "until_action"]),
     schedule: scheduleSchema,
     window: windowSchema
   })
   .superRefine((draft, context) => {
     addNoticeContentIssues(draft, draft.kind, context);
+
+    // v3b-1: "Quando o aluno clica no botão" sem botao nunca pararia (tambem quando o botao sai depois).
+    if (draft.kind === "popup" && draft.popup?.frequency.mode === "repeat" && draft.popup.frequency.stopOn === "click" && !draft.cta) {
+      context.addIssue({ code: "custom", message: POPUP_NO_BUTTON_STOP_MESSAGE, path: ["popup", "frequency", "stopOn"] });
+    }
 
     if (draft.kind === "popup" && draft.response) {
       context.addIssue({ code: "custom", message: "Pedir resposta vale só para notificações.", path: ["response"] });
@@ -484,6 +584,8 @@ export const noticeDraftSchema: z.ZodType<NoticeDraft> = z
       context.addIssue({ code: "custom", message: "O fim precisa vir depois do início.", path: ["window", "endsAt"] });
     }
   });
+
+export const noticeDraftSchema: z.ZodType<NoticeDraft> = z.preprocess(withoutInboxPopup, noticeDraftObjectSchema);
 
 /** Regras que so valem na hora de publicar (rascunho pode guardar uma data que ja passou). */
 export function publishProblems(draft: NoticeDraft, now: number): { message: string; path: string }[] {
@@ -540,9 +642,13 @@ export function validityUntilProblem(endsAt: string, sendAt: number): string | n
   return end > sendAt + INBOX_HISTORY_DAYS * DAY_MS ? "O fim pode ser no máximo 90 dias depois do envio." : null;
 }
 
-/** Rascunho vazio de cada tipo (o editor abre assim): a notificacao nova ja permite reacoes (v3a). */
+/**
+ * Rascunho vazio de cada tipo (o editor abre assim): a notificacao nova ja permite reacoes (v3a); o pop-up
+ * novo vem com a configuracao padrao (v3b-1: so no Inicio, 3 s depois de abrir, uma vez, fecha no X ou fora).
+ */
 export function emptyNoticeDraft(kind: CampaignKind): NoticeDraft {
   return {
+    ...(kind === "popup" ? { popup: defaultPopupSettings() } : {}),
     allowHide: true,
     allowSnooze: true,
     audience: EVERYONE,
@@ -688,7 +794,7 @@ export const saveNoticeSchema = z.object({
   draft: noticeDraftSchema,
   expectedUpdatedAt: expectedUpdatedAtSchema.optional(),
   id: campaignIdSchema.optional(),
-  /** v3a: "Mostrar de novo para quem já viu" junto com o salvar de um pop-up no ar ou pausado em "Uma vez". */
+  /** "Mostrar de novo para quem já viu" junto com o salvar de um pop-up no ar ou pausado (v3a; v3b-1: qualquer "Quantas vezes"). */
   reshow: z.boolean().optional()
 });
 export type SaveNoticeInput = z.infer<typeof saveNoticeSchema>;

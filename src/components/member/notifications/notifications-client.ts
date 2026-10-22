@@ -9,10 +9,15 @@ import type {
   NotificationResponseValue,
   NotificationsFilter,
   NotificationsPage,
-  NotificationsSummary
+  NotificationsSummary,
+  PopupPlanItem,
+  PopupShowAnswer,
+  PopupsAnswer
 } from "@/server/communications/notification-model";
 import type { PopupEvent } from "@/server/communications/campaign-model";
+import { coversPage, type PopupCloseVia, type PopupNext } from "../../../server/communications/popup-display-model";
 import { INBOX_KEEP_MS, INBOX_REUSE_MS, isSummaryFresh } from "./notifications-model";
+import { clockOffsetOf, POPUP_HOST_RULES, readPopupsAnswer } from "./popup-host-model";
 
 // Conversa do sino e do pop-up com /api/notifications e /api/popups (docs/22 §4.4), mais o numero do
 // sino guardado na memoria do navegador. O topo (AppShell) remonta a cada pagina; o numero fica aqui,
@@ -32,14 +37,26 @@ import { INBOX_KEEP_MS, INBOX_REUSE_MS, isSummaryFresh } from "./notifications-m
 // passa (AppShell -> MemberNotificationsMenu -> painel). O login troca de pagina sem recarregar
 // (router.replace): sem o dono, a conta seguinte via o numero e a pagina da anterior. Outro id = nada do
 // que estava guardado vale, e a resposta de um pedido feito para o dono anterior nao e guardada.
+//
+// v3b-1 (docs/25 §4): o resumo pedido com `?page=` traz tambem os pop-ups (o mapa grosso das paginas onde
+// algum pop-up no ar pode aparecer e, na pagina coberta, o plano do aluno, sem conteudo). Fica numa segunda
+// memoria de 1 minuto, com o mesmo dono: nas paginas seguintes o navegador decide sozinho se a pagina pode
+// ter pop-up, e so pede de novo quando ela e coberta e o plano passou do minuto. O POST /show devolve o
+// conteudo e quando o pop-up pode voltar; essa resposta e o que o aluno faz depois acertam o plano guardado.
 
 export class NotificationsRequestError extends Error {
+  /** POST /show recusado (409): quando o pop-up pode voltar (null = nao volta mais). */
+  nextAt?: string | null;
   status: number;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, nextAt?: string | null) {
     super(message);
     this.name = "NotificationsRequestError";
     this.status = status;
+
+    if (nextAt !== undefined) {
+      this.nextAt = nextAt;
+    }
   }
 }
 
@@ -120,12 +137,17 @@ export function fetchNotificationsPage(input: { cursor?: string | null; filter: 
   );
 }
 
-export function fetchSummary(input: { popup?: boolean; signal?: AbortSignal } = {}) {
-  return getJson<NotificationsSummary>(
-    input.popup ? "/api/notifications/summary?popup=1" : "/api/notifications/summary",
-    "Não foi possível carregar as notificações.",
-    input.signal
-  );
+/** Endereco do resumo: com a pagina (v3b-1, traz os pop-ups), com o pop-up da v1 (abas antigas) ou so o numero. */
+export function summaryUrl(input: { page?: string | null; popup?: boolean } = {}) {
+  if (input.page) {
+    return `/api/notifications/summary?page=${encodeURIComponent(input.page)}`;
+  }
+
+  return input.popup ? "/api/notifications/summary?popup=1" : "/api/notifications/summary";
+}
+
+export function fetchSummary(input: { page?: string | null; popup?: boolean; signal?: AbortSignal } = {}) {
+  return getJson<NotificationsSummary>(summaryUrl(input), "Não foi possível carregar as notificações.", input.signal);
 }
 
 /**
@@ -194,8 +216,55 @@ export function beaconAudio(id: string, body: AudioRequest) {
   sendBeaconPost(notificationPath(id, "audio"), JSON.stringify(body));
 }
 
-export function postPopupEvent(id: string, event: PopupEvent) {
-  sendBeaconPost(`/api/popups/${encodeURIComponent(id)}/events`, JSON.stringify({ event }));
+/** O que o aluno fez no pop-up (beacon: pode sair junto com a pagina). `via` so com `closed`. */
+export function postPopupEvent(id: string, event: PopupEvent, options: { via?: PopupCloseVia } = {}) {
+  const body = event === "closed" && options.via ? { event, via: options.via } : { event };
+
+  sendBeaconPost(`/api/popups/${encodeURIComponent(id)}/events`, JSON.stringify(body));
+}
+
+/**
+ * Abre o pop-up: o servidor confere de novo (no ar, segmento, pagina, momento e frequencia), grava a
+ * abertura e so entao devolve o conteudo e quando ele pode voltar. Desiste em 10 s; `signal` e o fim da
+ * visualizacao de pagina (o host aborta ao sair). Recusa vira NotificationsRequestError (409 com `nextAt`).
+ */
+export async function postPopupShow(
+  id: string,
+  body: { page: string; trigger: "lesson_completed" | "page_load" },
+  signal?: AbortSignal
+): Promise<PopupShowAnswer> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), POPUP_HOST_RULES.showTimeoutMs);
+  const abort = () => controller.abort();
+
+  if (signal?.aborted) {
+    controller.abort();
+  } else {
+    signal?.addEventListener("abort", abort, { once: true });
+  }
+
+  try {
+    const response = await fetch(`/api/popups/${encodeURIComponent(id)}/show`, {
+      body: JSON.stringify(body),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+      signal: controller.signal
+    });
+    const payload = (await response.json().catch(() => ({}))) as { data?: PopupShowAnswer; error?: string; nextAt?: unknown };
+
+    if (!response.ok || payload.data === undefined) {
+      const nextAt = response.status === 409 ? (typeof payload.nextAt === "string" ? payload.nextAt : null) : undefined;
+
+      throw new NotificationsRequestError(payload.error ?? "Pop-up indisponivel.", response.status, nextAt);
+    }
+
+    return payload.data;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
 }
 
 // --- Numero do sino (memoria do navegador) ---------------------------------------------------------
@@ -236,6 +305,7 @@ export function claimNotificationsMemory(userId: string | null | undefined): voi
   inboxRequest = null;
   inboxGeneration += 1;
   summaryRequest = null;
+  popupMemory = { ...INITIAL_POPUP_MEMORY, owner: memoryOwner };
   setSummaryState({ ...INITIAL_SUMMARY, owner: memoryOwner });
 }
 
@@ -245,10 +315,27 @@ function isOtherOwner(userId: string | null | undefined) {
 }
 
 let summaryState: SummaryMemory = INITIAL_SUMMARY;
-let summaryRequest: { owner: string | null; popup: boolean; promise: Promise<NotificationsSummary | null> } | null = null;
+let summaryRequest: {
+  owner: string | null;
+  /** v3b-1: a pagina pedida (a resposta traz os pop-ups); null = sem pagina. */
+  page: string | null;
+  popup: boolean;
+  promise: Promise<NotificationsSummary | null>;
+} | null = null;
 /** A home vai pedir o resumo junto com o pop-up: ate la, o topo nao pede o seu (um pedido so). */
 let summaryHeldForPopup = false;
 const summaryListeners = new Set<() => void>();
+
+/**
+ * Pop-ups do ultimo resumo pedido com pagina (v3b-1): `answer` null = nada a mostrar neste minuto (o
+ * servidor nao mandou, ou o pedido falhou: a falha tambem conta como tentativa). `offsetMs` acerta o
+ * relogio do navegador pela hora do servidor (asOf). Mesmo dono do numero do sino.
+ */
+type PopupMemory = { answer: PopupsAnswer | null; fetchedAt: number | null; offsetMs: number; owner: string | null };
+
+const INITIAL_POPUP_MEMORY: PopupMemory = { answer: null, fetchedAt: null, offsetMs: 0, owner: null };
+
+let popupMemory: PopupMemory = INITIAL_POPUP_MEMORY;
 
 function setSummaryState(next: SummaryMemory) {
   summaryState = next;
@@ -291,31 +378,55 @@ export function holdSummaryForPopup(held: boolean) {
   summaryHeldForPopup = held;
 }
 
+/** Guarda os pop-ups de um resumo pedido com pagina (so do dono de quando o pedido saiu). */
+function setPopupMemory(answer: PopupsAnswer | null, owner: string | null, arrivedAt: number) {
+  if (owner !== memoryOwner) {
+    return;
+  }
+
+  popupMemory = { answer, fetchedAt: arrivedAt, offsetMs: answer ? clockOffsetOf(answer.asOf, arrivedAt) : 0, owner };
+}
+
 /**
  * Busca o numero do sino se o guardado ja passou do prazo (ou com `force`); com `popup`, busca sempre,
- * trazendo junto o pop-up da vez (so a home pede). Um pedido comum aproveita o que ja esta em andamento.
- * Devolve o resumo, ou null quando nao buscou ou falhou. Nunca lanca.
+ * trazendo junto o pop-up da vez (abas da v1). Com `page` (v3b-1), busca quando o numero ou os pop-ups
+ * guardados passaram do prazo, e a resposta acerta os dois. Um pedido comum aproveita o que ja esta em
+ * andamento; um pedido com pagina aproveita outro com pagina (qualquer uma: o host confere a cobertura
+ * depois). Devolve o resumo, ou null quando nao buscou ou falhou. Nunca lanca.
  */
 export function refreshNotificationsSummary(
-  options: { force?: boolean; popup?: boolean; userId?: string | null } = {}
+  options: { force?: boolean; page?: string | null; popup?: boolean; userId?: string | null } = {}
 ): Promise<NotificationsSummary | null> {
-  const popup = Boolean(options.popup);
+  const page = options.page ? options.page : null;
+  const popup = !page && Boolean(options.popup);
 
   claimNotificationsMemory(options.userId);
 
-  if (summaryRequest && summaryRequest.owner === memoryOwner && (summaryRequest.popup || !popup)) {
-    return summaryRequest.promise;
+  if (summaryRequest && summaryRequest.owner === memoryOwner) {
+    const joins = page ? summaryRequest.page !== null : popup ? summaryRequest.popup : true;
+
+    if (joins) {
+      return summaryRequest.promise;
+    }
   }
 
-  if (!popup && !options.force && (summaryHeldForPopup || isSummaryFresh(summaryState.fetchedAt, Date.now()))) {
+  const now = Date.now();
+  const fresh = isSummaryFresh(summaryState.fetchedAt, now) && (!page || isSummaryFresh(popupMemory.fetchedAt, now));
+
+  if (!popup && !options.force && (summaryHeldForPopup || fresh)) {
     return Promise.resolve(null);
   }
 
   // O dono de quando o pedido saiu: a resposta que volta depois da troca de conta nao e guardada.
   const owner = memoryOwner;
-  const promise: Promise<NotificationsSummary | null> = fetchSummary({ popup })
+  const promise: Promise<NotificationsSummary | null> = fetchSummary({ page, popup })
     .then((summary) => {
       setSummaryUnseen(summary.unseen, owner);
+
+      if (page) {
+        setPopupMemory(readPopupsAnswer(summary.popups), owner, Date.now());
+      }
+
       return summary;
     })
     .catch((error: unknown) => {
@@ -333,6 +444,12 @@ export function refreshNotificationsSummary(
         status: summaryState.status === "ready" && !sessionEnded ? "ready" : "error",
         unseen: sessionEnded ? 0 : summaryState.unseen
       });
+
+      if (page) {
+        // Sem resposta, nenhum pop-up neste minuto (nunca um plano velho).
+        setPopupMemory(null, owner, Date.now());
+      }
+
       return null;
     })
     .finally(() => {
@@ -341,7 +458,7 @@ export function refreshNotificationsSummary(
       }
     });
 
-  summaryRequest = { owner, popup, promise };
+  summaryRequest = { owner, page, popup, promise };
 
   return promise;
 }
@@ -350,11 +467,16 @@ export function refreshNotificationsSummary(
  * Numero do sino para o topo: busca depois da hidratacao e ao voltar para a aba, respeitando o prazo.
  * `refreshOnMount: false` na home, onde o resumo vem com o pedido do pop-up. `userId` (o aluno da
  * sessao) diz de quem e a memoria: antes do efeito, o numero de outra conta nunca aparece (vale o zero).
+ * `page` (v3b-1): a chave da pagina do pop-up; o pedido do topo traz junto os pop-ups dela (o host entra
+ * nele: os efeitos do topo rodam antes dos do host).
  */
-export function useNotificationsSummary(options: { refreshOnMount?: boolean; userId?: string | null } = {}): NotificationsSummaryState {
+export function useNotificationsSummary(
+  options: { page?: string | null; refreshOnMount?: boolean; userId?: string | null } = {}
+): NotificationsSummaryState {
   const state = useSyncExternalStore(subscribeSummary, getSummarySnapshot, getServerSummarySnapshot);
   const refreshOnMount = options.refreshOnMount ?? true;
   const userId = options.userId;
+  const page = options.page ?? null;
 
   // No layout: o dono muda antes dos efeitos comuns da pagina (o pop-up da home pede o resumo num deles).
   useLayoutEffect(() => {
@@ -363,18 +485,18 @@ export function useNotificationsSummary(options: { refreshOnMount?: boolean; use
 
   useEffect(() => {
     if (refreshOnMount) {
-      void refreshNotificationsSummary({ userId });
+      void refreshNotificationsSummary({ page, userId });
     }
 
     function handleVisibilityChange() {
       if (document.visibilityState === "visible") {
-        void refreshNotificationsSummary({ userId });
+        void refreshNotificationsSummary({ page, userId });
       }
     }
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [refreshOnMount, userId]);
+  }, [page, refreshOnMount, userId]);
 
   return summaryFor(state, userId);
 }
@@ -387,6 +509,100 @@ export function summaryFor(state: NotificationsSummaryState & { owner?: string |
 /** O numero guardado para este aluno, fora do React (o mesmo que useNotificationsSummary devolve). */
 export function currentSummaryFor(userId: string | null | undefined): NotificationsSummaryState {
   return summaryFor(summaryState, userId);
+}
+
+// --- Plano dos pop-ups (v3b-1, docs/25 §4) -------------------------------------------------------
+//
+// O plano guardado e o que o navegador sabe do aluno por 1 minuto: em quais paginas algum pop-up pode
+// aparecer (mapa grosso, sem ids de produto) e, para os pop-ups do segmento dele, paginas exatas, momento,
+// espera e quando cada um pode voltar. Cada resposta do POST /show e o que o aluno fez acertam o plano, para
+// as paginas seguintes do mesmo minuto decidirem certo sem pedir nada.
+
+export type PopupPlan = { items: PopupPlanItem[]; offsetMs: number };
+
+/**
+ * O que a memoria (mais nova que 1 minuto) diz desta pagina, sem pedir nada: `covered` = algum pop-up no ar
+ * pode aparecer nela; `plan` null = a resposta guardada foi de uma pagina nao coberta (falta o plano).
+ * null = a memoria passou do prazo (ou nunca houve resposta).
+ */
+export function popupPlanFromMemory(pageKey: string): { covered: boolean; offsetMs: number; plan: PopupPlanItem[] | null } | null {
+  const memory = popupMemory;
+
+  if (memory.owner !== memoryOwner || !isSummaryFresh(memory.fetchedAt, Date.now())) {
+    return null;
+  }
+
+  if (!memory.answer) {
+    return { covered: false, offsetMs: memory.offsetMs, plan: null };
+  }
+
+  return { covered: coversPage(memory.answer.pages, pageKey), offsetMs: memory.offsetMs, plan: memory.answer.plan };
+}
+
+/**
+ * O plano para esta pagina: espera o pedido em andamento (o do topo), usa a memoria se ela vale (pagina
+ * nao coberta = nenhum pedido) e, so quando a pagina e coberta e falta o plano, pede uma vez. null =
+ * nenhum pop-up aqui agora (ou o pedido falhou). Nunca lanca.
+ */
+export async function ensurePopupPlan(pageKey: string): Promise<PopupPlan | null> {
+  const inFlight = summaryRequest && summaryRequest.owner === memoryOwner ? summaryRequest.promise : null;
+
+  if (inFlight) {
+    await inFlight;
+  }
+
+  const kept = popupPlanFromMemory(pageKey);
+
+  if (kept) {
+    if (!kept.covered) {
+      return null;
+    }
+
+    if (kept.plan) {
+      return { items: kept.plan, offsetMs: kept.offsetMs };
+    }
+  }
+
+  await refreshNotificationsSummary({ force: true, page: pageKey });
+
+  const fetched = popupPlanFromMemory(pageKey);
+
+  return fetched && fetched.covered && fetched.plan ? { items: fetched.plan, offsetMs: fetched.offsetMs } : null;
+}
+
+/**
+ * Acerta um pop-up no plano guardado depois do POST /show (ou de uma recusa com `nextAt`): null = ele nao
+ * volta mais (sai do plano); senao, `notBefore` passa a ser o que o servidor disse.
+ */
+export function updatePopupInPlan(id: string, next: PopupNext): void {
+  const answer = popupMemory.answer;
+
+  if (!answer?.plan) {
+    return;
+  }
+
+  const plan = next === null
+    ? answer.plan.filter((item) => item.id !== id)
+    : answer.plan.map((item) => (item.id === id ? { ...item, notBefore: next.notBefore } : item));
+
+  popupMemory = { ...popupMemory, answer: { ...answer, plan } };
+}
+
+/**
+ * O que o aluno fez no pop-up, no plano guardado: clicar tira (menos em "Só quando o pop-up terminar"),
+ * "Não mostrar de novo" e "Lembrar depois" tiram (o proximo plano traz de volta na hora certa), fechar nao
+ * muda nada (o show ja disse quando ele pode voltar).
+ */
+export function updatePopupAfterOutcome(id: string, outcome: PopupEvent): void {
+  const item = popupMemory.answer?.plan?.find((candidate) => candidate.id === id);
+
+  if (!item) {
+    return;
+  }
+
+  if (outcome === "dismissed" || outcome === "snoozed" || (outcome === "clicked" && item.stopOn !== "never")) {
+    updatePopupInPlan(id, null);
+  }
 }
 
 // --- Primeira pagina guardada (v3a, docs/24 §7.3) --------------------------------------------------
