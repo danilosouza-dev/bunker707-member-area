@@ -442,6 +442,14 @@ test("quem envia novo recebe um 'enviada em seu nome' so uma vez; editar outra v
   assert.equal(item.actor?.name, perfil.full_name?.trim() || "Equipe Bunker707", "a aluna ve quem envia agora");
 });
 
+/** As proximas 8h de Sao Paulo (11h UTC, sem horario de verao) depois de `ms` (FLOW_LIMITS.deferHourSaoPaulo). */
+function proximas8hDeSaoPaulo(ms) {
+  const dia = new Date(ms);
+  const oito = Date.UTC(dia.getUTCFullYear(), dia.getUTCMonth(), dia.getUTCDate(), 11);
+
+  return oito > ms ? oito : oito + 24 * HORA;
+}
+
 test("seguintes: tirar o destino que uma delas usa da 422; destino novo atualiza as paginas acompanhadas; o fluxo continua no ar e as pendentes saem", async () => {
   const entrada = randomUUID();
   const s1 = randomUUID();
@@ -479,8 +487,11 @@ test("seguintes: tirar o destino que uma delas usa da 422; destino novo atualiza
   await tick(now + MIN);
   await tick(now + 2 * HORA);
   // As duas seguintes (s1 e s2) vencem juntas para os mesmos alunos: o motor manda uma e empurra a outra
-  // 1 h (FLOW_LIMITS.minGapMinutes), em ordem que nao e fixa; o tick de +4 h manda a que ficou.
+  // 1 h (FLOW_LIMITS.minGapMinutes), em ordem que nao e fixa; o tick de +4 h manda a que ficou. Se o
+  // empurrao passa da meia-noite de Sao Paulo, o motor guarda a que ficou para as 8h do dia (nunca de
+  // madrugada): o tick das 8h a manda. Sem ele o teste falhava rodando entre 21h e meia-noite.
   await tick(now + 4 * HORA);
+  await tick(proximas8hDeSaoPaulo(now + 3 * HORA) + MIN);
   assert.deepEqual(await quemRecebeuOPasso(s2), alunos(), "a seguinte do aviso com destino novo sai (ninguem visitou a pagina nova)");
   const tarefas = unwrap(await db.from("communication_flow_tasks").select("status").eq("flow_id", usaODestino.flowId), "Tarefas");
   assert.equal(tarefas.length, 3, "os tres entraram no fluxo do aviso editado");
