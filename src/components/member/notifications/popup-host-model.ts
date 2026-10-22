@@ -2,8 +2,9 @@
 // arma nesta visualizacao de pagina, o que cada conclusao de aula arma, o que impede abrir agora (outro
 // pop-up, aba escondida, tela cheia, o nosso player tocando, algo aberto por cima) e se isso descarta a
 // abertura ou so espera. O plano vem do resumo (notifications-client.ts) e nao traz conteudo: o conteudo
-// so vem no POST /show, que confere tudo de novo no servidor. Modulo puro: sem DOM, imports relativos;
-// tests/pop-ups-v3b1-navegador.test.mjs carrega direto pelo Node.
+// so vem no POST /show, que confere tudo de novo no servidor. Modulo puro: o document so chega por
+// parametro (hasBlockingLayer), imports relativos; tests/pop-ups-v3b1-navegador.test.mjs carrega direto pelo
+// Node.
 
 import { popupAllowsPage } from "../../../server/communications/popup-display-model";
 import type { PopupPlanItem, PopupsAnswer } from "../../../server/communications/notification-model";
@@ -156,6 +157,42 @@ export function blockReason(env: BlockEnv, armed: ArmedPopup, phase: "after_show
   }
 
   return env.layer ? "layer" : null;
+}
+
+/** Campo de texto com foco (o aluno esta digitando): o pop-up nao rouba o foco nem fecha o teclado. */
+const TYPING_TARGETS =
+  'input:not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="reset"]):not([type="submit"]), textarea, select, [contenteditable=""], [contenteditable="true"]';
+
+/** O que hasBlockingLayer le do document (o teste passa um de mentira). */
+export type LayerDocument = Pick<Document, "activeElement" | "body" | "documentElement" | "querySelectorAll">;
+
+/** Na tela de verdade: fora de [hidden]/[inert] e com caixa (display: none nao tem). */
+function isShown(element: Element) {
+  return !element.closest("[inert], [hidden]") && element.getClientRects().length > 0;
+}
+
+/**
+ * Outro dialogo, gaveta, painel ou modal aberto (ou a rolagem travada por um deles)? Tambem conta um
+ * controle do topo do AppShell aberto (menu da conta, busca, sino; eles marcam aria-expanded) e alguem
+ * digitando. So o topo (data-member-topbar) e so o que esta na tela: um painel escondido que ficou montado
+ * (o Tutor IA da aula tem um <header> com aria-expanded) nao segura o pop-up ate a desistencia.
+ */
+export function hasBlockingLayer(doc: LayerDocument) {
+  if (doc.body.style.overflow === "hidden" || doc.documentElement.style.overflow === "hidden") {
+    return true;
+  }
+
+  if (Array.from(doc.querySelectorAll('[data-member-topbar] [aria-expanded="true"]')).some(isShown)) {
+    return true;
+  }
+
+  if (doc.activeElement?.matches(TYPING_TARGETS)) {
+    return true;
+  }
+
+  return Array.from(doc.querySelectorAll('[aria-modal="true"], [role="dialog"], [role="alertdialog"]')).some(
+    (element) => !element.closest("[data-member-popup]") && isShown(element)
+  );
 }
 
 export function blockAction(reason: BlockReason): BlockAction {

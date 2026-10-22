@@ -292,7 +292,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
   return (
     <PlatformBrandingProvider branding={branding}>
     <div className="min-h-screen bg-[#141414] text-white" data-member-buttons={style.buttons} data-member-corners={style.corners} data-member-menu={style.menu}>
-      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden">
+      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden" data-member-topbar="">
         <div
           aria-hidden="true"
           className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.68)_0%,rgba(0,0,0,0.26)_58%,rgba(0,0,0,0)_100%)] transition-opacity duration-300 ease-out will-change-opacity"

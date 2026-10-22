@@ -30,6 +30,7 @@ import {
   blockReason,
   completionOpenings,
   givenUp,
+  hasBlockingLayer,
   openingsForPageView,
   POPUP_HOST_RULES,
   shouldSendPageClose,
@@ -65,34 +66,6 @@ function preloadPopupDialog() {
 
 function isFullscreen() {
   return Boolean(document.fullscreenElement || (document as Document & { webkitFullscreenElement?: Element | null }).webkitFullscreenElement);
-}
-
-/** Campo de texto com foco (o aluno esta digitando): o pop-up nao rouba o foco nem fecha o teclado. */
-const TYPING_TARGETS =
-  'input:not([type="button"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="reset"]):not([type="submit"]), textarea, select, [contenteditable=""], [contenteditable="true"]';
-
-/**
- * Outro dialogo, gaveta, painel ou modal aberto (ou a rolagem travada por um deles)? Tambem conta um
- * controle do topo aberto (menu da conta, busca; eles marcam aria-expanded) e alguem digitando.
- */
-function hasBlockingLayer() {
-  if (document.body.style.overflow === "hidden" || document.documentElement.style.overflow === "hidden") {
-    return true;
-  }
-
-  if (document.querySelector('header [aria-expanded="true"]')) {
-    return true;
-  }
-
-  const active = document.activeElement;
-
-  if (active instanceof HTMLElement && active.matches(TYPING_TARGETS)) {
-    return true;
-  }
-
-  return Array.from(document.querySelectorAll<HTMLElement>('[aria-modal="true"], [role="dialog"], [role="alertdialog"]')).some(
-    (element) => !element.closest("[inert], [hidden], [data-member-popup]") && element.getClientRects().length > 0
-  );
 }
 
 type Showing = { armed: ArmedPopup; popup: PopupItem };
@@ -152,7 +125,7 @@ export function MemberPopupHost({
       return {
         fullscreen: isFullscreen() || Boolean(media?.fullscreen),
         hidden: document.visibilityState !== "visible",
-        layer: hasBlockingLayer(),
+        layer: hasBlockingLayer(document),
         lesson: media ? { activeLessonId: media.activeLessonId, playing: media.playing, touched: media.touched } : null,
         // O anterior ainda saindo (animacao) tambem conta: nunca dois na tela.
         popupOpen: openRef.current !== null || document.querySelector("[data-member-popup]") !== null

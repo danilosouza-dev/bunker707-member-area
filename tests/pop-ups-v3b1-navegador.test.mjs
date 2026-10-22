@@ -268,6 +268,57 @@ test("blockReason na aula, ao concluir: trocou de aula ou deu play de novo desca
   assert.equal(host.blockReason(tocandoDeNovo, concluindo(), "after_show"), "playing");
 });
 
+// Um elemento de mentira para hasBlockingLayer: escondido ([hidden]/[inert]), sem caixa (display: none) ou
+// dentro do proprio pop-up.
+function camada({ caixa = true, dentroDe = [] } = {}) {
+  return {
+    closest: (selector) => (selector.split(",").some((parte) => dentroDe.includes(parte.trim())) ? {} : null),
+    getClientRects: () => ({ length: caixa ? 1 : 0 }),
+    matches: () => false
+  };
+}
+
+function documento({ ativo = null, dialogos = [], overflow = "", topo = [] } = {}) {
+  const porSeletor = {
+    '[data-member-topbar] [aria-expanded="true"]': topo,
+    '[aria-modal="true"], [role="dialog"], [role="alertdialog"]': dialogos
+  };
+
+  return {
+    activeElement: ativo,
+    body: { style: { overflow } },
+    documentElement: { style: { overflow: "" } },
+    querySelectorAll: (selector) => porSeletor[selector] ?? []
+  };
+}
+
+test("hasBlockingLayer: so o topo do AppShell e so o que esta na tela (o Tutor IA escondido nao segura)", () => {
+  assert.equal(host.hasBlockingLayer(documento()), false);
+  assert.equal(host.hasBlockingLayer(documento({ overflow: "hidden" })), true, "rolagem travada por uma gaveta");
+
+  // Menu da conta, busca ou sino abertos no topo seguram; um botao do topo escondido (display: none no
+  // celular) ou dentro de [hidden] nao.
+  assert.equal(host.hasBlockingLayer(documento({ topo: [camada()] })), true);
+  assert.equal(host.hasBlockingLayer(documento({ topo: [camada({ caixa: false })] })), false);
+  assert.equal(host.hasBlockingLayer(documento({ topo: [camada({ dentroDe: ["[hidden]"] })] })), false);
+
+  // O <header> do Tutor IA (aria-expanded no "Histórico") fica montado na aba escondida: fora do topo, o
+  // seletor nem o encontra; e um dialogo escondido, inerte, sem caixa ou o proprio pop-up tambem nao conta.
+  assert.equal(host.hasBlockingLayer(documento({ dialogos: [camada()] })), true);
+  assert.equal(host.hasBlockingLayer(documento({ dialogos: [camada({ dentroDe: ["[hidden]"] })] })), false);
+  assert.equal(host.hasBlockingLayer(documento({ dialogos: [camada({ dentroDe: ["[inert]"] })] })), false);
+  assert.equal(host.hasBlockingLayer(documento({ dialogos: [camada({ caixa: false })] })), false);
+  assert.equal(host.hasBlockingLayer(documento({ dialogos: [camada({ dentroDe: ["[data-member-popup]"] })] })), false);
+
+  // Alguem digitando (input, textarea, contenteditable) segura; foco num botao nao.
+  const digitando = { matches: (selector) => selector.includes("textarea") };
+  assert.equal(host.hasBlockingLayer(documento({ ativo: digitando })), true);
+  assert.equal(host.hasBlockingLayer(documento({ ativo: { matches: () => false } })), false);
+
+  assert.match(shellSource, /<header className="fixed left-0 right-0 top-0 z-40 overflow-hidden" data-member-topbar="">/);
+  assert.match(hostSource, /layer: hasBlockingLayer\(document\)/);
+});
+
 test("givenUp conta 10 min da hora da abertura (nao do comeco da pagina); closeViaOf; shouldSendPageClose", () => {
   const armada = abrindo({ at: agora + 600_000 });
 
