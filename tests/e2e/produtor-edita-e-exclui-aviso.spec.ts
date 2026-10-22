@@ -52,9 +52,17 @@ async function abrirMenuDaLinha(page: Page, titulo: string) {
   await page.goto("/admin/comunicacao/avisos");
   const linha = page.getByRole("row").filter({ hasText: titulo });
   await expect(linha).toHaveCount(1);
-  await linha.getByRole("button", { name: `Ações de ${titulo}` }).click();
+  const itens = page.getByRole("menuitem");
+  // Logo depois de abrir a pagina o botao ja esta desenhado, mas o React pode ainda nao ter ligado o clique
+  // (no WebKit da CI o primeiro clique se perdia e o menu nunca abria): clica de novo ate o menu abrir.
+  await expect(async () => {
+    if ((await itens.count()) === 0) {
+      await linha.getByRole("button", { name: `Ações de ${titulo}` }).click();
+    }
+    await expect(itens.first()).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
 
-  return page.getByRole("menuitem");
+  return itens;
 }
 
 test.describe("produtor publica", () => {
