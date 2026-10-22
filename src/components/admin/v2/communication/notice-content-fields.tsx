@@ -18,6 +18,7 @@ import { NoticePollField } from "./notice-poll-field";
 import { NoticeSenderField } from "./notice-sender-field";
 import { NoticeValidityField } from "./notice-validity-field";
 import { CTA_FIELD_COPY, NOTICE_INTERACTION_COPY, emptyPoll, type NoticeSenderChoice } from "./notices-view-model";
+import { POPUP_DESIGN_COPY } from "./popup-design/popup-design-editor-model";
 
 // Conteudo de uma notificacao (docs/23; docs/22 §2.2): titulo, texto, quem envia, icone ao lado do
 // titulo, imagem e audio, botao, resposta e, quando `showValidity`, quanto tempo fica no sino. O mesmo
@@ -38,6 +39,11 @@ import { CTA_FIELD_COPY, NOTICE_INTERACTION_COPY, emptyPoll, type NoticeSenderCh
 // Ajustes da v3a: "Permitir que o aluno exclua do sino" (allowHide, ligado por padrao) logo depois de
 // "Permitir reações"; muda tambem depois do envio. Num passo de fluxo no ar que ja chegou a alguem, a
 // enquete chega travada (lockedFields.poll).
+//
+// Design do pop-up (docs/26), `popupDesign` (pop-up "Personalizado"): o texto e o icone nao aparecem para o
+// aluno (os blocos do design sao o texto), entao somem daqui; a imagem vai para o card Design > Mídia e o
+// "Para onde leva" para o bloco Botão principal. "Título" vira "Nome do pop-up" (listas e relatorios; o mesmo
+// id "aviso-titulo") e o bloco de midia fica so com o Áudio.
 
 /** O conteudo editado aqui: o do aviso, com a validade dos passos de fluxo ("with_anchor"). */
 export type NoticeContentValue = Pick<NoticeDraft, "allowHide" | "audio" | "body" | "cta" | "icon" | "image" | "poll" | "reactions" | "response" | "sender" | "title"> & {
@@ -86,6 +92,8 @@ type NoticeContentFieldsProps = {
   showValidity: boolean;
   /** Acrescenta "Até a notificação principal sumir" (passo que conta de uma notificacao). */
   validityAnchor?: { label: string };
+  /** Pop-up "Personalizado" (docs/26): sem texto, icone, imagem e destino aqui (vao para o card Design). */
+  popupDesign?: boolean;
   value: NoticeContentValue;
 };
 
@@ -143,6 +151,7 @@ export function NoticeContentFields({
   onImageUploadChange,
   onSendersChange,
   pollCanEndAtDate = true,
+  popupDesign = false,
   products,
   productsLoaded,
   resetKey,
@@ -164,6 +173,8 @@ export function NoticeContentFields({
   const latest = useRef(value);
   const limits = NOTICE_LIMITS[kind];
   const inbox = kind === "inbox";
+  // Design do pop-up (docs/26): no Personalizado, o design desenha o pop-up (o titulo vira o nome).
+  const custom = !inbox && popupDesign;
   const id = (suffix: string) => `${idPrefix}-${suffix}`;
 
   useEffect(() => {
@@ -242,25 +253,28 @@ export function NoticeContentFields({
           <HeroTextField
             disabled={disabled}
             error={errorFor("title")}
+            hint={custom ? POPUP_DESIGN_COPY.content.titleHint : undefined}
             id={id("titulo")}
-            label="Título"
+            label={custom ? POPUP_DESIGN_COPY.content.titleLabel : "Título"}
             max={limits.title}
             onBlur={() => onBlurField("title")}
             onChange={(title) => onChange({ title })}
             value={value.title}
           />
-          <HeroTextField
-            disabled={disabled}
-            error={errorFor("body")}
-            hint={inbox ? "Textos longos ficam com “Ver mais” no sino." : undefined}
-            id={id("texto")}
-            label="Texto (opcional)"
-            max={limits.body}
-            multiline
-            onBlur={() => onBlurField("body")}
-            onChange={(body) => onChange({ body })}
-            value={value.body}
-          />
+          {custom ? null : (
+            <HeroTextField
+              disabled={disabled}
+              error={errorFor("body")}
+              hint={inbox ? "Textos longos ficam com “Ver mais” no sino." : undefined}
+              id={id("texto")}
+              label="Texto (opcional)"
+              max={limits.body}
+              multiline
+              onBlur={() => onBlurField("body")}
+              onChange={(body) => onChange({ body })}
+              value={value.body}
+            />
+          )}
           {inbox ? (
             <NoticeSenderField
               canEditBrand={canEditBrand}
@@ -276,23 +290,30 @@ export function NoticeContentFields({
               value={value.sender}
             />
           ) : null}
-          <NoticeIconField disabled={disabled} id={id("icone")} onChange={(icon) => onChange({ icon })} value={value.icon} />
+          {custom ? null : <NoticeIconField disabled={disabled} id={id("icone")} onChange={(icon) => onChange({ icon })} value={value.icon} />}
         </div>
       </Block>
 
-      <Block description="Uma imagem 16:9 e um áudio curto, para o aviso ganhar atenção." layout={layout} meta="opcional" title="Imagem e áudio">
+      <Block
+        description={custom ? POPUP_DESIGN_COPY.content.audioDescription : "Uma imagem 16:9 e um áudio curto, para o aviso ganhar atenção."}
+        layout={layout}
+        meta="opcional"
+        title={custom ? POPUP_DESIGN_COPY.content.audioTitle : "Imagem e áudio"}
+      >
         <div className="flex min-w-0 flex-col gap-5">
-          <ImageField
-            error={imageError ?? errorFor("image.url")}
-            id={id("imagem")}
-            label="Imagem"
-            onChange={(next) => void changeImage(next)}
-            optional
-            pending={imageUpload !== null}
-            slot="notice"
-            value={imageUpload ?? value.image?.url ?? null}
-          />
-          {value.image ? (
+          {custom ? null : (
+            <ImageField
+              error={imageError ?? errorFor("image.url")}
+              id={id("imagem")}
+              label="Imagem"
+              onChange={(next) => void changeImage(next)}
+              optional
+              pending={imageUpload !== null}
+              slot="notice"
+              value={imageUpload ?? value.image?.url ?? null}
+            />
+          )}
+          {value.image && !custom ? (
             <HeroTextField
               disabled={disabled}
               error={errorFor("image.alt")}
@@ -306,9 +327,12 @@ export function NoticeContentFields({
             />
           ) : null}
           <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">
-              Áudio<span className="font-normal text-[var(--text-tertiary)]"> (opcional)</span>
-            </span>
+            {/* Personalizado: o bloco ja se chama "Áudio" (opcional); o rotulo de dentro so repetiria. */}
+            {custom ? null : (
+              <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">
+                Áudio<span className="font-normal text-[var(--text-tertiary)]"> (opcional)</span>
+              </span>
+            )}
             <NoticeAudioField
               disabled={disabled || audioLocked !== undefined}
               error={errorFor("audio.url") ?? errorFor("audio.durationSeconds") ?? errorFor("audio")}
@@ -322,20 +346,23 @@ export function NoticeContentFields({
         </div>
       </Block>
 
-      <Block description={CTA_FIELD_COPY.blockDescription} layout={layout} meta="opcional" title={CTA_FIELD_COPY.blockTitle}>
-        <NoticeCtaField
-          disabled={disabled}
-          errors={{ display: errorFor("cta.display"), href: errorFor("cta.href"), label: errorFor("cta.label") }}
-          idPrefix={idPrefix}
-          key={resetKey}
-          kind={kind}
-          onBlurField={onBlurField}
-          onChange={(cta) => onChange({ cta })}
-          products={products}
-          productsLoaded={productsLoaded}
-          value={value.cta}
-        />
-      </Block>
+      {/* Personalizado: o texto e o destino do botao ficam no bloco Botão principal do design. */}
+      {custom ? null : (
+        <Block description={CTA_FIELD_COPY.blockDescription} layout={layout} meta="opcional" title={CTA_FIELD_COPY.blockTitle}>
+          <NoticeCtaField
+            disabled={disabled}
+            errors={{ display: errorFor("cta.display"), href: errorFor("cta.href"), label: errorFor("cta.label") }}
+            idPrefix={idPrefix}
+            key={resetKey}
+            kind={kind}
+            onBlurField={onBlurField}
+            onChange={(cta) => onChange({ cta })}
+            products={products}
+            productsLoaded={productsLoaded}
+            value={value.cta}
+          />
+        </Block>
+      )}
 
       {inbox ? (
         <Block description={NOTICE_INTERACTION_COPY.blockDescription} layout={layout} meta="opcional" title={NOTICE_INTERACTION_COPY.blockTitle}>

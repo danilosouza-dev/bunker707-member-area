@@ -868,3 +868,44 @@ export async function popUpsQueAbremNaHome(page: Page) {
     .filter((item) => item.trigger === "page_load" && (item.notBefore === null || Date.parse(item.notBefore) <= asOf))
     .map((item) => item.id);
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Design do pop-up (docs/26 §8): o que o editor gravou, lido do banco
+ * ---------------------------------------------------------------------------------------------- */
+
+export type DesignDoPopUpNoBanco = {
+  /** Fontes enviadas que o design usa, resolvidas na biblioteca (a familia bf_ que o navegador registra). */
+  fontes: { family: string; id: string; name: string }[];
+  id: string;
+  /** A imagem do aviso: a capa do video (o quadro tirado pelo editor quando nao havia imagem). */
+  imagem: string | null;
+  /** O design gravado (null = Padrão). */
+  design: {
+    blocks: Record<string, unknown>[];
+    fonts: string[];
+    media: { kind: string; video: { mimeType: string; path: string; url: string } | null };
+  } | null;
+};
+
+/**
+ * O design Personalizado de um pop-up como ficou no banco depois de salvar/publicar pela tela: o design, a capa e
+ * as fontes enviadas (familia bf_) que ele usa. Falha se o pop-up nao existe.
+ */
+export async function designDoPopUpNoBanco(titulo: string): Promise<DesignDoPopUpNoBanco> {
+  const db = createLocalAdminClient();
+  const linha = unwrap(
+    await db.from("campaigns").select("id,image_url,popup_design").eq("kind", "popup").eq("title", titulo).is("deleted_at", null).single(),
+    `Lendo o design do pop-up "${titulo}"`
+  ) as { id: string; image_url: string | null; popup_design: DesignDoPopUpNoBanco["design"] };
+  const ids = linha.popup_design?.fonts ?? [];
+  const fontes = ids.length
+    ? (unwrap(await db.from("communication_fonts").select("id,family_key,name").in("id", ids), "Lendo as fontes do design") as { family_key: string; id: string; name: string }[])
+    : [];
+
+  return {
+    design: linha.popup_design,
+    fontes: fontes.map((fonte) => ({ family: fonte.family_key, id: fonte.id, name: fonte.name })),
+    id: linha.id,
+    imagem: linha.image_url
+  };
+}

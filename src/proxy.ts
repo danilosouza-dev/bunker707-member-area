@@ -102,7 +102,9 @@ function createContentSecurityPolicy(nonce: string, upgradeInsecureRequests: boo
     "default-src 'self'",
     "base-uri 'self'",
     `connect-src 'self' ${[...getSupabaseConnectionSources(), ...observabilityConnectionSources].join(" ")}`.trim(),
-    "font-src 'self' data:",
+    // Fontes enviadas para o design dos pop-ups (bucket communication-fonts, docs/26): so a origem do nosso
+    // Supabase (o FontFace do aluno baixa de la); nada de Google Fonts na hora.
+    `font-src 'self' data: ${getSupabaseConnectionSources().filter((source) => source.startsWith("http")).join(" ")}`.trim(),
     "form-action 'self'",
     "frame-ancestors 'none'",
     "frame-src 'self' https:",

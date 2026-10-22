@@ -681,6 +681,8 @@ export async function limparComunicacao(db) {
 
   const etapas = [
     ["Apagando fluxos de teste", () => db.from("communication_flows").delete().in("created_by", ids)],
+    // Design do pop-up (docs/26): fontes enviadas pelas contas de teste (os arquivos no Storage ficam com o teste).
+    ["Apagando fontes de teste", () => db.from("communication_fonts").delete().in("created_by", ids)],
     ["Apagando avisos de teste", () => db.from("campaigns").delete().in("created_by", ids)],
     ["Apagando notificacoes de teste", () => db.from("notifications").delete().in("user_id", ids)],
     ["Apagando estados de pop-up de teste", () => db.from("campaign_deliveries").delete().in("user_id", ids)],

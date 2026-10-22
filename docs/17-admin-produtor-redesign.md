@@ -355,6 +355,8 @@ CSV do filtro atual: nome, e-mail, telefone, produtos, turma, situação, entrou
 > - **Frequência por pop-up, escolhida pela equipe**: Uma vez, ou Mais de uma vez com limite por dia, tempo entre uma vez e outra, limite total e o que faz parar; o **Volta em** do Lembrar depois (5 minutos a 7 dias); **Como fechar** (no X ou fora, ou só no X, com o Esc sempre fechando). Sem limite fixo entre pop-ups: as regras fixas são só **um de cada vez** e, na aula, **nunca com o vídeo do nosso player tocando**. Até 50 pop-ups publicados ao mesmo tempo.
 > - **Mostrar de novo para quem já viu** vale em qualquer "Quantas vezes". O relatório ganha as linhas Onde, Quando aparece, Quantas vezes e Como fecha no "Detalhes"; a tela de relatório por página e por jeito de fechar fica para a v3b-2, com os modelos de configuração.
 
+> **Atualização (22/10/2026).** Entrou o **Design do pop-up** (documento próprio: `docs/26`; migração `202610230001`). O editor do pop-up ganha o card **Design** logo depois do conteúdo: **Padrão** (o de sempre) ou **Personalizado** (modelos para começar; seções Mídia, Texto e posição, Blocos, Cartão, Fontes, Fechar e links; prévia de celular e computador lado a lado; dica de contraste). No Personalizado, "Título" vira **Nome do pop-up** e Texto, Ícone, Imagem e Para onde leva vão para o design (a imagem em Mídia, o destino no bloco Botão principal). O "construtor de HTML" pedido virou blocos estruturados, nunca HTML cru. Detalhes do editor em 1.8.2 (Design do pop-up).
+
 #### 1.8.1 Tipos e limites
 
 | Tipo | Onde o aluno vê | Para quê | Limite por aluno (fixo no sistema) |
@@ -384,6 +386,15 @@ Uma página: formulário à esquerda, **prévia ao vivo** à direita usando exat
 Revisão em uma frase ("Pop-up para 318 alunos da Formação IA sem acesso ao Bootcamp, de 14/10 a 21/10, no máximo 1 vez"), **Enviar teste para mim**, **Publicar**. Acima de 500 alunos, quem não é dono ou admin vê **Enviar para aprovação**, e o aviso fica "Aguardando aprovação" até um dono ou admin aprovar (D4).
 
 Lista (`/admin/comunicacao`): nome, tipo, para quem, período, situação (Rascunho / Aguardando aprovação / Agendado / Ativo / Pausado / Encerrado), vistos, cliques, dispensa %, conversões. Ações: Pausar, Duplicar, Encerrar. No relatório de cada aviso: funil Elegíveis → Vistos → Clicaram → Converteram, dispensa % (alerta > 40 %), quebra por produto e situação, e o botão **Salvar quem converteu como segmento**.
+
+
+**Design do pop-up (22/10/2026, `docs/26` §2).** Só no pop-up, card **Design** depois do conteúdo:
+
+- **Padrão** | **Personalizado** (`name="popup-design"`); a primeira vez em Personalizado mostra **Começar de um modelo** (Mídia no topo com degradê, Só texto, Texto sobre a mídia); sem botão no aviso, o modelo cria `Saiba mais` com o destino vazio; voltar a Padrão guarda o design em memória; **Trocar de modelo** confirma;
+- seções, nesta ordem: **Mídia** (Sem mídia, Imagem, Vídeo com envio direto ao Storage e porcentagem; sem imagem, um quadro do vídeo vira a capa; formato, recorte, degradê), **Texto e posição** (zonas, subir, alinhamento, espaço), **Blocos** (Subir, Descer, Editar, Tirar; Adicionar bloco; até 12), **Cartão** (largura P/M/G, fundo, borda, cantos, respiro, sombra), **Fontes** (biblioteca com Renomear, Excluir e Enviar fonte), **Fechar e links**;
+- o destino do botão principal é o `NoticeCtaField` de sempre dentro do bloco (sem a chave "Levar o aluno a algum lugar", prop `showSwitch={false}`); "Quando o aluno clica no botão" também libera com um Segundo botão "Abrir um link";
+- salvar e sair da página esperam o vídeo terminar de subir (`Espere o vídeo terminar de enviar.`); cada erro do design foca o campo (`docs/26` §2.3); a dica de contraste nunca impede salvar;
+- o relatório mostra a mesma prévia com as fontes do design.
 
 #### 1.8.3 Webinários (`/admin/comunicacao/webinarios`)
 

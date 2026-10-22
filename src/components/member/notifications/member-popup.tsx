@@ -11,6 +11,7 @@ import type { PopupItem } from "@/server/communications/notification-model";
 import { NoticeAudioPlayer } from "./notice-audio-player";
 import { NoticeTitleIcon } from "./notice-icons";
 import { resolveNotificationLink, type NotificationLink } from "./notifications-model";
+import { PopupDesignCard } from "./popup-design/popup-design-card";
 
 // Pop-up do aluno (docs/22 §1.3; v3b-1 em docs/25): nas paginas, no momento e na frequencia que a equipe
 // escolheu, um de cada vez, so quando nada mais esta aberto por cima e a aba esta visivel (na aula, nunca
@@ -26,6 +27,9 @@ import { resolveNotificationLink, type NotificationLink } from "./notifications-
 //
 // O icone do aviso (docs/23) vai antes do titulo, dentro do <h2> (20 px, aria-hidden: o nome do dialogo
 // continua sendo o titulo). O audio do pop-up nao guarda o ouvido (sem `listen`): e o player da v1.
+//
+// Design do pop-up (docs/26): com `popup.design` ("Personalizado"), o cartao e o PopupDesignCard
+// (popup-design/), com as mesmas props; sem design ("Padrão"), exatamente o cartao de sempre.
 
 export type MemberPopupCardProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -37,6 +41,8 @@ export type MemberPopupCardProps = {
   onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink) => void;
   onDismiss?: () => void;
   onSnooze?: () => void;
+  /** Personalizado: false pausa o video (a janela fechando); padrao true. O Padrão nao tem video. */
+  playing?: boolean;
   popup: PopupItem;
   /** Previa do admin: mesmo visual, sem links, audio parado e botoes sem acao. */
   preview?: boolean;
@@ -85,7 +91,14 @@ function PopupCta({
   );
 }
 
-export function MemberPopupCard({
+export function MemberPopupCard({ playing, ...props }: MemberPopupCardProps) {
+  const { design, fonts } = props.popup;
+
+  return design ? <PopupDesignCard {...props} design={design} fonts={fonts} playing={playing} /> : <DefaultPopupCard {...props} />;
+}
+
+/** O cartao "Padrão" (o de sempre). */
+function DefaultPopupCard({
   accessPreviewMode,
   bodyId,
   nudgeClose = false,
@@ -96,7 +109,7 @@ export function MemberPopupCard({
   popup,
   preview = false,
   titleId
-}: MemberPopupCardProps) {
+}: Omit<MemberPopupCardProps, "playing">) {
   const image = popup.image?.url ? popup.image : null;
   const snoozeClassName = memberButtonClassName({ className: "-ml-3", size: "sm", variant: "ghost" });
   const dismissClassName = memberButtonClassName({ className: "-mr-3 ml-auto text-zinc-400", size: "sm", variant: "ghost" });

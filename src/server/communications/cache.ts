@@ -11,7 +11,8 @@ import { revalidateTag, updateTag } from "next/cache";
 export const COMMUNICATIONS_TAG = "communications";
 // v3b-1: a chave ganhou "v3b1" porque a entrada mudou de formato (configuracao de cada pop-up junto) e o
 // Data Cache da Vercel sobrevive ao deploy: uma entrada do formato da v3a nunca e lida.
-export const LIVE_POPUPS_CACHE_KEY = ["communications-live-popups", "v3b1"] as const;
+// Design do pop-up (docs/26): "design1" pelo mesmo motivo (cada entrada leva o design e as fontes resolvidas).
+export const LIVE_POPUPS_CACHE_KEY = ["communications-live-popups", "design1"] as const;
 
 export function invalidateLivePopups({ from }: { from: "action" | "route" }) {
   if (from === "action") {

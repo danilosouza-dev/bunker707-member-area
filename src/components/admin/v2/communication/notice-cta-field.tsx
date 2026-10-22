@@ -51,6 +51,8 @@ type NoticeCtaFieldProps = {
   onChange: (cta: NoticeCta | null) => void;
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
+  /** false: sem a chave "Levar o aluno a algum lugar" (bloco Botão principal do design do pop-up, docs/26). */
+  showSwitch?: boolean;
   value: NoticeCta | null;
 };
 
@@ -82,7 +84,7 @@ function Note({ children, tone = "neutral" }: { children: string; tone?: "neutra
   );
 }
 
-export function NoticeCtaField({ disabled, errors, idPrefix = "aviso", kind, onBlurField, onChange, products, productsLoaded, value }: NoticeCtaFieldProps) {
+export function NoticeCtaField({ disabled, errors, idPrefix = "aviso", kind, onBlurField, onChange, products, productsLoaded, showSwitch = true, value }: NoticeCtaFieldProps) {
   const cta = value ?? EMPTY_CTA;
   const id = (suffix: string) => `${idPrefix}-botao-${suffix}`;
   const display = ctaDisplayOf(kind, cta);
@@ -124,15 +126,17 @@ export function NoticeCtaField({ disabled, errors, idPrefix = "aviso", kind, onB
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <AdminSwitch
-        checked={value !== null}
-        description={ctaSwitchDescription(kind, value)}
-        disabled={disabled}
-        id={id("mostrar")}
-        label={CTA_FIELD_COPY.switchLabel}
-        // O que foi escrito volta ao religar; no pop-up, sempre pelo botao (o modo pode ser de quando era notificacao).
-        onCheckedChange={(checked) => onChange(checked ? { ...lastCta.current, ...(kind === "popup" ? { display: "button" as const } : {}) } : null)}
-      />
+      {showSwitch ? (
+        <AdminSwitch
+          checked={value !== null}
+          description={ctaSwitchDescription(kind, value)}
+          disabled={disabled}
+          id={id("mostrar")}
+          label={CTA_FIELD_COPY.switchLabel}
+          // O que foi escrito volta ao religar; no pop-up, sempre pelo botao (o modo pode ser de quando era notificacao).
+          onCheckedChange={(checked) => onChange(checked ? { ...lastCta.current, ...(kind === "popup" ? { display: "button" as const } : {}) } : null)}
+        />
+      ) : null}
 
       {value ? (
         <>

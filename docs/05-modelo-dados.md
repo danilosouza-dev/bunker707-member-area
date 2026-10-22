@@ -1648,6 +1648,33 @@ RLS como estava (ligada, nada para `anon`/`authenticated`). Nenhum indice novo: 
 **Deploy**: **antes** do merge na `dev` (Supabase da nuvem, `docs/25` §10 passo 1; na Hetzner o `deploy-membros` aplica as migracoes antes de trocar o app). Sem ela, o app novo mostra o aviso de banco desatualizado no admin (as colunas novas estao em `CAMPAIGN_COLUMNS`), responde `popups: null` no resumo e 404 no `show`, e o job `comunicacao` do tick falha (para notificacoes agendadas, seguintes e fluxos). A migracao sozinha nao atrapalha o app da v3a. Depois do merge, nao editar pop-ups pela previa de uma PR mais antiga (salvar um "Mais de uma vez" como o "Uma vez" da v3a fere `campaigns_popup_frequency_v3b`).
 
 
+### Design do pop-up (migracao `202610230001`, 22/10/2026)
+
+Produto em `docs/26`. O pop-up "Personalizado" (midia com video ou imagem que some num degrade, selo, titulo de 1 a 4 linhas, texto, botoes com estilo livre e fontes enviadas). Arquivo novo (as `202610200001` ... `202610220003` nao mudam; o teste de guarda `popup-design.guard` fixa o sha256 da nova e confere os hashes das antigas). Tres secoes aditivas e idempotentes, todas pelo MCP: sem `drop`, `delete`, gatilho ou funcao; constraint dentro de `if not exists`; nada para o SQL Editor.
+
+**campaigns**: `popup_design jsonb` (nulo = **Padrão**, o visual de antes; nenhuma linha e reescrita). Check `campaigns_popup_design_v1`: nulo, ou `kind = 'popup'` com objeto, `version` numerica (com `coalesce`, para um objeto sem `version` nao passar) e `pg_column_size <= 32768`. O formato fino (versao 1: `card`, `media`, `text`, `blocks[]`, `close`, `links`, `fonts[]`) mora no zod `popup-design-schema.ts`, conferido ao salvar **e** ao ler (invalido ou de outra versao = Padrão). O video guarda `{ path, url, mimeType }` e a url e recalculada do caminho pelo servidor; fontes enviadas so pelo id. O design nao cita o aviso (pode virar modelo salvo sem migracao). `CAMPAIGN_COLUMNS` le a coluna; a notificacao nunca tem design (o app tira a chave; o check recusa).
+
+**communication_fonts** (nova; a biblioteca de fontes enviadas pela equipe):
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id` | uuid | chave |
+| `name` | text | 1 a 60 caracteres (o que a equipe ve no seletor) |
+| `family_key` | text | `^bf_[a-f0-9]{12}$`, unico (a familia no CSS do aluno; nunca o nome do produtor) |
+| `file_path` | text | `^fonts/[a-f0-9]{24}\.(woff2\|woff\|ttf\|otf)$` (24 hex do sha256: o mesmo arquivo nao duplica; unico entre as nao excluidas) |
+| `format` | text | `woff2`, `woff`, `truetype`, `opentype` (pelos primeiros bytes) |
+| `weight` | smallint | 100 a 900, de 100 em 100 (so rotula o seletor; o FontFace vale `100 900`) |
+| `style` | text | `normal` ou `italic` |
+| `size_bytes` | integer | 1 a 2.097.152 |
+| `created_by` | uuid | `auth.users`, `on delete set null` |
+| `created_at`, `deleted_at` | timestamptz | excluir = `deleted_at` (o arquivo fica: pop-up gravado nunca perde a fonte) |
+
+Indices: `family_key` unico; `file_path` unico onde `deleted_at is null`; `name` onde `deleted_at is null` (a lista). RLS ligado e **sem politica**; `revoke all` de `anon`/`authenticated`; so `service_role`. O aluno recebe so `{ family, format, id, style, url, weight }` das fontes do pop-up que esta abrindo (resolvidas pelo servidor, sem olhar `deleted_at`). Excluir uma fonte em uso por pop-up nao excluido (`popup_design @> {"fonts":[id]}`) e recusado (409). `limparComunicacao` (testes) apaga as fontes das contas de teste.
+
+**Storage**: buckets publicos `communication-fonts` (2 MB; `font/woff2`, `font/woff`, `font/ttf`, `font/otf`; objetos `fonts/<24 hex>.<ext>`, `cacheControl` de 1 ano) e `communication-popup-video` (15 MB; `video/mp4`, `video/webm`; objetos `videos/<uuid>.<mp4|webm>`, enviados pelo navegador por endereco assinado). Arquivos orfaos (video trocado, fonte excluida) ficam nesta versao (`docs/26` D21).
+
+**Deploy**: **antes** do merge na `dev` (`docs/26` §11 passo 1). Sem ela, o app novo mostra o aviso de banco desatualizado no admin (`popup_design` esta em `CAMPAIGN_COLUMNS`) e a lista de pop-ups no ar falha. A migracao sozinha nao atrapalha o app da v3b-1.
+
 ## Retencao de dados pessoais
 
 Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.

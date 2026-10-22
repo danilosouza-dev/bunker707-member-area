@@ -8,6 +8,7 @@
 import { INBOX_HISTORY_DAYS } from "./campaign-model";
 import type { NotificationPoll, ReactionId } from "./interactions-model";
 import type { NoticeIconColor, NoticeIconId } from "./message-meta";
+import type { PopupDesign, PopupFontFace } from "./popup-design-model";
 
 export type { NotificationPoll } from "./interactions-model";
 
@@ -97,6 +98,16 @@ export type PopupItem = {
   /** v3b-1: so quando "Só no X"; sem a chave = fecha no X, no Esc ou clicando fora (o objeto padrao fica igual ao da v1). */
   close?: "x_only";
   cta: PopupCta | null;
+  /**
+   * Design "Personalizado" (docs/26), validado no servidor (popup-design-schema.ts) e com o endereco do video
+   * recalculado do caminho. Sem a chave = Padrão: a resposta continua exatamente a da v3b-1.
+   */
+  design?: PopupDesign;
+  /**
+   * Fontes enviadas que o design usa, resolvidas no servidor (o navegador nunca le a tabela). So vem junto com
+   * `design`; pode faltar uma fonte (o texto cai na pilha do sistema).
+   */
+  fonts?: PopupFontFace[];
   /**
    * Icone ao lado do titulo. A API so manda a chave quando o pop-up tem icone: sem icone, a resposta do
    * resumo continua exatamente a da v1.

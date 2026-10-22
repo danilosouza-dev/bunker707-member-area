@@ -13,6 +13,9 @@ import "server-only";
 // A equipe nunca tem linha de entrega: nunca ve pop-up. Os caminhos da v1 (?popup=1 e o evento "impressed")
 // continuam para as abas abertas antes do deploy. v2 (docs/23): sem icone, a chave nem vai; v3b-1: `close`
 // so vai no "Só no X" (o pop-up padrao fica igual ao da v1).
+// Design do pop-up (docs/26): a lista no ar leva o design de cada pop-up (lido pelo schema; invalido = Padrão;
+// endereco do video recalculado do caminho) e as fontes enviadas resolvidas numa consulta so. `design` e
+// `fonts` so vao no Personalizado (o Padrão continua com a resposta de antes).
 
 import { unstable_cache } from "next/cache";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
@@ -22,6 +25,8 @@ import { canSnooze, isPopupLive, popupEventPatch, type PopupEvent } from "./camp
 import { assertNoDbError, communicationsDb, CommunicationError, describeError, isMissingCommunicationSchema } from "./db";
 import { noticeIconOfColumns } from "./message-meta";
 import { normalizePeaks, type PopupItem, type PopupsAnswer } from "./notification-model";
+import type { PopupDesign, PopupFontFace } from "./popup-design-model";
+import { parsePopupDesign } from "./popup-design-schema";
 import {
   coversPage,
   decideShow,
@@ -37,6 +42,7 @@ import {
   type PopupCountState,
   type PopupNext
 } from "./popup-display-model";
+import { loadPopupFontFaces, withOwnStorageUrls } from "./popup-fonts";
 import {
   fetchFormationCourses,
   fetchPopupDeliveries,
@@ -65,8 +71,11 @@ export class PopupRefusedError extends CommunicationError {
   }
 }
 
-/** Um pop-up da lista no ar: o conteudo (so sai no show) e as regras (paginas, momento, quantas vezes). */
-type LivePopupEntry = { row: LivePopupRow; rules: LivePopupRules };
+/**
+ * Um pop-up da lista no ar: o conteudo (so sai no show), as regras (paginas, momento, quantas vezes) e o design
+ * com as fontes que ele usa (null/[] no Padrão).
+ */
+type LivePopupEntry = { design: PopupDesign | null; fonts: PopupFontFace[]; row: LivePopupRow; rules: LivePopupRules };
 
 /** Resposta do show: o conteudo, quando pode voltar e as vezes no dia (o historico grava ate 100 por dia). */
 export type PopupShowResult = { dayImpressions: number; next: PopupNext; popup: PopupItem };
@@ -125,10 +134,28 @@ async function loadLivePopupEntries(): Promise<LivePopupEntry[]> {
     }
   }
 
+  // Design do pop-up (docs/26): invalido = Padrão; as fontes numa consulta (falha = sem fonte enviada, o texto
+  // cai na pilha do sistema; o pop-up nunca cai).
+  const designs = rows.map((row) => withOwnStorageUrls(db, parsePopupDesign(row.popup_design)));
+  const fontIds = designs.flatMap((design) => design?.fonts ?? []);
+  let faces: PopupFontFace[] = [];
+
+  if (fontIds.length > 0) {
+    try {
+      faces = await loadPopupFontFaces(db, fontIds);
+    } catch (error) {
+      console.error(`[comunicacao] fontes dos pop-ups: ${describeError(error)}`);
+      faces = [];
+    }
+  }
+
   return rows.map((row, index) => {
     const own = settings[index];
+    const design = designs[index];
 
     return {
+      design,
+      fonts: design ? faces.filter((face) => design.fonts.includes(face.id)) : [],
       row,
       rules: {
         allowSnooze: row.allow_snooze,
@@ -188,6 +215,8 @@ function toPopupItem(entry: LivePopupEntry, delivery: PopupCountState): PopupIte
   return {
     ...(icon ? { icon } : {}),
     ...(entry.rules.settings.close === "x_only" ? { close: "x_only" as const } : {}),
+    // Design do pop-up (docs/26): so no Personalizado (o Padrão continua com o objeto de antes).
+    ...(entry.design ? { design: entry.design, fonts: entry.fonts } : {}),
     audio:
       audioUrl && row.audio_duration_seconds
         ? { durationSeconds: row.audio_duration_seconds, mimeType: row.audio_mime, peaks: normalizePeaks(row.audio_peaks), url: audioUrl }

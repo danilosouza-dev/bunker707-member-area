@@ -1,0 +1,484 @@
+import assert from "node:assert/strict";
+import { readFile, readdir } from "node:fs/promises";
+import test from "node:test";
+import "./support/admin-action-stubs.mjs";
+
+// Editor do "Design do pop-up" (docs/26; spec §7.3; docs/18 §1.1): as pecas puras do card "Design" do editor
+// (popup-design-editor-model.ts). Escolher um modelo (cria o botao "Saiba mais" quando falta e mantem o video),
+// Padrão <-> Personalizado com memoria, acrescentar/tirar/subir/descer bloco (limite de 12, ids unicos, tirar o
+// botao principal tira o botao do aviso), a sincronia com o botao e o audio, o foco de cada erro do design
+// (todas as chaves do §7.2, com os ids que existem nas telas), os pesos de cada fonte, a conferencia do video e
+// da fonte antes de enviar e o vocabulario da equipe. Tudo carregado direto pelo Node.
+
+const editor = await import("../src/components/admin/v2/communication/popup-design/popup-design-editor-model.ts");
+const model = await import("../src/server/communications/popup-design-model.ts");
+const designSchema = await import("../src/server/communications/popup-design-schema.ts");
+const schemas = await import("../src/server/communications/schemas.ts");
+const viewModel = await import("../src/components/admin/v2/communication/notices-view-model.ts");
+
+const ORIGIN = "http://127.0.0.1:55321";
+const VIDEO_PATH = "videos/0b7c7f3e-2d1a-4c55-9a4e-5f1f7b2c9d10.mp4";
+const VIDEO = { mimeType: "video/mp4", path: VIDEO_PATH, url: `${ORIGIN}/storage/v1/object/public/communication-popup-video/${VIDEO_PATH}` };
+const IMAGE = { alt: "", url: `${ORIGIN}/storage/v1/object/public/content-assets/communications/images/capa.webp` };
+const CTA = { href: "/minhas-compras", label: "Quero ver", target: "same_tab" };
+const AUDIO = { durationSeconds: 12, mimeType: "audio/webm", peaks: [], url: `${ORIGIN}/storage/v1/object/public/communication-audio/audio/a.webm` };
+const FONT_ID = "6f1c2c9e-8d55-4f3a-9a1b-0c2d3e4f5a6b";
+
+const PROIBIDAS = ["campanha", "público", "audiência", "evento", "oferta", "gatilho", "trigger", "sessão", "impressão", "home", "layout", "template", "automação", "lembrete"];
+
+function popupDraft(overrides = {}) {
+  return { ...schemas.emptyNoticeDraft("popup"), cta: CTA, image: IMAGE, title: "Aula nova", ...overrides };
+}
+
+function errorsOf(draft) {
+  const parsed = schemas.noticeDraftSchema.safeParse(viewModel.noticeDraftForKind(draft));
+  return parsed.success ? {} : viewModel.noticeErrorsFrom(parsed.error.issues);
+}
+
+function collectStrings(value, into = []) {
+  if (typeof value === "string") {
+    into.push(value);
+  } else if (Array.isArray(value)) {
+    value.forEach((item) => collectStrings(item, into));
+  } else if (value && typeof value === "object") {
+    Object.values(value).forEach((item) => collectStrings(item, into));
+  }
+
+  return into;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Modelos para comecar
+ * ---------------------------------------------------------------------------------------------- */
+
+test("modelo: cada um preenche um design valido, canonico e sem dica de contraste; sem botao, cria o “Saiba mais”", () => {
+  assert.deepEqual(
+    editor.DESIGN_STARTER_OPTIONS.map((starter) => starter.label),
+    ["Mídia no topo com degradê", "Só texto", "Texto sobre a mídia"]
+  );
+
+  for (const { id } of editor.DESIGN_STARTER_OPTIONS) {
+    const semBotao = editor.applyStarter({ audio: null, cta: null }, id, null);
+    assert.deepEqual(semBotao.cta, { href: "", label: "Saiba mais", target: "same_tab" }, `${id}: botao criado com o destino a escolher`);
+    assert.equal(designSchema.popupDesignSchema.safeParse(semBotao.design).success, true, id);
+    assert.deepEqual(model.canonicalPopupDesign(semBotao.design), semBotao.design, `${id}: canonico`);
+    assert.deepEqual(model.popupDesignContrastHints(semBotao.design), [], `${id}: sem dica de contraste`);
+    assert.equal(semBotao.design.blocks.filter((block) => block.type === "button").length, 1);
+
+    const comBotao = editor.applyStarter({ audio: null, cta: CTA }, id, null);
+    assert.equal("cta" in comBotao, false, `${id}: o botao que ja existe fica como esta`);
+
+    // O rascunho inteiro passa (o destino vazio do "Saiba mais" e o unico erro).
+    assert.deepEqual(errorsOf(popupDraft({ ...semBotao, cta: { ...semBotao.cta, href: "/minhas-compras" } })), {}, id);
+    assert.deepEqual(Object.keys(errorsOf(popupDraft(semBotao))), ["cta.href"], `${id}: so falta escolher para onde leva`);
+  }
+});
+
+test("modelo: com audio entra o bloco Áudio; o video que ja estava no design continua (e a midia vira Vídeo)", () => {
+  const comAudio = editor.applyStarter({ audio: AUDIO, cta: CTA }, "media_top_fade", null);
+  assert.equal(comAudio.design.blocks.filter((block) => block.type === "audio").length, 1);
+  assert.deepEqual(errorsOf(popupDraft({ audio: AUDIO, design: comAudio.design })), {});
+
+  const anterior = editor.applyStarter({ audio: null, cta: CTA }, "text_only", { ...model.popupStarterDesign("media_top_fade"), media: { ...model.popupStarterDesign("media_top_fade").media, kind: "video", video: VIDEO } });
+  assert.deepEqual(anterior.design.media.video, VIDEO, "o video fica guardado mesmo no modelo sem midia");
+  assert.equal(anterior.design.media.kind, "none");
+
+  const comVideo = editor.applyStarter({ audio: null, cta: CTA }, "media_overlay", anterior.design);
+  assert.equal(comVideo.design.media.kind, "video");
+  assert.deepEqual(comVideo.design.media.video, VIDEO);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Padrão <-> Personalizado
+ * ---------------------------------------------------------------------------------------------- */
+
+test("Padrão <-> Personalizado: voltar ao Padrão guarda o design; voltar ao Personalizado devolve, coerente com o botao e o audio", () => {
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+
+  const paraPadrao = editor.switchDesignMode({ audio: null, cta: CTA, design }, "default", null);
+  assert.deepEqual(paraPadrao.patch, { design: null });
+  assert.equal(paraPadrao.remembered, design);
+
+  // No Padrão o produtor tirou o botao e gravou um audio: o design volta com o bloco Áudio e sem o botao.
+  const devolta = editor.switchDesignMode({ audio: AUDIO, cta: null, design: null }, "custom", paraPadrao.remembered);
+  assert.deepEqual(
+    devolta.patch.design.blocks.map((block) => block.type),
+    ["badge", "heading", "text", "audio"]
+  );
+  assert.deepEqual(errorsOf(popupDraft({ audio: AUDIO, cta: null, design: devolta.patch.design })), {});
+
+  // Primeira vez no Personalizado (sem memoria): nada muda ainda, a tela mostra os modelos.
+  assert.deepEqual(editor.switchDesignMode({ audio: null, cta: CTA, design: null }, "custom", null), { patch: null, remembered: null });
+  // Ja no modo pedido: nada muda.
+  assert.equal(editor.switchDesignMode({ audio: null, cta: CTA, design }, "custom", null).patch, null);
+  assert.equal(editor.switchDesignMode({ audio: null, cta: CTA, design: null }, "default", design).patch, null);
+});
+
+test("sincronia: no Personalizado, tirar o botao tira o bloco do botao; gravar o audio poe o bloco Áudio antes do botao", () => {
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+  const draft = popupDraft({ design });
+
+  const semBotao = editor.withSyncedDesign(draft, { cta: null });
+  assert.equal(semBotao.design.blocks.some((block) => block.type === "button"), false);
+
+  const comAudio = editor.withSyncedDesign(draft, { audio: AUDIO });
+  assert.deepEqual(
+    comAudio.design.blocks.map((block) => block.type),
+    ["badge", "heading", "text", "audio", "button"]
+  );
+  assert.deepEqual(errorsOf(comAudio), {});
+
+  // Outras mudancas, o Padrão e a notificacao ficam como estao.
+  assert.equal(editor.withSyncedDesign(draft, { title: "Outro" }).design, design);
+  assert.equal(editor.withSyncedDesign(popupDraft({ design: null }), { cta: null }).design, null);
+  const inbox = { ...schemas.emptyNoticeDraft("inbox"), design };
+  assert.equal(editor.withSyncedDesign(inbox, { cta: null }).design, design);
+});
+
+test("quantas vezes: sem botao principal, um segundo botao com link libera “Quando o aluno clica no botão” (D9)", async () => {
+  const popupEditor = await import("../src/components/admin/v2/communication/popup-editor-model.ts");
+  const semBotao = editor.withSyncedDesign(popupDraft({ design: editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design }), { cta: null });
+  const fechar = { ...model.newPopupBlock("button2", "b8"), action: { kind: "close" } };
+  const link = { ...model.newPopupBlock("button2", "b8"), action: { href: "/minhas-compras", kind: "link", target: "same_tab" } };
+
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, design: semBotao.design }), true, "sem botao e sem link, o clique nunca pararia");
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, design: { ...semBotao.design, blocks: [...semBotao.design.blocks, fechar] } }), true, "Fechar nao conta como o clique");
+  const comLink = { ...semBotao.design, blocks: [...semBotao.design.blocks, link] };
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, design: comLink }), false, "o link do segundo botao conta como o clique");
+  assert.equal(popupEditor.repeatStartOf({ cta: null, design: comLink }).stopOn, "click");
+  assert.equal(popupEditor.repeatStartOf({ cta: null, design: semBotao.design }).stopOn, "never");
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, design: null }), true, "Padrão sem botao: como antes");
+
+  // O aviso sem botao no Personalizado aponta para o card Design (nao para a chave que o Personalizado esconde).
+  assert.equal(popupEditor.POPUP_EDITOR_COPY.frequency.stopNoButtonDesign, "Este pop-up não tem botão. Acrescente o Botão principal no Design ou escolha outra opção.");
+
+  // O schema aceita o mesmo (sem erro em popup.frequency.stopOn).
+  const repetir = { ...semBotao, design: comLink, popup: { ...semBotao.popup, frequency: { everyMinutes: null, maxPerDay: 1, maxTotal: null, mode: "repeat", stopOn: "click" } } };
+  assert.equal(errorsOf(repetir)["popup.frequency.stopOn"], undefined);
+  assert.ok(errorsOf({ ...repetir, design: semBotao.design })["popup.frequency.stopOn"]);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Blocos
+ * ---------------------------------------------------------------------------------------------- */
+
+test("blocos: selo, titulo, texto e espaco entram antes do botao; o segundo botao no fim; o Botão principal cria o botao do aviso", () => {
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+
+  const texto = editor.addBlock({ audio: null, cta: CTA, design }, "text");
+  assert.equal(texto.index, 3);
+  assert.deepEqual(
+    texto.design.blocks.map((block) => block.type),
+    ["badge", "heading", "text", "text", "button"]
+  );
+
+  const segundo = editor.addBlock({ audio: null, cta: CTA, design: texto.design }, "button2");
+  assert.equal(segundo.design.blocks.at(-1).type, "button2");
+  assert.deepEqual(editor.addableBlockTypes(segundo.design), ["badge", "heading", "text", "spacer"], "botao e segundo botao so uma vez");
+  assert.equal(editor.addBlock({ audio: null, cta: CTA, design: segundo.design }, "button2"), null);
+
+  // Sem botao: "Botão principal" volta a aparecer e cria o "Saiba mais".
+  const tirado = editor.removeBlock(design, design.blocks.findIndex((block) => block.type === "button"));
+  assert.equal(tirado.cta, null, "tirar o botao principal tira o botao do aviso");
+  assert.ok(editor.addableBlockTypes(tirado.design).includes("button"));
+  const principal = editor.addBlock({ audio: null, cta: null, design: tirado.design }, "button");
+  assert.deepEqual(principal.cta, { href: "", label: "Saiba mais", target: "same_tab" });
+  assert.equal(principal.design.blocks.at(-1).type, "button");
+
+  for (const patch of [texto, segundo]) {
+    assert.deepEqual(errorsOf(popupDraft({ design: patch.design })), {}, "o design continua valido");
+  }
+});
+
+test("blocos: no maximo 12, ids unicos; o Áudio e o ultimo bloco nao saem; subir e descer param nas pontas", () => {
+  let design = editor.applyStarter({ audio: AUDIO, cta: CTA }, "text_only", null).design;
+
+  while (editor.canAddBlock(design)) {
+    design = editor.addBlock({ audio: AUDIO, cta: CTA, design }, "spacer").design;
+  }
+
+  assert.equal(design.blocks.length, 12);
+  assert.equal(new Set(design.blocks.map((block) => block.id)).size, 12, "ids unicos");
+  assert.ok(design.blocks.every((block) => model.POPUP_BLOCK_ID_PATTERN.test(block.id)));
+  assert.equal(editor.addBlock({ audio: AUDIO, cta: CTA, design }, "text"), null, "o 13º nao entra");
+  assert.equal(editor.POPUP_DESIGN_COPY.blocks.limit, "Use até 12 blocos.");
+  assert.deepEqual(errorsOf(popupDraft({ audio: AUDIO, design })), {});
+
+  const audio = design.blocks.findIndex((block) => block.type === "audio");
+  assert.equal(editor.canRemoveBlock(design, audio), false);
+  assert.equal(editor.removeBlock(design, audio), null);
+
+  const unico = { ...design, blocks: [design.blocks[0]] };
+  assert.equal(editor.canRemoveBlock(unico, 0), false, "o design nunca fica sem bloco");
+
+  const inicio = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+  assert.equal(editor.moveBlock(inicio, 0, -1), inicio);
+  assert.equal(editor.moveBlock(inicio, inicio.blocks.length - 1, 1), inicio);
+  const descido = editor.moveBlock(inicio, 0, 1);
+  assert.deepEqual(
+    descido.blocks.map((block) => block.type),
+    ["heading", "badge", "text", "button"]
+  );
+  assert.deepEqual(editor.moveBlock(descido, 1, -1).blocks, inicio.blocks);
+});
+
+test("blocos: trocar a fonte por uma enviada recalcula as fontes do design; nome e resumo de cada bloco", () => {
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+  const heading = design.blocks[1];
+  const trocado = editor.replaceBlock(design, 1, { ...heading, style: { ...heading.style, font: { id: FONT_ID, kind: "uploaded" } } });
+  assert.deepEqual(trocado.fonts, [FONT_ID]);
+
+  assert.equal(editor.blockSummary(design.blocks[1], CTA), "Conteúdo novo / Já disponível");
+  assert.equal(editor.blockSummary(design.blocks[3], CTA), "Quero ver");
+  assert.equal(editor.blockSummary(design.blocks[3], null), "Sem texto");
+  assert.equal(editor.blockSummary(model.newPopupBlock("button2", "b9"), CTA), "Agora não · Fechar");
+  assert.equal(editor.blockSummary(model.newPopupBlock("spacer", "b9"), CTA), "16 px");
+
+  const doisTextos = editor.addBlock({ audio: null, cta: CTA, design }, "text").design;
+  assert.equal(editor.blockName(doisTextos, 2), "Texto 1");
+  assert.equal(editor.blockName(doisTextos, 3), "Texto 2");
+  assert.equal(editor.blockName(doisTextos, 0), "Selo");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Foco de cada erro
+ * ---------------------------------------------------------------------------------------------- */
+
+test("foco: cada chave do design leva ao campo da tabela do §7.2", () => {
+  const casos = [
+    ["design.blocks.1.lines.0.text", "#popup-design-bloco-1-linha-0"],
+    ["design.blocks.1.lines.2", "#popup-design-bloco-1-linha-2"],
+    ["design.blocks.2.text", "#popup-design-bloco-2-texto"],
+    ["design.blocks.4.label", "#popup-design-bloco-4-rotulo"],
+    ["design.blocks.4.action", "#popup-design-bloco-4-link, #popup-design-bloco-4 [name$='-acao']"],
+    ["design.blocks.4.action.href", "#popup-design-bloco-4-link, #popup-design-bloco-4 [name$='-acao']"],
+    ["design.blocks.0.style.size", "#popup-design-bloco-0"],
+    ["design.blocks.3", "#popup-design-bloco-3"],
+    ["design.blocks", "#popup-design-blocos"],
+    ["design.media.video", "#popup-design-video"],
+    ["design.media.fade.height", "[name='popup-design-midia']"],
+    ["design.media", "[name='popup-design-midia']"],
+    ["design.text.gap", "[name='popup-design-posicao']"],
+    ["design.card.radius", "#popup-design-cartao"],
+    ["design.close.color", "#popup-design-fechar"],
+    ["design.links.color", "#popup-design-fechar"],
+    ["design.fonts", "#popup-design-fontes"],
+    ["design.version", "[name='popup-design']"],
+    ["design", "[name='popup-design']"]
+  ];
+
+  for (const [key, selector] of casos) {
+    assert.equal(editor.popupDesignFocusSelector(key), selector, key);
+  }
+
+  assert.equal(editor.popupDesignFocusSelector("cta.label"), null, "o botao e a imagem seguem com os ids de hoje");
+  assert.equal(editor.popupDesignFocusSelector("designer"), null);
+});
+
+test("foco: os erros que o schema da de verdade caem no seletor certo, e os ids existem nas telas", async () => {
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+  const heading = design.blocks[1];
+  const quebrado = {
+    ...design,
+    blocks: [
+      design.blocks[0],
+      { ...heading, lines: [{ ...heading.lines[0], text: "  " }] },
+      { ...design.blocks[2], text: "" },
+      design.blocks[3],
+      { ...model.newPopupBlock("button2", "b7"), label: "" }
+    ]
+  };
+  const erros = errorsOf(popupDraft({ design: quebrado }));
+  assert.equal(erros["design.blocks.1.lines.0.text"], "Escreva o texto da linha.");
+  assert.equal(erros["design.blocks.2.text"], "Escreva o texto.");
+  assert.equal(erros["design.blocks.4.label"], "Escreva o texto do botão.");
+
+  const lembrar = errorsOf(popupDraft({ allowSnooze: false, design: { ...design, blocks: [...design.blocks, { ...model.newPopupBlock("button2", "b7"), action: { kind: "snooze" } }] } }));
+  assert.equal(lembrar["design.blocks.4.action"], "Este botão usa o “Lembrar depois”, que está desligado neste pop-up.");
+  assert.equal(editor.popupDesignFocusSelector("design.blocks.4.action"), "#popup-design-bloco-4-link, #popup-design-bloco-4 [name$='-acao']");
+
+  const semVideo = errorsOf(popupDraft({ design: { ...design, media: { ...design.media, kind: "video", video: null } } }));
+  assert.equal(semVideo["design.media.video"], "Envie o vídeo ou escolha outra mídia.");
+
+  const semBloco = errorsOf(popupDraft({ design: { ...design, blocks: design.blocks.filter((block) => block.type !== "button") } }));
+  assert.equal(semBloco["design.blocks"], "Falta o bloco do botão principal no design.");
+
+  // Os ids e nomes dos seletores existem nas telas do editor.
+  const pasta = new URL("../src/components/admin/v2/communication/popup-design/", import.meta.url);
+  const telas = (await Promise.all((await readdir(pasta)).filter((file) => file.endsWith(".tsx")).map((file) => readFile(new URL(file, pasta), "utf8")))).join("\n");
+
+  for (const pedaco of [
+    'name="popup-design"',
+    'name="popup-design-midia"',
+    'name="popup-design-posicao"',
+    'id="popup-design-video"',
+    'id="popup-design-blocos"',
+    'id="popup-design-cartao"',
+    'id="popup-design-fechar"',
+    'id="popup-design-fontes"',
+    "`popup-design-bloco-${index}`",
+    "-linha-${",
+    "-texto`",
+    "-rotulo`",
+    "-link`",
+    "-acao`",
+    'idPrefix="aviso"',
+    'id="aviso-imagem"'
+  ]) {
+    assert.ok(telas.includes(pedaco), `as telas tem ${pedaco}`);
+  }
+
+  // O editor soma "design" ao FIELD_FOCUS (depois do botao, antes de "Para quem") e resolve o seletor pelo modelo.
+  const editorTela = await readFile(new URL("../src/components/admin/v2/communication/notice-editor.tsx", import.meta.url), "utf8");
+  const bloco = editorTela.slice(editorTela.indexOf("const FIELD_FOCUS"), editorTela.indexOf("];", editorTela.indexOf("const FIELD_FOCUS")));
+  const prefixos = [...bloco.matchAll(/\["([^"]+)",\s*"[^"]+"\]/g)].map((match) => match[1]);
+  assert.ok(prefixos.includes("design"));
+  assert.ok(prefixos.indexOf("design") > prefixos.indexOf("cta") && prefixos.indexOf("design") < prefixos.indexOf("audience"));
+  assert.match(editorTela, /popupDesignFocusSelector\(/);
+});
+
+test("foco: o bloco com erro abre a edicao (chaves do bloco e, no botao principal, as do cta)", () => {
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+  assert.ok(editor.blockErrorKeys(design.blocks[1], 1).includes("design.blocks.1.lines.1.text"));
+  assert.ok(editor.blockErrorKeys(design.blocks[2], 2).includes("design.blocks.2.text"));
+  assert.ok(editor.blockErrorKeys(design.blocks[3], 3).includes("cta.href"));
+  assert.ok(editor.blockErrorKeys(model.newPopupBlock("button2", "b5"), 4).includes("design.blocks.4.action.href"));
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Fontes e pesos
+ * ---------------------------------------------------------------------------------------------- */
+
+test("pesos: cada fonte mostra os pesos que tem; trocar a fonte ajusta o peso; a enviada comeca no peso dela", () => {
+  assert.deepEqual(
+    editor.weightOptionsFor({ key: "exo2", kind: "builtin" }).map((option) => option.label),
+    ["Média (500)", "Seminegrito (600)", "Negrito (700)"]
+  );
+  assert.deepEqual(
+    editor.weightOptionsFor({ key: "inter", kind: "builtin" }).map((option) => option.label),
+    ["Fina (100)", "Extra leve (200)", "Leve (300)", "Normal (400)", "Média (500)", "Seminegrito (600)", "Negrito (700)", "Extra negrito (800)", "Black (900)"]
+  );
+  assert.equal(editor.weightOptionsFor({ id: FONT_ID, kind: "uploaded" }).length, 9);
+  assert.deepEqual(
+    editor.weightOptionsFor({ key: "serif", kind: "builtin" }).map((option) => option.value),
+    ["400", "700"]
+  );
+
+  const biblioteca = [{ createdAt: "", family: "bf_0123456789ab", format: "woff2", id: FONT_ID, name: "Minha fonte", sizeBytes: 53_248, style: "normal", url: "", weight: 600 }];
+  assert.equal(editor.weightAfterFontChange({ key: "exo2", kind: "builtin" }, 800, biblioteca), 700);
+  assert.equal(editor.weightAfterFontChange({ key: "exo2", kind: "builtin" }, 400, biblioteca), 500);
+  assert.equal(editor.weightAfterFontChange({ key: "inter", kind: "builtin" }, 300, biblioteca), 300);
+  assert.equal(editor.weightAfterFontChange({ id: FONT_ID, kind: "uploaded" }, 400, biblioteca), 600);
+
+  assert.equal(editor.popupFontLabel({ key: "condensed", kind: "builtin" }, biblioteca), "Condensada");
+  assert.equal(editor.popupFontLabel({ id: FONT_ID, kind: "uploaded" }, biblioteca), "Minha fonte");
+  assert.equal(editor.popupFontLabel({ id: "7a2d3e4f-9e66-4a4b-8b2c-1d3e4f5a6b7c", kind: "uploaded" }, biblioteca), "Fonte que saiu da biblioteca");
+  assert.deepEqual(editor.fontRefFromValue(editor.fontRefValue({ id: FONT_ID, kind: "uploaded" })), { id: FONT_ID, kind: "uploaded" });
+  assert.deepEqual(editor.fontRefFromValue("builtin:exo2"), { key: "exo2", kind: "builtin" });
+  assert.equal(editor.fontRefFromValue("builtin:comic"), null);
+  assert.equal(editor.describeFontOption(biblioteca[0]), "Seminegrito (600) · Normal · 52 KB");
+  assert.deepEqual(
+    editor.sortedFontLibrary([{ ...biblioteca[0], id: "b", name: "Zeta" }, { ...biblioteca[0], id: "a", name: "Alfa" }, { ...biblioteca[0], id: "b", name: "Zeta" }]).map((font) => font.name),
+    ["Alfa", "Zeta"]
+  );
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Conferencia antes de enviar e numeros
+ * ---------------------------------------------------------------------------------------------- */
+
+test("video e fonte: tipo e tamanho conferidos no navegador, com as frases do servidor", () => {
+  assert.equal(editor.videoFileProblem({ size: 1_000, type: "video/mp4" }), null);
+  assert.equal(editor.videoFileProblem({ size: 1_000, type: "video/webm" }), null);
+  assert.equal(editor.videoFileProblem({ size: 1_000, type: "video/quicktime" }), "Use um vídeo MP4 (H.264) ou WEBM.");
+  assert.equal(editor.videoFileProblem({ size: 15 * 1024 * 1024 + 1, type: "video/mp4" }), "O vídeo deve ter no máximo 15 MB.");
+  assert.equal(editor.videoFileProblem({ size: 0, type: "video/mp4" }), "O vídeo deve ter no máximo 15 MB.");
+  assert.equal(editor.videoDurationHint(8), null);
+  assert.equal(editor.videoDurationHint(40), "Vídeos curtos (até 15 segundos) ficam mais leves e combinam com a repetição.");
+
+  assert.equal(editor.fontFileProblem(null), "Escolha um arquivo de fonte.");
+  assert.equal(editor.fontFileProblem({ name: "Minha-Fonte.WOFF2", size: 40_000 }), null);
+  assert.equal(editor.fontFileProblem({ name: "fonte.ttc", size: 40_000 }), "Use uma fonte WOFF2, WOFF, TTF ou OTF.");
+  assert.equal(editor.fontFileProblem({ name: "fonte.otf", size: 2 * 1024 * 1024 + 1 }), "A fonte deve ter no máximo 2 MB.");
+  assert.equal(editor.fontNameFromFile("C:\\fontes\\Space_Grotesk-Bold.ttf"), "Space Grotesk Bold");
+});
+
+test("numeros: so o valor dentro do limite vale (o mesmo texto do zod no limite)", () => {
+  assert.equal(editor.parseBoundedNumber("16", { integer: true, max: 96, min: 10 }), 16);
+  assert.equal(editor.parseBoundedNumber("1", { integer: true, max: 96, min: 10 }), null, "digitando: ainda fora do limite");
+  assert.equal(editor.parseBoundedNumber("12.5", { integer: true, max: 96, min: 10 }), null);
+  assert.equal(editor.parseBoundedNumber("1,25", { max: 2, min: 0.8 }), 1.25);
+  assert.equal(editor.parseBoundedNumber("-0,05", { max: 0.5, min: -0.1 }), -0.05);
+  assert.equal(editor.parseBoundedNumber("", { max: 2, min: 0.8 }), null);
+  assert.equal(editor.parseBoundedNumber("abc", { max: 2, min: 0.8 }), null);
+  assert.equal(editor.rangeMessage(0.8, 2), "Use de 0,8 a 2.");
+  assert.equal(editor.clampNumber(120, 10, 96), 96);
+
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+  const zod = designSchema.popupDesignSchema.safeParse({ ...design, blocks: [{ ...design.blocks[0], style: { ...design.blocks[0].style, lineHeight: 3 } }, ...design.blocks.slice(1)] });
+  assert.equal(zod.success, false);
+  assert.equal(zod.error.issues[0].message, editor.rangeMessage(0.8, 2), "a frase da tela e a do zod");
+});
+
+test("comparacao: o mesmo design com cor maiuscula e texto com espaco conta como igual", () => {
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+  const mexido = { ...design, links: { color: design.links.color.toUpperCase() } };
+  assert.equal(editor.sameDesign(design, mexido), true);
+  assert.equal(editor.sameDesign(design, null), false);
+  assert.equal(editor.sameDesign(null, undefined), true);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Vocabulario
+ * ---------------------------------------------------------------------------------------------- */
+
+test("vocabulario: os textos do card Design nao usam palavra fora do vocabulario da equipe", async () => {
+  const textos = collectStrings([
+    editor.POPUP_DESIGN_COPY,
+    editor.DESIGN_MODE_OPTIONS,
+    editor.MEDIA_KIND_OPTIONS,
+    editor.MEDIA_ASPECT_OPTIONS,
+    editor.MEDIA_POSITION_OPTIONS,
+    editor.TEXT_PLACEMENT_OPTIONS,
+    editor.TEXT_ALIGN_OPTIONS,
+    editor.CARD_WIDTH_OPTIONS,
+    editor.CARD_SHADOW_OPTIONS,
+    editor.BUTTON_SIZE_OPTIONS,
+    editor.BUTTON_WIDTH_OPTIONS,
+    editor.BUTTON2_ACTION_OPTIONS,
+    editor.LINK_TARGET_OPTIONS,
+    editor.FONT_STYLE_OPTIONS,
+    editor.PAINT_KIND_OPTIONS,
+    editor.LINE_PAINT_OPTIONS,
+    editor.LINE_SIZE_OPTIONS,
+    editor.BLOCK_TYPE_LABELS,
+    editor.FONT_WEIGHT_LABELS,
+    editor.DESIGN_STARTER_OPTIONS
+  ]);
+
+  assert.ok(textos.length > 150);
+
+  for (const texto of textos) {
+    for (const palavra of PROIBIDAS) {
+      assert.ok(!texto.toLocaleLowerCase("pt-BR").includes(palavra), `"${texto}" usa "${palavra}"`);
+    }
+  }
+
+  // Os textos do §7.2, palavra por palavra.
+  assert.equal(editor.POPUP_DESIGN_COPY.card.description, "Escolha o visual do pop-up. O Padrão é o de sempre; no Personalizado você monta mídia, textos, botões e cores.");
+  assert.equal(editor.POPUP_DESIGN_COPY.video.hint, "MP4 (H.264) ou WEBM, até 15 MB. Toca sem som, em repetição. Quem prefere menos movimento vê só a imagem.");
+  assert.equal(editor.POPUP_DESIGN_COPY.fonts.hint, "Quer uma fonte do Google Fonts? Baixe o arquivo no site e envie aqui. Nada é carregado do Google na hora.");
+  assert.equal(editor.POPUP_DESIGN_COPY.content.titleHint, "Aparece nas listas e nos relatórios. Para o aluno, vale o título do design.");
+
+  // As telas do editor tambem (o texto escrito direto no JSX).
+  const pasta = new URL("../src/components/admin/v2/communication/popup-design/", import.meta.url);
+
+  for (const arquivo of (await readdir(pasta)).filter((file) => file.endsWith(".tsx"))) {
+    const fonte = await readFile(new URL(arquivo, pasta), "utf8");
+
+    // "trigger" e "home" aparecem em nomes de codigo (SelectTrigger, HOME_PAGE_LINKS); o resto nunca.
+    for (const palavra of PROIBIDAS.filter((item) => item !== "trigger" && item !== "home")) {
+      assert.ok(!fonte.toLocaleLowerCase("pt-BR").includes(palavra), `${arquivo} usa "${palavra}"`);
+    }
+  }
+});
