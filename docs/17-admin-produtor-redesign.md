@@ -333,30 +333,37 @@ CSV do filtro atual: nome, e-mail, telefone, produtos, turma, situação, entrou
 >   - o fim por N conversões não entrou;
 >   - **Como medir** ficou fixo em "Voltaram a estudar (7 dias)", sem o seletor de desfecho;
 >   - fora desta rodada: "Salvar quem converteu como segmento" e a quebra por produto.
-> - **Limites**: os do pop-up seguem 1.8.1 (1 por sessão, 1 a cada 24 h, só na home), sem o tipo "crítico". Faixa, card, destaque, toast, e-mail e WhatsApp continuam no plano.
+> - **Limites**: os do pop-up seguem 1.8.1 (só na home; o limite de 1 por sessão e 1 a cada 24 h saiu por decisão do produtor, docs/24 §10.8), sem o tipo "crítico". Faixa, card, destaque, toast, e-mail e WhatsApp continuam no plano.
 > - **Módulo** `src/server/communications/`, telas em `src/components/admin/v2/communication/` e no aluno `src/components/member/notifications/`; migração `202610200001`.
 
 > **Atualização (21/10/2026).** Entrou a **Comunicação v2**, por pedido explícito do produtor em 20/10/2026 (documento próprio: `docs/23`; registro desta rodada em 2.10). Migração `202610200002`.
-> - No editor de notificação: **Quem envia** (a escola, eu ou outra pessoa da equipe; o círculo do sino mostra a foto dela e a pessoa recebe um e-mail), **Ícone ao lado do título**, **Fica no sino por** (1 hora a 90 dias) e o card **Depois desta notificação** (notificações seguintes para quem fez ou não fez algo com a anterior, depois do envio ou antes de vencer, em até 3 níveis).
+> - No editor de notificação: **Quem envia** (a escola, eu ou outra pessoa da equipe; o círculo do sino mostra a foto dela e a pessoa recebe um e-mail), **Ícone ao lado do título**, **Fica no sino por** (5 minutos a 90 dias desde os ajustes da v3a; era 1 hora a 90 dias) e o card **Depois desta notificação** (notificações seguintes para quem fez ou não fez algo com a anterior, depois do envio ou antes de vencer, em até 3 níveis).
 > - **Fluxos** (`/admin/comunicacao/fluxos`): quem entra por regras (de uma vez ou continuamente), passos Notificação e Condição (Sim/Não), esperas, Objetivo, relatório por passo, ativar, pausar, retomar, encerrar e editar no ar com `Aplicar alterações`. As seguintes do editor são um fluxo visto pela notificação: o mesmo motor e o mesmo modelo.
 > - Marca ganhou o **Ícone da escola** (o círculo das notificações da escola).
 > - Limite novo, fixo e em texto: no máximo 3 notificações de fluxos e seguintes por aluno por dia, com 1 hora entre elas (1.8.1).
 > - Muda 1.14: "automações encadeadas" saiu de fora do MVP, só no sino; e-mail, tag e bônus seguem na fase 7.
 
+> **Atualização (22/10/2026).** Entrou a **Comunicação v3a "Sino e avisos"**, por pedido do produtor depois de testar a v2 (documento próprio: `docs/24`). Migração `202610220001`. **Mudam decisões**:
+> - **CRUD completo no ⋯** em toda situação em que faz sentido (Ver relatório, Editar, Duplicar, Excluir e as ações de estado). A **notificação enviada passa a ser editável** (só o conteúdo: título, texto, imagem, ícone, Quem envia, destino e como o aluno chega lá, textos de Aceitar/Recusar e reações), chega a todos os sinos na hora e em silêncio, e vale como publicar (`messaging.publish`; acima de 500 que receberam, `publish_large`; nunca vira pedido). Segmento, envio, tempo no sino, áudio, ligar a resposta e a enquete continuam travados. **Excluir** vale em qualquer situação menos "Enviando" (a enviada sai de todos os sinos; o que os alunos veem ou está agendado pede `messaging.publish`). Era "Notificação enviada não muda" e "Excluir só rascunho, aguardando, cancelado e encerrado".
+> - **Reações** (6 emoji fixos, o aluno vê só a própria; os números ficam no relatório) e **enquetes** (2 a 6 opções, uma ou várias, resultado para quem votar, fim por data ou quando sai do sino, **Encerrar enquete**) entram no sino, nas notificações seguintes e nos passos de fluxo. Antes não estavam em nenhuma fase.
+> - O aluno ganha a **lixeira** (Excluir notificação, com Desfazer), o **cartão clicável** (Como o aluno chega lá), **Mudar resposta** e o título de 15 px em negrito; o sino lê a lista numa consulta só e guarda a primeira página no navegador.
+> - Pop-up: só o **Mostrar de novo para quem já viu** (no "Uma vez"). A **personalização do pop-up** (páginas e exclusões, gatilhos, frequência, limites globais editáveis, o construtor por blocos, enquete no pop-up e "Como fechar") fica para a **v3b "Pop-ups sob medida"**, que vai mudar a linha "Pop-up" de 1.8.1 (hoje 1 por sessão, 1 a cada 24 h, só na home) e D12. O "construtor de HTML" pedido pelo produtor vira blocos estruturados desenhados pelos componentes do app, nunca HTML cru (segurança da área do aluno e a CSP com nonce).
+> - Limite novo nas escritas do aluno (reação, voto, lixeira, resposta): 30 por minuto; as rotas de leitura continuam sem limite (2.3).
+
 #### 1.8.1 Tipos e limites
 
 | Tipo | Onde o aluno vê | Para quê | Limite por aluno (fixo no sistema) |
 |---|---|---|---|
-| **Pop-up** | centro da home, após 3 s ou 1ª interação; nunca durante uma aula | decisão: webinário em < 72 h, promoção com prazo, aviso obrigatório | 1 por sessão e 1 a cada 24 h; o tipo "crítico" (só do sistema) ignora o limite |
+| **Pop-up** | centro da home, após 3 s ou 1ª interação; nunca durante uma aula | decisão: webinário em < 72 h, promoção com prazo, aviso obrigatório | ~~1 por sessão e 1 a cada 24 h~~: saiu por decisão do produtor (docs/24 §10.8); um de cada vez, cada pop-up com a sua regra |
 | **Faixa no topo** | abaixo do cabeçalho | estado persistente: contagem regressiva, "sua live começa em 2 h" | 1 ativa por vez; fechar vale 7 dias |
 | **Card na home** | fileira "Para você" ou card dentro de uma fileira | promoção ou webinário como item do catálogo | 1 fileira + 1 card por fileira; fechar vale 30 dias |
 | **Destaque da home** | o hero | lançamento ou evento da semana | 1 por vez |
-| **Notificação (sino)** | caixa de notificações, 90 dias de histórico (cada notificação pode ficar menos, de 1 hora a 90 dias) | tudo o que foi exibido + respostas a comentários + replays | avisos da equipe sem limite; notificações de fluxos e notificações seguintes: no máximo 3 por dia, com pelo menos 1 hora entre elas (docs/23) |
+| **Notificação (sino)** | caixa de notificações, 90 dias de histórico (cada notificação pode ficar menos, de 5 minutos a 90 dias); desde a v3a o aluno pode excluir do próprio sino (quando a equipe deixa), reagir e votar | tudo o que foi exibido + respostas a comentários + replays | avisos da equipe sem limite; notificações de fluxos e notificações seguintes: no máximo 3 por dia, com pelo menos 1 hora entre elas (docs/23) |
 | **Toast** | canto da tela, só reativo | nova aula liberada, comentário respondido | 2 por sessão |
 | **E-mail** (fase 5) | caixa de entrada do aluno | convite e lembretes de webinário, promoção com prazo | marketing 2 por semana, 08–21 h; o plano gratuito do serviço de envio limita a 100 e-mails por dia (D6) |
 | **WhatsApp** (fase 7) | WhatsApp oficial (API da Meta) | lembrete de webinário; marketing só com autorização explícita | 1 por semana |
 
-Os limites aparecem no editor como texto ("Para não cansar o aluno, mostramos no máximo 1 pop-up por dia"), não como campos.
+Os limites aparecem no editor como texto, não como campos (hoje: "Por enquanto o pop-up aparece só na home, nunca durante uma aula, e um de cada vez."; a frequência vira campo na v3b).
 
 Nota (21/10/2026): a linha "Notificação (sino)" mudou de "sem limite" para o limite de fluxos e notificações seguintes acima, com a Comunicação v2 (`docs/23` §2.10 e V13; `docs/09`). O que passa do limite do dia sai às 8h do dia seguinte (São Paulo); o que o intervalo de 1 hora segura espera o intervalo; nenhum dos dois sai depois do prazo ou de 7 adiamentos. Sem horário de silêncio no sino (ele não toca nem manda push); os avisos avulsos da equipe e as notificações de comentário continuam sem limite. Texto no editor: `Para não cansar o aluno: no máximo 3 notificações de fluxos e notificações seguintes por dia para cada aluno, com pelo menos 1 hora entre elas. Se passar do limite do dia, sai às 8h do dia seguinte; se o prazo dela acabar antes, não sai.`
 
@@ -477,7 +484,7 @@ Nota (21/10/2026): "automações encadeadas" saiu de fora do MVP por pedido expl
 | D9 | Admin em tema claro também, ou só escuro? | Só escuro no MVP; a troca de tema já está preparada para depois |
 | D10 | Botão principal do admin: claro (branco com texto escuro) ou vermelho da marca? Hoje o design system manda usar o vermelho como primário no admin | Claro, como o botão primário da área do aluno; o vermelho sobra para marca, ações destrutivas e "ao vivo", sem colidir com erro nos gráficos |
 | D11 | Renomear o tipo "Produto" para "Material" também na área do aluno (hoje o rótulo aparece no modal de detalhes)? | Sim, com migração de rótulo |
-| D12 | Permitir ultrapassar o limite de 1 pop-up por dia em lançamentos? | Não no MVP; o excedente usa Faixa no topo e Destaque da home |
+| D12 | Permitir ultrapassar o limite de 1 pop-up por dia em lançamentos? | Revista em 21/10/2026: o produtor tirou o limite fixo entre pop-ups (docs/24 §10.8); a frequência de cada pop-up é escolha da equipe (v3b) |
 | D13 | Migrar do YouTube: tudo, só produtos pagos, ou só produtos novos daqui em diante? | Só pagos, começando pelo de maior receita; abertos e bônus ficam no YouTube |
 
 A ordem do roadmap tem um ponto negociável, descrito em 2.10: Comunicação pode vir antes do vídeo se um lançamento exigir.
@@ -791,6 +798,8 @@ Próximos passos, fora desta entrega:
 > Retenção: `notifications` e `campaign_deliveries` saem com 24 meses (`prune_communication_history()`, D8; o estado de pop-up ainda no ar ou pausado fica, `docs/22` §4.6) e a conta excluída leva as linhas dela (cascade), em vez de ficar com o `user_id` pseudônimo.
 >
 > **Atualização (21/10/2026): Comunicação v2** (migração `202610200002`, `docs/23` §3): `communication_flows`, `communication_flow_nodes`, `communication_flow_runs` e `communication_flow_tasks` (fluxos e notificações seguintes, um motor só, sem fila de jobs nova) e `member_page_visits` (última visita por aluno e página, só das páginas que um fluxo no ar usa; não é o `page_viewed` de 2.5). A retenção de 24 meses vale para tarefas terminadas, passagens de fluxos encerrados e visitas.
+>
+> **Atualização (22/10/2026): Comunicação v3a** (migração `202610220001`, `docs/24` §3): nenhuma tabela nova. `campaigns` ganha `cta_display`, `allow_reactions`, `poll` e `edited_at`/`edited_by`; `notifications` ganha a lixeira do aluno (`hidden_at`), a reação, a mudança de resposta, o voto e o contador de escritas; `campaign_deliveries` ganha as bases do "Mostrar de novo". A leitura do sino vira uma RPC (`communication_inbox_page`) com a regra de visibilidade num lugar só; os eventos novos (`notification_reacted`, `notification_voted`, `notification_hidden`) vão para `student_events`, só com ids.
 
 **LGPD: exclusão e retenção.** "Excluir aluno" roda um job que: revoga entitlements; substitui nome/e-mail/telefone em `profiles` e `students` por valores anonimizados; mantém `lesson_progress`, `lesson_comments` (corpo substituído por "[comentário removido]" se o aluno pedir), `student_events`, rollups e `campaign_deliveries` apenas com o `user_id` pseudônimo; apaga `ai_conversations`/`ai_messages` daquele aluno; remove `push_subscriptions` e `communication_preferences`; registra em `admin_audit_log`. Retenção padrão: `message_events` e `student_events` 24 meses; `lesson_watch_segments` 12 meses (rollups permanecem); `webhook_events` e `video_provider_events` 12 meses (feito para `webhook_events` em 17/10/2026 por `public.prune_personal_data()`, que também anonimiza `email_outbox` em 90/180 dias e apaga `email_webhook_events` em 90 dias; `docs/06`, seção LGPD); `admin_audit_log` 5 anos. Nenhum PII vai ao PostHog além do id.
 

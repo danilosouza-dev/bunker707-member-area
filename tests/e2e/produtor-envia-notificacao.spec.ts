@@ -37,7 +37,7 @@ test.describe("produtor", () => {
 
     // Botao: liga, escreve o texto e escolhe a pagina da area (as pilulas sao radios escondidos dentro
     // do label: clicar no texto marca).
-    const mostrarBotao = page.getByRole("switch", { name: "Mostrar um botão" });
+    const mostrarBotao = page.getByRole("switch", { name: "Levar o aluno a algum lugar" });
     await mostrarBotao.click();
     await expect(mostrarBotao).toHaveAttribute("aria-checked", "true");
     const textoDoBotao = page.getByLabel("Texto do botão", { exact: true });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { test as base, expect, type BrowserContext } from "@playwright/test";
+import { test as base, expect, type BrowserContext, type Page, type Request } from "@playwright/test";
 import {
   ESCOLA_DE_TESTE,
   SENHA_DE_TESTE,
@@ -107,8 +107,11 @@ export type EstadoDoPopUp = {
   snoozedUntil: string | null;
 };
 
-/** O que a aluna fez com o pop-up de titulo dado, lido do banco (null: o pop-up nao existe ou ela nao esta no segmento). */
-export async function estadoDoPopUpDaAluna(titulo: string): Promise<EstadoDoPopUp | null> {
+/**
+ * O que a aluna (ou outra conta de teste) fez com o pop-up de titulo dado, lido do banco (null: o pop-up nao
+ * existe ou ela nao esta no segmento).
+ */
+export async function estadoDoPopUpDaAluna(titulo: string, chave: ChaveDaConta = "aluna"): Promise<EstadoDoPopUp | null> {
   const db = createLocalAdminClient();
   const contas = await contasDeTeste(db);
   const campanha = await db.from("campaigns").select("id").eq("kind", "popup").eq("title", titulo).is("deleted_at", null).maybeSingle();
@@ -125,7 +128,7 @@ export async function estadoDoPopUpDaAluna(titulo: string): Promise<EstadoDoPopU
     .from("campaign_deliveries")
     .select("dismissed_at,impressions,snooze_count,snoozed_until")
     .eq("campaign_id", campanha.data.id)
-    .eq("user_id", contas.aluna.id)
+    .eq("user_id", contas[chave].id)
     .maybeSingle();
 
   if (entrega.error) {
@@ -429,4 +432,251 @@ export async function garantirProfessorDeNomeLongo() {
 /** Tira o professor de nome comprido da equipe e apaga a conta (depois de zerarComunicacao). */
 export async function apagarProfessorDeNomeLongo() {
   await apagarContaDeTeste(createLocalAdminClient(), PROFESSOR_DE_NOME_LONGO.email);
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Comunicacao v3a (docs/24 §11): notificacao enviada com enquete, reacoes, resposta e cartao clicavel;
+ * pop-up visto ha mais tempo; contador de pedidos do navegador
+ * ---------------------------------------------------------------------------------------------- */
+
+const UMA_HORA = 3_600_000;
+
+type ContaDeTeste = { email: string; id: string; nome: string };
+type ChaveDaConta = keyof typeof ESCOLA_DE_TESTE.contas;
+
+/** Uma conta de teste pela chave (aluna, alunoSemAcesso, produtor...), com o id do Auth local. */
+export async function contaDeTeste(chave: ChaveDaConta): Promise<ContaDeTeste> {
+  const contas = (await contasDeTeste(createLocalAdminClient())) as Record<ChaveDaConta, ContaDeTeste>;
+
+  return contas[chave];
+}
+
+/** Id do aviso (notificacao ou pop-up, fora de fluxo, nao excluido) pelo titulo. */
+export async function idDoAviso(titulo: string) {
+  const db = createLocalAdminClient();
+  const aviso = unwrap(
+    await db.from("campaigns").select("id").eq("title", titulo).is("flow_id", null).is("deleted_at", null).maybeSingle(),
+    `Lendo o aviso "${titulo}"`
+  ) as { id: string } | null;
+
+  if (!aviso) {
+    throw new Error(`O aviso "${titulo}" nao existe.`);
+  }
+
+  return aviso.id;
+}
+
+/** O que a equipe escolheu no aviso (fora de fluxo, nao excluido): a lixeira do sino e o tempo no sino. */
+export async function avisoNoBanco(titulo: string) {
+  const db = createLocalAdminClient();
+  const aviso = unwrap(
+    await db.from("campaigns").select("allow_hide,valid_until,validity_minutes").eq("title", titulo).is("flow_id", null).is("deleted_at", null).maybeSingle(),
+    `Lendo o aviso "${titulo}"`
+  ) as { allow_hide: boolean; valid_until: string | null; validity_minutes: number | null } | null;
+
+  if (!aviso) {
+    throw new Error(`O aviso "${titulo}" nao existe.`);
+  }
+
+  return aviso;
+}
+
+export type EnqueteDeTeste = {
+  closesAt?: string | null;
+  multiple?: boolean;
+  options: { id: string; label: string }[];
+  question: string;
+  showResults?: boolean;
+};
+
+export type NotificacaoDeTeste = {
+  /** Destino (Para onde leva): pagina da area (mesma aba) ou link (nova aba). */
+  destino?: { href: string; label: string; novaAba?: boolean };
+  /** Como o aluno chega la (docs/24 §1.2); so com destino. Padrao: "button". */
+  display?: "button" | "button_and_card" | "card";
+  /** Ha quantos minutos chegou (ordem no sino: a mais nova primeiro). Padrao 30. */
+  minutosAtras?: number;
+  /** Quem recebe (uma linha no sino de cada). Padrao: so a aluna. */
+  para?: ChaveDaConta[];
+  /** "Permitir que o aluno exclua do sino" (campaigns.allow_hide). Padrao true (o padrao do banco). */
+  podeExcluir?: boolean;
+  poll?: EnqueteDeTeste | null;
+  /** Permitir reacoes. Padrao false (o padrao do banco; a tela liga nas notificacoes novas). */
+  reactions?: boolean;
+  /** Aceitar/Recusar com os textos dados. */
+  response?: { aceitar: string; recusar: string } | null;
+  texto?: string;
+  titulo: string;
+};
+
+/**
+ * Notificacao ja enviada pelo produtor de teste (docs/24 §11), gravada direto no banco como o envio deixa:
+ * o aviso "Enviado" (sent_at, quantos receberam) e uma linha no sino de cada conta de `para`. Mais rapido
+ * que montar na tela e cobre o que a tela ainda nao cria sozinha numa so passada (enquete, reacoes, modo do
+ * cartao e resposta juntos). Devolve o id do aviso. Desfaca com zerarComunicacao.
+ */
+export async function enviarNotificacao(input: NotificacaoDeTeste) {
+  const db = createLocalAdminClient();
+  const contas = (await contasDeTeste(db)) as Record<ChaveDaConta, ContaDeTeste>;
+  const para = input.para ?? ["aluna"];
+  const minutosAtras = input.minutosAtras ?? 30;
+  const chegou = new Date(Date.now() - minutosAtras * 60_000).toISOString();
+  const poll = input.poll
+    ? {
+        closesAt: input.poll.closesAt ?? null,
+        multiple: input.poll.multiple ?? false,
+        options: input.poll.options,
+        question: input.poll.question,
+        showResults: input.poll.showResults ?? true
+      }
+    : null;
+  const [aviso] = unwrap(
+    await db
+      .from("campaigns")
+      .insert({
+        accept_label: input.response?.aceitar ?? null,
+        allow_hide: input.podeExcluir ?? true,
+        allow_reactions: input.reactions ?? false,
+        audience: { kind: "everyone" },
+        audience_count: para.length,
+        body: input.texto ?? "",
+        created_by: contas.produtor.id,
+        cta_display: input.destino ? (input.display ?? "button") : "button",
+        cta_href: input.destino?.href ?? null,
+        cta_label: input.destino?.label ?? null,
+        cta_target: input.destino ? (input.destino.novaAba ? "new_tab" : "same_tab") : null,
+        decline_label: input.response?.recusar ?? null,
+        kind: "inbox",
+        poll,
+        recipients_count: para.length,
+        response_mode: input.response ? "accept_decline" : "none",
+        send_at: chegou,
+        sent_at: chegou,
+        status: "sent",
+        title: input.titulo,
+        updated_by: contas.produtor.id
+      })
+      .select("id"),
+    `Gravando a notificacao "${input.titulo}"`
+  ) as { id: string }[];
+
+  unwrap(
+    await db.from("notifications").insert(
+      para.map((chave) => ({
+        campaign_id: aviso.id,
+        created_at: chegou,
+        dedupe_key: `campaign:${aviso.id}`,
+        expires_at: new Date(Date.parse(chegou) + 90 * 24 * UMA_HORA).toISOString(),
+        kind: "notice",
+        user_id: contas[chave].id
+      }))
+    ),
+    `Gravando o sino de "${input.titulo}"`
+  );
+
+  return aviso.id;
+}
+
+/**
+ * Volta no tempo o que um aluno viu de um pop-up (first_seen_at e last_seen_at), em horas: com 25 h, o limite
+ * de 1 pop-up a cada 24 h deixa de valer para ele e so a regra do proprio pop-up decide (Uma vez, Até o aluno
+ * clicar, Não mostrar de novo, Mostrar de novo). Devolve quantas linhas mudou (0: ele nunca viu).
+ */
+export async function envelhecerPopup(campaignId: string, userId: string, horas: number) {
+  const db = createLocalAdminClient();
+  const entrega = unwrap(
+    await db.from("campaign_deliveries").select("first_seen_at,last_seen_at").eq("campaign_id", campaignId).eq("user_id", userId).maybeSingle(),
+    "Lendo o pop-up do aluno"
+  ) as { first_seen_at: string | null; last_seen_at: string | null } | null;
+
+  if (!entrega?.last_seen_at) {
+    return 0;
+  }
+
+  const antes = (iso: string | null) => (iso ? new Date(Date.parse(iso) - horas * UMA_HORA).toISOString() : null);
+  unwrap(
+    await db
+      .from("campaign_deliveries")
+      .update({ first_seen_at: antes(entrega.first_seen_at), last_seen_at: antes(entrega.last_seen_at) })
+      .eq("campaign_id", campaignId)
+      .eq("user_id", userId),
+    "Envelhecendo o pop-up do aluno"
+  );
+
+  return 1;
+}
+
+export type ContadorDePedidos = {
+  /** Quando cada pedido saiu (Date.now() no processo do teste), na ordem. */
+  readonly inicios: readonly number[];
+  parar(): void;
+  readonly total: number;
+  zerar(): void;
+};
+
+/**
+ * Conta os pedidos que o navegador faz para um caminho (o padrao casa com o pathname inteiro, sem a busca),
+ * por metodo (padrao GET). Ex.: contarPedidos(page, /^\/api\/notifications$/) conta a lista do sino e nao o
+ * resumo nem as escritas.
+ */
+export function contarPedidos(page: Page, padrao: RegExp, metodo = "GET"): ContadorDePedidos {
+  const inicios: number[] = [];
+  const ouvir = (request: Request) => {
+    if (request.method() === metodo && padrao.test(new URL(request.url()).pathname)) {
+      inicios.push(Date.now());
+    }
+  };
+
+  page.on("request", ouvir);
+
+  return {
+    inicios,
+    parar: () => {
+      page.off("request", ouvir);
+    },
+    get total() {
+      return inicios.length;
+    },
+    zerar: () => {
+      inicios.length = 0;
+    }
+  };
+}
+
+export type LinhaDoSino = {
+  clicked_at: string | null;
+  created_at: string;
+  expires_at: string | null;
+  hidden_at: string | null;
+  opened_at: string | null;
+  poll_choice: string[] | null;
+  reaction: string | null;
+  read_at: string | null;
+  response: string | null;
+  seen_at: string | null;
+};
+
+/** A linha do sino de uma conta para o aviso de titulo dado, lida do banco (null: nao recebeu). */
+export async function linhaDoSino(titulo: string, chave: ChaveDaConta = "aluna"): Promise<LinhaDoSino | null> {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+  const avisos = unwrap(await db.from("campaigns").select("id").eq("title", titulo), `Lendo o aviso "${titulo}"`) as { id: string }[];
+
+  if (avisos.length === 0) {
+    return null;
+  }
+
+  return unwrap(
+    await db
+      .from("notifications")
+      .select("clicked_at,created_at,expires_at,hidden_at,opened_at,poll_choice,reaction,read_at,response,seen_at")
+      .in(
+        "campaign_id",
+        avisos.map((aviso) => aviso.id)
+      )
+      .eq("user_id", conta.id)
+      .eq("is_test", false)
+      .maybeSingle(),
+    "Lendo a linha do sino"
+  ) as LinhaDoSino | null;
 }

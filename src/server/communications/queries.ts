@@ -36,6 +36,7 @@ import {
   availableNoticeActions,
   CAMPAIGN_KIND_LABELS,
   formatSaoPauloDateTime,
+  noticeRecipients,
   SITUATION_LABELS,
   situationOf,
   situationTone,
@@ -50,22 +51,29 @@ import { assertNoDbError, chunksOf, communicationsDb, type CommunicationsDb } fr
 import { entryOf, followUpsFromTree, type FlowEndedReason, type FlowNode, type FlowStatus, type FollowUp } from "./flow-model";
 import type { FlowNoticeContent } from "./flow-schemas";
 import { definitionOf, fetchFlowNodeStats, fetchFlowTree, lastSourceExpiry, type LoadedFlowTree } from "./flow-store";
+import { parsePoll, type PollOption } from "./interactions-model";
 import { noticeIconOfColumns, normalizeSchoolIcon, SCHOOL_NAME_FALLBACK_TEAM, type NoticeIconColor, type NoticeIconId } from "./message-meta";
 import { emptyNoticeDraft, type NoticeDraft } from "./schemas";
 import {
   audienceOfRow,
   EMPTY_CAMPAIGN_ENGAGEMENT,
   EMPTY_CAMPAIGN_STATS,
+  emptyMessageInteractions,
   fetchCampaign,
   fetchCampaignEngagement,
   fetchCampaignStats,
   fetchCampaignsByIds,
+  fetchMessageInteractions,
+  fetchNoticeCitations,
   fetchOverview,
   listCampaignRows,
+  reshowPopupDeliveries,
   rowToDraft,
   type CampaignEngagement,
   type CampaignRow,
-  type CampaignStats
+  type CampaignStats,
+  type MessageInteractions,
+  type NoticeCitations
 } from "./store";
 
 export const NOTICES_PAGE_SIZE = 20;
@@ -80,6 +88,11 @@ export type NoticeListItem = {
   actions: NoticeAction[];
   audienceCount: number | null;
   audienceDescription: string;
+  /**
+   * v3a: quantos avisos e fluxos citam a notificacao enviada nas regras (os dialogos de Excluir e Retirar do
+   * sino avisam; nunca impedem); null para o que nao e notificacao enviada.
+   */
+  citations: NoticeCitations | null;
   /** Cliques sobre vistos, 0..100 (null sem ninguem que viu). */
   clickRate: number | null;
   createdAt: string;
@@ -112,6 +125,9 @@ export type NoticeDetail = NoticeListItem & {
   approvedBy: NoticePerson | null;
   audienceCountedAt: string | null;
   draft: NoticeDraft;
+  /** v3a: a ultima edicao de uma notificacao enviada ou de um pop-up no ar ou pausado (linha "Editado"). */
+  editedAt: string | null;
+  editedBy: NoticePerson | null;
   /** Abriram, comecaram o audio e ouviram ate o fim (v2), sem os testes da equipe. */
   engagement: CampaignEngagement;
   /** Conteudo de um passo de fluxo: /avisos/[id] leva para o fluxo (null = aviso comum). */
@@ -124,9 +140,20 @@ export type NoticeDetail = NoticeListItem & {
    * e, acima de 500, messaging.publish_large); null nos outros casos.
    */
   followUpOptions: NoticeEditorOptions | null;
+  /**
+   * v3a: reacoes, votos, excluidas do sino e mudancas de resposta da notificacao (sem os testes da equipe);
+   * vazio para o pop-up e para o que ainda nao saiu.
+   */
+  interactions: MessageInteractions;
   lastError: string | null;
   recipientsCount: number | null;
   requestedAt: string | null;
+  /**
+   * v3a: pop-up no ar ou pausado: quantos a regra "Uma vez" pula agora (viram e nao clicaram nem escolheram
+   * "Não mostrar de novo"), contado pela regra "Uma vez" mesmo com o pop-up em "Até o aluno clicar" (o
+   * "Mostrar de novo para quem já viu" do editor); null nos outros casos.
+   */
+  reshowable: number | null;
   requestedBy: NoticePerson | null;
   sendAt: string | null;
   /**
@@ -179,25 +206,35 @@ function collectIds(definition: AudienceDefinition, products: Set<string>, cohor
   }
 }
 
-/** Titulo de cada aviso citado, pela chave da regra ("campaign:<id>"); aviso excluido fica sem titulo. */
+/**
+ * Titulo de cada aviso citado, pela chave da regra ("campaign:<id>"); aviso excluido fica sem titulo.
+ * v3a: tambem o texto de cada opcao da enquete (regra "votou em “X”"), so dos avisos com enquete.
+ */
 async function selectNoticeTitles(db: CommunicationsDb, ids: readonly string[]) {
   const titles: Record<string, string> = {};
+  const pollOptions: Record<string, Record<string, string>> = {};
   const valid = Array.from(new Set(ids)).filter((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id));
 
   for (const part of chunksOf(valid, 150)) {
-    const { data, error } = await db.from("campaigns").select("id,title").in("id", part).is("deleted_at", null);
+    const { data, error } = await db.from("campaigns").select("id,title,poll").in("id", part).is("deleted_at", null);
     assertNoDbError(error, "Comunicacao: nomes (avisos)");
 
-    for (const row of (data ?? []) as { id: string; title: string | null }[]) {
+    for (const row of (data ?? []) as { id: string; poll: unknown; title: string | null }[]) {
+      const key = messageRefKey({ campaignId: row.id, kind: "campaign" });
       const title = row.title?.trim();
+      const poll = parsePoll(row.poll);
 
       if (title) {
-        titles[messageRefKey({ campaignId: row.id, kind: "campaign" })] = title;
+        titles[key] = title;
+      }
+
+      if (poll) {
+        pollOptions[key] = Object.fromEntries(poll.options.map((option) => [option.id, option.label]));
       }
     }
   }
 
-  return titles;
+  return { pollOptions, titles };
 }
 
 async function selectNames(db: CommunicationsDb, table: "cohorts" | "content_items", column: "name" | "title", ids: readonly string[]) {
@@ -221,7 +258,8 @@ async function selectNames(db: CommunicationsDb, table: "cohorts" | "content_ite
 
 /**
  * Nomes dos produtos, turmas e avisos citados nos segmentos (produto ou aviso removido cai no texto
- * padrao da frase). `messages` so vem quando alguma regra cita um aviso.
+ * padrao da frase). `messages` so vem quando alguma regra cita um aviso; `pollOptions` (v3a), quando
+ * algum aviso citado tem enquete.
  */
 export async function loadAudienceNames(db: CommunicationsDb, definitions: readonly AudienceDefinition[]): Promise<AudienceNames> {
   const products = new Set<string>();
@@ -229,23 +267,35 @@ export async function loadAudienceNames(db: CommunicationsDb, definitions: reado
   const campaigns = new Set<string>();
   definitions.forEach((definition) => collectIds(definition, products, cohorts, campaigns));
 
-  const [productNames, cohortNames, messageTitles] = await Promise.all([
+  const [productNames, cohortNames, notices] = await Promise.all([
     selectNames(db, "content_items", "title", Array.from(products)),
     selectNames(db, "cohorts", "name", Array.from(cohorts).filter((id) => /^[0-9a-f-]{36}$/i.test(id))),
     campaigns.size > 0 ? selectNoticeTitles(db, Array.from(campaigns)) : Promise.resolve(null)
   ]);
 
-  return messageTitles ? { cohorts: cohortNames, messages: messageTitles, products: productNames } : { cohorts: cohortNames, products: productNames };
+  if (!notices) {
+    return { cohorts: cohortNames, products: productNames };
+  }
+
+  return Object.keys(notices.pollOptions).length > 0
+    ? { cohorts: cohortNames, messages: notices.titles, pollOptions: notices.pollOptions, products: productNames }
+    : { cohorts: cohortNames, messages: notices.titles, products: productNames };
 }
 
 /** Aviso enviado que o segmento pode citar em "O que fez com uma notificação" (o seletor do construtor). */
 export type AudienceNoticeOption = {
-  /** Ha o que abrir ("Ver mais", audio, botao ou resposta); sem isso, nada de "abriu" na regra. */
+  /** v3a: aceita reacoes (a regra oferece "reagiu"). */
+  allowsReactions: boolean;
+  /** Ha o que abrir ("Ver mais", audio, destino, resposta ou enquete); sem isso, nada de "abriu" na regra. */
   canOpen: boolean;
   hasAudio: boolean;
   hasCta: boolean;
+  /** v3a: tem enquete (a regra oferece "votou na enquete"). */
+  hasPoll: boolean;
   hasResponse: boolean;
   id: string;
+  /** v3a: as opcoes da enquete, na ordem (vazio sem enquete). */
+  pollOptions: PollOption[];
   sentAt: string;
   title: string;
 };
@@ -256,14 +306,14 @@ const AUDIENCE_NOTICE_DAYS = 90;
 
 /**
  * Notificacoes enviadas nos ultimos 90 dias (fora as dos fluxos), mais recentes primeiro: o seletor da
- * regra "O que fez com uma notificação" no segmento (docs/23 §7). O que cada uma tem (audio, botao,
- * resposta) decide as acoes oferecidas.
+ * regra "O que fez com uma notificação" no segmento (docs/23 §7). O que cada uma tem (audio, destino,
+ * resposta e, v3a, reacoes e enquete) decide as acoes oferecidas.
  */
 export async function loadAudienceNoticeOptions(db: CommunicationsDb, now = Date.now()): Promise<AudienceNoticeOption[]> {
   const since = new Date(now - AUDIENCE_NOTICE_DAYS * 86_400_000).toISOString();
   const { data, error } = await db
     .from("campaigns")
-    .select("id,title,body,sent_at,audio_url,cta_href,response_mode")
+    .select("id,title,body,sent_at,audio_url,cta_href,response_mode,allow_reactions,poll")
     .eq("kind", "inbox")
     .eq("status", "sent")
     .is("flow_id", null)
@@ -274,20 +324,35 @@ export async function loadAudienceNoticeOptions(db: CommunicationsDb, now = Date
     .limit(AUDIENCE_NOTICE_OPTIONS_LIMIT);
   assertNoDbError(error, "Comunicacao: notificacoes enviadas");
 
-  type Row = { audio_url: string | null; body: string | null; cta_href: string | null; id: string; response_mode: string | null; sent_at: string; title: string | null };
+  type Row = {
+    allow_reactions: boolean | null;
+    audio_url: string | null;
+    body: string | null;
+    cta_href: string | null;
+    id: string;
+    poll: unknown;
+    response_mode: string | null;
+    sent_at: string;
+    title: string | null;
+  };
 
   return ((data ?? []) as Row[]).map((row) => {
     const hasAudio = Boolean(row.audio_url);
     const hasCta = Boolean(row.cta_href);
     const hasResponse = row.response_mode === "accept_decline";
+    const poll = parsePoll(row.poll);
 
     return {
-      // Aviso curto so de texto aparece inteiro no sino: nao ha o que abrir (docs/23 V7).
-      canOpen: hasAudio || hasCta || hasResponse || shouldClampNotificationBody(row.body ?? ""),
+      allowsReactions: row.allow_reactions === true,
+      // Aviso curto so de texto aparece inteiro no sino: nao ha o que abrir (docs/23 V7). Enquete conta
+      // (votar abre); reacao nao (docs/24 T15).
+      canOpen: hasAudio || hasCta || hasResponse || poll !== null || shouldClampNotificationBody(row.body ?? ""),
       hasAudio,
       hasCta,
+      hasPoll: poll !== null,
       hasResponse,
       id: row.id,
+      pollOptions: poll?.options ?? [],
       sentAt: row.sent_at,
       title: row.title?.trim() || "Sem título"
     };
@@ -356,6 +421,7 @@ export function describeNoticeWhen(row: Pick<CampaignRow, "ends_at" | "kind" | "
 function toListItem(
   row: CampaignRow,
   input: {
+    citations?: ReadonlyMap<string, NoticeCitations>;
     followUps?: ReadonlyMap<string, { count: number; sent: number }>;
     names: AudienceNames;
     now: number;
@@ -367,11 +433,15 @@ function toListItem(
   const timing = { endsAt: row.ends_at, kind: row.kind, sendAt: row.send_at, startsAt: row.starts_at, status: row.status };
   const situation = situationOf(timing, input.now);
   const stats = input.stats.get(row.id) ?? EMPTY_CAMPAIGN_STATS;
+  const sentNotice = row.kind === "inbox" && row.status === "sent";
 
   return {
-    actions: availableNoticeActions(timing, input.now, input.permissions),
+    // v3a: o menu sabe a regra "Quantas vezes" (Mostrar de novo so em "Uma vez") e quantos a notificacao
+    // alcancou (Editar a enviada acima de 500 so com messaging.publish_large), a mesma conta do servidor.
+    actions: availableNoticeActions(timing, input.now, input.permissions, { popupRepeat: row.popup_repeat, recipients: noticeRecipients(row) }),
     audienceCount: row.audience_count,
     audienceDescription: describeAudience(audienceOfRow(row), input.names),
+    citations: sentNotice ? (input.citations?.get(row.id) ?? { flows: 0, notices: 0 }) : null,
     clickRate: rate(stats.clicked, stats.seen),
     createdAt: row.created_at,
     createdBy: row.created_by ? (input.people.get(row.created_by) ?? null) : null,
@@ -393,25 +463,41 @@ function toListItem(
   };
 }
 
+/** v3a: notificacoes enviadas da lista (as que podem ser citadas pelas regras de outros avisos e fluxos). */
+function sentNoticeIds(rows: readonly CampaignRow[]) {
+  return rows.filter((row) => row.kind === "inbox" && row.status === "sent").map((row) => row.id);
+}
+
 /** Lista da equipe, 20 por pagina, mais novos primeiro, com os numeros de cada aviso. */
 export async function listNotices(input: { kind?: CampaignKind; now?: number; page?: number; permissions?: NoticePermissions }): Promise<NoticesPage> {
   const db = communicationsDb();
   const now = input.now ?? Date.now();
   const page = Math.max(1, Math.floor(input.page ?? 1));
   const { rows, total } = await listCampaignRows(db, { kind: input.kind, page, pageSize: NOTICES_PAGE_SIZE });
-  const [stats, names, people, followUps] = await Promise.all([
+  // v3a: as regras que citam cada notificacao enviada, uma ida so por pagina (nenhuma sem enviada).
+  const [stats, names, people, followUps, citations] = await Promise.all([
     fetchCampaignStats(db, rows.map((row) => row.id)),
     loadAudienceNames(db, rows.map(audienceOfRow)),
     loadPeople(db, rows.map((row) => row.created_by)),
-    loadFollowUpCounts(db, rows.filter((row) => row.kind === "inbox").map((row) => row.id))
+    loadFollowUpCounts(db, rows.filter((row) => row.kind === "inbox").map((row) => row.id)),
+    fetchNoticeCitations(db, sentNoticeIds(rows))
   ]);
 
   return {
-    items: rows.map((row) => toListItem(row, { followUps, names, now, people, permissions: input.permissions ?? NO_PERMISSIONS, stats })),
+    items: rows.map((row) => toListItem(row, { citations, followUps, names, now, people, permissions: input.permissions ?? NO_PERMISSIONS, stats })),
     page,
     pageSize: NOTICES_PAGE_SIZE,
     total
   };
+}
+
+/** Pop-up publicado ou pausado: quantos a regra "Uma vez" pula agora (docs/24 §2.4); null nos outros casos. */
+async function reshowableOf(db: CommunicationsDb, row: CampaignRow, now: number) {
+  if (row.kind !== "popup" || (row.status !== "active" && row.status !== "paused")) {
+    return null;
+  }
+
+  return (await reshowPopupDeliveries(db, { apply: false, campaignId: row.id, max: null, now: new Date(now) }))?.count ?? null;
 }
 
 /** Um aviso para o editor ou o relatorio; null se nao existe (ou foi excluido). */
@@ -429,16 +515,21 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
   }
 
   const permissions = input.permissions ?? NO_PERMISSIONS;
-  const [stats, engagement, names, people, sender, followUps] = await Promise.all([
+  // v3a: reacoes, votos e excluidas so existem nas linhas dos alunos (notificacao que saiu).
+  const hasStudentRows = row.kind === "inbox" && !row.flow_id && (row.status === "sending" || row.status === "sent" || row.status === "canceled");
+  const [stats, engagement, names, people, sender, followUps, interactions, citations, reshowable] = await Promise.all([
     fetchCampaignStats(db, [row.id]),
     fetchCampaignEngagement(db, [row.id]),
     loadAudienceNames(db, [audienceOfRow(row)]),
-    loadPeople(db, [row.created_by, row.requested_by, row.approved_by]),
+    loadPeople(db, [row.created_by, row.requested_by, row.approved_by, row.edited_by]),
     row.sender_user_id ? loadSender(db, row.sender_user_id) : Promise.resolve(null),
-    row.kind === "inbox" && !row.flow_id ? loadNoticeFollowUps(db, row, permissions) : Promise.resolve({ detail: null, options: null })
+    row.kind === "inbox" && !row.flow_id ? loadNoticeFollowUps(db, row, permissions) : Promise.resolve({ detail: null, options: null }),
+    hasStudentRows ? fetchMessageInteractions(db, { campaignIds: [row.id] }) : Promise.resolve(new Map<string, MessageInteractions>()),
+    row.flow_id ? Promise.resolve(new Map<string, NoticeCitations>()) : fetchNoticeCitations(db, sentNoticeIds([row])),
+    row.flow_id ? Promise.resolve(null) : reshowableOf(db, row, now)
   ]);
   const counts = followUps.detail ? new Map([[row.id, { count: followUps.detail.count, sent: followUps.detail.sent }]]) : undefined;
-  const item = toListItem(row, { followUps: counts, names, now, people, permissions, stats });
+  const item = toListItem(row, { citations, followUps: counts, names, now, people, permissions, stats });
   // approved_at tambem marca quem publicou direto com messaging.publish_large (o envio agendado nao volta
   // para aprovacao); o relatorio so mostra "Aprovado" quando houve pedido.
   const approved = Boolean(row.requested_at && row.approved_at);
@@ -449,15 +540,19 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
     approvedBy: approved && row.approved_by ? (people.get(row.approved_by) ?? null) : null,
     audienceCountedAt: row.audience_counted_at,
     draft: rowToDraft(row),
+    editedAt: row.edited_at,
+    editedBy: row.edited_by ? (people.get(row.edited_by) ?? null) : null,
     engagement: engagement.get(row.id) ?? EMPTY_CAMPAIGN_ENGAGEMENT,
     flowId: row.flow_id,
     flowNodeId: row.flow_node_id,
     followUpOptions: followUps.options,
     followUps: followUps.detail,
+    interactions: interactions.get(row.id) ?? emptyMessageInteractions(),
     lastError: row.last_error,
     recipientsCount: row.recipients_count,
     requestedAt: row.requested_at,
     requestedBy: row.requested_by ? (people.get(row.requested_by) ?? null) : null,
+    reshowable,
     sendAt: row.send_at,
     sender,
     sentAt: row.sent_at
@@ -664,6 +759,8 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
     names: {
       cohorts: { ...extra.cohorts, ...names.cohorts },
       ...(extra.messages ? { messages: extra.messages } : {}),
+      // v3a: as opcoes das enquetes citadas ("votaram em “Sábado” na enquete …").
+      ...(extra.pollOptions ? { pollOptions: extra.pollOptions } : {}),
       products: { ...extra.products, ...names.products }
     },
     notices,
@@ -725,11 +822,16 @@ export function followUpContentOf(node: Pick<FlowNode, "expireWithAnchor">, row:
   const draft = row ? rowToDraft(row) : emptyNoticeDraft("inbox");
 
   return {
+    // Ajustes da v3a: a lixeira do passo (sem ela, salvar de novo voltaria a permitir excluir).
+    allowHide: draft.allowHide ?? true,
     audio: draft.audio,
     body: draft.body,
     cta: draft.cta,
     icon: draft.icon,
     image: draft.image,
+    // v3a: a enquete e as reacoes do passo (sem elas, salvar de novo criaria uma versao sem enquete).
+    poll: draft.poll ?? null,
+    reactions: draft.reactions ?? false,
     response: draft.response,
     sender: draft.sender,
     title: draft.title,
@@ -879,25 +981,49 @@ async function loadNoticeFollowUps(
   const live = flow.status !== "draft" && flow.status !== "pending_approval";
   const ctaKeys = Object.fromEntries(messageNodes.map((node) => [node.id, pageKeyOfHref(versions.get(node.campaignId ?? "")?.cta_href ?? null)]));
   const definitions = [...messageNodes.map((node) => node.filter), ...tree.nodes.map((node) => node.condition), goal].filter((item): item is AudienceDefinition => Boolean(item));
-  const [nodeStats, ruleNames, sent] = await Promise.all([
+  // v3a: reagiram e votaram de cada seguinte (as linhas "Reagiram" e "Votaram" do cartao no relatorio).
+  const [nodeStats, ruleNames, sent, interactions] = await Promise.all([
     live ? fetchFlowNodeStats(db, flow.id, ctaKeys) : Promise.resolve(new Map()),
     loadAudienceNames(db, definitions),
-    live ? countFollowUpRows(db, flow.id) : Promise.resolve(0)
+    live ? countFollowUpRows(db, flow.id) : Promise.resolve(0),
+    live ? fetchMessageInteractions(db, { flowId: flow.id }) : Promise.resolve(new Map<string, MessageInteractions>())
   ]);
   const titles: Record<string, string> = { ...(entry ? { [messageRefKey({ kind: "node", nodeId: entry.id })]: row.title } : {}) };
 
-  for (const node of messageNodes) {
-    titles[messageRefKey({ kind: "node", nodeId: node.id })] = contentOfNode(node.id).title.trim() || "Sem título";
+  // v3a: as opcoes das enquetes da principal e das seguintes ("votaram em “Sábado” na enquete …").
+  const polls: Record<string, Record<string, string>> = {};
+  const addPoll = (nodeId: string, poll: { options: readonly PollOption[] } | null | undefined) => {
+    if (poll) {
+      polls[messageRefKey({ kind: "node", nodeId })] = Object.fromEntries(poll.options.map((option) => [option.id, option.label]));
+    }
+  };
+
+  if (entry) {
+    addPoll(entry.id, parsePoll(row.poll));
   }
 
-  const names: AudienceNames = { ...ruleNames, messages: { ...ruleNames.messages, ...titles } };
+  for (const node of messageNodes) {
+    titles[messageRefKey({ kind: "node", nodeId: node.id })] = contentOfNode(node.id).title.trim() || "Sem título";
+    addPoll(node.id, contentOfNode(node.id).poll);
+  }
+
+  const names: AudienceNames = {
+    ...ruleNames,
+    messages: { ...ruleNames.messages, ...titles },
+    ...(Object.keys(polls).length > 0 ? { pollOptions: { ...ruleNames.pollOptions, ...polls } } : {})
+  };
   const stats: Record<string, FollowUpStats> = {};
 
   for (const node of messageNodes) {
     const values = nodeStats.get(node.id);
 
     if (values) {
-      stats[node.id] = Object.fromEntries(FOLLOW_UP_STAT_FIELDS.map((field) => [field, values[field] ?? 0])) as FollowUpStats;
+      const interaction = interactions.get(node.id);
+      stats[node.id] = {
+        ...(Object.fromEntries(FOLLOW_UP_STAT_FIELDS.map((field) => [field, values[field] ?? 0])) as FollowUpStats),
+        reacted: interaction?.reacted ?? 0,
+        voted: interaction?.pollVoters ?? 0
+      };
     }
   }
 

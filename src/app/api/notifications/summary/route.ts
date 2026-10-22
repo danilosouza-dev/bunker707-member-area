@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireApiUser } from "@/server/auth/guards";
+import { requireApiSessionUser } from "@/server/auth/guards";
 import { countUnseen } from "@/server/communications/inbox";
 import type { NotificationsSummary } from "@/server/communications/notification-model";
 import { getEligiblePopup } from "@/server/communications/popups";
@@ -7,13 +7,14 @@ import { noStore } from "@/server/communications/route-support";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 // Resumo leve do sino, lido pela barra do topo depois de carregar a pagina (nunca no carregamento do
-// servidor): o numero do sino e, com ?popup=1 (so na home), o pop-up que o aluno deve ver agora.
+// servidor): o numero do sino e, com ?popup=1 (so na home), o pop-up que o aluno deve ver agora. Sessao
+// pelas claims do JWT (v3a, docs/24); o numero numa ida ao banco (communication_inbox_counts).
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {
     return noStore(auth.response!);

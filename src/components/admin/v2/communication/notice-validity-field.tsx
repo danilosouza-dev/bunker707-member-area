@@ -4,10 +4,12 @@ import { AlertCircle } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { FlowValidity } from "@/server/communications/message-meta";
+import { VALIDITY_MIN_MINUTES } from "@/server/communications/schemas";
 import { PillGroup, adminInputClass } from "../form";
 import { DateTimeField } from "./notice-when-fields";
 import {
   VALIDITY_CHOICE_OPTIONS,
+  VALIDITY_UNIT_OPTIONS,
   defaultWindowEnd,
   showsUrgencyHint,
   validityChoiceOf,
@@ -19,9 +21,10 @@ import {
 } from "./notices-view-model";
 
 // "Fica no sino por" (docs/23; docs/22 §2.2): 1, 3, 7, 30 ou 90 dias (padrao) ou "Outro", por um tempo
-// (horas ou dias) ou ate uma data e hora de Sao Paulo. Na notificacao seguinte e no construtor ha tambem
-// "Até a notificação principal sumir" (`anchorLabel`). Os limites (1 hora a 90 dias, fim pelo menos 1 hora
-// depois do envio) vem do zod e de publishProblems; aqui so as frases e os campos.
+// (minutos, horas ou dias; minutos nos ajustes da v3a) ou ate uma data e hora de Sao Paulo. Na notificacao
+// seguinte e no construtor ha tambem "Até a notificação principal sumir" (`anchorLabel`). Os limites (5
+// minutos a 90 dias, fim pelo menos 1 hora depois do envio) vem do zod e de publishProblems; aqui so as
+// frases e os campos. Um tempo gravado reabre na maior unidade exata (90 = 90 minutos, 120 = 2 horas).
 
 type NoticeValidityFieldProps = {
   /** "Até a notificação principal sumir" (so em passo que conta de uma notificacao). */
@@ -40,11 +43,6 @@ const OTHER_OPTIONS = [
   { label: "Por um tempo", value: "duration" },
   { label: "Até uma data", value: "until" }
 ] as const;
-
-const UNIT_OPTIONS = [
-  { label: "horas", value: "hours" },
-  { label: "dias", value: "days" }
-] as const satisfies readonly { label: string; value: ValidityUnit }[];
 
 const labelClass = "text-[13px] leading-5 font-medium text-[var(--text-primary)]";
 
@@ -129,7 +127,7 @@ export function NoticeValidityField({ anchorLabel, disabled, errors, idPrefix, o
                   disabled={disabled}
                   id={`${idPrefix}-numero`}
                   inputMode="numeric"
-                  min={1}
+                  min={unit === "minutes" ? VALIDITY_MIN_MINUTES : 1}
                   onChange={(event) => changeAmount(event.target.value, unit)}
                   type="number"
                   value={amountText}
@@ -139,7 +137,7 @@ export function NoticeValidityField({ anchorLabel, disabled, errors, idPrefix, o
                   disabled={disabled}
                   name={`${idPrefix}-unidade`}
                   onChange={(next) => changeAmount(amountText, next)}
-                  options={UNIT_OPTIONS}
+                  options={VALIDITY_UNIT_OPTIONS}
                   value={unit}
                 />
               </div>

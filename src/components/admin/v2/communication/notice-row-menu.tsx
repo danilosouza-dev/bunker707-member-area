@@ -3,19 +3,21 @@
 import {
   BellOff,
   CalendarX,
+  ChartColumn,
   CircleCheck,
   CircleStop,
   Copy,
   Pause,
   Pencil,
   Play,
+  RotateCcw,
   Send,
   Trash2,
   Undo2,
   type LucideIcon
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { startTransition, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { ActionResult } from "@/lib/action-result";
@@ -27,23 +29,28 @@ import {
   endNotice,
   pauseNotice,
   rejectNotice,
+  reshowPopup,
   resumeNotice,
   sendNoticeTestToMe,
   withdrawNotice
 } from "@/server/communications/actions";
-import type { CampaignKind, CampaignStatus, NoticeAction } from "@/server/communications/campaign-model";
+import type { CampaignKind, CampaignSituation, CampaignStatus, NoticeAction } from "@/server/communications/campaign-model";
 import { ErrorBanner } from "../error-banner";
 import { ConfirmDialog, RowMenu } from "../settings/kit";
 import { adminToast } from "../toast";
 import { withdrawFollowUpsLabel } from "./follow-ups-view-model";
 import {
   NOTICE_ACTION_TOASTS,
-  isLivePopupStatus,
+  deleteFollowUpsLabel,
+  deletedNoticeToast,
   noticeActionConfirm,
   noticeActionNeedsConfirm,
+  noticeEditHref,
   noticeHref,
   noticeMenuEntries,
-  publishedNoticeToast
+  publishedNoticeToast,
+  reshownPopupToast,
+  type NoticeCitationCounts
 } from "./notices-view-model";
 
 // Acoes de um aviso (docs/22 §2; docs/17 §1.8 "Pausar, Duplicar, Encerrar"), as mesmas na lista, no
@@ -53,17 +60,26 @@ import {
 // leva a versao lida (updatedAt): se o aviso mudou em outra tela, volta 409 e o banner oferece
 // "Recarregar". Pausar tem "Desfazer" no toast. v2: "Retirar do sino" de uma notificacao com seguintes
 // avisa que elas deixam de sair e traz a caixa "Retirar também as notificações seguintes que já saíram (n)",
-// marcada (docs/23 §2.2).
+// marcada (docs/23 §2.2). v3a (docs/24 §2.1): "Ver relatório", Editar a notificacao enviada (?editar=1),
+// Excluir pela situacao (a enviada com a caixa "Excluir também as notificações seguintes que já saíram (n)"),
+// a frase das regras que citam a notificacao e "Mostrar de novo para quem já viu" no pop-up "Uma vez".
+// Ajustes da v3a: Excluir e Retirar do sino nao revalidam a pagina na acao (o servidor desenhava a pagina
+// inteira de novo na mesma resposta): o dialogo fecha e o toast aparece assim que a acao volta, e a lista
+// atualiza logo depois (router.refresh numa transicao; na pagina do aviso, Excluir volta para a lista).
 
 export type NoticeActionTarget = {
   actions: readonly NoticeAction[];
   audienceCount: number | null;
+  /** v3a: avisos e fluxos que citam a notificacao enviada nas regras (Excluir e Retirar do sino avisam). */
+  citations?: NoticeCitationCounts | null;
   /** Notificacoes seguintes (v2): quantas e quantas ja sairam (o "Retirar do sino" oferece retirar essas). */
   followUps?: { count: number; sent: number } | null;
   id: string;
   kind: CampaignKind;
   /** Notificacao enviada: quantos receberam (texto do "Retirar do sino"). */
   recipients?: number | null;
+  /** v3a: a situacao de agora (o texto de Excluir muda: pop-up no ar, pausado, notificacao enviada...). */
+  situation: CampaignSituation;
   status: CampaignStatus;
   title: string;
   updatedAt: string;
@@ -80,8 +96,10 @@ const ACTION_ICONS: Partial<Record<NoticeAction, LucideIcon>> = {
   end: CircleStop,
   pause: Pause,
   reject: Undo2,
+  reshow: RotateCcw,
   resume: Play,
   send_test: Send,
+  view_report: ChartColumn,
   withdraw: BellOff
 };
 
@@ -92,7 +110,7 @@ export function NoticeActionIcon({ action, className = "size-4" }: { action: Not
 }
 
 type UseNoticeActionsOptions = {
-  /** Depois de excluir (o relatorio volta para a lista; a lista so atualiza). */
+  /** Depois de excluir (o relatorio volta para a lista); sem ele, a tela atual atualiza (a lista). */
   onDeleted?: () => void;
 };
 
@@ -104,12 +122,18 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
   const router = useRouter();
   const [confirming, setConfirming] = useState<{ action: NoticeAction; notice: NoticeActionTarget } | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  // "Retirar também as notificações seguintes que já saíram" (marcada a cada vez que o dialogo abre).
+  // "Retirar (ou Excluir) também as notificações seguintes que já saíram" (marcada a cada vez que o dialogo abre).
   const [alsoFollowUps, setAlsoFollowUps] = useState(true);
   const [failure, setFailure] = useState<Failure | null>(null);
 
   function fail(result: Extract<ActionResult<unknown>, { ok: false }>) {
     setFailure({ message: result.error, status: result.status });
+  }
+
+  // Fora do caminho do dialogo: a pagina e buscada de novo numa transicao, que nao segura o toast nem o fechar
+  // do dialogo (o finally de execute fecha na mesma hora).
+  function refreshInBackground() {
+    startTransition(() => router.refresh());
   }
 
   async function execute(action: NoticeAction, notice: NoticeActionTarget) {
@@ -139,7 +163,7 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
           }
 
           adminToast.success(NOTICE_ACTION_TOASTS.pause ?? "", {
-            onUndo: () => void execute("resume", { ...notice, status: "paused", updatedAt: result.data.updatedAt })
+            onUndo: () => void execute("resume", { ...notice, situation: "paused", status: "paused", updatedAt: result.data.updatedAt })
           });
           return;
         }
@@ -162,17 +186,35 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
           }
 
           adminToast.success(NOTICE_ACTION_TOASTS.withdraw ?? "");
+          refreshInBackground();
           return;
         }
         case "delete": {
-          const result = await deleteNotice(input);
+          const result = await deleteNotice({ ...input, alsoFollowUps });
 
           if (!result.ok) {
             return fail(result);
           }
 
-          adminToast.success(NOTICE_ACTION_TOASTS.delete ?? "");
-          onDeleted?.();
+          adminToast.success(deletedNoticeToast({ kind: notice.kind, removed: result.data.removed, situation: notice.situation }));
+
+          // A pagina do aviso volta para a lista (que chega nova: a pagina e dinamica); a lista so atualiza.
+          if (onDeleted) {
+            onDeleted();
+          } else {
+            refreshInBackground();
+          }
+
+          return;
+        }
+        case "reshow": {
+          const result = await reshowPopup(input);
+
+          if (!result.ok) {
+            return fail(result);
+          }
+
+          adminToast.success(reshownPopupToast(result.data.reshown));
           return;
         }
         default: {
@@ -198,8 +240,13 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
   }
 
   function request(action: NoticeAction, notice: NoticeActionTarget) {
+    if (action === "view_report") {
+      router.push(noticeHref(notice.id));
+      return;
+    }
+
     if (action === "edit") {
-      router.push(noticeHref(notice.id, { edit: isLivePopupStatus(notice.kind, notice.status) }));
+      router.push(noticeEditHref(notice));
       return;
     }
 
@@ -215,7 +262,11 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
 
   const copy = confirming ? noticeActionConfirm(confirming.action, confirming.notice) : null;
   const conflict = failure?.status === 409;
-  const sentFollowUps = confirming?.action === "withdraw" ? (confirming.notice.followUps?.sent ?? 0) : 0;
+  // A caixa das seguintes que ja sairam: Retirar do sino e Excluir a notificacao enviada.
+  const sentFollowUps =
+    confirming?.action === "withdraw" || (confirming?.action === "delete" && confirming.notice.situation === "sent")
+      ? (confirming.notice.followUps?.sent ?? 0)
+      : 0;
 
   const confirmDialog = (
     <ConfirmDialog
@@ -225,6 +276,12 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
       destructive={copy?.destructive}
       onConfirm={() => {
         if (confirming) {
+          // Excluir e Retirar do sino: o dialogo fecha na hora (o toast confirma quando terminar; um erro
+          // aparece no banner da tela, como nas outras acoes).
+          if (confirming.action === "delete" || confirming.action === "withdraw") {
+            setConfirming(null);
+          }
+
           void execute(confirming.action, confirming.notice);
         }
       }}
@@ -243,7 +300,7 @@ export function useNoticeActions({ onDeleted }: UseNoticeActionsOptions = {}) {
             className="size-[18px] rounded border-[var(--border-stronger)] data-checked:border-[var(--text-primary)] data-checked:bg-[var(--text-primary)] data-checked:text-[var(--surface-1)]"
             onCheckedChange={(checked) => setAlsoFollowUps(checked === true)}
           />
-          {withdrawFollowUpsLabel(sentFollowUps)}
+          {confirming?.action === "delete" ? deleteFollowUpsLabel(sentFollowUps) : withdrawFollowUpsLabel(sentFollowUps)}
         </label>
       ) : null}
     </ConfirmDialog>

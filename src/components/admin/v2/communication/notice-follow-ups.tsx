@@ -19,6 +19,7 @@ import type { ProductPickerItem } from "../storefront/product-picker";
 import { adminToast } from "../toast";
 import { CardSelect, FollowUpCard, type FollowUpEditorOptions } from "./follow-up-card";
 import { FollowUpSheet } from "./follow-up-sheet";
+import { livePollLockedFields } from "./flows/flows-view-model";
 import {
   FOLLOW_UPS_COPY,
   FOLLOW_UPS_SECTION_TITLE,
@@ -27,6 +28,7 @@ import {
   canNestFollowUp,
   duplicateFollowUp,
   findFollowUp,
+  followUpAudienceNames,
   followUpChoiceErrors,
   followUpErrorAt,
   followUpFormItemsOf,
@@ -112,12 +114,15 @@ type NoticeFollowUpsProps = {
 /** A notificacao de cima como opcao das regras "O que fez com uma notificação" das seguintes de baixo. */
 function flowMessageOf(parent: FollowUpParent): AudienceFlowMessageChoice {
   return {
+    allowsReactions: parent.allowsReactions,
     canOpen: hasSomethingToOpen(parent),
     ctaPageKey: pageKeyOfHref(parent.ctaHref),
     hasAudio: parent.hasAudio,
     hasCta: Boolean(parent.ctaHref),
+    hasPoll: parent.hasPoll,
     hasResponse: parent.hasResponse,
     nodeId: parent.nodeId,
+    pollOptions: parent.pollOptions,
     title: parent.title
   };
 }
@@ -164,6 +169,8 @@ export function NoticeFollowUps({
   const rootProblem = addFollowUpProblem([...items], null);
   const editing = editingId ? findFollowUp([...items], editingId) : null;
   const removing = removingId ? findFollowUp([...items], removingId) : null;
+  // v3a: as opcoes das enquetes nas frases das regras ("votaram em “Sábado” na enquete …").
+  const cardNames = useMemo(() => followUpAudienceNames(names, main, items), [items, main, names]);
 
   function change(nextItems: FollowUpFormItem[], nextStop: FollowUpStopLine = stop) {
     onChange({ items: nextItems, stop: nextStop });
@@ -173,7 +180,7 @@ export function NoticeFollowUps({
     const location = parentId ? findFollowUp([...items], parentId) : null;
     const parent = location ? followUpParentOf(location.item.id, "previous", location.item.content) : main;
     const item = newFollowUpItem(crypto.randomUUID(), parent);
-    // A primeira seguinte marca a linha de parar com o produto do botao do aviso (quando abre um produto).
+    // A primeira seguinte marca a linha de parar com o produto do destino do aviso (quando abre um produto).
     const nextStop = items.length === 0 && stop.kind === "product" && !stop.enabled && !stop.productId ? initialStopLine(noticeCtaHref) : stop;
 
     change(appendFollowUp([...items], parentId, item), nextStop);
@@ -201,7 +208,7 @@ export function NoticeFollowUps({
           flowContext={{ messages: ancestors }}
           item={item}
           key={item.id}
-          names={names}
+          names={cardNames}
           noticeId={noticeId}
           number={number}
           onAddChild={canNestFollowUp(depth) ? () => add(item.id) : null}
@@ -331,6 +338,8 @@ export function NoticeFollowUps({
           idPrefix={`seguinte-${(numbers.get(editing.item.id) ?? "x").replace(/\./g, "-")}`}
           level={editingParent.level}
           live={mode.kind === "live"}
+          // Ajustes da v3a: no fluxo no ar, a enquete de uma seguinte que ja chegou a alguem nao muda.
+          lockedFields={livePollLockedFields({ live: flowLive, received: stats[editing.item.id]?.received })}
           now={now}
           onAudioBusyChange={(reason) => onAudioBusyChange?.(reason)}
           onBlurField={() => undefined}

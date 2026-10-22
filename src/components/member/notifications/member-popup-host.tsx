@@ -6,7 +6,7 @@ import { POPUP_RULES } from "@/server/communications/campaign-model";
 import type { PopupItem } from "@/server/communications/notification-model";
 import type { PopupOutcome } from "./member-popup-dialog";
 import { holdSummaryForPopup, postPopupEvent, refreshNotificationsSummary } from "./notifications-client";
-import { POPUP_SESSION_KEY, SUMMARY_TTL_MS } from "./notifications-model";
+import { SUMMARY_TTL_MS } from "./notifications-model";
 
 // Quando mostrar o pop-up da home (docs/22 §1.3): fica em toda pagina do aluno (AppShell), mas so age na
 // home. Pede o resumo com o pop-up 1,5 s depois de a home aparecer; esse pedido tambem traz o numero do
@@ -23,37 +23,15 @@ const POPUP_FETCH_DELAY_MS = 1_500;
 /** Enquanto algo esta aberto por cima (ou a aba escondida), confere de novo a cada segundo. */
 const POPUP_RETRY_MS = 1_000;
 
-// Memoria da pagina (sobrevive a troca de pagina, nao ao recarregar): sem sessionStorage (aba
-// anonima, bloqueio), vale ao menos ate recarregar; e sem pop-up na ultima conferencia, a volta para a
-// home dentro de 1 minuto nao pergunta de novo.
-let shownInThisPage = false;
+// Sem limite entre pop-ups (decisao do produtor, docs/24 §10): um por visita a home, um de cada vez, e na
+// proxima visita o servidor escolhe de novo pela regra de cada pop-up. Memoria da pagina (sobrevive a troca
+// de pagina, nao ao recarregar): sem pop-up na ultima conferencia, a volta para a home dentro de 1 minuto nao
+// pergunta de novo.
 let lastEmptyCheckAt: number | null = null;
-
-function wasShownThisSession() {
-  if (shownInThisPage) {
-    return true;
-  }
-
-  try {
-    return window.sessionStorage.getItem(POPUP_SESSION_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function rememberShown() {
-  shownInThisPage = true;
-
-  try {
-    window.sessionStorage.setItem(POPUP_SESSION_KEY, "1");
-  } catch {
-    // Sem sessionStorage: fica a memoria da pagina.
-  }
-}
 
 /** Ainda vale perguntar pelo pop-up nesta visita a home? */
 function shouldAskForPopup(now: number) {
-  return !wasShownThisSession() && !(lastEmptyCheckAt !== null && now - lastEmptyCheckAt < SUMMARY_TTL_MS);
+  return !(lastEmptyCheckAt !== null && now - lastEmptyCheckAt < SUMMARY_TTL_MS);
 }
 
 /** Campo de texto com foco (o aluno esta digitando): o pop-up nao rouba o foco nem fecha o teclado. */
@@ -121,7 +99,7 @@ export function MemberPopupHost({
     }
 
     function tryShow(item: PopupItem) {
-      if (cancelled || wasShownThisSession()) {
+      if (cancelled) {
         return;
       }
 
@@ -130,7 +108,6 @@ export function MemberPopupHost({
         return;
       }
 
-      rememberShown();
       outcomeRef.current = null;
       setPopup(item);
       setOpen(true);

@@ -18,19 +18,24 @@ import { StatusChip } from "../status-chip";
 import { adminCard } from "../styles";
 import { useAdminTopbarTitle } from "../topbar-title";
 import { NoticeFollowUpsReport } from "./notice-follow-ups";
+import { NoticeInteractionsReport } from "./notice-interactions-report";
 import { NoticePreview } from "./notice-preview";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
 import {
+  INTERACTIONS_OPEN_NOTE,
   NOTICES_HREF,
   closedWithoutClickRate,
   formatPercent,
   formatStudentCount,
+  hiddenFromBellTile,
   isHighCloseRate,
   noticeAudioSteps,
   noticeAuthorLine,
   noticeFunnel,
   noticeHref,
-  ratio
+  noticeReportLastLine,
+  ratio,
+  responseChangedTile
 } from "./notices-view-model";
 
 // Relatorio de um aviso (docs/22 §2.4; docs/17 §1.8 "funil Elegíveis → Vistos → Clicaram"): para quem
@@ -45,6 +50,11 @@ import {
 // (communication_campaign_engagement); quando quem envia e uma pessoa, "Criada por … · em nome de …".
 // No fim, "Notificações seguintes" (NoticeFollowUpsReport): as seguintes com os numeros de cada uma e, para
 // quem pode publicar, as mudancas em etapas com "Aplicar alterações".
+//
+// v3a (docs/24 §2.1, §2.2 e §2.6): Editar tambem na notificacao enviada (para quem pode: messaging.publish e,
+// acima de 500, messaging.publish_large; senao a ultima linha diz por que), "Editado" na linha do tempo, o
+// menu com Excluir pela situacao e as regras que citam a notificacao, e as reacoes, a enquete e quem excluiu
+// do sino (NoticeInteractionsReport, com "Encerrar enquete").
 
 type NoticeReportProps = {
   branding: NoticeEditorOptions["branding"];
@@ -63,11 +73,14 @@ function toTarget(detail: NoticeDetail): NoticeActionTarget {
   return {
     actions: detail.actions,
     audienceCount: detail.audienceCount,
+    // v3a: Excluir e Retirar do sino avisam das regras que citam a notificacao; o texto segue a situacao.
+    citations: detail.citations,
     // v2: "Retirar do sino" avisa das seguintes e oferece retirar as que ja sairam.
     followUps: detail.followUps ? { count: detail.followUps.count, sent: detail.followUps.sent } : null,
     id: detail.id,
     kind: detail.kind,
     recipients: detail.stats.recipients,
+    situation: detail.situation,
     status: detail.status,
     title: detail.title,
     updatedAt: detail.updatedAt
@@ -121,6 +134,11 @@ function timelineOf(detail: NoticeDetail): TimelineEntry[] {
     if (detail.status === "canceled" && detail.sentAt) {
       entries.push({ label: "Retirado do sino", value: when(detail.updatedAt) });
     }
+
+    // v3a: a ultima edicao depois do envio.
+    if (detail.editedAt) {
+      entries.push({ label: "Editado", value: `${detail.editedBy?.name ?? "Equipe"} · ${when(detail.editedAt)}` });
+    }
   } else {
     if (detail.sentAt) {
       entries.push({ label: "Publicado", value: when(detail.sentAt) });
@@ -132,6 +150,11 @@ function timelineOf(detail: NoticeDetail): TimelineEntry[] {
 
     if (detail.draft.window.endsAt) {
       entries.push({ label: detail.situation === "ended" ? "Terminou" : "Termina", value: when(detail.draft.window.endsAt) });
+    }
+
+    // v3a: a ultima edicao do pop-up no ar ou pausado.
+    if (detail.editedAt) {
+      entries.push({ label: "Editado", value: `${detail.editedBy?.name ?? "Equipe"} · ${when(detail.editedAt)}` });
     }
   }
 
@@ -153,6 +176,11 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
   const canResume = detail.actions.includes("resume");
   const busy = busyKey?.startsWith(`${detail.id}:`) ?? false;
   const answered = stats.accepted + stats.declined;
+  const lastLine = noticeReportLastLine({ actions: detail.actions, kind: detail.kind, permissions, recipients: detail.stats.recipients, status: detail.status });
+  // v3a: "Excluíram do sino" ao lado de "Voltaram a estudar" (so quando alguem excluiu).
+  const hiddenTile = detail.kind === "inbox" ? hiddenFromBellTile(detail.interactions.hidden, stats.recipients) : null;
+  const funnelTiles = funnel.length + (hiddenTile ? 1 : 0);
+  const changedTile = responseChangedTile(stats, detail.interactions.responseChanged);
 
   useAdminTopbarTitle(detail.title);
 
@@ -179,7 +207,8 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
                 Editar
               </AdminLinkButton>
             ) : null}
-            <NoticeRowMenu exclude={["edit", "pause", "resume"]} notice={target} onRequest={request} />
+            {/* O relatorio ja e o "Ver relatório"; Editar, Pausar e Retomar ficam como botoes. */}
+            <NoticeRowMenu exclude={["edit", "pause", "resume", "view_report"]} notice={target} onRequest={request} />
           </>
         }
         breadcrumb={[{ href: NOTICES_HREF, label: "Avisos e pop-ups" }, { label: "Relatório" }]}
@@ -213,7 +242,10 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
       ) : null}
       {detail.status === "paused" ? <Note>Pop-up pausado: os alunos não veem até você retomar.</Note> : null}
 
-      <section aria-label="Funil do aviso" className={cn("grid grid-cols-2 gap-3", funnel.length > 4 ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
+      <section
+        aria-label="Funil do aviso"
+        className={cn("grid grid-cols-2 gap-3", funnelTiles > 5 ? "lg:grid-cols-6" : funnelTiles > 4 ? "lg:grid-cols-5" : "lg:grid-cols-4")}
+      >
         {funnel.map((step) => (
           <KpiTile
             definition={step.percent === null ? step.base : `${formatPercent(step.percent)} ${step.base}`}
@@ -224,9 +256,12 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
             value={step.value}
           />
         ))}
+        {hiddenTile ? <KpiTile definition={hiddenTile.definition} definitionShort={hiddenTile.definitionShort} label={hiddenTile.label} value={hiddenTile.value} /> : null}
       </section>
       <p className="-mt-3 text-xs leading-5 text-[var(--text-tertiary)]">
-        {detail.kind === "inbox" ? "Abriram: tocaram no cartão, em “Ver mais”, no áudio, no botão ou responderam (“Marcar todas como lidas” não conta). " : ""}
+        {detail.kind === "inbox"
+          ? `Abriram: tocaram no cartão, em “Ver mais”, no áudio, no botão ou responderam (“Marcar todas como lidas” não conta). ${INTERACTIONS_OPEN_NOTE} `
+          : ""}
         Voltaram a estudar: viram o aviso e estudaram nos 7 dias seguintes (pelo menos 10 min assistidos ou 1 aula concluída). A equipe e os testes não entram nos números.
       </p>
 
@@ -259,8 +294,19 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
             label="Recusaram"
             value={stats.declined}
           />
+          {/* v3a: quem trocou de resposta (Aceitaram e Recusaram contam a resposta de agora). */}
+          <KpiTile
+            definition={changedTile.definition}
+            definitionShort={changedTile.definitionShort}
+            emptyLabel="de quem respondeu"
+            label={changedTile.label}
+            value={changedTile.value}
+          />
         </section>
       ) : null}
+
+      {/* v3a (docs/24 §2.6): reacoes, enquete (com "Encerrar enquete"), mudaram de resposta e excluiram do sino. */}
+      {detail.kind === "inbox" ? <NoticeInteractionsReport detail={detail} now={now} permissions={permissions} /> : null}
 
       {detail.kind === "popup" ? (
         <section aria-label="O que fizeram com o pop-up" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -326,11 +372,7 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
                 <dd className="text-[var(--text-primary)] tabular-nums">{entry.value}</dd>
               </div>
             ))}
-            {permissions.canWrite && !canEdit && detail.actions.includes("duplicate") ? (
-              <div className="border-t border-[var(--border-subtle)] pt-4 text-[13px] leading-5 text-[var(--text-secondary)]">
-                Este aviso não muda mais. Para mandar de novo ou ajustar, use Duplicar no menu.
-              </div>
-            ) : null}
+            {lastLine ? <div className="border-t border-[var(--border-subtle)] pt-4 text-[13px] leading-5 text-[var(--text-secondary)]">{lastLine}</div> : null}
           </dl>
         </SectionCard>
       </div>

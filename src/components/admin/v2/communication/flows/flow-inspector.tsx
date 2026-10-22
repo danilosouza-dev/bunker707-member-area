@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EVERYONE, type AudienceDefinition, type AudienceNames } from "@/server/communications/audience-model";
 import type { FlowEntryMode } from "@/server/communications/flow-model";
-import { pageKeyOfHref } from "@/server/member-area/page-visit-model";
 import type { FlowDraft, FlowNodeDraft, FlowNoticeContent } from "@/server/communications/flow-schemas";
 import type { NoticeEditorOptions } from "@/server/communications/queries";
 import { PillGroup, adminInputClass } from "../../form";
@@ -36,7 +35,8 @@ import {
   GOAL_HINT,
   GOAL_INTRO,
   liveContentNote,
-  messageReportLines,
+  livePollLockedFields,
+  messageStepLines,
   notReceivedLines,
   ONCE_PER_FLOW_TEXT,
   PAGE_VISIT_LIVE_NOTE,
@@ -48,6 +48,7 @@ import {
   waitMinutes,
   waitParts,
   type FlowSourceNotice,
+  type FlowStepInteractionCounts,
   type FlowStepStats,
   type ReportLine,
   type WaitUnit
@@ -344,11 +345,15 @@ export function MessageInspector({ content, context, draft, errors, imagePreview
         idPrefix={idPrefix}
         kind="inbox"
         layout="plain"
+        // Ajustes da v3a: no ar, a enquete de um passo que ja chegou a alguem nao muda (o servidor recusa igual).
+        lockedFields={livePollLockedFields({ live: context.live, received })}
         onAudioBusyChange={context.onAudioBusyChange}
         onBlurField={(key) => context.onTouch(`messages.${node.id}.${key}`)}
         onChange={(patch) => onChange({ content: { ...content, ...patch } as FlowNoticeContent })}
         onImageUploadChange={context.onImageUploadChange}
         onSendersChange={context.onSendersChange}
+        // v3a: a enquete de um passo so encerra quando a notificacao sai do sino (docs/24 T13).
+        pollCanEndAtDate={false}
         products={context.pickerItems}
         productsLoaded={options.productsLoaded}
         resetKey={context.resetKey}
@@ -539,30 +544,26 @@ function Lines({ lines }: { lines: readonly ReportLine[] }) {
 type StepNumbersProps = {
   content: FlowNoticeContent | null;
   context: Pick<InspectorContext, "now" | "options" | "senders">;
+  /** v3a: reacoes e votos do passo (Reagiram, Votaram e as opcoes da enquete). */
+  interactions?: FlowStepInteractionCounts | null;
   kind: "condition" | "message";
   stats: FlowStepStats | null;
   withdraw: (() => void) | null;
 };
 
 /** O passo no relatorio: os numeros (com a parte do anterior), por que alguns nao receberam e a previa. */
-export function StepNumbers({ content, context, kind, stats, withdraw }: StepNumbersProps) {
+export function StepNumbers({ content, context, interactions = null, kind, stats, withdraw }: StepNumbersProps) {
   if (kind === "condition") {
     return <Lines lines={conditionReportLines(stats)} />;
   }
 
-  const meta = {
-    ctaTracked: Boolean(pageKeyOfHref(content?.cta?.href ?? null)),
-    hasAudio: Boolean(content?.audio),
-    hasCta: Boolean(content?.cta),
-    hasResponse: Boolean(content?.response)
-  };
   const notReceived = notReceivedLines(stats);
   const reasons = describeNotReceived(notReceived.parts);
   const capHelp = notReceived.parts.find((part) => part.id === "cap" && part.value > 0)?.help ?? null;
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <Lines lines={messageReportLines(stats, meta)} />
+      <Lines lines={messageStepLines(stats, content, interactions)} />
       <div className="flex min-w-0 flex-col gap-1 border-t border-[var(--border-subtle)] pt-4 text-[13px] leading-5">
         <p className="font-medium text-[var(--text-primary)] tabular-nums">Não receberam {formatReportValue(notReceived.total)}</p>
         {reasons ? <p className="text-[var(--text-secondary)] tabular-nums">{reasons}</p> : null}

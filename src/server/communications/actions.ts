@@ -17,6 +17,12 @@
 // 422) e a pessoa escolhida recebe o e-mail "enviada em seu nome" quando a notificacao sai; o conteudo
 // de um passo de fluxo so muda pelo fluxo (409 em toda acao daqui); toda contagem le as linhas dos
 // avisos citados por regras "o que fez com a notificacao X"; o teste fica pelo menos 1 hora no sino.
+//
+// v3a (docs/24 §2 e §4.7–§4.10): a notificacao enviada muda o conteudo (messaging.publish; acima de 500
+// alunos, messaging.publish_large), num caminho proprio que nunca volta a rascunho nem mexe nas seguintes;
+// Excluir vale em toda situacao menos "Enviando" (agendado, enviado e pop-up no ar ou pausado pedem
+// messaging.publish); "Mostrar de novo para quem já viu" no pop-up "Uma vez" (menu e editor) e "Encerrar
+// enquete". As regras que citam a notificacao so avisam (contagem na auditoria), nunca impedem.
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -57,8 +63,10 @@ import {
 } from "./audience-model";
 import { invalidateLivePopups } from "./cache";
 import {
+  APPROVAL_THRESHOLD,
   isEditableStatus,
   isSameVersion,
+  noticeRecipients,
   publishDecision,
   situationOf,
   type CampaignSituation,
@@ -75,8 +83,10 @@ import {
   watchedPageKeysOf,
   type FlowMessageMeta,
   type FlowNode,
-  type FlowStatus
+  type FlowStatus,
+  type FlowTree
 } from "./flow-model";
+import { isPollClosed, parsePoll } from "./interactions-model";
 import {
   previewFollowUpAudienceSchema,
   saveNoticeFollowUpsSchema,
@@ -101,13 +111,16 @@ import {
 import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
 import {
+  deleteNoticeSchema,
   noticeDraftSchema,
   noticeIdSchema,
   previewAudienceSchema,
   publishProblems,
   saveNoticeSchema,
+  sentNoticeLockedProblems,
   uploadNoticeImageSchema,
   withdrawNoticeSchema,
+  type DeleteNoticeInput,
   type NoticeDraft,
   type NoticeIdInput,
   type SaveNoticeInput,
@@ -120,13 +133,17 @@ import {
   fetchCampaign,
   fetchCampaignRecipientIds,
   fetchCampaignsByIds,
+  fetchNoticeCitations,
   insertCampaign,
   NOTICE_CHANGED_MESSAGE,
   NOTICE_MISSING_MESSAGE,
+  reshowPopupDeliveries,
   rowToDraft,
+  SENT_EDITABLE_COLUMNS,
   softDeleteCampaign,
   updateCampaign,
   upsertTestNotification,
+  type CampaignContentColumns,
   type CampaignPatch,
   type CampaignRow
 } from "./store";
@@ -140,6 +157,17 @@ const RESUME_NEEDS_APPROVAL = "Este pop-up passou de 500 alunos. Para retomar, p
 const FLOW_MESSAGE = "Esta notificação faz parte de um fluxo. Abra o fluxo para mudar.";
 const SENDER_NOT_ON_TEAM = "Escolha alguém da equipe.";
 const HOUR_MS = 3_600_000;
+// v3a (docs/24 §2.2–§2.4 e §4.7–§4.10)
+const SENT_EDIT_NEEDS_PUBLISH = "Só quem pode publicar muda uma notificação enviada. Duplique para criar outra.";
+const SENT_EDIT_NEEDS_APPROVAL = "Para mudar uma notificação que já chegou a mais de 500 alunos, peça a um dono ou administrador.";
+const SENT_EDIT_FOLLOW_UP_HINT = "Mude a notificação seguinte no relatório antes de salvar.";
+const DELETE_NEEDS_PUBLISH = "Só quem pode publicar exclui um aviso que os alunos veem ou que está agendado.";
+const DELETE_WHILE_SENDING = "A notificação ainda está sendo enviada. Espere terminar para excluir.";
+const POPUP_NOT_LIVE = "Este pop-up não está no ar.";
+const RESHOW_ONLY_ONCE = "Mostrar de novo vale para pop-ups em “Uma vez”. Em “Até o aluno clicar”, quem fechou já volta a ver 24 horas depois.";
+const RESHOW_NEEDS_APPROVAL = "Para mostrar de novo a mais de 500 alunos, peça a um dono ou administrador.";
+const POLL_MISSING = "Esta notificação não tem enquete.";
+const POLL_ALREADY_CLOSED = "A enquete já está encerrada.";
 
 export type SavedNotice = {
   /**
@@ -148,6 +176,8 @@ export type SavedNotice = {
    */
   flowUpdatedAt?: string | null;
   id: string;
+  /** v3a: pop-up no ar salvo com "Mostrar de novo para quem já viu": quantos voltam a ver (o toast conta). */
+  reshown?: number;
   status: CampaignStatus;
   updatedAt: string;
 };
@@ -290,6 +320,68 @@ function stateChange(row: CampaignRow, now: number): NoticeStateChange {
   return { id: row.id, situation: situationNow(row, now), updatedAt: row.updated_at };
 }
 
+/**
+ * Encerrar o pop-up (e excluir o que esta no ar): o fim da janela vira agora, sem ultrapassar o inicio de
+ * uma janela que ainda nem comecou e sem mexer num fim que ja passou.
+ */
+function endingPatch(row: CampaignRow, now: Date): CampaignPatch {
+  const endsAt = row.ends_at ? Date.parse(row.ends_at) : null;
+  const startsAt = row.starts_at ? Date.parse(row.starts_at) : null;
+
+  return (endsAt === null || endsAt > now.getTime()) && (startsAt === null || startsAt < now.getTime()) ? { ends_at: now.toISOString() } : {};
+}
+
+/** Quantos avisos e fluxos citam a notificacao nas regras (so a auditoria; nunca impede nada). */
+async function citationsOf(db: CommunicationsDb, row: CampaignRow) {
+  if (row.kind !== "inbox") {
+    return { flows: 0, notices: 0 };
+  }
+
+  return (await fetchNoticeCitations(db, [row.id])).get(row.id) ?? { flows: 0, notices: 0 };
+}
+
+/**
+ * "Mostrar de novo para quem já viu" (docs/24 §4.9), antes de gravar: quantos a regra "Uma vez" pula agora
+ * (ainda no segmento, viram e nao clicaram nem escolheram "Não mostrar de novo"). Acima de 500 sem
+ * messaging.publish_large, 403; pop-up fora do ar, 409.
+ */
+async function countPopupReshow(db: CommunicationsDb, access: AdminAccess, campaignId: string, now: Date) {
+  const counted = await reshowPopupDeliveries(db, { apply: false, campaignId, max: null, now });
+
+  if (!counted) {
+    throw new CommunicationError(POPUP_NOT_LIVE, 409);
+  }
+
+  if (counted.count > APPROVAL_THRESHOLD && !can(access, "messaging.publish_large")) {
+    throw new CommunicationError(RESHOW_NEEDS_APPROVAL, 403);
+  }
+
+  return counted.count;
+}
+
+/**
+ * Aplica o "mostrar de novo" (RPC 5.3, com o teto de 500 de quem nao tem messaging.publish_large). null = o
+ * pop-up saiu de "Uma vez" no meio (409); refused = passou de 500 no meio (403). Devolve quantos voltam a ver.
+ */
+async function applyPopupReshow(db: CommunicationsDb, access: AdminAccess, campaignId: string, now: Date) {
+  const applied = await reshowPopupDeliveries(db, {
+    apply: true,
+    campaignId,
+    max: can(access, "messaging.publish_large") ? null : APPROVAL_THRESHOLD,
+    now
+  });
+
+  if (!applied) {
+    throw new CommunicationError(RESHOW_ONLY_ONCE, 409);
+  }
+
+  if (applied.refused) {
+    throw new CommunicationError(RESHOW_NEEDS_APPROVAL, 403);
+  }
+
+  return applied.reshown;
+}
+
 /** JSON com chaves em ordem (o jsonb do banco devolve as chaves em outra ordem). */
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) {
@@ -419,14 +511,6 @@ function noticeFlowName(title: string) {
   return name.length <= FLOW_NAME_MAX ? name : `Seguintes de “${clean.slice(0, FLOW_NAME_MAX - 16).trimEnd()}…”`;
 }
 
-/**
- * Quantos receberam ou vao receber a notificacao (a regra dos 500 das seguintes, docs/23 §2.9). O maior dos
- * dois: num envio cortado pelo orcamento do tick (ainda "sending"), recipients_count e so o parcial.
- */
-function noticeRecipientsOf(row: CampaignRow) {
-  return Math.max(row.recipients_count ?? 0, row.audience_count ?? 0);
-}
-
 /** O fluxo das seguintes do aviso, so a linha (sem os passos). */
 async function noticeFlowRow(db: CommunicationsDb, noticeId: string): Promise<FlowRow | null> {
   const { data, error } = await db
@@ -443,14 +527,23 @@ async function noticeFlowRow(db: CommunicationsDb, noticeId: string): Promise<Fl
 
 /**
  * O fluxo do aviso acompanha a situacao do aviso (7.13 sem versao: quem manda e o aviso). So quando a
- * situacao atual esta em `from`; nada a fazer = devolve o fluxo como esta (ou null sem fluxo).
+ * situacao atual esta em `from`; nada a fazer = devolve o fluxo como esta (ou null sem fluxo). `flow` = a
+ * linha ja lida pela acao (null = sem fluxo); ausente, le agora.
  */
 async function moveNoticeFlow(
   db: CommunicationsDb,
   noticeId: string,
-  input: { actorId: string | null; entryCount?: number | null; from: readonly FlowStatus[]; now: Date; reason?: string | null; to: FlowStateChange["to"] }
+  input: {
+    actorId: string | null;
+    entryCount?: number | null;
+    flow?: FlowRow | null;
+    from: readonly FlowStatus[];
+    now: Date;
+    reason?: string | null;
+    to: FlowStateChange["to"];
+  }
 ): Promise<FlowRow | null> {
-  const flow = await noticeFlowRow(db, noticeId);
+  const flow = input.flow === undefined ? await noticeFlowRow(db, noticeId) : input.flow;
 
   if (!flow || !input.from.includes(flow.status)) {
     return flow;
@@ -493,12 +586,25 @@ function followUpIssuePath(base: string | undefined, field: string | null) {
   return field && FOLLOW_UP_ISSUE_FIELDS[field] ? `${base}.${FOLLOW_UP_ISSUE_FIELDS[field]}` : base;
 }
 
+/** As seguintes conferidas contra o conteudo do aviso: o fluxo, quem envia e as paginas que ele acompanha. */
+type CheckedFollowUps = { flow: FlowRow; senders: string[]; watched: string[] };
+
+/** O fluxo das seguintes do aviso como esta gravado agora, com o conteudo atual de cada passo. */
+type NoticeFollowUpState = {
+  flow: FlowRow;
+  goal: AudienceDefinition | null;
+  messageNodes: FlowNode[];
+  metas: Record<string, FlowMessageMeta>;
+  tree: FlowTree;
+  versions: Map<string, CampaignRow>;
+};
+
 /**
- * Publicar ou aprovar: as seguintes gravadas estao boas para sair (a arvore, 400 "A notificação seguinte 1
- * tem um problema: ..."), e quem envia cada uma ainda esta na equipe (422). Devolve o fluxo e quem envia;
- * null = o aviso nao tem seguintes.
+ * Le o fluxo das seguintes do aviso e a versao atual de cada passo; o meta da notificacao principal vem de
+ * `row` (no editar depois do envio, o conteudo novo ainda nao gravado). null = o aviso nao tem seguintes, ou
+ * o fluxo ja terminou (nada mais sai).
  */
-async function followUpsForPublish(db: CommunicationsDb, row: CampaignRow): Promise<{ flow: FlowRow; senders: string[] } | null> {
+async function loadNoticeFollowUps(db: CommunicationsDb, row: CampaignRow): Promise<NoticeFollowUpState | null> {
   if (row.kind !== "inbox") {
     return null;
   }
@@ -506,7 +612,7 @@ async function followUpsForPublish(db: CommunicationsDb, row: CampaignRow): Prom
   const loaded = await loadNoticeFlow(db, row.id);
   const messageNodes = loaded?.tree.nodes.filter((node) => node.kind === "message") ?? [];
 
-  if (!loaded || messageNodes.length === 0) {
+  if (!loaded || messageNodes.length === 0 || loaded.flow.status === "ended") {
     return null;
   }
 
@@ -522,11 +628,30 @@ async function followUpsForPublish(db: CommunicationsDb, row: CampaignRow): Prom
     }
   }
 
-  const goal = definitionOf(loaded.flow.goal);
-  const [issue] = [...validateFlowTree(loaded.tree, metas), ...validateFlowGoal(loaded.tree, goal, metas)].filter((item) => item.level !== "warning");
+  return { flow: loaded.flow, goal: definitionOf(loaded.flow.goal), messageNodes, metas, tree: loaded.tree, versions };
+}
+
+/**
+ * As seguintes gravadas estao boas para sair com o conteudo `row` do aviso (a arvore e o objetivo contra os
+ * metas de agora, 400 "A notificação seguinte 1 tem um problema: ..."), e quem envia cada uma ainda esta na
+ * equipe (422). Nao grava nada (v3a: o editar depois do envio confere antes de gravar o conteudo novo).
+ * `checkSenders: false` (editar a notificacao enviada) nao confere quem envia as seguintes: corrigir um erro
+ * de digitacao no aviso nao depende delas, e o sino ja mostra a escola quando quem envia saiu da equipe; a
+ * conferencia fica onde as seguintes sao salvas (assertFollowUpSenders) e ao publicar ou aprovar.
+ * null = o aviso nao tem seguintes, ou o fluxo ja terminou (nada mais sai).
+ */
+async function checkNoticeFollowUps(db: CommunicationsDb, row: CampaignRow, options: { checkSenders?: boolean } = {}): Promise<CheckedFollowUps | null> {
+  const state = await loadNoticeFollowUps(db, row);
+
+  if (!state) {
+    return null;
+  }
+
+  const { flow, goal, messageNodes, metas, tree, versions } = state;
+  const [issue] = [...validateFlowTree(tree, metas), ...validateFlowGoal(tree, goal, metas)].filter((item) => item.level !== "warning");
 
   if (issue) {
-    const drawn = followUpsFromTree(loaded.tree);
+    const drawn = followUpsFromTree(tree);
     const numbers = drawn ? followUpNumbers(drawn) : new Map(messageNodes.map((node, index) => [node.id, String(index + 1)]));
     const number = issue.nodeId ? numbers.get(issue.nodeId) : undefined;
     const path = followUpIssuePath(issue.nodeId && drawn ? followUpPaths(drawn).get(issue.nodeId) : undefined, issue.field);
@@ -536,34 +661,89 @@ async function followUpsForPublish(db: CommunicationsDb, row: CampaignRow): Prom
 
   const senders = Array.from(new Set(Array.from(versions.values(), (version) => version.sender_user_id).filter((id): id is string => Boolean(id))));
 
-  for (const userId of senders) {
-    const state = await senderState(db, userId);
+  if (options.checkSenders !== false) {
+    const states = await Promise.all(senders.map((userId) => senderState(db, userId)));
+    const gone = states.find((sender) => !sender.onTeam);
 
-    if (!state.onTeam) {
-      throw new CommunicationError(`${state.name ?? "A pessoa escolhida"} não está mais na equipe. Escolha quem envia.`, 422);
+    if (gone) {
+      throw new CommunicationError(`${gone.name ?? "A pessoa escolhida"} não está mais na equipe. Escolha quem envia.`, 422);
     }
   }
 
-  // Paginas acompanhadas com o botao do aviso de agora: trocar o botao depois de gravar as seguintes (ou
-  // seguintes feitas so no construtor) nao re-grava o fluxo, e a visita a pagina nova nunca seria gravada
-  // ("não visitou a página do botão" valeria para todos).
-  const watched = watchedPageKeysOf(loaded.tree, goal, metas, row.cta_href);
-  const saved = [...(loaded.flow.watched_page_keys ?? [])].sort();
+  return { flow, senders, watched: watchedPageKeysOf(tree, goal, metas, row.cta_href) };
+}
 
-  if (JSON.stringify([...watched].sort()) !== JSON.stringify(saved)) {
+function sameKeys(left: readonly string[] | null | undefined, right: readonly string[]) {
+  return JSON.stringify([...(left ?? [])].sort()) === JSON.stringify([...right].sort());
+}
+
+/**
+ * Paginas acompanhadas com o destino do aviso de agora: trocar o destino depois de gravar as seguintes (ou
+ * seguintes feitas so no construtor) nao re-grava o fluxo, e a visita a pagina nova nunca seria gravada
+ * ("não visitou a página do botão" valeria para todos). Devolve o fluxo e se as paginas mudaram.
+ * Grava so na versao do fluxo lida (updated_at): uma seguinte salva no meio (communication_save_flow grava
+ * outra arvore, talvez com "visitou a página X") nunca e sobrescrita por paginas de uma arvore antiga. Mudou
+ * no meio: le a arvore de novo e recalcula uma vez com o conteudo `row` do aviso (o fluxo sumiu ou terminou
+ * no meio = nada a gravar).
+ */
+async function syncNoticeWatchedPages(db: CommunicationsDb, checked: CheckedFollowUps, row: CampaignRow): Promise<{ changed: boolean; flow: FlowRow }> {
+  let flow = checked.flow;
+  let watched = checked.watched;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (sameKeys(flow.watched_page_keys, watched)) {
+      return { changed: false, flow };
+    }
+
     const { data, error } = await db
       .from("communication_flows")
       .update({ watched_page_keys: watched })
-      .eq("id", loaded.flow.id)
+      .eq("id", flow.id)
+      .eq("updated_at", flow.updated_at)
       .is("deleted_at", null)
-      .select(FLOW_COLUMNS)
-      .maybeSingle();
+      .select(FLOW_COLUMNS);
     assertNoDbError(error, "Comunicacao: paginas acompanhadas das seguintes");
 
-    return { flow: (data as FlowRow | null) ?? loaded.flow, senders };
+    const [updated] = (data ?? []) as FlowRow[];
+
+    if (updated) {
+      return { changed: true, flow: updated };
+    }
+
+    if (attempt > 0) {
+      break;
+    }
+
+    const again = await loadNoticeFollowUps(db, row);
+
+    if (!again) {
+      return { changed: false, flow };
+    }
+
+    flow = again.flow;
+    watched = watchedPageKeysOf(again.tree, again.goal, again.metas, row.cta_href);
   }
 
-  return { flow: loaded.flow, senders };
+  // Mudou duas vezes no meio: o aviso ja foi gravado; quem salvou por ultimo gravou as paginas da arvore dele.
+  console.error(`[comunicacao] paginas acompanhadas do fluxo ${flow.id} nao gravadas: o fluxo mudou duas vezes no meio`);
+
+  return { changed: false, flow };
+}
+
+/**
+ * Publicar ou aprovar: as seguintes conferidas (checkNoticeFollowUps) e as paginas acompanhadas em dia.
+ * Devolve o fluxo e quem envia; null = o aviso nao tem seguintes.
+ */
+async function followUpsForPublish(db: CommunicationsDb, row: CampaignRow): Promise<{ flow: FlowRow; senders: string[] } | null> {
+  const checked = await checkNoticeFollowUps(db, row);
+
+  if (!checked) {
+    return null;
+  }
+
+  const { flow } = await syncNoticeWatchedPages(db, checked, row);
+
+  return { flow, senders: checked.senders };
 }
 
 /**
@@ -600,10 +780,110 @@ async function goLiveWithFollowUps(
  * ---------------------------------------------------------------------------------------------- */
 
 /**
+ * v3a (docs/24 §4.7): a notificacao enviada muda so o conteudo que o aluno le (titulo, texto, imagem, icone,
+ * quem envia, destino e como chega la, textos da resposta e reacoes), para todos na hora e sem avisar de
+ * novo: a linha do sino aponta para o aviso. Caminho proprio, nunca o do pop-up no ar: publishProblems
+ * recusaria todo envio que ja passou; nada volta a rascunho, o fluxo das seguintes nao se mexe e a lista de
+ * quem recebeu nao e recalculada. Vale como publicar: sem messaging.publish, ou acima de 500 alunos sem
+ * messaging.publish_large, 403 (nunca pedido de aprovacao).
+ */
+async function saveSentNotice(input: {
+  access: AdminAccess;
+  columns: CampaignContentColumns;
+  current: CampaignRow;
+  data: SaveNoticeInput;
+  db: CommunicationsDb;
+  userId: string;
+}): Promise<SavedNotice> {
+  const { access, columns, current, data, db, userId } = input;
+
+  // A versao primeiro: o editor aberto antes de "Encerrar enquete" (ou de outra edicao) recebe o 409, nao o
+  // 400 de uma enquete que ele nem mexeu.
+  assertSameVersion(current, data.expectedUpdatedAt);
+
+  if (columns.kind !== current.kind) {
+    throw new NoticeFieldError("kind", "O tipo não muda depois de publicado.");
+  }
+
+  // Segmento, envio, tempo no sino, audio, ligar ou desligar a resposta e a enquete nao mudam (400 no campo).
+  const [locked] = sentNoticeLockedProblems(rowToDraft(current), data.draft);
+
+  if (locked) {
+    throw new NoticeFieldError(locked.path, locked.message);
+  }
+
+  if (!can(access, "messaging.publish")) {
+    throw new CommunicationError(SENT_EDIT_NEEDS_PUBLISH, 403);
+  }
+
+  const recipients = noticeRecipients(current);
+
+  if (recipients > APPROVAL_THRESHOLD && !can(access, "messaging.publish_large")) {
+    throw new CommunicationError(SENT_EDIT_NEEDS_APPROVAL, 403);
+  }
+
+  const content = Object.fromEntries(SENT_EDITABLE_COLUMNS.map((column) => [column, columns[column]])) as Pick<CampaignContentColumns, (typeof SENT_EDITABLE_COLUMNS)[number]>;
+  const fields = SENT_EDITABLE_COLUMNS.filter((column) => (content[column] ?? null) !== (current[column] ?? null));
+  let checked: CheckedFollowUps | null;
+
+  // As seguintes ainda valem com o conteudo novo (ex.: "foi para o destino" sem destino): 422, mudar antes no
+  // relatorio. Nada e gravado aqui. Quem envia as seguintes nao trava o aviso (ajustes da v3a): quem saiu da
+  // equipe aparece como a escola no sino, e a conferencia fica onde as seguintes sao salvas.
+  try {
+    checked = await checkNoticeFollowUps(db, { ...current, ...content }, { checkSenders: false });
+  } catch (error) {
+    if (error instanceof NoticeFieldError) {
+      throw new CommunicationError(`${error.message} ${SENT_EDIT_FOLLOW_UP_HINT}`, 422);
+    }
+
+    throw error;
+  }
+
+  const now = new Date();
+  const saved = await updateCampaign(
+    db,
+    current.id,
+    { ...content, edited_at: now.toISOString(), edited_by: userId, updated_by: userId },
+    { expectedStatuses: ["sent"], expectedUpdatedAt: current.updated_at }
+  );
+
+  // Destino novo: as seguintes que olham "a página para onde a notificação leva" passam a olhar a nova (o
+  // cache das visitas de pagina divide a tag com o dos pop-ups no ar). A versao nova do fluxo volta para o
+  // editor (salvar as seguintes logo depois nao leva 409).
+  const synced = checked ? await syncNoticeWatchedPages(db, checked, saved) : null;
+
+  if (synced?.changed) {
+    invalidateLivePopups({ from: "action" });
+  }
+
+  // Quem passou a enviar recebe o "enviada em seu nome" (a chave do aviso faz ser uma vez por pessoa).
+  if (saved.sender_user_id && saved.sender_user_id !== current.sender_user_id) {
+    await notifySendersOnBehalf(db, { actorId: userId, campaignId: saved.id, count: recipients, senders: [saved.sender_user_id], title: saved.title }).catch((error: unknown) =>
+      console.error(`[comunicacao] "enviada em seu nome" de ${saved.id} nao agendado: ${error instanceof Error ? error.message : String(error)}`)
+    );
+  }
+
+  await recordAudit(db, {
+    action: "communication.edited_after_send",
+    actorId: userId,
+    count: recipients,
+    entityId: saved.id,
+    entityType: "campaign",
+    metadata: { fields, kind: "inbox", recipients }
+  });
+  revalidateNotices(saved.id);
+
+  return { flowUpdatedAt: synced?.changed ? synced.flow.updated_at : null, id: saved.id, status: "sent", updatedAt: saved.updated_at };
+}
+
+/**
  * [messaging.write] Cria ou atualiza o aviso. Agendado ou aguardando aprovacao volta a rascunho;
  * pop-up no ar ou pausado continua como esta (e recalcula quem ve se o segmento mudou). Mudar o pop-up
  * no ar vale como publicar: precisa de messaging.publish e, acima de 500 alunos (o segmento novo, ou a
  * contagem gravada quando o segmento nao mudou), de messaging.publish_large; senao, 403.
+ * v3a: notificacao enviada muda so o conteudo (saveSentNotice); o pop-up no ar ou pausado em "Uma vez" pode
+ * salvar com `reshow` ("Mostrar de novo para quem já viu": contado e conferido antes de gravar, aplicado
+ * depois, com a regra nova ja gravada).
  */
 export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionResult<SavedNotice>> {
   return runAdminAction("messaging.write", saveNoticeSchema, input, async ({ access, input: data, user }) => {
@@ -629,11 +909,17 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
 
     const current = await requireCampaign(db, data.id);
 
+    if (current.kind === "inbox" && current.status === "sent") {
+      return saveSentNotice({ access, columns, current, data, db, userId: user.id });
+    }
+
     if (!isEditableStatus(current.kind, current.status)) {
       throw new CommunicationError(NOT_EDITABLE, 409);
     }
 
     const live = current.kind === "popup" && (current.status === "active" || current.status === "paused");
+    // "Mostrar de novo" so vale no pop-up no ar ou pausado; em outra situacao, o pedido e ignorado.
+    const reshow = live && data.reshow === true;
     const audienceChanged = stableJson(normalizeAudience(audienceOfRow(current))) !== stableJson(columns.audience);
     const now = new Date();
     let loaded: LoadedAudience | undefined;
@@ -653,6 +939,10 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
         throw new CommunicationError(LIVE_EDIT_NEEDS_PUBLISH, 403);
       }
 
+      if (reshow && data.draft.repeat !== "once") {
+        throw new NoticeFieldError("reshow", RESHOW_ONLY_ONCE);
+      }
+
       if (audienceChanged) {
         loaded = await loadFactsFor(db, now, columns.audience);
       }
@@ -662,14 +952,21 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
       if (!canPublishTo(access, count)) {
         throw new CommunicationError(LIVE_EDIT_NEEDS_APPROVAL, 403);
       }
+
+      // Antes de gravar: acima de 500 sem messaging.publish_large, nada muda (403).
+      if (reshow) {
+        await countPopupReshow(db, access, current.id, now);
+      }
     }
 
     const patch: CampaignPatch = {
       ...columns,
       updated_by: user.id,
-      ...(live ? {} : { requested_at: null, requested_by: null, status: "draft" as const })
+      // v3a: a ultima edicao do pop-up no ar ou pausado aparece no relatorio ("Editado").
+      ...(live ? { edited_at: now.toISOString(), edited_by: user.id } : { requested_at: null, requested_by: null, status: "draft" as const })
     };
     let saved = await updateCampaign(db, current.id, patch, { expectedStatuses: [current.status], expectedUpdatedAt: data.expectedUpdatedAt });
+    let reshown: number | undefined;
 
     if (live) {
       if (audienceChanged) {
@@ -678,6 +975,19 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
       }
 
       invalidateLivePopups({ from: "action" });
+
+      // Depois de gravar (a regra "Uma vez" ja gravada) e de recalcular quem ve: so quem ainda esta no segmento.
+      if (reshow) {
+        reshown = await applyPopupReshow(db, access, saved.id, now);
+        await recordAudit(db, {
+          action: "communication.popup_reshown",
+          actorId: user.id,
+          count: reshown,
+          entityId: saved.id,
+          entityType: "campaign",
+          metadata: { count: reshown, via: "editor" }
+        });
+      }
     }
 
     // v2: agendado ou aguardando aprovacao voltou a rascunho; o fluxo das seguintes volta junto (nada saiu).
@@ -698,7 +1008,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     });
     revalidateNotices(saved.id);
 
-    return { flowUpdatedAt, id: saved.id, status: saved.status, updatedAt: saved.updated_at };
+    return { flowUpdatedAt, id: saved.id, ...(reshown === undefined ? {} : { reshown }), status: saved.status, updatedAt: saved.updated_at };
   });
 }
 
@@ -959,18 +1269,8 @@ async function changePopupStatus(input: {
     }
   }
 
-  const patch: CampaignPatch = { status: input.to, updated_by: input.actorId };
-
-  if (input.to === "ended") {
-    const endsAt = row.ends_at ? Date.parse(row.ends_at) : null;
-    const startsAt = row.starts_at ? Date.parse(row.starts_at) : null;
-
-    // Fim da janela = agora (sem ultrapassar o inicio de uma janela que ainda nem comecou).
-    if ((endsAt === null || endsAt > now.getTime()) && (startsAt === null || startsAt < now.getTime())) {
-      patch.ends_at = now.toISOString();
-    }
-  }
-
+  // Encerrar: fim da janela = agora (sem ultrapassar o inicio de uma janela que ainda nem comecou).
+  const patch: CampaignPatch = { status: input.to, updated_by: input.actorId, ...(input.to === "ended" ? endingPatch(row, now) : {}) };
   let updated = await updateCampaign(db, row.id, patch, { expectedStatuses: input.from, expectedUpdatedAt: row.updated_at });
 
   if (input.to === "active") {
@@ -1006,10 +1306,56 @@ export async function endNotice(input: NoticeIdInput): Promise<ActionResult<Noti
   );
 }
 
+/** Retirar as seguintes que ja sairam: os passos ficam cancelados e as linhas dos alunos saem do sino (o teste fica). */
+async function withdrawFollowUpRows(db: CommunicationsDb, flowId: string, actorId: string): Promise<number> {
+  const [canceled, deleted] = await Promise.all([
+    db.from("campaigns").update({ status: "canceled", updated_by: actorId }).eq("flow_id", flowId).in("status", ["draft", "sent"]),
+    db.from("notifications").delete({ count: "exact" }).eq("flow_id", flowId).eq("is_test", false)
+  ]);
+  assertNoDbError(canceled.error, "Comunicacao: retirar as seguintes");
+  assertNoDbError(deleted.error, "Comunicacao: tirar as seguintes do sino");
+
+  return deleted.count ?? 0;
+}
+
+/**
+ * Tira a notificacao enviada do sino (Retirar do sino e Excluir, docs/24 §4.8): primeiro a situacao
+ * ("canceled", na versao lida; o sino ja esconde aviso que nao esta enviado), depois as seguintes param antes
+ * de qualquer linha sair (o fluxo do aviso termina com `flowReason`: pendentes e reservadas canceladas, 7.13)
+ * e, com `alsoFollowUps`, as que ja sairam somem do sino; por fim as linhas dos alunos (o teste fica).
+ * Ajustes da v3a (Excluir demorava): as leituras (o fluxo do aviso e as regras que citam a notificacao, para
+ * a auditoria) vao junto com a primeira gravacao, e o que nao depende um do outro vai junto (Promise.all).
+ */
+async function withdrawSentNotice(
+  db: CommunicationsDb,
+  row: CampaignRow,
+  input: { actorId: string; alsoFollowUps: boolean; expectedUpdatedAt?: string | null; flowReason: "source_deleted" | "source_withdrawn"; now: Date }
+): Promise<{ citations: { flows: number; notices: number }; flow: FlowRow | null; followUpsRemoved: number; removed: number; updated: CampaignRow }> {
+  const [updated, current, citations] = await Promise.all([
+    updateCampaign(db, row.id, { status: "canceled", updated_by: input.actorId }, { expectedStatuses: ["sent"], expectedUpdatedAt: input.expectedUpdatedAt }),
+    noticeFlowRow(db, row.id),
+    citationsOf(db, row)
+  ]);
+  const flow = await moveNoticeFlow(db, row.id, { actorId: input.actorId, flow: current, from: ["active", "paused"], now: input.now, reason: input.flowReason, to: "ended" });
+  const [followUpsRemoved, removed] = await Promise.all([
+    flow && input.alsoFollowUps ? withdrawFollowUpRows(db, flow.id, input.actorId) : Promise.resolve(0),
+    deleteCampaignNotifications(db, row.id)
+  ]);
+
+  if (flow) {
+    invalidateLivePopups({ from: "action" });
+  }
+
+  return { citations, flow, followUpsRemoved, removed, updated };
+}
+
 /**
  * [messaging.publish] Retira a notificacao enviada: some do sino dos alunos (fica como cancelada). v2: as
  * seguintes deixam de sair (o fluxo do aviso termina, source_withdrawn) e, com `alsoFollowUps` (padrao),
- * as que ja sairam tambem somem do sino.
+ * as que ja sairam tambem somem do sino. v3a: a auditoria conta as regras que citam a notificacao.
+ * Ajustes da v3a: sem revalidatePath (com ele, o servidor invalida o cache e desenha a pagina inteira de novo
+ * na mesma resposta da acao); a tela fecha o dialogo, mostra o toast e so entao atualiza (router.refresh numa
+ * transicao, useNoticeActions). O updateTag do fluxo encerrado continua (cache das visitas de pagina).
  */
 export async function withdrawNotice(input: WithdrawNoticeInput): Promise<ActionResult<NoticeStateChange & { removed: number }>> {
   return runAdminAction("messaging.publish", withdrawNoticeSchema, input, async ({ input: data, user }) => {
@@ -1021,31 +1367,13 @@ export async function withdrawNotice(input: WithdrawNoticeInput): Promise<Action
       throw new CommunicationError("Esta ação vale só para notificações.", 422);
     }
 
-    // Primeiro a situacao (o sino ja esconde aviso que nao esta enviado), depois as linhas.
-    const updated = await updateCampaign(
-      db,
-      row.id,
-      { status: "canceled", updated_by: user.id },
-      { expectedStatuses: ["sent"], expectedUpdatedAt: data.expectedUpdatedAt }
-    );
-    // As seguintes param antes de qualquer linha sair: pendentes e reservadas canceladas (7.13).
-    const flow = await moveNoticeFlow(db, row.id, { actorId: user.id, from: ["active", "paused"], now, reason: "source_withdrawn", to: "ended" });
-    let followUpsRemoved = 0;
-
-    if (flow && data.alsoFollowUps) {
-      const canceled = await db.from("campaigns").update({ status: "canceled", updated_by: user.id }).eq("flow_id", flow.id).in("status", ["draft", "sent"]);
-      assertNoDbError(canceled.error, "Comunicacao: retirar as seguintes");
-
-      const deleted = await db.from("notifications").delete({ count: "exact" }).eq("flow_id", flow.id).eq("is_test", false);
-      assertNoDbError(deleted.error, "Comunicacao: tirar as seguintes do sino");
-      followUpsRemoved = deleted.count ?? 0;
-    }
-
-    const removed = await deleteCampaignNotifications(db, row.id);
-
-    if (flow) {
-      invalidateLivePopups({ from: "action" });
-    }
+    const { citations, flow, followUpsRemoved, removed, updated } = await withdrawSentNotice(db, row, {
+      actorId: user.id,
+      alsoFollowUps: data.alsoFollowUps,
+      expectedUpdatedAt: data.expectedUpdatedAt,
+      flowReason: "source_withdrawn",
+      now
+    });
 
     await recordAudit(db, {
       action: "communication.withdrawn",
@@ -1053,11 +1381,96 @@ export async function withdrawNotice(input: WithdrawNoticeInput): Promise<Action
       count: removed,
       entityId: row.id,
       entityType: "campaign",
-      metadata: { also_follow_ups: Boolean(flow) && data.alsoFollowUps, follow_ups_removed: followUpsRemoved, kind: row.kind }
+      metadata: {
+        also_follow_ups: Boolean(flow) && data.alsoFollowUps,
+        cited_by_flows: citations.flows,
+        cited_by_notices: citations.notices,
+        follow_ups_removed: followUpsRemoved,
+        kind: row.kind
+      }
+    });
+
+    return { ...stateChange(updated, now.getTime()), removed };
+  });
+}
+
+/**
+ * [messaging.publish] "Mostrar de novo para quem já viu" pelo menu (docs/24 §2.4 e §4.9): so pop-up no ar ou
+ * pausado em "Uma vez". Quem ainda esta no segmento, viu e nao clicou nem escolheu "Não mostrar de novo"
+ * volta a contar como novo. Acima de 500, messaging.publish_large.
+ * O aviso nao muda (a versao devolvida e a mesma).
+ */
+export async function reshowPopup(input: NoticeIdInput): Promise<ActionResult<{ reshown: number; updatedAt: string }>> {
+  return runAdminAction("messaging.publish", noticeIdSchema, input, async ({ access, input: data, user }) => {
+    const db = communicationsDb();
+    const now = new Date();
+    const row = await requireCampaign(db, data.id);
+
+    if (row.kind !== "popup") {
+      throw new CommunicationError("Esta ação vale só para pop-ups.", 422);
+    }
+
+    if ((row.status !== "active" && row.status !== "paused") || situationNow(row, now.getTime()) === "ended") {
+      throw new CommunicationError(POPUP_NOT_LIVE, 409);
+    }
+
+    assertSameVersion(row, data.expectedUpdatedAt);
+
+    if (row.popup_repeat !== "once") {
+      throw new CommunicationError(RESHOW_ONLY_ONCE, 409);
+    }
+
+    await countPopupReshow(db, access, row.id, now);
+    const reshown = await applyPopupReshow(db, access, row.id, now);
+
+    await recordAudit(db, {
+      action: "communication.popup_reshown",
+      actorId: user.id,
+      count: reshown,
+      entityId: row.id,
+      entityType: "campaign",
+      metadata: { count: reshown, via: "menu" }
     });
     revalidateNotices(row.id);
 
-    return { ...stateChange(updated, now.getTime()), removed };
+    return { reshown, updatedAt: row.updated_at };
+  });
+}
+
+/**
+ * [messaging.publish] "Encerrar enquete" no relatorio da notificacao enviada (docs/24 §4.10): o fim vira
+ * agora (ISO canonico) e ninguem mais vota; o resultado fica como esta. So aviso: o passo de fluxo e recusado
+ * por requireCampaign (a enquete dele termina quando a notificacao sai do sino).
+ */
+export async function closeNoticePoll(input: NoticeIdInput): Promise<ActionResult<NoticeStateChange>> {
+  return runAdminAction("messaging.publish", noticeIdSchema, input, async ({ input: data, user }) => {
+    const db = communicationsDb();
+    const now = new Date();
+    const row = await requireCampaign(db, data.id);
+    const poll = row.kind === "inbox" && row.status === "sent" ? parsePoll(row.poll) : null;
+
+    if (!poll) {
+      throw new CommunicationError(POLL_MISSING, 409);
+    }
+
+    if (isPollClosed(poll, now.getTime())) {
+      throw new CommunicationError(POLL_ALREADY_CLOSED, 409);
+    }
+
+    assertSameVersion(row, data.expectedUpdatedAt);
+
+    const nowIso = now.toISOString();
+    const updated = await updateCampaign(
+      db,
+      row.id,
+      { edited_at: nowIso, edited_by: user.id, poll: { ...poll, closesAt: nowIso }, updated_by: user.id },
+      { expectedStatuses: ["sent"], expectedUpdatedAt: row.updated_at }
+    );
+
+    await recordAudit(db, { action: "communication.poll_closed", actorId: user.id, entityId: row.id, entityType: "campaign", metadata: {} });
+    revalidateNotices(row.id);
+
+    return stateChange(updated, now.getTime());
   });
 }
 
@@ -1136,6 +1549,14 @@ export async function duplicateNotice(input: NoticeIdInput): Promise<ActionResul
       draft.validity = { mode: "default" };
     }
 
+    // v3a: enquete com fim que ja passou (ou a menos de 1 hora) volta a "quando sair do sino"; o fim que fica
+    // vai no ISO canonico (o check campaigns_poll_v3). Reacoes e "como o aluno chega la" vao junto.
+    if (draft.poll?.closesAt) {
+      const closesAt = Date.parse(draft.poll.closesAt);
+
+      draft.poll = { ...draft.poll, closesAt: closesAt > now + HOUR_MS ? new Date(closesAt).toISOString() : null };
+    }
+
     const created = await insertCampaign(db, { ...draftToColumns(draft), created_by: user.id, status: "draft", updated_by: user.id });
     const followUps = created.kind === "inbox" ? await duplicateNoticeFollowUps(db, { actorId: user.id, notice: created, now, sourceId: row.id }) : 0;
 
@@ -1152,39 +1573,106 @@ export async function duplicateNotice(input: NoticeIdInput): Promise<ActionResul
   });
 }
 
-/** [messaging.write] Exclui rascunho, aviso aguardando aprovacao, cancelado ou encerrado. */
-export async function deleteNotice(input: NoticeIdInput): Promise<ActionResult<{ id: string }>> {
-  return runAdminAction("messaging.write", noticeIdSchema, input, async ({ input: data, user }) => {
+/**
+ * [messaging.write] Exclui o aviso (docs/24 §2.3 e §4.8), em toda situacao menos "Enviando" (o envio segura a
+ * linha: 409). Rascunho, aguardando aprovacao, cancelado e encerrado: so sai da lista (e o fluxo das seguintes
+ * junto). O que os alunos veem ou vao ver pede messaging.publish (nunca a regra dos 500: tirar nunca alcanca
+ * mais ninguem): agendado (o tick so reserva aviso nao excluido), enviado (sai de todo sino como Retirar do
+ * sino, com as seguintes que ja sairam por padrao, e depois da lista) e pop-up no ar ou pausado (encerrado
+ * agora e depois tirado da lista). Regras que citam a notificacao so avisam: a contagem vai para a auditoria.
+ * Ajustes da v3a (o dialogo demorava a fechar): as leituras vao junto com a primeira gravacao, o que nao
+ * depende um do outro vai junto (Promise.all), o fluxo ja lido nao e lido de novo (de ~11 idas ao banco em
+ * serie para ~5 na enviada com seguintes), e nada de revalidatePath (com ele, o servidor invalida o cache e
+ * desenha a pagina inteira de novo na mesma resposta; na pagina do aviso, a de um aviso que nao existe mais).
+ * A tela fecha o dialogo e mostra o toast assim que a acao volta e entao atualiza a lista (router.refresh numa
+ * transicao) ou volta para ela (onDeleted). O updateTag do pop-up e do fluxo continua (o cache deles).
+ */
+export async function deleteNotice(input: DeleteNoticeInput): Promise<ActionResult<{ id: string; removed: number }>> {
+  return runAdminAction("messaging.write", deleteNoticeSchema, input, async ({ access, input: data, user }) => {
     const db = communicationsDb();
     const now = new Date();
     const row = await requireCampaign(db, data.id);
+
+    assertSameVersion(row, data.expectedUpdatedAt);
+
+    if (row.status === "sending") {
+      throw new CommunicationError(DELETE_WHILE_SENDING, 409);
+    }
+
     const situation = situationNow(row, now.getTime());
-    const deletable = ["draft", "pending_approval", "canceled", "ended"].includes(row.status) || (row.kind === "popup" && situation === "ended");
+    // Pop-up publicado (no ar ou com a janela por comecar) ou pausado; o que ja passou do fim e "encerrado".
+    const livePopup = row.kind === "popup" && (row.status === "paused" || (row.status === "active" && situation !== "ended"));
 
-    if (!deletable) {
-      throw new CommunicationError(
-        row.kind === "popup" ? "Encerre o pop-up antes de excluir." : "Notificação enviada não é excluída: use Retirar para tirar do sino dos alunos.",
-        409
+    if ((row.status === "scheduled" || row.status === "sent" || livePopup) && !can(access, "messaging.publish")) {
+      throw new CommunicationError(DELETE_NEEDS_PUBLISH, 403);
+    }
+
+    const nowIso = now.toISOString();
+    let citations = { flows: 0, notices: 0 };
+    let removed = 0;
+    let followUpsRemoved = 0;
+
+    if (row.status === "sent") {
+      const withdrawn = await withdrawSentNotice(db, row, {
+        actorId: user.id,
+        alsoFollowUps: data.alsoFollowUps,
+        expectedUpdatedAt: row.updated_at,
+        flowReason: "source_deleted",
+        now
+      });
+
+      citations = withdrawn.citations;
+      removed = withdrawn.removed;
+      followUpsRemoved = withdrawn.followUpsRemoved;
+
+      // O fluxo ja terminou (source_deleted) junto com a retirada: so sai da lista, junto com o aviso.
+      await Promise.all([
+        softDeleteCampaign(db, row.id, { actorId: user.id, expectedStatuses: ["canceled"], expectedUpdatedAt: withdrawn.updated.updated_at, now }),
+        withdrawn.flow ? removeNoticeFlow(db, withdrawn.flow, { actorId: user.id, now, reason: null }) : Promise.resolve()
+      ]);
+    } else if (livePopup) {
+      // Encerrado e tirado da lista numa gravacao so (o mesmo resultado das duas de antes).
+      await updateCampaign(
+        db,
+        row.id,
+        { ...endingPatch(row, now), deleted_at: nowIso, deleted_by: user.id, status: "ended", updated_by: user.id },
+        { expectedStatuses: [row.status], expectedUpdatedAt: row.updated_at }
       );
-    }
-
-    await softDeleteCampaign(db, row.id, { actorId: user.id, expectedStatuses: [row.status], expectedUpdatedAt: data.expectedUpdatedAt, now });
-
-    if (row.kind === "popup") {
       invalidateLivePopups({ from: "action" });
+    } else {
+      const [, flow, cited] = await Promise.all([
+        softDeleteCampaign(db, row.id, { actorId: user.id, expectedStatuses: [row.status], expectedUpdatedAt: row.updated_at, now }),
+        row.kind === "inbox" ? noticeFlowRow(db, row.id) : Promise.resolve(null),
+        citationsOf(db, row)
+      ]);
+
+      citations = cited;
+
+      // Pop-up fora do ar (rascunho, agendado, encerrado): a lista em cache so tem os no ar e a leitura ja
+      // descarta os encerrados, entao nao ha o que invalidar (e a resposta nao volta com a pagina renderizada).
+
+      // v2: as seguintes saem junto (no ar ou pausado, encerradas antes: source_deleted).
+      if (flow) {
+        await removeNoticeFlow(db, flow, { actorId: user.id, now, reason: "source_deleted" });
+      }
     }
 
-    // v2: as seguintes saem junto (no ar ou pausado, encerradas antes: source_deleted).
-    const flow = row.kind === "inbox" ? await noticeFlowRow(db, row.id) : null;
+    await recordAudit(db, {
+      action: "communication.deleted",
+      actorId: user.id,
+      entityId: row.id,
+      entityType: "campaign",
+      metadata: {
+        cited_by_flows: citations.flows,
+        cited_by_notices: citations.notices,
+        follow_ups_removed: followUpsRemoved,
+        kind: row.kind,
+        removed,
+        status: row.status
+      }
+    });
 
-    if (flow) {
-      await removeNoticeFlow(db, flow, { actorId: user.id, now, reason: "source_deleted" });
-    }
-
-    await recordAudit(db, { action: "communication.deleted", actorId: user.id, entityId: row.id, entityType: "campaign", metadata: { kind: row.kind, status: row.status } });
-    revalidateNotices();
-
-    return { id: row.id };
+    return { id: row.id, removed };
   });
 }
 
@@ -1348,7 +1836,7 @@ export async function saveNoticeFollowUps(input: SaveNoticeFollowUpsInput): Prom
       throw new CommunicationError(FOLLOW_UPS_NEED_PUBLISH, 403);
     }
 
-    if (sent && !canPublishTo(access, noticeRecipientsOf(notice))) {
+    if (sent && !canPublishTo(access, noticeRecipients(notice))) {
       throw new CommunicationError(LIVE_FLOW_NEEDS_APPROVAL, 403);
     }
 
@@ -1436,7 +1924,7 @@ export async function saveNoticeFollowUps(input: SaveNoticeFollowUpsInput): Prom
 
     // A primeira seguinte de uma notificacao que ja saiu: o fluxo nasce no ar (o conteudo vira "sent").
     if (sent && flow.status === "draft") {
-      flow = await changeFlowState(db, { actorId: user.id, entryCount: noticeRecipientsOf(notice), expectedUpdatedAt: flow.updated_at, flowId: flow.id, now, to: "active" });
+      flow = await changeFlowState(db, { actorId: user.id, entryCount: noticeRecipients(notice), expectedUpdatedAt: flow.updated_at, flowId: flow.id, now, to: "active" });
     }
 
     invalidateLivePopups({ from: "action" });
@@ -1445,7 +1933,7 @@ export async function saveNoticeFollowUps(input: SaveNoticeFollowUpsInput): Prom
     const newSenders = sent ? saved.senderIds.filter((id) => !previousSenders.has(id)) : [];
 
     if (newSenders.length > 0) {
-      await notifySendersOnBehalf(db, { actorId: user.id, count: noticeRecipientsOf(notice), flowId: flow.id, senders: newSenders, title: flow.name }).catch((error: unknown) =>
+      await notifySendersOnBehalf(db, { actorId: user.id, count: noticeRecipients(notice), flowId: flow.id, senders: newSenders, title: flow.name }).catch((error: unknown) =>
         console.error(`[comunicacao] "enviada em seu nome" do fluxo ${flow.id} nao agendado: ${error instanceof Error ? error.message : String(error)}`)
       );
     }

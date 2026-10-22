@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
-import { NOTICE_LIMITS } from "@/server/communications/campaign-model";
+import { NOTICE_LIMITS, type CampaignKind } from "@/server/communications/campaign-model";
+import type { CtaDisplay } from "@/server/communications/notification-model";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import {
   HOME_PAGE_LINKS,
@@ -18,19 +19,34 @@ import { AdminField, PillGroup, adminInputClass, fieldDescribedBy } from "../for
 import { HeroTextField } from "../member-area/home-hero/fields";
 import { AdminSwitch } from "../settings/kit";
 import { ProductPicker, type ProductPickerItem } from "../storefront/product-picker";
+import {
+  CTA_DISPLAY_OPTIONS,
+  CTA_FIELD_COPY,
+  ctaDestinationAriaLabel,
+  ctaDisplayOf,
+  ctaLabelError,
+  ctaSwitchDescription,
+  ctaTextFieldCopy
+} from "./notices-view-model";
 
 // Botao do aviso (docs/22 §2.2): texto, para onde leva (um produto, uma pagina da area ou um link
 // externo) e em que aba abre. Mesma logica do botao do Destaque (member-area/home-hero/cta-field.tsx)
 // e os mesmos links aceitos (home-hero-links.ts, conferidos de novo pelo servidor e na hora de
 // desenhar para o aluno). Desligar guarda o que foi escrito ate sair da tela.
+//
+// v3a (docs/24 §2.5): a chave vira "Levar o aluno a algum lugar" e, na notificacao, o primeiro campo e
+// "Como o aluno chega lá" (pelo botao; pelo botao ou tocando na notificacao; so tocando, sem botao). No
+// "Só tocando" o texto e o que aparece ao lado da seta no pe da notificacao. O pop-up abre sempre pelo botao.
 
 export type NoticeCta = NonNullable<NoticeDraft["cta"]>;
 
 type NoticeCtaFieldProps = {
   disabled: boolean;
-  errors: { href?: string; label?: string };
+  errors: { display?: string; href?: string; label?: string };
   /** Prefixo dos ids e nomes ("aviso" no editor: "aviso-botao-texto"); unico em cada formulario na tela. */
   idPrefix?: string;
+  /** Notificacao escolhe como o aluno chega la; pop-up, so o botao. */
+  kind: CampaignKind;
   onBlurField: (field: "cta.href" | "cta.label") => void;
   onChange: (cta: NoticeCta | null) => void;
   products: readonly ProductPickerItem[];
@@ -56,7 +72,7 @@ const MODE_DEFAULT_TARGET: Record<HeroCtaDestinationMode, HeroCtaTarget> = {
 };
 
 const EXTERNAL_HINT = "Uma página fora da área do aluno, como a de vendas ou um formulário.";
-const EMPTY_CTA: NoticeCta = { href: "", label: "", target: "same_tab" };
+const EMPTY_CTA: NoticeCta = { display: "button", href: "", label: "", target: "same_tab" };
 
 function Note({ children, tone = "neutral" }: { children: string; tone?: "neutral" | "warning" }) {
   return (
@@ -66,9 +82,11 @@ function Note({ children, tone = "neutral" }: { children: string; tone?: "neutra
   );
 }
 
-export function NoticeCtaField({ disabled, errors, idPrefix = "aviso", onBlurField, onChange, products, productsLoaded, value }: NoticeCtaFieldProps) {
+export function NoticeCtaField({ disabled, errors, idPrefix = "aviso", kind, onBlurField, onChange, products, productsLoaded, value }: NoticeCtaFieldProps) {
   const cta = value ?? EMPTY_CTA;
   const id = (suffix: string) => `${idPrefix}-botao-${suffix}`;
+  const display = ctaDisplayOf(kind, cta);
+  const text = ctaTextFieldCopy(display);
   const [mode, setMode] = useState<HeroCtaDestinationMode>(() => describeCtaDestination(cta.href).mode);
   // Ultimo endereco escolhido em cada modo (voltar a ele ao trocar) e o botao inteiro ao desligar.
   const remembered = useRef<Partial<Record<HeroCtaDestinationMode, string>>>({ [mode]: cta.href });
@@ -108,30 +126,47 @@ export function NoticeCtaField({ disabled, errors, idPrefix = "aviso", onBlurFie
     <div className="flex min-w-0 flex-col gap-5">
       <AdminSwitch
         checked={value !== null}
-        description={value ? "O botão aparece embaixo do texto do aviso." : "Sem botão, o aviso só informa."}
+        description={ctaSwitchDescription(kind, value)}
         disabled={disabled}
         id={id("mostrar")}
-        label="Mostrar um botão"
-        onCheckedChange={(checked) => onChange(checked ? { ...lastCta.current } : null)}
+        label={CTA_FIELD_COPY.switchLabel}
+        // O que foi escrito volta ao religar; no pop-up, sempre pelo botao (o modo pode ser de quando era notificacao).
+        onCheckedChange={(checked) => onChange(checked ? { ...lastCta.current, ...(kind === "popup" ? { display: "button" as const } : {}) } : null)}
       />
 
       {value ? (
         <>
+          {kind === "inbox" ? (
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{CTA_FIELD_COPY.displayLabel}</span>
+              <PillGroup
+                ariaLabel={CTA_FIELD_COPY.displayLabel}
+                disabled={disabled}
+                name={id("modo")}
+                onChange={(next: CtaDisplay) => update({ display: next })}
+                options={CTA_DISPLAY_OPTIONS}
+                value={display}
+              />
+              {errors.display ? <p className="text-[13px] leading-5 text-[var(--error)]">{errors.display}</p> : null}
+            </div>
+          ) : null}
+
           <HeroTextField
             disabled={disabled}
-            error={errors.label}
+            error={ctaLabelError(display, errors.label)}
+            hint={text.hint}
             id={id("texto")}
-            label="Texto do botão"
+            label={text.label}
             max={NOTICE_LIMITS.ctaLabel}
             onBlur={() => onBlurField("cta.label")}
             onChange={(label) => update({ label })}
-            placeholder="Ex.: Assistir agora"
+            placeholder={text.placeholder}
             value={cta.label}
           />
 
           <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Para onde leva</span>
-            <PillGroup ariaLabel="Para onde o botão leva" disabled={disabled} name={id("destino")} onChange={changeMode} options={MODE_OPTIONS} value={mode} />
+            <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{CTA_FIELD_COPY.destinationLabel}</span>
+            <PillGroup ariaLabel={ctaDestinationAriaLabel(display)} disabled={disabled} name={id("destino")} onChange={changeMode} options={MODE_OPTIONS} value={mode} />
           </div>
 
           {mode === "product" ? (

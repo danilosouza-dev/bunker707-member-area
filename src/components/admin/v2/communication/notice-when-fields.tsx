@@ -3,24 +3,39 @@
 import { AlertCircle, Info } from "lucide-react";
 import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { isoToSaoPauloLocal, saoPauloLocalToIso } from "@/server/communications/campaign-model";
+import { isoToSaoPauloLocal, saoPauloLocalToIso, type CampaignStatus } from "@/server/communications/campaign-model";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import { PillGroup, adminInputClass } from "../form";
 import { AdminSwitch } from "../settings/kit";
-import { defaultSendAt, defaultWindowEnd } from "./notices-view-model";
+import { RESHOW_SWITCH_LABEL, defaultSendAt, defaultWindowEnd, popupRepeatChangeHint, reshowSwitchCopy, showsReshowSwitch } from "./notices-view-model";
 
 // "Quando" do aviso (docs/22 §2.2): notificacao sai agora ou numa data e hora de Sao Paulo; pop-up tem
 // janela (comeca ao publicar ou numa data; termina sem data ou numa data), quantas vezes aparece e se
 // permite "Lembrar depois". Os limites fixos do pop-up aparecem como texto, nunca como campo
 // (docs/17 §1.8.1). Datas nativas (type="date"/"time") no tema escuro; a hora vale para Sao Paulo
 // (UTC-3, como o resto do sistema).
+// v3a (docs/24 §2.4): no pop-up no ar ou pausado, "Mostrar de novo para quem já viu" logo depois de
+// "Quantas vezes", so enquanto a escolha e "Uma vez", e a dica do que muda para quem ja viu quando a escolha
+// e diferente da salva.
 
 type WhenDraft = Pick<NoticeDraft, "allowSnooze" | "kind" | "repeat" | "schedule" | "window">;
+
+/** Pop-up ja publicado (editor com ?editar=1): o que esta salvo e o "Mostrar de novo". */
+export type NoticeWhenLive = {
+  onReshowChange: (reshow: boolean) => void;
+  reshow: boolean;
+  /** Quantos a regra "Uma vez" pula agora (detail.reshowable). */
+  reshowable: number | null;
+  savedRepeat: NoticeDraft["repeat"];
+  status: CampaignStatus;
+};
 
 type NoticeWhenFieldsProps = {
   disabled: boolean;
   draft: WhenDraft;
-  errors: { endsAt?: string; sendAt?: string; startsAt?: string };
+  errors: { endsAt?: string; reshow?: string; sendAt?: string; startsAt?: string };
+  /** v3a: so no pop-up no ar ou pausado. */
+  live?: NoticeWhenLive | null;
   onChange: (patch: Partial<WhenDraft>) => void;
 };
 
@@ -137,7 +152,7 @@ export function DateTimeField({ disabled, error, idPrefix, label, onChange, valu
   );
 }
 
-export function NoticeWhenFields({ disabled, draft, errors, onChange }: NoticeWhenFieldsProps) {
+export function NoticeWhenFields({ disabled, draft, errors, live, onChange }: NoticeWhenFieldsProps) {
   // Ultima data escolhida em cada campo, para voltar a ela ao trocar de "agora" para "data".
   const remembered = useRef<{ endsAt?: string; sendAt?: string; startsAt?: string }>({});
 
@@ -182,6 +197,8 @@ export function NoticeWhenFields({ disabled, draft, errors, onChange }: NoticeWh
   }
 
   const { endsAt, startsAt } = draft.window;
+  const repeatChangeHint = live ? popupRepeatChangeHint({ saved: live.savedRepeat, shown: draft.repeat, status: live.status }) : null;
+  const reshowCopy = live ? reshowSwitchCopy(live.reshowable) : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -255,7 +272,32 @@ export function NoticeWhenFields({ disabled, draft, errors, onChange }: NoticeWh
         <span className={labelClass}>Quantas vezes</span>
         <PillGroup ariaLabel="Quantas vezes o pop-up aparece" disabled={disabled} name="aviso-repeticao" onChange={(repeat) => onChange({ repeat })} options={REPEAT_OPTIONS} value={draft.repeat} />
         <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{REPEAT_HINTS[draft.repeat]}</p>
+        {repeatChangeHint ? (
+          <p className="flex items-start gap-2 text-[13px] leading-5 text-[var(--text-secondary)]">
+            <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            {repeatChangeHint}
+          </p>
+        ) : null}
       </div>
+
+      {live && reshowCopy && showsReshowSwitch({ kind: draft.kind, repeat: draft.repeat, status: live.status }) ? (
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <AdminSwitch
+            checked={live.reshow && !reshowCopy.disabled}
+            description={reshowCopy.description}
+            disabled={disabled || reshowCopy.disabled}
+            id="aviso-mostrar-de-novo"
+            label={RESHOW_SWITCH_LABEL}
+            onCheckedChange={live.onReshowChange}
+          />
+          {errors.reshow ? (
+            <p className="flex items-start gap-1.5 text-[13px] leading-5 text-[var(--error)]" id="aviso-mostrar-de-novo-error">
+              <AlertCircle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              {errors.reshow}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <AdminSwitch
         checked={draft.allowSnooze}
@@ -268,7 +310,7 @@ export function NoticeWhenFields({ disabled, draft, errors, onChange }: NoticeWh
 
       <p className="flex items-start gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-3 py-2.5 text-[13px] leading-5 text-[var(--text-secondary)]">
         <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        Para não cansar o aluno, mostramos no máximo 1 pop-up por dia, só na home e nunca durante uma aula.
+        Por enquanto o pop-up aparece só na home, nunca durante uma aula, e um de cada vez.
       </p>
     </div>
   );

@@ -75,7 +75,7 @@ test("aviso curto so de texto: só 'nem viu no sino' e 'viu no sino', nunca 'nã
   assert.match(model.NOTHING_TO_OPEN_NOTE, /só dá para saber se ele viu/);
 });
 
-test("'Ver mais', áudio, botão ou resposta liberam 'viu no sino, mas não abriu' (primeira e padrão) e 'não abriu'", () => {
+test("'Ver mais', áudio, destino ou resposta liberam 'viu no sino, mas não abriu' (primeira e padrão) e 'não abriu'", () => {
   const longo = principal({ body: "x".repeat(181) });
   const comAudio = principal({ audio });
   const comBotao = principal({ cta: { href: "https://exemplo.test", label: "Ver", target: "new_tab" } });
@@ -92,12 +92,12 @@ test("'Ver mais', áudio, botão ou resposta liberam 'viu no sino, mas não abri
   }
 
   assert.equal(model.defaultQuickChoice(longo), "seen_not_opened");
-  assert.equal(model.QUICK_CHOICE_COPY.seen_not_opened.hint, "Abrir é tocar no cartão, em “Ver mais”, no áudio, no botão ou responder. “Marcar todas como lidas” não conta.");
+  assert.equal(model.QUICK_CHOICE_COPY.seen_not_opened.hint, "Abrir é tocar na notificação, em “Ver mais”, no áudio ou no botão, reagir, votar ou responder. “Marcar todas como lidas” não conta.");
   assert.equal(model.QUICK_CHOICE_COPY.not_opened.hint, "Inclui quem ainda nem abriu o sino: essa pessoa vai ver as duas juntas.");
   assert.equal(model.QUICK_CHOICE_COPY.not_seen.hint, "Quem ainda não abriu o sino vai ver as duas juntas quando abrir.");
 });
 
-test("botão, página acompanhada, áudio e resposta: cada um traz as suas escolhas; botão externo não tem 'visitou'", () => {
+test("destino, página acompanhada, áudio e resposta: cada um traz as suas escolhas; destino externo não tem 'visitou'", () => {
   const externo = model.quickChoicesFor(principal({ cta: { href: "https://exemplo.test", label: "Ver", target: "new_tab" } }));
   assert.ok(externo.includes("opened_not_clicked") && externo.includes("not_clicked") && externo.includes("clicked_no_access"));
   assert.ok(!externo.includes("visited_no_access") && !externo.includes("not_visited"));
@@ -129,8 +129,8 @@ test("botão, página acompanhada, áudio e resposta: cada um traz as suas escol
   );
 
   const rotulos = model.QUICK_CHOICE_IDS.map((id) => model.QUICK_CHOICE_COPY[id].label);
-  assert.ok(rotulos.includes("não visitou a página do botão"));
-  assert.ok(rotulos.includes("visitou a página do botão, mas ainda não tem acesso a"));
+  assert.ok(rotulos.includes("não visitou a página para onde a notificação leva"));
+  assert.ok(rotulos.includes("visitou a página para onde a notificação leva, mas ainda não tem acesso a"));
   for (const rotulo of rotulos) {
     assert.doesNotMatch(rotulo, FORBIDDEN_COPY);
   }
@@ -140,9 +140,13 @@ test("cada escolha vira regras sobre a notificação de cima; negar implica 'rec
   const parent = principal({ cta: botaoProduto });
   const ref = { kind: "node", nodeId: ENTRADA };
 
+  // v3a: as "não …" pulam quem excluiu a notificacao de cima do sino (docs/24 §2.7).
   assert.deepEqual(model.quickChoiceRules("seen_not_opened", parent), {
     kind: "rules",
-    root: { items: [{ action: "seen", negate: false, ref, type: "message" }, { action: "opened", negate: true, ref, type: "message" }], match: "all" }
+    root: {
+      items: [{ action: "seen", negate: false, ref, type: "message" }, { action: "opened", negate: true, ref, type: "message" }, { action: "hidden", negate: true, ref, type: "message" }],
+      match: "all"
+    }
   });
   assert.deepEqual(model.quickChoiceRules("not_visited", parent).root.items, [
     { negate: true, page: { kind: "message_cta", nodeId: ENTRADA }, since: { kind: "message", nodeId: ENTRADA }, type: "page_visit" }
@@ -162,7 +166,7 @@ test("cada escolha vira regras sobre a notificação de cima; negar implica 'rec
   assert.equal(audience.evaluateAudience(viuNaoAbriu, aluno({ messages: { [`node:${ENTRADA}`]: linha({ seenAt: NOW }) } }), contexto), true);
 });
 
-test("'clicou no botão, mas ainda não tem acesso a Y' = clicou E não tem Y: quem já é dono de Y e clicou não recebe", () => {
+test("'foi para o destino, mas ainda não tem acesso a Y' = foi E não tem Y: quem já é dono de Y e foi não recebe", () => {
   const parent = principal({ cta: botaoProduto });
   const item = model.changeQuickChoice(model.newFollowUpItem(S1, parent), "clicked_no_access", parent);
 
@@ -341,16 +345,19 @@ test("resumo do cartão: quando e para quem, com o nome do produto e as regras e
   assert.equal(model.followUpSummary(item, parent, names), "1 dia depois do envio · para quem viu no sino, mas não abriu");
   assert.equal(
     model.followUpSummary(model.changeFollowUpAnchor({ ...model.changeQuickChoice(item, "not_clicked", parent), when: { anchor: "sent", minutes: 180 } }, "expires"), parent, names),
-    "3 horas antes de vencer · para quem não clicou no botão"
+    "3 horas antes de vencer · para quem não foi para o destino"
   );
   assert.equal(
     model.followUpSummary(model.changeQuickChoice(item, "clicked_no_access", parent), parent, names),
-    "1 dia depois do envio · para quem clicou no botão, mas ainda não tem acesso a Formação IA"
+    "1 dia depois do envio · para quem foi para o destino, mas ainda não tem acesso a Formação IA"
   );
   assert.equal(model.followUpSummary(model.changeQuickChoice(item, "everyone", parent), parent, names), "1 dia depois do envio · para todos que receberam");
 
   const regras = model.changeQuickChoice(model.changeQuickChoice(item, "not_opened", parent), "rules", parent);
-  assert.equal(model.followUpSummary(regras, parent, names), "1 dia depois do envio · para alunos que não abriram a notificação “Aula nova”");
+  assert.equal(
+    model.followUpSummary(regras, parent, names),
+    "1 dia depois do envio · para alunos que não abriram a notificação “Aula nova” e não excluíram do sino a notificação “Aula nova”"
+  );
 
   const anterior = model.followUpParentOf(S1, "previous", conteudo());
   assert.equal(model.followUpWhenLabel({ anchor: "sent", minutes: 60 }, anterior.level), "1 hora depois do envio da anterior");
@@ -496,7 +503,7 @@ test("referências à entrada que o navegador ainda não conhecia passam para a 
   const drafts = model.followUpDraftsOf([model.newFollowUpItem(S1, model.followUpParentOf(provisoria, "main", conteudo({ body: "x".repeat(200) })))], model.followUpParentOf(provisoria, "main", conteudo({ body: "x".repeat(200) })));
   const remapped = model.remapEntryRefs(drafts, ENTRADA);
 
-  assert.deepEqual(remapped[0].who.root.items.map((rule) => rule.ref.nodeId), [ENTRADA, ENTRADA]);
+  assert.deepEqual(remapped[0].who.root.items.map((rule) => rule.ref.nodeId), [ENTRADA, ENTRADA, ENTRADA]);
   assert.equal(model.remapEntryRefs(remapped, ENTRADA)[0].who.root.items[0].ref.nodeId, ENTRADA);
 });
 
@@ -526,7 +533,7 @@ test("números de cada seguinte no relatório: o que a notificação tem e o por
   const stats = { accepted: 0, audio_completed: 3, audio_started: 5, cap: 2, clicked: 4, declined: 0, expired: 4, filtered: 12, goal: 6, opened: 9, reached: 40, received: 12, removed: 0, seen: 10, waiting: 12 };
   const rows = model.followUpNumberRows(stats, conteudo({ audio, cta: botaoProduto }));
 
-  assert.deepEqual(rows.map((row) => row.label), ["Chegaram", "Esperando", "Receberam", "Viram no sino", "Abriram", "Começaram o áudio", "Ouviram até o fim", "Clicaram no botão", "Não receberam"]);
+  assert.deepEqual(rows.map((row) => row.label), ["Chegaram", "Esperando", "Receberam", "Viram no sino", "Abriram", "Começaram o áudio", "Ouviram até o fim", "Foram para o destino", "Não receberam"]);
   assert.equal(rows.at(-1).value, "24 (fora do filtro 12 · atingiram o objetivo antes 6 · venceu o prazo 4 · limite do dia 2)");
   assert.deepEqual(model.followUpNumberRows(null, conteudo()).map((row) => row.value), ["—", "—", "—", "—", "—"]);
 
@@ -602,4 +609,180 @@ test("apoio do cartão: erro pelo caminho (ou o primeiro de dentro), chip da lis
   const parent = model.followUpParentOf(provisoria, "main", conteudo({ body: "x".repeat(200) }));
   const drafts = model.followUpDraftsOf([{ ...model.newFollowUpItem(S1, parent), children: [model.newFollowUpItem(S11, model.followUpParentOf(S1, "previous", conteudo({ body: "x".repeat(200) })))] }], parent);
   assert.deepEqual(model.foreignNodeRefs(drafts), [provisoria], "a filha cita a seguinte, que nao e de fora");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * v3a (docs/24 §2.7): enquete, reacoes e quem excluiu a notificacao de cima do sino
+ * ---------------------------------------------------------------------------------------------- */
+
+const SABADO = "a1b2c3d4";
+const DOMINGO = "e5f6a7b8";
+const enquete = { closesAt: null, multiple: false, options: [{ id: SABADO, label: "Sábado" }, { id: DOMINGO, label: "Domingo" }], question: "Qual dia?", showResults: true };
+const resposta = { acceptLabel: "Vou", declineLabel: "Não vou" };
+
+test("v3a: a de cima traz reações e enquete; a enquete conta como algo para abrir, a reação não", () => {
+  const comEnquete = principal({ body: "Curta.", poll: enquete });
+  const comReacoes = principal({ body: "Curta.", reactions: true });
+
+  assert.equal(comEnquete.hasPoll, true);
+  assert.deepEqual(comEnquete.pollOptions, enquete.options);
+  assert.equal(comEnquete.allowsReactions, false);
+  assert.equal(comReacoes.allowsReactions, true);
+  assert.equal(principal().allowsReactions, false, "conteudo antigo sem a chave: sem reacoes");
+  assert.equal(principal().hasPoll, false);
+  assert.equal(model.hasSomethingToOpen(comEnquete), true, "votar abre");
+  assert.equal(model.hasSomethingToOpen(comReacoes), false, "reagir sozinho nao faz haver o que abrir");
+  assert.equal(model.hasSomethingToOpen({ body: "Curta.", ctaHref: null, hasAudio: false, hasResponse: false }), false, "forma da v2 sem hasPoll");
+});
+
+test("v3a: 'não votou na enquete' e 'não reagiu' só quando a de cima tem, depois das de resposta", () => {
+  const ambos = model.quickChoicesFor(principal({ body: "Curta.", poll: enquete, reactions: true }));
+
+  assert.deepEqual(ambos, ["seen_not_opened", "not_seen", "not_opened", "not_voted", "not_reacted", "everyone", "rules"]);
+  assert.deepEqual(model.quickChoicesFor(principal({ response: resposta, reactions: true })).slice(3), ["not_responded", "accepted", "declined", "not_reacted", "everyone", "rules"]);
+  assert.ok(!model.quickChoicesFor(principal({ body: "x".repeat(200) })).includes("not_voted"));
+  assert.ok(!model.quickChoicesFor(principal({ body: "x".repeat(200) })).includes("not_reacted"));
+  assert.ok(!model.quickChoicesFor(principal({ body: "Curta.", reactions: true })).includes("not_opened"), "so reacoes: nada a abrir");
+  assert.deepEqual(model.quickChoicesFor(principal({ body: "Curta.", reactions: true })), ["not_seen", "seen", "not_reacted", "everyone", "rules"]);
+  assert.equal(model.QUICK_CHOICE_COPY.not_voted.label, "não votou na enquete");
+  assert.equal(model.QUICK_CHOICE_COPY.not_reacted.label, "não reagiu");
+  assert.equal(model.NOTHING_TO_OPEN_NOTE, "Esta notificação não tem áudio, destino, resposta, enquete nem texto longo: o aluno lê tudo no sino, então só dá para saber se ele viu.");
+
+  const ref = { kind: "node", nodeId: ENTRADA };
+  assert.deepEqual(model.quickChoiceRules("not_voted", principal({ poll: enquete })).root.items, [
+    { action: "voted", negate: true, ref, type: "message" },
+    { action: "hidden", negate: true, ref, type: "message" }
+  ]);
+  assert.deepEqual(model.quickChoiceRules("not_reacted", principal({ reactions: true })).root.items, [
+    { action: "reacted", negate: true, ref, type: "message" },
+    { action: "hidden", negate: true, ref, type: "message" }
+  ]);
+});
+
+test("v3a: as escolhas 'não …' pulam quem excluiu a de cima do sino; as outras não mudam (com a linha embaixo)", () => {
+  const parent = principal({ audio, cta: botaoProduto, poll: enquete, reactions: true, response: resposta });
+  const pulam = ["not_opened", "seen_not_opened", "not_clicked", "opened_not_clicked", "not_responded", "not_voted", "not_reacted", "audio_not_started", "audio_not_completed"];
+  const hidden = { action: "hidden", negate: true, ref: { kind: "node", nodeId: ENTRADA }, type: "message" };
+
+  assert.deepEqual([...model.QUICK_CHOICES_SKIPPING_HIDDEN].sort(), [...pulam].sort());
+
+  for (const choice of model.QUICK_CHOICE_IDS.filter((id) => id !== "rules")) {
+    const rules = model.quickChoiceRules(choice, parent, model.quickChoiceNeedsProduct(choice) ? PRODUTO : null);
+    const items = rules.kind === "rules" ? rules.root.items : [];
+
+    assert.equal(items.some((item) => item.action === "hidden"), pulam.includes(choice), choice);
+
+    if (pulam.includes(choice)) {
+      assert.deepEqual(items.at(-1), hidden, `${choice}: a regra vem no fim`);
+      assert.deepEqual(model.quickChoiceHints(choice).at(-1), "Quem excluiu a notificação de cima do sino não recebe esta.");
+    } else {
+      assert.equal(model.quickChoiceHints(choice).includes(model.HIDDEN_SKIP_NOTE), false, choice);
+    }
+  }
+
+  assert.deepEqual(model.quickChoiceHints("not_opened"), ["Inclui quem ainda nem abriu o sino: essa pessoa vai ver as duas juntas.", "Quem excluiu a notificação de cima do sino não recebe esta."]);
+  assert.deepEqual(model.quickChoiceHints("not_clicked"), ["Quem excluiu a notificação de cima do sino não recebe esta."]);
+  assert.deepEqual(model.quickChoiceHints("everyone"), []);
+  assert.deepEqual(model.quickChoiceHints("seen"), [model.NOTHING_TO_OPEN_NOTE]);
+
+  // Quem excluiu nao recebe "viu no sino, mas não abriu"; quem so viu, recebe.
+  const viuNaoAbriu = model.quickChoiceRules("seen_not_opened", parent);
+  assert.equal(audience.evaluateAudience(viuNaoAbriu, aluno({ messages: { [`node:${ENTRADA}`]: linha({ seenAt: NOW }) } }), contexto), true);
+  assert.equal(audience.evaluateAudience(viuNaoAbriu, aluno({ messages: { [`node:${ENTRADA}`]: linha({ hiddenAt: NOW, seenAt: NOW }) } }), contexto), false);
+
+  const naoReagiu = model.quickChoiceRules("not_reacted", parent);
+  assert.equal(audience.evaluateAudience(naoReagiu, aluno({ messages: { [`node:${ENTRADA}`]: linha({ seenAt: NOW }) } }), contexto), true);
+  assert.equal(audience.evaluateAudience(naoReagiu, aluno({ messages: { [`node:${ENTRADA}`]: linha({ reaction: "love", seenAt: NOW }) } }), contexto), false, "reagiu");
+  assert.equal(audience.evaluateAudience(naoReagiu, aluno({ messages: {} }), contexto), false, "nao recebeu");
+
+  const naoVotou = model.quickChoiceRules("not_voted", parent);
+  assert.equal(audience.evaluateAudience(naoVotou, aluno({ messages: { [`node:${ENTRADA}`]: linha({ pollChoice: [SABADO], seenAt: NOW }) } }), contexto), false, "votou");
+  assert.equal(audience.evaluateAudience(naoVotou, aluno({ messages: { [`node:${ENTRADA}`]: linha({ pollChoice: [], seenAt: NOW }) } }), contexto), true, "tirou o voto");
+});
+
+test("v3a: a seguinte gravada pela v2 (sem 'não excluiu do sino') reabre na escolha rápida; a próxima gravação escreve a forma nova", () => {
+  const parent = principal({ audio, cta: botaoProduto, response: resposta });
+  const v2 = ["not_opened", "seen_not_opened", "not_clicked", "opened_not_clicked", "not_responded", "audio_not_started", "audio_not_completed"];
+
+  for (const choice of v2) {
+    const antiga = model.quickChoiceRules(choice, parent, null, { v2: true });
+
+    assert.equal(antiga.root.items.some((item) => item.action === "hidden"), false, `${choice} v2 sem a regra`);
+    assert.deepEqual(model.quickChoiceOfRules(reverseKeys(antiga), parent), { choice, productId: null }, `${choice} na forma da v2`);
+    assert.deepEqual(model.quickChoiceOfRules(model.quickChoiceRules(choice, parent), parent), { choice, productId: null }, `${choice} na forma da v3a`);
+  }
+
+  // Reabriu na escolha: a gravacao seguinte manda a forma nova.
+  const gravadas = [{ campaignId: "c1", children: [], content: conteudo({ title: "Seg" }), id: S1, when: { anchor: "sent", minutes: DIA }, who: model.quickChoiceRules("not_clicked", parent, null, { v2: true }) }];
+  const [item] = model.followUpFormItemsOf(gravadas, parent);
+  assert.equal(item.choice, "not_clicked");
+  assert.deepEqual(model.followUpDraftsOf([item], parent)[0].who, model.quickChoiceRules("not_clicked", parent));
+
+  // As escolhas novas nao tinham forma na v2: "não votou" sozinho e uma regra do construtor.
+  const comEnquete = principal({ poll: enquete });
+  const soVotou = { kind: "rules", root: { items: [{ action: "voted", negate: true, ref: { kind: "node", nodeId: ENTRADA }, type: "message" }], match: "all" } };
+  assert.equal(model.quickChoiceOfRules(soVotou, comEnquete).choice, "rules");
+  assert.equal(model.quickChoiceOfRules(model.quickChoiceRules("not_voted", comEnquete), comEnquete).choice, "not_voted");
+});
+
+test("v3a: tirar a enquete ou as reações da de cima invalida a escolha; a árvore recusa a regra", () => {
+  const comEnquete = principal({ body: "x".repeat(200), poll: enquete });
+  const item = { ...model.changeQuickChoice(model.newFollowUpItem(S1, comEnquete), "not_voted", comEnquete), content: conteudo({ title: "Vote" }) };
+
+  assert.deepEqual(model.followUpChoiceErrors([item], comEnquete), {});
+  assert.deepEqual(model.followUpTreeErrors({ drafts: model.followUpsToSave("inbox", [item], comEnquete), entryId: ENTRADA, notice: conteudo({ poll: enquete }) }), {});
+
+  const semEnquete = principal({ body: "x".repeat(200) });
+  assert.deepEqual(model.followUpChoiceErrors([item], semEnquete), { "followUps.0.who": model.FOLLOW_UPS_COPY.staleChoice });
+  assert.deepEqual(model.followUpTreeErrors({ drafts: model.followUpsToSave("inbox", [item], semEnquete), entryId: ENTRADA, notice: conteudo() }), {
+    "followUps.0.who": "A notificação escolhida não tem enquete. Escolha outra regra."
+  });
+
+  const comReacoes = principal({ body: "x".repeat(200), reactions: true });
+  const reagiu = { ...model.changeQuickChoice(model.newFollowUpItem(S2, comReacoes), "not_reacted", comReacoes), content: conteudo({ title: "Reaja" }) };
+  assert.deepEqual(model.followUpTreeErrors({ drafts: model.followUpsToSave("inbox", [reagiu], comReacoes), entryId: ENTRADA, notice: conteudo({ reactions: false }) }), {
+    "followUps.0.who": "A notificação escolhida não aceita reações. Escolha outra regra."
+  });
+
+  assert.deepEqual(model.flowMetaOfContent(conteudo({ poll: enquete, reactions: true })), {
+    allowsReactions: true,
+    campaignId: "",
+    ctaHref: null,
+    hasAudio: false,
+    hasCta: false,
+    hasPoll: true,
+    hasResponse: false,
+    pollOptionIds: [SABADO, DOMINGO],
+    title: "Aula nova",
+    validUntil: null,
+    validityMinutes: null
+  });
+});
+
+test("v3a: números da seguinte com 'Votaram' e 'Reagiram'; a cópia 'destino' e as opções nas frases", () => {
+  const stats = { accepted: 0, audio_completed: 0, audio_started: 0, cap: 0, clicked: 4, declined: 0, expired: 0, filtered: 0, goal: 0, opened: 9, reached: 12, reacted: 5, received: 12, removed: 0, seen: 10, voted: 7, waiting: 0 };
+  const rows = model.followUpNumberRows(stats, conteudo({ cta: botaoProduto, poll: enquete, reactions: true }));
+
+  assert.deepEqual(rows.map((row) => row.label), ["Chegaram", "Esperando", "Receberam", "Viram no sino", "Abriram", "Foram para o destino", "Votaram", "Reagiram"]);
+  assert.deepEqual(rows.slice(-2).map((row) => row.value), ["7", "5"]);
+  assert.deepEqual(model.followUpNumberRows({ ...stats, reacted: undefined, voted: undefined }, conteudo({ poll: enquete, reactions: true })).slice(-2).map((row) => row.value), ["0", "0"], "sem o numero: 0");
+  assert.deepEqual(model.followUpNumberRows(null, conteudo({ poll: enquete })).at(-1), { label: "Votaram", value: "—" });
+
+  const labels = model.QUICK_CHOICE_IDS.map((id) => model.QUICK_CHOICE_COPY[id].label);
+  assert.ok(labels.includes("não foi para o destino"));
+  assert.ok(labels.includes("abriu, mas não foi para o destino"));
+  assert.ok(labels.includes("foi para o destino, mas ainda não tem acesso a"));
+  assert.ok(labels.every((label) => !label.includes("botão")));
+
+  // As opcoes da enquete da principal e das seguintes entram nos nomes ("votaram em “Sábado”").
+  const main = principal({ poll: enquete });
+  const filhaComEnquete = { ...model.newFollowUpItem(S1, main), content: conteudo({ poll: { ...enquete, options: [{ id: "c0c0c0c0", label: "Manhã" }, { id: "d0d0d0d0", label: "Noite" }] } }) };
+  const names = model.followUpAudienceNames({ cohorts: {}, messages: { [`node:${ENTRADA}`]: "Aula nova" }, products: {} }, main, [filhaComEnquete]);
+  assert.deepEqual(names.pollOptions, { [`node:${ENTRADA}`]: { [DOMINGO]: "Domingo", [SABADO]: "Sábado" }, [`node:${S1}`]: { c0c0c0c0: "Manhã", d0d0d0d0: "Noite" } });
+  assert.equal(
+    audience.describeAudience({ kind: "rules", root: { items: [{ action: "voted", choice: SABADO, negate: false, ref: { kind: "node", nodeId: ENTRADA }, type: "message" }], match: "all" } }, names),
+    "Alunos que votaram em “Sábado” na enquete da notificação “Aula nova”"
+  );
+  const semEnquete = { cohorts: {}, products: {} };
+  assert.equal(model.followUpAudienceNames(semEnquete, principal(), [model.newFollowUpItem(S1, principal())]), semEnquete, "sem enquete: os mesmos nomes");
 });

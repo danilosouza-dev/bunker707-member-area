@@ -26,10 +26,30 @@ import {
 
 export type FlowNoticeContent = Omit<NoticeContent, "validity"> & { validity: FlowValidity };
 
-/** O conteudo do aviso com `validity` aceitando "Ate a notificacao principal sumir". Sempre notificacao. */
+/** Enquete de seguinte ou de passo de fluxo: o envio e relativo, entao a data fixa poderia cair antes dele (v3a). */
+export const FLOW_POLL_CLOSES_AT_MESSAGE = "Numa notificação seguinte ou num passo de fluxo, a enquete encerra quando a notificação sair do sino.";
+
+/**
+ * Ajustes da v3a: num fluxo no ar ou pausado, a enquete de um passo que ja chegou a algum aluno nao muda (o id
+ * da opcao renomeada fica: os votos antigos contariam para o texto novo no relatorio e na regra "votou em X").
+ * O servidor recusa (422, flow-store.ts) e a tela trava o campo com a mesma frase (LIVE_POLL_LOCKED_NOTE).
+ */
+export const FLOW_POLL_LOCKED_MESSAGE =
+  "A enquete não muda depois que esta notificação chegou a alguém: os votos já dados ficariam com outro texto. Para outra enquete, crie uma notificação seguinte nova.";
+
+/**
+ * O conteudo do aviso com `validity` aceitando "Ate a notificacao principal sumir". Sempre notificacao. A
+ * enquete (v3a) so encerra quando a notificacao sai do sino.
+ */
 export const flowNoticeContentSchema: z.ZodType<FlowNoticeContent> = z
   .object({ ...NOTICE_CONTENT_FIELDS, validity: flowValiditySchema.default((): FlowValidity => ({ mode: "default" })) })
-  .superRefine((content, context) => addNoticeContentIssues(content, "inbox", context));
+  .superRefine((content, context) => {
+    addNoticeContentIssues(content, "inbox", context);
+
+    if (content.poll && content.poll.closesAt !== null) {
+      context.addIssue({ code: "custom", message: FLOW_POLL_CLOSES_AT_MESSAGE, path: ["poll", "closesAt"] });
+    }
+  });
 
 export const WITH_ANCHOR_NEEDS_NOTIFICATION_MESSAGE = "Escolha quando ela sai em relação a uma notificação.";
 
@@ -191,11 +211,14 @@ export function flowTreeOfDraft(draft: Pick<FlowDraft, "messages" | "nodes" | "o
       const validity = validityToColumns(content.validity);
 
       messages[node.id] = {
+        allowsReactions: content.reactions ?? false,
         campaignId: "",
         ctaHref: content.cta?.href ?? null,
         hasAudio: Boolean(content.audio),
         hasCta: Boolean(content.cta),
+        hasPoll: Boolean(content.poll),
         hasResponse: Boolean(content.response),
+        pollOptionIds: content.poll?.options.map((option) => option.id) ?? [],
         title: content.title,
         validUntil: validity.valid_until,
         validityMinutes: validity.validity_minutes

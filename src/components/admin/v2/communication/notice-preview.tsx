@@ -12,12 +12,15 @@ import { MEMBER_PREVIEW_VH_VAR, type PreviewDevice } from "../member-area/previe
 import {
   PREVIEW_AGE_MS,
   PREVIEW_LISTEN_OPTIONS,
+  PREVIEW_POLL_OPTIONS,
   draftToNotificationItem,
   draftToPopupItem,
+  hasPreviewPoll,
   previewSender,
   type NoticeSenderChoice,
   type PreviewContent,
-  type PreviewListen
+  type PreviewListen,
+  type PreviewPoll
 } from "./notices-view-model";
 
 // Previa do aviso (docs/22 §2.2): os componentes REAIS do aluno (NotificationCard dentro do painel do
@@ -32,6 +35,13 @@ import {
 // v2 (docs/23): o circulo e quem envia (a pessoa da equipe, ou o icone da escola de Marca), o icone vai
 // antes do titulo, o "Termina em" aparece como o aluno ve logo depois do envio (chegou ha 30 s) e, com
 // audio, as pilulas "Áudio na prévia" trocam o player parado entre "Não ouvido" e "Ouvido".
+//
+// v3a (docs/24 §2.5): o cartao do sino ja desenha o titulo maior, a linha "Ver …" ou o realce do cartao
+// clicavel, o botao de reagir e a lixeira (parados) e a enquete. Com enquete, as pilulas "Enquete na
+// prévia" trocam entre "Antes de votar" e "Depois de votar" (a primeira opcao como o voto do proprio
+// aluno: 1 voto, 100%, nunca numero inventado); quem monta a enquete do cartao e draftToNotificationItem.
+// Ajustes da v3a: com "Permitir que o aluno exclua do sino" desligado, o cartao sai sem o "⋯" de excluir
+// (allowHide no item; o NotificationCard decide por canHideNotification).
 
 /** Tokens de :root que o admin sobrescreve e a area do aluno usa (os mesmos do PreviewFrame). */
 const STUDENT_TOKENS: Record<string, string> = {
@@ -156,6 +166,18 @@ type NoticePreviewProps = {
   senders?: readonly NoticeSenderChoice[];
 };
 
+/** "Enquete na prévia": Antes de votar | Depois de votar (so com enquete). */
+function PollPills({ onChange, value }: { onChange: (value: PreviewPoll) => void; value: PreviewPoll }) {
+  const name = useId();
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+      <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Enquete na prévia</span>
+      <PillGroup ariaLabel="Enquete na prévia" name={name} onChange={onChange} options={PREVIEW_POLL_OPTIONS} value={value} />
+    </div>
+  );
+}
+
 /** "Áudio na prévia": Não ouvido | Ouvido (so com audio; o pop-up nao guarda o ouvido). */
 function ListenPills({ onChange, value }: { onChange: (value: PreviewListen) => void; value: PreviewListen }) {
   // Nome proprio por previa: o editor, a folha da seguinte e o painel do passo podem estar na tela juntos.
@@ -171,6 +193,7 @@ function ListenPills({ onChange, value }: { onChange: (value: PreviewListen) => 
 
 export function NoticePreview({ anchorExpiresAt, branding, className, device, draft, imageUrl, now, senders = [] }: NoticePreviewProps) {
   const [listen, setListen] = useState<PreviewListen>("not_heard");
+  const [pollPreview, setPollPreview] = useState<PreviewPoll>("before");
   const emptyTitle = !draft.title.trim();
 
   if (draft.kind === "popup") {
@@ -195,12 +218,15 @@ export function NoticePreview({ anchorExpiresAt, branding, className, device, dr
     createdAt: new Date(now - PREVIEW_AGE_MS).toISOString(),
     imageUrl,
     listen,
+    pollPreview,
     sender: previewSender(draft.sender ?? null, senders)
   });
+  const showsPoll = hasPreviewPoll(draft);
 
   return (
     <div className={cn("flex min-w-0 flex-col gap-3", className)}>
       {draft.audio ? <ListenPills onChange={setListen} value={listen} /> : null}
+      {showsPoll ? <PollPills onChange={setPollPreview} value={pollPreview} /> : null}
       <PreviewStage
         ariaLabel={`Prévia da notificação no sino, no ${device === "mobile" ? "celular" : "computador"}`}
         className={cn(emptyTitle && "[&_article>div>p:first-child]:font-medium [&_article>div>p:first-child]:text-white/40")}

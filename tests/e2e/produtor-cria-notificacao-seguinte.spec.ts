@@ -78,7 +78,7 @@ test.describe("produtor", () => {
     await expect(page.getByText("Cor do ícone · Vermelho")).toBeVisible();
 
     // Botao para um curso a venda (algo para abrir: "não abriu" aparece entre as escolhas da seguinte).
-    await page.getByRole("switch", { name: "Mostrar um botão" }).click();
+    await page.getByRole("switch", { name: "Levar o aluno a algum lugar" }).click();
     await page.getByLabel("Texto do botão", { exact: true }).fill(BOTAO);
     await page.getByRole("radiogroup", { name: "Para onde o botão leva" }).getByText("Um produto").click();
     await page.getByRole("group", { name: "Produto", exact: true }).getByText(ESCOLA_DE_TESTE.cursoBloqueado.titulo).click();

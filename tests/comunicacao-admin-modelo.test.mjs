@@ -140,6 +140,7 @@ test("botao principal: mesma regra do servidor (aprovacao acima de 500 sem a per
   assert.equal(model.isNoticeKindLocked("pending_approval"), false);
   assert.equal(model.isNoticeKindLocked("scheduled"), true);
   assert.equal(model.isNoticeKindLocked("active"), true);
+  assert.equal(model.isNoticeKindLocked("sent"), true, "v3a: a enviada muda o conteudo, nunca o tipo");
 });
 
 test("rascunho: so os campos do tipo vao ao servidor e a comparacao ignora o que o banco reescreve", () => {
@@ -155,6 +156,17 @@ test("rascunho: so os campos do tipo vao ao servidor e a comparacao ignora o que
   const popup = model.noticeDraftForKind(draft({ kind: "popup", response: { acceptLabel: "Vou", declineLabel: "Não vou" }, schedule: { mode: "at", sendAt: "" } }));
   assert.equal(popup.response, null);
   assert.deepEqual(popup.schedule, { mode: "now" });
+
+  // v3a: o pop-up deixa reacoes e enquete e abre o destino pelo botao; a notificacao guarda o que tem.
+  const enquete = { closesAt: null, multiple: false, options: [{ id: "a1", label: "Sim" }, { id: "b2", label: "Não" }], question: "Vem?", showResults: true };
+  const comTudo = draft({ cta: { display: "card", href: "/minhas-compras", label: "Ver", target: "same_tab" }, poll: enquete, reactions: true });
+  const comoPopup = model.noticeDraftForKind({ ...comTudo, kind: "popup" });
+  assert.equal(comoPopup.reactions, false);
+  assert.equal(comoPopup.poll, null);
+  assert.equal(comoPopup.cta.display, "button");
+  assert.equal(schemas.noticeDraftSchema.safeParse(comoPopup).success, true);
+  assert.deepEqual(model.noticeDraftForKind(comTudo).poll, enquete);
+  assert.equal(model.noticeDraftForKind(comTudo).cta.display, "card");
 
   // Banco devolve +00:00, ids ordenados e texto aparado: continua "sem mudanca".
   const local = draft({
@@ -242,6 +254,13 @@ test("previa: notificacao nao lida da escola, titulo vazio vira dica e botao inc
   assert.equal(item.cta, null, "sem destino o botao nao aparece");
   assert.deepEqual(item.image, { alt: "Professora", url: "https://cdn.test/a.webp" });
   assert.deepEqual(item.response, { acceptLabel: "Aceitar", declineLabel: "Não vou", value: null });
+  assert.deepEqual(item.reactions, { value: null }, "v3a: notificacao nova com reacoes mostra o botao de reagir");
+  assert.equal(item.poll, null);
+  assert.equal(
+    model.draftToNotificationItem(draft({ cta: { href: "/minhas-compras", label: "Ver", target: "same_tab" } }), { createdAt: "2026-10-20T15:00:00.000Z" }).cta.display,
+    "button",
+    "rascunho sem display: pelo botao"
+  );
 
   const uploading = model.draftToNotificationItem(draft(), { createdAt: "2026-10-20T15:00:00.000Z", imageUrl: "data:image/webp;base64,AAAA" });
   assert.equal(uploading.image.url, "data:image/webp;base64,AAAA", "imagem ainda subindo ja aparece");
@@ -426,7 +445,8 @@ test("editor: salvar sem mudanca nao grava; com mudanca, o toast conta o que foi
   assert.equal(model.savedNoticeToast("inbox", null), "Rascunho salvo.", "aviso novo");
   assert.equal(model.savedNoticeToast("inbox", "scheduled"), "Rascunho salvo. O envio agendado foi cancelado: agende de novo.");
   assert.equal(model.savedNoticeToast("popup", "pending_approval"), "Rascunho salvo. O pedido de aprovação foi cancelado.");
-  assert.equal(model.savedNoticeToast("popup", "active"), "Pop-up atualizado. Quem já fechou não vê de novo.");
+  // v3a (docs/24 §2.4): o toast diz o que acontece com quem ja viu pela regra salva ("Uma vez" por padrao).
+  assert.equal(model.savedNoticeToast("popup", "active"), "Pop-up atualizado. Quem já viu não vê de novo.");
   assert.equal(model.savedNoticeToast("popup", "paused"), "Pop-up salvo. Ele continua pausado.");
   assert.equal(model.testSentToast(false, "scheduled"), "Enviamos a notificação para o seu sino.", "teste sem mudanca nao grava nada");
   assert.equal(model.testSentToast(true, "scheduled"), "Enviamos a notificação para o seu sino. O envio agendado foi cancelado: agende de novo.");
@@ -652,7 +672,7 @@ test("fica no sino por: pilulas 1, 3, 7, 30 e 90 dias, 'Outro' por um tempo ou a
   assert.equal(model.validityDurationMinutes(5, "hours"), 300);
   assert.equal(model.validityDurationMinutes(2, "days"), 2_880);
   assert.ok(Number.isNaN(model.validityDurationMinutes(Number.NaN, "days")));
-  assert.equal(schemas.validitySchema.safeParse({ minutes: model.validityDurationMinutes(Number.NaN, "days"), mode: "duration" }).error.issues[0].message, "Use de 1 hora a 90 dias.");
+  assert.equal(schemas.validitySchema.safeParse({ minutes: model.validityDurationMinutes(Number.NaN, "days"), mode: "duration" }).error.issues[0].message, "Use de 5 minutos a 90 dias.");
 
   assert.equal(model.showsUrgencyHint({ minutes: 43_200, mode: "duration" }, NOW), true, "30 dias ou menos");
   assert.equal(model.showsUrgencyHint({ minutes: 43_260, mode: "duration" }, NOW), false);

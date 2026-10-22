@@ -42,42 +42,90 @@ test("situacao: pop-up publicado antes da janela aparece agendado e depois do fi
   );
 });
 
-test("acoes por situacao: rascunho, aguardando aprovacao, agendado, enviando, enviado e cancelado", () => {
-  const acoes = (status, perms = todas, kind = "inbox") => campaign.availableNoticeActions(timing({ kind, status }), now, perms);
+// v3a (docs/24 §2.1): o menu na ordem do "…", com Ver relatorio, Editar a enviada e Excluir em toda situacao.
+const publica = { canPublish: true, canPublishLarge: false, canWrite: true };
+
+test("acoes por situacao: rascunho, aguardando aprovacao, agendado, enviando, enviado e cancelado (na ordem do menu)", () => {
+  const acoes = (status, perms = todas, kind = "inbox", extra) => campaign.availableNoticeActions(timing({ kind, status }), now, perms, extra);
 
   assert.deepEqual(acoes("draft"), ["edit", "publish", "send_test", "duplicate", "delete"]);
+  assert.deepEqual(acoes("draft", soEscreve), ["edit", "publish", "send_test", "duplicate", "delete"]);
   assert.deepEqual(acoes("draft", todas, "popup"), ["edit", "publish", "duplicate", "delete"], "pop-up nao tem teste no sino");
   assert.deepEqual(acoes("pending_approval"), ["edit", "approve", "reject", "send_test", "duplicate", "delete"]);
-  assert.deepEqual(acoes("pending_approval", { ...todas, canPublishLarge: false }), ["edit", "send_test", "duplicate", "delete"], "so quem aprova ve aprovar");
-  assert.deepEqual(acoes("scheduled"), ["edit", "cancel_schedule", "send_test", "duplicate"]);
-  assert.deepEqual(acoes("scheduled", soEscreve), ["edit", "send_test", "duplicate"]);
-  assert.deepEqual(acoes("sending"), ["duplicate"]);
-  assert.deepEqual(acoes("sent"), ["withdraw", "duplicate"]);
-  assert.deepEqual(acoes("sent", soEscreve), ["duplicate"]);
-  assert.deepEqual(acoes("canceled"), ["duplicate", "delete"]);
+  assert.deepEqual(acoes("pending_approval", publica), ["edit", "send_test", "duplicate", "delete"], "so quem aprova ve aprovar");
+  assert.deepEqual(acoes("pending_approval", soEscreve), ["edit", "send_test", "duplicate", "delete"]);
+  assert.deepEqual(acoes("scheduled"), ["edit", "send_test", "duplicate", "cancel_schedule", "delete"]);
+  assert.deepEqual(acoes("scheduled", publica), ["edit", "send_test", "duplicate", "cancel_schedule", "delete"]);
+  assert.deepEqual(acoes("scheduled", soEscreve), ["edit", "send_test", "duplicate"], "excluir o agendado cancela o envio: messaging.publish");
+  assert.deepEqual(acoes("sending"), ["view_report", "duplicate"], "enviando: nada de excluir no meio do envio");
+  assert.deepEqual(acoes("sending", soEscreve), ["view_report", "duplicate"]);
+  assert.deepEqual(acoes("sent"), ["view_report", "edit", "duplicate", "withdraw", "delete"]);
+  assert.deepEqual(acoes("sent", publica), ["view_report", "edit", "duplicate", "withdraw", "delete"]);
+  assert.deepEqual(acoes("sent", soEscreve), ["view_report", "duplicate"], "quem so escreve nao muda nem tira do sino");
+  assert.deepEqual(acoes("canceled"), ["view_report", "duplicate", "delete"]);
+  assert.deepEqual(acoes("canceled", soEscreve), ["view_report", "duplicate", "delete"]);
   assert.deepEqual(acoes("draft", { canPublish: true, canPublishLarge: true, canWrite: false }), [], "sem messaging.write nada");
 });
 
-test("acoes do pop-up: no ar, agendado pela janela, encerrado pela janela, pausado e encerrado", () => {
-  const acoes = (extra, perms = todas) => campaign.availableNoticeActions(timing({ kind: "popup", ...extra }), now, perms);
+test("acoes da notificacao enviada: Editar acima de 500 alunos so com messaging.publish_large (o numero vem em extra)", () => {
+  const acoes = (perms, extra) => campaign.availableNoticeActions(timing({ status: "sent" }), now, perms, extra);
 
-  assert.deepEqual(acoes({ status: "active" }), ["edit", "pause", "end", "duplicate"]);
-  assert.deepEqual(acoes({ startsAt: iso(now + HOUR), status: "active" }), ["edit", "pause", "end", "duplicate"]);
-  assert.deepEqual(acoes({ endsAt: iso(now - HOUR), status: "active" }), ["duplicate", "delete"]);
-  assert.deepEqual(acoes({ status: "paused" }), ["edit", "resume", "end", "duplicate"]);
-  assert.deepEqual(acoes({ status: "ended" }), ["duplicate", "delete"]);
+  assert.deepEqual(acoes(publica, { recipients: 500 }), ["view_report", "edit", "duplicate", "withdraw", "delete"], "500 ainda e de quem publica");
+  assert.deepEqual(acoes(publica, { recipients: 501 }), ["view_report", "duplicate", "withdraw", "delete"], "501 sem publish_large: Editar nem aparece");
+  assert.deepEqual(acoes(todas, { recipients: 501 }), ["view_report", "edit", "duplicate", "withdraw", "delete"]);
+  assert.deepEqual(acoes(publica, {}), ["view_report", "edit", "duplicate", "withdraw", "delete"], "sem o numero: so messaging.publish (o servidor confere)");
+  assert.deepEqual(acoes(publica, { recipients: null }), ["view_report", "edit", "duplicate", "withdraw", "delete"]);
+  assert.deepEqual(acoes(soEscreve, { recipients: 10 }), ["view_report", "duplicate"]);
+  assert.ok(!acoes(todas, { popupRepeat: "once", recipients: 1 }).includes("reshow"), "mostrar de novo e so do pop-up");
 
-  // Editar o pop-up no ar muda o que o aluno ve agora: so quem pode publicar (o servidor confere os 500).
-  assert.deepEqual(acoes({ status: "active" }, soEscreve), ["duplicate"], "quem so escreve nao edita o pop-up no ar");
-  assert.deepEqual(acoes({ status: "paused" }, soEscreve), ["duplicate"]);
-  assert.deepEqual(acoes({ status: "active" }, { ...todas, canPublishLarge: false }), ["edit", "pause", "end", "duplicate"]);
+  assert.equal(campaign.noticeRecipients({ audience_count: 318, recipients_count: 320 }), 320);
+  assert.equal(campaign.noticeRecipients({ audience_count: 501, recipients_count: 12 }), 501, "o maior dos dois");
+  assert.equal(campaign.noticeRecipients({ audience_count: null, recipients_count: null }), 0);
+});
+
+test("acoes do pop-up: no ar, agendado pela janela, encerrado pela janela, pausado e encerrado (com Mostrar de novo so em 'Uma vez')", () => {
+  const acoes = (extra, perms = todas, more) => campaign.availableNoticeActions(timing({ kind: "popup", ...extra }), now, perms, more);
+  const umaVez = { popupRepeat: "once" };
+  const ateClicar = { popupRepeat: "until_action" };
+
+  assert.deepEqual(acoes({ status: "active" }), ["view_report", "edit", "pause", "duplicate", "end", "delete"], "sem extra: nada de Mostrar de novo");
+  assert.deepEqual(acoes({ status: "active" }, todas, umaVez), ["view_report", "edit", "pause", "reshow", "duplicate", "end", "delete"]);
+  assert.deepEqual(acoes({ status: "active" }, todas, ateClicar), ["view_report", "edit", "pause", "duplicate", "end", "delete"], "ate clicar: quem fechou ja volta em 24 h");
+  assert.deepEqual(acoes({ status: "active" }, publica, umaVez), ["view_report", "edit", "pause", "reshow", "duplicate", "end", "delete"], "os 500 o servidor confere");
+  assert.deepEqual(
+    acoes({ startsAt: iso(now + HOUR), status: "active" }, todas, umaVez),
+    ["view_report", "edit", "pause", "duplicate", "end", "delete"],
+    "janela ainda por comecar: ninguem viu"
+  );
+  assert.deepEqual(acoes({ endsAt: iso(now - HOUR), status: "active" }, todas, umaVez), ["view_report", "duplicate", "delete"], "janela terminou");
+  assert.deepEqual(acoes({ status: "paused" }), ["view_report", "edit", "resume", "duplicate", "end", "delete"]);
+  assert.deepEqual(acoes({ status: "paused" }, todas, umaVez), ["view_report", "edit", "resume", "reshow", "duplicate", "end", "delete"]);
+  assert.deepEqual(acoes({ status: "paused" }, todas, ateClicar), ["view_report", "edit", "resume", "duplicate", "end", "delete"]);
+  assert.deepEqual(acoes({ status: "ended" }, todas, umaVez), ["view_report", "duplicate", "delete"]);
+
+  // Editar, pausar, mostrar de novo, encerrar e excluir o pop-up no ar mudam o que o aluno ve: so quem publica.
+  assert.deepEqual(acoes({ status: "active" }, soEscreve, umaVez), ["view_report", "duplicate"], "quem so escreve nao mexe no pop-up no ar");
+  assert.deepEqual(acoes({ status: "paused" }, soEscreve, umaVez), ["view_report", "duplicate"]);
+  assert.deepEqual(acoes({ endsAt: iso(now - HOUR), status: "active" }, soEscreve), ["view_report", "duplicate", "delete"], "encerrado pela janela: quem escreve exclui");
+  assert.deepEqual(acoes({ status: "ended" }, soEscreve), ["view_report", "duplicate", "delete"]);
   assert.deepEqual(acoes({ status: "draft" }, soEscreve), ["edit", "publish", "duplicate", "delete"], "rascunho continua com quem escreve");
 
   assert.equal(campaign.isEditableStatus("popup", "active"), true);
+  assert.equal(campaign.isEditableStatus("popup", "paused"), true);
   assert.equal(campaign.isEditableStatus("popup", "ended"), false);
   assert.equal(campaign.isEditableStatus("inbox", "scheduled"), true);
-  assert.equal(campaign.isEditableStatus("inbox", "sent"), false);
+  assert.equal(campaign.isEditableStatus("inbox", "sent"), true, "v3a: a enviada muda o conteudo");
+  assert.equal(campaign.isEditableStatus("inbox", "sending"), false);
+  assert.equal(campaign.isEditableStatus("inbox", "canceled"), false);
   assert.equal(campaign.isEditableStatus("inbox", "pending_approval"), true);
+
+  assert.equal(campaign.isLiveNoticeStatus("popup", "active"), true);
+  assert.equal(campaign.isLiveNoticeStatus("popup", "paused"), true);
+  assert.equal(campaign.isLiveNoticeStatus("popup", "ended"), false);
+  assert.equal(campaign.isLiveNoticeStatus("inbox", "sent"), true);
+  for (const status of ["draft", "pending_approval", "scheduled", "sending", "canceled", null, undefined]) {
+    assert.equal(campaign.isLiveNoticeStatus("inbox", status), false, String(status));
+  }
 });
 
 test("aprovacao (docs/17 D4): ate 500 alunos publica quem pode publicar; 501 precisa de messaging.publish_large; sem messaging.publish sempre aprovacao", () => {
@@ -152,15 +200,18 @@ const entrega = (campaignId, extra = {}) => ({
   ...extra
 });
 const noAr = (id, extra = {}) => ({ allowSnooze: true, id, repeat: "once", startsAt: now - 10 * HOUR, ...extra });
-const escolhe = (input) => campaign.pickPopup({ deliveries: [], lastAnyPopupSeenAt: null, live: [], now, ...input });
+const escolhe = (input) => campaign.pickPopup({ deliveries: [], live: [], now, ...input });
 
-test("pop-up: no maximo 1 a cada 24 h; so com linha elegivel; o mais recente primeiro (empate pelo id)", () => {
+test("pop-up: sem limite entre pop-ups (docs/24 §10); so com linha elegivel; o mais recente primeiro (empate pelo id)", () => {
   const live = [noAr("a", { startsAt: now - 30 * HOUR }), noAr("c", { startsAt: now - HOUR }), noAr("b", { startsAt: now - HOUR })];
   const deliveries = [entrega("a"), entrega("b"), entrega("c")];
 
   assert.equal(escolhe({ deliveries, live }), "b", "c e b comecaram juntos: b antes pelo id");
-  assert.equal(escolhe({ deliveries, lastAnyPopupSeenAt: now - 23 * HOUR, live }), null, "viu um pop-up ha 23 h");
-  assert.equal(escolhe({ deliveries, lastAnyPopupSeenAt: now - 24 * HOUR, live }), "b");
+  assert.equal(
+    escolhe({ deliveries: [entrega("a"), entrega("b", { impressions: 1, lastSeenAt: now - HOUR }), entrega("c")], live }),
+    "c",
+    "viu outro pop-up ha 1 h: o proximo aparece mesmo assim"
+  );
   assert.equal(escolhe({ deliveries: [entrega("a")], live }), "a", "sem linha nao ha pop-up");
   assert.equal(escolhe({ deliveries: [entrega("a", { eligible: false })], live }), null, "saiu do segmento");
   assert.equal(escolhe({ deliveries, live: [] }), null);
@@ -198,11 +249,6 @@ test("pop-up 'Uma vez' com 'Lembrar depois': volta quando o lembrete vence; cada
   );
   assert.equal(escolhe({ deliveries: [visto({ impressions: 3, snoozeCount: 2, snoozedUntil: now - HOUR })], live }), null, "no maximo 2 lembretes");
   assert.equal(escolhe({ deliveries: [visto({})], live }), null, "fechou sem lembrar depois: nao volta");
-  assert.equal(
-    escolhe({ deliveries: [visto({ snoozeCount: 1, snoozedUntil: now - HOUR })], lastAnyPopupSeenAt: now - 2 * HOUR, live }),
-    null,
-    "o limite de 1 pop-up a cada 24 h continua valendo"
-  );
 });
 
 test("versao do editor: o mesmo instante em qualquer formato ISO, ate o microssegundo", () => {
@@ -239,6 +285,82 @@ test("eventos do pop-up: impressao conta e marca a primeira vez; clique e 'Não 
   assert.deepEqual(campaign.popupEventPatch(entrega("a"), "dismissed", input), { dismissed_at: iso(now) });
   assert.deepEqual(campaign.popupEventPatch(entrega("a", { dismissedAt: now - HOUR }), "dismissed", input), {});
   assert.deepEqual(campaign.popupEventPatch(entrega("a"), "closed", input), {});
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * v3a (docs/24 §2.4 e §4.9): "Mostrar de novo para quem já viu", so no pop-up "Uma vez"
+ * ---------------------------------------------------------------------------------------------- */
+
+// Como getEligiblePopup: o ultimo pop-up visto e o maior lastSeenAt das linhas do aluno (este incluido).
+const escolheComoNoServidor = ({ deliveries, live }) =>
+  campaign.pickPopup({
+    deliveries,
+    live,
+    now
+  });
+const zerado = (extra) => ({ ...extra, impressionsBeforeReshow: extra.impressions ?? 0, snoozesBeforeReshow: Math.min(extra.snoozeCount ?? 0, 1), snoozeCount: Math.min(extra.snoozeCount ?? 0, 1), snoozedUntil: null });
+
+test("mostrar de novo: 'Uma vez' visto ha 25 h nao volta; depois de zerado volta, ate visto ha 2 h (sem limite entre pop-ups)", () => {
+  const live = [noAr("a")];
+  const fechou25h = { impressions: 1, lastSeenAt: now - 25 * HOUR };
+
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", fechou25h)], live }), null, "uma vez: quem fechou nao ve de novo");
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado(fechou25h))], live }), "a", "zerado: conta como novo");
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ impressions: 1, lastSeenAt: now - 2 * HOUR }))], live }), "a", "zerado volta na hora (docs/24 §10)");
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { ...zerado(fechou25h), impressions: 2, lastSeenAt: now - 25 * HOUR })], live }), null, "viu de novo depois de zerado: some");
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ ...fechou25h, clickedAt: now - 25 * HOUR }))], live }), null, "clicou: nunca");
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", zerado({ ...fechou25h, dismissedAt: now - 25 * HOUR }))], live }), null, "Não mostrar de novo: nunca");
+});
+
+test("mostrar de novo: 'Até o aluno clicar' volta 24 h depois de ter visto este pop-up, sem zerar nada", () => {
+  const ateClicar = [noAr("a", { repeat: "until_action" })];
+
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { impressions: 1, lastSeenAt: now - 2 * HOUR })], live: ateClicar }), null);
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { impressions: 1, lastSeenAt: now - 25 * HOUR })], live: ateClicar }), "a");
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { clickedAt: now - 30 * HOUR, impressions: 1, lastSeenAt: now - 30 * HOUR })], live: ateClicar }), null);
+  assert.equal(escolheComoNoServidor({ deliveries: [entrega("a", { dismissedAt: now - 30 * HOUR, impressions: 1, lastSeenAt: now - 30 * HOUR })], live: ateClicar }), null);
+});
+
+test("mostrar de novo: 'Lembrar depois' conta desde o zerar (mais 2 vezes); sem zerar, a regra da v1 exatamente", () => {
+  const live = [noAr("a")];
+  // Zerado com um lembrete antes: snoozeCount 1 e a base 1.
+  const depoisDoZerar = (extra) => entrega("a", { impressions: 3, impressionsBeforeReshow: 3, lastSeenAt: now - 25 * HOUR, snoozeCount: 1, snoozesBeforeReshow: 1, ...extra });
+
+  assert.equal(escolheComoNoServidor({ deliveries: [depoisDoZerar({})], live }), "a");
+  assert.equal(escolheComoNoServidor({ deliveries: [depoisDoZerar({ impressions: 4 })], live }), null, "viu uma vez depois de zerado");
+  assert.equal(escolheComoNoServidor({ deliveries: [depoisDoZerar({ impressions: 4, snoozeCount: 2, snoozedUntil: now - HOUR })], live }), "a", "lembrou: mais uma vez");
+  assert.equal(campaign.canSnooze(depoisDoZerar({}), true), true);
+  assert.equal(campaign.canSnooze(depoisDoZerar({ snoozeCount: 2 }), true), true, "um lembrete desde o zerar");
+  assert.equal(campaign.canSnooze(depoisDoZerar({ snoozeCount: 3 }), true), false, "dois desde o zerar: acabou");
+  assert.equal(campaign.canSnooze(depoisDoZerar({}), false), false);
+  assert.deepEqual(campaign.popupEventPatch(depoisDoZerar({ snoozeCount: 2 }), "snoozed", { allowSnooze: true, now }), {
+    snooze_count: 3,
+    snoozed_until: iso(now + 24 * HOUR)
+  });
+  assert.equal(campaign.popupEventPatch(depoisDoZerar({ snoozeCount: 3 }), "snoozed", { allowSnooze: true, now }), null);
+
+  // Bases zeradas (a v1) = o mesmo resultado de sempre.
+  for (const extra of [{}, { impressions: 1 }, { impressions: 1, snoozeCount: 1 }, { impressions: 2, snoozeCount: 1 }, { impressions: 3, snoozeCount: 2 }]) {
+    const v1 = entrega("a", { lastSeenAt: extra.impressions ? now - 25 * HOUR : null, ...extra });
+    const v3 = { ...v1, impressionsBeforeReshow: 0, snoozesBeforeReshow: 0 };
+
+    assert.equal(campaign.pickPopup({ deliveries: [v3], live, now }), campaign.pickPopup({ deliveries: [v1], live, now }), JSON.stringify(extra));
+    assert.equal(campaign.canSnooze(v3, true), campaign.canSnooze(v1, true));
+  }
+});
+
+test("mostrar de novo: quem a RPC zera (no segmento, viu, nao clicou, nao dispensou e 'Uma vez' pularia)", () => {
+  const visto = (extra) => entrega("a", { impressions: 1, lastSeenAt: now - 25 * HOUR, ...extra });
+
+  assert.equal(campaign.reshowSkipped(visto({})), true, "viu e fechou");
+  assert.equal(campaign.reshowSkipped(visto({ impressions: 2, snoozeCount: 1 })), true, "viu de novo depois do lembrete");
+  assert.equal(campaign.reshowSkipped(visto({ eligible: false })), false, "saiu do segmento");
+  assert.equal(campaign.reshowSkipped(visto({ snoozeCount: 1, snoozedUntil: now + HOUR })), false, "viu uma vez e lembrou: 'Uma vez' ainda mostra");
+  assert.equal(campaign.reshowSkipped(visto({ clickedAt: now - HOUR })), false, "clicou");
+  assert.equal(campaign.reshowSkipped(visto({ dismissedAt: now - HOUR })), false, "Não mostrar de novo");
+  assert.equal(campaign.reshowSkipped(entrega("a")), false, "ainda nao viu");
+  assert.equal(campaign.reshowSkipped(visto({ impressionsBeforeReshow: 1 })), false, "ja zerado e ainda nao viu de novo");
+  assert.equal(campaign.reshowSkipped(visto({ impressions: 2, impressionsBeforeReshow: 1 })), true, "zerado e viu de novo");
 });
 
 test("'Lembrar depois': 24 h, ate 2 vezes, e so quando o aviso permite", () => {
@@ -349,6 +471,7 @@ const popup = (extra = {}) => ({ ...schemas.emptyNoticeDraft("popup"), title: "T
 
 test("rascunho vazio de cada tipo: todos os alunos, agora, sem janela, uma vez e com 'Lembrar depois'", () => {
   assert.deepEqual(schemas.emptyNoticeDraft("popup"), {
+    allowHide: true,
     allowSnooze: true,
     audience: { kind: "everyone" },
     audio: null,
@@ -357,6 +480,8 @@ test("rascunho vazio de cada tipo: todos os alunos, agora, sem janela, uma vez e
     icon: null,
     image: null,
     kind: "popup",
+    poll: null,
+    reactions: false,
     repeat: "once",
     response: null,
     schedule: { mode: "now" },
@@ -365,6 +490,8 @@ test("rascunho vazio de cada tipo: todos os alunos, agora, sem janela, uma vez e
     validity: { mode: "default" },
     window: { endsAt: null, startsAt: null }
   });
+  assert.equal(schemas.emptyNoticeDraft("inbox").reactions, true, "v3a: a notificacao nova ja permite reacoes");
+  assert.equal(schemas.emptyNoticeDraft("inbox").poll, null);
   assert.deepEqual(problemas(notificacao()), []);
   assert.deepEqual(problemas(popup()), []);
 });

@@ -1,18 +1,27 @@
 "use client";
 
-import { Hourglass, Info } from "lucide-react";
+import { ChartColumn, Hourglass, Info } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PRODUCT_FORMAT_LABELS, PRODUCT_SITUATION_LABELS } from "@/server/catalog/model";
 import { MemberFilterPills } from "@/components/member/ui/member-filters";
-import { previewNoticeAudience, publishNotice, saveNoticeDraft, saveNoticeFollowUps, sendFollowUpTestToMe, sendNoticeTestToMe } from "@/server/communications/actions";
+import {
+  previewNoticeAudience,
+  publishNotice,
+  reshowPopup,
+  saveNoticeDraft,
+  saveNoticeFollowUps,
+  sendFollowUpTestToMe,
+  sendNoticeTestToMe
+} from "@/server/communications/actions";
 import { describeAudience, normalizeAudience, type AudienceDefinition } from "@/server/communications/audience-model";
 import {
   APPROVAL_THRESHOLD,
   describeNoticeReview,
   formatSaoPauloDateTime,
+  situationOf,
   type CampaignKind,
   type CampaignStatus,
   type NoticePermissions
@@ -23,6 +32,7 @@ import type { NoticeDetail, NoticeEditorOptions } from "@/server/communications/
 import { audienceDefinitionSchema, emptyNoticeDraft, noticeDraftSchema, publishProblems, type NoticeDraft } from "@/server/communications/schemas";
 import { ErrorBanner } from "../error-banner";
 import { PillGroup } from "../form";
+import { AdminLinkButton } from "../link-button";
 import type { PreviewDevice } from "../member-area/preview-frame";
 import { AdminPage } from "../page-container";
 import { PageHeader } from "../page-header";
@@ -66,6 +76,7 @@ import {
   NOTHING_TO_SAVE_MESSAGE,
   NOTICES_HREF,
   PRIMARY_INTENT_LABELS,
+  SENT_NOTICE_COPY,
   audienceErrorsFrom,
   audienceMessageOptions,
   audienceNamesWithMessages,
@@ -73,6 +84,8 @@ import {
   isLivePopupStatus,
   isNoticeKindLocked,
   isSameNoticeDraft,
+  isSentNotice,
+  livePopupBanner,
   noticeDraftForKind,
   noticeErrorsFrom,
   noticeErrorsFromAction,
@@ -82,8 +95,15 @@ import {
   primaryIntentFor,
   publishedNoticeToast,
   rebaseNoticeDraft,
+  reshownPopupToast,
   savedNoticeToast,
+  sentNoticeAudienceNote,
+  sentNoticeBanner,
+  sentNoticeReview,
+  sentNoticeWhenNote,
+  showsReshowSwitch,
   testSentToast,
+  usesNoticeDestinationPage,
   type NoticeFieldErrors,
   type NoticeSenderChoice
 } from "./notices-view-model";
@@ -100,7 +120,12 @@ import {
 // - O botao principal salva e publica com a versao devolvida: "Enviar agora", "Agendar envio",
 //   "Publicar pop-up" ou "Enviar para aprovação" (publishDecision com a contagem ao vivo; o servidor
 //   decide de novo e conta outra vez).
-// - Pop-up no ar ou pausado: o botao principal so salva (continua no ar).
+// - Pop-up no ar ou pausado: o botao principal so salva (continua no ar). v3a: em "Uma vez", o switch
+//   "Mostrar de novo para quem já viu" (saveNoticeDraft com reshow; so o switch = reshowPopup).
+// - v3a, notificacao enviada (?editar=1, docs/24 §2.2): so o conteudo muda ("Salvar alterações" e volta para
+//   o relatorio); segmento, envio, tempo no sino, audio, ligar a resposta e a enquete ficam travados com o
+//   motivo, e as seguintes mudam no relatorio. "Permitir que o aluno exclua do sino" (ajustes da v3a) nao
+//   trava: muda tambem depois do envio.
 // - A contagem do segmento vem do servidor (previewNoticeAudience) 500 ms depois da ultima mudanca.
 // - Imagem: recorte WebP no navegador e envio logo depois (uploadNoticeImage). Audio: NoticeAudioField.
 
@@ -141,10 +166,19 @@ const FIELD_FOCUS: readonly [string, string][] = [
   ["audio", "#aviso-audio"],
   ["cta.label", "#aviso-botao-texto"],
   ["cta.href", "#aviso-botao-produto, [name='aviso-botao-pagina'], #aviso-botao-link"],
+  // v3a: como o aluno chega la, reacoes e enquete (notice-content-fields, notice-poll-field).
+  ["cta.display", "[name='aviso-botao-modo']"],
   ["cta", "#aviso-botao-mostrar"],
+  ["reactions", "#aviso-reacoes"],
+  // Ajustes da v3a: "Permitir que o aluno exclua do sino".
+  ["allowHide", "#aviso-excluir"],
   ["response.acceptLabel", "#aviso-aceitar"],
   ["response.declineLabel", "#aviso-recusar"],
   ["response", "#aviso-resposta"],
+  ["poll.question", "#aviso-enquete-pergunta"],
+  ["poll.options", "[id^='aviso-enquete-opcao-']"],
+  ["poll.closesAt", "#aviso-enquete-fim-data, [name='aviso-enquete-encerra']"],
+  ["poll", "#aviso-enquete"],
   ["audience", "[name='aviso-para-quem']"],
   ["schedule", "#aviso-envio-data"],
   ["validity.endsAt", "#aviso-validade-fim-data"],
@@ -152,6 +186,7 @@ const FIELD_FOCUS: readonly [string, string][] = [
   ["validity", "[name='aviso-validade']"],
   ["window.startsAt", "#aviso-inicio-data"],
   ["window", "#aviso-fim-data"],
+  ["reshow", "#aviso-mostrar-de-novo"],
   // v2: "Depois desta notificação" (o cartao recebe o foco; o campo com erro fica marcado nele).
   ["goal", "#aviso-seguintes-parar"],
   ["followUps", "#aviso-seguintes"]
@@ -270,6 +305,9 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const [testBusyId, setTestBusyId] = useState<string | null>(null);
   const [kindConfirm, setKindConfirm] = useState(false);
   const [previewTarget, setPreviewTarget] = useState<FollowUpPreviewChoice>("main");
+  // v3a: "Mostrar de novo para quem já viu" (pop-up no ar em "Uma vez"): desligado ao abrir, depois de cada
+  // salvar e sempre que "Quantas vezes" muda.
+  const [reshow, setReshow] = useState(false);
 
   if (initial && initial.updatedAt !== serverVersion) {
     setServerVersion(initial.updatedAt);
@@ -281,11 +319,14 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       setFailure(null);
       setServerErrors({});
       setResetKey((key) => key + 1);
+      setReshow(false);
     }
   }
 
   const status = savedVersion?.status ?? null;
   const livePopup = isLivePopupStatus(draft.kind, status);
+  // v3a: notificacao enviada (?editar=1): so o conteudo muda, para todos na hora.
+  const sentMode = isSentNotice(draft.kind, status);
   const kindLocked = isNoticeKindLocked(status);
   // v2: as seguintes so mudam aqui antes do envio (depois, no relatorio); arvore do construtor = so leitura.
   const followUpsMode = initial?.followUps?.mode ?? { kind: "edit" as const };
@@ -296,13 +337,18 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   );
   const followUpsKey = followUpsStateKey(followUps.items, followUps.stop, mainFollowUpParent);
   // Pop-up com fluxo gravado: salvar tira o fluxo (tambem o que so o construtor desenha).
+  // Notificacao enviada: as seguintes mudam no relatorio, nunca por este salvar.
   const followUpsDirty =
     draft.kind === "popup"
       ? flowVersion.flowId !== null
-      : followUpsEditable && (followUpsKey !== savedFollowUpsKey || (flowVersion.flowId === null && followUps.items.length > 0));
+      : !sentMode && followUpsEditable && (followUpsKey !== savedFollowUpsKey || (flowVersion.flowId === null && followUps.items.length > 0));
   const followUpsCount = followUps.items.length > 0 ? countFollowUps(followUps.items) : flowVersion.flowId ? (initial?.followUps?.count ?? 0) : 0;
   const dirty = !isSameNoticeDraft(saved, draft) || followUpsDirty;
   const uploading = imageUpload !== null || followUpUpload !== null;
+  // v3a: o "Mostrar de novo" so vale enquanto aparece (pop-up no ar em "Uma vez") e ha alguem para mostrar.
+  const reshowRequested = reshow && showsReshowSwitch({ kind: draft.kind, repeat: draft.repeat, status }) && initial?.reshowable !== 0;
+  // Quantos tem a notificacao enviada no sino agora (banner, revisao, "Para quem" e o toast).
+  const sentRecipients = initial ? initial.stats.recipients : null;
 
   // O fluxo do aviso mudou no servidor (outra tela, "Recarregar"): a versao segue o banco; sem mudanca
   // local, as seguintes tambem (com mudanca, o que o produtor escreveu fica e grava por cima).
@@ -353,7 +399,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
   // Contagem ao vivo do segmento (500 ms depois da ultima mudanca; resposta velha e ignorada).
   useEffect(() => {
-    if (!audienceValid) {
+    // Notificacao enviada: o segmento nao muda (so leitura), nada para contar.
+    if (!audienceValid || sentMode) {
       return;
     }
 
@@ -383,7 +430,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }, COUNT_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [audienceKey, audienceValid, countAttempt]);
+  }, [audienceKey, audienceValid, countAttempt, sentMode]);
 
   // Cmd/Ctrl+Enter salva o rascunho (o atalho le a versao mais nova da funcao).
   useEffect(() => {
@@ -490,6 +537,12 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     setDraft((current) => ({ ...current, ...patch }));
     clearServerErrors(Object.keys(patch));
 
+    // v3a: trocar "Quantas vezes" desliga o "Mostrar de novo" (e apaga o erro dele).
+    if ("repeat" in patch) {
+      setReshow(false);
+      clearServerErrors(["reshow"]);
+    }
+
     if (failure && failure.status !== 409) {
       setFailure(null);
     }
@@ -515,8 +568,11 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     window.requestAnimationFrame(() => bannerRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" }));
   }
 
-  /** Confere e grava o rascunho; devolve a versao gravada ou null (erro ja na tela). */
-  async function persist(extraErrors: NoticeFieldErrors = {}): Promise<SavedVersion | null> {
+  /**
+   * Confere e grava o rascunho; devolve a versao gravada ou null (erro ja na tela). v3a: `reshow` pede o
+   * "Mostrar de novo para quem já viu" junto (pop-up no ar em "Uma vez"); `reshown` = quantos voltam a ver.
+   */
+  async function persist(extraErrors: NoticeFieldErrors = {}, options: { reshow?: boolean } = {}): Promise<(SavedVersion & { reshown?: number }) | null> {
     if (uploading) {
       showFailure({ message: "Espere a imagem terminar de enviar e tente de novo.", status: 0 });
       return null;
@@ -540,7 +596,12 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     setFailure(null);
     setServerErrors({});
     const sent = payload;
-    const result = await saveNoticeDraft({ draft: sent, expectedUpdatedAt: savedVersion?.updatedAt, id: savedVersion?.id });
+    const result = await saveNoticeDraft({
+      draft: sent,
+      expectedUpdatedAt: savedVersion?.updatedAt,
+      id: savedVersion?.id,
+      ...(options.reshow ? { reshow: true } : {})
+    });
 
     if (!result.ok) {
       const fieldErrors = noticeErrorsFromAction(result.fieldErrors);
@@ -589,7 +650,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       setSavedFollowUpsKey(followUpsStateKey(followUps.items, followUps.stop, { ...mainFollowUpParent, nodeId: nextEntry }));
     }
 
-    return version;
+    return { ...version, reshown: result.data.reshown };
   }
 
   /**
@@ -605,13 +666,38 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }
   }
 
+  /** v3a: so o "Mostrar de novo" ligado, sem mudanca no pop-up: reshowPopup (o aviso nao muda). */
+  async function reshowOnly(version: SavedVersion) {
+    setBusy("save");
+    const result = await reshowPopup({ expectedUpdatedAt: version.updatedAt, id: version.id });
+    setBusy(null);
+
+    if (!result.ok) {
+      setServerErrors({});
+      showFailure({ message: result.error, status: result.status });
+      return;
+    }
+
+    setReshow(false);
+    adminToast.success(
+      result.data.reshown > 0 ? savedNoticeToast("popup", version.status, { repeat: saved.repeat, reshown: result.data.reshown }) : reshownPopupToast(0)
+    );
+  }
+
   async function saveDraft() {
     if (busy) {
       return;
     }
 
+    const idle = !uploading && !audioBusy;
+
+    if (savedVersion && !dirty && idle && reshowRequested) {
+      await reshowOnly(savedVersion);
+      return;
+    }
+
     // Nada mudou: gravar de novo cancelaria o agendamento ou o pedido de aprovacao sem motivo.
-    if (savedVersion && !dirty && !uploading && !audioBusy) {
+    if (savedVersion && !dirty && idle) {
       adminToast.info(NOTHING_TO_SAVE_MESSAGE);
       openSavedNotice(savedVersion.id);
       return;
@@ -619,11 +705,19 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
     const previousStatus = status;
     setBusy("save");
-    const version = await persist();
+    const version = await persist({}, { reshow: reshowRequested });
     setBusy(null);
 
     if (version) {
-      adminToast.success(savedNoticeToast(draft.kind, previousStatus));
+      setReshow(false);
+      adminToast.success(savedNoticeToast(draft.kind, previousStatus, { recipients: sentRecipients, repeat: payload.repeat, reshown: version.reshown }));
+
+      // Notificacao enviada: volta para o relatorio (os alunos ja veem a versao nova).
+      if (previousStatus === "sent" && draft.kind === "inbox") {
+        router.push(noticeHref(version.id));
+        return;
+      }
+
       openSavedNotice(version.id);
     }
   }
@@ -733,6 +827,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
   function discard() {
     setDraft(saved);
+    setReshow(false);
     setServerErrors({});
     setFailure(null);
     setSubmitted(false);
@@ -749,9 +844,13 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       ? {
           actions: initial.actions,
           audienceCount: initial.audienceCount,
+          // v3a: Excluir e Retirar do sino avisam das regras que citam a notificacao; o texto segue a situacao
+          // da versao salva (a janela que esta na tela ainda nao vale).
+          citations: initial.citations,
           id: savedVersion.id,
           kind: initial.kind,
           recipients: initial.stats.recipients,
+          situation: situationOf({ endsAt: saved.window.endsAt, kind: initial.kind, sendAt: null, startsAt: saved.window.startsAt, status: savedVersion.status }, now),
           status: savedVersion.status,
           title: initial.title,
           updatedAt: savedVersion.updatedAt
@@ -760,13 +859,35 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const noticeActions = useNoticeActions({ onDeleted: () => router.push(NOTICES_HREF) });
   const conflict = failure?.status === 409;
   const previewImage = imageUpload ?? draft.image?.url ?? null;
-  const primaryLabel = livePopup ? "Salvar alterações" : PRIMARY_INTENT_LABELS[intent];
+  // Pop-up no ar e notificacao enviada: o botao principal so salva (o que os alunos ja veem muda na hora).
+  const savesInPlace = livePopup || sentMode;
+  const primaryLabel = savesInPlace ? SENT_NOTICE_COPY.save : PRIMARY_INTENT_LABELS[intent];
+  // As seguintes que olham "a página para onde a notificação leva" passam a olhar o destino novo.
+  const destinationChanged = sentMode && (draft.cta?.href ?? null) !== (saved.cta?.href ?? null);
+  const followUpsWatchDestination = useMemo(() => {
+    if (!sentMode || followUps.items.length === 0) {
+      return false;
+    }
+
+    const rules: AudienceDefinition[] = [];
+    const collect = (drafts: ReturnType<typeof followUpsToSave>) =>
+      drafts.forEach((item) => {
+        rules.push(item.who);
+        collect(item.children);
+      });
+
+    collect(followUpsToSave("inbox", followUps.items, mainFollowUpParent));
+
+    return usesNoticeDestinationPage(rules, entryId);
+  }, [entryId, followUps.items, mainFollowUpParent, sentMode]);
   const working = (label: string, key: Exclude<Busy, null>) => (busy === key ? (key === "publish" ? "Publicando…" : key === "test" ? "Enviando teste…" : "Salvando…") : label);
 
   let previewStatus: string;
 
-  if (dirty) {
-    previewStatus = livePopup ? "Mudanças não salvas: os alunos ainda veem a versão anterior." : "Rascunho: os alunos só veem depois de publicar.";
+  if (sentMode) {
+    previewStatus = dirty ? SENT_NOTICE_COPY.previewDirty : SENT_NOTICE_COPY.previewClean;
+  } else if (dirty) {
+    previewStatus = livePopup ? SENT_NOTICE_COPY.previewDirty : "Rascunho: os alunos só veem depois de publicar.";
   } else if (livePopup) {
     previewStatus = status === "paused" ? "Pausado: os alunos não veem até retomar." : "É o que os alunos veem agora.";
   } else if (status === "scheduled") {
@@ -779,9 +900,20 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     <AdminPage className="gap-6 pb-28">
       <PageHeader
         actions={
-          actionTarget ? <NoticeRowMenu exclude={["edit", "send_test", "approve", "reject"]} notice={actionTarget} onRequest={noticeActions.request} /> : null
+          actionTarget ? (
+            <>
+              {/* v3a: a notificacao enviada tem o relatorio a um clique (o menu nao repete "Ver relatório"). */}
+              {sentMode ? (
+                <AdminLinkButton href={noticeHref(actionTarget.id)} variant="secondary">
+                  <ChartColumn aria-hidden="true" className="size-4" />
+                  {SENT_NOTICE_COPY.viewReport}
+                </AdminLinkButton>
+              ) : null}
+              <NoticeRowMenu exclude={["edit", "view_report", "send_test", "approve", "reject"]} notice={actionTarget} onRequest={noticeActions.request} />
+            </>
+          ) : null
         }
-        breadcrumb={[{ href: NOTICES_HREF, label: "Avisos e pop-ups" }, { label: initial ? "Editar aviso" : "Novo aviso" }]}
+        breadcrumb={[{ href: NOTICES_HREF, label: "Avisos e pop-ups" }, { label: initial ? (sentMode ? SENT_NOTICE_COPY.title : "Editar aviso") : "Novo aviso" }]}
         description={
           initial ? (
             <span className="flex flex-wrap items-center gap-2">
@@ -792,7 +924,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             "Uma notificação no sino ou um pop-up na home, para um segmento."
           )
         }
-        title={initial ? initial.title : "Novo aviso"}
+        title={initial ? (sentMode ? SENT_NOTICE_COPY.title : initial.title) : "Novo aviso"}
       />
 
       {noticeActions.errorBanner}
@@ -834,12 +966,11 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             </Note>
           ) : null}
 
-          {livePopup ? (
-            <Note icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>
-              {status === "paused"
-                ? "Este pop-up está pausado. As mudanças valem quando ele voltar ao ar."
-                : "Este pop-up está no ar. As mudanças valem assim que você salvar; quem já fechou não vê de novo."}
-            </Note>
+          {livePopup ? <Note icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>{livePopupBanner(status)}</Note> : null}
+
+          {sentMode ? <Note icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>{sentNoticeBanner(sentRecipients)}</Note> : null}
+          {destinationChanged && followUpsWatchDestination ? (
+            <Note icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>{SENT_NOTICE_COPY.destinationNote}</Note>
           ) : null}
 
           {failure ? (
@@ -899,6 +1030,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             disabled={locked}
             errorFor={errorFor}
             kind={draft.kind}
+            // v3a: na notificacao enviada, audio, enquete e ligar a resposta ficam travados com o motivo.
+            lockedFields={sentMode ? SENT_NOTICE_COPY.locked : undefined}
             leading={
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Tipo</span>
@@ -931,50 +1064,83 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
           />
 
           <SectionCard description="Todos os alunos ou só quem combina com as regras." title="Para quem">
-            <div className="flex min-w-0 flex-col gap-4">
-              <AudienceBuilder
-                cohorts={options.cohorts}
-                disabled={locked}
-                errors={audienceErrors}
-                notices={options.notices}
-                onChange={(audience) => change({ audience })}
-                products={pickerItems}
-                productsLoaded={options.productsLoaded}
-                segments={options.segments}
-                value={draft.audience}
-              />
-              <AudienceCount description={audienceDescription} needsApproval={needsApproval} onRetry={() => setCountAttempt((attempt) => attempt + 1)} state={countView} />
-            </div>
+            {sentMode ? (
+              // v3a: o segmento nao muda depois do envio (so leitura).
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <p className="text-sm leading-6 text-[var(--text-primary)]">{audienceDescription}</p>
+                <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{sentNoticeAudienceNote(sentRecipients)}</p>
+              </div>
+            ) : (
+              <div className="flex min-w-0 flex-col gap-4">
+                <AudienceBuilder
+                  cohorts={options.cohorts}
+                  disabled={locked}
+                  errors={audienceErrors}
+                  notices={options.notices}
+                  onChange={(audience) => change({ audience })}
+                  products={pickerItems}
+                  productsLoaded={options.productsLoaded}
+                  segments={options.segments}
+                  value={draft.audience}
+                />
+                <AudienceCount description={audienceDescription} needsApproval={needsApproval} onRetry={() => setCountAttempt((attempt) => attempt + 1)} state={countView} />
+              </div>
+            )}
           </SectionCard>
 
           <SectionCard
             description={draft.kind === "inbox" ? "Agora ou numa data e hora, e quanto tempo fica no sino." : "A janela em que o pop-up aparece e quantas vezes."}
             title="Quando"
           >
-            <div className="flex min-w-0 flex-col gap-6">
-              <NoticeWhenFields
-                disabled={locked}
-                key={resetKey}
-                draft={draft}
-                errors={{ endsAt: errorFor("window.endsAt"), sendAt: errorFor("schedule.sendAt"), startsAt: errorFor("window.startsAt") }}
-                onChange={(patch) => change(patch)}
-              />
-              {draft.kind === "inbox" ? (
-                <NoticeValidityField
+            {sentMode ? (
+              // v3a: o envio e o tempo no sino nao mudam depois do envio (so leitura).
+              <p className="text-sm leading-6 text-[var(--text-primary)]">
+                {sentNoticeWhenNote({ sentAt: initial?.sentAt ?? null, validityLabel: describeValidity(saved.validity) })}
+              </p>
+            ) : (
+              <div className="flex min-w-0 flex-col gap-6">
+                <NoticeWhenFields
                   disabled={locked}
-                  errors={{ endsAt: errorFor("validity.endsAt"), minutes: errorFor("validity.minutes"), validity: errorFor("validity") }}
-                  idPrefix="aviso-validade"
-                  key={`validade-${resetKey}`}
-                  // O aviso nunca tem "Até a notificação principal sumir" (sem anchorLabel).
-                  onChange={(validity) => change({ validity: validity as Validity })}
-                  sendAt={sendAtTime}
-                  value={draft.validity}
+                  key={resetKey}
+                  draft={draft}
+                  errors={{ endsAt: errorFor("window.endsAt"), reshow: errorFor("reshow"), sendAt: errorFor("schedule.sendAt"), startsAt: errorFor("window.startsAt") }}
+                  // v3a: no pop-up no ar, "Mostrar de novo para quem já viu" e a dica de "Quantas vezes".
+                  live={
+                    livePopup && status
+                      ? { onReshowChange: setReshow, reshow, reshowable: initial?.reshowable ?? null, savedRepeat: saved.repeat, status }
+                      : null
+                  }
+                  onChange={(patch) => change(patch)}
                 />
-              ) : null}
-            </div>
+                {draft.kind === "inbox" ? (
+                  <NoticeValidityField
+                    disabled={locked}
+                    errors={{ endsAt: errorFor("validity.endsAt"), minutes: errorFor("validity.minutes"), validity: errorFor("validity") }}
+                    idPrefix="aviso-validade"
+                    key={`validade-${resetKey}`}
+                    // O aviso nunca tem "Até a notificação principal sumir" (sem anchorLabel).
+                    onChange={(validity) => change({ validity: validity as Validity })}
+                    sendAt={sendAtTime}
+                    value={draft.validity}
+                  />
+                ) : null}
+              </div>
+            )}
           </SectionCard>
 
-          {draft.kind === "inbox" ? (
+          {/* v3a: depois do envio, as seguintes mudam no relatorio. */}
+          {sentMode && savedVersion ? (
+            <SectionCard title={FOLLOW_UPS_COPY.title}>
+              <div className="flex min-w-0 flex-col items-start gap-3">
+                <p className="text-sm leading-6 text-[var(--text-secondary)]">{SENT_NOTICE_COPY.followUps}</p>
+                <AdminLinkButton href={noticeHref(savedVersion.id)} variant="secondary">
+                  {SENT_NOTICE_COPY.followUpsLink}
+                </AdminLinkButton>
+              </div>
+            </SectionCard>
+          ) : null}
+
+          {draft.kind === "inbox" && !sentMode ? (
             <NoticeFollowUps
               actions={flowVersion.flowId ? <ViewAsFlowLink flowId={flowVersion.flowId} /> : undefined}
               contentErrorOf={(path) => followUpErrorAt(shownFollowUpErrors, `${path}.content`)}
@@ -1016,9 +1182,13 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
           <SectionCard title="Revisão">
             <div className="flex min-w-0 flex-col gap-4">
               <p aria-live="polite" className="text-sm leading-6 text-[var(--text-primary)]">
-                {livePopup ? `${reviewSentence} Já publicado: salvar mantém no ar.` : reviewSentence}
+                {sentMode
+                  ? sentNoticeReview({ recipients: sentRecipients, sentAt: initial?.sentAt ?? null })
+                  : livePopup
+                    ? `${reviewSentence} Já publicado: salvar mantém no ar.`
+                    : reviewSentence}
               </p>
-              {intent === "approval" && !livePopup ? (
+              {intent === "approval" && !savesInPlace ? (
                 <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
                   {permissions.canPublish
                     ? "Acima de 500 alunos, um dono ou administrador aprova antes de sair."
@@ -1026,10 +1196,10 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                 </p>
               ) : null}
               <div className="flex flex-wrap items-center gap-2">
-                <Button className="px-4" disabled={locked} onClick={() => void (livePopup ? saveDraft() : publish())} type="button">
-                  {livePopup ? working(primaryLabel, "save") : working(primaryLabel, "publish")}
+                <Button className="px-4" disabled={locked} onClick={() => void (savesInPlace ? saveDraft() : publish())} type="button">
+                  {savesInPlace ? working(primaryLabel, "save") : working(primaryLabel, "publish")}
                 </Button>
-                {livePopup ? (
+                {savesInPlace ? (
                   dirty ? (
                     <Button className="px-4" disabled={locked} onClick={discard} type="button" variant="secondary">
                       Descartar mudanças
@@ -1040,15 +1210,21 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                     {working("Salvar rascunho", "save")}
                   </Button>
                 )}
-                {draft.kind === "inbox" && !livePopup ? (
+                {draft.kind === "inbox" && !savesInPlace ? (
                   <Button className="px-4" disabled={locked} onClick={() => void sendTest()} type="button" variant="secondary">
                     {working("Enviar teste para mim", "test")}
                   </Button>
                 ) : null}
               </div>
               <p className="text-xs leading-5 text-[var(--text-tertiary)]">
-                {draft.kind === "inbox" && !livePopup ? "O teste chega só no seu sino e não conta nos números. " : ""}
-                Ctrl+Enter (⌘+Enter no Mac) salva {livePopup ? "as alterações" : "o rascunho"}.
+                {savesInPlace ? (
+                  SENT_NOTICE_COPY.saveHint
+                ) : (
+                  <>
+                    {draft.kind === "inbox" ? "O teste chega só no seu sino e não conta nos números. " : ""}
+                    Ctrl+Enter (⌘+Enter no Mac) salva o rascunho.
+                  </>
+                )}
               </p>
             </div>
           </SectionCard>

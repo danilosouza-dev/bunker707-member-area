@@ -12,8 +12,8 @@ import { NoticeAudioPlayer } from "./notice-audio-player";
 import { NoticeTitleIcon } from "./notice-icons";
 import { resolveNotificationLink, type NotificationLink } from "./notifications-model";
 
-// Pop-up da home do aluno (docs/22 §1.3; limites fixos em docs/17 §1.8.1): so na home (nunca na aula),
-// no maximo um por sessao do navegador e um a cada 24 h (o servidor escolhe qual e quando), 3 s depois
+// Pop-up da home do aluno (docs/22 §1.3; docs/24 §10): so na home (nunca na aula), um de cada vez e sem
+// limite entre pop-ups (cada um segue a sua regra; o servidor escolhe qual e quando), 3 s depois
 // de abrir a pagina e so quando nada mais esta aberto por cima e a aba esta visivel. "Lembrar depois"
 // (24 h, ate 2 vezes, se o aviso permitir), "Não mostrar de novo" e fechar (X, Esc ou fora).
 //

@@ -156,7 +156,6 @@ test("titulo de comentario separa o nome (negrito) do resto; texto longo comeca 
   assert.deepEqual(model.splitActorTitle("Alguém mencionou você", null), { actor: null, rest: "Alguém mencionou você" });
   assert.equal(model.shouldClampNotificationBody("a".repeat(180)), false);
   assert.equal(model.shouldClampNotificationBody("a".repeat(181)), true);
-  assert.equal(model.POPUP_SESSION_KEY, "bunker707:popup-shown");
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -375,4 +374,303 @@ test("avisos mostrados ha menos de 15 s vao em shown (ate 50); comentarios e os 
 
   const muitas = Array.from({ length: 70 }, (_, index) => ({ createdAt: asOf, id: `n${index}`, kind: "notice" }));
   assert.equal(model.recentFlowIds(muitas, asOf).length, 50);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * v3a (docs/24): cartao clicavel, lixeira, reacoes, enquete, Mudar resposta e o plano de cada abertura
+ * ---------------------------------------------------------------------------------------------- */
+
+const aviso = (cta, extra = {}) => ({ cta, href: null, kind: "notice", reactions: null, title: "Aula nova", ...extra });
+const destino = (display) => ({ ...(display ? { display } : {}), href: "/minhas-compras", label: "Ver a aula nova", target: "same_tab" });
+
+test("cartao clicavel: pelo botao (tambem sem display, a v2), pelo botao ou tocando, e so tocando com o texto ao lado da seta", () => {
+  const link = { href: "/minhas-compras", internal: true, newTab: false };
+
+  for (const cta of [destino(undefined), destino("button")]) {
+    assert.deepEqual(model.cardLinkOf(aviso(cta), { cueId: "seta" }), {
+      accessibleLink: "button",
+      button: true,
+      cue: null,
+      describedBy: null,
+      display: "button",
+      link,
+      wholeCard: false
+    });
+  }
+
+  assert.deepEqual(model.cardLinkOf(aviso(destino("button_and_card")), { cueId: "seta" }), {
+    accessibleLink: "button",
+    button: true,
+    cue: null,
+    describedBy: null,
+    display: "button_and_card",
+    link,
+    wholeCard: true
+  });
+
+  assert.deepEqual(model.cardLinkOf(aviso(destino("card")), { cueId: "seta" }), {
+    accessibleLink: "title",
+    button: false,
+    cue: "Ver a aula nova",
+    describedBy: "seta",
+    display: "card",
+    link,
+    wholeCard: true
+  });
+
+  // Site de fora em nova aba e o modo "ver como" do produtor nos caminhos internos.
+  assert.equal(model.cardLinkOf(aviso({ ...destino("card"), href: "https://ao-vivo.bunker707.test/live", target: "new_tab" })).link.newTab, true);
+  assert.equal(model.cardLinkOf(aviso(destino("card")), { accessPreviewMode: "student_with_access" }).link.href, "/minhas-compras?accessPreview=student_with_access");
+  // Valor desconhecido vira "button".
+  assert.equal(model.cardLinkOf(aviso(destino("banner"))).display, "button");
+
+  const semDestino = { accessibleLink: null, button: false, cue: null, describedBy: null, display: "button", link: null, wholeCard: false };
+  assert.deepEqual(model.cardLinkOf(aviso(null)), semDestino);
+  assert.deepEqual(model.cardLinkOf(aviso({ ...destino("card"), href: "javascript:alert(1)" })), semDestino, "destino que nao vale nao vira link nem cartao clicavel");
+  assert.deepEqual(model.cardLinkOf(aviso({ ...destino("card"), label: "  " })), semDestino);
+});
+
+test("comentario: o cartao inteiro leva para a aula e o link de verdade e a frase", () => {
+  const comentario = { cta: null, href: "/conteudo/abc/aulas/m1?lessonId=l1", kind: "comment_reply", title: "Ana Souza respondeu seu comentário" };
+
+  assert.deepEqual(model.cardLinkOf(comentario), {
+    accessibleLink: "title",
+    button: false,
+    cue: null,
+    describedBy: null,
+    display: "card",
+    link: { href: "/conteudo/abc/aulas/m1?lessonId=l1", internal: true, newTab: false },
+    wholeCard: true
+  });
+  assert.equal(model.cardLinkOf({ ...comentario, href: null }).wholeCard, false);
+  assert.equal(model.cardLinkOf({ ...comentario, href: null }).accessibleLink, null);
+});
+
+test("nomes da lixeira e das reacoes levam o titulo (ou a frase do comentario)", () => {
+  assert.deepEqual(model.cardActionLabels(aviso(null, { reactions: { value: null } })), {
+    hide: "Excluir notificação “Aula nova”",
+    react: "Reagir à notificação “Aula nova”",
+    reaction: null
+  });
+  assert.equal(model.cardActionLabels(aviso(null, { reactions: { value: "love" } })).reaction, "Sua reação a “Aula nova”: Amei. Mudar reação");
+  assert.equal(model.cardActionLabels(aviso(null, { title: "  Aula nova " })).hide, "Excluir notificação “Aula nova”");
+  assert.equal(
+    model.cardActionLabels({ reactions: null, title: "Ana Souza respondeu seu comentário" }).hide,
+    "Excluir notificação “Ana Souza respondeu seu comentário”"
+  );
+});
+
+test("reacao: escolher poe ou troca; escolher a mesma tira; a frase do status", () => {
+  assert.equal(model.nextReaction(null, "love"), "love");
+  assert.equal(model.nextReaction(undefined, "like"), "like");
+  assert.equal(model.nextReaction("love", "like"), "like");
+  assert.equal(model.nextReaction("love", "love"), null);
+  assert.equal(model.reactionStatus("love"), "Você reagiu com Amei.");
+  assert.equal(model.reactionStatus("wow"), "Você reagiu com Uau.");
+  assert.equal(model.reactionStatus(null), "Reação retirada.");
+});
+
+const enquete = (extra = {}) => ({
+  choice: [],
+  closed: false,
+  closesAt: null,
+  multiple: false,
+  options: [
+    { id: "sim", label: "Sim" },
+    { id: "nao", label: "Não" }
+  ],
+  question: "Vem para a live?",
+  results: null,
+  showResults: true,
+  ...extra
+});
+
+test("enquete: cada linha de baixo de docs/24 §1.6 e os nomes com porcentagem e votos", () => {
+  assert.equal(model.pollView(enquete()).footer, "Escolha uma opção.");
+  assert.equal(model.pollView(enquete({ multiple: true })).footer, "Escolha uma ou mais opções.");
+  assert.equal(
+    model.pollView(enquete({ choice: ["sim"] })).footer,
+    "Seu voto foi registrado. Toque em outra opção para mudar, ou na sua para tirar o voto.",
+    "votou, sem resultado (a equipe desligou)"
+  );
+  assert.equal(model.pollView(enquete({ choice: ["sim"], multiple: true })).footer, "Seu voto foi registrado. Toque para marcar ou desmarcar.");
+
+  const votou = enquete({ choice: ["sim"], results: { counts: { nao: 74, sim: 54 }, voters: 128 } });
+  const view = model.pollView(votou);
+  assert.equal(view.footer, "Seu voto foi registrado. Toque em outra opção para mudar, ou na sua para tirar o voto. 128 votos");
+  assert.equal(view.resultsVisible, true);
+  assert.deepEqual(
+    view.options.map((option) => [option.id, option.chosen, option.percent, option.name]),
+    [
+      ["sim", true, 42, "Sim, 42%, 54 votos"],
+      ["nao", false, 58, "Não, 58%, 74 votos"]
+    ]
+  );
+
+  // Fim marcado (Sao Paulo: 21:00 UTC = 18:00).
+  assert.equal(
+    model.pollView({ ...votou, closesAt: "2026-10-25T21:00:00.000Z" }).footer,
+    "Seu voto foi registrado. Toque em outra opção para mudar, ou na sua para tirar o voto. 128 votos · Encerra em 25/10 às 18:00"
+  );
+  assert.equal(model.pollView(enquete({ closesAt: "2026-10-25T21:00:00.000Z" })).footer, "Escolha uma opção. Encerra em 25/10 às 18:00");
+  // Varias respostas: as porcentagens somam mais de 100%.
+  assert.equal(
+    model.pollView({ ...votou, multiple: true, results: { counts: { nao: 1, sim: 1 }, voters: 1 } }).footer,
+    "Seu voto foi registrado. Toque para marcar ou desmarcar. 1 voto · Cada pessoa pode marcar mais de uma"
+  );
+
+  // Um voto so: singular.
+  const sozinho = model.pollView(enquete({ choice: ["sim"], results: { counts: { nao: 0, sim: 1 }, voters: 1 } }));
+  assert.deepEqual(
+    sozinho.options.map((option) => option.name),
+    ["Sim, 100%, 1 voto", "Não, 0%, 0 votos"]
+  );
+
+  // Encerrada: com e sem resultado; a escolha continua marcada.
+  assert.equal(model.pollView({ ...votou, closed: true }).footer, "Enquete encerrada · 128 votos");
+  assert.equal(model.pollView(enquete({ choice: ["nao"], closed: true })).footer, "Enquete encerrada.");
+  assert.equal(model.pollView(enquete({ choice: ["nao"], closed: true })).options[1].chosen, true);
+  assert.equal(model.pollView(enquete()).options[0].name, "Sim", "sem resultado o nome e so a opcao");
+  assert.equal(model.pollView(enquete()).options[0].percent, null);
+  assert.equal(model.pollVotesLabel(1200), "1.200 votos");
+});
+
+test("enquete: o toque vota, troca ou tira (uma resposta) e marca ou desmarca (varias); o voto otimista move os numeros", () => {
+  assert.deepEqual(model.pollPressChoice(enquete(), "sim"), ["sim"]);
+  assert.deepEqual(model.pollPressChoice(enquete({ choice: ["sim"] }), "nao"), ["nao"]);
+  assert.deepEqual(model.pollPressChoice(enquete({ choice: ["sim"] }), "sim"), [], "a escolhida tira o voto");
+  assert.deepEqual(model.pollPressChoice(enquete({ multiple: true, choice: ["sim"] }), "nao"), ["nao", "sim"]);
+  assert.deepEqual(model.pollPressChoice(enquete({ multiple: true, choice: ["nao", "sim"] }), "sim"), ["nao"]);
+  assert.equal(model.samePollChoice(["sim", "nao"], ["nao", "sim"]), true);
+  assert.equal(model.samePollChoice(["sim"], []), false);
+
+  const votou = enquete({ choice: ["sim"], results: { counts: { nao: 3, sim: 5 }, voters: 8 } });
+  assert.deepEqual(model.applyPollChoice(votou, ["nao"]).results, { counts: { nao: 4, sim: 4 }, voters: 8 }, "trocou: o voto muda de lugar");
+  assert.equal(model.applyPollChoice(votou, []).results, null, "tirou o voto numa enquete aberta: sem resultado");
+  assert.deepEqual(model.applyPollChoice(votou, []).choice, []);
+  assert.deepEqual(model.applyPollChoice(enquete(), ["sim"]), enquete({ choice: ["sim"] }), "primeiro voto: o resultado vem do servidor");
+  assert.deepEqual(model.applyPollChoice(votou, ["sim", "outra"]).choice, ["sim"], "id que a enquete nao tem nao entra");
+  assert.deepEqual(
+    model.applyPollChoice({ ...votou, closed: true }, []).results,
+    { counts: { nao: 3, sim: 4 }, voters: 7 },
+    "encerrada mostra o resultado a todos"
+  );
+});
+
+test("Mudar resposta: respondida mostra a frase; mudando, a mesma resposta fecha sem pedido e a outra manda", () => {
+  assert.equal(model.responseStage(null, false), "ask");
+  assert.equal(model.responseStage(null, true), "ask");
+  assert.equal(model.responseStage("accepted", false), "answered");
+  assert.equal(model.responseStage("accepted", true), "changing");
+  assert.equal(model.responsePress("accepted", "accepted"), "keep");
+  assert.equal(model.responsePress("accepted", "declined"), "send");
+  assert.equal(model.responsePress(null, "accepted"), "send");
+  assert.equal(model.responseAnswerLabel("accepted"), "Você aceitou");
+  assert.equal(model.responseAnswerLabel("declined"), "Você recusou");
+});
+
+test("frases das escritas do aluno", () => {
+  assert.equal(model.TOO_MANY_WRITES_MESSAGE, "Muitas tentativas. Espere um pouco.");
+  assert.equal(model.HIDE_ERROR_MESSAGE, "Não foi possível excluir. Tente de novo.");
+  assert.equal(model.UNHIDE_ERROR_MESSAGE, "Não foi possível desfazer. Tente de novo.");
+  assert.equal(model.REACTION_ERROR_MESSAGE, "Não foi possível reagir. Tente de novo.");
+  assert.equal(model.VOTE_ERROR_MESSAGE, "Não foi possível registrar seu voto. Tente de novo.");
+  assert.equal(model.POLL_CLOSED_MESSAGE, "A enquete foi encerrada.");
+  assert.equal(model.HIDDEN_STATUS, "Notificação excluída.");
+  assert.equal(model.RESTORED_STATUS, "A notificação voltou para o sino.");
+  assert.equal(model.REFRESH_FAILED_MESSAGE, "Não foi possível atualizar. Estas são as notificações de antes.");
+});
+
+test("cada abertura: guardada ha menos de 5 s abre como esta; ate 10 min abre e atualiza; mais velha ou nada, esqueleto", () => {
+  assert.equal(model.INBOX_REUSE_MS, 5_000);
+  assert.equal(model.INBOX_KEEP_MS, 600_000);
+  assert.equal(model.INBOX_PREFETCH_DWELL_MS, 120);
+  assert.equal(model.INBOX_INTENT_STALE_MS, 60_000);
+  assert.equal(model.INBOX_CLOSE_QUIET_MS, 1_000);
+
+  const reusar = { fetch: false, render: "kept", seen: "now" };
+  const atualizar = { fetch: true, render: "kept", seen: "after_fetch" };
+  const esqueleto = { fetch: true, render: "skeleton", seen: "after_fetch" };
+
+  assert.deepEqual(model.openingPlan(now - 4_999, now), reusar);
+  assert.deepEqual(model.openingPlan(now, now), reusar);
+  assert.deepEqual(model.openingPlan(now - 5_000, now), atualizar);
+  assert.deepEqual(model.openingPlan(now - 600_000, now), atualizar);
+  assert.deepEqual(model.openingPlan(now - 600_001, now), esqueleto);
+  assert.deepEqual(model.openingPlan(null, now), esqueleto);
+  assert.deepEqual(model.openingPlan(now + 30_000, now), atualizar, "relogio voltou: mostra e atualiza");
+});
+
+test("pagina atualizada por tras: o que o aluno mexeu fica, as excluidas continuam no lugar", () => {
+  const item = (id, createdAt, extra = {}) => ({ createdAt, id, readAt: null, ...extra });
+  const local = [
+    item("c", "2026-10-20T14:00:00.000Z", { readAt: "agora" }),
+    item("b", "2026-10-20T13:00:00.000Z"),
+    item("a", "2026-10-20T12:00:00.000Z")
+  ];
+  const fresh = [item("d", "2026-10-20T14:30:00.000Z"), item("c", "2026-10-20T14:00:00.000Z"), item("a", "2026-10-20T12:00:00.000Z", { readAt: "servidor" })];
+
+  const merged = model.mergeRefreshedPage(fresh, local, { excludedIds: new Set(["b"]), touchedIds: new Set(["c", "b"]) });
+  assert.deepEqual(merged.map((entry) => entry.id), ["d", "c", "b", "a"]);
+  assert.equal(merged[1].readAt, "agora", "mexido nesta abertura: fica o da tela");
+  assert.equal(merged[3].readAt, "servidor", "nao mexido: vale o do servidor");
+  assert.deepEqual(model.mergeRefreshedPage(fresh, local, { excludedIds: new Set(), touchedIds: new Set() }), fresh);
+});
+
+test("escritas do cartao: uma em andamento; toques na espera trocam o que vai depois; voltar ao do servidor nao manda", async () => {
+  const fila = model.createWriteQueue();
+  const enviados = [];
+  const resultados = [];
+  let liberar = [];
+  const send = (value) =>
+    new Promise((resolve, reject) => {
+      enviados.push(value);
+      liberar.push({ reject, resolve: () => resolve(value) });
+    });
+  const options = (confirmed) => ({ confirmed, equal: (a, b) => a === b, send, settle: (outcome) => resultados.push(outcome) });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  fila.push("reacao:1", "love", options(null));
+  fila.push("reacao:1", "like", options(null));
+  fila.push("reacao:1", "fire", options(null));
+  assert.deepEqual(enviados, ["love"], "uma escrita por vez");
+  assert.equal(fila.busy("reacao:1"), true);
+
+  liberar.shift().resolve();
+  await tick();
+  assert.deepEqual(enviados, ["love", "fire"], "sai o ultimo estado");
+  liberar.shift().resolve();
+  await tick();
+  assert.deepEqual(resultados, [{ error: null, failed: false, value: "fire" }]);
+  assert.equal(fila.busy("reacao:1"), false);
+
+  // Falhou e nada mais na fila: volta para o que vale no servidor, com o erro.
+  resultados.length = 0;
+  fila.push("reacao:1", "wow", options("fire"));
+  const erro = new Error("rede");
+  liberar.shift().reject(erro);
+  await tick();
+  assert.deepEqual(resultados, [{ error: erro, failed: true, value: "fire" }]);
+
+  // Falhou, mas o aluno voltou para o que o servidor tem: nada a mandar e nenhum erro.
+  resultados.length = 0;
+  enviados.length = 0;
+  fila.push("reacao:1", "wow", options("fire"));
+  fila.push("reacao:1", "fire", options("fire"));
+  liberar.shift().reject(erro);
+  await tick();
+  assert.deepEqual(enviados, ["wow"]);
+  assert.deepEqual(resultados, [{ error: null, failed: false, value: "fire" }]);
+
+  // Igual ao do servidor desde o comeco: nem pedido.
+  resultados.length = 0;
+  fila.push("reacao:2", null, options(null));
+  assert.deepEqual(enviados, ["wow"]);
+  assert.deepEqual(resultados, [{ error: null, failed: false, value: null }]);
+
+  // Chaves diferentes (outro cartao ou outro tipo) andam juntas.
+  liberar = [];
+  fila.push("voto:1", "a", options(null));
+  fila.push("reacao:3", "love", options(null));
+  assert.deepEqual(enviados.slice(-2), ["a", "love"]);
 });

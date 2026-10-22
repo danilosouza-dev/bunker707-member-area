@@ -328,7 +328,7 @@ test("clicar registra clicked_at; outra pessoa nao clica na notificacao da aluna
   assert.ok(detalhe.stats.seen >= 1);
 });
 
-test("aviso com resposta: aceitar vale, a segunda resposta e 409 e aviso sem pedido de resposta e 404", async () => {
+test("aviso com resposta: aceitar vale, mudar a resposta vale (v3a) e aviso sem pedido de resposta e 404", async () => {
   const publicado = await salvarEPublicar(
     produtor,
     rascunho({ response: { acceptLabel: "Quero participar", declineLabel: "Agora não" }, title: "Convite: mentoria em grupo" })
@@ -339,14 +339,18 @@ test("aviso com resposta: aceitar vale, a segunda resposta e 409 e aviso sem ped
 
   const aceite = await responder(aluna, item.id, "accepted");
   assert.equal(aceite.status, 200);
-  assert.deepEqual((await aceite.json()).data, { response: "accepted" });
+  assert.deepEqual((await aceite.json()).data, { changed: false, response: "accepted" });
 
+  // v3a (docs/24 §1.5): a segunda resposta muda a resposta (antes era 409 "Você já respondeu.").
   const segunda = await responder(aluna, item.id, "declined");
-  assert.equal(segunda.status, 409);
-  assert.equal((await segunda.json()).error, "Você já respondeu.");
+  assert.equal(segunda.status, 200);
+  assert.deepEqual((await segunda.json()).data, { changed: true, response: "declined" });
 
   const depois = await sino(aluna);
-  assert.equal(depois.items.find((notificacao) => notificacao.id === item.id).response.value, "accepted");
+  assert.equal(depois.items.find((notificacao) => notificacao.id === item.id).response.value, "declined");
+
+  // Volta para "aceitou": o relatorio conta a resposta de agora.
+  assert.deepEqual((await (await responder(aluna, item.id, "accepted")).json()).data, { changed: true, response: "accepted" });
   assert.equal((await responder(aluna, estado.notificacaoId, "accepted")).status, 404, "o primeiro aviso nao pede resposta");
   assert.equal((await responder(aluna, item.id, "talvez")).status, 400);
 
@@ -494,7 +498,7 @@ test("enviar teste para mim: so quem pediu recebe, marcado como teste, fora dos 
   assert.equal((await actions.sendNoticeTestToMe({ id: popup.data.id })).status, 422);
 });
 
-test("duplicar cria outro rascunho com o mesmo conteudo; excluir tira da lista; aviso enviado nao se exclui", async () => {
+test("duplicar cria outro rascunho com o mesmo conteudo; excluir tira da lista; aviso enviado excluido sai do sino (v3a)", async () => {
   actAs(produtor);
   const salvo = await actions.saveNoticeDraft({ draft: rascunho({ title: "Para duplicar" }) });
   const copia = await actions.duplicateNotice({ id: salvo.data.id });
@@ -518,9 +522,18 @@ test("duplicar cria outro rascunho com o mesmo conteudo; excluir tira da lista; 
   assert.equal(depoisDoFim.page, 5_000);
   assert.ok(Number.isInteger(depoisDoFim.total) && depoisDoFim.total >= 0);
 
-  const enviado = await salvarEPublicar(produtor, rascunho({ title: "Enviado nao se exclui" }));
+  // v3a (docs/24 §2.3): antes era 409; agora a enviada sai do sino de todo mundo e depois sai da lista.
+  const enviado = await salvarEPublicar(produtor, rascunho({ title: "Enviada que se exclui" }));
+  assert.ok((await sino(aluna)).items.some((item) => item.title === "Enviada que se exclui"), "chegou no sino");
   actAs(produtor);
-  assert.equal((await actions.deleteNotice({ id: enviado.id })).status, 409);
+  const excluida = await actions.deleteNotice({ id: enviado.id });
+  assert.equal(excluida.ok, true, JSON.stringify(excluida));
+  assert.equal(excluida.data.id, enviado.id);
+  assert.ok(excluida.data.removed >= 1, "conta quem tinha no sino");
+  assert.ok(!(await sino(aluna)).items.some((item) => item.title === "Enviada que se exclui"), "saiu do sino da aluna");
+  assert.equal((await linhasDoAviso(enviado.id)).length, 0);
+  assert.equal(await getNoticeDetail(enviado.id), null);
+  assert.ok(!(await listNotices({ page: 1 })).items.some((item) => item.id === enviado.id));
 });
 
 /* ------------------------------------------------------------------------------------------------

@@ -196,21 +196,23 @@ test("frase da validade: 'fica 3 dias no sino', horas, data em Sao Paulo e 'ate 
   assert.equal(meta.describeValidity({ mode: "with_anchor" }, { anchorLabel: "“Oferta especial!”" }), "fica no sino até “Oferta especial!” sumir");
 });
 
-test("schema da validade: de 1 hora a 90 dias, data e hora validas; 'ate a principal sumir' so no fluxo", () => {
+test("schema da validade: de 5 minutos a 90 dias, data e hora validas; 'ate a principal sumir' so no fluxo", () => {
   const validade = (validity) => problemas(schemas.validitySchema, validity);
 
   assert.deepEqual(validade({ mode: "default" }), []);
+  assert.deepEqual(validade({ minutes: 5, mode: "duration" }), [], "ajustes da v3a: a partir de 5 minutos");
+  assert.deepEqual(validade({ minutes: 59, mode: "duration" }), []);
   assert.deepEqual(validade({ minutes: 60, mode: "duration" }), []);
   assert.deepEqual(validade({ minutes: 129_600, mode: "duration" }), []);
-  assert.deepEqual(validade({ minutes: 59, mode: "duration" }), [["minutes", "Use de 1 hora a 90 dias."]]);
-  assert.deepEqual(validade({ minutes: 129_601, mode: "duration" }), [["minutes", "Use de 1 hora a 90 dias."]]);
-  assert.deepEqual(validade({ minutes: 90.5, mode: "duration" }), [["minutes", "Use de 1 hora a 90 dias."]]);
+  assert.deepEqual(validade({ minutes: 4, mode: "duration" }), [["minutes", "No mínimo 5 minutos."]]);
+  assert.deepEqual(validade({ minutes: 129_601, mode: "duration" }), [["minutes", "No máximo 90 dias."]]);
+  assert.deepEqual(validade({ minutes: 90.5, mode: "duration" }), [["minutes", "Use de 5 minutos a 90 dias."]]);
   assert.deepEqual(validade({ endsAt: "2026-10-21T14:30:00-03:00", mode: "until" }), []);
   assert.deepEqual(validade({ endsAt: "amanhã", mode: "until" }), [["endsAt", "Escolha data e hora."]]);
   assert.deepEqual(validade({ mode: "with_anchor" }), [["mode", "Escolha quanto tempo fica no sino."]]);
 
   assert.deepEqual(problemas(schemas.flowValiditySchema, { mode: "with_anchor" }), []);
-  assert.deepEqual(problemas(schemas.flowValiditySchema, { minutes: 59, mode: "duration" }), [["minutes", "Use de 1 hora a 90 dias."]]);
+  assert.deepEqual(problemas(schemas.flowValiditySchema, { minutes: 4, mode: "duration" }), [["minutes", "No mínimo 5 minutos."]]);
   assert.deepEqual(problemas(schemas.noticeDraftSchema, notificacao({ validity: { mode: "with_anchor" } })), [
     ["validity.mode", "Escolha quanto tempo fica no sino."]
   ]);
@@ -415,11 +417,14 @@ test("rascunho do construtor -> arvore e conteudo para o motor conferir", () => 
   });
   assert.equal(tree.nodes[1].expireWithAnchor, true, "'ate a principal sumir' vira expire_with_anchor");
   assert.deepEqual(messages[PASSO_2], {
+    allowsReactions: true,
     campaignId: "",
     ctaHref: "/conteudo/curso-ia",
     hasAudio: false,
     hasCta: true,
+    hasPoll: false,
     hasResponse: false,
+    pollOptionIds: [],
     title: "Oferta especial!",
     validUntil: null,
     validityMinutes: null

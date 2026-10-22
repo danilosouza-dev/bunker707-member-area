@@ -1520,7 +1520,7 @@ Produto e regras em `docs/23`. Idempotente, sem `drop ... if exists` nem `drop c
 
 - `sender_user_id` -> auth.users (set null): quem envia (pessoa da equipe); nulo = a escola. Fora de `admin_roles` na hora de ler = a escola;
 - `icon` + `icon_color`: ids do catalogo do app (`message-meta.ts`); o banco confere so o formato (`campaigns_icon_v2`: os dois juntos, `^[a-z][a-z0-9_]{1,23}$` e `^[a-z]{3,12}$`), para o catalogo mudar sem migracao;
-- `validity_minutes` (60 a 129.600) ou `valid_until` (exclusivos, `campaigns_validity_v2`); os dois nulos = 90 dias;
+- `validity_minutes` (60 a 129.600 na v2; desde a `202610220002`, 5 a 129.600 pelo check `campaigns_validity_v3`, e o `campaigns_validity_v2` saiu) ou `valid_until` (exclusivos); os dois nulos = 90 dias;
 - `flow_id` -> communication_flows (cascade) + `flow_node_id` (sem FK de proposito: a versao nasce antes do passo): conteudo de um passo de fluxo, situacao so `draft`, `sent` ou `canceled` (`campaigns_flow_message_v2`), fora da lista de avisos (`campaigns_notice_list_idx` parcial em `flow_id is null`). Num fluxo no ar, mudar o conteudo cria outra linha (versao) ja `sent`, com `sent_at`;
 - `campaigns_inbox_only_v2`: quem envia, tempo no sino e passo de fluxo so na notificacao (`inbox`); o pop-up ganha so o icone.
 
@@ -1567,6 +1567,61 @@ Produto e regras em `docs/23`. Idempotente, sem `drop ... if exists` nem `drop c
 **Branding**: `platform_settings.branding.schoolIcon` (texto; ausente = `/brand/icon-bunker.svg`): o Icone da escola da Marca. Toda gravacao da aparencia espalha o branding atual, para trocar a logo ou o estilo nao apagar o icone.
 
 **Deploy**: a 0002 vai **antes** do deploy que a usa (no Supabase da nuvem antes do merge na `dev`; na Hetzner o `deploy-membros` aplica as migracoes antes de trocar o app). Nao ha caminho de volta para as colunas da v1: sem ela, o sino e o pop-up respondem vazio, a rota do audio responde 404, o job registra "migracao 202610200001 pendente ou 202610200002 pendente" e termina, as telas mostram o aviso (`202610200002`), e envios, cliques e respostas nao funcionam. A migracao sozinha nao quebra o app da v1 (colunas novas nulas, `expires_at` pelo gatilho).
+
+### Comunicacao v3a (migracao `202610220001`, 22/10/2026)
+
+Produto e regras em `docs/24`. Aditiva e idempotente: sem `drop` e sem `delete from` (tudo pelo MCP, secao por secao), checks novos em blocos `if not exists`, nenhum gatilho novo. As `202610200001`, `202610200002` e `202610210001` nao mudam (o teste de guarda confere os hashes). RLS das tres tabelas ja ligado; cada RPC nova `security invoker`, `search_path` fixo, `revoke all` de `public`/`anon`/`authenticated` e `execute` so para `service_role`.
+
+**campaigns** (colunas novas; o padrao e o comportamento da v2):
+
+- `cta_display` (`button` padrao, `button_and_card`, `card`): como o aluno chega ao destino. Check `campaigns_cta_display_v3`: os dois ultimos so na notificacao com `cta_href`; no `card`, `cta_label` e o texto ao lado da seta;
+- `allow_reactions` (padrao `false`: tudo o que ja existia fica sem reacoes; o app manda `true` nas notificacoes, seguintes e passos novos). Check `campaigns_reactions_v3`: so notificacao;
+- `poll` jsonb: `{ question, options: [{ id, label }], multiple, showResults, closesAt }`. Check `campaigns_poll_v3`: objeto ate 4 KB, 2 a 6 opcoes, `closesAt` nulo ou ISO UTC canonico (`2026-10-25T21:00:00.000Z`, comparado como texto, sem cast que possa falhar) e `response_mode = 'none'` (nao convive com Aceitar/Recusar). Sem trava de tipo: a v3b poe enquete no pop-up sem tirar o check. O conteudo (textos, ids `^[a-z0-9]{1,12}$`, opcoes diferentes) e conferido pelo app (`interactions-model.ts`);
+- `edited_at`, `edited_by` -> auth.users (set null): ultima edicao de uma notificacao enviada ou de um pop-up no ar ou pausado (o relatorio mostra `Editado`). `touch_campaign_version` nao muda (as colunas novas sao edicoes e mudam `updated_at`).
+
+**notifications** (colunas novas, nulas ou 0):
+
+- `hidden_at`: o aluno excluiu do proprio sino. Fora da lista, dos numeros e das marcacoes; continua "recebeu" e "viu" nos relatorios e nas regras;
+- `reaction` + `reacted_at` (check `notifications_reaction_v3`: juntos, so `notice`, id `^[a-z][a-z_]{1,15}$`; o catalogo e do app: like, love, fire, clap, laugh, wow);
+- `response_changed_at` + `response_changes` (0 a 1.000; check `notifications_response_change_v3`): mudou a resposta; `responded_at` continua sendo a primeira;
+- `poll_choice text[]` (1 a 6 ids, so `notice`) + `poll_voted_at` + `poll_changes` (0 a 1.000; check `notifications_poll_v3`): o voto; nulo = nao votou ou tirou o voto;
+- `interaction_writes` (0 a 1.000; check `notifications_interaction_writes_v3`): escritas do aluno que mudaram a linha (reagir, votar, excluir/desfazer, responder). Os eventos dessas escritas param em 20 por linha;
+- indice `notifications_poll_tally_idx (campaign_id) where poll_choice is not null and not is_test`: a contagem de uma enquete le so as linhas de quem votou.
+
+**campaign_deliveries** (colunas novas): `reshown_at` (ultimo "Mostrar de novo para quem ja viu" que valeu para o aluno; informativo), `impressions_before_reshow` e `snoozes_before_reshow` (check `campaign_deliveries_reshow_v3`: entre 0 e `impressions` / `snooze_count`). A regra "Uma vez" conta so o que veio depois (`impressions - impressions_before_reshow > snooze_count - snoozes_before_reshow`); com zero e a regra da v1. Os numeros do relatorio continuam nas colunas da v1.
+
+**RPCs novas** (so `service_role`):
+
+- 4.1 `communication_visible_notifications(p_user_id, p_now, p_id default null)`: a regra de "aparece no sino" num lugar so (do aluno, ultimos 90 dias, antes do fim, nao excluida por ele; aviso enviado e nao excluido, o teste da equipe aparece; comentario aprovado e nao apagado, e o respondido tambem). Devolve a linha com o que as conferencias precisam (`sent_at`, `response_mode`, `has_audio`, `allow_reactions`, `poll`, `interaction_writes`). Usada pela lista, pelos numeros, por "Marcar todas", "abriu o sino" e por toda conferencia de uma linha;
+- 4.2 `communication_poll_tally(p_campaign_id)`: `{ counts, voters }` das linhas sem teste, pelo indice parcial;
+- 4.3 `communication_inbox_page(p_user_id, p_filter, p_cursor_created_at, p_cursor_id, p_limit, p_now)`: `{ items, unseen, unread }` numa chamada: as `limit + 1` linhas (o cursor), o aviso, quem envia (`sender_on_team`, `sender_profile`), o autor do comentario (`actor_profile`, `reply`) e `poll_tally` so para quem votou ou com a enquete encerrada pela data (os numeros com o teto de 100 e 500 da v1);
+- 4.4 `communication_inbox_counts(p_user_id, p_now)`: `{ unseen, unread }`;
+- 5.1 `communication_respond_notification(p_user_id, p_notification_id, p_response, p_now)`: primeira resposta ou troca, com `{ first, changed, response, writes }`;
+- 5.2 `communication_vote_notification_poll(p_user_id, p_notification_id, p_option_ids, p_now)`: grava, troca ou tira o voto (`[]`), soma `poll_changes` e `interaction_writes` e devolve a contagem so depois de um voto com resultado visivel;
+- 5.3 `communication_reshow_popup(p_campaign_id, p_now, p_max, p_apply)`: conta (sem gravar) ou aplica o "Mostrar de novo" so no pop-up `active`/`paused` em "Uma vez" (nulo fora disso; `refused` acima de `p_max`); conta so quem ainda esta no segmento, viu, nao clicou, nao escolheu "Nao mostrar de novo" e nao veria de novo em "Uma vez"; aplicar grava `impressions_before_reshow = impressions`, `snooze_count` e `snoozes_before_reshow` = `least(snooze_count, 1)`, `snoozed_until = null` e `reshown_at`; devolve `{ count, reshown, refused }`;
+- 5.4 `communication_message_interactions(p_campaign_ids, p_flow_id)`: por aviso ou passo, `hidden`, reacoes por emoji, votos por opcao, quem votou, quem mudou o voto e a resposta (o relatorio e o do fluxo);
+- 5.6 `communication_notice_citations(p_campaign_ids)`: quantos avisos que ainda contam o segmento (rascunho, aguardando, agendado, pop-up no ar ou pausado) e quantos fluxos nao encerrados citam cada notificacao em alguma regra (`audience`, `entry_audience`, `goal`, `filter`, `condition`), fora o fluxo das seguintes dela;
+- 5.5 (a 7.9 `communication_flow_batch_facts`, mesma assinatura da `202610200002`): as linhas de notificacao do lote trazem tambem `reaction`, `poll_choice` e `hidden_at`.
+
+`communication_campaign_stats`, `communication_campaign_engagement`, `communication_overview`, `communication_flow_node_stats` e `prune_communication_history` nao mudam. Retencao: as colunas novas vivem em linhas que ja saem aos 24 meses; conta excluida leva tudo (cascade).
+
+**Deploy**: a 0003 vai **antes** do deploy que a usa (no Supabase da nuvem antes do merge na `dev`, `docs/24` §12; na Hetzner o `deploy-membros` aplica as migracoes antes de trocar o app). Sem ela, o app da v3a responde o sino vazio e as escritas novas 404 (`isMissingCommunicationSchema`). A migracao sozinha nao atrapalha o app da v2 (colunas com padrao; nenhuma linha fica excluida antes das rotas novas).
+
+### Comunicacao v3a, ajustes (migracao `202610220002`, 22/10/2026)
+
+Produto em `docs/24` §10. Arquivo novo (a `202610220001` ja esta na nuvem e nao muda; o teste de guarda `comunicacao-v3a-ajustes.guard` confere o hash). Secoes 1 a 4 aditivas e idempotentes, pelo MCP: sem `delete`, sem gatilho, coluna e constraint com `if not exists`. A secao 5 e a unica que tira alguma coisa e vai sozinha, por ultimo.
+
+**campaigns**:
+
+- `allow_hide boolean not null default true`: o aluno pode excluir a notificacao do proprio sino ("Permitir que o aluno exclua do sino"). Tudo o que ja existia continua com a lixeira. Muda depois do envio (`SENT_EDITABLE_COLUMNS`); num passo de fluxo no ar, mudar cria versao nova. No pop-up nao tem efeito (o app grava sempre `true`). A rota de excluir confere (403 `Esta notificação não pode ser excluída.`); o "Desfazer" vale sempre;
+- check `campaigns_validity_v3`: `validity_minutes` nulo ou de 5 a 129.600, exclusivo com `valid_until` (o mesmo da v2 com o minimo em 5). Secao 5: `alter table public.campaigns drop constraint if exists campaigns_validity_v2;` (o de 60 minutos). Enquanto a 5 nao roda, o check antigo continua valendo e o banco recusa menos de 60 minutos.
+
+**RPCs trocadas** (mesma assinatura, `create or replace`, permissoes repetidas: so `service_role`):
+
+- `communication_poll_tally(p_campaign_id)`: num passo de fluxo (`flow_node_id` preenchido) soma os votos de todas as versoes do passo (como o relatorio, 5.4 da 0001); fora de fluxo, a do aviso. Continua sem os testes e pelo indice `notifications_poll_tally_idx`;
+- `communication_inbox_page(...)`: o objeto `campaign` de cada item leva `allow_hide` (o app le como `allowHide`; ausente ou nulo = `true`; comentario sempre `true`).
+
+**Deploy**: como a 0001, **antes** do deploy que a usa (no Supabase da nuvem antes do merge na `dev`, `docs/24` §12, passo 8). Sem ela, salvar avisos falha (o app grava `allow_hide` em todo aviso) e a pagina do sino sai sem `allow_hide` (todo cartao com o "⋯", como antes); sem a secao 5, o banco recusa menos de 60 minutos.
 
 ## Retencao de dados pessoais
 

@@ -9,8 +9,9 @@ import "server-only";
 import { normalizeAudience, type AudienceDefinition } from "./audience-model";
 import { popupRefreshDueBefore, type CampaignKind, type CampaignStatus, type PopupRepeat } from "./campaign-model";
 import { assertNoDbError, chunksOf, CommunicationError, type CommunicationsDb } from "./db";
+import { isReactionId, parsePoll, POLL_OPTION_ID, type PollDefinition, type ReactionId } from "./interactions-model";
 import { noticeIconOfColumns, testSendExpiresAt, validityOfRow, validityToColumns } from "./message-meta";
-import { normalizePeaks } from "./notification-model";
+import { CTA_DISPLAYS, normalizePeaks, type CtaDisplay } from "./notification-model";
 import type { NoticeDraft } from "./schemas";
 
 /* ------------------------------------------------------------------------------------------------
@@ -21,11 +22,17 @@ import type { NoticeDraft } from "./schemas";
 const RANGE_NOT_SATISFIABLE = "PGRST103";
 
 // v2 (migracao 202610200002): quem envia, icone, validade no sino e o passo do fluxo.
+// v3a (migracao 202610220001): como o aluno chega ao destino, reacoes, enquete e a ultima edicao no ar.
+// Ajustes da v3a (202610220002): a lixeira do aluno por notificacao (allow_hide).
 export const CAMPAIGN_COLUMNS =
-  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by,sender_user_id,icon,icon_color,validity_minutes,valid_until,flow_id,flow_node_id";
+  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by,sender_user_id,icon,icon_color,validity_minutes,valid_until,flow_id,flow_node_id,cta_display,allow_reactions,poll,edited_at,edited_by,allow_hide";
 
 export type CampaignRow = {
   accept_label: string | null;
+  /** O aluno pode excluir a notificacao do proprio sino (so notificacao; o pop-up fica sempre true). */
+  allow_hide: boolean;
+  /** O aluno pode reagir (so notificacao). */
+  allow_reactions: boolean;
   allow_snooze: boolean;
   approved_at: string | null;
   approved_by: string | null;
@@ -40,6 +47,8 @@ export type CampaignRow = {
   body: string;
   created_at: string;
   created_by: string | null;
+  /** Como o aluno chega ao destino (so notificacao; o pop-up e sempre "button"). */
+  cta_display: CtaDisplay;
   cta_href: string | null;
   cta_label: string | null;
   cta_target: "new_tab" | "same_tab" | null;
@@ -48,6 +57,9 @@ export type CampaignRow = {
   deleted_by: string | null;
   dispatch_attempts: number;
   dispatch_started_at: string | null;
+  /** Ultima edicao de uma notificacao enviada ou de um pop-up no ar ou pausado (o relatorio mostra "Editado"). */
+  edited_at: string | null;
+  edited_by: string | null;
   ends_at: string | null;
   /** Conteudo de um passo de fluxo (fora da lista de avisos); null = aviso comum. */
   flow_id: string | null;
@@ -60,6 +72,8 @@ export type CampaignRow = {
   image_url: string | null;
   kind: CampaignKind;
   last_error: string | null;
+  /** Enquete (jsonb; ler com parsePoll). */
+  poll: unknown;
   popup_repeat: PopupRepeat;
   recipients_count: number | null;
   requested_at: string | null;
@@ -83,11 +97,14 @@ export type CampaignRow = {
 export type CampaignContentColumns = Pick<
   CampaignRow,
   | "accept_label"
+  | "allow_hide"
+  | "allow_reactions"
   | "allow_snooze"
   | "audio_duration_seconds"
   | "audio_mime"
   | "audio_url"
   | "body"
+  | "cta_display"
   | "cta_href"
   | "cta_label"
   | "cta_target"
@@ -106,12 +123,36 @@ export type CampaignContentColumns = Pick<
   | "title"
   | "valid_until"
   | "validity_minutes"
-> & { audience: AudienceDefinition; audio_peaks: number[] | null };
+> & { audience: AudienceDefinition; audio_peaks: number[] | null; poll: PollDefinition | null };
 
-export type CampaignPatch = Partial<Omit<CampaignRow, "audience" | "audio_peaks" | "created_at" | "id" | "updated_at">> & {
+export type CampaignPatch = Partial<Omit<CampaignRow, "audience" | "audio_peaks" | "created_at" | "id" | "poll" | "updated_at">> & {
   audience?: AudienceDefinition;
   audio_peaks?: number[] | null;
+  poll?: PollDefinition | null;
 };
+
+/**
+ * O que uma notificacao enviada ainda pode mudar (v3a, docs/24 §2.2): o conteudo que o aluno le e, nos
+ * ajustes da v3a, se o aluno pode excluir do sino (allow_hide). Segmento, envio, tempo no sino, audio,
+ * ligar ou desligar a resposta e a enquete ficam (sentNoticeLockedProblems).
+ */
+export const SENT_EDITABLE_COLUMNS = [
+  "title",
+  "body",
+  "image_url",
+  "image_alt",
+  "icon",
+  "icon_color",
+  "sender_user_id",
+  "cta_label",
+  "cta_href",
+  "cta_target",
+  "cta_display",
+  "accept_label",
+  "decline_label",
+  "allow_reactions",
+  "allow_hide"
+] as const satisfies readonly (keyof CampaignContentColumns)[];
 
 /* ------------------------------------------------------------------------------------------------
  * Rascunho <-> colunas
@@ -127,6 +168,10 @@ export function audienceOfRow(row: Pick<CampaignRow, "audience">): AudienceDefin
 
   // Segmento ilegivel nunca vira "todos os alunos": vira um grupo "qualquer regra" vazio (ninguem).
   return { kind: "rules", root: { items: [], match: "any" } };
+}
+
+function ctaDisplayOf(value: unknown): CtaDisplay {
+  return (CTA_DISPLAYS as readonly unknown[]).includes(value) ? (value as CtaDisplay) : "button";
 }
 
 function peaksOf(value: unknown): number[] {
@@ -147,6 +192,11 @@ export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
     audio_peaks: draft.audio ? peaksOf(draft.audio.peaks) : null,
     audio_url: draft.audio ? draft.audio.url : null,
     body: draft.body,
+    // Cartao clicavel, reacoes e enquete sao da notificacao (checks campaigns_*_v3); o pop-up abre pelo botao.
+    allow_reactions: isInbox ? draft.reactions ?? false : false,
+    // A lixeira tambem (o pop-up nao vai para o sino): o pop-up grava o padrao.
+    allow_hide: isInbox ? draft.allowHide ?? true : true,
+    cta_display: isInbox && draft.cta ? draft.cta.display ?? "button" : "button",
     cta_href: draft.cta ? draft.cta.href : null,
     cta_label: draft.cta ? draft.cta.label : null,
     cta_target: draft.cta ? draft.cta.target : null,
@@ -157,6 +207,7 @@ export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
     image_alt: draft.image ? draft.image.alt || null : null,
     image_url: draft.image ? draft.image.url : null,
     kind: draft.kind,
+    poll: isInbox ? draft.poll ?? null : null,
     popup_repeat: isInbox ? "once" : draft.repeat,
     response_mode: isInbox && draft.response ? "accept_decline" : "none",
     send_at: isInbox && draft.schedule.mode === "at" ? draft.schedule.sendAt : null,
@@ -170,6 +221,8 @@ export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
 
 export function rowToDraft(row: CampaignRow): NoticeDraft {
   return {
+    // Linha sem a coluna (leitura antiga) = a lixeira de sempre.
+    allowHide: row.kind !== "inbox" || row.allow_hide !== false,
     allowSnooze: row.allow_snooze,
     audience: audienceOfRow(row),
     audio:
@@ -182,10 +235,15 @@ export function rowToDraft(row: CampaignRow): NoticeDraft {
           }
         : null,
     body: row.body,
-    cta: row.cta_href && row.cta_label && row.cta_target ? { href: row.cta_href, label: row.cta_label, target: row.cta_target } : null,
+    cta:
+      row.cta_href && row.cta_label && row.cta_target
+        ? { display: row.kind === "inbox" ? ctaDisplayOf(row.cta_display) : "button", href: row.cta_href, label: row.cta_label, target: row.cta_target }
+        : null,
     icon: noticeIconOfColumns(row.icon, row.icon_color),
     image: row.image_url ? { alt: row.image_alt ?? "", url: row.image_url } : null,
     kind: row.kind,
+    poll: parsePoll(row.poll),
+    reactions: row.kind === "inbox" && row.allow_reactions === true,
     repeat: row.popup_repeat,
     response:
       row.kind === "inbox" && row.response_mode === "accept_decline"
@@ -512,10 +570,20 @@ export async function upsertTestNotification(
           clicked_at: null,
           created_at: nowIso,
           expires_at: expiresAt,
+          // v3a: o teste volta para o sino (mesmo excluido) sem reacao, voto nem mudanca de resposta.
+          hidden_at: null,
+          interaction_writes: 0,
           opened_at: null,
+          poll_changes: 0,
+          poll_choice: null,
+          poll_voted_at: null,
+          reacted_at: null,
+          reaction: null,
           read_at: null,
           responded_at: null,
           response: null,
+          response_changed_at: null,
+          response_changes: 0,
           seen_at: null
         })
         .eq("id", (existing.data as { id: string }).id)
@@ -568,6 +636,41 @@ export async function setDeliveryEligibility(db: CommunicationsDb, campaignId: s
     const { error } = await db.from("campaign_deliveries").update({ eligible }).eq("campaign_id", campaignId).in("user_id", part);
     assertNoDbError(error, "Comunicacao: alunos do pop-up");
   }
+}
+
+export type PopupReshowResult = {
+  /** Quem a regra "Uma vez" pulava e volta a contar como novo (ainda no segmento, viu e nao clicou). */
+  count: number;
+  /** Acima de `max` (sem publish_large): nada mudou. */
+  refused: boolean;
+  reshown: number;
+};
+
+/**
+ * "Mostrar de novo para quem já viu" (RPC 5.3 da 202610220001, so pop-up "Uma vez"): `apply: false` so conta
+ * (pela regra "Uma vez", mesmo com o pop-up em "Até o aluno clicar"); `apply: true` zera, a nao ser que a
+ * contagem passe de `max` (refused, nada muda). null = o pop-up nao esta no ar nem pausado (ou, ao aplicar,
+ * nao esta em "Uma vez").
+ */
+export async function reshowPopupDeliveries(
+  db: CommunicationsDb,
+  input: { apply: boolean; campaignId: string; max: number | null; now: Date }
+): Promise<PopupReshowResult | null> {
+  const { data, error } = await db.rpc("communication_reshow_popup", {
+    p_apply: input.apply,
+    p_campaign_id: input.campaignId,
+    p_max: input.max,
+    p_now: input.now.toISOString()
+  });
+  assertNoDbError(error, "Comunicacao: mostrar o pop-up de novo");
+
+  const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+
+  if (!row || typeof row !== "object") {
+    return null;
+  }
+
+  return { count: toNumber(row.count), refused: row.refused === true, reshown: toNumber(row.reshown) };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -652,6 +755,104 @@ export async function fetchCampaignEngagement(db: CommunicationsDb, ids: readonl
   }
 
   return engagement;
+}
+
+/** Reacoes, votos, excluidas do sino e mudancas de resposta (v3a): so as linhas dos alunos, nunca o teste. */
+export type MessageInteractions = {
+  /** Excluiram do proprio sino. */
+  hidden: number;
+  /** Mudaram o voto pelo menos uma vez. */
+  pollChanged: number;
+  /** Votos por id de opcao (com varias respostas, um aluno conta em mais de uma). */
+  pollOptions: Record<string, number>;
+  pollVoters: number;
+  /** Reagiram (qualquer reacao). */
+  reacted: number;
+  reactions: Partial<Record<ReactionId, number>>;
+  /** Mudaram de resposta pelo menos uma vez. */
+  responseChanged: number;
+};
+
+export function emptyMessageInteractions(): MessageInteractions {
+  return { hidden: 0, pollChanged: 0, pollOptions: {}, pollVoters: 0, reacted: 0, reactions: {}, responseChanged: 0 };
+}
+
+const INTERACTION_TOTALS: Record<string, Exclude<keyof MessageInteractions, "pollOptions" | "reactions">> = {
+  hidden: "hidden",
+  poll_changed: "pollChanged",
+  poll_voters: "pollVoters",
+  reacted: "reacted",
+  response_changed: "responseChanged"
+};
+
+/**
+ * RPC communication_message_interactions (5.4 da 202610220001): numeros por aviso (`campaignIds`) e/ou por
+ * passo de um fluxo (`flowId`). Chave do mapa = id do aviso ou do passo; sem linha de aluno, sem chave.
+ */
+export async function fetchMessageInteractions(
+  db: CommunicationsDb,
+  input: { campaignIds?: readonly string[]; flowId?: string | null }
+): Promise<Map<string, MessageInteractions>> {
+  const result = new Map<string, MessageInteractions>();
+  const campaignIds = [...new Set(input.campaignIds ?? [])];
+
+  if (campaignIds.length === 0 && !input.flowId) {
+    return result;
+  }
+
+  const { data, error } = await db.rpc("communication_message_interactions", { p_campaign_ids: campaignIds, p_flow_id: input.flowId ?? null });
+  assertNoDbError(error, "Comunicacao: reacoes e enquetes");
+
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    const key = String(row.scope_id ?? "");
+
+    if (!key) {
+      continue;
+    }
+
+    const entry = result.get(key) ?? emptyMessageInteractions();
+    const metric = String(row.metric ?? "");
+    const item = String(row.item ?? "");
+    const total = toNumber(row.total);
+
+    if (metric === "reaction") {
+      if (isReactionId(item)) {
+        entry.reactions[item] = total;
+      }
+    } else if (metric === "poll_option") {
+      if (POLL_OPTION_ID.test(item)) {
+        entry.pollOptions[item] = total;
+      }
+    } else if (Object.hasOwn(INTERACTION_TOTALS, metric)) {
+      entry[INTERACTION_TOTALS[metric]] = total;
+    }
+
+    result.set(key, entry);
+  }
+
+  return result;
+}
+
+/** Quantos avisos (que ainda contam o segmento) e fluxos (nao encerrados) citam a notificacao nas regras. */
+export type NoticeCitations = { flows: number; notices: number };
+
+/** RPC communication_notice_citations (5.6 da 202610220001): uma ida para a pagina; lista vazia, nenhuma. */
+export async function fetchNoticeCitations(db: CommunicationsDb, campaignIds: readonly string[]): Promise<Map<string, NoticeCitations>> {
+  const result = new Map<string, NoticeCitations>();
+  const ids = [...new Set(campaignIds)];
+
+  if (ids.length === 0) {
+    return result;
+  }
+
+  const { data, error } = await db.rpc("communication_notice_citations", { p_campaign_ids: ids });
+  assertNoDbError(error, "Comunicacao: regras que citam a notificacao");
+
+  for (const row of (data ?? []) as Record<string, unknown>[]) {
+    result.set(String(row.campaign_id), { flows: toNumber(row.flows), notices: toNumber(row.notices) });
+  }
+
+  return result;
 }
 
 export type CommunicationOverviewRow = { activeNow: number; clicked: number; seen: number; studied7d: number };

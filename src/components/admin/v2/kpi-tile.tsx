@@ -108,7 +108,10 @@ export function KpiTile({
         "@max-[196px]:grid-cols-[auto_minmax(0,1fr)] @max-[196px]:grid-rows-[auto_auto_auto_1fr] @max-[196px]:[grid-template-areas:'label_label'_'num_delta'_'def_def'_'spark_spark']"
       )}
     >
-      <span className="min-w-0 truncate text-[13px] leading-5 font-medium text-[var(--text-secondary)] [grid-area:label]">{label}</span>
+      {/* Cartao estreito (duas colunas a 375 px): o rotulo e a definicao quebram em ate duas linhas em vez de cortar. */}
+      <span className="min-w-0 truncate text-[13px] leading-5 font-medium text-[var(--text-secondary)] [grid-area:label] @max-[196px]:line-clamp-2 @max-[196px]:whitespace-normal">
+        {label}
+      </span>
       {hasDelta ? (
         <span
           className={cn(
@@ -136,7 +139,10 @@ export function KpiTile({
         </span>
       ) : null}
       <span
-        className={cn("mt-2 min-w-0 truncate text-xs leading-4 font-medium text-[var(--text-tertiary)] [grid-area:def]", "@max-[196px]:mt-0")}
+        className={cn(
+          "mt-2 min-w-0 truncate text-xs leading-4 font-medium text-[var(--text-tertiary)] [grid-area:def]",
+          "@max-[196px]:mt-0 @max-[196px]:line-clamp-2 @max-[196px]:whitespace-normal"
+        )}
         title={footer}
       >
         <span className="@max-[196px]:hidden">{footer}</span>

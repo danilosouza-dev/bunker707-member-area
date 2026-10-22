@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
-import { requireApiUser } from "@/server/auth/guards";
+import { requireApiSessionUser } from "@/server/auth/guards";
 import { listNotifications } from "@/server/communications/inbox";
 import { decodeCursor } from "@/server/communications/notification-model";
 import { noStore } from "@/server/communications/route-support";
 import { jsonRouteError } from "@/server/http/route-errors";
 
 // Sino do aluno (docs/22 §1.1 e §4.4): pagina das notificacoes do proprio aluno, ultimos 90 dias, mais novas
-// primeiro. ?filter=unread so as nao lidas; ?cursor= continua de onde a pagina anterior parou.
+// primeiro. ?filter=unread so as nao lidas; ?cursor= continua de onde a pagina anterior parou. v3a (docs/24):
+// sessao pelas claims do JWT (requireApiSessionUser, sem ida ao Auth com AUTH_SESSION_STRATEGY=claims) e a
+// pagina inteira numa ida ao banco (communication_inbox_page).
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiSessionUser();
 
   if (auth.response || !auth.user) {
     return noStore(auth.response!);

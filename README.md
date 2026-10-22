@@ -44,6 +44,8 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Runbook: Bunker707 na Hetzner, dois servidores (membros e marketing) operados pelo workflow Infra (Hetzner) (17/10/2026, atualizado em 18/10/2026)](docs/20-runbook-hetzner.md)
 - [Retomada da migracao para a Hetzner (estado em 19/10/2026)](docs/21-retomada-migracao-hetzner.md)
 - [Comunicacao v1: notificacoes no sino e pop-ups (20/10/2026)](docs/22-comunicacao-notificacoes-e-pop-ups.md)
+- [Comunicacao v2: quem envia, tempo no sino, notificacoes seguintes e fluxos (21/10/2026)](docs/23-comunicacao-v2-fluxos.md)
+- [Comunicacao v3a: sino e avisos (CRUD, lixeira, cartao clicavel, reacoes, enquete e velocidade) (22/10/2026)](docs/24-comunicacao-v3a-sino-e-avisos.md)
 
 ## Padroes de trabalho
 

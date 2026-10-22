@@ -6,6 +6,10 @@
 // v2: quem envia, icone ao lado do titulo e quanto tempo fica no sino entram no conteudo
 // (noticeContentSchema, o mesmo das mensagens dos fluxos em flow-schemas.ts), e as regras novas do
 // segmento ("message" no segmento; "page_visit" e "access_gained" so em flowRuleDefinitionSchema).
+//
+// v3a (docs/24 §5.3): como o aluno chega ao destino (cta.display), reacoes e enquete no conteudo; o que
+// trava depois do envio (sentNoticeLockedProblems); excluir com as seguintes; e os corpos das rotas novas
+// do sino (reagir, votar, excluir do sino).
 
 import { z } from "zod";
 import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
@@ -20,11 +24,13 @@ import {
   audienceDepth,
   countAudienceRules,
   isAudienceGroup,
+  normalizeAudience,
   type AudienceDefinition,
   type AudienceGroup,
   type AudienceNode
 } from "./audience-model";
 import { AUDIO_LIMITS, CAMPAIGN_KINDS, INBOX_HISTORY_DAYS, NOTICE_LIMITS, type CampaignKind, type PopupRepeat } from "./campaign-model";
+import { isReactionId, POLL_LIMITS, POLL_OPTION_ID, pollSchema, REACTION_IDS, type PollDefinition } from "./interactions-model";
 import {
   NOTICE_ICON_COLORS,
   NOTICE_ICON_IDS,
@@ -34,6 +40,7 @@ import {
   type NoticeIconId,
   type Validity
 } from "./message-meta";
+import { CTA_DISPLAYS, type CtaDisplay } from "./notification-model";
 
 /* ------------------------------------------------------------------------------------------------
  * Segmento
@@ -111,12 +118,20 @@ const ruleSchema = z.discriminatedUnion(
       cohortIds: z.array(z.uuid({ error: "Turma inválida." })).min(1, "Escolha pelo menos uma turma.").max(AUDIENCE_LIMITS.maxIds),
       type: z.literal("cohort")
     }),
-    z.object({
-      action: z.enum(MESSAGE_ACTIONS, { error: "Escolha o que o aluno fez com a notificação." }),
-      negate: negateSchema,
-      ref: messageRefSchema,
-      type: z.literal("message")
-    }),
+    z
+      .object({
+        action: z.enum(MESSAGE_ACTIONS, { error: "Escolha o que o aluno fez com a notificação." }),
+        // v3a: a reacao (reacted) ou o id da opcao da enquete (voted); ausente = qualquer uma.
+        choice: z.string({ error: "Escolha uma opção." }).regex(/^[a-z0-9_]{1,16}$/, { error: "Escolha uma opção." }).optional(),
+        negate: negateSchema,
+        ref: messageRefSchema,
+        type: z.literal("message")
+      })
+      .superRefine((rule, context) => {
+        if (rule.action === "reacted" && rule.choice !== undefined && !isReactionId(rule.choice)) {
+          context.addIssue({ code: "custom", message: "Escolha uma reação da lista.", path: ["choice"] });
+        }
+      }),
     z.object({ negate: negateSchema, page: pageTargetSchema, since: flowSinceSchema, type: z.literal("page_visit") }),
     z.object({ negate: negateSchema, productIds: idListSchema("um produto"), since: flowSinceSchema, type: z.literal("access_gained") })
   ],
@@ -227,7 +242,9 @@ const audioSchema = z.object({
   url: mediaUrlSchema
 });
 
+// cta: o destino e como o aluno chega la (v3a). Rascunho antigo sem `display` = "button".
 const ctaSchema = z.object({
+  display: z.enum(CTA_DISPLAYS, { error: "Escolha como o aluno chega lá." }).default("button"),
   href: z
     .string({ error: "Escolha para onde o botão leva." })
     .trim()
@@ -274,7 +291,14 @@ export const iconSchema = z
   )
   .nullable();
 
-const VALIDITY_RANGE_MESSAGE = "Use de 1 hora a 90 dias.";
+/**
+ * "Por um tempo" a partir de 5 minutos (ajustes da v3a, check campaigns_validity_v3 da 202610220002); o teto
+ * continua 90 dias. Os dois numeros vem de VALIDITY_LIMITS (message-meta.ts), que segue o banco.
+ */
+export const VALIDITY_MIN_MINUTES = VALIDITY_LIMITS.minMinutes;
+export const VALIDITY_MIN_MESSAGE = "No mínimo 5 minutos.";
+const VALIDITY_MAX_MESSAGE = "No máximo 90 dias.";
+const VALIDITY_RANGE_MESSAGE = "Use de 5 minutos a 90 dias.";
 
 const validityOptions = [
   // 90 dias (o padrao: nada gravado).
@@ -283,8 +307,8 @@ const validityOptions = [
     minutes: z
       .number({ error: VALIDITY_RANGE_MESSAGE })
       .int(VALIDITY_RANGE_MESSAGE)
-      .min(VALIDITY_LIMITS.minMinutes, VALIDITY_RANGE_MESSAGE)
-      .max(VALIDITY_LIMITS.maxMinutes, VALIDITY_RANGE_MESSAGE),
+      .min(VALIDITY_MIN_MINUTES, VALIDITY_MIN_MESSAGE)
+      .max(VALIDITY_LIMITS.maxMinutes, VALIDITY_MAX_MESSAGE),
     mode: z.literal("duration")
   }),
   z.object({ endsAt: isoSchema, mode: z.literal("until") })
@@ -321,15 +345,25 @@ export type NoticeSender = { userId: string } | null;
 export type NoticeIconChoice = { color: NoticeIconColor; id: NoticeIconId } | null;
 
 export type NoticeDraft = {
+  /**
+   * "Permitir que o aluno exclua do sino" (ajustes da v3a, campaigns.allow_hide; so notificacao, o pop-up
+   * ignora); ausente = true (a lixeira de sempre).
+   */
+  allowHide?: boolean;
   allowSnooze: boolean;
   audience: AudienceDefinition;
   audio: { durationSeconds: number; mimeType: string | null; peaks: number[]; url: string } | null;
   body: string;
-  cta: { href: string; label: string; target: "new_tab" | "same_tab" } | null;
+  /** Destino; `display` (v3a, so notificacao) ausente = "button". */
+  cta: { display?: CtaDisplay; href: string; label: string; target: "new_tab" | "same_tab" } | null;
   /** Icone ao lado do titulo (notificacao e pop-up); null = sem icone. */
   icon: NoticeIconChoice;
   image: { alt: string; url: string } | null;
   kind: CampaignKind;
+  /** Enquete (v3a, so notificacao); ausente = sem enquete. */
+  poll?: PollDefinition | null;
+  /** Permitir reacoes (v3a, so notificacao); ausente = nao. */
+  reactions?: boolean;
   repeat: PopupRepeat;
   response: { acceptLabel: string; declineLabel: string } | null;
   schedule: { mode: "now" } | { mode: "at"; sendAt: string };
@@ -342,26 +376,51 @@ export type NoticeDraft = {
 };
 
 /** O conteudo de uma notificacao (titulo ate a validade): o mesmo do aviso e das mensagens dos fluxos. */
-export type NoticeContent = Pick<NoticeDraft, "audio" | "body" | "cta" | "icon" | "image" | "response" | "sender" | "title" | "validity">;
+export type NoticeContent = Pick<
+  NoticeDraft,
+  "allowHide" | "audio" | "body" | "cta" | "icon" | "image" | "poll" | "reactions" | "response" | "sender" | "title" | "validity"
+>;
 
 /**
  * Campos do conteudo. Os tres da v2 tem padrao (escola, sem icone, 90 dias): um rascunho da v1 sem eles
- * continua valendo exatamente como antes.
+ * continua valendo exatamente como antes. Os da v3a tambem (sem reacoes, sem enquete, pelo botao, com a
+ * lixeira).
  */
 export const NOTICE_CONTENT_FIELDS = {
+  // Rascunho antigo = o aluno pode excluir (a coluna nasce true para tudo o que ja existe).
+  allowHide: z.boolean({ error: "Escolha se o aluno pode excluir do sino." }).default(true),
   audio: audioSchema.nullable(),
   body: z.string({ error: "Escreva o texto." }).trim(),
   cta: ctaSchema.nullable(),
   icon: iconSchema.default(null),
   image: imageSchema.nullable(),
+  poll: pollSchema.nullable().default(null),
+  // Rascunho antigo = sem reacoes; os editores comecam a notificacao nova com true.
+  reactions: z.boolean({ error: "Escolha se permite reações." }).default(false),
   response: responseSchema.nullable(),
   sender: senderSchema.default(null),
   title: z.string({ error: "Escreva um título." }).trim().min(1, "Escreva um título."),
   validity: validitySchema.default((): Validity => ({ mode: "default" }))
 };
 
-/** Limites de titulo e texto do tipo (a mensagem de fluxo e sempre notificacao). */
-export function addNoticeContentIssues(content: { body: string; title: string }, kind: CampaignKind, context: z.RefinementCtx) {
+/**
+ * Limites de titulo e texto do tipo (a mensagem de fluxo e sempre notificacao) e, da v3a, o que nao
+ * convive: enquete com Aceitar/Recusar, e enquete, reacoes ou cartao clicavel no pop-up. Vale para o
+ * rascunho do aviso, para noticeContentSchema e para flowNoticeContentSchema (erro no campo, nunca o erro
+ * generico do check campaigns_poll_v3).
+ */
+export function addNoticeContentIssues(
+  content: {
+    body: string;
+    cta?: { display?: CtaDisplay } | null;
+    poll?: PollDefinition | null;
+    reactions?: boolean;
+    response?: unknown;
+    title: string;
+  },
+  kind: CampaignKind,
+  context: z.RefinementCtx
+) {
   const limits = NOTICE_LIMITS[kind];
 
   if (content.title.length > limits.title) {
@@ -370,6 +429,22 @@ export function addNoticeContentIssues(content: { body: string; title: string },
 
   if (content.body.length > limits.body) {
     context.addIssue({ code: "custom", message: `Use até ${limits.body} caracteres.`, path: ["body"] });
+  }
+
+  if (content.poll && content.response) {
+    context.addIssue({ code: "custom", message: "Use a resposta ou a enquete, não as duas.", path: ["poll"] });
+  }
+
+  if (kind === "popup" && content.poll) {
+    context.addIssue({ code: "custom", message: "A enquete vale só para notificações por enquanto.", path: ["poll"] });
+  }
+
+  if (kind === "popup" && content.reactions) {
+    context.addIssue({ code: "custom", message: "Reações valem só para notificações.", path: ["reactions"] });
+  }
+
+  if (kind === "popup" && content.cta && (content.cta.display ?? "button") !== "button") {
+    context.addIssue({ code: "custom", message: "No pop-up, o destino abre pelo botão.", path: ["cta", "display"] });
   }
 }
 
@@ -430,6 +505,17 @@ export function publishProblems(draft: NoticeDraft, now: number): { message: str
     }
   }
 
+  // v3a: a enquete com fim marcado precisa terminar no futuro e depois do envio agendado.
+  const closesAt = draft.kind === "inbox" && draft.poll?.closesAt ? Date.parse(draft.poll.closesAt) : Number.NaN;
+
+  if (Number.isFinite(closesAt)) {
+    if (closesAt <= now) {
+      problems.push({ message: "Escolha um fim no futuro.", path: "poll.closesAt" });
+    } else if (draft.schedule.mode === "at" && closesAt <= Date.parse(draft.schedule.sendAt)) {
+      problems.push({ message: "A enquete encerraria antes de a notificação sair.", path: "poll.closesAt" });
+    }
+  }
+
   return problems;
 }
 
@@ -454,9 +540,10 @@ export function validityUntilProblem(endsAt: string, sendAt: number): string | n
   return end > sendAt + INBOX_HISTORY_DAYS * DAY_MS ? "O fim pode ser no máximo 90 dias depois do envio." : null;
 }
 
-/** Rascunho vazio de cada tipo (o editor abre assim). */
+/** Rascunho vazio de cada tipo (o editor abre assim): a notificacao nova ja permite reacoes (v3a). */
 export function emptyNoticeDraft(kind: CampaignKind): NoticeDraft {
   return {
+    allowHide: true,
     allowSnooze: true,
     audience: EVERYONE,
     audio: null,
@@ -465,6 +552,8 @@ export function emptyNoticeDraft(kind: CampaignKind): NoticeDraft {
     icon: null,
     image: null,
     kind,
+    poll: null,
+    reactions: kind === "inbox",
     repeat: "once",
     response: null,
     schedule: { mode: "now" },
@@ -476,6 +565,120 @@ export function emptyNoticeDraft(kind: CampaignKind): NoticeDraft {
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Notificacao enviada: o que muda e o que trava (v3a, docs/24 §2.2 e §4.7)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** JSON com as chaves em ordem (comparacao estavel). */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value ?? null);
+}
+
+/** O mesmo instante escrito de dois jeitos ("Z" ou "+00:00", com ou sem milissegundos) e igual. */
+function sameInstant(left: string | null | undefined, right: string | null | undefined) {
+  if ((left ?? null) === null || (right ?? null) === null) {
+    return (left ?? null) === (right ?? null);
+  }
+
+  const leftTime = Date.parse(left as string);
+  const rightTime = Date.parse(right as string);
+
+  return Number.isFinite(leftTime) && Number.isFinite(rightTime) ? leftTime === rightTime : left === right;
+}
+
+function sameSchedule(left: NoticeDraft["schedule"], right: NoticeDraft["schedule"]) {
+  if (left.mode !== right.mode) {
+    return false;
+  }
+
+  return left.mode === "now" || (right.mode === "at" && sameInstant(left.sendAt, right.sendAt));
+}
+
+function sameValidity(left: Validity, right: Validity) {
+  if (left.mode !== right.mode) {
+    return false;
+  }
+
+  if (left.mode === "duration") {
+    return right.mode === "duration" && left.minutes === right.minutes;
+  }
+
+  return left.mode === "default" || (right.mode === "until" && sameInstant(left.endsAt, right.endsAt));
+}
+
+/** Enquete comparavel: textos aparados e o fim pelo instante. */
+function pollKey(poll: PollDefinition | null | undefined) {
+  if (!poll) {
+    return "null";
+  }
+
+  const closesAt = poll.closesAt === null ? null : Date.parse(poll.closesAt);
+
+  return stableJson({
+    closesAt: closesAt !== null && Number.isFinite(closesAt) ? closesAt : poll.closesAt,
+    multiple: poll.multiple,
+    options: poll.options.map((option) => ({ id: option.id, label: option.label.trim() })),
+    question: poll.question.trim(),
+    showResults: poll.showResults
+  });
+}
+
+export const SENT_LOCKED_MESSAGES = {
+  audience: "O segmento não muda depois do envio.",
+  audio: "O áudio não muda depois do envio: quem já ouviu ficaria marcado como tendo ouvido o novo. Para trocar, duplique a notificação.",
+  poll: "A enquete não muda depois do envio.",
+  response: "Pedir uma resposta não muda depois do envio.",
+  schedule: "O envio e o tempo no sino não mudam depois do envio."
+} as const;
+
+/**
+ * Notificacao enviada: o que mudou e nao pode mudar (segmento, envio, tempo no sino, audio, ligar ou
+ * desligar a resposta, enquete). Titulo, texto, imagem, icone, quem envia, destino, textos da resposta,
+ * reacoes e a lixeira do aluno (allowHide) podem. Datas comparadas pelo instante. Vazio = pode salvar.
+ */
+export function sentNoticeLockedProblems(saved: NoticeDraft, next: NoticeDraft): { message: string; path: string }[] {
+  const problems: { message: string; path: string }[] = [];
+
+  if (stableJson(normalizeAudience(saved.audience)) !== stableJson(normalizeAudience(next.audience))) {
+    problems.push({ message: SENT_LOCKED_MESSAGES.audience, path: "audience" });
+  }
+
+  if (!sameSchedule(saved.schedule, next.schedule)) {
+    problems.push({ message: SENT_LOCKED_MESSAGES.schedule, path: "schedule.sendAt" });
+  }
+
+  if (!sameValidity(saved.validity, next.validity)) {
+    problems.push({ message: SENT_LOCKED_MESSAGES.schedule, path: "validity" });
+  }
+
+  if ((saved.audio?.url ?? null) !== (next.audio?.url ?? null) || (saved.audio?.durationSeconds ?? null) !== (next.audio?.durationSeconds ?? null)) {
+    problems.push({ message: SENT_LOCKED_MESSAGES.audio, path: "audio" });
+  }
+
+  if (((saved.response ?? null) === null) !== ((next.response ?? null) === null)) {
+    problems.push({ message: SENT_LOCKED_MESSAGES.response, path: "response" });
+  }
+
+  if (pollKey(saved.poll) !== pollKey(next.poll)) {
+    problems.push({ message: SENT_LOCKED_MESSAGES.poll, path: "poll" });
+  }
+
+  return problems;
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Entradas das Server Actions
  * ---------------------------------------------------------------------------------------------- */
 
@@ -484,7 +687,9 @@ const campaignIdSchema = z.uuid({ error: "Aviso inválido." });
 export const saveNoticeSchema = z.object({
   draft: noticeDraftSchema,
   expectedUpdatedAt: expectedUpdatedAtSchema.optional(),
-  id: campaignIdSchema.optional()
+  id: campaignIdSchema.optional(),
+  /** v3a: "Mostrar de novo para quem já viu" junto com o salvar de um pop-up no ar ou pausado em "Uma vez". */
+  reshow: z.boolean().optional()
 });
 export type SaveNoticeInput = z.infer<typeof saveNoticeSchema>;
 
@@ -497,6 +702,10 @@ export type NoticeIdInput = z.infer<typeof noticeIdSchema>;
 /** "Retirar do sino" (v2): com as notificacoes seguintes que ja sairam, marcado por padrao. */
 export const withdrawNoticeSchema = noticeIdSchema.extend({ alsoFollowUps: z.boolean().default(true) });
 export type WithdrawNoticeInput = z.input<typeof withdrawNoticeSchema>;
+
+/** "Excluir" (v3a) em qualquer situacao: a enviada sai do sino com as seguintes que ja sairam, por padrao. */
+export const deleteNoticeSchema = noticeIdSchema.extend({ alsoFollowUps: z.boolean().default(true) });
+export type DeleteNoticeInput = z.input<typeof deleteNoticeSchema>;
 
 export const previewAudienceSchema = z.object({ audience: audienceDefinitionSchema });
 
@@ -513,6 +722,30 @@ export const audioEventSchema = z.discriminatedUnion(
   { error: "Evento invalido." }
 );
 export type AudioEventInput = z.infer<typeof audioEventSchema>;
+
+/**
+ * Rotas novas do sino (v3a, docs/24 §5.1): reagir (null tira a reacao), votar ([] tira o voto) e excluir
+ * do proprio sino (false = Desfazer). Mensagens da API sem acento.
+ */
+const INVALID_REACTION = "Reacao invalida.";
+const INVALID_VOTE = "Voto invalido.";
+const INVALID_HIDE = "Pedido invalido.";
+
+export const reactionBodySchema = z.object({ reaction: z.enum(REACTION_IDS, { error: INVALID_REACTION }).nullable() }, { error: INVALID_REACTION });
+export type ReactionBody = z.infer<typeof reactionBodySchema>;
+
+export const pollVoteBodySchema = z.object(
+  {
+    optionIds: z
+      .array(z.string({ error: INVALID_VOTE }).regex(POLL_OPTION_ID, { error: INVALID_VOTE }), { error: INVALID_VOTE })
+      .max(POLL_LIMITS.maxOptions, { error: INVALID_VOTE })
+  },
+  { error: INVALID_VOTE }
+);
+export type PollVoteBody = z.infer<typeof pollVoteBodySchema>;
+
+export const hideBodySchema = z.object({ hidden: z.boolean({ error: INVALID_HIDE }) }, { error: INVALID_HIDE });
+export type HideBody = z.infer<typeof hideBodySchema>;
 
 /** Imagem 16:9 recortada no navegador (slot "notice", src/server/catalog/webp.ts). */
 export const uploadNoticeImageSchema = z.object({

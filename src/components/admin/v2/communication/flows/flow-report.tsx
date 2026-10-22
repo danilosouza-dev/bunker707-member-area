@@ -12,7 +12,6 @@ import type { FlowBranch } from "@/server/communications/flow-model";
 import type { FlowDetail } from "@/server/communications/flow-queries";
 import type { FlowNodeDraft } from "@/server/communications/flow-schemas";
 import type { NoticeEditorOptions } from "@/server/communications/queries";
-import { pageKeyOfHref } from "@/server/member-area/page-visit-model";
 import { ErrorBanner } from "../../error-banner";
 import { KpiTile } from "../../kpi-tile";
 import { AdminLinkButton } from "../../link-button";
@@ -44,6 +43,7 @@ import {
   flowTitleOf,
   formatReportValue,
   messageReportLines,
+  messageStepLines,
   noticeOriginBanner,
   notReceivedLines,
   preorder,
@@ -58,7 +58,8 @@ import {
 // ligada), os numeros de "Quem entra" no topo, a linha de atraso so quando ha fila vencida e, embaixo, a
 // tabela acessivel "Números por passo" (tambem os passos removidos, "Passo removido em 21/10"). Tocar num
 // passo mostra os numeros dele (no celular, folha de tela cheia com "Concluir"). Pausar, Retomar, Editar (as
-// alteracoes, ?editar=1) e "Retirar do sino" de um passo ficam para quem pode publicar.
+// alteracoes, ?editar=1) e "Retirar do sino" de um passo ficam para quem pode publicar. v3a: "Votaram" e
+// "Reagiram" de cada notificacao e, com enquete, uma linha por opcao (pelo id entre as versoes).
 
 type FlowReportProps = {
   detail: FlowDetail;
@@ -214,6 +215,7 @@ export function FlowReport({ detail, initialStep = null, now, options, permissio
       <StepNumbers
         content={draft.messages[selectedNode.id] ?? null}
         context={{ now, options, senders: options.senders }}
+        interactions={report?.interactions[selectedNode.id] ?? null}
         kind="message"
         stats={report?.nodes[selectedNode.id] ?? null}
         withdraw={live && permissions.canPublish ? () => requestWithdraw(selectedNode) : null}
@@ -397,7 +399,7 @@ export function FlowReport({ detail, initialStep = null, now, options, permissio
                   <LinesRows
                     lines={
                       node.kind === "message"
-                        ? messageReportLines(stats, { ctaTracked: Boolean(pageKeyOfHref(content?.cta?.href ?? null)), hasAudio: Boolean(content?.audio), hasCta: Boolean(content?.cta), hasResponse: Boolean(content?.response) })
+                        ? messageStepLines(stats, content, report?.interactions[node.id] ?? null)
                         : conditionReportLines(stats)
                     }
                   />

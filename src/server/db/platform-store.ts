@@ -80,6 +80,8 @@ type PlatformStudent = {
   /** Foto do perfil (profiles.avatar_url), so no menu do topo; ausente = iniciais. */
   avatarUrl?: string | null;
   fullName: string;
+  /** Id da conta (o dono da memoria do sino no navegador); ausente sem sessao. */
+  id?: string | null;
   name: string;
 };
 
@@ -2280,8 +2282,13 @@ export async function getAppShellData(user?: SessionUser) {
     branding: database.branding,
     // "Ver como aluno com/sem acesso": so quem ve o catalogo da escola toda (o Professor ve os cursos dele de verdade).
     canUseAccessPreview: Boolean(adminAccess && catalogScope(adminAccess) === null),
-    // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam.
-    student: { ...getStudentForUser(database, user, profile?.fullName), avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl) }
+    // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam. O id e o dono da memoria do
+    // sino no navegador (outra conta no mesmo navegador nunca ve o numero nem a pagina da anterior).
+    student: {
+      ...getStudentForUser(database, user, profile?.fullName),
+      avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl),
+      id: user?.id ?? null
+    }
   };
 }
 
