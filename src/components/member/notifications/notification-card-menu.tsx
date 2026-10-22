@@ -48,13 +48,23 @@ export function NotificationCardMenu({
   /** Excluiu: o cartao sai da tela e o painel leva o foco para o Desfazer (o menu nao devolve o foco). */
   const hidingRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  /** Fechou com Esc: o foco volta para o "⋯" depois que o menu some (ver onOpenChangeComplete). */
-  const escapedRef = useRef(false);
 
-  // Esc no menu: fecha so ele. Ouvido no proprio elemento: o popover do sino e a IA Diretor escutam no
-  // document e fechariam junto.
+  // Fechar o menu (Esc, tocar fora) com o foco dentro dele: o foco vai para o "⋯" ANTES de o menu sumir. No
+  // Safari o item com foco perde o foco quando o menu e removido (blur na remocao), o foco cai no body e o
+  // popover do sino entende "o foco saiu" e fecha o painel inteiro. Excluir nao passa por aqui: o painel
+  // leva o foco para o Desfazer.
+  function keepFocusInPanel() {
+    if (!hidingRef.current && popup?.contains(document.activeElement)) {
+      triggerRef.current?.focus({ preventScroll: true });
+    }
+  }
+
+  // Esc com o menu aberto: fecha so ele e o foco vai para o "⋯". Ouvido na window, na captura, antes de
+  // qualquer outro: o popover do sino e a IA Diretor escutam no document e fechariam junto. No Safari o
+  // clique nao foca o botao e o foco pode nem entrar no menu (fica no body): ouvir so no menu deixava o
+  // Esc fechar o painel inteiro.
   useEffect(() => {
-    if (!open || !popup) {
+    if (!open) {
       return;
     }
 
@@ -64,14 +74,14 @@ export function NotificationCardMenu({
       }
 
       event.preventDefault();
-      event.stopPropagation();
-      escapedRef.current = true;
+      event.stopImmediatePropagation();
+      triggerRef.current?.focus({ preventScroll: true });
       setOpen(false);
     }
 
-    popup.addEventListener("keydown", handleKeyDown);
-    return () => popup.removeEventListener("keydown", handleKeyDown);
-  }, [open, popup]);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [open]);
 
   if (preview) {
     return (
@@ -84,24 +94,24 @@ export function NotificationCardMenu({
   return (
     <Menu.Root
       modal={false}
-      onOpenChange={setOpen}
-      // No Safari o item com foco perde o foco quando o menu some (blur na remocao) e o popover do sino puxa o
-      // foco para o painel um quadro depois: com Esc, devolve ao "⋯" depois disso (o finalFocus nao basta).
-      onOpenChangeComplete={(isOpen) => {
-        if (isOpen || !escapedRef.current) {
-          return;
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          keepFocusInPanel();
         }
 
-        escapedRef.current = false;
-        window.requestAnimationFrame(() => {
-          if (!hidingRef.current) {
-            triggerRef.current?.focus({ preventScroll: true });
-          }
-        });
+        setOpen(nextOpen);
       }}
       open={open}
     >
-      <Menu.Trigger aria-label={label} className={cn(CARD_MENU_POSITION, buttonClassName, revealClassName, focusRing)} data-card-more="" ref={triggerRef}>
+      <Menu.Trigger
+        aria-label={label}
+        className={cn(CARD_MENU_POSITION, buttonClassName, revealClassName, focusRing)}
+        data-card-more=""
+        // No Safari tocar num botao nao o foca: o menu abria com o foco no body e o Esc fechava o painel
+        // inteiro. Focado aqui, o menu abre como no Chrome (o foco entra nele e volta para o "⋯").
+        onPointerDown={(event) => event.currentTarget.focus({ preventScroll: true })}
+        ref={triggerRef}
+      >
         <MoreHorizontal aria-hidden="true" className="size-4" />
       </Menu.Trigger>
       <Menu.Portal>
