@@ -21,6 +21,9 @@ import { findFreeNode, freePreviewPopupItem, resolveFreeForDevice, type FreeId, 
 import { freeDesignSizePercent, popupFreeHints, type FreeHint, type FreeMeasuredRects } from "@/server/communications/popup-free-checks";
 import { freeDesignClipboardText, parseFreeDesignPaste } from "@/server/communications/popup-free-paste";
 import type { NoticeDraft } from "@/server/communications/schemas";
+import { saveTemplate } from "@/server/communications/template-actions";
+import { defaultTemplateName, templateDesignSupportOf, templateErrorsFromAction } from "@/server/communications/template-model";
+import { ConfirmDialog } from "../../settings/kit";
 import type { ProductPickerItem } from "../../storefront/product-picker";
 import { adminTransition } from "../../styles";
 import { adminToast } from "../../toast";
@@ -42,6 +45,7 @@ import {
   FREE_EDITOR_COPY,
   addFreeElement,
   alignFreeNode,
+  applyFreeTemplateDesign,
   applyFreeFontAtKey,
   duplicateFreeNode,
   freeAddedAnnouncement,
@@ -95,6 +99,7 @@ import {
 import { FreeInspector, type FreeEditorCommand, type FreeFocusRequest } from "./free-inspector";
 import { FreeLayersPanel, type FreeLayerCommand } from "./free-layers-panel";
 import { FreeReviewPanel } from "./free-review-panel";
+import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } from "./free-templates-panel";
 
 // Editor Livre do pop-up (docs/27; spec §4.2): a casca de tela cheia por cima do editor do aviso (Dialog do
 // Base UI, `fixed inset-0`), carregada pelo card Design com next/dynamic. Trabalha numa COPIA do design (estado
@@ -121,6 +126,13 @@ export type FreeEditorContent = {
   allowSnooze: boolean;
   audio: NoticeDraft["audio"];
   cta: NoticeDraft["cta"];
+  /**
+   * Editando um modelo (modo modelo de Pop-up ou pagina do design guardado): o Revisar confere o botao pela regra do
+   * modelo (docs/28 D8: texto e destino podem ficar vazios), como o card e o "Salvar modelo".
+   */
+  ctaOptional?: boolean;
+  /** Pagina do modelo de Design (docs/28 §5.7): o destino do Botão principal some (e escolhido em cada aviso). */
+  hideCtaDestination?: boolean;
   onCtaChange: (cta: NoticeDraft["cta"]) => void;
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
@@ -147,8 +159,28 @@ export type FreeDesignEditorProps = {
    */
   onSaveDraft: () => Promise<{ message?: string; ok: true } | { errors: Record<string, string>; message: string; ok: false }>;
   open: boolean;
+  /** Rotulo do botao de salvar (padrao freeSaveLabel(savesInPlace)); no modo modelo e na pagina do Design, "Salvar modelo". */
+  saveLabel?: string;
+  /**
+   * Pergunta antes de salvar (docs/28 D29: modelo com uma parte que nao abriu). O dialogo abre dentro do editor (por
+   * cima dele, como o colar); null = salva direto.
+   */
+  saveConfirm?: { cancelLabel: string; confirmLabel: string; description: string; title: string } | null;
   /** Pop-up no ar ou pausado: o botão diz "Salvar alterações", como no editor do aviso (docs/27 L16). */
   savesInPlace?: boolean;
+  /** Linha de baixo do titulo (padrao content.title); no modo modelo e na pagina do Design, "Modelo: {nome}". */
+  subtitle?: string;
+  /** Chave da copia de recuperacao (padrao freeRecoveryKey(noticeId)). */
+  recoveryKey?: string;
+  /**
+   * Aba "Modelos" (docs/28 §5.9; null = sem a aba: a pagina do modelo de Design nao tem, o aviso e o modo modelo de
+   * Pop-up tem): "Salvar este design como modelo" e "Meus modelos".
+   */
+  templates?: {
+    onApplied: (templateId: string) => void;
+    sourceNoticeId: string | null;
+    sourceTemplateIds: readonly string[];
+  } | null;
   /** Erros do último salvar, já com freeErrorKeys (só as chaves freeDesign.* e as de fora, para a frase). */
   serverErrors: Readonly<Record<string, string>>;
   /** "Trocar de modelo" no card Design (Z): o design de antes vira um passo para trás (Ctrl + Z volta a ele). */
@@ -288,9 +320,14 @@ function FreeEditorSession({
   onClose,
   onFontsChange,
   onSaveDraft,
+  recoveryKey: recoveryKeyProp,
   returnTo,
+  saveConfirm = null,
+  saveLabel,
   savesInPlace = false,
   serverErrors,
+  subtitle,
+  templates = null,
   undoTo = null
 }: FreeDesignEditorProps & { returnTo: HTMLElement | null }) {
   const [initialEntry] = useState<FreeHistoryEntry>(() => ({ cta: content.cta, design: initialDesign }));
@@ -301,7 +338,9 @@ function FreeEditorSession({
   const { cta, design } = history.present;
   const initialNodeId = initialFocus?.kind === "error" ? freeNodeIdForKey(initialDesign, initialFocus.key.replace(/^freeDesign\./, "")) : null;
   const [selectedId, setSelectedId] = useState<FreeId | null>(initialNodeId);
-  const [leftTab, setLeftTab] = useState<"elements" | "layers">("layers");
+  const [leftTab, setLeftTab] = useState<"elements" | "layers" | "templates">("layers");
+  // D29: a pergunta antes do primeiro salvar de um modelo com uma parte que nao abriu.
+  const [confirmingSave, setConfirmingSave] = useState(false);
   const [rightPanel, setRightPanel] = useState<"inspector" | "review">(initialFocus?.kind === "review" ? "review" : "inspector");
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [zoom, setZoom] = useState<"100" | "fit">("fit");
@@ -315,7 +354,7 @@ function FreeEditorSession({
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [announcement, setAnnouncement] = useState<Announcement>({ id: 0, text: "" });
   const [checks, setChecks] = useState<{ errors: Record<string, string>; hints: FreeHint[] }>(() => ({
-    errors: freeEditorErrors(initialDesign, { allowSnooze: content.allowSnooze, audio: content.audio, cta: content.cta }),
+    errors: freeEditorErrors(initialDesign, { allowSnooze: content.allowSnooze, audio: content.audio, cta: content.cta, ctaOptional: content.ctaOptional }),
     hints: popupFreeHints(initialDesign, { content: { allowSnooze: content.allowSnooze, ctaLabel: content.cta?.label } })
   }));
   const [serverState, setServerState] = useState<ServerErrorState>(() => {
@@ -323,7 +362,7 @@ function FreeEditorSession({
 
     return Object.keys(split.design).length > 0 ? { cta: content.cta, design: initialDesign, errors: split.design } : null;
   });
-  const recoveryKey = freeRecoveryKey(noticeId);
+  const recoveryKey = recoveryKeyProp ?? freeRecoveryKey(noticeId);
   const [storage] = useState(() => browserFreeRecoveryStorage());
   const [recovery, setRecovery] = useState<FreeRecovery | null>(() => {
     const saved = readFreeRecovery(storage, recoveryKey);
@@ -439,13 +478,13 @@ function FreeEditorSession({
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setChecks({
-        errors: freeEditorErrors(design, { allowSnooze: content.allowSnooze, audio: content.audio, cta }),
+        errors: freeEditorErrors(design, { allowSnooze: content.allowSnooze, audio: content.audio, cta, ctaOptional: content.ctaOptional }),
         hints: popupFreeHints(design, { content: { allowSnooze: content.allowSnooze, ctaLabel: cta?.label }, rects })
       });
     }, FREE_CHECK_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [content.allowSnooze, content.audio, cta, design, rects]);
+  }, [content.allowSnooze, content.audio, content.ctaOptional, cta, design, rects]);
 
   const errors = useMemo(() => ({ ...liveServerErrors(serverState, design, cta), ...checks.errors }), [checks.errors, cta, design, serverState]);
   const review = useMemo(() => freeReviewItems(design, errors, checks.hints), [checks.hints, design, errors]);
@@ -527,6 +566,82 @@ function FreeEditorSession({
     announce(message);
 
     return null;
+  }
+
+  /* --------------------------------------------------------------------------------------------
+   * Aba Modelos (docs/28 §5.9): "Meus modelos" lido uma vez por sessao, "Usar este modelo" como um colar (um passo so
+   * no historico) e "Salvar este design como modelo" (o design do historico atual, sem salvar o aviso)
+   * ------------------------------------------------------------------------------------------ */
+
+  const mine = useDesignTemplatesLoad("free");
+
+  function applyTemplate(item: FreeTemplateItem) {
+    if (busyReason) {
+      setBanner({ kind: "wait", text: copy.save.waitUpload });
+      announce(copy.save.waitUpload);
+
+      return;
+    }
+
+    const current = historyRef.current;
+    const result = applyFreeTemplateDesign(item, {
+      content: { audio: content.audio, cta: current.present.cta },
+      fontIds: fonts.map((font) => font.id),
+      knownAssets: freeKnownAssets([current.present, ...current.past, ...current.future, initialEntry])
+    });
+
+    if (!result.ok) {
+      const text = result.errors.join(" ");
+
+      setBanner({ kind: "error", text });
+      announce(text);
+
+      return;
+    }
+
+    commit({ cta: result.cta, design: result.design });
+    setSelectedId(null);
+    setRightPanel("inspector");
+
+    const message = [copy.templates.applied, ...result.notes].join(" ");
+
+    adminToast.success(message);
+    announce(message);
+    templates?.onApplied(item.id);
+  }
+
+  async function saveDesignAsTemplate(name: string): Promise<{ ok: true } | { fieldError?: string; message: string; ok: false; status: number }> {
+    const present = historyRef.current.present;
+    const result = await saveTemplate({
+      body: {
+        design: null,
+        freeDesign: present.design,
+        source: "design",
+        support: templateDesignSupportOf({ cta: present.cta, design: null, freeDesign: present.design, image: null })
+      },
+      name,
+      origin: "free_editor",
+      sourceNoticeId: templates?.sourceNoticeId ?? null,
+      sourceTemplateIds: [...(templates?.sourceTemplateIds ?? [])]
+    }).catch(() => null);
+
+    if (!result) {
+      return { message: copy.save.failed, ok: false, status: 500 };
+    }
+
+    if (!result.ok) {
+      const { name: nameError, ...others } = templateErrorsFromAction(result.fieldErrors);
+
+      return { fieldError: nameError, message: Object.values(others)[0] ?? result.error, ok: false, status: result.status };
+    }
+
+    adminToast.success(copy.templates.saved);
+    announce(copy.templates.saved);
+    // A lista da aba volta a ser lida (o modelo novo aparece nela).
+    mine.reset();
+    mine.open();
+
+    return { ok: true };
   }
 
   /* --------------------------------------------------------------------------------------------
@@ -842,7 +957,7 @@ function FreeEditorSession({
     }
   }
 
-  async function save() {
+  async function save(confirmed = false) {
     if (busyReason) {
       setBanner({ kind: "wait", text: copy.save.waitUpload });
       announce(copy.save.waitUpload);
@@ -851,6 +966,13 @@ function FreeEditorSession({
     }
 
     if (saving || disabled) {
+      return;
+    }
+
+    // Modelo com uma parte que nao abriu (docs/28 D29): pergunta antes do primeiro salvar.
+    if (saveConfirm && !confirmed) {
+      setConfirmingSave(true);
+
       return;
     }
 
@@ -1125,7 +1247,8 @@ function FreeEditorSession({
 
   const finalFocusTarget = useCallback(() => (returnTo?.isConnected ? returnTo : true), [returnTo]);
 
-  const hasNotice = content.title.trim().length > 0;
+  const subtitleText = (subtitle ?? content.title).trim();
+  const leftTabs = templates ? (["elements", "layers", "templates"] as const) : (["elements", "layers"] as const);
 
   return (
     <DialogPrimitive.Popup
@@ -1154,7 +1277,7 @@ function FreeEditorSession({
           </Button>
           <div className="min-w-0 border-l border-[var(--border-subtle)] pl-3">
             <DialogPrimitive.Title className="truncate text-sm leading-5 font-semibold text-[var(--text-primary)]">{copy.bar.title}</DialogPrimitive.Title>
-            {hasNotice ? <p className="truncate text-xs leading-4 text-[var(--text-secondary)]">{content.title}</p> : null}
+            {subtitleText ? <p className="truncate text-xs leading-4 text-[var(--text-secondary)]">{subtitleText}</p> : null}
           </div>
         </div>
 
@@ -1250,7 +1373,7 @@ function FreeEditorSession({
             variant="secondary"
           >
             <Save aria-hidden="true" className="size-4" />
-            {saving ? copy.bar.saving : freeSaveLabel(savesInPlace)}
+            {saving ? copy.bar.saving : (saveLabel ?? freeSaveLabel(savesInPlace))}
           </Button>
         </div>
       </header>
@@ -1290,11 +1413,11 @@ function FreeEditorSession({
         <Tabs.Root
           className="flex min-h-0 min-w-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-1)]"
           data-free-zone="left"
-          onValueChange={(value) => setLeftTab(value as "elements" | "layers")}
+          onValueChange={(value) => setLeftTab(value as "elements" | "layers" | "templates")}
           value={leftTab}
         >
           <Tabs.List className="flex h-11 shrink-0 items-stretch gap-1 border-b border-[var(--border-subtle)] px-2">
-            {(["elements", "layers"] as const).map((tab) => (
+            {leftTabs.map((tab) => (
               <Tabs.Tab
                 className={cn(
                   "relative -mb-px flex items-center border-b-2 border-transparent px-2.5 text-[13px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] data-active:border-[var(--focus-ring)] data-active:text-[var(--text-primary)]",
@@ -1304,7 +1427,7 @@ function FreeEditorSession({
                 key={tab}
                 value={tab}
               >
-                {tab === "elements" ? copy.tabs.elements : copy.tabs.layers}
+                {copy.tabs[tab]}
               </Tabs.Tab>
             ))}
           </Tabs.List>
@@ -1314,6 +1437,21 @@ function FreeEditorSession({
           <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="layers">
             <FreeLayersPanel cta={cta} design={design} disabled={disabled} flagged={flagged} onCommand={onLayerCommand} onSelect={(id) => select(id)} selectedId={activeId} />
           </Tabs.Panel>
+          {templates ? (
+            <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="templates">
+              <FreeTemplatesPanel
+                busy={busyReason}
+                defaultName={defaultTemplateName({ forDesign: true, kind: "design", mode: "free", title: content.title })}
+                disabled={disabled}
+                fonts={mine.fonts}
+                load={mine.load}
+                onOpen={mine.open}
+                onRetry={mine.retry}
+                onSave={saveDesignAsTemplate}
+                onUse={applyTemplate}
+              />
+            </Tabs.Panel>
+          ) : null}
         </Tabs.Root>
 
         {/* Meio: area de desenho */}
@@ -1378,6 +1516,21 @@ function FreeEditorSession({
       <div aria-live="polite" className="sr-only" data-free-live="">
         {announcement.text ? <p key={announcement.id}>{announcement.text}</p> : null}
       </div>
+
+      {saveConfirm ? (
+        <ConfirmDialog
+          cancelLabel={saveConfirm.cancelLabel}
+          confirmLabel={saveConfirm.confirmLabel}
+          description={saveConfirm.description}
+          onConfirm={() => {
+            setConfirmingSave(false);
+            void save(true);
+          }}
+          onOpenChange={setConfirmingSave}
+          open={confirmingSave}
+          title={saveConfirm.title}
+        />
+      ) : null}
     </DialogPrimitive.Popup>
   );
 }

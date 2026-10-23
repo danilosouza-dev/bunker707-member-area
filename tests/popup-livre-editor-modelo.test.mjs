@@ -675,6 +675,20 @@ test("Revisar: o Botão principal sem destino aparece com a frase do Personaliza
   }
 });
 
+test("num modelo, o Revisar confere o Botão principal pela regra do modelo: texto e destino vazios passam, preenchidos seguem a regra do aviso", () => {
+  // Modo modelo de Pop-up e pagina do design guardado (docs/28 D8): o "Salvar modelo" aceita o botao sem destino, entao o
+  // Revisar tambem; um link preenchido errado continua apontado, com a frase do aviso.
+  const { cta, design: value } = starters.applyFreeStarter("glow_text", { audio: null, cta: null });
+  const model = (next) => ({ allowSnooze: true, audio: null, cta: next, ctaOptional: true });
+
+  assert.deepEqual(editor.freeEditorErrors(value, model(cta)), {});
+  assert.deepEqual(editor.freeEditorErrors(value, model({ ...cta, label: "" })), {});
+  assert.deepEqual(editor.freeEditorErrors(value, model({ ...cta, href: "http://exemplo.com" })), { "cta.href": "Use um link que comece com https://." });
+  assert.deepEqual(Object.keys(editor.freeEditorErrors(value, model({ ...cta, label: "x".repeat(31) }))), ["cta.label"]);
+  // Fora do modelo, o mesmo botao sem destino continua apontado no Revisar.
+  assert.deepEqual(Object.keys(editor.freeEditorErrors(value, { allowSnooze: true, audio: null, cta, ctaOptional: false })), ["cta.href"]);
+});
+
 test("salvar de dentro do editor: no pop-up no ar, o botão e a frase do editor do aviso; no rascunho, como antes", async () => {
   const notices = await import("../src/components/admin/v2/communication/notices-view-model.ts");
 

@@ -5,7 +5,10 @@ import "server-only";
 // - Video (mp4 H.264 ou webm, ate 15 MB): o navegador envia direto ao bucket communication-popup-video por um
 //   endereco assinado (o arquivo nunca passa pelo servidor do app); depois o servidor confere o tamanho pelo
 //   Storage e so os primeiros 64 bytes (pedido com Range). Tipo diferente da extensao, tamanho acima do limite
-//   ou bytes que nao sao de video: o objeto e apagado. Caminho videos/<uuid>.<mp4|webm>, sempre aleatorio.
+//   ou bytes que nao sao de video: recusado (413/422). O recusado NUNCA e apagado por padrao (docs/28 D16: o
+//   mesmo video pode estar em varios avisos e modelos, e uma conferencia que falhasse apagaria o arquivo de
+//   todos); so o fim do envio (finishPopupVideoUpload) pede para apagar, e so o envio novo que ninguem cita
+//   (removeRefused). O resto fica para a limpeza de 30 dias. Caminho videos/<uuid>.<mp4|webm>, sempre aleatorio.
 // - Fonte (woff2, woff, ttf, otf, ate 2 MB): chega pela rota multipart do admin; o servidor confere a
 //   assinatura e a estrutura minima do cabecalho, grava em communication-fonts/fonts/<24 hex do sha256>.<ext>
 //   (o mesmo arquivo nao duplica) com o tipo do formato encontrado, e cria a linha da biblioteca com a familia
@@ -257,23 +260,48 @@ export async function readFirstBytes(url: string, count: number): Promise<Uint8A
   return head.subarray(0, filled);
 }
 
-/** Video recusado: apaga o objeto (falha ao apagar so vira log) e devolve o erro para o editor. */
-async function refuseVideo(db: CommunicationsDb, objectPath: string, error: CommunicationError): Promise<never> {
-  const removed = await db.storage.from(POPUP_VIDEO_BUCKET).remove([objectPath]);
+/** Quem pode pedir para apagar o video recusado (so finishPopupVideoUpload): recebe a data de criacao do objeto. */
+export type RemoveRefusedVideo = (object: { createdAt: string | null }) => Promise<boolean>;
 
-  if (removed.error) {
-    console.error(`[comunicacao] video recusado nao foi apagado: ${removed.error.message}`);
+/**
+ * Video recusado: devolve o erro para o editor. O objeto so e apagado quando `removeRefused` existe e devolve true
+ * (o envio novo que ninguem cita, docs/28 D16); sem ele, o recusado fica para a limpeza. Falha ao apagar so vira log.
+ */
+async function refuseVideo(
+  db: CommunicationsDb,
+  objectPath: string,
+  error: CommunicationError,
+  refused: { createdAt: string | null; removeRefused?: RemoveRefusedVideo }
+): Promise<never> {
+  if (refused.removeRefused && (await refused.removeRefused({ createdAt: refused.createdAt }))) {
+    const removed = await db.storage.from(POPUP_VIDEO_BUCKET).remove([objectPath]);
+
+    if (removed.error) {
+      console.error(`[comunicacao] video recusado nao foi apagado: ${removed.error.message}`);
+    }
   }
 
   throw error;
 }
 
+/** A data de criacao do objeto no info() do Storage (camelCase; created_at como reserva; ausente = null). */
+function createdAtOf(details: { createdAt?: unknown; created_at?: unknown }): string | null {
+  const value = details.createdAt ?? details.created_at;
+
+  return typeof value === "string" && value ? value : null;
+}
+
 /**
  * Confere o video que o navegador enviou ao bucket: existe (senao 404), tamanho ate 15 MB (senao 413), os
- * primeiros bytes sao do tipo que a extensao promete e o tipo gravado no Storage e o mesmo (senao 422). Os
- * recusados sao apagados. Devolve o PopupVideo com o endereco publico calculado do caminho.
+ * primeiros bytes sao do tipo que a extensao promete e o tipo gravado no Storage e o mesmo (senao 422). Sem
+ * `removeRefused` (o padrao), o recusado NUNCA e apagado; com ele, so quando a funcao devolve true (docs/28 D16).
+ * Devolve o PopupVideo com o endereco publico calculado do caminho.
  */
-export async function inspectPopupVideo(db: CommunicationsDb, objectPath: string): Promise<{ sizeBytes: number; video: PopupVideo }> {
+export async function inspectPopupVideo(
+  db: CommunicationsDb,
+  objectPath: string,
+  options: { removeRefused?: RemoveRefusedVideo } = {}
+): Promise<{ sizeBytes: number; video: PopupVideo }> {
   const expected = popupVideoMimeTypeOfPath(objectPath);
 
   if (!expected) {
@@ -291,15 +319,22 @@ export async function inspectPopupVideo(db: CommunicationsDb, objectPath: string
     throw new Error(`Comunicacao: nao foi possivel ler o video no Storage: ${info.error.message}`);
   }
 
-  const details = info.data as { contentType?: unknown; metadata?: { mimetype?: unknown; size?: unknown } | null; size?: unknown };
+  const details = info.data as {
+    contentType?: unknown;
+    createdAt?: unknown;
+    created_at?: unknown;
+    metadata?: { mimetype?: unknown; size?: unknown } | null;
+    size?: unknown;
+  };
   const sizeBytes = Number(details.size ?? details.metadata?.size ?? 0);
+  const refused = { createdAt: createdAtOf(details), removeRefused: options.removeRefused };
 
   if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
-    return refuseVideo(db, objectPath, new CommunicationError(POPUP_VIDEO_FORMAT_MESSAGE, 422));
+    return refuseVideo(db, objectPath, new CommunicationError(POPUP_VIDEO_FORMAT_MESSAGE, 422), refused);
   }
 
   if (sizeBytes > POPUP_VIDEO_LIMITS.maxBytes) {
-    return refuseVideo(db, objectPath, new CommunicationError(POPUP_VIDEO_SIZE_MESSAGE, 413));
+    return refuseVideo(db, objectPath, new CommunicationError(POPUP_VIDEO_SIZE_MESSAGE, 413), refused);
   }
 
   const url = storage.getPublicUrl(objectPath).data.publicUrl;
@@ -308,7 +343,7 @@ export async function inspectPopupVideo(db: CommunicationsDb, objectPath: string
 
   // O tipo gravado no Storage veio do navegador: so vale se for o mesmo que os bytes mostram.
   if (sniffPopupVideo(head) !== expected || storedType !== expected) {
-    return refuseVideo(db, objectPath, new CommunicationError(POPUP_VIDEO_FORMAT_MESSAGE, 422));
+    return refuseVideo(db, objectPath, new CommunicationError(POPUP_VIDEO_FORMAT_MESSAGE, 422), refused);
   }
 
   return { sizeBytes, video: { mimeType: expected, path: objectPath, url } };

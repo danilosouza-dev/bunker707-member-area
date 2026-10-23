@@ -12,6 +12,8 @@ import type { ActionResult } from "@/lib/action-result";
 import { runAdminAction } from "@/server/actions/run-action";
 import { recordAudit } from "@/server/audit/log";
 import { assertNoDbError, communicationsDb, CommunicationError } from "./db";
+import { mayRemoveRefusedVideo } from "./design-checks";
+import { isMissingTemplatesTable } from "./media-cleanup";
 import {
   POPUP_FONT_LIMITS,
   POPUP_VIDEO_BUCKET,
@@ -34,6 +36,7 @@ import {
   POPUP_VIDEO_FORMAT_MESSAGE,
   POPUP_VIDEO_SIZE_MESSAGE
 } from "./popup-media";
+import { TEMPLATE_MESSAGES, TEMPLATES_TABLE } from "./template-model";
 
 const startVideoSchema = z.object({
   mimeType: z.enum(POPUP_VIDEO_MIME_TYPES, { error: POPUP_VIDEO_FORMAT_MESSAGE }),
@@ -83,11 +86,18 @@ export async function startPopupVideoUpload(input: { mimeType: string; sizeBytes
   });
 }
 
-/** [messaging.write] Confere o video enviado (tamanho e primeiros bytes) e devolve o PopupVideo; invalido = apagado. */
+/**
+ * [messaging.write] Confere o video enviado (tamanho e primeiros bytes) e devolve o PopupVideo. O invalido (413/422)
+ * so e apagado quando e o envio novo de verdade (docs/28 D16): o objeto foi criado ha menos de 1 hora e nenhum
+ * aviso ou modelo nao excluido cita o caminho (o de um "Tentar de novo" ou de uma chamada repetida pode ja estar num
+ * modelo). O resto fica para a limpeza de 30 dias. E o unico lugar que pede para apagar o recusado.
+ */
 export async function finishPopupVideoUpload(input: { path: string }): Promise<ActionResult<PopupVideo>> {
   return runAdminAction("messaging.write", finishVideoSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
-    const { sizeBytes, video } = await inspectPopupVideo(db, data.path);
+    const { sizeBytes, video } = await inspectPopupVideo(db, data.path, {
+      removeRefused: ({ createdAt }) => mayRemoveRefusedVideo(db, data.path, createdAt, new Date())
+    });
 
     await recordAudit(db, {
       action: "communication.video_uploaded",
@@ -131,7 +141,7 @@ export async function renamePopupFont(input: { id: string; name: string }): Prom
   });
 }
 
-/** [messaging.write] Exclui a fonte da biblioteca (deleted_at); recusa (409) quando um pop-up nao excluido usa. */
+/** [messaging.write] Exclui a fonte da biblioteca (deleted_at); recusa (409) quando um pop-up ou um modelo nao excluido usa. */
 export async function deletePopupFont(input: { id: string }): Promise<ActionResult<{ id: string }>> {
   return runAdminAction("messaging.write", deleteFontSchema, input, async ({ input: data, user }) => {
     const db = communicationsDb();
@@ -152,6 +162,23 @@ export async function deletePopupFont(input: { id: string }): Promise<ActionResu
 
     if ((count ?? 0) > 0) {
       throw new CommunicationError(fontInUseMessage(count ?? 0), 409);
+    }
+
+    // Modelos (docs/28 D18): um modelo salvo segura a fonte dele. Tabela de modelos ausente = nenhum modelo.
+    const templates = await db
+      .from(TEMPLATES_TABLE)
+      .select("id", { count: "exact", head: true })
+      .contains("payload", { design: { fonts: [data.id] } })
+      .is("deleted_at", null);
+
+    if (templates.error && !isMissingTemplatesTable(templates.error)) {
+      assertNoDbError(templates.error, "Comunicacao: modelos que usam a fonte");
+    }
+
+    const inTemplates = templates.error ? 0 : (templates.count ?? 0);
+
+    if (inTemplates > 0) {
+      throw new CommunicationError(TEMPLATE_MESSAGES.fontInTemplates(inTemplates), 409);
     }
 
     const { data: removed, error } = await db

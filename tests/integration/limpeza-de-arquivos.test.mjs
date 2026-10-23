@@ -18,7 +18,10 @@ import { limparComunicacao, seedEscolaDeTeste, usuarioDeTeste } from "../fixture
 //   o envio espera a rodada terminar e grava de novo; no fim o arquivo esta no Storage e sem marca;
 // - reserva esquecida (rodada que caiu): o envio toma, a rodada seguinte solta e decide de novo; a reserva de uma
 //   rodada em andamento fica com ela;
-// - o job do tick trabalha uma vez no dia e grava so contagens em job_runs.
+// - o job do tick trabalha uma vez no dia e grava so contagens em job_runs;
+// - modelos (docs/28 D17): o modelo nao excluido segura o arquivo (notificacao com imagem e audio, pop-up
+//   Personalizado com video e fundo, design Livre com imagens) e a fonte excluida que ele cita; excluido o modelo,
+//   o arquivo e marcado na rodada seguinte e sai depois dos 30 dias.
 // A rodada lista o Storage local inteiro: arquivos que outros testes deixaram sem uso ganham uma marca nova (nunca
 // vencida), e as marcas sao apagadas no fim. Precisa da migracao 202610240001 aplicada no banco local.
 
@@ -300,6 +303,124 @@ test("fonte excluida que um pop-up no ar usa fica; a que ninguem usa sai depois 
   await marcar(semUso, antesDeAmanha(30 * DIA));
   await rodada();
   assert.equal(await existe(semUso), false, "e sai depois dos 30 dias");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Modelos (docs/28 D17)
+ * ---------------------------------------------------------------------------------------------- */
+
+async function modelo(payload, extra = {}) {
+  const [linha] = unwrap(
+    await db
+      .from("communication_templates")
+      .insert({
+        created_by: produtor.id,
+        design_mode: payload.kind === "inbox" ? null : payload.design ? (payload.design.mode === "free" ? "free" : "custom") : null,
+        kind: payload.kind,
+        name: "Modelo da limpeza",
+        payload,
+        updated_by: produtor.id,
+        ...extra
+      })
+      .select("id"),
+    "Criando o modelo"
+  );
+  return linha.id;
+}
+
+const POPUP_SETTINGS = { close: "any", delaySeconds: 3, exclude: [], frequency: { mode: "once" }, pages: ["home"], snoozeMinutes: 1440, trigger: "page_load" };
+
+function conteudoCom({ audio = null, imagem = null } = {}) {
+  return {
+    audio: audio ? { durationSeconds: 5, mimeType: "audio/mpeg", peaks: [], url: audio.url } : null,
+    body: "",
+    cta: null,
+    image: imagem ? { alt: "", url: imagem.url } : null,
+    poll: null,
+    reactions: false,
+    response: null,
+    title: "Modelo"
+  };
+}
+
+test("modelos seguram os arquivos: notificação com imagem e áudio, pop-up Personalizado com vídeo e fundo e design Livre com imagens", async () => {
+  const [imagem, audio, video, fundo, livre, capa] = await Promise.all([enviarImagem(), enviarAudio(), enviarVideo(), enviarImagem(), enviarImagem("free"), enviarImagem("free")]);
+
+  await modelo({
+    audience: null,
+    content: conteudoCom({ audio, imagem }),
+    followUps: null,
+    kind: "inbox",
+    settings: { allowHide: true, icon: null, sender: null, validity: { mode: "default" } },
+    version: 1
+  });
+  await modelo({ audience: null, content: null, design: personalizadoCom(video, fundo), designSupport: { ctaLabel: null, image: null }, kind: "popup", settings: { allowSnooze: true, icon: null, popup: POPUP_SETTINGS }, version: 1 });
+  await modelo({
+    design: {
+      artboard: { fill: [{ asset: "fundo", kind: "image" }], width: 440 },
+      assets: [
+        { height: 90, id: "img", kind: "image", path: livre.path, width: 160 },
+        { height: 90, id: "fundo", kind: "image", path: capa.path, width: 160 }
+      ],
+      children: [{ asset: "img", id: "foto", type: "image" }, { id: "links", type: "links" }],
+      fonts: [],
+      mode: "free",
+      version: 1
+    },
+    designSupport: { ctaLabel: null, image: null },
+    kind: "design",
+    version: 1
+  });
+
+  const arquivos = [imagem, audio, video, fundo, livre, capa];
+  for (const arquivo of arquivos) {
+    await marcar(arquivo, antesDeAmanha(40 * DIA));
+  }
+
+  await rodada();
+
+  for (const arquivo of arquivos) {
+    assert.equal(await existe(arquivo), true, `${arquivo.bucket}/${arquivo.path} continua no Storage`);
+    assert.equal(await marca(arquivo), null, "e a marca antiga sai");
+  }
+});
+
+test("modelo excluído: o arquivo é marcado na rodada seguinte e sai depois dos 30 dias", async () => {
+  const video = await enviarVideo();
+  const id = await modelo({ design: personalizadoCom(video), designSupport: { ctaLabel: null, image: null }, kind: "design", version: 1 });
+
+  await rodada();
+  assert.equal(await marca(video), null, "o modelo segura o vídeo");
+
+  unwrap(await db.from("communication_templates").update({ deleted_at: new Date().toISOString(), deleted_by: produtor.id }).eq("id", id), "Excluindo o modelo");
+  await rodada();
+  assert.equal(Date.parse(await marca(video)), AMANHA.getTime(), "marcado na rodada seguinte à exclusão");
+  assert.equal(await existe(video), true);
+
+  await marcar(video, antesDeAmanha(31 * DIA));
+  await rodada();
+  assert.equal(await existe(video), false, "com 31 dias, sai do Storage");
+  assert.equal(await marca(video), null);
+});
+
+test("a fonte excluída que um modelo não excluído cita continua no Storage", async () => {
+  const arquivo = await enviarFonte();
+  const [linha] = unwrap(
+    await db
+      .from("communication_fonts")
+      .insert({ created_by: produtor.id, deleted_at: new Date().toISOString(), family_key: `bf_${hex(6)}`, file_path: arquivo.path, format: "woff2", name: "Fonte do modelo", size_bytes: WOFF2.length })
+      .select("id"),
+    "Criando a fonte excluida"
+  );
+  const design = custom.popupStarterDesign("text_only");
+  design.blocks[1].style.font = { id: linha.id, kind: "uploaded" };
+  design.fonts = [linha.id];
+  await modelo({ design, designSupport: { ctaLabel: null, image: null }, kind: "design", version: 1 });
+
+  await marcar(arquivo, antesDeAmanha(40 * DIA));
+  await rodada();
+  assert.equal(await existe(arquivo), true, "a fonte do modelo fica");
+  assert.equal(await marca(arquivo), null);
 });
 
 test("o mesmo audio enviado de novo esquece a marca (o prazo recomeca)", async () => {

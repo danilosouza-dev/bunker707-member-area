@@ -1705,6 +1705,31 @@ Chave `(bucket, path)`; indice em `first_orphan_at` (os vencidos saem pelos mais
 
 **Deploy**: antes do deploy que traz o job (sem a tabela, o job registra "migracao pendente" e termina sem erro; o tick continua verde).
 
+### Modelos da Comunicacao (migracao `202610250001`, 25/10/2026)
+
+Produto em `docs/28`. A equipe guarda a configuracao de uma notificacao, de um pop-up ou so do design (Personalizado ou Livre) para comecar avisos novos. Arquivo novo (as `202610200001` ... `202610240001` nao mudam; o teste de guarda `comunicacao-modelos.guard` confere o texto e os hashes das antigas). Uma secao aditiva e idempotente, pelo MCP: sem `drop`, `delete` nem funcao nova; o unico gatilho usa a funcao que ja existe `public.set_updated_at()`, criado dentro de `do $$ ... if not exists`; nada para o SQL Editor. O texto `popup_design` nunca aparece nela (guarda do Livre).
+
+**communication_templates** (nova):
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id` | uuid | chave (`gen_random_uuid()`) |
+| `kind` | text | `inbox` (Notificacao), `popup` (Pop-up) ou `design` (so o design); nao muda depois de criado |
+| `design_mode` | text | `custom` ou `free`; nulo na notificacao e no pop-up Padrão; obrigatorio no `design` (check `communication_templates_design_mode`) |
+| `name` | text | 1 a 80 caracteres sem espacos nas pontas (o app apara); nao precisa ser unico; nunca vai para a auditoria |
+| `payload` | jsonb | versao 1, formato e limites em `src/server/communications/template-model.ts`; check `communication_templates_payload_v1`: objeto, `version` numerica (com `coalesce`), `kind` igual a coluna e `pg_column_size <= 1048576` (o app para em 768 KB pela estimativa por cima, `docs/28` D14) |
+| `created_by`, `updated_by`, `deleted_by` | uuid | `auth.users`, `on delete set null` (toda linha semeada por teste leva uma conta `@bunker707.test`) |
+| `created_at`, `updated_at` | timestamptz | `updated_at` pelo gatilho `set_communication_templates_updated_at` (a versao do editor: 409 "mudou em outra tela") |
+| `deleted_at` | timestamptz | excluir = `deleted_at` (some da lista e dos seletores; o arquivo sem outro uso sai pela limpeza 30 dias depois) |
+
+Indices: `updated_at desc` e `(kind, design_mode, updated_at desc)`, os dois onde `deleted_at is null`. RLS ligado e **sem politica**; `revoke all` de `anon`/`authenticated`; `grant select, insert, update, delete` so ao `service_role`. O aluno nunca le (nenhuma rota do aluno nem `/api` importa os modulos de modelo; guarda). Limite de 200 modelos nao excluidos, conferido pelo app antes de gravar (duas gravacoes ao mesmo tempo podem passar de 200 por um; nada quebra). Nunca vao para o payload: data e hora de envio, janela do pop-up, "ate uma data", fim marcado da enquete, situacao, aprovacao, "mostrar de novo", ids de aviso ou de fluxo, numeros e versao de linha (`docs/28` §2.6). O payload e lido parte por parte (parte invalida volta ao padrao com uma nota no editor); a limpeza le o jsonb cru.
+
+**Arquivos**: o modelo segura o video, as imagens, o audio e as fontes que cita (`templateMediaUse` em `media-refs.ts`, lido por `loadTemplateMediaUse` no job da limpeza); excluir uma fonte citada por modelo nao excluido e recusado (409). O fim do envio do video so apaga o recusado recente que nenhum aviso ou modelo cita; o salvar nunca apaga (`docs/28` D16).
+
+**Auditoria**: `communication.template_saved`, `.template_renamed`, `.template_duplicated`, `.template_deleted` (`entity_type: "communication_template"`) e `communication.template_used` (`entity_type: "campaign"`), so com ids encontrados no banco, codigos e contagens.
+
+**Deploy**: **antes** do merge na `dev` (`docs/28` §11 passo 1). Sem a tabela, a aba Modelos mostra "migracao pendente", o "Novo aviso" continua um link e a limpeza segue sem modelos (so a tabela ausente vale como "nenhum modelo"). A migracao sozinha nao atrapalha o app de antes.
+
 ## Retencao de dados pessoais
 
 Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.

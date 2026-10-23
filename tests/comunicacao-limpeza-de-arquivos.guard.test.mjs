@@ -26,6 +26,7 @@ const custom = await import("../src/server/communications/popup-design-model.ts"
 const customSchema = await import("../src/server/communications/popup-design-schema.ts");
 const freeSchema = await import("../src/server/communications/popup-free-schema.ts");
 const freeStarters = await import("../src/server/communications/popup-free-starters.ts");
+const templates = await import("../src/server/communications/template-model.ts");
 
 const ORIGEM = "https://abcdefgh.supabase.co";
 const HEX = "0123456789abcdef01234567";
@@ -178,6 +179,91 @@ test("tipos dos designs: os campos de arquivo de hoje", () => {
     LEMBRETE
   );
   assert.deepEqual(camposDeArquivo(read("src/server/communications/popup-free-model.ts")), ["FreeImageAsset.path", "FreeVideoAsset.path"], LEMBRETE);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Modelos (docs/28 D17): amostra completa de cada tipo, lida pelos campos conhecidos (sem a varredura larga)
+ * ---------------------------------------------------------------------------------------------- */
+
+const PASSO = (n) => `0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d${String(n).padStart(2, "0")}`;
+const imagem = (hex) => ({ alt: "Foto", url: publico("content-assets", `communications/images/${hex}.webp`) });
+const audio = (hex) => ({ durationSeconds: 12, mimeType: "audio/mpeg", peaks: [10, 20], url: publico("communication-audio", `campaigns/${hex}.mp3`) });
+const conteudoCompleto = (n) => ({
+  audio: audio(String(n).repeat(24).slice(0, 24)),
+  body: "Texto",
+  cta: { display: "button", href: "https://exemplo.com", label: "Ver", target: "new_tab" },
+  image: imagem(String(n + 1).repeat(24).slice(0, 24)),
+  poll: null,
+  reactions: true,
+  response: null,
+  title: "Titulo"
+});
+const seguinte = (n, children = []) => ({
+  children,
+  content: { ...conteudoCompleto(n), allowHide: true, icon: null, sender: null, validity: { mode: "default" } },
+  id: PASSO(n),
+  when: { anchor: "sent", minutes: 60 },
+  who: { kind: "everyone" }
+});
+
+/** Uma amostra de cada tipo de modelo com todo campo que pode ter arquivo preenchido. */
+function modelosCompletos() {
+  return {
+    design_custom: { design: personalizadoCompleto(), designSupport: { ctaLabel: "Ver", image: imagem("c".repeat(24)) }, kind: "design", version: 1 },
+    design_free: { design: livreCompleto(), designSupport: { ctaLabel: null, image: null }, kind: "design", version: 1 },
+    inbox: {
+      audience: null,
+      content: conteudoCompleto(1),
+      followUps: { entryId: PASSO(99), goal: null, items: [seguinte(3, [seguinte(5)]), seguinte(7)] },
+      kind: "inbox",
+      settings: { allowHide: true, icon: null, sender: null, validity: { mode: "default" } },
+      version: 1
+    },
+    popup: {
+      audience: null,
+      content: { ...conteudoCompleto(2), reactions: false },
+      design: personalizadoCompleto(),
+      designSupport: null,
+      kind: "popup",
+      settings: { allowSnooze: true, icon: null, popup: { close: "any", delaySeconds: 3, exclude: [], frequency: { mode: "once" }, pages: ["home"], snoozeMinutes: 1440, trigger: "page_load" } },
+      version: 1
+    },
+    popup_sem_conteudo: {
+      audience: null,
+      content: null,
+      design: personalizadoCompleto(),
+      designSupport: { ctaLabel: "Ver", image: imagem("d".repeat(24)) },
+      kind: "popup",
+      settings: { allowSnooze: true, icon: null, popup: { close: "any", delaySeconds: 3, exclude: [], frequency: { mode: "once" }, pages: ["home"], snoozeMinutes: 1440, trigger: "page_load" } },
+      version: 1
+    }
+  };
+}
+
+const LEMBRETE_MODELO = "campo de arquivo novo no payload do modelo (template-model.ts): leia-o em templateFieldMediaRefs (media-refs.ts) e ponha-o na amostra desta guarda";
+
+test("modelos: amostras completas (validas no schema estrito); os campos conhecidos cobrem a varredura larga, e templateMediaUse junta os dois", () => {
+  for (const [tipo, amostra] of Object.entries(modelosCompletos())) {
+    const parsed = templates.templatePayloadSchema.safeParse(amostra);
+    assert.equal(parsed.success, true, parsed.success ? "" : `${tipo}: ${JSON.stringify(parsed.error.issues)}`);
+
+    assert.deepEqual(chaves(refs.templateFieldMediaRefs(parsed.data)), chaves(refs.mediaRefsInJson(parsed.data)), `${tipo}: ${LEMBRETE_MODELO}`);
+    assert.deepEqual(chaves(refs.templateMediaUse({ payload: parsed.data }).refs), chaves(refs.mediaRefsInJson(parsed.data)), tipo);
+    assert.ok(refs.templateFieldMediaRefs(parsed.data).length >= 2, `${tipo}: a amostra cita arquivos`);
+  }
+
+  // As seguintes em dois niveis: a imagem e o audio de cada uma (3 seguintes = 6 arquivos) mais os da principal.
+  assert.equal(refs.templateFieldMediaRefs(modelosCompletos().inbox).length, 8);
+});
+
+test("modelos: os campos com cara de arquivo dos tipos de template-model.ts sao os que templateMediaUse le", () => {
+  assert.deepEqual(
+    camposDeArquivo(read("src/server/communications/template-model.ts")),
+    // TemplateContent.audio.url e .image.url; TemplateDesignSupport.image.url (o resto do payload sao os designs, lidos acima).
+    ["TemplateContent.url", "TemplateContent.url", "TemplateDesignSupport.url"],
+    LEMBRETE_MODELO
+  );
+  assert.match(read("src/server/communications/media-cleanup.ts"), /templateMediaUse\(row\)/, "a limpeza le cada modelo por templateMediaUse");
 });
 
 test("colunas de campaigns e tipos de notificacao: cada um decidido", () => {

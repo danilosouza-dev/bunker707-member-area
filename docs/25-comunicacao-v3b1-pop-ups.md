@@ -386,7 +386,7 @@ O que a implementação decidiu onde o desenho era omisso ou não batia com o c�
 | A linha "Também no ar no Início: …" na Revisão (pop-ups em sequência que a equipe não vê) | v3b-2 (precisa da lista no ar no editor) |
 | A etiqueta "Abre direto na aula" no seletor de produto | depois (o seletor da vitrine não tem lugar para etiqueta; a frase ao vivo já avisa) |
 | Aparelhos e frequência por visita | nunca |
-| Modelos de configuração, construtor avançado e enquete no pop-up | modelos de configuração na v3b-2; o construtor visual entrou no **Design do pop-up** (`docs/26`); a enquete no pop-up fica na v3b-3 |
+| Modelos de configuração, construtor avançado e enquete no pop-up | os modelos de configuração entraram em 25/10/2026 (`docs/28`: Notificação, Pop-up e Design, com "Usar" e "Novo aviso" com modelos); o construtor visual entrou no **Design do pop-up** (`docs/26`); a enquete no pop-up fica na v3b-3 |
 
 **Ajustes conhecidos, para depois**: a cota de 30 por minuto é por processo (na Vercel, por instância); com o mapa grosso, assim que algum pop-up no ar cita um produto, toda página de produto (ou de aula) pede o plano uma vez por minuto; ponta a ponta no WebKit dos dois arquivos novos (rodados no Chromium; o WebKit roda no CI); no seletor de produtos da lista de páginas, o `aria-describedby` aponta para um id de erro que não existe (a mensagem fica uma vez no grupo; inofensivo).
 

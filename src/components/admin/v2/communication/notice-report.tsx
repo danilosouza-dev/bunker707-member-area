@@ -23,6 +23,7 @@ import { NoticeFollowUpsReport } from "./notice-follow-ups";
 import { NoticeInteractionsReport } from "./notice-interactions-report";
 import { NoticePreview } from "./notice-preview";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
+import { useNoticeSaveAsTemplate } from "./templates/save-as-template-dialog";
 import {
   INTERACTIONS_OPEN_NOTE,
   NOTICES_HREF,
@@ -177,6 +178,8 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
   const router = useRouter();
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   const { busyKey, confirmDialog, errorBanner, request } = useNoticeActions({ onDeleted: () => router.push(NOTICES_HREF) });
+  // Modelos (docs/28 §6.2): "Salvar como modelo" no menu, com a versao gravada do aviso.
+  const saveAs = useNoticeSaveAsTemplate();
   const target = toTarget(detail);
   const { engagement, stats } = detail;
   const funnel = noticeFunnel({ ...stats, opened: engagement.opened }, detail.kind);
@@ -224,7 +227,14 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
               </AdminLinkButton>
             ) : null}
             {/* O relatorio ja e o "Ver relatório"; Editar, Pausar e Retomar ficam como botoes. */}
-            <NoticeRowMenu exclude={["edit", "pause", "resume", "view_report"]} notice={target} onRequest={request} />
+            <span className="contents" data-notice-menu={detail.id}>
+              <NoticeRowMenu
+                exclude={["edit", "pause", "resume", "view_report"]}
+                extra={saveAs.extraFor(detail)}
+                notice={target}
+                onRequest={request}
+              />
+            </span>
           </>
         }
         breadcrumb={[{ href: NOTICES_HREF, label: "Avisos e pop-ups" }, { label: "Relatório" }]}
@@ -407,6 +417,7 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
       {detail.kind === "inbox" && detail.followUps ? <NoticeFollowUpsReport detail={detail} now={now} /> : null}
 
       {confirmDialog}
+      {saveAs.dialog}
     </AdminPage>
   );
 }

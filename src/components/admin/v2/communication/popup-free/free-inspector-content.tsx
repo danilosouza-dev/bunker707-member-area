@@ -15,6 +15,7 @@ import { HeroTextField } from "../../member-area/home-hero/fields";
 import { AdminSwitch } from "../../settings/kit";
 import { ProductPicker } from "../../storefront/product-picker";
 import { NoticeCtaField, type NoticeCta } from "../notice-cta-field";
+import { CtaLabelOnlyField } from "../popup-design/block-editors";
 import { ColorField, PillField, fieldLabelClass } from "../popup-design/design-controls";
 import { uploadFreeImageFile, uploadFreeVideoFile } from "./free-assets";
 import type { FreeEditorContent } from "./free-editor";
@@ -215,13 +216,30 @@ const EMPTY_CTA: NoticeCta = { display: "button", href: "", label: "", target: "
 function CtaContent(props: Of<"button">) {
   const { content, disabled, errors, node, onCtaChange } = props;
   const cta = content.cta ?? EMPTY_CTA;
+  const idPrefix = freeFieldId(node.id, "").replace(/-$/, "");
+
+  // Pagina do modelo de Design (docs/28 §5.7): so o texto; o destino e escolhido em cada aviso.
+  if (content.hideCtaDestination) {
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        <CtaLabelOnlyField
+          cta={cta}
+          disabled={disabled}
+          error={errors["cta.label"]}
+          idPrefix={idPrefix}
+          onChange={(next) => onCtaChange(next, { coalesceKey: `${node.id}:cta.label` })}
+        />
+        <ButtonIconFields design={props.design} disabled={disabled} node={node} onChange={props.onChange} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <NoticeCtaField
         disabled={disabled}
         errors={{ href: errors["cta.href"], label: errors["cta.label"] }}
-        idPrefix={freeFieldId(node.id, "").replace(/-$/, "")}
+        idPrefix={idPrefix}
         kind="popup"
         onBlurField={() => undefined}
         onChange={(next) => {

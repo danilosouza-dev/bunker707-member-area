@@ -1,22 +1,25 @@
-import { BellRing, Plus } from "lucide-react";
+import { BellRing } from "lucide-react";
 import type { CampaignKind } from "@/server/communications/campaign-model";
 import type { CommunicationOverview, NoticesPage } from "@/server/communications/queries";
+import type { RecentTemplate } from "@/server/communications/template-queries";
 import { CommunityPagination } from "../community/pagination";
 import { EmptyState } from "../empty-state";
 import { CommunicationTabs } from "../frames/communication-frame";
 import { COMMUNICATION_TAB_META, COMMUNICATION_TITLE, getCommunicationKpis } from "../frames/communication-model";
 import { KpiTile } from "../kpi-tile";
-import { AdminLinkButton } from "../link-button";
 import { AdminPage } from "../page-container";
 import { PageHeader } from "../page-header";
 import type { ResolvedAdminPeriod } from "../period";
 import { NoticeKindFilters } from "./notice-kind-filters";
 import { NoticesTable } from "./notices-table";
-import { NEW_NOTICE_HREF, NOTICES_HREF, newNoticeHref } from "./notices-view-model";
+import { NOTICES_HREF, newNoticeHref } from "./notices-view-model";
+import { NewNoticeButton } from "./templates/new-notice-button";
 
 // Comunicacao > Avisos e pop-ups (docs/22 §2.1; docs/17 §1.8): cabecalho com "Novo aviso", as abas de
 // Comunicacao, os quatro numeros do periodo da barra superior (communication_overview; sem dado, "—"),
-// filtro Todos · Notificações · Pop-ups no endereco (?tipo=) e a tabela paginada (?pagina=).
+// filtro Todos · Notificações · Pop-ups no endereco (?tipo=) e a tabela paginada (?pagina=). Modelos (docs/28
+// §5.4): com modelos salvos, "Novo aviso" vira um menu com "Começar em branco" e os 5 mais recentes; sem nenhum,
+// continua o link de sempre (o estado vazio da lista nao muda).
 
 type NoticesListViewProps = {
   canWrite: boolean;
@@ -24,6 +27,8 @@ type NoticesListViewProps = {
   overview: CommunicationOverview;
   page: NoticesPage;
   period: ResolvedAdminPeriod;
+  /** Os modelos mais recentes do "Novo aviso" (sem modelos ou sem a migracao: total 0, o link de sempre). */
+  recent: { items: RecentTemplate[]; total: number };
   searchParams: Record<string, string | string[] | undefined>;
 };
 
@@ -33,7 +38,7 @@ const EMPTY_COPY: Record<"all" | CampaignKind, { description: string; title: str
   popup: { description: "Crie um pop-up para os alunos.", title: "Nenhum pop-up ainda" }
 };
 
-export function NoticesListView({ canWrite, kind, overview, page, period, searchParams }: NoticesListViewProps) {
+export function NoticesListView({ canWrite, kind, overview, page, period, recent, searchParams }: NoticesListViewProps) {
   const meta = COMMUNICATION_TAB_META.avisos;
   const periodLabel = period.label.toLocaleLowerCase("pt-BR");
   const values = [overview.activeNow, overview.seen, overview.clickRate, overview.studied7d];
@@ -45,10 +50,7 @@ export function NoticesListView({ canWrite, kind, overview, page, period, search
         <PageHeader
           actions={
             canWrite ? (
-              <AdminLinkButton href={NEW_NOTICE_HREF}>
-                <Plus aria-hidden="true" className="size-4" />
-                Novo aviso
-              </AdminLinkButton>
+              <NewNoticeButton recent={recent} />
             ) : null
           }
           description={meta.description}

@@ -11,8 +11,8 @@ import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste }
 // (WebP com transparencia, conferida pelos bytes, caminho e medidas do servidor, sem endereco); as recusas
 // (nao e WebP, lados, tamanho, sem permissao); ao salvar, todo caminho novo e conferido no Storage (imagem que
 // nao existe ou de outro lugar recusada, medidas trocadas pelas do servidor, video que nao passou pela
-// conferencia recusado e apagado) e o video do Personalizado ja gravado na linha e reaproveitado sem conferir
-// de novo e sem apagar.
+// conferencia recusado e deixado para a limpeza: o salvar nunca apaga, docs/28 D16) e o video do Personalizado ja
+// gravado na linha e reaproveitado sem conferir de novo e sem apagar.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -244,13 +244,13 @@ test("caminho de imagem de outro lugar do bucket é recusado", async () => {
   }
 });
 
-test("vídeo novo que não passou pela conferência é recusado e apagado", async () => {
+test("vídeo novo que não passou pela conferência é recusado no salvar e fica para a limpeza", async () => {
   const caminho = await enviarVideoSemConferir(HTML);
   const result = await salvar(popupLivre({ video: { mimeType: "video/mp4", path: caminho } }));
 
   assert.deepEqual([result.ok, result.status], [false, 400]);
   assert.deepEqual(result.fieldErrors, { "freeDesign.assets.midia": [POPUP_FREE_MESSAGES.video] });
-  assert.equal(await existeNoBucket(custom.POPUP_VIDEO_BUCKET, caminho), false, "o objeto recusado foi apagado");
+  assert.equal(await existeNoBucket(custom.POPUP_VIDEO_BUCKET, caminho), true, "o salvar nunca apaga: o objeto continua no bucket (docs/28 D16)");
 
   // Caminho que nunca recebeu arquivo.
   const vazio = await salvar(popupLivre({ video: { mimeType: "video/mp4", path: `videos/${randomUUID()}.mp4` } }));
@@ -298,4 +298,5 @@ test("vídeo do Personalizado gravado reusado no Livre não é conferido de novo
   const novo = await salvar(popupLivre({ video: { mimeType: "video/mp4", path: caminho } }));
 
   assert.deepEqual(novo.fieldErrors, { "freeDesign.assets.midia": [POPUP_FREE_MESSAGES.video] });
+  assert.equal(await existeNoBucket(custom.POPUP_VIDEO_BUCKET, caminho), true, "recusado no aviso novo, mas nunca apagado (a linha antiga ainda usa)");
 });

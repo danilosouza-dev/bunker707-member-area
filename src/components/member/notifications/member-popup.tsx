@@ -31,6 +31,9 @@ import { loadPopupFreeCard } from "./popup-free/popup-free-load";
 //
 // Design do pop-up (docs/26): com `popup.design` ("Personalizado"), o cartao e o PopupDesignCard
 // (popup-design/), com as mesmas props; sem design ("Padrão"), exatamente o cartao de sempre.
+// Modelos (docs/28): `still` (so com `preview`) deixa o video do Personalizado e do Livre sempre na capa, para as
+// miniaturas da lista e de "Meus modelos" nunca montarem <video>.
+//
 // Design Livre (docs/27): com `popup.freeDesign`, o PopupFreeCard, num pedaco proprio (popup-free-load.ts, por
 // React.lazy + Suspense sem nada no lugar): o cartao Livre e os 24 icones nunca entram no pedaco da janela do
 // Padrão/Personalizado. O host ja baixou esse pedaco antes de abrir; enquanto nao chega, nada e desenhado.
@@ -52,6 +55,11 @@ export type MemberPopupCardProps = {
   popup: PopupItem;
   /** Previa do admin: mesmo visual, sem links, audio parado e botoes sem acao. */
   preview?: boolean;
+  /**
+   * So previa (miniaturas dos modelos, docs/28): o video fica sempre parado, como em "menos movimento" (a capa
+   * entra como imagem e nada do video e baixado). O aluno nunca passa.
+   */
+  still?: boolean;
   /** id do titulo (aria-labelledby do dialogo). */
   titleId?: string;
 };
@@ -100,18 +108,20 @@ function PopupCta({
   );
 }
 
-export function MemberPopupCard({ playing, ...props }: MemberPopupCardProps) {
+export function MemberPopupCard({ playing, still, ...props }: MemberPopupCardProps) {
   const { design, fonts, freeDesign } = props.popup;
+  // `still` so vale na previa (o cartao do aluno nunca recebe; sem previa, e ignorado).
+  const stillPreview = props.preview === true && still === true ? { still: true } : {};
 
   if (freeDesign) {
     return (
       <Suspense fallback={null}>
-        <PopupFreeCard {...props} design={freeDesign} fonts={fonts} playing={playing} />
+        <PopupFreeCard {...props} {...stillPreview} design={freeDesign} fonts={fonts} playing={playing} />
       </Suspense>
     );
   }
 
-  return design ? <PopupDesignCard {...props} design={design} fonts={fonts} playing={playing} /> : <DefaultPopupCard {...props} />;
+  return design ? <PopupDesignCard {...props} {...stillPreview} design={design} fonts={fonts} playing={playing} /> : <DefaultPopupCard {...props} />;
 }
 
 /** O cartao "Padrão" (o de sempre). */

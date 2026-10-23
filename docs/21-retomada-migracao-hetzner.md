@@ -362,3 +362,33 @@ contrato).
 
 **Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
 trocar o app.
+
+### 9.4 Modelos da Comunicacao: migracao `202610250001` antes do deploy (25/10/2026)
+
+A PR dos Modelos (`docs/28`) traz `supabase/migrations/202610250001_communication_templates.sql`. As migracoes ate a
+`202610240001` nao mudam (a guarda `comunicacao-modelos.guard` confere os hashes).
+
+Regra: **a 0001 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, o app novo continua
+de pe: a aba Modelos mostra "migracao pendente" (`202610250001`), o "Novo aviso" continua um link, o `?modelo=` abre o
+editor em branco com "Este modelo não existe mais" e a limpeza segue sem modelos (so a tabela ausente vale como
+"nenhum modelo"). Salvar um modelo falha ate aplicar. A migracao sozinha nao atrapalha o app de antes (tabela nova).
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**:
+
+1. conferir que ela ainda nao esta la: `list_migrations` (com `202610240001`, sem `202610250001`);
+2. a secao unica pelo MCP do Supabase, numa chamada so: `execute_sql` com `set lock_timeout = '5s';` antes do texto
+   do arquivo (a tabela e nova; o `lock_timeout` so protege o `create trigger`, que pega um lock curto na tabela
+   nova), ou `apply_migration` com o arquivo inteiro, nome `communication_templates`. Nao ha `drop`, `delete` nem
+   funcao nova: o gatilho usa a `public.set_updated_at()` que ja existe, dentro de `do $$ ... if not exists`. Se o
+   MCP recusar o bloco `do`, o plano B esta no `docs/28` §8 (risco 1);
+3. conferir com as consultas do cabecalho da migracao: `relrowsecurity = true`, 0 politicas, `anon` e
+   `authenticated` sem `select`, 9 constraints, o gatilho `set_communication_templates_updated_at` e 0 linhas. Se
+   foi por `execute_sql` (que nao grava a versao), gravar o historico com o `insert into
+   supabase_migrations.schema_migrations (version, name, statements) ... on conflict (version) do nothing` do
+   relatorio da PR;
+4. a idempotencia foi conferida no banco local (segunda aplicacao com `psql` sem erro, so "already exists,
+   skipping"; e a primeira aplicacao numa tabela nova, dentro de uma transacao desfeita);
+5. fazer o merge e seguir o roteiro do `docs/28` §11.
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
+trocar o app.

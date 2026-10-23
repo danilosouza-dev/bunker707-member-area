@@ -573,9 +573,9 @@ export const noticeContentSchema: z.ZodType<NoticeContent> = z
 
 /**
  * Notificacao nunca leva `popup` nem `design` (o editor nao mostra; o servidor grava os padroes): as chaves saem
- * antes de validar.
+ * antes de validar. Exportada para o rascunho dos Modelos (template-model.ts, docs/28), que faz o mesmo.
  */
-function withoutInboxPopup(value: unknown) {
+export function withoutInboxPopup(value: unknown) {
   if (
     !value ||
     typeof value !== "object" ||
@@ -867,9 +867,21 @@ export function sentNoticeLockedProblems(saved: NoticeDraft, next: NoticeDraft):
 
 const campaignIdSchema = z.uuid({ error: "Aviso inválido." });
 
+/**
+ * Modelos de onde o aviso veio (docs/28 D16 b): os arquivos do design desses modelos contam como ja conferidos.
+ * Ate 20 (o mesmo TEMPLATE_LIMITS.sourcesAccepted de template-model.ts, que importa este arquivo; um teste
+ * confere os dois numeros), sem repetidos; o navegador manda no maximo 5.
+ */
+const FROM_TEMPLATES_MAX = 20;
+
 export const saveNoticeSchema = z.object({
   draft: noticeDraftSchema,
   expectedUpdatedAt: expectedUpdatedAtSchema.optional(),
+  fromTemplates: z
+    .array(z.uuid({ error: "Modelo inválido." }))
+    .max(FROM_TEMPLATES_MAX, "Modelo inválido.")
+    .transform((ids) => [...new Set(ids.map((id) => id.toLowerCase()))])
+    .optional(),
   id: campaignIdSchema.optional(),
   /** "Mostrar de novo para quem já viu" junto com o salvar de um pop-up no ar ou pausado (v3a; v3b-1: qualquer "Quantas vezes"). */
   reshow: z.boolean().optional()

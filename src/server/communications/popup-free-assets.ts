@@ -1,11 +1,12 @@
 import "server-only";
 
-// Arquivos do design Livre (docs/27 §5.2): o design guarda so o caminho; ao salvar, todo caminho que a linha
-// gravada ainda nao usa (storedPopupDesignAssetPaths: Livre e Personalizado) e conferido no Storage. Imagem:
-// existe no content-assets, ate 420.000 bytes, gravada como WebP, e os primeiros 64 bytes (Range, cancelado sem
-// esperar) sao WebP com as medidas do cabecalho; as medidas do servidor substituem as do navegador. Video: a
-// mesma conferencia do Personalizado (inspectPopupVideo; o recusado e apagado). Arquivo que a linha gravada
-// ainda usa nunca e conferido de novo nem apagado.
+// Arquivos do design Livre (docs/27 §5.2): o design guarda so o caminho; ao salvar, todo caminho que nenhum design
+// conhecido usa (a linha gravada e, com os Modelos, os modelos e o aviso de onde ele veio, docs/28 D16 b;
+// storedPopupDesignAssetPaths: Livre e Personalizado) e conferido no Storage. Imagem: existe no content-assets, ate
+// 420.000 bytes, gravada como WebP, e os primeiros 64 bytes (Range, cancelado sem esperar) sao WebP com as medidas do
+// cabecalho; as medidas do servidor substituem as do navegador. Video: a mesma conferencia do Personalizado
+// (inspectPopupVideo, sem pedir para apagar): o recusado recebe 400 no campo e fica para a limpeza de 30 dias.
+// Arquivo que um design conhecido ja usa nunca e conferido de novo nem apagado.
 
 import { readWebpDimensions } from "@/server/catalog/webp";
 import { CommunicationError, NoticeFieldError, type CommunicationsDb } from "./db";
@@ -74,9 +75,7 @@ export async function inspectFreeImage(db: CommunicationsDb, objectPath: string)
   return { height: dimensions.height, sizeBytes, width: dimensions.width };
 }
 
-function storedFreeImageSizes(value: unknown): Map<string, { height: number; width: number }> {
-  const sizes = new Map<string, { height: number; width: number }>();
-
+function storedFreeImageSizes(value: unknown, sizes = new Map<string, { height: number; width: number }>()): Map<string, { height: number; width: number }> {
   if (!value || typeof value !== "object" || (value as { mode?: unknown }).mode !== "free") {
     return sizes;
   }
@@ -94,12 +93,20 @@ function storedFreeImageSizes(value: unknown): Map<string, { height: number; wid
 
 /**
  * Antes de gravar o Livre: cada arquivo novo conferido (400 em freeDesign.assets.<id> quando falta ou nao vale) e
- * as medidas das imagens trocadas pelas do servidor. `stored` = o popup_design da linha gravada (null num aviso
- * novo). Devolve o design com as medidas do servidor (o mesmo objeto quando nada muda).
+ * as medidas das imagens trocadas pelas do servidor. `known` = um design gravado (o popup_design da linha; null num
+ * aviso novo) ou uma lista deles (a linha, os modelos e o aviso de onde o design veio, docs/28 D16 b): caminhos e
+ * medidas de qualquer um contam como conferidos. Nunca apaga nada. Devolve o design com as medidas do servidor (o
+ * mesmo objeto quando nada muda).
  */
-export async function assertPopupFreeAssets(db: CommunicationsDb, design: PopupFreeDesign, stored: unknown): Promise<PopupFreeDesign> {
-  const storedPaths = new Set(storedPopupDesignAssetPaths(stored));
-  const storedSizes = storedFreeImageSizes(stored);
+export async function assertPopupFreeAssets(db: CommunicationsDb, design: PopupFreeDesign, known: unknown | readonly unknown[]): Promise<PopupFreeDesign> {
+  const designs: readonly unknown[] = Array.isArray(known) ? known : [known];
+  const storedPaths = new Set(designs.flatMap((item) => storedPopupDesignAssetPaths(item)));
+  const storedSizes = new Map<string, { height: number; width: number }>();
+
+  for (const item of designs) {
+    storedFreeImageSizes(item, storedSizes);
+  }
+
   let changed = false;
   const assets: FreeAsset[] = [];
 

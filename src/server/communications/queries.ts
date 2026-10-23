@@ -950,6 +950,60 @@ export function followUpContentOf(node: Pick<FlowNode, "expireWithAnchor">, row:
   };
 }
 
+/** A arvore do cartao (followUpsFromTree) com o conteudo atual de cada passo, pela versao gravada. */
+function savedFollowUpsOf(tree: LoadedFlowTree["tree"], drawn: readonly FollowUp[], versions: ReadonlyMap<string, CampaignRow>): SavedFollowUp[] {
+  const byId = new Map(tree.nodes.map((node) => [node.id, node]));
+  const contentOfNode = (nodeId: string) => {
+    const node = byId.get(nodeId);
+
+    return followUpContentOf(node ?? { expireWithAnchor: false }, versions.get(node?.campaignId ?? ""));
+  };
+  const toSaved = (followUp: FollowUp): SavedFollowUp => ({
+    campaignId: followUp.campaignId,
+    children: followUp.children.map(toSaved),
+    content: contentOfNode(followUp.id),
+    id: followUp.id,
+    when: followUp.when,
+    who: followUp.who
+  });
+
+  return drawn.map(toSaved);
+}
+
+/**
+ * As seguintes do aviso como o cartao desenha, para guardar num modelo (docs/28 D7; saveTemplateFromNotice): a parte
+ * de loadNoticeFollowUps que monta os itens, sem numeros nem modo. null = o aviso nao tem fluxo (ou nao e notificacao);
+ * `items` null = so o construtor desenha a arvore (condicao, outra base, mais niveis). O objetivo vem como esta
+ * gravado (o "other" do construtor e decidido por quem chama).
+ */
+export async function loadNoticeFollowUpDrafts(
+  db: CommunicationsDb,
+  row: CampaignRow
+): Promise<{ entryId: string; goal: AudienceDefinition | null; items: SavedFollowUp[] | null } | null> {
+  if (row.kind !== "inbox" || row.flow_id) {
+    return null;
+  }
+
+  const loaded = await loadNoticeFlow(db, row.id);
+  const entry = loaded ? entryOf(loaded.tree) : null;
+
+  if (!loaded || !entry) {
+    return null;
+  }
+
+  const goal = definitionOf(loaded.flow.goal);
+  const drawn = followUpsFromTree(loaded.tree);
+
+  if (!drawn) {
+    return { entryId: entry.id, goal, items: null };
+  }
+
+  const messageNodes = loaded.tree.nodes.filter((node) => node.kind === "message");
+  const versions = new Map((await fetchCampaignsByIds(db, messageNodes.map((node) => node.campaignId ?? "").filter(Boolean))).map((version) => [version.id, version]));
+
+  return { entryId: entry.id, goal, items: savedFollowUpsOf(loaded.tree, drawn, versions) };
+}
+
 /**
  * Linhas das seguintes no sino (sem os testes): exatamente o que "Retirar também as notificações seguintes
  * que já saíram (n)" apaga (withdrawNotice), inclusive as de um passo removido depois de sair.
@@ -1080,14 +1134,6 @@ async function loadNoticeFollowUps(
 
     return followUpContentOf(node ?? { expireWithAnchor: false }, versions.get(node?.campaignId ?? ""));
   };
-  const toSaved = (followUp: FollowUp): SavedFollowUp => ({
-    campaignId: followUp.campaignId,
-    children: followUp.children.map(toSaved),
-    content: contentOfNode(followUp.id),
-    id: followUp.id,
-    when: followUp.when,
-    who: followUp.who
-  });
   const goal = definitionOf(flow.goal);
   const live = flow.status !== "draft" && flow.status !== "pending_approval";
   const ctaKeys = Object.fromEntries(messageNodes.map((node) => [node.id, pageKeyOfHref(versions.get(node.campaignId ?? "")?.cta_href ?? null)]));
@@ -1156,7 +1202,7 @@ async function loadNoticeFollowUps(
       entryNodeId: entry?.id ?? null,
       flowId: flow.id,
       goal,
-      items: drawn ? drawn.map(toSaved) : null,
+      items: drawn ? savedFollowUpsOf(tree, drawn, versions) : null,
       lines,
       mode,
       names,

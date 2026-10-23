@@ -4,8 +4,10 @@ import "server-only";
 // 1. le as marcas (communication_media_orphans; sem a tabela, termina sem erro: migracao pendente);
 // 2. lista os nossos lugares no Storage (media-refs.ts: videos, fontes, audios, imagens do aviso e do Livre);
 // 3. junta tudo que esta em uso: avisos, pop-ups e passos de fluxo nao excluidos (imagem, audio, design
-//    Personalizado ou Livre), fontes da biblioteca (e a excluida que um aviso ou modelo ainda cita), modelos
-//    (loadTemplateMediaUse) e notificacoes de tipo que guarda arquivo (nenhum hoje);
+//    Personalizado ou Livre), fontes da biblioteca (e a excluida que um aviso ou modelo ainda cita), os modelos
+//    nao excluidos (loadTemplateMediaUse: o jsonb cru de communication_templates, docs/28 D17; so a tabela
+//    ausente vale como "nenhum modelo", qualquer outro erro para a rodada sem marcar nem apagar nada) e
+//    notificacoes de tipo que guarda arquivo (nenhum hoje);
 // 4. planeja (media-cleanup-model.ts), marca o que ficou sem uso, desmarca o que voltou a ser usado;
 // 5. para os vencidos (30 dias sem uso, ate 500): junta o uso DE NOVO, reserva a marca de forma atomica (grava
 //    claimed_at so se ela ainda e antiga e livre), apaga do Storage e SO ENTAO tira a linha. Falha no Storage solta a
@@ -26,9 +28,11 @@ import {
   mediaLocationOf,
   NOTIFICATION_KINDS_WITH_MEDIA,
   notificationMediaRefs,
+  templateMediaUse,
   type FontFileRow,
   type MediaLocation,
   type MediaRef,
+  type TemplateMediaRow,
   type TemplateMediaUse
 } from "./media-refs";
 import {
@@ -49,6 +53,10 @@ export const MEDIA_ORPHANS_TABLE = "communication_media_orphans";
 export const MEDIA_BUSY_MESSAGE = "Este arquivo está saindo do armazenamento agora. Envie de novo em alguns minutos.";
 
 const CAMPAIGN_PAGE = 200;
+/** 20 por pagina: o payload pode ter ate 768 KB (docs/28 D14). */
+const TEMPLATE_PAGE = 20;
+/** A tabela dos modelos (template-model.TEMPLATES_TABLE; este modulo nao importa o modelo puro dos Modelos). */
+const TEMPLATES_TABLE_NAME = "communication_templates";
 const ROW_PAGE = 1_000;
 const WRITE_CHUNK = 500;
 /** Caminhos por filtro `in` (vao na URL) e por chamada de remocao ao Storage. */
@@ -101,14 +109,45 @@ function emptyResult(): MediaCleanupResult {
  * ---------------------------------------------------------------------------------------------- */
 
 /**
- * Modelos de pop-up (ainda nao existem): quando a tabela de modelos chegar, ler aqui cada modelo nao excluido e
- * devolver `templateMediaUse(modelo)` (media-refs.ts). O que um modelo usa nunca sai do Storage, e a fonte
- * excluida que um modelo cita tambem fica.
+ * Tabela de modelos ausente (migracao 202610250001 pendente): 42P01 ou PGRST205 com a mensagem citando
+ * communication_templates. So isso: coluna que falta (42703, PGRST204) ou falha de conexao nao e "nenhum modelo"
+ * (num deploy a frente de uma migracao futura, a rodada marcaria os arquivos que so os modelos seguram).
+ */
+export function isMissingTemplatesTable(error: { code?: string | null; message?: string | null } | null | undefined): boolean {
+  return Boolean(error && (error.code === "42P01" || error.code === "PGRST205") && (error.message ?? "").includes(TEMPLATES_TABLE_NAME));
+}
+
+/**
+ * Modelos nao excluidos (docs/28 D17), por keyset, select "id,payload": o que cada um segura pelo jsonb cru
+ * (templateMediaUse). isMissingTemplatesTable na primeira pagina -> [] (nenhum modelo foi gravado); numa pagina
+ * seguinte, lanca como os outros. Qualquer outro erro lanca, inclusive
+ * 42703 e PGRST204 (coluna) e falha de conexao: a rodada para sem marcar nem apagar nada. O que um modelo usa nunca
+ * sai do Storage, e a fonte excluida que um modelo cita tambem fica.
  */
 export async function loadTemplateMediaUse(db: CommunicationsDb): Promise<TemplateMediaUse[]> {
-  void db;
+  const uses: TemplateMediaUse[] = [];
+  let missing = false;
 
-  return [];
+  await readByKeyset<TemplateMediaRow & { id: string }>(
+    async (afterId, limit) => {
+      const base = db.from(TEMPLATES_TABLE_NAME).select("id,payload").is("deleted_at", null);
+      const result = await (afterId ? base.gt("id", afterId) : base).order("id").limit(limit);
+
+      // So na primeira pagina: a tabela que some no meio da leitura nao e "nenhum modelo" (os ja lidos seguram
+      // arquivos); o erro segue para o assertNoDbError e a rodada para sem marcar nem apagar.
+      if (afterId === null && isMissingTemplatesTable(result.error)) {
+        missing = true;
+        return { data: [], error: null };
+      }
+
+      return result;
+    },
+    TEMPLATE_PAGE,
+    "Comunicacao: arquivos em uso pelos modelos",
+    (rows) => rows.forEach((row) => uses.push(templateMediaUse(row)))
+  );
+
+  return missing ? [] : uses;
 }
 
 /** Paginas por id (chave crescente): linhas que entram ou saem durante a leitura nao deslocam as outras. */

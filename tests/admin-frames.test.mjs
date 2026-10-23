@@ -17,13 +17,14 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const stripComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const resolve = (value) => period.resolveAdminPeriod(period.parseAdminPeriodParam(value, now), now);
 
-test("Comunicacao: quatro abas com endereco proprio, frase do prototipo e fase so no atributo", () => {
-  assert.deepEqual([...model.COMMUNICATION_TABS], ["avisos", "fluxos", "webinarios", "promocoes"]);
+test("Comunicacao: cinco abas com endereco proprio, frase do prototipo e fase so no atributo", () => {
+  assert.deepEqual([...model.COMMUNICATION_TABS], ["avisos", "fluxos", "modelos", "webinarios", "promocoes"]);
   assert.deepEqual(
     model.COMMUNICATION_TABS.map((tab) => [model.COMMUNICATION_TAB_META[tab].label, model.COMMUNICATION_TAB_META[tab].href]),
     [
       ["Avisos e pop-ups", "/admin/comunicacao/avisos"],
       ["Fluxos", "/admin/comunicacao/fluxos"],
+      ["Modelos", "/admin/comunicacao/modelos"],
       ["Webinários", "/admin/comunicacao/webinarios"],
       ["Promoções", "/admin/comunicacao/promocoes"]
     ]
@@ -31,8 +32,14 @@ test("Comunicacao: quatro abas com endereco proprio, frase do prototipo e fase s
   assert.equal(model.COMMUNICATION_HOME_HREF, "/admin/comunicacao/avisos");
   assert.deepEqual(
     model.COMMUNICATION_TABS.map((tab) => model.COMMUNICATION_TAB_META[tab].phase),
-    [5, 7, 5, 6]
+    [5, 7, 7, 5, 6]
   );
+  // docs/28 (D22, D25): a aba Modelos e a lista de configuracoes prontas; os modelos de fluxo ficam em "Novo fluxo".
+  assert.equal(
+    model.COMMUNICATION_TAB_META.modelos.description,
+    "Configurações prontas de notificações, pop-ups e designs para começar avisos novos. Os modelos de fluxo ficam em Novo fluxo."
+  );
+  assert.doesNotMatch(model.COMMUNICATION_TAB_META.modelos.description, /template|público|audiência|layout|lembrete/i);
   assert.equal(model.COMMUNICATION_TAB_META.fluxos.description, "Sequências de notificações com regras: quem entra, o que recebe e quando.");
   assert.doesNotMatch(model.COMMUNICATION_TAB_META.fluxos.description, /automátic|automaç/i, "\"Notificações automáticas\" e das de comentario (docs/22 §1.2)");
 
@@ -50,6 +57,7 @@ test("Comunicacao: os quatro numeros de cada aba seguem o periodo da barra super
   assert.match(model.getCommunicationKpis("fluxos", resolve("hoje"))[2].definition, /hoje$/, "enviadas seguem o periodo");
   assert.deepEqual(labels("webinarios"), ["Próximos", "Inscritos", "Comparecimento", "Replays"]);
   assert.deepEqual(labels("promocoes"), ["Ativas", "Cliques no checkout", "Taxa de clique", "Terminam em 7 dias"]);
+  assert.deepEqual(labels("modelos"), [], "Modelos nao tem numeros no topo (D22)");
 
   assert.equal(labels("avisos", "hoje")[1], "Vistos hoje");
   assert.equal(labels("avisos", "1d")[1], "Vistos em 24 horas");
@@ -108,10 +116,10 @@ test("Comunicacao: Avisos e pop-ups e tela de verdade, com numeros do banco e lo
   assert.match(page, /<PendingMigrationNotice migration="202610200001" \/>/, "banco sem a migracao: aviso, nunca tela quebrada");
   assert.doesNotMatch(list, /value=\{null\}/, "numero de verdade, nao o \"—\" da moldura");
   assert.match(list, /overview\.activeNow, overview\.seen, overview\.clickRate, overview\.studied7d/);
-  assert.match(list, /canWrite \? \(\s*<AdminLinkButton href=\{NEW_NOTICE_HREF\}>/, "Novo aviso so para quem cria avisos");
+  assert.match(list, /canWrite \? \(\s*<NewNoticeButton/, "Novo aviso so para quem cria avisos (com modelos, o menu; sem, o link de sempre)");
   assert.match(list, /<CommunicationTabs \/>/, "mesmas abas das outras telas de Comunicacao");
 
-  for (const route of ["avisos", "avisos/novo", "avisos/[id]", "fluxos", "fluxos/novo", "fluxos/[id]"]) {
+  for (const route of ["avisos", "avisos/novo", "avisos/[id]", "fluxos", "fluxos/novo", "fluxos/[id]", "modelos"]) {
     for (const file of ["page.tsx", "loading.tsx"]) {
       assert.ok(existsSync(new URL(`../src/app/admin/(v2)/comunicacao/${route}/${file}`, import.meta.url)), `${route}/${file}`);
     }

@@ -4,8 +4,10 @@
 //
 // Arquivos: o design colado so fica com os arquivos que este pop-up ja conhece (mesmo tipo e mesmo caminho); os
 // outros (de outro pop-up ou inventados por uma IA) saem, e a Imagem ou o Vídeo que os usava fica vazio para a
-// equipe enviar de novo. Assim nenhum caminho de outro aviso entra no salvar (que confere os bytes de um arquivo
-// novo e apaga o video que nao passa: o arquivo podia ser de outro aviso).
+// equipe enviar de novo. Assim nenhum caminho de outro aviso entra no salvar: a conferencia do salvar so ve se o
+// arquivo existe e vale (um caminho de outro aviso passaria nela), e o design colado nao pode passar a segurar o
+// arquivo de outro aviso. (O salvar nunca apaga o recusado, docs/28 D16; o modelo aplicado manda os arquivos dele
+// pelo knownAssets.)
 
 import type { NoticeDraft } from "./schemas";
 import { canonicalPopupFreeDesign, walkFreeNodes, type FreeAsset, type PopupFreeDesign } from "./popup-free-model";

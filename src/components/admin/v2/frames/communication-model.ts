@@ -3,14 +3,15 @@
 //
 // Avisos e pop-ups ja e a tela de verdade (docs/22): os quatro numeros vem do banco
 // (communication_overview). Fluxos tambem (docs/23): sequencias de notificacoes com regras, com os
-// numeros de communication_flow_stats. Webinarios e Promocoes ainda nao existem (docs/17 §1.8): a moldura mostra
+// numeros de communication_flow_stats. Modelos (docs/28) e a lista das configuracoes prontas, sem numeros
+// no topo nem Periodo na barra (uma lista de modelos nao tem numero de periodo). Webinarios e Promocoes ainda nao existem (docs/17 §1.8): a moldura mostra
 // o cabecalho, as abas e os quatro numeros em "—", e um aviso honesto no lugar da lista. Nenhum
 // numero, webinario ou promocao de exemplo.
 
 import type { KpiValueFormat } from "../format";
 import type { ResolvedAdminPeriod } from "../period";
 
-export const COMMUNICATION_TABS = ["avisos", "fluxos", "webinarios", "promocoes"] as const;
+export const COMMUNICATION_TABS = ["avisos", "fluxos", "modelos", "webinarios", "promocoes"] as const;
 export type CommunicationTab = (typeof COMMUNICATION_TABS)[number];
 
 export const COMMUNICATION_TITLE = "Comunicação";
@@ -44,6 +45,14 @@ export const COMMUNICATION_TAB_META: Record<CommunicationTab, CommunicationTabMe
     label: "Fluxos",
     phase: 7,
     upcomingTitle: "Os fluxos estão a caminho"
+  },
+  // Tela de verdade (docs/28), sem numeros: os modelos de fluxo continuam em "Novo fluxo".
+  modelos: {
+    description: "Configurações prontas de notificações, pop-ups e designs para começar avisos novos. Os modelos de fluxo ficam em Novo fluxo.",
+    href: "/admin/comunicacao/modelos",
+    label: "Modelos",
+    phase: 7,
+    upcomingTitle: "Os modelos estão a caminho"
   },
   promocoes: {
     description: "Selo, preço e prazo no card bloqueado, com cliques rastreados até o checkout.",
@@ -93,7 +102,8 @@ export function describeCommunicationPeriod(period: Pick<ResolvedAdminPeriod, "d
  * Os quatro numeros de cada aba, com os rotulos do prototipo. Sem dado, o cartao mostra "—". Avisos
  * traz a definicao de cada um (docs/22 §2.1): ativos = pop-ups no ar + notificacoes agendadas ou
  * enviando; vistos e cliques no periodo; voltaram a estudar = viram e estudaram em 7 dias. Fluxos
- * (docs/23 §2.4): no ar agora, alunos dentro agora, notificacoes enviadas e objetivo no periodo.
+ * (docs/23 §2.4): no ar agora, alunos dentro agora, notificacoes enviadas e objetivo no periodo. Modelos
+ * (docs/28) nao tem numeros.
  */
 export function getCommunicationKpis(tab: CommunicationTab, period: Pick<ResolvedAdminPeriod, "days" | "period">): CommunicationKpi[] {
   switch (tab) {
@@ -131,6 +141,8 @@ export function getCommunicationKpis(tab: CommunicationTab, period: Pick<Resolve
           label: "Atingiram o objetivo"
         }
       ];
+    case "modelos":
+      return [];
     case "webinarios":
       return [
         { format: "number", label: "Próximos" },

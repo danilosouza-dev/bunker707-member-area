@@ -24,6 +24,8 @@ import type { NoticeSenderChoice } from "./notices-view-model";
 // (`lockedFields`, de livePollLockedFields em notice-follow-ups).
 
 type FollowUpSheetProps = {
+  /** false: "Fica no sino por" sem "Até uma data" (modo modelo, docs/28 §5.6). */
+  allowUntil?: boolean;
   /** Fim da notificacao de cima na previa ("Até a notificação principal sumir"). */
   anchorExpiresAt: number | null;
   branding: { iconUrl: string; logoUrl: string | null; name: string };
@@ -60,6 +62,7 @@ const DEVICE_OPTIONS = [
 ] as const satisfies readonly { label: string; value: PreviewDevice }[];
 
 export function FollowUpSheet({
+  allowUntil = true,
   anchorExpiresAt,
   branding,
   canEditBrand,
@@ -135,6 +138,7 @@ export function FollowUpSheet({
           sendAt={now}
           senders={senders}
           showValidity
+          validityAllowUntil={allowUntil}
           validityAnchor={{ label: followUpValidityAnchorLabel(level) }}
           value={content}
         />

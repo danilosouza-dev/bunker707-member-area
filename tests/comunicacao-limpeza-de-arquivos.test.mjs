@@ -3,7 +3,7 @@ import test from "node:test";
 import "./support/admin-action-stubs.mjs";
 
 // Limpeza automatica dos arquivos da Comunicacao sem uso (docs/22 §4.6; docs/18 §1.1): o que conta como uso em
-// cada tipo de conteudo (Padrão, Personalizado, Livre, aviso, notificacao, fonte, modelo), os prazos de 24 h e de
+// cada tipo de conteudo (Padrão, Personalizado, Livre, aviso, notificacao, fonte, modelo da docs/28), os prazos de 24 h e de
 // 30 dias, quando o job trabalha no dia, o plano de cada rodada e a rodada inteira contra um banco e um Storage em
 // memoria (inclusive a falha do Storage, que solta a reserva). A reserva antes de apagar: a linha so sai depois da
 // remocao, o envio do mesmo arquivo confere a marca antes de enviar (livre sai, reservada espera, esquecida e
@@ -149,12 +149,46 @@ test("fontes: a da biblioteca fica; a excluída só fica se um aviso não exclu�
   assert.deepEqual(chaves(refs.fontFileRefs([{ deleted_at: antes(DIA), file_path: FONTE, id: "velha" }, { deleted_at: null, file_path: FONTE, id: "nova" }], [])), [`communication-fonts/${FONTE}`]);
 });
 
-test("modelos: o gancho existe, usa as mesmas funções e hoje não devolve nada", async () => {
-  assert.deepEqual(await cleanup.loadTemplateMediaUse({}), []);
+/** Payload de modelo de pop-up (docs/28): conteudo com imagem e audio, design Personalizado com video e fundo. */
+function modeloDePopUp(origin = NUVEM) {
+  return {
+    audience: null,
+    content: {
+      audio: { durationSeconds: 3, mimeType: "audio/mpeg", peaks: [], url: publico(origin, "communication-audio", AUDIO) },
+      body: "",
+      cta: null,
+      image: { alt: "", url: publico(origin, "content-assets", `communications/images/${HEX2}.webp`) },
+      poll: null,
+      reactions: false,
+      response: null,
+      title: "Oferta"
+    },
+    design: personalizadoComTudo(origin),
+    designSupport: null,
+    kind: "popup",
+    settings: { allowSnooze: true, icon: null, popup: {} },
+    version: 1
+  };
+}
 
-  const uso = refs.templateMediaUse({ design: personalizadoComTudo() });
-  assert.deepEqual(chaves(uso.refs), [`communication-popup-video/${VIDEO}`, `content-assets/${AVISO_IMG}`]);
+test("modelos: o que o modelo segura sai do jsonb cru, pelas mesmas funções do aviso (design, conteúdo e fontes)", () => {
+  const uso = refs.templateMediaUse({ payload: modeloDePopUp() });
+  assert.deepEqual(chaves(uso.refs), [
+    `communication-audio/${AUDIO}`,
+    `communication-popup-video/${VIDEO}`,
+    `content-assets/${AVISO_IMG}`,
+    `content-assets/communications/images/${HEX2}.webp`
+  ]);
   assert.deepEqual(uso.fontIds, [FONTE_ID]);
+  assert.deepEqual(refs.templateMediaUse({ payload: null }), { fontIds: [], refs: [] });
+  assert.deepEqual(refs.templateMediaUse({}), { fontIds: [], refs: [] });
+  assert.deepEqual(chaves(refs.templateMediaUse({ payload: { ...modeloDePopUp(HETZNER), design: livreComTudo() } }).refs), [
+    `communication-audio/${AUDIO}`,
+    `communication-popup-video/${VIDEO2}`,
+    `content-assets/${LIVRE_IMG}`,
+    `content-assets/${AVISO_IMG}`,
+    `content-assets/communications/images/${HEX2}.webp`
+  ], "nuvem e Hetzner dão o mesmo arquivo; o Livre segura todo arquivo de assets");
 });
 
 test("os lugares: só os nossos padrões; o resto do bucket das capas nunca é da limpeza", () => {
@@ -294,10 +328,17 @@ test("plano: marca reservada por outra rodada fica com ela (nem desmarcada, nem 
  * ---------------------------------------------------------------------------------------------- */
 
 /** Banco e Storage em memoria que entendem so as consultas da limpeza. */
-function memoria({ campaigns = [], fonts = [], marks = [], objects = [], onRemove = null, removeError = null }) {
-  const state = { campaigns, fonts, marks: marks.map((row) => ({ ...row })), objects: objects.map((row) => ({ ...row })), removed: [] };
+function memoria({ campaigns = [], fonts = [], marks = [], objects = [], onRemove = null, removeError = null, tableErrors = {}, templates = [] }) {
+  const state = { campaigns, fonts, marks: marks.map((row) => ({ ...row })), objects: objects.map((row) => ({ ...row })), removed: [], templates };
 
   function run(query) {
+    // tableErrors: { tabela: erro } ou uma funcao (query) => erro | null (o erro so numa pagina seguinte, por exemplo).
+    const tableError = typeof tableErrors === "function" ? tableErrors(query) : tableErrors[query.table];
+
+    if (tableError) {
+      return { data: null, error: tableError };
+    }
+
     const value = (name) => query.filters.find(([method, column]) => method === name || column === name);
     const matches = (row) =>
       query.filters.every(([method, column, arg]) => {
@@ -341,7 +382,7 @@ function memoria({ campaigns = [], fonts = [], marks = [], objects = [], onRemov
       return { data: limited(state.marks.filter(matches)), error: null };
     }
 
-    const table = { campaigns: state.campaigns, communication_fonts: state.fonts }[query.table] ?? [];
+    const table = { campaigns: state.campaigns, communication_fonts: state.fonts, communication_templates: state.templates }[query.table] ?? [];
     return { data: limited(table.filter(matches)), error: null };
   }
 
@@ -487,6 +528,81 @@ test("rodada: banco sem a migração 202610240001 (ou sem a coluna claimed_at) t
     const result = await cleanup.runMediaCleanup({ db: proxied, now: AGORA });
     assert.equal(result.pendingMigration, true, error.code);
   }
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Modelos (docs/28 D17): a leitura dos modelos nao excluidos e a regra estreita da tabela ausente
+ * ---------------------------------------------------------------------------------------------- */
+
+test("modelos: loadTemplateMediaUse le os não excluídos (jsonb cru, mesmo o que não passa no schema) e a rodada não marca o que eles seguram", async () => {
+  const quebrado = { ...modeloDePopUp(), settings: "não é configuração", version: 1 };
+  const db = memoria({
+    objects: [velho("communication-popup-video", VIDEO), velho("communication-audio", AUDIO), velho("content-assets", AVISO_IMG), velho("communication-popup-video", VIDEO2)],
+    templates: [
+      { deleted_at: null, id: "t1", payload: quebrado },
+      { deleted_at: antes(DIA), id: "t2", payload: { design: livreComTudo(), designSupport: { ctaLabel: null, image: null }, kind: "design", version: 1 } }
+    ]
+  });
+
+  const usos = await cleanup.loadTemplateMediaUse(db);
+  assert.equal(usos.length, 1, "o excluído não segura nada");
+  assert.ok(chaves(usos[0].refs).includes(`communication-popup-video/${VIDEO}`), "o payload que não passa no schema ainda segura os arquivos");
+
+  const rodada = await cleanup.runMediaCleanup({ db, now: AGORA });
+  assert.deepEqual(db.state.marks.map((row) => `${row.bucket}/${row.path}`), [`communication-popup-video/${VIDEO2}`], "só o vídeo do modelo excluído fica sem uso");
+  assert.equal(rodada.marked, 1);
+});
+
+test("modelos: só a tabela ausente (42P01/PGRST205 citando communication_templates) vale como nenhum modelo; coluna que falta ou falha de conexão para a rodada sem marcar nem apagar", async () => {
+  for (const error of [
+    { code: "PGRST205", message: "Could not find the table 'public.communication_templates' in the schema cache" },
+    { code: "42P01", message: 'relation "public.communication_templates" does not exist' }
+  ]) {
+    assert.deepEqual(await cleanup.loadTemplateMediaUse(memoria({ tableErrors: { communication_templates: error } })), [], error.code);
+  }
+
+  assert.equal(cleanup.isMissingTemplatesTable({ code: "PGRST205", message: "Could not find the table 'public.outra_tabela' in the schema cache" }), false, "outra tabela não é a dos modelos");
+  assert.equal(cleanup.isMissingTemplatesTable(null), false);
+
+  for (const error of [
+    { code: "42703", message: "column communication_templates.payload does not exist" },
+    { code: "PGRST204", message: "Could not find the 'payload' column of 'communication_templates' in the schema cache" },
+    { code: null, message: "connection failure" },
+    { code: "PGRST205", message: "Could not find the table 'public.outra_tabela' in the schema cache" }
+  ]) {
+    const db = memoria({
+      marks: [{ bucket: "communication-audio", first_orphan_at: antes(40 * DIA), path: AUDIO }],
+      objects: [velho("communication-audio", AUDIO), velho("communication-popup-video", VIDEO2)],
+      tableErrors: { communication_templates: error }
+    });
+
+    await assert.rejects(cleanup.loadTemplateMediaUse(db), undefined, `${error.code}: loadTemplateMediaUse`);
+    await assert.rejects(cleanup.loadReferencedMedia(db), undefined, `${error.code}: loadReferencedMedia`);
+    await assert.rejects(cleanup.runMediaCleanup({ db, now: AGORA }), undefined, `${error.code}: a rodada para`);
+    assert.deepEqual(db.state.removed, [], `${error.code}: nada apagado`);
+    assert.deepEqual(db.state.marks.map((row) => `${row.bucket}/${row.path}`), [`communication-audio/${AUDIO}`], `${error.code}: nada marcado`);
+  }
+});
+
+test("modelos: a tabela ausente só vale como nenhum modelo na primeira página; numa página seguinte a leitura lança e a rodada para sem marcar nem apagar", async () => {
+  const templates = Array.from({ length: 20 }, (_, index) => ({ deleted_at: null, id: `t${String(index).padStart(2, "0")}`, payload: modeloDePopUp() }));
+  const ausente = { code: "PGRST205", message: "Could not find the table 'public.communication_templates' in the schema cache" };
+  // A pagina 1 (sem "gt") le as 20 linhas; a 2 (gt id) acha a tabela ausente (a migracao desfeita no meio da leitura).
+  const naSegunda = (query) => (query.table === "communication_templates" && query.filters.some(([method]) => method === "gt") ? ausente : null);
+  const db = memoria({
+    marks: [{ bucket: "communication-audio", first_orphan_at: antes(40 * DIA), path: AUDIO }],
+    objects: [velho("communication-audio", AUDIO), velho("communication-popup-video", VIDEO2)],
+    tableErrors: naSegunda,
+    templates
+  });
+
+  await assert.rejects(cleanup.loadTemplateMediaUse(db), undefined, "nao devolve [] descartando os 20 ja lidos");
+  await assert.rejects(cleanup.runMediaCleanup({ db, now: AGORA }), undefined, "a rodada para");
+  assert.deepEqual(db.state.removed, [], "nada apagado: o audio que os modelos seguram fica");
+  assert.deepEqual(db.state.marks.map((row) => `${row.bucket}/${row.path}`), [`communication-audio/${AUDIO}`], "nada marcado");
+
+  // Na primeira pagina continua valendo como nenhum modelo (a migracao pendente).
+  assert.deepEqual(await cleanup.loadTemplateMediaUse(memoria({ tableErrors: { communication_templates: ausente } })), []);
 });
 
 /* ------------------------------------------------------------------------------------------------

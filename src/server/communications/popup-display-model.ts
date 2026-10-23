@@ -442,6 +442,20 @@ export function reconcilePopupFrequency(input: { frequency: PopupFrequency | und
   return frequency.mode === "once" ? v1Frequency(repeat) : frequency;
 }
 
+/**
+ * "Quantas vezes" que vai ser gravado (o salvar do aviso, actions.withPopupSettings, e o modelo de pop-up,
+ * template-model.ts): a conciliacao de reconcilePopupFrequency e, quando a regra veio so do `repeat` da v1
+ * ("Até o aluno clicar") num pop-up sem botao, "Só quando o pop-up terminar" (o mesmo para o aluno: ninguem clica
+ * num botao que nao existe). Escolher "Quando o aluno clica no botão" sem botao em `frequency` continua como veio
+ * (o zod do rascunho recusa; o modelo pode guardar, docs/28 D8).
+ */
+export function popupFrequencyToSave(input: { frequency: PopupFrequency | undefined; hasCta: boolean; repeat: PopupRepeat; stored: PopupFrequency | null }): PopupFrequency {
+  const reconciled = reconcilePopupFrequency({ frequency: input.frequency, repeat: input.repeat, stored: input.stored });
+  const fromRepeat = reconciled !== input.frequency;
+
+  return fromRepeat && !input.hasCta && reconciled.mode === "repeat" && reconciled.stopOn === "click" ? { ...reconciled, stopOn: "never" } : reconciled;
+}
+
 /** O unico jeito de o editor e o Duplicar mudarem "Quantas vezes": `popup.frequency` e `repeat` juntos. */
 export function popupFrequencyPatch(draft: { popup?: PopupSettings }, frequency: PopupFrequency): { popup: PopupSettings; repeat: PopupRepeat } {
   return { popup: { ...(draft.popup ?? defaultPopupSettings()), frequency }, repeat: repeatOfFrequency(frequency) };
