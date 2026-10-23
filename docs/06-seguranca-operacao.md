@@ -563,6 +563,16 @@ O pop-up "Livre" (`docs/27`; sem migracao; dados em `docs/05`, secao Design Livr
 - **Copia de recuperacao do editor** (`localStorage` de quem edita): so o design e o `cta`, lida com o mesmo zod e apagada ao salvar.
 - **Auditoria.** `popup_design: "free"` em salvar/publicar/aprovar e `communication.free_image_uploaded` (`{ height, size_bytes, width }`); nunca o conteudo do design. **CSP** sem mudanca.
 
+### Limpeza dos arquivos sem uso (23/10/2026)
+
+Video, imagem, audio e fonte da Comunicacao sem uso saem do Storage 30 dias depois (`docs/22` §4.6; migracao `202610240001`; tabela em `docs/05`, secao Limpeza dos arquivos sem uso).
+
+- **Nunca apagar o que esta em uso.** A leitura do que esta em uso e larga de proposito (`media-refs.ts`: endereco do Storage de qualquer origem, caminho solto, tipo de arquivo desconhecido nos dois buckets) e e a mesma do salvar; antes de apagar, o uso e lido de novo e a marca e reservada de forma atomica (so sai a linha ainda antiga); envio do mesmo arquivo (audio, imagens e fontes tem nome pelo conteudo) apaga a marca e o prazo recomeca. Arquivo com menos de 24 h nao e julgado. A guarda `comunicacao-limpeza-de-arquivos.guard` falha quando um campo de arquivo novo aparece no design, em `campaigns` ou num tipo de notificacao sem ser lido.
+- **So os nossos lugares.** Os buckets `communication-popup-video` (`videos/`), `communication-fonts` (`fonts/`), `communication-audio` (`campaigns/`) e, no `content-assets`, so `communications/images/` e `communications/free/`; objeto fora do padrao de nome nunca e marcado nem apagado. O check da tabela recusa qualquer caminho do `content-assets` fora de `communications/`.
+- **Banco fechado, Storage pela API.** `communication_media_orphans` com RLS ligado e sem politica, so `service_role`; o arquivo sai pela API do Storage com a chave de servico, nunca por SQL em `storage.objects`. Ate 500 por rodada, uma vez por dia.
+- **Registro so com numeros.** Log e `job_runs.metadata.media_cleanup` levam contagens (listados, em uso, marcados, desmarcados, apagados, falhas); nunca caminho, titulo ou dado de aluno. Falha no Storage devolve a marca e tenta no dia seguinte.
+- **Backup.** O que saiu do Storage so volta pelo backup diario do servidor (`docs/20` §10.1) enquanto ele guardar o dia.
+
 ## Equipe e permissoes
 
 Desde 2026-10-15 o dono monta a equipe em Configuracoes > Equipe (`/admin/configuracoes/equipe`): funcoes prontas que se combinam, funcoes personalizadas e permissoes extras por pessoa. Tabela, regras e decisao de mercado em docs/17 §2.3.

@@ -11,8 +11,10 @@ import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { AUDIO_LIMITS } from "./campaign-model";
 import { CommunicationError } from "./db";
+import { forgetOrphanMark } from "./media-cleanup";
+import { NOTICE_AUDIO_BUCKET } from "./media-refs";
 
-export const NOTICE_AUDIO_BUCKET = "communication-audio";
+export { NOTICE_AUDIO_BUCKET };
 export const NOTICE_AUDIO_FORMAT_MESSAGE = "Use um arquivo de áudio MP3, M4A, OGG, WEBM ou WAV.";
 export const NOTICE_AUDIO_SIZE_MESSAGE = "O áudio deve ter no máximo 10 MB.";
 
@@ -133,6 +135,9 @@ export async function persistNoticeAudio(input: { bytes: Uint8Array; mimeType: s
   if (!isHttpsOrLoopbackUrl(new URL(url))) {
     throw new Error("Comunicacao: o audio nao ficou num endereco publico seguro.");
   }
+
+  // O mesmo audio enviado de novo cai no mesmo caminho: o prazo da limpeza recomeca (docs/22 §4.6).
+  await forgetOrphanMark(getSupabaseAdminClient(), { bucket: NOTICE_AUDIO_BUCKET, path: objectPath });
 
   return { mimeType: format.mimeType, url };
 }

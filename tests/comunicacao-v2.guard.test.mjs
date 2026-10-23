@@ -159,7 +159,8 @@ test("guarda: o motor dos fluxos nao muda o contrato dos jobs (tipo Job e ordem 
 
   assert.match(jobTypeBody, /\bname: string;/);
   assert.match(jobTypeBody, /\brun\(ctx: JobContext\): Promise<void>;/);
-  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob\];/);
+  // A limpeza diaria dos arquivos sem uso (docs/22 §4.6) entrou por ultimo; o tipo Job nao mudou.
+  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob, communicationMediaJob\];/);
 });
 
 /* ------------------------------------------------------------------------------------------------

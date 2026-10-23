@@ -72,7 +72,7 @@ Vocabulário na tela: **Livre**, **Abrir editor Livre**, **Editor Livre**, **Ele
 - **Rascunho do aviso** (`NoticeDraft`): `freeDesign` ao lado de `design`. O editor do aviso manda **sempre as duas chaves** (no máximo uma não nula, `Escolha um design só.`). Ao salvar, a **regra das duas chaves**: um pedido com uma só das chaves (mesmo nula) zera a outra; com as duas, vale como veio; sem nenhuma, fica o gravado. Assim uma aba do admin aberta antes do deploy (que só manda `design`) troca o Livre gravado em vez de gravá-lo de novo por baixo. Gravar: `popup_design = freeDesign ?? design ?? null`.
 - **Pop-up do aluno** (`PopupItem`): `freeDesign` (sem `locked` e `name`, que são só do editor) e `fonts`; `title` = o texto do primeiro Título (ou o Nome do pop-up), `body` = o primeiro Texto, `image` e `icon` nulos (uma aba do aluno com o código antigo, no meio do deploy, mostra o cartão Padrão com o texto de verdade). **Plano** (`PopupPlanItem`): `design: "free"` só nos Livres. Cache da lista no ar com a chave nova `["communications-live-popups", "design2"]`.
 - **Campos do aviso no Livre**: `title` = Nome do pop-up; `body`, `icon` e `image` guardados mas não aparecem (voltar a Padrão devolve; a imagem do nosso bucket pode virar capa do Vídeo de um modelo); `cta` = o Botão principal; `audio` = o elemento Áudio; `allowSnooze` = o "Lembrar depois" dos links e do botão.
-- **Arquivos**: imagens em `content-assets/communications/free/<24 hex>.webp` (enviadas no editor) ou `communications/images/` (a do aviso, reaproveitada); vídeo em `communication-popup-video/videos/<uuid>.<mp4|webm>`. O design guarda só o caminho; o endereço é montado na hora (§4). Arquivos que ficaram sem uso continuam no Storage (job futuro, como D21 do `docs/26`).
+- **Arquivos**: imagens em `content-assets/communications/free/<24 hex>.webp` (enviadas no editor) ou `communications/images/` (a do aviso, reaproveitada); vídeo em `communication-popup-video/videos/<uuid>.<mp4|webm>`. O design guarda só o caminho; o endereço é montado na hora (§4). Arquivos que ficaram sem uso saem do Storage 30 dias depois, pelo job diário da limpeza (`docs/22` §4.6; todo `assets[].path` de um Livre não excluído conta como uso).
 - Auditoria: `popup_design: "free" | "custom" | "default"` (nunca o conteúdo) e `communication.free_image_uploaded` (`{ height, size_bytes, width }`).
 - O formato completo do JSON (campos, padrões, limites, regras e exemplos testados) está na §9.
 
@@ -705,7 +705,7 @@ Forma canônica (padrões omitidos). O Vídeo e a Imagem dos modelos começam se
 | Arrastar nas Camadas e nas camadas de fundo, arrastar elementos da sequência no desenho, arrastar do painel, seleção de vários, distribuir, `Alt + clique`, zoom com passos, mais de um botão "Abrir um link" | PR L4 |
 | Salvar como modelo, copiar elementos entre pop-ups, biblioteca de imagens, cores salvas, migração para subir o teto de tamanho | PR L5 |
 | Animações, cores ao passar o mouse, contador, texto editado direto no desenho, Textura, contorno do texto, mistura de cores, marca-texto | PR L6 |
-| Limpeza de imagens, vídeos e fontes sem uso no Storage | job futuro |
+| Limpeza de imagens, vídeos e fontes sem uso no Storage | feito em 23/10/2026 (`docs/22` §4.6) |
 | HTML ou CSS escrito pela equipe; mídia ou fonte de fora; texto em imagem no lugar de texto | nunca |
 | Ponta a ponta no WebKit dos arquivos novos (e a foto dos cantos do vídeo com máscara, spec §3.2) | rodados no Chromium; o WebKit roda no CI |
 

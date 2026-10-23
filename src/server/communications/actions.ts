@@ -83,6 +83,8 @@ import {
 } from "./campaign-model";
 import { assertNoDbError, communicationsDb, CommunicationError, NoticeFieldError, type CommunicationsDb } from "./db";
 import { dispatchInboxCampaign, refreshPopupDeliveries } from "./dispatch";
+import { forgetOrphanMark } from "./media-cleanup";
+import { storageRefOfUrl } from "./media-refs";
 import {
   entryOf,
   followUpsFromTree,
@@ -129,7 +131,7 @@ import {
 import { assertPopupDesignFonts, withOwnStorageUrls } from "./popup-fonts";
 import { popupCardImagePathOf, type PopupDesign } from "./popup-design-model";
 import { parsePopupDesign, POPUP_DESIGN_MESSAGES, popupDesignContentProblems } from "./popup-design-schema";
-import { parseStoredPopupDesign, popupDesignKindOf, storedPopupDesignFontIds } from "./popup-design-router";
+import { parseStoredPopupDesign, popupDesignKindOf, storedPopupDesignAssetPaths, storedPopupDesignFontIds } from "./popup-design-router";
 import { assertPopupFreeAssets } from "./popup-free-assets";
 import type { PopupFreeDesign } from "./popup-free-model";
 import { POPUP_FREE_MESSAGES, popupFreeContentProblems } from "./popup-free-schema";
@@ -518,14 +520,15 @@ async function assertStoredDesignFonts(db: CommunicationsDb, row: CampaignRow) {
 }
 
 /**
- * O video so entra no design conferido pelo servidor: um caminho diferente do gravado passa de novo pela
- * conferencia do envio (existe, ate 15 MB, os primeiros bytes e o tipo gravado batem; o recusado e apagado).
- * Sem isso, um objeto enviado pelo endereco assinado sem passar por finishPopupVideoUpload seria aceito.
+ * O video so entra no design conferido pelo servidor: um caminho que a linha gravada ainda nao usa
+ * (storedPopupDesignAssetPaths, a mesma leitura do job da limpeza) passa de novo pela conferencia do envio (existe,
+ * ate 15 MB, os primeiros bytes e o tipo gravado batem; o recusado e apagado). Sem isso, um objeto enviado pelo
+ * endereco assinado sem passar por finishPopupVideoUpload seria aceito.
  */
 async function assertPopupDesignVideo(db: CommunicationsDb, design: PopupDesign, row: CampaignRow | null) {
   const video = design.media.video;
 
-  if (!video || (row && parsePopupDesign(row.popup_design)?.media.video?.path === video.path)) {
+  if (!video || (row && storedPopupDesignAssetPaths(row.popup_design).includes(video.path))) {
     return;
   }
 
@@ -542,8 +545,8 @@ async function assertPopupDesignVideo(db: CommunicationsDb, design: PopupDesign,
 
 /**
  * A imagem do fundo do cartao so entra conferida: o schema ja garantiu o caminho do nosso bucket de imagens
- * (communications/images/<24 hex>.webp, qualquer origem no endereco: o servidor troca pela nossa); um caminho
- * diferente do gravado precisa existir no Storage como WebP (400 em design.card.background.url).
+ * (communications/images/<24 hex>.webp, qualquer origem no endereco: o servidor troca pela nossa); um caminho que
+ * a linha gravada ainda nao usa precisa existir no Storage como WebP (400 em design.card.background.url).
  */
 async function assertPopupDesignCardImage(db: CommunicationsDb, design: PopupDesign, row: CampaignRow | null) {
   const background = design.card.background;
@@ -553,9 +556,8 @@ async function assertPopupDesignCardImage(db: CommunicationsDb, design: PopupDes
   }
 
   const path = popupCardImagePathOf(background.url);
-  const stored = row ? parsePopupDesign(row.popup_design)?.card.background : null;
 
-  if (path && stored?.kind === "image" && popupCardImagePathOf(stored.url) === path) {
+  if (path && row && storedPopupDesignAssetPaths(row.popup_design).includes(path)) {
     return;
   }
 
@@ -1953,6 +1955,9 @@ export async function uploadNoticeImage(input: { image: string }): Promise<Actio
     if (!isHttpsOrLoopbackUrl(new URL(url))) {
       throw new Error("Comunicacao: a imagem nao foi enviada ao armazenamento.");
     }
+
+    // A mesma imagem enviada de novo cai no mesmo caminho: o prazo da limpeza recomeca (docs/22 §4.6).
+    await forgetOrphanMark(communicationsDb(), storageRefOfUrl(url));
 
     return { url };
   });

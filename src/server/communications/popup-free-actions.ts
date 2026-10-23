@@ -13,6 +13,7 @@ import { recordAudit } from "@/server/audit/log";
 import { decodeWebpDataUrl, readWebpDimensions } from "@/server/catalog/webp";
 import { persistImageAsset } from "@/server/db/media-assets";
 import { communicationsDb, NoticeFieldError } from "./db";
+import { forgetOrphanMark } from "./media-cleanup";
 import { storagePublicPath } from "./popup-design-model";
 import { FREE_DESIGN_LIMITS } from "./popup-free-model";
 import { FREE_IMAGE_BUCKET, FREE_IMAGE_PATH_PATTERN } from "./popup-free-render";
@@ -63,6 +64,9 @@ export async function uploadPopupFreeImage(input: { image: string }): Promise<Ac
     if (!FREE_IMAGE_PATH_PATTERN.test(path)) {
       throw new Error("Comunicacao: a imagem do Livre nao foi enviada ao armazenamento.");
     }
+
+    // A mesma imagem enviada de novo cai no mesmo caminho: o prazo da limpeza recomeca (docs/22 §4.6).
+    await forgetOrphanMark(communicationsDb(), { bucket: FREE_IMAGE_BUCKET, path });
 
     await recordAudit(communicationsDb(), {
       action: "communication.free_image_uploaded",
