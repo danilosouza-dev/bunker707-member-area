@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
-import { estadoDoPopUpDaAluna, eventosDoPopUp, expect, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
+import { contaDeTeste, estadoDoPopUpDaAluna, eventosDoPopUp, expect, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
 
 // Design Livre de ponta a ponta (docs/27 §8; spec §7.3; docs/18 §3.1). Num aviso NOVO, o produtor escolhe Livre,
 // usa o modelo "Vídeo no topo com degradê" (o editor de tela cheia abre), envia o video de teste, troca as duas
@@ -14,6 +14,8 @@ import { estadoDoPopUpDaAluna, eventosDoPopUp, expect, reabrirPopUpParaAluna, te
 // recarrega (tudo igual) e publica. A aluna ve o Livre a 1440 e a 375 px: texto de verdade (selecionavel), as
 // duas cores e a fonte enviada, tudo encolhido na mesma proporcao no celular (343 / 520), nenhum texto abaixo de
 // 12 px, o X fecha e o clique no botao conta. Com E2E_SHOTS_DIR, guarda as fotos do editor e do pop-up.
+// Depois, com o pop-up NO AR (docs/27 L16): o salvar de dentro do editor Livre diz "Salvar alterações" e a frase do
+// pop-up no ar (nunca "Rascunho salvo."), e o "Mostrar de novo para quem já viu" ligado fica para o salvar do aviso.
 
 const TITULO = "Pop-up E2E: o produtor monta no Livre";
 const LINHA_1 = "Aprenda IA";
@@ -58,6 +60,18 @@ async function lerAviso(titulo: string) {
     await db.from("campaigns").select("id,cta_href,cta_label,popup_design,status").eq("kind", "popup").eq("title", titulo).is("deleted_at", null).maybeSingle(),
     `Lendo o pop-up "${titulo}"`
   ) as { cta_href: string | null; cta_label: string | null; id: string; popup_design: DesignGravado | null; status: string } | null;
+}
+
+/** Quando o pop-up voltou a contar como novo para a aluna ("Mostrar de novo para quem já viu"); null = nunca. */
+async function mostradoDeNovoParaAluna(campaignId: string) {
+  const db = createLocalAdminClient();
+  const aluna = await contaDeTeste("aluna");
+  const entrega = unwrap(
+    await db.from("campaign_deliveries").select("reshown_at").eq("campaign_id", campaignId).eq("user_id", aluna.id).single(),
+    "Lendo a entrega do pop-up da aluna"
+  ) as { reshown_at: string | null };
+
+  return entrega.reshown_at;
 }
 
 /** A linha das Camadas (o botao de selecionar) cujo nome comeca com o texto. */
@@ -505,5 +519,53 @@ test.describe("aluna", () => {
       await expect.poll(async () => (await eventosDoPopUp(aviso?.id ?? "")).at(-1)?.event_type).toBe("message_closed");
       expect((await eventosDoPopUp(aviso?.id ?? "")).at(-1)?.metadata).toMatchObject({ via: "x" });
     });
+  });
+});
+
+test.describe("produtor com o pop-up no ar", () => {
+  test.use({ storageState: SESSAO_DO_PRODUTOR, viewport: { height: 900, width: 1440 } });
+
+  test("o editor Livre salva como o editor do aviso; o Mostrar de novo fica para o salvar do aviso", async ({ page }) => {
+    const aviso = await lerAviso(TITULO);
+    expect(aviso?.status).toBe("active");
+    const id = aviso?.id ?? "";
+    expect(await mostradoDeNovoParaAluna(id)).toBeNull();
+
+    await page.goto(`/admin/comunicacao/avisos/${id}?editar=1`);
+    await page.waitForLoadState("networkidle");
+    const mostrarDeNovo = page.getByRole("switch", { name: "Mostrar de novo para quem já viu" });
+    await mostrarDeNovo.click();
+    await expect(mostrarDeNovo).toBeChecked();
+
+    const editor = page.getByRole("dialog", { name: "Editor Livre" });
+    await page.getByRole("region", { exact: true, name: "Design" }).getByRole("button", { name: "Abrir editor Livre" }).click();
+    await expect(editor).toBeVisible({ timeout: 30_000 });
+    await editor.locator('[data-free-layer-row="texto"]').getByRole("button", { exact: true, name: "Esconder" }).click();
+    await expect(noPalco(editor, "texto")).toHaveCount(0);
+
+    // No ar: o botao do editor do aviso e a frase do pop-up no ar, sem o "Mostrar de novo" (a contagem fica para la).
+    await expect(editor.getByRole("button", { name: "Salvar rascunho" })).toHaveCount(0);
+    await editor.getByRole("button", { exact: true, name: "Salvar alterações" }).click();
+    await expect(
+      editor.getByText("Pop-up atualizado. Quem já viu não vê de novo. Para quem já está com a área aberta, pode levar até 1 minuto.", { exact: true })
+    ).toHaveCount(1);
+    await expect(page.getByText("Rascunho salvo.", { exact: true })).toHaveCount(0);
+    await expect(editor).toBeVisible();
+    await expect.poll(async () => (await lerAviso(TITULO))?.popup_design?.children.find((node) => node.id === "texto")?.hidden ?? false).toBe(true);
+    expect((await lerAviso(TITULO))?.status).toBe("active");
+    expect(await mostradoDeNovoParaAluna(id)).toBeNull();
+
+    // O pedido continua ligado: o salvar do aviso (sem outra mudanca) mostra de novo e conta quantos.
+    await editor.getByRole("button", { name: "Concluir e voltar ao aviso" }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(mostrarDeNovo).toBeChecked();
+    await page.getByRole("button", { exact: true, name: "Salvar alterações" }).click();
+    await expect(
+      page.getByText("Pop-up atualizado. Ele volta a aparecer para 1 aluno que já tinha visto. Para quem já está com a área aberta, pode levar até 1 minuto.", {
+        exact: true
+      })
+    ).toBeVisible();
+    await expect(mostrarDeNovo).not.toBeChecked();
+    expect(await mostradoDeNovoParaAluna(id)).not.toBeNull();
   });
 });

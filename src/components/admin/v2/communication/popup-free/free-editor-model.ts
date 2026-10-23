@@ -33,6 +33,7 @@ import { FREE_ELEMENT_ID_PREFIX, FREE_STARTER_CTA, newFreeNode, type FreeElement
 import { FREE_NODE_TYPE_LABELS, freeNodeDisplayName, type FreeHint, type FreeMeasuredRects } from "../../../../../server/communications/popup-free-checks";
 import type { PopupFontRef } from "../../../../../server/communications/popup-design-model";
 import type { NoticeDraft } from "../../../../../server/communications/schemas";
+import { SENT_NOTICE_COPY } from "../notices-view-model";
 import {
   alignFreeRect,
   freePlaceFromRect,
@@ -1135,6 +1136,19 @@ export function freeOutsideFieldNames(errors: Readonly<Record<string, string>>):
   }
 
   return names;
+}
+
+/**
+ * O botao de salvar do editor Livre (docs/27 L16): no pop-up no ar ou pausado (`savesInPlace`), o do editor do aviso
+ * ("Salvar alterações": vale para os alunos na hora); no resto, "Salvar rascunho".
+ */
+export function freeSaveLabel(savesInPlace: boolean): string {
+  return savesInPlace ? SENT_NOTICE_COPY.save : FREE_EDITOR_COPY.bar.saveDraft;
+}
+
+/** A frase depois de salvar: a do editor do aviso (no pop-up no ar, o que acontece com quem ja viu); sem ela, "Rascunho salvo.". */
+export function freeSavedMessage(message: string | undefined): string {
+  return message ?? FREE_EDITOR_COPY.save.saved;
 }
 
 /** O elemento de uma chave de erro ou dica (o Botão principal para "cta.*", o Áudio para "audio"). */

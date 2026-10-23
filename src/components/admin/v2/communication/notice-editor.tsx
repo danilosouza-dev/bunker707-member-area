@@ -163,8 +163,11 @@ type NoticeEditorProps = {
 };
 
 type Failure = { message: string; status: number; title: string };
-/** O que o "Salvar rascunho" de dentro do editor Livre recebe (contrato do pacote E, spec §9.6). */
-type FreeSaveResult = { ok: true } | { errors: Record<string, string>; message: string; ok: false };
+/**
+ * O que o "Salvar rascunho" de dentro do editor Livre recebe (contrato do pacote E, spec §9.6). `message`: a frase do
+ * toast daqui (no pop-up no ar, o que acontece com quem ja viu); sem ela, o editor Livre diz "Rascunho salvo.".
+ */
+type FreeSaveResult = { message?: string; ok: true } | { errors: Record<string, string>; message: string; ok: false };
 type PersistOutcome = { ok: true; version: SavedVersion & { reshown?: number } } | { errors: NoticeFieldErrors; message: string; ok: false };
 type Busy = "publish" | "save" | "test" | null;
 type SavedVersion = { id: string; status: CampaignStatus; updatedAt: string };
@@ -831,7 +834,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
   /**
    * "Salvar rascunho". `fromFreeEditor`: o salvar de dentro do editor Livre (spec §4.2): sem os toasts daqui (o
-   * editor diz "Rascunho salvo."), devolvendo os erros para o Revisar dele, e sem trocar de endereco agora.
+   * editor mostra a mesma frase, devolvida em `message`), devolvendo os erros para o Revisar dele, e sem trocar de
+   * endereco agora. O "Mostrar de novo" pedido fica para o salvar daqui, que conta quantos voltam a ver (docs/27 L16).
    */
   async function saveDraft(options: { fromFreeEditor?: boolean } = {}): Promise<FreeSaveResult> {
     const quiet = options.fromFreeEditor === true;
@@ -854,12 +858,13 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       }
 
       openSavedNotice(savedVersion.id);
-      return { ok: true };
+      // Livre: no pop-up no ar, a frase daqui; no rascunho, a do editor Livre ("Rascunho salvo.", como antes).
+      return livePopup ? { message: NOTHING_TO_SAVE_MESSAGE, ok: true } : { ok: true };
     }
 
     const previousStatus = status;
     setBusy("save");
-    const outcome = await persist({}, { reshow: reshowRequested });
+    const outcome = await persist({}, { reshow: reshowRequested && !quiet });
     setBusy(null);
 
     if (!outcome.ok) {
@@ -867,10 +872,11 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }
 
     const { version } = outcome;
-    setReshow(false);
+    const message = savedNoticeToast(draft.kind, previousStatus, { recipients: sentRecipients, repeat: payload.repeat, reshown: version.reshown });
 
     if (!quiet) {
-      adminToast.success(savedNoticeToast(draft.kind, previousStatus, { recipients: sentRecipients, repeat: payload.repeat, reshown: version.reshown }));
+      setReshow(false);
+      adminToast.success(message);
     }
 
     // Notificacao enviada: volta para o relatorio (os alunos ja veem a versao nova).
@@ -880,7 +886,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }
 
     openSavedNotice(version.id);
-    return { ok: true };
+    return { message, ok: true };
   }
 
   async function publish() {
@@ -1256,6 +1262,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
               onSaveDraft={saveFromFreeEditor}
               products={pickerItems}
               productsLoaded={options.productsLoaded}
+              savesInPlace={savesInPlace}
             />
           ) : null}
 

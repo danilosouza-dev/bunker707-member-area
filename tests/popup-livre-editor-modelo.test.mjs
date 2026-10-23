@@ -629,6 +629,28 @@ test("Revisar: erros do navegador e do salvar levam ao elemento; campos de fora 
   assert.equal(C.review.size(12), "Tamanho do design: 12 % do máximo.");
 });
 
+test("salvar de dentro do editor: no pop-up no ar, o botão e a frase do editor do aviso; no rascunho, como antes", async () => {
+  const notices = await import("../src/components/admin/v2/communication/notices-view-model.ts");
+
+  // Pop-up no ar ou pausado (o salvar vale para os alunos): o botao principal do editor do aviso.
+  assert.equal(editor.freeSaveLabel(true), notices.SENT_NOTICE_COPY.save);
+  assert.equal(editor.freeSaveLabel(true), "Salvar alterações");
+  assert.equal(editor.freeSaveLabel(false), C.bar.saveDraft);
+  assert.equal(editor.freeSaveLabel(false), "Salvar rascunho");
+
+  // A frase depois: a do toast do editor do aviso (devolvida pelo salvar); sem ela, "Rascunho salvo.".
+  assert.equal(
+    editor.freeSavedMessage(notices.savedNoticeToast("popup", "active", { repeat: "once" })),
+    "Pop-up atualizado. Quem já viu não vê de novo. Para quem já está com a área aberta, pode levar até 1 minuto."
+  );
+  assert.equal(editor.freeSavedMessage(notices.savedNoticeToast("popup", "paused", { repeat: "once" })), "Pop-up salvo. Ele continua pausado.");
+  assert.equal(editor.freeSavedMessage(notices.NOTHING_TO_SAVE_MESSAGE), "Nenhuma mudança para salvar.");
+  assert.equal(editor.freeSavedMessage(notices.savedNoticeToast("popup", "draft", { repeat: "once" })), "Rascunho salvo.");
+  assert.equal(editor.freeSavedMessage(notices.savedNoticeToast("popup", null, { repeat: "once" })), "Rascunho salvo.", "aviso novo");
+  assert.equal(editor.freeSavedMessage(undefined), C.save.saved);
+  assert.equal(C.save.saved, "Rascunho salvo.");
+});
+
 test("vocabulário das frases do editor", () => {
   const texts = [];
   const collect = (value) => {

@@ -1097,19 +1097,31 @@ export function isSameNoticeDraft(left: NoticeDraft, right: NoticeDraft) {
   return stableJson(canonicalNoticeDraft(left)) === stableJson(canonicalNoticeDraft(right));
 }
 
+/** O design do pop-up: Personalizado e Livre andam juntos no Recarregar (no maximo um nao nulo, docs/27 L17). */
+const DESIGN_PAIR_KEYS = ["design", "freeDesign"] as const satisfies readonly (keyof NoticeDraft)[];
+
 /**
  * "Recarregar" depois de um 409: o que o produtor mudou aqui fica; o que ele nao mexeu segue a versao
- * nova do banco (campo a campo do rascunho: titulo, texto, imagem, segmento...).
+ * nova do banco (campo a campo do rascunho: titulo, texto, imagem, segmento...). O design do pop-up
+ * (`design` + `freeDesign`) e um campo so: mexeu em um dos dois aqui, ficam os dois daqui; senao, os dois
+ * do banco (nunca o Personalizado daqui com o Livre de outra tela).
  */
 export function rebaseNoticeDraft(base: NoticeDraft, local: NoticeDraft, server: NoticeDraft): NoticeDraft {
   const result = { ...local } as Record<keyof NoticeDraft, unknown>;
   const canonicalBase = canonicalNoticeDraft(base);
   const canonicalLocal = canonicalNoticeDraft(local);
+  const unchanged = (key: keyof NoticeDraft) => stableJson(canonicalBase[key]) === stableJson(canonicalLocal[key]);
+  const isDesignKey = (key: keyof NoticeDraft) => (DESIGN_PAIR_KEYS as readonly string[]).includes(key);
 
   for (const key of Object.keys(server) as (keyof NoticeDraft)[]) {
-    if (stableJson(canonicalBase[key]) === stableJson(canonicalLocal[key])) {
+    if (!isDesignKey(key) && unchanged(key)) {
       result[key] = server[key];
     }
+  }
+
+  if (DESIGN_PAIR_KEYS.some((key) => key in server) && DESIGN_PAIR_KEYS.every(unchanged)) {
+    result.design = server.design ?? null;
+    result.freeDesign = server.freeDesign ?? null;
   }
 
   return result as NoticeDraft;

@@ -58,6 +58,8 @@ import {
   freeParentId,
   freeRemoveProblem,
   freeReviewItems,
+  freeSavedMessage,
+  freeSaveLabel,
   freeSelectionDescription,
   freeStageDesign,
   freeToFreeProblem,
@@ -136,9 +138,14 @@ export type FreeDesignEditorProps = {
   /** `dirtySinceSave`: houve mudança depois do último salvar com sucesso (o Z decide se troca de endereço, §4.13). */
   onClose: (result: { dirtySinceSave: boolean }) => void;
   onFontsChange: (fonts: PopupFontOption[]) => void;
-  /** O Z não chama openSavedNotice enquanto o editor Livre está aberto (§4.13). */
-  onSaveDraft: () => Promise<{ ok: true } | { errors: Record<string, string>; message: string; ok: false }>;
+  /**
+   * O Z não chama openSavedNotice enquanto o editor Livre está aberto (§4.13). `message` no sucesso: a frase do editor
+   * do aviso (pop-up no ar); sem ela, "Rascunho salvo.".
+   */
+  onSaveDraft: () => Promise<{ message?: string; ok: true } | { errors: Record<string, string>; message: string; ok: false }>;
   open: boolean;
+  /** Pop-up no ar ou pausado: o botão diz "Salvar alterações", como no editor do aviso (docs/27 L16). */
+  savesInPlace?: boolean;
   /** Erros do último salvar, já com freeErrorKeys (só as chaves freeDesign.* e as de fora, para a frase). */
   serverErrors: Readonly<Record<string, string>>;
   /** "Trocar de modelo" no card Design (Z): o design de antes vira um passo para trás (Ctrl + Z volta a ele). */
@@ -279,6 +286,7 @@ function FreeEditorSession({
   onFontsChange,
   onSaveDraft,
   returnTo,
+  savesInPlace = false,
   serverErrors,
   undoTo = null
 }: FreeDesignEditorProps & { returnTo: HTMLElement | null }) {
@@ -829,11 +837,13 @@ function FreeEditorSession({
     setSaving(false);
 
     if (result.ok) {
+      const message = freeSavedMessage(result.message);
+
       setSavedSignature(freeEntrySignature(snapshot));
       setServerState(null);
       clearFreeRecovery(storage, recoveryKey);
-      adminToast.success(copy.save.saved);
-      announce(copy.save.saved);
+      adminToast.success(message);
+      announce(message);
 
       return;
     }
@@ -1195,7 +1205,7 @@ function FreeEditorSession({
             variant="secondary"
           >
             <Save aria-hidden="true" className="size-4" />
-            {saving ? copy.bar.saving : copy.bar.saveDraft}
+            {saving ? copy.bar.saving : freeSaveLabel(savesInPlace)}
           </Button>
         </div>
       </header>

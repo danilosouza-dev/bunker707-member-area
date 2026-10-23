@@ -155,6 +155,8 @@ export type PopupDesignFieldProps = {
   freeServerErrors?: Readonly<Record<string, string>>;
   /** Id do aviso gravado (null = aviso novo): a chave da copia de recuperacao do editor Livre. */
   noticeId?: string | null;
+  /** Livre: pop-up no ar ou pausado (o salvar vale para os alunos): o editor Livre fala como o editor do aviso. */
+  savesInPlace?: boolean;
 };
 
 /**
@@ -412,7 +414,8 @@ export function PopupDesignField({
   onImageUploadChange,
   onSaveDraft,
   products,
-  productsLoaded
+  productsLoaded,
+  savesInPlace = false
 }: PopupDesignFieldProps) {
   const design = draft.design ?? null;
   const freeDesign = draft.freeDesign ?? null;
@@ -655,6 +658,7 @@ export function PopupDesignField({
           onFontsChange={onFontsChange}
           onSaveDraft={onSaveDraft ?? (async () => ({ errors: {}, message: "", ok: false as const }))}
           open
+          savesInPlace={savesInPlace}
           serverErrors={freeServerErrors}
           undoTo={freeEditor.undoTo}
         />
