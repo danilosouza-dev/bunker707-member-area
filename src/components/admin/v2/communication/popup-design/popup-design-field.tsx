@@ -18,7 +18,7 @@ import {
 } from "@/server/communications/popup-design-model";
 import { freePreviewPopupItem, type PopupFreeDesign } from "@/server/communications/popup-free-model";
 import { resolveFreeArtboard } from "@/server/communications/popup-free-render";
-import { freeStarterDesign, type FreeStarterId } from "@/server/communications/popup-free-starters";
+import { freeFromCustomDesign, freeStarterDesign, type FreeStarterId } from "@/server/communications/popup-free-starters";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import { ConfirmDialog, SectionCard } from "../../settings/kit";
 import type { ProductPickerItem } from "../../storefront/product-picker";
@@ -36,8 +36,10 @@ import {
   FREE_STARTER_OPTIONS,
   NO_REMEMBERED_DESIGNS,
   POPUP_DESIGN_COPY,
+  applyFreeFromCustomPatch,
   applyFreeStarterPatch,
   applyStarter,
+  freeCustomSourceOf,
   freeDesignSummary,
   freeProblemsLabel,
   freeStarterVideoOf,
@@ -340,17 +342,23 @@ function ModeChoice({ disabled, error, onChange, value }: { disabled: boolean; e
 function FreeStarterPicker({
   busy,
   disabled,
+  fromCustom,
   onClose,
   onUse,
+  onUseCustom,
   showClose
 }: {
   busy: boolean;
   disabled: boolean;
+  /** "Usar o design Personalizado": a miniatura do Livre que sai dele (null = o aviso nao tem Personalizado). */
+  fromCustom: PopupFreeDesign | null;
   onClose: () => void;
   onUse: (id: FreeStarterId) => void;
+  onUseCustom: () => void;
   showClose: boolean;
 }) {
   const copy = POPUP_DESIGN_COPY.free.starters;
+  const customCopy = POPUP_DESIGN_COPY.free.fromCustom;
   const designs = useMemo(() => Object.fromEntries(FREE_STARTER_OPTIONS.map((starter) => [starter.id, freeStarterDesign(starter.id)])) as Record<FreeStarterId, PopupFreeDesign>, []);
 
   return (
@@ -360,6 +368,20 @@ function FreeStarterPicker({
         <p className="mt-0.5 text-[13px] leading-5 text-[var(--text-secondary)]">{copy.hint}</p>
       </div>
       <ul className="m-0 flex min-w-0 list-none flex-col gap-2 p-0">
+        {fromCustom ? (
+          <li className="flex min-w-0 items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] p-3" data-free-from-custom="">
+            <FreeThumb design={fromCustom} />
+            <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
+              <div className="min-w-0">
+                <p className="text-sm leading-5 font-medium text-[var(--text-primary)]">{customCopy.label}</p>
+                <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{customCopy.description}</p>
+              </div>
+              <Button className="h-9 px-3 pointer-coarse:h-11" disabled={disabled || busy} onClick={onUseCustom} type="button" variant="secondary">
+                {busy ? POPUP_DESIGN_COPY.free.preparing : customCopy.use}
+              </Button>
+            </div>
+          </li>
+        ) : null}
         {FREE_STARTER_OPTIONS.map((starter) => (
           <li className="flex min-w-0 items-center gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] p-3" key={starter.id}>
             <FreeThumb design={designs[starter.id]} />
@@ -425,7 +447,9 @@ export function PopupDesignField({
   // Personalizado ou Livre escolhido sem design ainda, ou "Trocar de modelo" aberto: a lista de modelos daquele modo.
   const [choosing, setChoosing] = useState<Exclude<PopupDesignMode, "default"> | null>(null);
   const [confirmStarter, setConfirmStarter] = useState<PopupDesignStarterId | null>(null);
-  const [confirmFreeStarter, setConfirmFreeStarter] = useState<FreeStarterId | null>(null);
+  const [confirmFreeStarter, setConfirmFreeStarter] = useState<FreeStarterId | "custom" | null>(null);
+  // O Personalizado guardado na memoria (espelho do ref para a tela): "Usar o design Personalizado" no Livre.
+  const [rememberedCustom, setRememberedCustom] = useState<PopupDesign | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [upload, setUpload] = useState<{ apply?: (font: PopupFontOption) => void } | null>(null);
   const [freeEditor, setFreeEditor] = useState<FreeEditorState | null>(null);
@@ -447,6 +471,7 @@ export function PopupDesignField({
     const result = switchDesignMode(draft, next, remembered.current);
     const restored = next === "custom" ? result.patch?.design : next === "free" ? result.patch?.freeDesign : null;
     remembered.current = result.remembered;
+    setRememberedCustom(result.remembered.custom);
     setChoosing(next !== "default" && !restored ? next : null);
 
     if (result.patch) {
@@ -493,6 +518,66 @@ export function PopupDesignField({
     setChoosing(null);
     openFreeEditor({ initialDesign: patch.freeDesign, initialFocus: null, undoTo: previous });
   }
+
+  /**
+   * "Usar o design Personalizado" (L1.1): o Livre parecido com o Personalizado de agora (ou o guardado), com a imagem
+   * do aviso (midia ou capa) e a do fundo do cartao medidas aqui; abre o editor, com o Livre de antes um passo atras.
+   */
+  async function applyFreeFromCustomNow() {
+    const custom = freeCustomSourceOf(latest.current, remembered.current);
+
+    setConfirmFreeStarter(null);
+
+    if (!custom) {
+      return;
+    }
+
+    const previous = freeDesign ? { cta: draft.cta, design: freeDesign } : null;
+    const imageUrl = draft.image?.url ?? null;
+    const imagePath = imageUrl ? popupCardImagePathOf(imageUrl) : null;
+    const cardUrl = custom.card.background.kind === "image" ? custom.card.background.url : null;
+    const cardPath = cardUrl ? popupCardImagePathOf(cardUrl) : null;
+    const usesImage = custom.media.kind !== "none";
+
+    setPreparing(true);
+    const [imageSize, cardSize] = await Promise.all([
+      imageUrl && imagePath && usesImage ? measureImage(imageUrl) : Promise.resolve(null),
+      cardUrl && cardPath ? measureImage(cardUrl) : Promise.resolve(null)
+    ]);
+    setPreparing(false);
+
+    const patch = applyFreeFromCustomPatch(latest.current, custom, {
+      cardImage: cardSize && cardPath ? { ...cardSize, path: cardPath } : null,
+      hasImage: Boolean(imageUrl),
+      image: imageSize && imagePath ? { ...imageSize, path: imagePath } : null
+    });
+
+    onChange(patch);
+    setChoosing(null);
+    openFreeEditor({ initialDesign: patch.freeDesign, initialFocus: null, undoTo: previous });
+  }
+
+  // A miniatura de "Usar o design Personalizado": as imagens com medidas de exemplo (as de verdade sao lidas ao usar).
+  const customSource = design ?? rememberedCustom;
+  const noticeImageUrl = draft.image?.url ?? null;
+  const fromCustomThumb = useMemo(() => {
+    if (!customSource) {
+      return null;
+    }
+
+    const imagePath = noticeImageUrl ? popupCardImagePathOf(noticeImageUrl) : null;
+    const cardUrl = customSource.card.background.kind === "image" ? customSource.card.background.url : null;
+    const cardPath = cardUrl ? popupCardImagePathOf(cardUrl) : null;
+    const sample = { height: 720, width: 1280 };
+
+    return freeFromCustomDesign(customSource, {
+      audio: draft.audio,
+      cardImage: cardPath ? { ...sample, path: cardPath } : null,
+      cta: draft.cta,
+      hasImage: Boolean(noticeImageUrl),
+      image: imagePath ? { ...sample, path: imagePath } : null
+    }).design;
+  }, [customSource, draft.audio, draft.cta, noticeImageUrl]);
 
   function updateDesign(next: PopupDesign) {
     onChange({ design: next });
@@ -576,8 +661,10 @@ export function PopupDesignField({
           <FreeStarterPicker
             busy={preparing}
             disabled={disabled}
+            fromCustom={fromCustomThumb}
             onClose={() => setChoosing(null)}
             onUse={(id) => (freeDesign ? setConfirmFreeStarter(id) : void applyFreeStarterNow(id))}
+            onUseCustom={() => (freeDesign ? setConfirmFreeStarter("custom") : void applyFreeFromCustomNow())}
             showClose={Boolean(freeDesign)}
           />
         ) : null}
@@ -668,7 +755,9 @@ export function PopupDesignField({
         cancelLabel={freeCopy.confirm.cancel}
         confirmLabel={freeCopy.confirm.confirm}
         description={freeCopy.confirm.description}
-        onConfirm={() => (confirmFreeStarter ? void applyFreeStarterNow(confirmFreeStarter) : undefined)}
+        onConfirm={() =>
+          confirmFreeStarter === "custom" ? void applyFreeFromCustomNow() : confirmFreeStarter ? void applyFreeStarterNow(confirmFreeStarter) : undefined
+        }
         onOpenChange={(open) => (!open ? setConfirmFreeStarter(null) : undefined)}
         open={confirmFreeStarter !== null}
         title={freeCopy.confirm.title}

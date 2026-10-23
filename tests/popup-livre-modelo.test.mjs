@@ -758,10 +758,10 @@ test("freeAssetUrl só monta endereço de caminho do padrão e da origem conferi
  * Modelos, sincronia, JSON Schema e o documento
  * ---------------------------------------------------------------------------------------------- */
 
-test("os três modelos são válidos, sem dica de contraste e abaixo de 20 % do tamanho", () => {
+test("os quatro modelos são válidos, sem dica de contraste e abaixo de 20 % do tamanho", () => {
   assert.deepEqual(
     starters.FREE_DESIGN_STARTERS.map((item) => item.id),
-    ["video_top_fade", "glow_text", "blank"]
+    ["video_top_fade", "glow_text", "blank", "cutout_sticker"]
   );
 
   for (const { id } of starters.FREE_DESIGN_STARTERS) {
@@ -924,7 +924,8 @@ test("dicas: contraste, texto pequeno, texto no celular, ordem de leitura, texto
   );
   assert.ok(plain.find((hint) => hint.kind === "contrast").message.startsWith("Contraste baixo ("));
   assert.deepEqual(plain.find((hint) => hint.kind === "small-text"), { key: "nodes.miudo.textStyle.size", kind: "small-text", message: "Texto abaixo de 12 px fica difícil de ler.", nodeId: "miudo" });
-  assert.equal(plain.find((hint) => hint.kind === "phone-text").message, "No celular, 3 textos ficam um pouco maiores que no desenho (mínimo de 12 px para ler bem).");
+  // Texto no celular (L1.1): os textos curtos daqui so crescem um pouco com o piso de 12 px, sem mudar de linha.
+  assert.equal(plain.some((hint) => hint.kind === "phone-text"), false, "texto que so cresce um pouco nao gera dica");
   assert.deepEqual(plain.find((hint) => hint.kind === "font-device").key, "nodes.condensado.textStyle.font");
   assert.deepEqual(plain.find((hint) => hint.kind === "no-poster"), { key: "nodes.midia.asset", kind: "no-poster", message: "Sem capa: quem prefere menos movimento não vê o vídeo.", nodeId: "midia" });
   assert.deepEqual(
@@ -984,7 +985,6 @@ test("vocabulário das frases, dos modelos e das dicas", () => {
     ...starters.FREE_DESIGN_STARTERS.flatMap(({ id }) => JSON.stringify(starters.freeStarterDesign(id)).match(/"(?:text|label|name)":"[^"]*"/g) ?? []),
     ...starters.FREE_ELEMENT_KINDS.flatMap((kind) => JSON.stringify(starters.newFreeNode(kind, "x")).match(/"(?:text|label|name)":"[^"]*"/g) ?? []),
     ...Object.values(checks.POPUP_FREE_HINT_MESSAGES).map((value) => (typeof value === "function" ? value("A", "B") : value)),
-    checks.POPUP_FREE_HINT_MESSAGES.phoneText(1),
     ...Object.values(checks.FREE_NODE_TYPE_LABELS),
     checks.freeDesignSizeLabel(10)
   ];
@@ -993,7 +993,10 @@ test("vocabulário das frases, dos modelos e das dicas", () => {
     assert.equal(forbidden.test(value), false, value);
   }
 
-  assert.equal(checks.POPUP_FREE_HINT_MESSAGES.phoneText(1), "No celular, 1 texto fica um pouco maior que no desenho (mínimo de 12 px para ler bem).");
+  assert.equal(
+    checks.POPUP_FREE_HINT_MESSAGES.phoneText,
+    "No celular, este texto ocupa mais linhas que no desenho (o texto não fica abaixo de 12 px). Use letra maior ou dê mais largura."
+  );
 });
 
 /* ------------------------------------------------------------------------------------------------

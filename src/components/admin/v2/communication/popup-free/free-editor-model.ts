@@ -170,8 +170,53 @@ export const FREE_EDITOR_COPY = {
     selected: (name: string, x: number, y: number) => `Selecionado: ${name}, X ${x}, Y ${y}.`
   },
   tabs: { elements: "Elementos", layers: "Camadas" },
-  toolbar: { duplicate: "Duplicar", label: "Ações do elemento", moveDown: "Descer", moveUp: "Subir", remove: "Excluir", toFree: "Soltar" }
+  toolbar: { duplicate: "Duplicar", label: "Ações do elemento", moveDown: "Descer", moveUp: "Subir", remove: "Excluir", toFree: "Soltar" },
+  /** Copiar e colar o design (docs/27 L1.1). */
+  transfer: {
+    apply: "Usar este design",
+    cancel: "Cancelar",
+    clipboardBlocked: "O navegador não deixou ler a área de transferência. Cole no campo com Ctrl + V.",
+    close: "Fechar",
+    copied: "Design copiado.",
+    copyDesign: "Copiar o design",
+    copyInstructions: "Copiar as instruções para a IA",
+    fromClipboard: "Colar da área de transferência",
+    instructionsCopied: "Instruções copiadas. Cole na conversa com a IA junto com o design.",
+    manualDescription: "Não deu para copiar sozinho. Selecione o texto abaixo e copie com Ctrl + C.",
+    manualLabel: "Texto para copiar",
+    manualTitle: "Copiar o texto",
+    menu: "Copiar e colar",
+    menuHint: "Para pedir a um Claude ou ChatGPT seu: copie as instruções e o design, cole lá, peça a mudança e traga o JSON de volta em Colar o design.",
+    pasteDescription: "Cole o JSON do design, copiado de outro pop-up ou feito pela IA. O design de agora é trocado; Ctrl + Z desfaz.",
+    pasteDesign: "Colar o design…",
+    pasteLabel: "Design em JSON",
+    pasteTitle: "Colar o design",
+    pasted: "Design colado. Ctrl + Z desfaz."
+  }
 } as const;
+
+/**
+ * Os arquivos que este pop-up conhece para o "Colar o design" (docs/27 L1.1): os do design aberto, os de todo o
+ * historico do editor (um arquivo enviado e depois tirado continua sendo deste aviso) e os dos designs extras
+ * (o de quando o editor abriu). Um por caminho e tipo.
+ */
+export function freeKnownAssets(entries: readonly { design: Pick<PopupFreeDesign, "assets"> }[]): PopupFreeDesign["assets"] {
+  const seen = new Set<string>();
+  const out: PopupFreeDesign["assets"] = [];
+
+  for (const entry of entries) {
+    for (const asset of entry.design.assets) {
+      const key = `${asset.kind}:${asset.path}`;
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(asset);
+      }
+    }
+  }
+
+  return out;
+}
 
 /** Nome falado de cada alca de redimensionar. */
 export const FREE_HANDLE_LABELS = {

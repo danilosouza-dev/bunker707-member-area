@@ -19,11 +19,13 @@ import { cn } from "@/lib/utils";
 import type { PopupFontOption } from "@/server/communications/popup-design-model";
 import { findFreeNode, freePreviewPopupItem, resolveFreeForDevice, type FreeId, type PopupFreeDesign } from "@/server/communications/popup-free-model";
 import { freeDesignSizePercent, popupFreeHints, type FreeHint, type FreeMeasuredRects } from "@/server/communications/popup-free-checks";
+import { freeDesignClipboardText, parseFreeDesignPaste } from "@/server/communications/popup-free-paste";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import type { ProductPickerItem } from "../../storefront/product-picker";
 import { adminTransition } from "../../styles";
 import { adminToast } from "../../toast";
 import { FreeCanvas, type FreeCanvasApi, type FreeCanvasToolbarCommand } from "./free-canvas";
+import { FreeCopyPaste } from "./free-copy-paste";
 import { FreeElementsPanel } from "./free-elements-panel";
 import type { FreeRect } from "./free-editor-geometry";
 import {
@@ -49,6 +51,7 @@ import {
   freeEditorErrors,
   freeFlaggedNodeIds,
   freeFocusAfterAdd,
+  freeKnownAssets,
   freeNodeIdForKey,
   freeNodeOf,
   freeNodeToFree,
@@ -313,7 +316,7 @@ function FreeEditorSession({
   const [announcement, setAnnouncement] = useState<Announcement>({ id: 0, text: "" });
   const [checks, setChecks] = useState<{ errors: Record<string, string>; hints: FreeHint[] }>(() => ({
     errors: freeEditorErrors(initialDesign, { allowSnooze: content.allowSnooze, audio: content.audio, cta: content.cta }),
-    hints: popupFreeHints(initialDesign, {})
+    hints: popupFreeHints(initialDesign, { content: { allowSnooze: content.allowSnooze, ctaLabel: content.cta?.label } })
   }));
   const [serverState, setServerState] = useState<ServerErrorState>(() => {
     const split = splitSaveErrors(initialDesign, serverErrors);
@@ -437,7 +440,7 @@ function FreeEditorSession({
     const timer = window.setTimeout(() => {
       setChecks({
         errors: freeEditorErrors(design, { allowSnooze: content.allowSnooze, audio: content.audio, cta }),
-        hints: popupFreeHints(design, { rects })
+        hints: popupFreeHints(design, { content: { allowSnooze: content.allowSnooze, ctaLabel: cta?.label }, rects })
       });
     }, FREE_CHECK_DELAY_MS);
 
@@ -492,6 +495,38 @@ function FreeEditorSession({
   function discardRecovery() {
     clearFreeRecovery(storage, recoveryKey);
     setRecovery(null);
+  }
+
+  /* --------------------------------------------------------------------------------------------
+   * Copiar e colar o design (docs/27 L1.1): colar e um passo so no historico (design e botao principal juntos)
+   * ------------------------------------------------------------------------------------------ */
+
+  function pasteDesign(text: string): readonly string[] | null {
+    if (busyReason) {
+      return [copy.save.waitUpload];
+    }
+
+    const current = historyRef.current;
+    const result = parseFreeDesignPaste(text, {
+      content: { audio: content.audio, cta: current.present.cta },
+      fontIds: fonts.map((font) => font.id),
+      knownAssets: freeKnownAssets([current.present, ...current.past, ...current.future, initialEntry])
+    });
+
+    if (!result.ok) {
+      return result.errors;
+    }
+
+    commit({ cta: result.cta, design: result.design });
+    setSelectedId(null);
+    setRightPanel("inspector");
+
+    const message = [copy.transfer.pasted, ...result.notes].join(" ");
+
+    adminToast.success(message);
+    announce(message);
+
+    return null;
   }
 
   /* --------------------------------------------------------------------------------------------
@@ -1195,6 +1230,16 @@ function FreeEditorSession({
               </span>
             ) : null}
           </Button>
+          <FreeCopyPaste
+            designText={() => freeDesignClipboardText(historyRef.current.present.design)}
+            disabled={disabled}
+            loadInstructions={() => import("./free-ai-instructions").then((module) => module.FREE_AI_INSTRUCTIONS)}
+            onCopied={(message) => {
+              adminToast.success(message);
+              announce(message);
+            }}
+            onPaste={pasteDesign}
+          />
           <ShortcutsPopover onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
           <Button
             aria-disabled={saving || disabled || undefined}
