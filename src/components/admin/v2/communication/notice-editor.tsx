@@ -183,8 +183,27 @@ const DEVICE_OPTIONS = [
 ] as const satisfies readonly { label: string; value: PreviewDevice }[];
 
 const COUNT_DEBOUNCE_MS = 500;
-/** Erro do Livre (ou do Botão principal no Livre): o resumo do card Design, ou o botao do editor. */
-const FREE_FOCUS = "#popup-livre-revisar, #popup-livre-abrir, [name='popup-design']";
+/**
+ * Erro do Livre (ou do Botão principal no Livre): o resumo do card Design, ou o botao do editor, ou a escolha do
+ * design, NESTA ordem (o querySelector da lista inteira acharia antes a opção Padrão, que vem antes na tela).
+ */
+const FREE_FOCUS_ORDER = ["#popup-livre-revisar", "#popup-livre-abrir", "[name='popup-design']"] as const;
+const FREE_FOCUS = FREE_FOCUS_ORDER.join(", ");
+
+/** O elemento do seletor; o do Livre, o primeiro que existir na ordem da lista. */
+function focusTargetOf(selector: string): HTMLElement | null {
+  const candidates: readonly string[] = selector === FREE_FOCUS ? FREE_FOCUS_ORDER : [selector];
+
+  for (const candidate of candidates) {
+    const element = document.querySelector<HTMLElement>(candidate);
+
+    if (element) {
+      return element;
+    }
+  }
+
+  return null;
+}
 
 /** Elemento que recebe foco quando o campo tem erro (na ordem da tela). */
 const FIELD_FOCUS: readonly [string, string][] = [
@@ -273,7 +292,7 @@ function focusFirstError(errors: NoticeFieldErrors, free = false) {
   // O campo pode aparecer so depois de renderizar (bloco do design que abre com o erro): tenta mais duas vezes.
   const focusWhenReady = (attempt: number) =>
     window.requestAnimationFrame(() => {
-      const element = selector ? document.querySelector<HTMLElement>(selector) : null;
+      const element = selector ? focusTargetOf(selector) : null;
 
       if (!element && selector && attempt < 2) {
         focusWhenReady(attempt + 1);

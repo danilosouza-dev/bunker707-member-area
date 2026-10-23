@@ -335,7 +335,12 @@ test("todo modelo do Personalizado vira um Livre válido, na forma canônica, se
         const result = starters.freeFromCustomDesign(source, { audio, cta, hasImage: true, image: NOTICE_IMAGE });
 
         assert.deepEqual(valid(result.design), result.design, `${id}: ja na forma canonica`);
-        assert.deepEqual(editor.freeEditorErrors(result.design, { allowSnooze: true, audio, cta: result.cta }), {}, `${id}: sem problema para revisar`);
+        // Sem botao no aviso, o "Saiba mais" novo ainda nao tem destino: o unico item do Revisar (o salvar recusa igual).
+        assert.deepEqual(
+          editor.freeEditorErrors(result.design, { allowSnooze: true, audio, cta: result.cta }),
+          cta ? {} : { "cta.href": "Escolha para onde o botão leva." },
+          `${id}: só o destino do botão para revisar`
+        );
         assert.deepEqual(phoneHints(result.design, { ctaLabel: result.cta.label }), [], id);
         assert.equal(model.freeCloseVisibilityProblem(result.design), null, id);
         assert.deepEqual(result.cta, cta ?? { href: "", label: "Saiba mais", target: "same_tab" });

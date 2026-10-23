@@ -16,6 +16,10 @@ const recovery = await import("../src/components/admin/v2/communication/popup-fr
 const model = await import("../src/server/communications/popup-free-model.ts");
 const starters = await import("../src/server/communications/popup-free-starters.ts");
 const schema = await import("../src/server/communications/popup-free-schema.ts");
+const inspector = await import("../src/components/admin/v2/communication/popup-free/free-inspector-model.ts");
+const designEditor = await import("../src/components/admin/v2/communication/popup-design/popup-design-editor-model.ts");
+const noticeSchemas = await import("../src/server/communications/schemas.ts");
+const noticeView = await import("../src/components/admin/v2/communication/notices-view-model.ts");
 
 const M = schema.POPUP_FREE_MESSAGES;
 const C = editor.FREE_EDITOR_COPY;
@@ -627,6 +631,48 @@ test("Revisar: erros do navegador e do salvar levam ao elemento; campos de fora 
   assert.equal(editor.freeStageDesign(value), value);
   assert.equal(editor.freeOnlyLinks(design([LINKS])), true);
   assert.equal(C.review.size(12), "Tamanho do design: 12 % do máximo.");
+});
+
+/** Os erros que o editor do aviso confere ao salvar (o mesmo zod do servidor), com as chaves dos elementos. */
+function noticeDraftErrors(draft) {
+  const parsed = noticeSchemas.noticeDraftSchema.safeParse(noticeView.noticeDraftForKind(draft));
+
+  return parsed.success ? {} : schema.freeErrorKeys(draft.freeDesign, noticeView.noticeErrorsFrom(parsed.error.issues));
+}
+
+test("Revisar: o Botão principal sem destino aparece com a frase do Personalizado, leva ao “Para onde leva” e some ao preencher", () => {
+  // Um modelo pronto num aviso sem botao: o "Saiba mais" com o destino vazio (o produtor escolhe no editor).
+  const { cta, design: value } = starters.applyFreeStarter("glow_text", { audio: null, cta: null });
+  assert.deepEqual(cta, { href: "", label: "Saiba mais", target: "same_tab" });
+  const content = (next) => ({ allowSnooze: true, audio: null, cta: next });
+
+  // O salvar do aviso recusa (e o card Design conta "1 problema para revisar"); o Personalizado diz a mesma frase.
+  const draft = { ...noticeSchemas.emptyNoticeDraft("popup"), cta, freeDesign: value, title: "Ao vivo hoje" };
+  const card = Object.fromEntries(Object.entries(noticeDraftErrors(draft)).filter(([key]) => designEditor.isFreeProblemKey(key)));
+  const personalizado = noticeDraftErrors({ ...noticeSchemas.emptyNoticeDraft("popup"), ...designEditor.applyStarter({ audio: null, cta: null }, "text_only", null), title: "Ao vivo hoje" });
+  assert.equal(personalizado["cta.href"], "Escolha para onde o botão leva.");
+  assert.deepEqual(card, { "cta.href": personalizado["cta.href"] });
+
+  // O Revisar do editor Livre mostra o mesmo erro, no Botão principal, e leva ao "Para onde leva" no Conteúdo.
+  const errors = editor.freeEditorErrors(value, content(cta));
+  assert.deepEqual(errors, editor.freeEditorErrorKeys(value, card), "o card, o salvar e o Revisar contam o mesmo");
+  const review = editor.freeReviewItems(value, errors, []);
+  assert.deepEqual(review.errors, [{ action: null, key: "cta.href", kind: "error", message: "Escolha para onde o botão leva.", nodeId: "botao", nodeName: "Botão principal" }]);
+  assert.deepEqual([...editor.freeFlaggedNodeIds(value, errors, [])], ["botao"]);
+  assert.deepEqual(inspector.freeFocusTargetOf(value, { key: "cta.href" }), { fieldId: "livre-botao-botao-destino", nodeId: "botao", tab: "content" });
+
+  // Com o destino escolhido, o item some (e o salvar passa); a regra e a do botao do aviso, com as frases dele.
+  const filled = { ...cta, href: "/minhas-compras" };
+  assert.deepEqual(editor.freeEditorErrors(value, content(filled)), {});
+  assert.deepEqual(noticeDraftErrors({ ...draft, cta: filled }), {});
+  assert.deepEqual(editor.freeEditorErrors(value, content({ ...cta, href: "http://exemplo.com" })), { "cta.href": "Use um link que comece com https://." });
+  assert.deepEqual(editor.freeEditorErrors(value, content({ ...filled, label: "   " })), { "cta.label": "Escreva o texto do botão." });
+
+  for (const broken of [{ ...cta, href: "http://exemplo.com" }, { ...filled, label: "   " }, { ...filled, label: "x".repeat(31) }]) {
+    const fromNotice = Object.fromEntries(Object.entries(noticeDraftErrors({ ...draft, cta: broken })).filter(([key]) => designEditor.isFreeProblemKey(key)));
+
+    assert.deepEqual(editor.freeEditorErrors(value, content(broken)), editor.freeEditorErrorKeys(value, fromNotice), JSON.stringify(broken));
+  }
 });
 
 test("salvar de dentro do editor: no pop-up no ar, o botão e a frase do editor do aviso; no rascunho, como antes", async () => {

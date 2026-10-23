@@ -32,7 +32,7 @@ import { POPUP_FREE_MESSAGES, freeErrorKeys, popupFreeContentProblems, popupFree
 import { FREE_ELEMENT_ID_PREFIX, FREE_STARTER_CTA, newFreeNode, type FreeElementKind } from "../../../../../server/communications/popup-free-starters";
 import { FREE_NODE_TYPE_LABELS, freeNodeDisplayName, type FreeHint, type FreeMeasuredRects } from "../../../../../server/communications/popup-free-checks";
 import type { PopupFontRef } from "../../../../../server/communications/popup-design-model";
-import type { NoticeDraft } from "../../../../../server/communications/schemas";
+import { noticeCtaProblems, type NoticeDraft } from "../../../../../server/communications/schemas";
 import { SENT_NOTICE_COPY } from "../notices-view-model";
 import {
   alignFreeRect,
@@ -1089,9 +1089,11 @@ function safeCanonical(design: PopupFreeDesign): PopupFreeDesign {
 }
 
 /**
- * Os erros do design no navegador: o zod do Livre (as mesmas frases do servidor) e as regras com o conteudo do
- * aviso. Chaves sem o prefixo "freeDesign." (nodes.<id>..., artboard..., close..., assets..., fonts, size, design),
- * mais "cta.label"/"cta.href" (o Botão principal) e "audio" (o elemento Áudio).
+ * Os erros do design no navegador: o zod do Livre (as mesmas frases do servidor), as regras com o conteudo do
+ * aviso e o botao do aviso que o Livre edita no Botão principal (o mesmo zod do rascunho: o "Saiba mais" de um
+ * modelo, sem destino, aparece aqui como no salvar e no card). Chaves sem o prefixo "freeDesign." (nodes.<id>...,
+ * artboard..., close..., assets..., fonts, size, design), mais "cta.label"/"cta.href" (o Botão principal) e "audio"
+ * (o elemento Áudio).
  */
 export function freeEditorErrors(design: PopupFreeDesign, content: { allowSnooze: boolean; audio: unknown; cta: unknown }): Record<string, string> {
   const raw: Record<string, string> = {};
@@ -1107,7 +1109,7 @@ export function freeEditorErrors(design: PopupFreeDesign, content: { allowSnooze
     }
   }
 
-  for (const problem of popupFreeContentProblems(parsed.success ? parsed.data : safeCanonical(design), content)) {
+  for (const problem of [...popupFreeContentProblems(parsed.success ? parsed.data : safeCanonical(design), content), ...noticeCtaProblems(content.cta)]) {
     const key = problem.path.join(".");
 
     if (!(key in raw)) {
