@@ -44,20 +44,30 @@ async function writeClipboard(text: string): Promise<boolean> {
   }
 }
 
-/** Baixa o pedaco das instrucoes antes do clique (abrir o menu ja comeca). */
-function prefetchInstructions() {
-  void import("./free-ai-instructions").catch(() => undefined);
-}
-
 export function FreeCopyPaste({ designText, disabled, loadInstructions, onCopied, onPaste }: FreeCopyPasteProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [manual, setManual] = useState<string | null>(null);
+  // As instrucoes baixam quando o menu abre: no clique o texto ja esta aqui e a copia acontece no proprio clique
+  // (o Safari so deixa escrever na area de transferencia dentro do gesto).
+  const instructions = useRef<string | null>(null);
+
+  function prefetchInstructions() {
+    if (instructions.current === null) {
+      loadInstructions().then(
+        (text) => {
+          instructions.current = text;
+        },
+        () => undefined
+      );
+    }
+  }
 
   async function copyText(load: () => string | Promise<string>, message: string) {
     setMenuOpen(false);
 
-    const text = await load();
+    const ready = load();
+    const text = typeof ready === "string" ? ready : await ready;
 
     if (await writeClipboard(text)) {
       onCopied(message);
@@ -111,7 +121,7 @@ export function FreeCopyPaste({ designText, disabled, loadInstructions, onCopied
                   icon={<Sparkles aria-hidden="true" className="size-4" />}
                   label={copy.copyInstructions}
                   marker="instructions"
-                  onClick={() => void copyText(loadInstructions, copy.instructionsCopied)}
+                  onClick={() => void copyText(() => instructions.current ?? loadInstructions(), copy.instructionsCopied)}
                 />
               </div>
               <p className="mt-1 border-t border-[var(--border-subtle)] px-2 pt-2 pb-1 text-xs leading-4 text-[var(--text-secondary)]">{copy.menuHint}</p>

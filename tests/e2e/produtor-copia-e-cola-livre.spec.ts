@@ -79,9 +79,10 @@ async function copiarEColar(page: Page, editor: Locator, acao: "copy" | "instruc
   await page.locator(`[data-free-transfer-action="${acao}"]`).click();
 }
 
-test("usa o design Personalizado no Livre, copia e cola o design e copia as instruções para a IA", async ({ context, page }) => {
+test("usa o design Personalizado no Livre, copia e cola o design e copia as instruções para a IA", async ({ browserName, context, page }) => {
   test.setTimeout(180_000);
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  // O WebKit so conhece a permissao de ler (escrever, depois de um clique, ja vale); o Chromium pede as duas.
+  await context.grantPermissions(browserName === "webkit" ? ["clipboard-read"] : ["clipboard-read", "clipboard-write"]);
   await page.goto(`/admin/comunicacao/avisos/${avisoId}`);
   await page.waitForLoadState("networkidle");
 

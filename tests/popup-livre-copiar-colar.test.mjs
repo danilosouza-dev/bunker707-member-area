@@ -250,7 +250,7 @@ test("colar é um passo só no histórico (design e botão principal juntos) e c
   );
 });
 
-test("as instruções para a IA vêm do docs/27 §9 (gerado), vão no pacote do editor e só são baixadas ao copiar", async () => {
+test("as instruções para a IA vêm do docs/27 §9 (gerado), vão no pacote do editor e só são baixadas ao abrir Copiar e colar", async () => {
   const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
   const generated = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-ai-instructions.ts", import.meta.url), "utf8");
 
@@ -302,12 +302,12 @@ test("as instruções para a IA vêm do docs/27 §9 (gerado), vão no pacote do 
     assert.ok(model.jsonbBytesUpperBound(result.design) <= 2.5 * compact.length, "12.000 caracteres sem espacos ficam abaixo de 30.000 bytes");
   }
 
-  // So o editor importa, e so por import() (o pedaco e baixado no clique); nada no app busca o docs na hora.
+  // So o editor importa, e so por import() (o pedaco e baixado quando o menu abre); nada no app busca o docs na hora.
   const root = new URL("../src/", import.meta.url);
   const files = readdirSync(root, { recursive: true }).filter((file) => /\.(ts|tsx)$/.test(file));
   const importers = files.filter((file) => /free-ai-instructions/.test(readFileSync(new URL(file, root), "utf8")) && !file.endsWith("free-ai-instructions.ts"));
 
-  assert.deepEqual(importers.map((file) => file.split(/[\\/]/).pop()).sort(), ["free-copy-paste.tsx", "free-editor.tsx"]);
+  assert.deepEqual(importers.map((file) => file.split(/[\\/]/).pop()).sort(), ["free-editor.tsx"]);
 
   for (const file of importers) {
     const source = readFileSync(new URL(file, root), "utf8");
