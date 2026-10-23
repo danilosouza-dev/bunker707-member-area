@@ -10,14 +10,12 @@ import type {
   NotificationsFilter,
   NotificationsPage,
   NotificationsSummary,
-  PopupPlanItem,
-  PopupShowAnswer,
-  PopupsAnswer
+  PopupShowAnswer
 } from "@/server/communications/notification-model";
 import type { PopupEvent } from "@/server/communications/campaign-model";
 import { coversPage, type PopupCloseVia, type PopupNext } from "../../../server/communications/popup-display-model";
 import { INBOX_KEEP_MS, INBOX_REUSE_MS, isSummaryFresh } from "./notifications-model";
-import { clockOffsetOf, POPUP_HOST_RULES, readPopupsAnswer } from "./popup-host-model";
+import { clockOffsetOf, POPUP_HOST_RULES, readPopupsAnswer, type HostTrigger, type PlanAnswer, type PlanItem } from "./popup-host-model";
 
 // Conversa do sino e do pop-up com /api/notifications e /api/popups (docs/22 §4.4), mais o numero do
 // sino guardado na memoria do navegador. O topo (AppShell) remonta a cada pagina; o numero fica aqui,
@@ -43,19 +41,29 @@ import { clockOffsetOf, POPUP_HOST_RULES, readPopupsAnswer } from "./popup-host-
 // memoria de 1 minuto, com o mesmo dono: nas paginas seguintes o navegador decide sozinho se a pagina pode
 // ter pop-up, e so pede de novo quando ela e coberta e o plano passou do minuto. O POST /show devolve o
 // conteudo e quando o pop-up pode voltar; essa resposta e o que o aluno faz depois acertam o plano guardado.
+//
+// v3b-2 (docs/29 §5.1): o show aceita os quatro momentos, a recusa 409 diz o motivo (`not_started` = o pop-up
+// ainda vai comecar) e o host ouve cada plano novo guardado (subscribePopupMemory) para armar a hora marcada da
+// pagina aberta. Nenhuma funcao nova pede nada.
 
 export class NotificationsRequestError extends Error {
   /** POST /show recusado (409): quando o pop-up pode voltar (null = nao volta mais). */
   nextAt?: string | null;
+  /** POST /show recusado (409): o motivo do servidor (v3b-2: "not_started" = ainda vai comecar). */
+  reason?: string;
   status: number;
 
-  constructor(message: string, status: number, nextAt?: string | null) {
+  constructor(message: string, status: number, nextAt?: string | null, reason?: string) {
     super(message);
     this.name = "NotificationsRequestError";
     this.status = status;
 
     if (nextAt !== undefined) {
       this.nextAt = nextAt;
+    }
+
+    if (reason !== undefined) {
+      this.reason = reason;
     }
   }
 }
@@ -226,13 +234,10 @@ export function postPopupEvent(id: string, event: PopupEvent, options: { via?: P
 /**
  * Abre o pop-up: o servidor confere de novo (no ar, segmento, pagina, momento e frequencia), grava a
  * abertura e so entao devolve o conteudo e quando ele pode voltar. Desiste em 10 s; `signal` e o fim da
- * visualizacao de pagina (o host aborta ao sair). Recusa vira NotificationsRequestError (409 com `nextAt`).
+ * visualizacao de pagina (o host aborta ao sair). Recusa vira NotificationsRequestError (409 com `nextAt` e o
+ * `reason` do servidor).
  */
-export async function postPopupShow(
-  id: string,
-  body: { page: string; trigger: "lesson_completed" | "page_load" },
-  signal?: AbortSignal
-): Promise<PopupShowAnswer> {
+export async function postPopupShow(id: string, body: { page: string; trigger: HostTrigger }, signal?: AbortSignal): Promise<PopupShowAnswer> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), POPUP_HOST_RULES.showTimeoutMs);
   const abort = () => controller.abort();
@@ -252,12 +257,14 @@ export async function postPopupShow(
       method: "POST",
       signal: controller.signal
     });
-    const payload = (await response.json().catch(() => ({}))) as { data?: PopupShowAnswer; error?: string; nextAt?: unknown };
+    const payload = (await response.json().catch(() => ({}))) as { data?: PopupShowAnswer; error?: string; nextAt?: unknown; reason?: unknown };
 
     if (!response.ok || payload.data === undefined) {
-      const nextAt = response.status === 409 ? (typeof payload.nextAt === "string" ? payload.nextAt : null) : undefined;
+      const refused = response.status === 409;
+      const nextAt = refused ? (typeof payload.nextAt === "string" ? payload.nextAt : null) : undefined;
+      const reason = refused && typeof payload.reason === "string" ? payload.reason : undefined;
 
-      throw new NotificationsRequestError(payload.error ?? "Pop-up indisponivel.", response.status, nextAt);
+      throw new NotificationsRequestError(payload.error ?? "Pop-up indisponivel.", response.status, nextAt, reason);
     }
 
     return payload.data;
@@ -331,11 +338,13 @@ const summaryListeners = new Set<() => void>();
  * servidor nao mandou, ou o pedido falhou: a falha tambem conta como tentativa). `offsetMs` acerta o
  * relogio do navegador pela hora do servidor (asOf). Mesmo dono do numero do sino.
  */
-type PopupMemory = { answer: PopupsAnswer | null; fetchedAt: number | null; offsetMs: number; owner: string | null };
+type PopupMemory = { answer: PlanAnswer | null; fetchedAt: number | null; offsetMs: number; owner: string | null };
 
 const INITIAL_POPUP_MEMORY: PopupMemory = { answer: null, fetchedAt: null, offsetMs: 0, owner: null };
 
 let popupMemory: PopupMemory = INITIAL_POPUP_MEMORY;
+/** v3b-2: quem quer saber de cada resposta guardada (o host arma a hora marcada da pagina aberta). */
+const popupMemoryListeners = new Set<() => void>();
 
 function setSummaryState(next: SummaryMemory) {
   summaryState = next;
@@ -378,13 +387,32 @@ export function holdSummaryForPopup(held: boolean) {
   summaryHeldForPopup = held;
 }
 
-/** Guarda os pop-ups de um resumo pedido com pagina (so do dono de quando o pedido saiu). */
-function setPopupMemory(answer: PopupsAnswer | null, owner: string | null, arrivedAt: number) {
+/** Guarda os pop-ups de um resumo pedido com pagina (so do dono de quando o pedido saiu) e avisa os ouvintes. */
+function setPopupMemory(answer: PlanAnswer | null, owner: string | null, arrivedAt: number) {
   if (owner !== memoryOwner) {
     return;
   }
 
   popupMemory = { answer, fetchedAt: arrivedAt, offsetMs: answer ? clockOffsetOf(answer.asOf, arrivedAt) : 0, owner };
+  popupMemoryListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      // Um ouvinte que falha nao derruba a resposta guardada (nem os outros ouvintes).
+    }
+  });
+}
+
+/**
+ * Avisa a cada resposta de pop-ups guardada (depois de guardar; so do dono atual). O ouvinte le o que quiser com
+ * popupPlanFromMemory. Nao pede nada. Devolve a funcao que para de ouvir.
+ */
+export function subscribePopupMemory(listener: () => void): () => void {
+  popupMemoryListeners.add(listener);
+
+  return () => {
+    popupMemoryListeners.delete(listener);
+  };
 }
 
 /**
@@ -518,14 +546,14 @@ export function currentSummaryFor(userId: string | null | undefined): Notificati
 // espera e quando cada um pode voltar. Cada resposta do POST /show e o que o aluno fez acertam o plano, para
 // as paginas seguintes do mesmo minuto decidirem certo sem pedir nada.
 
-export type PopupPlan = { items: PopupPlanItem[]; offsetMs: number };
+export type PopupPlan = { items: PlanItem[]; offsetMs: number };
 
 /**
  * O que a memoria (mais nova que 1 minuto) diz desta pagina, sem pedir nada: `covered` = algum pop-up no ar
  * pode aparecer nela; `plan` null = a resposta guardada foi de uma pagina nao coberta (falta o plano).
  * null = a memoria passou do prazo (ou nunca houve resposta).
  */
-export function popupPlanFromMemory(pageKey: string): { covered: boolean; offsetMs: number; plan: PopupPlanItem[] | null } | null {
+export function popupPlanFromMemory(pageKey: string): { covered: boolean; offsetMs: number; plan: PlanItem[] | null } | null {
   const memory = popupMemory;
 
   if (memory.owner !== memoryOwner || !isSummaryFresh(memory.fetchedAt, Date.now())) {

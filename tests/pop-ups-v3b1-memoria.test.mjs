@@ -246,15 +246,18 @@ test("POST /show: 200 devolve o conteudo e o proximo; 409 traz nextAt; 404 e 429
   assert.ok(recusa instanceof client.NotificationsRequestError);
   assert.equal(recusa.status, 409);
   assert.equal(recusa.nextAt, iso(agora + MINUTO));
+  assert.equal(recusa.reason, "frequency", "v3b-2: o motivo do 409");
 
   const mudou = await client.postPopupShow("pop-a", { page: "saved", trigger: "page_load" }).catch((error) => error);
   assert.equal(mudou.status, 409);
   assert.equal(mudou.nextAt, null);
+  assert.equal(mudou.reason, "changed");
 
   for (const [page, status] of [["materials", 404], ["support", 429]]) {
     const erro = await client.postPopupShow("pop-a", { page, trigger: "lesson_completed" }).catch((error) => error);
     assert.equal(erro.status, status);
     assert.equal(erro.nextAt, undefined);
+    assert.equal(erro.reason, undefined, "so o 409 traz motivo");
   }
 
   const fim = new AbortController();
@@ -320,7 +323,7 @@ test("um pop-up sem ritmo: o show diz 'de novo em 5 s', e a pagina seguinte do m
   recomecar();
   responder = resumoCom({ pages: ["any"], plan: [item({ stopOn: "never" })] });
   const plano = await client.ensurePopupPlan("saved");
-  const primeira = host.openingsForPageView({ items: plano.items, offsetMs: plano.offsetMs, pageKey: "saved", pageViewStart: agora });
+  const primeira = host.openingsForPageView({ items: plano.items, now: agora, offsetMs: plano.offsetMs, pageKey: "saved", pageViewStart: agora });
   assert.equal(primeira.length, 1);
 
   // Abriu 3 s depois; o show respondeu "pode de novo 5 s depois"; o aluno fechou.
@@ -330,7 +333,7 @@ test("um pop-up sem ritmo: o show diz 'de novo em 5 s', e a pagina seguinte do m
 
   agora += 6_000; // Materiais, 6 s depois de aparecer
   const kept = client.popupPlanFromMemory("materials");
-  const segunda = host.openingsForPageView({ items: kept.plan, offsetMs: kept.offsetMs, pageKey: "materials", pageViewStart: agora });
+  const segunda = host.openingsForPageView({ items: kept.plan, now: agora, offsetMs: kept.offsetMs, pageKey: "materials", pageViewStart: agora });
   assert.equal(segunda.length, 1);
   assert.equal(resumos().length, 1, "nenhum pedido novo");
 });
@@ -340,4 +343,77 @@ test("summaryUrl: com pagina, com o pop-up da v1 ou so o numero", () => {
   assert.equal(client.summaryUrl({ popup: true }), "/api/notifications/summary?popup=1");
   assert.equal(client.summaryUrl({ page: "home", popup: true }), "/api/notifications/summary?page=home");
   assert.equal(client.summaryUrl(), "/api/notifications/summary");
+});
+
+test("v3b-2: o show recusado antes da hora (409 not_started) traz o nextAt e o motivo; os quatro momentos vao no corpo", async () => {
+  recomecar();
+  const comeca = iso(agora + 30_000);
+  responder = (url, pedido) =>
+    pedido.body.trigger === "first_login" || pedido.body.trigger === "course_completed"
+      ? { body: { error: "Pop-up fora da vez.", nextAt: null, reason: "trigger" }, status: 409 }
+      : { body: { error: "Pop-up fora da vez.", nextAt: comeca, reason: "not_started" }, status: 409 };
+
+  const cedo = await client.postPopupShow("live", { page: "saved", trigger: "page_load" }).catch((error) => error);
+  assert.equal(cedo.status, 409);
+  assert.equal(cedo.reason, "not_started");
+  assert.equal(cedo.nextAt, comeca);
+
+  for (const trigger of ["first_login", "course_completed"]) {
+    const erro = await client.postPopupShow("live", { page: "lesson:curso", trigger }).catch((error) => error);
+    assert.equal(erro.reason, "trigger");
+    assert.deepEqual(pedidos.at(-1).body, { page: "lesson:curso", trigger });
+  }
+
+  // Motivo que nao e texto nao vira motivo.
+  responder = () => ({ body: { error: "Pop-up fora da vez.", nextAt: comeca, reason: 7 }, status: 409 });
+  const estranho = await client.postPopupShow("live", { page: "saved", trigger: "page_load" }).catch((error) => error);
+  assert.equal(estranho.reason, undefined);
+});
+
+test("v3b-2: subscribePopupMemory avisa depois de cada resposta guardada (com o plano ja na memoria), nunca a da conta anterior, e para de avisar", async () => {
+  recomecar();
+  const vistos = [];
+  const parar = client.subscribePopupMemory(() => {
+    const kept = client.popupPlanFromMemory("saved");
+    vistos.push(kept?.plan?.map((entry) => entry.id) ?? null);
+  });
+  const quebrado = client.subscribePopupMemory(() => {
+    throw new Error("ouvinte com defeito");
+  });
+
+  responder = resumoCom({ pages: ["any"], plan: [item({ id: "live", startsAt: iso(agora + 60 * MINUTO) })] });
+  await client.ensurePopupPlan("saved");
+  assert.deepEqual(vistos, [["live"]], "avisou depois de guardar");
+  assert.equal(client.popupPlanFromMemory("saved").plan[0].startsAt, iso(agora + 60 * MINUTO), "o ouvinte com defeito nao derrubou a resposta");
+
+  // Mexer no plano depois do show nao avisa (so a resposta nova do resumo).
+  client.updatePopupInPlan("live", { notBefore: iso(agora + 5_000) });
+  assert.equal(vistos.length, 1);
+
+  // A falha tambem e uma resposta guardada (nenhum pop-up neste minuto).
+  agora += 2 * MINUTO;
+  responder = () => ({ body: { error: "falhou" }, status: 500 });
+  await client.ensurePopupPlan("saved");
+  assert.deepEqual(vistos, [["live"], null]);
+
+  // A resposta do pedido feito pela conta anterior nao e guardada nem avisada.
+  agora += 2 * MINUTO;
+  let soltar;
+  responder = () => new Promise((resolve) => {
+    soltar = () => resolve(resumoCom({ pages: ["any"], plan: [item()] })("/api/notifications/summary?page=saved"));
+  });
+  const pedido = client.refreshNotificationsSummary({ force: true, page: "saved" });
+  await new Promise((resolve) => setImmediate(resolve));
+  client.claimNotificationsMemory("outra-conta");
+  soltar();
+  await pedido;
+  assert.equal(vistos.length, 2);
+
+  parar();
+  quebrado();
+  client.claimNotificationsMemory(`aluno-${conta}`);
+  agora += 2 * MINUTO;
+  responder = resumoCom({ pages: ["any"], plan: [item()] });
+  await client.ensurePopupPlan("saved");
+  assert.equal(vistos.length, 2, "parou de ouvir");
 });
