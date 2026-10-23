@@ -418,6 +418,7 @@ Tracking de progresso:
 - a primeira entrega cobre YouTube. Chromecast/AirPlay nativos e adapters receptores para Vimeo, Bunny, Mux ou URL propria permanecem evolucoes separadas por provider;
 - Vimeo, Bunny, Mux e embeds externos devem ficar atras de adapters de player equivalentes, expondo uma interface comum de play, pause, currentTime, duration, seek e estado de conclusao;
 - enquanto um adapter especifico ainda nao estiver completo, o app pode registrar inicio por clique no player e um temporizador de sessao para alimentar `Continue assistindo`, deixando claro que esse fallback nao substitui a precisao de provedores com API integrada.
+- desde 23/10/2026 (Comunicacao v3b-2, `docs/29` §4.4), Bunny, Vimeo e Mux tem uma **ponte por `postMessage`** na pagina da aula (`src/lib/lesson-embed-bridge.ts`, puro; as origens e regras em `src/lib/lesson-embed-origins.ts`; o hook `src/components/use-lesson-embed-bridge.ts` baixa a ponte por `import()` so quando o iframe e de um player da lista): protocolo do Vimeo (`{ method, value }` / `{ event, data }`) e Player.js (Bunny e Mux, texto JSON com `context: "player.js"`), sem SDK, sem script de fora e sem mudar a CSP. Liga pela origem do `src` do iframe (lista exata: `player.vimeo.com`, `iframe.mediadelivery.net` e `player.mediadelivery.net` como um grupo, `player.mux.com`), aceita mensagem so dessas origens e do `contentWindow` do iframe, manda com `targetOrigin` exato e so confia depois da resposta ao `getPaused`. Com a ponte confirmada: o fim do video conclui a aula (como o YouTube), o progresso usa o tempo real e o temporizador de sessao acima nao roda; o pop-up le se o video toca (`lesson-media-signal.ts`). Sem resposta (sem referrer, player que nao responde, outra origem), fica o fallback. Ainda nao ha `seek` nem comando de tocar pela ponte (so leitura).
 
 ## Eventos do aluno
 
@@ -444,7 +445,7 @@ Eventos iniciais:
 
 Esses eventos alimentarao dashboards, automacoes e IA no futuro.
 
-Comunicacao v1 (20/10/2026) grava, pelas rotas do sino e do pop-up, `notification_read`, `notification_clicked`, `notification_responded`, `message_impressed`, `message_clicked`, `message_closed`, `message_dismissed` e `message_snoozed`, so com ids no metadata (`docs/05`, secao Eventos). A v2 (21/10/2026) soma `notification_audio_started` e `notification_audio_completed` (rota do audio, uma vez cada); visitas de pagina nao viram evento: vao para `member_page_visits`, so enquanto um fluxo precisa (secao Comunicacao).
+Comunicacao v3b-2 (23/10/2026): nenhum evento novo; o aluno nao grava mais linhas com `entity_type = 'campaign'` (politica de insert de `student_events`), e o relatorio do pop-up le essas linhas por um indice parcial (`docs/29`). Comunicacao v1 (20/10/2026) grava, pelas rotas do sino e do pop-up, `notification_read`, `notification_clicked`, `notification_responded`, `message_impressed`, `message_clicked`, `message_closed`, `message_dismissed` e `message_snoozed`, so com ids no metadata (`docs/05`, secao Eventos). A v2 (21/10/2026) soma `notification_audio_started` e `notification_audio_completed` (rota do audio, uma vez cada); visitas de pagina nao viram evento: vao para `member_page_visits`, so enquanto um fluxo precisa (secao Comunicacao).
 
 No MVP, a avaliacao da aula em formato de reacao (`Nao gostei`, `Gostei`, `Amei`) e persistida junto do progresso autenticado da aula em `lesson_progress.lesson_reactions`, para sobreviver a refresh e futuras telas de CRM. A elegibilidade da avaliacao usa o maior percentual ja alcancado na aula, nao apenas a posicao atual do player.
 
@@ -745,6 +746,36 @@ Aluno:  lista no ar (cache 60 s, design1) -> parsePopupDesign + url do video + f
 ```
 
 Invariantes: o Padrão nao muda (mesmo HTML, mesma resposta do `show`); a notificacao nunca tem design; zod no salvar e no ler; nada de HTML ou CSS em texto; video e fonte so dos nossos buckets; o cartao do aluno nao importa o zod (o JS inicial do aluno nao cresce; o cartao fica no pedaco preguicoso da janela).
+
+### Implementado (23/10/2026): Comunicacao v3b-2
+
+Produto, regras e decisoes em `docs/29`; tabelas em `docs/05` (secao Comunicacao v3b-2); seguranca em `docs/06` (secao Comunicacao v3b-2). Migracao `202610260001_communication_v3b2.sql` (aditiva, cinco secoes pelo MCP, a 5 sozinha; aplicada antes do merge). Nenhuma variavel de ambiente nova, nenhum servico novo, nenhum job novo nem fase nova do tick.
+
+Modulos novos ou mudados:
+
+- puros: `popup-display-model.ts` (quatro momentos, `popupWindowSoon`, plano e mapa com 24 h a frente, `decideShow` com `not_started`, produtos do primeiro acesso), `popup-first-access.ts` (candidato, marca, recalculo), `src/lib/course-completion.ts` (a virada do curso, `courseCompletedOf`), `popup-report-model.ts` (o relatorio), `popup-host-model.ts` (hora marcada, `reconcileClockOpenings`, `rearmAfterNotStarted`, `createArmedClock`, `bridge_pending`), `src/lib/lesson-embed-bridge.ts` + `lesson-embed-origins.ts` (a ponte), `src/lib/lesson-media-signal.ts` (`bridge`, `readable`, `waitLessonFullscreenEnd`);
+- servidor: `dispatch.ts` (o recalculo do "No primeiro acesso" com a marca), `store.ts` (`fetchFirstAccessDeliveries`, `markFirstAccessDeliveries`, `fetchPopupReport`, faixas `popupRefreshBandStart` em :07/:22/:37/:52), `popup-store.ts` (`fetchCourseCompletionFacts`), `popups.ts` (409 `not_started`, conferencia do curso no `show`), `actions.ts` (trava do primeiro acesso, `PublishedNotice.popup`), `queries.ts` (`getPopupReport`, cache de 60 s), `lesson-access.ts` (`publishedLessonIds`), `platform-store.ts` (`replaceCompletedLessonsWithPrevious`), `api/progress/lessons` (`courseCompleted`);
+- navegador: `member-popup-host.tsx` (despertador pela hora de parede, plano mais novo com a pagina aberta, segunda tentativa), `notifications-client.ts` (`subscribePopupMemory`, `reason` do 409), `lesson-experience.tsx` (o iframe por estado, a ponte, o fim que conclui, `persistLessonProgressResult`), `use-lesson-embed-bridge.ts`; admin: o card "Quando e onde aparece" com quatro momentos e o `PopupReportSection`/`PopupReportLoader` na pagina do aviso.
+
+```txt
+Aluno parado na pagina (plano com startsAt ate 24 h antes) -> host arma a hora marcada: startsAt + 2 s + sorteio 0-4 s
+  -> despertador <= 30 s pela hora de parede (+ visibilitychange/pageshow/focus) -> fila -> POST /api/popups/[id]/show
+  -> antes da hora: 409 not_started (nextAt) -> uma segunda tentativa; na hora: decideShow -> RPC -> conteudo
+Tick (faixas :07/:22/:37/:52) -> refreshPopupDeliveries -> first_login: candidatos + marca first_access_at; sem marca sai
+Aula: PUT /api/progress/lessons -> replaceCompletedLessonsWithPrevious (o "antes" do CAS) -> { courseCompleted: true } so na virada
+  -> host arma course_completed -> show confere o curso no banco
+Aula com Bunny/Vimeo/Mux: iframe <-> postMessage (origens exatas, getPaused) -> play/pause/ended/tempo -> progresso e pop-up
+Equipe: pagina do pop-up -> Suspense -> getPopupReport (cache 60 s) -> RPC communication_popup_report (indice parcial)
+```
+
+Invariantes:
+
+- o conteudo do pop-up so no `show`; o 409 `not_started` so para quem esta no segmento;
+- quem e "aluno novo" e decidido no recalculo (servidor); o navegador nunca se declara novo;
+- sem polling (C11): nenhum pedido em laco; o despertador e a conferencia ao voltar so leem o relogio; a hora marcada vem no plano de sempre;
+- a ponte nunca usa `*`, SDK de fora nem origem nova na CSP; sem resposta ao `getPaused`, a aula fica como antes;
+- a funcao do relatorio conta so aluno com linha vista, nunca mais que a linha e nunca a equipe; o aluno nao grava linhas de avisos no historico;
+- a 0026 vai antes do merge (sem ela, o job `comunicacao` do tick falha); nao publicar os momentos novos com o app de antes no ar (R1).
 
 ## Deploy
 

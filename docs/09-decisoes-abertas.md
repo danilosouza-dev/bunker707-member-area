@@ -294,7 +294,7 @@ Decisao tomada:
 - **ate 50 pop-ups publicados ao mesmo tempo** (no ar ou agendados), por publicar, aprovar, pedir aprovacao e retomar; nao limita o que o aluno ve;
 - **pop-ups de antes sem reescrever dados**: "Ate o aluno clicar" = Mais de uma vez com 1 dia entre uma vez e outra, ate clicar; sem botao, abre e salva como "So quando o pop-up terminar".
 
-Em aberto: as acoes que o produtor quer como momento do pop-up (a resposta ao produtor pergunta, `docs/25` §10.1); os modelos de configuracao (v3b-2) e o construtor avancado com enquete (v3b-3).
+Em aberto: as acoes que o produtor quer como momento do pop-up (a resposta ao produtor pergunta, `docs/25` §10.1); os modelos de configuracao (entregues em `docs/28`) e o construtor avancado com enquete (v3b-3). Hora marcada ao vivo, primeiro acesso e curso concluido: entregues na v3b-2 (abaixo).
 
 ### Design do pop-up (22/10/2026)
 
@@ -341,6 +341,30 @@ Decisoes tomadas com o produtor (23/10):
 - quem cria avisos cria e edita modelos (`messaging.write`); o aluno nunca ve um modelo; limite de 200 modelos na escola.
 
 Em aberto (a v1 segue com a escolha indicada, `docs/28` §8): o "Novo aviso" com modelos ficou como **menu no botao** (e nao uma tela "Como voce quer comecar?"); com "Levar o segmento" desligado, o aviso comeca em **Todos os alunos**; excluir um modelo pede **so confirmacao** (sem Desfazer no toast).
+
+### Comunicacao v3b-2: hora marcada ao vivo, primeiro acesso, curso concluido, relatorio do pop-up e players de fora (23/10/2026)
+
+O resto da v3b que o `docs/25` deixou para depois (hora marcada ao vivo, "No primeiro acesso", "Ao concluir todas as aulas do curso", o relatorio de onde apareceu e como fecharam, o player do Bunny/Vimeo lido por `postMessage`). Detalhes em `docs/29`; migracao `202610260001`. **Muda decisoes**: o "Num horario" da v3b-1 (so na proxima pagina aberta) vira a hora marcada ao vivo; na aula, o "tocou no player = o pop-up desiste" da v3b-1 vira "espera o video parar" em todo player que a pagina le; o `show` antes da hora passa de 404 a 409; as faixas do recalculo dos pop-ups saem das horas redondas.
+
+Decisao tomada (spec revisada duas vezes e integracao com medida; as perguntas abaixo seguem com a resposta assumida):
+
+- **D1 hora marcada nao e momento novo**: e o comportamento de "Ao abrir a pagina" (e de "No primeiro acesso") com `Começa: Em uma data`; `at_start` continua sem uso (os Modelos nunca guardam a janela, entao um modelo com `at_start` abriria invalido). Abre em hora do servidor + 2 s + 0 a 4 s sorteados + "Quanto tempo depois"; nao desiste por tempo (o Termina decide); segue a hora de parede (despertador de ate 30 s, sem pedido em laco); o plano leva os pop-ups ate 24 h antes;
+- **D6 regra unica na aula**: video tocando = espera parar, no arquivo, no YouTube e no Bunny/Vimeo/Mux com a ponte confirmada; ponte pendente confere a cada 1 s; so o player que a pagina nao le continua "mexeu = descarta" (pedido E(1) estendido ao arquivo e ao YouTube por coerencia; pergunta P1);
+- **D7 "No primeiro acesso"** com **Conta como primeiro acesso**: "A primeira vez na area" (conta criada depois do comeco do pop-up, ou que nunca entrou) ou "A primeira vez com estes produtos" (acesso aberto ganho depois do comeco a um dos produtos, ate 20, ou acesso sem nunca ter entrado; a plataforma inteira vale); decidido **no recalculo do segmento**, nunca no navegador; quem perde o acesso deixa de ver (os acessos sao a verdade; P10); ate 15 minutos de atraso (P3, B2 depois);
+- **D8 a marca `first_access_at`**: so a linha marcada pelo recalculo novo continua elegivel depois de o aluno entrar; linha elegivel sem marca e sem ser candidata sai (a de um app de antes); num pop-up que ja foi ao ar, trocar de ou para "No primeiro acesso" e recusado (duplique);
+- **D10 "Ao concluir um curso"** = todas as aulas publicadas dos modulos publicados concluidas (a regra "Progresso 100 %" do segmento); a rota de progresso diz a virada pela gravacao que venceu o compare-and-swap; o `show` confere no banco; formacao = cada curso (a inteira na C2; P4); cada virada e nova chance;
+- **D12 relatorio na pagina do pop-up, desde a publicacao** (sem o Periodo; P5): 4 numeros e 4 blocos, das linhas por aluno (exatas) e do historico ja gravado (ate 100 por aluno e dia), pela funcao `communication_popup_report` (so `service_role`), com indice parcial em `student_events`, cache de 60 s e `Suspense`; sem `page` nos eventos de resultado (D13, P6); a analista so leitura nao abre (P7);
+- **D14 ponte propria por `postMessage`** com o Vimeo e o Player.js (Bunny e Mux): sem SDK, sem script de fora e sem mudar a CSP; origens exatas (a Bunny e um grupo de duas) e `event.source`; `targetOrigin` exato; so confia depois da resposta ao `getPaused`; com ela, o fim do video conclui a aula e o progresso usa o tempo real; sem ela, tudo como antes;
+- **D20 o aluno nao grava linhas de avisos no proprio historico**: a politica de insert de `student_events` recusa `entity_type = 'campaign'` (`alter policy`); as linhas forjadas de antes ficam presas no teto da funcao;
+- **integrador, com medida** (`docs/29` §7.2 e §8.2): a funcao do relatorio foi **reescrita** com o mesmo resultado linha a linha (88/145 ms com 3 mil alunos; 1,04/1,32 s com 30 mil, ~30 % acima da meta de 1 s, aceito: 15 vezes a escala do `docs/17`); as **faixas do recalculo dos pop-ups** viram em :07, :22, :37 e :52 (o p95 do `show` com o tick passava de 100 ms; os fluxos ficam nas horas redondas); o **orcamento de JavaScript** do Inicio e de Favoritos foi **excedido e aceito** (+1,72 KB, orcamento 1 KB; a aula +2,63 KB, dentro dos 3 KB): e o codigo da hora marcada, que precisa estar em toda pagina.
+
+Regra de operacao (R1): **nao publicar nem editar "No primeiro acesso" ou "Ao concluir um curso" num ambiente enquanto o app (e o tick) dele roda a versao de antes**; nao usar previas de PRs anteriores; pausar esses pop-ups antes de voltar a imagem na Hetzner (`docs/21` §9.5, `docs/20` §9).
+
+Em aberto (perguntas ao produtor, `docs/29` §10.2; a entrega segue com a resposta assumida entre parenteses): P1 esperar o video parar tambem no arquivo e no YouTube (sim); P2 quem ja tinha acesso e nunca entrou conta como aluno novo (sim); P3 ate 15 minutos de atraso (sim); P4 um pop-up por curso da formacao e desmarcar e concluir de novo conta (sim; formacao inteira na C2); P5 relatorio desde a publicacao (sim); P6 `page` no clique e no fechar daqui para frente (depois, D2); P7 analista ver o relatorio (fica como esta); P8 alguns segundos de diferenca na hora marcada (sim); P9 capa de dois toques, host novo da Bunny e tela cheia de Bunny e Mux (depois, E2); P10 quem perde o acesso deixa de ver o pop-up de boas-vindas (sim).
+
+**Pendencia (LGPD)**: a retencao de 24 meses de `student_events` prometida no `docs/17` §2.4 **nunca foi feita** (`202610170004_personal_data_retention.sql` nao cobre a tabela). Quando vier (job e migracao proprios, D2), o relatorio "Desde a publicacao" do pop-up encolhe sem aviso (o historico some, as linhas por aluno ficam): o job guarda antes os numeros do relatorio de cada pop-up, ou a tela troca a frase do historico do rodape (`footnoteHistory`) por "nos ultimos 24 meses".
+
+Depois desta entrega: a conferencia em aparelho real dos players (condicao para a PR `dev -> main`, `docs/29` §10.1); a v3b-3 (a linha "Tambem no ar no Inicio: ..." na Revisao e a enquete no pop-up); D2, E2, B2 e C2 (`docs/29` §9.1).
 
 ## Design
 

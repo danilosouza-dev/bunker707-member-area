@@ -1087,9 +1087,11 @@ Tabela append-only para comportamento do aluno.
 
 Politicas atuais:
 
-- aluno autenticado pode inserir somente evento com `user_id = auth.uid()`;
+- aluno autenticado pode inserir somente evento com `user_id = auth.uid()` e, desde a migracao `202610260001` (Comunicacao v3b-2, abaixo), nunca com `entity_type = 'campaign'` (as linhas dos avisos so saem pelo servidor, com a service role);
 - aluno pode ler somente os proprios eventos;
 - eventos de login ja usam `user_signed_in` no fluxo de email/senha e OAuth.
+
+Indices: alem dos de sempre, `student_events_campaign_idx` em `(entity_id, event_type) where entity_type = 'campaign'` (so as linhas dos avisos; o relatorio do pop-up, migracao `202610260001`). Retencao: a de 24 meses prometida no `docs/17` §2.4 **ainda nao existe** para esta tabela (`202610170004_personal_data_retention.sql` nao a cobre); quando chegar, o relatorio "Desde a publicacao" do pop-up encolhe (`docs/29` §9.1, D2).
 
 Exemplos de event_type:
 
@@ -1630,7 +1632,7 @@ Produto em `docs/25`. Pop-ups com paginas, momento, frequencia escolhida pela eq
 **campaigns** (padroes = o comportamento de antes; nenhuma linha e reescrita):
 
 - `popup_pages text[] default {home}` (onde aparece: `any`, `home`, `purchases`, `saved`, `materials`, `journey`, `continue`, `profile`, `support`, `content:*`/`content:<id>`, `lesson:*`/`lesson:<id>`; uma formacao vale tambem para os cursos dela, o app expande) e `popup_exclude_pages text[] default {}` (nunca nestas paginas, sem `any`; a excecao vence);
-- `popup_trigger text default 'page_load'` (`page_load`, `lesson_completed`; o check ja aceita `at_start`, `first_login` e `course_completed` para a v3b-2) e `popup_delay_seconds smallint default 3` (0 a 600);
+- `popup_trigger text default 'page_load'` (`page_load`, `lesson_completed`; o check ja aceita `at_start`, `first_login` e `course_completed`, os dois ultimos usados desde a v3b-2, abaixo; `at_start` continua sem uso) e `popup_delay_seconds smallint default 3` (0 a 600);
 - `popup_frequency text` (`once` ou `repeat`; **nulo = pop-up de antes**, lido de `popup_repeat`: `once` = Uma vez, `until_action` = 1 dia entre uma vez e outra, ate clicar), `popup_every_minutes` (1 a 129.600), `popup_max_per_day` (1 a 100), `popup_max_total` (2 a 1.000) e `popup_stop_on` (`click` ou `never`);
 - `popup_close text default 'any'` (`any` ou `x_only`) e `popup_snooze_minutes integer default 1440` (5 a 10.080);
 - checks `campaigns_popup_pages_v3b` (ate 20 de cada, formato pela funcao `communication_popup_pages_ok`, so paginas de aula com `lesson_completed`), `campaigns_popup_trigger_v3b`, `campaigns_popup_frequency_v3b` (`popup_repeat` coerente: `once` so com Uma vez, `until_action` com Mais de uma vez; a v3a e as abas antigas leem essa coluna), `campaigns_popup_close_v3b`, `campaigns_popup_snooze_v3b` e `campaigns_popup_only_v3b` (notificacao e passo de fluxo sempre com os padroes: nada de pop-up vaza para o sino). O app grava `popup_repeat` e `popup_frequency` sempre juntos (`popupSettingsToColumns`); a linha passa para o formato novo quando e salva.
@@ -1729,6 +1731,25 @@ Indices: `updated_at desc` e `(kind, design_mode, updated_at desc)`, os dois ond
 **Auditoria**: `communication.template_saved`, `.template_renamed`, `.template_duplicated`, `.template_deleted` (`entity_type: "communication_template"`) e `communication.template_used` (`entity_type: "campaign"`), so com ids encontrados no banco, codigos e contagens.
 
 **Deploy**: **antes** do merge na `dev` (`docs/28` §11 passo 1). Sem a tabela, a aba Modelos mostra "migracao pendente", o "Novo aviso" continua um link e a limpeza segue sem modelos (so a tabela ausente vale como "nenhum modelo"). A migracao sozinha nao atrapalha o app de antes.
+
+### Comunicacao v3b-2 (migracao `202610260001`, 23/10/2026)
+
+Produto em `docs/29`. Hora marcada ao vivo, momentos "No primeiro acesso" (`first_login`) e "Ao concluir um curso" (`course_completed`), relatorio do pop-up e players de fora. Arquivo novo (as migracoes ate a `202610250001` nao mudam; o teste de guarda `comunicacao-v3b2.guard` confere os hashes e fixa o sha256 da nova, `44566be5...f3b76ae8`). Cinco secoes aditivas e idempotentes, todas pelo MCP, uma por chamada e na ordem; a 5 sozinha (se o MCP travar no `alter policy`, pelo SQL Editor). Sem `drop`, `delete`, gatilho nem `create policy`; constraint dentro de `if not exists`; o texto da coluna do design nunca aparece (guarda do Livre).
+
+**campaigns**: `popup_access_products text[] not null default {}`: no momento "No primeiro acesso", os produtos (ids de `content_items`) cujo acesso ganho depois do comeco do pop-up conta como primeiro acesso; o acesso a plataforma inteira vale para todos; vazio = "A primeira vez na area". Check `campaigns_popup_access_v3b2`: `communication_popup_products_ok(popup_access_products)` e lista nao vazia so com `kind = 'popup'` e `popup_trigger = 'first_login'` (notificacao, passo de fluxo e os outros momentos sempre vazios). Quem e "aluno novo" e decidido pelo app no recalculo do segmento (`dispatch.ts`), nunca no banco. O comentario de `popup_trigger` passa a descrever os quatro momentos (`first_login` e `course_completed` ja passavam no check da `202610220003`; `course_completed` so com paginas de aula pelo `campaigns_popup_pages_v3b`). `CAMPAIGN_COLUMNS` le a coluna nova; a lista no ar (`LIVE_POPUP_COLUMNS`) nao.
+
+**campaign_deliveries**: `first_access_at timestamptz` (nulo): o recalculo do "No primeiro acesso" grava quando habilitou a linha por o aluno ser candidato. So a linha marcada continua elegivel depois de o aluno entrar na area (enquanto estiver no segmento e, com produtos, com acesso aberto a um deles ou a plataforma); uma linha habilitada por um app sem esta regra (que le `first_login` como `page_load`) sai no recalculo seguinte. Nulo nos outros momentos e nas notificacoes; o `upsert` do app de antes nao toca a coluna.
+
+**student_events**: indice parcial `student_events_campaign_idx` em `(entity_id, event_type) where entity_type = 'campaign'` (1,95 MB para 264 mil linhas de avisos em 2,66 milhoes, medido; nao e `concurrently`: enquanto monta, as escritas na tabela esperam, ~2,3 s para 2,66 a 3,3 milhoes de linhas; conte as linhas antes). A politica `Students can create own events` (da `202606150003`) muda so a condicao, por `alter policy`: `with check (auth.uid() = user_id and coalesce(entity_type, '') <> 'campaign')`. O navegador so grava `entity_type: "auth"`; as funcoes que gravam no banco sao `security definer`; as rotas gravam com a service role.
+
+**Funcoes** (so `service_role`, revogadas de `public`/`anon`/`authenticated`, assinatura exata conferida na guarda):
+
+- `communication_popup_products_ok(p_products text[]) returns boolean` (`immutable`, `search_path = pg_catalog`): ate 20, sem nulo, cada id em `^[A-Za-z0-9_-]{1,240}$` (o mesmo texto de `POPUP_PRODUCT_ID`), conferido um por um com `unnest` (um `array_to_string` aceitaria `{''}` e `{'a,b'}`);
+- `communication_popup_report(p_campaign_id uuid) returns table (metric text, item text, total bigint, students bigint)` (`stable`, `security invoker`, `search_path = pg_catalog, public`): os numeros do relatorio de um pop-up. Linhas `opened`, `opened_kind` (`home`, `purchases`, `saved`, `materials`, `journey`, `continue`, `profile`, `support`, `content`, `lesson`, `other`), `opened_product` (por id), `opened_trigger` (os quatro momentos e `other`), `outcome` (`clicked`, `dismissed`, `snoozed`, `closed_x`, `closed_outside`, `closed_esc`, `closed_page`, `closed_unknown`), `outcomes`, `times` (`1`, `2`, `3-5`, `6-10`, `11+`), `viewers`, `max`, `median`. Conta so aluno com linha vista (`impressions > 0`), nunca a equipe de hoje (`admin_roles`) e nunca mais vezes do que a linha diz (`least(n, impressions)` por aluno e item); pagina, momento e jeito conferidos com as listas do app (`POPUP_PAGE_KEY`, `POPUP_TRIGGERS`, `POPUP_CLOSE_VIAS`; o resto vira `other`/`closed_unknown`; sem pagina = `home`, sem momento = `page_load`). Uma leitura do historico pelo indice parcial e uma passada por aluno, **sem juntar tabelas grandes** (a linha por aluno entra no mesmo agrupamento por `union all`); medida em `docs/29` §7.2.
+
+RLS de `campaigns` e `campaign_deliveries` como estava; nenhuma tabela nova. Eventos: nenhum novo; `message_impressed.trigger` pode ser `first_login` ou `course_completed`. `prune_communication_history` e as outras RPCs nao mudam.
+
+**Deploy**: **antes** do merge na `dev` (`docs/29` §10; `docs/21` §9.5); na Hetzner o `deploy-membros` aplica antes de trocar o app. Sem ela, `CAMPAIGN_COLUMNS` quebra o admin de avisos e o job `comunicacao` do tick (como na v3b-1). A migracao sozinha nao atrapalha o app de antes. **Nao publicar nem editar "No primeiro acesso" ou "Ao concluir um curso" enquanto o app do ambiente rodar a versao de antes** (`docs/29` R1).
 
 ## Retencao de dados pessoais
 
