@@ -5,7 +5,11 @@ import "server-only";
 // turmas, segmentos de Alunos, marca para a previa). Chamadas pelas paginas do admin depois de
 // requirePageArea("comunicacao"); banco sem a migracao 202610200001 -> PendingMigrationError (a pagina
 // mostra o aviso da migracao).
+//
+// v3b-2 (docs/29 §6.5): o relatorio do pop-up (getPopupReport: a RPC communication_popup_report e os nomes dos
+// produtos citados, com cache de 60 s) e os produtos do "No primeiro acesso" nos nomes de "Detalhes".
 
+import { unstable_cache } from "next/cache";
 import {
   followUpsModeOf,
   type FollowUpsMode,
@@ -47,7 +51,8 @@ import {
   type NoticePermissions,
   type SituationTone
 } from "./campaign-model";
-import { assertNoDbError, chunksOf, communicationsDb, type CommunicationsDb } from "./db";
+import { COMMUNICATIONS_TAG } from "./cache";
+import { assertNoDbError, chunksOf, communicationsDb, describeError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
 import { entryOf, followUpsFromTree, type FlowEndedReason, type FlowNode, type FlowStatus, type FollowUp } from "./flow-model";
 import type { FlowNoticeContent } from "./flow-schemas";
 import { definitionOf, fetchFlowNodeStats, fetchFlowTree, lastSourceExpiry, type LoadedFlowTree } from "./flow-store";
@@ -56,6 +61,7 @@ import { noticeIconOfColumns, normalizeSchoolIcon, SCHOOL_NAME_FALLBACK_TEAM, ty
 import { popupSettingsOfRow } from "./popup-display-model";
 import type { PopupFontFace, PopupFontOption } from "./popup-design-model";
 import { listPopupFontLibrary, loadPopupFontFaces } from "./popup-fonts";
+import { buildPopupReport, popupReportProductIds, readPopupReportRows, type PopupReportView } from "./popup-report-model";
 import { describePopupPlacementShort } from "./popup-sentences";
 import { emptyNoticeDraft, type NoticeDraft } from "./schemas";
 import {
@@ -70,6 +76,7 @@ import {
   fetchMessageInteractions,
   fetchNoticeCitations,
   fetchOverview,
+  fetchPopupReport,
   listCampaignRows,
   reshowPopupDeliveries,
   rowToDraft,
@@ -525,14 +532,17 @@ async function reshowableOf(db: CommunicationsDb, row: CampaignRow, now: number)
   return (await reshowPopupDeliveries(db, { apply: false, campaignId: row.id, max: null, now: new Date(now) }))?.count ?? null;
 }
 
-/** v3b-1: produtos citados nas paginas e excecoes do pop-up (content:<id> e lesson:<id>; curingas nao contam). */
+/**
+ * v3b-1: produtos citados nas paginas e excecoes do pop-up (content:<id> e lesson:<id>; curingas nao contam).
+ * v3b-2: tambem os produtos do "No primeiro acesso" (os nomes de "Detalhes" e da frase).
+ */
 function popupProductIds(row: CampaignRow) {
   if (row.kind !== "popup") {
     return [];
   }
 
   const settings = popupSettingsOfRow(row);
-  const ids = new Set<string>();
+  const ids = new Set<string>(settings.accessProducts ?? []);
 
   for (const pattern of [...settings.pages, ...settings.exclude]) {
     const id = /^(?:content|lesson):(.+)$/.exec(pattern)?.[1];
@@ -653,6 +663,43 @@ async function loadSender(db: CommunicationsDb, userId: string): Promise<NonNull
     name: person?.full_name?.trim() || SCHOOL_NAME_FALLBACK_TEAM,
     onTeam: Boolean(role.data)
   };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Relatorio do pop-up (v3b-2, docs/29 §6.5)
+ * ---------------------------------------------------------------------------------------------- */
+
+export type PopupReportResult = { status: "error" } | { status: "pending_migration" } | { status: "ok"; view: PopupReportView };
+
+/** Duas leituras: a RPC (so service_role) e, quando o relatorio cita produtos, os nomes deles. */
+async function loadPopupReport(campaignId: string): Promise<PopupReportView> {
+  const db = communicationsDb();
+  const rows = readPopupReportRows(await fetchPopupReport(db, campaignId));
+  const productIds = popupReportProductIds(rows);
+  const names = productIds.length > 0 ? await selectNames(db, "content_items", "title", productIds) : {};
+
+  return buildPopupReport(rows, names);
+}
+
+// Cache de 60 s (tag "communications": toda acao de aviso invalida); so o resultado certo entra (o erro sobe e
+// nao fica guardado). O id entra pelos argumentos da chamada.
+const cachedPopupReport = unstable_cache(loadPopupReport, ["communications-popup-report", "v3b2"], {
+  revalidate: 60,
+  tags: [COMMUNICATIONS_TAG]
+});
+
+/** Relatorio de um pop-up (cache de 60 s, tag communications): duas leituras, a RPC e os nomes dos produtos citados. */
+export async function getPopupReport(campaignId: string): Promise<PopupReportResult> {
+  try {
+    return { status: "ok", view: await cachedPopupReport(campaignId) };
+  } catch (error) {
+    if (isMissingCommunicationSchema(error)) {
+      return { status: "pending_migration" };
+    }
+
+    console.error("[admin/comunicacao] relatorio do pop-up", describeError(error));
+    return { status: "error" };
+  }
 }
 
 /** Os quatro numeros do topo (Avisos ativos, Vistos, Taxa de clique, Voltaram a estudar) no periodo. */

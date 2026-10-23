@@ -8,6 +8,9 @@ import { expect, test, zerarComunicacao } from "./fixtures";
 // vivo; "Só no X"). A revisao, a legenda da previa, o toast de publicar (ate 1 minuto), as linhas de
 // "Detalhes" do relatorio, a segunda linha da lista e, no pop-up no ar, "Mostrar de novo para quem já viu" em
 // "Mais de uma vez" e a linha de quem ja viu ao mudar onde ele aparece.
+// v3b-2 (docs/29 §6.1 e §6.5): as quatro pilulas de "Quando aparece"; no pop-up que ja foi ao ar, a trava do
+// primeiro acesso ("No primeiro acesso" desabilitada, as outras tres nao, e a linha ligada pelo aria-describedby
+// do grupo); o relatorio "Como o pop-up foi visto" vazio logo depois de publicar.
 
 const TITULO = "Pop-up E2E: configurado nos cards";
 const SESSAO_DO_PRODUTOR = "tests/e2e/.auth/produtor.json";
@@ -34,7 +37,13 @@ test("monta o pop-up nos dois cards, com a validação, as frases e a prévia, e
   // Quando e onde aparece.
   const lugar = card(page, "Quando e onde aparece");
   await expect(lugar.getByText("Em que momento e em quais páginas o pop-up abre.", { exact: true })).toBeVisible();
-  await expect(lugar.getByRole("radiogroup", { name: "Quando o pop-up aparece" }).getByRole("radio", { name: "Ao abrir a página" })).toBeChecked();
+  const momento = lugar.getByRole("radiogroup", { name: "Quando o pop-up aparece" });
+  await expect(momento.getByRole("radio", { name: "Ao abrir a página" })).toBeChecked();
+  await expect(momento.getByRole("radio")).toHaveCount(4);
+  for (const nome of ["Ao abrir a página", "Ao concluir uma aula", "No primeiro acesso", "Ao concluir um curso"]) {
+    await expect(momento.getByRole("radio", { exact: true, name: nome })).toBeEnabled();
+  }
+  await expect(momento).not.toHaveAttribute("aria-describedby", /.+/);
   const onde = lugar.getByRole("radiogroup", { name: "Onde o pop-up aparece" });
   await expect(onde.getByRole("radio", { name: "Só no Início" })).toBeChecked();
   await onde.getByText("Escolher páginas", { exact: true }).click();
@@ -123,6 +132,10 @@ test("monta o pop-up nos dois cards, com a validação, as frases e a prévia, e
   await expect(linha("Quando aparece")).toHaveText("Ao abrir a página, 3 segundos depois");
   await expect(linha("Quantas vezes")).toHaveText("Até 2 vezes por dia, com pelo menos 2 horas entre uma vez e outra, até o pop-up terminar");
   await expect(linha("Como fecha")).toHaveText("Só no X (e no Esc)");
+
+  // v3b-2: o relatorio do pop-up, ainda sem ninguem que viu.
+  await expect(page.getByRole("heading", { level: 2, name: "Como o pop-up foi visto" })).toBeVisible();
+  await expect(page.getByText("Ninguém viu este pop-up ainda. Os números aparecem aqui quando os alunos começarem a ver.", { exact: true })).toBeVisible();
 });
 
 test("no ar: a lista mostra onde ele aparece; Editar tem Mostrar de novo em Mais de uma vez e avisa ao mudar onde ele aparece", async ({ page }) => {
@@ -152,6 +165,16 @@ test("no ar: a lista mostra onde ele aparece; Editar tem Mostrar de novo em Mais
   await expect(vezes.getByRole("radiogroup", { exact: true, name: "Unidade do tempo" }).getByRole("radio", { name: "horas" })).toBeChecked();
 
   const lugar = card(page, "Quando e onde aparece");
+  // v3b-2 (D8): no pop-up que ja foi ao ar, "No primeiro acesso" nao troca com os outros momentos.
+  const momento = lugar.getByRole("radiogroup", { name: "Quando o pop-up aparece" });
+  await expect(momento.getByRole("radio", { exact: true, name: "No primeiro acesso" })).toBeDisabled();
+  for (const nome of ["Ao abrir a página", "Ao concluir uma aula", "Ao concluir um curso"]) {
+    await expect(momento.getByRole("radio", { exact: true, name: nome })).toBeEnabled();
+  }
+  const trava = lugar.getByText("Num pop-up que já foi ao ar, “No primeiro acesso” não troca com os outros momentos. Para isso, duplique o pop-up.", { exact: true });
+  await expect(trava).toBeVisible();
+  await expect(momento).toHaveAccessibleDescription("Num pop-up que já foi ao ar, “No primeiro acesso” não troca com os outros momentos. Para isso, duplique o pop-up.");
+
   await lugar.getByRole("group", { name: "Nunca nestas páginas" }).getByRole("checkbox", { exact: true, name: "Suporte" }).click();
   await expect(lugar.getByText("Aparece em qualquer página, menos Perfil e Suporte.", { exact: true })).toBeVisible();
   await expect(

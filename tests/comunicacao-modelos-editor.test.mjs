@@ -570,8 +570,9 @@ test("PopupPlacementFields com showWindow={false}: sem os campos de início e fi
   const withWindow = renderPlacement({});
   const withoutWindow = renderPlacement({ showWindow: false });
 
-  assert.match(withWindow, /Começa/, "o editor do aviso continua com a janela");
-  assert.doesNotMatch(withoutWindow, /Começa/);
+  // O rotulo do campo (">Começa<"): a dica de "Ao abrir a página" cita “Começa: Em uma data” (v3b-2, docs/29 §6.1).
+  assert.match(withWindow, />Começa</, "o editor do aviso continua com a janela");
+  assert.doesNotMatch(withoutWindow, />Começa</);
   assert.doesNotMatch(withoutWindow, /Termina/);
   assert.doesNotMatch(withoutWindow, /aviso-inicio/);
   assert.doesNotMatch(withoutWindow, /aviso-fim/);

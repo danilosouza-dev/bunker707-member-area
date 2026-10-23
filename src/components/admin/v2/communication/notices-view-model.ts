@@ -74,11 +74,14 @@ import { AUDIO_HEARD_SLOTS } from "../../../../server/communications/notificatio
 import {
   canonicalPopupSettings,
   canonicalPatterns,
+  canonicalProductIds,
+  isPageTrigger,
   repeatOfFrequency,
   sameFrequency,
   type PopupFrequency,
   type PopupSettings,
-  type PopupStopOn
+  type PopupStopOn,
+  type PopupTrigger
 } from "../../../../server/communications/popup-display-model";
 import { canonicalPopupDesign, type PopupFontFace } from "../../../../server/communications/popup-design-model";
 import { canonicalPopupFreeDesign, freePreviewPopupItem, type PopupFreeDesign } from "../../../../server/communications/popup-free-model";
@@ -575,8 +578,31 @@ export function reshownPopupToast(count: number, mode: "once" | "repeat" = "once
 /** v3b-1: quem ja esta com a area aberta guarda o pop-up por ate 1 minuto no navegador (docs/25 §5.6). */
 const POPUP_DELAY_SUFFIX = "Para quem já está com a área aberta, pode levar até 1 minuto.";
 
+/**
+ * v3b-2 (docs/29 §6.4): o pop-up que foi ao ar, como o servidor devolve em PublishedNotice.popup (publicar e
+ * aprovar): o Comeca no futuro e o momento. Sem a chave (notificacao, servidor de antes), o toast de antes.
+ */
+export type PublishedPopupInfo = { startsInFuture: boolean; trigger: PopupTrigger };
+
 /** Toast depois de publicar ou aprovar, conforme o que o servidor decidiu. */
-export function publishedNoticeToast(result: { audienceCount: number; recipients: number | null; situation: CampaignSituation }, kind: CampaignKind) {
+export function publishedNoticeToast(
+  result: { audienceCount: number; popup?: PublishedPopupInfo; recipients: number | null; situation: CampaignSituation },
+  kind: CampaignKind
+) {
+  const popup = kind === "popup" ? result.popup : undefined;
+
+  // v3b-2: Comeca no futuro num momento de pagina (a hora marcada ao vivo, com a ressalva de quem ja esta com
+  // a area aberta) e "No primeiro acesso" no ar agora.
+  if (popup && result.situation !== "pending_approval") {
+    if (popup.startsInFuture && isPageTrigger(popup.trigger)) {
+      return "Pop-up publicado. Na hora marcada, ele aparece para quem abrir uma das páginas e para quem já estiver nelas. Para quem está com a área aberta agora, vale a partir da próxima página ou de quando voltar para a aba.";
+    }
+
+    if (!popup.startsInFuture && popup.trigger === "first_login" && result.situation === "active") {
+      return "Pop-up publicado. Ele aparece para os alunos novos a partir de agora.";
+    }
+  }
+
   switch (result.situation) {
     case "pending_approval":
       return "Enviado para aprovação.";
@@ -786,12 +812,13 @@ export function popupFrequencyChangeHint(input: { saved: PopupFrequency | null |
   return "Mudar “Quantas vezes” vale na hora para todos, contando as vezes que cada aluno já viu.";
 }
 
-type PopupPlacementSnapshot = { popup: Pick<PopupSettings, "exclude" | "pages" | "trigger">; window: NoticeDraft["window"] };
+type PopupPlacementSnapshot = { popup: Pick<PopupSettings, "accessProducts" | "exclude" | "pages" | "trigger">; window: NoticeDraft["window"] };
 
 /**
  * v3b-1 (docs/25 §2.3): as linhas de aviso do card "Quando e onde aparece" no pop-up no ar ou pausado:
  * paginas, excecoes ou momento diferentes do salvo (quem ja viu continua contando como visto) e, no ar, o
- * "Começa" levado para o futuro (some para todos ate la).
+ * "Começa" levado para o futuro (some para todos ate la). v3b-2 (docs/29 §6.1): os produtos do primeiro
+ * acesso entram na comparacao e, quando so eles mudaram, a linha de quem ja contava como aluno novo.
  */
 export function popupPlacementChangeNotes(input: { now: number; saved: PopupPlacementSnapshot; shown: PopupPlacementSnapshot; status: CampaignStatus | null | undefined }): string[] {
   if (!isLivePopupStatus("popup", input.status)) {
@@ -801,11 +828,17 @@ export function popupPlacementChangeNotes(input: { now: number; saved: PopupPlac
   const notes: string[] = [];
   const { saved, shown } = input;
   const samePatterns = (left: readonly string[], right: readonly string[]) => canonicalPatterns(left).join(" ") === canonicalPatterns(right).join(" ");
+  const sameProducts = canonicalProductIds(saved.popup.accessProducts ?? []).join(" ") === canonicalProductIds(shown.popup.accessProducts ?? []).join(" ");
+  const samePlace = saved.popup.trigger === shown.popup.trigger && samePatterns(saved.popup.pages, shown.popup.pages) && samePatterns(saved.popup.exclude, shown.popup.exclude);
 
-  if (saved.popup.trigger !== shown.popup.trigger || !samePatterns(saved.popup.pages, shown.popup.pages) || !samePatterns(saved.popup.exclude, shown.popup.exclude)) {
+  if (!samePlace || !sameProducts) {
     notes.push(
       "Mudar onde ou quando ele aparece vale na hora. Quem já viu continua contando como visto, também nas páginas novas. Para todos verem de novo, ligue “Mostrar de novo para quem já viu”."
     );
+  }
+
+  if (samePlace && !sameProducts && shown.popup.trigger === "first_login") {
+    notes.push("Quem já contava como aluno novo continua contando enquanto tiver acesso a um dos produtos marcados. A mudança vale para quem chegar daqui para frente.");
   }
 
   const shownStart = shown.window.startsAt === null ? Number.NaN : Date.parse(shown.window.startsAt);

@@ -467,6 +467,15 @@ function audiencePhrase(count: number | null) {
   return count === 1 ? "para 1 aluno" : `para ${new Intl.NumberFormat("pt-BR").format(count)} alunos`;
 }
 
+/** v3b-2: " (entre 318 alunos do segmento)", " (entre os alunos do segmento)" depois do "para quem" do pop-up. */
+function amongSegmentPhrase(count: number | null) {
+  if (count === null) {
+    return " (entre os alunos do segmento)";
+  }
+
+  return count === 1 ? " (entre 1 aluno do segmento)" : ` (entre ${new Intl.NumberFormat("pt-BR").format(count)} alunos do segmento)`;
+}
+
 export type NoticeReviewInput = {
   audienceCount: number | null;
   /** Notificacoes seguintes (v2): quantas e o produto da linha "Parar ... para quem tiver acesso a". */
@@ -474,9 +483,11 @@ export type NoticeReviewInput = {
   kind: CampaignKind;
   /**
    * v3b-1: as partes do pop-up ja em frase (popupReviewParts de popup-sentences.ts): onde e quando (null = o
-   * padrao, so no Inicio ao abrir) e quantas vezes; sem valor, a frase de `repeat` da v1.
+   * padrao, so no Inicio ao abrir) e quantas vezes; sem valor, a frase de `repeat` da v1. v3b-2: `audience`
+   * ("para quem entrar pela primeira vez", so no "No primeiro acesso") entra no lugar de "para {318 alunos}",
+   * com a contagem do segmento entre parenteses.
    */
-  popup?: { frequency: string; placement: string | null } | null;
+  popup?: { audience?: string | null; frequency: string; placement: string | null } | null;
   repeat: PopupRepeat;
   schedule: { mode: "now" } | { mode: "at"; sendAt: string };
   /**
@@ -533,8 +544,10 @@ export function describeNoticeReview(input: NoticeReviewInput) {
   }
 
   const placement = input.popup?.placement;
+  // v3b-2: no "No primeiro acesso", quem ve vem antes da contagem do segmento.
+  const who = input.popup?.audience?.trim() ? `${input.popup.audience.trim()}${amongSegmentPhrase(input.audienceCount)}` : audience;
 
-  return `Pop-up ${audience}${placement ? `, ${placement}` : ""}, ${period}, ${input.popup?.frequency ?? POPUP_REPEAT_LABELS[input.repeat]}.`;
+  return `Pop-up ${who}${placement ? `, ${placement}` : ""}, ${period}, ${input.popup?.frequency ?? POPUP_REPEAT_LABELS[input.repeat]}.`;
 }
 
 /* ------------------------------------------------------------------------------------------------
