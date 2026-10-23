@@ -42,7 +42,19 @@ export function isInlineImage(value: string | null | undefined) {
   return Boolean(value?.startsWith("data:image/"));
 }
 
-export async function persistImageAsset(value: string | null | undefined, ownerPath: string) {
+/** O objeto que o envio vai gravar (bucket e caminho; o nome vem do conteudo). */
+export type ImageAssetObject = { bucket: string; path: string };
+
+/**
+ * Grava a imagem inline (data URL) no content-assets com nome pelo conteudo e devolve a URL publica (valor que nao e
+ * imagem inline volta como veio). `beforeUpload` roda com o caminho final antes do envio: a Comunicacao usa para
+ * conferir a marca da limpeza dos arquivos (docs/22 §4.6); se falhar, nada e enviado.
+ */
+export async function persistImageAsset(
+  value: string | null | undefined,
+  ownerPath: string,
+  options: { beforeUpload?: (object: ImageAssetObject) => Promise<void> } = {}
+) {
   const normalizedValue = value?.trim();
 
   if (!normalizedValue || !isInlineImage(normalizedValue)) {
@@ -63,6 +75,9 @@ export async function persistImageAsset(value: string | null | undefined, ownerP
     .join("/");
   const objectPath = `${safeOwnerPath}/${hash}.${parsed.extension}`;
   const supabase = getSupabaseAdminClient();
+
+  await options.beforeUpload?.({ bucket: contentAssetsBucket, path: objectPath });
+
   const uploadResult = await supabase.storage
     .from(contentAssetsBucket)
     .upload(objectPath, parsed.bytes, {

@@ -169,8 +169,9 @@ test("tick route authenticates first, bounds the body and records job_runs", () 
   const jobTypeBody = registrySource.match(/export type Job = \{([^}]*)\}/)?.[1] ?? "";
   assert.match(jobTypeBody, /\bname: string;/);
   assert.match(jobTypeBody, /\brun\(ctx: JobContext\): Promise<void>;/);
-  // Ordem do registro: e-mails primeiro, depois a Comunicacao (sino e pop-ups).
-  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob\];/);
+  // Ordem do registro: e-mails primeiro, depois a Comunicacao (sino e pop-ups) e, por ultimo, a limpeza diaria
+  // dos arquivos da Comunicacao sem uso (usa so o que sobra do tick).
+  assert.match(registrySource, /export const jobRegistry: readonly Job\[\] = \[emailOutboxJob, communicationsJob, communicationMediaJob\];/);
   assert.match(jobRunsSource, /\.from\("job_runs"\)/);
 });
 

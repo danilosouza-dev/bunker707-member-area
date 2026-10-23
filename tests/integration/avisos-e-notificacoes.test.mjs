@@ -371,7 +371,7 @@ test("agendar: nada chega antes da hora; o job do tick envia uma vez so, mesmo r
 
   const jobDaComunicacao = jobRegistry.filter((job) => job.name === COMMUNICATIONS_JOB_NAME);
   assert.equal(jobDaComunicacao.length, 1, "o job esta no registro do tick");
-  assert.deepEqual(jobRegistry.map((job) => job.name).slice(-2), ["email-outbox", COMMUNICATIONS_JOB_NAME], "depois da fila de e-mails");
+  assert.deepEqual(jobRegistry.map((job) => job.name).slice(0, 2), ["email-outbox", COMMUNICATIONS_JOB_NAME], "depois da fila de e-mails");
 
   const cedo = await runJobsTick({ jobs: jobDaComunicacao, supabase: db });
   assert.deepEqual(cedo.failed, [], JSON.stringify(cedo));

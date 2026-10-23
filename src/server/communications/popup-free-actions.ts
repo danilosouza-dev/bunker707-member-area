@@ -13,6 +13,7 @@ import { recordAudit } from "@/server/audit/log";
 import { decodeWebpDataUrl, readWebpDimensions } from "@/server/catalog/webp";
 import { persistImageAsset } from "@/server/db/media-assets";
 import { communicationsDb, NoticeFieldError } from "./db";
+import { forgetOrphanMark } from "./media-cleanup";
 import { storagePublicPath } from "./popup-design-model";
 import { FREE_DESIGN_LIMITS } from "./popup-free-model";
 import { FREE_IMAGE_BUCKET, FREE_IMAGE_PATH_PATTERN } from "./popup-free-render";
@@ -55,7 +56,11 @@ export async function uploadPopupFreeImage(input: { image: string }): Promise<Ac
       throw new NoticeFieldError("image", POPUP_FREE_MESSAGES.imageUploadSides);
     }
 
-    const url = (await persistImageAsset(data.image, "communications/free")).trim();
+    // A mesma imagem enviada de novo cai no mesmo caminho: antes de enviar, a marca da limpeza sai (o prazo
+    // recomeca) e uma remocao em andamento do mesmo caminho termina primeiro (docs/22 §4.6).
+    const url = (
+      await persistImageAsset(data.image, "communications/free", { beforeUpload: (object) => forgetOrphanMark(communicationsDb(), object) })
+    ).trim();
     const marker = storagePublicPath(FREE_IMAGE_BUCKET, "");
     const index = url.indexOf(marker);
     const path = index === -1 ? "" : url.slice(index + marker.length).split(/[?#]/)[0];

@@ -176,7 +176,7 @@ Blocos 1 a 12; linhas do título 1 a 4; fonte 10 a 96 px; altura da linha 0,8 a 
 - **Envio de fonte**: `POST /api/admin/communications/popup-fonts` (multipart, só `messaging.write`, 2 MB): o tipo vem dos primeiros bytes e do cabeçalho mínimo (WOFF2/WOFF com o tamanho do arquivo, TTF/OTF com o diretório de tabelas inteiro); coleção (`ttcf`) e qualquer outra coisa → 422; o tipo informado pelo navegador nunca é usado. O mesmo arquivo não duplica (caminho pelo sha256).
 - **CSP**: `font-src 'self' data: <origem do Supabase>` (nada do Google: o teste de guarda confere que a CSP não cita `fonts.googleapis.com`/`fonts.gstatic.com`); `img-src` e `media-src` já aceitavam o Storage.
 - **Auditoria** sem conteúdo: `popup_design: "custom" | "default"` em salvar/publicar/aprovar; `communication.font_uploaded`, `communication.font_renamed`, `communication.font_deleted` e `communication.video_uploaded` (só ids, formato e tamanho).
-- **Arquivos órfãos** (vídeo trocado, fonte excluída) ficam no Storage nesta versão (D21); excluir uma fonte em uso por pop-up não excluído é recusado (409).
+- **Arquivos órfãos** (vídeo trocado, imagem do fundo trocada, fonte excluída, pop-up excluído) saem do Storage 30 dias depois de ficarem sem uso, pelo job diário da limpeza (`docs/22` §4.6, desde 23/10/2026; a fonte excluída que um pop-up não excluído ainda usa fica); excluir uma fonte em uso por pop-up não excluído continua recusado (409).
 
 ---
 
@@ -242,7 +242,7 @@ O zod nunca entra no pedaço do aluno (guarda). O terceiro arquivo da janela é 
 | D18 | CSP `font-src` com a origem do Supabase | o FontFace baixa do Storage; nada do Google |
 | D19 | Auditoria só com códigos, ids, formato e tamanho | rastro sem dado pessoal nem texto |
 | D20 | Design autocontido (sem id de aviso; fontes por id) | pode virar "modelo salvo" depois sem migração |
-| D21 | Arquivos órfãos ficam no Storage nesta versão | limpeza é trabalho de job; volume pequeno (só a equipe envia) |
+| D21 | Arquivos órfãos ficavam no Storage na primeira versão; desde 23/10/2026 saem 30 dias depois de ficarem sem uso (`docs/22` §4.6) | limpeza é trabalho de job; os 30 dias deixam desfazer uma exclusão ou duplicar o aviso |
 | D22 | Modelo "Mídia no topo com degradê": subir 34 % e escuro de 50 % a 92 % da mídia, paradas suavizadas (era subir 28 % e degradê de 65 % até o fim; antes ainda, 12 % e 55 % linear) | conferido em fotos contra a referência (23/10): a mídia aparece inteira na metade de cima, a passagem fica no meio do cartão com o selo em cima dela e título, texto e botão ficam no escuro; com 28 %/65 % o título ainda pegava o fim da passagem |
 | D23 | No Personalizado, o card do conteúdo some com o rótulo "Áudio (opcional)" de dentro do bloco Áudio | o bloco já se chama Áudio; o rótulo repetia |
 | D24 | O envio do vídeo cancela o corpo do pedido de 64 bytes sem esperar (`void cancel()`) | dentro do `next start`, esperar o `cancel` de um corpo lido pela metade nunca terminava e o editor ficava em "Enviando o vídeo… 100%" (pego nas fotos do editor; os testes no Node não pegavam) |
@@ -269,7 +269,7 @@ O zod nunca entra no pedaço do aluno (guarda). O terceiro arquivo da janela é 
 | HTML ou CSS escrito pela equipe | nunca |
 | Google Fonts carregado do Google na hora | nunca (baixar e enviar) |
 | Design na notificação do sino | não planejado |
-| Limpeza de vídeos e fontes sem uso no Storage | job futuro (D21) |
+| Limpeza de vídeos e fontes sem uso no Storage | feito em 23/10/2026: `docs/22` §4.6 (D21 mudou) |
 | Som no vídeo, controles, vídeo longo, vídeo de fora (YouTube, Bunny) no pop-up | não planejado (o vídeo é ambiente, curto e mudo) |
 | Ponta a ponta no WebKit dos arquivos novos | rodados no Chromium; o WebKit roda no CI |
 

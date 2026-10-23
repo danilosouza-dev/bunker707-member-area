@@ -18,6 +18,7 @@ import "server-only";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { assertNoDbError, CommunicationError, type CommunicationsDb } from "./db";
+import { forgetOrphanMark } from "./media-cleanup";
 import {
   POPUP_CARD_IMAGE_BUCKET,
   POPUP_CARD_IMAGE_PATH_PATTERN,
@@ -489,6 +490,11 @@ export async function persistPopupFont(db: CommunicationsDb, input: PersistPopup
   if (existing) {
     return { created: false, font: optionOrGone(db, existing) };
   }
+
+  // O arquivo de uma fonte excluida pode estar marcado sem uso: antes de enviar, a marca sai (o prazo da limpeza
+  // recomeca) e uma remocao em andamento do mesmo caminho termina primeiro; so depois "ja existe" vale como enviado e
+  // a linha nova pode apontar para o arquivo (docs/22 §4.6).
+  await forgetOrphanMark(db, { bucket: POPUP_FONTS_BUCKET, path: filePath });
 
   const { count, error: countError } = await db.from("communication_fonts").select("id", { count: "exact", head: true }).is("deleted_at", null);
   assertNoDbError(countError, "Comunicacao: tamanho da biblioteca de fontes");

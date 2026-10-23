@@ -1673,7 +1673,7 @@ Desde 23/10/2026 (sem migracao; a versao continua 1): `media.fade` ganhou `end` 
 
 Indices: `family_key` unico; `file_path` unico onde `deleted_at is null`; `name` onde `deleted_at is null` (a lista). RLS ligado e **sem politica**; `revoke all` de `anon`/`authenticated`; so `service_role`. O aluno recebe so `{ family, format, id, style, url, weight }` das fontes do pop-up que esta abrindo (resolvidas pelo servidor, sem olhar `deleted_at`). Excluir uma fonte em uso por pop-up nao excluido (`popup_design @> {"fonts":[id]}`) e recusado (409). `limparComunicacao` (testes) apaga as fontes das contas de teste.
 
-**Storage**: buckets publicos `communication-fonts` (2 MB; `font/woff2`, `font/woff`, `font/ttf`, `font/otf`; objetos `fonts/<24 hex>.<ext>`, `cacheControl` de 1 ano) e `communication-popup-video` (15 MB; `video/mp4`, `video/webm`; objetos `videos/<uuid>.<mp4|webm>`, enviados pelo navegador por endereco assinado). Arquivos orfaos (video trocado, fonte excluida) ficam nesta versao (`docs/26` D21).
+**Storage**: buckets publicos `communication-fonts` (2 MB; `font/woff2`, `font/woff`, `font/ttf`, `font/otf`; objetos `fonts/<24 hex>.<ext>`, `cacheControl` de 1 ano) e `communication-popup-video` (15 MB; `video/mp4`, `video/webm`; objetos `videos/<uuid>.<mp4|webm>`, enviados pelo navegador por endereco assinado). Arquivos orfaos (video trocado, fonte excluida) saem do Storage 30 dias depois de ficarem sem uso, desde 23/10/2026 (secao Limpeza dos arquivos sem uso, abaixo).
 
 **Deploy**: **antes** do merge na `dev` (`docs/26` §11 passo 1). Sem ela, o app novo mostra o aviso de banco desatualizado no admin (`popup_design` esta em `CAMPAIGN_COLUMNS`) e a lista de pop-ups no ar falha. A migracao sozinha nao atrapalha o app da v3b-1.
 
@@ -1687,6 +1687,23 @@ Produto em `docs/27` (o formato do JSON na §9 de la). O Livre mora na mesma col
 - **Fontes**: `fonts` na raiz, como no Personalizado (a fonte "em uso" continua achada por `popup_design @> { fonts: [id] }`).
 - **Auditoria**: `popup_design: "free" | "custom" | "default"` e `communication.free_image_uploaded` (`{ height, size_bytes, width }`).
 - **Deploy**: nenhuma migracao; so o app. Voltar o deploy depois do PR do celular separado (L3) deixa invalidos os designs salvos com `devices` ate o deploy novo voltar (`docs/27` §9.1).
+
+### Limpeza dos arquivos sem uso (migracao `202610240001`, 23/10/2026)
+
+Produto em `docs/22` §4.6 (Retencao). Video, imagem, audio e fonte da Comunicacao que nada mais usa saem do Storage 30 dias depois de ficarem sem uso. Arquivo novo (as `202610200001` ... `202610230001` nao mudam). Uma secao aditiva e idempotente, pelo MCP: sem `drop`, `delete` nem funcao; nada para o SQL Editor.
+
+**communication_media_orphans** (nova; os arquivos sem uso e desde quando):
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `bucket` | text | `communication-popup-video`, `communication-fonts`, `communication-audio` ou `content-assets` (neste, so caminhos `communications/%`: o check `communication_media_orphans_content_assets` nunca deixa a tabela citar uma capa) |
+| `path` | text | 1 a 512 caracteres, sem `/` no comeco nem `..` |
+| `first_orphan_at` | timestamptz | primeira rodada em que o arquivo foi visto sem uso (padrao `now()`) |
+| `claimed_at` | timestamptz | reserva da rodada que esta apagando o arquivo (null = livre); a linha so sai depois da remocao no Storage, e o envio do mesmo arquivo espera; com 15 min ou mais, esquecida e solta |
+
+Chave `(bucket, path)`; indice em `first_orphan_at` (os vencidos saem pelos mais antigos). RLS ligado e **sem politica**; `revoke all` de `anon`/`authenticated`; so `service_role`. Quem escreve e o job `comunicacao-limpeza-de-arquivos` do tick (uma vez por dia, 06:53 UTC): marca o que ficou sem uso, apaga a linha (livre) do que voltou a ser usado ou sumiu do Storage, e apaga do Storage (pela API, nunca por SQL) o que esta marcado ha 30 dias ou mais, ate 500 por rodada: reserva (`claimed_at`, so na marca vencida e livre), remove e so entao tira a linha; falha solta a reserva. O envio do mesmo audio, imagem ou fonte (nome pelo conteudo) confere a marca antes de enviar: a livre sai, a reservada faz o envio esperar a remocao terminar (`docs/22` §4.6). "Em uso" (`src/server/communications/media-refs.ts`): `image_url`, `audio_url` e o design (Personalizado: video e imagem do fundo do cartao; Livre: `assets[].path`) de todo aviso, pop-up e passo de fluxo nao excluido; toda fonte da biblioteca e a excluida que um aviso nao excluido ainda cita em `fonts`; modelos (o gancho `loadTemplateMediaUse`, vazio ate os Modelos existirem). Notificacao nao guarda arquivo (a de aviso conta pelo aviso). As contagens de cada rodada ficam em `job_runs.metadata.media_cleanup` (so numeros).
+
+**Deploy**: antes do deploy que traz o job (sem a tabela, o job registra "migracao pendente" e termina sem erro; o tick continua verde).
 
 ## Retencao de dados pessoais
 

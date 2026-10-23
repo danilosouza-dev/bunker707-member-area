@@ -28,8 +28,24 @@ const AMOSTRAS = {
 
 function fakeStorage() {
   const uploads = [];
+  uploads.checks = [];
 
   actionStubs.db = {
+    // A marca da limpeza dos arquivos (docs/22 §4.6) e conferida antes de cada envio: aqui, nenhuma marca.
+    from(table) {
+      assert.equal(table, "communication_media_orphans");
+      const checked = { bucket: null, path: null };
+      uploads.checks.push(checked);
+      const query = {
+        eq(column, value) {
+          checked[column] = value;
+          return query;
+        },
+        limit: async () => ({ data: [], error: null }),
+        select: () => query
+      };
+      return query;
+    },
     storage: {
       from(bucket) {
         return {
@@ -38,6 +54,7 @@ function fakeStorage() {
           },
           async upload(path, body, options) {
             const duplicate = uploads.some((upload) => upload.bucket === bucket && upload.path === path);
+            assert.ok(uploads.checks.some((checked) => checked.bucket === bucket && checked.path === path), "marca conferida antes do envio");
             uploads.push({ bucket, options, path, size: body.length });
             return { error: duplicate ? { message: "The resource already exists" } : null };
           }
