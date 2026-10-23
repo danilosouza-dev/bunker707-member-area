@@ -841,8 +841,13 @@ export type PopUpDeTeste = {
   lembrarEm?: number | null;
   /** Onde aparece (padroes de popup-display-model.ts). Padrao ["home"]. */
   paginas?: string[];
-  /** Quando aparece. Padrao "page_load". */
-  quando?: "lesson_completed" | "page_load";
+  /**
+   * v3b-2 (docs/29 §6.1): so com `quando: "first_login"`, os produtos de "A primeira vez com estes produtos" (ids de
+   * content_items); vazio ou sem a chave = "A primeira vez na área".
+   */
+  produtosDoPrimeiroAcesso?: string[];
+  /** Quando aparece. Padrao "page_load". v3b-2: "No primeiro acesso" e "Ao concluir um curso". */
+  quando?: "course_completed" | "first_login" | "lesson_completed" | "page_load";
   texto?: string;
   titulo: string;
 };
@@ -856,10 +861,34 @@ export type PopUpDeTeste = {
  * zerarComunicacao.
  */
 export async function publicarPopUp(browser: Browser, input: PopUpDeTeste) {
+  const id = await gravarRascunhoDePopUp(input);
+  const { fechar, pagina } = await abrirComoProdutor(browser);
+
+  try {
+    await pagina.goto(`/admin/comunicacao/avisos/${id}`);
+    await pagina.waitForLoadState("networkidle");
+    await expect(pagina.getByLabel("Título", { exact: true })).toHaveValue(input.titulo);
+    await pagina.getByRole("button", { exact: true, name: "Publicar pop-up" }).click();
+    await expect(pagina.getByText(/^Pop-up publicado\./)).toBeVisible();
+    await expect(pagina).toHaveURL(new RegExp(`/admin/comunicacao/avisos/${id}$`));
+  } finally {
+    await fechar();
+  }
+
+  return id;
+}
+
+/**
+ * Grava o pop-up para todos os alunos direto no banco, como o editor salva (o rascunho de publicarPopUp). Com
+ * `aguardandoAprovacao`, como o pedido de aprovacao deixa (v3b-2: o toast de aprovar pela lista). Devolve o id.
+ * Desfaca com zerarComunicacao.
+ */
+export async function gravarRascunhoDePopUp(input: PopUpDeTeste & { aguardandoAprovacao?: boolean }) {
   const db = createLocalAdminClient();
   const contas = (await contasDeTeste(db)) as Record<ChaveDaConta, ContaDeTeste>;
   const frequencia = input.frequencia ?? { mode: "once" };
   const repete = frequencia.mode === "repeat";
+  const agora = new Date().toISOString();
   const [rascunho] = unwrap(
     await db
       .from("campaigns")
@@ -884,8 +913,11 @@ export async function publicarPopUp(browser: Browser, input: PopUpDeTeste) {
         popup_snooze_minutes: input.lembrarEm ?? 1_440,
         popup_stop_on: repete ? (frequencia.stopOn ?? (input.botao ? "click" : "never")) : null,
         popup_trigger: input.quando ?? "page_load",
+        // v3b-2: o check campaigns_popup_access_v3b2 so aceita produtos no "No primeiro acesso".
+        ...(input.quando === "first_login" ? { popup_access_products: input.produtosDoPrimeiroAcesso ?? [] } : {}),
+        ...(input.aguardandoAprovacao ? { requested_at: agora, requested_by: contas.produtor.id } : {}),
         starts_at: input.inicio ?? null,
-        status: "draft",
+        status: input.aguardandoAprovacao ? "pending_approval" : "draft",
         title: input.titulo,
         updated_by: contas.produtor.id
       })
@@ -893,22 +925,24 @@ export async function publicarPopUp(browser: Browser, input: PopUpDeTeste) {
     `Gravando o rascunho do pop-up "${input.titulo}"`
   ) as { id: string }[];
 
-  const contexto = await browser.newContext({ baseURL: enderecoDoApp, locale: "pt-BR", storageState: SESSAO_DO_PRODUTOR, timezoneId: "America/Sao_Paulo" });
+  return rascunho.id;
+}
+
+/**
+ * Uma aba do produtor de teste (a sessao guardada pelo setup), com a rede de fora cortada, para um teste que ja usa
+ * a pagina da aluna. Feche com `fechar()`.
+ */
+export async function abrirComoProdutor(browser: Browser, opcoes: { viewport?: { height: number; width: number } } = {}) {
+  const contexto = await browser.newContext({
+    baseURL: enderecoDoApp,
+    locale: "pt-BR",
+    storageState: SESSAO_DO_PRODUTOR,
+    timezoneId: "America/Sao_Paulo",
+    ...(opcoes.viewport ? { viewport: opcoes.viewport } : {})
+  });
   await bloquearRedeExterna(contexto);
 
-  try {
-    const pagina = await contexto.newPage();
-    await pagina.goto(`/admin/comunicacao/avisos/${rascunho.id}`);
-    await pagina.waitForLoadState("networkidle");
-    await expect(pagina.getByLabel("Título", { exact: true })).toHaveValue(input.titulo);
-    await pagina.getByRole("button", { exact: true, name: "Publicar pop-up" }).click();
-    await expect(pagina.getByText(/^Pop-up publicado\./)).toBeVisible();
-    await expect(pagina).toHaveURL(new RegExp(`/admin/comunicacao/avisos/${rascunho.id}$`));
-  } finally {
-    await contexto.close();
-  }
-
-  return rascunho.id;
+  return { contexto, fechar: () => contexto.close(), pagina: await contexto.newPage() };
 }
 
 export type EventoDoPopUp = { event_type: string; metadata: Record<string, unknown> };
@@ -1121,4 +1155,395 @@ export async function segmentoDoAviso(titulo: string) {
   ) as { audience: unknown };
 
   return aviso.audience;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Comunicacao v3b-2 (docs/29 §8.4): hora marcada, "No primeiro acesso", "Ao concluir um curso", relatorio do
+ * pop-up e as paginas falsas dos players de fora (Vimeo e Player.js) servidas nas URLs reais
+ * ---------------------------------------------------------------------------------------------- */
+
+/** source_event_id dos acessos liberados por estes testes (um por conta e produto). */
+function eventoDoAcessoDeTeste(chave: ChaveDaConta, productId: string) {
+  return `e2e-v3b2:${chave}:${productId}`;
+}
+
+/**
+ * Libera agora o produto para a conta (uma linha de entitlements criada agora, ativa, sem fim), como uma venda
+ * aprovada: o "ganhou acesso" do "No primeiro acesso" e o created_at/starts_at dela. Uma linha que sobrou de uma
+ * rodada anterior sai antes (a linha e sempre nova). Desfaca com tirarAcessoDeTeste.
+ */
+export async function liberarAcessoDeTeste(chave: ChaveDaConta, productId: string) {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+  const evento = eventoDoAcessoDeTeste(chave, productId);
+  const agora = new Date().toISOString();
+
+  unwrap(await db.from("entitlements").delete().eq("user_id", conta.id).eq("source_event_id", evento), "Tirando o acesso de teste anterior");
+  unwrap(
+    await db.from("entitlements").insert({
+      ends_at: null,
+      source_event_id: evento,
+      source_provider: "manual",
+      starts_at: agora,
+      status: "active",
+      target_id: productId,
+      target_type: "standalone_course",
+      user_id: conta.id
+    }),
+    `Liberando ${productId} para ${conta.email}`
+  );
+}
+
+/** Tira o acesso liberado por liberarAcessoDeTeste (apaga a linha; os acessos da escola de teste ficam). */
+export async function tirarAcessoDeTeste(chave: ChaveDaConta, productId: string) {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  unwrap(
+    await db.from("entitlements").delete().eq("user_id", conta.id).eq("source_event_id", eventoDoAcessoDeTeste(chave, productId)),
+    `Tirando ${productId} de ${conta.email}`
+  );
+}
+
+/**
+ * Recalcula agora quem ve o pop-up (o segmento e, no "No primeiro acesso", quem conta como aluno novo): zera
+ * audience_refreshed_at (nulo vence qualquer faixa do recalculo, docs/29 §4.9) e roda o tick do app.
+ */
+export async function recalcularPopUp(campaignId: string) {
+  const db = createLocalAdminClient();
+
+  unwrap(await db.from("campaigns").update({ audience_refreshed_at: null }).eq("id", campaignId), "Pedindo o recalculo do pop-up");
+  await rodarTick();
+}
+
+/**
+ * Grava direto as aulas concluidas da conta num conteudo (lesson_progress.completed_lesson_ids, a lista inteira,
+ * como a rota de progresso grava): arranjo para "Ao concluir um curso" (todas menos a ultima). Desfaca com
+ * zerarProgressoDosAlunos.
+ */
+export async function concluirAulasDaAluna(contentId: string, lessonIds: string[], chave: ChaveDaConta = "aluna") {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  unwrap(
+    await db
+      .from("lesson_progress")
+      .upsert({ completed_lesson_ids: lessonIds, content_id: contentId, updated_at: new Date().toISOString(), user_id: conta.id }, { onConflict: "user_id,content_id" }),
+    `Concluindo aulas de ${contentId}`
+  );
+}
+
+/** As aulas concluidas da conta num conteudo, lidas do banco ([] sem linha). */
+export async function aulasConcluidasDaAluna(contentId: string, chave: ChaveDaConta = "aluna") {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+  const linha = unwrap(
+    await db.from("lesson_progress").select("completed_lesson_ids").eq("user_id", conta.id).eq("content_id", contentId).maybeSingle(),
+    "Lendo as aulas concluidas"
+  ) as { completed_lesson_ids: string[] } | null;
+
+  return linha?.completed_lesson_ids ?? [];
+}
+
+export type LinhaDoRelatorio = { item: string; metric: string; students: number; total: number };
+
+/** Os numeros do relatorio do pop-up como o banco devolve (RPC communication_popup_report, so service role). */
+export async function relatorioDoPopUp(campaignId: string): Promise<LinhaDoRelatorio[]> {
+  const db = createLocalAdminClient();
+  const linhas = unwrap(await db.rpc("communication_popup_report", { p_campaign_id: campaignId }), "Lendo o relatorio do pop-up") as {
+    item: string;
+    metric: string;
+    students: number | string;
+    total: number | string;
+  }[];
+
+  return linhas.map((linha) => ({ item: linha.item, metric: linha.metric, students: Number(linha.students), total: Number(linha.total) }));
+}
+
+/** O momento (occurred_at) de cada evento do historico do pop-up para a conta, na ordem. */
+export async function horariosDoPopUp(campaignId: string, chave: ChaveDaConta = "aluna") {
+  const db = createLocalAdminClient();
+  const conta = await contaDeTeste(chave);
+
+  return unwrap(
+    await db
+      .from("student_events")
+      .select("event_type,occurred_at")
+      .eq("entity_type", "campaign")
+      .eq("entity_id", campaignId)
+      .eq("user_id", conta.id)
+      .order("occurred_at", { ascending: true }),
+    "Lendo os horarios do historico do pop-up"
+  ) as { event_type: string; occurred_at: string }[];
+}
+
+export type OpcoesDoPlayerFalso = {
+  /** Duracao do video em segundos (o tempo do "Terminar"). Padrao 120. */
+  duracao?: number;
+  /**
+   * Manda o `ready` so este tempo depois de carregar (ms), como a Bunny legada (o receptor nasce no `loadeddata`).
+   * Padrao: no `load`.
+   */
+  prontoDepoisDe?: number;
+};
+
+type ConfigDoPlayerFalso = Required<OpcoesDoPlayerFalso> & {
+  /** Os formatos das mensagens: os do player (vimeo ou playerjs); os dois na pagina de outra origem. */
+  protocolos: ("playerjs" | "vimeo")[];
+  /** Manda os eventos mesmo sem inscricao (a pagina de outra origem, que ninguem ouve). */
+  semInscricao: boolean;
+};
+
+/**
+ * A pagina falsa de um player de fora: botoes Tocar, Pausar e Terminar e o estado ("carregando", "pronto" depois
+ * de responder o getPaused, que e o que confirma a ponte do lado da aula). Fala como o player de verdade (docs/29
+ * §5.5): manda para window.parent com a targetOrigin da origem do referrer; no Vimeo, `{event:"ready"}` so no
+ * `load`, o `ping` respondido com `{method:"ping"}` (nunca com ready), inscricoes `addEventListener` e
+ * `{method:"getPaused",value}`; no Player.js, texto JSON com context "player.js", ready no `load` e de novo a quem
+ * se inscreve no `ready`, inscricoes com `listener` e a resposta do getPaused com o listener pedido. Os eventos so
+ * saem para quem se inscreveu.
+ */
+function htmlDoPlayerFalso(config: ConfigDoPlayerFalso) {
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Player de teste</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; background: #111; color: #fff; font: 14px sans-serif; }
+  button { min-height: 44px; padding: 0 16px; font: inherit; }
+</style>
+</head>
+<body>
+<button id="tocar" type="button">Tocar</button>
+<button id="pausar" type="button">Pausar</button>
+<button id="terminar" type="button">Terminar</button>
+<p id="estado" role="status">carregando</p>
+<script>
+(() => {
+  const CONFIG = ${JSON.stringify(config)};
+  const VERSAO = "0.1.0";
+  // A janela da aula (o pai direto); sem ancestorOrigins, a origem do referrer, como os players fazem.
+  const destino = (() => {
+    if (location.ancestorOrigins && location.ancestorOrigins.length > 0) {
+      return location.ancestorOrigins[0];
+    }
+    try {
+      return new URL(document.referrer).origin;
+    } catch {
+      return "*";
+    }
+  })();
+  const estado = document.getElementById("estado");
+  const inscritos = new Map();
+  let pausado = true;
+  let segundos = 0;
+
+  function postar(mensagem) {
+    window.parent.postMessage(mensagem, destino);
+  }
+
+  function prontoPlayerJs(listener) {
+    const mensagem = { context: "player.js", version: VERSAO, event: "ready", value: { src: location.href, events: ["play", "pause", "ended", "timeupdate"], methods: ["play", "pause", "getPaused"] } };
+    return JSON.stringify(listener ? { ...mensagem, listener } : mensagem);
+  }
+
+  function pronto() {
+    if (CONFIG.protocolos.includes("vimeo")) {
+      postar({ event: "ready", player_id: "player-de-teste" });
+    }
+    if (CONFIG.protocolos.includes("playerjs")) {
+      postar(prontoPlayerJs(null));
+    }
+  }
+
+  function emitir(nome) {
+    const tempo = { seconds: segundos, duration: CONFIG.duracao };
+    if (CONFIG.protocolos.includes("vimeo") && (CONFIG.semInscricao || inscritos.has(nome))) {
+      postar({ event: nome, data: { ...tempo, percent: CONFIG.duracao > 0 ? segundos / CONFIG.duracao : 0 } });
+    }
+    if (CONFIG.protocolos.includes("playerjs") && (CONFIG.semInscricao || inscritos.has(nome))) {
+      const mensagem = { context: "player.js", version: VERSAO, event: nome, listener: inscritos.get(nome) ?? undefined };
+      postar(JSON.stringify(nome === "timeupdate" || nome === "ended" ? { ...mensagem, value: tempo } : mensagem));
+    }
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) {
+      return;
+    }
+    let dados = event.data;
+    if (typeof dados === "string") {
+      try {
+        dados = JSON.parse(dados);
+      } catch {
+        return;
+      }
+    }
+    if (!dados || typeof dados !== "object") {
+      return;
+    }
+    if (CONFIG.protocolos[0] === "vimeo") {
+      if (dados.method === "ping") {
+        postar({ method: "ping" });
+      } else if (dados.method === "addEventListener" && typeof dados.value === "string") {
+        inscritos.set(dados.value, true);
+      } else if (dados.method === "getPaused") {
+        postar({ method: "getPaused", value: pausado });
+        estado.textContent = "pronto";
+      }
+      return;
+    }
+    if (dados.context !== "player.js") {
+      return;
+    }
+    if (dados.method === "addEventListener" && typeof dados.value === "string") {
+      if (dados.value === "ready") {
+        postar(prontoPlayerJs(dados.listener));
+      } else {
+        inscritos.set(dados.value, typeof dados.listener === "string" ? dados.listener : null);
+      }
+    } else if (dados.method === "getPaused") {
+      postar(JSON.stringify({ context: "player.js", version: VERSAO, event: "getPaused", value: pausado, listener: dados.listener }));
+      estado.textContent = "pronto";
+    }
+  });
+
+  document.getElementById("tocar").addEventListener("click", () => {
+    pausado = false;
+    segundos = Math.max(segundos, 1);
+    emitir("play");
+    emitir("timeupdate");
+  });
+  document.getElementById("pausar").addEventListener("click", () => {
+    pausado = true;
+    emitir("pause");
+  });
+  document.getElementById("terminar").addEventListener("click", () => {
+    pausado = true;
+    segundos = CONFIG.duracao;
+    emitir("timeupdate");
+    emitir("ended");
+  });
+
+  window.addEventListener("load", () => {
+    if (CONFIG.prontoDepoisDe > 0) {
+      setTimeout(pronto, CONFIG.prontoDepoisDe);
+    } else {
+      pronto();
+    }
+  });
+})();
+</script>
+</body>
+</html>`;
+}
+
+/** Serve a pagina falsa em toda URL da origem (so o documento; o resto da 404, nunca sai da maquina). */
+async function servirPlayerFalso(page: Page, origem: string, config: ConfigDoPlayerFalso) {
+  const html = htmlDoPlayerFalso(config);
+
+  // page.route vence o corte de rede do contexto (bloquearRedeExterna): o iframe fica com a origem verdadeira.
+  await page.route(`${origem}/**`, (route) =>
+    route.request().resourceType() === "document"
+      ? route.fulfill({ body: html, contentType: "text/html; charset=utf-8", status: 200 })
+      : route.fulfill({ body: "", status: 404 })
+  );
+}
+
+/**
+ * O player do Vimeo de mentira em https://player.vimeo.com/** (docs/29 §8.4): o iframe da aula com Vimeo carrega
+ * esta pagina com a origem verdadeira, e a conferencia de origem da ponte e exercitada de verdade.
+ */
+export async function paginaFalsaDoVimeo(page: Page, opcoes: OpcoesDoPlayerFalso = {}) {
+  await servirPlayerFalso(page, "https://player.vimeo.com", {
+    duracao: opcoes.duracao ?? 120,
+    prontoDepoisDe: opcoes.prontoDepoisDe ?? 0,
+    protocolos: ["vimeo"],
+    semInscricao: false
+  });
+}
+
+/**
+ * O player Player.js de mentira (Bunny e Mux) na origem dada (https://iframe.mediadelivery.net,
+ * https://player.mediadelivery.net ou https://player.mux.com). `redirecionarDe`: o endereco gravado na aula leva a
+ * mesma pagina nesta origem (o iframe.mediadelivery.net que passa a levar ao player novo, crítica 28 da docs/29): o
+ * src fica numa origem e as mensagens chegam da outra, do mesmo grupo.
+ */
+export async function paginaFalsaPlayerJs(page: Page, origem: string, opcoes: OpcoesDoPlayerFalso & { redirecionarDe?: string } = {}) {
+  await servirPlayerFalso(page, origem, {
+    duracao: opcoes.duracao ?? 120,
+    prontoDepoisDe: opcoes.prontoDepoisDe ?? 0,
+    protocolos: ["playerjs"],
+    semInscricao: false
+  });
+
+  if (opcoes.redirecionarDe) {
+    // O documento do endereco gravado troca a si mesmo pelo da outra origem (um 302 do page.route nao serve: o
+    // Playwright nao intercepta o pedido redirecionado, que sairia para a rede).
+    const html = `<!doctype html><meta charset="utf-8"><title>Redirecionando</title><script>location.replace(${JSON.stringify(origem)} + location.pathname + location.search);</script>`;
+
+    await page.route(`${opcoes.redirecionarDe}/**`, (route) =>
+      route.request().resourceType() === "document"
+        ? route.fulfill({ body: html, contentType: "text/html; charset=utf-8", status: 200 })
+        : route.fulfill({ body: "", status: 404 })
+    );
+  }
+}
+
+/**
+ * Um player de fora que a pagina nao le (vimeo colado de outro site, outra origem): manda os eventos nos dois
+ * formatos, sem esperar inscricao, para window.parent. Ninguem do lado da aula deve ouvir.
+ */
+export async function paginaFalsaDeOutroPlayer(page: Page, origem: string, opcoes: OpcoesDoPlayerFalso = {}) {
+  await servirPlayerFalso(page, origem, {
+    duracao: opcoes.duracao ?? 120,
+    prontoDepoisDe: opcoes.prontoDepoisDe ?? 0,
+    protocolos: ["vimeo", "playerjs"],
+    semInscricao: true
+  });
+}
+
+/** O player de fora da aula (o iframe do palco). No WebKit, clicar la dentro so por aqui. */
+export function playerDeFora(page: Page) {
+  return page.frameLocator("[data-lesson-player-stage] iframe");
+}
+
+/** Espera a pagina falsa do player responder o getPaused (a ponte do lado da aula confirma com essa resposta). */
+export async function esperarPlayerDeForaPronto(page: Page) {
+  await expect(playerDeFora(page).locator("#estado")).toHaveText("pronto", { timeout: 20_000 });
+}
+
+/**
+ * Toca na capa do player de fora (o botao transparente "Reproduzir aula" por cima do iframe, que some quando a
+ * aula comeca). Clica ate ela sumir: o primeiro clique logo depois de abrir a pagina pode chegar antes da hidratacao.
+ */
+export async function tocarNaCapaDoPlayer(page: Page) {
+  const capa = page.locator("[data-lesson-player-stage]").locator("..").getByRole("button", { exact: true, name: "Reproduzir aula" });
+
+  await expect(async () => {
+    if (await capa.isVisible()) {
+      await capa.click({ timeout: 2_000 });
+    }
+    await expect(capa).toBeHidden({ timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+}
+
+/**
+ * Segura a resposta do resumo do sino (GET /api/notifications/summary, que traz o plano dos pop-ups) ate `soltar()`.
+ * O "Quanto tempo depois" conta da montagem da pagina; segurando o plano, o teste faz o que precisa antes de o host
+ * poder armar, sem depender de a pagina (e o player de fora) carregar antes desse tempo, como no WebKit do CI.
+ */
+export async function segurarResumoDoSino(page: Page) {
+  let soltar: () => void = () => undefined;
+  const solto = new Promise<void>((resolve) => {
+    soltar = resolve;
+  });
+
+  await page.route(/\/api\/notifications\/summary(\?|$)/, async (route) => {
+    await solto;
+    await route.continue();
+  });
+
+  return { soltar };
 }
