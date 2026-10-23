@@ -11,14 +11,15 @@ Este documento vale para qualquer trabalho no design Livre: o editor de tela che
 | Peça | O que faz | Onde |
 |---|---|---|
 | **Padrão \| Personalizado \| Livre** | os dois primeiros continuam exatamente como no `docs/26`; **Livre** monta o pop-up do zero, elemento por elemento | editor do pop-up, card **Design** (logo depois do conteúdo) |
-| **Modelos para começar** | **Vídeo no topo com degradê** (a estrutura da referência que o produtor mandou), **Só texto com brilho**, **Em branco**; escolher abre o editor (numa tela larga); **Trocar de modelo** pede confirmação e dá para desfazer no editor | card Design, na primeira vez em Livre |
+| **Modelos para começar** | **Vídeo no topo com degradê** (a estrutura da referência que o produtor mandou), **Só texto com brilho**, **Em branco**, **Imagem recortada com selo** (L1.1) e, quando o aviso tem um Personalizado, **Usar o design Personalizado** (L1.1, §13.2); escolher abre o editor (numa tela larga); **Trocar de modelo** pede confirmação e dá para desfazer no editor | card Design, na primeira vez em Livre |
 | **Resumo no card** | miniatura (o próprio cartão do aluno, reduzido), **Abrir editor Livre**, `{n} elementos · {largura} px` e, com problemas, `{n} problemas para revisar` (abre o editor no Revisar) | card Design |
 | **Editor Livre** | tela cheia por cima do editor do aviso: **Elementos** e **Camadas** à esquerda, a área de desenho no meio (selecionar, arrastar, redimensionar pelas alças, guias de alinhamento), **Conteúdo / Estilo / Avançado** à direita (ou **Pop-up**, sem seleção, ou **Revisar**); **Desfazer** / **Refazer** (100 passos), **Ver como** Computador / Celular, zoom **Ajustar à tela** / **100 %**, **Atalhos**, **Salvar rascunho** (o editor continua aberto), **Concluir** | botão **Abrir editor Livre** (só em telas a partir de 1.024 px; abaixo, só a prévia) |
 | **Elementos** | Título, Texto, Selo, Botão principal, Botão (Fechar, Lembrar depois ou Abrir um link), Imagem (até 6 arquivos, com transparência), Vídeo (um), Ícone (24 prontos), Forma, Degradê, Linha, Espaço, Caixa em coluna, Caixa em linha; mais o Áudio (entra e sai com o áudio do aviso) e os Links (sempre um) | aba **Elementos** |
 | **Na sequência / Solta** | na sequência, os elementos seguem a ordem da caixa (com largura, altura, margem até negativa e alinhamento); soltos têm X, Y, largura, altura, girar e camada, e 6 botões de **Alinhar no pop-up** | aba **Avançado** |
 | **Estilo** | fundo com até 3 camadas (cor, degradê, degradê circular, imagem), borda, cantos, até 2 sombras (inclusive por dentro), opacidade, desfoque, desfoque do que está atrás, esmaecer de qualquer lado; texto com fonte (prontas e enviadas), tamanho, peso, itálico, altura da linha, espaço entre letras, maiúsculas, sublinhado ou riscado, alinhamento, cor ou degradê, sombra; **Outro estilo na seleção** dá cor, peso, tamanho ou fonte próprios a palavras escolhidas | aba **Estilo** e a área de texto |
 | **Pop-up** | largura no computador (P 360, M 440, G 520, GG 640 ou outra de 280 a 720, com **Ajustar os elementos à nova largura**), altura mínima, fundo, borda, cantos, sombra, respiro, a sequência da prancheta, o X (cor, fundo, borda, tamanho, distância, lado) e as fontes | painel **Pop-up** (nada selecionado) |
-| **Revisar** | sempre `Tamanho do design: N % do máximo.`; os erros que impedem salvar (cada um leva ao elemento e ao campo) e as dicas (contraste, texto pequeno, texto que muda no celular, ordem de leitura, texto por cima de botão, cortado, celular alto, fonte que muda, vídeo sem capa) | botão **Revisar** |
+| **Revisar** | sempre `Tamanho do design: N % do máximo.`; os erros que impedem salvar (cada um leva ao elemento e ao campo) e as dicas (contraste, texto pequeno, texto que muda de linha no celular (só quando o piso de 12 px muda o encaixe, §13.4), ordem de leitura, texto por cima de botão, cortado, celular alto, fonte que muda, vídeo sem capa) | botão **Revisar** |
+| **Copiar e colar** (L1.1) | **Copiar o design** (o JSON na forma canônica), **Colar o design…** (o mesmo zod; arquivos de outro pop-up ficam vazios; um passo no desfazer) e **Copiar as instruções para a IA** (o §9), para a equipe pedir mudanças ao Claude ou ao ChatGPT dela e colar a resposta (§13.1) | barra de cima do editor Livre |
 | **Celular** | o pop-up inteiro encolhe na mesma proporção (343 px numa tela de 375); texto nunca abaixo de 12 px e 44 px de toque nos botões, nos links e no X | aluno e prévia |
 | **Dados** | o Livre mora em `campaigns.popup_design` com `mode: "free"` (o Personalizado sem a chave); sem migração; o JSON é estrito, esparso e só guarda caminhos dos nossos buckets (§3, §9) | banco |
 
@@ -47,7 +48,7 @@ Vocabulário na tela: **Livre**, **Abrir editor Livre**, **Editor Livre**, **Ele
 
 - Descrição: `Escolha o visual do pop-up. O Padrão é o de sempre; no Personalizado você monta por seções; no Livre você monta do zero, elemento por elemento.` Opções (`name="popup-design"`, empilhadas): **Padrão** e **Personalizado** como no `docs/26`, e **Livre** · `Monte do zero, como num editor de páginas: coloque cada elemento onde quiser, um por cima do outro, com o estilo que quiser.`
 - **Memória entre os três**: trocar de modo guarda o design do modo que saiu; voltar devolve sem perguntar (coerente com o botão e o áudio de agora). Só o design do modo escolhido vai no rascunho (`design` ou `freeDesign`, nunca os dois).
-- **Primeira vez no Livre**: **Começar de um modelo** (`Escolha um ponto de partida. No editor, tudo pode ser mudado.`), com a miniatura de cada modelo (o próprio `PopupFreeCard` em prévia, reduzido, fora do teclado) e `Usar este modelo`. Escolher aplica o modelo e abre o editor (numa tela larga). Sem botão no aviso, o modelo cria o `cta` `Saiba mais` com destino vazio (o "Para onde leva" fica no Botão principal, no editor); com áudio, entra o elemento Áudio; o vídeo do Personalizado atual ou guardado entra como arquivo do Vídeo e a imagem do aviso, quando é do nosso bucket, entra como capa (medidas lidas no navegador; o servidor confere ao salvar).
+- **Primeira vez no Livre**: **Começar de um modelo** (`Escolha um ponto de partida. No editor, tudo pode ser mudado.`), com a miniatura de cada modelo (o próprio `PopupFreeCard` em prévia, reduzido, fora do teclado) e `Usar este modelo`. Escolher aplica o modelo e abre o editor (numa tela larga). Sem botão no aviso, o modelo cria o `cta` `Saiba mais` com destino vazio (o "Para onde leva" fica no Botão principal, no editor); com áudio, entra o elemento Áudio; o vídeo do Personalizado atual ou guardado entra como arquivo do Vídeo e a imagem do aviso, quando é do nosso bucket, entra como capa (medidas lidas no navegador; o servidor confere ao salvar). Desde o L1.1 são quatro modelos (mais **Imagem recortada com selo**) e, quando o aviso tem um Personalizado (o do rascunho ou o guardado ao trocar de modo), o primeiro item é **Seu design Personalizado** com **Usar o design Personalizado** (§13.2).
 - **Com o Livre montado**: miniatura, **Abrir editor Livre** (o editor é baixado no clique; passar o mouse ou focar o botão já começa a baixar), `{n} elementos · {largura} px` e, com erros que impedem salvar (do design ou do Botão principal), `{n} problemas para revisar`, que abre o editor no **Revisar**. **Trocar de modelo** pede confirmação (`Trocar de modelo?` / `O design Livre atual será trocado pelo modelo. Dá para desfazer no editor.` / `Trocar` / `Cancelar`) e abre o editor com o design de antes um passo atrás (Ctrl + Z volta a ele).
 - Tela menor que 1.024 px: `O editor Livre precisa de uma tela maior (a partir de 1.024 px de largura). Aqui você vê a prévia.` (o botão fica desligado; a prévia continua).
 - No Livre, o card do conteúdo se comporta como no Personalizado: esconde Texto, Ícone, Imagem e "Para onde leva" (o texto e o destino do Botão principal ficam no editor); "Título" vira **Nome do pop-up** (listas, relatórios e nome do diálogo quando o design não tem Título). O áudio continua no campo **Áudio** do aviso (`Um áudio curto. No design, o player fica onde estiver o elemento Áudio.`).
@@ -57,7 +58,7 @@ Vocabulário na tela: **Livre**, **Abrir editor Livre**, **Editor Livre**, **Ele
 
 - Um `Dialog` do Base UI em tela cheia por cima do editor do aviso. O `Esc` não fecha (serve para "selecionar a caixa de fora"); fecha só em **Concluir**. Ao abrir, o foco vai para a primeira linha das Camadas; ao fechar, volta para **Abrir editor Livre**.
 - Trabalha numa **cópia** do design e manda ao rascunho do aviso com atraso (no fim de um arrastar, 300 ms depois da última tecla e ao fechar). O histórico guarda o design e o `cta` juntos (excluir o Botão principal e desfazer devolve os dois).
-- Barra de cima: **Concluir** (`Concluir e voltar ao aviso`), `Editor Livre` e o nome do pop-up; **Ver como** Computador | Celular; zoom **Ajustar à tela** | **100 %**; **Desfazer**, **Refazer**, **Revisar** (com o número de erros e dicas), **Atalhos** (`?`), **Salvar rascunho**. Três colunas: 280 / desenho / 340 px a partir de 1.280 px; 248 / desenho / 300 de 1.024 a 1.279.
+- Barra de cima: **Concluir** (`Concluir e voltar ao aviso`), `Editor Livre` e o nome do pop-up; **Ver como** Computador | Celular; zoom **Ajustar à tela** | **100 %**; **Desfazer**, **Refazer**, **Revisar** (com o número de erros e dicas), **Copiar e colar** (L1.1, §13.1), **Atalhos** (`?`), **Salvar rascunho**. Três colunas: 280 / desenho / 340 px a partir de 1.280 px; 248 / desenho / 300 de 1.024 a 1.279.
 - **Salvar rascunho** chama o salvar do editor do aviso e o editor **continua aberto**, com histórico, seleção e zoom (`Rascunho salvo.`). Com o pop-up no ar ou pausado, o botão é **Salvar alterações** e a frase é a do editor do aviso (por exemplo `Pop-up atualizado. Quem já viu não vê de novo. …`); o "Mostrar de novo para quem já viu" fica para o salvar do aviso (L16). Num aviso novo, o editor do aviso guarda o id e só troca de endereço no **Concluir** sem mudança depois do último salvar (trocar de endereço remontaria a página e levaria o editor junto); com mudança, o próximo salvar, já fora do editor, troca. Erro do design abre o **Revisar** com os itens; erro fora do design (por exemplo, o Nome do pop-up vazio) mostra `Há campos para revisar fora do editor: {nomes}.` com **Fechar o editor e revisar**. Enquanto um arquivo sobe, salvar e concluir esperam (`Espere o arquivo terminar de enviar.`). O Ctrl + Enter do editor do aviso não age com o editor Livre aberto.
 - **Trabalho perdido**: com mudança não salva, o editor liga o `beforeunload` e guarda uma cópia de recuperação no navegador (`localStorage["bunker707:livre:<id do aviso ou novo>"]`, 1 s depois da última mudança, apagada ao salvar); ao abrir com uma cópia diferente, a faixa `Há um design deste pop-up que não foi salvo ({hora}).` oferece **Recuperar** (um passo no histórico) e **Descartar**. O editor do aviso também liga o `beforeunload` com o Livre mudado e não salvo.
 - **Área de desenho**: o mesmo `PopupFreeCard` do aluno em prévia (Computador = palco da largura escolhida; Celular = moldura de 375 px com o cartão de 343 px). Clique seleciona o elemento mais de cima; duplo clique num texto abre a área de texto. Soltos: arrastar (a partir de 3 px), 8 alças (Shift mantém a proporção), setas (1 px; Shift, 10 px), guias que grudam nas bordas e no centro da prancheta e dos outros soltos (Alt desliga). Durante o arrastar o design não muda (só a prévia); no fim, um passo no histórico. Da sequência: barrinha com **Subir**, **Descer**, **Duplicar**, **Soltar** e **Excluir**. O palco é focável e diz o selecionado (`Selecionado: Título, X 24, Y 120.`).
@@ -88,7 +89,7 @@ Vocabulário na tela: **Livre**, **Abrir editor Livre**, **Editor Livre**, **Ele
 
 ## 5. Por dentro
 
-- **Módulos puros** (imports relativos; os testes carregam pelo Node): `popup-free-model.ts` (tipos, limites, forma canônica, árvore, estimativa do jsonb, reescala, item de prévia; **sem zod**), `popup-free-render.ts` (o único módulo de valores que o cartão do aluno importa: padrões, escala, leituras do design, nome do diálogo, origem e endereço dos arquivos), `popup-free-schema.ts` (zod, mensagens, regras com o conteúdo, chaves de erro), `popup-free-json-schema.ts` (o JSON Schema, que nenhuma tela importa, §7), `popup-free-starters.ts` (os 3 modelos, elementos novos, sincronia com o conteúdo), `popup-free-checks.ts` (as dicas do Revisar e o medidor), `popup-design-router.ts` (leitura da coluna). Servidor: `popup-free-assets.ts` (`server-only`) e `popup-free-actions.ts` (`uploadPopupFreeImage`).
+- **Módulos puros** (imports relativos; os testes carregam pelo Node): `popup-free-model.ts` (tipos, limites, forma canônica, árvore, estimativa do jsonb, reescala, item de prévia; **sem zod**), `popup-free-render.ts` (o único módulo de valores que o cartão do aluno importa: padrões, escala, leituras do design, nome do diálogo, origem e endereço dos arquivos), `popup-free-schema.ts` (zod, mensagens, regras com o conteúdo, chaves de erro), `popup-free-json-schema.ts` (o JSON Schema, que nenhuma tela importa, §7), `popup-free-starters.ts` (os 4 modelos, `freeFromCustomDesign`, elementos novos, sincronia com o conteúdo), `popup-free-checks.ts` (as dicas do Revisar, a dica "texto no celular" e o medidor), `popup-free-paste.ts` (L1.1: o texto de "Copiar o design" e a leitura do "Colar o design"), `popup-design-router.ts` (leitura da coluna). Servidor: `popup-free-assets.ts` (`server-only`) e `popup-free-actions.ts` (`uploadPopupFreeImage`).
 - **Do banco ao aluno**: a lista no ar lê pelo roteador; o Livre passa por `freeDesignForStudent`; as fontes de todos os pop-ups numa consulta; o plano marca `design: "free"`. O host baixa a janela e o pedaço do cartão Livre **antes** do `POST /show` quando o plano diz Livre (se o `show` trouxer um Livre que o plano não marcou, a janela espera o pedaço).
 - **Cartão** (`src/components/member/notifications/popup-free/`): `popup-free-card.tsx`, `popup-free-nodes.tsx` (um `switch` por tipo, `data-free-id` num elemento só), `popup-free-media.tsx`, `popup-free-styles.ts` (todos os objetos de estilo, puro), `popup-free-icons.tsx` (24 ícones), `popup-free-load.ts` (a única porta do pedaço). `MemberPopupCard` despacha `freeDesign` → `PopupFreeCard` por `React.lazy` (o mesmo pedaço próprio do `next/dynamic` da spec, carregável pelo Node nos testes); senão `design` → `PopupDesignCard`; senão o cartão de sempre (HTML do Padrão e do Personalizado comparado com o de antes do Livre).
 - **Editor** (`src/components/admin/v2/communication/popup-free/`): casca e palco (`free-editor.tsx`, `free-canvas.tsx`, `free-elements-panel.tsx`, `free-layers-panel.tsx`, `free-review-panel.tsx`, `free-editor-model.ts`, `free-editor-history.ts`, `free-editor-geometry.ts`, `free-editor-recovery.ts`) e painel da direita (`free-inspector*.tsx`, `free-artboard-settings.tsx`, `free-fields.tsx`, `free-assets.ts`, `free-inspector-model.ts`). O card Design (`popup-design/popup-design-field.tsx`) carrega o editor com `next/dynamic` e passa o contrato `FreeDesignEditorProps` (spec §9.6), mais `undoTo` (o design de antes do **Trocar de modelo**). O editor do aviso (`notice-editor.tsx`) guarda o rascunho, passa `onSaveDraft` (o salvar sem os toasts dele, devolvendo os erros) e adia o `openSavedNotice` enquanto o editor Livre está aberto.
@@ -139,12 +140,18 @@ O cartão Livre fica num pedaço próprio, baixado só quando o pop-up armado é
 | L9 | **Trocar de modelo** abre o editor com o design de antes um passo atrás (`undoTo`) | a frase combinada promete "Dá para desfazer no editor"; o editor começava cada abertura sem passado |
 | L10 | O editor Livre só em telas a partir de 1.024 px; abaixo, só a prévia | decisão do produtor; três colunas e alças precisam de espaço |
 | L11 | Escolher Livre (ou Personalizado) sem modelo deixa o rascunho sem design até escolher um modelo | igual ao Personalizado de antes: a prévia não muda antes da escolha |
-| L12 | `{n} problemas para revisar` conta só os erros que impedem salvar (do design e do Botão principal), não as dicas | a dica "texto no celular" aparece nos três modelos (Links de 13 px e Selo de 12 px viram 12 px no celular): contar dicas deixaria o card sempre com um "problema" |
+| L12 | `{n} problemas para revisar` conta só os erros que impedem salvar (do design e do Botão principal), não as dicas | a dica "texto no celular" aparecia nos três modelos (Links de 13 px e Selo de 12 px viram 12 px no celular): contar dicas deixaria o card sempre com um "problema". Desde o L1.1 a dica só aparece quando o piso muda o encaixe (L18) e nenhum modelo a acende; a contagem continua só com os erros |
 | L13 | Sem `z.tuple` no schema e o JSON Schema num módulo que nenhuma tela importa | o zod é um pedaço compartilhado com o JS inicial do Início e o build inclui ali toda classe e todo conversor do zod usados em qualquer tela; os dois custavam ~0,9 KB gzip a todo aluno (§7) |
 | L14 | Copiar e colar o design no L1.1; "Criar com IA" no L2 | decisões do produtor (perguntas 2 e 3 da spec) |
 | L15 | Em "Outro estilo na seleção", a divisão da parte só entra quando um estilo é escolhido; "Linha no texto: Nenhuma" numa parte não tira o sublinhado do elemento inteiro | dividir sem estilo seria um passo invisível no histórico; o tipo da parte só aceita sublinhado ou riscado (fica para quando ganhar "nenhuma") |
 | L16 | Com o pop-up no ar ou pausado, o salvar de dentro do editor Livre fala como o editor do aviso: o botão **Salvar alterações** e, depois, a mesma frase do toast dele (`savedNoticeToast`, devolvida em `message`); o "Mostrar de novo para quem já viu" ligado não vai nesse salvar e continua ligado para o salvar do aviso. Rascunho: **Salvar rascunho** / `Rascunho salvo.`, como antes | o salvar do Livre no ar chega aos alunos em até 1 minuto, mas dizia "Rascunho salvo." e aplicava o "Mostrar de novo" sem mostrar quantos voltam a ver |
 | L17 | No **Recarregar** depois de um 409, `design` e `freeDesign` são um campo só: mexeu em um dos dois aqui, ficam os dois daqui; senão, os dois do banco | campo a campo, o Personalizado daqui juntava-se ao Livre de outra tela: salvar recusava com `Escolha um design só.` e voltar ao Personalizado apagava o que foi editado |
+| L18 | A dica "texto no celular" só aparece quando o piso de 12 px muda o encaixe: Título, Texto ou Selo com mais linhas, texto do botão cortado, Links que passam a quebrar ou uma Caixa em linha que deixa de caber (uma dica por elemento, §13.4) | a regra de antes (tamanho × 343 ÷ largura < 11,5) acendia em todos os modelos e virou barulho; o que importa ao produtor é o texto mudar de lugar, não ficar 2 px maior. É uma estimativa da largura das letras (o servidor não mede), então fica como dica, nunca como erro |
+| L19 | **Colar o design** só fica com os arquivos que este pop-up conhece (o design aberto e todo o histórico do editor); os outros saem e o elemento fica com `asset: null` | um caminho de outro aviso passaria na conferência do salvar (o arquivo existe) e o salvar apaga o vídeo novo que não passa na conferência, que podia ser o de outro aviso; e a IA inventa caminhos. Enviar de novo é um clique no elemento vazio, que o Revisar aponta |
+| L20 | As instruções para a IA são um arquivo gerado do §9 (`npm run livre:instrucoes`, com teste de igualdade), baixado só ao abrir **Copiar e colar** | o documento e as instruções nunca se separam; nada busca o docs na hora; o editor não carrega ~27 KB de texto antes de alguém pedir |
+| L21 | **Colar** segue o aviso como os modelos: com áudio entra o Áudio (sem, sai), com botão entra o Botão principal que faltava, e o Botão principal colado num aviso sem botão cria o "Saiba mais" com o destino vazio | colar não apaga o botão que veio no design (o produtor colou de propósito), e é o comportamento já conhecido do **Usar este modelo** |
+| L22 | **Usar o design Personalizado** é um ponto de partida à parte dos 4 modelos, só quando o aviso tem um Personalizado; a imagem no fundo do cartão vira camadas (escuro, imagem cabendo na largura, cor de apoio "clareada") | o resultado depende do aviso (não é um modelo fixo). No Livre o escuro cobre o cartão inteiro; clarear a cor de apoio na mesma conta deixa o resto do cartão com a cor de antes. "Parecido, não idêntico": a borda da imagem não some na cor de apoio como no Personalizado |
+| L23 | O modelo **Imagem recortada com selo** com o selo de 128 px (o rascunho tinha 112), a coluna de texto de 256 px e os botões com quebra | com 112 px o "Aula bônus" quebrava em duas linhas no celular (a dica nova acendia no modelo); com a quebra ligada, um texto de botão longo desce para a linha de baixo em vez de apertar |
 
 ## 9. Contrato do JSON
 
@@ -319,9 +326,9 @@ O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`,
 
 `popupFreeJsonSchema()` (em `popup-free-json-schema.ts`, um módulo que nenhuma tela importa, §7) gera o JSON Schema da entrada (`z.toJSONSchema` com `io: "input"`; o elemento recursivo sai em `$defs`/`$ref`).
 
-### 9.9 Exemplos: os 3 modelos para começar
+### 9.9 Exemplos: os 4 modelos para começar
 
-Forma canônica (padrões omitidos). O Vídeo dos modelos começa sem arquivo (`"asset": null`): o editor preenche com o vídeo do Personalizado guardado ou pede o envio.
+Forma canônica (padrões omitidos). O Vídeo e a Imagem dos modelos começam sem arquivo (`"asset": null`): o editor preenche o Vídeo com o vídeo do Personalizado guardado ou pede o envio; a Imagem recortada a equipe envia.
 
 **Vídeo no topo com degradê** (a estrutura da referência: vídeo solto no topo sumindo no fundo escuro, selo por cima, título condensado em duas cores, texto cinza, botão verde-limão com borda de baixo e brilho, X pequeno):
 
@@ -564,11 +571,122 @@ Forma canônica (padrões omitidos). O Vídeo dos modelos começa sem arquivo (`
 }
 ```
 
+**Imagem recortada com selo** (L1.1: a imagem sem fundo solta à direita, uma mancha de luz atrás dela, o selo inclinado por cima, o texto numa coluna à esquerda e os dois botões lado a lado, que passam para baixo quando o texto do botão é longo):
+
+```json
+{
+  "artboard": {
+    "align": "start",
+    "border": { "color": "#ffffff1a", "width": 1 },
+    "fill": [{ "angle": 135, "kind": "linear", "stops": [{ "at": 0, "color": "#1e1b4b" }, { "at": 100, "color": "#0f172a" }] }],
+    "gap": 0,
+    "minHeight": 320,
+    "padding": [36, 32, 12, 32],
+    "radius": 28,
+    "shadows": [{ "blur": 80, "color": "#000000b3", "spread": 0, "x": 0, "y": 24 }],
+    "width": 480
+  },
+  "assets": [],
+  "children": [
+    {
+      "box": {
+        "blur": 30,
+        "fill": [
+          { "extent": "closest-side", "kind": "radial", "stops": [{ "at": 0, "color": "#8b5cf680" }, { "at": 100, "color": "#8b5cf600" }], "x": 50, "y": 50 }
+        ]
+      },
+      "id": "brilho",
+      "name": "Brilho",
+      "place": { "h": 280, "mode": "free", "w": 280, "x": 250, "y": -40, "z": -1 },
+      "shape": "ellipse",
+      "type": "shape"
+    },
+    {
+      "asset": null,
+      "fit": "contain",
+      "id": "foto",
+      "name": "Imagem recortada",
+      "place": { "h": 200, "mode": "free", "w": 170, "x": 290, "y": 50 },
+      "type": "image"
+    },
+    {
+      "box": { "fill": [{ "color": "#facc15", "kind": "solid" }], "padding": [6, 12], "radius": 8 },
+      "id": "selo",
+      "label": "Aula bônus",
+      "place": { "mode": "free", "rotate": -8, "w": 128, "x": 288, "y": 34, "z": 2 },
+      "textStyle": { "align": "center", "paint": { "color": "#111111", "kind": "solid" }, "size": 14, "weight": 800 },
+      "type": "badge"
+    },
+    {
+      "children": [
+        {
+          "id": "titulo",
+          "lines": [
+            [{ "text": "Comece hoje" }],
+            [
+              {
+                "style": { "paint": { "angle": 90, "kind": "linear", "stops": [{ "at": 0, "color": "#a78bfa" }, { "at": 100, "color": "#22d3ee" }] } },
+                "text": "em 7 passos"
+              }
+            ]
+          ],
+          "textStyle": { "lineHeight": 1.05, "size": 34 },
+          "type": "heading"
+        },
+        {
+          "id": "texto",
+          "lines": [[{ "text": "Um passo por dia, com exercícios curtos e uma aula ao vivo no fim." }]],
+          "textStyle": { "lineHeight": 1.45, "paint": { "color": "#cbd5e1", "kind": "solid" }, "size": 17 },
+          "type": "text"
+        },
+        {
+          "children": [
+            {
+              "action": { "kind": "cta" },
+              "box": { "fill": [{ "color": "#ffffff", "kind": "solid" }], "padding": [12, 18], "radius": 12 },
+              "id": "botao",
+              "textStyle": { "paint": { "color": "#0f172a", "kind": "solid" }, "size": 16 },
+              "type": "button"
+            },
+            {
+              "action": { "kind": "close" },
+              "box": { "border": { "color": "#ffffff40", "width": 1 }, "padding": [11, 16], "radius": 12 },
+              "id": "agoranao",
+              "label": "Agora não",
+              "textStyle": { "size": 16, "weight": 600 },
+              "type": "button"
+            }
+          ],
+          "id": "acoes",
+          "layout": { "align": "center", "dir": "row", "gap": 8, "wrap": true },
+          "place": { "margin": [8, 0, 0, 0], "mode": "flow" },
+          "type": "box"
+        }
+      ],
+      "id": "coluna",
+      "layout": { "align": "start", "gap": 12 },
+      "place": { "mode": "flow", "width": 256 },
+      "type": "box"
+    },
+    {
+      "id": "links",
+      "place": { "margin": [12, 0, 0, 0], "mode": "flow" },
+      "textStyle": { "paint": { "color": "#a5b4fc", "kind": "solid" }, "size": 14 },
+      "type": "links"
+    }
+  ],
+  "close": { "background": "#00000066" },
+  "fonts": [],
+  "mode": "free",
+  "version": 1
+}
+```
+
 ## 10. Fica de fora
 
 | Fora desta entrega | Onde está |
 |---|---|
-| Copiar e colar o design (o JSON) e "Copiar as instruções para a IA"; "Usar o design Personalizado" (`freeFromCustomDesign`); o modelo "Imagem recortada com selo"; dica do peso das imagens; capa de vídeo que já está no Storage | PR L1.1 (decisão do produtor: o copiar e colar vem logo depois) |
+| Dica do peso das imagens (precisa do tamanho do arquivo, que o design não guarda); capa de vídeo tirada de um vídeo que já está no Storage (precisa de CORS no `canvas`) | ficaram do L1.1 (que entregou o copiar e colar, as instruções para a IA, "Usar o design Personalizado", o quarto modelo e a dica nova, §13); vão para o L5 (Meus modelos e biblioteca de imagens), junto com o tamanho dos arquivos já enviados |
 | "Criar com IA" (texto e/ou imagem de referência pela conta conectada no gateway) | PR L2 (§9.8 e spec §5.7) |
 | Valores próprios do celular por elemento (`devices.mobile`) | PR L3 (o schema recusa `devices` nesta versão) |
 | Arrastar nas Camadas e nas camadas de fundo, arrastar elementos da sequência no desenho, arrastar do painel, seleção de vários, distribuir, `Alt + clique`, zoom com passos, mais de um botão "Abrir um link" | PR L4 |
@@ -582,17 +700,19 @@ Forma canônica (padrões omitidos). O Vídeo dos modelos começa sem arquivo (`
 
 | Tipo | Arquivo | O que prova |
 |---|---|---|
-| Unitário | `tests/popup-livre-modelo.test.mjs` (31) | schema estrito em todo nível (inclusive `url` e `devices`), documento mínimo, limites e frases, ids, profundidade, contagens, botões e links, 1.200 letras, caminhos dos buckets, capa, X visível, link seguro, estimativa do jsonb contra o banco, teto de tamanho, forma canônica, roteador, caminhos gravados, regras com o conteúdo, chaves de erro, reescala, `freeDesignForStudent`, origem e endereço dos arquivos, os 3 modelos, sincronia do Áudio, JSON Schema (e só o módulo próprio chama o `toJSONSchema`, nenhuma tela o importa), os exemplos desta §9, dicas e vocabulário |
+| Unitário | `tests/popup-livre-modelo.test.mjs` (31) | schema estrito em todo nível (inclusive `url` e `devices`), documento mínimo, limites e frases, ids, profundidade, contagens, botões e links, 1.200 letras, caminhos dos buckets, capa, X visível, link seguro, estimativa do jsonb contra o banco, teto de tamanho, forma canônica, roteador, caminhos gravados, regras com o conteúdo, chaves de erro, reescala, `freeDesignForStudent`, origem e endereço dos arquivos, os 4 modelos, sincronia do Áudio, JSON Schema (e só o módulo próprio chama o `toJSONSchema`, nenhuma tela o importa), os exemplos desta §9, dicas e vocabulário |
 | Unitário | `tests/popup-livre-desenho.test.mjs` (27) | o desenho do aluno: sequência e solto em `cqw`, prancheta que cresce até os soltos, altura mínima nos textos, piso de 12 px, pinturas, `url()` só da origem conferida (14 origens maliciosas), esmaecer, texto em degradê, links, h2 e descrição, vídeo × capa, cliques, foco visível, `sizes`, quadriculado só na prévia, escondido, ordem do DOM, `dragPreview` e o **HTML do Padrão e do Personalizado igual ao de antes do Livre** |
 | Guarda | `tests/popup-livre.guard.test.mjs` (6) | sem HTML/CSS em texto, o cartão sem zod/modelo/dicas, o cartão só por `import()`, `url(` só pelo `freeAssetUrl`, o editor fora do lado do aluno, nenhuma migração nova |
 | Unitário | `tests/popup-livre-editor-modelo.test.mjs` (21) | onde o elemento entra, foco no envio, duplicar/excluir/subir/descer/caixas, soltar e seguir a sequência, setas, redimensionar com Shift, alinhar no pop-up, guias, escala do zoom e do celular, arrastar = um passo, histórico (junta, guarda o `cta`, 100 passos, modelo e recuperar), cópia de recuperação, teclado das Camadas, o botão e a frase do salvar no pop-up no ar (L16), vocabulário |
 | Unitário | `tests/popup-livre-painel-modelo.test.mjs` (23) | área de texto (Enter, limites, acentos e emoji), Outro estilo na seleção, editar mantendo estilos (400 edições aleatórias), voltar ao estilo, paradas, camadas de fundo, lados, sombras, chave de erro → aba e campo, Abrir um link único, reescala, pesos, imagem até 1.600 px e 420 KB, vocabulário |
 | Unitário | `tests/popup-design-editor-modelo.test.mjs` (23) | os do Personalizado, mais: os três modos com memória (Livre e Personalizado nunca juntos no rascunho), os modelos do Livre (o "Saiba mais", o vídeo do Personalizado e a imagem do aviso como capa, só caminhos), o rascunho com as duas chaves, a forma canônica com o Livre, a prévia pelo item do Livre, o D9 com o "Abrir um link" do Livre, a sincronia do Livre com o botão e o áudio, a cópia nova do card palavra por palavra |
+| Unitário | `tests/popup-livre-copiar-colar.test.mjs` (15) | L1.1: copiar dá a forma canônica e colar devolve o mesmo design (e o mesmo texto); a resposta da IA com ```json em volta; arquivos de fora viram `asset: null`, a pintura e a capa de fora saem e os conhecidos ficam com as medidas daqui; as frases do colar (vazio, JSON quebrado, grande demais, Personalizado, zod com o nome do elemento, até 5 e "E mais N."); fonte fora da biblioteca vira Inter; o Botão principal e o Áudio acompanham o aviso; colar = um passo no histórico; os arquivos de todo o histórico; as instruções geradas do §9 (iguais ao arquivo, os exemplos colam, só por `import()`, nada busca o docs); todo modelo do Personalizado vira um Livre válido sem dica; o mapeamento (mídia e esmaecer, vídeo e capa, títulos, quebras, botões e brilho, segundo botão, Espaço, links, imagem no fundo com a cor clareada, degradê de outra cor, Sobre a mídia, X que precisa contrastar, sem imagem, imagem sem medidas, 4 títulos e 1.200 letras); o card ("Usar o design Personalizado", o "Saiba mais"); o modelo novo; a conta do tamanho no celular e quando a dica aparece (texto longo, parte, selo solto, botão cortado, linha de botões, links) |
 | Integração | `tests/integration/pop-ups-livre-dados.test.mjs` (15) | salvar e ler na forma canônica sem endereço, o maior Livre aceito passa no check de 32 KB, Livre inválido some da lista e abre como Padrão, lista no ar e plano, notificação sem design, trocar para Padrão, aba antiga, sem chave mantém, duas chaves recusadas, duplicar, publicar e aprovar conferem fontes, fonte em uso, auditoria |
 | Integração | `tests/integration/pop-ups-livre-envios.test.mjs` (8) | `uploadPopupFreeImage` (WebP com alfa, caminho e medidas do servidor), recusas, 403, imagem nova inexistente, medidas trocadas pelas do servidor, caminho de outro lugar, vídeo não conferido recusado e apagado, vídeo do Personalizado reusado não apagado |
 | Ponta a ponta | `tests/e2e/pop-up-livre-aluno.spec.ts` (8) | nome do diálogo, texto selecionável, selo sobre o vídeo que some, vídeo mudo tocando, X de 28 px com 44 px de toque, Tab nas Camadas e o X por último, `Esc`, clique conta, menos movimento sem vídeo, 375 px com 343 px e proporção, forma por cima do botão não impede o clique, `dismiss: false`, Padrão e Personalizado iguais |
 | Ponta a ponta | `tests/e2e/produtor-monta-pop-up-livre.spec.ts` (4) | num aviso novo: Livre, modelo, vídeo, duas linhas com cores pelo "Outro estilo na seleção", fonte enviada, Botão principal, Selo solto arrastado e com setas, Alinhar ao centro, respiro por lado, Imagem enviada arrastada até a borda (guia) e redimensionada com Shift, esconder e desfazer/refazer pelas Camadas, largura G, Computador e Celular, **Salvar rascunho com o editor aberto** (endereço de aviso novo, Ctrl + Z ainda desfaz), **Concluir** (endereço do aviso), recarregar igual, prévia, publicar, o gravado; a aluna a 1440 (texto real, cores, fonte, clique contado) e a 375 (343 px, proporção, nada abaixo de 12 px, X fecha); com o pop-up no ar, o editor Livre diz **Salvar alterações** e a frase do pop-up no ar, sem aplicar o "Mostrar de novo" ligado, que o salvar do aviso aplica depois (L16) |
 | Ponta a ponta | `tests/e2e/pop-up-livre-editor-teclado.spec.ts` (2) | só teclado: abrir (foco nas Camadas), Tab passa pela lista uma vez, Título pelo Elementos, Forma movida com setas (posição falada), Alt + ↑, E, T, Ctrl + D, Delete, Ctrl + Z, o foco nunca cai no vazio nem sai do editor, linha vazia → Revisar → foco na área de texto, erro fora do editor → **Fechar o editor e revisar** → foco em **Abrir editor Livre**; **Trocar de modelo** confirma e Ctrl + Z volta ao design de antes |
+| Ponta a ponta | `tests/e2e/produtor-copia-e-cola-livre.spec.ts` (1) | L1.1: num rascunho com o Personalizado "Só texto", Livre › **Usar o design Personalizado** (o editor abre com o título, o selo e o botão dele); **Copiar o design** (o JSON canônico na área de transferência, sem endereço); mudar o título e **Colar o design…** pela área de transferência (volta, num passo só: Ctrl + Z e Ctrl + Shift + Z); texto que não é JSON (a frase, o foco no campo); um design com a imagem de outro pop-up (a Imagem vazia e o Revisar pedindo a imagem; Ctrl + Z volta); **Copiar as instruções para a IA**; salvar e o gravado |
 
 Amostras em `tests/fixtures/popup-livre/` (imagem WebP com alfa, imagem larga demais, PNG que não é WebP, a capa de teste e o HTML de antes do Padrão e do Personalizado). Ajudas: `tests/e2e/popup-livre-fixtures.ts` (`prepararMidiaDoLivre`, `designVideoNoTopo`, `publicarPopUpLivre`); `zerarComunicacao` (em `tests/e2e/fixtures.ts`) também apaga as imagens de `communications/free/` que nenhum aviso que ficou usa.
 
@@ -607,3 +727,78 @@ Amostras em `tests/fixtures/popup-livre/` (imagem WebP com alfa, imagem larga de
 7. **Salvar rascunho**: `Rascunho salvo.` e o editor continua aberto; **Concluir**: o endereço passa a ser o do aviso; recarregar: tudo igual.
 8. **Publicar pop-up**; entrar como aluno no computador e no celular: o mesmo desenho, menor no celular, o texto selecionável, o X fecha e o clique no botão conta no relatório.
 9. Fechar a aba com mudança não salva no editor: o navegador pergunta; reabrir o editor oferece **Recuperar**.
+
+## 13. Acabamento do Livre (L1.1)
+
+Data: 23/10/2026. Os cortes marcados L1.1 na spec (§1.5): **Copiar e colar** o design com **Copiar as instruções para a IA** (pergunta 2 do produtor: usar o Claude ou o ChatGPT dele antes do "Criar com IA"), o ponto de partida **Usar o design Personalizado**, o quarto modelo **Imagem recortada com selo** e a dica "texto no celular" mais quieta. Sem migração e sem mudança no cartão do aluno. A dica do peso das imagens e a capa tirada de um vídeo que já está no Storage ficaram para depois (§10).
+
+### 13.1 Copiar e colar o design
+
+- Na barra de cima do editor, **Copiar e colar** (o ícone da área de transferência; o nome aparece a partir de 1.536 px) abre três ações e a frase `Para pedir a um Claude ou ChatGPT seu: copie as instruções e o design, cole lá, peça a mudança e traga o JSON de volta em Colar o design.`
+- **Copiar o design**: a forma canônica em JSON com 2 espaços (`freeDesignClipboardText`, a mesma que o servidor grava: só caminhos, nunca endereço) vai para a área de transferência (`Design copiado.`). Quando o navegador não deixa copiar, abre **Copiar o texto** com o texto selecionado para o Ctrl + C.
+- **Colar o design…**: um diálogo com o campo **Design em JSON** (colar com Ctrl + V) e **Colar da área de transferência** (sem permissão do navegador: `O navegador não deixou ler a área de transferência. Cole no campo com Ctrl + V.`). **Usar este design** passa por `parseFreeDesignPaste` (`popup-free-paste.ts`, puro):
+  1. aceita a resposta da IA com uma frase ou com ```json em volta (vale do primeiro `{` ao último `}`); até 200.000 letras (`O texto colado é grande demais para um design.`);
+  2. só o Livre (`"mode": "free"`); um Personalizado ou outra coisa: `Isso não é um design Livre. Copie pelo botão “Copiar o design” ou peça à IA o JSON com "mode": "free".`; JSON quebrado: `Não deu para ler o texto colado. Copie o design inteiro, do primeiro { ao último }.`;
+  3. **arquivos**: ficam só os que este pop-up já conhece (mesmo tipo e mesmo caminho, no design aberto ou em qualquer passo do histórico do editor), com as medidas daqui (as do servidor); os outros saem, a Imagem ou o Vídeo que os usava fica com `asset: null` (o Revisar pede `Escolha a imagem deste elemento.`), a pintura de imagem de fora sai (e o fundo vazio junto) e a capa de fora sai (L19);
+  4. **fontes** enviadas que não estão na biblioteca viram Inter;
+  5. o mesmo zod do salvar (`popupFreeDesignSchema`) e a forma canônica; os erros ficam no diálogo (nunca em toast), em frases curtas com o nome do elemento (`O design colado tem algo que não vale:` e depois `“Título grande”: Escreva algo nesta linha.`), até 5 e `E mais N.`;
+  6. coerente com o aviso, como nos modelos (L21): com áudio entra o Áudio, sem áudio ele sai; com botão entra o Botão principal que faltava; o Botão principal colado num aviso sem botão cria o `Saiba mais` com o destino vazio.
+- Aplicar é **um passo só** no histórico (design e `cta` juntos): `Design colado. Ctrl + Z desfaz.`, mais os avisos que couberem (`1 arquivo não é deste pop-up e ficou de fora: envie de novo onde o elemento ficou vazio.`, `2 fontes não estão na biblioteca e viraram Inter.`, `O botão principal ganhou o texto “Saiba mais”. Escolha para onde ele leva.`). Com um arquivo subindo, espera (`Espere o arquivo terminar de enviar.`). Sem permissão de mudar, só copiar.
+- **Copiar as instruções para a IA**: o texto de `free-ai-instructions.ts`, gerado deste documento por `npm run livre:instrucoes` (`scripts/livre-instrucoes-ia.mjs`): um começo curto (responder só com o JSON, seguir o contrato à risca, mudar só o que foi pedido num design mandado junto, nunca escrever endereço de arquivo) e as partes 9.2, 9.3, 9.4, 9.5, 9.6, 9.8 e 9.9 (sem a 9.1 e a 9.7, que são do banco e do editor). O arquivo vai no pacote do editor e só é baixado no clique (abrir o menu já começa); nada busca o docs na hora (L20). `Instruções copiadas. Cole na conversa com a IA junto com o design.` Um teste confere que o arquivo bate com o §9: mudou o §9, rode o script.
+
+### 13.2 "Usar o design Personalizado"
+
+- No card Design, em **Começar de um modelo** do Livre, quando o aviso tem um Personalizado (o do rascunho ou o guardado ao trocar de modo), o primeiro item é **Seu design Personalizado** · `Começa com o vídeo, a imagem, as fontes e os textos dele. Fica parecido; o resto você ajusta no editor.`, com a miniatura e **Usar o design Personalizado**. Com um Livre montado, pede a confirmação do **Trocar de modelo** e abre o editor com o Livre de antes um passo atrás (Ctrl + Z). A imagem do aviso e a do fundo do cartão são medidas no navegador ao usar (o servidor confere ao salvar).
+- `freeFromCustomDesign` (puro, em `popup-free-starters.ts`; spec §5.3) faz um Livre parecido, não idêntico (L22):
+
+| Personalizado | Livre |
+|---|---|
+| Cartão P, M, G | `artboard.width` 360, 440, 520 |
+| Fundo em cor ou degradê | uma camada (`solid`, ou `linear` com as duas cores no mesmo ângulo) |
+| Imagem no fundo do cartão | `[escuro (#000000 com o alfa do escuro), a imagem cabendo na largura presa em cima, no meio ou embaixo, a cor de apoio]`; a cor de apoio vai clareada (cada canal ÷ (1 − escuro)) para, debaixo do escuro, ficar a de antes; sem medidas, só a cor de apoio |
+| Borda, cantos, sombra (Nenhuma, Suave, Forte), respiro | borda, `radius`, `shadows` com os valores do CSS do preset, `padding` |
+| Mídia (vídeo, ou a imagem do aviso), formato, parte que aparece | Vídeo ou Imagem solto em (0, 0, W, W × proporção), `focus` em cima, no meio ou embaixo; o vídeo do nosso bucket com a imagem do aviso de capa; imagem sem medidas entra vazia; aviso sem imagem com a mídia Imagem: sem mídia (como o Personalizado mostra) |
+| Degradê "Igual ao fundo do cartão" | `box.fade` embaixo, de (fim − comprimento) a fim |
+| Degradê de outra cor | uma Forma "Degradê" do tamanho da mídia, por cima dela, com as mesmas paradas suavizadas |
+| Abaixo da mídia, subindo N % | respiro de cima = altura da mídia × (1 − N %) + respiro |
+| Sobre a mídia, em cima, no meio ou embaixo | `minHeight` = altura da mídia, `justify` start, center ou end, a mídia (e o degradê) na camada −1 |
+| Alinhamento do grupo e espaço entre blocos | `artboard.align` e `gap` |
+| Selo | Selo com o fundo, a borda, os cantos e o respiro 5 × 12; o alinhamento próprio vira `place.align` |
+| Título (linhas com cor e tamanho próprios) | Título com uma linha por linha e a cor ou o tamanho na parte; do 5º título em diante, Texto |
+| Texto (com quebras) | Texto com uma linha por quebra (as vazias saem; até 12) |
+| Botão principal e segundo botão (P, M, G; Ocupa a linha; brilho) | Botão com o respiro que dá a mesma altura, a fonte do tamanho, `width: "fill"` e o brilho como sombra; o segundo com Fechar, Lembrar depois ou o link |
+| Áudio, Espaço | Áudio, Espaço |
+| X | o mesmo; se não passa na regra do X do Livre (§9.6), o X escuro de sempre |
+| Links | a cor e o alinhamento; "Não mostrar de novo" escondido = `dismiss: false`; a mesma distância do último bloco |
+| Primeiro bloco com o texto no topo | a margem para o canto do X (56 − respiro), como no Personalizado |
+| Fontes enviadas e textos | as mesmas fontes (`fonts` recalculado); até 1.200 letras somadas (o teto do Livre) |
+
+### 13.3 Modelo "Imagem recortada com selo"
+
+`Uma imagem sem fundo ao lado do texto, um selo inclinado por cima e dois botões.` O JSON está na §9.9 (o rascunho da spec adaptado ao schema de agora, com texto neutro): prancheta de 480 px em degradê escuro, a Imagem recortada solta à direita (começa vazia: a equipe envia uma imagem com fundo transparente), uma mancha de luz atrás dela, o selo "Aula bônus" inclinado por cima, título de duas linhas (a segunda em degradê), texto, o Botão principal e "Agora não" lado a lado (passam para baixo quando o texto do botão é longo) e os Links. O selo tem 128 px e a coluna 256 px para nada mudar de linha no celular (L23).
+
+### 13.4 Dica "texto no celular"
+
+- No celular o pop-up inteiro encolhe na proporção min(W, 343) ÷ W, mas a fonte nunca fica abaixo de 12 px (nem acima do próprio tamanho): `freePhoneEquivalentSize` dá o tamanho que o texto tem no celular em px da prancheta (12 px numa prancheta de 440 = 15,39; 16 px fica 16, o piso não mexe).
+- `freePhoneTextHints` (em `popup-free-checks.ts`): para cada elemento visível com algum tamanho que o piso aumenta (o do elemento ou o de uma parte), estima a largura das letras (≈ 0,5 em; mais peso, mais larga; maiúsculas + 22 %; Condensada mais estreita; Monoespaçada 0,6; mais o espaço entre letras) na largura que ele tem (solto: a largura dele; na sequência: a largura fixa ou a da caixa de fora, menos margens, respiro e borda) e compara o desenho com o celular. A dica aparece quando:
+  - um **Título**, **Texto** ou **Selo** passa a ocupar mais linhas (`No celular, este texto ocupa mais linhas que no desenho (o texto não fica abaixo de 12 px). Use letra maior ou dê mais largura.`);
+  - o texto de um **Botão** (uma linha só, com reticências) deixa de caber (`No celular, o texto deste botão fica cortado (...)`);
+  - os **Links** passam a quebrar ("Lembrar depois" só conta quando o aviso deixa adiar e não há botão Lembrar depois);
+  - os filhos de uma **Caixa em linha** (largura fixa, Espaço, Ícone e os textos de uma linha) deixam de caber lado a lado (`No celular, os elementos desta linha não cabem lado a lado (...)`), no primeiro texto que o piso aumenta.
+- Um texto curto que só cresce um pouco (o selo e os links dos modelos, os textos da conversão do Personalizado) não gera dica. Uma dica por elemento, com a chave do tamanho (do elemento ou da parte), e o texto do Botão principal vem do `cta` do aviso. É uma estimativa: a fonte de verdade pode quebrar um pouco antes ou depois, e por isso fica como dica (L18).
+
+### 13.5 Por dentro
+
+- Novos: `src/server/communications/popup-free-paste.ts` (copiar e colar), `src/components/admin/v2/communication/popup-free/free-copy-paste.tsx` (o menu e os dois diálogos), `src/components/admin/v2/communication/popup-free/free-ai-instructions.ts` (gerado) e `scripts/livre-instrucoes-ia.mjs`.
+- Mudaram: `popup-free-starters.ts` (o quarto modelo e `freeFromCustomDesign`), `popup-free-checks.ts` (a dica nova; `popupFreeHints` recebe `content` com o texto do Botão principal e o adiar), `free-editor.tsx` (o menu e o colar num passo), `free-editor-model.ts` (as frases e `freeKnownAssets`), `popup-design-field.tsx` e `popup-design-editor-model.ts` (o item **Usar o design Personalizado**).
+- Desempenho: nada muda no aluno (nenhum arquivo do cartão foi tocado). No admin, o editor ganha o menu e o colar (o zod já estava no editor); as instruções (~27 KB de texto) ficam num pedaço próprio, baixado ao abrir o menu.
+
+### 13.6 Roteiro de conferência
+
+1. Num pop-up com o design Personalizado, **Livre**: o primeiro item é **Seu design Personalizado**; **Usar o design Personalizado** abre o editor com o vídeo (ou a imagem), as fontes, os textos e os botões dele, parecido.
+2. **Copiar e colar** › **Copiar o design**; num bloco de notas, colar: o JSON, sem endereço de arquivo.
+3. Mudar o título; **Copiar e colar** › **Colar o design…** › **Colar da área de transferência** › **Usar este design**: o título volta. Ctrl + Z: a mudança volta; Ctrl + Shift + Z: o colado volta.
+4. **Colar o design…** com um texto qualquer: a frase aparece no diálogo. Colar o design de outro pop-up com imagem: a Imagem fica vazia e o **Revisar** pede a imagem.
+5. **Copiar as instruções para a IA** e **Copiar o design**; colar os dois no Claude ou no ChatGPT e pedir uma mudança ("deixe o botão roxo"); colar a resposta em **Colar o design…**: a mudança aparece.
+6. **Trocar de modelo** › **Imagem recortada com selo**: a imagem começa vazia; enviar uma imagem com fundo transparente pela Imagem recortada.
+7. **Revisar** nos quatro modelos: nenhuma dica "texto no celular". Mudar o Texto para 12 px numa largura GG: a dica aparece no Texto.

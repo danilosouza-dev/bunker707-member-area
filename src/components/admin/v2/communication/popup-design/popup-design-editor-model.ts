@@ -11,7 +11,14 @@
 import type { NoticeDraft } from "../../../../../server/communications/schemas";
 import { freeNodeCount, type PopupFreeDesign } from "../../../../../server/communications/popup-free-model";
 import { resolveFreeArtboard } from "../../../../../server/communications/popup-free-render";
-import { FREE_DESIGN_STARTERS, applyFreeStarter, syncFreeDesignWithContent, type FreeStarterId } from "../../../../../server/communications/popup-free-starters";
+import {
+  FREE_DESIGN_STARTERS,
+  applyFreeStarter,
+  freeFromCustomDesign,
+  syncFreeDesignWithContent,
+  type FreeMeasuredImage,
+  type FreeStarterId
+} from "../../../../../server/communications/popup-free-starters";
 import {
   POPUP_BUILTIN_FONTS,
   POPUP_CARD_IMAGE_DEFAULTS,
@@ -85,6 +92,12 @@ export const POPUP_DESIGN_COPY = {
       title: "Trocar de modelo?"
     },
     open: "Abrir editor Livre",
+    /** "Usar o design Personalizado" (L1.1): o Personalizado de agora (ou o guardado) vira o ponto de partida. */
+    fromCustom: {
+      description: "Começa com o vídeo, a imagem, as fontes e os textos dele. Fica parecido; o resto você ajusta no editor.",
+      label: "Seu design Personalizado",
+      use: "Usar o design Personalizado"
+    },
     preparing: "Preparando o modelo…",
     smallScreen: "O editor Livre precisa de uma tela maior (a partir de 1.024 px de largura). Aqui você vê a prévia.",
     starters: {
@@ -567,6 +580,26 @@ export function applyFreeStarterPatch(
 ): DesignPatch & { freeDesign: PopupFreeDesign } {
   const video = media.video ? { mimeType: media.video.mimeType, path: media.video.path } : null;
   const result = applyFreeStarter(starter, { audio: content.audio, cta: content.cta, poster: media.poster ?? null, video });
+
+  return content.cta ? { design: null, freeDesign: result.design } : { cta: result.cta, design: null, freeDesign: result.design };
+}
+
+/** O Personalizado que vira ponto de partida do Livre (L1.1): o do rascunho ou o guardado na memoria. */
+export function freeCustomSourceOf(content: Pick<DesignContent, "design">, remembered: RememberedDesigns): PopupDesign | null {
+  return content.design ?? remembered.custom ?? null;
+}
+
+/**
+ * "Usar o design Personalizado" (docs/27 L1.1; spec §5.3): o Livre parecido com o Personalizado (freeFromCustomDesign),
+ * com a imagem do aviso e a do fundo do cartao (do nosso bucket, com as medidas lidas no navegador). Como nos
+ * modelos: sem botao no aviso, cria o "Saiba mais"; o Personalizado sai do rascunho (fica na memoria da tela).
+ */
+export function applyFreeFromCustomPatch(
+  content: DesignContent,
+  custom: PopupDesign,
+  media: { cardImage?: FreeMeasuredImage | null; hasImage?: boolean; image?: FreeMeasuredImage | null } = {}
+): DesignPatch & { freeDesign: PopupFreeDesign } {
+  const result = freeFromCustomDesign(custom, { audio: content.audio, cardImage: media.cardImage ?? null, cta: content.cta, hasImage: media.hasImage, image: media.image ?? null });
 
   return content.cta ? { design: null, freeDesign: result.design } : { cta: result.cta, design: null, freeDesign: result.design };
 }

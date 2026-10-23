@@ -867,7 +867,7 @@ test("dragPreview move só o elemento arrastado sem mudar o design", () => {
   assert.equal(styles.freePlaceCss(design.children[0], styleCtx(design), "column", { dw: -500, dx: 0, dy: 0, id: "a" }).width, len(4), "nunca menor que 4 px");
 });
 
-test("os três modelos para começar desenham no cartão do aluno", async () => {
+test("os modelos para começar desenham no cartão do aluno", async () => {
   const starters = await import("../src/server/communications/popup-free-starters.ts");
 
   for (const { id } of starters.FREE_DESIGN_STARTERS) {
