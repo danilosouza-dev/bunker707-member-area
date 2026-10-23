@@ -581,7 +581,8 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
   const hasStudentRows = row.kind === "inbox" && !row.flow_id && (row.status === "sending" || row.status === "sent" || row.status === "canceled");
   const popupProducts = popupProductIds(row);
   const draft = noticeDraftOfRow(row);
-  const designFontIds = draft.design?.fonts ?? [];
+  // Livre (docs/27): as fontes do que estiver no rascunho (Livre ou Personalizado).
+  const designFontIds = (draft.freeDesign ?? draft.design)?.fonts ?? [];
   const [stats, engagement, names, people, sender, followUps, interactions, citations, reshowable, popupNames, designFonts] = await Promise.all([
     fetchCampaignStats(db, [row.id]),
     fetchCampaignEngagement(db, [row.id]),

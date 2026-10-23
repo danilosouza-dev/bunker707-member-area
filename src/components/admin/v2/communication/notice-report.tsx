@@ -347,8 +347,8 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
               </h2>
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">Como o aluno vê.</p>
             </div>
-            {/* Design do pop-up (docs/26): o Personalizado mostra celular e computador juntos. */}
-            {detail.kind === "popup" && detail.draft.design ? null : (
+            {/* Design do pop-up (docs/26, docs/27): o Personalizado e o Livre mostram celular e computador juntos. */}
+            {detail.kind === "popup" && (detail.draft.design || detail.draft.freeDesign) ? null : (
               <PillGroup ariaLabel="Aparelho da prévia" name="aviso-relatorio-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
             )}
           </div>

@@ -14,6 +14,7 @@ import {
   limparProgresso,
   limparSessoesDeTv
 } from "../fixtures/escola-de-teste.mjs";
+import { storedPopupDesignAssetPaths } from "../../src/server/communications/popup-design-router";
 import { pngQuadrado } from "../support/imagem-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 
@@ -94,10 +95,48 @@ export async function zerarAreaDeMembros() {
  * Apaga fluxos, avisos, pop-ups, notificacoes e visitas de pagina das contas de teste (docs/22 e docs/23;
  * os fluxos primeiro, como em limparComunicacao). Use em `test.beforeAll` E em `test.afterAll` de quem
  * publica algo: um pop-up esquecido abre na home dos outros arquivos (e um dialogo a mais confunde quem
- * procura "o" dialogo da pagina); uma notificacao muda o nome do sino.
+ * procura "o" dialogo da pagina); uma notificacao muda o nome do sino. Livre (docs/27): depois, as imagens
+ * enviadas no editor Livre (`communications/free/` no bucket de imagens) que nenhum aviso que ficou usa.
  */
 export async function zerarComunicacao() {
-  await limparComunicacao(createLocalAdminClient());
+  const db = createLocalAdminClient();
+  await limparComunicacao(db);
+  await apagarImagensDoLivreSemUso(db);
+}
+
+const PASTA_DO_LIVRE = "communications/free";
+
+/** As imagens do Livre que nenhum aviso gravado usa (as dos testes; nunca as de um aviso que ficou no banco). */
+async function apagarImagensDoLivreSemUso(db: ReturnType<typeof createLocalAdminClient>) {
+  const linhas = unwrap(await db.from("campaigns").select("popup_design").not("popup_design", "is", null), "Lendo os designs que ficaram") as {
+    popup_design: unknown;
+  }[];
+  const usadas = new Set(linhas.flatMap((linha) => storedPopupDesignAssetPaths(linha.popup_design)));
+  const caminhos: string[] = [];
+
+  for (let offset = 0; ; offset += 100) {
+    const { data, error } = await db.storage.from("content-assets").list(PASTA_DO_LIVRE, { limit: 100, offset });
+
+    if (error) {
+      throw new Error(`Listando as imagens do Livre: ${error.message}`);
+    }
+
+    caminhos.push(...(data ?? []).filter((item) => item.id !== null).map((item) => `${PASTA_DO_LIVRE}/${item.name}`));
+
+    if (!data || data.length < 100) {
+      break;
+    }
+  }
+
+  const semUso = caminhos.filter((caminho) => !usadas.has(caminho));
+
+  if (semUso.length > 0) {
+    const { error } = await db.storage.from("content-assets").remove(semUso);
+
+    if (error) {
+      throw new Error(`Apagando as imagens do Livre: ${error.message}`);
+    }
+  }
 }
 
 export type EstadoDoPopUp = {

@@ -23,7 +23,8 @@ import {
   type PopupStopOn
 } from "./popup-display-model";
 import type { PopupDesign } from "./popup-design-model";
-import { parsePopupDesign } from "./popup-design-schema";
+import { parseStoredPopupDesign } from "./popup-design-router";
+import type { PopupFreeDesign } from "./popup-free-model";
 import type { NoticeDraft } from "./schemas";
 
 /* ------------------------------------------------------------------------------------------------
@@ -95,7 +96,10 @@ export type CampaignRow = {
    */
   popup_close: PopupClose;
   popup_delay_seconds: number;
-  /** Design Personalizado do pop-up (jsonb; ler com parsePopupDesign: invalido = Padrão); nulo = Padrão. */
+  /**
+   * Design do pop-up (jsonb): o Personalizado (sem `mode`) ou o Livre (`mode: "free"`); ler pelo roteador
+   * (popup-design-router.parseStoredPopupDesign: invalido = os dois nulos); nulo = Padrão.
+   */
   popup_design: unknown;
   /** Mais de uma vez: intervalo em minutos; nulo = sem intervalo. */
   popup_every_minutes: number | null;
@@ -171,13 +175,13 @@ export type CampaignContentColumns = Pick<
   | "title"
   | "valid_until"
   | "validity_minutes"
-> & { audience: AudienceDefinition; audio_peaks: number[] | null; poll: PollDefinition | null; popup_design: PopupDesign | null };
+> & { audience: AudienceDefinition; audio_peaks: number[] | null; poll: PollDefinition | null; popup_design: PopupDesign | PopupFreeDesign | null };
 
 export type CampaignPatch = Partial<Omit<CampaignRow, "audience" | "audio_peaks" | "created_at" | "id" | "poll" | "popup_design" | "updated_at">> & {
   audience?: AudienceDefinition;
   audio_peaks?: number[] | null;
   poll?: PollDefinition | null;
-  popup_design?: PopupDesign | null;
+  popup_design?: PopupDesign | PopupFreeDesign | null;
 };
 
 /**
@@ -275,8 +279,9 @@ export function draftToColumns(draft: NoticeDraft): CampaignContentColumns {
     kind: draft.kind,
     poll: isInbox ? draft.poll ?? null : null,
     ...popupColumnsOfDraft(draft),
-    // Design do pop-up (docs/26; check campaigns_popup_design_v1): so pop-up; ausente = Padrão.
-    popup_design: isInbox ? null : (draft.design ?? null),
+    // Design do pop-up (docs/26; check campaigns_popup_design_v1): so pop-up; ausente = Padrão. O Livre (docs/27)
+    // vai na mesma coluna (no maximo um dos dois nao nulo: o schema do rascunho confere).
+    popup_design: isInbox ? null : (draft.freeDesign ?? draft.design ?? null),
     response_mode: isInbox && draft.response ? "accept_decline" : "none",
     send_at: isInbox && draft.schedule.mode === "at" ? draft.schedule.sendAt : null,
     sender_user_id: isInbox && draft.sender ? draft.sender.userId : null,
@@ -312,8 +317,8 @@ export function rowToDraft(row: CampaignRow): NoticeDraft {
     kind: row.kind,
     poll: parsePoll(row.poll),
     // v3b-1: so o pop-up leva a configuracao (o rascunho da notificacao continua sem a chave). Design do
-    // pop-up (docs/26): lido pelo schema; invalido ou de outra versao = Padrão (null).
-    ...(row.kind === "popup" ? { design: parsePopupDesign(row.popup_design), popup: popupSettingsOfRow(row) } : {}),
+    // pop-up (docs/26) e Livre (docs/27): lidos pelo roteador; invalido ou de outra versao = Padrão (os dois null).
+    ...(row.kind === "popup" ? { ...parseStoredPopupDesign(row.popup_design), popup: popupSettingsOfRow(row) } : {}),
     reactions: row.kind === "inbox" && row.allow_reactions === true,
     repeat: row.popup_repeat,
     response:

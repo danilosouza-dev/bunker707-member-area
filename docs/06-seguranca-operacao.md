@@ -550,6 +550,19 @@ O pop-up "Personalizado" (`docs/26`; migracao `202610230001`; tabelas em `docs/0
 - **Auditoria.** `popup_design: "custom" | "default"` em salvar/publicar/aprovar; `communication.font_uploaded` (`{ format, size_bytes }`), `communication.font_renamed`, `communication.font_deleted`, `communication.video_uploaded` (`{ mime_type, size_bytes }`): so ids e codigos, nunca o texto do design.
 - **Licenca das fontes.** O dialogo de envio lembra a equipe de conferir se a licenca permite usar no site; a fonte de teste do repositorio (subconjunto da Inter, OFL-1.1) tem `tests/fixtures/popup-design/LICENCA.txt`.
 
+### Design Livre do pop-up (23/10/2026)
+
+O pop-up "Livre" (`docs/27`; sem migracao; dados em `docs/05`, secao Design Livre do pop-up).
+
+- **Texto de verdade, CSS so por objeto.** Todo texto e texto do React; nunca `dangerouslySetInnerHTML`, `innerHTML`, `cssText`, `<style>` nem `style` em texto no cartao Livre, no `member-popup*` e no editor (guardas `popup-livre.guard` e no teste do editor). As unicas strings montadas sao gradientes, sombras, mascaras, `rotate()`, `translate()` (so na previa do arrastar), `sizes` e `url()`, todas de valores validados.
+- **`url()` nunca com texto do design.** O design guarda so caminhos; o endereco e `freeAssetUrl` = a origem do Supabase de `NEXT_PUBLIC_SUPABASE_URL` conferida uma vez (`freeStorageOrigin`: https, ou http so na propria maquina, sem usuario, senha, caminho, query ou fragmento, maquina so `[a-z0-9.-]`) + o caminho publico do bucket + um caminho que casou com o padrao do tipo. Um design colado, gerado por IA ou nao salvo nao abre `url()` para fora nem sai das aspas (teste com 14 origens maliciosas).
+- **Zod estrito no navegador, na Server Action e na leitura**; chave a mais recusa em qualquer nivel (inclusive `url` num arquivo e `devices`); Livre invalido no banco nao aparece para o aluno (log `[comunicacao] design livre invalido <id>`, nunca o conteudo). Regra das duas chaves de design conferida no servidor depois da juncao.
+- **Arquivos conferidos pelos bytes.** `uploadPopupFreeImage` (`messaging.write`) aceita so WebP de 16 a 1.600 px e ate 420.000 bytes (`communications/free/<24 hex>.webp`); ao salvar, todo caminho novo e conferido no Storage (existe, tamanho, primeiros 64 bytes WebP com as medidas, que substituem as do navegador; video pela conferencia do Personalizado); arquivo que a linha gravada ainda usa nunca e apagado.
+- **Contra pop-up que engana.** O X sempre existe, fora da prancheta e por cima de tudo, sempre visivel (alfa do icone >= `cc` e contraste >= 3:1 com o fundo dele: erro que impede salvar) e o `Esc` sempre fecha; elementos decorativos nao recebem clique; a prancheta corta o que passa dela; no maximo um botao "Abrir um link", com a regra do botao principal.
+- **Peso.** Ate 32 elementos, 6 imagens de 420 KB, 1 video, desfoque em ate 4 elementos e o teto do JSON; com menos movimento ou economia de dados o video nem e baixado; o cartao Livre so e baixado quando o pop-up armado e Livre.
+- **Copia de recuperacao do editor** (`localStorage` de quem edita): so o design e o `cta`, lida com o mesmo zod e apagada ao salvar.
+- **Auditoria.** `popup_design: "free"` em salvar/publicar/aprovar e `communication.free_image_uploaded` (`{ height, size_bytes, width }`); nunca o conteudo do design. **CSP** sem mudanca.
+
 ## Equipe e permissoes
 
 Desde 2026-10-15 o dono monta a equipe em Configuracoes > Equipe (`/admin/configuracoes/equipe`): funcoes prontas que se combinam, funcoes personalizadas e permissoes extras por pessoa. Tabela, regras e decisao de mercado em docs/17 §2.3.

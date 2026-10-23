@@ -7,6 +7,7 @@ import { NotificationCard } from "@/components/member/notifications/notification
 import { MemberFilterPills } from "@/components/member/ui/member-filters";
 import { cn } from "@/lib/utils";
 import type { PopupFontFace } from "@/server/communications/popup-design-model";
+import { resolveFreeArtboard } from "@/server/communications/popup-free-render";
 import { popupCloseCaption } from "@/server/communications/popup-sentences";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import { PillGroup } from "../form";
@@ -49,6 +50,8 @@ import {
 // Design do pop-up (docs/26): no Personalizado, o celular (375 px) e o computador aparecem juntos (lado a lado
 // quando cabe, um embaixo do outro na coluna estreita), os dois pelo MemberPopupCard (que desenha o
 // PopupDesignCard do aluno) com as fontes enviadas (`fonts`: a biblioteca no editor, as do design no relatorio).
+// Livre (docs/27): igual, pelo PopupFreeCard (o pedaco proprio do MemberPopupCard), com o computador do tamanho da
+// largura escolhida.
 // O computador tem 600 px: o cartao G (520 px) cabe no tamanho real.
 
 /** Tokens de :root que o admin sobrescreve e a area do aluno usa (os mesmos do PreviewFrame). */
@@ -177,7 +180,7 @@ type NoticePreviewProps = {
   className?: string;
   device: PreviewDevice;
   /** O aviso inteiro (pop-up usa o "Lembrar depois" e como fecha) ou so o conteudo de uma notificacao. */
-  draft: PreviewContent & Partial<Pick<NoticeDraft, "allowSnooze" | "design" | "popup" | "sender">>;
+  draft: PreviewContent & Partial<Pick<NoticeDraft, "allowSnooze" | "design" | "freeDesign" | "popup" | "sender">>;
   /** Design do pop-up: as fontes enviadas (o editor passa a biblioteca; o relatorio, as do design). */
   fonts?: readonly PopupFontFace[];
   /** Imagem recortada ainda subindo (data URL): a previa mostra antes do envio terminar. */
@@ -218,8 +221,12 @@ export function NoticePreview({ anchorExpiresAt, branding, className, device, dr
   const [pollPreview, setPollPreview] = useState<PreviewPoll>("before");
   const emptyTitle = !draft.title.trim();
 
-  if (draft.kind === "popup" && draft.design) {
+  if (draft.kind === "popup" && (draft.design || draft.freeDesign)) {
     const item = draftToPopupItem({ ...draft, allowSnooze: draft.allowSnooze ?? true }, { fonts, imageUrl });
+    // Livre (docs/27): o computador com espaco para a largura escolhida (ate 720 px) no tamanho real.
+    const desktopStage = draft.freeDesign
+      ? { ...DESIGN_DESKTOP_STAGE, width: Math.max(DESIGN_DESKTOP_STAGE.width, resolveFreeArtboard(draft.freeDesign).width + 64) }
+      : DESIGN_DESKTOP_STAGE;
     // O botao principal do design aparece na previa assim que tem texto (o destino ainda vazio do "Saiba mais"
     // do modelo nao some com ele; na previa o botao nunca leva a lugar nenhum).
     const label = draft.cta?.label.trim() ?? "";
@@ -229,9 +236,9 @@ export function NoticePreview({ anchorExpiresAt, branding, className, device, dr
         ariaLabel={`Prévia do pop-up no ${target === "mobile" ? "celular" : "computador"}`}
         device={target}
         note={note}
-        stage={target === "desktop" ? DESIGN_DESKTOP_STAGE : undefined}
+        stage={target === "desktop" ? desktopStage : undefined}
       >
-        <div className="relative grid place-items-center p-4" style={{ minHeight: (target === "desktop" ? DESIGN_DESKTOP_STAGE : STAGES.mobile).minHeight }}>
+        <div className="relative grid place-items-center p-4" style={{ minHeight: (target === "desktop" ? desktopStage : STAGES.mobile).minHeight }}>
           <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" />
           <div className="relative w-full">
             <div className="flex justify-center">
@@ -244,7 +251,7 @@ export function NoticePreview({ anchorExpiresAt, branding, className, device, dr
 
     return (
       <div className={cn("@container min-w-0", className)}>
-        <div className="grid min-w-0 items-start gap-4 @[52rem]:grid-cols-[minmax(0,375fr)_minmax(0,600fr)]">
+        <div className="grid min-w-0 items-start gap-4 @[52rem]:grid-cols-[minmax(0,375fr)_minmax(0,600fr)]" data-popup-design={draft.freeDesign ? "free" : "custom"}>
           {stage("mobile")}
           {stage("desktop", popupCloseCaption(draft.popup?.close ?? "any"))}
         </div>

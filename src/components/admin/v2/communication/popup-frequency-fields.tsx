@@ -46,7 +46,7 @@ export type PopupFrequencyLive = {
 
 type PopupFrequencyFieldsProps = {
   disabled: boolean;
-  draft: Pick<NoticeDraft, "allowSnooze" | "cta" | "popup" | "repeat" | "window"> & Partial<Pick<NoticeDraft, "design">>;
+  draft: Pick<NoticeDraft, "allowSnooze" | "cta" | "popup" | "repeat" | "window"> & Partial<Pick<NoticeDraft, "design" | "freeDesign">>;
   errorFor: (key: string) => string | undefined;
   live: PopupFrequencyLive | null;
   onChange: (patch: Partial<NoticeDraft>) => void;
@@ -213,7 +213,7 @@ function StopPills({
   onChange,
   value
 }: {
-  /** Design Personalizado: o aviso sem botao aponta para o card Design (nao para a chave do conteudo). */
+  /** Design Personalizado ou Livre: o aviso sem botao aponta para o card Design (nao para a chave do conteudo). */
   custom: boolean;
   disabled: boolean;
   noButton: boolean;
@@ -406,7 +406,7 @@ export function PopupFrequencyFields({ disabled, draft, errorFor, live, onChange
 
             <div className="flex min-w-0 flex-col gap-1.5">
               <span className={labelClass}>{copy.stopLabel}</span>
-              <StopPills custom={Boolean(draft.design)} disabled={disabled} noButton={noButton} onChange={(stopOn) => changeRepeat({ stopOn })} value={frequency.stopOn} />
+              <StopPills custom={Boolean(draft.design || draft.freeDesign)} disabled={disabled} noButton={noButton} onChange={(stopOn) => changeRepeat({ stopOn })} value={frequency.stopOn} />
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.stopHint[frequency.stopOn]}</p>
               <FieldError id="popup-para-error" message={errorFor("popup.frequency.stopOn")} />
             </div>

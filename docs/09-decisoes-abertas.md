@@ -314,6 +314,20 @@ Fora desta entrega: arrastar livre, enquete no pop-up (v3b-3), salvar design com
 
 Em aberto: se o produtor quer **modelos salvos** de design (o formato ja permite) e **arrastar livre** depois de usar as zonas.
 
+### Design Livre do pop-up (23/10/2026)
+
+Pedido do produtor depois do Personalizado: "criar o que eu quiser da forma que eu quiser", montando o pop-up do zero, elemento por elemento, como no Elementor. Detalhes em `docs/27`; sem migracao. Responde ao "arrastar livre" que estava em aberto acima.
+
+Decisoes tomadas com o produtor (23/10):
+
+- **terceira opcao Livre** no card Design; Padrao e Personalizado continuam iguais; o editor e de tela cheia (Elementos e Camadas, desenho com arrastar, alcas e guias, Conteudo / Estilo / Avancado, desfazer e refazer, Revisar);
+- **no celular o pop-up inteiro encolhe na mesma proporcao**, com texto nunca abaixo de 12 px e 44 px de toque (aceito pelo produtor); valores proprios do celular por elemento ficam para o PR L3, com lugar reservado nos dados;
+- o editor Livre **so abre em telas a partir de 1.024 px**; no celular e no tablet de pe, so a previa;
+- **copiar e colar o design** (para pedir mudancas ao Claude ou ChatGPT do produtor por fora) vem no proximo PR (L1.1); **"Criar com IA"** pela conta conectada no gateway vem depois (L2);
+- o design guarda so caminhos dos nossos buckets e o endereco e montado na hora pela origem conferida; o X sempre visivel e erro que impede salvar.
+
+Em aberto: qual conta conectada usar primeiro no "Criar com IA" (Claude ou Codex) e a confirmacao do produtor de que a imagem de referencia pode ir para a empresa da IA (pergunta 3 da spec; pode responder depois).
+
 ## Design
 
 ### Login

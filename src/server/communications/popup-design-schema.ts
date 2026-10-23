@@ -64,13 +64,13 @@ export const POPUP_DESIGN_MESSAGES = {
 
 const range = (min: number, max: number) => `Use de ${String(min).replace(".", ",")} a ${String(max).replace(".", ",")}.`;
 
-function intIn(bounds: { max: number; min: number }) {
+export function intIn(bounds: { max: number; min: number }) {
   const message = range(bounds.min, bounds.max);
 
   return z.number({ error: message }).int(message).min(bounds.min, message).max(bounds.max, message);
 }
 
-function numberIn(bounds: { max: number; min: number }) {
+export function numberIn(bounds: { max: number; min: number }) {
   const message = range(bounds.min, bounds.max);
 
   return z.number({ error: message }).min(bounds.min, message).max(bounds.max, message);
@@ -123,7 +123,7 @@ const cardBackgroundSchema = z.discriminatedUnion(
   { error: "Escolha uma cor, um degradê ou uma imagem." }
 );
 
-const fontRefSchema = z.discriminatedUnion(
+export const fontRefSchema = z.discriminatedUnion(
   "kind",
   [
     z.strictObject({ key: z.enum(POPUP_BUILTIN_FONT_KEYS, { error: POPUP_DESIGN_MESSAGES.font }), kind: z.literal("builtin") }),
@@ -132,7 +132,7 @@ const fontRefSchema = z.discriminatedUnion(
   { error: POPUP_DESIGN_MESSAGES.font }
 );
 
-const weightSchema = z.union(
+export const weightSchema = z.union(
   POPUP_FONT_WEIGHTS.map((weight) => z.literal(weight)),
   { error: "Escolha um peso da lista." }
 );
@@ -165,7 +165,7 @@ const buttonStyleSchema = z.strictObject({
 const blockIdSchema = z.string({ error: POPUP_DESIGN_MESSAGES.design }).regex(POPUP_BLOCK_ID_PATTERN, POPUP_DESIGN_MESSAGES.design);
 
 /** Link do segundo botao: a mesma regra do botao principal (pagina da area, produto ou https). */
-const linkHrefSchema = z
+export const linkHrefSchema = z
   .string({ error: "Escolha para onde o botão leva." })
   .trim()
   .superRefine((value, context) => {

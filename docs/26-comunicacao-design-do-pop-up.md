@@ -6,6 +6,8 @@ Data: 22/10/2026. Pedido do produtor, depois da v3b-1 (`docs/25`): montar o visu
 
 **Atualização (23/10/2026, link opcional).** O produtor quer o rodapé do cartão Personalizado limpo: em **Fechar e links** entrou a chave **Mostrar o link “Não mostrar de novo”** (ligada por padrão). Desligada, o link some; sem "Lembrar depois" também, o cartão não tem rodapé nenhum e termina logo depois do último bloco, com o respiro do cartão. A dica embaixo da chave desligada diz o custo (`Sem o link, o aluno só fecha no X. Num pop-up que repete sem parar, ele não tem como deixar de vê-lo.`). Só no Personalizado: o Padrão continua com o link sempre. Sem migração: `links.showDismiss` no JSON do design, sem a chave = `true` (§3.1, D34).
 
+**Atualização (23/10/2026, Livre).** O card **Design** ganhou a terceira opção, **Livre** (documento próprio: `docs/27`): um editor de tela cheia, no estilo do Elementor, para montar o pop-up do zero, elemento por elemento (soltos ou na sequência, um por cima do outro, com estilo em cada elemento). Padrão e Personalizado continuam exatamente como aqui (HTML comparado por teste); o Livre mora na mesma coluna `popup_design`, com `mode: "free"`, sem migração. A descrição do card passou a citar os três modos e a memória entre os modos vale para os três (§2.1). O "arrastar livre" que estava em "Fica de fora" é o Livre (§9).
+
 Este documento registra o **Design do pop-up**: no editor do pop-up, o card **Design** com **Padrão** (o visual de sempre, sem mudança nenhuma) ou **Personalizado** (o construtor). Vale para qualquer trabalho no visual do pop-up, no editor de avisos, nos envios de vídeo e de fonte ou no `MemberPopupCard`. Ele continua a v1 (`docs/22`), a v2 (`docs/23`), a v3a (`docs/24`) e a v3b-1 (`docs/25`); onde, quando, quantas vezes e como fecha continuam como no `docs/25`. Migração `202610230001_communication_popup_design.sql` (as `202610200001` … `202610220003`, já aplicadas, não mudam). Tabelas em `docs/05` (seção Design do pop-up), segurança em `docs/06` (seção Design do pop-up), desenho em `docs/12`, editor em `docs/17` §1.8.2, testes em `docs/18`. A notificação do sino **nunca** tem design.
 
 ---
@@ -90,11 +92,11 @@ O que mudou: o produtor escolhe **onde começa a escurecer** e **onde fica total
 
 ### 2.1 Card "Design"
 
-Logo depois do card do conteúdo, só no pop-up. Descrição: `Escolha o visual do pop-up. O Padrão é o de sempre; no Personalizado você monta mídia, textos, botões e cores.`
+Logo depois do card do conteúdo, só no pop-up. Descrição (desde o Livre, 23/10): `Escolha o visual do pop-up. O Padrão é o de sempre; no Personalizado você monta por seções; no Livre você monta do zero, elemento por elemento.`
 
-- Escolha (`name="popup-design"`): **Padrão** · `Imagem em cima, título, texto e botão, com as cores da área de membros.` | **Personalizado** · `Monte o seu: vídeo ou imagem com degradê, textos com fontes e cores, botões do seu jeito.`
+- Escolha (`name="popup-design"`, as três empilhadas): **Padrão** · `Imagem em cima, título, texto e botão, com as cores da área de membros.` | **Personalizado** · `Monte o seu: vídeo ou imagem com degradê, textos com fontes e cores, botões do seu jeito.` | **Livre** (`docs/27` §2.1).
 - Primeira vez em Personalizado: **Começar de um modelo** (`Escolha um modelo para começar. Depois, tudo pode ser mudado.`) com os três modelos e **Usar este modelo**. Sem botão no aviso, o modelo cria o botão `Saiba mais` com o destino vazio (o produtor escolhe para onde leva; salvar sem destino foca o campo). Com áudio, entra o bloco Áudio. O vídeo que já estava no design fica.
-- Voltar a **Padrão** guarda o design em memória; voltar a Personalizado devolve sem perguntar (coerente com o botão e o áudio do momento). **Trocar de modelo** confirma (`Trocar de modelo?` / `Os textos e as cores do design atual serão trocados pelos do modelo.` / `Trocar` / `Cancelar`).
+- Voltar a **Padrão** (ou ir para o **Livre**) guarda o design em memória; voltar a Personalizado devolve sem perguntar (coerente com o botão e o áudio do momento). **Trocar de modelo** confirma (`Trocar de modelo?` / `Os textos e as cores do design atual serão trocados pelos do modelo.` / `Trocar` / `Cancelar`).
 - No Personalizado, o card do conteúdo esconde **Texto**, **Ícone**, **Imagem** (vai para Mídia, com a descrição da imagem) e **Para onde leva** (vai para o bloco Botão principal); **Título** vira **Nome do pop-up** (`Aparece nas listas e nos relatórios. Para o aluno, vale o título do design.`); o bloco de mídia vira só **Áudio**. Texto e ícone ficam guardados: voltar a Padrão devolve tudo.
 
 ### 2.2 Seções (nesta ordem)
@@ -261,7 +263,7 @@ O zod nunca entra no pedaço do aluno (guarda). O terceiro arquivo da janela é 
 
 | Fora desta entrega | Onde está |
 |---|---|
-| Arrastar livre (posição x/y) | depois, se as zonas não bastarem |
+| Arrastar livre (posição x/y) | entrou como o modo **Livre** do card Design (`docs/27`, 23/10/2026) |
 | Enquete dentro do pop-up | v3b-3 |
 | Salvar um design como modelo reutilizável | depois (o design já é autocontido, D20) |
 | HTML ou CSS escrito pela equipe | nunca |

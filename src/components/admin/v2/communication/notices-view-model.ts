@@ -9,7 +9,9 @@
 // configuracao do pop-up (`popup`), "Mostrar de novo" em qualquer "Quantas vezes" (textos por como para de
 // aparecer), os toasts com o "até 1 minuto" e as linhas de aviso do pop-up no ar.
 // Design do pop-up (docs/26): o rascunho do pop-up leva `design` (null = Padrão), a forma canonica compara o
-// design canonico e a previa monta o PopupItem com o design e as fontes resolvidas.
+// design canonico e a previa monta o PopupItem com o design e as fontes resolvidas. Livre (docs/27): a chave
+// `freeDesign` ao lado (as duas sempre no pedido, no maximo uma nao nula), a forma canonica do Livre e a previa
+// pelo freePreviewPopupItem (o mesmo item do palco do editor).
 
 import {
   AUDIENCE_LIMITS,
@@ -79,6 +81,7 @@ import {
   type PopupStopOn
 } from "../../../../server/communications/popup-display-model";
 import { canonicalPopupDesign, type PopupFontFace } from "../../../../server/communications/popup-design-model";
+import { canonicalPopupFreeDesign, freePreviewPopupItem, type PopupFreeDesign } from "../../../../server/communications/popup-free-model";
 import { popupSettingsOfDraft } from "./popup-editor-model";
 
 /* ------------------------------------------------------------------------------------------------
@@ -965,8 +968,10 @@ export function noticeDraftForKind(draft: NoticeDraft): NoticeDraft {
     ...draft,
     allowHide: true,
     cta: draft.cta ? { ...draft.cta, display: "button" } : null,
-    // Design do pop-up (docs/26): null = Padrão (o rascunho sem a chave tambem).
+    // Design do pop-up (docs/26): null = Padrão (o rascunho sem a chave tambem). Livre (docs/27): as duas chaves
+    // sempre (uma aba antiga que so manda `design` troca o Livre gravado, spec §2.1).
     design: draft.design ?? null,
+    freeDesign: draft.freeDesign ?? null,
     poll: null,
     popup,
     reactions: false,
@@ -978,17 +983,27 @@ export function noticeDraftForKind(draft: NoticeDraft): NoticeDraft {
   };
 }
 
-/** O rascunho sem as chaves `popup` e `design` (a notificacao nunca leva; comparacoes canonicas ficam iguais). */
+/** O rascunho sem as chaves `popup`, `design` e `freeDesign` (a notificacao nunca leva; comparacoes canonicas ficam iguais). */
 function withoutPopupKey(draft: NoticeDraft): NoticeDraft {
-  if (!("popup" in draft) && !("design" in draft)) {
+  if (!("popup" in draft) && !("design" in draft) && !("freeDesign" in draft)) {
     return draft;
   }
 
   const rest = { ...draft };
   delete rest.popup;
   delete rest.design;
+  delete rest.freeDesign;
 
   return rest;
+}
+
+/** Livre na forma canonica (a do servidor); um design no meio da edicao que ela nao entende fica como esta. */
+function safeCanonicalFreeDesign(design: PopupFreeDesign): PopupFreeDesign {
+  try {
+    return canonicalPopupFreeDesign(design);
+  } catch {
+    return design;
+  }
 }
 
 function isoOrRaw(value: string) {
@@ -1006,8 +1021,15 @@ export function canonicalNoticeDraft(draft: NoticeDraft): NoticeDraft {
   const inbox = draft.kind === "inbox";
 
   return {
-    // Design do pop-up (docs/26): o design canonico (null = Padrão); a notificacao sem a chave.
-    ...(inbox ? {} : { design: draft.design ? canonicalPopupDesign(draft.design) : null, popup: canonicalPopupSettings(popupSettingsOfDraft(draft)) }),
+    // Design do pop-up (docs/26): o design canonico (null = Padrão); a notificacao sem a chave. Livre (docs/27):
+    // o Livre canonico ao lado.
+    ...(inbox
+      ? {}
+      : {
+          design: draft.design ? canonicalPopupDesign(draft.design) : null,
+          freeDesign: draft.freeDesign ? safeCanonicalFreeDesign(draft.freeDesign) : null,
+          popup: canonicalPopupSettings(popupSettingsOfDraft(draft))
+        }),
     // Ajustes da v3a: so o false desliga a lixeira do aluno (rascunho antigo sem a chave = pode excluir).
     allowHide: inbox ? draft.allowHide !== false : true,
     allowSnooze: inbox ? true : draft.allowSnooze,
@@ -1551,14 +1573,27 @@ export function draftToNotificationItem(
  * Pop-up como o aluno ve na primeira vez (o icone so quando escolhido, como a API manda). v3b-1: "Só no X"
  * leva `close` (sem a chave = fecha no X, no Esc ou clicando fora, como o show manda). Design do pop-up
  * (docs/26): no Personalizado, `design` e as fontes que ele usa (`fonts`: a biblioteca do editor ou as do
- * relatorio; fonte que falta cai na pilha do sistema), como o show manda.
+ * relatorio; fonte que falta cai na pilha do sistema), como o show manda. Livre (docs/27): o item do
+ * freePreviewPopupItem (o mesmo do palco do editor: titulo e texto do design, sem imagem nem icone).
  */
 export function draftToPopupItem(
-  draft: Pick<NoticeDraft, "allowSnooze" | "audio" | "body" | "cta" | "icon" | "image" | "title"> & Partial<Pick<NoticeDraft, "design" | "popup">>,
+  draft: Pick<NoticeDraft, "allowSnooze" | "audio" | "body" | "cta" | "icon" | "image" | "title"> & Partial<Pick<NoticeDraft, "design" | "freeDesign" | "popup">>,
   input: { fonts?: readonly PopupFontFace[]; imageUrl?: string | null } = {}
 ): PopupItem {
   const imageUrl = input.imageUrl ?? draft.image?.url ?? null;
   const design = draft.design ?? null;
+
+  if (draft.freeDesign) {
+    return freePreviewPopupItem({
+      allowSnooze: draft.allowSnooze,
+      audio: draft.audio,
+      close: draft.popup?.close === "x_only" ? "x_only" : "any",
+      cta: draft.cta,
+      design: draft.freeDesign,
+      fonts: input.fonts ?? [],
+      title: draft.title.trim() || PREVIEW_TITLE_PLACEHOLDER
+    });
+  }
 
   return {
     audio: draft.audio ? { ...draft.audio } : null,

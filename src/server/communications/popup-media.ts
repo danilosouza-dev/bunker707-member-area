@@ -205,16 +205,16 @@ export function newPopupVideoPath(mimeType: PopupVideoMimeType) {
   return `videos/${randomUUID()}.${VIDEO_EXTENSIONS[mimeType]}`;
 }
 
-function baseMimeType(value: unknown) {
+export function baseMimeType(value: unknown) {
   return typeof value === "string" ? value.split(";")[0].trim().toLowerCase() : "";
 }
 
-function isStorageNotFound(error: { message?: string; status?: unknown; statusCode?: unknown }) {
+export function isStorageNotFound(error: { message?: string; status?: unknown; statusCode?: unknown }) {
   return String(error.statusCode ?? "") === "404" || Number(error.status) === 404 || /not.?found/i.test(error.message ?? "");
 }
 
 /** Os primeiros `count` bytes de um endereco publico (pedido com Range; nunca le alem disso). */
-async function readFirstBytes(url: string, count: number): Promise<Uint8Array> {
+export async function readFirstBytes(url: string, count: number): Promise<Uint8Array> {
   if (!isHttpsOrLoopbackUrl(new URL(url))) {
     throw new Error("Comunicacao: o video nao esta num endereco publico seguro.");
   }

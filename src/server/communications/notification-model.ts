@@ -9,6 +9,7 @@ import { INBOX_HISTORY_DAYS } from "./campaign-model";
 import type { NotificationPoll, ReactionId } from "./interactions-model";
 import type { NoticeIconColor, NoticeIconId } from "./message-meta";
 import type { PopupDesign, PopupFontFace } from "./popup-design-model";
+import type { PopupFreeDesign } from "./popup-free-model";
 
 export type { NotificationPoll } from "./interactions-model";
 
@@ -105,9 +106,16 @@ export type PopupItem = {
   design?: PopupDesign;
   /**
    * Fontes enviadas que o design usa, resolvidas no servidor (o navegador nunca le a tabela). So vem junto com
-   * `design`; pode faltar uma fonte (o texto cai na pilha do sistema).
+   * `design` ou `freeDesign`; pode faltar uma fonte (o texto cai na pilha do sistema).
    */
   fonts?: PopupFontFace[];
+  /**
+   * Design "Livre" (docs/27), validado no servidor (popup-free-schema.ts), sem `locked` e `name` (so do editor).
+   * Nunca junto com `design`. No Livre, `title` e `body` vem do design (primeiro titulo e primeiro texto
+   * visiveis) e `image`/`icon` ficam nulos: uma aba com o codigo antigo mostra o cartao Padrão com o texto de
+   * verdade. Sem a chave = Padrão ou Personalizado (a resposta nao muda).
+   */
+  freeDesign?: PopupFreeDesign;
   /**
    * Icone ao lado do titulo. A API so manda a chave quando o pop-up tem icone: sem icone, a resposta do
    * resumo continua exatamente a da v1.
@@ -121,6 +129,11 @@ export type PopupItem = {
 /** Um pop-up do plano do aluno (sem conteudo: o conteudo so vem no POST /show). */
 export type PopupPlanItem = {
   delaySeconds: number;
+  /**
+   * So nos pop-ups Livres (docs/27): o host baixa o pedaco do cartao Livre antes do POST /show. Padrão e
+   * Personalizado: sem a chave (o plano nao muda).
+   */
+  design?: "free";
   /** Nunca nestas paginas (padroes exatos ja expandidos: formacao -> cursos). So pop-ups do segmento do aluno. */
   exclude: string[];
   id: string;
