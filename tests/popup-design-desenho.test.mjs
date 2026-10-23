@@ -784,3 +784,15 @@ const DEFAULT_CARD_V3B1 =
 
 const DEFAULT_PREVIEW_V3B1 =
   '<div class="relative w-[min(28rem,calc(100cqw-2rem))] overflow-hidden rounded-[16px] border border-white/10 bg-[#181818] text-white shadow-[0_24px_80px_rgba(0,0,0,0.7)]"><div class="@container"><div class="p-5 @min-[26rem]:p-6"><h2 class="text-xl font-bold leading-7 [overflow-wrap:anywhere] pr-10">Turma nova</h2><p class="mt-2 whitespace-pre-line text-sm leading-6 text-zinc-300 [overflow-wrap:anywhere]">A turma nova começa segunda.</p><div class="mt-5 flex flex-col gap-2"><div class="flex items-center gap-2"><span class="inline-flex shrink-0 select-none items-center justify-center gap-2 whitespace-nowrap rounded-[var(--member-button-radius)] font-semibold transition-[background-color,border-color,color,box-shadow,opacity] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:pointer-events-none disabled:opacity-45 aria-disabled:pointer-events-none aria-disabled:opacity-45 [&amp;_svg]:shrink-0 hover:bg-white/[0.07] hover:text-white h-9 px-3 text-[13px] [&amp;_svg]:size-4 -mr-3 ml-auto text-zinc-400">Não mostrar de novo</span></div></div></div></div><span aria-hidden="true" class="absolute right-3 top-3 z-10 grid size-9 place-items-center rounded-full bg-black/55 text-white backdrop-blur transition-[background-color,scale] duration-150 hover:bg-black/75 motion-reduce:transition-none before:absolute before:-inset-1 before:rounded-full before:content-[&#x27;&#x27;] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"><svg/></span></div>';
+
+test("cartao de cor semitransparente com 'Igual ao fundo do cartão': a mascara vale e a midia some no cartao translucido (D27)", () => {
+  const design = { ...starter(), card: { ...starter().card, background: { color: "#18181bcc", kind: "solid" } } };
+
+  assert.ok(styles.popupMediaBoxCss(design, false).maskImage, "mascara, nao camada opaca");
+  assert.equal(styles.popupFadeCss(design), null);
+
+  // Outra cor continua camada por cima, sem o alfa, como antes.
+  const other = withFade(design, { color: "#ffffff" });
+  assert.equal(styles.popupMediaBoxCss(other, false).maskImage, undefined);
+  assert.match(String(styles.popupFadeCss(other)?.background), /#ffffff/);
+});

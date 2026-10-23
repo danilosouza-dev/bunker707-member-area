@@ -1170,6 +1170,8 @@ export function popupDesignContrastHints(design: PopupDesign): PopupContrastHint
     }
   };
 
+  const card = cardColorsOf(design.card.background);
+
   design.blocks.forEach((block, index) => {
     const key = `blocks.${index}`;
 
@@ -1185,13 +1187,19 @@ export function popupDesignContrastHints(design: PopupDesign): PopupContrastHint
       add(key, block.id, worstRatio(colorsOf(block.style.paint), backdrop, cardBase), isLargeText(block.style.size, block.style.weight) ? 3 : 4.5);
     } else if (block.type === "button" || block.type === "button2") {
       const style = block.style;
-      const background = style.background.kind === "solid" && parseHex(style.background.color).a === 0 ? (backdrop ?? [cardBase]) : colorsOf(style.background);
+      const transparent = style.background.kind === "solid" && parseHex(style.background.color).a === 0;
+
+      // Botao sem fundo sobre a imagem do cartao (ou sobre a midia sem degrade): nada para medir; a cor de
+      // apoio nao e o que fica atras dele. Vale so a dica geral de "card.background".
+      if (transparent && !backdrop && !card) {
+        return;
+      }
+
+      const background = transparent ? (backdrop ?? [cardBase]) : colorsOf(style.background);
 
       add(key, block.id, worstRatio([style.textColor], background, cardBase), isLargeText(POPUP_BUTTON_METRICS[style.size].fontSize, style.weight) ? 3 : 4.5);
     }
   });
-
-  const card = cardColorsOf(design.card.background);
 
   if (card) {
     add("links", null, worstRatio([design.links.color], card, "#000000"), 4.5);

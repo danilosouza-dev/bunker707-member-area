@@ -22,8 +22,8 @@ const copy = POPUP_DESIGN_COPY.cardSection;
 type CardBackgroundFieldProps = {
   disabled: boolean;
   errorFor: (key: string) => string | undefined;
-  /** O fundo mais novo (o envio termina depois: o fundo pode ter mudado no meio). */
-  latest: () => PopupCardBackground;
+  /** O fundo mais novo (o envio termina depois: o fundo pode ter mudado no meio); null = voltou ao Padrão. */
+  latest: () => PopupCardBackground | null;
   /** A imagem subindo segura o salvar (a frase de espera) e solta no fim (null). */
   onBusyChange?: (reason: string | null) => void;
   onChange: (background: PopupCardBackground) => void;
@@ -60,7 +60,7 @@ export function CardBackgroundField({ disabled, errorFor, latest, onBusyChange, 
   function updateImage(patch: Partial<PopupCardImage>) {
     const current = latest();
 
-    if (current.kind === "image") {
+    if (current?.kind === "image") {
       onChange({ ...current, ...patch });
     }
   }

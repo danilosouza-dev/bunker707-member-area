@@ -24,7 +24,8 @@ type SectionProps = {
 type CardSectionProps = SectionProps & {
   hints: readonly PopupContrastHint[];
   /** O design mais novo (o envio da imagem do fundo termina depois). */
-  latestDesign: () => PopupDesign;
+  /** O design mais novo; null = o pop-up voltou ao Padrão (um envio que termina depois e descartado). */
+  latestDesign: () => PopupDesign | null;
   /** A imagem do fundo subindo segura o salvar. */
   onBusyChange?: (reason: string | null) => void;
 };
@@ -97,11 +98,14 @@ export function CardSection({ design, disabled, errorFor, hints, latestDesign, o
       <CardBackgroundField
         disabled={disabled}
         errorFor={errorFor}
-        latest={() => latestDesign().card.background}
+        latest={() => latestDesign()?.card.background ?? null}
         onBusyChange={onBusyChange}
         onChange={(background) => {
           const current = latestDesign();
-          onChange({ ...current, card: { ...current.card, background } });
+
+          if (current) {
+            onChange({ ...current, card: { ...current.card, background } });
+          }
         }}
         value={card.background}
       />

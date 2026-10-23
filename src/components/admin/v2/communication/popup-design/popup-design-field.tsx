@@ -304,7 +304,7 @@ export function PopupDesignField({
               disabled={disabled}
               errorFor={errorFor}
               hints={hints}
-              latestDesign={() => latestDesign() ?? design}
+              latestDesign={() => latest.current.design ?? null}
               onBusyChange={(reason) => reportBusy("background", reason)}
               onChange={updateDesign}
             />

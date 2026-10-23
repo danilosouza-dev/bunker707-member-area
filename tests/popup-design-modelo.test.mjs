@@ -623,3 +623,17 @@ test("contraste com imagem no fundo: uma dica que nao mede (conferir na previa);
   const overColor = { ...designSemEnd(), media: { ...designSemEnd().media, fade: { color: "#ffffff", enabled: true, end: 70, height: 35 } } };
   assert.ok(model.popupDesignContrastHints(overColor).some((hint) => hint.key.startsWith("blocks.0.lines")), "titulo branco sobre o degrade branco");
 });
+
+test("contraste: botao sem fundo sobre a imagem do cartao nao e medido (so a dica geral); com cor no cartao, continua medido", () => {
+  const design = { ...starter(), card: { ...starter().card, background: cardImage() } };
+  const ghost = structuredClone(design);
+  const index = ghost.blocks.findIndex((block) => block.type === "button");
+  ghost.blocks[index].style.background = { color: "#ffffff00", kind: "solid" };
+  ghost.blocks[index].style.textColor = "#ffffff";
+
+  assert.deepEqual(model.popupDesignContrastHints(ghost).map((hint) => hint.key), ["card.background"], "cor de apoio clara: nenhuma dica inventada no botao");
+
+  const solid = structuredClone(ghost);
+  solid.card.background = { color: "#ffffff", kind: "solid" };
+  assert.ok(model.popupDesignContrastHints(solid).some((hint) => hint.key === `blocks.${index}`), "texto branco num botao sem fundo sobre cartao branco: medido");
+});

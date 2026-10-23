@@ -140,7 +140,13 @@ export function MediaSection({ design, disabled, draft, errorFor, latest, onBusy
   useEffect(() => () => busyRef.current?.(null), []);
 
   function updateMedia(patch: Partial<PopupMedia>) {
-    const current = latest().design ?? design;
+    const current = latest().design;
+
+    // Voltou ao Padrão no meio do envio do video: o envio que termina depois nao reabre o Personalizado.
+    if (!current) {
+      return;
+    }
+
     onChange({ design: { ...current, media: { ...current.media, ...patch } } });
   }
 
