@@ -5,11 +5,18 @@
 // vivo em popup-sentences.ts; aqui so o que a tela precisa para montar os campos. Modulo puro (sem React,
 // imports relativos, sem enum): tests/pop-ups-v3b1-editor.test.mjs carrega direto pelo Node. Vocabulario
 // fechado da equipe (docs/17 §1.3): o teste confere os textos.
+//
+// v3b-2 (docs/29 §6.1): quatro momentos ("No primeiro acesso" com "Conta como primeiro acesso" e os produtos;
+// "Ao concluir um curso" com "De quais cursos"), textos por momento (dica, "Quanto tempo depois", "Começa"),
+// a trava do primeiro acesso no pop-up que ja foi ao ar e o erro "Escolha pelo menos um produto." dos produtos
+// do primeiro acesso (so o editor ve: no rascunho salvo, a lista vazia e "A primeira vez na área").
 
 import { FIXED_PAGE_KEYS, type FixedPageKey } from "../../../../server/member-area/page-visit-model";
 import {
   canonicalPatterns,
   defaultPopupSettings,
+  isLessonTrigger,
+  isPageTrigger,
   reconcilePopupFrequency,
   type PopupClose,
   type PopupFrequency,
@@ -29,9 +36,19 @@ import type { NoticeDraft } from "../../../../server/communications/schemas";
 export const POPUP_EDITOR_COPY = {
   placement: {
     contentDescription: "A página com a capa e a lista de aulas.",
+    courseExceptionsLabel: "Menos os cursos de alguns produtos",
+    courseFormationHint: "Numa formação, o pop-up aparece ao concluir cada curso dela.",
+    courseScopeAria: "De quais cursos",
+    courseScopeLabel: "De quais cursos",
+    courseScopeOptions: [
+      { label: "De qualquer curso", value: "any" },
+      { label: "Só destes produtos", value: "some" }
+    ],
     delayHint: {
+      course_completed: "Conta a partir de quando o curso fica concluído.",
+      first_login: "Conta a partir de quando a página abre.",
       lesson_completed: "Conta a partir de quando a aula fica concluída.",
-      page_load: "Conta a partir de quando a página abre."
+      page_load: "Conta a partir de quando a página abre (na hora marcada, a partir dessa hora)."
     },
     delayLabel: "Quanto tempo depois",
     delayOtherLabel: "Quantos segundos",
@@ -41,29 +58,56 @@ export const POPUP_EDITOR_COPY = {
     exceptionsDescription: "Ex.: em qualquer página, menos Perfil e Suporte.",
     exceptionsLabel: "Nunca mostrar em algumas páginas",
     exceptionsLegend: "Nunca nestas páginas",
+    firstAccessAria: "Conta como primeiro acesso",
+    firstAccessDelayNote: "Para quem acabou de comprar, pode levar até 15 minutos para valer: nesse caso, ele aparece na página seguinte que o aluno abrir.",
+    firstAccessHint: {
+      area: "Vale para quem ganhou a conta depois que o pop-up começou e para quem ainda não tinha entrado nenhuma vez. Quem já usava a área não vê.",
+      products:
+        "Vale para quem ganhou acesso a um destes produtos depois que o pop-up começou, mesmo que já usasse a área, e para quem tem acesso a um deles mas ainda não tinha entrado. Quem perde o acesso deixa de ver. Para um curso de uma formação, escolha a formação (o acesso vem por ela)."
+    },
+    firstAccessLabel: "Conta como primeiro acesso",
+    firstAccessLocked: "Num pop-up que já foi ao ar, “No primeiro acesso” não troca com os outros momentos. Para isso, duplique o pop-up.",
+    firstAccessOptions: [
+      { label: "A primeira vez na área", value: "area" },
+      { label: "A primeira vez com estes produtos", value: "products" }
+    ],
     formationHint: "Uma formação vale também para os cursos dela.",
     lessonDescription: "A página com o vídeo da aula.",
     lessonExceptionsLabel: "Menos as aulas de alguns produtos",
     lessonHint:
-      "Na aula, o pop-up só abre antes de o aluno dar o play: com um tempo longo em “Quanto tempo depois”, quase ninguém vê. No celular, nas aulas com vídeo do Bunny, do Vimeo ou do Mux, ele não abre ao abrir a página: para essas aulas, use “Ao concluir uma aula”.",
+      "Na aula, se o vídeo estiver tocando, o pop-up espera ele parar. Se o aluno assistir mais de 10 minutos sem parar, ele não aparece nessa visita. Em vídeo colado de outro site, ele só abre antes do play (no celular, não abre nessas aulas). No iPhone, nas aulas com vídeo do Bunny, ele às vezes não abre: ali o vídeo só responde à página depois do play.",
     lessonScopeAria: "De quais aulas",
     lessonScopeLabel: "De quais aulas",
-    note: "Um pop-up de cada vez: se dois tiverem que abrir juntos, o segundo espera o primeiro fechar. Na aula, nunca com o vídeo do nosso player tocando; nos vídeos do Bunny, do Vimeo e do Mux, só antes do play (no computador) ou depois do Concluir.",
+    note: "Um pop-up de cada vez: se dois tiverem que abrir juntos, o segundo espera o primeiro fechar. Na aula, nunca com o vídeo tocando: ele espera o vídeo parar. Quando a página não consegue saber se o vídeo toca (vídeo colado de outro site e, no iPhone, às vezes o do Bunny), ele só abre antes do play, e no celular não abre.",
     pagesLegend: "Páginas",
     productsEmpty: "Nenhum produto ainda. Crie um em Produtos.",
     productsUnavailable: "Não foi possível carregar a lista de produtos agora. Recarregue a página para escolher um produto.",
-    startsAtHint: "A partir dessa hora, quem abrir uma das páginas escolhidas vê o pop-up.",
+    startsAtHint: {
+      course_completed: "A partir dessa hora, quem concluir um curso vê o pop-up. Nada abre sozinho na hora marcada.",
+      first_login:
+        "A partir dessa hora, quem abrir uma das páginas escolhidas vê o pop-up, e quem já estiver numa delas vê na hora (com alguns segundos de diferença entre os alunos).",
+      lesson_completed: "A partir dessa hora, quem concluir uma aula vê o pop-up. Nada abre sozinho na hora marcada.",
+      page_load:
+        "A partir dessa hora, quem abrir uma das páginas escolhidas vê o pop-up, e quem já estiver numa delas vê na hora (com alguns segundos de diferença entre os alunos)."
+    },
+    /** Com "Começa" no futuro, nos momentos de pagina (a hora marcada ao vivo). */
+    startsAtLiveNote:
+      "Para um aviso de hora curta, marque também “Termina”: quem voltar para a aba depois disso não vê. Publique com antecedência: quem já estava com a área aberta antes de você publicar só vê ao abrir outra página ou voltar para a aba.",
     title: "Quando e onde aparece",
     triggerAria: "Quando o pop-up aparece",
     triggerHint: {
+      course_completed:
+        "Aparece na página da aula logo depois que o aluno conclui a última aula que faltava do curso (todas as aulas publicadas). Com o vídeo ainda tocando, espera ele parar.",
+      first_login: "Aparece só para aluno novo (ou para quem acabou de ganhar acesso aos produtos escolhidos), na primeira página escolhida que ele abrir.",
       lesson_completed:
-        "Aparece na página da aula logo depois que a aula fica concluída: no fim do vídeo (vídeo de arquivo e YouTube) ou quando o aluno toca em Concluir. Nos vídeos do Bunny, do Vimeo e do Mux, por enquanto, só quando ele toca em Concluir. Com o vídeo de arquivo ou do YouTube ainda tocando, espera ele parar. Se o aluno já começou outra aula, o pop-up espera a próxima aula concluída.",
-      page_load: "Abre pouco depois de o aluno abrir uma das páginas escolhidas."
+        "Aparece na página da aula logo depois que a aula fica concluída: no fim do vídeo ou quando o aluno toca em Concluir. Com o vídeo ainda tocando, espera ele parar. Se o aluno já começou outra aula, o pop-up espera a próxima aula concluída. Em vídeo colado de outro site, só quando o aluno toca em Concluir.",
+      page_load:
+        "Abre pouco depois de o aluno abrir uma das páginas escolhidas. Com “Começa: Em uma data”, também abre na hora marcada para quem já estiver numa dessas páginas."
     },
     triggerLabel: "Quando aparece",
     whereAria: "Onde o pop-up aparece",
     whereHint: {
-      any: "Em todas as páginas da área do aluno, também nas aulas (só antes do play). Nunca no login nem no Modo TV.",
+      any: "Em todas as páginas da área do aluno, também nas aulas (com o vídeo parado). Nunca no login nem no Modo TV.",
       home: "Na página inicial da área.",
       pages: "Marque as páginas onde ele pode aparecer."
     },
@@ -81,6 +125,9 @@ export const POPUP_EDITOR_COPY = {
     description: "Para cada aluno: quantas vezes aparece, o que faz parar e como ele fecha.",
     dismissLine: "“Não mostrar de novo” sempre vale: quem escolhe não vê mais este pop-up.",
     intervalDescription: {
+      course_completed: "Depois desse tempo, ele volta no próximo curso concluído.",
+      first_login:
+        "Depois desse tempo, ele volta na próxima vez que o aluno abrir uma das páginas escolhidas. Nunca abre sozinho no meio de uma página que o aluno já está vendo.",
       lesson_completed: "Depois desse tempo, ele volta na próxima aula concluída.",
       page_load:
         "Depois desse tempo, ele volta na próxima vez que o aluno abrir uma das páginas escolhidas. Nunca abre sozinho no meio de uma página que o aluno já está vendo."
@@ -130,7 +177,9 @@ export function popupSettingsOfDraft(draft: Pick<NoticeDraft, "popup" | "repeat"
 
 export const POPUP_TRIGGER_OPTIONS = [
   { label: "Ao abrir a página", value: "page_load" },
-  { label: "Ao concluir uma aula", value: "lesson_completed" }
+  { label: "Ao concluir uma aula", value: "lesson_completed" },
+  { label: "No primeiro acesso", value: "first_login" },
+  { label: "Ao concluir um curso", value: "course_completed" }
 ] as const satisfies readonly { label: string; value: PopupTrigger }[];
 
 function lessonPatterns(patterns: readonly string[]) {
@@ -139,10 +188,10 @@ function lessonPatterns(patterns: readonly string[]) {
 
 /**
  * "Nunca nestas páginas" so existe com "Em qualquer página" ou com "Qualquer produto" / "Qualquer aula"
- * marcados (ao concluir uma aula: com "De qualquer produto").
+ * marcados (ao concluir uma aula ou um curso: com "De qualquer produto" / "De qualquer curso").
  */
 export function canExclude(settings: Pick<PopupSettings, "pages" | "trigger">) {
-  if (settings.trigger === "lesson_completed") {
+  if (isLessonTrigger(settings.trigger)) {
     return settings.pages.includes("lesson:*");
   }
 
@@ -154,23 +203,61 @@ export function tidyPopupPlacement(settings: PopupSettings): PopupSettings {
   return canExclude(settings) || settings.exclude.length === 0 ? settings : { ...settings, exclude: [] };
 }
 
+/** A configuracao sem os produtos do primeiro acesso (a chave so existe em "No primeiro acesso"). */
+function withoutAccessProducts(settings: PopupSettings): PopupSettings {
+  const copy = { ...settings };
+  delete copy.accessProducts;
+
+  return copy;
+}
+
 /**
- * Trocar o momento: para "Ao concluir uma aula" ficam so as aulas das paginas (nenhuma -> qualquer aula) e
- * das excecoes; de volta para "Ao abrir a página", as aulas escolhidas viram "Páginas de aula". "Quanto
- * tempo depois" nunca muda sozinho.
+ * Trocar o momento: para um momento de conclusao ("Ao concluir uma aula", "Ao concluir um curso") ficam so as
+ * aulas das paginas (nenhuma -> qualquer aula) e das excecoes; de volta para um momento de pagina ("Ao abrir a
+ * página", "No primeiro acesso"), as aulas escolhidas viram "Páginas de aula". Entre dois momentos de pagina
+ * (ou dois de conclusao) as paginas ficam. Os produtos do primeiro acesso so existem em "No primeiro acesso"
+ * (sair apaga; entrar comeca em [], "A primeira vez na área"). "Quanto tempo depois" nunca muda sozinho.
  */
 export function settingsForTrigger(settings: PopupSettings, trigger: PopupTrigger): PopupSettings {
   if (trigger === settings.trigger) {
     return settings;
   }
 
-  if (trigger === "lesson_completed") {
-    const pages = lessonPatterns(settings.pages);
+  const base: PopupSettings = trigger === "first_login" ? { ...withoutAccessProducts(settings), accessProducts: [], trigger } : { ...withoutAccessProducts(settings), trigger };
 
-    return tidyPopupPlacement({ ...settings, exclude: lessonPatterns(settings.exclude), pages: pages.length > 0 ? pages : ["lesson:*"], trigger });
+  if (isLessonTrigger(trigger) === isLessonTrigger(settings.trigger)) {
+    return tidyPopupPlacement(base);
   }
 
-  return tidyPopupPlacement({ ...settings, exclude: lessonPatterns(settings.exclude), pages: lessonPatterns(settings.pages), trigger });
+  if (isLessonTrigger(trigger)) {
+    const pages = lessonPatterns(settings.pages);
+
+    return tidyPopupPlacement({ ...base, exclude: lessonPatterns(settings.exclude), pages: pages.length > 0 ? pages : ["lesson:*"] });
+  }
+
+  return tidyPopupPlacement({ ...base, exclude: lessonPatterns(settings.exclude), pages: lessonPatterns(settings.pages) });
+}
+
+/**
+ * Trava do primeiro acesso (docs/29 D8): num pop-up que ja foi ao ar (`sentAt` nao nulo), "No primeiro acesso"
+ * nao troca com os outros momentos. Devolve as pilulas desabilitadas: as outras tres quando o salvo e "No
+ * primeiro acesso"; senao, so ela. Nada no rascunho que nunca foi ao ar. O servidor recusa do mesmo jeito.
+ */
+export function lockedTriggersOf(input: { savedTrigger: PopupTrigger | null | undefined; sentAt: string | null | undefined }): PopupTrigger[] {
+  if (!input.sentAt || !input.savedTrigger) {
+    return [];
+  }
+
+  return input.savedTrigger === "first_login"
+    ? POPUP_TRIGGER_OPTIONS.map((option) => option.value).filter((value) => value !== "first_login")
+    : ["first_login"];
+}
+
+/** Ids escolhidos que nao estao mais na lista de produtos (o chip "Produto removido", que da para tirar). */
+export function removedProductIds(selected: readonly string[], products: readonly { id: string }[]): string[] {
+  const known = new Set(products.map((product) => product.id));
+
+  return selected.filter((id) => !known.has(id));
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -304,16 +391,29 @@ export function checklistLineProducts(checklist: PopupChecklist, kind: PopupChec
  * Estado da tela do card "Quando e onde aparece" (o que nao vira padrao)
  * ---------------------------------------------------------------------------------------------- */
 
+/** "Conta como primeiro acesso": a primeira vez na area ([] produtos) ou com os produtos escolhidos. */
+export type PopupFirstAccessChoice = "area" | "products";
+
 export type PopupPlacementUi = {
   /** "Onde aparece" (a lista com so o Inicio marcado continua em "Escolher páginas"). */
   choice: PopupPlacementChoice;
   /** A chave "Nunca mostrar em algumas páginas" (ou "Menos as aulas de alguns produtos") ligada. */
   exceptions: boolean;
+  /**
+   * v3b-2: "Conta como primeiro acesso" (so em "No primeiro acesso"). "products" com a lista vazia e so da
+   * tela: salvar pede "Escolha pelo menos um produto." (popupPlacementProblems).
+   */
+  firstAccess: PopupFirstAccessChoice;
   pending: { exclude: PopupChecklistPending; pages: PopupChecklistPending };
 };
 
-export function placementUiOf(settings: Pick<PopupSettings, "exclude" | "pages">): PopupPlacementUi {
-  return { choice: placementChoiceOf(settings), exceptions: settings.exclude.length > 0, pending: { exclude: NO_PENDING_LINES, pages: NO_PENDING_LINES } };
+export function placementUiOf(settings: Pick<PopupSettings, "accessProducts" | "exclude" | "pages">): PopupPlacementUi {
+  return {
+    choice: placementChoiceOf(settings),
+    exceptions: settings.exclude.length > 0,
+    firstAccess: (settings.accessProducts ?? []).length > 0 ? "products" : "area",
+    pending: { exclude: NO_PENDING_LINES, pages: NO_PENDING_LINES }
+  };
 }
 
 /** As excecoes saem com o lugar delas: a chave desliga e nada fica esperando produto. */
@@ -323,13 +423,15 @@ export function syncPlacementUi(ui: PopupPlacementUi, settings: PopupSettings): 
 
 /**
  * Os erros que so o editor ve (antes de existir padrao): "Escolha pelo menos um produto." numa linha de
- * produto marcada sem produto, nas paginas (`popup.pages`) ou nas excecoes (`popup.exclude`). O zod confere
- * o resto, com as mesmas chaves.
+ * produto marcada sem produto, nas paginas (`popup.pages`) ou nas excecoes (`popup.exclude`), e em "A
+ * primeira vez com estes produtos" sem produto (`popup.accessProducts`). O zod confere o resto, com as mesmas
+ * chaves.
  */
 export function popupPlacementProblems(settings: PopupSettings, ui: PopupPlacementUi): Record<string, string> {
   const problems: Record<string, string> = {};
-  const pagesShown = settings.trigger === "lesson_completed" || ui.choice === "pages";
-  const pending = settings.trigger === "lesson_completed" ? { content: false, lesson: ui.pending.pages.lesson } : ui.pending.pages;
+  const lesson = isLessonTrigger(settings.trigger);
+  const pagesShown = lesson || ui.choice === "pages";
+  const pending = lesson ? { content: false, lesson: ui.pending.pages.lesson } : ui.pending.pages;
 
   if (pagesShown && checklistProblem(checklistOf(settings.pages, pending))) {
     problems["popup.pages"] = CHOOSE_PRODUCT_MESSAGE;
@@ -339,11 +441,22 @@ export function popupPlacementProblems(settings: PopupSettings, ui: PopupPlaceme
     problems["popup.exclude"] = CHOOSE_PRODUCT_MESSAGE;
   }
 
+  if (settings.trigger === "first_login" && ui.firstAccess === "products" && (settings.accessProducts ?? []).length === 0) {
+    problems["popup.accessProducts"] = CHOOSE_PRODUCT_MESSAGE;
+  }
+
   return problems;
 }
 
+/** "Começa" no futuro num momento de pagina: a linha da hora marcada ao vivo (startsAtLiveNote). */
+export function showsStartsAtLiveNote(input: { now: number; startsAt: string | null; trigger: PopupTrigger }) {
+  const startsAt = input.startsAt === null ? Number.NaN : Date.parse(input.startsAt);
+
+  return isPageTrigger(input.trigger) && Number.isFinite(startsAt) && startsAt > input.now;
+}
+
 /* ------------------------------------------------------------------------------------------------
- * Ao concluir uma aula: de quais aulas
+ * Ao concluir uma aula (ou um curso): de quais aulas (ou cursos)
  * ---------------------------------------------------------------------------------------------- */
 
 export type PopupLessonScope = "any" | "some";
@@ -353,6 +466,7 @@ export const POPUP_LESSON_SCOPE_OPTIONS = [
   { label: "Só de aulas destes produtos", value: "some" }
 ] as const satisfies readonly { label: string; value: PopupLessonScope }[];
 
+/** "De quais aulas" e "De quais cursos": qualquer (lesson:*) ou so de alguns produtos (lesson:<id>). */
 export function lessonScopeOf(settings: Pick<PopupSettings, "pages">): PopupLessonScope {
   return settings.pages.includes("lesson:*") ? "any" : "some";
 }

@@ -154,7 +154,8 @@ test("revisao: o pop-up padrao fica exatamente como antes; onde, quando e o atra
     });
 
   assert.equal(revisao(config()), "Pop-up para 318 alunos, de 14/10/2026 às 09:00 a 21/10/2026 às 23:59, no máximo 1 vez.");
-  assert.deepEqual(frases.popupReviewParts(config(), nomes), { frequency: "no máximo 1 vez", placement: null });
+  // v3b-2: `audience` (o "para quem" do "No primeiro acesso") fica null nos outros momentos.
+  assert.deepEqual(frases.popupReviewParts(config(), nomes), { audience: null, frequency: "no máximo 1 vez", placement: null });
   assert.equal(
     revisao(config({ delaySeconds: 0, exclude: ["profile"], frequency: repetir({ everyMinutes: 120, maxPerDay: 3 }), pages: ["any"] }), { window: { endsAt: null, startsAt: null } }),
     "Pop-up para 318 alunos, em qualquer página, menos Perfil, logo ao abrir, a partir de agora, sem data para acabar, até 3 vezes por dia, com pelo menos 2 horas entre uma vez e outra, até o aluno clicar."

@@ -1,3 +1,5 @@
+// DUBLÊ: substituído pela frente S (spec §7)
+// (So o `accessProducts` e a mensagem do curso no popupSettingsSchema, spec §3.3; o integrador fica com o arquivo da frente S.)
 // Schemas zod dos avisos (Comunicacao > Avisos e pop-ups, docs/22; v2 em docs/23). O mesmo schema valida o
 // editor no navegador do admin e as Server Actions (docs/17 §2.3). Modulo puro: sem "server-only", imports
 // relativos; tests/comunicacao-segmentos.test.mjs, tests/comunicacao-avisos-modelo.test.mjs e
@@ -57,10 +59,13 @@ import {
   canonicalPopupSettings,
   defaultPopupSettings,
   placementCoversNothing,
+  isLessonTrigger,
   POPUP_CLOSE_MODES,
   POPUP_PAGE_PATTERN,
+  POPUP_PRODUCT_ID,
   POPUP_STOP_ON,
   POPUP_TRIGGERS,
+  POPUP_V3B2_RULES,
   type PopupSettings
 } from "./popup-display-model";
 
@@ -379,6 +384,8 @@ const PICK_FROM_LIST_MESSAGE = "Escolha páginas da lista.";
 export const POPUP_NO_BUTTON_STOP_MESSAGE = "Este pop-up não tem botão: escolha quando ele para de aparecer.";
 
 const popupPageSchema = z.string({ error: PICK_FROM_LIST_MESSAGE }).regex(POPUP_PAGE_PATTERN, PICK_FROM_LIST_MESSAGE);
+const PICK_PRODUCTS_MESSAGE = "Escolha produtos da lista.";
+const popupProductIdSchema = z.string({ error: PICK_PRODUCTS_MESSAGE }).regex(POPUP_PRODUCT_ID, PICK_PRODUCTS_MESSAGE);
 const intIn = (min: number, max: number, message: string) => z.number({ error: message }).int(message).min(min, message).max(max, message);
 
 export const popupFrequencySchema = z.discriminatedUnion(
@@ -415,13 +422,19 @@ function addPopupSettingsIssues(settings: PopupSettings, context: z.RefinementCt
     context.addIssue({ code: "custom", message: "Com essas exceções, o pop-up não aparece em nenhuma página.", path: ["exclude"] });
   }
 
-  if (settings.trigger === "lesson_completed" && pages.some((pattern) => !pattern.startsWith("lesson:"))) {
-    context.addIssue({ code: "custom", message: "Ao concluir uma aula vale só para páginas de aula.", path: ["pages"] });
+  if (isLessonTrigger(settings.trigger) && pages.some((pattern) => !pattern.startsWith("lesson:"))) {
+    context.addIssue({
+      code: "custom",
+      message: settings.trigger === "course_completed" ? "Ao concluir um curso vale só para páginas de aula." : "Ao concluir uma aula vale só para páginas de aula.",
+      path: ["pages"]
+    });
   }
 }
 
 export const popupSettingsSchema = z
   .object({
+    // So no primeiro acesso; nos outros momentos a forma canonica apaga (o editor nunca manda).
+    accessProducts: z.array(popupProductIdSchema).max(POPUP_V3B2_RULES.accessProductsMax, "Use até 20 produtos.").optional(),
     close: z.enum(POPUP_CLOSE_MODES, { error: "Escolha como o aluno fecha o pop-up." }).default("any"),
     delaySeconds: intIn(0, 600, "Use de 0 a 600 segundos.").default(3),
     exclude: z.array(popupPageSchema).max(20, "Use até 20 páginas.").default([]),

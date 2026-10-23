@@ -1,3 +1,7 @@
+// DUBLÊ: substituído pela frente S (spec §7)
+// (So as exportacoes da spec §3.2 que a frente R usa: os quatro momentos, isPageTrigger/isLessonTrigger,
+// accessProducts, POPUP_PRODUCT_ID, POPUP_V3B2_RULES, canonicalProductIds e canonicalPopupSettings; o
+// integrador fica com o arquivo da frente S inteiro.)
 // Pop-ups da v3b-1 "frequencia, paginas e como fechar" (docs/25): em quais paginas cada pop-up aparece e em
 // quais nunca, em que momento (ao abrir a pagina, ao concluir uma aula), quantas vezes para cada aluno, em
 // quanto tempo o "Lembrar depois" traz de volta e como fecha. As regras moram so aqui: o servidor (resumo,
@@ -9,14 +13,33 @@
 // Sem limite entre pop-ups (decisao do produtor, docs/24 §10.8): cada pop-up segue a propria frequencia; o
 // sistema so garante um de cada vez na tela. Pisos tecnicos invisiveis (POPUP_V3B1_RULES): o mesmo pop-up
 // nunca abre duas vezes em menos de 5 s para o mesmo aluno e o historico grava ate 100 aberturas por dia.
+//
+// v3b-2 (docs/29): dois momentos novos, "No primeiro acesso" (first_login, de pagina: quem e aluno novo e
+// decidido no recalculo do segmento, popup-first-access.ts) e "Ao concluir um curso" (course_completed, de
+// aula). A hora marcada ao vivo e o "Comeca" de sempre: o plano e o mapa levam os pop-ups que comecam nas
+// proximas 24 h (o plano com `startsAt`) e o show antes da hora responde not_started (409) a quem esta no
+// segmento.
 
 import { FIXED_PAGE_KEYS, FIXED_PAGE_PATHS } from "../member-area/page-visit-model";
 import type { PopupDeliveryState, PopupRepeat } from "./campaign-model";
 import type { PopupPlanItem } from "./notification-model";
 // Sem import de flow-model.ts nem de popup-sentences.ts (campaign-model -> este modulo nao pode virar ciclo).
 
-export const POPUP_TRIGGERS = ["page_load", "lesson_completed"] as const;
+export const POPUP_TRIGGERS = ["page_load", "lesson_completed", "first_login", "course_completed"] as const;
 export type PopupTrigger = (typeof POPUP_TRIGGERS)[number];
+/** Momentos que abrem pela pagina (o navegador arma ao abrir a pagina e na hora marcada). */
+export const POPUP_PAGE_TRIGGERS = ["page_load", "first_login"] as const satisfies readonly PopupTrigger[];
+/** Momentos que abrem pela conclusao, so em paginas de aula (check campaigns_popup_pages_v3b). */
+export const POPUP_LESSON_TRIGGERS = ["lesson_completed", "course_completed"] as const satisfies readonly PopupTrigger[];
+
+export function isPageTrigger(trigger: string): trigger is (typeof POPUP_PAGE_TRIGGERS)[number] {
+  return (POPUP_PAGE_TRIGGERS as readonly string[]).includes(trigger);
+}
+
+export function isLessonTrigger(trigger: string): trigger is (typeof POPUP_LESSON_TRIGGERS)[number] {
+  return (POPUP_LESSON_TRIGGERS as readonly string[]).includes(trigger);
+}
+
 export const POPUP_STOP_ON = ["click", "never"] as const;
 export type PopupStopOn = (typeof POPUP_STOP_ON)[number];
 export const POPUP_CLOSE_MODES = ["any", "x_only"] as const;
@@ -31,6 +54,12 @@ export type PopupFrequency =
   | { everyMinutes: number | null; maxPerDay: number | null; maxTotal: number | null; mode: "repeat"; stopOn: PopupStopOn };
 
 export type PopupSettings = {
+  /**
+   * So em "No primeiro acesso" (trigger first_login): [] = a primeira vez na area; ids = a primeira vez com
+   * estes produtos. Nos outros momentos a chave nao existe (forma canonica), entao configuracoes e modelos
+   * de antes continuam byte a byte.
+   */
+  accessProducts?: string[];
   close: PopupClose;
   delaySeconds: number;
   exclude: string[];
@@ -45,6 +74,8 @@ export type PopupSettings = {
 export const POPUP_PAGE_PATTERN = /^(any|home|purchases|saved|materials|journey|continue|profile|support|(?:content|lesson):(?:\*|[A-Za-z0-9_-]{1,240}))$/;
 /** Uma pagina de verdade (sem curingas). */
 export const POPUP_PAGE_KEY = /^(home|purchases|saved|materials|journey|continue|profile|support|(?:content|lesson):[A-Za-z0-9_-]{1,240})$/;
+/** Id de produto (o mesmo pedaco do POPUP_PAGE_KEY; o mesmo texto de communication_popup_products_ok). */
+export const POPUP_PRODUCT_ID = /^[A-Za-z0-9_-]{1,240}$/;
 
 export const POPUP_V3B1_RULES = {
   defaultDelaySeconds: 3,
@@ -58,6 +89,16 @@ export const POPUP_V3B1_RULES = {
   minGapMs: 5_000,
   publishedMax: 50,
   snoozeMinutes: { default: 1_440, max: 10_080, min: 5 }
+} as const;
+
+export const POPUP_V3B2_RULES = {
+  /** "A primeira vez com estes produtos": ate 20 produtos (check campaigns_popup_access_v3b2). */
+  accessProductsMax: 20,
+  /**
+   * O plano leva pop-ups que comecam ate 24 h depois, e o startsAt de quem comecou ate 24 h antes (a pagina
+   * aberta antes da hora ainda arma).
+   */
+  liveHorizonMs: 86_400_000
 } as const;
 
 export const POPUP_SETTINGS_DEFAULT: PopupSettings = {
@@ -337,6 +378,24 @@ export function frequencyOfColumns(row: PopupColumnsInput): PopupFrequency {
   };
 }
 
+/**
+ * Produtos do "No primeiro acesso": aparados, sem repeticao, em ordem de codigo, so os que passam em
+ * POPUP_PRODUCT_ID (o resto sai).
+ */
+export function canonicalProductIds(ids: readonly unknown[]): string[] {
+  const unique = new Set<string>();
+
+  for (const id of ids) {
+    const trimmed = typeof id === "string" ? id.trim() : "";
+
+    if (POPUP_PRODUCT_ID.test(trimmed)) {
+      unique.add(trimmed);
+    }
+  }
+
+  return [...unique].sort();
+}
+
 function patternsOf(value: unknown, fallback: readonly string[], allowAny: boolean) {
   if (!Array.isArray(value)) {
     return [...fallback];
@@ -461,11 +520,15 @@ export function popupFrequencyPatch(draft: { popup?: PopupSettings }, frequency:
   return { popup: { ...(draft.popup ?? defaultPopupSettings()), frequency }, repeat: repeatOfFrequency(frequency) };
 }
 
-/** Forma canonica (o editor compara mudancas nao salvas e draftToColumns grava): padroes em ordem, sem sobra. */
+/**
+ * Forma canonica (o editor compara mudancas nao salvas e draftToColumns grava): padroes em ordem, sem sobra.
+ * `accessProducts` so existe em first_login (canonicos); nos outros momentos a chave e apagada.
+ */
 export function canonicalPopupSettings(settings: PopupSettings): PopupSettings {
   const { frequency } = settings;
 
   return {
+    ...(settings.trigger === "first_login" ? { accessProducts: canonicalProductIds(settings.accessProducts ?? []) } : {}),
     close: settings.close,
     delaySeconds: settings.delaySeconds,
     exclude: canonicalPatterns(settings.exclude),

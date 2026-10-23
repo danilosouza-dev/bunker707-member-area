@@ -129,7 +129,8 @@ test("Nunca nestas páginas: so com Em qualquer página ou com Qualquer produto 
   const ui = { choice: "any", exceptions: true, pending: { exclude: { content: true, lesson: false }, pages: editor.NO_PENDING_LINES } };
   assert.deepEqual(editor.syncPlacementUi(ui, config({ pages: ["home"] })), { ...ui, exceptions: false, pending: { ...ui.pending, exclude: editor.NO_PENDING_LINES } });
   assert.equal(editor.syncPlacementUi(ui, comLugar), ui);
-  assert.deepEqual(editor.placementUiOf(comLugar), { choice: "any", exceptions: true, pending: { exclude: editor.NO_PENDING_LINES, pages: editor.NO_PENDING_LINES } });
+  // v3b-2: a escolha "Conta como primeiro acesso" tambem e estado da tela (sem produtos = a primeira vez na area).
+  assert.deepEqual(editor.placementUiOf(comLugar), { choice: "any", exceptions: true, firstAccess: "area", pending: { exclude: editor.NO_PENDING_LINES, pages: editor.NO_PENDING_LINES } });
   assert.equal(editor.placementUiOf(config()).exceptions, false);
 });
 
@@ -161,7 +162,8 @@ test("erros so do editor: linha de produto sem produto nas paginas (popup.pages)
  * ---------------------------------------------------------------------------------------------- */
 
 test("trocar o momento: ao concluir ficam so as aulas (nenhuma -> qualquer aula); de volta, as aulas viram Páginas de aula", () => {
-  assert.deepEqual(editor.POPUP_TRIGGER_OPTIONS.map((option) => option.label), ["Ao abrir a página", "Ao concluir uma aula"]);
+  // v3b-2: quatro momentos (os dois novos em tests/pop-ups-v3b2-editor.test.mjs).
+  assert.deepEqual(editor.POPUP_TRIGGER_OPTIONS.map((option) => option.label), ["Ao abrir a página", "Ao concluir uma aula", "No primeiro acesso", "Ao concluir um curso"]);
 
   const qualquer = config({ delaySeconds: 30, exclude: ["profile", "lesson:curso-x"], pages: ["any"] });
   const concluir = editor.settingsForTrigger(qualquer, "lesson_completed");
@@ -251,13 +253,27 @@ test("textos dos dois cards (docs/25 §2.2–§2.4)", () => {
   assert.equal(placement.description, "Em que momento e em quais páginas o pop-up abre.");
   assert.equal(frequency.title, "Quantas vezes e como fecha");
   assert.equal(frequency.description, "Para cada aluno: quantas vezes aparece, o que faz parar e como ele fecha.");
-  assert.equal(placement.whereHint.any, "Em todas as páginas da área do aluno, também nas aulas (só antes do play). Nunca no login nem no Modo TV.");
+  // v3b-2 (docs/29 D6): na aula, o pop-up espera o video parar em todo player que a pagina le.
+  assert.equal(placement.whereHint.any, "Em todas as páginas da área do aluno, também nas aulas (com o vídeo parado). Nunca no login nem no Modo TV.");
   assert.equal(placement.exceptionsLabel, "Nunca mostrar em algumas páginas");
   assert.equal(placement.exceptionsLegend, "Nunca nestas páginas");
-  assert.equal(placement.startsAtHint, "A partir dessa hora, quem abrir uma das páginas escolhidas vê o pop-up.");
+  // v3b-2 (docs/29 §6.1): a dica do "Começa" e por momento (a hora marcada ao vivo nos momentos de pagina).
+  assert.equal(
+    placement.startsAtHint.page_load,
+    "A partir dessa hora, quem abrir uma das páginas escolhidas vê o pop-up, e quem já estiver numa delas vê na hora (com alguns segundos de diferença entre os alunos)."
+  );
+  assert.equal(placement.startsAtHint.lesson_completed, "A partir dessa hora, quem concluir uma aula vê o pop-up. Nada abre sozinho na hora marcada.");
   assert.equal(
     placement.note,
-    "Um pop-up de cada vez: se dois tiverem que abrir juntos, o segundo espera o primeiro fechar. Na aula, nunca com o vídeo do nosso player tocando; nos vídeos do Bunny, do Vimeo e do Mux, só antes do play (no computador) ou depois do Concluir."
+    "Um pop-up de cada vez: se dois tiverem que abrir juntos, o segundo espera o primeiro fechar. Na aula, nunca com o vídeo tocando: ele espera o vídeo parar. Quando a página não consegue saber se o vídeo toca (vídeo colado de outro site e, no iPhone, às vezes o do Bunny), ele só abre antes do play, e no celular não abre."
+  );
+  assert.equal(
+    placement.lessonHint,
+    "Na aula, se o vídeo estiver tocando, o pop-up espera ele parar. Se o aluno assistir mais de 10 minutos sem parar, ele não aparece nessa visita. Em vídeo colado de outro site, ele só abre antes do play (no celular, não abre nessas aulas). No iPhone, nas aulas com vídeo do Bunny, ele às vezes não abre: ali o vídeo só responde à página depois do play."
+  );
+  assert.equal(
+    placement.triggerHint.lesson_completed,
+    "Aparece na página da aula logo depois que a aula fica concluída: no fim do vídeo ou quando o aluno toca em Concluir. Com o vídeo ainda tocando, espera ele parar. Se o aluno já começou outra aula, o pop-up espera a próxima aula concluída. Em vídeo colado de outro site, só quando o aluno toca em Concluir."
   );
   assert.equal(frequency.onceHint, "Aparece uma vez para cada aluno e para quando ele fecha, clica no botão ou escolhe “Não mostrar de novo”. Cada “Lembrar depois” vale mais uma vez.");
   assert.equal(frequency.stopNoButton, "Este pop-up não tem botão. Ligue “Levar o aluno a algum lugar” ou escolha outra opção.");

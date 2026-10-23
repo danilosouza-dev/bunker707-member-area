@@ -1,13 +1,14 @@
 "use client";
 
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Info } from "lucide-react";
 import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { isoToSaoPauloLocal, saoPauloLocalToIso } from "@/server/communications/campaign-model";
+import type { PopupTrigger } from "@/server/communications/popup-display-model";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import { PillGroup, adminInputClass } from "../form";
 import { defaultSendAt, defaultWindowEnd } from "./notices-view-model";
-import { POPUP_EDITOR_COPY } from "./popup-editor-model";
+import { POPUP_EDITOR_COPY, popupSettingsOfDraft, showsStartsAtLiveNote } from "./popup-editor-model";
 
 // "Quando" do aviso (docs/22 §2.2): notificacao sai agora ou numa data e hora de Sao Paulo. Datas nativas
 // (type="date"/"time") no tema escuro; a hora vale para Sao Paulo (UTC-3, como o resto do sistema).
@@ -15,13 +16,17 @@ import { POPUP_EDITOR_COPY } from "./popup-editor-model";
 // termina sem data ou numa data) e o PopupWindowFields do card "Quando e onde aparece"
 // (popup-placement-fields.tsx); "Quantas vezes", "Lembrar depois" e "Mostrar de novo para quem já viu"
 // foram para o card "Quantas vezes e como fecha" (popup-frequency-fields.tsx).
+// v3b-2 (docs/29 §6.1): a dica do "Começa" e por momento, e com "Começa" no futuro num momento de pagina vem
+// a linha da hora marcada ao vivo (marque também "Termina"; publique com antecedência).
 
-type WhenDraft = Pick<NoticeDraft, "kind" | "schedule" | "window">;
+type WhenDraft = Pick<NoticeDraft, "kind" | "popup" | "repeat" | "schedule" | "window">;
 
 type NoticeWhenFieldsProps = {
   disabled: boolean;
   draft: WhenDraft;
   errors: { endsAt?: string; sendAt?: string; startsAt?: string };
+  /** Hora da tela (o "Começa" no futuro do pop-up). */
+  now: number;
   onChange: (patch: Partial<WhenDraft>) => void;
 };
 
@@ -128,7 +133,7 @@ export function DateTimeField({ disabled, error, idPrefix, label, onChange, valu
   );
 }
 
-export function NoticeWhenFields({ disabled, draft, errors, onChange }: NoticeWhenFieldsProps) {
+export function NoticeWhenFields({ disabled, draft, errors, now, onChange }: NoticeWhenFieldsProps) {
   // Ultima data escolhida, para voltar a ela ao trocar de "agora" para "data".
   const remembered = useRef<{ sendAt?: string }>({});
 
@@ -138,7 +143,9 @@ export function NoticeWhenFields({ disabled, draft, errors, onChange }: NoticeWh
       <PopupWindowFields
         disabled={disabled}
         errors={{ endsAt: errors.endsAt, startsAt: errors.startsAt }}
+        now={now}
         onChange={(window) => onChange({ window })}
+        trigger={popupSettingsOfDraft(draft).trigger}
         window={draft.window}
       />
     );
@@ -186,15 +193,20 @@ export function NoticeWhenFields({ disabled, draft, errors, onChange }: NoticeWh
 type PopupWindowFieldsProps = {
   disabled: boolean;
   errors: { endsAt?: string; startsAt?: string };
+  /** Hora da tela: com "Começa" no futuro num momento de pagina, a linha da hora marcada ao vivo. */
+  now: number;
   onChange: (window: NoticeDraft["window"]) => void;
+  /** O momento do pop-up (a dica do "Começa" e por momento, docs/29 §6.1). */
+  trigger: PopupTrigger;
   window: NoticeDraft["window"];
 };
 
 /**
  * "Começa" e "Termina" do pop-up (a janela), no card "Quando e onde aparece" (v3b-1, docs/25 §2.3). Com
- * "Começa: Em uma data", a dica diz que a partir dessa hora quem abrir uma das paginas ve o pop-up.
+ * "Começa: Em uma data", a dica diz o que acontece a partir dessa hora naquele momento; no futuro e num
+ * momento de pagina, tambem a linha da hora marcada ao vivo (v3b-2).
  */
-export function PopupWindowFields({ disabled, errors, onChange, window }: PopupWindowFieldsProps) {
+export function PopupWindowFields({ disabled, errors, now, onChange, trigger, window }: PopupWindowFieldsProps) {
   // Ultima data escolhida em cada campo, para voltar a ela ao trocar de "sem data" para "data".
   const remembered = useRef<{ endsAt?: string; startsAt?: string }>({});
   const { endsAt, startsAt } = window;
@@ -232,7 +244,13 @@ export function PopupWindowFields({ disabled, errors, onChange, window }: PopupW
               onChange={(iso) => onChange({ endsAt, startsAt: iso })}
               value={startsAt}
             />
-            <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{POPUP_EDITOR_COPY.placement.startsAtHint}</p>
+            <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{POPUP_EDITOR_COPY.placement.startsAtHint[trigger]}</p>
+            {showsStartsAtLiveNote({ now, startsAt, trigger }) ? (
+              <p className="flex items-start gap-2 text-[13px] leading-5 text-[var(--text-secondary)]">
+                <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                <span className="min-w-0">{POPUP_EDITOR_COPY.placement.startsAtLiveNote}</span>
+              </p>
+            ) : null}
           </>
         ) : null}
       </div>

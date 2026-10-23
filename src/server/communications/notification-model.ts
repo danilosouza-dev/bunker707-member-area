@@ -1,3 +1,5 @@
+// DUBLÊ: substituído pela frente S (spec §7)
+// (So o `trigger` do PopupPlanItem com os quatro momentos, spec §3.2; o integrador fica com o arquivo da frente S.)
 // Sino do aluno (docs/22 §1.1 e §4.4; v2 em docs/23): contratos que a API devolve e o navegador desenha, e
 // regras puras das notificacoes automaticas de comentario. Modulo puro (sem "server-only", imports
 // relativos): as rotas /api/notifications, o painel do sino, a previa do admin e
@@ -142,7 +144,7 @@ export type PopupPlanItem = {
   pages: string[];
   /** O que faz parar: null = Uma vez; "click" = quando clica no botao; "never" = so quando o pop-up termina. */
   stopOn: "click" | "never" | null;
-  trigger: "lesson_completed" | "page_load";
+  trigger: "course_completed" | "first_login" | "lesson_completed" | "page_load";
 };
 
 export type PopupsAnswer = {

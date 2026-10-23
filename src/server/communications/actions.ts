@@ -1,5 +1,8 @@
 "use server";
 
+// DUBLÊ: substituído pela frente S (spec §7)
+// (So PublishedNotice.popup e o preenchimento em goLive, spec §4.7; o integrador fica com o arquivo da frente S.)
+
 // Server Actions de Comunicacao > Avisos e pop-ups (docs/22 §3; docs/17 §1.8 e D4). Toda acao passa
 // por runAdminAction (permissao + zod + ActionResult), confere a versao lida pela tela (updated_at ->
 // 409) e grava na auditoria (admin_audit_log, so ids e contagens). Permissoes:
@@ -130,7 +133,8 @@ import {
   popupSettingsOfRow,
   POPUP_V3B1_RULES,
   repeatOfFrequency,
-  type PopupFrequency
+  type PopupFrequency,
+  type PopupTrigger
 } from "./popup-display-model";
 import { assertPopupDesignFonts } from "./popup-fonts";
 import { parsePopupDesign, popupDesignContentProblems } from "./popup-design-schema";
@@ -218,6 +222,11 @@ export type SavedNotice = {
 export type PublishedNotice = {
   audienceCount: number;
   id: string;
+  /**
+   * v3b-2 (docs/29 §4.7): so no pop-up que foi para o ar (publicar e aprovar), para o toast do editor e do menu
+   * da lista: o Comeca no futuro e o momento. Notificacao e pedido de aprovacao: sem a chave.
+   */
+  popup?: { startsInFuture: boolean; trigger: PopupTrigger };
   /** Notificacao enviada agora: quantos alunos receberam. */
   recipients: number | null;
   situation: CampaignSituation;
@@ -578,6 +587,13 @@ function popupAuditOf(row: CampaignRow) {
   };
 }
 
+/** v3b-2: o que o toast do pop-up publicado precisa (o Comeca no futuro e o momento), da linha gravada. */
+function publishedPopupOf(row: CampaignRow, now: number): PublishedNotice["popup"] {
+  const startsAt = row.starts_at ? Date.parse(row.starts_at) : Number.NaN;
+
+  return { startsInFuture: Number.isFinite(startsAt) && startsAt > now, trigger: popupSettingsOfRow(row).trigger };
+}
+
 /**
  * v3b-1 (docs/25 D13): no maximo 50 pop-ups publicados ao mesmo tempo (no ar ou agendados, nao excluidos e sem
  * fim no passado), este fora da conta: o 51o e recusado (422) ao publicar, aprovar e retomar. Nunca limita o
@@ -696,7 +712,14 @@ async function goLive(input: {
 
   const latest = (await fetchCampaign(db, row.id)) ?? active;
 
-  return { audienceCount: input.count, id: row.id, recipients: null, situation: situationNow(latest, now.getTime()), updatedAt: latest.updated_at };
+  return {
+    audienceCount: input.count,
+    id: row.id,
+    popup: publishedPopupOf(latest, now.getTime()),
+    recipients: null,
+    situation: situationNow(latest, now.getTime()),
+    updatedAt: latest.updated_at
+  };
 }
 
 /* ------------------------------------------------------------------------------------------------

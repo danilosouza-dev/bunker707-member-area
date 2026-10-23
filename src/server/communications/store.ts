@@ -1,3 +1,5 @@
+// DUBLÊ: substituído pela frente S (spec §7)
+// (So PopupReportDbRow e fetchPopupReport, spec §3.2 e §4.8; o integrador fica com o arquivo da frente S.)
 import "server-only";
 
 // Leituras e escritas dos avisos (tabela campaigns), do sino (notifications) e do estado do pop-up por
@@ -803,6 +805,25 @@ export const EMPTY_CAMPAIGN_STATS: CampaignStats = {
 };
 
 const toNumber = (value: unknown) => (typeof value === "number" ? value : Number(value ?? 0)) || 0;
+
+/** Uma linha de communication_popup_report (202610260001). O modelo do relatorio confere metric e item. */
+export type PopupReportDbRow = { item: string; metric: string; students: number; total: number };
+
+/**
+ * Numeros do relatorio de um pop-up (RPC communication_popup_report, so service_role). bigint pode vir como
+ * texto (toNumber). Sem a migracao: o erro de esquema sobe (quem chama trata isMissingCommunicationSchema).
+ */
+export async function fetchPopupReport(db: CommunicationsDb, campaignId: string): Promise<PopupReportDbRow[]> {
+  const { data, error } = await db.rpc("communication_popup_report", { p_campaign_id: campaignId });
+  assertNoDbError(error, "Comunicacao: relatorio do pop-up");
+
+  return ((Array.isArray(data) ? data : []) as Record<string, unknown>[]).map((row) => ({
+    item: typeof row.item === "string" ? row.item : String(row.item ?? ""),
+    metric: typeof row.metric === "string" ? row.metric : String(row.metric ?? ""),
+    students: toNumber(row.students),
+    total: toNumber(row.total)
+  }));
+}
 
 export async function fetchCampaignStats(db: CommunicationsDb, ids: readonly string[]): Promise<Map<string, CampaignStats>> {
   const stats = new Map<string, CampaignStats>();
