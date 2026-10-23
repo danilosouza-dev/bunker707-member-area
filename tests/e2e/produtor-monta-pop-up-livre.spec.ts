@@ -100,6 +100,8 @@ async function corNoTrecho(page: Page, editor: Locator, idDoTitulo: string, inic
   await campo.fill(cor);
   await page.getByRole("button", { exact: true, name: "Fechar" }).filter({ visible: true }).last().click();
   await expect(campo).toBeHidden();
+  // Ao fechar, o foco volta para a area de texto (com o trecho marcado); so depois o passo seguinte mexe no foco.
+  await expect(area).toBeFocused();
 }
 
 /** Um campo de numero (Base UI): clica antes de preencher (senao o texto novo vai para o fim do que ja tinha). */
@@ -289,10 +291,14 @@ test.describe("produtor", () => {
       const antes = { h: await numeroDe(editor.locator(`#livre-${imagem}-altura`)), w: await numeroDe(editor.locator(`#livre-${imagem}-largura`)) };
       const alca = editor.locator("[data-free-handle='se']");
       const ponto = await caixa(alca);
+      // A alca fica perto do pe da tela: o ponteiro nao sai da janela (o WebKit nao entrega movimento fora dela). No
+      // canto com Shift vale o maior dos dois movimentos, entao o lado direito puxa a largura.
+      const janela = page.viewportSize() ?? { height: 900, width: 1440 };
+      const desce = Math.max(0, Math.min(60, janela.height - (ponto.y + ponto.height / 2) - 4));
       await page.keyboard.down("Shift");
       await page.mouse.move(ponto.x + ponto.width / 2, ponto.y + ponto.height / 2);
       await page.mouse.down();
-      await page.mouse.move(ponto.x + 60, ponto.y + 60, { steps: 6 });
+      await page.mouse.move(ponto.x + 60, ponto.y + ponto.height / 2 + desce, { steps: 6 });
       await page.mouse.up();
       await page.keyboard.up("Shift");
       const largura = editor.locator(`#livre-${imagem}-largura`);

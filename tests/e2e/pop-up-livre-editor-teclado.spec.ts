@@ -67,6 +67,7 @@ async function foco(page: Page) {
 
     return {
       emLugarNenhum: !element || element === document.body,
+      guarda: element?.hasAttribute("data-base-ui-focus-guard") ?? false,
       id: element?.id ?? "",
       layer: element?.hasAttribute("data-free-layer-select") ?? false,
       name: element?.getAttribute("aria-label") ?? element?.textContent?.trim() ?? "",
@@ -83,6 +84,9 @@ type Foco = Awaited<ReturnType<typeof foco>>;
 async function tabAte(page: Page, chegou: (atual: Foco) => boolean, opcoes: { max?: number; voltar?: boolean } = {}) {
   for (let passo = 0; passo < (opcoes.max ?? 60); passo += 1) {
     await page.keyboard.press(opcoes.voltar ? "Shift+Tab" : "Tab");
+    // Do ultimo para o primeiro (e o contrario), o Tab passa pela guarda do Dialog, que devolve o foco ao editor no
+    // quadro seguinte: espera esse quadro e confere onde o foco ficou.
+    await expect.poll(async () => (await foco(page)).guarda, "a guarda do Dialog devolve o foco ao editor").toBe(false);
     const atual = await foco(page);
     expect(atual.emLugarNenhum, "o foco nunca cai no vazio").toBe(false);
     expect(atual.noEditor, `o foco fica no editor (${atual.name || atual.id})`).toBe(true);
