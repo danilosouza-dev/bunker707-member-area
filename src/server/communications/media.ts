@@ -124,6 +124,11 @@ export async function persistNoticeAudio(input: { bytes: Uint8Array; mimeType: s
   const hash = createHash("sha256").update(input.bytes).digest("hex").slice(0, 24);
   const objectPath = `campaigns/${hash}.${format.extension}`;
   const storage = getSupabaseAdminClient().storage.from(NOTICE_AUDIO_BUCKET);
+
+  // O mesmo audio enviado de novo cai no mesmo caminho: antes de enviar, a marca da limpeza sai (o prazo recomeca) e
+  // uma remocao em andamento do mesmo caminho termina primeiro; so depois "ja existe" vale como enviado (docs/22 §4.6).
+  await forgetOrphanMark(getSupabaseAdminClient(), { bucket: NOTICE_AUDIO_BUCKET, path: objectPath });
+
   const upload = await storage.upload(objectPath, input.bytes, { cacheControl: "31536000", contentType: format.mimeType, upsert: false });
 
   if (upload.error && !/already exists|duplicate/i.test(upload.error.message)) {
@@ -135,9 +140,6 @@ export async function persistNoticeAudio(input: { bytes: Uint8Array; mimeType: s
   if (!isHttpsOrLoopbackUrl(new URL(url))) {
     throw new Error("Comunicacao: o audio nao ficou num endereco publico seguro.");
   }
-
-  // O mesmo audio enviado de novo cai no mesmo caminho: o prazo da limpeza recomeca (docs/22 §4.6).
-  await forgetOrphanMark(getSupabaseAdminClient(), { bucket: NOTICE_AUDIO_BUCKET, path: objectPath });
 
   return { mimeType: format.mimeType, url };
 }

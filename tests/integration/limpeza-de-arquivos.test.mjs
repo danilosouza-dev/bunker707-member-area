@@ -14,6 +14,10 @@ import { limparComunicacao, seedEscolaDeTeste, usuarioDeTeste } from "../fixture
 // - arquivo que volta a ser usado e desmarcado; enviado ha menos de 24 h nao e julgado;
 // - fonte excluida que um pop-up no ar ainda usa fica; a que ninguem usa sai depois dos 30 dias;
 // - o mesmo audio enviado de novo esquece a marca (o prazo recomeca);
+// - envio do mesmo audio ou da mesma fonte entre a reserva e a remocao (reserva, envio dos mesmos bytes, remocao):
+//   o envio espera a rodada terminar e grava de novo; no fim o arquivo esta no Storage e sem marca;
+// - reserva esquecida (rodada que caiu): o envio toma, a rodada seguinte solta e decide de novo; a reserva de uma
+//   rodada em andamento fica com ela;
 // - o job do tick trabalha uma vez no dia e grava so contagens em job_runs.
 // A rodada lista o Storage local inteiro: arquivos que outros testes deixaram sem uso ganham uma marca nova (nunca
 // vencida), e as marcas sao apagadas no fim. Precisa da migracao 202610240001 aplicada no banco local.
@@ -23,6 +27,7 @@ const contas = await seedEscolaDeTeste(db);
 const produtor = usuarioDeTeste(contas.produtor);
 const cleanup = await import("../../src/server/communications/media-cleanup.ts");
 const media = await import("../../src/server/communications/media.ts");
+const popupMedia = await import("../../src/server/communications/popup-media.ts");
 const custom = await import("../../src/server/communications/popup-design-model.ts");
 const { COMMUNICATION_MEDIA_JOB_NAME, communicationMediaJob } = await import("../../src/server/jobs/communication-media-job.ts");
 const { runJobsTick } = await import("../../src/server/jobs/run-tick.ts");
@@ -68,6 +73,90 @@ async function marcar({ bucket, path }, firstOrphanAt) {
     await db.from("communication_media_orphans").upsert({ bucket, first_orphan_at: firstOrphanAt, path }, { onConflict: "bucket,path" }),
     "Gravando a marca"
   );
+}
+
+async function reserva({ bucket, path }) {
+  const rows = unwrap(await db.from("communication_media_orphans").select("claimed_at").eq("bucket", bucket).eq("path", path), "Lendo a reserva");
+  return rows[0]?.claimed_at ?? null;
+}
+
+async function reservar({ bucket, path }, firstOrphanAt, claimedAt) {
+  unwrap(
+    await db.from("communication_media_orphans").upsert({ bucket, claimed_at: claimedAt, first_orphan_at: firstOrphanAt, path }, { onConflict: "bucket,path" }),
+    "Gravando a reserva"
+  );
+}
+
+const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const audioDeTeste = () => Buffer.concat([Buffer.from("ID3"), randomBytes(256)]);
+/** TTF minimo aceito por sniffPopupFont (00 01 00 00, uma tabela, diretorio inteiro), unico por chamada. */
+const fonteDeTeste = () => Buffer.concat([Buffer.from([0, 1, 0, 0, 0, 1, 0, 16, 0, 0, 0, 0]), randomBytes(16 + 64)]);
+
+/** Envia o audio pelo caminho do editor e devolve o arquivo (bucket e caminho). */
+async function audioDoEditor(bytes) {
+  const enviado = await media.persistNoticeAudio({ bytes, mimeType: "audio/mpeg" });
+  const path = new URL(enviado.url).pathname.split("/communication-audio/")[1];
+  const arquivo = { bucket: "communication-audio", path };
+  criados.set(`communication-audio/${path}`, arquivo);
+
+  return arquivo;
+}
+
+/**
+ * O banco da rodada com um gancho na remocao do Storage: `aoRemover` roda depois da reserva e antes de o Storage
+ * apagar (e onde o editor envia o mesmo arquivo de novo). O resto e o cliente local de verdade.
+ */
+function comGanchoNaRemocao(aoRemover) {
+  const storage = {
+    from(bucket) {
+      const api = db.storage.from(bucket);
+      return {
+        list: (...args) => api.list(...args),
+        async remove(paths) {
+          await aoRemover(bucket, paths);
+          return api.remove(paths);
+        }
+      };
+    }
+  };
+
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "storage") {
+        return storage;
+      }
+
+      const value = Reflect.get(target, property);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+}
+
+/**
+ * Reserva -> envio dos mesmos bytes -> remocao: `enviar` comeca quando a rodada ja reservou o arquivo e vai pedir a
+ * remocao; o Storage so apaga 1 s depois. Devolve o resultado da rodada e o do envio.
+ */
+async function rodadaComEnvioNoMeio(arquivo, enviar) {
+  let envio = null;
+  let enviado = false;
+  const rodadaDb = comGanchoNaRemocao(async (bucket, paths) => {
+    if (bucket !== arquivo.bucket || !paths.includes(arquivo.path)) {
+      return;
+    }
+
+    assert.notEqual(await reserva(arquivo), null, "reservado antes da remocao, e a linha ainda esta la");
+    envio = enviar().then((resultado) => {
+      enviado = true;
+      return resultado;
+    });
+    await esperar(1_000);
+    assert.equal(enviado, false, "o envio espera a remocao terminar");
+  });
+
+  const resultado = await cleanup.runMediaCleanup({ db: rodadaDb, now: AMANHA });
+  assert.ok(envio, "a rodada pediu a remocao do arquivo");
+
+  return { enviado: await envio, resultado };
 }
 
 async function aviso(campos) {
@@ -223,6 +312,66 @@ test("o mesmo audio enviado de novo esquece a marca (o prazo recomeca)", async (
   await marcar(arquivo, antesDeAmanha(40 * DIA));
   await media.persistNoticeAudio({ bytes, mimeType: "audio/mpeg" });
   assert.equal(await marca(arquivo), null);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Envio do mesmo arquivo durante a remocao (reserva antes de apagar)
+ * ---------------------------------------------------------------------------------------------- */
+
+test("o mesmo audio enviado entre a reserva e a remocao: o envio espera a rodada e o arquivo fica, sem marca", async () => {
+  const bytes = audioDeTeste();
+  const arquivo = await audioDoEditor(bytes);
+  await marcar(arquivo, antesDeAmanha(40 * DIA));
+
+  const { enviado, resultado } = await rodadaComEnvioNoMeio(arquivo, () => media.persistNoticeAudio({ bytes, mimeType: "audio/mpeg" }));
+
+  assert.ok(resultado.deleted >= 1, "a rodada apagou o arquivo antigo");
+  assert.ok(new URL(enviado.url).pathname.endsWith(`/communication-audio/${arquivo.path}`), "o editor recebeu o mesmo caminho");
+  assert.equal(await existe(arquivo), true, "o arquivo que o editor recebeu esta no Storage");
+  assert.equal(await marca(arquivo), null, "e sem marca");
+});
+
+test("a mesma fonte enviada de novo entre a reserva e a remocao: a fonte nova da biblioteca fica com o arquivo", async () => {
+  const bytes = fonteDeTeste();
+  const fonte = { name: "Fonte da limpeza", style: "normal", userId: produtor.id, weight: 400 };
+  const primeira = await popupMedia.persistPopupFont(db, { ...fonte, bytes });
+  const arquivo = { bucket: "communication-fonts", path: popupMedia.popupFontFilePath(bytes, popupMedia.sniffPopupFont(bytes)) };
+  criados.set(`communication-fonts/${arquivo.path}`, arquivo);
+  assert.equal(primeira.created, true);
+
+  unwrap(await db.from("communication_fonts").update({ deleted_at: new Date().toISOString() }).eq("id", primeira.font.id), "Excluindo a fonte");
+  await marcar(arquivo, antesDeAmanha(40 * DIA));
+
+  const { enviado, resultado } = await rodadaComEnvioNoMeio(arquivo, () => popupMedia.persistPopupFont(db, { ...fonte, bytes }));
+
+  assert.ok(resultado.deleted >= 1);
+  assert.equal(enviado.created, true, "linha nova na biblioteca");
+  const viva = unwrap(await db.from("communication_fonts").select("file_path").eq("id", enviado.font.id).is("deleted_at", null), "Lendo a fonte nova");
+  assert.deepEqual(viva.map((linha) => linha.file_path), [arquivo.path]);
+  assert.equal(await existe(arquivo), true, "o arquivo da fonte nova esta no Storage");
+  assert.equal(await marca(arquivo), null);
+});
+
+test("reserva esquecida: o envio toma; a rodada seguinte solta e decide de novo; a de uma rodada em andamento fica", async () => {
+  const vinteMinutos = () => new Date(Date.now() - 20 * 60_000).toISOString();
+
+  const bytes = audioDeTeste();
+  const tomado = await audioDoEditor(bytes);
+  await reservar(tomado, antesDeAmanha(40 * DIA), vinteMinutos());
+  await media.persistNoticeAudio({ bytes, mimeType: "audio/mpeg" });
+  assert.equal(await marca(tomado), null, "o envio tomou a reserva esquecida");
+  assert.equal(await existe(tomado), true);
+
+  const [esquecido, emAndamento] = await Promise.all([enviarAudio(), enviarAudio()]);
+  await reservar(esquecido, antesDeAmanha(40 * DIA), vinteMinutos());
+  await reservar(emAndamento, antesDeAmanha(40 * DIA), new Date().toISOString());
+
+  const resultado = await rodada();
+  assert.ok(resultado.released >= 1, JSON.stringify(resultado));
+  assert.equal(await existe(esquecido), false, "solta, vencida e sem uso: saiu do Storage");
+  assert.equal(await marca(esquecido), null);
+  assert.equal(await existe(emAndamento), true, "a reserva de outra rodada fica com ela");
+  assert.notEqual(await reserva(emAndamento), null);
 });
 
 test("o job do tick trabalha uma vez no dia e grava so contagens em job_runs", async () => {

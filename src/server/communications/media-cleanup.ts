@@ -7,11 +7,15 @@ import "server-only";
 //    Personalizado ou Livre), fontes da biblioteca (e a excluida que um aviso ou modelo ainda cita), modelos
 //    (loadTemplateMediaUse) e notificacoes de tipo que guarda arquivo (nenhum hoje);
 // 4. planeja (media-cleanup-model.ts), marca o que ficou sem uso, desmarca o que voltou a ser usado;
-// 5. para os vencidos (30 dias sem uso, ate 500): junta o uso DE NOVO, reserva a marca de forma atomica (apaga a
-//    linha so se ela ainda e antiga) e so entao apaga do Storage. Falha no Storage devolve a marca.
+// 5. para os vencidos (30 dias sem uso, ate 500): junta o uso DE NOVO, reserva a marca de forma atomica (grava
+//    claimed_at so se ela ainda e antiga e livre), apaga do Storage e SO ENTAO tira a linha. Falha no Storage solta a
+//    reserva (a marca fica, com a data antiga).
+// Quem envia de novo o mesmo arquivo (forgetOrphanMark, ANTES de enviar) apaga a marca livre ou espera a linha
+// reservada sair: um envio nunca acontece entre a reserva e a remocao, entao nada que o editor acabou de receber
+// some (docs/22 §4.6). Reserva esquecida ha 15 min (rodada que caiu) e solta no comeco da rodada seguinte.
 // Idempotente e retomavel: repetir a rodada nao muda nada que a anterior ja fez. Registra so contagens.
 
-import { assertNoDbError, chunksOf, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
+import { assertNoDbError, chunksOf, CommunicationError, isMissingCommunicationSchema, type CommunicationsDb } from "./db";
 import {
   CAMPAIGN_MEDIA_COLUMNS,
   campaignMediaRefs,
@@ -28,16 +32,21 @@ import {
   type TemplateMediaUse
 } from "./media-refs";
 import {
+  claimStaleCutoff,
   groupByBucket,
   MEDIA_CLEANUP_RULES,
   mediaLocationKey,
   orphanDueCutoff,
+  orphanMarkUploadStep,
   planMediaCleanup,
   type ListedMedia,
   type OrphanMark
 } from "./media-cleanup-model";
 
 export const MEDIA_ORPHANS_TABLE = "communication_media_orphans";
+
+/** O envio do mesmo arquivo chegou durante a remocao e ela nao terminou a tempo (409). */
+export const MEDIA_BUSY_MESSAGE = "Este arquivo está saindo do armazenamento agora. Envie de novo em alguns minutos.";
 
 const CAMPAIGN_PAGE = 200;
 const ROW_PAGE = 1_000;
@@ -60,6 +69,8 @@ export type MediaCleanupResult = {
   pendingMigration: boolean;
   recent: number;
   referenced: number;
+  /** Reservas esquecidas (rodada que caiu entre reservar e terminar) soltas no comeco. */
+  released: number;
   remaining: number;
   unmarked: number;
   waiting: number;
@@ -77,6 +88,7 @@ function emptyResult(): MediaCleanupResult {
     pendingMigration: false,
     recent: 0,
     referenced: 0,
+    released: 0,
     remaining: 0,
     rescued: 0,
     unmarked: 0,
@@ -224,20 +236,35 @@ async function listLocation(db: CommunicationsDb, location: MediaLocation, signa
   return { complete: false, objects };
 }
 
+/**
+ * Solta as reservas esquecidas (claimStaleMinutes): uma rodada que caiu entre reservar e terminar. A linha volta
+ * livre com a data antiga e esta rodada decide de novo (sumiu do Storage: sai; ainda la e sem uso: reserva de novo).
+ */
+async function releaseStaleClaims(db: CommunicationsDb): Promise<number> {
+  const { data, error } = await db
+    .from(MEDIA_ORPHANS_TABLE)
+    .update({ claimed_at: null })
+    .lt("claimed_at", claimStaleCutoff(new Date()).toISOString())
+    .select("path");
+  assertNoDbError(error, "Comunicacao: soltar reservas esquecidas da limpeza");
+
+  return (data ?? []).length;
+}
+
 async function loadMarks(db: CommunicationsDb): Promise<OrphanMark[]> {
   const marks: OrphanMark[] = [];
 
   for (let from = 0; ; from += ROW_PAGE) {
     const { data, error } = await db
       .from(MEDIA_ORPHANS_TABLE)
-      .select("bucket,path,first_orphan_at")
+      .select("bucket,path,first_orphan_at,claimed_at")
       .order("bucket")
       .order("path")
       .range(from, from + ROW_PAGE - 1);
     assertNoDbError(error, "Comunicacao: arquivos marcados sem uso");
 
-    const rows = (data ?? []) as { bucket: string; first_orphan_at: string; path: string }[];
-    rows.forEach((row) => marks.push({ bucket: row.bucket, firstOrphanAt: row.first_orphan_at, path: row.path }));
+    const rows = (data ?? []) as { bucket: string; claimed_at: string | null; first_orphan_at: string; path: string }[];
+    rows.forEach((row) => marks.push({ bucket: row.bucket, claimedAt: row.claimed_at ?? null, firstOrphanAt: row.first_orphan_at, path: row.path }));
 
     if (rows.length < ROW_PAGE) {
       return marks;
@@ -252,33 +279,103 @@ async function insertMarks(db: CommunicationsDb, rows: readonly { bucket: string
   }
 }
 
+/** Desmarca (voltou a ser usado, sumiu, nao e nosso). So a linha livre: a reservada e da rodada que esta apagando. */
 async function deleteMarks(db: CommunicationsDb, refs: readonly MediaRef[]) {
   for (const [bucket, group] of groupByBucket(refs)) {
     for (const part of chunksOf(group, PATH_CHUNK)) {
-      const { error } = await db.from(MEDIA_ORPHANS_TABLE).delete().eq("bucket", bucket).in("path", part.map((ref) => ref.path));
+      const { error } = await db
+        .from(MEDIA_ORPHANS_TABLE)
+        .delete()
+        .eq("bucket", bucket)
+        .in("path", part.map((ref) => ref.path))
+        .is("claimed_at", null);
       assertNoDbError(error, "Comunicacao: desmarcar arquivos");
     }
   }
 }
 
+/** Fim da reserva `claimToken`: a linha sai (apagou do Storage) ou volta livre com a data antiga (nao apagou). */
+async function endClaims(db: CommunicationsDb, bucket: string, paths: readonly string[], claimToken: string, removed: boolean) {
+  const table = db.from(MEDIA_ORPHANS_TABLE);
+  const query = removed ? table.delete() : table.update({ claimed_at: null });
+  const { error } = await query.eq("bucket", bucket).in("path", [...paths]).eq("claimed_at", claimToken);
+  assertNoDbError(error, removed ? "Comunicacao: tirar as marcas dos arquivos apagados" : "Comunicacao: soltar a reserva dos arquivos");
+}
+
+const sleepFor = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /**
- * Esquece a marca de um arquivo enviado de novo (o nome dos audios, das imagens e das fontes vem do conteudo: o
- * mesmo arquivo cai no mesmo caminho). A proxima rodada marca de novo, com a hora dela, se ainda estiver sem uso:
- * os 30 dias recomecam e o arquivo nao some enquanto o aviso ainda nao foi salvo. Nunca falha o envio.
+ * Chamar ANTES de enviar um arquivo com nome pelo conteudo (audios, imagens e fontes: o mesmo arquivo cai no mesmo
+ * caminho, e "ja existe" vale como enviado). Tira a marca da limpeza para o prazo de 30 dias recomecar e garante que
+ * nenhuma remocao do mesmo caminho esteja em andamento quando o envio acontecer (docs/22 §4.6):
+ * - marca livre: apaga (so se ainda livre). Depois disso a rodada nao tem o que reservar, e marca nova so vence em
+ *   30 dias;
+ * - marca reservada: a rodada esta apagando do Storage e so tira a linha depois. Espera a linha sair (ou voltar
+ *   livre, quando a remocao falhou) e confere de novo; o envio que vem depois grava o arquivo outra vez. Passou de
+ *   `uploadWaitMs`: 409 (MEDIA_BUSY_MESSAGE), nada enviado;
+ * - reserva esquecida (15 min, rodada que caiu): apaga a mesma reserva lida;
+ * - sem marca: segue.
+ * Banco sem a migracao: segue (sem a tabela, a limpeza nao roda). Outro erro do banco falha o envio: sem conferir,
+ * o arquivo podia sair logo depois de enviado.
  */
-export async function forgetOrphanMark(db: CommunicationsDb, ref: MediaRef | null) {
+export async function forgetOrphanMark(
+  db: CommunicationsDb,
+  ref: MediaRef | null,
+  options: { pollMs?: number; sleep?: (ms: number) => Promise<void>; waitMs?: number } = {}
+): Promise<void> {
   if (!ref || !mediaLocationOf(ref)) {
     return;
   }
 
-  try {
-    const { error } = await db.from(MEDIA_ORPHANS_TABLE).delete().eq("bucket", ref.bucket).eq("path", ref.path);
-
-    if (error && !isMissingCommunicationSchema(error)) {
-      console.error(`[comunicacao] marca de arquivo sem uso nao apagada no envio: ${error.message}`);
+  const sleep = options.sleep ?? sleepFor;
+  const pollMs = options.pollMs ?? MEDIA_CLEANUP_RULES.uploadPollMs;
+  const deadline = Date.now() + (options.waitMs ?? MEDIA_CLEANUP_RULES.uploadWaitMs);
+  /** Sem a tabela (ou a coluna): a limpeza nao roda, o envio segue. Outro erro: falha o envio. */
+  const pendingMigrationOrThrow = (error: { code?: string | null; message: string }) => {
+    if (isMissingCommunicationSchema(error)) {
+      return true;
     }
-  } catch (error) {
-    console.error("[comunicacao] marca de arquivo sem uso nao apagada no envio.", error instanceof Error ? error.message : error);
+
+    throw new Error(`Comunicacao: marca de arquivo sem uso nao conferida antes do envio: ${error.message}`);
+  };
+
+  for (;;) {
+    const { data, error } = await db.from(MEDIA_ORPHANS_TABLE).select("claimed_at").eq("bucket", ref.bucket).eq("path", ref.path).limit(1);
+
+    if (error && pendingMigrationOrThrow(error)) {
+      return;
+    }
+
+    const rows = (data ?? []) as { claimed_at: string | null }[];
+    const claimedAt = rows.length > 0 ? (rows[0].claimed_at ?? null) : null;
+    const step = orphanMarkUploadStep(rows.length > 0 ? { claimedAt } : null, new Date());
+
+    if (step === "proceed") {
+      return;
+    }
+
+    if (step === "delete_free" || step === "take_stale") {
+      const base = db.from(MEDIA_ORPHANS_TABLE).delete().eq("bucket", ref.bucket).eq("path", ref.path);
+      const guarded = claimedAt === null ? base.is("claimed_at", null) : base.eq("claimed_at", claimedAt);
+      const { data: gone, error: deleteError } = await guarded.select("path");
+
+      if (deleteError && pendingMigrationOrThrow(deleteError)) {
+        return;
+      }
+
+      if ((gone ?? []).length > 0) {
+        return;
+      }
+
+      // A linha mudou entre as duas consultas (a rodada reservou agora): le de novo.
+      continue;
+    }
+
+    if (Date.now() >= deadline) {
+      throw new CommunicationError(MEDIA_BUSY_MESSAGE, 409);
+    }
+
+    await sleep(pollMs);
   }
 }
 
@@ -306,6 +403,7 @@ export async function runMediaCleanup(input: {
   let marks: OrphanMark[];
 
   try {
+    result.released = await releaseStaleClaims(db);
     marks = await loadMarks(db);
   } catch (error) {
     if (isMissingCommunicationSchema(error)) {
@@ -369,35 +467,48 @@ export async function runMediaCleanup(input: {
         continue;
       }
 
-      // Reserva atomica: so sai a linha que ainda e antiga (um envio de novo, que apaga a marca, ganha).
+      // Reserva atomica: so a linha ainda antiga e livre ganha claimed_at. Um envio do mesmo arquivo que chegou antes
+      // apagou a linha livre (nada a reservar); um que chega depois ve a reserva e espera a linha sair.
+      const claimedAt = Date.now();
+      const claimToken = new Date(claimedAt).toISOString();
       const { data: claimedRows, error: claimError } = await db
         .from(MEDIA_ORPHANS_TABLE)
-        .delete()
+        .update({ claimed_at: claimToken })
         .eq("bucket", bucket)
         .in("path", part.map((row) => row.path))
         .lte("first_orphan_at", cutoff)
-        .select("bucket,path,first_orphan_at");
+        .is("claimed_at", null)
+        .select("path");
       assertNoDbError(claimError, "Comunicacao: reservar arquivos vencidos");
 
-      const claimed = (claimedRows ?? []) as { bucket: string; first_orphan_at: string; path: string }[];
+      const claimed = ((claimedRows ?? []) as { path: string }[]).map((row) => row.path);
 
       if (claimed.length === 0) {
         continue;
       }
 
-      const removal = await db.storage.from(bucket).remove(claimed.map((row) => row.path));
+      // So pede a remocao logo depois de reservar: a reserva vira esquecida (e pode ser tomada) muito depois disso.
+      if (Date.now() - claimedAt > MEDIA_CLEANUP_RULES.claimRemoveWindowMs) {
+        await endClaims(db, bucket, claimed, claimToken, false);
+        result.remaining += claimed.length;
+        continue;
+      }
+
+      const removal = await db.storage.from(bucket).remove(claimed);
 
       if (removal.error) {
         result.failed += claimed.length;
         console.error(`[comunicacao] limpeza de arquivos: ${claimed.length} arquivo(s) de ${bucket} nao sairam do Storage: ${removal.error.message}`);
-        await insertMarks(db, claimed);
+        await endClaims(db, bucket, claimed, claimToken, false);
         continue;
       }
 
+      // So agora a linha sai: quem esperava para enviar o mesmo arquivo grava de novo depois da remocao.
+      await endClaims(db, bucket, claimed, claimToken, true);
       result.deleted += claimed.length;
     }
   }
 
-  // Falha no Storage nao segura a rodada do dia: as marcas voltaram e saem amanha.
+  // Falha no Storage nao segura a rodada do dia: as marcas voltaram livres e saem amanha.
   return finish(!signal?.aborted && result.remaining === 0);
 }

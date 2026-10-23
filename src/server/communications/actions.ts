@@ -84,7 +84,6 @@ import {
 import { assertNoDbError, communicationsDb, CommunicationError, NoticeFieldError, type CommunicationsDb } from "./db";
 import { dispatchInboxCampaign, refreshPopupDeliveries } from "./dispatch";
 import { forgetOrphanMark } from "./media-cleanup";
-import { storageRefOfUrl } from "./media-refs";
 import {
   entryOf,
   followUpsFromTree,
@@ -1950,14 +1949,15 @@ export async function uploadNoticeImage(input: { image: string }): Promise<Actio
       throw new NoticeFieldError("image", check.message);
     }
 
-    const url = (await persistImageAsset(data.image, "communications/images")).trim();
+    // A mesma imagem enviada de novo cai no mesmo caminho: antes de enviar, a marca da limpeza sai (o prazo
+    // recomeca) e uma remocao em andamento do mesmo caminho termina primeiro (docs/22 §4.6).
+    const url = (
+      await persistImageAsset(data.image, "communications/images", { beforeUpload: (object) => forgetOrphanMark(communicationsDb(), object) })
+    ).trim();
 
     if (!isHttpsOrLoopbackUrl(new URL(url))) {
       throw new Error("Comunicacao: a imagem nao foi enviada ao armazenamento.");
     }
-
-    // A mesma imagem enviada de novo cai no mesmo caminho: o prazo da limpeza recomeca (docs/22 §4.6).
-    await forgetOrphanMark(communicationsDb(), storageRefOfUrl(url));
 
     return { url };
   });

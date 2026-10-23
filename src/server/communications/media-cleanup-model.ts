@@ -7,6 +7,9 @@
 // - Sem uso: entra em communication_media_orphans com a hora em que foi visto sem uso; volta a ser usado, sai.
 // - Sem uso ha 30 dias ou mais: sai do Storage (no maximo 500 por rodada; o resto na rodada seguinte). Os 30 dias
 //   deixam desfazer uma exclusao ou duplicar um aviso excluido sem perder o video, a imagem, o audio ou a fonte.
+// - Reserva antes de apagar: a rodada grava `claimed_at` na marca vencida e livre, apaga do Storage e so entao tira
+//   a linha (falha devolve a marca livre). Quem envia de novo o mesmo arquivo confere a marca ANTES de enviar
+//   (orphanMarkUploadStep): marca livre sai; reservada, espera a rodada terminar; reserva esquecida (15 min) e tomada.
 
 import { COMMUNICATION_MEDIA_LOCATIONS, mediaKey, mediaLocationOf, type MediaLocation, type MediaRef } from "./media-refs";
 
@@ -32,7 +35,19 @@ export const MEDIA_CLEANUP_RULES = {
   /** Tempo proprio da rodada dentro do tick de minuto. */
   budgetMs: 20_000,
   /** Sobra minima do tick para comecar; menos que isso, fica para o minuto seguinte. */
-  minTickLeftMs: 15_000
+  minTickLeftMs: 15_000,
+  /**
+   * Reserva com mais que isso esta esquecida (a rodada caiu entre reservar e terminar): a rodada seguinte solta e
+   * quem envia de novo pode tomar. Bem acima do que uma remocao vive (pedida ate 1 min depois de reservar, e o
+   * gateway do Storage corta o pedido em 30 s).
+   */
+  claimStaleMinutes: 15,
+  /** A rodada so pede a remocao ao Storage ate este tempo depois de reservar; passou (processo parado), solta. */
+  claimRemoveWindowMs: 60_000,
+  /** Quanto o envio do mesmo arquivo espera uma remocao em andamento antes de pedir para tentar de novo. */
+  uploadWaitMs: 10_000,
+  /** Intervalo entre as conferencias do envio enquanto a marca esta reservada. */
+  uploadPollMs: 250
 } as const;
 
 const HOUR_MS = 3_600_000;
@@ -65,6 +80,40 @@ export function isOrphanDue(firstOrphanAt: string | null | undefined, now: Date)
 /** Ate quando (exclusive) a marca precisa ter nascido para o arquivo poder sair agora. */
 export function orphanDueCutoff(now: Date): Date {
   return new Date(now.getTime() - MEDIA_CLEANUP_RULES.graceDays * DAY_MS);
+}
+
+/** Reservas feitas antes disso estao esquecidas (claimStaleMinutes). */
+export function claimStaleCutoff(now: Date): Date {
+  return new Date(now.getTime() - MEDIA_CLEANUP_RULES.claimStaleMinutes * 60_000);
+}
+
+/** Reserva esquecida: feita ha 15 min ou mais (data ilegivel tambem: nunca segura um envio para sempre). */
+export function isClaimStale(claimedAt: string, now: Date): boolean {
+  const claimed = timeOf(claimedAt);
+
+  return claimed === null || claimed <= claimStaleCutoff(now).getTime();
+}
+
+/**
+ * O que o envio de um arquivo com nome pelo conteudo faz com a marca dele, ANTES de enviar (docs/22 §4.6):
+ * - `proceed`: sem marca. Nenhuma remocao em andamento (a rodada so tira a linha reservada depois de apagar do
+ *   Storage) e nenhuma marca nova vence antes de 30 dias: pode enviar, e "ja existe" vale como enviado;
+ * - `delete_free`: marca livre, apagar (so se ainda livre; depois disso a rodada nao tem o que reservar);
+ * - `take_stale`: reserva esquecida, apagar (so se for a mesma reserva lida);
+ * - `wait`: reservada agora, a rodada esta apagando: esperar a linha sair (ou voltar livre) e conferir de novo.
+ */
+export type OrphanMarkUploadStep = "delete_free" | "proceed" | "take_stale" | "wait";
+
+export function orphanMarkUploadStep(mark: { claimedAt: string | null } | null, now: Date): OrphanMarkUploadStep {
+  if (!mark) {
+    return "proceed";
+  }
+
+  if (mark.claimedAt === null) {
+    return "delete_free";
+  }
+
+  return isClaimStale(mark.claimedAt, now) ? "take_stale" : "wait";
 }
 
 /** Inicio da janela do dia: o ultimo horario diario (UTC) que ja passou. */
@@ -119,10 +168,12 @@ export function mediaCleanupDecision(now: Date, runs: readonly MediaCleanupRunRe
 
 /** Um arquivo listado no Storage (so os que casam com o padrao do lugar). */
 export type ListedMedia = MediaRef & { createdAt: string | null };
-/** Uma linha de communication_media_orphans. */
-export type OrphanMark = MediaRef & { firstOrphanAt: string };
+/** Uma linha de communication_media_orphans (`claimedAt`: reservada por uma rodada que esta apagando). */
+export type OrphanMark = MediaRef & { claimedAt?: string | null; firstOrphanAt: string };
 
 export type MediaCleanupPlan = {
+  /** Marcas reservadas por outra rodada (ficam com ela: nem desmarcadas, nem vencidas aqui). */
+  claimed: number;
   /** Vencidos para sair agora (os mais antigos primeiro, ate o teto). */
   due: OrphanMark[];
   /** Sem uso pela primeira vez: entram na tabela com a hora de agora. */
@@ -170,10 +221,15 @@ export function planMediaCleanup(input: {
   }
 
   const marked = new Map(input.marked.map((row) => [mediaKey(row), row]));
-  const plan: MediaCleanupPlan = { due: [], mark: [], recent: 0, remaining: 0, unmark: [], waiting: 0 };
+  const plan: MediaCleanupPlan = { claimed: 0, due: [], mark: [], recent: 0, remaining: 0, unmark: [], waiting: 0 };
   const due: OrphanMark[] = [];
 
   for (const [key, row] of marked) {
+    if (row.claimedAt) {
+      plan.claimed += 1;
+      continue;
+    }
+
     const location = mediaLocationOf(row, locations);
     const object = listed.get(key);
     const gone = !object && location !== null && input.completeLocations.has(locationKey(location));

@@ -9,7 +9,8 @@ import "./support/admin-action-stubs.mjs";
 //   media-refs.ts devolvem; o schema e os tipos dos designs tem a contagem de campos de arquivo conferida (campo
 //   novo = esta guarda falha e lembra de ler o campo em media-refs.ts e por na amostra);
 // - colunas de campaigns e tipos de notificacao: cada um decidido (guarda arquivo ou nao);
-// - todo envio com nome pelo conteudo esquece a marca (o prazo recomeca);
+// - todo envio com nome pelo conteudo confere a marca ANTES de enviar (o prazo recomeca e uma remocao em andamento
+//   termina primeiro; depois disso "ja existe" vale como enviado);
 // - a 202610240001 passa pelo MCP numa secao so, sem drop, delete ou funcao, RLS sem politica, e nao cita a
 //   coluna do design (a guarda do Livre proibe);
 // - o job fica por ultimo no registro do tick.
@@ -203,20 +204,52 @@ test("colunas de campaigns e tipos de notificacao: cada um decidido", () => {
   assert.deepEqual([...banco.matchAll(/'([a-z_]+)'/g)].map((match) => match[1]).sort(), decididos);
 });
 
-test("todo envio com nome pelo conteudo esquece a marca (o prazo da limpeza recomeca)", () => {
-  for (const file of [
-    "src/server/communications/media.ts",
-    "src/server/communications/popup-media.ts",
-    "src/server/communications/actions.ts",
-    "src/server/communications/popup-free-actions.ts"
+test("todo envio com nome pelo conteudo confere a marca ANTES de enviar (nada enviado some na remocao em andamento)", () => {
+  /** O trecho da funcao `name` ate a proxima funcao exportada. */
+  const bodyOf = (file, name) => {
+    const code = codeOf(read(file));
+    const start = code.indexOf(`export async function ${name}(`);
+    assert.ok(start >= 0, `${file}: ${name}`);
+    const end = code.indexOf("\nexport ", start + 1);
+    return code.slice(start, end === -1 ? undefined : end);
+  };
+
+  // Audio e fonte: a conferencia vem antes do upload ao Storage.
+  for (const [file, name] of [
+    ["src/server/communications/media.ts", "persistNoticeAudio"],
+    ["src/server/communications/popup-media.ts", "persistPopupFont"]
   ]) {
-    assert.match(codeOf(read(file)), /await forgetOrphanMark\(/, file);
+    const body = bodyOf(file, name);
+    const forget = body.indexOf("await forgetOrphanMark(");
+    assert.ok(forget > 0 && forget < body.indexOf(".upload("), `${file}: ${name} confere a marca antes do upload`);
   }
 
-  // A imagem do aviso: logo depois do persistImageAsset de communications/images.
-  const actions = codeOf(read("src/server/communications/actions.ts"));
-  const envio = actions.slice(actions.indexOf('persistImageAsset(data.image, "communications/images")'));
-  assert.ok(envio.indexOf("forgetOrphanMark(") > 0 && envio.indexOf("forgetOrphanMark(") < envio.indexOf("return { url }"));
+  // Imagens do aviso e do Livre: a conferencia vai como beforeUpload do persistImageAsset, que roda antes do upload.
+  for (const [file, name, folder] of [
+    ["src/server/communications/actions.ts", "uploadNoticeImage", "communications/images"],
+    ["src/server/communications/popup-free-actions.ts", "uploadPopupFreeImage", "communications/free"]
+  ]) {
+    const body = bodyOf(file, name);
+    assert.match(body, new RegExp(`persistImageAsset\\(data\\.image, "${folder}", \\{ beforeUpload: \\(object\\) => forgetOrphanMark\\(communicationsDb\\(\\), object\\) \\}\\)`), `${file}: ${name}`);
+  }
+
+  const assets = bodyOf("src/server/db/media-assets.ts", "persistImageAsset");
+  const hook = assets.indexOf("await options.beforeUpload?.(");
+  assert.ok(hook > 0 && hook < assets.indexOf(".upload("), "persistImageAsset roda o beforeUpload antes do upload");
+});
+
+test("a rodada so tira a marca depois de apagar do Storage; desmarcar nunca mexe na reservada", () => {
+  const code = codeOf(read("src/server/communications/media-cleanup.ts"));
+  const run = code.slice(code.indexOf("export async function runMediaCleanup("));
+  const claim = run.indexOf('.update({ claimed_at: claimToken })');
+  const remove = run.indexOf(".remove(claimed)");
+  const finish = run.indexOf("await endClaims(db, bucket, claimed, claimToken, true)");
+
+  assert.ok(claim > 0 && claim < remove && remove < finish, "reserva, remocao e so entao a linha sai");
+  assert.doesNotMatch(run, /\.delete\(\)/, "a rodada nao apaga marca direto: so por deleteMarks (livres) e endClaims (a propria reserva)");
+  assert.match(code, /async function deleteMarks[\s\S]*?\.is\("claimed_at", null\)/);
+  assert.match(code, /async function endClaims[\s\S]*?\.eq\("claimed_at", claimToken\)/);
+  assert.doesNotMatch(code, /insertMarks\(db, claimed\)/, "falha nunca recria a marca com a data antiga (a linha so e solta)");
 });
 
 test("a 202610240001 passa pelo MCP numa secao so: tabela pequena, RLS sem politica, nada de drop, delete ou funcao", () => {
@@ -235,6 +268,8 @@ test("a 202610240001 passa pelo MCP numa secao so: tabela pequena, RLS sem polit
   assert.match(code, /create table if not exists public\.communication_media_orphans \(/);
   assert.match(code, /primary key \(bucket, path\)/);
   assert.match(code, /first_orphan_at timestamptz not null default now\(\)/);
+  assert.match(code, /^  claimed_at timestamptz,$/m);
+  assert.match(code, /alter table public\.communication_media_orphans add column if not exists claimed_at timestamptz;/);
   assert.match(code, /alter table public\.communication_media_orphans enable row level security;/);
   assert.match(code, /revoke all on public\.communication_media_orphans from anon, authenticated;/);
   assert.match(code, /grant select, insert, update, delete on public\.communication_media_orphans to service_role;/);

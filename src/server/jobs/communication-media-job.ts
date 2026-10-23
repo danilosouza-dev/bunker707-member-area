@@ -65,6 +65,7 @@ function countsOf(result: MediaCleanupResult) {
     ms: result.ms,
     recent: result.recent,
     referenced: result.referenced,
+    released: result.released,
     remaining: result.remaining,
     rescued: result.rescued,
     unmarked: result.unmarked,

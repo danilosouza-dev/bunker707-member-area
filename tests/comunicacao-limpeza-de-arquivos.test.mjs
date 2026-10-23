@@ -5,8 +5,10 @@ import "./support/admin-action-stubs.mjs";
 // Limpeza automatica dos arquivos da Comunicacao sem uso (docs/22 §4.6; docs/18 §1.1): o que conta como uso em
 // cada tipo de conteudo (Padrão, Personalizado, Livre, aviso, notificacao, fonte, modelo), os prazos de 24 h e de
 // 30 dias, quando o job trabalha no dia, o plano de cada rodada e a rodada inteira contra um banco e um Storage em
-// memoria (inclusive a falha do Storage, que devolve a marca). A rodada contra o banco e o Storage locais de
-// verdade esta em tests/integration/limpeza-de-arquivos.test.mjs; os campos de arquivo dos designs, na guarda.
+// memoria (inclusive a falha do Storage, que solta a reserva). A reserva antes de apagar: a linha so sai depois da
+// remocao, o envio do mesmo arquivo confere a marca antes de enviar (livre sai, reservada espera, esquecida e
+// tomada) e, no meio de uma remocao, o arquivo enviado fica. A rodada contra o banco e o Storage locais de verdade
+// esta em tests/integration/limpeza-de-arquivos.test.mjs; os campos de arquivo dos designs, na guarda.
 
 const refs = await import("../src/server/communications/media-refs.ts");
 const model = await import("../src/server/communications/media-cleanup-model.ts");
@@ -184,6 +186,21 @@ test("30 dias: sai com 30 dias sem uso, nunca antes (data ilegível nunca vence)
   assert.equal(model.orphanDueCutoff(AGORA).toISOString(), antes(30 * DIA));
 });
 
+test("reserva: esquecida com 15 min; o envio do mesmo arquivo segue sem marca, apaga a livre, espera a reservada e toma a esquecida", () => {
+  assert.equal(model.MEDIA_CLEANUP_RULES.claimStaleMinutes, 15);
+  assert.ok(model.MEDIA_CLEANUP_RULES.claimRemoveWindowMs < model.MEDIA_CLEANUP_RULES.claimStaleMinutes * 60_000, "a remoção sai bem antes de a reserva ficar esquecida");
+  assert.equal(model.claimStaleCutoff(AGORA).toISOString(), antes(15 * 60_000));
+  assert.equal(model.isClaimStale(antes(15 * 60_000 - 1_000), AGORA), false);
+  assert.equal(model.isClaimStale(antes(15 * 60_000), AGORA), true);
+  assert.equal(model.isClaimStale("lixo", AGORA), true, "data ilegível nunca segura um envio");
+
+  assert.equal(model.orphanMarkUploadStep(null, AGORA), "proceed");
+  assert.equal(model.orphanMarkUploadStep({ claimedAt: null }, AGORA), "delete_free");
+  assert.equal(model.orphanMarkUploadStep({ claimedAt: antes(2_000) }, AGORA), "wait");
+  assert.equal(model.orphanMarkUploadStep({ claimedAt: new Date(AGORA.getTime() + 5_000).toISOString() }, AGORA), "wait", "relógio um pouco à frente: espera");
+  assert.equal(model.orphanMarkUploadStep({ claimedAt: antes(16 * 60_000) }, AGORA), "take_stale");
+});
+
 test("o dia: a rodada sai a partir das 06:53 UTC, uma vez; falha espera 1 h; parou no teto continua em 5 min", () => {
   assert.equal(model.dailySlotStart(new Date("2026-11-30T06:52:00.000Z")).toISOString(), "2026-11-29T06:53:00.000Z");
   assert.equal(model.dailySlotStart(new Date("2026-11-30T06:53:00.000Z")).toISOString(), "2026-11-30T06:53:00.000Z");
@@ -258,12 +275,26 @@ test("plano: só o vencido que ainda está no Storage sai, os mais antigos prime
   assert.deepEqual(pela.due, []);
 });
 
+test("plano: marca reservada por outra rodada fica com ela (nem desmarcada, nem vencida, nem marcada de novo)", () => {
+  const reservada = (path, extra = {}) => ({ bucket: "communication-popup-video", claimedAt: antes(60_000), firstOrphanAt: antes(40 * DIA), path, ...extra });
+  const plano = model.planMediaCleanup({
+    completeLocations: LUGARES_COMPLETOS,
+    listed: [velho("communication-popup-video", VIDEO)],
+    marked: [reservada(VIDEO), reservada(VIDEO2)],
+    now: AGORA,
+    referenced: new Set([`communication-popup-video/${VIDEO}`])
+  });
+
+  assert.equal(plano.claimed, 2);
+  assert.deepEqual([plano.due, plano.unmark, plano.mark], [[], [], []], "em uso ou sumida, a reservada não é mexida aqui");
+});
+
 /* ------------------------------------------------------------------------------------------------
  * A rodada inteira, com banco e Storage em memoria
  * ---------------------------------------------------------------------------------------------- */
 
 /** Banco e Storage em memoria que entendem so as consultas da limpeza. */
-function memoria({ campaigns = [], fonts = [], marks = [], objects = [], removeError = null }) {
+function memoria({ campaigns = [], fonts = [], marks = [], objects = [], onRemove = null, removeError = null }) {
   const state = { campaigns, fonts, marks: marks.map((row) => ({ ...row })), objects: objects.map((row) => ({ ...row })), removed: [] };
 
   function run(query) {
@@ -273,6 +304,7 @@ function memoria({ campaigns = [], fonts = [], marks = [], objects = [], removeE
         if (method === "eq") return row[column] === arg;
         if (method === "in") return arg.includes(row[column]);
         if (method === "lte") return row[column] <= arg;
+        if (method === "lt") return row[column] != null && row[column] < arg;
         if (method === "gt") return row[column] > arg;
         if (method === "is") return (row[column] ?? null) === arg;
         return true;
@@ -300,7 +332,13 @@ function memoria({ campaigns = [], fonts = [], marks = [], objects = [], removeE
         return { data: gone, error: null };
       }
 
-      return { data: limited(state.marks), error: null };
+      if (query.op === "update") {
+        const changed = state.marks.filter(matches);
+        changed.forEach((row) => Object.assign(row, query.payload));
+        return { data: changed.map((row) => ({ ...row })), error: null };
+      }
+
+      return { data: limited(state.marks.filter(matches)), error: null };
     }
 
     const table = { campaigns: state.campaigns, communication_fonts: state.fonts }[query.table] ?? [];
@@ -345,6 +383,8 @@ function memoria({ campaigns = [], fonts = [], marks = [], objects = [], removeE
             return { data: entries.slice(offset, offset + limit), error: null };
           },
           async remove(paths) {
+            await onRemove?.(bucket, paths);
+
             if (removeError) {
               return { data: null, error: { message: removeError } };
             }
@@ -379,7 +419,7 @@ test("rodada: marca, espera os 30 dias, apaga o vencido, nunca o usado, e repeti
   assert.ok(db.state.objects.some((object) => object.path === VIDEO), "o vídeo usado pelo pop-up fica");
 });
 
-test("rodada: falha no Storage devolve a marca com a data de antes (sai amanhã)", async () => {
+test("rodada: falha no Storage solta a reserva e a marca fica com a data de antes (sai amanhã)", async () => {
   const db = memoria({
     marks: [{ bucket: "communication-audio", first_orphan_at: antes(40 * DIA), path: AUDIO }],
     objects: [velho("communication-audio", AUDIO)],
@@ -396,24 +436,151 @@ test("rodada: falha no Storage devolve a marca com a data de antes (sai amanhã)
     console.error = original;
   }
 
-  assert.deepEqual(db.state.marks, [{ bucket: "communication-audio", first_orphan_at: antes(40 * DIA), path: AUDIO }]);
+  assert.deepEqual(db.state.marks, [{ bucket: "communication-audio", claimed_at: null, first_orphan_at: antes(40 * DIA), path: AUDIO }]);
   assert.ok(errors.some((line) => line.includes("nao sairam do Storage")), errors.join("\n"));
   assert.ok(!errors.join("\n").includes(AUDIO), "o log não leva o caminho");
 });
 
-test("rodada: banco sem a migração 202610240001 termina sem erro", async () => {
-  const db = memoria({});
-  const from = db.from;
-  const proxied = {
-    ...db,
-    from: (table) =>
-      table === "communication_media_orphans"
-        ? { select: () => ({ order: () => ({ order: () => ({ range: async () => ({ data: null, error: { code: "PGRST205", message: "Could not find the table" } }) }) }) }) }
-        : from(table)
-  };
+test("rodada: a reserva só sai da tabela depois da remoção; a esquecida é solta e decidida de novo; a de outra rodada fica", async () => {
+  const agora = new Date();
+  const db = memoria({
+    marks: [
+      { bucket: "communication-audio", claimed_at: null, first_orphan_at: antes(40 * DIA), path: AUDIO },
+      // Rodada que caiu entre reservar e terminar, há 20 min: solta no começo e apagada nesta.
+      { bucket: "communication-fonts", claimed_at: new Date(agora.getTime() - 20 * 60_000).toISOString(), first_orphan_at: antes(40 * DIA), path: FONTE },
+      // Outra rodada apagando agora: fica com ela.
+      { bucket: "communication-popup-video", claimed_at: new Date(agora.getTime() - 5_000).toISOString(), first_orphan_at: antes(40 * DIA), path: VIDEO }
+    ],
+    objects: [velho("communication-audio", AUDIO), velho("communication-fonts", FONTE), velho("communication-popup-video", VIDEO)],
+    onRemove(bucket, paths) {
+      for (const path of paths) {
+        const linha = db.state.marks.find((row) => row.bucket === bucket && row.path === path);
+        assert.ok(linha?.claimed_at, `${bucket}/${path}: reservada durante a remoção, e a linha ainda está lá`);
+      }
+    }
+  });
 
-  const result = await cleanup.runMediaCleanup({ db: proxied, now: AGORA });
-  assert.equal(result.pendingMigration, true);
+  const result = await cleanup.runMediaCleanup({ db, now: AGORA });
+  assert.equal(result.released, 1);
+  assert.equal(result.deleted, 2);
+  assert.deepEqual(db.state.removed.sort(), [`communication-audio/${AUDIO}`, `communication-fonts/${FONTE}`]);
+  assert.deepEqual(db.state.marks.map((row) => `${row.bucket}/${row.path}`), [`communication-popup-video/${VIDEO}`], "só a reserva da outra rodada fica");
+  assert.ok(db.state.objects.some((object) => object.path === VIDEO));
+});
+
+test("rodada: banco sem a migração 202610240001 (ou sem a coluna claimed_at) termina sem erro", async () => {
+  for (const error of [{ code: "PGRST205", message: "Could not find the table" }, { code: "42703", message: "column communication_media_orphans.claimed_at does not exist" }]) {
+    const db = memoria({});
+    const from = db.from;
+    const falha = async () => ({ data: null, error });
+    const proxied = {
+      ...db,
+      from: (table) =>
+        table === "communication_media_orphans"
+          ? {
+              select: () => ({ order: () => ({ order: () => ({ range: falha }) }) }),
+              update: () => ({ lt: () => ({ select: falha }) })
+            }
+          : from(table)
+    };
+
+    const result = await cleanup.runMediaCleanup({ db: proxied, now: AGORA });
+    assert.equal(result.pendingMigration, true, error.code);
+  }
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * O envio do mesmo arquivo (antes de enviar)
+ * ---------------------------------------------------------------------------------------------- */
+
+const AUDIO_REF = { bucket: "communication-audio", path: AUDIO };
+
+test("envio: sem marca segue; a livre sai; a esquecida é tomada; caminho que não é nosso nem consulta", async () => {
+  const semMarca = memoria({});
+  await cleanup.forgetOrphanMark(semMarca, AUDIO_REF, { sleep: () => assert.fail("não devia esperar") });
+
+  const livre = memoria({ marks: [{ bucket: AUDIO_REF.bucket, claimed_at: null, first_orphan_at: antes(40 * DIA), path: AUDIO }] });
+  await cleanup.forgetOrphanMark(livre, AUDIO_REF, { sleep: () => assert.fail("não devia esperar") });
+  assert.deepEqual(livre.state.marks, []);
+
+  const esquecida = memoria({ marks: [{ bucket: AUDIO_REF.bucket, claimed_at: new Date(Date.now() - 16 * 60_000).toISOString(), first_orphan_at: antes(40 * DIA), path: AUDIO }] });
+  await cleanup.forgetOrphanMark(esquecida, AUDIO_REF, { sleep: () => assert.fail("não devia esperar") });
+  assert.deepEqual(esquecida.state.marks, []);
+
+  await cleanup.forgetOrphanMark({ from: () => assert.fail("não devia consultar") }, { bucket: "content-assets", path: `products/${HEX}.webp` });
+  await cleanup.forgetOrphanMark({ from: () => assert.fail("não devia consultar") }, null);
+});
+
+test("envio: marca reservada espera a rodada terminar; não terminou a tempo, 409 e nada enviado", async () => {
+  const reservada = () => ({ bucket: AUDIO_REF.bucket, claimed_at: new Date().toISOString(), first_orphan_at: antes(40 * DIA), path: AUDIO });
+
+  const db = memoria({ marks: [reservada()] });
+  let esperas = 0;
+  await cleanup.forgetOrphanMark(db, AUDIO_REF, {
+    sleep: async () => {
+      esperas += 1;
+      // A rodada termina enquanto o envio espera: apagou do Storage e tirou a linha.
+      if (esperas === 2) {
+        db.state.marks = [];
+      }
+    }
+  });
+  assert.equal(esperas, 2);
+
+  // A remoção falhou e a rodada soltou a reserva: a marca volta livre e o envio a apaga.
+  const falhou = memoria({ marks: [reservada()] });
+  await cleanup.forgetOrphanMark(falhou, AUDIO_REF, {
+    sleep: async () => {
+      falhou.state.marks[0].claimed_at = null;
+    }
+  });
+  assert.deepEqual(falhou.state.marks, []);
+
+  const presa = memoria({ marks: [reservada()] });
+  await assert.rejects(
+    cleanup.forgetOrphanMark(presa, AUDIO_REF, { sleep: async () => {}, waitMs: 0 }),
+    (error) => error.status === 409 && error.message === cleanup.MEDIA_BUSY_MESSAGE
+  );
+  assert.equal(presa.state.marks.length, 1, "a reserva da rodada fica");
+});
+
+test("envio: banco sem a migração segue; outro erro do banco falha o envio (sem conferir, o arquivo podia sair)", async () => {
+  const comErro = (error) => ({ from: () => ({ select: () => ({ eq: () => ({ eq: () => ({ limit: async () => ({ data: null, error }) }) }) }) }) });
+
+  await cleanup.forgetOrphanMark(comErro({ code: "PGRST205", message: "Could not find the table" }), AUDIO_REF);
+  await cleanup.forgetOrphanMark(comErro({ code: "42703", message: "column communication_media_orphans.claimed_at does not exist" }), AUDIO_REF);
+  await assert.rejects(cleanup.forgetOrphanMark(comErro({ code: "08006", message: "connection failure" }), AUDIO_REF), /nao conferida antes do envio/);
+});
+
+test("envio no meio da remoção (reserva, envio dos mesmos bytes, remoção): o envio espera e o arquivo fica, sem marca", async () => {
+  let envio = null;
+  let enviado = false;
+  const db = memoria({
+    marks: [{ bucket: AUDIO_REF.bucket, claimed_at: null, first_orphan_at: antes(40 * DIA), path: AUDIO }],
+    objects: [velho(AUDIO_REF.bucket, AUDIO)],
+    async onRemove(bucket, paths) {
+      if (!paths.includes(AUDIO)) {
+        return;
+      }
+
+      // O editor envia o mesmo áudio entre a reserva e a remoção: confere a marca antes de enviar e grava depois.
+      envio = cleanup
+        .forgetOrphanMark(db, AUDIO_REF, { sleep: () => new Promise((resolve) => setTimeout(resolve, 5)) })
+        .then(() => {
+          enviado = true;
+          db.state.objects.push({ bucket: AUDIO_REF.bucket, createdAt: new Date().toISOString(), path: AUDIO });
+        });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.equal(enviado, false, "o envio espera a remoção terminar");
+    }
+  });
+
+  const result = await cleanup.runMediaCleanup({ db, now: AGORA });
+  await envio;
+
+  assert.equal(result.deleted, 1);
+  assert.ok(db.state.objects.some((object) => object.path === AUDIO), "o arquivo que o editor recebeu continua lá");
+  assert.deepEqual(db.state.marks, [], "e sem marca");
 });
 
 /* ------------------------------------------------------------------------------------------------
