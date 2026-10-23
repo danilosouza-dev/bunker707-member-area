@@ -38,7 +38,12 @@ export const POPUP_DESIGN_LIMITS = {
   button2Label: 30,
   buttonRadius: { max: 999, min: 0 },
   cardPadding: { max: 48, min: 12 },
+  /** Imagem no fundo do cartao: o escuro por cima da imagem (%). */
+  cardImageDim: { max: 80, min: 0 },
   cardRadius: { max: 40, min: 0 },
+  /** Onde o degrade da midia fica totalmente na cor (% da altura da midia, do topo). */
+  fadeEnd: { max: 100, min: 20 },
+  /** Comprimento da passagem do degrade (% da altura da midia); ele comeca em max(0, fim - comprimento). */
   fadeHeight: { max: 100, min: 10 },
   fontSize: { max: 96, min: 10 },
   gap: { max: 48, min: 0 },
@@ -160,6 +165,14 @@ export type PopupFontOption = PopupFontFace & { createdAt: string; name: string;
 
 export type PopupFontRef = { key: PopupBuiltinFont; kind: "builtin" } | { id: string; kind: "uploaded" };
 
+/** Sem `end` (design salvo antes do "Fica totalmente escuro em"): o degrade vai ate o fim da midia, como antes. */
+export const POPUP_FADE_END_DEFAULT = 100;
+/**
+ * Imagem no fundo do cartao nova: embaixo (o pedido do produtor: o video em cima passando para a imagem
+ * embaixo) e 40 % de escuro por cima.
+ */
+export const POPUP_CARD_IMAGE_DEFAULTS = { dim: 40, position: "bottom" } as const satisfies { dim: number; position: PopupMediaPosition };
+
 /* ------------------------------------------------------------------------------------------------
  * Storage (videos e fontes ficam no Supabase Storage, nunca no servidor do app)
  * ---------------------------------------------------------------------------------------------- */
@@ -180,6 +193,14 @@ export const POPUP_FONT_PATH_PATTERN = /^fonts\/[a-f0-9]{24}\.(?:woff2|woff|ttf|
  * finishPopupVideoUpload confere tamanho e primeiros bytes e devolve o PopupVideo (ou apaga o objeto).
  */
 export type PopupVideoUploadTicket = { path: string; signedUrl: string; token: string };
+
+/**
+ * Imagem no fundo do cartao: a mesma imagem do aviso (uploadNoticeImage: WebP recortado, gravado por
+ * persistImageAsset em content-assets/communications/images/<24 hex do sha256>.webp). So esse lugar vale:
+ * nunca um endereco de fora.
+ */
+export const POPUP_CARD_IMAGE_BUCKET = "content-assets";
+export const POPUP_CARD_IMAGE_PATH_PATTERN = /^communications\/images\/[a-f0-9]{24}\.webp$/;
 
 /** Caminho publico de um objeto do Storage (sem a origem). */
 export function storagePublicPath(bucket: string, objectPath: string) {
@@ -209,11 +230,53 @@ export function isOwnStorageUrl(value: string, input: { bucket: string; objectPa
   }
 }
 
+/** Nome de maquina so com letras, numeros, ponto e hifen (ou [::1]): o URL do WHATWG deixa passar aspas e ";". */
+const SAFE_HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$|^\[::1\]$/;
+
+/**
+ * O caminho da imagem do fundo do cartao (communications/images/<24 hex>.webp) quando o endereco e o objeto
+ * publico do nosso bucket de imagens (com `origin`, so na origem do nosso Supabase); null = nao vale. A maquina
+ * so com [a-z0-9.-]: o endereco vai dentro de url("...") no CSS do cartao, e nada pode sair das aspas.
+ */
+export function popupCardImagePathOf(value: string, origin?: string | null): string | null {
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+
+  if (!SAFE_HOSTNAME.test(url.hostname)) {
+    return null;
+  }
+
+  const objectPath = url.pathname.slice(storagePublicPath(POPUP_CARD_IMAGE_BUCKET, "").length);
+
+  return POPUP_CARD_IMAGE_PATH_PATTERN.test(objectPath) && isOwnStorageUrl(value, { bucket: POPUP_CARD_IMAGE_BUCKET, objectPath, origin })
+    ? objectPath
+    : null;
+}
+
+/** A imagem do fundo do cartao e do nosso bucket de imagens (o mesmo lugar da imagem do aviso). */
+export function isOwnPopupCardImageUrl(value: string, origin?: string | null): boolean {
+  return popupCardImagePathOf(value, origin) !== null;
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Tipos do design (versao 1)
  * ---------------------------------------------------------------------------------------------- */
 
 export type PopupPaint = { color: HexColor; kind: "solid" } | { angle: number; from: HexColor; kind: "gradient"; to: HexColor };
+
+/**
+ * Imagem no fundo do cartao (atras da midia e do texto): na largura do cartao, presa em cima, no meio ou embaixo
+ * (`position`), com o escuro por cima (`dim`, 0 a 80 %) e a borda sumindo na cor de apoio. `color`: a cor de
+ * apoio (o resto do cartao, enquanto a imagem carrega, a base do contraste e a cor "auto" do degrade).
+ */
+export type PopupCardImage = { color: HexColor; dim: number; kind: "image"; position: PopupMediaPosition; url: string };
+/** Fundo do cartao: cor, degrade ou imagem. */
+export type PopupCardBackground = PopupCardImage | PopupPaint;
 export type PopupBorder = { color: HexColor; width: number };
 
 export type PopupTextStyle = {
@@ -271,13 +334,20 @@ export type PopupBlock = PopupAudioBlock | PopupBadgeBlock | PopupButton2Block |
 
 export type PopupVideo = { mimeType: PopupVideoMimeType; path: string; url: string };
 
+export type PopupMediaFade = { color: HexColor | "auto"; enabled: boolean; end: number; height: number };
+
 export type PopupMedia = {
   aspect: PopupMediaAspect;
-  /** Degrade da midia para o fundo do cartao: altura em % da midia e a cor ("auto" = o fundo do cartao). */
-  fade: { color: HexColor | "auto"; enabled: boolean; height: number };
+  /**
+   * Degrade da midia para o fundo do cartao, em % da altura da midia contados do topo: totalmente na cor em
+   * `end` (20 a 100; sem `end` no banco = 100, como antes) e comecando `height` antes (em max(0, end - height)).
+   * Abaixo de `end` a midia nao aparece. Cor "auto" = o proprio fundo do cartao aparece (mascara na midia);
+   * outra cor = camada por cima da midia.
+   */
+  fade: PopupMediaFade;
   /** image = a imagem do aviso; video = o video (a imagem do aviso e a capa dele). */
   kind: PopupMediaKind;
-  /** Recorte da midia (object-position). */
+  /** A parte da midia que aparece (object-position: o enquadramento, nunca o degrade). */
   position: PopupMediaPosition;
   /** Fica guardado ao trocar para imagem; obrigatorio com kind "video". */
   video: PopupVideo | null;
@@ -293,7 +363,7 @@ export type PopupTextZone = {
 };
 
 export type PopupCardStyle = {
-  background: PopupPaint;
+  background: PopupCardBackground;
   border: PopupBorder;
   padding: number;
   radius: number;
@@ -333,6 +403,12 @@ function canonicalPaint(paint: PopupPaint): PopupPaint {
   return paint.kind === "solid"
     ? { color: hex(paint.color), kind: "solid" }
     : { angle: Math.round(paint.angle), from: hex(paint.from), kind: "gradient", to: hex(paint.to) };
+}
+
+function canonicalCardBackground(background: PopupCardBackground): PopupCardBackground {
+  return background.kind === "image"
+    ? { color: hex(background.color), dim: Math.round(background.dim), kind: "image", position: background.position, url: background.url.trim() }
+    : canonicalPaint(background);
 }
 
 function canonicalFont(font: PopupFontRef): PopupFontRef {
@@ -443,7 +519,7 @@ export function canonicalPopupDesign(design: PopupDesign): PopupDesign {
   return {
     blocks,
     card: {
-      background: canonicalPaint(design.card.background),
+      background: canonicalCardBackground(design.card.background),
       border: canonicalBorder(design.card.border),
       padding: Math.round(design.card.padding),
       radius: Math.round(design.card.radius),
@@ -458,6 +534,7 @@ export function canonicalPopupDesign(design: PopupDesign): PopupDesign {
       fade: {
         color: design.media.fade.color === "auto" ? "auto" : hex(design.media.fade.color),
         enabled: design.media.fade.enabled,
+        end: Math.round(design.media.fade.end ?? POPUP_FADE_END_DEFAULT),
         height: Math.round(design.media.fade.height)
       },
       kind: design.media.kind,
@@ -617,7 +694,7 @@ export function popupStarterDesign(id: PopupDesignStarterId, input: { hasAudio?:
       close: { background: "#ffffff14", color: "#ffffff" },
       fonts: [],
       links: { color: "#a1a1aa" },
-      media: { aspect: "16:9", fade: { color: "auto", enabled: false, height: 60 }, kind: "none", position: "center", video },
+      media: { aspect: "16:9", fade: { color: "auto", enabled: false, end: 100, height: 60 }, kind: "none", position: "center", video },
       text: { align: "left", gap: 14, overlap: 0, placement: "below" },
       version: POPUP_DESIGN_VERSION
     });
@@ -645,7 +722,7 @@ export function popupStarterDesign(id: PopupDesignStarterId, input: { hasAudio?:
       close: STARTER_CLOSE,
       fonts: [],
       links: { color: "#a1a1aa" },
-      media: { aspect: "4:3", fade: { color: "auto", enabled: true, height: 75 }, kind: video ? "video" : "image", position: "center", video },
+      media: { aspect: "4:3", fade: { color: "auto", enabled: true, end: 100, height: 75 }, kind: video ? "video" : "image", position: "center", video },
       text: { align: "left", gap: 12, overlap: 0, placement: "over-bottom" },
       version: POPUP_DESIGN_VERSION
     });
@@ -694,9 +771,11 @@ export function popupStarterDesign(id: PopupDesignStarterId, input: { hasAudio?:
     close: STARTER_CLOSE,
     fonts: [],
     links: { color: "#a1a1aa" },
-    // Subir 28 % com degrade de 65 %: o selo fica dentro do degrade e o titulo comeca onde a midia some (Z, docs/26).
-    media: { aspect: "16:9", fade: { color: "auto", enabled: true, height: 65 }, kind: video ? "video" : "image", position: "center", video },
-    text: { align: "center", gap: 12, overlap: 28, placement: "below" },
+    // A referencia: a midia aparece inteira na metade de cima, escurece de 50 % a 92 % da altura dela (a passagem
+    // fica no meio do cartao, com o selo em cima dela) e o texto sobe 34 % por cima, entao titulo, texto e botao
+    // ficam na parte escura (conferido em fotos contra a referencia, docs/26).
+    media: { aspect: "16:9", fade: { color: "auto", enabled: true, end: 92, height: 42 }, kind: video ? "video" : "image", position: "center", video },
+    text: { align: "center", gap: 12, overlap: 34, placement: "below" },
     version: POPUP_DESIGN_VERSION
   });
 }
@@ -812,24 +891,125 @@ export function paintToCss(paint: PopupPaint): string {
   return paint.kind === "solid" ? paint.color : `linear-gradient(${paint.angle}deg, ${paint.from}, ${paint.to})`;
 }
 
-/** A primeira cor da pintura (a cor "auto" do degrade da midia e a base do contraste). */
-export function paintBaseColor(paint: PopupPaint): HexColor {
-  return paint.kind === "solid" ? paint.color : paint.from;
+/** A primeira cor da pintura ou a cor de apoio da imagem (a cor "auto" do degrade da midia e a base do contraste). */
+export function paintBaseColor(paint: PopupCardBackground): HexColor {
+  return paint.kind === "solid" || paint.kind === "image" ? paint.color : paint.from;
 }
 
-/** Cor final do degrade da midia ("auto" = o fundo do cartao). */
+/** Duas casas hex de uma fracao de 0 a 1 (alfa do #RRGGBBAA). */
+function alphaHex(fraction: number) {
+  return Math.round(Math.min(1, Math.max(0, fraction)) * 255)
+    .toString(16)
+    .padStart(2, "0");
+}
+
+/**
+ * Imagem no fundo do cartao: a imagem do aviso e sempre 16:9 (uploadNoticeImage), entao na largura do cartao
+ * ela tem 56,25 % dessa largura de altura (cqw: o cartao fica dentro do container das unidades).
+ */
+const CARD_IMAGE_HEIGHT = "56.25cqw";
+
+/** Onde a imagem fica no cartao (o resto e a cor de apoio). */
+const CARD_IMAGE_POSITION: Record<PopupMediaPosition, string> = { bottom: "center bottom", center: "center center", top: "center top" };
+
+/**
+ * A borda da imagem que encontra o resto do cartao some na cor de apoio (nunca uma linha dura): embaixo, some a
+ * borda de cima; em cima, a de baixo; no meio, as duas.
+ */
+function cardImageEdgeCss(position: PopupMediaPosition, color: HexColor): string {
+  const clear = `${color.slice(0, 7)}00`;
+
+  if (position === "center") {
+    return `linear-gradient(180deg, ${color} 0%, ${clear} 30%, ${clear} 70%, ${color} 100%)`;
+  }
+
+  return `linear-gradient(${position === "bottom" ? 180 : 0}deg, ${color} 0%, ${clear} 40%)`;
+}
+
+/**
+ * O fundo do cartao em CSS (`background`): cor, degrade, ou a imagem na largura do cartao, presa em cima, no
+ * meio ou embaixo, com o escuro por cima dela, a borda sumindo na cor de apoio e a cor de apoio no resto (e
+ * enquanto a imagem carrega). Com a midia sumindo no fundo ("Igual ao fundo do cartão"), "Embaixo" e o video
+ * em cima passando para a imagem embaixo. Imagem que nao e do nosso bucket de imagens: so a cor de apoio. O
+ * endereco vai normalizado (`URL.href`) e so passa com maquina [a-z0-9.-] e caminho [a-z0-9/._-]: nada sai do
+ * url("...").
+ */
+export function cardBackgroundCss(background: PopupCardBackground): string {
+  if (background.kind !== "image") {
+    return paintToCss(background);
+  }
+
+  if (!isOwnPopupCardImageUrl(background.url)) {
+    return background.color;
+  }
+
+  const dim = `#000000${alphaHex(background.dim / 100)}`;
+  const box = `${CARD_IMAGE_POSITION[background.position]} / 100% ${CARD_IMAGE_HEIGHT} no-repeat border-box`;
+
+  return [
+    `${cardImageEdgeCss(background.position, background.color)} ${box}`,
+    `linear-gradient(${dim}, ${dim}) ${box}`,
+    `url("${new URL(background.url).href}") ${box}`,
+    background.color
+  ].join(", ");
+}
+
+/** Cor final do degrade da midia ("auto" = o fundo do cartao: a cor, a primeira do degrade ou a de apoio da imagem). */
 export function fadeColorOf(design: Pick<PopupDesign, "card" | "media">): HexColor {
   return design.media.fade.color === "auto" ? paintBaseColor(design.card.background) : design.media.fade.color;
 }
 
 /**
- * O degrade por cima da midia (de transparente ate a cor), so a altura escolhida. Paradas suavizadas (35 % da
- * cor na metade, 75 % aos tres quartos): a midia "some" sem a faixa dura que o degrade linear deixa no comeco.
+ * Onde o degrade da midia comeca e termina (% da altura da midia, do topo): totalmente na cor em `end` (sem
+ * `end` = 100, o de antes), comecando `height` antes (nunca acima do topo).
+ */
+export function popupFadeSpan(fade: Pick<PopupMediaFade, "height"> & { end?: number }): { end: number; start: number } {
+  const end = Math.min(100, Math.max(0, Math.round(fade.end ?? POPUP_FADE_END_DEFAULT)));
+
+  return { end, start: Math.max(0, end - Math.round(fade.height)) };
+}
+
+/**
+ * Paradas suavizadas da passagem (fracao da passagem -> quanto ja e da cor): 35 % da cor na metade, 75 % aos
+ * tres quartos. A midia "some" sem a faixa dura que o degrade linear deixa no comeco.
+ */
+const FADE_EASE = [
+  { alpha: 0, at: 0 },
+  { alpha: 0x59 / 255, at: 0.45 },
+  { alpha: 0xbf / 255, at: 0.75 },
+  { alpha: 1, at: 1 }
+] as const;
+
+function percent(value: number) {
+  return `${round(value, 2)}%`;
+}
+
+/**
+ * O degrade por cima da midia (cor escolhida, sem ser "Igual ao fundo do cartão"): a camada vai do comeco da
+ * passagem ate embaixo (popupFadeCss), de transparente ate a cor no fim da passagem e a cor solida dali para
+ * baixo (o gradiente repete a ultima cor ate o fim da camada). Sem `end` (ou 100) e o mesmo de antes.
  */
 export function fadeGradientCss(design: Pick<PopupDesign, "card" | "media">): string {
   const color = fadeColorOf(design).slice(0, 7);
+  const { end, start } = popupFadeSpan(design.media.fade);
+  // Posicoes na camada, que tem (100 - start) % da altura da midia.
+  const scale = start >= 100 ? 1 : (end - start) / (100 - start);
+  const stops = FADE_EASE.map(({ alpha, at }) => `${color}${alpha === 1 ? "" : alphaHex(alpha)} ${percent(at * scale * 100)}`);
 
-  return `linear-gradient(180deg, ${color}00 0%, ${color}59 45%, ${color}bf 75%, ${color} 100%)`;
+  return `linear-gradient(180deg, ${stops.join(", ")})`;
+}
+
+/**
+ * A mascara da midia ("Igual ao fundo do cartão"): opaca ate o comeco da passagem, some com as mesmas paradas
+ * suavizadas e fica transparente do fim da passagem para baixo. O fundo de verdade do cartao (cor, degrade ou
+ * imagem) aparece por baixo; num fundo de cor, o resultado e o mesmo da camada de antes.
+ */
+export function fadeMaskCss(design: Pick<PopupDesign, "media">): string {
+  const { end, start } = popupFadeSpan(design.media.fade);
+  const length = end - start;
+  const stops = [`#000000 ${percent(start)}`, ...FADE_EASE.slice(1).map(({ alpha, at }) => `#000000${alphaHex(1 - alpha)} ${percent(start + at * length)}`)];
+
+  return `linear-gradient(180deg, #000000 0%, ${stops.join(", ")})`;
 }
 
 /** Pilha de fontes de um texto: a fonte enviada (pela familia resolvida) ou a pronta, sempre com o sistema no fim. */
@@ -907,17 +1087,26 @@ export function isLargeText(size: number, weight: number) {
 }
 
 export type PopupContrastHint = {
-  /** Bloco do aviso (id) quando a dica e de um bloco; null = links ou X. */
+  /** Bloco do aviso (id) quando a dica e de um bloco; null = links, X ou o fundo do cartao. */
   blockId: string | null;
-  /** Onde a dica aparece: "blocks.2", "blocks.1.lines.0", "links" ou "close". */
+  /** Onde a dica aparece: "blocks.2", "blocks.1.lines.0", "links", "close" ou "card.background". */
   key: string;
   message: string;
-  ratio: number;
+  /** null = nao da para medir (imagem no fundo do cartao). */
+  ratio: number | null;
   required: number;
 };
 
+/** Imagem no fundo do cartao: a dica que nao mede (a imagem pode ser clara ou escura em qualquer parte). */
+export const POPUP_IMAGE_CONTRAST_MESSAGE = "Com imagem no fundo não dá para medir o contraste. Confira na prévia se os textos ficam fáceis de ler.";
+
 function colorsOf(paint: PopupPaint): HexColor[] {
   return paint.kind === "solid" ? [paint.color] : [paint.from, paint.to];
+}
+
+/** Cores do fundo do cartao para medir; null = imagem (nao da para medir). */
+function cardColorsOf(background: PopupCardBackground): HexColor[] | null {
+  return background.kind === "image" ? null : colorsOf(background);
 }
 
 function formatRatio(value: number) {
@@ -928,15 +1117,23 @@ export function contrastHintMessage(ratio: number, required: number) {
   return `Contraste baixo (${formatRatio(ratio)}:1). Para ler bem, use pelo menos ${formatRatio(required)}:1.`;
 }
 
-/** Cores atras do grupo de texto; null = sobre a midia sem degrade (nao da para medir). */
+/**
+ * Cores atras do grupo de texto; null = nao da para medir (sobre a midia sem degrade, ou a imagem no fundo do
+ * cartao aparecendo atras do texto). "Sobre a mídia, embaixo" com degrade fica na parte escura: a cor
+ * escolhida, ou o proprio fundo do cartao ("Igual ao fundo do cartão").
+ */
 function textBackdrop(design: PopupDesign): HexColor[] | null {
-  const card = colorsOf(design.card.background);
+  const card = cardColorsOf(design.card.background);
 
   if (design.media.kind === "none" || design.text.placement === "below") {
     return card;
   }
 
-  return design.media.fade.enabled && design.text.placement === "over-bottom" ? [fadeColorOf(design)] : null;
+  if (!design.media.fade.enabled || design.text.placement !== "over-bottom") {
+    return null;
+  }
+
+  return design.media.fade.color === "auto" ? card : [design.media.fade.color];
 }
 
 function worstRatio(foregrounds: readonly HexColor[], backgrounds: readonly HexColor[], base: HexColor) {
@@ -954,7 +1151,9 @@ function worstRatio(foregrounds: readonly HexColor[], backgrounds: readonly HexC
 /**
  * Dicas de contraste do design (WCAG AA: 4,5:1 no texto, 3:1 no texto grande e no X). Mede o texto contra o
  * fundo do cartao (ou o degrade quando o texto fica sobre a midia embaixo), o selo e os botoes contra o
- * proprio fundo. Texto sobre a midia sem degrade nao e medido. Nunca impede salvar.
+ * proprio fundo. Texto sobre a midia sem degrade nao e medido. Imagem no fundo do cartao: uma dica so
+ * ("card.background", sem medida) pedindo para conferir na previa; o selo, os botoes com fundo e o X continuam
+ * medidos (cada um tem o proprio fundo). Nunca impede salvar.
  */
 export function popupDesignContrastHints(design: PopupDesign): PopupContrastHint[] {
   const hints: PopupContrastHint[] = [];
@@ -987,8 +1186,17 @@ export function popupDesignContrastHints(design: PopupDesign): PopupContrastHint
     }
   });
 
-  add("links", null, worstRatio([design.links.color], colorsOf(design.card.background), "#000000"), 4.5);
+  const card = cardColorsOf(design.card.background);
+
+  if (card) {
+    add("links", null, worstRatio([design.links.color], card, "#000000"), 4.5);
+  }
+
   add("close", null, contrastRatio(design.close.color, design.close.background, cardBase), 3);
+
+  if (!card) {
+    hints.push({ blockId: null, key: "card.background", message: POPUP_IMAGE_CONTRAST_MESSAGE, ratio: null, required: 4.5 });
+  }
 
   return hints;
 }

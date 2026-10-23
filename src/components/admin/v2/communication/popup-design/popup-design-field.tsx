@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
+  cardBackgroundCss,
   paintToCss,
   popupDesignContrastHints,
   popupStarterDesign,
@@ -79,7 +80,7 @@ function StarterThumb({ id }: { id: PopupDesignStarterId }) {
     <span
       aria-hidden="true"
       className="relative grid h-[84px] w-[60px] shrink-0 overflow-hidden rounded-md border border-white/10"
-      style={{ background: paintToCss(design.card.background) }}
+      style={{ background: cardBackgroundCss(design.card.background) }}
     >
       {hasMedia ? (
         <span
@@ -240,6 +241,12 @@ export function PopupDesignField({
   }
 
   const latestDesign = () => latest.current.design ?? design;
+  // O video (Mídia) e a imagem do fundo (Cartão) sobem separados: o salvar espera os dois.
+  const busyReasons = useRef<{ background: string | null; media: string | null }>({ background: null, media: null });
+  const reportBusy = (part: "background" | "media", reason: string | null) => {
+    busyReasons.current = { ...busyReasons.current, [part]: reason };
+    onBusyChange?.(busyReasons.current.media ?? busyReasons.current.background);
+  };
   const context: BlockEditorContext = {
     cta: draft.cta,
     disabled,
@@ -280,7 +287,7 @@ export function PopupDesignField({
               draft={draft}
               errorFor={errorFor}
               latest={() => latest.current}
-              onBusyChange={onBusyChange}
+              onBusyChange={(reason) => reportBusy("media", reason)}
               onChange={onChange}
               onImageUploadChange={onImageUploadChange}
             />
@@ -292,7 +299,15 @@ export function PopupDesignField({
               latestDesign={latestDesign}
               onChange={onChange}
             />
-            <CardSection design={design} disabled={disabled} errorFor={errorFor} onChange={updateDesign} />
+            <CardSection
+              design={design}
+              disabled={disabled}
+              errorFor={errorFor}
+              hints={hints}
+              latestDesign={() => latestDesign() ?? design}
+              onBusyChange={(reason) => reportBusy("background", reason)}
+              onChange={updateDesign}
+            />
             <FontsSection disabled={disabled} errorFor={errorFor} fonts={fonts} onFontsChange={onFontsChange} onRequestUpload={() => setUpload({})} />
             <CloseSection design={design} disabled={disabled} errorFor={errorFor} hints={hints} onChange={updateDesign} />
           </>

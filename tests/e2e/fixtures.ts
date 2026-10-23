@@ -882,8 +882,15 @@ export type DesignDoPopUpNoBanco = {
   /** O design gravado (null = Padrão). */
   design: {
     blocks: Record<string, unknown>[];
+    /** Fundo do cartao: cor, degradê ou a imagem (com `url`, `position`, `dim` e a cor de apoio). */
+    card: { background: { kind: string; url?: string } & Record<string, unknown> };
     fonts: string[];
-    media: { kind: string; video: { mimeType: string; path: string; url: string } | null };
+    media: {
+      /** Degradê: totalmente escuro em `end` (% da midia, do topo), comecando `height` antes. */
+      fade: { color: string; enabled: boolean; end: number; height: number };
+      kind: string;
+      video: { mimeType: string; path: string; url: string } | null;
+    };
   } | null;
 };
 

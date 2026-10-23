@@ -10,7 +10,9 @@ import { describeHeroCtaHrefProblem, isSafeHeroCtaHref } from "../member-area/ho
 import {
   canonicalPopupDesign,
   HEX_COLOR_PATTERN,
+  isOwnPopupCardImageUrl,
   isOwnStorageUrl,
+  POPUP_FADE_END_DEFAULT,
   POPUP_ALIGNS,
   POPUP_BLOCK_ID_PATTERN,
   POPUP_BUILTIN_FONT_KEYS,
@@ -42,6 +44,8 @@ export const POPUP_DESIGN_MESSAGES = {
   blockKind: "Escolha o tipo do bloco.",
   blocksEmpty: "Adicione pelo menos um bloco.",
   buttonWithoutCta: "Escreva o texto do botão e escolha para onde ele leva.",
+  cardImage: "Envie a imagem do fundo de novo.",
+  cardImageMissing: "Envie a imagem do fundo ou escolha Cor ou Degradê.",
   color: "Use uma cor no formato #RRGGBB.",
   ctaWithoutButton: "Falta o bloco do botão principal no design.",
   design: "Monte o design de novo: algo nele não vale.",
@@ -86,6 +90,36 @@ const paintSchema = z.discriminatedUnion(
 );
 
 const borderSchema = z.strictObject({ color: hexColor, width: intIn(LIMITS.borderWidth) });
+
+/**
+ * Fundo do cartao: cor, degrade ou imagem. A imagem so do nosso bucket de imagens, no mesmo lugar da imagem do
+ * aviso (content-assets/communications/images/<24 hex>.webp, enviada pelo uploadNoticeImage); o servidor
+ * recalcula o endereco a partir do caminho ao salvar e ao ler (popup-fonts.withOwnStorageUrls).
+ */
+const cardBackgroundSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z.strictObject({ color: hexColor, kind: z.literal("solid") }),
+    z.strictObject({ angle: intIn(LIMITS.angle), from: hexColor, kind: z.literal("gradient"), to: hexColor }),
+    z.strictObject({
+      color: hexColor,
+      dim: intIn(LIMITS.cardImageDim),
+      kind: z.literal("image"),
+      position: z.enum(POPUP_MEDIA_POSITIONS, { error: "Escolha onde a imagem fica." }),
+      url: z
+        .string({ error: POPUP_DESIGN_MESSAGES.cardImage })
+        .trim()
+        .superRefine((value, context) => {
+          if (!value) {
+            context.addIssue({ code: "custom", message: POPUP_DESIGN_MESSAGES.cardImageMissing });
+          } else if (value.length > 2_048 || !isOwnPopupCardImageUrl(value)) {
+            context.addIssue({ code: "custom", message: POPUP_DESIGN_MESSAGES.cardImage });
+          }
+        })
+    })
+  ],
+  { error: "Escolha uma cor, um degradê ou uma imagem." }
+);
 
 const fontRefSchema = z.discriminatedUnion(
   "kind",
@@ -211,7 +245,7 @@ const designObjectSchema = z.strictObject(
   {
     blocks: z.array(blockSchema).min(1, POPUP_DESIGN_MESSAGES.blocksEmpty).max(LIMITS.blocks, `Use até ${LIMITS.blocks} blocos.`),
     card: z.strictObject({
-      background: paintSchema,
+      background: cardBackgroundSchema,
       border: borderSchema,
       padding: intIn(LIMITS.cardPadding),
       radius: intIn(LIMITS.cardRadius),
@@ -224,9 +258,15 @@ const designObjectSchema = z.strictObject(
     links: z.strictObject({ color: hexColor }),
     media: z.strictObject({
       aspect: z.enum(POPUP_MEDIA_ASPECTS, { error: "Escolha o formato da mídia." }),
-      fade: z.strictObject({ color: z.union([z.literal("auto"), hexColor]), enabled: z.boolean(), height: intIn(LIMITS.fadeHeight) }),
+      // Sem `end` (design salvo antes do "Fica totalmente escuro em") = 100: o degrade de antes, igual.
+      fade: z.strictObject({
+        color: z.union([z.literal("auto"), hexColor]),
+        enabled: z.boolean(),
+        end: intIn(LIMITS.fadeEnd).default(POPUP_FADE_END_DEFAULT),
+        height: intIn(LIMITS.fadeHeight)
+      }),
       kind: z.enum(POPUP_MEDIA_KINDS, { error: "Escolha a mídia." }),
-      position: z.enum(POPUP_MEDIA_POSITIONS, { error: "Escolha o recorte da mídia." }),
+      position: z.enum(POPUP_MEDIA_POSITIONS, { error: "Escolha a parte da mídia que aparece." }),
       video: videoSchema.nullable()
     }),
     text: z.strictObject({

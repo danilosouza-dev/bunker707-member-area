@@ -10,6 +10,7 @@
 import type { NoticeDraft } from "../../../../../server/communications/schemas";
 import {
   POPUP_BUILTIN_FONTS,
+  POPUP_CARD_IMAGE_DEFAULTS,
   POPUP_DESIGN_LIMITS,
   POPUP_DESIGN_STARTERS,
   POPUP_FONT_LIMITS,
@@ -19,6 +20,7 @@ import {
   canonicalPopupDesign,
   newPopupBlock,
   nextPopupBlockId,
+  paintBaseColor,
   popupStarterDesign,
   syncPopupDesignBlocks,
   uploadedFontIdsOf,
@@ -27,7 +29,10 @@ import {
   type PopupBlockType,
   type PopupButton2ActionKind,
   type PopupButtonSize,
+  type HexColor,
   type PopupButtonWidth,
+  type PopupCardBackground,
+  type PopupCardImage,
   type PopupCardShadow,
   type PopupCardWidth,
   type PopupDesign,
@@ -39,6 +44,7 @@ import {
   type PopupMediaAspect,
   type PopupMediaKind,
   type PopupMediaPosition,
+  type PopupPaint,
   type PopupTextAlign,
   type PopupTextPlacement,
   type PopupVideoMimeType
@@ -85,14 +91,18 @@ export const POPUP_DESIGN_COPY = {
     aspect: "Formato da mídia",
     fade: "Degradê para o fundo",
     fadeAuto: "Igual ao fundo do cartão",
+    fadeAutoHint: "A mídia some e aparece o fundo do cartão (cor, degradê ou imagem).",
     fadeColor: "Cor do degradê",
-    fadeHeight: "Altura do degradê",
+    fadeEnd: "Fica totalmente escuro em",
+    fadeHint: "0 % é o topo da mídia e 100 %, o fim dela. Suba o escuro para o texto ficar na parte escura.",
+    fadeStart: "Começa a escurecer em",
     groupLabel: "Mídia do pop-up",
     image: "Imagem",
     imageAlt: "Descrição da imagem (opcional)",
     imageAltHint: "Ajuda quem usa leitor de tela. Ex.: Professora apresentando a aula nova.",
     imageHint: "Também é a capa do vídeo.",
-    position: "Recorte"
+    position: "Parte da mídia que aparece",
+    positionHint: "Muda só o enquadramento do vídeo ou da imagem, não o degradê."
   },
   video: {
     busy: "Espere o vídeo terminar de enviar.",
@@ -165,6 +175,18 @@ export const POPUP_DESIGN_COPY = {
   audio: { note: "O player do áudio aparece aqui. Para trocar o áudio, use o campo Áudio." },
   cardSection: {
     background: "Fundo",
+    backgroundImage: "Imagem do fundo",
+    backgroundImageBusy: "Espere a imagem do fundo terminar de enviar.",
+    backgroundImageColor: "Cor de apoio",
+    backgroundImageColorHint: "Preenche o resto do cartão e aparece enquanto a imagem carrega.",
+    backgroundImageDim: "Escurecer a imagem",
+    backgroundImageDimHint: "Uma camada escura por cima da imagem deixa o texto mais fácil de ler.",
+    backgroundImageFailed: "Não foi possível enviar a imagem. Tente de novo.",
+    backgroundImageHint: "Fica atrás da mídia e do texto, na largura do cartão. A borda some na cor de apoio.",
+    backgroundImageMissing: "Envie a imagem do fundo ou escolha Cor ou Degradê.",
+    backgroundImageNotOurs: "Envie o arquivo da imagem (link de outro site não vale aqui).",
+    backgroundImagePosition: "Onde a imagem fica",
+    backgroundImagePositionHint: "Embaixo, com o degradê “Igual ao fundo do cartão”, o vídeo passa para a imagem.",
     border: "Borda",
     borderColor: "Cor da borda",
     borderWidth: "Espessura da borda",
@@ -319,6 +341,37 @@ export const PAINT_KIND_OPTIONS: readonly Option<PaintKind>[] = [
   { label: "Cor", value: "solid" },
   { label: "Degradê", value: "gradient" }
 ];
+
+export type CardBackgroundKind = "gradient" | "image" | "solid";
+
+/** Fundo do cartão: "Cor" | "Degradê" | "Imagem". */
+export const CARD_BACKGROUND_KIND_OPTIONS: readonly Option<CardBackgroundKind>[] = [...PAINT_KIND_OPTIONS, { label: "Imagem", value: "image" }];
+
+/** A pintura nova ao trocar "Cor" <-> "Degradê" (a cor de agora vira a primeira do degradê e vice-versa). */
+export function paintOfKind(kind: PaintKind, base: HexColor): PopupPaint {
+  return kind === "solid" ? { color: base, kind: "solid" } : { angle: 90, from: base, kind: "gradient", to: "#a78bfa" };
+}
+
+/**
+ * O fundo do cartão ao trocar "Cor" | "Degradê" | "Imagem": a cor de agora segue (vira a cor, a primeira do
+ * degradê ou a cor de apoio da imagem). Imagem: a ultima imagem escolhida volta (`remembered`); sem ela, a
+ * imagem ainda vazia (o salvar pede para enviar), embaixo e com 40 % de escuro.
+ */
+export function cardBackgroundOfKind(kind: CardBackgroundKind, current: PopupCardBackground, remembered: PopupCardImage | null): PopupCardBackground {
+  if (kind === current.kind) {
+    return current;
+  }
+
+  const base = paintBaseColor(current);
+
+  if (kind === "image") {
+    return remembered
+      ? { ...remembered, color: base }
+      : { color: base, dim: POPUP_CARD_IMAGE_DEFAULTS.dim, kind: "image", position: POPUP_CARD_IMAGE_DEFAULTS.position, url: "" };
+  }
+
+  return paintOfKind(kind, base);
+}
 
 export type LinePaintChoice = "gradient" | "inherit" | "solid";
 
@@ -678,10 +731,24 @@ export function popupDesignFocusSelector(key: string): string | null {
     return container;
   }
 
+  // Do mais fino ao mais largo (o primeiro prefixo que casa vence).
   const sections: readonly [string, string][] = [
     ["design.blocks", "#popup-design-blocos"],
     ["design.media.video", "#popup-design-video"],
+    ["design.media.position", "[name='popup-design-midia-recorte']"],
+    ["design.media.fade.end", "#popup-design-degrade-fim"],
+    ["design.media.fade.height", "#popup-design-degrade-inicio"],
+    ["design.media.fade.color", "#popup-design-degrade-cor"],
+    ["design.media.fade", "#popup-design-degrade"],
     ["design.media", "[name='popup-design-midia']"],
+    ["design.card.background.url", "[aria-labelledby='popup-design-cartao-imagem-label']"],
+    ["design.card.background.position", "[name='popup-design-cartao-imagem-parte']"],
+    ["design.card.background.dim", "#popup-design-cartao-imagem-escurecer"],
+    ["design.card.background.color", "#popup-design-cartao-fundo-cor"],
+    ["design.card.background.from", "#popup-design-cartao-fundo-de"],
+    ["design.card.background.to", "#popup-design-cartao-fundo-para"],
+    ["design.card.background.angle", "#popup-design-cartao-fundo-angulo"],
+    ["design.card.background", "[name='popup-design-cartao-fundo-tipo']"],
     ["design.text", "[name='popup-design-posicao']"],
     ["design.card", "#popup-design-cartao"],
     ["design.close", "#popup-design-fechar"],
@@ -777,6 +844,52 @@ export function parseBoundedNumber(text: string, bounds: { integer?: boolean; ma
   }
 
   return value;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Degradê da mídia: "Começa a escurecer em" e "Fica totalmente escuro em"
+ * ---------------------------------------------------------------------------------------------- */
+
+/** "Começa a escurecer em" (% da altura da mídia, do topo). */
+export const FADE_START_LIMITS = { max: 90, min: 0 } as const;
+/** "Fica totalmente escuro em" (= `fade.end`). */
+export const FADE_END_LIMITS = { max: POPUP_DESIGN_LIMITS.fadeEnd.max, min: POPUP_DESIGN_LIMITS.fadeEnd.min } as const;
+/** A passagem mais curta (= o minimo de `fade.height`). */
+const FADE_MIN_PASSAGE = POPUP_DESIGN_LIMITS.fadeHeight.min;
+
+export type FadeRange = { end: number; start: number };
+type FadeSpan = { end: number; height: number };
+
+/** O que a tela mostra a partir do design: o escuro comeca em `end - height` e fica total em `end`. */
+export function fadeRangeOf(fade: FadeSpan): FadeRange {
+  const end = clampNumber(Math.round(fade.end), FADE_END_LIMITS.min, FADE_END_LIMITS.max);
+  const start = clampNumber(end - Math.round(fade.height), FADE_START_LIMITS.min, Math.min(FADE_START_LIMITS.max, end - FADE_MIN_PASSAGE));
+
+  return { end, start };
+}
+
+/** O que vai para o design a partir da tela: `{ end, height = end - start }`, com a passagem de pelo menos 10 %. */
+export function fadeFromRange(range: FadeRange): FadeSpan {
+  const end = clampNumber(Math.round(range.end), FADE_END_LIMITS.min, FADE_END_LIMITS.max);
+  const start = clampNumber(Math.round(range.start), FADE_START_LIMITS.min, Math.min(FADE_START_LIMITS.max, end - FADE_MIN_PASSAGE));
+
+  return { end, height: clampNumber(end - start, FADE_MIN_PASSAGE, POPUP_DESIGN_LIMITS.fadeHeight.max) };
+}
+
+/** Mudar o comeco: o fim fica, a nao ser que o comeco passe dele (o fim desce junto, 10 % abaixo). */
+export function withFadeStart<Fade extends FadeSpan>(fade: Fade, start: number): Fade {
+  const nextStart = clampNumber(Math.round(start), FADE_START_LIMITS.min, FADE_START_LIMITS.max);
+  const end = Math.max(fadeRangeOf(fade).end, nextStart + FADE_MIN_PASSAGE);
+
+  return { ...fade, ...fadeFromRange({ end, start: nextStart }) };
+}
+
+/** Mudar o fim: o comeco fica, a nao ser que o fim suba acima dele (o comeco sobe junto, 10 % acima). */
+export function withFadeEnd<Fade extends FadeSpan>(fade: Fade, end: number): Fade {
+  const nextEnd = clampNumber(Math.round(end), FADE_END_LIMITS.min, FADE_END_LIMITS.max);
+  const start = Math.min(fadeRangeOf(fade).start, nextEnd - FADE_MIN_PASSAGE);
+
+  return { ...fade, ...fadeFromRange({ end: nextEnd, start }) };
 }
 
 /* ------------------------------------------------------------------------------------------------

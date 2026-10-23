@@ -103,6 +103,8 @@ test("os modelos para comecar valem no schema, ja estao na forma canonica e pass
   const reference = starter("media_top_fade");
   assert.equal(reference.media.kind, "image", "sem video escolhido, a midia e a imagem do aviso");
   assert.equal(reference.media.fade.enabled, true);
+  assert.deepEqual(reference.media.fade, { color: "auto", enabled: true, end: 92, height: 42 }, "escurece no meio: de 50 % a 92 % da midia");
+  assert.equal(reference.text.overlap, 34, "o selo fica sobre a passagem; titulo, texto e botao no escuro");
   assert.equal(reference.text.placement, "below");
   assert.ok(reference.text.overlap > 0, "o selo sobe por cima do degrade");
   assert.deepEqual(
@@ -451,5 +453,135 @@ test("escala: px do cartao em cqw do proprio cartao, com piso de leitura e de to
   assert.equal(model.popupCardWidthPx({ card: { width: "S" } }), 360);
   assert.equal(model.paintToCss({ angle: 160, from: "#2a1a5e", kind: "gradient", to: "#0b0b12" }), "linear-gradient(160deg, #2a1a5e, #0b0b12)");
   assert.equal(model.fadeColorOf(starter()), "#16181c", "auto = o fundo do cartao");
-  assert.equal(model.fadeGradientCss(starter()), "linear-gradient(180deg, #16181c00 0%, #16181c59 45%, #16181cbf 75%, #16181c 100%)");
+  const old = { ...starter(), media: { ...starter().media, fade: { color: "auto", enabled: true, height: 65 } } };
+  assert.equal(model.fadeGradientCss(old), "linear-gradient(180deg, #16181c00 0%, #16181c59 45%, #16181cbf 75%, #16181c 100%)", "sem end: o de antes");
+  // O modelo escurece de 50 % a 92 %: a camada (de 50 % ate embaixo) chega a cor em 84 % dela.
+  assert.equal(model.fadeGradientCss(starter()), "linear-gradient(180deg, #16181c00 0%, #16181c59 37.8%, #16181cbf 63%, #16181c 84%)");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Degrade com comeco e fim ("Começa a escurecer em" / "Fica totalmente escuro em") e imagem no fundo
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Um design como o PR do "Design do pop-up" gravou (sem `end`): o do produtor no ambiente de teste. */
+function designSemEnd() {
+  const design = starter("media_overlay", { video: { mimeType: "video/mp4", path: VIDEO_PATH, url: VIDEO_URL } });
+  design.media = { ...design.media, aspect: "4:3", fade: { color: "auto", enabled: true, height: 75 } };
+  design.text = { align: "center", gap: 12, overlap: 0, placement: "over-bottom" };
+  design.card.background = { color: "#181b1e", kind: "solid" };
+  return design;
+}
+
+test("degrade: design salvo sem `end` le com end 100 (o mesmo de antes); end de 20 a 100, inteiro; comeco = fim - comprimento", () => {
+  const old = designSemEnd();
+  assert.equal("end" in old.media.fade, false);
+
+  const parsed = schema.parsePopupDesign(old);
+  assert.ok(parsed, "o design antigo continua Personalizado");
+  assert.deepEqual(parsed.media.fade, { color: "auto", enabled: true, end: 100, height: 75 });
+  assert.deepEqual(parsed, model.canonicalPopupDesign(old), "so o end entra (a forma canonica completa com 100)");
+  assert.deepEqual(model.popupFadeSpan(parsed.media.fade), { end: 100, start: 25 });
+  assert.deepEqual(model.canonicalPopupDesign(old).media.fade.end, 100, "forma canonica sem end = 100");
+  assert.equal(schemas.noticeDraftSchema.parse(popupDraft({ design: old })).design.media.fade.end, 100, "o rascunho antigo tambem");
+
+  for (const [end, ok] of [[20, true], [100, true], [70, true], [19, false], [101, false], [50.5, false], ["70", false], [null, false]]) {
+    const design = designSemEnd();
+    design.media.fade.end = end;
+    const result = schema.popupDesignSchema.safeParse(design);
+
+    assert.equal(result.success, ok, `end ${end}`);
+    if (!ok) {
+      assert.ok(issuesOf(result).some((issue) => issue.path === "media.fade.end"), JSON.stringify(issuesOf(result)));
+    }
+  }
+
+  assert.deepEqual(model.popupFadeSpan({ end: 70, height: 35 }), { end: 70, start: 35 });
+  assert.deepEqual(model.popupFadeSpan({ end: 45, height: 80 }), { end: 45, start: 0 }, "nunca acima do topo");
+  assert.deepEqual(model.popupFadeSpan(starter().media.fade), { end: 92, start: 50 }, "o modelo da referencia escurece no meio");
+});
+
+const CARD_IMAGE_PATH = "communications/images/0123456789abcdef01234567.webp";
+const CARD_IMAGE_URL = `${ORIGIN}/storage/v1/object/public/content-assets/${CARD_IMAGE_PATH}`;
+const cardImage = (overrides = {}) => ({ color: "#16181C", dim: 40, kind: "image", position: "bottom", url: CARD_IMAGE_URL, ...overrides });
+
+test("imagem no fundo do cartao: so a imagem do aviso no nosso bucket (communications/images/<24 hex>.webp)", () => {
+  const accept = (background) => schema.popupDesignSchema.safeParse({ ...starter(), card: { ...starter().card, background } });
+  const parsed = accept(cardImage({ url: `  ${CARD_IMAGE_URL} ` }));
+
+  assert.equal(parsed.success, true, JSON.stringify(issuesOf(parsed)));
+  assert.deepEqual(parsed.data.card.background, { color: "#16181c", dim: 40, kind: "image", position: "bottom", url: CARD_IMAGE_URL }, "canonico");
+  assert.equal(accept(cardImage({ url: CARD_IMAGE_URL.replace(ORIGIN, "https://outro.supabase.co") })).success, true, "a origem e trocada pela nossa no servidor");
+  assert.equal(accept(cardImage({ url: `http://localhost:54321/storage/v1/object/public/content-assets/${CARD_IMAGE_PATH}` })).success, true, "Supabase local");
+
+  for (const [label, url] of [
+    ["outro bucket", `${ORIGIN}/storage/v1/object/public/communication-fonts/${CARD_IMAGE_PATH}`],
+    ["outra pasta do bucket", `${ORIGIN}/storage/v1/object/public/content-assets/catalog/covers/0123456789abcdef01234567.webp`],
+    ["outro formato", CARD_IMAGE_URL.replace(".webp", ".png")],
+    ["nome fora do formato", CARD_IMAGE_URL.replace("0123456789abcdef01234567", "capa")],
+    ["subindo pasta", `${ORIGIN}/storage/v1/object/public/content-assets/communications/images/../0123456789abcdef01234567.webp`],
+    ["com query", `${CARD_IMAGE_URL}?width=10`],
+    ["com fragmento", `${CARD_IMAGE_URL}#x`],
+    ["com usuario", CARD_IMAGE_URL.replace("http://", "http://a:b@")],
+    ["http fora da maquina", `http://exemplo.supabase.co/storage/v1/object/public/content-assets/${CARD_IMAGE_PATH}`],
+    ["fora do Storage", `https://cdn.exemplo.com/${CARD_IMAGE_PATH}`],
+    ["javascript", "javascript:alert(1)"],
+    ["aspas e ponto e virgula na maquina", `https://a";color:red;x.supabase.co/storage/v1/object/public/content-assets/${CARD_IMAGE_PATH}`],
+    ["parenteses na maquina", `https://a)b.supabase.co/storage/v1/object/public/content-assets/${CARD_IMAGE_PATH}`],
+    ["data", "data:image/webp;base64,AAAA"],
+    ["relativo", `/storage/v1/object/public/content-assets/${CARD_IMAGE_PATH}`]
+  ]) {
+    const result = accept(cardImage({ url }));
+    assert.equal(result.success, false, label);
+    assert.deepEqual(issuesOf(result), [{ message: schema.POPUP_DESIGN_MESSAGES.cardImage, path: "card.background.url" }], label);
+  }
+
+  assert.deepEqual(issuesOf(accept(cardImage({ url: "  " }))), [{ message: schema.POPUP_DESIGN_MESSAGES.cardImageMissing, path: "card.background.url" }], "sem imagem ainda");
+
+  for (const [label, change, path] of [
+    ["escuro acima de 80", { dim: 81 }, "card.background.dim"],
+    ["escuro quebrado", { dim: 10.5 }, "card.background.dim"],
+    ["recorte fora da lista", { position: "left" }, "card.background.position"],
+    ["cor de apoio fora do formato", { color: "preto" }, "card.background.color"],
+    ["chave a mais", { css: "color:red" }, "card.background"]
+  ]) {
+    const result = accept(cardImage(change));
+    assert.equal(result.success, false, label);
+    assert.ok(issuesOf(result).some((issue) => issue.path === path || issue.path.startsWith(`${path}.`)), `${label}: ${JSON.stringify(issuesOf(result))}`);
+  }
+
+  assert.equal(model.popupCardImagePathOf(CARD_IMAGE_URL), CARD_IMAGE_PATH);
+  assert.equal(model.popupCardImagePathOf(CARD_IMAGE_URL, ORIGIN), CARD_IMAGE_PATH);
+  assert.equal(model.popupCardImagePathOf(CARD_IMAGE_URL, "https://outro.supabase.co"), null, "com a origem, so a nossa");
+  assert.equal(model.paintBaseColor(cardImage()), "#16181C", "a cor de apoio e a base (auto do degrade e contraste)");
+});
+
+test("imagem no fundo: o servidor troca o endereco pelo do nosso Storage a partir do caminho (salvar e ler)", () => {
+  const design = { ...starter(), card: { ...starter().card, background: cardImage({ url: CARD_IMAGE_URL.replace(ORIGIN, "https://outro.exemplo") }) } };
+  const own = fonts.withOwnStorageUrls(fakeDb, design);
+
+  assert.equal(own.card.background.url, CARD_IMAGE_URL);
+  assert.equal(own.media, design.media, "sem video, a midia fica");
+  const broken = { ...design, card: { ...design.card, background: cardImage({ url: "https://cdn.exemplo.com/x.webp" }) } };
+  assert.deepEqual(fonts.withOwnStorageUrls(fakeDb, broken).card.background, { color: "#16181C", kind: "solid" }, "nunca deveria chegar; vira so a cor de apoio");
+  const plain = starter();
+  assert.equal(fonts.withOwnStorageUrls(fakeDb, plain), plain, "sem video nem imagem, o mesmo objeto");
+});
+
+test("contraste com imagem no fundo: uma dica que nao mede (conferir na previa); selo, botoes e X continuam medidos", () => {
+  const design = { ...starter(), card: { ...starter().card, background: cardImage() } };
+  const hints = model.popupDesignContrastHints(design);
+
+  assert.deepEqual(hints, [{ blockId: null, key: "card.background", message: model.POPUP_IMAGE_CONTRAST_MESSAGE, ratio: null, required: 4.5 }]);
+  assert.doesNotMatch(model.POPUP_IMAGE_CONTRAST_MESSAGE, /campanha|público|audiência|evento|oferta|gatilho|trigger|sessão|impressão|home/i);
+
+  const badBadge = structuredClone(design);
+  badBadge.blocks[0].style.paint = { color: badBadge.blocks[0].background.color, kind: "solid" };
+  assert.ok(model.popupDesignContrastHints(badBadge).some((hint) => hint.key === "blocks.0"), "o selo tem o proprio fundo: medido");
+  const badText = structuredClone(design);
+  badText.blocks[2].style.paint = { color: "#16181c", kind: "solid" };
+  assert.equal(model.popupDesignContrastHints(badText).some((hint) => hint.key === "blocks.2"), false, "texto sobre a imagem nao e medido");
+
+  // Texto "Sobre a midia, embaixo" com degrade de outra cor fica na cor solida: medido contra ela.
+  const overColor = { ...designSemEnd(), media: { ...designSemEnd().media, fade: { color: "#ffffff", enabled: true, end: 70, height: 35 } } };
+  assert.ok(model.popupDesignContrastHints(overColor).some((hint) => hint.key.startsWith("blocks.0.lines")), "titulo branco sobre o degrade branco");
 });

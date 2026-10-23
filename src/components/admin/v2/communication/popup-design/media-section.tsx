@@ -5,31 +5,107 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { uploadNoticeImage } from "@/server/communications/actions";
 import { NOTICE_LIMITS } from "@/server/communications/campaign-model";
-import { POPUP_DESIGN_LIMITS, type PopupDesign, type PopupMedia } from "@/server/communications/popup-design-model";
+import { fadeColorOf, paintBaseColor, type HexColor, type PopupDesign, type PopupMedia, type PopupMediaFade } from "@/server/communications/popup-design-model";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import { HeroTextField } from "../../member-area/home-hero/fields";
 import { ImageField } from "../../products/image-field";
 import { AdminSwitch } from "../../settings/kit";
 import { ColorField, DesignFieldError, DesignSection, NumberField, PillField } from "./design-controls";
 import {
+  FADE_END_LIMITS,
+  FADE_START_LIMITS,
   MEDIA_ASPECT_OPTIONS,
   MEDIA_KIND_OPTIONS,
   MEDIA_POSITION_OPTIONS,
   POPUP_DESIGN_COPY,
+  fadeRangeOf,
   videoDurationHint,
   videoFileProblem,
-  videoMimeTypeOf
+  videoMimeTypeOf,
+  withFadeEnd,
+  withFadeStart
 } from "./popup-design-editor-model";
 import { captureVideoFrame, readVideoDuration, uploadPopupVideo } from "./video-upload";
 
 // Secao "Mídia" do design (docs/26 §7.2): Sem mídia | Imagem | Vídeo. A imagem e a do aviso (o mesmo campo, o
 // mesmo recorte 16:9 e o mesmo id "aviso-imagem"); ela tambem e a capa do video (quem prefere menos movimento ou
 // economiza dados ve so ela). O video vai direto ao Storage (video-upload.ts); enviado sem imagem, um quadro dele
-// vira a capa. Depois: formato, recorte e o degrade para o fundo do cartao.
+// vira a capa. Depois: formato, a parte da midia que aparece (so o enquadramento, nunca o degrade) e o degrade
+// para o fundo do cartao: onde comeca a escurecer e onde fica totalmente escuro (o design guarda `end` e
+// `height = fim - comeco`; abaixo do fim, so o fundo).
 
 const copy = POPUP_DESIGN_COPY.media;
 const videoCopy = POPUP_DESIGN_COPY.video;
 const ACCEPT = "video/mp4,video/webm";
+/** As duas barras do degradê na mesma escala (0 a 100 % da mídia), alinhadas com o desenho ao lado. */
+const FADE_SLIDER_SCALE = { max: 100, min: 0 } as const;
+
+/**
+ * Onde o degradê comeca e onde fica total (% da altura da mídia, do topo), com um desenho pequeno da mídia ao
+ * lado: a parte de cima e a mídia, a de baixo e a cor do degradê. O design guarda `{ end, height }`.
+ */
+function FadeRangeFields({
+  color,
+  disabled,
+  endError,
+  fade,
+  onChange,
+  startError
+}: {
+  color: HexColor;
+  disabled: boolean;
+  endError?: string;
+  fade: PopupMediaFade;
+  onChange: (fade: PopupMediaFade) => void;
+  startError?: string;
+}) {
+  const range = fadeRangeOf(fade);
+  const base = color.slice(0, 7);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 items-stretch gap-4">
+        <span
+          aria-hidden="true"
+          className="relative w-10 shrink-0 overflow-hidden rounded-md border border-[var(--border-strong)]"
+          data-fade-diagram=""
+          style={{ background: "linear-gradient(160deg, #d4d4d8 0%, #a1a1aa 35%, #71717a 70%, #52525b 100%)" }}
+        >
+          <span className="absolute inset-0" style={{ background: `linear-gradient(to bottom, ${base}00 ${range.start}%, ${base} ${range.end}%)` }} />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          <NumberField
+            disabled={disabled}
+            error={startError}
+            id="popup-design-degrade-inicio"
+            label={copy.fadeStart}
+            max={FADE_START_LIMITS.max}
+            min={FADE_START_LIMITS.min}
+            onChange={(start) => onChange(withFadeStart(fade, start))}
+            slider
+            sliderScale={FADE_SLIDER_SCALE}
+            suffix="%"
+            value={range.start}
+          />
+          <NumberField
+            disabled={disabled}
+            error={endError}
+            id="popup-design-degrade-fim"
+            label={copy.fadeEnd}
+            max={FADE_END_LIMITS.max}
+            min={FADE_END_LIMITS.min}
+            onChange={(end) => onChange(withFadeEnd(fade, end))}
+            slider
+            sliderScale={FADE_SLIDER_SCALE}
+            suffix="%"
+            value={range.end}
+          />
+        </div>
+      </div>
+      <p className="text-xs leading-5 text-[var(--text-secondary)]">{copy.fadeHint}</p>
+    </div>
+  );
+}
 
 type VideoPhase = { kind: "idle" } | { kind: "checking" } | { kind: "uploading"; percent: number };
 
@@ -245,8 +321,25 @@ export function MediaSection({ design, disabled, draft, errorFor, latest, onBusy
 
       {media.kind !== "none" ? (
         <>
-          <PillField disabled={disabled} label={copy.aspect} name="popup-design-midia-formato" onChange={(aspect) => updateMedia({ aspect })} options={MEDIA_ASPECT_OPTIONS} value={media.aspect} />
-          <PillField disabled={disabled} label={copy.position} name="popup-design-midia-recorte" onChange={(position) => updateMedia({ position })} options={MEDIA_POSITION_OPTIONS} value={media.position} />
+          <PillField
+            disabled={disabled}
+            error={errorFor("design.media.aspect")}
+            label={copy.aspect}
+            name="popup-design-midia-formato"
+            onChange={(aspect) => updateMedia({ aspect })}
+            options={MEDIA_ASPECT_OPTIONS}
+            value={media.aspect}
+          />
+          <PillField
+            disabled={disabled}
+            error={errorFor("design.media.position")}
+            hint={copy.positionHint}
+            label={copy.position}
+            name="popup-design-midia-recorte"
+            onChange={(position) => updateMedia({ position })}
+            options={MEDIA_POSITION_OPTIONS}
+            value={media.position}
+          />
           <div className="flex min-w-0 flex-col gap-4">
             <AdminSwitch
               checked={media.fade.enabled}
@@ -257,28 +350,31 @@ export function MediaSection({ design, disabled, draft, errorFor, latest, onBusy
             />
             {media.fade.enabled ? (
               <div className="flex min-w-0 flex-col gap-4 border-l-2 border-[var(--border-subtle)] pl-4">
-                <NumberField
+                <FadeRangeFields
+                  color={fadeColorOf(design)}
                   disabled={disabled}
-                  error={errorFor("design.media.fade.height")}
-                  id="popup-design-degrade-altura"
-                  label={copy.fadeHeight}
-                  max={POPUP_DESIGN_LIMITS.fadeHeight.max}
-                  min={POPUP_DESIGN_LIMITS.fadeHeight.min}
-                  onChange={(height) => updateMedia({ fade: { ...media.fade, height } })}
-                  suffix="%"
-                  value={media.fade.height}
+                  endError={errorFor("design.media.fade.end")}
+                  fade={media.fade}
+                  onChange={(fade) => updateMedia({ fade })}
+                  startError={errorFor("design.media.fade.height")}
                 />
                 <AdminSwitch
                   checked={media.fade.color === "auto"}
+                  description={media.fade.color === "auto" ? copy.fadeAutoHint : undefined}
                   disabled={disabled}
                   id="popup-design-degrade-auto"
                   label={copy.fadeAuto}
-                  onCheckedChange={(auto) =>
-                    updateMedia({ fade: { ...media.fade, color: auto ? "auto" : design.card.background.kind === "solid" ? design.card.background.color : design.card.background.from } })
-                  }
+                  onCheckedChange={(auto) => updateMedia({ fade: { ...media.fade, color: auto ? "auto" : paintBaseColor(design.card.background) } })}
                 />
                 {media.fade.color !== "auto" ? (
-                  <ColorField disabled={disabled} id="popup-design-degrade-cor" label={copy.fadeColor} onChange={(color) => updateMedia({ fade: { ...media.fade, color } })} value={media.fade.color} />
+                  <ColorField
+                    disabled={disabled}
+                    error={errorFor("design.media.fade.color")}
+                    id="popup-design-degrade-cor"
+                    label={copy.fadeColor}
+                    onChange={(color) => updateMedia({ fade: { ...media.fade, color } })}
+                    value={media.fade.color}
+                  />
                 ) : null}
               </div>
             ) : null}

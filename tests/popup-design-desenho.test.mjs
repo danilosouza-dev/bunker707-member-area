@@ -226,12 +226,12 @@ test("zona do texto: 'Subir' em cqw (% da altura da midia), sem midia nao sobe, 
   const design = starter();
   const below = styles.popupTextGroupCss(design, true);
 
-  assert.equal(below.marginTop, "-15.75cqw", "subir 28% de uma midia 16:9 = 28 x 0,5625 cqw");
+  assert.equal(below.marginTop, "-19.125cqw", "subir 34% de uma midia 16:9 = 34 x 0,5625 cqw");
   assert.equal(below.padding, `${model.scaledLength(24, W)} ${model.scaledLength(24, W)} 0`);
   assert.equal(below.alignItems, "center");
   assert.equal(below.gap, model.scaledLength(12, W));
   assert.equal(styles.popupTextGroupCss(design, false).marginTop, undefined, "sem midia nao sobe");
-  assert.equal(styles.popupTextGroupCss({ ...design, media: { ...design.media, aspect: "1:1" } }, true).marginTop, "-28cqw");
+  assert.equal(styles.popupTextGroupCss({ ...design, media: { ...design.media, aspect: "1:1" } }, true).marginTop, "-34cqw");
 
   const over = { ...design, text: { ...design.text, placement: "over-bottom" } };
   assert.equal(styles.isTextOverMedia(over, true), true);
@@ -245,14 +245,66 @@ test("zona do texto: 'Subir' em cqw (% da altura da midia), sem midia nao sobe, 
   assert.equal(styles.popupMediaFillCss({ ...design, media: { ...design.media, position: "top" } }).objectPosition, "center top");
 });
 
-test("degrade da midia: so ligado, na altura escolhida, ate o fundo do cartao", () => {
+/** O design com o degrade trocado (as outras partes do modelo ficam). */
+const withFade = (design, fade) => ({ ...design, media: { ...design.media, fade: { ...design.media.fade, ...fade } } });
+
+/** As paradas de um linear-gradient de hex: [{ alpha 0..255, at % }]. */
+function stopsOf(css) {
+  return [...css.matchAll(/#([0-9a-f]{6})([0-9a-f]{2})? (-?[\d.]+)%/g)].map((match) => ({ alpha: match[2] ? parseInt(match[2], 16) : 255, at: Number(match[3]) }));
+}
+
+test("degrade 'Igual ao fundo do cartão': mascara na caixa da midia (opaca ate o comeco, some ate o fim, transparente embaixo)", () => {
   const design = starter();
+  const box = styles.popupMediaBoxCss(design, false);
+  const mask = "linear-gradient(180deg, #000000 0%, #000000 50%, #000000a6 68.9%, #00000040 81.5%, #00000000 92%)";
+
+  assert.deepEqual(design.media.fade, { color: "auto", enabled: true, end: 92, height: 42 }, "o modelo escurece de 50 % a 92 % da midia");
+  assert.equal(box.maskImage, mask);
+  assert.equal(box.WebkitMaskImage, mask, "Safari: -webkit-mask-image");
+  assert.equal(styles.popupFadeCss(design), null, "sem camada por cima: o fundo de verdade do cartao aparece por baixo");
+  assert.equal(model.popupFadeSpan(design.media.fade).start, 50);
+
+  const off = withFade(design, { enabled: false });
+  assert.equal(styles.popupMediaBoxCss(off, false).maskImage, undefined, "desligado: nem mascara");
+  assert.equal(styles.popupFadeCss(off), null, "desligado: nem camada");
+
+  // Passagem maior que o fim: comeca no topo (nunca acima).
+  assert.equal(model.fadeMaskCss(withFade(design, { end: 45, height: 80 })), "linear-gradient(180deg, #000000 0%, #000000 0%, #000000a6 20.25%, #00000040 33.75%, #00000000 45%)");
+});
+
+test("degrade de outra cor: camada do comeco da passagem ate embaixo, cor solida depois do fim; nunca mascara", () => {
+  const design = withFade(starter(), { color: "#101010", end: 70, height: 35 });
   const fade = styles.popupFadeCss(design);
 
+  // A camada tem 65 % da midia (de 35 % ate embaixo): as paradas 35 % -> 50,75 % -> 61,25 % -> 70 % da midia.
+  assert.equal(fade.background, "linear-gradient(180deg, #10101000 0%, #10101059 24.23%, #101010bf 40.38%, #101010 53.85%)");
+  assert.equal(fade.height, "calc(65% + 1px)");
+  assert.equal(fade.bottom, "-1px");
+  assert.equal(fade.pointerEvents, "none");
+  assert.equal(styles.popupMediaBoxCss(design, false).maskImage, undefined);
+  assert.equal(styles.popupFadeCss(withFade(design, { enabled: false })), null);
+});
+
+test("design salvo antes do 'Fica totalmente escuro em' (sem end): o mesmo degrade de antes, nos dois modos", () => {
+  const old = { ...starter(), media: { ...starter().media, fade: { color: "#16181c", enabled: true, height: 65 } } };
+
+  // Outra cor: exatamente o CSS da versao anterior (camada de 65 % embaixo, paradas 0/45/75/100).
+  const fade = styles.popupFadeCss(old);
   assert.equal(fade.background, "linear-gradient(180deg, #16181c00 0%, #16181c59 45%, #16181cbf 75%, #16181c 100%)");
   assert.equal(fade.height, "calc(65% + 1px)");
-  assert.equal(fade.pointerEvents, "none");
-  assert.equal(styles.popupFadeCss({ ...design, media: { ...design.media, fade: { ...design.media.fade, enabled: false } } }), null);
+  assert.deepEqual(model.popupFadeSpan(old.media.fade), { end: 100, start: 35 });
+
+  // "Igual ao fundo do cartão": a mascara e o complemento da camada de antes nas mesmas alturas da midia
+  // (cor por cima com alfa a = mascara com 1 - a sobre o mesmo fundo de cor): o aluno ve o mesmo cartao.
+  const auto = { ...old, media: { ...old.media, fade: { color: "auto", enabled: true, height: 65 } } };
+  const mask = stopsOf(styles.popupMediaBoxCss(auto, false).maskImage).slice(1);
+  const layer = stopsOf(fade.background).map(({ alpha, at }) => ({ alpha, at: Math.round((35 + (at * 65) / 100) * 100) / 100 }));
+  assert.deepEqual(
+    mask.map(({ alpha, at }) => ({ alpha: 255 - alpha, at })),
+    layer,
+    "mascara (opaca ate 35 %, depois 64,25 %, 83,75 %, 100 %) = 1 - a camada de antes"
+  );
+  assert.equal(styles.popupFadeCss(auto), null);
 });
 
 test("cartao: largura (a escolhida ou a tela - 2 rem), container das unidades cqw, cantos em cqw, base Inter", () => {
@@ -266,6 +318,63 @@ test("cartao: largura (a escolhida ou a tela - 2 rem), container das unidades cq
   assert.equal(card.overflow, "hidden");
   assert.equal(card.fontFamily, model.POPUP_BUILTIN_FONTS.inter.stack);
   assert.deepEqual(styles.popupCloseCss(design), { background: "#00000099", color: "#ffffff" });
+});
+
+const CARD_IMAGE_URL = `${ORIGIN}/storage/v1/object/public/content-assets/communications/images/0123456789abcdef01234567.webp`;
+const withCardImage = (design, image = {}) => ({
+  ...design,
+  card: { ...design.card, background: { color: "#16181c", dim: 40, kind: "image", position: "bottom", url: CARD_IMAGE_URL, ...image } }
+});
+
+test("imagem no fundo do cartao: na largura do cartao, presa onde foi escolhida, escuro por cima, borda sumindo na cor de apoio; so do nosso bucket", () => {
+  const design = withCardImage(starter());
+  const box = (position) => `${position} / 100% 56.25cqw no-repeat border-box`;
+
+  // Embaixo (o video em cima passando para a imagem embaixo): a borda de cima some na cor; 40 % de escuro = 66.
+  assert.equal(
+    styles.popupCardCss(design).background,
+    [
+      `linear-gradient(180deg, #16181c 0%, #16181c00 40%) ${box("center bottom")}`,
+      `linear-gradient(#00000066, #00000066) ${box("center bottom")}`,
+      `url("${CARD_IMAGE_URL}") ${box("center bottom")}`,
+      "#16181c"
+    ].join(", ")
+  );
+  assert.equal(
+    styles.popupCardCss(withCardImage(starter(), { dim: 0, position: "top" })).background,
+    [
+      `linear-gradient(0deg, #16181c 0%, #16181c00 40%) ${box("center top")}`,
+      `linear-gradient(#00000000, #00000000) ${box("center top")}`,
+      `url("${CARD_IMAGE_URL}") ${box("center top")}`,
+      "#16181c"
+    ].join(", "),
+    "em cima: a borda de baixo some; sem escuro"
+  );
+  assert.match(
+    styles.popupCardCss(withCardImage(starter(), { color: "#101010cc", dim: 80, position: "center" })).background,
+    /^linear-gradient\(180deg, #101010cc 0%, #10101000 30%, #10101000 70%, #101010cc 100%\) center center \/ 100% 56\.25cqw no-repeat border-box, linear-gradient\(#000000cc, #000000cc\) center center /,
+    "no meio: as duas bordas somem; 80 % de escuro = cc; cor de apoio com transparencia"
+  );
+
+  // Endereco que nao e do nosso bucket de imagens (outra pasta, outro bucket, outro formato, com query): so a cor.
+  for (const url of [
+    `${ORIGIN}/storage/v1/object/public/content-assets/catalog/0123456789abcdef01234567.webp`,
+    `${ORIGIN}/storage/v1/object/public/communication-fonts/communications/images/0123456789abcdef01234567.webp`,
+    `${ORIGIN}/storage/v1/object/public/content-assets/communications/images/0123456789abcdef01234567.png`,
+    `${CARD_IMAGE_URL}?x=")`,
+    "javascript:alert(1)",
+    // O URL do navegador aceita aspas e ";" no nome da maquina: nunca entra no url("...") do CSS.
+    `https://a";color:red;x.supabase.co/storage/v1/object/public/content-assets/communications/images/0123456789abcdef01234567.webp`,
+    `https://a)b.supabase.co/storage/v1/object/public/content-assets/communications/images/0123456789abcdef01234567.webp`,
+    `http://evil.example/storage/v1/object/public/content-assets/communications/images/0123456789abcdef01234567.webp`
+  ]) {
+    assert.equal(styles.popupCardCss(withCardImage(starter(), { url })).background, "#16181c", url);
+  }
+
+  // A mascara da midia deixa a imagem aparecer onde a midia some; "auto" do degrade usa a cor de apoio.
+  assert.ok(styles.popupMediaBoxCss(design, false).maskImage);
+  assert.equal(model.fadeColorOf(design), "#16181c");
+  assert.equal(model.fadeColorOf(withFade(design, { color: "#202020" })), "#202020");
 });
 
 test("o primeiro bloco guarda o canto do X so quando o texto comeca no topo do cartao", () => {
@@ -415,14 +524,37 @@ test("Personalizado: linhas do titulo e texto de verdade, cores, <h2>/<p> com os
   assert.match(html, /<span style="[^"]*background:#ff4fa3[^"]*"><span [^>]*>Novidade<\/span><\/span>/);
   assert.match(html, /<a class="[^"]*" data-popup-button="primary" href="\/minhas-compras" style="[^"]*background:#e0ff3a[^"]*"><span [^>]*>Saiba mais<\/span><\/a>/);
   assert.match(html, /<img alt="Capa da aula nova"[^>]*src="https:\/\/projeto\.supabase\.co\/storage\/v1\/object\/public\/content-assets\/communications\/images\/capa\.webp"/);
-  assert.match(html, /data-popup-fade=""/);
+  assert.match(html, /<div data-popup-media="image" style="[^"]*mask-image:linear-gradient\(180deg, #000000 0%, #000000 50%[^"]*-webkit-mask-image:linear-gradient\(180deg, #000000 0%/);
+  assert.doesNotMatch(html, /data-popup-fade=""/, "'Igual ao fundo do cartão' e a mascara, sem camada por cima");
   assert.doesNotMatch(html, /<video/);
   assert.match(html, /<button [^>]*type="button">Lembrar depois<\/button>/);
   assert.match(html, /<button [^>]*type="button">Não mostrar de novo<\/button>/);
   assert.match(html, /<button aria-label="Fechar" class="[^"]*size-9[^"]*before:-inset-1[^"]*" style="background:#00000099;color:#ffffff" type="button">/);
   assert.doesNotMatch(html, /user-select/, "texto selecionavel (o navegador decide; nada de user-select: none)");
-  assert.equal((html.match(/pointer-events:none/g) ?? []).length, 1, "so o degrade deixa o toque passar");
+  assert.equal((html.match(/pointer-events:none/g) ?? []).length, 0, "nada por cima do cartao segura ou deixa passar o toque");
+  const colored = render(createElement(MemberPopupCard, { popup: popupOf(withFade(design, { color: "#101010" })) }));
+  assert.match(colored, /data-popup-fade=""/, "outra cor: a camada por cima da midia");
+  assert.equal((colored.match(/pointer-events:none/g) ?? []).length, 1, "so a camada do degrade deixa o toque passar");
   assert.doesNotMatch(html, /Nome do pop-up nas listas/, "o titulo do aviso nao aparece no Personalizado");
+});
+
+test("imagem no fundo do cartao no HTML: no proprio cartao (atras da midia e do texto), igual com ou sem movimento", () => {
+  const design = withCardImage(starter("media_top_fade", { video: VIDEO }));
+  const html = render(createElement(MemberPopupCard, { popup: popupOf(design) }));
+  const cardStyle = html.match(/<div data-fonts-ready="" data-popup-design="" style="[^"]*"><div style="([^"]*)"/)[1];
+
+  assert.ok(
+    cardStyle.startsWith(
+      "background:linear-gradient(180deg, #16181c 0%, #16181c00 40%) center bottom / 100% 56.25cqw no-repeat border-box, " +
+        "linear-gradient(#00000066, #00000066) center bottom / 100% 56.25cqw no-repeat border-box, " +
+        `url(&quot;${CARD_IMAGE_URL}&quot;) center bottom / 100% 56.25cqw no-repeat border-box, #16181c;`
+    ),
+    cardStyle
+  );
+  // No servidor (sem saber do movimento) a caixa do video fica vazia, mas o fundo ja e a imagem; com a mascara.
+  assert.match(html, /data-popup-media="pending" style="[^"]*mask-image:/);
+  assert.equal((html.match(/url\(&quot;/g) ?? []).length, 1, "a imagem do fundo uma vez so, no cartao");
+  assert.match(html, /<h2[^>]*>/, "o texto continua de verdade por cima");
 });
 
 test("degrade no titulo e no texto vira background-clip: text no HTML", () => {

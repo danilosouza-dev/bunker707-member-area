@@ -1654,6 +1654,8 @@ Produto em `docs/26`. O pop-up "Personalizado" (midia com video ou imagem que so
 
 **campaigns**: `popup_design jsonb` (nulo = **Padrão**, o visual de antes; nenhuma linha e reescrita). Check `campaigns_popup_design_v1`: nulo, ou `kind = 'popup'` com objeto, `version` numerica (com `coalesce`, para um objeto sem `version` nao passar) e `pg_column_size <= 32768`. O formato fino (versao 1: `card`, `media`, `text`, `blocks[]`, `close`, `links`, `fonts[]`) mora no zod `popup-design-schema.ts`, conferido ao salvar **e** ao ler (invalido ou de outra versao = Padrão). O video guarda `{ path, url, mimeType }` e a url e recalculada do caminho pelo servidor; fontes enviadas so pelo id. O design nao cita o aviso (pode virar modelo salvo sem migracao). `CAMPAIGN_COLUMNS` le a coluna; a notificacao nunca tem design (o app tira a chave; o check recusa).
 
+Desde 23/10/2026 (sem migracao; a versao continua 1): `media.fade` ganhou `end` (20 a 100, % da altura da midia em que o degrade fica total; `height` continua o comprimento da passagem, que comeca em `max(0, end - height)`); o zod le o design sem `end` como 100, entao o design ja salvo fica igual. `card.background` ganhou `{ kind: "image", url, position: "top" | "center" | "bottom", dim: 0..80, color }`, com a url so do objeto publico `content-assets/communications/images/<24 hex>.webp` (onde o `uploadNoticeImage` grava), recalculada do caminho pelo servidor como a do video (`docs/26` §3.1).
+
 **communication_fonts** (nova; a biblioteca de fontes enviadas pela equipe):
 
 | Coluna | Tipo | Regra |

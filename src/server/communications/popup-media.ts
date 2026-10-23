@@ -10,12 +10,17 @@ import "server-only";
 //   assinatura e a estrutura minima do cabecalho, grava em communication-fonts/fonts/<24 hex do sha256>.<ext>
 //   (o mesmo arquivo nao duplica) com o tipo do formato encontrado, e cria a linha da biblioteca com a familia
 //   bf_<12 hex aleatorios> (o nome do produtor so aparece no seletor do editor, nunca no CSS).
+// - Imagem do fundo do cartao: a imagem do aviso (uploadNoticeImage confere o WebP e grava em
+//   content-assets/communications/images/<24 hex>.webp). Ao salvar um caminho novo, o servidor confere que o
+//   objeto existe no nosso bucket e foi gravado como WebP (inspectPopupCardImage).
 // Modulo do servidor; os testes de unidade carregam com "server-only" trocado por um duble.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { assertNoDbError, CommunicationError, type CommunicationsDb } from "./db";
 import {
+  POPUP_CARD_IMAGE_BUCKET,
+  POPUP_CARD_IMAGE_PATH_PATTERN,
   POPUP_FONT_LIMITS,
   POPUP_FONT_PATH_PATTERN,
   POPUP_FONTS_BUCKET,
@@ -33,6 +38,7 @@ import { fontRowToFace, POPUP_FONT_COLUMNS, type PopupFontRow } from "./popup-fo
 export const POPUP_VIDEO_FORMAT_MESSAGE = "Use um vídeo MP4 (H.264) ou WEBM.";
 export const POPUP_VIDEO_SIZE_MESSAGE = "O vídeo deve ter no máximo 15 MB.";
 export const POPUP_VIDEO_AGAIN_MESSAGE = "Envie o vídeo de novo.";
+export const POPUP_CARD_IMAGE_AGAIN_MESSAGE = "Envie a imagem do fundo de novo.";
 export const POPUP_FONT_FORMAT_MESSAGE = "Use uma fonte WOFF2, WOFF, TTF ou OTF.";
 export const POPUP_FONT_SIZE_MESSAGE = "A fonte deve ter no máximo 2 MB.";
 export const POPUP_FONT_FILE_MESSAGE = "Escolha um arquivo de fonte.";
@@ -305,6 +311,34 @@ export async function inspectPopupVideo(db: CommunicationsDb, objectPath: string
   }
 
   return { sizeBytes, video: { mimeType: expected, path: objectPath, url } };
+}
+
+/**
+ * Confere a imagem do fundo do cartao no nosso bucket de imagens: caminho communications/images/<24 hex>.webp,
+ * o objeto existe e foi gravado como WebP (so o uploadNoticeImage grava ali, depois de conferir o WebP).
+ * Faltando ou fora disso: CommunicationError com "Envie a imagem do fundo de novo." (nada e apagado: a
+ * imagem pode ser a de outro aviso).
+ */
+export async function inspectPopupCardImage(db: CommunicationsDb, objectPath: string): Promise<void> {
+  if (!POPUP_CARD_IMAGE_PATH_PATTERN.test(objectPath)) {
+    throw new CommunicationError(POPUP_CARD_IMAGE_AGAIN_MESSAGE, 400);
+  }
+
+  const info = await db.storage.from(POPUP_CARD_IMAGE_BUCKET).info(objectPath);
+
+  if (info.error) {
+    if (isStorageNotFound(info.error as { message?: string; status?: unknown; statusCode?: unknown })) {
+      throw new CommunicationError(POPUP_CARD_IMAGE_AGAIN_MESSAGE, 404);
+    }
+
+    throw new Error(`Comunicacao: nao foi possivel ler a imagem do fundo no Storage: ${info.error.message}`);
+  }
+
+  const details = info.data as { contentType?: unknown; metadata?: { mimetype?: unknown } | null };
+
+  if (baseMimeType(details.contentType ?? details.metadata?.mimetype) !== "image/webp") {
+    throw new CommunicationError(POPUP_CARD_IMAGE_AGAIN_MESSAGE, 422);
+  }
 }
 
 /* ------------------------------------------------------------------------------------------------

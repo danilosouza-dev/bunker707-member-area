@@ -17,7 +17,9 @@ import {
 } from "./popup-design-styles";
 
 // Midia do pop-up "Personalizado" (docs/26): a imagem do aviso, ou o video mudo em repeticao (inline, sem
-// controles, sem picture-in-picture) com a imagem de capa, e o degrade por cima ate o fundo do cartao.
+// controles, sem picture-in-picture) com a imagem de capa, sumindo no fundo do cartao entre "Começa a escurecer
+// em" e "Fica totalmente escuro em": com "Igual ao fundo do cartão" a caixa leva uma mascara (o fundo de verdade
+// do cartao, cor, degrade ou imagem, aparece por baixo); com outra cor, uma camada por cima (popupFadeCss).
 //
 // Menos movimento (prefers-reduced-motion) ou economia de dados (Save-Data): so a capa, e o <video> nem e
 // montado, entao nada do video e baixado. A preferencia e lida antes de desenhar (useSyncExternalStore: na

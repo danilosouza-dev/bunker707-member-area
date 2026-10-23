@@ -256,9 +256,22 @@ test("foco: cada chave do design leva ao campo da tabela do §7.2", () => {
     ["design.blocks.3", "#popup-design-bloco-3"],
     ["design.blocks", "#popup-design-blocos"],
     ["design.media.video", "#popup-design-video"],
-    ["design.media.fade.height", "[name='popup-design-midia']"],
+    ["design.media.position", "[name='popup-design-midia-recorte']"],
+    ["design.media.fade.end", "#popup-design-degrade-fim"],
+    ["design.media.fade.height", "#popup-design-degrade-inicio"],
+    ["design.media.fade.color", "#popup-design-degrade-cor"],
+    ["design.media.fade", "#popup-design-degrade"],
+    ["design.media.kind", "[name='popup-design-midia']"],
     ["design.media", "[name='popup-design-midia']"],
     ["design.text.gap", "[name='popup-design-posicao']"],
+    ["design.card.background.url", "[aria-labelledby='popup-design-cartao-imagem-label']"],
+    ["design.card.background.position", "[name='popup-design-cartao-imagem-parte']"],
+    ["design.card.background.dim", "#popup-design-cartao-imagem-escurecer"],
+    ["design.card.background.color", "#popup-design-cartao-fundo-cor"],
+    ["design.card.background.from", "#popup-design-cartao-fundo-de"],
+    ["design.card.background.to", "#popup-design-cartao-fundo-para"],
+    ["design.card.background.angle", "#popup-design-cartao-fundo-angulo"],
+    ["design.card.background", "[name='popup-design-cartao-fundo-tipo']"],
     ["design.card.radius", "#popup-design-cartao"],
     ["design.close.color", "#popup-design-fechar"],
     ["design.links.color", "#popup-design-fechar"],
@@ -303,6 +316,18 @@ test("foco: os erros que o schema da de verdade caem no seletor certo, e os ids 
   const semBloco = errorsOf(popupDraft({ design: { ...design, blocks: design.blocks.filter((block) => block.type !== "button") } }));
   assert.equal(semBloco["design.blocks"], "Falta o bloco do botão principal no design.");
 
+  // Fundo do cartao com Imagem: sem imagem ainda (url vazia) ou link de fora caem no campo da imagem do fundo.
+  const fundoImagem = (url) => ({ ...design, card: { ...design.card, background: { color: "#16181c", dim: 40, kind: "image", position: "center", url } } });
+  for (const url of ["", "https://exemplo.com/imagem.webp"]) {
+    const erros = errorsOf(popupDraft({ design: fundoImagem(url) }));
+    const chave = Object.keys(erros).find((key) => key.startsWith("design.card.background"));
+    assert.ok(chave, `fundo com imagem "${url}" da erro no fundo`);
+    assert.equal(editor.popupDesignFocusSelector(chave), "[aria-labelledby='popup-design-cartao-imagem-label']", chave);
+  }
+
+  const fadeFora = errorsOf(popupDraft({ design: { ...design, media: { ...design.media, fade: { ...design.media.fade, end: 10 } } } }));
+  assert.equal(editor.popupDesignFocusSelector(Object.keys(fadeFora).find((key) => key.startsWith("design.media.fade"))), "#popup-design-degrade-fim");
+
   // Os ids e nomes dos seletores existem nas telas do editor.
   const pasta = new URL("../src/components/admin/v2/communication/popup-design/", import.meta.url);
   const telas = (await Promise.all((await readdir(pasta)).filter((file) => file.endsWith(".tsx")).map((file) => readFile(new URL(file, pasta), "utf8")))).join("\n");
@@ -323,10 +348,31 @@ test("foco: os erros que o schema da de verdade caem no seletor certo, e os ids 
     "-link`",
     "-acao`",
     'idPrefix="aviso"',
-    'id="aviso-imagem"'
+    'id="aviso-imagem"',
+    // Mídia: a parte que aparece e o degradê (comeco, fim, cor).
+    'name="popup-design-midia-recorte"',
+    'id="popup-design-degrade"',
+    'id="popup-design-degrade-inicio"',
+    'id="popup-design-degrade-fim"',
+    'id="popup-design-degrade-cor"',
+    // Cartão > Fundo: Cor | Degradê | Imagem (a imagem pelo campo de imagem de sempre: rotulo `${id}-label`).
+    'id="popup-design-cartao-fundo"',
+    'name="popup-design-cartao-fundo-tipo"',
+    "`${id}-cor`",
+    "`${id}-de`",
+    "`${id}-para`",
+    "`${id}-angulo`",
+    'id="popup-design-cartao-imagem"',
+    'name="popup-design-cartao-imagem-parte"',
+    'id="popup-design-cartao-imagem-escurecer"',
+    'id="popup-design-cartao-fundo-cor"'
   ]) {
     assert.ok(telas.includes(pedaco), `as telas tem ${pedaco}`);
   }
+
+  // A imagem do fundo usa o campo de imagem de sempre: o botao da moldura e rotulado por `${id}-label`.
+  const campoImagem = await readFile(new URL("../src/components/admin/v2/products/image-field.tsx", import.meta.url), "utf8");
+  assert.ok(campoImagem.includes("aria-labelledby={`${id}-label`}"));
 
   // O editor soma "design" ao FIELD_FOCUS (depois do botao, antes de "Para quem") e resolve o seletor pelo modelo.
   const editorTela = await readFile(new URL("../src/components/admin/v2/communication/notice-editor.tsx", import.meta.url), "utf8");
@@ -420,6 +466,90 @@ test("numeros: so o valor dentro do limite vale (o mesmo texto do zod no limite)
   assert.equal(zod.error.issues[0].message, editor.rangeMessage(0.8, 2), "a frase da tela e a do zod");
 });
 
+/* ------------------------------------------------------------------------------------------------
+ * Degradê da mídia: "Começa a escurecer em" e "Fica totalmente escuro em" <-> { end, height }
+ * ---------------------------------------------------------------------------------------------- */
+
+test("degradê: comeco e fim na tela viram { end, height = fim - comeco } e voltam iguais", () => {
+  assert.deepEqual(editor.FADE_START_LIMITS, { max: 90, min: 0 });
+  assert.deepEqual(editor.FADE_END_LIMITS, { max: 100, min: 20 });
+
+  // O design salvo antes (sem `end` = 100): 75 % de altura = escurece de 25 % ate o fim, como antes.
+  assert.deepEqual(editor.fadeRangeOf({ end: 100, height: 75 }), { end: 100, start: 25 });
+  assert.deepEqual(editor.fadeRangeOf({ end: 100, height: 100 }), { end: 100, start: 0 });
+  assert.deepEqual(editor.fadeRangeOf({ end: 40, height: 75 }), { end: 40, start: 0 }, "nunca acima do topo");
+
+  // A configuracao do produtor so subindo o escuro: de 35 % a 70 %.
+  assert.deepEqual(editor.fadeFromRange({ end: 70, start: 35 }), { end: 70, height: 35 });
+  assert.deepEqual(editor.fadeFromRange({ end: 100, start: 0 }), { end: 100, height: 100 });
+
+  // Ida e volta para todo comeco e fim validos (comeco pelo menos 10 % antes do fim).
+  for (let end = 20; end <= 100; end += 5) {
+    for (let start = 0; start <= Math.min(90, end - 10); start += 5) {
+      const span = editor.fadeFromRange({ end, start });
+      assert.ok(span.height >= 10 && span.height <= 100 && span.end === end, `${start}-${end}`);
+      assert.deepEqual(editor.fadeRangeOf(span), { end, start }, `${start}-${end}`);
+    }
+  }
+
+  // Fora do limite: o mais perto que vale (inteiro, comeco < fim com 10 % de passagem).
+  assert.deepEqual(editor.fadeFromRange({ end: 150, start: -20 }), { end: 100, height: 100 });
+  assert.deepEqual(editor.fadeFromRange({ end: 5, start: 0 }), { end: 20, height: 20 });
+  assert.deepEqual(editor.fadeFromRange({ end: 50, start: 48 }), { end: 50, height: 10 });
+  assert.deepEqual(editor.fadeFromRange({ end: 70.4, start: 34.6 }), { end: 70, height: 35 });
+});
+
+test("degradê: mudar o comeco ou o fim mexe so nele; passar do outro empurra o outro junto (10 % de passagem)", () => {
+  const fade = { color: "auto", enabled: true, end: 100, height: 75 };
+
+  // Subir o escuro como o produtor quer: comeco 35, fim 70.
+  const comFim = editor.withFadeEnd(fade, 70);
+  assert.deepEqual(comFim, { color: "auto", enabled: true, end: 70, height: 45 }, "o comeco (25 %) fica");
+  const subido = editor.withFadeStart(comFim, 35);
+  assert.deepEqual(subido, { color: "auto", enabled: true, end: 70, height: 35 });
+  assert.deepEqual(editor.fadeRangeOf(subido), { end: 70, start: 35 });
+
+  // O comeco passando do fim empurra o fim para baixo; o fim subindo acima do comeco puxa o comeco para cima.
+  assert.deepEqual(editor.fadeRangeOf(editor.withFadeStart(subido, 80)), { end: 90, start: 80 });
+  assert.deepEqual(editor.fadeRangeOf(editor.withFadeStart(subido, 95)), { end: 100, start: 90 }, "comeco no maximo 90");
+  assert.deepEqual(editor.fadeRangeOf(editor.withFadeEnd(subido, 40)), { end: 40, start: 30 });
+  assert.deepEqual(editor.fadeRangeOf(editor.withFadeEnd(subido, 10)), { end: 20, start: 10 }, "fim no minimo 20");
+
+  // O resultado sempre passa no zod do design.
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+  for (const next of [comFim, subido, editor.withFadeStart(subido, 95), editor.withFadeEnd(subido, 10), editor.withFadeStart(fade, 0)]) {
+    assert.equal(designSchema.popupDesignSchema.safeParse({ ...design, media: { ...design.media, fade: next } }).success, true, JSON.stringify(next));
+  }
+});
+
+test("fundo do cartão: Cor | Degradê | Imagem levam a cor junto; a imagem vazia pede envio; a ultima imagem volta", () => {
+  assert.deepEqual(
+    editor.CARD_BACKGROUND_KIND_OPTIONS.map((option) => option.label),
+    ["Cor", "Degradê", "Imagem"]
+  );
+
+  const cor = { color: "#16181c", kind: "solid" };
+  const imagemVazia = editor.cardBackgroundOfKind("image", cor, null);
+  assert.deepEqual(imagemVazia, { color: "#16181c", dim: 40, kind: "image", position: "bottom", url: "" }, "a cor vira a cor de apoio, embaixo");
+  assert.deepEqual(editor.cardBackgroundOfKind("solid", imagemVazia, null), cor, "e volta");
+  assert.deepEqual(editor.cardBackgroundOfKind("gradient", imagemVazia, null), { angle: 90, from: "#16181c", kind: "gradient", to: "#a78bfa" });
+  assert.deepEqual(editor.cardBackgroundOfKind("solid", { angle: 90, from: "#2a1a5e", kind: "gradient", to: "#0b0b12" }, null), { color: "#2a1a5e", kind: "solid" });
+  assert.equal(editor.cardBackgroundOfKind("solid", cor, null), cor, "o mesmo tipo nao muda nada");
+
+  // A imagem que ja foi escolhida volta (com a cor de agora como apoio), sem enviar de novo.
+  const url = `${ORIGIN}/storage/v1/object/public/content-assets/communications/images/0123456789abcdef01234567.webp`;
+  const escolhida = { color: "#000000", dim: 55, kind: "image", position: "bottom", url };
+  assert.deepEqual(editor.cardBackgroundOfKind("image", { color: "#202020", kind: "solid" }, escolhida), { ...escolhida, color: "#202020" });
+
+  // O zod: a imagem nossa passa; vazia ou de fora, nao (o editor leva o erro ao campo da imagem do fundo).
+  const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+  const comFundo = (background) => designSchema.popupDesignSchema.safeParse({ ...design, card: { ...design.card, background } }).success;
+  assert.equal(comFundo(escolhida), true);
+  assert.equal(comFundo(imagemVazia), false);
+  assert.equal(comFundo({ ...escolhida, url: "https://exemplo.com/communications/images/0123456789abcdef01234567.webp" }), false);
+  assert.equal(comFundo({ ...escolhida, dim: 81 }), false, "escurecer ate 80 %");
+});
+
 test("comparacao: o mesmo design com cor maiuscula e texto com espaco conta como igual", () => {
   const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
   const mexido = { ...design, links: { color: design.links.color.toUpperCase() } };
@@ -449,6 +579,7 @@ test("vocabulario: os textos do card Design nao usam palavra fora do vocabulario
     editor.LINK_TARGET_OPTIONS,
     editor.FONT_STYLE_OPTIONS,
     editor.PAINT_KIND_OPTIONS,
+    editor.CARD_BACKGROUND_KIND_OPTIONS,
     editor.LINE_PAINT_OPTIONS,
     editor.LINE_SIZE_OPTIONS,
     editor.BLOCK_TYPE_LABELS,
@@ -469,6 +600,17 @@ test("vocabulario: os textos do card Design nao usam palavra fora do vocabulario
   assert.equal(editor.POPUP_DESIGN_COPY.video.hint, "MP4 (H.264) ou WEBM, até 15 MB. Toca sem som, em repetição. Quem prefere menos movimento vê só a imagem.");
   assert.equal(editor.POPUP_DESIGN_COPY.fonts.hint, "Quer uma fonte do Google Fonts? Baixe o arquivo no site e envie aqui. Nada é carregado do Google na hora.");
   assert.equal(editor.POPUP_DESIGN_COPY.content.titleHint, "Aparece nas listas e nos relatórios. Para o aluno, vale o título do design.");
+
+  // Degradê: comeco e fim (nunca mais "Altura do degradê"); o antigo "Recorte" diz que e so o enquadramento.
+  assert.equal(editor.POPUP_DESIGN_COPY.media.fadeStart, "Começa a escurecer em");
+  assert.equal(editor.POPUP_DESIGN_COPY.media.fadeEnd, "Fica totalmente escuro em");
+  assert.match(editor.POPUP_DESIGN_COPY.media.fadeHint, /Suba o escuro para o texto ficar na parte escura\./);
+  assert.equal(editor.POPUP_DESIGN_COPY.media.position, "Parte da mídia que aparece");
+  assert.match(editor.POPUP_DESIGN_COPY.media.positionHint, /não o degradê/);
+  assert.equal("fadeHeight" in editor.POPUP_DESIGN_COPY.media, false);
+  assert.ok(!textos.some((texto) => /\bRecorte\b/.test(texto)), "nenhum rotulo chama a parte da mídia de Recorte");
+  assert.equal(editor.POPUP_DESIGN_COPY.cardSection.backgroundImageDim, "Escurecer a imagem");
+  assert.equal(editor.POPUP_DESIGN_COPY.cardSection.backgroundImagePosition, "Onde a imagem fica");
 
   // As telas do editor tambem (o texto escrito direto no JSX).
   const pasta = new URL("../src/components/admin/v2/communication/popup-design/", import.meta.url);

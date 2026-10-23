@@ -11,7 +11,9 @@
 import type { CSSProperties } from "react";
 import type { AccessPreviewMode } from "../../../../lib/access-preview";
 import {
+  cardBackgroundCss,
   fadeGradientCss,
+  fadeMaskCss,
   fontStackOf,
   fontStretchOf,
   isOwnStorageUrl,
@@ -32,6 +34,7 @@ import {
   POPUP_VIDEO_PATH_PATTERN,
   popupCardOuterWidth,
   popupCardWidthPx,
+  popupFadeSpan,
   scaledButtonHeight,
   scaledFontSize,
   scaledLength,
@@ -231,11 +234,17 @@ export function popupOuterCss(design: PopupDesign): CSSProperties {
   return { containerType: "inline-size", position: "relative", width: popupCardOuterWidth(design) };
 }
 
+/**
+ * O cartao: fundo (cor, degrade ou a imagem na largura do cartao, presa em cima, no meio ou embaixo, com o
+ * escuro por cima, a borda sumindo na cor de apoio e a cor de apoio no resto: cardBackgroundCss), borda, cantos
+ * e sombra. A imagem fica atras da midia e do texto; com o degrade "Igual ao fundo do cartão" a midia some nela
+ * (mascara).
+ */
 export function popupCardCss(design: PopupDesign): CSSProperties {
   const cardWidth = popupCardWidthPx(design);
 
   return {
-    background: paintToCss(design.card.background),
+    background: cardBackgroundCss(design.card.background),
     border: borderCss(design.card.border),
     borderRadius: scaledLength(design.card.radius, cardWidth),
     boxShadow: POPUP_CARD_SHADOW_CSS[design.card.shadow],
@@ -312,13 +321,25 @@ export function popupMediaMode(design: Pick<PopupDesign, "media">, input: { hasI
   return input.hasImage ? "image" : "none";
 }
 
-/** Caixa da midia: o formato escolhido; "Sobre a midia" divide a celula do grid com o texto. */
+/** O degrade "Igual ao fundo do cartão" e uma mascara na caixa da midia (o fundo do cartao aparece por baixo). */
+function fadesIntoCard(design: Pick<PopupDesign, "media">): boolean {
+  return design.media.fade.enabled && design.media.fade.color === "auto";
+}
+
+/**
+ * Caixa da midia: o formato escolhido; "Sobre a midia" divide a celula do grid com o texto. Degrade "Igual
+ * ao fundo do cartão": a mascara (opaca ate o comeco da passagem, transparente do fim para baixo), entao o
+ * fundo de verdade do cartao (cor, degrade ou imagem) aparece onde a midia some.
+ */
 export function popupMediaBoxCss(design: PopupDesign, over: boolean): CSSProperties {
+  const mask = fadesIntoCard(design) ? fadeMaskCss(design) : null;
+
   return {
     aspectRatio: design.media.aspect.replace(":", " / "),
     overflow: "hidden",
     position: "relative",
     width: "100%",
+    ...(mask ? { maskImage: mask, WebkitMaskImage: mask } : null),
     ...(over ? { alignSelf: "start", gridArea: "1 / 1" } : null)
   };
 }
@@ -335,17 +356,23 @@ export function popupMediaFillCss(design: PopupDesign): CSSProperties {
   };
 }
 
-/** O degrade da midia para o fundo do cartao (embaixo, na altura escolhida); null = desligado. */
+/**
+ * O degrade de outra cor por cima da midia: do comeco da passagem ate embaixo, de transparente ate a cor no
+ * fim da passagem e a cor solida dali para baixo. null = desligado ou "Igual ao fundo do cartão" (mascara na
+ * caixa: popupMediaBoxCss).
+ */
 export function popupFadeCss(design: PopupDesign): CSSProperties | null {
-  if (!design.media.fade.enabled) {
+  if (!design.media.fade.enabled || fadesIntoCard(design)) {
     return null;
   }
+
+  const { start } = popupFadeSpan(design.media.fade);
 
   // 1 px a mais embaixo: nenhuma linha da imagem aparece entre o degrade e o fundo do cartao.
   return {
     background: fadeGradientCss(design),
     bottom: "-1px",
-    height: `calc(${design.media.fade.height}% + 1px)`,
+    height: `calc(${100 - start}% + 1px)`,
     left: 0,
     pointerEvents: "none",
     position: "absolute",

@@ -1,13 +1,15 @@
 "use client";
 
 import { POPUP_DESIGN_LIMITS, type PopupCardStyle, type PopupContrastHint, type PopupDesign, type PopupTextZone } from "@/server/communications/popup-design-model";
-import { BorderField, ColorField, ContrastHint, DesignFieldError, DesignSection, NumberField, PaintField, PillField } from "./design-controls";
+import { CardBackgroundField } from "./card-background-field";
+import { BorderField, ColorField, ContrastHint, DesignFieldError, DesignSection, NumberField, PillField } from "./design-controls";
 import { ALIGN_OPTIONS, CARD_SHADOW_OPTIONS, CARD_WIDTH_OPTIONS, POPUP_DESIGN_COPY, TEXT_PLACEMENT_OPTIONS } from "./popup-design-editor-model";
 
 // Secoes "Texto e posição", "Cartão" e "Fechar e links" do design (docs/26 §7.2). Tudo por zonas (sem arrastar):
 // onde fica o texto, quanto sobe sobre a midia, o alinhamento e o espaco entre os blocos; a largura do cartao no
-// computador (no celular encolhe junto), o fundo, a borda, os cantos, o respiro e a sombra; as cores do X e dos
-// links "Lembrar depois" e "Não mostrar de novo", com a dica de contraste.
+// computador (no celular encolhe junto), o fundo (cor, degrade ou imagem, card-background-field), a borda, os
+// cantos, o respiro e a sombra; as cores do X e dos links "Lembrar depois" e "Não mostrar de novo", com a dica
+// de contraste.
 
 const LIMITS = POPUP_DESIGN_LIMITS;
 
@@ -16,6 +18,14 @@ type SectionProps = {
   disabled: boolean;
   errorFor: (key: string) => string | undefined;
   onChange: (design: PopupDesign) => void;
+};
+
+type CardSectionProps = SectionProps & {
+  hints: readonly PopupContrastHint[];
+  /** O design mais novo (o envio da imagem do fundo termina depois). */
+  latestDesign: () => PopupDesign;
+  /** A imagem do fundo subindo segura o salvar. */
+  onBusyChange?: (reason: string | null) => void;
 };
 
 export function TextZoneSection({ design, disabled, errorFor, onChange }: SectionProps) {
@@ -65,10 +75,12 @@ export function TextZoneSection({ design, disabled, errorFor, onChange }: Sectio
   );
 }
 
-export function CardSection({ design, disabled, errorFor, onChange }: SectionProps) {
+export function CardSection({ design, disabled, errorFor, hints, latestDesign, onBusyChange, onChange }: CardSectionProps) {
   const copy = POPUP_DESIGN_COPY.cardSection;
   const card = design.card;
   const update = (patch: Partial<PopupCardStyle>) => onChange({ ...design, card: { ...card, ...patch } });
+  // Sem imagem enviada ainda, nada para conferir.
+  const cardHints = card.background.kind === "image" && !card.background.url ? [] : hints.filter((hint) => hint.key === "card.background");
 
   return (
     <DesignSection id="popup-design-cartao" title={POPUP_DESIGN_COPY.sections.card}>
@@ -81,7 +93,20 @@ export function CardSection({ design, disabled, errorFor, onChange }: SectionPro
         options={CARD_WIDTH_OPTIONS}
         value={card.width}
       />
-      <PaintField disabled={disabled} id="popup-design-cartao-fundo" label={copy.background} onChange={(background) => update({ background })} value={card.background} />
+      <CardBackgroundField
+        disabled={disabled}
+        errorFor={errorFor}
+        latest={() => latestDesign().card.background}
+        onBusyChange={onBusyChange}
+        onChange={(background) => {
+          const current = latestDesign();
+          onChange({ ...current, card: { ...current.card, background } });
+        }}
+        value={card.background}
+      />
+      {cardHints.map((hint) => (
+        <ContrastHint key={`${hint.key}-${hint.blockId ?? ""}`} message={hint.message} />
+      ))}
       <BorderField disabled={disabled} id="popup-design-cartao-borda" label={copy.border} onChange={(border) => update({ border })} value={card.border} />
       <div className="grid min-w-0 grid-cols-2 gap-4">
         <NumberField

@@ -250,3 +250,86 @@ test("o banco recusa design em notificacao, design que nao e objeto e objeto sem
     assert.match(error?.message ?? "", /campaigns_popup_design_v1/, JSON.stringify(value));
   }
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * Degrade com comeco e fim e imagem no fundo do cartao (docs/26, "Suba o escuro")
+ * ---------------------------------------------------------------------------------------------- */
+
+/** WebP minimo (cabecalho VP8X) do tamanho dado: o que o recorte do navegador manda ao uploadNoticeImage. */
+function webpDataUrl(width, height) {
+  const bytes = new Uint8Array(32);
+  bytes.set([0x52, 0x49, 0x46, 0x46, 0x38, 0x0a, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x58, 0x0a, 0x00, 0x00, 0x00], 0);
+  bytes.set([(width - 1) & 0xff, ((width - 1) >> 8) & 0xff, ((width - 1) >> 16) & 0xff], 24);
+  bytes.set([(height - 1) & 0xff, ((height - 1) >> 8) & 0xff, ((height - 1) >> 16) & 0xff], 27);
+  // Bytes diferentes a cada chamada: outro sha256, outro caminho (o teste nunca reaproveita um objeto antigo).
+  bytes.set(randomUUID().replaceAll("-", "").slice(0, 2).split("").map((char) => char.charCodeAt(0)), 30);
+
+  return `data:image/webp;base64,${Buffer.from(bytes).toString("base64")}`;
+}
+
+function comImagemNoFundo(url) {
+  const base = design();
+  base.card.background = { color: "#16181C", dim: 40, kind: "image", position: "bottom", url };
+  return base;
+}
+
+test("imagem no fundo do cartao: a do uploadNoticeImage salva com o nosso endereco; de fora ou sem arquivo e recusada", async () => {
+  actAs(produtor);
+  const enviada = ok(await actions.uploadNoticeImage({ image: webpDataUrl(1280, 720) }));
+  const caminho = enviada.url.split(`/${model.POPUP_CARD_IMAGE_BUCKET}/`)[1];
+  assert.match(caminho, model.POPUP_CARD_IMAGE_PATH_PATTERN);
+  const nossa = db.storage.from(model.POPUP_CARD_IMAGE_BUCKET).getPublicUrl(caminho).data.publicUrl;
+
+  try {
+    // O navegador manda o caminho certo com outra origem: o servidor grava o nosso endereco.
+    const salvo = ok(await salvar(popup({ design: comImagemNoFundo(enviada.url.replace(new URL(enviada.url).origin, "https://outro.supabase.co")) })));
+    const gravado = (await linha(salvo.id)).popup_design;
+    assert.deepEqual(gravado.card.background, { color: "#16181c", dim: 40, kind: "image", position: "bottom", url: nossa });
+
+    // Salvar de novo com a mesma imagem (o caminho ja gravado) nao confere o Storage outra vez e continua valendo.
+    ok(await salvar(popup({ design: comImagemNoFundo(nossa), title: "Mesmo fundo" }), salvo.id));
+
+    // Endereco de fora: o schema recusa no campo da imagem do fundo, nada muda na linha.
+    const deFora = await salvar(popup({ design: comImagemNoFundo("https://cdn.exemplo.com/fundo.webp") }), salvo.id);
+    assert.equal(deFora.ok, false);
+    assert.equal(deFora.status, 400);
+    assert.deepEqual(deFora.fieldErrors, { "draft.design.card.background.url": ["Envie a imagem do fundo de novo."] });
+
+    // O nosso formato de caminho, mas sem arquivo no Storage: recusado pela conferencia do servidor.
+    const semArquivo = await salvar(popup({ design: comImagemNoFundo(nossa.replace(/[a-f0-9]{24}\.webp$/, "0".repeat(24) + ".webp")) }), salvo.id);
+    assert.equal(semArquivo.ok, false);
+    assert.equal(semArquivo.status, 400);
+    assert.deepEqual(semArquivo.fieldErrors, { "design.card.background.url": ["Envie a imagem do fundo de novo."] });
+    assert.deepEqual((await linha(salvo.id)).popup_design.card.background.url, nossa, "a linha continua com a imagem boa");
+
+    // A aluna recebe o mesmo fundo (endereco recalculado na leitura tambem).
+    const atual = unwrap(await db.from("campaigns").select("updated_at").eq("id", salvo.id).single(), "Lendo o aviso");
+    actAs(produtor);
+    ok(await actions.publishNotice({ expectedUpdatedAt: atual.updated_at, id: salvo.id }));
+    const daAluna = await popupDaAluna();
+    assert.equal(daAluna.id, salvo.id);
+    assert.deepEqual(daAluna.design.card.background, { color: "#16181c", dim: 40, kind: "image", position: "bottom", url: nossa });
+  } finally {
+    unwrap(await db.storage.from(model.POPUP_CARD_IMAGE_BUCKET).remove([caminho]), "Apagando a imagem de teste");
+  }
+});
+
+test("design gravado antes do 'Fica totalmente escuro em' (sem end): editor e aluna leem com end 100, o resto igual", async () => {
+  const salvo = ok(await salvar(popup({ design: design() })));
+  const antigo = structuredClone((await linha(salvo.id)).popup_design);
+  delete antigo.media.fade.end;
+  antigo.media.fade.height = 65;
+  unwrap(await db.from("campaigns").update({ popup_design: antigo }).eq("id", salvo.id), "Gravando o design como a versao anterior gravava");
+  assert.equal("end" in (await linha(salvo.id)).popup_design.media.fade, false);
+
+  actAs(produtor);
+  const detalhe = await getNoticeDetail(salvo.id, { permissions: TODAS });
+  assert.deepEqual(detalhe.draft.design.media.fade, { ...antigo.media.fade, end: 100 });
+  assert.deepEqual({ ...detalhe.draft.design, media: { ...detalhe.draft.design.media, fade: antigo.media.fade } }, antigo, "so o end entra");
+
+  const atual = unwrap(await db.from("campaigns").select("updated_at").eq("id", salvo.id).single(), "Lendo o aviso");
+  actAs(produtor);
+  ok(await actions.publishNotice({ expectedUpdatedAt: atual.updated_at, id: salvo.id }));
+  const daAluna = await popupDaAluna();
+  assert.deepEqual(daAluna.design.media.fade, { ...antigo.media.fade, end: 100 });
+});

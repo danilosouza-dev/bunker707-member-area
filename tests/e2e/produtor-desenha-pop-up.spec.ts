@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { pngQuadrado } from "../support/imagem-de-teste.mjs";
 import { designDoPopUpNoBanco, estadoDoPopUpDaAluna, eventosDoPopUp, expect, reabrirPopUpParaAluna, test, zerarComunicacao, type DesignDoPopUpNoBanco } from "./fixtures";
 
 // "Design do pop-up" de ponta a ponta (docs/26 §8; docs/18 §3.1): o produtor abre um pop-up novo, escolhe
@@ -8,6 +9,10 @@ import { designDoPopUpNoBanco, estadoDoPopUpDaAluna, eventosDoPopUp, expect, rea
 // aluna abre o Início e ve o pop-up: o titulo e texto de verdade (selecionavel, nao imagem), na fonte enviada; o
 // <video> e mudo, em repeticao, com a capa; o clique no botao conta como antes; em 375 px nao rola para o lado;
 // com menos movimento nao ha <video>. Com E2E_SHOTS_DIR, guarda as fotos do editor e do pop-up nessa pasta.
+// O pedido do produtor depois da primeira versao (docs/26 §1.3): ele sobe o escuro do degradê ("Começa a
+// escurecer em" 35 %, "Fica totalmente escuro em" 70 %) e o titulo fica na parte escura, na previa e no pop-up
+// da aluna (a mascara da midia e conferida parada a parada); e escolhe Cartão > Fundo > Imagem (a imagem embaixo,
+// com o escuro por cima), que aparece atras do texto nos dois lugares.
 
 const TITULO = "Pop-up E2E: o produtor desenha";
 const LINHA_1 = "Aprenda IA";
@@ -20,6 +25,10 @@ const FONTE = "Fonte do produtor E2E";
 const SESSAO_DO_PRODUTOR = "tests/e2e/.auth/produtor.json";
 const FIXTURES = "tests/fixtures/popup-design";
 const SHOTS = process.env.E2E_SHOTS_DIR;
+/** O escuro subido pelo produtor (% da altura da midia, do topo). */
+const ESCURO = { comeca: 35, total: 70 };
+const IMAGEM_DO_FUNDO = /url\("[^"]+\/storage\/v1\/object\/public\/content-assets\/communications\/images\/[a-f0-9]{24}\.webp"\)/;
+const SEM_MEDIDA_COM_IMAGEM = "Com imagem no fundo não dá para medir o contraste. Confira na prévia se os textos ficam fáceis de ler.";
 
 test.describe.configure({ mode: "serial" });
 
@@ -45,6 +54,52 @@ async function fundoDe(elemento: Locator) {
 
     return "none";
   });
+}
+
+/**
+ * O degradê "Igual ao fundo do cartão" e a mascara da midia: ate onde ela e opaca, de onde ela some de vez e
+ * quanto da midia ainda aparece no topo do titulo (0 = o titulo fica so no escuro do cartao).
+ */
+async function escuroDaMidia(escopo: Locator) {
+  return escopo.evaluate((root) => {
+    const media = root.querySelector("[data-popup-media]");
+    const heading = root.querySelector("h2");
+
+    if (!media || !heading) {
+      return null;
+    }
+
+    const css = getComputedStyle(media);
+    const mask = css.maskImage && css.maskImage !== "none" ? css.maskImage : css.webkitMaskImage;
+    const stops = [...mask.matchAll(/rgba?\(([^)]+)\)\s+([\d.]+)%/g)].map(([, rgb, at]) => {
+      const parts = rgb.split(",");
+      return { alpha: parts.length === 4 ? Number(parts[3]) : 1, at: Number(at) };
+    });
+    const box = media.getBoundingClientRect();
+    const top = ((heading.getBoundingClientRect().top - box.top) / box.height) * 100;
+    // Quanto da midia aparece no topo do titulo: interpolado entre as paradas (depois da ultima, a ultima).
+    let behind = stops.length ? stops[stops.length - 1].alpha : 1;
+
+    for (let index = 1; index < stops.length; index += 1) {
+      const [from, to] = [stops[index - 1], stops[index]];
+
+      if (top <= to.at) {
+        behind = top <= from.at ? from.alpha : from.alpha + ((to.alpha - from.alpha) * (top - from.at)) / (to.at - from.at);
+        break;
+      }
+    }
+
+    return {
+      atrasDoTitulo: Math.round(behind * 100) / 100,
+      opacaAte: Math.max(...stops.filter((stop) => stop.alpha === 1).map((stop) => stop.at)),
+      someDesde: Math.min(...stops.filter((stop) => stop.alpha === 0).map((stop) => stop.at))
+    };
+  });
+}
+
+/** O fundo do cartao (o elemento com a cor, o degrade ou a imagem). */
+async function fundoDoCartao(escopo: Locator) {
+  return escopo.locator("[data-popup-design] > div").first().evaluate((element) => getComputedStyle(element).backgroundImage);
 }
 
 test.describe("produtor", () => {
@@ -97,6 +152,32 @@ test.describe("produtor", () => {
     await design.locator("#popup-design-bloco-3-estilo-texto-cor").fill("#0b0b0f");
     await escolherPilula(design, "popup-design-bloco-3-estilo-largura", "full");
 
+    // Sobe o escuro do degradê: o modelo escurece de 50 % a 92 % da mídia; o produtor quer o escuro mais alto.
+    // "Parte da mídia que aparece" (o antigo "Recorte") é só o enquadramento, não o degradê.
+    await expect(design.getByText("Muda só o enquadramento do vídeo ou da imagem, não o degradê.", { exact: true })).toBeVisible();
+    const comeca = design.getByLabel("Começa a escurecer em", { exact: true });
+    const total = design.getByLabel("Fica totalmente escuro em", { exact: true });
+    await expect(comeca).toHaveValue("50");
+    await expect(total).toHaveValue("92");
+    await comeca.fill(String(ESCURO.comeca));
+    await comeca.blur();
+    await total.fill(String(ESCURO.total));
+    await total.blur();
+    await expect(comeca).toHaveValue(String(ESCURO.comeca));
+    await expect(total).toHaveValue(String(ESCURO.total));
+
+    // Cartão > Fundo > Imagem: a imagem sobe pelo envio da imagem do aviso (recorte 16:9) e fica embaixo.
+    const cartao = design.getByRole("region", { exact: true, name: "Cartão" });
+    await cartao.getByRole("radiogroup", { exact: true, name: "Fundo" }).getByText("Imagem", { exact: true }).click();
+    await cartao.locator("#popup-design-cartao-fundo input[type='file'][accept='image/*']").setInputFiles({ buffer: pngQuadrado(1280), mimeType: "image/png", name: "fundo-de-teste.png" });
+    await page.getByRole("dialog").getByRole("button", { exact: true, name: "Usar esta imagem" }).click();
+    await expect(cartao.getByRole("button", { name: "Trocar imagem" })).toBeVisible({ timeout: 30_000 });
+    await expect(cartao.locator("input[name='popup-design-cartao-imagem-parte'][value='bottom']")).toBeChecked();
+    const escurecer = cartao.getByLabel("Escurecer a imagem", { exact: true });
+    await escurecer.fill("30");
+    await escurecer.blur();
+    await expect(cartao.getByText(SEM_MEDIDA_COM_IMAGEM, { exact: true })).toBeVisible();
+
     // As duas previas (celular e computador) mostram o titulo novo nas cores escolhidas e o botao em degrade.
     const previa = page.getByRole("region", { exact: true, name: "Prévia" });
     for (const aparelho of ["celular", "computador"]) {
@@ -110,6 +191,11 @@ test.describe("produtor", () => {
       await expect(figura.getByText(BOTAO, { exact: true })).toBeVisible();
       await expect.poll(() => fundoDe(figura.getByText(BOTAO, { exact: true }))).toContain("linear-gradient");
       await expect.poll(() => figura.getByRole("heading", { level: 2 }).evaluate((element) => getComputedStyle(element).fontFamily)).toMatch(/bf_[a-f0-9]{12}/);
+
+      // O escuro subiu: a midia e opaca ate 35 %, some de vez em 70 % e o titulo fica so no escuro.
+      await expect.poll(() => escuroDaMidia(figura)).toMatchObject({ atrasDoTitulo: 0, opacaAte: ESCURO.comeca, someDesde: ESCURO.total });
+      // A imagem do fundo (do nosso bucket) atras do texto, com o escuro por cima.
+      await expect.poll(() => fundoDoCartao(figura), { timeout: 30_000 }).toMatch(IMAGEM_DO_FUNDO);
     }
 
     const celular = await previa.getByRole("figure", { name: "Prévia do pop-up no celular" }).locator("[data-popup-design]").boundingBox();
@@ -135,6 +221,11 @@ test.describe("produtor", () => {
     expect(gravado.design?.media.video?.url).toMatch(/\/storage\/v1\/object\/public\/communication-popup-video\/videos\/[0-9a-f-]{36}\.mp4$/);
     expect(gravado.imagem).toMatch(/\/storage\/v1\/object\/public\/content-assets\//);
     expect(gravado.fontes.map((fonte) => fonte.name)).toEqual([FONTE]);
+    expect(gravado.design?.media.fade).toEqual({ color: "auto", enabled: true, end: ESCURO.total, height: ESCURO.total - ESCURO.comeca });
+    expect(gravado.design?.card.background).toMatchObject({ dim: 30, kind: "image", position: "bottom" });
+    expect(gravado.design?.card.background.url).toMatch(
+      /\/storage\/v1\/object\/public\/content-assets\/communications\/images\/[a-f0-9]{24}\.webp$/
+    );
     const titulo = gravado.design?.blocks.find((block) => block.type === "heading") as { lines: { paint: { color: string } | null; text: string }[] };
     expect(titulo.lines).toEqual([
       { paint: { color: COR_1.hex, kind: "solid" }, size: null, text: LINHA_1 },
@@ -204,6 +295,10 @@ test.describe("aluna", () => {
           source: element.querySelector("source")?.src ?? null
         }))
       ).toEqual({ autoplay: true, controls: false, loop: true, muted: true, playsInline: true, poster: gravado.imagem, source: gravado.design?.media.video?.url ?? null });
+
+      // O escuro subido e a imagem do fundo chegam iguais ao pop-up da aluna (o mesmo cartao da previa).
+      await expect.poll(() => escuroDaMidia(popUp)).toMatchObject({ atrasDoTitulo: 0, opacaAte: ESCURO.comeca, someDesde: ESCURO.total });
+      await expect.poll(() => fundoDoCartao(popUp)).toMatch(IMAGEM_DO_FUNDO);
 
       // O botao estilizado.
       const botao = popUp.getByRole("link", { name: BOTAO });

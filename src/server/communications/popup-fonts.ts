@@ -6,18 +6,20 @@ import "server-only";
 // - loadPopupFontFaces: por id, sem olhar deleted_at (pop-up gravado nunca perde a fonte; o arquivo fica);
 // - listPopupFontLibrary: a biblioteca do editor (so as nao excluidas, por nome);
 // - assertPopupDesignFonts: salvar e publicar so com fontes que existem na biblioteca (400 no campo);
-// - withOwnStorageUrls: o endereco do video sempre recalculado a partir do caminho (nunca o que veio do
-//   navegador), entao so aponta para o nosso bucket.
+// - withOwnStorageUrls: o endereco do video e o da imagem do fundo do cartao sempre recalculados a partir do
+//   caminho (nunca o que veio do navegador), entao so apontam para os nossos buckets.
 // Envio, renomear e excluir fontes e o envio do video moram em popup-design-actions.ts e nas rotas do admin.
 
 import { assertNoDbError, NoticeFieldError, type CommunicationsDb } from "./db";
 import {
+  POPUP_CARD_IMAGE_BUCKET,
   POPUP_FONT_FAMILY_PATTERN,
   POPUP_FONT_FORMATS,
   POPUP_FONT_PATH_PATTERN,
   POPUP_FONT_STYLES,
   POPUP_FONTS_BUCKET,
   POPUP_VIDEO_BUCKET,
+  popupCardImagePathOf,
   type PopupDesign,
   type PopupFontFace,
   type PopupFontFormat,
@@ -44,7 +46,11 @@ export type PopupFontRow = {
 export const POPUP_FONT_MISSING_MESSAGE = "Esta fonte não está mais na biblioteca. Escolha outra.";
 
 /** Endereco publico de um objeto dos buckets do design (o cliente de servico so monta o texto). */
-export function popupStoragePublicUrl(db: CommunicationsDb, bucket: typeof POPUP_FONTS_BUCKET | typeof POPUP_VIDEO_BUCKET, objectPath: string) {
+export function popupStoragePublicUrl(
+  db: CommunicationsDb,
+  bucket: typeof POPUP_CARD_IMAGE_BUCKET | typeof POPUP_FONTS_BUCKET | typeof POPUP_VIDEO_BUCKET,
+  objectPath: string
+) {
   return db.storage.from(bucket).getPublicUrl(objectPath).data.publicUrl;
 }
 
@@ -119,14 +125,30 @@ export async function assertPopupDesignFonts(db: CommunicationsDb, design: Popup
   }
 }
 
-/** O design com o endereco do video recalculado do caminho (sempre o nosso bucket publico). */
+/**
+ * O design com o endereco do video e o da imagem do fundo do cartao recalculados do caminho (sempre os nossos
+ * buckets publicos, na origem do nosso Supabase). O schema ja garantiu o caminho da imagem
+ * (communications/images/<24 hex>.webp); um que nao valha (nunca deveria chegar aqui) vira so a cor de apoio.
+ */
 export function withOwnStorageUrls<T extends PopupDesign | null | undefined>(db: CommunicationsDb, design: T): T {
-  if (!design?.media.video) {
+  if (!design) {
+    return design;
+  }
+
+  const video = design.media.video;
+  const background = design.card.background;
+  const imagePath = background.kind === "image" ? popupCardImagePathOf(background.url) : null;
+
+  if (!video && background.kind !== "image") {
     return design;
   }
 
   return {
     ...design,
-    media: { ...design.media, video: { ...design.media.video, url: popupStoragePublicUrl(db, POPUP_VIDEO_BUCKET, design.media.video.path) } }
+    card:
+      background.kind === "image"
+        ? { ...design.card, background: imagePath ? { ...background, url: popupStoragePublicUrl(db, POPUP_CARD_IMAGE_BUCKET, imagePath) } : { color: background.color, kind: "solid" } }
+        : design.card,
+    media: video ? { ...design.media, video: { ...video, url: popupStoragePublicUrl(db, POPUP_VIDEO_BUCKET, video.path) } } : design.media
   };
 }

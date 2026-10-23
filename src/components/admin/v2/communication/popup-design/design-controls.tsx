@@ -8,7 +8,7 @@ import { HEX_COLOR_PATTERN, POPUP_DESIGN_LIMITS, type HexColor, type PopupBorder
 import { PillGroup, adminInputClass, type PillOption } from "../../form";
 import { AdminSwitch } from "../../settings/kit";
 import { adminTransition } from "../../styles";
-import { PAINT_KIND_OPTIONS, POPUP_DESIGN_COPY, clampNumber, parseBoundedNumber, rangeMessage, type PaintKind } from "./popup-design-editor-model";
+import { PAINT_KIND_OPTIONS, POPUP_DESIGN_COPY, clampNumber, paintOfKind, parseBoundedNumber, rangeMessage, type PaintKind } from "./popup-design-editor-model";
 
 // Pecas pequenas do card "Design" (docs/26): secao com titulo, numero com limite, cor (#RRGGBB ou #RRGGBBAA com o
 // seletor do navegador), pintura (cor ou degrade), borda, cantos com "Pílula", lista e a dica de contraste. Mesmo
@@ -96,6 +96,13 @@ type NumberFieldProps = {
   max: number;
   min: number;
   onChange: (value: number) => void;
+  /**
+   * Barra de arrastar ao lado do numero (mesmo valor). So para o mouse e o toque: o teclado e o leitor de tela
+   * usam o numero (setas sobem e descem), sem dois campos com o mesmo nome.
+   */
+  slider?: boolean;
+  /** Escala da barra quando difere do limite (os dois campos do degradê usam 0 a 100 %, como o desenho ao lado). */
+  sliderScale?: { max: number; min: number };
   step?: number;
   suffix?: string;
   value: number;
@@ -109,7 +116,7 @@ function numberText(value: number) {
  * Numero com limite: so o valor dentro do limite vai para o design (digitar "1" a caminho de "16" nao estraga
  * nada); fora dele, a frase do limite embaixo; ao sair do campo, volta ao valor valido mais perto.
  */
-export function NumberField({ disabled, error, hint, id, integer = true, label, max, min, onChange, step = 1, suffix, value }: NumberFieldProps) {
+export function NumberField({ disabled, error, hint, id, integer = true, label, max, min, onChange, slider = false, sliderScale, step = 1, suffix, value }: NumberFieldProps) {
   const [text, setText] = useState(() => numberText(value));
   const [synced, setSynced] = useState(value);
   const invalid = parseBoundedNumber(text, { integer, max, min }) === null;
@@ -160,6 +167,29 @@ export function NumberField({ disabled, error, hint, id, integer = true, label, 
           value={text}
         />
         {suffix ? <span className="text-sm leading-5 text-[var(--text-secondary)]">{suffix}</span> : null}
+        {slider ? (
+          <input
+            aria-hidden="true"
+            className="h-10 min-w-0 flex-1 cursor-pointer accent-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+            data-slider-for={id}
+            disabled={disabled}
+            max={sliderScale?.max ?? max}
+            min={sliderScale?.min ?? min}
+            onChange={(event) => {
+              const next = clampNumber(Number(event.target.value), min, max);
+              setText(numberText(next));
+              setSynced(next);
+
+              if (next !== value) {
+                onChange(next);
+              }
+            }}
+            step={step}
+            tabIndex={-1}
+            type="range"
+            value={clampNumber(value, min, max)}
+          />
+        ) : null}
       </div>
       {hint && !message ? (
         <p className="text-xs leading-5 text-[var(--text-secondary)]" id={`${id}-hint`}>
@@ -258,6 +288,28 @@ type PaintFieldProps = {
   value: PopupPaint;
 };
 
+/** As cores de uma pintura: a cor (rotulo so para leitor de tela) ou De, Para e o Ângulo. */
+export function PaintColorFields({ disabled, id, label, onChange, value }: { disabled?: boolean; id: string; label: string; onChange: (paint: PopupPaint) => void; value: PopupPaint }) {
+  return value.kind === "solid" ? (
+    <ColorField disabled={disabled} id={`${id}-cor`} label={label} labelHidden onChange={(color) => onChange({ color, kind: "solid" })} value={value.color} />
+  ) : (
+    <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+      <ColorField disabled={disabled} id={`${id}-de`} label={POPUP_DESIGN_COPY.color.from} onChange={(from) => onChange({ ...value, from })} value={value.from} />
+      <ColorField disabled={disabled} id={`${id}-para`} label={POPUP_DESIGN_COPY.color.to} onChange={(to) => onChange({ ...value, to })} value={value.to} />
+      <NumberField
+        disabled={disabled}
+        id={`${id}-angulo`}
+        label={POPUP_DESIGN_COPY.color.angle}
+        max={POPUP_DESIGN_LIMITS.angle.max}
+        min={POPUP_DESIGN_LIMITS.angle.min}
+        onChange={(angle) => onChange({ ...value, angle })}
+        suffix="°"
+        value={value.angle}
+      />
+    </div>
+  );
+}
+
 /** Pintura: "Cor" | "Degradê" (De, Para e o Ângulo de 0 a 360°). */
 export function PaintField({ disabled, error, id, label, onChange, value }: PaintFieldProps) {
   function changeKind(kind: PaintKind) {
@@ -265,30 +317,13 @@ export function PaintField({ disabled, error, id, label, onChange, value }: Pain
       return;
     }
 
-    onChange(kind === "solid" ? { color: value.kind === "gradient" ? value.from : "#ffffff", kind: "solid" } : { angle: 90, from: value.kind === "solid" ? value.color : "#ffffff", kind: "gradient", to: "#a78bfa" });
+    onChange(paintOfKind(kind, value.kind === "solid" ? value.color : value.from));
   }
 
   return (
     <div className="flex min-w-0 flex-col gap-3" id={id}>
       <PillField disabled={disabled} label={label} name={`${id}-tipo`} onChange={changeKind} options={PAINT_KIND_OPTIONS} value={value.kind} />
-      {value.kind === "solid" ? (
-        <ColorField disabled={disabled} id={`${id}-cor`} label={label} labelHidden onChange={(color) => onChange({ color, kind: "solid" })} value={value.color} />
-      ) : (
-        <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-          <ColorField disabled={disabled} id={`${id}-de`} label={POPUP_DESIGN_COPY.color.from} onChange={(from) => onChange({ ...value, from })} value={value.from} />
-          <ColorField disabled={disabled} id={`${id}-para`} label={POPUP_DESIGN_COPY.color.to} onChange={(to) => onChange({ ...value, to })} value={value.to} />
-          <NumberField
-            disabled={disabled}
-            id={`${id}-angulo`}
-            label={POPUP_DESIGN_COPY.color.angle}
-            max={POPUP_DESIGN_LIMITS.angle.max}
-            min={POPUP_DESIGN_LIMITS.angle.min}
-            onChange={(angle) => onChange({ ...value, angle })}
-            suffix="°"
-            value={value.angle}
-          />
-        </div>
-      )}
+      <PaintColorFields disabled={disabled} id={id} label={label} onChange={onChange} value={value} />
       <InlineError id={`${id}-error`} message={error} />
     </div>
   );

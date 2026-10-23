@@ -127,9 +127,9 @@ import {
   type PopupFrequency
 } from "./popup-display-model";
 import { assertPopupDesignFonts, withOwnStorageUrls } from "./popup-fonts";
-import type { PopupDesign } from "./popup-design-model";
-import { parsePopupDesign, popupDesignContentProblems } from "./popup-design-schema";
-import { inspectPopupVideo } from "./popup-media";
+import { popupCardImagePathOf, type PopupDesign } from "./popup-design-model";
+import { parsePopupDesign, POPUP_DESIGN_MESSAGES, popupDesignContentProblems } from "./popup-design-schema";
+import { inspectPopupCardImage, inspectPopupVideo } from "./popup-media";
 import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, noticeDraftOfRow, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
 import {
@@ -437,9 +437,10 @@ function withPopupSettings(draft: NoticeDraft, stored: CampaignRow | null): Noti
 }
 
 /**
- * Design do pop-up (docs/26) antes de gravar: o endereco do video recalculado do caminho (nunca o que veio do
- * navegador), o video novo conferido de novo e as fontes enviadas conferidas na biblioteca (400 em
- * design.fonts quando uma saiu). `row` = a linha gravada (null num aviso novo).
+ * Design do pop-up (docs/26) antes de gravar: os enderecos do video e da imagem do fundo do cartao
+ * recalculados do caminho (nunca o que veio do navegador), o video novo e a imagem nova conferidos no Storage
+ * e as fontes enviadas conferidas na biblioteca (400 em design.fonts quando uma saiu). `row` = a linha
+ * gravada (null num aviso novo).
  */
 async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: CampaignRow | null): Promise<NoticeDraft> {
   if (draft.kind !== "popup" || !draft.design) {
@@ -455,6 +456,7 @@ async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: 
 
   await assertPopupDesignFonts(db, draft.design);
   await assertPopupDesignVideo(db, draft.design, row);
+  await assertPopupDesignCardImage(db, draft.design, row);
 
   return { ...draft, design: withOwnStorageUrls(db, draft.design) };
 }
@@ -476,6 +478,40 @@ async function assertPopupDesignVideo(db: CommunicationsDb, design: PopupDesign,
   } catch (error) {
     if (error instanceof CommunicationError) {
       throw new NoticeFieldError("design.media.video", error.message);
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * A imagem do fundo do cartao so entra conferida: o schema ja garantiu o caminho do nosso bucket de imagens
+ * (communications/images/<24 hex>.webp, qualquer origem no endereco: o servidor troca pela nossa); um caminho
+ * diferente do gravado precisa existir no Storage como WebP (400 em design.card.background.url).
+ */
+async function assertPopupDesignCardImage(db: CommunicationsDb, design: PopupDesign, row: CampaignRow | null) {
+  const background = design.card.background;
+
+  if (background.kind !== "image") {
+    return;
+  }
+
+  const path = popupCardImagePathOf(background.url);
+  const stored = row ? parsePopupDesign(row.popup_design)?.card.background : null;
+
+  if (path && stored?.kind === "image" && popupCardImagePathOf(stored.url) === path) {
+    return;
+  }
+
+  try {
+    if (!path) {
+      throw new CommunicationError(POPUP_DESIGN_MESSAGES.cardImage, 400);
+    }
+
+    await inspectPopupCardImage(db, path);
+  } catch (error) {
+    if (error instanceof CommunicationError) {
+      throw new NoticeFieldError("design.card.background.url", error.message);
     }
 
     throw error;
