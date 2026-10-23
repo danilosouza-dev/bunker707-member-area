@@ -129,6 +129,10 @@ import {
 import { assertPopupDesignFonts, withOwnStorageUrls } from "./popup-fonts";
 import { popupCardImagePathOf, type PopupDesign } from "./popup-design-model";
 import { parsePopupDesign, POPUP_DESIGN_MESSAGES, popupDesignContentProblems } from "./popup-design-schema";
+import { parseStoredPopupDesign, popupDesignKindOf, storedPopupDesignFontIds } from "./popup-design-router";
+import { assertPopupFreeAssets } from "./popup-free-assets";
+import type { PopupFreeDesign } from "./popup-free-model";
+import { POPUP_FREE_MESSAGES, popupFreeContentProblems } from "./popup-free-schema";
 import { inspectPopupCardImage, inspectPopupVideo } from "./popup-media";
 import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, noticeDraftOfRow, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
@@ -429,11 +433,29 @@ function withPopupSettings(draft: NoticeDraft, stored: CampaignRow | null): Noti
   const fromRepeat = reconciled !== draft.popup?.frequency;
   const frequency: PopupFrequency =
     fromRepeat && !draft.cta && reconciled.mode === "repeat" && reconciled.stopOn === "click" ? { ...reconciled, stopOn: "never" } : reconciled;
-  // Design do pop-up (docs/26): `design` manda quando vem (null = Padrão); sem a chave (rascunho de antes), o
-  // da linha gravada (aviso novo = Padrão).
-  const design = draft.design !== undefined ? draft.design : row ? parsePopupDesign(row.popup_design) : null;
+  const { design, freeDesign } = popupDesignsToSave(draft, row);
 
-  return { ...draft, design, popup: { ...base, frequency }, repeat: repeatOfFrequency(frequency) };
+  return { ...draft, design, freeDesign, popup: { ...base, frequency }, repeat: repeatOfFrequency(frequency) };
+}
+
+/**
+ * A regra das duas chaves de design (docs/27 §2.1): o pedido com uma so (`design` ou `freeDesign`, mesmo null)
+ * zera a outra; com as duas, valem como vieram; sem nenhuma (rascunho de antes), o design gravado na linha pelo
+ * roteador (aviso novo = Padrão). Uma aba do admin aberta antes do Livre (so manda `design`) troca o Livre
+ * gravado em vez de grava-lo de novo por baixo. "No maximo uma nao nula" e conferido de novo depois da juncao.
+ */
+function popupDesignsToSave(draft: NoticeDraft, row: CampaignRow | null): Pick<NoticeDraft, "design" | "freeDesign"> {
+  const hasDesign = draft.design !== undefined;
+  const hasFree = draft.freeDesign !== undefined;
+  const stored = !hasDesign && !hasFree && row ? parseStoredPopupDesign(row.popup_design) : null;
+  const design = hasDesign ? (draft.design ?? null) : hasFree ? null : (stored?.design ?? null);
+  const freeDesign = hasFree ? (draft.freeDesign ?? null) : hasDesign ? null : (stored?.freeDesign ?? null);
+
+  if (design && freeDesign) {
+    throw new NoticeFieldError("freeDesign", POPUP_FREE_MESSAGES.bothDesigns);
+  }
+
+  return { design, freeDesign };
 }
 
 /**
@@ -443,6 +465,10 @@ function withPopupSettings(draft: NoticeDraft, stored: CampaignRow | null): Noti
  * gravada (null num aviso novo).
  */
 async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: CampaignRow | null): Promise<NoticeDraft> {
+  if (draft.kind === "popup" && draft.freeDesign) {
+    return withCheckedFreeDesign(db, draft, draft.freeDesign, row);
+  }
+
   if (draft.kind !== "popup" || !draft.design) {
     return draft;
   }
@@ -459,6 +485,36 @@ async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: 
   await assertPopupDesignCardImage(db, draft.design, row);
 
   return { ...draft, design: withOwnStorageUrls(db, draft.design) };
+}
+
+/**
+ * Design Livre (docs/27 §5.1) antes de gravar: combina com o conteudo (400 no campo), as fontes enviadas
+ * continuam na biblioteca (400 em freeDesign.fonts) e cada arquivo novo e conferido no Storage, com as medidas
+ * das imagens trocadas pelas do servidor (400 em freeDesign.assets.<id>).
+ */
+async function withCheckedFreeDesign(db: CommunicationsDb, draft: NoticeDraft, freeDesign: PopupFreeDesign, row: CampaignRow | null): Promise<NoticeDraft> {
+  const [problem] = popupFreeContentProblems(freeDesign, draft);
+
+  if (problem) {
+    throw new NoticeFieldError(problem.path.join("."), problem.message);
+  }
+
+  await assertPopupDesignFonts(db, freeDesign, "freeDesign.fonts");
+
+  return { ...draft, freeDesign: await assertPopupFreeAssets(db, freeDesign, row?.popup_design ?? null) };
+}
+
+/** As fontes do design gravado na linha (Livre ou Personalizado), para publicar e aprovar. */
+async function assertStoredDesignFonts(db: CommunicationsDb, row: CampaignRow) {
+  if (row.kind !== "popup") {
+    return;
+  }
+
+  if (popupDesignKindOf(row.popup_design) === "free") {
+    await assertPopupDesignFonts(db, { fonts: storedPopupDesignFontIds(row.popup_design) }, "freeDesign.fonts");
+  } else {
+    await assertPopupDesignFonts(db, parsePopupDesign(row.popup_design));
+  }
 }
 
 /**
@@ -527,8 +583,8 @@ function popupAuditOf(row: CampaignRow) {
   const settings = popupSettingsOfRow(row);
 
   return {
-    // Design do pop-up (docs/26): so o codigo (custom | default), nunca o conteudo.
-    popup_design: row.popup_design ? "custom" : "default",
+    // Design do pop-up (docs/26; Livre, docs/27): so o codigo (custom | default | free), nunca o conteudo.
+    popup_design: popupDesignKindOf(row.popup_design),
     popup_frequency: settings.frequency.mode,
     popup_pages: settings.pages.length,
     popup_trigger: settings.trigger
@@ -1240,8 +1296,8 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
     await assertSenderForPublish(db, row);
-    // Design do pop-up (docs/26): so com fontes que continuam na biblioteca.
-    await assertPopupDesignFonts(db, row.kind === "popup" ? parsePopupDesign(row.popup_design) : null);
+    // Design do pop-up (docs/26; Livre, docs/27): so com fontes que continuam na biblioteca.
+    await assertStoredDesignFonts(db, row);
     // v3b-1: tambem antes do pedido de aprovacao (um pedido que nao caberia no ar nao fica esperando).
     await assertPopupRoom(db, row, now, POPUPS_FULL_TO_PUBLISH);
     const followUps = await followUpsForPublish(db, row);
@@ -1328,7 +1384,7 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
     await assertSenderForPublish(db, row);
-    await assertPopupDesignFonts(db, row.kind === "popup" ? parsePopupDesign(row.popup_design) : null);
+    await assertStoredDesignFonts(db, row);
     await assertPopupRoom(db, row, now, POPUPS_FULL_TO_PUBLISH);
     const followUps = await followUpsForPublish(db, row);
 

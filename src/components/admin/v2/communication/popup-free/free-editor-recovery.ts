@@ -1,0 +1,159 @@
+// Editor Livre do pop-up (docs/27; spec §4.2 e §6): a copia de recuperacao no navegador. Enquanto ha mudanca que
+// ainda nao foi salva, o editor guarda `{ cta, design, savedAt }` em localStorage["bunker707:livre:<id do aviso ou
+// novo>"] (com espera de 1 s) e apaga ao salvar com sucesso. So na maquina de quem edita, so o design e o botao
+// principal (nada do aluno). A leitura passa pelo mesmo zod do servidor: uma copia que nao passa e descartada em
+// silencio. Sem armazenamento (janela privada, bloqueado), tudo devolve null/false e o editor funciona igual.
+//
+// Modulo puro (o armazenamento entra por parametro), imports relativos, tudo em try/catch.
+
+import { canonicalPopupFreeDesign, type PopupFreeDesign } from "../../../../../server/communications/popup-free-model";
+import { parsePopupFreeDesign } from "../../../../../server/communications/popup-free-schema";
+import type { NoticeDraft } from "../../../../../server/communications/schemas";
+
+export const FREE_RECOVERY_PREFIX = "bunker707:livre:";
+/** Espera depois da ultima mudanca antes de gravar a copia. */
+export const FREE_RECOVERY_DELAY_MS = 1_000;
+
+export type FreeRecoveryStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
+export type FreeRecovery = { cta: NoticeDraft["cta"]; design: PopupFreeDesign; savedAt: string };
+
+export function freeRecoveryKey(noticeId: string | null | undefined): string {
+  return `${FREE_RECOVERY_PREFIX}${noticeId && noticeId.trim() ? noticeId.trim() : "novo"}`;
+}
+
+/** O localStorage do navegador, ou null (sem janela, janela privada que recusa, bloqueado). */
+export function browserFreeRecoveryStorage(): FreeRecoveryStorage | null {
+  try {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    const storage = window.localStorage;
+
+    return storage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function ctaOf(value: unknown): NoticeDraft["cta"] | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const cta = value as Record<string, unknown>;
+
+  if (typeof cta.href !== "string" || typeof cta.label !== "string" || (cta.target !== "new_tab" && cta.target !== "same_tab")) {
+    return undefined;
+  }
+
+  if (cta.href.length > 2_000 || cta.label.length > 200) {
+    return undefined;
+  }
+
+  const display = cta.display === "button" || cta.display === "button_and_card" || cta.display === "card" ? cta.display : undefined;
+
+  return { ...(display ? { display } : {}), href: cta.href, label: cta.label, target: cta.target };
+}
+
+/** Grava a copia. Devolve false quando nao deu (sem armazenamento, cheio, bloqueado). */
+export function writeFreeRecovery(storage: FreeRecoveryStorage | null, key: string, entry: { cta: NoticeDraft["cta"]; design: PopupFreeDesign }, now: Date = new Date()): boolean {
+  if (!storage) {
+    return false;
+  }
+
+  try {
+    storage.setItem(key, JSON.stringify({ cta: entry.cta, design: entry.design, savedAt: now.toISOString() }));
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Le a copia pelo mesmo zod; uma copia que nao passa e apagada e devolve null. */
+export function readFreeRecovery(storage: FreeRecoveryStorage | null, key: string): FreeRecovery | null {
+  if (!storage) {
+    return null;
+  }
+
+  let raw: string | null;
+
+  try {
+    raw = storage.getItem(key);
+  } catch {
+    return null;
+  }
+
+  if (!raw) {
+    return null;
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    clearFreeRecovery(storage, key);
+
+    return null;
+  }
+
+  const value = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  const design = value ? parsePopupFreeDesign(value.design) : null;
+  const cta = value ? ctaOf(value.cta) : undefined;
+  const savedAt = value && typeof value.savedAt === "string" && !Number.isNaN(Date.parse(value.savedAt)) ? value.savedAt : null;
+
+  if (!design || cta === undefined || !savedAt) {
+    clearFreeRecovery(storage, key);
+
+    return null;
+  }
+
+  return { cta, design, savedAt };
+}
+
+export function clearFreeRecovery(storage: FreeRecoveryStorage | null, key: string): void {
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Sem armazenamento: nada a apagar.
+  }
+}
+
+/** A forma comparavel de `{ cta, design }` (o design na forma canonica, o botao sem espacos nas pontas). */
+export function freeEntrySignature(entry: { cta: NoticeDraft["cta"]; design: PopupFreeDesign }): string {
+  let design: unknown = entry.design;
+
+  try {
+    design = canonicalPopupFreeDesign(entry.design);
+  } catch {
+    // Um design no meio da edicao que a forma canonica nao entende: compara como esta.
+  }
+
+  const cta = entry.cta ? { href: entry.cta.href.trim(), label: entry.cta.label.trim(), target: entry.cta.target } : null;
+
+  return JSON.stringify({ cta, design });
+}
+
+/** A copia so aparece quando e diferente do que o editor abriu. */
+export function freeRecoveryDiffers(recovery: FreeRecovery | null, current: { cta: NoticeDraft["cta"]; design: PopupFreeDesign }): boolean {
+  return Boolean(recovery) && freeEntrySignature(recovery as FreeRecovery) !== freeEntrySignature(current);
+}
+
+/** A hora da copia para a faixa ("14:05"). */
+export function freeRecoveryTime(savedAt: string, locale = "pt-BR", timeZone?: string): string {
+  try {
+    return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", ...(timeZone ? { timeZone } : {}) }).format(new Date(savedAt));
+  } catch {
+    return "";
+  }
+}

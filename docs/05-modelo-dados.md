@@ -1677,6 +1677,17 @@ Indices: `family_key` unico; `file_path` unico onde `deleted_at is null`; `name`
 
 **Deploy**: **antes** do merge na `dev` (`docs/26` §11 passo 1). Sem ela, o app novo mostra o aviso de banco desatualizado no admin (`popup_design` esta em `CAMPAIGN_COLUMNS`) e a lista de pop-ups no ar falha. A migracao sozinha nao atrapalha o app da v3b-1.
 
+### Design Livre do pop-up (sem migracao, 23/10/2026)
+
+Produto em `docs/27` (o formato do JSON na §9 de la). O Livre mora na mesma coluna `campaigns.popup_design`, com `mode: "free"` e `version` propria (1); o Personalizado e o objeto sem `mode`. O check `campaigns_popup_design_v1` vale para os dois (o `pg_column_size` mede o jsonb sem compressao: ~21 KB de JSON de verdade); o zod do Livre limita por uma estimativa por cima do jsonb (ate 30.000 bytes) e a 32 elementos. Leitura pelo roteador `popup-design-router.ts` (`parseStoredPopupDesign`, `popupDesignKindOf`, `storedPopupDesignFontIds`, `storedPopupDesignAssetPaths`); Livre invalido no banco nao aparece para o aluno e abre como Padrao no editor.
+
+- **Rascunho** (`NoticeDraft`): `freeDesign` ao lado de `design`, no maximo um nao nulo; gravar `popup_design = freeDesign ?? design ?? null`. Regra das duas chaves ao salvar: um pedido com uma so das chaves zera a outra; sem nenhuma, fica o gravado (uma aba antiga do admin troca o Livre em vez de grava-lo por baixo).
+- **Aluno**: `PopupItem.freeDesign` (sem `locked` e `name`) com `fonts`; `title`/`body` do proprio design, `image` e `icon` nulos; `PopupPlanItem.design = "free"` so nos Livres. Cache da lista no ar: chave `["communications-live-popups", "design2"]`.
+- **Arquivos**: o design guarda so caminhos (`assets[].path`): imagens em `content-assets/communications/free/<24 hex>.webp` (novas, por `uploadPopupFreeImage`) ou `communications/images/` (a do aviso); video em `communication-popup-video/videos/<uuid>.<mp4|webm>`. O endereco e montado na hora pela origem conferida do Supabase. Arquivo novo e conferido pelos bytes ao salvar (e as medidas da imagem sao as do servidor). Sem bucket novo.
+- **Fontes**: `fonts` na raiz, como no Personalizado (a fonte "em uso" continua achada por `popup_design @> { fonts: [id] }`).
+- **Auditoria**: `popup_design: "free" | "custom" | "default"` e `communication.free_image_uploaded` (`{ height, size_bytes, width }`).
+- **Deploy**: nenhuma migracao; so o app. Voltar o deploy depois do PR do celular separado (L3) deixa invalidos os designs salvos com `devices` ate o deploy novo voltar (`docs/27` §9.1).
+
 ## Retencao de dados pessoais
 
 Migracao `202610170004_personal_data_retention.sql` (17/10/2026). Regras em `docs/06-seguranca-operacao.md`, secao LGPD; teste `tests/integration/retencao-de-dados-pessoais.test.mjs`.

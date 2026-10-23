@@ -433,9 +433,14 @@ test("textos do admin novo evitam o vocabulario tecnico proibido", () => {
   const forbidden = /\b(?:entitlements?|rbac|assets?|escopo|persistid[oa]s?|crm|drip|webhooks?|supabase)\b/i;
   // docs/17 §1.3: "webhook" so em Configuracoes > Vendas, onde e o nome do menu da Hotmart que o produtor precisa achar.
   const forbiddenInSales = /\b(?:entitlements?|rbac|assets?|escopo|persistid[oa]s?|crm|drip|supabase)\b/i;
+  // docs/27 §2.3: no editor Livre, "asset"/"assets" sao nomes de campos do JSON do design (codigo, nunca texto de
+  // tela); as frases do Livre tem testes de vocabulario proprios (tests/popup-livre-*-modelo.test.mjs).
+  const forbiddenInFree = /\b(?:entitlements?|rbac|escopo|persistid[oa]s?|crm|drip|webhooks?|supabase)\b/i;
 
   for (const { path, source } of v2Sources) {
-    assert.doesNotMatch(stripComments(source), path.includes("/settings/sales/") ? forbiddenInSales : forbidden, path);
+    const rule = path.includes("/settings/sales/") ? forbiddenInSales : path.includes("/communication/popup-free/") ? forbiddenInFree : forbidden;
+
+    assert.doesNotMatch(stripComments(source), rule, path);
   }
 });
 

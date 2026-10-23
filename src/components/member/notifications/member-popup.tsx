@@ -2,7 +2,7 @@
 
 import { ArrowRight, ExternalLink, X } from "lucide-react";
 import Image from "next/image";
-import type { MouseEvent } from "react";
+import { lazy, Suspense, type MouseEvent } from "react";
 import { memberButtonClassName } from "@/components/member/ui/member-button";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
@@ -12,6 +12,7 @@ import { NoticeAudioPlayer } from "./notice-audio-player";
 import { NoticeTitleIcon } from "./notice-icons";
 import { resolveNotificationLink, type NotificationLink } from "./notifications-model";
 import { PopupDesignCard } from "./popup-design/popup-design-card";
+import { loadPopupFreeCard } from "./popup-free/popup-free-load";
 
 // Pop-up do aluno (docs/22 §1.3; v3b-1 em docs/25): nas paginas, no momento e na frequencia que a equipe
 // escolheu, um de cada vez, so quando nada mais esta aberto por cima e a aba esta visivel (na aula, nunca
@@ -30,6 +31,11 @@ import { PopupDesignCard } from "./popup-design/popup-design-card";
 //
 // Design do pop-up (docs/26): com `popup.design` ("Personalizado"), o cartao e o PopupDesignCard
 // (popup-design/), com as mesmas props; sem design ("Padrão"), exatamente o cartao de sempre.
+// Design Livre (docs/27): com `popup.freeDesign`, o PopupFreeCard, num pedaco proprio (popup-free-load.ts, por
+// React.lazy + Suspense sem nada no lugar): o cartao Livre e os 24 icones nunca entram no pedaco da janela do
+// Padrão/Personalizado. O host ja baixou esse pedaco antes de abrir; enquanto nao chega, nada e desenhado.
+// (React.lazy e nao next/dynamic: o mesmo pedaco e o mesmo "nada ate carregar", e o cartao continua carregavel
+// pelo Node nos testes de desenho, que importam este arquivo.)
 
 export type MemberPopupCardProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -51,6 +57,9 @@ export type MemberPopupCardProps = {
 };
 
 const focusRing = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
+
+// O pedaco exporta o cartao como padrao: o lazy recebe a porta direto.
+const PopupFreeCard = lazy(loadPopupFreeCard);
 
 function PopupCta({
   accessPreviewMode,
@@ -92,7 +101,15 @@ function PopupCta({
 }
 
 export function MemberPopupCard({ playing, ...props }: MemberPopupCardProps) {
-  const { design, fonts } = props.popup;
+  const { design, fonts, freeDesign } = props.popup;
+
+  if (freeDesign) {
+    return (
+      <Suspense fallback={null}>
+        <PopupFreeCard {...props} design={freeDesign} fonts={fonts} playing={playing} />
+      </Suspense>
+    );
+  }
 
   return design ? <PopupDesignCard {...props} design={design} fonts={fonts} playing={playing} /> : <DefaultPopupCard {...props} />;
 }

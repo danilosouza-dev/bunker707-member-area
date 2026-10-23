@@ -16,6 +16,7 @@
 //
 // Design do pop-up (docs/26): `design` (null = Padrão; so pop-up, a notificacao nunca leva a chave), validado
 // por popup-design-schema.ts e coerente com o conteudo (botao, audio, imagem e "Lembrar depois").
+// Design Livre (docs/27): `freeDesign` ao lado (popup-free-schema.ts); no maximo um dos dois nao nulo.
 
 import { z } from "zod";
 import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
@@ -49,6 +50,9 @@ import {
 import { CTA_DISPLAYS, type CtaDisplay } from "./notification-model";
 import { popupDesignLinkButton, type PopupDesign } from "./popup-design-model";
 import { popupDesignContentProblems, popupDesignSchema } from "./popup-design-schema";
+import type { PopupFreeDesign } from "./popup-free-model";
+import { freeLinkButton } from "./popup-free-render";
+import { POPUP_FREE_MESSAGES, popupFreeContentProblems, popupFreeDesignSchema } from "./popup-free-schema";
 import {
   canonicalPopupSettings,
   defaultPopupSettings,
@@ -442,6 +446,12 @@ export type NoticeDraft = {
    * linha (ou Padrão num aviso novo).
    */
   design?: PopupDesign | null;
+  /**
+   * Design Livre do pop-up (docs/27), ao lado de `design` (Personalizado): no maximo uma das duas nao nula
+   * ("Escolha um design só."). So pop-up. Ao salvar, uma das chaves no pedido (mesmo null) zera a outra; as duas
+   * valem como vieram; nenhuma = o design gravado na linha (actions.withPopupSettings).
+   */
+  freeDesign?: PopupFreeDesign | null;
   /** Icone ao lado do titulo (notificacao e pop-up); null = sem icone. */
   icon: NoticeIconChoice;
   image: { alt: string; url: string } | null;
@@ -556,7 +566,7 @@ function withoutInboxPopup(value: unknown) {
     typeof value !== "object" ||
     Array.isArray(value) ||
     (value as { kind?: unknown }).kind !== "inbox" ||
-    !("popup" in value || "design" in value)
+    !("popup" in value || "design" in value || "freeDesign" in value)
   ) {
     return value;
   }
@@ -564,6 +574,7 @@ function withoutInboxPopup(value: unknown) {
   const rest: Record<string, unknown> = { ...(value as Record<string, unknown>) };
   delete rest.popup;
   delete rest.design;
+  delete rest.freeDesign;
 
   return rest;
 }
@@ -574,6 +585,7 @@ const noticeDraftObjectSchema = z
     allowSnooze: z.boolean(),
     audience: audienceDefinitionSchema,
     design: popupDesignSchema.nullable().optional(),
+    freeDesign: popupFreeDesignSchema.nullable().optional(),
     kind: z.enum(CAMPAIGN_KINDS, { error: "Escolha o tipo do aviso." }),
     popup: popupSettingsSchema.optional(),
     repeat: z.enum(["once", "until_action"]),
@@ -590,7 +602,8 @@ const noticeDraftObjectSchema = z
       draft.popup?.frequency.mode === "repeat" &&
       draft.popup.frequency.stopOn === "click" &&
       !draft.cta &&
-      !popupDesignLinkButton(draft.design)
+      !popupDesignLinkButton(draft.design) &&
+      !freeLinkButton(draft.freeDesign)
     ) {
       context.addIssue({ code: "custom", message: POPUP_NO_BUTTON_STOP_MESSAGE, path: ["popup", "frequency", "stopOn"] });
     }
@@ -598,6 +611,18 @@ const noticeDraftObjectSchema = z
     // Design do pop-up (docs/26): o design e o conteudo andam juntos (botao, audio, imagem, "Lembrar depois").
     if (draft.kind === "popup" && draft.design) {
       for (const problem of popupDesignContentProblems(draft.design, draft)) {
+        context.addIssue({ code: "custom", message: problem.message, path: problem.path });
+      }
+    }
+
+    // Design Livre (docs/27): um design so; e o Livre anda junto com o conteudo (botao, audio, "Lembrar depois",
+    // Imagem e Video com arquivo).
+    if (draft.kind === "popup" && draft.design && draft.freeDesign) {
+      context.addIssue({ code: "custom", message: POPUP_FREE_MESSAGES.bothDesigns, path: ["freeDesign"] });
+    }
+
+    if (draft.kind === "popup" && draft.freeDesign) {
+      for (const problem of popupFreeContentProblems(draft.freeDesign, draft)) {
         context.addIssue({ code: "custom", message: problem.message, path: problem.path });
       }
     }

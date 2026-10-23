@@ -1,0 +1,609 @@
+# 27. Comunicação: design Livre do pop-up (editor estilo Elementor)
+
+Data: 23/10/2026. Pedido do produtor depois do Personalizado (`docs/26`): "criar o que eu quiser da forma que eu quiser", montando o pop-up do zero, elemento por elemento, com estilo em cada elemento, como no Elementor. No card **Design** do pop-up entra a terceira opção **Livre**, ao lado de **Padrão** e **Personalizado** (os dois continuam exatamente como estavam). Sem migração: o Livre mora na mesma coluna `campaigns.popup_design` (migração `202610230001`), com `mode: "free"`.
+
+Este documento vale para qualquer trabalho no design Livre: o editor de tela cheia, o cartão do aluno (`PopupFreeCard`), o JSON do design, os envios de imagem e o "Criar com IA" que vem depois. Onde, quando, quantas vezes e como o pop-up fecha continuam como no `docs/25`; o Personalizado continua no `docs/26`. A notificação do sino **nunca** tem design.
+
+---
+
+## Resumo em uma página
+
+| Peça | O que faz | Onde |
+|---|---|---|
+| **Padrão \| Personalizado \| Livre** | os dois primeiros continuam exatamente como no `docs/26`; **Livre** monta o pop-up do zero, elemento por elemento | editor do pop-up, card **Design** (logo depois do conteúdo) |
+| **Modelos para começar** | **Vídeo no topo com degradê** (a estrutura da referência que o produtor mandou), **Só texto com brilho**, **Em branco**; escolher abre o editor (numa tela larga); **Trocar de modelo** pede confirmação e dá para desfazer no editor | card Design, na primeira vez em Livre |
+| **Resumo no card** | miniatura (o próprio cartão do aluno, reduzido), **Abrir editor Livre**, `{n} elementos · {largura} px` e, com problemas, `{n} problemas para revisar` (abre o editor no Revisar) | card Design |
+| **Editor Livre** | tela cheia por cima do editor do aviso: **Elementos** e **Camadas** à esquerda, a área de desenho no meio (selecionar, arrastar, redimensionar pelas alças, guias de alinhamento), **Conteúdo / Estilo / Avançado** à direita (ou **Pop-up**, sem seleção, ou **Revisar**); **Desfazer** / **Refazer** (100 passos), **Ver como** Computador / Celular, zoom **Ajustar à tela** / **100 %**, **Atalhos**, **Salvar rascunho** (o editor continua aberto), **Concluir** | botão **Abrir editor Livre** (só em telas a partir de 1.024 px; abaixo, só a prévia) |
+| **Elementos** | Título, Texto, Selo, Botão principal, Botão (Fechar, Lembrar depois ou Abrir um link), Imagem (até 6 arquivos, com transparência), Vídeo (um), Ícone (24 prontos), Forma, Degradê, Linha, Espaço, Caixa em coluna, Caixa em linha; mais o Áudio (entra e sai com o áudio do aviso) e os Links (sempre um) | aba **Elementos** |
+| **Na sequência / Solta** | na sequência, os elementos seguem a ordem da caixa (com largura, altura, margem até negativa e alinhamento); soltos têm X, Y, largura, altura, girar e camada, e 6 botões de **Alinhar no pop-up** | aba **Avançado** |
+| **Estilo** | fundo com até 3 camadas (cor, degradê, degradê circular, imagem), borda, cantos, até 2 sombras (inclusive por dentro), opacidade, desfoque, desfoque do que está atrás, esmaecer de qualquer lado; texto com fonte (prontas e enviadas), tamanho, peso, itálico, altura da linha, espaço entre letras, maiúsculas, sublinhado ou riscado, alinhamento, cor ou degradê, sombra; **Outro estilo na seleção** dá cor, peso, tamanho ou fonte próprios a palavras escolhidas | aba **Estilo** e a área de texto |
+| **Pop-up** | largura no computador (P 360, M 440, G 520, GG 640 ou outra de 280 a 720, com **Ajustar os elementos à nova largura**), altura mínima, fundo, borda, cantos, sombra, respiro, a sequência da prancheta, o X (cor, fundo, borda, tamanho, distância, lado) e as fontes | painel **Pop-up** (nada selecionado) |
+| **Revisar** | sempre `Tamanho do design: N % do máximo.`; os erros que impedem salvar (cada um leva ao elemento e ao campo) e as dicas (contraste, texto pequeno, texto que muda no celular, ordem de leitura, texto por cima de botão, cortado, celular alto, fonte que muda, vídeo sem capa) | botão **Revisar** |
+| **Celular** | o pop-up inteiro encolhe na mesma proporção (343 px numa tela de 375); texto nunca abaixo de 12 px e 44 px de toque nos botões, nos links e no X | aluno e prévia |
+| **Dados** | o Livre mora em `campaigns.popup_design` com `mode: "free"` (o Personalizado sem a chave); sem migração; o JSON é estrito, esparso e só guarda caminhos dos nossos buckets (§3, §9) | banco |
+
+Vocabulário na tela: **Livre**, **Abrir editor Livre**, **Editor Livre**, **Elementos**, **Camadas**, **Conteúdo**, **Estilo**, **Avançado**, **Pop-up**, **Revisar**, **Na sequência**, **Solta**, **Concluir**, **Salvar rascunho**, **Nome do pop-up**. Nunca "campanha", "público", "audiência", "evento", "oferta", "gatilho", "trigger", "sessão", "impressão", "home", "automação", "lembrete", "layout", "template" nem "fluxo" (testes de vocabulário em `popup-livre-*-modelo` e `popup-design-editor-modelo`).
+
+### Resposta curta ao produtor (para colar)
+
+> Pronto: no card **Design** do pop-up agora tem **Livre**, ao lado de Padrão e Personalizado (os pop-ups que já existiam continuam iguais). No Livre você abre um editor de tela cheia, como o Elementor: à esquerda, **Elementos** (título, texto, selo, botões, imagem, vídeo, ícone, formas, degradê, linha, espaço e caixas em coluna ou em linha) e **Camadas** (a lista de tudo, para escolher, subir e descer, esconder e travar); no meio, o pop-up, onde você clica, arrasta e muda o tamanho, com guias para alinhar; à direita, **Conteúdo**, **Estilo** e **Avançado** de cada elemento. Você escreve o texto como num editor e pode dar outra cor, peso ou fonte a palavras escolhidas. Dá para colocar um elemento por cima do outro, soltar onde quiser, centralizar com um clique, girar, usar degradê em qualquer fundo e no texto, várias imagens (com fundo transparente), sombra, brilho, desfoque, esmaecer e preço riscado. Tem desfazer e refazer, a prévia de computador e celular (no celular, o pop-up inteiro fica menor, igual, e o texto nunca fica abaixo de 12 px) e o painel **Revisar**, que avisa o que precisa de ajuste. **Salvar rascunho** dentro do editor salva sem fechar. Comece pelo modelo **Vídeo no topo com degradê**, que é a estrutura do exemplo que você mandou; para ficar idêntico, envie a fonte do título em **Enviar fonte…**. O texto continua de verdade (o aluno seleciona e o leitor de tela lê) e o clique no botão conta como antes. O editor abre em telas a partir de 1.024 px (no celular e no tablet de pé, só a prévia). O botão de copiar e colar o design vem no próximo passo, e o "Criar com IA", com a sua conta do Claude ou do Codex, depois dele.
+
+## 1. O que o aluno vê
+
+- O pop-up Livre abre onde, quando e quantas vezes a equipe escolheu (`docs/25`), na mesma janela de sempre (mesmo véu, foco inicial, `Esc`, "Como fechar", "um de cada vez", nunca com o player tocando). Só o cartão muda.
+- **O cartão** (`PopupFreeCard`): a prancheta na largura escolhida (280 a 720 px no computador), com os elementos na ordem das Camadas; os da sequência seguem as caixas (coluna ou linha), os soltos ficam na posição escolhida, um por cima do outro pela camada. O X fica por último, fora da prancheta e por cima de tudo (`zIndex` 60), sempre visível (o schema recusa um X que não contrasta, §9.6 regra 11) e com 44 px de toque. A prancheta corta o que passa dela: nada imita a página fora do cartão.
+- **Texto de verdade** em tudo: título, texto, selo, botões e links são texto da página (o aluno seleciona, o leitor de tela lê, o tradutor traduz). O degradê no texto é `background-clip: text` em cada parte, com a cor de seleção legível. Nada vira imagem.
+- **Nome do diálogo** = o texto do primeiro Título visível (`<h2>`, as linhas com espaço entre elas); sem Título, o "Nome do pop-up". A descrição é o primeiro Texto visível. Ordem de leitura e de Tab = ordem das Camadas (não a posição na tela); o X vem por último.
+- **Celular**: o cartão ocupa a tela menos 1 rem de cada lado e tudo encolhe na mesma proporção (unidades `cqw` do próprio cartão: 375 px de tela → 343 px de cartão → 0,78 num cartão de 440). Duas proteções: o texto nunca fica abaixo de 12 px (um texto pequeno fica um pouco maior que a proporção, e os elementos com texto crescem em vez de vazar) e os botões, os links e o X têm 44 px de toque por um `::before` invisível (o desenho não muda). Nada rola para o lado em 375 px. O aluno não mede nada nesta versão (o celular separado é o PR L3, §10).
+- **Mídia**: imagens e o vídeo só dos nossos buckets, com o endereço montado na hora (§4). O vídeo é mudo, em repetição, inline, sem controles e escondido do leitor de tela; com **menos movimento** ou **economia de dados** aparece a capa (ou só o fundo do elemento, sem capa) e o vídeo nem é baixado. Imagens pelo `next/image` com `sizes` pela largura do elemento (o celular baixa a versão pequena).
+- **Cliques**: elementos decorativos (forma, linha, espaço, ícone, imagem, vídeo, caixa) não recebem clique, então nada decorativo por cima bloqueia o botão nem o X; título, texto e selo recebem (para selecionar o texto), e o Revisar avisa quando um deles cobre um botão. O **Botão principal** é o botão de sempre (`cta`: mesmo destino, o mesmo clique contado em `message_clicked` e `clicked_at`); o botão **Abrir um link** (no máximo um) também conta como o clique; **Fechar** fecha como o X; **Lembrar depois** adia como o link (some quando o aluno não pode mais adiar).
+- **Links**: "Lembrar depois" (quando o pop-up deixa adiar e não há botão Lembrar depois) e "Não mostrar de novo" (que a equipe pode esconder em Conteúdo; o aluno continua fechando pelo X, pelo `Esc` e, fora de "Só no X", clicando fora).
+- **Pedaço próprio**: o código do cartão Livre só é baixado quando o pop-up armado é Livre (o plano do aluno marca `design: "free"`), **antes** do `POST /show`: sem o código, nada abre e nada conta como visto (regra do `docs/25`). Padrão e Personalizado não pagam nada por ele (§7).
+- **Livre inválido** no banco (edição direta, deploy voltado): não aparece para o aluno (§9.1).
+
+## 2. O que a equipe faz (editor Livre)
+
+### 2.1 Card "Design"
+
+- Descrição: `Escolha o visual do pop-up. O Padrão é o de sempre; no Personalizado você monta por seções; no Livre você monta do zero, elemento por elemento.` Opções (`name="popup-design"`, empilhadas): **Padrão** e **Personalizado** como no `docs/26`, e **Livre** · `Monte do zero, como num editor de páginas: coloque cada elemento onde quiser, um por cima do outro, com o estilo que quiser.`
+- **Memória entre os três**: trocar de modo guarda o design do modo que saiu; voltar devolve sem perguntar (coerente com o botão e o áudio de agora). Só o design do modo escolhido vai no rascunho (`design` ou `freeDesign`, nunca os dois).
+- **Primeira vez no Livre**: **Começar de um modelo** (`Escolha um ponto de partida. No editor, tudo pode ser mudado.`), com a miniatura de cada modelo (o próprio `PopupFreeCard` em prévia, reduzido, fora do teclado) e `Usar este modelo`. Escolher aplica o modelo e abre o editor (numa tela larga). Sem botão no aviso, o modelo cria o `cta` `Saiba mais` com destino vazio (o "Para onde leva" fica no Botão principal, no editor); com áudio, entra o elemento Áudio; o vídeo do Personalizado atual ou guardado entra como arquivo do Vídeo e a imagem do aviso, quando é do nosso bucket, entra como capa (medidas lidas no navegador; o servidor confere ao salvar).
+- **Com o Livre montado**: miniatura, **Abrir editor Livre** (o editor é baixado no clique; passar o mouse ou focar o botão já começa a baixar), `{n} elementos · {largura} px` e, com erros que impedem salvar (do design ou do Botão principal), `{n} problemas para revisar`, que abre o editor no **Revisar**. **Trocar de modelo** pede confirmação (`Trocar de modelo?` / `O design Livre atual será trocado pelo modelo. Dá para desfazer no editor.` / `Trocar` / `Cancelar`) e abre o editor com o design de antes um passo atrás (Ctrl + Z volta a ele).
+- Tela menor que 1.024 px: `O editor Livre precisa de uma tela maior (a partir de 1.024 px de largura). Aqui você vê a prévia.` (o botão fica desligado; a prévia continua).
+- No Livre, o card do conteúdo se comporta como no Personalizado: esconde Texto, Ícone, Imagem e "Para onde leva" (o texto e o destino do Botão principal ficam no editor); "Título" vira **Nome do pop-up** (listas, relatórios e nome do diálogo quando o design não tem Título). O áudio continua no campo **Áudio** do aviso (`Um áudio curto. No design, o player fica onde estiver o elemento Áudio.`).
+- **Prévia** do aviso e **relatório**: celular (375 px) e computador lado a lado, pelo mesmo cartão do aluno (o computador do tamanho da largura escolhida). **Quantas vezes → Quando o aluno clica no botão** vale com o Botão principal ou com o botão **Abrir um link** visível do Livre (D9 do `docs/26`).
+
+### 2.2 O editor Livre
+
+- Um `Dialog` do Base UI em tela cheia por cima do editor do aviso. O `Esc` não fecha (serve para "selecionar a caixa de fora"); fecha só em **Concluir**. Ao abrir, o foco vai para a primeira linha das Camadas; ao fechar, volta para **Abrir editor Livre**.
+- Trabalha numa **cópia** do design e manda ao rascunho do aviso com atraso (no fim de um arrastar, 300 ms depois da última tecla e ao fechar). O histórico guarda o design e o `cta` juntos (excluir o Botão principal e desfazer devolve os dois).
+- Barra de cima: **Concluir** (`Concluir e voltar ao aviso`), `Editor Livre` e o nome do pop-up; **Ver como** Computador | Celular; zoom **Ajustar à tela** | **100 %**; **Desfazer**, **Refazer**, **Revisar** (com o número de erros e dicas), **Atalhos** (`?`), **Salvar rascunho**. Três colunas: 280 / desenho / 340 px a partir de 1.280 px; 248 / desenho / 300 de 1.024 a 1.279.
+- **Salvar rascunho** chama o salvar do editor do aviso e o editor **continua aberto**, com histórico, seleção e zoom (`Rascunho salvo.`). Com o pop-up no ar ou pausado, o botão é **Salvar alterações** e a frase é a do editor do aviso (por exemplo `Pop-up atualizado. Quem já viu não vê de novo. …`); o "Mostrar de novo para quem já viu" fica para o salvar do aviso (L16). Num aviso novo, o editor do aviso guarda o id e só troca de endereço no **Concluir** sem mudança depois do último salvar (trocar de endereço remontaria a página e levaria o editor junto); com mudança, o próximo salvar, já fora do editor, troca. Erro do design abre o **Revisar** com os itens; erro fora do design (por exemplo, o Nome do pop-up vazio) mostra `Há campos para revisar fora do editor: {nomes}.` com **Fechar o editor e revisar**. Enquanto um arquivo sobe, salvar e concluir esperam (`Espere o arquivo terminar de enviar.`). O Ctrl + Enter do editor do aviso não age com o editor Livre aberto.
+- **Trabalho perdido**: com mudança não salva, o editor liga o `beforeunload` e guarda uma cópia de recuperação no navegador (`localStorage["bunker707:livre:<id do aviso ou novo>"]`, 1 s depois da última mudança, apagada ao salvar); ao abrir com uma cópia diferente, a faixa `Há um design deste pop-up que não foi salvo ({hora}).` oferece **Recuperar** (um passo no histórico) e **Descartar**. O editor do aviso também liga o `beforeunload` com o Livre mudado e não salvo.
+- **Área de desenho**: o mesmo `PopupFreeCard` do aluno em prévia (Computador = palco da largura escolhida; Celular = moldura de 375 px com o cartão de 343 px). Clique seleciona o elemento mais de cima; duplo clique num texto abre a área de texto. Soltos: arrastar (a partir de 3 px), 8 alças (Shift mantém a proporção), setas (1 px; Shift, 10 px), guias que grudam nas bordas e no centro da prancheta e dos outros soltos (Alt desliga). Durante o arrastar o design não muda (só a prévia); no fim, um passo no histórico. Da sequência: barrinha com **Subir**, **Descer**, **Duplicar**, **Soltar** e **Excluir**. O palco é focável e diz o selecionado (`Selecionado: Título, X 24, Y 120.`).
+- **Camadas**: árvore na ordem de leitura, com etiquetas `Solta`, `Escondida`, `Travada` e o aviso de algo para revisar; em cada linha **Esconder**, **Travar** e o menu `⋯` (Duplicar, Subir, Descer, Colocar dentro da caixa…, Tirar da caixa, Renomear, Excluir). Teclado: ↑/↓, →/←, Enter, Alt + ↑/↓, E, T, Shift + F10, Delete, Ctrl + D, F2; o Tab passa pela lista uma vez só. Links e Áudio não se excluem.
+- **Painel da direita**: **Conteúdo / Estilo / Avançado** do elemento (detalhes no `docs/17` §1.8.2 e na spec), ou **Pop-up** sem seleção, ou **Revisar**. Campos de número com arrastar no rótulo, setas (Shift = 10) e a frase do limite; cor como no Personalizado.
+- **Envios**: imagem de qualquer proporção (JPG, PNG ou WebP, convertida no navegador para WebP de até 1.600 px e 420 KB, transparência mantida) por `uploadPopupFreeImage`; vídeo pelo envio do Personalizado (direto ao Storage), com a capa tirada de um quadro do arquivo local; fontes pela biblioteca do Personalizado.
+
+## 3. Dados
+
+- Coluna `campaigns.popup_design` (migração `202610230001`, sem migração nova): o Personalizado é o objeto sem `mode`; o Livre, `{ "mode": "free", "version": 1, ... }`. O check do banco (objeto com `version`, só pop-up, `pg_column_size` até 32 KB) vale para os dois; o zod do Livre limita por uma estimativa do jsonb (até 30.000 bytes) e a 32 elementos (§9.5).
+- **Rascunho do aviso** (`NoticeDraft`): `freeDesign` ao lado de `design`. O editor do aviso manda **sempre as duas chaves** (no máximo uma não nula, `Escolha um design só.`). Ao salvar, a **regra das duas chaves**: um pedido com uma só das chaves (mesmo nula) zera a outra; com as duas, vale como veio; sem nenhuma, fica o gravado. Assim uma aba do admin aberta antes do deploy (que só manda `design`) troca o Livre gravado em vez de gravá-lo de novo por baixo. Gravar: `popup_design = freeDesign ?? design ?? null`.
+- **Pop-up do aluno** (`PopupItem`): `freeDesign` (sem `locked` e `name`, que são só do editor) e `fonts`; `title` = o texto do primeiro Título (ou o Nome do pop-up), `body` = o primeiro Texto, `image` e `icon` nulos (uma aba do aluno com o código antigo, no meio do deploy, mostra o cartão Padrão com o texto de verdade). **Plano** (`PopupPlanItem`): `design: "free"` só nos Livres. Cache da lista no ar com a chave nova `["communications-live-popups", "design2"]`.
+- **Campos do aviso no Livre**: `title` = Nome do pop-up; `body`, `icon` e `image` guardados mas não aparecem (voltar a Padrão devolve; a imagem do nosso bucket pode virar capa do Vídeo de um modelo); `cta` = o Botão principal; `audio` = o elemento Áudio; `allowSnooze` = o "Lembrar depois" dos links e do botão.
+- **Arquivos**: imagens em `content-assets/communications/free/<24 hex>.webp` (enviadas no editor) ou `communications/images/` (a do aviso, reaproveitada); vídeo em `communication-popup-video/videos/<uuid>.<mp4|webm>`. O design guarda só o caminho; o endereço é montado na hora (§4). Arquivos que ficaram sem uso continuam no Storage (job futuro, como D21 do `docs/26`).
+- Auditoria: `popup_design: "free" | "custom" | "default"` (nunca o conteúdo) e `communication.free_image_uploaded` (`{ height, size_bytes, width }`).
+- O formato completo do JSON (campos, padrões, limites, regras e exemplos testados) está na §9.
+
+## 4. Segurança
+
+- **Texto** sempre como texto do React (escapado). Nada de `dangerouslySetInnerHTML`, `innerHTML`, `cssText`, `<style>` nem `style` em texto no cartão Livre, no `member-popup*` e no editor (guardas em `popup-livre.guard` e no teste do editor).
+- **CSS só de valores validados** (hex, números com limite, listas fechadas). As únicas strings montadas são gradientes, sombras, máscaras, `rotate()`, `translate()` (só na prévia do arrastar), `sizes` e `url()`. O `url()` **nunca** usa texto do design: é `freeAssetUrl` = a origem do nosso Supabase (de `NEXT_PUBLIC_SUPABASE_URL`, conferida uma vez por `freeStorageOrigin`: https, ou http só na própria máquina, sem usuário, senha, caminho, query ou fragmento, máquina só com `[a-z0-9.-]`) + o caminho público do bucket + um caminho que casou com o padrão do tipo. Um design colado, gerado por IA ou ainda não salvo não consegue abrir um `url()` para fora nem sair das aspas (teste com origens maliciosas).
+- **Zod estrito** no navegador, na Server Action e na leitura; chave a mais recusa (inclusive `url` num arquivo e `devices`); Livre inválido no banco não aparece para o aluno.
+- **Storage**: só os dois buckets e os padrões de caminho acima; arquivo novo conferido pelos bytes ao salvar (`inspectFreeImage`: existe, até 420.000 bytes, primeiros 64 bytes WebP com as medidas do cabeçalho, que substituem as do navegador; vídeo pela conferência do Personalizado); arquivo que a linha gravada ainda usa nunca é apagado. Envio só para a equipe com `messaging.write`.
+- **Links**: o botão "Abrir um link" segue a regra do botão principal (página da área, produto ou https); no máximo um; `rel="noopener noreferrer"` em nova aba.
+- **Contra pop-up que engana**: o X sempre existe, por cima de tudo, sempre visível (alfa do ícone ≥ `cc` e contraste ≥ 3:1 com o fundo dele: erro que impede salvar) e o `Esc` sempre fecha; decorativos não recebem clique; texto por cima de botão gera a dica de cobertura; a prancheta corta o que passa dela. Esconder "Não mostrar de novo" não tira nenhum jeito de fechar.
+- **Abuso e peso**: até 32 elementos, 6 imagens de 420 KB, 1 vídeo de 15 MB, desfoque em até 4 elementos, teto de tamanho do JSON; o cartão do aluno não baixa nada antes de abrir.
+- **Recuperação no navegador** só na máquina de quem edita, só o design e o `cta`, lida com o mesmo zod e apagada ao salvar. **Auditoria** só com códigos, ids, tamanhos e o tipo do design. **CSP** sem mudança.
+
+## 5. Por dentro
+
+- **Módulos puros** (imports relativos; os testes carregam pelo Node): `popup-free-model.ts` (tipos, limites, forma canônica, árvore, estimativa do jsonb, reescala, item de prévia; **sem zod**), `popup-free-render.ts` (o único módulo de valores que o cartão do aluno importa: padrões, escala, leituras do design, nome do diálogo, origem e endereço dos arquivos), `popup-free-schema.ts` (zod, mensagens, regras com o conteúdo, chaves de erro), `popup-free-json-schema.ts` (o JSON Schema, que nenhuma tela importa, §7), `popup-free-starters.ts` (os 3 modelos, elementos novos, sincronia com o conteúdo), `popup-free-checks.ts` (as dicas do Revisar e o medidor), `popup-design-router.ts` (leitura da coluna). Servidor: `popup-free-assets.ts` (`server-only`) e `popup-free-actions.ts` (`uploadPopupFreeImage`).
+- **Do banco ao aluno**: a lista no ar lê pelo roteador; o Livre passa por `freeDesignForStudent`; as fontes de todos os pop-ups numa consulta; o plano marca `design: "free"`. O host baixa a janela e o pedaço do cartão Livre **antes** do `POST /show` quando o plano diz Livre (se o `show` trouxer um Livre que o plano não marcou, a janela espera o pedaço).
+- **Cartão** (`src/components/member/notifications/popup-free/`): `popup-free-card.tsx`, `popup-free-nodes.tsx` (um `switch` por tipo, `data-free-id` num elemento só), `popup-free-media.tsx`, `popup-free-styles.ts` (todos os objetos de estilo, puro), `popup-free-icons.tsx` (24 ícones), `popup-free-load.ts` (a única porta do pedaço). `MemberPopupCard` despacha `freeDesign` → `PopupFreeCard` por `React.lazy` (o mesmo pedaço próprio do `next/dynamic` da spec, carregável pelo Node nos testes); senão `design` → `PopupDesignCard`; senão o cartão de sempre (HTML do Padrão e do Personalizado comparado com o de antes do Livre).
+- **Editor** (`src/components/admin/v2/communication/popup-free/`): casca e palco (`free-editor.tsx`, `free-canvas.tsx`, `free-elements-panel.tsx`, `free-layers-panel.tsx`, `free-review-panel.tsx`, `free-editor-model.ts`, `free-editor-history.ts`, `free-editor-geometry.ts`, `free-editor-recovery.ts`) e painel da direita (`free-inspector*.tsx`, `free-artboard-settings.tsx`, `free-fields.tsx`, `free-assets.ts`, `free-inspector-model.ts`). O card Design (`popup-design/popup-design-field.tsx`) carrega o editor com `next/dynamic` e passa o contrato `FreeDesignEditorProps` (spec §9.6), mais `undoTo` (o design de antes do **Trocar de modelo**). O editor do aviso (`notice-editor.tsx`) guarda o rascunho, passa `onSaveDraft` (o salvar sem os toasts dele, devolvendo os erros) e adia o `openSavedNotice` enquanto o editor Livre está aberto.
+- **Erros**: os do zod chegam com índices (`freeDesign.children.3.lines.0.1.text`) e passam por `freeErrorKeys` (`freeDesign.nodes.<id>.lines.0.1.text`, estável se a ordem mudar) no navegador e nas respostas do servidor; os erros lançados pelo servidor já vêm nesse formato. Fora do editor, um erro do Livre (ou do Botão principal no Livre) leva o foco ao `{n} problemas para revisar`.
+
+## 6. Rotas e ações
+
+| Rota / ação | O que faz |
+|---|---|
+| `uploadPopupFreeImage({ image })` (`popup-free-actions.ts`) | data URL WebP (o editor converte) → `{ asset: { height, kind: "image", path, width } }` (sem endereço; o id do arquivo é do editor); `Envie a imagem como WebP.` / `A imagem precisa ter de 16 a 1.600 px de cada lado.` / `A imagem ficou grande demais. Use uma menor.`; 403 sem `messaging.write`; auditoria `communication.free_image_uploaded` |
+| `startPopupVideoUpload` / `finishPopupVideoUpload` | os do Personalizado (`docs/26` §6), reaproveitados pelo Vídeo do Livre |
+| Fontes (`POST /api/admin/communications/popup-fonts`, renomear, excluir) | as do Personalizado; uma fonte usada só por um Livre não deixa excluir (409) |
+| Salvar (`saveNoticeDraft`) | regra das duas chaves; `withCheckedFreeDesign`: regras com o conteúdo do aviso (400 no campo), fontes na biblioteca, arquivos novos conferidos e medidas das imagens trocadas pelas do servidor; recusa em `freeDesign.assets.<id>` (`Envie a imagem de novo.` / `Envie o vídeo de novo.`) |
+| Publicar / aprovar | conferem de novo as fontes do que está gravado (Livre ou Personalizado) |
+| Duplicar | copia `popup_design` como está (o Livre vai junto) |
+| `POST /api/popups/[id]/show` e o plano | o Livre do aluno (§3); 404 para Livre inválido |
+
+## 7. Desempenho
+
+O cartão Livre fica num pedaço próprio, baixado só quando o pop-up armado é Livre; o editor Livre só é baixado no admin, ao abrir. Medido com `next build` (Turbopack, gzip, o mesmo `.env.test.local` nas duas árvores), `origin/dev` (e555188) × esta entrega, com o método do `docs/26` §7 (`scratchpad/v3/livre/s-tools/measure-livre.mjs`):
+
+| | `origin/dev` | esta entrega | diferença | limite da spec |
+|---|---|---|---|---|
+| JS inicial do Início (`/`) | 297.383 B | 297.616 B | **+233 B** | +200 B |
+| JS inicial da página do produto (`/conteudo/[id]`) | 286.547 B | 286.763 B | **+216 B** | +200 B |
+| pedaço da janela do pop-up (o `import()` do host, 3 arquivos) | 22.072 B | 22.272 B | **+200 B** | +300 B |
+| pedaço do cartão Livre (`loadPopupFreeCard`, só para pop-up Livre) | — | 9.838 B | | 12 KB |
+| pedaço do editor Livre (só ao clicar em **Abrir editor Livre**) | — | 63.312 B | | baixado só ao abrir |
+| JS inicial do editor do aviso no admin (`/admin/comunicacao/avisos/[id]`) | 608.760 B | 629.725 B | +20.965 B | sem limite |
+
+- zod, `popup-free-model.ts`, os modelos, as dicas e o schema **não** estão no pedaço do cartão Livre (conferido por texto e pela guarda `popup-livre.guard`); o cartão Livre não está no JS inicial nem na janela do Padrão/Personalizado.
+- **Por que o JS inicial passou do combinado em ~30 B**: o próprio Livre no aluno custa ~+128 B (a marca `design: "free"` do plano e o despacho, medidos pelo pacote S). O resto vem de pedaços **compartilhados** que o build monta pelo uso no app inteiro, não por tela: o objeto de "motivos" do Base UI (que o Início já baixa pelo Dialog) ganhou as constantes do `NumberField` e das `Tabs` usados só no editor Livre do admin (`scrub`, `wheel`, `input-*`, `initial`, `missing`: ~110 B), e o mesmo efeito, maior, aparecia no zod. No fechamento, duas correções tiraram ~900 B gzip do Início: o JSON Schema do "Criar com IA" foi para um módulo próprio que nenhuma tela importa (`popup-free-json-schema.ts`; o `z.toJSONSchema` puxava para o pedaço do zod os conversores de todos os tipos) e o schema do Livre deixou de usar `z.tuple` (listas de tamanho fixo com `z.array(...).length(n)`, mesma validação e mesmas frases). Sobram os ~110 B do Base UI, que só sairiam trocando os campos de número e as abas do editor (escolhidos na spec §4.12); ficou registrado em vez de trocar componente no fechamento. Um teste (`popup-livre-modelo`) garante que só o módulo próprio chama `toJSONSchema` e que nenhuma tela o importa.
+- O editor do aviso no admin cresce ~21 KB no JS inicial: o card Design passa a carregar o schema, os modelos e o modelo do Livre (validação no navegador, miniaturas, resumo e problemas). A miniatura usa o `MemberPopupCard` (o cartão Livre continua no pedaço próprio).
+- Imagens e vídeo vêm do Storage, nunca do servidor do app; com menos movimento ou economia de dados o vídeo não é baixado; a fonte enviada só baixa quando o pop-up abre. O servidor faz um `safeParse` a mais por pop-up Livre no ar, uma vez a cada 60 s (cache), sem consulta nova.
+
+## 8. Decisões
+
+| # | Decisão | Por quê |
+|---|---|---|
+| L1 | Livre na mesma coluna, com `mode: "free"`, e a chave `freeDesign` separada de `design` no rascunho e no `PopupItem` | sem migração; o código do Personalizado fica intocado; os pacotes paralelos não brigaram pelos arquivos dele |
+| L2 | Regra das duas chaves ao salvar, conferida de novo depois da junção | uma aba antiga do admin (só `design`) troca o Livre gravado em vez de gravá-lo por baixo |
+| L3 | O design guarda só caminhos; o endereço sai de `freeAssetUrl` com a origem conferida | nenhum texto do design entra num `url()` (o `img-src` aceita `https:`) |
+| L4 | No celular, o pop-up inteiro encolhe (`cqw`), com texto ≥ 12 px e toque de 44 px; valores por aparelho ficam reservados (`devices`, PR L3) | decisão do produtor (pergunta 1 da spec): um desenho só, legível |
+| L5 | 32 elementos e estimativa do jsonb ≤ 30.000, sem migração; o medidor fica sempre no Revisar | o check de 32 KB mede o jsonb sem compressão (~21 KB de JSON de verdade); mudar a migração aplicada é proibido |
+| L6 | O cartão Livre num pedaço próprio, baixado antes do `show` quando o plano diz Livre | sem o código nada abre e nada conta como visto; Padrão e Personalizado não pagam pelo Livre |
+| L7 | `React.lazy` em vez de `next/dynamic` no `MemberPopupCard`, e o host baixa o cartão pela janela | o `next/dynamic` não carrega no Node (quebrava os testes do Personalizado); o `import()` direto duplicava ~13,6 KB gzip da janela no pedaço do Livre |
+| L8 | Salvar de dentro do editor não fecha o editor; num aviso novo, a troca de endereço espera o **Concluir** sem mudança depois do último salvar | trocar de endereço remonta a página e levaria histórico, seleção e zoom |
+| L9 | **Trocar de modelo** abre o editor com o design de antes um passo atrás (`undoTo`) | a frase combinada promete "Dá para desfazer no editor"; o editor começava cada abertura sem passado |
+| L10 | O editor Livre só em telas a partir de 1.024 px; abaixo, só a prévia | decisão do produtor; três colunas e alças precisam de espaço |
+| L11 | Escolher Livre (ou Personalizado) sem modelo deixa o rascunho sem design até escolher um modelo | igual ao Personalizado de antes: a prévia não muda antes da escolha |
+| L12 | `{n} problemas para revisar` conta só os erros que impedem salvar (do design e do Botão principal), não as dicas | a dica "texto no celular" aparece nos três modelos (Links de 13 px e Selo de 12 px viram 12 px no celular): contar dicas deixaria o card sempre com um "problema" |
+| L13 | Sem `z.tuple` no schema e o JSON Schema num módulo que nenhuma tela importa | o zod é um pedaço compartilhado com o JS inicial do Início e o build inclui ali toda classe e todo conversor do zod usados em qualquer tela; os dois custavam ~0,9 KB gzip a todo aluno (§7) |
+| L14 | Copiar e colar o design no L1.1; "Criar com IA" no L2 | decisões do produtor (perguntas 2 e 3 da spec) |
+| L15 | Em "Outro estilo na seleção", a divisão da parte só entra quando um estilo é escolhido; "Linha no texto: Nenhuma" numa parte não tira o sublinhado do elemento inteiro | dividir sem estilo seria um passo invisível no histórico; o tipo da parte só aceita sublinhado ou riscado (fica para quando ganhar "nenhuma") |
+| L16 | Com o pop-up no ar ou pausado, o salvar de dentro do editor Livre fala como o editor do aviso: o botão **Salvar alterações** e, depois, a mesma frase do toast dele (`savedNoticeToast`, devolvida em `message`); o "Mostrar de novo para quem já viu" ligado não vai nesse salvar e continua ligado para o salvar do aviso. Rascunho: **Salvar rascunho** / `Rascunho salvo.`, como antes | o salvar do Livre no ar chega aos alunos em até 1 minuto, mas dizia "Rascunho salvo." e aplicava o "Mostrar de novo" sem mostrar quantos voltam a ver |
+| L17 | No **Recarregar** depois de um 409, `design` e `freeDesign` são um campo só: mexeu em um dos dois aqui, ficam os dois daqui; senão, os dois do banco | campo a campo, o Personalizado daqui juntava-se ao Livre de outra tela: salvar recusava com `Escolha um design só.` e voltar ao Personalizado apagava o que foi editado |
+
+## 9. Contrato do JSON
+
+O JSON do design Livre é o contrato entre o editor, o servidor, o cartão do aluno e (no PR "Criar com IA") a IA. Esta seção é a fonte para quem escreve um design à mão ou pede a uma IA. **Todo bloco `json` desta seção é um design completo e passa no schema**: `tests/popup-livre-modelo.test.mjs` lê o documento e valida cada exemplo (documento e schema não se separam).
+
+### 9.1 Onde fica e como é lido
+
+- Coluna `campaigns.popup_design` (jsonb). O Personalizado é o objeto sem a chave `mode`; o Livre é `{ "mode": "free", "version": 1, ... }`. A leitura passa pelo roteador (`src/server/communications/popup-design-router.ts`): `mode: "free"` vai ao schema do Livre (`popup-free-schema.ts`), o resto ao do Personalizado. Os dois são estritos: um nunca vira o outro por engano.
+- Validação estrita no navegador do editor, na Server Action ao salvar e na leitura do banco: chave a mais é recusada em qualquer nível (inclusive `url` num arquivo e `devices`, reservada para o PR do celular separado).
+- Livre inválido no banco (só com edição direta ou depois de voltar um deploy): **não aparece para o aluno** (sai da lista no ar com o log `[comunicacao] design livre invalido <id do aviso>`, nunca o conteúdo) e abre como Padrão no editor do aviso.
+- O que se grava é sempre a **forma canônica** (`canonicalPopupFreeDesign`): sem o que é igual ao padrão (§9.4), cores em minúsculas, px e ângulos inteiros, altura da linha, espaço entre letras e traço do ícone com 2 casas, paradas do degradê ordenadas por `at`, lados no formato mais curto (`[a, a, a, a]` → `a`; `[v, h, v, h]` → `[v, h]`), nome aparado (vazio sai), partes vizinhas com o mesmo estilo juntas (sem passar de 600 letras), arquivos que nenhum elemento usa fora de `assets`, `assets` e `fonts` sempre presentes (`fonts` recalculado) e chaves em ordem alfabética.
+- `version` do Livre só muda quando um documento velho deixar de valer. Campos novos (como `devices` ou uma pintura nova) entram sem mudar a versão. **Voltar o deploy** depois do PR do celular separado: designs salvos com `devices` ficam inválidos para o código antigo e não aparecem até o deploy novo voltar (anotar no runbook da volta).
+- Toda medida está em **px da prancheta** na largura escolhida (`artboard.width`, 280 a 720). No celular o pop-up inteiro encolhe na mesma proporção (unidades `cqw` do próprio cartão), com duas proteções: texto nunca abaixo de 12 px e área de toque de 44 px nos botões, nos links e no X (invisível, não muda o desenho).
+- Arquivos: o design guarda **só o caminho** no nosso Storage. O endereço é montado na hora pelo cartão e pelo editor (`freeAssetUrl`): a origem conferida do nosso Supabase + o caminho público do bucket + um caminho que casou com o padrão do tipo.
+
+### 9.2 O documento mínimo
+
+Prancheta e X com os padrões, sem arquivos nem fontes (o schema completa `assets` e `fonts`). Vale num aviso sem botão e sem áudio:
+
+```json
+{ "mode": "free", "version": 1, "children": [{ "id": "links", "type": "links" }] }
+```
+
+Com título, texto e o botão principal (o texto e o destino do botão moram no `cta` do aviso, fora do design):
+
+```json
+{
+  "mode": "free",
+  "version": 1,
+  "children": [
+    { "id": "titulo", "type": "heading", "lines": [[{ "text": "Aula nova no ar" }]] },
+    { "id": "texto", "type": "text", "lines": [[{ "text": "Assista hoje e coloque em prática." }]], "textStyle": { "paint": { "kind": "solid", "color": "#d4d4d8" } } },
+    { "id": "botao", "type": "button", "action": { "kind": "cta" }, "box": { "fill": [{ "kind": "solid", "color": "#e50914" }], "radius": 999, "padding": [12, 24] } },
+    { "id": "links", "type": "links" }
+  ]
+}
+```
+
+### 9.3 Campos
+
+Raiz:
+
+| Chave | Tipo | O que é |
+|---|---|---|
+| `mode` | `"free"` | sempre |
+| `version` | `1` | sempre |
+| `artboard` | objeto (opcional) | a prancheta: `width` (280 a 720), `minHeight` (0 a 1.600; 0 = cresce com o conteúdo), `fill` (1 a 3 pinturas; a primeira fica por cima), `padding` (lados, 0 a 200), `gap` (0 a 96), `align` (`stretch` · `start` · `center` · `end`), `justify` (`start` · `center` · `end` · `between`), `radius` (0 a 64), `border`, `shadows` (até 2) |
+| `close` | objeto (opcional) | o X: `color`, `background`, `border`, `size` (28 · 36 · 44), `inset` (8 a 24), `side` (`right` · `left`) |
+| `children` | lista (1 a 32) | os elementos na ordem do DOM (= ordem de leitura e das Camadas) |
+| `assets` | lista (opcional na entrada) | arquivos (§ Arquivos abaixo) |
+| `fonts` | lista (opcional na entrada) | ignorada na entrada: a forma canônica recalcula os ids das fontes enviadas usadas |
+
+Comum a todos os elementos: `id` (letra minúscula e depois letras minúsculas e números, até 16; único entre elementos e, à parte, entre arquivos), `type`, `name` (nome nas Camadas, até 40), `hidden` (não aparece para o aluno), `locked` (só no editor), `place`, `box`.
+
+`place` (posição):
+
+| Modo | Campos |
+|---|---|
+| `{ "mode": "flow" }` (na sequência; o padrão) | `width`: `"fill"` (ocupa a linha), `"hug"` (do tamanho do conteúdo) ou px (4 a 720); `height` (4 a 1.600: fixa em mídia, forma, linha e espaço; mínima nos elementos com texto e nas caixas); `align` (`start` · `center` · `end` · `stretch`; sem = o da caixa); `margin` (lados, −400 a 400; negativa sobrepõe o vizinho); `z` (−10 a 10) |
+| `{ "mode": "free" }` (solta; só filhos diretos da prancheta) | `x` (−720 a 1.440), `y` (−400 a 2.400), `w` (4 a 1.440), `h` (4 a 2.400; sem = automática; mínima nos elementos com texto), `rotate` (−180 a 180), `z` (−10 a 10) |
+
+`box` (caixa de qualquer elemento): `fill` (até 3 pinturas), `border` (`width` 0 a 8 px, `color`, `style` `solid` · `dashed` · `dotted`), `radius` (0 a 999, ou 4 cantos; 999 = pílula), `shadows` (até 2: `x`, `y` −100 a 100, `blur` 0 a 200, `spread` −50 a 50, `color`, `inset`), `padding` (lados, 0 a 200), `opacity` (0 a 100), `blur` (0 a 80), `backdropBlur` (0 a 40), `clip` (corta o que passa), `fade` (esmaecer: `side` `bottom` · `top` · `left` · `right`, `start` e `end` em %, fim pelo menos 5 depois do começo).
+
+Pinturas (`fill`, e as três primeiras também em `textStyle.paint`):
+
+| `kind` | Campos |
+|---|---|
+| `solid` | `color` |
+| `linear` | `angle` (0 a 360; padrão 180 = de cima para baixo), `stops` (2 a 5 paradas `{ at: 0 a 100, color }`) |
+| `radial` | `x`, `y` (centro em %), `shape` (`ellipse` · `circle`), `extent` (`farthest-corner` · `closest-side`), `stops` |
+| `image` (só em `fill`) | `asset` (id de uma imagem de `assets`), `fit` (`cover` · `contain` · `tile`), `focus` (`[x, y]` em %) |
+
+Lados (`padding`, `margin`): um número, `[vertical, horizontal]` ou `[cima, direita, baixo, esquerda]`. Cores: `#RRGGBB` ou `#RRGGBBAA`.
+
+`textStyle` (Título, Texto, Selo, Botão, Links): `font` (`{ "kind": "builtin", "key": "inter" | "exo2" | "system" | "condensed" | "serif" | "mono" }` ou `{ "kind": "uploaded", "id": "<uuid da biblioteca>" }`), `size` (10 a 160), `weight` (100 a 900, de 100 em 100), `italic`, `lineHeight` (0,7 a 2,5), `letterSpacing` (−0,2 a 1 em), `uppercase`, `decoration` (`underline` · `line-through`), `align` (`left` · `center` · `right`; nos Links alinha a linha dos links), `paint` (sólida, linear ou circular), `shadow` (`x`, `y`, `blur`, `color`).
+
+Texto do Título e do Texto: `lines` = linhas; cada linha = partes `{ "text": "...", "style": { ... } }` lado a lado. O texto da parte não é aparado (o espaço entre partes conta). `style` da parte aceita `font`, `size`, `weight`, `italic`, `uppercase`, `decoration`, `letterSpacing` e `paint`; o resto vem do elemento.
+
+Elementos (`type`):
+
+| `type` | Campos próprios |
+|---|---|
+| `heading` (Título) | `lines` (1 a 4), `textStyle`; o primeiro visível é o `<h2>` e o nome do diálogo |
+| `text` (Texto) | `lines` (1 a 12), `textStyle`; o primeiro visível descreve o diálogo |
+| `badge` (Selo) | `label` (1 a 40), `icon`, `textStyle` |
+| `button` (Botão) | `action`: `{ "kind": "cta" }` (o botão principal: texto e destino no `cta` do aviso, sem `label`), `{ "kind": "close" }`, `{ "kind": "snooze" }` (Lembrar depois) ou `{ "kind": "link", "href": "...", "target": "same_tab" | "new_tab" }` (Abrir um link; o clique conta como o clique do pop-up); `label` (1 a 40, obrigatório fora do `cta`); `icon` (`{ "name", "side": "end" | "start" }`); `textStyle` |
+| `image` (Imagem) | `asset` (id de uma imagem de `assets`; `null` só no rascunho), `alt` (até 160; vazio = decorativa), `fit` (`cover` · `contain`), `focus` |
+| `video` (Vídeo) | `asset` (id do vídeo de `assets`; `null` só no rascunho), `fit`, `focus`; toca sem som, em repetição; com menos movimento ou economia de dados, só a capa |
+| `icon` (Ícone) | `icon` (um dos 24 nomes abaixo), `size` (8 a 160), `stroke` (1 a 3), `color` |
+| `divider` (Linha) | `thickness` (1 a 8), `color`, `style` |
+| `spacer` (Espaço) | `size` (0 a 400) |
+| `shape` (Forma e Degradê) | `shape` (`rect` · `ellipse`); o resto é `box` |
+| `audio` (Áudio) | nenhum: o player do áudio do aviso |
+| `links` (Links) | `dismiss` (mostra "Não mostrar de novo"; padrão `true`), `gap` (0 a 96), `textStyle`; "Lembrar depois" aparece sozinho quando o aluno pode adiar e não há botão Lembrar depois |
+| `box` (Caixa) | `children` (0 a 20), `layout`: `dir` (`column` · `row`), `gap` (0 a 96), `align` (`stretch` · `start` · `center` · `end`), `justify` (`start` · `center` · `end` · `between` · `around`), `wrap` |
+
+Ícones: `arrow-right`, `bell`, `book-open`, `calendar`, `check`, `chevron-right`, `circle-check`, `clock`, `crown`, `flame`, `gem`, `gift`, `graduation-cap`, `heart`, `lock-open`, `megaphone`, `percent`, `play`, `rocket`, `sparkles`, `star`, `tag`, `trophy`, `zap`.
+
+Arquivos (`assets`), só pelo caminho no nosso Storage (o design não tem endereço):
+
+| `kind` | Campos |
+|---|---|
+| `image` | `id`, `path` (`communications/free/<24 hex>.webp`, enviada no editor, ou `communications/images/<24 hex>.webp`, a imagem do aviso; bucket `content-assets`), `width` e `height` (16 a 1.600; o servidor troca pelas medidas lidas do arquivo) |
+| `video` | `id`, `path` (`videos/<uuid>.mp4` ou `.webm`, bucket `communication-popup-video`), `mimeType` (`video/mp4` · `video/webm`, igual à extensão), `poster` (opcional: id de uma imagem de `assets`) |
+
+### 9.4 Padrões (omitidos na forma canônica)
+
+| Campo | Padrão |
+|---|---|
+| `artboard` | `width` 440, `minHeight` 0, `fill` `[{ "kind": "solid", "color": "#16181c" }]`, `padding` 24, `gap` 12, `align` `stretch`, `justify` `start`, `radius` 24, sem `border`, sem `shadows` |
+| `close` | `color` `#ffffff`, `background` `#ffffff1f`, `size` 36, `inset` 12, `side` `right`, sem `border` |
+| `hidden`, `locked`, `italic`, `uppercase`, `clip`, `inset`, `wrap` | `false` |
+| `place` | `{ "mode": "flow" }` com largura `fill` (título, texto, imagem, vídeo, linha, caixa, áudio, links, forma, espaço) ou `hug` (selo, botão, ícone); `margin`, `z`, `rotate` 0; `align` = o da caixa |
+| `box` | `opacity` 100, `blur` 0, `backdropBlur` 0, `padding` 0, `radius` 0, borda `style` `solid` |
+| `textStyle` | título 28 / 800 / 1,1; texto 15 / 400 / 1,5; selo 12 / 700 / 1,2; botão 15 / 700 / 1,2; links 13 / 600 / 1,2; comum: fonte Inter, `letterSpacing` 0, `align` `left`, cor `#ffffff` |
+| linear `angle` | 180 |
+| radial `shape` / `extent` | `ellipse` / `farthest-corner` |
+| imagem `fit` / `focus` / `alt` | `cover` / `[50, 50]` / `""` |
+| ícone `size` / `stroke` / `color` | 24 / 2 / `#ffffff` |
+| linha `thickness` / `style` / `color` | 1 / `solid` / `#ffffff1f` |
+| espaço `size` | 16 |
+| forma `shape` | `rect` |
+| caixa `layout` | `dir` `column`, `gap` 0, `align` `stretch`, `justify` `start`, `wrap` false |
+| links `dismiss` / `gap` | `true` / 8 |
+| botão `icon.side` | `end` |
+
+### 9.5 Limites
+
+| Limite | Valor |
+|---|---|
+| Elementos | 1 a 32 (sem contar a prancheta) |
+| Filhos por caixa | 0 a 20 |
+| Caixas | uma caixa pode ter outra dentro; a de dentro não tem caixa |
+| Elementos soltos | só na prancheta, até 24 |
+| Títulos / linhas por título | até 4 / 1 a 4 |
+| Linhas por texto / partes por linha / letras por parte | 1 a 12 / 1 a 6 / 1 a 600 |
+| Texto do selo e do botão | 1 a 40 |
+| Todos os textos somados | até 1.200 letras |
+| Imagens diferentes / elementos Imagem | até 6 / até 8 |
+| Vídeo | no máximo 1 |
+| Ícones (elementos Ícone) | até 12 |
+| Botões | um botão principal (existe se e só se o aviso tem botão); outros até 3, dos quais no máximo 1 "Abrir um link" |
+| Links / Áudio | exatamente 1 / no máximo 1 (existe se e só se o aviso tem áudio) |
+| Elementos com desfoque | até 4 |
+| Camadas de fundo / paradas / sombras | até 3 / 2 a 5 / até 2 |
+| Fontes enviadas | até 4 |
+| Imagem enviada | WebP, 16 a 1.600 px de cada lado, até 420.000 bytes |
+| Tamanho | estimativa do jsonb (`jsonbBytesUpperBound` da forma canônica) até 30.000 bytes (o check do banco mede o jsonb sem compressão e para em 32.768) |
+
+### 9.6 Regras entre partes e com o conteúdo do aviso
+
+No schema: ids únicos; profundidade e contagens da §9.5; solto só na prancheta; `label` obrigatório fora do `cta` e proibido no `cta`; todo `asset` de elemento ou pintura existe em `assets` com o tipo certo; a capa do vídeo é uma imagem de `assets`; o caminho casa com o padrão do bucket e o vídeo tem a extensão do tipo; o link do botão segue a regra do botão principal (página da área, produto ou https); cada linha tem pelo menos uma letra que não é espaço; até 4 fontes enviadas; o tamanho; e o **X sempre visível**: o alfa da cor do ícone do X é pelo menos `cc` e o contraste entre o ícone e o fundo do X (o fundo composto sobre a cor de base da prancheta, a camada de baixo do `fill`; com alfa, sobre preto) é pelo menos 3:1.
+
+Com o conteúdo do aviso (no salvar e no publicar): aviso com botão pede o botão principal (`Falta o botão principal no design.`); botão principal sem botão no aviso (`Escreva o texto do botão e escolha para onde ele leva.` em `cta.label`); aviso com áudio pede o Áudio (`Falta o elemento Áudio no design.`); Áudio sem áudio no aviso (`Envie o áudio ou tire o elemento Áudio.` em `audio`); botão Lembrar depois com o adiar desligado; Imagem e Vídeo sem arquivo. "Quantas vezes → Quando o aluno clica no botão" vale com o `cta` ou com o botão "Abrir um link".
+
+No rascunho do aviso, `freeDesign` fica ao lado de `design` (o Personalizado): no máximo um não nulo (`Escolha um design só.`). Ao salvar, o pedido com uma só das chaves (mesmo `null`) zera a outra; com as duas, valem como vieram; sem nenhuma, fica o que está gravado.
+
+### 9.7 Chaves de erro
+
+O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`, `freeDesign.close.<campo>`, `freeDesign.assets.<id do arquivo>`, `freeDesign.fonts`, `freeDesign.size` e `freeDesign.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.nodes.botao.action.href` ou `freeDesign.nodes.titulo.lines.0.1.text`). Os índices que o zod devolve (`freeDesign.children.3.children.0...`) viram ids por `freeErrorKey`/`freeErrorKeys`, estáveis se a ordem mudar.
+
+### 9.8 Guia curto para a IA
+
+1. Escreva só o JSON do design, na forma desta seção; não escreva `assets` nem `fonts` (o servidor junta a partir dos arquivos e fontes disponíveis) e nunca escreva endereço de arquivo.
+2. Texto sempre na sequência (`place` omitido ou `flow`); solto só para mídia, forma, degradê e adesivo.
+3. Um botão principal (`{ "kind": "cta" }`) quando o aviso tem botão; o texto dele vai no `cta` do aviso, fora do design.
+4. Os `links` sempre no fim da prancheta; o Áudio antes do primeiro botão, quando o aviso tem áudio.
+5. Imagem de foto vira um elemento Imagem com `"asset": null` e `"name": "Troque esta imagem"`, que a equipe preenche.
+6. Omita o que é igual ao padrão (§9.4): o documento mínimo `{ mode, version, children }` já vale.
+7. O X precisa contrastar com o fundo dele; cores com alfa só onde fizer sentido.
+8. Fique bem abaixo do tamanho máximo: menos elementos e menos partes de texto.
+
+`popupFreeJsonSchema()` (em `popup-free-json-schema.ts`, um módulo que nenhuma tela importa, §7) gera o JSON Schema da entrada (`z.toJSONSchema` com `io: "input"`; o elemento recursivo sai em `$defs`/`$ref`).
+
+### 9.9 Exemplos: os 3 modelos para começar
+
+Forma canônica (padrões omitidos). O Vídeo dos modelos começa sem arquivo (`"asset": null`): o editor preenche com o vídeo do Personalizado guardado ou pede o envio.
+
+**Vídeo no topo com degradê** (a estrutura da referência: vídeo solto no topo sumindo no fundo escuro, selo por cima, título condensado em duas cores, texto cinza, botão verde-limão com borda de baixo e brilho, X pequeno):
+
+```json
+{
+  "artboard": {
+    "align": "center",
+    "border": { "color": "#ffffff1a", "width": 1 },
+    "fill": [
+      {
+        "kind": "linear",
+        "stops": [{ "at": 0, "color": "#111216" }, { "at": 55, "color": "#16181d" }, { "at": 100, "color": "#262b34" }]
+      }
+    ],
+    "gap": 0,
+    "padding": [168, 24, 20, 24],
+    "shadows": [{ "blur": 80, "color": "#000000b3", "spread": 0, "x": 0, "y": 24 }]
+  },
+  "assets": [],
+  "children": [
+    {
+      "asset": null,
+      "box": { "fade": { "end": 100, "side": "bottom", "start": 40 } },
+      "id": "midia",
+      "name": "Vídeo do topo",
+      "place": { "h": 248, "mode": "free", "w": 440, "x": 0, "y": 0 },
+      "type": "video"
+    },
+    {
+      "box": {
+        "border": { "color": "#ff9ccf", "width": 1 },
+        "fill": [{ "kind": "linear", "stops": [{ "at": 0, "color": "#e0007a" }, { "at": 100, "color": "#d1006f" }] }],
+        "padding": [4, 10],
+        "radius": 999,
+        "shadows": [{ "blur": 0, "color": "#ffffff59", "inset": true, "spread": 0, "x": 0, "y": 1 }]
+      },
+      "icon": "gift",
+      "id": "selo",
+      "label": "Novidade",
+      "type": "badge"
+    },
+    {
+      "id": "titulo",
+      "lines": [
+        [{ "style": { "paint": { "color": "#e5ff1f", "kind": "solid" } }, "text": "Experimente grátis" }],
+        [{ "text": "Nova aula ao vivo" }]
+      ],
+      "place": { "margin": [12, 0, 0, 0], "mode": "flow" },
+      "textStyle": {
+        "align": "center",
+        "font": { "key": "condensed", "kind": "builtin" },
+        "lineHeight": 0.95,
+        "size": 40,
+        "uppercase": true
+      },
+      "type": "heading"
+    },
+    {
+      "id": "texto",
+      "lines": [[{ "text": "Uma aula nova acabou de entrar na sua área. Assista agora e coloque em prática ainda hoje." }]],
+      "place": { "margin": [12, 0, 0, 0], "mode": "flow" },
+      "textStyle": { "align": "center", "paint": { "color": "#a1a1aa", "kind": "solid" } },
+      "type": "text"
+    },
+    {
+      "action": { "kind": "cta" },
+      "box": {
+        "fill": [{ "kind": "linear", "stops": [{ "at": 0, "color": "#f0ff5c" }, { "at": 100, "color": "#d9f500" }] }],
+        "padding": [12, 22],
+        "radius": 10,
+        "shadows": [
+          { "blur": 0, "color": "#9db300", "spread": 0, "x": 0, "y": 3 },
+          { "blur": 0, "color": "#ffffff80", "inset": true, "spread": 0, "x": 0, "y": 1 }
+        ]
+      },
+      "id": "botao",
+      "place": { "margin": [24, 0, 0, 0], "mode": "flow" },
+      "textStyle": { "paint": { "color": "#111216", "kind": "solid" } },
+      "type": "button"
+    },
+    {
+      "id": "links",
+      "place": { "margin": [12, 0, 0, 0], "mode": "flow" },
+      "textStyle": { "align": "center", "paint": { "color": "#a1a1aa", "kind": "solid" } },
+      "type": "links"
+    }
+  ],
+  "close": { "background": "#ffffff40", "size": 28 },
+  "fonts": [],
+  "mode": "free",
+  "version": 1
+}
+```
+
+**Só texto com brilho** (sem mídia: duas manchas de luz soltas atrás, título com uma parte em degradê, botão largo):
+
+```json
+{
+  "artboard": {
+    "align": "center",
+    "border": { "color": "#ffffff14", "width": 1 },
+    "fill": [{ "color": "#0b0b12", "kind": "solid" }],
+    "gap": 14,
+    "padding": [44, 28, 12, 28],
+    "shadows": [{ "blur": 80, "color": "#000000b3", "spread": 0, "x": 0, "y": 24 }]
+  },
+  "assets": [],
+  "children": [
+    {
+      "box": {
+        "blur": 40,
+        "fill": [
+          {
+            "extent": "closest-side",
+            "kind": "radial",
+            "stops": [{ "at": 0, "color": "#7c3aed99" }, { "at": 100, "color": "#7c3aed00" }],
+            "x": 50,
+            "y": 50
+          }
+        ]
+      },
+      "id": "luz1",
+      "name": "Luz roxa",
+      "place": { "h": 280, "mode": "free", "w": 280, "x": -90, "y": -90, "z": -1 },
+      "shape": "ellipse",
+      "type": "shape"
+    },
+    {
+      "box": {
+        "blur": 40,
+        "fill": [
+          {
+            "extent": "closest-side",
+            "kind": "radial",
+            "stops": [{ "at": 0, "color": "#06b6d480" }, { "at": 100, "color": "#06b6d400" }],
+            "x": 50,
+            "y": 50
+          }
+        ]
+      },
+      "id": "luz2",
+      "name": "Luz azul",
+      "place": { "h": 260, "mode": "free", "w": 260, "x": 250, "y": 140, "z": -1 },
+      "shape": "ellipse",
+      "type": "shape"
+    },
+    {
+      "box": {
+        "border": { "color": "#ffffff26", "width": 1 },
+        "fill": [{ "color": "#ffffff14", "kind": "solid" }],
+        "padding": [5, 12],
+        "radius": 999
+      },
+      "icon": "sparkles",
+      "id": "selo",
+      "label": "Ao vivo hoje",
+      "textStyle": { "paint": { "color": "#e9d5ff", "kind": "solid" }, "size": 13 },
+      "type": "badge"
+    },
+    {
+      "id": "titulo",
+      "lines": [
+        [
+          { "text": "Sua próxima aula " },
+          {
+            "style": {
+              "paint": {
+                "angle": 90,
+                "kind": "linear",
+                "stops": [{ "at": 0, "color": "#c084fc" }, { "at": 100, "color": "#22d3ee" }]
+              }
+            },
+            "text": "começa às 20h"
+          }
+        ]
+      ],
+      "textStyle": { "align": "center", "size": 32 },
+      "type": "heading"
+    },
+    {
+      "id": "texto",
+      "lines": [[{ "text": "Entre alguns minutos antes para pegar um bom lugar e mandar as suas perguntas." }]],
+      "textStyle": { "align": "center", "paint": { "color": "#d4d4d8", "kind": "solid" }, "size": 16 },
+      "type": "text"
+    },
+    {
+      "action": { "kind": "cta" },
+      "box": {
+        "fill": [
+          {
+            "angle": 90,
+            "kind": "linear",
+            "stops": [{ "at": 0, "color": "#7c3aed" }, { "at": 100, "color": "#2563eb" }]
+          }
+        ],
+        "padding": [14, 24],
+        "radius": 14,
+        "shadows": [{ "blur": 32, "color": "#7c3aed66", "spread": 0, "x": 0, "y": 8 }]
+      },
+      "id": "botao",
+      "place": { "margin": [6, 0, 0, 0], "mode": "flow", "width": "fill" },
+      "textStyle": { "size": 16 },
+      "type": "button"
+    },
+    { "id": "links", "textStyle": { "paint": { "color": "#a1a1aa", "kind": "solid" }, "size": 14 }, "type": "links" }
+  ],
+  "close": { "background": "#ffffff14" },
+  "fonts": [],
+  "mode": "free",
+  "version": 1
+}
+```
+
+**Em branco** (só o fundo, um título, o botão e os links):
+
+```json
+{
+  "artboard": {
+    "border": { "color": "#ffffff1a", "width": 1 },
+    "gap": 14,
+    "padding": [28, 24, 12, 24],
+    "shadows": [{ "blur": 80, "color": "#000000b3", "spread": 0, "x": 0, "y": 24 }]
+  },
+  "assets": [],
+  "children": [
+    { "id": "titulo", "lines": [[{ "text": "Seu título aqui" }]], "type": "heading" },
+    {
+      "action": { "kind": "cta" },
+      "box": { "fill": [{ "color": "#ffffff", "kind": "solid" }], "padding": [13, 24], "radius": 999 },
+      "id": "botao",
+      "textStyle": { "paint": { "color": "#16181c", "kind": "solid" }, "size": 16 },
+      "type": "button"
+    },
+    { "id": "links", "textStyle": { "paint": { "color": "#a1a1aa", "kind": "solid" }, "size": 14 }, "type": "links" }
+  ],
+  "close": { "background": "#ffffff14" },
+  "fonts": [],
+  "mode": "free",
+  "version": 1
+}
+```
+
+## 10. Fica de fora
+
+| Fora desta entrega | Onde está |
+|---|---|
+| Copiar e colar o design (o JSON) e "Copiar as instruções para a IA"; "Usar o design Personalizado" (`freeFromCustomDesign`); o modelo "Imagem recortada com selo"; dica do peso das imagens; capa de vídeo que já está no Storage | PR L1.1 (decisão do produtor: o copiar e colar vem logo depois) |
+| "Criar com IA" (texto e/ou imagem de referência pela conta conectada no gateway) | PR L2 (§9.8 e spec §5.7) |
+| Valores próprios do celular por elemento (`devices.mobile`) | PR L3 (o schema recusa `devices` nesta versão) |
+| Arrastar nas Camadas e nas camadas de fundo, arrastar elementos da sequência no desenho, arrastar do painel, seleção de vários, distribuir, `Alt + clique`, zoom com passos, mais de um botão "Abrir um link" | PR L4 |
+| Salvar como modelo, copiar elementos entre pop-ups, biblioteca de imagens, cores salvas, migração para subir o teto de tamanho | PR L5 |
+| Animações, cores ao passar o mouse, contador, texto editado direto no desenho, Textura, contorno do texto, mistura de cores, marca-texto | PR L6 |
+| Limpeza de imagens, vídeos e fontes sem uso no Storage | job futuro |
+| HTML ou CSS escrito pela equipe; mídia ou fonte de fora; texto em imagem no lugar de texto | nunca |
+| Ponta a ponta no WebKit dos arquivos novos (e a foto dos cantos do vídeo com máscara, spec §3.2) | rodados no Chromium; o WebKit roda no CI |
+
+## 11. Testes
+
+| Tipo | Arquivo | O que prova |
+|---|---|---|
+| Unitário | `tests/popup-livre-modelo.test.mjs` (31) | schema estrito em todo nível (inclusive `url` e `devices`), documento mínimo, limites e frases, ids, profundidade, contagens, botões e links, 1.200 letras, caminhos dos buckets, capa, X visível, link seguro, estimativa do jsonb contra o banco, teto de tamanho, forma canônica, roteador, caminhos gravados, regras com o conteúdo, chaves de erro, reescala, `freeDesignForStudent`, origem e endereço dos arquivos, os 3 modelos, sincronia do Áudio, JSON Schema (e só o módulo próprio chama o `toJSONSchema`, nenhuma tela o importa), os exemplos desta §9, dicas e vocabulário |
+| Unitário | `tests/popup-livre-desenho.test.mjs` (27) | o desenho do aluno: sequência e solto em `cqw`, prancheta que cresce até os soltos, altura mínima nos textos, piso de 12 px, pinturas, `url()` só da origem conferida (14 origens maliciosas), esmaecer, texto em degradê, links, h2 e descrição, vídeo × capa, cliques, foco visível, `sizes`, quadriculado só na prévia, escondido, ordem do DOM, `dragPreview` e o **HTML do Padrão e do Personalizado igual ao de antes do Livre** |
+| Guarda | `tests/popup-livre.guard.test.mjs` (6) | sem HTML/CSS em texto, o cartão sem zod/modelo/dicas, o cartão só por `import()`, `url(` só pelo `freeAssetUrl`, o editor fora do lado do aluno, nenhuma migração nova |
+| Unitário | `tests/popup-livre-editor-modelo.test.mjs` (21) | onde o elemento entra, foco no envio, duplicar/excluir/subir/descer/caixas, soltar e seguir a sequência, setas, redimensionar com Shift, alinhar no pop-up, guias, escala do zoom e do celular, arrastar = um passo, histórico (junta, guarda o `cta`, 100 passos, modelo e recuperar), cópia de recuperação, teclado das Camadas, o botão e a frase do salvar no pop-up no ar (L16), vocabulário |
+| Unitário | `tests/popup-livre-painel-modelo.test.mjs` (23) | área de texto (Enter, limites, acentos e emoji), Outro estilo na seleção, editar mantendo estilos (400 edições aleatórias), voltar ao estilo, paradas, camadas de fundo, lados, sombras, chave de erro → aba e campo, Abrir um link único, reescala, pesos, imagem até 1.600 px e 420 KB, vocabulário |
+| Unitário | `tests/popup-design-editor-modelo.test.mjs` (23) | os do Personalizado, mais: os três modos com memória (Livre e Personalizado nunca juntos no rascunho), os modelos do Livre (o "Saiba mais", o vídeo do Personalizado e a imagem do aviso como capa, só caminhos), o rascunho com as duas chaves, a forma canônica com o Livre, a prévia pelo item do Livre, o D9 com o "Abrir um link" do Livre, a sincronia do Livre com o botão e o áudio, a cópia nova do card palavra por palavra |
+| Integração | `tests/integration/pop-ups-livre-dados.test.mjs` (15) | salvar e ler na forma canônica sem endereço, o maior Livre aceito passa no check de 32 KB, Livre inválido some da lista e abre como Padrão, lista no ar e plano, notificação sem design, trocar para Padrão, aba antiga, sem chave mantém, duas chaves recusadas, duplicar, publicar e aprovar conferem fontes, fonte em uso, auditoria |
+| Integração | `tests/integration/pop-ups-livre-envios.test.mjs` (8) | `uploadPopupFreeImage` (WebP com alfa, caminho e medidas do servidor), recusas, 403, imagem nova inexistente, medidas trocadas pelas do servidor, caminho de outro lugar, vídeo não conferido recusado e apagado, vídeo do Personalizado reusado não apagado |
+| Ponta a ponta | `tests/e2e/pop-up-livre-aluno.spec.ts` (8) | nome do diálogo, texto selecionável, selo sobre o vídeo que some, vídeo mudo tocando, X de 28 px com 44 px de toque, Tab nas Camadas e o X por último, `Esc`, clique conta, menos movimento sem vídeo, 375 px com 343 px e proporção, forma por cima do botão não impede o clique, `dismiss: false`, Padrão e Personalizado iguais |
+| Ponta a ponta | `tests/e2e/produtor-monta-pop-up-livre.spec.ts` (4) | num aviso novo: Livre, modelo, vídeo, duas linhas com cores pelo "Outro estilo na seleção", fonte enviada, Botão principal, Selo solto arrastado e com setas, Alinhar ao centro, respiro por lado, Imagem enviada arrastada até a borda (guia) e redimensionada com Shift, esconder e desfazer/refazer pelas Camadas, largura G, Computador e Celular, **Salvar rascunho com o editor aberto** (endereço de aviso novo, Ctrl + Z ainda desfaz), **Concluir** (endereço do aviso), recarregar igual, prévia, publicar, o gravado; a aluna a 1440 (texto real, cores, fonte, clique contado) e a 375 (343 px, proporção, nada abaixo de 12 px, X fecha); com o pop-up no ar, o editor Livre diz **Salvar alterações** e a frase do pop-up no ar, sem aplicar o "Mostrar de novo" ligado, que o salvar do aviso aplica depois (L16) |
+| Ponta a ponta | `tests/e2e/pop-up-livre-editor-teclado.spec.ts` (2) | só teclado: abrir (foco nas Camadas), Tab passa pela lista uma vez, Título pelo Elementos, Forma movida com setas (posição falada), Alt + ↑, E, T, Ctrl + D, Delete, Ctrl + Z, o foco nunca cai no vazio nem sai do editor, linha vazia → Revisar → foco na área de texto, erro fora do editor → **Fechar o editor e revisar** → foco em **Abrir editor Livre**; **Trocar de modelo** confirma e Ctrl + Z volta ao design de antes |
+
+Amostras em `tests/fixtures/popup-livre/` (imagem WebP com alfa, imagem larga demais, PNG que não é WebP, a capa de teste e o HTML de antes do Padrão e do Personalizado). Ajudas: `tests/e2e/popup-livre-fixtures.ts` (`prepararMidiaDoLivre`, `designVideoNoTopo`, `publicarPopUpLivre`); `zerarComunicacao` (em `tests/e2e/fixtures.ts`) também apaga as imagens de `communications/free/` que nenhum aviso que ficou usa.
+
+## 12. Roteiro de conferência no ambiente de teste
+
+1. Nenhuma migração: só o deploy do app. Um pop-up Padrão e um Personalizado que já existiam abrem iguais para o aluno e no editor.
+2. Novo pop-up › Design › **Livre** › **Vídeo no topo com degradê**: o editor abre em tela cheia. Selecionar **Vídeo do topo** › Conteúdo › **Enviar vídeo**: aparece `Vídeo enviado.` e a capa.
+3. Título › Conteúdo: trocar as duas linhas; selecionar uma palavra › **Outro estilo na seleção** › outra cor: a palavra muda no desenho.
+4. Pop-up (clicar no vazio) › Fontes › **Enviar fonte**; Título › Estilo › Fonte: a fonte enviada.
+5. Elementos › **Selo** › **Soltar** › arrastar e usar as setas › Avançado › **Alinhar ao centro**; Elementos › **Imagem** › enviar uma imagem com fundo transparente › soltar e mudar o tamanho pelas alças (a guia rosa aparece perto das bordas e do centro).
+6. **Desfazer** e **Refazer**; Camadas › **Esconder** e **Travar**; **Ver como** Celular (o cartão fica com 343 px).
+7. **Salvar rascunho**: `Rascunho salvo.` e o editor continua aberto; **Concluir**: o endereço passa a ser o do aviso; recarregar: tudo igual.
+8. **Publicar pop-up**; entrar como aluno no computador e no celular: o mesmo desenho, menor no celular, o texto selecionável, o X fecha e o clique no botão conta no relatório.
+9. Fechar a aba com mudança não salva no editor: o navegador pergunta; reabrir o editor oferece **Recuperar**.

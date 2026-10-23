@@ -206,7 +206,10 @@ test.describe("players da aula: o nosso tocando e o de fora no toque", () => {
 
     await reabrirPopUpParaAluna(TITULO);
     const aberturas = contarPedidos(page, ABERTURA, "POST");
-    await page.goto(AULA_3);
+    // Os 3 s contam de quando a pagina monta (o resumo sai junto), nao do "load", que no WebKit do CI chega a
+    // passar dos 3 s: o play vem logo depois de a pagina nova montar.
+    await page.goto(AULA_3, { waitUntil: "commit" });
+    await page.waitForRequest((request) => RESUMO.test(new URL(request.url()).pathname));
     await page.getByRole("button", { name: "Reproduzir aula" }).click();
     await nadaAbre(page, TITULO);
     expect(aberturas.total).toBe(0);

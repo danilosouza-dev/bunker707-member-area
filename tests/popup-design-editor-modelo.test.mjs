@@ -89,15 +89,17 @@ test("modelo: com audio entra o bloco Áudio; o video que ja estava no design co
 });
 
 /* ------------------------------------------------------------------------------------------------
- * Padrão <-> Personalizado
+ * Padrão <-> Personalizado <-> Livre
  * ---------------------------------------------------------------------------------------------- */
+
+const NADA = editor.NO_REMEMBERED_DESIGNS;
 
 test("Padrão <-> Personalizado: voltar ao Padrão guarda o design; voltar ao Personalizado devolve, coerente com o botao e o audio", () => {
   const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
 
-  const paraPadrao = editor.switchDesignMode({ audio: null, cta: CTA, design }, "default", null);
-  assert.deepEqual(paraPadrao.patch, { design: null });
-  assert.equal(paraPadrao.remembered, design);
+  const paraPadrao = editor.switchDesignMode({ audio: null, cta: CTA, design }, "default", NADA);
+  assert.deepEqual(paraPadrao.patch, { design: null, freeDesign: null });
+  assert.equal(paraPadrao.remembered.custom, design);
 
   // No Padrão o produtor tirou o botao e gravou um audio: o design volta com o bloco Áudio e sem o botao.
   const devolta = editor.switchDesignMode({ audio: AUDIO, cta: null, design: null }, "custom", paraPadrao.remembered);
@@ -105,13 +107,145 @@ test("Padrão <-> Personalizado: voltar ao Padrão guarda o design; voltar ao Pe
     devolta.patch.design.blocks.map((block) => block.type),
     ["badge", "heading", "text", "audio"]
   );
+  assert.equal(devolta.patch.freeDesign, null);
   assert.deepEqual(errorsOf(popupDraft({ audio: AUDIO, cta: null, design: devolta.patch.design })), {});
 
   // Primeira vez no Personalizado (sem memoria): nada muda ainda, a tela mostra os modelos.
-  assert.deepEqual(editor.switchDesignMode({ audio: null, cta: CTA, design: null }, "custom", null), { patch: null, remembered: null });
+  assert.deepEqual(editor.switchDesignMode({ audio: null, cta: CTA, design: null }, "custom", NADA), { patch: null, remembered: NADA });
   // Ja no modo pedido: nada muda.
-  assert.equal(editor.switchDesignMode({ audio: null, cta: CTA, design }, "custom", null).patch, null);
-  assert.equal(editor.switchDesignMode({ audio: null, cta: CTA, design: null }, "default", design).patch, null);
+  assert.equal(editor.switchDesignMode({ audio: null, cta: CTA, design }, "custom", NADA).patch, null);
+  assert.equal(editor.switchDesignMode({ audio: null, cta: CTA, design: null }, "default", { custom: design, free: null }).patch, null);
+});
+
+test("três modos: o Livre e o Personalizado guardam um ao outro na memoria e nunca ficam juntos no rascunho", () => {
+  const free = livreEmBranco();
+  const custom = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
+
+  assert.deepEqual(editor.DESIGN_MODE_OPTIONS.map((option) => option.label), ["Padrão", "Personalizado", "Livre"]);
+  assert.equal(editor.popupDesignModeOf({ design: null, freeDesign: free }), "free");
+  assert.equal(editor.popupDesignModeOf({ design: custom, freeDesign: null }), "custom");
+  assert.equal(editor.popupDesignModeOf({}), "default");
+
+  // Personalizado -> Livre pela primeira vez: o Personalizado vai para a memoria e o rascunho fica sem design
+  // (a tela mostra os modelos do Livre).
+  const paraLivre = editor.switchDesignMode({ audio: null, cta: CTA, design: custom, freeDesign: null }, "free", NADA);
+  assert.deepEqual(paraLivre.patch, { design: null, freeDesign: null });
+  assert.equal(paraLivre.remembered.custom, custom);
+
+  // Livre -> Personalizado: o Livre fica na memoria e o Personalizado volta sem perguntar.
+  const paraPersonalizado = editor.switchDesignMode({ audio: null, cta: CTA, design: null, freeDesign: free }, "custom", paraLivre.remembered);
+  assert.equal(paraPersonalizado.patch.freeDesign, null);
+  assert.equal(paraPersonalizado.patch.design.blocks.length, custom.blocks.length);
+  assert.equal(paraPersonalizado.remembered.free, free);
+
+  // E volta ao Livre, coerente com o audio de agora (o elemento Áudio entra antes do botao).
+  const deVolta = editor.switchDesignMode({ audio: AUDIO, cta: CTA, design: paraPersonalizado.patch.design, freeDesign: null }, "free", paraPersonalizado.remembered);
+  assert.equal(deVolta.patch.design, null);
+  assert.ok(deVolta.patch.freeDesign.children.some((node) => node.type === "audio"));
+  assert.ok(deVolta.remembered.custom);
+  assert.deepEqual(errorsOf(popupDraft({ audio: AUDIO, design: null, freeDesign: deVolta.patch.freeDesign })), {});
+
+  // Livre -> Padrão: os dois nulos.
+  assert.deepEqual(editor.switchDesignMode({ audio: null, cta: CTA, design: null, freeDesign: free }, "default", NADA).patch, { design: null, freeDesign: null });
+});
+
+function livreEmBranco() {
+  return editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
+}
+
+test("modelos do Livre: os tres da spec, o botao “Saiba mais” quando falta, o video do Personalizado e a imagem do aviso como capa", () => {
+  assert.deepEqual(
+    editor.FREE_STARTER_OPTIONS.map((starter) => [starter.label, starter.description]),
+    [
+      ["Vídeo no topo com degradê", "Vídeo em cima sumindo no fundo escuro, selo, título em duas cores e botão verde."],
+      ["Só texto com brilho", "Sem mídia: manchas de luz no fundo, título em degradê e botão largo."],
+      ["Em branco", "Só o fundo, um título, o botão e os links. Você coloca o resto."]
+    ]
+  );
+
+  // Sem botao no aviso: o modelo cria o "Saiba mais" com o destino vazio (o produtor escolhe no editor).
+  const semBotao = editor.applyFreeStarterPatch({ audio: null, cta: null, design: null }, "blank");
+  assert.deepEqual(semBotao.cta, { href: "", label: "Saiba mais", target: "same_tab" });
+  assert.equal(semBotao.design, null);
+  assert.ok(semBotao.freeDesign.children.some((node) => node.type === "button" && node.action.kind === "cta"));
+
+  // Com botao: o cta do aviso fica como esta (o patch nem leva a chave).
+  const comBotao = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "glow_text");
+  assert.equal("cta" in comBotao, false);
+  assert.deepEqual(errorsOf(popupDraft({ design: null, freeDesign: comBotao.freeDesign })), {});
+
+  // "Vídeo no topo": o video do Personalizado (no rascunho ou guardado) e a capa com as medidas lidas.
+  const custom = { ...editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design };
+  custom.media = { ...custom.media, kind: "video", video: VIDEO };
+  assert.equal(editor.freeStarterVideoOf({ design: custom }, NADA), VIDEO);
+  assert.equal(editor.freeStarterVideoOf({ design: null }, { custom, free: null }), VIDEO);
+  assert.equal(editor.freeStarterVideoOf({ design: null }, NADA), null);
+
+  const capa = { height: 720, path: "communications/images/0123456789abcdef01234567.webp", width: 1280 };
+  const comVideo = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "video_top_fade", { poster: capa, video: VIDEO });
+  const arquivos = comVideo.freeDesign.assets;
+  assert.deepEqual(arquivos.find((asset) => asset.kind === "video"), { id: "video", kind: "video", mimeType: "video/mp4", path: VIDEO_PATH, poster: "capa" });
+  assert.deepEqual(arquivos.find((asset) => asset.kind === "image"), { height: 720, id: "capa", kind: "image", path: capa.path, width: 1280 });
+  assert.equal(JSON.stringify(comVideo.freeDesign).includes("http"), false, "o design guarda so o caminho");
+
+  // Resumo e problemas do card.
+  assert.equal(editor.freeDesignSummary(comBotao.freeDesign), `${comBotao.freeDesign.children.length} elementos · 440 px`);
+  assert.equal(editor.freeProblemsLabel(1), "1 problema para revisar");
+  assert.equal(editor.freeProblemsLabel(3), "3 problemas para revisar");
+  assert.equal(editor.isFreeProblemKey("freeDesign.nodes.botao.label"), true);
+  assert.equal(editor.isFreeProblemKey("cta.href"), true);
+  assert.equal(editor.isFreeProblemKey("title"), false);
+});
+
+test("rascunho do Livre: o pedido leva as duas chaves, a forma canonica compara o Livre e a previa usa o item do Livre", async () => {
+  const popupEditor = await import("../src/components/admin/v2/communication/popup-editor-model.ts");
+  const free = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
+  const draft = popupDraft({ design: null, freeDesign: free });
+
+  // As duas chaves sempre no pedido (spec §2.1: uma aba antiga que so manda `design` troca o Livre gravado).
+  const payload = viewModel.noticeDraftForKind(draft);
+  assert.equal(payload.design, null);
+  assert.equal(payload.freeDesign, free);
+  assert.equal("freeDesign" in viewModel.noticeDraftForKind({ ...draft, kind: "inbox" }), false, "a notificacao nunca leva o Livre");
+  assert.equal(viewModel.noticeDraftForKind(popupDraft({ design: null })).freeDesign, null);
+
+  // "Tem mudanca": o Livre pela forma canonica (padrao escrito = omitido); mudar um texto conta.
+  const escrito = { ...free, artboard: { ...free.artboard, width: 440 } };
+  assert.equal(viewModel.isSameNoticeDraft(draft, { ...draft, freeDesign: escrito }), true);
+  const titulo = free.children.find((node) => node.type === "heading");
+  const outroTexto = { ...free, children: free.children.map((node) => (node === titulo ? { ...node, lines: [[{ text: "Outro título" }]] } : node)) };
+  assert.equal(viewModel.isSameNoticeDraft(draft, { ...draft, freeDesign: outroTexto }), false);
+  assert.equal(viewModel.isSameNoticeDraft(draft, { ...draft, freeDesign: null }), false);
+
+  // Previa e relatorio: o mesmo item do palco do editor (titulo do design, sem imagem nem icone).
+  const item = viewModel.draftToPopupItem({ ...draft, popup: { ...draft.popup, close: "x_only" } });
+  assert.equal(item.freeDesign, free);
+  assert.equal(item.image, null);
+  assert.equal(item.close, "x_only");
+  assert.equal(item.title, "Seu título aqui");
+
+  // D9: no Livre sem botao principal, o botao "Abrir um link" visivel libera "Quando o aluno clica no botão".
+  const semBotao = editor.withSyncedDesign(draft, { cta: null }).freeDesign;
+  const link = { action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, id: "link1", label: "Ver aulas", type: "button" };
+  const comLink = { ...semBotao, children: [...semBotao.children.slice(0, -1), link, semBotao.children.at(-1)] };
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, freeDesign: semBotao }), true);
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, freeDesign: comLink }), false);
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, freeDesign: { ...comLink, children: comLink.children.map((node) => (node.id === "link1" ? { ...node, hidden: true } : node)) } }), true, "escondido nao conta");
+  assert.equal(popupEditor.repeatStartOf({ cta: null, freeDesign: comLink }).stopOn, "click");
+});
+
+test("sincronia no Livre: tirar o botao tira o Botão principal; gravar o audio poe o elemento Áudio", () => {
+  const free = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
+  const draft = popupDraft({ design: null, freeDesign: free });
+
+  const semBotao = editor.withSyncedDesign(draft, { cta: null });
+  assert.equal(semBotao.freeDesign.children.some((node) => node.type === "button" && node.action.kind === "cta"), false);
+  assert.equal(semBotao.design, null);
+
+  const comAudio = editor.withSyncedDesign(draft, { audio: AUDIO });
+  assert.ok(comAudio.freeDesign.children.some((node) => node.type === "audio"));
+  assert.deepEqual(errorsOf(comAudio), {});
+  assert.equal(editor.withSyncedDesign(draft, { title: "Outro" }).freeDesign, free);
 });
 
 test("sincronia: no Personalizado, tirar o botao tira o bloco do botao; gravar o audio poe o bloco Áudio antes do botao", () => {
@@ -594,7 +728,8 @@ test("vocabulario: os textos do card Design nao usam palavra fora do vocabulario
     editor.LINE_SIZE_OPTIONS,
     editor.BLOCK_TYPE_LABELS,
     editor.FONT_WEIGHT_LABELS,
-    editor.DESIGN_STARTER_OPTIONS
+    editor.DESIGN_STARTER_OPTIONS,
+    editor.FREE_STARTER_OPTIONS
   ]);
 
   assert.ok(textos.length > 150);
@@ -606,7 +741,19 @@ test("vocabulario: os textos do card Design nao usam palavra fora do vocabulario
   }
 
   // Os textos do §7.2, palavra por palavra.
-  assert.equal(editor.POPUP_DESIGN_COPY.card.description, "Escolha o visual do pop-up. O Padrão é o de sempre; no Personalizado você monta mídia, textos, botões e cores.");
+  assert.equal(
+    editor.POPUP_DESIGN_COPY.card.description,
+    "Escolha o visual do pop-up. O Padrão é o de sempre; no Personalizado você monta por seções; no Livre você monta do zero, elemento por elemento."
+  );
+  // Livre (docs/27 §4.1), palavra por palavra.
+  assert.equal(
+    editor.POPUP_DESIGN_COPY.modes.free.description,
+    "Monte do zero, como num editor de páginas: coloque cada elemento onde quiser, um por cima do outro, com o estilo que quiser."
+  );
+  assert.equal(editor.POPUP_DESIGN_COPY.free.starters.hint, "Escolha um ponto de partida. No editor, tudo pode ser mudado.");
+  assert.equal(editor.POPUP_DESIGN_COPY.free.open, "Abrir editor Livre");
+  assert.equal(editor.POPUP_DESIGN_COPY.free.confirm.description, "O design Livre atual será trocado pelo modelo. Dá para desfazer no editor.");
+  assert.equal(editor.POPUP_DESIGN_COPY.free.smallScreen, "O editor Livre precisa de uma tela maior (a partir de 1.024 px de largura). Aqui você vê a prévia.");
   assert.equal(editor.POPUP_DESIGN_COPY.video.hint, "MP4 (H.264) ou WEBM, até 15 MB. Toca sem som, em repetição. Quem prefere menos movimento vê só a imagem.");
   assert.equal(editor.POPUP_DESIGN_COPY.fonts.hint, "Quer uma fonte do Google Fonts? Baixe o arquivo no site e envie aqui. Nada é carregado do Google na hora.");
   assert.equal(editor.POPUP_DESIGN_COPY.content.titleHint, "Aparece nas listas e nos relatórios. Para o aluno, vale o título do design.");

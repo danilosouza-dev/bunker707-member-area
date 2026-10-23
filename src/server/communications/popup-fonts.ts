@@ -107,8 +107,11 @@ export async function listPopupFontLibrary(db: CommunicationsDb): Promise<PopupF
   });
 }
 
-/** Salvar ou publicar um design so com fontes da biblioteca (nao excluidas): senao 400 em design.fonts. */
-export async function assertPopupDesignFonts(db: CommunicationsDb, design: PopupDesign | null | undefined) {
+/**
+ * Salvar ou publicar um design so com fontes da biblioteca (nao excluidas): senao 400 em `key` (design.fonts no
+ * Personalizado; freeDesign.fonts no Livre, docs/27). Aceita o design ou so `{ fonts }` (os dois guardam na raiz).
+ */
+export async function assertPopupDesignFonts(db: CommunicationsDb, design: Pick<PopupDesign, "fonts"> | null | undefined, key = "design.fonts") {
   const ids = design?.fonts ?? [];
 
   if (ids.length === 0) {
@@ -121,7 +124,7 @@ export async function assertPopupDesignFonts(db: CommunicationsDb, design: Popup
   const found = new Set(((data ?? []) as { id: string }[]).map((row) => row.id.toLowerCase()));
 
   if (ids.some((id) => !found.has(id))) {
-    throw new NoticeFieldError("design.fonts", POPUP_FONT_MISSING_MESSAGE);
+    throw new NoticeFieldError(key, POPUP_FONT_MISSING_MESSAGE);
   }
 }
 

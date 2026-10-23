@@ -16,6 +16,10 @@ import "server-only";
 // Design do pop-up (docs/26): a lista no ar leva o design de cada pop-up (lido pelo schema; invalido = Padrão;
 // endereco do video recalculado do caminho) e as fontes enviadas resolvidas numa consulta so. `design` e
 // `fonts` so vao no Personalizado (o Padrão continua com a resposta de antes).
+// Design Livre (docs/27 §2.1 e §5.1): lido pelo roteador; um Livre invalido no banco sai da lista no ar (com o
+// log e o id, nunca o conteudo) em vez de virar Padrão com o nome interno. No Livre, o item leva `freeDesign`
+// (sem `locked` e `name`) e as fontes; `title` e `body` vem do design; imagem e icone nulos. O plano marca
+// `design: "free"` (o navegador baixa o pedaco do cartao Livre antes do show).
 
 import { unstable_cache } from "next/cache";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
@@ -26,7 +30,9 @@ import { assertNoDbError, communicationsDb, CommunicationError, describeError, i
 import { noticeIconOfColumns } from "./message-meta";
 import { normalizePeaks, type PopupItem, type PopupsAnswer } from "./notification-model";
 import type { PopupDesign, PopupFontFace } from "./popup-design-model";
-import { parsePopupDesign } from "./popup-design-schema";
+import { parseStoredPopupDesign, popupDesignKindOf } from "./popup-design-router";
+import { freeDesignForStudent, type PopupFreeDesign } from "./popup-free-model";
+import { freeFirstHeading, freeFirstText, freeHeadingText } from "./popup-free-render";
 import {
   coversPage,
   decideShow,
@@ -75,7 +81,14 @@ export class PopupRefusedError extends CommunicationError {
  * Um pop-up da lista no ar: o conteudo (so sai no show), as regras (paginas, momento, quantas vezes) e o design
  * com as fontes que ele usa (null/[] no Padrão).
  */
-type LivePopupEntry = { design: PopupDesign | null; fonts: PopupFontFace[]; row: LivePopupRow; rules: LivePopupRules };
+type LivePopupEntry = {
+  design: PopupDesign | null;
+  fonts: PopupFontFace[];
+  /** Design Livre (docs/27), ja sem `locked` e `name`; nunca junto com `design`. */
+  freeDesign: PopupFreeDesign | null;
+  row: LivePopupRow;
+  rules: LivePopupRules;
+};
 
 /** Resposta do show: o conteudo, quando pode voltar e as vezes no dia (o historico grava ate 100 por dia). */
 export type PopupShowResult = { dayImpressions: number; next: PopupNext; popup: PopupItem };
@@ -120,7 +133,22 @@ function namedProductIds(patterns: readonly string[]) {
  */
 async function loadLivePopupEntries(): Promise<LivePopupEntry[]> {
   const db = communicationsDb();
-  const rows = await loadLivePopupRows(db, new Date().toISOString());
+  // Design (docs/26 e docs/27): pelo roteador. Livre invalido nao aparece (sai da lista); Personalizado
+  // invalido = Padrão, como antes.
+  const stored = new Map<string, ReturnType<typeof parseStoredPopupDesign>>();
+  const rows = (await loadLivePopupRows(db, new Date().toISOString())).filter((row) => {
+    const parsed = parseStoredPopupDesign(row.popup_design);
+
+    if (popupDesignKindOf(row.popup_design) === "free" && !parsed.freeDesign) {
+      console.error(`[comunicacao] design livre invalido ${row.id}`);
+
+      return false;
+    }
+
+    stored.set(row.id, parsed);
+
+    return true;
+  });
   const settings = rows.map((row) => popupSettingsOfRow(row));
   const named = namedProductIds(settings.flatMap((item) => [...item.pages, ...item.exclude]));
   let coursesOf = new Map<string, string[]>();
@@ -136,8 +164,13 @@ async function loadLivePopupEntries(): Promise<LivePopupEntry[]> {
 
   // Design do pop-up (docs/26): invalido = Padrão; as fontes numa consulta (falha = sem fonte enviada, o texto
   // cai na pilha do sistema; o pop-up nunca cai).
-  const designs = rows.map((row) => withOwnStorageUrls(db, parsePopupDesign(row.popup_design)));
-  const fontIds = designs.flatMap((design) => design?.fonts ?? []);
+  const designs = rows.map((row) => withOwnStorageUrls(db, stored.get(row.id)?.design ?? null));
+  const freeDesigns = rows.map((row) => {
+    const freeDesign = stored.get(row.id)?.freeDesign ?? null;
+
+    return freeDesign ? freeDesignForStudent(freeDesign) : null;
+  });
+  const fontIds = [...designs.flatMap((design) => design?.fonts ?? []), ...freeDesigns.flatMap((design) => design?.fonts ?? [])];
   let faces: PopupFontFace[] = [];
 
   if (fontIds.length > 0) {
@@ -152,10 +185,13 @@ async function loadLivePopupEntries(): Promise<LivePopupEntry[]> {
   return rows.map((row, index) => {
     const own = settings[index];
     const design = designs[index];
+    const freeDesign = freeDesigns[index];
+    const usedFonts = design?.fonts ?? freeDesign?.fonts ?? [];
 
     return {
       design,
-      fonts: design ? faces.filter((face) => design.fonts.includes(face.id)) : [],
+      fonts: usedFonts.length > 0 ? faces.filter((face) => usedFonts.includes(face.id)) : [],
+      freeDesign,
       row,
       rules: {
         allowSnooze: row.allow_snooze,
@@ -207,21 +243,25 @@ function safeMediaUrl(value: string | null) {
 }
 
 function toPopupItem(entry: LivePopupEntry, delivery: PopupCountState): PopupItem {
-  const { row } = entry;
-  const imageUrl = safeMediaUrl(row.image_url);
+  const { freeDesign, row } = entry;
+  const imageUrl = freeDesign ? null : safeMediaUrl(row.image_url);
   const audioUrl = safeMediaUrl(row.audio_url);
-  const icon = noticeIconOfColumns(row.icon, row.icon_color);
+  const icon = freeDesign ? null : noticeIconOfColumns(row.icon, row.icon_color);
+  // Livre (docs/27): titulo e texto do design (uma aba com o codigo antigo mostra o Padrão com o texto de verdade).
+  const heading = freeDesign ? freeFirstHeading(freeDesign) : null;
+  const text = freeDesign ? freeFirstText(freeDesign) : null;
 
   return {
     ...(icon ? { icon } : {}),
     ...(entry.rules.settings.close === "x_only" ? { close: "x_only" as const } : {}),
     // Design do pop-up (docs/26): so no Personalizado (o Padrão continua com o objeto de antes).
     ...(entry.design ? { design: entry.design, fonts: entry.fonts } : {}),
+    ...(freeDesign ? { fonts: entry.fonts, freeDesign } : {}),
     audio:
       audioUrl && row.audio_duration_seconds
         ? { durationSeconds: row.audio_duration_seconds, mimeType: row.audio_mime, peaks: normalizePeaks(row.audio_peaks), url: audioUrl }
         : null,
-    body: row.body ?? "",
+    body: freeDesign ? (text ? freeHeadingText(text) : "") : (row.body ?? ""),
     canSnooze: canSnooze(delivery, row.allow_snooze),
     cta:
       row.cta_href && row.cta_label && row.cta_target && isSafeHeroCtaHref(row.cta_href)
@@ -229,7 +269,7 @@ function toPopupItem(entry: LivePopupEntry, delivery: PopupCountState): PopupIte
         : null,
     id: row.id,
     image: imageUrl ? { alt: row.image_alt ?? "", url: imageUrl } : null,
-    title: row.title
+    title: (heading ? freeHeadingText(heading) : "") || row.title
   };
 }
 
@@ -292,8 +332,11 @@ export async function getPopupsAnswer(userId: string, pageKey: string, now = Dat
     }
 
     const rows = await fetchPopupDeliveries(communicationsDb(), userId, relevant.map((rule) => rule.id));
+    const free = new Set(live.filter((entry) => entry.freeDesign).map((entry) => entry.rules.id));
+    const plan = planPopups({ deliveries: rows.map(toCountState), live: relevant, now });
 
-    return { asOf, pages, plan: planPopups({ deliveries: rows.map(toCountState), live: relevant, now }) };
+    // Livre (docs/27): o plano marca o pop-up Livre (o navegador baixa o pedaco do cartao antes do show).
+    return { asOf, pages, plan: free.size > 0 ? plan.map((item) => (free.has(item.id) ? { ...item, design: "free" as const } : item)) : plan };
   } catch (error) {
     if (!isMissingCommunicationSchema(error)) {
       console.error(`[comunicacao] plano de pop-ups: ${describeError(error)}`);

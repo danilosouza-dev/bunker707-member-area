@@ -131,7 +131,15 @@ test("no ar: a lista mostra onde ele aparece; Editar tem Mostrar de novo em Mais
   await expect(linhaDaLista).toHaveCount(1);
   await expect(linhaDaLista.getByText("Em qualquer página (com exceções)", { exact: true })).toBeVisible();
 
-  await linhaDaLista.getByRole("button", { name: `Ações de ${TITULO}` }).click();
+  // O botao ja esta desenhado antes de o React ligar o clique (no WebKit da CI o primeiro clique se perdia e o
+  // menu nunca abria): clica de novo ate o menu abrir, como em produtor-edita-e-exclui-aviso.
+  const itens = page.getByRole("menuitem");
+  await expect(async () => {
+    if ((await itens.count()) === 0) {
+      await linhaDaLista.getByRole("button", { name: `Ações de ${TITULO}` }).click();
+    }
+    await expect(itens.first()).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
   await expect(page.getByRole("menuitem", { name: "Mostrar de novo para quem já viu" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Editar" }).click();
   await expect(page).toHaveURL(/\/admin\/comunicacao\/avisos\/[0-9a-f-]{36}\?editar=1$/);

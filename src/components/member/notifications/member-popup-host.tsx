@@ -31,6 +31,7 @@ import {
   completionOpenings,
   givenUp,
   hasBlockingLayer,
+  needsFreeCard,
   openingsForPageView,
   POPUP_HOST_RULES,
   shouldSendPageClose,
@@ -48,14 +49,27 @@ import {
 // parar e nada aberto por cima; baixa a janela e so entao pede o POST /show, que confere tudo no servidor,
 // conta a abertura e devolve o conteudo. Registra o que o aluno fez (e como fechou) e acerta o plano.
 // Nada roda em intervalo alem da conferencia de 1 s enquanto algo bloqueia; nenhum pedido em laco.
+//
+// Design Livre (docs/27): quando o plano marca o pop-up com `design: "free"`, o pedaco do cartao Livre
+// (popup-free-load.ts, pela janela) e baixado junto com a janela, antes do POST /show (sem o codigo, nada abre
+// e nada conta como visto). Se o show trouxer um Livre que o plano nao marcou (plano de ate 1 minuto antes da
+// troca), o pedaco e esperado antes de abrir. Padrão e Personalizado nunca baixam esse pedaco.
 
 const loadPopupDialog = () => import("./member-popup-dialog");
+/** O cartao Livre vem pela janela (o pedaco dele so traz o que a janela ainda nao tem). */
+const loadPopupFreeCard = () => loadPopupDialog().then((module) => module.loadPopupFreeCard());
 
 const MemberPopupDialog = dynamic(() => loadPopupDialog().then((module) => module.MemberPopupDialog), { ssr: false });
 
-/** Comeca a baixar a janela quando algo foi armado, sem disputar com a pagina (falha aqui nao importa). */
-function preloadPopupDialog() {
-  const run = () => void loadPopupDialog().catch(() => undefined);
+/** Comeca a baixar a janela (e o cartao Livre, se armado) quando algo foi armado, sem disputar com a pagina. */
+function preloadPopupDialog(free: boolean) {
+  const run = () => {
+    void loadPopupDialog().catch(() => undefined);
+
+    if (free) {
+      void loadPopupFreeCard().catch(() => undefined);
+    }
+  };
 
   if (typeof window.requestIdleCallback === "function") {
     window.requestIdleCallback(run, { timeout: 2_000 });
@@ -134,6 +148,7 @@ export function MemberPopupHost({
 
     function arm(openings: ArmedPopup[]) {
       let armedAny = false;
+      let armedFree = false;
 
       for (const armed of openings) {
         if (armedKeys.has(armed.key)) {
@@ -142,6 +157,7 @@ export function MemberPopupHost({
 
         armedKeys.add(armed.key);
         armedAny = true;
+        armedFree ||= needsFreeCard(armed);
         later(() => {
           queue.push(armed);
           pump();
@@ -149,7 +165,7 @@ export function MemberPopupHost({
       }
 
       if (armedAny) {
-        preloadPopupDialog();
+        preloadPopupDialog(armedFree);
       }
     }
 
@@ -253,9 +269,16 @@ export function MemberPopupHost({
     }
 
     async function show(armed: ArmedPopup) {
+      // O cartao Livre (se o plano marcou) baixa junto com a janela.
+      const freeCard = needsFreeCard(armed) ? loadPopupFreeCard() : null;
+
+      freeCard?.catch(() => undefined);
+
       try {
-        // A janela antes do show: sem o codigo dela (rede caiu, deploy novo), nada abre e nada conta como visto.
+        // A janela (e o cartao Livre) antes do show: sem o codigo (rede caiu, deploy novo), nada abre e nada conta
+        // como visto.
         await loadPopupDialog();
+        await freeCard;
       } catch {
         next();
         return;
@@ -290,6 +313,19 @@ export function MemberPopupHost({
       }
 
       updatePopupInPlan(armed.id, answer.next);
+
+      // Livre que o plano nao marcou: espera o pedaco do cartao (ja contou; sem o codigo, nada aparece).
+      if (answer.popup.freeDesign && !needsFreeCard(armed)) {
+        try {
+          await loadPopupFreeCard();
+        } catch {
+          if (!cancelled) {
+            next();
+          }
+
+          return;
+        }
+      }
 
       // Saiu da pagina com o show no ar: contou e nao aparece (a unica perda aceita).
       if (!cancelled) {

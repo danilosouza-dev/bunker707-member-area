@@ -29,6 +29,8 @@ export type HostTrigger = "lesson_completed" | "page_load";
 /** Uma abertura armada nesta visualizacao de pagina. at = relogio do navegador. */
 export type ArmedPopup = {
   at: number;
+  /** Design Livre (o plano marcou): o host baixa tambem o pedaco do cartao Livre antes do POST /show. */
+  design?: "free";
   id: string;
   /** page_load: o id (uma vez por visualizacao); lesson_completed: `${id}:${lessonId}`. */
   key: string;
@@ -54,6 +56,16 @@ function allowedAt(item: Pick<PopupPlanItem, "notBefore">, serverAt: number) {
   return Number.isFinite(notBefore) && notBefore <= serverAt + POPUP_HOST_RULES.notBeforeMarginMs;
 }
 
+/** So o Livre leva a marca (Padrão e Personalizado: a abertura fica igual a da v3b-1). */
+function designOf(item: Pick<PopupPlanItem, "design">): Pick<ArmedPopup, "design"> {
+  return item.design === "free" ? { design: "free" } : {};
+}
+
+/** O plano marcou o pop-up como Livre: o pedaco do cartao Livre vem antes do POST /show. */
+export function needsFreeCard(armed: Pick<ArmedPopup, "design">): boolean {
+  return armed.design === "free";
+}
+
 function delayMsOf(item: Pick<PopupPlanItem, "delaySeconds">) {
   return Number.isFinite(item.delaySeconds) && item.delaySeconds > 0 ? item.delaySeconds * 1000 : 0;
 }
@@ -74,6 +86,7 @@ export function openingsForPageView(input: {
     )
     .map((item) => ({
       at: input.pageViewStart + delayMsOf(item),
+      ...designOf(item),
       id: item.id,
       key: item.id,
       lessonId: null,
@@ -102,6 +115,7 @@ export function completionOpenings(input: {
     )
     .map((item) => ({
       at: input.now + delayMsOf(item),
+      ...designOf(item),
       id: item.id,
       key: `${item.id}:${input.lessonId}`,
       lessonId: input.lessonId,
@@ -264,6 +278,8 @@ function planItemOf(value: unknown): PopupPlanItem | null {
 
   return {
     delaySeconds: item.delaySeconds,
+    // Livre: o host baixa o pedaco do cartao Livre antes do POST /show; outro valor some (Padrão/Personalizado).
+    ...(item.design === "free" ? { design: "free" as const } : {}),
     exclude,
     id: item.id,
     notBefore: item.notBefore as string | null,

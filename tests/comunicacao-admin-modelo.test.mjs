@@ -204,6 +204,48 @@ test("Recarregar depois de conflito: fica o que mudou aqui, o resto segue o banc
   assert.deepEqual(model.rebaseNoticeDraft(base, base, server), server, "sem mudanca local: a versao do banco");
 });
 
+test("Recarregar com o design do pop-up: Personalizado e Livre andam juntos, nunca os dois", async () => {
+  const designModel = await import("../src/server/communications/popup-design-model.ts");
+  const freeStarters = await import("../src/server/communications/popup-free-starters.ts");
+  const custom = designModel.popupStarterDesign("text_only");
+  const customEdited = designModel.popupStarterDesign("media_top_fade");
+  const free = freeStarters.applyFreeStarter("blank", { audio: null, cta: null }).design;
+  const popup = (overrides) => ({ ...schemas.emptyNoticeDraft("popup"), freeDesign: null, title: "Aula bônus", ...overrides });
+  const base = popup({ design: custom });
+  // Outra tela trocou para o Livre (e mudou o titulo) enquanto esta editava o Personalizado.
+  const serverLivre = popup({ design: null, freeDesign: free, title: "Aula bônus de outra tela" });
+
+  // Mexeu no Personalizado aqui: ficam os dois daqui (sem o Livre da outra tela); o resto segue o banco.
+  const kept = model.rebaseNoticeDraft(base, popup({ design: customEdited }), serverLivre);
+  assert.deepEqual(kept.design, customEdited);
+  assert.equal(kept.freeDesign, null);
+  assert.equal(kept.title, "Aula bônus de outra tela");
+  const oneDesign = (draft) => !schemas.noticeDraftSchema.safeParse(model.noticeDraftForKind(draft)).error?.issues.some((issue) => issue.message === "Escolha um design só.");
+  assert.equal(oneDesign(kept), true, "salvar nao recusa com Escolha um design só.");
+
+  // Sem mudanca no design aqui (so no texto): os dois do banco.
+  const taken = model.rebaseNoticeDraft(base, popup({ body: "Texto daqui", design: custom }), serverLivre);
+  assert.equal(taken.design, null);
+  assert.deepEqual(taken.freeDesign, free);
+  assert.equal(taken.body, "Texto daqui");
+  assert.deepEqual(model.rebaseNoticeDraft(base, base, serverLivre), serverLivre, "sem mudanca local: a versao do banco");
+
+  // Trocou para o Livre aqui enquanto a outra tela mexia no Personalizado: o Livre daqui, sem o Personalizado de la.
+  const localLivre = model.rebaseNoticeDraft(base, popup({ design: null, freeDesign: free }), popup({ design: customEdited }));
+  assert.equal(localLivre.design, null);
+  assert.deepEqual(localLivre.freeDesign, free);
+
+  // Nunca os dois: toda combinacao de daqui x banco (Padrão, Personalizado, outro Personalizado, Livre).
+  const variants = [popup({ design: null }), base, popup({ design: customEdited }), popup({ design: null, freeDesign: free })];
+  for (const [localIndex, local] of variants.entries()) {
+    for (const [serverIndex, server] of variants.entries()) {
+      const rebased = model.rebaseNoticeDraft(base, local, server);
+      assert.equal(Boolean(rebased.design && rebased.freeDesign), false, `daqui ${localIndex} x banco ${serverIndex}`);
+      assert.equal(oneDesign(rebased), true, `daqui ${localIndex} x banco ${serverIndex}: um design so`);
+    }
+  }
+});
+
 test("erros: caminho do campo, prefixo da Server Action e posicao da regra no segmento", () => {
   assert.deepEqual(
     model.noticeErrorsFrom([

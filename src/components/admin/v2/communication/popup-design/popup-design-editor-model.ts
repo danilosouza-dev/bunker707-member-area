@@ -1,5 +1,6 @@
 // Editor do "Design do pop-up" (docs/26; contrato em scratchpad v3/design/spec.md §7): as pecas puras do card
-// "Design" do editor do pop-up. Padrão | Personalizado com memoria, modelos para comecar, blocos (acrescentar,
+// "Design" do editor do pop-up. Padrão | Personalizado | Livre (docs/27) com memoria entre os tres, modelos para
+// comecar (os do Personalizado e os do Livre), blocos (acrescentar,
 // tirar, subir, descer), o botao principal ligado ao `cta` do aviso, o bloco Áudio ligado ao audio, os pesos de
 // cada fonte, o resumo de cada bloco, a conferencia do video antes de enviar e o foco de cada erro do design.
 // Tudo aqui e texto do produtor em portugues, sem palavra fora do vocabulario (testado).
@@ -8,6 +9,9 @@
 // tipos do design e os modelos moram em popup-design-model.ts (P0); aqui so a logica da tela.
 
 import type { NoticeDraft } from "../../../../../server/communications/schemas";
+import { freeNodeCount, type PopupFreeDesign } from "../../../../../server/communications/popup-free-model";
+import { resolveFreeArtboard } from "../../../../../server/communications/popup-free-render";
+import { FREE_DESIGN_STARTERS, applyFreeStarter, syncFreeDesignWithContent, type FreeStarterId } from "../../../../../server/communications/popup-free-starters";
 import {
   POPUP_BUILTIN_FONTS,
   POPUP_CARD_IMAGE_DEFAULTS,
@@ -58,13 +62,38 @@ type Option<Value extends string> = { label: string; value: Value };
 
 export const POPUP_DESIGN_COPY = {
   card: {
-    description: "Escolha o visual do pop-up. O Padrão é o de sempre; no Personalizado você monta mídia, textos, botões e cores.",
+    description: "Escolha o visual do pop-up. O Padrão é o de sempre; no Personalizado você monta por seções; no Livre você monta do zero, elemento por elemento.",
     title: "Design"
   },
   modes: {
     custom: { description: "Monte o seu: vídeo ou imagem com degradê, textos com fontes e cores, botões do seu jeito.", label: "Personalizado" },
     default: { description: "Imagem em cima, título, texto e botão, com as cores da área de membros.", label: "Padrão" },
+    free: {
+      description: "Monte do zero, como num editor de páginas: coloque cada elemento onde quiser, um por cima do outro, com o estilo que quiser.",
+      label: "Livre"
+    },
     groupLabel: "Design do pop-up"
+  },
+  /** Livre (docs/27; spec §4.1): os modelos para comecar, o resumo do design montado e o botao do editor. */
+  free: {
+    audioDescription: "Um áudio curto. No design, o player fica onde estiver o elemento Áudio.",
+    change: "Trocar de modelo",
+    confirm: {
+      cancel: "Cancelar",
+      confirm: "Trocar",
+      description: "O design Livre atual será trocado pelo modelo. Dá para desfazer no editor.",
+      title: "Trocar de modelo?"
+    },
+    open: "Abrir editor Livre",
+    preparing: "Preparando o modelo…",
+    smallScreen: "O editor Livre precisa de uma tela maior (a partir de 1.024 px de largura). Aqui você vê a prévia.",
+    starters: {
+      close: "Cancelar",
+      hint: "Escolha um ponto de partida. No editor, tudo pode ser mudado.",
+      title: "Começar de um modelo",
+      use: "Usar este modelo"
+    },
+    thumbLabel: "Miniatura do design Livre"
   },
   starters: {
     change: "Trocar de modelo",
@@ -259,11 +288,12 @@ export const POPUP_DESIGN_COPY = {
  * Escolhas (pilulas e listas)
  * ---------------------------------------------------------------------------------------------- */
 
-export type PopupDesignMode = "custom" | "default";
+export type PopupDesignMode = "custom" | "default" | "free";
 
 export const DESIGN_MODE_OPTIONS: readonly (Option<PopupDesignMode> & { description: string })[] = [
   { description: POPUP_DESIGN_COPY.modes.default.description, label: POPUP_DESIGN_COPY.modes.default.label, value: "default" },
-  { description: POPUP_DESIGN_COPY.modes.custom.description, label: POPUP_DESIGN_COPY.modes.custom.label, value: "custom" }
+  { description: POPUP_DESIGN_COPY.modes.custom.description, label: POPUP_DESIGN_COPY.modes.custom.label, value: "custom" },
+  { description: POPUP_DESIGN_COPY.modes.free.description, label: POPUP_DESIGN_COPY.modes.free.label, value: "free" }
 ];
 
 export const MEDIA_KIND_OPTIONS: readonly Option<PopupMediaKind>[] = [
@@ -489,66 +519,128 @@ export function formatKb(bytes: number): string {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Padrão | Personalizado e modelos
+ * Padrão | Personalizado | Livre e modelos
  * ---------------------------------------------------------------------------------------------- */
 
-type DesignContent = Pick<NoticeDraft, "audio" | "cta"> & { design?: PopupDesign | null };
-type DesignPatch = Partial<Pick<NoticeDraft, "cta" | "design">>;
+type DesignContent = Pick<NoticeDraft, "audio" | "cta"> & { design?: PopupDesign | null; freeDesign?: PopupFreeDesign | null };
+type DesignPatch = Partial<Pick<NoticeDraft, "cta" | "design" | "freeDesign">>;
+
+/** O ultimo design de cada modo que saiu (volta sem perguntar ao escolher o modo de novo). */
+export type RememberedDesigns = { custom: PopupDesign | null; free: PopupFreeDesign | null };
+
+export const NO_REMEMBERED_DESIGNS: RememberedDesigns = { custom: null, free: null };
 
 /** O botao que o modelo cria quando o pop-up ainda nao tem (o produtor escolhe para onde leva). */
 export const STARTER_CTA = { href: "", label: "Saiba mais", target: "same_tab" } as const;
 
 export const DESIGN_STARTER_OPTIONS = POPUP_DESIGN_STARTERS;
 
-/**
- * Escolher um modelo: o design do modelo (com o bloco Áudio quando ha audio e o video que ja estava no design) e,
- * sem botao no pop-up, o botao "Saiba mais" com o destino vazio.
- */
-export function applyStarter(content: DesignContent, starter: PopupDesignStarterId, previous: PopupDesign | null | undefined): DesignPatch {
-  const design = popupStarterDesign(starter, { hasAudio: Boolean(content.audio), video: previous?.media.video ?? null });
+/** Os modelos para comecar o Livre (docs/27 §4.1; nomes e descricoes de popup-free-starters.ts). */
+export const FREE_STARTER_OPTIONS = FREE_DESIGN_STARTERS;
 
-  return content.cta ? { design } : { cta: { ...STARTER_CTA }, design };
+/** O modo do rascunho: o Livre ganha do Personalizado (o schema recusa os dois juntos). */
+export function popupDesignModeOf(content: Pick<DesignContent, "design" | "freeDesign">): PopupDesignMode {
+  return content.freeDesign ? "free" : content.design ? "custom" : "default";
 }
 
 /**
- * Trocar Padrão <-> Personalizado. Padrão: design null e o atual vai para a memoria. Personalizado: volta o da
- * memoria (coerente com o botao e o audio de agora), sem perguntar; sem memoria, nada muda ainda (a tela mostra
- * os modelos). `remembered` e o que a tela guarda depois da troca.
+ * Escolher um modelo: o design do modelo (com o bloco Áudio quando ha audio e o video que ja estava no design) e,
+ * sem botao no pop-up, o botao "Saiba mais" com o destino vazio. O Livre sai do rascunho (um design so).
+ */
+export function applyStarter(content: DesignContent, starter: PopupDesignStarterId, previous: PopupDesign | null | undefined): DesignPatch {
+  const design = popupStarterDesign(starter, { hasAudio: Boolean(content.audio), video: previous?.media.video ?? null });
+  const patch: DesignPatch = content.cta ? { design } : { cta: { ...STARTER_CTA }, design };
+
+  return content.freeDesign ? { ...patch, freeDesign: null } : patch;
+}
+
+/**
+ * Escolher um modelo do Livre (spec §4.1): o design do modelo coerente com o conteudo (Áudio se ha audio; o Botão
+ * principal sempre, criando o `cta` "Saiba mais" quando o aviso nao tem botao), com o video do Personalizado
+ * atual ou guardado como arquivo do Vídeo e a imagem do aviso (do nosso bucket, com as medidas lidas no navegador)
+ * como capa. O Personalizado sai do rascunho (fica na memoria da tela).
+ */
+export function applyFreeStarterPatch(
+  content: DesignContent,
+  starter: FreeStarterId,
+  media: { poster?: { height: number; path: string; width: number } | null; video?: PopupDesign["media"]["video"] | null } = {}
+): DesignPatch & { freeDesign: PopupFreeDesign } {
+  const video = media.video ? { mimeType: media.video.mimeType, path: media.video.path } : null;
+  const result = applyFreeStarter(starter, { audio: content.audio, cta: content.cta, poster: media.poster ?? null, video });
+
+  return content.cta ? { design: null, freeDesign: result.design } : { cta: result.cta, design: null, freeDesign: result.design };
+}
+
+/** O video que um modelo do Livre reaproveita: o do Personalizado no rascunho ou o guardado na memoria. */
+export function freeStarterVideoOf(content: Pick<DesignContent, "design">, remembered: RememberedDesigns): PopupDesign["media"]["video"] | null {
+  return content.design?.media.video ?? remembered.custom?.media.video ?? null;
+}
+
+/** "{n} elementos · {largura} px" (o resumo do Livre montado no card Design). */
+export function freeDesignSummary(design: PopupFreeDesign): string {
+  const count = freeNodeCount(design);
+
+  return `${count} ${count === 1 ? "elemento" : "elementos"} · ${resolveFreeArtboard(design).width} px`;
+}
+
+/** "{n} problemas para revisar" (abre o editor no Revisar). */
+export function freeProblemsLabel(count: number): string {
+  return count === 1 ? "1 problema para revisar" : `${count} problemas para revisar`;
+}
+
+/** As chaves de erro que sao do Livre: o design e, no Livre, o Botão principal (o "Para onde leva" fica no editor). */
+export function isFreeProblemKey(key: string): boolean {
+  return key === "freeDesign" || key.startsWith("freeDesign.") || key === "cta" || key.startsWith("cta.");
+}
+
+/**
+ * Trocar Padrão, Personalizado e Livre. O design do modo que sai vai para a memoria; voltar devolve o da memoria
+ * (coerente com o botao e o audio de agora), sem perguntar; sem memoria, o rascunho fica sem design ate escolher
+ * um modelo (a tela mostra os modelos). Sempre um design so no rascunho. `remembered` e o que a tela guarda depois.
  */
 export function switchDesignMode(
   content: DesignContent,
   mode: PopupDesignMode,
-  remembered: PopupDesign | null
-): { patch: DesignPatch | null; remembered: PopupDesign | null } {
-  const current = content.design ?? null;
+  remembered: RememberedDesigns
+): { patch: DesignPatch | null; remembered: RememberedDesigns } {
+  const current = popupDesignModeOf(content);
 
-  if (mode === "default") {
-    return current ? { patch: { design: null }, remembered: current } : { patch: null, remembered };
-  }
-
-  if (current) {
+  if (mode === current) {
     return { patch: null, remembered };
   }
 
-  if (!remembered) {
-    return { patch: null, remembered: null };
+  const kept: RememberedDesigns = {
+    custom: current === "custom" ? (content.design ?? null) : remembered.custom,
+    free: current === "free" ? (content.freeDesign ?? null) : remembered.free
+  };
+  const sync = { hasAudio: Boolean(content.audio), hasCta: Boolean(content.cta) };
+  const none: DesignPatch | null = current === "default" ? null : { design: null, freeDesign: null };
+
+  if (mode === "custom" && kept.custom) {
+    return { patch: { design: syncPopupDesignBlocks(kept.custom, sync), freeDesign: null }, remembered: kept };
   }
 
-  return { patch: { design: syncPopupDesignBlocks(remembered, { hasAudio: Boolean(content.audio), hasCta: Boolean(content.cta) }) }, remembered };
+  if (mode === "free" && kept.free) {
+    return { patch: { design: null, freeDesign: syncFreeDesignWithContent(kept.free, sync) }, remembered: kept };
+  }
+
+  return { patch: none, remembered: kept };
 }
 
 /**
- * O rascunho depois de uma mudanca: com Personalizado, mudar o botao ou o audio deixa os blocos coerentes
- * (o bloco do botao principal existe se e so se ha botao; o bloco Áudio se e so se ha audio).
+ * O rascunho depois de uma mudanca: com Personalizado ou Livre, mudar o botao ou o audio deixa o design coerente
+ * (o botao principal existe se e so se ha botao; o Áudio se e so se ha audio).
  */
 export function withSyncedDesign<Draft extends DesignContent & { kind: NoticeDraft["kind"] }>(current: Draft, patch: Partial<Draft>): Draft {
   const next = { ...current, ...patch };
 
-  if (next.kind !== "popup" || !next.design || !("audio" in patch || "cta" in patch)) {
+  if (next.kind !== "popup" || !(next.design || next.freeDesign) || !("audio" in patch || "cta" in patch)) {
     return next;
   }
 
-  return { ...next, design: syncPopupDesignBlocks(next.design, { hasAudio: Boolean(next.audio), hasCta: Boolean(next.cta) }) };
+  const sync = { hasAudio: Boolean(next.audio), hasCta: Boolean(next.cta) };
+
+  return next.freeDesign ? { ...next, freeDesign: syncFreeDesignWithContent(next.freeDesign, sync) } : { ...next, design: syncPopupDesignBlocks(next.design as PopupDesign, sync) };
 }
 
 /* ------------------------------------------------------------------------------------------------

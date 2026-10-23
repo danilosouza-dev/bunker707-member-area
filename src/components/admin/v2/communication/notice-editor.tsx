@@ -28,6 +28,7 @@ import {
 } from "@/server/communications/campaign-model";
 import { describeValidity, type Validity } from "@/server/communications/message-meta";
 import { saveNoticeFollowUpsSchema } from "@/server/communications/flow-schemas";
+import { freeErrorKeys } from "@/server/communications/popup-free-schema";
 import { popupReviewParts } from "@/server/communications/popup-sentences";
 import type { NoticeDetail, NoticeEditorOptions } from "@/server/communications/queries";
 import { audienceDefinitionSchema, emptyNoticeDraft, noticeDraftSchema, popupSettingsSchema, publishProblems, type NoticeDraft } from "@/server/communications/schemas";
@@ -75,7 +76,7 @@ import { NoticeValidityField } from "./notice-validity-field";
 import { NoticeWhenFields } from "./notice-when-fields";
 import { PopupFrequencyFields } from "./popup-frequency-fields";
 import { PopupDesignField } from "./popup-design/popup-design-field";
-import { popupDesignFocusSelector, withSyncedDesign } from "./popup-design/popup-design-editor-model";
+import { isFreeProblemKey, popupDesignFocusSelector, withSyncedDesign } from "./popup-design/popup-design-editor-model";
 import { PopupPlacementFields } from "./popup-placement-fields";
 import { POPUP_EDITOR_COPY, placementUiOf, popupPlacementProblems, popupSettingsOfDraft, type PopupPlacementUi } from "./popup-editor-model";
 import {
@@ -143,6 +144,13 @@ import {
 //   card), mudar o botao ou o audio deixa os blocos coerentes (withSyncedDesign), o video subindo segura o
 //   salvar e a previa mostra celular e computador juntos. Os erros do design focam pelo modelo
 //   (popupDesignFocusSelector: "design.blocks.2.lines.0.text" -> "#popup-design-bloco-2-linha-0").
+// - Livre (docs/27; spec §4.13): o rascunho manda sempre `design` e `freeDesign` (no maximo um nao nulo); os erros
+//   do Livre passam por freeErrorKeys ("freeDesign.children.3..." -> "freeDesign.nodes.botao...") e levam ao
+//   resumo do card Design ("{n} problemas para revisar"), assim como os do Botão principal (o "Para onde leva"
+//   fica no editor Livre). "Salvar rascunho" de dentro do editor Livre grava sem fechar o editor: enquanto ele esta
+//   aberto, o primeiro salvar de um aviso novo guarda o id em vez de trocar de endereco (trocar remontaria tudo e
+//   levaria o historico do editor); no Concluir sem mudanca depois do ultimo salvar, troca. O Ctrl+Enter daqui
+//   nao age com o editor Livre aberto (ele tem o proprio salvar).
 
 type NoticeEditorProps = {
   /** Tipo de um aviso novo (?tipo=popup abre em pop-up). */
@@ -155,6 +163,12 @@ type NoticeEditorProps = {
 };
 
 type Failure = { message: string; status: number; title: string };
+/**
+ * O que o "Salvar rascunho" de dentro do editor Livre recebe (contrato do pacote E, spec §9.6). `message`: a frase do
+ * toast daqui (no pop-up no ar, o que acontece com quem ja viu); sem ela, o editor Livre diz "Rascunho salvo.".
+ */
+type FreeSaveResult = { message?: string; ok: true } | { errors: Record<string, string>; message: string; ok: false };
+type PersistOutcome = { ok: true; version: SavedVersion & { reshown?: number } } | { errors: NoticeFieldErrors; message: string; ok: false };
 type Busy = "publish" | "save" | "test" | null;
 type SavedVersion = { id: string; status: CampaignStatus; updatedAt: string };
 
@@ -169,6 +183,8 @@ const DEVICE_OPTIONS = [
 ] as const satisfies readonly { label: string; value: PreviewDevice }[];
 
 const COUNT_DEBOUNCE_MS = 500;
+/** Erro do Livre (ou do Botão principal no Livre): o resumo do card Design, ou o botao do editor. */
+const FREE_FOCUS = "#popup-livre-revisar, #popup-livre-abrir, [name='popup-design']";
 
 /** Elemento que recebe foco quando o campo tem erro (na ordem da tela). */
 const FIELD_FOCUS: readonly [string, string][] = [
@@ -186,6 +202,8 @@ const FIELD_FOCUS: readonly [string, string][] = [
   ["cta", "#aviso-botao-mostrar"],
   // Design do pop-up (docs/26): o seletor de cada erro do design sai do modelo (blocos pela posicao).
   ["design", "[name='popup-design']"],
+  // Livre (docs/27): o resumo do card Design ("{n} problemas para revisar", que abre o editor no Revisar).
+  ["freeDesign", FREE_FOCUS],
   ["reactions", "#aviso-reacoes"],
   // Ajustes da v3a: "Permitir que o aluno exclua do sino".
   ["allowHide", "#aviso-excluir"],
@@ -227,7 +245,7 @@ function scrollBehavior(): ScrollBehavior {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
 }
 
-function focusFirstError(errors: NoticeFieldErrors) {
+function focusFirstError(errors: NoticeFieldErrors, free = false) {
   const keys = Object.keys(errors);
 
   if (keys.length === 0) {
@@ -245,7 +263,9 @@ function focusFirstError(errors: NoticeFieldErrors) {
           ? `#aviso-regra-${audienceKey.replace(/\./g, "-")}`
           : prefix === "design" && designKey
             ? (popupDesignFocusSelector(designKey) ?? target)
-            : target;
+            : free && isFreeProblemKey(prefix)
+              ? FREE_FOCUS
+              : target;
       break;
     }
   }
@@ -319,6 +339,10 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const [audioBusy, setAudioBusy] = useState<string | null>(null);
   // Design do pop-up (docs/26): o video subindo segura o salvar; a biblioteca de fontes muda no card Design.
   const [designBusy, setDesignBusy] = useState<string | null>(null);
+  // Livre (spec §4.13): o editor de tela cheia aberto e o id do aviso novo gravado de dentro dele (troca de endereco
+  // so no Concluir).
+  const freeEditorOpen = useRef(false);
+  const pendingNoticeId = useRef<string | null>(null);
   const [popupFonts, setPopupFonts] = useState(() => options.popupFonts);
   // Equipe de "Quem envia" (relida quando a pessoa volta de Perfil com a foto nova).
   const [senders, setSenders] = useState<NoticeSenderChoice[]>(() => options.senders);
@@ -430,7 +454,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const popupSettings = useMemo(() => popupSettingsOfDraft(draft), [draft]);
   const clientErrors = useMemo(() => {
     const parsed = noticeDraftSchema.safeParse(payload);
-    const errors = parsed.success ? {} : noticeErrorsFrom(parsed.error.issues);
+    // Livre: indices dos elementos viram ids ("freeDesign.children.3..." -> "freeDesign.nodes.botao...").
+    const errors = parsed.success ? {} : freeErrorKeys(payload.freeDesign, noticeErrorsFrom(parsed.error.issues));
 
     // v3b-1: a linha de produto marcada sem produto (so o editor sabe) vence o "Escolha pelo menos uma página.".
     return payload.kind === "popup" ? { ...errors, ...popupPlacementProblems(popupSettings, popupUi) } : errors;
@@ -494,6 +519,11 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   // Cmd/Ctrl+Enter salva o rascunho (o atalho le a versao mais nova da funcao).
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      // Com o editor Livre aberto, o salvar e o dele (que sabe o que ja foi gravado).
+      if (freeEditorOpen.current) {
+        return;
+      }
+
       if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.altKey) {
         event.preventDefault();
         saveShortcut.current();
@@ -588,6 +618,12 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const previewLocation = draft.kind === "inbox" && previewTarget !== "main" ? findFollowUp(followUps.items, previewTarget) : null;
   const sendAtTime = draft.schedule.mode === "at" ? Date.parse(draft.schedule.sendAt) : now;
   const savedSender = initial?.sender ? { id: initial.sender.id, name: initial.sender.name } : null;
+  // Livre: os erros do design e do Botão principal (o resumo do card Design e o Revisar do editor).
+  const isFree = draft.kind === "popup" && Boolean(draft.freeDesign);
+  const freeProblems = useMemo(
+    () => (isFree ? Object.fromEntries(Object.entries({ ...clientErrors, ...serverErrors }).filter(([key]) => isFreeProblemKey(key))) : {}),
+    [clientErrors, isFree, serverErrors]
+  );
 
   function errorFor(key: string) {
     return serverErrors[key] ?? (submitted || touched.has(key) ? clientErrors[key] : undefined);
@@ -654,25 +690,31 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
    * Confere e grava o rascunho; devolve a versao gravada ou null (erro ja na tela). v3a: `reshow` pede o
    * "Mostrar de novo para quem já viu" junto (pop-up no ar em "Uma vez"); `reshown` = quantos voltam a ver.
    */
-  async function persist(extraErrors: NoticeFieldErrors = {}, options: { reshow?: boolean } = {}): Promise<(SavedVersion & { reshown?: number }) | null> {
+  async function persist(extraErrors: NoticeFieldErrors = {}, options: { reshow?: boolean } = {}): Promise<PersistOutcome> {
+    // Com o editor Livre aberto (modal), o foco fica nele: o banner e o campo marcado esperam o Concluir.
+    const focusErrors = (errors: NoticeFieldErrors) => (freeEditorOpen.current ? undefined : focusFirstError(errors, isFree));
+
     if (uploading) {
-      showFailure({ message: "Espere a imagem terminar de enviar e tente de novo.", status: 0 });
-      return null;
+      const message = "Espere a imagem terminar de enviar e tente de novo.";
+      showFailure({ message, status: 0 });
+      return { errors: {}, message, ok: false };
     }
 
     if (audioBusy || followUpAudioBusy || designBusy) {
-      showFailure({ message: audioBusy ?? followUpAudioBusy ?? designBusy ?? "", status: 0 });
-      return null;
+      const message = audioBusy ?? followUpAudioBusy ?? designBusy ?? "";
+      showFailure({ message, status: 0 });
+      return { errors: {}, message, ok: false };
     }
 
     setSubmitted(true);
     const errors = { ...clientErrors, ...extraErrors, ...followUpErrors };
 
     if (Object.keys(errors).length > 0) {
+      const message = "Revise os campos destacados.";
       setServerErrors(extraErrors);
-      showFailure({ message: "Revise os campos destacados.", status: 400 });
-      focusFirstError(errors);
-      return null;
+      showFailure({ message, status: 400 });
+      focusErrors(errors);
+      return { errors, message, ok: false };
     }
 
     setFailure(null);
@@ -686,11 +728,11 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     });
 
     if (!result.ok) {
-      const fieldErrors = noticeErrorsFromAction(result.fieldErrors);
+      const fieldErrors = freeErrorKeys(sent.freeDesign, noticeErrorsFromAction(result.fieldErrors));
       setServerErrors(fieldErrors);
       showFailure({ message: result.error, status: result.status });
-      focusFirstError(fieldErrors);
-      return null;
+      focusErrors(fieldErrors);
+      return { errors: fieldErrors, message: result.error, ok: false };
     }
 
     const version = { id: result.data.id, status: result.data.status, updatedAt: result.data.updatedAt };
@@ -721,8 +763,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
         // erro de campo (409, 403...), a frase do servidor diz o que fazer.
         const message = Object.keys(fieldErrors).length > 0 ? FOLLOW_UPS_COPY.partialSaveText : savedFollowUps.error;
         showFailure({ message, status: savedFollowUps.status, title: FOLLOW_UPS_COPY.partialSaveTitle });
-        focusFirstError(fieldErrors);
-        return null;
+        focusErrors(fieldErrors);
+        return { errors: fieldErrors, message, ok: false };
       }
 
       const nextEntry = savedFollowUps.data.entryNodeId ?? crypto.randomUUID();
@@ -732,7 +774,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       setSavedFollowUpsKey(followUpsStateKey(followUps.items, followUps.stop, { ...mainFollowUpParent, nodeId: nextEntry }));
     }
 
-    return { ...version, reshown: result.data.reshown };
+    return { ok: true, version: { ...version, reshown: result.data.reshown } };
   }
 
   /**
@@ -743,8 +785,32 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
    * banner de erro). Nada se perde: o que esta na tela e o que foi gravado.
    */
   function openSavedNotice(id: string) {
-    if (!initial) {
-      router.replace(noticeHref(id), { scroll: false });
+    if (initial) {
+      return;
+    }
+
+    // Livre aberto (spec §4.13): trocar de endereco remontaria o editor do aviso e levaria o editor Livre junto.
+    if (freeEditorOpen.current) {
+      pendingNoticeId.current = id;
+      return;
+    }
+
+    router.replace(noticeHref(id), { scroll: false });
+  }
+
+  /** O editor Livre abriu ou fechou; no Concluir sem mudanca depois do ultimo salvar, o aviso novo troca de endereco. */
+  function changeFreeEditorOpen(open: boolean, result?: { dirtySinceSave: boolean }) {
+    freeEditorOpen.current = open;
+
+    if (open) {
+      return;
+    }
+
+    const id = pendingNoticeId.current;
+    pendingNoticeId.current = null;
+
+    if (id && result && !result.dirtySinceSave) {
+      openSavedNotice(id);
     }
   }
 
@@ -766,42 +832,61 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     );
   }
 
-  async function saveDraft() {
+  /**
+   * "Salvar rascunho". `fromFreeEditor`: o salvar de dentro do editor Livre (spec §4.2): sem os toasts daqui (o
+   * editor mostra a mesma frase, devolvida em `message`), devolvendo os erros para o Revisar dele, e sem trocar de
+   * endereco agora. O "Mostrar de novo" pedido fica para o salvar daqui, que conta quantos voltam a ver (docs/27 L16).
+   */
+  async function saveDraft(options: { fromFreeEditor?: boolean } = {}): Promise<FreeSaveResult> {
+    const quiet = options.fromFreeEditor === true;
+
     if (busy) {
-      return;
+      return { errors: {}, message: "Espere o salvar terminar.", ok: false };
     }
 
     const idle = !uploading && !audioBusy && !designBusy;
 
-    if (savedVersion && !dirty && idle && reshowRequested) {
+    if (savedVersion && !dirty && idle && reshowRequested && !quiet) {
       await reshowOnly(savedVersion);
-      return;
+      return { ok: true };
     }
 
     // Nada mudou: gravar de novo cancelaria o agendamento ou o pedido de aprovacao sem motivo.
     if (savedVersion && !dirty && idle) {
-      adminToast.info(NOTHING_TO_SAVE_MESSAGE);
+      if (!quiet) {
+        adminToast.info(NOTHING_TO_SAVE_MESSAGE);
+      }
+
       openSavedNotice(savedVersion.id);
-      return;
+      // Livre: no pop-up no ar, a frase daqui; no rascunho, a do editor Livre ("Rascunho salvo.", como antes).
+      return livePopup ? { message: NOTHING_TO_SAVE_MESSAGE, ok: true } : { ok: true };
     }
 
     const previousStatus = status;
     setBusy("save");
-    const version = await persist({}, { reshow: reshowRequested });
+    const outcome = await persist({}, { reshow: reshowRequested && !quiet });
     setBusy(null);
 
-    if (version) {
-      setReshow(false);
-      adminToast.success(savedNoticeToast(draft.kind, previousStatus, { recipients: sentRecipients, repeat: payload.repeat, reshown: version.reshown }));
-
-      // Notificacao enviada: volta para o relatorio (os alunos ja veem a versao nova).
-      if (previousStatus === "sent" && draft.kind === "inbox") {
-        router.push(noticeHref(version.id));
-        return;
-      }
-
-      openSavedNotice(version.id);
+    if (!outcome.ok) {
+      return outcome;
     }
+
+    const { version } = outcome;
+    const message = savedNoticeToast(draft.kind, previousStatus, { recipients: sentRecipients, repeat: payload.repeat, reshown: version.reshown });
+
+    if (!quiet) {
+      setReshow(false);
+      adminToast.success(message);
+    }
+
+    // Notificacao enviada: volta para o relatorio (os alunos ja veem a versao nova).
+    if (previousStatus === "sent" && draft.kind === "inbox") {
+      router.push(noticeHref(version.id));
+      return { ok: true };
+    }
+
+    openSavedNotice(version.id);
+    return { message, ok: true };
   }
 
   async function publish() {
@@ -813,23 +898,24 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     const extra = Object.fromEntries(problems.map((problem) => [problem.path, problem.message]));
 
     setBusy("publish");
-    const version = await persist(extra);
+    const outcome = await persist(extra);
 
-    if (!version) {
+    if (!outcome.ok) {
       setBusy(null);
       return;
     }
 
+    const { version } = outcome;
     const result = await publishNotice({ expectedUpdatedAt: version.updatedAt, id: version.id });
     setBusy(null);
 
     if (!result.ok) {
-      const fieldErrors = noticeErrorsFromAction(result.fieldErrors);
+      const fieldErrors = freeErrorKeys(payload.freeDesign, noticeErrorsFromAction(result.fieldErrors));
       setServerErrors(fieldErrors);
       // O rascunho ja foi gravado: o banner diz isso e a tela fica (sem trocar de endereco, que remontaria
       // o editor e levaria o banner junto).
       showFailure({ message: result.error, status: result.status, title: noticeFailureTitle({ savedDraft: true, status: result.status, step: "publish" }) });
-      focusFirstError(fieldErrors);
+      focusFirstError(fieldErrors, isFree);
       return;
     }
 
@@ -846,7 +932,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     const previousStatus = status;
     const saves = dirty || !savedVersion;
     setBusy("test");
-    const version = saves ? await persist() : savedVersion;
+    const outcome = saves ? await persist() : null;
+    const version = outcome ? (outcome.ok ? outcome.version : null) : savedVersion;
 
     if (!version) {
       setBusy(null);
@@ -876,7 +963,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     const saves = dirty || !savedVersion;
     setBusy("test");
     setTestBusyId(nodeId);
-    const version = saves ? await persist() : savedVersion;
+    const outcome = saves ? await persist() : null;
+    const version = outcome ? (outcome.ok ? outcome.version : null) : savedVersion;
 
     if (!version) {
       setBusy(null);
@@ -921,6 +1009,11 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   useEffect(() => {
     saveShortcut.current = () => void saveDraft();
   });
+
+  /** "Salvar rascunho" do editor Livre: sempre com o rascunho desta renderizacao (o editor espera uma volta antes). */
+  const saveFromFreeEditor = () => saveDraft({ fromFreeEditor: true });
+  // Os erros do ultimo salvar que o editor Livre mostra (do design no Revisar; os de fora, na faixa dele).
+  const freeServerErrors = isFree ? serverErrors : {};
 
   const actionTarget: NoticeActionTarget | null =
     initial && savedVersion
@@ -1136,8 +1229,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             onChange={(patch) => change(patch as Partial<NoticeDraft>)}
             onImageUploadChange={setImageUpload}
             onSendersChange={setSenders}
-            // Design do pop-up: no Personalizado, texto, icone, imagem e destino vao para o card Design.
-            popupDesign={draft.kind === "popup" && Boolean(draft.design)}
+            // Design do pop-up: no Personalizado e no Livre, texto, icone, imagem e destino vao para o card Design.
+            popupDesign={draft.kind === "popup" && (draft.freeDesign ? "free" : Boolean(draft.design))}
             products={pickerItems}
             productsLoaded={options.productsLoaded}
             resetKey={resetKey}
@@ -1150,20 +1243,26 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             value={draft}
           />
 
-          {/* Design do pop-up (docs/26): Padrão | Personalizado, logo depois do conteudo. */}
+          {/* Design do pop-up (docs/26, docs/27): Padrão | Personalizado | Livre, logo depois do conteudo. */}
           {draft.kind === "popup" ? (
             <PopupDesignField
               disabled={locked}
               draft={draft}
               errorFor={errorFor}
               fonts={popupFonts}
+              freeProblems={freeProblems}
+              freeServerErrors={freeServerErrors}
               key={`design-${resetKey}`}
+              noticeId={savedVersion?.id ?? null}
               onBusyChange={setDesignBusy}
               onChange={(patch) => change(patch)}
               onFontsChange={setPopupFonts}
+              onFreeEditorOpenChange={changeFreeEditorOpen}
               onImageUploadChange={setImageUpload}
+              onSaveDraft={saveFromFreeEditor}
               products={pickerItems}
               productsLoaded={options.productsLoaded}
+              savesInPlace={savesInPlace}
             />
           ) : null}
 
@@ -1375,8 +1474,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                 {previewStatus}
               </p>
             </div>
-            {/* Personalizado: celular e computador juntos (sem a escolha do aparelho). */}
-            {draft.kind === "popup" && draft.design ? null : (
+            {/* Personalizado e Livre: celular e computador juntos (sem a escolha do aparelho). */}
+            {draft.kind === "popup" && (draft.design || draft.freeDesign) ? null : (
               <PillGroup ariaLabel="Aparelho da prévia" name="aviso-previa-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
             )}
           </div>

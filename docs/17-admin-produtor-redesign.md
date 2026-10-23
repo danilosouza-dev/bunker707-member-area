@@ -355,6 +355,8 @@ CSV do filtro atual: nome, e-mail, telefone, produtos, turma, situação, entrou
 > - **Frequência por pop-up, escolhida pela equipe**: Uma vez, ou Mais de uma vez com limite por dia, tempo entre uma vez e outra, limite total e o que faz parar; o **Volta em** do Lembrar depois (5 minutos a 7 dias); **Como fechar** (no X ou fora, ou só no X, com o Esc sempre fechando). Sem limite fixo entre pop-ups: as regras fixas são só **um de cada vez** e, na aula, **nunca com o vídeo do nosso player tocando**. Até 50 pop-ups publicados ao mesmo tempo.
 > - **Mostrar de novo para quem já viu** vale em qualquer "Quantas vezes". O relatório ganha as linhas Onde, Quando aparece, Quantas vezes e Como fecha no "Detalhes"; a tela de relatório por página e por jeito de fechar fica para a v3b-2, com os modelos de configuração.
 
+> **Atualização (23/10/2026).** Entrou o **Design Livre** (documento próprio: `docs/27`; sem migração): a terceira opção do card **Design**, com o editor de tela cheia no estilo do Elementor (§1.8.2).
+
 > **Atualização (22/10/2026).** Entrou o **Design do pop-up** (documento próprio: `docs/26`; migração `202610230001`). O editor do pop-up ganha o card **Design** logo depois do conteúdo: **Padrão** (o de sempre) ou **Personalizado** (modelos para começar; seções Mídia, Texto e posição, Blocos, Cartão, Fontes, Fechar e links; prévia de celular e computador lado a lado; dica de contraste). No Personalizado, "Título" vira **Nome do pop-up** e Texto, Ícone, Imagem e Para onde leva vão para o design (a imagem em Mídia, o destino no bloco Botão principal). O "construtor de HTML" pedido virou blocos estruturados, nunca HTML cru. Detalhes do editor em 1.8.2 (Design do pop-up).
 
 #### 1.8.1 Tipos e limites
@@ -395,6 +397,14 @@ Lista (`/admin/comunicacao`): nome, tipo, para quem, período, situação (Rascu
 - o destino do botão principal é o `NoticeCtaField` de sempre dentro do bloco (sem a chave "Levar o aluno a algum lugar", prop `showSwitch={false}`); "Quando o aluno clica no botão" também libera com um Segundo botão "Abrir um link";
 - salvar e sair da página esperam o vídeo e a imagem do fundo terminarem de subir (`Espere o vídeo terminar de enviar.` / `Espere a imagem do fundo terminar de enviar.`); cada erro do design foca o campo (`docs/26` §2.3); a dica de contraste nunca impede salvar;
 - o relatório mostra a mesma prévia com as fontes do design.
+
+**Design Livre (23/10/2026, `docs/27` §2).** A terceira opção do card **Design**, **Livre**, monta o pop-up do zero num editor de tela cheia no estilo do Elementor:
+
+- card Design: **Padrão** | **Personalizado** | **Livre** empilhados, com memória entre os três; a primeira vez no Livre mostra **Começar de um modelo** com miniaturas (Vídeo no topo com degradê, Só texto com brilho, Em branco) e escolher abre o editor; com o Livre montado: miniatura, **Abrir editor Livre**, `{n} elementos · {largura} px`, `{n} problemas para revisar` (abre no Revisar) e **Trocar de modelo** (confirma; Ctrl + Z no editor volta ao de antes); abaixo de 1.024 px de largura, o botão fica desligado com a frase e a prévia continua; no Livre, o conteúdo esconde Texto, Ícone, Imagem e Para onde leva (o Botão principal mora no editor);
+- editor: barra com **Concluir**, `Editor Livre`, **Ver como** Computador | Celular, zoom **Ajustar à tela** | **100 %**, **Desfazer**, **Refazer**, **Revisar**, **Atalhos**, **Salvar rascunho**; à esquerda **Elementos** (Texto: Título, Texto, Selo; Botões: Botão principal, Botão; Mídia: Imagem, Vídeo, Ícone; Formas: Forma, Degradê, Linha, Espaço; Estrutura: Caixa em coluna, Caixa em linha) e **Camadas** (árvore com Esconder, Travar e o menu ⋯); no meio o desenho (selecionar, arrastar, 8 alças, guias, barrinha da sequência com Subir, Descer, Duplicar, Soltar, Excluir); à direita **Conteúdo / Estilo / Avançado** do elemento, **Pop-up** sem seleção (largura com "Ajustar os elementos à nova largura", altura mínima, fundo, borda, cantos, sombra, respiro, a sequência, o X e as fontes) ou **Revisar** (medidor de tamanho, erros que levam ao campo, dicas);
+- **Salvar rascunho** dentro do editor grava sem fechar (num aviso novo, o endereço só troca no **Concluir**); erro de fora do editor mostra **Fechar o editor e revisar**; fechar a aba com mudança pede confirmação e reabrir oferece **Recuperar**;
+- tudo tem caminho pelo teclado (Camadas com setas, E, T, Alt + ↑/↓, Delete, Ctrl + D; palco com setas; Ctrl + Z / Ctrl + Shift + Z) e pelos campos (X, Y, largura, altura, Alinhar no pop-up);
+- a prévia do aviso e o relatório desenham o Livre pelo mesmo cartão do aluno, no celular e no computador.
 
 #### 1.8.3 Webinários (`/admin/comunicacao/webinarios`)
 

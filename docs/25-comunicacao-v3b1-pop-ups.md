@@ -93,7 +93,7 @@ Nada é empurrado para o navegador (sem tempo real, C11).
 | **Para de aparecer** | `Quando o aluno clica no botão` (padrão): o clique para; fechar não. `Só quando o pop-up terminar`: continua no ritmo mesmo depois do clique, até a data de fim. Sem botão no pop-up, a primeira opção fica desligada e um `Mais de uma vez` novo começa em `Só quando o pop-up terminar` |
 
 - Sem limite por dia nem intervalo: aparece em toda página escolhida (ou toda aula concluída), com pelo menos 5 s entre uma e outra, até a parada; o editor avisa, não proíbe.
-- `Não mostrar de novo` sempre para de vez, em qualquer modo, e sempre aparece.
+- `Não mostrar de novo` sempre para de vez, em qualquer modo. Aparece sempre no Padrão; no Personalizado (`docs/26` D34) e no Livre (`docs/27` §1) a equipe pode escondê-lo, e o aluno continua fechando pelo X, pelo `Esc` e (fora de "Só no X") clicando fora.
 - `Lembrar depois` (quando permitido) esconde pelo `Volta em` (5 minutos a 7 dias, padrão 24 horas), no máximo 2 vezes desde o último `Mostrar de novo`.
 - Mudar "Quantas vezes" de um pop-up no ar vale na hora, contando o que cada aluno já viu.
 - Os pop-ups de antes em `Até o aluno clicar` são exatamente `Mais de uma vez` com `Tempo entre uma vez e outra: 1 dia` e `Quando o aluno clica no botão` (P10). Os que não têm botão abrem no editor e são salvos como `Só quando o pop-up terminar` (sem botão, ninguém clica: dá no mesmo; seção 8.1).
@@ -451,6 +451,7 @@ Ajudas novas em `tests/e2e/fixtures.ts`: `publicarPopUp(browser, { titulo, pagin
 
 ### 10.2 Próximos passos (depois da v3b-1)
 
+1. **Design Livre** (entregue, `docs/27`): a terceira opção do card Design, com o editor de tela cheia no estilo do Elementor; o cartão Livre segue as mesmas regras de onde, quando, quantas vezes e como fecha deste documento.
 1. **Design do pop-up** (entregue, `docs/26`): o card Design com Padrão | Personalizado (vídeo ou imagem com degradê, selo, título de duas cores, texto, botões com estilo livre, fontes enviadas, prévia de celular e computador). As regras desta página (onde, quando, quantas vezes, como fecha) valem igual para os dois visuais; "Quando o aluno clica no botão" também conta o Segundo botão com link.
 2. **v3b-2**: modelos de configuração (pop-ups e notificações), hora marcada ao vivo, No primeiro acesso, Ao concluir todas as aulas do curso, o relatório de onde apareceu e como fecharam, o player do Bunny/Vimeo lido por `postMessage`.
 3. **v3b-3**: enquete dentro do pop-up (o design já tem lugar para blocos novos) e, se o produtor pedir, modelos salvos de design e arrastar livre.

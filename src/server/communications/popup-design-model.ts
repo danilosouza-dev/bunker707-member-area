@@ -234,6 +234,8 @@ export function isOwnStorageUrl(value: string, input: { bucket: string; objectPa
 
 /** Nome de maquina so com letras, numeros, ponto e hifen (ou [::1]): o URL do WHATWG deixa passar aspas e ";". */
 const SAFE_HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$|^\[::1\]$/;
+/** O mesmo padrao, para o design Livre (popup-free-render.freeStorageOrigin). */
+export const STORAGE_SAFE_HOSTNAME = SAFE_HOSTNAME;
 
 /**
  * O caminho da imagem do fundo do cartao (communications/images/<24 hex>.webp) quando o endereco e o objeto

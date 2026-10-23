@@ -43,7 +43,8 @@ import { POPUP_DESIGN_COPY } from "./popup-design/popup-design-editor-model";
 // Design do pop-up (docs/26), `popupDesign` (pop-up "Personalizado"): o texto e o icone nao aparecem para o
 // aluno (os blocos do design sao o texto), entao somem daqui; a imagem vai para o card Design > Mídia e o
 // "Para onde leva" para o bloco Botão principal. "Título" vira "Nome do pop-up" (listas e relatorios; o mesmo
-// id "aviso-titulo") e o bloco de midia fica so com o Áudio.
+// id "aviso-titulo") e o bloco de midia fica so com o Áudio. No Livre (docs/27, `popupDesign="free"`), o mesmo: o
+// texto, a imagem e o destino do Botão principal ficam no editor Livre.
 
 /** O conteudo editado aqui: o do aviso, com a validade dos passos de fluxo ("with_anchor"). */
 export type NoticeContentValue = Pick<NoticeDraft, "allowHide" | "audio" | "body" | "cta" | "icon" | "image" | "poll" | "reactions" | "response" | "sender" | "title"> & {
@@ -92,8 +93,11 @@ type NoticeContentFieldsProps = {
   showValidity: boolean;
   /** Acrescenta "Até a notificação principal sumir" (passo que conta de uma notificacao). */
   validityAnchor?: { label: string };
-  /** Pop-up "Personalizado" (docs/26): sem texto, icone, imagem e destino aqui (vao para o card Design). */
-  popupDesign?: boolean;
+  /**
+   * Pop-up "Personalizado" (docs/26) ou "Livre" (`"free"`, docs/27): sem texto, icone, imagem e destino aqui (vao
+   * para o card Design; no Livre, para o editor Livre).
+   */
+  popupDesign?: boolean | "free";
   value: NoticeContentValue;
 };
 
@@ -174,7 +178,7 @@ export function NoticeContentFields({
   const limits = NOTICE_LIMITS[kind];
   const inbox = kind === "inbox";
   // Design do pop-up (docs/26): no Personalizado, o design desenha o pop-up (o titulo vira o nome).
-  const custom = !inbox && popupDesign;
+  const custom = !inbox && Boolean(popupDesign);
   const id = (suffix: string) => `${idPrefix}-${suffix}`;
 
   useEffect(() => {
@@ -295,7 +299,13 @@ export function NoticeContentFields({
       </Block>
 
       <Block
-        description={custom ? POPUP_DESIGN_COPY.content.audioDescription : "Uma imagem 16:9 e um áudio curto, para o aviso ganhar atenção."}
+        description={
+          custom
+            ? popupDesign === "free"
+              ? POPUP_DESIGN_COPY.free.audioDescription
+              : POPUP_DESIGN_COPY.content.audioDescription
+            : "Uma imagem 16:9 e um áudio curto, para o aviso ganhar atenção."
+        }
         layout={layout}
         meta="opcional"
         title={custom ? POPUP_DESIGN_COPY.content.audioTitle : "Imagem e áudio"}

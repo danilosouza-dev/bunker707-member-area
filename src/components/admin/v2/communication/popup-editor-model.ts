@@ -18,6 +18,7 @@ import {
   type PopupTrigger
 } from "../../../../server/communications/popup-display-model";
 import { popupDesignLinkButton } from "../../../../server/communications/popup-design-model";
+import { freeLinkButton } from "../../../../server/communications/popup-free-render";
 import { describeMinutes } from "../../../../server/communications/popup-sentences";
 import type { NoticeDraft } from "../../../../server/communications/schemas";
 
@@ -102,7 +103,7 @@ export const POPUP_EDITOR_COPY = {
     },
     stopLabel: "Para de aparecer",
     stopNoButton: "Este pop-up não tem botão. Ligue “Levar o aluno a algum lugar” ou escolha outra opção.",
-    /** Design Personalizado (docs/26): o botao mora no card Design, sem a chave "Levar o aluno a algum lugar". */
+    /** Design Personalizado ou Livre (docs/26, docs/27): o botao mora no card Design, sem a chave "Levar o aluno a algum lugar". */
     stopNoButtonDesign: "Este pop-up não tem botão. Acrescente o Botão principal no Design ou escolha outra opção.",
     title: "Quantas vezes e como fecha",
     totalDescription: "“Lembrar depois” não gasta vez.",
@@ -394,17 +395,18 @@ export const POPUP_REPEAT_DEFAULTS = { everyMinutes: 1_440, maxPerDay: 1, maxTot
 /** Pop-up sem botao: "Quando o aluno clica no botão" fica desligado (nunca pararia). */
 /**
  * "Quando o aluno clica no botão" sem nada para clicar nunca pararia: desligada sem `cta`, a nao ser que o design
- * Personalizado tenha um segundo botao com link (docs/26 D9: o link conta como o clique, como no schema).
+ * Personalizado tenha um segundo botao com link (docs/26 D9: o link conta como o clique, como no schema) ou o Livre
+ * tenha o botao "Abrir um link" visivel (docs/27; no maximo um, entao o clique contado e sempre de um botao so).
  */
-export function clickStopDisabled(draft: Pick<NoticeDraft, "cta"> & Partial<Pick<NoticeDraft, "design">>) {
-  return draft.cta === null && !popupDesignLinkButton(draft.design);
+export function clickStopDisabled(draft: Pick<NoticeDraft, "cta"> & Partial<Pick<NoticeDraft, "design" | "freeDesign">>) {
+  return draft.cta === null && !popupDesignLinkButton(draft.design) && !freeLinkButton(draft.freeDesign);
 }
 
 /**
  * "Mais de uma vez" a partir de "Uma vez": 1 por dia, ate clicar (sem botao: so quando o pop-up terminar).
  * Os ultimos valores desta tela (`remembered`) voltam quando a equipe vai e volta.
  */
-export function repeatStartOf(draft: Pick<NoticeDraft, "cta"> & Partial<Pick<NoticeDraft, "design">>, remembered: PopupRepeatFrequency | null = null): PopupRepeatFrequency {
+export function repeatStartOf(draft: Pick<NoticeDraft, "cta"> & Partial<Pick<NoticeDraft, "design" | "freeDesign">>, remembered: PopupRepeatFrequency | null = null): PopupRepeatFrequency {
   const fallbackStop: PopupStopOn = clickStopDisabled(draft) ? "never" : "click";
 
   if (remembered) {
