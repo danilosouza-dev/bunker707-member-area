@@ -688,6 +688,48 @@ function buttonPartsOf(style: PopupButtonStyle): Pick<FreeButtonNode, "box" | "p
   };
 }
 
+/**
+ * O comeco de `text` com ate `max` letras (pontos de codigo, como a conta do schema) e ate `units` unidades UTF-16
+ * (o `max` do zod nos textos curtos). Nunca parte um emoji ao meio: a metade solta passa no zod, mas o jsonb do
+ * banco recusa o texto e o salvar daria erro.
+ */
+function cutText(text: string, max: number, units = Number.POSITIVE_INFINITY): string {
+  let kept = "";
+  let count = 0;
+
+  for (const letter of text) {
+    if (count >= max || kept.length + letter.length > units) {
+      break;
+    }
+
+    kept += letter;
+    count += 1;
+  }
+
+  return kept;
+}
+
+type FreeSidesValue = number | [number, number] | [number, number, number, number];
+
+/** Lados em quatro valores [cima, direita, baixo, esquerda]. */
+function fourSidesOf(sides: FreeSidesValue | undefined): [number, number, number, number] {
+  if (sides === undefined || typeof sides === "number") {
+    const value = sides ?? 0;
+
+    return [value, value, value, value];
+  }
+
+  return sides.length === 2 ? [sides[0], sides[1], sides[0], sides[1]] : [sides[0], sides[1], sides[2], sides[3]];
+}
+
+/** O elemento na sequencia com `extra` px a mais na margem de cima (o resto do alinhamento e da margem fica). */
+function withTopMargin(node: FreeNode, extra: number): FreeNode {
+  const flow = node.place?.mode === "flow" ? node.place : { mode: "flow" as const };
+  const [top, right, bottom, left] = fourSidesOf(flow.margin);
+
+  return { ...node, place: { ...flow, margin: [top + extra, right, bottom, left] } } as FreeNode;
+}
+
 /** Linhas de texto que valem no Livre (cada uma com uma letra que nao e espaco), no maximo `max`. */
 function textLines(lines: readonly string[], max: number): string[] {
   const kept = lines.filter((line) => line.trim().length > 0);
@@ -701,7 +743,8 @@ function textLines(lines: readonly string[], max: number): string[] {
  * fundo vira `[escuro, imagem, cor de apoio]` (a imagem cabendo na largura, presa em cima, no meio ou embaixo); a
  * midia vira um Vídeo ou uma Imagem solta no topo (0, 0, W, W x proporcao), com o esmaecer de (fim - comprimento) a
  * fim quando o degrade e "Igual ao fundo do cartão" ou uma Forma Degradê por cima na cor escolhida; "Abaixo da
- * mídia" com subir vira o respiro de cima; "Sobre a mídia" vira a altura minima da midia com o texto em cima, no
+ * mídia" com subir vira o respiro de cima (ate 200; o resto, a margem de cima do primeiro elemento na sequencia);
+ * "Sobre a mídia" vira a altura minima da midia com o texto em cima, no
  * meio ou embaixo; os blocos viram elementos na mesma ordem (selo, titulo com uma parte por linha, texto com uma
  * linha por quebra, Botão principal, segundo botao, Áudio, Espaço), o alinhamento do grupo vira o da prancheta e o
  * espaco entre blocos o `gap`; o X e os links ("Não mostrar de novo" opcional) seguem. Video, capa, fontes e textos
@@ -731,11 +774,12 @@ export function freeFromCustomDesign(
 
     return id;
   };
+  // O teto de 1.200 letras do Livre, contado como o schema conta (pontos de codigo, nunca meio emoji).
   let letters: number = FREE_DESIGN_LIMITS.textTotal;
   const spend = (text: string) => {
-    const kept = text.slice(0, Math.max(0, letters));
+    const kept = cutText(text, Math.max(0, letters));
 
-    letters -= kept.length;
+    letters -= [...kept].length;
 
     return kept;
   };
@@ -805,7 +849,7 @@ export function freeFromCustomDesign(
 
     switch (block.type) {
       case "badge": {
-        const label = spend(block.text.trim().slice(0, FREE_DESIGN_LIMITS.label));
+        const label = spend(cutText(block.text.trim(), FREE_DESIGN_LIMITS.label, FREE_DESIGN_LIMITS.label));
         const align = flexAlignOf(block.style.align === "inherit" ? zone : block.style.align);
         // O texto do selo fica centralizado na pilula (como no Personalizado); o alinhamento vale para o selo.
         const style = textStyleOf(block.style, zone);
@@ -865,7 +909,7 @@ export function freeFromCustomDesign(
         break;
       }
       case "button2": {
-        const label = spend(block.label.trim().slice(0, FREE_DESIGN_LIMITS.label));
+        const label = spend(cutText(block.label.trim(), FREE_DESIGN_LIMITS.label, FREE_DESIGN_LIMITS.label));
         const action = block.action.kind === "link" ? { href: block.action.href, kind: "link" as const, target: block.action.target } : { kind: block.action.kind };
 
         if (label.trim()) {
@@ -938,14 +982,26 @@ export function freeFromCustomDesign(
     fill = [freePaintOf(background)];
   }
 
-  const top = over || !hasMedia ? padding : Math.round(mediaHeight * (1 - custom.text.overlap / 100) + padding);
+  // "Abaixo da midia": o texto comeca onde o Personalizado o poe, na altura exata da midia (largura x proporcao)
+  // menos o quanto ele sobe, mais o respiro. O respiro de cima vai ate o teto do Livre (200); o que passa (ate 368:
+  // midia 1:1 de 520 sem subir + 48) vira margem de cima do primeiro elemento na sequencia (ate 400), no mesmo y.
+  const exactMediaHeight = width * POPUP_MEDIA_RATIOS[custom.media.aspect];
+  const top = over || !hasMedia ? padding : Math.round(exactMediaHeight * (1 - custom.text.overlap / 100) + padding);
+  const topPadding = Math.min(top, FREE_DESIGN_LIMITS.padding.max);
+
+  if (top > topPadding) {
+    const first = children.findIndex((node) => node.place?.mode !== "free");
+
+    children[first] = withTopMargin(children[first], top - topPadding);
+  }
+
   const artboard: NonNullable<PopupFreeDesign["artboard"]> = {
     align: flexAlignOf(zone),
     fill,
     gap: custom.text.gap,
     justify: !over ? "start" : custom.text.placement === "over-top" ? "start" : custom.text.placement === "over-middle" ? "center" : "end",
     minHeight: over ? mediaHeight : 0,
-    padding: [top, padding, showDismiss ? Math.round(padding / 2) + 14 : padding, padding],
+    padding: [topPadding, padding, showDismiss ? Math.round(padding / 2) + 14 : padding, padding],
     radius: custom.card.radius,
     width
   };

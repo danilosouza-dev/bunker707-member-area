@@ -5,6 +5,10 @@
 //   npm run livre:instrucoes
 //
 // tests/popup-livre-copiar-colar.test.mjs confere que o arquivo gerado bate com o docs (os dois nao se separam).
+//
+// O texto vai para a conversa de um terceiro (o Claude ou o ChatGPT do produtor): o que e so de quem mantem o codigo
+// (nomes de arquivo e de funcao, banco, buckets, caminhos) fica no docs entre <!-- ia:fora --> e <!-- /ia:fora -->
+// (o Markdown nao mostra os marcadores) e sai aqui; sobrou algum desses termos, o script para (docs/27 L26).
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -17,13 +21,22 @@ export const LIVRE_INSTRUCTIONS_PATH = `${root}src/components/admin/v2/communica
 /** As partes do §9 que a IA precisa (sem 9.1, que e onde o banco guarda, e 9.7, as chaves de erro do editor). */
 const SECTIONS = ["9.2", "9.3", "9.4", "9.5", "9.6", "9.8", "9.9"];
 
+/** Trecho do docs so para quem mantem o codigo (o marcador pode ficar no meio da linha ou em linhas proprias). */
+const INTERNAL = /<!-- ia:fora -->[\s\S]*?<!-- \/ia:fora -->/g;
+
+/**
+ * O que nunca vai nas instrucoes: arquivo do codigo, banco, bucket, jsonb, zod, referencia a secao do docs (a IA nao
+ * recebe o docs inteiro) e marcador que sobrou.
+ */
+export const LIVRE_INSTRUCTIONS_FORBIDDEN = [/\.tsx?\b/, /\bbanco\b/i, /bucket/i, /jsonb/i, /\bz\./, /§/, /<!--|-->/, /\bsrc\//, /Storage/];
+
 const PREFACE = `Você vai escrever o design de um pop-up "Livre" da área de membros, em JSON.
 
 Como responder:
 - Responda só com o JSON do design (um objeto que começa com { e termina com }), sem texto antes ou depois.
 - Siga o contrato abaixo à risca: chave que não está no contrato faz o design ser recusado.
 - Se eu mandar um design junto, mude só o que eu pedir e devolva o design inteiro.
-- Não escreva endereço de imagem nem de vídeo: use um elemento Imagem ou Vídeo com "asset": null e a equipe envia o arquivo depois.
+- Arquivos: em todo elemento Imagem ou Vídeo novo use sempre "asset": null (a equipe envia o arquivo no editor). Não escreva endereço nem caminho de arquivo e não crie itens em "assets"; se o design que eu mandar já tem "assets", devolva essa lista e os "asset" exatamente como vieram.
 
 # Contrato do JSON do design Livre
 `;
@@ -46,7 +59,21 @@ export function livreInstructionsText(doc) {
     throw new Error(`docs/27: esperava as partes ${SECTIONS.join(", ")} da secao 9; vieram ${parts.length}.`);
   }
 
-  return `${PREFACE}\n${parts.map((part) => part.trim()).join("\n\n")}\n`;
+  const text = `${PREFACE}\n${parts.map((part) => withoutInternal(part).trim()).join("\n\n")}\n`;
+  const leak = LIVRE_INSTRUCTIONS_FORBIDDEN.find((pattern) => pattern.test(text));
+
+  if (leak) {
+    const at = text.search(leak);
+
+    throw new Error(`docs/27 §9: detalhe de implementacao nas instrucoes para a IA (${leak}): "${text.slice(Math.max(0, at - 60), at + 40)}". Marque com <!-- ia:fora --> ... <!-- /ia:fora --> ou reescreva.`);
+  }
+
+  return text;
+}
+
+/** A parte sem os trechos marcados, sem espaco sobrando no fim da linha e sem linha em branco dobrada. */
+function withoutInternal(part) {
+  return part.replace(INTERNAL, "").replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n");
 }
 
 /** O arquivo TypeScript com o texto (uma constante, sem nada em tempo de execucao). */

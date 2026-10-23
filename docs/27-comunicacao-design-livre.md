@@ -152,10 +152,15 @@ O cartão Livre fica num pedaço próprio, baixado só quando o pop-up armado é
 | L21 | **Colar** segue o aviso como os modelos: com áudio entra o Áudio (sem, sai), com botão entra o Botão principal que faltava, e o Botão principal colado num aviso sem botão cria o "Saiba mais" com o destino vazio | colar não apaga o botão que veio no design (o produtor colou de propósito), e é o comportamento já conhecido do **Usar este modelo** |
 | L22 | **Usar o design Personalizado** é um ponto de partida à parte dos 4 modelos, só quando o aviso tem um Personalizado; a imagem no fundo do cartão vira camadas (escuro, imagem cabendo na largura, cor de apoio "clareada") | o resultado depende do aviso (não é um modelo fixo). No Livre o escuro cobre o cartão inteiro; clarear a cor de apoio na mesma conta deixa o resto do cartão com a cor de antes. "Parecido, não idêntico": a borda da imagem não some na cor de apoio como no Personalizado |
 | L23 | O modelo **Imagem recortada com selo** com o selo de 128 px (o rascunho tinha 112), a coluna de texto de 256 px e os botões com quebra | com 112 px o "Aula bônus" quebrava em duas linhas no celular (a dica nova acendia no modelo); com a quebra ligada, um texto de botão longo desce para a linha de baixo em vez de apertar |
+| L24 | **Usar o design Personalizado** com "Abaixo da mídia": o texto começa na altura exata da mídia (largura × proporção, sem arredondar antes) × (1 − subir) + respiro; o respiro de cima da prancheta vai até 200 e o que passa vira margem de cima do primeiro elemento na sequência (até 368, dentro dos 400 da margem) | o respiro de cima inteiro passava do teto de 200 sempre que a mídia, depois de subir, tinha mais de ~200 px (o modelo "Mídia no topo com degradê" no cartão G dava 217 e o schema recusava: 954 das 6.804 combinações do teste); a margem guarda o mesmo y sem mexer no schema. Um teste varre modelos, larguras, formatos, posições, subir, respiros, mídia e degradê pelo schema e pela conta do tamanho e confere o y com o do Personalizado (até 1 px) |
+| L25 | Na conversão do Personalizado, o teto de 1.200 letras e o de 40 nos textos curtos cortam por letra (ponto de código, a mesma conta do schema), nunca no meio de um emoji | `slice` corta em unidades UTF-16: um emoji na fronteira deixava a metade solta, que o zod aceita mas o jsonb do banco recusa (erro do servidor ao salvar) |
+| L26 | As instruções para a IA não levam detalhe de implementação: o que é só de quem mantém o código fica no §9 entre `<!-- ia:fora -->` e `<!-- /ia:fora -->` e o script tira; o tamanho vira um limite simples; Imagem e Vídeo novos sempre com `"asset": null` (os `assets` de um design mandado junto voltam como vieram); referências pelo nome da parte. O script para se sobrar `.ts`, banco, bucket, jsonb, `z.`, `§`, Storage ou um marcador | o texto vai para a conversa de um terceiro (o Claude ou o ChatGPT do produtor): nomes de arquivo, buckets, caminhos e o check do banco não ajudam a IA a escrever o design e expõem o que é interno; "§7" e "§9.5" apontavam para partes que a IA não recebe ou não reconhece |
 
 ## 9. Contrato do JSON
 
 O JSON do design Livre é o contrato entre o editor, o servidor, o cartão do aluno e (no PR "Criar com IA") a IA. Esta seção é a fonte para quem escreve um design à mão ou pede a uma IA. **Todo bloco `json` desta seção é um design completo e passa no schema**: `tests/popup-livre-modelo.test.mjs` lê o documento e valida cada exemplo (documento e schema não se separam).
+
+As partes 9.2 a 9.6, 9.8 e 9.9 viram as instruções para a IA (§13.1), que vão para a conversa de um terceiro: o que é só de quem mantém o código (nomes de arquivo e de função, banco, buckets, caminhos) fica entre `<!-- ia:fora -->` e `<!-- /ia:fora -->` (o Markdown não mostra os marcadores; o script tira o trecho) e as referências entre partes dizem o nome da parte ("veja 9.4 Padrões"), nunca uma seção que não vai junto (L26).
 
 ### 9.1 Onde fica e como é lido
 
@@ -169,7 +174,7 @@ O JSON do design Livre é o contrato entre o editor, o servidor, o cartão do al
 
 ### 9.2 O documento mínimo
 
-Prancheta e X com os padrões, sem arquivos nem fontes (o schema completa `assets` e `fonts`). Vale num aviso sem botão e sem áudio:
+Prancheta e X com os padrões, sem arquivos nem fontes (`assets` e `fonts` podem ficar de fora: são completados sozinhos). Vale num aviso sem botão e sem áudio:
 
 ```json
 { "mode": "free", "version": 1, "children": [{ "id": "links", "type": "links" }] }
@@ -201,7 +206,7 @@ Raiz:
 | `artboard` | objeto (opcional) | a prancheta: `width` (280 a 720), `minHeight` (0 a 1.600; 0 = cresce com o conteúdo), `fill` (1 a 3 pinturas; a primeira fica por cima), `padding` (lados, 0 a 200), `gap` (0 a 96), `align` (`stretch` · `start` · `center` · `end`), `justify` (`start` · `center` · `end` · `between`), `radius` (0 a 64), `border`, `shadows` (até 2) |
 | `close` | objeto (opcional) | o X: `color`, `background`, `border`, `size` (28 · 36 · 44), `inset` (8 a 24), `side` (`right` · `left`) |
 | `children` | lista (1 a 32) | os elementos na ordem do DOM (= ordem de leitura e das Camadas) |
-| `assets` | lista (opcional na entrada) | arquivos (§ Arquivos abaixo) |
+| `assets` | lista (opcional na entrada) | os arquivos de imagem e vídeo (veja Arquivos, mais abaixo) |
 | `fonts` | lista (opcional na entrada) | ignorada na entrada: a forma canônica recalcula os ids das fontes enviadas usadas |
 
 Comum a todos os elementos: `id` (letra minúscula e depois letras minúsculas e números, até 16; único entre elementos e, à parte, entre arquivos), `type`, `name` (nome nas Camadas, até 40), `hidden` (não aparece para o aluno), `locked` (só no editor), `place`, `box`.
@@ -238,8 +243,8 @@ Elementos (`type`):
 | `text` (Texto) | `lines` (1 a 12), `textStyle`; o primeiro visível descreve o diálogo |
 | `badge` (Selo) | `label` (1 a 40), `icon`, `textStyle` |
 | `button` (Botão) | `action`: `{ "kind": "cta" }` (o botão principal: texto e destino no `cta` do aviso, sem `label`), `{ "kind": "close" }`, `{ "kind": "snooze" }` (Lembrar depois) ou `{ "kind": "link", "href": "...", "target": "same_tab" | "new_tab" }` (Abrir um link; o clique conta como o clique do pop-up); `label` (1 a 40, obrigatório fora do `cta`); `icon` (`{ "name", "side": "end" | "start" }`); `textStyle` |
-| `image` (Imagem) | `asset` (id de uma imagem de `assets`; `null` só no rascunho), `alt` (até 160; vazio = decorativa), `fit` (`cover` · `contain`), `focus` |
-| `video` (Vídeo) | `asset` (id do vídeo de `assets`; `null` só no rascunho), `fit`, `focus`; toca sem som, em repetição; com menos movimento ou economia de dados, só a capa |
+| `image` (Imagem) | `asset` (id de uma imagem de `assets`, ou `null`: sem arquivo, a equipe envia no editor antes de publicar), `alt` (até 160; vazio = decorativa), `fit` (`cover` · `contain`), `focus` |
+| `video` (Vídeo) | `asset` (id do vídeo de `assets`, ou `null`: sem arquivo, a equipe envia no editor antes de publicar), `fit`, `focus`; toca sem som, em repetição; com menos movimento ou economia de dados, só a capa |
 | `icon` (Ícone) | `icon` (um dos 24 nomes abaixo), `size` (8 a 160), `stroke` (1 a 3), `color` |
 | `divider` (Linha) | `thickness` (1 a 8), `color`, `style` |
 | `spacer` (Espaço) | `size` (0 a 400) |
@@ -250,12 +255,16 @@ Elementos (`type`):
 
 Ícones: `arrow-right`, `bell`, `book-open`, `calendar`, `check`, `chevron-right`, `circle-check`, `clock`, `crown`, `flame`, `gem`, `gift`, `graduation-cap`, `heart`, `lock-open`, `megaphone`, `percent`, `play`, `rocket`, `sparkles`, `star`, `tag`, `trophy`, `zap`.
 
-Arquivos (`assets`), só pelo caminho no nosso Storage (o design não tem endereço):
+Arquivos (`assets`): quem escreve o design (à mão ou por uma IA) não escreve arquivos. Imagem e Vídeo novos vão sempre com `"asset": null` e a equipe envia o arquivo no editor; nada de `assets` novos, de pintura `image` nova ou de endereço de arquivo. Num design copiado do editor, `assets` e os `asset` que vieram ficam exatamente como estão.
+
+<!-- ia:fora -->
+Por dentro (só o editor e o servidor escrevem; fica fora das instruções para a IA): cada arquivo é só o caminho no nosso Storage, sem endereço.
 
 | `kind` | Campos |
 |---|---|
 | `image` | `id`, `path` (`communications/free/<24 hex>.webp`, enviada no editor, ou `communications/images/<24 hex>.webp`, a imagem do aviso; bucket `content-assets`), `width` e `height` (16 a 1.600; o servidor troca pelas medidas lidas do arquivo) |
 | `video` | `id`, `path` (`videos/<uuid>.mp4` ou `.webm`, bucket `communication-popup-video`), `mimeType` (`video/mp4` · `video/webm`, igual à extensão), `poster` (opcional: id de uma imagem de `assets`) |
+<!-- /ia:fora -->
 
 ### 9.4 Padrões (omitidos na forma canônica)
 
@@ -299,15 +308,17 @@ Arquivos (`assets`), só pelo caminho no nosso Storage (o design não tem endere
 | Camadas de fundo / paradas / sombras | até 3 / 2 a 5 / até 2 |
 | Fontes enviadas | até 4 |
 | Imagem enviada | WebP, 16 a 1.600 px de cada lado, até 420.000 bytes |
-| Tamanho | estimativa do jsonb (`jsonbBytesUpperBound` da forma canônica) até 30.000 bytes (o check do banco mede o jsonb sem compressão e para em 32.768) |
+| Tamanho | até 30.000 bytes na conta do editor, que pesa mais que o texto do JSON: fique abaixo de uns 12.000 caracteres de JSON sem espaços (cada modelo da 9.9 tem menos de 2.500)<!-- ia:fora -->; a conta é a estimativa do jsonb (`jsonbBytesUpperBound` da forma canônica) e o check do banco mede o jsonb sem compressão e para em 32.768<!-- /ia:fora --> |
 
 ### 9.6 Regras entre partes e com o conteúdo do aviso
 
-No schema: ids únicos; profundidade e contagens da §9.5; solto só na prancheta; `label` obrigatório fora do `cta` e proibido no `cta`; todo `asset` de elemento ou pintura existe em `assets` com o tipo certo; a capa do vídeo é uma imagem de `assets`; o caminho casa com o padrão do bucket e o vídeo tem a extensão do tipo; o link do botão segue a regra do botão principal (página da área, produto ou https); cada linha tem pelo menos uma letra que não é espaço; até 4 fontes enviadas; o tamanho; e o **X sempre visível**: o alfa da cor do ícone do X é pelo menos `cc` e o contraste entre o ícone e o fundo do X (o fundo composto sobre a cor de base da prancheta, a camada de baixo do `fill`; com alfa, sobre preto) é pelo menos 3:1.
+Sempre (o schema confere ao colar e ao salvar): ids únicos; profundidade e contagens de 9.5 Limites; solto só na prancheta; `label` obrigatório fora do `cta` e proibido no `cta`; todo `asset` de elemento ou pintura existe em `assets` com o tipo certo; a capa do vídeo é uma imagem de `assets`;<!-- ia:fora --> o caminho casa com o padrão do bucket e o vídeo tem a extensão do tipo;<!-- /ia:fora --> o link do botão segue a regra do botão principal (página da área, produto ou https); cada linha tem pelo menos uma letra que não é espaço; até 4 fontes enviadas; o tamanho; e o **X sempre visível**: o alfa da cor do ícone do X é pelo menos `cc` e o contraste entre o ícone e o fundo do X (o fundo composto sobre a cor de base da prancheta, a camada de baixo do `fill`; com alfa, sobre preto) é pelo menos 3:1.
 
 Com o conteúdo do aviso (no salvar e no publicar): aviso com botão pede o botão principal (`Falta o botão principal no design.`); botão principal sem botão no aviso (`Escreva o texto do botão e escolha para onde ele leva.` em `cta.label`); aviso com áudio pede o Áudio (`Falta o elemento Áudio no design.`); Áudio sem áudio no aviso (`Envie o áudio ou tire o elemento Áudio.` em `audio`); botão Lembrar depois com o adiar desligado; Imagem e Vídeo sem arquivo. "Quantas vezes → Quando o aluno clica no botão" vale com o `cta` ou com o botão "Abrir um link".
 
+<!-- ia:fora -->
 No rascunho do aviso, `freeDesign` fica ao lado de `design` (o Personalizado): no máximo um não nulo (`Escolha um design só.`). Ao salvar, o pedido com uma só das chaves (mesmo `null`) zera a outra; com as duas, valem como vieram; sem nenhuma, fica o que está gravado.
+<!-- /ia:fora -->
 
 ### 9.7 Chaves de erro
 
@@ -315,16 +326,18 @@ O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`,
 
 ### 9.8 Guia curto para a IA
 
-1. Escreva só o JSON do design, na forma desta seção; não escreva `assets` nem `fonts` (o servidor junta a partir dos arquivos e fontes disponíveis) e nunca escreva endereço de arquivo.
+1. Escreva só o JSON do design, na forma desta seção. Imagem e Vídeo novos sempre com `"asset": null` (a equipe envia o arquivo no editor); não escreva `assets` nem `fonts` novos e nunca um endereço de arquivo. Se o design que eu mandar já tem `assets`, devolva essa lista e os `asset` exatamente como vieram.
 2. Texto sempre na sequência (`place` omitido ou `flow`); solto só para mídia, forma, degradê e adesivo.
 3. Um botão principal (`{ "kind": "cta" }`) quando o aviso tem botão; o texto dele vai no `cta` do aviso, fora do design.
 4. Os `links` sempre no fim da prancheta; o Áudio antes do primeiro botão, quando o aviso tem áudio.
 5. Imagem de foto vira um elemento Imagem com `"asset": null` e `"name": "Troque esta imagem"`, que a equipe preenche.
-6. Omita o que é igual ao padrão (§9.4): o documento mínimo `{ mode, version, children }` já vale.
+6. Omita o que é igual ao padrão (veja 9.4 Padrões): o documento mínimo `{ mode, version, children }` já vale.
 7. O X precisa contrastar com o fundo dele; cores com alfa só onde fizer sentido.
 8. Fique bem abaixo do tamanho máximo: menos elementos e menos partes de texto.
 
+<!-- ia:fora -->
 `popupFreeJsonSchema()` (em `popup-free-json-schema.ts`, um módulo que nenhuma tela importa, §7) gera o JSON Schema da entrada (`z.toJSONSchema` com `io: "input"`; o elemento recursivo sai em `$defs`/`$ref`).
+<!-- /ia:fora -->
 
 ### 9.9 Exemplos: os 4 modelos para começar
 
@@ -571,7 +584,7 @@ Forma canônica (padrões omitidos). O Vídeo e a Imagem dos modelos começam se
 }
 ```
 
-**Imagem recortada com selo** (L1.1: a imagem sem fundo solta à direita, uma mancha de luz atrás dela, o selo inclinado por cima, o texto numa coluna à esquerda e os dois botões lado a lado, que passam para baixo quando o texto do botão é longo):
+**Imagem recortada com selo** (<!-- ia:fora -->L1.1: <!-- /ia:fora -->a imagem sem fundo solta à direita, uma mancha de luz atrás dela, o selo inclinado por cima, o texto numa coluna à esquerda e os dois botões lado a lado, que passam para baixo quando o texto do botão é longo):
 
 ```json
 {
@@ -706,7 +719,7 @@ Forma canônica (padrões omitidos). O Vídeo e a Imagem dos modelos começam se
 | Unitário | `tests/popup-livre-editor-modelo.test.mjs` (21) | onde o elemento entra, foco no envio, duplicar/excluir/subir/descer/caixas, soltar e seguir a sequência, setas, redimensionar com Shift, alinhar no pop-up, guias, escala do zoom e do celular, arrastar = um passo, histórico (junta, guarda o `cta`, 100 passos, modelo e recuperar), cópia de recuperação, teclado das Camadas, o botão e a frase do salvar no pop-up no ar (L16), vocabulário |
 | Unitário | `tests/popup-livre-painel-modelo.test.mjs` (23) | área de texto (Enter, limites, acentos e emoji), Outro estilo na seleção, editar mantendo estilos (400 edições aleatórias), voltar ao estilo, paradas, camadas de fundo, lados, sombras, chave de erro → aba e campo, Abrir um link único, reescala, pesos, imagem até 1.600 px e 420 KB, vocabulário |
 | Unitário | `tests/popup-design-editor-modelo.test.mjs` (23) | os do Personalizado, mais: os três modos com memória (Livre e Personalizado nunca juntos no rascunho), os modelos do Livre (o "Saiba mais", o vídeo do Personalizado e a imagem do aviso como capa, só caminhos), o rascunho com as duas chaves, a forma canônica com o Livre, a prévia pelo item do Livre, o D9 com o "Abrir um link" do Livre, a sincronia do Livre com o botão e o áudio, a cópia nova do card palavra por palavra |
-| Unitário | `tests/popup-livre-copiar-colar.test.mjs` (15) | L1.1: copiar dá a forma canônica e colar devolve o mesmo design (e o mesmo texto); a resposta da IA com ```json em volta; arquivos de fora viram `asset: null`, a pintura e a capa de fora saem e os conhecidos ficam com as medidas daqui; as frases do colar (vazio, JSON quebrado, grande demais, Personalizado, zod com o nome do elemento, até 5 e "E mais N."); fonte fora da biblioteca vira Inter; o Botão principal e o Áudio acompanham o aviso; colar = um passo no histórico; os arquivos de todo o histórico; as instruções geradas do §9 (iguais ao arquivo, os exemplos colam, só por `import()`, nada busca o docs); todo modelo do Personalizado vira um Livre válido sem dica; o mapeamento (mídia e esmaecer, vídeo e capa, títulos, quebras, botões e brilho, segundo botão, Espaço, links, imagem no fundo com a cor clareada, degradê de outra cor, Sobre a mídia, X que precisa contrastar, sem imagem, imagem sem medidas, 4 títulos e 1.200 letras); o card ("Usar o design Personalizado", o "Saiba mais"); o modelo novo; a conta do tamanho no celular e quando a dica aparece (texto longo, parte, selo solto, botão cortado, linha de botões, links) |
+| Unitário | `tests/popup-livre-copiar-colar.test.mjs` (17) | L1.1: copiar dá a forma canônica e colar devolve o mesmo design (e o mesmo texto); a resposta da IA com ```json em volta; arquivos de fora viram `asset: null`, a pintura e a capa de fora saem e os conhecidos ficam com as medidas daqui; as frases do colar (vazio, JSON quebrado, grande demais, Personalizado, zod com o nome do elemento, até 5 e "E mais N."); fonte fora da biblioteca vira Inter; o Botão principal e o Áudio acompanham o aviso; colar = um passo no histórico; os arquivos de todo o histórico; as instruções geradas do §9 (iguais ao arquivo, os exemplos colam e cabem no tamanho prometido, só por `import()`, nada busca o docs, nada de `.ts`, banco, bucket, jsonb, `z.` ou `§`, e o script para com um trecho sem marcador); todo modelo do Personalizado vira um Livre válido sem dica; o mapeamento (mídia e esmaecer, vídeo e capa, títulos, quebras, botões e brilho, segundo botão, Espaço, links, imagem no fundo com a cor clareada, degradê de outra cor, Sobre a mídia, X que precisa contrastar, sem imagem, imagem sem medidas, 4 títulos e 1.200 letras); toda combinação do Personalizado (modelo × largura × formato × posição × subir × respiro × mídia × degradê) passa no schema e na conta do tamanho com o texto no mesmo y (até 1 px), e cada subir de 0 a 60 com o respiro até 200 e a margem até 400; o corte das 1.200 letras com um emoji na fronteira (texto e botão); o card ("Usar o design Personalizado", o "Saiba mais"); o modelo novo; a conta do tamanho no celular e quando a dica aparece (texto longo, parte, selo solto, botão cortado, linha de botões, links) |
 | Integração | `tests/integration/pop-ups-livre-dados.test.mjs` (15) | salvar e ler na forma canônica sem endereço, o maior Livre aceito passa no check de 32 KB, Livre inválido some da lista e abre como Padrão, lista no ar e plano, notificação sem design, trocar para Padrão, aba antiga, sem chave mantém, duas chaves recusadas, duplicar, publicar e aprovar conferem fontes, fonte em uso, auditoria |
 | Integração | `tests/integration/pop-ups-livre-envios.test.mjs` (8) | `uploadPopupFreeImage` (WebP com alfa, caminho e medidas do servidor), recusas, 403, imagem nova inexistente, medidas trocadas pelas do servidor, caminho de outro lugar, vídeo não conferido recusado e apagado, vídeo do Personalizado reusado não apagado |
 | Ponta a ponta | `tests/e2e/pop-up-livre-aluno.spec.ts` (8) | nome do diálogo, texto selecionável, selo sobre o vídeo que some, vídeo mudo tocando, X de 28 px com 44 px de toque, Tab nas Camadas e o X por último, `Esc`, clique conta, menos movimento sem vídeo, 375 px com 343 px e proporção, forma por cima do botão não impede o clique, `dismiss: false`, Padrão e Personalizado iguais |
@@ -744,7 +757,7 @@ Data: 23/10/2026. Os cortes marcados L1.1 na spec (§1.5): **Copiar e colar** o 
   5. o mesmo zod do salvar (`popupFreeDesignSchema`) e a forma canônica; os erros ficam no diálogo (nunca em toast), em frases curtas com o nome do elemento (`O design colado tem algo que não vale:` e depois `“Título grande”: Escreva algo nesta linha.`), até 5 e `E mais N.`;
   6. coerente com o aviso, como nos modelos (L21): com áudio entra o Áudio, sem áudio ele sai; com botão entra o Botão principal que faltava; o Botão principal colado num aviso sem botão cria o `Saiba mais` com o destino vazio.
 - Aplicar é **um passo só** no histórico (design e `cta` juntos): `Design colado. Ctrl + Z desfaz.`, mais os avisos que couberem (`1 arquivo não é deste pop-up e ficou de fora: envie de novo onde o elemento ficou vazio.`, `2 fontes não estão na biblioteca e viraram Inter.`, `O botão principal ganhou o texto “Saiba mais”. Escolha para onde ele leva.`). Com um arquivo subindo, espera (`Espere o arquivo terminar de enviar.`). Sem permissão de mudar, só copiar.
-- **Copiar as instruções para a IA**: o texto de `free-ai-instructions.ts`, gerado deste documento por `npm run livre:instrucoes` (`scripts/livre-instrucoes-ia.mjs`): um começo curto (responder só com o JSON, seguir o contrato à risca, mudar só o que foi pedido num design mandado junto, nunca escrever endereço de arquivo) e as partes 9.2, 9.3, 9.4, 9.5, 9.6, 9.8 e 9.9 (sem a 9.1 e a 9.7, que são do banco e do editor). O arquivo vai no pacote do editor e só é baixado no clique (abrir o menu já começa); nada busca o docs na hora (L20). `Instruções copiadas. Cole na conversa com a IA junto com o design.` Um teste confere que o arquivo bate com o §9: mudou o §9, rode o script.
+- **Copiar as instruções para a IA**: o texto de `free-ai-instructions.ts`, gerado deste documento por `npm run livre:instrucoes` (`scripts/livre-instrucoes-ia.mjs`): um começo curto (responder só com o JSON, seguir o contrato à risca, mudar só o que foi pedido num design mandado junto, Imagem e Vídeo novos sempre com `"asset": null` e os `assets` de um design mandado junto devolvidos como vieram, nunca endereço ou caminho de arquivo) e as partes 9.2, 9.3, 9.4, 9.5, 9.6, 9.8 e 9.9 (sem a 9.1 e a 9.7, que são do banco e do editor), sem os trechos marcados com `<!-- ia:fora -->` (nomes de arquivo e de função, banco, buckets, caminhos); o script para se sobrar algum desses termos (L26). O arquivo vai no pacote do editor e só é baixado no clique (abrir o menu já começa); nada busca o docs na hora (L20). `Instruções copiadas. Cole na conversa com a IA junto com o design.` Um teste confere que o arquivo bate com o §9: mudou o §9, rode o script.
 
 ### 13.2 "Usar o design Personalizado"
 
@@ -760,7 +773,7 @@ Data: 23/10/2026. Os cortes marcados L1.1 na spec (§1.5): **Copiar e colar** o 
 | Mídia (vídeo, ou a imagem do aviso), formato, parte que aparece | Vídeo ou Imagem solto em (0, 0, W, W × proporção), `focus` em cima, no meio ou embaixo; o vídeo do nosso bucket com a imagem do aviso de capa; imagem sem medidas entra vazia; aviso sem imagem com a mídia Imagem: sem mídia (como o Personalizado mostra) |
 | Degradê "Igual ao fundo do cartão" | `box.fade` embaixo, de (fim − comprimento) a fim |
 | Degradê de outra cor | uma Forma "Degradê" do tamanho da mídia, por cima dela, com as mesmas paradas suavizadas |
-| Abaixo da mídia, subindo N % | respiro de cima = altura da mídia × (1 − N %) + respiro |
+| Abaixo da mídia, subindo N % | o texto começa em altura exata da mídia (W × proporção) × (1 − N %) + respiro: respiro de cima até 200 e o resto como margem de cima do primeiro elemento na sequência (L24) |
 | Sobre a mídia, em cima, no meio ou embaixo | `minHeight` = altura da mídia, `justify` start, center ou end, a mídia (e o degradê) na camada −1 |
 | Alinhamento do grupo e espaço entre blocos | `artboard.align` e `gap` |
 | Selo | Selo com o fundo, a borda, os cantos e o respiro 5 × 12; o alinhamento próprio vira `place.align` |
@@ -771,7 +784,7 @@ Data: 23/10/2026. Os cortes marcados L1.1 na spec (§1.5): **Copiar e colar** o 
 | X | o mesmo; se não passa na regra do X do Livre (§9.6), o X escuro de sempre |
 | Links | a cor e o alinhamento; "Não mostrar de novo" escondido = `dismiss: false`; a mesma distância do último bloco |
 | Primeiro bloco com o texto no topo | a margem para o canto do X (56 − respiro), como no Personalizado |
-| Fontes enviadas e textos | as mesmas fontes (`fonts` recalculado); até 1.200 letras somadas (o teto do Livre) |
+| Fontes enviadas e textos | as mesmas fontes (`fonts` recalculado); até 1.200 letras somadas (o teto do Livre), contadas e cortadas por letra, nunca no meio de um emoji (L25) |
 
 ### 13.3 Modelo "Imagem recortada com selo"
 

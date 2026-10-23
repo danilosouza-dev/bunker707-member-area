@@ -15,6 +15,7 @@ const starters = await import("../src/server/communications/popup-free-starters.
 const checks = await import("../src/server/communications/popup-free-checks.ts");
 const paste = await import("../src/server/communications/popup-free-paste.ts");
 const custom = await import("../src/server/communications/popup-design-model.ts");
+const render = await import("../src/server/communications/popup-free-render.ts");
 const editor = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
 const history = await import("../src/components/admin/v2/communication/popup-free/free-editor-history.ts");
 const designEditor = await import("../src/components/admin/v2/communication/popup-design/popup-design-editor-model.ts");
@@ -265,13 +266,40 @@ test("as instruções para a IA vêm do docs/27 §9 (gerado), vão no pacote do 
 
   assert.ok(!FREE_AI_INSTRUCTIONS.includes("### 9.1 ") && !FREE_AI_INSTRUCTIONS.includes("### 9.7 "), "sem o banco e as chaves de erro do editor");
 
-  // Os exemplos das instrucoes colam de volta no editor.
+  // O texto vai para a conversa de um terceiro: nada de arquivo do codigo, banco, bucket, jsonb, zod, caminho de
+  // arquivo ou secao do docs que nao vai junto; os trechos marcados com <!-- ia:fora --> continuam no docs.
+  for (const internal of [".ts", "banco", "bucket", "jsonb", "z.", "§7", "§9", "§", "<!--", "-->", "Storage", "content-assets", "communication-popup-video", "communications/", "videos/", "jsonbBytesUpperBound", "popupFreeJsonSchema", "freeDesign"]) {
+    assert.ok(!FREE_AI_INSTRUCTIONS.includes(internal), `as instrucoes para a IA falam de "${internal}"`);
+  }
+
+  for (const internal of ["jsonbBytesUpperBound", "content-assets", "communication-popup-video", "popup-free-json-schema.ts", "Escolha um design só."]) {
+    assert.match(doc, new RegExp(`<!-- ia:fora -->(?:(?!<!-- /ia:fora -->)[\\s\\S])*${internal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), `"${internal}" continua no docs, marcado`);
+  }
+
+  for (const pattern of instructions.LIVRE_INSTRUCTIONS_FORBIDDEN) {
+    assert.doesNotMatch(FREE_AI_INSTRUCTIONS, pattern);
+  }
+
+  assert.throws(
+    () => instructions.livreInstructionsText(doc.replace("### 9.2 O documento mínimo\n", "### 9.2 O documento mínimo\n\nO check do banco mede o jsonb.\n")),
+    /detalhe de implementacao/,
+    "um trecho de implementacao sem o marcador para o script"
+  );
+  assert.match(FREE_AI_INSTRUCTIONS, /Imagem ou Vídeo novo use sempre "asset": null/, "arquivos: sempre asset null");
+  assert.match(FREE_AI_INSTRUCTIONS, /\| Tamanho \| até 30\.000 bytes[^|]*\|\n/, "o tamanho como um limite simples");
+
+  // Os exemplos das instrucoes colam de volta no editor e cabem no que a linha Tamanho promete.
   const blocks = [...FREE_AI_INSTRUCTIONS.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => match[1]);
 
   assert.ok(blocks.length >= 6, `${blocks.length} exemplos`);
 
   for (const block of blocks) {
-    assert.equal(paste.parseFreeDesignPaste(block, context({ content: { audio: null, cta: null } })).ok, true);
+    const result = paste.parseFreeDesignPaste(block, context({ content: { audio: null, cta: null } }));
+    const compact = JSON.stringify(JSON.parse(block));
+
+    assert.equal(result.ok, true);
+    assert.ok(compact.length < 2500, `${compact.length} caracteres: "cada modelo da 9.9 tem menos de 2.500"`);
+    assert.ok(model.jsonbBytesUpperBound(result.design) <= 2.5 * compact.length, "12.000 caracteres sem espacos ficam abaixo de 30.000 bytes");
   }
 
   // So o editor importa, e so por import() (o pedaco e baixado no clique); nada no app busca o docs na hora.
@@ -342,8 +370,17 @@ test("freeFromCustomDesign: mídia no topo com o esmaecer, vídeo e capa reaprov
   assert.deepEqual(node("midia").box.fade, { end: 92, side: "bottom", start: 50 });
   assert.equal(node("midia").asset, "video");
 
-  // "Abaixo da mídia" subindo 34 %: o respiro de cima = 248 x 0,66 + 24; o grupo centralizado; o espaco entre blocos.
-  assert.deepEqual(value.artboard.padding, [188, 24, 24, 24], "sem o Não mostrar de novo: o respiro de baixo e o do cartao");
+  // "Abaixo da mídia" subindo 34 %: o respiro de cima = 247,5 (440 x 9/16, a altura exata do Personalizado) x 0,66 + 24;
+  // o grupo centralizado; o espaco entre blocos.
+  assert.deepEqual(value.artboard.padding, [187, 24, 24, 24], "sem o Não mostrar de novo: o respiro de baixo e o do cartao");
+  assert.equal(node("selo").place, undefined, "abaixo de 200, sem margem");
+
+  // Cartão G (520): 292,5 x 0,66 + 24 = 217 passa do teto de 200 do respiro; os 17 que faltam vão na margem de cima do
+  // primeiro elemento na sequencia (o texto continua no mesmo y, e o schema aceita).
+  const wide = valid(starters.freeFromCustomDesign(custom.canonicalPopupDesign({ ...source, card: { ...source.card, width: "L" } }), { audio: { durationSeconds: 3 }, cta: CTA, hasImage: true, image: NOTICE_IMAGE }).design);
+
+  assert.deepEqual(wide.artboard.padding, [200, 24, 24, 24]);
+  assert.deepEqual(model.findFreeNode(wide, "selo").node.place, { margin: [17, 0, 0, 0], mode: "flow" });
   assert.equal(value.artboard.align, "center");
   assert.equal(value.artboard.gap, undefined, "12 e o padrao");
   assert.deepEqual(value.artboard.shadows, [{ blur: 80, color: "#000000b3", spread: 0, x: 0, y: 24 }]);
@@ -455,6 +492,166 @@ test("freeFromCustomDesign: sem imagem não há mídia de imagem; imagem sem med
     }
   });
   assert.ok(letters <= 1200, `${letters} letras`);
+});
+
+/** Lados (`padding`, `margin`) nos quatro valores [cima, direita, baixo, esquerda]. */
+function fourSides(sides) {
+  if (typeof sides === "number") return [sides, sides, sides, sides];
+  if (sides.length === 2) return [sides[0], sides[1], sides[0], sides[1]];
+  return sides;
+}
+
+/** Onde o primeiro elemento na sequencia comeca no Livre: o respiro de cima da prancheta + a margem de cima dele. */
+function livreTextTop(value) {
+  const first = value.children.find((node) => node.place?.mode !== "free");
+  const margin = first.place?.margin === undefined ? 0 : fourSides(first.place.margin)[0];
+
+  return fourSides(render.resolveFreeArtboard(value).padding)[0] + margin;
+}
+
+test("freeFromCustomDesign: toda combinação do Personalizado vira um Livre válido e o texto começa no mesmo lugar", () => {
+  const fades = [
+    { color: "auto", enabled: false, end: 100, height: 40 },
+    { color: "auto", enabled: true, end: 92, height: 42 },
+    { color: "#0b0b12", enabled: true, end: 90, height: 50 }
+  ];
+  const problems = [];
+  let combos = 0;
+
+  for (const { id } of custom.POPUP_DESIGN_STARTERS) {
+    const base = custom.popupStarterDesign(id, { video: VIDEO });
+
+    for (const width of Object.keys(custom.POPUP_CARD_WIDTHS)) {
+      for (const aspect of custom.POPUP_MEDIA_ASPECTS) {
+        for (const placement of custom.POPUP_TEXT_PLACEMENTS) {
+          for (const overlap of [0, 34, 60]) {
+            for (const padding of [12, 24, 48]) {
+              for (const kind of custom.POPUP_MEDIA_KINDS) {
+                for (const fade of kind === "none" ? fades.slice(0, 1) : fades) {
+                  const source = custom.canonicalPopupDesign({
+                    ...base,
+                    card: { ...base.card, padding, width },
+                    media: { ...base.media, aspect, fade, kind, video: kind === "video" ? VIDEO : base.media.video },
+                    text: { ...base.text, overlap, placement }
+                  });
+                  const label = `${id} ${width} ${aspect} ${placement} subir ${overlap} respiro ${padding} ${kind} ${fade.enabled ? fade.color : "sem degradê"}`;
+                  const { design: value } = starters.freeFromCustomDesign(source, { audio: null, cta: CTA, hasImage: true, image: NOTICE_IMAGE });
+                  const parsed = schema.popupFreeDesignSchema.safeParse(value);
+
+                  combos += 1;
+
+                  if (!parsed.success) {
+                    problems.push(`${label}: ${parsed.error.issues.map((issue) => `${issue.path.join(".")} ${issue.message}`).join("; ")}`);
+                    continue;
+                  }
+
+                  assert.deepEqual(parsed.data, value, `${label}: ja na forma canonica`);
+                  assert.ok(checks.freeDesignSizePercent(value) <= 100, `${label}: cabe no tamanho`);
+
+                  // Onde o texto comeca no Personalizado: abaixo da midia que ele sobe N %; sem midia ou "Sobre a midia",
+                  // no respiro (no meio e embaixo, o resto da altura e do justify, conferido abaixo).
+                  const cardWidth = custom.POPUP_CARD_WIDTHS[width];
+                  const mediaHeight = cardWidth * custom.POPUP_MEDIA_RATIOS[aspect];
+                  const below = kind !== "none" && placement === "below";
+                  const expected = below ? mediaHeight * (1 - overlap / 100) + padding : padding;
+
+                  if (Math.abs(livreTextTop(value) - expected) > 1) {
+                    problems.push(`${label}: texto em ${livreTextTop(value)} px, no Personalizado em ${expected.toFixed(2)} px`);
+                  }
+
+                  if (kind !== "none") {
+                    assert.ok(Math.abs(value.children[0].place.h - mediaHeight) <= 0.5, `${label}: a altura da midia`);
+                  }
+
+                  if (kind !== "none" && placement !== "below") {
+                    assert.ok(Math.abs(render.resolveFreeArtboard(value).minHeight - mediaHeight) <= 0.5, `${label}: a altura minima`);
+                    assert.equal(render.resolveFreeArtboard(value).justify, { "over-bottom": "end", "over-middle": "center", "over-top": "start" }[placement], label);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  assert.equal(combos, 3 * 3 * 3 * 4 * 3 * 3 * (1 + 3 + 3));
+  assert.deepEqual(problems.slice(0, 5), [], `${problems.length} de ${combos} combinações com problema`);
+
+  // "Abaixo da mídia" com cada subir de 0 a 60: o respiro de cima dentro do teto (200), a margem dentro da dela (400) e
+  // o texto no mesmo y do Personalizado (o schema inteiro ja rodou acima; aqui so o que o subir muda).
+  for (const { id } of custom.POPUP_DESIGN_STARTERS) {
+    const base = custom.popupStarterDesign(id, { video: VIDEO });
+
+    for (const width of Object.keys(custom.POPUP_CARD_WIDTHS)) {
+      for (const aspect of custom.POPUP_MEDIA_ASPECTS) {
+        for (const padding of [12, 24, 48]) {
+          for (let overlap = 0; overlap <= 60; overlap += 1) {
+            const source = custom.canonicalPopupDesign({
+              ...base,
+              card: { ...base.card, padding, width },
+              media: { ...base.media, aspect, kind: "video", video: VIDEO },
+              text: { ...base.text, overlap, placement: "below" }
+            });
+            const { design: value } = starters.freeFromCustomDesign(source, { audio: null, cta: CTA });
+            const first = value.children.find((node) => node.place?.mode !== "free");
+            const margin = first.place?.margin === undefined ? [0] : fourSides(first.place.margin);
+            const expected = custom.POPUP_CARD_WIDTHS[width] * custom.POPUP_MEDIA_RATIOS[aspect] * (1 - overlap / 100) + padding;
+            const label = `${id} ${width} ${aspect} subir ${overlap} respiro ${padding}`;
+
+            assert.ok(fourSides(render.resolveFreeArtboard(value).padding)[0] <= model.FREE_DESIGN_LIMITS.padding.max, label);
+            assert.ok(margin.every((side) => Math.abs(side) <= model.FREE_DESIGN_LIMITS.margin.max), label);
+            assert.ok(Math.abs(livreTextTop(value) - expected) <= 0.5, `${label}: texto em ${livreTextTop(value)} px, no Personalizado em ${expected.toFixed(2)} px`);
+          }
+        }
+      }
+    }
+  }
+});
+
+test("freeFromCustomDesign: o teto de 1.200 letras corta por letra (ponto de código), nunca no meio de um emoji", () => {
+  const emoji = "😀";
+  const headings = Array.from({ length: 5 }, (_, index) => ({ ...custom.newPopupBlock("heading", `h${index}`), lines: [{ paint: null, size: null, text: `Título ${index}` }] }));
+  const texts = (count) => Array.from({ length: count }, (_, index) => ({ ...custom.newPopupBlock("text", `t${index}`), text: "a".repeat(300) }));
+  const lettersOf = (value) => {
+    const all = [];
+
+    model.walkFreeNodes(value.children, (node) => {
+      for (const line of node.lines ?? []) all.push(...line.map((span) => span.text));
+      if (typeof node.label === "string") all.push(node.label);
+    });
+
+    return all;
+  };
+
+  // 5 titulos de 8 letras + 3 textos de 300 = 940: sobram 260 e o emoji e a letra 260 do 4º texto (unidades 260 e 261).
+  const inText = custom.canonicalPopupDesign({
+    ...custom.popupStarterDesign("text_only"),
+    blocks: [...headings, ...texts(3), { ...custom.newPopupBlock("text", "t9"), text: `${"a".repeat(259)}${emoji}${"b".repeat(39)}` }, custom.newPopupBlock("button", "b1")]
+  });
+  // 4 textos somando 1.199 letras: sobra 1 para o texto do segundo botao, que comeca com o emoji.
+  const inLabel = custom.canonicalPopupDesign({
+    ...custom.popupStarterDesign("text_only"),
+    blocks: [
+      ...texts(3),
+      { ...custom.newPopupBlock("text", "t9"), text: "a".repeat(299) },
+      custom.newPopupBlock("button", "b1"),
+      { ...custom.newPopupBlock("button2", "b2"), label: `${emoji} Ver depois` }
+    ]
+  });
+
+  for (const [name, source, last] of [["texto", inText, `${"a".repeat(259)}${emoji}`], ["botão", inLabel, emoji]]) {
+    const result = valid(starters.freeFromCustomDesign(source, { audio: null, cta: CTA }).design);
+    const all = lettersOf(result);
+
+    for (const text of all) {
+      assert.ok(text.isWellFormed(), `${name}: ${JSON.stringify(text.slice(-4))} tem metade de um emoji (o jsonb do banco recusa)`);
+    }
+
+    assert.equal(all.reduce((sum, text) => sum + [...text].length, 0), 1200, `${name}: as 1.200 letras, com o emoji inteiro`);
+    assert.ok(all.includes(last), `${name}: o corte fica logo depois do emoji`);
+  }
 });
 
 test("card Design: Usar o design Personalizado pega o do rascunho ou o guardado e cria o Saiba mais quando falta", () => {
