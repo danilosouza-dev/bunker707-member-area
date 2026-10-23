@@ -20,12 +20,17 @@ import "server-only";
 // log e o id, nunca o conteudo) em vez de virar Padrão com o nome interno. No Livre, o item leva `freeDesign`
 // (sem `locked` e `name`) e as fontes; `title` e `body` vem do design; imagem e icone nulos. O plano marca
 // `design: "free"` (o navegador baixa o pedaco do cartao Livre antes do show).
+// v3b-2 (docs/29): o mapa e o plano levam os pop-ups que comecam nas proximas 24 h (o plano com `startsAt`: a
+// hora marcada ao vivo para quem ja esta na pagina); o show antes da hora responde 409 not_started com o
+// Comeca, so para quem esta no segmento; "Ao concluir um curso" confere no banco que o curso esta completo
+// antes de gravar a abertura (duas leituras so nesse momento).
 
 import { unstable_cache } from "next/cache";
 import { isHttpsOrLoopbackUrl } from "@/lib/loopback-url";
 import { isSafeHeroCtaHref } from "@/server/member-area/home-hero-links";
 import { COMMUNICATIONS_TAG, LIVE_POPUPS_CACHE_KEY } from "./cache";
 import { canSnooze, isPopupLive, popupEventPatch, type PopupEvent } from "./campaign-model";
+import { isCourseComplete } from "@/lib/course-completion";
 import { assertNoDbError, communicationsDb, CommunicationError, describeError, isMissingCommunicationSchema } from "./db";
 import { noticeIconOfColumns } from "./message-meta";
 import { normalizePeaks, type PopupItem, type PopupsAnswer } from "./notification-model";
@@ -43,13 +48,16 @@ import {
   popupDayBounds,
   popupSettingsOfRow,
   popupWindowOpen,
+  popupWindowSoon,
   showNext,
   type LivePopupRules,
   type PopupCountState,
-  type PopupNext
+  type PopupNext,
+  type ShowRefusal
 } from "./popup-display-model";
 import { loadPopupFontFaces, withOwnStorageUrls } from "./popup-fonts";
 import {
+  fetchCourseCompletionFacts,
   fetchFormationCourses,
   fetchPopupDeliveries,
   fetchPopupDelivery,
@@ -63,13 +71,19 @@ export const POPUP_NOT_FOUND = "Pop-up nao encontrado.";
 export const POPUP_REFUSED = "Pop-up fora da vez.";
 export const SNOOZE_REFUSED = "Não dá para lembrar depois de novo.";
 
-/** O show recusou (409): a pagina, o momento ou a frequencia nao deixam agora, ou a linha mudou no meio. */
-export class PopupRefusedError extends CommunicationError {
-  /** Hora do servidor (ISO) em que a frequencia deixa de novo; null = nunca mais ou nao se sabe. */
-  nextAt: string | null;
-  reason: "changed" | "frequency" | "page" | "trigger";
+/** Por que o show recusou com 409 (os 404 ficam de fora: nao dizem se o pop-up existe). */
+export type PopupRefusalReason = Exclude<ShowRefusal, "not_eligible" | "not_live">;
 
-  constructor(reason: "changed" | "frequency" | "page" | "trigger", nextAt: string | null) {
+/**
+ * O show recusou (409): a pagina, o momento ou a frequencia nao deixam agora, a linha mudou no meio ou (v3b-2)
+ * o pop-up ainda nao comecou (not_started, com nextAt = o Comeca).
+ */
+export class PopupRefusedError extends CommunicationError {
+  /** Hora do servidor (ISO) em que a frequencia (ou o Comeca) deixa de novo; null = nunca mais ou nao se sabe. */
+  nextAt: string | null;
+  reason: PopupRefusalReason;
+
+  constructor(reason: PopupRefusalReason, nextAt: string | null) {
     super(POPUP_REFUSED, 409);
     this.name = "PopupRefusedError";
     this.nextAt = nextAt;
@@ -312,7 +326,8 @@ export async function getEligiblePopup(userId: string, now = Date.now()): Promis
 /**
  * O pedaco dos pop-ups no resumo do sino (GET /api/notifications/summary?page=). O mapa grosso das paginas sai
  * do cache, sem ir ao banco; o plano do aluno so na pagina coberta, numa consulta pela chave primaria. Sem
- * migracao ou com erro -> null (o numero do sino nunca quebra por causa de um pop-up).
+ * migracao ou com erro -> null (o numero do sino nunca quebra por causa de um pop-up). v3b-2: o mapa e o plano
+ * levam tambem os pop-ups que comecam nas proximas 24 h (horizonte padrao de popupWindowSoon).
  */
 export async function getPopupsAnswer(userId: string, pageKey: string, now = Date.now()): Promise<PopupsAnswer | null> {
   try {
@@ -325,7 +340,7 @@ export async function getPopupsAnswer(userId: string, pageKey: string, now = Dat
       return { asOf, pages, plan: null };
     }
 
-    const relevant = rules.filter((rule) => popupWindowOpen(rule, now));
+    const relevant = rules.filter((rule) => popupWindowSoon(rule, now));
 
     if (relevant.length === 0) {
       return { asOf, pages, plan: [] };
@@ -350,7 +365,9 @@ export async function getPopupsAnswer(userId: string, pageKey: string, now = Dat
  * Abre o pop-up agora (POST /api/popups/[id]/show): confere no ar, segmento, pagina, momento e quantas vezes
  * sobre a linha lida e grava a abertura pela RPC com o updated_at dessa leitura (um clique, adiamento,
  * recalculo ou outra aba no meio recusa: 409 "changed"). So depois devolve o conteudo e quando pode voltar.
- * Fora do ar, de outro aluno ou fora do segmento: 404 sem dizer se existe.
+ * Fora do ar, de outro aluno ou fora do segmento: 404 sem dizer se existe. v3b-2: antes da hora, quem esta no
+ * segmento recebe 409 not_started com nextAt = o Comeca; "Ao concluir um curso" so abre com o curso da pagina
+ * completo no banco (senao 409 trigger, sem nextAt: o aviso da pagina pode ter sido forjado).
  */
 export async function showPopup(userId: string, campaignId: string, input: { page: string; trigger: string }, now = Date.now()): Promise<PopupShowResult> {
   try {
@@ -371,6 +388,15 @@ export async function showPopup(userId: string, campaignId: string, input: { pag
       }
 
       throw new PopupRefusedError(decision.reason, decision.nextAt === null ? null : iso(decision.nextAt));
+    }
+
+    if (input.trigger === "course_completed") {
+      // decideShow ja conferiu que a pagina e uma aula deste pop-up (lesson:<conteudo>).
+      const facts = await fetchCourseCompletionFacts(db, userId, input.page.slice("lesson:".length));
+
+      if (!isCourseComplete(facts.publishedLessonIds, facts.completedLessonIds)) {
+        throw new PopupRefusedError("trigger", null);
+      }
     }
 
     // O updated_at vai como o PostgREST devolveu (microssegundos): por new Date() a comparacao nunca bateria.

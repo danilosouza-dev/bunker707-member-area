@@ -258,7 +258,9 @@ test("configuracao -> colunas -> configuracao: ida e volta; popup_repeat sempre 
     trigger: "page_load"
   };
 
+  // v3b-2: a coluna dos produtos do primeiro acesso vai sempre (vazia fora de first_login).
   assert.deepEqual(model.popupSettingsToColumns(cheio), {
+    popup_access_products: [],
     popup_close: "x_only",
     popup_delay_seconds: 10,
     popup_every_minutes: 30,
@@ -284,6 +286,7 @@ test("configuracao -> colunas -> configuracao: ida e volta; popup_repeat sempre 
   assert.deepEqual(uma.pages, ["lesson:*"], "as listas sao copiadas");
 
   assert.deepEqual(model.POPUP_COLUMNS_FOR_INBOX, {
+    popup_access_products: [],
     popup_close: "any",
     popup_delay_seconds: 3,
     popup_every_minutes: null,
@@ -532,7 +535,9 @@ test("show: no ar, elegivel, pagina, momento e frequencia, nessa ordem", () => {
 
   assert.deepEqual(decide({}), { ok: true });
   assert.deepEqual(decide({ popup: null }), { nextAt: null, ok: false, reason: "not_live" });
-  assert.deepEqual(decide({ popup: { ...popup, startsAt: now + MIN } }), { nextAt: null, ok: false, reason: "not_live" }, "janela por comecar");
+  // v3b-2 (D4): antes da hora, quem esta no segmento recebe not_started com o Comeca; quem nao esta, not_eligible.
+  assert.deepEqual(decide({ popup: { ...popup, startsAt: now + MIN } }), { nextAt: now + MIN, ok: false, reason: "not_started" }, "janela por comecar");
+  assert.deepEqual(decide({ delivery: null, popup: { ...popup, startsAt: now + MIN } }), { nextAt: null, ok: false, reason: "not_eligible" }, "por comecar, fora do segmento");
   assert.deepEqual(decide({ popup: { ...popup, endsAt: now } }), { nextAt: null, ok: false, reason: "not_live" }, "janela terminou");
   assert.deepEqual(decide({ delivery: null }), { nextAt: null, ok: false, reason: "not_eligible" });
   assert.deepEqual(decide({ delivery: estado({ eligible: false }) }), { nextAt: null, ok: false, reason: "not_eligible" });
@@ -570,7 +575,9 @@ test("plano do aluno: so a janela aberta, so com linha elegivel, sem os que para
     now
   });
 
+  // v3b-2 (D3): o que comeca em 1 h entra, com startsAt e notBefore = o Comeca.
   assert.deepEqual(plano, [
+    { delaySeconds: 3, exclude: [], id: "futuro", notBefore: iso(now + HOUR), pages: ["home"], startsAt: iso(now + HOUR), stopOn: null, trigger: "page_load" },
     { delaySeconds: 3, exclude: [], id: "diario", notBefore: "2026-10-24T03:00:00.000Z", pages: ["lesson:x"], stopOn: "click", trigger: "lesson_completed" },
     { delaySeconds: 3, exclude: [], id: "sempre", notBefore: null, pages: ["home"], stopOn: "never", trigger: "page_load" },
     { delaySeconds: 0, exclude: ["profile"], id: "uma", notBefore: null, pages: ["any"], stopOn: null, trigger: "page_load" }
@@ -585,12 +592,14 @@ test("mapa das paginas: so pop-ups com a janela aberta, nunca um id de produto, 
       [
         regras("a", {}, { pages: ["lesson:formacao-ia", "lesson:curso-1", "home"] }),
         regras("b", {}, { exclude: ["content:x"], pages: ["content:x", "profile", "home"] }),
-        regras("c", { startsAt: now + HOUR }, { pages: ["any"] })
+        // v3b-2: o que comeca daqui a mais de 24 h ainda nao entra no mapa (em ate 24 h entra: abaixo).
+        regras("c", { startsAt: now + 25 * HOUR }, { pages: ["any"] })
       ],
       now
     ),
     ["home", "profile", "content:*", "lesson:*"]
   );
+  assert.deepEqual(model.pagesCovering([regras("c", { startsAt: now + HOUR }, { pages: ["any"] })], now), ["any"], "comeca em 1 h: cobre");
   assert.deepEqual(model.pagesCovering([regras("a", {}, { pages: ["saved"] }), regras("b", {}, { pages: ["any"] })], now), ["any"]);
   assert.deepEqual(model.pagesCovering([regras("a", { endsAt: now }, { pages: ["any"] })], now), [], "janela terminou");
 });

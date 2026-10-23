@@ -9,7 +9,7 @@ import "./support/admin-action-stubs.mjs";
 // comentarios por aluno e lida em paginas (o PostgREST corta RPC em 1000 linhas). O envio e o recalculo
 // de verdade estao em tests/integration/avisos-e-notificacoes.test.mjs e tests/integration/pop-ups.test.mjs.
 
-const { dispatchInboxCampaign, processCommunications } = await import("../src/server/communications/dispatch.ts");
+const { dispatchInboxCampaign, processCommunications, refreshPopupDeliveries } = await import("../src/server/communications/dispatch.ts");
 const { COMMENT_COUNTS_PAGE, fetchCommentCounts } = await import("../src/server/communications/audience-facts.ts");
 const { COMMUNICATIONS_JOB_NAME, communicationsJob } = await import("../src/server/jobs/communications-job.ts");
 
@@ -765,4 +765,108 @@ test("nenhum select embute campaigns em communication_flows (ou o contrario) sem
   }
 
   assert.ok(checked >= 3);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * "No primeiro acesso" (v3b-2, docs/29 §4.6): o recalculo com a marca first_access_at
+ * ---------------------------------------------------------------------------------------------- */
+
+const PRIMEIRO = {
+  ...POPUP,
+  created_at: "2026-10-01T00:00:00.000Z",
+  popup_access_products: [],
+  popup_pages: ["home"],
+  popup_trigger: "first_login",
+  sent_at: "2026-10-20T12:00:00.000Z",
+  starts_at: null
+};
+const uid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const CONTA_ANTIGA = Date.parse("2026-09-01T00:00:00.000Z");
+const fatoDe = (n, extra = {}) => ({ accesses: [], createdAt: CONTA_ANTIGA, lastSignInAt: CONTA_ANTIGA, userId: uid(n), ...extra });
+const carregados = (facts) => ({ context: { commentRanks: {}, lessonTotals: {}, now: Date.parse("2026-10-20T15:00:00.000Z") }, facts, people: new Map() });
+
+/** O banco do recalculo: as linhas de hoje (com a marca) e o que foi gravado. */
+function recalculoDb(campaign, rows) {
+  return scriptedDb((query) => {
+    if (query.table === "campaign_deliveries" && query.op === "select") {
+      return { data: rows, error: null };
+    }
+
+    if (query.table === "campaigns" && query.op === "update") {
+      return { data: [{ ...campaign, ...query.payload }], error: null };
+    }
+
+    return { data: [], error: null };
+  });
+}
+
+const gravadas = (db, op) => db.queries.filter((query) => query.table === "campaign_deliveries" && query.op === op);
+
+test("primeiro acesso, 'A primeira vez na área': so os alunos novos ficam elegiveis, com a marca; a linha de um app antigo sai", async () => {
+  const now = new Date("2026-10-20T15:07:42.000Z");
+  const rows = [
+    { eligible: true, first_access_at: null, user_id: uid(1) }, // conta antiga que ja entrou, habilitada por um app antigo
+    { eligible: true, first_access_at: "2026-10-20T12:00:00.000Z", user_id: uid(2) }, // marcado que ja entrou: fica
+    { eligible: true, first_access_at: null, user_id: uid(3) } // nunca entrou, sem a marca: so ganha a marca
+  ];
+  const db = recalculoDb(PRIMEIRO, rows);
+  const facts = [
+    fatoDe(1),
+    fatoDe(2, { lastSignInAt: now.getTime() - 60_000 }),
+    fatoDe(3, { lastSignInAt: null }),
+    fatoDe(4, { createdAt: Date.parse("2026-10-20T13:00:00.000Z"), lastSignInAt: now.getTime() - 60_000 }), // conta nova
+    fatoDe(5) // antigo sem linha: fica de fora
+  ];
+
+  const result = await refreshPopupDeliveries({ campaign: PRIMEIRO, db, loaded: carregados(facts), now });
+
+  assert.deepEqual(result, { added: 2, audienceCount: 3, removed: 1 });
+  const leitura = gravadas(db, "select")[0];
+  assert.equal(leitura.payload, "user_id,eligible,first_access_at", "a mesma leitura das linhas, com a marca");
+
+  const [marca] = gravadas(db, "upsert");
+  assert.deepEqual(
+    marca.payload,
+    [uid(3), uid(4)].map((userId) => ({ campaign_id: PRIMEIRO.id, eligible: true, first_access_at: now.toISOString(), user_id: userId }))
+  );
+  const [desliga] = gravadas(db, "update");
+  assert.deepEqual(desliga.payload, { eligible: false });
+  assert.ok(desliga.filters.some(([method, column, values]) => method === "in" && column === "user_id" && values.length === 1 && values[0] === uid(1)));
+
+  const contagem = db.queries.find((query) => query.table === "campaigns" && query.op === "update");
+  assert.equal(contagem.payload.audience_count, 3, "elegiveis depois do recalculo");
+});
+
+test("primeiro acesso, 'estes produtos': acesso novo conta; quem perdeu o acesso (reembolso) sai mesmo marcado; a plataforma vale", async () => {
+  const now = new Date("2026-10-20T15:07:42.000Z");
+  const campaign = { ...PRIMEIRO, popup_access_products: ["produto-extra"], starts_at: "2026-10-20T12:00:00.000Z" };
+  const novo = Date.parse("2026-10-20T14:00:00.000Z");
+  const db = recalculoDb(campaign, [
+    { eligible: true, first_access_at: "2026-10-20T12:30:00.000Z", user_id: uid(1) }, // marcado, perdeu o acesso
+    { eligible: true, first_access_at: "2026-10-20T12:30:00.000Z", user_id: uid(2) } // marcado, com a plataforma
+  ]);
+  const facts = [
+    fatoDe(1, { accesses: [{ endsAt: null, gainedAt: CONTA_ANTIGA, productId: "outro", startsAt: CONTA_ANTIGA }] }),
+    fatoDe(2, { accesses: [{ endsAt: null, gainedAt: CONTA_ANTIGA, productId: "platform", startsAt: CONTA_ANTIGA }] }),
+    fatoDe(3, { accesses: [{ endsAt: null, gainedAt: novo, productId: "produto-extra", startsAt: novo }] }),
+    fatoDe(4, { accesses: [{ endsAt: null, gainedAt: CONTA_ANTIGA, productId: "produto-extra", startsAt: CONTA_ANTIGA }] }) // antigo e ja entrou
+  ];
+
+  const result = await refreshPopupDeliveries({ campaign, db, loaded: carregados(facts), now });
+
+  assert.deepEqual(result, { added: 1, audienceCount: 2, removed: 1 });
+  assert.deepEqual(gravadas(db, "upsert")[0].payload.map((row) => row.user_id), [uid(3)]);
+  assert.ok(gravadas(db, "update")[0].filters.some(([method, column, values]) => method === "in" && column === "user_id" && values.join() === uid(1)));
+});
+
+test("os outros momentos continuam como antes: o segmento inteiro, sem ler nem gravar a marca", async () => {
+  const now = new Date("2026-10-20T15:07:42.000Z");
+  const campaign = { ...PRIMEIRO, popup_trigger: "page_load" };
+  const db = recalculoDb(campaign, [{ eligible: true, user_id: uid(9) }]);
+
+  const result = await refreshPopupDeliveries({ campaign, db, loaded: carregados([fatoDe(1), fatoDe(2, { lastSignInAt: null })]), now });
+
+  assert.deepEqual(result, { added: 2, audienceCount: 2, removed: 1 });
+  assert.equal(gravadas(db, "select")[0].payload, "user_id,eligible");
+  assert.deepEqual(gravadas(db, "upsert")[0].payload, [uid(1), uid(2)].map((userId) => ({ campaign_id: campaign.id, eligible: true, user_id: userId })), "sem first_access_at");
 });

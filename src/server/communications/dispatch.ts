@@ -18,6 +18,11 @@ import "server-only";
 // quem saiu (deixa de ver). Impressoes, cliques e "Nao mostrar de novo" nunca sao apagados. O segmento
 // do pop-up no ar pode crescer alem de 500 sem nova aprovacao (decisao em docs/22 §2.3); editar ou
 // retomar o pop-up confere o limite de novo.
+//
+// "No primeiro acesso" (v3b-2, docs/29 §4.6): no mesmo recalculo, so quem conta como aluno novo (no segmento e
+// candidato, popup-first-access.ts) fica elegivel, com a marca first_access_at; quem ja tinha a marca continua
+// enquanto estiver no segmento (em "estes produtos", com acesso aberto a um deles). Linha elegivel sem marca e
+// sem ser candidato (a de um app sem esta regra) sai. Nenhuma leitura nova: os fatos do tick e as linhas de hoje.
 
 import { recordAudit } from "@/server/audit/log";
 import { resolveAudienceUserIds } from "./audience";
@@ -28,14 +33,18 @@ import { CommunicationError, describeError, isMissingCommunicationSchema, type C
 import { createFactsLoader, type FactsLoader } from "./facts-loader";
 import { changeFlowState } from "./flow-store";
 import { computeExpiresAt } from "./message-meta";
+import { popupSettingsOfRow } from "./popup-display-model";
+import { firstAccessDeliveryChanges, firstAccessSince, hasOpenAccessToAny, isFirstAccessCandidate } from "./popup-first-access";
 import {
   audienceOfRow,
   claimDueInbox,
   countCampaignRecipients,
   fetchCampaignRecipientIds,
   fetchDeliveryEligibility,
+  fetchFirstAccessDeliveries,
   fetchPopupsToRefresh,
   insertNotificationRows,
+  markFirstAccessDeliveries,
   setDeliveryEligibility,
   updateCampaign,
   upsertDeliveries,
@@ -249,6 +258,7 @@ async function holdForApproval(input: { audienceCount: number; campaign: Campaig
  * Recalcula quem ve o pop-up: quem entrou no segmento passa a elegivel (linha nova ou reativada), quem
  * saiu deixa de ser elegivel. Grava a contagem e a hora do recalculo no aviso, so se o aviso nao foi
  * editado no meio (senao a hora fica vazia e o job do minuto seguinte refaz com o segmento atual).
+ * "No primeiro acesso" (v3b-2): so os alunos novos do segmento, com a marca (firstAccessDeliveryChanges).
  */
 export async function refreshPopupDeliveries(input: {
   campaign: CampaignRow;
@@ -266,19 +276,39 @@ export async function refreshPopupDeliveries(input: {
   const loaded =
     (await input.loaded) ?? (input.facts ? await input.facts.load(messageCampaignIds) : await loadAudienceFacts(db, now, { messageCampaignIds }));
   const matching = new Set(resolveAudienceUserIds(audience, loaded));
-  const current = await fetchDeliveryEligibility(db, campaign.id);
-  const toEnable = Array.from(matching).filter((userId) => current.get(userId) !== true);
-  const toDisable = Array.from(current).filter(([userId, eligible]) => eligible && !matching.has(userId)).map(([userId]) => userId);
+  const settings = popupSettingsOfRow(campaign);
+  let changes: { added: number; audienceCount: number; removed: number };
 
-  await upsertDeliveries(db, campaign.id, toEnable);
-  await setDeliveryEligibility(db, campaign.id, toDisable, false);
+  if (settings.trigger === "first_login") {
+    const since = firstAccessSince(campaign);
+    const products = settings.accessProducts ?? [];
+    const inSegment = loaded.facts.filter((facts) => matching.has(facts.userId));
+    const candidates = new Set(inSegment.filter((facts) => isFirstAccessCandidate(facts, products, since)).map((facts) => facts.userId));
+    const withAccess = products.length === 0 ? null : new Set(inSegment.filter((facts) => hasOpenAccessToAny(facts, products)).map((facts) => facts.userId));
+    // A mesma leitura paginada de fetchDeliveryEligibility, com first_access_at: nenhuma ida a mais.
+    const current = await fetchFirstAccessDeliveries(db, campaign.id);
+    const { audienceCount, toDisable, toMark } = firstAccessDeliveryChanges({ audience: matching, candidates, current, withAccess });
+
+    await markFirstAccessDeliveries(db, campaign.id, toMark, now.toISOString());
+    await setDeliveryEligibility(db, campaign.id, toDisable, false);
+    changes = { added: toMark.length, audienceCount, removed: toDisable.length };
+  } else {
+    // Os outros momentos: como antes (a marca do primeiro acesso, se houver, fica como estiver).
+    const current = await fetchDeliveryEligibility(db, campaign.id);
+    const toEnable = Array.from(matching).filter((userId) => current.get(userId) !== true);
+    const toDisable = Array.from(current).filter(([userId, eligible]) => eligible && !matching.has(userId)).map(([userId]) => userId);
+
+    await upsertDeliveries(db, campaign.id, toEnable);
+    await setDeliveryEligibility(db, campaign.id, toDisable, false);
+    changes = { added: toEnable.length, audienceCount: matching.size, removed: toDisable.length };
+  }
 
   try {
     // updated_at so muda com edicao da equipe (o gatilho ignora a contagem e a hora do recalculo).
     await updateCampaign(
       db,
       campaign.id,
-      { audience_count: matching.size, audience_counted_at: now.toISOString(), audience_refreshed_at: now.toISOString() },
+      { audience_count: changes.audienceCount, audience_counted_at: now.toISOString(), audience_refreshed_at: now.toISOString() },
       { expectedStatuses: [campaign.status], expectedUpdatedAt: campaign.updated_at }
     );
   } catch (error) {
@@ -293,7 +323,7 @@ export async function refreshPopupDeliveries(input: {
     }
   }
 
-  return { added: toEnable.length, audienceCount: matching.size, removed: toDisable.length };
+  return changes;
 }
 
 export type ProcessCommunicationsResult = {

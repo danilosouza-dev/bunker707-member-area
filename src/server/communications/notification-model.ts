@@ -137,12 +137,21 @@ export type PopupPlanItem = {
   /** Nunca nestas paginas (padroes exatos ja expandidos: formacao -> cursos). So pop-ups do segmento do aluno. */
   exclude: string[];
   id: string;
-  /** Hora do servidor (ISO) antes da qual "Quantas vezes" ainda nao deixa; null = ja pode. */
+  /**
+   * Hora do servidor (ISO) antes da qual nao abre: a frequencia ("Quantas vezes") e, no pop-up que ainda vai
+   * comecar (v3b-2), o comeco; null = ja pode.
+   */
   notBefore: string | null;
   pages: string[];
+  /**
+   * v3b-2: o Comeca do pop-up (hora do servidor, ISO) quando ele cai entre 24 h atras e 24 h a frente, antes ou
+   * depois da hora. O navegador novo arma a hora marcada para a pagina aberta antes dela; o antigo ignora a chave
+   * e respeita o notBefore (que, antes da hora, ja e >= startsAt).
+   */
+  startsAt?: string;
   /** O que faz parar: null = Uma vez; "click" = quando clica no botao; "never" = so quando o pop-up termina. */
   stopOn: "click" | "never" | null;
-  trigger: "lesson_completed" | "page_load";
+  trigger: "course_completed" | "first_login" | "lesson_completed" | "page_load";
 };
 
 export type PopupsAnswer = {
