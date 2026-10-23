@@ -328,6 +328,20 @@ Decisoes tomadas com o produtor (23/10):
 
 Em aberto: qual conta conectada usar primeiro no "Criar com IA" (Claude ou Codex) e a confirmacao do produtor de que a imagem de referencia pode ir para a empresa da IA (pergunta 3 da spec; pode responder depois).
 
+### Modelos da Comunicacao (25/10/2026)
+
+Pedido do produtor: guardar a configuracao de uma notificacao, de um pop-up ou so do design para comecar avisos novos, e reusar o design (Personalizado ou Livre) "com outros videos e tudo mais". Detalhes em `docs/28`; migracao `202610250001`. **Fecha** o "Em aberto: modelos salvos de design" (Design do pop-up, acima) e os "modelos de configuracao (v3b-2)" da v3b-1.
+
+Decisoes tomadas com o produtor (23/10):
+
+- tres tipos: **Notificacao**, **Pop-up** e **Design** (Personalizado ou Livre); o tipo e o modo do design nao mudam depois de criado;
+- o modelo guarda a configuracao sempre e, se o produtor quiser, o conteudo, o segmento e (na notificacao) as notificacoes seguintes; data e hora de envio, a janela do pop-up, "ate uma data" e o fim marcado da enquete nunca vao;
+- **Usar** abre o aviso novo preenchido e nada e gravado ate salvar; mudar ou excluir um modelo nunca mexe nos avisos feitos com ele;
+- o modelo segura os arquivos que cita (o pop-up pode ser excluido e o modelo continua com o video, as imagens, o audio e as fontes); excluir o modelo manda o que mais nada usa para a limpeza de 30 dias;
+- quem cria avisos cria e edita modelos (`messaging.write`); o aluno nunca ve um modelo; limite de 200 modelos na escola.
+
+Em aberto (a v1 segue com a escolha indicada, `docs/28` §8): o "Novo aviso" com modelos ficou como **menu no botao** (e nao uma tela "Como voce quer comecar?"); com "Levar o segmento" desligado, o aviso comeca em **Todos os alunos**; excluir um modelo pede **so confirmacao** (sem Desfazer no toast).
+
 ## Design
 
 ### Login

@@ -123,6 +123,12 @@ test("barra superior mostra so os filtros que a tela usa (prototipo aprovado)", 
     "/admin/comunicacao/avisos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70",
     "/admin/comunicacao/fluxos/novo",
     "/admin/comunicacao/fluxos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70",
+    // docs/28 (D22): a aba Modelos nao tem numero de periodo; o modo modelo do editor tambem nao.
+    "/admin/comunicacao/modelos",
+    "/admin/comunicacao/modelos?tipo=popup",
+    "/admin/comunicacao/modelos/novo",
+    "/admin/comunicacao/modelos/novo?tipo=design-livre",
+    "/admin/comunicacao/modelos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70",
     "/admin/area-de-membros",
     "/admin/area-de-membros/modulos",
     "/admin/configuracoes",
@@ -149,6 +155,8 @@ test("titulo da barra do celular: area ou tela interna", () => {
   assert.equal(getAdminMobileTitle("/admin/comunicacao/avisos/novo"), "Novo aviso");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/fluxos/novo"), "Novo fluxo");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/fluxos"), "Comunicação");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/modelos"), "Comunicação");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/modelos/novo?tipo=popup"), "Novo modelo");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/avisos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70"), "Comunicação", "a pagina troca pelo titulo do aviso");
   assert.equal(getAdminMobileTitle("/admin/comunidade/denuncias"), "Comunidade");
   assert.equal(getAdminMobileTitle("/admin/configuracoes"), "Configurações");
@@ -233,7 +241,7 @@ test("menu de cada funcao: so as areas que ela abre, e a primeira tela e a prime
     "Alunos",
     "Produtos[Todos os produtos|Pacotes|Importar]",
     "Área de membros[Vitrine|Destaque|Módulos|Login|Marca]",
-    "Comunicação[Avisos e pop-ups|Fluxos|Webinários|Promoções]",
+    "Comunicação[Avisos e pop-ups|Fluxos|Modelos|Webinários|Promoções]",
     "Comunidade",
     "Configurações[Todas as configurações|Equipe|Tutor IA|Vendas]"
   ]);
@@ -243,7 +251,7 @@ test("menu de cada funcao: so as areas que ela abre, e a primeira tela e a prime
     "Alunos",
     "Produtos[Todos os produtos|Pacotes|Importar]",
     "Área de membros[Vitrine|Destaque|Módulos|Login|Marca]",
-    "Comunicação[Avisos e pop-ups|Fluxos|Webinários|Promoções]",
+    "Comunicação[Avisos e pop-ups|Fluxos|Modelos|Webinários|Promoções]",
     "Comunidade"
   ]);
   assert.deepEqual(menu("instructor", { productIds: ["curso-1"] }), ["Meus cursos", "Comunidade"]);
@@ -311,6 +319,7 @@ test("cada destino do menu que pertence a esta fase tem uma pagina", () => {
     "/admin/comunicacao/avisos/novo",
     "/admin/comunicacao/fluxos",
     "/admin/comunicacao/fluxos/novo",
+    "/admin/comunicacao/modelos",
     "/admin/produtos/pacotes",
     "/admin/area-de-membros",
     "/admin/area-de-membros/destaque",

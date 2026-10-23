@@ -8,6 +8,7 @@
 // Modulo puro, com imports relativos (tests/popup-design-editor-modelo.test.mjs carrega direto pelo Node). Os
 // tipos do design e os modelos moram em popup-design-model.ts (P0); aqui so a logica da tela.
 
+import { isoToSaoPauloLocal } from "../../../../../server/communications/campaign-model";
 import type { NoticeDraft } from "../../../../../server/communications/schemas";
 import { freeNodeCount, type PopupFreeDesign } from "../../../../../server/communications/popup-free-model";
 import { resolveFreeArtboard } from "../../../../../server/communications/popup-free-render";
@@ -294,6 +295,29 @@ export const POPUP_DESIGN_COPY = {
     audioTitle: "Áudio",
     titleHint: "Aparece nas listas e nos relatórios. Para o aluno, vale o título do design.",
     titleLabel: "Nome do pop-up"
+  },
+  /**
+   * "Meus modelos" e "Salvar design como modelo" (docs/28 §5.8): os designs que a equipe guardou, na lista do modo,
+   * antes dos modelos prontos. Os textos do card moram so aqui.
+   */
+  mine: {
+    applied: "Design aplicado.",
+    capped: "Mostrando os 50 mais recentes.",
+    ctaDestination: "O destino do botão é escolhido em cada aviso.",
+    error: "Não foi possível carregar seus modelos agora.",
+    loading: "Carregando seus modelos…",
+    readyTitle: "Modelos prontos",
+    retry: "Tentar de novo",
+    save: "Salvar design como modelo",
+    saveConfirm: "Salvar modelo",
+    saveDescription: (mode: "custom" | "free") =>
+      `Fica em “Meus modelos” do design ${mode === "free" ? "Livre" : "Personalizado"} e em Comunicação › Modelos. Os textos do design vão junto; o destino do botão fica em cada aviso.`,
+    saved: "Design salvo em Meus modelos.",
+    title: "Meus modelos",
+    updated: (date: string) => `Atualizado em ${date}`,
+    use: "Usar este modelo",
+    useLabel: (name: string) => `Usar este modelo: ${name}`,
+    waitUpload: "Espere o envio terminar."
   }
 } as const;
 
@@ -1031,4 +1055,114 @@ export function sameDesign(left: PopupDesign | null | undefined, right: PopupDes
   }
 
   return JSON.stringify(canonicalPopupDesign(left)) === JSON.stringify(canonicalPopupDesign(right));
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * "Meus modelos" (docs/28 §5.8): o estado da lista carregada sob demanda e o que a tela mostra
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O que "Meus modelos" sabe: nada pedido ainda, carregando, erro ou os itens (com o total do modo). */
+export type DesignTemplatesLoad<Item> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error" }
+  | { items: readonly Item[]; status: "ready"; total: number };
+
+export type DesignTemplatesEvent<Item> =
+  | { kind: "failed" }
+  | { items: readonly Item[]; kind: "loaded"; total: number }
+  | { kind: "open" }
+  | { kind: "reset" }
+  | { kind: "retry" };
+
+/**
+ * A lista muda assim: abrir a lista pela primeira vez (idle) ou "Tentar de novo" (erro) -> carregando; a leitura
+ * volta com os itens ou com erro; "Salvar design como modelo" descarta o que foi carregado (reset -> idle), para
+ * recarregar na proxima abertura. Abrir de novo com a lista ja carregada nao pede outra vez.
+ */
+export function nextDesignTemplatesLoad<Item>(load: DesignTemplatesLoad<Item>, event: DesignTemplatesEvent<Item>): DesignTemplatesLoad<Item> {
+  switch (event.kind) {
+    case "open":
+      return load.status === "idle" ? { status: "loading" } : load;
+    case "retry":
+      return load.status === "error" ? { status: "loading" } : load;
+    case "loaded":
+      return { items: event.items, status: "ready", total: event.total };
+    case "failed":
+      return { status: "error" };
+    case "reset":
+      return { status: "idle" };
+  }
+}
+
+/** "23/10/2026" no fuso de Sao Paulo (invalido -> ""). */
+function saoPauloDate(iso: string): string {
+  const local = isoToSaoPauloLocal(iso);
+
+  if (!local) {
+    return "";
+  }
+
+  const [year, month, day] = local.date.split("-");
+
+  return `${day}/${month}/${year}`;
+}
+
+/** Os textos da lista de "Meus modelos" (o card Design usa POPUP_DESIGN_COPY.mine; a aba Modelos do Livre, os dela). */
+export type DesignTemplatesCopy = {
+  capped: string;
+  error: string;
+  loading: string;
+  readyTitle?: string;
+  retry: string;
+  title: string;
+  updated: (date: string) => string;
+  useLabel: (name: string) => string;
+};
+
+export type DesignTemplatesPickerView<Item> = {
+  /** Erro da leitura, com o botao que pede de novo. */
+  error: { message: string; retry: string } | null;
+  /** Carregando: duas linhas de esqueleto e o texto para leitor de tela. */
+  loading: { label: string } | null;
+  /** O titulo dos modelos prontos (no card Design, sempre que a lista tem "Meus modelos"). */
+  readyTitle: string | null;
+  /** A secao "Meus modelos" (so com 1 ou mais itens). */
+  section: {
+    items: { item: Item; name: string; updated: string; useLabel: string }[];
+    /** Mais de 50 no modo: "Mostrando os 50 mais recentes.". */
+    note: string | null;
+    title: string;
+  } | null;
+};
+
+/** O que a lista do modo mostra de "Meus modelos" em cada estado (spec §5.8 e §5.9). */
+export function designTemplatesPickerState<Item extends { name: string; updatedAt: string }>(
+  load: DesignTemplatesLoad<Item>,
+  options: { copy?: DesignTemplatesCopy; limit?: number } = {}
+): DesignTemplatesPickerView<Item> {
+  const copy = options.copy ?? POPUP_DESIGN_COPY.mine;
+  const limit = options.limit ?? 50;
+  const base = { error: null, loading: null, readyTitle: copy.readyTitle ?? null, section: null };
+
+  if (load.status === "loading" || load.status === "idle") {
+    return { ...base, loading: { label: copy.loading } };
+  }
+
+  if (load.status === "error") {
+    return { ...base, error: { message: copy.error, retry: copy.retry } };
+  }
+
+  if (load.items.length === 0) {
+    return base;
+  }
+
+  return {
+    ...base,
+    section: {
+      items: load.items.map((item) => ({ item, name: item.name, updated: copy.updated(saoPauloDate(item.updatedAt)), useLabel: copy.useLabel(item.name) })),
+      note: load.total > limit ? copy.capped : null,
+      title: copy.title
+    }
+  };
 }

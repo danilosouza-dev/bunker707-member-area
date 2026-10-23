@@ -1,8 +1,8 @@
 // Arquivos da Comunicacao no Storage e quem usa cada um (docs/22 §4.6, limpeza automatica dos arquivos sem uso).
 // Modulo puro (servidor e editor; sem zod, sem "server-only", imports relativos): os lugares onde a Comunicacao
 // guarda arquivos e UMA funcao por tipo de conteudo que devolve os arquivos que ele usa. As mesmas funcoes servem
-// ao salvar (storedPopupDesignAssetPaths no popup-design-router.ts: arquivo que a linha gravada ja usa nunca e
-// conferido de novo) e ao job da limpeza (media-cleanup.ts: arquivo usado nunca e apagado).
+// ao salvar (storedPopupDesignAssetPaths no popup-design-router.ts: arquivo que a linha gravada ou um modelo ja usa
+// nunca e conferido de novo) e ao job da limpeza (media-cleanup.ts: arquivo usado nunca e apagado).
 //
 // A leitura e de proposito larga e sem validar a fundo: qualquer texto que aponte para um arquivo do nosso Storage
 // (endereco publico de qualquer origem, porque a origem muda entre nuvem e Hetzner, ou o caminho num campo de
@@ -306,12 +306,71 @@ export function fontFileRefs(rows: readonly FontFileRow[], usedFontIds: Iterable
 }
 
 /**
- * O que um modelo segura (Modelos de pop-up ainda nao existem): os arquivos e as fontes do design dele, pelas
- * mesmas funcoes do aviso. Quem criar a tabela de modelos so chama esta funcao em loadTemplateMediaUse
- * (media-cleanup.ts) para cada modelo nao excluido.
+ * O que um modelo segura (docs/28 D17; tabela communication_templates, lida por loadTemplateMediaUse em
+ * media-cleanup.ts): os arquivos e as fontes do payload dele, lidos do jsonb CRU (nunca do parse: um modelo que
+ * deixasse de passar no schema perderia os arquivos e continuaria na lista).
  */
 export type TemplateMediaUse = { fontIds: string[]; refs: MediaRef[] };
+export type TemplateMediaRow = { payload?: unknown };
 
-export function templateMediaUse(template: { design: unknown }): TemplateMediaUse {
-  return { fontIds: designFontIds(template.design), refs: popupDesignMediaRefs(template.design) };
+function urlRef(value: unknown): MediaRef | null {
+  return isObject(value) ? storageRefOfUrl(value.url) : null;
+}
+
+/** A imagem e o audio de um conteudo (o do modelo e o de cada seguinte). */
+function contentMediaRefs(value: unknown): (MediaRef | null)[] {
+  return isObject(value) ? [urlRef(value.image), urlRef(value.audio)] : [];
+}
+
+/**
+ * Os campos de arquivo conhecidos do payload de um modelo: content.image.url, content.audio.url,
+ * designSupport.image.url, o design (popupDesignMediaRefs) e, para cada seguinte em qualquer nivel,
+ * items[].content.image.url e .audio.url. Nao dependem da varredura larga (que tem teto de textos).
+ */
+export function templateFieldMediaRefs(payload: unknown): MediaRef[] {
+  if (!isObject(payload)) {
+    return [];
+  }
+
+  const refs: (MediaRef | null)[] = [...contentMediaRefs(payload.content)];
+  const support = isObject(payload.designSupport) ? payload.designSupport : null;
+
+  if (support) {
+    refs.push(urlRef(support.image));
+  }
+
+  refs.push(...popupDesignMediaRefs(payload.design));
+
+  const followUps = isObject(payload.followUps) ? payload.followUps : null;
+  const walk = (items: unknown, depth: number) => {
+    if (!Array.isArray(items) || depth > 24) {
+      return;
+    }
+
+    for (const item of items) {
+      if (isObject(item)) {
+        refs.push(...contentMediaRefs(item.content));
+        walk(item.children, depth + 1);
+      }
+    }
+  };
+
+  walk(followUps?.items, 0);
+
+  return uniqueRefs(refs.filter((ref): ref is MediaRef => ref !== null));
+}
+
+/**
+ * O que um modelo segura: os campos conhecidos (templateFieldMediaRefs) unidos a varredura larga
+ * mediaRefsInJson(payload) (que tem teto de 5.000 textos: os campos conhecidos nunca dependem dela).
+ * fontIds = designFontIds(payload.design).
+ */
+export function templateMediaUse(template: TemplateMediaRow): TemplateMediaUse {
+  const payload = isObject(template.payload) ? template.payload : null;
+
+  if (!payload) {
+    return { fontIds: [], refs: [] };
+  }
+
+  return { fontIds: designFontIds(payload.design), refs: uniqueRefs([...templateFieldMediaRefs(payload), ...mediaRefsInJson(payload)]) };
 }

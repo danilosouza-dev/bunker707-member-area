@@ -13,6 +13,7 @@ import {
   describeAudience,
   EVERYONE,
   normalizeAudience,
+  remapNodeRefs,
   type AudienceDefinition,
   type AudienceNames,
   type AudienceNode,
@@ -917,36 +918,8 @@ export function appendFollowUp(items: readonly FollowUpFormItem[], parentId: str
   return items.map((item) => (item.id === parentId ? { ...item, children: [...item.children, child] } : { ...item, children: appendFollowUp(item.children, parentId, child) }));
 }
 
-/** Troca os ids de passo dentro das regras (copia com ids novos: "Duplicar" e "duplicar aviso"). */
-export function remapNodeRefs(definition: AudienceDefinition, ids: ReadonlyMap<string, string>): AudienceDefinition {
-  if (definition.kind !== "rules") {
-    return definition;
-  }
-
-  const id = (value: string) => ids.get(value) ?? value;
-  const node = (item: AudienceNode): AudienceNode => {
-    if ("items" in item) {
-      return { ...item, items: item.items.map(node) };
-    }
-
-    switch (item.type) {
-      case "message":
-        return item.ref.kind === "node" ? { ...item, ref: { kind: "node", nodeId: id(item.ref.nodeId) } } : item;
-      case "page_visit":
-        return {
-          ...item,
-          page: item.page.kind === "message_cta" ? { kind: "message_cta", nodeId: id(item.page.nodeId) } : item.page,
-          since: item.since.kind === "message" ? { kind: "message", nodeId: id(item.since.nodeId) } : item.since
-        };
-      case "access_gained":
-        return item.since.kind === "message" ? { ...item, since: { kind: "message", nodeId: id(item.since.nodeId) } } : item;
-      default:
-        return item;
-    }
-  };
-
-  return { kind: "rules", root: { ...definition.root, items: definition.root.items.map(node) } };
-}
+/** Troca os ids de passo dentro das regras: mora em audience-model.ts (puro, sem tela; docs/28 D7) e segue exportada daqui. */
+export { remapNodeRefs } from "../../../../server/communications/audience-model";
 
 /**
  * "Duplicar": a mesma seguinte (e as dela) logo depois, com ids novos e o conteudo como nova versao. As

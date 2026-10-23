@@ -69,6 +69,8 @@ import { noticeErrorsFrom, noticeErrorsFromAction, type AudienceFlowMessageChoic
 type NoticeFollowUpsProps = {
   /** Acoes do cabecalho do cartao ("Ver como fluxo"). */
   actions?: ReactNode;
+  /** false: a folha de cada seguinte sem "Até uma data" no tempo no sino (modo modelo, docs/28 §5.6). */
+  allowUntil?: boolean;
   /** Antes dos cartoes (o aviso do relatorio no ar). */
   banner?: ReactNode;
   /** Primeiro erro do conteudo de uma seguinte ("followUps.0" -> "Escreva um título."). */
@@ -129,6 +131,7 @@ function flowMessageOf(parent: FollowUpParent): AudienceFlowMessageChoice {
 
 export function NoticeFollowUps({
   actions,
+  allowUntil = true,
   banner,
   contentErrorOf,
   description = FOLLOW_UPS_COPY.description,
@@ -329,6 +332,7 @@ export function NoticeFollowUps({
 
       {editing && editingParent ? (
         <FollowUpSheet
+          allowUntil={allowUntil}
           anchorExpiresAt={followUpPreviewAnchorExpiry(editing.item.when, editingParent, now)}
           branding={options.branding}
           canEditBrand={options.canEditBrand}

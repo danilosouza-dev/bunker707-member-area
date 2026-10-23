@@ -36,7 +36,7 @@ import {
 } from "@/server/communications/actions";
 import type { CampaignKind, CampaignSituation, CampaignStatus, NoticeAction } from "@/server/communications/campaign-model";
 import { ErrorBanner } from "../error-banner";
-import { ConfirmDialog, RowMenu } from "../settings/kit";
+import { ConfirmDialog, RowMenu, type RowMenuAction } from "../settings/kit";
 import { adminToast } from "../toast";
 import { withdrawFollowUpsLabel } from "./follow-ups-view-model";
 import {
@@ -52,6 +52,7 @@ import {
   reshownPopupToast,
   type NoticeCitationCounts
 } from "./notices-view-model";
+import { noticeMenuWithExtra } from "./templates/templates-view-model";
 
 // Acoes de um aviso (docs/22 §2; docs/17 §1.8 "Pausar, Duplicar, Encerrar"), as mesmas na lista, no
 // editor e no relatorio: o menu "…" mostra so o que a situacao permite (availableNoticeActions, o
@@ -67,6 +68,7 @@ import {
 // Ajustes da v3a: Excluir e Retirar do sino nao revalidam a pagina na acao (o servidor desenhava a pagina
 // inteira de novo na mesma resposta): o dialogo fecha e o toast aparece assim que a acao volta, e a lista
 // atualiza logo depois (router.refresh numa transicao; na pagina do aviso, Excluir volta para a lista).
+// Modelos (docs/28): `extra` poe "Salvar como modelo" logo depois de "Duplicar" (a lista e o relatorio passam).
 
 export type NoticeActionTarget = {
   actions: readonly NoticeAction[];
@@ -356,23 +358,32 @@ const SIMPLE_ACTIONS: Partial<Record<NoticeAction, SimpleAction>> = {
 type NoticeRowMenuProps = {
   /** Acoes que a tela ja mostra como botao (ficam fora do menu). */
   exclude?: readonly NoticeAction[];
+  /**
+   * Entradas da tela que nao sao acoes do aviso (docs/28: "Salvar como modelo"), logo depois de "Duplicar" (ou antes
+   * da primeira com a linha separadora, sem Duplicar). A lista do servidor (NoticeAction) nao muda.
+   */
+  extra?: readonly RowMenuAction[];
   notice: NoticeActionTarget;
   onRequest: (action: NoticeAction, notice: NoticeActionTarget) => void;
 };
 
 /** Menu "…" de um aviso. Sem nenhuma acao disponivel, nao aparece. */
-export function NoticeRowMenu({ exclude, notice, onRequest }: NoticeRowMenuProps) {
+export function NoticeRowMenu({ exclude, extra, notice, onRequest }: NoticeRowMenuProps) {
   const entries = noticeMenuEntries(notice.actions, exclude);
 
   return (
     <RowMenu
-      actions={entries.map((entry) => ({
-        destructive: entry.destructive,
-        icon: <NoticeActionIcon action={entry.action} />,
-        label: entry.label,
-        onSelect: () => onRequest(entry.action, notice),
-        separated: entry.separated
-      }))}
+      actions={noticeMenuWithExtra(entries, extra).map((item) =>
+        item.kind === "extra"
+          ? item.extra
+          : {
+              destructive: item.entry.destructive,
+              icon: <NoticeActionIcon action={item.entry.action} />,
+              label: item.entry.label,
+              onSelect: () => onRequest(item.entry.action, notice),
+              separated: item.entry.separated
+            }
+      )}
       label={`Ações de ${notice.title}`}
     />
   );

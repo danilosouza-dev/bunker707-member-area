@@ -10,6 +10,7 @@ import { StatusChip } from "../status-chip";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
 import { followUpsChip } from "./follow-ups-view-model";
 import { formatStudentCount, noticeHref, noticeRowNumbers } from "./notices-view-model";
+import { useNoticeSaveAsTemplate } from "./templates/save-as-template-dialog";
 
 // Tabela de Avisos e pop-ups (docs/22 §2.1): linha inteira abre o aviso (editor no rascunho, relatorio
 // depois de enviado), menu "…" com as acoes da situacao por cima do link. No celular vira um cartao
@@ -17,7 +18,8 @@ import { formatStudentCount, noticeHref, noticeRowNumbers } from "./notices-view
 // de aviso que nunca saiu (rascunho, aguardando aprovacao, agendado) mostram "—". v2 (docs/23 §2.2): o
 // chip "+2 seguintes" ao lado do tipo e, sem imagem, o icone ao lado do titulo no lugar do icone do tipo.
 // v3b-1 (docs/25 §2.8): segunda linha na coluna "Quando" do pop-up que nao e o padrao (placementLabel) e o
-// "Quantas vezes" (popupMode) no alvo do menu.
+// "Quantas vezes" (popupMode) no alvo do menu. Modelos (docs/28 §6.2): "Salvar como modelo" no menu, logo depois de
+// "Duplicar" (a versao gravada do aviso; passo de fluxo nao tem Duplicar e nao vira modelo).
 
 export function toNoticeActionTarget(item: NoticeListItem): NoticeActionTarget {
   return {
@@ -59,6 +61,7 @@ export function NoticeThumb({ icon, imageUrl, kind }: { icon?: NoticeListItem["i
 
 export function NoticesTable({ items }: { items: readonly NoticeListItem[] }) {
   const { busyKey, confirmDialog, errorBanner, request } = useNoticeActions();
+  const saveAs = useNoticeSaveAsTemplate();
 
   const columns: DataTableColumn<NoticeListItem>[] = [
     {
@@ -133,8 +136,8 @@ export function NoticesTable({ items }: { items: readonly NoticeListItem[] }) {
     },
     {
       cell: (item) => (
-        <span aria-busy={busyKey?.startsWith(`${item.id}:`) || undefined} className="flex justify-end">
-          <NoticeRowMenu notice={toNoticeActionTarget(item)} onRequest={request} />
+        <span aria-busy={busyKey?.startsWith(`${item.id}:`) || undefined} className="flex justify-end" data-notice-menu={item.id}>
+          <NoticeRowMenu extra={saveAs.extraFor(item)} notice={toNoticeActionTarget(item)} onRequest={request} />
         </span>
       ),
       className: "relative z-10 w-14 max-md:absolute max-md:top-2.5 max-md:right-2 max-md:w-auto",
@@ -156,6 +159,7 @@ export function NoticesTable({ items }: { items: readonly NoticeListItem[] }) {
         rows={items}
       />
       {confirmDialog}
+      {saveAs.dialog}
     </div>
   );
 }

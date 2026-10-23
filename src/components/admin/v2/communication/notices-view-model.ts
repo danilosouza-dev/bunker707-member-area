@@ -1582,6 +1582,15 @@ export function draftToNotificationItem(
 }
 
 /**
+ * A previa tem a escolha Computador | Celular? O pop-up com design (Personalizado ou Livre) mostra o celular e o
+ * computador juntos, sem a escolha; a notificacao e o pop-up Padrao tem a escolha. Uma regra so para o editor do aviso,
+ * a pagina do modelo de Design (docs/28 §1.7) e a propria NoticePreview.
+ */
+export function previewHasDeviceChoice(draft: { design?: unknown; freeDesign?: unknown; kind: CampaignKind }): boolean {
+  return !(draft.kind === "popup" && Boolean(draft.design || draft.freeDesign));
+}
+
+/**
  * Pop-up como o aluno ve na primeira vez (o icone so quando escolhido, como a API manda). v3b-1: "Só no X"
  * leva `close` (sem a chave = fecha no X, no Esc ou clicando fora, como o show manda). Design do pop-up
  * (docs/26): no Personalizado, `design` e as fontes que ele usa (`fonts`: a biblioteca do editor ou as do

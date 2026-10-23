@@ -667,10 +667,14 @@ async function idsDasContasDeTeste(db) {
 
 /**
  * Apaga o que os testes gravaram na Comunicacao: fluxos criados pelas contas de teste (passos, passagens,
- * tarefas e o conteudo dos passos saem junto, por cascata), avisos criados por elas (com o sino e os
- * pop-ups deles, por cascata) e as notificacoes, estados de pop-up e visitas de pagina das contas de
+ * tarefas e o conteudo dos passos saem junto, por cascata), os modelos (docs/28), avisos criados por elas (com o
+ * sino e os pop-ups deles, por cascata) e as notificacoes, estados de pop-up e visitas de pagina das contas de
  * teste. A ordem importa: um passo aponta para o conteudo (campaigns) sem cascata, entao apagar os avisos
- * antes dos fluxos falharia (23503). Banco sem a migracao: nada a limpar.
+ * antes dos fluxos falharia (23503); os modelos saem antes dos avisos. Banco sem a migracao: nada a limpar.
+ *
+ * Modelos: toda linha de modelo semeada por teste leva `created_by` de uma conta @bunker707.test, e todo teste que
+ * apaga uma conta temporaria (apagarContaDeTeste) chama esta funcao ANTES: o `on delete set null` deixaria a linha
+ * sem dono para sempre, fora do alcance desta limpeza, e o limite de 200 modelos e da escola inteira.
  */
 export async function limparComunicacao(db) {
   const ids = await idsDasContasDeTeste(db);
@@ -683,6 +687,8 @@ export async function limparComunicacao(db) {
     ["Apagando fluxos de teste", () => db.from("communication_flows").delete().in("created_by", ids)],
     // Design do pop-up (docs/26): fontes enviadas pelas contas de teste (os arquivos no Storage ficam com o teste).
     ["Apagando fontes de teste", () => db.from("communication_fonts").delete().in("created_by", ids)],
+    // Modelos (docs/28; migracao 202610250001): antes dos avisos.
+    ["Apagando modelos de teste", () => db.from("communication_templates").delete().in("created_by", ids)],
     ["Apagando avisos de teste", () => db.from("campaigns").delete().in("created_by", ids)],
     ["Apagando notificacoes de teste", () => db.from("notifications").delete().in("user_id", ids)],
     ["Apagando estados de pop-up de teste", () => db.from("campaign_deliveries").delete().in("user_id", ids)],

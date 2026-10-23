@@ -167,6 +167,15 @@ const ACTIONS: readonly StaticEntry[] = [
     requires: ["messaging.write"],
     title: "Novo fluxo"
   },
+  {
+    // Modelos da Comunicacao (docs/28 §5.1): a escolha do tipo do modelo novo.
+    group: "actions",
+    href: "/admin/comunicacao/modelos/novo",
+    id: "acao:novo-modelo",
+    keywords: "criar modelo salvar reutilizar configuracao notificacao pop-up popup design comunicar",
+    requires: ["messaging.write"],
+    title: "Novo modelo"
+  },
   { group: "actions", href: STUDENT_AREA_HREF, id: "acao:area-do-aluno", keywords: "ver como aluno", title: "Ver área do aluno" }
 ];
 

@@ -27,12 +27,14 @@ import {
   type FreeNodeType,
   type PopupFreeDesign
 } from "../../../../../server/communications/popup-free-model";
+import { POPUP_FREE_PASTE_MESSAGES, parseFreeDesignPaste, type FreePasteContext, type FreePasteResult } from "../../../../../server/communications/popup-free-paste";
 import { freeHeadingText, resolveFreeArtboard } from "../../../../../server/communications/popup-free-render";
 import { POPUP_FREE_MESSAGES, freeErrorKeys, popupFreeContentProblems, popupFreeDesignSchema } from "../../../../../server/communications/popup-free-schema";
 import { FREE_ELEMENT_ID_PREFIX, FREE_STARTER_CTA, newFreeNode, type FreeElementKind } from "../../../../../server/communications/popup-free-starters";
 import { FREE_NODE_TYPE_LABELS, freeNodeDisplayName, type FreeHint, type FreeMeasuredRects } from "../../../../../server/communications/popup-free-checks";
 import type { PopupFontRef } from "../../../../../server/communications/popup-design-model";
 import { noticeCtaProblems, type NoticeDraft } from "../../../../../server/communications/schemas";
+import { TEMPLATE_MESSAGES, templateCtaSchema } from "../../../../../server/communications/template-model";
 import { SENT_NOTICE_COPY } from "../notices-view-model";
 import {
   alignFreeRect,
@@ -169,7 +171,27 @@ export const FREE_EDITOR_COPY = {
     resize: (handle: string) => `Mudar o tamanho (${handle})`,
     selected: (name: string, x: number, y: number) => `Selecionado: ${name}, X ${x}, Y ${y}.`
   },
-  tabs: { elements: "Elementos", layers: "Camadas" },
+  tabs: { elements: "Elementos", layers: "Camadas", templates: "Modelos" },
+  /** A aba Modelos (docs/28 §5.9): "Salvar este design como modelo" e os designs Livres que a equipe guardou. */
+  templates: {
+    applied: "Modelo aplicado. Ctrl + Z desfaz.",
+    capped: "Mostrando os 50 mais recentes.",
+    dialogConfirm: "Salvar modelo",
+    dialogDescription:
+      "Fica em “Meus modelos” do design Livre e em Comunicação › Modelos. Os textos do design vão junto; o destino do botão fica em cada aviso.",
+    dialogTitle: "Salvar design como modelo",
+    empty: "Seus designs Livres salvos aparecem aqui. Use “Salvar este design como modelo”.",
+    error: "Não foi possível carregar seus modelos agora.",
+    listLabel: "Seus designs Livres salvos",
+    loading: "Carregando seus modelos…",
+    retry: "Tentar de novo",
+    save: "Salvar este design como modelo",
+    saved: "Design salvo em Meus modelos.",
+    title: "Meus modelos",
+    updated: (date: string) => `Atualizado em ${date}`,
+    use: "Usar este modelo",
+    useLabel: (name: string) => `Usar este modelo: ${name}`
+  },
   toolbar: { duplicate: "Duplicar", label: "Ações do elemento", moveDown: "Descer", moveUp: "Subir", remove: "Excluir", toFree: "Soltar" },
   /** Copiar e colar o design (docs/27 L1.1). */
   transfer: {
@@ -1080,6 +1102,17 @@ export function stripFreeDesignPrefix(key: string): string {
   return key.startsWith("freeDesign.") ? key.slice("freeDesign.".length) : key;
 }
 
+/** O botao do aviso pela regra do modelo (templateCtaSchema), com as chaves do rascunho ("cta.href", "cta.label"). */
+function templateCtaProblems(cta: unknown): { message: string; path: string[] }[] {
+  if (cta === null || cta === undefined) {
+    return [];
+  }
+
+  const parsed = templateCtaSchema.safeParse(cta);
+
+  return parsed.success ? [] : parsed.error.issues.map((issue) => ({ message: issue.message, path: ["cta", ...issue.path.map(String)] }));
+}
+
 function safeCanonical(design: PopupFreeDesign): PopupFreeDesign {
   try {
     return canonicalPopupFreeDesign(design);
@@ -1093,9 +1126,13 @@ function safeCanonical(design: PopupFreeDesign): PopupFreeDesign {
  * aviso e o botao do aviso que o Livre edita no Botão principal (o mesmo zod do rascunho: o "Saiba mais" de um
  * modelo, sem destino, aparece aqui como no salvar e no card). Chaves sem o prefixo "freeDesign." (nodes.<id>...,
  * artboard..., close..., assets..., fonts, size, design), mais "cta.label"/"cta.href" (o Botão principal) e "audio"
- * (o elemento Áudio).
+ * (o elemento Áudio). Num modelo (`ctaOptional`), o botao segue a regra do modelo (docs/28 D8): texto e destino podem
+ * ficar vazios, preenchidos seguem a mesma regra do aviso.
  */
-export function freeEditorErrors(design: PopupFreeDesign, content: { allowSnooze: boolean; audio: unknown; cta: unknown }): Record<string, string> {
+export function freeEditorErrors(
+  design: PopupFreeDesign,
+  content: { allowSnooze: boolean; audio: unknown; cta: unknown; ctaOptional?: boolean }
+): Record<string, string> {
   const raw: Record<string, string> = {};
   const parsed = popupFreeDesignSchema.safeParse(design);
 
@@ -1109,7 +1146,9 @@ export function freeEditorErrors(design: PopupFreeDesign, content: { allowSnooze
     }
   }
 
-  for (const problem of [...popupFreeContentProblems(parsed.success ? parsed.data : safeCanonical(design), content), ...noticeCtaProblems(content.cta)]) {
+  const ctaProblems = content.ctaOptional ? templateCtaProblems(content.cta) : noticeCtaProblems(content.cta);
+
+  for (const problem of [...popupFreeContentProblems(parsed.success ? parsed.data : safeCanonical(design), content), ...ctaProblems]) {
     const key = problem.path.join(".");
 
     if (!(key in raw)) {
@@ -1183,6 +1222,28 @@ export function freeOutsideFieldNames(errors: Readonly<Record<string, string>>):
   }
 
   return names;
+}
+
+/**
+ * "Usar este modelo" na aba Modelos do editor Livre (docs/28 §5.9): o design do modelo entra como um colar (um passo
+ * so no historico, sem confirmacao), com os arquivos do proprio modelo contados como deste pop-up (o servidor confere
+ * de novo ao salvar, sabendo de onde vieram). Quando o botao principal nasce agora (o aviso nao tinha botao) e o
+ * modelo guardou o texto dele, o botao ganha esse texto e a nota do colar ("…ganhou o texto “Saiba mais”…") vira a
+ * do modelo (TEMPLATE_MESSAGES.applyCta).
+ */
+export function applyFreeTemplateDesign(item: { design: PopupFreeDesign; support: { ctaLabel: string | null } }, context: FreePasteContext): FreePasteResult {
+  const result = parseFreeDesignPaste(JSON.stringify(item.design), { ...context, knownAssets: [...context.knownAssets, ...item.design.assets] });
+  const label = item.support.ctaLabel?.trim() ?? "";
+
+  if (!result.ok || context.content.cta || !result.cta || !label) {
+    return result;
+  }
+
+  return {
+    ...result,
+    cta: { ...result.cta, label },
+    notes: result.notes.map((note) => (note === POPUP_FREE_PASTE_MESSAGES.cta ? TEMPLATE_MESSAGES.applyCta(label) : note))
+  };
 }
 
 /**

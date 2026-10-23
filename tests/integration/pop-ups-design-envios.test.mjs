@@ -15,7 +15,8 @@ import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste }
 // - renomear e excluir pela biblioteca: fonte em uso por pop-up nao excluido nao sai (409); livre sai da
 //   biblioteca e o arquivo fica (pop-up gravado nunca perde a fonte);
 // - video: endereco assinado -> o navegador envia com a chave publica -> o servidor confere tamanho e os
-//   primeiros bytes e devolve o PopupVideo do nosso bucket; bytes de outro tipo sao 422 e o objeto some;
+//   primeiros bytes e devolve o PopupVideo do nosso bucket; bytes de outro tipo sao 422 e o objeto do envio novo some
+//   (so ele: um caminho que um modelo cita fica; o salvar nunca apaga, docs/28 D16);
 // - pop-up salvo com endereco de video de fora do nosso bucket e recusado (400 no campo do video).
 // Arquivos de verdade em tests/fixtures/popup-design/ (ffmpeg e um subconjunto da Inter, OFL).
 
@@ -453,7 +454,7 @@ test("pop-up com video: endereco de fora do nosso bucket e recusado; o do nosso 
   assert.equal(linha.popup_design.media.video.url, video.url);
 });
 
-test("pop-up com video: objeto que nao passou pela conferencia do envio e conferido ao salvar (recusado e apagado)", async () => {
+test("pop-up com video: objeto que nao passou pela conferencia do envio e conferido ao salvar (recusado e fica para a limpeza)", async () => {
   // Envio pelo endereco assinado com bytes que nao sao video (tipo declarado video/mp4, que o bucket aceita),
   // sem chamar finishPopupVideoUpload: salvar o design apontando para ele confere ali mesmo.
   actAs(produtor);
@@ -465,7 +466,7 @@ test("pop-up com video: objeto que nao passou pela conferencia do envio e confer
   const recusado = await salvar(popupComDesign({ video: naoConferido }));
   assert.deepEqual([recusado.ok, recusado.status], [false, 400]);
   assert.deepEqual(recusado.fieldErrors["design.media.video"], ["Use um vídeo MP4 (H.264) ou WEBM."], JSON.stringify(recusado.fieldErrors));
-  assert.equal(await existeNoBucket(model.POPUP_VIDEO_BUCKET, ticket.path), false, "o objeto recusado foi apagado");
+  assert.equal(await existeNoBucket(model.POPUP_VIDEO_BUCKET, ticket.path), true, "o salvar nunca apaga: o recusado fica para a limpeza (docs/28 D16)");
 
   // Caminho que nunca recebeu arquivo: "Envie o vídeo de novo."
   const vazio = `videos/${randomUUID()}.mp4`;
@@ -478,4 +479,42 @@ test("pop-up com video: objeto que nao passou pela conferencia do envio e confer
   const salvo = ok(await salvar(popupComDesign({ video })));
   actAs(produtor);
   ok(await actions.saveNoticeDraft({ draft: popupComDesign({ video }), id: salvo.id }));
+});
+
+/** Objeto montado direto no Storage (sem o endereco assinado nem a conferencia), com o tipo gravado que o teste quiser. */
+async function montarVideo(bytes, contentType) {
+  const path = `videos/${randomUUID()}.mp4`;
+  unwrap(await db.storage.from(model.POPUP_VIDEO_BUCKET).upload(path, bytes, { contentType, upsert: false }), "Montando o video direto no Storage");
+  criados[model.POPUP_VIDEO_BUCKET].add(path);
+  return path;
+}
+
+test("fim do envio (docs/28 D16): caminho citado por um modelo nao excluido e recusado (422) e o objeto continua no bucket", async () => {
+  // Bytes de mp4 de verdade gravados como webm: a conferencia recusa (o tipo gravado nao bate).
+  const path = await montarVideo(MP4, "video/webm");
+  const url = db.storage.from(model.POPUP_VIDEO_BUCKET).getPublicUrl(path).data.publicUrl;
+  const design = { ...structuredClone(model.popupStarterDesign("media_top_fade")), media: { ...model.popupStarterDesign("media_top_fade").media, kind: "video", video: { mimeType: "video/mp4", path, url } } };
+  unwrap(
+    await db.from("communication_templates").insert({
+      created_by: produtor.id,
+      design_mode: "custom",
+      kind: "design",
+      name: "Modelo com video",
+      payload: { design, designSupport: { ctaLabel: null, image: null }, kind: "design", version: 1 },
+      updated_by: produtor.id
+    }),
+    "Criando o modelo que cita o video"
+  );
+
+  actAs(produtor);
+  const result = await designActions.finishPopupVideoUpload({ path });
+  assert.deepEqual([result.ok, result.status, result.error], [false, 422, "Use um vídeo MP4 (H.264) ou WEBM."]);
+  assert.equal(await existeNoBucket(model.POPUP_VIDEO_BUCKET, path), true, "o modelo segura o arquivo: o fim do envio nao apaga");
+
+  // Sem nenhum aviso ou modelo citando (o modelo saiu), o mesmo envio recente e apagado.
+  unwrap(await db.from("communication_templates").delete().eq("created_by", produtor.id), "Tirando o modelo");
+  actAs(produtor);
+  const denovo = await designActions.finishPopupVideoUpload({ path });
+  assert.equal(denovo.status, 422);
+  assert.equal(await existeNoBucket(model.POPUP_VIDEO_BUCKET, path), false, "o envio novo que ninguem cita sai");
 });

@@ -55,6 +55,8 @@ export type PopupDesignCardProps = {
   popup: PopupItem;
   /** Previa do admin: mesmo visual, sem links, audio parado e botoes sem acao. */
   preview?: boolean;
+  /** So previa (miniaturas dos modelos, docs/28): o video fica na capa ("still"), nunca monta <video>. O aluno nunca passa. */
+  still?: boolean;
   /** id do <h2> do primeiro bloco de titulo (aria-labelledby do dialogo). */
   titleId?: string;
 };
@@ -75,10 +77,13 @@ export function PopupDesignCard({
   playing = true,
   popup,
   preview = false,
+  still = false,
   titleId
 }: PopupDesignCardProps) {
   const fontsReady = usePopupFontFaces(fonts);
-  const motion = usePopupMotion();
+  // O hook continua sendo chamado sempre (regra dos hooks); `still` so troca o resultado na previa.
+  const preferredMotion = usePopupMotion();
+  const motion = still ? "still" : preferredMotion;
   const image = popup.image?.url ? popup.image : null;
   const mode = popupMediaMode(design, { hasImage: Boolean(image), motion });
   const hasMedia = mode !== "none";

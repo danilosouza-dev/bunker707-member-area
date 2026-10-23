@@ -748,6 +748,41 @@ export function normalizeAudience(definition: AudienceDefinition): AudienceDefin
   return root.items.length === 0 ? EVERYONE : { kind: "rules", root };
 }
 
+/**
+ * Troca os ids de passo dentro das regras (copia com ids novos: "Duplicar", "duplicar aviso" e o "Usar" de um
+ * modelo com notificacoes seguintes, docs/28 D7): a notificacao citada, a pagina do botao dela e o "desde".
+ * Mora aqui (puro, sem tela); follow-ups-view-model.ts reexporta.
+ */
+export function remapNodeRefs(definition: AudienceDefinition, ids: ReadonlyMap<string, string>): AudienceDefinition {
+  if (definition.kind !== "rules") {
+    return definition;
+  }
+
+  const id = (value: string) => ids.get(value) ?? value;
+  const node = (item: AudienceNode): AudienceNode => {
+    if ("items" in item) {
+      return { ...item, items: item.items.map(node) };
+    }
+
+    switch (item.type) {
+      case "message":
+        return item.ref.kind === "node" ? { ...item, ref: { kind: "node", nodeId: id(item.ref.nodeId) } } : item;
+      case "page_visit":
+        return {
+          ...item,
+          page: item.page.kind === "message_cta" ? { kind: "message_cta", nodeId: id(item.page.nodeId) } : item.page,
+          since: item.since.kind === "message" ? { kind: "message", nodeId: id(item.since.nodeId) } : item.since
+        };
+      case "access_gained":
+        return item.since.kind === "message" ? { ...item, since: { kind: "message", nodeId: id(item.since.nodeId) } } : item;
+      default:
+        return item;
+    }
+  };
+
+  return { kind: "rules", root: { ...definition.root, items: definition.root.items.map(node) } };
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Frase do segmento ("Alunos que ...")
  * ---------------------------------------------------------------------------------------------- */

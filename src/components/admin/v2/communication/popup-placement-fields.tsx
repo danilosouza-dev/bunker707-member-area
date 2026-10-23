@@ -61,6 +61,8 @@ type PopupPlacementFieldsProps = {
   opensOnLesson: readonly string[];
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
+  /** false: sem "Começa" e "Termina" (modo modelo, docs/28 D9: a janela do pop-up nunca vai para o modelo). */
+  showWindow?: boolean;
   ui: PopupPlacementUi;
 };
 
@@ -92,6 +94,7 @@ export function PopupPlacementFields({
   opensOnLesson,
   products,
   productsLoaded,
+  showWindow = true,
   ui
 }: PopupPlacementFieldsProps) {
   const copy = POPUP_EDITOR_COPY.placement;
@@ -303,12 +306,14 @@ export function PopupPlacementFields({
         <p className={hintClass}>{settings.delaySeconds === 0 && !lesson ? copy.delayZeroHint : copy.delayHint[settings.trigger]}</p>
       </div>
 
-      <PopupWindowFields
-        disabled={disabled}
-        errors={{ endsAt: errorFor("window.endsAt"), startsAt: errorFor("window.startsAt") }}
-        onChange={(window) => onChange({ window })}
-        window={draft.window}
-      />
+      {showWindow ? (
+        <PopupWindowFields
+          disabled={disabled}
+          errors={{ endsAt: errorFor("window.endsAt"), startsAt: errorFor("window.startsAt") }}
+          onChange={(window) => onChange({ window })}
+          window={draft.window}
+        />
+      ) : null}
 
       <div className="flex min-w-0 flex-col gap-2">
         <p aria-live="polite" className="text-sm leading-6 text-[var(--text-primary)]">

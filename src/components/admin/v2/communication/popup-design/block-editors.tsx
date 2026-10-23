@@ -4,6 +4,7 @@ import { Minus, Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NOTICE_LIMITS } from "@/server/communications/campaign-model";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import {
   HOME_PAGE_LINKS,
@@ -34,6 +35,7 @@ import { HeroTextField } from "../../member-area/home-hero/fields";
 import type { ProductPickerItem } from "../../storefront/product-picker";
 import { ProductPicker } from "../../storefront/product-picker";
 import { NoticeCtaField } from "../notice-cta-field";
+import { ctaTextFieldCopy } from "../notices-view-model";
 import { BorderField, ColorField, ContrastHint, DesignFieldError, NumberField, PaintField, PillField, RadiusField, fieldLabelClass } from "./design-controls";
 import {
   BUTTON2_ACTION_OPTIONS,
@@ -56,6 +58,11 @@ export type BlockEditorContext = {
   cta: NoticeDraft["cta"];
   disabled: boolean;
   errorFor: (key: string) => string | undefined;
+  /**
+   * Pagina do modelo de Design (docs/28 §5.7): o destino do Botão principal some (e escolhido em cada aviso); fica so
+   * o texto do botao.
+   */
+  hideCtaDestination?: boolean;
   hints: readonly PopupContrastHint[];
   library: readonly PopupFontOption[];
   onCtaChange: (cta: NonNullable<NoticeDraft["cta"]>) => void;
@@ -306,10 +313,49 @@ function TextEditor({ block, context, index, onChange }: EditorProps<PopupTextBl
   );
 }
 
+/**
+ * O texto do Botão principal sem o destino (pagina do modelo de Design, docs/28 §5.7; tambem no editor Livre): o
+ * mesmo campo do botao do aviso e a frase de que o destino e escolhido em cada aviso.
+ */
+export function CtaLabelOnlyField({
+  cta,
+  disabled,
+  error,
+  idPrefix,
+  onChange
+}: {
+  cta: NonNullable<NoticeDraft["cta"]>;
+  disabled: boolean;
+  error?: string;
+  idPrefix: string;
+  onChange: (cta: NonNullable<NoticeDraft["cta"]>) => void;
+}) {
+  const text = ctaTextFieldCopy("button");
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <HeroTextField
+        disabled={disabled}
+        error={error}
+        id={`${idPrefix}-botao-texto`}
+        label={text.label}
+        max={NOTICE_LIMITS.ctaLabel}
+        onBlur={() => undefined}
+        onChange={(label) => onChange({ ...cta, label })}
+        placeholder={text.placeholder}
+        value={cta.label}
+      />
+      <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{POPUP_DESIGN_COPY.mine.ctaDestination}</p>
+    </div>
+  );
+}
+
 function ButtonEditor({ block, context, index, onChange }: EditorProps<PopupButtonBlock>) {
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      {context.cta ? (
+      {context.cta && context.hideCtaDestination ? (
+        <CtaLabelOnlyField cta={context.cta} disabled={context.disabled} error={context.errorFor("cta.label")} idPrefix="aviso" onChange={context.onCtaChange} />
+      ) : context.cta ? (
         <NoticeCtaField
           disabled={context.disabled}
           errors={{ href: context.errorFor("cta.href"), label: context.errorFor("cta.label") }}

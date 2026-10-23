@@ -47,6 +47,8 @@ export type PopupFreeCardProps = {
   popup: PopupItem;
   /** Prévia do admin: mesmo visual, sem links, áudio parado, botões sem ação; Imagem/Vídeo sem arquivo viram um quadriculado com "Escolha a imagem". */
   preview?: boolean;
+  /** Só prévia (miniaturas dos modelos, docs/28): o vídeo fica no modo "still" (o poster como imagem; nada do vídeo é baixado). O aluno nunca passa. */
+  still?: boolean;
   /** Só testes: a origem do Storage (o cartão usa STORAGE_ORIGIN). */
   storageOrigin?: string | null;
   titleId?: string;
@@ -105,12 +107,15 @@ export function PopupFreeCard({
   playing = true,
   popup,
   preview = false,
+  still = false,
   storageOrigin,
   titleId
 }: PopupFreeCardProps) {
   const faces = fonts ?? popup.fonts ?? NO_FACES;
   const fontsReady = usePopupFontFaces(faces);
-  const motion = usePopupMotion();
+  // O hook continua sendo chamado sempre (regra dos hooks); `still` so troca o resultado na previa.
+  const preferredMotion = usePopupMotion();
+  const motion = still ? "still" : preferredMotion;
   const origin = storageOrigin === undefined ? STORAGE_ORIGIN : storageOrigin;
   const ctx = freeRenderContextOf({
     accessPreviewMode,

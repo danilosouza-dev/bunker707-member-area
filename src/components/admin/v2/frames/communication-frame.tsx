@@ -1,4 +1,4 @@
-import { BellRing, CalendarClock, TicketPercent, Workflow, type LucideIcon } from "lucide-react";
+import { BellRing, CalendarClock, LayoutTemplate, TicketPercent, Workflow, type LucideIcon } from "lucide-react";
 import { Suspense } from "react";
 import { EmptyState } from "../empty-state";
 import { KpiTile } from "../kpi-tile";
@@ -17,16 +17,17 @@ import {
 
 // Moldura de Comunicacao na disposicao do prototipo aprovado para as abas que ainda estao sendo
 // construidas (Webinários e Promoções): cabecalho com a frase da aba, abas sublinhadas (Avisos e
-// pop-ups · Fluxos · Webinários · Promoções, cada uma com endereco proprio), os quatro numeros da aba
+// pop-ups · Fluxos · Modelos · Webinários · Promoções, cada uma com endereco proprio), os quatro numeros da aba
 // e, no lugar da lista, o aviso honesto de tela em construcao. Os numeros seguem o periodo da barra
 // superior (?periodo=) e ficam em "—": nada aqui e simulado. Sem botao de criar: seria um botao que
-// finge funcionar. Avisos e pop-ups e Fluxos ja tem a tela de verdade (communication/notices-list-view.tsx
-// e communication/flows/flows-list-view.tsx), que usam as mesmas abas (CommunicationTabs); nunca esta
-// moldura.
+// finge funcionar. Avisos e pop-ups, Fluxos e Modelos ja tem a tela de verdade (communication/notices-list-view.tsx,
+// communication/flows/flows-list-view.tsx e communication/templates/templates-list-view.tsx), que usam as mesmas
+// abas (CommunicationTabs); nunca esta moldura (o Record pede a chave de Modelos mesmo assim).
 
 const TAB_ICONS: Record<CommunicationTab, LucideIcon> = {
   avisos: BellRing,
   fluxos: Workflow,
+  modelos: LayoutTemplate,
   promocoes: TicketPercent,
   webinarios: CalendarClock
 };
@@ -35,6 +36,7 @@ const TAB_ICONS: Record<CommunicationTab, LucideIcon> = {
 const TAB_NOTES: Record<CommunicationTab, string> = {
   avisos: " Os avisos chegam com esta tela.",
   fluxos: " Os fluxos chegam com esta tela.",
+  modelos: " Os modelos chegam com esta tela.",
   promocoes: " As promoções chegam com esta tela.",
   webinarios: " Os webinários chegam com esta tela."
 };

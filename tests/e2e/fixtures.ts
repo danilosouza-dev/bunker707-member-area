@@ -14,7 +14,9 @@ import {
   limparProgresso,
   limparSessoesDeTv
 } from "../fixtures/escola-de-teste.mjs";
+import { templateMediaUse } from "../../src/server/communications/media-refs";
 import { storedPopupDesignAssetPaths } from "../../src/server/communications/popup-design-router";
+import { templateDesignModeOf, type TemplatePayload } from "../../src/server/communications/template-model";
 import { pngQuadrado } from "../support/imagem-de-teste.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 
@@ -68,9 +70,32 @@ export async function zerarFotoDosAlunos() {
   await limparFotoDoPerfil(db, [contas.aluna.id, contas.alunoSemAcesso.id]);
 }
 
-/** Apaga uma conta criada por um teste de navegador (sai da equipe e some do Auth local). */
+/**
+ * Apaga uma conta criada por um teste de navegador (sai da equipe e some do Auth local). Antes, os modelos da
+ * Comunicacao que ela criou (docs/28): o `on delete set null` deixaria a linha sem dono, fora do alcance de
+ * limparComunicacao, e o limite de 200 modelos e da escola inteira.
+ */
 export async function apagarConta(email: string) {
-  await apagarContaDeTeste(createLocalAdminClient(), email);
+  const db = createLocalAdminClient();
+  await apagarModelosDaConta(db, email);
+  await apagarContaDeTeste(db, email);
+}
+
+/** Os modelos (communication_templates) criados pela conta do e-mail dado. Banco sem a migracao: nada a apagar. */
+async function apagarModelosDaConta(db: ReturnType<typeof createLocalAdminClient>, email: string) {
+  const perfil = unwrap(await db.from("profiles").select("id").eq("email", email.toLowerCase()).maybeSingle(), `Lendo a conta ${email}`) as {
+    id: string;
+  } | null;
+
+  if (!perfil) {
+    return;
+  }
+
+  const { error } = await db.from(TABELA_DE_MODELOS).delete().eq("created_by", perfil.id);
+
+  if (error && !/does not exist|Could not find/i.test(error.message)) {
+    throw new Error(`Apagando os modelos de ${email}: ${error.message}`);
+  }
 }
 
 /** Apaga os produtos criados por um teste de navegador (titulo com o prefixo), com modulos e aulas. */
@@ -92,11 +117,13 @@ export async function zerarAreaDeMembros() {
 }
 
 /**
- * Apaga fluxos, avisos, pop-ups, notificacoes e visitas de pagina das contas de teste (docs/22 e docs/23;
- * os fluxos primeiro, como em limparComunicacao). Use em `test.beforeAll` E em `test.afterAll` de quem
- * publica algo: um pop-up esquecido abre na home dos outros arquivos (e um dialogo a mais confunde quem
- * procura "o" dialogo da pagina); uma notificacao muda o nome do sino. Livre (docs/27): depois, as imagens
- * enviadas no editor Livre (`communications/free/` no bucket de imagens) que nenhum aviso que ficou usa.
+ * Apaga fluxos, modelos (docs/28), avisos, pop-ups, notificacoes e visitas de pagina das contas de teste (docs/22
+ * e docs/23; os fluxos primeiro e os modelos antes dos avisos, como em limparComunicacao). Use em `test.beforeAll`
+ * E em `test.afterAll` de quem publica algo: um pop-up esquecido abre na home dos outros arquivos (e um dialogo a
+ * mais confunde quem procura "o" dialogo da pagina); uma notificacao muda o nome do sino; um modelo esquecido
+ * vira menu no "Novo aviso" dos outros arquivos. Livre (docs/27): depois, as imagens enviadas no editor Livre
+ * (`communications/free/` no bucket de imagens) que nenhum aviso nem modelo que ficou usa. Chame antes de apagar
+ * qualquer conta temporaria (apagarConta tambem apaga os modelos dela).
  */
 export async function zerarComunicacao() {
   const db = createLocalAdminClient();
@@ -106,12 +133,21 @@ export async function zerarComunicacao() {
 
 const PASTA_DO_LIVRE = "communications/free";
 
-/** As imagens do Livre que nenhum aviso gravado usa (as dos testes; nunca as de um aviso que ficou no banco). */
+/**
+ * As imagens do Livre que nenhum aviso gravado nem modelo que sobrou usa (as dos testes; nunca as de um aviso ou de
+ * um modelo que ficou no banco, de quem desenvolve ou de outro arquivo de teste). Os modelos sao lidos pelo jsonb
+ * cru (templateMediaUse, a mesma leitura da limpeza do servidor), inclusive os excluidos: errar para o lado de
+ * guardar so custa espaco no bucket local.
+ */
 async function apagarImagensDoLivreSemUso(db: ReturnType<typeof createLocalAdminClient>) {
   const linhas = unwrap(await db.from("campaigns").select("popup_design").not("popup_design", "is", null), "Lendo os designs que ficaram") as {
     popup_design: unknown;
   }[];
   const usadas = new Set(linhas.flatMap((linha) => storedPopupDesignAssetPaths(linha.popup_design)));
+
+  for (const caminho of await caminhosDosModelos(db)) {
+    usadas.add(caminho);
+  }
   const caminhos: string[] = [];
 
   for (let offset = 0; ; offset += 100) {
@@ -135,6 +171,34 @@ async function apagarImagensDoLivreSemUso(db: ReturnType<typeof createLocalAdmin
 
     if (error) {
       throw new Error(`Apagando as imagens do Livre: ${error.message}`);
+    }
+  }
+}
+
+const TABELA_DE_MODELOS = "communication_templates";
+const BUCKET_DE_IMAGENS = "content-assets";
+
+/** Os caminhos no bucket de imagens que os modelos gravados citam (de 20 em 20: o payload pode ter ate 768 KB). */
+async function caminhosDosModelos(db: ReturnType<typeof createLocalAdminClient>) {
+  const caminhos: string[] = [];
+
+  for (let offset = 0; ; offset += 20) {
+    const { data, error } = await db.from(TABELA_DE_MODELOS).select("id,payload").order("id").range(offset, offset + 19);
+
+    if (error) {
+      if (/does not exist|Could not find/i.test(error.message)) {
+        return caminhos;
+      }
+
+      throw new Error(`Lendo os modelos que ficaram: ${error.message}`);
+    }
+
+    for (const linha of (data ?? []) as { payload: unknown }[]) {
+      caminhos.push(...templateMediaUse(linha).refs.filter((ref) => ref.bucket === BUCKET_DE_IMAGENS).map((ref) => ref.path));
+    }
+
+    if (!data || data.length < 20) {
+      return caminhos;
     }
   }
 }
@@ -522,6 +586,16 @@ export async function idDoAviso(titulo: string) {
   }
 
   return aviso.id;
+}
+
+/** O titulo e a versao (updated_at) de um aviso pelo id: confere que nada gravou o aviso. Falha se nao existe. */
+export async function versaoDoAviso(id: string) {
+  const db = createLocalAdminClient();
+
+  return unwrap(await db.from("campaigns").select("title,updated_at").eq("id", id).single(), `Lendo a versão do aviso ${id}`) as {
+    title: string;
+    updated_at: string;
+  };
 }
 
 /** O que a equipe escolheu no aviso (fora de fluxo, nao excluido): a lixeira do sino e o tempo no sino. */
@@ -956,4 +1030,95 @@ export async function designDoPopUpNoBanco(titulo: string): Promise<DesignDoPopU
     id: linha.id,
     imagem: linha.image_url
   };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Modelos da Comunicacao (docs/28): o que a tela gravou e os cenarios montados direto no banco
+ * ---------------------------------------------------------------------------------------------- */
+
+export type ModeloNoBanco = {
+  created_by: string | null;
+  design_mode: "custom" | "free" | null;
+  id: string;
+  kind: "design" | "inbox" | "popup";
+  name: string;
+  /** O jsonb gravado (versao 1, formato de template-model.ts), sem passar pelo parse. */
+  payload: Record<string, unknown>;
+  updated_at: string;
+};
+
+/** O modelo nao excluido de nome dado, como ficou no banco (falha se nao existe ou se ha mais de um). */
+export async function modeloNoBanco(nome: string): Promise<ModeloNoBanco> {
+  const db = createLocalAdminClient();
+  const linha = unwrap(
+    await db.from(TABELA_DE_MODELOS).select("created_by,design_mode,id,kind,name,payload,updated_at").eq("name", nome).is("deleted_at", null).maybeSingle(),
+    `Lendo o modelo "${nome}"`
+  ) as ModeloNoBanco | null;
+
+  if (!linha) {
+    throw new Error(`O modelo "${nome}" nao existe.`);
+  }
+
+  return linha;
+}
+
+/** Quantos modelos nao excluidos tem o nome dado (0 depois de excluir pela tela). */
+export async function contarModelosNoBanco(nome: string) {
+  const db = createLocalAdminClient();
+  const { count, error } = await db.from(TABELA_DE_MODELOS).select("id", { count: "exact", head: true }).eq("name", nome).is("deleted_at", null);
+
+  if (error) {
+    throw new Error(`Contando os modelos "${nome}": ${error.message}`);
+  }
+
+  return count ?? 0;
+}
+
+/**
+ * Monta um modelo direto no banco (cenarios de lista, busca e filtro): SEMPRE com `created_by` do produtor de teste
+ * (@bunker707.test), para limparComunicacao apagar. O tipo e o modo do design saem do payload, como no servidor.
+ * Devolve o id. Desfaca com zerarComunicacao.
+ */
+export async function criarModeloNoBanco(payload: TemplatePayload, nome: string) {
+  const db = createLocalAdminClient();
+  const produtor = await contaDeTeste("produtor");
+  const linha = unwrap(
+    await db
+      .from(TABELA_DE_MODELOS)
+      .insert({ created_by: produtor.id, design_mode: templateDesignModeOf(payload), kind: payload.kind, name: nome, payload, updated_by: produtor.id })
+      .select("id")
+      .single(),
+    `Gravando o modelo "${nome}"`
+  ) as { id: string };
+
+  return linha.id;
+}
+
+/** Os registros "communication.template_used" do aviso (docs/28 §4.8): os modelos de onde ele veio. */
+export async function modelosUsadosNoAviso(campaignId: string) {
+  const db = createLocalAdminClient();
+
+  return unwrap(
+    await db.from("admin_audit_log").select("metadata").eq("action", "communication.template_used").eq("entity_type", "campaign").eq("entity_id", campaignId),
+    "Lendo a auditoria do modelo usado"
+  ) as { metadata: { created?: boolean; template_ids?: string[] } }[];
+}
+
+/** Os ids dos passos (communication_flow_nodes) de um fluxo: os das notificacoes seguintes gravadas. */
+export async function idsDosPassosDoFluxo(flowId: string) {
+  const db = createLocalAdminClient();
+  const passos = unwrap(await db.from("communication_flow_nodes").select("id").eq("flow_id", flowId), "Lendo os passos do fluxo") as { id: string }[];
+
+  return passos.map((passo) => passo.id);
+}
+
+/** O segmento ("Para quem") gravado no aviso (fora de fluxo, nao excluido). */
+export async function segmentoDoAviso(titulo: string) {
+  const db = createLocalAdminClient();
+  const aviso = unwrap(
+    await db.from("campaigns").select("audience").eq("title", titulo).is("flow_id", null).is("deleted_at", null).single(),
+    `Lendo o segmento do aviso "${titulo}"`
+  ) as { audience: unknown };
+
+  return aviso.audience;
 }

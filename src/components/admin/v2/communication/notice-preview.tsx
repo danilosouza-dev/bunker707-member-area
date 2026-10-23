@@ -19,6 +19,7 @@ import {
   draftToNotificationItem,
   draftToPopupItem,
   hasPreviewPoll,
+  previewHasDeviceChoice,
   previewSender,
   type NoticeSenderChoice,
   type PreviewContent,
@@ -53,6 +54,8 @@ import {
 // Livre (docs/27): igual, pelo PopupFreeCard (o pedaco proprio do MemberPopupCard), com o computador do tamanho da
 // largura escolhida.
 // O computador tem 600 px: o cartao G (520 px) cabe no tamanho real.
+// Modelos (docs/28 §1.7): a escolha Computador | Celular (PreviewDeviceChoice) mora aqui, a mesma no editor do aviso e
+// na pagina do modelo de Design, e some quando a previa ja mostra os dois (previewHasDeviceChoice).
 
 /** Tokens de :root que o admin sobrescreve e a area do aluno usa (os mesmos do PreviewFrame). */
 const STUDENT_TOKENS: Record<string, string> = {
@@ -82,6 +85,33 @@ const STAGES: Record<PreviewDevice, Stage> = {
   desktop: { caption: "Computador · tamanho real", minHeight: 560, width: 520 },
   mobile: { caption: "Celular · 375 px", minHeight: 720, width: 375 }
 };
+
+const DEVICE_OPTIONS = [
+  { label: "Computador", value: "desktop" },
+  { label: "Celular", value: "mobile" }
+] as const satisfies readonly { label: string; value: PreviewDevice }[];
+
+/**
+ * "Aparelho da prévia": Computador | Celular. Nada no pop-up com design (Personalizado ou Livre), em que a previa ja
+ * mostra o celular e o computador juntos.
+ */
+export function PreviewDeviceChoice({
+  draft,
+  name,
+  onChange,
+  value
+}: {
+  draft: Parameters<typeof previewHasDeviceChoice>[0];
+  name: string;
+  onChange: (device: PreviewDevice) => void;
+  value: PreviewDevice;
+}) {
+  if (!previewHasDeviceChoice(draft)) {
+    return null;
+  }
+
+  return <PillGroup ariaLabel="Aparelho da prévia" name={name} onChange={onChange} options={DEVICE_OPTIONS} value={value} />;
+}
 
 /** Design do pop-up: o computador com espaco para o cartao G (520 px) no tamanho real. */
 const DESIGN_DESKTOP_STAGE: Stage = { caption: "Computador · tamanho real", minHeight: 560, width: 600 };
@@ -221,7 +251,7 @@ export function NoticePreview({ anchorExpiresAt, branding, className, device, dr
   const [pollPreview, setPollPreview] = useState<PreviewPoll>("before");
   const emptyTitle = !draft.title.trim();
 
-  if (draft.kind === "popup" && (draft.design || draft.freeDesign)) {
+  if (draft.kind === "popup" && !previewHasDeviceChoice(draft)) {
     const item = draftToPopupItem({ ...draft, allowSnooze: draft.allowSnooze ?? true }, { fonts, imageUrl });
     // Livre (docs/27): o computador com espaco para a largura escolhida (ate 720 px) no tamanho real.
     const desktopStage = draft.freeDesign

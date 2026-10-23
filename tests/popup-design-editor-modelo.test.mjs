@@ -707,6 +707,27 @@ test("comparacao: o mesmo design com cor maiuscula e texto com espaco conta como
  * Vocabulario
  * ---------------------------------------------------------------------------------------------- */
 
+/**
+ * O codigo sem os nomes que dizem "template" (docs/28 §5.8): identificadores (`TemplateNameDialog`, `templateMode`,
+ * `saveTemplate`, a prop `templates` declarada, desestruturada ou passada) e os caminhos de import. O texto do JSX, as
+ * strings e os comentarios ficam: ali "template" continua proibido.
+ */
+function semNomesDeCodigo(fonte) {
+  return fonte
+    .replace(/(?:from\s+|import\()\s*["'][^"']*["']/g, "")
+    .replace(/[\w$]*(?:Template|TEMPLATE)[\w$]*|\btemplate[A-Z][\w$]*/g, "")
+    .replace(/\btemplates(?=\??:|\s*=[^=>]|\?\.|\.[a-zA-Z])/g, "");
+}
+
+test("vocabulario: nomes de codigo com template saem da conferencia; o texto da tela nao", () => {
+  assert.equal(semNomesDeCodigo('import { saveTemplate } from "@/server/communications/template-actions";').includes("emplate"), false);
+  assert.equal(semNomesDeCodigo("  templates?: { onApplied } | null;\n  templates: mine = null\n  templates={mine}").includes("emplate"), false);
+  assert.equal(semNomesDeCodigo("<TemplateNameDialog templateMode={x} />").includes("emplate"), false);
+  assert.ok(semNomesDeCodigo("<p>Meus templates</p>").includes("templates"), "texto no JSX continua conferido");
+  assert.ok(semNomesDeCodigo('label="Usar template"').includes("template"), "strings continuam conferidas");
+  assert.ok(semNomesDeCodigo("// escolha um template").includes("template"), "comentarios continuam conferidos");
+});
+
 test("vocabulario: os textos do card Design nao usam palavra fora do vocabulario da equipe", async () => {
   const textos = collectStrings([
     editor.POPUP_DESIGN_COPY,
@@ -780,9 +801,14 @@ test("vocabulario: os textos do card Design nao usam palavra fora do vocabulario
   for (const arquivo of (await readdir(pasta)).filter((file) => file.endsWith(".tsx"))) {
     const fonte = await readFile(new URL(arquivo, pasta), "utf8");
 
-    // "trigger" e "home" aparecem em nomes de codigo (SelectTrigger, HOME_PAGE_LINKS); o resto nunca.
+    // "trigger" e "home" aparecem em nomes de codigo (SelectTrigger, HOME_PAGE_LINKS); o resto nunca. Desde os Modelos
+    // (docs/28 §5.8), "template" tambem e nome de codigo (a prop `templates`, template-actions, TemplateNameDialog):
+    // tirados esses nomes e os caminhos de import, "template" nunca aparece (nem no JSX, nem nas strings, nem nos
+    // comentarios).
     for (const palavra of PROIBIDAS.filter((item) => item !== "trigger" && item !== "home")) {
-      assert.ok(!fonte.toLocaleLowerCase("pt-BR").includes(palavra), `${arquivo} usa "${palavra}"`);
+      const texto = palavra === "template" ? semNomesDeCodigo(fonte) : fonte;
+
+      assert.ok(!texto.toLocaleLowerCase("pt-BR").includes(palavra), `${arquivo} usa "${palavra}"`);
     }
   }
 });

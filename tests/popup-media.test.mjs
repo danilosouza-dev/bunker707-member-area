@@ -133,7 +133,7 @@ test("fonte: acima de 2 MB e 413 e formato errado e 422 antes de tocar no Storag
 });
 
 /** Storage falso do bucket de video + fetch falso do endereco publico (registra os pedidos). */
-function videoStorage({ contentType, head, size }) {
+function videoStorage({ contentType, createdAt = undefined, head, size }) {
   const removed = [];
   const requests = [];
   const db = {
@@ -142,7 +142,8 @@ function videoStorage({ contentType, head, size }) {
         assert.equal(bucket, model.POPUP_VIDEO_BUCKET);
         return {
           getPublicUrl: (path) => ({ data: { publicUrl: `https://projeto.supabase.co/storage/v1/object/public/${bucket}/${path}` } }),
-          info: async () => (size === null ? { data: null, error: { message: "Object not found", status: 400, statusCode: "404" } } : { data: { contentType, size }, error: null }),
+          info: async () =>
+            size === null ? { data: null, error: { message: "Object not found", status: 400, statusCode: "404" } } : { data: { contentType, createdAt, size }, error: null },
           remove: async (paths) => (removed.push(...paths), { data: [], error: null })
         };
       }
@@ -194,7 +195,7 @@ test("video enviado: pede so os primeiros 64 bytes (Range) e para de ler mesmo s
   }
 });
 
-test("video enviado: bytes de outro tipo, tipo gravado diferente ou tamanho acima de 15 MB apagam o objeto; inexistente e 404", async () => {
+test("video enviado: bytes de outro tipo, tipo gravado diferente ou tamanho acima de 15 MB sao recusados e o objeto fica (sem pedir para apagar); inexistente e 404", async () => {
   const casos = [
     { esperado: { message: "Use um vídeo MP4 (H.264) ou WEBM.", status: 422 }, head: bytes("<html>"), nome: "HTML com extensao .mp4", size: 900 },
     { esperado: { message: "Use um vídeo MP4 (H.264) ou WEBM.", status: 422 }, head: fixture("video-de-teste.webm").subarray(0, 64), nome: "webm com extensao .mp4", size: 900 },
@@ -212,7 +213,7 @@ test("video enviado: bytes de outro tipo, tipo gravado diferente ou tamanho acim
         (error) => ({ message: error.message, status: error.status })
       );
       assert.deepEqual(erro, caso.esperado, caso.nome);
-      assert.deepEqual(fake.removed, [path], `${caso.nome}: o objeto e apagado`);
+      assert.deepEqual(fake.removed, [], `${caso.nome}: sem removeRefused, o recusado nunca e apagado (docs/28 D16)`);
     } finally {
       fake.restore();
     }
@@ -226,5 +227,57 @@ test("video enviado: bytes de outro tipo, tipo gravado diferente ou tamanho acim
     assert.deepEqual(faltando.requests, [], "nem pede os bytes");
   } finally {
     faltando.restore();
+  }
+});
+
+test("video recusado: so e apagado quando removeRefused devolve true (recebe o createdAt do info); o aceito nunca pergunta", async () => {
+  const CRIADO = "2026-10-23T12:00:00.000Z";
+  const recusar = { contentType: "video/mp4", createdAt: CRIADO, head: bytes("<html>"), size: 900 };
+
+  for (const [resposta, apagado] of [
+    [false, false],
+    [true, true]
+  ]) {
+    const path = media.newPopupVideoPath("video/mp4");
+    const fake = videoStorage(recusar);
+    const perguntas = [];
+
+    try {
+      const erro = await media
+        .inspectPopupVideo(fake.db, path, {
+          removeRefused: async (objeto) => {
+            perguntas.push(objeto);
+            return resposta;
+          }
+        })
+        .catch((error) => ({ message: error.message, status: error.status }));
+      assert.deepEqual(erro, { message: "Use um vídeo MP4 (H.264) ou WEBM.", status: 422 });
+      assert.deepEqual(perguntas, [{ createdAt: CRIADO }], "a decisao recebe a data de criacao do objeto");
+      assert.deepEqual(fake.removed, apagado ? [path] : [], `removeRefused devolveu ${resposta}`);
+    } finally {
+      fake.restore();
+    }
+  }
+
+  // Sem createdAt no info(): a decisao recebe null (e quem decide nao apaga).
+  const semData = videoStorage({ ...recusar, createdAt: undefined });
+
+  try {
+    const perguntas = [];
+    await media.inspectPopupVideo(semData.db, media.newPopupVideoPath("video/mp4"), { removeRefused: async (objeto) => (perguntas.push(objeto), false) }).catch(() => null);
+    assert.deepEqual(perguntas, [{ createdAt: null }]);
+  } finally {
+    semData.restore();
+  }
+
+  // O video que passa nunca chama removeRefused.
+  const bom = videoStorage({ contentType: "video/mp4", createdAt: CRIADO, head: fixture("video-de-teste.mp4").subarray(0, 64), size: 2_862 });
+
+  try {
+    const { video } = await media.inspectPopupVideo(bom.db, media.newPopupVideoPath("video/mp4"), { removeRefused: async () => assert.fail("nao devia perguntar") });
+    assert.equal(video.mimeType, "video/mp4");
+    assert.deepEqual(bom.removed, []);
+  } finally {
+    bom.restore();
   }
 });

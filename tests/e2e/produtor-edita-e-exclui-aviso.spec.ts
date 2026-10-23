@@ -13,11 +13,11 @@ import {
 } from "./fixtures";
 
 // CRUD dos avisos no navegador (docs/24 §2.1 a §2.4 e §11; docs/18 §3.1): o ⋯ de uma notificacao enviada
-// mostra Ver relatório, Editar, Duplicar, Retirar do sino e Excluir; Editar troca o titulo e a aluna ve o
-// novo sem a bolinha de nao lida voltar; Excluir tira da lista e do sino dela. Um pop-up no ar em "Uma vez"
-// que a aluna fechou (o que ela viu volta 25 h no tempo): ela nao ve de novo; ⋯ "Mostrar de novo para quem
-// já viu" -> "para 1 aluno" -> ela ve; o aluno que escolheu "Não mostrar de novo" nao ve. v3b-1 (docs/25
-// §2.4): em "Mais de uma vez" o editor e o ⋯ continuam com "Mostrar de novo" (vale em qualquer "Quantas
+// mostra Ver relatório, Editar, Duplicar, Salvar como modelo (docs/28), Retirar do sino e Excluir; Editar troca o
+// titulo e a aluna ve o novo sem a bolinha de nao lida voltar; Excluir tira da lista e do sino dela. Um pop-up no
+// ar em "Uma vez" que a aluna fechou (o que ela viu volta 25 h no tempo): ela nao ve de novo; ⋯ "Mostrar de novo
+// para quem já viu" -> "para 1 aluno" -> ela ve; o aluno que escolheu "Não mostrar de novo" nao ve. v3b-1
+// (docs/25 §2.4): em "Mais de uma vez" o editor e o ⋯ continuam com "Mostrar de novo" (vale em qualquer "Quantas
 // vezes"). O pop-up e publicado pela tela: a lista de pop-ups no ar fica 60 s em cache no servidor e so a
 // publicacao a renova (como em aluno-ve-pop-up).
 
@@ -124,9 +124,10 @@ test.describe("alunos veem", () => {
 test.describe("produtor edita e mostra de novo", () => {
   test.use({ storageState: SESSAO_DO_PRODUTOR });
 
-  test("⋯ da notificação enviada: Ver relatório, Editar, Duplicar, Retirar do sino e Excluir; Editar troca o título", async ({ page }) => {
+  test("⋯ da notificação enviada: Ver relatório, Editar, Duplicar, Salvar como modelo, Retirar do sino e Excluir; Editar troca o título", async ({ page }) => {
     const itens = await abrirMenuDaLinha(page, ENVIADA);
-    await expect(itens).toHaveText(["Ver relatório", "Editar", "Duplicar", "Retirar do sino", "Excluir"]);
+    // "Salvar como modelo" (docs/28 §1.3) entra logo depois de Duplicar.
+    await expect(itens).toHaveText(["Ver relatório", "Editar", "Duplicar", "Salvar como modelo", "Retirar do sino", "Excluir"]);
     await page.getByRole("menuitem", { name: "Editar" }).click();
 
     await expect(page).toHaveURL(new RegExp(`/admin/comunicacao/avisos/${idDaEnviada}\\?editar=1$`));

@@ -32,6 +32,10 @@
 // Design do pop-up (docs/26): o rascunho do pop-up leva `design` (null = Padrão; ausente = o gravado na linha);
 // salvar confere as fontes na biblioteca e recalcula o endereco do video a partir do caminho (so o nosso
 // bucket); publicar e aprovar conferem as fontes de novo; duplicar copia o design; a auditoria leva "design".
+//
+// Modelos (docs/28 D16): as conferencias de arquivo moram em design-checks.ts e nunca apagam (o recusado fica para
+// a limpeza); o aviso que comeca de um modelo manda `fromTemplates`, e os arquivos do design desses modelos contam
+// como ja conferidos (auditoria "communication.template_used" so com os ids encontrados).
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -82,6 +86,7 @@ import {
   type CampaignStatus
 } from "./campaign-model";
 import { assertNoDbError, communicationsDb, CommunicationError, NoticeFieldError, type CommunicationsDb } from "./db";
+import { checkCustomDesignFiles, checkFreeDesignFiles } from "./design-checks";
 import { dispatchInboxCampaign, refreshPopupDeliveries } from "./dispatch";
 import { forgetOrphanMark } from "./media-cleanup";
 import {
@@ -121,22 +126,21 @@ import {
 import {
   defaultPopupSettings,
   frequencyOfColumns,
+  popupFrequencyToSave,
   popupSettingsOfRow,
   POPUP_V3B1_RULES,
-  reconcilePopupFrequency,
   repeatOfFrequency,
   type PopupFrequency
 } from "./popup-display-model";
-import { assertPopupDesignFonts, withOwnStorageUrls } from "./popup-fonts";
-import { popupCardImagePathOf, type PopupDesign } from "./popup-design-model";
-import { parsePopupDesign, POPUP_DESIGN_MESSAGES, popupDesignContentProblems } from "./popup-design-schema";
-import { parseStoredPopupDesign, popupDesignKindOf, storedPopupDesignAssetPaths, storedPopupDesignFontIds } from "./popup-design-router";
-import { assertPopupFreeAssets } from "./popup-free-assets";
+import { assertPopupDesignFonts } from "./popup-fonts";
+import { parsePopupDesign, popupDesignContentProblems } from "./popup-design-schema";
+import { parseStoredPopupDesign, popupDesignKindOf, storedPopupDesignFontIds } from "./popup-design-router";
 import type { PopupFreeDesign } from "./popup-free-model";
 import { POPUP_FREE_MESSAGES, popupFreeContentProblems } from "./popup-free-schema";
-import { inspectPopupCardImage, inspectPopupVideo } from "./popup-media";
 import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, noticeDraftOfRow, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
+import { TEMPLATE_LIMITS } from "./template-model";
+import { fetchTemplatesByIds, type TemplateRow } from "./template-store";
 import {
   deleteNoticeSchema,
   noticeDraftSchema,
@@ -430,10 +434,12 @@ function withPopupSettings(draft: NoticeDraft, stored: CampaignRow | null): Noti
 
   const row = stored?.kind === "popup" ? stored : null;
   const base = draft.popup ?? (row ? popupSettingsOfRow(row) : defaultPopupSettings());
-  const reconciled = reconcilePopupFrequency({ frequency: draft.popup?.frequency, repeat: draft.repeat, stored: row ? frequencyOfColumns(row) : null });
-  const fromRepeat = reconciled !== draft.popup?.frequency;
-  const frequency: PopupFrequency =
-    fromRepeat && !draft.cta && reconciled.mode === "repeat" && reconciled.stopOn === "click" ? { ...reconciled, stopOn: "never" } : reconciled;
+  const frequency: PopupFrequency = popupFrequencyToSave({
+    frequency: draft.popup?.frequency,
+    hasCta: Boolean(draft.cta),
+    repeat: draft.repeat,
+    stored: row ? frequencyOfColumns(row) : null
+  });
   const { design, freeDesign } = popupDesignsToSave(draft, row);
 
   return { ...draft, design, freeDesign, popup: { ...base, frequency }, repeat: repeatOfFrequency(frequency) };
@@ -462,12 +468,13 @@ function popupDesignsToSave(draft: NoticeDraft, row: CampaignRow | null): Pick<N
 /**
  * Design do pop-up (docs/26) antes de gravar: os enderecos do video e da imagem do fundo do cartao
  * recalculados do caminho (nunca o que veio do navegador), o video novo e a imagem nova conferidos no Storage
- * e as fontes enviadas conferidas na biblioteca (400 em design.fonts quando uma saiu). `row` = a linha
- * gravada (null num aviso novo).
+ * (design-checks.ts; o recusado recebe 400 no campo e nunca e apagado, docs/28 D16) e as fontes enviadas conferidas
+ * na biblioteca (400 em design.fonts quando uma saiu). `row` = a linha gravada (null num aviso novo); `known` = os
+ * designs dos modelos de onde o aviso veio (docs/28 D16 b): os arquivos deles, como os da linha, ja foram conferidos.
  */
-async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: CampaignRow | null): Promise<NoticeDraft> {
+async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: CampaignRow | null, known: readonly unknown[] = []): Promise<NoticeDraft> {
   if (draft.kind === "popup" && draft.freeDesign) {
-    return withCheckedFreeDesign(db, draft, draft.freeDesign, row);
+    return withCheckedFreeDesign(db, draft, draft.freeDesign, row, known);
   }
 
   if (draft.kind !== "popup" || !draft.design) {
@@ -482,10 +489,8 @@ async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: 
   }
 
   await assertPopupDesignFonts(db, draft.design);
-  await assertPopupDesignVideo(db, draft.design, row);
-  await assertPopupDesignCardImage(db, draft.design, row);
 
-  return { ...draft, design: withOwnStorageUrls(db, draft.design) };
+  return { ...draft, design: await checkCustomDesignFiles(db, draft.design, [row?.popup_design ?? null, ...known]) };
 }
 
 /**
@@ -493,7 +498,13 @@ async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: 
  * continuam na biblioteca (400 em freeDesign.fonts) e cada arquivo novo e conferido no Storage, com as medidas
  * das imagens trocadas pelas do servidor (400 em freeDesign.assets.<id>).
  */
-async function withCheckedFreeDesign(db: CommunicationsDb, draft: NoticeDraft, freeDesign: PopupFreeDesign, row: CampaignRow | null): Promise<NoticeDraft> {
+async function withCheckedFreeDesign(
+  db: CommunicationsDb,
+  draft: NoticeDraft,
+  freeDesign: PopupFreeDesign,
+  row: CampaignRow | null,
+  known: readonly unknown[]
+): Promise<NoticeDraft> {
   const [problem] = popupFreeContentProblems(freeDesign, draft);
 
   if (problem) {
@@ -502,7 +513,7 @@ async function withCheckedFreeDesign(db: CommunicationsDb, draft: NoticeDraft, f
 
   await assertPopupDesignFonts(db, freeDesign, "freeDesign.fonts");
 
-  return { ...draft, freeDesign: await assertPopupFreeAssets(db, freeDesign, row?.popup_design ?? null) };
+  return { ...draft, freeDesign: await checkFreeDesignFiles(db, freeDesign, [row?.popup_design ?? null, ...known]) };
 }
 
 /** As fontes do design gravado na linha (Livre ou Personalizado), para publicar e aprovar. */
@@ -519,60 +530,35 @@ async function assertStoredDesignFonts(db: CommunicationsDb, row: CampaignRow) {
 }
 
 /**
- * O video so entra no design conferido pelo servidor: um caminho que a linha gravada ainda nao usa
- * (storedPopupDesignAssetPaths, a mesma leitura do job da limpeza) passa de novo pela conferencia do envio (existe,
- * ate 15 MB, os primeiros bytes e o tipo gravado batem; o recusado e apagado). Sem isso, um objeto enviado pelo
- * endereco assinado sem passar por finishPopupVideoUpload seria aceito.
+ * Modelos de onde o aviso veio (docs/28 D16 b): as linhas encontradas (nao excluidas, ou excluidas ha menos de 29
+ * dias: o arquivo de um modelo excluido so sai 30 dias depois da marca da limpeza). Os designs delas contam como
+ * arquivos ja conferidos; os ids so vao para a auditoria quando a linha existe.
  */
-async function assertPopupDesignVideo(db: CommunicationsDb, design: PopupDesign, row: CampaignRow | null) {
-  const video = design.media.video;
-
-  if (!video || (row && storedPopupDesignAssetPaths(row.popup_design).includes(video.path))) {
-    return;
+async function templatesUsedBy(db: CommunicationsDb, ids: readonly string[] | undefined, now: Date): Promise<TemplateRow[]> {
+  if (!ids || ids.length === 0) {
+    return [];
   }
 
-  try {
-    await inspectPopupVideo(db, video.path);
-  } catch (error) {
-    if (error instanceof CommunicationError) {
-      throw new NoticeFieldError("design.media.video", error.message);
-    }
-
-    throw error;
-  }
+  return fetchTemplatesByIds(db, ids, { includeDeletedSince: new Date(now.getTime() - TEMPLATE_LIMITS.deletedKnownDays * 86_400_000) });
 }
 
-/**
- * A imagem do fundo do cartao so entra conferida: o schema ja garantiu o caminho do nosso bucket de imagens
- * (communications/images/<24 hex>.webp, qualquer origem no endereco: o servidor troca pela nossa); um caminho que
- * a linha gravada ainda nao usa precisa existir no Storage como WebP (400 em design.card.background.url).
- */
-async function assertPopupDesignCardImage(db: CommunicationsDb, design: PopupDesign, row: CampaignRow | null) {
-  const background = design.card.background;
+function templateDesignsOf(rows: readonly TemplateRow[]): unknown[] {
+  return rows.map((row) => (row.payload && typeof row.payload === "object" && !Array.isArray(row.payload) ? (row.payload as { design?: unknown }).design ?? null : null));
+}
 
-  if (background.kind !== "image") {
+/** "communication.template_used" (docs/28 §4.8): so quando algum modelo foi encontrado, so com os ids encontrados. */
+async function recordTemplateUse(db: CommunicationsDb, input: { actorId: string; created: boolean; noticeId: string; rows: readonly TemplateRow[] }) {
+  if (input.rows.length === 0) {
     return;
   }
 
-  const path = popupCardImagePathOf(background.url);
-
-  if (path && row && storedPopupDesignAssetPaths(row.popup_design).includes(path)) {
-    return;
-  }
-
-  try {
-    if (!path) {
-      throw new CommunicationError(POPUP_DESIGN_MESSAGES.cardImage, 400);
-    }
-
-    await inspectPopupCardImage(db, path);
-  } catch (error) {
-    if (error instanceof CommunicationError) {
-      throw new NoticeFieldError("design.card.background.url", error.message);
-    }
-
-    throw error;
-  }
+  await recordAudit(db, {
+    action: "communication.template_used",
+    actorId: input.actorId,
+    entityId: input.noticeId,
+    entityType: "campaign",
+    metadata: { created: input.created, template_ids: input.rows.map((row) => row.id) }
+  });
 }
 
 /** v3b-1: a auditoria do pop-up salvo ou publicado leva o momento, quantas paginas e o modo (so codigos e contagens). */
@@ -1120,8 +1106,12 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
 
     await assertSenderForSave(db, data.draft);
 
+    // Modelos (docs/28 D16 b): os arquivos do design dos modelos de onde o aviso veio ja foram conferidos.
+    const templates = await templatesUsedBy(db, data.fromTemplates, new Date());
+    const known = templateDesignsOf(templates);
+
     if (!data.id) {
-      const fresh = await withCheckedDesign(db, withPopupSettings(data.draft, null), null);
+      const fresh = await withCheckedDesign(db, withPopupSettings(data.draft, null), null, known);
       const created = await insertCampaign(db, { ...draftToColumns(fresh), created_by: user.id, status: "draft", updated_by: user.id });
 
       await recordAudit(db, {
@@ -1131,17 +1121,21 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
         entityType: "campaign",
         metadata: { created: true, kind: created.kind, sender_user_id: created.sender_user_id, ...popupAuditOf(created) }
       });
+      await recordTemplateUse(db, { actorId: user.id, created: true, noticeId: created.id, rows: templates });
       revalidateNotices();
 
       return { id: created.id, status: created.status, updatedAt: created.updated_at };
     }
 
     const current = await requireCampaign(db, data.id);
-    const draft = await withCheckedDesign(db, withPopupSettings(data.draft, current), current);
+    const draft = await withCheckedDesign(db, withPopupSettings(data.draft, current), current, known);
     const columns = draftToColumns(draft);
 
     if (current.kind === "inbox" && current.status === "sent") {
-      return saveSentNotice({ access, columns, current, data, db, userId: user.id });
+      const sent = await saveSentNotice({ access, columns, current, data, db, userId: user.id });
+      await recordTemplateUse(db, { actorId: user.id, created: false, noticeId: current.id, rows: templates });
+
+      return sent;
     }
 
     if (!isEditableStatus(current.kind, current.status)) {
@@ -1242,6 +1236,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
         ...popupAuditOf(saved)
       }
     });
+    await recordTemplateUse(db, { actorId: user.id, created: false, noticeId: saved.id, rows: templates });
     revalidateNotices(saved.id);
 
     return { flowUpdatedAt, id: saved.id, ...(reshown === undefined ? {} : { reshown }), status: saved.status, updatedAt: saved.updated_at };

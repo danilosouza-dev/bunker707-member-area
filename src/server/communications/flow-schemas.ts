@@ -330,7 +330,11 @@ export const followUpDraftSchema: z.ZodType<FollowUpDraft> = z.lazy(() =>
   })
 );
 
-function addFollowUpTreeIssues(followUps: readonly FollowUpDraft[], context: z.RefinementCtx) {
+/**
+ * A arvore das seguintes: ids sem repeticao, ate 3 niveis e no maximo FLOW_LIMITS.maxNodes ao todo (caminhos
+ * "followUps.0.children.1"). Exportada para as seguintes guardadas num modelo (template-model.ts, docs/28 D7).
+ */
+export function addFollowUpTreeIssues(followUps: readonly FollowUpDraft[], context: z.RefinementCtx) {
   const seen = new Set<string>();
   let total = 0;
 

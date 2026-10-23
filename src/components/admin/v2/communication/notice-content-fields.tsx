@@ -93,6 +93,8 @@ type NoticeContentFieldsProps = {
   showValidity: boolean;
   /** Acrescenta "Até a notificação principal sumir" (passo que conta de uma notificacao). */
   validityAnchor?: { label: string };
+  /** false: "Fica no sino por" sem "Até uma data" (modo modelo, docs/28 §5.6; a folha da seguinte repassa). */
+  validityAllowUntil?: boolean;
   /**
    * Pop-up "Personalizado" (docs/26) ou "Livre" (`"free"`, docs/27): sem texto, icone, imagem e destino aqui (vao
    * para o card Design; no Livre, para o editor Livre).
@@ -165,6 +167,7 @@ export function NoticeContentFields({
   sendAt,
   senders,
   showValidity,
+  validityAllowUntil = true,
   validityAnchor,
   value
 }: NoticeContentFieldsProps) {
@@ -473,6 +476,7 @@ export function NoticeContentFields({
         <Block layout={layout} title="Tempo no sino">
           <div className="flex min-w-0 flex-col gap-4">
             <NoticeValidityField
+              allowUntil={validityAllowUntil}
               anchorLabel={validityAnchor?.label}
               disabled={disabled}
               errors={validityErrors}

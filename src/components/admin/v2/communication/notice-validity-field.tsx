@@ -27,6 +27,11 @@ import {
 // frases e os campos. Um tempo gravado reabre na maior unidade exata (90 = 90 minutos, 120 = 2 horas).
 
 type NoticeValidityFieldProps = {
+  /**
+   * false: sem "Até uma data" no "Outro" (modo modelo, docs/28 D9: data fixa nunca vai para o modelo); o "Outro" fica
+   * so com "Por um tempo".
+   */
+  allowUntil?: boolean;
   /** "Até a notificação principal sumir" (so em passo que conta de uma notificacao). */
   anchorLabel?: string;
   disabled: boolean;
@@ -46,7 +51,7 @@ const OTHER_OPTIONS = [
 
 const labelClass = "text-[13px] leading-5 font-medium text-[var(--text-primary)]";
 
-export function NoticeValidityField({ anchorLabel, disabled, errors, idPrefix, onChange, sendAt, value }: NoticeValidityFieldProps) {
+export function NoticeValidityField({ allowUntil = true, anchorLabel, disabled, errors, idPrefix, onChange, sendAt, value }: NoticeValidityFieldProps) {
   const parts = value.mode === "duration" ? validityDurationParts(value.minutes) : null;
   const [unit, setUnit] = useState<ValidityUnit>(parts?.unit ?? "days");
   const [amountText, setAmountText] = useState(parts && Number.isFinite(parts.amount) ? String(parts.amount) : "");
@@ -80,6 +85,8 @@ export function NoticeValidityField({ anchorLabel, disabled, errors, idPrefix, o
   }
 
   const minutesError = errors.minutes ?? (value.mode === "duration" ? errors.validity : undefined);
+  // Sem "Até uma data" (modo modelo): o "Outro" mostra direto o tempo.
+  const untilShown = allowUntil && value.mode === "until";
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -97,17 +104,19 @@ export function NoticeValidityField({ anchorLabel, disabled, errors, idPrefix, o
 
       {choice === "other" ? (
         <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] p-3">
-          <PillGroup
-            ariaLabel="Outro tempo no sino"
-            disabled={disabled}
-            name={`${idPrefix}-outro`}
-            onChange={(mode) =>
-              onChange(mode === "until" ? { endsAt: value.mode === "until" ? value.endsAt : defaultWindowEnd(null, sendAt), mode: "until" } : validityOfChoice("other", { mode: "default" }))
-            }
-            options={OTHER_OPTIONS}
-            value={value.mode === "until" ? "until" : "duration"}
-          />
-          {value.mode === "until" ? (
+          {allowUntil ? (
+            <PillGroup
+              ariaLabel="Outro tempo no sino"
+              disabled={disabled}
+              name={`${idPrefix}-outro`}
+              onChange={(mode) =>
+                onChange(mode === "until" ? { endsAt: value.mode === "until" ? value.endsAt : defaultWindowEnd(null, sendAt), mode: "until" } : validityOfChoice("other", { mode: "default" }))
+              }
+              options={OTHER_OPTIONS}
+              value={value.mode === "until" ? "until" : "duration"}
+            />
+          ) : null}
+          {untilShown && value.mode === "until" ? (
             <DateTimeField
               disabled={disabled}
               error={errors.endsAt ?? errors.validity}

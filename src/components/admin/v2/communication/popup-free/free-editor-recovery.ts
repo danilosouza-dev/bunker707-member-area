@@ -21,6 +21,14 @@ export function freeRecoveryKey(noticeId: string | null | undefined): string {
   return `${FREE_RECOVERY_PREFIX}${noticeId && noticeId.trim() ? noticeId.trim() : "novo"}`;
 }
 
+/**
+ * A chave da copia de recuperacao do editor Livre num modelo (modo modelo de Pop-up e pagina do modelo de Design,
+ * docs/28 §5.9): "bunker707:livre:modelo:<id do modelo ou novo>", que nunca se confunde com a de um aviso.
+ */
+export function freeTemplateRecoveryKey(id: string | null | undefined): string {
+  return `${FREE_RECOVERY_PREFIX}modelo:${id && id.trim() ? id.trim() : "novo"}`;
+}
+
 /** O localStorage do navegador, ou null (sem janela, janela privada que recusa, bloqueado). */
 export function browserFreeRecoveryStorage(): FreeRecoveryStorage | null {
   try {

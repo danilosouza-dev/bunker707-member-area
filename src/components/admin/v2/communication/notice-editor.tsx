@@ -1,6 +1,6 @@
 "use client";
 
-import { ChartColumn, Hourglass, Info } from "lucide-react";
+import { BookmarkPlus, ChartColumn, Hourglass, Info } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -31,15 +31,28 @@ import { saveNoticeFollowUpsSchema } from "@/server/communications/flow-schemas"
 import { freeErrorKeys } from "@/server/communications/popup-free-schema";
 import { popupReviewParts } from "@/server/communications/popup-sentences";
 import type { NoticeDetail, NoticeEditorOptions } from "@/server/communications/queries";
-import { audienceDefinitionSchema, emptyNoticeDraft, noticeDraftSchema, popupSettingsSchema, publishProblems, type NoticeDraft } from "@/server/communications/schemas";
+import { audienceDefinitionSchema, emptyNoticeDraft, noticeDraftSchema, popupSettingsSchema, publishProblems, type NoticeDraft, type SaveNoticeInput } from "@/server/communications/schemas";
+import { saveTemplate } from "@/server/communications/template-actions";
+import {
+  TEMPLATE_LIMITS,
+  TEMPLATE_MESSAGES,
+  TEMPLATES_HREF,
+  hasReadNotes,
+  templateDraftInputSchema,
+  templateErrorsFromAction,
+  templateNameSchema,
+  type NoticeStart,
+  type TemplateInclude
+} from "@/server/communications/template-model";
+import type { TemplateEditorInput } from "@/server/communications/template-queries";
 import { ErrorBanner } from "../error-banner";
-import { PillGroup } from "../form";
+import { AdminField, PillGroup, adminInputClass, fieldDescribedBy } from "../form";
 import { AdminLinkButton } from "../link-button";
 import type { PreviewDevice } from "../member-area/preview-frame";
 import { AdminPage } from "../page-container";
 import { PageHeader } from "../page-header";
 import { useWarnBeforeUnload } from "../products/use-warn-before-unload";
-import { ConfirmDialog, SectionCard } from "../settings/kit";
+import { AdminSwitch, ConfirmDialog, SectionCard } from "../settings/kit";
 import { StatusChip } from "../status-chip";
 import type { ProductPickerItem } from "../storefront/product-picker";
 import { adminCard } from "../styles";
@@ -57,11 +70,13 @@ import {
   followUpsStateKey,
   followUpsToSave,
   followUpChoiceErrors,
+  followUpDraftsOf,
   followUpErrorAt,
   followUpTreeErrors,
   goalOfStopLine,
   parentOfItem,
   popupSwitchConfirm,
+  stopGoalDefinition,
   stopLineOfGoal,
   stopProductName,
   type FollowUpFormItem,
@@ -70,15 +85,36 @@ import {
 } from "./follow-ups-view-model";
 import { NoticeContentFields } from "./notice-content-fields";
 import { NoticeFollowUps, ViewAsFlowLink } from "./notice-follow-ups";
-import { NoticePreview } from "./notice-preview";
+import { NoticePreview, PreviewDeviceChoice } from "./notice-preview";
 import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./notice-row-menu";
 import { NoticeValidityField } from "./notice-validity-field";
 import { NoticeWhenFields } from "./notice-when-fields";
 import { PopupFrequencyFields } from "./popup-frequency-fields";
 import { PopupDesignField } from "./popup-design/popup-design-field";
 import { isFreeProblemKey, popupDesignFocusSelector, withSyncedDesign } from "./popup-design/popup-design-editor-model";
+import { freeTemplateRecoveryKey } from "./popup-free/free-editor-recovery";
 import { PopupPlacementFields } from "./popup-placement-fields";
 import { POPUP_EDITOR_COPY, placementUiOf, popupPlacementProblems, popupSettingsOfDraft, type PopupPlacementUi } from "./popup-editor-model";
+import { isEditorSaveShortcut } from "./save-shortcut";
+import { SaveAsTemplateDialog } from "./templates/save-as-template-dialog";
+import {
+  TEMPLATE_EDITOR_COPY,
+  noticeEditorModeOf,
+  noticeFromTemplateHref,
+  noticeStartNotes,
+  recentTemplateIds,
+  sameTemplateInclude,
+  savedFollowUpsOfDrafts,
+  templateContentDescription,
+  templateDraftForSave,
+  templateEditHref,
+  templateEditorHidden,
+  templateEditorTitle,
+  templateHidesCtaDestination,
+  templateNameCounter,
+  templateSaveFailureTitle,
+  undoTemplateUse
+} from "./template-editor-model";
 import {
   NOTHING_TO_SAVE_MESSAGE,
   NOTICES_HREF,
@@ -151,6 +187,15 @@ import {
 //   aberto, o primeiro salvar de um aviso novo guarda o id em vez de trocar de endereco (trocar remontaria tudo e
 //   levaria o historico do editor); no Concluir sem mudanca depois do ultimo salvar, troca. O Ctrl+Enter daqui
 //   nao age com o editor Livre aberto (ele tem o proprio salvar).
+// - Modelos (docs/28 §5.6): `start` abre um aviso novo preenchido por um modelo (/avisos/novo?modelo=; nada e gravado
+//   ate salvar, D5) e `template` abre o editor em modo modelo (/modelos/novo e /modelos/[id] de notificacao e de
+//   pop-up): o card Modelo (nome e as chaves "Levar o conteúdo", "Levar o segmento" e "Levar as notificações
+//   seguintes"), sem envio, janela, "Até uma data", fim da enquete, teste, aprovacao e Publicar; o salvar e o
+//   saveTemplate (409 "mudou em outra tela" com Recarregar e rebase como no aviso). Os dois sao lidos so na montagem
+//   (D28). `usedTemplateIds` (os modelos aplicados neste editor, ate 5) vai em fromTemplates do aviso e em
+//   sourceTemplateIds do modelo (D16 b), perde o modelo no Desfazer do toast de "Usar este modelo" (undoTemplateUse)
+//   e zera no salvar. Fora do modo modelo, "Salvar como modelo" no cabecalho abre o dialogo com o que esta na tela
+//   (D11) e nao recarrega nada.
 
 type NoticeEditorProps = {
   /** Tipo de um aviso novo (?tipo=popup abre em pop-up). */
@@ -160,7 +205,18 @@ type NoticeEditorProps = {
   now: number;
   options: NoticeEditorOptions;
   permissions: NoticePermissions;
+  /** Aviso novo comecando de um modelo (/avisos/novo?modelo=). Lido so na montagem (D28). */
+  start?: NoticeStart | null;
+  /** Nota do topo quando o ?modelo= nao abriu: "missing" -> startMissing; "unreadable" -> startUnreadable. */
+  startProblem?: "missing" | "unreadable" | null;
+  /** Modo modelo (/modelos/novo?tipo=notificacao|popup e /modelos/[id] de inbox/popup). Lido so na montagem (D28). */
+  template?: TemplateEditorInput | null;
 };
+
+/** Modelo novo: as tres chaves ligadas (D31). */
+const ALL_INCLUDED: TemplateInclude = { audience: true, content: true, followUps: true };
+/** O modelo gravado que este editor conhece (a versao do 409). */
+type SavedTemplateVersion = { id: string; updatedAt: string };
 
 type Failure = { message: string; status: number; title: string };
 /**
@@ -176,11 +232,6 @@ const KIND_OPTIONS = [
   { label: "Notificação no sino", value: "inbox" },
   { label: "Pop-up", value: "popup" }
 ] as const satisfies readonly { label: string; value: CampaignKind }[];
-
-const DEVICE_OPTIONS = [
-  { label: "Computador", value: "desktop" },
-  { label: "Celular", value: "mobile" }
-] as const satisfies readonly { label: string; value: PreviewDevice }[];
 
 const COUNT_DEBOUNCE_MS = 500;
 /**
@@ -207,6 +258,8 @@ function focusTargetOf(selector: string): HTMLElement | null {
 
 /** Elemento que recebe foco quando o campo tem erro (na ordem da tela). */
 const FIELD_FOCUS: readonly [string, string][] = [
+  // Modo modelo (docs/28 §5.6): o nome do modelo, no card Modelo do topo.
+  ["name", "#modelo-nome"],
   ["kind", "[name='aviso-tipo']"],
   ["title", "#aviso-titulo"],
   ["body", "#aviso-texto"],
@@ -327,6 +380,16 @@ function followUpsStateOf(detail: NoticeDetail | null, entryId: string): { items
   };
 }
 
+/** As seguintes de um modelo (ids gravados ou novos: quem preparou decide) no formato do cartao. */
+function followUpsStateOfStart(begin: NoticeStart | null, entryId: string): { items: FollowUpFormItem[]; stop: FollowUpStopLine } {
+  const followUps = begin?.followUps ?? null;
+
+  return {
+    items: begin && followUps ? followUpFormItemsOf(savedFollowUpsOfDrafts(followUps.items), followUpParentOf(entryId, "main", begin.draft)) : [],
+    stop: stopLineOfGoal(followUps?.goal ? stopGoalDefinition(followUps.goal.productId) : null)
+  };
+}
+
 /** Placeholders validos para conferir as seguintes no navegador com o mesmo schema da Server Action. */
 const FOLLOW_UPS_CHECK_INPUT = { expectedNoticeUpdatedAt: "2026-01-01T00:00:00.000Z", noticeId: "00000000-0000-4000-8000-000000000000" } as const;
 
@@ -339,10 +402,42 @@ function Note({ children, icon }: { children: ReactNode; icon?: ReactNode }) {
   );
 }
 
-export function NoticeEditor({ defaultKind, initial, now, options, permissions }: NoticeEditorProps) {
+export function NoticeEditor({ defaultKind, initial, now, options, permissions, start = null, startProblem = null, template = null }: NoticeEditorProps) {
   const router = useRouter();
-  const [draft, setDraft] = useState<NoticeDraft>(() => initial?.draft ?? emptyNoticeDraft(defaultKind));
-  const [saved, setSaved] = useState<NoticeDraft>(() => initial?.draft ?? emptyNoticeDraft(defaultKind));
+  // D28: o modelo de onde o editor comeca (aviso novo de um modelo ou o modo modelo) e lido so aqui, na montagem: uma
+  // prop nova (a pagina desenhada de novo) nunca troca o rascunho. A unica excecao e o rebase depois do 409, abaixo.
+  const [mount] = useState(() => {
+    const mode = noticeEditorModeOf({ initial, start, template });
+
+    return { begin: mode === "template" ? (template?.start ?? null) : mode === "start" ? start : null, mode, startProblem: mode === "new" ? startProblem : null };
+  });
+  const begin = mount.begin;
+  const templateMode = mount.mode === "template";
+  const hidden = templateEditorHidden(mount.mode);
+  const [draft, setDraft] = useState<NoticeDraft>(() => initial?.draft ?? begin?.draft ?? emptyNoticeDraft(defaultKind));
+  // Aviso novo de um modelo: o gravado e o vazio (a tela ja comeca com mudanca). Modo modelo: o modelo aberto.
+  const [saved, setSaved] = useState<NoticeDraft>(() =>
+    initial?.draft ?? (templateMode && begin ? begin.draft : emptyNoticeDraft(begin?.draft.kind ?? defaultKind))
+  );
+  // Modo modelo (docs/28 §5.6): o nome, as chaves (D31), a versao gravada (409), as notas de leitura e a pergunta de
+  // D29 antes do primeiro salvar de um modelo com uma parte que nao abriu.
+  const [templateName, setTemplateName] = useState(() => template?.name ?? "");
+  const [savedTemplateName, setSavedTemplateName] = useState(() => template?.name ?? "");
+  const [include, setInclude] = useState<TemplateInclude>(() => template?.include ?? ALL_INCLUDED);
+  const [savedInclude, setSavedInclude] = useState<TemplateInclude>(() => template?.include ?? ALL_INCLUDED);
+  const [templateVersion, setTemplateVersion] = useState<SavedTemplateVersion | null>(() =>
+    template?.id && template.updatedAt ? { id: template.id, updatedAt: template.updatedAt } : null
+  );
+  const [serverTemplateVersion, setServerTemplateVersion] = useState<string | null>(template?.updatedAt ?? null);
+  const [templateNotes, setTemplateNotes] = useState<string[]>(() => (templateMode ? (template?.notes ?? []) : []));
+  const [readPending, setReadPending] = useState(() => templateMode && hasReadNotes(template?.notes ?? []));
+  const [confirmRead, setConfirmRead] = useState(false);
+  const pendingTemplateId = useRef<string | null>(null);
+  // Os modelos aplicados neste editor (o de inicio sempre, os 5 mais recentes): arquivos ja conferidos no salvar.
+  const [usedTemplateIds, setUsedTemplateIds] = useState<string[]>(() => (mount.mode === "start" && start?.templateId ? [start.templateId] : []));
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
+  // Modo modelo: as seguintes como estao gravadas no modelo ("Descartar mudanças" volta a elas).
+  const savedTemplateFollowUps = useRef<{ entryId: string; state: { items: FollowUpFormItem[]; stop: FollowUpStopLine } } | null>(null);
   const [savedVersion, setSavedVersion] = useState<SavedVersion | null>(() =>
     initial ? { id: initial.id, status: initial.status, updatedAt: initial.updatedAt } : null
   );
@@ -380,14 +475,25 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const saveShortcut = useRef<() => void>(() => undefined);
   // v2 "Depois desta notificação": as seguintes (estado do formulario: trocar para pop-up e voltar antes de
   // salvar traz de volta), a versao do fluxo do aviso e o que foi gravado por ultimo (dirty).
-  const [entryId, setEntryId] = useState(() => initial?.followUps?.entryNodeId ?? crypto.randomUUID());
-  const [followUps, setFollowUps] = useState(() => followUpsStateOf(initial, initial?.followUps?.entryNodeId ?? ""));
+  const [entryId, setEntryId] = useState(() => initial?.followUps?.entryNodeId ?? begin?.followUps?.entryId ?? crypto.randomUUID());
+  const [followUps, setFollowUps] = useState(() =>
+    initial ? followUpsStateOf(initial, initial.followUps?.entryNodeId ?? "") : followUpsStateOfStart(begin, begin?.followUps?.entryId ?? "")
+  );
   const [flowVersion, setFlowVersion] = useState<{ flowId: string | null; updatedAt: string | null }>(() => ({
     flowId: initial?.followUps?.flowId ?? null,
     updatedAt: initial?.followUps?.updatedAt ?? null
   }));
   const [serverFlowVersion, setServerFlowVersion] = useState<string | null>(initial?.followUps?.updatedAt ?? null);
   const [savedFollowUpsKey, setSavedFollowUpsKey] = useState(() => {
+    // Modo modelo: as seguintes que o modelo tem (sem mudanca ao abrir). Aviso novo (de um modelo ou nao): o vazio,
+    // entao as seguintes do modelo sao gravadas no primeiro salvar.
+    if (templateMode && begin) {
+      const entry = begin.followUps?.entryId ?? "";
+      const state = followUpsStateOfStart(begin, entry);
+
+      return followUpsStateKey(state.items, state.stop, followUpParentOf(entry, "main", begin.draft));
+    }
+
     const entry = initial?.followUps?.entryNodeId ?? "";
     const state = followUpsStateOf(initial, entry);
 
@@ -403,7 +509,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const [reshow, setReshow] = useState(false);
   // v3b-1: o estado da tela do card "Quando e onde aparece" que nao vira padrao (volta ao gravado junto com
   // o rascunho: Recarregar, Descartar).
-  const [popupUi, setPopupUi] = useState<PopupPlacementUi>(() => placementUiOf(popupSettingsOfDraft(initial?.draft ?? emptyNoticeDraft(defaultKind))));
+  const [popupUi, setPopupUi] = useState<PopupPlacementUi>(() => placementUiOf(popupSettingsOfDraft(initial?.draft ?? begin?.draft ?? emptyNoticeDraft(defaultKind))));
 
   if (initial && initial.updatedAt !== serverVersion) {
     setServerVersion(initial.updatedAt);
@@ -436,12 +542,15 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const followUpsKey = followUpsStateKey(followUps.items, followUps.stop, mainFollowUpParent);
   // Pop-up com fluxo gravado: salvar tira o fluxo (tambem o que so o construtor desenha).
   // Notificacao enviada: as seguintes mudam no relatorio, nunca por este salvar.
-  const followUpsDirty =
-    draft.kind === "popup"
+  // Modo modelo: so o que mudou desde o modelo aberto (o modelo nao tem fluxo).
+  const followUpsDirty = templateMode
+    ? draft.kind === "inbox" && followUpsKey !== savedFollowUpsKey
+    : draft.kind === "popup"
       ? flowVersion.flowId !== null
       : !sentMode && followUpsEditable && (followUpsKey !== savedFollowUpsKey || (flowVersion.flowId === null && followUps.items.length > 0));
   const followUpsCount = followUps.items.length > 0 ? countFollowUps(followUps.items) : flowVersion.flowId ? (initial?.followUps?.count ?? 0) : 0;
-  const dirty = !isSameNoticeDraft(saved, draft) || followUpsDirty;
+  const templateDirty = templateMode && (templateName !== savedTemplateName || !sameTemplateInclude(include, savedInclude));
+  const dirty = !isSameNoticeDraft(saved, draft) || followUpsDirty || templateDirty;
   const uploading = imageUpload !== null || followUpUpload !== null;
   // v3a: o "Mostrar de novo" so vale enquanto aparece (pop-up no ar; v3b-1: qualquer "Quantas vezes") e ha
   // alguem para mostrar.
@@ -467,21 +576,67 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }
   }
 
+  // Modo modelo: o modelo mudou no servidor ("Recarregar" depois de um 409). Como no aviso, o que o produtor nao mexeu
+  // passa a ser o da versao nova (rascunho, nome, chaves e, sem mudanca local, as seguintes); o resto fica.
+  if (templateMode && template && template.updatedAt !== serverTemplateVersion) {
+    setServerTemplateVersion(template.updatedAt);
+
+    if (template.id && template.updatedAt && (!templateVersion || Date.parse(template.updatedAt) !== Date.parse(templateVersion.updatedAt))) {
+      const next = template.start.draft;
+      const rebased = rebaseNoticeDraft(saved, draft, next);
+
+      setDraft(rebased);
+      setSaved(next);
+      setTemplateName(templateName === savedTemplateName ? template.name : templateName);
+      setSavedTemplateName(template.name);
+      setInclude(sameTemplateInclude(include, savedInclude) ? template.include : include);
+      setSavedInclude(template.include);
+      setTemplateVersion({ id: template.id, updatedAt: template.updatedAt });
+      setTemplateNotes(template.notes);
+      setReadPending(hasReadNotes(template.notes));
+      setFailure(null);
+      setServerErrors({});
+      setResetKey((key) => key + 1);
+      setPopupUi(placementUiOf(popupSettingsOfDraft(rebased)));
+
+      if (!followUpsDirty) {
+        const entry = template.start.followUps?.entryId ?? entryId;
+        const state = followUpsStateOfStart(template.start, entry);
+
+        setEntryId(entry);
+        setFollowUps(state);
+        setSavedFollowUpsKey(followUpsStateKey(state.items, state.stop, followUpParentOf(entry, "main", next)));
+        savedTemplateFollowUps.current = { entryId: entry, state };
+      }
+    }
+  }
+
   const locked = busy !== null;
   const pickerItems = useMemo(() => toPickerItems(options.products), [options.products]);
   const payload = useMemo(() => noticeDraftForKind(draft), [draft]);
   const popupSettings = useMemo(() => popupSettingsOfDraft(draft), [draft]);
+  // Modo modelo de Pop-up com design e "Levar o conteúdo" desligado: o destino do botao principal nunca vai para o
+  // modelo, entao o card Design esconde o campo e o salvar manda o destino vazio (templateDraftForSave).
+  const ctaDestinationHidden = templateMode && templateHidesCtaDestination({ content: include.content, draft });
   const clientErrors = useMemo(() => {
-    const parsed = noticeDraftSchema.safeParse(payload);
+    // Modo modelo: o rascunho afrouxado do modelo (D8: textos obrigatorios podem ficar vazios) e o nome; o destino
+    // escondido nao conta (ele vai vazio).
+    const parsed = templateMode ? templateDraftInputSchema.safeParse(templateDraftForSave(payload, include)) : noticeDraftSchema.safeParse(payload);
     // Livre: indices dos elementos viram ids ("freeDesign.children.3..." -> "freeDesign.nodes.botao...").
-    const errors = parsed.success ? {} : freeErrorKeys(payload.freeDesign, noticeErrorsFrom(parsed.error.issues));
+    const errors: NoticeFieldErrors = parsed.success ? {} : freeErrorKeys(payload.freeDesign, noticeErrorsFrom(parsed.error.issues));
+    const name = templateMode ? templateNameSchema.safeParse(templateName) : null;
+
+    if (name && !name.success) {
+      errors.name = name.error.issues[0]?.message ?? TEMPLATE_EDITOR_COPY.card.nameLabel;
+    }
 
     // v3b-1: a linha de produto marcada sem produto (so o editor sabe) vence o "Escolha pelo menos uma página.".
     return payload.kind === "popup" ? { ...errors, ...popupPlacementProblems(popupSettings, popupUi) } : errors;
-  }, [payload, popupSettings, popupUi]);
+  }, [include, payload, popupSettings, popupUi, templateMode, templateName]);
   // As seguintes conferidas no navegador com o mesmo schema e a mesma arvore do servidor.
   const followUpErrors = useMemo(() => {
-    if (draft.kind !== "inbox" || !followUpsEditable || followUps.items.length === 0) {
+    // Modo modelo com "Levar as notificações seguintes" desligado: as seguintes nao vao, nada para conferir.
+    if (draft.kind !== "inbox" || !followUpsEditable || followUps.items.length === 0 || (templateMode && !include.followUps)) {
       return {};
     }
 
@@ -493,12 +648,18 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       ...followUpChoiceErrors(followUps.items, mainFollowUpParent),
       ...(parsed.success ? {} : noticeErrorsFrom(parsed.error.issues))
     };
-  }, [draft, entryId, followUps, followUpsEditable, mainFollowUpParent]);
+  }, [draft, entryId, followUps, followUpsEditable, include.followUps, mainFollowUpParent, templateMode]);
   const audienceKey = JSON.stringify(normalizeAudience(draft.audience));
   const audienceValid = useMemo(() => audienceDefinitionSchema.safeParse(JSON.parse(audienceKey)).success, [audienceKey]);
 
   useWarnBeforeUnload(dirty || uploading || audioBusy !== null || designBusy !== null);
-  useAdminTopbarTitle(initial ? initial.title : "Novo aviso");
+  useAdminTopbarTitle(
+    templateMode
+      ? templateEditorTitle({ id: templateVersion?.id ?? null, kind: draft.kind, savedName: savedTemplateName })
+      : initial
+        ? initial.title
+        : "Novo aviso"
+  );
 
   // Contagem ao vivo do segmento (500 ms depois da ultima mudanca; resposta velha e ignorada).
   useEffect(() => {
@@ -535,7 +696,9 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     return () => window.clearTimeout(timer);
   }, [audienceKey, audienceValid, countAttempt, sentMode]);
 
-  // Cmd/Ctrl+Enter salva o rascunho (o atalho le a versao mais nova da funcao).
+  // Cmd/Ctrl+Enter salva o rascunho (o atalho le a versao mais nova da funcao). Nunca com o foco num dialogo, num
+  // painel, na lista de uma escolha ou num menu (save-shortcut.ts): por tras do "Salvar como modelo", gravaria o que
+  // esta na tela (num pop-up no ar, os alunos veriam na hora) e o modelo nao seria salvo (docs/28 D11 e D32).
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       // Com o editor Livre aberto, o salvar e o dele (que sabe o que ja foi gravado).
@@ -543,7 +706,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
         return;
       }
 
-      if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.altKey) {
+      if (isEditorSaveShortcut(event)) {
         event.preventDefault();
         saveShortcut.current();
       }
@@ -739,12 +902,15 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     setFailure(null);
     setServerErrors({});
     const sent = payload;
-    const result = await saveNoticeDraft({
+    // Os modelos aplicados neste editor (D16 b): os arquivos do design deles ja foram conferidos.
+    const input: SaveNoticeInput = {
       draft: sent,
       expectedUpdatedAt: savedVersion?.updatedAt,
       id: savedVersion?.id,
-      ...(options.reshow ? { reshow: true } : {})
-    });
+      ...(options.reshow ? { reshow: true } : {}),
+      ...(usedTemplateIds.length > 0 ? { fromTemplates: [...usedTemplateIds] } : {})
+    };
+    const result = await saveNoticeDraft(input);
 
     if (!result.ok) {
       const fieldErrors = freeErrorKeys(sent.freeDesign, noticeErrorsFromAction(result.fieldErrors));
@@ -758,6 +924,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     const movedFlowVersion = result.data.flowUpdatedAt ?? null;
     setSavedVersion(version);
     setSaved(canonicalNoticeDraft(sent));
+    // Os caminhos passaram a estar na linha gravada.
+    setUsedTemplateIds([]);
 
     if (movedFlowVersion) {
       setFlowVersion((current) => ({ ...current, updatedAt: movedFlowVersion }));
@@ -826,11 +994,127 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     }
 
     const id = pendingNoticeId.current;
+    const templateId = pendingTemplateId.current;
     pendingNoticeId.current = null;
+    pendingTemplateId.current = null;
 
     if (id && result && !result.dirtySinceSave) {
       openSavedNotice(id);
     }
+
+    if (templateId && result && !result.dirtySinceSave) {
+      openSavedTemplate(templateId);
+    }
+  }
+
+  /** Modo modelo: o primeiro salvar de um modelo novo troca para o endereco dele (com o editor Livre aberto, no Concluir). */
+  function openSavedTemplate(id: string) {
+    if (template?.id) {
+      return;
+    }
+
+    if (freeEditorOpen.current) {
+      pendingTemplateId.current = id;
+      return;
+    }
+
+    router.replace(templateEditHref(id), { scroll: false });
+  }
+
+  /**
+   * "Salvar modelo" (docs/28 §5.6): confere o rascunho afrouxado e o nome no navegador e grava pelo saveTemplate com as
+   * chaves do card Modelo, a versao lida (409) e os modelos aplicados. `fromFreeEditor`: o salvar de dentro do editor
+   * Livre (sem toast daqui, devolvendo os erros para o Revisar dele e sem trocar de endereco agora).
+   */
+  async function saveTemplateNow(options: { confirmed?: boolean; fromFreeEditor?: boolean } = {}): Promise<FreeSaveResult> {
+    const quiet = options.fromFreeEditor === true;
+    const focusErrors = (errors: NoticeFieldErrors) => (freeEditorOpen.current ? undefined : focusFirstError(errors, isFree));
+
+    if (busy) {
+      return { errors: {}, message: "Espere o salvar terminar.", ok: false };
+    }
+
+    // D29: a primeira vez, pergunta (no editor Livre, a pergunta e dele: o confirm do saveConfirm).
+    if (readPending && !options.confirmed && !quiet) {
+      setConfirmRead(true);
+      return { errors: {}, message: "", ok: false };
+    }
+
+    if (uploading || audioBusy || followUpAudioBusy || designBusy) {
+      const message = uploading ? "Espere a imagem terminar de enviar e tente de novo." : (audioBusy ?? followUpAudioBusy ?? designBusy ?? "");
+      showFailure({ message, status: 0, title: templateSaveFailureTitle(0) });
+      return { errors: {}, message, ok: false };
+    }
+
+    setSubmitted(true);
+    const errors = { ...clientErrors, ...followUpErrors };
+
+    if (Object.keys(errors).length > 0) {
+      const message = "Revise os campos destacados.";
+      setServerErrors({});
+      showFailure({ message, status: 400, title: templateSaveFailureTitle(400) });
+      focusErrors(errors);
+      return { errors, message, ok: false };
+    }
+
+    setFailure(null);
+    setServerErrors({});
+    setBusy("save");
+    const sent = payload;
+    const followUpsBody =
+      sent.kind === "inbox" && include.followUps && followUps.items.length > 0
+        ? { entryId, goal: goalOfStopLine(followUps.stop), items: followUpDraftsOf(followUps.items, mainFollowUpParent) }
+        : null;
+    const sentInclude = { ...include, followUps: sent.kind === "inbox" && include.followUps };
+    const result = await saveTemplate({
+      body: { draft: templateDraftForSave(sent, include), followUps: followUpsBody, include: sentInclude, source: "notice" },
+      ...(templateVersion ? { expectedUpdatedAt: templateVersion.updatedAt, id: templateVersion.id } : {}),
+      name: templateName,
+      origin: "template_editor",
+      sourceTemplateIds: [...usedTemplateIds]
+    }).catch(() => null);
+    setBusy(null);
+
+    if (!result) {
+      const message = "Não foi possível salvar agora. Tente de novo.";
+      showFailure({ message, status: 500, title: templateSaveFailureTitle(500) });
+      return { errors: {}, message, ok: false };
+    }
+
+    if (!result.ok) {
+      const fieldErrors = freeErrorKeys(sent.freeDesign, templateErrorsFromAction(result.fieldErrors));
+      setServerErrors(fieldErrors);
+      // O titulo do banner e sempre o do modelo ("Não foi possível salvar o modelo"; no 409, "Este modelo mudou…").
+      showFailure({
+        message: result.status === 409 ? TEMPLATE_MESSAGES.changed : result.error,
+        status: result.status,
+        title: templateSaveFailureTitle(result.status)
+      });
+      focusErrors(fieldErrors);
+      return { errors: fieldErrors, message: result.error, ok: false };
+    }
+
+    const savedNow = result.data;
+    setTemplateVersion({ id: savedNow.id, updatedAt: savedNow.updatedAt });
+    setSaved(canonicalNoticeDraft(sent));
+    setSavedTemplateName(savedNow.name);
+    setTemplateName(savedNow.name);
+    setSavedInclude(include);
+    setSavedFollowUpsKey(followUpsKey);
+    savedTemplateFollowUps.current = { entryId, state: followUps };
+    setUsedTemplateIds([]);
+    setReadPending(false);
+    setTemplateNotes([]);
+    setSubmitted(false);
+
+    const message = [TEMPLATE_EDITOR_COPY.saved, ...savedNow.notes].join(" ");
+
+    if (!quiet) {
+      adminToast.success(message);
+    }
+
+    openSavedTemplate(savedNow.id);
+    return { message: TEMPLATE_EDITOR_COPY.saved, ok: true };
   }
 
   /** v3a: so o "Mostrar de novo" ligado, sem mudanca no pop-up: reshowPopup (o aviso nao muda). */
@@ -1016,6 +1300,17 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
   function discard() {
     setDraft(saved);
+    setTemplateName(savedTemplateName);
+    setInclude(savedInclude);
+
+    // Modo modelo: as seguintes tambem voltam ao que esta gravado no modelo.
+    if (templateMode) {
+      const back = savedTemplateFollowUps.current ?? { entryId: begin?.followUps?.entryId ?? entryId, state: followUpsStateOfStart(begin, begin?.followUps?.entryId ?? "") };
+
+      setEntryId(back.entryId);
+      setFollowUps(back.state);
+    }
+
     setReshow(false);
     setPopupUi(placementUiOf(popupSettingsOfDraft(saved)));
     setServerErrors({});
@@ -1026,11 +1321,14 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   }
 
   useEffect(() => {
-    saveShortcut.current = () => void saveDraft();
+    saveShortcut.current = () => void (templateMode ? saveTemplateNow() : saveDraft());
   });
 
-  /** "Salvar rascunho" do editor Livre: sempre com o rascunho desta renderizacao (o editor espera uma volta antes). */
-  const saveFromFreeEditor = () => saveDraft({ fromFreeEditor: true });
+  /**
+   * "Salvar rascunho" do editor Livre: sempre com o rascunho desta renderizacao (o editor espera uma volta antes). No
+   * modo modelo, "Salvar modelo" (a pergunta de D29 ja foi feita dentro do editor Livre).
+   */
+  const saveFromFreeEditor = () => (templateMode ? saveTemplateNow({ confirmed: true, fromFreeEditor: true }) : saveDraft({ fromFreeEditor: true }));
   // Os erros do ultimo salvar que o editor Livre mostra (do design no Revisar; os de fora, na faixa dele).
   const freeServerErrors = isFree ? serverErrors : {};
 
@@ -1081,7 +1379,9 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
   let previewStatus: string;
 
-  if (sentMode) {
+  if (templateMode) {
+    previewStatus = TEMPLATE_EDITOR_COPY.preview;
+  } else if (sentMode) {
     previewStatus = dirty ? SENT_NOTICE_COPY.previewDirty : SENT_NOTICE_COPY.previewClean;
   } else if (dirty) {
     previewStatus = livePopup ? SENT_NOTICE_COPY.previewDirty : "Rascunho: os alunos só veem depois de publicar.";
@@ -1093,41 +1393,181 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
     previewStatus = "Os alunos só veem depois de publicar.";
   }
 
+  // Modelos (docs/28 §5.6): a ligacao de "Meus modelos" no card Design (aviso novo, gravado e modo modelo).
+  const startTemplateId = mount.mode === "start" ? (start?.templateId ?? null) : null;
+  const designTemplates = {
+    // Devolve o Desfazer do toast: o modelo sai da lista (o salvar nao manda o id nem grava "template_used").
+    onApplied: (id: string) => {
+      const use = { before: usedTemplateIds, id };
+
+      setUsedTemplateIds((list) => recentTemplateIds(list, id, startTemplateId));
+
+      return () => setUsedTemplateIds((list) => undoTemplateUse(list, use, startTemplateId));
+    },
+    sourceNoticeId: templateMode ? null : (savedVersion?.id ?? null),
+    sourceTemplateIds: usedTemplateIds
+  };
+  const templateKind = draft.kind;
+  const templateCopy = TEMPLATE_EDITOR_COPY;
+  const anyUpload = uploading || audioBusy !== null || followUpAudioBusy !== null || designBusy !== null;
+  // As notas do topo do aviso novo de um modelo (ou do ?modelo= que nao abriu); somem depois do primeiro salvar.
+  const startNotes = noticeStartNotes({
+    mode: mount.mode,
+    notes: begin?.notes ?? [],
+    problem: mount.startProblem,
+    saved: savedVersion !== null,
+    templateName: start?.templateName ?? null
+  });
+
+  const savedTemplateId = templateVersion?.id ?? null;
+  // "Salvar como modelo" (D11: o que esta na tela, sem gravar o aviso), antes do menu ⋯.
+  const saveAsButton =
+    !hidden.saveAsTemplate && permissions.canWrite ? (
+      <Button
+        className="px-3"
+        disabled={locked || anyUpload}
+        onClick={() => setSaveAsOpen(true)}
+        title={anyUpload ? templateCopy.saveAs.waitUpload : undefined}
+        type="button"
+        variant="secondary"
+      >
+        <BookmarkPlus aria-hidden="true" className="size-4" />
+        {templateCopy.saveAs.label}
+      </Button>
+    ) : null;
+
   return (
     <AdminPage className="gap-6 pb-28">
-      <PageHeader
-        actions={
-          actionTarget ? (
-            <>
-              {/* v3a: a notificacao enviada tem o relatorio a um clique (o menu nao repete "Ver relatório"). */}
-              {sentMode ? (
-                <AdminLinkButton href={noticeHref(actionTarget.id)} variant="secondary">
-                  <ChartColumn aria-hidden="true" className="size-4" />
-                  {SENT_NOTICE_COPY.viewReport}
+      {templateMode ? (
+        <PageHeader
+          actions={
+            savedTemplateId ? (
+              dirty ? (
+                <Button disabled title={templateCopy.header.useDirty} type="button" variant="secondary">
+                  {templateCopy.header.use}
+                </Button>
+              ) : (
+                <AdminLinkButton href={noticeFromTemplateHref(savedTemplateId)} variant="secondary">
+                  {templateCopy.header.use}
                 </AdminLinkButton>
-              ) : null}
-              <NoticeRowMenu exclude={["edit", "view_report", "send_test", "approve", "reject"]} notice={actionTarget} onRequest={noticeActions.request} />
-            </>
-          ) : null
-        }
-        breadcrumb={[{ href: NOTICES_HREF, label: "Avisos e pop-ups" }, { label: initial ? (sentMode ? SENT_NOTICE_COPY.title : "Editar aviso") : "Novo aviso" }]}
-        description={
-          initial ? (
-            <span className="flex flex-wrap items-center gap-2">
-              <StatusChip tone={initial.situationTone}>{initial.situationLabel}</StatusChip>
-              <span>{initial.kindLabel}</span>
-            </span>
-          ) : (
-            "Uma notificação no sino ou um pop-up, para um segmento."
-          )
-        }
-        title={initial ? (sentMode ? SENT_NOTICE_COPY.title : initial.title) : "Novo aviso"}
-      />
+              )
+            ) : null
+          }
+          breadcrumb={[{ href: TEMPLATES_HREF, label: templateCopy.breadcrumb.list }, { label: savedTemplateId ? templateCopy.breadcrumb.edit : templateCopy.breadcrumb.new }]}
+          description={`${templateCopy.header.descriptions[templateKind]}${templateVersion ? templateCopy.header.updatedAt(formatSaoPauloDateTime(templateVersion.updatedAt)) : ""}`}
+          title={templateEditorTitle({ id: savedTemplateId, kind: templateKind, savedName: savedTemplateName })}
+        />
+      ) : (
+        <PageHeader
+          actions={
+            saveAsButton || actionTarget ? (
+              <>
+                {saveAsButton}
+                {/* v3a: a notificacao enviada tem o relatorio a um clique (o menu nao repete "Ver relatório"). */}
+                {actionTarget && sentMode ? (
+                  <AdminLinkButton href={noticeHref(actionTarget.id)} variant="secondary">
+                    <ChartColumn aria-hidden="true" className="size-4" />
+                    {SENT_NOTICE_COPY.viewReport}
+                  </AdminLinkButton>
+                ) : null}
+                {actionTarget ? (
+                  <NoticeRowMenu exclude={["edit", "view_report", "send_test", "approve", "reject"]} notice={actionTarget} onRequest={noticeActions.request} />
+                ) : null}
+              </>
+            ) : null
+          }
+          breadcrumb={[{ href: NOTICES_HREF, label: "Avisos e pop-ups" }, { label: initial ? (sentMode ? SENT_NOTICE_COPY.title : "Editar aviso") : "Novo aviso" }]}
+          description={
+            initial ? (
+              <span className="flex flex-wrap items-center gap-2">
+                <StatusChip tone={initial.situationTone}>{initial.situationLabel}</StatusChip>
+                <span>{initial.kindLabel}</span>
+              </span>
+            ) : (
+              "Uma notificação no sino ou um pop-up, para um segmento."
+            )
+          }
+          title={initial ? (sentMode ? SENT_NOTICE_COPY.title : initial.title) : "Novo aviso"}
+        />
+      )}
 
       {noticeActions.errorBanner}
 
       <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,480px)_minmax(0,1fr)] xl:grid-cols-[minmax(0,560px)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-6">
+          {startNotes.length > 0 ? (
+            <Note icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>
+              {startNotes.map((note) => (
+                <p key={note}>{note}</p>
+              ))}
+            </Note>
+          ) : null}
+
+          {templateMode ? (
+            <>
+              <SectionCard title={templateCopy.card.title}>
+                <div className="flex min-w-0 flex-col gap-4">
+                  <AdminField error={errorFor("name")} hint={templateNameCounter(templateName)} id="modelo-nome" label={templateCopy.card.nameLabel}>
+                    <input
+                      aria-describedby={fieldDescribedBy("modelo-nome", { error: errorFor("name"), hint: errorFor("name") ? null : templateNameCounter(templateName) })}
+                      aria-invalid={errorFor("name") ? true : undefined}
+                      autoComplete="off"
+                      className={adminInputClass}
+                      disabled={locked}
+                      id="modelo-nome"
+                      maxLength={TEMPLATE_LIMITS.name}
+                      onBlur={() => touch("name")}
+                      onChange={(event) => {
+                        setTemplateName(event.target.value);
+                        clearServerErrors(["name"]);
+
+                        if (failure && failure.status !== 409) {
+                          setFailure(null);
+                        }
+                      }}
+                      required
+                      value={templateName}
+                    />
+                  </AdminField>
+                  <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{templateCopy.card.phrase}</p>
+                  <AdminSwitch
+                    checked={include.content}
+                    description={templateContentDescription(templateKind, draft.kind === "popup" && Boolean(draft.design || draft.freeDesign))}
+                    disabled={locked}
+                    id="modelo-levar-conteudo"
+                    label={templateCopy.include.content.label}
+                    onCheckedChange={(content) => setInclude((current) => ({ ...current, content }))}
+                  />
+                  <AdminSwitch
+                    checked={include.audience}
+                    description={templateCopy.include.audience.description}
+                    disabled={locked}
+                    id="modelo-levar-segmento"
+                    label={templateCopy.include.audience.label}
+                    onCheckedChange={(audience) => setInclude((current) => ({ ...current, audience }))}
+                  />
+                  {templateKind === "inbox" ? (
+                    <AdminSwitch
+                      checked={include.followUps}
+                      description={templateCopy.include.followUps.description}
+                      disabled={locked}
+                      id="modelo-levar-seguintes"
+                      label={templateCopy.include.followUps.label}
+                      onCheckedChange={(next) => setInclude((current) => ({ ...current, followUps: next }))}
+                    />
+                  ) : null}
+                </div>
+              </SectionCard>
+              {templateNotes.length > 0 ? (
+                <Note icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>
+                  {templateNotes.map((note) => (
+                    <p key={note}>{note}</p>
+                  ))}
+                </Note>
+              ) : null}
+            </>
+          ) : null}
+
           {status === "pending_approval" ? (
             <Note icon={<Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-[var(--warning)]" />}>
               <p className="font-medium text-[var(--text-primary)]">Aguardando aprovação de um dono ou administrador.</p>
@@ -1217,7 +1657,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                 }
                 title={failure.title}
               >
-                {conflict ? `${failure.message} O que você mudou aqui continua no rascunho.` : failure.message}
+                {conflict && !templateMode ? `${failure.message} O que você mudou aqui continua no rascunho.` : failure.message}
               </ErrorBanner>
             </div>
           ) : null}
@@ -1230,17 +1670,29 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             // v3a: na notificacao enviada, audio, enquete e ligar a resposta ficam travados com o motivo.
             lockedFields={sentMode ? SENT_NOTICE_COPY.locked : undefined}
             leading={
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Tipo</span>
-                <PillGroup ariaLabel="Tipo do aviso" disabled={locked || kindLocked} name="aviso-tipo" onChange={requestKind} options={KIND_OPTIONS} value={draft.kind} />
-                <p className="text-xs leading-5 text-[var(--text-secondary)]">
-                  {kindLocked
-                    ? "O tipo não muda depois de publicado. Para trocar, duplique o aviso."
-                    : draft.kind === "inbox"
-                      ? "O aluno vê quando abrir o sino."
-                      : "Aparece por cima da página, onde e quando você escolher."}
-                </p>
-              </div>
+              hidden.kindPills ? (
+                // Modo modelo: o tipo nao muda (D1); com "Levar o conteúdo" desligado, a nota no topo do card.
+                <div className="flex min-w-0 flex-col gap-3">
+                  {!include.content ? <Note icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>{templateCopy.off.content}</Note> : null}
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{templateCopy.kind.label}</span>
+                    <p className="text-sm leading-6 text-[var(--text-primary)]">{templateCopy.header.descriptions[templateKind]}</p>
+                    <p className="text-xs leading-5 text-[var(--text-secondary)]">{templateCopy.kind.hint}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex min-w-0 flex-col gap-1.5">
+                  <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">Tipo</span>
+                  <PillGroup ariaLabel="Tipo do aviso" disabled={locked || kindLocked} name="aviso-tipo" onChange={requestKind} options={KIND_OPTIONS} value={draft.kind} />
+                  <p className="text-xs leading-5 text-[var(--text-secondary)]">
+                    {kindLocked
+                      ? "O tipo não muda depois de publicado. Para trocar, duplique o aviso."
+                      : draft.kind === "inbox"
+                        ? "O aluno vê quando abrir o sino."
+                        : "Aparece por cima da página, onde e quando você escolher."}
+                  </p>
+                </div>
+              )
             }
             onAudioBusyChange={setAudioBusy}
             onBlurField={touch}
@@ -1248,6 +1700,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             onChange={(patch) => change(patch as Partial<NoticeDraft>)}
             onImageUploadChange={setImageUpload}
             onSendersChange={setSenders}
+            // Modo modelo: a enquete sem fim marcado (D9).
+            pollCanEndAtDate={!hidden.pollEndDate}
             // Design do pop-up: no Personalizado e no Livre, texto, icone, imagem e destino vao para o card Design.
             popupDesign={draft.kind === "popup" && (draft.freeDesign ? "free" : Boolean(draft.design))}
             products={pickerItems}
@@ -1271,6 +1725,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
               fonts={popupFonts}
               freeProblems={freeProblems}
               freeServerErrors={freeServerErrors}
+              hideCtaDestination={ctaDestinationHidden}
               key={`design-${resetKey}`}
               noticeId={savedVersion?.id ?? null}
               onBusyChange={setDesignBusy}
@@ -1282,6 +1737,27 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
               products={pickerItems}
               productsLoaded={options.productsLoaded}
               savesInPlace={savesInPlace}
+              // Modelos (docs/28 §5.8 e §5.9): "Meus modelos", "Salvar design como modelo" e, no modo modelo, o editor
+              // Livre com "Salvar modelo" (e a pergunta de D29 antes do primeiro salvar).
+              freeEditor={
+                templateMode
+                  ? {
+                      recoveryKey: freeTemplateRecoveryKey(template?.id ?? null),
+                      saveConfirm: readPending
+                        ? {
+                            cancelLabel: templateCopy.confirmRead.cancel,
+                            confirmLabel: templateCopy.confirmRead.confirm,
+                            description: templateCopy.confirmRead.description,
+                            title: templateCopy.confirmRead.title
+                          }
+                        : null,
+                      saveLabel: templateCopy.review.save,
+                      showTemplatesTab: true,
+                      subtitle: templateCopy.title(templateName.trim() || savedTemplateName)
+                    }
+                  : null
+              }
+              templates={designTemplates}
             />
           ) : null}
 
@@ -1294,6 +1770,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
               </div>
             ) : (
               <div className="flex min-w-0 flex-col gap-4">
+                {templateMode && !include.audience ? <Note icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>{templateCopy.off.audience}</Note> : null}
                 <AudienceBuilder
                   cohorts={options.cohorts}
                   disabled={locked}
@@ -1311,7 +1788,10 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
           </SectionCard>
 
           {draft.kind === "inbox" ? (
-            <SectionCard description="Agora ou numa data e hora, e quanto tempo fica no sino." title="Quando">
+            <SectionCard
+              description={templateMode ? templateCopy.validity.description : "Agora ou numa data e hora, e quanto tempo fica no sino."}
+              title={templateMode ? templateCopy.validity.title : "Quando"}
+            >
               {sentMode ? (
                 // v3a: o envio e o tempo no sino nao mudam depois do envio (so leitura).
                 <p className="text-sm leading-6 text-[var(--text-primary)]">
@@ -1319,14 +1799,18 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                 </p>
               ) : (
                 <div className="flex min-w-0 flex-col gap-6">
-                  <NoticeWhenFields
-                    disabled={locked}
-                    key={resetKey}
-                    draft={draft}
-                    errors={{ endsAt: errorFor("window.endsAt"), sendAt: errorFor("schedule.sendAt"), startsAt: errorFor("window.startsAt") }}
-                    onChange={(patch) => change(patch)}
-                  />
+                  {hidden.schedule ? null : (
+                    <NoticeWhenFields
+                      disabled={locked}
+                      key={resetKey}
+                      draft={draft}
+                      errors={{ endsAt: errorFor("window.endsAt"), sendAt: errorFor("schedule.sendAt"), startsAt: errorFor("window.startsAt") }}
+                      onChange={(patch) => change(patch)}
+                    />
+                  )}
                   <NoticeValidityField
+                    // Modo modelo: sem "Até uma data" (D9).
+                    allowUntil={!hidden.validityUntil}
                     disabled={locked}
                     errors={{ endsAt: errorFor("validity.endsAt"), minutes: errorFor("validity.minutes"), validity: errorFor("validity") }}
                     idPrefix="aviso-validade"
@@ -1356,6 +1840,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                   opensOnLesson={options.opensOnLesson}
                   products={pickerItems}
                   productsLoaded={options.productsLoaded}
+                  // Modo modelo: sem "Começa" e "Termina" (D9).
+                  showWindow={!hidden.window}
                   ui={popupUi}
                 />
               </SectionCard>
@@ -1391,7 +1877,11 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
 
           {draft.kind === "inbox" && !sentMode ? (
             <NoticeFollowUps
-              actions={flowVersion.flowId ? <ViewAsFlowLink flowId={flowVersion.flowId} /> : undefined}
+              actions={flowVersion.flowId && !hidden.viewAsFlow ? <ViewAsFlowLink flowId={flowVersion.flowId} /> : undefined}
+              allowUntil={!hidden.validityUntil}
+              banner={
+                templateMode && !include.followUps ? <Note icon={<Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}>{templateCopy.off.followUps}</Note> : undefined
+              }
               contentErrorOf={(path) => followUpErrorAt(shownFollowUpErrors, `${path}.content`)}
               disabled={locked}
               errorFor={(path) => followUpErrorAt(shownFollowUpErrors, path)}
@@ -1419,7 +1909,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
               }}
               onImageUploadChange={setFollowUpUpload}
               onSendersChange={setSenders}
-              onSendTest={(nodeId) => void sendFollowUpTest(nodeId)}
+              onSendTest={hidden.sendTest ? undefined : (nodeId) => void sendFollowUpTest(nodeId)}
               options={followUpOptions}
               stats={{}}
               stop={followUps.stop}
@@ -1428,55 +1918,74 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             />
           ) : null}
 
-          <SectionCard title="Revisão">
-            <div className="flex min-w-0 flex-col gap-4">
-              <p aria-live="polite" className="text-sm leading-6 text-[var(--text-primary)]">
-                {sentMode
-                  ? sentNoticeReview({ recipients: sentRecipients, sentAt: initial?.sentAt ?? null })
-                  : livePopup
-                    ? `${reviewSentence} Já publicado: salvar mantém no ar.`
-                    : reviewSentence}
-              </p>
-              {intent === "approval" && !savesInPlace ? (
-                <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
-                  {permissions.canPublish
-                    ? "Acima de 500 alunos, um dono ou administrador aprova antes de sair."
-                    : "Sua função na equipe envia para um dono ou administrador aprovar antes de sair."}
-                </p>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-2">
-                <Button className="px-4" disabled={locked} onClick={() => void (savesInPlace ? saveDraft() : publish())} type="button">
-                  {savesInPlace ? working(primaryLabel, "save") : working(primaryLabel, "publish")}
-                </Button>
-                {savesInPlace ? (
-                  dirty ? (
+          {templateMode ? (
+            <SectionCard title={templateCopy.review.title}>
+              <div className="flex min-w-0 flex-col gap-4">
+                <p className="text-sm leading-6 text-[var(--text-primary)]">{templateCopy.review.sentence}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button className="px-4" disabled={locked} onClick={() => void saveTemplateNow()} type="button">
+                    {busy === "save" ? templateCopy.review.saving : templateCopy.review.save}
+                  </Button>
+                  {templateVersion && dirty ? (
                     <Button className="px-4" disabled={locked} onClick={discard} type="button" variant="secondary">
-                      Descartar mudanças
+                      {templateCopy.review.discard}
                     </Button>
-                  ) : null
-                ) : (
-                  <Button className="px-4" disabled={locked} onClick={() => void saveDraft()} type="button" variant="secondary">
-                    {working("Salvar rascunho", "save")}
-                  </Button>
-                )}
-                {draft.kind === "inbox" && !savesInPlace ? (
-                  <Button className="px-4" disabled={locked} onClick={() => void sendTest()} type="button" variant="secondary">
-                    {working("Enviar teste para mim", "test")}
-                  </Button>
-                ) : null}
+                  ) : null}
+                </div>
+                <p className="text-xs leading-5 text-[var(--text-tertiary)]">{templateCopy.review.hint}</p>
               </div>
-              <p className="text-xs leading-5 text-[var(--text-tertiary)]">
-                {savesInPlace ? (
-                  SENT_NOTICE_COPY.saveHint
-                ) : (
-                  <>
-                    {draft.kind === "inbox" ? "O teste chega só no seu sino e não conta nos números. " : ""}
-                    Ctrl+Enter (⌘+Enter no Mac) salva o rascunho.
-                  </>
-                )}
-              </p>
-            </div>
-          </SectionCard>
+            </SectionCard>
+          ) : (
+            <SectionCard title="Revisão">
+              <div className="flex min-w-0 flex-col gap-4">
+                <p aria-live="polite" className="text-sm leading-6 text-[var(--text-primary)]">
+                  {sentMode
+                    ? sentNoticeReview({ recipients: sentRecipients, sentAt: initial?.sentAt ?? null })
+                    : livePopup
+                      ? `${reviewSentence} Já publicado: salvar mantém no ar.`
+                      : reviewSentence}
+                </p>
+                {intent === "approval" && !savesInPlace ? (
+                  <p className="text-[13px] leading-5 text-[var(--text-secondary)]">
+                    {permissions.canPublish
+                      ? "Acima de 500 alunos, um dono ou administrador aprova antes de sair."
+                      : "Sua função na equipe envia para um dono ou administrador aprovar antes de sair."}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button className="px-4" disabled={locked} onClick={() => void (savesInPlace ? saveDraft() : publish())} type="button">
+                    {savesInPlace ? working(primaryLabel, "save") : working(primaryLabel, "publish")}
+                  </Button>
+                  {savesInPlace ? (
+                    dirty ? (
+                      <Button className="px-4" disabled={locked} onClick={discard} type="button" variant="secondary">
+                        Descartar mudanças
+                      </Button>
+                    ) : null
+                  ) : (
+                    <Button className="px-4" disabled={locked} onClick={() => void saveDraft()} type="button" variant="secondary">
+                      {working("Salvar rascunho", "save")}
+                    </Button>
+                  )}
+                  {draft.kind === "inbox" && !savesInPlace ? (
+                    <Button className="px-4" disabled={locked} onClick={() => void sendTest()} type="button" variant="secondary">
+                      {working("Enviar teste para mim", "test")}
+                    </Button>
+                  ) : null}
+                </div>
+                <p className="text-xs leading-5 text-[var(--text-tertiary)]">
+                  {savesInPlace ? (
+                    SENT_NOTICE_COPY.saveHint
+                  ) : (
+                    <>
+                      {draft.kind === "inbox" ? "O teste chega só no seu sino e não conta nos números. " : ""}
+                      Ctrl+Enter (⌘+Enter no Mac) salva o rascunho.
+                    </>
+                  )}
+                </p>
+              </div>
+            </SectionCard>
+          )}
         </div>
 
         {/* Fixa ao rolar; mais alta que a janela, rola por dentro (o fim do aviso nunca fica escondido). */}
@@ -1494,9 +2003,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
               </p>
             </div>
             {/* Personalizado e Livre: celular e computador juntos (sem a escolha do aparelho). */}
-            {draft.kind === "popup" && (draft.design || draft.freeDesign) ? null : (
-              <PillGroup ariaLabel="Aparelho da prévia" name="aviso-previa-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
-            )}
+            <PreviewDeviceChoice draft={draft} name="aviso-previa-aparelho" onChange={setDevice} value={device} />
           </div>
           {draft.kind === "inbox" && followUps.items.length > 0 ? (
             <MemberFilterPills
@@ -1526,6 +2033,41 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       </div>
 
       {noticeActions.confirmDialog}
+
+      {/* D29: modelo com uma parte que nao abriu, antes do primeiro "Salvar modelo". */}
+      {templateMode ? (
+        <ConfirmDialog
+          cancelLabel={templateCopy.confirmRead.cancel}
+          confirmLabel={templateCopy.confirmRead.confirm}
+          description={templateCopy.confirmRead.description}
+          onConfirm={() => {
+            setConfirmRead(false);
+            void saveTemplateNow({ confirmed: true });
+          }}
+          onOpenChange={setConfirmRead}
+          open={confirmRead}
+          title={templateCopy.confirmRead.title}
+        />
+      ) : null}
+
+      {hidden.saveAsTemplate ? null : (
+        <SaveAsTemplateDialog
+          onOpenChange={setSaveAsOpen}
+          open={saveAsOpen}
+          source={{
+            draft: payload,
+            followUps:
+              draft.kind === "inbox" && followUps.items.length > 0
+                ? { entryId, goal: goalOfStopLine(followUps.stop), items: followUpDraftsOf(followUps.items, mainFollowUpParent) }
+                : null,
+            followUpsBuilderOnly: followUpsMode.kind === "readonly" && followUpsMode.reason === "builder",
+            followUpsOtherGoal: followUps.stop.kind === "other",
+            kind: "editor",
+            sourceNoticeId: savedVersion?.id ?? null,
+            sourceTemplateIds: usedTemplateIds
+          }}
+        />
+      )}
 
       <ConfirmDialog
         confirmLabel={popupSwitchConfirm(followUpsCount).confirmLabel}
