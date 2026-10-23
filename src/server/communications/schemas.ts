@@ -285,6 +285,21 @@ const ctaSchema = z.object({
   target: z.enum(["same_tab", "new_tab"], { error: "Escolha onde o link abre." })
 });
 
+/**
+ * Os problemas do botao do aviso (`cta`) com as chaves e as frases do rascunho ("cta.href", "cta.label"): o mesmo
+ * ctaSchema do noticeDraftSchema. O Revisar do editor Livre confere o Botão principal com ele (docs/27 §2.2), para o
+ * Revisar, o salvar e o card Design contarem os mesmos erros. Sem botao (null), nada a conferir.
+ */
+export function noticeCtaProblems(cta: unknown): { message: string; path: string[] }[] {
+  if (cta === null || cta === undefined) {
+    return [];
+  }
+
+  const parsed = ctaSchema.safeParse(cta);
+
+  return parsed.success ? [] : parsed.error.issues.map((issue) => ({ message: issue.message, path: ["cta", ...issue.path.map(String)] }));
+}
+
 const responseLabelSchema = (empty: string) =>
   z.string().trim().min(1, empty).max(NOTICE_LIMITS.responseLabel, `Use até ${NOTICE_LIMITS.responseLabel} caracteres.`);
 
