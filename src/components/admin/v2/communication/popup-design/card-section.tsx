@@ -1,6 +1,7 @@
 "use client";
 
 import { POPUP_DESIGN_LIMITS, type PopupCardStyle, type PopupContrastHint, type PopupDesign, type PopupTextZone } from "@/server/communications/popup-design-model";
+import { AdminSwitch } from "../../settings/kit";
 import { CardBackgroundField } from "./card-background-field";
 import { BorderField, ColorField, ContrastHint, DesignFieldError, DesignSection, NumberField, PillField } from "./design-controls";
 import { ALIGN_OPTIONS, CARD_SHADOW_OPTIONS, CARD_WIDTH_OPTIONS, POPUP_DESIGN_COPY, TEXT_PLACEMENT_OPTIONS } from "./popup-design-editor-model";
@@ -9,7 +10,7 @@ import { ALIGN_OPTIONS, CARD_SHADOW_OPTIONS, CARD_WIDTH_OPTIONS, POPUP_DESIGN_CO
 // onde fica o texto, quanto sobe sobre a midia, o alinhamento e o espaco entre os blocos; a largura do cartao no
 // computador (no celular encolhe junto), o fundo (cor, degrade ou imagem, card-background-field), a borda, os
 // cantos, o respiro e a sombra; as cores do X e dos links "Lembrar depois" e "Não mostrar de novo", com a dica
-// de contraste.
+// de contraste, e a chave que tira o link "Não mostrar de novo" (so no Personalizado; a dica diz o custo).
 
 const LIMITS = POPUP_DESIGN_LIMITS;
 
@@ -155,8 +156,26 @@ export function CloseSection({ design, disabled, errorFor, hints, onChange }: Se
         />
       </div>
       {closeHint ? <ContrastHint message={closeHint.message} /> : null}
-      <ColorField disabled={disabled} error={errorFor("design.links.color")} id="popup-design-links-cor" label={copy.links} onChange={(color) => onChange({ ...design, links: { color } })} value={design.links.color} />
+      <ColorField
+        disabled={disabled}
+        error={errorFor("design.links.color")}
+        id="popup-design-links-cor"
+        label={copy.links}
+        onChange={(color) => onChange({ ...design, links: { ...design.links, color } })}
+        value={design.links.color}
+      />
       {linksHint ? <ContrastHint message={linksHint.message} /> : null}
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <AdminSwitch
+          checked={design.links.showDismiss}
+          description={design.links.showDismiss ? undefined : copy.showDismissOff}
+          disabled={disabled}
+          id="popup-design-links-nao-mostrar"
+          label={copy.showDismiss}
+          onCheckedChange={(showDismiss) => onChange({ ...design, links: { ...design.links, showDismiss } })}
+        />
+        <DesignFieldError id="popup-design-links-nao-mostrar-error" message={errorFor("design.links.showDismiss")} />
+      </div>
     </DesignSection>
   );
 }

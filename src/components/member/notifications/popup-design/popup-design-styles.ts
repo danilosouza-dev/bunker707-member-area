@@ -391,8 +391,10 @@ export const POPUP_OVER_STAGE_CSS: CSSProperties = { display: "grid", gridTempla
  * O grupo de texto (coluna de blocos): respiro do cartao, espaco entre blocos e alinhamento do grupo.
  * "Abaixo da midia" sobe sobre ela pela margem negativa (subir % da altura da midia = % x razao em cqw);
  * "Sobre a midia" fica na mesma celula do grid, em cima, no meio ou embaixo (a celula cresce, nunca corta).
+ * `hasFooter`: com o rodape dos links, o respiro de baixo fica por conta dele; sem nenhum link, o cartao
+ * termina logo depois do ultimo bloco com o respiro do cartao.
  */
-export function popupTextGroupCss(design: PopupDesign, hasMedia: boolean): CSSProperties {
+export function popupTextGroupCss(design: PopupDesign, hasMedia: boolean, hasFooter = true): CSSProperties {
   const cardWidth = popupCardWidthPx(design);
   const padding = scaledLength(design.card.padding, cardWidth);
   const base: CSSProperties = {
@@ -411,7 +413,7 @@ export function popupTextGroupCss(design: PopupDesign, hasMedia: boolean): CSSPr
 
   const lift = hasMedia ? design.text.overlap * POPUP_MEDIA_RATIOS[design.media.aspect] : 0;
 
-  return { ...base, ...(lift > 0 ? { marginTop: `${-Math.round(lift * 10_000) / 10_000}cqw` } : null), padding: `${padding} ${padding} 0` };
+  return { ...base, ...(lift > 0 ? { marginTop: `${-Math.round(lift * 10_000) / 10_000}cqw` } : null), padding: hasFooter ? `${padding} ${padding} 0` : padding };
 }
 
 /**
@@ -429,13 +431,19 @@ export function popupFirstBlockClearance(design: PopupDesign, hasMedia: boolean)
 }
 
 /**
- * Links pequenos do rodape: "Não mostrar de novo" sempre; "Lembrar depois" quando o aluno ainda pode adiar e
- * nao ha segundo botao "Lembrar depois" (sem repetir).
+ * Links pequenos do rodape: "Não mostrar de novo" quando a equipe o mantem (`links.showDismiss`; sem a chave,
+ * aparece); "Lembrar depois" quando o aluno ainda pode adiar e nao ha segundo botao "Lembrar depois" (sem
+ * repetir). Os dois desligados = sem rodape (popupHasFooter).
  */
-export function popupFooterLinks(design: Pick<PopupDesign, "blocks">, canSnooze: boolean): { dismiss: true; snooze: boolean } {
+export function popupFooterLinks(design: Pick<PopupDesign, "blocks" | "links">, canSnooze: boolean): { dismiss: boolean; snooze: boolean } {
   const snoozeButton = design.blocks.some((block) => block.type === "button2" && block.action.kind === "snooze");
 
-  return { dismiss: true, snooze: canSnooze && !snoozeButton };
+  return { dismiss: design.links.showDismiss !== false, snooze: canSnooze && !snoozeButton };
+}
+
+/** Ha rodape so com pelo menos um link; sem nenhum, nada e desenhado (nem o respiro dele). */
+export function popupHasFooter(links: { dismiss: boolean; snooze: boolean }): boolean {
+  return links.dismiss || links.snooze;
 }
 
 /** O rodape: depois de tudo, com o respiro do cartao; o texto dos links alinha com o do grupo. */

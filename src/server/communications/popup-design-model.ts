@@ -167,6 +167,8 @@ export type PopupFontRef = { key: PopupBuiltinFont; kind: "builtin" } | { id: st
 
 /** Sem `end` (design salvo antes do "Fica totalmente escuro em"): o degrade vai ate o fim da midia, como antes. */
 export const POPUP_FADE_END_DEFAULT = 100;
+/** Sem `links.showDismiss` (design salvo antes da chave): o link "Não mostrar de novo" aparece, como antes. */
+export const POPUP_SHOW_DISMISS_DEFAULT = true;
 /**
  * Imagem no fundo do cartao nova: embaixo (o pedido do produtor: o video em cima passando para a imagem
  * embaixo) e 40 % de escuro por cima.
@@ -378,8 +380,11 @@ export type PopupDesign = {
   close: { background: HexColor; color: HexColor };
   /** Ids das fontes enviadas usadas (derivado: ordenado e sem repeticao; o servidor recalcula ao salvar). */
   fonts: string[];
-  /** "Lembrar depois" e "Não mostrar de novo". */
-  links: { color: HexColor };
+  /**
+   * "Lembrar depois" e "Não mostrar de novo": a cor dos dois e se o "Não mostrar de novo" aparece (`showDismiss`;
+   * sem a chave no banco = true, como antes). So no Personalizado: o Padrão sempre mostra o link.
+   */
+  links: { color: HexColor; showDismiss: boolean };
   media: PopupMedia;
   text: PopupTextZone;
   version: typeof POPUP_DESIGN_VERSION;
@@ -528,7 +533,7 @@ export function canonicalPopupDesign(design: PopupDesign): PopupDesign {
     },
     close: { background: hex(design.close.background), color: hex(design.close.color) },
     fonts: uploadedFontIdsOf(blocks),
-    links: { color: hex(design.links.color) },
+    links: { color: hex(design.links.color), showDismiss: design.links.showDismiss ?? POPUP_SHOW_DISMISS_DEFAULT },
     media: {
       aspect: design.media.aspect,
       fade: {
@@ -693,7 +698,7 @@ export function popupStarterDesign(id: PopupDesignStarterId, input: { hasAudio?:
       },
       close: { background: "#ffffff14", color: "#ffffff" },
       fonts: [],
-      links: { color: "#a1a1aa" },
+      links: { color: "#a1a1aa", showDismiss: true },
       media: { aspect: "16:9", fade: { color: "auto", enabled: false, end: 100, height: 60 }, kind: "none", position: "center", video },
       text: { align: "left", gap: 14, overlap: 0, placement: "below" },
       version: POPUP_DESIGN_VERSION
@@ -721,7 +726,7 @@ export function popupStarterDesign(id: PopupDesignStarterId, input: { hasAudio?:
       card: { background: solid("#101014"), border: { color: "#ffffff1a", width: 1 }, padding: 24, radius: 24, shadow: "strong", width: "M" },
       close: STARTER_CLOSE,
       fonts: [],
-      links: { color: "#a1a1aa" },
+      links: { color: "#a1a1aa", showDismiss: true },
       media: { aspect: "4:3", fade: { color: "auto", enabled: true, end: 100, height: 75 }, kind: video ? "video" : "image", position: "center", video },
       text: { align: "left", gap: 12, overlap: 0, placement: "over-bottom" },
       version: POPUP_DESIGN_VERSION
@@ -770,7 +775,7 @@ export function popupStarterDesign(id: PopupDesignStarterId, input: { hasAudio?:
     card: { background: solid("#16181c"), border: { color: "#ffffff1a", width: 1 }, padding: 24, radius: 24, shadow: "strong", width: "M" },
     close: STARTER_CLOSE,
     fonts: [],
-    links: { color: "#a1a1aa" },
+    links: { color: "#a1a1aa", showDismiss: true },
     // A referencia: a midia aparece inteira na metade de cima, escurece de 50 % a 92 % da altura dela (a passagem
     // fica no meio do cartao, com o selo em cima dela) e o texto sobe 34 % por cima, entao titulo, texto e botao
     // ficam na parte escura (conferido em fotos contra a referencia, docs/26).

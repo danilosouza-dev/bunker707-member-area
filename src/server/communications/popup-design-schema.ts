@@ -13,6 +13,7 @@ import {
   isOwnPopupCardImageUrl,
   isOwnStorageUrl,
   POPUP_FADE_END_DEFAULT,
+  POPUP_SHOW_DISMISS_DEFAULT,
   POPUP_ALIGNS,
   POPUP_BLOCK_ID_PATTERN,
   POPUP_BUILTIN_FONT_KEYS,
@@ -54,6 +55,7 @@ export const POPUP_DESIGN_MESSAGES = {
   imageForMedia: "Envie a imagem do topo ou escolha “Sem mídia”.",
   imageForVideo: "Envie também uma imagem: ela aparece enquanto o vídeo carrega e para quem prefere menos movimento.",
   paint: "Escolha uma cor ou um degradê.",
+  showDismiss: "Escolha se o link “Não mostrar de novo” aparece.",
   snoozeButtonOff: "Este botão usa o “Lembrar depois”, que está desligado neste pop-up.",
   tooManyFonts: `Use até ${LIMITS.uploadedFonts} fontes enviadas no mesmo pop-up.`,
   video: "Envie o vídeo de novo.",
@@ -255,7 +257,8 @@ const designObjectSchema = z.strictObject(
     close: z.strictObject({ background: hexColor, color: hexColor }),
     // Derivado dos blocos (o transform recalcula); so confere o formato.
     fonts: z.array(z.uuid({ error: POPUP_DESIGN_MESSAGES.font })).max(LIMITS.blocks),
-    links: z.strictObject({ color: hexColor }),
+    // Sem `showDismiss` (design salvo antes da chave) = true: o "Não mostrar de novo" aparece, como antes.
+    links: z.strictObject({ color: hexColor, showDismiss: z.boolean({ error: POPUP_DESIGN_MESSAGES.showDismiss }).default(POPUP_SHOW_DISMISS_DEFAULT) }),
     media: z.strictObject({
       aspect: z.enum(POPUP_MEDIA_ASPECTS, { error: "Escolha o formato da mídia." }),
       // Sem `end` (design salvo antes do "Fica totalmente escuro em") = 100: o degrade de antes, igual.

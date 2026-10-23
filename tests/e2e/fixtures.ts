@@ -885,6 +885,8 @@ export type DesignDoPopUpNoBanco = {
     /** Fundo do cartao: cor, degradê ou a imagem (com `url`, `position`, `dim` e a cor de apoio). */
     card: { background: { kind: string; url?: string } & Record<string, unknown> };
     fonts: string[];
+    /** Os links do rodape: a cor e se o "Não mostrar de novo" aparece. */
+    links: { color: string; showDismiss: boolean };
     media: {
       /** Degradê: totalmente escuro em `end` (% da midia, do topo), comecando `height` antes. */
       fade: { color: string; enabled: boolean; end: number; height: number };

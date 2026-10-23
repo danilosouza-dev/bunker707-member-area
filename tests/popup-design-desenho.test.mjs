@@ -397,6 +397,22 @@ test("rodape: 'Lembrar depois' some sem adiar e quando o segundo botao ja e 'Lem
   assert.deepEqual(styles.popupFooterLinks(withSnoozeButton, true), { dismiss: true, snooze: false });
   assert.equal(styles.popupFooterLinkCss(design).color, "#a1a1aa");
   assert.equal(styles.popupFooterLinkCss(design).minHeight, "44px");
+
+  // "Não mostrar de novo" desligado pela equipe: o link sai; sem a chave (design de antes) continua.
+  const semLink = { ...design, links: { ...design.links, showDismiss: false } };
+  assert.deepEqual(styles.popupFooterLinks(semLink, true), { dismiss: false, snooze: true });
+  assert.deepEqual(styles.popupFooterLinks(semLink, false), { dismiss: false, snooze: false });
+  assert.deepEqual(styles.popupFooterLinks({ ...design, links: { color: "#a1a1aa" } }, false), { dismiss: true, snooze: false }, "sem a chave = o link aparece");
+  assert.equal(styles.popupHasFooter({ dismiss: true, snooze: false }), true);
+  assert.equal(styles.popupHasFooter({ dismiss: false, snooze: true }), true);
+  assert.equal(styles.popupHasFooter({ dismiss: false, snooze: false }), false, "nenhum link = nenhum rodape");
+
+  // Sem rodape, o grupo de texto fecha com o respiro do cartao embaixo (com rodape, o respiro de baixo e dele).
+  assert.equal(styles.popupTextGroupCss(design, true).padding, `${model.scaledLength(24, W)} ${model.scaledLength(24, W)} 0`);
+  assert.equal(styles.popupTextGroupCss(design, true, true).padding, `${model.scaledLength(24, W)} ${model.scaledLength(24, W)} 0`);
+  assert.equal(styles.popupTextGroupCss(design, true, false).padding, model.scaledLength(24, W));
+  const over = { ...design, text: { ...design.text, placement: "over-bottom" } };
+  assert.equal(styles.popupTextGroupCss(over, true, false).padding, model.scaledLength(24, W), "sobre a midia o grupo ja tem o respiro todo");
 });
 
 test("video ou so a capa: menos movimento e economia de dados ficam na capa; no servidor nada e baixado", () => {
@@ -536,6 +552,41 @@ test("Personalizado: linhas do titulo e texto de verdade, cores, <h2>/<p> com os
   assert.match(colored, /data-popup-fade=""/, "outra cor: a camada por cima da midia");
   assert.equal((colored.match(/pointer-events:none/g) ?? []).length, 1, "so a camada do degrade deixa o toque passar");
   assert.doesNotMatch(html, /Nome do pop-up nas listas/, "o titulo do aviso nao aparece no Personalizado");
+});
+
+test("'Não mostrar de novo' desligado: o link some; sem 'Lembrar depois' tambem, nenhum rodape e o cartao termina no ultimo bloco", () => {
+  const design = starter();
+  const semLink = { ...design, links: { ...design.links, showDismiss: false } };
+  const groupPadding = model.scaledLength(24, W);
+
+  // Ligado (o de sempre): o rodape com os dois links; o design sem a chave (gravado antes) desenha igual.
+  const ligado = render(createElement(MemberPopupCard, { popup: popupOf(design) }));
+  assert.match(ligado, /<div data-popup-footer="" style="[^"]*"><button [^>]*type="button">Lembrar depois<\/button><button [^>]*type="button">Não mostrar de novo<\/button><\/div>/);
+  assert.match(ligado, new RegExp(`<div data-popup-text="" style="[^"]*padding:${groupPadding} ${groupPadding} 0"`), "com rodape, o respiro de baixo e dele");
+  assert.equal(render(createElement(MemberPopupCard, { popup: popupOf({ ...design, links: { color: design.links.color } }) })), ligado, "sem a chave = o mesmo HTML");
+
+  // Desligado, podendo adiar: so o "Lembrar depois" no rodape.
+  const soLembrar = render(createElement(MemberPopupCard, { popup: popupOf(semLink) }));
+  assert.doesNotMatch(soLembrar, /Não mostrar de novo/);
+  assert.match(soLembrar, /<div data-popup-footer="" style="[^"]*"><button [^>]*type="button">Lembrar depois<\/button><\/div>/);
+
+  // Desligado e sem adiar: nenhum rodape (nem o respiro dele); o grupo fecha com o respiro do cartao e vem o X.
+  const semRodape = render(createElement(MemberPopupCard, { popup: popupOf(semLink, { canSnooze: false }) }));
+  assert.doesNotMatch(semRodape, /Não mostrar de novo|Lembrar depois|data-popup-footer|min-height:44px|column-gap/);
+  assert.match(semRodape, new RegExp(`<div data-popup-text="" style="[^"]*padding:${groupPadding}"`));
+  assert.match(semRodape, /<\/a><\/div><\/div><button aria-label="Fechar"/, "depois do botao principal: o fim do grupo, o fim do cartao e o X");
+  assert.match(semRodape, /<button aria-label="Fechar"/, "o X nunca depende do link");
+
+  // O mesmo com o segundo botao "Lembrar depois" no lugar do link pequeno: o rodape some de vez.
+  const comBotao2 = { ...semLink, blocks: [...semLink.blocks, { ...model.newPopupBlock("button2", "b8"), action: { kind: "snooze" } }] };
+  const html = render(createElement(MemberPopupCard, { popup: popupOf(comBotao2) }));
+  assert.match(html, /data-popup-button="snooze"/);
+  assert.doesNotMatch(html, /data-popup-footer|Não mostrar de novo/);
+
+  // A previa do admin e o mesmo cartao.
+  const previa = render(createElement(MemberPopupCard, { popup: popupOf(semLink, { canSnooze: false }), preview: true }));
+  assert.doesNotMatch(previa, /Não mostrar de novo|data-popup-footer/);
+  assert.match(render(createElement(MemberPopupCard, { popup: popupOf(semLink), preview: true })), /<div data-popup-footer="" style="[^"]*"><span [^>]*>Lembrar depois<\/span><\/div>/);
 });
 
 test("imagem no fundo do cartao no HTML: no proprio cartao (atras da midia e do texto), igual com ou sem movimento", () => {

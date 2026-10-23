@@ -12,7 +12,9 @@ import { designDoPopUpNoBanco, estadoDoPopUpDaAluna, eventosDoPopUp, expect, rea
 // O pedido do produtor depois da primeira versao (docs/26 §1.3): ele sobe o escuro do degradê ("Começa a
 // escurecer em" 35 %, "Fica totalmente escuro em" 70 %) e o titulo fica na parte escura, na previa e no pop-up
 // da aluna (a mascara da midia e conferida parada a parada); e escolhe Cartão > Fundo > Imagem (a imagem embaixo,
-// com o escuro por cima), que aparece atras do texto nos dois lugares.
+// com o escuro por cima), que aparece atras do texto nos dois lugares. Em Fechar e links, desliga "Mostrar o link
+// “Não mostrar de novo”" (quer o rodape limpo; a dica diz o custo): o link some da previa e do pop-up da aluna, e
+// o "Lembrar depois" continua.
 
 const TITULO = "Pop-up E2E: o produtor desenha";
 const LINHA_1 = "Aprenda IA";
@@ -29,6 +31,8 @@ const SHOTS = process.env.E2E_SHOTS_DIR;
 const ESCURO = { comeca: 35, total: 70 };
 const IMAGEM_DO_FUNDO = /url\("[^"]+\/storage\/v1\/object\/public\/content-assets\/communications\/images\/[a-f0-9]{24}\.webp"\)/;
 const SEM_MEDIDA_COM_IMAGEM = "Com imagem no fundo não dá para medir o contraste. Confira na prévia se os textos ficam fáceis de ler.";
+const MOSTRAR_LINK = "Mostrar o link “Não mostrar de novo”";
+const SEM_O_LINK = "Sem o link, o aluno só fecha no X. Num pop-up que repete sem parar, ele não tem como deixar de vê-lo.";
 
 test.describe.configure({ mode: "serial" });
 
@@ -178,6 +182,15 @@ test.describe("produtor", () => {
     await escurecer.blur();
     await expect(cartao.getByText(SEM_MEDIDA_COM_IMAGEM, { exact: true })).toBeVisible();
 
+    // Fechar e links: tira o link "Não mostrar de novo" (rodape limpo); a dica so aparece com a chave desligada.
+    const fechar = design.getByRole("region", { exact: true, name: "Fechar e links" });
+    const mostrarLink = fechar.getByRole("switch", { exact: true, name: MOSTRAR_LINK });
+    await expect(mostrarLink).toBeChecked();
+    await expect(fechar.getByText(SEM_O_LINK, { exact: true })).toHaveCount(0);
+    await mostrarLink.click();
+    await expect(mostrarLink).not.toBeChecked();
+    await expect(fechar.getByText(SEM_O_LINK, { exact: true })).toBeVisible();
+
     // As duas previas (celular e computador) mostram o titulo novo nas cores escolhidas e o botao em degrade.
     const previa = page.getByRole("region", { exact: true, name: "Prévia" });
     for (const aparelho of ["celular", "computador"]) {
@@ -196,6 +209,9 @@ test.describe("produtor", () => {
       await expect.poll(() => escuroDaMidia(figura)).toMatchObject({ atrasDoTitulo: 0, opacaAte: ESCURO.comeca, someDesde: ESCURO.total });
       // A imagem do fundo (do nosso bucket) atras do texto, com o escuro por cima.
       await expect.poll(() => fundoDoCartao(figura), { timeout: 30_000 }).toMatch(IMAGEM_DO_FUNDO);
+      // Sem o link "Não mostrar de novo"; o "Lembrar depois" (o pop-up deixa adiar) continua no rodape.
+      await expect(figura.getByText("Não mostrar de novo", { exact: true })).toHaveCount(0);
+      await expect(figura.getByText("Lembrar depois", { exact: true })).toBeVisible();
     }
 
     const celular = await previa.getByRole("figure", { name: "Prévia do pop-up no celular" }).locator("[data-popup-design]").boundingBox();
@@ -226,6 +242,7 @@ test.describe("produtor", () => {
     expect(gravado.design?.card.background.url).toMatch(
       /\/storage\/v1\/object\/public\/content-assets\/communications\/images\/[a-f0-9]{24}\.webp$/
     );
+    expect(gravado.design?.links).toEqual({ color: "#a1a1aa", showDismiss: false });
     const titulo = gravado.design?.blocks.find((block) => block.type === "heading") as { lines: { paint: { color: string } | null; text: string }[] };
     expect(titulo.lines).toEqual([
       { paint: { color: COR_1.hex, kind: "solid" }, size: null, text: LINHA_1 },
@@ -305,6 +322,12 @@ test.describe("aluna", () => {
       await expect(botao).toBeVisible();
       expect(await fundoDe(botao)).toContain("linear-gradient");
       await expect(botao).toHaveCSS("color", "rgb(11, 11, 15)");
+
+      // O produtor tirou o "Não mostrar de novo": o link nao existe; "Lembrar depois" e o X continuam.
+      await expect(popUp.getByRole("button", { name: "Não mostrar de novo" })).toHaveCount(0);
+      await expect(popUp.getByText("Não mostrar de novo")).toHaveCount(0);
+      await expect(popUp.getByRole("button", { exact: true, name: "Lembrar depois" })).toBeVisible();
+      await expect(popUp.getByRole("button", { exact: true, name: "Fechar" })).toBeVisible();
 
       if (SHOTS) {
         await page.screenshot({ path: `${SHOTS}/aluno-fonte-degrade-1440.png` });

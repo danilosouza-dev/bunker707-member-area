@@ -234,7 +234,10 @@ export const POPUP_DESIGN_COPY = {
   close: {
     background: "Fundo do X",
     color: "Cor do X",
-    links: "Cor dos links (Lembrar depois e Não mostrar de novo)"
+    links: "Cor dos links (Lembrar depois e Não mostrar de novo)",
+    showDismiss: "Mostrar o link “Não mostrar de novo”",
+    /** So com a chave desligada: o custo de tirar o link, escrito para o produtor decidir. */
+    showDismissOff: "Sem o link, o aluno só fecha no X. Num pop-up que repete sem parar, ele não tem como deixar de vê-lo."
   },
   color: {
     angle: "Ângulo",
@@ -752,6 +755,7 @@ export function popupDesignFocusSelector(key: string): string | null {
     ["design.text", "[name='popup-design-posicao']"],
     ["design.card", "#popup-design-cartao"],
     ["design.close", "#popup-design-fechar"],
+    ["design.links.showDismiss", "#popup-design-links-nao-mostrar"],
     ["design.links", "#popup-design-fechar"],
     ["design.fonts", "#popup-design-fontes"]
   ];

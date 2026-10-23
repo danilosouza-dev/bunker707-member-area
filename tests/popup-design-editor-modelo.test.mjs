@@ -275,6 +275,8 @@ test("foco: cada chave do design leva ao campo da tabela do §7.2", () => {
     ["design.card.radius", "#popup-design-cartao"],
     ["design.close.color", "#popup-design-fechar"],
     ["design.links.color", "#popup-design-fechar"],
+    ["design.links.showDismiss", "#popup-design-links-nao-mostrar"],
+    ["design.links", "#popup-design-fechar"],
     ["design.fonts", "#popup-design-fontes"],
     ["design.version", "[name='popup-design']"],
     ["design", "[name='popup-design']"]
@@ -328,6 +330,12 @@ test("foco: os erros que o schema da de verdade caem no seletor certo, e os ids 
   const fadeFora = errorsOf(popupDraft({ design: { ...design, media: { ...design.media, fade: { ...design.media.fade, end: 10 } } } }));
   assert.equal(editor.popupDesignFocusSelector(Object.keys(fadeFora).find((key) => key.startsWith("design.media.fade"))), "#popup-design-degrade-fim");
 
+  // A chave "Mostrar o link “Não mostrar de novo”" so aceita booleano; o erro cai na propria chave.
+  const linkFora = errorsOf(popupDraft({ design: { ...design, links: { ...design.links, showDismiss: "não" } } }));
+  assert.equal(linkFora["design.links.showDismiss"], "Escolha se o link “Não mostrar de novo” aparece.");
+  assert.equal(editor.popupDesignFocusSelector("design.links.showDismiss"), "#popup-design-links-nao-mostrar");
+  assert.deepEqual(errorsOf(popupDraft({ design: { ...design, links: { ...design.links, showDismiss: false } } })), {}, "desligada, salva");
+
   // Os ids e nomes dos seletores existem nas telas do editor.
   const pasta = new URL("../src/components/admin/v2/communication/popup-design/", import.meta.url);
   const telas = (await Promise.all((await readdir(pasta)).filter((file) => file.endsWith(".tsx")).map((file) => readFile(new URL(file, pasta), "utf8")))).join("\n");
@@ -365,7 +373,9 @@ test("foco: os erros que o schema da de verdade caem no seletor certo, e os ids 
     'id="popup-design-cartao-imagem"',
     'name="popup-design-cartao-imagem-parte"',
     'id="popup-design-cartao-imagem-escurecer"',
-    'id="popup-design-cartao-fundo-cor"'
+    'id="popup-design-cartao-fundo-cor"',
+    // Fechar e links: a chave do "Não mostrar de novo".
+    'id="popup-design-links-nao-mostrar"'
   ]) {
     assert.ok(telas.includes(pedaco), `as telas tem ${pedaco}`);
   }
@@ -611,6 +621,10 @@ test("vocabulario: os textos do card Design nao usam palavra fora do vocabulario
   assert.ok(!textos.some((texto) => /\bRecorte\b/.test(texto)), "nenhum rotulo chama a parte da mídia de Recorte");
   assert.equal(editor.POPUP_DESIGN_COPY.cardSection.backgroundImageDim, "Escurecer a imagem");
   assert.equal(editor.POPUP_DESIGN_COPY.cardSection.backgroundImagePosition, "Onde a imagem fica");
+
+  // Fechar e links: a chave do "Não mostrar de novo" e a dica (so com a chave desligada) que diz o custo.
+  assert.equal(editor.POPUP_DESIGN_COPY.close.showDismiss, "Mostrar o link “Não mostrar de novo”");
+  assert.equal(editor.POPUP_DESIGN_COPY.close.showDismissOff, "Sem o link, o aluno só fecha no X. Num pop-up que repete sem parar, ele não tem como deixar de vê-lo.");
 
   // As telas do editor tambem (o texto escrito direto no JSX).
   const pasta = new URL("../src/components/admin/v2/communication/popup-design/", import.meta.url);

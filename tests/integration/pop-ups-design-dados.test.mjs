@@ -333,3 +333,36 @@ test("design gravado antes do 'Fica totalmente escuro em' (sem end): editor e al
   const daAluna = await popupDaAluna();
   assert.deepEqual(daAluna.design.media.fade, { ...antigo.media.fade, end: 100 });
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * "Não mostrar de novo" opcional no Personalizado (docs/26, D34)
+ * ---------------------------------------------------------------------------------------------- */
+
+test("'Mostrar o link Não mostrar de novo' desligado: grava false, o editor e a aluna leem false; o design gravado sem a chave le true", async () => {
+  const semLink = design();
+  semLink.links.showDismiss = false;
+  const salvo = ok(await salvar(popup({ design: semLink })));
+  assert.deepEqual((await linha(salvo.id)).popup_design.links, { color: "#a1a1aa", showDismiss: false }, "gravado na forma canonica, com a chave");
+
+  actAs(produtor);
+  const detalhe = await getNoticeDetail(salvo.id, { permissions: TODAS });
+  assert.deepEqual(detalhe.draft.design.links, { color: "#a1a1aa", showDismiss: false }, "o editor reabre desligado");
+
+  actAs(produtor);
+  ok(await actions.publishNotice({ expectedUpdatedAt: salvo.updatedAt, id: salvo.id }));
+  const daAluna = await popupDaAluna();
+  assert.equal(daAluna.id, salvo.id);
+  assert.deepEqual(daAluna.design.links, { color: "#a1a1aa", showDismiss: false }, "a aluna recebe o design sem o link");
+
+  // O design gravado antes da chave (so a cor nos links): o link continua aparecendo, para o editor e para a aluna.
+  const antigo = structuredClone((await linha(salvo.id)).popup_design);
+  delete antigo.links.showDismiss;
+  unwrap(await db.from("campaigns").update({ popup_design: antigo }).eq("id", salvo.id), "Gravando o design como a versao anterior gravava");
+  assert.deepEqual((await linha(salvo.id)).popup_design.links, { color: "#a1a1aa" });
+  const { invalidateLivePopups } = await import("../../src/server/communications/cache.ts");
+  invalidateLivePopups({ from: "route" });
+
+  actAs(produtor);
+  assert.deepEqual((await getNoticeDetail(salvo.id, { permissions: TODAS })).draft.design.links, { color: "#a1a1aa", showDismiss: true });
+  assert.deepEqual((await popupDaAluna()).design.links, { color: "#a1a1aa", showDismiss: true });
+});

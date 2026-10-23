@@ -225,6 +225,44 @@ test("parsePopupDesign: nulo, invalido ou de outra versao = Padrão (null); vali
   assert.equal(schema.parsePopupDesign(design).links.color, "#a1a1aa");
 });
 
+test("links.showDismiss: sem a chave le true (design salvo antes); false vai e volta; a forma canonica sempre tem a chave; so booleano", () => {
+  assert.equal(model.POPUP_SHOW_DISMISS_DEFAULT, true);
+
+  const semChave = starter();
+  delete semChave.links.showDismiss;
+  assert.equal("showDismiss" in semChave.links, false);
+  assert.deepEqual(schema.parsePopupDesign(semChave).links, { color: "#a1a1aa", showDismiss: true }, "sem a chave = o link aparece, como antes");
+  assert.deepEqual(model.canonicalPopupDesign(semChave).links, { color: "#a1a1aa", showDismiss: true }, "a forma canonica inclui a chave");
+  assert.deepEqual({ ...schema.parsePopupDesign(semChave), links: semChave.links }, semChave, "so a chave entra; o resto fica igual");
+
+  const semLink = starter();
+  semLink.links.showDismiss = false;
+  assert.deepEqual(schema.parsePopupDesign(semLink).links, { color: "#a1a1aa", showDismiss: false });
+  assert.equal(model.canonicalPopupDesign(semLink).links.showDismiss, false);
+  assert.equal(schemas.noticeDraftSchema.parse(popupDraft({ design: semLink })).design.links.showDismiss, false, "o rascunho do pop-up leva a chave");
+
+  for (const [label, links, path, message] of [
+    ["texto no lugar do booleano", { color: "#a1a1aa", showDismiss: "não" }, "links.showDismiss", schema.POPUP_DESIGN_MESSAGES.showDismiss],
+    ["chave a mais nos links", { color: "#a1a1aa", hide: true, showDismiss: true }, "links", null]
+  ]) {
+    const design = starter();
+    design.links = links;
+    const result = schema.popupDesignSchema.safeParse(design);
+
+    assert.equal(result.success, false, label);
+    assert.ok(
+      issuesOf(result).some((issue) => (issue.path === path || issue.path.startsWith(`${path}.`)) && (message === null || issue.message === message)),
+      `${label}: esperava erro em ${path}, veio ${JSON.stringify(issuesOf(result))}`
+    );
+    assert.equal(schema.parsePopupDesign(design), null, `${label}: na leitura vira Padrão`);
+  }
+
+  // Os modelos para comecar mostram o link (o de sempre); so a equipe tira.
+  for (const { id } of model.POPUP_DESIGN_STARTERS) {
+    assert.equal(starter(id).links.showDismiss, true, id);
+  }
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Rascunho do aviso: o design e o conteudo andam juntos
  * ---------------------------------------------------------------------------------------------- */

@@ -18,6 +18,7 @@ import {
   popupFooterCss,
   popupFooterLinkCss,
   popupFooterLinks,
+  popupHasFooter,
   popupMediaMode,
   popupOuterCss,
   popupTextGroupCss
@@ -84,6 +85,8 @@ export function PopupDesignCard({
   const over = isTextOverMedia(design, hasMedia);
   const cardWidth = popupCardWidthPx(design);
   const links = popupFooterLinks(design, popup.canSnooze);
+  // Sem "Não mostrar de novo" (a equipe tirou) e sem "Lembrar depois": nenhum rodape, o cartao termina no ultimo bloco.
+  const hasFooter = popupHasFooter(links);
   const linkStyle = popupFooterLinkCss(design);
   const linkClassName = cn("rounded-full underline-offset-4 hover:underline", focusRing);
   // Mesmo X do Padrão (36 px visiveis, 44 px de toque pelo before:, pulso do "Só no X"); so as cores mudam.
@@ -95,7 +98,7 @@ export function PopupDesignCard({
 
   const media = hasMedia ? <PopupDesignMedia design={design} image={image} mode={mode} over={over} playing={playing} /> : null;
   const group = (
-    <div data-popup-text="" style={popupTextGroupCss(design, hasMedia)}>
+    <div data-popup-text="" style={popupTextGroupCss(design, hasMedia, hasFooter)}>
       <PopupDesignBlocks
         accessPreviewMode={accessPreviewMode}
         bodyId={bodyId}
@@ -127,24 +130,28 @@ export function PopupDesignCard({
             {group}
           </>
         )}
-        <div style={popupFooterCss(design)}>
-          {links.snooze ? (
-            preview ? (
-              <span style={linkStyle}>Lembrar depois</span>
-            ) : (
-              <button className={linkClassName} onClick={onSnooze} style={linkStyle} type="button">
-                Lembrar depois
-              </button>
-            )
-          ) : null}
-          {preview ? (
-            <span style={linkStyle}>Não mostrar de novo</span>
-          ) : (
-            <button className={linkClassName} onClick={onDismiss} style={linkStyle} type="button">
-              Não mostrar de novo
-            </button>
-          )}
-        </div>
+        {hasFooter ? (
+          <div data-popup-footer="" style={popupFooterCss(design)}>
+            {links.snooze ? (
+              preview ? (
+                <span style={linkStyle}>Lembrar depois</span>
+              ) : (
+                <button className={linkClassName} onClick={onSnooze} style={linkStyle} type="button">
+                  Lembrar depois
+                </button>
+              )
+            ) : null}
+            {links.dismiss ? (
+              preview ? (
+                <span style={linkStyle}>Não mostrar de novo</span>
+              ) : (
+                <button className={linkClassName} onClick={onDismiss} style={linkStyle} type="button">
+                  Não mostrar de novo
+                </button>
+              )
+            ) : null}
+          </div>
+        ) : null}
       </div>
       {preview ? (
         <span aria-hidden="true" className={closeClassName} style={popupCloseCss(design)}>
