@@ -12,7 +12,9 @@
 // do sino (reagir, votar, excluir do sino).
 //
 // v3b-1 (docs/25 §2.5): a configuracao do pop-up (popupSettingsSchema: onde, quando, quantas vezes,
-// "Lembrar depois" e como fecha), com as regras em popup-display-model.ts.
+// "Lembrar depois" e como fecha), com as regras em popup-display-model.ts. v3b-2 (docs/29 §3.3): os momentos
+// "No primeiro acesso" e "Ao concluir um curso" e os produtos do primeiro acesso (accessProducts, que somem
+// fora de first_login na forma canonica).
 //
 // Design do pop-up (docs/26): `design` (null = Padrão; so pop-up, a notificacao nunca leva a chave), validado
 // por popup-design-schema.ts e coerente com o conteudo (botao, audio, imagem e "Lembrar depois").
@@ -57,10 +59,13 @@ import {
   canonicalPopupSettings,
   defaultPopupSettings,
   placementCoversNothing,
+  isLessonTrigger,
   POPUP_CLOSE_MODES,
   POPUP_PAGE_PATTERN,
+  POPUP_PRODUCT_ID,
   POPUP_STOP_ON,
   POPUP_TRIGGERS,
+  POPUP_V3B2_RULES,
   type PopupSettings
 } from "./popup-display-model";
 
@@ -379,6 +384,8 @@ const PICK_FROM_LIST_MESSAGE = "Escolha páginas da lista.";
 export const POPUP_NO_BUTTON_STOP_MESSAGE = "Este pop-up não tem botão: escolha quando ele para de aparecer.";
 
 const popupPageSchema = z.string({ error: PICK_FROM_LIST_MESSAGE }).regex(POPUP_PAGE_PATTERN, PICK_FROM_LIST_MESSAGE);
+const PICK_PRODUCTS_MESSAGE = "Escolha produtos da lista.";
+const popupProductIdSchema = z.string({ error: PICK_PRODUCTS_MESSAGE }).regex(POPUP_PRODUCT_ID, PICK_PRODUCTS_MESSAGE);
 const intIn = (min: number, max: number, message: string) => z.number({ error: message }).int(message).min(min, message).max(max, message);
 
 export const popupFrequencySchema = z.discriminatedUnion(
@@ -398,8 +405,9 @@ export const popupFrequencySchema = z.discriminatedUnion(
 
 /**
  * Excecoes e paginas que nao convivem: "qualquer página" nunca e excecao, a mesma pagina nas duas listas,
- * excecoes que tiram tudo e, ao concluir uma aula, so paginas de aula. ("Escolha pelo menos um produto." e
- * do editor, antes de existir padrao.)
+ * excecoes que tiram tudo e, ao concluir uma aula ou um curso, so paginas de aula. ("Escolha pelo menos um
+ * produto." e do editor, antes de existir padrao; no primeiro acesso, a lista vazia salva e "A primeira vez na
+ * área".)
  */
 function addPopupSettingsIssues(settings: PopupSettings, context: z.RefinementCtx) {
   const pages = Array.isArray(settings.pages) ? settings.pages : [];
@@ -415,13 +423,19 @@ function addPopupSettingsIssues(settings: PopupSettings, context: z.RefinementCt
     context.addIssue({ code: "custom", message: "Com essas exceções, o pop-up não aparece em nenhuma página.", path: ["exclude"] });
   }
 
-  if (settings.trigger === "lesson_completed" && pages.some((pattern) => !pattern.startsWith("lesson:"))) {
-    context.addIssue({ code: "custom", message: "Ao concluir uma aula vale só para páginas de aula.", path: ["pages"] });
+  if (isLessonTrigger(settings.trigger) && pages.some((pattern) => !pattern.startsWith("lesson:"))) {
+    context.addIssue({
+      code: "custom",
+      message: settings.trigger === "course_completed" ? "Ao concluir um curso vale só para páginas de aula." : "Ao concluir uma aula vale só para páginas de aula.",
+      path: ["pages"]
+    });
   }
 }
 
 export const popupSettingsSchema = z
   .object({
+    // So no primeiro acesso; nos outros momentos a forma canonica apaga (o editor nunca manda).
+    accessProducts: z.array(popupProductIdSchema).max(POPUP_V3B2_RULES.accessProductsMax, "Use até 20 produtos.").optional(),
     close: z.enum(POPUP_CLOSE_MODES, { error: "Escolha como o aluno fecha o pop-up." }).default("any"),
     delaySeconds: intIn(0, 600, "Use de 0 a 600 segundos.").default(3),
     exclude: z.array(popupPageSchema).max(20, "Use até 20 páginas.").default([]),

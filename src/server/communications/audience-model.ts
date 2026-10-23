@@ -147,6 +147,11 @@ export type AudienceStudentFacts = {
   completedByContent: Record<string, number>;
   /** Totais sobre o que o aluno pode estudar agora (mesma conta da lista de Alunos). */
   completedLessons: number;
+  /**
+   * v3b-2: quando a conta foi criada (profiles.created_at, em ms; o "No primeiro acesso" do pop-up). Opcional:
+   * os fatos montados fora de buildStudentFacts (o lote do motor dos fluxos, os testes) podem nao trazer.
+   */
+  createdAt?: number | null;
   lastSignInAt: number | null;
   lastStudiedAt: number | null;
   pace: StudentPace;

@@ -9,14 +9,33 @@
 // Sem limite entre pop-ups (decisao do produtor, docs/24 §10.8): cada pop-up segue a propria frequencia; o
 // sistema so garante um de cada vez na tela. Pisos tecnicos invisiveis (POPUP_V3B1_RULES): o mesmo pop-up
 // nunca abre duas vezes em menos de 5 s para o mesmo aluno e o historico grava ate 100 aberturas por dia.
+//
+// v3b-2 (docs/29): dois momentos novos, "No primeiro acesso" (first_login, de pagina: quem e aluno novo e
+// decidido no recalculo do segmento, popup-first-access.ts) e "Ao concluir um curso" (course_completed, de
+// aula). A hora marcada ao vivo e o "Comeca" de sempre: o plano e o mapa levam os pop-ups que comecam nas
+// proximas 24 h (o plano com `startsAt`) e o show antes da hora responde not_started (409) a quem esta no
+// segmento.
 
 import { FIXED_PAGE_KEYS, FIXED_PAGE_PATHS } from "../member-area/page-visit-model";
 import type { PopupDeliveryState, PopupRepeat } from "./campaign-model";
 import type { PopupPlanItem } from "./notification-model";
 // Sem import de flow-model.ts nem de popup-sentences.ts (campaign-model -> este modulo nao pode virar ciclo).
 
-export const POPUP_TRIGGERS = ["page_load", "lesson_completed"] as const;
+export const POPUP_TRIGGERS = ["page_load", "lesson_completed", "first_login", "course_completed"] as const;
 export type PopupTrigger = (typeof POPUP_TRIGGERS)[number];
+/** Momentos que abrem pela pagina (o navegador arma ao abrir a pagina e na hora marcada). */
+export const POPUP_PAGE_TRIGGERS = ["page_load", "first_login"] as const satisfies readonly PopupTrigger[];
+/** Momentos que abrem pela conclusao, so em paginas de aula (check campaigns_popup_pages_v3b). */
+export const POPUP_LESSON_TRIGGERS = ["lesson_completed", "course_completed"] as const satisfies readonly PopupTrigger[];
+
+export function isPageTrigger(trigger: string): trigger is (typeof POPUP_PAGE_TRIGGERS)[number] {
+  return (POPUP_PAGE_TRIGGERS as readonly string[]).includes(trigger);
+}
+
+export function isLessonTrigger(trigger: string): trigger is (typeof POPUP_LESSON_TRIGGERS)[number] {
+  return (POPUP_LESSON_TRIGGERS as readonly string[]).includes(trigger);
+}
+
 export const POPUP_STOP_ON = ["click", "never"] as const;
 export type PopupStopOn = (typeof POPUP_STOP_ON)[number];
 export const POPUP_CLOSE_MODES = ["any", "x_only"] as const;
@@ -31,6 +50,12 @@ export type PopupFrequency =
   | { everyMinutes: number | null; maxPerDay: number | null; maxTotal: number | null; mode: "repeat"; stopOn: PopupStopOn };
 
 export type PopupSettings = {
+  /**
+   * So em "No primeiro acesso" (trigger first_login): [] = a primeira vez na area; ids = a primeira vez com
+   * estes produtos. Nos outros momentos a chave nao existe (forma canonica), entao configuracoes e modelos
+   * de antes continuam byte a byte.
+   */
+  accessProducts?: string[];
   close: PopupClose;
   delaySeconds: number;
   exclude: string[];
@@ -45,6 +70,8 @@ export type PopupSettings = {
 export const POPUP_PAGE_PATTERN = /^(any|home|purchases|saved|materials|journey|continue|profile|support|(?:content|lesson):(?:\*|[A-Za-z0-9_-]{1,240}))$/;
 /** Uma pagina de verdade (sem curingas). */
 export const POPUP_PAGE_KEY = /^(home|purchases|saved|materials|journey|continue|profile|support|(?:content|lesson):[A-Za-z0-9_-]{1,240})$/;
+/** Id de produto (o mesmo pedaco do POPUP_PAGE_KEY; o mesmo texto de communication_popup_products_ok). */
+export const POPUP_PRODUCT_ID = /^[A-Za-z0-9_-]{1,240}$/;
 
 export const POPUP_V3B1_RULES = {
   defaultDelaySeconds: 3,
@@ -60,6 +87,16 @@ export const POPUP_V3B1_RULES = {
   snoozeMinutes: { default: 1_440, max: 10_080, min: 5 }
 } as const;
 
+export const POPUP_V3B2_RULES = {
+  /** "A primeira vez com estes produtos": ate 20 produtos (check campaigns_popup_access_v3b2). */
+  accessProductsMax: 20,
+  /**
+   * O plano leva pop-ups que comecam ate 24 h depois, e o startsAt de quem comecou ate 24 h antes (a pagina
+   * aberta antes da hora ainda arma).
+   */
+  liveHorizonMs: 86_400_000
+} as const;
+
 export const POPUP_SETTINGS_DEFAULT: PopupSettings = {
   close: "any",
   delaySeconds: 3,
@@ -73,6 +110,8 @@ export const POPUP_SETTINGS_DEFAULT: PopupSettings = {
 export const POPUP_UNTIL_CLICK_V1: PopupFrequency = { everyMinutes: 1_440, maxPerDay: null, maxTotal: null, mode: "repeat", stopOn: "click" };
 
 export type PopupColumns = {
+  /** v3b-2: so em first_login ("A primeira vez com estes produtos"); vazio nos outros momentos e nas notificacoes. */
+  popup_access_products: string[];
   popup_close: PopupClose;
   popup_delay_seconds: number;
   popup_every_minutes: number | null;
@@ -93,7 +132,8 @@ export type PopupCountState = PopupDeliveryState & { dayImpressions: number; res
 /** Um pop-up da lista no ar (cache), com as paginas ja expandidas (formacao -> cursos). */
 export type LivePopupRules = { allowSnooze: boolean; endsAt: number | null; id: string; rank: number; settings: PopupSettings; startsAt: number | null };
 
-export type ShowRefusal = "changed" | "frequency" | "not_eligible" | "not_live" | "page" | "trigger";
+export type ShowRefusal = "changed" | "frequency" | "not_eligible" | "not_live" | "not_started" | "page" | "trigger";
+/** Em not_started, nextAt = startsAt (o navegador arma de novo uma vez para essa hora). */
 export type ShowDecision = { ok: true } | { nextAt: number | null; ok: false; reason: Exclude<ShowRefusal, "changed"> };
 export type FrequencyVerdict = { allowed: true } | { allowed: false; nextAt: number | null };
 /** Quando o pop-up pode voltar depois de uma abertura (resposta do show): null = nao volta mais. */
@@ -337,6 +377,29 @@ export function frequencyOfColumns(row: PopupColumnsInput): PopupFrequency {
   };
 }
 
+/**
+ * Produtos do "No primeiro acesso": aparados, sem repeticao, em ordem de codigo, so os que passam em
+ * POPUP_PRODUCT_ID (o resto sai).
+ */
+export function canonicalProductIds(ids: readonly unknown[]): string[] {
+  const unique = new Set<string>();
+
+  for (const id of ids) {
+    const trimmed = typeof id === "string" ? id.trim() : "";
+
+    if (POPUP_PRODUCT_ID.test(trimmed)) {
+      unique.add(trimmed);
+    }
+  }
+
+  return [...unique].sort();
+}
+
+/** A coluna popup_access_products lida sem confiar: lista que nao e lista = [] ("a primeira vez na área"). */
+function accessProductsOf(value: unknown): string[] {
+  return Array.isArray(value) ? canonicalProductIds(value).slice(0, POPUP_V3B2_RULES.accessProductsMax) : [];
+}
+
 function patternsOf(value: unknown, fallback: readonly string[], allowAny: boolean) {
   if (!Array.isArray(value)) {
     return [...fallback];
@@ -349,20 +412,23 @@ function patternsOf(value: unknown, fallback: readonly string[], allowAny: boole
 
 /**
  * Configuracao do pop-up a partir da linha; cada campo cai no padrao quando falta ou e invalido (linha lida
- * antes da migracao nao tem nenhum; um momento da v3b-2, como at_start, lido por este app vira page_load).
+ * antes da migracao nao tem nenhum; um momento desconhecido, como at_start, vira page_load). v3b-2: os
+ * produtos do primeiro acesso so existem em first_login (a chave nao existe nos outros momentos).
  */
 export function popupSettingsOfRow(row: PopupColumnsInput): PopupSettings {
   const fallback = POPUP_SETTINGS_DEFAULT;
   const { delaySeconds, snoozeMinutes } = POPUP_V3B1_RULES;
+  const trigger = (POPUP_TRIGGERS as readonly unknown[]).includes(row.popup_trigger) ? (row.popup_trigger as PopupTrigger) : fallback.trigger;
 
   return {
+    ...(trigger === "first_login" ? { accessProducts: accessProductsOf(row.popup_access_products) } : {}),
     close: row.popup_close === "x_only" ? "x_only" : "any",
     delaySeconds: integerIn(row.popup_delay_seconds, delaySeconds.min, delaySeconds.max) ?? fallback.delaySeconds,
     exclude: patternsOf(row.popup_exclude_pages, fallback.exclude, false),
     frequency: frequencyOfColumns(row),
     pages: patternsOf(row.popup_pages, fallback.pages, true),
     snoozeMinutes: integerIn(row.popup_snooze_minutes, snoozeMinutes.min, snoozeMinutes.max) ?? fallback.snoozeMinutes,
-    trigger: (POPUP_TRIGGERS as readonly unknown[]).includes(row.popup_trigger) ? (row.popup_trigger as PopupTrigger) : fallback.trigger
+    trigger
   };
 }
 
@@ -370,12 +436,16 @@ export function repeatOfFrequency(frequency: PopupFrequency): PopupRepeat {
   return frequency.mode === "once" ? "once" : "until_action";
 }
 
-/** As onze colunas popup_* e popup_repeat (sempre coerente com "Quantas vezes", check campaigns_popup_frequency_v3b). */
+/**
+ * As colunas popup_* e popup_repeat (sempre coerente com "Quantas vezes", check campaigns_popup_frequency_v3b);
+ * v3b-2: popup_access_products so em first_login (check campaigns_popup_access_v3b2).
+ */
 export function popupSettingsToColumns(settings: PopupSettings): PopupColumns {
   const { frequency } = settings;
   const repeat = frequency.mode === "repeat" ? frequency : null;
 
   return {
+    popup_access_products: settings.trigger === "first_login" ? [...(settings.accessProducts ?? [])] : [],
     popup_close: settings.close,
     popup_delay_seconds: settings.delaySeconds,
     popup_every_minutes: repeat ? repeat.everyMinutes : null,
@@ -393,6 +463,7 @@ export function popupSettingsToColumns(settings: PopupSettings): PopupColumns {
 
 /** O que uma notificacao (e um passo de fluxo) grava: os padroes (check campaigns_popup_only_v3b). */
 export const POPUP_COLUMNS_FOR_INBOX: PopupColumns = {
+  popup_access_products: [],
   popup_close: "any",
   popup_delay_seconds: 3,
   popup_every_minutes: null,
@@ -461,11 +532,15 @@ export function popupFrequencyPatch(draft: { popup?: PopupSettings }, frequency:
   return { popup: { ...(draft.popup ?? defaultPopupSettings()), frequency }, repeat: repeatOfFrequency(frequency) };
 }
 
-/** Forma canonica (o editor compara mudancas nao salvas e draftToColumns grava): padroes em ordem, sem sobra. */
+/**
+ * Forma canonica (o editor compara mudancas nao salvas e draftToColumns grava): padroes em ordem, sem sobra.
+ * `accessProducts` so existe em first_login (canonicos); nos outros momentos a chave e apagada.
+ */
 export function canonicalPopupSettings(settings: PopupSettings): PopupSettings {
   const { frequency } = settings;
 
   return {
+    ...(settings.trigger === "first_login" ? { accessProducts: canonicalProductIds(settings.accessProducts ?? []) } : {}),
     close: settings.close,
     delaySeconds: settings.delaySeconds,
     exclude: canonicalPatterns(settings.exclude),
@@ -594,9 +669,16 @@ export function popupWindowOpen(popup: Pick<LivePopupRules, "endsAt" | "startsAt
   return (popup.startsAt === null || popup.startsAt <= now) && (popup.endsAt === null || popup.endsAt > now);
 }
 
+/** A janela abre ate `horizonMs` depois de agora e ainda nao fechou (o plano e o mapa, v3b-2). */
+export function popupWindowSoon(popup: Pick<LivePopupRules, "endsAt" | "startsAt">, now: number, horizonMs: number = POPUP_V3B2_RULES.liveHorizonMs) {
+  return (popup.startsAt === null || popup.startsAt <= now + horizonMs) && (popup.endsAt === null || popup.endsAt > now);
+}
+
 /**
- * O servidor deixa abrir este pop-up agora, nesta pagina e neste momento? Na ordem: no ar, elegivel, pagina,
- * momento, frequencia. Depois o servidor grava pela RPC 5.1 com o updated_at que leu (null = "changed").
+ * O servidor deixa abrir este pop-up agora, nesta pagina e neste momento? Na ordem: no ar (sem fim no
+ * passado), elegivel, ja comecou (v3b-2: antes da hora, not_started com nextAt = startsAt, so para quem esta
+ * no segmento; quem nao esta continua com not_eligible, nada vaza), pagina, momento, frequencia. Depois o
+ * servidor grava pela RPC 5.1 com o updated_at que leu (null = "changed").
  */
 export function decideShow(input: {
   delivery: PopupCountState | null;
@@ -607,12 +689,16 @@ export function decideShow(input: {
 }): ShowDecision {
   const { delivery, now, popup } = input;
 
-  if (!popup || !popupWindowOpen(popup, now)) {
+  if (!popup || (popup.endsAt !== null && popup.endsAt <= now)) {
     return { nextAt: null, ok: false, reason: "not_live" };
   }
 
   if (!delivery || !delivery.eligible) {
     return { nextAt: null, ok: false, reason: "not_eligible" };
+  }
+
+  if (popup.startsAt !== null && popup.startsAt > now) {
+    return { nextAt: popup.startsAt, ok: false, reason: "not_started" };
   }
 
   if (!popupAllowsPage(popup.settings, input.pageKey)) {
@@ -635,15 +721,23 @@ function byRank(left: LivePopupRules, right: LivePopupRules) {
 /**
  * O plano do aluno (sem conteudo): os pop-ups no ar do segmento dele que ainda podem aparecer, na ordem (o
  * comeco da janela mais recente primeiro; sem comeco, a publicacao; empate pelo id). Nunca filtrado por
- * pagina nem por horizonte: o plano serve todas as paginas dos proximos 60 s.
+ * pagina: o plano serve todas as paginas dos proximos 60 s. v3b-2: entram tambem os que comecam ate
+ * `horizonMs` depois (com notBefore >= startsAt), e todo item cujo Comeca caiu entre `horizonMs` atras e
+ * `horizonMs` a frente leva `startsAt` (o navegador arma a hora marcada para a pagina aberta antes dela).
  */
-export function planPopups(input: { deliveries: readonly PopupCountState[]; live: readonly LivePopupRules[]; now: number }): PopupPlanItem[] {
+export function planPopups(input: {
+  deliveries: readonly PopupCountState[];
+  horizonMs?: number;
+  live: readonly LivePopupRules[];
+  now: number;
+}): PopupPlanItem[] {
   const { now } = input;
+  const horizonMs = input.horizonMs ?? POPUP_V3B2_RULES.liveHorizonMs;
   const byCampaign = new Map(input.deliveries.map((delivery) => [delivery.campaignId, delivery] as const));
   const plan: PopupPlanItem[] = [];
 
   for (const popup of [...input.live].sort(byRank)) {
-    if (!popupWindowOpen(popup, now)) {
+    if (!popupWindowSoon(popup, now, horizonMs)) {
       continue;
     }
 
@@ -660,12 +754,16 @@ export function planPopups(input: { deliveries: readonly PopupCountState[]; live
       continue;
     }
 
+    const future = popup.startsAt !== null && popup.startsAt > now;
+    const waits = [...(verdict.allowed || verdict.nextAt === null ? [] : [verdict.nextAt]), ...(future ? [popup.startsAt!] : [])];
+
     plan.push({
       delaySeconds: popup.settings.delaySeconds,
       exclude: [...popup.settings.exclude],
       id: popup.id,
-      notBefore: verdict.allowed || verdict.nextAt === null ? null : iso(verdict.nextAt),
+      notBefore: waits.length === 0 ? null : iso(Math.max(...waits)),
       pages: [...popup.settings.pages],
+      ...(popup.startsAt !== null && popup.startsAt > now - horizonMs ? { startsAt: iso(popup.startsAt) } : {}),
       stopOn: frequency.mode === "once" ? null : frequency.stopOn,
       trigger: popup.settings.trigger
     });
@@ -677,13 +775,14 @@ export function planPopups(input: { deliveries: readonly PopupCountState[]; live
 /**
  * Onde algum pop-up no ar pode aparecer: a uniao grossa das paginas (content:* e lesson:* no lugar dos ids,
  * que sao slugs legiveis dos titulos), ["any"] quando algum aparece em qualquer pagina. Excecoes ficam de
- * fora de proposito (superconjunto: um falso positivo custa uma leitura do plano a cada 60 s).
+ * fora de proposito (superconjunto: um falso positivo custa uma leitura do plano a cada 60 s). v3b-2: cobre
+ * tambem as paginas dos que comecam ate `horizonMs` depois (a hora marcada para quem ja esta na pagina).
  */
-export function pagesCovering(live: readonly LivePopupRules[], now: number): string[] {
+export function pagesCovering(live: readonly LivePopupRules[], now: number, horizonMs: number = POPUP_V3B2_RULES.liveHorizonMs): string[] {
   const patterns = new Set<string>();
 
   for (const popup of live) {
-    if (popupWindowOpen(popup, now)) {
+    if (popupWindowSoon(popup, now, horizonMs)) {
       popup.settings.pages.forEach((pattern) => patterns.add(coarsePagePattern(pattern)));
     }
   }

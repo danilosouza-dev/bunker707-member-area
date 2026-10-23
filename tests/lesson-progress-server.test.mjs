@@ -6,6 +6,8 @@ import { actionStubs, createFakeDb } from "./support/admin-action-stubs.mjs";
 // Gravacao do progresso da aula no servidor (replaceCompletedLessons em platform-store), executada
 // com banco falso: a lista completed_lesson_ids e a verdade. Heartbeat e flush ao sair da pagina
 // (PUT e POST levam o mesmo payload) nao rebaixam aula concluida; desmarcar volta a "em andamento".
+// v3b-2 (docs/29 §4.4): replaceCompletedLessonsWithPrevious devolve tambem as concluidas lidas pela tentativa
+// que venceu o compare-and-swap (o "antes" de verdade, que a rota usa para dizer se o curso fechou).
 
 const store = await import("../src/server/db/platform-store.ts");
 
@@ -110,4 +112,87 @@ test("fileira 'Continue assistindo' da home ignora aula da lista de concluidas (
   assert.match(source, /const completedLessonIds = new Set\(Array\.isArray\(record\.completedLessonIds\) \? record\.completedLessonIds : \[\]\);/);
   assert.match(source, /if \(!isLessonResumable\(lessonId, watchState, completedLessonIds\)\) \{/);
   assert.doesNotMatch(source, /watchState\.status === "completed" \|\| watchState\.progressPercent <= 0/, "a conta antiga, so pelo watch state, saiu");
+});
+
+/**
+ * Banco falso do compare-and-swap: cada leitura de lesson_progress devolve a proxima versao da lista (a primeira
+ * pode estar velha) e o update so grava quando o updated_at lido e o da versao guardada agora.
+ */
+function casDb(versions) {
+  let reads = 0;
+  const stored = versions.at(-1);
+  const generic = () => {
+    const chain = { eq: () => chain, in: () => chain, maybeSingle: async () => ({ data: null, error: null }), select: () => chain, then: (ok, fail) => Promise.resolve({ data: [], error: null }).then(ok, fail) };
+    return chain;
+  };
+
+  return {
+    reads: () => reads,
+    from(table) {
+      if (table !== "lesson_progress") {
+        return generic();
+      }
+
+      return {
+        insert: async () => ({ error: null }),
+        select() {
+          const chain = {
+            eq: () => chain,
+            maybeSingle: async () => {
+              const row = versions[Math.min(reads, versions.length - 1)];
+              reads += 1;
+              return { data: row ? structuredClone(row) : null, error: null };
+            }
+          };
+          return chain;
+        },
+        update() {
+          let expected = null;
+          const chain = {
+            eq: (column, value) => {
+              if (column === "updated_at") {
+                expected = value;
+              }
+              return chain;
+            },
+            select: async () => ({ data: expected === stored.updated_at ? [{ user_id: USER_ID }] : [], error: null })
+          };
+          return chain;
+        }
+      };
+    },
+    rpc: async () => ({ data: null, error: null })
+  };
+}
+
+test("replaceCompletedLessonsWithPrevious: o 'antes' e o da tentativa que venceu o compare-and-swap", async () => {
+  const velha = { ...completedRow(), completed_lesson_ids: [], updated_at: "2026-10-16T10:00:00.000Z" };
+  const atual = completedRow();
+  const db = casDb([velha, atual]);
+  actionStubs.db = db;
+
+  const { previousCompletedLessonIds, record } = await store.replaceCompletedLessonsWithPrevious({
+    completedLessonIds: ["a1", "a2"],
+    contentId: CONTENT_ID,
+    lessonId: "a2",
+    status: "completed",
+    userId: USER_ID
+  });
+
+  assert.equal(db.reads(), 2, "a primeira tentativa perdeu e releu");
+  assert.deepEqual(previousCompletedLessonIds, ["a1"], "o da leitura que gravou, nunca o da que perdeu");
+  assert.deepEqual(record.completedLessonIds, ["a1", "a2"]);
+});
+
+test("replaceCompletedLessonsWithPrevious: sem linha (primeira gravacao) o 'antes' e vazio; replaceCompletedLessons devolve so o registro", async () => {
+  useDb([]);
+
+  const first = await store.replaceCompletedLessonsWithPrevious({ completedLessonIds: ["a1"], contentId: CONTENT_ID, lessonId: "a1", status: "completed", userId: USER_ID });
+  assert.deepEqual(first.previousCompletedLessonIds, []);
+  assert.deepEqual(first.record.completedLessonIds, ["a1"]);
+
+  useDb([completedRow()]);
+  const record = await store.replaceCompletedLessons({ completedLessonIds: ["a1", "a2"], contentId: CONTENT_ID, userId: USER_ID });
+  assert.deepEqual(record.completedLessonIds, ["a1", "a2"]);
+  assert.equal("previousCompletedLessonIds" in record, false, "os outros chamadores nao mudam");
 });

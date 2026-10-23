@@ -273,6 +273,8 @@ export function buildStudentFacts(sources: StudentFactsSources): { facts: Audien
       comments: sources.comments.get(profile.id) ?? ZERO_COMMENTS,
       completedByContent,
       completedLessons,
+      // v3b-2: o "No primeiro acesso" do pop-up (a coluna ja vem em PROFILE_COLUMNS: nenhuma leitura nova).
+      createdAt: timeOf(profile.created_at),
       lastSignInAt: timeOf(profile.last_sign_in_at),
       lastStudiedAt: timeOf(lastStudiedAt),
       pace: paceOf({ completedLessons, lastStudiedAt, now, totalLessons }),
