@@ -176,14 +176,42 @@ test("recalculo do pop-up que falha grava so a hora do recalculo: tenta de novo 
 
   const busca = db.queries.find((query) => query.table === "campaigns" && query.op === "select" && isPopupQuery(query));
   assert.ok(
-    busca.filters.some(([method, value]) => method === "or" && value.includes('audience_refreshed_at.lt."2026-10-20T15:00:00.000Z"')),
-    "vencido = recalculado antes do comeco da faixa de 15 minutos"
+    busca.filters.some(([method, value]) => method === "or" && value.includes('audience_refreshed_at.lt."2026-10-20T15:07:00.000Z"')),
+    "vencido = recalculado antes do comeco da faixa de 15 minutos (deslocada para :07, docs/29 §4.9)"
   );
 
   const gravacoes = db.queries.filter((query) => query.table === "campaigns" && query.op === "update");
   assert.deepEqual(gravacoes.map((query) => query.payload), [{ audience_refreshed_at: now.toISOString() }], "so a hora; nada de last_error");
   assert.ok(gravacoes[0].filters.some(([method, column, values]) => method === "in" && column === "status" && values.includes("active")));
   assert.ok(errors.some((line) => line.includes("nao recalculado")), errors.join("\n"));
+});
+
+test("faixas do recalculo dos pop-ups viram em :07, :22, :37 e :52: no minuto redondo de uma live nada novo vence; os fluxos ficam nas redondas", async () => {
+  const { POPUP_REFRESH_OFFSET_MS, popupRefreshBandStart, popupRefreshDueBefore } = await import("../src/server/communications/campaign-model.ts");
+  const QUINZE = 15 * 60 * 1000;
+  const corte = async (hora) => {
+    const db = scriptedDb(() => ({ count: 0, data: [], error: null }));
+    await processCommunications({ db, now: new Date(hora) });
+    const busca = db.queries.find((query) => query.table === "campaigns" && query.op === "select" && isPopupQuery(query));
+    const filtro = busca.filters.find(([method, value]) => method === "or" && value.includes("audience_refreshed_at.lt."));
+    return /audience_refreshed_at\.lt\."([^"]+)"/.exec(filtro[1])[1];
+  };
+
+  assert.equal(POPUP_REFRESH_OFFSET_MS, 7 * 60 * 1000);
+  // A live das 20:00: o tick das 20:00 so recalcula quem nao foi recalculado desde 19:52 (ninguem, num tick por minuto).
+  assert.equal(await corte("2026-10-20T20:00:00.000Z"), "2026-10-20T19:52:00.000Z");
+  assert.equal(await corte("2026-10-20T20:06:59.999Z"), "2026-10-20T19:52:00.000Z");
+  assert.equal(await corte("2026-10-20T20:07:00.000Z"), "2026-10-20T20:07:00.000Z");
+  assert.equal(await corte("2026-10-20T20:21:59.000Z"), "2026-10-20T20:07:00.000Z");
+  assert.equal(await corte("2026-10-20T20:22:00.000Z"), "2026-10-20T20:22:00.000Z");
+  assert.equal(await corte("2026-10-20T20:52:30.000Z"), "2026-10-20T20:52:00.000Z");
+  assert.equal(await corte("2026-10-20T21:01:00.000Z"), "2026-10-20T20:52:00.000Z");
+  // No maximo 15 minutos sem recalculo: o pop-up recalculado logo depois da virada vence na virada seguinte.
+  const recalculado = Date.parse("2026-10-20T20:07:00.000Z");
+  assert.ok(!(recalculado < popupRefreshBandStart(Date.parse("2026-10-20T20:21:59.999Z"), QUINZE)));
+  assert.ok(recalculado < popupRefreshBandStart(Date.parse("2026-10-20T20:22:00.000Z"), QUINZE));
+  // Os fluxos (flow-engine.ts) continuam com a faixa redonda.
+  assert.equal(popupRefreshDueBefore(Date.parse("2026-10-20T20:00:00.000Z"), QUINZE), Date.parse("2026-10-20T20:00:00.000Z"));
 });
 
 /** Fatos de `total` alunos (o segmento "todos" nao olha os fatos). */

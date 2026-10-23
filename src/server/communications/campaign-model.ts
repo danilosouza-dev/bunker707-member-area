@@ -389,6 +389,18 @@ export function popupRefreshDueBefore(now: number, everyMs: number) {
   return Math.floor(now / everyMs) * everyMs;
 }
 
+/**
+ * v3b-2 (docs/29 §4.9): as faixas do recalculo dos pop-ups viram 7 minutos depois das redondas (:07, :22, :37,
+ * :52), fora da hora de uma live marcada (20:00), quando os alunos parados na pagina chamam o show todos juntos.
+ * Os fluxos (flow-engine.ts) continuam nas redondas.
+ */
+export const POPUP_REFRESH_OFFSET_MS = 7 * 60 * 1000;
+
+/** Comeco da faixa do recalculo dos pop-ups em que `now` cai (deslocada em `offsetMs`). */
+export function popupRefreshBandStart(now: number, everyMs: number, offsetMs: number = POPUP_REFRESH_OFFSET_MS) {
+  return popupRefreshDueBefore(now - offsetMs, everyMs) + offsetMs;
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Agenda no fuso de Sao Paulo (UTC-3 fixo, sem horario de verao, como o resto do sistema)
  * ---------------------------------------------------------------------------------------------- */

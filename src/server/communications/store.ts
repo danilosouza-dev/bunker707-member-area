@@ -7,7 +7,7 @@ import "server-only";
 // nunca enviam o mesmo aviso ao mesmo tempo (e o envio e idempotente pelo dedupe_key).
 
 import { normalizeAudience, type AudienceDefinition } from "./audience-model";
-import { popupRefreshDueBefore, type CampaignKind, type CampaignStatus, type PopupRepeat } from "./campaign-model";
+import { popupRefreshBandStart, type CampaignKind, type CampaignStatus, type PopupRepeat } from "./campaign-model";
 import { assertNoDbError, chunksOf, CommunicationError, type CommunicationsDb } from "./db";
 import { isReactionId, parsePoll, POLL_OPTION_ID, type PollDefinition, type ReactionId } from "./interactions-model";
 import { noticeIconOfColumns, testSendExpiresAt, validityOfRow, validityToColumns } from "./message-meta";
@@ -522,7 +522,8 @@ export async function claimDueInbox(db: CommunicationsDb, now: Date, limit: numb
  */
 export async function fetchPopupsToRefresh(db: CommunicationsDb, now: Date, staleMs: number, limit: number): Promise<CampaignRow[]> {
   const nowIso = now.toISOString();
-  const staleIso = new Date(popupRefreshDueBefore(now.getTime(), staleMs)).toISOString();
+  // Faixas deslocadas para :07, :22, :37 e :52 (docs/29 §4.9): o recalculo nunca cai no minuto redondo de uma live.
+  const staleIso = new Date(popupRefreshBandStart(now.getTime(), staleMs)).toISOString();
   const { data, error } = await db
     .from("campaigns")
     .select(CAMPAIGN_COLUMNS)
