@@ -111,11 +111,51 @@ async function preencherNumero(campo: Locator, valor: number) {
   await campo.press("Tab");
 }
 
-/** A caixa (px de tela) de um elemento. */
+/**
+ * A caixa (px de tela) de um elemento, medida pela propria pagina quando para de mudar: com "Ajustar à tela", o
+ * palco muda de escala alguns quadros depois de o cartao crescer ou encolher (soltar um elemento perto do pe muda a
+ * altura), e o WebKit da CI chegava a medir antes. `livre`: o ponto do meio e o proprio elemento (nada por cima).
+ */
+async function caixaParada(locator: Locator) {
+  return locator.evaluate(async (element) => {
+    const quadro = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    let antes = "";
+    let iguais = 0;
+
+    for (let vez = 0; vez < 240 && iguais < 3; vez += 1) {
+      await quadro();
+      const rect = element.getBoundingClientRect();
+      const agora = [rect.x, rect.y, rect.width, rect.height].map((valor) => valor.toFixed(2)).join(",");
+      iguais = agora === antes ? iguais + 1 : 0;
+      antes = agora;
+    }
+
+    const rect = element.getBoundingClientRect();
+    const meio = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+
+    return {
+      box: rect.width > 0 && rect.height > 0 ? { height: rect.height, width: rect.width, x: rect.x, y: rect.y } : null,
+      livre: document.elementFromPoint(meio.x, meio.y) === element,
+      meio,
+      parado: iguais >= 3
+    };
+  });
+}
+
+/** A caixa (px de tela) de um elemento desenhado, depois de o palco parar de mudar. */
 async function caixa(locator: Locator) {
-  const box = await locator.boundingBox();
-  expect(box, "elemento desenhado").not.toBeNull();
-  return box as { height: number; width: number; x: number; y: number };
+  const medida = await caixaParada(locator);
+  expect(medida.parado, "o elemento parou de mudar de lugar").toBe(true);
+  expect(medida.box, "elemento desenhado").not.toBeNull();
+  return medida.box as { height: number; width: number; x: number; y: number };
+}
+
+/** O meio do elemento, conferido depois de o palco parar: o que esta nesse ponto da tela e o proprio elemento. */
+async function meioLivre(locator: Locator) {
+  const medida = await caixaParada(locator);
+  expect(medida.parado, "o elemento parou de mudar de lugar").toBe(true);
+  expect(medida.livre, "o meio do elemento esta livre na tela").toBe(true);
+  return medida.meio;
 }
 
 /** O numero de um campo do painel (aceita a virgula do pt-BR). */
@@ -290,15 +330,15 @@ test.describe("produtor", () => {
       // Redimensiona pela alca do canto de baixo a direita, com Shift: a proporcao fica.
       const antes = { h: await numeroDe(editor.locator(`#livre-${imagem}-altura`)), w: await numeroDe(editor.locator(`#livre-${imagem}-largura`)) };
       const alca = editor.locator("[data-free-handle='se']");
-      const ponto = await caixa(alca);
+      const ponto = await meioLivre(alca);
       // A alca fica perto do pe da tela: o ponteiro nao sai da janela (o WebKit nao entrega movimento fora dela). No
       // canto com Shift vale o maior dos dois movimentos, entao o lado direito puxa a largura.
       const janela = page.viewportSize() ?? { height: 900, width: 1440 };
-      const desce = Math.max(0, Math.min(60, janela.height - (ponto.y + ponto.height / 2) - 4));
+      const desce = Math.max(0, Math.min(60, janela.height - ponto.y - 4));
       await page.keyboard.down("Shift");
-      await page.mouse.move(ponto.x + ponto.width / 2, ponto.y + ponto.height / 2);
+      await page.mouse.move(ponto.x, ponto.y);
       await page.mouse.down();
-      await page.mouse.move(ponto.x + 60, ponto.y + ponto.height / 2 + desce, { steps: 6 });
+      await page.mouse.move(ponto.x + 60, ponto.y + desce, { steps: 6 });
       await page.mouse.up();
       await page.keyboard.up("Shift");
       const largura = editor.locator(`#livre-${imagem}-largura`);
