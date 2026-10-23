@@ -47,6 +47,7 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Comunicacao v2: quem envia, tempo no sino, notificacoes seguintes e fluxos (21/10/2026)](docs/23-comunicacao-v2-fluxos.md)
 - [Comunicacao v3a: sino e avisos (CRUD, lixeira, cartao clicavel, reacoes, enquete e velocidade) (22/10/2026)](docs/24-comunicacao-v3a-sino-e-avisos.md)
 - [Comunicacao v3b-1: pop-ups com paginas, momentos, frequencia e como fechar (22/10/2026)](docs/25-comunicacao-v3b1-pop-ups.md)
+- [Comunicacao: design do pop-up com video, degrade, blocos, fontes e botoes (22/10/2026)](docs/26-comunicacao-design-do-pop-up.md)
 
 ## Padroes de trabalho
 

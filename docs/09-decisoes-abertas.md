@@ -296,6 +296,24 @@ Decisao tomada:
 
 Em aberto: as acoes que o produtor quer como momento do pop-up (a resposta ao produtor pergunta, `docs/25` §10.1); os modelos de configuracao (v3b-2) e o construtor avancado com enquete (v3b-3).
 
+### Design do pop-up (22/10/2026)
+
+Pedido do produtor depois da v3b-1: montar o visual do pop-up como num editor, a partir de uma referencia (video curto no topo sumindo num degrade, selo, titulo de duas cores, texto cinza, botao em pilula). Detalhes em `docs/26`; migracao `202610230001`. **Antecipa parte da v3b-3** (o construtor) sem a enquete; nenhuma decisao anterior muda.
+
+Decisao tomada (com o produtor, antes do desenho):
+
+- **Padrão | Personalizado** no card Design; o Padrão e o de sempre e o padrao de todo pop-up (os que existem nao mudam); a notificacao nunca tem design;
+- **texto por zonas** (abaixo da midia, subindo sobre ela, ou sobre ela em cima/meio/embaixo), sem arrastar livre;
+- **fontes prontas** (Inter, Exo 2 e pilhas do sistema) e **enviadas** (WOFF2, WOFF, TTF, OTF ate 2 MB, conferidas pelos bytes) numa biblioteca; **nada do Google Fonts em tempo de execucao** (privacidade: baixar e enviar);
+- **midia**: nenhuma, imagem (a do aviso, tambem a capa) ou video (MP4 H.264 ou WEBM ate 15 MB, no Storage, mudo, em repeticao); menos movimento ou economia de dados = so a capa;
+- **botao principal = o botao de sempre** (mesmo clique contado); segundo botao Fechar, Lembrar depois ou Abrir um link (o link conta como o clique, tambem para "Para de aparecer: Quando o aluno clica no botao");
+- **texto de verdade** com estilos so por objeto validado; zod estrito no salvar e no ler; URLs so dos nossos buckets;
+- **contraste** como dica, sem impedir salvar; nome acessivel = o titulo do design.
+
+Fora desta entrega: arrastar livre, enquete no pop-up (v3b-3), salvar design como modelo reutilizavel (o design ja e autocontido), HTML/CSS da equipe (nunca), limpeza dos arquivos sem uso no Storage (job futuro). No fechamento, o modelo "Midia no topo com degrade" passou a subir 28 % com degrade de 65 % (o contrato dizia 12 % e 55 %), depois da conferencia com a referencia (`docs/26` D22).
+
+Em aberto: se o produtor quer **modelos salvos** de design (o formato ja permite) e **arrastar livre** depois de usar as zonas.
+
 ## Design
 
 ### Login

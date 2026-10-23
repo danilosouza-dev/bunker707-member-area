@@ -723,6 +723,27 @@ Invariantes:
 - o pop-up nunca pausa nem retoma o video da aula e nunca abre com o nosso player tocando;
 - a 0003 vai antes do merge (sem ela, o job `comunicacao` do tick falha); a migracao sozinha nao atrapalha o app da v3a.
 
+### Implementado (22/10/2026): Design do pop-up
+
+Produto, regras e decisoes em `docs/26`; tabelas em `docs/05` (secao Design do pop-up); seguranca em `docs/06` (secao Design do pop-up). Migracao `202610230001_communication_popup_design.sql` (aditiva, toda pelo MCP, aplicada antes do merge). Nenhuma variavel de ambiente nova, nenhum servico novo, nenhum job novo. Video e fontes no Supabase Storage (nunca no servidor do app).
+
+Modulos novos ou mudados:
+
+- puros: `popup-design-model.ts` (tipos v1, limites, fontes prontas, modelos, forma canonica, sincronia com botao/audio, nome acessivel, escala `cqw`, CSS, contraste WCAG, regra das URLs do Storage; **sem zod**), `popup-design-schema.ts` (zod v1, `parsePopupDesign`, regras design x conteudo), `popup-design-editor-model.ts` (as pecas do card Design), `popup-design-styles.ts` (os estilos do cartao do aluno);
+- servidor: `popup-fonts.ts` (resolver de fontes, biblioteca, conferencia ao salvar/publicar, url do video recalculada), `popup-media.ts` (sniffers de video e fonte, leitura de 64 bytes, gravacao da fonte), `popup-design-actions.ts` (envio de video, biblioteca), rota `POST /api/admin/communications/popup-fonts`; `actions.ts`, `store.ts`, `queries.ts`, `popups.ts`, `popup-store.ts`, `cache.ts` (chave `design1`) e `notification-model.ts` (`PopupItem.design/fonts`);
+- navegador: `src/components/member/notifications/popup-design/` (cartao, blocos, midia, carregador de fontes), `MemberPopupCard` despacha Padrão ou Personalizado; `src/components/admin/v2/communication/popup-design/` (o card Design do editor).
+
+```txt
+Equipe: card Design -> video: startPopupVideoUpload -> PUT no endereco assinado (Storage) -> finishPopupVideoUpload (64 bytes)
+        fonte: POST /api/admin/communications/popup-fonts -> communication_fonts + bucket
+        salvar/publicar -> popupDesignSchema (zod) -> withCheckedDesign (design x conteudo, fontes, url do video) -> popup_design
+Aluno:  lista no ar (cache 60 s, design1) -> parsePopupDesign + url do video + fontes resolvidas (1 consulta)
+        -> POST /api/popups/[id]/show -> PopupItem { design, fonts } -> MemberPopupCard -> PopupDesignCard
+        -> FontFace do Storage; <video> so sem menos movimento / Save-Data
+```
+
+Invariantes: o Padrão nao muda (mesmo HTML, mesma resposta do `show`); a notificacao nunca tem design; zod no salvar e no ler; nada de HTML ou CSS em texto; video e fonte so dos nossos buckets; o cartao do aluno nao importa o zod (o JS inicial do aluno nao cresce; o cartao fica no pedaco preguicoso da janela).
+
 ## Deploy
 
 Fase inicial (hoje):

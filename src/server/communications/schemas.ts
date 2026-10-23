@@ -13,6 +13,9 @@
 //
 // v3b-1 (docs/25 §2.5): a configuracao do pop-up (popupSettingsSchema: onde, quando, quantas vezes,
 // "Lembrar depois" e como fecha), com as regras em popup-display-model.ts.
+//
+// Design do pop-up (docs/26): `design` (null = Padrão; so pop-up, a notificacao nunca leva a chave), validado
+// por popup-design-schema.ts e coerente com o conteudo (botao, audio, imagem e "Lembrar depois").
 
 import { z } from "zod";
 import { isHttpsOrLoopbackUrl } from "../../lib/loopback-url";
@@ -44,6 +47,8 @@ import {
   type Validity
 } from "./message-meta";
 import { CTA_DISPLAYS, type CtaDisplay } from "./notification-model";
+import { popupDesignLinkButton, type PopupDesign } from "./popup-design-model";
+import { popupDesignContentProblems, popupDesignSchema } from "./popup-design-schema";
 import {
   canonicalPopupSettings,
   defaultPopupSettings,
@@ -431,6 +436,12 @@ export type NoticeDraft = {
   body: string;
   /** Destino; `display` (v3a, so notificacao) ausente = "button". */
   cta: { display?: CtaDisplay; href: string; label: string; target: "new_tab" | "same_tab" } | null;
+  /**
+   * Design do pop-up (docs/26): null = Padrão (o visual de sempre); o design = Personalizado. So pop-up (a
+   * notificacao nunca leva a chave). Ausente (rascunhos e testes de antes) = no servidor, o design gravado na
+   * linha (ou Padrão num aviso novo).
+   */
+  design?: PopupDesign | null;
   /** Icone ao lado do titulo (notificacao e pop-up); null = sem icone. */
   icon: NoticeIconChoice;
   image: { alt: string; url: string } | null;
@@ -535,14 +546,24 @@ export const noticeContentSchema: z.ZodType<NoticeContent> = z
   .object(NOTICE_CONTENT_FIELDS)
   .superRefine((content, context) => addNoticeContentIssues(content, "inbox", context));
 
-/** Notificacao nunca leva `popup` (o editor nao mostra; o servidor grava os padroes): a chave sai antes de validar. */
+/**
+ * Notificacao nunca leva `popup` nem `design` (o editor nao mostra; o servidor grava os padroes): as chaves saem
+ * antes de validar.
+ */
 function withoutInboxPopup(value: unknown) {
-  if (!value || typeof value !== "object" || Array.isArray(value) || (value as { kind?: unknown }).kind !== "inbox" || !("popup" in value)) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    (value as { kind?: unknown }).kind !== "inbox" ||
+    !("popup" in value || "design" in value)
+  ) {
     return value;
   }
 
   const rest: Record<string, unknown> = { ...(value as Record<string, unknown>) };
   delete rest.popup;
+  delete rest.design;
 
   return rest;
 }
@@ -552,6 +573,7 @@ const noticeDraftObjectSchema = z
     ...NOTICE_CONTENT_FIELDS,
     allowSnooze: z.boolean(),
     audience: audienceDefinitionSchema,
+    design: popupDesignSchema.nullable().optional(),
     kind: z.enum(CAMPAIGN_KINDS, { error: "Escolha o tipo do aviso." }),
     popup: popupSettingsSchema.optional(),
     repeat: z.enum(["once", "until_action"]),
@@ -561,9 +583,23 @@ const noticeDraftObjectSchema = z
   .superRefine((draft, context) => {
     addNoticeContentIssues(draft, draft.kind, context);
 
-    // v3b-1: "Quando o aluno clica no botão" sem botao nunca pararia (tambem quando o botao sai depois).
-    if (draft.kind === "popup" && draft.popup?.frequency.mode === "repeat" && draft.popup.frequency.stopOn === "click" && !draft.cta) {
+    // v3b-1: "Quando o aluno clica no botão" sem botao nunca pararia (tambem quando o botao sai depois). No
+    // design (docs/26), o segundo botao com link tambem conta como o clique.
+    if (
+      draft.kind === "popup" &&
+      draft.popup?.frequency.mode === "repeat" &&
+      draft.popup.frequency.stopOn === "click" &&
+      !draft.cta &&
+      !popupDesignLinkButton(draft.design)
+    ) {
       context.addIssue({ code: "custom", message: POPUP_NO_BUTTON_STOP_MESSAGE, path: ["popup", "frequency", "stopOn"] });
+    }
+
+    // Design do pop-up (docs/26): o design e o conteudo andam juntos (botao, audio, imagem, "Lembrar depois").
+    if (draft.kind === "popup" && draft.design) {
+      for (const problem of popupDesignContentProblems(draft.design, draft)) {
+        context.addIssue({ code: "custom", message: problem.message, path: problem.path });
+      }
     }
 
     if (draft.kind === "popup" && draft.response) {
@@ -648,7 +684,8 @@ export function validityUntilProblem(endsAt: string, sendAt: number): string | n
  */
 export function emptyNoticeDraft(kind: CampaignKind): NoticeDraft {
   return {
-    ...(kind === "popup" ? { popup: defaultPopupSettings() } : {}),
+    // Design do pop-up (docs/26): o pop-up novo comeca no Padrão.
+    ...(kind === "popup" ? { design: null, popup: defaultPopupSettings() } : {}),
     allowHide: true,
     allowSnooze: true,
     audience: EVERYONE,

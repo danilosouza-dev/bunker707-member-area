@@ -74,6 +74,8 @@ import { NoticeRowMenu, useNoticeActions, type NoticeActionTarget } from "./noti
 import { NoticeValidityField } from "./notice-validity-field";
 import { NoticeWhenFields } from "./notice-when-fields";
 import { PopupFrequencyFields } from "./popup-frequency-fields";
+import { PopupDesignField } from "./popup-design/popup-design-field";
+import { popupDesignFocusSelector, withSyncedDesign } from "./popup-design/popup-design-editor-model";
 import { PopupPlacementFields } from "./popup-placement-fields";
 import { POPUP_EDITOR_COPY, placementUiOf, popupPlacementProblems, popupSettingsOfDraft, type PopupPlacementUi } from "./popup-editor-model";
 import {
@@ -136,6 +138,11 @@ import {
 //   trava: muda tambem depois do envio.
 // - A contagem do segmento vem do servidor (previewNoticeAudience) 500 ms depois da ultima mudanca.
 // - Imagem: recorte WebP no navegador e envio logo depois (uploadNoticeImage). Audio: NoticeAudioField.
+// - Design do pop-up (docs/26): o card "Design" (popup-design/popup-design-field.tsx) logo depois do conteudo:
+//   Padrão | Personalizado. No Personalizado, o conteudo esconde texto, icone, imagem e destino (vao para o
+//   card), mudar o botao ou o audio deixa os blocos coerentes (withSyncedDesign), o video subindo segura o
+//   salvar e a previa mostra celular e computador juntos. Os erros do design focam pelo modelo
+//   (popupDesignFocusSelector: "design.blocks.2.lines.0.text" -> "#popup-design-bloco-2-linha-0").
 
 type NoticeEditorProps = {
   /** Tipo de um aviso novo (?tipo=popup abre em pop-up). */
@@ -177,6 +184,8 @@ const FIELD_FOCUS: readonly [string, string][] = [
   // v3a: como o aluno chega la, reacoes e enquete (notice-content-fields, notice-poll-field).
   ["cta.display", "[name='aviso-botao-modo']"],
   ["cta", "#aviso-botao-mostrar"],
+  // Design do pop-up (docs/26): o seletor de cada erro do design sai do modelo (blocos pela posicao).
+  ["design", "[name='popup-design']"],
   ["reactions", "#aviso-reacoes"],
   // Ajustes da v3a: "Permitir que o aluno exclua do sino".
   ["allowHide", "#aviso-excluir"],
@@ -227,19 +236,35 @@ function focusFirstError(errors: NoticeFieldErrors) {
 
   let selector: string | null = null;
   const audienceKey = Object.keys(audienceErrorsFrom(errors)).find((key) => key !== "");
+  const designKey = keys.find((key) => key === "design" || key.startsWith("design."));
 
   for (const [prefix, target] of FIELD_FOCUS) {
     if (keys.some((key) => key === prefix || key.startsWith(`${prefix}.`))) {
-      selector = prefix === "audience" && audienceKey !== undefined ? `#aviso-regra-${audienceKey.replace(/\./g, "-")}` : target;
+      selector =
+        prefix === "audience" && audienceKey !== undefined
+          ? `#aviso-regra-${audienceKey.replace(/\./g, "-")}`
+          : prefix === "design" && designKey
+            ? (popupDesignFocusSelector(designKey) ?? target)
+            : target;
       break;
     }
   }
 
-  window.requestAnimationFrame(() => {
-    const element = selector ? document.querySelector<HTMLElement>(selector) : null;
-    element?.focus({ preventScroll: true });
-    element?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
-  });
+  // O campo pode aparecer so depois de renderizar (bloco do design que abre com o erro): tenta mais duas vezes.
+  const focusWhenReady = (attempt: number) =>
+    window.requestAnimationFrame(() => {
+      const element = selector ? document.querySelector<HTMLElement>(selector) : null;
+
+      if (!element && selector && attempt < 2) {
+        focusWhenReady(attempt + 1);
+        return;
+      }
+
+      element?.focus({ preventScroll: true });
+      element?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
+    });
+
+  focusWhenReady(0);
 }
 
 function toPickerItems(products: NoticeEditorOptions["products"]): ProductPickerItem[] {
@@ -292,6 +317,9 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const [submitted, setSubmitted] = useState(false);
   const [imageUpload, setImageUpload] = useState<string | null>(null);
   const [audioBusy, setAudioBusy] = useState<string | null>(null);
+  // Design do pop-up (docs/26): o video subindo segura o salvar; a biblioteca de fontes muda no card Design.
+  const [designBusy, setDesignBusy] = useState<string | null>(null);
+  const [popupFonts, setPopupFonts] = useState(() => options.popupFonts);
   // Equipe de "Quem envia" (relida quando a pessoa volta de Perfil com a foto nova).
   const [senders, setSenders] = useState<NoticeSenderChoice[]>(() => options.senders);
   const [device, setDevice] = useState<PreviewDevice>("desktop");
@@ -425,7 +453,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   const audienceKey = JSON.stringify(normalizeAudience(draft.audience));
   const audienceValid = useMemo(() => audienceDefinitionSchema.safeParse(JSON.parse(audienceKey)).success, [audienceKey]);
 
-  useWarnBeforeUnload(dirty || uploading || audioBusy !== null);
+  useWarnBeforeUnload(dirty || uploading || audioBusy !== null || designBusy !== null);
   useAdminTopbarTitle(initial ? initial.title : "Novo aviso");
 
   // Contagem ao vivo do segmento (500 ms depois da ultima mudanca; resposta velha e ignorada).
@@ -584,7 +612,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
   }
 
   function change(patch: Partial<NoticeDraft>) {
-    setDraft((current) => ({ ...current, ...patch }));
+    // Design do pop-up: com Personalizado, mudar o botao ou o audio deixa os blocos coerentes.
+    setDraft((current) => withSyncedDesign(current, patch));
     clearServerErrors(Object.keys(patch));
 
     // v3a: trocar "Quantas vezes" desliga o "Mostrar de novo" (e apaga o erro dele).
@@ -631,8 +660,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       return null;
     }
 
-    if (audioBusy || followUpAudioBusy) {
-      showFailure({ message: audioBusy ?? followUpAudioBusy ?? "", status: 0 });
+    if (audioBusy || followUpAudioBusy || designBusy) {
+      showFailure({ message: audioBusy ?? followUpAudioBusy ?? designBusy ?? "", status: 0 });
       return null;
     }
 
@@ -742,7 +771,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
       return;
     }
 
-    const idle = !uploading && !audioBusy;
+    const idle = !uploading && !audioBusy && !designBusy;
 
     if (savedVersion && !dirty && idle && reshowRequested) {
       await reshowOnly(savedVersion);
@@ -1107,6 +1136,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             onChange={(patch) => change(patch as Partial<NoticeDraft>)}
             onImageUploadChange={setImageUpload}
             onSendersChange={setSenders}
+            // Design do pop-up: no Personalizado, texto, icone, imagem e destino vao para o card Design.
+            popupDesign={draft.kind === "popup" && Boolean(draft.design)}
             products={pickerItems}
             productsLoaded={options.productsLoaded}
             resetKey={resetKey}
@@ -1118,6 +1149,23 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
             showValidity={false}
             value={draft}
           />
+
+          {/* Design do pop-up (docs/26): Padrão | Personalizado, logo depois do conteudo. */}
+          {draft.kind === "popup" ? (
+            <PopupDesignField
+              disabled={locked}
+              draft={draft}
+              errorFor={errorFor}
+              fonts={popupFonts}
+              key={`design-${resetKey}`}
+              onBusyChange={setDesignBusy}
+              onChange={(patch) => change(patch)}
+              onFontsChange={setPopupFonts}
+              onImageUploadChange={setImageUpload}
+              products={pickerItems}
+              productsLoaded={options.productsLoaded}
+            />
+          ) : null}
 
           <SectionCard description="Todos os alunos ou só quem combina com as regras." title="Para quem">
             {sentMode ? (
@@ -1327,7 +1375,10 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
                 {previewStatus}
               </p>
             </div>
-            <PillGroup ariaLabel="Aparelho da prévia" name="aviso-previa-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
+            {/* Personalizado: celular e computador juntos (sem a escolha do aparelho). */}
+            {draft.kind === "popup" && draft.design ? null : (
+              <PillGroup ariaLabel="Aparelho da prévia" name="aviso-previa-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
+            )}
           </div>
           {draft.kind === "inbox" && followUps.items.length > 0 ? (
             <MemberFilterPills
@@ -1351,7 +1402,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions }
               senders={senders}
             />
           ) : (
-            <NoticePreview branding={options.branding} device={device} draft={draft} imageUrl={previewImage} now={now} senders={senders} />
+            <NoticePreview branding={options.branding} device={device} draft={draft} fonts={popupFonts} imageUrl={previewImage} now={now} senders={senders} />
           )}
         </section>
       </div>

@@ -12,10 +12,10 @@ import "server-only";
 import { POPUP_V3B1_RULES, type PopupColumns } from "./popup-display-model";
 import { assertNoDbError, type CommunicationsDb } from "./db";
 
-/** Conteudo do pop-up (para o show) e as colunas da configuracao (v3b-1). */
+/** Conteudo do pop-up (para o show), as colunas da configuracao (v3b-1) e o design (docs/26). */
 export const LIVE_POPUP_COLUMNS =
   "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,popup_repeat,allow_snooze,starts_at,ends_at,sent_at,created_at,icon,icon_color," +
-  "popup_pages,popup_exclude_pages,popup_trigger,popup_delay_seconds,popup_frequency,popup_every_minutes,popup_max_per_day,popup_max_total,popup_stop_on,popup_close,popup_snooze_minutes";
+  "popup_pages,popup_exclude_pages,popup_trigger,popup_delay_seconds,popup_frequency,popup_every_minutes,popup_max_per_day,popup_max_total,popup_stop_on,popup_close,popup_snooze_minutes,popup_design";
 
 // v3a: as bases do "mostrar de novo para quem ja viu"; v3b-1: o ultimo zerar, as vezes no dia e o updated_at
 // que a RPC da abertura compara (texto exato do PostgREST, com os microssegundos).
@@ -41,6 +41,8 @@ export type LivePopupRow = Partial<PopupColumns> & {
   image_alt: string | null;
   image_url: string | null;
   kind: "popup";
+  /** Design do pop-up (jsonb; ler com parsePopupDesign); nulo = Padrão. */
+  popup_design?: unknown;
   sent_at: string | null;
   starts_at: string | null;
   status: "active";

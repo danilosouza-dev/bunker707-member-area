@@ -54,6 +54,8 @@ import { definitionOf, fetchFlowNodeStats, fetchFlowTree, lastSourceExpiry, type
 import { parsePoll, type PollOption } from "./interactions-model";
 import { noticeIconOfColumns, normalizeSchoolIcon, SCHOOL_NAME_FALLBACK_TEAM, type NoticeIconColor, type NoticeIconId } from "./message-meta";
 import { popupSettingsOfRow } from "./popup-display-model";
+import type { PopupFontFace, PopupFontOption } from "./popup-design-model";
+import { listPopupFontLibrary, loadPopupFontFaces } from "./popup-fonts";
 import { describePopupPlacementShort } from "./popup-sentences";
 import { emptyNoticeDraft, type NoticeDraft } from "./schemas";
 import {
@@ -133,6 +135,11 @@ export type NoticeDetail = NoticeListItem & {
   approvedAt: string | null;
   approvedBy: NoticePerson | null;
   audienceCountedAt: string | null;
+  /**
+   * Design do pop-up (docs/26): as fontes enviadas que o design usa, resolvidas aqui (a previa do relatorio e
+   * do editor desenha com elas); [] no Padrão, sem fonte enviada ou se a leitura falhar.
+   */
+  designFonts: PopupFontFace[];
   draft: NoticeDraft;
   /** v3a: a ultima edicao de uma notificacao enviada ou de um pop-up no ar ou pausado (linha "Editado"). */
   editedAt: string | null;
@@ -573,7 +580,9 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
   // v3a: reacoes, votos e excluidas so existem nas linhas dos alunos (notificacao que saiu).
   const hasStudentRows = row.kind === "inbox" && !row.flow_id && (row.status === "sending" || row.status === "sent" || row.status === "canceled");
   const popupProducts = popupProductIds(row);
-  const [stats, engagement, names, people, sender, followUps, interactions, citations, reshowable, popupNames] = await Promise.all([
+  const draft = noticeDraftOfRow(row);
+  const designFontIds = draft.design?.fonts ?? [];
+  const [stats, engagement, names, people, sender, followUps, interactions, citations, reshowable, popupNames, designFonts] = await Promise.all([
     fetchCampaignStats(db, [row.id]),
     fetchCampaignEngagement(db, [row.id]),
     loadAudienceNames(db, [audienceOfRow(row)]),
@@ -584,7 +593,14 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
     row.flow_id ? Promise.resolve(new Map<string, NoticeCitations>()) : fetchNoticeCitations(db, sentNoticeIds([row])),
     row.flow_id ? Promise.resolve(null) : reshowableOf(db, row, now),
     // v3b-1: os nomes das frases de "Detalhes" (uma leitura, so quando o pop-up cita produtos).
-    popupProducts.length > 0 ? selectNames(db, "content_items", "title", popupProducts) : Promise.resolve({} as Record<string, string>)
+    popupProducts.length > 0 ? selectNames(db, "content_items", "title", popupProducts) : Promise.resolve({} as Record<string, string>),
+    // Design do pop-up (docs/26): uma leitura, so quando o design usa fonte enviada; falha = a pilha do sistema.
+    designFontIds.length > 0
+      ? loadPopupFontFaces(db, designFontIds).catch((error: unknown) => {
+          console.error("[admin/comunicacao] fontes do design", error);
+          return [] as PopupFontFace[];
+        })
+      : Promise.resolve([] as PopupFontFace[])
   ]);
   const counts = followUps.detail ? new Map([[row.id, { count: followUps.detail.count, sent: followUps.detail.sent }]]) : undefined;
   const item = toListItem(row, { citations, followUps: counts, names, now, people, permissions, stats });
@@ -597,7 +613,8 @@ export async function getNoticeDetail(id: string, input: { now?: number; permiss
     approvedAt: approved ? row.approved_at : null,
     approvedBy: approved && row.approved_by ? (people.get(row.approved_by) ?? null) : null,
     audienceCountedAt: row.audience_counted_at,
-    draft: noticeDraftOfRow(row),
+    designFonts,
+    draft,
     editedAt: row.edited_at,
     editedBy: row.edited_by ? (people.get(row.edited_by) ?? null) : null,
     engagement: engagement.get(row.id) ?? EMPTY_CAMPAIGN_ENGAGEMENT,
@@ -690,6 +707,11 @@ export type NoticeEditorOptions = {
    */
   opensOnLesson: string[];
   products: NoticeEditorProduct[];
+  /**
+   * Design do pop-up (docs/26): a biblioteca de fontes enviadas (nao excluidas, por nome) para o seletor e a
+   * previa; [] sem a migracao 202610230001 ou se a leitura falhar (o resto do editor funciona).
+   */
+  popupFonts: PopupFontOption[];
   /** false: a lista de produtos nao carregou agora (o resto do editor funciona). */
   productsLoaded: boolean;
   segments: NoticeSegmentOption[];
@@ -776,7 +798,7 @@ async function editorViewer() {
 export async function loadNoticeEditorOptions(input: { audiences?: readonly AudienceDefinition[] } = {}): Promise<NoticeEditorOptions> {
   const db = communicationsDb();
   const viewer = await editorViewer();
-  const [productsResult, cohortsResult, savedSegments, settings, senders, notices, opensOnLesson] = await Promise.all([
+  const [productsResult, cohortsResult, savedSegments, settings, senders, notices, opensOnLesson, popupFonts] = await Promise.all([
     listProductOptions()
       .then((items) => ({ items, loaded: true }))
       .catch((error: unknown) => {
@@ -798,6 +820,11 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
     loadOpensOnLesson(db).catch((error: unknown) => {
       console.error("[admin/comunicacao] produtos que abrem direto na aula", error);
       return [] as string[];
+    }),
+    // Design do pop-up (docs/26): so o seletor de fontes depende disto.
+    listPopupFontLibrary(db).catch((error: unknown) => {
+      console.error("[admin/comunicacao] biblioteca de fontes", error);
+      return [] as PopupFontOption[];
     })
   ]);
   assertNoDbError(cohortsResult.error, "Comunicacao: turmas");
@@ -846,6 +873,7 @@ export async function loadNoticeEditorOptions(input: { audiences?: readonly Audi
     },
     notices,
     opensOnLesson,
+    popupFonts,
     products,
     productsLoaded: productsResult.loaded,
     segments,

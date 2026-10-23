@@ -411,6 +411,8 @@ test("rascunho vazio de cada tipo: todos os alunos, agora, sem janela, uma vez e
     audio: null,
     body: "",
     cta: null,
+    // Design do pop-up (docs/26): o pop-up novo comeca no Padrão.
+    design: null,
     icon: null,
     image: null,
     kind: "popup",

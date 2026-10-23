@@ -28,6 +28,10 @@
 // fecha (withPopupSettings completa o rascunho da v1/v3a a partir da linha gravada); "Mostrar de novo" vale
 // em qualquer "Quantas vezes"; no maximo 50 pop-ups publicados ao mesmo tempo (publicar, aprovar e retomar
 // recusam o 51o, 422); a auditoria do pop-up salvo ou publicado leva o momento, quantas paginas e o modo.
+//
+// Design do pop-up (docs/26): o rascunho do pop-up leva `design` (null = Padrão; ausente = o gravado na linha);
+// salvar confere as fontes na biblioteca e recalcula o endereco do video a partir do caminho (so o nosso
+// bucket); publicar e aprovar conferem as fontes de novo; duplicar copia o design; a auditoria leva "design".
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -122,6 +126,10 @@ import {
   repeatOfFrequency,
   type PopupFrequency
 } from "./popup-display-model";
+import { assertPopupDesignFonts, withOwnStorageUrls } from "./popup-fonts";
+import { popupCardImagePathOf, type PopupDesign } from "./popup-design-model";
+import { parsePopupDesign, POPUP_DESIGN_MESSAGES, popupDesignContentProblems } from "./popup-design-schema";
+import { inspectPopupCardImage, inspectPopupVideo } from "./popup-media";
 import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, noticeDraftOfRow, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
 import {
@@ -421,8 +429,93 @@ function withPopupSettings(draft: NoticeDraft, stored: CampaignRow | null): Noti
   const fromRepeat = reconciled !== draft.popup?.frequency;
   const frequency: PopupFrequency =
     fromRepeat && !draft.cta && reconciled.mode === "repeat" && reconciled.stopOn === "click" ? { ...reconciled, stopOn: "never" } : reconciled;
+  // Design do pop-up (docs/26): `design` manda quando vem (null = Padrão); sem a chave (rascunho de antes), o
+  // da linha gravada (aviso novo = Padrão).
+  const design = draft.design !== undefined ? draft.design : row ? parsePopupDesign(row.popup_design) : null;
 
-  return { ...draft, popup: { ...base, frequency }, repeat: repeatOfFrequency(frequency) };
+  return { ...draft, design, popup: { ...base, frequency }, repeat: repeatOfFrequency(frequency) };
+}
+
+/**
+ * Design do pop-up (docs/26) antes de gravar: os enderecos do video e da imagem do fundo do cartao
+ * recalculados do caminho (nunca o que veio do navegador), o video novo e a imagem nova conferidos no Storage
+ * e as fontes enviadas conferidas na biblioteca (400 em design.fonts quando uma saiu). `row` = a linha
+ * gravada (null num aviso novo).
+ */
+async function withCheckedDesign(db: CommunicationsDb, draft: NoticeDraft, row: CampaignRow | null): Promise<NoticeDraft> {
+  if (draft.kind !== "popup" || !draft.design) {
+    return draft;
+  }
+
+  // O design que veio da linha (rascunho sem a chave) tambem precisa combinar com o conteudo novo.
+  const [problem] = popupDesignContentProblems(draft.design, draft);
+
+  if (problem) {
+    throw new NoticeFieldError(problem.path.join("."), problem.message);
+  }
+
+  await assertPopupDesignFonts(db, draft.design);
+  await assertPopupDesignVideo(db, draft.design, row);
+  await assertPopupDesignCardImage(db, draft.design, row);
+
+  return { ...draft, design: withOwnStorageUrls(db, draft.design) };
+}
+
+/**
+ * O video so entra no design conferido pelo servidor: um caminho diferente do gravado passa de novo pela
+ * conferencia do envio (existe, ate 15 MB, os primeiros bytes e o tipo gravado batem; o recusado e apagado).
+ * Sem isso, um objeto enviado pelo endereco assinado sem passar por finishPopupVideoUpload seria aceito.
+ */
+async function assertPopupDesignVideo(db: CommunicationsDb, design: PopupDesign, row: CampaignRow | null) {
+  const video = design.media.video;
+
+  if (!video || (row && parsePopupDesign(row.popup_design)?.media.video?.path === video.path)) {
+    return;
+  }
+
+  try {
+    await inspectPopupVideo(db, video.path);
+  } catch (error) {
+    if (error instanceof CommunicationError) {
+      throw new NoticeFieldError("design.media.video", error.message);
+    }
+
+    throw error;
+  }
+}
+
+/**
+ * A imagem do fundo do cartao so entra conferida: o schema ja garantiu o caminho do nosso bucket de imagens
+ * (communications/images/<24 hex>.webp, qualquer origem no endereco: o servidor troca pela nossa); um caminho
+ * diferente do gravado precisa existir no Storage como WebP (400 em design.card.background.url).
+ */
+async function assertPopupDesignCardImage(db: CommunicationsDb, design: PopupDesign, row: CampaignRow | null) {
+  const background = design.card.background;
+
+  if (background.kind !== "image") {
+    return;
+  }
+
+  const path = popupCardImagePathOf(background.url);
+  const stored = row ? parsePopupDesign(row.popup_design)?.card.background : null;
+
+  if (path && stored?.kind === "image" && popupCardImagePathOf(stored.url) === path) {
+    return;
+  }
+
+  try {
+    if (!path) {
+      throw new CommunicationError(POPUP_DESIGN_MESSAGES.cardImage, 400);
+    }
+
+    await inspectPopupCardImage(db, path);
+  } catch (error) {
+    if (error instanceof CommunicationError) {
+      throw new NoticeFieldError("design.card.background.url", error.message);
+    }
+
+    throw error;
+  }
 }
 
 /** v3b-1: a auditoria do pop-up salvo ou publicado leva o momento, quantas paginas e o modo (so codigos e contagens). */
@@ -433,7 +526,13 @@ function popupAuditOf(row: CampaignRow) {
 
   const settings = popupSettingsOfRow(row);
 
-  return { popup_frequency: settings.frequency.mode, popup_pages: settings.pages.length, popup_trigger: settings.trigger };
+  return {
+    // Design do pop-up (docs/26): so o codigo (custom | default), nunca o conteudo.
+    popup_design: row.popup_design ? "custom" : "default",
+    popup_frequency: settings.frequency.mode,
+    popup_pages: settings.pages.length,
+    popup_trigger: settings.trigger
+  };
 }
 
 /**
@@ -965,7 +1064,8 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     await assertSenderForSave(db, data.draft);
 
     if (!data.id) {
-      const created = await insertCampaign(db, { ...draftToColumns(withPopupSettings(data.draft, null)), created_by: user.id, status: "draft", updated_by: user.id });
+      const fresh = await withCheckedDesign(db, withPopupSettings(data.draft, null), null);
+      const created = await insertCampaign(db, { ...draftToColumns(fresh), created_by: user.id, status: "draft", updated_by: user.id });
 
       await recordAudit(db, {
         action: "communication.saved",
@@ -980,7 +1080,7 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     }
 
     const current = await requireCampaign(db, data.id);
-    const draft = withPopupSettings(data.draft, current);
+    const draft = await withCheckedDesign(db, withPopupSettings(data.draft, current), current);
     const columns = draftToColumns(draft);
 
     if (current.kind === "inbox" && current.status === "sent") {
@@ -1140,6 +1240,8 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
     await assertSenderForPublish(db, row);
+    // Design do pop-up (docs/26): so com fontes que continuam na biblioteca.
+    await assertPopupDesignFonts(db, row.kind === "popup" ? parsePopupDesign(row.popup_design) : null);
     // v3b-1: tambem antes do pedido de aprovacao (um pedido que nao caberia no ar nao fica esperando).
     await assertPopupRoom(db, row, now, POPUPS_FULL_TO_PUBLISH);
     const followUps = await followUpsForPublish(db, row);
@@ -1226,6 +1328,7 @@ export async function approveNotice(input: NoticeIdInput): Promise<ActionResult<
     assertSameVersion(row, data.expectedUpdatedAt);
     assertPublishable(row, now.getTime());
     await assertSenderForPublish(db, row);
+    await assertPopupDesignFonts(db, row.kind === "popup" ? parsePopupDesign(row.popup_design) : null);
     await assertPopupRoom(db, row, now, POPUPS_FULL_TO_PUBLISH);
     const followUps = await followUpsForPublish(db, row);
 

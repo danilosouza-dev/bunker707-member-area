@@ -347,12 +347,16 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
               </h2>
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">Como o aluno vê.</p>
             </div>
-            <PillGroup ariaLabel="Aparelho da prévia" name="aviso-relatorio-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
+            {/* Design do pop-up (docs/26): o Personalizado mostra celular e computador juntos. */}
+            {detail.kind === "popup" && detail.draft.design ? null : (
+              <PillGroup ariaLabel="Aparelho da prévia" name="aviso-relatorio-aparelho" onChange={setDevice} options={DEVICE_OPTIONS} value={device} />
+            )}
           </div>
           <NoticePreview
             branding={branding}
             device={device}
             draft={detail.draft}
+            fonts={detail.designFonts}
             now={now}
             senders={detail.sender?.onTeam ? [{ avatarUrl: detail.sender.avatarUrl, id: detail.sender.id, isMe: false, name: detail.sender.name, roleLabel: "" }] : []}
           />

@@ -46,7 +46,7 @@ export type PopupFrequencyLive = {
 
 type PopupFrequencyFieldsProps = {
   disabled: boolean;
-  draft: Pick<NoticeDraft, "allowSnooze" | "cta" | "popup" | "repeat" | "window">;
+  draft: Pick<NoticeDraft, "allowSnooze" | "cta" | "popup" | "repeat" | "window"> & Partial<Pick<NoticeDraft, "design">>;
   errorFor: (key: string) => string | undefined;
   live: PopupFrequencyLive | null;
   onChange: (patch: Partial<NoticeDraft>) => void;
@@ -206,7 +206,20 @@ function NoteLine({ children, tone }: { children: ReactNode; tone: "info" | "war
 }
 
 /** "Para de aparecer": pilulas como o PillGroup, com "Quando o aluno clica no botão" desligada sem botao. */
-function StopPills({ disabled, noButton, onChange, value }: { disabled: boolean; noButton: boolean; onChange: (value: PopupRepeatFrequency["stopOn"]) => void; value: PopupRepeatFrequency["stopOn"] }) {
+function StopPills({
+  custom,
+  disabled,
+  noButton,
+  onChange,
+  value
+}: {
+  /** Design Personalizado: o aviso sem botao aponta para o card Design (nao para a chave do conteudo). */
+  custom: boolean;
+  disabled: boolean;
+  noButton: boolean;
+  onChange: (value: PopupRepeatFrequency["stopOn"]) => void;
+  value: PopupRepeatFrequency["stopOn"];
+}) {
   const copy = POPUP_EDITOR_COPY.frequency;
 
   return (
@@ -243,7 +256,7 @@ function StopPills({ disabled, noButton, onChange, value }: { disabled: boolean;
       </div>
       {noButton ? (
         <p className="text-xs leading-5 text-[var(--text-secondary)]" id="popup-para-sem-botao">
-          {copy.stopNoButton}
+          {custom ? copy.stopNoButtonDesign : copy.stopNoButton}
         </p>
       ) : null}
     </div>
@@ -393,7 +406,7 @@ export function PopupFrequencyFields({ disabled, draft, errorFor, live, onChange
 
             <div className="flex min-w-0 flex-col gap-1.5">
               <span className={labelClass}>{copy.stopLabel}</span>
-              <StopPills disabled={disabled} noButton={noButton} onChange={(stopOn) => changeRepeat({ stopOn })} value={frequency.stopOn} />
+              <StopPills custom={Boolean(draft.design)} disabled={disabled} noButton={noButton} onChange={(stopOn) => changeRepeat({ stopOn })} value={frequency.stopOn} />
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.stopHint[frequency.stopOn]}</p>
               <FieldError id="popup-para-error" message={errorFor("popup.frequency.stopOn")} />
             </div>

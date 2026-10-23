@@ -8,6 +8,8 @@
 // v3b-1 (docs/25 §2.1, §2.3 e §2.4): o pop-up deixa de ser "da home" nos textos, o rascunho leva a
 // configuracao do pop-up (`popup`), "Mostrar de novo" em qualquer "Quantas vezes" (textos por como para de
 // aparecer), os toasts com o "até 1 minuto" e as linhas de aviso do pop-up no ar.
+// Design do pop-up (docs/26): o rascunho do pop-up leva `design` (null = Padrão), a forma canonica compara o
+// design canonico e a previa monta o PopupItem com o design e as fontes resolvidas.
 
 import {
   AUDIENCE_LIMITS,
@@ -76,6 +78,7 @@ import {
   type PopupSettings,
   type PopupStopOn
 } from "../../../../server/communications/popup-display-model";
+import { canonicalPopupDesign, type PopupFontFace } from "../../../../server/communications/popup-design-model";
 import { popupSettingsOfDraft } from "./popup-editor-model";
 
 /* ------------------------------------------------------------------------------------------------
@@ -962,6 +965,8 @@ export function noticeDraftForKind(draft: NoticeDraft): NoticeDraft {
     ...draft,
     allowHide: true,
     cta: draft.cta ? { ...draft.cta, display: "button" } : null,
+    // Design do pop-up (docs/26): null = Padrão (o rascunho sem a chave tambem).
+    design: draft.design ?? null,
     poll: null,
     popup,
     reactions: false,
@@ -973,14 +978,15 @@ export function noticeDraftForKind(draft: NoticeDraft): NoticeDraft {
   };
 }
 
-/** O rascunho sem a chave `popup` (a notificacao nunca leva; comparacoes canonicas ficam iguais). */
+/** O rascunho sem as chaves `popup` e `design` (a notificacao nunca leva; comparacoes canonicas ficam iguais). */
 function withoutPopupKey(draft: NoticeDraft): NoticeDraft {
-  if (!("popup" in draft)) {
+  if (!("popup" in draft) && !("design" in draft)) {
     return draft;
   }
 
   const rest = { ...draft };
   delete rest.popup;
+  delete rest.design;
 
   return rest;
 }
@@ -1000,7 +1006,8 @@ export function canonicalNoticeDraft(draft: NoticeDraft): NoticeDraft {
   const inbox = draft.kind === "inbox";
 
   return {
-    ...(inbox ? {} : { popup: canonicalPopupSettings(popupSettingsOfDraft(draft)) }),
+    // Design do pop-up (docs/26): o design canonico (null = Padrão); a notificacao sem a chave.
+    ...(inbox ? {} : { design: draft.design ? canonicalPopupDesign(draft.design) : null, popup: canonicalPopupSettings(popupSettingsOfDraft(draft)) }),
     // Ajustes da v3a: so o false desliga a lixeira do aluno (rascunho antigo sem a chave = pode excluir).
     allowHide: inbox ? draft.allowHide !== false : true,
     allowSnooze: inbox ? true : draft.allowSnooze,
@@ -1542,19 +1549,30 @@ export function draftToNotificationItem(
 
 /**
  * Pop-up como o aluno ve na primeira vez (o icone so quando escolhido, como a API manda). v3b-1: "Só no X"
- * leva `close` (sem a chave = fecha no X, no Esc ou clicando fora, como o show manda).
+ * leva `close` (sem a chave = fecha no X, no Esc ou clicando fora, como o show manda). Design do pop-up
+ * (docs/26): no Personalizado, `design` e as fontes que ele usa (`fonts`: a biblioteca do editor ou as do
+ * relatorio; fonte que falta cai na pilha do sistema), como o show manda.
  */
 export function draftToPopupItem(
-  draft: Pick<NoticeDraft, "allowSnooze" | "audio" | "body" | "cta" | "icon" | "image" | "title"> & Partial<Pick<NoticeDraft, "popup">>,
-  input: { imageUrl?: string | null } = {}
+  draft: Pick<NoticeDraft, "allowSnooze" | "audio" | "body" | "cta" | "icon" | "image" | "title"> & Partial<Pick<NoticeDraft, "design" | "popup">>,
+  input: { fonts?: readonly PopupFontFace[]; imageUrl?: string | null } = {}
 ): PopupItem {
   const imageUrl = input.imageUrl ?? draft.image?.url ?? null;
+  const design = draft.design ?? null;
 
   return {
     audio: draft.audio ? { ...draft.audio } : null,
     body: draft.body.trim(),
     canSnooze: draft.allowSnooze,
     ...(draft.popup?.close === "x_only" ? { close: "x_only" as const } : {}),
+    ...(design
+      ? {
+          design,
+          fonts: (input.fonts ?? [])
+            .filter((face) => design.fonts.includes(face.id))
+            .map((face) => ({ family: face.family, format: face.format, id: face.id, style: face.style, url: face.url, weight: face.weight }))
+        }
+      : {}),
     cta: previewCta(draft.cta),
     ...(draft.icon ? { icon: { color: draft.icon.color, id: draft.icon.id } } : {}),
     id: "previa",

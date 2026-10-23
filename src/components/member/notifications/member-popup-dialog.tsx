@@ -7,6 +7,7 @@ import type { PopupItem } from "@/server/communications/notification-model";
 import type { PopupCloseVia } from "@/server/communications/popup-display-model";
 import { MemberPopupCard } from "./member-popup";
 import { useEscapeToClose } from "./notifications-client";
+import { popupDialogAria } from "./popup-design/popup-design-styles";
 import { closeViaOf } from "./popup-host-model";
 
 // Janela do pop-up (docs/22 §1.3; v3b-1 em docs/25; desenho em docs/12). Baixada antes de o host pedir o
@@ -17,6 +18,11 @@ import { closeViaOf } from "./popup-host-model";
 //
 // "Só no X" (`popup.close === "x_only"`): o toque fora nao fecha (disablePointerDismissal), so faz o X
 // pulsar; o X e o Esc fecham (o Esc fica para quem usa teclado ou leitor de tela, padrao WAI-ARIA).
+//
+// Design do pop-up (docs/26): no "Personalizado", o nome do dialogo e o texto do titulo do design (o <h2>,
+// aria-labelledby); sem bloco Título, o titulo do aviso (aria-label). A descricao e o primeiro bloco Texto. O
+// segundo botao usa as saidas de sempre: Fechar = o X, Lembrar depois = o link, link = o clique do botao. O
+// video do design pausa quando a janela comeca a fechar (`playing`).
 
 export type PopupOutcome = "clicked" | "closed" | "dismissed" | "snoozed";
 
@@ -40,6 +46,7 @@ export function MemberPopupDialog({
   const titleId = useId();
   const bodyId = useId();
   const xOnly = popup.close === "x_only";
+  const aria = popupDialogAria(popup, { bodyId, titleId });
   const [nudgeClose, setNudgeClose] = useState(false);
   const nudgeTimerRef = useRef<number | null>(null);
 
@@ -109,8 +116,7 @@ export function MemberPopupDialog({
         <Dialog.Backdrop className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-[2px] transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none" />
         <Dialog.Viewport className="fixed inset-0 z-[201] grid place-items-center overflow-y-auto p-4" onPointerDown={handleVeilPointerDown}>
           <Dialog.Popup
-            aria-describedby={popup.body ? bodyId : undefined}
-            aria-labelledby={titleId}
+            {...aria}
             aria-modal="true"
             className="outline-none transition-[opacity,transform] duration-200 ease-out data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
             data-member-popup=""
@@ -131,6 +137,7 @@ export function MemberPopupDialog({
               }}
               onDismiss={() => onFinish("dismissed")}
               onSnooze={() => onFinish("snoozed")}
+              playing={open}
               popup={popup}
               titleId={titleId}
             />
