@@ -224,3 +224,37 @@ test("historico de antes da v3b-1: sem pagina = Inicio, sem momento = Ao abrir a
   assert.deepEqual(numeros["outcomes|"], [3, 1], "cada linha limitada pelas vezes da linha");
   assert.equal(numeros["opened_product|javascript"], undefined, "pagina fora da lista nunca vira produto");
 });
+
+test("pagina conferida como POPUP_PAGE_KEY: id de produto com ate 240 caracteres; 241, dois pontos, curinga, maiuscula ou vazio = other", async () => {
+  const publicado = await publicar(popup({ pages: ["home"] }, { title: "Paginas no limite" }));
+  unwrap(
+    await db.from("campaign_deliveries").update({ impressions: 10, last_seen_at: new Date().toISOString() }).eq("campaign_id", publicado.id).eq("user_id", aluna.id),
+    "Linha de 10 vezes"
+  );
+  const limite = "a".repeat(240);
+  const aberturas = [`lesson:${limite}`, `content:${"b".repeat(241)}`, "content:a:b", "lesson:*", "lesson:", "Home", "support", "content:produto_2-b"];
+  await gravarComoServico(
+    aberturas.map((page) => ({
+      entity_id: publicado.id,
+      entity_type: "campaign",
+      event_type: "message_impressed",
+      metadata: { campaign_id: publicado.id, page, trigger: "page_load" },
+      user_id: aluna.id
+    }))
+  );
+
+  const numeros = await relatorio(publicado.id);
+
+  assert.deepEqual(numeros["opened|"], [8, 1]);
+  assert.deepEqual(numeros["opened_kind|lesson"], [1, 1]);
+  assert.deepEqual(numeros["opened_kind|content"], [1, 1]);
+  assert.deepEqual(numeros["opened_kind|support"], [1, 1]);
+  assert.deepEqual(numeros["opened_kind|other"], [5, 1], "241, dois pontos, curinga, vazio e maiuscula");
+  assert.deepEqual(numeros[`opened_product|${limite}`], [1, 1], "240 caracteres ainda e produto");
+  assert.deepEqual(numeros["opened_product|produto_2-b"], [1, 1]);
+  assert.deepEqual(
+    Object.keys(numeros).filter((key) => key.startsWith("opened_product|")).length,
+    2,
+    "so os dois ids validos viram produto"
+  );
+});

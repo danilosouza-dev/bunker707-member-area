@@ -7,7 +7,13 @@
 // parametro (hasBlockingLayer), o relogio e o sorteio tambem; imports relativos;
 // tests/pop-ups-v3b1-navegador.test.mjs e tests/pop-ups-v3b2-navegador.test.mjs carregam direto pelo Node.
 
-import { popupAllowsPage } from "../../../server/communications/popup-display-model";
+import {
+  isLessonTrigger,
+  isPageTrigger,
+  popupAllowsPage,
+  POPUP_TRIGGERS,
+  POPUP_V3B2_RULES
+} from "../../../server/communications/popup-display-model";
 import type { PopupPlanItem, PopupsAnswer } from "../../../server/communications/notification-model";
 
 export const POPUP_HOST_RULES = {
@@ -21,8 +27,8 @@ export const POPUP_HOST_RULES = {
   giveUpMs: 10 * 60_000,
   /** No Inicio, o primeiro pedido sai 1,5 s depois de a pagina abrir (nao disputa com ela). */
   homeFetchDelayMs: 1_500,
-  /** O plano so arma ate 24 h a frente (POPUP_V3B2_RULES.liveHorizonMs). */
-  liveHorizonMs: 86_400_000,
+  /** O plano so arma ate 24 h a frente (o mesmo horizonte do servidor). */
+  liveHorizonMs: POPUP_V3B2_RULES.liveHorizonMs,
   /** Hora marcada: espera ate 2 s depois da hora do servidor (o relogio acertado pelo asOf erra pouco). */
   liveStartMarginMs: 2_000,
   /** Hora marcada: cada aba abre num momento sorteado de 0 a 4 s depois da folga (todas ao mesmo tempo pesam). */
@@ -35,24 +41,9 @@ export const POPUP_HOST_RULES = {
 
 export type HostTrigger = "course_completed" | "first_login" | "lesson_completed" | "page_load";
 
-// DUBLÊ: substituído pela frente S (spec §7). O PopupPlanItem da spec §3.2 (com `startsAt` e os quatro momentos)
-// ainda nao existe em notification-model.ts nesta frente; depois da integracao, `PopupPlanItem` ja e isto e estes
-// dois tipos viram apelidos dele (ou somem).
-export type PlanItem = Omit<PopupPlanItem, "startsAt" | "trigger"> & { startsAt?: string; trigger: HostTrigger };
-export type PlanAnswer = Omit<PopupsAnswer, "plan"> & { plan: PlanItem[] | null };
-
-/** Momentos que abrem pela pagina (ao abrir e na hora marcada; POPUP_PAGE_TRIGGERS do servidor). */
-const PAGE_TRIGGERS: readonly string[] = ["page_load", "first_login"];
-/** Momentos que abrem pela conclusao, so em paginas de aula (POPUP_LESSON_TRIGGERS do servidor). */
-const LESSON_TRIGGERS: readonly string[] = ["lesson_completed", "course_completed"];
-
-function isPageMoment(trigger: string): trigger is "first_login" | "page_load" {
-  return PAGE_TRIGGERS.includes(trigger);
-}
-
-function isLessonMoment(trigger: string): trigger is "course_completed" | "lesson_completed" {
-  return LESSON_TRIGGERS.includes(trigger);
-}
+/** Um item do plano (o contrato do resumo, notification-model.ts). */
+export type PlanItem = PopupPlanItem;
+export type PlanAnswer = PopupsAnswer;
 
 /** Uma abertura armada nesta visualizacao de pagina. at = relogio do navegador. */
 export type ArmedPopup = {
@@ -148,7 +139,7 @@ export function openingsForPageView(input: {
   const openings: ArmedPopup[] = [];
 
   for (const item of input.items) {
-    if (!isPageMoment(item.trigger) || !popupAllowsPage(item, input.pageKey)) {
+    if (!isPageTrigger(item.trigger) || !popupAllowsPage(item, input.pageKey)) {
       continue;
     }
 
@@ -203,7 +194,7 @@ export function reconcileClockOpenings(input: {
       continue;
     }
 
-    const planned = input.items.some((item) => item.id === id && isPageMoment(item.trigger) && popupAllowsPage(item, input.pageKey));
+    const planned = input.items.some((item) => item.id === id && isPageTrigger(item.trigger) && popupAllowsPage(item, input.pageKey));
     const opening = openingOf.get(id);
 
     if (!planned) {
@@ -399,7 +390,7 @@ export function blockReason(env: BlockEnv, armed: ArmedPopup, phase: "after_show
 
   const lesson = env.lesson;
 
-  if (lesson && isPageMoment(armed.trigger)) {
+  if (lesson && isPageTrigger(armed.trigger)) {
     // Nunca por cima do video tocando: espera parar (antes e depois do show).
     if (lesson.playing) {
       return "playing";
@@ -417,7 +408,7 @@ export function blockReason(env: BlockEnv, armed: ArmedPopup, phase: "after_show
     }
   }
 
-  if (lesson && isLessonMoment(armed.trigger)) {
+  if (lesson && isLessonTrigger(armed.trigger)) {
     if (phase === "before_show") {
       if (lesson.activeLessonId !== armed.lessonId) {
         return "left_lesson";
@@ -509,7 +500,7 @@ export function shouldSendPageClose(input: { outcome: string | null; persisted: 
   return input.outcome === null && !input.persisted;
 }
 
-const PLAN_TRIGGERS: readonly string[] = [...PAGE_TRIGGERS, ...LESSON_TRIGGERS];
+const PLAN_TRIGGERS: readonly string[] = POPUP_TRIGGERS;
 const PLAN_STOPS: readonly (string | null)[] = ["click", "never", null];
 
 function stringList(value: unknown): string[] | null {

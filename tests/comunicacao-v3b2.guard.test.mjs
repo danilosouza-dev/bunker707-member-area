@@ -9,8 +9,9 @@ import "./support/resolve-extensionless-ts.mjs";
 // - cinco secoes pelo MCP (a 5 sozinha), idempotente, sem drop, delete, gatilho, create policy nem concurrently,
 //   exatamente um alter policy (o insert do aluno em student_events recusa as linhas dos avisos) e sem a coluna do
 //   design (a guarda do Livre proibe);
-// - a funcao do relatorio confere pagina, momento e jeito de fechar com as mesmas listas do app, e o check dos
-//   produtos confere id por id com o mesmo id do app e o mesmo teto;
+// - a funcao do relatorio confere pagina, momento e jeito de fechar com as mesmas listas do app (uma linha de
+//   numeros por item) sem a repeticao {1,240} da expressao e sem juntar tabelas grandes, e o check dos produtos
+//   confere id por id com o mesmo id do app e o mesmo teto;
 // - as duas funcoes sao so do service_role.
 
 const root = new URL("../", import.meta.url);
@@ -30,7 +31,7 @@ function functionBody(code, name) {
   return { body: code.slice(open + 2, close), header: code.slice(start, open) };
 }
 
-test("as migracoes ate a 202610250001 continuam byte a byte; a 0026 e o texto exato da spec (§3.1)", () => {
+test("as migracoes ate a 202610250001 continuam byte a byte; a 0026 e o texto exato da spec (§3.1, com o relatorio do integrador)", () => {
   const dir = new URL("supabase/migrations/", root);
   const files = readdirSync(dir)
     .filter((name) => name.endsWith(".sql"))
@@ -48,7 +49,7 @@ test("as migracoes ate a 202610250001 continuam byte a byte; a 0026 e o texto ex
   assert.ok(files.includes("202610260001_communication_v3b2.sql"));
   assert.equal(
     createHash("sha256").update(read(MIGRATION)).digest("hex"),
-    "afd17b717549f18bfcbc170b106716bb86a46636649ccb16fcaa6362678623ea",
+    "44566be50ca166161f25b222e01944236470e3a515b6bca7320d61d9f3b76ae8",
     "a 202610260001 e o texto exato da spec (§3.1): mudou? atualize a spec e este hash juntos"
   );
 });
@@ -102,17 +103,63 @@ test("a 0026: exatamente um alter policy, o insert do aluno em student_events, q
 
 test("o relatorio confere pagina, momento e jeito de fechar com as mesmas listas do app", () => {
   const { body } = functionBody(sqlCodeOf(read(MIGRATION)), "communication_popup_report");
+  // A pagina: as mesmas paginas fixas e o mesmo id de POPUP_PAGE_KEY, sem a repeticao {1,240} da expressao (o
+  // integrador mediu ~10 us por linha): as fixas por igualdade, o id pelo mesmo conjunto e o teto pelo tamanho.
+  const pageKey = /^\^\(((?:[a-z]+\|)+)\(\?:content\|lesson\):(\[[^\]]+\])\{1,(\d+)\}\)\$$/.exec(model.POPUP_PAGE_KEY.source);
+  assert.ok(pageKey, "POPUP_PAGE_KEY no formato conhecido (paginas fixas | content/lesson:id{1,N})");
+  const fixedPages = pageKey[1].slice(0, -1).split("|");
+  const idClass = pageKey[2];
+  const idMax = Number(pageKey[3]);
+  const quoted = (list) => list.map((value) => `'${value}'`).join(", ");
 
-  assert.ok(body.includes(`~ '${model.POPUP_PAGE_KEY.source}'`), "POPUP_PAGE_KEY igual ao da funcao");
-  assert.ok(body.includes(`in (${model.POPUP_TRIGGERS.map((trigger) => `'${trigger}'`).join(", ")})`), "POPUP_TRIGGERS igual ao da funcao");
-  assert.ok(body.includes(`in (${model.POPUP_CLOSE_VIAS.map((via) => `'${via}'`).join(", ")})`), "POPUP_CLOSE_VIAS igual ao da funcao");
-  assert.match(body, /when e\.metadata ->> 'page' is null then 'home'/, "sem pagina = Inicio");
-  assert.match(body, /when e\.metadata ->> 'trigger' is null then 'page_load'/, "sem momento = Ao abrir a pagina");
+  assert.equal(`^${idClass}{1,${idMax}}$`, model.POPUP_PRODUCT_ID.source, "o id da pagina e o id de produto");
+  assert.ok(body.includes(`when r.page in (${quoted(fixedPages)}) then r.page`), "as paginas fixas de POPUP_PAGE_KEY");
+  assert.ok(
+    body.includes(`when r.page ~ '^(?:content|lesson):${idClass}+$' and char_length(r.page) - position(':' in r.page) <= ${idMax} then r.page`),
+    "o id de POPUP_PAGE_KEY, com o mesmo teto"
+  );
+  assert.doesNotMatch(body, /\{1,\d+\}/, "sem repeticao limitada na expressao (custa caro por linha)");
+  assert.ok(body.includes(`in (${quoted(model.POPUP_TRIGGERS)})`), "POPUP_TRIGGERS igual ao da funcao");
+  assert.ok(body.includes(`in (${quoted(model.POPUP_CLOSE_VIAS)})`), "POPUP_CLOSE_VIAS igual ao da funcao");
+  assert.match(body, /when r\.page is null then 'home'/, "sem pagina = Inicio");
+  assert.match(body, /when r\.moment is null then 'page_load'/, "sem momento = Ao abrir a pagina");
   assert.match(body, /else 'unknown'/, "sem jeito = closed_unknown");
-  assert.match(body, /sum\(least\(k\.n, v\.impressions\)\)/, "nunca mais vezes do que a linha diz");
+  assert.match(body, /e\.metadata ->> 'page' as page, e\.metadata ->> 'trigger' as moment, e\.metadata ->> 'via' as via/);
+  assert.match(body, /offset 0\s*\) r/, "cada chave do jsonb lida uma vez por linha");
+
+  // Uma linha de numeros por item das listas do app: tipos de pagina (as fixas, content, lesson e other),
+  // momentos (POPUP_TRIGGERS e other) e resultados (clique, Nao mostrar de novo, Lembrar depois e cada jeito).
+  const items = [
+    ["opened", "", "opened"],
+    ...[...fixedPages, "content", "lesson", "other"].map((kind) => ["opened_kind", kind, `kind_${kind}`]),
+    ...[...model.POPUP_TRIGGERS, "other"].map((moment) => ["opened_trigger", moment, `moment_${moment}`]),
+    ...["clicked", "dismissed", "snoozed", ...[...model.POPUP_CLOSE_VIAS, "unknown"].map((via) => `closed_${via}`)].map((outcome) => [
+      "outcome",
+      outcome,
+      `outcome_${outcome}`
+    ]),
+    ["outcomes", "", "outcomes"]
+  ];
+
+  for (const [metric, item, column] of items) {
+    assert.ok(body.includes(`('${metric}', '${item}', t.${column}_total, t.${column}_students)`), `${metric}/${item}`);
+    assert.ok(
+      body.includes(`sum(least(p.${column}, p.impressions)) as ${column}_total, count(*) filter (where p.${column} > 0) as ${column}_students`),
+      `${metric}/${item}: nunca mais vezes do que a linha diz`
+    );
+  }
+
+  assert.equal((body.match(/sum\(least\(p\.\w+, p\.impressions\)\)/g) ?? []).length, items.length, "nenhum item a mais");
+  assert.match(body, /sum\(least\(q\.n, q\.impressions\)\)/, "produtos: nunca mais vezes do que a linha diz");
+  assert.match(body, /where p\.impressions is not null/, "so quem tem linha vista");
   assert.match(body, /d\.impressions > 0/, "so quem viu");
   assert.match(body, /not exists \(select 1 from public\.admin_roles a where a\.user_id = d\.user_id\)/, "nunca a equipe");
   assert.match(body, /e\.entity_type = 'campaign'\s+and e\.entity_id = p_campaign_id::text/, "pelo indice parcial");
+  assert.doesNotMatch(
+    body,
+    /\bjoin\s+(?!lateral\b)/i,
+    "sem juntar tabelas grandes (a funcao planeja sem o id e erra o tamanho: um laco aninhado custava 27 s)"
+  );
 });
 
 test("assinatura e privilegios do relatorio: security invoker, so o service_role executa", () => {
