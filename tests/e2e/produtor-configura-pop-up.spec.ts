@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, gravarRascunhoDePopUp, test, zerarComunicacao } from "./fixtures";
+import { esperarAvisoPublicado, expect, gravarRascunhoDePopUp, test, zerarComunicacao } from "./fixtures";
 
 // O produtor configura o pop-up nos dois cards novos (docs/25 §2; docs/18 §3.1): "Quando e onde aparece"
 // (Escolher páginas sem nenhuma pagina marcada recusa; "Em qualquer página" com "Nunca nestas páginas: Perfil" e a frase ao
@@ -12,7 +12,9 @@ import { expect, gravarRascunhoDePopUp, test, zerarComunicacao } from "./fixture
 // primeiro acesso nos dois sentidos ("No primeiro acesso" desabilitada e as outras tres nao; num "No primeiro
 // acesso" no ar, as outras tres desabilitadas uma a uma), com a linha ligada pelo aria-describedby do grupo; o
 // relatorio "Como o pop-up foi visto" vazio logo depois de publicar; e o toast com a ressalva da hora marcada ao
-// publicar com Começa no futuro pelo editor e ao aprovar pelo menu da lista.
+// publicar com Começa no futuro pelo editor e ao aprovar pelo menu da lista. Depois do toast de publicar, o editor
+// ainda navega para o relatorio: esperarAvisoPublicado antes de qualquer page.goto (no WebKit do CI o goto era
+// interrompido por essa navegacao).
 
 const TITULO = "Pop-up E2E: configurado nos cards";
 const SESSAO_DO_PRODUTOR = "tests/e2e/.auth/produtor.json";
@@ -232,6 +234,7 @@ test("Começa no futuro: o toast avisa de quem já está com a área aberta, ao 
   ).toBeVisible();
   await page.getByRole("button", { exact: true, name: "Publicar pop-up" }).click();
   await expect(page.getByText(RESSALVA_DA_HORA_MARCADA, { exact: true })).toBeVisible();
+  await esperarAvisoPublicado(page);
 
   await page.goto("/admin/comunicacao/avisos");
   await abrirMenuDaLinha(page, PELA_LISTA);
@@ -256,6 +259,7 @@ test("No primeiro acesso no ar: as outras três pílulas ficam desabilitadas, co
   await expect(momentoNoRascunho.getByRole("radio", { exact: true, name: "Ao abrir a página" })).toBeEnabled();
   await page.getByRole("button", { exact: true, name: "Publicar pop-up" }).click();
   await expect(page.getByText("Pop-up publicado. Ele aparece para os alunos novos a partir de agora.", { exact: true })).toBeVisible();
+  await esperarAvisoPublicado(page);
 
   await page.goto(`/admin/comunicacao/avisos/${id}?editar=1`);
   await page.waitForLoadState("networkidle");
