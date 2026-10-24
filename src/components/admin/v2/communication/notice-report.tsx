@@ -61,6 +61,9 @@ import {
 //
 // v3b-1 (docs/25 §2.9): no pop-up, "Detalhes" ganha, depois de "Quando", Onde, Quando aparece, Quantas vezes e
 // Como fecha (popupSettingsLines, com os nomes dos produtos citados); "Lembrar depois" diz o "Volta em" dele.
+//
+// v3b-2 (docs/29 §2.6): no pop-up que ja foi ao ar, "Como o pop-up foi visto" (o no `popupReport` da pagina,
+// num Suspense: o funil nao espera) logo depois do alerta de fechamento alto, antes de Conteúdo e Detalhes.
 
 type NoticeReportProps = {
   branding: NoticeEditorOptions["branding"];
@@ -68,6 +71,8 @@ type NoticeReportProps = {
   /** Hora da leitura (servidor). */
   now: number;
   permissions: NoticePermissions;
+  /** v3b-2: o relatorio do pop-up que ja foi ao ar (Suspense + PopupReportLoader da pagina); null nos outros. */
+  popupReport?: ReactNode;
 };
 
 const DEVICE_OPTIONS = [
@@ -87,6 +92,8 @@ function toTarget(detail: NoticeDetail): NoticeActionTarget {
     kind: detail.kind,
     // v3b-1: o toast de "Mostrar de novo" muda em "Mais de uma vez".
     popupMode: detail.popupMode,
+    // v3b-2: o dialogo de Aprovar diz o alcance certo em "No primeiro acesso".
+    popupTrigger: detail.popupTrigger,
     recipients: detail.stats.recipients,
     situation: detail.situation,
     status: detail.status,
@@ -174,7 +181,7 @@ function timelineOf(detail: NoticeDetail): TimelineEntry[] {
   return entries;
 }
 
-export function NoticeReport({ branding, detail, now, permissions }: NoticeReportProps) {
+export function NoticeReport({ branding, detail, now, permissions, popupReport = null }: NoticeReportProps) {
   const router = useRouter();
   const [device, setDevice] = useState<PreviewDevice>("desktop");
   const { busyKey, confirmDialog, errorBanner, request } = useNoticeActions({ onDeleted: () => router.push(NOTICES_HREF) });
@@ -347,6 +354,8 @@ export function NoticeReport({ branding, detail, now, permissions }: NoticeRepor
           {`${formatPercent(closeRate)} de quem viu fechou sem clicar. Vale rever o título, a imagem ou para quem vai${canPause ? ", ou pausar enquanto ajusta" : ""}.`}
         </Note>
       ) : null}
+
+      {detail.kind === "popup" ? popupReport : null}
 
       <div className="grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]">
         <section aria-labelledby="aviso-relatorio-conteudo" className={cn(adminCard, "flex min-w-0 flex-col gap-3 p-4")}>

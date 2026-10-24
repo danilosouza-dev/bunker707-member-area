@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test, zerarComunicacao } from "./fixtures";
+import { esperarAvisoPublicado, expect, gravarRascunhoDePopUp, test, zerarComunicacao } from "./fixtures";
 
 // O produtor configura o pop-up nos dois cards novos (docs/25 §2; docs/18 §3.1): "Quando e onde aparece"
 // (Escolher páginas sem nenhuma pagina marcada recusa; "Em qualquer página" com "Nunca nestas páginas: Perfil" e a frase ao
@@ -8,6 +8,13 @@ import { expect, test, zerarComunicacao } from "./fixtures";
 // vivo; "Só no X"). A revisao, a legenda da previa, o toast de publicar (ate 1 minuto), as linhas de
 // "Detalhes" do relatorio, a segunda linha da lista e, no pop-up no ar, "Mostrar de novo para quem já viu" em
 // "Mais de uma vez" e a linha de quem ja viu ao mudar onde ele aparece.
+// v3b-2 (docs/29 §2.1, §2.2, §2.5 e §2.6): as quatro pilulas de "Quando aparece"; no pop-up que ja foi ao ar, a trava do
+// primeiro acesso nos dois sentidos ("No primeiro acesso" desabilitada e as outras tres nao; num "No primeiro
+// acesso" no ar, as outras tres desabilitadas uma a uma), com a linha ligada pelo aria-describedby do grupo; o
+// relatorio "Como o pop-up foi visto" vazio logo depois de publicar; e o toast com a ressalva da hora marcada ao
+// publicar com Começa no futuro pelo editor e ao aprovar pelo menu da lista. Depois do toast de publicar, o editor
+// ainda navega para o relatorio: esperarAvisoPublicado antes de qualquer page.goto (no WebKit do CI o goto era
+// interrompido por essa navegacao).
 
 const TITULO = "Pop-up E2E: configurado nos cards";
 const SESSAO_DO_PRODUTOR = "tests/e2e/.auth/produtor.json";
@@ -34,7 +41,13 @@ test("monta o pop-up nos dois cards, com a validação, as frases e a prévia, e
   // Quando e onde aparece.
   const lugar = card(page, "Quando e onde aparece");
   await expect(lugar.getByText("Em que momento e em quais páginas o pop-up abre.", { exact: true })).toBeVisible();
-  await expect(lugar.getByRole("radiogroup", { name: "Quando o pop-up aparece" }).getByRole("radio", { name: "Ao abrir a página" })).toBeChecked();
+  const momento = lugar.getByRole("radiogroup", { name: "Quando o pop-up aparece" });
+  await expect(momento.getByRole("radio", { name: "Ao abrir a página" })).toBeChecked();
+  await expect(momento.getByRole("radio")).toHaveCount(4);
+  for (const nome of ["Ao abrir a página", "Ao concluir uma aula", "No primeiro acesso", "Ao concluir um curso"]) {
+    await expect(momento.getByRole("radio", { exact: true, name: nome })).toBeEnabled();
+  }
+  await expect(momento).not.toHaveAttribute("aria-describedby", /.+/);
   const onde = lugar.getByRole("radiogroup", { name: "Onde o pop-up aparece" });
   await expect(onde.getByRole("radio", { name: "Só no Início" })).toBeChecked();
   await onde.getByText("Escolher páginas", { exact: true }).click();
@@ -123,6 +136,10 @@ test("monta o pop-up nos dois cards, com a validação, as frases e a prévia, e
   await expect(linha("Quando aparece")).toHaveText("Ao abrir a página, 3 segundos depois");
   await expect(linha("Quantas vezes")).toHaveText("Até 2 vezes por dia, com pelo menos 2 horas entre uma vez e outra, até o pop-up terminar");
   await expect(linha("Como fecha")).toHaveText("Só no X (e no Esc)");
+
+  // v3b-2: o relatorio do pop-up, ainda sem ninguem que viu.
+  await expect(page.getByRole("heading", { level: 2, name: "Como o pop-up foi visto" })).toBeVisible();
+  await expect(page.getByText("Ninguém viu este pop-up ainda. Os números aparecem aqui quando os alunos começarem a ver.", { exact: true })).toBeVisible();
 });
 
 test("no ar: a lista mostra onde ele aparece; Editar tem Mostrar de novo em Mais de uma vez e avisa ao mudar onde ele aparece", async ({ page }) => {
@@ -152,6 +169,16 @@ test("no ar: a lista mostra onde ele aparece; Editar tem Mostrar de novo em Mais
   await expect(vezes.getByRole("radiogroup", { exact: true, name: "Unidade do tempo" }).getByRole("radio", { name: "horas" })).toBeChecked();
 
   const lugar = card(page, "Quando e onde aparece");
+  // v3b-2 (D8): no pop-up que ja foi ao ar, "No primeiro acesso" nao troca com os outros momentos.
+  const momento = lugar.getByRole("radiogroup", { name: "Quando o pop-up aparece" });
+  await expect(momento.getByRole("radio", { exact: true, name: "No primeiro acesso" })).toBeDisabled();
+  for (const nome of ["Ao abrir a página", "Ao concluir uma aula", "Ao concluir um curso"]) {
+    await expect(momento.getByRole("radio", { exact: true, name: nome })).toBeEnabled();
+  }
+  const trava = lugar.getByText("Num pop-up que já foi ao ar, “No primeiro acesso” não troca com os outros momentos. Para isso, duplique o pop-up.", { exact: true });
+  await expect(trava).toBeVisible();
+  await expect(momento).toHaveAccessibleDescription("Num pop-up que já foi ao ar, “No primeiro acesso” não troca com os outros momentos. Para isso, duplique o pop-up.");
+
   await lugar.getByRole("group", { name: "Nunca nestas páginas" }).getByRole("checkbox", { exact: true, name: "Suporte" }).click();
   await expect(lugar.getByText("Aparece em qualquer página, menos Perfil e Suporte.", { exact: true })).toBeVisible();
   await expect(
@@ -170,4 +197,82 @@ test("no ar: a lista mostra onde ele aparece; Editar tem Mostrar de novo em Mais
   await expect(card(page, "Detalhes").locator("dl > div").filter({ has: page.getByText("Onde", { exact: true }) }).locator("dd")).toHaveText(
     "Em qualquer página, menos Perfil e Suporte"
   );
+});
+
+/** Abre o menu "Ações de …" de uma linha da lista, clicando de novo ate abrir (o primeiro clique pode chegar antes da hidratacao). */
+async function abrirMenuDaLinha(page: Page, titulo: string) {
+  const linhaDaLista = page.getByRole("row").filter({ hasText: titulo });
+  const itens = page.getByRole("menuitem");
+
+  await expect(linhaDaLista).toHaveCount(1);
+  await expect(async () => {
+    if ((await itens.count()) === 0) {
+      await linhaDaLista.getByRole("button", { name: `Ações de ${titulo}` }).click();
+    }
+    await expect(itens.first()).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+}
+
+const RESSALVA_DA_HORA_MARCADA =
+  "Pop-up publicado. Na hora marcada, ele aparece para quem abrir uma das páginas e para quem já estiver nelas. Para quem está com a área aberta agora, vale a partir da próxima página ou de quando voltar para a aba.";
+
+test("Começa no futuro: o toast avisa de quem já está com a área aberta, ao publicar pelo editor e ao aprovar pela lista", async ({ page }) => {
+  const daquiADuasHoras = new Date(Date.now() + 2 * 3_600_000).toISOString();
+  const PELO_EDITOR = "Pop-up E2E: live publicada no editor";
+  const PELA_LISTA = "Pop-up E2E: live aprovada na lista";
+  const peloEditor = await gravarRascunhoDePopUp({ inicio: daquiADuasHoras, titulo: PELO_EDITOR });
+  await gravarRascunhoDePopUp({ aguardandoAprovacao: true, inicio: daquiADuasHoras, titulo: PELA_LISTA });
+
+  await page.goto(`/admin/comunicacao/avisos/${peloEditor}`);
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByLabel("Título", { exact: true })).toHaveValue(PELO_EDITOR);
+  await expect(
+    card(page, "Quando e onde aparece").getByText(
+      "Para um aviso de hora curta, marque também “Termina”: quem voltar para a aba depois disso não vê. Publique com antecedência: quem já estava com a área aberta antes de você publicar só vê ao abrir outra página ou voltar para a aba.",
+      { exact: true }
+    )
+  ).toBeVisible();
+  await page.getByRole("button", { exact: true, name: "Publicar pop-up" }).click();
+  await expect(page.getByText(RESSALVA_DA_HORA_MARCADA, { exact: true })).toBeVisible();
+  await esperarAvisoPublicado(page);
+
+  await page.goto("/admin/comunicacao/avisos");
+  await abrirMenuDaLinha(page, PELA_LISTA);
+  await page.getByRole("menuitem", { name: "Aprovar e publicar" }).click();
+  const confirmar = page.getByRole("dialog", { name: `Aprovar “${PELA_LISTA}”?` });
+  await expect(confirmar).toBeVisible();
+  await confirmar.getByRole("button", { exact: true, name: "Aprovar e publicar" }).click();
+  await expect(page.getByText(RESSALVA_DA_HORA_MARCADA, { exact: true })).toBeVisible();
+  await expect(confirmar).toHaveCount(0);
+});
+
+test("No primeiro acesso no ar: as outras três pílulas ficam desabilitadas, com a linha da trava", async ({ page }) => {
+  const TITULO_DO_PRIMEIRO_ACESSO = "Pop-up E2E: boas-vindas na área";
+  const id = await gravarRascunhoDePopUp({ quando: "first_login", titulo: TITULO_DO_PRIMEIRO_ACESSO });
+
+  await page.goto(`/admin/comunicacao/avisos/${id}`);
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByLabel("Título", { exact: true })).toHaveValue(TITULO_DO_PRIMEIRO_ACESSO);
+  // Antes de ir ao ar, nada trava.
+  const momentoNoRascunho = card(page, "Quando e onde aparece").getByRole("radiogroup", { name: "Quando o pop-up aparece" });
+  await expect(momentoNoRascunho.getByRole("radio", { exact: true, name: "No primeiro acesso" })).toBeChecked();
+  await expect(momentoNoRascunho.getByRole("radio", { exact: true, name: "Ao abrir a página" })).toBeEnabled();
+  await page.getByRole("button", { exact: true, name: "Publicar pop-up" }).click();
+  await expect(page.getByText("Pop-up publicado. Ele aparece para os alunos novos a partir de agora.", { exact: true })).toBeVisible();
+  await esperarAvisoPublicado(page);
+
+  await page.goto(`/admin/comunicacao/avisos/${id}?editar=1`);
+  await page.waitForLoadState("networkidle");
+  const lugar = card(page, "Quando e onde aparece");
+  const momento = lugar.getByRole("radiogroup", { name: "Quando o pop-up aparece" });
+  await expect(momento.getByRole("radio", { exact: true, name: "No primeiro acesso" })).toBeChecked();
+  await expect(momento.getByRole("radio", { exact: true, name: "No primeiro acesso" })).toBeEnabled();
+  for (const nome of ["Ao abrir a página", "Ao concluir uma aula", "Ao concluir um curso"]) {
+    await expect(momento.getByRole("radio", { exact: true, name: nome })).toBeDisabled();
+  }
+  const trava = "Num pop-up que já foi ao ar, “No primeiro acesso” não troca com os outros momentos. Para isso, duplique o pop-up.";
+  await expect(lugar.getByText(trava, { exact: true })).toBeVisible();
+  await expect(momento).toHaveAccessibleDescription(trava);
+  // A escolha de "Conta como primeiro acesso" continua editavel (so o momento trava).
+  await expect(lugar.getByRole("radiogroup", { name: "Conta como primeiro acesso" }).getByRole("radio", { exact: true, name: "A primeira vez na área" })).toBeChecked();
 });

@@ -35,6 +35,7 @@ import {
   withdrawNotice
 } from "@/server/communications/actions";
 import type { CampaignKind, CampaignSituation, CampaignStatus, NoticeAction } from "@/server/communications/campaign-model";
+import type { PopupTrigger } from "@/server/communications/popup-display-model";
 import { ErrorBanner } from "../error-banner";
 import { ConfirmDialog, RowMenu, type RowMenuAction } from "../settings/kit";
 import { adminToast } from "../toast";
@@ -84,6 +85,8 @@ export type NoticeActionTarget = {
    * uma vez". Sem ele, o texto de "Uma vez".
    */
   popupMode?: "once" | "repeat" | null;
+  /** v3b-2: o momento do pop-up (NoticeListItem.popupTrigger): o dialogo de Aprovar muda em "No primeiro acesso". */
+  popupTrigger?: PopupTrigger | null;
   /** Notificacao enviada: quantos receberam (texto do "Retirar do sino"). */
   recipients?: number | null;
   /** v3a: a situacao de agora (o texto de Excluir muda: pop-up no ar, pausado, notificacao enviada...). */

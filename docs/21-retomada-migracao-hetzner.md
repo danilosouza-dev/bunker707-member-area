@@ -9,6 +9,11 @@
 > na producao o `deploy-membros` aplica sozinho. Passos na secao 9. As correcoes da revisao vem na
 > `202610210001` (a 0002 ja esta aplicada na nuvem de teste e nao muda): mesma regra, secao 9.1.
 >
+> **Atualizacao de 23/10/2026:** a Comunicacao v3b-2 traz a migracao `202610260001` (cinco secoes, a 5 sozinha;
+> antes, contar as linhas de `student_events`), que vai antes do merge na `dev`; e uma regra de operacao: **nao
+> publicar nem editar pop-ups "No primeiro acesso" ou "Ao concluir um curso" enquanto o app do ambiente rodar a versao
+> de antes** (R1). Passos na secao 9.5.
+>
 > **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
 > `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a
 > `dev` (teste na Vercel), promocao para a `main` e `deploy-membros` disparado da `main` (secao 8, item 6).
@@ -392,3 +397,58 @@ editor em branco com "Este modelo não existe mais" e a limpeza segue sem modelo
 
 **Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
 trocar o app.
+
+### 9.5 Comunicacao v3b-2: migracao `202610260001` antes do deploy (23/10/2026)
+
+A PR da Comunicacao v3b-2 "Pop-ups: hora marcada ao vivo, primeiro acesso, curso concluido, relatorio e players de
+fora" (`docs/29`) traz `supabase/migrations/202610260001_communication_v3b2.sql` (sha256 `44566be5...f3b76ae8`, fixado
+na guarda `comunicacao-v3b2.guard`). As migracoes ate a `202610250001` nao mudam.
+
+Regra: **a 0026 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, `CAMPAIGN_COLUMNS`
+(que ganhou `popup_access_products`) quebra o admin de avisos e **o job `comunicacao` do tick**, parando notificacoes
+agendadas, seguintes e fluxos ate a migracao (como na v3b-1). A migracao sozinha nao atrapalha o app de antes (ele nao
+le as colunas novas; o navegador de antes nao grava `campaign` no historico).
+
+**Regra de operacao (R1, `docs/29` §3 e §9.2)**: **nao publicar nem editar "No primeiro acesso" ou "Ao concluir um
+curso" num ambiente enquanto o app (e o tick) desse ambiente roda a versao de antes.** O app de antes le os dois como
+"Ao abrir a pagina": o plano e o `show` dele aceitam, o tick dele habilita o segmento inteiro num "No primeiro acesso"
+(o app novo desfaz no recalculo seguinte: a linha sem a marca `first_access_at` sai) e editar ali um "No primeiro
+acesso" sem produtos grava "Ao abrir a pagina" sem erro. Na nuvem, vale entre aplicar a migracao e o merge; depois do
+merge, nao usar previas de PRs anteriores para criar ou editar pop-ups. Na Hetzner, vale ao voltar para a imagem
+anterior (`docs/20` §9).
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**:
+
+1. conferir que ela ainda nao esta la: `list_migrations` (com `202610250001`, sem `202610260001`);
+2. contar as linhas: `select count(*) from public.student_events;` (o indice da secao 3 nao e `concurrently`: enquanto
+   ele monta, as escritas na tabela esperam; ate uns 10 milhoes de linhas, segundos; no local, 2,66 milhoes em ~2,3 s);
+3. as cinco secoes pelo MCP do Supabase, `execute_sql`, **uma por chamada e na ordem do arquivo**, cada uma comecando
+   com `set lock_timeout = '5s';`: 1 `campaigns` (funcao `communication_popup_products_ok`, coluna
+   `popup_access_products`, comentarios e o check `campaigns_popup_access_v3b2` dentro de `do $$ ... if not exists`) ->
+   2 `campaign_deliveries.first_access_at` -> 3 o indice `student_events_campaign_idx`, numa chamada so dele -> 4 a
+   funcao `communication_popup_report` (`create or replace`, mesma assinatura: se uma versao anterior ja tiver sido
+   aplicada, ela e trocada) -> 5 o `alter policy "Students can create own events"`, **sozinha** (se o MCP recusar, pelo
+   SQL Editor). Ou `apply_migration` com o arquivo inteiro, nome `communication_v3b2`. Nao ha `drop`, `delete`, gatilho
+   nem `create policy`. O texto de cada chamada e o bloco `/* N. ... */` correspondente do proprio arquivo da migracao
+   (do cabecalho da secao ate o cabecalho da seguinte), com `set lock_timeout = '5s';` na frente;
+4. conferir com as consultas do cabecalho da migracao: constraint `campaigns_popup_access_v3b2` com
+   `convalidated = true`; 1 funcao `communication_popup_products_ok`; 0 pop-ups com produtos; 0 linhas com
+   `first_access_at`; o indice existe; `communication_popup_report` com `authenticated` = false e `service_role` =
+   true; `select metric, total, students from public.communication_popup_report(gen_random_uuid()) order by 1;` =
+   `max 0 0`, `median 0 0`, `viewers 0 0`; a politica com `campaign` no `with check`. O cabecalho nao confere as
+   permissoes da funcao dos produtos: rode a parte
+   `select has_function_privilege('authenticated', 'public.communication_popup_products_ok(text[])', 'execute'),
+   has_function_privilege('service_role', 'public.communication_popup_products_ok(text[])', 'execute');` = `false`, `true`;
+5. se foi por `execute_sql` (que nao grava a versao), gravar o historico com
+   `insert into supabase_migrations.schema_migrations (version, name) values ('202610260001', 'communication_v3b2') on conflict (version) do nothing;`
+   (a coluna `statements` e `text[]`; o texto da migracao nao precisa entrar); `list_migrations` com `202610260001`;
+6. a idempotencia foi conferida no banco local (duas aplicacoes com `psql` sem erro, so "already exists, skipping";
+   `db:reset` com 52 migracoes e mais uma aplicacao por cima): reaplicar uma secao que travou no meio e seguro;
+7. fazer o merge e seguir o roteiro do `docs/29` §10 (o primeiro passo e conferir que a `dev` ja roda a v3b-2 antes de
+   publicar os momentos novos). A conferencia dos players em aparelho real (`docs/29` §10.1) e condicao para a PR
+   `dev` -> `main`.
+
+**Producao (Hetzner)**: nada manual para a migracao. A promocao `dev` -> `main` e o `deploy-membros` aplicam a
+migracao antes de trocar o app (o indice trava as escritas em `student_events` pelos segundos da montagem). Antes de
+voltar para a imagem anterior, pausar os pop-ups "No primeiro acesso" e "Ao concluir um curso" (`docs/20` §9). Depois,
+uma rodada do `carga` com um pop-up de hora marcada (`docs/20` §12.1, `docs/29` R17).

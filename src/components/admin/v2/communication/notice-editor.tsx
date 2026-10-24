@@ -94,7 +94,7 @@ import { PopupDesignField } from "./popup-design/popup-design-field";
 import { isFreeProblemKey, popupDesignFocusSelector, withSyncedDesign } from "./popup-design/popup-design-editor-model";
 import { freeTemplateRecoveryKey } from "./popup-free/free-editor-recovery";
 import { PopupPlacementFields } from "./popup-placement-fields";
-import { POPUP_EDITOR_COPY, placementUiOf, popupPlacementProblems, popupSettingsOfDraft, type PopupPlacementUi } from "./popup-editor-model";
+import { POPUP_EDITOR_COPY, lockedTriggersOf, placementUiOf, popupPlacementProblems, popupSettingsOfDraft, type PopupPlacementUi } from "./popup-editor-model";
 import { isEditorSaveShortcut } from "./save-shortcut";
 import { SaveAsTemplateDialog } from "./templates/save-as-template-dialog";
 import {
@@ -293,6 +293,8 @@ const FIELD_FOCUS: readonly [string, string][] = [
   ["validity", "[name='aviso-validade']"],
   // v3b-1: "Quando e onde aparece" do pop-up (a janela fica no fim do card) e "Quantas vezes e como fecha".
   ["popup.trigger", "[name='popup-momento']"],
+  // v3b-2: "A primeira vez com estes produtos" sem produto (o seletor; sem a lista, as pilulas).
+  ["popup.accessProducts", "#popup-primeiro-acesso-produtos, [name='popup-primeiro-acesso']"],
   ["popup.pages", "#popup-paginas, #popup-paginas-aulas"],
   ["popup.exclude", "#popup-excecoes"],
   ["popup.delaySeconds", "#popup-atraso-outro"],
@@ -1344,6 +1346,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions, 
           kind: initial.kind,
           // v3b-1: o toast de "Mostrar de novo" segue o "Quantas vezes" salvo.
           popupMode: initial.kind === "popup" ? (saved.popup?.frequency.mode ?? initial.popupMode) : null,
+          // v3b-2: o dialogo de Aprovar (faixa "Aguardando aprovação") segue o momento salvo.
+          popupTrigger: initial.kind === "popup" ? (saved.popup?.trigger ?? initial.popupTrigger) : null,
           recipients: initial.stats.recipients,
           situation: situationOf({ endsAt: saved.window.endsAt, kind: initial.kind, sendAt: null, startsAt: saved.window.startsAt, status: savedVersion.status }, now),
           status: savedVersion.status,
@@ -1805,6 +1809,7 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions, 
                       key={resetKey}
                       draft={draft}
                       errors={{ endsAt: errorFor("window.endsAt"), sendAt: errorFor("schedule.sendAt"), startsAt: errorFor("window.startsAt") }}
+                      now={now}
                       onChange={(patch) => change(patch)}
                     />
                   )}
@@ -1833,6 +1838,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions, 
                   errorFor={errorFor}
                   key={`onde-${resetKey}`}
                   live={livePopup && status ? { saved, status } : null}
+                  // v3b-2 (D8): num pop-up que ja foi ao ar, "No primeiro acesso" nao troca com os outros momentos.
+                  lockedTriggers={lockedTriggersOf({ savedTrigger: popupSettingsOfDraft(saved).trigger, sentAt: initial?.sentAt ?? null })}
                   names={popupNames}
                   now={now}
                   onChange={(patch) => change(patch)}

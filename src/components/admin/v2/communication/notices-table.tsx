@@ -32,6 +32,8 @@ export function toNoticeActionTarget(item: NoticeListItem): NoticeActionTarget {
     kind: item.kind,
     // v3b-1: o toast de "Mostrar de novo" segue o "Quantas vezes" do pop-up.
     popupMode: item.popupMode,
+    // v3b-2: o dialogo de Aprovar diz o alcance certo em "No primeiro acesso".
+    popupTrigger: item.popupTrigger,
     recipients: item.stats.recipients,
     situation: item.situation,
     status: item.status,

@@ -48,6 +48,7 @@ import { LessonReleaseOverlay, type LessonLockNotice } from "@/components/lesson
 import { MemberRoleBadge } from "@/components/member/ui/member-chip";
 import { useNavigationFeedback, useNavigationFeedbackRouter } from "@/components/navigation-feedback";
 import { LessonTvControl } from "@/components/lesson-tv-control";
+import { useLessonEmbedBridge } from "@/components/use-lesson-embed-bridge";
 import {
   Tooltip,
   TooltipContent,
@@ -59,6 +60,8 @@ import {
   type YouTubeManualPlayerController
 } from "@/components/youtube-manual-stream-player";
 import { withAccessPreviewParam } from "@/lib/access-preview";
+import { courseCompletedOf } from "@/lib/course-completion";
+import { embedBridgeTarget } from "@/lib/lesson-embed-origins";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import {
   EMPTY_LESSON_MATERIAL_LEARNER_STATE,
@@ -1400,6 +1403,9 @@ export function LessonExperience({
   const lessonSupportPanelRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const youtubeIframeRef = useRef<HTMLIFrameElement>(null);
+  // Iframe do player de fora (Bunny, Vimeo, Mux) por estado: ele monta um quadro depois do primeiro desenho e a
+  // ponte (useLessonEmbedBridge) liga de novo quando ele chega (docs/29 §4.4).
+  const [embedIframe, setEmbedIframe] = useState<HTMLIFrameElement | null>(null);
   const youtubePlayerRef = useRef<YouTubePlayer | null>(null);
   const pendingTutorSeekRef = useRef<PendingTutorSeek | null>(null);
   const readyYouTubePlayerRef = useRef<ReadyYouTubePlayer | null>(null);
@@ -1752,13 +1758,13 @@ export function LessonExperience({
     setLessonWatchStates(lessonWatchStatesRef.current);
     setProgressSaveError(LESSON_PROGRESS_SAVE_ERROR);
   }, []);
-  const persistLessonProgress = useCallback(async (
+  const persistLessonProgressResult = useCallback(async (
     payload: LessonProgressPayload,
     transport: LessonProgressTransport = "fetch"
-  ) => {
+  ): Promise<{ courseCompleted: boolean; saved: boolean }> => {
     if (transport === "beacon") {
       sendLessonProgressOnPageExit(payload);
-      return false;
+      return { courseCompleted: false, saved: false };
     }
 
     try {
@@ -1774,7 +1780,9 @@ export function LessonExperience({
       if (response.ok) {
         // So agora a avaliacao/o progresso estao gravados: a aba Materiais pode perguntar de novo.
         setSavedMaterialLearnerStates((current) => applySavedProgressToLearnerStates(current, payload));
-        return true;
+        // A gravacao que fechou o curso traz courseCompleted (docs/29 §4.3): o pop-up "Ao concluir um curso".
+        const body: unknown = await response.json().catch(() => null);
+        return { courseCompleted: courseCompletedOf(body), saved: true };
       }
 
       const detail = await response.text();
@@ -1786,8 +1794,12 @@ export function LessonExperience({
       console.error("Erro de rede ao salvar progresso da aula.", error);
     }
 
-    return false;
+    return { courseCompleted: false, saved: false };
   }, []);
+  const persistLessonProgress = useCallback((
+    payload: LessonProgressPayload,
+    transport: LessonProgressTransport = "fetch"
+  ) => persistLessonProgressResult(payload, transport).then((result) => result.saved), [persistLessonProgressResult]);
   const syncLessonWatchProgress = useCallback(async ({
     durationSeconds,
     force = false,
@@ -1845,7 +1857,7 @@ export function LessonExperience({
       setCompletedLessonIds((current) => withLessonCompletion(current, lessonId, true));
     }
 
-    const saved = await persistLessonProgress({
+    const { courseCompleted, saved } = await persistLessonProgressResult({
       contentId: item.id,
       durationSeconds: nextState.durationSeconds,
       lessonId,
@@ -1863,8 +1875,9 @@ export function LessonExperience({
     }
 
     if (saved && completesLesson && latest) {
-      // Conclusao gravada: o pop-up "ao concluir uma aula" pode abrir (docs/25 §1.4).
-      announceLessonMedia({ contentId: item.id, kind: "completed", lessonId });
+      // Conclusao gravada: o pop-up "ao concluir uma aula" (e, se fechou o curso, "ao concluir um curso") pode
+      // abrir (docs/25 §1.4, docs/29 §4.3).
+      announceLessonMedia({ contentId: item.id, ...(courseCompleted ? { courseCompleted: true } : {}), kind: "completed", lessonId });
     }
 
     if (saved && status === "completed") {
@@ -1874,13 +1887,13 @@ export function LessonExperience({
     beginCompletionRequest,
     isActiveLessonLocked,
     item.id,
-    persistLessonProgress,
+    persistLessonProgressResult,
     refreshAfterUnlockingLesson,
     settleOptimisticCompletion
   ]);
 
   function handlePlayerStart() {
-    // Pop-up "ao abrir a página" (docs/25 §1.4): depois do play no nosso player, nao abre mais nesta pagina.
+    // Pop-up "ao abrir a página" (docs/25 §1.4, docs/29 §4.5): no player que a pagina nao le, o play o descarta.
     announceLessonMedia({ kind: "touched" });
 
     if (isActiveLessonLocked || !activeLessonKey) {
@@ -1917,6 +1930,64 @@ export function LessonExperience({
       youTubePlaybackIntentLessonIdRef.current = activeLessonKey;
     }
   }
+
+  /** O tempo real do player de fora (pela ponte): a batida de 15 s segura o que nao e `force`. */
+  function syncEmbedWatchProgress(duration: number | null, seconds: number | null, force: boolean) {
+    const progressSeconds = seconds ?? lessonWatchStatesRef.current[activeLessonKey]?.progressSeconds ?? 0;
+    const durationSeconds = duration ?? activeLessonDurationSeconds;
+    const progressPercent = durationSeconds && durationSeconds > 0
+      ? clampProgressPercent((progressSeconds / durationSeconds) * 100)
+      : progressSeconds > 0 ? 1 : 0;
+
+    void syncLessonWatchProgress({
+      durationSeconds,
+      force,
+      lessonId: activeLessonKey,
+      progressPercent: Math.min(99, progressPercent),
+      progressSeconds,
+      status: "in_progress"
+    });
+  }
+
+  // O play pela ponte chama o handlePlayerStart do desenho mais novo (a ponte guarda o callback fora do React).
+  const handlePlayerStartRef = useRef(handlePlayerStart);
+
+  useEffect(() => {
+    handlePlayerStartRef.current = handlePlayerStart;
+  });
+
+  // Ponte com o player de fora (Bunny, Vimeo, Mux; docs/29 §4.4): com ela confirmada, o fim do video
+  // conclui a aula, o progresso usa o tempo real e o pop-up espera o video parar. Sem resposta, tudo como antes.
+  // Antes de qualquer retorno cedo (regra dos hooks); o YouTube tem os nossos controles (nunca esta ponte).
+  const embedBridge = useLessonEmbedBridge({
+    enabled: canRenderEmbeddedPlayer && !isActiveLessonLocked && activePlayerRenderConfig?.kind === "iframe" && activeLessonVideoProvider !== "youtube",
+    iframe: embedIframe,
+    lessonId: activeLessonKey || null,
+    onEnded: ({ duration, seconds }) => {
+      const durationSeconds = duration ?? activeLessonDurationSeconds;
+
+      void syncLessonWatchProgress({
+        durationSeconds,
+        force: true,
+        lessonId: activeLessonKey,
+        progressPercent: 100,
+        progressSeconds: durationSeconds ?? seconds ?? 0,
+        status: "completed"
+      });
+    },
+    onPause: ({ duration, seconds }) => {
+      syncEmbedWatchProgress(duration, seconds, true);
+    },
+    onPlay: () => {
+      if (!startedLessonIdsRef.current.has(activeLessonKey)) {
+        handlePlayerStartRef.current();
+      }
+    },
+    onTime: ({ duration, seconds }) => {
+      syncEmbedWatchProgress(duration, seconds, false);
+    },
+    src: activePlayerRenderConfig?.kind === "iframe" ? activePlayerRenderConfig.src : null
+  });
 
   const syncYouTubePlayerProgress = useCallback(async (
     player: YouTubePlayer,
@@ -2891,12 +2962,14 @@ export function LessonExperience({
   ]);
 
   useEffect(() => {
+    // Com a ponte do player de fora confirmada, o progresso vem do tempo real do video (nunca deste cronometro).
     if (
       !activeLesson ||
       !activeLessonStarted ||
       isActiveLessonLocked ||
       playerRenderConfig?.kind === "video" ||
-      activeLesson.video?.provider === "youtube"
+      activeLesson.video?.provider === "youtube" ||
+      embedBridge.bridge === "confirmed"
     ) {
       return;
     }
@@ -2925,6 +2998,7 @@ export function LessonExperience({
     activeLesson,
     activeLessonDurationSeconds,
     activeLessonStarted,
+    embedBridge.bridge,
     isActiveLessonLocked,
     lessonWatchStates,
     activeLesson?.video?.provider,
@@ -3489,7 +3563,7 @@ export function LessonExperience({
     lessonWatchStatesRef.current = withLessonWatchState(lessonWatchStatesRef.current, lessonId, toggle.watchState);
     setLessonWatchStates(lessonWatchStatesRef.current);
 
-    void persistLessonProgress({
+    void persistLessonProgressResult({
       completedLessonIds: toggle.payloadCompletedLessonIds,
       contentId: item.id,
       durationSeconds: toggle.watchState.durationSeconds,
@@ -3498,15 +3572,16 @@ export function LessonExperience({
       progressPercent: toggle.watchState.progressPercent,
       progressSeconds: toggle.watchState.progressSeconds,
       status: toggle.watchState.status
-    }).then((saved) => {
+    }).then(({ courseCompleted, saved }) => {
       // Lido antes de settleOptimisticCompletion: a conclusao desfeita antes da resposta nao e anunciada.
       const latest = pendingCompletionRef.current.get(lessonId) === requestId;
 
       settleOptimisticCompletion(lessonId, requestId, saved, snapshot);
 
       if (saved && toggle.willComplete && latest) {
-        // Concluir gravado: o pop-up "ao concluir uma aula" pode abrir (docs/25 §1.4).
-        announceLessonMedia({ contentId: item.id, kind: "completed", lessonId });
+        // Concluir gravado: o pop-up "ao concluir uma aula" (e, se fechou o curso, "ao concluir um curso") pode
+        // abrir (docs/25 §1.4, docs/29 §4.3).
+        announceLessonMedia({ contentId: item.id, ...(courseCompleted ? { courseCompleted: true } : {}), kind: "completed", lessonId });
       }
 
       if (saved && toggle.willComplete) {
@@ -4091,8 +4166,10 @@ export function LessonExperience({
               className={isPlayerFullscreen
                 ? "absolute left-1/2 top-1/2 aspect-video w-full max-w-[177.7778vh] -translate-x-1/2 -translate-y-1/2 overflow-hidden bg-black"
                 : "absolute inset-0 overflow-hidden rounded-[8px] bg-black"}
-              // A aula na tela e o tipo de player, lidos pelo pop-up (src/lib/lesson-media-signal.ts).
+              // A aula na tela, o tipo de player e se ele e um player de fora da lista da ponte (Bunny, Vimeo, Mux),
+              // lidos pelo pop-up (src/lib/lesson-media-signal.ts).
               data-lesson-id={activeLessonKey || undefined}
+              data-lesson-player-bridge={activePlayerRenderConfig?.kind === "iframe" && !usesCustomYouTubeControls && embedBridgeTarget(activePlayerRenderConfig.src) ? "" : undefined}
               data-lesson-player-kind={!activePlayerRenderConfig ? undefined : activePlayerRenderConfig.kind === "video" ? "native" : usesCustomYouTubeControls ? "youtube" : "iframe"}
               data-lesson-player-stage
               ref={playerStageRef}
@@ -4177,7 +4254,7 @@ export function LessonExperience({
                       ref={
                         activeLesson.video?.provider === "youtube" && activePlayerRenderConfig.kind === "iframe"
                           ? youtubeIframeRef
-                          : undefined
+                          : setEmbedIframe
                       }
                       referrerPolicy="strict-origin-when-cross-origin"
                       sandbox={usesCustomYouTubeControls

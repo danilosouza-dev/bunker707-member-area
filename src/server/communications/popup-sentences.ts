@@ -4,8 +4,23 @@
 // aqui chega ao aluno. Modulo puro: sem "server-only", imports relativos; o editor, a lista, o relatorio e
 // tests/pop-ups-v3b1-frases.test.mjs usam as mesmas funcoes. Vocabulario fechado da equipe (docs/17 §1.3):
 // o teste confere as frases.
+//
+// v3b-2 (docs/29 §2.5): cada frase com ramo por momento ganha "No primeiro acesso" (como "Ao abrir a página",
+// com quem conta como aluno novo: a area ou os produtos escolhidos) e "Ao concluir um curso" (como "Ao
+// concluir uma aula", com os cursos). Os ramos sao um registro por momento (MOMENT_WORDS), para o curso nunca
+// cair no texto da pagina nem no da aula; tests/pop-ups-v3b2-frases.test.mjs confere cada frase.
 
-import { canonicalPatterns, isDefaultPlacement, pagePatternMatches, type PopupClose, type PopupFrequency, type PopupPageKind, type PopupSettings, type PopupTrigger } from "./popup-display-model";
+import {
+  canonicalPatterns,
+  isDefaultPlacement,
+  isLessonTrigger,
+  pagePatternMatches,
+  type PopupClose,
+  type PopupFrequency,
+  type PopupPageKind,
+  type PopupSettings,
+  type PopupTrigger
+} from "./popup-display-model";
 
 /** id do produto -> nome */
 export type PopupNames = Readonly<Record<string, string>>;
@@ -50,6 +65,41 @@ const EXCEPTION_LABELS: Readonly<Record<string, string>> = {
   purchases: "Minhas compras",
   saved: "Favoritos",
   support: "Suporte"
+};
+
+/**
+ * As palavras de cada momento nas frases de "Quantas vezes": toda vez que... (revisao e aviso), toda vez
+ * que... (frase ao vivo), quando volta depois do intervalo e como as vezes do dia podem vir seguidas.
+ */
+const MOMENT_WORDS: Record<PopupTrigger, { every: string; everyLive: string; everyNote: string; inARow: string; nextAfter: string }> = {
+  course_completed: {
+    every: "toda vez que o aluno concluir um curso",
+    everyLive: "toda vez que concluir um curso",
+    everyNote: "toda vez que o aluno concluir um curso",
+    inARow: "uma a cada curso concluído",
+    nextAfter: "no próximo curso concluído depois desse tempo"
+  },
+  first_login: {
+    every: "toda vez que o aluno abrir uma das páginas",
+    everyLive: "toda vez que abrir uma das páginas",
+    everyNote: "toda vez que o aluno abrir uma das páginas escolhidas",
+    inARow: "uma em cada página que o aluno abrir",
+    nextAfter: "na próxima página que abrir depois desse tempo"
+  },
+  lesson_completed: {
+    every: "toda vez que o aluno concluir uma aula",
+    everyLive: "toda vez que concluir uma aula",
+    everyNote: "toda vez que o aluno concluir uma aula",
+    inARow: "uma a cada aula concluída",
+    nextAfter: "na próxima aula concluída depois desse tempo"
+  },
+  page_load: {
+    every: "toda vez que o aluno abrir uma das páginas",
+    everyLive: "toda vez que abrir uma das páginas",
+    everyNote: "toda vez que o aluno abrir uma das páginas escolhidas",
+    inARow: "uma em cada página que o aluno abrir",
+    nextAfter: "na próxima página que abrir depois desse tempo"
+  }
 };
 
 const NUMBER = new Intl.NumberFormat("pt-BR");
@@ -192,13 +242,55 @@ function lessonExceptionPhrase(patterns: readonly string[], names: PopupNames) {
   return lessons.length === 1 ? `, menos as aulas de ${nameOf(lessons[0], names) ?? "um produto"}` : `, menos as aulas de ${count(lessons.length)} produtos`;
 }
 
-/** A frase ao vivo do card "Quando e onde aparece": "Aparece em qualquer página, menos Perfil." */
-export function describePopupPlacement(settings: PopupSettings, names: PopupNames): string {
-  if (settings.trigger === "lesson_completed") {
-    return `Aparece ${lessonMomentPhrase(settings.pages, names)}${lessonExceptionPhrase(settings.exclude, names)}.`;
+/** Ao concluir um curso: "ao concluir um curso", "... de Formação IA", "... de 2 produtos". */
+function courseMomentPhrase(patterns: readonly string[], names: PopupNames) {
+  const list = canonicalPatterns(patterns);
+  const lessons = productIdsOf(list, "lesson");
+
+  if (list.includes("any") || list.includes("lesson:*") || lessons.length === 0) {
+    return "ao concluir um curso";
   }
 
-  return `Aparece ${describePopupPages(settings.pages, names)}${describePopupExceptions(settings.exclude, names)}.`;
+  return lessons.length === 1 ? `ao concluir um curso de ${nameOf(lessons[0], names) ?? "um produto"}` : `ao concluir um curso de ${count(lessons.length)} produtos`;
+}
+
+/** Ao concluir um curso: "", ", menos os cursos de Curso X", ", menos os cursos de 2 produtos". */
+function courseExceptionPhrase(patterns: readonly string[], names: PopupNames) {
+  const lessons = productIdsOf(canonicalPatterns(patterns), "lesson");
+
+  if (lessons.length === 0) {
+    return "";
+  }
+
+  return lessons.length === 1 ? `, menos os cursos de ${nameOf(lessons[0], names) ?? "um produto"}` : `, menos os cursos de ${count(lessons.length)} produtos`;
+}
+
+/** No primeiro acesso, os produtos: "Formação IA", "2 produtos" (produto sem nome: "um produto"). */
+function accessProductsPhrase(ids: readonly string[], names: PopupNames) {
+  return ids.length === 1 ? (nameOf(ids[0], names) ?? "um produto") : `${count(ids.length)} produtos`;
+}
+
+/** Os produtos do "No primeiro acesso" (so nesse momento; vazio = a primeira vez na area). */
+function accessProductsOf(settings: PopupSettings) {
+  return settings.trigger === "first_login" ? [...new Set(settings.accessProducts ?? [])] : [];
+}
+
+/** A frase ao vivo do card "Quando e onde aparece": "Aparece em qualquer página, menos Perfil." */
+export function describePopupPlacement(settings: PopupSettings, names: PopupNames): string {
+  switch (settings.trigger) {
+    case "lesson_completed":
+      return `Aparece ${lessonMomentPhrase(settings.pages, names)}${lessonExceptionPhrase(settings.exclude, names)}.`;
+    case "course_completed":
+      return `Aparece ${courseMomentPhrase(settings.pages, names)}${courseExceptionPhrase(settings.exclude, names)}.`;
+    case "first_login": {
+      const products = accessProductsOf(settings);
+      const who = products.length === 0 ? "na primeira vez que o aluno entra na área" : `na primeira vez depois de ganhar acesso a ${accessProductsPhrase(products, names)}`;
+
+      return `Aparece ${who}, ${describePopupPages(settings.pages, names)}${describePopupExceptions(settings.exclude, names)}.`;
+    }
+    default:
+      return `Aparece ${describePopupPages(settings.pages, names)}${describePopupExceptions(settings.exclude, names)}.`;
+  }
 }
 
 /**
@@ -207,7 +299,8 @@ export function describePopupPlacement(settings: PopupSettings, names: PopupName
  * quando nenhum, ou quando "Páginas de aula" ja cobre.
  */
 export function opensOnLessonNote(settings: PopupSettings, opensOnLesson: readonly string[], names: PopupNames): string | null {
-  if (settings.trigger !== "page_load") {
+  // Vale nos momentos de pagina ("Ao abrir a página" e "No primeiro acesso").
+  if (isLessonTrigger(settings.trigger)) {
     return null;
   }
 
@@ -251,7 +344,7 @@ export function describePopupFrequency(frequency: PopupFrequency, trigger: Popup
   }
 
   if (frequency.maxPerDay === null && frequency.everyMinutes === null) {
-    parts.push(trigger === "lesson_completed" ? "toda vez que o aluno concluir uma aula" : "toda vez que o aluno abrir uma das páginas");
+    parts.push(MOMENT_WORDS[trigger].every);
   }
 
   if (frequency.maxTotal !== null) {
@@ -277,7 +370,7 @@ export function describePopupFrequencyLive(settings: PopupSettings, allowSnooze:
     return `Cada aluno vê uma vez${allowSnooze ? " (mais uma a cada “Lembrar depois”)" : ""}. ${caption}`;
   }
 
-  const lesson = settings.trigger === "lesson_completed";
+  const words = MOMENT_WORDS[settings.trigger];
   const parts: string[] = [];
 
   if (frequency.maxPerDay !== null) {
@@ -285,13 +378,11 @@ export function describePopupFrequencyLive(settings: PopupSettings, allowSnooze:
   }
 
   if (frequency.everyMinutes !== null) {
-    const when = lesson ? "na próxima aula concluída depois desse tempo" : "na próxima página que abrir depois desse tempo";
-
-    parts.push(`com pelo menos ${describeMinutes(frequency.everyMinutes)} entre uma vez e outra (${when})`);
+    parts.push(`com pelo menos ${describeMinutes(frequency.everyMinutes)} entre uma vez e outra (${words.nextAfter})`);
   }
 
   if (frequency.maxPerDay === null && frequency.everyMinutes === null) {
-    parts.push(lesson ? "toda vez que concluir uma aula" : "toda vez que abrir uma das páginas");
+    parts.push(words.everyLive);
   }
 
   if (frequency.maxTotal !== null) {
@@ -326,27 +417,49 @@ function lessonDelayPhrase(delaySeconds: number) {
 }
 
 /**
- * As partes do pop-up na frase de revisao (describeNoticeReview): onde e quando (null quando tudo e o
- * padrao: so no Inicio, ao abrir a pagina, 3 s depois) e quantas vezes.
+ * As partes do pop-up na frase de revisao (describeNoticeReview): para quem (v3b-2: so no "No primeiro
+ * acesso", que entra no lugar de "para {318 alunos}"; null nos outros momentos), onde e quando (null quando
+ * tudo e o padrao: so no Inicio, ao abrir a pagina, 3 s depois) e quantas vezes.
  */
-export function popupReviewParts(settings: PopupSettings, names: PopupNames): { frequency: string; placement: string | null } {
+export function popupReviewParts(settings: PopupSettings, names: PopupNames): { audience: string | null; frequency: string; placement: string | null } {
   const frequency = describePopupFrequency(settings.frequency, settings.trigger);
 
   if (isDefaultPlacement(settings)) {
-    return { frequency, placement: null };
+    return { audience: null, frequency, placement: null };
   }
 
-  if (settings.trigger === "lesson_completed") {
-    return {
-      frequency,
-      placement: `${lessonMomentPhrase(settings.pages, names)}${lessonExceptionPhrase(settings.exclude, names)}${lessonDelayPhrase(settings.delaySeconds)}`
-    };
-  }
+  switch (settings.trigger) {
+    case "lesson_completed":
+      return {
+        audience: null,
+        frequency,
+        placement: `${lessonMomentPhrase(settings.pages, names)}${lessonExceptionPhrase(settings.exclude, names)}${lessonDelayPhrase(settings.delaySeconds)}`
+      };
+    case "course_completed":
+      return {
+        audience: null,
+        frequency,
+        placement: `${courseMomentPhrase(settings.pages, names)}${courseExceptionPhrase(settings.exclude, names)}${lessonDelayPhrase(settings.delaySeconds)}`
+      };
+    case "first_login": {
+      const products = accessProductsOf(settings);
 
-  return {
-    frequency,
-    placement: `${describePopupPages(settings.pages, names)}${describePopupExceptions(settings.exclude, names)}${openDelayPhrase(settings.delaySeconds)}`
-  };
+      return {
+        audience:
+          products.length === 0
+            ? "para quem entrar pela primeira vez"
+            : `para quem entrar pela primeira vez depois de ganhar acesso a ${accessProductsPhrase(products, names)}`,
+        frequency,
+        placement: `${describePopupPages(settings.pages, names)}${describePopupExceptions(settings.exclude, names)}${openDelayPhrase(settings.delaySeconds)}`
+      };
+    }
+    default:
+      return {
+        audience: null,
+        frequency,
+        placement: `${describePopupPages(settings.pages, names)}${describePopupExceptions(settings.exclude, names)}${openDelayPhrase(settings.delaySeconds)}`
+      };
+  }
 }
 
 /** Segunda linha da coluna "Quando" na lista (sem nomes de produto); null quando tudo e o padrao. */
@@ -357,8 +470,15 @@ export function describePopupPlacementShort(settings: PopupSettings): string | n
 
   const suffix = settings.exclude.length > 0 ? " (com exceções)" : "";
 
-  if (settings.trigger === "lesson_completed") {
-    return `Ao concluir uma aula${suffix}`;
+  switch (settings.trigger) {
+    case "lesson_completed":
+      return `Ao concluir uma aula${suffix}`;
+    case "course_completed":
+      return `Ao concluir um curso${suffix}`;
+    case "first_login":
+      return `No primeiro acesso${suffix}`;
+    default:
+      break;
   }
 
   const pages = canonicalPatterns(settings.pages);
@@ -380,12 +500,30 @@ export function describePopupPlacementShort(settings: PopupSettings): string | n
   return `${label}${suffix}`;
 }
 
+/** "Quando aparece" em "Detalhes": "Ao abrir a página", "No primeiro acesso à área", "No primeiro acesso a Formação IA". */
+function momentLabel(settings: PopupSettings, names: PopupNames) {
+  switch (settings.trigger) {
+    case "lesson_completed":
+      return "Ao concluir uma aula";
+    case "course_completed":
+      return "Ao concluir um curso";
+    case "first_login": {
+      const products = accessProductsOf(settings);
+
+      return products.length === 0 ? "No primeiro acesso à área" : `No primeiro acesso a ${accessProductsPhrase(products, names)}`;
+    }
+    default:
+      return "Ao abrir a página";
+  }
+}
+
 /** As linhas de "Detalhes" no relatorio do pop-up, depois de "Quando". */
 export function popupSettingsLines(
   settings: PopupSettings,
   names: PopupNames
 ): { label: "Como fecha" | "Onde" | "Quando aparece" | "Quantas vezes"; value: string }[] {
-  const lesson = settings.trigger === "lesson_completed";
+  // Ao concluir uma aula ou um curso: so paginas de aula (as excecoes sao aulas de produtos).
+  const lesson = isLessonTrigger(settings.trigger);
   const where = lesson
     ? `${describePopupPages(settings.pages, names)}${lessonExceptionPhrase(settings.exclude, names)}`
     : `${describePopupPages(settings.pages, names)}${describePopupExceptions(settings.exclude, names)}`;
@@ -393,7 +531,7 @@ export function popupSettingsLines(
 
   return [
     { label: "Onde", value: capitalize(where) },
-    { label: "Quando aparece", value: `${lesson ? "Ao concluir uma aula" : "Ao abrir a página"}, ${delay}` },
+    { label: "Quando aparece", value: `${momentLabel(settings, names)}, ${delay}` },
     { label: "Quantas vezes", value: capitalize(describePopupFrequency(settings.frequency, settings.trigger)) },
     { label: "Como fecha", value: settings.close === "x_only" ? "Só no X (e no Esc)" : "No X, no Esc ou clicando fora" }
   ];
@@ -409,7 +547,7 @@ export function popupSettingsLines(
  */
 export function popupFrequencyNotes(input: { endsAt: string | null; frequency: PopupFrequency; trigger: PopupTrigger }): { text: string; tone: "info" | "warning" }[] {
   const { frequency } = input;
-  const lesson = input.trigger === "lesson_completed";
+  const words = MOMENT_WORDS[input.trigger];
   const notes: { text: string; tone: "info" | "warning" }[] = [];
 
   if (frequency.mode === "once") {
@@ -429,16 +567,13 @@ export function popupFrequencyNotes(input: { endsAt: string | null; frequency: P
 
   if (maxPerDay === null && everyMinutes === null) {
     const until = frequency.stopOn === "click" ? ", até ele clicar no botão" : ", até o pop-up terminar";
-    const every = lesson ? "toda vez que o aluno concluir uma aula" : "toda vez que o aluno abrir uma das páginas escolhidas";
 
-    notes.push({ text: `Sem limite por dia nem tempo entre uma vez e outra, o pop-up aparece ${every}${until}.`, tone: "warning" });
+    notes.push({ text: `Sem limite por dia nem tempo entre uma vez e outra, o pop-up aparece ${words.everyNote}${until}.`, tone: "warning" });
   }
 
   if (maxPerDay !== null && maxPerDay > 1 && everyMinutes === null) {
-    const where = lesson ? "uma a cada aula concluída" : "uma em cada página que o aluno abrir";
-
     notes.push({
-      text: `Sem tempo entre uma vez e outra, as ${count(maxPerDay)} vezes do dia podem acontecer seguidas, ${where}. Para espalhar pelo dia, ligue “Tempo entre uma vez e outra”.`,
+      text: `Sem tempo entre uma vez e outra, as ${count(maxPerDay)} vezes do dia podem acontecer seguidas, ${words.inARow}. Para espalhar pelo dia, ligue “Tempo entre uma vez e outra”.`,
       tone: "info"
     });
   }

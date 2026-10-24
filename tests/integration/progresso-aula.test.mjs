@@ -260,3 +260,37 @@ test("sair da pagina manda o progresso por POST (sendBeacon) e grava igual ao PU
   assert.equal(page.initialLessonWatchStates[curso.aulas.aula3].progressPercent, 50);
   assert.equal(page.selectedModule.progress, 50, "o modulo 2 (1 aula) fica em 50%");
 });
+
+test("v3b-2 (docs/29 §4.3): so a resposta que fecha o curso leva courseCompleted (PUT e beacon); heartbeat e fim repetido nao", async () => {
+  await limparProgresso(db, [contas.aluna.id]);
+  actAs(aluna);
+  const todas = [curso.aulas.aula1, curso.aulas.aula2, curso.aulas.aula3];
+
+  const parcial = await (await putProgresso({ completedLessonIds: todas.slice(0, 2), contentId: curso.id, lessonId: curso.aulas.aula2, status: "completed" })).json();
+  assert.deepEqual(Object.keys(parcial), ["data"], "ainda falta aula: a resposta de sempre");
+
+  // Heartbeat no meio (sem a lista): a gravacao rele a linha e o curso continua incompleto.
+  const heartbeat = await (await putProgresso({ contentId: curso.id, lessonId: curso.aulas.aula3, progressSeconds: 30 })).json();
+  assert.deepEqual(Object.keys(heartbeat), ["data"]);
+
+  const fechou = await (await putProgresso({ completedLessonIds: todas, contentId: curso.id, lessonId: curso.aulas.aula3, status: "completed" })).json();
+  assert.equal(fechou.courseCompleted, true);
+  assert.deepEqual((await lerProgressoNoBanco(contas.aluna.id)).completed_lesson_ids.sort(), [...todas].sort());
+
+  // O fim do video na ultima aula repetido (a Bunny manda ended duas vezes): so a primeira virou o curso.
+  const repetido = await (await putProgresso({ contentId: curso.id, lessonId: curso.aulas.aula3, progressPercent: 100, status: "completed" })).json();
+  assert.equal(repetido.courseCompleted, undefined);
+
+  // O beacon (POST) fecha igual, depois de desmarcar.
+  await putProgresso({ completedLessonIds: todas.slice(0, 2), contentId: curso.id, lessonId: curso.aulas.aula3, status: "in_progress" });
+  const beacon = await POST(
+    new Request("http://localhost/api/progress/lessons", {
+      body: JSON.stringify({ completedLessonIds: todas, contentId: curso.id, lessonId: curso.aulas.aula3, status: "completed" }),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    })
+  );
+  assert.equal((await beacon.json()).courseCompleted, true);
+
+  await limparProgresso(db, [contas.aluna.id]);
+});

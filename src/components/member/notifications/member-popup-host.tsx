@@ -7,6 +7,7 @@ import {
   lessonMediaSnapshot,
   readLessonMediaSignal,
   resetLessonMedia,
+  waitLessonFullscreenEnd,
   waitLessonMediaStop,
   watchLessonPlayerFocus
 } from "@/lib/lesson-media-signal";
@@ -21,6 +22,7 @@ import {
   postPopupEvent,
   postPopupShow,
   refreshNotificationsSummary,
+  subscribePopupMemory,
   updatePopupAfterOutcome,
   updatePopupInPlan,
   type PopupPlan
@@ -28,12 +30,17 @@ import {
 import {
   blockAction,
   blockReason,
+  clockOffsetOf,
   completionOpenings,
+  createArmedClock,
   givenUp,
   hasBlockingLayer,
   needsFreeCard,
+  newPlanAction,
   openingsForPageView,
   POPUP_HOST_RULES,
+  rearmAfterNotStarted,
+  reconcileClockOpenings,
   shouldSendPageClose,
   type ArmedPopup,
   type BlockAction,
@@ -48,7 +55,17 @@ import {
 // numa fila que abre um de cada vez: espera a aba visivel, a tela cheia acabar, o nosso player da aula
 // parar e nada aberto por cima; baixa a janela e so entao pede o POST /show, que confere tudo no servidor,
 // conta a abertura e devolve o conteudo. Registra o que o aluno fez (e como fechou) e acerta o plano.
-// Nada roda em intervalo alem da conferencia de 1 s enquanto algo bloqueia; nenhum pedido em laco.
+// Nada roda em intervalo alem da conferencia de 1 s enquanto algo bloqueia e do despertador de ate 30 s de uma
+// abertura armada (so o relogio do navegador; nenhum pedido em laco).
+//
+// Hora marcada (docs/29 §4.1): o pop-up com Comeca depois da abertura da pagina arma para a hora do servidor
+// (+ 2 s de folga, + 0 a 4 s sorteados, + "Quanto tempo depois") e nao desiste por tempo (o Termina decide no
+// servidor). Toda abertura armada segue a hora de parede: o despertador compara Date.now() a cada no maximo 30 s
+// e a volta da aba, a volta do cache do navegador e o foco da janela conferem na hora o que ja venceu (o aparelho
+// dormindo para o relogio dos temporizadores). Um plano mais novo que chega com a pagina aberta (o topo pediu ao
+// voltar para a aba, ou outra pagina pediu) arma, desarma ou troca a hora marcada (e desarma tudo quando a
+// resposta nova nao cobre mais a pagina); nenhum pedido novo. O 409 `not_started` (relogio adiantado, a equipe
+// adiou) arma de novo uma vez para o `nextAt`, com o relogio acertado pelo `asOf` da propria recusa.
 //
 // Design Livre (docs/27): quando o plano marca o pop-up com `design: "free"`, o pedaco do cartao Livre
 // (popup-free-load.ts, pela janela) e baixado junto com a janela, antes do POST /show (sem o codigo, nada abre
@@ -115,6 +132,14 @@ export function MemberPopupHost({
     const timers = new Set<number>();
     /** Cada abertura (o id em "ao abrir a página", o id e a aula em "ao concluir") so uma vez aqui. */
     const armedKeys = new Set<string>();
+    /** Hora marcada ainda nao vencida: id -> chave (`${id}@${startsAt}`). */
+    const clockKeys = new Map<string, string>();
+    /** Ids de momento de pagina que ja entraram na fila nesta visualizacao (nunca duas vezes). */
+    const queued = new Set<string>();
+    /** O acerto do relogio do plano com que armou (acertado a cada plano novo). */
+    let offsetMs = 0;
+    /** Quantas vezes o curso virou nesta visualizacao (cada virada e outra chance de "Ao concluir um curso"). */
+    let courseTurns = 0;
     const queue: ArmedPopup[] = [];
     let cancelled = false;
     /** Um item da fila esta sendo conferido, pedido ou aberto (um de cada vez). */
@@ -140,10 +165,57 @@ export function MemberPopupHost({
         fullscreen: isFullscreen() || Boolean(media?.fullscreen),
         hidden: document.visibilityState !== "visible",
         layer: hasBlockingLayer(document),
-        lesson: media ? { activeLessonId: media.activeLessonId, playing: media.playing, touched: media.touched } : null,
+        lesson: media
+          ? { activeLessonId: media.activeLessonId, bridge: media.bridge, playing: media.playing, readable: media.readable, touched: media.touched }
+          : null,
         // O anterior ainda saindo (animacao) tambem conta: nunca dois na tela.
         popupOpen: openRef.current !== null || document.querySelector("[data-member-popup]") !== null
       };
+    }
+
+    /** Venceu (o despertador ou a conferencia de volta): entra na fila. */
+    function due(armed: ArmedPopup) {
+      if (cancelled) {
+        return;
+      }
+
+      if (armed.clock && clockKeys.get(armed.id) === armed.key) {
+        clockKeys.delete(armed.id);
+      }
+
+      if (armed.lessonId === null) {
+        queued.add(armed.id);
+      }
+
+      queue.push(armed);
+      pump();
+    }
+
+    /** Toda abertura armada segue a hora de parede (despertador de ate 30 s; nenhum pedido). */
+    const clock = createArmedClock({ now: () => Date.now(), onDue: due, timers: window });
+
+    /** Arma uma abertura (sem conferir chave: quem chama confere). A hora marcada tambem entra em clockKeys. */
+    function armAt(armed: ArmedPopup) {
+      if (armed.clock) {
+        clockKeys.set(armed.id, armed.key);
+      }
+
+      clock.arm(armed);
+    }
+
+    /** Desarma a hora marcada de um id (a equipe mudou o Comeca, ou ele saiu do plano). */
+    function cancelClock(id: string) {
+      const armedKey = clockKeys.get(id);
+
+      if (armedKey) {
+        clockKeys.delete(id);
+        clock.cancel(armedKey);
+      }
+    }
+
+    /** A volta da aba, do cache do navegador ou o foco: o que ja venceu entra na fila na hora. */
+    function checkDue() {
+      clock.checkDue();
     }
 
     function arm(openings: ArmedPopup[]) {
@@ -151,17 +223,17 @@ export function MemberPopupHost({
       let armedFree = false;
 
       for (const armed of openings) {
-        if (armedKeys.has(armed.key)) {
+        if (armed.clock ? queued.has(armed.id) || clockKeys.has(armed.id) : armedKeys.has(armed.key)) {
           continue;
         }
 
-        armedKeys.add(armed.key);
+        if (!armed.clock) {
+          armedKeys.add(armed.key);
+        }
+
         armedAny = true;
         armedFree ||= needsFreeCard(armed);
-        later(() => {
-          queue.push(armed);
-          pump();
-        }, armed.at - Date.now());
+        armAt(armed);
       }
 
       if (armedAny) {
@@ -221,11 +293,9 @@ export function MemberPopupHost({
       }
 
       if (action === "wait_fullscreen") {
-        // webkitendfullscreen: o video da aula saindo da tela cheia propria do iPhone (nao sobe: captura).
-        const names = ["fullscreenchange", "webkitfullscreenchange", "webkitendfullscreen"];
-
-        names.forEach((name) => document.addEventListener(name, resume, true));
-        stopWaiting = () => names.forEach((name) => document.removeEventListener(name, resume, true));
+        // Os avisos do document (o iPhone e o webkitendfullscreen), a ponte do player de fora (o Vimeo so avisa
+        // por mensagem) e a conferencia de 1 s.
+        stopWaiting = waitLessonFullscreenEnd(resume);
         return;
       }
 
@@ -234,7 +304,8 @@ export function MemberPopupHost({
         return;
       }
 
-      // Outro pop-up saindo, algo aberto por cima ou alguem digitando: confere de novo em 1 s.
+      // Outro pop-up saindo, algo aberto por cima, alguem digitando ou a ponte do player de fora ainda no aperto
+      // de mao: confere de novo em 1 s.
       const timer = window.setTimeout(resume, POPUP_HOST_RULES.blockedRecheckMs);
       stopWaiting = () => window.clearTimeout(timer);
     }
@@ -245,7 +316,8 @@ export function MemberPopupHost({
         return;
       }
 
-      // 10 min depois da hora dele, desiste (nada registrado): a conferencia de 1 s nunca fica para sempre.
+      // 10 min depois da hora dele, desiste (nada registrado): a conferencia de 1 s nunca fica para sempre. A hora
+      // marcada nao desiste por tempo (o Termina decide no servidor; a ponte pendente tem teto de 15 s).
       if (givenUp(armed, Date.now())) {
         next();
         return;
@@ -304,6 +376,17 @@ export function MemberPopupHost({
         const refused = error instanceof NotificationsRequestError && error.status === 409;
 
         updatePopupInPlan(armed.id, refused && error.nextAt ? { notBefore: error.nextAt } : null);
+
+        // Hora marcada que chegou antes do comeco (relogio adiantado, a equipe adiou): de novo, uma vez so, com o
+        // relogio acertado pela hora que veio na recusa (o relogio do navegador pode ter mudado desde o plano).
+        if (!cancelled && refused && error.reason === "not_started" && error.nextAt) {
+          const offset = error.asOf ? clockOffsetOf(error.asOf, Date.now()) : offsetMs;
+          const again = rearmAfterNotStarted(armed, error.nextAt, offset, Date.now());
+
+          if (again) {
+            armAt(again);
+          }
+        }
 
         if (!cancelled) {
           next();
@@ -378,7 +461,14 @@ export function MemberPopupHost({
     }
 
     function handlePageShow(event: PageTransitionEvent) {
-      if (!event.persisted || !openRef.current) {
+      if (!event.persisted) {
+        return;
+      }
+
+      // Voltou do cache do navegador: a hora marcada que venceu enquanto isso entra na fila agora.
+      checkDue();
+
+      if (!openRef.current) {
         return;
       }
 
@@ -396,21 +486,32 @@ export function MemberPopupHost({
         return;
       }
 
-      // O momento da conclusao: a hora e se o nosso player tocava (Concluir no meio do video).
+      // O momento da conclusao: a hora, a aula na tela, se o player da aula tocava (Concluir no meio do video) e se
+      // fechou o curso (cada virada conta uma vez a mais: desmarcar e concluir de novo e outra chance).
       const completedAt = Date.now();
-      const playing = lessonMediaSnapshot().playing;
+      const { activeLessonId, playing } = lessonMediaSnapshot();
+      const courseCompleted = signal.courseCompleted === true;
+
+      if (courseCompleted) {
+        courseTurns += 1;
+      }
+
+      const turn = courseTurns;
 
       // O plano pode ter mudado desde que a aula abriu: pede so se a memoria passou de 1 minuto.
       void ensurePopupPlan(key).then((plan) => {
         if (!cancelled && plan) {
           arm(
             completionOpenings({
+              activeLessonId,
               contentId,
+              courseCompleted,
               items: plan.items,
               lessonId: signal.lessonId,
               now: completedAt,
               offsetMs: plan.offsetMs,
-              playing
+              playing,
+              turn
             })
           );
         }
@@ -444,13 +545,63 @@ export function MemberPopupHost({
       }
 
       if (!cancelled && plan) {
-        arm(openingsForPageView({ items: plan.items, offsetMs: plan.offsetMs, pageKey: key, pageViewStart }));
+        offsetMs = plan.offsetMs;
+        arm(openingsForPageView({ items: plan.items, now: Date.now(), offsetMs: plan.offsetMs, pageKey: key, pageViewStart }));
+      }
+    }
+
+    /**
+     * Plano mais novo guardado com a pagina aberta (o topo pediu ao voltar para a aba, ou outra pagina pediu): so a
+     * hora marcada muda (arma, desarma ou troca de hora; a resposta que nao cobre mais a pagina desarma tudo). O
+     * resto continua so para a proxima pagina.
+     */
+    function handleNewPlan() {
+      const kept = popupPlanFromMemory(key);
+      const action = newPlanAction(kept);
+
+      if (cancelled || !kept || action === "skip") {
+        return;
+      }
+
+      if (action === "disarm_all" || !kept.plan) {
+        // O unico pop-up que cobria a pagina pausou, encerrou ou saiu do segmento: a hora armada nao vale mais.
+        [...clockKeys.keys()].filter((id) => !queued.has(id)).forEach(cancelClock);
+        return;
+      }
+
+      offsetMs = kept.offsetMs;
+
+      const now = Date.now();
+      const { arm: toArm, disarm } = reconcileClockOpenings({
+        armed: clockKeys,
+        items: kept.plan,
+        now,
+        offsetMs: kept.offsetMs,
+        openings: openingsForPageView({ items: kept.plan, now, offsetMs: kept.offsetMs, onlyClock: true, pageKey: key, pageViewStart }),
+        pageKey: key,
+        queued
+      });
+
+      disarm.forEach(cancelClock);
+      toArm.forEach(armAt);
+
+      if (toArm.length > 0) {
+        preloadPopupDialog(toArm.some(needsFreeCard));
+      }
+    }
+
+    function handleVisibility() {
+      if (document.visibilityState === "visible") {
+        checkDue();
       }
     }
 
     closedRef.current = () => next(POPUP_HOST_RULES.betweenPopupsMs);
+    const stopMemory = subscribePopupMemory(handleNewPlan);
     window.addEventListener("pagehide", handlePageHide);
     window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("focus", checkDue);
+    document.addEventListener("visibilitychange", handleVisibility);
 
     if (contentId) {
       window.addEventListener(LESSON_MEDIA_EVENT, handleLessonMedia);
@@ -474,11 +625,15 @@ export function MemberPopupHost({
       }
 
       stopWaiting?.();
+      stopMemory();
       timers.forEach((timer) => window.clearTimeout(timer));
       timers.clear();
+      clock.stop();
       stopFocusWatch?.();
       window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("focus", checkDue);
+      document.removeEventListener("visibilitychange", handleVisibility);
       window.removeEventListener(LESSON_MEDIA_EVENT, handleLessonMedia);
       closedRef.current = null;
     };

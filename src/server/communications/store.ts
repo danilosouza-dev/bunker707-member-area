@@ -7,7 +7,7 @@ import "server-only";
 // nunca enviam o mesmo aviso ao mesmo tempo (e o envio e idempotente pelo dedupe_key).
 
 import { normalizeAudience, type AudienceDefinition } from "./audience-model";
-import { popupRefreshDueBefore, type CampaignKind, type CampaignStatus, type PopupRepeat } from "./campaign-model";
+import { popupRefreshBandStart, type CampaignKind, type CampaignStatus, type PopupRepeat } from "./campaign-model";
 import { assertNoDbError, chunksOf, CommunicationError, type CommunicationsDb } from "./db";
 import { isReactionId, parsePoll, POLL_OPTION_ID, type PollDefinition, type ReactionId } from "./interactions-model";
 import { noticeIconOfColumns, testSendExpiresAt, validityOfRow, validityToColumns } from "./message-meta";
@@ -40,8 +40,9 @@ const RANGE_NOT_SATISFIABLE = "PGRST103";
 // v3b-1 (202610220003): onde, quando e quantas vezes o pop-up aparece, "Lembrar depois" e como fecha. Lidas
 // tambem pelo tick (claimDueInbox, fetchPopupsToRefresh, updateCampaign): sem a migracao, o tick para.
 // Design do pop-up (202610230001, docs/26): popup_design (o mesmo vale: a migracao vai antes do deploy).
+// v3b-2 (202610260001, docs/29): popup_access_products (os produtos do "No primeiro acesso"; idem).
 export const CAMPAIGN_COLUMNS =
-  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by,sender_user_id,icon,icon_color,validity_minutes,valid_until,flow_id,flow_node_id,cta_display,allow_reactions,poll,edited_at,edited_by,allow_hide,popup_pages,popup_exclude_pages,popup_trigger,popup_delay_seconds,popup_frequency,popup_every_minutes,popup_max_per_day,popup_max_total,popup_stop_on,popup_close,popup_snooze_minutes,popup_design";
+  "id,kind,status,title,body,image_url,image_alt,audio_url,audio_mime,audio_duration_seconds,audio_peaks,cta_label,cta_href,cta_target,response_mode,accept_label,decline_label,audience,audience_count,audience_counted_at,send_at,starts_at,ends_at,popup_repeat,allow_snooze,dispatch_started_at,dispatch_attempts,last_error,sent_at,recipients_count,audience_refreshed_at,requested_by,requested_at,approved_by,approved_at,created_by,updated_by,created_at,updated_at,deleted_at,deleted_by,sender_user_id,icon,icon_color,validity_minutes,valid_until,flow_id,flow_node_id,cta_display,allow_reactions,poll,edited_at,edited_by,allow_hide,popup_pages,popup_exclude_pages,popup_trigger,popup_delay_seconds,popup_frequency,popup_every_minutes,popup_max_per_day,popup_max_total,popup_stop_on,popup_close,popup_snooze_minutes,popup_design,popup_access_products";
 
 export type CampaignRow = {
   accept_label: string | null;
@@ -91,6 +92,11 @@ export type CampaignRow = {
   /** Enquete (jsonb; ler com parsePoll). */
   poll: unknown;
   /**
+   * v3b-2: no "No primeiro acesso" (popup_trigger = first_login), os produtos cujo acesso ganho depois do comeco
+   * do pop-up conta como primeiro acesso; vazio = a primeira vez na area (e nos outros momentos e notificacoes).
+   */
+  popup_access_products: string[];
+  /**
    * v3b-1: como fecha (any = X, Esc ou fora; x_only = X e Esc), os segundos depois de abrir a pagina (ou de
    * concluir a aula), as excecoes e as paginas (ler com popupSettingsOfRow). Notificacao fica com os padroes.
    */
@@ -114,7 +120,7 @@ export type CampaignRow = {
   /** "Lembrar depois": em quantos minutos volta (padrao 1440). */
   popup_snooze_minutes: number;
   popup_stop_on: PopupStopOn | null;
-  /** page_load | lesson_completed (a v3b-2 acrescenta outros; este app le um desconhecido como page_load). */
+  /** page_load | lesson_completed | first_login | course_completed (um desconhecido, como at_start, e lido como page_load). */
   popup_trigger: string;
   recipients_count: number | null;
   requested_at: string | null;
@@ -156,6 +162,7 @@ export type CampaignContentColumns = Pick<
   | "image_alt"
   | "image_url"
   | "kind"
+  | "popup_access_products"
   | "popup_close"
   | "popup_delay_seconds"
   | "popup_every_minutes"
@@ -515,7 +522,8 @@ export async function claimDueInbox(db: CommunicationsDb, now: Date, limit: numb
  */
 export async function fetchPopupsToRefresh(db: CommunicationsDb, now: Date, staleMs: number, limit: number): Promise<CampaignRow[]> {
   const nowIso = now.toISOString();
-  const staleIso = new Date(popupRefreshDueBefore(now.getTime(), staleMs)).toISOString();
+  // Faixas deslocadas para :07, :22, :37 e :52 (docs/29 §4.7): o recalculo nunca cai no minuto redondo de uma live.
+  const staleIso = new Date(popupRefreshBandStart(now.getTime(), staleMs)).toISOString();
   const { data, error } = await db
     .from("campaigns")
     .select(CAMPAIGN_COLUMNS)
@@ -673,6 +681,44 @@ export async function upsertTestNotification(
  * Pop-up por aluno (campaign_deliveries)
  * ---------------------------------------------------------------------------------------------- */
 
+/** As linhas do pop-up com a marca do primeiro acesso (mesma leitura paginada de fetchDeliveryEligibility, + first_access_at). */
+export async function fetchFirstAccessDeliveries(db: CommunicationsDb, campaignId: string): Promise<Map<string, { eligible: boolean; marked: boolean }>> {
+  const result = new Map<string, { eligible: boolean; marked: boolean }>();
+
+  for (let from = 0; ; from += ID_PAGE) {
+    const { data, error } = await db
+      .from("campaign_deliveries")
+      .select("user_id,eligible,first_access_at")
+      .eq("campaign_id", campaignId)
+      .order("user_id")
+      .range(from, from + ID_PAGE - 1);
+    assertNoDbError(error, "Comunicacao: alunos do pop-up");
+
+    const rows = (data ?? []) as { eligible: boolean; first_access_at: string | null; user_id: string }[];
+    rows.forEach((row) => result.set(row.user_id, { eligible: row.eligible, marked: row.first_access_at !== null }));
+
+    if (rows.length < ID_PAGE) {
+      return result;
+    }
+  }
+}
+
+/**
+ * Candidatos do primeiro acesso: cria a linha ou volta a deixar elegivel, com first_access_at = at (impressoes
+ * ficam). So a linha marcada continua elegivel depois de o aluno entrar na area (popup-first-access.ts).
+ */
+export async function markFirstAccessDeliveries(db: CommunicationsDb, campaignId: string, userIds: readonly string[], at: string): Promise<void> {
+  for (const part of chunksOf(userIds, NOTIFICATION_INSERT_CHUNK)) {
+    const { error } = await db
+      .from("campaign_deliveries")
+      .upsert(
+        part.map((userId) => ({ campaign_id: campaignId, eligible: true, first_access_at: at, user_id: userId })),
+        { onConflict: "campaign_id,user_id" }
+      );
+    assertNoDbError(error, "Comunicacao: alunos do pop-up");
+  }
+}
+
 export async function fetchDeliveryEligibility(db: CommunicationsDb, campaignId: string): Promise<Map<string, boolean>> {
   const result = new Map<string, boolean>();
 
@@ -803,6 +849,25 @@ export const EMPTY_CAMPAIGN_STATS: CampaignStats = {
 };
 
 const toNumber = (value: unknown) => (typeof value === "number" ? value : Number(value ?? 0)) || 0;
+
+/** Uma linha de communication_popup_report (202610260001). O modelo do relatorio confere metric e item. */
+export type PopupReportDbRow = { item: string; metric: string; students: number; total: number };
+
+/**
+ * Numeros do relatorio de um pop-up (RPC communication_popup_report, so service_role). bigint pode vir como
+ * texto (toNumber). Sem a migracao: o erro de esquema sobe (quem chama trata isMissingCommunicationSchema).
+ */
+export async function fetchPopupReport(db: CommunicationsDb, campaignId: string): Promise<PopupReportDbRow[]> {
+  const { data, error } = await db.rpc("communication_popup_report", { p_campaign_id: campaignId });
+  assertNoDbError(error, "Comunicacao: relatorio do pop-up");
+
+  return ((Array.isArray(data) ? data : []) as Record<string, unknown>[]).map((row) => ({
+    item: typeof row.item === "string" ? row.item : String(row.item ?? ""),
+    metric: typeof row.metric === "string" ? row.metric : String(row.metric ?? ""),
+    students: toNumber(row.students),
+    total: toNumber(row.total)
+  }));
+}
 
 export async function fetchCampaignStats(db: CommunicationsDb, ids: readonly string[]): Promise<Map<string, CampaignStats>> {
   const stats = new Map<string, CampaignStats>();

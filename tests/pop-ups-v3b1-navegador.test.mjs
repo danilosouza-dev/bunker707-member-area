@@ -99,8 +99,21 @@ const item = (extra = {}) => ({
 });
 
 const ambiente = (extra = {}) => ({ fullscreen: false, hidden: false, layer: false, lesson: null, popupOpen: false, ...extra });
-const aula = (extra = {}) => ({ activeLessonId: "aula-1", playing: false, touched: false, ...extra });
-const abrindo = (extra = {}) => ({ at: agora, id: "pop-a", key: "pop-a", lessonId: null, playingAtCompletion: false, trigger: "page_load", ...extra });
+// v3b-2 (docs/29 §4.5): a aula diz tambem se a pagina le o player (readable) e a ponte do player de fora.
+const aula = (extra = {}) => ({ activeLessonId: "aula-1", bridge: "none", playing: false, readable: true, touched: false, ...extra });
+const abrindo = (extra = {}) => ({
+  at: agora,
+  clock: false,
+  delayMs: 0,
+  giveUpAt: agora + 600_000,
+  id: "pop-a",
+  key: "pop-a",
+  lessonId: null,
+  playingAtCompletion: false,
+  rearmed: false,
+  trigger: "page_load",
+  ...extra
+});
 const concluindo = (extra = {}) => abrindo({ key: "pop-a:aula-1", lessonId: "aula-1", trigger: "lesson_completed", ...extra });
 
 function montarPalco({ kind = "native", lessonId = "aula-1", video = { ended: false, paused: true } } = {}) {
@@ -139,7 +152,7 @@ test("ao abrir a pagina: arma com a espera do pop-up, so nas paginas dele (a exc
     item({ delaySeconds: 10, id: "produtos", pages: ["content:*"] })
   ];
 
-  const naHome = host.openingsForPageView({ items: itens, offsetMs: 0, pageKey: "home", pageViewStart: agora });
+  const naHome = host.openingsForPageView({ items: itens, now: agora, offsetMs: 0, pageKey: "home", pageViewStart: agora });
   assert.deepEqual(
     naHome.map(({ at, id, key, trigger }) => ({ at, id, key, trigger })),
     [
@@ -151,17 +164,17 @@ test("ao abrir a pagina: arma com a espera do pop-up, so nas paginas dele (a exc
   assert.equal(naHome[0].lessonId, null);
   assert.equal(naHome[0].playingAtCompletion, false);
 
-  assert.deepEqual(host.openingsForPageView({ items: itens, offsetMs: 0, pageKey: "profile", pageViewStart: agora }), [], "Perfil e excecao");
+  assert.deepEqual(host.openingsForPageView({ items: itens, now: agora, offsetMs: 0, pageKey: "profile", pageViewStart: agora }), [], "Perfil e excecao");
   assert.deepEqual(
-    host.openingsForPageView({ items: itens, offsetMs: 0, pageKey: "content:abc", pageViewStart: agora }).map((armed) => [armed.id, armed.at]),
+    host.openingsForPageView({ items: itens, now: agora, offsetMs: 0, pageKey: "content:abc", pageViewStart: agora }).map((armed) => [armed.id, armed.at]),
     [["qualquer", agora + 3_000], ["produtos", agora + 10_000]]
   );
-  assert.deepEqual(host.openingsForPageView({ items: itens, offsetMs: 0, pageKey: "login", pageViewStart: agora }), [], "pagina sem chave valida");
+  assert.deepEqual(host.openingsForPageView({ items: itens, now: agora, offsetMs: 0, pageKey: "login", pageViewStart: agora }), [], "pagina sem chave valida");
 });
 
 test("ao abrir a pagina: o notBefore do servidor vale na hora da abertura, com 1 s de folga e o relogio acertado", () => {
   const ids = (notBefore, offsetMs = 0) =>
-    host.openingsForPageView({ items: [item({ notBefore })], offsetMs, pageKey: "home", pageViewStart: agora }).map((armed) => armed.id);
+    host.openingsForPageView({ items: [item({ notBefore })], now: agora, offsetMs, pageKey: "home", pageViewStart: agora }).map((armed) => armed.id);
 
   assert.deepEqual(ids(null), ["pop-a"]);
   assert.deepEqual(ids(iso(agora + 3_000)), ["pop-a"], "pode exatamente na hora da abertura");
@@ -179,7 +192,7 @@ test("um pop-up sem ritmo abre em duas visualizacoes seguidas (o show disse: pod
 
   // Proxima pagina 2 s depois (abre 3 s depois dela = 5 s depois da anterior) e outra 6 s depois.
   for (const passou of [2_000, 6_000]) {
-    const armadas = host.openingsForPageView({ items: [depoisDoShow], offsetMs: 0, pageKey: "materials", pageViewStart: vistoEm + passou });
+    const armadas = host.openingsForPageView({ items: [depoisDoShow], now: vistoEm + passou, offsetMs: 0, pageKey: "materials", pageViewStart: vistoEm + passou });
     assert.equal(armadas.length, 1, `pagina ${passou} ms depois`);
     assert.equal(armadas[0].at, vistoEm + passou + 3_000);
   }
@@ -229,7 +242,7 @@ test("blockReason: a ordem (outro pop-up, aba escondida, tela cheia, aula, algo 
   assert.equal(host.blockReason(tudo, abrindo(), "before_show"), "open");
   assert.equal(host.blockReason({ ...tudo, popupOpen: false }, abrindo(), "before_show"), "hidden");
   assert.equal(host.blockReason({ ...tudo, hidden: false, popupOpen: false }, abrindo(), "before_show"), "fullscreen");
-  assert.equal(host.blockReason(ambiente({ layer: true, lesson: aula({ touched: true }) }), abrindo(), "before_show"), "touched");
+  assert.equal(host.blockReason(ambiente({ layer: true, lesson: aula({ readable: false, touched: true }) }), abrindo(), "before_show"), "touched");
   assert.equal(host.blockReason(ambiente({ layer: true }), abrindo(), "before_show"), "layer");
   assert.equal(host.blockReason(ambiente(), abrindo(), "before_show"), null);
   assert.equal(host.blockReason(ambiente(), abrindo(), "after_show"), null);
@@ -244,12 +257,19 @@ test("blockReason: a ordem (outro pop-up, aba escondida, tela cheia, aula, algo 
   assert.equal(host.blockAction("replayed"), "drop");
 });
 
-test("blockReason na aula, ao abrir a pagina: mexer no player descarta so antes do show; depois dele, tocando, espera", () => {
-  assert.equal(host.blockReason(ambiente({ lesson: aula({ touched: true }) }), abrindo(), "before_show"), "touched");
-  assert.equal(host.blockReason(ambiente({ lesson: aula({ playing: true }) }), abrindo(), "before_show"), "touched", "tocando sem toque (autoplay) tambem");
+test("blockReason na aula, ao abrir a pagina: no player que a pagina le, tocando espera (v3b-2, D6); no que ela nao le, mexer descarta so antes do show", () => {
+  // Arquivo e YouTube (a pagina le): tocou antes da hora nao descarta mais; tocando, espera parar; parado, abre.
+  assert.equal(host.blockReason(ambiente({ lesson: aula({ playing: true, touched: true }) }), abrindo(), "before_show"), "playing", "era touched (drop)");
+  assert.equal(host.blockReason(ambiente({ lesson: aula({ playing: true }) }), abrindo(), "before_show"), "playing", "tocando sem toque (autoplay) tambem espera");
+  assert.equal(host.blockReason(ambiente({ lesson: aula({ touched: true }) }), abrindo(), "before_show"), null, "tocado e parado: abre");
   assert.equal(host.blockReason(ambiente({ lesson: aula() }), abrindo(), "before_show"), null);
 
-  assert.equal(host.blockReason(ambiente({ lesson: aula({ touched: true }) }), abrindo(), "after_show"), null, "ja contado: mexer nao descarta");
+  // Player que a pagina nao le (iframe sem ponte): mexer descarta antes do show.
+  const semPonte = (extra = {}) => aula({ readable: false, ...extra });
+  assert.equal(host.blockReason(ambiente({ lesson: semPonte({ touched: true }) }), abrindo(), "before_show"), "touched");
+  assert.equal(host.blockReason(ambiente({ lesson: semPonte() }), abrindo(), "before_show"), null);
+
+  assert.equal(host.blockReason(ambiente({ lesson: semPonte({ touched: true }) }), abrindo(), "after_show"), null, "ja contado: mexer nao descarta");
   assert.equal(host.blockReason(ambiente({ lesson: aula({ playing: true, touched: true }) }), abrindo(), "after_show"), "playing");
 });
 
@@ -320,7 +340,15 @@ test("hasBlockingLayer: so o topo do AppShell e so o que esta na tela (o Tutor I
 });
 
 test("givenUp conta 10 min da hora da abertura (nao do comeco da pagina); closeViaOf; shouldSendPageClose", () => {
-  const armada = abrindo({ at: agora + 600_000 });
+  const armada = host.openingsForPageView({
+    items: [item({ delaySeconds: 600 })],
+    now: agora,
+    offsetMs: 0,
+    pageKey: "home",
+    pageViewStart: agora
+  })[0];
+
+  assert.equal(armada.at, agora + 600_000);
 
   assert.equal(host.givenUp(armada, agora + 600_000 + 10 * 60_000), false, "espera de 600 s nao desiste na hora de abrir");
   assert.equal(host.givenUp(armada, agora + 600_000 + 10 * 60_000 + 1), true);
@@ -359,7 +387,15 @@ test("snapshot le o <video> do palco na hora: tocando, parado sem evento de paus
   recomecarDom();
   const { video } = montarPalco({ video: { ended: false, paused: false } });
 
-  assert.deepEqual(media.lessonMediaSnapshot(), { activeLessonId: "aula-1", fullscreen: false, playerKind: "native", playing: true, touched: false });
+  assert.deepEqual(media.lessonMediaSnapshot(), {
+    activeLessonId: "aula-1",
+    bridge: "none",
+    fullscreen: false,
+    playerKind: "native",
+    playing: true,
+    readable: true,
+    touched: false
+  });
 
   video.paused = true; // a troca de aula muda o src: o navegador para o video sem disparar `pause`
   assert.equal(media.lessonMediaSnapshot().playing, false);
@@ -369,7 +405,74 @@ test("snapshot le o <video> do palco na hora: tocando, parado sem evento de paus
   assert.equal(media.lessonMediaSnapshot().playing, false);
 
   palco = null;
-  assert.deepEqual(media.lessonMediaSnapshot(), { activeLessonId: null, fullscreen: false, playerKind: null, playing: false, touched: false });
+  assert.deepEqual(media.lessonMediaSnapshot(), {
+    activeLessonId: null,
+    bridge: "none",
+    fullscreen: false,
+    playerKind: null,
+    playing: false,
+    readable: false,
+    touched: false
+  });
+});
+
+test("snapshot: o <video> cujo arquivo nao carregou (error) nao toca, mesmo com paused false (o play que falhou no WebKit); o evento error acorda a espera", () => {
+  recomecarDom();
+  const { video } = montarPalco({ video: { ended: false, error: { code: 4 }, paused: false } });
+
+  assert.equal(media.lessonMediaSnapshot().playing, false, "MEDIA_ERR_SRC_NOT_SUPPORTED: parado");
+  assert.equal(media.lessonMediaSnapshot().readable, true, "continua o nosso player");
+
+  video.error = null;
+  assert.equal(media.lessonMediaSnapshot().playing, true, "sem erro, paused false = tocando");
+
+  // Tocando de verdade, a espera segue; o arquivo falha no meio (error): a espera acaba na hora, uma vez so.
+  let parou = 0;
+  const parar = media.waitLessonMediaStop(() => {
+    parou += 1;
+  });
+
+  video.dispatchEvent(new Event("error"));
+  assert.equal(parou, 0, "o evento sem video.error nao para nada");
+  video.error = { code: 2 };
+  video.dispatchEvent(new Event("error"));
+  assert.equal(parou, 1, "o arquivo que nao carregou e um video parado");
+  video.dispatchEvent(new Event("error"));
+  assert.equal(parou, 1, "uma vez so");
+  parar();
+});
+
+test("snapshot: o <video> que nem chegou aos metadados (readyState 0) nao toca, mesmo com paused false (o carregamento pendurado no WebKit); no meio do video, esperar dados continua tocando", () => {
+  recomecarDom();
+  const { video } = montarPalco({ video: { ended: false, error: null, paused: false, readyState: 0 } });
+
+  assert.equal(media.lessonMediaSnapshot().playing, false, "HAVE_NOTHING: nenhum quadro na tela");
+  assert.equal(media.lessonMediaSnapshot().readable, true, "continua o nosso player");
+
+  video.readyState = 1;
+  assert.equal(media.lessonMediaSnapshot().playing, true, "HAVE_METADATA (depois de um salto): tocando, o pop-up espera");
+  video.readyState = 2;
+  assert.equal(media.lessonMediaSnapshot().playing, true, "HAVE_CURRENT_DATA (falha da rede no meio): tocando");
+  video.readyState = 4;
+  assert.equal(media.lessonMediaSnapshot().playing, true);
+
+  // Com o video que nunca carrega, a conferencia de 1 s da espera acaba sozinha (nenhum evento chega).
+  mock.timers.enable({ apis: ["setInterval"] });
+
+  try {
+    let parou = 0;
+    const parar = media.waitLessonMediaStop(() => {
+      parou += 1;
+    });
+
+    assert.equal(parou, 0, "tocando (readyState 4): a espera comeca sem decidir");
+    video.readyState = 0;
+    mock.timers.tick(1_000);
+    assert.equal(parou, 1, "a conferencia de 1 s ve o video sem quadro e libera o pop-up");
+    parar();
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("snapshot: tela cheia da pagina e a tela cheia propria do iPhone (webkitDisplayingFullscreen)", () => {
@@ -450,7 +553,15 @@ test("announce guarda o estado e dispara o evento; reset zera; eventos de outro 
   assert.equal(media.lessonMediaSnapshot().touched, true);
   media.announceLessonMedia({ contentId: "curso-x", kind: "completed", lessonId: "aula-1" });
   media.resetLessonMedia();
-  assert.deepEqual(media.lessonMediaSnapshot(), { activeLessonId: "aula-1", fullscreen: false, playerKind: "youtube", playing: false, touched: false });
+  assert.deepEqual(media.lessonMediaSnapshot(), {
+    activeLessonId: "aula-1",
+    bridge: "none",
+    fullscreen: false,
+    playerKind: "youtube",
+    playing: false,
+    readable: true,
+    touched: false
+  });
 
   for (const detail of [null, "completed", { kind: "completed", contentId: "curso x", lessonId: "a" }, { kind: "completed", contentId: "c" }, { kind: "youtube" }, { kind: "outra" }]) {
     window.dispatchEvent(new CustomEvent(media.LESSON_MEDIA_EVENT, { detail }));
@@ -551,7 +662,10 @@ test("guarda: as cinco insercoes na aula (play, palco, YouTube, fim do video e C
   ]) {
     const latest = trecho.indexOf("const latest =");
     const settle = trecho.indexOf("settleOptimisticCompletion(lessonId, requestId, saved, snapshot);");
-    const anuncio = trecho.indexOf("announceLessonMedia({ contentId: item.id, kind: \"completed\", lessonId });");
+    // v3b-2: o anuncio leva tambem o curso fechado (so quando a resposta do PUT disse, docs/29 §4.3).
+    const anuncio = trecho.indexOf(
+      "announceLessonMedia({ contentId: item.id, ...(courseCompleted ? { courseCompleted: true } : {}), kind: \"completed\", lessonId });"
+    );
 
     assert.ok(latest > 0 && settle > latest && anuncio > settle, `${nome}: latest -> settle -> anuncio`);
     assert.ok(trecho.includes(`if (${condicao})`), `${nome}: so a conclusao gravada e mais nova`);

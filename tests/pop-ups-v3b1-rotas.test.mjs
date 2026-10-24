@@ -290,7 +290,18 @@ async function mostrar(id, body) {
     }),
     { params: Promise.resolve({ id }) }
   );
-  return { body: await response.json(), headers: response.headers, status: response.status };
+  const corpo = await response.json();
+
+  // v3b-2: todo 409 traz a hora do servidor (asOf, ISO, nunca no futuro); conferida aqui e tirada do corpo para
+  // os testes compararem o resto palavra por palavra.
+  if (response.status === 409) {
+    const { asOf, ...resto } = corpo;
+    assert.match(asOf, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "o 409 traz asOf");
+    assert.ok(Date.parse(asOf) <= Date.now());
+    return { asOf, body: resto, headers: response.headers, status: response.status };
+  }
+
+  return { body: corpo, headers: response.headers, status: response.status };
 }
 
 /** Evento como o navegador manda no sendBeacon: corpo JSON em text/plain. */
@@ -508,7 +519,7 @@ test("show 409: pagina de excecao, outro momento, frequencia (com nextAt) e linh
   assert.deepEqual(eventos(db), [], "recusado: nada no historico");
 });
 
-test("show 404 sem dizer se existe (desconhecido, fora do segmento, sem linha, pausado, janela futura) e 400 para pedido invalido", async () => {
+test("show 404 sem dizer se existe (desconhecido, fora do segmento, sem linha, pausado, janela futura fora do segmento) e 400 para pedido invalido", async () => {
   const aluno = novoAluno();
   banco({
     campaigns: [
@@ -516,7 +527,8 @@ test("show 404 sem dizer se existe (desconhecido, fora do segmento, sem linha, p
       popupNoAr({ id: OUTRO, status: "paused" }),
       popupNoAr({ id: TERCEIRO, starts_at: iso(Date.now() + HORA) })
     ],
-    deliveries: [linha(aluno, { eligible: false }), linha(aluno, { campaign_id: OUTRO }), linha(aluno, { campaign_id: TERCEIRO })]
+    // v3b-2 (D4): o agendado so responde 404 para quem esta fora do segmento (no segmento: 409 not_started, abaixo).
+    deliveries: [linha(aluno, { eligible: false }), linha(aluno, { campaign_id: OUTRO }), linha(aluno, { campaign_id: TERCEIRO, eligible: false })]
   });
 
   for (const id of [POPUP, OUTRO, TERCEIRO, "bbbbbbbb-0000-4000-8000-000000000099"]) {
@@ -547,6 +559,19 @@ test("show 404 sem dizer se existe (desconhecido, fora do segmento, sem linha, p
 
   sessao.user = null;
   assert.equal((await mostrar(POPUP, NA_HOME)).status, 401);
+});
+
+test("show de pop-up agendado (v3b-2, D4): 409 not_started com o Comeca para quem esta no segmento, sem gravar nada", async () => {
+  const aluno = novoAluno();
+  const comeca = iso(Date.now() + HORA);
+  const db = banco({ campaigns: [popupNoAr({ starts_at: comeca })], deliveries: [linha(aluno)] });
+
+  const resposta = await mostrar(POPUP, NA_HOME);
+
+  assert.equal(resposta.status, 409);
+  assert.deepEqual(resposta.body, { error: "Pop-up fora da vez.", nextAt: comeca, reason: "not_started" });
+  assert.deepEqual(db.calls.rpc.filter((call) => call.name === "communication_record_popup_impression"), [], "nada gravado antes da hora");
+  assert.deepEqual(eventos(db), []);
 });
 
 test("historico: message_impressed so enquanto as aberturas do dia sao ate 100 (a linha guarda a conta exata)", async () => {

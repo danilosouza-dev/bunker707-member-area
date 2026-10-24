@@ -3109,7 +3109,7 @@ function createLessonProgressConflictError() {
   });
 }
 
-export async function replaceCompletedLessons(input: {
+export type ReplaceCompletedLessonsInput = {
   completedLessonIds?: string[];
   contentId: string;
   durationSeconds?: number;
@@ -3121,17 +3121,31 @@ export async function replaceCompletedLessons(input: {
   resumeFrameUrl?: string;
   status?: LessonWatchStatus;
   userId: string;
-}) {
+};
+
+export async function replaceCompletedLessons(input: ReplaceCompletedLessonsInput) {
+  return (await replaceCompletedLessonsWithPrevious(input)).record;
+}
+
+/**
+ * O mesmo que replaceCompletedLessons, devolvendo tambem as concluidas lidas na tentativa que venceu o
+ * compare-and-swap (o "antes" verdadeiro desta gravacao; Comunicacao v3b-2, docs/29 §4.3: a rota de progresso
+ * diz se esta gravacao fechou o curso). replaceCompletedLessons chama esta e devolve so `record`.
+ */
+export async function replaceCompletedLessonsWithPrevious(input: ReplaceCompletedLessonsInput): Promise<{
+  previousCompletedLessonIds: string[];
+  record: LessonProgressRecord;
+}> {
   // A fila local serializa escritas da mesma instancia; o compare-and-swap em replaceCompletedLessonsUnsafe
   // protege contra instancias serverless concorrentes, com releitura e novo merge em caso de conflito.
   const writeResult = lessonProgressWriteQueue.then(async () => {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        const { activity, record } = await replaceCompletedLessonsUnsafe(input);
+        const { activity, previousCompletedLessonIds, record } = await replaceCompletedLessonsUnsafe(input);
         // Atividade real (docs/17 §1.11) so depois do compare-and-swap confirmado: uma tentativa que
         // perdeu o conflito nao conta. Fora do caminho da resposta, para nao atrasar o heartbeat.
         scheduleStudentActivity({ contentId: record.contentId, delta: activity, userId: record.userId });
-        return record;
+        return { previousCompletedLessonIds, record };
       } catch (error) {
         if ((error as { code?: string }).code !== LESSON_PROGRESS_CONFLICT_CODE || attempt >= 3) {
           throw error;
@@ -3168,19 +3182,7 @@ async function replaceCompletedLessonsUnsafe({
   resumeFrameUrl,
   status,
   userId
-}: {
-  completedLessonIds?: string[];
-  contentId: string;
-  durationSeconds?: number;
-  lessonId?: string;
-  lessonReactions?: Partial<Record<string, LessonReaction>>;
-  maxProgressPercent?: number;
-  progressPercent?: number;
-  progressSeconds?: number;
-  resumeFrameUrl?: string;
-  status?: LessonWatchStatus;
-  userId: string;
-}) {
+}: ReplaceCompletedLessonsInput) {
   const supabase = getSupabaseAdminClient();
   const currentResult = await supabase
     .from("lesson_progress")
@@ -3292,6 +3294,9 @@ async function replaceCompletedLessonsUnsafe({
     user_id: nextRecord.userId
   };
 
+  // O "antes" desta tentativa: so vale se o compare-and-swap abaixo confirmar (senao a fila tenta de novo).
+  const previousCompletedLessonIds = [...(currentRecord?.completedLessonIds ?? [])];
+
   if (currentRow) {
     const updateResult = await supabase
       .from("lesson_progress")
@@ -3306,7 +3311,7 @@ async function replaceCompletedLessonsUnsafe({
       throw createLessonProgressConflictError();
     }
 
-    return { activity, record: nextRecord };
+    return { activity, previousCompletedLessonIds, record: nextRecord };
   }
 
   const insertResult = await supabase.from("lesson_progress").insert(nextRow);
@@ -3316,5 +3321,5 @@ async function replaceCompletedLessonsUnsafe({
   }
 
   await throwIfSupabaseError(insertResult.error, "Erro salvando progresso da aula");
-  return { activity, record: nextRecord };
+  return { activity, previousCompletedLessonIds, record: nextRecord };
 }

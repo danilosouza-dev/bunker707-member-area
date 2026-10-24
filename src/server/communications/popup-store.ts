@@ -7,7 +7,8 @@ import "server-only";
 // - os cursos de cada formacao escolhida numa pagina, com a regra do catalogo (fetchIncludedCourses): so o
 //   curso incluido conta, inclusive os que entrarem na formacao depois;
 // - a linha do aluno em campaign_deliveries (chave primaria) e a abertura pela RPC
-//   communication_record_popup_impression, que so grava se a linha ainda e a que o app leu (updated_at).
+//   communication_record_popup_impression, que so grava se a linha ainda e a que o app leu (updated_at);
+// - v3b-2: as concluidas do aluno e as aulas publicadas de um curso, so no show de "Ao concluir um curso".
 
 import { POPUP_V3B1_RULES, type PopupColumns } from "./popup-display-model";
 import { assertNoDbError, type CommunicationsDb } from "./db";
@@ -178,4 +179,35 @@ export async function recordPopupImpression(
   }
 
   return { day_impressions: counts.day_impressions, impressions: counts.impressions };
+}
+
+/**
+ * Conclusao de um curso para o show de "Ao concluir um curso" (v3b-2, docs/29 §4.3): as concluidas do aluno
+ * (lesson_progress, pela chave do aluno e do conteudo) em paralelo com os modulos publicados do conteudo; depois
+ * as aulas publicadas desses modulos. Duas idas ao banco em sequencia, so nesse momento.
+ */
+export async function fetchCourseCompletionFacts(
+  db: CommunicationsDb,
+  userId: string,
+  contentId: string
+): Promise<{ completedLessonIds: string[]; publishedLessonIds: string[] }> {
+  const [progress, modules] = await Promise.all([
+    db.from("lesson_progress").select("completed_lesson_ids").eq("user_id", userId).eq("content_id", contentId).maybeSingle(),
+    db.from("course_modules").select("id").eq("owner_id", contentId).eq("status", "published")
+  ]);
+  assertNoDbError(progress.error, "Progresso do curso do pop-up");
+  assertNoDbError(modules.error, "Modulos do curso do pop-up");
+
+  const completed = (progress.data as { completed_lesson_ids?: unknown } | null)?.completed_lesson_ids;
+  const completedLessonIds = Array.isArray(completed) ? completed.filter((id): id is string => typeof id === "string") : [];
+  const moduleIds = ((modules.data ?? []) as { id: string }[]).map((row) => row.id);
+
+  if (moduleIds.length === 0) {
+    return { completedLessonIds, publishedLessonIds: [] };
+  }
+
+  const lessons = await db.from("lessons").select("id").in("module_id", moduleIds).eq("status", "published");
+  assertNoDbError(lessons.error, "Aulas do curso do pop-up");
+
+  return { completedLessonIds, publishedLessonIds: ((lessons.data ?? []) as { id: string }[]).map((row) => row.id) };
 }

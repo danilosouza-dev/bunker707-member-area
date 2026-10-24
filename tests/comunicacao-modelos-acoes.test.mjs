@@ -34,6 +34,7 @@ registerHooks({
       const source = `
         export function revalidatePath(path) { globalThis.__modelosAcoes.revalidados.push(path); }
         export function revalidateTag(tag) { globalThis.__modelosAcoes.revalidados.push(tag); }
+        export function updateTag(tag) { globalThis.__modelosAcoes.revalidados.push(tag); }
         export function unstable_cache(fn) { return fn; }`;
 
       return { shortCircuit: true, url: `data:text/javascript,${encodeURIComponent(source)}` };

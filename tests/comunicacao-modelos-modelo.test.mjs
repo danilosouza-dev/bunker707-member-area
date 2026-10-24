@@ -927,3 +927,45 @@ test("salvar: o design exige exatamente um dos dois; o update exige a versão li
   assert.deepEqual(problemas(model.templateNameSchema, "x".repeat(81)), [["", "Use até 80 caracteres."]]);
   assert.equal(model.templateNameSchema.parse("  Lançamento  "), "Lançamento");
 });
+
+test("v3b-2 (docs/29 §2.7): modelo de pop-up com 'No primeiro acesso' (e produtos) e com 'Ao concluir um curso' vai e volta igual; o de antes le igual; produtos fora do primeiro acesso somem", () => {
+  const comPopup = (popup) => ({ ...schemas.emptyNoticeDraft("popup"), popup: { ...schemas.emptyNoticeDraft("popup").popup, ...popup }, title: "Boas-vindas" });
+  const ida = (popup) => model.templatePayloadOfDraft({ draft: comPopup(popup), followUps: null, include: TUDO }).payload;
+
+  const primeiro = ida({ accessProducts: ["formacao-ia", "curso-b", "curso-b"], trigger: "first_login" });
+  assert.equal(primeiro.version, 1, "versao continua 1 (aditivo)");
+  assert.equal(primeiro.settings.popup.trigger, "first_login");
+  assert.deepEqual(primeiro.settings.popup.accessProducts, ["curso-b", "formacao-ia"], "canonico");
+  const lidoPrimeiro = model.parseTemplatePayload("popup", JSON.parse(JSON.stringify(primeiro)));
+  assert.deepEqual(lidoPrimeiro.notes, []);
+  assert.deepEqual(lidoPrimeiro.payload.settings.popup, primeiro.settings.popup);
+
+  const area = ida({ trigger: "first_login" });
+  assert.deepEqual(area.settings.popup.accessProducts, [], "a primeira vez na area");
+
+  const curso = ida({ pages: ["lesson:*"], trigger: "course_completed" });
+  const lidoCurso = model.parseTemplatePayload("popup", JSON.parse(JSON.stringify(curso)));
+  assert.deepEqual(lidoCurso.notes, []);
+  assert.deepEqual(lidoCurso.payload.settings.popup, curso.settings.popup);
+  assert.equal("accessProducts" in lidoCurso.payload.settings.popup, false);
+
+  // Modelo de antes (sem a chave): le igual, byte a byte.
+  const antes = ida({});
+  assert.equal("accessProducts" in antes.settings.popup, false);
+  const lidoAntes = model.parseTemplatePayload("popup", JSON.parse(JSON.stringify(antes)));
+  assert.deepEqual(lidoAntes.notes, []);
+  assert.equal(JSON.stringify(lidoAntes.payload.settings.popup), JSON.stringify(antes.settings.popup));
+
+  // accessProducts gravado num modelo com page_load (ex.: editado a mao): some na leitura, sem nota.
+  const sujo = JSON.parse(JSON.stringify(antes));
+  sujo.settings.popup.accessProducts = ["formacao-ia"];
+  const lidoSujo = model.parseTemplatePayload("popup", sujo);
+  assert.deepEqual(lidoSujo.notes, []);
+  assert.equal("accessProducts" in lidoSujo.payload.settings.popup, false);
+
+  // A janela continua fora do modelo; o aviso criado a partir dele comeca sem Comeca nem Termina.
+  const inicio = model.noticeStartOfTemplate({ id: AVISO, name: "Boas-vindas", payload: lidoPrimeiro.payload }, { newId: randomUUID });
+  assert.deepEqual(inicio.draft.window, { endsAt: null, startsAt: null });
+  assert.equal(inicio.draft.popup.trigger, "first_login");
+  assert.deepEqual(inicio.draft.popup.accessProducts, ["curso-b", "formacao-ia"]);
+});

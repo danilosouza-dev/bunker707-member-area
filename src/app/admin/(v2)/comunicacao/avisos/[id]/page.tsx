@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
+import { Suspense } from "react";
 import { NoticeEditor } from "@/components/admin/v2/communication/notice-editor";
 import { NoticeReport } from "@/components/admin/v2/communication/notice-report";
+import { PopupReportLoader } from "@/components/admin/v2/communication/popup-report-loader";
+import { PopupReportSkeleton } from "@/components/admin/v2/communication/popup-report-section";
 import { NOTICE_EDIT_PARAM, NOTICES_HREF, opensNoticeEditor } from "@/components/admin/v2/communication/notices-view-model";
 import { AdminPage } from "@/components/admin/v2/page-container";
 import { PageHeader } from "@/components/admin/v2/page-header";
@@ -42,6 +45,8 @@ function readNow() {
 // v3a (docs/24 §2.2): a notificação enviada tambem abre no relatório; o editor (so o conteudo) so com
 // ?editar=1 e "edit" nas ações (messaging.publish e, acima de 500 alunos, messaging.publish_large), pela
 // mesma regra de opensNoticeEditor. Sem a permissao, o ?editar=1 abre o relatório.
+// v3b-2 (docs/29 §2.6 e §6.2): no pop-up que ja foi ao ar, o relatorio "Como o pop-up foi visto" num Suspense (o
+// funil e o resto da pagina nao esperam a RPC).
 export default async function AdminNoticePage({ params, searchParams }: PageProps) {
   const [{ access }, { id }, query] = await Promise.all([requirePageArea("comunicacao"), params, searchParams]);
 
@@ -97,5 +102,12 @@ export default async function AdminNoticePage({ params, searchParams }: PageProp
     return <NoticeEditor defaultKind={data.detail.kind} initial={data.detail} now={now} options={data.options} permissions={permissions} />;
   }
 
-  return <NoticeReport branding={data.branding} detail={data.detail} now={now} permissions={permissions} />;
+  const popupReport =
+    data.detail.kind === "popup" && data.detail.sentAt !== null ? (
+      <Suspense fallback={<PopupReportSkeleton />}>
+        <PopupReportLoader campaignId={data.detail.id} />
+      </Suspense>
+    ) : null;
+
+  return <NoticeReport branding={data.branding} detail={data.detail} now={now} permissions={permissions} popupReport={popupReport} />;
 }

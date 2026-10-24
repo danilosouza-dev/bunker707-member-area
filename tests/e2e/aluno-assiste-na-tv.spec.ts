@@ -7,7 +7,8 @@ import { ESCOLA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
 // pareamento, o controle e o encerramento.
 
 const { curso } = ESCOLA_DE_TESTE;
-const ENDERECO_DA_TV = "http://127.0.0.1:3100/tv";
+// A mesma porta do app de teste (E2E_PORT, como em fixtures.ts): com a porta escrita, o arquivo falhava fora da 3100.
+const ENDERECO_DA_TV = `http://127.0.0.1:${process.env.E2E_PORT ?? "3100"}/tv`;
 const SEM_LOGIN = { cookies: [], origins: [] };
 
 test.beforeAll(zerarSessoesDeTv);

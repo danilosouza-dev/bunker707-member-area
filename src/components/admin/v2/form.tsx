@@ -90,8 +90,12 @@ export type PillOption<Value extends string> = {
 type PillGroupProps<Value extends string> = {
   ariaLabel: string;
   className?: string;
+  /** id da linha que explica o grupo (aria-describedby no role="radiogroup"). */
+  describedBy?: string;
   /** Desabilita so enquanto salva; nunca por validacao. */
   disabled?: boolean;
+  /** Pilulas desabilitadas uma a uma (o radio nativo fica disabled e a pilula com o visual de desabilitada). */
+  disabledValues?: readonly Value[];
   /** name do grupo de radios (unico na pagina). */
   name: string;
   onChange: (value: Value) => void;
@@ -106,30 +110,33 @@ type PillGroupProps<Value extends string> = {
 export function PillGroup<Value extends string>({
   ariaLabel,
   className,
+  describedBy,
   disabled = false,
+  disabledValues,
   name,
   onChange,
   options,
   value
 }: PillGroupProps<Value>) {
   return (
-    <div aria-label={ariaLabel} className={cn("flex min-w-0 flex-wrap gap-2", className)} role="radiogroup">
+    <div aria-describedby={describedBy} aria-label={ariaLabel} className={cn("flex min-w-0 flex-wrap gap-2", className)} role="radiogroup">
       {options.map((option) => {
         const checked = option.value === value;
+        const optionDisabled = disabled || (disabledValues?.includes(option.value) ?? false);
 
         return (
           <label
             className={cn(
               adminPillClasses(checked),
               "has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-[var(--focus-ring)]",
-              disabled && "cursor-not-allowed opacity-60"
+              optionDisabled && "cursor-not-allowed opacity-60"
             )}
             key={option.value}
           >
             <input
               checked={checked}
               className="sr-only"
-              disabled={disabled}
+              disabled={optionDisabled}
               name={name}
               onChange={() => onChange(option.value)}
               type="radio"

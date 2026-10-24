@@ -50,6 +50,11 @@ export type LessonsAccessContext = {
   isAdmin: boolean;
   lessonIds: string[];
   lessonVideoConfigs: Record<string, LessonVideoConfig | null>;
+  /**
+   * v3b-2 (docs/29 §4.3): aulas publicadas dos modulos publicados do conteudo (aluno; a mesma leitura da ordem
+   * das aulas, nenhuma a mais); null para a equipe (nada e lido a mais).
+   */
+  publishedLessonIds: string[] | null;
 };
 
 export class LessonAccessError extends Error {
@@ -227,7 +232,8 @@ export async function requireLessonsAccess({
     contentId,
     isAdmin,
     lessonIds: uniqueLessonIds,
-    lessonVideoConfigs
+    lessonVideoConfigs,
+    publishedLessonIds: null
   };
 
   if (isAdmin) {
@@ -328,7 +334,7 @@ export async function requireLessonsAccess({
     throw new LessonAccessError("Uma ou mais aulas ainda nao estao liberadas.", 403);
   }
 
-  return accessContext;
+  return { ...accessContext, publishedLessonIds: ((orderedLessonsResult.data ?? []) as AccessOrderLessonRow[]).map((lesson) => lesson.id) };
 }
 
 export async function requireLessonAccess({

@@ -4,12 +4,17 @@ import {
   contarPedidos,
   envelhecerPopup,
   esperarPlayerDaAula,
+  esperarPlayerDeForaPronto,
   estadoDoPopUpDaAluna,
   eventosDoPopUp,
   expect,
+  paginaFalsaDoVimeo,
+  playerDeFora,
   publicarPopUp,
   reabrirPopUpParaAluna,
+  segurarResumoDoSino,
   test,
+  tocarNaCapaDoPlayer,
   trocarVideoDaAula,
   zerarComunicacao,
   zerarProgressoDosAlunos
@@ -26,8 +31,11 @@ import { ESCOLA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
 //   pagina, com um pedido do resumo so.
 // - Sem ritmo ("Só quando o pop-up terminar", sem limite por dia nem tempo entre uma vez e outra): fechado,
 //   volta na pagina seguinte depois de 5 s sem pedir o resumo de novo (a memoria guardou quando).
-// - Pagina de aula, "Ao abrir a página": aparece antes do play; dar o play antes dos 3 s descarta; num
-//   aparelho de toque, numa aula com player de fora (iframe), nao abre.
+// - Pagina de aula, "Ao abrir a página": aparece antes do play. v3b-2 (docs/29 D6): o play nao descarta mais, o
+//   pop-up espera o video parar. No nosso player o arquivo nao carrega aqui (a rede de fora esta cortada), entao
+//   depois do play o video fica parado e o pop-up abre (o "tocando espera" do arquivo e do YouTube fica no teste de
+//   unidade, pop-ups-v3b1-navegador); no player de fora (a pagina falsa do Vimeo), tocando antes dos 3 s ele
+//   espera e Pausar abre. Num aparelho de toque, numa aula com player de fora que nao responde a ponte, nao abre.
 // - "Ao concluir uma aula": Concluir abre; Concluir e trocar de aula pela playlist descarta.
 // - "Só no X" a 375 px: o toque fora nao fecha, o Esc fecha, o X tem 44 px de toque e a pagina nao rola de lado.
 // - Dois pop-ups do Inicio ao mesmo tempo: um de cada vez.
@@ -55,9 +63,38 @@ async function irPeloMenu(page: Page, nome: string, endereco: string) {
   await expect(gaveta).toBeHidden();
 }
 
-/** Espera o tempo de um pop-up "Ao abrir a página" (3 s) com folga e confere que nada abriu. */
-async function nadaAbre(page: Page, titulo: string) {
-  await page.waitForTimeout(4_500);
+/** O que o pop-up le da pagina da aula com o nosso player (a mensagem de um teste que falhou no CI). */
+async function estadoDoPlayerNativo(page: Page) {
+  return page.evaluate(() => {
+    const video = document.querySelector("[data-lesson-player-stage] video") as (HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }) | null;
+
+    return {
+      activeElement: document.activeElement?.tagName ?? null,
+      bodyOverflow: document.body.style.overflow,
+      dialogos: document.querySelectorAll('[role="dialog"], [aria-modal="true"]').length,
+      fullscreen: document.fullscreenElement !== null,
+      topoAberto: document.querySelectorAll('[data-member-topbar] [aria-expanded="true"]').length,
+      video: video
+        ? {
+            ended: video.ended,
+            error: video.error?.code ?? null,
+            networkState: video.networkState,
+            paused: video.paused,
+            readyState: video.readyState,
+            webkitFullscreen: Boolean(video.webkitDisplayingFullscreen)
+          }
+        : null,
+      visibilidade: document.visibilityState
+    };
+  });
+}
+
+/**
+ * Espera o tempo de um pop-up "Ao abrir a página" (3 s) com folga e confere que nada abriu. `espera` (ms) estica
+ * a folga quando a decisao de nao abrir vem depois (a aula com player de fora que nao responde a ponte).
+ */
+async function nadaAbre(page: Page, titulo: string, espera = 4_500) {
+  await page.waitForTimeout(espera);
   await expect(page.locator("[data-member-popup]")).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
 }
@@ -167,7 +204,7 @@ test.describe("na página da aula, ao abrir a página", () => {
   });
 });
 
-test.describe("players da aula: o nosso tocando e o de fora no toque", () => {
+test.describe("players da aula: o nosso, o de fora tocando e o de fora no toque", () => {
   const TITULO = "Pop-up E2E: nunca sobre o vídeo";
   let videoDaAula3: Record<string, unknown> | null = null;
   let videoDaLiberada: Record<string, unknown> | null = null;
@@ -175,8 +212,9 @@ test.describe("players da aula: o nosso tocando e o de fora no toque", () => {
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(180_000);
     await zerarComunicacao();
-    // Aula 3: video de arquivo (o nosso player, <video>; o arquivo nao carrega, a rede de fora esta cortada,
-    // mas o botao de play conta como tocar). Aula liberada: Vimeo (player de fora, em iframe).
+    // Aula 3: video de arquivo (o nosso player, <video>; o arquivo nao carrega, a rede de fora esta cortada:
+    // depois do play ele fica parado). Aula liberada: Vimeo (player de fora, em iframe; a pagina falsa do player
+    // so no teste que a usa).
     videoDaAula3 = await trocarVideoDaAula(curso.aulas.aula3, { provider: "custom_url", url: "https://videos.bunker707.test/aula-3.mp4" });
     videoDaLiberada = await trocarVideoDaAula(cursoLiberacao.aulas.liberada, { provider: "vimeo", url: "https://vimeo.com/76979871" });
     await publicarPopUp(browser, { frequencia: { mode: "repeat", stopOn: "never" }, paginas: ["lesson:*"], texto: TEXTO, titulo: TITULO });
@@ -192,7 +230,7 @@ test.describe("players da aula: o nosso tocando e o de fora no toque", () => {
     }
   });
 
-  test("no nosso player: sem tocar, abre; dar o play antes dos 3 s descarta o pop-up desta página", async ({ page }) => {
+  test("no nosso player: sem tocar, abre; depois do play, com o vídeo parado, também abre (o play não descarta mais)", async ({ page }) => {
     test.setTimeout(180_000);
     await esperarPlayerDaAula(page, AULA_3, "native");
     // Sem tocar no player, abre (as recargas da espera pelo catalogo tambem podem ter aberto: a aluna volta
@@ -211,20 +249,61 @@ test.describe("players da aula: o nosso tocando e o de fora no toque", () => {
     await page.goto(AULA_3, { waitUntil: "commit" });
     await page.waitForRequest((request) => RESUMO.test(new URL(request.url()).pathname));
     await page.getByRole("button", { name: "Reproduzir aula" }).click();
-    await nadaAbre(page, TITULO);
+    // O arquivo nao carrega (rede de fora cortada): o video nao toca (no Chromium o play e recusado e paused fica
+    // true; no WebKit o carregamento fica pendurado, paused vira false e readyState fica em 0), e o pop-up abre
+    // como depois de pausar. Se nao abrir, a mensagem traz o estado do <video> e da pagina, para dizer o que segurou.
+    await expect
+      .poll(async () => ((await popUp.count()) > 0 ? "aberto" : JSON.stringify(await estadoDoPlayerNativo(page))), { timeout: 10_000 })
+      .toBe("aberto");
+    await expect(popUp).toBeVisible();
+    expect(aberturas.total).toBe(1);
+    await popUp.getByRole("button", { name: "Fechar" }).click();
+    await expect(popUp).toHaveCount(0);
+  });
+
+  test("no player de fora (Vimeo): tocando antes dos 3 s, o pop-up espera; Pausar abre", async ({ page }) => {
+    test.setTimeout(180_000);
+    await esperarPlayerDaAula(page, AULA_LIBERADA, "iframe");
+    await reabrirPopUpParaAluna(TITULO);
+    await paginaFalsaDoVimeo(page);
+    const aberturas = contarPedidos(page, ABERTURA, "POST");
+    // O plano so chega depois do Tocar (a pagina pode carregar devagar no WebKit do CI).
+    const resumo = await segurarResumoDoSino(page);
+
+    await page.goto(AULA_LIBERADA);
+    await esperarPlayerDeForaPronto(page);
+    await tocarNaCapaDoPlayer(page);
+    await playerDeFora(page).getByRole("button", { exact: true, name: "Tocar" }).click();
+    const plano = page.waitForResponse((response) => RESUMO.test(new URL(response.url()).pathname));
+    resumo.soltar();
+    await plano;
+
+    const popUp = page.getByRole("dialog", { name: TITULO });
+    await page.waitForTimeout(5_000);
+    await expect(popUp).toHaveCount(0);
     expect(aberturas.total).toBe(0);
+
+    await playerDeFora(page).getByRole("button", { exact: true, name: "Pausar" }).click();
+    await expect(popUp).toBeVisible({ timeout: 2_000 });
+    expect(aberturas.total).toBe(1);
+    await popUp.getByRole("button", { name: "Fechar" }).click();
+    await expect(popUp).toHaveCount(0);
   });
 
   test.describe("aparelho de toque", () => {
     test.use({ hasTouch: true, isMobile: true, viewport: { height: 812, width: 375 } });
 
-    test("numa aula com player de fora (iframe) não abre; numa aula do nosso player, abre", async ({ page }) => {
+    test("numa aula com player de fora (iframe) que não responde à ponte não abre; numa aula do nosso player, abre", async ({ page }) => {
       test.setTimeout(180_000);
       await esperarPlayerDaAula(page, AULA_LIBERADA, "iframe");
       await reabrirPopUpParaAluna(TITULO);
       const aberturas = contarPedidos(page, ABERTURA, "POST");
       await page.goto(AULA_LIBERADA);
-      await nadaAbre(page, TITULO);
+      // Com a ponte do player de fora ainda sem resposta, o host nao decide (`bridge_pending`, confere de novo a
+      // cada 1 s): so quando a ponte desiste (12 × 400 ms = 4,8 s depois de ligar, apos a hidratacao) a conferencia
+      // seguinte ve o toque e descarta. Os 4,5 s de sempre acabariam antes dessa decisao e uma regressao (abrir uns
+      // 5 a 7 s depois de montar) passaria: 3 s do pop-up + 4,8 s do aperto de mao + 1 s da conferencia + folga.
+      await nadaAbre(page, TITULO, 12_000);
       expect(aberturas.total).toBe(0);
 
       await page.goto(AULA_1);
