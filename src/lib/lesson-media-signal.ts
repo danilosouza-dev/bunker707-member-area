@@ -9,7 +9,8 @@
 // Players de fora (Bunny, Vimeo, Mux) sao iframes de outra origem: a pagina le o play deles pela ponte
 // (src/lib/lesson-embed-bridge.ts), so depois de confirmada (uma ida e volta respondida). Enquanto a ponte de um
 // player da lista esta no aperto de mao, ela fica "pendente" (no maximo 15 s; antes do primeiro sinal da aula,
-// um iframe da lista conta como pendente ate 15 s depois de a pagina abrir: a aula marca o palco com
+// um iframe da lista conta como pendente ate 15 s depois de o palco passar a mostrar um player da lista para a
+// aula na tela, ou de a pagina abrir, o que vier por ultimo: a aula marca o palco com
 // data-lesson-player-bridge quando o src e de um player da lista, pelo embedBridgeTarget, para que este modulo,
 // que vai em toda pagina com o host do pop-up, nao carregue a lista de origens). Sem ponte (outra origem, ou sem
 // resposta), a pagina nao le o player: conta como "mexeu no player" o foco dentro do iframe do palco e, numa
@@ -45,7 +46,8 @@ export type LessonMediaSnapshot = {
   activeLessonId: string | null;
   /**
    * v3b-2: a ponte da aula na tela. "pending" tambem vale antes do primeiro sinal, quando o iframe do palco tem
-   * origem da lista (embedBridgeTarget) e a pagina abriu ha menos de pendingMaxMs; "none" = sem ponte ou sem
+   * origem da lista (embedBridgeTarget) e o palco mostra esse player para a aula na tela ha menos de
+   * pendingMaxMs (contado da pagina abrir ou da troca de aula, o que vier por ultimo); "none" = sem ponte ou sem
    * resposta (iframe de outra origem, ponte "silent", sinal de outra aula, player que nao e iframe).
    */
   bridge: "confirmed" | "none" | "pending";
@@ -66,7 +68,8 @@ const STOP_RECHECK_MS = 1_000;
 /** O teto da ponte pendente (EMBED_BRIDGE_RULES.pendingMaxMs; tests/pop-ups-v3b2-navegador confere que e o mesmo). */
 const BRIDGE_PENDING_MS = 15_000;
 
-type VideoLike = { ended?: boolean; paused?: boolean; webkitDisplayingFullscreen?: boolean };
+/** `error`: o arquivo nao carregou (o WebKit deixa `paused` false depois do play que falhou). */
+type VideoLike = { ended?: boolean; error?: unknown; paused?: boolean; webkitDisplayingFullscreen?: boolean };
 
 type EmbedState = { bridge: EmbedBridge; fullscreen: boolean; lessonId: string | null; playing: boolean };
 
@@ -79,6 +82,13 @@ let youTubePlaying = false;
 let embed: EmbedState = EMBED_NONE;
 /** Quando a pagina abriu (o ultimo resetLessonMedia): o iframe da lista conta como pendente ate pendingMaxMs depois. */
 let resetAt = 0;
+/**
+ * A aula para a qual o palco mostra um player da lista e desde quando: a troca de aula dentro da pagina (a chave
+ * da pagina nao muda, resetLessonMedia nao roda) reabre a janela pendente para a aula nova, ate a ponte dela
+ * anunciar algo.
+ */
+let listedLessonId: string | null = null;
+let listedSince = 0;
 
 function stageElement(): Element | null {
   return typeof document === "undefined" ? null : document.querySelector(STAGE_SELECTOR);
@@ -137,9 +147,21 @@ function documentFullscreen() {
 
 /**
  * A ponte da aula na tela: o ultimo sinal dela ou, antes dele, o player da lista (o palco marcado com
- * data-lesson-player-bridge) nos primeiros 15 s da pagina.
+ * data-lesson-player-bridge) nos primeiros 15 s desde que o palco mostra esse player para a aula na tela (a
+ * abertura da pagina ou a troca de aula, o que vier por ultimo).
  */
 function bridgeOf(stage: Element | null, playerKind: LessonPlayerKind | null, activeLessonId: string | null): LessonMediaSnapshot["bridge"] {
+  const listed = playerKind === "iframe" && typeof stage?.getAttribute("data-lesson-player-bridge") === "string";
+
+  // O palco passou a mostrar um player da lista para outra aula (ou voltou a mostrar um, depois de outro player):
+  // a janela pendente recomeca para ela.
+  if (!listed) {
+    listedLessonId = null;
+  } else if (activeLessonId !== listedLessonId) {
+    listedLessonId = activeLessonId;
+    listedSince = Date.now();
+  }
+
   if (playerKind !== "iframe") {
     return "none";
   }
@@ -148,9 +170,7 @@ function bridgeOf(stage: Element | null, playerKind: LessonPlayerKind | null, ac
     return embed.bridge === "silent" ? "none" : embed.bridge;
   }
 
-  const listed = typeof stage?.getAttribute("data-lesson-player-bridge") === "string";
-
-  return listed && Date.now() - resetAt < BRIDGE_PENDING_MS ? "pending" : "none";
+  return listed && Date.now() - Math.max(resetAt, listedSince) < BRIDGE_PENDING_MS ? "pending" : "none";
 }
 
 /** Le a pagina na hora: o <video> do palco pelo proprio elemento, o YouTube e a ponte pelo ultimo sinal. */
@@ -160,7 +180,8 @@ export function lessonMediaSnapshot(): LessonMediaSnapshot {
   const playerKind = kind && PLAYER_KINDS.includes(kind) ? (kind as LessonPlayerKind) : null;
   const activeLessonId = stage?.getAttribute("data-lesson-id") || null;
   const video = stageVideo(stage);
-  const nativePlaying = Boolean(video && !video.paused && !video.ended);
+  // O arquivo que nao carregou (video.error) nao toca: no WebKit o play que falhou deixa paused false para sempre.
+  const nativePlaying = Boolean(video && !video.paused && !video.ended && !video.error);
   const bridge = bridgeOf(stage, playerKind, activeLessonId);
   const embedActive = bridge === "confirmed";
 
@@ -183,6 +204,8 @@ export function resetLessonMedia(): void {
   youTubePlaying = false;
   embed = EMBED_NONE;
   resetAt = Date.now();
+  listedLessonId = null;
+  listedSince = 0;
 }
 
 /** Le o sinal do evento sem confiar no formato (qualquer script da pagina pode disparar o mesmo nome). */
@@ -317,9 +340,10 @@ function waitUntilClear(
 }
 
 /**
- * Chama `onStop` (uma vez) quando nada do player da aula toca: pause, ended, emptied e abort do video do palco,
- * o YouTube parado, a ponte do player de fora parada, e a conferencia de 1 s (o video trocado ou desmontado na
- * troca de aula nao avisa). Devolve a funcao que para de esperar.
+ * Chama `onStop` (uma vez) quando nada do player da aula toca: pause, ended, emptied, abort e error do video do
+ * palco (o arquivo que nao carregou nao toca), o YouTube parado, a ponte do player de fora parada, e a
+ * conferencia de 1 s (o video trocado ou desmontado na troca de aula nao avisa). Devolve a funcao que para de
+ * esperar.
  */
 export function waitLessonMediaStop(onStop: () => void): () => void {
   if (typeof window === "undefined") {
@@ -330,7 +354,7 @@ export function waitLessonMediaStop(onStop: () => void): () => void {
     () => lessonMediaSnapshot().playing,
     onStop,
     stageVideo(stageElement()),
-    ["pause", "ended", "emptied", "abort"],
+    ["pause", "ended", "emptied", "abort", "error"],
     false,
     (signal) => (signal.kind === "youtube" || signal.kind === "embed") && !signal.playing
   );

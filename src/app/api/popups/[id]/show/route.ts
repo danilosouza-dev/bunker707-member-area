@@ -11,7 +11,8 @@ import { jsonRouteError } from "@/server/http/route-errors";
 // trigger: "page_load" | "lesson_completed" | "first_login" | "course_completed" }. O navegador chama logo antes
 // de desenhar, com o codigo do pop-up ja carregado; o servidor confere no ar, segmento, pagina, momento e
 // quantas vezes, grava a abertura de forma atomica e so entao devolve o conteudo e quando o pop-up pode voltar
-// ({ next: { notBefore } | null }). Fora da vez: 409 { error, reason, nextAt }; antes do Comeca, para quem esta
+// ({ next: { notBefore } | null }). Fora da vez: 409 { error, reason, nextAt, asOf } (asOf = a hora do servidor
+// na recusa, para o navegador acertar o relogio da segunda tentativa); antes do Comeca, para quem esta
 // no segmento, 409 com reason "not_started" e nextAt = o Comeca (o navegador arma de novo uma vez); "Ao concluir
 // um curso" com o curso incompleto no banco: 409 "trigger" sem nextAt. Fora do ar, de outro aluno ou fora do
 // segmento: 404 sem dizer se existe.
@@ -94,7 +95,9 @@ export async function POST(request: Request, context: RouteContext) {
     return noStore(NextResponse.json({ data: { next: shown.next, popup: shown.popup } }));
   } catch (error) {
     if (error instanceof PopupRefusedError) {
-      return noStore(NextResponse.json({ error: error.message, nextAt: error.nextAt, reason: error.reason }, { status: 409 }));
+      return noStore(
+        NextResponse.json({ asOf: new Date().toISOString(), error: error.message, nextAt: error.nextAt, reason: error.reason }, { status: 409 })
+      );
     }
 
     return noStore(jsonRouteError(error, "Nao foi possivel abrir o pop-up."));

@@ -198,11 +198,9 @@ test.describe("ao concluir um curso", () => {
     await expect(popUp).toHaveCount(0);
     expect(aberturas.total).toBe(1);
 
-    // Concluir de novo vira o curso de novo: outra chance (sem limite em "Quantas vezes"). Na mesma visualizacao de
-    // pagina, cada abertura de conclusao vale uma vez por pop-up e aula (a chave `pop-up:course:aula`, docs/25 §4.4):
-    // a nova chance e na proxima pagina aberta.
-    await page.reload();
-    await page.waitForLoadState("networkidle");
+    // Concluir de novo vira o curso de novo: outra chance (sem limite em "Quantas vezes"), na MESMA pagina aberta:
+    // cada virada do curso nesta visualizacao e uma chave propria (`pop-up:course:<virada>`, docs/29 §4.3), sem
+    // recarregar nada.
     await expect(page.getByRole("button", { exact: true, name: "Concluir aula atual" })).toBeVisible();
     expect(await tocarEmConcluir(page, "Concluir aula atual")).toMatchObject({ courseCompleted: true });
     await expect(popUp).toBeVisible();

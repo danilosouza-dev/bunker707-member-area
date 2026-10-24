@@ -103,7 +103,7 @@ test("plano velho pede uma vez (forcado, mesmo com o numero do sino novo); respo
   recomecar();
   responder = resumoCom({ pages: ["content:*"], plan: [item({ pages: ["content:*"] })] });
   await client.refreshNotificationsSummary({ page: "home" });
-  assert.deepEqual(client.popupPlanFromMemory("content:abc"), { covered: true, offsetMs: 0, plan: null });
+  assert.deepEqual(client.popupPlanFromMemory("content:abc"), { answered: true, covered: true, offsetMs: 0, plan: null });
   assert.deepEqual(await client.ensurePopupPlan("content:abc"), { items: [item({ pages: ["content:*"] })], offsetMs: 0 });
   assert.equal(resumos().length, 2);
 });
@@ -127,7 +127,7 @@ test("home: o topo fica segurado ate o host pedir; depois, um pedido ?page=home;
   // Volta para a home 30 s depois: a memoria responde na hora, sem pedido.
   agora += 30_000;
   const daMemoria = client.popupPlanFromMemory("home");
-  assert.deepEqual(daMemoria, { covered: true, offsetMs: 0, plan: [item({ pages: ["home"] })] });
+  assert.deepEqual(daMemoria, { answered: true, covered: true, offsetMs: 0, plan: [item({ pages: ["home"] })] });
   assert.deepEqual(
     host.openingsForPageView({ items: daMemoria.plan, offsetMs: daMemoria.offsetMs, pageKey: "home", pageViewStart: agora }).map((armed) => armed.at),
     [agora + 3_000]
@@ -198,6 +198,10 @@ test("falha conta como tentativa para o numero e para os pop-ups: dentro do minu
   responder = () => ({ body: { error: "Servico indisponivel." }, status: 503 });
   assert.equal(await client.ensurePopupPlan("home"), null, "falhou: nenhum pop-up (nunca o plano velho)");
   assert.equal(resumos().length, 2);
+  // A falha guardada nao diz nada da pagina (answered false): o host com a pagina aberta nao desarma a hora marcada
+  // por ela (newPlanAction "skip"); a resposta de verdade sem a pagina (answered true) desarma.
+  assert.deepEqual(client.popupPlanFromMemory("home"), { answered: false, covered: false, offsetMs: 0, plan: null });
+  assert.equal(host.newPlanAction(client.popupPlanFromMemory("home")), "skip");
 
   agora += 10_000;
   assert.equal(await client.ensurePopupPlan("content:abc"), null);
@@ -368,6 +372,33 @@ test("v3b-2: o show recusado antes da hora (409 not_started) traz o nextAt e o m
   responder = () => ({ body: { error: "Pop-up fora da vez.", nextAt: comeca, reason: 7 }, status: 409 });
   const estranho = await client.postPopupShow("live", { page: "saved", trigger: "page_load" }).catch((error) => error);
   assert.equal(estranho.reason, undefined);
+  assert.equal(estranho.asOf, undefined, "sem asOf no corpo: a segunda tentativa usa o acerto do plano");
+});
+
+test("v3b-2: o 409 traz a hora do servidor (asOf) para acertar o relogio da segunda tentativa; so quando le como data; nunca fora do 409", async () => {
+  recomecar();
+  const comeca = iso(agora + 30_000);
+  let asOf = iso(agora + 90_000); // o servidor esta 90 s a frente do relogio deste navegador
+  responder = (url, pedido) =>
+    pedido.body.page === "home"
+      ? { body: { asOf, error: "Pop-up nao encontrado." }, status: 404 }
+      : { body: { asOf, error: "Pop-up fora da vez.", nextAt: comeca, reason: "not_started" }, status: 409 };
+
+  const cedo = await client.postPopupShow("live", { page: "saved", trigger: "page_load" }).catch((error) => error);
+  assert.ok(cedo instanceof client.NotificationsRequestError);
+  assert.equal(cedo.asOf, asOf);
+  assert.equal(host.clockOffsetOf(cedo.asOf, agora), 90_000, "o acerto novo vem da propria recusa");
+
+  for (const estranho of ["ontem", 7, null]) {
+    asOf = estranho;
+    const erro = await client.postPopupShow("live", { page: "saved", trigger: "page_load" }).catch((error) => error);
+    assert.equal(erro.asOf, undefined, `asOf ${JSON.stringify(estranho)} nao le como data`);
+  }
+
+  asOf = iso(agora);
+  const sumiu = await client.postPopupShow("live", { page: "home", trigger: "page_load" }).catch((error) => error);
+  assert.equal(sumiu.status, 404);
+  assert.equal(sumiu.asOf, undefined, "so o 409 traz a hora");
 });
 
 test("v3b-2: subscribePopupMemory avisa depois de cada resposta guardada (com o plano ja na memoria), nunca a da conta anterior, e para de avisar", async () => {

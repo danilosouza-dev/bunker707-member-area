@@ -234,7 +234,18 @@ async function mostrar(id, body) {
     new Request(`http://localhost/api/popups/${id}/show`, { body: JSON.stringify(body), headers: { "content-type": "application/json" }, method: "POST" }),
     { params: Promise.resolve({ id }) }
   );
-  return { body: await response.json(), status: response.status };
+  const corpo = await response.json();
+
+  // v3b-2: todo 409 traz a hora do servidor (asOf, ISO, nunca no futuro; o navegador acerta o relogio da segunda
+  // tentativa por ela); conferida aqui e tirada do corpo para os testes compararem o resto palavra por palavra.
+  if (response.status === 409) {
+    const { asOf, ...resto } = corpo;
+    assert.match(asOf, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "o 409 traz asOf");
+    assert.ok(Date.parse(asOf) <= Date.now());
+    return { asOf, body: resto, status: response.status };
+  }
+
+  return { body: corpo, status: response.status };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -264,9 +275,13 @@ test("show do agendado: 409 not_started com o Comeca no segmento; 404 fora; com 
   const comeca = Date.now() + HORA;
   const db = banco({ campaign_deliveries: [linha(aluno)], campaigns: [popupNoAr({ starts_at: iso(comeca) })] });
 
+  const antesDe = Date.now();
   const antes = await mostrar(POPUP, { page: "saved", trigger: "page_load" });
   assert.equal(antes.status, 409);
   assert.deepEqual(antes.body, { error: "Pop-up fora da vez.", nextAt: iso(comeca), reason: "not_started" });
+  // A hora do servidor na recusa (o navegador acerta o relogio da segunda tentativa por ela, nao pelo plano).
+  assert.ok(Date.parse(antes.asOf) >= antesDe && Date.parse(antes.asOf) <= Date.now(), `asOf ${antes.asOf} e a hora da recusa`);
+  assert.ok(Date.parse(antes.asOf) < comeca, "a recusa veio antes do Comeca");
   assert.deepEqual(aberturas(db), [], "nada gravado antes da hora");
 
   await assert.rejects(popups.showPopup(aluno, POPUP, { page: "saved", trigger: "page_load" }, comeca - 1), (error) => {
