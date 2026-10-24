@@ -8,9 +8,13 @@
 // A linha habilitada pelo recalculo novo leva a marca campaign_deliveries.first_access_at: so ela continua
 // elegivel depois de o aluno entrar na area (last_sign_in_at muda a cada login). Linha elegivel sem a marca e
 // sem ser candidato (a de um app sem esta regra, que le first_login como page_load) sai.
+// A edicao do pop-up no ar (saveNoticeDraft) tambem decide aqui: a regra dos 500 conta o segmento inteiro
+// (liveEditCountsSegment) e mudar so os produtos ou o "Começa" pede o recalculo do minuto seguinte
+// (firstAccessRecalcNeeded).
 // Modulo puro: sem "server-only", imports relativos; tests/pop-ups-v3b2-modelo.test.mjs carrega direto pelo Node.
 
 import type { AudienceStudentFacts } from "./audience-model";
+import { canonicalProductIds, type PopupTrigger } from "./popup-display-model";
 
 /**
  * Num pop-up que ja foi ao ar (sent_at), trocar de ou para "No primeiro acesso" e recusado (D8): "Vezes que
@@ -21,6 +25,37 @@ export const FIRST_ACCESS_SWITCH_MESSAGE = "Num pop-up que já foi ao ar, não d
 /** A troca de momento que o pop-up que ja foi ao ar nao aceita: de ou para first_login. */
 export function switchesFirstAccess(stored: string, next: string | undefined): boolean {
   return (stored === "first_login") !== (next === "first_login");
+}
+
+/**
+ * A regra dos 500 na edicao do pop-up no ar ou pausado (saveNoticeDraft): conta o segmento de novo quando ele
+ * mudou e, em "No primeiro acesso", sempre. Nesse momento a contagem gravada (audience_count) e a dos
+ * candidatos e mantidos (docs/29 §4.2), em geral pequena; publicar e retomar contam o segmento inteiro, e a
+ * edicao ao vivo (ex.: passar para "A primeira vez na área" num segmento de 3.000) tem de contar igual.
+ */
+export function liveEditCountsSegment(input: { audienceChanged: boolean; trigger: PopupTrigger }): boolean {
+  return input.audienceChanged || input.trigger === "first_login";
+}
+
+/**
+ * Mudar so os produtos ou o "Começa" de um "No primeiro acesso" no ar ou pausado muda quem e aluno novo sem
+ * mudar o segmento, e o recalculo da hora so roda quando o segmento muda. Nesse caso a hora do ultimo
+ * recalculo e apagada (audience_refreshed_at = null) e o job do minuto seguinte refaz (fetchPopupsToRefresh:
+ * nulo sempre vence, fora das faixas de :07/:22/:37/:52). Com o segmento mudado, o recalculo ja roda na hora.
+ */
+export function firstAccessRecalcNeeded(input: {
+  audienceChanged: boolean;
+  current: { accessProducts: readonly string[]; startsAt: string | null };
+  next: { accessProducts: readonly string[]; startsAt: string | null };
+  trigger: PopupTrigger;
+}): boolean {
+  if (input.audienceChanged || input.trigger !== "first_login") {
+    return false;
+  }
+
+  const sameProducts = canonicalProductIds(input.current.accessProducts).join(" ") === canonicalProductIds(input.next.accessProducts).join(" ");
+
+  return !sameProducts || timeOf(input.current.startsAt) !== timeOf(input.next.startsAt);
 }
 
 export type FirstAccessFacts = Pick<AudienceStudentFacts, "accesses" | "lastSignInAt" | "userId"> & { createdAt?: number | null };

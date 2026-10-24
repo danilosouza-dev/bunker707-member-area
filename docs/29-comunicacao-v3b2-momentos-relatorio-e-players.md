@@ -126,7 +126,7 @@ Trocar o momento (`settingsForTrigger`): para `Ao concluir uma aula` ou `Ao conc
 - Depois: **Onde aparece** igual a "Ao abrir a página" (Só no Início por padrão), **Nunca nestas páginas**, **Quanto tempo depois** e a nota `Para quem acabou de comprar, pode levar até 15 minutos para valer: nesse caso, ele aparece na página seguinte que o aluno abrir.`
 - Produto escolhido que não existe mais: o chip `Produto removido`, com o botão "Tirar o produto removido da lista".
 - **Trava no ar (D8)**: com o pop-up já publicado, se o momento salvo é `No primeiro acesso`, as outras três pílulas ficam desabilitadas; se não é, a pílula `No primeiro acesso` fica desabilitada; nos dois casos, a linha `Num pop-up que já foi ao ar, “No primeiro acesso” não troca com os outros momentos. Para isso, duplique o pop-up.` debaixo das pílulas, ligada pelo `aria-describedby` do grupo. O servidor recusa do mesmo jeito (400, §2.4). Rascunho nunca publicado troca à vontade.
-- No pop-up no ar ou pausado, mudar só os produtos do primeiro acesso mostra `Quem já contava como aluno novo continua contando enquanto tiver acesso a um dos produtos marcados. A mudança vale para quem chegar daqui para frente.`
+- No pop-up no ar ou pausado, mudar só os produtos do primeiro acesso (ou só o "Começa") não recalcula na hora: a hora do último recálculo é apagada e o job do minuto seguinte refaz quem é aluno novo (§4.7). Por isso, quando só os produtos mudaram, o card mostra **só** a linha `Quem já contava como aluno novo continua contando enquanto tiver acesso a um dos produtos marcados. A mudança vale para quem chegar daqui para frente, em até alguns minutos.`; ao passar para `A primeira vez na área`, `Quem já contava como aluno novo continua contando enquanto estiver no segmento. A mudança vale para quem chegar daqui para frente, em até alguns minutos.`. A linha de sempre (`Mudar onde ou quando ele aparece vale na hora. …`) só aparece quando páginas, exceções ou momento mudaram.
 
 ### 2.3 Ao concluir um curso no editor
 
@@ -156,6 +156,13 @@ No rascunho salvo, a lista vazia é "A primeira vez na área"; o servidor nunca 
 | Quantas vezes (sem limite nem intervalo) | como "Ao abrir a página" | `toda vez que o aluno concluir um curso` / ao vivo `toda vez que concluir um curso` / intervalo `(no próximo curso concluído depois desse tempo)` / vezes do dia seguidas `…, uma a cada curso concluído. …` |
 
 **Revisão com "para quem"** (só no primeiro acesso): `Pop-up para quem entrar pela primeira vez (entre {318 alunos} do segmento), no Início, a partir de agora, sem data para acabar, no máximo 1 vez.`; com produtos: `Pop-up para quem entrar pela primeira vez depois de ganhar acesso a Formação IA (entre {318 alunos} do segmento), …`; sem a contagem: `(entre os alunos do segmento)`. O pop-up padrão (Início, ao abrir, 3 s, Uma vez) continua **exatamente** a frase de antes (`docs/25` §2.6). Produto sem nome nas frases: "um produto" (como as frases da v3b-1).
+
+**Diálogo de Aprovar** (menu da lista, faixa "Aguardando aprovação" do editor e relatório; `noticeActionConfirm("approve")`, com o momento em `popupTrigger`):
+
+| Pop-up | Texto |
+|---|---|
+| `No primeiro acesso` | `O pop-up passa a aparecer para quem entrar pela primeira vez (entre {318 alunos} do segmento), nas páginas escolhidas. A contagem é refeita na hora de publicar.` |
+| Os outros momentos (e sem o momento) | `O pop-up passa a aparecer para {318 alunos}, nas páginas e no momento escolhidos. A contagem é refeita na hora de publicar.` (como antes) |
 
 **Toasts**:
 
@@ -196,7 +203,7 @@ Os momentos `No primeiro acesso` e `Ao concluir um curso` e os produtos do prime
 
 ### 2.8 Quem pode e auditoria
 
-As permissões da v3b-1 não mudam (`docs/25` §2.7): mudar o momento ou os produtos do primeiro acesso de um pop-up no ar conta como mudar o que os alunos veem. **Ver o relatório** exige `messaging.write` (a página do aviso já exigia; a analista só leitura fica para a D2). Auditoria de salvar, pedir aprovação, publicar e aprovar: `popup_trigger` já ia; entra `popup_access_products: <quantos>` só no primeiro acesso. **Duplicar** copia o momento e os produtos; o pop-up novo começa do zero (as linhas e as marcas não vão junto; "aluno novo" contado do começo do novo).
+As permissões da v3b-1 não mudam (`docs/25` §2.7): mudar o momento ou os produtos do primeiro acesso de um pop-up no ar conta como mudar o que os alunos veem. Na regra dos 500 da edição no ar, um "No primeiro acesso" **sempre reconta o segmento inteiro** (`liveEditCountsSegment`), mesmo com o segmento igual: a contagem gravada desse momento é a dos candidatos (§4.2), em geral pequena, e sem isso quem não tem `messaging.publish_large` alargaria o pop-up (passar para "A primeira vez na área", somar produtos) num segmento de 3.000 sem aprovação; publicar e retomar já contam o segmento inteiro. **Ver o relatório** exige `messaging.write` (a página do aviso já exigia; a analista só leitura fica para a D2). Auditoria de salvar, pedir aprovação, publicar e aprovar: `popup_trigger` já ia; entra `popup_access_products: <quantos>` só no primeiro acesso. **Duplicar** copia o momento e os produtos; o pop-up novo começa do zero (as linhas e as marcas não vão junto; "aluno novo" contado do começo do novo).
 
 ---
 
@@ -271,7 +278,7 @@ A leitura das linhas é a de hoje com uma coluna a mais; o filtro é em memória
 
 ### 4.7 Faixas do recálculo dos pop-ups (deslocadas)
 
-`fetchPopupsToRefresh` usa `popupRefreshBandStart(now) = popupRefreshDueBefore(now − 7 min, 15 min) + 7 min` (`POPUP_REFRESH_OFFSET_MS` em `campaign-model.ts`): as faixas viram em **:07, :22, :37 e :52**, fora das horas redondas de uma live (20:00), e o intervalo continua de no máximo 15 minutos (D9 e a dica do editor). Só os pop-ups mudam: os fluxos (`flow-engine.ts`) continuam nas horas redondas. Publicar, retomar e mudar o segmento de um pop-up no ar continuam recalculando na hora; um recálculo que falhou ou foi atropelado por uma mudança deixa `audience_refreshed_at` nulo e o job do minuto seguinte refaz, fora das faixas (nulo sempre vence). Mudar só os produtos de um "No primeiro acesso" no ar muda quem é aluno novo na faixa seguinte (até 15 minutos). Motivo e medida em §7.2.
+`fetchPopupsToRefresh` usa `popupRefreshBandStart(now) = popupRefreshDueBefore(now − 7 min, 15 min) + 7 min` (`POPUP_REFRESH_OFFSET_MS` em `campaign-model.ts`): as faixas viram em **:07, :22, :37 e :52**, fora das horas redondas de uma live (20:00), e o intervalo continua de no máximo 15 minutos (D9 e a dica do editor). Só os pop-ups mudam: os fluxos (`flow-engine.ts`) continuam nas horas redondas. Publicar, retomar e mudar o segmento de um pop-up no ar continuam recalculando na hora; um recálculo que falhou ou foi atropelado por uma mudança deixa `audience_refreshed_at` nulo e o job do minuto seguinte refaz, fora das faixas (nulo sempre vence). Mudar só os produtos ou só o "Começa" de um "No primeiro acesso" no ar ou pausado (sem mudar o segmento) usa o mesmo caminho: `saveNoticeDraft` apaga `audience_refreshed_at` (`firstAccessRecalcNeeded`) e o job do minuto seguinte refaz quem é aluno novo, sem esperar a faixa. Motivo e medida em §7.2.
 
 ---
 
@@ -304,7 +311,8 @@ A cota de 30 por minuto por aluno do pop-up continua (cada aluno faz no máximo 
 
 | O quê | O que muda |
 |---|---|
-| `saveNoticeDraft` (e todo caminho que grava um pop-up já publicado: editar no ar, pausado, aprovar edição) | recusa trocar de ou para "No primeiro acesso" (`NoticeFieldError("popup.trigger", …)`, 400; o texto mora em `popup-first-access.ts`, porque `actions.ts` é `"use server"`); auditoria com `popup_access_products` |
+| `saveNoticeDraft` (e todo caminho que grava um pop-up já publicado: editar no ar, pausado, aprovar edição) | recusa trocar de ou para "No primeiro acesso" (`NoticeFieldError("popup.trigger", …)`, 400; o texto mora em `popup-first-access.ts`, porque `actions.ts` é `"use server"`); num "No primeiro acesso" no ar, a regra dos 500 conta o segmento inteiro mesmo com o segmento igual (`liveEditCountsSegment`, §2.8) e mudar só os produtos ou o "Começa" apaga `audience_refreshed_at` para o job do minuto seguinte refazer (`firstAccessRecalcNeeded`, §4.7); auditoria com `popup_access_products` |
+| `queries.ts` (lista) | `NoticeListItem.popupTrigger` (o momento do pop-up; null na notificação): o diálogo de Aprovar diz o alcance certo em "No primeiro acesso" (§2.5), pela lista, pela faixa do editor e pelo relatório |
 | `publishNotice`, `approveNotice` | `PublishedNotice.popup = { startsInFuture, trigger }` (preenchido em `goLive`, o caminho comum dos dois; nunca no pedido de aprovação nem na notificação) |
 | `duplicateNotice` | copia o momento e os produtos (sem linhas nem marcas) |
 | `queries.ts` | `getPopupReport` (§4.6); `popupProductIds` inclui os produtos do primeiro acesso (nomes no Detalhes e nas frases) |

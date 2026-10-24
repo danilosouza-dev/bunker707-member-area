@@ -1346,6 +1346,8 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions, 
           kind: initial.kind,
           // v3b-1: o toast de "Mostrar de novo" segue o "Quantas vezes" salvo.
           popupMode: initial.kind === "popup" ? (saved.popup?.frequency.mode ?? initial.popupMode) : null,
+          // v3b-2: o dialogo de Aprovar (faixa "Aguardando aprovação") segue o momento salvo.
+          popupTrigger: initial.kind === "popup" ? (saved.popup?.trigger ?? initial.popupTrigger) : null,
           recipients: initial.stats.recipients,
           situation: situationOf({ endsAt: saved.window.endsAt, kind: initial.kind, sendAt: null, startsAt: saved.window.startsAt, status: savedVersion.status }, now),
           status: savedVersion.status,

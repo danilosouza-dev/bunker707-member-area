@@ -323,6 +323,44 @@ test("num pop-up que ja foi ao ar, trocar de ou para 'No primeiro acesso' e 400 
   assert.deepEqual(gravado, { popup_access_products: [curso.id], popup_trigger: "first_login" });
 });
 
+test("'No primeiro acesso' no ar: mudar so os produtos ou o Comeca apaga a hora do ultimo recalculo (o job do minuto seguinte refaz); so o titulo nao", async () => {
+  const draft = popup({ popup: { accessProducts: [curso.id], pages: ["home"], trigger: "first_login" }, title: "Boas-vindas ao curso" });
+  const publicado = await publicar(draft);
+  const marca = async () => unwrap(await db.from("campaigns").select("audience_refreshed_at").eq("id", publicado.id).single(), "Lendo a hora do recalculo").audience_refreshed_at;
+  assert.notEqual(await marca(), null, "publicar recalcula na hora e grava a hora");
+
+  actAs(produtor);
+  const titulo = ok(await actions.saveNoticeDraft({ draft: { ...draft, title: "Boas-vindas, editado" }, expectedUpdatedAt: publicado.updatedAt, id: publicado.id }));
+  assert.notEqual(await marca(), null, "so o titulo: nada a refazer");
+
+  const produtos = ok(
+    await actions.saveNoticeDraft({
+      draft: { ...draft, popup: { ...draft.popup, accessProducts: [curso.id, cursoBloqueado.id] }, title: "Boas-vindas, editado" },
+      expectedUpdatedAt: titulo.updatedAt,
+      id: publicado.id
+    })
+  );
+  assert.equal(await marca(), null, "so os produtos: a hora some e o job do minuto seguinte refaz");
+  assert.deepEqual(
+    unwrap(await db.from("campaigns").select("popup_access_products,status").eq("id", publicado.id).single(), "Lendo o pop-up"),
+    { popup_access_products: [curso.id, cursoBloqueado.id].sort(), status: "active" }
+  );
+
+  // O recalculo (o do job) grava a hora de novo; mudar so o Comeca apaga outra vez.
+  await recalcular(publicado.id);
+  assert.notEqual(await marca(), null, "o recalculo gravou a hora");
+
+  const comeca = new Date(Date.now() + HORA).toISOString();
+  ok(
+    await actions.saveNoticeDraft({
+      draft: { ...draft, popup: { ...draft.popup, accessProducts: [curso.id, cursoBloqueado.id] }, title: "Boas-vindas, editado", window: { endsAt: null, startsAt: comeca } },
+      expectedUpdatedAt: produtos.updatedAt,
+      id: publicado.id
+    })
+  );
+  assert.equal(await marca(), null, "so o Comeca: a hora some outra vez");
+});
+
 test("PublishedNotice.popup: aprovar devolve o mesmo que publicar; notificacao e pedido de aprovacao vao sem a chave", async () => {
   const { data } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 });
   const redatoraId =

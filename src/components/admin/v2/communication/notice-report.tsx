@@ -92,6 +92,8 @@ function toTarget(detail: NoticeDetail): NoticeActionTarget {
     kind: detail.kind,
     // v3b-1: o toast de "Mostrar de novo" muda em "Mais de uma vez".
     popupMode: detail.popupMode,
+    // v3b-2: o dialogo de Aprovar diz o alcance certo em "No primeiro acesso".
+    popupTrigger: detail.popupTrigger,
     recipients: detail.stats.recipients,
     situation: detail.situation,
     status: detail.status,

@@ -58,7 +58,7 @@ import type { FlowNoticeContent } from "./flow-schemas";
 import { definitionOf, fetchFlowNodeStats, fetchFlowTree, lastSourceExpiry, type LoadedFlowTree } from "./flow-store";
 import { parsePoll, type PollOption } from "./interactions-model";
 import { noticeIconOfColumns, normalizeSchoolIcon, SCHOOL_NAME_FALLBACK_TEAM, type NoticeIconColor, type NoticeIconId } from "./message-meta";
-import { popupSettingsOfRow } from "./popup-display-model";
+import { popupSettingsOfRow, type PopupTrigger } from "./popup-display-model";
 import type { PopupFontFace, PopupFontOption } from "./popup-design-model";
 import { listPopupFontLibrary, loadPopupFontFaces } from "./popup-fonts";
 import { buildPopupReport, popupReportProductIds, readPopupReportRows, type PopupReportView } from "./popup-report-model";
@@ -125,6 +125,8 @@ export type NoticeListItem = {
   placementLabel: string | null;
   /** v3b-1: "Quantas vezes" do pop-up (o aviso de "Mostrar de novo" muda com ele); null na notificacao. */
   popupMode: "once" | "repeat" | null;
+  /** v3b-2: o momento do pop-up (o dialogo de Aprovar muda em "No primeiro acesso"); null na notificacao. */
+  popupTrigger: PopupTrigger | null;
   situation: CampaignSituation;
   situationLabel: string;
   situationTone: SituationTone;
@@ -481,6 +483,7 @@ function toListItem(
     kindLabel: CAMPAIGN_KIND_LABELS[row.kind],
     placementLabel: popupSettings ? describePopupPlacementShort(popupSettings) : null,
     popupMode: popupSettings ? popupSettings.frequency.mode : null,
+    popupTrigger: popupSettings ? popupSettings.trigger : null,
     situation,
     situationLabel: SITUATION_LABELS[situation],
     situationTone: situationTone(situation),

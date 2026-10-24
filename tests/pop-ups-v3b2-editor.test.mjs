@@ -9,8 +9,9 @@ import "./support/resolve-extensionless-ts.mjs";
 // momentos ("No primeiro acesso" com "Conta como primeiro acesso" e os produtos; "Ao concluir um curso" com "De
 // quais cursos"), o que muda ao trocar o momento, os erros que so o editor ve, a trava do primeiro acesso no
 // pop-up que ja foi ao ar (as pilulas desabilitadas uma a uma e a linha ligada pelo aria-describedby), os textos
-// por momento, a linha da hora marcada ao vivo no "Começa", as linhas do pop-up no ar com os produtos e os
-// toasts de publicar e aprovar com o que o servidor devolve em PublishedNotice.popup. Os .tsx sao transpilados
+// por momento, a linha da hora marcada ao vivo no "Começa", as linhas do pop-up no ar com os produtos, o dialogo
+// de Aprovar no primeiro acesso e os toasts de publicar e aprovar com o que o servidor devolve em
+// PublishedNotice.popup. Os .tsx sao transpilados
 // aqui pelo TypeScript (so JSX -> JS) e desenhados com renderToStaticMarkup, como em
 // tests/comunicacao-modelos-tela.test.mjs.
 
@@ -490,15 +491,57 @@ test("linhas do pop-up no ar: mudar só os produtos do primeiro acesso traz a li
   const linhas = (popup, status = "active") => model.popupPlacementChangeNotes({ now: NOW, saved: salvo, shown: { popup, window: janela }, status });
   const quemJaViu =
     "Mudar onde ou quando ele aparece vale na hora. Quem já viu continua contando como visto, também nas páginas novas. Para todos verem de novo, ligue “Mostrar de novo para quem já viu”.";
-  const alunoNovo = "Quem já contava como aluno novo continua contando enquanto tiver acesso a um dos produtos marcados. A mudança vale para quem chegar daqui para frente.";
+  const alunoNovo =
+    "Quem já contava como aluno novo continua contando enquanto tiver acesso a um dos produtos marcados. A mudança vale para quem chegar daqui para frente, em até alguns minutos.";
+  const alunoNovoNaArea = "Quem já contava como aluno novo continua contando enquanto estiver no segmento. A mudança vale para quem chegar daqui para frente, em até alguns minutos.";
 
   assert.deepEqual(linhas(salvo.popup), [], "nada mudou");
   assert.deepEqual(linhas({ ...salvo.popup, accessProducts: ["formacao-ia"] }), [], "a mesma lista");
-  assert.deepEqual(linhas({ ...salvo.popup, accessProducts: ["curso-x", "formacao-ia"] }), [quemJaViu, alunoNovo]);
-  assert.deepEqual(linhas({ ...salvo.popup, accessProducts: [] }), [quemJaViu, alunoNovo], "para a primeira vez na área");
+  // So os produtos: a mudanca nao vale na hora (o job do minuto seguinte refaz), entao so a linha de quem ja contava.
+  assert.deepEqual(linhas({ ...salvo.popup, accessProducts: ["curso-x", "formacao-ia"] }), [alunoNovo], "so os produtos: so a linha de quem ja contava");
+  assert.doesNotMatch(linhas({ ...salvo.popup, accessProducts: ["curso-x", "formacao-ia"] }).join("\n"), /vale na hora/);
+  assert.deepEqual(linhas({ ...salvo.popup, accessProducts: [] }), [alunoNovoNaArea], "para a primeira vez na área: a linha da area");
+  assert.doesNotMatch(linhas({ ...salvo.popup, accessProducts: [] }).join("\n"), /produtos marcados/);
   assert.deepEqual(linhas({ ...salvo.popup, pages: ["any"] }), [quemJaViu], "so as paginas: a linha de sempre");
-  assert.deepEqual(linhas({ ...salvo.popup, accessProducts: ["curso-x"] }, "paused"), [quemJaViu, alunoNovo], "pausado tambem");
+  assert.deepEqual(linhas({ ...salvo.popup, accessProducts: ["curso-x"], pages: ["any"] }), [quemJaViu], "paginas e produtos: a linha de sempre");
+  assert.deepEqual(linhas({ ...salvo.popup, accessProducts: ["curso-x"] }, "paused"), [alunoNovo], "pausado tambem");
   assert.deepEqual(linhas({ ...salvo.popup, accessProducts: ["curso-x"] }, "draft"), [], "rascunho: nada");
+
+  for (const linha of [alunoNovo, alunoNovoNaArea]) {
+    semPalavrasProibidas(linha);
+  }
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Dialogo de Aprovar (§2.5): o alcance do "No primeiro acesso"
+ * ---------------------------------------------------------------------------------------------- */
+
+test("dialogo de Aprovar: o pop-up 'No primeiro acesso' diz 'para quem entrar pela primeira vez (entre N do segmento)'; os outros momentos, a frase de sempre", () => {
+  const aviso = (extra = {}) => ({ audienceCount: 318, kind: "popup", situation: "pending_approval", title: "Boas-vindas", ...extra });
+  const primeiroAcesso = model.noticeActionConfirm("approve", aviso({ popupTrigger: "first_login" }));
+  const deSempre = "O pop-up passa a aparecer para 318 alunos, nas páginas e no momento escolhidos. A contagem é refeita na hora de publicar.";
+
+  assert.deepEqual(primeiroAcesso, {
+    confirmLabel: "Aprovar e publicar",
+    description: "O pop-up passa a aparecer para quem entrar pela primeira vez (entre 318 alunos do segmento), nas páginas escolhidas. A contagem é refeita na hora de publicar.",
+    destructive: false,
+    title: "Aprovar “Boas-vindas”?"
+  });
+  assert.equal(
+    model.noticeActionConfirm("approve", aviso({ audienceCount: 1, popupTrigger: "first_login" })).description,
+    "O pop-up passa a aparecer para quem entrar pela primeira vez (entre 1 aluno do segmento), nas páginas escolhidas. A contagem é refeita na hora de publicar."
+  );
+  assert.equal(model.noticeActionConfirm("approve", aviso({ popupTrigger: "page_load" })).description, deSempre);
+  assert.equal(model.noticeActionConfirm("approve", aviso({ popupTrigger: "lesson_completed" })).description, deSempre);
+  assert.equal(model.noticeActionConfirm("approve", aviso({ popupTrigger: "course_completed" })).description, deSempre);
+  assert.equal(model.noticeActionConfirm("approve", aviso({ popupTrigger: null })).description, deSempre, "sem o momento (alvo de antes): a frase de sempre");
+  assert.equal(model.noticeActionConfirm("approve", aviso()).description, deSempre);
+  assert.equal(
+    model.noticeActionConfirm("approve", aviso({ kind: "inbox", popupTrigger: "first_login" })).description,
+    "A notificação vai para o sino de 318 alunos (ou na data agendada). A contagem é refeita na hora de publicar.",
+    "a notificacao nao olha o momento"
+  );
+  semPalavrasProibidas(primeiroAcesso.description);
 });
 
 /* ------------------------------------------------------------------------------------------------
