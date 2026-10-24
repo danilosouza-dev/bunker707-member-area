@@ -13,6 +13,7 @@ const panel = await import("../src/components/admin/v2/communication/popup-free/
 const model = await import("../src/server/communications/popup-free-model.ts");
 const render = await import("../src/server/communications/popup-free-render.ts");
 const schema = await import("../src/server/communications/popup-free-schema.ts");
+const popupEditor = await import("../src/components/admin/v2/communication/popup-editor-model.ts");
 
 const C = panel.FREE_INSPECTOR_COPY;
 const M = schema.POPUP_FREE_MESSAGES;
@@ -842,7 +843,16 @@ test("vocabulário das frases do painel", () => {
   assert.equal(C.text.parts, "Partes com estilo próprio");
   assert.equal(C.image.hint, "JPG, PNG ou WebP. O editor deixa leve sozinho; transparência funciona.");
   assert.equal(C.video.hint, "MP4 (H.264) ou WEBM, até 15 MB. Toca sem som, em repetição. Quem prefere menos movimento vê só a capa.");
-  assert.equal(C.links.snoozeNote, "“Lembrar depois” aparece sozinho quando o pop-up deixa adiar.");
+  // Links › Conteúdo (docs/27 §13.7): a chave do "Lembrar depois" e a MESMA do card "Quantas vezes e como fecha".
+  assert.equal(C.links.snooze, "Permitir “Lembrar depois”");
+  assert.equal(C.links.snooze, popupEditor.POPUP_EDITOR_COPY.frequency.snoozeLabel, "o mesmo nome do card");
+  assert.equal(C.links.dismiss, "Mostrar “Não mostrar de novo”");
+  assert.equal(C.links.snoozeOff, "Sem “Lembrar depois”, o pop-up volta só pela regra de “Quantas vezes”.");
+  assert.equal(panel.freeLinksSnoozeDescription(true, 1_440), "Volta em 1 dia, até 2 vezes.");
+  assert.equal(panel.freeLinksSnoozeDescription(true, 1_440), popupEditor.snoozeSwitchDescription(1_440), "ligada, a mesma frase do card");
+  assert.equal(panel.freeLinksSnoozeDescription(true, 90), "Volta em 90 minutos, até 2 vezes.");
+  assert.equal(panel.freeLinksSnoozeDescription(false, 1_440), C.links.snoozeOff);
+  assert.equal("snoozeNote" in C.links, false, "a nota fixa de antes saiu: a chave esta no painel");
   assert.equal(C.advanced.freeHint, "Solta: você escolhe o lugar. Só fora de caixas.");
   assert.equal(C.advanced.layerNote, "Quem vem depois nas Camadas fica por cima; aqui você muda isso.");
   assert.equal(C.popup.widthNote, "No celular, o pop-up inteiro encolhe junto, igual.");
