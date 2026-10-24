@@ -1,8 +1,9 @@
 // Editor Livre do pop-up (docs/27; spec §4.2 e §6): a copia de recuperacao no navegador. Enquanto ha mudanca que
-// ainda nao foi salva, o editor guarda `{ cta, design, savedAt }` em localStorage["bunker707:livre:<id do aviso ou
-// novo>"] (com espera de 1 s) e apaga ao salvar com sucesso. So na maquina de quem edita, so o design e o botao
-// principal (nada do aluno). A leitura passa pelo mesmo zod do servidor: uma copia que nao passa e descartada em
-// silencio. Sem armazenamento (janela privada, bloqueado), tudo devolve null/false e o editor funciona igual.
+// ainda nao foi salva, o editor guarda `{ allowSnooze, cta, design, savedAt }` em localStorage["bunker707:livre:<id
+// do aviso ou novo>"] (com espera de 1 s) e apaga ao salvar com sucesso. So na maquina de quem edita, so o design, o
+// botao principal e a regra do "Lembrar depois" (nada do aluno). A leitura passa pelo mesmo zod do servidor: uma
+// copia que nao passa e descartada em silencio; `allowSnooze` que nao e booleano (copias de antes) fica de fora. Sem
+// armazenamento (janela privada, bloqueado), tudo devolve null/false e o editor funciona igual.
 //
 // Modulo puro (o armazenamento entra por parametro), imports relativos, tudo em try/catch.
 
@@ -15,7 +16,8 @@ export const FREE_RECOVERY_PREFIX = "bunker707:livre:";
 export const FREE_RECOVERY_DELAY_MS = 1_000;
 
 export type FreeRecoveryStorage = Pick<Storage, "getItem" | "removeItem" | "setItem">;
-export type FreeRecovery = { cta: NoticeDraft["cta"]; design: PopupFreeDesign; savedAt: string };
+export type FreeRecovery = { allowSnooze?: boolean; cta: NoticeDraft["cta"]; design: PopupFreeDesign; savedAt: string };
+type FreeRecoveryEntry = { allowSnooze?: boolean; cta: NoticeDraft["cta"]; design: PopupFreeDesign };
 
 export function freeRecoveryKey(noticeId: string | null | undefined): string {
   return `${FREE_RECOVERY_PREFIX}${noticeId && noticeId.trim() ? noticeId.trim() : "novo"}`;
@@ -69,13 +71,15 @@ function ctaOf(value: unknown): NoticeDraft["cta"] | undefined {
 }
 
 /** Grava a copia. Devolve false quando nao deu (sem armazenamento, cheio, bloqueado). */
-export function writeFreeRecovery(storage: FreeRecoveryStorage | null, key: string, entry: { cta: NoticeDraft["cta"]; design: PopupFreeDesign }, now: Date = new Date()): boolean {
+export function writeFreeRecovery(storage: FreeRecoveryStorage | null, key: string, entry: FreeRecoveryEntry, now: Date = new Date()): boolean {
   if (!storage) {
     return false;
   }
 
   try {
-    storage.setItem(key, JSON.stringify({ cta: entry.cta, design: entry.design, savedAt: now.toISOString() }));
+    const allowSnooze = typeof entry.allowSnooze === "boolean" ? { allowSnooze: entry.allowSnooze } : {};
+
+    storage.setItem(key, JSON.stringify({ ...allowSnooze, cta: entry.cta, design: entry.design, savedAt: now.toISOString() }));
 
     return true;
   } catch {
@@ -120,6 +124,10 @@ export function readFreeRecovery(storage: FreeRecoveryStorage | null, key: strin
     clearFreeRecovery(storage, key);
 
     return null;
+  }
+
+  if (typeof value?.allowSnooze === "boolean") {
+    return { allowSnooze: value.allowSnooze, cta, design, savedAt };
   }
 
   return { cta, design, savedAt };

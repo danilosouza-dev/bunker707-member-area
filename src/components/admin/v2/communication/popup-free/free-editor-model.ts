@@ -95,7 +95,7 @@ export const FREE_EDITOR_COPY = {
   },
   canNotRemove: {
     audio: "Para tirar o áudio, tire o arquivo no campo Áudio do aviso.",
-    links: "Os links Lembrar depois e Não mostrar de novo ficam sempre. Para esconder o Não mostrar de novo, use Conteúdo."
+    links: "Os links ficam no desenho, mas cada um se tira em Conteúdo: desligue “Permitir Lembrar depois” ou “Mostrar Não mostrar de novo”."
   },
   devices: { desktop: "Computador", mobile: "Celular" },
   elements: {

@@ -133,9 +133,16 @@ export type FreeEditorContent = {
   ctaOptional?: boolean;
   /** Pagina do modelo de Design (docs/28 §5.7): o destino do Botão principal some (e escolhido em cada aviso). */
   hideCtaDestination?: boolean;
+  /**
+   * Links › Conteúdo (docs/27 §13.7): a chave "Permitir “Lembrar depois”" e a mesma regra do card "Quantas vezes e
+   * como fecha" (campaigns.allow_snooze). Nao entra no historico do Livre (e uma regra do pop-up, como o Áudio).
+   */
+  onAllowSnoozeChange: (allowSnooze: boolean) => void;
   onCtaChange: (cta: NoticeDraft["cta"]) => void;
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
+  /** O "Volta em" do card (minutos), so para a frase da chave em Links › Conteúdo. */
+  snoozeMinutes: number;
   title: string;
 };
 
@@ -515,11 +522,12 @@ function FreeEditorSession({
       return;
     }
 
-    const present = history.present;
-    const timer = window.setTimeout(() => writeFreeRecovery(storage, recoveryKey, present), FREE_RECOVERY_DELAY_MS);
+    // A regra do "Lembrar depois" vai junto (nao esta no historico, mas o Livre tambem a edita).
+    const entry = { ...history.present, allowSnooze: content.allowSnooze };
+    const timer = window.setTimeout(() => writeFreeRecovery(storage, recoveryKey, entry), FREE_RECOVERY_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [dirtySinceSave, history.present, recoveryKey, storage]);
+  }, [content.allowSnooze, dirtySinceSave, history.present, recoveryKey, storage]);
 
   function recover() {
     if (!recovery) {
@@ -527,6 +535,11 @@ function FreeEditorSession({
     }
 
     commit({ cta: recovery.cta, design: recovery.design });
+
+    if (typeof recovery.allowSnooze === "boolean" && recovery.allowSnooze !== content.allowSnooze) {
+      content.onAllowSnoozeChange(recovery.allowSnooze);
+    }
+
     setRecovery(null);
     announce(copy.announce.recovered);
   }

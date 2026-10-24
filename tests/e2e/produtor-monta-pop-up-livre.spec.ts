@@ -406,6 +406,28 @@ test.describe("produtor", () => {
       await expect(editor.locator("[data-free-canvas-card] [data-free-artboard]")).toHaveJSProperty("offsetWidth", 520);
     });
 
+    await test.step("Links › Conteúdo: desliga Permitir Lembrar depois; a previa perde o link na hora", async () => {
+      // docs/27 §13.7: a chave e a mesma do card "Quantas vezes e como fecha" (campaigns.allow_snooze).
+      await camada(editor, "Links").click();
+      await editor.getByRole("tab", { exact: true, name: "Conteúdo" }).click();
+      const cartao = editor.locator("[data-free-canvas-card]");
+      await expect(cartao.getByText("Lembrar depois", { exact: true })).toBeVisible();
+      const chave = editor.locator('[id^="livre-"][id$="-lembrar"][aria-checked]');
+      await expect(chave).toHaveAttribute("aria-checked", "true");
+      await expect(editor.getByText("Volta em 1 dia, até 2 vezes.", { exact: true })).toBeVisible();
+      // WebKit: clica ate a chave virar (um clique pode cair antes de o painel terminar de montar).
+      await expect(async () => {
+        if ((await chave.getAttribute("aria-checked")) === "true") {
+          await chave.click();
+        }
+
+        expect(await chave.getAttribute("aria-checked")).toBe("false");
+      }).toPass();
+      await expect(editor.getByText("Sem “Lembrar depois”, o pop-up volta só pela regra de “Quantas vezes”.", { exact: true })).toBeVisible();
+      await expect(cartao.getByText("Lembrar depois", { exact: true })).toHaveCount(0);
+      await expect(cartao.getByText("Não mostrar de novo", { exact: true })).toBeVisible();
+    });
+
     await test.step("Concluir: o endereco passa a ser o do aviso, o card mostra o resumo", async () => {
       await editor.getByRole("button", { name: "Concluir e voltar ao aviso" }).click();
       await expect(editor).toHaveCount(0);
@@ -417,6 +439,8 @@ test.describe("produtor", () => {
       await expect(page.getByLabel("Nome do pop-up", { exact: true })).toHaveValue(TITULO);
       await expect(page.locator("#aviso-texto")).toHaveCount(0);
       await expect(page.locator("#aviso-botao-texto")).toHaveCount(0);
+      // A chave desligada dentro do editor Livre e a do card "Quantas vezes e como fecha" (uma regra so).
+      await expect(page.locator("#aviso-lembrar")).toHaveAttribute("aria-checked", "false");
     });
 
     await test.step("recarrega: tudo igual (o editor abre com o que foi salvo)", async () => {
@@ -430,6 +454,9 @@ test.describe("produtor", () => {
       await expect(noPalco(editor, selo)).toBeVisible();
       await expect(noPalco(editor, imagem)).toBeVisible();
       await expect(editor.locator("[data-free-canvas-card] [data-free-artboard]")).toHaveJSProperty("offsetWidth", 520);
+      // O "Lembrar depois" desligado ficou gravado no aviso (allow_snooze): a previa do editor continua sem o link.
+      await expect(editor.locator("[data-free-canvas-card]").getByText("Lembrar depois", { exact: true })).toHaveCount(0);
+      await expect(page.locator("#aviso-lembrar")).toHaveAttribute("aria-checked", "false");
       await editor.getByRole("button", { name: "Concluir e voltar ao aviso" }).click();
       await expect(editor).toHaveCount(0);
       await expect(design.getByRole("button", { name: "Abrir editor Livre" })).toBeFocused();

@@ -110,8 +110,9 @@ function LayerIcon({ node }: { node: FreeNode | null }) {
   return <Icon aria-hidden="true" className={className} />;
 }
 
+/** Etiqueta da linha (Solta, Escondida, Travada): 12 px, nunca menos (docs/17); a linha quebra quando as tres nao cabem. */
 function Tag2({ children }: { children: ReactNode }) {
-  return <span className="shrink-0 rounded-sm bg-[var(--surface-3)] px-1 text-[10px] leading-4 text-[var(--text-secondary)]">{children}</span>;
+  return <span className="shrink-0 rounded-sm bg-[var(--surface-3)] px-1 text-[12px] leading-4 text-[var(--text-secondary)]">{children}</span>;
 }
 
 export function FreeLayersPanel({ cta, design, disabled, flagged, onCommand, onSelect, selectedId }: FreeLayersPanelProps) {
