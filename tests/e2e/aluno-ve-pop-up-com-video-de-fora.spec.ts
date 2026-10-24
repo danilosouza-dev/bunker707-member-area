@@ -27,7 +27,7 @@ import { ESCOLA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
 // protocolo do player (Vimeo ou Player.js) e escreve "pronto" quando responde o getPaused (a confirmacao da ponte).
 //
 // - "Ao abrir a página", 3 s: o aluno toca na capa e da Tocar dentro do player antes da hora do pop-up; depois de
-//   5 s, nada (nem o pedido de abrir); Pausar abre em ate 2 s.
+//   5 s, nada (nem o pedido de abrir); Pausar abre em ate 2 s e grava o progresso com o tempo do player (D15).
 // - "Ao concluir uma aula": Tocar e Terminar concluem a aula sem tocar em Concluir, e o pop-up abre.
 // - Player.js nos tres enderecos: a aula Bunny gravada em iframe.mediadelivery.net (a pagina falsa ali, e depois
 //   o mesmo endereco levando ao player novo em player.mediadelivery.net) e a aula Mux: Terminar conclui.
@@ -130,7 +130,11 @@ test.describe("ao abrir a página, com o Vimeo tocando", () => {
     await expect(popUp).toHaveCount(0);
     expect(aberturas.total).toBe(0);
 
+    // D15: com a ponte confirmada, o progresso da aula usa o tempo do player (nunca o cronometro de 15 s): Pausar
+    // grava na hora (force) os segundos e a duracao que a pagina falsa mandou (1 s de 120 s).
+    const gravouAPausa = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/progress/lessons" && request.method() === "PUT");
     await playerDeFora(page).getByRole("button", { exact: true, name: "Pausar" }).click();
+    expect((await gravouAPausa).postDataJSON()).toMatchObject({ durationSeconds: 120, progressSeconds: 1, status: "in_progress" });
     await expect(popUp).toBeVisible({ timeout: 2_000 });
     expect(aberturas.total).toBe(1);
     await expect.poll(async () => (await eventosDoPopUp(id)).map((evento) => evento.event_type)).toEqual(["message_impressed"]);

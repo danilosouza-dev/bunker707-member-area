@@ -879,6 +879,19 @@ export async function publicarPopUp(browser: Browser, input: PopUpDeTeste) {
 }
 
 /**
+ * Espera a navegacao de depois de "Publicar pop-up" pelo editor assentar: o editor mostra o toast e so entao faz o
+ * router.push para a pagina do aviso, que passa a abrir o relatorio ("Publicar pop-up" some e "Detalhes" aparece).
+ * Um page.goto logo depois do toast e interrompido por essa navegacao ("interrupted by another navigation", no
+ * WebKit do CI): chame isto antes de trocar de pagina.
+ */
+export async function esperarAvisoPublicado(page: Page) {
+  await expect(page).toHaveURL(/\/admin\/comunicacao\/avisos\/[0-9a-f-]{36}$/);
+  await expect(page.getByRole("button", { exact: true, name: "Publicar pop-up" })).toHaveCount(0);
+  await expect(page.getByRole("region", { exact: true, name: "Detalhes" })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+}
+
+/**
  * Grava o pop-up para todos os alunos direto no banco, como o editor salva (o rascunho de publicarPopUp). Com
  * `aguardandoAprovacao`, como o pedido de aprovacao deixa (v3b-2: o toast de aprovar pela lista). Devolve o id.
  * Desfaca com zerarComunicacao.

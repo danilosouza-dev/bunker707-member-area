@@ -63,9 +63,12 @@ async function irPeloMenu(page: Page, nome: string, endereco: string) {
   await expect(gaveta).toBeHidden();
 }
 
-/** Espera o tempo de um pop-up "Ao abrir a página" (3 s) com folga e confere que nada abriu. */
-async function nadaAbre(page: Page, titulo: string) {
-  await page.waitForTimeout(4_500);
+/**
+ * Espera o tempo de um pop-up "Ao abrir a página" (3 s) com folga e confere que nada abriu. `espera` (ms) estica
+ * a folga quando a decisao de nao abrir vem depois (a aula com player de fora que nao responde a ponte).
+ */
+async function nadaAbre(page: Page, titulo: string, espera = 4_500) {
+  await page.waitForTimeout(espera);
   await expect(page.locator("[data-member-popup]")).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: titulo })).toHaveCount(0);
 }
@@ -265,7 +268,11 @@ test.describe("players da aula: o nosso, o de fora tocando e o de fora no toque"
       await reabrirPopUpParaAluna(TITULO);
       const aberturas = contarPedidos(page, ABERTURA, "POST");
       await page.goto(AULA_LIBERADA);
-      await nadaAbre(page, TITULO);
+      // Com a ponte do player de fora ainda sem resposta, o host nao decide (`bridge_pending`, confere de novo a
+      // cada 1 s): so quando a ponte desiste (12 × 400 ms = 4,8 s depois de ligar, apos a hidratacao) a conferencia
+      // seguinte ve o toque e descarta. Os 4,5 s de sempre acabariam antes dessa decisao e uma regressao (abrir uns
+      // 5 a 7 s depois de montar) passaria: 3 s do pop-up + 4,8 s do aperto de mao + 1 s da conferencia + folga.
+      await nadaAbre(page, TITULO, 12_000);
       expect(aberturas.total).toBe(0);
 
       await page.goto(AULA_1);
