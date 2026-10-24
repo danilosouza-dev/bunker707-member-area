@@ -416,6 +416,32 @@ test("snapshot le o <video> do palco na hora: tocando, parado sem evento de paus
   });
 });
 
+test("snapshot: o <video> cujo arquivo nao carregou (error) nao toca, mesmo com paused false (o play que falhou no WebKit); o evento error acorda a espera", () => {
+  recomecarDom();
+  const { video } = montarPalco({ video: { ended: false, error: { code: 4 }, paused: false } });
+
+  assert.equal(media.lessonMediaSnapshot().playing, false, "MEDIA_ERR_SRC_NOT_SUPPORTED: parado");
+  assert.equal(media.lessonMediaSnapshot().readable, true, "continua o nosso player");
+
+  video.error = null;
+  assert.equal(media.lessonMediaSnapshot().playing, true, "sem erro, paused false = tocando");
+
+  // Tocando de verdade, a espera segue; o arquivo falha no meio (error): a espera acaba na hora, uma vez so.
+  let parou = 0;
+  const parar = media.waitLessonMediaStop(() => {
+    parou += 1;
+  });
+
+  video.dispatchEvent(new Event("error"));
+  assert.equal(parou, 0, "o evento sem video.error nao para nada");
+  video.error = { code: 2 };
+  video.dispatchEvent(new Event("error"));
+  assert.equal(parou, 1, "o arquivo que nao carregou e um video parado");
+  video.dispatchEvent(new Event("error"));
+  assert.equal(parou, 1, "uma vez so");
+  parar();
+});
+
 test("snapshot: tela cheia da pagina e a tela cheia propria do iPhone (webkitDisplayingFullscreen)", () => {
   recomecarDom();
   const { video } = montarPalco();

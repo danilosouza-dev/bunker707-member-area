@@ -79,6 +79,7 @@ Date.now = () => agora;
 const host = await import("../src/components/member/notifications/popup-host-model.ts");
 const media = await import("../src/lib/lesson-media-signal.ts");
 const origins = await import("../src/lib/lesson-embed-origins.ts");
+const bridge = await import("../src/lib/lesson-embed-bridge.ts");
 const hostSource = await readFile(new URL("../src/components/member/notifications/member-popup-host.tsx", import.meta.url), "utf8");
 
 const MINUTO = 60_000;
@@ -150,6 +151,38 @@ function novaPagina() {
 }
 
 const embed = (extra = {}) => ({ bridge: "confirmed", fullscreen: false, kind: "embed", lessonId: "aula-1", playing: false, ...extra });
+
+/** O ambiente que o host monta do snapshot (member-popup-host.tsx, env()). */
+const ambienteDaAula = () => {
+  const snap = media.lessonMediaSnapshot();
+  return ambiente({ lesson: { activeLessonId: snap.activeLessonId, bridge: snap.bridge, playing: snap.playing, readable: snap.readable, touched: snap.touched } });
+};
+
+const VIMEO = "https://player.vimeo.com/video/76979871";
+
+/**
+ * A sessao da ponte de verdade (a logica do hook use-lesson-embed-bridge) anunciando ao modulo do sinal, com um
+ * iframe de mentira que recebe mensagens do "Vimeo" pela janela da ponte.
+ */
+function sessaoDaPonte() {
+  const win = Object.assign(new EventTarget(), {
+    clearInterval: (id) => globalThis.clearInterval(id),
+    clearTimeout: (id) => globalThis.clearTimeout(id),
+    setInterval: (callback, ms) => globalThis.setInterval(callback, ms),
+    setTimeout: (callback, ms) => globalThis.setTimeout(callback, ms)
+  });
+  const nada = () => undefined;
+  const sessao = bridge.createEmbedBridgeSession({
+    announce: (signal) => media.announceLessonMedia({ bridge: signal.bridge, fullscreen: signal.fullscreen, kind: "embed", lessonId: signal.lessonId, playing: signal.playing }),
+    callbacks: () => ({ onEnded: nada, onPause: nada, onPlay: nada, onTime: nada }),
+    now: () => agora,
+    win
+  });
+  const novoIframe = () => Object.assign(new EventTarget(), { contentWindow: { postMessage: nada } });
+  const mensagem = (iframe, data) => win.dispatchEvent(Object.assign(new Event("message"), { data, origin: "https://player.vimeo.com", source: iframe.contentWindow }));
+
+  return { mensagem, novoIframe, sessao };
+}
 
 // --- 1. A hora marcada no plano -------------------------------------------------------------------------
 
@@ -263,6 +296,32 @@ test("rearmAfterNotStarted: uma vez so, para o nextAt (com folga, sorteio e a es
   assert.equal(host.rearmAfterNotStarted(armada, iso(agora + 25 * HORA), 0, agora, meio), null, "mais de 24 h a frente: o proximo plano traz");
 });
 
+test("segunda tentativa com o relogio acertado pelo asOf do 409 (o relogio do navegador mudou depois do plano), nao pelo acerto do plano", () => {
+  // O plano chegou com o servidor 2 min "a frente" (o relogio do navegador estava 2 min atrasado); depois o sistema
+  // acertou o relogio: agora o navegador e o servidor batem. O show saiu 2 min antes da hora e o servidor recusou.
+  const comeca = agora + 5 * MINUTO;
+  const doPlano = 120_000;
+  const [armada] = abrir([agendado(comeca)], { offsetMs: doPlano });
+  assert.equal(armada.clock, true);
+  assert.equal(armada.at + doPlano, comeca + 2_000 + 2_000 + 3_000, "armou pelo acerto do plano");
+
+  const recusa = { asOf: iso(agora), nextAt: iso(comeca) };
+  const fresco = host.clockOffsetOf(recusa.asOf, agora);
+  assert.equal(fresco, 0, "a recusa diz: servidor = navegador agora");
+
+  const velho = host.rearmAfterNotStarted(armada, recusa.nextAt, doPlano, agora, meio);
+  assert.ok(velho.at + fresco < comeca + host.POPUP_HOST_RULES.liveStartMarginMs, "com o acerto velho a segunda tentativa cairia de novo 2 min antes da hora do servidor");
+
+  const novo = host.rearmAfterNotStarted(armada, recusa.nextAt, fresco, agora, meio);
+  assert.ok(novo.at + fresco >= comeca + host.POPUP_HOST_RULES.liveStartMarginMs, "com o acerto da recusa, na hora do servidor (com a folga)");
+  assert.equal(novo.at, comeca + 2_000 + 2_000 + 3_000);
+  assert.equal(novo.key, `live@${recusa.nextAt}`);
+
+  // O host usa o asOf da recusa quando ele veio; sem ele, o acerto do plano.
+  assert.match(hostSource, /const offset = error\.asOf \? clockOffsetOf\(error\.asOf, Date\.now\(\)\) : offsetMs;/);
+  assert.match(hostSource, /rearmAfterNotStarted\(armed, error\.nextAt, offset, Date\.now\(\)\)/);
+});
+
 test("givenUp: a hora marcada (giveUpAt null) nunca desiste por tempo; as outras, 10 min depois da hora delas", () => {
   const [armada] = abrir([agendado(agora + MINUTO)]);
 
@@ -336,19 +395,53 @@ test("completionOpenings com courseCompleted arma os dois momentos (na ordem do 
     item({ id: "outro-curso", pages: ["lesson:curso-y"], trigger: "course_completed" }),
     item({ id: "pagina", pages: ["any"], trigger: "page_load" })
   ];
-  const fechou = host.completionOpenings({ contentId: "curso-x", courseCompleted: true, items: itens, lessonId: "ultima", now: agora, offsetMs: 0, playing: true });
+  const concluir = (extra = {}) =>
+    host.completionOpenings({ activeLessonId: "ultima", contentId: "curso-x", courseCompleted: true, items: itens, lessonId: "ultima", now: agora, offsetMs: 0, playing: true, turn: 1, ...extra });
+  const fechou = concluir();
 
   assert.deepEqual(
     fechou.map(({ at, clock, giveUpAt, id, key, lessonId, playingAtCompletion, trigger }) => ({ at, clock, giveUpAt, id, key, lessonId, playingAtCompletion, trigger })),
     [
-      { at: agora, clock: false, giveUpAt: agora + 10 * MINUTO, id: "curso", key: "curso:course:ultima", lessonId: "ultima", playingAtCompletion: true, trigger: "course_completed" },
+      { at: agora, clock: false, giveUpAt: agora + 10 * MINUTO, id: "curso", key: "curso:course:1", lessonId: "ultima", playingAtCompletion: true, trigger: "course_completed" },
       { at: agora + 2_000, clock: false, giveUpAt: agora + 2_000 + 10 * MINUTO, id: "aula", key: "aula:ultima", lessonId: "ultima", playingAtCompletion: true, trigger: "lesson_completed" }
     ]
   );
 
-  const semCurso = host.completionOpenings({ contentId: "curso-x", courseCompleted: false, items: itens, lessonId: "ultima", now: agora, offsetMs: 0, playing: false });
+  const semCurso = concluir({ courseCompleted: false, playing: false });
   assert.deepEqual(semCurso.map((armed) => armed.key), ["aula:ultima"]);
+
+  // Desmarcar e concluir de novo a mesma aula na mesma pagina: a segunda virada e outra chave (outra chance); a da
+  // aula continua uma por aula (mesma chave, nao arma de novo).
+  const deNovo = concluir({ now: agora + MINUTO, turn: 2 });
+  assert.deepEqual(deNovo.map((armed) => armed.key), ["curso:course:2", "aula:ultima"]);
+  assert.notEqual(deNovo[0].key, fechou[0].key, "duas viradas, duas aberturas do curso");
 });
+
+test("Ao concluir um curso: a aula armada e a que esta na tela (o check de outra aula na playlist nao e 'outra aula'); so a troca de aula depois descarta", () => {
+  const itens = [item({ delaySeconds: 0, id: "curso", pages: ["lesson:*"], trigger: "course_completed" }), item({ id: "aula", pages: ["lesson:*"], trigger: "lesson_completed" })];
+  // Na tela, aula-5; a aluna marcou o check da aula-2 na playlist e isso fechou o curso.
+  const [curso, daAula] = host.completionOpenings({ activeLessonId: "aula-5", contentId: "curso-x", courseCompleted: true, items: itens, lessonId: "aula-2", now: agora, offsetMs: 0, playing: false, turn: 1 });
+
+  assert.equal(curso.lessonId, "aula-5", "o curso: a aula na tela");
+  assert.equal(curso.key, "curso:course:1");
+  assert.equal(daAula.lessonId, "aula-2", "a aula: a concluida, como antes");
+  assert.equal(daAula.key, "aula:aula-2");
+
+  assert.equal(host.blockReason(ambiente({ lesson: aula({ activeLessonId: "aula-5" }) }), curso, "before_show"), null, "aula-5 continua na tela: abre");
+  assert.equal(host.blockReason(ambiente({ lesson: aula({ activeLessonId: "aula-5" }) }), daAula, "before_show"), "left_lesson", "a aula concluida nao e a da tela: como antes");
+  assert.equal(host.blockReason(ambiente({ lesson: aula({ activeLessonId: "aula-6" }) }), curso, "before_show"), "left_lesson", "trocou de aula depois de concluir: descarta");
+
+  // Sem palco (snapshot sem aula na tela), a aula concluida vale.
+  assert.equal(host.completionOpenings({ activeLessonId: null, contentId: "curso-x", courseCompleted: true, items: itens, lessonId: "aula-2", now: agora, offsetMs: 0, playing: false, turn: 1 })[0].lessonId, "aula-2");
+
+  // O host conta as viradas da visualizacao e passa a aula na tela.
+  assert.match(hostSource, /let courseTurns = 0;/);
+  assert.match(hostSource, /if \(courseCompleted\) \{\s*courseTurns \+= 1;\s*\}/);
+  assert.match(hostSource, /const \{ activeLessonId, playing \} = lessonMediaSnapshot\(\);/);
+  assert.match(hostSource, /activeLessonId,\s*contentId,\s*courseCompleted,\s*items: plan\.items,/);
+  assert.match(hostSource, /playing,\s*turn\s*\}\)/);
+});
+
 
 // --- 7. O plano lido sem confiar no formato ----------------------------------------------------------------
 
@@ -411,6 +504,7 @@ test("snapshot sem sinal: iframe da lista conta como pendente nos primeiros 15 s
 
   novaPagina();
   montarPalco();
+  assert.equal(media.lessonMediaSnapshot().bridge, "pending", "o palco mostra o player da lista desde a abertura");
   agora = abriu + 2_000;
   assert.equal(media.lessonMediaSnapshot().bridge, "pending");
   agora = abriu + origins.EMBED_BRIDGE_RULES.pendingMaxMs - 1;
@@ -447,6 +541,82 @@ test("tela de toque + iframe da lista: o snapshot da tocado e pendente (a abertu
   assert.equal(host.blockReason(env(), naPagina(), "before_show"), "touched");
   media.announceLessonMedia(embed({ bridge: "confirmed" }));
   assert.equal(host.blockReason(env(), naPagina(), "before_show"), null, "confirmada e parada: abre");
+});
+
+test("troca de aula dentro da pagina: o player da lista da aula nova reabre a janela pendente (bridge_pending, nao touched) ate a ponte dela falar", () => {
+  const abriu = agora;
+  const { mensagem, novoIframe, sessao } = sessaoDaPonte();
+
+  try {
+    novaPagina();
+    montarPalco({ src: VIMEO });
+    const primeiro = novoIframe();
+    sessao.set({ enabled: true, iframe: primeiro, lessonId: "aula-1", src: VIMEO });
+    mensagem(primeiro, { event: "ready" });
+    mensagem(primeiro, { method: "getPaused", value: false });
+    assert.deepEqual([media.lessonMediaSnapshot().bridge, media.lessonMediaSnapshot().playing], ["confirmed", true], "a ponte da aula-1 confirmou tocando");
+
+    // A aluna mexeu no player (tela de toque) e assistiu 60 s; o pop-up "Ao abrir a página" espera o video parar.
+    toque = true;
+    agora = abriu + MINUTO;
+    assert.equal(host.blockReason(ambienteDaAula(), naPagina(), "before_show"), "playing");
+    const motivos = [];
+    const parar = media.waitLessonMediaStop(() => motivos.push(host.blockReason(ambienteDaAula(), naPagina(), "before_show")));
+
+    // Troca de aula pela playlist: o DOM ja mostra a aula-2 (outro Vimeo) quando a ponte da aula-1 se despede com
+    // playing: false, que acorda a espera; a ponte da aula-2 ainda nem anunciou.
+    montarPalco({ lessonId: "aula-2", src: `${VIMEO}1` });
+    sessao.set({ enabled: true, iframe: novoIframe(), lessonId: "aula-2", src: `${VIMEO}1` });
+    assert.deepEqual(motivos, ["bridge_pending"], "era touched (descartava): a janela pendente recomeca na troca");
+    parar();
+
+    // Com a ponte da aula-2 pendente de verdade, continua pendente; sem resposta, acaba.
+    assert.equal(media.lessonMediaSnapshot().bridge, "pending");
+  } finally {
+    sessao.stop();
+    agora = abriu;
+  }
+});
+
+test("troca para um player da lista 40 s depois de a pagina abrir: pendente por 15 s a partir da troca, depois nada", () => {
+  const abriu = agora;
+
+  novaPagina();
+  montarPalco({ kind: "youtube", src: "https://www.youtube.com/embed/x" });
+  media.announceLessonMedia({ kind: "youtube", playing: true });
+  agora = abriu + 40_000;
+  assert.equal(host.blockReason(ambienteDaAula(), naPagina(), "before_show"), "playing");
+
+  const motivos = [];
+  const parar = media.waitLessonMediaStop(() => motivos.push(host.blockReason(ambienteDaAula(), naPagina(), "before_show")));
+
+  montarPalco({ lessonId: "aula-2", src: VIMEO });
+  media.announceLessonMedia({ kind: "youtube", playing: false }); // o efeito do YouTube desmontando
+  assert.deepEqual(motivos, ["bridge_pending"], "a janela conta da troca, nao da abertura da pagina (40 s atras)");
+  parar();
+
+  agora = abriu + 40_000 + origins.EMBED_BRIDGE_RULES.pendingMaxMs - 1;
+  assert.equal(media.lessonMediaSnapshot().bridge, "pending");
+  agora = abriu + 40_000 + origins.EMBED_BRIDGE_RULES.pendingMaxMs;
+  assert.equal(media.lessonMediaSnapshot().bridge, "none", "15 s depois da troca: a regra de antes (mexeu = descarta)");
+  assert.equal(host.blockReason(ambienteDaAula(), naPagina(), "before_show"), "touched");
+
+  // Voltar para a aula-1 (YouTube) e de novo para a aula-2: o palco voltou a mostrar o player da lista, a janela recomeca.
+  montarPalco({ kind: "youtube", src: "https://www.youtube.com/embed/x" });
+  assert.equal(media.lessonMediaSnapshot().bridge, "none");
+  montarPalco({ lessonId: "aula-2", src: VIMEO });
+  assert.equal(media.lessonMediaSnapshot().bridge, "pending");
+  // A mesma aula na tela, o tempo passando: a janela nao recomeca sozinha.
+  agora += origins.EMBED_BRIDGE_RULES.pendingMaxMs;
+  assert.equal(media.lessonMediaSnapshot().bridge, "none");
+  montarPalco({ lessonId: "aula-2", src: VIMEO });
+  assert.equal(media.lessonMediaSnapshot().bridge, "none", "redesenhar o mesmo palco nao e troca");
+  montarPalco({ lessonId: "aula-2", src: VIMEO });
+
+  // O sinal da aula na tela sempre vence a janela.
+  media.announceLessonMedia(embed({ bridge: "silent", lessonId: "aula-2" }));
+  assert.equal(media.lessonMediaSnapshot().bridge, "none");
+  agora = abriu;
 });
 
 test("waitLessonMediaStop termina com o sinal da ponte parada", () => {
@@ -499,9 +669,12 @@ test("reconcileClockOpenings: o plano mais novo arma, troca, desarma ou deixa a 
     host.reconcileClockOpenings({
       armed,
       items,
+      now,
+      offsetMs: 0,
       openings: host.openingsForPageView({ items, now, offsetMs: 0, onlyClock: true, pageKey: "saved", pageViewStart, random: meio }),
       pageKey: "saved",
-      queued
+      queued,
+      random: meio
     });
   const vivo = (startsAt, extra = {}) => item({ notBefore: null, startsAt: iso(startsAt), ...extra });
 
@@ -533,19 +706,61 @@ test("reconcileClockOpenings: o plano mais novo arma, troca, desarma ou deixa a 
     { arm: [], disarm: ["live"] },
     "agora so em outra pagina"
   );
+  // O Comeca foi para antes da abertura da pagina (18:30): a hora velha (20:00) nao vale mais; abre agora, com o
+  // sorteio e a espera, sem desistir, com a chave da hora nova.
+  const agoraMesmo = h19 + 31 * MINUTO;
+  const voltou = reconciliar({ armed: armadas, items: [vivo(h19 - 30 * MINUTO)], now: agoraMesmo });
+  assert.deepEqual(voltou.disarm, ["live"], "Comeca foi para antes da abertura da pagina: desarma a hora velha");
+  assert.deepEqual(voltou.arm, [
+    {
+      at: agoraMesmo + 2_000 + 3_000,
+      clock: true,
+      delayMs: 3_000,
+      giveUpAt: null,
+      id: "live",
+      key: `live@${iso(h19 - 30 * MINUTO)}`,
+      lessonId: null,
+      playingAtCompletion: false,
+      rearmed: false,
+      startsAt: iso(h19 - 30 * MINUTO),
+      trigger: "page_load"
+    }
+  ]);
   assert.deepEqual(
-    reconciliar({ armed: armadas, items: [vivo(h19 - 30 * MINUTO)], now: h19 + 31 * MINUTO }),
+    reconciliar({ armed: new Map([["live", voltou.arm[0].key]]), items: [vivo(h19 - 30 * MINUTO)], now: agoraMesmo + MINUTO }),
     { arm: [], disarm: [] },
-    "Comeca foi para antes da abertura da pagina: fica como estava (o show decide)"
+    "o mesmo plano de novo: ja armado com essa chave, nada"
   );
+
+  // O Comeca saiu ("Ao publicar"): idem, com a chave `@now` e sem startsAt.
+  const saiu = reconciliar({ armed: armadas, items: [item()], now: agoraMesmo });
+  assert.deepEqual(saiu.disarm, ["live"], "o Comeca saiu: desarma a hora velha");
+  assert.deepEqual(saiu.arm.map(({ at, clock, giveUpAt, key }) => ({ at, clock, giveUpAt, key })), [{ at: agoraMesmo + 2_000 + 3_000, clock: true, giveUpAt: null, key: "live@now" }]);
+  assert.equal("startsAt" in saiu.arm[0], false);
+  assert.deepEqual(reconciliar({ armed: new Map([["live", "live@now"]]), items: [item()], now: agoraMesmo + MINUTO }), { arm: [], disarm: [] }, "de novo: nada");
   assert.deepEqual(
-    reconciliar({ armed: armadas, items: [item()], now: h19 + 31 * MINUTO }),
-    { arm: [], disarm: [] },
-    "o Comeca saiu: fica como estava"
+    reconciliar({ armed: armadas, items: [item({ notBefore: iso(agoraMesmo + 10 * MINUTO) })], now: agoraMesmo }),
+    { arm: [], disarm: ["live"] },
+    "a frequencia nao deixa agora: so desarma (a proxima pagina decide)"
   );
 
   // Um pop-up publicado depois, sem Comeca, fica para a proxima pagina (nada de reler em laco).
   assert.deepEqual(reconciliar({ items: [item({ id: "novo" })], now: h19 + 31 * MINUTO }), { arm: [], disarm: [] });
+});
+
+test("newPlanAction: a resposta nova que nao cobre mais a pagina desarma a hora marcada; a falha e a memoria vencida nao mexem em nada", () => {
+  const plano = [item()];
+
+  assert.equal(host.newPlanAction(null), "skip", "memoria vencida (ou nunca houve resposta)");
+  assert.equal(host.newPlanAction({ answered: false, covered: false, plan: null }), "skip", "o pedido falhou: nada se sabe");
+  assert.equal(host.newPlanAction({ answered: true, covered: false, plan: null }), "disarm_all", "o unico pop-up que cobria a pagina pausou ou encerrou");
+  assert.equal(host.newPlanAction({ answered: true, covered: true, plan: null }), "disarm_all", "coberta sem plano: a resposta veio de outra pagina (sem o plano desta), nada a armar");
+  assert.equal(host.newPlanAction({ answered: true, covered: true, plan: plano }), "reconcile");
+
+  // O host: null ou "skip" sai; "disarm_all" desarma toda hora marcada que ainda nao entrou na fila; senao reconcilia.
+  assert.match(hostSource, /const action = newPlanAction\(kept\);\s*if \(cancelled \|\| !kept \|\| action === "skip"\) \{\s*return;\s*\}/);
+  assert.match(hostSource, /if \(action === "disarm_all" \|\| !kept\.plan\) \{[\s\S]*?\[\.\.\.clockKeys\.keys\(\)\]\.filter\(\(id\) => !queued\.has\(id\)\)\.forEach\(cancelClock\);\s*return;\s*\}/);
+  assert.match(hostSource, /reconcileClockOpenings\(\{\s*armed: clockKeys,\s*items: kept\.plan,\s*now,\s*offsetMs: kept\.offsetMs,/);
 });
 
 // --- 12. O relogio de parede -------------------------------------------------------------------------------

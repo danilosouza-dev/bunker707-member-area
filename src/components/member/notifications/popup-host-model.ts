@@ -58,11 +58,13 @@ export type ArmedPopup = {
   giveUpAt: number | null;
   id: string;
   /**
-   * page_load/first_login: o id; hora marcada: `${id}@${startsAt}` (a hora mudou = outra chave);
-   * segunda tentativa da hora marcada: `${id}@${nextAt}`; lesson_completed: `${id}:${lessonId}`;
-   * course_completed: `${id}:course:${lessonId}`.
+   * page_load/first_login: o id; hora marcada: `${id}@${startsAt}` (a hora mudou = outra chave; o Comeca que saiu
+   * ou voltou para antes da abertura da pagina: `${id}@now`); segunda tentativa da hora marcada: `${id}@${nextAt}`;
+   * lesson_completed: `${id}:${lessonId}`; course_completed: `${id}:course:${turn}` (cada virada do curso nesta
+   * visualizacao e uma chave: desmarcar e concluir de novo e outra chance).
    */
   key: string;
+  /** Conclusao: a aula concluida (lesson_completed) ou a aula na tela quando o curso virou (course_completed). */
   lessonId: string | null;
   /** Conclusao: o player da aula tocava quando a aula foi concluida (Concluir no meio do video). */
   playingAtCompletion: boolean;
@@ -168,23 +170,63 @@ export function openingsForPageView(input: {
 }
 
 /**
+ * O Comeca de um id armado foi para antes da abertura da pagina, ou saiu: a hora velha nao vale mais e o pop-up
+ * abre agora (sorteio + "Quanto tempo depois"), como se a pagina tivesse aberto depois do Comeca. Chave
+ * `${id}@${startsAt}` ou `${id}@now` (o mesmo plano de novo nao arma outra vez). null quando a frequencia nao deixa.
+ */
+function lateClockOpening(item: PlanItem, now: number, offsetMs: number, random: () => number): ArmedPopup | null {
+  const delayMs = delayMsOf(item);
+  const at = now + spreadOf(random) + delayMs;
+
+  if (!allowedAt(item, at + offsetMs)) {
+    return null;
+  }
+
+  return {
+    ...designOf(item),
+    at,
+    clock: true,
+    delayMs,
+    giveUpAt: null,
+    id: item.id,
+    key: lateClockKey(item),
+    lessonId: null,
+    playingAtCompletion: false,
+    rearmed: false,
+    ...(item.startsAt ? { startsAt: item.startsAt } : {}),
+    trigger: item.trigger
+  };
+}
+
+function lateClockKey(item: Pick<PlanItem, "id" | "startsAt">) {
+  return `${item.id}@${item.startsAt ?? "now"}`;
+}
+
+/**
  * Plano mais novo com a pagina aberta (onlyClock): o que armar e o que desarmar na hora marcada. `armed` = id ->
  * chave da abertura da hora marcada ainda nao vencida; `queued` = ids que ja entraram na fila nesta visualizacao;
- * `openings` = openingsForPageView({ onlyClock: true }) do plano novo.
+ * `openings` = openingsForPageView({ onlyClock: true }) do plano novo; `now`, `offsetMs` e `random` armam a
+ * abertura atrasada. Pura.
  * - id ja na fila: nada (nunca duas vezes na mesma visualizacao);
  * - mesma chave: nada; chave diferente (a equipe adiantou ou adiou o Comeca): desarma a velha e arma a nova;
  * - id armado sem item do momento de pagina para esta pagina no plano novo (saiu do segmento, pausou, outras
  *   paginas): desarma;
  * - id armado cujo item continua mas nao arma mais pela hora (o Comeca foi para antes da abertura da pagina ou
- *   saiu): fica armado como estava (o show decide na hora velha).
+ *   saiu): desarma a hora velha e arma para agora (sorteio + "Quanto tempo depois", chave `${id}@${startsAt}` ou
+ *   `${id}@now`; so se a frequencia deixar), a nao ser que ja esteja armado com essa chave.
  */
 export function reconcileClockOpenings(input: {
   armed: ReadonlyMap<string, string>;
   items: readonly PlanItem[];
+  now: number;
+  offsetMs: number;
   openings: readonly ArmedPopup[];
   pageKey: string;
   queued: ReadonlySet<string>;
+  /** Sorteio do espalhamento (o teste passa um fixo). Padrao Math.random. */
+  random?: () => number;
 }): { arm: ArmedPopup[]; disarm: string[] } {
+  const random = input.random ?? Math.random;
   const arm: ArmedPopup[] = [];
   const disarm: string[] = [];
   const openingOf = new Map(input.openings.map((opening) => [opening.id, opening]));
@@ -194,14 +236,24 @@ export function reconcileClockOpenings(input: {
       continue;
     }
 
-    const planned = input.items.some((item) => item.id === id && isPageTrigger(item.trigger) && popupAllowsPage(item, input.pageKey));
+    const planned = input.items.find((item) => item.id === id && isPageTrigger(item.trigger) && popupAllowsPage(item, input.pageKey));
     const opening = openingOf.get(id);
 
     if (!planned) {
       disarm.push(id);
-    } else if (opening && opening.key !== key) {
+    } else if (opening) {
+      if (opening.key !== key) {
+        disarm.push(id);
+        arm.push(opening);
+      }
+    } else if (lateClockKey(planned) !== key) {
       disarm.push(id);
-      arm.push(opening);
+
+      const late = lateClockOpening(planned, input.now, input.offsetMs, random);
+
+      if (late) {
+        arm.push(late);
+      }
     }
   }
 
@@ -212,6 +264,24 @@ export function reconcileClockOpenings(input: {
   }
 
   return { arm, disarm };
+}
+
+/**
+ * O que o host faz com um plano mais novo guardado com a pagina aberta (popupPlanFromMemory): null = a memoria
+ * passou do prazo ("skip"); resposta guardada que nao cobre mais a pagina ou veio sem plano (pausou, encerrou,
+ * saiu do segmento o unico pop-up que cobria): "disarm_all" (a hora marcada armada nao vale mais); a resposta
+ * que falhou (`answered` false) parece igual, mas nao diz nada: "skip"; com plano para a pagina: "reconcile".
+ */
+export function newPlanAction(kept: { answered: boolean; covered: boolean; plan: readonly PlanItem[] | null } | null): "disarm_all" | "reconcile" | "skip" {
+  if (!kept) {
+    return "skip";
+  }
+
+  if (!kept.covered || !kept.plan) {
+    return kept.answered ? "disarm_all" : "skip";
+  }
+
+  return "reconcile";
 }
 
 /** Quanto esperar ate a proxima conferencia da abertura: no maximo armWakeMs, 0 quando ja venceu. */
@@ -326,10 +396,15 @@ export function rearmAfterNotStarted(armed: ArmedPopup, nextAt: string, offsetMs
 }
 
 /**
- * "Ao concluir uma aula" (e, com `courseCompleted`, "Ao concluir um curso"): o que uma conclusao gravada arma
- * (uma vez por pop-up e aula nesta visualizacao), na ordem do plano.
+ * "Ao concluir uma aula" (e, com `courseCompleted`, "Ao concluir um curso"): o que uma conclusao gravada arma, na
+ * ordem do plano. A aula: uma vez por pop-up e aula nesta visualizacao (chave `${id}:${lessonId}`). O curso: uma
+ * vez por pop-up e virada (`turn`, a conta de viradas desta visualizacao; chave `${id}:course:${turn}`), com a
+ * aula na tela na hora da virada (`activeLessonId`; o check de outra aula da playlist nao e "outra aula na tela"),
+ * senao a concluida.
  */
 export function completionOpenings(input: {
+  /** A aula na tela na hora da conclusao (lessonMediaSnapshot().activeLessonId); null = sem palco. */
+  activeLessonId: string | null;
   contentId: string;
   /** O servidor disse que esta conclusao fechou o curso. */
   courseCompleted: boolean;
@@ -338,12 +413,15 @@ export function completionOpenings(input: {
   now: number;
   offsetMs: number;
   playing: boolean;
+  /** Quantas vezes o curso virou nesta visualizacao de pagina (esta e a `turn`-esima). */
+  turn: number;
 }): ArmedPopup[] {
   const pageKey = `lesson:${input.contentId}`;
   const openings: ArmedPopup[] = [];
 
   for (const item of input.items) {
-    const moment = item.trigger === "lesson_completed" || (input.courseCompleted && item.trigger === "course_completed");
+    const course = item.trigger === "course_completed";
+    const moment = item.trigger === "lesson_completed" || (input.courseCompleted && course);
     const delayMs = delayMsOf(item);
     const at = input.now + delayMs;
 
@@ -358,8 +436,8 @@ export function completionOpenings(input: {
       ...designOf(item),
       giveUpAt: at + POPUP_HOST_RULES.giveUpMs,
       id: item.id,
-      key: item.trigger === "course_completed" ? `${item.id}:course:${input.lessonId}` : `${item.id}:${input.lessonId}`,
-      lessonId: input.lessonId,
+      key: course ? `${item.id}:course:${input.turn}` : `${item.id}:${input.lessonId}`,
+      lessonId: course ? (input.activeLessonId ?? input.lessonId) : input.lessonId,
       playingAtCompletion: input.playing,
       rearmed: false,
       trigger: item.trigger

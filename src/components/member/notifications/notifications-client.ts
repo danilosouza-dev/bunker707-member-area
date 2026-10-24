@@ -47,13 +47,15 @@ import { clockOffsetOf, POPUP_HOST_RULES, readPopupsAnswer, type HostTrigger, ty
 // pagina aberta. Nenhuma funcao nova pede nada.
 
 export class NotificationsRequestError extends Error {
+  /** POST /show recusado (409): a hora do servidor na recusa (ISO), para acertar o relogio da segunda tentativa. */
+  asOf?: string;
   /** POST /show recusado (409): quando o pop-up pode voltar (null = nao volta mais). */
   nextAt?: string | null;
   /** POST /show recusado (409): o motivo do servidor (v3b-2: "not_started" = ainda vai comecar). */
   reason?: string;
   status: number;
 
-  constructor(message: string, status: number, nextAt?: string | null, reason?: string) {
+  constructor(message: string, status: number, nextAt?: string | null, reason?: string, asOf?: string) {
     super(message);
     this.name = "NotificationsRequestError";
     this.status = status;
@@ -64,6 +66,10 @@ export class NotificationsRequestError extends Error {
 
     if (reason !== undefined) {
       this.reason = reason;
+    }
+
+    if (asOf !== undefined) {
+      this.asOf = asOf;
     }
   }
 }
@@ -234,8 +240,8 @@ export function postPopupEvent(id: string, event: PopupEvent, options: { via?: P
 /**
  * Abre o pop-up: o servidor confere de novo (no ar, segmento, pagina, momento e frequencia), grava a
  * abertura e so entao devolve o conteudo e quando ele pode voltar. Desiste em 10 s; `signal` e o fim da
- * visualizacao de pagina (o host aborta ao sair). Recusa vira NotificationsRequestError (409 com `nextAt` e o
- * `reason` do servidor).
+ * visualizacao de pagina (o host aborta ao sair). Recusa vira NotificationsRequestError (409 com `nextAt`, o
+ * `reason` e o `asOf` do servidor; o asOf so quando le como data).
  */
 export async function postPopupShow(id: string, body: { page: string; trigger: HostTrigger }, signal?: AbortSignal): Promise<PopupShowAnswer> {
   const controller = new AbortController();
@@ -257,14 +263,21 @@ export async function postPopupShow(id: string, body: { page: string; trigger: H
       method: "POST",
       signal: controller.signal
     });
-    const payload = (await response.json().catch(() => ({}))) as { data?: PopupShowAnswer; error?: string; nextAt?: unknown; reason?: unknown };
+    const payload = (await response.json().catch(() => ({}))) as {
+      asOf?: unknown;
+      data?: PopupShowAnswer;
+      error?: string;
+      nextAt?: unknown;
+      reason?: unknown;
+    };
 
     if (!response.ok || payload.data === undefined) {
       const refused = response.status === 409;
       const nextAt = refused ? (typeof payload.nextAt === "string" ? payload.nextAt : null) : undefined;
       const reason = refused && typeof payload.reason === "string" ? payload.reason : undefined;
+      const asOf = refused && typeof payload.asOf === "string" && Number.isFinite(Date.parse(payload.asOf)) ? payload.asOf : undefined;
 
-      throw new NotificationsRequestError(payload.error ?? "Pop-up indisponivel.", response.status, nextAt, reason);
+      throw new NotificationsRequestError(payload.error ?? "Pop-up indisponivel.", response.status, nextAt, reason, asOf);
     }
 
     return payload.data;
@@ -549,11 +562,12 @@ export function currentSummaryFor(userId: string | null | undefined): Notificati
 export type PopupPlan = { items: PlanItem[]; offsetMs: number };
 
 /**
- * O que a memoria (mais nova que 1 minuto) diz desta pagina, sem pedir nada: `covered` = algum pop-up no ar
- * pode aparecer nela; `plan` null = a resposta guardada foi de uma pagina nao coberta (falta o plano).
+ * O que a memoria (mais nova que 1 minuto) diz desta pagina, sem pedir nada: `answered` = o servidor respondeu
+ * (false = a tentativa falhou e nada se sabe neste minuto); `covered` = algum pop-up no ar pode aparecer nela;
+ * `plan` null = a resposta guardada foi de uma pagina nao coberta (falta o plano), ou a falha.
  * null = a memoria passou do prazo (ou nunca houve resposta).
  */
-export function popupPlanFromMemory(pageKey: string): { covered: boolean; offsetMs: number; plan: PlanItem[] | null } | null {
+export function popupPlanFromMemory(pageKey: string): { answered: boolean; covered: boolean; offsetMs: number; plan: PlanItem[] | null } | null {
   const memory = popupMemory;
 
   if (memory.owner !== memoryOwner || !isSummaryFresh(memory.fetchedAt, Date.now())) {
@@ -561,10 +575,10 @@ export function popupPlanFromMemory(pageKey: string): { covered: boolean; offset
   }
 
   if (!memory.answer) {
-    return { covered: false, offsetMs: memory.offsetMs, plan: null };
+    return { answered: false, covered: false, offsetMs: memory.offsetMs, plan: null };
   }
 
-  return { covered: coversPage(memory.answer.pages, pageKey), offsetMs: memory.offsetMs, plan: memory.answer.plan };
+  return { answered: true, covered: coversPage(memory.answer.pages, pageKey), offsetMs: memory.offsetMs, plan: memory.answer.plan };
 }
 
 /**
