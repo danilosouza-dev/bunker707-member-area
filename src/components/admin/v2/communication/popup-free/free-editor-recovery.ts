@@ -160,6 +160,27 @@ export function freeEntrySignature(entry: { cta: NoticeDraft["cta"]; design: Pop
   return JSON.stringify({ cta, design });
 }
 
+/**
+ * A regra do "Lembrar depois" a devolver ao recuperar a copia (docs/27 §13.7): so quando a copia a guardou como
+ * booleano e ela e diferente da atual; null = nada a mudar (copia de antes sem a chave, ou igual).
+ */
+export function allowSnoozeToRestore(recovery: Pick<FreeRecovery, "allowSnooze"> | null, current: boolean): boolean | null {
+  if (!recovery || typeof recovery.allowSnooze !== "boolean" || recovery.allowSnooze === current) {
+    return null;
+  }
+
+  return recovery.allowSnooze;
+}
+
+/**
+ * Houve mudanca depois do ultimo salvar com sucesso: a assinatura de { cta, design } OU a regra do "Lembrar depois"
+ * (que o Livre edita fora do historico, direto no rascunho do aviso; docs/27 §13.7). O Z so troca de endereco no
+ * Concluir quando nao houve (§4.13): sem a chave na conta, a troca remontaria o editor e perderia a chave em silencio.
+ */
+export function freeDirtySinceSave(state: { allowSnooze: boolean; savedAllowSnooze: boolean; savedSignature: string; signature: string }): boolean {
+  return state.signature !== state.savedSignature || state.allowSnooze !== state.savedAllowSnooze;
+}
+
 /** A copia so aparece quando e diferente do que o editor abriu. */
 export function freeRecoveryDiffers(recovery: FreeRecovery | null, current: { cta: NoticeDraft["cta"]; design: PopupFreeDesign }): boolean {
   return Boolean(recovery) && freeEntrySignature(recovery as FreeRecovery) !== freeEntrySignature(current);

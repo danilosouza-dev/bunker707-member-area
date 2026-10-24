@@ -154,6 +154,8 @@ export const FREE_INSPECTOR_COPY = {
     gap: "Espaço entre os links",
     /** A mesma chave do card "Quantas vezes e como fecha" (docs/27 §13.7): o mesmo nome, a mesma regra. */
     snooze: POPUP_EDITOR_COPY.frequency.snoozeLabel,
+    /** Pagina do modelo de Design (docs/28 §1.7): o modelo nao guarda a regra, entao a chave vira esta nota. */
+    snoozeFixed: "“Lembrar depois” é regra do pop-up, não do modelo de design: define-se no aviso.",
     snoozeOff: "Sem “Lembrar depois”, o pop-up volta só pela regra de “Quantas vezes”."
   },
   audio: { note: "O player do áudio do aviso aparece aqui. Para trocar o áudio, use o campo Áudio." },

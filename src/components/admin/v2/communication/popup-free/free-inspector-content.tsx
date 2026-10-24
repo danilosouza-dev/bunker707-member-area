@@ -759,14 +759,19 @@ function LinksContent({ content, design, disabled, errors, node, onChange }: Of<
     <div className="flex min-w-0 flex-col gap-5">
       <div className="flex min-w-0 flex-col gap-1.5">
         {/* A mesma regra do card "Quantas vezes e como fecha" (campaigns.allow_snooze): fora do historico do Livre. */}
-        <AdminSwitch
-          checked={content.allowSnooze}
-          description={freeLinksSnoozeDescription(content.allowSnooze, content.snoozeMinutes)}
-          disabled={disabled}
-          id={id("lembrar")}
-          label={C.links.snooze}
-          onCheckedChange={(allowSnooze) => content.onAllowSnoozeChange(allowSnooze)}
-        />
+        {content.allowSnoozeEditable === false ? (
+          // Pagina do modelo de Design: o modelo nao guarda a regra (docs/28 §1.7), a chave mudaria nada.
+          <FreeNote>{C.links.snoozeFixed}</FreeNote>
+        ) : (
+          <AdminSwitch
+            checked={content.allowSnooze}
+            description={freeLinksSnoozeDescription(content.allowSnooze, content.snoozeMinutes)}
+            disabled={disabled}
+            id={id("lembrar")}
+            label={C.links.snooze}
+            onCheckedChange={(allowSnooze) => content.onAllowSnoozeChange(allowSnooze)}
+          />
+        )}
         <AdminSwitch
           checked={dismiss}
           description={dismiss ? undefined : C.links.closedNote}

@@ -541,6 +541,42 @@ test("cópia de recuperação: grava, lê com o zod, descarta a inválida e some
   assert.equal(recovery.browserFreeRecoveryStorage(), null, "no Node nao ha janela");
 });
 
+test("mudança desde o salvar: a regra do Lembrar depois conta, mesmo fora do histórico (o Concluir só troca de endereço sem ela pendente)", () => {
+  // docs/27 §13.7 e §4.13: "Salvar rascunho" -> desliga a chave -> Concluir. Sem a chave na conta, o Z trocava de
+  // endereco, remontava o editor do aviso a partir do banco e a chave voltava ligada em silencio.
+  const saved = recovery.freeEntrySignature({ cta: CTA, design: design([TITLE, CTA_NODE, LINKS]) });
+  const other = recovery.freeEntrySignature({ cta: CTA, design: design([TEXT, CTA_NODE, LINKS]) });
+
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: true, savedAllowSnooze: true, savedSignature: saved, signature: saved }), false);
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: false, savedAllowSnooze: true, savedSignature: saved, signature: saved }), true, "so a chave mudou depois do salvar: ainda ha o que gravar");
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: true, savedAllowSnooze: false, savedSignature: saved, signature: saved }), true);
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: true, savedAllowSnooze: true, savedSignature: saved, signature: other }), true, "o design mudou");
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: false, savedAllowSnooze: false, savedSignature: saved, signature: saved }), false, "desligada e salva assim: nada pendente");
+
+  // O editor usa a conta e guarda a chave salva junto com a assinatura; o editor do aviso so troca de endereco com
+  // os dois lados limpos (o dele e o do Livre).
+  const editorSource = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+  assert.match(editorSource, /freeDirtySinceSave\(\{ allowSnooze: content\.allowSnooze, savedAllowSnooze, savedSignature, signature \}\)/);
+  assert.match(editorSource, /setSavedAllowSnooze\(allowSnoozeSnapshot\)/);
+  const noticeSource = readFileSync(new URL("../src/components/admin/v2/communication/notice-editor.tsx", import.meta.url), "utf8");
+  assert.match(noticeSource, /!result\.dirtySinceSave && !dirty/);
+});
+
+test("recuperar a cópia: a regra do Lembrar depois só volta quando a cópia a guardou como booleano e ela é diferente", () => {
+  const entry = { cta: CTA, design: design([TITLE, CTA_NODE, LINKS]), savedAt: "2026-10-23T17:05:00.000Z" };
+
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: false }, true), false);
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: true }, false), true);
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: true }, true), null, "igual: nada a mudar");
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: false }, false), null);
+  assert.equal(recovery.allowSnoozeToRestore(entry, true), null, "copia de antes, sem a chave");
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: "sim" }, true), null, "so booleano");
+  assert.equal(recovery.allowSnoozeToRestore(null, true), null);
+
+  const editorSource = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+  assert.match(editorSource, /allowSnoozeToRestore\(recovery, content\.allowSnooze\)/, "o recuperar usa a conta");
+});
+
 test("Camadas: setas na linha, E esconde, T trava", () => {
   const key = (value, extra = {}) => ({ altKey: false, ctrlKey: false, key: value, metaKey: false, shiftKey: false, ...extra });
   const at = { button: 0, buttons: 4, row: 2, rows: 5 };

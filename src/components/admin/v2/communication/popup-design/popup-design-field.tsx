@@ -194,6 +194,8 @@ export type PopupDesignFieldProps = {
    * Modelos quando os modelos estao ligados). `saveConfirm`: a pergunta de D29 antes do primeiro salvar.
    */
   freeEditor?: {
+    /** false na pagina do modelo de Design: a chave "Permitir “Lembrar depois”" de Links › Conteúdo vira uma nota. */
+    allowSnoozeEditable?: boolean;
     recoveryKey: string;
     saveConfirm?: FreeDesignEditorProps["saveConfirm"];
     saveLabel: string;
@@ -1046,6 +1048,7 @@ export function PopupDesignField({
         <FreeDesignEditor
           content={{
             allowSnooze: draft.allowSnooze,
+            allowSnoozeEditable: freeEditorSetup?.allowSnoozeEditable ?? true,
             audio: draft.audio,
             cta: draft.cta,
             ctaOptional: freeEditorSetup !== null,

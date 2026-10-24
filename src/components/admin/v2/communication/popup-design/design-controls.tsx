@@ -8,7 +8,7 @@ import { HEX_COLOR_PATTERN, POPUP_DESIGN_LIMITS, alphaPercentOf, withAlphaPercen
 import { PillGroup, adminInputClass, type PillOption } from "../../form";
 import { AdminSwitch } from "../../settings/kit";
 import { adminTransition } from "../../styles";
-import { PAINT_KIND_OPTIONS, POPUP_DESIGN_COPY, clampNumber, paintOfKind, parseBoundedNumber, rangeMessage, type PaintKind } from "./popup-design-editor-model";
+import { OPACITY_BOUNDS, PAINT_KIND_OPTIONS, POPUP_DESIGN_COPY, clampNumber, opacityAfterBlur, paintOfKind, parseBoundedNumber, rangeMessage, type PaintKind } from "./popup-design-editor-model";
 
 // Pecas pequenas do card "Design" (docs/26): secao com titulo, numero com limite, cor (#RRGGBB ou #RRGGBBAA com o
 // seletor do navegador e a opacidade em %), pintura (cor ou degrade), borda, cantos com "Pílula", lista e a dica de contraste. Mesmo
@@ -212,8 +212,6 @@ type ColorFieldProps = {
   value: HexColor;
 };
 
-const OPACITY_BOUNDS = { integer: true, max: 100, min: 0 } as const;
-
 /**
  * Cor: o texto (#RRGGBB ou #RRGGBBAA, o fim e a transparencia), o seletor do navegador ao lado (so #RRGGBB: a
  * transparencia que ja estava no texto continua) e a opacidade em % (0 a 100; 100 grava os 6 digitos, nunca "ff").
@@ -286,6 +284,8 @@ export function ColorField({ disabled, error, id, label, labelHidden = false, on
         />
         <span className="flex shrink-0 items-center gap-1">
           <input
+            aria-describedby={message ? `${id}-error` : undefined}
+            aria-invalid={message ? true : undefined}
             aria-label={`${label}: ${POPUP_DESIGN_COPY.color.opacity}`}
             className={cn(adminInputClass, "w-[4.5rem] tabular-nums")}
             disabled={disabled}
@@ -294,13 +294,13 @@ export function ColorField({ disabled, error, id, label, labelHidden = false, on
             max={OPACITY_BOUNDS.max}
             min={OPACITY_BOUNDS.min}
             onBlur={() => {
-              const parsed = Number(opacityText.trim());
+              // So uma cor diferente vai para o design (no Livre, cada mudanca e um passo do historico).
+              const next = opacityAfterBlur(opacityText, value);
 
-              if (Number.isFinite(parsed) && opacityText.trim() !== "") {
-                const next = clampNumber(Math.round(parsed), OPACITY_BOUNDS.min, OPACITY_BOUNDS.max);
-                commitOpacity(next, String(next));
+              if (next.changed) {
+                commit(next.hex, next.text);
               } else {
-                setOpacityText(String(alphaPercentOf(value)));
+                setOpacityText(next.text);
               }
             }}
             onChange={(event) => {

@@ -185,6 +185,37 @@ test("ColorField: 6 digitos = 100 %, desabilitado desabilita a opacidade, rotulo
   assert.match(input(escondido, 'aria-label="Fundo: opacidade"'), /id="popup-design-cartao-fundo-cor-opacidade"/);
 });
 
+test("opacityAfterBlur: fora de 0 a 100 encosta no limite, vazio volta ao que vale e so uma cor diferente conta como mudanca", () => {
+  // docs/26 §2.2. `changed` false = nada vai para o design (no Livre, cada mudanca e um passo do historico).
+  assert.deepEqual(editorModel.opacityAfterBlur("50", "#ffffff80"), { changed: false, hex: "#ffffff80", text: "50" }, "ja estava em 50");
+  assert.deepEqual(editorModel.opacityAfterBlur("150", "#ffffff80"), { changed: true, hex: "#ffffff", text: "100" }, "encosta em 100 e grava os 6 digitos");
+  assert.deepEqual(editorModel.opacityAfterBlur("-5", "#ffffff80"), { changed: true, hex: "#ffffff00", text: "0" }, "encosta em 0");
+  assert.deepEqual(editorModel.opacityAfterBlur("", "#ffffff80"), { changed: false, hex: "#ffffff80", text: "50" }, "vazio volta ao que vale");
+  assert.deepEqual(editorModel.opacityAfterBlur("  ", "#000000b3"), { changed: false, hex: "#000000b3", text: "70" });
+  assert.deepEqual(editorModel.opacityAfterBlur("abc", "#000000b3"), { changed: false, hex: "#000000b3", text: "70" });
+  assert.deepEqual(editorModel.opacityAfterBlur("100", "#ffffff"), { changed: false, hex: "#ffffff", text: "100" }, "100 numa cor de 6 digitos: nada muda");
+  assert.deepEqual(editorModel.opacityAfterBlur("150", "#ffffff"), { changed: false, hex: "#ffffff", text: "100" }, "o numero encosta, a cor ja era essa");
+  assert.deepEqual(editorModel.opacityAfterBlur("49.6", "#ffffff"), { changed: true, hex: "#ffffff80", text: "50" }, "arredonda");
+  assert.deepEqual(editorModel.OPACITY_BOUNDS, { integer: true, max: 100, min: 0 });
+
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-design/design-controls.tsx", import.meta.url), "utf8");
+  assert.match(source, /opacityAfterBlur\(opacityText, value\)/, "o campo decide o sair pela conta");
+});
+
+test("ColorField: com erro, o numero da opacidade aponta para a mensagem e fica invalido, como o texto da cor; sem erro, nenhum dos dois", () => {
+  const comErro = renderColor({ error: "Escolha uma cor." });
+  const opacidade = input(comErro, 'aria-label="Cor do X: opacidade"');
+
+  assert.match(opacidade, /aria-describedby="popup-design-x-cor-error"/);
+  assert.match(opacidade, /aria-invalid="true"/);
+  assert.match(input(comErro, 'id="popup-design-x-cor"'), /aria-describedby="popup-design-x-cor-error"/);
+  assert.match(comErro, /id="popup-design-x-cor-error"[^>]*>[\s\S]*Escolha uma cor\./);
+
+  const semErro = input(renderColor(), 'aria-label="Cor do X: opacidade"');
+  assert.doesNotMatch(semErro, /aria-describedby=/);
+  assert.doesNotMatch(semErro, /aria-invalid=/, "o atributo (a classe aria-invalid: do Tailwind fica)");
+});
+
 test("todo campo de cor do Design e do Livre e o mesmo ColorField (a opacidade vale em todos, inclusive na Cor do X)", async () => {
   const pastas = ["../src/components/admin/v2/communication/popup-design/", "../src/components/admin/v2/communication/popup-free/"];
   const comSeletorProprio = [];

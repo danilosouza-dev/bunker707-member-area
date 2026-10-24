@@ -57,9 +57,9 @@ async function lerAviso(titulo: string) {
   const db = createLocalAdminClient();
 
   return unwrap(
-    await db.from("campaigns").select("id,cta_href,cta_label,popup_design,status").eq("kind", "popup").eq("title", titulo).is("deleted_at", null).maybeSingle(),
+    await db.from("campaigns").select("id,allow_snooze,cta_href,cta_label,popup_design,status").eq("kind", "popup").eq("title", titulo).is("deleted_at", null).maybeSingle(),
     `Lendo o pop-up "${titulo}"`
-  ) as { cta_href: string | null; cta_label: string | null; id: string; popup_design: DesignGravado | null; status: string } | null;
+  ) as { allow_snooze: boolean; cta_href: string | null; cta_label: string | null; id: string; popup_design: DesignGravado | null; status: string } | null;
 }
 
 /** Quando o pop-up voltou a contar como novo para a aluna ("Mostrar de novo para quem já viu"); null = nunca. */
@@ -426,6 +426,14 @@ test.describe("produtor", () => {
       await expect(editor.getByText("Sem “Lembrar depois”, o pop-up volta só pela regra de “Quantas vezes”.", { exact: true })).toBeVisible();
       await expect(cartao.getByText("Lembrar depois", { exact: true })).toHaveCount(0);
       await expect(cartao.getByText("Não mostrar de novo", { exact: true })).toBeVisible();
+
+      // A chave desligada e mudanca desde o ultimo salvar (mesmo fora do historico): o Concluir agora nao trocaria de
+      // endereco (trocar remontaria o editor a partir do banco e perderia a chave). Salvar de novo grava o allow_snooze
+      // e devolve o fluxo de antes.
+      await editor.getByRole("button", { name: "Salvar rascunho" }).click();
+      await expect.poll(async () => (await lerAviso(TITULO))?.allow_snooze, { timeout: 15_000 }).toBe(false);
+      await expect(editor).toBeVisible();
+      expect(page.url()).toMatch(/\/admin\/comunicacao\/avisos\/novo/);
     });
 
     await test.step("Concluir: o endereco passa a ser o do aviso, o card mostra o resumo", async () => {

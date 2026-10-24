@@ -88,6 +88,8 @@ import {
   FREE_RECOVERY_DELAY_MS,
   browserFreeRecoveryStorage,
   clearFreeRecovery,
+  allowSnoozeToRestore,
+  freeDirtySinceSave,
   freeEntrySignature,
   freeRecoveryDiffers,
   freeRecoveryKey,
@@ -124,6 +126,11 @@ const FREE_POSITION_ANNOUNCE_MS = 500;
 
 export type FreeEditorContent = {
   allowSnooze: boolean;
+  /**
+   * Links › Conteúdo mostra a chave "Permitir “Lembrar depois”" (padrao). false na pagina do modelo de Design (docs/28
+   * §1.7): o modelo nao guarda a regra, entao no lugar da chave fica a nota de que ela se define no aviso.
+   */
+  allowSnoozeEditable?: boolean;
   audio: NoticeDraft["audio"];
   cta: NoticeDraft["cta"];
   /**
@@ -377,8 +384,10 @@ function FreeEditorSession({
     return saved && freeRecoveryDiffers(saved, initialEntry) ? saved : null;
   });
   const [savedSignature, setSavedSignature] = useState(() => freeEntrySignature(initialEntry));
+  // A regra do "Lembrar depois" fica fora do historico, mas conta como mudanca (o Z nao troca de endereco com ela pendente).
+  const [savedAllowSnooze, setSavedAllowSnooze] = useState(content.allowSnooze);
   const signature = useMemo(() => freeEntrySignature(history.present), [history.present]);
-  const dirtySinceSave = signature !== savedSignature;
+  const dirtySinceSave = freeDirtySinceSave({ allowSnooze: content.allowSnooze, savedAllowSnooze, savedSignature, signature });
 
   const rootRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -536,8 +545,10 @@ function FreeEditorSession({
 
     commit({ cta: recovery.cta, design: recovery.design });
 
-    if (typeof recovery.allowSnooze === "boolean" && recovery.allowSnooze !== content.allowSnooze) {
-      content.onAllowSnoozeChange(recovery.allowSnooze);
+    const allowSnooze = allowSnoozeToRestore(recovery, content.allowSnooze);
+
+    if (allowSnooze !== null) {
+      content.onAllowSnoozeChange(allowSnooze);
     }
 
     setRecovery(null);
@@ -990,6 +1001,7 @@ function FreeEditorSession({
     }
 
     const snapshot = historyRef.current.present;
+    const allowSnoozeSnapshot = content.allowSnooze;
 
     flush();
     setSaving(true);
@@ -1010,6 +1022,7 @@ function FreeEditorSession({
       const message = freeSavedMessage(result.message);
 
       setSavedSignature(freeEntrySignature(snapshot));
+      setSavedAllowSnooze(allowSnoozeSnapshot);
       setServerState(null);
       clearFreeRecovery(storage, recoveryKey);
       adminToast.success(message);

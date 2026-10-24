@@ -198,6 +198,21 @@ test.describe("produtor", () => {
     await opacidadeDoX.blur();
     await expect(fechar.locator("#popup-design-x-cor")).toHaveValue("#ffffff80");
 
+    // Ao sair do campo (docs/26 §2.2): fora de 0 a 100 encosta no limite (100 grava os 6 digitos); vazio volta ao que valia.
+    await opacidadeDoX.fill("150");
+    await opacidadeDoX.blur();
+    await expect(opacidadeDoX).toHaveValue("100");
+    await expect(fechar.locator("#popup-design-x-cor")).toHaveValue("#ffffff");
+    await opacidadeDoX.fill("");
+    await opacidadeDoX.blur();
+    await expect(opacidadeDoX).toHaveValue("100");
+    await expect(fechar.locator("#popup-design-x-cor")).toHaveValue("#ffffff");
+
+    // De volta aos 50 %: e isso que fica gravado (close.color "#ffffff80").
+    await opacidadeDoX.fill("50");
+    await opacidadeDoX.blur();
+    await expect(fechar.locator("#popup-design-x-cor")).toHaveValue("#ffffff80");
+
     // As duas previas (celular e computador) mostram o titulo novo nas cores escolhidas e o botao em degrade.
     const previa = page.getByRole("region", { exact: true, name: "Prévia" });
     for (const aparelho of ["celular", "computador"]) {
