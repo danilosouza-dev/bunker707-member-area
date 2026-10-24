@@ -442,6 +442,39 @@ test("snapshot: o <video> cujo arquivo nao carregou (error) nao toca, mesmo com 
   parar();
 });
 
+test("snapshot: o <video> que nem chegou aos metadados (readyState 0) nao toca, mesmo com paused false (o carregamento pendurado no WebKit); no meio do video, esperar dados continua tocando", () => {
+  recomecarDom();
+  const { video } = montarPalco({ video: { ended: false, error: null, paused: false, readyState: 0 } });
+
+  assert.equal(media.lessonMediaSnapshot().playing, false, "HAVE_NOTHING: nenhum quadro na tela");
+  assert.equal(media.lessonMediaSnapshot().readable, true, "continua o nosso player");
+
+  video.readyState = 1;
+  assert.equal(media.lessonMediaSnapshot().playing, true, "HAVE_METADATA (depois de um salto): tocando, o pop-up espera");
+  video.readyState = 2;
+  assert.equal(media.lessonMediaSnapshot().playing, true, "HAVE_CURRENT_DATA (falha da rede no meio): tocando");
+  video.readyState = 4;
+  assert.equal(media.lessonMediaSnapshot().playing, true);
+
+  // Com o video que nunca carrega, a conferencia de 1 s da espera acaba sozinha (nenhum evento chega).
+  mock.timers.enable({ apis: ["setInterval"] });
+
+  try {
+    let parou = 0;
+    const parar = media.waitLessonMediaStop(() => {
+      parou += 1;
+    });
+
+    assert.equal(parou, 0, "tocando (readyState 4): a espera comeca sem decidir");
+    video.readyState = 0;
+    mock.timers.tick(1_000);
+    assert.equal(parou, 1, "a conferencia de 1 s ve o video sem quadro e libera o pop-up");
+    parar();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
 test("snapshot: tela cheia da pagina e a tela cheia propria do iPhone (webkitDisplayingFullscreen)", () => {
   recomecarDom();
   const { video } = montarPalco();

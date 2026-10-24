@@ -68,8 +68,11 @@ const STOP_RECHECK_MS = 1_000;
 /** O teto da ponte pendente (EMBED_BRIDGE_RULES.pendingMaxMs; tests/pop-ups-v3b2-navegador confere que e o mesmo). */
 const BRIDGE_PENDING_MS = 15_000;
 
-/** `error`: o arquivo nao carregou (o WebKit deixa `paused` false depois do play que falhou). */
-type VideoLike = { ended?: boolean; error?: unknown; paused?: boolean; webkitDisplayingFullscreen?: boolean };
+/**
+ * `error`: o arquivo nao carregou (o WebKit deixa `paused` false depois do play que falhou); `readyState` 0
+ * (HAVE_NOTHING): nem os metadados chegaram, nenhum quadro na tela (o carregamento que nunca termina).
+ */
+type VideoLike = { ended?: boolean; error?: unknown; paused?: boolean; readyState?: number; webkitDisplayingFullscreen?: boolean };
 
 type EmbedState = { bridge: EmbedBridge; fullscreen: boolean; lessonId: string | null; playing: boolean };
 
@@ -180,8 +183,11 @@ export function lessonMediaSnapshot(): LessonMediaSnapshot {
   const playerKind = kind && PLAYER_KINDS.includes(kind) ? (kind as LessonPlayerKind) : null;
   const activeLessonId = stage?.getAttribute("data-lesson-id") || null;
   const video = stageVideo(stage);
-  // O arquivo que nao carregou (video.error) nao toca: no WebKit o play que falhou deixa paused false para sempre.
-  const nativePlaying = Boolean(video && !video.paused && !video.ended && !video.error);
+  // O arquivo que nao carregou (video.error) ou que nem chegou aos metadados (readyState 0, HAVE_NOTHING: o
+  // carregamento pendurado, a CDN fora) nao toca: nenhum quadro na tela. No WebKit o play que falhou, ou que ficou
+  // esperando um arquivo que nao vem, deixa paused false para sempre. No meio do video, a espera por dados
+  // (readyState 1 ou 2, depois de um salto ou de uma falha da rede) continua "tocando": o pop-up espera.
+  const nativePlaying = Boolean(video && !video.paused && !video.ended && !video.error && video.readyState !== 0);
   const bridge = bridgeOf(stage, playerKind, activeLessonId);
   const embedActive = bridge === "confirmed";
 

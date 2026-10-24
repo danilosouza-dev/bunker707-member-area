@@ -63,6 +63,32 @@ async function irPeloMenu(page: Page, nome: string, endereco: string) {
   await expect(gaveta).toBeHidden();
 }
 
+/** O que o pop-up le da pagina da aula com o nosso player (a mensagem de um teste que falhou no CI). */
+async function estadoDoPlayerNativo(page: Page) {
+  return page.evaluate(() => {
+    const video = document.querySelector("[data-lesson-player-stage] video") as (HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }) | null;
+
+    return {
+      activeElement: document.activeElement?.tagName ?? null,
+      bodyOverflow: document.body.style.overflow,
+      dialogos: document.querySelectorAll('[role="dialog"], [aria-modal="true"]').length,
+      fullscreen: document.fullscreenElement !== null,
+      topoAberto: document.querySelectorAll('[data-member-topbar] [aria-expanded="true"]').length,
+      video: video
+        ? {
+            ended: video.ended,
+            error: video.error?.code ?? null,
+            networkState: video.networkState,
+            paused: video.paused,
+            readyState: video.readyState,
+            webkitFullscreen: Boolean(video.webkitDisplayingFullscreen)
+          }
+        : null,
+      visibilidade: document.visibilityState
+    };
+  });
+}
+
 /**
  * Espera o tempo de um pop-up "Ao abrir a página" (3 s) com folga e confere que nada abriu. `espera` (ms) estica
  * a folga quando a decisao de nao abrir vem depois (a aula com player de fora que nao responde a ponte).
@@ -223,7 +249,12 @@ test.describe("players da aula: o nosso, o de fora tocando e o de fora no toque"
     await page.goto(AULA_3, { waitUntil: "commit" });
     await page.waitForRequest((request) => RESUMO.test(new URL(request.url()).pathname));
     await page.getByRole("button", { name: "Reproduzir aula" }).click();
-    // O arquivo nao carrega (rede de fora cortada): o video nao toca, e o pop-up abre como depois de pausar.
+    // O arquivo nao carrega (rede de fora cortada): o video nao toca (no Chromium o play e recusado e paused fica
+    // true; no WebKit o carregamento fica pendurado, paused vira false e readyState fica em 0), e o pop-up abre
+    // como depois de pausar. Se nao abrir, a mensagem traz o estado do <video> e da pagina, para dizer o que segurou.
+    await expect
+      .poll(async () => ((await popUp.count()) > 0 ? "aberto" : JSON.stringify(await estadoDoPlayerNativo(page))), { timeout: 10_000 })
+      .toBe("aberto");
     await expect(popUp).toBeVisible();
     expect(aberturas.total).toBe(1);
     await popUp.getByRole("button", { name: "Fechar" }).click();
