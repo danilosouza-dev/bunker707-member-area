@@ -121,8 +121,18 @@ async function mostrar(user, id, page, trigger = "page_load") {
     new Request(`http://localhost/api/popups/${id}/show`, { body: JSON.stringify({ page, trigger }), headers: { "content-type": "application/json" }, method: "POST" }),
     { params: Promise.resolve({ id }) }
   );
+  const corpo = await response.json();
 
-  return { body: await response.json(), status: response.status };
+  // v3b-2: todo 409 traz a hora do servidor (asOf, ISO, nunca no futuro); conferida aqui e tirada do corpo para os
+  // testes compararem o resto palavra por palavra.
+  if (response.status === 409) {
+    const { asOf, ...resto } = corpo;
+    assert.match(asOf, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, "o 409 traz asOf");
+    assert.ok(Date.parse(asOf) <= Date.now());
+    return { asOf, body: resto, status: response.status };
+  }
+
+  return { body: corpo, status: response.status };
 }
 
 /** Evento como o navegador manda no sendBeacon: corpo JSON em text/plain. */
