@@ -1,4 +1,4 @@
-// Ponte com os players de fora da pagina da aula (Bunny, Vimeo, Mux; docs/29 §5.5): a pagina passa a saber
+// Ponte com os players de fora da pagina da aula (Bunny, Vimeo, Mux; docs/29 §4.4): a pagina passa a saber
 // quando o video do iframe toca, pausa e acaba, sem SDK de terceiro, sem script de fora e sem mudar a CSP. So
 // mensagens entre janelas (postMessage), nos protocolos publicos dos players: o do Vimeo ({ method, value } /
 // { event, data }) e o Player.js (Bunny e Mux: texto JSON com context "player.js").

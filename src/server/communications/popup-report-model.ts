@@ -1,4 +1,4 @@
-// Relatorio do pop-up (v3b-2, docs/29 §6.5): as linhas de communication_popup_report (202610260001) viram os
+// Relatorio do pop-up (v3b-2, docs/29 §2.6 e §4.6): as linhas de communication_popup_report (202610260001) viram os
 // quatro numeros e os quatro blocos da pagina do pop-up ("Onde apareceu", "Em que momento", "Como fecharam" e
 // "Quantas vezes cada aluno viu"). As linhas chegam sem confiar no formato (metrica numa lista fixa, item
 // conferido por metrica, numeros finitos >= 0; o resto e ignorado). "Vezes que apareceu" e as faixas vem das
@@ -34,7 +34,7 @@ export type PopupReportView = {
 };
 
 /* ------------------------------------------------------------------------------------------------
- * Textos (docs/29 §6.5)
+ * Textos (docs/29 §2.6)
  * ---------------------------------------------------------------------------------------------- */
 
 /** Tipos de pagina na ordem do menu (o desempate de "Onde apareceu"). */
@@ -56,7 +56,7 @@ export const POPUP_REPORT_COPY = {
   failure: "Não foi possível carregar estes números agora. Recarregue a página.",
   footnote:
     "“Onde apareceu”, “Em que momento” e “Como fecharam” contam cada vez que o pop-up apareceu, pelo histórico (até 100 vezes por aluno por dia). “Vezes que apareceu” e “Quantas vezes cada aluno viu” vêm da conta de cada aluno e são exatas. “Sem registro”: vezes em que o aluno saiu sem o navegador conseguir avisar. A equipe não entra nos números.",
-  /** Chave propria: a retencao do historico (docs/29 §2.2, D2) troca so ela. */
+  /** Chave propria: a retencao do historico (docs/29 §9.1, D2) troca so ela. */
   footnoteHistory: "Nas vezes mais antigas, o histórico não guardava a página nem o jeito de fechar: elas aparecem como Início e “Fecharam (sem detalhe)”.",
   kpis: {
     max: "No máximo, para um aluno",

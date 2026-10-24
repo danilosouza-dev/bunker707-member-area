@@ -583,7 +583,7 @@ export function reshownPopupToast(count: number, mode: "once" | "repeat" = "once
 const POPUP_DELAY_SUFFIX = "Para quem já está com a área aberta, pode levar até 1 minuto.";
 
 /**
- * v3b-2 (docs/29 §6.4): o pop-up que foi ao ar, como o servidor devolve em PublishedNotice.popup (publicar e
+ * v3b-2 (docs/29 §2.5 e §6.2): o pop-up que foi ao ar, como o servidor devolve em PublishedNotice.popup (publicar e
  * aprovar): o Comeca no futuro e o momento. Sem a chave (notificacao, servidor de antes), o toast de antes.
  */
 export type PublishedPopupInfo = { startsInFuture: boolean; trigger: PopupTrigger };

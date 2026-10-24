@@ -842,7 +842,7 @@ export type PopUpDeTeste = {
   /** Onde aparece (padroes de popup-display-model.ts). Padrao ["home"]. */
   paginas?: string[];
   /**
-   * v3b-2 (docs/29 §6.1): so com `quando: "first_login"`, os produtos de "A primeira vez com estes produtos" (ids de
+   * v3b-2 (docs/29 §2.2): so com `quando: "first_login"`, os produtos de "A primeira vez com estes produtos" (ids de
    * content_items); vazio ou sem a chave = "A primeira vez na área".
    */
   produtosDoPrimeiroAcesso?: string[];
@@ -1171,7 +1171,7 @@ export async function segmentoDoAviso(titulo: string) {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Comunicacao v3b-2 (docs/29 §8.4): hora marcada, "No primeiro acesso", "Ao concluir um curso", relatorio do
+ * Comunicacao v3b-2 (docs/29 §9.3): hora marcada, "No primeiro acesso", "Ao concluir um curso", relatorio do
  * pop-up e as paginas falsas dos players de fora (Vimeo e Player.js) servidas nas URLs reais
  * ---------------------------------------------------------------------------------------------- */
 
@@ -1220,7 +1220,7 @@ export async function tirarAcessoDeTeste(chave: ChaveDaConta, productId: string)
 
 /**
  * Recalcula agora quem ve o pop-up (o segmento e, no "No primeiro acesso", quem conta como aluno novo): zera
- * audience_refreshed_at (nulo vence qualquer faixa do recalculo, docs/29 §4.9) e roda o tick do app.
+ * audience_refreshed_at (nulo vence qualquer faixa do recalculo, docs/29 §4.7) e roda o tick do app.
  */
 export async function recalcularPopUp(campaignId: string) {
   const db = createLocalAdminClient();
@@ -1310,7 +1310,7 @@ type ConfigDoPlayerFalso = Required<OpcoesDoPlayerFalso> & {
 /**
  * A pagina falsa de um player de fora: botoes Tocar, Pausar e Terminar e o estado ("carregando", "pronto" depois
  * de responder o getPaused, que e o que confirma a ponte do lado da aula). Fala como o player de verdade (docs/29
- * §5.5): manda para window.parent com a targetOrigin da origem do referrer; no Vimeo, `{event:"ready"}` so no
+ * §4.4): manda para window.parent com a targetOrigin da origem do referrer; no Vimeo, `{event:"ready"}` so no
  * `load`, o `ping` respondido com `{method:"ping"}` (nunca com ready), inscricoes `addEventListener` e
  * `{method:"getPaused",value}`; no Player.js, texto JSON com context "player.js", ready no `load` e de novo a quem
  * se inscreve no `ready`, inscricoes com `listener` e a resposta do getPaused com o listener pedido. Os eventos so
@@ -1465,7 +1465,7 @@ async function servirPlayerFalso(page: Page, origem: string, config: ConfigDoPla
 }
 
 /**
- * O player do Vimeo de mentira em https://player.vimeo.com/** (docs/29 §8.4): o iframe da aula com Vimeo carrega
+ * O player do Vimeo de mentira em https://player.vimeo.com/** (docs/29 §4.4 e §9.3): o iframe da aula com Vimeo carrega
  * esta pagina com a origem verdadeira, e a conferencia de origem da ponte e exercitada de verdade.
  */
 export async function paginaFalsaDoVimeo(page: Page, opcoes: OpcoesDoPlayerFalso = {}) {

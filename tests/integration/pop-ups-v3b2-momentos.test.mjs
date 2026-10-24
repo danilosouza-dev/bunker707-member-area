@@ -13,7 +13,7 @@ import {
   usuarioDeTeste
 } from "../fixtures/escola-de-teste.mjs";
 
-// Pop-ups da v3b-2 (docs/29 §8.3) contra o banco LOCAL de verdade: a hora marcada (o resumo leva o startsAt,
+// Pop-ups da v3b-2 (docs/29 §4.1 a §4.3 e §9.3) contra o banco LOCAL de verdade: a hora marcada (o resumo leva o startsAt,
 // o show antes da hora e 409 not_started, na hora abre), "No primeiro acesso" (a primeira vez na area e com
 // estes produtos, a marca first_access_at, o reembolso que tira, as linhas de um app antigo que saem), a trava
 // da troca de momento num pop-up que ja foi ao ar, o PublishedNotice.popup do toast (publicar e aprovar), "Ao

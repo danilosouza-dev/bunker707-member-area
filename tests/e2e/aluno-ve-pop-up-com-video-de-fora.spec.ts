@@ -21,7 +21,7 @@ import {
 } from "./fixtures";
 import { ESCOLA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
 
-// Pop-up com os players de fora da aula (Bunny, Vimeo e Mux; docs/29 §5.4, §5.5 e §8.4; docs/18 §3.1). Os players
+// Pop-up com os players de fora da aula (Bunny, Vimeo e Mux; docs/29 §1.4, §4.4, §4.5 e §9.3; docs/18 §3.1). Os players
 // sao paginas falsas servidas nas URLs reais (page.route vence o corte de rede do contexto): o iframe fica com a
 // origem verdadeira do player e a conferencia de origem da ponte e exercitada de verdade. Cada pagina falsa fala o
 // protocolo do player (Vimeo ou Player.js) e escreve "pronto" quando responde o getPaused (a confirmacao da ponte).

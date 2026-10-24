@@ -16,7 +16,7 @@ import type { PopupReportResult } from "@/server/communications/queries";
 import { KpiTile } from "../kpi-tile";
 import { adminCard } from "../styles";
 
-// Relatorio do pop-up (v3b-2, docs/29 §6.5): "Como o pop-up foi visto", desde a publicacao, com os quatro
+// Relatorio do pop-up (v3b-2, docs/29 §2.6): "Como o pop-up foi visto", desde a publicacao, com os quatro
 // numeros (KpiTile, 4 por linha e 2 colunas abaixo de 768 px) e os quatro blocos de barras horizontais simples
 // como as da enquete (o numero escrito ao lado; a barra fora do leitor de tela), nada de pizza ou rosca. "Ver
 // como tabela" troca os quatro blocos de uma vez por <table> com <caption> e <th scope="col">; abaixo de 768 px

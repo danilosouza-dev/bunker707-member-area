@@ -1404,7 +1404,7 @@ export function LessonExperience({
   const videoRef = useRef<HTMLVideoElement>(null);
   const youtubeIframeRef = useRef<HTMLIFrameElement>(null);
   // Iframe do player de fora (Bunny, Vimeo, Mux) por estado: ele monta um quadro depois do primeiro desenho e a
-  // ponte (useLessonEmbedBridge) liga de novo quando ele chega (docs/29 §5.7).
+  // ponte (useLessonEmbedBridge) liga de novo quando ele chega (docs/29 §4.4).
   const [embedIframe, setEmbedIframe] = useState<HTMLIFrameElement | null>(null);
   const youtubePlayerRef = useRef<YouTubePlayer | null>(null);
   const pendingTutorSeekRef = useRef<PendingTutorSeek | null>(null);
@@ -1780,7 +1780,7 @@ export function LessonExperience({
       if (response.ok) {
         // So agora a avaliacao/o progresso estao gravados: a aba Materiais pode perguntar de novo.
         setSavedMaterialLearnerStates((current) => applySavedProgressToLearnerStates(current, payload));
-        // A gravacao que fechou o curso traz courseCompleted (docs/29 §4.4): o pop-up "Ao concluir um curso".
+        // A gravacao que fechou o curso traz courseCompleted (docs/29 §4.3): o pop-up "Ao concluir um curso".
         const body: unknown = await response.json().catch(() => null);
         return { courseCompleted: courseCompletedOf(body), saved: true };
       }
@@ -1876,7 +1876,7 @@ export function LessonExperience({
 
     if (saved && completesLesson && latest) {
       // Conclusao gravada: o pop-up "ao concluir uma aula" (e, se fechou o curso, "ao concluir um curso") pode
-      // abrir (docs/25 §1.4, docs/29 §5.3).
+      // abrir (docs/25 §1.4, docs/29 §4.3).
       announceLessonMedia({ contentId: item.id, ...(courseCompleted ? { courseCompleted: true } : {}), kind: "completed", lessonId });
     }
 
@@ -1893,7 +1893,7 @@ export function LessonExperience({
   ]);
 
   function handlePlayerStart() {
-    // Pop-up "ao abrir a página" (docs/25 §1.4, docs/29 §5.4): no player que a pagina nao le, o play o descarta.
+    // Pop-up "ao abrir a página" (docs/25 §1.4, docs/29 §4.5): no player que a pagina nao le, o play o descarta.
     announceLessonMedia({ kind: "touched" });
 
     if (isActiveLessonLocked || !activeLessonKey) {
@@ -1956,7 +1956,7 @@ export function LessonExperience({
     handlePlayerStartRef.current = handlePlayerStart;
   });
 
-  // Ponte com o player de fora (Bunny, Vimeo, Mux; docs/29 §5.5 e §5.7): com ela confirmada, o fim do video
+  // Ponte com o player de fora (Bunny, Vimeo, Mux; docs/29 §4.4): com ela confirmada, o fim do video
   // conclui a aula, o progresso usa o tempo real e o pop-up espera o video parar. Sem resposta, tudo como antes.
   // Antes de qualquer retorno cedo (regra dos hooks); o YouTube tem os nossos controles (nunca esta ponte).
   const embedBridge = useLessonEmbedBridge({
@@ -3580,7 +3580,7 @@ export function LessonExperience({
 
       if (saved && toggle.willComplete && latest) {
         // Concluir gravado: o pop-up "ao concluir uma aula" (e, se fechou o curso, "ao concluir um curso") pode
-        // abrir (docs/25 §1.4, docs/29 §5.3).
+        // abrir (docs/25 §1.4, docs/29 §4.3).
         announceLessonMedia({ contentId: item.id, ...(courseCompleted ? { courseCompleted: true } : {}), kind: "completed", lessonId });
       }
 

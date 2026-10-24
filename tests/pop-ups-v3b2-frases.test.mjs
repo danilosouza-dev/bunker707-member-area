@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
-// Frases da equipe, v3b-2 (docs/29 §6.3; spec §7.3 R; critica 17): cada frase com ramo por momento ganha "No
+// Frases da equipe, v3b-2 (docs/29 §2.5; spec §7.3 R; critica 17): cada frase com ramo por momento ganha "No
 // primeiro acesso" (como "Ao abrir a página", com quem conta como aluno novo) e "Ao concluir um curso" (como
 // "Ao concluir uma aula", com os cursos), palavra por palavra: a frase ao vivo, a revisao com "para quem", a
 // segunda linha da lista, "Detalhes", "Quantas vezes" (revisao, frase ao vivo e avisos) e a nota do curso que

@@ -1,4 +1,4 @@
-// Sinais da pagina da aula para o pop-up dos avisos (docs/25 §4, docs/29 §5.6): o pop-up nunca abre por cima do
+// Sinais da pagina da aula para o pop-up dos avisos (docs/25 §4, docs/29 §4.5): o pop-up nunca abre por cima do
 // player da aula tocando e "Ao concluir uma aula" (e "Ao concluir um curso") so abre depois que o servidor gravou a
 // conclusao. A pagina da aula (lesson-experience.tsx) anuncia por um evento da window: o aluno deu play no nosso
 // player, o YouTube com os nossos controles tocou ou parou, uma aula foi concluida (e se ela fechou o curso) e o

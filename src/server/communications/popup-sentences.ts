@@ -5,7 +5,7 @@
 // tests/pop-ups-v3b1-frases.test.mjs usam as mesmas funcoes. Vocabulario fechado da equipe (docs/17 §1.3):
 // o teste confere as frases.
 //
-// v3b-2 (docs/29 §6.3): cada frase com ramo por momento ganha "No primeiro acesso" (como "Ao abrir a página",
+// v3b-2 (docs/29 §2.5): cada frase com ramo por momento ganha "No primeiro acesso" (como "Ao abrir a página",
 // com quem conta como aluno novo: a area ou os produtos escolhidos) e "Ao concluir um curso" (como "Ao
 // concluir uma aula", com os cursos). Os ramos sao um registro por momento (MOMENT_WORDS), para o curso nunca
 // cair no texto da pagina nem no da aula; tests/pop-ups-v3b2-frases.test.mjs confere cada frase.

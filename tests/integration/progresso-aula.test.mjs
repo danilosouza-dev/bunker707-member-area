@@ -261,7 +261,7 @@ test("sair da pagina manda o progresso por POST (sendBeacon) e grava igual ao PU
   assert.equal(page.selectedModule.progress, 50, "o modulo 2 (1 aula) fica em 50%");
 });
 
-test("v3b-2 (docs/29 §4.4): so a resposta que fecha o curso leva courseCompleted (PUT e beacon); heartbeat e fim repetido nao", async () => {
+test("v3b-2 (docs/29 §4.3): so a resposta que fecha o curso leva courseCompleted (PUT e beacon); heartbeat e fim repetido nao", async () => {
   await limparProgresso(db, [contas.aluna.id]);
   actAs(aluna);
   const todas = [curso.aulas.aula1, curso.aulas.aula2, curso.aulas.aula3];

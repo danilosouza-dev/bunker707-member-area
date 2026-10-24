@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
-// O navegador do aluno na v3b-2 (docs/29 §5): a hora marcada (o pop-up com Comeca arma para a hora do servidor,
+// O navegador do aluno na v3b-2 (docs/29 §4.1, §4.3 e §4.5): a hora marcada (o pop-up com Comeca arma para a hora do servidor,
 // com folga, sorteio e "Quanto tempo depois", sem desistir por tempo), o relogio acertado, a segunda tentativa
 // depois do 409 not_started, o plano mais novo que chega com a pagina aberta (arma, desarma ou troca a hora), o
 // despertador que segue a hora de parede (o aparelho dormindo), "No primeiro acesso" como momento de pagina,
@@ -335,7 +335,7 @@ test("givenUp: a hora marcada (giveUpAt null) nunca desiste por tempo; as outras
 
 // --- 5. O que bloqueia ------------------------------------------------------------------------------------
 
-test("blockReason (docs/29 §5.4): na aula, o momento de pagina espera o video parar em todo player que a pagina le", () => {
+test("blockReason (docs/29 §1.4 e §4.5): na aula, o momento de pagina espera o video parar em todo player que a pagina le", () => {
   for (const trigger of ["page_load", "first_login"]) {
     const armada = naPagina({ trigger });
     const hora = naPagina({ clock: true, giveUpAt: null, key: "pop-a@x", trigger });

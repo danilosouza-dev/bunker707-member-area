@@ -6,7 +6,7 @@ import "server-only";
 // requirePageArea("comunicacao"); banco sem a migracao 202610200001 -> PendingMigrationError (a pagina
 // mostra o aviso da migracao).
 //
-// v3b-2 (docs/29 §6.5): o relatorio do pop-up (getPopupReport: a RPC communication_popup_report e os nomes dos
+// v3b-2 (docs/29 §4.6 e §6.2): o relatorio do pop-up (getPopupReport: a RPC communication_popup_report e os nomes dos
 // produtos citados, com cache de 60 s) e os produtos do "No primeiro acesso" nos nomes de "Detalhes".
 
 import { unstable_cache } from "next/cache";
@@ -669,7 +669,7 @@ async function loadSender(db: CommunicationsDb, userId: string): Promise<NonNull
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Relatorio do pop-up (v3b-2, docs/29 §6.5)
+ * Relatorio do pop-up (v3b-2, docs/29 §4.6)
  * ---------------------------------------------------------------------------------------------- */
 
 export type PopupReportResult = { status: "error" } | { status: "pending_migration" } | { status: "ok"; view: PopupReportView };

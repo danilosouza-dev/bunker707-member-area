@@ -62,7 +62,7 @@ import {
 // v3b-1 (docs/25 §2.9): no pop-up, "Detalhes" ganha, depois de "Quando", Onde, Quando aparece, Quantas vezes e
 // Como fecha (popupSettingsLines, com os nomes dos produtos citados); "Lembrar depois" diz o "Volta em" dele.
 //
-// v3b-2 (docs/29 §6.5): no pop-up que ja foi ao ar, "Como o pop-up foi visto" (o no `popupReport` da pagina,
+// v3b-2 (docs/29 §2.6): no pop-up que ja foi ao ar, "Como o pop-up foi visto" (o no `popupReport` da pagina,
 // num Suspense: o funil nao espera) logo depois do alerta de fechamento alto, antes de Conteúdo e Detalhes.
 
 type NoticeReportProps = {

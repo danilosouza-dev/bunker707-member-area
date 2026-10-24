@@ -1,4 +1,4 @@
-// Curso concluido (Comunicacao v3b-2, docs/29 §4.4): a mesma conta da regra "Progresso 100 %" do segmento
+// Curso concluido (Comunicacao v3b-2, docs/29 §4.3): a mesma conta da regra "Progresso 100 %" do segmento
 // (audience-model.ts, audience-facts.ts): todas as aulas publicadas dos modulos publicados concluidas, e pelo
 // menos uma aula publicada. Usada pela rota de progresso (a resposta que fecha o curso leva courseCompleted),
 // pelo show do pop-up "Ao concluir um curso" (confere de novo no banco) e pela pagina da aula (le a resposta).

@@ -5,7 +5,7 @@ import { announceLessonMedia } from "@/lib/lesson-media-signal";
 import type { EmbedBridge, EmbedCallbacks } from "@/lib/lesson-embed-bridge";
 import { embedBridgeTarget } from "@/lib/lesson-embed-origins";
 
-// A ponte com o player de fora da aula (Bunny, Vimeo, Mux; docs/29 §5.5) dentro do React: so liga e desliga a
+// A ponte com o player de fora da aula (Bunny, Vimeo, Mux; docs/29 §4.4) dentro do React: so liga e desliga a
 // sessao de src/lib/lesson-embed-bridge.ts. O efeito depende so de enabled, do iframe (o elemento, por um ref de
 // funcao com estado: o iframe monta um quadro depois do primeiro desenho), da aula e do src; callbacks novos a
 // cada desenho vao para um ref e nunca religam a ponte. O estado so muda quando a ponte, o tocar ou a tela cheia

@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
-// Guarda da v3b-2 dos pop-ups (docs/29 §3.1 e §8.2; docs/18 §1.2): o que se le na migracao 202610260001.
+// Guarda da v3b-2 dos pop-ups (docs/29 §3, §4.6 e §5; docs/18 §1.2): o que se le na migracao 202610260001.
 // - as migracoes ate a 202610250001 continuam byte a byte, e a 0026 e o texto exato da spec;
 // - cinco secoes pelo MCP (a 5 sozinha), idempotente, sem drop, delete, gatilho, create policy nem concurrently,
 //   exatamente um alter policy (o insert do aluno em student_events recusa as linhas dos avisos) e sem a coluna do
@@ -31,7 +31,7 @@ function functionBody(code, name) {
   return { body: code.slice(open + 2, close), header: code.slice(start, open) };
 }
 
-test("as migracoes ate a 202610250001 continuam byte a byte; a 0026 e o texto exato da spec (§3.1, com o relatorio do integrador)", () => {
+test("as migracoes ate a 202610250001 continuam byte a byte; a 0026 e o texto exato da spec (§3, com o relatorio do integrador)", () => {
   const dir = new URL("supabase/migrations/", root);
   const files = readdirSync(dir)
     .filter((name) => name.endsWith(".sql"))
@@ -50,7 +50,7 @@ test("as migracoes ate a 202610250001 continuam byte a byte; a 0026 e o texto ex
   assert.equal(
     createHash("sha256").update(read(MIGRATION)).digest("hex"),
     "44566be50ca166161f25b222e01944236470e3a515b6bca7320d61d9f3b76ae8",
-    "a 202610260001 e o texto exato da spec (§3.1): mudou? atualize a spec e este hash juntos"
+    "a 202610260001 e o texto exato da spec (§3): mudou? atualize a spec e este hash juntos"
   );
 });
 
@@ -191,4 +191,44 @@ test("o check dos produtos confere id por id (unnest, nunca array_to_string), co
   assert.match(check, /cardinality\(popup_access_products\) = 0 or \(kind = 'popup' and popup_trigger = 'first_login'\)/, "so no primeiro acesso");
   assert.match(code, /revoke all on function public\.communication_popup_products_ok\(text\[\]\) from public, anon, authenticated;/);
   assert.match(code, /grant execute on function public\.communication_popup_products_ok\(text\[\]\) to service_role;/);
+});
+
+test("toda citacao 'docs/29 §N(.M)' em src/ e tests/ aponta para um titulo que existe no docs/29", () => {
+  const spec = read("docs/29-comunicacao-v3b2-momentos-relatorio-e-players.md");
+  const headings = new Set();
+  for (const line of spec.split("\n")) {
+    const heading = /^## (\d+)\. /.exec(line) ?? /^### (\d+\.\d+) /.exec(line);
+    if (heading) headings.add(heading[1]);
+  }
+  assert.ok(headings.has("4.7") && headings.has("9.3"), "o docs/29 tem os titulos numerados");
+
+  const extensions = [".ts", ".tsx", ".mts", ".mjs"];
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = new URL(entry.name + (entry.isDirectory() ? "/" : ""), dir);
+      if (entry.isDirectory()) walk(path);
+      else if (extensions.some((extension) => entry.name.endsWith(extension))) files.push(path);
+    }
+  };
+  walk(new URL("src/", root));
+  walk(new URL("tests/", root));
+
+  const wrong = [];
+  let cited = 0;
+  for (const file of files) {
+    // Um comentario que continua na linha seguinte ("docs/29\n * §4.4") e lido como uma linha so.
+    const text = readFileSync(file, "utf8").replace(/\n[ \t]*(?:\*(?!\/)|\/\/)[ \t]*/g, " ");
+    for (const match of text.matchAll(/docs\/29([^\n]*)/g)) {
+      // So as secoes citadas para o docs/29: ate o proximo documento, ponto e virgula, parentese ou dois pontos.
+      const tail = match[1].split(/docs\/|[;):]/)[0];
+      for (const [, section] of tail.matchAll(/§ ?(\d+(?:\.\d+)?)/g)) {
+        cited += 1;
+        if (!headings.has(section)) wrong.push(`${file.pathname.slice(root.pathname.length)}: docs/29 §${section}`);
+      }
+    }
+  }
+
+  assert.ok(cited >= 70, `pelo menos 70 citacoes do docs/29 (${cited})`);
+  assert.deepEqual(wrong, [], "citacoes do docs/29 sem titulo correspondente");
 });

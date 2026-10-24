@@ -257,7 +257,7 @@ test("textos dos dois cards (docs/25 §2.2–§2.4)", () => {
   assert.equal(placement.whereHint.any, "Em todas as páginas da área do aluno, também nas aulas (com o vídeo parado). Nunca no login nem no Modo TV.");
   assert.equal(placement.exceptionsLabel, "Nunca mostrar em algumas páginas");
   assert.equal(placement.exceptionsLegend, "Nunca nestas páginas");
-  // v3b-2 (docs/29 §6.1): a dica do "Começa" e por momento (a hora marcada ao vivo nos momentos de pagina).
+  // v3b-2 (docs/29 §2.1): a dica do "Começa" e por momento (a hora marcada ao vivo nos momentos de pagina).
   assert.equal(
     placement.startsAtHint.page_load,
     "A partir dessa hora, quem abrir uma das páginas escolhidas vê o pop-up, e quem já estiver numa delas vê na hora (com alguns segundos de diferença entre os alunos)."

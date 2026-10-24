@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { abrirComoProdutor, eventosDoPopUp, expect, publicarPopUp, relatorioDoPopUp, test, zerarComunicacao, zerarProgressoDosAlunos } from "./fixtures";
 
-// Relatorio do pop-up (docs/29 §6.5 e §8.4; docs/18 §3.1): a aluna ve o pop-up em Favoritos e fecha no Esc; o
+// Relatorio do pop-up (docs/29 §2.6 e §9.3; docs/18 §3.1): a aluna ve o pop-up em Favoritos e fecha no Esc; o
 // produtor abre a pagina do pop-up e ve "Como o pop-up foi visto": Vezes que apareceu 1, Favoritos em "Onde
 // apareceu" e "Fecharam no Esc" em "Como fecharam". "Ver como tabela" troca os quatro blocos por tabelas e volta;
 // a 375 px, nos dois modos, a pagina nao rola de lado. O relatorio fica 60 s em cache (a publicacao ja desenhou a

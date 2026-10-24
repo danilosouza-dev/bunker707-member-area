@@ -928,7 +928,7 @@ test("salvar: o design exige exatamente um dos dois; o update exige a versão li
   assert.equal(model.templateNameSchema.parse("  Lançamento  "), "Lançamento");
 });
 
-test("v3b-2 (docs/29 §3.5): modelo de pop-up com 'No primeiro acesso' (e produtos) e com 'Ao concluir um curso' vai e volta igual; o de antes le igual; produtos fora do primeiro acesso somem", () => {
+test("v3b-2 (docs/29 §2.7): modelo de pop-up com 'No primeiro acesso' (e produtos) e com 'Ao concluir um curso' vai e volta igual; o de antes le igual; produtos fora do primeiro acesso somem", () => {
   const comPopup = (popup) => ({ ...schemas.emptyNoticeDraft("popup"), popup: { ...schemas.emptyNoticeDraft("popup").popup, ...popup }, title: "Boas-vindas" });
   const ida = (popup) => model.templatePayloadOfDraft({ draft: comPopup(popup), followUps: null, include: TUDO }).payload;
 

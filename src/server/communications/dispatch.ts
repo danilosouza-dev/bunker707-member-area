@@ -19,7 +19,7 @@ import "server-only";
 // do pop-up no ar pode crescer alem de 500 sem nova aprovacao (decisao em docs/22 §2.3); editar ou
 // retomar o pop-up confere o limite de novo.
 //
-// "No primeiro acesso" (v3b-2, docs/29 §4.6): no mesmo recalculo, so quem conta como aluno novo (no segmento e
+// "No primeiro acesso" (v3b-2, docs/29 §4.2): no mesmo recalculo, so quem conta como aluno novo (no segmento e
 // candidato, popup-first-access.ts) fica elegivel, com a marca first_access_at; quem ja tinha a marca continua
 // enquanto estiver no segmento (em "estes produtos", com acesso aberto a um deles). Linha elegivel sem marca e
 // sem ser candidato (a de um app sem esta regra) sai. Nenhuma leitura nova: os fatos do tick e as linhas de hoje.

@@ -8,7 +8,7 @@ import { esperarAvisoPublicado, expect, gravarRascunhoDePopUp, test, zerarComuni
 // vivo; "Só no X"). A revisao, a legenda da previa, o toast de publicar (ate 1 minuto), as linhas de
 // "Detalhes" do relatorio, a segunda linha da lista e, no pop-up no ar, "Mostrar de novo para quem já viu" em
 // "Mais de uma vez" e a linha de quem ja viu ao mudar onde ele aparece.
-// v3b-2 (docs/29 §6.1, §6.4 e §6.5): as quatro pilulas de "Quando aparece"; no pop-up que ja foi ao ar, a trava do
+// v3b-2 (docs/29 §2.1, §2.2, §2.5 e §2.6): as quatro pilulas de "Quando aparece"; no pop-up que ja foi ao ar, a trava do
 // primeiro acesso nos dois sentidos ("No primeiro acesso" desabilitada e as outras tres nao; num "No primeiro
 // acesso" no ar, as outras tres desabilitadas uma a uma), com a linha ligada pelo aria-describedby do grupo; o
 // relatorio "Como o pop-up foi visto" vazio logo depois de publicar; e o toast com a ressalva da hora marcada ao

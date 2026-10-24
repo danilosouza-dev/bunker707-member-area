@@ -58,7 +58,7 @@ import {
 // Nada roda em intervalo alem da conferencia de 1 s enquanto algo bloqueia e do despertador de ate 30 s de uma
 // abertura armada (so o relogio do navegador; nenhum pedido em laco).
 //
-// Hora marcada (docs/29 §5.2): o pop-up com Comeca depois da abertura da pagina arma para a hora do servidor
+// Hora marcada (docs/29 §4.1): o pop-up com Comeca depois da abertura da pagina arma para a hora do servidor
 // (+ 2 s de folga, + 0 a 4 s sorteados, + "Quanto tempo depois") e nao desiste por tempo (o Termina decide no
 // servidor). Toda abertura armada segue a hora de parede: o despertador compara Date.now() a cada no maximo 30 s
 // e a volta da aba, a volta do cache do navegador e o foco da janela conferem na hora o que ja venceu (o aparelho

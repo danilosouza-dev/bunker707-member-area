@@ -177,7 +177,7 @@ test("recalculo do pop-up que falha grava so a hora do recalculo: tenta de novo 
   const busca = db.queries.find((query) => query.table === "campaigns" && query.op === "select" && isPopupQuery(query));
   assert.ok(
     busca.filters.some(([method, value]) => method === "or" && value.includes('audience_refreshed_at.lt."2026-10-20T15:07:00.000Z"')),
-    "vencido = recalculado antes do comeco da faixa de 15 minutos (deslocada para :07, docs/29 §4.9)"
+    "vencido = recalculado antes do comeco da faixa de 15 minutos (deslocada para :07, docs/29 §4.7)"
   );
 
   const gravacoes = db.queries.filter((query) => query.table === "campaigns" && query.op === "update");
@@ -796,7 +796,7 @@ test("nenhum select embute campaigns em communication_flows (ou o contrario) sem
 });
 
 /* ------------------------------------------------------------------------------------------------
- * "No primeiro acesso" (v3b-2, docs/29 §4.6): o recalculo com a marca first_access_at
+ * "No primeiro acesso" (v3b-2, docs/29 §4.2): o recalculo com a marca first_access_at
  * ---------------------------------------------------------------------------------------------- */
 
 const PRIMEIRO = {

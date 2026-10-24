@@ -3129,7 +3129,7 @@ export async function replaceCompletedLessons(input: ReplaceCompletedLessonsInpu
 
 /**
  * O mesmo que replaceCompletedLessons, devolvendo tambem as concluidas lidas na tentativa que venceu o
- * compare-and-swap (o "antes" verdadeiro desta gravacao; Comunicacao v3b-2, docs/29 §4.4: a rota de progresso
+ * compare-and-swap (o "antes" verdadeiro desta gravacao; Comunicacao v3b-2, docs/29 §4.3: a rota de progresso
  * diz se esta gravacao fechou o curso). replaceCompletedLessons chama esta e devolve so `record`.
  */
 export async function replaceCompletedLessonsWithPrevious(input: ReplaceCompletedLessonsInput): Promise<{

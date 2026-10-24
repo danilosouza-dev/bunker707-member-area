@@ -5,7 +5,7 @@ import { actAs } from "../support/integration-hooks.mjs";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
-// Relatorio do pop-up na tela (docs/29 §6.5; spec §7.3 R) contra o banco LOCAL de verdade: getPopupReport le a
+// Relatorio do pop-up na tela (docs/29 §2.6 e §4.6; spec §7.3 R) contra o banco LOCAL de verdade: getPopupReport le a
 // RPC communication_popup_report (202610260001) e os nomes dos produtos citados e devolve o relatorio pronto
 // (os quatro numeros, onde apareceu com "Por produto", em que momento, como fecharam e as faixas). As aberturas
 // e o fechamento saem pelas rotas do aluno (como o navegador). As linhas cruas da funcao estao em

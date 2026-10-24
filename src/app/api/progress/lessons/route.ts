@@ -7,7 +7,7 @@ import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { LessonReaction, LessonWatchStatus } from "@/lib/platform-types";
 
-// Progresso da aula. Comunicacao v3b-2 (docs/29 §4.4): 200 { data } como sempre; 200 { courseCompleted: true,
+// Progresso da aula. Comunicacao v3b-2 (docs/29 §4.3 e §6.1): 200 { data } como sempre; 200 { courseCompleted: true,
 // data } so no pedido que vira o curso de incompleto para completo para um aluno (todas as aulas publicadas dos
 // modulos publicados concluidas). O "antes" e o que a gravacao vencedora leu (replaceCompletedLessonsWithPrevious),
 // nunca a leitura do acesso: duas gravacoes que fecham o mesmo curso dao uma virada so. A equipe nunca recebe.

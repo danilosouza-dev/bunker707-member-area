@@ -1,4 +1,4 @@
-// "No primeiro acesso" do pop-up (Comunicacao v3b-2, docs/29 §4.3): quem conta como aluno novo, decidido no
+// "No primeiro acesso" do pop-up (Comunicacao v3b-2, docs/29 §4.2): quem conta como aluno novo, decidido no
 // recalculo do segmento (dispatch.refreshPopupDeliveries, a cada 15 min e ao publicar), nunca pelo navegador.
 // - "A primeira vez na área" (accessProducts vazio): quem ainda nao entrou nenhuma vez ou ganhou a conta depois
 //   do comeco do pop-up;

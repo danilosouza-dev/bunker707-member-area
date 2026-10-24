@@ -4,7 +4,7 @@ import { actAs, actAsSignedIn, integrationSession } from "../support/integration
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import { ESCOLA_DE_TESTE, limparComunicacao, SENHA_DE_TESTE, seedEscolaDeTeste, usuarioDeTeste } from "../fixtures/escola-de-teste.mjs";
 
-// Relatorio do pop-up (docs/29 §3.1 secao 4 e §8.3) contra o banco LOCAL de verdade: as linhas cruas da RPC
+// Relatorio do pop-up (docs/29 §3 secao 4, §4.6 e §5) contra o banco LOCAL de verdade: as linhas cruas da RPC
 // communication_popup_report. As aberturas e os fechamentos saem pelas rotas do aluno (como o navegador); as
 // linhas "de antes" e da equipe sao gravadas pela service role. Aqui: onde apareceu (tipo de pagina e produto),
 // em que momento, como fecharam, quantas vezes cada aluno viu; a equipe fora; o insert forjado do aluno recusado

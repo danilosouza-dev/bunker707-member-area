@@ -16,7 +16,7 @@ import { POPUP_EDITOR_COPY, popupSettingsOfDraft, showsStartsAtLiveNote } from "
 // termina sem data ou numa data) e o PopupWindowFields do card "Quando e onde aparece"
 // (popup-placement-fields.tsx); "Quantas vezes", "Lembrar depois" e "Mostrar de novo para quem já viu"
 // foram para o card "Quantas vezes e como fecha" (popup-frequency-fields.tsx).
-// v3b-2 (docs/29 §6.1): a dica do "Começa" e por momento, e com "Começa" no futuro num momento de pagina vem
+// v3b-2 (docs/29 §2.1): a dica do "Começa" e por momento, e com "Começa" no futuro num momento de pagina vem
 // a linha da hora marcada ao vivo (marque também "Termina"; publique com antecedência).
 
 type WhenDraft = Pick<NoticeDraft, "kind" | "popup" | "repeat" | "schedule" | "window">;
@@ -196,7 +196,7 @@ type PopupWindowFieldsProps = {
   /** Hora da tela: com "Começa" no futuro num momento de pagina, a linha da hora marcada ao vivo. */
   now: number;
   onChange: (window: NoticeDraft["window"]) => void;
-  /** O momento do pop-up (a dica do "Começa" e por momento, docs/29 §6.1). */
+  /** O momento do pop-up (a dica do "Começa" e por momento, docs/29 §2.1). */
   trigger: PopupTrigger;
   window: NoticeDraft["window"];
 };

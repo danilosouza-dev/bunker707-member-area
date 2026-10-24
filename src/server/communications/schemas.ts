@@ -12,7 +12,7 @@
 // do sino (reagir, votar, excluir do sino).
 //
 // v3b-1 (docs/25 §2.5): a configuracao do pop-up (popupSettingsSchema: onde, quando, quantas vezes,
-// "Lembrar depois" e como fecha), com as regras em popup-display-model.ts. v3b-2 (docs/29 §3.3): os momentos
+// "Lembrar depois" e como fecha), com as regras em popup-display-model.ts. v3b-2 (docs/29 §2.4 e §3): os momentos
 // "No primeiro acesso" e "Ao concluir um curso" e os produtos do primeiro acesso (accessProducts, que somem
 // fora de first_login na forma canonica).
 //

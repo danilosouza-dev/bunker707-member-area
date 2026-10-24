@@ -50,7 +50,7 @@ import {
 // PopupPlacementUi, guardado pelo editor: os erros "Escolha pelo menos um produto." saem dele
 // (popupPlacementProblems). A 375 px cada controle tem 44 px e as listas ficam numa coluna.
 //
-// v3b-2 (docs/29 §6.1): quatro momentos. "No primeiro acesso" pede "Conta como primeiro acesso" (a primeira
+// v3b-2 (docs/29 §2.1 a §2.3): quatro momentos. "No primeiro acesso" pede "Conta como primeiro acesso" (a primeira
 // vez na area ou com os produtos escolhidos, ate 20, com o chip "Produto removido" para o que saiu da lista) e
 // depois o mesmo "Onde aparece" de "Ao abrir a página", com a nota do atraso de ate 15 minutos. "Ao concluir
 // um curso" tem "De quais cursos" (como "De quais aulas"). Num pop-up que ja foi ao ar, "No primeiro acesso"

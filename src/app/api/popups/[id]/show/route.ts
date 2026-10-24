@@ -7,7 +7,7 @@ import { STUDENT_WRITE_LIMIT_MESSAGE, STUDENT_WRITE_RETRY_AFTER_SECONDS, takeStu
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 
-// Abrir o pop-up agora (Comunicacao v3b-1, docs/25 §4.5; v3b-2, docs/29 §4.5): { page: chave da pagina,
+// Abrir o pop-up agora (Comunicacao v3b-1, docs/25 §4.5; v3b-2, docs/29 §4.1 item 2, §4.3 e §6.1): { page: chave da pagina,
 // trigger: "page_load" | "lesson_completed" | "first_login" | "course_completed" }. O navegador chama logo antes
 // de desenhar, com o codigo do pop-up ja carregado; o servidor confere no ar, segmento, pagina, momento e
 // quantas vezes, grava a abertura de forma atomica e so entao devolve o conteudo e quando o pop-up pode voltar

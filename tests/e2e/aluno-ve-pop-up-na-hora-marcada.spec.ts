@@ -17,7 +17,7 @@ import {
 } from "./fixtures";
 import { ESCOLA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
 
-// Hora marcada ao vivo (docs/29 §5.2 e §8.4; docs/18 §3.1): com "Começa: Em uma data", o pop-up abre na hora
+// Hora marcada ao vivo (docs/29 §1.1, §4.1 e §9.3; docs/18 §3.1): com "Começa: Em uma data", o pop-up abre na hora
 // certa tambem para quem ja esta parado numa das paginas escolhidas. A aberta sai entre a hora + 2 s e a hora + 6 s
 // (folga de 2 s e espalhamento de 0 a 4 s), mais o "Quanto tempo depois". Cada grupo publica pelas fixtures (a
 // publicacao renova a lista no ar) com o Começa alguns segundos a frente e a aluna abre a pagina antes da hora.

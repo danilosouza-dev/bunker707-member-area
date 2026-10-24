@@ -221,7 +221,7 @@ export type PublishedNotice = {
   audienceCount: number;
   id: string;
   /**
-   * v3b-2 (docs/29 §4.7): so no pop-up que foi para o ar (publicar e aprovar), para o toast do editor e do menu
+   * v3b-2 (docs/29 §2.5 e §6.2): so no pop-up que foi para o ar (publicar e aprovar), para o toast do editor e do menu
    * da lista: o Comeca no futuro e o momento. Notificacao e pedido de aprovacao: sem a chave.
    */
   popup?: { startsInFuture: boolean; trigger: PopupTrigger };

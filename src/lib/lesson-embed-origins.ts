@@ -1,4 +1,4 @@
-// As origens dos players de fora que a ponte da aula le (docs/29 §5.5, D16) e as regras dela, num modulo
+// As origens dos players de fora que a ponte da aula le (docs/29 §4.4, D16) e as regras dela, num modulo
 // pequeno e separado: lesson-media-signal.ts (que vai em toda pagina do aluno, com o host do pop-up) so precisa
 // saber se o iframe do palco e de um player da lista; o resto da ponte (src/lib/lesson-embed-bridge.ts, que
 // reexporta tudo daqui) so baixa na pagina da aula. Puro.

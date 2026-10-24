@@ -522,7 +522,7 @@ export async function claimDueInbox(db: CommunicationsDb, now: Date, limit: numb
  */
 export async function fetchPopupsToRefresh(db: CommunicationsDb, now: Date, staleMs: number, limit: number): Promise<CampaignRow[]> {
   const nowIso = now.toISOString();
-  // Faixas deslocadas para :07, :22, :37 e :52 (docs/29 §4.9): o recalculo nunca cai no minuto redondo de uma live.
+  // Faixas deslocadas para :07, :22, :37 e :52 (docs/29 §4.7): o recalculo nunca cai no minuto redondo de uma live.
   const staleIso = new Date(popupRefreshBandStart(now.getTime(), staleMs)).toISOString();
   const { data, error } = await db
     .from("campaigns")

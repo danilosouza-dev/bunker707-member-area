@@ -6,7 +6,7 @@
 // imports relativos, sem enum): tests/pop-ups-v3b1-editor.test.mjs carrega direto pelo Node. Vocabulario
 // fechado da equipe (docs/17 §1.3): o teste confere os textos.
 //
-// v3b-2 (docs/29 §6.1): quatro momentos ("No primeiro acesso" com "Conta como primeiro acesso" e os produtos;
+// v3b-2 (docs/29 §2.1 a §2.4): quatro momentos ("No primeiro acesso" com "Conta como primeiro acesso" e os produtos;
 // "Ao concluir um curso" com "De quais cursos"), textos por momento (dica, "Quanto tempo depois", "Começa"),
 // a trava do primeiro acesso no pop-up que ja foi ao ar e o erro "Escolha pelo menos um produto." dos produtos
 // do primeiro acesso (so o editor ve: no rascunho salvo, a lista vazia e "A primeira vez na área").

@@ -42,7 +42,7 @@ import { clockOffsetOf, POPUP_HOST_RULES, readPopupsAnswer, type HostTrigger, ty
 // ter pop-up, e so pede de novo quando ela e coberta e o plano passou do minuto. O POST /show devolve o
 // conteudo e quando o pop-up pode voltar; essa resposta e o que o aluno faz depois acertam o plano guardado.
 //
-// v3b-2 (docs/29 §5.1): o show aceita os quatro momentos, a recusa 409 diz o motivo (`not_started` = o pop-up
+// v3b-2 (docs/29 §4.1 e §6.1): o show aceita os quatro momentos, a recusa 409 diz o motivo (`not_started` = o pop-up
 // ainda vai comecar) e o host ouve cada plano novo guardado (subscribePopupMemory) para armar a hora marcada da
 // pagina aberta. Nenhuma funcao nova pede nada.
 

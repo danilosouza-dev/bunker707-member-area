@@ -1,4 +1,4 @@
-// Regras do navegador para abrir os pop-ups (docs/25 §4, docs/29 §5; member-popup-host.tsx usa): o que o plano
+// Regras do navegador para abrir os pop-ups (docs/25 §4, docs/29 §4.1, §4.3 e §4.5; member-popup-host.tsx usa): o que o plano
 // do aluno arma nesta visualizacao de pagina (tambem na hora marcada do Comeca, para a pagina aberta antes dela),
 // o que cada conclusao de aula (e de curso) arma, o que impede abrir agora (outro pop-up, aba escondida, tela
 // cheia, o player da aula tocando, a ponte com o player de fora ainda no aperto de mao, algo aberto por cima) e
@@ -449,7 +449,7 @@ export function completionOpenings(input: {
 
 /**
  * O que impede abrir agora (o primeiro que vale), antes do POST /show ou depois dele (ja contado: nada que
- * era descartado antes descarta depois, so espera). Na aula (docs/29 §5.4), os momentos de pagina esperam o
+ * era descartado antes descarta depois, so espera). Na aula (docs/29 §1.4 e §4.5), os momentos de pagina esperam o
  * video parar em todo player que a pagina le; com a ponte do player de fora ainda no aperto de mao, conferem de
  * novo a cada 1 s; so no player que a pagina nao le, mexer nele descarta (antes do show).
  */

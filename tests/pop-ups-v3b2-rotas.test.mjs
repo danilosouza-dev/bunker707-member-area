@@ -3,7 +3,7 @@ import { registerHooks } from "node:module";
 import test from "node:test";
 import { actionStubs } from "./support/admin-action-stubs.mjs";
 
-// Pop-ups da v3b-2 no servidor (docs/29 §4.4 e §4.5), sem banco: um banco falso (copia enxuta do de
+// Pop-ups da v3b-2 no servidor (docs/29 §4.1, §4.3 e §6.1), sem banco: um banco falso (copia enxuta do de
 // tests/pop-ups-v3b1-rotas.test.mjs, que e interno daquele arquivo) que conta as idas, com a RPC da abertura
 // simulada. Aqui: o resumo numa pagina coberta so por um agendado (uma leitura, item com startsAt) e numa fora
 // (nenhuma); o show do agendado (409 not_started com o Comeca no segmento, 404 fora, 200 na hora com o relogio

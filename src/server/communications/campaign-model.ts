@@ -390,7 +390,7 @@ export function popupRefreshDueBefore(now: number, everyMs: number) {
 }
 
 /**
- * v3b-2 (docs/29 §4.9): as faixas do recalculo dos pop-ups viram 7 minutos depois das redondas (:07, :22, :37,
+ * v3b-2 (docs/29 §4.7): as faixas do recalculo dos pop-ups viram 7 minutos depois das redondas (:07, :22, :37,
  * :52), fora da hora de uma live marcada (20:00), quando os alunos parados na pagina chamam o show todos juntos.
  * Os fluxos (flow-engine.ts) continuam nas redondas.
  */

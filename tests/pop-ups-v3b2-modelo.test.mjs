@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
-// Regras puras da v3b-2 dos pop-ups (docs/29 §3.2 a §4.4): os quatro momentos, os produtos do "No primeiro
+// Regras puras da v3b-2 dos pop-ups (docs/29 §2.4, §3 e §4.1 a §4.3): os quatro momentos, os produtos do "No primeiro
 // acesso" nas colunas e no schema (somem fora de first_login), o plano e o mapa com os pop-ups que comecam nas
 // proximas 24 h (startsAt e notBefore), o not_started do show, quem conta como aluno novo e o recalculo com a
 // marca (a linha de um app antigo sai), o comeco do pop-up, o curso concluido e a leitura da resposta do

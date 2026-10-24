@@ -51,7 +51,7 @@ export type LessonsAccessContext = {
   lessonIds: string[];
   lessonVideoConfigs: Record<string, LessonVideoConfig | null>;
   /**
-   * v3b-2 (docs/29 §4.4): aulas publicadas dos modulos publicados do conteudo (aluno; a mesma leitura da ordem
+   * v3b-2 (docs/29 §4.3): aulas publicadas dos modulos publicados do conteudo (aluno; a mesma leitura da ordem
    * das aulas, nenhuma a mais); null para a equipe (nada e lido a mais).
    */
   publishedLessonIds: string[] | null;

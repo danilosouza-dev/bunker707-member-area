@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import "./support/resolve-extensionless-ts.mjs";
 
-// Relatorio do pop-up, v3b-2 (docs/29 §6.5; spec §7.3 R): as linhas de communication_popup_report lidas sem
+// Relatorio do pop-up, v3b-2 (docs/29 §2.6 e §4.6; spec §7.3 R): as linhas de communication_popup_report lidas sem
 // confiar no formato (readPopupReportRows), os quatro numeros e os quatro blocos (buildPopupReport): onde
 // apareceu (com "Por produto": os 10 com mais vezes, "Outros produtos" e "Produto removido"), em que momento, como
 // fecharam (com "Sem registro", nunca negativo) e quantas vezes cada aluno viu; percentuais sem base e nunca acima

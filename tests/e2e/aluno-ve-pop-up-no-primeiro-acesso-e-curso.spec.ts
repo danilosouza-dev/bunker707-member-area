@@ -16,7 +16,7 @@ import {
 } from "./fixtures";
 import { ESCOLA_DE_TESTE } from "../fixtures/escola-de-teste.mjs";
 
-// Os dois momentos novos do pop-up (docs/29 §1, §4.3, §4.4 e §8.4; docs/18 §3.1).
+// Os dois momentos novos do pop-up (docs/29 §1, §4.2, §4.3 e §9.3; docs/18 §3.1).
 //
 // - "No primeiro acesso · A primeira vez com estes produtos": o produtor monta pela tela (a frase ao vivo, a
 //   revisao com "para quem" e o toast dos alunos novos); a aluna (conta antiga, que ja entrou) nao conta como

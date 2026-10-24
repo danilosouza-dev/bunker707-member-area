@@ -99,7 +99,7 @@ const item = (extra = {}) => ({
 });
 
 const ambiente = (extra = {}) => ({ fullscreen: false, hidden: false, layer: false, lesson: null, popupOpen: false, ...extra });
-// v3b-2 (docs/29 §5.4): a aula diz tambem se a pagina le o player (readable) e a ponte do player de fora.
+// v3b-2 (docs/29 §4.5): a aula diz tambem se a pagina le o player (readable) e a ponte do player de fora.
 const aula = (extra = {}) => ({ activeLessonId: "aula-1", bridge: "none", playing: false, readable: true, touched: false, ...extra });
 const abrindo = (extra = {}) => ({
   at: agora,
@@ -629,7 +629,7 @@ test("guarda: as cinco insercoes na aula (play, palco, YouTube, fim do video e C
   ]) {
     const latest = trecho.indexOf("const latest =");
     const settle = trecho.indexOf("settleOptimisticCompletion(lessonId, requestId, saved, snapshot);");
-    // v3b-2: o anuncio leva tambem o curso fechado (so quando a resposta do PUT disse, docs/29 §5.7).
+    // v3b-2: o anuncio leva tambem o curso fechado (so quando a resposta do PUT disse, docs/29 §4.3).
     const anuncio = trecho.indexOf(
       "announceLessonMedia({ contentId: item.id, ...(courseCompleted ? { courseCompleted: true } : {}), kind: \"completed\", lessonId });"
     );

@@ -45,7 +45,7 @@ function readNow() {
 // v3a (docs/24 §2.2): a notificação enviada tambem abre no relatório; o editor (so o conteudo) so com
 // ?editar=1 e "edit" nas ações (messaging.publish e, acima de 500 alunos, messaging.publish_large), pela
 // mesma regra de opensNoticeEditor. Sem a permissao, o ?editar=1 abre o relatório.
-// v3b-2 (docs/29 §6.5): no pop-up que ja foi ao ar, o relatorio "Como o pop-up foi visto" num Suspense (o
+// v3b-2 (docs/29 §2.6 e §6.2): no pop-up que ja foi ao ar, o relatorio "Como o pop-up foi visto" num Suspense (o
 // funil e o resto da pagina nao esperam a RPC).
 export default async function AdminNoticePage({ params, searchParams }: PageProps) {
   const [{ access }, { id }, query] = await Promise.all([requirePageArea("comunicacao"), params, searchParams]);

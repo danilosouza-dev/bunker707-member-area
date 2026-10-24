@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import "./support/resolve-extensionless-ts.mjs";
 
-// Editor do pop-up, v3b-2 (docs/29 §6.1, §6.2 e §6.4; spec §7.3 R): o card "Quando e onde aparece" com quatro
+// Editor do pop-up, v3b-2 (docs/29 §2.1 a §2.5; spec §7.3 R): o card "Quando e onde aparece" com quatro
 // momentos ("No primeiro acesso" com "Conta como primeiro acesso" e os produtos; "Ao concluir um curso" com "De
 // quais cursos"), o que muda ao trocar o momento, os erros que so o editor ve, a trava do primeiro acesso no
 // pop-up que ja foi ao ar (as pilulas desabilitadas uma a uma e a linha ligada pelo aria-describedby), os textos

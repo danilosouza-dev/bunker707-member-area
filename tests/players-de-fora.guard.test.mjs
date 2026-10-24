@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
-// Guardas da ponte com os players de fora (docs/29 §5.5 e §4.10; docs/18 §2.2: conferencia de texto so para
+// Guardas da ponte com os players de fora (docs/29 §4.4 e §5; docs/18 §2.2: conferencia de texto so para
 // regra de seguranca e de arquitetura). O comportamento esta em tests/players-de-fora.test.mjs e nos testes de
 // ponta a ponta: aqui so o que nao pode mudar sem ninguem perceber (nada de "*", nada de SDK nem script de fora,
 // origens exatas, o referrer que os receptores do Player.js exigem, o iframe por estado e a CSP).

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
 
-// A ponte com os players de fora da aula (docs/29 §5.5; src/lib/lesson-embed-bridge.ts): quais origens ligam
+// A ponte com os players de fora da aula (docs/29 §4.4; src/lib/lesson-embed-bridge.ts): quais origens ligam
 // (exatas, a Bunny em grupo de duas), quais mensagens passam (so do proprio iframe e do grupo), o que se le delas
 // sem confiar no formato (Vimeo e Player.js), o aperto de mao repetido com a targetOrigin exata, a confirmacao so
 // pela resposta do getPaused (tambem de um ready tardio, e do Vimeo ja carregado que so responde o ping), o fim

@@ -6,7 +6,7 @@ import { actionStubs, createFakeDb } from "./support/admin-action-stubs.mjs";
 // Gravacao do progresso da aula no servidor (replaceCompletedLessons em platform-store), executada
 // com banco falso: a lista completed_lesson_ids e a verdade. Heartbeat e flush ao sair da pagina
 // (PUT e POST levam o mesmo payload) nao rebaixam aula concluida; desmarcar volta a "em andamento".
-// v3b-2 (docs/29 §4.4): replaceCompletedLessonsWithPrevious devolve tambem as concluidas lidas pela tentativa
+// v3b-2 (docs/29 §4.3): replaceCompletedLessonsWithPrevious devolve tambem as concluidas lidas pela tentativa
 // que venceu o compare-and-swap (o "antes" de verdade, que a rota usa para dizer se o curso fechou).
 
 const store = await import("../src/server/db/platform-store.ts");

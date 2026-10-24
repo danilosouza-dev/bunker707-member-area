@@ -182,7 +182,7 @@ export async function recordPopupImpression(
 }
 
 /**
- * Conclusao de um curso para o show de "Ao concluir um curso" (v3b-2, docs/29 §4.5): as concluidas do aluno
+ * Conclusao de um curso para o show de "Ao concluir um curso" (v3b-2, docs/29 §4.3): as concluidas do aluno
  * (lesson_progress, pela chave do aluno e do conteudo) em paralelo com os modulos publicados do conteudo; depois
  * as aulas publicadas desses modulos. Duas idas ao banco em sequencia, so nesse momento.
  */
