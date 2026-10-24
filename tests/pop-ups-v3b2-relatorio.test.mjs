@@ -11,7 +11,8 @@ import "./support/resolve-extensionless-ts.mjs";
 // fecharam (com "Sem registro", nunca negativo) e quantas vezes cada aluno viu; percentuais sem base e nunca acima
 // de 100 %; os textos da tabela 6.5 palavra por palavra (o rodape sem data, critica 14) e a tela desenhada
 // (barras com o numero escrito ao lado e a barra fora do leitor de tela, tabelas com <caption> e <th scope="col">,
-// cartoes <dl> abaixo de 768 px, o alternador com aria-pressed, os estados sem numero e o esqueleto). Os .tsx sao
+// cartoes <dl> abaixo de 768 px, o alternador como botao de acao sem aria-pressed e 44 px no toque, os estados sem
+// numero e o esqueleto). Os .tsx sao
 // transpilados aqui pelo TypeScript (so JSX -> JS), como em tests/comunicacao-modelos-tela.test.mjs.
 
 const root = new URL("../", import.meta.url);
@@ -383,7 +384,13 @@ test("a tela: quatro números, as barras com o número escrito ao lado (a barra 
   assert.match(html, /<h2[^>]*id="aviso-relatorio-popup"[^>]*>Como o pop-up foi visto<\/h2>/);
   assert.match(html, /aria-labelledby="aviso-relatorio-popup"/);
   assert.ok(html.includes("Desde a publicação. Atualiza a cada minuto."));
-  assert.match(html, /<button[^>]*aria-pressed="false"[^>]*>.*Ver como tabela<\/button>/);
+  // O alternador e um botao de acao: o texto diz o que o clique faz, sem aria-pressed (o leitor de tela nao
+  // anuncia "Ver como gráfico, pressionado" com as tabelas na tela); 44 px no toque.
+  const alternador = /<button[^>]*>[^<]*(?:<svg[^>]*>.*?<\/svg>)?Ver como tabela<\/button>/.exec(html)?.[0];
+  assert.ok(alternador, "o botao Ver como tabela");
+  assert.doesNotMatch(alternador, /aria-pressed/, "sem aria-pressed");
+  assert.match(alternador, /class="[^"]*pointer-coarse:h-11[^"]*"/, "44 px no toque");
+  assert.doesNotMatch(html, /Ver como gráfico/, "no modo grafico so o texto da acao de ir para a tabela");
   for (const label of ["Vezes que apareceu", "Alunos que viram", "Viram mais de uma vez", "No máximo, para um aluno"]) {
     assert.ok(html.includes(label), label);
   }
@@ -433,7 +440,7 @@ test("estados sem números: migração pendente, falha, ninguém viu; o esquelet
 
   const pendente = desenhar({ status: "pending_migration" });
   assert.ok(pendente.includes(copy.pendingMigration) && pendente.includes(copy.title));
-  assert.doesNotMatch(pendente, /aria-pressed/, "sem numeros, sem alternador");
+  assert.doesNotMatch(pendente, /Ver como (tabela|gráfico)/, "sem numeros, sem alternador");
 
   assert.ok(desenhar({ status: "error" }).includes(copy.failure));
 

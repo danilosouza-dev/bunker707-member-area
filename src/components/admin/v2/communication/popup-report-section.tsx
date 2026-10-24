@@ -20,8 +20,9 @@ import { adminCard } from "../styles";
 // numeros (KpiTile, 4 por linha e 2 colunas abaixo de 768 px) e os quatro blocos de barras horizontais simples
 // como as da enquete (o numero escrito ao lado; a barra fora do leitor de tela), nada de pizza ou rosca. "Ver
 // como tabela" troca os quatro blocos de uma vez por <table> com <caption> e <th scope="col">; abaixo de 768 px
-// cada linha vira um cartao (<dl>), sem rolagem lateral a 375 px. A escolha fica so na tela (sem
-// localStorage). "Por produto" e sempre uma tabela (o nome, as vezes e os alunos). Os numeros chegam prontos de
+// cada linha vira um cartao (<dl>), sem rolagem lateral a 375 px. O alternador e um botao de acao comum (sem
+// aria-pressed): o texto diz o que o clique faz ("Ver como tabela" / "Ver como gráfico") e alterna com o
+// estado; 44 px no toque (pointer-coarse:h-11). A escolha fica so na tela (sem localStorage). "Por produto" e sempre uma tabela (o nome, as vezes e os alunos). Os numeros chegam prontos de
 // popup-report-model.ts (getPopupReport, cache de 60 s): aqui so o desenho.
 
 type PopupReportSectionProps = { result: PopupReportResult };
@@ -221,7 +222,7 @@ export function PopupReportSection({ result }: PopupReportSectionProps) {
       <Header
         action={
           showsNumbers ? (
-            <Button aria-pressed={table} className="gap-1.5 px-3" onClick={() => setTable((value) => !value)} type="button" variant="ghost">
+            <Button className="gap-1.5 px-3 pointer-coarse:h-11" onClick={() => setTable((value) => !value)} type="button" variant="ghost">
               {table ? <ChartColumn aria-hidden="true" className="size-4" /> : <Table2 aria-hidden="true" className="size-4" />}
               {table ? COPY.toggle.chart : COPY.toggle.table}
             </Button>
