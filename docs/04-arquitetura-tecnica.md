@@ -609,8 +609,9 @@ pg_cron tick (* * * * *) -> POST /api/jobs/tick -> job comunicacao (processCommu
         falha -> attempts + 1, a terceira cancela com last_error
      -> sem approved_at e o segmento passou de 500: volta para pending_approval (sem data), nada sai
   2. fetchPopupsToRefresh: ate 5 pop-ups active (no ar ou com janela futura) sem recalculo desde o comeco da faixa de
-     15 min (:00, :15, :30, :45) -> refreshPopupDeliveries (grava so se updated_at nao mudou; senao limpa a hora);
-     falha -> grava so a hora (tenta na faixa seguinte)
+     15 min (desde a v3b-2 em :07, :22, :37 e :52, popupRefreshBandStart, docs/29 §4.7; antes :00, :15, :30, :45; os
+     fluxos continuam nas horas redondas) -> refreshPopupDeliveries (grava so se updated_at nao mudou; senao limpa a
+     hora); falha -> grava so a hora (tenta na faixa seguinte)
   fatos dos alunos lidos uma vez por rodada e so se houver trabalho; sem a migracao: registra e termina
 Resposta a comentario (aula ou Comunidade) -> after() -> notifyCommentReply -> notifications (comment_reply / comment_mention)
 Aluno: AppShell (depois da hidratacao) -> GET /api/notifications/summary -> numero do sino (60 s em memoria, falha tambem)

@@ -429,16 +429,19 @@ anterior (`docs/20` §9).
    funcao `communication_popup_report` (`create or replace`, mesma assinatura: se uma versao anterior ja tiver sido
    aplicada, ela e trocada) -> 5 o `alter policy "Students can create own events"`, **sozinha** (se o MCP recusar, pelo
    SQL Editor). Ou `apply_migration` com o arquivo inteiro, nome `communication_v3b2`. Nao ha `drop`, `delete`, gatilho
-   nem `create policy`. O texto exato de cada chamada esta no relatorio do integrador da PR;
+   nem `create policy`. O texto de cada chamada e o bloco `/* N. ... */` correspondente do proprio arquivo da migracao
+   (do cabecalho da secao ate o cabecalho da seguinte), com `set lock_timeout = '5s';` na frente;
 4. conferir com as consultas do cabecalho da migracao: constraint `campaigns_popup_access_v3b2` com
    `convalidated = true`; 1 funcao `communication_popup_products_ok`; 0 pop-ups com produtos; 0 linhas com
-   `first_access_at`; o indice existe; `communication_popup_report` e `communication_popup_products_ok` com
-   `authenticated` = false e `service_role` = true; `select metric, total, students from
-   public.communication_popup_report(gen_random_uuid()) order by 1;` = `max 0 0`, `median 0 0`, `viewers 0 0`; a
-   politica com `campaign` no `with check`;
-5. se foi por `execute_sql` (que nao grava a versao), gravar o historico com o `insert into
-   supabase_migrations.schema_migrations (version, name, statements) values ('202610260001', 'communication_v3b2', ...)
-   on conflict (version) do nothing` do relatorio da PR; `list_migrations` com `202610260001`;
+   `first_access_at`; o indice existe; `communication_popup_report` com `authenticated` = false e `service_role` =
+   true; `select metric, total, students from public.communication_popup_report(gen_random_uuid()) order by 1;` =
+   `max 0 0`, `median 0 0`, `viewers 0 0`; a politica com `campaign` no `with check`. O cabecalho nao confere as
+   permissoes da funcao dos produtos: rode a parte
+   `select has_function_privilege('authenticated', 'public.communication_popup_products_ok(text[])', 'execute'),
+   has_function_privilege('service_role', 'public.communication_popup_products_ok(text[])', 'execute');` = `false`, `true`;
+5. se foi por `execute_sql` (que nao grava a versao), gravar o historico com
+   `insert into supabase_migrations.schema_migrations (version, name) values ('202610260001', 'communication_v3b2') on conflict (version) do nothing;`
+   (a coluna `statements` e `text[]`; o texto da migracao nao precisa entrar); `list_migrations` com `202610260001`;
 6. a idempotencia foi conferida no banco local (duas aplicacoes com `psql` sem erro, so "already exists, skipping";
    `db:reset` com 52 migracoes e mais uma aplicacao por cima): reaplicar uma secao que travou no meio e seguro;
 7. fazer o merge e seguir o roteiro do `docs/29` §10 (o primeiro passo e conferir que a `dev` ja roda a v3b-2 antes de
