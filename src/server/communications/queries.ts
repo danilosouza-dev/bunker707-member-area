@@ -674,8 +674,12 @@ async function loadSender(db: CommunicationsDb, userId: string): Promise<NonNull
 
 export type PopupReportResult = { status: "error" } | { status: "pending_migration" } | { status: "ok"; view: PopupReportView };
 
-/** Duas leituras: a RPC (so service_role) e, quando o relatorio cita produtos, os nomes deles. */
-async function loadPopupReport(campaignId: string): Promise<PopupReportView> {
+/**
+ * Duas leituras: a RPC (so service_role) e, quando o relatorio cita produtos, os nomes deles. O segundo
+ * argumento e o minuto da chave do cache (popupReportCacheMinute): so muda a chave, nao entra na leitura.
+ */
+async function loadPopupReport(campaignId: string, _minute: number): Promise<PopupReportView> {
+  void _minute;
   const db = communicationsDb();
   const rows = readPopupReportRows(await fetchPopupReport(db, campaignId));
   const productIds = popupReportProductIds(rows);
@@ -684,8 +688,18 @@ async function loadPopupReport(campaignId: string): Promise<PopupReportView> {
   return buildPopupReport(rows, names);
 }
 
+/**
+ * O minuto do relogio que entra na chave do cache: no Next 16.4, dentro de um request, uma entrada vencida e
+ * devolvida na hora e renovada so por tras (e nunca vence sozinha), entao sem o minuto a primeira abertura da
+ * pagina depois de uma pausa mostrava os numeros da visita anterior. Com o minuto na chave, a janela de 60 s
+ * ("Atualiza a cada minuto") passa a valer de fato.
+ */
+export function popupReportCacheMinute(now = Date.now()) {
+  return Math.floor(now / 60_000);
+}
+
 // Cache de 60 s (tag "communications": toda acao de aviso invalida); so o resultado certo entra (o erro sobe e
-// nao fica guardado). O id entra pelos argumentos da chamada.
+// nao fica guardado). O id e o minuto entram pelos argumentos da chamada.
 const cachedPopupReport = unstable_cache(loadPopupReport, ["communications-popup-report", "v3b2"], {
   revalidate: 60,
   tags: [COMMUNICATIONS_TAG]
@@ -694,7 +708,7 @@ const cachedPopupReport = unstable_cache(loadPopupReport, ["communications-popup
 /** Relatorio de um pop-up (cache de 60 s, tag communications): duas leituras, a RPC e os nomes dos produtos citados. */
 export async function getPopupReport(campaignId: string): Promise<PopupReportResult> {
   try {
-    return { status: "ok", view: await cachedPopupReport(campaignId) };
+    return { status: "ok", view: await cachedPopupReport(campaignId, popupReportCacheMinute()) };
   } catch (error) {
     if (isMissingCommunicationSchema(error)) {
       return { status: "pending_migration" };

@@ -91,18 +91,18 @@ test("a aluna fecha no Esc em Favoritos; o produtor vê onde, como fecharam e qu
     });
 
     await test.step("Ver como tabela mostra as tabelas e Ver como gráfico volta", async () => {
+      // O alternador e um botao de acao (sem aria-pressed): o estado se le pelo texto, que diz o que o clique faz.
       const alternar = relatorio(tela).getByRole("button", { name: /^Ver como (tabela|gráfico)$/ });
       await expect(alternar).toHaveText("Ver como tabela");
-      await expect(alternar).toHaveAttribute("aria-pressed", "false");
       // Clica ate trocar (o primeiro clique logo depois de recarregar pode chegar antes da hidratacao).
       await expect(async () => {
-        if ((await alternar.getAttribute("aria-pressed")) !== "true") {
+        if ((await alternar.textContent())?.trim() !== "Ver como gráfico") {
           await alternar.click();
         }
-        await expect(alternar).toHaveAttribute("aria-pressed", "true", { timeout: 1_000 });
+        await expect(alternar).toHaveText("Ver como gráfico", { timeout: 1_000 });
       }).toPass({ timeout: 15_000 });
       const voltar = relatorio(tela).getByRole("button", { name: "Ver como gráfico" });
-      await expect(voltar).toHaveAttribute("aria-pressed", "true");
+      await expect(voltar).toBeVisible();
 
       const onde = relatorio(tela).getByRole("table", { name: "Onde apareceu" });
       await expect(onde).toBeVisible();
@@ -112,8 +112,13 @@ test("a aluna fecha no Esc em Favoritos; o produtor vê onde, como fecharam e qu
       await expect(fecharam.getByRole("row").filter({ has: tela.getByRole("cell", { exact: true, name: "Fecharam no Esc" }) })).toBeVisible();
       await expect(relatorio(tela).getByRole("table")).toHaveCount(4);
 
-      await voltar.click();
-      await expect(relatorio(tela).getByRole("button", { name: "Ver como tabela" })).toHaveAttribute("aria-pressed", "false");
+      await expect(async () => {
+        if ((await alternar.textContent())?.trim() !== "Ver como tabela") {
+          await alternar.click();
+        }
+        await expect(alternar).toHaveText("Ver como tabela", { timeout: 1_000 });
+      }).toPass({ timeout: 15_000 });
+      await expect(relatorio(tela).getByRole("button", { name: "Ver como tabela" })).toBeVisible();
       await expect(relatorio(tela).getByRole("table")).toHaveCount(0);
       await expect(bloco(tela, "Onde apareceu").getByRole("listitem").filter({ has: tela.getByText("Favoritos", { exact: true }) })).toBeVisible();
     });
@@ -127,10 +132,10 @@ test("a aluna fecha no Esc em Favoritos; o produtor vê onde, como fecharam e qu
 
       const alternar = relatorio(tela).getByRole("button", { name: /^Ver como (tabela|gráfico)$/ });
       await expect(async () => {
-        if ((await alternar.getAttribute("aria-pressed")) !== "true") {
+        if ((await alternar.textContent())?.trim() !== "Ver como gráfico") {
           await alternar.click();
         }
-        await expect(alternar).toHaveAttribute("aria-pressed", "true", { timeout: 1_000 });
+        await expect(alternar).toHaveText("Ver como gráfico", { timeout: 1_000 });
       }).toPass({ timeout: 15_000 });
       // Abaixo de 768 px cada linha vira um cartao (lista de dl), sem tabela larga.
       const lista = relatorio(tela).getByRole("list", { name: "Onde apareceu" });
