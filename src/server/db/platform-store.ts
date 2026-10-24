@@ -12,6 +12,7 @@ import { CATALOG_TAG, MEMBER_CATALOG_CACHE_KEY, MEMBER_CATALOG_REVALIDATE_SECOND
 import { getAdminAccessForUser, getUserDisplayName } from "@/server/auth/session";
 import { getSupabaseAdminClient } from "@/server/db/supabase/client";
 import { persistImageAsset } from "@/server/db/media-assets";
+import { isDefaultSchoolIcon } from "@/server/communications/message-meta";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { getReleaseRuleNotice } from "@/lib/release-rules";
 import type { MemberReleaseState } from "@/lib/release-state";
@@ -79,6 +80,8 @@ type PlatformStudent = {
   /** Foto do perfil (profiles.avatar_url), so no menu do topo; ausente = iniciais. */
   avatarUrl?: string | null;
   fullName: string;
+  /** Id da conta (o dono da memoria do sino no navegador); ausente sem sessao. */
+  id?: string | null;
   name: string;
 };
 
@@ -351,6 +354,10 @@ export type PlatformAppearanceInput = {
   logo?: {
     image: string | null;
   };
+  /** Icone da escola (Marca > Icone da escola): null = de volta ao simbolo padrao (a chave sai de branding). */
+  schoolIcon?: {
+    image: string | null;
+  };
   /** Estilo da area do aluno (Marca > Estilo); sempre completo. */
   style?: MemberStyleConfig;
 };
@@ -379,14 +386,25 @@ function normalizePlatformBranding(value: unknown): PlatformBrandingConfig {
 
   const branding = value as Partial<PlatformBrandingConfig>;
   const style = normalizeMemberStyle(value);
+  // Icone da escola: so fica na chave quando ha um; ausente = o simbolo padrao (normalizeSchoolIcon).
+  const schoolIcon = typeof branding.schoolIcon === "string" ? branding.schoolIcon.trim() : "";
+  const icon = schoolIcon ? { schoolIcon } : {};
 
   if (branding.logoImage === null) {
-    return { logoImage: null, style };
+    return { logoImage: null, ...icon, style };
   }
 
   const logoImage = typeof branding.logoImage === "string" ? branding.logoImage.trim() : "";
-  return { logoImage: logoImage || defaultLogoImage, style };
+  return { logoImage: logoImage || defaultLogoImage, ...icon, style };
 }
+
+/** Marca sem o icone da escola: o circulo das notificacoes volta ao simbolo padrao. */
+function withoutSchoolIcon(branding: PlatformBrandingConfig): PlatformBrandingConfig {
+  const next = { ...branding };
+  delete next.schoolIcon;
+  return next;
+}
+
 const defaultStudent: PlatformStudent = {
   fullName: "Aluno Bunker707",
   name: "Aluno"
@@ -2264,8 +2282,13 @@ export async function getAppShellData(user?: SessionUser) {
     branding: database.branding,
     // "Ver como aluno com/sem acesso": so quem ve o catalogo da escola toda (o Professor ve os cursos dele de verdade).
     canUseAccessPreview: Boolean(adminAccess && catalogScope(adminAccess) === null),
-    // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam.
-    student: { ...getStudentForUser(database, user, profile?.fullName), avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl) }
+    // Nome e foto vem do perfil do aluno (profiles), que ele e a equipe editam. O id e o dono da memoria do
+    // sino no navegador (outra conta no mesmo navegador nunca ve o numero nem a pagina da anterior).
+    student: {
+      ...getStudentForUser(database, user, profile?.fullName),
+      avatarUrl: sanitizeProfileAvatarUrl(profile?.avatarUrl),
+      id: user?.id ?? null
+    }
   };
 }
 
@@ -2780,12 +2803,16 @@ function applyAppearanceToHero(stored: unknown, input: { enabled: boolean; image
 }
 
 export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
-  if (input.hero === undefined && input.logo === undefined && input.style === undefined) {
+  if (input.hero === undefined && input.logo === undefined && input.schoolIcon === undefined && input.style === undefined) {
     throw createAdminMutationError("Nenhuma alteracao de aparencia informada.", 400);
   }
 
   if (input.logo !== undefined && input.logo.image !== null && !input.logo.image.trim()) {
     throw createAdminMutationError("Envie uma imagem ou informe uma URL para a logo.", 400);
+  }
+
+  if (input.schoolIcon !== undefined && input.schoolIcon.image !== null && !input.schoolIcon.image.trim()) {
+    throw createAdminMutationError("Envie uma imagem ou informe uma URL para o ícone da escola.", 400);
   }
 
   const database = await readAdminDatabase();
@@ -2807,11 +2834,12 @@ export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
   }
 
   if (input.logo !== undefined) {
-    // Trocar a logo nunca apaga o estilo (cantos, botoes, menu) gravado na mesma chave.
+    // Trocar a logo nunca apaga o estilo (cantos, botoes, menu) nem o icone da escola gravados na mesma
+    // chave: parte sempre da marca gravada.
     const style = normalizeMemberStyle(database.branding);
 
     if (input.logo.image === null) {
-      database.branding = { logoImage: null, style };
+      database.branding = { ...database.branding, logoImage: null, style };
     } else {
       const providedLogo = input.logo.image.trim();
 
@@ -2820,12 +2848,31 @@ export async function updatePlatformAppearance(input: PlatformAppearanceInput) {
       }
 
       database.branding = {
+        ...database.branding,
         logoImage: await persistAppearanceImage(providedLogo, "platform/logo", "A logo da plataforma"),
         style
       };
     }
 
     settingsKeys.push("branding");
+  }
+
+  if (input.schoolIcon !== undefined) {
+    // O circulo das notificacoes da escola. null (ou o proprio simbolo padrao) tira a chave: ausente = padrao.
+    const providedIcon = input.schoolIcon.image?.trim() ?? null;
+
+    if (providedIcon === null || isDefaultSchoolIcon(providedIcon)) {
+      database.branding = withoutSchoolIcon(database.branding);
+    } else {
+      database.branding = {
+        ...database.branding,
+        schoolIcon: await persistAppearanceImage(providedIcon, "platform/school-icon", "O ícone da escola")
+      };
+    }
+
+    if (!settingsKeys.includes("branding")) {
+      settingsKeys.push("branding");
+    }
   }
 
   if (input.style !== undefined) {
@@ -3062,7 +3109,7 @@ function createLessonProgressConflictError() {
   });
 }
 
-export async function replaceCompletedLessons(input: {
+export type ReplaceCompletedLessonsInput = {
   completedLessonIds?: string[];
   contentId: string;
   durationSeconds?: number;
@@ -3074,17 +3121,31 @@ export async function replaceCompletedLessons(input: {
   resumeFrameUrl?: string;
   status?: LessonWatchStatus;
   userId: string;
-}) {
+};
+
+export async function replaceCompletedLessons(input: ReplaceCompletedLessonsInput) {
+  return (await replaceCompletedLessonsWithPrevious(input)).record;
+}
+
+/**
+ * O mesmo que replaceCompletedLessons, devolvendo tambem as concluidas lidas na tentativa que venceu o
+ * compare-and-swap (o "antes" verdadeiro desta gravacao; Comunicacao v3b-2, docs/29 §4.3: a rota de progresso
+ * diz se esta gravacao fechou o curso). replaceCompletedLessons chama esta e devolve so `record`.
+ */
+export async function replaceCompletedLessonsWithPrevious(input: ReplaceCompletedLessonsInput): Promise<{
+  previousCompletedLessonIds: string[];
+  record: LessonProgressRecord;
+}> {
   // A fila local serializa escritas da mesma instancia; o compare-and-swap em replaceCompletedLessonsUnsafe
   // protege contra instancias serverless concorrentes, com releitura e novo merge em caso de conflito.
   const writeResult = lessonProgressWriteQueue.then(async () => {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        const { activity, record } = await replaceCompletedLessonsUnsafe(input);
+        const { activity, previousCompletedLessonIds, record } = await replaceCompletedLessonsUnsafe(input);
         // Atividade real (docs/17 §1.11) so depois do compare-and-swap confirmado: uma tentativa que
         // perdeu o conflito nao conta. Fora do caminho da resposta, para nao atrasar o heartbeat.
         scheduleStudentActivity({ contentId: record.contentId, delta: activity, userId: record.userId });
-        return record;
+        return { previousCompletedLessonIds, record };
       } catch (error) {
         if ((error as { code?: string }).code !== LESSON_PROGRESS_CONFLICT_CODE || attempt >= 3) {
           throw error;
@@ -3121,19 +3182,7 @@ async function replaceCompletedLessonsUnsafe({
   resumeFrameUrl,
   status,
   userId
-}: {
-  completedLessonIds?: string[];
-  contentId: string;
-  durationSeconds?: number;
-  lessonId?: string;
-  lessonReactions?: Partial<Record<string, LessonReaction>>;
-  maxProgressPercent?: number;
-  progressPercent?: number;
-  progressSeconds?: number;
-  resumeFrameUrl?: string;
-  status?: LessonWatchStatus;
-  userId: string;
-}) {
+}: ReplaceCompletedLessonsInput) {
   const supabase = getSupabaseAdminClient();
   const currentResult = await supabase
     .from("lesson_progress")
@@ -3245,6 +3294,9 @@ async function replaceCompletedLessonsUnsafe({
     user_id: nextRecord.userId
   };
 
+  // O "antes" desta tentativa: so vale se o compare-and-swap abaixo confirmar (senao a fila tenta de novo).
+  const previousCompletedLessonIds = [...(currentRecord?.completedLessonIds ?? [])];
+
   if (currentRow) {
     const updateResult = await supabase
       .from("lesson_progress")
@@ -3259,7 +3311,7 @@ async function replaceCompletedLessonsUnsafe({
       throw createLessonProgressConflictError();
     }
 
-    return { activity, record: nextRecord };
+    return { activity, previousCompletedLessonIds, record: nextRecord };
   }
 
   const insertResult = await supabase.from("lesson_progress").insert(nextRow);
@@ -3269,5 +3321,5 @@ async function replaceCompletedLessonsUnsafe({
   }
 
   await throwIfSupabaseError(insertResult.error, "Erro salvando progresso da aula");
-  return { activity, record: nextRecord };
+  return { activity, previousCompletedLessonIds, record: nextRecord };
 }

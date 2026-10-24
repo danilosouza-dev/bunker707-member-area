@@ -21,3 +21,4 @@
 - [ ] Preserva entitlements internos como fonte de verdade de acesso
 - [ ] Nao adiciona segredos, tokens, payloads privados ou dados pessoais reais (nem nos dados de teste)
 - [ ] Atualiza documentacao quando muda regra, decisao ou fluxo duravel
+- [ ] Migracao nova que o app usa aplicada no Supabase da nuvem antes do merge na dev (docs/21 §9)

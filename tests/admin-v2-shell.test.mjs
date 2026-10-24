@@ -102,6 +102,7 @@ test("barra superior mostra so os filtros que a tela usa (prototipo aprovado)", 
   assert.deepEqual(getAdminTopbarScope("/admin/produtos/curso-ia/desempenho"), periodOnly, "Desempenho do produto");
   assert.deepEqual(getAdminTopbarScope("/admin/comunicacao"), periodOnly);
   assert.deepEqual(getAdminTopbarScope("/admin/comunicacao/avisos?periodo=hoje"), periodOnly);
+  assert.deepEqual(getAdminTopbarScope("/admin/comunicacao/fluxos?situacao=ativos"), periodOnly, "Fluxos: os numeros seguem o periodo");
   assert.deepEqual(getAdminTopbarScope("/admin/comunicacao/webinarios"), periodOnly);
   assert.deepEqual(getAdminTopbarScope("/admin/comunicacao/promocoes"), periodOnly);
   assert.deepEqual(getAdminTopbarScope("/admin/configuracoes/ia/consumo"), periodOnly, "Consumo do Tutor IA");
@@ -119,6 +120,15 @@ test("barra superior mostra so os filtros que a tela usa (prototipo aprovado)", 
     "/admin/comunidade",
     "/admin/comunidade/denuncias",
     "/admin/comunicacao/avisos/novo",
+    "/admin/comunicacao/avisos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70",
+    "/admin/comunicacao/fluxos/novo",
+    "/admin/comunicacao/fluxos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70",
+    // docs/28 (D22): a aba Modelos nao tem numero de periodo; o modo modelo do editor tambem nao.
+    "/admin/comunicacao/modelos",
+    "/admin/comunicacao/modelos?tipo=popup",
+    "/admin/comunicacao/modelos/novo",
+    "/admin/comunicacao/modelos/novo?tipo=design-livre",
+    "/admin/comunicacao/modelos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70",
     "/admin/area-de-membros",
     "/admin/area-de-membros/modulos",
     "/admin/configuracoes",
@@ -142,6 +152,12 @@ test("titulo da barra do celular: area ou tela interna", () => {
   assert.equal(getAdminMobileTitle("/admin/area-de-membros/marca"), "Área de membros");
   assert.equal(getAdminMobileTitle("/admin/home"), "Área de membros");
   assert.equal(getAdminMobileTitle("/admin/comunicacao/webinarios"), "Comunicação");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/avisos/novo"), "Novo aviso");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/fluxos/novo"), "Novo fluxo");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/fluxos"), "Comunicação");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/modelos"), "Comunicação");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/modelos/novo?tipo=popup"), "Novo modelo");
+  assert.equal(getAdminMobileTitle("/admin/comunicacao/avisos/7b6f3c1e-0d2a-4c8e-9f1a-2b3c4d5e6f70"), "Comunicação", "a pagina troca pelo titulo do aviso");
   assert.equal(getAdminMobileTitle("/admin/comunidade/denuncias"), "Comunidade");
   assert.equal(getAdminMobileTitle("/admin/configuracoes"), "Configurações");
   assert.equal(getAdminMobileTitle("/admin/configuracoes/ia/consumo"), "Tutor IA");
@@ -153,6 +169,7 @@ test("links do menu levam o periodo so para as telas que usam o Periodo da barra
   assert.equal(buildAdminNavHref("/admin", "7d"), "/admin?periodo=7d");
   assert.equal(buildAdminNavHref("/admin", "2026-10-01..2026-10-10"), "/admin?periodo=2026-10-01..2026-10-10");
   assert.equal(buildAdminNavHref("/admin/comunicacao/avisos", "hoje"), "/admin/comunicacao/avisos?periodo=hoje");
+  assert.equal(buildAdminNavHref("/admin/comunicacao/fluxos", "7d"), "/admin/comunicacao/fluxos?periodo=7d");
   assert.equal(buildAdminNavHref("/admin/produtos", "7d"), "/admin/produtos", "Produtos nao usa o Periodo");
   assert.equal(buildAdminNavHref("/admin/comunidade", "7d"), "/admin/comunidade", "Comunidade tem o filtro na pagina");
   assert.equal(buildAdminNavHref("/admin/configuracoes/ia", "7d"), "/admin/configuracoes/ia");
@@ -224,7 +241,7 @@ test("menu de cada funcao: so as areas que ela abre, e a primeira tela e a prime
     "Alunos",
     "Produtos[Todos os produtos|Pacotes|Importar]",
     "Área de membros[Vitrine|Destaque|Módulos|Login|Marca]",
-    "Comunicação[Avisos e pop-ups|Webinários|Promoções]",
+    "Comunicação[Avisos e pop-ups|Fluxos|Modelos|Webinários|Promoções]",
     "Comunidade",
     "Configurações[Todas as configurações|Equipe|Tutor IA|Vendas]"
   ]);
@@ -234,7 +251,7 @@ test("menu de cada funcao: so as areas que ela abre, e a primeira tela e a prime
     "Alunos",
     "Produtos[Todos os produtos|Pacotes|Importar]",
     "Área de membros[Vitrine|Destaque|Módulos|Login|Marca]",
-    "Comunicação[Avisos e pop-ups|Webinários|Promoções]",
+    "Comunicação[Avisos e pop-ups|Fluxos|Modelos|Webinários|Promoções]",
     "Comunidade"
   ]);
   assert.deepEqual(menu("instructor", { productIds: ["curso-1"] }), ["Meus cursos", "Comunidade"]);
@@ -298,6 +315,11 @@ test("cada destino do menu que pertence a esta fase tem uma pagina", () => {
   for (const href of [
     "/admin/alunos",
     "/admin/alunos/novo",
+    "/admin/comunicacao/avisos",
+    "/admin/comunicacao/avisos/novo",
+    "/admin/comunicacao/fluxos",
+    "/admin/comunicacao/fluxos/novo",
+    "/admin/comunicacao/modelos",
     "/admin/produtos/pacotes",
     "/admin/area-de-membros",
     "/admin/area-de-membros/destaque",
@@ -420,9 +442,14 @@ test("textos do admin novo evitam o vocabulario tecnico proibido", () => {
   const forbidden = /\b(?:entitlements?|rbac|assets?|escopo|persistid[oa]s?|crm|drip|webhooks?|supabase)\b/i;
   // docs/17 §1.3: "webhook" so em Configuracoes > Vendas, onde e o nome do menu da Hotmart que o produtor precisa achar.
   const forbiddenInSales = /\b(?:entitlements?|rbac|assets?|escopo|persistid[oa]s?|crm|drip|supabase)\b/i;
+  // docs/27 §2.3: no editor Livre, "asset"/"assets" sao nomes de campos do JSON do design (codigo, nunca texto de
+  // tela); as frases do Livre tem testes de vocabulario proprios (tests/popup-livre-*-modelo.test.mjs).
+  const forbiddenInFree = /\b(?:entitlements?|rbac|escopo|persistid[oa]s?|crm|drip|webhooks?|supabase)\b/i;
 
   for (const { path, source } of v2Sources) {
-    assert.doesNotMatch(stripComments(source), path.includes("/settings/sales/") ? forbiddenInSales : forbidden, path);
+    const rule = path.includes("/settings/sales/") ? forbiddenInSales : path.includes("/communication/popup-free/") ? forbiddenInFree : forbidden;
+
+    assert.doesNotMatch(stripComments(source), rule, path);
   }
 });
 

@@ -4,6 +4,8 @@ import { MemberFooter } from "@/components/member-footer";
 import { SupportView } from "@/components/member/pages/support-view";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { requirePageUser } from "@/server/auth/guards";
+import { pageKeyOfRoute } from "@/server/member-area/page-visit-model";
+import { trackMemberPageVisit } from "@/server/member-area/page-visits";
 import { getAppShellData } from "@/server/db/platform-store";
 import { getSupportPageData } from "@/server/member-area/student-pages";
 
@@ -26,6 +28,7 @@ export default async function SupportPage({ searchParams }: SupportPageProps) {
   // Os canais nao dependem do aluno: leitura em paralelo com o topo da pagina.
   const [shellData, supportData] = await Promise.all([getAppShellData(user), getSupportPageData()]);
   const accessPreviewMode = shellData.canUseAccessPreview ? requestedAccessPreviewMode : undefined;
+  await trackMemberPageVisit({ accessPreviewMode, pageKey: pageKeyOfRoute("/suporte"), userId: user.id });
 
   return (
     <AppShell

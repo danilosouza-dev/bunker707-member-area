@@ -1,6 +1,8 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { communicationMediaJob } from "./communication-media-job";
+import { communicationsJob } from "./communications-job";
 import { emailOutboxJob } from "./email-outbox-job";
 
 // Ponto de extensao dos jobs leves executados pelo tick de minuto.
@@ -30,7 +32,14 @@ import { emailOutboxJob } from "./email-outbox-job";
 //     { name: "lembretes-de-webinario", run: (ctx) => sendDueReminders(ctx) }
 //   ];
 //
-// Jobs registrados hoje: `email-outbox` (fila de e-mails transacionais, src/server/jobs/email-outbox-job.ts).
+// Jobs registrados hoje, nesta ordem:
+// - `email-outbox` (fila de e-mails transacionais, src/server/jobs/email-outbox-job.ts);
+// - `comunicacao` (notificacoes do sino agendadas e quem ve cada pop-up, src/server/jobs/communications-job.ts).
+//   Excecao registrada em docs/09 e docs/04: as linhas do sino sao minusculas, gravadas em lotes de 500,
+//   com teto por rodada e retomaveis; envio em massa de e-mail/push continua fora do tick;
+// - `comunicacao-limpeza-de-arquivos` (arquivos da Comunicacao sem uso ha 30 dias saem do Storage,
+//   src/server/jobs/communication-media-job.ts). Roda a cada minuto, mas so trabalha uma vez por dia (06:53 UTC),
+//   com ate 500 arquivos por rodada; fica por ultimo para usar so o que sobra do tick.
 
 export type JobContext = {
   // Cliente administrativo do Supabase (service role); usar somente no servidor.
@@ -49,4 +58,4 @@ export type Job = {
   run(ctx: JobContext): Promise<void>;
 };
 
-export const jobRegistry: readonly Job[] = [emailOutboxJob];
+export const jobRegistry: readonly Job[] = [emailOutboxJob, communicationsJob, communicationMediaJob];

@@ -106,7 +106,7 @@ export async function getStorefrontEditorData(): Promise<StorefrontEditorData> {
   return mapStorefrontEditorData({ contentRows, moduleRows, platformRows, settingsRows });
 }
 
-/** Marca: banner da home e logo. */
+/** Marca: banner da home, logo, icone da escola (branding.schoolIcon, o simbolo padrao quando ausente) e estilo. */
 export async function getStorefrontBrand(): Promise<StorefrontBrand> {
   return mapStorefrontBrand(await readPlatformSettings(BRAND_SETTING_KEYS));
 }

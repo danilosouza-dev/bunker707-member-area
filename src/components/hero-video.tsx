@@ -4,6 +4,7 @@ import { Pause, Play, Volume1, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { cssImageUrl } from "@/lib/css-url";
 import { normalizeHeroVideoOptions, youtubeThumbnailUrl, type HeroVideoSource } from "@/lib/hero-video";
+import { OVERLAY_EVENT, overlayEventOpen } from "@/lib/overlay-event";
 import type { HeroVideoOptions } from "@/lib/platform-types";
 
 // Video de destaque do produto (topo do modal da home e banner da pagina do curso).
@@ -16,6 +17,9 @@ import type { HeroVideoOptions } from "@/lib/platform-types";
 // - "Reduzir movimento" ou autoplay desligado: so a capa, com um botao de tocar.
 // - Autoplay bloqueado pelo aparelho (iOS em economia de energia, por exemplo): o iframe volta a receber
 //   toque para a pessoa usar o botao de tocar do proprio YouTube; arquivo direto ganha o nosso botao.
+// - Pop-up dos avisos aberto por cima (evento `bunker707:overlay`, src/lib/overlay-event.ts): o YouTube
+//   pausa e volta a tocar quando ele fecha, so se foi o pop-up quem pausou (o <video> direto o pop-up
+//   pausa sozinho).
 
 type HeroVideoProps = {
   className?: string;
@@ -266,6 +270,8 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
   const youtubeReadyRef = useRef(false);
   // Ate quando ignorar som/volume reportados pelo player, logo depois de um ajuste feito por aqui.
   const localControlUntilRef = useRef(0);
+  // O pop-up dos avisos pausou o YouTube (volta a tocar quando ele fechar).
+  const pausedByOverlayRef = useRef(false);
 
   const autoStart = settings.autoplay && !prefersReducedMotion;
   // Com som desde o inicio quando a pessoa clicou (gesto dela) ou quando o produtor pediu e o navegador deixou.
@@ -509,6 +515,48 @@ export function HeroVideo({ className = "", controlsClassName = "bottom-4 right-
     // instanceId e estavel; postToYouTube so usa refs. O efeito reinicia quando o iframe e recriado (src ou frame).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [embedSrc, hasFrame, settings.loop]);
+
+  // Pop-up aberto por cima: pausa o YouTube que estava tocando e retoma ao fechar (pausa da pessoa fica).
+  useEffect(() => {
+    if (!youtube || !playerActive) {
+      return;
+    }
+
+    function handleOverlay(event: Event) {
+      if (overlayEventOpen(event)) {
+        if (desiredRef.current.paused || pausedByOverlayRef.current) {
+          return;
+        }
+
+        pausedByOverlayRef.current = true;
+        desiredRef.current.paused = true;
+        setPaused(true);
+
+        if (youtubeReadyRef.current) {
+          postToYouTube("pauseVideo");
+        }
+
+        return;
+      }
+
+      if (!pausedByOverlayRef.current) {
+        return;
+      }
+
+      pausedByOverlayRef.current = false;
+      desiredRef.current.paused = false;
+      setPaused(false);
+
+      if (youtubeReadyRef.current) {
+        postToYouTube("playVideo");
+      }
+    }
+
+    window.addEventListener(OVERLAY_EVENT, handleOverlay);
+    return () => window.removeEventListener(OVERLAY_EVENT, handleOverlay);
+    // postToYouTube so usa refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [youtube, playerActive]);
 
   // Arquivo direto: descobre se o autoplay foi bloqueado (a promessa de play() falha) para mostrar o botao de tocar.
   useEffect(() => {

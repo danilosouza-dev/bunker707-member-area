@@ -1,14 +1,17 @@
-// Regras puras da moldura de Comunicacao (prototipo aprovado, telas "Avisos e pop-ups", "Webinários" e
+// Regras puras de Comunicacao (prototipo aprovado, telas "Avisos e pop-ups", "Webinários" e
 // "Promoções"). Sem React: tests/admin-frames.test.mjs carrega este arquivo direto pelo Node.
 //
-// Comunicacao ainda nao existe (docs/17 §1.8). A moldura mostra o cabecalho, as abas e os quatro
-// numeros de cada aba na disposicao do prototipo, todos em "—", e um aviso honesto no lugar da lista.
-// Nenhum numero, aviso, webinario ou promocao de exemplo.
+// Avisos e pop-ups ja e a tela de verdade (docs/22): os quatro numeros vem do banco
+// (communication_overview). Fluxos tambem (docs/23): sequencias de notificacoes com regras, com os
+// numeros de communication_flow_stats. Modelos (docs/28) e a lista das configuracoes prontas, sem numeros
+// no topo nem Periodo na barra (uma lista de modelos nao tem numero de periodo). Webinarios e Promocoes ainda nao existem (docs/17 §1.8): a moldura mostra
+// o cabecalho, as abas e os quatro numeros em "—", e um aviso honesto no lugar da lista. Nenhum
+// numero, webinario ou promocao de exemplo.
 
 import type { KpiValueFormat } from "../format";
 import type { ResolvedAdminPeriod } from "../period";
 
-export const COMMUNICATION_TABS = ["avisos", "webinarios", "promocoes"] as const;
+export const COMMUNICATION_TABS = ["avisos", "fluxos", "modelos", "webinarios", "promocoes"] as const;
 export type CommunicationTab = (typeof COMMUNICATION_TABS)[number];
 
 export const COMMUNICATION_TITLE = "Comunicação";
@@ -29,11 +32,27 @@ type CommunicationTabMeta = {
 
 export const COMMUNICATION_TAB_META: Record<CommunicationTab, CommunicationTabMeta> = {
   avisos: {
-    description: "Pop-ups, faixas e cards na home do aluno, cada um para um segmento.",
+    description: "Notificações no sino e pop-ups para os alunos, cada um para um segmento.",
     href: "/admin/comunicacao/avisos",
     label: "Avisos e pop-ups",
     phase: 5,
     upcomingTitle: "Os avisos e pop-ups estão a caminho"
+  },
+  // Tela de verdade (nunca moldura): "Notificações automáticas" fica para as de comentario (docs/22 §1.2).
+  fluxos: {
+    description: "Sequências de notificações com regras: quem entra, o que recebe e quando.",
+    href: "/admin/comunicacao/fluxos",
+    label: "Fluxos",
+    phase: 7,
+    upcomingTitle: "Os fluxos estão a caminho"
+  },
+  // Tela de verdade (docs/28), sem numeros: os modelos de fluxo continuam em "Novo fluxo".
+  modelos: {
+    description: "Configurações prontas de notificações, pop-ups e designs para começar avisos novos. Os modelos de fluxo ficam em Novo fluxo.",
+    href: "/admin/comunicacao/modelos",
+    label: "Modelos",
+    phase: 7,
+    upcomingTitle: "Os modelos estão a caminho"
   },
   promocoes: {
     description: "Selo, preço e prazo no card bloqueado, com cliques rastreados até o checkout.",
@@ -52,6 +71,10 @@ export const COMMUNICATION_TAB_META: Record<CommunicationTab, CommunicationTabMe
 };
 
 export type CommunicationKpi = {
+  /** O que o numero conta, na linha de baixo do cartao (so nas abas com numero de verdade). */
+  definition?: string;
+  /** Versao curta da definicao, para o cartao estreito. */
+  definitionShort?: string;
   format: KpiValueFormat;
   label: string;
 };
@@ -75,16 +98,51 @@ export function describeCommunicationPeriod(period: Pick<ResolvedAdminPeriod, "d
   }
 }
 
-/** Os quatro numeros de cada aba, com os rotulos do prototipo. Sem dado, o cartao mostra "—". */
+/**
+ * Os quatro numeros de cada aba, com os rotulos do prototipo. Sem dado, o cartao mostra "—". Avisos
+ * traz a definicao de cada um (docs/22 §2.1): ativos = pop-ups no ar + notificacoes agendadas ou
+ * enviando; vistos e cliques no periodo; voltaram a estudar = viram e estudaram em 7 dias. Fluxos
+ * (docs/23 §2.4): no ar agora, alunos dentro agora, notificacoes enviadas e objetivo no periodo. Modelos
+ * (docs/28) nao tem numeros.
+ */
 export function getCommunicationKpis(tab: CommunicationTab, period: Pick<ResolvedAdminPeriod, "days" | "period">): CommunicationKpi[] {
   switch (tab) {
     case "avisos":
       return [
-        { format: "number", label: "Avisos ativos" },
-        { format: "number", label: `Vistos ${describeCommunicationPeriod(period)}` },
-        { format: "percent", label: "Taxa de clique" },
-        { format: "number", label: "Voltaram a estudar" }
+        { definition: "Pop-ups no ar e notificações agendadas", definitionShort: "No ar e agendados", format: "number", label: "Avisos ativos" },
+        {
+          definition: "No sino e nos pop-ups",
+          definitionShort: "Sino e pop-ups",
+          format: "number",
+          label: `Vistos ${describeCommunicationPeriod(period)}`
+        },
+        { definition: "Cliques ÷ vistos no período", definitionShort: "Cliques ÷ vistos", format: "percent", label: "Taxa de clique" },
+        {
+          definition: "Viram e estudaram em até 7 dias",
+          definitionShort: "Estudaram em 7 dias",
+          format: "number",
+          label: "Voltaram a estudar"
+        }
       ];
+    case "fluxos":
+      return [
+        { definition: "No ar agora (pausados não contam)", definitionShort: "No ar agora", format: "number", label: "Fluxos ativos" },
+        { definition: "Alunos com um passo ainda pela frente", definitionShort: "Ainda no caminho", format: "number", label: "No fluxo agora" },
+        {
+          definition: `Pelos fluxos e notificações seguintes, ${describeCommunicationPeriod(period)}`,
+          definitionShort: `Saíram ${describeCommunicationPeriod(period)}`,
+          format: "number",
+          label: "Notificações enviadas"
+        },
+        {
+          definition: `Saíram do fluxo pelo objetivo, ${describeCommunicationPeriod(period)}`,
+          definitionShort: `Pelo objetivo ${describeCommunicationPeriod(period)}`,
+          format: "number",
+          label: "Atingiram o objetivo"
+        }
+      ];
+    case "modelos":
+      return [];
     case "webinarios":
       return [
         { format: "number", label: "Próximos" },

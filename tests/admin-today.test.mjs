@@ -262,7 +262,7 @@ test("Criar: so destinos reais, o resto desativado com 'Em breve' e nunca 'fase'
       ["Produto a partir de uma playlist", "/admin/produtos/importar", null],
       ["Pacote", "/admin/produtos/pacotes", null],
       ["Aluno", "/admin/alunos/novo", null],
-      ["Aviso", null, "Em breve"],
+      ["Aviso", "/admin/comunicacao/avisos/novo", null],
       ["Webinário", null, "Em breve"],
       ["Promoção", null, "Em breve"]
     ]
@@ -278,7 +278,8 @@ test("Criar: so destinos reais, o resto desativado com 'Em breve' e nunca 'fase'
     "/admin/produtos/importar": "src/app/admin/(v2)/produtos/importar/page.tsx",
     "/admin/produtos/novo": "src/app/admin/(v2)/produtos/novo/page.tsx",
     "/admin/produtos/pacotes": "src/app/admin/(v2)/produtos/pacotes/page.tsx",
-    "/admin/alunos/novo": "src/app/admin/(v2)/alunos/novo/page.tsx"
+    "/admin/alunos/novo": "src/app/admin/(v2)/alunos/novo/page.tsx",
+    "/admin/comunicacao/avisos/novo": "src/app/admin/(v2)/comunicacao/avisos/novo/page.tsx"
   };
   for (const [href, file] of Object.entries(pages)) {
     assert.ok(items.some((item) => item.href === href), href);

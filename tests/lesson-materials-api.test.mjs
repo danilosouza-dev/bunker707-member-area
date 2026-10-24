@@ -128,10 +128,11 @@ test("pagina da aula passa para a aba Materiais so o que o servidor confirmou", 
   assert.doesNotMatch(lesson, /learnerKey=/);
   assert.doesNotMatch(lesson, /Math\.floor\(activeLessonMaxWatchedPercent \/ 10\)/);
   assert.match(lesson, /savedLearner=\{savedMaterialLearnerStates\[activeLessonKey\] \?\? EMPTY_LESSON_MATERIAL_LEARNER_STATE\}/);
-  // O estado gravado so muda depois que o PUT do progresso responde ok.
+  // O estado gravado so muda depois que o PUT do progresso responde ok (v3b-2: a resposta tambem diz se a
+  // gravacao fechou o curso, docs/29 §4.3).
   assert.match(
     lesson,
-    /if \(response\.ok\) \{[\s\S]{0,200}setSavedMaterialLearnerStates\(\(current\) => applySavedProgressToLearnerStates\(current, payload\)\);\s*return true;/
+    /if \(response\.ok\) \{[\s\S]{0,200}setSavedMaterialLearnerStates\(\(current\) => applySavedProgressToLearnerStates\(current, payload\)\);[\s\S]{0,300}?return \{ courseCompleted: courseCompletedOf\(body\), saved: true \};/
   );
   assert.equal(lesson.match(/setSavedMaterialLearnerStates\(/g)?.length, 1, "nenhum outro lugar muda o estado gravado");
 });

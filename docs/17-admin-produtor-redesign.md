@@ -104,6 +104,7 @@ Produtos
   Home do aluno
 Comunicação
   Avisos e pop-ups
+  Fluxos
   Webinários
   Promoções
 Comunidade
@@ -128,10 +129,14 @@ Sitemap completo (um endereço por tela):
 | Alunos | `/admin/alunos`, `/admin/alunos/novo`, `/admin/alunos/importar`, `/admin/alunos/[id]`, `/admin/alunos/turmas`, `/admin/alunos/segmentos` |
 | Produtos | `/admin/produtos`, `/admin/produtos/novo`, `/admin/produtos/importar`, `/admin/produtos/pacotes`, `/admin/produtos/[id]` (Conteúdo), `/detalhes`, `/acesso`, `/alunos`, `/desempenho`, `/aulas/[lessonId]` (painel lateral com endereço próprio) |
 | Área de membros | `/admin/area-de-membros` (Vitrine), `/destaque`, `/modulos` (`?busca=`, `?pagina=`), `/login`, `/marca`; `/admin/home` redireciona para a Vitrine |
-| Comunicação | `/admin/comunicacao` (todas), `/avisos/novo`, `/avisos/[id]`, `/webinarios`, `/webinarios/novo`, `/webinarios/[id]`, `/promocoes`, `/promocoes/nova`, `/promocoes/[id]` |
+| Comunicação | `/admin/comunicacao` (redireciona para `/avisos`), `/avisos` (todos, `?tipo=notificacao\|popup`, `?pagina=`), `/avisos/novo` (`?tipo=popup`), `/avisos/[id]` (editor ou relatório; `?editar=1` no pop-up no ar), `/fluxos` (`?situacao=ativos\|rascunhos\|encerrados`, `?pagina=`), `/fluxos/novo`, `/fluxos/[id]` (construtor ou relatório; `?editar=1` no fluxo no ar, `?passo=`), `/webinarios`, `/webinarios/novo`, `/webinarios/[id]`, `/promocoes`, `/promocoes/nova`, `/promocoes/[id]` |
 | Comunidade | `/admin/comunidade` (fila), `/denuncias`, `/top`, `/regras` |
 | Configurações | `/admin/configuracoes` (geral), `/equipe`, `/video`, `/ia`, `/vendas`, `/canais` |
 | ~~Transitório~~ | ~~`/admin/legado`~~ removido em 14/10/2026: existe um admin só |
+
+Atualização (20/10/2026): a lista "todas" de Comunicação ficou em `/admin/comunicacao/avisos` (o primeiro item do submenu); `/admin/comunicacao` só redireciona para ela. Avisos e pop-ups é tela real desde a Comunicação v1 (1.8); Webinários e Promoções continuam como telas em construção. "Novo aviso" entrou no Cmd+K e "Aviso" no menu Criar do Hoje, para quem tem `messaging.write`.
+
+Atualização (21/10/2026): **Fluxos** entrou no submenu de Comunicação, depois de Avisos e pop-ups, como tela real (Comunicação v2, `docs/23`), com o filtro de período no topo, "Novo fluxo" no Cmd+K e o título `Novo fluxo` no celular.
 
 ### 1.5 Tela "Hoje"
 
@@ -307,20 +312,81 @@ CSV do filtro atual: nome, e-mail, telefone, produtos, turma, situação, entrou
 
 É o módulo que justifica ter uma área de membros própria em vez do Hotmart Club. Nasce enxuto e ligado aos segmentos.
 
+> **Atualização (20/10/2026).** Entrou a **Comunicação v1**, com dois tipos: **Notificação** (sino) e **Pop-up** (home). Regras, decisões e o que fica para depois estão em `docs/22`; o registro desta rodada está em 2.10.
+> - **Avisos e pop-ups** (`/admin/comunicacao/avisos`) é tela real:
+>   - lista com os quatro números do período (Avisos ativos, Vistos, Taxa de clique, Voltaram a estudar) e filtro Todos / Notificações / Pop-ups;
+>   - editor com prévia ao vivo usando os componentes do aluno;
+>   - relatório de cada aviso;
+>   - aprovação acima de 500 alunos (D4);
+>   - Pausar, Retomar, Encerrar, Cancelar agendamento, Retirar do sino, Duplicar e Excluir.
+> - **O lado do aluno (1.8.5)**:
+>   - entraram o sino completo e o pop-up com "Lembrar depois" (24 h, até 2 vezes) e "Não mostrar de novo";
+>   - também as notificações automáticas de resposta e menção nos comentários, pela aula e pela Comunidade do admin;
+>   - a central `/perfil/notificacoes` fica para quando houver canal fora da plataforma.
+> - **Desvios do desenho de 1.8.1 e 1.8.2**:
+>   - a notificação aceita texto maior (título 80, texto 600; o pop-up fica nos 60/240);
+>   - o aviso ganhou **áudio**, enviado ou **gravado no navegador** (até 5 min e 10 MB, com forma de onda e velocidade no sino), por pedido do produtor;
+>   - **Para quem** virou um **construtor de regras** E/OU com um nível de grupo (produto, progresso nas aulas, comentários, tempo de acesso, acesso terminando, último estudo, entrada na plataforma, ritmo e turma), no lugar do construtor rápido. Os segmentos de Alunos entram como regras;
+>   - o botão leva a Um produto, Página da área ou Link externo; Aula, Webinário e Promoção ficam para quando existirem;
+>   - a notificação pode pedir **resposta** (Aceitar / Recusar), o mecanismo dos futuros convites;
+>   - "Só eu (teste)" virou **Enviar teste para mim**;
+>   - o fim por N conversões não entrou;
+>   - **Como medir** ficou fixo em "Voltaram a estudar (7 dias)", sem o seletor de desfecho;
+>   - fora desta rodada: "Salvar quem converteu como segmento" e a quebra por produto.
+> - **Limites**: os do pop-up seguem 1.8.1 (era só na home até a v3b-1, `docs/25`; o limite de 1 por sessão e 1 a cada 24 h saiu por decisão do produtor, docs/24 §10.8), sem o tipo "crítico". Faixa, card, destaque, toast, e-mail e WhatsApp continuam no plano.
+> - **Módulo** `src/server/communications/`, telas em `src/components/admin/v2/communication/` e no aluno `src/components/member/notifications/`; migração `202610200001`.
+
+> **Atualização (21/10/2026).** Entrou a **Comunicação v2**, por pedido explícito do produtor em 20/10/2026 (documento próprio: `docs/23`; registro desta rodada em 2.10). Migração `202610200002`.
+> - No editor de notificação: **Quem envia** (a escola, eu ou outra pessoa da equipe; o círculo do sino mostra a foto dela e a pessoa recebe um e-mail), **Ícone ao lado do título**, **Fica no sino por** (5 minutos a 90 dias desde os ajustes da v3a; era 1 hora a 90 dias) e o card **Depois desta notificação** (notificações seguintes para quem fez ou não fez algo com a anterior, depois do envio ou antes de vencer, em até 3 níveis).
+> - **Fluxos** (`/admin/comunicacao/fluxos`): quem entra por regras (de uma vez ou continuamente), passos Notificação e Condição (Sim/Não), esperas, Objetivo, relatório por passo, ativar, pausar, retomar, encerrar e editar no ar com `Aplicar alterações`. As seguintes do editor são um fluxo visto pela notificação: o mesmo motor e o mesmo modelo.
+> - Marca ganhou o **Ícone da escola** (o círculo das notificações da escola).
+> - Limite novo, fixo e em texto: no máximo 3 notificações de fluxos e seguintes por aluno por dia, com 1 hora entre elas (1.8.1).
+> - Muda 1.14: "automações encadeadas" saiu de fora do MVP, só no sino; e-mail, tag e bônus seguem na fase 7.
+
+> **Atualização (22/10/2026).** Entrou a **Comunicação v3a "Sino e avisos"**, por pedido do produtor depois de testar a v2 (documento próprio: `docs/24`). Migração `202610220001`. **Mudam decisões**:
+> - **CRUD completo no ⋯** em toda situação em que faz sentido (Ver relatório, Editar, Duplicar, Excluir e as ações de estado). A **notificação enviada passa a ser editável** (só o conteúdo: título, texto, imagem, ícone, Quem envia, destino e como o aluno chega lá, textos de Aceitar/Recusar e reações), chega a todos os sinos na hora e em silêncio, e vale como publicar (`messaging.publish`; acima de 500 que receberam, `publish_large`; nunca vira pedido). Segmento, envio, tempo no sino, áudio, ligar a resposta e a enquete continuam travados. **Excluir** vale em qualquer situação menos "Enviando" (a enviada sai de todos os sinos; o que os alunos veem ou está agendado pede `messaging.publish`). Era "Notificação enviada não muda" e "Excluir só rascunho, aguardando, cancelado e encerrado".
+> - **Reações** (6 emoji fixos, o aluno vê só a própria; os números ficam no relatório) e **enquetes** (2 a 6 opções, uma ou várias, resultado para quem votar, fim por data ou quando sai do sino, **Encerrar enquete**) entram no sino, nas notificações seguintes e nos passos de fluxo. Antes não estavam em nenhuma fase.
+> - O aluno ganha a **lixeira** (Excluir notificação, com Desfazer), o **cartão clicável** (Como o aluno chega lá), **Mudar resposta** e o título de 15 px em negrito; o sino lê a lista numa consulta só e guarda a primeira página no navegador.
+> - Pop-up: só o **Mostrar de novo para quem já viu** (no "Uma vez"). A **personalização do pop-up** (páginas e exclusões, gatilhos, frequência, limites globais editáveis, o construtor por blocos, enquete no pop-up e "Como fechar") fica para a **v3b "Pop-ups sob medida"**, que vai mudar a linha "Pop-up" de 1.8.1 (hoje 1 por sessão, 1 a cada 24 h, só na home) e D12. O "construtor de HTML" pedido pelo produtor vira blocos estruturados desenhados pelos componentes do app, nunca HTML cru (segurança da área do aluno e a CSP com nonce).
+> - Limite novo nas escritas do aluno (reação, voto, lixeira, resposta): 30 por minuto; as rotas de leitura continuam sem limite (2.3).
+
+> **Atualização (22/10/2026).** Entrou a **Comunicação v3b-1 "Pop-ups: frequência, páginas e como fechar"**, por decisão do produtor depois de testar a v3a (documento próprio: `docs/25`). Migração `202610220003`. **Mudam a linha "Pop-up" de 1.8.1 e D12**:
+> - O pop-up aparece **onde e quando a equipe escolher**: Só no Início (padrão), Em qualquer página ou as páginas marcadas, com **Nunca nestas páginas**; **Ao abrir a página** (0 a 600 s) ou **Ao concluir uma aula**. Nunca no login, no Modo TV, no admin nem no "ver como".
+> - **Frequência por pop-up, escolhida pela equipe**: Uma vez, ou Mais de uma vez com limite por dia, tempo entre uma vez e outra, limite total e o que faz parar; o **Volta em** do Lembrar depois (5 minutos a 7 dias); **Como fechar** (no X ou fora, ou só no X, com o Esc sempre fechando). Sem limite fixo entre pop-ups: as regras fixas são só **um de cada vez** e, na aula, **nunca com o vídeo do nosso player tocando**. Até 50 pop-ups publicados ao mesmo tempo.
+> - **Mostrar de novo para quem já viu** vale em qualquer "Quantas vezes". O relatório ganha as linhas Onde, Quando aparece, Quantas vezes e Como fecha no "Detalhes"; a tela de relatório por página e por jeito de fechar fica para a v3b-2, com os modelos de configuração.
+
+> **Atualização (23/10/2026).** Entrou a **Comunicação v3b-2 "Pop-ups: hora marcada ao vivo, primeiro acesso, curso concluído, relatório e players de fora"** (documento próprio: `docs/29`; migração `202610260001`):
+> - **Quando aparece** ganha **No primeiro acesso** (`A primeira vez na área` ou `A primeira vez com estes produtos`, até 20, decidido no recálculo do segmento; até 15 minutos de atraso para quem acabou de comprar; num pop-up já publicado, não troca com os outros momentos) e **Ao concluir um curso** (todas as aulas publicadas do curso; numa formação, cada curso). Com `Começa: Em uma data`, o pop-up de página abre **na hora marcada** também para quem já está na página (com alguns segundos de diferença entre os alunos; o **Termina** decide até quando).
+> - **Relatório do pop-up** na página do pop-up publicado (**Como o pop-up foi visto**): Vezes que apareceu, Alunos que viram, Viram mais de uma vez, No máximo para um aluno, e os blocos Onde apareceu (com Por produto), Em que momento, Como fecharam e Quantas vezes cada aluno viu, em gráfico ou tabela, **desde a publicação** (sem o Período do topo), atualizado a cada minuto. É a "tela de relatório por página e por jeito de fechar" que a v3b-1 deixou para depois.
+> - Na aula, o pop-up **espera o vídeo parar** em todo player que a página lê; a página passa a ler o **Bunny**, o **Vimeo** e o **Mux** (a aula conclui sozinha no fim do vídeo). Nenhum limite novo.
+
+> **Atualização (25/10/2026).** Entraram os **Modelos** da Comunicação (documento próprio: `docs/28`; migração `202610250001`):
+> - aba nova **Modelos** (`/admin/comunicacao/modelos`), entre Fluxos e Webinários, sem números no topo nem Período: lista com busca pelo nome, pílulas Todos / Notificação / Pop-up / Design Personalizado / Design Livre, miniatura, resumo, "Atualizado em", "Criado por" e o ⋯ **Usar**, **Editar**, **Renomear**, **Duplicar**, **Excluir** (com confirmação). Os modelos de fluxo continuam em **Novo fluxo** e os do card Design continuam como **Modelos prontos**;
+> - **Salvar como modelo** no cabeçalho do editor do aviso (usa o que está na tela, sem gravar o aviso) e no ⋯ da lista e do relatório (a versão gravada), com as chaves **Levar o conteúdo**, **Levar o segmento** e, na notificação com seguintes, **Levar as notificações seguintes**. Data e hora de envio, a janela do pop-up, "até uma data" e o fim marcado da enquete nunca vão;
+> - **Novo aviso** vira menu quando há modelos ("Começar em branco", os 5 mais recentes, "Ver todos os modelos"); **Usar** abre `/avisos/novo?modelo=<id>` preenchido e nada é gravado até salvar;
+> - **Novo modelo** (`/modelos/novo`) escolhe Notificação, Pop-up, Design Personalizado ou Design Livre. O **modo modelo do editor** (`/modelos/[id]`) é o editor do aviso sem envio, janela, "Até uma data", fim da enquete, teste e aprovação, com o card **Modelo** (nome e as chaves), "Salvar modelo" e o 409 "Este modelo mudou em outra tela" com Recarregar; o modelo de Design tem a página própria (modo fixo, sem o destino do botão principal);
+> - no card Design, **Meus modelos** (antes dos Modelos prontos) e **Salvar design como modelo**; no editor Livre, a terceira aba **Modelos**. O Cmd+K ganhou **Novo modelo**. Só quem cria avisos (`messaging.write`) vê e mexe; o aluno nunca vê um modelo.
+
+> **Atualização (23/10/2026).** Entrou o **Design Livre** (documento próprio: `docs/27`; sem migração): a terceira opção do card **Design**, com o editor de tela cheia no estilo do Elementor (§1.8.2).
+
+> **Atualização (22/10/2026).** Entrou o **Design do pop-up** (documento próprio: `docs/26`; migração `202610230001`). O editor do pop-up ganha o card **Design** logo depois do conteúdo: **Padrão** (o de sempre) ou **Personalizado** (modelos para começar; seções Mídia, Texto e posição, Blocos, Cartão, Fontes, Fechar e links; prévia de celular e computador lado a lado; dica de contraste). No Personalizado, "Título" vira **Nome do pop-up** e Texto, Ícone, Imagem e Para onde leva vão para o design (a imagem em Mídia, o destino no bloco Botão principal). O "construtor de HTML" pedido virou blocos estruturados, nunca HTML cru. Detalhes do editor em 1.8.2 (Design do pop-up).
+
 #### 1.8.1 Tipos e limites
 
 | Tipo | Onde o aluno vê | Para quê | Limite por aluno (fixo no sistema) |
 |---|---|---|---|
-| **Pop-up** | centro da home, após 3 s ou 1ª interação; nunca durante uma aula | decisão: webinário em < 72 h, promoção com prazo, aviso obrigatório | 1 por sessão e 1 a cada 24 h; o tipo "crítico" (só do sistema) ignora o limite |
+| **Pop-up** | centro da tela, onde e quando a equipe escolher (Início, qualquer página ou as marcadas, menos as exceções; ao abrir a página, ao concluir uma aula e, desde a v3b-2, no primeiro acesso e ao concluir um curso, com a hora marcada ao vivo; `docs/25` e `docs/29`); na aula, nunca com o vídeo tocando (espera parar) | decisão: webinário em < 72 h, promoção com prazo, aviso obrigatório | ~~1 por sessão e 1 a cada 24 h~~: saiu por decisão do produtor (docs/24 §10.8); frequência por pop-up, escolhida pela equipe; um de cada vez |
 | **Faixa no topo** | abaixo do cabeçalho | estado persistente: contagem regressiva, "sua live começa em 2 h" | 1 ativa por vez; fechar vale 7 dias |
 | **Card na home** | fileira "Para você" ou card dentro de uma fileira | promoção ou webinário como item do catálogo | 1 fileira + 1 card por fileira; fechar vale 30 dias |
 | **Destaque da home** | o hero | lançamento ou evento da semana | 1 por vez |
-| **Notificação (sino)** | caixa de notificações, 90 dias de histórico | tudo o que foi exibido + respostas a comentários + replays | sem limite |
+| **Notificação (sino)** | caixa de notificações, 90 dias de histórico (cada notificação pode ficar menos, de 5 minutos a 90 dias); desde a v3a o aluno pode excluir do próprio sino (quando a equipe deixa), reagir e votar | tudo o que foi exibido + respostas a comentários + replays | avisos da equipe sem limite; notificações de fluxos e notificações seguintes: no máximo 3 por dia, com pelo menos 1 hora entre elas (docs/23) |
 | **Toast** | canto da tela, só reativo | nova aula liberada, comentário respondido | 2 por sessão |
 | **E-mail** (fase 5) | caixa de entrada do aluno | convite e lembretes de webinário, promoção com prazo | marketing 2 por semana, 08–21 h; o plano gratuito do serviço de envio limita a 100 e-mails por dia (D6) |
 | **WhatsApp** (fase 7) | WhatsApp oficial (API da Meta) | lembrete de webinário; marketing só com autorização explícita | 1 por semana |
 
-Os limites aparecem no editor como texto ("Para não cansar o aluno, mostramos no máximo 1 pop-up por dia"), não como campos.
+Os limites aparecem no editor como texto, não como campos. Desde a v3b-1, a frequência do pop-up é um campo (card "Quantas vezes e como fecha", `docs/25` §2.4); o que continua como texto é a nota do card "Quando e onde aparece" (desde a v3b-2, `docs/29` §2.1): `Um pop-up de cada vez: se dois tiverem que abrir juntos, o segundo espera o primeiro fechar. Na aula, nunca com o vídeo tocando: ele espera o vídeo parar. Quando a página não consegue saber se o vídeo toca (vídeo colado de outro site e, no iPhone, às vezes o do Bunny), ele só abre antes do play, e no celular não abre.`
+
+Nota (21/10/2026): a linha "Notificação (sino)" mudou de "sem limite" para o limite de fluxos e notificações seguintes acima, com a Comunicação v2 (`docs/23` §2.10 e V13; `docs/09`). O que passa do limite do dia sai às 8h do dia seguinte (São Paulo); o que o intervalo de 1 hora segura espera o intervalo; nenhum dos dois sai depois do prazo ou de 7 adiamentos. Sem horário de silêncio no sino (ele não toca nem manda push); os avisos avulsos da equipe e as notificações de comentário continuam sem limite. Texto no editor: `Para não cansar o aluno: no máximo 3 notificações de fluxos e notificações seguintes por dia para cada aluno, com pelo menos 1 hora entre elas. Se passar do limite do dia, sai às 8h do dia seguinte; se o prazo dela acabar antes, não sai.`
 
 #### 1.8.2 Criar aviso (`/admin/comunicacao/avisos/novo`)
 
@@ -334,6 +400,23 @@ Uma página: formulário à esquerda, **prévia ao vivo** à direita usando exat
 Revisão em uma frase ("Pop-up para 318 alunos da Formação IA sem acesso ao Bootcamp, de 14/10 a 21/10, no máximo 1 vez"), **Enviar teste para mim**, **Publicar**. Acima de 500 alunos, quem não é dono ou admin vê **Enviar para aprovação**, e o aviso fica "Aguardando aprovação" até um dono ou admin aprovar (D4).
 
 Lista (`/admin/comunicacao`): nome, tipo, para quem, período, situação (Rascunho / Aguardando aprovação / Agendado / Ativo / Pausado / Encerrado), vistos, cliques, dispensa %, conversões. Ações: Pausar, Duplicar, Encerrar. No relatório de cada aviso: funil Elegíveis → Vistos → Clicaram → Converteram, dispensa % (alerta > 40 %), quebra por produto e situação, e o botão **Salvar quem converteu como segmento**.
+
+
+**Design do pop-up (22/10/2026, `docs/26` §2).** Só no pop-up, card **Design** depois do conteúdo:
+
+- **Padrão** | **Personalizado** (`name="popup-design"`); a primeira vez em Personalizado mostra **Começar de um modelo** (Mídia no topo com degradê, Só texto, Texto sobre a mídia); sem botão no aviso, o modelo cria `Saiba mais` com o destino vazio; voltar a Padrão guarda o design em memória; **Trocar de modelo** confirma;
+- seções, nesta ordem: **Mídia** (Sem mídia, Imagem, Vídeo com envio direto ao Storage e porcentagem; sem imagem, um quadro do vídeo vira a capa; formato, **Parte da mídia que aparece** (era "Recorte": só o enquadramento), degradê com **Começa a escurecer em** e **Fica totalmente escuro em**, desde 23/10/2026), **Texto e posição** (zonas, subir, alinhamento, espaço), **Blocos** (Subir, Descer, Editar, Tirar; Adicionar bloco; até 12), **Cartão** (largura P/M/G, fundo **Cor**, **Degradê** ou **Imagem** com Onde a imagem fica, Escurecer a imagem e Cor de apoio, borda, cantos, respiro, sombra), **Fontes** (biblioteca com Renomear, Excluir e Enviar fonte), **Fechar e links** (cores do X e dos links e, desde 23/10/2026, a chave **Mostrar o link “Não mostrar de novo”**, ligada por padrão, com a dica do custo quando desligada);
+- o destino do botão principal é o `NoticeCtaField` de sempre dentro do bloco (sem a chave "Levar o aluno a algum lugar", prop `showSwitch={false}`); "Quando o aluno clica no botão" também libera com um Segundo botão "Abrir um link";
+- salvar e sair da página esperam o vídeo e a imagem do fundo terminarem de subir (`Espere o vídeo terminar de enviar.` / `Espere a imagem do fundo terminar de enviar.`); cada erro do design foca o campo (`docs/26` §2.3); a dica de contraste nunca impede salvar;
+- o relatório mostra a mesma prévia com as fontes do design.
+
+**Design Livre (23/10/2026, `docs/27` §2).** A terceira opção do card **Design**, **Livre**, monta o pop-up do zero num editor de tela cheia no estilo do Elementor:
+
+- card Design: **Padrão** | **Personalizado** | **Livre** empilhados, com memória entre os três; a primeira vez no Livre mostra **Começar de um modelo** com miniaturas (Vídeo no topo com degradê, Só texto com brilho, Em branco) e escolher abre o editor; com o Livre montado: miniatura, **Abrir editor Livre**, `{n} elementos · {largura} px`, `{n} problemas para revisar` (abre no Revisar) e **Trocar de modelo** (confirma; Ctrl + Z no editor volta ao de antes); abaixo de 1.024 px de largura, o botão fica desligado com a frase e a prévia continua; no Livre, o conteúdo esconde Texto, Ícone, Imagem e Para onde leva (o Botão principal mora no editor);
+- editor: barra com **Concluir**, `Editor Livre`, **Ver como** Computador | Celular, zoom **Ajustar à tela** | **100 %**, **Desfazer**, **Refazer**, **Revisar**, **Atalhos**, **Salvar rascunho**; à esquerda **Elementos** (Texto: Título, Texto, Selo; Botões: Botão principal, Botão; Mídia: Imagem, Vídeo, Ícone; Formas: Forma, Degradê, Linha, Espaço; Estrutura: Caixa em coluna, Caixa em linha) e **Camadas** (árvore com Esconder, Travar e o menu ⋯); no meio o desenho (selecionar, arrastar, 8 alças, guias, barrinha da sequência com Subir, Descer, Duplicar, Soltar, Excluir); à direita **Conteúdo / Estilo / Avançado** do elemento, **Pop-up** sem seleção (largura com "Ajustar os elementos à nova largura", altura mínima, fundo, borda, cantos, sombra, respiro, a sequência, o X e as fontes) ou **Revisar** (medidor de tamanho, erros que levam ao campo, dicas);
+- **Salvar rascunho** dentro do editor grava sem fechar (num aviso novo, o endereço só troca no **Concluir**); erro de fora do editor mostra **Fechar o editor e revisar**; fechar a aba com mudança pede confirmação e reabrir oferece **Recuperar**;
+- tudo tem caminho pelo teclado (Camadas com setas, E, T, Alt + ↑/↓, Delete, Ctrl + D; palco com setas; Ctrl + Z / Ctrl + Shift + Z) e pelos campos (X, Y, largura, altura, Alinhar no pop-up);
+- a prévia do aviso e o relatório desenham o Livre pelo mesmo cartão do aluno, no celular e no computador.
 
 #### 1.8.3 Webinários (`/admin/comunicacao/webinarios`)
 
@@ -395,7 +478,7 @@ Convenção de janela: **tudo segue o período selecionado no topo** (padrão 30
 | Candidatos a upsell | ≥ 70 % ou conclusão do produto A sem acesso ao "próximo passo" B | Desempenho; Alunos | Criar promoção | Fase 3 (exige "Próximo passo" configurado no produto) |
 | Acessos expirando | acesso termina em ≤ 30 / 15 / 7 dias, separados em quem estuda e quem não | Hoje; Alunos | quem estuda: renovação; quem não: "termine antes de DD/MM" | Fase 1 |
 | Tutor IA | perguntas, % de falhas, custo estimado, aulas com mais perguntas | Configurações › IA; Desempenho | falhas > 2 % → conexões | Fase 1 (o dado já existe) |
-| Avisos | elegíveis → vistos → cliques → resultados; % de dispensa; quem voltou a estudar em 7 dias | Comunicação | pausar / duplicar / salvar quem converteu como segmento | Fase 5 |
+| Avisos | elegíveis → vistos → cliques → resultados; % de dispensa; quem voltou a estudar em 7 dias; no pop-up (desde a v3b-2, `docs/29` §2.6), **Como o pop-up foi visto**: vezes que apareceu (soma das linhas por aluno, exata), alunos que viram, viram mais de uma vez, o máximo e a mediana por aluno, e onde apareceu (tipo de página e produto), em que momento e como fecharam (do histórico, até 100 por aluno e dia; "Sem registro" = aberturas sem resultado), **desde a publicação** (exceção à convenção do Período, escrita no rótulo: o funil do aviso já é desde a publicação) | Comunicação | pausar / duplicar / salvar quem converteu como segmento; no pop-up, mudar onde, quando ou quantas vezes | Fase 5 (relatório do pop-up: v3b-2) |
 | Webinários | inscritos ÷ elegíveis; presença ÷ inscritos; replay assistido | Comunicação | replay para quem faltou | Fase 5 |
 | Vitrine | impressões e taxa de clique por fileira | Produtos › Home do aluno | reordenar fileiras | Fase 3 |
 | Ciclo de vida semanal | Semana ativa = ≥ 10 min assistidos ou ≥ 1 aula concluída (`student_daily_activity`). Novos (primeira semana ativa de toda a história) / Retidos (ativos nesta semana e na anterior) / Recuperados (ativos nesta, parados na anterior, com atividade antes) / Inativos (acesso aberto há ≥ 4 semanas e nenhuma semana ativa nas 4 últimas). Semana começa na segunda, fuso da escola. Backfill aproximado até 15/10/2026. | Alunos (topo) | clique abre o grupo da semana na lista | Entregue (15/10/2026) |
@@ -420,7 +503,9 @@ Quatro fluxos precisam funcionar bem em 375 px e são critério de aceite das fa
 
 ### 1.14 O que fica fora do MVP (escrito agora para não voltar depois)
 
-WhatsApp (só na fase 7, utilitário primeiro), e-mail em massa com editor visual, testes A/B, editor de texto rico, gamificação, certificados, mural da comunidade, ranking público de alunos, automações encadeadas, aplicativo nativo. Também ficam fora da barra lateral quaisquer telas sem backend real: a lição das telas decorativas de Integrações e Comunidade não se repete.
+WhatsApp (só na fase 7, utilitário primeiro), e-mail em massa com editor visual, testes A/B, editor de texto rico, gamificação, certificados, mural da comunidade, ranking público de alunos, ~~automações encadeadas~~, aplicativo nativo. Também ficam fora da barra lateral quaisquer telas sem backend real: a lição das telas decorativas de Integrações e Comunidade não se repete.
+
+Nota (21/10/2026): "automações encadeadas" saiu de fora do MVP por pedido explícito do produtor em 20/10/2026, ver `docs/23`: notificações seguintes no editor de notificação e Fluxos com regras, só no sino. Passos por e-mail, WhatsApp, tag e liberação de bônus continuam fora (fase 7).
 
 ### 1.15 Decisões em aberto para o produtor
 
@@ -437,7 +522,7 @@ WhatsApp (só na fase 7, utilitário primeiro), e-mail em massa com editor visua
 | D9 | Admin em tema claro também, ou só escuro? | Só escuro no MVP; a troca de tema já está preparada para depois |
 | D10 | Botão principal do admin: claro (branco com texto escuro) ou vermelho da marca? Hoje o design system manda usar o vermelho como primário no admin | Claro, como o botão primário da área do aluno; o vermelho sobra para marca, ações destrutivas e "ao vivo", sem colidir com erro nos gráficos |
 | D11 | Renomear o tipo "Produto" para "Material" também na área do aluno (hoje o rótulo aparece no modal de detalhes)? | Sim, com migração de rótulo |
-| D12 | Permitir ultrapassar o limite de 1 pop-up por dia em lançamentos? | Não no MVP; o excedente usa Faixa no topo e Destaque da home |
+| D12 | Permitir ultrapassar o limite de 1 pop-up por dia em lançamentos? | **Fechada** em 22/10/2026: sem limite fixo entre pop-ups (docs/24 §10.8); a frequência de cada pop-up é escolha da equipe, no editor (`docs/25`, v3b-1) |
 | D13 | Migrar do YouTube: tudo, só produtos pagos, ou só produtos novos daqui em diante? | Só pagos, começando pelo de maior receita; abertos e bônus ficam no YouTube |
 
 A ordem do roadmap tem um ponto negociável, descrito em 2.10: Comunicação pode vir antes do vídeo se um lançamento exigir.
@@ -738,6 +823,24 @@ Próximos passos, fora desta entrega:
 | `offers` / `attribution_clicks` | promoção: `content_id`, `badge`, `price_label`, `coupon_code`, `checkout_url`, `provider`, `starts_at`, `ends_at`, `audience_id`; clique: `click_token unique`, `user_id`, `campaign_id`, `offer_id`, `clicked_at`, `converted_at`, `webhook_event_id` | 6 |
 | `webhook_events` | `provider`, `external_event_id`, `payload jsonb` bruto, `signature_valid`, `processing_status`, `outcome`, `outcome_detail`, `error_message`, alvo e aluno resolvidos → entitlements (feita em 17/10/2026, com `integration_settings` e `sales_product_links`; docs/05) | 6 |
 
+> **Atualização (20/10/2026): o que a fase 5 criou de fato** (migração `202610200001`; colunas em `docs/05`, seção Comunicação):
+>
+> | Planejado | Feito na Comunicação v1 |
+> |---|---|
+> | `notifications` (`user_id`, `kind`, `title`, `body`, `href`, `campaign_id`, `event_id`, `read_at`) | `notifications` com `kind` `notice` / `comment_reply` / `comment_mention`, `campaign_id` (o aviso não copia o texto), `actor_id`, `dedupe_key` única por aluno, `is_test`, `seen_at` (número do sino) separado de `read_at` (bolinha), `clicked_at` e `response`; sem `event_id` |
+> | `campaigns` com `content jsonb`, `audience_id`, `channels`, `frequency`, `tier`, `priority`, `goal_event_type`, `revision` | `campaigns` com colunas próprias para o conteúdo (título, texto, imagem, **áudio**, botão, resposta), `audience` jsonb (as regras do segmento), `kind` só `inbox` e `popup`, janela, `popup_repeat`, `allow_snooze`, aprovação, envio (`dispatch_*`, `recipients_count`) e `updated_at` como versão; sem `tier`, `priority`, `channels` e desfecho (fixo) |
+> | `campaign_deliveries` + `message_events` + `campaign_daily_stats` | `campaign_deliveries` (com `eligible` e `snooze_count`, só para pop-up); os eventos vão para `student_events` (`message_*` e `notification_*`) e os números saem de RPC (`communication_campaign_stats`, `communication_overview`) |
+> | `audiences` + `audience_static_members` sobre `student_facts` | não criadas: o segmento vive em `campaigns.audience` e é avaliado em TypeScript sobre as mesmas leituras da lista de Alunos (`docs/22` C4) |
+> | `scheduled_sends`, `communication_preferences`, `consent_log`, `push_subscriptions`, `events` / `event_registrations` | ficam para os próximos canais e para Webinários; o envio agendado do sino usa `campaigns.send_at` e o job `comunicacao` do tick |
+>
+> Retenção: `notifications` e `campaign_deliveries` saem com 24 meses (`prune_communication_history()`, D8; o estado de pop-up ainda no ar ou pausado fica, `docs/22` §4.6) e a conta excluída leva as linhas dela (cascade), em vez de ficar com o `user_id` pseudônimo.
+>
+> **Atualização (21/10/2026): Comunicação v2** (migração `202610200002`, `docs/23` §3): `communication_flows`, `communication_flow_nodes`, `communication_flow_runs` e `communication_flow_tasks` (fluxos e notificações seguintes, um motor só, sem fila de jobs nova) e `member_page_visits` (última visita por aluno e página, só das páginas que um fluxo no ar usa; não é o `page_viewed` de 2.5). A retenção de 24 meses vale para tarefas terminadas, passagens de fluxos encerrados e visitas.
+>
+> **Atualização (22/10/2026): Comunicação v3a** (migração `202610220001`, `docs/24` §3): nenhuma tabela nova. `campaigns` ganha `cta_display`, `allow_reactions`, `poll` e `edited_at`/`edited_by`; `notifications` ganha a lixeira do aluno (`hidden_at`), a reação, a mudança de resposta, o voto e o contador de escritas; `campaign_deliveries` ganha as bases do "Mostrar de novo". A leitura do sino vira uma RPC (`communication_inbox_page`) com a regra de visibilidade num lugar só; os eventos novos (`notification_reacted`, `notification_voted`, `notification_hidden`) vão para `student_events`, só com ids.
+>
+> **Atualização (23/10/2026): Comunicação v3b-2** (migração `202610260001`, `docs/29` §3): nenhuma tabela nova. `campaigns.popup_access_products` (os produtos do "No primeiro acesso") e `campaign_deliveries.first_access_at` (a marca do recálculo). **Índice novo** `student_events_campaign_idx` em `(entity_id, event_type) where entity_type = 'campaign'` (só as linhas dos avisos; 1,95 MB para 264 mil linhas de avisos em 2,66 milhões, medido): o relatório do pop-up lê por ele, numa função `communication_popup_report` (uma passada por aluno, sem junção; só `service_role`). Os índices genéricos de `student_events` planejados acima (`(event_type, occurred_at desc)`, `(entity_type, entity_id)`) continuam por fazer. A política de insert do aluno em `student_events` passou a recusar `entity_type = 'campaign'`. **A retenção de 24 meses de `student_events` prometida no parágrafo LGPD abaixo nunca foi feita** (`202610170004` não cobre a tabela): quando vier, o relatório "Desde a publicação" encolhe, então o job guarda antes os números de cada pop-up ou a tela troca a frase do histórico (`docs/29` §9.1, D2).
+
 **LGPD: exclusão e retenção.** "Excluir aluno" roda um job que: revoga entitlements; substitui nome/e-mail/telefone em `profiles` e `students` por valores anonimizados; mantém `lesson_progress`, `lesson_comments` (corpo substituído por "[comentário removido]" se o aluno pedir), `student_events`, rollups e `campaign_deliveries` apenas com o `user_id` pseudônimo; apaga `ai_conversations`/`ai_messages` daquele aluno; remove `push_subscriptions` e `communication_preferences`; registra em `admin_audit_log`. Retenção padrão: `message_events` e `student_events` 24 meses; `lesson_watch_segments` 12 meses (rollups permanecem); `webhook_events` e `video_provider_events` 12 meses (feito para `webhook_events` em 17/10/2026 por `public.prune_personal_data()`, que também anonimiza `email_outbox` em 90/180 dias e apaga `email_webhook_events` em 90 dias; `docs/06`, seção LGPD); `admin_audit_log` 5 anos. Nenhum PII vai ao PostHog além do id.
 
 ### 2.5 Taxonomia de eventos
@@ -748,7 +851,7 @@ Catálogo único em `src/server/events/catalog.ts` (união tipada + schema zod p
 
 **Primeira leva (fase 2, em paralelo a Produtos/Alunos)**: `lesson_started` (`is_rewatch`, `entry_point`), `lesson_progress` (heartbeat de 15 s com `watched_seconds_delta`, `position_seconds`, `max_progress_percent`, `playback_rate` → `lesson_watch_segments`, nunca `student_events`), `lesson_completed` (`completion_source` player/auto/manual/admin), `lesson_rated`, `home_viewed`, `home_card_impressed/clicked` (`section_id`, `position`), `content_opened`, `purchase_cta_clicked`, `search_performed`, `saved_item_toggled`, `entitlement_granted/revoked/expired` (servidor).
 
-**Segunda leva (fase 5–6)**: `message_delivered/impressed/clicked/dismissed/converted`, `webinar_registered/attended`, `comment_replied_by_staff` (`hours_to_reply`), `video_seeked/errored`.
+**Segunda leva (fase 5–6)**: `message_delivered/impressed/clicked/dismissed/converted`, `webinar_registered/attended`, `comment_replied_by_staff` (`hours_to_reply`), `video_seeked/errored`. Feito na Comunicação v1 (20/10/2026), gravado pelas rotas do aluno em `student_events`, só com ids: `message_impressed`, `message_clicked`, `message_dismissed`, mais `message_closed` (fechou sem clicar) e `message_snoozed` (Lembrar depois) no pop-up, e `notification_read`, `notification_clicked`, `notification_responded` no sino. `message_delivered` não virou evento (a linha em `notifications` ou `campaign_deliveries` é a entrega) e `message_converted` espera o seletor de desfecho. Na Comunicação v2 (21/10/2026, `docs/23` §5.1) entraram `notification_audio_started` (primeiro play; substitui o `notification_read` que o play gravava) e `notification_audio_completed` (ouviu 44 de 48 trechos), uma vez cada por notificação, com `entity_type = notification` e `metadata.campaign_id`; o progresso do áudio e as visitas de página não viram evento (ficam em `notifications` e `member_page_visits`). Na v3b-1 (22/10/2026, `docs/25` §5.3), `message_impressed` ganhou `page` e `trigger` e `message_closed` ganhou `via`; na v3b-2 (23/10/2026, `docs/29` §6.3), nenhum evento novo: `trigger` pode ser também `first_login` e `course_completed`, as linhas dos avisos (`entity_type = 'campaign'`) só saem pelo servidor (o aluno não grava mais) e o relatório do pop-up lê esses eventos pelo índice parcial; `page` nos eventos de resultado (clique, fechar, Lembrar depois, Não mostrar de novo) fica para a D2.
 
 **Destinos**: eventos discretos e acionáveis em `student_events`; heartbeat só em `lesson_watch_segments`; tudo espelhado no PostHog com `$insert_id`. **Volume**: heartbeat de 15 s × 10 h/mês × 2.000 alunos ≈ 4,8 milhões de eventos/mês, acima do free tier do PostHog (1 milhão); por isso o heartbeat **não** vai ao PostHog (só o agregado por sessão em `lesson_paused/ended`), e `page_viewed` é amostrado a 20 % se necessário. `player_mode = synthetic` (o cronômetro de +10 s a cada 10 s em iframes, `lesson-experience.tsx:2469-2497`) é gravado mas **excluído dos rollups** até os adaptadores existirem.
 
@@ -838,7 +941,7 @@ Cada fase entrega algo que o produtor usa e desliga a view antiga correspondente
 | **4 — Vídeo multi-provedor** | 2 semanas | `video_assets` + `video_provider_events`; adaptador + `useLessonPlayback`; Bunny (TUS, webhook, token, player.js, Transcribe), YouTube oficial com branding e sem overlays, Vimeo SDK, HLS; `VideoField` com detecção; Modo TV via adaptador e `GET .../source`; Trocar vídeos em massa; Configurações > Vídeo; CSP por provedor; extração não oficial desligada; piloto com 1 produto | progresso real (não cronômetro) em 100 % das aulas Bunny e Vimeo; aula YouTube sem elemento sobre o iframe; zero chamadas a `youtube.com/youtubei` no servidor; retomada e avaliação aos 30 % sem regressão (testes node) |
 | **5 — Comunicação v1** | 2 semanas | `notifications` + sino completo; `campaigns`, `campaign_deliveries`, `message_events`, `campaign_daily_stats`; motor de elegibilidade com caps; `GET /api/messages/eligible`; pop-up, faixa, card, toast e hero no aluno; editor de aviso com prévia real e desfecho; relatório; `/perfil/notificacoes`, `consent_log`, descadastro sem login; Webinários com inscrição, `.ics`, lembretes por sino e e-mail (Resend), replay → aula | aviso segmentado para "Inativos 14 d" aparece 1 vez por 24 h, dispensa persiste, funil no relatório em < 1 min; webinário com lembretes de 24 h e 1 h entregues; p95 do endpoint < 50 ms; "pausar aviso" funciona no celular |
 | **6 — Vendas, promoções e consolidação** | 2 semanas | Webhooks Hotmart/Ticto → entitlements (`webhook_events` bruto, assinatura, idempotência, regras de pacote); Promoções com `/r/:token` e atribuição; Home do aluno (Vitrine migrada para `home_sections`, Destaque com CTA, Marca); Configurações completas (Equipe, Vendas, Comunicação); **passe de performance do aluno** (layout de grupo, `cacheComponents`, imagens AVIF, `next/dynamic`, progresso por RPC); sessão de teste moderada; remoção de `/admin/legado` e de `admin-dashboard.tsx`; `platform-store.ts` sem leitores do admin; docs 04/05/09/12/13 atualizados | venda de teste na Ticto libera acesso em < 60 s; nenhuma rota do admin acima de 700 KB; home do aluno ≤ 450 KB e LCP ≤ 2,0 s em preview móvel; auditoria axe sem erros; `npm run verify` com orçamento de bundle |
-| **7 — Crescimento** | contínuo | WhatsApp utility (Cloud API), push web (VAPID), A/B de avisos, automações 4×4 (concluiu aula/módulo/curso, marco %, inativo N dias, novo acesso → aviso, e-mail, tag, liberar bônus), Mux/Cloudflare, temas frequentes do Tutor, tema claro | reativação por aviso ≥ 5 % medida em 7 dias |
+| **7 — Crescimento** | contínuo | WhatsApp utility (Cloud API), push web (VAPID), A/B de avisos, automações 4×4 (concluiu aula/módulo/curso, marco %, inativo N dias, novo acesso → aviso, e-mail, tag, liberar bônus; **em parte entregue em 21/10/2026**, por pedido explícito do produtor: Fluxos com entrada por regras (novo acesso, progresso, inatividade, contínua em até 15 minutos) e saída "aviso" no sino, `docs/23`; faltam e-mail, tag, liberar bônus e o disparo na hora por evento), Mux/Cloudflare, temas frequentes do Tutor, tema claro | reativação por aviso ≥ 5 % medida em 7 dias |
 
 Total: ≈ 13 semanas até a remoção do legado. A ordem é negociável em um ponto: Comunicação (5) pode trocar com Vídeo (4) se um lançamento exigir, porque a segmentação básica já funciona com entitlements e progresso.
 
@@ -885,6 +988,73 @@ Pedido do produtor: "Quero poder editar login, escolher algum template de login 
 - **Produto que saiu de venda na Vitrine:** excluir um produto (ou tirá-lo de venda) nunca trava a publicação da vitrine. A regra é uma só, a mesma que a home do aluno já aplicava (`pruneHomeSectionRefs` em `src/server/storefront/model.ts`): o produto sai das fileiras de escolha manual, a fileira de módulos dele sai inteira e a escolha manual que fica vazia por causa disso sai também. Ela roda em três lugares: ao excluir o produto (`deleteContentItem` relê `homeSections` e grava com a versão lida; vitrine nunca publicada não ganha a chave; se essa limpeza falhar, a exclusão continua valendo), ao abrir e ao publicar a Vitrine (o rascunho já nasce limpo, com o aviso neutro "1 produto que não está mais à venda saiu de “Para você”. Publique para salvar.") e em `publishHomeSections`, que limpa em vez de recusar (defesa contra a tela antiga e contra uma exclusão entre abrir e publicar). Os outros erros continuam: título vazio, fileira automática repetida e escolha manual que o produtor deixou vazia. A tela Módulos não precisou mudar: ela não confere as outras fileiras.
 - **Fica para depois:** evento `home_hero_cta_clicked` e CTR por fileira (fase 3); destaque por um período a partir de um Webinário ou Promoção (fase 5); apagar do Storage as imagens descartadas; trocar as imagens padrão em PNG (2,2 a 2,4 MB) por AVIF/WebP; imagem separada para o celular no destaque; login com Apple, links de rodapé e rótulos de e-mail/senha editáveis; mostrar na prévia do login o estado de erro (hoje só o formulário vazio aparece); aviso no admin antigo apontando para Área de membros; gatilho de `updated_at` em `platform_settings`; validação com login de verdade (publicar e abrir `/login` numa janela anônima, publicar o destaque com botão e vídeo, ligar uma fileira e conferir a home), que nesta rodada foi feita por testes e por telas de exemplo.
 
+#### Registro da fase 5 (Comunicação v1, integração em 20/10/2026)
+
+Pedido do produtor: notificações no sino com imagem, áudio que toca ali mesmo, botão para dentro ou para fora da plataforma e convites que o aluno aceita ou recusa; a equipe cria, envia na hora ou agenda; e pop-ups para grupos de alunos escolhidos por regras combinadas ("porcentagem de aulas concluídas, quem mais comentou, quem não comentou, quem comprou há menos ou há mais de X dias"). Entregue a parte de avisos da fase 5 (sino e pop-up); Webinários e Promoções continuam em construção. Documento próprio: `docs/22`. Migração `202610200001_communication_v1.sql`.
+
+- **O que entrou:**
+  - Avisos e pop-ups no admin (lista, editor com prévia real, relatório, aprovação acima de 500);
+  - o sino do aluno com notificações de aviso e de comentário;
+  - o pop-up da home;
+  - o job `comunicacao` no tick;
+  - "Aviso" no Criar do Hoje e "Novo aviso" no Cmd+K.
+- **Critério da fase 1 que ficou pendente:** "primeira resposta do professor pelo admin aparece no sino do aluno". Agora vale: a resposta pela Comunidade e pela aula chega ao sino como `Nome respondeu seu comentário`, com o trecho e o link da aula (`tests/integration/avisos-e-notificacoes.test.mjs`).
+- **Tipos:** só Notificação (sino) e Pop-up (home). Faixa, card, destaque e toast ficam para depois; o tipo "crítico" do sistema também.
+- **Onde grava:**
+  - `campaigns` (o aviso, com o segmento em `audience` jsonb);
+  - `notifications` (uma linha por aluno; a de aviso aponta para o aviso);
+  - `campaign_deliveries` (estado do pop-up por aluno).
+  - Sem `audiences`, `student_facts`, `message_events` e `campaign_daily_stats` (2.4, Atualização de 20/10/2026).
+- **Segmento:**
+  - construtor de regras E/OU com um nível de grupo, avaliado em TypeScript sobre as mesmas leituras da lista de Alunos, com a equipe sempre fora;
+  - a regra "Comentários" cobre "quem mais comentou" (os N primeiros na janela) e "quem não comentou";
+  - os segmentos salvos de Alunos viram regras.
+  - O desenho previa `audiences` sobre `student_facts` (fase 2), que ainda não existe; a conta vai para uma RPC quando a escola passar de alguns milhares de alunos.
+- **Envio no tick (decisão registrada em `docs/04` e `docs/09`):** a notificação agendada sai pelo job `comunicacao`, e não pela fila de jobs prevista para "envios em massa", porque a fila ainda não está instalada. A linha do sino é minúscula, gravada em lotes de 500, com teto de 20.000 por rodada, retomável sem duplicar (chave única por aluno) e com reserva condicional, como a fila de e-mail. "Enviar agora" grava na própria ação e deixa para o job o que passar do teto.
+- **Conflito de edição:**
+  - `updated_at` é a versão, conferida no próprio UPDATE (409 "Este aviso mudou em outra tela"), como nas outras telas;
+  - o gatilho `touch_campaign_version` não muda a versão quando o job só recalcula a contagem do segmento do pop-up, para quem está com o editor aberto não perder a versão a cada 15 minutos.
+- **Prévia real (D6 da rodada Área de membros):** o editor desenha o `NotificationCard` e o `MemberPopupCard` do aluno em modo `preview`, dentro de `PreviewFrame`. Por isso os componentes do aluno respondem a container query, e não à largura da janela.
+- **Áudio:**
+  - arquivo enviado ou gravado no navegador (MediaRecorder), até 5 minutos e 10 MB;
+  - rota própria em vez de Server Action (limite de 1 MB), tipo conferido pelos bytes;
+  - bucket público `communication-audio`;
+  - microfone liberado só no `/admin` (`Permissions-Policy`);
+  - a forma de onda (48 barras) e a duração são medidas no navegador da equipe e gravadas com o aviso.
+- **Menção:** só quando um único autor da conversa tem o `@usuario` (o nome de usuário não é único na escola).
+- **Números:**
+  - Avisos ativos, Vistos, Taxa de clique e Voltaram a estudar, por RPC, sem a equipe e sem os testes;
+  - "Voltaram a estudar" usa a régua de 1.11 (≥ 10 min ou 1 aula nos 7 dias depois de ver);
+  - o relatório de cada aviso mostra o funil, as respostas e, no pop-up, fecharam sem clicar (alerta acima de 40 %), Não mostrar de novo e Lembrar depois.
+- **Fica para depois:**
+  - faixa, card, destaque e toast;
+  - e-mail, push e WhatsApp, com `/perfil/notificacoes`, consentimento e descadastro sem login;
+  - seletor de desfecho e "Salvar quem converteu como segmento";
+  - aba "Avisos recebidos" no perfil do aluno e "Enviar aviso" em Alunos, Comunidade › Top alunos e nos alertas do Hoje;
+  - convites entre membros e a comunidade do aluno;
+  - salas ao vivo "tipo Zoom" com números de retenção;
+  - Webinários e Promoções (1.8.3 e 1.8.4);
+  - tempo real no sino;
+  - limpar do Storage áudios e imagens descartados;
+  - p95 do resumo do sino medido em produção (meta de 2.8).
+
+#### Registro da Comunicação v2 (integração em 21/10/2026)
+
+Pedido explícito do produtor (20/10/2026), olhando a prévia do sino: trocar o megafone pela imagem de quem envia e pôr um ícone com o título; escolher quanto tempo a notificação fica no sino; e "uma automaçãozinha de notificações": uma segunda notificação só para quem não abriu, não ouviu o áudio, não clicou ou visitou a página e não comprou, X horas depois ou faltando X horas para vencer; depois, a onda do áudio verde "como no WhatsApp". Documento próprio: `docs/23`. Migração `202610200002_communication_v2.sql` (a `202610200001` não mudou).
+
+- **O que entrou:**
+  - no sino: quem envia (ícone da escola ou foto da equipe, sem megafone), ícone ao lado do título, fim por notificação com `Termina em`, áudio ouvido em quatro estados guardados no servidor, "abriu" separado de "lida";
+  - no editor: Quem envia, Ícone, Fica no sino por e Depois desta notificação (seguintes em até 3 níveis, linha de parada por produto, contagem na hora depois do envio, edição no relatório depois do envio);
+  - Fluxos: lista, quatro modelos, construtor (duas colunas no computador, uma coluna com painel em tela cheia no celular), ativação com aprovação acima de 500, pausar, retomar, encerrar, duplicar, excluir, edição no ar preparada e relatório por passo;
+  - Marca: Ícone da escola;
+  - regra "O que fez com uma notificação" nos segmentos; visita de página e "ganhou acesso desde" nos fluxos;
+  - e-mail `sent_as` para a pessoa da equipe usada como remetente.
+- **Decisões que mudam este documento:** "automações encadeadas" saiu de 1.14 (nota datada); a linha "Notificação (sino)" de 1.8.1 ganhou o limite de 3 por dia com 1 hora entre elas; a fase 7 ("automações 4×4") ficou em parte entregue (só sino; e-mail, tag e bônus continuam).
+- **Motor no tick (mesma exceção de C5, `docs/04` e `docs/09`):** fase 2 do job `comunicacao`, depois dos envios da v1, com 25 s próprios, lotes de 150 e até 3.000 tarefas por minuto, idempotente e retomável; nada de fila nova. Parado, custa 3 leituras indexadas por minuto.
+- **Visitas de página:** gravadas no servidor nas páginas do aluno, só das páginas que um fluxo ativo ou pausado usa; nenhum pedido a mais por página (só dois beacons: detalhes do produto e Comprar).
+- **Testes:** unitários, guardas, 6 arquivos de integração novos e 3 estendidos e 4 de ponta a ponta (`docs/23` §10); os testes da v1 passam sem mudança.
+- **Fica para depois:** passos por e-mail, push e WhatsApp; disparo na hora por evento; A/B e seletor de desfecho; rodada do `carga` com um fluxo no ar (`docs/20` §12.1); e o resto do `docs/23` §9.
+
 ### 2.11 Riscos e mitigações
 
 | Risco | Mitigação |
@@ -920,13 +1090,13 @@ Pedido do produtor: "Quero poder editar login, escolher algum template de login 
 | Aluno / Sem conta | `profiles` (`auth.users`) / `students` sem `user_id` |
 | Turma | `cohorts` + `cohort_memberships` |
 | Pacote | `product_combos` + `product_combo_items` |
-| Segmento / Público | `audiences` avaliadas sobre `student_facts` |
-| Aviso (Pop-up, Faixa, Card, Destaque, Toast) | `campaigns.kind` |
-| Avisos recebidos (aba do perfil) | `campaign_deliveries` + `message_events` do aluno |
+| Segmento / Público | `audiences` avaliadas sobre `student_facts`; nos avisos, desde 20/10/2026, `campaigns.audience` (regras E/OU avaliadas em `src/server/communications/audience-model.ts`) |
+| Aviso (Pop-up, Faixa, Card, Destaque, Toast) | `campaigns.kind` (hoje `inbox` = Notificação e `popup` = Pop-up) |
+| Avisos recebidos (aba do perfil) | `campaign_deliveries` + `notifications` do aluno e os `message_*` / `notification_*` em `student_events` |
 | Webinário | `events` + `event_registrations` |
 | Promoção | `offers` + `attribution_clicks` |
-| Notificação (sino) | `notifications` |
-| Desfecho de um aviso | `campaigns.goal_event_type` + janela de atribuição |
+| Notificação (sino) | `notifications` (`kind` `notice` aponta para o aviso; `comment_reply` / `comment_mention` são as automáticas) |
+| Desfecho de um aviso | `campaigns.goal_event_type` + janela de atribuição; na Comunicação v1, fixo: "Voltaram a estudar (7 dias)" pela RPC `communication_campaign_stats` |
 | Vendas recebidas | `webhook_events` (Hotmart/Ticto) |
 | Código do produto na Hotmart / na Ticto | `sales_product_links` (provider, external_product_id → product_id ou combo_id) |
 | Hotmart ou Ticto conectada / Precisa de atenção / Em configuração | `integration_settings.status` (+ plataforma sem adaptador = "Em configuração") |
@@ -939,6 +1109,8 @@ Pedido do produtor: "Quero poder editar login, escolher algum template de login 
 | Tutor IA / Diretor; marcar como FAQ | `ai_conversations`, `ai_messages`; par pergunta/resposta em `lesson_ai_profiles` |
 | Equipe: dono, funções prontas (admin, editor, professor, suporte, analista), funções personalizadas e permissões extras | `admin_roles.role` (owner, admin, editor, instructor, support, analyst, custom) + `admin_roles.permissions` (funções, extras e alcance, cursos da pessoa) + `admin_functions` |
 | Registro de quem fez o quê | `admin_audit_log` |
+| Fluxo; Quem entra; Objetivo; Notificação seguinte | `communication_flows` (`entry_audience`, `entry_mode`, `goal`; `origin = notice` são as seguintes de uma notificação) + `communication_flow_nodes` (`kind` entry, message, condition); trabalho do motor em `communication_flow_tasks` (`docs/23`) |
+| Quem envia; Ícone ao lado do título; Fica no sino por | `campaigns.sender_user_id`; `campaigns.icon` + `icon_color`; `campaigns.validity_minutes` / `valid_until` e `notifications.expires_at` |
 | Admin antigo | `/admin/legado` (`admin-dashboard.tsx`), removido na fase 6 |
 
 ### 2.13 Referências

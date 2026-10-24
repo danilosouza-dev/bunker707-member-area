@@ -1,47 +1,264 @@
 "use client";
 
 import { Popover } from "@base-ui/react/popover";
-import { Bell, CalendarClock, Megaphone, Tag } from "lucide-react";
+import { Bell, RotateCw } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
+import { prefetchInbox, useEscapeToClose, useNotificationsSummary } from "@/components/member/notifications/notifications-client";
+import {
+  bellLabel,
+  formatBadgeCount,
+  INBOX_PREFETCH_DWELL_MS,
+  intentPrefetchMinAge,
+  shouldPrefetchOnIntent,
+  type InboxIntentKind
+} from "@/components/member/notifications/notifications-model";
+import type { NotificationsPanel as NotificationsPanelComponent } from "@/components/member/notifications/notifications-panel";
+import { MemberButton } from "@/components/member/ui/member-button";
+import { MemberSkeletonBlock } from "@/components/member/ui/member-skeletons";
+import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cn } from "@/lib/utils";
 
-// Lembretes do aluno no topo (sino), entre a busca e a conta. Mostra so o que existir de verdade:
-// avisos da escola, convites para webinarios e promocoes chegam com o modulo Comunicacao
-// (docs/17 §1.8, fase 5). Ate la o painel diz que nao ha lembretes e o que vai aparecer ali; nunca um
-// exemplo nem um numero inventado. O painel vai em portal: o topo tem `overflow-hidden`.
+// Sino do aluno no topo, entre a busca e a conta (docs/22 §1.1; desenho em docs/12): o numero vermelho conta o que chegou
+// desde a ultima abertura (nunca um numero inventado) e o painel mostra a caixa dos ultimos 90 dias:
+// avisos da escola e respostas/mencoes nos comentarios. O painel vai em portal (o topo tem
+// `overflow-hidden`) e so monta aberto; o numero vem de uma memoria fora do React que sobrevive a
+// troca de pagina (notifications-client.ts). O codigo do painel (lista, cartoes, player) so e baixado
+// quando o aluno chega perto do sino (mouse em cima ou foco), como a IA Diretor; se o download falha
+// (rede, ou deploy novo que trocou os arquivos), o erro fica dentro do painel e a pagina continua.
+//
+// O painel fica acima da IA Diretor aberta (z-180) e abaixo do pop-up (z-200), que espera o sino fechar.
+// v3b-1 (docs/25 §4): o pedido do numero leva a chave da pagina e traz junto os pop-ups dela.
+//
+// v3a (docs/24 §7.3): a primeira pagina da lista comeca a ser buscada na intencao, junto com o codigo do
+// painel: mouse parado 120 ms no sino ou foco pelo Tab (:focus-visible) buscam so sem pagina guardada ou
+// com ela mais velha que 1 minuto; o dedo ou Enter/Espaco no sino fechado buscam na hora quando ela tem
+// mais de 5 s. Nunca com o painel aberto nem no segundo depois de fechar (o foco volta para o sino).
+//
+// Ajustes da v3a: o numero e a pagina guardados sao do aluno da sessao (`studentId`, vindo do AppShell):
+// depois de entrar com outra conta sem recarregar, nada da conta anterior aparece.
 
-const upcoming = [
-  { icon: Megaphone, label: "Avisos da escola" },
-  { icon: CalendarClock, label: "Convites e lembretes de webinários" },
-  { icon: Tag, label: "Promoções para você" }
-] as const;
+const loadNotificationsPanel = () => import("@/components/member/notifications/notifications-panel");
 
-export function MemberNotificationsMenu({ className }: { className?: string }) {
+function PanelLoading() {
   return (
-    <Popover.Root>
+    <div className="px-4 py-4">
+      <p className="sr-only" role="status">
+        Carregando notificações
+      </p>
+      <MemberSkeletonBlock className="h-4 w-28" />
+      {["first", "second", "third"].map((row) => (
+        <div className="grid grid-cols-[40px_minmax(0,1fr)] gap-3 pt-5" key={row}>
+          <MemberSkeletonBlock className="size-10 rounded-full" />
+          <span className="block space-y-2 pt-1">
+            <MemberSkeletonBlock className="h-3.5 w-4/5" />
+            <MemberSkeletonBlock className="h-3 w-3/5" />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type NotificationsPanelProps = ComponentProps<typeof NotificationsPanelComponent>;
+
+/** O painel nao baixou: o aviso fica no proprio painel (sem a tela de erro geral) e recarregar resolve. */
+function PanelLoadFailed() {
+  return (
+    <div className="flex flex-col">
+      <div className="flex min-h-[3.75rem] items-center px-4 pb-3 pt-4">
+        <Popover.Title className="text-base font-semibold text-white">Notificações</Popover.Title>
+      </div>
+      <div className="mx-4 mb-4 flex flex-col items-start gap-3 rounded-[12px] border border-red-400/20 bg-red-500/[0.07] px-4 py-4" role="alert">
+        <p className="text-sm font-medium text-red-100">Não foi possível abrir as notificações.</p>
+        <MemberButton onClick={() => window.location.reload()} size="sm" variant="secondary">
+          <RotateCw aria-hidden="true" />
+          Recarregar a página
+        </MemberButton>
+      </div>
+    </div>
+  );
+}
+
+const NotificationsPanel = dynamic(
+  () =>
+    loadNotificationsPanel()
+      .then((module) => module.NotificationsPanel)
+      // Sem o catch, a falha do download subiria ate a tela de erro geral (global-error) e a pagina inteira sumiria.
+      .catch((): ComponentType<NotificationsPanelProps> => PanelLoadFailed),
+  {
+    loading: () => <PanelLoading />,
+    ssr: false
+  }
+);
+
+/** Comeca a baixar o painel antes do clique (falha aqui nao importa: o clique tenta de novo). */
+function preloadPanel() {
+  void loadNotificationsPanel().catch(() => undefined);
+}
+
+/** Foco que veio do teclado (Tab), nao do clique nem do foco devolvido ao fechar o painel. */
+function isFocusVisible(element: Element) {
+  try {
+    return element.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}
+
+export function MemberNotificationsMenu({
+  accessPreviewMode,
+  className,
+  onNavigate,
+  popupPage,
+  refreshSummaryOnMount = true,
+  schoolIconUrl,
+  schoolLogoUrl,
+  schoolName,
+  studentId
+}: {
+  accessPreviewMode?: AccessPreviewMode;
+  className?: string;
+  /** Navegacao do AppShell (salva progresso e favoritos antes de trocar de pagina). */
+  onNavigate?: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
+  /**
+   * Chave da pagina para os pop-ups (v3b-1; null fora das paginas do aluno e no "ver como"): o pedido do
+   * numero traz junto os pop-ups dela, e o host do pop-up entra nesse pedido.
+   */
+  popupPage?: string | null;
+  /** false na home: o numero vem no pedido do pop-up (MemberPopupHost), um pedido so. */
+  refreshSummaryOnMount?: boolean;
+  /** Icone da escola (Marca): o circulo dos avisos enviados pela escola. */
+  schoolIconUrl?: string | null;
+  /** Logo do topo: reserva do circulo quando o icone nao carrega. */
+  schoolLogoUrl?: string | null;
+  schoolName: string;
+  /** O aluno da sessao: dono do numero e da pagina guardados (sem ele, a memoria fica sem dono, como antes). */
+  studentId?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  const openRef = useRef(false);
+  /** Quando o painel fechou: foco e mouse logo depois nao sao intencao. */
+  const closedAtRef = useRef<number | null>(null);
+  const intentTimerRef = useRef<number | null>(null);
+  const { unseen } = useNotificationsSummary({ page: popupPage, refreshOnMount: refreshSummaryOnMount, userId: studentId });
+  const badge = formatBadgeCount(unseen);
+
+  function cancelIntent() {
+    if (intentTimerRef.current !== null) {
+      window.clearTimeout(intentTimerRef.current);
+      intentTimerRef.current = null;
+    }
+  }
+
+  useEffect(() => cancelIntent, []);
+
+  function intends(kind: InboxIntentKind, focusVisible = false) {
+    return shouldPrefetchOnIntent({ closedAt: closedAtRef.current, focusVisible, kind, now: Date.now(), open: openRef.current });
+  }
+
+  /** Mouse parado ou foco pelo Tab: o codigo do painel ja, a lista depois de 120 ms parado. */
+  function startIntent(kind: "focus" | "hover", focusVisible = false) {
+    preloadPanel();
+    cancelIntent();
+
+    if (!intends(kind, focusVisible)) {
+      return;
+    }
+
+    intentTimerRef.current = window.setTimeout(() => {
+      intentTimerRef.current = null;
+
+      if (intends(kind, focusVisible)) {
+        prefetchInbox({ minAgeMs: intentPrefetchMinAge(kind), userId: studentId });
+      }
+    }, INBOX_PREFETCH_DWELL_MS);
+  }
+
+  /** Dedo, clique ou Enter/Espaco no sino fechado: vai abrir, a lista sai junto com o codigo. */
+  function pressIntent() {
+    if (!intends("press")) {
+      return;
+    }
+
+    cancelIntent();
+    preloadPanel();
+    prefetchInbox({ minAgeMs: intentPrefetchMinAge("press"), userId: studentId });
+  }
+
+  function changeOpen(next: boolean) {
+    openRef.current = next;
+    cancelIntent();
+
+    if (!next) {
+      closedAtRef.current = Date.now();
+    }
+
+    setOpen(next);
+  }
+
+  useEscapeToClose(
+    open,
+    () => {
+      changeOpen(false);
+      triggerRef.current?.focus();
+    },
+    (target) => Boolean(popupRef.current?.contains(target) || triggerRef.current?.contains(target))
+  );
+
+  return (
+    <Popover.Root onOpenChange={changeOpen} open={open}>
       <Popover.Trigger
-        aria-label="Lembretes"
+        aria-label={bellLabel(unseen)}
         className={cn(
-          "grid size-10 shrink-0 place-items-center rounded-full text-white outline-none transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white data-popup-open:bg-white/10 motion-reduce:transition-none",
+          "relative grid size-10 shrink-0 place-items-center rounded-full text-white outline-none transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white data-popup-open:bg-white/10 motion-reduce:transition-none",
           className
         )}
-        title="Lembretes"
+        onBlur={cancelIntent}
+        onFocus={(event) => startIntent("focus", isFocusVisible(event.currentTarget))}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            pressIntent();
+          }
+        }}
+        onPointerDown={(event) => {
+          if (event.button === 0) {
+            pressIntent();
+          }
+        }}
+        onPointerEnter={() => startIntent("hover")}
+        onPointerLeave={cancelIntent}
+        ref={triggerRef}
       >
         <Bell aria-hidden="true" className="size-5" />
+        {badge ? (
+          <span
+            aria-hidden="true"
+            className="absolute right-1 top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[var(--accent)] px-1 text-[11px] font-bold leading-none tabular-nums text-white ring-2 ring-[#141414]"
+          >
+            {badge}
+          </span>
+        ) : null}
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Positioner align="end" className="z-50 outline-none" collisionPadding={16} side="bottom" sideOffset={10}>
-          <Popover.Popup className="w-[min(20rem,calc(100vw-2rem))] origin-[var(--transform-origin)] rounded-[14px] border border-white/10 bg-[#1b1b1b]/95 p-4 text-white shadow-[0_24px_70px_rgba(0,0,0,0.65)] outline-none backdrop-blur-xl transition-[opacity,transform] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none">
-            <Popover.Title className="text-sm font-semibold">Lembretes</Popover.Title>
-            <Popover.Description className="mt-1 text-sm text-zinc-400">Nenhum lembrete por enquanto.</Popover.Description>
-            <p className="mt-4 text-xs font-semibold text-zinc-500">Quando houver, aparecem aqui:</p>
-            <ul className="mt-2 space-y-2">
-              {upcoming.map(({ icon: Icon, label }) => (
-                <li className="flex items-center gap-2.5 text-sm text-zinc-300" key={label}>
-                  <Icon aria-hidden="true" className="size-4 shrink-0 text-zinc-500" />
-                  {label}
-                </li>
-              ))}
-            </ul>
+        <Popover.Positioner align="end" className="z-[190] outline-none" collisionPadding={12} side="bottom" sideOffset={10}>
+          <Popover.Popup
+            className="w-[min(25rem,calc(100vw-1.5rem))] origin-[var(--transform-origin)] overflow-hidden rounded-[14px] border border-white/10 bg-[#1b1b1b]/95 p-0 text-white shadow-[0_24px_70px_rgba(0,0,0,0.65)] outline-none backdrop-blur-xl transition-[opacity,transform] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            // Foco no painel (o leitor anuncia "Notificações"); o Tab segue para os filtros e a lista.
+            initialFocus={popupRef}
+            ref={popupRef}
+          >
+            <NotificationsPanel
+              accessPreviewMode={accessPreviewMode}
+              onClose={() => changeOpen(false)}
+              onNavigate={onNavigate}
+              schoolIconUrl={schoolIconUrl}
+              schoolLogoUrl={schoolLogoUrl}
+              schoolName={schoolName}
+              studentId={studentId}
+            />
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>

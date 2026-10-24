@@ -126,6 +126,7 @@ test("marca: banner e logo seguem os padroes do servidor", () => {
   assert.deepEqual(model.mapStorefrontBrand([]), {
     hero: { enabled: true, image: model.DEFAULT_HERO_IMAGE, mediaType: "image" },
     logoImage: model.DEFAULT_LOGO_IMAGE,
+    schoolIcon: "/brand/icon-bunker.svg",
     style: { buttons: "soft", corners: "soft", menu: "sidebar" }
   });
 
@@ -140,6 +141,78 @@ test("marca: banner e logo seguem os padroes do servidor", () => {
   assert.equal(model.normalizeHero({ enabled: true, image: "  " }).enabled, false, "banner sem imagem nao aparece");
   assert.equal(model.normalizeHero({ image: "/v.mp4", mediaType: "video" }).mediaType, "video");
   assert.equal(model.normalizeLogo({ logoImage: "   " }, true), model.DEFAULT_LOGO_IMAGE);
+});
+
+test("marca: o icone da escola vem da marca gravada; ausente ou vazio e o simbolo padrao", () => {
+  const icone = "https://cdn.exemplo.com/platform/school-icon/abc.webp";
+  const brand = model.mapStorefrontBrand([
+    { key: "branding", value: { logoImage: null, schoolIcon: `  ${icone} `, style: { buttons: "pill", corners: "rounded", menu: "header" } } }
+  ]);
+  assert.equal(brand.schoolIcon, icone);
+  assert.equal(brand.logoImage, null, "o icone nao mexe na logo");
+  assert.deepEqual(brand.style, { buttons: "pill", corners: "rounded", menu: "header" }, "nem no estilo");
+
+  assert.equal(model.mapStorefrontBrand([{ key: "branding", value: { logoImage: "/logo.svg", schoolIcon: "   " } }]).schoolIcon, "/brand/icon-bunker.svg");
+  assert.equal(model.mapStorefrontBrand([{ key: "branding", value: { logoImage: "/logo.svg" } }]).schoolIcon, "/brand/icon-bunker.svg");
+  assert.equal(model.normalizeBrandingSchoolIcon(null), "/brand/icon-bunker.svg");
+  assert.equal(model.normalizeBrandingSchoolIcon({ schoolIcon: 42 }), "/brand/icon-bunker.svg", "valor estranho gravado = simbolo padrao");
+  assert.equal(model.brandToDraft(brand).schoolIcon, icone, "o rascunho da Marca comeca no icone gravado");
+});
+
+test("marca: o PUT leva o icone da escola so quando muda; voltar ao simbolo padrao vai como null", () => {
+  const style = { buttons: "soft", corners: "soft", menu: "sidebar" };
+  const published = { heroEnabled: true, heroImage: "/hero.png", logoImage: "/logo.svg", schoolIcon: "/brand/icon-bunker.svg", style };
+  const enviado = "data:image/webp;base64,AAAA";
+
+  assert.deepEqual(model.buildAppearancePayload(published, { ...published }), {});
+  assert.equal(model.isBrandDirty(published, { ...published, schoolIcon: enviado }), true);
+  assert.deepEqual(model.buildAppearancePayload(published, { ...published, schoolIcon: enviado }), { schoolIcon: { image: enviado } });
+  assert.deepEqual(
+    model.buildAppearancePayload(published, { ...published, logoImage: null, schoolIcon: "https://cdn.exemplo.com/i.png" }),
+    { logo: { image: null }, schoolIcon: { image: "https://cdn.exemplo.com/i.png" } },
+    "logo e icone mudam juntos no mesmo PUT"
+  );
+
+  const comIcone = { ...published, schoolIcon: "https://cdn.exemplo.com/i.png" };
+  assert.deepEqual(model.buildAppearancePayload(comIcone, published), { schoolIcon: { image: null } }, "Usar o simbolo padrao");
+  assert.deepEqual(
+    model.buildAppearancePayload(comIcone, { ...comIcone, style: { ...style, menu: "header" } }),
+    { style: { ...style, menu: "header" } },
+    "trocar o estilo nao manda o icone"
+  );
+  assert.equal(model.isBrandDirty(published, { ...published, schoolIcon: " " }), false, "vazio e o simbolo padrao");
+});
+
+test("icone da escola enviado ou colado: quadrado e com pelo menos 128 px; SVG so pela proporcao", () => {
+  const quadrada = "Use uma imagem quadrada (mesma largura e altura).";
+  const pequena = "Use uma imagem de pelo menos 128 × 128 px.";
+
+  assert.equal(model.schoolIconSizeProblem({ height: 512, width: 512 }), null);
+  assert.equal(model.schoolIconSizeProblem({ height: 128, width: 128 }), null, "128 × 128 passa");
+  assert.equal(model.schoolIconSizeProblem({ height: 1100, width: 1000 }), null, "proporcao 0,91 ainda e quadrada");
+  assert.equal(model.schoolIconSizeProblem({ height: 1000, width: 1100 }), null, "proporcao 1,1 ainda e quadrada");
+  assert.equal(model.schoolIconSizeProblem({ height: 1120, width: 1000 }), quadrada, "0,89 nao e");
+  assert.equal(model.schoolIconSizeProblem({ height: 240, width: 2159 }), quadrada, "a logo comprida nao serve de icone");
+  assert.equal(model.schoolIconSizeProblem({ height: 127, width: 127 }), pequena);
+  assert.equal(model.schoolIconSizeProblem({ height: 128, width: 120 }), pequena, "quadrada, mas pequena");
+  assert.equal(model.schoolIconSizeProblem({ height: 279.36, vector: true, width: 279.36 }), null, "o simbolo padrao (SVG) passa");
+  assert.equal(model.schoolIconSizeProblem({ height: 24, vector: true, width: 24 }), null, "SVG pequeno desenha em qualquer tamanho");
+  assert.equal(model.schoolIconSizeProblem({ height: 150, vector: true, width: 300 }), quadrada);
+  assert.equal(model.schoolIconSizeProblem({ height: 0, vector: true, width: 0 }), quadrada, "sem medida nao da para conferir");
+  assert.equal(model.schoolIconSizeProblem({ height: Number.NaN, width: 512 }), quadrada);
+  assert.deepEqual(model.SCHOOL_ICON_RULES, { maxRatio: 1.1, maxSide: 512, minRatio: 0.9, minSide: 128 });
+});
+
+test("SVG enviado como icone: a medida vem do viewBox, ou de width e height em px", () => {
+  const svg = (attributes) => model.svgSizeOf({ height: null, viewBox: null, width: null, ...attributes });
+
+  assert.deepEqual(svg({ viewBox: "-8.62 -19.69 279.36 279.36" }), { height: 279.36, width: 279.36 }, "o simbolo padrao");
+  assert.deepEqual(svg({ height: "50", viewBox: "0,0,200,100", width: "50" }), { height: 100, width: 200 }, "o viewBox vale mais que width e height");
+  assert.deepEqual(svg({ height: "128px", width: "128" }), { height: 128, width: 128 });
+  assert.deepEqual(svg({ height: "100%", width: "100%" }), { height: 0, width: 0 }, "porcentagem nao e medida");
+  assert.deepEqual(svg({ height: "2cm", viewBox: "0 0 0 10", width: "2cm" }), { height: 0, width: 0 });
+  assert.deepEqual(svg({}), { height: 0, width: 0 });
+  assert.equal(model.schoolIconSizeProblem({ ...svg({}), vector: true }), "Use uma imagem quadrada (mesma largura e altura).");
 });
 
 test("mover fileiras: Alt+setas, arrastar e limites", () => {

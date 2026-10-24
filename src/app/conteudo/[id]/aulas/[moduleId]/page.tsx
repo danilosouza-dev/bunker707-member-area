@@ -5,6 +5,8 @@ import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { getAppShellData, getLessonPageData } from "@/server/db/platform-store";
 import { requireStudentPageUser } from "@/server/auth/guards";
+import { contentPageKey } from "@/server/member-area/page-visit-model";
+import { trackMemberPageVisit } from "@/server/member-area/page-visits";
 
 type LessonPageProps = {
   params: Promise<{
@@ -34,6 +36,9 @@ export default async function LessonPage({ params, searchParams }: LessonPagePro
   if (!lessonPageData) {
     notFound();
   }
+
+  // A aula conta como visita a pagina do produto (docs/23 §5.2), antes de qualquer redirect.
+  await trackMemberPageVisit({ accessPreviewMode, pageKey: contentPageKey(lessonPageData.item.id), userId: user.id });
 
   if (lessonPageData.item.isLocked) {
     redirect("/");

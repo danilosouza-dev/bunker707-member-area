@@ -13,7 +13,7 @@ import {
   ShieldCheck,
   type LucideIcon
 } from "lucide-react";
-import { MemberButtonLink } from "@/components/member/ui/member-button";
+import { memberButtonClassName } from "@/components/member/ui/member-button";
 import { MemberEmptyState } from "@/components/member/ui/member-empty-state";
 import { MemberPage, MemberPageHeader, MemberSection } from "@/components/member/ui/member-page";
 import { MemberSurface } from "@/components/member/ui/member-surface";
@@ -23,7 +23,8 @@ import { MEMBER_SUPPORT_FAQ, type MemberSupportChannel, type MemberSupportChanne
 
 // Suporte: canais que a escola configurou (link de ajuda da tela de entrar + canais fixos), perguntas
 // frequentes e atalhos. Sem formulario nesta fase (nao ha caixa de entrada no admin para responder).
-// As perguntas usam <details> nativo: abrem e fecham sem JavaScript.
+// As perguntas usam <details> nativo: abrem e fecham sem JavaScript. O atalho da equipe para o admin e
+// um <a> comum (carregamento inteiro): o microfone so e liberado num documento carregado em /admin.
 
 const channelIcons: Record<MemberSupportChannelKind, LucideIcon> = {
   email: Mail,
@@ -122,10 +123,10 @@ export function SupportView({
             <MemberEmptyState
               action={
                 canUseAccessPreview ? (
-                  <MemberButtonLink href="/admin/area-de-membros/login" size="sm">
+                  <a className={memberButtonClassName({ size: "sm" })} href="/admin/area-de-membros/login">
                     <Settings />
                     Configurar link de ajuda
-                  </MemberButtonLink>
+                  </a>
                 ) : undefined
               }
               description={

@@ -3,6 +3,8 @@ import { FavoritesExperience } from "@/components/favorites-experience";
 import { MemberFooter } from "@/components/member-footer";
 import { normalizeAccessPreviewMode } from "@/lib/access-preview";
 import { requireStudentPageUser } from "@/server/auth/guards";
+import { pageKeyOfRoute } from "@/server/member-area/page-visit-model";
+import { trackMemberPageVisit } from "@/server/member-area/page-visits";
 import { getAppShellData, getFavoritesPageData, getMemberLibrary } from "@/server/db/platform-store";
 import { buildFavoritesPageView } from "@/server/member-area/favorites-view";
 
@@ -27,6 +29,7 @@ export default async function FavoritesPage({ searchParams }: FavoritesPageProps
     getMemberLibrary(accessPreviewMode, user)
   ]);
   const view = buildFavoritesPageView(favoritesData, library);
+  await trackMemberPageVisit({ accessPreviewMode, pageKey: pageKeyOfRoute("/favoritos"), userId: user.id });
 
   return (
     <AppShell

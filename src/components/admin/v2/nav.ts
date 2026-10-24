@@ -83,6 +83,8 @@ export const adminNavItems: readonly AdminNavItem[] = [
   {
     children: [
       { href: "/admin/comunicacao/avisos", label: "Avisos e pop-ups" },
+      { href: "/admin/comunicacao/fluxos", label: "Fluxos" },
+      { href: "/admin/comunicacao/modelos", label: "Modelos" },
       { href: "/admin/comunicacao/webinarios", label: "Webinários" },
       { href: "/admin/comunicacao/promocoes", label: "Promoções" }
     ],
@@ -210,7 +212,8 @@ const NO_TOPBAR_FILTERS: AdminTopbarScope = { period: false, product: false };
 
 /**
  * Periodo e Produto aparecem so nas telas que os usam: Hoje (os dois); Desempenho do produto,
- * Comunicacao e Consumo do Tutor IA (so o Periodo). Alunos e Comunidade tem filtros na propria pagina;
+ * Comunicacao e Consumo do Tutor IA (so o Periodo). A aba Modelos da Comunicacao nao tem Periodo (docs/28:
+ * uma lista de modelos nao tem numero de periodo). Alunos e Comunidade tem filtros na propria pagina;
  * formularios e Configuracoes nao usam nenhum.
  */
 export function getAdminTopbarScope(pathname: string | null | undefined): AdminTopbarScope {
@@ -222,7 +225,7 @@ export function getAdminTopbarScope(pathname: string | null | undefined): AdminT
 
   if (
     /^\/admin\/produtos\/[^/]+\/desempenho$/.test(path) ||
-    /^\/admin\/comunicacao(?:\/(?:avisos|webinarios|promocoes))?$/.test(path) ||
+    /^\/admin\/comunicacao(?:\/(?:avisos|fluxos|webinarios|promocoes))?$/.test(path) ||
     path === "/admin/configuracoes/ia/consumo"
   ) {
     return { period: true, product: false };
@@ -236,6 +239,9 @@ const mobileTitleOverrides: readonly AdminNavChild[] = [
   { href: "/admin/produtos/novo", label: "Novo produto" },
   { href: "/admin/produtos/importar", label: "Importar" },
   { href: "/admin/produtos/pacotes", label: "Pacotes" },
+  { href: "/admin/comunicacao/avisos/novo", label: "Novo aviso" },
+  { href: "/admin/comunicacao/fluxos/novo", label: "Novo fluxo" },
+  { href: "/admin/comunicacao/modelos/novo", label: "Novo modelo" },
   { href: "/admin/configuracoes/equipe", label: "Equipe" },
   { href: "/admin/configuracoes/ia", label: "Tutor IA" },
   { href: "/admin/configuracoes/vendas", label: "Vendas" }

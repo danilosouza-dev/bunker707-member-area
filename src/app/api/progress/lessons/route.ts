@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
+import { courseJustCompleted } from "@/lib/course-completion";
 import { requireApiUser } from "@/server/auth/guards";
-import { replaceCompletedLessons } from "@/server/db/platform-store";
+import { replaceCompletedLessonsWithPrevious } from "@/server/db/platform-store";
 import { requireLessonsAccess } from "@/server/access/lesson-access";
 import { readBoundedJson } from "@/server/http/bounded-json";
 import { jsonRouteError } from "@/server/http/route-errors";
 import type { LessonReaction, LessonWatchStatus } from "@/lib/platform-types";
+
+// Progresso da aula. Comunicacao v3b-2 (docs/29 §4.3 e §6.1): 200 { data } como sempre; 200 { courseCompleted: true,
+// data } so no pedido que vira o curso de incompleto para completo para um aluno (todas as aulas publicadas dos
+// modulos publicados concluidas). O "antes" e o que a gravacao vencedora leu (replaceCompletedLessonsWithPrevious),
+// nunca a leitura do acesso: duas gravacoes que fecham o mesmo curso dao uma virada so. A equipe nunca recebe.
 
 export async function PUT(request: Request) {
   const auth = await requireApiUser();
@@ -85,13 +91,13 @@ export async function PUT(request: Request) {
   ]));
 
   try {
-    await requireLessonsAccess({
+    const access = await requireLessonsAccess({
       contentId: payload.contentId,
       lessonIds: referencedLessonIds,
       userId: auth.user.id
     });
 
-    const data = await replaceCompletedLessons({
+    const { previousCompletedLessonIds, record: data } = await replaceCompletedLessonsWithPrevious({
       completedLessonIds: payload.completedLessonIds,
       contentId: payload.contentId,
       durationSeconds: payload.durationSeconds,
@@ -105,7 +111,11 @@ export async function PUT(request: Request) {
       userId: auth.user.id
     });
 
-    return NextResponse.json({ data });
+    const courseCompleted =
+      access.publishedLessonIds !== null &&
+      courseJustCompleted({ after: data.completedLessonIds, before: previousCompletedLessonIds, published: access.publishedLessonIds });
+
+    return NextResponse.json(courseCompleted ? { courseCompleted: true, data } : { data });
   } catch (error) {
     return jsonRouteError(error, "Nao foi possivel salvar o progresso da aula.");
   }

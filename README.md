@@ -42,6 +42,15 @@ Construir uma area de membros robusta, moderna e preparada para evoluir com:
 - [Padrao de testes e rotina de qualidade (16/10/2026)](docs/18-padrao-de-testes.md)
 - [Infra propria (Hetzner) e e-mail (Resend): numeros e decisao de 18/10/2026](docs/19-infra-hetzner-e-email.md)
 - [Runbook: Bunker707 na Hetzner, dois servidores (membros e marketing) operados pelo workflow Infra (Hetzner) (17/10/2026, atualizado em 18/10/2026)](docs/20-runbook-hetzner.md)
+- [Retomada da migracao para a Hetzner (estado em 19/10/2026)](docs/21-retomada-migracao-hetzner.md)
+- [Comunicacao v1: notificacoes no sino e pop-ups (20/10/2026)](docs/22-comunicacao-notificacoes-e-pop-ups.md)
+- [Comunicacao v2: quem envia, tempo no sino, notificacoes seguintes e fluxos (21/10/2026)](docs/23-comunicacao-v2-fluxos.md)
+- [Comunicacao v3a: sino e avisos (CRUD, lixeira, cartao clicavel, reacoes, enquete e velocidade) (22/10/2026)](docs/24-comunicacao-v3a-sino-e-avisos.md)
+- [Comunicacao v3b-1: pop-ups com paginas, momentos, frequencia e como fechar (22/10/2026)](docs/25-comunicacao-v3b1-pop-ups.md)
+- [Comunicacao: design do pop-up com video, degrade, blocos, fontes e botoes (22/10/2026)](docs/26-comunicacao-design-do-pop-up.md)
+- [Comunicacao: design Livre do pop-up, editor no estilo do Elementor (23/10/2026)](docs/27-comunicacao-design-livre.md)
+- [Comunicacao: modelos de notificacao, de pop-up e de design (25/10/2026)](docs/28-comunicacao-modelos.md)
+- [Comunicacao v3b-2: hora marcada ao vivo, primeiro acesso, curso concluido, relatorio do pop-up e players de fora (23/10/2026)](docs/29-comunicacao-v3b2-momentos-relatorio-e-players.md)
 
 ## Padroes de trabalho
 
@@ -96,6 +105,7 @@ O repositorio ja possui a base inicial do app:
 - CRM com navegacao expandida para Produtos, Combos, Comunidade, Moderacao, Agentes de IA e Configuracoes > Integracoes;
 - CRUD persistido de combos de produtos, usando `Turma A` como padrao quando nenhuma turma foi criada;
 - moderacao persistida de comentarios e palavras bloqueadas no CRM, com fila por status/denuncia e auditoria das acoes;
+- sino de notificacoes no topo da area do aluno (desde 20/10/2026): avisos da escola com imagem, audio que toca no proprio sino, botao para uma pagina da area ou link externo e resposta `Aceitar`/`Recusar`, mais as respostas e mencoes nos comentarios; pop-ups so na home (1 por sessao e 1 a cada 24 h, `Lembrar depois` e `Não mostrar de novo`); no admin, Comunicacao > Avisos e pop-ups cria, agenda e mede cada aviso para segmentos montados por regras E/OU, com aprovacao acima de 500 alunos e envio agendado pelo tick de minuto (docs/22);
 - area de Personalizacao no CRM com lista inicial de vitrine, login, pagina de produtos e produtos/cursos; cada item abre um editor proprio com representacao fiel da pagina final e opcoes laterais de edicao;
 - separacao visual e de navegacao entre area de membros (`/`) e CRM/backoffice (`/admin`), com logos levando para a home correta e atalhos entre as duas experiencias para usuarios admin;
 - fluxo inicial de criacao no CMS para formacoes, cursos, mentorias, webinarios, produtos e bootcamps, com capa, acesso gratuito/fechado, limite de estudantes, link externo de compra e regras de entrega por data ou por dias apos inscricao;

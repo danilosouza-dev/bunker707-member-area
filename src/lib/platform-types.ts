@@ -230,6 +230,11 @@ export type HomeHeroConfig = {
 
 export type PlatformBrandingConfig = {
   logoImage: string | null;
+  /**
+   * Icone da escola (Marca): o circulo das notificacoes que a escola envia. Ausente = o simbolo padrao
+   * (SCHOOL_DEFAULT_ICON em src/server/communications/message-meta.ts).
+   */
+  schoolIcon?: string;
   /** Cantos, botoes e menu da area do aluno (src/lib/member-style.ts). Ausente = padrao discreto. */
   style?: MemberStyleConfig;
 };

@@ -3,6 +3,20 @@
 > **Atualizacao de 19/10/2026 (segunda sessao):** a revisao da secao 4.1 foi feita (secao 7) e a execucao da
 > 4.3 comecou. O produtor decidiu CX23 (4 GB) para os dois servidores, mantidos ligados (secao 8). Leia as
 > secoes 7 e 8 antes da 4.
+>
+> **Atualizacao de 21/10/2026:** a Comunicacao v2 traz a migracao `202610200002` (com a RPC 7.15 e as correcoes
+> M1 a M4), que precisa estar aplicada antes do deploy que a usa: no Supabase da nuvem antes do merge na `dev`;
+> na producao o `deploy-membros` aplica sozinho. Passos na secao 9. As correcoes da revisao vem na
+> `202610210001` (a 0002 ja esta aplicada na nuvem de teste e nao muda): mesma regra, secao 9.1.
+>
+> **Atualizacao de 23/10/2026:** a Comunicacao v3b-2 traz a migracao `202610260001` (cinco secoes, a 5 sozinha;
+> antes, contar as linhas de `student_events`), que vai antes do merge na `dev`; e uma regra de operacao: **nao
+> publicar nem editar pop-ups "No primeiro acesso" ou "Ao concluir um curso" enquanto o app do ambiente rodar a versao
+> de antes** (R1). Passos na secao 9.5.
+>
+> **Atualizacao de 19/10/2026 (fim do dia):** a producao na Hetzner roda a `main` (promocao #107, imagem
+> `hetzner-sha-5e44340`). Daqui em diante vale o fluxo do `CONTRIBUTING.md`: branch a partir da `dev`, PR para a
+> `dev` (teste na Vercel), promocao para a `main` e `deploy-membros` disparado da `main` (secao 8, item 6).
 
 Documento de passagem de sessao. Quem continuar (outra conta, outra sessao do Claude Code na nuvem) le este
 arquivo primeiro e segue a secao 4, na ordem. Tudo que esta aqui foi verificado na sessao de 18 e 19/10/2026.
@@ -30,7 +44,8 @@ e `checkip.amazonaws.com` passam.
 
 Por isso os "bracos" sao o workflow `Infra (Hetzner)` (`.github/workflows/infra.yml`, id 388832203 no
 GitHub), disparado pela ferramenta MCP do GitHub `actions_run_trigger` (metodo `run_workflow`,
-`workflow_id: infra.yml`, `ref: claude/hopeful-franklin-04s7wt`, inputs `etapa`, `opcoes`, `payload`) e lido
+`workflow_id: infra.yml`, `ref: main`, inputs `etapa`, `opcoes`, `payload`; `deploy-*` so roda da `main`, as
+outras etapas rodam de qualquer branch) e lido
 por `actions_list` (`list_workflow_runs`) e `get_job_logs` (`run_id`, `failed_only`, `return_content: true`).
 Teste feito em 18/10/2026: a execucao 39174505182 (etapa `status`) rodou e parou em "Segredo HCLOUD_TOKEN
 ausente", como esperado. O caminho funciona; faltam os segredos.
@@ -133,12 +148,12 @@ plano B se faltar estoque).
 ## 6. Texto para colar na nova sessao
 
 ```txt
-Continue a migracao da Bunker707 para a Hetzner de onde parou. Trabalhe na branch
-claude/hopeful-franklin-04s7wt do repositorio danilosouza-dev/bunker707-member-area. Leia primeiro
-docs/21-retomada-migracao-hetzner.md e siga a secao 4 na ordem: termine a revisao da secao 4.1, depois
-confira se os segredos HCLOUD_TOKEN e CLOUDFLARE_API_TOKEN ja estao no GitHub (dispare a etapa status do
-workflow Infra (Hetzner)) e execute as etapas da secao 4.3, me reportando o custo do plan antes do
-provision e o resultado de cada etapa. Tudo pela IA; eu nao tenho maquina local.
+Continue a migracao da Bunker707 para a Hetzner de onde parou. Trabalhe numa branch criada a partir da
+dev do repositorio danilosouza-dev/bunker707-member-area (fluxo do CONTRIBUTING.md). Leia primeiro
+docs/21-retomada-migracao-hetzner.md: os servidores ja estao no ar (secao 8). Confira o estado com a etapa
+status do workflow Infra (Hetzner) e siga os pendentes da secao 8 (a virada de producao, item 4), me
+reportando o resultado de cada etapa. Codigo novo vai para o servidor so pela main, depois do teste na dev.
+Tudo pela IA; eu nao tenho maquina local.
 ```
 
 ## 7. Revisao da secao 4.1 (feita em 19/10/2026)
@@ -210,8 +225,230 @@ Pendente, para o produtor decidir:
    o Supabase da nuvem ficam como ambiente de teste (item 6).
 5. Opcional: igualar os modelos de e-mail do Supabase cloud (staging) ao `/auth/confirm` (docs/06).
 6. (Decidido em 19/10/2026.) Ambientes: `dev` = teste na Vercel com o Supabase da nuvem, so contas da equipe;
-   `main` = producao na Hetzner, e `deploy-membros` recusa outra branch (`CONTRIBUTING.md`). Pendente do produtor:
-   na Vercel (projeto `bunker707-member-area`, conta do Bertoldo, plano Hobby), Settings > Environments >
-   Production > Branch Tracking de `main` para `dev`; o conector da Vercel nao tem essa opcao. Esta branch
-   (`claude/hopeful-franklin-04s7wt`) roda na producao sem ter passado pela `dev`: PR aberta para a `dev`, depois
-   promocao para a `main`; ate la nao ha deploy novo (a trava ja vale).
+   `main` = producao na Hetzner, e `deploy-membros` recusa outra branch (`CONTRIBUTING.md`). Feito no mesmo dia:
+   o produtor trocou na Vercel (projeto `bunker707-member-area`, conta do Bertoldo, plano Hobby) o Branch
+   Tracking de Production de `main` para `dev`; a branch da migracao entrou na `dev` (#105, com a #106) e foi
+   promovida para a `main` (#107); `deploy-membros` da `main` (execucao 39313206338) pos no ar
+   `hetzner-sha-5e44340`, smoke verde, `AUTH_SESSION_STRATEGY=claims` conferido no container.
+
+## 9. Comunicacao v2: migracao `202610200002` antes do deploy (21/10/2026)
+
+A PR da Comunicacao v2 (`docs/23`, branch `claude/notification-system-ymk02g`) traz a migracao
+`supabase/migrations/202610200002_communication_v2.sql`. A `202610200001` (v1) ja esta aplicada no Supabase da
+nuvem e nao muda.
+
+Regra: **a 0002 vai antes do deploy que a usa**. O app da v2 nao tem caminho de volta para as colunas da v1:
+sem a migracao o sino e o pop-up respondem vazio, a rota do audio responde 404, o job `comunicacao` registra
+"migracao 202610200001 pendente ou 202610200002 pendente" e termina, as telas mostram o aviso de atualizacao,
+e envios, cliques e respostas nao funcionam. O contrario e seguro: a migracao sozinha nao atrapalha o app da
+v1 (colunas novas nulas; `expires_at` preenchido pelo gatilho).
+
+A versao a aplicar e a do repositorio, que ja traz as correcoes feitas na implementacao:
+
+- M1: RPC 7.15 `communication_release_flow_tasks(jsonb)` (devolve um lote que falhou antes de aplicar, devolvendo a
+  tentativa), com revoke/grant/comment;
+- M2: a reserva (7.1) carimba `greatest(p_now, clock_timestamp())`;
+- M3: a 7.5 recusa pai ou ancora fora da arvore enviada (`Passo invalido.`);
+- M4: o check `notifications_engagement_v2` nao tem "aberta implica lida";
+- `notifications.flow_id` com `on delete cascade` (achado no teste do contrato, antes do M1).
+
+Se alguma versao anterior da 0002 tivesse sido aplicada em algum banco, os blocos `if not exists` manteriam o
+check antigo: confira antes (abaixo). Ate 21/10/2026 a 0002 nao foi aplicada em nenhum banco fora do local.
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**, antes do merge da PR na `dev` (a Vercel
+publica a `dev` sozinha no merge):
+
+1. secoes 1 a 8 pelo MCP do Supabase (`apply_migration`, nome `communication_v2`), de uma vez ou em partes, na
+   ordem do arquivo (fluxos -> passos -> `campaigns` -> `notifications` -> passagens e tarefas -> visitas ->
+   RPCs -> permissoes). O MCP trava (timeout) em comando que ele julga destrutivo; a 0002 nao tem `drop`, mas
+   se uma parte travar, mande-a pelo SQL Editor;
+2. secao 9 (retencao: `delete` dentro de `prune_communication_history()`) pelo SQL Editor (ou `psql`);
+3. conferir: as consultas do cabecalho da migracao (`sem_fim = 0`);
+   `select count(*) from pg_proc where proname = 'communication_release_flow_tasks';` = 1;
+   `select pg_get_constraintdef(oid) from pg_constraint where conname = 'notifications_engagement_v2';` sem
+   `read_at`; `list_migrations` com `202610200002`. Se partes foram pelo SQL Editor e a versao nao aparece:
+   `insert into supabase_migrations.schema_migrations (version, name) values ('202610200002', 'communication_v2') on conflict do nothing;`
+4. o tick do ambiente de teste ligado (secao 5: `jobs_tick_url` e `jobs_tick_token` no Vault); seguir o roteiro
+   do `docs/23` §11.
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam as migracoes novas
+antes de trocar o app (`deploy.sh`, docs/20 §9). Depois, a rodada do `carga` com um fluxo no ar (docs/20 §12.1).
+
+### 9.1 Correcoes da revisao: migracao `202610210001` (21/10/2026)
+
+A 0002 ja foi aplicada no Supabase da nuvem de teste e **nao muda mais**. O que a revisao corrigiu no banco
+vem em `supabase/migrations/202610210001_communication_v2_fixes.sql`, idempotente, sem `drop` e sem `delete`:
+
+1. coluna `communication_flow_nodes.born_first_level` + gatilho `set_communication_flow_nodes_first_level`
+   (passo criado como filho da entrada);
+2. 7.1 `communication_claim_flow_tasks`: a tarefa presa que vira falha fecha a passagem sem nada aberto;
+3. 7.2 `communication_enroll_flow`: confere a `revision` de cada entrada;
+4. 7.3 `communication_enroll_notice_recipients`: complemento so de passo que nasceu de primeiro nivel, criado
+   depois da passagem (nunca o passo que subiu de nivel para quem foi pelo outro caminho);
+5. 7.4 `communication_apply_flow_results`: confere a `revision` de cada decisao (`stale_version`);
+6. permissoes e descricoes (mesmas assinaturas).
+
+Ambiente de teste: secoes 1 a 6 pelo MCP do Supabase (`apply_migration`, nome `communication_v2_fixes`), de uma
+vez ou em partes, **antes** do merge da correcao na `dev` (o app novo manda `revision`; a migracao sozinha nao
+atrapalha o app anterior, que nao manda e nao e conferido). Conferir:
+`select tgname from pg_trigger where tgrelid = 'public.communication_flow_nodes'::regclass;` (com
+`set_communication_flow_nodes_first_level`) e `list_migrations` com `202610210001`. Passos ja existentes ficam com
+`born_first_level = false` (o complemento so vale para seguintes criadas depois de aplicar). Producao: nada
+manual (o `deploy-membros` aplica).
+
+### 9.2 Comunicacao v3a: migracao `202610220001` antes do deploy (22/10/2026)
+
+A PR da Comunicacao v3a "Sino e avisos" (`docs/24`, branch `claude/notification-system-ymk02g`) traz
+`supabase/migrations/202610220001_communication_v3a.sql`. As `202610200001`, `202610200002` e `202610210001` ja
+estao aplicadas no Supabase da nuvem de teste e nao mudam.
+
+Regra: **a 0003 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). O app da v3a sem ela mostra
+o sino vazio e as escritas novas (reagir, votar, excluir) respondem 404; a migracao sozinha nao atrapalha o app da
+v2 (colunas novas com padrao; nenhuma linha fica excluida antes das rotas novas).
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**:
+
+1. conferir que ela ainda nao esta la: `list_migrations` (sem `202610220001`);
+2. secoes 1 a 6 pelo MCP do Supabase (`apply_migration`, nome `communication_v3a`), de uma vez ou uma secao por
+   chamada, **na ordem do arquivo**: 1 `campaigns` (colunas e checks) -> 2 `notifications` (colunas, checks e o
+   indice parcial) -> 3 `campaign_deliveries` -> 4 leitura do sino (4.1 visibilidade, 4.2 contagem da enquete,
+   4.3 pagina, 4.4 numeros: a 4.2 precisa existir antes da 4.3 e da 5.2, que a chamam) -> 5 escritas (5.1 a 5.6,
+   com a 7.9 refeita com a mesma assinatura) -> 6 permissoes e descricoes. Nao ha `drop` nem `delete`: nenhuma
+   parte precisa do SQL Editor. O indice novo nasce vazio (ninguem votou);
+3. conferir: as consultas do cabecalho da migracao;
+   `select count(*) from pg_proc where proname = 'communication_inbox_page';` = 1;
+   `select pg_get_constraintdef(oid) from pg_constraint where conname = 'notifications_poll_v3';`;
+   `select indexname from pg_indexes where indexname = 'notifications_poll_tally_idx';`; `list_migrations` com
+   `202610220001`. Se alguma parte foi pelo SQL Editor e a versao nao aparece:
+   `insert into supabase_migrations.schema_migrations (version, name) values ('202610220001', 'communication_v3a') on conflict do nothing;`
+4. a idempotencia foi conferida no banco local (segunda aplicacao sem erro, so "already exists, skipping"):
+   reaplicar uma secao que travou no meio e seguro;
+5. ajustes depois do primeiro teste (`docs/24` §10): `supabase/migrations/202610220002_communication_v3a_ajustes.sql`,
+   tambem **antes do merge** (o app novo le `allow_hide` na pagina do sino e grava menos de 60 minutos no tempo do
+   sino). Secoes 1 a 4 pelo MCP (`apply_migration`, nome `communication_v3a_ajustes`), na ordem do arquivo; a secao 5
+   (`alter table public.campaigns drop constraint if exists campaigns_validity_v2;`, a unica que tira alguma coisa)
+   sozinha, pelo MCP ou pelo SQL Editor. Conferir com `list_migrations` (`202610220002`) e as consultas do
+   `docs/24` §12, passo 8;
+6. fazer o merge e seguir o roteiro do `docs/24` §12.
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
+trocar o app. Depois, a rodada do `carga` com o sino novo (docs/20 §12.1; meta de tempo de servidor ate 20 ms).
+
+### 9.3 Comunicacao v3b-1: migracao `202610220003` antes do deploy (22/10/2026)
+
+A PR da Comunicacao v3b-1 "Pop-ups: frequencia, paginas e como fechar" (`docs/25`) traz
+`supabase/migrations/202610220003_communication_v3b1.sql`. As `202610200001`, `202610200002`, `202610210001`,
+`202610220001` e `202610220002` ja estao aplicadas no Supabase da nuvem de teste e nao mudam.
+
+Regra: **a 0003 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, o app novo para mais
+que os pop-ups: o admin mostra o aviso de banco desatualizado (as colunas novas estao em `CAMPAIGN_COLUMNS`), o resumo
+responde `popups: null`, o `show` responde 404 e **o job `comunicacao` do tick falha** (le as campanhas com
+`CAMPAIGN_COLUMNS`), parando notificacoes agendadas, seguintes e fluxos ate a migracao. O sino continua. A migracao
+sozinha nao atrapalha o app da v3a (colunas com padrao = o comportamento de antes; a funcao de reinicio mantem o
+contrato).
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**:
+
+1. conferir que ela ainda nao esta la: `list_migrations` (com `202610220002`, sem `202610220003`);
+2. secoes 1 a 6 pelo MCP do Supabase, **na ordem do arquivo**, `execute_sql` **uma secao por chamada** (a secao 2
+   usa a funcao da 1; a secao 4, que valida o check de `campaign_deliveries`, vai sozinha para a leitura da tabela
+   nao segurar o `add column` da 3), ou `apply_migration` com o arquivo inteiro, nome `communication_v3b1`. Nao ha
+   `drop`, `delete` nem gatilho: nenhuma parte precisa do SQL Editor;
+3. conferir com as consultas do cabecalho da migracao (os pop-ups de antes em `page_load`, `null`, `any`, `1440`;
+   7 constraints `campaign%v3b`, todas `convalidated = true`; 2 funcoes; `popup_repeat` fora da funcao de reinicio) e
+   `list_migrations` com `202610220003`. Se foi por `execute_sql` (que nao grava a versao):
+   `insert into supabase_migrations.schema_migrations (version, name) values ('202610220003', 'communication_v3b1') on conflict do nothing;`
+4. a idempotencia foi conferida no banco local (segunda aplicacao com `psql` sem erro, so "already exists,
+   skipping"): reaplicar uma secao que travou no meio e seguro;
+5. fazer o merge e seguir o roteiro do `docs/25` §10;
+6. **depois do merge, nao editar pop-ups pela previa de uma PR mais antiga** (criada antes da v3b-1): ela usa o mesmo
+   banco, e salvar um pop-up "Mais de uma vez" como o "Uma vez" da v3a fere `campaigns_popup_frequency_v3b` (a previa
+   antiga mostra o erro generico; o app novo sempre grava `popup_repeat` e `popup_frequency` juntos).
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
+trocar o app.
+
+### 9.4 Modelos da Comunicacao: migracao `202610250001` antes do deploy (25/10/2026)
+
+A PR dos Modelos (`docs/28`) traz `supabase/migrations/202610250001_communication_templates.sql`. As migracoes ate a
+`202610240001` nao mudam (a guarda `comunicacao-modelos.guard` confere os hashes).
+
+Regra: **a 0001 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, o app novo continua
+de pe: a aba Modelos mostra "migracao pendente" (`202610250001`), o "Novo aviso" continua um link, o `?modelo=` abre o
+editor em branco com "Este modelo não existe mais" e a limpeza segue sem modelos (so a tabela ausente vale como
+"nenhum modelo"). Salvar um modelo falha ate aplicar. A migracao sozinha nao atrapalha o app de antes (tabela nova).
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**:
+
+1. conferir que ela ainda nao esta la: `list_migrations` (com `202610240001`, sem `202610250001`);
+2. a secao unica pelo MCP do Supabase, numa chamada so: `execute_sql` com `set lock_timeout = '5s';` antes do texto
+   do arquivo (a tabela e nova; o `lock_timeout` so protege o `create trigger`, que pega um lock curto na tabela
+   nova), ou `apply_migration` com o arquivo inteiro, nome `communication_templates`. Nao ha `drop`, `delete` nem
+   funcao nova: o gatilho usa a `public.set_updated_at()` que ja existe, dentro de `do $$ ... if not exists`. Se o
+   MCP recusar o bloco `do`, o plano B esta no `docs/28` §8 (risco 1);
+3. conferir com as consultas do cabecalho da migracao: `relrowsecurity = true`, 0 politicas, `anon` e
+   `authenticated` sem `select`, 9 constraints, o gatilho `set_communication_templates_updated_at` e 0 linhas. Se
+   foi por `execute_sql` (que nao grava a versao), gravar o historico com o `insert into
+   supabase_migrations.schema_migrations (version, name, statements) ... on conflict (version) do nothing` do
+   relatorio da PR;
+4. a idempotencia foi conferida no banco local (segunda aplicacao com `psql` sem erro, so "already exists,
+   skipping"; e a primeira aplicacao numa tabela nova, dentro de uma transacao desfeita);
+5. fazer o merge e seguir o roteiro do `docs/28` §11.
+
+**Producao (Hetzner)**: nada manual. A promocao `dev` -> `main` e o `deploy-membros` aplicam a migracao antes de
+trocar o app.
+
+### 9.5 Comunicacao v3b-2: migracao `202610260001` antes do deploy (23/10/2026)
+
+A PR da Comunicacao v3b-2 "Pop-ups: hora marcada ao vivo, primeiro acesso, curso concluido, relatorio e players de
+fora" (`docs/29`) traz `supabase/migrations/202610260001_communication_v3b2.sql` (sha256 `44566be5...f3b76ae8`, fixado
+na guarda `comunicacao-v3b2.guard`). As migracoes ate a `202610250001` nao mudam.
+
+Regra: **a 0026 vai antes do merge da PR na `dev`** (a Vercel publica a `dev` sozinha). Sem ela, `CAMPAIGN_COLUMNS`
+(que ganhou `popup_access_products`) quebra o admin de avisos e **o job `comunicacao` do tick**, parando notificacoes
+agendadas, seguintes e fluxos ate a migracao (como na v3b-1). A migracao sozinha nao atrapalha o app de antes (ele nao
+le as colunas novas; o navegador de antes nao grava `campaign` no historico).
+
+**Regra de operacao (R1, `docs/29` §3 e §9.2)**: **nao publicar nem editar "No primeiro acesso" ou "Ao concluir um
+curso" num ambiente enquanto o app (e o tick) desse ambiente roda a versao de antes.** O app de antes le os dois como
+"Ao abrir a pagina": o plano e o `show` dele aceitam, o tick dele habilita o segmento inteiro num "No primeiro acesso"
+(o app novo desfaz no recalculo seguinte: a linha sem a marca `first_access_at` sai) e editar ali um "No primeiro
+acesso" sem produtos grava "Ao abrir a pagina" sem erro. Na nuvem, vale entre aplicar a migracao e o merge; depois do
+merge, nao usar previas de PRs anteriores para criar ou editar pop-ups. Na Hetzner, vale ao voltar para a imagem
+anterior (`docs/20` §9).
+
+**Ambiente de teste (Supabase da nuvem, `hrtnqcznhdmodjikvddm`)**:
+
+1. conferir que ela ainda nao esta la: `list_migrations` (com `202610250001`, sem `202610260001`);
+2. contar as linhas: `select count(*) from public.student_events;` (o indice da secao 3 nao e `concurrently`: enquanto
+   ele monta, as escritas na tabela esperam; ate uns 10 milhoes de linhas, segundos; no local, 2,66 milhoes em ~2,3 s);
+3. as cinco secoes pelo MCP do Supabase, `execute_sql`, **uma por chamada e na ordem do arquivo**, cada uma comecando
+   com `set lock_timeout = '5s';`: 1 `campaigns` (funcao `communication_popup_products_ok`, coluna
+   `popup_access_products`, comentarios e o check `campaigns_popup_access_v3b2` dentro de `do $$ ... if not exists`) ->
+   2 `campaign_deliveries.first_access_at` -> 3 o indice `student_events_campaign_idx`, numa chamada so dele -> 4 a
+   funcao `communication_popup_report` (`create or replace`, mesma assinatura: se uma versao anterior ja tiver sido
+   aplicada, ela e trocada) -> 5 o `alter policy "Students can create own events"`, **sozinha** (se o MCP recusar, pelo
+   SQL Editor). Ou `apply_migration` com o arquivo inteiro, nome `communication_v3b2`. Nao ha `drop`, `delete`, gatilho
+   nem `create policy`. O texto de cada chamada e o bloco `/* N. ... */` correspondente do proprio arquivo da migracao
+   (do cabecalho da secao ate o cabecalho da seguinte), com `set lock_timeout = '5s';` na frente;
+4. conferir com as consultas do cabecalho da migracao: constraint `campaigns_popup_access_v3b2` com
+   `convalidated = true`; 1 funcao `communication_popup_products_ok`; 0 pop-ups com produtos; 0 linhas com
+   `first_access_at`; o indice existe; `communication_popup_report` com `authenticated` = false e `service_role` =
+   true; `select metric, total, students from public.communication_popup_report(gen_random_uuid()) order by 1;` =
+   `max 0 0`, `median 0 0`, `viewers 0 0`; a politica com `campaign` no `with check`. O cabecalho nao confere as
+   permissoes da funcao dos produtos: rode a parte
+   `select has_function_privilege('authenticated', 'public.communication_popup_products_ok(text[])', 'execute'),
+   has_function_privilege('service_role', 'public.communication_popup_products_ok(text[])', 'execute');` = `false`, `true`;
+5. se foi por `execute_sql` (que nao grava a versao), gravar o historico com
+   `insert into supabase_migrations.schema_migrations (version, name) values ('202610260001', 'communication_v3b2') on conflict (version) do nothing;`
+   (a coluna `statements` e `text[]`; o texto da migracao nao precisa entrar); `list_migrations` com `202610260001`;
+6. a idempotencia foi conferida no banco local (duas aplicacoes com `psql` sem erro, so "already exists, skipping";
+   `db:reset` com 52 migracoes e mais uma aplicacao por cima): reaplicar uma secao que travou no meio e seguro;
+7. fazer o merge e seguir o roteiro do `docs/29` §10 (o primeiro passo e conferir que a `dev` ja roda a v3b-2 antes de
+   publicar os momentos novos). A conferencia dos players em aparelho real (`docs/29` §10.1) e condicao para a PR
+   `dev` -> `main`.
+
+**Producao (Hetzner)**: nada manual para a migracao. A promocao `dev` -> `main` e o `deploy-membros` aplicam a
+migracao antes de trocar o app (o indice trava as escritas em `student_events` pelos segundos da montagem). Antes de
+voltar para a imagem anterior, pausar os pop-ups "No primeiro acesso" e "Ao concluir um curso" (`docs/20` §9). Depois,
+uma rodada do `carga` com um pop-up de hora marcada (`docs/20` §12.1, `docs/29` R17).

@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ComponentProps, type ComponentType, type MouseEvent } from "react";
+import { MemberPopupHost } from "@/components/member/notifications/member-popup-host";
 import { DirectorIcon } from "@/components/member/shell/director-parts";
 import { MemberAccountMenu } from "@/components/member/shell/member-account-menu";
 import { MemberNotificationsMenu } from "@/components/member/shell/member-notifications-menu";
@@ -16,11 +17,14 @@ import { PlatformBrandingProvider } from "@/components/platform-branding";
 import type { PlatformDirectorChat as PlatformDirectorChatComponent } from "@/components/platform-director-chat";
 import { flushPendingSavedItemChanges } from "@/components/saved-item-button";
 import { ACCESS_PREVIEW_PARAM, withAccessPreviewParam } from "@/lib/access-preview";
+import { isAdminPath } from "@/lib/auth/redirect";
 import { signOutAndLeave } from "@/lib/auth/sign-out";
 import { normalizeMemberStyle } from "@/lib/member-style";
 import { cn } from "@/lib/utils";
 import { canOptimizeImageSrc } from "@/lib/image-hosts";
 import type { ContentPageHeroCorners, PlatformBrandingConfig } from "@/lib/platform-types";
+import { SCHOOL_DEFAULT_ICON } from "@/server/communications/message-meta";
+import { popupPageKeyOf } from "@/server/communications/popup-display-model";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 
 type AppShellProps = {
@@ -33,6 +37,8 @@ type AppShellProps = {
   student: {
     avatarUrl?: string | null;
     fullName: string;
+    /** Id do aluno da sessao: dono da memoria do sino (o login troca de pagina sem recarregar). */
+    id?: string | null;
     name: string;
   };
 };
@@ -154,6 +160,10 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
   // quando so o banner desta pagina e arredondado (escolha do produto): logo e perfil seguem o banner.
   const rounded = style.corners === "rounded" || bannerCorners === "rounded";
   const pathname = usePathname();
+  // Pagina do pop-up (docs/25 §1.2): a chave da pagina do aluno, fora do "ver como" (null = nunca um pop-up
+  // aqui). Na home, o pedido do pop-up traz o numero do sino (o topo nao pede o seu ao montar).
+  const popupPage = accessPreviewMode ? null : popupPageKeyOf(pathname);
+  const popupHome = popupPage === "home";
   const headerLinks = menuInHeader
     ? (getMemberSidebarSections(pathname, accessPreviewMode).find((section) => section.id === "estudar")?.items ?? [])
     : [];
@@ -215,6 +225,14 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
     void (async () => {
       await window.__bunker707FlushLessonProgress?.();
       await flushPendingSavedItemChanges();
+
+      // Admin: carregamento inteiro, depois de salvar progresso e favoritos (o microfone dos avisos so
+      // e liberado num documento carregado em /admin; isAdminPath).
+      if (isAdminPath(href)) {
+        window.location.assign(href);
+        return;
+      }
+
       router.push(href);
     })();
   }
@@ -274,7 +292,7 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
   return (
     <PlatformBrandingProvider branding={branding}>
     <div className="min-h-screen bg-[#141414] text-white" data-member-buttons={style.buttons} data-member-corners={style.corners} data-member-menu={style.menu}>
-      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden">
+      <header className="fixed left-0 right-0 top-0 z-40 overflow-hidden" data-member-topbar="">
         <div
           aria-hidden="true"
           className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(0,0,0,0.68)_0%,rgba(0,0,0,0.26)_58%,rgba(0,0,0,0)_100%)] transition-opacity duration-300 ease-out will-change-opacity"
@@ -386,7 +404,18 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
                 placeholder="Pesquisar aulas, cursos, formações e bootcamps..."
               />
             </div>
-            <MemberNotificationsMenu className={searchOpen ? "max-sm:hidden" : undefined} />
+            <MemberNotificationsMenu
+              accessPreviewMode={accessPreviewMode}
+              className={searchOpen ? "max-sm:hidden" : undefined}
+              onNavigate={(event, href) => handleProgressAwareNavigation(event, href)}
+              popupPage={popupPage}
+              refreshSummaryOnMount={!popupHome}
+              // O circulo dos avisos da escola e o Icone da escola (Marca); a logo fica no topo e de reserva.
+              schoolIconUrl={branding?.schoolIcon ?? SCHOOL_DEFAULT_ICON}
+              schoolLogoUrl={logoImage}
+              schoolName="Bunker707"
+              studentId={student.id}
+            />
             <MemberAccountMenu
               accessPreviewMode={accessPreviewMode}
               className={searchOpen ? "max-sm:hidden" : undefined}
@@ -439,6 +468,9 @@ export function AppShell({ accessPreviewMode, bannerCorners, branding, canUseAcc
       />
 
       <main>{children}</main>
+
+      {/* Pop-ups dos avisos: em toda pagina do aluno com chave, fora do modo "ver como" do produtor (docs/25 §4). */}
+      <MemberPopupHost onNavigate={(event, href) => handleProgressAwareNavigation(event, href)} pageKey={popupPage} />
 
       {!sidebarOpen ? (
         directorRequested ? (

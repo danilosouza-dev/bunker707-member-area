@@ -58,7 +58,14 @@ Aluno comentando aula
   -> bloqueio por palavra proibida
   -> comentario pendente/aprovado
   -> fila de moderacao
-  -> notificacoes futuras
+  -> notificacao no sino de quem foi respondido ou mencionado (desde 20/10/2026)
+
+Equipe criando aviso (Comunicacao > Avisos e pop-ups)
+  -> segmento por regras sobre os dados dos alunos
+  -> notificacao no sino (agora ou agendada pelo tick) ou pop-up na home
+  -> vistos, cliques e quem voltou a estudar
+  -> notificacoes seguintes e fluxos (desde 21/10/2026): o motor no tick decide, para cada aluno,
+     o que sai e quando, pelo que ele fez com as notificacoes anteriores, visitas e acessos
 
 Aluno perguntando para IA
   -> checagem de entitlement
@@ -94,6 +101,8 @@ src/
     ai/
     jobs/
     email/
+    communications/   (avisos, sino, pop-ups, notificacoes seguintes e fluxos; secao Comunicacao abaixo)
+    member-area/      (inclui page-visits.ts: visitas das paginas que um fluxo no ar usa)
 ```
 
 ## Arquitetura de dados implementada
@@ -144,6 +153,8 @@ Capas e thumbnails nao devem ser persistidas como Data URL/Base64 em colunas do 
 - URL publica persistida nas tabelas de conteudo.
 
 O bucket e publico porque as capas sao arte de exibicao, nao material protegido. Videos, materiais privados e arquivos originais continuam fora desse bucket e exigem autorizacao/token proprio.
+
+Avisos da Comunicacao (desde 20/10/2026, `docs/22` §4.5): a imagem 16:9 do aviso usa o mesmo fluxo (recorte WebP de 1280 x 720 no navegador, servidor confere medida e peso, ate 420 KB) e vai para `content-assets/communications/images`. O audio do aviso fica no bucket publico proprio `communication-audio` (migracao `202610200001`: so tipos de audio, ate 10 MB), em `campaigns/{hash}.{ext}` com `Cache-Control` de um ano. Ele sobe por rota (`POST /api/admin/communications/audio`, multipart), nao por Server Action (limite de 1 MB), e o servidor confere o formato pelos primeiros bytes. Duracao e forma de onda sao medidas no navegador da equipe e gravadas com o aviso; so a URL vai para o banco. Publico pelo mesmo motivo das capas: aviso nao e conteudo pago e o nome por hash nao e adivinhavel.
 
 ## Autenticacao
 
@@ -295,7 +306,8 @@ Implementacao atual:
 - moderacao: `/api/admin/moderation/comments/[commentId]`;
 - palavras bloqueadas: `/api/admin/moderation/blocked-words`;
 - tabelas de comentarios ficam com RLS habilitado e sem acesso direto de `anon`/`authenticated`; as regras de sessao, entitlement e moderacao rodam nas APIs server-side;
-- `analysis_status`, `analysis_result` e `analyzed_at` deixam cada comentario pronto para jobs futuros de sentimento, temas, intencao, duvidas e oportunidades de conteudo.
+- `analysis_status`, `analysis_result` e `analyzed_at` deixam cada comentario pronto para jobs futuros de sentimento, temas, intencao, duvidas e oportunidades de conteudo;
+- desde 20/10/2026 toda resposta (pela aula em `createLessonComment` ou pela Comunidade do admin em `replyToComment`) chama `scheduleCommentReplyNotification` (`src/server/communications/comment-notifications.ts`), que roda depois da resposta HTTP (`after()` do Next; fora de um pedido, na hora) e grava no sino a notificacao de resposta para o dono do comentario e a de mencao para o `@usuario` do comeco da resposta. Melhor esforco: falha vira log `[notificacoes]` e nunca derruba a publicacao. O sino so mostra a notificacao enquanto a resposta e o comentario respondido estao aprovados e nao excluidos.
 
 ## Agentes de IA
 
@@ -406,6 +418,7 @@ Tracking de progresso:
 - a primeira entrega cobre YouTube. Chromecast/AirPlay nativos e adapters receptores para Vimeo, Bunny, Mux ou URL propria permanecem evolucoes separadas por provider;
 - Vimeo, Bunny, Mux e embeds externos devem ficar atras de adapters de player equivalentes, expondo uma interface comum de play, pause, currentTime, duration, seek e estado de conclusao;
 - enquanto um adapter especifico ainda nao estiver completo, o app pode registrar inicio por clique no player e um temporizador de sessao para alimentar `Continue assistindo`, deixando claro que esse fallback nao substitui a precisao de provedores com API integrada.
+- desde 23/10/2026 (Comunicacao v3b-2, `docs/29` §4.4), Bunny, Vimeo e Mux tem uma **ponte por `postMessage`** na pagina da aula (`src/lib/lesson-embed-bridge.ts`, puro; as origens e regras em `src/lib/lesson-embed-origins.ts`; o hook `src/components/use-lesson-embed-bridge.ts` baixa a ponte por `import()` so quando o iframe e de um player da lista): protocolo do Vimeo (`{ method, value }` / `{ event, data }`) e Player.js (Bunny e Mux, texto JSON com `context: "player.js"`), sem SDK, sem script de fora e sem mudar a CSP. Liga pela origem do `src` do iframe (lista exata: `player.vimeo.com`, `iframe.mediadelivery.net` e `player.mediadelivery.net` como um grupo, `player.mux.com`), aceita mensagem so dessas origens e do `contentWindow` do iframe, manda com `targetOrigin` exato e so confia depois da resposta ao `getPaused`. Com a ponte confirmada: o fim do video conclui a aula (como o YouTube), o progresso usa o tempo real e o temporizador de sessao acima nao roda; o pop-up le se o video toca (`lesson-media-signal.ts`). Sem resposta (sem referrer, player que nao responde, outra origem), fica o fallback. Ainda nao ha `seek` nem comando de tocar pela ponte (so leitura).
 
 ## Eventos do aluno
 
@@ -431,6 +444,8 @@ Eventos iniciais:
 - support_requested.
 
 Esses eventos alimentarao dashboards, automacoes e IA no futuro.
+
+Comunicacao v3b-2 (23/10/2026): nenhum evento novo; o aluno nao grava mais linhas com `entity_type = 'campaign'` (politica de insert de `student_events`), e o relatorio do pop-up le essas linhas por um indice parcial (`docs/29`). Comunicacao v1 (20/10/2026) grava, pelas rotas do sino e do pop-up, `notification_read`, `notification_clicked`, `notification_responded`, `message_impressed`, `message_clicked`, `message_closed`, `message_dismissed` e `message_snoozed`, so com ids no metadata (`docs/05`, secao Eventos). A v2 (21/10/2026) soma `notification_audio_started` e `notification_audio_completed` (rota do audio, uma vez cada); visitas de pagina nao viram evento: vao para `member_page_visits`, so enquanto um fluxo precisa (secao Comunicacao).
 
 No MVP, a avaliacao da aula em formato de reacao (`Nao gostei`, `Gostei`, `Amei`) e persistida junto do progresso autenticado da aula em `lesson_progress.lesson_reactions`, para sobreviver a refresh e futuras telas de CRM. A elegibilidade da avaliacao usa o maior percentual ja alcancado na aula, nao apenas a posicao atual do player.
 
@@ -462,6 +477,10 @@ Dois mecanismos, com papeis diferentes (ver `docs/17-admin-produtor-redesign.md`
 - **Tick de minuto** (implementado na fase 0): `pg_cron` + `pg_net` no Supabase chamam `POST /api/jobs/tick` a cada minuto. Serve para trabalho leve e frequente: lembretes, envios agendados, liberacoes vencidas, rollups horarios pequenos.
 - **Fila de jobs** (Inngest ou Trigger.dev, a partir da fase 1): importacoes, transcricoes, exportacoes, calculo de audiencias e envios em massa, com retomada e retentativas. Nada disso roda dentro do tick.
 
+Excecao decidida em 20/10/2026 (Comunicacao v1; `docs/09`, secao Notificacoes e pop-ups): a notificacao do sino agendada e o segmento dos pop-ups no ar rodam no tick, no job `comunicacao`. A fila de jobs ainda nao esta instalada e o trabalho cabe nas regras do tick: cada notificacao e uma linha pequena (dois ids e uma chave unica por aluno), gravada em lotes de 500, com teto de 20.000 linhas e 3 avisos por rodada, retomavel sem duplicar (o tick cortado continua no seguinte), e o recalculo de quem ve cada pop-up le os dados dos alunos uma vez por rodada (ate 5 pop-ups, cada um a cada 15 minutos). Envio em massa de e-mail, push e WhatsApp continua fora do tick.
+
+A mesma excecao vale para o motor dos fluxos e das notificacoes seguintes (Comunicacao v2, 21/10/2026; `docs/23` §4 e V20): fase 2 do job `comunicacao`, depois do trabalho da v1, com orcamento proprio de 25 s, lotes de 150 tarefas, ate 20 lotes por tick, entrada em lotes de 500 ate 5.000 por tick, tudo idempotente (chave por passo e aluno) e retomavel. Parado, custa 3 leituras indexadas por minuto e nao le os alunos. Os numeros vao para `job_runs.metadata` da execucao do job (`{ tick_run_id, flows }`); o tipo `Job` e o registro nao mudam. Fila nova so se a escala pedir (o relatorio mostra a fila atrasada).
+
 Fluxo do tick:
 
 ```txt
@@ -483,7 +502,7 @@ Codigo:
 
 - `src/app/api/jobs/tick/route.ts`: autenticacao, leitura do corpo e resposta;
 - `src/server/jobs/tick-auth.ts`: validacao do token, modulo puro coberto por `tests/jobs-tick.test.mjs`;
-- `src/server/jobs/registry.ts`: ponto de extensao. `Job = { name, run(ctx) }`; `ctx` traz o cliente administrativo do Supabase, um `AbortSignal` com o prazo do tick, o instante do tick e os ids de `job_runs`. Registrado hoje: `email-outbox` (`src/server/jobs/email-outbox-job.ts`, fila de e-mails transacionais; secao E-mail transacional);
+- `src/server/jobs/registry.ts`: ponto de extensao. `Job = { name, run(ctx) }`; `ctx` traz o cliente administrativo do Supabase, um `AbortSignal` com o prazo do tick, o instante do tick e os ids de `job_runs`. Registrados hoje, nesta ordem: `email-outbox` (`src/server/jobs/email-outbox-job.ts`, fila de e-mails transacionais; secao E-mail transacional) `comunicacao` (`src/server/jobs/communications-job.ts`, notificacoes do sino agendadas, quem ve cada pop-up e, na fase 2, o motor dos fluxos; secao Comunicacao) e, por ultimo, `comunicacao-limpeza-de-arquivos` (`src/server/jobs/communication-media-job.ts`: uma rodada por dia, a partir das 06:53 UTC, tira do Storage os arquivos da Comunicacao sem uso ha 30 dias, ate 500 por rodada; `docs/22` §4.6);
 - `src/server/jobs/run-tick.ts`: executa os jobs em sequencia com orcamento de 45 s; um job que lanca erro ou estoura o prazo vira `failed` sem derrubar os demais; jobs que nao couberem no prazo ficam para o proximo tick (`skipped`);
 - `src/server/jobs/job-runs.ts`: gravacao de `public.job_runs`.
 
@@ -495,7 +514,7 @@ Regras para um job novo no registro:
 - recomputos pesados (por exemplo `student_facts`) rodam a noite em agendamento proprio, nunca por minuto no banco primario;
 - dead-letter apos 3 falhas e retentativas com `attempts` ficam com o job que precisar delas (a coluna ja existe em `job_runs`).
 
-Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias. Na mesma linha, `public.prune_personal_data()` roda as 06:23 UTC (`bunker707-personal-data-prune`, migracao `202610170004`) e anonimiza `webhook_events` (12 meses) e `email_outbox` (90/180 dias) e apaga `email_webhook_events` (90 dias): regras em `docs/06`, secao LGPD.
+Retencao: `public.prune_job_history()` roda diariamente as 06:17 UTC (`bunker707-jobs-history-prune`) e apaga `job_runs` com sucesso apos 30 dias, com falha apos 90 dias, e `cron.job_run_details` apos 7 dias. Na mesma linha, `public.prune_personal_data()` roda as 06:23 UTC (`bunker707-personal-data-prune`, migracao `202610170004`) e anonimiza `webhook_events` (12 meses) e `email_outbox` (90/180 dias) e apaga `email_webhook_events` (90 dias): regras em `docs/06`, secao LGPD. Depois, as 06:41 UTC, `public.prune_communication_history()` (`bunker707-communication-prune`, migracao `202610200001`, refeita pela `202610200002`) apaga notificacoes e estados de pop-up com mais de 24 meses (menos os de pop-up ainda no ar ou pausado) e, desde 21/10/2026, tarefas terminadas, passagens de fluxos encerrados ou excluidos e visitas de pagina com mais de 24 meses.
 
 Configuracao por ambiente (passos completos no topo de `supabase/migrations/202610100001_jobs_cron.sql`):
 
@@ -523,7 +542,8 @@ Regras:
 Pontos de disparo (`src/server/students/access.ts`, a mesma rotina do admin e dos webhooks de venda):
 
 - **boas-vindas** (`welcome`): na primeira vez que a conta nasce. Numa venda por webhook, sempre; pelo admin (Adicionar aluno, importacao), so quando a equipe escolheu convite ou senha temporaria, porque "Nao enviar agora" significa isso. O texto diz com qual e-mail entrar e como criar a senha conforme a entrega: convite (chega outro e-mail com o link), senha temporaria (a equipe passa) ou nada (usar "Esqueci minha senha" na tela de entrar);
-- **acesso liberado por compra** (`purchase`): quando `grantProductAccess` vem de `source = "webhook"` e abre um acesso que estava fechado (novo, revogado, suspenso ou expirado). Um e-mail por compra, com os produtos abertos e o link de cada um (`/conteudo/<id>`). Prazo a mais num acesso ja aberto e acoes da equipe (liberar, em massa, importacao) nao avisam o aluno; envio em massa a partir da lista de alunos fica para o modulo Comunicacao.
+- **acesso liberado por compra** (`purchase`): quando `grantProductAccess` vem de `source = "webhook"` e abre um acesso que estava fechado (novo, revogado, suspenso ou expirado). Um e-mail por compra, com os produtos abertos e o link de cada um (`/conteudo/<id>`). Prazo a mais num acesso ja aberto e acoes da equipe (liberar, em massa, importacao) nao avisam o aluno; envio em massa a partir da lista de alunos fica para o modulo Comunicacao (a v1 de 20/10/2026 manda so para o sino e o pop-up; e-mail e um canal da proxima etapa, `docs/22` §6);
+- **enviada em seu nome** (`sent_as`, desde 21/10/2026, `docs/23` §1.6): para a pessoa da equipe escolhida em "Quem envia" quando uma notificacao sai (agora, agendada ou aprovada) ou um fluxo e ativado, aprovado ou ganha um remetente novo. Disparado por `src/server/communications/sender-notices.ts` (`notifySendersOnBehalf`) depois da resposta (`after()`), nunca para quem publicou nem para quem saiu da equipe; template `templates/sent-as.ts`; chaves `sent-as:campaign:<aviso>:<pessoa>` e `sent-as:flow:<fluxo>:<pessoa>`. E para a equipe, nao para alunos: nao e envio em massa.
 
 Links nos e-mails usam `NEXT_PUBLIC_SITE_URL`; sem ela, a origem do request que disparou (`redirectTo` do admin ou `siteOrigin` informado pelo webhook); por ultimo, `http://localhost:3000`.
 
@@ -549,9 +569,214 @@ pg_cron 'bunker707-personal-data-prune' (06:23 UTC) -> public.prune_personal_dat
 Codigo:
 
 - `src/server/email/types.ts`, `config.ts`, `providers/resend.ts`, `outbox-rules.ts`, `webhook-signature.ts`, `webhook-events.ts`, `templates/*`: modulos puros, cobertos por `tests/email-*.test.mjs`;
-- `src/server/email/outbox.ts` (fila no banco), `provider.ts` (escolha pelo ambiente), `transactional.ts` (os dois e-mails), `src/server/jobs/email-outbox-job.ts` e `src/app/api/webhooks/resend/route.ts`: cobertos por `tests/integration/email-transacional.test.mjs` com o banco local e o provedor falso de `tests/support/integration-email-provider.mjs`. Nenhum teste envia e-mail de verdade.
+- `src/server/email/outbox.ts` (fila no banco), `provider.ts` (escolha pelo ambiente), `transactional.ts` (os dois e-mails do aluno; o `sent_as` da equipe sai por `src/server/communications/sender-notices.ts`), `src/server/jobs/email-outbox-job.ts` e `src/app/api/webhooks/resend/route.ts`: cobertos por `tests/integration/email-transacional.test.mjs` com o banco local e o provedor falso de `tests/support/integration-email-provider.mjs`. Nenhum teste envia e-mail de verdade.
 
 Variaveis: `EMAIL_PROVIDER`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `EMAIL_FROM`, `EMAIL_REPLY_TO`, `EMAIL_DAILY_LIMIT` e `NEXT_PUBLIC_SITE_URL` (`.env.example`; tabela em `docs/06-seguranca-operacao.md`, secao E-mail transacional).
+
+## Comunicacao (sino e pop-ups)
+
+### Implementado (20/10/2026): Comunicacao v1
+
+Produto, regras e decisoes em `docs/22`; tabelas em `docs/05` (secao Comunicacao); seguranca em `docs/06` (secao Comunicacao); admin em `docs/17` §1.8. Migracao `202610200001_communication_v1.sql`. Nenhuma variavel de ambiente nova.
+
+Modulo `src/server/communications/`:
+
+- modulos puros (sem `server-only`, carregados direto pelo Node nos testes unitarios e importados pelo editor do admin): `audience-model.ts` (regras do segmento, grupos E/OU com um nivel, `evaluateAudience`, `normalizeAudience`, `describeAudience` com a frase "Alunos que ...", conversao dos segmentos salvos de Alunos), `schemas.ts` (zod do rascunho, do segmento e das acoes, com as mensagens em portugues; `publishProblems` para o que so vale ao publicar), `campaign-model.ts` (tipos, limites fixos, situacao, acoes por situacao e permissao, `publishDecision` acima de 500, agenda no fuso de Sao Paulo, frase de revisao, `pickPopup` e `popupEventPatch`) e `notification-model.ts` (contratos da API do sino, titulo das notificacoes de comentario, mencao, trecho, cursor e forma de onda);
+- `db.ts` (cliente de servico, `CommunicationError` com status HTTP, `NoticeFieldError` para erro de campo no formato do zod, deteccao da migracao pendente), `store.ts` (colunas explicitas, gravacao condicional por `updated_at` e situacao com 409, reserva das notificacoes vencidas, gravacao em lotes de 500, estados do pop-up, RPCs dos numeros), `audience-facts.ts` (os dados de cada aluno com as mesmas leituras de `src/server/students/store.ts` e a mesma conta de `buildStudentIndex`, sem a equipe, mais os comentarios por janela), `audience.ts` (quem esta no segmento e a amostra de 5 nomes);
+- `dispatch.ts` (`dispatchInboxCampaign`, `refreshPopupDeliveries`, `processCommunications`), `actions.ts` (Server Actions do admin, todas por `runAdminAction` e com `admin_audit_log`), `queries.ts` (lista, detalhe, os quatro numeros e as opcoes do editor), `cache.ts` (tag `communications` da lista de pop-ups no ar), `media.ts` (audio), `inbox.ts` e `popups.ts` (lado do aluno), `comment-notifications.ts` (resposta e mencao) e `route-support.ts` (resposta sem cache e eventos do aluno);
+- `src/server/jobs/communications-job.ts`: job `comunicacao`, registrado depois do `email-outbox` (secao Jobs).
+- Limpeza dos arquivos sem uso (23/10/2026, migracao `202610240001`, `docs/22` §4.6): `media-refs.ts` (os lugares da Comunicacao no Storage e uma funcao por tipo de conteudo que devolve os arquivos que ele usa, a mesma do salvar), `media-cleanup-model.ts` (24 h, 30 dias, o dia da rodada, o plano e a reserva: `orphanMarkUploadStep`), `media-cleanup.ts` (a rodada, que reserva, remove e so entao tira a marca; `forgetOrphanMark`, chamado ANTES de cada envio com nome pelo conteudo, inclusive pelo `beforeUpload` do `persistImageAsset`; e `loadTemplateMediaUse`, que le os modelos pelo jsonb cru desde 25/10/2026) e `src/server/jobs/communication-media-job.ts` (job `comunicacao-limpeza-de-arquivos`, o ultimo do registro).
+- Modelos (25/10/2026, migracao `202610250001`, `docs/28`): `template-model.ts` (puro, sem `@/` nem `server-only`: tipos do payload versao 1, limites, textos, schemas afrouxados do rascunho e estritos do payload, construtores, leitura parte por parte com `TEMPLATE_UPGRADES`, `noticeStartOfTemplate`, `applyDesignTemplatePatch`, resumo, nomes e mapa de erros), `template-store.ts` (a tabela, com a guarda de versao de `updateCampaign`), `template-queries.ts` (lista, detalhe, `prepareNoticeStart` com ids novos, `prepareTemplateEditor` com os ids gravados, recentes do "Novo aviso"), `template-actions.ts` (`"use server"`, tudo por `runAdminAction("messaging.write")`, nenhuma chama `revalidatePath`), `design-checks.ts` (as conferencias de arquivo do design, tiradas de `actions.ts`, com a lista de designs conhecidos e sem apagar; `videoPathInUse` e `mayRemoveRefusedVideo` do fim do envio) e `team-checks.ts` (quem envia na equipe). Telas em `src/components/admin/v2/communication/templates/` (aba, dialogos, miniaturas, "Novo aviso"), `template-editor-model.ts`, `template-kind-choice.tsx`, `design-template-editor.tsx` e `popup-free/free-templates-panel.tsx`; rotas `src/app/admin/(v2)/comunicacao/modelos/`.
+
+Rotas:
+
+- aluno (todas com `requireApiUser` e `Cache-Control: private, no-store`; as que recebem corpo usam `readBoundedJson` de 8 KB): `GET /api/notifications` (`?filter=all|unread`, `?cursor=`), `GET /api/notifications/summary` (`?popup=1` so na home), `POST /api/notifications/read` (`{ seen: true }`, `{ ids }` ou `{ all: true }`), `POST /api/notifications/[id]/click` (sem corpo, aceita `sendBeacon`), `POST /api/notifications/[id]/response` e `POST /api/popups/[id]/events` (aceita `text/plain`, como o `sendBeacon` manda);
+- admin: `POST /api/admin/communications/audio` (`requireApiRole("messaging.write")`, multipart, `maxDuration` 60). O resto do admin sao Server Actions: `saveNoticeDraft`, `previewNoticeAudience`, `publishNotice`, `approveNotice`, `rejectNotice`, `cancelScheduledNotice`, `pauseNotice`, `resumeNotice`, `endNotice`, `withdrawNotice`, `duplicateNotice`, `deleteNotice`, `sendNoticeTestToMe` e `uploadNoticeImage`;
+- telas: `/admin/comunicacao/avisos` (lista), `/avisos/novo` e `/avisos/[id]` (editor ou relatorio), atras de `requirePageArea("comunicacao")` (`messaging.write`). Lado do aluno: `MemberNotificationsMenu` no topo do `AppShell` e `MemberPopupHost` montado uma vez, ligado so em `/` e fora do modo "ver como" (`src/components/member/notifications/`).
+
+```txt
+Equipe (messaging.write) -> Server Action -> runAdminAction -> campaigns (rascunho, updated_at = versao)
+  publicar -> conta o segmento (audience-facts + audience-model; 0 alunos = 422) na versao lida (grava so ela, senao 409)
+           -> publishDecision: sem messaging.publish ou > 500 sem messaging.publish_large -> pending_approval
+           -> com messaging.publish_large (ou aprovado): approved_at
+  editar/retomar pop-up no ar -> publishDecision de novo; sem permissao -> 403 (sem pedido)
+  notificacao agora   -> sending -> dispatchInboxCampaign na propria acao -> notifications (lotes de 500) -> sent
+  notificacao agendada -> scheduled
+  pop-up              -> active -> refreshPopupDeliveries -> campaign_deliveries -> invalidateLivePopups
+pg_cron tick (* * * * *) -> POST /api/jobs/tick -> job comunicacao (processCommunications)
+  1. claimDueInbox: ate 3 avisos (scheduled vencido, ou sending com reserva vazia ou de mais de 2 min), update condicional
+     -> dispatchInboxCampaign: so quem ainda nao recebeu, ate 20.000 por rodada; cortado -> solta a reserva;
+        falha -> attempts + 1, a terceira cancela com last_error
+     -> sem approved_at e o segmento passou de 500: volta para pending_approval (sem data), nada sai
+  2. fetchPopupsToRefresh: ate 5 pop-ups active (no ar ou com janela futura) sem recalculo desde o comeco da faixa de
+     15 min (desde a v3b-2 em :07, :22, :37 e :52, popupRefreshBandStart, docs/29 §4.7; antes :00, :15, :30, :45; os
+     fluxos continuam nas horas redondas) -> refreshPopupDeliveries (grava so se updated_at nao mudou; senao limpa a
+     hora); falha -> grava so a hora (tenta na faixa seguinte)
+  fatos dos alunos lidos uma vez por rodada e so se houver trabalho; sem a migracao: registra e termina
+Resposta a comentario (aula ou Comunidade) -> after() -> notifyCommentReply -> notifications (comment_reply / comment_mention)
+Aluno: AppShell (depois da hidratacao) -> GET /api/notifications/summary -> numero do sino (60 s em memoria, falha tambem)
+  abre o sino (painel baixado ao chegar perto) -> GET /api/notifications -> POST read { seen: true } (so o que aparece)
+  home -> GET /api/notifications/summary?popup=1 (1,5 s; unico pedido do resumo na home) -> pop-ups no ar
+       (unstable_cache 60 s, tag communications) + campaign_deliveries do aluno + ultimo pop-up visto -> pickPopup
+       -> janela baixada so com pop-up -> POST /api/popups/[id]/events
+pg_cron 'bunker707-communication-prune' (06:41 UTC) -> public.prune_communication_history() (24 meses; pop-up no ar fica)
+```
+
+Invariantes:
+
+- nada da Comunicacao e lido pelo navegador: RLS ligado e nada para `anon`/`authenticated`; as rotas usam o `user_id` da sessao e devolvem 404 para o que nao e do aluno;
+- a lista de pop-ups no ar e o unico cache compartilhado e so tem os avisos; o estado de cada aluno e lido a cada pedido em duas consultas pequenas, e o numero do sino nunca entra no carregamento da pagina (`getAppShellData` nao mudou);
+- notificacao de aviso nao copia o conteudo: o sino junta o aviso por chave estrangeira e esconde aviso excluido, nao enviado (o teste da equipe aparece) ou retirado;
+- link do botao conferido ao gravar (`isSafeHeroCtaHref` no schema), ao ler no servidor e ao desenhar; imagem e audio so de `https` (ou do Supabase na propria maquina);
+- toda escrita do admin confere a versao lida (`updated_at`) e a situacao no proprio UPDATE; o gatilho `touch_campaign_version` nao muda a versao quando so a contagem do segmento muda;
+- deploy antes da migracao nao quebra: o sino responde vazio, marcar como vista ou lida nao faz nada, clique, resposta e eventos do pop-up respondem 404, o job registra e termina e as telas do admin mostram o aviso de atualizacao do banco.
+
+### Implementado (21/10/2026): Comunicacao v2
+
+Produto, regras e decisoes em `docs/23`; tabelas em `docs/05` (secao Comunicacao v2); seguranca em `docs/06` (secao Comunicacao v2); admin em `docs/17` §1.8. Migracao `202610200002_communication_v2.sql`. Nenhuma variavel de ambiente nova e nenhum servico novo.
+
+Modulos novos ou mudados:
+
+- puros (sem `server-only`, imports relativos, testados direto pelo Node): `message-meta.ts` (catalogo de icones e cores, tempo no sino e `computeExpiresAt`, `urgencyLabel`, icone da escola), `flow-model.ts` (limites fixos `FLOW_LIMITS`, `decideFlowTask`, `dueFromAnchor`, `childTasksOf`, `validateFlowTree`, `validateFlowGoal`, seguintes ↔ arvore, `watchedPageKeysOf`), `flow-schemas.ts` (zod do fluxo e das seguintes), `audience-model.ts` (as regras `message`, `page_visit` e `access_gained`), `src/server/member-area/page-visit-model.ts` (chaves das paginas) e, no admin, `flows-view-model.ts`, `flow-templates-model.ts` e `follow-ups-view-model.ts`;
+- servidor: `flow-store.ts` (leituras, sondagens, RPCs do motor e `saveFlowTree`, a ordem do salvar), `flow-facts.ts` (fatos de um lote, com cache por tick), `flow-engine.ts` (`processFlows`), `facts-loader.ts` (leitor de fatos por chave dividido pelas duas fases do job), `flow-actions.ts` e `flow-queries.ts` (as telas de Fluxos), `sender-notices.ts` (e-mail `sent_as`), `audience-facts.ts` (linhas das notificacoes citadas em regras e fatos por lista de alunos, em pedacos de 150), `inbox.ts` (fim, "abriu", audio, quem envia ao vivo, `shown`), `actions.ts` (Quem envia, tempo no sino, seguintes) e `src/server/member-area/page-visits.ts` (`trackMemberPageVisit`, chaves acompanhadas em `unstable_cache`).
+
+Rotas novas: `POST /api/notifications/[id]/audio` e `POST /api/page-visits` (as duas com `requireApiSessionUser`, que le so as claims do JWT); `POST /api/notifications/read` aceita `shown`. Telas novas: `/admin/comunicacao/fluxos`, `/fluxos/novo` e `/fluxos/[id]`.
+
+```txt
+Equipe -> notificacao com seguintes (saveNoticeDraft + saveNoticeFollowUps) ou fluxo (saveFlow)
+  -> saveFlowTree: conteudo (versao nova se o fluxo esta no ar) + RPC 7.5 (arvore com versao, watched_page_keys)
+  -> publicar a notificacao / ativar o fluxo -> RPC 7.13 (conteudo sent antes do fluxo active) -> e-mail sent_as
+pg_cron tick -> POST /api/jobs/tick -> job comunicacao
+  fase 1: processCommunications (v1)                     } um leitor de fatos por chave (createFactsLoader)
+  fase 2: processFlows (25 s)                            }
+    0. 3 sondagens (tarefa vencida de fluxo ativo, entrada pendente, seguintes esperando o aviso)
+    1. seguintes: RPC 7.3 depois de o aviso estar sent (e o complemento de uma seguinte nova)
+    2-3. construtor: entrada inicial e continua na faixa de 15 min (RPC 7.2, lotes de 500)
+    4. lotes de 150: RPC 7.1 (reserva) -> RPC 7.9 (fatos) -> decideFlowTask (puro) -> RPC 7.4 (aplica:
+       envio uma vez, limite de 3 por dia e 1 h, filhos); erro de dado -> divide ao meio; falha antes -> RPC 7.15
+    5. varredura do Objetivo (RPC 7.6)   6. conclusao (RPC 7.13)
+    -> job_runs.metadata { tick_run_id, flows }
+Aluno: pagina da area -> trackMemberPageVisit (after(), so chave acompanhada, sem equipe, sem pre-carregamento)
+  detalhes do produto / Comprar -> sendBeacon POST /api/page-visits
+  sino: primeiro play -> POST /audio started (substitui POST /read {ids}); progresso por fetch ou beacon
+```
+
+Invariantes:
+
+- nada novo e lido pelo navegador: RLS ligado, nada para `anon`/`authenticated`, RPCs so com `service_role`;
+- o motor so envia o que a RPC de aplicacao confirma sob trava (fluxo, passo, versao e equipe relidos), uma vez por (passo, aluno), dentro do limite diario;
+- nenhum embed entre `campaigns` e `communication_flows` sem a dica da FK (`PGRST201` derrubaria o job a cada minuto); teste confere;
+- a 0002 vai antes do deploy que a usa: nao ha caminho de volta para as colunas da v1 (sem ela, o sino responde vazio, o job registra "202610200002 pendente" e termina, e envios e cliques nao funcionam).
+
+### Implementado (22/10/2026): Comunicacao v3a
+
+Produto, regras e decisoes em `docs/24`; tabelas em `docs/05` (secao Comunicacao v3a); seguranca em `docs/06` (secao Comunicacao v3a). Migracao `202610220001_communication_v3a.sql` (aditiva, toda pelo MCP). Nenhuma variavel de ambiente nova e nenhum servico novo.
+
+Modulos novos ou mudados:
+
+- puros: `interactions-model.ts` (catalogo das reacoes, `pollSchema`, `parsePoll`, `normalizePollChoice`, resultado da enquete, `shouldRecordInteraction`), `student-write-limit.ts` (`takeStudentWrite`: 30 escritas por minuto por aluno, por processo), `campaign-model.ts` (`availableNoticeActions` com `{ popupRepeat, recipients }`, `noticeRecipients`, `pickPopup` com as bases do "Mostrar de novo"), `schemas.ts` (`sentNoticeLockedProblems`, corpos das rotas novas), `notifications-model.ts` (cartao clicavel, nomes, enquete, Mudar resposta, `openingPlan`, `shouldPrefetchOnIntent`, constantes `INBOX_*`);
+- servidor: `inbox.ts` (a lista e os numeros em uma RPC cada; `setNotificationHidden`, `reactToNotification`, `voteOnNotificationPoll`, `respondToNotification` com troca), `actions.ts` (editar a enviada, `deleteNotice` por situacao, `reshowPopup`, `closeNoticePoll`), `queries.ts` (citacoes, interacoes e `reshowable` no detalhe);
+- navegador: `notifications-client.ts` guarda a primeira pagina do sino numa memoria do modulo (5 s / 60 s / 10 min) e a busca na intencao (`prefetchInbox`), junto com o codigo do painel.
+
+Rotas novas: `POST /api/notifications/[id]/reaction`, `/poll` e `/hide`; `/response` aceita a troca. Toda rota do sino e o beacon do pop-up usam `requireApiSessionUser` (claims do JWT, sem ida ao Auth em producao).
+
+```txt
+Aluno: mouse 120 ms / foco pelo Tab / toque no sino -> codigo do painel + GET /api/notifications (uma vez)
+  -> requireApiSessionUser (claims) -> RPC communication_inbox_page (pagina, pessoas, numeros, contagem da
+     enquete so para quem votou ou encerrada) -> memoria do navegador (reabre na hora; > 5 s atualiza por tras)
+  reagir / votar / excluir / responder -> takeStudentWrite (30/min) -> communication_visible_notifications
+     (a mesma regra da lista) -> escrita (ou RPC 5.1 / 5.2) -> evento ate 20 por linha
+Equipe: Editar a enviada -> saveNoticeDraft (versao, campos travados, publish/500, seguintes) -> so as colunas editaveis
+  Excluir -> withdrawSentNotice + exclusao logica | Mostrar de novo -> RPC 5.3 (conta, 500, aplica)
+```
+
+Invariantes:
+
+- a regra de "aparece no sino" existe so em SQL (`communication_visible_notifications`): lista, numeros, marcacoes e cada conferencia de uma linha usam a mesma; teste de paridade;
+- editar a enviada nunca roda `publishProblems`, nunca move o fluxo das seguintes e nunca recalcula pop-ups;
+- sem polling (C11): pedidos do sino so na intencao ou na abertura, no maximo um por abertura, nenhum ao fechar;
+- a 0003 vai antes do deploy que a usa (sem ela, o sino responde vazio e as escritas novas 404); a migracao sozinha nao atrapalha o app da v2.
+
+### Implementado (22/10/2026): Comunicacao v3b-1
+
+Produto, regras e decisoes em `docs/25`; tabelas em `docs/05` (secao Comunicacao v3b-1); seguranca em `docs/06` (secao Comunicacao v3b-1). Migracao `202610220003_communication_v3b1.sql` (aditiva, toda pelo MCP, aplicada antes do merge). Nenhuma variavel de ambiente nova, nenhum servico novo, nenhum job novo nem fase nova do tick.
+
+Modulos novos ou mudados:
+
+- puros: `popup-display-model.ts` (chave da pagina, padroes e excecoes, formacao -> cursos, colunas <-> configuracao, `frequencyVerdict`, `showNext`, `decideShow`, `planPopups`, `pagesCovering`, dia de Sao Paulo), `popup-sentences.ts` (todas as frases da equipe), `popup-editor-model.ts` (os dois cards), `popup-host-model.ts` (o que o navegador arma e o que bloqueia), `src/lib/lesson-media-signal.ts` (o player da aula lido do DOM na hora); `campaign-model.ts` perdeu `pickPopup`, `reshowSkipped`, `LivePopup` e `POPUP_RULES.delayMs/minHoursBetween`;
+- servidor: `popups.ts` (lista no ar em cache com as regras, `getPopupsAnswer`, `showPopup`, `recordPopupEvent`, o caminho da v1), `popup-store.ts` (leituras, formacoes, RPC da abertura), `actions.ts` (`withPopupSettings`, teto de 50, Mostrar de novo em qualquer modo), `queries.ts` (`placementLabel`, `popupMode`, `popupNames`, `opensOnLesson`);
+- navegador: `notifications-client.ts` ganha a memoria dos pop-ups (1 minuto, mesmo dono do sino); `member-popup-host.tsx` vira uma fila por visualizacao de pagina, montada em toda pagina do aluno com chave; `lesson-experience.tsx` ganha cinco insercoes (os sinais do player).
+
+Rotas: `GET /api/notifications/summary?page=<chave>` (mapa grosso e plano), `POST /api/popups/[id]/show` (novo) e `POST /api/popups/[id]/events` com `via`; `?popup=1` e o `impressed` da v1 continuam para abas antigas.
+
+```txt
+Aluno abre uma pagina -> topo: GET /api/notifications/summary?page=<chave> (so se o numero ou a memoria passou de 1 min)
+  -> lista no ar (cache 60 s) -> mapa grosso; pagina coberta -> 1 leitura das linhas do aluno -> plano (sem conteudo)
+  host: arma pelo plano (ou pela conclusao da aula) -> fila, um de cada vez -> bloqueios (player, tela cheia, camada)
+  -> baixa a janela -> POST /api/popups/[id]/show -> decideShow -> RPC communication_record_popup_impression
+     (compare-and-set em updated_at) -> conteudo + next -> abre; resultado -> beacon /events (com via)
+Equipe: salvar -> withPopupSettings -> popup_* + popup_repeat juntos | publicar/aprovar/retomar -> teto de 50
+  Mostrar de novo -> RPC communication_reshow_popup (qualquer modo; clique zera so em "never")
+```
+
+Invariantes:
+
+- conteudo do pop-up so no `show`, depois de conferir e gravar; o mapa que vai a todo aluno nunca tem id de produto;
+- as regras de frequencia moram so em `popup-display-model.ts` (servidor, navegador e testes); o SQL so guarda a escrita atomica e os formatos;
+- sem polling (C11): nenhuma consulta por aluno nas paginas sem pop-up e nenhum pedido dentro do minuto; nada roda em intervalo alem da conferencia de 1 s enquanto algo bloqueia;
+- o pop-up nunca pausa nem retoma o video da aula e nunca abre com o nosso player tocando;
+- a 0003 vai antes do merge (sem ela, o job `comunicacao` do tick falha); a migracao sozinha nao atrapalha o app da v3a.
+
+### Implementado (22/10/2026): Design do pop-up
+
+Produto, regras e decisoes em `docs/26`; tabelas em `docs/05` (secao Design do pop-up); seguranca em `docs/06` (secao Design do pop-up). Migracao `202610230001_communication_popup_design.sql` (aditiva, toda pelo MCP, aplicada antes do merge). Nenhuma variavel de ambiente nova, nenhum servico novo, nenhum job novo. Video e fontes no Supabase Storage (nunca no servidor do app).
+
+Modulos novos ou mudados:
+
+- puros: `popup-design-model.ts` (tipos v1, limites, fontes prontas, modelos, forma canonica, sincronia com botao/audio, nome acessivel, escala `cqw`, CSS, contraste WCAG, regra das URLs do Storage; **sem zod**), `popup-design-schema.ts` (zod v1, `parsePopupDesign`, regras design x conteudo), `popup-design-editor-model.ts` (as pecas do card Design), `popup-design-styles.ts` (os estilos do cartao do aluno);
+- servidor: `popup-fonts.ts` (resolver de fontes, biblioteca, conferencia ao salvar/publicar, url do video recalculada), `popup-media.ts` (sniffers de video e fonte, leitura de 64 bytes, gravacao da fonte), `popup-design-actions.ts` (envio de video, biblioteca), rota `POST /api/admin/communications/popup-fonts`; `actions.ts`, `store.ts`, `queries.ts`, `popups.ts`, `popup-store.ts`, `cache.ts` (chave `design1`) e `notification-model.ts` (`PopupItem.design/fonts`);
+- navegador: `src/components/member/notifications/popup-design/` (cartao, blocos, midia, carregador de fontes), `MemberPopupCard` despacha Padrão ou Personalizado; `src/components/admin/v2/communication/popup-design/` (o card Design do editor).
+
+```txt
+Equipe: card Design -> video: startPopupVideoUpload -> PUT no endereco assinado (Storage) -> finishPopupVideoUpload (64 bytes)
+        fonte: POST /api/admin/communications/popup-fonts -> communication_fonts + bucket
+        salvar/publicar -> popupDesignSchema (zod) -> withCheckedDesign (design x conteudo, fontes, url do video) -> popup_design
+Aluno:  lista no ar (cache 60 s, design1) -> parsePopupDesign + url do video + fontes resolvidas (1 consulta)
+        -> POST /api/popups/[id]/show -> PopupItem { design, fonts } -> MemberPopupCard -> PopupDesignCard
+        -> FontFace do Storage; <video> so sem menos movimento / Save-Data
+```
+
+Invariantes: o Padrão nao muda (mesmo HTML, mesma resposta do `show`); a notificacao nunca tem design; zod no salvar e no ler; nada de HTML ou CSS em texto; video e fonte so dos nossos buckets; o cartao do aluno nao importa o zod (o JS inicial do aluno nao cresce; o cartao fica no pedaco preguicoso da janela).
+
+### Implementado (23/10/2026): Comunicacao v3b-2
+
+Produto, regras e decisoes em `docs/29`; tabelas em `docs/05` (secao Comunicacao v3b-2); seguranca em `docs/06` (secao Comunicacao v3b-2). Migracao `202610260001_communication_v3b2.sql` (aditiva, cinco secoes pelo MCP, a 5 sozinha; aplicada antes do merge). Nenhuma variavel de ambiente nova, nenhum servico novo, nenhum job novo nem fase nova do tick.
+
+Modulos novos ou mudados:
+
+- puros: `popup-display-model.ts` (quatro momentos, `popupWindowSoon`, plano e mapa com 24 h a frente, `decideShow` com `not_started`, produtos do primeiro acesso), `popup-first-access.ts` (candidato, marca, recalculo), `src/lib/course-completion.ts` (a virada do curso, `courseCompletedOf`), `popup-report-model.ts` (o relatorio), `popup-host-model.ts` (hora marcada, `reconcileClockOpenings`, `rearmAfterNotStarted`, `createArmedClock`, `bridge_pending`), `src/lib/lesson-embed-bridge.ts` + `lesson-embed-origins.ts` (a ponte), `src/lib/lesson-media-signal.ts` (`bridge`, `readable`, `waitLessonFullscreenEnd`);
+- servidor: `dispatch.ts` (o recalculo do "No primeiro acesso" com a marca), `store.ts` (`fetchFirstAccessDeliveries`, `markFirstAccessDeliveries`, `fetchPopupReport`, faixas `popupRefreshBandStart` em :07/:22/:37/:52), `popup-store.ts` (`fetchCourseCompletionFacts`), `popups.ts` (409 `not_started`, conferencia do curso no `show`), `actions.ts` (trava do primeiro acesso, `PublishedNotice.popup`), `queries.ts` (`getPopupReport`, cache de 60 s), `lesson-access.ts` (`publishedLessonIds`), `platform-store.ts` (`replaceCompletedLessonsWithPrevious`), `api/progress/lessons` (`courseCompleted`);
+- navegador: `member-popup-host.tsx` (despertador pela hora de parede, plano mais novo com a pagina aberta, segunda tentativa), `notifications-client.ts` (`subscribePopupMemory`, `reason` do 409), `lesson-experience.tsx` (o iframe por estado, a ponte, o fim que conclui, `persistLessonProgressResult`), `use-lesson-embed-bridge.ts`; admin: o card "Quando e onde aparece" com quatro momentos e o `PopupReportSection`/`PopupReportLoader` na pagina do aviso.
+
+```txt
+Aluno parado na pagina (plano com startsAt ate 24 h antes) -> host arma a hora marcada: startsAt + 2 s + sorteio 0-4 s
+  -> despertador <= 30 s pela hora de parede (+ visibilitychange/pageshow/focus) -> fila -> POST /api/popups/[id]/show
+  -> antes da hora: 409 not_started (nextAt) -> uma segunda tentativa; na hora: decideShow -> RPC -> conteudo
+Tick (faixas :07/:22/:37/:52) -> refreshPopupDeliveries -> first_login: candidatos + marca first_access_at; sem marca sai
+Aula: PUT /api/progress/lessons -> replaceCompletedLessonsWithPrevious (o "antes" do CAS) -> { courseCompleted: true } so na virada
+  -> host arma course_completed -> show confere o curso no banco
+Aula com Bunny/Vimeo/Mux: iframe <-> postMessage (origens exatas, getPaused) -> play/pause/ended/tempo -> progresso e pop-up
+Equipe: pagina do pop-up -> Suspense -> getPopupReport (cache 60 s) -> RPC communication_popup_report (indice parcial)
+```
+
+Invariantes:
+
+- o conteudo do pop-up so no `show`; o 409 `not_started` so para quem esta no segmento;
+- quem e "aluno novo" e decidido no recalculo (servidor); o navegador nunca se declara novo;
+- sem polling (C11): nenhum pedido em laco; o despertador e a conferencia ao voltar so leem o relogio; a hora marcada vem no plano de sempre;
+- a ponte nunca usa `*`, SDK de fora nem origem nova na CSP; sem resposta ao `getPaused`, a aula fica como antes;
+- a funcao do relatorio conta so aluno com linha vista, nunca mais que a linha e nunca a equipe; o aluno nao grava linhas de avisos no historico;
+- a 0026 vai antes do merge (sem ela, o job `comunicacao` do tick falha); nao publicar os momentos novos com o app de antes no ar (R1).
 
 ## Deploy
 
