@@ -191,6 +191,13 @@ test.describe("produtor", () => {
     await expect(mostrarLink).not.toBeChecked();
     await expect(fechar.getByText(SEM_O_LINK, { exact: true })).toBeVisible();
 
+    // Opacidade ao lado da cor: o X a 50 % vira "#ffffff80" no texto da cor (e e isso que fica gravado).
+    const opacidadeDoX = fechar.getByLabel("Cor do X: opacidade", { exact: true });
+    await expect(opacidadeDoX).toHaveValue("100");
+    await opacidadeDoX.fill("50");
+    await opacidadeDoX.blur();
+    await expect(fechar.locator("#popup-design-x-cor")).toHaveValue("#ffffff80");
+
     // As duas previas (celular e computador) mostram o titulo novo nas cores escolhidas e o botao em degrade.
     const previa = page.getByRole("region", { exact: true, name: "Prévia" });
     for (const aparelho of ["celular", "computador"]) {
@@ -243,6 +250,7 @@ test.describe("produtor", () => {
       /\/storage\/v1\/object\/public\/content-assets\/communications\/images\/[a-f0-9]{24}\.webp$/
     );
     expect(gravado.design?.links).toEqual({ color: "#a1a1aa", showDismiss: false });
+    expect(gravado.design?.close.color).toBe("#ffffff80");
     const titulo = gravado.design?.blocks.find((block) => block.type === "heading") as { lines: { paint: { color: string } | null; text: string }[] };
     expect(titulo.lines).toEqual([
       { paint: { color: COR_1.hex, kind: "solid" }, size: null, text: LINHA_1 },

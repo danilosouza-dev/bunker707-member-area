@@ -286,6 +286,8 @@ export const POPUP_DESIGN_COPY = {
     angle: "Ângulo",
     from: "De",
     invalid: "Use uma cor no formato #RRGGBB.",
+    /** Nome acessivel do numero ao lado da cor ("{rotulo}: opacidade"); sem rotulo visivel, para nao se confundir com a Opacidade do Livre. */
+    opacity: "opacidade",
     picker: "seletor de cor",
     placeholder: "#RRGGBB",
     to: "Para"

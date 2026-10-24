@@ -22,6 +22,34 @@ export const POPUP_DESIGN_VERSION = 1 as const;
 export const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 export type HexColor = string;
 
+/** A opacidade de uma cor em % (0 a 100), arredondada: 6 digitos (ou cor invalida) = 100. */
+export function alphaPercentOf(hex: HexColor): number {
+  if (!HEX_COLOR_PATTERN.test(hex) || hex.length !== 9) {
+    return 100;
+  }
+
+  return Math.round((Number.parseInt(hex.slice(7), 16) / 255) * 100);
+}
+
+/**
+ * A cor com a opacidade em % (0 a 100, fora disso encosta no limite): os dois digitos do alfa no fim da cor de 6
+ * digitos; 100 % devolve so os 6 digitos (a forma canonica nunca leva "ff"). Cor invalida volta como veio.
+ */
+export function withAlphaPercent(hex: HexColor, percent: number): HexColor {
+  if (!HEX_COLOR_PATTERN.test(hex) || !Number.isFinite(percent)) {
+    return hex;
+  }
+
+  const base = hex.slice(0, 7).toLowerCase();
+  const clamped = Math.min(100, Math.max(0, Math.round(percent)));
+
+  if (clamped === 100) {
+    return base;
+  }
+
+  return `${base}${Math.round((clamped / 100) * 255).toString(16).padStart(2, "0")}`;
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Limites e listas
  * ---------------------------------------------------------------------------------------------- */
