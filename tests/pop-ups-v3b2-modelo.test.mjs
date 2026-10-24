@@ -339,6 +339,43 @@ test("comeco do pop-up para o primeiro acesso: Comeca, senao a publicacao, senao
 });
 
 /* ------------------------------------------------------------------------------------------------
+ * 10b. Edicao do pop-up no ar: a regra dos 500 e o recalculo do minuto seguinte
+ * ---------------------------------------------------------------------------------------------- */
+
+test("regra dos 500 na edicao no ar: 'No primeiro acesso' conta o segmento inteiro mesmo com o segmento igual; os outros so quando ele mudou", () => {
+  assert.equal(firstAccess.liveEditCountsSegment({ audienceChanged: false, trigger: "first_login" }), true, "a contagem gravada e so a dos candidatos");
+  assert.equal(firstAccess.liveEditCountsSegment({ audienceChanged: true, trigger: "first_login" }), true);
+  assert.equal(firstAccess.liveEditCountsSegment({ audienceChanged: false, trigger: "page_load" }), false, "segmento igual: vale a contagem gravada");
+  assert.equal(firstAccess.liveEditCountsSegment({ audienceChanged: true, trigger: "page_load" }), true);
+  assert.equal(firstAccess.liveEditCountsSegment({ audienceChanged: false, trigger: "lesson_completed" }), false);
+  assert.equal(firstAccess.liveEditCountsSegment({ audienceChanged: false, trigger: "course_completed" }), false);
+});
+
+test("recalculo do minuto seguinte: so os produtos ou o Comeca de um 'No primeiro acesso' mudaram, com o segmento igual", () => {
+  const comeca = "2026-10-23T15:00:00.000Z";
+  const precisa = ({ audienceChanged = false, current = {}, next = {}, trigger = "first_login" } = {}) =>
+    firstAccess.firstAccessRecalcNeeded({
+      audienceChanged,
+      current: { accessProducts: ["formacao-ia"], startsAt: comeca, ...current },
+      next: { accessProducts: ["formacao-ia"], startsAt: comeca, ...next },
+      trigger
+    });
+
+  assert.equal(precisa(), false, "nada mudou");
+  assert.equal(precisa({ next: { accessProducts: ["curso-x", "formacao-ia"] } }), true, "produto a mais");
+  assert.equal(precisa({ next: { accessProducts: [] } }), true, "para a primeira vez na area");
+  assert.equal(precisa({ current: { accessProducts: [] }, next: { accessProducts: ["curso-x"] } }), true, "da area para estes produtos");
+  assert.equal(precisa({ next: { accessProducts: [" formacao-ia ", "formacao-ia"] } }), false, "a mesma lista na forma canonica");
+  assert.equal(precisa({ next: { startsAt: "2026-10-24T15:00:00.000Z" } }), true, "o Comeca mudou");
+  assert.equal(precisa({ next: { startsAt: "2026-10-23T15:00:00+00:00" } }), false, "a mesma hora escrita de outro jeito (como o banco devolve)");
+  assert.equal(precisa({ next: { startsAt: null } }), true, "o Comeca tirado");
+  assert.equal(precisa({ current: { startsAt: null }, next: { startsAt: null } }), false);
+  assert.equal(precisa({ audienceChanged: true, next: { accessProducts: [] } }), false, "segmento mudado: o recalculo ja roda na hora");
+  assert.equal(precisa({ next: { accessProducts: [] }, trigger: "page_load" }), false, "outro momento: nada a refazer");
+  assert.equal(precisa({ next: { startsAt: null }, trigger: "course_completed" }), false);
+});
+
+/* ------------------------------------------------------------------------------------------------
  * 11. Curso concluido
  * ---------------------------------------------------------------------------------------------- */
 

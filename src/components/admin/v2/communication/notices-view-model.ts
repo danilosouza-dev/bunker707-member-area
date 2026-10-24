@@ -463,6 +463,8 @@ export function noticeActionConfirm(
     citations?: NoticeCitationCounts | null;
     followUps?: { count: number; sent: number } | null;
     kind: CampaignKind;
+    /** v3b-2: o momento do pop-up (NoticeListItem.popupTrigger): em "No primeiro acesso", Aprovar diz o alcance certo. */
+    popupTrigger?: PopupTrigger | null;
     recipients?: number | null;
     situation?: CampaignSituation;
     title: string;
@@ -477,7 +479,9 @@ export function noticeActionConfirm(
         description:
           notice.kind === "inbox"
             ? `A notificação vai para o sino de ${formatStudentCount(notice.audienceCount)} (ou na data agendada). A contagem é refeita na hora de publicar.`
-            : `O pop-up passa a aparecer para ${formatStudentCount(notice.audienceCount)}, nas páginas e no momento escolhidos. A contagem é refeita na hora de publicar.`,
+            : notice.popupTrigger === "first_login"
+              ? `O pop-up passa a aparecer para quem entrar pela primeira vez (entre ${formatStudentCount(notice.audienceCount)} do segmento), nas páginas escolhidas. A contagem é refeita na hora de publicar.`
+              : `O pop-up passa a aparecer para ${formatStudentCount(notice.audienceCount)}, nas páginas e no momento escolhidos. A contagem é refeita na hora de publicar.`,
         destructive: false,
         title: `Aprovar “${title}”?`
       };
@@ -817,8 +821,9 @@ type PopupPlacementSnapshot = { popup: Pick<PopupSettings, "accessProducts" | "e
 /**
  * v3b-1 (docs/25 §2.3): as linhas de aviso do card "Quando e onde aparece" no pop-up no ar ou pausado:
  * paginas, excecoes ou momento diferentes do salvo (quem ja viu continua contando como visto) e, no ar, o
- * "Começa" levado para o futuro (some para todos ate la). v3b-2 (docs/29 §6.1): os produtos do primeiro
- * acesso entram na comparacao e, quando so eles mudaram, a linha de quem ja contava como aluno novo.
+ * "Começa" levado para o futuro (some para todos ate la). v3b-2 (docs/29 §2.2): os produtos do primeiro
+ * acesso entram na comparacao e, quando so eles mudaram, so a linha de quem ja contava como aluno novo (a
+ * mudanca nao vale na hora: a linha de sempre fica para paginas, excecoes e momento).
  */
 export function popupPlacementChangeNotes(input: { now: number; saved: PopupPlacementSnapshot; shown: PopupPlacementSnapshot; status: CampaignStatus | null | undefined }): string[] {
   if (!isLivePopupStatus("popup", input.status)) {
@@ -831,14 +836,20 @@ export function popupPlacementChangeNotes(input: { now: number; saved: PopupPlac
   const sameProducts = canonicalProductIds(saved.popup.accessProducts ?? []).join(" ") === canonicalProductIds(shown.popup.accessProducts ?? []).join(" ");
   const samePlace = saved.popup.trigger === shown.popup.trigger && samePatterns(saved.popup.pages, shown.popup.pages) && samePatterns(saved.popup.exclude, shown.popup.exclude);
 
-  if (!samePlace || !sameProducts) {
+  if (!samePlace) {
     notes.push(
       "Mudar onde ou quando ele aparece vale na hora. Quem já viu continua contando como visto, também nas páginas novas. Para todos verem de novo, ligue “Mostrar de novo para quem já viu”."
     );
   }
 
+  // So os produtos do primeiro acesso mudaram: nada vale na hora (o job do minuto seguinte refaz quem e aluno
+  // novo); a linha diz so isso, com a variante de quem passou para "A primeira vez na área".
   if (samePlace && !sameProducts && shown.popup.trigger === "first_login") {
-    notes.push("Quem já contava como aluno novo continua contando enquanto tiver acesso a um dos produtos marcados. A mudança vale para quem chegar daqui para frente.");
+    notes.push(
+      canonicalProductIds(shown.popup.accessProducts ?? []).length > 0
+        ? "Quem já contava como aluno novo continua contando enquanto tiver acesso a um dos produtos marcados. A mudança vale para quem chegar daqui para frente, em até alguns minutos."
+        : "Quem já contava como aluno novo continua contando enquanto estiver no segmento. A mudança vale para quem chegar daqui para frente, em até alguns minutos."
+    );
   }
 
   const shownStart = shown.window.startsAt === null ? Number.NaN : Date.parse(shown.window.startsAt);

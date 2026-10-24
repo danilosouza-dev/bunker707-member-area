@@ -133,7 +133,7 @@ import {
   type PopupFrequency,
   type PopupTrigger
 } from "./popup-display-model";
-import { FIRST_ACCESS_SWITCH_MESSAGE, switchesFirstAccess } from "./popup-first-access";
+import { FIRST_ACCESS_SWITCH_MESSAGE, firstAccessRecalcNeeded, liveEditCountsSegment, switchesFirstAccess } from "./popup-first-access";
 import { assertPopupDesignFonts } from "./popup-fonts";
 import { parsePopupDesign, popupDesignContentProblems } from "./popup-design-schema";
 import { parseStoredPopupDesign, popupDesignKindOf, storedPopupDesignFontIds } from "./popup-design-router";
@@ -1119,7 +1119,8 @@ async function saveSentNotice(input: {
  * [messaging.write] Cria ou atualiza o aviso. Agendado ou aguardando aprovacao volta a rascunho;
  * pop-up no ar ou pausado continua como esta (e recalcula quem ve se o segmento mudou). Mudar o pop-up
  * no ar vale como publicar: precisa de messaging.publish e, acima de 500 alunos (o segmento novo, ou a
- * contagem gravada quando o segmento nao mudou), de messaging.publish_large; senao, 403.
+ * contagem gravada quando o segmento nao mudou; em "No primeiro acesso", sempre o segmento inteiro), de
+ * messaging.publish_large; senao, 403.
  * v3a: notificacao enviada muda so o conteudo (saveSentNotice); o pop-up no ar ou pausado pode salvar com
  * `reshow` ("Mostrar de novo para quem já viu", v3b-1 em qualquer "Quantas vezes": contado e conferido antes
  * de gravar, aplicado depois, com a regra nova ja gravada).
@@ -1178,9 +1179,20 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
     const reshow = live && data.reshow === true;
     const audienceChanged = stableJson(normalizeAudience(audienceOfRow(current))) !== stableJson(columns.audience);
     const now = new Date();
+    const currentPopup = live ? popupSettingsOfRow(current) : null;
+    // v3b-2: so os produtos ou o "Começa" de um "No primeiro acesso" no ar mudaram (o segmento nao): o recalculo
+    // da hora nao roda; a hora do ultimo recalculo e apagada e o job do minuto seguinte refaz quem e aluno novo.
+    const recalcNeeded =
+      currentPopup !== null &&
+      firstAccessRecalcNeeded({
+        audienceChanged,
+        current: { accessProducts: currentPopup.accessProducts ?? [], startsAt: current.starts_at },
+        next: { accessProducts: columns.popup_access_products, startsAt: columns.starts_at },
+        trigger: currentPopup.trigger
+      });
     let loaded: LoadedAudience | undefined;
 
-    if (live) {
+    if (live && currentPopup) {
       if (columns.kind !== current.kind) {
         throw new NoticeFieldError("kind", "O tipo não muda depois de publicado.");
       }
@@ -1196,7 +1208,9 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
         throw new CommunicationError(LIVE_EDIT_NEEDS_PUBLISH, 403);
       }
 
-      if (audienceChanged) {
+      // v3b-2: em "No primeiro acesso" a contagem gravada e a dos candidatos (pequena); a regra dos 500 conta o
+      // segmento inteiro, como publicar e retomar, mesmo com o segmento igual.
+      if (liveEditCountsSegment({ audienceChanged, trigger: currentPopup.trigger })) {
         loaded = await loadFactsFor(db, now, columns.audience);
       }
 
@@ -1216,7 +1230,8 @@ export async function saveNoticeDraft(input: SaveNoticeInput): Promise<ActionRes
       ...columns,
       updated_by: user.id,
       // v3a: a ultima edicao do pop-up no ar ou pausado aparece no relatorio ("Editado").
-      ...(live ? { edited_at: now.toISOString(), edited_by: user.id } : { requested_at: null, requested_by: null, status: "draft" as const })
+      ...(live ? { edited_at: now.toISOString(), edited_by: user.id } : { requested_at: null, requested_by: null, status: "draft" as const }),
+      ...(recalcNeeded ? { audience_refreshed_at: null } : {})
     };
     let saved = await updateCampaign(db, current.id, patch, { expectedStatuses: [current.status], expectedUpdatedAt: data.expectedUpdatedAt });
     let reshown: number | undefined;
