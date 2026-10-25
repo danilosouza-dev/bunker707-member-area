@@ -9,8 +9,8 @@ import "./support/admin-action-stubs.mjs";
 // freeLayerDropTarget, com todo vao alcancavel), os lugares do desenho (freeFlowContainers) e o lugar de soltar no
 // desenho (freeFlowDropAt, inclusive o mesmo vao que nao grava), o ponto da tela em px da prancheta, o Celular com a
 // ordem uma so, o elemento novo que entra onde foi solto e as guardas de fonte do editor e do desenho. No L4b, a Forma
-// e a Caixa soltas que entram numa caixa guardam o tamanho e a camada abaixo de 0 vira 0. Tudo carregado direto pelo
-// Node.
+// e a Caixa soltas que entram numa caixa guardam o tamanho, e a camada abaixo de 0 vira 0 em quem entra numa caixa
+// (solto ou ja na sequencia). Tudo carregado direto pelo Node.
 
 const editor = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
 const geometry = await import("../src/components/admin/v2/communication/popup-free/free-editor-geometry.ts");
@@ -210,6 +210,62 @@ test("Forma e Caixa soltas que entram numa caixa guardam a largura e a altura; c
   assert.equal(title.design.devices.mobile.nodes.titulo, undefined, "fora a Forma e a Caixa, o tamanho do celular sai com a posicao");
   assert.equal(find(editor.moveFreeNodeIntoBox(loose, "selo", "caixa").design, "selo").node.place, undefined);
   assert.ok(valid(title.design));
+});
+
+test("quem já está na sequência e entra numa caixa também fica com a camada abaixo de 0 em 0, em todo tipo (L4b)", () => {
+  // O resto da C8: a camada de quem esta na sequencia pode ficar negativa pelo [ (shiftFreeNodeLayer). Levado para
+  // uma caixa com fundo, ele seria pintado atras do fundo dela, porque so a prancheta isola as camadas.
+  const fill = [{ color: "#ff000080", kind: "solid" }];
+  const base = design(
+    [
+      { ...TITLE, place: { mode: "flow", z: -1 } },
+      { box: { fill: [{ color: "#ffffff26", kind: "solid" }] }, id: "forma", place: { height: 40, mode: "flow", width: 120, z: -2 }, type: "shape" },
+      { ...BADGE, place: { mode: "flow", z: 3 } },
+      { box: { fill }, children: [{ ...TEXT, place: { align: "center", mode: "flow", z: -1 } }, spacer("e1")], id: "caixa", type: "box" },
+      { box: { fill }, children: [], id: "outra", type: "box" },
+      LINKS
+    ],
+    { devices: { mobile: { nodes: { forma: { hidden: true }, titulo: { textStyle: { size: 20 } } } } } }
+  );
+  assert.deepEqual(find(base, "titulo").node.place, { mode: "flow", z: -1 }, "o Titulo foi semeado com a camada negativa");
+
+  // Da prancheta para a caixa, pelas Camadas e pelo ⋯ Colocar dentro: a camada sai; o resto do lugar e o celular ficam.
+  const title = editor.moveFreeNodeTo(base, "titulo", { index: 0, parentId: "caixa" });
+  assert.equal(title.becameFlow, false);
+  assert.equal(find(title.design, "titulo").node.place, undefined, "z -1 vira 0 (o padrao, fora)");
+  assert.deepEqual(title.design.devices, base.devices, "o celular nao muda");
+  assert.deepEqual(editor.moveFreeNodeIntoBox(base, "titulo", "caixa").design, editor.moveFreeNodeTo(base, "titulo", { index: 2, parentId: "caixa" }).design);
+  assert.equal(find(editor.moveFreeNodeIntoBox(base, "titulo", "caixa").design, "titulo").node.place, undefined);
+
+  const shape = editor.moveFreeNodeIntoBox(base, "forma", "caixa");
+  assert.deepEqual(find(shape.design, "forma").node.place, { height: 40, mode: "flow", width: 120 }, "a Forma guarda o tamanho");
+
+  // De uma caixa para outra: tambem entra numa caixa.
+  const between = editor.moveFreeNodeIntoBox(base, "texto", "outra");
+  assert.deepEqual(find(between.design, "texto").node.place, { align: "center", mode: "flow" });
+
+  // Camada 0 ou acima: fica.
+  assert.deepEqual(find(editor.moveFreeNodeIntoBox(base, "selo", "caixa").design, "selo").node.place, { mode: "flow", z: 3 });
+
+  // Reordenado na mesma caixa ou levado a prancheta (que isola as camadas): fica como esta.
+  const reordered = editor.moveFreeNodeTo(base, "texto", { index: 2, parentId: "caixa" });
+  assert.deepEqual(ids(find(reordered.design, "caixa").node.children), ["e1", "texto"]);
+  assert.deepEqual(find(reordered.design, "texto").node.place, { align: "center", mode: "flow", z: -1 });
+  const out = editor.moveFreeNodeTo(base, "texto", { index: 0, parentId: null });
+  assert.deepEqual(find(out.design, "texto").node.place, { align: "center", mode: "flow", z: -1 });
+  const artboard = editor.moveFreeNodeTo(base, "titulo", { index: 2, parentId: null });
+  assert.deepEqual(find(artboard.design, "titulo").node.place, { mode: "flow", z: -1 });
+
+  // O lugar vazio fica undefined, como no solto (flowPlaceOf) e no [ (shiftFreeNodeLayer): a forma canonica o tira.
+  assert.equal("place" in find(model.canonicalPopupFreeDesign(title.design), "titulo").node, false);
+
+  for (const result of [title, shape, between, reordered, out, artboard]) {
+    assert.ok(valid(result.design));
+  }
+
+  for (const result of [shape, between, reordered, out, artboard]) {
+    assert.deepEqual(model.canonicalPopupFreeDesign(result.design), result.design, "ja na forma canonica");
+  }
 });
 
 test("paridade com o Subir e o Colocar dentro: travado, escondido, Links e Áudio se movem", () => {

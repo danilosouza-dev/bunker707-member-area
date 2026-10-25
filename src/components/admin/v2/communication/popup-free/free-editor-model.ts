@@ -909,6 +909,23 @@ function flowPlaceOf(node: FreeNode, options: { artboardWidth: number; intoBox: 
 }
 
 /**
+ * Quem ja esta na sequencia e entra numa caixa (vindo da prancheta ou de outra caixa): uma camada abaixo de 0 vira 0,
+ * a mesma regra do solto em flowPlaceOf (a caixa nao isola as camadas e ele ficaria atras do fundo dela). O resto do
+ * lugar fica. A camada e uma so nos dois aparelhos: o celular nao muda.
+ */
+function flowIntoBoxOf(node: FreeNode): FreeNode {
+  if (node.place?.mode !== "flow" || !((node.place.z ?? 0) < 0)) {
+    return node;
+  }
+
+  const { z: unusedZ, ...place } = node.place;
+
+  void unusedZ;
+
+  return { ...node, place: Object.keys(place).length > 1 ? place : undefined };
+}
+
+/**
  * A entrada do celular de um solto que virou sequencia (docs/27 L48): a posicao solta do celular sai. A Forma e a
  * Caixa com largura ou altura proprias no celular ficam com elas na sequencia do celular ({ mode: "flow", width,
  * height }, so o que difere do computador), para o tamanho no celular nao virar o do computador no proprio gesto.
@@ -1016,8 +1033,10 @@ export function freeMoveProblem(design: PopupFreeDesign, id: FreeId, target: Fre
  * elemento ainda conta quando o pai e o mesmo). Null quando freeMoveProblem nao deixa (inclusive o mesmo lugar). Um
  * solto que entra numa caixa vira sequencia (`becameFlow`, flowPlaceOf): guarda a camada (abaixo de 0 vira 0), a
  * Forma e a Caixa guardam a largura e a altura, e o celular perde so a posicao solta (a Forma e a Caixa com tamanho
- * proprio no celular ficam com ele na sequencia do celular). Um solto que muda de lugar na prancheta continua solto.
- * Nada mais muda em devices.
+ * proprio no celular ficam com ele na sequencia do celular). Quem ja esta na sequencia e entra numa caixa (da
+ * prancheta ou de outra caixa) tambem fica com a camada abaixo de 0 em 0 (flowIntoBoxOf); reordenado na mesma caixa
+ * ou levado a prancheta, fica como esta. Um solto que muda de lugar na prancheta continua solto. Nada mais muda em
+ * devices.
  */
 export function moveFreeNodeTo(design: PopupFreeDesign, id: FreeId, target: FreeMoveTarget): { becameFlow: boolean; design: PopupFreeDesign } | null {
   if (freeMoveProblem(design, id, target) !== null) {
@@ -1031,7 +1050,9 @@ export function moveFreeNodeTo(design: PopupFreeDesign, id: FreeId, target: Free
   const becameFlow = detached.node.place?.mode === "free" && target.parentId !== null;
 
   if (!becameFlow) {
-    return { becameFlow, design: insertNode(detached.design, target.parentId, at, detached.node) };
+    const node = target.parentId !== null && !samePlace ? flowIntoBoxOf(detached.node) : detached.node;
+
+    return { becameFlow, design: insertNode(detached.design, target.parentId, at, node) };
   }
 
   const artboardWidth = resolveFreeArtboard(design).width;
