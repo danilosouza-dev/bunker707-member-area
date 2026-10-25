@@ -58,6 +58,7 @@ import {
   type PopupDesignMode,
   type RememberedDesigns
 } from "./popup-design-editor-model";
+import { popupSettingsOfDraft } from "../popup-editor-model";
 import type { FreeDesignEditorProps } from "../popup-free/free-editor";
 
 // Cartao "Design" do editor do pop-up (docs/26; spec §7): Padrão | Personalizado | Livre, modelos para comecar e,
@@ -193,6 +194,8 @@ export type PopupDesignFieldProps = {
    * Modelos quando os modelos estao ligados). `saveConfirm`: a pergunta de D29 antes do primeiro salvar.
    */
   freeEditor?: {
+    /** false na pagina do modelo de Design: a chave "Permitir “Lembrar depois”" de Links › Conteúdo vira uma nota. */
+    allowSnoozeEditable?: boolean;
     recoveryKey: string;
     saveConfirm?: FreeDesignEditorProps["saveConfirm"];
     saveLabel: string;
@@ -1045,13 +1048,17 @@ export function PopupDesignField({
         <FreeDesignEditor
           content={{
             allowSnooze: draft.allowSnooze,
+            allowSnoozeEditable: freeEditorSetup?.allowSnoozeEditable ?? true,
             audio: draft.audio,
             cta: draft.cta,
             ctaOptional: freeEditorSetup !== null,
             hideCtaDestination,
+            // A mesma regra do card "Quantas vezes e como fecha" (campaigns.allow_snooze), pelo mesmo caminho do cta.
+            onAllowSnoozeChange: (allowSnooze) => onChange({ allowSnooze }),
             onCtaChange: (cta) => onChange({ cta }),
             products,
             productsLoaded,
+            snoozeMinutes: popupSettingsOfDraft(draft).snoozeMinutes,
             title: draft.title
           }}
           disabled={disabled}

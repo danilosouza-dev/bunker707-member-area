@@ -38,6 +38,7 @@ import {
   freeHintsOf,
   freeLetterCount,
   freeLinkActionDisabledReason,
+  freeLinksSnoozeDescription,
   freeVideoAssetOf,
   withFreeNodeFields,
   withFreeNodeImage,
@@ -750,13 +751,27 @@ function BoxContent({ design, disabled, errors, node, onChange }: Of<"box">) {
   );
 }
 
-function LinksContent({ design, disabled, errors, node, onChange }: Of<"links">) {
+function LinksContent({ content, design, disabled, errors, node, onChange }: Of<"links">) {
   const id = (field: string) => freeFieldId(node.id, field);
   const dismiss = node.dismiss !== false;
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <div className="flex min-w-0 flex-col gap-1.5">
+        {/* A mesma regra do card "Quantas vezes e como fecha" (campaigns.allow_snooze): fora do historico do Livre. */}
+        {content.allowSnoozeEditable === false ? (
+          // Pagina do modelo de Design: o modelo nao guarda a regra (docs/28 §1.7), a chave mudaria nada.
+          <FreeNote>{C.links.snoozeFixed}</FreeNote>
+        ) : (
+          <AdminSwitch
+            checked={content.allowSnooze}
+            description={freeLinksSnoozeDescription(content.allowSnooze, content.snoozeMinutes)}
+            disabled={disabled}
+            id={id("lembrar")}
+            label={C.links.snooze}
+            onCheckedChange={(allowSnooze) => content.onAllowSnoozeChange(allowSnooze)}
+          />
+        )}
         <AdminSwitch
           checked={dismiss}
           description={dismiss ? undefined : C.links.closedNote}
@@ -765,7 +780,6 @@ function LinksContent({ design, disabled, errors, node, onChange }: Of<"links">)
           label={C.links.dismiss}
           onCheckedChange={(checked) => onChange(withFreeNodeFields(design, node.id, { dismiss: checked ? undefined : false }))}
         />
-        <FreeNote>{C.links.snoozeNote}</FreeNote>
       </div>
       <FreeNumberField
         bounds={L.gap}

@@ -152,7 +152,8 @@ test("excluir: links e áudio não saem; o principal tira o botão do aviso", ()
   assert.deepEqual(editor.removeFreeNode(base, "links"), { reason: C.canNotRemove.links });
   assert.deepEqual(editor.removeFreeNode(base, "audio"), { reason: C.canNotRemove.audio });
   assert.deepEqual(editor.removeFreeNode(base, "caixa"), { reason: C.canNotRemove.audio }, "a caixa com o Áudio dentro também fica");
-  assert.equal(C.canNotRemove.links, "Os links Lembrar depois e Não mostrar de novo ficam sempre. Para esconder o Não mostrar de novo, use Conteúdo.");
+  // docs/27 §13.7: os links nao se excluem (o contrato pede um Links), mas cada um se tira pela chave em Conteúdo.
+  assert.equal(C.canNotRemove.links, "Os links ficam no desenho, mas cada um se tira em Conteúdo: desligue “Permitir Lembrar depois” ou “Mostrar Não mostrar de novo”.");
   assert.equal(C.canNotRemove.audio, "Para tirar o áudio, tire o arquivo no campo Áudio do aviso.");
 
   const noCta = editor.removeFreeNode(base, "principal");
@@ -494,6 +495,16 @@ test("cópia de recuperação: grava, lê com o zod, descarta a inválida e some
   assert.equal(recovery.freeRecoveryTime(read.savedAt, "pt-BR", "UTC"), "17:05");
   assert.equal(recovery.freeRecoveryDiffers(read, entry), false, "igual ao que abriu: a faixa nao aparece");
   assert.equal(recovery.freeRecoveryDiffers(read, { cta: CTA, design: design([TEXT, CTA_NODE, LINKS]) }), true);
+  assert.equal("allowSnooze" in read, false, "sem a regra do Lembrar depois na copia, nada e devolvido (copias de antes)");
+
+  // docs/27 §13.7: a regra "Permitir “Lembrar depois”" vai ao lado do cta (o Livre tambem a edita) e volta como veio.
+  assert.equal(recovery.writeFreeRecovery(storage, key, { ...entry, allowSnooze: false }), true);
+  assert.equal(recovery.readFreeRecovery(storage, key).allowSnooze, false);
+  assert.equal(JSON.parse(storage.getItem(key)).allowSnooze, false);
+  assert.equal(recovery.writeFreeRecovery(storage, key, { ...entry, allowSnooze: true }), true);
+  assert.equal(recovery.readFreeRecovery(storage, key).allowSnooze, true);
+  storage.setItem(key, JSON.stringify({ allowSnooze: "sim", cta: CTA, design: entry.design, savedAt: "2026-10-23T17:05:00Z" }));
+  assert.equal("allowSnooze" in recovery.readFreeRecovery(storage, key), false, "allowSnooze que nao e booleano fica de fora; o resto vale");
 
   // Uma copia que nao passa no zod (chave a mais, X invisivel, JSON quebrado) e apagada em silencio.
   storage.setItem(key, JSON.stringify({ cta: CTA, design: { ...entry.design, url: "https://exemplo.com/x.webp" }, savedAt: "2026-10-23T17:05:00Z" }));
@@ -528,6 +539,42 @@ test("cópia de recuperação: grava, lê com o zod, descarta a inválida e some
   assert.equal(recovery.readFreeRecovery(broken, key), null);
   assert.doesNotThrow(() => recovery.clearFreeRecovery(broken, key));
   assert.equal(recovery.browserFreeRecoveryStorage(), null, "no Node nao ha janela");
+});
+
+test("mudança desde o salvar: a regra do Lembrar depois conta, mesmo fora do histórico (o Concluir só troca de endereço sem ela pendente)", () => {
+  // docs/27 §13.7 e §4.13: "Salvar rascunho" -> desliga a chave -> Concluir. Sem a chave na conta, o Z trocava de
+  // endereco, remontava o editor do aviso a partir do banco e a chave voltava ligada em silencio.
+  const saved = recovery.freeEntrySignature({ cta: CTA, design: design([TITLE, CTA_NODE, LINKS]) });
+  const other = recovery.freeEntrySignature({ cta: CTA, design: design([TEXT, CTA_NODE, LINKS]) });
+
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: true, savedAllowSnooze: true, savedSignature: saved, signature: saved }), false);
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: false, savedAllowSnooze: true, savedSignature: saved, signature: saved }), true, "so a chave mudou depois do salvar: ainda ha o que gravar");
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: true, savedAllowSnooze: false, savedSignature: saved, signature: saved }), true);
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: true, savedAllowSnooze: true, savedSignature: saved, signature: other }), true, "o design mudou");
+  assert.equal(recovery.freeDirtySinceSave({ allowSnooze: false, savedAllowSnooze: false, savedSignature: saved, signature: saved }), false, "desligada e salva assim: nada pendente");
+
+  // O editor usa a conta e guarda a chave salva junto com a assinatura; o editor do aviso so troca de endereco com
+  // os dois lados limpos (o dele e o do Livre).
+  const editorSource = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+  assert.match(editorSource, /freeDirtySinceSave\(\{ allowSnooze: content\.allowSnooze, savedAllowSnooze, savedSignature, signature \}\)/);
+  assert.match(editorSource, /setSavedAllowSnooze\(allowSnoozeSnapshot\)/);
+  const noticeSource = readFileSync(new URL("../src/components/admin/v2/communication/notice-editor.tsx", import.meta.url), "utf8");
+  assert.match(noticeSource, /!result\.dirtySinceSave && !dirty/);
+});
+
+test("recuperar a cópia: a regra do Lembrar depois só volta quando a cópia a guardou como booleano e ela é diferente", () => {
+  const entry = { cta: CTA, design: design([TITLE, CTA_NODE, LINKS]), savedAt: "2026-10-23T17:05:00.000Z" };
+
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: false }, true), false);
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: true }, false), true);
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: true }, true), null, "igual: nada a mudar");
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: false }, false), null);
+  assert.equal(recovery.allowSnoozeToRestore(entry, true), null, "copia de antes, sem a chave");
+  assert.equal(recovery.allowSnoozeToRestore({ ...entry, allowSnooze: "sim" }, true), null, "so booleano");
+  assert.equal(recovery.allowSnoozeToRestore(null, true), null);
+
+  const editorSource = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+  assert.match(editorSource, /allowSnoozeToRestore\(recovery, content\.allowSnooze\)/, "o recuperar usa a conta");
 });
 
 test("Camadas: setas na linha, E esconde, T trava", () => {
@@ -760,4 +807,16 @@ test("o editor Livre não monta HTML nem CSS em texto (dangerouslySetInnerHTML, 
 
     assert.equal(/dangerouslySetInnerHTML|\.innerHTML|cssText|<style[\s>]|style="/.test(source), false, file);
   }
+});
+
+test("as etiquetas das Camadas (Solta, Escondida, Travada) têm 12 px, nunca menos", () => {
+  // docs/17: nada abaixo de 12 px no admin. As etiquetas ficam numa linha que quebra (flex-wrap) quando as tres nao cabem.
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-layers-panel.tsx", import.meta.url), "utf8");
+  const tag = source.match(/function Tag2[\s\S]*?\n}/)?.[0] ?? "";
+
+  assert.match(tag, /text-\[12px\]/);
+  // text-xs e 12 px (0,75 rem); abaixo disso so por valor fixo.
+  assert.equal(/text-\[(?:[1-9]|1[01])px\]|text-\[0\.(?:[0-6]\d*|7[0-4]\d*)rem\]/.test(source), false, "nenhum texto do painel das Camadas abaixo de 12 px");
+  assert.match(source, /flex-wrap gap-1" id=\{`free-layer-tags-/, "as etiquetas quebram de linha quando nao cabem lado a lado");
+  assert.deepEqual(C.layers.tags, { free: "Solta", hidden: "Escondida", locked: "Travada" });
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
+import "./support/transpile-tsx.mjs";
 
 // Editor Livre do pop-up (docs/27; spec §4.6, §4.7, §7.1 e §9.6; docs/18 §1.1), pacote I: as pecas puras do painel
 // da direita. A area de texto (Enter, limite de linhas), "Outro estilo na seleção" (antes / selecao / depois, com
@@ -13,6 +14,10 @@ const panel = await import("../src/components/admin/v2/communication/popup-free/
 const model = await import("../src/server/communications/popup-free-model.ts");
 const render = await import("../src/server/communications/popup-free-render.ts");
 const schema = await import("../src/server/communications/popup-free-schema.ts");
+const popupEditor = await import("../src/components/admin/v2/communication/popup-editor-model.ts");
+const { createElement } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { FreeInspectorContent } = await import("../src/components/admin/v2/communication/popup-free/free-inspector-content.tsx");
 
 const C = panel.FREE_INSPECTOR_COPY;
 const M = schema.POPUP_FREE_MESSAGES;
@@ -817,6 +822,34 @@ const UI_FILES = [
   "free-assets.ts"
 ].map((name) => new URL(`../src/components/admin/v2/communication/popup-free/${name}`, import.meta.url));
 
+test("Links › Conteúdo: a chave do Lembrar depois no aviso; na página do modelo de Design, só a nota (o modelo não guarda a regra)", () => {
+  // docs/27 §13.7 e docs/28 §1.7: `allowSnoozeEditable` false vem da pagina do modelo de Design pelo card Design.
+  const base = design([{ id: "titulo", lines: [[{ text: "Aula nova" }]], type: "heading" }, LINKS]);
+
+  function render(allowSnoozeEditable) {
+    const content = { allowSnooze: true, allowSnoozeEditable, audio: null, cta: null, onAllowSnoozeChange() {}, onCtaChange() {}, products: [], productsLoaded: true, snoozeMinutes: 1_440, title: "Aula nova" };
+    const props = { content, design: base, disabled: false, errors: {}, fonts: [], hints: [], latest: () => base, node: model.findFreeNode(base, "links").node, onBusyChange() {}, onChange() {}, onCtaChange() {}, onFontsChange() {}, rects: {} };
+
+    return renderToStaticMarkup(createElement(FreeInspectorContent, props));
+  }
+
+  const aviso = render(true);
+  assert.match(aviso, /id="livre-links-lembrar"/, "no aviso, a chave esta la");
+  assert.match(aviso, /Permitir “Lembrar depois”/);
+  assert.match(aviso, /Volta em 1 dia, até 2 vezes\./);
+  assert.equal(aviso.includes(C.links.snoozeFixed), false);
+
+  const modelo = render(false);
+  assert.doesNotMatch(modelo, /id="[^"]*-lembrar"/, "na pagina do modelo de Design nao ha a chave");
+  assert.equal(modelo.includes("Permitir “Lembrar depois”"), false);
+  assert.ok(modelo.includes(C.links.snoozeFixed), "no lugar, a nota");
+  assert.match(modelo, /id="livre-links-nao-mostrar"/, "a chave do Não mostrar de novo continua");
+  assert.equal(C.links.snoozeFixed, "“Lembrar depois” é regra do pop-up, não do modelo de design: define-se no aviso.");
+
+  // Sem a chave (o aviso comum e o modo modelo de Pop-up nao passam nada), o padrao e a chave.
+  assert.match(render(undefined), /id="livre-links-lembrar"/);
+});
+
 test("vocabulário das frases do painel", () => {
   const strings = [
     ...collectStrings(C),
@@ -842,7 +875,16 @@ test("vocabulário das frases do painel", () => {
   assert.equal(C.text.parts, "Partes com estilo próprio");
   assert.equal(C.image.hint, "JPG, PNG ou WebP. O editor deixa leve sozinho; transparência funciona.");
   assert.equal(C.video.hint, "MP4 (H.264) ou WEBM, até 15 MB. Toca sem som, em repetição. Quem prefere menos movimento vê só a capa.");
-  assert.equal(C.links.snoozeNote, "“Lembrar depois” aparece sozinho quando o pop-up deixa adiar.");
+  // Links › Conteúdo (docs/27 §13.7): a chave do "Lembrar depois" e a MESMA do card "Quantas vezes e como fecha".
+  assert.equal(C.links.snooze, "Permitir “Lembrar depois”");
+  assert.equal(C.links.snooze, popupEditor.POPUP_EDITOR_COPY.frequency.snoozeLabel, "o mesmo nome do card");
+  assert.equal(C.links.dismiss, "Mostrar “Não mostrar de novo”");
+  assert.equal(C.links.snoozeOff, "Sem “Lembrar depois”, o pop-up volta só pela regra de “Quantas vezes”.");
+  assert.equal(panel.freeLinksSnoozeDescription(true, 1_440), "Volta em 1 dia, até 2 vezes.");
+  assert.equal(panel.freeLinksSnoozeDescription(true, 1_440), popupEditor.snoozeSwitchDescription(1_440), "ligada, a mesma frase do card");
+  assert.equal(panel.freeLinksSnoozeDescription(true, 90), "Volta em 90 minutos, até 2 vezes.");
+  assert.equal(panel.freeLinksSnoozeDescription(false, 1_440), C.links.snoozeOff);
+  assert.equal("snoozeNote" in C.links, false, "a nota fixa de antes saiu: a chave esta no painel");
   assert.equal(C.advanced.freeHint, "Solta: você escolhe o lugar. Só fora de caixas.");
   assert.equal(C.advanced.layerNote, "Quem vem depois nas Camadas fica por cima; aqui você muda isso.");
   assert.equal(C.popup.widthNote, "No celular, o pop-up inteiro encolhe junto, igual.");

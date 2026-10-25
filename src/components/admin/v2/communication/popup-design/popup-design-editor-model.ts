@@ -59,7 +59,9 @@ import {
   type PopupPaint,
   type PopupTextAlign,
   type PopupTextPlacement,
-  type PopupVideoMimeType
+  type PopupVideoMimeType,
+  alphaPercentOf,
+  withAlphaPercent
 } from "../../../../../server/communications/popup-design-model";
 
 type Option<Value extends string> = { label: string; value: Value };
@@ -286,6 +288,8 @@ export const POPUP_DESIGN_COPY = {
     angle: "Ângulo",
     from: "De",
     invalid: "Use uma cor no formato #RRGGBB.",
+    /** Nome acessivel do numero ao lado da cor ("{rotulo}: opacidade"); sem rotulo visivel, para nao se confundir com a Opacidade do Livre. */
+    opacity: "opacidade",
     picker: "seletor de cor",
     placeholder: "#RRGGBB",
     to: "Para"
@@ -980,6 +984,27 @@ export function rangeMessage(min: number, max: number): string {
 
 export function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+export const OPACITY_BOUNDS = { integer: true, max: 100, min: 0 } as const;
+
+/**
+ * Ao sair do numero da opacidade do campo de cor (docs/26 §2.2): fora de 0 a 100 encosta no limite; vazio ou sem
+ * numero volta ao que a cor vale. `changed` so quando a cor fica diferente (no Livre, cada mudanca e um passo do
+ * historico: sair do campo sem mexer nao pode criar um passo vazio).
+ */
+export function opacityAfterBlur(text: string, current: HexColor): { changed: boolean; hex: HexColor; text: string } {
+  const trimmed = text.trim();
+  const parsed = Number(trimmed);
+
+  if (trimmed === "" || !Number.isFinite(parsed)) {
+    return { changed: false, hex: current, text: String(alphaPercentOf(current)) };
+  }
+
+  const percent = clampNumber(Math.round(parsed), OPACITY_BOUNDS.min, OPACITY_BOUNDS.max);
+  const hex = withAlphaPercent(current, percent);
+
+  return { changed: hex !== current, hex, text: String(percent) };
 }
 
 /** O texto digitado vira numero valido do campo ou null (fora do limite, vazio, inteiro pedido). */

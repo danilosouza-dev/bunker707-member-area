@@ -88,6 +88,8 @@ import {
   FREE_RECOVERY_DELAY_MS,
   browserFreeRecoveryStorage,
   clearFreeRecovery,
+  allowSnoozeToRestore,
+  freeDirtySinceSave,
   freeEntrySignature,
   freeRecoveryDiffers,
   freeRecoveryKey,
@@ -124,6 +126,11 @@ const FREE_POSITION_ANNOUNCE_MS = 500;
 
 export type FreeEditorContent = {
   allowSnooze: boolean;
+  /**
+   * Links › Conteúdo mostra a chave "Permitir “Lembrar depois”" (padrao). false na pagina do modelo de Design (docs/28
+   * §1.7): o modelo nao guarda a regra, entao no lugar da chave fica a nota de que ela se define no aviso.
+   */
+  allowSnoozeEditable?: boolean;
   audio: NoticeDraft["audio"];
   cta: NoticeDraft["cta"];
   /**
@@ -133,9 +140,16 @@ export type FreeEditorContent = {
   ctaOptional?: boolean;
   /** Pagina do modelo de Design (docs/28 §5.7): o destino do Botão principal some (e escolhido em cada aviso). */
   hideCtaDestination?: boolean;
+  /**
+   * Links › Conteúdo (docs/27 §13.7): a chave "Permitir “Lembrar depois”" e a mesma regra do card "Quantas vezes e
+   * como fecha" (campaigns.allow_snooze). Nao entra no historico do Livre (e uma regra do pop-up, como o Áudio).
+   */
+  onAllowSnoozeChange: (allowSnooze: boolean) => void;
   onCtaChange: (cta: NoticeDraft["cta"]) => void;
   products: readonly ProductPickerItem[];
   productsLoaded: boolean;
+  /** O "Volta em" do card (minutos), so para a frase da chave em Links › Conteúdo. */
+  snoozeMinutes: number;
   title: string;
 };
 
@@ -370,8 +384,10 @@ function FreeEditorSession({
     return saved && freeRecoveryDiffers(saved, initialEntry) ? saved : null;
   });
   const [savedSignature, setSavedSignature] = useState(() => freeEntrySignature(initialEntry));
+  // A regra do "Lembrar depois" fica fora do historico, mas conta como mudanca (o Z nao troca de endereco com ela pendente).
+  const [savedAllowSnooze, setSavedAllowSnooze] = useState(content.allowSnooze);
   const signature = useMemo(() => freeEntrySignature(history.present), [history.present]);
-  const dirtySinceSave = signature !== savedSignature;
+  const dirtySinceSave = freeDirtySinceSave({ allowSnooze: content.allowSnooze, savedAllowSnooze, savedSignature, signature });
 
   const rootRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -515,11 +531,12 @@ function FreeEditorSession({
       return;
     }
 
-    const present = history.present;
-    const timer = window.setTimeout(() => writeFreeRecovery(storage, recoveryKey, present), FREE_RECOVERY_DELAY_MS);
+    // A regra do "Lembrar depois" vai junto (nao esta no historico, mas o Livre tambem a edita).
+    const entry = { ...history.present, allowSnooze: content.allowSnooze };
+    const timer = window.setTimeout(() => writeFreeRecovery(storage, recoveryKey, entry), FREE_RECOVERY_DELAY_MS);
 
     return () => window.clearTimeout(timer);
-  }, [dirtySinceSave, history.present, recoveryKey, storage]);
+  }, [content.allowSnooze, dirtySinceSave, history.present, recoveryKey, storage]);
 
   function recover() {
     if (!recovery) {
@@ -527,6 +544,13 @@ function FreeEditorSession({
     }
 
     commit({ cta: recovery.cta, design: recovery.design });
+
+    const allowSnooze = allowSnoozeToRestore(recovery, content.allowSnooze);
+
+    if (allowSnooze !== null) {
+      content.onAllowSnoozeChange(allowSnooze);
+    }
+
     setRecovery(null);
     announce(copy.announce.recovered);
   }
@@ -977,6 +1001,7 @@ function FreeEditorSession({
     }
 
     const snapshot = historyRef.current.present;
+    const allowSnoozeSnapshot = content.allowSnooze;
 
     flush();
     setSaving(true);
@@ -997,6 +1022,7 @@ function FreeEditorSession({
       const message = freeSavedMessage(result.message);
 
       setSavedSignature(freeEntrySignature(snapshot));
+      setSavedAllowSnooze(allowSnoozeSnapshot);
       setServerState(null);
       clearFreeRecovery(storage, recoveryKey);
       adminToast.success(message);

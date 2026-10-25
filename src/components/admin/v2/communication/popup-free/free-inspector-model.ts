@@ -44,6 +44,7 @@ import { freeTextDefaultsOf, type FreeResolvedTextStyle } from "../../../../../s
 import { POPUP_FREE_MESSAGES } from "../../../../../server/communications/popup-free-schema";
 import { HEX_COLOR_PATTERN, POPUP_BUILTIN_FONTS, type HexColor, type PopupFontOption, type PopupFontRef, type PopupFontWeight, type PopupVideoMimeType } from "../../../../../server/communications/popup-design-model";
 import { rangeMessage, weightAfterFontChange, weightOptionsFor } from "../popup-design/popup-design-editor-model";
+import { POPUP_EDITOR_COPY, snoozeSwitchDescription } from "../popup-editor-model";
 
 const L = FREE_DESIGN_LIMITS;
 const M = POPUP_FREE_MESSAGES;
@@ -151,7 +152,11 @@ export const FREE_INSPECTOR_COPY = {
     closedNote: "O aluno continua fechando pelo X.",
     dismiss: "Mostrar “Não mostrar de novo”",
     gap: "Espaço entre os links",
-    snoozeNote: "“Lembrar depois” aparece sozinho quando o pop-up deixa adiar."
+    /** A mesma chave do card "Quantas vezes e como fecha" (docs/27 §13.7): o mesmo nome, a mesma regra. */
+    snooze: POPUP_EDITOR_COPY.frequency.snoozeLabel,
+    /** Pagina do modelo de Design (docs/28 §1.7): o modelo nao guarda a regra, entao a chave vira esta nota. */
+    snoozeFixed: "“Lembrar depois” é regra do pop-up, não do modelo de design: define-se no aviso.",
+    snoozeOff: "Sem “Lembrar depois”, o pop-up volta só pela regra de “Quantas vezes”."
   },
   audio: { note: "O player do áudio do aviso aparece aqui. Para trocar o áudio, use o campo Áudio." },
   style: {
@@ -1527,6 +1532,14 @@ export function freeLinkActionDisabledReason(design: Pick<PopupFreeDesign, "chil
   });
 
   return other ? M.linkButtons : null;
+}
+
+/**
+ * A frase debaixo de "Permitir “Lembrar depois”" em Links › Conteúdo (docs/27 §13.7): ligada, a mesma do card
+ * ("Volta em 1 dia, até 2 vezes."); desligada, o que muda para o aluno.
+ */
+export function freeLinksSnoozeDescription(allowSnooze: boolean, snoozeMinutes: number): string {
+  return allowSnooze ? snoozeSwitchDescription(snoozeMinutes) : FREE_INSPECTOR_COPY.links.snoozeOff;
 }
 
 /** O que o botao faz depois de trocar (link comeca sem destino, na mesma aba; o texto fica). */

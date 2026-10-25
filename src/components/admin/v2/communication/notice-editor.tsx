@@ -1000,11 +1000,15 @@ export function NoticeEditor({ defaultKind, initial, now, options, permissions, 
     pendingNoticeId.current = null;
     pendingTemplateId.current = null;
 
-    if (id && result && !result.dirtySinceSave) {
+    // Troca so sem mudanca pendente de nenhum dos dois lados: a do Livre (design, cta e a regra do "Lembrar depois")
+    // e a do editor do aviso (dirty). Trocar remonta o editor a partir do banco e perderia o que nao foi gravado.
+    const clean = result !== undefined && !result.dirtySinceSave && !dirty;
+
+    if (id && clean) {
       openSavedNotice(id);
     }
 
-    if (templateId && result && !result.dirtySinceSave) {
+    if (templateId && clean) {
       openSavedTemplate(templateId);
     }
   }
