@@ -81,13 +81,21 @@ export type FreeNewNodeContext = {
   design?: Pick<PopupFreeDesign, "artboard">;
   /**
    * Um centro em px da prancheta: o da Forma solta (o que se ve no palco ou onde foi solta; sem = o centro da
-   * prancheta) e a altura do Degradê arrastado do painel (o meio na altura do ponto; sem = no topo).
+   * prancheta) e a altura do Degradê arrastado do painel (o meio na altura do ponto; sem = no topo). O x e o y que
+   * saem dele ficam nos limites de um solto (FREE_DESIGN_LIMITS.x e .y).
    */
   center?: { x: number; y: number };
 };
 
 function clearOf(color: string) {
   return `${color.slice(0, 7)}00`;
+}
+
+/** Um x ou um y de solto dentro do limite do design (o ponto pode estar no fundo de uma prancheta de mais de 2400 px). */
+function placeAxis(value: number, axis: "x" | "y") {
+  const limit = FREE_DESIGN_LIMITS[axis];
+
+  return Math.min(limit.max, Math.max(limit.min, Math.round(value)));
 }
 
 /** O elemento novo de cada tipo, com os valores iniciais (o painel Elementos acrescenta este). */
@@ -123,7 +131,7 @@ export function newFreeNode(kind: FreeElementKind | FreeNodeType, id: FreeId, co
       return {
         box: { fill: [{ color: "#ffffff26", kind: "solid" }], radius: 16 },
         id,
-        place: { h: 120, mode: "free", w: 120, x: Math.round(center.x - 60), y: Math.round(center.y - 60) },
+        place: { h: 120, mode: "free", w: 120, x: placeAxis(center.x - 60, "x"), y: placeAxis(center.y - 60, "y") },
         type: "shape"
       };
     }
@@ -135,7 +143,7 @@ export function newFreeNode(kind: FreeElementKind | FreeNodeType, id: FreeId, co
         box: { fill: [{ kind: "linear", stops: [{ at: 0, color: clearOf(color) }, { at: 100, color: color.slice(0, 7) }] }] },
         id,
         name: "Degradê",
-        place: { h: 200, mode: "free", w: artboard.width, x: 0, y: context.center ? Math.max(0, Math.round(context.center.y - 100)) : 0, z: -1 },
+        place: { h: 200, mode: "free", w: artboard.width, x: 0, y: context.center ? placeAxis(Math.max(0, context.center.y - 100), "y") : 0, z: -1 },
         type: "shape"
       };
     }

@@ -870,6 +870,32 @@ test("elemento novo onde soltou: o vão da sequência, a Forma e o Degradê pelo
   assert.deepEqual(ids(editor.addFreeElement(base, "heading").design.children), ["titulo", "caixa", "titulo2", "links"]);
 });
 
+test("elemento novo solto perto do fundo de uma prancheta alta: a Forma e o Degradê ficam no limite e o design vale", () => {
+  // Espacos de 1600 e 1200 px: a prancheta passa de 2400 px, o limite de y de um solto.
+  const tall = design([{ ...spacer("a"), place: { height: 1600, mode: "flow" } }, { ...spacer("b"), place: { height: 1200, mode: "flow" } }, LINKS]);
+  const L = model.FREE_DESIGN_LIMITS;
+  assert.ok(valid(tall));
+
+  const gradient = editor.addFreeElement(tall, "gradient", { center: { x: 200, y: 2600 } });
+  assert.equal(gradient.node.place.y, L.y.max);
+  assert.ok(valid(gradient.design), "o Degrade com o meio em y 2600");
+  const shape = editor.addFreeElement(tall, "shape", { center: { x: 200, y: 2470 } });
+  assert.deepEqual({ x: shape.node.place.x, y: shape.node.place.y }, { x: 140, y: L.y.max });
+  assert.ok(valid(shape.design), "a Forma com o centro em y 2470");
+
+  // O indicador do desenho mostra o mesmo lugar que entra.
+  assert.deepEqual(editor.freeNewNodeDropSpec(tall, "gradient").rectAt({ x: 200, y: 2600 }), rect(0, L.y.max, 440, 200));
+  assert.deepEqual(editor.freeNewNodeDropSpec(tall, "shape").rectAt({ x: 200, y: 2470 }), rect(140, L.y.max, 120, 120));
+
+  // O x e o y da Forma ficam nos limites de um solto, para qualquer centro.
+  const far = editor.addFreeElement(tall, "shape", { center: { x: 5000, y: -5000 } });
+  assert.deepEqual({ x: far.node.place.x, y: far.node.place.y }, { x: L.x.max, y: L.y.min });
+  assert.ok(valid(far.design));
+  const left = editor.addFreeElement(tall, "shape", { center: { x: -5000, y: 5000 } });
+  assert.deepEqual({ x: left.node.place.x, y: left.node.place.y }, { x: L.x.min, y: L.y.max });
+  assert.ok(valid(left.design));
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Guardas de fonte: o editor e o desenho
  * ---------------------------------------------------------------------------------------------- */
