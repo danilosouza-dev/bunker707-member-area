@@ -103,7 +103,7 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
     await cliqueCom(page, centroDe(await caixaParada(noPalco(editor, "ft"))), ["Control"]);
     await expect(frase).toHaveText("Forma C entrou na seleção. 3 elementos.");
 
-    expect(await escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
     await expect(editor.locator("[data-free-selection]")).toHaveCount(0);
     await expect(grupo).toBeVisible();
     await expect(editor.locator("[data-free-selection-group-tag]")).toHaveText("3 elementos");
@@ -123,7 +123,7 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
     await page.keyboard.press("Control+z");
     await expect(frase).toHaveText("Desfeito.");
     expect(await lugares(editor)).toEqual(antes);
-    expect(await escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
   });
 
   await test.step("arrastar uma leva as três num passo; o Esc no meio de outro arrastar não muda nada", async () => {
@@ -148,7 +148,7 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
       fc: { x: antes.fc.x + dx, y: antes.fc.y + dy },
       ft: antes.ft
     });
-    expect(await escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
 
     // Um passo so: um Ctrl + Z volta as tres.
     await noPalcoTecla(page, editor, "Control+z");
@@ -165,19 +165,19 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
     });
 
     expect(await lugares(editor)).toEqual(antes);
-    expect(await escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
   });
 
   await test.step("o clique sem arrastar num dos escolhidos deixa só ele; Shift + clique volta às três", async () => {
     await cliqueCom(page, noPalco(editor, "fb"));
-    expect(await escolhidos(editor)).toEqual(["fb"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fb"]);
     await expect(editor.locator("[data-free-selection]")).toHaveAttribute("data-free-selection", "fb");
     await expect(varios).toHaveCount(0);
 
     await cliqueCom(page, noPalco(editor, "fa"), ["Shift"]);
     await cliqueCom(page, noPalco(editor, "fc"), ["Shift"]);
     await expect(frase).toHaveText("Forma C entrou na seleção. 3 elementos.");
-    expect(await escolhidos(editor)).toEqual(["fb", "fa", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fb", "fa", "fc"]);
   });
 
   await test.step("Ctrl + D duplica as três (as cópias ficam escolhidas), Delete exclui as cópias e Ctrl + Z volta", async () => {
@@ -186,14 +186,14 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
     await noPalcoTecla(page, editor, "Control+d");
     await expect(frase).toHaveText("3 elementos duplicados.");
     await expect.poll(async () => (await linhasDasCamadas(editor)).length).toBe(linhas + 3);
+    await expect.poll(async () => (await escolhidos(editor)).length).toBe(3);
     const copias = await escolhidos(editor);
-    expect(copias).toHaveLength(3);
     expect(copias.filter((id) => ["fa", "fb", "fc"].includes(id))).toEqual([]);
 
     await noPalcoTecla(page, editor, "Delete");
     await expect(frase).toHaveText("3 elementos excluídos. Ctrl + Z desfaz.");
     await expect.poll(async () => (await linhasDasCamadas(editor)).length).toBe(linhas);
-    expect(await escolhidos(editor)).toEqual([]);
+    await expect.poll(() => escolhidos(editor)).toEqual([]);
     // Depois de excluir pelo palco, o foco continua no palco.
     await expect(editor.locator("[data-free-stage]")).toBeFocused();
 
@@ -206,7 +206,7 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
 
   await test.step("nas Camadas: Shift + ↓ pega o intervalo, Ctrl + clique e Ctrl + Enter põem e tiram, e T trava as três", async () => {
     await botaoDaCamada(editor, "fa").click();
-    expect(await escolhidos(editor)).toEqual(["fa"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa"]);
 
     // Shift + ↓ com o foco na linha: a linha de baixo entra e o intervalo cresce desde a ancora (a Forma A).
     await botaoDaCamada(editor, "fa").focus();
@@ -216,16 +216,16 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
     await page.keyboard.press("Shift+ArrowDown");
     await expect(frase).toHaveText("3 elementos escolhidos.");
     await expect(botaoDaCamada(editor, "fc")).toBeFocused();
-    expect(await escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
 
     // Ctrl + clique poe o Título; Ctrl + Enter na linha dele o tira.
     await botaoDaCamada(editor, "titulo").click({ modifiers: ["Control"] });
     await expect(frase).toHaveText("Título entrou na seleção. 4 elementos.");
-    expect(await escolhidos(editor)).toEqual(["fa", "fb", "fc", "titulo"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc", "titulo"]);
     await botaoDaCamada(editor, "titulo").focus();
     await page.keyboard.press("Control+Enter");
     await expect(frase).toHaveText("Título saiu da seleção. 3 elementos.");
-    expect(await escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
 
     // aria-current so no principal (o ultimo escolhido); "Na seleção" nas outras linhas escolhidas.
     await expect(botaoDaCamada(editor, "fc")).toHaveAttribute("aria-current", "true");
@@ -258,7 +258,7 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
   await test.step("Ver como Celular: as setas no grupo mudam só o celular", async () => {
     await editor.getByRole("button", { exact: true, name: "Celular" }).click();
     await expect(frase).toHaveText("Editando o Celular.");
-    expect(await escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
     await expect(varios.getByText("Com Ver como: Celular, alinhar e distribuir mudam só o celular.", { exact: true })).toBeVisible();
 
     await noPalcoTecla(page, editor, "ArrowDown");

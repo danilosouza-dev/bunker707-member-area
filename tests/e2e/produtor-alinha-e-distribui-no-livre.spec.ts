@@ -136,10 +136,10 @@ test("alinha e distribui várias Formas, alinha o girado, Alt + clique na pilha 
 
   await test.step("pelas Camadas, clique na Forma 1 e Shift + clique na travada: cinco escolhidas", async () => {
     await botaoDaCamada(editor, "f1").click();
-    expect(await escolhidos(editor)).toEqual(["f1"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["f1"]);
     await botaoDaCamada(editor, "ft").click({ modifiers: ["Shift"] });
     await expect(frase).toHaveText("5 elementos escolhidos.");
-    expect(await escolhidos(editor)).toEqual(["f1", "f2", "f3", "f4", "ft"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["f1", "f2", "f3", "f4", "ft"]);
     await expect(varios.getByRole("heading", { exact: true, name: "5 elementos selecionados" })).toBeVisible();
   });
 
@@ -211,7 +211,7 @@ test("alinha e distribui várias Formas, alinha o girado, Alt + clique na pilha 
 
   await test.step("o Selo girado 90° com Alinhar à esquerda: a borda que se vê fica em x 0", async () => {
     await botaoDaCamada(editor, "selo").click();
-    expect(await escolhidos(editor)).toEqual(["selo"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["selo"]);
     await expect(varios).toHaveCount(0);
     expect((await lugar(editor, "selo")).x, "girado, o Selo comeca bem longe da borda").toBeGreaterThan(200);
 
@@ -230,11 +230,11 @@ test("alinha e distribui várias Formas, alinha o girado, Alt + clique na pilha 
 
     await cliqueCom(page, ponto, ["Alt"]);
     await expect(frase).toHaveText("Selecionado: Embaixo (2 de 2 neste ponto).");
-    expect(await escolhidos(editor)).toEqual(["sa"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["sa"]);
 
     await cliqueCom(page, ponto, ["Alt"]);
     await expect(frase).toHaveText("Selecionado: Em cima (1 de 2 neste ponto).");
-    expect(await escolhidos(editor)).toEqual(["sb"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["sb"]);
   });
 
   await test.step("a Forma de baixo pelo ⋯ › Colocar dentro da caixa continua desenhada, com largura e altura", async () => {

@@ -199,7 +199,9 @@ export function falado(editor: Locator) {
 
 /**
  * Os escolhidos desenhados no palco (L4b): com varios, o id de cada contorno (data-free-selection-item, na ordem da
- * escolha, o principal por ultimo); com um, o de data-free-selection; sem nada, uma lista vazia.
+ * escolha, o principal por ultimo); com um, o de data-free-selection; sem nada, uma lista vazia. O contorno de um
+ * elemento que acabou de nascer (Duplicar) ou de voltar (Ctrl + Z) so aparece depois de ele ser medido, uns quadros
+ * depois (no WebKit, mais): confira com expect.poll, nunca lendo uma vez so.
  */
 export async function escolhidos(editor: Locator): Promise<string[]> {
   const varios = await editor.locator("[data-free-selection-item]").evaluateAll((items) => items.map((item) => item.getAttribute("data-free-selection-item") ?? ""));

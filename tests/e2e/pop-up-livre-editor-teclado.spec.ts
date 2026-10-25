@@ -358,14 +358,14 @@ test("vários pelo teclado, o foco na troca do painel Vários e o duplo clique n
     await page.keyboard.press("Shift+ArrowDown");
     await expect(frase).toHaveText("2 elementos escolhidos.");
     await expect(linhaDe("fb")).toBeFocused();
-    expect(await escolhidos(editor)).toEqual(["fa", "fb"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb"]);
 
     await page.keyboard.press("Control+Enter");
     await expect(frase).toHaveText("Forma B saiu da seleção. 1 elemento.");
     expect(await selecionado(editor)).toBe("fa");
     await page.keyboard.press("Control+Enter");
     await expect(frase).toHaveText("Forma B entrou na seleção. 2 elementos.");
-    expect(await escolhidos(editor)).toEqual(["fa", "fb"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb"]);
     await expect(linhaDe("fb")).toBeFocused();
   });
 
@@ -386,7 +386,7 @@ test("vários pelo teclado, o foco na troca do painel Vários e o duplo clique n
     await palco.focus();
     await page.keyboard.press("Control+a");
     await expect(frase).toHaveText("5 elementos escolhidos.");
-    expect(await escolhidos(editor)).toHaveLength(5);
+    await expect.poll(() => escolhidos(editor)).toHaveLength(5);
     await expect(varios.getByRole("heading", { exact: true, name: "5 elementos selecionados" })).toBeVisible();
     await expect(palco).toBeFocused();
 
@@ -412,7 +412,7 @@ test("vários pelo teclado, o foco na troca do painel Vários e o duplo clique n
     // C11: o Esc no painel Vários vai a nada (todos estao na prancheta) e o foco vai ao palco.
     await page.keyboard.press("Escape");
     await expect(varios).toHaveCount(0);
-    expect(await escolhidos(editor)).toEqual([]);
+    await expect.poll(() => escolhidos(editor)).toEqual([]);
     await expect(palco).toBeFocused();
     expect(await selecionadoNoPalco(editor)).toBe("Nada selecionado.");
   });
@@ -445,7 +445,7 @@ test("vários pelo teclado, o foco na troca do painel Vários e o duplo clique n
     await expect(frase).toHaveText("2 elementos duplicados.");
     const comCopias = await linhas(editor);
     expect(comCopias).toHaveLength(7);
-    expect(await escolhidos(editor)).toHaveLength(2);
+    await expect.poll(() => escolhidos(editor)).toHaveLength(2);
     await expect(duplicar).toBeFocused();
 
     // As copias saem e o painel Varios some com o foco dentro: o foco vai ao palco, e o Ctrl + Shift + Z chega ao editor.
@@ -459,7 +459,7 @@ test("vários pelo teclado, o foco na troca do painel Vários e o duplo clique n
     await expect(frase).toHaveText("Refeito.");
     expect(await linhas(editor)).toEqual(comCopias);
     // O refazer nao devolve a escolha das copias, que a equipe nao fez de novo.
-    expect(await escolhidos(editor)).toEqual([]);
+    await expect.poll(() => escolhidos(editor)).toEqual([]);
     await expect(palco).toBeFocused();
     await focoNoEditor();
   });
