@@ -8,7 +8,8 @@ import "./support/transpile-tsx.mjs";
 // da direita. A area de texto (Enter, limite de linhas), "Outro estilo na seleção" (antes / selecao / depois, com
 // acentos, emoji e letras combinadas), editar o texto mantendo o estilo das partes, "Voltar ao estilo do elemento",
 // as paradas do degradê, as camadas de fundo, os lados, as sombras com os atalhos, o mapa chave -> aba/campo, o
-// "Abrir um link" so um, a largura com a reescala, os pesos de cada fonte, a conta da imagem e o vocabulario.
+// "Abrir um link" que nunca desliga (ate 3, L4b), a largura com a reescala, os pesos de cada fonte, a conta da
+// imagem e o vocabulario.
 
 const panel = await import("../src/components/admin/v2/communication/popup-free/free-inspector-model.ts");
 const model = await import("../src/server/communications/popup-free-model.ts");
@@ -1007,21 +1008,46 @@ test("chave de erro leva à aba e ao campo, e o pedido de envio põe o foco em E
   assert.equal(panel.freeTabAfterSelection("advanced", null, "heading"), "content");
 });
 
-test("Abrir um link desliga quando outro botão já abre um link", () => {
+test("Abrir um link nunca desliga: com outro botão já em link, a pílula do Fechar continua ligada (L4b, até 3)", () => {
   const value = design([
+    { action: { kind: "cta" }, id: "principal", type: "button" },
     { action: { href: "https://exemplo.com", kind: "link", target: "new_tab" }, id: "link", label: "Ver", type: "button" },
+    { action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, id: "link2", label: "Compras", type: "button" },
     { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" },
     LINKS
   ]);
 
-  // O outro botão não pode virar link; o próprio botão de link pode continuar.
-  assert.equal(panel.freeLinkActionDisabledReason(value, "fechar"), "Use um botão “Abrir um link” só.");
-  assert.equal(panel.freeLinkActionDisabledReason(value, "link"), null);
-  assert.equal(M.linkButtons, "Use um botão “Abrir um link” só.");
+  // O limite de um link so saiu do painel e do schema.
+  assert.equal("freeLinkActionDisabledReason" in panel, false);
+  assert.equal("linkButtons" in M, false);
 
-  // Sem link nenhum, pode.
-  const free = design([{ action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" }, LINKS]);
-  assert.equal(panel.freeLinkActionDisabledReason(free, "fechar"), null);
+  // O Conteudo do Fechar desenhado de verdade: as 3 opcoes ligadas, sem o motivo embaixo.
+  const content = { allowSnooze: true, allowSnoozeEditable: true, audio: null, cta: null, onAllowSnoozeChange() {}, onCtaChange() {}, products: [], productsLoaded: true, snoozeMinutes: 1_440, title: "Aula nova" };
+  const html = renderToStaticMarkup(
+    createElement(FreeInspectorContent, {
+      content,
+      design: value,
+      disabled: false,
+      errors: {},
+      fonts: [],
+      hints: [],
+      latest: () => value,
+      node: model.findFreeNode(value, "fechar").node,
+      onBusyChange() {},
+      onChange() {},
+      onCtaChange() {},
+      onFontsChange() {},
+      rects: {}
+    })
+  );
+  const radios = [...html.matchAll(/<input[^>]*name="livre-fechar-acao"[^>]*>/g)].map(([tag]) => tag);
+
+  assert.equal(radios.length, 3, html);
+  assert.ok(radios.some((tag) => tag.includes('value="link"')), "a opcao Abrir um link esta la");
+  assert.equal(radios.some((tag) => /\sdisabled=""/.test(tag)), false, "nenhuma opcao desligada");
+  assert.doesNotMatch(html, /id="livre-fechar-acao-motivo"/, "sem frase de motivo");
+  assert.doesNotMatch(html, /aria-describedby="livre-fechar-acao-motivo"/);
+  assert.equal(html.includes("Abrir um link” só"), false);
 
   // Trocar o que o botão faz: link começa sem destino, na mesma aba; o texto fica.
   const button = { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" };

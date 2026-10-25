@@ -625,8 +625,9 @@ const noticeDraftObjectSchema = z
     addNoticeContentIssues(draft, draft.kind, context);
 
     // v3b-1: "Quando o aluno clica no botão" sem botao nunca pararia (tambem quando o botao sai depois). No
-    // design (docs/26), o segundo botao com link tambem conta como o clique. No Livre (docs/27 §2.1), o que se
-    // clica precisa estar visivel nos dois aparelhos (freeHasClickTarget: o celular pode esconder).
+    // design (docs/26), o segundo botao com link tambem conta como o clique. No Livre (docs/27 §2.1, L4b), cada
+    // aparelho precisa de algo visivel para clicar: o Botao principal ou um dos ate 3 "Abrir um link"
+    // (freeHasClickTarget; o Botao principal escondido no computador nao conta ali).
     if (
       draft.kind === "popup" &&
       draft.popup?.frequency.mode === "repeat" &&

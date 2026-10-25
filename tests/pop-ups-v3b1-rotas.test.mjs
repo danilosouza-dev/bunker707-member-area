@@ -790,6 +790,33 @@ test("eventos: Padrão, aviso sem botao e botao escondido nos dois aparelhos nao
   assert.deepEqual(await metadataDe(db, { button: "link:site", event: "clicked" }), { campaign_id: POPUP });
 });
 
+test("eventos (L4b): com 2 e 3 Abrir um link no Livre, cada clique grava o id do seu link; o link escondido nos dois aparelhos nao", async () => {
+  const link = (id, href) => ({ action: { href, kind: "link", target: "same_tab" }, id, label: `Abrir ${id}`, type: "button" });
+  const comLinha = () => linha(sessao.user.id, { impressions: 1, last_seen_at: iso(Date.now() - MIN) });
+
+  // Dois links: o design passa no schema (o limite de um link so saiu) e cada um conta pelo seu id.
+  novoAluno();
+  let db = banco({ campaigns: [popupNoAr({ popup_design: livre([LINK_DO_LIVRE, link("compras", "https://exemplo.com/b")]) })], deliveries: [comLinha()] });
+  assert.deepEqual(await metadataDe(db, { button: "link:site", event: "clicked" }), { button: "link:site", campaign_id: POPUP });
+  assert.deepEqual(await metadataDe(db, { button: "link:compras", event: "clicked" }), { button: "link:compras", campaign_id: POPUP });
+  assert.deepEqual(await metadataDe(db, { button: "cta", event: "clicked" }), { button: "cta", campaign_id: POPUP });
+
+  // Tres links (o teto de 3 botoes alem do principal), o terceiro escondido nos dois aparelhos: so ele fica sem a chave.
+  novoAluno();
+  db = banco({
+    campaigns: [popupNoAr({ popup_design: livre([LINK_DO_LIVRE, link("compras", "https://exemplo.com/b"), { ...link("aula", "/minhas-compras"), hidden: true }]) })],
+    deliveries: [comLinha()]
+  });
+  assert.deepEqual(await metadataDe(db, { button: "link:compras", event: "clicked" }), { button: "link:compras", campaign_id: POPUP });
+  assert.deepEqual(await metadataDe(db, { button: "link:site", event: "clicked" }), { button: "link:site", campaign_id: POPUP });
+  assert.deepEqual(await metadataDe(db, { button: "link:aula", event: "clicked" }), { campaign_id: POPUP }, "escondido nos dois aparelhos");
+  assert.deepEqual(
+    eventos(db).map((item) => item.event_type),
+    Array(3).fill("message_clicked"),
+    "todo clique grava, com ou sem a chave"
+  );
+});
+
 test("eventos: a falha da leitura do design vira log e o clique grava sem metadata.button (200); clique recusado nao le o design", async () => {
   const aluno = novoAluno();
   const db = banco({ campaigns: [popupNoAr({ popup_design: livre() })], deliveries: [linha(aluno, { impressions: 1, last_seen_at: iso(Date.now() - MIN) })] });

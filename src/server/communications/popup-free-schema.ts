@@ -66,7 +66,6 @@ export const POPUP_FREE_MESSAGES = {
   imageUploadSides: "A imagem precisa ter de 16 a 1.600 px de cada lado.",
   label: "Escreva o texto.",
   lineEmpty: "Escreva algo nesta linha.",
-  linkButtons: "Use um botão “Abrir um link” só.",
   links: "Falta o elemento dos links (Lembrar depois e Não mostrar de novo).",
   mobilePlace: "No celular, o elemento fica como no computador: solto continua solto e na sequência continua na sequência.",
   linksDuplicate: "O design só pode ter um elemento dos links.",
@@ -376,7 +375,7 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
   const byId = new Map<FreeId, FreeNode>();
   const assets = design.assets ?? [];
   const assetKinds = new Map<FreeId, FreeAsset["kind"]>();
-  const counts = { audio: 0, buttons: 0, cta: 0, effects: 0, free: 0, headings: 0, icons: 0, imageNodes: 0, linkButtons: 0, links: 0, nodes: 0, text: 0, videos: 0 };
+  const counts = { audio: 0, buttons: 0, cta: 0, effects: 0, free: 0, headings: 0, icons: 0, imageNodes: 0, links: 0, nodes: 0, text: 0, videos: 0 };
   let textTotalReported = false;
 
   assets.forEach((item, index) => {
@@ -479,12 +478,9 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
               issue(M.design, [...at, "label"]);
             }
           } else {
+            // Ate 3 alem do principal, em qualquer mistura de Fechar, Lembrar depois e Abrir um link (L4b).
             if (++counts.buttons > L.buttons) {
               issue(M.buttons, [...at, "action"]);
-            }
-
-            if (node.action.kind === "link" && ++counts.linkButtons > L.linkButtons) {
-              issue(M.linkButtons, [...at, "action"]);
             }
 
             if (node.label === undefined) {

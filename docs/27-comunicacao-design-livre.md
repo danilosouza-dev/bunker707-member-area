@@ -257,7 +257,7 @@ Elementos (`type`):
 | `heading` (Título) | `lines` (1 a 4), `textStyle`; o primeiro visível é o `<h2>` e o nome do diálogo |
 | `text` (Texto) | `lines` (1 a 12), `textStyle`; o primeiro visível descreve o diálogo |
 | `badge` (Selo) | `label` (1 a 40), `icon`, `textStyle` |
-| `button` (Botão) | `action`: `{ "kind": "cta" }` (o botão principal: texto e destino no `cta` do aviso, sem `label`), `{ "kind": "close" }`, `{ "kind": "snooze" }` (Lembrar depois) ou `{ "kind": "link", "href": "...", "target": "same_tab" | "new_tab" }` (Abrir um link; o clique conta como o clique do pop-up); `label` (1 a 40, obrigatório fora do `cta`); `icon` (`{ "name", "side": "end" | "start" }`); `textStyle` |
+| `button` (Botão) | `action`: `{ "kind": "cta" }` (o botão principal: texto e destino no `cta` do aviso, sem `label`), `{ "kind": "close" }`, `{ "kind": "snooze" }` (Lembrar depois) ou `{ "kind": "link", "href": "...", "target": "same_tab" | "new_tab" }` (Abrir um link: até 3, cada um com o seu destino; o clique em qualquer um conta como o clique do pop-up); `label` (1 a 40, obrigatório fora do `cta`); `icon` (`{ "name", "side": "end" | "start" }`); `textStyle` |
 | `image` (Imagem) | `asset` (id de uma imagem de `assets`, ou `null`: sem arquivo, a equipe envia no editor antes de publicar), `alt` (até 160; vazio = decorativa), `fit` (`cover` · `contain`), `focus` |
 | `video` (Vídeo) | `asset` (id do vídeo de `assets`, ou `null`: sem arquivo, a equipe envia no editor antes de publicar), `fit`, `focus`; toca sem som, em repetição; com menos movimento ou economia de dados, só a capa |
 | `icon` (Ícone) | `icon` (um dos 24 nomes abaixo), `size` (8 a 160), `stroke` (1 a 3), `color` |
@@ -317,7 +317,7 @@ Por dentro (só o editor e o servidor escrevem; fica fora das instruções para 
 | Imagens diferentes / elementos Imagem | até 6 / até 8 |
 | Vídeo | no máximo 1 |
 | Ícones (elementos Ícone) | até 12 |
-| Botões | um botão principal (existe se e só se o aviso tem botão); outros até 3, dos quais no máximo 1 "Abrir um link" |
+| Botões | um botão principal (existe se e só se o aviso tem botão); outros até 3: Fechar, Lembrar depois ou Abrir um link, em qualquer mistura (até 3 "Abrir um link") |
 | Links / Áudio | exatamente 1 / no máximo 1 (existe se e só se o aviso tem áudio) |
 | Elementos com desfoque | até 4 |
 | Camadas de fundo / paradas / sombras | até 3 / 2 a 5 / até 2 |
@@ -329,7 +329,7 @@ Por dentro (só o editor e o servidor escrevem; fica fora das instruções para 
 
 Sempre (o schema confere ao colar e ao salvar): ids únicos; profundidade e contagens de 9.5 Limites; solto só na prancheta; `label` obrigatório fora do `cta` e proibido no `cta`; todo `asset` de elemento ou pintura existe em `assets` com o tipo certo; a capa do vídeo é uma imagem de `assets`;<!-- ia:fora --> o caminho casa com o padrão do bucket e o vídeo tem a extensão do tipo;<!-- /ia:fora --> o link do botão segue a regra do botão principal (página da área, produto ou https); cada linha tem pelo menos uma letra que não é espaço; até 4 fontes enviadas; o tamanho; e o **X sempre visível**: o alfa da cor do ícone do X é pelo menos `cc` e o contraste entre o ícone e o fundo do X (o fundo composto sobre a cor de base da prancheta, a camada de baixo do `fill`; com alfa, sobre preto) é pelo menos 3:1.
 
-Com o conteúdo do aviso (no salvar e no publicar): aviso com botão pede o botão principal (`Falta o botão principal no design.`); botão principal sem botão no aviso (`Escreva o texto do botão e escolha para onde ele leva.` em `cta.label`); aviso com áudio pede o Áudio (`Falta o elemento Áudio no design.`); Áudio sem áudio no aviso (`Envie o áudio ou tire o elemento Áudio.` em `audio`); botão Lembrar depois com o adiar desligado; Imagem e Vídeo sem arquivo. "Quantas vezes → Quando o aluno clica no botão" vale com o `cta` ou com o botão "Abrir um link".
+Com o conteúdo do aviso (no salvar e no publicar): aviso com botão pede o botão principal (`Falta o botão principal no design.`); botão principal sem botão no aviso (`Escreva o texto do botão e escolha para onde ele leva.` em `cta.label`); aviso com áudio pede o Áudio (`Falta o elemento Áudio no design.`); Áudio sem áudio no aviso (`Envie o áudio ou tire o elemento Áudio.` em `audio`); botão Lembrar depois com o adiar desligado; Imagem e Vídeo sem arquivo. "Quantas vezes → Quando o aluno clica no botão" vale quando o computador e o celular têm, cada um, um botão visível que conta como o clique: o botão principal (com o `cta`) ou qualquer "Abrir um link" com destino que vale; os botões podem ser outros em cada aparelho, e o escondido num aparelho não conta nele (o botão principal escondido no computador também não; veja 9.10 Celular). Sem isso: `Este pop-up não tem botão: escolha quando ele para de aparecer.`
 
 <!-- ia:fora -->
 No rascunho do aviso, `freeDesign` fica ao lado de `design` (o Personalizado): no máximo um não nulo (`Escolha um design só.`). Ao salvar, o pedido com uma só das chaves (mesmo `null`) zera a outra; com as duas, valem como vieram; sem nenhuma, fica o que está gravado.
@@ -343,7 +343,7 @@ O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`,
 
 1. Escreva só o JSON do design, na forma desta seção. Imagem e Vídeo novos sempre com `"asset": null` (a equipe envia o arquivo no editor); não escreva `assets` nem `fonts` novos e nunca um endereço de arquivo. Se o design que eu mandar já tem `assets`, devolva essa lista e os `asset` exatamente como vieram.
 2. Texto sempre na sequência (`place` omitido ou `flow`); solto só para mídia, forma, degradê e adesivo.
-3. Um botão principal (`{ "kind": "cta" }`) quando o aviso tem botão; o texto dele vai no `cta` do aviso, fora do design.
+3. Um botão principal (`{ "kind": "cta" }`) quando o aviso tem botão; o texto dele vai no `cta` do aviso, fora do design. Para destinos além do principal, use "Abrir um link" (`{ "kind": "link", ... }`): até 3 botões além do principal, contando Fechar e Lembrar depois.
 4. Os `links` sempre no fim da prancheta; o Áudio antes do primeiro botão, quando o aviso tem áudio.
 5. Imagem de foto vira um elemento Imagem com `"asset": null` e `"name": "Troque esta imagem"`, que a equipe preenche.
 6. Omita o que é igual ao padrão (veja 9.4 Padrões): o documento mínimo `{ mode, version, children }` já vale.

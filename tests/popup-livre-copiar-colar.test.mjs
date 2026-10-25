@@ -308,6 +308,36 @@ test("colar é um passo só no histórico (design e botão principal juntos) e c
   );
 });
 
+test("colar um design com o principal e 3 Abrir um link vale num passo só (L4b: até 3 links)", () => {
+  const link = (id, href, target = "same_tab") => ({ action: { href, kind: "link", target }, id, label: `Abrir ${id}`, type: "button" });
+  const text = JSON.stringify({
+    children: [
+      { id: "titulo", lines: [[{ text: "Escolha por onde começar" }]], type: "heading" },
+      { action: { kind: "cta" }, id: "botao", type: "button" },
+      link("linka", "/minhas-compras"),
+      link("linkb", "https://exemplo.com/b", "new_tab"),
+      link("linkc", "/conteudo/produto-1"),
+      { id: "links", type: "links" }
+    ],
+    mode: "free",
+    version: 1
+  });
+  const result = paste.parseFreeDesignPaste(text, context());
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(
+    result.design.children.filter((node) => node.type === "button" && node.action.kind === "link").map((node) => node.id),
+    ["linka", "linkb", "linkc"]
+  );
+  assert.deepEqual(result.cta, CTA, "o Botão principal acompanha o aviso");
+
+  const before = { cta: CTA, design: starters.freeStarterDesign("blank") };
+  const pushed = history.pushFreeHistory(history.createFreeHistory(before), { cta: result.cta, design: result.design }, { coalesceKey: null });
+
+  assert.equal(pushed.past.length, 1, "um passo so");
+  assert.deepEqual(history.undoFreeHistory(pushed).present, before);
+});
+
 test("as instruções para a IA vêm do docs/27 §9 (gerado), vão no pacote do editor e só são baixadas ao abrir Copiar e colar", async () => {
   const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
   const generated = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-ai-instructions.ts", import.meta.url), "utf8");
@@ -355,6 +385,15 @@ test("as instruções para a IA vêm do docs/27 §9 (gerado), vão no pacote do 
   assert.ok(!FREE_AI_INSTRUCTIONS.includes("resolveFreeForDevice") && !FREE_AI_INSTRUCTIONS.includes("matchMedia"), "o por dentro do celular fica no docs");
   assert.match(doc, /<!-- ia:fora -->(?:(?!<!-- \/ia:fora -->)[\s\S])*resolveFreeForDevice/, "o por dentro do celular continua no docs, marcado");
   assert.match(FREE_AI_INSTRUCTIONS, /\| Tamanho \| até 30\.000 bytes[^|]*\|\n/, "o tamanho como um limite simples");
+  // L4b: ate 3 "Abrir um link" em qualquer mistura com Fechar e Lembrar depois; o guia manda usar o link para
+  // destinos alem do principal, e o limite de um link so saiu.
+  assert.ok(!FREE_AI_INSTRUCTIONS.includes('no máximo 1 "Abrir um link"'), "sem o limite de um link so");
+  assert.ok(
+    FREE_AI_INSTRUCTIONS.includes('| Botões | um botão principal (existe se e só se o aviso tem botão); outros até 3: Fechar, Lembrar depois ou Abrir um link, em qualquer mistura (até 3 "Abrir um link") |'),
+    "o limite dos botoes"
+  );
+  assert.match(FREE_AI_INSTRUCTIONS, /3\. Um botão principal [^\n]*Para destinos além do principal, use "Abrir um link"/, "o guia curto fala do link");
+  assert.match(FREE_AI_INSTRUCTIONS, /vale quando o computador e o celular têm, cada um, um botão visível que conta como o clique/, "o D9 por aparelho");
 
   // Os exemplos das instrucoes colam de volta no editor e cabem no que a linha Tamanho promete.
   const blocks = [...FREE_AI_INSTRUCTIONS.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => match[1]);

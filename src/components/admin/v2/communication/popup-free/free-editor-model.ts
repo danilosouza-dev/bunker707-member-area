@@ -147,7 +147,6 @@ export const FREE_EDITOR_COPY = {
     ctaExists: "O pop-up já tem o botão principal.",
     groupsLabel: "Elementos para acrescentar",
     hint: "Clique para acrescentar ou arraste até o lugar no desenho.",
-    linkButtonOnly: M.linkButtons,
     videoOnly: M.videoDuplicate
   },
   layers: {
@@ -441,7 +440,6 @@ function contains(node: FreeNode, match: (item: FreeNode) => boolean): boolean {
 }
 
 const isCta = (node: FreeNode): node is FreeButtonNode => node.type === "button" && node.action.kind === "cta";
-const isLinkButton = (node: FreeNode) => node.type === "button" && node.action.kind === "link";
 
 export function freeCtaNode(design: Pick<PopupFreeDesign, "children">): FreeButtonNode | null {
   let found: FreeButtonNode | null = null;
@@ -468,9 +466,9 @@ export function freeParentId(design: Pick<PopupFreeDesign, "children">, id: Free
  * Contagens: o que ainda cabe (o mesmo limite do schema, para o botao desligar antes)
  * ---------------------------------------------------------------------------------------------- */
 
-type Counts = { audio: number; buttons: number; cta: number; free: number; headings: number; icons: number; images: number; links: number; linkButtons: number; nodes: number; videos: number };
+type Counts = { audio: number; buttons: number; cta: number; free: number; headings: number; icons: number; images: number; links: number; nodes: number; videos: number };
 
-function countNodes(nodes: readonly FreeNode[], counts: Counts = { audio: 0, buttons: 0, cta: 0, free: 0, headings: 0, icons: 0, images: 0, linkButtons: 0, links: 0, nodes: 0, videos: 0 }): Counts {
+function countNodes(nodes: readonly FreeNode[], counts: Counts = { audio: 0, buttons: 0, cta: 0, free: 0, headings: 0, icons: 0, images: 0, links: 0, nodes: 0, videos: 0 }): Counts {
   walkFreeNodes(nodes, (node) => {
     counts.nodes += 1;
 
@@ -487,10 +485,6 @@ function countNodes(nodes: readonly FreeNode[], counts: Counts = { audio: 0, but
         counts.cta += 1;
       } else {
         counts.buttons += 1;
-
-        if (node.action.kind === "link") {
-          counts.linkButtons += 1;
-        }
       }
     }
   });
@@ -504,7 +498,6 @@ export function freeAddProblem(design: Pick<PopupFreeDesign, "children">, added:
 
   if (counts.nodes > L.nodes) return M.nodes;
   if (counts.cta > 1) return M.ctaDuplicate;
-  if (counts.linkButtons > L.linkButtons) return M.linkButtons;
   if (counts.buttons > L.buttons) return M.buttons;
   if (counts.headings > L.headings) return M.headings;
   if (counts.images > L.imageNodes) return M.imageNodes;
@@ -740,7 +733,8 @@ export function freeDuplicateProblem(design: PopupFreeDesign, id: FreeId): strin
     return M.childrenPerBox;
   }
 
-  // A copia conta como vai entrar (o Botão principal vira um "Abrir um link").
+  // A copia conta como vai entrar (o Botão principal vira um "Abrir um link", que cabe enquanto houver lugar nos 3
+  // botoes alem do principal).
   return freeAddProblem(design, [cloneWithIds(node, (prefix) => prefix, null)]);
 }
 
@@ -751,8 +745,9 @@ function subtreeIds(node: FreeNode): FreeId[] {
 
 /**
  * Duplica logo depois do original (ids novos em tudo). O Botão principal duplicado vira um botao "Abrir um link"
- * com o mesmo texto e destino (so se ainda nao ha um). Um solto duplicado anda 16 px para baixo e para a direita.
- * Os valores do celular vao junto para os ids novos (o solto anda 16 px no celular tambem, quando tem X/Y proprios).
+ * com o mesmo texto e destino, enquanto couber nos 3 botoes alem do principal (L4b). Um solto duplicado anda 16 px
+ * para baixo e para a direita. Os valores do celular vao junto para os ids novos (o solto anda 16 px no celular
+ * tambem, quando tem X/Y proprios).
  */
 export function duplicateFreeNode(design: PopupFreeDesign, id: FreeId, cta: NoticeDraft["cta"]): { design: PopupFreeDesign; id: FreeId } | { reason: string } {
   const problem = freeDuplicateProblem(design, id);
@@ -2014,17 +2009,6 @@ export function freeToFreeProblem(design: Pick<PopupFreeDesign, "children">, id:
   }
 
   return design.children.filter((item) => item.place?.mode === "free").length >= L.freeNodes ? M.freeNodes : null;
-}
-
-/** Ja existe um botao "Abrir um link" (o Duplicar do Botão principal desliga). */
-export function freeHasLinkButton(design: Pick<PopupFreeDesign, "children">): boolean {
-  let found = false;
-
-  walkFreeNodes(design.children, (node) => {
-    found ||= isLinkButton(node);
-  });
-
-  return found;
 }
 
 /* ------------------------------------------------------------------------------------------------
