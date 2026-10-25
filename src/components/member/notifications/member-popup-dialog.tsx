@@ -52,8 +52,11 @@ export function MemberPopupDialog({
   open,
   popup
 }: {
-  /** O aluno saiu do pop-up (o host registra o evento e fecha); `via` diz como fechou. */
-  onFinish: (outcome: PopupOutcome, via?: PopupCloseVia) => void;
+  /**
+   * O aluno saiu do pop-up (o host registra o evento e fecha); `via` diz como fechou; `button`, no clique do Livre,
+   * qual botao foi ("cta" ou "link:<id>").
+   */
+  onFinish: (outcome: PopupOutcome, via?: PopupCloseVia, button?: string) => void;
   /** Navegacao do AppShell (salva progresso e favoritos antes de trocar de pagina). */
   onNavigate?: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
   open: boolean;
@@ -146,8 +149,8 @@ export function MemberPopupDialog({
               bodyId={bodyId}
               nudgeClose={nudgeClose}
               onClose={() => onFinish("closed", "x")}
-              onCta={(event, link) => {
-                onFinish("clicked");
+              onCta={(event, link, button) => {
+                onFinish("clicked", undefined, button);
 
                 // Link de fora ou em nova aba: o navegador abre sozinho.
                 if (link.internal && !link.newTab) {

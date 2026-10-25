@@ -154,6 +154,72 @@ test("onde apareceu, em que momento, como fecharam e quantas vezes: das abertura
   });
 });
 
+/** Livre com o Botao principal e um "Abrir um link" (id "site"), para o clique por botao (docs/27 L47). */
+const LIVRE_COM_LINK = {
+  children: [
+    { id: "titulo", lines: [[{ text: "Relatório do Livre" }]], type: "heading" },
+    { action: { kind: "cta" }, id: "botao", type: "button" },
+    { action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, id: "site", label: "Ver minhas compras", type: "button" },
+    { dismiss: true, id: "links", type: "links" }
+  ],
+  mode: "free",
+  version: 1
+};
+
+/** Os message_clicked do pop-up, por aluno, com o botao gravado (ou "-" sem a chave). */
+async function botoesClicados(campaignId) {
+  const linhas = unwrap(
+    await db.from("student_events").select("metadata,user_id").eq("entity_id", campaignId).eq("event_type", "message_clicked"),
+    "Lendo os cliques"
+  );
+  const porAluno = {};
+
+  for (const linha of linhas) {
+    assert.equal(linha.metadata.campaign_id, campaignId);
+    assert.deepEqual(Object.keys(linha.metadata).sort(), "button" in linha.metadata ? ["button", "campaign_id"] : ["campaign_id"], "so ids no metadata");
+    (porAluno[linha.user_id] ??= []).push(linha.metadata.button ?? "-");
+  }
+
+  return Object.fromEntries(Object.entries(porAluno).map(([user, botoes]) => [user, botoes.sort()]));
+}
+
+test("clique por botao do Livre: metadata.button so com a forma e o design conferidos; com ou sem a chave, o relatorio conta igual em 'Clicaram no botão'", async () => {
+  const livre = await publicar(popup({ pages: ["saved"] }, { design: null, freeDesign: LIVRE_COM_LINK, title: "Livre com link" }));
+  const padrao = await publicar(popup({ pages: ["saved"] }, { title: "Padrão com botão" }));
+
+  // Aluna no Livre: o link, o Botao principal, um id fora do design e a aba de antes (sem botao) = 4 cliques.
+  for (const [n, button] of ["link:site", "cta", "link:naoexiste", undefined].entries()) {
+    if (n > 0) {
+      await passaram(livre.id, aluna.id);
+    }
+
+    await mostrar(aluna, livre.id, "saved");
+    await evento(aluna, livre.id, button === undefined ? { event: "clicked" } : { button, event: "clicked" });
+  }
+
+  // Outro aluno no Livre: valor forjado (forma errada), ignorado sem 400. A aluna no Padrão: o Padrão nunca leva a chave.
+  await mostrar(alunoSemAcesso, livre.id, "saved");
+  await evento(alunoSemAcesso, livre.id, { button: "javascript:alert(1)", event: "clicked" });
+  await mostrar(aluna, padrao.id, "saved");
+  await evento(aluna, padrao.id, { button: "cta", event: "clicked" });
+  // O botao so vai no clique.
+  await evento(aluna, livre.id, { button: "cta", event: "closed", via: "x" });
+
+  assert.deepEqual(await botoesClicados(livre.id), { [aluna.id]: ["-", "-", "cta", "link:site"], [alunoSemAcesso.id]: ["-"] });
+  assert.deepEqual(await botoesClicados(padrao.id), { [aluna.id]: ["-"] });
+  const fechou = unwrap(
+    await db.from("student_events").select("metadata").eq("entity_id", livre.id).eq("event_type", "message_closed"),
+    "Lendo o fechamento"
+  );
+  assert.deepEqual(fechou.map((linha) => linha.metadata), [{ campaign_id: livre.id, via: "x" }]);
+
+  const numeros = await relatorio(livre.id);
+  assert.deepEqual(numeros["outcome|clicked"], [5, 2], "com e sem metadata.button, todos os cliques contam");
+  assert.deepEqual(numeros["opened|"], [5, 2]);
+  assert.deepEqual(numeros["viewers|"], [5, 2]);
+  assert.deepEqual((await relatorio(padrao.id))["outcome|clicked"], [1, 1]);
+});
+
 test("o aluno nao grava linhas de avisos no proprio historico (RLS); as de antes ficam presas nas vezes da linha; quem nao viu nao conta", async () => {
   const visto = await publicar(popup({ pages: ["home"] }, { title: "Visto duas vezes" }));
   const naoVisto = await publicar(popup({ pages: ["home"] }, { title: "Nao visto" }));

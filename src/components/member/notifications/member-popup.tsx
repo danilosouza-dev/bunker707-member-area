@@ -52,7 +52,11 @@ export type MemberPopupCardProps = {
   /** "Só no X": o toque fora faz o X pulsar por 300 ms (nada sob prefers-reduced-motion). */
   nudgeClose?: boolean;
   onClose?: () => void;
-  onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink) => void;
+  /**
+   * Clique num botao com destino. `button` so vem do Livre (docs/27 L47): "cta" (o Botao principal) ou "link:<id>" (um
+   * "Abrir um link", pelo id do elemento); o Padrão e o Personalizado nao mandam.
+   */
+  onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink, button?: string) => void;
   onDismiss?: () => void;
   onSnooze?: () => void;
   /** Personalizado: false pausa o video (a janela fechando); padrao true. O Padrão nao tem video. */
