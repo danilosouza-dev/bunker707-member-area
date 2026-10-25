@@ -6,7 +6,8 @@ import type * as PopupFreeCardModule from "./popup-free-card";
 // baixado so para pop-up Livre: o JS inicial e a janela do Padrão/Personalizado nao crescem.
 //
 // O pedaco ja baixado fica guardado aqui: a janela le dele o nome e a descricao do dialogo do Livre
-// (popupFreeDialogAria, reexportado pelo cartao) sem puxar popup-free-render.ts para o pedaco da janela.
+// (popupFreeDialogAria do cartao, pelo design do aparelho da tela) sem puxar popup-free-render.ts para o pedaco da
+// janela.
 
 let loaded: typeof PopupFreeCardModule | undefined;
 

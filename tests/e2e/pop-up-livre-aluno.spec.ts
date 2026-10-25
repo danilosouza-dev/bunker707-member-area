@@ -1,5 +1,6 @@
-import type { Locator, Page } from "@playwright/test";
+import type { Browser, Locator, Page } from "@playwright/test";
 import { popupStarterDesign } from "../../src/server/communications/popup-design-model";
+import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import { bloquearRedeExterna, estadoDoPopUpDaAluna, eventosDoPopUp, expect, idDoAviso, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
 import { publicarPopUpComDesign } from "./popup-design-fixtures";
 import { designVideoNoTopo, prepararMidiaDoLivre, publicarPopUpLivre, type MidiaDoLivre } from "./popup-livre-fixtures";
@@ -11,7 +12,9 @@ import { designVideoNoTopo, prepararMidiaDoLivre, publicarPopUpLivre, type Midia
 // proporcao (conferido so no que fica acima de qualquer texto, numa amostra com a fonte enviada e textos de 16 px
 // ou mais); o Tab segue as Camadas e o X vem por ultimo; uma forma por cima do botao nao impede o clique (e o
 // clique conta); o Esc fecha; "Não mostrar de novo" some com dismiss false; Padrão e Personalizado continuam
-// iguais. Com E2E_SHOTS_DIR, guarda as fotos de 1440 e 375 px nessa pasta (conferencia visual).
+// iguais; com valores proprios do celular (docs/27 §1 e §9.10), a 375 px as caixas seguem o celular e a Forma escondida
+// no celular some, e a 1440 px vale o computador. Com E2E_SHOTS_DIR, guarda as fotos de 1440 e 375 px nessa pasta
+// (conferencia visual).
 
 const TITULO = "Pop-up E2E: Livre com vídeo";
 const NOME = /experimente grátis nova aula ao vivo/i;
@@ -322,6 +325,112 @@ test.describe("sem Não mostrar de novo", () => {
     await expect(popUp.getByText("Não mostrar de novo")).toHaveCount(0);
     await popUp.getByRole("button", { exact: true, name: "Fechar" }).click();
     await expect(popUp).toHaveCount(0);
+  });
+});
+
+test.describe("valores próprios do celular", () => {
+  const COM_CELULAR = "Pop-up E2E: Livre com celular";
+  const escala = 343 / 440;
+
+  test.beforeAll(async ({ browser }) => {
+    await zerarComunicacao();
+    // zerarComunicacao apaga a capa do Livre sem uso e a linha da fonte: prepara de novo (o video fica).
+    midia = await prepararMidiaDoLivre();
+    const base = designVideoNoTopo(midia, {
+      extra: [{ box: { fill: [{ color: "#ff00ff", kind: "solid" }] }, id: "mancha", name: "Forma só no computador", place: { h: 80, mode: "free", w: 120, x: 300, y: 40 }, type: "shape" }]
+    });
+    const id = await publicarPopUpLivre(browser, {
+      design: {
+        ...base,
+        devices: {
+          mobile: {
+            nodes: {
+              mancha: { hidden: true },
+              midia: { place: { h: 200, mode: "free", w: 360, x: 40, y: 16 } },
+              titulo: { textStyle: { size: 24 } }
+            }
+          }
+        }
+      },
+      titulo: COM_CELULAR
+    });
+
+    // Publicar pela tela guarda os valores do celular (o servidor confere o design de novo).
+    const gravado = unwrap(await createLocalAdminClient().from("campaigns").select("popup_design").eq("id", id).single(), "Lendo o pop-up publicado") as {
+      popup_design: { devices?: { mobile?: { nodes?: Record<string, unknown> } } } | null;
+    };
+    expect(Object.keys(gravado.popup_design?.devices?.mobile?.nodes ?? {}).sort()).toEqual(["mancha", "midia", "titulo"]);
+  });
+
+  /** Abre o pop-up numa tela da largura dada e mede depois que a entrada da janela para (nada se mexendo). */
+  async function medirNaTela(browser: Browser, width: number) {
+    const contexto = await browser.newContext({
+      baseURL: enderecoDoApp,
+      locale: "pt-BR",
+      // Menos movimento: a janela entra sem transicao e o video fica na capa (as caixas sao as mesmas).
+      reducedMotion: "reduce",
+      storageState: "tests/e2e/.auth/aluna.json",
+      timezoneId: "America/Sao_Paulo",
+      viewport: { height: 900, width }
+    });
+    await bloquearRedeExterna(contexto);
+
+    try {
+      const page = await contexto.newPage();
+      await reabrirPopUpParaAluna(COM_CELULAR);
+      const popUp = await abrirPopUp(page);
+      await page.waitForFunction(() =>
+        document.getAnimations().every((animation) => animation.playState !== "running" || animation.effect?.getComputedTiming().endTime === Infinity)
+      );
+      await expect(popUp.locator('[data-free-id="titulo"]')).toBeVisible();
+      // Solto e medido por dentro da borda da prancheta (a borda de 1 px nao encolhe): x e y como no design.
+      const dentro = (locator: Locator) =>
+        locator.evaluate((element) => {
+          const prancheta = element.closest("[data-free-artboard]") as HTMLElement;
+          const caixa = element.getBoundingClientRect();
+          const base = prancheta.getBoundingClientRect();
+          return { height: caixa.height, width: caixa.width, x: caixa.left - base.left - prancheta.clientLeft, y: caixa.top - base.top - prancheta.clientTop };
+        });
+      const mancha = popUp.locator('[data-free-id="mancha"]');
+
+      return {
+        cartao: await caixaDe(popUp.locator("[data-popup-free]")),
+        mancha: (await mancha.count()) > 0 ? await dentro(mancha) : null,
+        midia: await dentro(popUp.locator('[data-free-id="midia"]')),
+        tituloFonte: await popUp.locator('[data-free-id="titulo"]').evaluate((element) => parseFloat(getComputedStyle(element).fontSize))
+      };
+    } finally {
+      await contexto.close();
+    }
+  }
+
+  const perto = (atual: number, esperado: number, nome: string) => {
+    const tolerancia = Math.max(1, Math.abs(esperado) * 0.02);
+    expect(Math.abs(atual - esperado), `${nome}: ${atual} x ${esperado}`).toBeLessThanOrEqual(tolerancia);
+  };
+
+  test("a 375 px os elementos seguem o celular e a Forma escondida no celular some; a 1440 px vale o computador", async ({ browser }) => {
+    const celular = await medirNaTela(browser, 375);
+
+    expect(Math.round(celular.cartao.width)).toBe(343);
+    perto(celular.midia.x, 40 * escala, "midia.x no celular");
+    perto(celular.midia.y, 16 * escala, "midia.y no celular");
+    perto(celular.midia.width, 360 * escala, "midia.width no celular");
+    perto(celular.midia.height, 200 * escala, "midia.height no celular");
+    expect(celular.mancha, "a Forma escondida no celular nao e desenhada").toBeNull();
+    perto(celular.tituloFonte, 24 * escala, "fonte do titulo no celular (24 px encolhidos, acima de 12)");
+
+    const computador = await medirNaTela(browser, 1440);
+
+    expect(Math.round(computador.cartao.width)).toBe(440);
+    perto(computador.midia.x, 0, "midia.x no computador");
+    perto(computador.midia.y, 0, "midia.y no computador");
+    perto(computador.midia.width, 440, "midia.width no computador");
+    perto(computador.midia.height, 248, "midia.height no computador");
+    expect(computador.mancha, "no computador a Forma aparece").not.toBeNull();
+    perto(computador.mancha?.x ?? -1, 300, "mancha.x no computador");
+    perto(computador.mancha?.y ?? -1, 40, "mancha.y no computador");
+    perto(computador.tituloFonte, 40, "fonte do titulo no computador");
   });
 });
 

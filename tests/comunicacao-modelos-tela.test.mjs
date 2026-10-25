@@ -683,7 +683,7 @@ test("miniatura do Livre: antes de aparecer na tela, so o retangulo; com `label`
   assert.match(picker, /role="img"/);
 
   const code = stripComments(read("src/components/admin/v2/communication/templates/template-thumbs.tsx"));
-  assert.match(code, /<MemberPopupCard playing=\{false\} popup=\{popup\} preview still \/>/);
+  assert.match(code, /<MemberPopupCard device="desktop" playing=\{false\} popup=\{popup\} preview still \/>/, "a miniatura desenha o computador");
   assert.match(code, /new IntersectionObserver\(/);
 });
 
