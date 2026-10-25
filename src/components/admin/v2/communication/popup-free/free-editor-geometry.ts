@@ -460,12 +460,15 @@ export type FreePoint = { x: number; y: number };
 /** O lugar de um elemento: o vao `index` na lista do pai como ela esta agora (contando o proprio elemento). */
 export type FreeMoveTarget = { index: number; parentId: FreeId | null };
 export type FreeFlowItem = { id: FreeId; index: number; rect: FreeRect };
+/** Um filho da prancheta desenhado (da sequencia ou solto, quem se move tambem), com a camada e a posicao em children. */
+export type FreeFlowLayer = { id: FreeId; index: number; rect: FreeRect; z: number };
 /**
  * Um lugar que recebe elementos da sequencia no desenho: a prancheta (`id` null) ou uma caixa desenhada. `index` e a
  * posicao no pai (-1 na prancheta); `flow` diz se a caixa segue a sequencia (false na prancheta e numa caixa solta);
  * `accepts` null = aceita, texto = o motivo de recusa; `items` sao os filhos desenhados da sequencia, com o indice
  * real em `children`; `length` e children.length. `home` e a posicao de hoje do elemento arrastado quando este e o
- * pai dele (soltar no mesmo vao nao muda nada); sem, null.
+ * pai dele (soltar no mesmo vao nao muda nada); sem, null. `layers`, so na prancheta: os filhos desenhados dela, para
+ * saber quem esta por cima no ponto (sem, valem os itens com z 0).
  */
 export type FreeFlowContainer = {
   accepts: string | null;
@@ -476,6 +479,7 @@ export type FreeFlowContainer = {
   id: FreeId | null;
   index: number;
   items: FreeFlowItem[];
+  layers?: FreeFlowLayer[];
   length: number;
   parentId: FreeId | null;
   rect: FreeRect;
@@ -596,13 +600,70 @@ function sameGap(container: FreeFlowContainer, index: number): number {
   return index >= low && index <= high ? home : index;
 }
 
+/** A caixa de nivel 1 (filha da prancheta) de onde o contêiner vem, subindo por parentId. */
+function rootOf(container: FreeFlowContainer, byId: ReadonlyMap<FreeId | null, FreeFlowContainer>): FreeFlowContainer {
+  let current = container;
+
+  for (let step = 0; current.parentId !== null && step < byId.size; step += 1) {
+    const parent = byId.get(current.parentId);
+
+    if (!parent) {
+      break;
+    }
+
+    current = parent;
+  }
+
+  return current;
+}
+
 /**
- * O lugar de soltar no desenho (px da prancheta; `edge` e `empty` ja divididos pela escala). Acerta o contêiner mais
- * fundo sob o ponto (empate: maior z, depois o ultimo na lista, a ordem do DOM), com cada caixa crescida ate `empty`.
- * Se ele recusa, sobe ate um que aceite e guarda o primeiro motivo (`blocked`). Numa caixa da sequencia, a faixa da
- * borda (min(edge, 1/4 do lado), no eixo do pai) poe antes ou depois da caixa. O indice sai do meio dos itens no eixo
- * da caixa (na linha com quebra, pela linha visual do ponto). O indice e o real de children, e o mesmo vao do
- * arrastado vale o lugar de hoje. Fora da prancheta, null. Nao olha o aparelho nem o travado.
+ * O contêiner acertado pela ordem de pintura. Entre os filhos da prancheta sob o ponto, vence quem esta por cima: o
+ * de maior z e, no empate, o ultimo no DOM (o zIndex so sai com z diferente de 0, e a prancheta isola as camadas).
+ * Um filho que nao recebe (um item da sequencia, um solto que nao e caixa, quem se move ou um solto girado) tapa o
+ * que esta embaixo, e o acerto fica na prancheta: um Titulo por cima de uma caixa solta de fundo (z -1) nao a deixa
+ * receber. So dentro da caixa vencedora vale o mais fundo (empate: maior z, depois o ultimo na lista). Cada caixa
+ * conta com o retangulo crescido ate `empty`.
+ */
+function paintedHit(point: FreePoint, containers: readonly FreeFlowContainer[], artboard: FreeFlowContainer, byId: ReadonlyMap<FreeId | null, FreeFlowContainer>, empty: number): FreeFlowContainer {
+  const subtrees = new Map<FreeFlowContainer, FreeFlowContainer[]>();
+
+  for (const container of containers) {
+    if (container !== artboard && containsPoint(hitRectOf(container, empty), point)) {
+      const root = rootOf(container, byId);
+
+      subtrees.set(root, [...(subtrees.get(root) ?? []), container]);
+    }
+  }
+
+  if (subtrees.size === 0) {
+    return artboard;
+  }
+
+  type Candidate = { index: number; root: FreeFlowContainer | null; z: number };
+  const layers = artboard.layers ?? artboard.items.map((item) => ({ ...item, z: 0 }));
+  const candidates: Candidate[] = [
+    ...layers.filter((layer) => !byId.has(layer.id) && containsPoint(layer.rect, point)).map((layer) => ({ index: layer.index, root: null, z: layer.z })),
+    ...[...subtrees.keys()].map((root) => ({ index: root.index, root, z: root.z }))
+  ];
+  const top = candidates.reduce<Candidate | null>((best, candidate) => (!best || candidate.z > best.z || (candidate.z === best.z && candidate.index >= best.index) ? candidate : best), null);
+  const inside = top?.root ? subtrees.get(top.root) : undefined;
+
+  if (!inside) {
+    return artboard;
+  }
+
+  return inside.reduce((hit, container) => (container.depth > hit.depth || (container.depth === hit.depth && container.z >= hit.z) ? container : hit), inside[0]);
+}
+
+/**
+ * O lugar de soltar no desenho (px da prancheta; `edge` e `empty` ja divididos pela escala). Acerta pela ordem de
+ * pintura (paintedHit): entre os filhos da prancheta, o que esta por cima no ponto; dentro da caixa vencedora, o
+ * contêiner mais fundo; cada caixa crescida ate `empty`. Se ele recusa, sobe ate um que aceite e guarda o primeiro
+ * motivo (`blocked`). Numa caixa da sequencia, a faixa da borda (min(edge, 1/4 do lado), no eixo do pai) poe antes ou
+ * depois da caixa. O indice sai do meio dos itens no eixo da caixa (na linha com quebra, pela linha visual do ponto).
+ * O indice e o real de children, e o mesmo vao do arrastado vale o lugar de hoje. Fora da prancheta, null. Nao olha o
+ * aparelho nem o travado.
  */
 export function freeFlowDropAt(point: FreePoint, containers: readonly FreeFlowContainer[], options: { edge: number; empty: number }): FreeFlowDrop | null {
   const artboard = containers.find((container) => container.id === null);
@@ -611,19 +672,8 @@ export function freeFlowDropAt(point: FreePoint, containers: readonly FreeFlowCo
     return null;
   }
 
-  let hit = artboard;
-
-  for (const container of containers) {
-    if (container === artboard || !containsPoint(hitRectOf(container, options.empty), point)) {
-      continue;
-    }
-
-    if (hit === artboard || container.depth > hit.depth || (container.depth === hit.depth && container.z >= hit.z)) {
-      hit = container;
-    }
-  }
-
   const byId = new Map<FreeId | null, FreeFlowContainer>(containers.map((container) => [container.id, container]));
+  const hit = paintedHit(point, containers, artboard, byId, options.empty);
   let target = hit;
   let blocked: FreeFlowDrop["blocked"] = null;
 

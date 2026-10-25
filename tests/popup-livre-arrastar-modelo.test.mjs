@@ -628,6 +628,81 @@ test("desenho: a faixa da borda, a caixa vazia de 24 px, a caixa cheia, o empate
   assert.equal(geometry.freeFlowDropAt({ x: 200, y: 100 }, containers.slice(1), AT_1), null);
 });
 
+test("desenho: o acerto pela ordem de pintura (z e a ordem do DOM entre os filhos da prancheta; dentro, o mais fundo)", () => {
+  const T = (id) => ({ ...TEXT, id });
+  const at = (value, rects, moving, x, y) => {
+    const drop = geometry.freeFlowDropAt({ x, y }, editor.freeFlowContainers(value, rects, moving), AT_1);
+
+    return drop && { index: drop.index, parentId: drop.parentId };
+  };
+
+  // [Caixa[Dentro[d1]], Solta (z 5, por cima)[s1], mover, Links]: o ponto esta sobre a Solta e sobre a Dentro.
+  const over = (z) =>
+    design([
+      { children: [{ children: [T("d1")], id: "dentro", type: "box" }], id: "caixa", type: "box" },
+      { children: [T("s1")], id: "solta", place: { mode: "free", w: 300, x: 60, y: 60, ...(z === undefined ? {} : { z }) }, type: "box" },
+      T("mover"),
+      LINKS
+    ]);
+  const overRects = {
+    "@artboard": rect(0, 0, 440, 500),
+    caixa: rect(24, 24, 392, 200),
+    d1: rect(56, 56, 100, 24),
+    dentro: rect(40, 40, 360, 160),
+    links: rect(24, 440, 392, 20),
+    mover: rect(24, 240, 392, 40),
+    s1: rect(70, 70, 100, 24),
+    solta: rect(60, 60, 300, 120)
+  };
+  assert.deepEqual(at(over(5), overRects, { id: "mover" }, 200, 150), { index: 1, parentId: "solta" }, "a Solta e desenhada por cima");
+  assert.ok(valid(editor.moveFreeNodeTo(over(5), "mover", { index: 1, parentId: "solta" }).design));
+  assert.deepEqual(at(over(undefined), overRects, { id: "mover" }, 200, 150), { index: 1, parentId: "solta" }, "com z igual, vale a ordem do DOM (a Solta vem depois)");
+  assert.deepEqual(at(over(-1), overRects, { id: "mover" }, 200, 150), { index: 1, parentId: "dentro" }, "mandada para tras, a Solta perde e vale o mais fundo da Caixa");
+  assert.deepEqual(at(over(5), overRects, { id: "mover" }, 380, 150), { index: 1, parentId: "dentro" }, "fora da Solta, o mais fundo da Caixa");
+  assert.deepEqual(at(over(5), overRects, { height: 0 }, 200, 150), { index: 1, parentId: "solta" }, "o elemento novo do painel usa a mesma conta");
+
+  // [Fundo (caixa solta z -1 cobrindo a prancheta, vazia), Titulo, Texto (arrastado), Links].
+  const back = (z) =>
+    design([{ children: [], id: "fundo", place: { h: 400, mode: "free", w: 440, x: 0, y: 0, ...(z === undefined ? {} : { z }) }, type: "box" }, TITLE, TEXT, LINKS]);
+  const backRects = { "@artboard": rect(0, 0, 440, 400), fundo: rect(0, 0, 440, 400), links: rect(24, 360, 392, 20), texto: rect(24, 72, 392, 40), titulo: rect(24, 24, 392, 40) };
+  // O Titulo (z 0) tapa o Fundo: o Texto entra antes do Titulo, na sequencia da prancheta.
+  const top = at(back(-1), backRects, { id: "texto" }, 200, 30);
+  assert.deepEqual(top, { index: 1, parentId: null });
+  assert.deepEqual(ids(editor.moveFreeNodeTo(back(-1), "texto", top).design.children), ["fundo", "texto", "titulo", "links"]);
+  assert.deepEqual(at(back(-1), backRects, { id: "texto" }, 200, 60), { index: 2, parentId: null }, "a metade de baixo do Titulo e o lugar de hoje");
+  // Soltar em cima do proprio Texto (um tremor) e o lugar de hoje: ele tapa o Fundo e nada muda.
+  const same = at(back(-1), backRects, { id: "texto" }, 200, 90);
+  assert.deepEqual(same, { index: 2, parentId: null });
+  assert.equal(editor.freeMoveProblem(back(-1), "texto", same), "");
+  // Onde so o Fundo esta desenhado, ele recebe.
+  assert.deepEqual(at(back(-1), backRects, { id: "texto" }, 200, 200), { index: 0, parentId: "fundo" });
+  // O elemento novo do painel: o mesmo.
+  assert.deepEqual(at(back(-1), backRects, { height: 0 }, 200, 30), { index: 1, parentId: null });
+  // Com z 0 o Fundo vem antes no DOM e continua atras do Titulo; com z 1 ele fica por cima e recebe.
+  assert.deepEqual(at(back(undefined), backRects, { id: "texto" }, 200, 30), { index: 1, parentId: null });
+  assert.deepEqual(at(back(1), backRects, { id: "texto" }, 200, 30), { index: 0, parentId: "fundo" });
+
+  // Um solto que nao e caixa, desenhado por cima, tapa a caixa (vale o que se ve); mandado para tras, nao.
+  const shaped = (z) =>
+    design([
+      { children: [T("e1")], id: "caixa", type: "box" },
+      { id: "forma", place: { h: 120, mode: "free", w: 120, x: 200, y: 40, ...(z === undefined ? {} : { z }) }, type: "shape" },
+      T("mover"),
+      LINKS
+    ]);
+  const shapedRects = { "@artboard": rect(0, 0, 440, 500), caixa: rect(24, 24, 392, 200), e1: rect(40, 40, 100, 24), forma: rect(200, 40, 120, 120), links: rect(24, 440, 392, 20), mover: rect(24, 240, 392, 40) };
+  assert.deepEqual(at(shaped(undefined), shapedRects, { id: "mover" }, 250, 100), { index: 0, parentId: null });
+  assert.deepEqual(at(shaped(-1), shapedRects, { id: "mover" }, 250, 100), { index: 1, parentId: "caixa" });
+
+  // A foto do comeco guarda os filhos desenhados da prancheta, com a camada (quem se move tambem; o escondido, nao).
+  const layered = editor.freeFlowContainers(design([...back(-1).children, { ...spacer("oculto"), hidden: true }]), { ...backRects, oculto: rect(0, 0, 10, 10) }, { id: "texto" });
+  assert.deepEqual(
+    layered[0].layers.map((layer) => [layer.id, layer.index, layer.z]),
+    [["fundo", 0, -1], ["titulo", 1, 0], ["texto", 2, 0], ["links", 3, 0]]
+  );
+  assert.equal(layered.slice(1).some((container) => "layers" in container), false, "so na prancheta");
+});
+
 test("desenho: soltar no mesmo vão não muda nada (soltos, escondidos e a prancheta sem itens)", () => {
   // [Titulo, Texto (arrastado), Forma solta, Links]: entre o Titulo e os Links e o lugar de hoje do Texto.
   const value = design([TITLE, TEXT, { id: "forma", place: { h: 120, mode: "free", w: 120, x: 100, y: 100 }, type: "shape" }, LINKS]);

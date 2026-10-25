@@ -1041,9 +1041,11 @@ function insideRotatedFree(design: PopupFreeDesign, found: Located): boolean {
  * a subarvore de um solto girado (o retangulo medido de dentro dele e o envelope girado). Cada caixa diz o motivo de
  * recusa: cheia (20) quando nao e o pai de hoje, ou a profundidade (a altura de caixa de quem se move, ou `height` de um
  * elemento novo). Caixa travada aceita. Os itens sao os filhos desenhados da sequencia (sem soltos, escondidos, sem
- * retangulo e sem quem se move), com o indice real em children. Quem esta dentro de um solto girado nao tem lugar pelo
- * desenho (a casa dele ficou de fora, e soltar no proprio lugar o tiraria da caixa): a lista vem vazia, o soltar da
- * null e nada muda. Para ele ficam as Camadas, o Subir e o Descer e o ⋯.
+ * retangulo e sem quem se move), com o indice real em children. A prancheta guarda tambem os filhos desenhados dela
+ * (`layers`: sequencia e soltos, quem se move tambem, com o z), para o acerto pela ordem de pintura de freeFlowDropAt.
+ * Quem esta dentro de um solto girado nao tem lugar pelo desenho (a casa dele ficou de fora, e soltar no proprio
+ * lugar o tiraria da caixa): a lista vem vazia, o soltar da null e nada muda. Para ele ficam as Camadas, o Subir e o
+ * Descer e o ⋯.
  */
 export function freeFlowContainers(stage: PopupFreeDesign, rects: FreeMeasuredRects, moving: { id: FreeId } | { height: 0 | 1 }): FreeFlowContainer[] {
   const artboard = rects["@artboard"];
@@ -1078,6 +1080,11 @@ export function freeFlowContainers(stage: PopupFreeDesign, rects: FreeMeasuredRe
       id: null,
       index: -1,
       items: itemsOf(stage.children),
+      layers: stage.children.flatMap((child, index) => {
+        const rect = rects[child.id];
+
+        return !child.hidden && rect ? [{ id: child.id, index, rect, z: child.place?.z ?? 0 }] : [];
+      }),
       length: stage.children.length,
       parentId: null,
       rect: artboard,
