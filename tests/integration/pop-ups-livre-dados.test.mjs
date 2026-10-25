@@ -521,11 +521,13 @@ test("Celular: salvar e ler um Livre com devices na forma canônica; o aluno rec
   actAs(produtor);
   ok(await actions.publishNotice({ expectedUpdatedAt: salvo.updatedAt, id: salvo.id }));
 
+  // O plano antes do show: o pop-up e "Uma vez" e, depois de visto, sai do plano.
+  assert.equal((await resumoDe(aluna)).plan.find((item) => item.id === salvo.id)?.design, "free");
+
   const doLivre = (await mostrar(aluna, salvo.id)).body.data.popup;
 
   assert.deepEqual(doLivre.freeDesign.devices, CELULAR_GRAVADO, "o aluno decide o aparelho na tela dele");
   assert.deepEqual(doLivre.freeDesign, model.freeDesignForStudent(gravado));
-  assert.equal((await resumoDe(aluna)).plan.find((item) => item.id === salvo.id)?.design, "free");
 
   // Uma posicao do celular com outro modo e recusada, com a chave pelo id (sem indice).
   const outroModo = livreComCelular();
