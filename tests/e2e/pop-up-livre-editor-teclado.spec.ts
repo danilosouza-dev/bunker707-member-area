@@ -18,7 +18,8 @@ import { abrirEditorLivre, cliqueCom, escolhidos, falado, gravarRascunhoLivre, n
 // painel Vários leva o foco ao palco, Ctrl + A com o foco no painel de um elemento leva ao titulo do painel Vários, e o
 // Esc no painel Vários deixa "Nada selecionado" com o foco no palco. Ctrl + = e Ctrl + − mudam o zoom do desenho. O
 // Duplicar do painel Vários pelo Enter e o Ctrl + Z: as copias saem, o foco vai ao palco e o Ctrl + Shift + Z refaz sem
-// escolher as copias de novo. O duplo clique no Título solto abre a area de texto dele; com Alt ou Shift, nao abre (C18).
+// escolher as copias de novo. "Voltar ao elemento" no Revisar leva o foco ao titulo do painel Vários (com varios) ou ao
+// palco (com um). O duplo clique no Título solto abre a area de texto dele; com Alt ou Shift, nao abre (C18).
 
 const TITULO = "Pop-up E2E: Livre pelo teclado";
 const ESCRITO = "Título pelo teclado";
@@ -459,6 +460,39 @@ test("vários pelo teclado, o foco na troca do painel Vários e o duplo clique n
     expect(await linhas(editor)).toEqual(comCopias);
     // O refazer nao devolve a escolha das copias, que a equipe nao fez de novo.
     expect(await escolhidos(editor)).toEqual([]);
+    await expect(palco).toBeFocused();
+    await focoNoEditor();
+  });
+
+  await test.step("Voltar ao elemento no Revisar leva o foco ao título do Vários (com vários) ou ao palco (com um)", async () => {
+    const revisar = editor.locator("[data-free-review-toggle]");
+    const voltar = editor.locator("[data-free-review-back]");
+
+    await linhaDe("fa").focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => selecionado(editor)).toBe("fa");
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(frase).toHaveText("2 elementos escolhidos.");
+
+    // O Revisar some com o foco no Voltar ao elemento; com varios, o foco vai ao titulo do painel Varios.
+    await revisar.focus();
+    await page.keyboard.press("Enter");
+    await expect(voltar).toBeVisible();
+    await voltar.focus();
+    await page.keyboard.press("Enter");
+    await expect(voltar).toHaveCount(0);
+    await expect(editor.locator("#livre-varios-titulo")).toBeFocused();
+
+    // Com um elemento, o foco vai ao palco.
+    await linhaDe("fa").focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => selecionado(editor)).toBe("fa");
+    await revisar.focus();
+    await page.keyboard.press("Enter");
+    await expect(voltar).toBeVisible();
+    await voltar.focus();
+    await page.keyboard.press("Enter");
+    await expect(voltar).toHaveCount(0);
     await expect(palco).toBeFocused();
     await focoNoEditor();
   });

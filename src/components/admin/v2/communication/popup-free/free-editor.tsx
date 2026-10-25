@@ -1552,6 +1552,20 @@ function FreeEditorSession({
    * Revisar
    * ------------------------------------------------------------------------------------------ */
 
+  /**
+   * "Voltar ao elemento": o Revisar some com o foco no botao. O foco vai ao titulo do painel Varios (com varios) ou ao
+   * palco (com um ou nada), como na troca de painel da C11.
+   */
+  function backFromReview() {
+    if (liveIds.length >= 2) {
+      pendingManyFocus.current = true;
+    } else {
+      pendingLayerFocus.current = "stage";
+    }
+
+    setRightPanel("inspector");
+  }
+
   function goToItem(item: FreeReviewItem) {
     setSelectedId(item.nodeId);
     setRightPanel("inspector");
@@ -2333,7 +2347,7 @@ function FreeEditorSession({
               disabled={disabled}
               errors={review.errors}
               hints={review.hints}
-              onBack={() => setRightPanel("inspector")}
+              onBack={backFromReview}
               onFontUploaded={fontUploaded}
               onGoTo={goToItem}
               onMobile={adjustOnMobile}

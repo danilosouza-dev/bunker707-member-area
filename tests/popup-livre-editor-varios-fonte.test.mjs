@@ -325,6 +325,14 @@ test("C11 e a aba: o foco vai ao título do Vários ou ao palco; o painel de um 
   assert.match(change, /pendingLayerFocus\.current = "stage";/);
   assert.match(source, /document\.getElementById\(FREE_INSPECTOR_MANY_TITLE_ID\)\?\.focus\(\);/);
 
+  // "Voltar ao elemento" no Revisar: o painel some com o foco no botao; o foco vai ao titulo do Varios ou ao palco.
+  const back = bodyOf("function backFromReview(");
+
+  assert.match(back, /if \(liveIds\.length >= 2\) \{\s+pendingManyFocus\.current = true;\s+\} else \{\s+pendingLayerFocus\.current = "stage";\s+\}/);
+  assert.ok(back.indexOf("pendingManyFocus.current = true;") < back.indexOf('setRightPanel("inspector");'), "o pedido de foco antes de trocar o painel");
+  assert.match(source, /<FreeReviewPanel\n[\s\S]*?onBack=\{backFromReview\}/);
+  assert.equal(/onBack=\{\(\) => setRightPanel\("inspector"\)\}/.test(source), false, "nunca a troca sem o pedido de foco");
+
   assert.match(source, /<div className=\{cn\("min-h-0 min-w-0 flex-1 flex-col", many \? "hidden" : "flex"\)\}>\s+<FreeInspector\b/);
   assert.match(source, /selectedId=\{inspectorId\}/);
   assert.match(source, /if \(!many && heldInspectorId !== activeId\) \{\s+setHeldInspectorId\(activeId\);/);
