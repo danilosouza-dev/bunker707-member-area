@@ -2,8 +2,8 @@
 
 import { NumberField as BaseNumberField } from "@base-ui/react/number-field";
 import { Popover } from "@base-ui/react/popover";
-import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, Check, ImageUp, LoaderCircle, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { AlertCircle, AlertTriangle, ArrowDown, ArrowUp, Check, GripVertical, ImageIcon, ImageUp, LoaderCircle, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FreeIcon } from "@/components/member/notifications/popup-free/popup-free-icons";
@@ -32,6 +32,7 @@ import { ColorField, DesignSection, PillField, fieldLabelClass } from "../popup-
 import { FontPicker, WeightPicker } from "../popup-design/font-picker";
 import { FontUploadDialog } from "../popup-design/font-upload-dialog";
 import { uploadFreeImageFile } from "./free-assets";
+import { FREE_LIST_DRAG_START_PX } from "./free-editor-geometry";
 import {
   FREE_DECORATION_OPTIONS,
   FREE_FILL_IMAGE_FIT_OPTIONS,
@@ -48,7 +49,12 @@ import {
   addFreeStop,
   applyFreeSpanStyle,
   freeBottomEdgeShadow,
+  freeFillDropAt,
+  freeFillFocusAfter,
+  freeFillFocusId,
   freeFillPaintOfKind,
+  freeFillReorder,
+  freeFillSwatch,
   freeGlowShadow,
   freeImageAssets,
   freeLinesText,
@@ -65,6 +71,7 @@ import {
   freeTextAreaChange,
   freeTextPaintOfKind,
   moveFreeFillLayer,
+  moveFreeFillLayerTo,
   newFreeBorder,
   newFreeFillLayer,
   newFreeShadow,
@@ -72,18 +79,21 @@ import {
   removeFreeStop,
   setFreeStop,
   splitFreeSpanAtSelection,
+  withFreeFillLayerAsset,
   type FreeFillPaintKind,
   type FreeFour,
   type FreeSpanStylePatch,
   type FreeTextRange
 } from "./free-inspector-model";
+import { FREE_POINTER_MOUSE_AND_PEN, followFreePointer } from "./free-pointer-drag";
 
 // Editor Livre do pop-up (docs/27; spec §4.6 e §4.7), pacote I: os campos do painel da direita. Numero com
 // unidade (NumberField do Base UI: arrastar no rotulo, setas e Shift = 10, a frase do limite), lados e cantos,
-// borda, sombras com os atalhos, paradas do degradê, pintura do texto, camadas de fundo, grade de icones,
-// escolher/enviar imagem, a fonte (o seletor e o envio do Personalizado, sem mudar nada neles) e a area de texto
-// com "Outro estilo na seleção" e as fichas das partes. Tudo so com valores validados; nenhum texto do design em
-// estilo (a faixa do degradê usa so cores hex e posicoes inteiras).
+// borda, sombras com os atalhos, paradas do degradê, pintura do texto, camadas de fundo (com a faixa Ordem do L4a:
+// arrastar a ficha ou Alt e as setas, docs/27 §13.9), grade de icones, escolher/enviar imagem, a fonte (o seletor e
+// o envio do Personalizado, sem mudar nada neles) e a area de texto com "Outro estilo na seleção" e as fichas das
+// partes. Tudo so com valores validados; nenhum texto do design em estilo (a faixa do degradê e as amostras das
+// camadas usam so cores hex e posicoes inteiras).
 
 const L = FREE_DESIGN_LIMITS;
 const C = FREE_INSPECTOR_COPY;
@@ -785,7 +795,7 @@ export function FreeTextPaintField({
 
 /** Monta as camadas com o id do arquivo da imagem (o fundo mais novo vem em `current`). */
 export type FreeImageLayerHandler = (
-  build: (assetId: FreeId, current: readonly FreeFillPaint[]) => FreeFillPaint[],
+  build: (assetId: FreeId, current: readonly FreeFillPaint[]) => readonly FreeFillPaint[],
   image: { height: number; path: string; width: number } | FreeId
 ) => void;
 
@@ -793,9 +803,38 @@ function fillKindLabel(kind: FreeFillPaintKind) {
   return FREE_FILL_KIND_OPTIONS.find((option) => option.value === kind)?.label ?? kind;
 }
 
+/** O que a faixa Ordem fala; o id troca a cada vez, para a mesma frase de novo tambem ser falada. */
+type FreeFillSaid = { id: number; text: string };
+/** Pedido de foco depois de uma mudanca na lista (resolvido uma vez, depois de a lista nova aparecer). */
+type FreeFillFocusRequest = { action: "add" | "down" | "order" | "remove" | "up"; index: number; seq: number };
+/** O gesto da faixa Ordem: a ficha que sai e o lugar onde ela entraria (null = fora da faixa, nao muda nada). */
+type FreeFillDrag = { from: number; to: number | null };
+
+/** A amostra da ficha: a pintura da camada (cores hex validadas) ou o icone da imagem. */
+function FillSwatch({ paint }: { paint: FreeFillPaint }) {
+  const swatch = freeFillSwatch(paint);
+
+  return (
+    <span
+      aria-hidden="true"
+      className="grid size-5 shrink-0 place-items-center overflow-hidden rounded border border-[var(--border-strong)] bg-[repeating-conic-gradient(#3f3f46_0%_25%,#18181b_0%_50%)] bg-[length:8px_8px]"
+    >
+      {swatch ? <span className="size-full" style={{ backgroundImage: swatch }} /> : <ImageIcon className="size-3.5 text-[var(--text-secondary)]" />}
+    </span>
+  );
+}
+
 /**
  * Fundo: camadas (a de cima primeiro), "+ Camada de fundo" (Cor, Degradê, Degradê circular, Imagem), Subir,
  * Descer e Tirar em cada uma. Imagem escolhe uma do design ou envia uma nova.
+ * Com 2 ou 3 camadas, a faixa "Ordem" no topo (docs/27 §13.9, L4a): uma ficha por camada, que se arrasta (mouse ou
+ * caneta, a partir de 4 px; a ficha tem touch-action: none) ou anda com Alt e as setas (o editor nao move o elemento
+ * por elas com o foco na ficha). Mudar a ordem, Tirar e "+ Camada" vao como um passo proprio no historico
+ * (`{ step: true }`: nao juntam com a cor de antes); a cor, o tipo e os numeros vao sem `options`. O foco segue a
+ * camada pelos ids `${id}-${indice}-subir`, `-descer`, `-tirar`, `-ordem` e `${id}-acrescentar`. O soltar so grava
+ * com o fundo igual ao do comeco do gesto; soltar no mesmo lugar ou longe da faixa nao muda nada. Enquanto uma imagem
+ * desta lista sobe, a faixa, Subir, Descer, Tirar, "+ Camada" e o cartao que espera a imagem ficam desligados, e a
+ * imagem acha a sua camada pela referencia (nunca pelo indice da hora do envio).
  */
 export function FreeFillLayersField({
   baseColor,
@@ -816,7 +855,8 @@ export function FreeFillLayersField({
   id: string;
   min?: number;
   onBusyChange: (reason: string | null) => void;
-  onChange: (fill: FreeFillPaint[] | undefined) => void;
+  /** `step`: mudanca de lugar, Tirar ou "+ Camada" (um passo proprio no historico, montado pelo design mais novo). */
+  onChange: (fill: FreeFillPaint[] | undefined, options?: { step?: boolean }) => void;
   /** Camada de imagem: quem chama poe o arquivo no design (enviado ou escolhido) e monta as camadas com o id. */
   onImageLayer: FreeImageLayerHandler;
   value: readonly FreeFillPaint[] | undefined;
@@ -824,97 +864,289 @@ export function FreeFillLayersField({
   const fill = value ?? [];
   const [adding, setAdding] = useState<FreeFillPaintKind>("solid");
   const [pendingImage, setPendingImage] = useState(false);
+  // A camada cuja imagem esta subindo ("new": a camada nova de imagem, ainda fora da lista).
+  const [sending, setSending] = useState<FreeFillPaint | "new" | null>(null);
+  const [drag, setDrag] = useState<FreeFillDrag | null>(null);
+  const [said, setSaid] = useState<FreeFillSaid>({ id: 0, text: "" });
+  const [focusAfter, setFocusAfter] = useState<FreeFillFocusRequest | null>(null);
+  const focusDone = useRef(0);
+  const listRef = useRef<HTMLOListElement>(null);
+  const disposeDrag = useRef<(() => void) | null>(null);
   const images = freeImageAssets(design);
   const full = fill.length >= L.fills;
+  const busy = sending !== null;
+  const off = Boolean(disabled) || busy;
 
-  function commit(next: FreeFillPaint[]) {
-    onChange(next.length > 0 ? next : undefined);
+  function commit(next: FreeFillPaint[], options?: { step?: boolean }) {
+    onChange(next.length > 0 ? next : undefined, options);
   }
 
   function update(index: number, paint: FreeFillPaint) {
     commit(fill.map((layer, position) => (position === index ? paint : layer)));
   }
 
+  /** Mudar de lugar, Tirar ou "+ Camada": um passo proprio, e o foco vai para onde a camada ficou. */
+  function commitStep(next: FreeFillPaint[], action: FreeFillFocusRequest["action"], index: number) {
+    commit(next, { step: true });
+    setFocusAfter((current) => ({ action, index, seq: (current?.seq ?? 0) + 1 }));
+  }
+
+  /** A faixa Ordem levou uma camada a `to`: grava, poe o foco na ficha dela e fala o lugar novo. */
+  function placeLayer(next: FreeFillPaint[], to: number) {
+    commitStep(next, "order", to);
+    setSaid((current) => ({ id: current.id + 1, text: C.fill.moved(C.fill.layer(to, fillKindLabel(next[to].kind))) }));
+  }
+
+  /** O envio da imagem desta camada liga e desliga o ocupado do editor e o desta lista. */
+  function busyFor(layer: FreeFillPaint | "new") {
+    return (reason: string | null) => {
+      setSending(reason ? layer : null);
+      onBusyChange(reason);
+    };
+  }
+
+  // O soltar acontece fora do React (ouvintes na janela): le o fundo e as funcoes da ultima vez que a lista foi
+  // desenhada (o onChange de agora monta pelo design mais novo).
+  const live = useRef({ fill, placeLayer });
+
+  useLayoutEffect(() => {
+    live.current = { fill, placeLayer };
+  });
+
+  // O foco segue a camada: uma vez por mudanca, depois de a lista nova aparecer (no WebKit o clique nao da foco ao
+  // botao, e um botao que desliga com o foco o perderia).
+  useLayoutEffect(() => {
+    if (!focusAfter || focusAfter.seq === focusDone.current) {
+      return;
+    }
+
+    focusDone.current = focusAfter.seq;
+    document.getElementById(freeFillFocusId(id, freeFillFocusAfter(focusAfter.action, focusAfter.index, fill.length, min)))?.focus();
+  });
+
+  useEffect(() => {
+    const dispose = disposeDrag;
+
+    return () => dispose.current?.();
+  }, []);
+
+  /** O lugar onde a ficha `from` entraria com o ponteiro neste ponto (px de tela), pelas fichas medidas agora. */
+  function dropAt(from: number, client: { x: number; y: number }) {
+    const list = listRef.current;
+
+    if (!list) {
+      return null;
+    }
+
+    const mids = Array.from(list.querySelectorAll<HTMLElement>("[data-free-fill-grip]"), (grip) => {
+      const box = grip.getBoundingClientRect();
+
+      return box.top + box.height / 2;
+    });
+
+    return freeFillDropAt(from, client, list.getBoundingClientRect(), mids);
+  }
+
+  function beginDrag(event: ReactPointerEvent<HTMLButtonElement>, from: number) {
+    // Um gesto comecado segue ate o fim: o pointerdown de outro ponteiro (um toque com o mouse apertado) nao o desliga.
+    if (off || drag || fill.length < 2) {
+      return;
+    }
+
+    disposeDrag.current?.();
+
+    // A foto do fundo e tirada no comeco do gesto (passado o limiar), nao no pointerdown: antes disso pode ser so um
+    // clique, e o blur de um campo pode gravar antes.
+    let start: readonly FreeFillPaint[] | null = null;
+
+    disposeDrag.current = followFreePointer(event, {
+      onCancel: () => setDrag(null),
+      onDrop: (client) => {
+        // O lugar sai do ponto do pointerup (a lista pode ter rolado sem mexer o ponteiro).
+        const to = dropAt(from, client);
+        const now = live.current;
+        const next = start && to !== null ? freeFillReorder(start, now.fill, from, to) : null;
+
+        setDrag(null);
+
+        if (next && to !== null) {
+          now.placeLayer(next, to);
+        }
+      },
+      onMove: (client) => {
+        const to = dropAt(from, client);
+
+        setDrag((current) => (current && current.from === from && current.to === to ? current : { from, to }));
+      },
+      onStart: () => {
+        start = live.current.fill;
+        setDrag({ from, to: from });
+      },
+      pointerTypes: FREE_POINTER_MOUSE_AND_PEN,
+      threshold: FREE_LIST_DRAG_START_PX
+    });
+  }
+
+  function onGripKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, from: number) {
+    if (!event.altKey || event.ctrlKey || event.metaKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) {
+      return;
+    }
+
+    // Sempre, mesmo sem mudar: com o foco na ficha, Alt e as setas nao chegam ao editor (que moveria o elemento).
+    event.preventDefault();
+    event.stopPropagation();
+
+    const to = from + (event.key === "ArrowUp" ? -1 : 1);
+    const next = off ? null : moveFreeFillLayerTo(fill, from, to);
+
+    if (next) {
+      placeLayer(next, to);
+    }
+  }
+
+  const dropEdge = drag && drag.to !== null && drag.to !== drag.from ? (drag.to < drag.from ? "before" : "after") : null;
+
   return (
     <fieldset className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0" id={id} tabIndex={-1}>
       <legend className={cn(fieldLabelClass, "mb-0.5 p-0")}>{C.fill.title}</legend>
       {fill.length !== 1 ? <FreeNote>{fill.length > 1 ? C.fill.topFirst : C.fill.empty}</FreeNote> : null}
-      {fill.map((paint, index) => (
-        <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-[var(--border-subtle)] p-3" key={index}>
-          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-            <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{C.fill.layer(index, fillKindLabel(paint.kind))}</span>
-            <div className="flex items-center gap-1">
-              <Button aria-label={`${C.fill.moveUp}: ${C.fill.layer(index, fillKindLabel(paint.kind))}`} className={cn(freeSmallButton, "px-2")} disabled={disabled || index === 0} onClick={() => commit(moveFreeFillLayer(fill, index, -1))} type="button" variant="ghost">
-                <ArrowUp aria-hidden="true" className="size-4" />
-              </Button>
-              <Button
-                aria-label={`${C.fill.moveDown}: ${C.fill.layer(index, fillKindLabel(paint.kind))}`}
-                className={cn(freeSmallButton, "px-2")}
-                disabled={disabled || index === fill.length - 1}
-                onClick={() => commit(moveFreeFillLayer(fill, index, 1))}
-                type="button"
-                variant="ghost"
-              >
-                <ArrowDown aria-hidden="true" className="size-4" />
-              </Button>
-              <Button
-                aria-label={`${C.fill.remove}: ${C.fill.layer(index, fillKindLabel(paint.kind))}`}
-                className={cn(freeSmallButton, "px-2")}
-                disabled={disabled || fill.length <= min}
-                onClick={() => commit(removeFreeFillLayer(fill, index, min))}
-                type="button"
-                variant="ghost"
-              >
-                <Trash2 aria-hidden="true" className="size-4" />
-              </Button>
-            </div>
-          </div>
-          <PillField
-            disabled={disabled}
-            label={C.fill.kind}
-            name={`${id}-${index}-tipo`}
-            onChange={(kind) => {
-              const next = freeFillPaintOfKind(kind, paint, images[0]?.id ?? null);
+      {fill.length >= 2 ? (
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <span aria-hidden="true" className={fieldLabelClass}>
+            {C.fill.order}
+          </span>
+          <ol aria-label={C.fill.orderLabel} className="m-0 flex min-w-0 list-none flex-col gap-1 p-0" ref={listRef}>
+            {fill.map((paint, index) => {
+              const layer = C.fill.layer(index, fillKindLabel(paint.kind));
+              const dragging = drag?.from === index;
 
-              if (next) {
-                update(index, next);
-              }
-            }}
-            options={images.length > 0 || paint.kind === "image" ? FREE_FILL_KIND_OPTIONS : FREE_FILL_KIND_OPTIONS.filter((option) => option.value !== "image")}
-            value={paint.kind}
-          />
-          {paint.kind === "solid" ? (
-            <ColorField disabled={disabled} id={`${id}-${index}-cor`} label={C.fill.color} onChange={(color) => update(index, { color, kind: "solid" })} value={paint.color} />
-          ) : paint.kind === "image" ? (
-            <div className="flex min-w-0 flex-col gap-3">
-              <FreeImagePicker
-                design={design}
-                disabled={disabled}
-                id={`${id}-${index}-imagem`}
-                onBusyChange={onBusyChange}
-                onPick={(image) =>
-                  onImageLayer((assetId, current) => current.map((layer, position) => (position === index && layer.kind === "image" ? { ...layer, asset: assetId } : layer)), image)
-                }
-                selected={paint.asset}
-              />
-              <PillField
-                disabled={disabled}
-                label={C.fill.fit}
-                name={`${id}-${index}-preenche`}
-                onChange={(fit) => update(index, fit === "cover" ? withoutKey(paint, "fit") : { ...paint, fit })}
-                options={FREE_FILL_IMAGE_FIT_OPTIONS}
-                value={paint.fit ?? "cover"}
-              />
-              <FocusFields disabled={disabled} focus={paint.focus} id={`${id}-${index}-foco`} onChange={(focus) => update(index, focus ? { ...paint, focus } : withoutKey(paint, "focus"))} />
-            </div>
-          ) : (
-            <GradientFields disabled={disabled} id={`${id}-${index}`} onChange={(next) => update(index, next as FreeFillPaint)} paint={paint} />
-          )}
+              return (
+                <li className="relative min-w-0" data-free-fill-layer={index} key={index}>
+                  {dropEdge && drag?.to === index ? (
+                    <span
+                      aria-hidden="true"
+                      className={cn("pointer-events-none absolute inset-x-1 z-10 h-0.5 rounded-full bg-[var(--focus-ring)]", dropEdge === "before" ? "-top-[3px]" : "-bottom-[3px]")}
+                      data-free-fill-drop={dropEdge}
+                    />
+                  ) : null}
+                  <button
+                    aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                    aria-label={C.fill.handle(layer)}
+                    className={cn(
+                      "flex h-9 w-full min-w-0 touch-none items-center gap-2 rounded-md border border-[var(--border-subtle)] px-2 text-left text-[13px] leading-5 text-[var(--text-primary)] outline-none select-none",
+                      // O cursor: pointer de todo botao (globals.css, fora das camadas) so cede com o !.
+                      "hover:bg-[var(--hover-overlay)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)] active:cursor-grabbing! disabled:cursor-not-allowed! disabled:opacity-60 pointer-coarse:h-11",
+                      dragging ? "cursor-grabbing! opacity-50" : "cursor-grab!",
+                      adminTransition
+                    )}
+                    data-free-fill-dragging={dragging ? "" : undefined}
+                    data-free-fill-grip={index}
+                    disabled={off}
+                    id={`${id}-${index}-ordem`}
+                    onKeyDown={(event) => onGripKeyDown(event, index)}
+                    onPointerDown={(event) => beginDrag(event, index)}
+                    type="button"
+                  >
+                    <GripVertical aria-hidden="true" className="size-4 shrink-0 text-[var(--text-tertiary)]" />
+                    <FillSwatch paint={paint} />
+                    <span className="min-w-0 truncate">{layer}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
         </div>
-      ))}
+      ) : null}
+      {fill.map((paint, index) => {
+        const layer = C.fill.layer(index, fillKindLabel(paint.kind));
+        // O cartao que espera a imagem: o Tipo, o "Como preenche" e o ponto de foco trocariam a camada que a imagem procura.
+        const cardOff = Boolean(disabled) || sending === paint;
+
+        return (
+          <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-[var(--border-subtle)] p-3" key={index}>
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+              <span className="text-[13px] leading-5 font-medium text-[var(--text-primary)]">{layer}</span>
+              <div className="flex items-center gap-1">
+                <Button
+                  aria-label={`${C.fill.moveUp}: ${layer}`}
+                  className={cn(freeSmallButton, "px-2")}
+                  disabled={off || index === 0}
+                  id={`${id}-${index}-subir`}
+                  onClick={() => commitStep(moveFreeFillLayer(fill, index, -1), "up", index)}
+                  type="button"
+                  variant="ghost"
+                >
+                  <ArrowUp aria-hidden="true" className="size-4" />
+                </Button>
+                <Button
+                  aria-label={`${C.fill.moveDown}: ${layer}`}
+                  className={cn(freeSmallButton, "px-2")}
+                  disabled={off || index === fill.length - 1}
+                  id={`${id}-${index}-descer`}
+                  onClick={() => commitStep(moveFreeFillLayer(fill, index, 1), "down", index)}
+                  type="button"
+                  variant="ghost"
+                >
+                  <ArrowDown aria-hidden="true" className="size-4" />
+                </Button>
+                <Button
+                  aria-label={`${C.fill.remove}: ${layer}`}
+                  className={cn(freeSmallButton, "px-2")}
+                  disabled={off || fill.length <= min}
+                  id={`${id}-${index}-tirar`}
+                  onClick={() => commitStep(removeFreeFillLayer(fill, index, min), "remove", index)}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trash2 aria-hidden="true" className="size-4" />
+                </Button>
+              </div>
+            </div>
+            <PillField
+              disabled={cardOff}
+              label={C.fill.kind}
+              name={`${id}-${index}-tipo`}
+              onChange={(kind) => {
+                const next = freeFillPaintOfKind(kind, paint, images[0]?.id ?? null);
+
+                if (next) {
+                  update(index, next);
+                }
+              }}
+              options={images.length > 0 || paint.kind === "image" ? FREE_FILL_KIND_OPTIONS : FREE_FILL_KIND_OPTIONS.filter((option) => option.value !== "image")}
+              value={paint.kind}
+            />
+            {paint.kind === "solid" ? (
+              <ColorField disabled={disabled} id={`${id}-${index}-cor`} label={C.fill.color} onChange={(color) => update(index, { color, kind: "solid" })} value={paint.color} />
+            ) : paint.kind === "image" ? (
+              <div className="flex min-w-0 flex-col gap-3">
+                <FreeImagePicker
+                  design={design}
+                  disabled={disabled || (busy && sending !== paint)}
+                  id={`${id}-${index}-imagem`}
+                  onBusyChange={busyFor(paint)}
+                  onPick={(image) => onImageLayer((assetId, current) => withFreeFillLayerAsset(current, paint, assetId), image)}
+                  selected={paint.asset}
+                />
+                <PillField
+                  disabled={cardOff}
+                  label={C.fill.fit}
+                  name={`${id}-${index}-preenche`}
+                  onChange={(fit) => update(index, fit === "cover" ? withoutKey(paint, "fit") : { ...paint, fit })}
+                  options={FREE_FILL_IMAGE_FIT_OPTIONS}
+                  value={paint.fit ?? "cover"}
+                />
+                <FocusFields disabled={cardOff} focus={paint.focus} id={`${id}-${index}-foco`} onChange={(focus) => update(index, focus ? { ...paint, focus } : withoutKey(paint, "focus"))} />
+              </div>
+            ) : (
+              <GradientFields disabled={disabled} id={`${id}-${index}`} onChange={(next) => update(index, next as FreeFillPaint)} paint={paint} />
+            )}
+          </div>
+        );
+      })}
       <div className="flex min-w-0 flex-col gap-2">
         <PillField
-          disabled={disabled || full}
+          disabled={off || full}
           label={C.fill.add}
           name={`${id}-nova`}
           onChange={(kind) => {
@@ -928,7 +1160,8 @@ export function FreeFillLayersField({
           <Button
             aria-label={C.fill.addLabel}
             className={freeSmallButton}
-            disabled={disabled || full}
+            disabled={off || full}
+            id={`${id}-acrescentar`}
             onClick={() => {
               if (adding === "image") {
                 setPendingImage(true);
@@ -938,7 +1171,7 @@ export function FreeFillLayersField({
               const layer = newFreeFillLayer(adding, baseColor);
 
               if (layer) {
-                commit(addFreeFillLayer(fill, layer));
+                commitStep(addFreeFillLayer(fill, layer), "add", 0);
               }
             }}
             type="button"
@@ -952,11 +1185,12 @@ export function FreeFillLayersField({
           <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-dashed border-[var(--border-strong)] p-3">
             <FreeImagePicker
               design={design}
-              disabled={disabled}
+              disabled={disabled || (busy && sending !== "new")}
               id={`${id}-nova-imagem`}
-              onBusyChange={onBusyChange}
+              onBusyChange={busyFor("new")}
               onPick={(image) => {
                 setPendingImage(false);
+                setFocusAfter((current) => ({ action: "add", index: 0, seq: (current?.seq ?? 0) + 1 }));
                 onImageLayer((assetId, current) => addFreeFillLayer(current, { asset: assetId, kind: "image" }), image);
               }}
               selected={null}
@@ -965,6 +1199,9 @@ export function FreeFillLayersField({
         ) : null}
       </div>
       <FreeFieldError message={error} />
+      <div aria-live="polite" className="sr-only" data-free-fill-status="" role="status">
+        {said.text ? <p key={said.id}>{said.text}</p> : null}
+      </div>
     </fieldset>
   );
 }

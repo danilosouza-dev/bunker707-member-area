@@ -20,6 +20,8 @@ const { renderToStaticMarkup } = await import("react-dom/server");
 const { FreeInspectorContent } = await import("../src/components/admin/v2/communication/popup-free/free-inspector-content.tsx");
 const { FreeInspectorMobile } = await import("../src/components/admin/v2/communication/popup-free/free-inspector-mobile.tsx");
 const { FreeArtboardSettings } = await import("../src/components/admin/v2/communication/popup-free/free-artboard-settings.tsx");
+const { FreeInspectorStyle } = await import("../src/components/admin/v2/communication/popup-free/free-inspector-style.tsx");
+const history = await import("../src/components/admin/v2/communication/popup-free/free-editor-history.ts");
 
 const C = panel.FREE_INSPECTOR_COPY;
 const M = schema.POPUP_FREE_MESSAGES;
@@ -548,6 +550,326 @@ test("camadas de fundo: até 3, subir e descer", () => {
   assert.equal(panel.freeFillBaseColor([{ asset: "img1", kind: "image" }]), null);
 });
 
+/* ------------------------------------------------------------------------------------------------
+ * Faixa Ordem do Fundo (docs/27 §13.9, L4a): arrastar a ficha ou Alt e as setas
+ * ---------------------------------------------------------------------------------------------- */
+
+const VERMELHO = { color: "#ff0000", kind: "solid" };
+const VERDE_FUNDO = { color: "#00ff00", kind: "solid" };
+const AZUL = { color: "#0000ff", kind: "solid" };
+const LARANJA = { color: "#ffaa00", kind: "solid" };
+const TRES = [VERMELHO, VERDE_FUNDO, AZUL];
+const SELO_COM_FUNDO = { box: { fill: TRES }, id: "selo", label: "Novidade", type: "badge" };
+const TITULO_FUNDO = { id: "titulo", lines: [[{ text: "Aula nova" }]], textStyle: { size: 40 }, type: "heading" };
+
+test("camadas de fundo de um lugar a outro: a posição final, sem perder nem duplicar camada", () => {
+  assert.deepEqual(panel.moveFreeFillLayerTo(TRES, 0, 2), [VERDE_FUNDO, AZUL, VERMELHO]);
+  assert.deepEqual(panel.moveFreeFillLayerTo(TRES, 2, 0), [AZUL, VERMELHO, VERDE_FUNDO]);
+  assert.deepEqual(panel.moveFreeFillLayerTo(TRES, 1, 0), [VERDE_FUNDO, VERMELHO, AZUL]);
+
+  // O mesmo lugar e fora da lista: null (nada muda e não há passo vazio).
+  assert.equal(panel.moveFreeFillLayerTo(TRES, 1, 1), null);
+  assert.equal(panel.moveFreeFillLayerTo(TRES, -1, 0), null);
+  assert.equal(panel.moveFreeFillLayerTo(TRES, 0, 3), null);
+  assert.equal(panel.moveFreeFillLayerTo(TRES, 0.5, 1), null);
+  assert.equal(panel.moveFreeFillLayerTo([], 0, 0), null);
+  assert.deepEqual(TRES, [VERMELHO, VERDE_FUNDO, AZUL], "a lista de antes não muda");
+
+  // Todas as idas: a camada levada fica no lugar pedido, com as mesmas referências (nenhuma se perde ou se repete), e o
+  // design continua valendo num Selo e na prancheta (com cores escuras: a camada de baixo da prancheta é a base do X, e
+  // o X precisa contrastar com ela em qualquer ordem).
+  const ESCURAS = [{ color: "#550000", kind: "solid" }, { color: "#005500", kind: "solid" }, { color: "#000055", kind: "solid" }];
+  const base = design([SELO_COM_FUNDO, LINKS], { artboard: { fill: ESCURAS } });
+
+  for (let from = 0; from < 3; from += 1) {
+    for (let to = 0; to < 3; to += 1) {
+      const moved = panel.moveFreeFillLayerTo(TRES, from, to);
+
+      if (from === to) {
+        assert.equal(moved, null);
+        continue;
+      }
+
+      assert.equal(moved.length, 3);
+      assert.equal(moved[to], TRES[from]);
+      assert.equal(new Set(moved).size, 3);
+      assert.ok(TRES.every((layer) => moved.includes(layer)));
+      assert.ok(schema.parsePopupFreeDesign(panel.withFreeArtboard(base, { fill: panel.moveFreeFillLayerTo(ESCURAS, from, to) })), `prancheta ${from} -> ${to}`);
+      assert.ok(schema.parsePopupFreeDesign(panel.withFreeBox(base, "selo", { fill: moved })), `selo ${from} -> ${to}`);
+    }
+  }
+
+  // O lugar de soltar pelos meios das fichas de hoje (px de tela), sem contar o da ficha arrastada.
+  const mids = [10, 50, 90];
+  assert.equal(panel.freeFillDropIndex(2, 5, mids), 0);
+  assert.equal(panel.freeFillDropIndex(2, 30, mids), 1);
+  assert.equal(panel.freeFillDropIndex(2, 70, mids), 2, "entre a ficha de cima e a própria: o mesmo lugar");
+  assert.equal(panel.freeFillDropIndex(0, 95, mids), 2);
+  assert.equal(panel.freeFillDropIndex(0, 60, mids), 1);
+  assert.equal(panel.freeFillDropIndex(0, 20, mids), 0);
+  assert.equal(panel.freeFillDropIndex(1, -40, mids), 0);
+  assert.equal(panel.freeFillDropIndex(1, 400, mids), 2);
+
+  // Longe da faixa (mais de 32 px): sem lugar, soltar ali não muda nada.
+  const area = { bottom: 100, left: 0, right: 200, top: 0 };
+  assert.equal(panel.FREE_FILL_DROP_SLACK_PX, 32);
+  assert.equal(panel.freeFillDropAt(2, { x: 100, y: 5 }, area, mids), 0);
+  assert.equal(panel.freeFillDropAt(2, { x: -31, y: 50 }, area, mids), 1);
+  assert.equal(panel.freeFillDropAt(0, { x: 100, y: 131 }, area, mids), 2);
+  assert.equal(panel.freeFillDropAt(2, { x: -33, y: 50 }, area, mids), null);
+  assert.equal(panel.freeFillDropAt(0, { x: 100, y: 133 }, area, mids), null);
+  assert.equal(panel.freeFillDropAt(0, { x: 233, y: 50 }, area, mids), null);
+  assert.equal(panel.freeFillDropAt(1, { x: 100, y: -33 }, area, mids), null);
+
+  // O soltar só grava com o fundo igual ao do começo, camada por camada (a prancheta sem fundo próprio desenha uma
+  // cópia nova da lista padrão a cada vez: a cópia vale).
+  assert.deepEqual(panel.freeFillReorder(TRES, TRES, 2, 0), [AZUL, VERMELHO, VERDE_FUNDO]);
+  assert.deepEqual(panel.freeFillReorder(TRES, [...TRES], 2, 0), [AZUL, VERMELHO, VERDE_FUNDO]);
+  assert.equal(panel.freeFillReorder(TRES, [LARANJA, VERDE_FUNDO, AZUL], 2, 0), null, "uma camada mudou durante o gesto");
+  assert.equal(panel.freeFillReorder(TRES, [VERMELHO, VERDE_FUNDO], 1, 0), null, "uma camada saiu durante o gesto");
+  assert.equal(panel.freeFillReorder(TRES, undefined, 1, 0), null);
+  assert.equal(panel.freeFillReorder(TRES, TRES, 1, 1), null, "o mesmo lugar");
+
+  // A amostra da ficha: só cores hex validadas; a imagem não tem amostra.
+  assert.equal(panel.freeFillSwatch(VERMELHO), "linear-gradient(90deg, #ff0000 0%, #ff0000 100%)");
+  assert.equal(panel.freeFillSwatch({ kind: "linear", stops: [{ at: 0, color: "#00000000" }, { at: 100, color: "#16181c" }] }), "linear-gradient(90deg, #00000000 0%, #16181c 100%)");
+  assert.equal(panel.freeFillSwatch({ asset: "img1", kind: "image" }), null);
+  assert.equal(panel.freeFillSwatch({ color: "red; background: url(x)", kind: "solid" }), null);
+});
+
+test("camadas de fundo: o foco segue a camada (Subir, Descer, a faixa, Tirar e + Camada)", () => {
+  // Subir: a camada foi para cima; no topo, o Subir dela desliga e o foco vai para o Descer.
+  assert.deepEqual(panel.freeFillFocusAfter("up", 2, 3, 0), { button: "subir", index: 1 });
+  assert.deepEqual(panel.freeFillFocusAfter("up", 1, 3, 0), { button: "descer", index: 0 });
+  // Descer: no fim, o Descer dela desliga e o foco vai para o Subir.
+  assert.deepEqual(panel.freeFillFocusAfter("down", 0, 3, 0), { button: "descer", index: 1 });
+  assert.deepEqual(panel.freeFillFocusAfter("down", 1, 3, 0), { button: "subir", index: 2 });
+  // A faixa (arrastar ou Alt e as setas): a ficha no lugar novo.
+  assert.deepEqual(panel.freeFillFocusAfter("order", 2, 3, 0), { button: "ordem", index: 2 });
+  // Tirar: o Tirar que ficou no lugar (ou o de cima); sem o que tirar, o + Camada.
+  assert.deepEqual(panel.freeFillFocusAfter("remove", 2, 2, 0), { button: "tirar", index: 1 });
+  assert.deepEqual(panel.freeFillFocusAfter("remove", 0, 2, 0), { button: "tirar", index: 0 });
+  assert.deepEqual(panel.freeFillFocusAfter("remove", 1, 1, 1), { button: "acrescentar", index: 0 }, "a prancheta guarda uma camada: o Tirar desliga");
+  assert.deepEqual(panel.freeFillFocusAfter("remove", 0, 0, 0), { button: "acrescentar", index: 0 });
+  // + Camada (a nova entra em cima): o foco fica nele enquanto ele continua ligado; a terceira camada desliga o botão,
+  // e o foco vai para a ficha da camada nova (no WebKit ele cairia no vazio).
+  assert.deepEqual(panel.freeFillFocusAfter("add", 0, 1, 0), { button: "acrescentar", index: 0 });
+  assert.deepEqual(panel.freeFillFocusAfter("add", 0, 2, 1), { button: "acrescentar", index: 0 });
+  assert.deepEqual(panel.freeFillFocusAfter("add", 0, model.FREE_DESIGN_LIMITS.fills, 0), { button: "ordem", index: 0 });
+
+  // Os ids da tela.
+  assert.equal(panel.freeFillFocusId("livre-selo-fundo", { button: "subir", index: 1 }), "livre-selo-fundo-1-subir");
+  assert.equal(panel.freeFillFocusId("livre-popup-fundo", { button: "ordem", index: 0 }), "livre-popup-fundo-0-ordem");
+  assert.equal(panel.freeFillFocusId("livre-popup-fundo", { button: "acrescentar", index: 0 }), "livre-popup-fundo-acrescentar");
+
+  // As frases da faixa, palavra por palavra.
+  assert.equal(C.fill.order, "Ordem");
+  assert.equal(C.fill.orderLabel, "Ordem das camadas de fundo");
+  assert.equal(C.fill.handle(C.fill.layer(0, "Cor")), "Mover Camada 1: Cor. Arraste ou use Alt e as setas.");
+  assert.equal(C.fill.moved(C.fill.layer(2, "Imagem")), "Camada de fundo movida. Agora é a Camada 3: Imagem.");
+
+  // Na tela: cada mudança estrutural pede o foco, e ele é resolvido depois de a lista nova aparecer.
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+  for (const call of ['commitStep(moveFreeFillLayer(fill, index, -1), "up", index)', 'commitStep(moveFreeFillLayer(fill, index, 1), "down", index)', 'commitStep(removeFreeFillLayer(fill, index, min), "remove", index)', 'commitStep(addFreeFillLayer(fill, layer), "add", 0)', 'commitStep(next, "order", to)']) {
+    assert.ok(source.includes(call), call);
+  }
+  assert.match(source, /freeFillFocusId\(id, freeFillFocusAfter\(focusAfter\.action, focusAfter\.index, fill\.length, min\)\)/);
+});
+
+test("camadas de fundo: a imagem que sobe acha a sua camada pela referência, e o cartão que espera fica parado", () => {
+  const PATH = "communications/free/eeeeeeeeeeeeeeeeeeeeeeee.webp";
+  const imagem = { asset: "img", kind: "image" };
+  const antes = [VERMELHO, imagem];
+
+  // "+ Camada" durante o envio: a imagem passou a ser a terceira, e o arquivo vai para ela (pelo índice da hora do
+  // envio iria para a Cor).
+  const deslocada = panel.addFreeFillLayer(antes, VERDE_FUNDO);
+  assert.deepEqual(panel.withFreeFillLayerAsset(deslocada, imagem, "img2"), [VERDE_FUNDO, VERMELHO, { asset: "img2", kind: "image" }]);
+  // Desfazer um arrastar feito antes do envio: a lista velha tem a mesma camada.
+  assert.deepEqual(panel.withFreeFillLayerAsset([imagem, VERMELHO], imagem, "img2"), [{ asset: "img2", kind: "image" }, VERMELHO]);
+  // Tirada (ou trocada) durante o envio: nada muda.
+  assert.deepEqual(panel.withFreeFillLayerAsset([VERMELHO], imagem, "img2"), [VERMELHO]);
+  assert.deepEqual(panel.withFreeFillLayerAsset([VERMELHO, { ...imagem }], imagem, "img2"), [VERMELHO, { ...imagem }]);
+
+  // Pelo design inteiro (o caminho do envio): o arquivo novo entra na camada certa e o design vale. A camada que pediu é
+  // a do design desenhado (a mesma referência que o design mais novo guarda).
+  const start = design([{ box: { fill: deslocada }, id: "forma", type: "shape" }, LINKS], {
+    assets: [{ height: 10, id: "img", kind: "image", path: "communications/free/ffffffffffffffffffffffff.webp", width: 10 }]
+  });
+  const pediu = model.findFreeNode(start, "forma").node.box.fill[2];
+  const placed = panel.withFreeFillImage(start, "forma", { height: 100, path: PATH, width: 100 }, (assetId, current) => panel.withFreeFillLayerAsset(current, pediu, assetId));
+  const fill = model.findFreeNode(placed, "forma").node.box.fill;
+  assert.deepEqual(fill.slice(0, 2), [VERDE_FUNDO, VERMELHO]);
+  assert.equal(fill[2].kind, "image");
+  assert.equal(placed.assets.find((asset) => asset.id === fill[2].asset)?.path, PATH);
+  assert.equal(placed.assets.length, 1, "o arquivo antigo, sem uso, sai");
+  assert.ok(schema.parsePopupFreeDesign(placed));
+
+  // Na tela: enquanto uma imagem desta lista sobe, a faixa, Subir, Descer, Tirar, "+ Camada" e o tipo da camada nova
+  // ficam desligados; o cartão que espera a imagem também (Tipo, Como preenche e ponto de foco).
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+  assert.match(source, /const off = Boolean\(disabled\) \|\| busy;/);
+  assert.equal((source.match(/disabled=\{off \|\| full\}/g) ?? []).length, 2, "+ Camada e o tipo da camada nova");
+  assert.match(source, /disabled=\{off\}\n\s+id=\{`\$\{id\}-\$\{index\}-ordem`\}/);
+  assert.match(source, /const cardOff = Boolean\(disabled\) \|\| sending === paint;/);
+  assert.equal((source.match(/disabled=\{cardOff\}/g) ?? []).length, 3, "Tipo, Como preenche e ponto de foco");
+  assert.ok(source.includes("onPick={(image) => onImageLayer((assetId, current) => withFreeFillLayerAsset(current, paint, assetId), image)}"));
+});
+
+test("camadas de fundo: a imagem que termina de subir depois de a camada sumir (Ctrl + Z no envio) não grava passo e o Refazer fica", () => {
+  const PATH = "communications/free/eeeeeeeeeeeeeeeeeeeeeeee.webp";
+  const ENVIADA = { height: 100, path: PATH, width: 100 };
+  const IMG = { height: 100, id: "img", kind: "image", path: "communications/free/ffffffffffffffffffffffff.webp", width: 100 };
+  const imagem = { asset: "img", kind: "image" };
+
+  // Sem a camada (ou com o mesmo arquivo), a própria lista volta, sem cópia.
+  const sem = [VERMELHO];
+  assert.equal(panel.withFreeFillLayerAsset(sem, imagem, "img2"), sem);
+  const com = [imagem, VERMELHO];
+  assert.equal(panel.withFreeFillLayerAsset(com, imagem, "img"), com);
+
+  // Um passo põe a camada de imagem na Forma; o envio de um arquivo novo começa para ela e um Ctrl + Z no meio a tira.
+  // O arquivo de antes fica em uso no Fundo (a forma canônica tira o que ninguém usa).
+  const FUNDO = { box: { fill: [imagem] }, id: "fundo", type: "shape" };
+  const base = design([FUNDO, { box: { fill: [VERMELHO] }, id: "forma", type: "shape" }, LINKS], { assets: [IMG] });
+  assert.equal(base.assets.length, 1);
+  const withImage = panel.withFreeBox(base, "forma", { fill: [imagem, VERMELHO] });
+  const pediu = model.findFreeNode(withImage, "forma").node.box.fill[0];
+  let h = history.pushFreeHistory(history.createFreeHistory({ cta: null, design: base }), { cta: null, design: withImage }, { now: 1_000 });
+  h = history.undoFreeHistory(h);
+  assert.deepEqual([h.past.length, h.future.length], [0, 1]);
+
+  // O envio termina pelo caminho do onPick: o design volta o mesmo (nem o arquivo entra) e o histórico não muda.
+  const latest = h.present.design;
+  const next = panel.withFreeFillImage(latest, "forma", ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediu, assetId));
+  assert.equal(next, latest);
+  const after = history.pushFreeHistory(h, { cta: null, design: next }, { now: 5_000 });
+  assert.equal(after, h);
+  assert.deepEqual([after.past.length, after.future.length], [0, 1], "o Refazer do passo desfeito continua");
+  assert.equal(history.redoFreeHistory(after).present.design, withImage);
+
+  // Na prancheta, o mesmo: sem a camada, o design volta o mesmo (com e sem fundo próprio).
+  const boardImage = panel.withFreeArtboard(base, { fill: [imagem, VERMELHO] });
+  const pediuNaPrancheta = boardImage.artboard.fill[0];
+  assert.equal(panel.withFreeFillImage(base, null, ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediuNaPrancheta, assetId)), base);
+  const semFundo = design([FUNDO, LINKS], { assets: [IMG] });
+  assert.equal(semFundo.artboard?.fill, undefined);
+  assert.equal(panel.withFreeFillImage(semFundo, null, ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediuNaPrancheta, assetId)), semFundo);
+
+  // "+ Camada" de imagem que chega com a lista já cheia (um Refazer no meio do envio): nada muda.
+  const cheia = design([FUNDO, { box: { fill: [VERMELHO, VERDE_FUNDO, AZUL] }, id: "forma", type: "shape" }, LINKS], { assets: [IMG] });
+  assert.equal(panel.withFreeFillImage(cheia, "forma", ENVIADA, (assetId, current) => panel.addFreeFillLayer(current, { asset: assetId, kind: "image" })), cheia);
+
+  // Com a camada no lugar, o arquivo novo entra nela (um passo, como antes).
+  const placed = panel.withFreeFillImage(withImage, "forma", ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediu, assetId));
+  assert.notEqual(placed, withImage);
+  assert.equal(placed.assets.find((asset) => asset.id === model.findFreeNode(placed, "forma").node.box.fill[0].asset)?.path, PATH);
+  assert.equal(placed.assets.length, 2);
+  assert.ok(schema.parsePopupFreeDesign(placed));
+});
+
+test("camadas de fundo: mudar a ordem é um passo próprio, montado pelo design mais novo; a cor continua juntando", () => {
+  const base = design([TITULO_FUNDO, { ...SELO_COM_FUNDO, place: { mode: "free", w: 116, x: 300, y: 16 } }, LINKS], {
+    devices: { mobile: { nodes: { selo: { place: { mode: "free", x: 120, y: 30 } } } } }
+  });
+  const entry = (value) => ({ cta: null, design: value });
+
+  // A cor (chave "selo:box.fill") e, 300 ms depois, a ordem sem chave: dois passos; desfazer volta só a ordem.
+  const colored = panel.withFreeBox(base, "selo", { fill: [LARANJA, VERDE_FUNDO, AZUL] });
+  const reordered = panel.withFreeBox(colored, "selo", { fill: panel.moveFreeFillLayerTo([LARANJA, VERDE_FUNDO, AZUL], 2, 0) });
+  let steps = history.pushFreeHistory(history.createFreeHistory(entry(base)), entry(colored), { coalesceKey: "selo:box.fill", now: 1_000 });
+  steps = history.pushFreeHistory(steps, entry(reordered), { now: 1_300 });
+  assert.equal(steps.past.length, 2);
+  const undone = history.undoFreeHistory(steps);
+  assert.equal(undone.present.design, colored, "desfazer volta só a ordem; a cor nova fica");
+  assert.equal(history.undoFreeHistory(undone).present.design, base);
+  // Com a chave de antes, a ordem juntava com a cor num passo só.
+  const merged = history.pushFreeHistory(
+    history.pushFreeHistory(history.createFreeHistory(entry(base)), entry(colored), { coalesceKey: "selo:box.fill", now: 1_000 }),
+    entry(reordered),
+    { coalesceKey: "selo:box.fill", now: 1_300 }
+  );
+  assert.equal(merged.past.length, 1);
+
+  // A ordem é uma só: o celular não muda e desenha a mesma ordem.
+  assert.deepEqual(reordered.devices, base.devices);
+  assert.deepEqual(model.findFreeNode(render.resolveFreeForDevice(reordered, "mobile"), "selo").node.box.fill, [AZUL, LARANJA, VERDE_FUNDO]);
+
+  // O Estilo: a ordem (step) vai sem chave e montada pelo design mais novo (latest): uma mudança em outro elemento
+  // durante o arrastar continua lá. A cor vai com a chave e pelo design desenhado.
+  const forma = { box: { fill: TRES }, id: "forma", place: { h: 100, mode: "free", w: 100, x: 40, y: 40 }, type: "shape" };
+  const drawn = design([TITULO_FUNDO, forma, LINKS]);
+  const newer = panel.withFreeTextStyle(drawn, "titulo", { size: 44 });
+  const calls = [];
+  const props = {
+    design: drawn,
+    disabled: false,
+    errors: {},
+    fonts: [],
+    hints: [],
+    latest: () => newer,
+    node: model.findFreeNode(drawn, "forma").node,
+    onBusyChange() {},
+    onChange: (next, field) => calls.push({ field, next }),
+    onCtaChange() {},
+    onFontsChange() {},
+    rects: {}
+  };
+  const field = fillFieldOf(FreeInspectorStyle(props));
+  assert.ok(field, "o Estilo tem o campo do Fundo");
+  assert.equal(field.props.id, "livre-forma-fundo");
+
+  field.props.onChange(panel.moveFreeFillLayerTo(TRES, 2, 0), { step: true });
+  assert.equal(calls[0].field, undefined, "sem chave: um passo próprio");
+  assert.equal(model.findFreeNode(calls[0].next, "titulo").node.textStyle.size, 44, "a mudança do outro elemento continua lá");
+  assert.deepEqual(model.findFreeNode(calls[0].next, "forma").node.box.fill, [AZUL, VERMELHO, VERDE_FUNDO]);
+
+  field.props.onChange([LARANJA, VERDE_FUNDO, AZUL]);
+  assert.equal(calls[1].field, "box.fill", "a cor junta pela chave do campo");
+  assert.equal(model.findFreeNode(calls[1].next, "titulo").node.textStyle.size, 40);
+
+  // A prancheta faz o mesmo (conferido no fonte: o componente usa estado).
+  const artboard = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-artboard-settings.tsx", import.meta.url), "utf8");
+  assert.match(artboard, /onChange\(withFreeArtboard\(options\?\.step \? latest\(\) : design, \{ fill:/);
+  assert.match(artboard, /options\?\.step \? undefined : "artboard\.fill"\)/);
+  const style = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-inspector-style.tsx", import.meta.url), "utf8");
+  assert.match(style, /options\?\.step \? onChange\(withFreeBox\(latest\(\), node\.id, \{ fill \}\)\) : set\(\{ fill \}, "fill"\)/);
+  // O campo manda { step: true } só nas mudanças estruturais; a cor, o tipo e os números vão sem.
+  const fields = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+  assert.equal((fields.match(/commit\(next, \{ step: true \}\)/g) ?? []).length, 1);
+  assert.match(fields, /function commitStep\([^)]*\) \{\n\s+commit\(next, \{ step: true \}\);/);
+  assert.match(fields, /function update\(index: number, paint: FreeFillPaint\) \{\n\s+commit\(fill\.map\(\(layer, position\) => \(position === index \? paint : layer\)\)\);/);
+});
+
+/** O FreeFillLayersField do Estilo (BoxSections nao usa ganchos: e desenhado aqui na mao). */
+function fillFieldOf(element) {
+  if (!element || typeof element !== "object") {
+    return null;
+  }
+
+  if (Array.isArray(element)) {
+    for (const child of element) {
+      const found = fillFieldOf(child);
+
+      if (found) {
+        return found;
+      }
+    }
+
+    return null;
+  }
+
+  if (typeof element.type === "function" && element.type.name === "FreeFillLayersField") {
+    return element;
+  }
+
+  if (typeof element.type === "function" && element.type.name === "BoxSections") {
+    return fillFieldOf(element.type(element.props));
+  }
+
+  return fillFieldOf(element.props?.children);
+}
+
 test("lados: todos iguais e cada lado", () => {
   assert.deepEqual(panel.freeSidesFour(undefined), [0, 0, 0, 0]);
   assert.deepEqual(panel.freeSidesFour(12), [12, 12, 12, 12]);
@@ -1067,6 +1389,43 @@ test("painel Pop-up desenhado: o grupo No celular com Igual ao computador em cad
   const own = draw(design([LINKS], { devices: { mobile: { artboard: { padding: 12 } } } }), { "devices.mobile.artboard.padding": "Use de 0 a 200." });
   assert.match(own, /aria-checked="false" aria-label="Respiro interno: igual ao computador"/);
   assert.ok(own.includes("Use de 0 a 200."));
+});
+
+test("Fundo desenhado: a faixa Ordem só com 2 ou 3 camadas, com fichas que se arrastam e os ids do foco", () => {
+  function draw(value) {
+    return renderToStaticMarkup(createElement(FreeArtboardSettings, { design: value, disabled: false, errors: {}, fonts: [], hints: [], latest: () => value, onBusyChange() {}, onChange() {}, onFontsChange() {}, rects: {} }));
+  }
+
+  // Uma camada (o padrão da prancheta): sem faixa.
+  const one = draw(design([LINKS]));
+  assert.equal(one.includes("data-free-fill-grip"), false);
+  assert.equal(one.includes("Ordem das camadas de fundo"), false);
+  assert.match(one, /id="livre-popup-fundo-acrescentar"/);
+
+  const two = draw(design([LINKS], { artboard: { fill: [VERMELHO, AZUL] } }));
+  assert.match(two, /<ol aria-label="Ordem das camadas de fundo"/);
+  assert.ok(two.includes(">Ordem<"));
+  assert.equal((two.match(/data-free-fill-grip="/g) ?? []).length, 2);
+  assert.deepEqual(two.match(/aria-label="Mover [^"]+"/g), [
+    'aria-label="Mover Camada 1: Cor. Arraste ou use Alt e as setas."',
+    'aria-label="Mover Camada 2: Cor. Arraste ou use Alt e as setas."'
+  ]);
+  assert.equal((two.match(/aria-keyshortcuts="Alt\+ArrowUp Alt\+ArrowDown"/g) ?? []).length, 2);
+  for (const fieldId of ["livre-popup-fundo-0-ordem", "livre-popup-fundo-0-subir", "livre-popup-fundo-0-descer", "livre-popup-fundo-0-tirar", "livre-popup-fundo-1-ordem", "livre-popup-fundo-acrescentar"]) {
+    assert.match(two, new RegExp(`id="${fieldId}"`), fieldId);
+  }
+  // A ficha tem touch-action: none (a caneta arrasta sem rolar o painel) e a amostra da cor.
+  assert.match(two, /<button[^>]*class="[^"]*touch-none[^"]*select-none[^"]*"[^>]*data-free-fill-grip="0"/);
+  assert.ok(two.includes("background-image:linear-gradient(90deg, #ff0000 0%, #ff0000 100%)"));
+  // Subir na de cima e Descer na de baixo desligados; a região que fala a mudança já está montada.
+  assert.match(two, /<button[^>]*disabled=""[^>]*id="livre-popup-fundo-0-subir"|<button[^>]*id="livre-popup-fundo-0-subir"[^>]*disabled=""/);
+  assert.match(two, /<button[^>]*disabled=""[^>]*id="livre-popup-fundo-1-descer"|<button[^>]*id="livre-popup-fundo-1-descer"[^>]*disabled=""/);
+  assert.match(two, /<div aria-live="polite" class="sr-only" data-free-fill-status="" role="status">/);
+
+  // Três camadas: o + Camada desliga (o foco vai para a ficha da nova; ver freeFillFocusAfter).
+  const three = draw(design([LINKS], { artboard: { fill: TRES } }));
+  assert.equal((three.match(/data-free-fill-grip="/g) ?? []).length, 3);
+  assert.match(three, /<button[^>]*disabled=""[^>]*id="livre-popup-fundo-acrescentar"|<button[^>]*id="livre-popup-fundo-acrescentar"[^>]*disabled=""/);
 });
 
 test("aba Celular desenhada: a frase, Voltar tudo, uma chave com nome por campo e o valor próprio", () => {

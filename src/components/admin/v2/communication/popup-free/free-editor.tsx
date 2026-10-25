@@ -30,7 +30,7 @@ import { adminToast } from "../../toast";
 import { FreeCanvas, type FreeCanvasApi, type FreeCanvasToolbarCommand } from "./free-canvas";
 import { FreeCopyPaste } from "./free-copy-paste";
 import { FreeElementsPanel } from "./free-elements-panel";
-import type { FreeRect } from "./free-editor-geometry";
+import type { FreeCanvasDrop, FreeMoveTarget, FreePoint, FreeRect } from "./free-editor-geometry";
 import {
   canRedoFreeHistory,
   canUndoFreeHistory,
@@ -59,11 +59,15 @@ import {
   freeKnownAssets,
   freeDeviceForFocusKey,
   freeMobileFreePlace,
+  freeMoveAnnouncement,
+  freeMoveProblem,
+  freeNewNodeDropSpec,
   freeNodeIdForKey,
   freeNodeOf,
   freeNodeToFree,
   freeNodeToSequence,
   freeOnlyLinks,
+  freeOutOfBoxProblem,
   freeOutsideFieldNames,
   freeParentId,
   freeRemoveProblem,
@@ -77,6 +81,7 @@ import {
   moveFreeNodeInList,
   moveFreeNodeIntoBox,
   moveFreeNodeOutOfBox,
+  moveFreeNodeTo,
   nudgeFreeNode,
   raiseFreeArtboardTo,
   removeFreeNode,
@@ -120,6 +125,12 @@ import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } fro
 // Celular (docs/27 §13.8, PR L3): com "Ver como: Celular" o palco desenha resolveFreeForDevice(design, "mobile") e
 // o arrastar, as alcas, as setas e o "Alinhar no pop-up" gravam em devices.mobile (um passo por gesto, como antes);
 // a aba Celular do painel e o grupo "No celular" do Pop-up mudam so o celular; entrar na aba liga o Celular.
+//
+// Arrastar do L4a (docs/27 §13.9): Camadas, desenho e o ⋯ levam a moveTo (freeMoveProblem e moveFreeNodeTo, um
+// passo sem juntar, nada no mesmo lugar); o painel Elementos mostra o lugar pelo previewDrop do desenho e acrescenta
+// no soltar pelo mesmo caminho do clique. A ordem e uma so: com o Celular, toda mudanca de ordem termina a frase com
+// "A ordem muda também no computador." (orderPhrase); Soltar e Seguir a sequencia terminam com ela sempre, mesmo sem
+// mudar a ordem, porque o modo e um so nos dois aparelhos.
 
 const copy = FREE_EDITOR_COPY;
 /** Espera depois da ultima tecla antes de mandar o design ao rascunho do aviso. */
@@ -761,6 +772,45 @@ function FreeEditorSession({
    * Comandos (Camadas, barrinha do desenho, painel da direita, teclado)
    * ------------------------------------------------------------------------------------------ */
 
+  /**
+   * A frase de uma mudanca de ordem: com "Ver como: Celular", mais "A ordem muda também no computador." (a ordem e uma
+   * so nos dois aparelhos, docs/27 L29).
+   */
+  function orderPhrase(text: string) {
+    return deviceRef.current === "mobile" ? `${text} ${copy.drag.alsoDesktop}` : text;
+  }
+
+  /**
+   * Leva um elemento a um vao (Camadas, desenho): confere no design de agora, grava um passo sem juntar com o anterior,
+   * seleciona e fala a posicao. O mesmo lugar ou um lugar invalido nao gravam nada.
+   */
+  function moveTo(id: FreeId, target: FreeMoveTarget) {
+    if (disabled) {
+      return;
+    }
+
+    const present = historyRef.current.present;
+    const problem = freeMoveProblem(present.design, id, target);
+
+    if (problem !== null) {
+      if (problem) {
+        announce(problem);
+      }
+
+      return;
+    }
+
+    const result = moveFreeNodeTo(present.design, id, target);
+
+    if (!result) {
+      return;
+    }
+
+    commitDesign(result.design);
+    select(id);
+    announce(orderPhrase(freeMoveAnnouncement(result.design, id, present.cta, { becameFlow: result.becameFlow })));
+  }
+
   function runCommand(kind: CommandKind, id: FreeId) {
     const present = historyRef.current.present;
     const node = freeNodeOf(present.design, id);
@@ -807,7 +857,7 @@ function FreeEditorSession({
 
         if (next) {
           commitDesign(next);
-          announce(kind === "moveUp" ? copy.announce.upward : copy.announce.downward);
+          announce(orderPhrase(kind === "moveUp" ? copy.announce.upward : copy.announce.downward));
         }
 
         return;
@@ -817,7 +867,14 @@ function FreeEditorSession({
 
         if (next) {
           commitDesign(next);
-          announce(copy.announce.outOfBox);
+          announce(orderPhrase(copy.announce.outOfBox));
+        } else {
+          // A caixa de fora cheia (20): a frase, sem passo.
+          const problem = freeOutOfBoxProblem(present.design, id);
+
+          if (problem) {
+            announce(problem);
+          }
         }
 
         return;
@@ -848,8 +905,10 @@ function FreeEditorSession({
         const next = freeNodeToFree(present.design, id, rects);
 
         if (next) {
+          // O Soltar muda o modo nos dois aparelhos (e, de dentro de uma caixa, o lugar em children): com o Celular, a
+          // frase do computador sai sempre, mesmo com a ordem igual (docs/27 §13.9).
           commitDesign(next);
-          announce(copy.announce.toFree);
+          announce(orderPhrase(copy.announce.toFree));
         }
 
         return;
@@ -858,8 +917,10 @@ function FreeEditorSession({
         const next = freeNodeToSequence(present.design, id, rects);
 
         if (next) {
+          // O lugar sai dos retangulos do aparelho que se ve, mas a ordem e uma so. Como no Soltar, a frase do computador
+          // sai sempre com o Celular (o modo e um so), mesmo quando o indice fica igual.
           commitDesign(next);
-          announce(copy.announce.toSequence);
+          announce(orderPhrase(copy.announce.toSequence));
         }
 
         return;
@@ -886,8 +947,14 @@ function FreeEditorSession({
 
       if (result) {
         commitDesign(result.design);
-        announce(result.becameFlow ? copy.announce.toSequence : copy.announce.intoBox);
+        announce(orderPhrase(result.becameFlow ? copy.announce.toSequence : copy.announce.intoBox));
       }
+
+      return;
+    }
+
+    if (command.kind === "move") {
+      moveTo(command.id, command.target);
 
       return;
     }
@@ -943,10 +1010,15 @@ function FreeEditorSession({
     runCommand(command, id);
   }
 
-  function add(kind: FreeCatalogKind) {
+  /**
+   * Acrescenta do painel Elementos: pelo clique (a Forma no centro do que se ve) ou soltando no desenho (`drop`: a
+   * Forma e o Degradê pelo ponto, o resto no vao da sequencia). O resto do caminho e o mesmo nos dois.
+   */
+  function add(kind: FreeCatalogKind, drop: FreeCanvasDrop | null = null) {
     const present = historyRef.current.present;
-    const center = kind === "shape" ? (canvasApi.current?.visibleCenter() ?? undefined) : undefined;
-    const result = addFreeElement(present.design, kind, { center, selectedId: activeId });
+    const center = drop?.kind === "free" ? drop.center : kind === "shape" && !drop ? (canvasApi.current?.visibleCenter() ?? undefined) : undefined;
+    const at = drop?.kind === "flow" ? { index: drop.index, parentId: drop.parentId } : undefined;
+    const result = addFreeElement(present.design, kind, { at, center, selectedId: activeId });
 
     if ("reason" in result) {
       announce(result.reason);
@@ -959,6 +1031,23 @@ function FreeEditorSession({
     setRightPanel("inspector");
     setFocusRequest(freeFocusAfterAdd(result.node));
     announce(freeAddedAnnouncement(kind));
+  }
+
+  /** Arrastando um botao do painel Elementos: o desenho mostra onde o elemento entra (o design de agora). */
+  function onElementDragMove(kind: FreeCatalogKind, client: FreePoint) {
+    canvasApi.current?.previewDrop?.(client, freeNewNodeDropSpec(historyRef.current.present.design, kind));
+  }
+
+  /** Fim do arrastar do painel: soltou na prancheta visivel, acrescenta ali; fora ou cancelado, nada. */
+  function onElementDragEnd(kind: FreeCatalogKind, client: FreePoint | null) {
+    const api = canvasApi.current;
+    const drop = client && api?.previewDrop ? api.previewDrop(client, freeNewNodeDropSpec(historyRef.current.present.design, kind)) : null;
+
+    api?.previewDrop?.(null, null);
+
+    if (drop) {
+      add(kind, drop);
+    }
   }
 
   /** Fim de um arrastar ou de uma alca: um passo no historico, no aparelho do "Ver como". */
@@ -1520,10 +1609,19 @@ function FreeEditorSession({
             ))}
           </Tabs.List>
           <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="elements">
-            <FreeElementsPanel design={design} disabled={disabled} onAdd={add} />
+            <FreeElementsPanel design={design} disabled={disabled} onAdd={(kind) => add(kind)} onDragEnd={onElementDragEnd} onDragMove={onElementDragMove} />
           </Tabs.Panel>
           <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="layers">
-            <FreeLayersPanel cta={cta} design={design} disabled={disabled} flagged={flagged} onCommand={onLayerCommand} onSelect={(id) => select(id)} selectedId={activeId} />
+            <FreeLayersPanel
+              cta={cta}
+              design={design}
+              device={device}
+              disabled={disabled}
+              flagged={flagged}
+              onCommand={onLayerCommand}
+              onSelect={(id) => select(id)}
+              selectedId={activeId}
+            />
           </Tabs.Panel>
           {templates ? (
             <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="templates">
@@ -1553,6 +1651,7 @@ function FreeEditorSession({
             fonts={fonts}
             onCommitRect={onCommitRect}
             onEditText={onEditText}
+            onMoveInFlow={moveTo}
             onRectsChange={setRects}
             onSelect={(id) => select(id)}
             onToolbar={onToolbar}

@@ -1,6 +1,7 @@
 // Editor Livre do pop-up (docs/27; spec §4.6 e §4.7), pacote I: as pecas puras do painel da direita. As frases
 // do painel (palavra por palavra da spec), as opcoes de cada campo, a area de texto com "Outro estilo na seleção"
-// (applyFreeTextEdit, splitFreeSpanAtSelection, applyFreeSpanStyle e as fichas das partes), as camadas de fundo,
+// (applyFreeTextEdit, splitFreeSpanAtSelection, applyFreeSpanStyle e as fichas das partes), as camadas de fundo
+// (com a faixa Ordem do L4a: o lugar de soltar, o foco que segue a camada e a imagem que acha a sua camada),
 // as paradas do degradê, os lados, as sombras com os atalhos, a largura do pop-up com a reescala, os pesos de cada
 // fonte, a conta da imagem (lado ate 1.600 px e as qualidades ate caber) e o mapa chave -> aba/campo
 // (freeInspectorTargetOf).
@@ -207,11 +208,17 @@ export const FREE_INSPECTOR_COPY = {
     focus: "Ponto de foco",
     focusX: "Ponto de foco: X",
     focusY: "Ponto de foco: Y",
+    /** Nome de cada ficha da faixa Ordem (a camada vem de `layer`). */
+    handle: (layer: string) => `Mover ${layer}. Arraste ou use Alt e as setas.`,
     image: "Imagem",
     kind: "Tipo da camada",
     layer: (index: number, kind: string) => `Camada ${index + 1}: ${kind}`,
     moveDown: "Descer",
     moveUp: "Subir",
+    /** Falado pela faixa Ordem depois de arrastar ou de Alt e as setas (a camada no lugar novo). */
+    moved: (layer: string) => `Camada de fundo movida. Agora é a ${layer}.`,
+    order: "Ordem",
+    orderLabel: "Ordem das camadas de fundo",
     remove: "Tirar",
     shape: "Formato",
     stopAdd: "Cor",
@@ -1302,6 +1309,142 @@ export function removeFreeFillLayer(fill: readonly FreeFillPaint[], index: numbe
   return fill.filter((_, position) => position !== index);
 }
 
+/*
+ * Faixa "Ordem" do Fundo (docs/27 §13.9, L4a): arrastar a ficha ou Alt e as setas levam uma camada a outra posicao
+ * (a de cima e a primeira). Mudar a ordem, Tirar e "+ Camada" sao um passo proprio no historico; o foco segue a
+ * camada (os botoes tem id `${id}-${indice}-subir`, `-descer`, `-tirar` e `-ordem`, e `${id}-acrescentar`).
+ */
+
+/** Soltar a ficha mais longe que isto (px de tela) da faixa nao muda nada. */
+export const FREE_FILL_DROP_SLACK_PX = 32;
+
+/**
+ * Leva a camada de `from` para a posicao final `to` (a de cima e a 0). Fora da lista ou no mesmo lugar: null (nada
+ * muda e nao ha passo vazio no historico). Nunca perde nem duplica camada.
+ */
+export function moveFreeFillLayerTo(fill: readonly FreeFillPaint[], from: number, to: number): FreeFillPaint[] | null {
+  const inside = (index: number) => Number.isInteger(index) && index >= 0 && index < fill.length;
+
+  if (!inside(from) || !inside(to) || from === to) {
+    return null;
+  }
+
+  const next = fill.filter((_, position) => position !== from);
+
+  next.splice(to, 0, fill[from]);
+
+  return next;
+}
+
+/**
+ * A posicao final da ficha `from` solta na altura `y` (px de tela): quantos meios das fichas de hoje, sem contar o
+ * dela, ficam acima de `y` (de 0 a length - 1). Igual a `from` = o mesmo lugar.
+ */
+export function freeFillDropIndex(from: number, y: number, mids: readonly number[]): number {
+  const above = mids.filter((mid, index) => index !== from && mid < y).length;
+
+  return Math.max(0, Math.min(Math.max(0, mids.length - 1), above));
+}
+
+/**
+ * A posicao final ao soltar no ponto (px de tela), ou null quando o ponto fica fora da faixa (`area`, o retangulo da
+ * lista) com mais de FREE_FILL_DROP_SLACK_PX de folga: soltar ali nao muda nada.
+ */
+export function freeFillDropAt(
+  from: number,
+  point: { x: number; y: number },
+  area: { bottom: number; left: number; right: number; top: number },
+  mids: readonly number[]
+): number | null {
+  const slack = FREE_FILL_DROP_SLACK_PX;
+
+  if (point.x < area.left - slack || point.x > area.right + slack || point.y < area.top - slack || point.y > area.bottom + slack) {
+    return null;
+  }
+
+  return freeFillDropIndex(from, point.y, mids);
+}
+
+/**
+ * O soltar da faixa Ordem: so muda com o fundo de agora igual ao do comeco do gesto (camada por camada; a prancheta
+ * sem fundo proprio desenha uma copia nova da lista padrao a cada vez) e com a posicao mudando. Senao, null.
+ */
+export function freeFillReorder(start: readonly FreeFillPaint[], now: readonly FreeFillPaint[] | undefined, from: number, to: number): FreeFillPaint[] | null {
+  const current = now ?? [];
+
+  if (current.length !== start.length || current.some((layer, index) => layer !== start[index])) {
+    return null;
+  }
+
+  return moveFreeFillLayerTo(current, from, to);
+}
+
+export type FreeFillFocusButton = "acrescentar" | "descer" | "ordem" | "subir" | "tirar";
+export type FreeFillFocus = { button: FreeFillFocusButton; index: number };
+
+/**
+ * Para onde vai o foco depois de uma mudanca na lista (`length` e o de depois): o foco segue a camada, sempre num
+ * botao ligado.
+ * - up de i (foi para i - 1): Subir em i - 1, ou Descer quando ela ficou em cima;
+ * - down de i (foi para i + 1): Descer em i + 1, ou Subir quando ela ficou embaixo;
+ * - order (arrastar ou Alt e as setas na ficha): a ficha no lugar novo;
+ * - add ("+ Camada", a nova entra em cima): o proprio "+ Camada" enquanto ele continua ligado; com a lista cheia ele
+ *   desliga, e o foco vai para a ficha da camada nova;
+ * - remove em i: o Tirar que ficou nesse lugar (ou o de cima dele), ou "+ Camada" quando nao ha mais o que tirar.
+ */
+export function freeFillFocusAfter(action: "add" | "down" | "order" | "remove" | "up", index: number, length: number, min: number): FreeFillFocus {
+  switch (action) {
+    case "up": {
+      const at = index - 1;
+
+      return at > 0 ? { button: "subir", index: at } : { button: "descer", index: at };
+    }
+    case "down": {
+      const at = index + 1;
+
+      return at < length - 1 ? { button: "descer", index: at } : { button: "subir", index: at };
+    }
+    case "order":
+      return { button: "ordem", index };
+    case "add":
+      return length >= L.fills ? { button: "ordem", index: 0 } : { button: "acrescentar", index: 0 };
+    case "remove":
+      return length === 0 || length <= min ? { button: "acrescentar", index: 0 } : { button: "tirar", index: Math.min(index, length - 1) };
+  }
+}
+
+/** O id do botao de freeFillFocusAfter no campo `id` do Fundo. */
+export function freeFillFocusId(id: string, focus: FreeFillFocus): string {
+  return focus.button === "acrescentar" ? `${id}-acrescentar` : `${id}-${focus.index}-${focus.button}`;
+}
+
+/**
+ * A imagem que terminou de subir vai para a camada que a pediu, achada pela referencia e nao pelo indice: durante o
+ * envio a lista pode ter mudado (Desfazer, outra camada acrescentada). Sem ela (tirada ou trocada de tipo), ou com o
+ * mesmo arquivo, nada muda: devolve a propria lista, e withFreeFillImage devolve o design sem passo novo.
+ */
+export function withFreeFillLayerAsset(fill: readonly FreeFillPaint[], layer: FreeFillPaint, assetId: FreeId): readonly FreeFillPaint[] {
+  const index = fill.indexOf(layer);
+
+  if (index < 0 || layer.kind !== "image" || layer.asset === assetId) {
+    return fill;
+  }
+
+  return fill.map((paint, position) => (position === index ? { ...layer, asset: assetId } : paint));
+}
+
+/** A amostra da ficha (CSS so de cores hex validadas, por freeStopsPreview); a imagem nao tem amostra (vai o icone). */
+export function freeFillSwatch(paint: FreeFillPaint): string | null {
+  if (paint.kind === "image") {
+    return null;
+  }
+
+  const stops = paint.kind === "solid" ? [{ at: 0, color: paint.color }, { at: 100, color: paint.color }] : paint.stops;
+  const preview = freeStopsPreview(stops);
+
+  return preview === "none" ? null : preview;
+}
+
 function mix(left: number, right: number, amount: number) {
   return Math.round(left + (right - left) * amount);
 }
@@ -2145,15 +2288,22 @@ export function withFreeVideoPoster(design: PopupFreeDesign, nodeId: FreeId, pos
   });
 }
 
+/** As mesmas camadas, na mesma ordem (pela referencia de cada uma). */
+function sameFreeFill(left: readonly FreeFillPaint[], right: readonly FreeFillPaint[]) {
+  return left.length === right.length && left.every((paint, index) => paint === right[index]);
+}
+
 /**
  * Camada de imagem num fundo (da prancheta: `nodeId` null; de um elemento: o id): poe o arquivo (enviado ou ja
- * no design) e monta as camadas com o id dele a partir do fundo mais novo.
+ * no design) e monta as camadas com o id dele a partir do fundo mais novo. Quando `build` nao muda as camadas (a
+ * camada que pediu a imagem sumiu durante o envio, ou a lista ja esta cheia), devolve o proprio `design`: nem o
+ * arquivo entra, nem o editor ganha um passo vazio (que apagaria o Refazer).
  */
 export function withFreeFillImage(
   design: PopupFreeDesign,
   nodeId: FreeId | null,
   image: { height: number; path: string; width: number } | FreeId,
-  build: (assetId: FreeId, current: readonly FreeFillPaint[]) => FreeFillPaint[]
+  build: (assetId: FreeId, current: readonly FreeFillPaint[]) => readonly FreeFillPaint[]
 ): PopupFreeDesign {
   if (typeof image === "string" && !hasImageAsset(design, image)) {
     return design;
@@ -2163,8 +2313,9 @@ export function withFreeFillImage(
 
   if (nodeId === null) {
     const current = placed.design.artboard?.fill ?? [];
+    const fill = build(placed.id, current);
 
-    return pruneFreeAssets({ ...placed.design, artboard: { ...placed.design.artboard, fill: build(placed.id, current) } });
+    return sameFreeFill(fill, current) ? design : pruneFreeAssets({ ...placed.design, artboard: { ...placed.design.artboard, fill: [...fill] } });
   }
 
   const found = findFreeNode(placed.design, nodeId);
@@ -2173,9 +2324,14 @@ export function withFreeFillImage(
     return design;
   }
 
-  const fill = build(placed.id, found.node.box?.fill ?? []);
+  const current = found.node.box?.fill ?? [];
+  const fill = build(placed.id, current);
 
-  return pruneFreeAssets(withFreeBox(placed.design, nodeId, { fill: fill.length > 0 ? fill : undefined }));
+  if (sameFreeFill(fill, current)) {
+    return design;
+  }
+
+  return pruneFreeAssets(withFreeBox(placed.design, nodeId, { fill: fill.length > 0 ? [...fill] : undefined }));
 }
 
 /** O arquivo de video do elemento e a capa dele (para a tela). */

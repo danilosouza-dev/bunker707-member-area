@@ -139,7 +139,11 @@ export function FreeArtboardSettings({ design, disabled, errors, fonts, hints, l
           id={id("fundo")}
           min={1}
           onBusyChange={onBusyChange}
-          onChange={(fill) => onChange(withFreeArtboard(design, { fill: fill && fill.length > 0 ? fill : [...FREE_ARTBOARD_DEFAULTS.fill] }), "artboard.fill")}
+          // Mudar a ordem, Tirar e "+ Camada" (step): um passo proprio, sem chave, montado pelo design mais novo. A cor e
+          // os numeros juntam pela chave "artboard.fill".
+          onChange={(fill, options) =>
+            onChange(withFreeArtboard(options?.step ? latest() : design, { fill: fill && fill.length > 0 ? fill : [...FREE_ARTBOARD_DEFAULTS.fill] }), options?.step ? undefined : "artboard.fill")
+          }
           onImageLayer={(build, image) => onChange(withFreeFillImage(latest(), null, image, build))}
           value={artboard.fill}
         />

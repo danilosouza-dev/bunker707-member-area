@@ -4,6 +4,9 @@
 // esconder, travar, renomear, camada (trazer para frente / enviar para tras), mover pelas setas, soltar e seguir a
 // sequencia, alinhar no pop-up pelo retangulo medido, as linhas das Camadas, os erros do design (zod no navegador e
 // as regras com o conteudo do aviso) e os itens do Revisar. O item de previa e o freePreviewPopupItem do pacote M.
+// O arrastar do L4a (docs/27 §13.9): uma regra so de mover (freeMoveProblem e moveFreeNodeTo, com o indice como vao
+// na lista de hoje) para as Camadas, o desenho, o painel e o ⋯, a frase de depois de soltar, o lugar de soltar nas
+// Camadas e os lugares do desenho (freeFlowContainers), e o elemento novo que entra onde foi solto.
 //
 // Modulo puro, imports relativos (tests/popup-livre-editor-modelo.test.mjs carrega direto pelo Node). Tudo aqui e
 // texto do produtor em portugues, sem palavra fora do vocabulario (testado).
@@ -44,9 +47,16 @@ import {
   alignFreeRect,
   freePlaceFromRect,
   freePlaceNumbers,
+  freeRectOfPlace,
   freeSequenceIndexFor,
   nudgeFreePlace,
   type FreeAlignEdge,
+  type FreeCanvasDropSpec,
+  type FreeFlowContainer,
+  type FreeFlowItem,
+  type FreeLayerOver,
+  type FreeMoveTarget,
+  type FreePoint,
   type FreeRect
 } from "./free-editor-geometry";
 
@@ -106,9 +116,19 @@ export const FREE_EDITOR_COPY = {
     links: "Os links ficam no desenho, mas cada um se tira em Conteúdo: desligue “Permitir Lembrar depois” ou “Mostrar Não mostrar de novo”."
   },
   devices: { desktop: "Computador", mobile: "Celular" },
+  /** O arrastar do L4a (docs/27 §13.9): a frase ao soltar e as etiquetas do indicador. */
+  drag: {
+    /** Com "Ver como: Celular", no fim de toda mudanca de ordem: a ordem e uma so nos dois aparelhos. */
+    alsoDesktop: "A ordem muda também no computador.",
+    alsoDesktopTag: "Muda também no computador",
+    inArtboard: "no pop-up",
+    intoItself: "Uma caixa não entra dentro dela mesma.",
+    moved: (n: number, total: number, where = "no pop-up") => `Movido. Posição ${n} de ${total}, ${where}.`
+  },
   elements: {
     ctaExists: "O pop-up já tem o botão principal.",
     groupsLabel: "Elementos para acrescentar",
+    hint: "Clique para acrescentar ou arraste até o lugar no desenho.",
     linkButtonOnly: M.linkButtons,
     videoOnly: M.videoDuplicate
   },
@@ -168,7 +188,7 @@ export const FREE_EDITOR_COPY = {
     "Ctrl + D: duplicar",
     "Ctrl + Z: desfazer",
     "Ctrl + Shift + Z: refazer",
-    "Esc: selecionar a caixa de fora (ou nada)",
+    "Esc: selecionar a caixa de fora (ou nada); arrastando, cancela",
     "[ e ]: enviar para trás / trazer para frente",
     "Shift ao redimensionar: manter a proporção",
     "Alt ao mover: sem guias",
@@ -201,7 +221,7 @@ export const FREE_EDITOR_COPY = {
     use: "Usar este modelo",
     useLabel: (name: string) => `Usar este modelo: ${name}`
   },
-  toolbar: { duplicate: "Duplicar", label: "Ações do elemento", moveDown: "Descer", moveUp: "Subir", remove: "Excluir", toFree: "Soltar" },
+  toolbar: { drag: "Arraste para mudar o lugar", duplicate: "Duplicar", label: "Ações do elemento", moveDown: "Descer", moveUp: "Subir", remove: "Excluir", toFree: "Soltar" },
   /** Copiar e colar o design (docs/27 L1.1). */
   transfer: {
     apply: "Usar este design",
@@ -544,11 +564,38 @@ export function freeInsertionPoint(design: PopupFreeDesign, selectedId: FreeId |
 
 export type FreeAddResult = { design: PopupFreeDesign; id: FreeId; kind: FreeCatalogKind; node: FreeNode } | { reason: string };
 
+/** Por que o elemento novo nao entra no vao escolhido (null = entra): o pai, o indice, as 20 da caixa e a profundidade. */
+function addAtProblem(design: PopupFreeDesign, node: FreeNode, at: FreeMoveTarget): string | null {
+  const parent = at.parentId === null ? null : locate(design, at.parentId);
+
+  if (at.parentId !== null && parent?.node.type !== "box") {
+    return M.design;
+  }
+
+  const siblings = childrenOf(design, at.parentId);
+
+  if (!Number.isInteger(at.index) || at.index < 0 || at.index > siblings.length) {
+    return M.design;
+  }
+
+  if (parent && siblings.length >= L.childrenPerBox) {
+    return M.childrenPerBox;
+  }
+
+  return (parent?.depth ?? 0) + boxHeight(node) > L.boxDepth ? M.depth : null;
+}
+
 /**
  * Acrescenta um elemento do painel Elementos. O Botão principal pede o `cta` do aviso (quem chama cria "Saiba mais"
- * com o destino vazio quando falta). Devolve a frase do limite quando nao cabe.
+ * com o destino vazio quando falta). Devolve a frase do limite quando nao cabe. Com `at` (arrastado do painel ate o
+ * desenho), um elemento da sequencia entra naquele vao (a frase da caixa cheia ou da profundidade quando nao cabe); um
+ * solto (Forma, Degradê) ignora `at`, entra pelo `center` e fica na prancheta antes dos Links, como no clique.
  */
-export function addFreeElement(design: PopupFreeDesign, kind: FreeCatalogKind, options: { center?: { x: number; y: number }; selectedId?: FreeId | null } = {}): FreeAddResult {
+export function addFreeElement(
+  design: PopupFreeDesign,
+  kind: FreeCatalogKind,
+  options: { at?: FreeMoveTarget; center?: FreePoint; selectedId?: FreeId | null } = {}
+): FreeAddResult {
   const reason = freeElementDisabledReason(design, kind);
 
   if (reason) {
@@ -557,9 +604,40 @@ export function addFreeElement(design: PopupFreeDesign, kind: FreeCatalogKind, o
 
   const id = nextFreeId(design, FREE_ELEMENT_ID_PREFIX[kind]);
   const node = newFreeNode(kind, id, { center: options.center, design });
+
+  if (options.at && node.place?.mode !== "free") {
+    const problem = addAtProblem(design, node, options.at);
+
+    if (problem) {
+      return { reason: problem };
+    }
+
+    // O elemento e novo: o vao vale como esta, sem ajuste.
+    return { design: insertNode(design, options.at.parentId, options.at.index, node), id, kind, node };
+  }
+
   const point = freeInsertionPoint(design, options.selectedId ?? null, node);
 
   return { design: insertNode(design, point.parentId, point.index, node), id, kind, node };
+}
+
+/**
+ * Como o desenho mostra um elemento novo arrastado do painel: a Forma e o Degradê entram soltos pelo centro (o
+ * retangulo de cada um no ponto), as caixas levam um nivel de caixa (a profundidade) e o resto entra na sequencia.
+ */
+export function freeNewNodeDropSpec(design: PopupFreeDesign, kind: FreeCatalogKind): FreeCanvasDropSpec {
+  if (kind === "shape" || kind === "gradient") {
+    return {
+      free: true,
+      rectAt: (center) => {
+        const place = newFreeNode(kind, "novo", { center, design }).place;
+
+        return place?.mode === "free" ? freeRectOfPlace(place) : { h: 0, w: 0, x: center.x, y: center.y };
+      }
+    };
+  }
+
+  return { free: false, height: kind === "column" || kind === "row" ? 1 : 0 };
 }
 
 /** O cta do Botão principal novo (sem botao no aviso: "Saiba mais" com o destino vazio). */
@@ -801,42 +879,269 @@ export function freeBoxTargets(design: PopupFreeDesign, id: FreeId): { id: FreeI
   return targets;
 }
 
+/**
+ * Por que nao da para levar o elemento ao vao `target.index` da lista de `target.parentId` como ela esta agora
+ * (contando o proprio elemento quando o pai e o mesmo). null = da; "" = invalido ou nada muda (sem frase); texto = a
+ * frase. Na ordem: o elemento e o pai existem (o pai e a prancheta ou uma caixa); a caixa nao entra nela mesma nem
+ * numa caixa de dentro dela; o indice cabe na lista; o mesmo lugar (os vaos de antes e de depois dele) nao e passo;
+ * uma caixa de outro pai com 20 elementos nao recebe; a profundidade de caixas fica em 2. Nao olha travado,
+ * escondido, Links, Áudio nem aparelho (a ordem e uma so nos dois).
+ */
+export function freeMoveProblem(design: PopupFreeDesign, id: FreeId, target: FreeMoveTarget): string | null {
+  const found = locate(design, id);
+  const parent = target.parentId === null ? null : locate(design, target.parentId);
+
+  if (!found || (target.parentId !== null && parent?.node.type !== "box")) {
+    return "";
+  }
+
+  if (target.parentId === id || contains(found.node, (item) => item.id === target.parentId)) {
+    return FREE_EDITOR_COPY.drag.intoItself;
+  }
+
+  const siblings = childrenOf(design, target.parentId);
+
+  if (!Number.isInteger(target.index) || target.index < 0 || target.index > siblings.length) {
+    return "";
+  }
+
+  const fromParent = found.parent?.id ?? null;
+
+  if (fromParent === target.parentId && (target.index === found.index || target.index === found.index + 1)) {
+    return "";
+  }
+
+  if (fromParent !== target.parentId && parent && siblings.length >= L.childrenPerBox) {
+    return M.childrenPerBox;
+  }
+
+  return (parent?.depth ?? 0) + boxHeight(found.node) > L.boxDepth ? M.depth : null;
+}
+
+/**
+ * Leva o elemento ao vao `target.index` da lista de `target.parentId` (o vao como a lista esta agora: o proprio
+ * elemento ainda conta quando o pai e o mesmo). Null quando freeMoveProblem nao deixa (inclusive o mesmo lugar). Um
+ * solto que entra numa caixa vira sequencia (guarda o z), perde so a posicao do celular e fica com o resto
+ * (`becameFlow`); um solto que muda de lugar na prancheta continua solto. Nada mais muda em devices.
+ */
+export function moveFreeNodeTo(design: PopupFreeDesign, id: FreeId, target: FreeMoveTarget): { becameFlow: boolean; design: PopupFreeDesign } | null {
+  if (freeMoveProblem(design, id, target) !== null) {
+    return null;
+  }
+
+  const found = locate(design, id) as Located;
+  const detached = detach(design, id) as NonNullable<ReturnType<typeof detach>>;
+  const samePlace = (found.parent?.id ?? null) === target.parentId;
+  const at = samePlace && target.index > found.index ? target.index - 1 : target.index;
+  const becameFlow = detached.node.place?.mode === "free" && target.parentId !== null;
+  const moved = insertNode(detached.design, target.parentId, at, becameFlow ? flowPlaceOf(detached.node) : detached.node);
+
+  return { becameFlow, design: becameFlow ? withoutFreeMobilePlace(moved, id) : moved };
+}
+
 /** Coloca no fim da caixa. Um solto vira sequencia sozinho (`becameFlow`) e perde a posicao solta do celular. */
 export function moveFreeNodeIntoBox(design: PopupFreeDesign, id: FreeId, boxId: FreeId): { becameFlow: boolean; design: PopupFreeDesign } | null {
   if (!freeBoxTargets(design, id).some((target) => target.id === boxId)) {
     return null;
   }
 
-  const detached = detach(design, id);
-
-  if (!detached) {
-    return null;
-  }
-
-  const becameFlow = detached.node.place?.mode === "free";
-  const box = locate(detached.design, boxId);
-
-  if (!box || box.node.type !== "box") {
-    return null;
-  }
-
-  const moved = insertNode(detached.design, boxId, box.node.children.length, flowPlaceOf(detached.node));
-
-  return { becameFlow, design: becameFlow ? withoutFreeMobilePlace(moved, id) : moved };
+  return moveFreeNodeTo(design, id, { index: childrenOf(design, boxId).length, parentId: boxId });
 }
 
-/** Tira da caixa: entra logo depois dela, na caixa de fora (ou na prancheta). */
-export function moveFreeNodeOutOfBox(design: PopupFreeDesign, id: FreeId): PopupFreeDesign | null {
+/** O lugar do "Tirar da caixa": logo depois da caixa, no pai dela (a caixa de fora ou a prancheta). Sem caixa, null. */
+export function freeOutOfBoxTarget(design: PopupFreeDesign, id: FreeId): FreeMoveTarget | null {
   const found = locate(design, id);
 
   if (!found?.parent) {
     return null;
   }
 
-  const parent = locate(design, found.parent.id) as Located;
-  const detached = detach(design, id) as NonNullable<ReturnType<typeof detach>>;
+  const box = locate(design, found.parent.id) as Located;
 
-  return insertNode(detached.design, parent.parent?.id ?? null, parent.index + 1, detached.node);
+  return { index: box.index + 1, parentId: box.parent?.id ?? null };
+}
+
+/** Por que o "Tirar da caixa" nao da: "" fora de caixa; a frase da caixa de fora cheia (20); null = da. */
+export function freeOutOfBoxProblem(design: PopupFreeDesign, id: FreeId): string | null {
+  const target = freeOutOfBoxTarget(design, id);
+
+  return target ? freeMoveProblem(design, id, target) : "";
+}
+
+/** Tira da caixa: entra logo depois dela, na caixa de fora (ou na prancheta). Null quando a caixa de fora esta cheia. */
+export function moveFreeNodeOutOfBox(design: PopupFreeDesign, id: FreeId): PopupFreeDesign | null {
+  const target = freeOutOfBoxTarget(design, id);
+
+  return target ? (moveFreeNodeTo(design, id, target)?.design ?? null) : null;
+}
+
+/**
+ * A frase depois de soltar (lida no design de DEPOIS): "Movido. Posição n de N, onde.", com n e N entre os irmaos
+ * (escondidos e soltos contam, como nas Camadas) e onde = "dentro de {caixa}" ou "no pop-up"; quando um solto virou
+ * sequencia, mais "Agora segue a sequência.". O final do Celular quem poe e o editor.
+ */
+export function freeMoveAnnouncement(design: PopupFreeDesign, id: FreeId, cta: NoticeDraft["cta"], options: { becameFlow: boolean }): string {
+  const found = locate(design, id);
+
+  if (!found) {
+    return "";
+  }
+
+  const total = found.parent ? found.parent.children.length : design.children.length;
+  const where = found.parent ? FREE_EDITOR_COPY.layers.inside(freeLayerLabel(found.parent, cta)) : FREE_EDITOR_COPY.drag.inArtboard;
+  const moved = FREE_EDITOR_COPY.drag.moved(found.index + 1, total, where);
+
+  return options.becameFlow ? `${moved} ${FREE_EDITOR_COPY.announce.toSequence}` : moved;
+}
+
+/**
+ * O lugar de soltar de uma zona das Camadas: antes da linha (no pai dela, no indice dela); depois (no indice + 1; numa
+ * caixa com filhos, dentro dela no comeco, porque a linha de baixo e o primeiro filho); dentro de uma caixa (no fim
+ * dela; numa folha vale como depois); abaixo da ultima linha, o fim da prancheta. A validade fica com freeMoveProblem.
+ */
+export function freeLayerDropTarget(design: PopupFreeDesign, over: FreeLayerOver): FreeMoveTarget | null {
+  if ("end" in over) {
+    return { index: design.children.length, parentId: null };
+  }
+
+  const found = locate(design, over.id);
+
+  if (!found) {
+    return null;
+  }
+
+  const parentId = found.parent?.id ?? null;
+
+  if (over.edge === "before") {
+    return { index: found.index, parentId };
+  }
+
+  if (found.node.type === "box" && (over.edge === "inside" || found.node.children.length > 0)) {
+    return over.edge === "inside" ? { index: found.node.children.length, parentId: found.node.id } : { index: 0, parentId: found.node.id };
+  }
+
+  return { index: found.index + 1, parentId };
+}
+
+/** Algum ancestral e um solto girado (no desenho, o retangulo de dentro dele e o envelope girado). */
+function insideRotatedFree(design: PopupFreeDesign, found: Located): boolean {
+  for (let parent = found.parent; parent; parent = locate(design, parent.id)?.parent ?? null) {
+    if (parent.place?.mode === "free" && parent.place.rotate) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Os lugares que recebem elementos da sequencia no desenho, numa foto do comeco do gesto. `stage` e o design do palco
+ * (resolveFreeForDevice: a direcao, a quebra e os escondidos do celular); `rects`, os medidos. A prancheta sempre
+ * aceita e e coluna; cada caixa desenhada entra, menos as escondidas, as sem retangulo, a subarvore de quem se move e
+ * a subarvore de um solto girado (o retangulo medido de dentro dele e o envelope girado). Cada caixa diz o motivo de
+ * recusa: cheia (20) quando nao e o pai de hoje, ou a profundidade (a altura de caixa de quem se move, ou `height` de um
+ * elemento novo). Caixa travada aceita. Os itens sao os filhos desenhados da sequencia (sem soltos, escondidos, sem
+ * retangulo e sem quem se move), com o indice real em children. A prancheta guarda tambem os filhos desenhados dela
+ * (`layers`: sequencia e soltos, quem se move tambem, com o z), para o acerto pela ordem de pintura de freeFlowDropAt.
+ * Quem esta dentro de um solto girado nao tem lugar pelo desenho (a casa dele ficou de fora, e soltar no proprio
+ * lugar o tiraria da caixa): a lista vem vazia, o soltar da null e nada muda. Para ele ficam as Camadas, o Subir e o
+ * Descer e o ⋯.
+ */
+export function freeFlowContainers(stage: PopupFreeDesign, rects: FreeMeasuredRects, moving: { id: FreeId } | { height: 0 | 1 }): FreeFlowContainer[] {
+  const artboard = rects["@artboard"];
+
+  if (!artboard) {
+    return [];
+  }
+
+  const movingId = "id" in moving ? moving.id : null;
+  const found = movingId ? locate(stage, movingId) : null;
+
+  if (found && insideRotatedFree(stage, found)) {
+    return [];
+  }
+
+  const height = "id" in moving ? (found ? boxHeight(found.node) : 0) : moving.height;
+  const homeParent = found ? (found.parent?.id ?? null) : undefined;
+  const itemsOf = (children: readonly FreeNode[]): FreeFlowItem[] =>
+    children.flatMap((child, index) => {
+      const rect = rects[child.id];
+
+      return child.place?.mode !== "free" && !child.hidden && rect && child.id !== movingId ? [{ id: child.id, index, rect }] : [];
+    });
+  const homeOf = (parentId: FreeId | null) => (found && homeParent === parentId ? found.index : null);
+  const containers: FreeFlowContainer[] = [
+    {
+      accepts: null,
+      depth: 0,
+      dir: "column",
+      flow: false,
+      home: homeOf(null),
+      id: null,
+      index: -1,
+      items: itemsOf(stage.children),
+      layers: stage.children.flatMap((child, index) => {
+        const rect = rects[child.id];
+
+        return !child.hidden && rect ? [{ id: child.id, index, rect, z: child.place?.z ?? 0 }] : [];
+      }),
+      length: stage.children.length,
+      parentId: null,
+      rect: artboard,
+      wrap: false,
+      z: -Infinity
+    }
+  ];
+
+  const walk = (nodes: readonly FreeNode[], depth: number, parentId: FreeId | null) => {
+    nodes.forEach((node, index) => {
+      const rect = rects[node.id];
+      const rotated = node.place?.mode === "free" && Boolean(node.place.rotate);
+
+      if (node.type !== "box" || node.hidden || !rect || node.id === movingId || rotated) {
+        return;
+      }
+
+      const full = node.children.length >= L.childrenPerBox && homeParent !== node.id;
+
+      containers.push({
+        accepts: full ? M.childrenPerBox : depth + height > L.boxDepth ? M.depth : null,
+        depth,
+        dir: node.layout?.dir ?? "column",
+        flow: node.place?.mode !== "free",
+        home: homeOf(node.id),
+        id: node.id,
+        index,
+        items: itemsOf(node.children),
+        length: node.children.length,
+        parentId,
+        rect,
+        wrap: Boolean(node.layout?.wrap),
+        z: node.place?.z ?? 0
+      });
+      walk(node.children, depth + 1, node.id);
+    });
+  };
+
+  walk(stage.children, 1, null);
+
+  return containers;
+}
+
+/**
+ * O arrastar da sequencia pode comecar por este elemento no desenho: da sequencia, nao travado, medido, com a
+ * prancheta medida e fora de um solto girado (o mesmo que freeFlowContainers(stage, rects, { id }) nao vir vazia,
+ * sem montar a lista). A alca "Arraste para mudar o lugar" da barrinha so aparece quando isto e verdade: num filho de
+ * um solto girado ela prometeria um arrastar que nunca comeca.
+ */
+export function freeFlowDraggable(stage: PopupFreeDesign, rects: FreeMeasuredRects, id: FreeId): boolean {
+  const found = locate(stage, id);
+
+  if (!found || !rects["@artboard"] || !rects[id] || found.node.locked || found.node.place?.mode === "free") {
+    return false;
+  }
+
+  return !insideRotatedFree(stage, found);
 }
 
 /* ------------------------------------------------------------------------------------------------
