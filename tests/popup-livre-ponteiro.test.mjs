@@ -7,8 +7,8 @@ import test from "node:test";
 // Prova o limiar (antes dele e so clique, e o Esc desliga o gesto), a captura so depois do limiar, o cancelamento por
 // Esc, blur, pointercancel e buttons 0, o lostpointercapture ignorado, as teclas engolidas durante o gesto (menos
 // Shift, Alt, Control e Meta), o click engolido depois (sai no primeiro click, no proximo pointerdown ou em 350 ms),
-// o pointerId filtrado, os pointerTypes de cada chamada, a funcao que desliga tudo e que nenhum ouvinte sobra na
-// janela. Tudo pelo Node, sem janela de verdade: o arquivo nao toca na janela ao carregar.
+// o pointerId filtrado, os pointerTypes de cada chamada, a funcao que desliga o gesto (e deixa o bloqueador) e que
+// nenhum ouvinte sobra na janela. Tudo pelo Node, sem janela de verdade: o arquivo nao toca na janela ao carregar.
 
 assert.equal(typeof globalThis.window, "undefined", "o Node nao tem janela");
 assert.equal(typeof globalThis.document, "undefined", "o Node nao tem documento");
@@ -444,7 +444,7 @@ test("ponteiro: o arrastar nativo do navegador (dragstart) não começa enquanto
   assert.equal(disparar(janela, "dragstart").defaultPrevented, false, "depois de soltar");
 });
 
-test("ponteiro: a função devolvida desliga tudo sem chamar handler, em qualquer momento", () => {
+test("ponteiro: a função devolvida desliga o gesto sem chamar handler; o bloqueador do click já ligado fica e sai sozinho", () => {
   // Antes do limiar.
   const antes = montar();
   antes.dispose();
@@ -462,19 +462,48 @@ test("ponteiro: a função devolvida desliga tudo sem chamar handler, em qualque
   assert.equal(meio.janela.ouvintes.length, 0);
   assert.equal(disparar(meio.janela, "click").defaultPrevented, false);
 
-  // Com o bloqueador ligado (depois de soltar ou do Esc): sai junto com o relogio.
+  // Chamada dentro do onDrop (o soltar desmonta quem guardou a funcao, e o React roda as limpezas antes de o
+  // navegador mandar o click): o click do botao solto continua engolido, e o painel nao acrescenta de novo.
+  let noSoltar = null;
+  const desmonta = montar({
+    handlers: {
+      onDrop: (ponto) => {
+        desmonta.chamadas.push(["drop", ponto]);
+        noSoltar();
+      }
+    }
+  });
+  noSoltar = desmonta.dispose;
+  ponteiro(desmonta.janela, "pointermove", 110, 100);
+  ponteiro(desmonta.janela, "pointerup", 110, 100);
+  assert.deepEqual(desmonta.chamadas.at(-1), ["drop", { x: 110, y: 100 }]);
+  const click = disparar(desmonta.janela, "click");
+  assert.equal(click.defaultPrevented, true, "o click do botao solto e engolido mesmo com a funcao chamada");
+  assert.equal(click.cancelBubble, true);
+  assert.equal(disparar(desmonta.janela, "click").defaultPrevented, false, "o seguinte passa");
+  assert.equal(desmonta.janela.ouvintes.length, 0);
+  assert.equal(desmonta.janela.relogios.size, 0);
+
+  // Com o bloqueador ligado (depois de soltar): ele fica e sai sozinho em 350 ms.
   const depois = arrastando();
   ponteiro(depois.janela, "pointerup", 120, 100);
   depois.dispose();
+  assert.deepEqual(depois.janela.tipos(), DO_BLOQUEADOR);
+  depois.janela.avancar(350);
   assert.equal(depois.janela.ouvintes.length, 0);
   assert.equal(depois.janela.relogios.size, 0);
 
+  // Depois do Esc, com o botao apertado: a funcao (chamada duas vezes) nao mexe, e o botao solto conta os 350 ms.
   const esc = arrastando();
   tecla(esc.janela, "Escape");
   esc.dispose();
   esc.dispose();
+  assert.deepEqual(esc.janela.tipos(), DO_BOTAO_APERTADO);
+  ponteiro(esc.janela, "pointerup", 120, 100);
+  assert.equal(disparar(esc.janela, "click").defaultPrevented, true, "o click do botao solto depois do Esc e engolido");
   assert.equal(esc.janela.ouvintes.length, 0);
   assert.equal(esc.janela.relogios.size, 0);
+  assert.deepEqual(esc.chamadas.slice(2), [["cancel"]]);
 });
 
 test("free-pointer-drag.ts carrega no Node sem janela, não toca na janela ao carregar e não monta HTML nem CSS em texto", () => {

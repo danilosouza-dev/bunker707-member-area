@@ -78,9 +78,10 @@ const FREE_POINTER_MODIFIER_KEYS: ReadonlySet<string> = new Set(["Alt", "Control
 const CAPTURE: AddEventListenerOptions = { capture: true };
 
 /**
- * Segue o gesto que comeca neste pointerdown. Devolve a funcao que desliga tudo (ouvintes, bloqueador do click e o
- * relogio) sem chamar nenhum handler: quem chama a usa ao desmontar. Nao chame no fim do gesto, que ja se desliga
- * sozinho e precisa deixar o bloqueador do click no lugar.
+ * Segue o gesto que comeca neste pointerdown. Devolve a funcao que desliga o gesto (os ouvintes de antes e de durante)
+ * sem chamar nenhum handler: quem chama a usa ao desmontar. Depois que um gesto comecado termina, ela nao mexe em
+ * nada: o bloqueador do click fica e sai sozinho (no primeiro click, no proximo pointerdown ou nos 350 ms). Assim ela
+ * pode ser chamada no onDrop, no onCancel ou numa limpeza que o soltar provoca sem deixar passar o click do botao solto.
  */
 export function followFreePointer(start: FreePointerStart, handlers: FreePointerHandlers): () => void {
   const element = start.currentTarget;
@@ -266,7 +267,7 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
     }
   }
 
-  /** Desliga tudo sem chamar handler (tambem e a funcao devolvida). */
+  /** Desliga tudo sem chamar handler, o bloqueador do click tambem. */
   function stop() {
     state = "off";
     removeGesture();
@@ -287,5 +288,10 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
   win.addEventListener("dragstart", onDragStart, CAPTURE);
   win.addEventListener("blur", onBlur);
 
-  return stop;
+  return () => {
+    // Com o gesto ja terminado, so sobra o bloqueador do click, que sai sozinho.
+    if (state === "pending" || state === "dragging") {
+      stop();
+    }
+  };
 }
