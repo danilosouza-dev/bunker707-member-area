@@ -81,7 +81,7 @@ Vocabulário na tela: **Livre**, **Abrir editor Livre**, **Editor Livre**, **Ele
 
 - **Texto** sempre como texto do React (escapado). Nada de `dangerouslySetInnerHTML`, `innerHTML`, `cssText`, `<style>` nem `style` em texto no cartão Livre, no `member-popup*` e no editor (guardas em `popup-livre.guard` e no teste do editor).
 - **CSS só de valores validados** (hex, números com limite, listas fechadas). As únicas strings montadas são gradientes, sombras, máscaras, `rotate()`, `translate()` (só na prévia do arrastar), `sizes` e `url()`. O `url()` **nunca** usa texto do design: é `freeAssetUrl` = a origem do nosso Supabase (de `NEXT_PUBLIC_SUPABASE_URL`, conferida uma vez por `freeStorageOrigin`: https, ou http só na própria máquina, sem usuário, senha, caminho, query ou fragmento, máquina só com `[a-z0-9.-]`) + o caminho público do bucket + um caminho que casou com o padrão do tipo. Um design colado, gerado por IA ou ainda não salvo não consegue abrir um `url()` para fora nem sair das aspas (teste com origens maliciosas).
-- **Zod estrito** no navegador, na Server Action e na leitura; chave a mais recusa (inclusive `url` num arquivo e `devices`); Livre inválido no banco não aparece para o aluno.
+- **Zod estrito** no navegador, na Server Action e na leitura; chave a mais recusa (inclusive `url` num arquivo e qualquer chave em `devices` fora da §9.10); Livre inválido no banco não aparece para o aluno.
 - **Storage**: só os dois buckets e os padrões de caminho acima; arquivo novo conferido pelos bytes ao salvar (`inspectFreeImage`: existe, até 420.000 bytes, primeiros 64 bytes WebP com as medidas do cabeçalho, que substituem as do navegador; vídeo pela conferência do Personalizado); arquivo que a linha gravada (ou um modelo de onde o aviso veio, `docs/28` D16) já usa conta como conferido. **O salvar nunca apaga** (desde 25/10/2026): o arquivo novo recusado recebe o erro no campo e fica no bucket para a limpeza de 30 dias. Envio só para a equipe com `messaging.write`.
 - **Links**: o botão "Abrir um link" segue a regra do botão principal (página da área, produto ou https); no máximo um; `rel="noopener noreferrer"` em nova aba.
 - **Contra pop-up que engana**: o X sempre existe, por cima de tudo, sempre visível (alfa do ícone ≥ `cc` e contraste ≥ 3:1 com o fundo dele: erro que impede salvar) e o `Esc` sempre fecha; decorativos não recebem clique; texto por cima de botão gera a dica de cobertura; a prancheta corta o que passa dela. Esconder "Não mostrar de novo" não tira nenhum jeito de fechar.
@@ -161,16 +161,16 @@ O cartão Livre fica num pedaço próprio, baixado só quando o pop-up armado é
 
 O JSON do design Livre é o contrato entre o editor, o servidor, o cartão do aluno e (no PR "Criar com IA") a IA. Esta seção é a fonte para quem escreve um design à mão ou pede a uma IA. **Todo bloco `json` desta seção é um design completo e passa no schema**: `tests/popup-livre-modelo.test.mjs` lê o documento e valida cada exemplo (documento e schema não se separam).
 
-As partes 9.2 a 9.6, 9.8 e 9.9 viram as instruções para a IA (§13.1), que vão para a conversa de um terceiro: o que é só de quem mantém o código (nomes de arquivo e de função, banco, buckets, caminhos) fica entre `<!-- ia:fora -->` e `<!-- /ia:fora -->` (o Markdown não mostra os marcadores; o script tira o trecho) e as referências entre partes dizem o nome da parte ("veja 9.4 Padrões"), nunca uma seção que não vai junto (L26).
+As partes 9.2 a 9.6, 9.8, 9.9 e 9.10 viram as instruções para a IA (§13.1), que vão para a conversa de um terceiro: o que é só de quem mantém o código (nomes de arquivo e de função, banco, buckets, caminhos) fica entre `<!-- ia:fora -->` e `<!-- /ia:fora -->` (o Markdown não mostra os marcadores; o script tira o trecho) e as referências entre partes dizem o nome da parte ("veja 9.4 Padrões"), nunca uma seção que não vai junto (L26).
 
 ### 9.1 Onde fica e como é lido
 
 - Coluna `campaigns.popup_design` (jsonb). O Personalizado é o objeto sem a chave `mode`; o Livre é `{ "mode": "free", "version": 1, ... }`. A leitura passa pelo roteador (`src/server/communications/popup-design-router.ts`): `mode: "free"` vai ao schema do Livre (`popup-free-schema.ts`), o resto ao do Personalizado. Os dois são estritos: um nunca vira o outro por engano.
-- Validação estrita no navegador do editor, na Server Action ao salvar e na leitura do banco: chave a mais é recusada em qualquer nível (inclusive `url` num arquivo e `devices`, reservada para o PR do celular separado).
+- Validação estrita no navegador do editor, na Server Action ao salvar e na leitura do banco: chave a mais é recusada em qualquer nível (inclusive `url` num arquivo e qualquer chave dentro de `devices` fora da §9.10).
 - Livre inválido no banco (só com edição direta ou depois de voltar um deploy): **não aparece para o aluno** (sai da lista no ar com o log `[comunicacao] design livre invalido <id do aviso>`, nunca o conteúdo) e abre como Padrão no editor do aviso.
 - O que se grava é sempre a **forma canônica** (`canonicalPopupFreeDesign`): sem o que é igual ao padrão (§9.4), cores em minúsculas, px e ângulos inteiros, altura da linha, espaço entre letras e traço do ícone com 2 casas, paradas do degradê ordenadas por `at`, lados no formato mais curto (`[a, a, a, a]` → `a`; `[v, h, v, h]` → `[v, h]`), nome aparado (vazio sai), partes vizinhas com o mesmo estilo juntas (sem passar de 600 letras), arquivos que nenhum elemento usa fora de `assets`, `assets` e `fonts` sempre presentes (`fonts` recalculado) e chaves em ordem alfabética.
-- `version` do Livre só muda quando um documento velho deixar de valer. Campos novos (como `devices` ou uma pintura nova) entram sem mudar a versão. **Voltar o deploy** depois do PR do celular separado: designs salvos com `devices` ficam inválidos para o código antigo e não aparecem até o deploy novo voltar (anotar no runbook da volta).
-- Toda medida está em **px da prancheta** na largura escolhida (`artboard.width`, 280 a 720). No celular o pop-up inteiro encolhe na mesma proporção (unidades `cqw` do próprio cartão), com duas proteções: texto nunca abaixo de 12 px e área de toque de 44 px nos botões, nos links e no X (invisível, não muda o desenho).
+- `version` do Livre só muda quando um documento velho deixar de valer. Campos novos (como `devices`, desde o PR L3, ou uma pintura nova) entram sem mudar a versão. **Voltar o deploy** para uma imagem de antes do L3: designs salvos com `devices` ficam inválidos para o código antigo (somem para o aluno com o log acima e abrem como Padrão no editor) até a imagem nova voltar; com o código antigo no ar ninguém salva valores de Celular (`docs/20` §9, espelho do R1 do `docs/29`).
+- Toda medida está em **px da prancheta** na largura escolhida (`artboard.width`, 280 a 720). No celular o pop-up inteiro encolhe na mesma proporção (unidades `cqw` do próprio cartão), com duas proteções: texto nunca abaixo de 12 px e área de toque de 44 px nos botões, nos links e no X (invisível, não muda o desenho). Os valores próprios do celular (`devices.mobile`, §9.10) entram por cima do computador antes de encolher.
 - Arquivos: o design guarda **só o caminho** no nosso Storage. O endereço é montado na hora pelo cartão e pelo editor (`freeAssetUrl`): a origem conferida do nosso Supabase + o caminho público do bucket + um caminho que casou com o padrão do tipo.
 
 ### 9.2 O documento mínimo
@@ -209,6 +209,7 @@ Raiz:
 | `children` | lista (1 a 32) | os elementos na ordem do DOM (= ordem de leitura e das Camadas) |
 | `assets` | lista (opcional na entrada) | os arquivos de imagem e vídeo (veja Arquivos, mais abaixo) |
 | `fonts` | lista (opcional na entrada) | ignorada na entrada: a forma canônica recalcula os ids das fontes enviadas usadas |
+| `devices` | objeto (opcional) | `{ "mobile": { ... } }`: só o que muda no celular (veja 9.10 Celular); sem ele, o celular encolhe o desenho do computador |
 
 Comum a todos os elementos: `id` (letra minúscula e depois letras minúsculas e números, até 16; único entre elementos e, à parte, entre arquivos), `type`, `name` (nome nas Camadas, até 40), `hidden` (não aparece para o aluno), `locked` (só no editor), `place`, `box`.
 
@@ -323,7 +324,7 @@ No rascunho do aviso, `freeDesign` fica ao lado de `design` (o Personalizado): n
 
 ### 9.7 Chaves de erro
 
-O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`, `freeDesign.close.<campo>`, `freeDesign.assets.<id do arquivo>`, `freeDesign.fonts`, `freeDesign.size` e `freeDesign.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.nodes.botao.action.href` ou `freeDesign.nodes.titulo.lines.0.1.text`). Os índices que o zod devolve (`freeDesign.children.3.children.0...`) viram ids por `freeErrorKey`/`freeErrorKeys`, estáveis se a ordem mudar.
+O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`, `freeDesign.close.<campo>`, `freeDesign.assets.<id do arquivo>`, `freeDesign.fonts`, `freeDesign.size`, `freeDesign.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.nodes.botao.action.href` ou `freeDesign.nodes.titulo.lines.0.1.text`) e, no celular, `freeDesign.devices.mobile.artboard.<campo>` e `freeDesign.devices.mobile.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.devices.mobile.nodes.selo.place.x`; já vêm pelo id, sem índice). Os índices que o zod devolve (`freeDesign.children.3.children.0...`) viram ids por `freeErrorKey`/`freeErrorKeys`, estáveis se a ordem mudar; `freeNodeIdOfKey` acha o elemento nos dois formatos.
 
 ### 9.8 Guia curto para a IA
 
@@ -335,6 +336,7 @@ O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`,
 6. Omita o que é igual ao padrão (veja 9.4 Padrões): o documento mínimo `{ mode, version, children }` já vale.
 7. O X precisa contrastar com o fundo dele; cores com alfa só onde fizer sentido.
 8. Fique bem abaixo do tamanho máximo: menos elementos e menos partes de texto.
+9. Só escreva `devices.mobile` quando pedirem algo só para o celular (veja 9.10 Celular), e só com o que muda; sem esse pedido, deixe `devices` de fora: o celular encolhe o desenho do computador sozinho.
 
 <!-- ia:fora -->
 `popupFreeJsonSchema()` (em `popup-free-json-schema.ts`, um módulo que nenhuma tela importa, §7) gera o JSON Schema da entrada (`z.toJSONSchema` com `io: "input"`; o elemento recursivo sai em `$defs`/`$ref`).
@@ -696,13 +698,68 @@ Forma canônica (padrões omitidos). O Vídeo e a Imagem dos modelos começam se
 }
 ```
 
+### 9.10 Celular
+
+Na tela do aluno com até 767 px de largura (o celular; as prévias do editor de 375 px também), o pop-up usa o desenho do computador encolhido na mesma proporção, com o texto nunca abaixo de 12 px. Quando algo precisa ser diferente só no celular (um título menor, um selo em outro lugar, uma imagem escondida), a raiz ganha `devices.mobile` só com o que muda. Medidas em px da prancheta, como no computador: o encolher e o piso de 12 px continuam valendo por cima. `version` continua `1`.
+
+| Chave | O que é |
+|---|---|
+| `devices.mobile.artboard` | a prancheta no celular: só `padding` (lados, 0 a 200), `gap` (0 a 96) e `minHeight` (0 a 1.600) |
+| `devices.mobile.nodes` | um objeto com o id de cada elemento que muda no celular (até 32), cada um só com os campos abaixo |
+
+| Campo do elemento | Vale para | O que muda |
+|---|---|---|
+| `hidden` | todos | `true` esconde só no celular; `false` mostra só no celular um elemento escondido no computador |
+| `place` | todos | com o **mesmo** `mode` do computador (sem `place` no computador = `flow`): solto (`free`) com `x`, `y`, `w`, `h`; na sequência (`flow`) com `width`, `height`, `margin`, `align`; os mesmos limites de 9.3 Campos; nunca `z` nem `rotate` |
+| `textStyle` | Título, Texto, Selo, Botão, Links | só `size`, `lineHeight`, `letterSpacing` e `align` |
+| `box` | todos | só `padding` e `radius` |
+| `size` | Espaço (0 a 400) e Ícone (8 a 160) | o tamanho |
+| `gap` | Links (0 a 96) | o espaço entre os links |
+| `layout` | Caixa | `dir`, `gap`, `align`, `justify`, `wrap` |
+
+Regras:
+
+- Cores, textos, pinturas, fundos, bordas, sombras, fontes, camada (`z`) e girar (`rotate`) são os mesmos no computador e no celular: não têm versão do celular.
+- Cada parte entra campo a campo por cima da do computador: `{ "place": { "mode": "free", "x": 24 } }` muda só o X; o Y, a largura, a altura, a camada e o girar continuam os do computador. `size`, `gap` e `hidden` trocam o valor inteiro.
+- Um elemento solto continua solto no celular e um da sequência continua na sequência: um `place` com outro `mode` é recusado (`No celular, o elemento fica como no computador: solto continua solto e na sequência continua na sequência.`). Campo fora desta lista (ou de outro tipo, como `size` num Título) é recusado.
+- Um id que não existe, um objeto vazio e um valor igual ao do computador saem sozinhos (a forma canônica); sem nada que mude, `devices` sai.
+
+Exemplo (o título menor e centralizado, o selo mais à esquerda, o texto só no computador e menos respiro no celular):
+
+```json
+{
+  "mode": "free",
+  "version": 1,
+  "children": [
+    { "id": "selo", "type": "badge", "label": "Novidade", "place": { "mode": "free", "x": 300, "y": 16, "w": 116 } },
+    { "id": "titulo", "type": "heading", "lines": [[{ "text": "Aula nova no ar" }]], "textStyle": { "size": 40 } },
+    { "id": "texto", "type": "text", "lines": [[{ "text": "Assista hoje e coloque em prática." }]] },
+    { "id": "links", "type": "links" }
+  ],
+  "devices": {
+    "mobile": {
+      "artboard": { "padding": 16 },
+      "nodes": {
+        "selo": { "place": { "mode": "free", "x": 24 } },
+        "texto": { "hidden": true },
+        "titulo": { "textStyle": { "align": "center", "size": 32 } }
+      }
+    }
+  }
+}
+```
+
+<!-- ia:fora -->
+Por dentro: `resolveFreeForDevice(design, device)` mora em `popup-free-render.ts` (o único módulo de valores que o cartão do aluno importa; `popup-free-model.ts` reexporta): `"desktop"`, ou um design sem `devices.mobile`, devolve o mesmo objeto; `"mobile"` junta a prancheta e, por elemento, `place`, `textStyle`, `box` e `layout` campo a campo (`size`, `gap` e `hidden` trocam). O aluno usa o celular quando `matchMedia("(max-width: 767px)")` casa (a mesma regra em todo lugar); as prévias do admin passam `device` (a de 375 px é o celular). O schema confere o modo da posição, o tipo de cada campo e o limite do Ícone nas regras entre partes (que sabem o tipo do elemento); a estimativa do tamanho conta `devices` (é a da forma canônica). As ajudas do editor mantêm o mapa coerente: duplicar copia a entrada para o id novo (o solto anda 16 px também no celular), excluir tira a entrada do elemento e de tudo dentro dele, **Soltar**, **Seguir a sequência** e **Colocar dentro da caixa** (quando o solto vira sequência) tiram a posição do celular, e **Ajustar os elementos à nova largura** escala os valores do celular junto. Colar deixa `devices` passar (ids que não existem saem na forma canônica). A dica "texto no celular" mede o design do celular (com os valores próprios) e, quando o tamanho do texto é do celular, leva a `devices.mobile.nodes.<id>.textStyle.size`. Sem migração: a coluna e o check de 32 KB já aceitam.
+<!-- /ia:fora -->
+
 ## 10. Fica de fora
 
 | Fora desta entrega | Onde está |
 |---|---|
 | Dica do peso das imagens (precisa do tamanho do arquivo, que o design não guarda); capa de vídeo tirada de um vídeo que já está no Storage (precisa de CORS no `canvas`) | ficaram do L1.1 (que entregou o copiar e colar, as instruções para a IA, "Usar o design Personalizado", o quarto modelo e a dica nova, §13); vão para o L5 (Meus modelos e biblioteca de imagens), junto com o tamanho dos arquivos já enviados |
 | "Criar com IA" (texto e/ou imagem de referência pela conta conectada no gateway) | PR L2 (§9.8 e spec §5.7) |
-| Valores próprios do celular por elemento (`devices.mobile`) | PR L3 (o schema recusa `devices` nesta versão) |
+| Valores próprios do celular por elemento (`devices.mobile`) | feito no PR L3 (§9.10) |
 | Arrastar nas Camadas e nas camadas de fundo, arrastar elementos da sequência no desenho, arrastar do painel, seleção de vários, distribuir, `Alt + clique`, zoom com passos, mais de um botão "Abrir um link" | PR L4 |
 | Salvar como modelo | feito em 25/10/2026 (`docs/28`): "Meus modelos" e "Salvar design como modelo" no card Design e a aba **Modelos** do editor Livre ("Salvar este design como modelo" e "Usar este modelo", um passo só no histórico) |
 | Copiar elementos entre pop-ups, biblioteca de imagens, cores salvas, migração para subir o teto de tamanho | PR L5 |
@@ -715,14 +772,14 @@ Forma canônica (padrões omitidos). O Vídeo e a Imagem dos modelos começam se
 
 | Tipo | Arquivo | O que prova |
 |---|---|---|
-| Unitário | `tests/popup-livre-modelo.test.mjs` (31) | schema estrito em todo nível (inclusive `url` e `devices`), documento mínimo, limites e frases, ids, profundidade, contagens, botões e links, 1.200 letras, caminhos dos buckets, capa, X visível, link seguro, estimativa do jsonb contra o banco, teto de tamanho, forma canônica, roteador, caminhos gravados, regras com o conteúdo, chaves de erro, reescala, `freeDesignForStudent`, origem e endereço dos arquivos, os 4 modelos, sincronia do Áudio, JSON Schema (e só o módulo próprio chama o `toJSONSchema`, nenhuma tela o importa), os exemplos desta §9, dicas e vocabulário |
+| Unitário | `tests/popup-livre-modelo.test.mjs` (40) | schema estrito em todo nível (inclusive `url` e o que não é da §9.10 dentro de `devices`), documento mínimo, limites e frases, ids, profundidade, contagens, botões e links, 1.200 letras, caminhos dos buckets, capa, X visível, link seguro, estimativa do jsonb contra o banco, teto de tamanho, forma canônica, roteador, caminhos gravados, regras com o conteúdo, chaves de erro, reescala, `freeDesignForStudent`, origem e endereço dos arquivos, os 4 modelos, sincronia do Áudio, JSON Schema (e só o módulo próprio chama o `toJSONSchema`, nenhuma tela o importa), os exemplos desta §9, dicas e vocabulário; Celular (L3): o formato de `devices.mobile` vale, chave a mais, camada, girar, cor e campo de outro tipo recusados, limites do computador (o do Ícone também), até 32 entradas, a posição no modo do computador, a forma canônica (id que não existe, objeto vazio e valor igual ao do computador saem; sem nada, `devices` sai), `resolveFreeForDevice` (o computador devolve o mesmo objeto; o celular junta campo a campo; escondido ou mostrado só no celular), a reescala com o celular, duplicar/excluir/Soltar/Seguir a sequência/Colocar dentro da caixa com o mapa coerente, o tamanho contando `devices`, as chaves pelo id e o exemplo da §9.10 |
 | Unitário | `tests/popup-livre-desenho.test.mjs` (27) | o desenho do aluno: sequência e solto em `cqw`, prancheta que cresce até os soltos, altura mínima nos textos, piso de 12 px, pinturas, `url()` só da origem conferida (14 origens maliciosas), esmaecer, texto em degradê, links, h2 e descrição, vídeo × capa, cliques, foco visível, `sizes`, quadriculado só na prévia, escondido, ordem do DOM, `dragPreview` e o **HTML do Padrão e do Personalizado igual ao de antes do Livre** |
 | Guarda | `tests/popup-livre.guard.test.mjs` (6) | sem HTML/CSS em texto, o cartão sem zod/modelo/dicas, o cartão só por `import()`, `url(` só pelo `freeAssetUrl`, o editor fora do lado do aluno, nenhuma migração nova |
 | Unitário | `tests/popup-livre-editor-modelo.test.mjs` (26) | onde o elemento entra, foco no envio, duplicar/excluir/subir/descer/caixas (a frase do Excluir dos Links), soltar e seguir a sequência, setas, redimensionar com Shift, alinhar no pop-up, guias, escala do zoom e do celular, arrastar = um passo, histórico (junta, guarda o `cta`, 100 passos, modelo e recuperar), cópia de recuperação (com o `allowSnooze` ao lado do `cta`), `freeDirtySinceSave` (a regra do "Lembrar depois" conta como mudança desde o salvar; o editor do aviso só troca de endereço com os dois lados limpos) e `allowSnoozeToRestore` (só booleano e diferente), teclado das Camadas, as etiquetas das Camadas a 12 px, o botão e a frase do salvar no pop-up no ar (L16), o Botão principal sem destino no Revisar (a frase do Personalizado, o mesmo erro do salvar e do card, o "Para onde leva", some ao preencher), vocabulário |
 | Unitário | `tests/popup-livre-painel-modelo.test.mjs` (24) | área de texto (Enter, limites, acentos e emoji), Outro estilo na seleção, editar mantendo estilos (400 edições aleatórias), voltar ao estilo, paradas, camadas de fundo, lados, sombras, chave de erro → aba e campo, Abrir um link único, reescala, pesos, imagem até 1.600 px e 420 KB, Links › Conteúdo desenhado (a chave "Permitir “Lembrar depois”" no aviso; na página do modelo de Design, só a nota), vocabulário |
 | Unitário | `tests/popup-design-editor-modelo.test.mjs` (23) | os do Personalizado, mais: os três modos com memória (Livre e Personalizado nunca juntos no rascunho), os modelos do Livre (o "Saiba mais", o vídeo do Personalizado e a imagem do aviso como capa, só caminhos), o rascunho com as duas chaves, a forma canônica com o Livre, a prévia pelo item do Livre, o D9 com o "Abrir um link" do Livre, a sincronia do Livre com o botão e o áudio, a cópia nova do card palavra por palavra |
-| Unitário | `tests/popup-livre-copiar-colar.test.mjs` (17) | L1.1: copiar dá a forma canônica e colar devolve o mesmo design (e o mesmo texto); a resposta da IA com ```json em volta; arquivos de fora viram `asset: null`, a pintura e a capa de fora saem e os conhecidos ficam com as medidas daqui; as frases do colar (vazio, JSON quebrado, grande demais, Personalizado, zod com o nome do elemento, até 5 e "E mais N."); fonte fora da biblioteca vira Inter; o Botão principal e o Áudio acompanham o aviso; colar = um passo no histórico; os arquivos de todo o histórico; as instruções geradas do §9 (iguais ao arquivo, os exemplos colam e cabem no tamanho prometido, só por `import()`, nada busca o docs, nada de `.ts`, banco, bucket, jsonb, `z.` ou `§`, e o script para com um trecho sem marcador); todo modelo do Personalizado vira um Livre válido sem dica; o mapeamento (mídia e esmaecer, vídeo e capa, títulos, quebras, botões e brilho, segundo botão, Espaço, links, imagem no fundo com a cor clareada, degradê de outra cor, Sobre a mídia, X que precisa contrastar, sem imagem, imagem sem medidas, 4 títulos e 1.200 letras); toda combinação do Personalizado (modelo × largura × formato × posição × subir × respiro × mídia × degradê) passa no schema e na conta do tamanho com o texto no mesmo y (até 1 px), e cada subir de 0 a 60 com o respiro até 200 e a margem até 400; o corte das 1.200 letras com um emoji na fronteira (texto e botão); o card ("Usar o design Personalizado", o "Saiba mais"); o modelo novo; a conta do tamanho no celular e quando a dica aparece (texto longo, parte, selo solto, botão cortado, linha de botões, links) |
-| Integração | `tests/integration/pop-ups-livre-dados.test.mjs` (15) | salvar e ler na forma canônica sem endereço, o maior Livre aceito passa no check de 32 KB, Livre inválido some da lista e abre como Padrão, lista no ar e plano, notificação sem design, trocar para Padrão, aba antiga, sem chave mantém, duas chaves recusadas, duplicar, publicar e aprovar conferem fontes, fonte em uso, auditoria |
+| Unitário | `tests/popup-livre-copiar-colar.test.mjs` (19) | L1.1: copiar dá a forma canônica e colar devolve o mesmo design (e o mesmo texto); a resposta da IA com ```json em volta; arquivos de fora viram `asset: null`, a pintura e a capa de fora saem e os conhecidos ficam com as medidas daqui; as frases do colar (vazio, JSON quebrado, grande demais, Personalizado, zod com o nome do elemento, até 5 e "E mais N."); fonte fora da biblioteca vira Inter; o Botão principal e o Áudio acompanham o aviso; colar = um passo no histórico; os arquivos de todo o histórico; as instruções geradas do §9 (iguais ao arquivo, os exemplos colam e cabem no tamanho prometido, só por `import()`, nada busca o docs, nada de `.ts`, banco, bucket, jsonb, `z.` ou `§`, e o script para com um trecho sem marcador); todo modelo do Personalizado vira um Livre válido sem dica; o mapeamento (mídia e esmaecer, vídeo e capa, títulos, quebras, botões e brilho, segundo botão, Espaço, links, imagem no fundo com a cor clareada, degradê de outra cor, Sobre a mídia, X que precisa contrastar, sem imagem, imagem sem medidas, 4 títulos e 1.200 letras); toda combinação do Personalizado (modelo × largura × formato × posição × subir × respiro × mídia × degradê) passa no schema e na conta do tamanho com o texto no mesmo y (até 1 px), e cada subir de 0 a 60 com o respiro até 200 e a margem até 400; o corte das 1.200 letras com um emoji na fronteira (texto e botão); o card ("Usar o design Personalizado", o "Saiba mais"); o modelo novo; a conta do tamanho no celular e quando a dica aparece (texto longo, parte, selo solto, botão cortado, linha de botões, links); Celular (L3): colar com `devices` (o id que não existe e o igual ao computador saem, copiar de novo dá o mesmo, o erro diz o elemento: `“Título grande”, no celular: …`), as instruções com a 9.10 e o item 9 do guia, a dica "texto no celular" medida com os valores do celular (e a chave do celular) |
+| Integração | `tests/integration/pop-ups-livre-dados.test.mjs` (18) | salvar e ler na forma canônica sem endereço, o maior Livre aceito passa no check de 32 KB, Livre inválido some da lista e abre como Padrão, lista no ar e plano, notificação sem design, trocar para Padrão, aba antiga, sem chave mantém, duas chaves recusadas, duplicar, publicar e aprovar conferem fontes, fonte em uso, auditoria; Celular (L3): salvar e ler com `devices` na forma canônica (o aluno recebe os valores do celular; outro modo recusado em `draft.freeDesign.devices.mobile.nodes.<id>.place.mode`), um Livre sem `devices` igual byte a byte ao ler e salvar de novo, o maior Livre com `devices` passa no check de 32 KB sem migração |
 | Integração | `tests/integration/pop-ups-livre-envios.test.mjs` (8) | `uploadPopupFreeImage` (WebP com alfa, caminho e medidas do servidor), recusas, 403, imagem nova inexistente, medidas trocadas pelas do servidor, caminho de outro lugar, vídeo não conferido recusado (o objeto fica, `docs/28` D16), vídeo do Personalizado reusado não apagado |
 | Ponta a ponta | `tests/e2e/pop-up-livre-aluno.spec.ts` (8) | nome do diálogo, texto selecionável, selo sobre o vídeo que some, vídeo mudo tocando, X de 28 px com 44 px de toque, Tab nas Camadas e o X por último, `Esc`, clique conta, menos movimento sem vídeo, 375 px com 343 px e proporção, forma por cima do botão não impede o clique, `dismiss: false`, Padrão e Personalizado iguais |
 | Ponta a ponta | `tests/e2e/produtor-monta-pop-up-livre.spec.ts` (4) | num aviso novo: Livre, modelo, vídeo, duas linhas com cores pelo "Outro estilo na seleção", fonte enviada, Botão principal, Selo solto arrastado e com setas, Alinhar ao centro, respiro por lado, Imagem enviada arrastada até a borda (guia) e redimensionada com Shift, esconder e desfazer/refazer pelas Camadas, largura G, Computador e Celular, **Salvar rascunho com o editor aberto** (endereço de aviso novo, Ctrl + Z ainda desfaz), **Concluir** (endereço do aviso), recarregar igual, prévia, publicar, o gravado; a aluna a 1440 (texto real, cores, fonte, clique contado) e a 375 (343 px, proporção, nada abaixo de 12 px, X fecha); com o pop-up no ar, o editor Livre diz **Salvar alterações** e a frase do pop-up no ar, sem aplicar o "Mostrar de novo" ligado, que o salvar do aviso aplica depois (L16) |

@@ -476,3 +476,127 @@ test("a imagem do Livre: medidas do servidor no lugar das do navegador e Imagem 
   ok(await salvar(popup({ cta: comDestino, design: null, freeDesign: aplicado.design }), salvo.id));
   assert.deepEqual((await linha(salvo.id)).popup_design, aplicado.design);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * Celular (PR L3, docs/27 §9.10): devices.mobile na mesma coluna, sem migracao
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O Livre de teste com valores do celular (alguns iguais ao computador, um id que nao existe). */
+function livreComCelular() {
+  return {
+    ...livre(),
+    devices: {
+      mobile: {
+        artboard: { padding: [16, 16, 16, 16] },
+        nodes: {
+          img: { place: { mode: "free", w: 48, x: 300, y: 60 } },
+          nada: { hidden: true },
+          texto: { hidden: true },
+          titulo: { textStyle: { align: "left", size: 22 } }
+        }
+      }
+    }
+  };
+}
+
+const CELULAR_GRAVADO = {
+  mobile: {
+    artboard: { padding: 16 },
+    nodes: { img: { place: { mode: "free", w: 48, y: 60 } }, texto: { hidden: true }, titulo: { textStyle: { size: 22 } } }
+  }
+};
+
+test("Celular: salvar e ler um Livre com devices na forma canônica; o aluno recebe os valores do celular", async () => {
+  const enviado = livreComCelular();
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: enviado })));
+  const gravado = (await linha(salvo.id)).popup_design;
+
+  assert.deepEqual(gravado.devices, CELULAR_GRAVADO, "sem o id que nao existe e sem o que e igual ao computador");
+  assert.deepEqual(gravado, model.canonicalPopupFreeDesign({ ...enviado, assets: [{ height: 48, id: "foto", kind: "image", path: IMAGEM_PATH, width: 64 }] }));
+  assert.equal(gravado.version, 1, "a versao continua 1");
+
+  actAs(produtor);
+  assert.deepEqual((await getNoticeDetail(salvo.id, { permissions: TODAS })).draft.freeDesign, gravado, "o editor abre com os valores do celular");
+
+  actAs(produtor);
+  ok(await actions.publishNotice({ expectedUpdatedAt: salvo.updatedAt, id: salvo.id }));
+
+  const doLivre = (await mostrar(aluna, salvo.id)).body.data.popup;
+
+  assert.deepEqual(doLivre.freeDesign.devices, CELULAR_GRAVADO, "o aluno decide o aparelho na tela dele");
+  assert.deepEqual(doLivre.freeDesign, model.freeDesignForStudent(gravado));
+  assert.equal((await resumoDe(aluna)).plan.find((item) => item.id === salvo.id)?.design, "free");
+
+  // Uma posicao do celular com outro modo e recusada, com a chave pelo id (sem indice).
+  const outroModo = livreComCelular();
+  outroModo.devices.mobile.nodes.img = { place: { mode: "flow", width: 100 } };
+  const recusado = await salvar(popup({ design: null, freeDesign: outroModo }), salvo.id);
+
+  assert.equal(recusado.ok, false);
+  assert.equal(recusado.status, 400);
+  assert.deepEqual(recusado.fieldErrors["draft.freeDesign.devices.mobile.nodes.img.place.mode"], [POPUP_FREE_MESSAGES.mobilePlace]);
+  assert.deepEqual((await linha(salvo.id)).popup_design, gravado, "nada muda");
+});
+
+test("Celular: um Livre sem devices continua igual byte a byte ao ler e salvar de novo", async () => {
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: livre({ image: false }) })));
+  const texto = async () => unwrap(await db.from("campaigns").select("popup_design::text").eq("id", salvo.id).single(), "Lendo o design como texto").popup_design;
+  const antes = await texto();
+
+  assert.equal(typeof antes, "string");
+  assert.equal(antes.includes('"devices"'), false);
+
+  actAs(produtor);
+  const detalhe = await getNoticeDetail(salvo.id, { permissions: TODAS });
+
+  assert.equal("devices" in detalhe.draft.freeDesign, false, "o editor nao inventa devices");
+  ok(await salvar(popup({ design: null, freeDesign: detalhe.draft.freeDesign }), salvo.id));
+  assert.equal(await texto(), antes, "o jsonb gravado e o mesmo");
+
+  // Valores do celular iguais ao computador nao gravam nada.
+  const eco = livre({ image: false });
+  ok(await salvar(popup({ design: null, freeDesign: { ...eco, devices: { mobile: { nodes: { titulo: { textStyle: { size: 28 } } } } } } }), salvo.id));
+  assert.equal(await texto(), antes, "igual ao computador: devices sai");
+});
+
+test("Celular: o maior Livre com devices que o zod aceita passa no check de 32 KB do banco", async () => {
+  const stops = [0, 25, 50, 75, 100].map((at) => ({ at, color: "#7c3aed99" }));
+  const build = (count) => {
+    const shapes = Array.from({ length: count }, (_, index) => ({
+      box: { fill: [1, 2, 3].map((offset) => ({ extent: "closest-side", kind: "radial", shape: "circle", stops, x: index + offset, y: 50 })) },
+      id: `forma${index}`,
+      place: { h: 100, mode: "free", w: 100, x: index, y: index },
+      type: "shape"
+    }));
+
+    return {
+      children: [...shapes, { action: { kind: "cta" }, id: "botao", type: "button" }, { id: "links", type: "links" }],
+      devices: {
+        mobile: {
+          artboard: { gap: 4, minHeight: 600, padding: [8, 12, 16, 20] },
+          nodes: Object.fromEntries(
+            shapes.map((shape, index) => [shape.id, { box: { padding: [1, 2, 3, 4], radius: [4, 3, 2, 1] }, hidden: index % 2 === 0, place: { h: 60 + index, mode: "free", w: 61 + index, x: 2 + index, y: 3 + index } }])
+          )
+        }
+      },
+      mode: "free",
+      version: 1
+    };
+  };
+  const size = (value) => model.jsonbBytesUpperBound(model.canonicalPopupFreeDesign(value));
+  let count = 1;
+
+  while (count < 24 && size(build(count + 1)) <= 30_000) {
+    count += 1;
+  }
+
+  const maior = build(count);
+
+  assert.ok(size(maior) > 27_000 && size(maior) <= 30_000, `estimativa ${size(maior)} com ${count} formas`);
+
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: maior })));
+  const gravado = (await linha(salvo.id)).popup_design;
+
+  assert.deepEqual(gravado, model.canonicalPopupFreeDesign(maior), "o banco aceitou, sem migracao");
+  assert.equal(Object.keys(gravado.devices.mobile.nodes).length, count);
+});

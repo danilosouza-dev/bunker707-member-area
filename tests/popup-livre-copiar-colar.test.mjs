@@ -232,6 +232,64 @@ test("colar: fonte fora da biblioteca vira Inter; o botão principal e o Áudio 
   assert.deepEqual(editor.freeEditorErrors(withAudio.design, { allowSnooze: true, audio: { durationSeconds: 3 }, cta: CTA }), {});
 });
 
+test("colar: os valores do celular (devices) passam, na forma canônica; o erro de um deles diz o elemento", () => {
+  const pasted = {
+    children: [
+      { id: "titulo", lines: [[{ text: "Aula nova" }]], name: "Título grande", textStyle: { size: 40 }, type: "heading" },
+      { id: "selo", label: "Novidade", place: { mode: "free", w: 120, x: 300, y: 16 }, type: "badge" },
+      { id: "links", type: "links" }
+    ],
+    devices: {
+      mobile: {
+        artboard: { padding: 16 },
+        nodes: {
+          nada: { hidden: true },
+          selo: { place: { mode: "free", x: 24, y: 16 } },
+          titulo: { textStyle: { size: 32 } }
+        }
+      }
+    },
+    mode: "free",
+    version: 1
+  };
+  const result = paste.parseFreeDesignPaste(JSON.stringify(pasted), context({ content: { audio: null, cta: null } }));
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.design.devices, {
+    mobile: { artboard: { padding: 16 }, nodes: { selo: { place: { mode: "free", x: 24 } }, titulo: { textStyle: { size: 32 } } } }
+  }, "o id que nao existe e o Y igual ao do computador saem");
+  assert.deepEqual(result.notes, []);
+
+  // Copiar de novo leva os valores do celular, e colar devolve o mesmo design.
+  const text = paste.freeDesignClipboardText(result.design);
+
+  assert.ok(text.includes('"devices"'));
+  assert.deepEqual(paste.parseFreeDesignPaste(text, context({ content: { audio: null, cta: null } })).design, result.design);
+
+  // O Botão principal que o aviso nao tem sai ao colar, e a entrada dele sai junto (id que nao existe mais).
+  const withCta = { ...pasted, children: [...pasted.children.slice(0, 2), { action: { kind: "cta" }, id: "botao", type: "button" }, pasted.children[2]], devices: { mobile: { nodes: { botao: { box: { padding: 8 } } } } } };
+  const synced = paste.parseFreeDesignPaste(JSON.stringify(withCta), context({ content: { audio: null, cta: null } }));
+
+  assert.equal(synced.ok, true, JSON.stringify(synced));
+  assert.equal(model.findFreeNode(synced.design, "botao")?.node.type, "button", "colar mantem o botao principal colado (cria o Saiba mais)");
+  assert.deepEqual(synced.design.devices.mobile.nodes.botao, { box: { padding: 8 } });
+
+  // Erro num valor do celular: a frase diz o elemento.
+  const broken = paste.parseFreeDesignPaste(
+    JSON.stringify({ ...pasted, devices: { mobile: { nodes: { selo: { place: { mode: "flow" } }, titulo: { textStyle: { size: 9 } } } } } }),
+    context()
+  );
+
+  assert.equal(broken.ok, false);
+  assert.deepEqual(broken.errors, [
+    P.invalid,
+    "“Título grande”, no celular: Use de 10 a 160.",
+    `“selo”, no celular: ${schema.POPUP_FREE_MESSAGES.mobilePlace}`
+  ]);
+  assert.equal(P.mobile("Título", "Use de 10 a 160."), "“Título”, no celular: Use de 10 a 160.");
+  assert.equal(PROIBIDAS.test(P.mobile("Título", schema.POPUP_FREE_MESSAGES.mobilePlace)), false);
+});
+
 test("colar é um passo só no histórico (design e botão principal juntos) e conhece os arquivos de todo o histórico", () => {
   const before = { cta: CTA, design: starters.freeStarterDesign("blank") };
   const result = paste.parseFreeDesignPaste(paste.freeDesignClipboardText(starters.freeStarterDesign("glow_text")), context({ content: { audio: null, cta: null } }));
@@ -260,7 +318,7 @@ test("as instruções para a IA vêm do docs/27 §9 (gerado), vão no pacote do 
 
   assert.ok(FREE_AI_INSTRUCTIONS.startsWith("Você vai escrever o design de um pop-up"));
 
-  for (const part of ["### 9.2 ", "### 9.3 ", "### 9.4 ", "### 9.5 ", "### 9.6 ", "### 9.8 ", "### 9.9 "]) {
+  for (const part of ["### 9.2 ", "### 9.3 ", "### 9.4 ", "### 9.5 ", "### 9.6 ", "### 9.8 ", "### 9.9 ", "### 9.10 "]) {
     assert.ok(FREE_AI_INSTRUCTIONS.includes(part), part);
   }
 
@@ -286,6 +344,16 @@ test("as instruções para a IA vêm do docs/27 §9 (gerado), vão no pacote do 
     "um trecho de implementacao sem o marcador para o script"
   );
   assert.match(FREE_AI_INSTRUCTIONS, /Imagem ou Vídeo novo use sempre "asset": null/, "arquivos: sempre asset null");
+  // Celular (PR L3): a parte 9.10 vai no fim e o guia pede devices.mobile so quando pedirem algo so para o celular.
+  assert.ok(FREE_AI_INSTRUCTIONS.indexOf("### 9.10 Celular") > FREE_AI_INSTRUCTIONS.indexOf("### 9.9 "), "a 9.10 depois da 9.9");
+  assert.ok(
+    FREE_AI_INSTRUCTIONS.includes(
+      "9. Só escreva `devices.mobile` quando pedirem algo só para o celular (veja 9.10 Celular), e só com o que muda; sem esse pedido, deixe `devices` de fora: o celular encolhe o desenho do computador sozinho."
+    ),
+    "o guia curto fala do celular"
+  );
+  assert.ok(!FREE_AI_INSTRUCTIONS.includes("resolveFreeForDevice") && !FREE_AI_INSTRUCTIONS.includes("matchMedia"), "o por dentro do celular fica no docs");
+  assert.match(doc, /<!-- ia:fora -->(?:(?!<!-- \/ia:fora -->)[\s\S])*resolveFreeForDevice/, "o por dentro do celular continua no docs, marcado");
   assert.match(FREE_AI_INSTRUCTIONS, /\| Tamanho \| até 30\.000 bytes[^|]*\|\n/, "o tamanho como um limite simples");
 
   // Os exemplos das instrucoes colam de volta no editor e cabem no que a linha Tamanho promete.
@@ -796,4 +864,20 @@ test("dica texto no celular: fica quieta nos modelos e só aparece quando o piso
 
   assert.deepEqual(phoneHints(links, { allowSnooze: true }).map((hint) => hint.nodeId), ["links"]);
   assert.deepEqual(phoneHints(links, { allowSnooze: false }), []);
+});
+
+test("dica texto no celular: mede o design do celular (com os valores próprios) e leva ao campo do celular", () => {
+  const paragraph =
+    "Uma aula nova acabou de entrar na sua área. Assista agora, anote as dúvidas e coloque em prática ainda hoje; na próxima aula ao vivo a gente responde tudo com calma e com exemplos.";
+  const wide = (devices) => design([{ id: "texto", lines: [[{ text: paragraph }]], textStyle: { size: 24 }, type: "text" }], { artboard: { width: 640 }, ...(devices ? { devices } : {}) });
+
+  // 24 px no computador: o piso nao mexe. 13 px so no celular: o piso mexe e a dica leva ao tamanho do celular.
+  assert.deepEqual(phoneHints(wide()), []);
+  assert.deepEqual(phoneHints(wide({ mobile: { nodes: { texto: { textStyle: { size: 13 } } } } })), [
+    { key: "devices.mobile.nodes.texto.textStyle.size", kind: "phone-text", message: checks.POPUP_FREE_HINT_MESSAGES.phoneText, nodeId: "texto" }
+  ]);
+  // Escondido so no celular: nada.
+  assert.deepEqual(phoneHints(wide({ mobile: { nodes: { texto: { hidden: true, textStyle: { size: 13 } } } } })), []);
+  // A chave do celular leva ao elemento no editor.
+  assert.equal(editor.freeNodeIdForKey(wide(), "devices.mobile.nodes.texto.textStyle.size"), "texto");
 });

@@ -90,6 +90,45 @@ export function freeFontSize(px: number, width: number): string {
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Aparelho: o celular com os valores proprios (devices.mobile) por cima do computador
+ * ---------------------------------------------------------------------------------------------- */
+
+type Loose = Record<string, unknown>;
+
+const isPlain = (value: unknown): value is Loose => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * O design do aparelho. "desktop" (ou sem valores do celular) devolve o MESMO objeto; "mobile" junta, por elemento,
+ * cada parte do celular por cima da do computador (`place`, `textStyle`, `box` e `layout` campo a campo; `size`,
+ * `gap` e `hidden` trocam) e a prancheta (respiro, espaco, altura minima). Pequeno de proposito: e o cartao do aluno.
+ */
+export function resolveFreeForDevice(design: PopupFreeDesign, device: "desktop" | "mobile"): PopupFreeDesign {
+  const mobile = device === "mobile" ? design.devices?.mobile : undefined;
+
+  if (!mobile) {
+    return design;
+  }
+
+  const own = (mobile.nodes ?? {}) as Record<string, Loose | undefined>;
+  const merge = (node: FreeNode): FreeNode => {
+    const next: Loose = { ...node };
+    const values = Object.prototype.hasOwnProperty.call(own, node.id) ? own[node.id] : undefined;
+
+    for (const [key, value] of Object.entries(values ?? {})) {
+      next[key] = isPlain(value) && isPlain(next[key]) ? { ...next[key], ...value } : value;
+    }
+
+    if (node.type === "box") {
+      next.children = node.children.map(merge);
+    }
+
+    return next as FreeNode;
+  };
+
+  return { ...design, artboard: { ...design.artboard, ...mobile.artboard }, children: design.children.map(merge) };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Leituras do design
  * ---------------------------------------------------------------------------------------------- */
 

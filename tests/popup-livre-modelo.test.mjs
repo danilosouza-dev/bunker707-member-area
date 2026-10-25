@@ -19,6 +19,7 @@ const router = await import("../src/server/communications/popup-design-router.ts
 const custom = await import("../src/server/communications/popup-design-model.ts");
 const schemas = await import("../src/server/communications/schemas.ts");
 const store = await import("../src/server/communications/store.ts");
+const editor = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
 
 const M = schema.POPUP_FREE_MESSAGES;
 const ORIGIN = "http://127.0.0.1:55321";
@@ -105,7 +106,8 @@ test("o schema do Livre recusa chave a mais em qualquer nível, inclusive url nu
   const base = design([heading("titulo")]);
 
   hasIssue({ ...base, extra: 1 }, "", M.design);
-  hasIssue({ ...base, devices: { mobile: {} } }, "", M.design);
+  // Celular (PR L3): `devices` existe, mas chave a mais dentro dele continua recusada (os casos no bloco Celular).
+  hasIssue({ ...base, devices: { tablet: {} } }, "devices", M.design);
   hasIssue({ ...base, artboard: { width: 440, cor: "#000000" } }, "artboard", M.design);
   hasIssue({ ...base, close: { color: "#ffffff", url: "https://x.com" } }, "close", M.design);
   hasIssue(design([{ ...heading("titulo"), html: "<b>oi</b>" }]), "children.0", M.design);
@@ -1052,4 +1054,321 @@ test("leituras do design: primeiro título e texto visíveis, nome do diálogo e
   assert.equal(item.freeDesign.children[0].locked, true, "a previa guarda o travado (o palco nao seleciona)");
   assert.equal(model.freePreviewPopupItem({ allowSnooze: false, audio: null, close: "x_only", cta: null, design: valid(design([])), fonts: [], id: "p", title: " Nome " }).title, "Nome");
   assert.equal(model.freePreviewPopupItem({ allowSnooze: false, audio: null, close: "x_only", cta: null, design: valid(design([])), fonts: [], title: "N" }).close, "x_only");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Celular (PR L3, docs/27 §9.10): devices.mobile
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Um solto, um da sequencia, uma caixa em linha com Texto, Ícone e Espaço, uma Imagem e os Links. */
+function celularBase(extra = {}) {
+  return design(
+    [
+      { id: "selo", label: "Novidade", place: { h: 40, mode: "free", rotate: 8, w: 120, x: 300, y: 16, z: 2 }, type: "badge" },
+      { ...heading("titulo"), place: { margin: [12, 0, 0, 0], mode: "flow" }, textStyle: { size: 40 } },
+      { children: [text("texto"), { icon: "star", id: "icone", type: "icon" }, { id: "espaco", type: "spacer" }], id: "caixa", layout: { dir: "row", gap: 10 }, type: "box" },
+      { asset: null, id: "foto", type: "image" }
+    ],
+    extra
+  );
+}
+
+/** O mesmo, com a Imagem escondida no computador. */
+function celularFotoEscondida(extra = {}) {
+  const base = celularBase(extra);
+
+  return { ...base, children: base.children.map((node) => (node.id === "foto" ? { ...node, hidden: true } : node)) };
+}
+
+/** Todos os campos que tem versao do celular, cada um diferente do computador (ja na forma canonica). */
+const MOBILE = {
+  artboard: { gap: 8, minHeight: 300, padding: [16, 12] },
+  nodes: {
+    caixa: { box: { padding: 8, radius: 12 }, layout: { align: "center", dir: "column", gap: 4, justify: "between", wrap: true } },
+    espaco: { size: 8 },
+    foto: { hidden: true },
+    icone: { size: 16 },
+    links: { gap: 4, textStyle: { align: "center" } },
+    selo: { place: { h: 36, mode: "free", w: 100, x: 24, y: 8 } },
+    titulo: { place: { align: "center", height: 40, margin: [8, 0, 0, 0], mode: "flow", width: 200 }, textStyle: { align: "center", letterSpacing: 0.05, lineHeight: 1.2, size: 28 } }
+  }
+};
+
+function withMobile(mobile, extra = {}) {
+  return celularBase({ devices: { mobile }, ...extra });
+}
+
+function withNodes(nodes) {
+  return withMobile({ nodes });
+}
+
+test("Celular: devices.mobile no formato combinado vale e volta igual na forma canônica", () => {
+  const value = valid(withMobile(MOBILE));
+
+  assert.deepEqual(value.devices, { mobile: MOBILE });
+  assert.deepEqual(Object.keys(value), ["assets", "children", "devices", "fonts", "mode", "version"], "devices em ordem alfabetica");
+  assert.equal(value.version, 1, "a versao continua 1");
+  assert.deepEqual(model.canonicalPopupFreeDesign(value), value, "idempotente");
+  assert.deepEqual(valid(withMobile({ artboard: { padding: 16 } })).devices, { mobile: { artboard: { padding: 16 } } }, "so a prancheta");
+  assert.deepEqual(valid(withNodes({ foto: { hidden: true } })).devices, { mobile: { nodes: { foto: { hidden: true } } } }, "so um elemento");
+  assert.ok(JSON.stringify(jsonSchemaModule.popupFreeJsonSchema()).includes('"devices"'), "o JSON Schema da entrada mostra devices");
+});
+
+test("Celular: chave a mais dentro de devices é recusada, com os limites do computador e o campo do tipo certo", () => {
+  hasIssue(withMobile({ cor: 1 }), "devices.mobile", M.design);
+  hasIssue(withMobile({ artboard: { width: 360 } }), "devices.mobile.artboard", M.design);
+  hasIssue(withNodes({ titulo: { color: "#ffffff" } }), "devices.mobile.nodes.titulo", M.design);
+  // Camada e girar sao os mesmos nos dois: nao tem versao do celular.
+  hasIssue(withNodes({ selo: { place: { mode: "free", x: 1, z: 3 } } }), "devices.mobile.nodes.selo.place", M.design);
+  hasIssue(withNodes({ selo: { place: { mode: "free", rotate: 10 } } }), "devices.mobile.nodes.selo.place", M.design);
+  hasIssue(withNodes({ titulo: { place: { mode: "flow", z: 1 } } }), "devices.mobile.nodes.titulo.place", M.design);
+  // Cores, pinturas, fundos e fontes: os mesmos nos dois.
+  hasIssue(withNodes({ titulo: { textStyle: { paint: { color: "#000000", kind: "solid" } } } }), "devices.mobile.nodes.titulo.textStyle", M.design);
+  hasIssue(withNodes({ titulo: { textStyle: { weight: 400 } } }), "devices.mobile.nodes.titulo.textStyle", M.design);
+  hasIssue(withNodes({ caixa: { box: { fill: [{ color: "#000000", kind: "solid" }] } } }), "devices.mobile.nodes.caixa.box", M.design);
+  hasIssue(withNodes({ Titulo: { hidden: true } }), "devices.mobile.nodes.Titulo", M.design);
+  hasIssue(withNodes({ foto: { hidden: "sim" } }), "devices.mobile.nodes.foto.hidden", M.design);
+  // O campo do tipo certo: size so no Espaço e no Ícone, gap so nos Links, layout so na Caixa, textStyle so com texto.
+  hasIssue(withNodes({ titulo: { size: 20 } }), "devices.mobile.nodes.titulo.size", M.design);
+  hasIssue(withNodes({ texto: { gap: 4 } }), "devices.mobile.nodes.texto.gap", M.design);
+  hasIssue(withNodes({ titulo: { layout: { dir: "row" } } }), "devices.mobile.nodes.titulo.layout", M.design);
+  hasIssue(withNodes({ foto: { textStyle: { size: 20 } } }), "devices.mobile.nodes.foto.textStyle", M.design);
+  // Os limites de cada campo sao os do computador (o do Ícone tambem).
+  hasIssue(withNodes({ icone: { size: 7 } }), "devices.mobile.nodes.icone.size", "Use de 8 a 160.");
+  hasIssue(withNodes({ espaco: { size: 401 } }), "devices.mobile.nodes.espaco.size", "Use de 0 a 400.");
+  hasIssue(withNodes({ selo: { place: { mode: "free", x: 2000 } } }), "devices.mobile.nodes.selo.place.x", "Use de -720 a 1440.");
+  hasIssue(withNodes({ titulo: { textStyle: { size: 9 } } }), "devices.mobile.nodes.titulo.textStyle.size", "Use de 10 a 160.");
+  hasIssue(withNodes({ titulo: { textStyle: { lineHeight: 3 } } }), "devices.mobile.nodes.titulo.textStyle.lineHeight", "Use de 0,7 a 2,5.");
+  hasIssue(withNodes({ caixa: { layout: { gap: 97 } } }), "devices.mobile.nodes.caixa.layout.gap", "Use de 0 a 96.");
+  hasIssue(withMobile({ artboard: { minHeight: 1601 } }), "devices.mobile.artboard.minHeight", "Use de 0 a 1600.");
+  // Ate 32 entradas (mesmo de ids que nao existem).
+  hasIssue(withNodes(Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`e${index}`, { hidden: true }]))), "devices.mobile.nodes", M.nodes);
+});
+
+test("Celular: a posição do celular tem o mesmo modo do computador", () => {
+  assert.equal(M.mobilePlace, "No celular, o elemento fica como no computador: solto continua solto e na sequência continua na sequência.");
+  hasIssue(withNodes({ selo: { place: { mode: "flow", width: 100 } } }), "devices.mobile.nodes.selo.place.mode", M.mobilePlace);
+  hasIssue(withNodes({ titulo: { place: { mode: "free", x: 0 } } }), "devices.mobile.nodes.titulo.place.mode", M.mobilePlace);
+  // Sem `place` no computador = na sequencia (e dentro de uma caixa nunca e solto).
+  hasIssue(withNodes({ texto: { place: { mode: "free", x: 0 } } }), "devices.mobile.nodes.texto.place.mode", M.mobilePlace);
+  valid(withNodes({ texto: { place: { margin: 4, mode: "flow" } } }));
+  valid(withNodes({ selo: { place: { mode: "free", y: 40 } } }));
+});
+
+test("Celular: a forma canônica tira id que não existe, objeto vazio e valor igual ao do computador; sem nada, devices sai", () => {
+  const plain = valid(celularBase());
+  const same = valid(
+    withMobile({
+      artboard: { gap: 12, minHeight: 0, padding: [24, 24, 24, 24] },
+      nodes: {
+        caixa: { box: { padding: 0, radius: 0 }, layout: { align: "stretch", dir: "row", gap: 10, justify: "start", wrap: false } },
+        espaco: { size: 16 },
+        foto: { hidden: false },
+        icone: { size: 24 },
+        links: { gap: 8, textStyle: { align: "left", letterSpacing: 0, lineHeight: 1.2, size: 13 } },
+        nada: { hidden: true },
+        selo: { place: { h: 40, mode: "free", w: 120, x: 300, y: 16 } },
+        texto: {},
+        titulo: { place: { margin: [12, 0, 0, 0], mode: "flow", width: "fill" }, textStyle: { size: 40 } }
+      }
+    })
+  );
+
+  assert.equal("devices" in same, false, "tudo igual ao computador (com os padroes): devices sai");
+  assert.deepEqual(same, plain);
+  assert.equal("devices" in valid(celularBase({ devices: {} })), false, "devices vazio sai");
+  assert.equal("devices" in valid(celularBase({ devices: { mobile: { nodes: {} } } })), false, "nodes vazio sai");
+
+  // So o que muda fica: o Y do selo (o X igual sai), o texto escondido so no celular; arredondado e lados curtos.
+  const partial = model.canonicalPopupFreeDesign(
+    withMobile({
+      artboard: { padding: [8, 8, 8, 8] },
+      nodes: {
+        selo: { place: { mode: "free", x: 300, y: 40.4 } },
+        texto: { hidden: true, place: { margin: [4, 0, 4, 0], mode: "flow" } },
+        titulo: { textStyle: { lineHeight: 1.234 } }
+      }
+    })
+  );
+
+  assert.deepEqual(partial.devices, {
+    mobile: {
+      artboard: { padding: 8 },
+      nodes: {
+        selo: { place: { mode: "free", y: 40 } },
+        texto: { hidden: true, place: { margin: [4, 0], mode: "flow" } },
+        titulo: { textStyle: { lineHeight: 1.23 } }
+      }
+    }
+  });
+  // Mostrar so no celular o que esta escondido no computador vale (e diferente do computador).
+  assert.deepEqual(valid(celularFotoEscondida({ devices: { mobile: { nodes: { foto: { hidden: false } } } } })).devices, { mobile: { nodes: { foto: { hidden: false } } } });
+  // Uma posicao com outro modo (so sem o zod, como numa conta do editor) sai.
+  assert.equal("devices" in model.canonicalPopupFreeDesign(withNodes({ selo: { place: { mode: "flow", width: 100 } } })), false);
+});
+
+test("Celular: resolveFreeForDevice junta o celular por cima e o computador devolve o mesmo objeto", () => {
+  const value = valid(withMobile(MOBILE));
+  const plain = valid(celularBase());
+
+  assert.equal(model.resolveFreeForDevice, render.resolveFreeForDevice, "mora em popup-free-render.ts; o modelo reexporta");
+  assert.equal(render.resolveFreeForDevice(value, "desktop"), value, "computador: o mesmo objeto");
+  assert.equal(render.resolveFreeForDevice(plain, "mobile"), plain, "sem valores do celular: o mesmo objeto");
+
+  const mobile = render.resolveFreeForDevice(value, "mobile");
+  const node = (id) => model.findFreeNode(mobile, id).node;
+
+  assert.deepEqual(render.resolveFreeArtboard(mobile), { ...render.resolveFreeArtboard(plain), gap: 8, minHeight: 300, padding: [16, 12] });
+  assert.deepEqual(node("selo").place, { h: 36, mode: "free", rotate: 8, w: 100, x: 24, y: 8, z: 2 }, "camada e girar do computador");
+  assert.equal(node("selo").label, "Novidade", "o texto e o mesmo");
+  assert.deepEqual(node("titulo").place, { align: "center", height: 40, margin: [8, 0, 0, 0], mode: "flow", width: 200 });
+  assert.deepEqual(node("titulo").textStyle, { align: "center", letterSpacing: 0.05, lineHeight: 1.2, size: 28 });
+  assert.deepEqual(node("caixa").box, { padding: 8, radius: 12 });
+  assert.deepEqual(node("caixa").layout, MOBILE.nodes.caixa.layout);
+  assert.equal(node("icone").size, 16);
+  assert.equal(node("espaco").size, 8);
+  assert.equal(node("foto").hidden, true, "escondido so no celular");
+  assert.deepEqual(node("links").textStyle, { align: "center" });
+  assert.equal(node("links").gap, 4);
+  assert.deepEqual(node("texto"), model.findFreeNode(value, "texto").node, "o que nao muda fica igual");
+  assert.equal(model.findFreeNode(value, "selo").node.place.x, 300, "o original nao muda");
+  assert.equal(model.findFreeNode(value, "foto").node.hidden, undefined);
+  assert.deepEqual(render.resolveFreeForDevice(mobile, "mobile"), mobile, "juntar de novo da o mesmo");
+
+  // Campo a campo: so o X no celular; o resto do computador.
+  const onlyX = render.resolveFreeForDevice(valid(withNodes({ selo: { place: { mode: "free", x: 24 } } })), "mobile");
+  assert.deepEqual(model.findFreeNode(onlyX, "selo").node.place, { h: 40, mode: "free", rotate: 8, w: 120, x: 24, y: 16, z: 2 });
+
+  // Escondido no computador e mostrado no celular.
+  const shown = valid(celularFotoEscondida({ devices: { mobile: { nodes: { foto: { hidden: false } } } } }));
+  assert.equal(model.findFreeNode(render.resolveFreeForDevice(shown, "mobile"), "foto").node.hidden, false);
+  assert.equal(model.findFreeNode(render.resolveFreeForDevice(shown, "desktop"), "foto").node.hidden, true);
+
+  // O aluno recebe os valores do celular.
+  assert.deepEqual(model.freeDesignForStudent(value).devices, value.devices);
+});
+
+test("Celular: Ajustar os elementos à nova largura escala os valores do celular junto", () => {
+  const value = valid(withMobile(MOBILE));
+  const big = model.rescaleFreeDesign(value, 660);
+  const nodes = big.devices.mobile.nodes;
+
+  assert.deepEqual(big.devices.mobile.artboard, { gap: 12, minHeight: 450, padding: [24, 18] });
+  assert.deepEqual(nodes.selo, { place: { h: 54, mode: "free", w: 150, x: 36, y: 12 } });
+  assert.deepEqual(nodes.titulo, {
+    place: { align: "center", height: 60, margin: [12, 0, 0, 0], mode: "flow", width: 300 },
+    textStyle: { align: "center", letterSpacing: 0.05, lineHeight: 1.2, size: 42 }
+  });
+  assert.deepEqual(nodes.caixa, { box: { padding: 12, radius: 18 }, layout: { ...MOBILE.nodes.caixa.layout, gap: 6 } });
+  assert.deepEqual(nodes.espaco, { size: 12 });
+  assert.deepEqual(nodes.icone, { size: 24 }, "16 vira 24 (o computador vai de 24 para 36)");
+  assert.deepEqual(nodes.links, { gap: 6, textStyle: { align: "center" } });
+  assert.deepEqual(nodes.foto, { hidden: true });
+  valid(big);
+  assert.deepEqual(model.rescaleFreeDesign(value, 440), value, "a mesma largura nao muda nada");
+});
+
+test("Celular: duplicar, excluir, Soltar, Seguir a sequência e Colocar dentro da caixa mantêm o mapa coerente", () => {
+  const value = valid(withMobile(MOBILE));
+  const nodesOf = (item) => item.devices?.mobile?.nodes ?? {};
+
+  // Duplicar o solto: a entrada vai para o id novo e anda 16 px tambem no celular.
+  const copy = editor.duplicateFreeNode(value, "selo", null);
+  assert.equal(copy.id, "selo2");
+  assert.deepEqual(nodesOf(copy.design).selo2, { place: { h: 36, mode: "free", w: 100, x: 40, y: 24 } });
+  assert.deepEqual(nodesOf(copy.design).selo, MOBILE.nodes.selo, "o original fica");
+  valid(copy.design);
+
+  // Duplicar a caixa: cada elemento de dentro leva a sua entrada para o id novo.
+  const box = editor.duplicateFreeNode(value, "caixa", null);
+  assert.equal(box.id, "caixa2");
+  assert.deepEqual(nodesOf(box.design).caixa2, MOBILE.nodes.caixa);
+  assert.deepEqual(nodesOf(box.design).icone2, { size: 16 });
+  assert.deepEqual(nodesOf(box.design).espaco2, { size: 8 });
+  assert.equal("texto2" in nodesOf(box.design), false, "sem entrada, nada a copiar");
+  assert.deepEqual(valid(box.design).devices.mobile.nodes.icone2, { size: 16 });
+
+  // Excluir tira a entrada do elemento e de tudo dentro dele; sem nenhuma entrada, devices sai.
+  const removed = editor.removeFreeNode(value, "caixa");
+  assert.deepEqual(Object.keys(nodesOf(removed.design)).sort(), ["foto", "links", "selo", "titulo"]);
+  valid(removed.design);
+  const lonely = valid(withNodes({ selo: { place: { mode: "free", x: 24 } } }));
+  assert.equal("devices" in editor.removeFreeNode(lonely, "selo").design, false);
+
+  // Soltar: o titulo vira solto e a posicao do celular (na sequencia) sai; o tamanho do texto do celular fica.
+  const loose = editor.freeNodeToFree(value, "titulo", { titulo: { h: 44, w: 392, x: 24, y: 80 } });
+  assert.deepEqual(nodesOf(loose).titulo, { textStyle: MOBILE.nodes.titulo.textStyle });
+  valid(loose);
+
+  // Seguir a sequencia: a posicao solta do celular sai (o selo so tinha a posicao: a entrada sai).
+  const flow = editor.freeNodeToSequence(value, "selo", {});
+  assert.equal("selo" in nodesOf(flow), false);
+  valid(flow);
+
+  // Colocar dentro da caixa: o solto vira sequencia e perde a posicao do celular; um da sequencia fica com a dele.
+  const inside = editor.moveFreeNodeIntoBox(value, "selo", "caixa");
+  assert.equal(inside.becameFlow, true);
+  assert.equal("selo" in nodesOf(inside.design), false);
+  valid(inside.design);
+  const flowInside = editor.moveFreeNodeIntoBox(value, "titulo", "caixa");
+  assert.equal(flowInside.becameFlow, false);
+  assert.deepEqual(nodesOf(flowInside.design).titulo, MOBILE.nodes.titulo);
+  valid(flowInside.design);
+});
+
+test("Celular: o tamanho do design conta devices e os erros saem pelo id", () => {
+  // O maior design de formas pesadas que ainda cabe sem os valores do celular.
+  let count = 4;
+
+  while (count < 24 && model.jsonbBytesUpperBound(model.canonicalPopupFreeDesign(heavyDesign(count + 1))) <= 30_000) {
+    count += 1;
+  }
+
+  const base = heavyDesign(count);
+  const shapes = base.children.filter((node) => node.type === "shape");
+
+  valid(base);
+
+  const nodes = Object.fromEntries(shapes.map((node) => [node.id, { box: { padding: [1, 2, 3, 4], radius: [1, 2, 3, 4] }, place: { h: 50, mode: "free", w: 50, x: 5, y: 5 } }]));
+  const heavy = { ...base, devices: { mobile: { nodes } } };
+
+  assert.ok(model.jsonbBytesUpperBound(model.canonicalPopupFreeDesign(heavy)) > model.jsonbBytesUpperBound(model.canonicalPopupFreeDesign(base)) + 5_000);
+  hasIssue(heavy, "size", M.size);
+  assert.ok(checks.freeDesignSizePercent(model.canonicalPopupFreeDesign(heavy)) > 100, "o medidor do Revisar conta o celular");
+
+  // Os mesmos valores do computador nao contam (saem na forma canonica).
+  const echo = Object.fromEntries(shapes.map((node) => [node.id, { place: { h: node.place.h, mode: "free", w: node.place.w, x: node.place.x, y: node.place.y } }]));
+  assert.equal("devices" in valid({ ...base, devices: { mobile: { nodes: echo } } }), false);
+
+  // Erros pelo id (devices.mobile.nodes.<id>...), sem indice para trocar.
+  const raw = withNodes({ selo: { place: { mode: "free", x: 2000 } } });
+  const key = "freeDesign.devices.mobile.nodes.selo.place.x";
+
+  assert.equal(schema.freeErrorKey(raw, key), key);
+  assert.deepEqual(schema.freeErrorKeys(raw, { [key]: "Use de -720 a 1440." }), { [key]: "Use de -720 a 1440." });
+  assert.equal(editor.freeEditorErrors(raw, { allowSnooze: true, audio: null, cta: null })["devices.mobile.nodes.selo.place.x"], "Use de -720 a 1440.", "o editor recebe a chave pelo id");
+  assert.equal(model.freeNodeIdOfKey("devices.mobile.nodes.selo.place.x"), "selo");
+  assert.equal(model.freeNodeIdOfKey("freeDesign.devices.mobile.nodes.titulo"), "titulo");
+  assert.equal(model.freeNodeIdOfKey("devices.mobile.artboard.padding"), null);
+  assert.equal(model.freeNodeIdOfKey("devices.mobile.nodes.Selo.place"), null);
+  assert.equal(editor.freeNodeIdForKey(valid(celularBase()), "devices.mobile.nodes.selo.place.x"), "selo");
+  assert.equal(editor.freeNodeIdForKey(valid(celularBase()), "devices.mobile.nodes.nada.place.x"), null, "id que nao existe");
+});
+
+test("Celular: o exemplo do docs/27 §9.10 vale e o celular muda só o que ele diz", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const part = doc.slice(doc.indexOf("### 9.10 Celular"), doc.indexOf("## 10."));
+  const blocks = [...part.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]));
+
+  assert.equal(blocks.length, 1);
+
+  const value = valid(blocks[0]);
+  const mobile = render.resolveFreeForDevice(value, "mobile");
+
+  assert.deepEqual(value.devices.mobile.nodes.selo, { place: { mode: "free", x: 24 } });
+  assert.deepEqual(model.findFreeNode(mobile, "selo").node.place, { mode: "free", w: 116, x: 24, y: 16 });
+  assert.equal(model.findFreeNode(mobile, "texto").node.hidden, true);
+  assert.equal(render.freeTextStyleOf(model.findFreeNode(mobile, "titulo").node).size, 32);
+  assert.equal(render.freeTextStyleOf(model.findFreeNode(value, "titulo").node).size, 40, "o computador continua com 40");
+  assert.equal(render.resolveFreeArtboard(mobile).padding, 16);
 });

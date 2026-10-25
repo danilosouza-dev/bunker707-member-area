@@ -13,16 +13,20 @@ import {
   canonicalPopupFreeDesign,
   findFreeNode,
   freeNodeCount,
+  freeMobileNodeOf,
   freeNodeIdOfKey,
   nextFreeId,
   uploadedFontIdsOfFree,
   updateFreeNode,
   walkFreeNodes,
+  withFreeMobileNodes,
+  withoutFreeMobilePlace,
   type FreeAbsolutePlace,
   type FreeBoxNode,
   type FreeButtonNode,
   type FreeFlowPlace,
   type FreeId,
+  type FreeMobileNode,
   type FreeNode,
   type FreeNodeType,
   type PopupFreeDesign
@@ -632,9 +636,15 @@ export function freeDuplicateProblem(design: PopupFreeDesign, id: FreeId): strin
   return freeAddProblem(design, [cloneWithIds(node, (prefix) => prefix, null)]);
 }
 
+/** Os ids do elemento e de tudo dentro dele (caixas), na ordem do DOM. */
+function subtreeIds(node: FreeNode): FreeId[] {
+  return node.type === "box" ? [node.id, ...node.children.flatMap(subtreeIds)] : [node.id];
+}
+
 /**
  * Duplica logo depois do original (ids novos em tudo). O Botão principal duplicado vira um botao "Abrir um link"
  * com o mesmo texto e destino (so se ainda nao ha um). Um solto duplicado anda 16 px para baixo e para a direita.
+ * Os valores do celular vao junto para os ids novos (o solto anda 16 px no celular tambem, quando tem X/Y proprios).
  */
 export function duplicateFreeNode(design: PopupFreeDesign, id: FreeId, cta: NoticeDraft["cta"]): { design: PopupFreeDesign; id: FreeId } | { reason: string } {
   const problem = freeDuplicateProblem(design, id);
@@ -661,8 +671,25 @@ export function duplicateFreeNode(design: PopupFreeDesign, id: FreeId, cta: Noti
   }
 
   const next = insertNode(design, found.parent?.id ?? null, found.index + 1, copy);
+  const copies = subtreeIds(copy);
+  const entries: Record<FreeId, FreeMobileNode> = {};
 
-  return { design: next, id: copy.id };
+  subtreeIds(found.node).forEach((oldId, index) => {
+    let entry = freeMobileNodeOf(design, oldId);
+
+    if (entry && index === 0 && entry.place?.mode === "free" && (entry.place.x !== undefined || entry.place.y !== undefined)) {
+      const place = entry.place;
+      const moved = freePlaceNumbers({ x: place.x === undefined ? undefined : place.x + 16, y: place.y === undefined ? undefined : place.y + 16 });
+
+      entry = { ...entry, place: { ...place, ...moved } };
+    }
+
+    if (entry) {
+      entries[copies[index]] = entry;
+    }
+  });
+
+  return { design: withFreeMobileNodes(next, entries), id: copy.id };
 }
 
 /** Por que nao da para excluir (Links e Áudio ficam sempre). */
@@ -698,7 +725,10 @@ export function removeFreeNode(design: PopupFreeDesign, id: FreeId): { ctaRemove
     return { reason: M.design };
   }
 
-  return { ctaRemoved: contains(detached.node, isCta), design: detached.design };
+  // O que o elemento (e o que estava dentro dele) mudava no celular sai junto.
+  const entries = Object.fromEntries(subtreeIds(detached.node).map((nodeId) => [nodeId, undefined]));
+
+  return { ctaRemoved: contains(detached.node, isCta), design: withFreeMobileNodes(detached.design, entries) };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -766,7 +796,7 @@ export function freeBoxTargets(design: PopupFreeDesign, id: FreeId): { id: FreeI
   return targets;
 }
 
-/** Coloca no fim da caixa. Um solto vira sequencia sozinho (`becameFlow`). */
+/** Coloca no fim da caixa. Um solto vira sequencia sozinho (`becameFlow`) e perde a posicao solta do celular. */
 export function moveFreeNodeIntoBox(design: PopupFreeDesign, id: FreeId, boxId: FreeId): { becameFlow: boolean; design: PopupFreeDesign } | null {
   if (!freeBoxTargets(design, id).some((target) => target.id === boxId)) {
     return null;
@@ -785,7 +815,9 @@ export function moveFreeNodeIntoBox(design: PopupFreeDesign, id: FreeId, boxId: 
     return null;
   }
 
-  return { becameFlow, design: insertNode(detached.design, boxId, box.node.children.length, flowPlaceOf(detached.node)) };
+  const moved = insertNode(detached.design, boxId, box.node.children.length, flowPlaceOf(detached.node));
+
+  return { becameFlow, design: becameFlow ? withoutFreeMobilePlace(moved, id) : moved };
 }
 
 /** Tira da caixa: entra logo depois dela, na caixa de fora (ou na prancheta). */
@@ -927,7 +959,8 @@ export function alignFreeNode(design: PopupFreeDesign, id: FreeId, edge: FreeAli
 
 /**
  * "Soltar": vira solto no mesmo lugar (pelo retangulo medido) e vai para a prancheta, logo depois da caixa de fora
- * onde estava (a ordem das Camadas fica perto da de antes).
+ * onde estava (a ordem das Camadas fica perto da de antes). A posicao do celular (na sequencia) sai: no celular ele
+ * fica solto no mesmo lugar do computador.
  */
 export function freeNodeToFree(design: PopupFreeDesign, id: FreeId, rects: FreeMeasuredRects): PopupFreeDesign | null {
   const found = locate(design, id);
@@ -949,12 +982,12 @@ export function freeNodeToFree(design: PopupFreeDesign, id: FreeId, rects: FreeM
   const detached = detach(design, id) as NonNullable<ReturnType<typeof detach>>;
   const node = { ...detached.node, place } as FreeNode;
 
-  return insertNode(detached.design, null, found.parent ? rootIndex + 1 : found.index, node);
+  return withoutFreeMobilePlace(insertNode(detached.design, null, found.parent ? rootIndex + 1 : found.index, node), id);
 }
 
 /**
  * "Seguir a sequencia": volta para a prancheta, na posicao da sequencia logo abaixo do topo dele (pela ordem dos
- * retangulos medidos).
+ * retangulos medidos). A posicao solta do celular sai junto.
  */
 export function freeNodeToSequence(design: PopupFreeDesign, id: FreeId, rects: FreeMeasuredRects): PopupFreeDesign | null {
   const found = locate(design, id);
@@ -971,7 +1004,7 @@ export function freeNodeToSequence(design: PopupFreeDesign, id: FreeId, rects: F
     .map(({ index, node }) => ({ index, rect: rects[node.id] }));
   const index = freeSequenceIndexFor(top, flow, detached.design.children.length);
 
-  return insertNode(detached.design, null, index, flowPlaceOf(detached.node));
+  return withoutFreeMobilePlace(insertNode(detached.design, null, index, flowPlaceOf(detached.node)), id);
 }
 
 /* ------------------------------------------------------------------------------------------------

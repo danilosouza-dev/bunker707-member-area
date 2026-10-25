@@ -7,6 +7,7 @@ import { contrastHintMessage, contrastRatio, isLargeText, type HexColor, type Po
 import {
   canonicalPopupFreeDesign,
   FREE_DESIGN_LIMITS,
+  freeMobileNodeOf,
   jsonbBytesUpperBound,
   type FreeBox,
   type FreeBoxLayout,
@@ -18,7 +19,15 @@ import {
   type FreeTextPaint,
   type PopupFreeDesign
 } from "./popup-free-model";
-import { FREE_MIN_FONT_PX, freeHasSnoozeButton, freeHeadingText, freeTextStyleOf, resolveFreeArtboard, type FreeResolvedTextStyle } from "./popup-free-render";
+import {
+  FREE_MIN_FONT_PX,
+  freeHasSnoozeButton,
+  freeHeadingText,
+  freeTextStyleOf,
+  resolveFreeArtboard,
+  resolveFreeForDevice,
+  type FreeResolvedTextStyle
+} from "./popup-free-render";
 
 export type FreeHint = {
   /** Mesmo formato das chaves de erro, sem "freeDesign.". */
@@ -453,14 +462,16 @@ function wrappedLines(lines: readonly TextRun[][], available: number, sizeOf: (s
 }
 
 /**
- * As dicas "texto no celular" (docs/27 L1.1, decisao L18): o piso de 12 px deixa o texto um pouco maior que a
+ * As dicas "texto no celular" (docs/27 L1.1, decisao L18; com os valores do celular desde o L3): o piso de 12 px deixa o texto um pouco maior que a
  * proporcao no celular, e isso so importa quando muda o encaixe. Por elemento visivel com algum tamanho que o piso
  * aumenta, estimando a largura das letras: Título, Texto e Selo que passam a ocupar MAIS LINHAS na largura que tem;
  * Botão (uma linha so, com reticencias) cujo texto deixa de caber e fica cortado; Links que passam a quebrar; e uma
  * Caixa em linha cujos filhos, somados, deixam de caber lado a lado. Um texto curto que so cresce um pouco (o selo e
  * os links dos modelos) nao gera dica.
  */
-export function freePhoneTextHints(design: PopupFreeDesign, content: FreePhoneTextContent = {}): FreeHint[] {
+export function freePhoneTextHints(desktop: PopupFreeDesign, content: FreePhoneTextContent = {}): FreeHint[] {
+  // O celular com os valores proprios (devices.mobile): o "desenho" do celular e o design do celular.
+  const design = resolveFreeForDevice(desktop, "mobile");
   const artboard = resolveFreeArtboard(design);
   const width = artboard.width;
   const designSize = (size: number) => size;
@@ -469,10 +480,15 @@ export function freePhoneTextHints(design: PopupFreeDesign, content: FreePhoneTe
   const seen = new Set<FreeId>();
   const snoozeLink = content.allowSnooze !== false && !freeHasSnoozeButton(design);
 
-  /** A primeira chave de tamanho que o piso aumenta (do elemento ou de uma parte); null = o piso nao mexe neste texto. */
+  /**
+   * A primeira chave de tamanho que o piso aumenta (do elemento ou de uma parte); null = o piso nao mexe neste texto.
+   * O tamanho proprio do celular leva ao campo do celular.
+   */
   const flooredKey = (node: FreeNode, style: FreeResolvedTextStyle): string | null => {
     if (phoneSize(style.size) > style.size + 1e-9) {
-      return `nodes.${node.id}.textStyle.size`;
+      return freeMobileNodeOf(desktop, node.id)?.textStyle?.size !== undefined
+        ? `devices.mobile.nodes.${node.id}.textStyle.size`
+        : `nodes.${node.id}.textStyle.size`;
     }
 
     if (node.type === "heading" || node.type === "text") {
