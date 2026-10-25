@@ -18,11 +18,12 @@ import {
 } from "./popup-livre-editor-fixtures";
 
 // Livre: arrastar nas Camadas (docs/27 §13.9, L4a; docs/18 §3.1). Num rascunho com [Título, Texto, Caixa em coluna
-// [Selo, Botão principal], Links] (o Botão principal semeado com o botao do aviso, para o Revisar nao pedir nada), o
-// produtor arrasta o Texto para o meio da linha da Caixa (entra no fim dela, um passo so no Ctrl + Z), o Selo para o
-// quarto de cima do Título (sai da caixa e fica primeiro), a Caixa para a linha do Botão de dentro dela (a recusa
-// aparece, nada muda e nao ha passo vazio), aperta Esc no meio de um arrastar (nada muda e a selecao fica), solta
-// abaixo da ultima linha (o fim do pop-up) e arrasta a propria linha 6 px (nada aparece). Com uma linha em Renomear,
+// [Selo, Botão principal], Links] (o Botão principal semeado com o botao do aviso, para o Revisar nao pedir nada), um
+// clique que treme 6 px dentro da linha do Texto seleciona o Texto, como o clique parado. O produtor arrasta o Texto
+// para o meio da linha da Caixa (entra no fim dela, um passo so no Ctrl + Z), o Selo para o quarto de cima do Título
+// (sai da caixa e fica primeiro), a Caixa para a linha do Botão de dentro dela (a recusa aparece, nada muda e nao ha
+// passo vazio), aperta Esc no meio de um arrastar (nada muda e a selecao fica), solta abaixo da ultima linha (o fim
+// do pop-up) e arrasta a propria linha 6 px (nada aparece e a linha fica selecionada). Com uma linha em Renomear,
 // arrastar outra linha ainda move (a foto do design e tirada depois do limiar). Com "Ver como: Celular", a etiqueta
 // diz que a ordem muda tambem no computador. Pelo teclado, Shift + F10 › Tirar da caixa e › Colocar dentro da caixa
 // deixam o foco na linha movida. Salvar grava a ordem nova. Funciona no WebKit: o mouse sempre dentro da janela, a
@@ -112,6 +113,25 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
   await expect(editor.getByRole("tab", { exact: true, name: "Camadas" })).toHaveAttribute("aria-selected", "true");
   expect(await ordem(editor)).toEqual(["titulo", "texto", "caixa", "caixa/selo", "caixa/botao", "links"]);
 
+  await test.step("um clique que treme 6 px dentro da linha do Texto seleciona o Texto, como o clique parado", async () => {
+    await expect(editor.locator("[data-free-selection]")).toHaveCount(0);
+    const antes = await frase.textContent();
+    const de = await pegar(editor, "texto");
+
+    await page.mouse.move(de.x, de.y);
+    await page.mouse.down();
+    await page.mouse.move(de.x + 2, de.y + 6, { steps: 4 });
+    // Passou dos 4 px (o arrastar comecou), mas a propria linha e o mesmo lugar: nada aparece.
+    await expect(editor.locator('[data-free-layer-dragging][data-free-layer-line="texto"]')).toHaveCount(1);
+    await expect(indicador).toHaveCount(0);
+    await page.mouse.up();
+    await expect(editor.locator("[data-free-layer-dragging]")).toHaveCount(0);
+    await expect(botaoDaCamada(editor, "texto")).toHaveAttribute("aria-current", "true");
+    expect(await selecionado(editor)).toBe("texto");
+    expect(await ordem(editor)).toEqual(["titulo", "texto", "caixa", "caixa/selo", "caixa/botao", "links"]);
+    expect(await frase.textContent()).toBe(antes);
+  });
+
   await test.step("o Texto no meio da linha da Caixa entra no fim dela, selecionado e com o foco na linha", async () => {
     await arrastar(page, await pegar(editor, "texto"), await naLinha(editor, "caixa", 0.5), {
       antesDeSoltar: () => expect(editor.locator("[data-free-layer-drop-inside]")).toBeVisible()
@@ -176,7 +196,7 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     await expect(frase).toContainText("Movido. Posição 3 de 3, no pop-up.");
   });
 
-  await test.step("a propria linha da Caixa 6 px para baixo e o mesmo lugar: nada aparece e nada muda", async () => {
+  await test.step("a propria linha da Caixa 6 px para baixo e o mesmo lugar: nada aparece, nada muda e a Caixa fica selecionada", async () => {
     const antes = await frase.textContent();
     const de = await pegar(editor, "caixa");
 
@@ -190,6 +210,9 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     await expect(editor.locator("[data-free-layer-dragging]")).toHaveCount(0);
     expect(await ordem(editor)).toEqual(["caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links", "titulo"]);
     expect(await frase.textContent()).toBe(antes);
+    // Soltar no mesmo lugar e o clique que tremeu: a Caixa fica selecionada (antes, o Título movido no passo de cima).
+    await expect(botaoDaCamada(editor, "caixa")).toHaveAttribute("aria-current", "true");
+    expect(await selecionado(editor)).toBe("caixa");
   });
 
   await test.step("com uma linha em Renomear, arrastar outra linha ainda move (e o nome fica)", async () => {

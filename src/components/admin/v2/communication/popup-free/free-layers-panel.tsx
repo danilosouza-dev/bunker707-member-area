@@ -72,9 +72,10 @@ import { followFreePointer } from "./free-pointer-drag";
 // (followFreePointer; antes disso e um clique). O lugar sai das linhas medidas (freeLayerDropAt: antes, depois, dentro
 // de uma caixa no fim, abaixo da ultima = fim do pop-up), nunca da posicao horizontal; fora do painel das Camadas nao
 // ha lugar. A foto do design e tirada quando o arrastar comeca (um Renomear que termina no pointerdown ja entra nela) e
-// o lugar e recalculado com o ponto do soltar e quando a lista rola. A propria linha e o mesmo lugar (nada aparece);
-// um lugar recusado mostra o motivo e o cursor de proibido. Soltar leva a run({ kind: "move" }): um passo, o elemento
-// selecionado e o foco na linha. Com "Ver como: Celular", a etiqueta diz que a ordem muda tambem no computador.
+// o lugar e recalculado com o ponto do soltar e quando a lista rola. A propria linha e o mesmo lugar (nada aparece), e
+// soltar no mesmo lugar seleciona a linha, como o clique que tremeu; um lugar recusado mostra o motivo e o cursor de
+// proibido. Soltar leva a run({ kind: "move" }): um passo, o elemento selecionado e o foco na linha. Com "Ver como:
+// Celular", a etiqueta diz que a ordem muda tambem no computador.
 
 const copy = FREE_EDITOR_COPY.layers;
 
@@ -195,7 +196,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
   // O elemento levado pelo ⋯ (Subir, Descer, Colocar dentro, Tirar): o foco volta ao botao 0 da linha dele.
   const menuMoved = useRef<FreeId | null>(null);
   // O de agora, para o arrastar (os ouvintes ficam na janela durante o gesto e nao veem a renderizacao nova).
-  const latest = useRef({ design, device, disabled, onCommand, rows });
+  const latest = useRef({ design, device, disabled, onCommand, onSelect, rows });
   const gestureRef = useRef<LayerGesture | null>(null);
   const disposeDrag = useRef<(() => void) | null>(null);
   const dropKey = useRef("");
@@ -204,7 +205,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
   const tabId = focusedId && rowIds.includes(focusedId) ? focusedId : selectedId && rowIds.includes(selectedId) ? selectedId : (rowIds[0] ?? null);
 
   useLayoutEffect(() => {
-    latest.current = { design, device, disabled, onCommand, rows };
+    latest.current = { design, device, disabled, onCommand, onSelect, rows };
   });
 
   // Ao desmontar no meio de um arrastar: desliga o gesto e o ouvinte de rolagem.
@@ -392,7 +393,8 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
   /**
    * O arrastar da linha (so o mouse, a partir de 4 px). A foto do design e tirada no onStart, depois do limiar: um
    * Renomear de outra linha termina no blur do pointerdown e ja entra nela. O soltar recalcula o lugar com o ponto do
-   * pointerup (a lista pode ter rolado sem o ponteiro andar) e leva a run({ kind: "move" }), com o foco na linha.
+   * pointerup (a lista pode ter rolado sem o ponteiro andar) e leva a run({ kind: "move" }), com o foco na linha. No
+   * mesmo lugar, so seleciona (o click do botao solto e engolido pelo ajudante); o Esc no meio nao seleciona nada.
    */
   function beginLayerDrag(event: ReactPointerEvent<HTMLButtonElement>, id: FreeId) {
     if (disabled) {
@@ -411,7 +413,19 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
 
         endLayerDrag();
 
-        if (!current || !drop?.target || drop.problem === "") {
+        if (!current || !drop) {
+          return;
+        }
+
+        // Soltar no mesmo lugar (a propria linha ou um vao que nao muda nada) e um clique que tremeu: seleciona, como o
+        // clique faria. O click que vem depois do soltar e engolido pelo bloqueador do ajudante.
+        if (drop.problem === "") {
+          latest.current.onSelect(current.id);
+
+          return;
+        }
+
+        if (!drop.target) {
           return;
         }
 
