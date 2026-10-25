@@ -20,6 +20,7 @@ import {
 import { useId } from "react";
 import { cn } from "@/lib/utils";
 import type { PopupFreeDesign } from "@/server/communications/popup-free-model";
+import type { FreePoint } from "./free-editor-geometry";
 import { FREE_EDITOR_COPY, FREE_ELEMENT_GROUPS, freeElementDisabledReason, type FreeCatalogKind } from "./free-editor-model";
 
 // Painel "Elementos" do editor Livre (spec §4.3): botoes de 72 x 64 px com icone e nome, em grupos. Clicar
@@ -47,6 +48,10 @@ export type FreeElementsPanelProps = {
   design: PopupFreeDesign;
   disabled: boolean;
   onAdd: (kind: FreeCatalogKind) => void;
+  /** Arrastando um botao ate o desenho: o ponteiro (px de tela) a cada movimento; o desenho mostra onde entra. */
+  onDragMove?: (kind: FreeCatalogKind, client: FreePoint) => void;
+  /** Fim do arrastar: o ponto do soltar (o editor acrescenta ali) ou null (cancelado: nada entra). */
+  onDragEnd?: (kind: FreeCatalogKind, client: FreePoint | null) => void;
 };
 
 export function FreeElementsPanel({ design, disabled, onAdd }: FreeElementsPanelProps) {
@@ -59,7 +64,7 @@ export function FreeElementsPanel({ design, disabled, onAdd }: FreeElementsPanel
 
         return (
           <section aria-labelledby={groupId} className="flex min-w-0 flex-col gap-2" key={group.label}>
-            <h3 className="text-[11px] leading-4 font-semibold tracking-wide text-[var(--text-tertiary)] uppercase" id={groupId}>
+            <h3 className="text-[12px] leading-4 font-semibold tracking-wide text-[var(--text-tertiary)] uppercase" id={groupId}>
               {group.label}
             </h3>
             <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,72px)] gap-2 p-0">
@@ -75,7 +80,7 @@ export function FreeElementsPanel({ design, disabled, onAdd }: FreeElementsPanel
                       aria-describedby={reason ? reasonId : undefined}
                       aria-disabled={off || undefined}
                       className={cn(
-                        "flex h-16 w-[72px] flex-col items-center justify-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-1 text-center text-[11px] leading-[14px] text-[var(--text-primary)] transition-colors duration-150",
+                        "flex h-16 w-[72px] flex-col items-center justify-center gap-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-2)] px-1 text-center text-[12px] leading-4 text-[var(--text-primary)] transition-colors duration-150",
                         off ? "cursor-not-allowed opacity-45" : "hover:border-[var(--border-strong)] hover:bg-[var(--surface-3)]"
                       )}
                       data-free-element={item.kind}

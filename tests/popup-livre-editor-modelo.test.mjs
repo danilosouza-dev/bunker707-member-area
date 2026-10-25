@@ -1030,3 +1030,20 @@ test("as etiquetas das Camadas (Solta, Escondida, Travada, Celular) têm 12 px, 
   const canvas = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-canvas.tsx", import.meta.url), "utf8");
   assert.match(canvas, /text-\[12px\][^"]*" data-free-selection-mobile=""/);
 });
+
+test("o painel Elementos e o desenho não têm texto abaixo de 12 px (nomes dos grupos e dos botões, nome do selecionado)", () => {
+  // docs/17: nada abaixo de 12 px no admin. No desenho, a etiqueta fica em scale(1/zoom): 12 px de tela em qualquer zoom.
+  const dir = new URL("../src/components/admin/v2/communication/popup-free/", import.meta.url);
+
+  for (const file of ["free-elements-panel.tsx", "free-canvas.tsx"]) {
+    const source = readFileSync(new URL(file, dir), "utf8");
+
+    assert.equal(/text-\[(?:[1-9]|1[01])px\]|text-\[0\.(?:[0-6]\d*|7[0-4]\d*)rem\]/.test(source), false, `${file}: nenhum texto abaixo de 12 px`);
+  }
+
+  const elements = readFileSync(new URL("free-elements-panel.tsx", dir), "utf8");
+  assert.match(elements, /<h3 className="text-\[12px\] /, "o nome do grupo");
+  assert.match(elements, /px-1 text-center text-\[12px\] /, "o nome do botao");
+  const canvas = readFileSync(new URL("free-canvas.tsx", dir), "utf8");
+  assert.match(canvas, /bg-\[var\(--focus-ring\)\] px-1\.5 text-\[12px\] leading-\[18px\] font-medium text-\[#0f0f10\]">\{label\}/, "o nome do selecionado");
+});

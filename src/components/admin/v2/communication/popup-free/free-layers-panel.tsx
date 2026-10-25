@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import type { FreeId, FreeNode, PopupFreeDesign } from "@/server/communications/popup-free-model";
 import type { NoticeDraft } from "@/server/communications/schemas";
 import { adminTransition } from "../../styles";
+import type { FreeMoveTarget } from "./free-editor-geometry";
 import {
   FREE_EDITOR_COPY,
   freeBoxTargets,
@@ -61,11 +62,14 @@ const copy = FREE_EDITOR_COPY.layers;
 export type FreeLayerCommand =
   | { id: FreeId; kind: "duplicate" | "moveDown" | "moveUp" | "outOfBox" | "remove" | "toggleHidden" | "toggleLocked" }
   | { boxId: FreeId; id: FreeId; kind: "intoBox" }
+  | { id: FreeId; kind: "move"; target: FreeMoveTarget }
   | { id: FreeId; kind: "rename"; name: string };
 
 export type FreeLayersPanelProps = {
   cta: NoticeDraft["cta"];
   design: PopupFreeDesign;
+  /** O "Ver como": com Celular, o indicador do arrastar diz que a ordem muda tambem no computador. */
+  device?: "desktop" | "mobile";
   disabled: boolean;
   flagged: ReadonlySet<FreeId>;
   onCommand: (command: FreeLayerCommand) => void;

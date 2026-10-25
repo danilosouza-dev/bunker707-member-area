@@ -21,22 +21,32 @@ import type { PopupFontFace } from "@/server/communications/popup-design-model";
 import { findFreeNode, freeMobileNodeOf, walkFreeNodes, type FreeId, type PopupFreeDesign } from "@/server/communications/popup-free-model";
 import type { FreeMeasuredRects } from "@/server/communications/popup-free-checks";
 import {
+  FREE_DROP_EDGE_SCREEN_PX,
+  FREE_DROP_EMPTY_SCREEN_PX,
   FREE_PHONE_FRAME_PX,
   FREE_RESIZE_HANDLES,
   finishFreeDrag,
+  freeArtboardPoint,
   freeDesktopStageWidth,
   freeDragPreview,
   freeFitZoom,
+  freeFlowDropAt,
+  freeFlowEmptyRects,
   freeRectOfPlace,
   freeSnapTargets,
   startFreeDrag,
   updateFreeDrag,
+  type FreeCanvasDrop,
+  type FreeCanvasDropSpec,
   type FreeDragMode,
   type FreeDragSession,
+  type FreeFlowDrop,
+  type FreeMoveTarget,
+  type FreePoint,
   type FreeRect,
   type FreeResizeHandle
 } from "./free-editor-geometry";
-import { FREE_EDITOR_COPY, FREE_HANDLE_LABELS, freeLayerLabel, freeNodeOf, isFreeMovable } from "./free-editor-model";
+import { FREE_EDITOR_COPY, FREE_HANDLE_LABELS, freeFlowContainers, freeLayerLabel, freeNodeOf, isFreeMovable } from "./free-editor-model";
 
 // Area de desenho do editor Livre (spec §4.4): o MESMO PopupFreeCard do aluno, em previa, dentro de um palco com
 // container-type: inline-size (Computador = max(W + 32, 600) px; Celular = moldura de 375 px, cartao de 343 px,
@@ -53,8 +63,27 @@ const copy = FREE_EDITOR_COPY;
 export type FreeCanvasToolbarCommand = "duplicate" | "moveDown" | "moveUp" | "remove" | "toFree";
 
 export type FreeCanvasApi = {
+  /**
+   * Arrastando um elemento novo do painel Elementos (docs/27 §13.9): com o ponteiro (px de tela) e o jeito do
+   * elemento, desenha onde ele entra e devolve o lugar (null fora da prancheta visivel). (null, null) limpa.
+   */
+  previewDrop?: (client: FreePoint | null, spec: FreeCanvasDropSpec | null) => FreeCanvasDrop | null;
   /** O centro do que se ve no palco, em px da prancheta (a Forma nova entra ali). */
   visibleCenter: () => { x: number; y: number } | null;
+};
+
+/**
+ * O indicador do arrastar (so na camada de selecao): a linha de onde entra, a caixa de destino, o retangulo do solto
+ * novo, as caixas vazias que aceitam, o lugar de antes, o motivo de recusa e a etiqueta do Celular.
+ */
+type FreeDropView = {
+  blocked: FreeFlowDrop["blocked"];
+  box: FreeRect | null;
+  both: boolean;
+  empties: FreeRect[];
+  line: FreeRect | null;
+  newRect: FreeRect | null;
+  origin: FreeRect | null;
 };
 
 export type FreeCanvasProps = {
@@ -66,6 +95,8 @@ export type FreeCanvasProps = {
   fonts: readonly PopupFontFace[];
   onCommitRect: (id: FreeId, rect: Partial<FreeRect>, kind: "move" | "resize") => void;
   onEditText: (id: FreeId) => void;
+  /** Fim de um arrastar de elemento da sequencia no desenho: o vao escolhido (o editor confere e grava num passo). */
+  onMoveInFlow?: (id: FreeId, target: FreeMoveTarget) => void;
   onRectsChange: (rects: FreeMeasuredRects) => void;
   onSelect: (id: FreeId | null) => void;
   onToolbar: (command: FreeCanvasToolbarCommand, id: FreeId) => void;
@@ -160,15 +191,56 @@ export function FreeCanvas({
   const [session, setSession] = useState<FreeDragSession | null>(null);
   const sessionRef = useRef<FreeDragSession | null>(null);
   const designRef = useRef(design);
+  const rectsRef = useRef(rects);
   const onRectsChangeRef = useRef(onRectsChange);
+  const [dropView, setDropView] = useState<FreeDropView | null>(null);
+  const dropKey = useRef("");
   const stageWidth = device === "mobile" ? FREE_PHONE_FRAME_PX : freeDesktopStageWidth(width);
   const scale = zoom === "100" ? 1 : freeFitZoom(viewport, { h: stageSize.h || 600, w: stageWidth });
   const layoutPerScreen = 1 / scale;
 
   useLayoutEffect(() => {
     designRef.current = design;
+    rectsRef.current = rects;
     onRectsChangeRef.current = onRectsChange;
   });
+
+  /** Troca o indicador do arrastar so quando ele muda (o cartao redesenha a cada troca). */
+  const showDropView = useCallback((next: FreeDropView | null) => {
+    const key = next ? JSON.stringify(next) : "";
+
+    if (key !== dropKey.current) {
+      dropKey.current = key;
+      setDropView(next);
+    }
+  }, []);
+
+  /**
+   * Um ponto da tela em px da prancheta e a escala de agora (px de tela por px da prancheta), com a mesma conta de
+   * measure e o retangulo lido na hora (a area de desenho rola). Null fora da area de desenho ou fora da prancheta.
+   */
+  const artboardPointAt = useCallback((client: FreePoint): { point: FreePoint; scale: number } | null => {
+    const artboard = wrapRef.current?.querySelector<HTMLElement>("[data-free-artboard]");
+    const view = viewportRef.current?.getBoundingClientRect();
+    const bounds = rectsRef.current["@artboard"];
+
+    if (!artboard || !view || !bounds || client.x < view.left || client.x > view.right || client.y < view.top || client.y > view.bottom) {
+      return null;
+    }
+
+    const W = designRef.current.artboard?.width ?? 440;
+    const box = artboard.getBoundingClientRect();
+    const layoutWidth = artboard.offsetWidth || W;
+    const screen = box.width / W || 1;
+    const perLayout = box.width / layoutWidth || 1;
+    const point = freeArtboardPoint(client, { x: box.left + artboard.clientLeft * perLayout, y: box.top + artboard.clientTop * perLayout }, screen);
+
+    if (point.x < 0 || point.y < 0 || point.x > bounds.w || point.y > bounds.h) {
+      return null;
+    }
+
+    return { point, scale: screen };
+  }, []);
 
   /** Mede a prancheta e cada elemento (px da prancheta, a partir do canto de dentro da borda). */
   const measure = useCallback(() => {
@@ -311,6 +383,39 @@ export function FreeCanvas({
     }
 
     apiRef.current = {
+      // So refs: o painel Elementos chama a cada movimento do ponteiro, sem esperar o React.
+      previewDrop: (client, spec) => {
+        const at = client && spec ? artboardPointAt(client) : null;
+
+        if (!spec || !at) {
+          showDropView(null);
+
+          return null;
+        }
+
+        if (spec.free) {
+          const center = { x: Math.round(at.point.x), y: Math.round(at.point.y) };
+
+          showDropView({ blocked: null, box: null, both: false, empties: [], line: null, newRect: spec.rectAt(center), origin: null });
+
+          return { center, kind: "free" };
+        }
+
+        // Um elemento novo nunca muda a ordem de outro: sem a etiqueta do Celular.
+        const containers = freeFlowContainers(designRef.current, rectsRef.current, { height: spec.height });
+        const empty = FREE_DROP_EMPTY_SCREEN_PX / at.scale;
+        const drop = freeFlowDropAt(at.point, containers, { edge: FREE_DROP_EDGE_SCREEN_PX / at.scale, empty });
+
+        if (!drop) {
+          showDropView(null);
+
+          return null;
+        }
+
+        showDropView({ blocked: drop.blocked, box: drop.box, both: false, empties: freeFlowEmptyRects(containers, empty), line: drop.line, newRect: null, origin: null });
+
+        return { index: drop.index, kind: "flow", parentId: drop.parentId };
+      },
       visibleCenter: () => {
         const artboard = wrapRef.current?.querySelector<HTMLElement>("[data-free-artboard]");
         const view = viewportRef.current?.getBoundingClientRect();
@@ -337,7 +442,7 @@ export function FreeCanvas({
     return () => {
       apiRef.current = null;
     };
-  }, [apiRef]);
+  }, [apiRef, artboardPointAt, showDropView]);
 
   /* --------------------------------------------------------------------------------------------
    * Ponteiro
@@ -477,7 +582,7 @@ export function FreeCanvas({
         ? freeRectOfPlace(selectedNode.place, rects[selectedNode.id]?.h)
         : (rects[selectedNode.id] ?? null)
     : null;
-  const hoverRect = hoverId && hoverId !== selectedId && !session ? (rects[hoverId] ?? null) : null;
+  const hoverRect = hoverId && hoverId !== selectedId && !session && !dropView ? (rects[hoverId] ?? null) : null;
   const rotate = selectedNode?.place?.mode === "free" ? (selectedNode.place.rotate ?? 0) : 0;
   const toLayout = (rect: FreeRect): CSSProperties => ({
     height: rect.h * frame.k,
@@ -508,7 +613,7 @@ export function FreeCanvas({
           className="absolute left-0 flex items-center gap-1 whitespace-nowrap"
           style={{ bottom: "100%", marginBottom: 4 * layoutPerScreen, transform: `scale(${layoutPerScreen})`, transformOrigin: "bottom left" }}
         >
-          <span className="rounded-sm bg-[var(--focus-ring)] px-1.5 text-[11px] leading-[18px] font-medium text-[#0f0f10]">{label}</span>
+          <span className="rounded-sm bg-[var(--focus-ring)] px-1.5 text-[12px] leading-[18px] font-medium text-[#0f0f10]">{label}</span>
           {mobileTag ? (
             <span className="rounded-sm border border-[var(--border-strong)] bg-[var(--surface-3)] px-1.5 text-[12px] leading-4 font-medium text-[var(--text-primary)]" data-free-selection-mobile="">
               {copy.layers.tags.mobile}
@@ -557,6 +662,56 @@ export function FreeCanvas({
 
   const guides = session?.last?.guides ?? [];
   const isPhone = device === "mobile";
+  const dropThickness = 2 * layoutPerScreen;
+  let dropIndicator: ReactNode = null;
+
+  if (dropView) {
+    const { line } = dropView;
+    const anchor = line ?? dropView.newRect ?? dropView.box;
+    const dashed = (thickness: number): CSSProperties => ({ outline: `${thickness}px dashed var(--focus-ring)`, outlineOffset: 0 });
+    // A linha de onde entra: deitada na coluna (h 0), em pe na linha (w 0); 2 px de tela, a cor do foco (as guias sao rosa).
+    const lineStyle: CSSProperties | null = line
+      ? line.w === 0 && line.h > 0
+        ? { height: line.h * frame.k, left: frame.clientLeft + line.x * frame.k - dropThickness / 2, top: frame.clientTop + line.y * frame.k, width: dropThickness }
+        : { height: dropThickness, left: frame.clientLeft + line.x * frame.k, top: frame.clientTop + line.y * frame.k - dropThickness / 2, width: Math.max(line.w * frame.k, dropThickness) }
+      : null;
+
+    dropIndicator = (
+      <>
+        {dropView.origin ? <div className="absolute rounded-[2px] bg-[rgba(10,10,11,0.55)]" data-free-flow-origin="" style={toLayout(dropView.origin)} /> : null}
+        {dropView.empties.map((rect, index) => (
+          <div className="absolute" data-free-drop-empty="" key={`vazia-${index}`} style={{ ...toLayout(rect), ...dashed(layoutPerScreen) }} />
+        ))}
+        {dropView.box ? <div className="absolute" data-free-drop-target="" style={{ ...toLayout(dropView.box), ...dashed(dropThickness) }} /> : null}
+        {dropView.newRect ? <div className="absolute" data-free-drop-new="" style={{ ...toLayout(dropView.newRect), ...dashed(dropThickness) }} /> : null}
+        {lineStyle ? <div className="absolute rounded-full bg-[var(--focus-ring)]" data-free-drop-line="" style={lineStyle} /> : null}
+        {anchor && (dropView.blocked || dropView.both) ? (
+          <span
+            aria-hidden="true"
+            className="absolute flex items-center gap-1 whitespace-nowrap"
+            style={{
+              left: frame.clientLeft + anchor.x * frame.k,
+              marginTop: 4 * layoutPerScreen,
+              top: frame.clientTop + (anchor.y + anchor.h) * frame.k,
+              transform: `scale(${layoutPerScreen})`,
+              transformOrigin: "top left"
+            }}
+          >
+            {dropView.blocked ? (
+              <span className="rounded-sm border border-[var(--border-strong)] bg-[var(--surface-3)] px-1.5 text-[12px] leading-[18px] font-medium text-[var(--text-primary)]" data-free-drop-hint="">
+                {dropView.blocked.reason}
+              </span>
+            ) : null}
+            {dropView.both ? (
+              <span className="rounded-sm border border-[var(--border-strong)] bg-[var(--surface-3)] px-1.5 text-[12px] leading-[18px] font-medium text-[var(--text-primary)]" data-free-drop-both="">
+                {copy.drag.alsoDesktopTag}
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+      </>
+    );
+  }
 
   return (
     <div
@@ -633,6 +788,7 @@ export function FreeCanvas({
                       />
                     )
                   )}
+                  {dropIndicator}
                 </div>
               </div>
             </div>
