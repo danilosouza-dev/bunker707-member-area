@@ -181,8 +181,8 @@ export type FreeCanvasProps = {
   selectedIds?: readonly FreeId[];
   stageRef: RefObject<HTMLDivElement | null>;
   toolbarDisabled: Partial<Record<FreeCanvasToolbarCommand, string | null>>;
-  /** Ajustar a tela ou um passo (50 a 200 %); o "100" em texto da barra de antes do L4b vale 100 %. */
-  zoom: FreeZoom | "100";
+  /** Ajustar a tela ou um passo (50 a 200 %). */
+  zoom: FreeZoom;
 };
 
 /** Medidas da prancheta no palco: px de layout por px da prancheta (1 no Computador; 343/W no Celular) e a borda. */

@@ -8,11 +8,12 @@ import "./support/transpile-tsx.mjs";
 // - as regras puras da casca: o pedido de escolher do desenho e das Camadas (Alt + Shift ou Ctrl + clique so
 //   acrescenta: quem ja esta so vira o principal), por e tirar, o intervalo desde a ancora (sem ela ou com pais
 //   diferentes, so acrescenta), o Ctrl + A pelo design do palco e para onde vai o foco na troca do painel da direita
-//   (C11);
+//   (C11); as teclas do zoom (Ctrl/⌘ + = e −, so com Ctrl ou ⌘ e sem Alt);
 // - guardas de fonte: a MESMA lista viva e normalizada no desenho, nas Camadas e no painel Varios (com o principal
 //   igual ao ultimo dela), um commit por ramo de runMany e de onManyCommand, as teclas da linha com selection, o painel
 //   de um elemento montado e escondido enquanto ha varios (a aba fica), o caminho do Elementos e o ramo move iguais, e
-//   nada de HTML em texto nos arquivos novos do L4b.
+//   nada de HTML em texto nos arquivos novos do L4b; o zoom: FreeZoomControl no lugar do Segmented de antes, o
+//   Ctrl + = so depois do `if (typing) return`, a frase do Ajustar com a escala nova e o copy.bar.zoom100 fora.
 
 const editorUrl = new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url);
 const source = readFileSync(editorUrl, "utf8");
@@ -22,7 +23,8 @@ const model = await import("../src/server/communications/popup-free-model.ts");
 const schema = await import("../src/server/communications/popup-free-schema.ts");
 
 const S = selection.FREE_SELECTION_COPY;
-const { freeAddToSelection, freeEditorSelect, freePanelFocusAfter, freeSelectRequestOfCanvas, freeSelectRequestOfLayers } = shell;
+const editorModel = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
+const { freeAddToSelection, freeEditorSelect, freeEditorZoomKey, freePanelFocusAfter, freeSelectRequestOfCanvas, freeSelectRequestOfLayers } = shell;
 
 const forma = (id, x, y, extra = {}) => ({ id, type: "shape", ...extra, place: { h: 40, mode: "free", w: 40, x, y, ...extra.place } });
 
@@ -165,6 +167,24 @@ test("C11: o foco no painel da direita vai ao título do Vários (de um para vá
   assert.equal(freePanelFocusAfter(3, 1, false), null);
 });
 
+test("Ctrl/⌘ + = (ou +) aumenta e Ctrl/⌘ + − (ou _) diminui o zoom; sem Ctrl ou ⌘, ou com Alt, nada", () => {
+  const key = (value, extra = {}) => ({ altKey: false, code: "", ctrlKey: true, key: value, metaKey: false, ...extra });
+
+  assert.equal(freeEditorZoomKey(key("=")), 1);
+  assert.equal(freeEditorZoomKey(key("+")), 1, "Ctrl + Shift + = no teclado americano");
+  assert.equal(freeEditorZoomKey(key("+", { code: "NumpadAdd" })), 1);
+  assert.equal(freeEditorZoomKey(key("=", { ctrlKey: false, metaKey: true })), 1, "⌘ no Mac");
+  assert.equal(freeEditorZoomKey(key("-")), -1);
+  assert.equal(freeEditorZoomKey(key("_")), -1);
+  assert.equal(freeEditorZoomKey(key("-", { code: "NumpadSubtract" })), -1);
+  assert.equal(freeEditorZoomKey(key("-", { ctrlKey: false, metaKey: true })), -1);
+
+  assert.equal(freeEditorZoomKey(key("=", { ctrlKey: false })), null, "sem Ctrl ou ⌘");
+  assert.equal(freeEditorZoomKey(key("-", { altKey: true })), null, "com Alt");
+  assert.equal(freeEditorZoomKey(key("0")), null, "o Ctrl + 0 fica com o navegador");
+  assert.equal(freeEditorZoomKey(key("a")), null);
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Guardas de fonte
  * ---------------------------------------------------------------------------------------------- */
@@ -281,4 +301,47 @@ test("os arquivos novos do L4b não montam HTML nem CSS em texto", () => {
 
     assert.equal(/dangerouslySetInnerHTML|\.innerHTML|cssText|<style[\s>]|style="/.test(text), false, file);
   }
+});
+
+test("o zoom na barra: FreeZoomControl no lugar do Segmented de antes, ligado ao desenho e às teclas", () => {
+  const bar = source.match(/<FreeZoomControl[\s\S]*?\/>/)?.[0] ?? "";
+
+  assert.match(bar, /disabledIn=\{freeZoomNext\(shownScale, 1\) === null\}/);
+  assert.match(bar, /disabledOut=\{freeZoomNext\(shownScale, -1\) === null\}/);
+  assert.match(bar, /onFit=\{zoomToFit\}\s+onStep=\{zoomStep\}\s+onZoom=\{zoomToStep\}\s+shownPercent=\{shownScale \* 100\}\s+zoom=\{zoom\}/);
+  assert.equal(source.match(/<Segmented\b/g)?.length, 1, "so o Ver como continua no Segmented");
+  assert.equal(/copy\.bar\.zoom100|"100" \| "fit"/.test(source), false, "o zoom de antes saiu");
+  assert.equal("zoom100" in editorModel.FREE_EDITOR_COPY.bar, false, "copy.bar.zoom100 saiu (C6)");
+  assert.match(source, /const \[zoom, setZoom\] = useState<FreeZoom>\("fit"\);/);
+
+  const canvas = source.match(/<FreeCanvas\n[\s\S]*?\/>/)?.[0] ?? "";
+  assert.match(canvas, /onScaleChange=\{onScaleChange\}/);
+  assert.match(canvas, /onZoomChange=\{setZoom\}/);
+  assert.match(canvas, /zoom=\{zoom\}/);
+
+  // O passo pela api do desenho, com a frase; nas pontas, a frase da ponta.
+  const step = bodyOf("function zoomStep(");
+  assert.match(step, /const step = api\.zoomBy\(direction\);/);
+  assert.match(step, /announce\(copy\.bar\.zoomSpoken\(step\)\)/);
+  assert.match(step, /announce\(direction === 1 \? copy\.bar\.zoomMax : copy\.bar\.zoomMin\)/);
+  assert.match(bodyOf("function zoomToStep("), /canvasApi\.current\?\.zoomTo\(step\)/);
+});
+
+test("o Ctrl + = só depois do `if (typing) return`; a frase do Ajustar à tela sai com a escala nova", () => {
+  const onKeyDown = bodyOf("function onKeyDown(");
+  const typing = onKeyDown.indexOf("if (typing) {\n      return;\n    }");
+  const zoomKey = onKeyDown.indexOf("freeEditorZoomKey(event)");
+
+  assert.ok(typing > 0 && zoomKey > typing, "fora de campo de texto");
+  assert.ok(zoomKey < onKeyDown.indexOf("if (!activeId || !selectedNode)"), "o zoom vale sem nada escolhido");
+  assert.match(onKeyDown, /if \(zoomDirection !== null\) \{\s+event\.preventDefault\(\);\s+zoomStep\(zoomDirection\);/, "nunca o zoom da pagina");
+
+  // No proximo onScaleChange, ou dois quadros depois quando a escala nao muda (contrato da rodada B, item 5).
+  const scale = source.match(/const onScaleChange = useCallback\([\s\S]*?\n {2}\);/)?.[0] ?? "";
+  assert.match(scale, /shownScaleRef\.current = scale;/);
+  assert.match(scale, /if \(fitSpeech\.current\) \{\s+fitSpeech\.current = false;\s+announce\(copy\.bar\.zoomFitSpoken\(Math\.round\(scale \* 100\)\)\);/);
+
+  const fit = bodyOf("function zoomToFit(");
+  assert.ok(fit.indexOf("fitSpeech.current = true;") < fit.indexOf('api.zoomTo("fit")'), "pedida antes do zoomTo (o onScaleChange pode vir no mesmo clique)");
+  assert.match(fit, /window\.requestAnimationFrame\(\(\) =>\s+window\.requestAnimationFrame\(\(\) => \{\s+if \(fitSpeech\.current\) \{\s+fitSpeech\.current = false;\s+announce\(copy\.bar\.zoomFitSpoken\(Math\.round\(shownScaleRef\.current \* 100\)\)\);/);
 });

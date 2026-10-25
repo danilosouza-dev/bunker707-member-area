@@ -30,7 +30,7 @@ import { adminToast } from "../../toast";
 import { FreeCanvas, type FreeCanvasApi, type FreeCanvasSelectHow, type FreeCanvasToolbarCommand } from "./free-canvas";
 import { FreeCopyPaste } from "./free-copy-paste";
 import { FreeElementsPanel } from "./free-elements-panel";
-import type { FreeCanvasDrop, FreeMoveTarget, FreePoint, FreeRect } from "./free-editor-geometry";
+import { freeZoomNext, type FreeCanvasDrop, type FreeMoveTarget, type FreePoint, type FreeRect, type FreeZoom, type FreeZoomStep } from "./free-editor-geometry";
 import {
   canRedoFreeHistory,
   canUndoFreeHistory,
@@ -132,6 +132,7 @@ import { freeMobileTextSizeKey, withoutFreeMobileValues } from "./free-inspector
 import { FreeLayersPanel, type FreeLayerCommand, type FreeLayerSelectHow } from "./free-layers-panel";
 import { FreeReviewPanel } from "./free-review-panel";
 import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } from "./free-templates-panel";
+import { FreeZoomControl } from "./free-zoom-control";
 
 // Editor Livre do pop-up (docs/27; spec §4.2): a casca de tela cheia por cima do editor do aviso (Dialog do
 // Base UI, `fixed inset-0`), carregada pelo card Design com next/dynamic. Trabalha numa COPIA do design (estado
@@ -161,6 +162,13 @@ import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } fro
 // e as teclas da linha das Camadas com selection) e a frase diz quantos. Na troca entre um elemento e varios com o
 // foco no painel da direita, o foco vai ao titulo do painel Varios (de um para varios) ou ao palco (de varios para um
 // ou nada). O painel de um elemento fica montado e escondido enquanto ha varios: ao voltar a um, a aba de antes fica.
+//
+// Zoom em passos (L4b, docs/27 L43): Ajustar a tela (o de abrir), 50, 75, 100, 150 e 200 %, fora do historico e mantido
+// no Salvar rascunho. A barra tem [Diminuir o zoom] [menu "62 %"] [Aumentar o zoom] (FreeZoomControl); Ctrl/⌘ + = (ou
+// +) e Ctrl/⌘ + − (ou _) fazem o mesmo fora de campo de texto, no lugar do zoom da pagina, e dizem "Zoom 150 %." (nas
+// pontas, que o zoom ja esta no menor ou no maior). Quem muda o zoom e o desenho (zoomBy e zoomTo da api, nunca no meio
+// de um arrastar, e a roda com Ctrl): a casca guarda o pedido (onZoomChange) e a escala mostrada (onScaleChange). A frase
+// do Ajustar a tela sai com a escala nova, no proximo onScaleChange, ou dois quadros depois quando a escala nao muda.
 
 const copy = FREE_EDITOR_COPY;
 const S = FREE_SELECTION_COPY;
@@ -497,6 +505,22 @@ export function freePanelFocusAfter(before: number, after: number, focusInRightP
   return after >= 2 ? "many" : "stage";
 }
 
+/**
+ * Ctrl/⌘ + '=' (ou '+', ou o + do teclado numerico) aumenta e Ctrl/⌘ + '-' (ou '_', ou o − do numerico) diminui o zoom
+ * do desenho; com Alt ou sem Ctrl/⌘, nada (null). O Ctrl + 0 fica com o navegador.
+ */
+export function freeEditorZoomKey(event: { altKey: boolean; code: string; ctrlKey: boolean; key: string; metaKey: boolean }): 1 | -1 | null {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+    return null;
+  }
+
+  if (event.key === "=" || event.key === "+" || event.code === "NumpadAdd") {
+    return 1;
+  }
+
+  return event.key === "-" || event.key === "_" || event.code === "NumpadSubtract" ? -1 : null;
+}
+
 /** Os comandos que valem para varios escolhidos (painel Varios, teclado e as teclas da linha das Camadas). */
 type ManyKind = "backward" | "duplicate" | "forward" | "remove" | "toggleHidden" | "toggleLocked";
 
@@ -543,7 +567,9 @@ function FreeEditorSession({
   const [rightPanel, setRightPanel] = useState<"inspector" | "review">(initialFocus?.kind === "review" ? "review" : "inspector");
   // Um erro de um campo do celular abre o editor ja no Celular (o painel abre a aba Celular).
   const [device, setDevice] = useState<FreeDevice>(() => (initialFocus?.kind === "error" ? freeDeviceForFocusKey(initialFocus.key, "desktop") : "desktop"));
-  const [zoom, setZoom] = useState<"100" | "fit">("fit");
+  // O zoom pedido (Ajustar a tela ao abrir) e a escala que o desenho mostra (o "62 %" do Ajustar a tela).
+  const [zoom, setZoom] = useState<FreeZoom>("fit");
+  const [shownScale, setShownScale] = useState(1);
   const [rects, setRects] = useState<FreeMeasuredRects>({});
   const [focusRequest, setFocusRequest] = useState<FreeFocusRequest | null>(() =>
     initialFocus?.kind === "error" ? { key: initialFocus.key.replace(/^freeDesign\./, "") } : null
@@ -588,6 +614,9 @@ function FreeEditorSession({
   const anchorRef = useRef<FreeId | null>(initialNodeId);
   const liveIdsRef = useRef<readonly FreeId[]>(initialNodeId ? [initialNodeId] : []);
   const pendingReviewFocus = useRef(initialFocus?.kind === "review");
+  // A escala mostrada para os ouvintes, e o "Ajustar à tela" que ainda vai dizer a escala nova.
+  const shownScaleRef = useRef(1);
+  const fitSpeech = useRef(false);
   const propsRef = useRef({ onChange, onCtaChange: content.onCtaChange, onSaveDraft });
 
   useLayoutEffect(() => {
@@ -1625,6 +1654,77 @@ function FreeEditorSession({
   }
 
   /* --------------------------------------------------------------------------------------------
+   * Zoom em passos (L4b): o desenho muda (zoomBy e zoomTo da api) e a casca guarda e diz
+   * ------------------------------------------------------------------------------------------ */
+
+  /** A escala que o desenho mostra; o "Ajustar à tela" pedido diz a escala nova aqui (contrato da rodada B, item 5). */
+  const onScaleChange = useCallback(
+    (scale: number) => {
+      shownScaleRef.current = scale;
+      setShownScale(scale);
+
+      if (fitSpeech.current) {
+        fitSpeech.current = false;
+        announce(copy.bar.zoomFitSpoken(Math.round(scale * 100)));
+      }
+    },
+    [announce]
+  );
+
+  /** [−] e [+] da barra, Ctrl/⌘ + = e −: o passo abaixo ou acima, com a frase; nas pontas, a frase da ponta. */
+  function zoomStep(direction: 1 | -1) {
+    const api = canvasApi.current;
+
+    if (!api) {
+      return;
+    }
+
+    const step = api.zoomBy(direction);
+
+    if (step !== false) {
+      announce(copy.bar.zoomSpoken(step));
+    } else if (freeZoomNext(shownScaleRef.current, direction) === null) {
+      announce(direction === 1 ? copy.bar.zoomMax : copy.bar.zoomMin);
+    }
+  }
+
+  /** Um passo escolhido no menu. */
+  function zoomToStep(step: FreeZoomStep) {
+    if (canvasApi.current?.zoomTo(step)) {
+      announce(copy.bar.zoomSpoken(step));
+    }
+  }
+
+  /**
+   * "Ajustar à tela" no menu: a frase sai com a escala nova, no proximo onScaleChange. Quando a escala nao muda (o
+   * Ajustar ja mostrava isso), o onScaleChange nao vem e a frase sai dois quadros depois, com a escala de agora.
+   */
+  function zoomToFit() {
+    const api = canvasApi.current;
+
+    if (!api) {
+      return;
+    }
+
+    fitSpeech.current = true;
+
+    if (!api.zoomTo("fit")) {
+      fitSpeech.current = false;
+
+      return;
+    }
+
+    window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(() => {
+        if (fitSpeech.current) {
+          fitSpeech.current = false;
+          announce(copy.bar.zoomFitSpoken(Math.round(shownScaleRef.current * 100)));
+        }
+      })
+    );
+  }
+
+  /* --------------------------------------------------------------------------------------------
    * Teclado (spec §4.4, §4.8, §4.9): nunca dentro de um campo de texto (o campo tem o proprio desfazer)
    * ------------------------------------------------------------------------------------------ */
 
@@ -1689,6 +1789,16 @@ function FreeEditorSession({
       // Ctrl/⌘ + A: os irmaos do principal (ou os de primeiro nivel), sem travados nem escondidos no aparelho.
       event.preventDefault();
       applySelect({ kind: "all", stageDesign });
+
+      return;
+    }
+
+    // Ctrl/⌘ + = e Ctrl/⌘ + −: o zoom do desenho (nunca o da pagina), so fora de campo de texto (decisao 6).
+    const zoomDirection = freeEditorZoomKey(event);
+
+    if (zoomDirection !== null) {
+      event.preventDefault();
+      zoomStep(zoomDirection);
 
       return;
     }
@@ -1958,14 +2068,14 @@ function FreeEditorSession({
             ]}
             value={device}
           />
-          <Segmented
-            label={copy.bar.zoom}
-            onChange={(value) => setZoom(value)}
-            options={[
-              { label: copy.bar.zoomFit, value: "fit" },
-              { label: copy.bar.zoom100, value: "100" }
-            ]}
-            value={zoom}
+          <FreeZoomControl
+            disabledIn={freeZoomNext(shownScale, 1) === null}
+            disabledOut={freeZoomNext(shownScale, -1) === null}
+            onFit={zoomToFit}
+            onStep={zoomStep}
+            onZoom={zoomToStep}
+            shownPercent={shownScale * 100}
+            zoom={zoom}
           />
         </div>
 
@@ -2145,8 +2255,10 @@ function FreeEditorSession({
             onEditText={onEditText}
             onMoveInFlow={moveTo}
             onRectsChange={setRects}
+            onScaleChange={onScaleChange}
             onSelect={selectFromCanvas}
             onToolbar={onToolbar}
+            onZoomChange={setZoom}
             popup={popup}
             rects={rects}
             selectedId={activeId}
@@ -2229,7 +2341,7 @@ function FreeEditorSession({
 
 type SegmentedOption<Value extends string> = { icon?: ReactNode; label: string; value: Value };
 
-/** Escolha unica da barra (Ver como, zoom): botoes com aria-pressed, setas andam entre eles. */
+/** Escolha unica da barra (Ver como): botoes com aria-pressed, setas andam entre eles. */
 function Segmented<Value extends string>({ label, onChange, options, value }: { label: string; onChange: (value: Value) => void; options: readonly SegmentedOption<Value>[]; value: Value }) {
   return (
     <div aria-label={label} className="flex items-center gap-2" role="group">

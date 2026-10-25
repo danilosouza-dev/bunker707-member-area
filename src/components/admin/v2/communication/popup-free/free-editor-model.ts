@@ -112,8 +112,6 @@ export const FREE_EDITOR_COPY = {
     undo: "Desfazer",
     viewAs: "Ver como",
     zoom: "Zoom",
-    /** O Segmented do zoom de antes; sai quando a barra ganha o controle de passos (docs/27 L43). */
-    zoom100: "100 %",
     zoomFit: "Ajustar à tela",
     /** O zoom em passos do L4b (docs/27 L43): [Diminuir o zoom] [62 %] [Aumentar o zoom] e o menu de passos. */
     zoomFitShown: (percent: number) => `Ajustar à tela (${percent} %)`,

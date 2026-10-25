@@ -418,12 +418,13 @@ test("a api ganha zoomBy, zoomTo, reveal e viewport depois de visibleCenter", ()
   assert.match(bodyOf("  const reveal = useCallback("), /freeRevealScroll\(/);
   assert.equal(/scrollIntoView/.test(source), false, "a conta e da propria area, sem rolar quem esta fora");
 
-  // C6: as props novas sao opcionais e o zoom aceita o valor de hoje.
+  // C6: as props novas sao opcionais (com padrao: sem a lista, so o principal). O "100" da barra de antes saiu do tipo
+  // do zoom quando a casca passou a mandar os passos (P12); freeZoomScale ainda o aceita.
   for (const prop of ["onCommitMoves", "onScaleChange", "onZoomChange", "selectedIds"]) {
     assert.match(source, new RegExp(`\\n  ${prop}\\?: `), prop);
   }
 
-  assert.match(source, /\n {2}zoom: FreeZoom \| "100";/);
+  assert.match(source, /\n {2}zoom: FreeZoom;/);
   assert.match(source, /\n {2}onSelect: \(id: FreeId \| null, how\?: FreeCanvasSelectHow\) => void;/);
 });
 
