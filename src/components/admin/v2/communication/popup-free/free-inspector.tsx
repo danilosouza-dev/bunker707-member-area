@@ -16,12 +16,13 @@ import { freeDuplicateProblem, freeNodeTypeLabel, freeRemoveProblem } from "./fr
 import { focusFreeField, freeSmallButton, useLatest } from "./free-fields";
 import { FreeInspectorAdvanced } from "./free-inspector-advanced";
 import { FreeInspectorContent, type FreeSectionProps } from "./free-inspector-content";
+import { FreeInspectorMobile } from "./free-inspector-mobile";
 import { FREE_INSPECTOR_COPY, freeFocusTargetOf, freeTabAfterSelection, type FreeAlignEdge, type FreeInspectorTab, type FreeInspectorTarget } from "./free-inspector-model";
 import { FreeInspectorStyle } from "./free-inspector-style";
 
 // Editor Livre do pop-up (docs/27; spec §4.6, §4.7 e §9.6), pacote I: o painel da direita. Com um elemento
-// escolhido: o tipo e o nome, Duplicar e Excluir, e as abas Conteúdo / Estilo / Avançado (a aba fica ao trocar de
-// elemento do mesmo tipo). Sem nada escolhido: o painel "Pop-up" (a prancheta e o X). Recebe pedidos de foco
+// escolhido: o tipo e o nome, Duplicar e Excluir, e as abas Conteúdo / Estilo / Avançado / Celular (a aba fica ao
+// trocar de elemento do mesmo tipo; a Celular fica com qualquer um, e entrar nela liga o "Ver como: Celular"). Sem nada escolhido: o painel "Pop-up" (a prancheta e o X). Recebe pedidos de foco
 // (erro do Revisar, elemento recem-adicionado, duplo clique no desenho): seleciona o elemento certo, abre a aba e
 // poe o foco no campo. As mudancas vao para o editor com a chave de juntar passos (`<id>:<campo>`).
 
@@ -31,6 +32,8 @@ export type { FreeAlignEdge };
 export type FreeEditorCommand =
   | { id: FreeId; kind: "backward" | "duplicate" | "forward" | "moveDown" | "moveUp" | "remove" | "toFree" | "toSequence" }
   | { edge: FreeAlignEdge; id: FreeId; kind: "align" }
+  /** "Voltar tudo ao do computador" na aba Celular: a entrada do elemento sai (um passo no historico). */
+  | { id: FreeId; kind: "mobileReset" }
   | { id: FreeId | null; kind: "select" };
 /** O que pôr em foco no painel: `key` no formato das chaves de erro, sem "freeDesign."; `upload` = o botão Enviar imagem/vídeo do elemento. */
 export type FreeFocusRequest = { intent?: "upload"; key: string };
@@ -38,7 +41,7 @@ export type FreeInspectorProps = {
   /** `content.onCtaChange` aqui já é o embrulhado pelo E (entra no histórico). */
   content: FreeEditorContent;
   design: PopupFreeDesign;
-  /** Aparelho da prévia (o painel não muda nada por aparelho na v1; só repassa para dicas). */
+  /** O "Ver como" do editor. A aba Celular muda só o celular em qualquer aparelho; entrar nela liga o Celular. */
   device: "desktop" | "mobile";
   disabled: boolean;
   /** Erros com as chaves sem o prefixo "freeDesign." (nodes.<id>..., artboard..., close..., assets..., fonts, size). */
@@ -51,6 +54,8 @@ export type FreeInspectorProps = {
   /** Texto e destino do Botão principal: entram no histórico { design, cta } com a coalesceKey. */
   onCtaChange: (cta: NoticeDraft["cta"], options?: { coalesceKey?: string }) => void;
   onCommand: (command: FreeEditorCommand) => void;
+  /** Troca o "Ver como" (entrar na aba Celular liga o Celular). */
+  onDeviceChange?: (device: "desktop" | "mobile") => void;
   onFocusHandled: () => void;
   onFontsChange: (fonts: PopupFontOption[]) => void;
   /** Retângulos medidos (px da prancheta), para o que o painel mostra (ex.: altura automática). */
@@ -62,14 +67,14 @@ type ElementTab = Exclude<FreeInspectorTab, "popup">;
 type PendingFocus = { request: FreeFocusRequest; target: FreeInspectorTarget | null };
 
 const tabClass = cn(
-  "relative inline-flex h-9 flex-1 items-center justify-center rounded-md px-2 text-[13px] font-medium text-[var(--text-secondary)] outline-none",
+  "relative inline-flex h-9 min-w-0 flex-1 items-center justify-center rounded-md px-1.5 text-[13px] font-medium text-[var(--text-secondary)] outline-none",
   "hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--focus-ring)]",
   "data-[active]:bg-[var(--surface-3)] data-[active]:text-[var(--text-primary)] pointer-coarse:h-11",
   adminTransition
 );
 
 export function FreeInspector(props: FreeInspectorProps) {
-  const { content, design, disabled, errors, focusRequest, fonts, hints, onBusyChange, onChange, onCommand, onCtaChange, onFocusHandled, onFontsChange, rects, selectedId } = props;
+  const { content, design, device, disabled, errors, focusRequest, fonts, hints, onBusyChange, onChange, onCommand, onCtaChange, onDeviceChange, onFocusHandled, onFontsChange, rects, selectedId } = props;
   const found = selectedId ? findFreeNode(design, selectedId) : null;
   const node = found?.node ?? null;
   const [tab, setTab] = useState<ElementTab>("content");
@@ -219,7 +224,18 @@ export function FreeInspector(props: FreeInspectorProps) {
         {removeProblem || duplicateProblem ? <p className="m-0 text-xs leading-5 text-[var(--text-secondary)]">{removeProblem ?? duplicateProblem}</p> : null}
       </header>
 
-      <Tabs.Root className="flex min-h-0 flex-1 flex-col" onValueChange={(value) => setTab(value as ElementTab)} value={tab}>
+      <Tabs.Root
+        className="flex min-h-0 flex-1 flex-col"
+        onValueChange={(value) => {
+          // Entrar na aba Celular liga o "Ver como: Celular" (o que se ve e o que se edita).
+          if (value === "mobile" && tab !== "mobile" && device !== "mobile") {
+            onDeviceChange?.("mobile");
+          }
+
+          setTab(value as ElementTab);
+        }}
+        value={tab}
+      >
         <Tabs.List aria-label={C.tabs.label} className="flex min-w-0 gap-1 border-b border-[var(--border-subtle)] px-3 py-2">
           <Tabs.Tab className={tabClass} value="content">
             {C.tabs.content}
@@ -229,6 +245,9 @@ export function FreeInspector(props: FreeInspectorProps) {
           </Tabs.Tab>
           <Tabs.Tab className={tabClass} value="advanced">
             {C.tabs.advanced}
+          </Tabs.Tab>
+          <Tabs.Tab className={tabClass} data-free-inspector-tab="mobile" value="mobile">
+            {C.tabs.mobile}
           </Tabs.Tab>
         </Tabs.List>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-8" id={panelId}>
@@ -240,6 +259,9 @@ export function FreeInspector(props: FreeInspectorProps) {
           </Tabs.Panel>
           <Tabs.Panel className="outline-none" value="advanced">
             {tab === "advanced" ? <FreeInspectorAdvanced key={node.id} {...sectionProps} onCommand={onCommand} /> : null}
+          </Tabs.Panel>
+          <Tabs.Panel className="outline-none" value="mobile">
+            {tab === "mobile" ? <FreeInspectorMobile key={node.id} {...sectionProps} onReset={(id) => onCommand({ id, kind: "mobileReset" })} /> : null}
           </Tabs.Panel>
         </div>
       </Tabs.Root>

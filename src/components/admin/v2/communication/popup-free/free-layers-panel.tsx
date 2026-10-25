@@ -110,7 +110,10 @@ function LayerIcon({ node }: { node: FreeNode | null }) {
   return <Icon aria-hidden="true" className={className} />;
 }
 
-/** Etiqueta da linha (Solta, Escondida, Travada): 12 px, nunca menos (docs/17); a linha quebra quando as tres nao cabem. */
+/**
+ * Etiqueta da linha (Solta, Escondida, Travada e Celular, quando o elemento tem valores proprios do celular): 12 px,
+ * nunca menos (docs/17); a linha quebra quando nao cabem lado a lado.
+ */
 function Tag2({ children }: { children: ReactNode }) {
   return <span className="shrink-0 rounded-sm bg-[var(--surface-3)] px-1 text-[12px] leading-4 text-[var(--text-secondary)]">{children}</span>;
 }
@@ -336,7 +339,7 @@ function LayerItem({ ctx, row }: { ctx: RowContext; row: FreeLayerRow }) {
           <button
             {...buttonProps(0)}
             aria-current={selected ? "true" : undefined}
-            aria-describedby={row.free || row.hidden || row.locked ? `free-layer-tags-${row.id}` : undefined}
+            aria-describedby={row.free || row.hidden || row.locked || row.mobile ? `free-layer-tags-${row.id}` : undefined}
             aria-label={row.selectLabel}
             className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-[13px] leading-5 text-[var(--text-primary)]"
             data-free-layer-select=""
@@ -346,11 +349,12 @@ function LayerItem({ ctx, row }: { ctx: RowContext; row: FreeLayerRow }) {
             <LayerIcon node={node} />
             <span className="flex min-w-0 flex-1 flex-col py-0.5">
               <span className="min-w-0 truncate">{row.label}</span>
-              {row.free || row.hidden || row.locked ? (
+              {row.free || row.hidden || row.locked || row.mobile ? (
                 <span className="flex min-w-0 flex-wrap gap-1" id={`free-layer-tags-${row.id}`}>
                   {row.free ? <Tag2>{copy.tags.free}</Tag2> : null}
                   {row.hidden ? <Tag2>{copy.tags.hidden}</Tag2> : null}
                   {row.locked ? <Tag2>{copy.tags.locked}</Tag2> : null}
+                  {row.mobile ? <Tag2>{copy.tags.mobile}</Tag2> : null}
                 </span>
               ) : null}
             </span>
