@@ -251,8 +251,12 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
     }
   }
 
+  /**
+   * Manda o comando ao editor, com o foco ficando na linha. Le o de agora (ligado ou nao, e o onCommand): o soltar do
+   * arrastar chama isto de um ouvinte ligado no pointerdown, numa renderizacao anterior.
+   */
   function run(command: FreeLayerCommand, keepFocus = true) {
-    if (disabled) {
+    if (latest.current.disabled) {
       return;
     }
 
@@ -260,7 +264,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
       pendingFocus.current = { button: 0, id: command.id };
     }
 
-    onCommand(command);
+    latest.current.onCommand(command);
   }
 
   /** Um item do ⋯ que muda o lugar do elemento: o ⋯ devolve o foco ao botao 0 da linha dele (finalFocus). */
@@ -407,13 +411,12 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
 
         endLayerDrag();
 
-        if (!current || !drop?.target || drop.problem === "" || latest.current.disabled) {
+        if (!current || !drop?.target || drop.problem === "") {
           return;
         }
 
         // Com o motivo, o editor so fala a frase (nada muda); o foco fica na linha do mesmo jeito.
-        pendingFocus.current = { button: 0, id: current.id };
-        latest.current.onCommand({ id: current.id, kind: "move", target: drop.target });
+        run({ id: current.id, kind: "move", target: drop.target });
       },
       onMove: (client) => {
         if (!gesture) {
