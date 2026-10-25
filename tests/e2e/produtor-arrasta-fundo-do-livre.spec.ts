@@ -9,7 +9,9 @@ import {
   caixaParada,
   camada,
   centroDe,
+  designDoRascunhoLivre,
   gravarRascunhoLivre,
+  lerDesignDoAviso,
   linhasDasCamadas,
   noPalco,
   prancheta
@@ -23,7 +25,8 @@ import {
 // Esc no meio do arrastar não muda nada e não chega ao editor. Na prancheta (painel Pop-up), "+ Camada de fundo" cria
 // a terceira camada e o foco vai para a ficha dela (o botão desliga); arrastar a ficha 2 para cima muda o fundo num
 // passo só; soltar longe da faixa não muda nada nem deixa passo vazio. Com "Ver como: Celular", o palco desenha a
-// mesma ordem. O botão semeado é o Botão principal (o rascunho grava o botão do aviso, e o Revisar não pede nada).
+// mesma ordem, e "Salvar rascunho" grava a ordem do Selo e o fundo da prancheta, sem nada próprio do celular. O botão
+// semeado é o Botão principal (o rascunho grava o botão do aviso, e o Revisar não pede nada).
 // Funciona no WebKit: só mouse e teclado, o mouse sempre dentro da janela, a prancheta e a caixa parada antes de
 // medir, o indicador esperado antes de soltar e o foco conferido com toBeFocused (no WebKit o clique não dá foco a
 // botão).
@@ -37,6 +40,7 @@ const FUNDO_DE_CIMA = "#112233";
 const FUNDO_DE_BAIXO = "#445566";
 
 const solida = (color: string): FreeFillPaint => ({ color, kind: "solid" });
+const PRANCHETA = { fill: [solida(FUNDO_DE_CIMA), solida(FUNDO_DE_BAIXO)] };
 
 const CHILDREN: FreeNode[] = [
   { id: "titulo", lines: [[{ text: "Aula nova no ar" }]], textStyle: { size: 40 }, type: "heading" },
@@ -59,7 +63,7 @@ let avisoId = "";
 
 test.beforeAll(async () => {
   await zerarComunicacao();
-  avisoId = await gravarRascunhoLivre(TITULO, CHILDREN, { artboard: { fill: [solida(FUNDO_DE_CIMA), solida(FUNDO_DE_BAIXO)] } });
+  avisoId = await gravarRascunhoLivre(TITULO, CHILDREN, { artboard: PRANCHETA });
 });
 
 test.afterAll(zerarComunicacao);
@@ -221,5 +225,20 @@ test("arrasta as camadas de fundo no Estilo e na prancheta: um passo, o foco jun
     await expect(prancheta(editor)).toHaveJSProperty("offsetWidth", 343);
     await expect.poll(() => fundoDe(noPalco(editor, "selo"))).toMatch(comecaPor("0, 0, 255"));
     await expect.poll(() => fundoDe(prancheta(editor))).toMatch(comecaPor("17, 34, 51"));
+  });
+
+  await test.step("Salvar rascunho grava a ordem do Selo e o fundo da prancheta, sem nada próprio do celular", async () => {
+    await editor.getByRole("button", { name: "Salvar rascunho" }).click();
+    await expect(editor.getByText("Rascunho salvo.", { exact: true })).toHaveCount(1);
+
+    const gravado = await lerDesignDoAviso(avisoId);
+    const selo = gravado?.children.find((node) => node.id === "selo");
+
+    // A ordem depois do Subir (o laranja foi desfeito): azul, verde e vermelho.
+    expect(selo?.type === "badge" ? selo.box?.fill : null).toEqual([solida(AZUL), solida(VERDE), solida(VERMELHO)]);
+    // O "+ Camada" da prancheta foi desfeito: as duas semeadas, na mesma ordem.
+    expect(gravado?.artboard?.fill).toEqual(PRANCHETA.fill);
+    // A ordem das camadas de fundo é uma só: "Ver como: Celular" não grava fundo no celular (devices como foi semeado).
+    expect(gravado?.devices).toEqual(designDoRascunhoLivre(CHILDREN, { artboard: PRANCHETA }).design.devices);
   });
 });
