@@ -397,6 +397,8 @@ O que cresce em toda página é a hora marcada (o modelo do host com o cliente +
 
 A janela do pop-up (o grupo do `import()` do host) foi de 22.796 para 22.805 B (+9 B) e o pedaço do cartão Livre, de 10.307 para 10.362 B (+55 B, a prévia de vários no editor e o botão no `onCta`); detalhes no `docs/27` §7.
 
+Essas diferenças de dezenas de bytes ficam dentro do ruído da compilação: na mesma pasta, a mesma árvore dá os mesmos bytes; em pastas diferentes, não. O L4a compilado três vezes, em pastas diferentes, deu de 300.940 a 300.954 B no Início, de 284.710 a 284.732 B em Favoritos e de 394.948 a 394.971 B na Aula (e até cerca de 90 B na página do aviso no admin). Vale a ordem de grandeza: o clique por botão custa dezenas de bytes em cada página. Para comparar duas árvores byte a byte, compilar as duas na mesma pasta.
+
 ---
 
 ## 8. Decisões
