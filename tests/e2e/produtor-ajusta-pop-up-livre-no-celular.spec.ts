@@ -3,7 +3,7 @@ import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import { contaDeTeste, expect, test, zerarComunicacao } from "./fixtures";
 
 // Livre: valores proprios do celular (docs/27 §9.10 e §13.8, PR L3; docs/18 §3.1). Num rascunho com um design
-// Livre (Selo solto, Título na sequência, Forma solta e os Links), o produtor seleciona a Forma com o Computador
+// Livre (Título na sequência, Selo solto por cima dele, Forma solta e os Links), o produtor seleciona a Forma com o Computador
 // ligado e abre a aba Celular, que liga "Ver como: Celular" (o editor diz "Editando o Celular."), arrasta o Selo no desenho (so o celular muda: o X do computador fica), abre a aba Celular
 // do Título e desliga "Igual ao computador" do Tamanho para 24 px, esconde a Forma so no celular, salva o rascunho
 // com o editor aberto, recarrega (as etiquetas "Celular" nas Camadas, a Forma some so no Celular) e publica. O
@@ -16,8 +16,9 @@ const SELO_NO_COMPUTADOR = { mode: "free", w: 116, x: 300, y: 16 } as const;
 const DESIGN = {
   artboard: { width: 440 },
   children: [
-    { id: "selo", label: "Novidade", place: SELO_NO_COMPUTADOR, type: "badge" },
     { id: "titulo", lines: [[{ text: "Aula nova no ar" }]], textStyle: { size: 40 }, type: "heading" },
+    // O Selo vem depois do Título: a linha do Título passa por baixo dele, e o de cima na camada recebe o clique.
+    { id: "selo", label: "Novidade", place: SELO_NO_COMPUTADOR, type: "badge" },
     { box: { fill: [{ color: "#38bdf8", kind: "solid" }], radius: 16 }, id: "forma", place: { h: 80, mode: "free", w: 80, x: 340, y: 120 }, type: "shape" },
     { id: "links", type: "links" }
   ],
