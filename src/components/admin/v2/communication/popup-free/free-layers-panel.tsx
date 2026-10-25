@@ -547,7 +547,9 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
 
   return (
     <div
-      className={cn("relative min-w-0", dragId && (dropView?.reason ? "cursor-not-allowed **:cursor-not-allowed" : "cursor-grabbing **:cursor-grabbing"))}
+      // O cursor: pointer de todo botao (globals.css, fora das camadas) so cede com o ! (os botoes da linha, inclusive o
+      // que tem a captura do ponteiro durante o arrastar).
+      className={cn("relative min-w-0", dragId && (dropView?.reason ? "cursor-not-allowed **:cursor-not-allowed!" : "cursor-grabbing **:cursor-grabbing!"))}
       data-free-layer-list=""
       ref={wrapRef}
     >

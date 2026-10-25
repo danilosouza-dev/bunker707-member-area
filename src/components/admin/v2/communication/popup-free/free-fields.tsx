@@ -1032,9 +1032,10 @@ export function FreeFillLayersField({
                     aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
                     aria-label={C.fill.handle(layer)}
                     className={cn(
-                      "flex h-9 w-full min-w-0 cursor-grab touch-none items-center gap-2 rounded-md border border-[var(--border-subtle)] px-2 text-left text-[13px] leading-5 text-[var(--text-primary)] outline-none select-none",
-                      "hover:bg-[var(--hover-overlay)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)] active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-60 pointer-coarse:h-11",
-                      dragging && "cursor-grabbing opacity-50",
+                      "flex h-9 w-full min-w-0 touch-none items-center gap-2 rounded-md border border-[var(--border-subtle)] px-2 text-left text-[13px] leading-5 text-[var(--text-primary)] outline-none select-none",
+                      // O cursor: pointer de todo botao (globals.css, fora das camadas) so cede com o !.
+                      "hover:bg-[var(--hover-overlay)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)] active:cursor-grabbing! disabled:cursor-not-allowed! disabled:opacity-60 pointer-coarse:h-11",
+                      dragging ? "cursor-grabbing! opacity-50" : "cursor-grab!",
                       adminTransition
                     )}
                     data-free-fill-dragging={dragging ? "" : undefined}
