@@ -6,7 +6,8 @@
 //   pointerId: o pointerup chega mesmo se a captura falhar ou o alvo desmontar.
 // - A captura (setPointerCapture, em try/catch) so vem depois do limiar: capturar ja no pointerdown mudaria o alvo
 //   do click e do dblclick (o duplo clique de editar texto, o clique de selecionar nas Camadas e o de acrescentar
-//   no Elementos). Antes do limiar, soltar e so um clique e nada e chamado.
+//   no Elementos). Antes do limiar, soltar e so um clique e nada e chamado; um Esc antes do limiar desliga o gesto
+//   (ele nao comeca mais) e segue para o editor como sempre.
 // - Depois do limiar: o pointerup solta (onDrop, uma vez); Esc, pointercancel, o blur da janela e um pointermove com
 //   buttons 0 (o botao solto fora da janela, no WebKit) cancelam (onCancel). O lostpointercapture e ignorado: gravar
 //   ali poria o elemento num lugar que ninguem escolheu.
@@ -158,6 +159,13 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
   }
 
   function onKeyDown(event: KeyboardEvent) {
+    // Esc antes do limiar: o gesto nao comeca mais, e o Esc segue para o editor (sem preventDefault).
+    if (state === "pending" && event.key === "Escape") {
+      stop();
+
+      return;
+    }
+
     if (state !== "dragging" || FREE_POINTER_MODIFIER_KEYS.has(event.key)) {
       return;
     }

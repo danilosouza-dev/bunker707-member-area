@@ -4,11 +4,11 @@ import test from "node:test";
 
 // Ajudante de ponteiro do editor Livre (docs/27 §13.9, L4a; docs/18 §1.1), pacote A: followFreePointer com uma
 // janela falsa (um EventTarget que guarda os ouvintes e tem relogio proprio) e um alvo cujo setPointerCapture lanca.
-// Prova o limiar (antes dele e so clique), a captura so depois do limiar, o cancelamento por Esc, blur, pointercancel
-// e buttons 0, o lostpointercapture ignorado, as teclas engolidas durante o gesto (menos Shift, Alt, Control e
-// Meta), o click engolido depois (sai no primeiro click, no proximo pointerdown ou em 350 ms), o pointerId filtrado,
-// os pointerTypes de cada chamada, a funcao que desliga tudo e que nenhum ouvinte sobra na janela. Tudo pelo Node,
-// sem janela de verdade: o arquivo nao toca na janela ao carregar.
+// Prova o limiar (antes dele e so clique, e o Esc desliga o gesto), a captura so depois do limiar, o cancelamento por
+// Esc, blur, pointercancel e buttons 0, o lostpointercapture ignorado, as teclas engolidas durante o gesto (menos
+// Shift, Alt, Control e Meta), o click engolido depois (sai no primeiro click, no proximo pointerdown ou em 350 ms),
+// o pointerId filtrado, os pointerTypes de cada chamada, a funcao que desliga tudo e que nenhum ouvinte sobra na
+// janela. Tudo pelo Node, sem janela de verdade: o arquivo nao toca na janela ao carregar.
 
 assert.equal(typeof globalThis.window, "undefined", "o Node nao tem janela");
 assert.equal(typeof globalThis.document, "undefined", "o Node nao tem documento");
@@ -178,9 +178,10 @@ test("ponteiro: antes do limiar é clique; 3 px e o pointerup não chamam nada, 
   assert.deepEqual(janela.tipos(), DO_GESTO);
   ponteiro(janela, "pointermove", 103, 100);
   ponteiro(janela, "pointermove", 102, 102);
-  // Antes do limiar as teclas seguem o caminho de sempre.
+  // Antes do limiar as teclas seguem o caminho de sempre (o Esc tem teste proprio: ele desliga o gesto).
   assert.equal(tecla(janela, "Delete").defaultPrevented, false);
-  assert.equal(tecla(janela, "Escape").defaultPrevented, false);
+  assert.equal(tecla(janela, "z", { ctrlKey: true }).defaultPrevented, false);
+  assert.equal(janela.ouvintes.length, DO_GESTO.length, "uma tecla antes do limiar nao desliga o gesto");
   ponteiro(janela, "pointerup", 103, 100);
   assert.deepEqual(chamadas, []);
   assert.deepEqual(alvo.capturas, [], "a captura nao vem antes do limiar (o click e o dblclick ficam no alvo de sempre)");
@@ -286,6 +287,28 @@ test("ponteiro: Esc cancela com defaultPrevented e a propagação parada; o clic
   assert.equal(disparar(janela, "click").defaultPrevented, false, "o seguinte passa");
   assert.equal(janela.ouvintes.length, 0);
   assert.equal(janela.relogios.size, 0);
+});
+
+test("ponteiro: Esc antes do limiar desliga o gesto e segue para o editor; o arrastar não começa mais", () => {
+  const { alvo, chamadas, janela } = montar();
+
+  ponteiro(janela, "pointermove", 102, 100);
+  const esc = tecla(janela, "Escape");
+
+  assert.equal(esc.defaultPrevented, false, "o Esc continua indo ao editor");
+  assert.equal(esc.cancelBubble, false);
+  assert.equal(janela.ouvintes.length, 0, "nenhum ouvinte sobra");
+
+  // A produtora apertou Esc: andar 20 px e soltar nao move nada.
+  ponteiro(janela, "pointermove", 120, 100);
+  ponteiro(janela, "pointermove", 140, 100);
+  ponteiro(janela, "pointerup", 140, 100);
+  assert.deepEqual(chamadas, []);
+  assert.deepEqual(alvo.capturas, [], "nada e capturado");
+  assert.equal(janela.relogios.size, 0);
+  // Nao houve gesto: nenhum bloqueador, as teclas e o click seguem o caminho de sempre.
+  assert.equal(tecla(janela, "Delete").defaultPrevented, false);
+  assert.equal(disparar(janela, "click").defaultPrevented, false);
 });
 
 test("ponteiro: durante o gesto as teclas são engolidas (Ctrl + Z, Delete, colar), menos Shift, Alt, Control e Meta", () => {
