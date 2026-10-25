@@ -13,7 +13,7 @@ import { usePopupMotion } from "../popup-design/popup-design-media";
 import { usePopupFontFaces } from "../popup-design/popup-font-loader";
 import { FreeNodes, freeRenderContextOf } from "./popup-free-nodes";
 import { freeDeviceOfWindow, freeDeviceSnapshot, freeServerDevice, subscribeFreeDevice, type FreeDevice } from "./popup-free-device";
-import { FREE_FOCUS_CLASS, FREE_TOUCH_CLASS, freeArtboardCss, freeCloseCss, freeOuterCss } from "./popup-free-styles";
+import { FREE_FOCUS_CLASS, FREE_TOUCH_CLASS, freeArtboardCss, freeCloseCss, freeOuterCss, type FreeDragPreview } from "./popup-free-styles";
 
 // Pop-up Livre do aluno (docs/27; spec §3): a prancheta montada do zero pela equipe (elementos na sequencia e
 // soltos, um por cima do outro), com texto de verdade, estilos so por objetos de estilo do React montados de
@@ -36,14 +36,18 @@ export type PopupFreeCardProps = {
   design: PopupFreeDesign;
   /** Só as prévias do admin: o aparelho desenhado (a de 375 px = "mobile"). O aluno nunca passa: sem, vale a largura da tela (FREE_MOBILE_QUERY). */
   device?: "desktop" | "mobile";
-  /** Só o editor, durante um arrastar: deslocamento provisório (px da prancheta) de um elemento solto, desenhado com `translate` sem mudar o design (§4.4). */
-  dragPreview?: { dx: number; dy: number; dh?: number; dw?: number; id: FreeId } | null;
+  /**
+   * Só o editor, durante um arrastar: deslocamento provisório (px da prancheta) de um elemento solto, ou de vários
+   * juntos (`ids`), desenhado com `translate` sem mudar o design (§4.4).
+   */
+  dragPreview?: FreeDragPreview | null;
   /** Só o editor: recebe o elemento do DOM de cada elemento do design (medir, selecionar). Nunca no diálogo do aluno. */
   editorNodeRef?: (id: FreeId, element: HTMLElement | null) => void;
   fonts?: readonly PopupFontFace[];
   nudgeClose?: boolean;
   onClose?: () => void;
-  onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink) => void;
+  /** O 3º argumento diz qual botão foi: "cta" (o Botão principal) ou `link:<id>` (um "Abrir um link"). */
+  onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink, button?: string) => void;
   onDismiss?: () => void;
   onSnooze?: () => void;
   playing?: boolean;

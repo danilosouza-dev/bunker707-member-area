@@ -14,7 +14,8 @@ import "./support/resolve-extensionless-ts.mjs";
 // - o url() so com a origem conferida e um caminho do padrao (maquinas maliciosas e caminhos de fora nao entram);
 // - nome e descricao do dialogo, ordem do DOM = Camadas, escondido nao desenhado, decorativos sem clique, o X por
 //   cima, o player do Audio clicavel dentro de uma caixa, foco visivel, `sizes`, links, quadriculado da previa,
-//   video so com movimento, previa do arrastar sem mudar o design;
+//   video so com movimento, previa do arrastar sem mudar o design (de um elemento ou de varios juntos);
+// - ate 3 "Abrir um link", cada um com o seu destino, e o botao clicado no 3o argumento do onCta ("cta" ou "link:<id>");
 // - o HTML do Padrão e do Personalizado igual ao de antes do Livre (tests/fixtures/popup-livre/antes-*.html,
 //   gerados no commit-base e555188, antes de qualquer mudanca do Livre);
 // - o plano marcando o Livre faz o host pedir o pedaco do cartao antes do POST /show.
@@ -867,6 +868,136 @@ test("dragPreview move só o elemento arrastado sem mudar o design", () => {
   assert.equal(JSON.stringify(design), before, "o design nao muda durante o arrastar");
   assert.doesNotMatch(card(design, { dragPreview }), /translate:/, "so no editor (previa)");
   assert.equal(styles.freePlaceCss(design.children[0], styleCtx(design), "column", { dw: -500, dx: 0, dy: 0, id: "a" }).width, len(4), "nunca menor que 4 px");
+});
+
+test("dragPreview com ids desloca todos os listados e só eles; a largura e a altura mudam só no id", () => {
+  const design = parsed({
+    children: [
+      { box: { fill: [{ color: "#ffffff", kind: "solid" }] }, id: "a", place: { h: 100, mode: "free", w: 100, x: 10, y: 20 }, type: "shape" },
+      { box: { fill: [{ color: "#000000", kind: "solid" }] }, id: "b", place: { h: 50, mode: "free", w: 50, x: 200, y: 20 }, type: "shape" },
+      { box: { fill: [{ color: "#ff0000", kind: "solid" }] }, id: "c", place: { h: 40, mode: "free", w: 40, x: 300, y: 300 }, type: "shape" },
+      { id: "texto", lines: [[{ text: "Na sequência" }]], type: "text" },
+      { id: "links", type: "links" }
+    ]
+  });
+  const before = JSON.stringify(design);
+  const still = card(design, { preview: true });
+  const translate = `translate:${len(30)} ${len(-5)}`;
+  // As alcas nunca chegam com varios (o grupo so move), mas se chegassem o tamanho mudaria so no `id`.
+  const markup = card(design, { dragPreview: { dh: 10, dw: 20, dx: 30, dy: -5, id: "a", ids: ["a", "b", "texto"] }, preview: true });
+
+  assert.ok(styleOfId(markup, "a").includes(translate), "o apertado anda");
+  assert.ok(styleOfId(markup, "b").includes(translate), "o outro da lista anda junto");
+  assert.ok(styleOfId(markup, "a").includes(`width:${len(120)};height:${len(110)}`), "dw e dh no id");
+  assert.ok(styleOfId(markup, "b").includes(`width:${len(50)};height:${len(50)}`), "o tamanho dos outros fica");
+  assert.equal(styleOfId(markup, "c"), styleOfId(still, "c"), "quem nao esta na lista nao muda");
+  assert.equal(styleOfId(markup, "texto"), styleOfId(still, "texto"), "na sequencia nao ha translate, mesmo na lista");
+  assert.equal(JSON.stringify(design), before, "o design nao muda durante o arrastar");
+
+  // O `id` anda mesmo fora de `ids`; sem `ids`, so ele (o caso de um elemento so, igual ao de antes).
+  const outside = card(design, { dragPreview: { dx: 30, dy: -5, id: "a", ids: ["b"] }, preview: true });
+  assert.ok(styleOfId(outside, "a").includes(translate) && styleOfId(outside, "b").includes(translate));
+  assert.equal(styleOfId(outside, "c"), styleOfId(still, "c"));
+  const one = card(design, { dragPreview: { dx: 30, dy: -5, id: "a" }, preview: true });
+  assert.ok(styleOfId(one, "a").includes(translate));
+  assert.equal(styleOfId(one, "b"), styleOfId(still, "b"));
+
+  assert.doesNotMatch(card(design, { dragPreview: { dx: 30, dy: -5, id: "a", ids: ["a", "b"] } }), /translate:/, "so no editor (previa)");
+  assert.equal(card(design, { dragPreview: { dx: 0, dy: 0, id: "a", ids: ["a", "b"] }, preview: true }), still, "sem deslocamento, o mesmo HTML");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Botões "Abrir um link" e o botão clicado no onCta
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O Botão principal, 3 "Abrir um link" e os Links. O desenho não confere quantos links há (isso é do schema, no
+ * salvar): o design é conferido com um link e os outros dois entram direto nele.
+ */
+function withThreeLinks() {
+  const design = parsed({
+    children: [
+      { action: { kind: "cta" }, id: "botao", type: "button" },
+      { action: { href: "/favoritos", kind: "link", target: "same_tab" }, id: "botao2", label: "Meus favoritos", type: "button" },
+      { id: "links", type: "links" }
+    ]
+  });
+  const [principal, first, links] = design.children;
+  const more = [
+    { ...first, action: { href: "https://exemplo.com.br/aula", kind: "link", target: "new_tab" }, id: "botao3", label: "Aula ao vivo" },
+    { ...first, action: { href: "https://exemplo.com.br/material", kind: "link", target: "same_tab" }, id: "botao4", label: "Material" }
+  ];
+
+  return { ...design, children: [principal, first, ...more, links] };
+}
+
+test("3 \"Abrir um link\" viram 3 <a data-free-button=\"link\">, cada um com o seu href e o seu target", () => {
+  const markup = card(withThreeLinks());
+  const anchors = [...markup.matchAll(/<a [^>]*data-free-button="link"[^>]*>/g)].map((match) => match[0]);
+
+  assert.equal(anchors.length, 3);
+  assert.match(anchors[0], /data-free-id="botao2" href="\/favoritos"/);
+  assert.doesNotMatch(anchors[0], /target=/, "na mesma aba");
+  assert.match(anchors[1], /data-free-id="botao3" href="https:\/\/exemplo\.com\.br\/aula"[^>]*rel="noopener noreferrer" target="_blank"/);
+  assert.match(anchors[2], /data-free-id="botao4" href="https:\/\/exemplo\.com\.br\/material"/);
+  assert.doesNotMatch(anchors[2], /target=/);
+  assert.match(markup, /Meus favoritos[\s\S]*Aula ao vivo[\s\S]*Material/, "na ordem das Camadas");
+  assert.match(markup, /<a [^>]*data-free-button="cta" data-free-id="botao" href="\/minhas-compras"/, "o Botão principal continua");
+  assert.equal((card(withThreeLinks(), { preview: true }).match(/<span data-free-button="link"/g) ?? []).length, 3, "na prévia, 3 rótulos sem ação");
+});
+
+/** Percorre a árvore de elementos do React (sem DOM) e aciona o onClick de cada botão do desenho. */
+function clickButtons(element, found = []) {
+  if (!element || typeof element !== "object") {
+    return found;
+  }
+
+  if (Array.isArray(element)) {
+    element.forEach((child) => clickButtons(child, found));
+    return found;
+  }
+
+  if (typeof element.type === "function") {
+    return clickButtons(element.type(element.props), found);
+  }
+
+  if (element.props?.onClick && element.props["data-free-button"]) {
+    found.push(element.props["data-free-id"]);
+    element.props.onClick({ preventDefault() {} });
+  }
+
+  return clickButtons(element.props?.children, found);
+}
+
+test("o onCta recebe qual botão foi: \"cta\" no Botão principal e \"link:<id>\" num \"Abrir um link\"", () => {
+  const base = withThreeLinks();
+  const [principal, ...rest] = base.children;
+  const design = {
+    ...base,
+    children: [principal, { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" }, { action: { kind: "snooze" }, id: "adiar", label: "Mais tarde", type: "button" }, ...rest]
+  };
+  const calls = [];
+  const handlers = {
+    onClose: () => calls.push(["close"]),
+    onCta: (_event, link, button) => calls.push(["cta", link.href, button]),
+    onSnooze: () => calls.push(["snooze"])
+  };
+  const nodes = (input) => design.children.map((node) => createElement(FreeNodeView, { ctx: ctxOf(design, input), node, parentDir: "column" }));
+
+  assert.deepEqual(clickButtons(nodes(handlers)), ["botao", "fechar", "adiar", "botao2", "botao3", "botao4"]);
+  assert.deepEqual(calls, [
+    ["cta", "/minhas-compras", "cta"],
+    ["close"],
+    ["snooze"],
+    ["cta", "/favoritos", "link:botao2"],
+    ["cta", "https://exemplo.com.br/aula", "link:botao3"],
+    ["cta", "https://exemplo.com.br/material", "link:botao4"]
+  ]);
+
+  // Na prévia os botões são rótulos sem ação: nada é chamado.
+  calls.length = 0;
+  assert.deepEqual(clickButtons(nodes({ ...handlers, preview: true })), []);
+  assert.deepEqual(calls, []);
 });
 
 test("os modelos para começar desenham no cartão do aluno", async () => {
