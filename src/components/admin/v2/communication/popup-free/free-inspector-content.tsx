@@ -37,7 +37,6 @@ import {
   freeFieldId,
   freeHintsOf,
   freeLetterCount,
-  freeLinkActionDisabledReason,
   freeLinksSnoozeDescription,
   freeVideoAssetOf,
   withFreeNodeFields,
@@ -377,19 +376,19 @@ function LinkDestination({
 function ButtonContent(props: Of<"button">) {
   const { content, design, disabled, errors, node, onChange } = props;
   const id = (field: string) => freeFieldId(node.id, field);
-  const linkReason = freeLinkActionDisabledReason(design, node.id);
+  // "Abrir um link" nunca desliga: ate 3 botoes alem do principal, em qualquer mistura (L4b); o 4o e recusado no
+  // Elementos e no Duplicar (M.buttons).
   const action = node.action.kind === "cta" ? "close" : node.action.kind;
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <FreeChoiceField
         disabled={disabled}
-        disabledReason={linkReason && action !== "link" ? linkReason : null}
         error={freeErrorAt(errors, `nodes.${node.id}.action.kind`) ?? (node.action.kind === "snooze" ? freeErrorAt(errors, `nodes.${node.id}.action`) : undefined)}
         label={C.button.action}
         name={id("acao")}
         onChange={(kind) => onChange(withFreeNodeFields(design, node.id, freeButtonActionOf(kind, node) as unknown as Record<string, unknown>))}
-        options={FREE_BUTTON_ACTION_OPTIONS.map((option) => ({ ...option, disabled: option.value === "link" && linkReason !== null }))}
+        options={FREE_BUTTON_ACTION_OPTIONS}
         value={action}
       />
       <HeroTextField

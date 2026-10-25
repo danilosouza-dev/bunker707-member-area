@@ -33,6 +33,10 @@ import { followFreePointer } from "./free-pointer-drag";
 // editor, sem receber ponteiro e escondida do leitor de tela). O click que vem depois de um arrastar e engolido pelo
 // ajudante, entao nunca entra duas vezes. Um botao no limite fica desligado com a frase do limite e nunca arrasta, mas
 // continua focavel (aria-disabled), para quem usa teclado ou leitor de tela ouvir o motivo.
+// L4b (docs/27 L44): com autoScrollTarget (a area de desenho), a area rola sozinha perto da borda enquanto o botao e
+// arrastado; o ajudante refaz o onMove com o ultimo ponto quando ela rola, e o desenho mostra o lugar de novo. A
+// rolagem so se arma depois que o ponto esteve dentro da area e fora da faixa da borda (C10): entrar pela esquerda
+// vindo daqui nao rola.
 
 const ICONS: Record<FreeCatalogKind, LucideIcon> = {
   badge: Tag,
@@ -55,6 +59,8 @@ const ICONS: Record<FreeCatalogKind, LucideIcon> = {
 const CHIP_OFFSET_PX = 12;
 
 export type FreeElementsPanelProps = {
+  /** A area que rola sozinha perto da borda durante o arrastar (a area de desenho); lida a cada quadro do gesto. */
+  autoScrollTarget?: () => Element | null;
   design: PopupFreeDesign;
   disabled: boolean;
   onAdd: (kind: FreeCatalogKind) => void;
@@ -73,7 +79,7 @@ type FreeElementDrag = FreeCatalogItem & { host: Element };
  */
 type FreeElementGesture = { state: "done" | "dragging" | "pending"; stop: () => void };
 
-export function FreeElementsPanel({ design, disabled, onAdd, onDragEnd, onDragMove }: FreeElementsPanelProps) {
+export function FreeElementsPanel({ autoScrollTarget, design, disabled, onAdd, onDragEnd, onDragMove }: FreeElementsPanelProps) {
   const baseId = useId();
   const [drag, setDrag] = useState<FreeElementDrag | null>(null);
   const chipRef = useRef<HTMLDivElement | null>(null);
@@ -81,10 +87,10 @@ export function FreeElementsPanel({ design, disabled, onAdd, onDragEnd, onDragMo
   const frameRef = useRef<number | null>(null);
   const gestureRef = useRef<FreeElementGesture | null>(null);
   // O design, o disabled e as funcoes de agora: o gesto comeca numa renderizacao e termina em outra.
-  const latestRef = useRef({ design, disabled, onDragEnd, onDragMove });
+  const latestRef = useRef({ autoScrollTarget, design, disabled, onDragEnd, onDragMove });
 
   useLayoutEffect(() => {
-    latestRef.current = { design, disabled, onDragEnd, onDragMove };
+    latestRef.current = { autoScrollTarget, design, disabled, onDragEnd, onDragMove };
   });
 
   /** Leva a ficha ate o ultimo ponto do ponteiro (no maximo uma vez por quadro). */
@@ -152,6 +158,8 @@ export function FreeElementsPanel({ design, disabled, onAdd, onDragEnd, onDragMo
     }
 
     const dispose = followFreePointer(event, {
+      // A area de desenho rola sozinha perto da borda (so com o alvo; o de agora, a cada quadro).
+      autoScroll: latestRef.current.autoScrollTarget ? () => latestRef.current.autoScrollTarget?.() ?? null : undefined,
       onCancel: () => finish(null),
       onDrop: (client) => finish(client),
       onMove: (client) => {

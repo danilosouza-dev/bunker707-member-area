@@ -269,21 +269,50 @@ test("POST /show: 200 devolve o conteudo e o proximo; 409 traz nextAt; 404 e 429
   await assert.rejects(client.postPopupShow("pop-a", { page: "home", trigger: "page_load" }, fim.signal), { name: "AbortError" });
 });
 
-test("eventos do pop-up vao pelo beacon com `via` so no fechamento", () => {
+test("eventos do pop-up vao pelo beacon com `via` so no fechamento e `button` so no clique (docs/27 L47)", () => {
   pedidos.length = 0;
 
   client.postPopupEvent("pop-a", "closed", { via: "esc" });
   client.postPopupEvent("pop-a", "clicked", { via: "x" });
   client.postPopupEvent("pop-a", "snoozed");
+  client.postPopupEvent("pop-a", "clicked", { button: "link:site" });
+  client.postPopupEvent("pop-a", "clicked", { button: "cta", via: "x" });
+  client.postPopupEvent("pop-a", "closed", { button: "cta", via: "outside" });
+  client.postPopupEvent("pop-a", "dismissed", { button: "cta" });
+  client.postPopupEvent("pop-a", "clicked", { button: "" });
 
   assert.deepEqual(
     pedidos.map((pedido) => [pedido.url, pedido.body]),
     [
       ["/api/popups/pop-a/events", { event: "closed", via: "esc" }],
       ["/api/popups/pop-a/events", { event: "clicked" }],
-      ["/api/popups/pop-a/events", { event: "snoozed" }]
+      ["/api/popups/pop-a/events", { event: "snoozed" }],
+      ["/api/popups/pop-a/events", { button: "link:site", event: "clicked" }],
+      ["/api/popups/pop-a/events", { button: "cta", event: "clicked" }],
+      ["/api/popups/pop-a/events", { event: "closed", via: "outside" }],
+      ["/api/popups/pop-a/events", { event: "dismissed" }],
+      ["/api/popups/pop-a/events", { event: "clicked" }]
     ]
   );
+});
+
+test("o botao do Livre vai do cartao ao beacon: a janela passa o `button` do onCta ao onFinish e o host so o leva no clique", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const pasta = new URL("../src/components/member/notifications/", import.meta.url);
+  const janela = await readFile(new URL("member-popup-dialog.tsx", pasta), "utf8");
+  const host = await readFile(new URL("member-popup-host.tsx", pasta), "utf8");
+  const cartao = await readFile(new URL("member-popup.tsx", pasta), "utf8");
+
+  assert.match(cartao, /onCta\?: \(event: MouseEvent<HTMLAnchorElement>, link: NotificationLink, button\?: string\) => void;/);
+  assert.match(janela, /onFinish: \(outcome: PopupOutcome, via\?: PopupCloseVia, button\?: string\) => void;/);
+  assert.match(janela, /onCta=\{\(event, link, button\) => \{\s+onFinish\("clicked", undefined, button\);/);
+  assert.match(host, /function finish\(outcome: PopupOutcome, via\?: PopupCloseVia, button\?: string\) \{/);
+  assert.match(
+    host,
+    /postPopupEvent\(current\.popup\.id, outcome, outcome === "closed" && via \? \{ via \} : outcome === "clicked" && button \? \{ button \} : \{\}\);/
+  );
+  // O fechar pela saida da pagina continua sem botao.
+  assert.match(host, /postPopupEvent\(current\.popup\.id, "closed", \{ via: "page" \}\);/);
 });
 
 test("plano guardado depois de cada resposta e de cada coisa que o aluno fez (a tabela da docs/25 §4.9)", async () => {

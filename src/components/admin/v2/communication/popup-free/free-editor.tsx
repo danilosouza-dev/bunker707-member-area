@@ -27,10 +27,10 @@ import { ConfirmDialog } from "../../settings/kit";
 import type { ProductPickerItem } from "../../storefront/product-picker";
 import { adminTransition } from "../../styles";
 import { adminToast } from "../../toast";
-import { FreeCanvas, type FreeCanvasApi, type FreeCanvasToolbarCommand } from "./free-canvas";
+import { FreeCanvas, type FreeCanvasApi, type FreeCanvasSelectHow, type FreeCanvasToolbarCommand } from "./free-canvas";
 import { FreeCopyPaste } from "./free-copy-paste";
 import { FreeElementsPanel } from "./free-elements-panel";
-import type { FreeCanvasDrop, FreeMoveTarget, FreePoint, FreeRect } from "./free-editor-geometry";
+import { freeZoomNext, type FreeCanvasDrop, type FreeMoveTarget, type FreePoint, type FreeRect, type FreeZoom, type FreeZoomStep } from "./free-editor-geometry";
 import {
   canRedoFreeHistory,
   canUndoFreeHistory,
@@ -74,7 +74,6 @@ import {
   freeReviewItems,
   freeSavedMessage,
   freeSaveLabel,
-  freeSelectionDescription,
   freeStageDesign,
   freeToFreeProblem,
   isFreeDesignErrorKey,
@@ -107,11 +106,33 @@ import {
   writeFreeRecovery,
   type FreeRecovery
 } from "./free-editor-recovery";
+import {
+  FREE_SELECTION_COPY,
+  alignFreeNodes,
+  distributeFreeNodes,
+  duplicateFreeNodes,
+  freeGroupCoalesceKey,
+  freeManyDescription,
+  freeManyPosition,
+  freeMovableIds,
+  freeNormalizeSelection,
+  freeSelectAllIds,
+  freeSelectionEscape,
+  freeSelectionName,
+  freeSelectionRange,
+  freeToggleInSelection,
+  moveFreeNodesBy,
+  removeFreeNodes,
+  setFreeNodesFlag,
+  shiftFreeNodesLayer
+} from "./free-editor-selection";
 import { FreeInspector, type FreeEditorCommand, type FreeFocusRequest } from "./free-inspector";
+import { FREE_INSPECTOR_MANY_TITLE_ID, FreeInspectorMany, type FreeManyCommand } from "./free-inspector-many";
 import { freeMobileTextSizeKey, withoutFreeMobileValues } from "./free-inspector-model";
-import { FreeLayersPanel, type FreeLayerCommand } from "./free-layers-panel";
+import { FreeLayersPanel, type FreeLayerCommand, type FreeLayerSelectHow } from "./free-layers-panel";
 import { FreeReviewPanel } from "./free-review-panel";
 import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } from "./free-templates-panel";
+import { FreeZoomControl } from "./free-zoom-control";
 
 // Editor Livre do pop-up (docs/27; spec §4.2): a casca de tela cheia por cima do editor do aviso (Dialog do
 // Base UI, `fixed inset-0`), carregada pelo card Design com next/dynamic. Trabalha numa COPIA do design (estado
@@ -131,8 +152,26 @@ import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } fro
 // no soltar pelo mesmo caminho do clique. A ordem e uma so: com o Celular, toda mudanca de ordem termina a frase com
 // "A ordem muda também no computador." (orderPhrase); Soltar e Seguir a sequencia terminam com ela sempre, mesmo sem
 // mudar a ordem, porque o modo e um so nos dois aparelhos.
+//
+// Varios escolhidos (L4b, docs/27 §13.10): a selecao e uma lista na ordem da escolha (o ultimo e o principal), fora do
+// historico e da copia de recuperacao. O desenho, as Camadas e o painel Varios recebem a MESMA lista, viva e
+// normalizada (liveIds: sem ids sem elemento, sem repetidos, nunca uma caixa junto com algo dentro dela), e
+// selectedId/activeId continuam sendo o principal. Os pedidos de escolher passam por freeEditorSelect (puro): so ele,
+// por ou tirar, so acrescentar (Alt + Shift ou Ctrl + clique: quem ja esta so vira o principal), o intervalo das
+// Camadas desde a ancora e o Ctrl + A. Cada comando de varios grava um passo so (runMany, onManyCommand, onCommitMoves
+// e as teclas da linha das Camadas com selection) e a frase diz quantos. Na troca entre um elemento e varios com o
+// foco no painel da direita, o foco vai ao titulo do painel Varios (de um para varios) ou ao palco (de varios para um
+// ou nada). O painel de um elemento fica montado e escondido enquanto ha varios: ao voltar a um, a aba de antes fica.
+//
+// Zoom em passos (L4b, docs/27 L43): Ajustar a tela (o de abrir), 50, 75, 100, 150 e 200 %, fora do historico e mantido
+// no Salvar rascunho. A barra tem [Diminuir o zoom] [menu "62 %"] [Aumentar o zoom] (FreeZoomControl); Ctrl/⌘ + = (ou
+// +) e Ctrl/⌘ + − (ou _) fazem o mesmo fora de campo de texto, no lugar do zoom da pagina, e dizem "Zoom 150 %." (nas
+// pontas, que o zoom ja esta no menor ou no maior). Quem muda o zoom e o desenho (zoomBy e zoomTo da api, nunca no meio
+// de um arrastar, e a roda com Ctrl): a casca guarda o pedido (onZoomChange) e a escala mostrada (onScaleChange). A frase
+// do Ajustar a tela sai com a escala nova, no proximo onScaleChange, ou dois quadros depois quando a escala nao muda.
 
 const copy = FREE_EDITOR_COPY;
+const S = FREE_SELECTION_COPY;
 /** Espera depois da ultima tecla antes de mandar o design ao rascunho do aviso. */
 const FREE_SEND_TYPING_MS = 300;
 /** Espera da validacao (zod no navegador) e das dicas depois da ultima mudanca. */
@@ -342,6 +381,179 @@ function nextTick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * Selecao de varios (L4b): as regras da casca, puras (tests/popup-livre-editor-varios-fonte.test.mjs)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** A posicao na pilha do ponto do Alt + clique ("2 de 3 neste ponto"). */
+type FreeStackSpot = { index: number; total: number };
+
+/**
+ * Um pedido de escolher: so ele (null limpa), por ou tirar (Shift, Ctrl ou ⌘ + clique, Ctrl + Enter nas Camadas), so
+ * acrescentar (Alt + Shift ou Ctrl + clique), o intervalo das Camadas desde a ancora e o Ctrl + A (os irmaos do
+ * principal no design do palco, ja resolvido para o aparelho do "Ver como").
+ */
+export type FreeEditorSelectRequest =
+  | { id: FreeId | null; kind: "only"; stack?: FreeStackSpot }
+  | { id: FreeId; kind: "toggle" }
+  | { id: FreeId; kind: "add"; stack?: FreeStackSpot }
+  | { id: FreeId; kind: "range" }
+  | { kind: "all"; stageDesign: Pick<PopupFreeDesign, "children"> };
+
+/** A selecao da casca: os ids na ordem da escolha (o ultimo e o principal) e a ancora do intervalo das Camadas. */
+export type FreeEditorSelection = { anchor: FreeId | null; ids: readonly FreeId[] };
+
+/** O pedido do desenho: sem `how` (ou "only"), so ele; "toggle" poe ou tira; com a pilha do Alt, so acrescenta. */
+export function freeSelectRequestOfCanvas(id: FreeId | null, how?: FreeCanvasSelectHow): FreeEditorSelectRequest {
+  if (!id || !how || how.mode === "only") {
+    return how?.stack ? { id, kind: "only", stack: how.stack } : { id, kind: "only" };
+  }
+
+  // Alt + Shift (ou Ctrl, ou ⌘) + clique poe o de baixo na selecao e nunca tira (contrato da rodada B, item 1).
+  return how.stack ? { id, kind: "add", stack: how.stack } : { id, kind: "toggle" };
+}
+
+/** O pedido das Camadas: Ctrl/⌘ poe ou tira, Shift pega o intervalo, sem tecla so a linha. */
+export function freeSelectRequestOfLayers(id: FreeId, how?: FreeLayerSelectHow): FreeEditorSelectRequest {
+  return how === "toggle" ? { id, kind: "toggle" } : how === "range" ? { id, kind: "range" } : { id, kind: "only" };
+}
+
+/**
+ * So acrescentar: quem ja esta na selecao so vira o principal (vai para o fim); quem nao esta entra no fim e a selecao
+ * se normaliza (uma caixa e algo dentro dela nunca ficam juntos). Um id sem elemento nao muda nada.
+ */
+export function freeAddToSelection(design: Pick<PopupFreeDesign, "children">, ids: readonly FreeId[], id: FreeId): { added: boolean; ids: FreeId[] } {
+  const current = freeNormalizeSelection(design, ids);
+
+  if (!findFreeNode(design, id)) {
+    return { added: false, ids: current };
+  }
+
+  if (current.includes(id)) {
+    return { added: false, ids: [...current.filter((item) => item !== id), id] };
+  }
+
+  return { added: true, ids: freeNormalizeSelection(design, [...current, id]) };
+}
+
+/**
+ * A selecao depois de um pedido, com a frase falada (null = nada a dizer). A selecao de entrada e normalizada no
+ * design de agora. O intervalo sem ancora (ou com pais diferentes) vira "so acrescentar" (docs/27 L36).
+ */
+export function freeEditorSelect(
+  design: Pick<PopupFreeDesign, "children">,
+  current: FreeEditorSelection,
+  request: FreeEditorSelectRequest
+): { anchor: FreeId | null; ids: FreeId[]; phrase: string | null } {
+  const ids = freeNormalizeSelection(design, current.ids);
+  const spot = (id: FreeId, stack: FreeStackSpot | undefined) => (stack ? S.stack(freeSelectionName(design, id), stack.index, stack.total) : null);
+
+  switch (request.kind) {
+    case "only":
+      return { anchor: request.id ?? current.anchor, ids: request.id ? [request.id] : [], phrase: request.id ? spot(request.id, request.stack) : null };
+    case "toggle": {
+      if (!findFreeNode(design, request.id)) {
+        return { anchor: current.anchor, ids, phrase: null };
+      }
+
+      const result = freeToggleInSelection(design, ids, request.id);
+      const name = freeSelectionName(design, request.id);
+
+      return { anchor: request.id, ids: result.ids, phrase: result.added ? S.toggledIn(name, result.ids.length) : S.toggledOut(name, result.ids.length) };
+    }
+    case "add": {
+      if (!findFreeNode(design, request.id)) {
+        return { anchor: current.anchor, ids, phrase: null };
+      }
+
+      const result = freeAddToSelection(design, ids, request.id);
+
+      return {
+        anchor: request.id,
+        ids: result.ids,
+        phrase: result.added ? S.toggledIn(freeSelectionName(design, request.id), result.ids.length) : spot(request.id, request.stack)
+      };
+    }
+    case "range": {
+      const range = freeSelectionRange(design, current.anchor, request.id);
+
+      if (!range) {
+        return freeEditorSelect(design, { anchor: current.anchor, ids }, { id: request.id, kind: "add" });
+      }
+
+      const next = freeNormalizeSelection(design, range);
+
+      return { anchor: current.anchor, ids: next, phrase: S.chosen(next.length) };
+    }
+    case "all": {
+      const next = freeNormalizeSelection(design, freeSelectAllIds(request.stageDesign, ids.at(-1) ?? null));
+
+      return next.length > 0 ? { anchor: next.at(-1) ?? null, ids: next, phrase: S.chosen(next.length) } : { anchor: current.anchor, ids, phrase: null };
+    }
+  }
+}
+
+/**
+ * Para onde vai o foco quando o painel da direita troca (C11), so com o foco dentro dele: de um (ou nada) para varios,
+ * o titulo do painel Varios; de varios para um ou nada, o palco (o painel de um elemento nao tem titulo focavel). De
+ * um para nada tambem vai ao palco: o painel do elemento da lugar ao painel Pop-up com o foco dentro dele.
+ */
+export function freePanelFocusAfter(before: number, after: number, focusInRightPanel: boolean): "many" | "stage" | null {
+  if (!focusInRightPanel) {
+    return null;
+  }
+
+  if (before >= 1 && after === 0) {
+    return "stage";
+  }
+
+  if ((before >= 2) === (after >= 2)) {
+    return null;
+  }
+
+  return after >= 2 ? "many" : "stage";
+}
+
+/**
+ * A selecao depois de desfazer ou refazer (o design troca sem passar pela escolha): so os escolhidos que se viam e
+ * continuam vivos no design novo, normalizados. Um id que morreu sai do estado e nao volta sozinho num refazer. A
+ * ancora do intervalo fica se o elemento dela continua no design; senao, vira o principal.
+ */
+export function freeSelectionAfterHistory(
+  design: PopupFreeDesign,
+  current: { anchor: FreeId | null; ids: readonly FreeId[] }
+): { anchor: FreeId | null; ids: FreeId[] } {
+  const ids = freeNormalizeSelection(design, current.ids);
+  const anchor = current.anchor !== null && findFreeNode(design, current.anchor) ? current.anchor : (ids.at(-1) ?? null);
+
+  return { anchor, ids };
+}
+
+/**
+ * Ctrl/⌘ + '=' (ou '+', ou o + do teclado numerico) aumenta e Ctrl/⌘ + '-' (ou '_', ou o − do numerico) diminui o zoom
+ * do desenho; com Alt ou sem Ctrl/⌘, nada (null). O Ctrl + 0 fica com o navegador.
+ */
+export function freeEditorZoomKey(event: { altKey: boolean; code: string; ctrlKey: boolean; key: string; metaKey: boolean }): 1 | -1 | null {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+    return null;
+  }
+
+  if (event.key === "=" || event.key === "+" || event.code === "NumpadAdd") {
+    return 1;
+  }
+
+  return event.key === "-" || event.key === "_" || event.code === "NumpadSubtract" ? -1 : null;
+}
+
+/** Os comandos que valem para varios escolhidos (painel Varios, teclado e as teclas da linha das Camadas). */
+type ManyKind = "backward" | "duplicate" | "forward" | "remove" | "toggleHidden" | "toggleLocked";
+
+const MANY_KINDS: ReadonlySet<string> = new Set<ManyKind>(["backward", "duplicate", "forward", "remove", "toggleHidden", "toggleLocked"]);
+
+function isManyKind(kind: string): kind is ManyKind {
+  return MANY_KINDS.has(kind);
+}
+
 function FreeEditorSession({
   content,
   disabled,
@@ -371,14 +583,17 @@ function FreeEditorSession({
   const historyRef = useRef<FreeHistory>(history);
   const { cta, design } = history.present;
   const initialNodeId = initialFocus?.kind === "error" ? freeNodeIdForKey(initialDesign, initialFocus.key.replace(/^freeDesign\./, "")) : null;
-  const [selectedId, setSelectedId] = useState<FreeId | null>(initialNodeId);
+  // A selecao (L4b): os ids na ordem da escolha, o ultimo e o principal. Fora do historico e da recuperacao.
+  const [selection, setSelection] = useState<FreeId[]>(() => (initialNodeId ? [initialNodeId] : []));
   const [leftTab, setLeftTab] = useState<"elements" | "layers" | "templates">("layers");
   // D29: a pergunta antes do primeiro salvar de um modelo com uma parte que nao abriu.
   const [confirmingSave, setConfirmingSave] = useState(false);
   const [rightPanel, setRightPanel] = useState<"inspector" | "review">(initialFocus?.kind === "review" ? "review" : "inspector");
   // Um erro de um campo do celular abre o editor ja no Celular (o painel abre a aba Celular).
   const [device, setDevice] = useState<FreeDevice>(() => (initialFocus?.kind === "error" ? freeDeviceForFocusKey(initialFocus.key, "desktop") : "desktop"));
-  const [zoom, setZoom] = useState<"100" | "fit">("fit");
+  // O zoom pedido (Ajustar a tela ao abrir) e a escala que o desenho mostra (o "62 %" do Ajustar a tela).
+  const [zoom, setZoom] = useState<FreeZoom>("fit");
+  const [shownScale, setShownScale] = useState(1);
   const [rects, setRects] = useState<FreeMeasuredRects>({});
   const [focusRequest, setFocusRequest] = useState<FreeFocusRequest | null>(() =>
     initialFocus?.kind === "error" ? { key: initialFocus.key.replace(/^freeDesign\./, "") } : null
@@ -417,12 +632,42 @@ function FreeEditorSession({
   const sendDelayRef = useRef(0);
   const positionTimer = useRef<number | null>(null);
   const pendingLayerFocus = useRef<FreeId | "stage" | null>(null);
+  // C11: o foco estava no painel da direita quando ele trocou de um elemento para varios (vai ao titulo do Varios).
+  const pendingManyFocus = useRef(false);
+  // A ancora do intervalo das Camadas (o ultimo escolhido sem Shift) e a selecao viva da ultima renderizacao.
+  const anchorRef = useRef<FreeId | null>(initialNodeId);
+  const liveIdsRef = useRef<readonly FreeId[]>(initialNodeId ? [initialNodeId] : []);
   const pendingReviewFocus = useRef(initialFocus?.kind === "review");
+  // A escala mostrada para os ouvintes, e o "Ajustar à tela" que ainda vai dizer a escala nova.
+  const shownScaleRef = useRef(1);
+  const fitSpeech = useRef(false);
   const propsRef = useRef({ onChange, onCtaChange: content.onCtaChange, onSaveDraft });
 
   useLayoutEffect(() => {
     propsRef.current = { onChange, onCtaChange: content.onCtaChange, onSaveDraft };
   });
+
+  /**
+   * Troca a selecao (a ancora vai junto). Com o foco no painel da direita, a troca entre um elemento e varios leva o
+   * foco ao titulo do painel Varios ou ao palco (C11): o painel de antes some com o foco dentro dele.
+   */
+  const changeSelection = useCallback((next: readonly FreeId[], anchor: FreeId | null = next.at(-1) ?? null) => {
+    const active = typeof document === "undefined" ? null : document.activeElement;
+    const inRight = active instanceof HTMLElement && Boolean(active.closest("[data-free-zone=\"right\"]"));
+    const focus = freePanelFocusAfter(liveIdsRef.current.length, new Set(next).size, inRight);
+
+    if (focus === "many") {
+      pendingManyFocus.current = true;
+    } else if (focus === "stage") {
+      pendingLayerFocus.current = "stage";
+    }
+
+    anchorRef.current = anchor;
+    setSelection([...next]);
+  }, []);
+
+  /** So um elemento (ou nada): o caminho de antes do L4b (colar, modelo, duplicar e excluir de um, Revisar). */
+  const setSelectedId = useCallback((id: FreeId | null) => changeSelection(id ? [id] : []), [changeSelection]);
 
   /* --------------------------------------------------------------------------------------------
    * Historico, envio ao rascunho do aviso, avisos falados
@@ -499,6 +744,28 @@ function FreeEditorSession({
     [announce]
   );
 
+  /**
+   * Desfazer e refazer trocam o design sem passar pela escolha: a selecao fica so com os escolhidos vivos no design
+   * novo (um id morto nao volta sozinho num refazer). Com o painel de um elemento ou o Varios aberto, a troca leva o
+   * foco como a C11 (o painel some com o foco dentro); com o Revisar aberto, o painel nao troca e o foco fica.
+   */
+  function keepLiveSelection(next: FreeHistory) {
+    const result = freeSelectionAfterHistory(next.present.design, { anchor: anchorRef.current, ids: liveIdsRef.current });
+
+    if (result.ids.length === selection.length && result.ids.every((id, index) => id === selection[index])) {
+      return;
+    }
+
+    if (rightPanel === "review") {
+      anchorRef.current = result.anchor;
+      setSelection(result.ids);
+
+      return;
+    }
+
+    changeSelection(result.ids, result.anchor);
+  }
+
   function undo() {
     const current = historyRef.current;
 
@@ -506,8 +773,11 @@ function FreeEditorSession({
       return;
     }
 
+    const next = undoFreeHistory(current);
+
     sendDelayRef.current = 0;
-    setHistory(undoFreeHistory(current));
+    keepLiveSelection(next);
+    setHistory(next);
     announce(copy.announce.undone);
   }
 
@@ -518,8 +788,11 @@ function FreeEditorSession({
       return;
     }
 
+    const next = redoFreeHistory(current);
+
     sendDelayRef.current = 0;
-    setHistory(redoFreeHistory(current));
+    keepLiveSelection(next);
+    setHistory(next);
     announce(copy.announce.redone);
   }
 
@@ -708,15 +981,75 @@ function FreeEditorSession({
    * Selecao, foco no painel, foco depois de excluir
    * ------------------------------------------------------------------------------------------ */
 
+  // A mesma lista viva e normalizada vai para o desenho, as Camadas e o painel Varios; o principal e o ultimo dela.
+  const liveIds = useMemo(() => freeNormalizeSelection(design, selection), [design, selection]);
+  const selectedId = liveIds.at(-1) ?? null;
   const selectedNode = freeNodeOf(design, selectedId);
   const activeId = selectedNode ? selectedId : null;
+  const many = liveIds.length >= 2;
+  // O design que o palco desenha (o do aparelho do "Ver como"): o Ctrl + A escolhe por ele.
+  const stageDesign = useMemo(() => resolveFreeForDevice(freeStageDesign(design), device), [design, device]);
 
-  const select = useCallback((id: FreeId | null) => {
-    setSelectedId(id);
-    setRightPanel("inspector");
-  }, []);
+  // O painel de um elemento fica montado (escondido) enquanto ha varios, com o ultimo elemento escolhido sozinho: ao
+  // voltar a um elemento, a aba de antes continua (a regra dele: a aba fica no mesmo tipo).
+  const [heldInspectorId, setHeldInspectorId] = useState<FreeId | null>(activeId);
+
+  if (!many && heldInspectorId !== activeId) {
+    setHeldInspectorId(activeId);
+  }
+
+  const inspectorId = many ? heldInspectorId : activeId;
 
   useLayoutEffect(() => {
+    liveIdsRef.current = liveIds;
+  });
+
+  const select = useCallback(
+    (id: FreeId | null) => {
+      setSelectedId(id);
+      setRightPanel("inspector");
+    },
+    [setSelectedId]
+  );
+
+  /** Um pedido de escolher do desenho, das Camadas ou do Ctrl + A: a selecao nova, a ancora e a frase. */
+  function applySelect(request: FreeEditorSelectRequest): FreeId | null {
+    const result = freeEditorSelect(historyRef.current.present.design, { anchor: anchorRef.current, ids: liveIds }, request);
+
+    changeSelection(result.ids, result.anchor);
+    setRightPanel("inspector");
+
+    if (result.phrase) {
+      announce(result.phrase);
+    }
+
+    return result.ids.at(-1) ?? null;
+  }
+
+  function selectFromCanvas(id: FreeId | null, how?: FreeCanvasSelectHow) {
+    applySelect(freeSelectRequestOfCanvas(id, how));
+  }
+
+  /** Escolher nas Camadas leva o principal para a vista no desenho (sem mexer no foco). */
+  function selectFromLayers(id: FreeId, how?: FreeLayerSelectHow) {
+    const principal = applySelect(freeSelectRequestOfLayers(id, how));
+
+    if (principal) {
+      canvasApi.current?.reveal([principal]);
+    }
+  }
+
+  useLayoutEffect(() => {
+    if (pendingManyFocus.current) {
+      pendingManyFocus.current = false;
+
+      if (many) {
+        document.getElementById(FREE_INSPECTOR_MANY_TITLE_ID)?.focus();
+
+        return;
+      }
+    }
+
     const pending = pendingLayerFocus.current;
 
     if (!pending) {
@@ -736,8 +1069,11 @@ function FreeEditorSession({
     (target ?? stageRef.current)?.focus();
   });
 
-  /** Depois de excluir, o foco fica perto: na linha que ocupa o lugar (Camadas) ou no palco. */
-  function focusAfterRemove(id: FreeId) {
+  /**
+   * Depois de excluir (um ou varios), o foco fica perto: na linha que ocupa o lugar da primeira excluida (Camadas) ou
+   * no palco.
+   */
+  function focusAfterRemove(ids: readonly FreeId[]) {
     const active = document.activeElement;
     const inLayers = Boolean(active instanceof HTMLElement && active.closest("[data-free-layer-row]"));
 
@@ -748,10 +1084,10 @@ function FreeEditorSession({
     }
 
     const rows = Array.from(rootRef.current?.querySelectorAll<HTMLElement>("[data-free-layer-row]") ?? []).map((row) => row.dataset.freeLayerRow ?? "");
-    const at = rows.indexOf(id);
-    const remaining = rows.filter((row, index) => row && row !== id && !(index > at && rows[at] && isInside(row, id)));
+    const at = Math.min(...ids.map((id) => rows.indexOf(id)).filter((index) => index >= 0));
+    const remaining = rows.filter((row) => row && !ids.includes(row) && !ids.some((id) => isInside(row, id)));
 
-    pendingLayerFocus.current = remaining[Math.min(at, remaining.length - 1)] ?? "stage";
+    pendingLayerFocus.current = Number.isFinite(at) ? (remaining[Math.min(at, remaining.length - 1)] ?? "stage") : "stage";
   }
 
   function isInside(rowId: FreeId, boxId: FreeId) {
@@ -844,7 +1180,7 @@ function FreeEditorSession({
           return;
         }
 
-        focusAfterRemove(id);
+        focusAfterRemove([id]);
         commit({ cta: result.ctaRemoved ? null : present.cta, design: result.design });
         setSelectedId(null);
         announce(copy.announce.removed);
@@ -939,6 +1275,123 @@ function FreeEditorSession({
     }
   }
 
+  /**
+   * Um comando com varios escolhidos (painel Varios, teclado, teclas da linha das Camadas): um passo so (um commit) e a
+   * frase dizendo quantos. A selecao vem viva e normalizada no design de agora.
+   */
+  function runMany(kind: ManyKind) {
+    const present = historyRef.current.present;
+    const ids = freeNormalizeSelection(present.design, liveIds);
+
+    if (disabled || ids.length === 0) {
+      return;
+    }
+
+    switch (kind) {
+      case "duplicate": {
+        // Atomico: um que nao cabe recusa tudo com o motivo dele; Links, Áudio e Vídeo ficam de fora (C7).
+        const result = duplicateFreeNodes(present.design, ids, present.cta);
+
+        if ("reason" in result) {
+          announce(result.reason);
+
+          return;
+        }
+
+        commitDesign(result.design);
+        changeSelection(result.ids);
+        announce(S.duplicated(result.ids.length, result.skipped));
+
+        return;
+      }
+      case "remove": {
+        // Links e Áudio ficam (kept); o foco vai para a linha que ocupa o lugar da primeira excluida, ou para o palco.
+        const result = removeFreeNodes(present.design, ids);
+
+        if ("reason" in result) {
+          announce(result.reason);
+
+          return;
+        }
+
+        focusAfterRemove(result.removed);
+        commit({ cta: result.ctaRemoved ? null : present.cta, design: result.design });
+        changeSelection([]);
+        announce(S.removed(result.removed.length, result.kept.length));
+
+        return;
+      }
+      case "toggleHidden":
+      case "toggleLocked": {
+        // Se algum ainda nao tem a marca, todos ganham; senao, todos perdem.
+        const flag = kind === "toggleHidden" ? "hidden" : "locked";
+        const result = setFreeNodesFlag(present.design, ids, flag);
+
+        if (result.design !== present.design) {
+          commitDesign(result.design);
+        }
+
+        announce(flag === "hidden" ? (result.value ? S.hidden(ids.length) : S.shown(ids.length)) : result.value ? S.locked(ids.length) : S.unlocked(ids.length));
+
+        return;
+      }
+      case "forward":
+      case "backward": {
+        // Cada um ±1 (de -10 a 10); quem esta no limite fica. Nada mudado: sem passo e sem frase, como com um.
+        const next = shiftFreeNodesLayer(present.design, ids, kind === "forward" ? 1 : -1);
+
+        if (next !== present.design) {
+          commitDesign(next, { coalesceKey: freeGroupCoalesceKey(ids, deviceRef.current, "z") });
+          announce(kind === "forward" ? S.layerForward : S.layerBackward);
+        }
+
+        return;
+      }
+    }
+  }
+
+  /** O painel Varios: cada botao um passo so (um commit), com a frase; "Escolher só" troca a selecao. */
+  function onManyCommand(command: FreeManyCommand) {
+    if (command.kind === "selectOnly") {
+      select(command.id);
+      canvasApi.current?.reveal([command.id]);
+
+      return;
+    }
+
+    if (command.kind !== "align" && command.kind !== "distribute") {
+      runMany(command.kind);
+
+      return;
+    }
+
+    const present = historyRef.current.present;
+
+    if (disabled) {
+      return;
+    }
+
+    // Alinhar e distribuir contam pela caixa que se ve no aparelho do "Ver como" (no Celular, so devices.mobile).
+    const result =
+      command.kind === "align"
+        ? alignFreeNodes(present.design, liveIds, command.edge, command.scope, rects, deviceRef.current)
+        : distributeFreeNodes(present.design, liveIds, command.axis, rects, deviceRef.current);
+
+    if ("reason" in result) {
+      announce(result.reason);
+
+      return;
+    }
+
+    if (result.design !== present.design) {
+      const phrase =
+        command.kind === "align" ? (command.scope === "selection" ? S.alignedSelection : S.alignedArtboard) : command.axis === "x" ? S.spacedX : S.spacedY;
+
+      commitDesign(result.design);
+      announce(S.afterMove(phrase, result.skipped));
+    }
+  }
+
   function onLayerCommand(command: FreeLayerCommand) {
     const present = historyRef.current.present;
 
@@ -966,6 +1419,14 @@ function FreeEditorSession({
         commitDesign(next);
         announce(copy.announce.renamed);
       }
+
+      return;
+    }
+
+    // E, T, Delete e Ctrl + D numa linha que esta numa selecao de 2 ou mais agem em todos (L37); o olho, o cadeado e o
+    // ⋯ mandam sem `selection` e agem so na linha (C17).
+    if (command.selection && many && liveIds.includes(command.id) && isManyKind(command.kind)) {
+      runMany(command.kind);
 
       return;
     }
@@ -1038,6 +1499,11 @@ function FreeEditorSession({
     canvasApi.current?.previewDrop?.(client, freeNewNodeDropSpec(historyRef.current.present.design, kind));
   }
 
+  /** A area de desenho que rola sozinha quando um botao do Elementos chega perto da borda dela. */
+  function canvasViewport() {
+    return canvasApi.current?.viewport() ?? null;
+  }
+
   /** Fim do arrastar do painel: soltou na prancheta visivel, acrescenta ali; fora ou cancelado, nada. */
   function onElementDragEnd(kind: FreeCatalogKind, client: FreePoint | null) {
     const api = canvasApi.current;
@@ -1059,6 +1525,16 @@ function FreeEditorSession({
     }
   }
 
+  /** Fim do arrastar de varios soltos juntos: um passo so, limitado pelo grupo (moveFreeNodesBy), no aparelho do "Ver como". */
+  function onCommitMoves(ids: readonly FreeId[], delta: { dx: number; dy: number }) {
+    const present = historyRef.current.present.design;
+    const next = moveFreeNodesBy(present, ids, delta.dx, delta.dy, deviceRef.current);
+
+    if (next !== present) {
+      commitDesign(next);
+    }
+  }
+
   function onEditText(id: FreeId) {
     const node = freeNodeOf(historyRef.current.present.design, id);
 
@@ -1076,6 +1552,20 @@ function FreeEditorSession({
    * Revisar
    * ------------------------------------------------------------------------------------------ */
 
+  /**
+   * "Voltar ao elemento": o Revisar some com o foco no botao. O foco vai ao titulo do painel Varios (com varios) ou ao
+   * palco (com um ou nada), como na troca de painel da C11.
+   */
+  function backFromReview() {
+    if (liveIds.length >= 2) {
+      pendingManyFocus.current = true;
+    } else {
+      pendingLayerFocus.current = "stage";
+    }
+
+    setRightPanel("inspector");
+  }
+
   function goToItem(item: FreeReviewItem) {
     setSelectedId(item.nodeId);
     setRightPanel("inspector");
@@ -1083,6 +1573,10 @@ function FreeEditorSession({
 
     // Um erro de um campo do celular leva a aba Celular, que liga o "Ver como: Celular".
     changeDevice(freeDeviceForFocusKey(item.key, deviceRef.current));
+
+    if (item.nodeId) {
+      canvasApi.current?.reveal([item.nodeId]);
+    }
   }
 
   /** "Ajustar no Celular" (dica "texto no celular"): a aba Celular do elemento, no tamanho do texto. */
@@ -1097,6 +1591,7 @@ function FreeEditorSession({
     setRightPanel("inspector");
     setFocusRequest({ key });
     changeDevice(freeDeviceForFocusKey(key, deviceRef.current));
+    canvasApi.current?.reveal([item.nodeId]);
   }
 
   function raise(item: FreeReviewItem) {
@@ -1230,6 +1725,77 @@ function FreeEditorSession({
   }
 
   /* --------------------------------------------------------------------------------------------
+   * Zoom em passos (L4b): o desenho muda (zoomBy e zoomTo da api) e a casca guarda e diz
+   * ------------------------------------------------------------------------------------------ */
+
+  /** A escala que o desenho mostra; o "Ajustar à tela" pedido diz a escala nova aqui (contrato da rodada B, item 5). */
+  const onScaleChange = useCallback(
+    (scale: number) => {
+      shownScaleRef.current = scale;
+      setShownScale(scale);
+
+      if (fitSpeech.current) {
+        fitSpeech.current = false;
+        announce(copy.bar.zoomFitSpoken(Math.round(scale * 100)));
+      }
+    },
+    [announce]
+  );
+
+  /** [−] e [+] da barra, Ctrl/⌘ + = e −: o passo abaixo ou acima, com a frase; nas pontas, a frase da ponta. */
+  function zoomStep(direction: 1 | -1) {
+    const api = canvasApi.current;
+
+    if (!api) {
+      return;
+    }
+
+    const step = api.zoomBy(direction);
+
+    if (step !== false) {
+      announce(copy.bar.zoomSpoken(step));
+    } else if (freeZoomNext(shownScaleRef.current, direction) === null) {
+      announce(direction === 1 ? copy.bar.zoomMax : copy.bar.zoomMin);
+    }
+  }
+
+  /** Um passo escolhido no menu. */
+  function zoomToStep(step: FreeZoomStep) {
+    if (canvasApi.current?.zoomTo(step)) {
+      announce(copy.bar.zoomSpoken(step));
+    }
+  }
+
+  /**
+   * "Ajustar à tela" no menu: a frase sai com a escala nova, no proximo onScaleChange. Quando a escala nao muda (o
+   * Ajustar ja mostrava isso), o onScaleChange nao vem e a frase sai dois quadros depois, com a escala de agora.
+   */
+  function zoomToFit() {
+    const api = canvasApi.current;
+
+    if (!api) {
+      return;
+    }
+
+    fitSpeech.current = true;
+
+    if (!api.zoomTo("fit")) {
+      fitSpeech.current = false;
+
+      return;
+    }
+
+    window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(() => {
+        if (fitSpeech.current) {
+          fitSpeech.current = false;
+          announce(copy.bar.zoomFitSpoken(Math.round(shownScaleRef.current * 100)));
+        }
+      })
+    );
+  }
+
+  /* --------------------------------------------------------------------------------------------
    * Teclado (spec §4.4, §4.8, §4.9): nunca dentro de um campo de texto (o campo tem o proprio desfazer)
    * ------------------------------------------------------------------------------------------ */
 
@@ -1283,8 +1849,27 @@ function FreeEditorSession({
     }
 
     if (key === "Escape") {
+      // Com um, a caixa de fora (ou nada); com varios, o pai comum quando todos estao na mesma caixa, senao nada.
       event.preventDefault();
-      select(freeParentId(design, activeId));
+      select(freeSelectionEscape(design, liveIds));
+
+      return;
+    }
+
+    if (mod && !event.altKey && lower === "a") {
+      // Ctrl/⌘ + A: os irmaos do principal (ou os de primeiro nivel), sem travados nem escondidos no aparelho.
+      event.preventDefault();
+      applySelect({ kind: "all", stageDesign });
+
+      return;
+    }
+
+    // Ctrl/⌘ + = e Ctrl/⌘ + −: o zoom do desenho (nunca o da pagina), so fora de campo de texto (decisao 6).
+    const zoomDirection = freeEditorZoomKey(event);
+
+    if (zoomDirection !== null) {
+      event.preventDefault();
+      zoomStep(zoomDirection);
 
       return;
     }
@@ -1294,6 +1879,12 @@ function FreeEditorSession({
     }
 
     const onCanvas = Boolean(target.closest("[data-free-zone=\"canvas\"]")) || target === rootRef.current;
+
+    if (many) {
+      manyKeyDown(event, onCanvas);
+
+      return;
+    }
 
     if (mod && !event.altKey && lower === "d") {
       event.preventDefault();
@@ -1341,24 +1932,104 @@ function FreeEditorSession({
       }
 
       commitDesign(next, { coalesceKey: freeArrowCoalesceKey(activeId, device) });
-
-      if (positionTimer.current !== null) {
-        window.clearTimeout(positionTimer.current);
-      }
+      canvasApi.current?.reveal([activeId]);
 
       const id = activeId;
 
-      positionTimer.current = window.setTimeout(() => {
-        positionTimer.current = null;
-
+      announcePositionLater(() => {
         const present = historyRef.current.present.design;
         const place = device === "mobile" ? freeMobileFreePlace(present, id) : freeNodeOf(present, id)?.place;
 
-        if (place?.mode === "free") {
-          announce(copy.announce.position(place.x, place.y));
-        }
-      }, FREE_POSITION_ANNOUNCE_MS);
+        return place?.mode === "free" ? copy.announce.position(place.x, place.y) : null;
+      });
     }
+  }
+
+  /** A frase da posicao depois de parar de apertar as setas (uma so, no fim). */
+  function announcePositionLater(phrase: () => string | null) {
+    if (positionTimer.current !== null) {
+      window.clearTimeout(positionTimer.current);
+    }
+
+    positionTimer.current = window.setTimeout(() => {
+      positionTimer.current = null;
+
+      const text = phrase();
+
+      if (text) {
+        announce(text);
+      }
+    }, FREE_POSITION_ANNOUNCE_MS);
+  }
+
+  /**
+   * O teclado com varios escolhidos (fora de campo de texto): Ctrl + D, Delete, [ e ] agem em todos num passo so; as
+   * setas movem os soltos nao travados juntos (limite do grupo, chave do grupo, a frase "Seleção em X, Y." no fim e o
+   * grupo levado para a vista); Alt + ↑/↓ so vale com um elemento.
+   */
+  function manyKeyDown(event: ReactKeyboardEvent<HTMLDivElement>, onCanvas: boolean) {
+    const key = event.key;
+    const mod = event.ctrlKey || event.metaKey;
+
+    if (mod && !event.altKey && key.toLowerCase() === "d") {
+      event.preventDefault();
+      runMany("duplicate");
+
+      return;
+    }
+
+    if ((key === "Delete" || key === "Backspace") && onCanvas && !mod) {
+      event.preventDefault();
+      runMany("remove");
+
+      return;
+    }
+
+    if ((key === "[" || key === "]") && !mod) {
+      event.preventDefault();
+      runMany(key === "]" ? "forward" : "backward");
+
+      return;
+    }
+
+    if (event.altKey && !mod && (key === "ArrowUp" || key === "ArrowDown")) {
+      event.preventDefault();
+      announce(S.onlyOne);
+
+      return;
+    }
+
+    if (!onCanvas || mod || event.altKey || !key.startsWith("Arrow")) {
+      return;
+    }
+
+    const present = historyRef.current.present.design;
+    const ids = freeMovableIds(present, liveIds).ids;
+
+    // Nenhum solto que anda (todos na sequencia ou travados): a seta fica com a area de desenho, como com um.
+    if (ids.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const step = event.shiftKey ? 10 : 1;
+    const dx = key === "ArrowLeft" ? -step : key === "ArrowRight" ? step : 0;
+    const dy = key === "ArrowUp" ? -step : key === "ArrowDown" ? step : 0;
+    const device = deviceRef.current;
+    const next = moveFreeNodesBy(present, ids, dx, dy, device);
+
+    if (next === present) {
+      return;
+    }
+
+    commitDesign(next, { coalesceKey: freeGroupCoalesceKey(ids, device) });
+    canvasApi.current?.reveal(ids);
+    announcePositionLater(() => {
+      const position = freeManyPosition(historyRef.current.present.design, ids, device);
+
+      return position ? S.position(position.x, position.y) : null;
+    });
   }
 
   useEffect(
@@ -1374,13 +2045,13 @@ function FreeEditorSession({
    * Desenho
    * ------------------------------------------------------------------------------------------ */
 
-  const stageDesign = useMemo(() => resolveFreeForDevice(freeStageDesign(design), device), [design, device]);
   const popup = useMemo(
     () => freePreviewPopupItem({ allowSnooze: content.allowSnooze, audio: content.audio, cta, design: stageDesign, fonts, title: content.title }),
     [content.allowSnooze, content.audio, content.title, cta, fonts, stageDesign]
   );
   const toolbarDisabled = useMemo(() => {
-    if (!selectedNode || !activeId) {
+    // Com varios, o desenho nao mostra a barrinha.
+    if (!selectedNode || !activeId || many) {
       return {};
     }
 
@@ -1394,7 +2065,7 @@ function FreeEditorSession({
       remove: freeRemoveProblem(design, activeId),
       toFree: freeToFreeProblem(design, activeId)
     } satisfies Partial<Record<FreeCanvasToolbarCommand, string | null>>;
-  }, [activeId, design, selectedNode]);
+  }, [activeId, design, many, selectedNode]);
   const wrappedContent = useMemo<FreeEditorContent>(
     () => ({
       ...content,
@@ -1468,14 +2139,14 @@ function FreeEditorSession({
             ]}
             value={device}
           />
-          <Segmented
-            label={copy.bar.zoom}
-            onChange={(value) => setZoom(value)}
-            options={[
-              { label: copy.bar.zoomFit, value: "fit" },
-              { label: copy.bar.zoom100, value: "100" }
-            ]}
-            value={zoom}
+          <FreeZoomControl
+            disabledIn={freeZoomNext(shownScale, 1) === null}
+            disabledOut={freeZoomNext(shownScale, -1) === null}
+            onFit={zoomToFit}
+            onStep={zoomStep}
+            onZoom={zoomToStep}
+            shownPercent={shownScale * 100}
+            zoom={zoom}
           />
         </div>
 
@@ -1609,7 +2280,7 @@ function FreeEditorSession({
             ))}
           </Tabs.List>
           <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="elements">
-            <FreeElementsPanel design={design} disabled={disabled} onAdd={(kind) => add(kind)} onDragEnd={onElementDragEnd} onDragMove={onElementDragMove} />
+            <FreeElementsPanel autoScrollTarget={canvasViewport} design={design} disabled={disabled} onAdd={(kind) => add(kind)} onDragEnd={onElementDragEnd} onDragMove={onElementDragMove} />
           </Tabs.Panel>
           <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="layers">
             <FreeLayersPanel
@@ -1619,8 +2290,9 @@ function FreeEditorSession({
               disabled={disabled}
               flagged={flagged}
               onCommand={onLayerCommand}
-              onSelect={(id) => select(id)}
+              onSelect={selectFromLayers}
               selectedId={activeId}
+              selectedIds={liveIds}
             />
           </Tabs.Panel>
           {templates ? (
@@ -1644,20 +2316,24 @@ function FreeEditorSession({
         <div className="flex min-h-0 min-w-0 flex-col" data-free-zone="middle">
           <FreeCanvas
             apiRef={canvasApi}
-            description={freeSelectionDescription(stageDesign, activeId, rects)}
+            description={freeManyDescription(stageDesign, liveIds, rects)}
             design={stageDesign}
             device={device}
             disabled={disabled}
             fonts={fonts}
+            onCommitMoves={onCommitMoves}
             onCommitRect={onCommitRect}
             onEditText={onEditText}
             onMoveInFlow={moveTo}
             onRectsChange={setRects}
-            onSelect={(id) => select(id)}
+            onScaleChange={onScaleChange}
+            onSelect={selectFromCanvas}
             onToolbar={onToolbar}
+            onZoomChange={setZoom}
             popup={popup}
             rects={rects}
             selectedId={activeId}
+            selectedIds={liveIds}
             stageRef={stageRef}
             toolbarDisabled={toolbarDisabled}
             zoom={zoom}
@@ -1671,7 +2347,7 @@ function FreeEditorSession({
               disabled={disabled}
               errors={review.errors}
               hints={review.hints}
-              onBack={() => setRightPanel("inspector")}
+              onBack={backFromReview}
               onFontUploaded={fontUploaded}
               onGoTo={goToItem}
               onMobile={adjustOnMobile}
@@ -1679,25 +2355,31 @@ function FreeEditorSession({
               sizePercent={sizePercent}
             />
           ) : (
-            <FreeInspector
-              content={wrappedContent}
-              design={design}
-              device={device}
-              disabled={disabled}
-              errors={errors}
-              focusRequest={focusRequest}
-              fonts={fonts}
-              hints={checks.hints}
-              onBusyChange={updateBusy}
-              onChange={(next, options) => commitDesign(next, options)}
-              onCommand={onInspectorCommand}
-              onCtaChange={(next, options) => commit({ cta: next, design: historyRef.current.present.design }, options)}
-              onDeviceChange={changeDevice}
-              onFocusHandled={() => setFocusRequest(null)}
-              onFontsChange={onFontsChange}
-              rects={rects}
-              selectedId={activeId}
-            />
+            <>
+              {/* Com varios, o painel de um elemento fica montado e escondido (a aba volta como estava). */}
+              <div className={cn("min-h-0 min-w-0 flex-1 flex-col", many ? "hidden" : "flex")}>
+                <FreeInspector
+                  content={wrappedContent}
+                  design={design}
+                  device={device}
+                  disabled={disabled}
+                  errors={errors}
+                  focusRequest={focusRequest}
+                  fonts={fonts}
+                  hints={checks.hints}
+                  onBusyChange={updateBusy}
+                  onChange={(next, options) => commitDesign(next, options)}
+                  onCommand={onInspectorCommand}
+                  onCtaChange={(next, options) => commit({ cta: next, design: historyRef.current.present.design }, options)}
+                  onDeviceChange={changeDevice}
+                  onFocusHandled={() => setFocusRequest(null)}
+                  onFontsChange={onFontsChange}
+                  rects={rects}
+                  selectedId={inspectorId}
+                />
+              </div>
+              {many ? <FreeInspectorMany design={design} device={device} disabled={disabled} onCommand={onManyCommand} rects={rects} selectedIds={liveIds} /> : null}
+            </>
           )}
         </aside>
       </div>
@@ -1730,7 +2412,7 @@ function FreeEditorSession({
 
 type SegmentedOption<Value extends string> = { icon?: ReactNode; label: string; value: Value };
 
-/** Escolha unica da barra (Ver como, zoom): botoes com aria-pressed, setas andam entre eles. */
+/** Escolha unica da barra (Ver como): botoes com aria-pressed, setas andam entre eles. */
 function Segmented<Value extends string>({ label, onChange, options, value }: { label: string; onChange: (value: Value) => void; options: readonly SegmentedOption<Value>[]; value: Value }) {
   return (
     <div aria-label={label} className="flex items-center gap-2" role="group">
@@ -1791,7 +2473,7 @@ function ShortcutsPopover({ onOpenChange, open }: { onOpenChange: (open: boolean
       >
         <Keyboard aria-hidden="true" className="size-4" />
         <span className="sr-only xl:not-sr-only">{copy.bar.shortcuts}</span>
-        <kbd aria-hidden="true" className="rounded border border-[var(--border-subtle)] px-1 text-[11px] leading-4 text-[var(--text-tertiary)]">
+        <kbd aria-hidden="true" className="rounded border border-[var(--border-subtle)] px-1 text-[12px] leading-4 text-[var(--text-tertiary)]">
           ?
         </kbd>
       </Popover.Trigger>

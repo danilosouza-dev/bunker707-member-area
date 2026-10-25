@@ -1,7 +1,9 @@
 import type { Locator, Page } from "@playwright/test";
+import type { FreeNode } from "../../src/server/communications/popup-free-model";
 import { applyFreeStarter } from "../../src/server/communications/popup-free-starters";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import { contaDeTeste, expect, test, zerarComunicacao } from "./fixtures";
+import { abrirEditorLivre, cliqueCom, escolhidos, falado, gravarRascunhoLivre, noPalco, zoomMostrado } from "./popup-livre-editor-fixtures";
 
 // Editor Livre so pelo teclado (docs/27; spec §4.4, §4.5, §4.9 e §7.3; docs/18 §3.1): num pop-up Livre em
 // rascunho (modelo "Em branco"), o produtor abre o editor com Enter (o foco vai para as Camadas), acrescenta um
@@ -10,10 +12,28 @@ import { contaDeTeste, expect, test, zerarComunicacao } from "./fixtures";
 // Tab passa pela lista das Camadas uma vez so e o foco nunca sai do editor nem cai no vazio. Salvar com uma linha
 // vazia abre o Revisar, e o item leva o foco a area de texto; com o "Nome do pop-up" vazio (um campo fora do
 // editor), salvar mostra "Fechar o editor e revisar"; ao fechar, o foco volta para "Abrir editor Livre".
+// L4b (docs/27 §13.10): num rascunho com [Título solto, Texto, duas Formas soltas, Links], varios pelo teclado. Nas
+// Camadas, Shift + ↓ estende e Ctrl + Enter poe e tira; Delete exclui as duas e Ctrl + Z volta; Ctrl + A no palco
+// escolhe os do mesmo nivel. Na troca do painel da direita (C11), o foco nunca cai no vazio: "Escolher só Título" no
+// painel Vários leva o foco ao palco, Ctrl + A com o foco no painel de um elemento leva ao titulo do painel Vários, e o
+// Esc no painel Vários deixa "Nada selecionado" com o foco no palco. Ctrl + = e Ctrl + − mudam o zoom do desenho. O
+// Duplicar do painel Vários pelo Enter e o Ctrl + Z: as copias saem, o foco vai ao palco e o Ctrl + Shift + Z refaz sem
+// escolher as copias de novo. "Voltar ao elemento" no Revisar leva o foco ao titulo do painel Vários (com varios) ou ao
+// palco (com um). O duplo clique no Título solto abre a area de texto dele; com Alt ou Shift, nao abre (C18).
 
 const TITULO = "Pop-up E2E: Livre pelo teclado";
 const ESCRITO = "Título pelo teclado";
 const SESSAO_DO_PRODUTOR = "tests/e2e/.auth/produtor.json";
+/** O rascunho do teste de varios (L4b): o Título solto embaixo da sequencia, duas Formas soltas e o Texto na sequencia. */
+const TITULO_VARIOS = "Pop-up E2E: Livre com vários pelo teclado";
+const COR = { fill: [{ color: "#38bdf8", kind: "solid" as const }], radius: 8 };
+const CHILDREN_VARIOS: FreeNode[] = [
+  { id: "titulo", lines: [[{ text: "Aula nova no ar" }]], place: { mode: "free", w: 320, x: 40, y: 200 }, type: "heading" },
+  { id: "texto", lines: [[{ text: "Veja o que mudou" }]], type: "text" },
+  { box: COR, id: "fa", name: "Forma A", place: { h: 60, mode: "free", w: 60, x: 40, y: 300 }, type: "shape" },
+  { box: COR, id: "fb", name: "Forma B", place: { h: 60, mode: "free", w: 60, x: 140, y: 300 }, type: "shape" },
+  { id: "links", type: "links" }
+];
 
 test.describe.configure({ mode: "serial" });
 test.use({ storageState: SESSAO_DO_PRODUTOR, viewport: { height: 900, width: 1440 } });
@@ -310,4 +330,194 @@ test("Trocar de modelo pede confirmação e dá para desfazer no editor (Ctrl + 
   // O card Design volta ao "Em branco" (o rascunho segue o editor) e o foco volta para "Abrir editor Livre".
   await expect(design.getByRole("button", { name: "Abrir editor Livre" })).toBeFocused();
   await expect(page.getByRole("region", { exact: true, name: "Prévia" }).getByText("Seu título aqui").first()).toBeVisible();
+});
+
+test("vários pelo teclado, o foco na troca do painel Vários e o duplo clique no Título solto (L4b)", async ({ page }) => {
+  test.setTimeout(180_000);
+  const id = await gravarRascunhoLivre(TITULO_VARIOS, CHILDREN_VARIOS, { artboard: { minHeight: 380 } });
+  const editor = await abrirEditorLivre(page, id);
+  const frase = falado(editor);
+  const palco = editor.locator("[data-free-stage]");
+  const varios = editor.locator('[data-free-inspector="many"]');
+  const linhaDe = (elemento: string) => editor.locator(`[data-free-layer-row="${elemento}"] [data-free-layer-select]`).first();
+  const textoDoTitulo = editor.locator("#livre-titulo-texto");
+
+  /** O foco nunca cai no vazio e nunca sai do editor. */
+  async function focoNoEditor() {
+    const atual = await foco(page);
+    expect(atual.emLugarNenhum, "o foco nunca cai no vazio").toBe(false);
+    expect(atual.noEditor, `o foco fica no editor (${atual.name || atual.id})`).toBe(true);
+  }
+
+  await test.step("nas Camadas, Shift + ↓ estende e Ctrl + Enter põe ou tira", async () => {
+    await linhaDe("fa").focus();
+    await page.keyboard.press("Enter");
+    // Com um elemento, o desenho continua com o data-free-selection de antes.
+    await expect.poll(() => selecionado(editor)).toBe("fa");
+
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(frase).toHaveText("2 elementos escolhidos.");
+    await expect(linhaDe("fb")).toBeFocused();
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb"]);
+
+    await page.keyboard.press("Control+Enter");
+    await expect(frase).toHaveText("Forma B saiu da seleção. 1 elemento.");
+    expect(await selecionado(editor)).toBe("fa");
+    await page.keyboard.press("Control+Enter");
+    await expect(frase).toHaveText("Forma B entrou na seleção. 2 elementos.");
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb"]);
+    await expect(linhaDe("fb")).toBeFocused();
+  });
+
+  await test.step("Delete exclui as duas e Ctrl + Z volta, com o foco numa linha", async () => {
+    await page.keyboard.press("Delete");
+    await expect(frase).toHaveText("2 elementos excluídos. Ctrl + Z desfaz.");
+    expect(await linhas(editor)).toEqual(["titulo", "texto", "links"]);
+    // O foco vai para a linha que ficou no lugar da primeira excluida.
+    await expect(linhaDe("links")).toBeFocused();
+
+    await page.keyboard.press("Control+z");
+    await expect(frase).toHaveText("Desfeito.");
+    expect(await linhas(editor)).toEqual(["titulo", "texto", "fa", "fb", "links"]);
+    await focoNoEditor();
+  });
+
+  await test.step("Ctrl + A no palco escolhe os do mesmo nível; Escolher só Título leva o foco ao palco", async () => {
+    await palco.focus();
+    await page.keyboard.press("Control+a");
+    await expect(frase).toHaveText("5 elementos escolhidos.");
+    await expect.poll(() => escolhidos(editor)).toHaveLength(5);
+    await expect(varios.getByRole("heading", { exact: true, name: "5 elementos selecionados" })).toBeVisible();
+    await expect(palco).toBeFocused();
+
+    // C11: o painel Vários some com o foco dentro dele; o foco vai ao palco.
+    const soTitulo = varios.getByRole("button", { exact: true, name: "Escolher só Título" });
+    await soTitulo.focus();
+    await expect(soTitulo).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(varios).toHaveCount(0);
+    expect(await selecionado(editor)).toBe("titulo");
+    await expect(palco).toBeFocused();
+  });
+
+  await test.step("Ctrl + A com o foco no painel de um elemento leva o foco ao título do painel Vários; o Esc nele deixa Nada selecionado", async () => {
+    const conteudo = editor.getByRole("tab", { exact: true, name: "Conteúdo" });
+
+    await conteudo.focus();
+    await expect(conteudo).toBeFocused();
+    await page.keyboard.press("Control+a");
+    await expect(frase).toHaveText("5 elementos escolhidos.");
+    await expect(editor.locator("#livre-varios-titulo")).toBeFocused();
+
+    // C11: o Esc no painel Vários vai a nada (todos estao na prancheta) e o foco vai ao palco.
+    await page.keyboard.press("Escape");
+    await expect(varios).toHaveCount(0);
+    await expect.poll(() => escolhidos(editor)).toEqual([]);
+    await expect(palco).toBeFocused();
+    expect(await selecionadoNoPalco(editor)).toBe("Nada selecionado.");
+  });
+
+  await test.step("Ctrl + = e Ctrl + − com o foco no palco mudam o zoom do desenho", async () => {
+    const antes = await zoomMostrado(editor);
+
+    await page.keyboard.press("Control+Equal");
+    await expect(frase).toHaveText(/^Zoom \d+ %\.$/);
+    const depois = await zoomMostrado(editor);
+    expect(depois).not.toBe(antes);
+    await expect(frase).toHaveText(`Zoom ${depois}.`);
+    await page.keyboard.press("Control+Minus");
+    await expect(frase).not.toHaveText(`Zoom ${depois}.`);
+    await expect(frase).toHaveText(/^Zoom \d+ %\.$/);
+    await expect(palco).toBeFocused();
+  });
+
+  await test.step("C11 no desfazer: Duplicar no painel Vários pelo Enter; o Ctrl + Z leva o foco ao palco e o Ctrl + Shift + Z refaz", async () => {
+    await linhaDe("fa").focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => selecionado(editor)).toBe("fa");
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(frase).toHaveText("2 elementos escolhidos.");
+
+    // No WebKit o clique nao da foco a botao: o Duplicar vai pelo teclado.
+    const duplicar = varios.getByRole("button", { exact: true, name: "Duplicar" });
+    await duplicar.focus();
+    await page.keyboard.press("Enter");
+    await expect(frase).toHaveText("2 elementos duplicados.");
+    const comCopias = await linhas(editor);
+    expect(comCopias).toHaveLength(7);
+    await expect.poll(() => escolhidos(editor)).toHaveLength(2);
+    await expect(duplicar).toBeFocused();
+
+    // As copias saem e o painel Varios some com o foco dentro: o foco vai ao palco, e o Ctrl + Shift + Z chega ao editor.
+    await page.keyboard.press("Control+z");
+    await expect(frase).toHaveText("Desfeito.");
+    expect(await linhas(editor)).toEqual(["titulo", "texto", "fa", "fb", "links"]);
+    await expect(varios).toHaveCount(0);
+    await expect(palco).toBeFocused();
+
+    await page.keyboard.press("Control+Shift+z");
+    await expect(frase).toHaveText("Refeito.");
+    expect(await linhas(editor)).toEqual(comCopias);
+    // O refazer nao devolve a escolha das copias, que a equipe nao fez de novo.
+    await expect.poll(() => escolhidos(editor)).toEqual([]);
+    await expect(palco).toBeFocused();
+    await focoNoEditor();
+  });
+
+  await test.step("Voltar ao elemento no Revisar leva o foco ao título do Vários (com vários) ou ao palco (com um)", async () => {
+    const revisar = editor.locator("[data-free-review-toggle]");
+    const voltar = editor.locator("[data-free-review-back]");
+
+    await linhaDe("fa").focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => selecionado(editor)).toBe("fa");
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(frase).toHaveText("2 elementos escolhidos.");
+
+    // O Revisar some com o foco no Voltar ao elemento; com varios, o foco vai ao titulo do painel Varios.
+    await revisar.focus();
+    await page.keyboard.press("Enter");
+    await expect(voltar).toBeVisible();
+    await voltar.focus();
+    await page.keyboard.press("Enter");
+    await expect(voltar).toHaveCount(0);
+    await expect(editor.locator("#livre-varios-titulo")).toBeFocused();
+
+    // Com um elemento, o foco vai ao palco.
+    await linhaDe("fa").focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => selecionado(editor)).toBe("fa");
+    await revisar.focus();
+    await page.keyboard.press("Enter");
+    await expect(voltar).toBeVisible();
+    await voltar.focus();
+    await page.keyboard.press("Enter");
+    await expect(voltar).toHaveCount(0);
+    await expect(palco).toBeFocused();
+    await focoNoEditor();
+  });
+
+  await test.step("C18: o duplo clique no Título solto abre a área de texto; com Alt ou com Shift, não abre", async () => {
+    await cliqueCom(page, noPalco(editor, "titulo"), [], { duplo: true });
+    await expect(textoDoTitulo).toBeFocused();
+    expect(await selecionado(editor)).toBe("titulo");
+
+    // Com a aba Avançado aberta e o foco no palco: Alt + duplo clique escolhe pela pilha, mas nao abre o texto.
+    const avancado = editor.getByRole("tab", { exact: true, name: "Avançado" });
+    await avancado.click();
+    await expect(avancado).toHaveAttribute("aria-selected", "true");
+    await palco.focus();
+    await cliqueCom(page, noPalco(editor, "titulo"), ["Alt"], { duplo: true });
+    await expect(frase).toHaveText("Selecionado: Título (1 de 1 neste ponto).");
+    await expect(avancado).toHaveAttribute("aria-selected", "true");
+    await expect(textoDoTitulo).toHaveCount(0);
+    await expect(palco).toBeFocused();
+
+    // Shift + duplo clique tira e poe na selecao, e tambem nao abre o texto.
+    await cliqueCom(page, noPalco(editor, "titulo"), ["Shift"], { duplo: true });
+    await expect(frase).toHaveText("Título entrou na seleção. 1 elemento.");
+    await expect(textoDoTitulo).not.toBeFocused();
+    await expect(palco).toBeFocused();
+    await focoNoEditor();
+  });
 });

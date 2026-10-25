@@ -298,6 +298,15 @@ test("D9 no Livre com o Celular: o que se clica precisa estar visível nos dois 
   assert.equal(schemas.POPUP_NO_BUTTON_STOP_MESSAGE, "Este pop-up não tem botão: escolha quando ele para de aparecer.");
   assert.equal(popupEditor.clickStopDisabled({ cta: null, freeDesign: linkSoNoComputador }), true);
   assert.equal(popupEditor.repeatStartOf({ cta: null, freeDesign: linkSoNoComputador }).stopOn, "never");
+  // A frase do card nao diz "não tem botão" quando o botao existe e so esta escondido num aparelho.
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: null, freeDesign: linkSoNoComputador }), true);
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: null, freeDesign: semBotao }), false, "sem botao nenhum: a frase de sempre");
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: null, freeDesign: comLink }), false, "visivel nos dois: nada a dizer");
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: null, freeDesign: null }), false, "Padrão: a frase de sempre");
+  assert.equal(
+    popupEditor.POPUP_EDITOR_COPY.frequency.stopHiddenButtonDesign,
+    "O botão que conta o clique está escondido no computador ou no celular. Mostre o botão nos dois aparelhos no Design ou escolha outra opção."
+  );
 
   // Visivel nos dois: passa.
   assert.equal(errorsOf(rascunho({ cta: null, freeDesign: comLink }))["popup.frequency.stopOn"], undefined);
@@ -310,12 +319,203 @@ test("D9 no Livre com o Celular: o que se clica precisa estar visível nos dois 
   const ctaSoNoComputador = { ...free, devices: { mobile: { nodes: { [ctaId]: { hidden: true } } } } };
   assert.equal(errorsOf(rascunho({ freeDesign: ctaSoNoComputador }))["popup.frequency.stopOn"], schemas.POPUP_NO_BUTTON_STOP_MESSAGE);
   assert.equal(popupEditor.clickStopDisabled({ cta: CTA, freeDesign: ctaSoNoComputador }), true);
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: CTA, freeDesign: ctaSoNoComputador }), true, "o Botão principal escondido no celular: mostrar nos dois");
   // ... com o "Abrir um link" visivel no celular, passa; e o Botao principal visivel nos dois, como sempre.
   const ctaEscondidoComLink = { ...ctaSoNoComputador, children: [...free.children.slice(0, -1), link, free.children.at(-1)] };
   assert.equal(errorsOf(rascunho({ freeDesign: ctaEscondidoComLink }))["popup.frequency.stopOn"], undefined);
   assert.equal(popupEditor.clickStopDisabled({ cta: CTA, freeDesign: ctaEscondidoComLink }), false);
   assert.equal(errorsOf(rascunho({ freeDesign: free }))["popup.frequency.stopOn"], undefined);
   assert.equal(popupEditor.clickStopDisabled({ cta: CTA, freeDesign: free }), false);
+});
+
+test("D9 por aparelho (L4b): links diferentes em cada aparelho valem; o Botão principal escondido no computador deixa de contar", async () => {
+  const popupEditor = await import("../src/components/admin/v2/communication/popup-editor-model.ts");
+  const render = await import("../src/server/communications/popup-free-render.ts");
+  const freeSchema = await import("../src/server/communications/popup-free-schema.ts");
+  const free = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
+  const ctaId = free.children.find((node) => node.type === "button" && node.action.kind === "cta").id;
+  const semBotao = editor.withSyncedDesign(popupDraft({ design: null, freeDesign: free }), { cta: null }).freeDesign;
+  const linkA = { action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, id: "linka", label: "Ver aulas", type: "button" };
+  const linkB = { action: { href: "https://exemplo.com/b", kind: "link", target: "new_tab" }, id: "linkb", label: "Ver mais", type: "button" };
+  const antesDosLinks = (value, ...nodes) => ({ ...value, children: [...value.children.slice(0, -1), ...nodes, value.children.at(-1)] });
+  const comCelular = (value, nodes) => ({ ...value, devices: { mobile: { nodes } } });
+  const repetir = { everyMinutes: null, maxPerDay: 1, maxTotal: null, mode: "repeat", stopOn: "click" };
+  const rascunho = (extra) => {
+    const draft = popupDraft({ design: null, ...extra });
+    return { ...draft, popup: { ...draft.popup, frequency: repetir } };
+  };
+  /** A mesma resposta nos tres lugares: o schema do salvar, a chave do editor e a regra pura. */
+  const conta = (freeDesign, cta) => {
+    const pelaRegra = render.freeHasClickTarget(freeDesign, cta !== null);
+    const recusado = errorsOf(rascunho({ cta, freeDesign }))["popup.frequency.stopOn"] === schemas.POPUP_NO_BUTTON_STOP_MESSAGE;
+
+    assert.equal(freeSchema.popupFreeDesignSchema.safeParse(freeDesign).success, true, "o design vale");
+    assert.equal(popupEditor.clickStopDisabled({ cta, freeDesign }), !pelaRegra, "a chave do editor segue a regra");
+    assert.equal(recusado, !pelaRegra, "o schema do salvar segue a regra");
+
+    return pelaRegra;
+  };
+
+  // Link A so no computador e link B so no celular (2 links, que o L4b passou a aceitar): cada aparelho tem o seu.
+  const doisLinks = antesDosLinks(semBotao, linkA, { ...linkB, hidden: true });
+  assert.equal(conta(comCelular(doisLinks, { linka: { hidden: true }, linkb: { hidden: false } }), null), true);
+  // Os dois escondidos no celular: o celular nunca pararia.
+  assert.equal(conta(comCelular(antesDosLinks(semBotao, linkA, linkB), { linka: { hidden: true }, linkb: { hidden: true } }), null), false);
+  assert.equal(conta(antesDosLinks(semBotao, linkA, linkB), null), true);
+
+  // O Botao principal escondido no computador, sem link: recusa (antes passava, porque so o celular era olhado).
+  const ctaEscondido = { ...free, children: free.children.map((node) => (node.id === ctaId ? { ...node, hidden: true } : node)) };
+  assert.equal(conta(ctaEscondido, CTA), false);
+  // ... aparecendo so no celular continua recusado (o computador nao tem o que clicar); escondido nos dois tambem.
+  assert.equal(conta(comCelular(ctaEscondido, { [ctaId]: { hidden: false } }), CTA), false);
+  assert.equal(conta(comCelular(ctaEscondido, { [ctaId]: { hidden: true } }), CTA), false);
+  // ... dentro de uma caixa escondida no computador, o mesmo.
+  const caixa = { children: [free.children.find((node) => node.id === ctaId)], hidden: true, id: "caixa", type: "box" };
+  assert.equal(conta({ ...free, children: [...free.children.filter((node) => node.id !== ctaId && node.type !== "links"), caixa, free.children.at(-1)] }, CTA), false);
+  // ... com um "Abrir um link" visivel nos dois, passa; so no computador, com o principal so no celular, tambem.
+  assert.equal(conta(antesDosLinks(ctaEscondido, linkA), CTA), true);
+  assert.equal(conta(comCelular(antesDosLinks(ctaEscondido, linkA), { [ctaId]: { hidden: false }, linka: { hidden: true } }), CTA), true);
+  // ... com um link de destino inseguro, nao conta (o schema ja recusa o destino; a regra nao o conta).
+  assert.equal(render.freeHasClickTarget(antesDosLinks(ctaEscondido, { ...linkA, action: { ...linkA.action, href: "javascript:alert(1)" } }), true), false);
+
+  // O Botao principal visivel nos dois, como sempre; o aviso com botao e o design sem o Botao principal: vale (o
+  // erro "Falta o botão principal no design." ja aparece no lugar dele). Sem Livre, so o botao do aviso.
+  assert.equal(conta(free, CTA), true);
+  assert.equal(render.freeHasClickTarget(semBotao, true), true);
+  assert.equal(render.freeHasClickTarget(null, true), true);
+  assert.equal(render.freeHasClickTarget(undefined, false), false);
+  // Sem botao no aviso, o Botao principal nao conta mesmo visivel (so os links).
+  assert.equal(render.freeHasClickTarget(free, false), false);
+});
+
+test("D9 por aparelho (L4b): o aviso já gravado com o Botão principal escondido no computador abre com 'Só quando o pop-up terminar'", async () => {
+  const store = await import("../src/server/communications/store.ts");
+  const { noticeDraftOfRow } = await import("../src/server/communications/queries.ts");
+  const free = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
+  const ctaId = free.children.find((node) => node.type === "button" && node.action.kind === "cta").id;
+  const ctaEscondido = { ...free, children: free.children.map((node) => (node.id === ctaId ? { ...node, hidden: true } : node)) };
+  const link = { action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, id: "linka", label: "Ver aulas", type: "button" };
+  const repetir = { everyMinutes: 120, maxPerDay: 3, maxTotal: 10, mode: "repeat", stopOn: "click" };
+  /** A linha como o banco devolve um aviso salvo (as colunas que o servidor grava, mais as da linha). */
+  const linhaDe = (draft, extra = {}) => ({
+    ...store.draftToColumns(draft),
+    approved_at: null,
+    approved_by: null,
+    created_at: "2026-10-25T12:00:00.000Z",
+    created_by: "00000000-0000-4000-8000-000000000001",
+    deleted_at: null,
+    flow_id: null,
+    flow_node_id: null,
+    id: "00000000-0000-4000-8000-0000000000aa",
+    status: "draft",
+    updated_at: "2026-10-25T12:00:00.000Z",
+    ...extra
+  });
+  const pedido = (freeDesign, frequency = repetir, extra = {}) => {
+    const draft = popupDraft({ design: null, freeDesign, ...extra });
+    return { ...draft, popup: { ...draft.popup, frequency }, repeat: frequency.mode === "once" ? "once" : "until_action" };
+  };
+
+  // Rascunho e pedido de aprovacao gravados antes do L4b: abrem como "Só quando o pop-up terminar", com o resto
+  // igual, e passam no schema que Publicar e Aprovar conferem (noticeDraftOfRow, assertPublishable).
+  for (const status of ["draft", "pending_approval"]) {
+    const linha = linhaDe(pedido(ctaEscondido), { status });
+    const lido = store.rowToDraft(linha);
+    const aberto = noticeDraftOfRow(linha);
+
+    assert.equal(lido.popup.frequency.stopOn, "click", "a linha gravada continua com o clique");
+    assert.equal(schemas.noticeDraftSchema.safeParse(lido).success, false, "sem a troca, publicar daria 400");
+    assert.deepEqual(aberto.popup.frequency, { ...repetir, stopOn: "never" });
+    assert.deepEqual({ ...aberto, popup: { ...aberto.popup, frequency: lido.popup.frequency } }, lido, "so a regra de parar muda");
+    assert.equal(schemas.noticeDraftSchema.safeParse(aberto).success, true, status);
+  }
+
+  // Quem tem algo para clicar nos dois aparelhos continua como foi gravado.
+  for (const freeDesign of [free, { ...ctaEscondido, children: [...ctaEscondido.children.slice(0, -1), link, ctaEscondido.children.at(-1)] }]) {
+    const linha = linhaDe(pedido(freeDesign));
+    assert.deepEqual(noticeDraftOfRow(linha), store.rowToDraft(linha));
+    assert.equal(noticeDraftOfRow(linha).popup.frequency.stopOn, "click");
+  }
+
+  // "Só quando o pop-up terminar" e "Uma vez" ficam iguais; o Padrão e o Personalizado com botao tambem.
+  assert.equal(noticeDraftOfRow(linhaDe(pedido(ctaEscondido, { ...repetir, stopOn: "never" }))).popup.frequency.stopOn, "never");
+  assert.deepEqual(noticeDraftOfRow(linhaDe(pedido(ctaEscondido, { mode: "once" }))).popup.frequency, { mode: "once" });
+  assert.equal(noticeDraftOfRow(linhaDe(pedido(null))).popup.frequency.stopOn, "click");
+  const personalizado = editor.applyStarter({ audio: null, cta: CTA }, "text_only", null).design;
+  assert.equal(noticeDraftOfRow(linhaDe(pedido(null, repetir, { design: personalizado }))).popup.frequency.stopOn, "click");
+
+  // O caso antigo (popup_frequency nulo, sem botao no aviso) continua valendo.
+  const antiga = linhaDe(pedido(null), { cta_href: null, cta_label: null, cta_target: null, popup_frequency: null, popup_repeat: "until_action" });
+  assert.equal(noticeDraftOfRow(antiga).popup.frequency.stopOn, "never");
+});
+
+test("D9 ao publicar e aprovar (L4b): a linha passa a 'Só quando o pop-up terminar' e o aluno recebe o que a equipe viu", async () => {
+  const store = await import("../src/server/communications/store.ts");
+  const display = await import("../src/server/communications/popup-display-model.ts");
+  const { noticeDraftOfRow, noticeStopOnToPublish } = await import("../src/server/communications/queries.ts");
+  const free = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
+  const ctaId = free.children.find((node) => node.type === "button" && node.action.kind === "cta").id;
+  // Como o app de antes deixava: o Botao principal escondido no computador e visivel no celular.
+  const soNoCelular = {
+    ...free,
+    children: free.children.map((node) => (node.id === ctaId ? { ...node, hidden: true } : node)),
+    devices: { mobile: { nodes: { [ctaId]: { hidden: false } } } }
+  };
+  const nosDois = { ...free, children: free.children.map((node) => (node.id === ctaId ? { ...node, hidden: true } : node)) };
+  const repetir = { everyMinutes: 120, maxPerDay: 3, maxTotal: 10, mode: "repeat", stopOn: "click" };
+  const linhaDe = (freeDesign, frequency = repetir, extra = {}) => {
+    const base = popupDraft({ design: null, freeDesign });
+    const draft = { ...base, popup: { ...base.popup, frequency }, repeat: frequency.mode === "once" ? "once" : "until_action" };
+
+    return {
+      ...store.draftToColumns(draft),
+      approved_at: null,
+      approved_by: null,
+      created_at: "2026-10-25T12:00:00.000Z",
+      created_by: "00000000-0000-4000-8000-000000000001",
+      deleted_at: null,
+      flow_id: null,
+      flow_node_id: null,
+      id: "00000000-0000-4000-8000-0000000000aa",
+      status: "draft",
+      updated_at: "2026-10-25T12:00:00.000Z",
+      ...extra
+    };
+  };
+
+  // O caso da conferencia: o celular mostra o Botao principal; sem a troca, o aluno pararia de ver ao clicar ali,
+  // enquanto o editor e o relatorio dizem "Só quando o pop-up terminar".
+  for (const [nome, design] of [["só no celular", soNoCelular], ["escondido nos dois", nosDois]]) {
+    for (const status of ["draft", "pending_approval"]) {
+      const linha = linhaDe(design, repetir, { status });
+
+      assert.equal(display.popupSettingsOfRow(linha).frequency.stopOn, "click", `${nome}: a linha gravada para no clique`);
+      assert.deepEqual(noticeStopOnToPublish(linha), { popup_stop_on: "never" }, `${nome}, ${status}`);
+
+      const publicada = { ...linha, ...noticeStopOnToPublish(linha), status: "active" };
+
+      assert.deepEqual(display.popupSettingsOfRow(publicada).frequency, noticeDraftOfRow(linha).popup.frequency, `${nome}: o aluno recebe o que a equipe viu`);
+      assert.deepEqual(display.popupSettingsOfRow(publicada).frequency, { ...repetir, stopOn: "never" });
+      // So a regra de parar muda; o resto da linha fica.
+      assert.deepEqual(Object.keys(noticeStopOnToPublish(linha)), ["popup_stop_on"]);
+    }
+  }
+
+  // Nada muda quando ha algo para clicar nos dois aparelhos, quando a regra ja e outra ou o aviso nao e pop-up Livre.
+  assert.deepEqual(noticeStopOnToPublish(linhaDe(free)), {});
+  assert.deepEqual(noticeStopOnToPublish(linhaDe(soNoCelular, { ...repetir, stopOn: "never" })), {});
+  assert.deepEqual(noticeStopOnToPublish(linhaDe(soNoCelular, { mode: "once" })), {});
+  assert.deepEqual(noticeStopOnToPublish(linhaDe(null)), {}, "o Padrão com botão para no clique, como foi gravado");
+  assert.deepEqual(noticeStopOnToPublish({ ...linhaDe(soNoCelular), kind: "inbox" }), {});
+  // O caso antigo (popup_frequency nulo) nao ganha a coluna: o check da tabela pede popup_stop_on nulo ali.
+  const antiga = linhaDe(null, repetir, { cta_href: null, cta_label: null, cta_target: null, popup_frequency: null, popup_repeat: "until_action", popup_stop_on: null });
+  assert.equal(noticeDraftOfRow(antiga).popup.frequency.stopOn, "never");
+  assert.deepEqual(noticeStopOnToPublish(antiga), {});
+
+  // Publicar (o pedido de aprovacao e o pôr no ar) e aprovar gravam a regra no mesmo update da situacao.
+  const actions = await readFile(new URL("../src/server/communications/actions.ts", import.meta.url), "utf8");
+  assert.match(actions, /updateCampaign\(db, row\.id, \{ \.\.\.common, \.\.\.noticeStopOnToPublish\(row\), sent_at: row\.sent_at \?\? nowIso, status: "active" \}, guard\)/);
+  assert.match(actions, /\{\s+\.\.\.noticeStopOnToPublish\(row\),\s+audience_count: count,[\s\S]*?status: "pending_approval",/);
 });
 
 test("sincronia: no Personalizado, tirar o botao tira o bloco do botao; gravar o audio poe o bloco Áudio antes do botao", () => {

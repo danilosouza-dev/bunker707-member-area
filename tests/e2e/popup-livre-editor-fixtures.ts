@@ -10,8 +10,10 @@ import { contaDeTeste, expect } from "./fixtures";
 // o modelo "Em branco" (conferido no schema e com o botao do aviso so quando o design tem o Botão principal, para o
 // Revisar nao pedir nada), abrir o editor, a caixa parada antes de medir, o arrastar com o mouse sempre dentro da
 // janela e a conferencia antes de soltar, as linhas das Camadas com o pai de cada uma, a frase falada e a conta px
-// da prancheta <-> tela. As ajudas do aluno ficam em popup-livre-fixtures.ts. Funciona no WebKit: so mouse, teclado
-// e o mouse dentro da janela; esperar a prancheta e a caixa parada antes do primeiro mouse.down.
+// da prancheta <-> tela. Do L4b (docs/27 §13.10): os escolhidos desenhados no palco, o clique com teclas seguradas
+// (Shift, Ctrl, Alt), o zoom mostrado na barra e a rolagem da area de desenho. As ajudas do aluno ficam em
+// popup-livre-fixtures.ts. Funciona no WebKit: so mouse, teclado e o mouse dentro da janela; esperar a prancheta e a
+// caixa parada antes do primeiro mouse.down.
 
 export const SESSAO_DO_PRODUTOR = "tests/e2e/.auth/produtor.json";
 /** A tela dos specs do editor (o palco e as tres colunas cabem sem rolar a pagina). */
@@ -193,6 +195,75 @@ export function noPalco(editor: Locator, id: string) {
 /** A frase falada do editor (a regiao aria-live). */
 export function falado(editor: Locator) {
   return editor.locator("[data-free-live]");
+}
+
+/**
+ * Os escolhidos desenhados no palco (L4b): com varios, o id de cada contorno (data-free-selection-item, na ordem da
+ * escolha, o principal por ultimo); com um, o de data-free-selection; sem nada, uma lista vazia. O contorno de um
+ * elemento que acabou de nascer (Duplicar) ou de voltar (Ctrl + Z) so aparece depois de ele ser medido, uns quadros
+ * depois (no WebKit, mais): confira com expect.poll, nunca lendo uma vez so.
+ */
+export async function escolhidos(editor: Locator): Promise<string[]> {
+  const varios = await editor.locator("[data-free-selection-item]").evaluateAll((items) => items.map((item) => item.getAttribute("data-free-selection-item") ?? ""));
+
+  if (varios.length > 0) {
+    return varios;
+  }
+
+  return editor.locator("[data-free-selection]").evaluateAll((items) => items.map((item) => item.getAttribute("data-free-selection") ?? ""));
+}
+
+/** Uma tecla que se segura durante o clique (Ctrl e nao ⌘: o CI roda no Linux). */
+export type TeclaDoClique = "Alt" | "Control" | "Shift";
+
+/**
+ * Clique (ou duplo clique) com teclas seguradas num elemento do desenho ou num ponto da tela (L4b): espera a
+ * hidratacao (o palco montado e o alvo parado, como antes do primeiro mouse.down do WebKit), leva o mouse ao ponto
+ * (sempre dentro da janela), aperta as teclas, clica e solta as teclas na ordem contraria, mesmo se o clique falhar.
+ * As teclas seguradas valem para o pointerdown, o click e o dblclick nos dois navegadores.
+ */
+export async function cliqueCom(page: Page, alvo: Locator | Ponto, teclas: readonly TeclaDoClique[] = [], opcoes: { duplo?: boolean } = {}) {
+  await expect(page.locator("[data-free-stage]")).toBeVisible();
+  const ponto = "evaluate" in alvo ? centroDe(await caixaParada(alvo)) : alvo;
+
+  dentroDaJanela(page, ponto, "do clique");
+  await page.mouse.move(ponto.x, ponto.y);
+
+  for (const tecla of teclas) {
+    await page.keyboard.down(tecla);
+  }
+
+  try {
+    if (opcoes.duplo) {
+      await page.mouse.dblclick(ponto.x, ponto.y);
+    } else {
+      await page.mouse.click(ponto.x, ponto.y);
+    }
+  } finally {
+    for (const tecla of [...teclas].reverse()) {
+      await page.keyboard.up(tecla);
+    }
+  }
+}
+
+/** O botao do menu do zoom na barra (o nome diz "Zoom: Ajustar à tela (62 %)" ou "Zoom: 150 %"). */
+export function menuDoZoom(editor: Locator) {
+  return editor.locator('[data-free-zoom="menu"]');
+}
+
+/** O zoom mostrado na barra ("62 %" no Ajustar à tela, "150 %" num passo). */
+export async function zoomMostrado(editor: Locator): Promise<string> {
+  return ((await menuDoZoom(editor).textContent()) ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** Quanto a area de desenho esta rolada (px de tela) e o maximo que ela rola em cada eixo. */
+export async function rolagemDaArea(editor: Locator): Promise<{ maxX: number; maxY: number; x: number; y: number }> {
+  return editor.locator('[data-free-zone="canvas"]').evaluate((area) => ({
+    maxX: area.scrollWidth - area.clientWidth,
+    maxY: area.scrollHeight - area.clientHeight,
+    x: area.scrollLeft,
+    y: area.scrollTop
+  }));
 }
 
 /**

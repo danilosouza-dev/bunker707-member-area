@@ -230,7 +230,7 @@ O zod nunca entra no pedaço do aluno (guarda). O terceiro arquivo da janela é 
 | D6 | Botão principal = o `cta` (mesma validação, mesmo clique); bloco existe se e só se há `cta` | "para quando clica no botão" continua; nunca um botão invisível |
 | D7 | Áudio = bloco Áudio, sincronizado sozinho | o produtor escolhe onde o player fica |
 | D8 | Segundo botão: Fechar, Lembrar depois ou Abrir um link, reaproveitando os eventos de hoje | sem rota nem histórico novos |
-| D9 | "Quando o aluno clica no botão" aceita também o segundo botão com link (no schema e, desde o fechamento, no card "Quantas vezes") | o clique do link grava `clicked_at` igual ao botão principal |
+| D9 | "Quando o aluno clica no botão" aceita também o segundo botão com link (no schema e, desde o fechamento, no card "Quantas vezes"). No Livre (`docs/27` L27, L45 e L46): até 3 "Abrir um link" contam como o clique, cada um, e a regra vale por aparelho: o computador e o celular precisam ter, cada um, um botão visível que conta (o Botão principal ou um dos links); desde o L4b, o Botão principal escondido no computador não conta ali | o clique do link grava `clicked_at` igual ao botão principal |
 | D10 | Fontes enviadas numa biblioteca (RLS sem política), família `bf_…`, resolvidas pelo servidor; excluir = `deleted_at`, recusado se em uso; até 4 por pop-up, 40 na biblioteca | privacidade (nada do Google), CSS seguro, pop-up gravado nunca perde a fonte |
 | D11 | FontFace com peso `"100 900"` | um arquivo estático vale para qualquer peso sem negrito imitado; fonte variável funciona |
 | D12 | Vídeo direto do navegador ao Storage por endereço assinado, conferido depois (64 bytes) | Server Action tem limite de 1 MB e a Vercel 4,5 MB; o arquivo nunca passa pelo app |

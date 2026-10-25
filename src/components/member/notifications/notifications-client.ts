@@ -230,9 +230,13 @@ export function beaconAudio(id: string, body: AudioRequest) {
   sendBeaconPost(notificationPath(id, "audio"), JSON.stringify(body));
 }
 
-/** O que o aluno fez no pop-up (beacon: pode sair junto com a pagina). `via` so com `closed`. */
-export function postPopupEvent(id: string, event: PopupEvent, options: { via?: PopupCloseVia } = {}) {
-  const body = event === "closed" && options.via ? { event, via: options.via } : { event };
+/**
+ * O que o aluno fez no pop-up (beacon: pode sair junto com a pagina). `via` so com `closed`; `button` so com `clicked`
+ * (no Livre: "cta" ou "link:<id>"; o servidor confere contra o design antes de gravar).
+ */
+export function postPopupEvent(id: string, event: PopupEvent, options: { button?: string; via?: PopupCloseVia } = {}) {
+  const body =
+    event === "closed" && options.via ? { event, via: options.via } : event === "clicked" && options.button ? { event, button: options.button } : { event };
 
   sendBeaconPost(`/api/popups/${encodeURIComponent(id)}/events`, JSON.stringify(body));
 }

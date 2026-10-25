@@ -1,7 +1,16 @@
-// Ajudante de ponteiro do editor Livre (docs/27 §13.9, L4a): segue um gesto de arrastar com eventos de ponteiro, o
-// mesmo para as Camadas, as camadas de fundo, a sequencia no desenho e o painel Elementos (o HTML5 DnD nao entra).
-// - Comeca so com o botao 0, isPrimary e um pointerType aceito NESTA chamada (padrao: so o mouse; o desenho e a
-//   ficha do Fundo, que tem touch-action: none, passam mouse e caneta). O toque segue so tocando.
+// Ajudante de ponteiro do editor Livre (docs/27 §13.9, L4a e L4b): segue um gesto de arrastar com eventos de ponteiro,
+// o mesmo para as Camadas, as camadas de fundo, a sequencia no desenho, o solto e as alcas do desenho e o painel
+// Elementos (o HTML5 DnD nao entra).
+// - Comeca so com o botao 0, isPrimary e um pointerType aceito NESTA chamada (padrao: so o mouse; a sequencia no
+//   desenho e a ficha do Fundo, que tem touch-action: none, passam mouse e caneta; o solto e as alcas do desenho,
+//   no mesmo cartao, passam tambem o toque, com FREE_POINTER_MOUSE_PEN_AND_TOUCH). Nas Camadas e no Elementos o
+//   toque segue so tocando.
+// - O onMove leva o Alt e o Shift de cada pointermove (sem guias e a proporcao nas alcas).
+// - Rolagem sozinha (opcao autoScroll, L44): com o gesto comecado, um laco de requestAnimationFrame rola a area perto
+//   da borda (freeAutoScrollStep) e chama o onMove de novo com o ultimo ponto so quando ela rolou. Cada eixo so se
+//   arma depois que o ponto esteve dentro da area e fora das duas faixas dele uma vez no gesto (C10): entrar pela
+//   faixa da esquerda (vindo do Elementos) nao rola para os lados, e pegar uma linha que ja esta na faixa de cima (a
+//   primeira das Camadas) nao rola para cima; pegar uma linha pelo icone (na faixa da esquerda) e descer rola a lista.
 // - Do pointerdown em diante ouve pointermove, pointerup e pointercancel na janela, em captura e filtrando pelo
 //   pointerId: o pointerup chega mesmo se a captura falhar ou o alvo desmontar.
 // - A captura (setPointerCapture, em try/catch) so vem depois do limiar: capturar ja no pointerdown mudaria o alvo
@@ -24,14 +33,29 @@
 /** Um ponto em px de tela (clientX, clientY); o mesmo formato de FreePoint (free-editor-geometry). */
 type FreePoint = { x: number; y: number };
 
-/** Quem pode arrastar. O toque fica de fora no L4a (rolar e tocar continuam como sao). */
-export type FreePointerKind = "mouse" | "pen";
+/** Quem pode arrastar. O toque so entra quando a chamada pede (o solto e as alcas do desenho, L4b). */
+export type FreePointerKind = "mouse" | "pen" | "touch";
 
 /** Padrao: so o mouse. Sem touch-action: none no alvo, a caneta rola o painel e o navegador manda pointercancel. */
 export const FREE_POINTER_MOUSE: readonly FreePointerKind[] = ["mouse"];
 
 /** Mouse e caneta: so onde o alvo tem touch-action: none (o cartao do desenho e a ficha do Fundo). */
 export const FREE_POINTER_MOUSE_AND_PEN: readonly FreePointerKind[] = ["mouse", "pen"];
+
+/**
+ * Mouse, caneta e toque: o solto e as alcas do desenho, cujo cartao tem touch-action: none (o dedo nao rola a area).
+ * Arrastar o solto com o dedo ja funcionava antes do L4b e continua (decisao 5 do produtor).
+ */
+export const FREE_POINTER_MOUSE_PEN_AND_TOUCH: readonly FreePointerKind[] = ["mouse", "pen", "touch"];
+
+/** Largura da faixa, dentro da borda da area, em que a rolagem sozinha anda (px de tela). */
+export const FREE_AUTO_SCROLL_EDGE_PX = 32;
+
+/** O mais rapido que a rolagem sozinha anda, colado na borda (px por quadro). */
+export const FREE_AUTO_SCROLL_MAX_PX = 20;
+
+/** Quantos pontos do gesto, no maximo, esperam o proximo quadro para armar a rolagem sozinha (sem quadro, nao cresce). */
+const FREE_AUTO_SCROLL_TRAIL_MAX = 64;
 
 /** Quanto tempo o click que vem depois de um gesto comecado fica engolido, a contar do botao solto. */
 export const FREE_POINTER_CLICK_GUARD_MS = 350;
@@ -53,13 +77,27 @@ export type FreePointerStart = {
   pointerType: string;
 };
 
+/** As teclas apertadas no pointermove: Alt desliga as guias e Shift mantem a proporcao nas alcas. */
+export type FreePointerKeys = { altKey: boolean; shiftKey: boolean };
+
+/** A caixa da area que rola, em px de tela (o getBoundingClientRect dela serve). */
+export type FreeAutoScrollArea = { bottom: number; left: number; right: number; top: number };
+
 export type FreePointerHandlers = {
+  /**
+   * A area que rola sozinha perto da borda durante o gesto (a area de desenho, a lista das Camadas), lida a cada
+   * quadro. Sem ela (ou devolvendo null), nada rola. A rolagem refaz o onMove com o ultimo ponto e as ultimas teclas.
+   */
+  autoScroll?: () => Element | null;
   /** O gesto comecado acabou sem soltar (Esc, pointercancel, blur da janela ou o botao solto fora da janela). */
   onCancel: () => void;
   /** O botao foi solto depois do limiar, neste ponto (px de tela). Chamado uma vez. */
   onDrop: (client: FreePoint) => void;
-  /** O ponteiro andou depois do limiar (o primeiro vem logo depois de onStart). */
-  onMove: (client: FreePoint) => void;
+  /**
+   * O ponteiro andou depois do limiar (o primeiro vem logo depois de onStart), com o Alt e o Shift desse pointermove.
+   * Com autoScroll, vem de novo com o ultimo ponto quando a area rolou sozinha.
+   */
+  onMove: (client: FreePoint, keys: FreePointerKeys) => void;
   /** O ponteiro passou do limiar: e a hora de tirar a foto do design (antes disso, o gesto pode ser so um clique). */
   onStart?: () => void;
   /** Os pointerType aceitos nesta chamada. Padrao: FREE_POINTER_MOUSE. */
@@ -76,6 +114,59 @@ const FREE_POINTER_MODIFIER_KEYS: ReadonlySet<string> = new Set(["Alt", "Control
  * captura quando o remove recebe { capture: true }, e o navegador aceita os dois.
  */
 const CAPTURE: AddEventListenerOptions = { capture: true };
+
+/** A velocidade de um lado: de 1 (no fim da faixa) a max (colada na borda); 0 fora da faixa. */
+function freeAutoScrollSpeed(distance: number, edge: number, max: number): number {
+  if (!(distance < edge)) {
+    return 0;
+  }
+
+  return Math.max(1, Math.round((max * (edge - distance)) / edge));
+}
+
+/**
+ * Quanto a area rola neste quadro (px de tela), com o ponto do ponteiro: so com o ponto dentro da area e a ate `edge`
+ * px de uma borda; a velocidade cresce de 1 a `max` perto da borda (negativa para a esquerda e para cima). Fora da
+ * area, nada. Numa area mais estreita que duas faixas, os dois lados se descontam (no meio, nada).
+ */
+export function freeAutoScrollStep(area: FreeAutoScrollArea, point: FreePoint, options: { edge?: number; max?: number } = {}): { dx: number; dy: number } {
+  const edge = options.edge ?? FREE_AUTO_SCROLL_EDGE_PX;
+  const max = Math.round(options.max ?? FREE_AUTO_SCROLL_MAX_PX);
+  const left = point.x - area.left;
+  const right = area.right - point.x;
+  const top = point.y - area.top;
+  const bottom = area.bottom - point.y;
+
+  // Os "!(x >= 0)" tambem barram o NaN.
+  if (!(edge > 0) || !(max >= 1) || !(left >= 0) || !(right >= 0) || !(top >= 0) || !(bottom >= 0)) {
+    return { dx: 0, dy: 0 };
+  }
+
+  // Subtrair (e nao negar) nunca da -0.
+  return {
+    dx: freeAutoScrollSpeed(right, edge, max) - freeAutoScrollSpeed(left, edge, max),
+    dy: freeAutoScrollSpeed(bottom, edge, max) - freeAutoScrollSpeed(top, edge, max)
+  };
+}
+
+/**
+ * Os eixos que o ponto arma na rolagem sozinha (C10): com ele dentro da area, o x se arma fora das faixas da esquerda
+ * e da direita, e o y fora das de cima e de baixo. Fora da area, nenhum. Numa area mais estreita (ou mais baixa) que
+ * duas faixas, aquele eixo nunca se arma.
+ */
+function freeAutoScrollArms(area: FreeAutoScrollArea, point: FreePoint, edge: number): { x: boolean; y: boolean } {
+  const left = point.x - area.left;
+  const right = area.right - point.x;
+  const top = point.y - area.top;
+  const bottom = area.bottom - point.y;
+
+  // Os "!(x >= 0)" tambem barram o NaN.
+  if (!(left >= 0) || !(right >= 0) || !(top >= 0) || !(bottom >= 0)) {
+    return { x: false, y: false };
+  }
+
+  return { x: left >= edge && right >= edge, y: top >= edge && bottom >= edge };
+}
 
 /**
  * Segue o gesto que comeca neste pointerdown. Devolve a funcao que desliga o gesto (os ouvintes de antes e de durante)
@@ -99,9 +190,19 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
   // solto para contar os 350 ms); guard: so o bloqueador do click; off: tudo desligado.
   let state: "dragging" | "guard" | "held" | "off" | "pending" = "pending";
   let timer: number | null = null;
+  // Rolagem sozinha: o quadro pedido, os eixos ja armados (C10) e o ultimo ponto e as ultimas teclas do pointermove.
+  let frame: number | null = null;
+  let armedX = false;
+  let armedY = false;
+  let lastPoint: FreePoint = origin;
+  let lastKeys: FreePointerKeys = { altKey: false, shiftKey: false };
+  // Os pontos do gesto desde o ultimo quadro (o do pointerdown entra no primeiro): a arma (C10) olha todos, e nao so o
+  // ultimo. Um movimento rapido ate a borda, entre dois quadros, nao deixa o eixo desarmado. A area so e lida no quadro.
+  let trail: FreePoint[] = handlers.autoScroll ? [origin] : [];
 
   const ours = (event: PointerEvent) => event.pointerId === pointerId;
   const pointOf = (event: PointerEvent): FreePoint => ({ x: event.clientX, y: event.clientY });
+  const keysOf = (event: PointerEvent): FreePointerKeys => ({ altKey: Boolean(event.altKey), shiftKey: Boolean(event.shiftKey) });
 
   function onPointerMove(event: PointerEvent) {
     if (!ours(event)) {
@@ -134,9 +235,83 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
       }
 
       handlers.onStart?.();
+      startAutoScroll();
     }
 
-    handlers.onMove(pointOf(event));
+    lastPoint = pointOf(event);
+    lastKeys = keysOf(event);
+
+    if (handlers.autoScroll && !(armedX && armedY)) {
+      trail.push(lastPoint);
+
+      if (trail.length > FREE_AUTO_SCROLL_TRAIL_MAX) {
+        trail = trail.slice(-FREE_AUTO_SCROLL_TRAIL_MAX);
+      }
+    }
+    handlers.onMove(lastPoint, lastKeys);
+  }
+
+  /** Liga o laco da rolagem sozinha, so com a opcao e com o gesto comecado (o onStart pode ter desligado tudo). */
+  function startAutoScroll() {
+    if (handlers.autoScroll && state === "dragging" && frame === null) {
+      frame = win.requestAnimationFrame(autoScrollFrame);
+    }
+  }
+
+  /**
+   * Um quadro da rolagem sozinha: le a area e o ultimo ponto, rola sem suavizar e refaz o onMove so quando a area
+   * rolou de fato (com o ponteiro parado e nada rolando, nenhum onMove a cada quadro). Para em endGesture e em stop.
+   */
+  function autoScrollFrame() {
+    frame = null;
+
+    if (state !== "dragging") {
+      return;
+    }
+
+    const area = handlers.autoScroll?.() ?? null;
+
+    if (area) {
+      const box = area.getBoundingClientRect();
+
+      // Armado, o eixo vale ate o fim do gesto. No quadro que o arma so com o ultimo ponto, ele esta fora das faixas
+      // daquele eixo: ali nao rola.
+      for (const point of [...trail, lastPoint]) {
+        const arms = freeAutoScrollArms(box, point, FREE_AUTO_SCROLL_EDGE_PX);
+
+        armedX = armedX || arms.x;
+        armedY = armedY || arms.y;
+      }
+
+      trail = [];
+
+      const step = freeAutoScrollStep(box, lastPoint);
+      // So nos eixos armados: o desarmado fica parado mesmo com o ponto na faixa dele.
+      const dx = armedX ? step.dx : 0;
+      const dy = armedY ? step.dy : 0;
+
+      if (dx !== 0 || dy !== 0) {
+        const beforeLeft = area.scrollLeft;
+        const beforeTop = area.scrollTop;
+
+        // A forma com numeros: sem scroll-behavior: smooth na area, a rolagem e na hora e ja se le aqui.
+        area.scrollBy(dx, dy);
+
+        if (area.scrollLeft !== beforeLeft || area.scrollTop !== beforeTop) {
+          handlers.onMove(lastPoint, lastKeys);
+        }
+      }
+    }
+
+    // O onMove pode ter desligado o gesto (quem chamou desmontou): so pede o proximo quadro com ele comecado.
+    startAutoScroll();
+  }
+
+  function stopAutoScroll() {
+    if (frame !== null) {
+      win.cancelAnimationFrame(frame);
+      frame = null;
+    }
   }
 
   function onPointerUp(event: PointerEvent) {
@@ -227,6 +402,7 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
   }
 
   function removeGesture() {
+    stopAutoScroll();
     win.removeEventListener("pointermove", onPointerMove, CAPTURE);
     win.removeEventListener("pointerup", onPointerUp, CAPTURE);
     win.removeEventListener("pointercancel", onPointerCancel, CAPTURE);

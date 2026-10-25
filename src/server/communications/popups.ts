@@ -256,6 +256,13 @@ function safeMediaUrl(value: string | null) {
   }
 }
 
+/** O Botao principal do aviso: so com texto, jeito de abrir e destino conferido; senao null. */
+function popupCtaOf(row: LivePopupRow): PopupItem["cta"] {
+  return row.cta_href && row.cta_label && row.cta_target && isSafeHeroCtaHref(row.cta_href)
+    ? { href: row.cta_href, label: row.cta_label, target: row.cta_target }
+    : null;
+}
+
 function toPopupItem(entry: LivePopupEntry, delivery: PopupCountState): PopupItem {
   const { freeDesign, row } = entry;
   const imageUrl = freeDesign ? null : safeMediaUrl(row.image_url);
@@ -277,10 +284,7 @@ function toPopupItem(entry: LivePopupEntry, delivery: PopupCountState): PopupIte
         : null,
     body: freeDesign ? (text ? freeHeadingText(text) : "") : (row.body ?? ""),
     canSnooze: canSnooze(delivery, row.allow_snooze),
-    cta:
-      row.cta_href && row.cta_label && row.cta_target && isSafeHeroCtaHref(row.cta_href)
-        ? { href: row.cta_href, label: row.cta_label, target: row.cta_target }
-        : null,
+    cta: popupCtaOf(row),
     id: row.id,
     image: imageUrl ? { alt: row.image_alt ?? "", url: imageUrl } : null,
     title: (heading ? freeHeadingText(heading) : "") || row.title
@@ -426,6 +430,17 @@ export async function showPopup(userId: string, campaignId: string, input: { pag
 
     throw error;
   }
+}
+
+/**
+ * O design Livre do pop-up no ar e se o aviso tem Botao principal, da mesma lista em cache do show (nunca dado de
+ * aluno; nenhuma consulta nova enquanto o cache vale). Fora da lista ou fora do Livre, null. A rota de eventos confere
+ * por aqui o botao clicado (popup-clicked-button.ts, docs/25 §5.1).
+ */
+export async function livePopupFreeDesign(campaignId: string): Promise<{ freeDesign: PopupFreeDesign; hasCta: boolean } | null> {
+  const entry = (await getLivePopups()).find((item) => item.rules.id === campaignId);
+
+  return entry?.freeDesign ? { freeDesign: entry.freeDesign, hasCta: popupCtaOf(entry.row) !== null } : null;
 }
 
 /** O que o evento mudou; no "impressed" da v1, as vezes no dia (o historico grava ate 100). */

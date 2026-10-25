@@ -197,6 +197,8 @@ Na página do pop-up que já foi ao ar (`kind = popup` e publicado), logo depois
 
 Percentuais com a base de cada bloco (nunca acima de 100 %; base 0 = nada escrito); linha com 0 não aparece. Barras horizontais simples com o número escrito ao lado (a barra `aria-hidden`), nada de pizza. Modo tabela: `<table>` com `<caption>` e `<th scope="col">` (primeira coluna `Página` / `Momento` / `Como fecharam` / `Quantas vezes`, depois `Vezes`, a coluna de percentual `% das vezes` em Onde apareceu e Em que momento, `% das vezes que apareceu` em Como fecharam e `% de quem viu` em Quantas vezes cada aluno viu, e `Alunos`; por produto `Produto`, `Vezes`, `Alunos`); abaixo de 768 px cada linha vira um cartão (`<dl>`), sem rolagem lateral a 375 px. KPIs em 4 colunas (2 abaixo de 768 px).
 
+**Clique por botão (L4b do Livre, `docs/27` L47)**: desde 25/10/2026, o `message_clicked` de um pop-up Livre pode guardar qual botão foi clicado (`metadata.button`: `cta` para o Botão principal ou `link:<id>` para um dos até 3 "Abrir um link"), conferido contra o design no ar. A função do relatório (`communication_popup_report`) conta todo `message_clicked` sem ler o `metadata`: **Clicaram no botão** continua somando todos os botões, e um clique com ou sem a chave conta igual (teste em `tests/integration/pop-ups-relatorio.test.mjs`). O bloco **Clicaram em cada botão** fica para o L4c: ele muda a função (migração aditiva nova, aplicada na nuvem antes do merge) e pede medida nova pelo §7.2; os dados já estão sendo gravados.
+
 ### 2.7 Modelos (`docs/28`)
 
 Os momentos `No primeiro acesso` e `Ao concluir um curso` e os produtos do primeiro acesso vão e voltam nos modelos de pop-up, pelos mesmos schemas (versão do payload continua **1**; modelo de antes lê igual). A janela continua fora do modelo: para "No primeiro acesso", o "começo do pop-up" é sempre o do aviso criado a partir do modelo. Produto citado que não existe mais: `Produto removido` no editor.
@@ -321,7 +323,7 @@ A cota de 30 por minuto por aluno do pop-up continua (cada aluno faz no máximo 
 
 ### 6.3 Eventos (`student_events`)
 
-Nenhum evento novo. `message_impressed.trigger` pode ser `first_login` ou `course_completed`. O aluno não grava mais linhas `campaign` (§5). O índice parcial cobre só essas linhas.
+Nenhum evento novo. `message_impressed.trigger` pode ser `first_login` ou `course_completed`. Desde o L4b do Livre (`docs/27` L47), o `message_clicked` pode levar `button` (`cta` ou `link:<id>`, só o id do elemento, conferido contra o design; `docs/25` §5.1), que o relatório não lê (§2.6). O aluno não grava mais linhas `campaign` (§5). O índice parcial cobre só essas linhas.
 
 ---
 
@@ -384,6 +386,18 @@ O horizonte de 24 h acrescenta no máximo uma leitura pela chave primária por a
 | Aula | 390.199 | 392.832 | +2.633 B | ≤ 3 KB: ok |
 
 O que cresce em toda página é a hora marcada (o modelo do host com o cliente +868 B, o host +346 B, o sinal da aula +337 B, o pedaço do `popup-display-model` usado no navegador 1.229 → 1.391 B), que precisa estar em toda página onde um pop-up ao vivo pode abrir. A ponte (≈ 1,8 KB) fica num pedaço baixado só na aula com player da lista; a janela do pop-up continua à parte. Baixar `reconcileClockOpenings` e `rearmAfterNotStarted` à parte tiraria só ~0,3 KB, continuaria acima do orçamento e poria um download justo no minuto da hora marcada, quando todas as abas abrem juntas: o integrador aceitou o excesso (§8.2).
+
+**Medida do L4b do Livre (25/10/2026)**, pelo mesmo método, o L4a (20fb1ab) × o L4b (d7fd7ac), sem `.env` nas duas árvores (os números absolutos não se comparam com os de cima, de outra árvore e com as variáveis de teste; vale a diferença): o clique por botão (`docs/27` L47) passa o `button` do cartão à janela, ao host e ao `postPopupEvent`, que ficam no JS de toda página; a conferência mora num módulo só do servidor (`popup-clicked-button.ts`, `server-only`), que nenhum arquivo de `.next/static` traz.
+
+| Página | L4a (bytes) | L4b (bytes) | Diferença |
+|---|---|---|---|
+| Início | 300.940 | 300.975 | +35 B |
+| Favoritos | 284.710 | 284.736 | +26 B |
+| Aula | 394.948 | 395.000 | +52 B |
+
+A janela do pop-up (o grupo do `import()` do host) foi de 22.796 para 22.805 B (+9 B) e o pedaço do cartão Livre, de 10.307 para 10.362 B (+55 B, a prévia de vários no editor e o botão no `onCta`); detalhes no `docs/27` §7.
+
+Essas diferenças de dezenas de bytes ficam dentro do ruído da compilação: na mesma pasta, a mesma árvore dá os mesmos bytes; em pastas diferentes, não. O L4a compilado três vezes, em pastas diferentes, deu de 300.940 a 300.954 B no Início, de 284.710 a 284.732 B em Favoritos e de 394.948 a 394.971 B na Aula (e até cerca de 90 B na página do aviso no admin). Vale a ordem de grandeza: o clique por botão custa dezenas de bytes em cada página. Para comparar duas árvores byte a byte, compilar as duas na mesma pasta.
 
 ---
 
@@ -453,6 +467,7 @@ O que a implementação decidiu onde o desenho era omisso ou não batia com o c�
 | Baixar `reconcileClockOpenings`/`rearmAfterNotStarted` à parte | Z3 |
 | Certificado ao concluir o curso | não existe certificado no produto |
 | Enquete dentro do pop-up | v3b-3 |
+| **Clicaram em cada botão** no relatório (o Botão principal e cada "Abrir um link" do Livre) | L4c do Livre (`docs/27` §10): muda `communication_popup_report` (migração aditiva nova, aplicada na nuvem antes do merge) e pede medida nova (§7.2); o `metadata.button` já é gravado desde o L4b (§2.6) |
 
 **Ajustes conhecidos, para depois**: os quatro arquivos ponta a ponta novos rodam no Chromium localmente; o WebKit roda no CI. A suíte de integração deixa eventos `campaign` órfãos de contas de teste (o `limparComunicacao` apaga avisos, não o histórico deles): não muda um relatório por id, mas pesa numa conta global de `student_events` no banco local.
 

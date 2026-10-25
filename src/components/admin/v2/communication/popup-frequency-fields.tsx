@@ -18,6 +18,7 @@ import {
   POPUP_REPEAT_DEFAULTS,
   POPUP_STOP_OPTIONS,
   clickStopDisabled,
+  clickStopHiddenOnDevice,
   minutesToParts,
   partsToMinutes,
   popupSettingsOfDraft,
@@ -209,6 +210,7 @@ function NoteLine({ children, tone }: { children: ReactNode; tone: "info" | "war
 function StopPills({
   custom,
   disabled,
+  hiddenButton,
   noButton,
   onChange,
   value
@@ -216,6 +218,8 @@ function StopPills({
   /** Design Personalizado ou Livre: o aviso sem botao aponta para o card Design (nao para a chave do conteudo). */
   custom: boolean;
   disabled: boolean;
+  /** Livre com o botao escondido num aparelho: a frase pede para mostrar o botao nos dois. */
+  hiddenButton: boolean;
   noButton: boolean;
   onChange: (value: PopupRepeatFrequency["stopOn"]) => void;
   value: PopupRepeatFrequency["stopOn"];
@@ -256,7 +260,7 @@ function StopPills({
       </div>
       {noButton ? (
         <p className="text-xs leading-5 text-[var(--text-secondary)]" id="popup-para-sem-botao">
-          {custom ? copy.stopNoButtonDesign : copy.stopNoButton}
+          {hiddenButton ? copy.stopHiddenButtonDesign : custom ? copy.stopNoButtonDesign : copy.stopNoButton}
         </p>
       ) : null}
     </div>
@@ -406,7 +410,7 @@ export function PopupFrequencyFields({ disabled, draft, errorFor, live, onChange
 
             <div className="flex min-w-0 flex-col gap-1.5">
               <span className={labelClass}>{copy.stopLabel}</span>
-              <StopPills custom={Boolean(draft.design || draft.freeDesign)} disabled={disabled} noButton={noButton} onChange={(stopOn) => changeRepeat({ stopOn })} value={frequency.stopOn} />
+              <StopPills custom={Boolean(draft.design || draft.freeDesign)} disabled={disabled} hiddenButton={clickStopHiddenOnDevice(draft)} noButton={noButton} onChange={(stopOn) => changeRepeat({ stopOn })} value={frequency.stopOn} />
               <p className="text-[13px] leading-5 text-[var(--text-secondary)]">{copy.stopHint[frequency.stopOn]}</p>
               <FieldError id="popup-para-error" message={errorFor("popup.frequency.stopOn")} />
             </div>

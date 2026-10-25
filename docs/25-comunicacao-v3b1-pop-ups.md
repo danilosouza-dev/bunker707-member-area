@@ -285,9 +285,16 @@ Todas com `no-store`, corpo por `readBoundedJson` (aceita o `text/plain` do `sen
 | `GET /api/notifications/summary?page=<chave>` (chave inválida é ignorada) | — | 200 `{ data: { popup: null, popups: { asOf, pages, plan } \| null, unseen } }` | — |
 | `GET /api/notifications/summary?popup=1` (v1) | — | 200 `{ data: { popup, unseen } }` | — |
 | `POST /api/popups/[id]/show` (novo) | `{ page, trigger: "page_load" \| "lesson_completed" }`, até 1.000 B | 200 `{ data: { next: { notBefore } \| null, popup } }`; 400 `Pedido invalido.`; 404 `Pop-up nao encontrado.`; 409 `{ error: "Pop-up fora da vez.", reason: "page" \| "trigger" \| "frequency" \| "changed", nextAt }`; 413; 429 | `message_impressed` `{ campaign_id, page, trigger }` (depois da resposta, até 100 por pop-up, aluno e dia) |
-| `POST /api/popups/[id]/events` | `{ event, via? }` (`via` só com `closed`: `x` \| `outside` \| `esc` \| `page`), até 8.000 B | 200; 400 `Evento invalido.` (também `via` desconhecido); 404; 409 `Não dá para lembrar depois de novo.` e, no `impressed` da v1, `Pop-up fora da vez.`; 429 | `message_closed` `{ campaign_id, via }`, `message_clicked`, `message_dismissed`, `message_snoozed`, `message_impressed` da v1 `{ campaign_id, page: "home", trigger: "page_load" }` |
+| `POST /api/popups/[id]/events` | `{ event, via?, button? }` (`via` só com `closed`: `x` \| `outside` \| `esc` \| `page`; `button` só com `clicked`, no Livre: `cta` \| `link:<id>`), até 8.000 B | 200; 400 `Evento invalido.` (também `via` desconhecido); 404; 409 `Não dá para lembrar depois de novo.` e, no `impressed` da v1, `Pop-up fora da vez.`; 429. O `button` nunca dá 400: inválido é ignorado | `message_closed` `{ campaign_id, via }`, `message_clicked` (`{ campaign_id, button }` quando o botão confere, abaixo), `message_dismissed`, `message_snoozed`, `message_impressed` da v1 `{ campaign_id, page: "home", trigger: "page_load" }` |
 
 O `PopupItem` só ganha `close: "x_only"` em `Só no X`: o objeto do pop-up padrão continua byte a byte o da v1.
+
+**Qual botão o aluno clicou (L4b, `docs/27` L47)**. No Livre, o clique num botão com destino manda junto qual foi: `cta` (o Botão principal) ou `link:<id>` (um "Abrir um link", pelo id do elemento). O caminho: o cartão chama `onCta(event, link, button)`, a janela passa o `button` ao `onFinish("clicked", undefined, button)`, o host leva ao `postPopupEvent` só no `clicked` e o cliente só põe a chave no corpo do `clicked`. O Padrão e o Personalizado nunca mandam. A rota grava `metadata.button` só quando as duas conferências passam, depois do evento válido:
+
+1. a forma (`popupClickedButton`, `src/server/communications/popup-clicked-button.ts`): `^(?:cta|link:[a-z][a-z0-9]{0,15})$`, o mesmo id de `FREE_ID_PATTERN`; fora disso, nada é lido;
+2. o design do pop-up no ar (a mesma lista em cache do `show`, sem consulta nova enquanto o cache vale): o pop-up é Livre e tem esse botão visível no computador ou no celular (fora de caixa escondida); `link:<id>` pede um "Abrir um link" com esse id e destino conferido; `cta` pede o Botão principal e o aviso com botão.
+
+Valor que não confere (texto livre, id que não existe, botão escondido nos dois aparelhos, Padrão ou Personalizado) é ignorado sem 400: o clique grava sem a chave. Uma falha na leitura da lista vira uma linha de log (`[comunicacao] botao clicado do pop-up <id>`) e o clique grava sem a chave. O módulo é só do servidor (`server-only`; só a rota de eventos importa): o JS das páginas do aluno não cresce com a conferência. O relatório (`communication_popup_report`) conta todo `message_clicked` sem ler o `metadata`: "Clicaram no botão" soma todos os botões; o bloco por botão fica para o L4c, com os dados já gravados.
 
 ### 5.2 Server Actions (`actions.ts`)
 
@@ -303,7 +310,7 @@ O `PopupItem` só ganha `close: "x_only"` em `Só no X`: o objeto do pop-up padr
 
 ### 5.3 Eventos (`student_events`, só ids e códigos)
 
-`message_impressed` ganha `page` e `trigger`; `message_closed` ganha `via`; os outros não mudam. Guardam o que o relatório da v3b-2 precisa (aberturas por tipo de página, último jeito de fechar).
+`message_impressed` ganha `page` e `trigger`; `message_closed` ganha `via`; os outros não mudam. Guardam o que o relatório da v3b-2 precisa (aberturas por tipo de página, último jeito de fechar). Desde o L4b, o `message_clicked` do Livre pode levar `button` (`cta` ou `link:<id>`, só o id do elemento, conferido contra o design; seção 5.1).
 
 ---
 
