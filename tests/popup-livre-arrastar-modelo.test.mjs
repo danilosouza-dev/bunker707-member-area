@@ -434,6 +434,34 @@ test("desenho: um solto girado tira a subárvore inteira, como contêiner e como
   assert.deepEqual(containers.map((container) => [container.id, container.flow]), [[null, false], ["caixa", true], ["girada", false], ["dentroGirada", true], ["travada", true]]);
 });
 
+test("desenho: quem está dentro de um solto girado não muda de lugar pelo desenho (soltar no próprio lugar não tira da caixa)", () => {
+  // [Titulo, Girada (solta, rotate 15)[t1, t2], Links]: o t1 e da sequencia, nao esta travado e tem retangulo.
+  const value = design([
+    TITLE,
+    { children: [{ ...TEXT, id: "t1" }, { ...TEXT, id: "t2" }], id: "girada", place: { mode: "free", rotate: 15, w: 200, x: 120, y: 200 }, type: "box" },
+    LINKS
+  ]);
+  const rects = { "@artboard": rect(0, 0, 440, 500), girada: rect(120, 200, 200, 100), links: rect(24, 440, 392, 20), t1: rect(130, 210, 180, 30), t2: rect(130, 250, 180, 30), titulo: rect(24, 24, 392, 40) };
+
+  // A casa dele (a caixa girada) nao entra na lista: sem contêineres, o soltar nao muda nada.
+  assert.deepEqual(editor.freeFlowContainers(value, rects, { id: "t1" }), []);
+  assert.equal(geometry.freeFlowDropAt({ x: 220, y: 225 }, editor.freeFlowContainers(value, rects, { id: "t1" }), AT_1), null, "no centro do proprio t1");
+  assert.equal(geometry.freeFlowDropAt({ x: 200, y: 10 }, editor.freeFlowContainers(value, rects, { id: "t2" }), AT_1), null, "nem acima do Titulo");
+
+  // A caixa interna de um solto girado e o que esta dentro dela: o mesmo.
+  const { design: stage, rects: stageRects } = stageSample();
+  assert.deepEqual(editor.freeFlowContainers(stage, stageRects, { id: "e1" }), []);
+  assert.deepEqual(editor.freeFlowContainers(stage, stageRects, { id: "dentroGirada" }), []);
+
+  // Sem giro, a casa entra e o mesmo vao e o lugar de hoje.
+  const straight = design(value.children.map((node) => (node.id === "girada" ? { ...node, place: { mode: "free", w: 200, x: 120, y: 200 } } : node)));
+  const home = geometry.freeFlowDropAt({ x: 220, y: 225 }, editor.freeFlowContainers(straight, rects, { id: "t1" }), AT_1);
+  assert.deepEqual({ index: home.index, parentId: home.parentId }, { index: 0, parentId: "girada" });
+  assert.equal(editor.freeMoveProblem(straight, "t1", home), "");
+  // Os elementos de fora do solto girado continuam com os lugares de sempre.
+  assert.deepEqual(editor.freeFlowContainers(value, rects, { id: "titulo" }).map((container) => container.id), [null]);
+});
+
 test("desenho: os motivos de recusa (caixa cheia de fora e profundidade) e o aparelho do palco", () => {
   const full = design([
     TEXT,

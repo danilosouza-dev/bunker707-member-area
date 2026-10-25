@@ -1023,6 +1023,17 @@ export function freeLayerDropTarget(design: PopupFreeDesign, over: FreeLayerOver
   return { index: found.index + 1, parentId };
 }
 
+/** Algum ancestral e um solto girado (no desenho, o retangulo de dentro dele e o envelope girado). */
+function insideRotatedFree(design: PopupFreeDesign, found: Located): boolean {
+  for (let parent = found.parent; parent; parent = locate(design, parent.id)?.parent ?? null) {
+    if (parent.place?.mode === "free" && parent.place.rotate) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Os lugares que recebem elementos da sequencia no desenho, numa foto do comeco do gesto. `stage` e o design do palco
  * (resolveFreeForDevice: a direcao, a quebra e os escondidos do celular); `rects`, os medidos. A prancheta sempre
@@ -1030,7 +1041,9 @@ export function freeLayerDropTarget(design: PopupFreeDesign, over: FreeLayerOver
  * a subarvore de um solto girado (o retangulo medido de dentro dele e o envelope girado). Cada caixa diz o motivo de
  * recusa: cheia (20) quando nao e o pai de hoje, ou a profundidade (a altura de caixa de quem se move, ou `height` de um
  * elemento novo). Caixa travada aceita. Os itens sao os filhos desenhados da sequencia (sem soltos, escondidos, sem
- * retangulo e sem quem se move), com o indice real em children.
+ * retangulo e sem quem se move), com o indice real em children. Quem esta dentro de um solto girado nao tem lugar pelo
+ * desenho (a casa dele ficou de fora, e soltar no proprio lugar o tiraria da caixa): a lista vem vazia, o soltar da
+ * null e nada muda. Para ele ficam as Camadas, o Subir e o Descer e o ⋯.
  */
 export function freeFlowContainers(stage: PopupFreeDesign, rects: FreeMeasuredRects, moving: { id: FreeId } | { height: 0 | 1 }): FreeFlowContainer[] {
   const artboard = rects["@artboard"];
@@ -1041,6 +1054,11 @@ export function freeFlowContainers(stage: PopupFreeDesign, rects: FreeMeasuredRe
 
   const movingId = "id" in moving ? moving.id : null;
   const found = movingId ? locate(stage, movingId) : null;
+
+  if (found && insideRotatedFree(stage, found)) {
+    return [];
+  }
+
   const height = "id" in moving ? (found ? boxHeight(found.node) : 0) : moving.height;
   const homeParent = found ? (found.parent?.id ?? null) : undefined;
   const itemsOf = (children: readonly FreeNode[]): FreeFlowItem[] =>
