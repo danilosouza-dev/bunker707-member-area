@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import test from "node:test";
 import { actionStubs } from "./support/admin-action-stubs.mjs";
@@ -10,8 +11,9 @@ import { actionStubs } from "./support/admin-action-stubs.mjs";
 // em pagina que nenhum pop-up cobre e le uma so na pagina coberta; o mapa nunca leva id de produto; o
 // ?popup=1 da v1 continua igual; o show (400/404/409/200, o updated_at exato, os 5 s, o teto de 100 eventos
 // por dia); o limite de 30 chamadas de pop-up por minuto (chave propria, sem gastar a do sino); os eventos
-// (jeito de fechar so no historico, "Volta em" do pop-up, o "impressed" da v1 pela RPC) e a falha da
-// leitura das formacoes, que nunca derruba os pop-ups.
+// (jeito de fechar so no historico, "Volta em" do pop-up, o "impressed" da v1 pela RPC, o botao clicado do Livre
+// em metadata.button so com a forma e o design conferidos, docs/27 L47) e a falha da leitura das formacoes, que
+// nunca derruba os pop-ups.
 
 const sessao = (globalThis.__popupRotasSessao ??= { user: null });
 const cacheDoNext = new URL("./support/integration-next-cache.mjs", import.meta.url).href;
@@ -43,6 +45,8 @@ const { popupDayBounds } = await import("../src/server/communications/popup-disp
 const summaryRoute = await import("../src/app/api/notifications/summary/route.ts");
 const showRoute = await import("../src/app/api/popups/[id]/show/route.ts");
 const eventsRoute = await import("../src/app/api/popups/[id]/events/route.ts");
+const clickedButton = await import("../src/server/communications/popup-clicked-button.ts");
+const { FREE_ID_PATTERN } = await import("../src/server/communications/popup-free-model.ts");
 
 const MIN = 60_000;
 const HORA = 60 * MIN;
@@ -638,6 +642,254 @@ test("eventos: fechar nao muda a linha e leva o jeito (x, outside, esc, page; pa
 
   assert.equal((await evento(POPUP, { event: "clicked", via: "x" })).status, 200, "`via` valido fora do fechar nao conta");
   assert.deepEqual(eventos(db).at(-1).metadata, { campaign_id: POPUP });
+});
+
+/** "Abrir um link" do Livre de teste (id "site"). */
+const LINK_DO_LIVRE = { action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, id: "site", label: "Ver o site", type: "button" };
+
+/** Um Livre valido (titulo, Botao principal, os elementos dados e os links) como a coluna popup_design guarda. */
+function livre(elementos = [LINK_DO_LIVRE], extra = {}) {
+  return {
+    children: [
+      { id: "titulo", lines: [[{ text: "Turma nova" }]], type: "heading" },
+      { action: { kind: "cta" }, id: "botao", type: "button" },
+      ...elementos,
+      { dismiss: true, id: "links", type: "links" }
+    ],
+    mode: "free",
+    version: 1,
+    ...extra
+  };
+}
+
+/** Leituras da lista no ar (a unica que pede popup_design). */
+const leiturasDaListaNoAr = (db) => db.calls.selects.filter((call) => call.table === "campaigns" && String(call.columns).includes("popup_design")).length;
+
+/** Um evento aceito (200) e o metadata que ficou no historico. */
+async function metadataDe(db, body) {
+  const resposta = await evento(POPUP, body);
+  assert.equal(resposta.status, 200, JSON.stringify({ body, resposta: resposta.body }));
+  assert.deepEqual(resposta.body, { data: { ok: true } });
+  return eventos(db).at(-1).metadata;
+}
+
+test("botao clicado (docs/27 L47): popupClickedButton aceita so 'cta' e 'link:<id>' com o id de FREE_ID_PATTERN", () => {
+  const { POPUP_CLICKED_BUTTON_PATTERN, popupClickedButton } = clickedButton;
+
+  assert.equal(POPUP_CLICKED_BUTTON_PATTERN.source, `^(?:cta|link:${FREE_ID_PATTERN.source.slice(1, -1)})$`, "o id e o mesmo de FREE_ID_PATTERN");
+
+  for (const valido of ["cta", "link:site", "link:b", "link:botao2", `link:a${"0".repeat(15)}`]) {
+    assert.equal(popupClickedButton(valido), valido, valido);
+  }
+
+  for (const invalido of [
+    "javascript:x",
+    "link:Site",
+    "link:2botao",
+    "link:",
+    `link:a${"0".repeat(16)}`,
+    "link:site ",
+    " cta",
+    "CTA",
+    "cta:site",
+    "close",
+    "snooze",
+    "link:site\n",
+    "",
+    42,
+    null,
+    undefined,
+    true,
+    ["cta"],
+    { kind: "cta" }
+  ]) {
+    assert.equal(popupClickedButton(invalido), null, JSON.stringify(invalido));
+  }
+});
+
+test("botao clicado: popupClickedButtonInDesign pede o botao visivel no computador ou no celular e o aviso com botao no 'cta'", () => {
+  const { popupClickedButtonInDesign: noDesign } = clickedButton;
+  const visivel = livre();
+
+  assert.equal(noDesign("cta", visivel, true), true);
+  assert.equal(noDesign("cta", visivel, false), false, "aviso sem Botao principal: o 'cta' nao e clicavel");
+  assert.equal(noDesign("link:site", visivel, false), true, "o link nao depende do botao do aviso");
+  assert.equal(noDesign("link:outro", visivel, true), false, "id que nao existe");
+  assert.equal(noDesign("link:titulo", visivel, true), false, "id de outro tipo de elemento");
+  assert.equal(noDesign("link:botao", visivel, true), false, "o Botao principal nao e 'Abrir um link'");
+  assert.equal(noDesign("cta", { ...visivel, children: visivel.children.filter((node) => node.id !== "botao") }, true), false, "sem o elemento do Botao principal");
+  assert.equal(noDesign("cta", livre([], { children: [{ action: { kind: "cta" }, hidden: true, id: "botao", type: "button" }] }), true), false, "Botao principal escondido");
+
+  const escondido = livre([{ ...LINK_DO_LIVRE, hidden: true }]);
+  assert.equal(noDesign("link:site", escondido, true), false, "escondido nos dois aparelhos");
+  assert.equal(noDesign("link:site", { ...escondido, devices: { mobile: { nodes: { site: { hidden: false } } } } }, true), true, "o celular mostra");
+  assert.equal(noDesign("link:site", { ...visivel, devices: { mobile: { nodes: { site: { hidden: true } } } } }, true), true, "o computador mostra");
+
+  assert.equal(noDesign("link:site", livre([{ children: [LINK_DO_LIVRE], hidden: true, id: "caixa", type: "box" }]), true), false, "dentro de caixa escondida");
+  assert.equal(noDesign("link:site", livre([{ children: [LINK_DO_LIVRE], id: "caixa", type: "box" }]), true), true, "dentro de caixa visivel");
+
+  const destinoRuim = livre([{ ...LINK_DO_LIVRE, action: { href: "javascript:alert(1)", kind: "link", target: "same_tab" } }]);
+  assert.equal(noDesign("link:site", destinoRuim, true), false, "destino que o aluno nunca recebe");
+});
+
+test("eventos: o clique do Livre grava metadata.button so com a forma e o design conferidos; nada e lido sem a forma certa", async () => {
+  const aluno = novoAluno();
+  const db = banco({ campaigns: [popupNoAr({ popup_design: livre() })], deliveries: [linha(aluno, { impressions: 1, last_seen_at: iso(Date.now() - MIN) })] });
+
+  assert.deepEqual(await metadataDe(db, { button: "link:site", event: "clicked" }), { button: "link:site", campaign_id: POPUP });
+  assert.deepEqual(await metadataDe(db, { button: "cta", event: "clicked" }), { button: "cta", campaign_id: POPUP });
+  assert.equal(leiturasDaListaNoAr(db), 2, "uma leitura da lista no ar por clique com a forma certa (aqui o cache do Next e passagem direta)");
+
+  assert.deepEqual(await metadataDe(db, { button: "link:outro", event: "clicked" }), { campaign_id: POPUP }, "forma certa, mas fora do design");
+  assert.equal(leiturasDaListaNoAr(db), 3);
+
+  for (const button of ["javascript:x", `link:a${"0".repeat(16)}`, 42, "link:Site", null, ["cta"], { kind: "cta" }]) {
+    assert.deepEqual(await metadataDe(db, { button, event: "clicked" }), { campaign_id: POPUP }, JSON.stringify(button));
+  }
+
+  assert.deepEqual(await metadataDe(db, { event: "clicked" }), { campaign_id: POPUP }, "sem botao (a aba de antes, o Padrão e o Personalizado)");
+  assert.equal(leiturasDaListaNoAr(db), 3, "forma errada ou sem botao: nenhuma leitura a mais");
+
+  // O botao so vai no clique: no fechar, no Lembrar depois e no Não mostrar de novo e ignorado (nem e conferido).
+  assert.deepEqual(await metadataDe(db, { button: "cta", event: "closed", via: "esc" }), { campaign_id: POPUP, via: "esc" });
+  assert.deepEqual(await metadataDe(db, { button: "link:site", event: "snoozed" }), { campaign_id: POPUP });
+  assert.deepEqual(await metadataDe(db, { button: "cta", event: "dismissed" }), { campaign_id: POPUP });
+  assert.equal(leiturasDaListaNoAr(db), 3);
+  assert.deepEqual(
+    eventos(db).map((item) => item.event_type),
+    [...Array(11).fill("message_clicked"), "message_closed", "message_snoozed", "message_dismissed"]
+  );
+});
+
+test("eventos: Padrão, aviso sem botao e botao escondido nos dois aparelhos nao levam metadata.button; o celular que mostra leva", async () => {
+  const comLinha = () => linha(sessao.user.id, { impressions: 1, last_seen_at: iso(Date.now() - MIN) });
+
+  novoAluno();
+  let db = banco({ campaigns: [popupNoAr()], deliveries: [comLinha()] });
+  assert.deepEqual(await metadataDe(db, { button: "cta", event: "clicked" }), { campaign_id: POPUP }, "Padrão (sem popup_design)");
+
+  novoAluno();
+  db = banco({ campaigns: [popupNoAr({ cta_href: null, cta_label: null, cta_target: null, popup_design: livre() })], deliveries: [comLinha()] });
+  assert.deepEqual(await metadataDe(db, { button: "cta", event: "clicked" }), { campaign_id: POPUP }, "Livre sem o botao do aviso");
+  assert.deepEqual(await metadataDe(db, { button: "link:site", event: "clicked" }), { button: "link:site", campaign_id: POPUP });
+
+  novoAluno();
+  db = banco({ campaigns: [popupNoAr({ popup_design: livre([{ ...LINK_DO_LIVRE, hidden: true }]) })], deliveries: [comLinha()] });
+  assert.deepEqual(await metadataDe(db, { button: "link:site", event: "clicked" }), { campaign_id: POPUP }, "escondido no computador e no celular");
+
+  novoAluno();
+  db = banco({
+    campaigns: [popupNoAr({ popup_design: livre([{ ...LINK_DO_LIVRE, hidden: true }], { devices: { mobile: { nodes: { site: { hidden: false } } } } }) })],
+    deliveries: [comLinha()]
+  });
+  assert.deepEqual(await metadataDe(db, { button: "link:site", event: "clicked" }), { button: "link:site", campaign_id: POPUP }, "so o celular mostra");
+
+  // Outro pop-up no ar tem o botao: o design conferido e o do pop-up do clique.
+  novoAluno();
+  db = banco({ campaigns: [popupNoAr({ popup_design: livre([]) }), popupNoAr({ id: OUTRO, popup_design: livre() })], deliveries: [comLinha()] });
+  assert.deepEqual(await metadataDe(db, { button: "link:site", event: "clicked" }), { campaign_id: POPUP });
+});
+
+test("eventos: a falha da leitura do design vira log e o clique grava sem metadata.button (200); clique recusado nao le o design", async () => {
+  const aluno = novoAluno();
+  const db = banco({ campaigns: [popupNoAr({ popup_design: livre() })], deliveries: [linha(aluno, { impressions: 1, last_seen_at: iso(Date.now() - MIN) })] });
+  const from = db.from.bind(db);
+  const falha = { code: "57014", message: "canceling statement due to statement timeout" };
+
+  // So a leitura da lista no ar (a que pede popup_design) falha; a do evento continua.
+  db.from = (table) => {
+    const api = from(table);
+
+    if (table !== "campaigns") {
+      return api;
+    }
+
+    return {
+      ...api,
+      select(columns) {
+        const chain = api.select(columns);
+
+        if (!String(columns).includes("popup_design")) {
+          return chain;
+        }
+
+        const proxy = new Proxy(chain, {
+          get(target, key) {
+            if (key === "then") {
+              return (ok, fail) => Promise.resolve({ data: null, error: falha }).then(ok, fail);
+            }
+
+            const value = target[key];
+            return typeof value === "function" ? (...args) => (value(...args), proxy) : value;
+          }
+        });
+        return proxy;
+      }
+    };
+  };
+
+  const logs = [];
+  const original = console.error;
+  console.error = (...args) => logs.push(args.join(" "));
+
+  try {
+    assert.deepEqual(await metadataDe(db, { button: "cta", event: "clicked" }), { campaign_id: POPUP });
+  } finally {
+    console.error = original;
+  }
+
+  assert.ok(logs.some((line) => line.includes(`[comunicacao] botao clicado do pop-up ${POPUP}`)), logs.join("\n"));
+  assert.equal(logs.some((line) => line.includes("Ver o site")), false, "o log nunca leva o conteudo");
+
+  // Pop-up que o aluno nao pode clicar (fora do segmento): 404 antes de qualquer leitura do design.
+  novoAluno();
+  const fora = banco({ campaigns: [popupNoAr({ popup_design: livre() })], deliveries: [linha(sessao.user.id, { eligible: false })] });
+  const recusado = await evento(POPUP, { button: "cta", event: "clicked" });
+  assert.equal(recusado.status, 404);
+  assert.equal(leiturasDaListaNoAr(fora), 0);
+  assert.deepEqual(eventos(fora), []);
+});
+
+test("eventos: o teto de 8 KB do corpo (413) e a cota de 30 por minuto continuam com o botao", async () => {
+  const aluno = novoAluno();
+  const db = banco({ campaigns: [popupNoAr({ popup_design: livre() })], deliveries: [linha(aluno, { impressions: 1 })] });
+
+  const grande = await evento(POPUP, { button: `link:${"a".repeat(8_100)}`, event: "clicked" });
+  assert.equal(grande.status, 413);
+  assert.deepEqual(grande.body, { error: "Solicitacao muito grande." });
+  assert.deepEqual(eventos(db), []);
+
+  for (let n = 1; n < 30; n += 1) {
+    assert.equal((await evento(POPUP, { button: "link:site", event: "clicked" })).status, 200, `clique ${n + 1}`);
+  }
+
+  const barrado = await evento(POPUP, { button: "link:site", event: "clicked" });
+  assert.equal(barrado.status, 429);
+  assert.equal(eventos(db).length, 29);
+  assert.ok(eventos(db).every((item) => item.metadata.button === "link:site"));
+});
+
+test("o botao clicado e conferido so no servidor: popup-clicked-button.ts e server-only, so a rota de eventos o importa e popup-display-model.ts nao o tem", () => {
+  const raiz = new URL("../src/", import.meta.url);
+  const modulo = readFileSync(new URL("server/communications/popup-clicked-button.ts", raiz), "utf8");
+  assert.match(modulo, /^import "server-only";\n/);
+
+  const quemCita = [];
+  const visitar = (dir) => {
+    for (const entrada of readdirSync(dir, { withFileTypes: true })) {
+      const caminho = new URL(entrada.name + (entrada.isDirectory() ? "/" : ""), dir);
+
+      if (entrada.isDirectory()) {
+        visitar(caminho);
+      } else if (/\.tsx?$/.test(entrada.name) && readFileSync(caminho, "utf8").includes('from "@/server/communications/popup-clicked-button"')) {
+        quemCita.push(decodeURIComponent(caminho.pathname.slice(raiz.pathname.length)));
+      }
+    }
+  };
+  visitar(raiz);
+
+  assert.deepEqual(quemCita, ["app/api/popups/[id]/events/route.ts"]);
+  assert.doesNotMatch(readFileSync(new URL("server/communications/popup-display-model.ts", raiz), "utf8"), /popupClickedButton/);
 });
 
 test("eventos: 'Lembrar depois' volta no 'Volta em' do pop-up (30 min), so sobre o valor lido; alem do limite e 409", async () => {

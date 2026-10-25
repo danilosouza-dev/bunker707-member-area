@@ -639,16 +639,17 @@ export function MemberPopupHost({
     };
   }, [pageKey]);
 
-  function finish(outcome: PopupOutcome, via?: PopupCloseVia) {
+  function finish(outcome: PopupOutcome, via?: PopupCloseVia, button?: string) {
     const current = openRef.current;
 
     if (!current || outcomeRef.current) {
       return;
     }
 
-    // Primeiro a marca (sincrona): o Esc e o fechamento do Base UI no mesmo toque nao contam duas vezes.
+    // Primeiro a marca (sincrona): o Esc e o fechamento do Base UI no mesmo toque nao contam duas vezes. O jeito de
+    // fechar so no "closed"; o botao do Livre (docs/27 L47) so no "clicked".
     outcomeRef.current = outcome;
-    postPopupEvent(current.popup.id, outcome, outcome === "closed" && via ? { via } : {});
+    postPopupEvent(current.popup.id, outcome, outcome === "closed" && via ? { via } : outcome === "clicked" && button ? { button } : {});
     updatePopupAfterOutcome(current.armed.id, outcome);
     openRef.current = null;
     setOpen(false);
