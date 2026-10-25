@@ -134,6 +134,8 @@ function arrastando(opcoes) {
 
 const DO_GESTO = ["blur", "dragstart (captura)", "keydown (captura)", "pointercancel (captura)", "pointermove (captura)", "pointerup (captura)"];
 const DO_BLOQUEADOR = ["click (captura)", "pointerdown (captura)"];
+/** Cancelado com o botao ainda apertado: o bloqueador espera o botao solto (pointerup, pointercancel ou buttons 0). */
+const DO_BOTAO_APERTADO = ["click (captura)", "pointercancel (captura)", "pointerdown (captura)", "pointermove (captura)", "pointerup (captura)"];
 
 test("ponteiro: toque, botão 2, ponteiro que não é o principal e caneta sem pedir não ligam nada; os pointerTypes vêm de cada chamada", () => {
   assert.deepEqual(pointer.FREE_POINTER_MOUSE, ["mouse"]);
@@ -274,7 +276,7 @@ test("ponteiro: Esc cancela com defaultPrevented e a propagação parada; o clic
 
   // O botao continua apertado: o bloqueador espera o pointerup para contar os 350 ms.
   janela.avancar(2_000);
-  assert.deepEqual(janela.tipos(), ["click (captura)", "pointercancel (captura)", "pointerdown (captura)", "pointerup (captura)"]);
+  assert.deepEqual(janela.tipos(), DO_BOTAO_APERTADO);
   ponteiro(janela, "pointerup", 200, 100, { pointerId: 2 });
   assert.equal(janela.relogios.size, 0, "o pointerup de outro ponteiro nao conta");
   ponteiro(janela, "pointerup", 200, 100);
@@ -287,6 +289,53 @@ test("ponteiro: Esc cancela com defaultPrevented e a propagação parada; o clic
   assert.equal(disparar(janela, "click").defaultPrevented, false, "o seguinte passa");
   assert.equal(janela.ouvintes.length, 0);
   assert.equal(janela.relogios.size, 0);
+});
+
+test("ponteiro: cancelado com o botão apertado, o bloqueador sai mesmo sem o pointerup (botão solto fora da janela ou em outro app)", () => {
+  assert.equal(pointer.FREE_POINTER_BLUR_GUARD_MS, 1_000);
+
+  // Esc e o botao solto fora da janela no WebKit: o pointerup nunca vem, so um pointermove com buttons 0.
+  const fora = arrastando();
+  tecla(fora.janela, "Escape");
+  ponteiro(fora.janela, "pointermove", 130, 100);
+  ponteiro(fora.janela, "pointermove", 130, 100, { buttons: 0, pointerId: 2 });
+  fora.janela.avancar(2_000);
+  assert.deepEqual(fora.janela.tipos(), DO_BOTAO_APERTADO, "com o botao apertado (ou outro ponteiro), continua esperando");
+  ponteiro(fora.janela, "pointermove", 130, 100, { buttons: 0 });
+  assert.deepEqual(fora.janela.tipos(), DO_BLOQUEADOR, "o botao solto: os 350 ms contam daqui");
+  fora.janela.avancar(349);
+  assert.equal(disparar(fora.janela, "click").defaultPrevented, true, "o click logo depois ainda e engolido");
+  const outro = arrastando();
+  tecla(outro.janela, "Escape");
+  ponteiro(outro.janela, "pointermove", 130, 100, { buttons: 0 });
+  outro.janela.avancar(350);
+  assert.equal(outro.janela.ouvintes.length, 0, "nenhum ouvinte sobra");
+  assert.equal(outro.janela.relogios.size, 0);
+  assert.equal(disparar(outro.janela, "click").defaultPrevented, false, "um Enter num botao do Elementos passa");
+  assert.deepEqual(outro.chamadas.slice(2), [["cancel"]]);
+
+  // O blur da janela e o botao solto em outro app: nada mais chega; o bloqueador sai em 1 s.
+  const app = arrastando();
+  disparar(app.janela, "blur");
+  assert.deepEqual(app.chamadas.slice(2), [["cancel"]]);
+  app.janela.avancar(999);
+  assert.deepEqual(app.janela.tipos(), DO_BOTAO_APERTADO);
+  app.janela.avancar(1);
+  assert.equal(app.janela.ouvintes.length, 0, "nenhum ouvinte sobra");
+  assert.equal(app.janela.relogios.size, 0);
+  assert.equal(disparar(app.janela, "click").defaultPrevented, false);
+
+  // Depois do blur, o botao solto de volta na janela: os 350 ms contam do pointerup (um relogio so).
+  const volta = arrastando();
+  disparar(volta.janela, "blur");
+  volta.janela.avancar(900);
+  ponteiro(volta.janela, "pointerup", 130, 100);
+  assert.deepEqual(volta.janela.tipos(), DO_BLOQUEADOR);
+  assert.equal(volta.janela.relogios.size, 1);
+  volta.janela.avancar(349);
+  assert.equal(disparar(volta.janela, "click").defaultPrevented, true, "o click do botao solto e engolido");
+  assert.equal(volta.janela.ouvintes.length, 0);
+  assert.equal(volta.janela.relogios.size, 0);
 });
 
 test("ponteiro: Esc antes do limiar desliga o gesto e segue para o editor; o arrastar não começa mais", () => {

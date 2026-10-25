@@ -15,8 +15,9 @@
 //   Control e Meta: o Esc do editor nao sobe para a caixa de fora, e Ctrl + Z, Delete ou colar no meio nao deixam
 //   velhos os indices calculados. O arrastar nativo do navegador (dragstart) nao comeca enquanto o gesto e seguido.
 // - Quando um gesto comecado termina, um bloqueador na janela, em captura, engole um click: ele sai no primeiro
-//   click, no proximo pointerdown ou 350 ms depois do botao solto (cancelado com o botao ainda apertado, por Esc ou
-//   blur, os 350 ms contam do pointerup que ainda vem).
+//   click, no proximo pointerdown ou 350 ms depois do botao solto. Cancelado com o botao ainda apertado (Esc ou blur),
+//   os 350 ms contam do botao solto: o pointerup, o pointercancel ou um pointermove com buttons 0 (no WebKit, solto
+//   fora da janela). Depois do blur o botao pode ser solto em outro app e nada chegar: ai o bloqueador sai em 1 s.
 // Nada aqui toca na janela ao carregar: a janela vem de start.currentTarget.ownerDocument.defaultView, e o arquivo
 // e carregado pelos testes do Node (free-fields.tsx entra em varios deles). Sem JSX, sem HTML e sem CSS em texto.
 
@@ -34,6 +35,12 @@ export const FREE_POINTER_MOUSE_AND_PEN: readonly FreePointerKind[] = ["mouse", 
 
 /** Quanto tempo o click que vem depois de um gesto comecado fica engolido, a contar do botao solto. */
 export const FREE_POINTER_CLICK_GUARD_MS = 350;
+
+/**
+ * Depois do blur da janela o botao pode ser solto em outro app, e ai nada mais chega: o bloqueador do click sai em no
+ * maximo isto, mesmo sem o pointerup.
+ */
+export const FREE_POINTER_BLUR_GUARD_MS = 1_000;
 
 /** O pointerdown que comeca o gesto (o evento do React serve: o currentTarget e lido na hora da chamada). */
 export type FreePointerStart = {
@@ -87,8 +94,8 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
   const win = view;
   const pointerId = start.pointerId;
   const origin: FreePoint = { x: start.clientX, y: start.clientY };
-  // pending: antes do limiar; dragging: o gesto comecou; held: cancelado com o botao ainda apertado (espera o
-  // pointerup para contar os 350 ms); guard: so o bloqueador do click; off: tudo desligado.
+  // pending: antes do limiar; dragging: o gesto comecou; held: cancelado com o botao ainda apertado (espera o botao
+  // solto para contar os 350 ms); guard: so o bloqueador do click; off: tudo desligado.
   let state: "dragging" | "guard" | "held" | "off" | "pending" = "pending";
   let timer: number | null = null;
 
@@ -183,6 +190,8 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
   function onBlur() {
     if (state === "dragging") {
       endGesture("held");
+      // O botao pode ser solto em outro app: sem pointerup, o bloqueador sai sozinho.
+      timer = win.setTimeout(stop, FREE_POINTER_BLUR_GUARD_MS);
       handlers.onCancel();
     } else {
       stop();
@@ -193,13 +202,16 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
     event.preventDefault();
   }
 
-  function onHeldUp(event: PointerEvent) {
-    if (!ours(event)) {
+  /**
+   * Cancelado com o botao apertado: o botao solto e o pointerup, o pointercancel ou um pointermove com buttons 0 (o
+   * botao solto fora da janela, no WebKit, que nao manda o pointerup). Dai em diante contam os 350 ms.
+   */
+  function onHeldRelease(event: PointerEvent) {
+    if (!ours(event) || (event.type === "pointermove" && event.buttons !== 0)) {
       return;
     }
 
-    win.removeEventListener("pointerup", onHeldUp, CAPTURE);
-    win.removeEventListener("pointercancel", onHeldUp, CAPTURE);
+    removeHeld();
     armTimer();
   }
 
@@ -222,8 +234,19 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
     win.removeEventListener("blur", onBlur);
   }
 
+  function removeHeld() {
+    win.removeEventListener("pointerup", onHeldRelease, CAPTURE);
+    win.removeEventListener("pointercancel", onHeldRelease, CAPTURE);
+    win.removeEventListener("pointermove", onHeldRelease, CAPTURE);
+  }
+
   function armTimer() {
     state = "guard";
+
+    if (timer !== null) {
+      win.clearTimeout(timer);
+    }
+
     timer = win.setTimeout(stop, FREE_POINTER_CLICK_GUARD_MS);
   }
 
@@ -235,8 +258,9 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
 
     if (next === "held") {
       state = "held";
-      win.addEventListener("pointerup", onHeldUp, CAPTURE);
-      win.addEventListener("pointercancel", onHeldUp, CAPTURE);
+      win.addEventListener("pointerup", onHeldRelease, CAPTURE);
+      win.addEventListener("pointercancel", onHeldRelease, CAPTURE);
+      win.addEventListener("pointermove", onHeldRelease, CAPTURE);
     } else {
       armTimer();
     }
@@ -246,8 +270,7 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
   function stop() {
     state = "off";
     removeGesture();
-    win.removeEventListener("pointerup", onHeldUp, CAPTURE);
-    win.removeEventListener("pointercancel", onHeldUp, CAPTURE);
+    removeHeld();
     win.removeEventListener("click", onGuardClick, CAPTURE);
     win.removeEventListener("pointerdown", onGuardPointerDown, CAPTURE);
 
