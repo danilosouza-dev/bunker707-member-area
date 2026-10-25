@@ -115,7 +115,7 @@ test("adicionar Imagem ou Vídeo pede o foco no envio", () => {
   assert.equal(find(image.design, image.id).node.asset, null);
 });
 
-test("duplicar cria ids novos e o principal duplicado vira Abrir um link, só se ainda não há um", () => {
+test("duplicar cria ids novos e o principal duplicado vira Abrir um link, enquanto couber nos 3 botões além do principal", () => {
   const box = { children: [{ ...TITLE, id: "t1" }, { ...TEXT, id: "x1" }], id: "caixa", type: "box" };
   const base = design([box, CTA_NODE, LINKS]);
   const copy = editor.duplicateFreeNode(base, "caixa", CTA);
@@ -131,11 +131,27 @@ test("duplicar cria ids novos e o principal duplicado vira Abrir um link, só se
   const link = find(fromCta.design, fromCta.id).node;
   assert.deepEqual(link.action, { href: "/minhas-compras", kind: "link", target: "new_tab" });
   assert.equal(link.label, "Quero ver");
-  assert.equal(editor.freeHasLinkButton(fromCta.design), true);
+  assert.equal("freeHasLinkButton" in editor, false, "o limite de um link so saiu (L4b)");
 
-  // Ja existe um "Abrir um link": duplicar o principal (ou o link) desliga.
-  assert.deepEqual(editor.duplicateFreeNode(fromCta.design, "principal", CTA), { reason: "Use um botão “Abrir um link” só." });
-  assert.equal(editor.freeDuplicateProblem(fromCta.design, fromCta.id), "Use um botão “Abrir um link” só.");
+  // L4b: ate 3 "Abrir um link" (o teto e o de 3 botoes alem do principal). Duplicar o principal mais duas vezes
+  // da 3 links, todos validos no schema; o 4o duplicar (do principal ou de um link) e recusado com a frase do teto.
+  const second = editor.duplicateFreeNode(fromCta.design, "principal", CTA);
+  const third = editor.duplicateFreeNode(second.design, "principal", CTA);
+  const links = [];
+
+  model.walkFreeNodes(third.design.children, (node) => {
+    if (node.type === "button" && node.action.kind === "link") links.push(node.id);
+  });
+  assert.equal(links.length, 3);
+  assert.equal(new Set(links).size, 3, "ids unicos");
+  assert.ok(schema.popupFreeDesignSchema.safeParse(third.design).success, "o principal e 3 links valem");
+  assert.deepEqual(editor.duplicateFreeNode(third.design, "principal", CTA), { reason: M.buttons });
+  assert.equal(editor.freeDuplicateProblem(third.design, fromCta.id), M.buttons);
+  assert.equal(editor.freeDuplicateProblem(second.design, fromCta.id), null, "com 2 links, duplicar um link ainda cabe");
+  // Elementos › Botão desliga com a mesma frase; o Botão principal continua com a frase dele.
+  assert.equal(editor.freeElementDisabledReason(third.design, "button"), M.buttons);
+  assert.equal(editor.freeElementDisabledReason(second.design, "button"), null);
+  assert.equal(M.buttons, "Use até 3 botões além do principal.");
 
   // Links, Áudio e Vídeo nao duplicam.
   assert.equal(editor.freeDuplicateProblem(base, "links"), M.linksDuplicate);

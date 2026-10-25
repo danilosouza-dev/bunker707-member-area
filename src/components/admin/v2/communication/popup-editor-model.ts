@@ -509,10 +509,10 @@ export const POPUP_REPEAT_DEFAULTS = { everyMinutes: 1_440, maxPerDay: 1, maxTot
 /** Pop-up sem botao: "Quando o aluno clica no botão" fica desligado (nunca pararia). */
 /**
  * "Quando o aluno clica no botão" sem nada para clicar nunca pararia: desligada sem `cta`, a nao ser que o design
- * Personalizado tenha um segundo botao com link (docs/26 D9: o link conta como o clique, como no schema) ou o Livre
- * tenha o botao "Abrir um link" visivel (docs/27; no maximo um, entao o clique contado e sempre de um botao so). No
- * Livre vale o que se ve nos dois aparelhos (freeHasClickTarget, a mesma regra do schema): o "Abrir um link"
- * escondido so no celular nao conta, e o Botao principal escondido so no celular pede o "Abrir um link" ali.
+ * Personalizado tenha um segundo botao com link (docs/26 D9: o link conta como o clique, como no schema). No Livre
+ * vale o que se ve em cada aparelho (freeHasClickTarget, a mesma regra do schema; docs/27 §2.1, L4b): o computador
+ * e o celular precisam de um botao visivel que conta, o Botao principal (com `cta`) ou um dos ate 3 "Abrir um
+ * link"; o escondido num aparelho nao conta ali, e o Botao principal escondido no computador tambem nao.
  */
 export function clickStopDisabled(draft: Pick<NoticeDraft, "cta"> & Partial<Pick<NoticeDraft, "design" | "freeDesign">>) {
   return !popupDesignLinkButton(draft.design) && !freeHasClickTarget(draft.freeDesign, draft.cta !== null);

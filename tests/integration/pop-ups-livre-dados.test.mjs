@@ -11,12 +11,16 @@ import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste }
 // banco nao aparece para a aluna e abre como Padrão no editor; a lista no ar e o plano levam o Livre (sem locked
 // e name, titulo e texto do design, sem imagem e icone) e o Padrão e o Personalizado continuam iguais; a regra
 // das duas chaves (uma aba antiga troca o Livre gravado); duplicar, publicar, aprovar, fontes em uso e auditoria.
+// L4b: ate 3 "Abrir um link" (salvar, ler, o aluno recebe os 3, o maior cabe no check, o 4o botao e 400), o D9 por
+// aparelho (um link so no computador e outro so no celular salvam; o Livre gravado antes com o Botao principal
+// escondido no computador abre, publica e e aprovado com "Só quando o pop-up terminar") e a Forma com largura e
+// altura na sequencia, no computador e no celular.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
 const actions = await import("../../src/server/communications/actions.ts");
 const designActions = await import("../../src/server/communications/popup-design-actions.ts");
-const { emptyNoticeDraft } = await import("../../src/server/communications/schemas.ts");
+const { emptyNoticeDraft, POPUP_NO_BUTTON_STOP_MESSAGE } = await import("../../src/server/communications/schemas.ts");
 const { getNoticeDetail } = await import("../../src/server/communications/queries.ts");
 const { invalidateLivePopups } = await import("../../src/server/communications/cache.ts");
 const custom = await import("../../src/server/communications/popup-design-model.ts");
@@ -601,4 +605,192 @@ test("Celular: o maior Livre com devices que o zod aceita passa no check de 32 K
 
   assert.deepEqual(gravado, model.canonicalPopupFreeDesign(maior), "o banco aceitou, sem migracao");
   assert.equal(Object.keys(gravado.devices.mobile.nodes).length, count);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * L4b: ate 3 "Abrir um link", o D9 por aparelho e a Forma na sequencia (docs/27 §9.5 e §2.1)
+ * ---------------------------------------------------------------------------------------------- */
+
+const ATE_CLICAR = { everyMinutes: null, maxPerDay: 1, maxTotal: null, mode: "repeat", stopOn: "click" };
+
+/** "Mais de uma vez" ate o aluno clicar, como o editor manda (`popup` e `repeat` juntos). */
+function ateClicar(draft) {
+  return { ...draft, popup: { ...draft.popup, frequency: ATE_CLICAR }, repeat: "until_action" };
+}
+
+function abrirUmLink(id, href, target = "same_tab", extra = {}) {
+  return { action: { href, kind: "link", target }, id, label: `Abrir ${id}`, type: "button", ...extra };
+}
+
+/** O Livre de teste (sem imagem) com mais elementos antes dos links (o ultimo). */
+function livreCom(...nodes) {
+  const base = livre({ image: false });
+
+  return { ...base, children: [...base.children.slice(0, -1), ...nodes, base.children.at(-1)] };
+}
+
+/** Os "Abrir um link" do design, na ordem. */
+function linksDe(design) {
+  return design.children.filter((node) => node.type === "button" && node.action.kind === "link").map((node) => [node.id, node.action.href, node.action.target]);
+}
+
+test("L4b: o Livre com o Botão principal e 3 Abrir um link é salvo e lido na forma canônica, e a aluna recebe os 3", async () => {
+  const enviado = livreCom(abrirUmLink("linka", "/minhas-compras"), abrirUmLink("linkb", "https://exemplo.com/b", "new_tab"), abrirUmLink("linkc", `/conteudo/${PRODUTO}`));
+  const salvo = await publicar(popup({ design: null, freeDesign: enviado }));
+  const gravado = (await linha(salvo.id)).popup_design;
+  const tres = [
+    ["linka", "/minhas-compras", "same_tab"],
+    ["linkb", "https://exemplo.com/b", "new_tab"],
+    ["linkc", `/conteudo/${PRODUTO}`, "same_tab"]
+  ];
+
+  assert.deepEqual(gravado, model.canonicalPopupFreeDesign(enviado));
+  assert.equal(gravado.version, 1, "sem versao nova");
+  assert.deepEqual(linksDe(gravado), tres);
+
+  actAs(produtor);
+  assert.deepEqual((await getNoticeDetail(salvo.id, { permissions: TODAS })).draft.freeDesign, gravado, "o editor abre com os 3");
+
+  const doLivre = (await mostrar(aluna, salvo.id)).body.data.popup;
+
+  assert.deepEqual(doLivre.freeDesign, model.freeDesignForStudent(gravado));
+  assert.deepEqual(linksDe(doLivre.freeDesign), tres, "a aluna recebe os 3");
+  assert.deepEqual(doLivre.cta, BOTAO, "e o Botão principal continua com o botao do aviso");
+});
+
+test("L4b: o maior Livre com 3 Abrir um link passa no check de 32 KB; o 4º botão além do principal é 400 no elemento", async () => {
+  const links = ["linka", "linkb", "linkc"].map((id, index) =>
+    abrirUmLink(id, `https://exemplo.com/${id}/${"a".repeat(120)}`, index === 1 ? "new_tab" : "same_tab", { label: `${id} ${"b".repeat(30)}` })
+  );
+  const formas = maiorLivre().children.filter((node) => node.type === "shape");
+  const build = (count, letters) => ({
+    children: [
+      ...formas.slice(0, count),
+      { id: "texto", lines: [[{ text: "a".repeat(Math.max(1, letters)) }]], type: "text" },
+      { action: { kind: "cta" }, id: "botao", type: "button" },
+      ...links,
+      { id: "links", type: "links" }
+    ],
+    mode: "free",
+    version: 1
+  });
+  const size = (value) => model.jsonbBytesUpperBound(model.canonicalPopupFreeDesign(value));
+  let count = 0;
+
+  while (count < formas.length && size(build(count + 1, 1)) <= 30_000) {
+    count += 1;
+  }
+
+  const maior = build(count, Math.min(600, 30_000 - size(build(count, 1)) + 1));
+
+  assert.ok(size(maior) > 29_000 && size(maior) <= 30_000, `estimativa ${size(maior)} com ${count} formas`);
+  assert.equal(linksDe(maior).length, 3);
+
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: maior })));
+
+  assert.deepEqual((await linha(salvo.id)).popup_design, model.canonicalPopupFreeDesign(maior), "o banco aceitou, sem migracao");
+
+  // O teto continua: 3 botoes alem do principal, em qualquer mistura. O 4o (um Fechar depois de 3 links) e 400.
+  const quatro = livreCom(
+    ...links.map((node) => ({ ...node, action: { ...node.action, href: "/minhas-compras" }, label: node.id })),
+    { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" }
+  );
+  const recusado = await salvar(popup({ design: null, freeDesign: quatro }), salvo.id);
+
+  assert.equal(recusado.ok, false);
+  assert.equal(recusado.status, 400);
+  assert.deepEqual(recusado.fieldErrors["draft.freeDesign.nodes.fechar.action"], [POPUP_FREE_MESSAGES.buttons]);
+  assert.equal(POPUP_FREE_MESSAGES.buttons, "Use até 3 botões além do principal.");
+  assert.deepEqual((await linha(salvo.id)).popup_design, model.canonicalPopupFreeDesign(maior), "nada muda");
+});
+
+test("L4b: 'Quando o aluno clica no botão' com um link só no computador e outro só no celular salva; os dois escondidos no celular é 400", async () => {
+  const semPrincipal = (...nodes) => {
+    const value = livreCom(...nodes);
+
+    return { ...value, children: value.children.filter((node) => !(node.type === "button" && node.action.kind === "cta")) };
+  };
+  const cadaUmNoSeu = {
+    ...semPrincipal(abrirUmLink("linka", "/minhas-compras"), abrirUmLink("linkb", "https://exemplo.com/b", "new_tab", { hidden: true })),
+    devices: { mobile: { nodes: { linka: { hidden: true }, linkb: { hidden: false } } } }
+  };
+  const salvo = ok(await salvar(ateClicar(popup({ cta: null, design: null, freeDesign: cadaUmNoSeu }))));
+  const gravado = (await linha(salvo.id)).popup_design;
+
+  assert.deepEqual(gravado, model.canonicalPopupFreeDesign(cadaUmNoSeu));
+  assert.deepEqual(gravado.devices, { mobile: { nodes: { linka: { hidden: true }, linkb: { hidden: false } } } });
+  actAs(produtor);
+  assert.deepEqual((await getNoticeDetail(salvo.id, { permissions: TODAS })).draft.popup.frequency, ATE_CLICAR);
+
+  const nenhumNoCelular = {
+    ...cadaUmNoSeu,
+    children: cadaUmNoSeu.children.map((node) => (node.id === "linkb" ? { ...node, hidden: false } : node)),
+    devices: { mobile: { nodes: { linka: { hidden: true }, linkb: { hidden: true } } } }
+  };
+  const recusado = await salvar(ateClicar(popup({ cta: null, design: null, freeDesign: nenhumNoCelular })), salvo.id);
+
+  assert.equal(recusado.status, 400);
+  assert.deepEqual(recusado.fieldErrors["draft.popup.frequency.stopOn"], [POPUP_NO_BUTTON_STOP_MESSAGE]);
+  assert.deepEqual((await linha(salvo.id)).popup_design, gravado, "nada muda");
+});
+
+test("L4b (D9): o Livre gravado antes com 'Quando o aluno clica no botão' e o Botão principal escondido no computador abre, publica e é aprovado como 'Só quando o pop-up terminar'", async () => {
+  // Como o app de antes gravava: salvo com o Botao principal visivel e depois escondido no computador (o schema de
+  // antes so olhava o celular). Um fica em rascunho e o outro num pedido de aprovacao.
+  const rascunho = ok(await salvar(ateClicar(popup({ design: null, freeDesign: livre({ image: false }), title: "Rascunho de antes" }))));
+  const pedido = ok(await salvar(ateClicar(popup({ design: null, freeDesign: livre({ image: false }), title: "Pedido de antes" }))));
+  const comum = livre({ image: false });
+  const escondido = model.canonicalPopupFreeDesign({ ...comum, children: comum.children.map((node) => (node.id === "botao" ? { ...node, hidden: true } : node)) });
+
+  for (const id of [rascunho.id, pedido.id]) {
+    unwrap(await db.from("campaigns").update({ popup_design: escondido }).eq("id", id), "Escondendo o Botao principal no computador");
+  }
+
+  unwrap(
+    await db.from("campaigns").update({ requested_at: new Date().toISOString(), requested_by: produtor.id, status: "pending_approval" }).eq("id", pedido.id),
+    "Pedindo aprovacao"
+  );
+
+  // O editor abre com a regra que vale; a linha continua como foi gravada.
+  actAs(produtor);
+  const detalhe = await getNoticeDetail(rascunho.id, { permissions: TODAS });
+
+  assert.deepEqual(detalhe.draft.freeDesign, escondido);
+  assert.deepEqual(detalhe.draft.popup.frequency, { ...ATE_CLICAR, stopOn: "never" });
+  assert.equal(unwrap(await db.from("campaigns").select("popup_stop_on").eq("id", rascunho.id).single(), "Lendo a regra gravada").popup_stop_on, "click");
+
+  // Salvar de novo pedindo o clique recebe a regra nova, no campo (e nada e gravado).
+  const comClique = await salvar(ateClicar(detalhe.draft), rascunho.id);
+
+  assert.equal(comClique.status, 400);
+  assert.deepEqual(comClique.fieldErrors["draft.popup.frequency.stopOn"], [POPUP_NO_BUTTON_STOP_MESSAGE]);
+
+  // Publicar e Aprovar conferem o rascunho como o editor abre: nada de 400 num campo que ninguem mudou.
+  actAs(produtor);
+  const publicado = ok(await actions.publishNotice({ expectedUpdatedAt: detalhe.updatedAt, id: rascunho.id }));
+
+  assert.equal(publicado.situation, "active");
+
+  actAs(produtor);
+  const aprovado = ok(await actions.approveNotice({ id: pedido.id }));
+
+  assert.equal(aprovado.situation, "active");
+});
+
+test("L4b: a Forma com largura e altura na sequência, no computador e no celular, é salva e lida igual", async () => {
+  const forma = { box: { fill: [{ color: "#7c3aed", kind: "solid" }] }, id: "forma", place: { height: 80, mode: "flow", width: 200 }, shape: "rect", type: "shape" };
+  const enviado = { ...livreCom(forma), devices: { mobile: { nodes: { forma: { place: { height: 60, mode: "flow", width: 120 } } } } } };
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: enviado })));
+  const gravado = (await linha(salvo.id)).popup_design;
+
+  assert.deepEqual(gravado, model.canonicalPopupFreeDesign(enviado));
+  assert.deepEqual(gravado.children.find((node) => node.id === "forma").place, { height: 80, mode: "flow", width: 200 });
+  assert.deepEqual(gravado.devices.mobile.nodes.forma, { place: { height: 60, mode: "flow", width: 120 } });
+
+  actAs(produtor);
+  const detalhe = await getNoticeDetail(salvo.id, { permissions: TODAS });
+
+  assert.deepEqual(detalhe.draft.freeDesign, gravado, "o editor abre igual");
+  ok(await salvar(popup({ design: null, freeDesign: detalhe.draft.freeDesign }), salvo.id));
+  assert.deepEqual((await linha(salvo.id)).popup_design, gravado, "salvar de novo nao muda nada");
 });

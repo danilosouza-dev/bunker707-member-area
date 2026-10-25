@@ -242,15 +242,25 @@ test("contagens: 32 elementos, 20 por caixa, 4 títulos, 6 imagens, 1 vídeo, 12
   hasIssue(design([...blurred(4), { box: { backdropBlur: 8 }, id: "vidro", type: "shape" }]), "children.4.box.backdropBlur", M.effects);
 });
 
-test("um botão principal, até 3 outros, um só Abrir um link, links sempre e áudio no máximo um", () => {
+test("um botão principal, até 3 outros em qualquer mistura (até 3 Abrir um link), links sempre e áudio no máximo um", () => {
   const cta = (id) => ({ action: { kind: "cta" }, id, type: "button" });
   const close = (id) => ({ action: { kind: "close" }, id, label: "Agora não", type: "button" });
-  const link = (id) => ({ action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, id, label: "Ver", type: "button" });
+  const snooze = (id) => ({ action: { kind: "snooze" }, id, label: "Depois", type: "button" });
+  const link = (id, href = "/minhas-compras") => ({ action: { href, kind: "link", target: "same_tab" }, id, label: "Ver", type: "button" });
 
   valid(design([cta("principal"), close("b1"), close("b2"), link("b3")]));
+  // L4b: o limite proprio de um "Abrir um link" saiu; vale o teto de 3 botoes alem do principal.
+  valid(design([cta("principal"), link("b1"), link("b2", "https://exemplo.com/a"), link("b3", "/conteudo/produto-1")]));
+  valid(design([link("b1"), snooze("b2"), link("b3")]));
+  assert.equal("linkButtons" in M, false, "a frase do link unico saiu");
+  assert.equal("linkButtons" in model.FREE_DESIGN_LIMITS, false);
   hasIssue(design([cta("p1"), cta("p2")]), "children.1.action", M.ctaDuplicate);
   hasIssue(design([close("b1"), close("b2"), close("b3"), close("b4")]), "children.3.action", M.buttons);
-  hasIssue(design([link("b1"), link("b2")]), "children.1.action", M.linkButtons);
+  // O 4o alem do principal da uma frase so, a do teto, no mesmo lugar (com links ou misturado).
+  assert.deepEqual(issues(design([cta("principal"), link("b1"), link("b2"), link("b3"), link("b4")])), [["children.4.action", M.buttons]]);
+  assert.deepEqual(issues(design([link("b1"), close("b2"), link("b3"), snooze("b4")])), [["children.3.action", M.buttons]]);
+  // O destino inseguro continua recusado em qualquer um dos links.
+  hasIssue(design([link("b1"), link("b2", "javascript:alert(1)")]), "children.1.action.href");
   hasIssue(design([{ action: { kind: "close" }, id: "b1", type: "button" }]), "children.0.label", M.label);
   hasIssue(design([{ action: { kind: "cta" }, id: "p", label: "Comprar", type: "button" }]), "children.0.label", M.design);
   hasIssue({ children: [heading("t")], mode: "free", version: 1 }, "children", M.links);
@@ -332,6 +342,33 @@ test("link do botão segue a regra do botão principal", () => {
   assert.equal(render.freeLinkButton(button("/minhas-compras")).id, "b");
   assert.equal(render.freeLinkButton(design([{ action: { href: "/x", kind: "link", target: "new_tab" }, hidden: true, id: "b", label: "Abrir", type: "button" }])), null);
   assert.equal(render.freeLinkButton(null), null);
+});
+
+test("3 Abrir um link ficam iguais na ida e na volta da forma canônica (sem chave nova, versão 1)", () => {
+  const link = (id, href, target = "same_tab") => ({ action: { href, kind: "link", target }, id, label: `Ir ${id}`, type: "button" });
+  const value = valid(
+    design([
+      { action: { kind: "cta" }, id: "principal", type: "button" },
+      link("linka", "/minhas-compras"),
+      link("linkb", "https://exemplo.com/b", "new_tab"),
+      link("linkc", "/conteudo/produto-1")
+    ])
+  );
+  const canonical = model.canonicalPopupFreeDesign(value);
+
+  assert.equal(canonical.version, 1);
+  assert.deepEqual(
+    canonical.children.filter((node) => node.type === "button" && node.action.kind === "link").map((node) => [node.id, node.action.href, node.action.target]),
+    [
+      ["linka", "/minhas-compras", "same_tab"],
+      ["linkb", "https://exemplo.com/b", "new_tab"],
+      ["linkc", "/conteudo/produto-1", "same_tab"]
+    ]
+  );
+  assert.deepEqual(model.canonicalPopupFreeDesign(canonical), canonical, "idempotente");
+  assert.deepEqual(valid(canonical), canonical, "a forma canônica passa no schema");
+  // O primeiro visivel continua sendo o da leitura do cartao.
+  assert.equal(render.freeLinkButton(canonical).id, "linka");
 });
 
 /* ------------------------------------------------------------------------------------------------

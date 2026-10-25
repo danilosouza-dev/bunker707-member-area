@@ -1692,21 +1692,8 @@ export function withFreeArtboardWidth(design: PopupFreeDesign, width: number, re
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Botoes: "Abrir um link" so um, trocar o que o botao faz
+ * Botoes: trocar o que o botao faz (ate 3 "Abrir um link" alem do principal, L4b: a opcao nunca desliga)
  * ---------------------------------------------------------------------------------------------- */
-
-/** Por que "Abrir um link" esta desligado neste botao (outro botao ja abre um link); null = pode. */
-export function freeLinkActionDisabledReason(design: Pick<PopupFreeDesign, "children">, nodeId: FreeId): string | null {
-  let other = false;
-
-  walkFreeNodes(design.children, (node) => {
-    if (node.id !== nodeId && node.type === "button" && node.action.kind === "link") {
-      other = true;
-    }
-  });
-
-  return other ? M.linkButtons : null;
-}
 
 /**
  * A frase debaixo de "Permitir “Lembrar depois”" em Links › Conteúdo (docs/27 §13.7): ligada, a mesma do card

@@ -311,7 +311,7 @@ export const FREE_DESIGN_LIMITS = {
   blur: { max: 80, min: 0 },
   borderWidth: { max: 8, min: 0 },
   boxDepth: 2, // caixas: na prancheta (1) e dentro de uma caixa (2); folhas ate 3
-  buttons: 3, // alem do principal
+  buttons: 3, // alem do principal: Fechar, Lembrar depois ou Abrir um link, em qualquer mistura (L4b)
   childrenPerBox: 20,
   closeInset: { max: 24, min: 8 },
   dividerThickness: { max: 8, min: 1 },
@@ -336,7 +336,6 @@ export const FREE_DESIGN_LIMITS = {
   label: 40,
   letterSpacing: { max: 1, min: -0.2 },
   lineHeight: { max: 2.5, min: 0.7 },
-  linkButtons: 1, // botoes "Abrir um link" (dentro dos 3)
   margin: { max: 400, min: -400 },
   minHeight: { max: 1600, min: 0 },
   name: 40,
