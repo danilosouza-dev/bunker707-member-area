@@ -2,10 +2,13 @@
 // redimensionar elementos soltos (inclusive girados), guias de alinhamento (bordas e centro da prancheta e dos
 // outros soltos), alinhar no pop-up pelo retangulo medido, escala do zoom e do celular nas contas do ponteiro e os
 // numeros do "Soltar" e do "Seguir a sequencia". Tudo em px da prancheta (a largura escolhida, artboard.width).
+// O arrastar do L4a (docs/27 §13.9): o ponto da tela em px da prancheta, o lugar de soltar no desenho (a linha de
+// onde entra, a caixa de destino e o motivo quando a caixa recusa) e o lugar de soltar nas Camadas, sempre pelos
+// retangulos medidos, nunca pelo elemento sob o ponteiro.
 //
 // Modulo puro, imports relativos (tests/popup-livre-editor-modelo.test.mjs carrega direto pelo Node).
 
-import { FREE_DESIGN_LIMITS, isTextBearing, type FreeAbsolutePlace, type FreeNodeType } from "../../../../../server/communications/popup-free-model";
+import { FREE_DESIGN_LIMITS, isTextBearing, type FreeAbsolutePlace, type FreeId, type FreeNodeType } from "../../../../../server/communications/popup-free-model";
 
 export type FreeRect = { h: number; w: number; x: number; y: number };
 export type FreeResizeHandle = "e" | "n" | "ne" | "nw" | "s" | "se" | "sw" | "w";
@@ -438,4 +441,286 @@ export function finishFreeDrag(session: FreeDragSession | null): Partial<FreeRec
   }
 
   return freePlaceNumbers(commitsHeight(session) ? rect : { w: rect.w, x: rect.x, y: rect.y });
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Arrastar do L4a (docs/27 §13.9): lugar de soltar no desenho e nas Camadas
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Distancia (px de tela) antes de um arrastar de elemento da sequencia comecar no desenho. */
+export const FREE_FLOW_DRAG_START_PX = 6;
+/** Distancia (px de tela) antes de um arrastar comecar nas Camadas, no Fundo e no painel Elementos. */
+export const FREE_LIST_DRAG_START_PX = 4;
+/** Faixa da borda de uma caixa da sequencia (px de tela): ali o elemento entra antes ou depois da caixa. */
+export const FREE_DROP_EDGE_SCREEN_PX = 8;
+/** Lado minimo (px de tela) da zona de soltar de uma caixa: uma caixa vazia nasce sem altura. */
+export const FREE_DROP_EMPTY_SCREEN_PX = 24;
+
+export type FreePoint = { x: number; y: number };
+/** O lugar de um elemento: o vao `index` na lista do pai como ela esta agora (contando o proprio elemento). */
+export type FreeMoveTarget = { index: number; parentId: FreeId | null };
+export type FreeFlowItem = { id: FreeId; index: number; rect: FreeRect };
+/**
+ * Um lugar que recebe elementos da sequencia no desenho: a prancheta (`id` null) ou uma caixa desenhada. `index` e a
+ * posicao no pai (-1 na prancheta); `flow` diz se a caixa segue a sequencia (false na prancheta e numa caixa solta);
+ * `accepts` null = aceita, texto = o motivo de recusa; `items` sao os filhos desenhados da sequencia, com o indice
+ * real em `children`; `length` e children.length. `home` e a posicao de hoje do elemento arrastado quando este e o
+ * pai dele (soltar no mesmo vao nao muda nada); sem, null.
+ */
+export type FreeFlowContainer = {
+  accepts: string | null;
+  depth: number;
+  dir: "column" | "row";
+  flow: boolean;
+  home?: number | null;
+  id: FreeId | null;
+  index: number;
+  items: FreeFlowItem[];
+  length: number;
+  parentId: FreeId | null;
+  rect: FreeRect;
+  wrap: boolean;
+  z: number;
+};
+/** Onde o elemento entra no desenho: o pai e o vao, a linha de onde entra, a caixa de destino e o motivo de recusa. */
+export type FreeFlowDrop = { blocked: { id: FreeId; reason: string } | null; box: FreeRect | null; index: number; line: FreeRect; parentId: FreeId | null };
+/** Uma linha das Camadas, medida pela div da linha (px de tela, na ordem do DOM). */
+export type FreeLayerLine = { box: boolean; height: number; id: FreeId; top: number };
+export type FreeLayerOver = { edge: "after" | "before" | "inside"; id: FreeId } | { end: true };
+/** Como o desenho mostra um elemento novo arrastado do painel: solto (o retangulo pelo centro) ou na sequencia. */
+export type FreeCanvasDropSpec = { free: false; height: 0 | 1 } | { free: true; rectAt: (center: FreePoint) => FreeRect };
+export type FreeCanvasDrop = { center: FreePoint; kind: "free" } | ({ kind: "flow" } & FreeMoveTarget);
+
+/**
+ * Um ponto da tela em px da prancheta: (client - origem) / escala. A origem e o canto de dentro da borda da prancheta
+ * na tela; a escala, px de tela por px da prancheta (zoom e, no celular, os 343 px do cartao). Escala <= 0 vale 1.
+ */
+export function freeArtboardPoint(client: FreePoint, origin: FreePoint, scale: number): FreePoint {
+  const safe = Number.isFinite(scale) && scale > 0 ? scale : 1;
+
+  return { x: (client.x - origin.x) / safe, y: (client.y - origin.y) / safe };
+}
+
+function containsPoint(rect: FreeRect, point: FreePoint) {
+  return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y && point.y <= rect.y + rect.h;
+}
+
+/** O lado menor que `min` cresce ate `min`, centrado. */
+function grown(rect: FreeRect, min: number): FreeRect {
+  const w = Math.max(rect.w, min);
+  const h = Math.max(rect.h, min);
+
+  return { h, w, x: rect.x - (w - rect.w) / 2, y: rect.y - (h - rect.h) / 2 };
+}
+
+function hitRectOf(container: FreeFlowContainer, empty: number): FreeRect {
+  return container.id === null ? container.rect : grown(container.rect, empty);
+}
+
+/** As linhas visuais de uma caixa em linha com quebra: abre linha nova quando o topo do item fica no fundo da anterior ou abaixo. */
+function visualLines(items: readonly FreeFlowItem[]): FreeFlowItem[][] {
+  const lines: FreeFlowItem[][] = [];
+  let bottom = -Infinity;
+
+  for (const item of items) {
+    if (lines.length === 0 || item.rect.y >= bottom) {
+      lines.push([item]);
+      bottom = item.rect.y + item.rect.h;
+    } else {
+      lines[lines.length - 1].push(item);
+      bottom = Math.max(bottom, item.rect.y + item.rect.h);
+    }
+  }
+
+  return lines;
+}
+
+function spanOf(items: readonly FreeFlowItem[], axis: "x" | "y"): { end: number; start: number } {
+  const start = Math.min(...items.map((item) => (axis === "x" ? item.rect.x : item.rect.y)));
+  const end = Math.max(...items.map((item) => (axis === "x" ? item.rect.x + item.rect.w : item.rect.y + item.rect.h)));
+
+  return { end, start };
+}
+
+/** O indice pelo meio dos itens no eixo: o primeiro cujo meio passa do ponto; nenhum, depois do ultimo. */
+function indexAlong(items: readonly FreeFlowItem[], axis: "x" | "y", at: number): number {
+  for (const item of items) {
+    const middle = axis === "x" ? item.rect.x + item.rect.w / 2 : item.rect.y + item.rect.h / 2;
+
+    if (middle > at) {
+      return item.index;
+    }
+  }
+
+  return items[items.length - 1].index + 1;
+}
+
+/** A linha de onde entra (px da prancheta): h 0 na coluna, w 0 na linha; sem itens, no meio do contêiner. */
+function gapLine(container: FreeFlowContainer, index: number, group: readonly FreeFlowItem[]): FreeRect {
+  const prev = [...group].reverse().find((item) => item.index < index);
+  const next = group.find((item) => item.index >= index);
+
+  if (!prev && !next) {
+    return { h: 0, w: container.rect.w, x: container.rect.x, y: container.rect.y + container.rect.h / 2 };
+  }
+
+  if (container.dir === "row") {
+    const span = spanOf(group, "y");
+    const x = prev && next ? (prev.rect.x + prev.rect.w + next.rect.x) / 2 : next ? next.rect.x : (prev as FreeFlowItem).rect.x + (prev as FreeFlowItem).rect.w;
+
+    return { h: span.end - span.start, w: 0, x, y: span.start };
+  }
+
+  const span = spanOf(group, "x");
+  const y = prev && next ? (prev.rect.y + prev.rect.h + next.rect.y) / 2 : next ? next.rect.y : (prev as FreeFlowItem).rect.y + (prev as FreeFlowItem).rect.h;
+
+  return { h: 0, w: span.end - span.start, x: span.start, y };
+}
+
+/**
+ * Soltar no mesmo vao (entre o item de antes e o de depois do arrastado, com so soltos, escondidos ou elementos sem
+ * retangulo no meio) e o lugar de hoje: o indice vira `home` e nada muda.
+ */
+function sameGap(container: FreeFlowContainer, index: number): number {
+  const home = container.home;
+
+  if (home === null || home === undefined) {
+    return index;
+  }
+
+  const prev = [...container.items].reverse().find((item) => item.index < home);
+  const next = container.items.find((item) => item.index > home);
+  const low = prev ? prev.index + 1 : 0;
+  const high = next ? next.index : container.length;
+
+  return index >= low && index <= high ? home : index;
+}
+
+/**
+ * O lugar de soltar no desenho (px da prancheta; `edge` e `empty` ja divididos pela escala). Acerta o contêiner mais
+ * fundo sob o ponto (empate: maior z, depois o ultimo na lista, a ordem do DOM), com cada caixa crescida ate `empty`.
+ * Se ele recusa, sobe ate um que aceite e guarda o primeiro motivo (`blocked`). Numa caixa da sequencia, a faixa da
+ * borda (min(edge, 1/4 do lado), no eixo do pai) poe antes ou depois da caixa. O indice sai do meio dos itens no eixo
+ * da caixa (na linha com quebra, pela linha visual do ponto). O indice e o real de children, e o mesmo vao do
+ * arrastado vale o lugar de hoje. Fora da prancheta, null. Nao olha o aparelho nem o travado.
+ */
+export function freeFlowDropAt(point: FreePoint, containers: readonly FreeFlowContainer[], options: { edge: number; empty: number }): FreeFlowDrop | null {
+  const artboard = containers.find((container) => container.id === null);
+
+  if (!artboard || !containsPoint(artboard.rect, point)) {
+    return null;
+  }
+
+  let hit = artboard;
+
+  for (const container of containers) {
+    if (container === artboard || !containsPoint(hitRectOf(container, options.empty), point)) {
+      continue;
+    }
+
+    if (hit === artboard || container.depth > hit.depth || (container.depth === hit.depth && container.z >= hit.z)) {
+      hit = container;
+    }
+  }
+
+  const byId = new Map<FreeId | null, FreeFlowContainer>(containers.map((container) => [container.id, container]));
+  let target = hit;
+  let blocked: FreeFlowDrop["blocked"] = null;
+
+  while (target.accepts !== null && target.id !== null) {
+    blocked ??= { id: target.id, reason: target.accepts };
+    target = byId.get(target.parentId) ?? artboard;
+  }
+
+  const finish = (container: FreeFlowContainer, index: number, group: readonly FreeFlowItem[]): FreeFlowDrop => ({
+    blocked,
+    box: container.id === null ? null : container.rect,
+    index: sameGap(container, index),
+    line: gapLine(container, index, group),
+    parentId: container.id
+  });
+
+  // Faixa da borda: antes ou depois da propria caixa, no pai (que precisa aceitar).
+  if (target === hit && hit.id !== null && hit.flow) {
+    const parent = byId.get(hit.parentId);
+
+    if (parent && parent.accepts === null) {
+      const rect = hitRectOf(hit, options.empty);
+      const horizontal = parent.dir === "row";
+      const start = horizontal ? rect.x : rect.y;
+      const size = horizontal ? rect.w : rect.h;
+      const at = horizontal ? point.x : point.y;
+      const band = Math.min(options.edge, size / 4);
+      const index = at < start + band ? hit.index : at > start + size - band ? hit.index + 1 : null;
+
+      if (index !== null) {
+        const lines = parent.dir === "row" && parent.wrap ? visualLines(parent.items) : [parent.items];
+        const group = lines.find((line) => line.some((item) => item.id === hit.id)) ?? parent.items;
+
+        return finish(parent, index, group);
+      }
+    }
+  }
+
+  if (target.items.length === 0) {
+    return finish(target, target.length, []);
+  }
+
+  if (target.dir === "row" && target.wrap) {
+    const lines = visualLines(target.items);
+    const distance = (line: readonly FreeFlowItem[]) => {
+      const span = spanOf(line, "y");
+
+      return point.y < span.start ? span.start - point.y : point.y > span.end ? point.y - span.end : 0;
+    };
+    const line = lines.reduce((best, candidate) => (distance(candidate) < distance(best) ? candidate : best), lines[0]);
+
+    return finish(target, indexAlong(line, "x", point.x), line);
+  }
+
+  const index = indexAlong(target.items, target.dir === "row" ? "x" : "y", target.dir === "row" ? point.x : point.y);
+
+  return finish(target, index, target.items);
+}
+
+/** As zonas de soltar das caixas vazias que aceitam (o tracejado do desenho), ja crescidas ate `empty`. */
+export function freeFlowEmptyRects(containers: readonly FreeFlowContainer[], empty: number): FreeRect[] {
+  return containers
+    .filter((container) => container.id !== null && container.accepts === null && container.items.length === 0)
+    .map((container) => hitRectOf(container, empty));
+}
+
+/**
+ * O lugar de soltar nas Camadas pela altura do ponteiro (px de tela). Numa caixa, o quarto de cima e antes, o de
+ * baixo e depois e o meio e dentro; numa folha, a metade. Acima da primeira linha, antes dela; abaixo da ultima, o
+ * fim da prancheta; num vao entre linhas, antes da de baixo. Quem chama devolve null fora do painel das Camadas.
+ */
+export function freeLayerDropAt(lines: readonly FreeLayerLine[], y: number): FreeLayerOver | null {
+  if (lines.length === 0) {
+    return null;
+  }
+
+  if (y < lines[0].top) {
+    return { edge: "before", id: lines[0].id };
+  }
+
+  const last = lines[lines.length - 1];
+
+  if (y >= last.top + last.height) {
+    return { end: true };
+  }
+
+  for (const line of lines) {
+    if (y >= line.top && y < line.top + line.height) {
+      if (line.box) {
+        return { edge: y < line.top + line.height / 4 ? "before" : y >= line.top + (line.height * 3) / 4 ? "after" : "inside", id: line.id };
+      }
+
+      return { edge: y < line.top + line.height / 2 ? "before" : "after", id: line.id };
+    }
+  }
+
+  const below = lines.find((line) => line.top > y) ?? last;
+
+  return { edge: "before", id: below.id };
 }

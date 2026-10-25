@@ -79,7 +79,10 @@ export const FREE_STARTER_CTA = { href: "", label: "Saiba mais", target: "same_t
 export type FreeNewNodeContext = {
   /** O design onde o elemento entra (a cor do fundo do Degradê, a largura da prancheta). */
   design?: Pick<PopupFreeDesign, "artboard">;
-  /** O centro do que se ve no palco (px da prancheta), para a Forma solta; sem = o centro da prancheta. */
+  /**
+   * Um centro em px da prancheta: o da Forma solta (o que se ve no palco ou onde foi solta; sem = o centro da
+   * prancheta) e a altura do Degradê arrastado do painel (o meio na altura do ponto; sem = no topo).
+   */
   center?: { x: number; y: number };
 };
 
@@ -132,7 +135,7 @@ export function newFreeNode(kind: FreeElementKind | FreeNodeType, id: FreeId, co
         box: { fill: [{ kind: "linear", stops: [{ at: 0, color: clearOf(color) }, { at: 100, color: color.slice(0, 7) }] }] },
         id,
         name: "Degradê",
-        place: { h: 200, mode: "free", w: artboard.width, x: 0, y: 0, z: -1 },
+        place: { h: 200, mode: "free", w: artboard.width, x: 0, y: context.center ? Math.max(0, Math.round(context.center.y - 100)) : 0, z: -1 },
         type: "shape"
       };
     }
