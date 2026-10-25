@@ -766,3 +766,55 @@ test("elemento novo onde soltou: o vão da sequência, a Forma e o Degradê pelo
   // Sem at, o mesmo de antes (no fim, antes dos Links).
   assert.deepEqual(ids(editor.addFreeElement(base, "heading").design.children), ["titulo", "caixa", "titulo2", "links"]);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * Guardas de fonte: o editor e o desenho
+ * ---------------------------------------------------------------------------------------------- */
+
+test("o editor liga o mover: o ramo move, um passo sem juntar e a frase do Celular em toda mudança de ordem", () => {
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /if \(command\.kind === "move"\) \{\s*moveTo\(command\.id, command\.target\);/, "o ramo move das Camadas");
+
+  const moveTo = source.match(/function moveTo\([\s\S]*?\n {2}}\n/)?.[0] ?? "";
+  assert.match(moveTo, /freeMoveProblem\(present\.design, id, target\)/);
+  assert.match(moveTo, /commitDesign\(result\.design\);/);
+  assert.equal(/coalesceKey/.test(moveTo), false, "um gesto e um passo proprio");
+  assert.match(moveTo, /announce\(orderPhrase\(freeMoveAnnouncement\(result\.design, id, present\.cta, \{ becameFlow: result\.becameFlow \}\)\)\)/);
+
+  assert.match(source, /function orderPhrase\(text: string\) \{\s*return deviceRef\.current === "mobile" \? `\$\{text\} \$\{copy\.drag\.alsoDesktop\}` : text;/);
+  assert.match(source, /announce\(orderPhrase\(kind === "moveUp" \? copy\.announce\.upward : copy\.announce\.downward\)\)/);
+  assert.match(source, /announce\(orderPhrase\(copy\.announce\.outOfBox\)\)/);
+  assert.match(source, /announce\(orderPhrase\(result\.becameFlow \? copy\.announce\.toSequence : copy\.announce\.intoBox\)\)/);
+  assert.match(source, /announce\(orderPhrase\(copy\.announce\.toFree\)\)/, "o Soltar tambem muda o lugar em children");
+  assert.match(source, /announce\(orderPhrase\(copy\.announce\.toSequence\)\)/, "o Seguir a sequencia tambem");
+  assert.match(source, /const problem = freeOutOfBoxProblem\(present\.design, id\);/, "o Tirar com a caixa de fora cheia fala a frase");
+
+  // O painel Elementos: o mesmo caminho do clique, o lugar pelo previewDrop do desenho e a limpeza no fim.
+  assert.match(source, /function add\(kind: FreeCatalogKind, drop: FreeCanvasDrop \| null = null\)/);
+  assert.match(source, /const at = drop\?\.kind === "flow" \? \{ index: drop\.index, parentId: drop\.parentId \} : undefined;/);
+  assert.match(source, /addFreeElement\(present\.design, kind, \{ at, center, selectedId: activeId \}\)/);
+  assert.match(source, /api\?\.previewDrop\?\.\(null, null\);/);
+  assert.match(source, /onDragEnd=\{onElementDragEnd\} onDragMove=\{onElementDragMove\}/);
+  assert.match(source, /device=\{device\}\s+disabled=\{disabled\}\s+flagged=\{flagged\}/, "as Camadas sabem do Celular");
+  assert.match(source, /onMoveInFlow=\{moveTo\}/);
+});
+
+test("o desenho mostra o lugar de soltar: previewDrop no apiRef e as etiquetas de 12 px", () => {
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-canvas.tsx", import.meta.url), "utf8");
+  const api = source.match(/apiRef\.current = \{[\s\S]*?visibleCenter:/)?.[0] ?? "";
+
+  assert.match(api, /previewDrop: \(client, spec\) =>/);
+  assert.match(api, /freeFlowContainers\(designRef\.current, rectsRef\.current, \{ height: spec\.height \}\)/, "o desenho do aparelho que se ve");
+  assert.match(api, /edge: FREE_DROP_EDGE_SCREEN_PX \/ at\.scale/);
+  assert.equal(/both: true/.test(api), false, "um elemento novo nao e mudanca de ordem: sem a etiqueta do Celular");
+  assert.match(source, /text-\[12px\][^"]*" data-free-drop-both="">\s*\{copy\.drag\.alsoDesktopTag\}/);
+  assert.match(source, /text-\[12px\][^"]*" data-free-drop-hint="">/);
+  assert.match(source, /data-free-drop-line=""/);
+  assert.match(source, /data-free-drop-target=""/);
+  assert.match(source, /data-free-drop-new=""/);
+  assert.match(source, /data-free-drop-empty=""/);
+  assert.match(source, /data-free-flow-origin=""/);
+  assert.match(source, /rectsRef\.current = rects;/);
+  assert.match(source, /!session && !dropView \?/, "com o indicador, o contorno de passar o mouse some");
+});
