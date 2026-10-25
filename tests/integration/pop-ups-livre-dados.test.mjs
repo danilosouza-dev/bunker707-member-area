@@ -26,7 +26,7 @@ const { invalidateLivePopups } = await import("../../src/server/communications/c
 const custom = await import("../../src/server/communications/popup-design-model.ts");
 const model = await import("../../src/server/communications/popup-free-model.ts");
 const starters = await import("../../src/server/communications/popup-free-starters.ts");
-const { POPUP_FREE_MESSAGES } = await import("../../src/server/communications/popup-free-schema.ts");
+const { POPUP_FREE_MESSAGES, freeErrorKey } = await import("../../src/server/communications/popup-free-schema.ts");
 const summaryRoute = await import("../../src/app/api/notifications/summary/route.ts");
 const showRoute = await import("../../src/app/api/popups/[id]/show/route.ts");
 
@@ -699,7 +699,10 @@ test("L4b: o maior Livre com 3 Abrir um link passa no check de 32 KB; o 4º bot�
 
   assert.equal(recusado.ok, false);
   assert.equal(recusado.status, 400);
-  assert.deepEqual(recusado.fieldErrors["draft.freeDesign.nodes.fechar.action"], [POPUP_FREE_MESSAGES.buttons]);
+  // O schema aponta o elemento pela posicao; o editor troca pela chave do id (freeErrorKeys, o campo certo no painel).
+  const fechar = quatro.children.findIndex((node) => node.id === "fechar");
+  assert.deepEqual(recusado.fieldErrors[`draft.freeDesign.children.${fechar}.action`], [POPUP_FREE_MESSAGES.buttons]);
+  assert.equal(freeErrorKey(quatro, `freeDesign.children.${fechar}.action`), "freeDesign.nodes.fechar.action");
   assert.equal(POPUP_FREE_MESSAGES.buttons, "Use até 3 botões além do principal.");
   assert.deepEqual((await linha(salvo.id)).popup_design, model.canonicalPopupFreeDesign(maior), "nada muda");
 });
