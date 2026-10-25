@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ArrowUp, Copy, Move, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, GripVertical, Move, Trash2 } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -23,6 +23,7 @@ import type { FreeMeasuredRects } from "@/server/communications/popup-free-check
 import {
   FREE_DROP_EDGE_SCREEN_PX,
   FREE_DROP_EMPTY_SCREEN_PX,
+  FREE_FLOW_DRAG_START_PX,
   FREE_PHONE_FRAME_PX,
   FREE_RESIZE_HANDLES,
   finishFreeDrag,
@@ -40,23 +41,36 @@ import {
   type FreeCanvasDropSpec,
   type FreeDragMode,
   type FreeDragSession,
+  type FreeFlowContainer,
   type FreeFlowDrop,
   type FreeMoveTarget,
   type FreePoint,
   type FreeRect,
   type FreeResizeHandle
 } from "./free-editor-geometry";
-import { FREE_EDITOR_COPY, FREE_HANDLE_LABELS, freeFlowContainers, freeLayerLabel, freeNodeOf, isFreeMovable } from "./free-editor-model";
+import { FREE_EDITOR_COPY, FREE_HANDLE_LABELS, freeFlowContainers, freeLayerLabel, freeMoveProblem, freeNodeOf, isFreeMovable } from "./free-editor-model";
+import { FREE_POINTER_MOUSE_AND_PEN, followFreePointer } from "./free-pointer-drag";
 
 // Area de desenho do editor Livre (spec §4.4): o MESMO PopupFreeCard do aluno, em previa, dentro de um palco com
 // container-type: inline-size (Computador = max(W + 32, 600) px; Celular = moldura de 375 px, cartao de 343 px,
 // como no aluno). O zoom e transform: scale() no palco (as unidades cqw nao mudam); a escala das contas do
 // ponteiro = largura medida da prancheta / W. Camada de selecao por cima (sem receber clique, menos as alcas e a
 // barrinha): contorno do elemento sob o mouse, contorno de 2 px do selecionado com a etiqueta do nome, 8 alcas nos
-// soltos, guias de alinhamento e a barrinha dos elementos da sequencia. Durante o arrastar o design nao muda: o
-// cartao desenha so aquele elemento deslocado (dragPreview) e o design muda uma vez, no fim. Com "Ver como: Celular"
-// o editor entrega o design do celular (resolveFreeForDevice) e grava o fim do gesto em devices.mobile; o
-// selecionado com valores proprios do celular ganha a etiqueta "Celular" ao lado do nome.
+// soltos, guias de alinhamento e a barrinha dos elementos da sequencia. Durante o arrastar de um solto o design nao
+// muda: o cartao desenha so aquele elemento deslocado (dragPreview) e o design muda uma vez, no fim. Com "Ver como:
+// Celular" o editor entrega o design do celular (resolveFreeForDevice) e grava o fim desse gesto em devices.mobile;
+// o selecionado com valores proprios do celular ganha a etiqueta "Celular" ao lado do nome.
+// Arrastar da sequencia (docs/27 §13.9, L4a): um elemento da sequencia nao travado se arrasta pelo proprio corpo ou
+// pela alca do comeco da barrinha (o jeito de pegar uma caixa coberta pelos filhos), com followFreePointer (mouse e
+// caneta; o cartao tem touch-action: none). O gesto comeca a 6 px de tela e so entao captura o ponteiro: o clique de
+// selecionar e o duplo clique de editar texto ficam como sao. A foto (os lugares de freeFlowContainers, o lugar de
+// antes e o design) e tirada no onStart, depois do limiar; dentro de um solto girado a lista vem vazia e o gesto nao
+// comeca. A cada movimento, freeFlowDropAt acha o vao, e o indicador mostra a linha de onde entra, a caixa de
+// destino, as caixas vazias que aceitam, o lugar de antes, o motivo de recusa e, no Celular, "Muda também no
+// computador" (a ordem e uma so, em children). Rolar a area de desenho no meio redesenha o indicador. Soltar
+// recalcula com o ponto do pointerup e chama onMoveInFlow (o editor confere e grava num passo); Esc, soltar fora da
+// prancheta, no mesmo lugar ou com o design mudado no meio nao mudam nada. Durante o gesto a barrinha fica montada e
+// invisivel, o contorno de passar o mouse some e o cartao fica com a mao fechada.
 
 const copy = FREE_EDITOR_COPY;
 
@@ -110,6 +124,23 @@ export type FreeCanvasProps = {
 
 /** Medidas da prancheta no palco: px de layout por px da prancheta (1 no Computador; 343/W no Celular) e a borda. */
 type Frame = { clientLeft: number; clientTop: number; k: number };
+
+/**
+ * O arrastar de um elemento da sequencia no desenho, a partir do limiar: a foto do comeco (o design do palco, os
+ * lugares que recebem e o lugar de antes), o ultimo ponto (px de tela, para redesenhar quando a area rola) e o vao
+ * de agora (null fora da prancheta, no mesmo lugar ou recusado).
+ */
+type FreeFlowSession = {
+  containers: FreeFlowContainer[];
+  design: PopupFreeDesign;
+  id: FreeId;
+  last: FreePoint | null;
+  origin: FreeRect;
+  target: FreeMoveTarget | null;
+};
+
+/** O scroll da area de desenho durante o arrastar da sequencia (o mesmo objeto para ligar e desligar). */
+const FLOW_SCROLL: AddEventListenerOptions = { capture: true, passive: true };
 
 const GUIDE_COLOR = "#ff3ea5";
 const HANDLE_CURSOR: Record<FreeResizeHandle, string> = {
@@ -165,6 +196,7 @@ export function FreeCanvas({
   fonts,
   onCommitRect,
   onEditText,
+  onMoveInFlow,
   onRectsChange,
   onSelect,
   onToolbar,
@@ -195,6 +227,12 @@ export function FreeCanvas({
   const onRectsChangeRef = useRef(onRectsChange);
   const [dropView, setDropView] = useState<FreeDropView | null>(null);
   const dropKey = useRef("");
+  const flowRef = useRef<FreeFlowSession | null>(null);
+  const flowDispose = useRef<(() => void) | null>(null);
+  const [flowDragging, setFlowDragging] = useState(false);
+  const deviceRef = useRef(device);
+  const disabledRef = useRef(disabled);
+  const onMoveInFlowRef = useRef(onMoveInFlow);
   const stageWidth = device === "mobile" ? FREE_PHONE_FRAME_PX : freeDesktopStageWidth(width);
   const scale = zoom === "100" ? 1 : freeFitZoom(viewport, { h: stageSize.h || 600, w: stageWidth });
   const layoutPerScreen = 1 / scale;
@@ -203,6 +241,9 @@ export function FreeCanvas({
     designRef.current = design;
     rectsRef.current = rects;
     onRectsChangeRef.current = onRectsChange;
+    deviceRef.current = device;
+    disabledRef.current = disabled;
+    onMoveInFlowRef.current = onMoveInFlow;
   });
 
   /** Troca o indicador do arrastar so quando ele muda (o cartao redesenha a cada troca). */
@@ -445,6 +486,117 @@ export function FreeCanvas({
   }, [apiRef, artboardPointAt, showDropView]);
 
   /* --------------------------------------------------------------------------------------------
+   * Arrastar da sequencia (L4a): so refs, porque o ajudante de ponteiro chama de fora do React
+   * ------------------------------------------------------------------------------------------ */
+
+  /**
+   * O vao sob o ponto (px de tela) pela foto do comeco, e o indicador. Devolve o vao que o soltar grava: null fora da
+   * prancheta, no mesmo lugar (sem linha nem caixa de destino) ou recusado (so o motivo).
+   */
+  const updateFlow = useCallback(
+    (client: FreePoint): FreeMoveTarget | null => {
+      const current = flowRef.current;
+
+      if (!current) {
+        return null;
+      }
+
+      current.last = client;
+
+      const at = artboardPointAt(client);
+      const artboard = wrapRef.current?.querySelector<HTMLElement>("[data-free-artboard]");
+      const screen = at?.scale ?? (artboard ? artboard.getBoundingClientRect().width / (current.design.artboard?.width ?? 440) || 1 : 1);
+      const empty = FREE_DROP_EMPTY_SCREEN_PX / screen;
+      const drop = at ? freeFlowDropAt(at.point, current.containers, { edge: FREE_DROP_EDGE_SCREEN_PX / screen, empty }) : null;
+      const target: FreeMoveTarget | null = drop ? { index: drop.index, parentId: drop.parentId } : null;
+      // "" = o mesmo lugar (ou nada a fazer): sem linha e sem caixa de destino; um texto e um motivo de recusa.
+      const problem = target ? freeMoveProblem(current.design, current.id, target) : "";
+      const moves = drop !== null && problem === null;
+
+      current.target = moves ? target : null;
+      showDropView({
+        blocked: drop?.blocked ?? (problem ? { id: current.id, reason: problem } : null),
+        box: drop && moves ? drop.box : null,
+        both: moves && deviceRef.current === "mobile",
+        empties: freeFlowEmptyRects(current.containers, empty),
+        line: drop && moves ? drop.line : null,
+        newRect: null,
+        origin: current.origin
+      });
+
+      return current.target;
+    },
+    [artboardPointAt, showDropView]
+  );
+
+  /**
+   * O ponteiro passou do limiar: a foto do comeco (o design do palco, os lugares que recebem e o lugar de antes). Ela e
+   * tirada aqui e nao no pointerdown: o blur de um campo que grava (Renomear nas Camadas) chega depois do pointerdown.
+   */
+  const startFlow = useCallback((id: FreeId) => {
+    const stage = designRef.current;
+    const node = freeNodeOf(stage, id);
+    const origin = rectsRef.current[id];
+    const containers = freeFlowContainers(stage, rectsRef.current, { id });
+
+    if (disabledRef.current || !node || node.locked || node.place?.mode === "free" || !origin || containers.length === 0) {
+      // Nao comeca: desliga o gesto sem chamar nada (o movimento que vem logo depois acha a sessao vazia).
+      flowDispose.current?.();
+      flowDispose.current = null;
+
+      return;
+    }
+
+    flowRef.current = { containers, design: stage, id, last: null, origin, target: null };
+    setFlowDragging(true);
+  }, []);
+
+  /**
+   * Fim do arrastar da sequencia. Com o ponto do pointerup, refaz o vao (a area pode ter rolado sem pointermove) e o
+   * editor grava; sem ponto (Esc, pointercancel, blur), so limpa. Com o design mudado no meio, os indices da foto
+   * ficaram velhos e nada muda.
+   */
+  const endFlow = useCallback(
+    (client: FreePoint | null) => {
+      const current = flowRef.current;
+      const target = current && client ? updateFlow(client) : null;
+
+      flowRef.current = null;
+      setFlowDragging(false);
+      showDropView(null);
+
+      if (current && target && designRef.current === current.design && !disabledRef.current) {
+        onMoveInFlowRef.current?.(current.id, target);
+      }
+    },
+    [showDropView, updateFlow]
+  );
+
+  // Rolar a area de desenho no meio do arrastar nao manda pointermove: o indicador e o vao saem do ultimo ponto.
+  useEffect(() => {
+    const view = viewportRef.current;
+
+    if (!flowDragging || !view) {
+      return;
+    }
+
+    const onScroll = () => {
+      const last = flowRef.current?.last;
+
+      if (last) {
+        updateFlow(last);
+      }
+    };
+
+    view.addEventListener("scroll", onScroll, FLOW_SCROLL);
+
+    return () => view.removeEventListener("scroll", onScroll, FLOW_SCROLL);
+  }, [flowDragging, updateFlow]);
+
+  // Ao desmontar, o gesto que estiver sendo seguido e desligado (o bloqueador do click de um gesto terminado fica).
+  useEffect(() => () => flowDispose.current?.(), []);
+
+  /* --------------------------------------------------------------------------------------------
    * Ponteiro
    * ------------------------------------------------------------------------------------------ */
 
@@ -498,6 +650,31 @@ export function FreeCanvas({
     }
   }
 
+  /**
+   * Segue o arrastar de um elemento da sequencia, pelo corpo (currentTarget = o cartao) ou pela alca da barrinha. So
+   * com o editor ligado, um elemento da sequencia nao travado e medido, e algum lugar para ele (dentro de um solto
+   * girado, nenhum: o gesto nao comeca). A captura e a foto so vem depois de 6 px (startFlow).
+   */
+  function beginFlowDrag(event: ReactPointerEvent<HTMLElement>, id: FreeId) {
+    const node = freeNodeOf(design, id);
+
+    if (disabled || !onMoveInFlow || !node || node.locked || node.place?.mode === "free" || !rects[id] || freeFlowContainers(design, rects, { id }).length === 0) {
+      return;
+    }
+
+    flowDispose.current?.();
+    flowDispose.current = followFreePointer(event, {
+      onCancel: () => endFlow(null),
+      onDrop: (client) => endFlow(client),
+      onMove: (client) => {
+        updateFlow(client);
+      },
+      onStart: () => startFlow(id),
+      pointerTypes: FREE_POINTER_MOUSE_AND_PEN,
+      threshold: FREE_FLOW_DRAG_START_PX
+    });
+  }
+
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) {
       return;
@@ -514,13 +691,20 @@ export function FreeCanvas({
 
     onSelect(id);
 
+    // Um solto muda X/Y (beginDrag, como sempre); um elemento da sequencia muda de lugar na ordem (beginFlowDrag).
     if (id) {
       beginDrag(event, id, "move");
+      beginFlowDrag(event, id);
     }
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     const current = sessionRef.current;
+
+    // Arrastando da sequencia: o contorno de passar o mouse fica desligado (o ajudante segue o gesto na janela).
+    if (flowRef.current) {
+      return;
+    }
 
     if (current) {
       const next = updateFreeDrag(current, { x: event.clientX, y: event.clientY }, { altKey: event.altKey, shiftKey: event.shiftKey });
@@ -582,7 +766,7 @@ export function FreeCanvas({
         ? freeRectOfPlace(selectedNode.place, rects[selectedNode.id]?.h)
         : (rects[selectedNode.id] ?? null)
     : null;
-  const hoverRect = hoverId && hoverId !== selectedId && !session && !dropView ? (rects[hoverId] ?? null) : null;
+  const hoverRect = hoverId && hoverId !== selectedId && !flowDragging && !session && !dropView ? (rects[hoverId] ?? null) : null;
   const rotate = selectedNode?.place?.mode === "free" ? (selectedNode.place.rotate ?? 0) : 0;
   const toLayout = (rect: FreeRect): CSSProperties => ({
     height: rect.h * frame.k,
@@ -644,11 +828,36 @@ export function FreeCanvas({
         {flowSelected ? (
           <div
             aria-label={copy.toolbar.label}
-            className="pointer-events-auto absolute right-0 flex items-center gap-0.5 rounded-md border border-[var(--border-strong)] bg-[var(--surface-3)] p-0.5 shadow-lg"
+            // Arrastando da sequencia, a barrinha fica montada (a alca pode ter a captura do ponteiro) e invisivel.
+            className={cn(
+              "pointer-events-auto absolute right-0 flex items-center gap-0.5 rounded-md border border-[var(--border-strong)] bg-[var(--surface-3)] p-0.5 shadow-lg",
+              flowDragging && "invisible"
+            )}
             data-free-overlay-control=""
             role="toolbar"
             style={{ bottom: "100%", marginBottom: 4 * layoutPerScreen, transform: `scale(${layoutPerScreen})`, transformOrigin: "bottom right" }}
           >
+            {/* A alca: o jeito de pegar uma caixa coberta pelos filhos (o mouse cai sempre no de dentro). */}
+            <span
+              aria-hidden="true"
+              className={cn(
+                "grid size-7 touch-none place-items-center rounded text-[var(--text-secondary)] hover:bg-[var(--press-overlay)]",
+                flowDragging ? "cursor-grabbing" : "cursor-grab"
+              )}
+              data-free-flow-grip=""
+              data-free-overlay-control=""
+              onPointerDown={(event) => {
+                if (event.button !== 0) {
+                  return;
+                }
+
+                event.stopPropagation();
+                beginFlowDrag(event, selectedNode.id);
+              }}
+              title={copy.toolbar.drag}
+            >
+              <GripVertical className="size-3.5" />
+            </span>
             <ToolbarButton icon={<ArrowUp className="size-3.5" />} label={copy.toolbar.moveUp} onClick={() => onToolbar("moveUp", selectedNode.id)} reason={toolbarDisabled.moveUp} />
             <ToolbarButton icon={<ArrowDown className="size-3.5" />} label={copy.toolbar.moveDown} onClick={() => onToolbar("moveDown", selectedNode.id)} reason={toolbarDisabled.moveDown} />
             <ToolbarButton icon={<Copy className="size-3.5" />} label={copy.toolbar.duplicate} onClick={() => onToolbar("duplicate", selectedNode.id)} reason={toolbarDisabled.duplicate} />
@@ -667,7 +876,8 @@ export function FreeCanvas({
 
   if (dropView) {
     const { line } = dropView;
-    const anchor = line ?? dropView.newRect ?? dropView.box;
+    // Sem linha (o mesmo lugar, com uma caixa cheia sob o ponteiro), o motivo fica embaixo de quem recusou.
+    const anchor = line ?? dropView.newRect ?? dropView.box ?? (dropView.blocked ? (rects[dropView.blocked.id] ?? null) : null);
     const dashed = (thickness: number): CSSProperties => ({ outline: `${thickness}px dashed var(--focus-ring)`, outlineOffset: 0 });
     // A linha de onde entra: deitada na coluna (h 0), em pe na linha (w 0); 2 px de tela, a cor do foco (as guias sao rosa).
     const lineStyle: CSSProperties | null = line
@@ -743,7 +953,7 @@ export function FreeCanvas({
               style={{ containerType: "inline-size" }}
             >
               <div
-                className={cn("relative mx-auto w-fit touch-none select-none", session ? (session.mode === "move" ? "cursor-grabbing" : "") : "")}
+                className={cn("relative mx-auto w-fit touch-none select-none", session ? (session.mode === "move" ? "cursor-grabbing" : "") : flowDragging ? "cursor-grabbing" : "")}
                 data-free-canvas-card=""
                 onDoubleClick={onDoubleClick}
                 onLostPointerCapture={() => {
