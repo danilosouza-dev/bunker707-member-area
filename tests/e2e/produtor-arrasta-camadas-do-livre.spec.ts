@@ -16,17 +16,18 @@ import {
   gravarRascunhoLivre,
   lerDesignDoAviso,
   linhasDasCamadas,
+  toqueDeOutroPonteiro,
   type Ponto
 } from "./popup-livre-editor-fixtures";
 
 // Livre: arrastar nas Camadas (docs/27 §13.9, L4a; docs/18 §3.1). Num rascunho com [Título, Texto, Caixa em coluna
 // [Selo, Botão principal], Links] (o Botão principal semeado com o botao do aviso, para o Revisar nao pedir nada), um
 // clique que treme 6 px dentro da linha do Texto seleciona o Texto, como o clique parado. O produtor arrasta o Texto
-// para o meio da linha da Caixa (com a mao fechada; entra no fim dela, um passo so no Ctrl + Z), o Selo para o quarto
-// de cima do Título (sai da caixa e fica primeiro), a Caixa para a linha do Botão de dentro dela (a recusa aparece com
-// o cursor de proibido, nada muda e nao ha passo vazio), aperta Esc no meio de um arrastar (nada muda, a selecao fica
-// e o foco continua nas Camadas), solta abaixo da ultima linha (o fim do pop-up) e arrasta a propria linha 6 px (nada
-// aparece e a linha fica selecionada).
+// para o meio da linha da Caixa (a mao fechada; um toque de outro ponteiro no meio nao para o gesto; entra no fim dela,
+// um passo so no Ctrl + Z), o Selo para o quarto de cima do Título (sai da caixa e fica primeiro), a Caixa para a linha
+// do Botão de dentro dela (a recusa aparece com o cursor de proibido, nada muda e nao ha passo vazio), aperta Esc no
+// meio de um arrastar (nada muda, a selecao fica e o foco continua nas Camadas), solta abaixo da ultima linha (o fim
+// do pop-up) e arrasta a propria linha 6 px (nada aparece e a linha fica selecionada).
 // Com uma linha em Renomear, arrastar outra linha ainda move (a foto do design e tirada depois do limiar). Com "Ver
 // como: Celular", a etiqueta diz que a ordem muda tambem no computador. Pelo teclado, Shift + F10 › Tirar da caixa e ›
 // Colocar dentro da caixa deixam o foco na linha movida. Salvar grava a ordem nova. Funciona no WebKit: o mouse sempre
@@ -141,9 +142,13 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
         await expect(editor.locator("[data-free-layer-drop-inside]")).toBeVisible();
         // A mao fechada no botao que tem a captura do ponteiro (o cursor: pointer de todo botao cede com o !).
         expect(await cursorDe(botaoDaCamada(editor, "texto"))).toBe("grabbing");
+        // Um toque de outro ponteiro em outra linha no meio do gesto nao o desliga: o indicador continua.
+        await toqueDeOutroPonteiro(botaoDaCamada(editor, "titulo"));
+        await expect(editor.locator("[data-free-layer-drop-inside]")).toBeVisible();
       }
     });
     await expect.poll(() => ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links"]);
+    await expect(editor.locator("[data-free-layer-dragging]")).toHaveCount(0);
     await expect(frase).toContainText("Movido. Posição 3 de 3, dentro de Caixa em coluna.");
     await expect(botaoDaCamada(editor, "texto")).toBeFocused();
     expect(await selecionado(editor)).toBe("texto");

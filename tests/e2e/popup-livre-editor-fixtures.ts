@@ -209,6 +209,21 @@ export async function cursorDe(locator: Locator) {
   return locator.evaluate((element) => getComputedStyle(element).cursor);
 }
 
+/**
+ * Um toque de outro ponteiro no elemento, como o dedo que encosta na tela com o mouse apertado: pointerdown e pointerup
+ * de toque, com um pointerId proprio, disparados no proprio elemento (os dois navegadores tem o PointerEvent). Sem
+ * hasTouch no contexto: a pagina continua com o mouse e o layout nao muda.
+ */
+export async function toqueDeOutroPonteiro(locator: Locator) {
+  await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const comum = { bubbles: true, button: 0, cancelable: true, clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2, isPrimary: true, pointerId: 707, pointerType: "touch" };
+
+    element.dispatchEvent(new PointerEvent("pointerdown", { ...comum, buttons: 1 }));
+    element.dispatchEvent(new PointerEvent("pointerup", { ...comum, buttons: 0 }));
+  });
+}
+
 /** As linhas das Camadas na ordem da lista, com o id da caixa de fora (null na prancheta). */
 export async function linhasDasCamadas(editor: Locator): Promise<{ id: string; pai: string | null }[]> {
   return editor.locator("[data-free-layer-row]").evaluateAll((rows) =>

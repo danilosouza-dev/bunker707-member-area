@@ -657,7 +657,8 @@ export function FreeCanvas({
    * solto girado (ali nao ha lugar para ele: o gesto nao comeca). A captura e a foto so vem depois de 6 px (startFlow).
    */
   function beginFlowDrag(event: ReactPointerEvent<HTMLElement>, id: FreeId) {
-    if (disabled || !onMoveInFlow || !freeFlowDraggable(design, rects, id)) {
+    // Um gesto comecado segue ate o fim: o pointerdown de outro ponteiro (um toque com o mouse apertado) nao o desliga.
+    if (flowRef.current || disabled || !onMoveInFlow || !freeFlowDraggable(design, rects, id)) {
       return;
     }
 
@@ -675,7 +676,8 @@ export function FreeCanvas({
   }
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) {
+    // Arrastando da sequencia, outro ponteiro (um toque, a caneta) nao seleciona nem desliga o gesto (beginFlowDrag).
+    if (event.button !== 0 || flowRef.current) {
       return;
     }
 

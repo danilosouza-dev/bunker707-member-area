@@ -15,7 +15,8 @@ import {
   lerDesignDoAviso,
   linhasDasCamadas,
   noPalco,
-  prancheta
+  prancheta,
+  toqueDeOutroPonteiro
 } from "./popup-livre-editor-fixtures";
 
 // Livre: arrastar os elementos da sequencia no desenho (docs/27 §13.9, L4a; docs/18 §3.1). Num rascunho com [Título,
@@ -23,13 +24,13 @@ import {
 // Caixa em linha so no celular (o Botão principal semeado com o botao do aviso, para o Revisar nao pedir nada), o
 // produtor arrasta pelo proprio elemento. Com os Links em Renomear nas Camadas, o Título desce um lugar na coluna: o
 // nome fica (a foto do arrastar vem depois do limiar, entao o blur do campo nao cancela o gesto), e Ctrl + Z e Ctrl +
-// Shift + Z sao um passo. O Texto entra no fim da Caixa (o foco fica no palco) e sai dela pela faixa da borda de baixo,
-// a Caixa vai para o topo pela alca da barrinha, o Título em cima da caixa cheia mostra o motivo e o Esc cancela (o
-// foco fica no palco), e soltar fora da prancheta nao muda nada. Com "Ver como: Celular" (a Caixa em linha), o Selo vai
-// para a direita do Botão: a etiqueta e a frase dizem que a ordem muda tambem no computador, e o Computador ve a mesma
-// ordem. Salvar rascunho grava a ordem nova em children, e devices fica como foi semeado. Funciona no WebKit: o mouse
-// sempre dentro da janela, a prancheta e os elementos parados antes de medir, o indicador antes de soltar e a frase
-// falada antes do passo seguinte.
+// Shift + Z sao um passo. O Texto entra no fim da Caixa (o foco fica no palco) e sai dela pela faixa da borda de baixo
+// (um toque de outro ponteiro no meio nao seleciona nem para o gesto), a Caixa vai para o topo pela alca da barrinha,
+// o Título em cima da caixa cheia mostra o motivo e o Esc cancela (o foco fica no palco), e soltar fora da prancheta
+// nao muda nada. Com "Ver como: Celular" (a Caixa em linha), o Selo vai para a direita do Botão: a etiqueta e a frase
+// dizem que a ordem muda tambem no computador, e o Computador ve a mesma ordem. Salvar rascunho grava a ordem nova em
+// children, e devices fica como foi semeado. Funciona no WebKit: o mouse sempre dentro da janela, a prancheta e os
+// elementos parados antes de medir, o indicador antes de soltar e a frase falada antes do passo seguinte.
 
 const TITULO = "Pop-up E2E: o produtor arrasta no desenho do Livre";
 /** A caixa cheia: 20 linhas (o limite de uma caixa), baixas para a prancheta caber na tela. */
@@ -162,7 +163,7 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
     await expect(editor.locator("[data-free-stage]")).toBeFocused();
   });
 
-  await test.step("o Texto sai da Caixa pela faixa da borda de baixo e fica logo depois dela", async () => {
+  await test.step("o Texto sai da Caixa pela faixa da borda de baixo e fica logo depois dela (um toque no meio nao para o gesto)", async () => {
     const texto = await caixaParada(noPalco(editor, "texto"));
     const caixa = await caixaParada(noPalco(editor, "caixa"));
 
@@ -171,12 +172,20 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
         await expect(linha).toBeVisible();
         // O destino e a prancheta: nenhuma caixa de destino.
         await expect(destino).toHaveCount(0);
+        // Um toque de outro ponteiro no Título no meio do gesto: nao seleciona o Título nem desliga o gesto.
+        await toqueDeOutroPonteiro(noPalco(editor, "titulo"));
+        await expect(linha).toBeVisible();
       }
     });
 
     await expect(falado(editor)).toHaveText("Movido. Posição 3 de 5, no pop-up.");
     expect(await ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "texto", "cheia", "links"]);
     expect(await filhosNoPalco(editor, "caixa")).toEqual(["selo", "botao"]);
+    // Nada do gesto fica para tras: sem linha nem lugar de antes, e a barrinha do Texto volta.
+    await expect(editor.locator("[data-free-selection]")).toHaveAttribute("data-free-selection", "texto");
+    await expect(linha).toHaveCount(0);
+    await expect(origem).toHaveCount(0);
+    await expect(barrinha).toBeVisible();
   });
 
   await test.step("a Caixa vai para o topo pela alça da barrinha", async () => {

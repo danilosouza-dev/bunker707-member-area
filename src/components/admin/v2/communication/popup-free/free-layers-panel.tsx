@@ -397,7 +397,8 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
    * mesmo lugar, so seleciona (o click do botao solto e engolido pelo ajudante); o Esc no meio nao seleciona nada.
    */
   function beginLayerDrag(event: ReactPointerEvent<HTMLButtonElement>, id: FreeId) {
-    if (disabled) {
+    // Um gesto comecado segue ate o fim: o pointerdown de outro ponteiro (um toque com o mouse apertado) nao o desliga.
+    if (disabled || gestureRef.current) {
       return;
     }
 

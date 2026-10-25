@@ -989,6 +989,11 @@ test("o desenho só desenha a alça quando o arrastar pode começar (num filho d
   const grip = source.match(/\{flowGrip \? \([\s\S]*?\) : null\}/)?.[0] ?? "";
   assert.match(grip, /data-free-flow-grip=""/, "a alca fica dentro do flowGrip");
   assert.match(grip, /beginFlowDrag\(event, selectedNode\.id\)/);
-  // O gesto confere a mesma regra: a alca e o corpo comecam (ou nao) juntos.
-  assert.match(source, /function beginFlowDrag\(event: ReactPointerEvent<HTMLElement>, id: FreeId\) \{\s*if \(disabled \|\| !onMoveInFlow \|\| !freeFlowDraggable\(design, rects, id\)\) \{\s*return;/);
+  // O gesto confere a mesma regra: a alca e o corpo comecam (ou nao) juntos. Com um gesto comecado, o pointerdown de
+  // outro ponteiro volta antes (nao desliga o gesto em silencio nem muda a selecao no meio).
+  assert.match(
+    source,
+    /function beginFlowDrag\(event: ReactPointerEvent<HTMLElement>, id: FreeId\) \{\s*(?:\/\/[^\n]*\n\s*)*if \(flowRef\.current \|\| disabled \|\| !onMoveInFlow \|\| !freeFlowDraggable\(design, rects, id\)\) \{\s*return;/
+  );
+  assert.match(source, /function onPointerDown\(event: ReactPointerEvent<HTMLDivElement>\) \{\s*(?:\/\/[^\n]*\n\s*)*if \(event\.button !== 0 \|\| flowRef\.current\) \{\s*return;/);
 });

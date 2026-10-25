@@ -16,14 +16,15 @@ import {
   lerDesignDoAviso,
   linhasDasCamadas,
   noPalco,
-  prancheta
+  prancheta,
+  toqueDeOutroPonteiro
 } from "./popup-livre-editor-fixtures";
 
 // Livre: arrastar as camadas de fundo (docs/27 §13.9, L4a; docs/18 §3.1). Num rascunho com um Selo de três camadas
 // (vermelho, verde e azul, nessa ordem) e a prancheta com duas, o produtor muda a cor da Camada 1 do Selo e logo
 // arrasta a ficha da Camada 3 para cima da 1 na faixa "Ordem" do Estilo (a ficha com a mão aberta e, arrastando, a
-// fechada): o azul fica por cima, e o Ctrl + Z volta só a ordem (a cor nova fica; outro Ctrl + Z volta a cor). Pelo
-// teclado, Alt + ↑ na ficha leva a camada para cima com o
+// fechada; um toque de outro ponteiro no meio não para o gesto): o azul fica por cima, e o Ctrl + Z volta só a ordem
+// (a cor nova fica; outro Ctrl + Z volta a cor). Pelo teclado, Alt + ↑ na ficha leva a camada para cima com o
 // foco junto e a frase falada, sem mexer no Selo nas Camadas; Subir num cartão leva o foco ao Subir do lugar novo; o
 // Esc no meio do arrastar não muda nada, não chega ao editor e deixa o foco no Estilo. Na prancheta (painel Pop-up),
 // "+ Camada de fundo" cria a terceira camada e o foco vai para a ficha dela (o botão desliga); arrastar a ficha 2 para
@@ -92,9 +93,9 @@ test("arrasta as camadas de fundo no Estilo e na prancheta: um passo, o foco jun
 
   /**
    * Arrasta a ficha `de` até um pouco abaixo do topo da ficha `para` (entra antes dela), com a linha e a mão fechada
-   * antes de soltar.
+   * antes de soltar. Com `toque`, um toque de outro ponteiro nessa ficha no meio do gesto (que não o desliga).
    */
-  async function arrastarFicha(campo: string, de: number, para: number) {
+  async function arrastarFicha(campo: string, de: number, para: number, opcoes: { toque?: boolean } = {}) {
     await faixa.scrollIntoViewIfNeeded();
     const origem = centroDe(await caixaParada(ficha(campo, de)));
     const alvo = await caixaParada(ficha(campo, para));
@@ -105,9 +106,14 @@ test("arrasta as camadas de fundo no Estilo e na prancheta: um passo, o foco jun
         await expect(editor.locator('[data-free-fill-drop="before"]')).toBeVisible();
         // O cursor: pointer de todo botão cede com o !: a ficha arrastada fica com a mão fechada.
         expect(await cursorDe(ficha(campo, de))).toBe("grabbing");
+
+        if (opcoes.toque) {
+          await toqueDeOutroPonteiro(ficha(campo, para));
+          await expect(editor.locator('[data-free-fill-drop="before"]')).toBeVisible();
+        }
       }
     });
-    await expect(editor.locator("[data-free-fill-dragging]")).toHaveCount(0);
+    await expect(editor.locator("[data-free-fill-dragging], [data-free-fill-drop]")).toHaveCount(0);
   }
 
   async function desfazer() {
@@ -126,7 +132,7 @@ test("arrasta as camadas de fundo no Estilo e na prancheta: um passo, o foco jun
     await expect.poll(() => fundoDe(noPalco(editor, "selo"))).toMatch(comecaPor("255, 170, 0"));
     // Parada, a ficha mostra a mão aberta (e não o cursor de clique de todo botão).
     expect(await cursorDe(ficha("livre-selo-fundo", 2))).toBe("grab");
-    await arrastarFicha("livre-selo-fundo", 2, 0);
+    await arrastarFicha("livre-selo-fundo", 2, 0, { toque: true });
 
     await expect(corDoSelo(0)).toHaveValue(AZUL);
     await expect(corDoSelo(1)).toHaveValue(LARANJA);

@@ -948,7 +948,8 @@ export function FreeFillLayersField({
   }
 
   function beginDrag(event: ReactPointerEvent<HTMLButtonElement>, from: number) {
-    if (off || fill.length < 2) {
+    // Um gesto comecado segue ate o fim: o pointerdown de outro ponteiro (um toque com o mouse apertado) nao o desliga.
+    if (off || drag || fill.length < 2) {
       return;
     }
 
