@@ -17,7 +17,8 @@ import { abrirEditorLivre, cliqueCom, escolhidos, falado, gravarRascunhoLivre, n
 // escolhe os do mesmo nivel. Na troca do painel da direita (C11), o foco nunca cai no vazio: "Escolher só Título" no
 // painel Vários leva o foco ao palco, Ctrl + A com o foco no painel de um elemento leva ao titulo do painel Vários, e o
 // Esc no painel Vários deixa "Nada selecionado" com o foco no palco. Ctrl + = e Ctrl + − mudam o zoom do desenho. O
-// duplo clique no Título solto abre a area de texto dele; com Alt ou Shift, nao abre (C18).
+// Duplicar do painel Vários pelo Enter e o Ctrl + Z: as copias saem, o foco vai ao palco e o Ctrl + Shift + Z refaz sem
+// escolher as copias de novo. O duplo clique no Título solto abre a area de texto dele; com Alt ou Shift, nao abre (C18).
 
 const TITULO = "Pop-up E2E: Livre pelo teclado";
 const ESCRITO = "Título pelo teclado";
@@ -427,6 +428,39 @@ test("vários pelo teclado, o foco na troca do painel Vários e o duplo clique n
     await expect(frase).not.toHaveText(`Zoom ${depois}.`);
     await expect(frase).toHaveText(/^Zoom \d+ %\.$/);
     await expect(palco).toBeFocused();
+  });
+
+  await test.step("C11 no desfazer: Duplicar no painel Vários pelo Enter; o Ctrl + Z leva o foco ao palco e o Ctrl + Shift + Z refaz", async () => {
+    await linhaDe("fa").focus();
+    await page.keyboard.press("Enter");
+    await expect.poll(() => selecionado(editor)).toBe("fa");
+    await page.keyboard.press("Shift+ArrowDown");
+    await expect(frase).toHaveText("2 elementos escolhidos.");
+
+    // No WebKit o clique nao da foco a botao: o Duplicar vai pelo teclado.
+    const duplicar = varios.getByRole("button", { exact: true, name: "Duplicar" });
+    await duplicar.focus();
+    await page.keyboard.press("Enter");
+    await expect(frase).toHaveText("2 elementos duplicados.");
+    const comCopias = await linhas(editor);
+    expect(comCopias).toHaveLength(7);
+    expect(await escolhidos(editor)).toHaveLength(2);
+    await expect(duplicar).toBeFocused();
+
+    // As copias saem e o painel Varios some com o foco dentro: o foco vai ao palco, e o Ctrl + Shift + Z chega ao editor.
+    await page.keyboard.press("Control+z");
+    await expect(frase).toHaveText("Desfeito.");
+    expect(await linhas(editor)).toEqual(["titulo", "texto", "fa", "fb", "links"]);
+    await expect(varios).toHaveCount(0);
+    await expect(palco).toBeFocused();
+
+    await page.keyboard.press("Control+Shift+z");
+    await expect(frase).toHaveText("Refeito.");
+    expect(await linhas(editor)).toEqual(comCopias);
+    // O refazer nao devolve a escolha das copias, que a equipe nao fez de novo.
+    expect(await escolhidos(editor)).toEqual([]);
+    await expect(palco).toBeFocused();
+    await focoNoEditor();
   });
 
   await test.step("C18: o duplo clique no Título solto abre a área de texto; com Alt ou com Shift, não abre", async () => {

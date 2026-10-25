@@ -22,6 +22,7 @@ const source = readFileSync(editorUrl, "utf8");
 const shell = await import("../src/components/admin/v2/communication/popup-free/free-editor.tsx");
 const selection = await import("../src/components/admin/v2/communication/popup-free/free-editor-selection.ts");
 const model = await import("../src/server/communications/popup-free-model.ts");
+const history = await import("../src/components/admin/v2/communication/popup-free/free-editor-history.ts");
 const schema = await import("../src/server/communications/popup-free-schema.ts");
 
 const S = selection.FREE_SELECTION_COPY;
@@ -167,6 +168,46 @@ test("C11: o foco no painel da direita vai ao título do Vários (de um para vá
   assert.equal(freePanelFocusAfter(1, 1, true), null);
   assert.equal(freePanelFocusAfter(1, 2, false), null, "com o foco fora do painel, nada muda");
   assert.equal(freePanelFocusAfter(3, 1, false), null);
+  // De um para nada: o painel do elemento da lugar ao painel Pop-up com o foco dentro (Ctrl + Z que tira o escolhido).
+  assert.equal(freePanelFocusAfter(1, 0, true), "stage", "Ctrl + Z que tira o escolhido, Esc a nada");
+  assert.equal(freePanelFocusAfter(0, 0, true), null, "o painel Pop-up continua");
+  assert.equal(freePanelFocusAfter(1, 0, false), null);
+});
+
+test("desfazer e refazer: a seleção fica com os vivos, o id morto sai do estado e não volta sozinho no refazer", () => {
+  const { createFreeHistory, pushFreeHistory, redoFreeHistory, undoFreeHistory } = history;
+  const { freeSelectionAfterHistory } = shell;
+
+  // Duplicar pelo painel Vários: as cópias ficam escolhidas. O Ctrl + Z tira as cópias e a seleção fica vazia.
+  const duplicated = selection.duplicateFreeNodes(DESIGN, ["a", "b"], null);
+  const copies = duplicated.ids;
+  let steps = pushFreeHistory(createFreeHistory({ cta: null, design: DESIGN }), { cta: null, design: duplicated.design });
+
+  assert.equal(copies.length, 2);
+  steps = undoFreeHistory(steps);
+  const afterUndo = freeSelectionAfterHistory(steps.present.design, { anchor: copies.at(-1), ids: copies });
+
+  assert.deepEqual(afterUndo, { anchor: null, ids: [] }, "as cópias morreram; a âncora delas também");
+
+  // O Ctrl + Shift + Z traz as cópias de volta, mas não a seleção que a equipe não fez de novo.
+  steps = redoFreeHistory(steps);
+  assert.deepEqual(freeSelectionAfterHistory(steps.present.design, afterUndo), { anchor: null, ids: [] });
+
+  // A cópia e a Forma a escolhidas; o Ctrl + Z deixa só a; o refazer não devolve a cópia.
+  const one = editorModel.duplicateFreeNode(DESIGN, "a", null);
+  let line = pushFreeHistory(createFreeHistory({ cta: null, design: DESIGN }), { cta: null, design: one.design });
+
+  line = undoFreeHistory(line);
+  const kept = freeSelectionAfterHistory(line.present.design, { anchor: "a", ids: [one.id, "a"] });
+
+  assert.deepEqual(kept, { anchor: "a", ids: ["a"] });
+  line = redoFreeHistory(line);
+  assert.deepEqual(freeSelectionAfterHistory(line.present.design, kept), { anchor: "a", ids: ["a"] });
+
+  // Normaliza como as outras escolhas: sem repetidos e nunca a caixa junto com um filho (fica o último).
+  assert.deepEqual(freeSelectionAfterHistory(DESIGN, { anchor: "selo", ids: ["selo", "a", "a", "caixa"] }), { anchor: "selo", ids: ["a", "caixa"] });
+  // A âncora que morreu vira o principal.
+  assert.deepEqual(freeSelectionAfterHistory(DESIGN, { anchor: "sumiu", ids: ["b", "c"] }), { anchor: "c", ids: ["b", "c"] });
 });
 
 test("Ctrl/⌘ + = (ou +) aumenta e Ctrl/⌘ + − (ou _) diminui o zoom; sem Ctrl ou ⌘, ou com Alt, nada", () => {
@@ -288,6 +329,22 @@ test("C11 e a aba: o foco vai ao título do Vários ou ao palco; o painel de um 
   assert.match(source, /selectedId=\{inspectorId\}/);
   assert.match(source, /if \(!many && heldInspectorId !== activeId\) \{\s+setHeldInspectorId\(activeId\);/);
   assert.match(source, /const inspectorId = many \? heldInspectorId : activeId;/);
+});
+
+test("desfazer e refazer passam a seleção viva pela troca de painel (C11); com o Revisar aberto, o foco fica", () => {
+  for (const name of ["undo", "redo"]) {
+    const body = bodyOf(`function ${name}() {`);
+
+    assert.match(body, new RegExp(`const next = ${name}FreeHistory\\(current\\);`));
+    assert.ok(body.indexOf("keepLiveSelection(next);") >= 0, `${name} mantém a seleção viva`);
+    assert.ok(body.indexOf("keepLiveSelection(next);") < body.indexOf("setHistory(next);"), `${name}: a seleção antes do design novo`);
+  }
+
+  const keep = bodyOf("function keepLiveSelection(");
+
+  assert.match(keep, /freeSelectionAfterHistory\(next\.present\.design, \{ anchor: anchorRef\.current, ids: liveIdsRef\.current \}\)/);
+  assert.match(keep, /if \(rightPanel === "review"\) \{\s+anchorRef\.current = result\.anchor;\s+setSelection\(result\.ids\);\s+return;\s+\}/);
+  assert.match(keep, /changeSelection\(result\.ids, result\.anchor\);/);
 });
 
 test("o Elementos acrescenta pelo principal e o ramo move das Camadas continua igual", () => {

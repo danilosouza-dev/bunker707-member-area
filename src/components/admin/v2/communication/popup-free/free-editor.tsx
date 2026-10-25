@@ -495,14 +495,38 @@ export function freeEditorSelect(
 
 /**
  * Para onde vai o foco quando o painel da direita troca (C11), so com o foco dentro dele: de um (ou nada) para varios,
- * o titulo do painel Varios; de varios para um ou nada, o palco (o painel de um elemento nao tem titulo focavel).
+ * o titulo do painel Varios; de varios para um ou nada, o palco (o painel de um elemento nao tem titulo focavel). De
+ * um para nada tambem vai ao palco: o painel do elemento da lugar ao painel Pop-up com o foco dentro dele.
  */
 export function freePanelFocusAfter(before: number, after: number, focusInRightPanel: boolean): "many" | "stage" | null {
-  if (!focusInRightPanel || (before >= 2) === (after >= 2)) {
+  if (!focusInRightPanel) {
+    return null;
+  }
+
+  if (before >= 1 && after === 0) {
+    return "stage";
+  }
+
+  if ((before >= 2) === (after >= 2)) {
     return null;
   }
 
   return after >= 2 ? "many" : "stage";
+}
+
+/**
+ * A selecao depois de desfazer ou refazer (o design troca sem passar pela escolha): so os escolhidos que se viam e
+ * continuam vivos no design novo, normalizados. Um id que morreu sai do estado e nao volta sozinho num refazer. A
+ * ancora do intervalo fica se o elemento dela continua no design; senao, vira o principal.
+ */
+export function freeSelectionAfterHistory(
+  design: PopupFreeDesign,
+  current: { anchor: FreeId | null; ids: readonly FreeId[] }
+): { anchor: FreeId | null; ids: FreeId[] } {
+  const ids = freeNormalizeSelection(design, current.ids);
+  const anchor = current.anchor !== null && findFreeNode(design, current.anchor) ? current.anchor : (ids.at(-1) ?? null);
+
+  return { anchor, ids };
 }
 
 /**
@@ -720,6 +744,28 @@ function FreeEditorSession({
     [announce]
   );
 
+  /**
+   * Desfazer e refazer trocam o design sem passar pela escolha: a selecao fica so com os escolhidos vivos no design
+   * novo (um id morto nao volta sozinho num refazer). Com o painel de um elemento ou o Varios aberto, a troca leva o
+   * foco como a C11 (o painel some com o foco dentro); com o Revisar aberto, o painel nao troca e o foco fica.
+   */
+  function keepLiveSelection(next: FreeHistory) {
+    const result = freeSelectionAfterHistory(next.present.design, { anchor: anchorRef.current, ids: liveIdsRef.current });
+
+    if (result.ids.length === selection.length && result.ids.every((id, index) => id === selection[index])) {
+      return;
+    }
+
+    if (rightPanel === "review") {
+      anchorRef.current = result.anchor;
+      setSelection(result.ids);
+
+      return;
+    }
+
+    changeSelection(result.ids, result.anchor);
+  }
+
   function undo() {
     const current = historyRef.current;
 
@@ -727,8 +773,11 @@ function FreeEditorSession({
       return;
     }
 
+    const next = undoFreeHistory(current);
+
     sendDelayRef.current = 0;
-    setHistory(undoFreeHistory(current));
+    keepLiveSelection(next);
+    setHistory(next);
     announce(copy.announce.undone);
   }
 
@@ -739,8 +788,11 @@ function FreeEditorSession({
       return;
     }
 
+    const next = redoFreeHistory(current);
+
     sendDelayRef.current = 0;
-    setHistory(redoFreeHistory(current));
+    keepLiveSelection(next);
+    setHistory(next);
     announce(copy.announce.redone);
   }
 
