@@ -716,6 +716,58 @@ test("camadas de fundo: a imagem que sobe acha a sua camada pela referência, e 
   assert.ok(source.includes("onPick={(image) => onImageLayer((assetId, current) => withFreeFillLayerAsset(current, paint, assetId), image)}"));
 });
 
+test("camadas de fundo: a imagem que termina de subir depois de a camada sumir (Ctrl + Z no envio) não grava passo e o Refazer fica", () => {
+  const PATH = "communications/free/eeeeeeeeeeeeeeeeeeeeeeee.webp";
+  const ENVIADA = { height: 100, path: PATH, width: 100 };
+  const IMG = { height: 100, id: "img", kind: "image", path: "communications/free/ffffffffffffffffffffffff.webp", width: 100 };
+  const imagem = { asset: "img", kind: "image" };
+
+  // Sem a camada (ou com o mesmo arquivo), a própria lista volta, sem cópia.
+  const sem = [VERMELHO];
+  assert.equal(panel.withFreeFillLayerAsset(sem, imagem, "img2"), sem);
+  const com = [imagem, VERMELHO];
+  assert.equal(panel.withFreeFillLayerAsset(com, imagem, "img"), com);
+
+  // Um passo põe a camada de imagem na Forma; o envio de um arquivo novo começa para ela e um Ctrl + Z no meio a tira.
+  // O arquivo de antes fica em uso no Fundo (a forma canônica tira o que ninguém usa).
+  const FUNDO = { box: { fill: [imagem] }, id: "fundo", type: "shape" };
+  const base = design([FUNDO, { box: { fill: [VERMELHO] }, id: "forma", type: "shape" }, LINKS], { assets: [IMG] });
+  assert.equal(base.assets.length, 1);
+  const withImage = panel.withFreeBox(base, "forma", { fill: [imagem, VERMELHO] });
+  const pediu = model.findFreeNode(withImage, "forma").node.box.fill[0];
+  let h = history.pushFreeHistory(history.createFreeHistory({ cta: null, design: base }), { cta: null, design: withImage }, { now: 1_000 });
+  h = history.undoFreeHistory(h);
+  assert.deepEqual([h.past.length, h.future.length], [0, 1]);
+
+  // O envio termina pelo caminho do onPick: o design volta o mesmo (nem o arquivo entra) e o histórico não muda.
+  const latest = h.present.design;
+  const next = panel.withFreeFillImage(latest, "forma", ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediu, assetId));
+  assert.equal(next, latest);
+  const after = history.pushFreeHistory(h, { cta: null, design: next }, { now: 5_000 });
+  assert.equal(after, h);
+  assert.deepEqual([after.past.length, after.future.length], [0, 1], "o Refazer do passo desfeito continua");
+  assert.equal(history.redoFreeHistory(after).present.design, withImage);
+
+  // Na prancheta, o mesmo: sem a camada, o design volta o mesmo (com e sem fundo próprio).
+  const boardImage = panel.withFreeArtboard(base, { fill: [imagem, VERMELHO] });
+  const pediuNaPrancheta = boardImage.artboard.fill[0];
+  assert.equal(panel.withFreeFillImage(base, null, ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediuNaPrancheta, assetId)), base);
+  const semFundo = design([FUNDO, LINKS], { assets: [IMG] });
+  assert.equal(semFundo.artboard?.fill, undefined);
+  assert.equal(panel.withFreeFillImage(semFundo, null, ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediuNaPrancheta, assetId)), semFundo);
+
+  // "+ Camada" de imagem que chega com a lista já cheia (um Refazer no meio do envio): nada muda.
+  const cheia = design([FUNDO, { box: { fill: [VERMELHO, VERDE_FUNDO, AZUL] }, id: "forma", type: "shape" }, LINKS], { assets: [IMG] });
+  assert.equal(panel.withFreeFillImage(cheia, "forma", ENVIADA, (assetId, current) => panel.addFreeFillLayer(current, { asset: assetId, kind: "image" })), cheia);
+
+  // Com a camada no lugar, o arquivo novo entra nela (um passo, como antes).
+  const placed = panel.withFreeFillImage(withImage, "forma", ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediu, assetId));
+  assert.notEqual(placed, withImage);
+  assert.equal(placed.assets.find((asset) => asset.id === model.findFreeNode(placed, "forma").node.box.fill[0].asset)?.path, PATH);
+  assert.equal(placed.assets.length, 2);
+  assert.ok(schema.parsePopupFreeDesign(placed));
+});
+
 test("camadas de fundo: mudar a ordem é um passo próprio, montado pelo design mais novo; a cor continua juntando", () => {
   const base = design([TITULO_FUNDO, { ...SELO_COM_FUNDO, place: { mode: "free", w: 116, x: 300, y: 16 } }, LINKS], {
     devices: { mobile: { nodes: { selo: { place: { mode: "free", x: 120, y: 30 } } } } }

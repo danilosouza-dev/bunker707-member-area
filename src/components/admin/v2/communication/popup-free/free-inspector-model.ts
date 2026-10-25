@@ -1420,13 +1420,14 @@ export function freeFillFocusId(id: string, focus: FreeFillFocus): string {
 
 /**
  * A imagem que terminou de subir vai para a camada que a pediu, achada pela referencia e nao pelo indice: durante o
- * envio a lista pode ter mudado (Desfazer, outra camada acrescentada). Sem ela (tirada ou trocada de tipo), nada muda.
+ * envio a lista pode ter mudado (Desfazer, outra camada acrescentada). Sem ela (tirada ou trocada de tipo), ou com o
+ * mesmo arquivo, nada muda: devolve a propria lista, e withFreeFillImage devolve o design sem passo novo.
  */
-export function withFreeFillLayerAsset(fill: readonly FreeFillPaint[], layer: FreeFillPaint, assetId: FreeId): FreeFillPaint[] {
+export function withFreeFillLayerAsset(fill: readonly FreeFillPaint[], layer: FreeFillPaint, assetId: FreeId): readonly FreeFillPaint[] {
   const index = fill.indexOf(layer);
 
-  if (index < 0 || layer.kind !== "image") {
-    return [...fill];
+  if (index < 0 || layer.kind !== "image" || layer.asset === assetId) {
+    return fill;
   }
 
   return fill.map((paint, position) => (position === index ? { ...layer, asset: assetId } : paint));
@@ -2287,15 +2288,22 @@ export function withFreeVideoPoster(design: PopupFreeDesign, nodeId: FreeId, pos
   });
 }
 
+/** As mesmas camadas, na mesma ordem (pela referencia de cada uma). */
+function sameFreeFill(left: readonly FreeFillPaint[], right: readonly FreeFillPaint[]) {
+  return left.length === right.length && left.every((paint, index) => paint === right[index]);
+}
+
 /**
  * Camada de imagem num fundo (da prancheta: `nodeId` null; de um elemento: o id): poe o arquivo (enviado ou ja
- * no design) e monta as camadas com o id dele a partir do fundo mais novo.
+ * no design) e monta as camadas com o id dele a partir do fundo mais novo. Quando `build` nao muda as camadas (a
+ * camada que pediu a imagem sumiu durante o envio, ou a lista ja esta cheia), devolve o proprio `design`: nem o
+ * arquivo entra, nem o editor ganha um passo vazio (que apagaria o Refazer).
  */
 export function withFreeFillImage(
   design: PopupFreeDesign,
   nodeId: FreeId | null,
   image: { height: number; path: string; width: number } | FreeId,
-  build: (assetId: FreeId, current: readonly FreeFillPaint[]) => FreeFillPaint[]
+  build: (assetId: FreeId, current: readonly FreeFillPaint[]) => readonly FreeFillPaint[]
 ): PopupFreeDesign {
   if (typeof image === "string" && !hasImageAsset(design, image)) {
     return design;
@@ -2305,8 +2313,9 @@ export function withFreeFillImage(
 
   if (nodeId === null) {
     const current = placed.design.artboard?.fill ?? [];
+    const fill = build(placed.id, current);
 
-    return pruneFreeAssets({ ...placed.design, artboard: { ...placed.design.artboard, fill: build(placed.id, current) } });
+    return sameFreeFill(fill, current) ? design : pruneFreeAssets({ ...placed.design, artboard: { ...placed.design.artboard, fill: [...fill] } });
   }
 
   const found = findFreeNode(placed.design, nodeId);
@@ -2315,9 +2324,14 @@ export function withFreeFillImage(
     return design;
   }
 
-  const fill = build(placed.id, found.node.box?.fill ?? []);
+  const current = found.node.box?.fill ?? [];
+  const fill = build(placed.id, current);
 
-  return pruneFreeAssets(withFreeBox(placed.design, nodeId, { fill: fill.length > 0 ? fill : undefined }));
+  if (sameFreeFill(fill, current)) {
+    return design;
+  }
+
+  return pruneFreeAssets(withFreeBox(placed.design, nodeId, { fill: fill.length > 0 ? [...fill] : undefined }));
 }
 
 /** O arquivo de video do elemento e a capa dele (para a tela). */

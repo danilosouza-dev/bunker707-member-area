@@ -795,7 +795,7 @@ export function FreeTextPaintField({
 
 /** Monta as camadas com o id do arquivo da imagem (o fundo mais novo vem em `current`). */
 export type FreeImageLayerHandler = (
-  build: (assetId: FreeId, current: readonly FreeFillPaint[]) => FreeFillPaint[],
+  build: (assetId: FreeId, current: readonly FreeFillPaint[]) => readonly FreeFillPaint[],
   image: { height: number; path: string; width: number } | FreeId
 ) => void;
 
