@@ -161,7 +161,9 @@ function BoxSections({ design, disabled, errors, latest, node, onBusyChange, onC
           error={error("fill")}
           id={id("fundo")}
           onBusyChange={onBusyChange}
-          onChange={(fill) => set({ fill }, "fill")}
+          // Mudar a ordem, Tirar e "+ Camada" (step): um passo proprio, sem chave, montado pelo design mais novo (uma
+          // mudanca em outro elemento durante o arrastar fica). A cor e os numeros juntam pela chave "id:box.fill".
+          onChange={(fill, options) => (options?.step ? onChange(withFreeBox(latest(), node.id, { fill })) : set({ fill }, "fill"))}
           onImageLayer={(build, image) => onChange(withFreeFillImage(latest(), node.id, image, build))}
           value={box.fill}
         />
