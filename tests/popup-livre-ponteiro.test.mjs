@@ -11,8 +11,8 @@ import test from "node:test";
 // nenhum ouvinte sobra na janela. Tudo pelo Node, sem janela de verdade: o arquivo nao toca na janela ao carregar.
 // L4b (docs/27 L39 e L44, decisao 5 do produtor e critica C10): o toque so quando a chamada pede, o Alt e o Shift no
 // onMove, freeAutoScrollStep e a rolagem sozinha (um requestAnimationFrame falso e uma area falsa que rola): so
-// depois do limiar, so armada depois de o ponto estar dentro da area e fora da faixa, o onMove so quando rolou e o
-// laco que para em todo fim de gesto.
+// depois do limiar, cada eixo so armado depois de o ponto estar dentro da area e fora das faixas dele, o onMove so
+// quando rolou e o laco que para em todo fim de gesto.
 
 assert.equal(typeof globalThis.window, "undefined", "o Node nao tem janela");
 assert.equal(typeof globalThis.document, "undefined", "o Node nao tem documento");
@@ -829,6 +829,58 @@ test("ponteiro: a rolagem sozinha só se arma depois de o ponto estar dentro da 
   deNovo.janela.quadro();
   deNovo.janela.quadro();
   assert.equal(painel.area.rolagens.length, 2, "o gesto novo nao herda a arma do anterior");
+});
+
+test("ponteiro: cada eixo da rolagem sozinha se arma sozinho; pegar uma linha das Camadas pelo ícone e descer em linha reta rola a lista (C10)", () => {
+  // A lista das Camadas (260 x 400 px, rolada 100 px): a linha pega pelo icone, a 20 px da borda esquerda (dentro da
+  // faixa), e arrastada reto para baixo ate a faixa de baixo. O y se arma no meio da lista; o x continua desarmado.
+  const lista = areaFalsa({ caixa: { bottom: 500, left: 0, right: 260, top: 100 }, maximo: { x: 0, y: 1000 }, rolagem: { x: 0, y: 100 } });
+  const camadas = rolando({ area: lista, comeco: { clientX: 20, clientY: 300 } });
+  ponteiro(camadas.janela, "pointermove", 20, 306);
+  camadas.janela.quadro();
+  assert.deepEqual(lista.rolagens, [], "o quadro que arma o y nao rola, e o x na faixa da esquerda nao rola sozinho");
+  ponteiro(camadas.janela, "pointermove", 20, 490);
+  camadas.janela.quadro();
+  camadas.janela.quadro();
+  assert.deepEqual(lista.rolagens, [[0, 14], [0, 14]], "desce a lista, sem rolar para os lados");
+  assert.equal(lista.scrollTop, 128);
+  assert.deepEqual(camadas.movimentos.slice(-2), [[{ x: 20, y: 490 }, SEM_TECLAS], [{ x: 20, y: 490 }, SEM_TECLAS]]);
+  // Indo ao meio da largura e voltando a faixa da esquerda, o x tambem se arma.
+  ponteiro(camadas.janela, "pointermove", 130, 300);
+  camadas.janela.quadro();
+  ponteiro(camadas.janela, "pointermove", 20, 300);
+  camadas.janela.quadro();
+  assert.deepEqual(lista.rolagens.at(-1), [-8, 0]);
+  ponteiro(camadas.janela, "pointerup", 20, 300);
+
+  // Um solto pego na faixa de cima da area de desenho e arrastado reto para a direita: o x se arma no meio e a area
+  // rola para a direita; o y, que nunca saiu da faixa de cima, nao rola para cima.
+  const solto = rolando({ comeco: { clientX: 200, clientY: 60 } });
+  ponteiro(solto.janela, "pointermove", 250, 60);
+  solto.janela.quadro();
+  assert.deepEqual(solto.area.rolagens, []);
+  ponteiro(solto.janela, "pointermove", 440, 60);
+  solto.janela.quadro();
+  assert.deepEqual(solto.area.rolagens, [[14, 0]]);
+  assert.equal(solto.area.scrollTop, 100);
+
+  // No canto (nas duas faixas) e vindo de fora pelo canto: nenhum eixo se arma.
+  const canto = rolando({ comeco: { clientX: 20, clientY: 20 } });
+  ponteiro(canto.janela, "pointermove", 55, 55);
+  canto.janela.quadro();
+  ponteiro(canto.janela, "pointermove", 52, 52);
+  canto.janela.quadro();
+  canto.janela.quadro();
+  assert.deepEqual(canto.area.rolagens, [], "entrar pelo canto nao rola");
+
+  // Uma area mais baixa que duas faixas: o y nunca se arma, e o x se arma e rola normalmente.
+  const baixa = areaFalsa({ caixa: { bottom: 100, left: 50, right: 450, top: 50 } });
+  const faixaBaixa = rolando({ area: baixa, comeco: { clientX: 200, clientY: 75 } });
+  ponteiro(faixaBaixa.janela, "pointermove", 210, 75);
+  faixaBaixa.janela.quadro();
+  ponteiro(faixaBaixa.janela, "pointermove", 445, 55);
+  faixaBaixa.janela.quadro();
+  assert.deepEqual(baixa.rolagens, [[17, 0]]);
 });
 
 test("ponteiro: o laço da rolagem para no pointerup, no pointercancel, no Esc, no blur, com o botão solto fora da janela e na função devolvida", () => {

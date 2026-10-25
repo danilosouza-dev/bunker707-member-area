@@ -7,9 +7,10 @@
 //   toque segue so tocando.
 // - O onMove leva o Alt e o Shift de cada pointermove (sem guias e a proporcao nas alcas).
 // - Rolagem sozinha (opcao autoScroll, L44): com o gesto comecado, um laco de requestAnimationFrame rola a area perto
-//   da borda (freeAutoScrollStep) e chama o onMove de novo com o ultimo ponto so quando ela rolou. Ela so se arma
-//   depois que o ponto esteve dentro da area e fora da faixa uma vez no gesto: entrar pela faixa (vindo do Elementos)
-//   ou pegar uma linha que ja esta nela (a primeira das Camadas) nao rola nada.
+//   da borda (freeAutoScrollStep) e chama o onMove de novo com o ultimo ponto so quando ela rolou. Cada eixo so se
+//   arma depois que o ponto esteve dentro da area e fora das duas faixas dele uma vez no gesto (C10): entrar pela
+//   faixa da esquerda (vindo do Elementos) nao rola para os lados, e pegar uma linha que ja esta na faixa de cima (a
+//   primeira das Camadas) nao rola para cima; pegar uma linha pelo icone (na faixa da esquerda) e descer rola a lista.
 // - Do pointerdown em diante ouve pointermove, pointerup e pointercancel na janela, em captura e filtrando pelo
 //   pointerId: o pointerup chega mesmo se a captura falhar ou o alvo desmontar.
 // - A captura (setPointerCapture, em try/catch) so vem depois do limiar: capturar ja no pointerdown mudaria o alvo
@@ -145,9 +146,23 @@ export function freeAutoScrollStep(area: FreeAutoScrollArea, point: FreePoint, o
   };
 }
 
-/** O ponto esta dentro da area e fora da faixa de todas as bordas: e o que arma a rolagem sozinha (C10). */
-function freeAutoScrollCore(area: FreeAutoScrollArea, point: FreePoint, edge: number): boolean {
-  return point.x - area.left >= edge && area.right - point.x >= edge && point.y - area.top >= edge && area.bottom - point.y >= edge;
+/**
+ * Os eixos que o ponto arma na rolagem sozinha (C10): com ele dentro da area, o x se arma fora das faixas da esquerda
+ * e da direita, e o y fora das de cima e de baixo. Fora da area, nenhum. Numa area mais estreita (ou mais baixa) que
+ * duas faixas, aquele eixo nunca se arma.
+ */
+function freeAutoScrollArms(area: FreeAutoScrollArea, point: FreePoint, edge: number): { x: boolean; y: boolean } {
+  const left = point.x - area.left;
+  const right = area.right - point.x;
+  const top = point.y - area.top;
+  const bottom = area.bottom - point.y;
+
+  // Os "!(x >= 0)" tambem barram o NaN.
+  if (!(left >= 0) || !(right >= 0) || !(top >= 0) || !(bottom >= 0)) {
+    return { x: false, y: false };
+  }
+
+  return { x: left >= edge && right >= edge, y: top >= edge && bottom >= edge };
 }
 
 /**
@@ -172,9 +187,10 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
   // solto para contar os 350 ms); guard: so o bloqueador do click; off: tudo desligado.
   let state: "dragging" | "guard" | "held" | "off" | "pending" = "pending";
   let timer: number | null = null;
-  // Rolagem sozinha: o quadro pedido, se ja se armou (C10) e o ultimo ponto e as ultimas teclas do pointermove.
+  // Rolagem sozinha: o quadro pedido, os eixos ja armados (C10) e o ultimo ponto e as ultimas teclas do pointermove.
   let frame: number | null = null;
-  let armed = false;
+  let armedX = false;
+  let armedY = false;
   let lastPoint: FreePoint = origin;
   let lastKeys: FreePointerKeys = { altKey: false, shiftKey: false };
 
@@ -243,22 +259,26 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
 
     if (area) {
       const box = area.getBoundingClientRect();
+      const arms = freeAutoScrollArms(box, lastPoint, FREE_AUTO_SCROLL_EDGE_PX);
 
-      if (!armed) {
-        armed = freeAutoScrollCore(box, lastPoint, FREE_AUTO_SCROLL_EDGE_PX);
-      } else {
-        const step = freeAutoScrollStep(box, lastPoint);
+      // Armado, o eixo vale ate o fim do gesto. No quadro que o arma, o ponto esta fora das faixas dele: ali nao rola.
+      armedX = armedX || arms.x;
+      armedY = armedY || arms.y;
 
-        if (step.dx !== 0 || step.dy !== 0) {
-          const beforeLeft = area.scrollLeft;
-          const beforeTop = area.scrollTop;
+      const step = freeAutoScrollStep(box, lastPoint);
+      // So nos eixos armados: o desarmado fica parado mesmo com o ponto na faixa dele.
+      const dx = armedX ? step.dx : 0;
+      const dy = armedY ? step.dy : 0;
 
-          // A forma com numeros: sem scroll-behavior: smooth na area, a rolagem e na hora e ja se le aqui.
-          area.scrollBy(step.dx, step.dy);
+      if (dx !== 0 || dy !== 0) {
+        const beforeLeft = area.scrollLeft;
+        const beforeTop = area.scrollTop;
 
-          if (area.scrollLeft !== beforeLeft || area.scrollTop !== beforeTop) {
-            handlers.onMove(lastPoint, lastKeys);
-          }
+        // A forma com numeros: sem scroll-behavior: smooth na area, a rolagem e na hora e ja se le aqui.
+        area.scrollBy(dx, dy);
+
+        if (area.scrollLeft !== beforeLeft || area.scrollTop !== beforeTop) {
+          handlers.onMove(lastPoint, lastKeys);
         }
       }
     }
