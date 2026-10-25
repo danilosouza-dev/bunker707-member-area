@@ -61,6 +61,7 @@ import {
   freeRemoveProblem,
   type FreeLayerRow
 } from "./free-editor-model";
+import { FREE_SELECTION_COPY } from "./free-editor-selection";
 import { followFreePointer } from "./free-pointer-drag";
 
 // Camadas do editor Livre (spec §4.5): a lista em arvore na ordem do DOM (de cima para baixo = ordem de leitura),
@@ -75,15 +76,30 @@ import { followFreePointer } from "./free-pointer-drag";
 // o lugar e recalculado com o ponto do soltar e quando a lista rola. A propria linha e o mesmo lugar (nada aparece), e
 // soltar no mesmo lugar seleciona a linha, como o clique que tremeu; um lugar recusado mostra o motivo e o cursor de
 // proibido. Soltar leva a run({ kind: "move" }): um passo, o elemento selecionado e o foco na linha. Com "Ver como:
-// Celular", a etiqueta diz que a ordem muda tambem no computador.
+// Celular", a etiqueta diz que a ordem muda tambem no computador. Perto da borda de cima ou de baixo, a lista rola
+// sozinha (autoScroll no tabpanel, L44).
+// Escolher varios (L4b, docs/27 L36 e L37): Ctrl/⌘ + clique poe ou tira, Shift + clique pega o intervalo desde a
+// ancora (o editor decide), Shift + ↑/↓ estende e Ctrl/⌘ + Enter poe ou tira pelo teclado. O arrastar da linha nao
+// comeca com Shift, Ctrl, ⌘ ou Alt (o clique escolhe). As linhas escolhidas ficam marcadas; aria-current so no
+// principal e a etiqueta "Na seleção" nas outras. E, T, Delete e Ctrl + D numa linha que esta numa selecao de 2 ou
+// mais agem na selecao (selection: true); o olho, o cadeado, o ⋯ (Duplicar e Excluir inclusive), F2 e Alt + ↑/↓
+// agem so na linha.
 
 const copy = FREE_EDITOR_COPY.layers;
 
 export type FreeLayerCommand =
-  | { id: FreeId; kind: "duplicate" | "moveDown" | "moveUp" | "outOfBox" | "remove" | "toggleHidden" | "toggleLocked" }
+  | {
+      id: FreeId;
+      kind: "duplicate" | "moveDown" | "moveUp" | "outOfBox" | "remove" | "toggleHidden" | "toggleLocked";
+      /** A tecla da linha (E, T, Delete ou Ctrl + D) numa selecao de 2 ou mais: o editor age em todos os escolhidos. */
+      selection?: true;
+    }
   | { boxId: FreeId; id: FreeId; kind: "intoBox" }
   | { id: FreeId; kind: "move"; target: FreeMoveTarget }
   | { id: FreeId; kind: "rename"; name: string };
+
+/** Como o clique (ou a tecla) escolhe a linha: so ela, por ou tirar (Ctrl/⌘) ou o intervalo desde a ancora (Shift). */
+export type FreeLayerSelectHow = "only" | "range" | "toggle";
 
 export type FreeLayersPanelProps = {
   cta: NoticeDraft["cta"];
@@ -93,11 +109,45 @@ export type FreeLayersPanelProps = {
   disabled: boolean;
   flagged: ReadonlySet<FreeId>;
   onCommand: (command: FreeLayerCommand) => void;
-  onSelect: (id: FreeId) => void;
+  /** Sem `how`, so a linha (como o Enter e o soltar no mesmo lugar). */
+  onSelect: (id: FreeId, how?: FreeLayerSelectHow) => void;
+  /** O principal (o ultimo escolhido): aria-current, o Tab e o foco que acompanha o desenho. */
   selectedId: FreeId | null;
+  /** Todos os escolhidos, na ordem da escolha (o ultimo e o principal). Sem a prop: so o selectedId. */
+  selectedIds?: readonly FreeId[];
 };
 
 const BUTTONS = 4;
+
+/** As teclas da linha que agem na selecao de 2 ou mais (L37): E, T, Delete e Ctrl + D. Alt + ↑/↓ fica na linha. */
+const SELECTION_KEY_KINDS: ReadonlySet<string> = new Set(["duplicate", "remove", "toggleHidden", "toggleLocked"]);
+
+/**
+ * O comando de uma tecla da linha: `selection: true` so com E, T, Delete ou Ctrl + D numa linha que esta numa selecao
+ * de 2 ou mais (o editor age em todos, um passo so). Fora dela, com um escolhido so, ou com Alt + ↑/↓, so a linha. O
+ * olho, o cadeado e o ⋯ nao passam por aqui: agem sempre so na linha (C17).
+ */
+export function freeLayerKeyCommand(
+  kind: "duplicate" | "moveDown" | "moveUp" | "remove" | "toggleHidden" | "toggleLocked",
+  id: FreeId,
+  selectedIds: readonly FreeId[]
+): FreeLayerCommand {
+  return SELECTION_KEY_KINDS.has(kind) && selectedIds.length >= 2 && selectedIds.includes(id) ? { id, kind, selection: true } : { id, kind };
+}
+
+/** O clique na linha: Ctrl ou ⌘ poe ou tira (vale antes do Shift), Shift pega o intervalo, sem tecla so ela. */
+export function freeLayerClickHow(event: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): FreeLayerSelectHow {
+  if (event.ctrlKey || event.metaKey) {
+    return "toggle";
+  }
+
+  return event.shiftKey ? "range" : "only";
+}
+
+/** O arrastar da linha so comeca sem tecla: com Shift, Ctrl, ⌘ ou Alt o pointerdown e so o comeco de um clique. */
+export function freeLayerDragAllowed(event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): boolean {
+  return !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+}
 
 const LAYER_ICONS: Record<Exclude<FreeNode["type"], "box" | "button">, LucideIcon> = {
   audio: AudioLines,
@@ -135,8 +185,8 @@ function LayerIcon({ node }: { node: FreeNode | null }) {
 }
 
 /**
- * Etiqueta da linha (Solta, Escondida, Travada e Celular, quando o elemento tem valores proprios do celular): 12 px,
- * nunca menos (docs/17); a linha quebra quando nao cabem lado a lado.
+ * Etiqueta da linha (Na seleção, Solta, Escondida, Travada e Celular, quando o elemento tem valores proprios do
+ * celular): 12 px, nunca menos (docs/17); a linha quebra quando nao cabem lado a lado.
  */
 function Tag2({ children }: { children: ReactNode }) {
   return <span className="shrink-0 rounded-sm bg-[var(--surface-3)] px-1 text-[12px] leading-4 text-[var(--text-secondary)]">{children}</span>;
@@ -183,8 +233,10 @@ function measureLayerLines(list: HTMLElement): MeasuredLine[] {
   });
 }
 
-export function FreeLayersPanel({ cta, design, device = "desktop", disabled, flagged, onCommand, onSelect, selectedId }: FreeLayersPanelProps) {
+export function FreeLayersPanel({ cta, design, device = "desktop", disabled, flagged, onCommand, onSelect, selectedId, selectedIds }: FreeLayersPanelProps) {
   const rows = freeLayerRows(design, cta, flagged);
+  // Sem a lista (o editor de antes do L4b), so o principal esta escolhido.
+  const chosen = selectedIds ?? (selectedId ? [selectedId] : []);
   const listRef = useRef<HTMLUListElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [focusedId, setFocusedId] = useState<FreeId | null>(null);
@@ -201,7 +253,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
   const disposeDrag = useRef<(() => void) | null>(null);
   const dropKey = useRef("");
   const rowIds = rows.map((row) => row.id);
-  // O botao com tabIndex 0: o que tem o foco, senao o selecionado, senao o primeiro.
+  // O botao com tabIndex 0: o que tem o foco, senao o selecionado (com varios, o principal), senao o primeiro.
   const tabId = focusedId && rowIds.includes(focusedId) ? focusedId : selectedId && rowIds.includes(selectedId) ? selectedId : (rowIds[0] ?? null);
 
   useLayoutEffect(() => {
@@ -217,7 +269,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
     []
   );
 
-  // A selecao feita no desenho leva o lugar do Tab junto (sem roubar o foco).
+  // A selecao feita no desenho leva o lugar do Tab junto (sem roubar o foco): com varios, o do principal.
   useEffect(() => {
     if (selectedId && !listRef.current?.contains(document.activeElement)) {
       setFocusedId(selectedId);
@@ -391,14 +443,16 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
   }
 
   /**
-   * O arrastar da linha (so o mouse, a partir de 4 px). A foto do design e tirada no onStart, depois do limiar: um
-   * Renomear de outra linha termina no blur do pointerdown e ja entra nela. O soltar recalcula o lugar com o ponto do
-   * pointerup (a lista pode ter rolado sem o ponteiro andar) e leva a run({ kind: "move" }), com o foco na linha. No
-   * mesmo lugar, so seleciona (o click do botao solto e engolido pelo ajudante); o Esc no meio nao seleciona nada.
+   * O arrastar da linha (so o mouse, a partir de 4 px, e so sem tecla: com Shift, Ctrl, ⌘ ou Alt e um clique de
+   * escolher). A foto do design e tirada no onStart, depois do limiar: um Renomear de outra linha termina no blur do
+   * pointerdown e ja entra nela. O soltar recalcula o lugar com o ponto do pointerup (a lista pode ter rolado sem o
+   * ponteiro andar) e leva a run({ kind: "move" }), com o foco na linha. No mesmo lugar, so seleciona (o click do botao
+   * solto e engolido pelo ajudante); o Esc no meio nao seleciona nada. Perto da borda de cima ou de baixo do painel
+   * das Camadas, a lista rola sozinha (autoScroll: o tabpanel que rola, o mesmo do ouvinte de rolagem).
    */
   function beginLayerDrag(event: ReactPointerEvent<HTMLButtonElement>, id: FreeId) {
     // Um gesto comecado segue ate o fim: o pointerdown de outro ponteiro (um toque com o mouse apertado) nao o desliga.
-    if (disabled || gestureRef.current) {
+    if (disabled || gestureRef.current || !freeLayerDragAllowed(event)) {
       return;
     }
 
@@ -407,6 +461,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
     let gesture: LayerGesture | null = null;
 
     disposeDrag.current = followFreePointer(event, {
+      autoScroll: () => gesture?.panel ?? null,
       onCancel: endLayerDrag,
       onDrop: (client) => {
         const current = gesture;
@@ -474,11 +529,26 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
       case "row":
         focusRow(rowIds[action.index] ?? row.id);
         break;
+      case "extend": {
+        // Shift + ↑/↓: o foco vai a linha vizinha e o intervalo vai da ancora ate ela. Na ponta da lista, nada muda.
+        const next = rowIds[action.index] ?? row.id;
+
+        focusRow(next);
+
+        if (next !== row.id) {
+          onSelect(next, "range");
+        }
+
+        break;
+      }
       case "button":
         focusRow(row.id, action.index);
         break;
       case "select":
         onSelect(row.id);
+        break;
+      case "toggleSelect":
+        onSelect(row.id, "toggle");
         break;
       case "toggleHidden":
       case "toggleLocked":
@@ -486,7 +556,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
       case "remove":
       case "moveUp":
       case "moveDown":
-        run({ id: row.id, kind: action.kind }, action.kind !== "remove");
+        run(freeLayerKeyCommand(action.kind, row.id, chosen), action.kind !== "remove");
         break;
       case "menu":
         openMenu(row.id);
@@ -522,6 +592,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
 
   const ctx: RowContext = {
     beginDrag: beginLayerDrag,
+    chosen: new Set(chosen),
     design,
     disabled,
     dragId,
@@ -592,6 +663,8 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
 
 type RowContext = {
   beginDrag: (event: ReactPointerEvent<HTMLButtonElement>, id: FreeId) => void;
+  /** Os escolhidos (o principal inclusive). */
+  chosen: ReadonlySet<FreeId>;
   design: PopupFreeDesign;
   disabled: boolean;
   dragId: FreeId | null;
@@ -600,11 +673,12 @@ type RowContext = {
   menuFor: FreeId | null;
   onButtonFocus: (id: FreeId) => void;
   onKey: (event: KeyboardEvent<HTMLElement>, row: FreeLayerRow, button: number) => void;
-  onSelect: (id: FreeId) => void;
+  onSelect: (id: FreeId, how?: FreeLayerSelectHow) => void;
   renaming: { id: FreeId; value: string } | null;
   rows: readonly FreeLayerRow[];
   run: (command: FreeLayerCommand, keepFocus?: boolean) => void;
   runFromMenu: (command: FreeLayerCommand) => void;
+  /** O principal. */
   selectedId: FreeId | null;
   setMenuFor: (id: FreeId | null) => void;
   setRenameValue: (id: FreeId, value: string) => void;
@@ -619,7 +693,11 @@ function LayerLevel({ ctx, parentId }: { ctx: RowContext; parentId: FreeId | nul
 function LayerItem({ ctx, row }: { ctx: RowContext; row: FreeLayerRow }) {
   const { design, disabled, menuFor, renaming, run, selectedId, tabId } = ctx;
   const node = freeNodeOf(design, row.id);
-  const selected = row.id === selectedId;
+  const principal = row.id === selectedId;
+  // Escolhida: o mesmo fundo do principal. Com 2 ou mais, as outras escolhidas ganham a etiqueta "Na seleção".
+  const selected = principal || ctx.chosen.has(row.id);
+  const inSelection = selected && !principal && ctx.chosen.size >= 2;
+  const tagged = inSelection || row.free || row.hidden || row.locked || row.mobile;
   const isTab = row.id === tabId;
   const removeProblem = freeRemoveProblem(design, row.id);
   const duplicateProblem = freeDuplicateProblem(design, row.id);
@@ -671,20 +749,21 @@ function LayerItem({ ctx, row }: { ctx: RowContext; row: FreeLayerRow }) {
         ) : (
           <button
             {...buttonProps(0)}
-            aria-current={selected ? "true" : undefined}
-            aria-describedby={row.free || row.hidden || row.locked || row.mobile ? `free-layer-tags-${row.id}` : undefined}
+            aria-current={principal ? "true" : undefined}
+            aria-describedby={tagged ? `free-layer-tags-${row.id}` : undefined}
             aria-label={row.selectLabel}
             className="flex min-h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-[13px] leading-5 text-[var(--text-primary)] select-none"
             data-free-layer-select=""
-            onClick={() => ctx.onSelect(row.id)}
+            onClick={(event) => ctx.onSelect(row.id, freeLayerClickHow(event))}
             onPointerDown={(event) => ctx.beginDrag(event, row.id)}
             type="button"
           >
             <LayerIcon node={node} />
             <span className="flex min-w-0 flex-1 flex-col py-0.5">
               <span className="min-w-0 truncate">{row.label}</span>
-              {row.free || row.hidden || row.locked || row.mobile ? (
+              {tagged ? (
                 <span className="flex min-w-0 flex-wrap gap-1" id={`free-layer-tags-${row.id}`}>
+                  {inSelection ? <Tag2>{FREE_SELECTION_COPY.inSelection}</Tag2> : null}
                   {row.free ? <Tag2>{copy.tags.free}</Tag2> : null}
                   {row.hidden ? <Tag2>{copy.tags.hidden}</Tag2> : null}
                   {row.locked ? <Tag2>{copy.tags.locked}</Tag2> : null}
@@ -750,6 +829,7 @@ function LayerItem({ ctx, row }: { ctx: RowContext; row: FreeLayerRow }) {
             finalFocus={ctx.menuFinalFocus}
             sideOffset={4}
           >
+            {/* O ⋯ e da linha: Duplicar e Excluir agem so nela, mesmo com a linha numa selecao de varios (C17). */}
             <MenuEntry disabledReason={duplicateProblem} label={copy.duplicate} onSelect={() => run({ id: row.id, kind: "duplicate" })} />
             <MenuEntry disabledReason={row.index === 0 ? "" : null} label={copy.moveUp} onSelect={() => ctx.runFromMenu({ id: row.id, kind: "moveUp" })} />
             <MenuEntry disabledReason={row.index >= row.siblings - 1 ? "" : null} label={copy.moveDown} onSelect={() => ctx.runFromMenu({ id: row.id, kind: "moveDown" })} />
