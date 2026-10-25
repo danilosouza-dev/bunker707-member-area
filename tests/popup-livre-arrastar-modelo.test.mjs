@@ -453,13 +453,42 @@ test("desenho: quem está dentro de um solto girado não muda de lugar pelo dese
   assert.deepEqual(editor.freeFlowContainers(stage, stageRects, { id: "e1" }), []);
   assert.deepEqual(editor.freeFlowContainers(stage, stageRects, { id: "dentroGirada" }), []);
 
+  // A alca da barrinha so aparece quando o arrastar pode comecar: dentro do solto girado, nao.
+  assert.equal(editor.freeFlowDraggable(value, rects, "t1"), false, "filho de solto girado: sem alca");
+  assert.equal(editor.freeFlowDraggable(stage, stageRects, "e1"), false, "neto de solto girado: sem alca");
+  assert.equal(editor.freeFlowDraggable(stage, stageRects, "dentroGirada"), false, "caixa dentro de solto girado: sem alca");
+
   // Sem giro, a casa entra e o mesmo vao e o lugar de hoje.
   const straight = design(value.children.map((node) => (node.id === "girada" ? { ...node, place: { mode: "free", w: 200, x: 120, y: 200 } } : node)));
+  assert.equal(editor.freeFlowDraggable(straight, rects, "t1"), true, "sem giro, a alca volta");
   const home = geometry.freeFlowDropAt({ x: 220, y: 225 }, editor.freeFlowContainers(straight, rects, { id: "t1" }), AT_1);
   assert.deepEqual({ index: home.index, parentId: home.parentId }, { index: 0, parentId: "girada" });
   assert.equal(editor.freeMoveProblem(straight, "t1", home), "");
   // Os elementos de fora do solto girado continuam com os lugares de sempre.
   assert.deepEqual(editor.freeFlowContainers(value, rects, { id: "titulo" }).map((container) => container.id), [null]);
+});
+
+test("desenho: freeFlowDraggable diz quando o arrastar da sequência pode começar (a alça só aparece então)", () => {
+  const { design: stage, rects } = stageSample();
+
+  // Da sequencia, nao travado e medido: pode (na prancheta ou dentro de uma caixa em linha).
+  assert.equal(editor.freeFlowDraggable(stage, rects, "titulo"), true);
+  assert.equal(editor.freeFlowDraggable(stage, rects, "caixa"), true);
+  assert.equal(editor.freeFlowDraggable(stage, rects, "selo"), true);
+  // O solto muda X/Y, nao a ordem; o travado nao arrasta; sem retangulo, sem prancheta medida ou sem o elemento, nao.
+  assert.equal(editor.freeFlowDraggable(stage, rects, "forma"), false, "solto");
+  assert.equal(editor.freeFlowDraggable(stage, rects, "girada"), false, "o proprio solto girado");
+  assert.equal(editor.freeFlowDraggable(stage, rects, "travada"), false, "travado");
+  assert.equal(editor.freeFlowDraggable(stage, { ...rects, titulo: undefined }, "titulo"), false, "sem retangulo");
+  assert.equal(editor.freeFlowDraggable(stage, { ...rects, "@artboard": undefined }, "titulo"), false, "sem a prancheta medida");
+  assert.equal(editor.freeFlowDraggable(stage, rects, "nenhum"), false, "id que nao existe");
+
+  // O mesmo que a lista do comeco do gesto nao vir vazia, para todo elemento da sequencia nao travado e medido.
+  model.walkFreeNodes(stage.children, (node) => {
+    if (node.place?.mode !== "free" && !node.locked && rects[node.id]) {
+      assert.equal(editor.freeFlowDraggable(stage, rects, node.id), editor.freeFlowContainers(stage, rects, { id: node.id }).length > 0, node.id);
+    }
+  });
 });
 
 test("desenho: os motivos de recusa (caixa cheia de fora e profundidade) e o aparelho do palco", () => {
@@ -946,4 +975,20 @@ test("o desenho mostra o lugar de soltar: previewDrop no apiRef e as etiquetas d
   assert.match(source, /data-free-flow-origin=""/);
   assert.match(source, /rectsRef\.current = rects;/);
   assert.match(source, /!session && !dropView \?/, "com o indicador, o contorno de passar o mouse some");
+});
+
+test("o desenho só desenha a alça quando o arrastar pode começar (num filho de solto girado, não)", () => {
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-canvas.tsx", import.meta.url), "utf8");
+
+  // Uma vez por selecao (e quando o design ou as medidas mudam), nao a cada desenho.
+  assert.match(
+    source,
+    /const flowGrip = useMemo\(\s*\(\) => canMoveInFlow && !disabled && selectedId !== null && freeFlowDraggable\(design, rects, selectedId\),\s*\[canMoveInFlow, design, disabled, rects, selectedId\]\s*\);/
+  );
+  assert.equal(source.match(/data-free-flow-grip=""/g)?.length, 1, "uma alca so");
+  const grip = source.match(/\{flowGrip \? \([\s\S]*?\) : null\}/)?.[0] ?? "";
+  assert.match(grip, /data-free-flow-grip=""/, "a alca fica dentro do flowGrip");
+  assert.match(grip, /beginFlowDrag\(event, selectedNode\.id\)/);
+  // O gesto confere a mesma regra: a alca e o corpo comecam (ou nao) juntos.
+  assert.match(source, /function beginFlowDrag\(event: ReactPointerEvent<HTMLElement>, id: FreeId\) \{\s*if \(disabled \|\| !onMoveInFlow \|\| !freeFlowDraggable\(design, rects, id\)\) \{\s*return;/);
 });

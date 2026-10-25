@@ -1128,6 +1128,22 @@ export function freeFlowContainers(stage: PopupFreeDesign, rects: FreeMeasuredRe
   return containers;
 }
 
+/**
+ * O arrastar da sequencia pode comecar por este elemento no desenho: da sequencia, nao travado, medido, com a
+ * prancheta medida e fora de um solto girado (o mesmo que freeFlowContainers(stage, rects, { id }) nao vir vazia,
+ * sem montar a lista). A alca "Arraste para mudar o lugar" da barrinha so aparece quando isto e verdade: num filho de
+ * um solto girado ela prometeria um arrastar que nunca comeca.
+ */
+export function freeFlowDraggable(stage: PopupFreeDesign, rects: FreeMeasuredRects, id: FreeId): boolean {
+  const found = locate(stage, id);
+
+  if (!found || !rects["@artboard"] || !rects[id] || found.node.locked || found.node.place?.mode === "free") {
+    return false;
+  }
+
+  return !insideRotatedFree(stage, found);
+}
+
 /* ------------------------------------------------------------------------------------------------
  * Esconder, travar, nome, camada
  * ---------------------------------------------------------------------------------------------- */

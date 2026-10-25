@@ -6,6 +6,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -48,7 +49,7 @@ import {
   type FreeRect,
   type FreeResizeHandle
 } from "./free-editor-geometry";
-import { FREE_EDITOR_COPY, FREE_HANDLE_LABELS, freeFlowContainers, freeLayerLabel, freeMoveProblem, freeNodeOf, isFreeMovable } from "./free-editor-model";
+import { FREE_EDITOR_COPY, FREE_HANDLE_LABELS, freeFlowContainers, freeFlowDraggable, freeLayerLabel, freeMoveProblem, freeNodeOf, isFreeMovable } from "./free-editor-model";
 import { FREE_POINTER_MOUSE_AND_PEN, followFreePointer } from "./free-pointer-drag";
 
 // Area de desenho do editor Livre (spec §4.4): o MESMO PopupFreeCard do aluno, em previa, dentro de um palco com
@@ -65,7 +66,7 @@ import { FREE_POINTER_MOUSE_AND_PEN, followFreePointer } from "./free-pointer-dr
 // caneta; o cartao tem touch-action: none). O gesto comeca a 6 px de tela e so entao captura o ponteiro: o clique de
 // selecionar e o duplo clique de editar texto ficam como sao. A foto (os lugares de freeFlowContainers, o lugar de
 // antes e o design) e tirada no onStart, depois do limiar; dentro de um solto girado a lista vem vazia e o gesto nao
-// comeca. A cada movimento, freeFlowDropAt acha o vao, e o indicador mostra a linha de onde entra, a caixa de
+// comeca (e a alca nem aparece: freeFlowDraggable, uma vez por selecao). A cada movimento, freeFlowDropAt acha o vao, e o indicador mostra a linha de onde entra, a caixa de
 // destino, as caixas vazias que aceitam, o lugar de antes, o motivo de recusa e, no Celular, "Muda também no
 // computador" (a ordem e uma so, em children). Rolar a area de desenho no meio redesenha o indicador. Soltar
 // recalcula com o ponto do pointerup e chama onMoveInFlow (o editor confere e grava num passo); Esc, soltar fora da
@@ -652,13 +653,11 @@ export function FreeCanvas({
 
   /**
    * Segue o arrastar de um elemento da sequencia, pelo corpo (currentTarget = o cartao) ou pela alca da barrinha. So
-   * com o editor ligado, um elemento da sequencia nao travado e medido, e algum lugar para ele (dentro de um solto
-   * girado, nenhum: o gesto nao comeca). A captura e a foto so vem depois de 6 px (startFlow).
+   * com o editor ligado e quando freeFlowDraggable deixa: um elemento da sequencia nao travado e medido, fora de um
+   * solto girado (ali nao ha lugar para ele: o gesto nao comeca). A captura e a foto so vem depois de 6 px (startFlow).
    */
   function beginFlowDrag(event: ReactPointerEvent<HTMLElement>, id: FreeId) {
-    const node = freeNodeOf(design, id);
-
-    if (disabled || !onMoveInFlow || !node || node.locked || node.place?.mode === "free" || !rects[id] || freeFlowContainers(design, rects, { id }).length === 0) {
+    if (disabled || !onMoveInFlow || !freeFlowDraggable(design, rects, id)) {
       return;
     }
 
@@ -776,6 +775,13 @@ export function FreeCanvas({
   });
   const movable = Boolean(selectedNode && isFreeMovable(selectedNode) && !disabled);
   const flowSelected = Boolean(selectedNode && selectedNode.place?.mode !== "free" && !selectedNode.locked && !disabled);
+  const canMoveInFlow = Boolean(onMoveInFlow);
+  // A alca so aparece quando o arrastar pode comecar (num filho de um solto girado, nao: ali ficam as Camadas, o Subir
+  // e o Descer e o ⋯). Calculada uma vez por selecao (e quando o design ou as medidas mudam), nao a cada desenho.
+  const flowGrip = useMemo(
+    () => canMoveInFlow && !disabled && selectedId !== null && freeFlowDraggable(design, rects, selectedId),
+    [canMoveInFlow, design, disabled, rects, selectedId]
+  );
   const handleSize = 9 * layoutPerScreen;
   const artboardRect = rects["@artboard"];
 
@@ -837,27 +843,30 @@ export function FreeCanvas({
             role="toolbar"
             style={{ bottom: "100%", marginBottom: 4 * layoutPerScreen, transform: `scale(${layoutPerScreen})`, transformOrigin: "bottom right" }}
           >
-            {/* A alca: o jeito de pegar uma caixa coberta pelos filhos (o mouse cai sempre no de dentro). */}
-            <span
-              aria-hidden="true"
-              className={cn(
-                "grid size-7 touch-none place-items-center rounded text-[var(--text-secondary)] hover:bg-[var(--press-overlay)]",
-                flowDragging ? "cursor-grabbing" : "cursor-grab"
-              )}
-              data-free-flow-grip=""
-              data-free-overlay-control=""
-              onPointerDown={(event) => {
-                if (event.button !== 0) {
-                  return;
-                }
+            {/* A alca: o jeito de pegar uma caixa coberta pelos filhos (o mouse cai sempre no de dentro). So quando o
+                arrastar pode comecar (flowGrip). */}
+            {flowGrip ? (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "grid size-7 touch-none place-items-center rounded text-[var(--text-secondary)] hover:bg-[var(--press-overlay)]",
+                  flowDragging ? "cursor-grabbing" : "cursor-grab"
+                )}
+                data-free-flow-grip=""
+                data-free-overlay-control=""
+                onPointerDown={(event) => {
+                  if (event.button !== 0) {
+                    return;
+                  }
 
-                event.stopPropagation();
-                beginFlowDrag(event, selectedNode.id);
-              }}
-              title={copy.toolbar.drag}
-            >
-              <GripVertical className="size-3.5" />
-            </span>
+                  event.stopPropagation();
+                  beginFlowDrag(event, selectedNode.id);
+                }}
+                title={copy.toolbar.drag}
+              >
+                <GripVertical className="size-3.5" />
+              </span>
+            ) : null}
             <ToolbarButton icon={<ArrowUp className="size-3.5" />} label={copy.toolbar.moveUp} onClick={() => onToolbar("moveUp", selectedNode.id)} reason={toolbarDisabled.moveUp} />
             <ToolbarButton icon={<ArrowDown className="size-3.5" />} label={copy.toolbar.moveDown} onClick={() => onToolbar("moveDown", selectedNode.id)} reason={toolbarDisabled.moveDown} />
             <ToolbarButton icon={<Copy className="size-3.5" />} label={copy.toolbar.duplicate} onClick={() => onToolbar("duplicate", selectedNode.id)} reason={toolbarDisabled.duplicate} />
