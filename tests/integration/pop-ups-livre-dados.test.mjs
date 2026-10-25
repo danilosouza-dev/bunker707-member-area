@@ -734,16 +734,21 @@ test("L4b: 'Quando o aluno clica no botão' com um link só no computador e outr
   assert.deepEqual((await linha(salvo.id)).popup_design, gravado, "nada muda");
 });
 
-test("L4b (D9): o Livre gravado antes com 'Quando o aluno clica no botão' e o Botão principal escondido no computador abre, publica e é aprovado como 'Só quando o pop-up terminar'", async () => {
+test("L4b (D9): o Livre gravado antes com 'Quando o aluno clica no botão' e o Botão principal escondido no computador abre, publica e é aprovado como 'Só quando o pop-up terminar', e a linha também", async () => {
   // Como o app de antes gravava: salvo com o Botao principal visivel e depois escondido no computador (o schema de
-  // antes so olhava o celular). Um fica em rascunho e o outro num pedido de aprovacao.
+  // antes so olhava o celular). Um fica em rascunho (escondido nos dois) e o outro num pedido de aprovacao (visivel
+  // so no celular, onde o aluno clicaria).
   const rascunho = ok(await salvar(ateClicar(popup({ design: null, freeDesign: livre({ image: false }), title: "Rascunho de antes" }))));
   const pedido = ok(await salvar(ateClicar(popup({ design: null, freeDesign: livre({ image: false }), title: "Pedido de antes" }))));
   const comum = livre({ image: false });
   const escondido = model.canonicalPopupFreeDesign({ ...comum, children: comum.children.map((node) => (node.id === "botao" ? { ...node, hidden: true } : node)) });
+  const soNoCelular = model.canonicalPopupFreeDesign({ ...escondido, devices: { mobile: { nodes: { botao: { hidden: false } } } } });
 
-  for (const id of [rascunho.id, pedido.id]) {
-    unwrap(await db.from("campaigns").update({ popup_design: escondido }).eq("id", id), "Escondendo o Botao principal no computador");
+  for (const [id, design] of [
+    [rascunho.id, escondido],
+    [pedido.id, soNoCelular]
+  ]) {
+    unwrap(await db.from("campaigns").update({ popup_design: design }).eq("id", id), "Escondendo o Botao principal no computador");
   }
 
   unwrap(
@@ -775,6 +780,15 @@ test("L4b (D9): o Livre gravado antes com 'Quando o aluno clica no botão' e o B
   const aprovado = ok(await actions.approveNotice({ id: pedido.id }));
 
   assert.equal(aprovado.situation, "active");
+
+  // A linha passa a dizer o mesmo que o editor e o relatorio: no celular, o aluno nao para de ver o pop-up ao clicar
+  // no Botao principal.
+  for (const id of [rascunho.id, pedido.id]) {
+    assert.equal(unwrap(await db.from("campaigns").select("popup_stop_on").eq("id", id).single(), "Lendo a regra publicada").popup_stop_on, "never", id);
+  }
+
+  actAs(produtor);
+  assert.deepEqual((await getNoticeDetail(pedido.id, { permissions: TODAS })).draft.popup.frequency, { ...ATE_CLICAR, stopOn: "never" });
 });
 
 test("L4b: a Forma com largura e altura na sequência, no computador e no celular, é salva e lida igual", async () => {

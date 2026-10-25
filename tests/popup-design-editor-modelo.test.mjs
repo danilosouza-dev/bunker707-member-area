@@ -439,6 +439,75 @@ test("D9 por aparelho (L4b): o aviso já gravado com o Botão principal escondid
   assert.equal(noticeDraftOfRow(antiga).popup.frequency.stopOn, "never");
 });
 
+test("D9 ao publicar e aprovar (L4b): a linha passa a 'Só quando o pop-up terminar' e o aluno recebe o que a equipe viu", async () => {
+  const store = await import("../src/server/communications/store.ts");
+  const display = await import("../src/server/communications/popup-display-model.ts");
+  const { noticeDraftOfRow, noticeStopOnToPublish } = await import("../src/server/communications/queries.ts");
+  const free = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
+  const ctaId = free.children.find((node) => node.type === "button" && node.action.kind === "cta").id;
+  // Como o app de antes deixava: o Botao principal escondido no computador e visivel no celular.
+  const soNoCelular = {
+    ...free,
+    children: free.children.map((node) => (node.id === ctaId ? { ...node, hidden: true } : node)),
+    devices: { mobile: { nodes: { [ctaId]: { hidden: false } } } }
+  };
+  const nosDois = { ...free, children: free.children.map((node) => (node.id === ctaId ? { ...node, hidden: true } : node)) };
+  const repetir = { everyMinutes: 120, maxPerDay: 3, maxTotal: 10, mode: "repeat", stopOn: "click" };
+  const linhaDe = (freeDesign, frequency = repetir, extra = {}) => {
+    const base = popupDraft({ design: null, freeDesign });
+    const draft = { ...base, popup: { ...base.popup, frequency }, repeat: frequency.mode === "once" ? "once" : "until_action" };
+
+    return {
+      ...store.draftToColumns(draft),
+      approved_at: null,
+      approved_by: null,
+      created_at: "2026-10-25T12:00:00.000Z",
+      created_by: "00000000-0000-4000-8000-000000000001",
+      deleted_at: null,
+      flow_id: null,
+      flow_node_id: null,
+      id: "00000000-0000-4000-8000-0000000000aa",
+      status: "draft",
+      updated_at: "2026-10-25T12:00:00.000Z",
+      ...extra
+    };
+  };
+
+  // O caso da conferencia: o celular mostra o Botao principal; sem a troca, o aluno pararia de ver ao clicar ali,
+  // enquanto o editor e o relatorio dizem "Só quando o pop-up terminar".
+  for (const [nome, design] of [["só no celular", soNoCelular], ["escondido nos dois", nosDois]]) {
+    for (const status of ["draft", "pending_approval"]) {
+      const linha = linhaDe(design, repetir, { status });
+
+      assert.equal(display.popupSettingsOfRow(linha).frequency.stopOn, "click", `${nome}: a linha gravada para no clique`);
+      assert.deepEqual(noticeStopOnToPublish(linha), { popup_stop_on: "never" }, `${nome}, ${status}`);
+
+      const publicada = { ...linha, ...noticeStopOnToPublish(linha), status: "active" };
+
+      assert.deepEqual(display.popupSettingsOfRow(publicada).frequency, noticeDraftOfRow(linha).popup.frequency, `${nome}: o aluno recebe o que a equipe viu`);
+      assert.deepEqual(display.popupSettingsOfRow(publicada).frequency, { ...repetir, stopOn: "never" });
+      // So a regra de parar muda; o resto da linha fica.
+      assert.deepEqual(Object.keys(noticeStopOnToPublish(linha)), ["popup_stop_on"]);
+    }
+  }
+
+  // Nada muda quando ha algo para clicar nos dois aparelhos, quando a regra ja e outra ou o aviso nao e pop-up Livre.
+  assert.deepEqual(noticeStopOnToPublish(linhaDe(free)), {});
+  assert.deepEqual(noticeStopOnToPublish(linhaDe(soNoCelular, { ...repetir, stopOn: "never" })), {});
+  assert.deepEqual(noticeStopOnToPublish(linhaDe(soNoCelular, { mode: "once" })), {});
+  assert.deepEqual(noticeStopOnToPublish(linhaDe(null)), {}, "o Padrão com botão para no clique, como foi gravado");
+  assert.deepEqual(noticeStopOnToPublish({ ...linhaDe(soNoCelular), kind: "inbox" }), {});
+  // O caso antigo (popup_frequency nulo) nao ganha a coluna: o check da tabela pede popup_stop_on nulo ali.
+  const antiga = linhaDe(null, repetir, { cta_href: null, cta_label: null, cta_target: null, popup_frequency: null, popup_repeat: "until_action", popup_stop_on: null });
+  assert.equal(noticeDraftOfRow(antiga).popup.frequency.stopOn, "never");
+  assert.deepEqual(noticeStopOnToPublish(antiga), {});
+
+  // Publicar (o pedido de aprovacao e o pôr no ar) e aprovar gravam a regra no mesmo update da situacao.
+  const actions = await readFile(new URL("../src/server/communications/actions.ts", import.meta.url), "utf8");
+  assert.match(actions, /updateCampaign\(db, row\.id, \{ \.\.\.common, \.\.\.noticeStopOnToPublish\(row\), sent_at: row\.sent_at \?\? nowIso, status: "active" \}, guard\)/);
+  assert.match(actions, /\{\s+\.\.\.noticeStopOnToPublish\(row\),\s+audience_count: count,[\s\S]*?status: "pending_approval",/);
+});
+
 test("sincronia: no Personalizado, tirar o botao tira o bloco do botao; gravar o audio poe o bloco Áudio antes do botao", () => {
   const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
   const draft = popupDraft({ design });

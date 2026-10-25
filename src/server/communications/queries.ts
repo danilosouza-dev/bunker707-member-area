@@ -589,6 +589,24 @@ export function noticeDraftOfRow(row: CampaignRow): NoticeDraft {
   return { ...draft, popup: { ...draft.popup, frequency: { ...frequency, stopOn: "never" } } };
 }
 
+/**
+ * L4b (D9 por aparelho, docs/27 §2.1): o que publicar e aprovar regravam junto com a situacao. Quando o
+ * noticeDraftOfRow abre um Livre gravado com "Quando o aluno clica no botão" como "Só quando o pop-up terminar"
+ * (o Botao principal escondido no computador e visivel no celular, por exemplo), a coluna popup_stop_on passa a
+ * dizer o mesmo no update que poe o aviso no ar ou pede aprovacao: o aluno recebe a regra que a equipe viu no editor
+ * e no relatorio, e nao para de ver o pop-up ao clicar no celular. O caso antigo (popup_frequency nulo) nao muda:
+ * sem botao no aviso, ninguem clica, e o check da tabela pede popup_stop_on nulo ali.
+ */
+export function noticeStopOnToPublish(row: CampaignRow): { popup_stop_on?: "never" } {
+  if (row.kind !== "popup" || row.popup_frequency !== "repeat" || row.popup_stop_on !== "click") {
+    return {};
+  }
+
+  const frequency = noticeDraftOfRow(row).popup?.frequency;
+
+  return frequency?.mode === "repeat" && frequency.stopOn === "never" ? { popup_stop_on: "never" } : {};
+}
+
 /** Um aviso para o editor ou o relatorio; null se nao existe (ou foi excluido). */
 export async function getNoticeDetail(id: string, input: { now?: number; permissions?: NoticePermissions } = {}): Promise<NoticeDetail | null> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
