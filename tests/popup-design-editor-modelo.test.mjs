@@ -249,6 +249,75 @@ test("sincronia no Livre: tirar o botao tira o Botão principal; gravar o audio 
   assert.equal(editor.withSyncedDesign(draft, { title: "Outro" }).freeDesign, free);
 });
 
+test("sincronia no Livre: tirar o Áudio e o Botão principal tira também os valores do celular deles; ao voltar, nada velho gruda", () => {
+  // O Áudio e o Botão principal postos pela sincronia (ids "audio" e "principal"), com valores do celular.
+  const inicio = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
+  const semNada = editor.withSyncedDesign(popupDraft({ design: null, freeDesign: inicio }), { cta: null });
+  const free = editor.withSyncedDesign(semNada, { audio: AUDIO, cta: CTA }).freeDesign;
+  const audioId = free.children.find((node) => node.type === "audio").id;
+  const ctaId = free.children.find((node) => node.type === "button" && node.action.kind === "cta").id;
+  const titulo = free.children.find((node) => node.type === "heading").id;
+  assert.deepEqual([audioId, ctaId], ["audio", "principal"]);
+  const celular = { mobile: { nodes: { [audioId]: { hidden: true }, [ctaId]: { textStyle: { size: 20 } }, [titulo]: { textStyle: { size: 22 } } } } };
+  const draft = popupDraft({ audio: AUDIO, design: null, freeDesign: { ...free, devices: celular } });
+
+  const sem = editor.withSyncedDesign(draft, { audio: null, cta: null });
+  assert.equal(sem.freeDesign.children.some((node) => node.type === "audio" || (node.type === "button" && node.action.kind === "cta")), false);
+  assert.deepEqual(Object.keys(sem.freeDesign.devices.mobile.nodes), [titulo], "so os valores do celular dos que ficaram");
+
+  const volta = editor.withSyncedDesign(sem, { audio: AUDIO, cta: CTA });
+  const audioNovo = volta.freeDesign.children.find((node) => node.type === "audio");
+  const ctaNovo = volta.freeDesign.children.find((node) => node.type === "button" && node.action.kind === "cta");
+  assert.deepEqual([audioNovo.id, ctaNovo.id], [audioId, ctaId], "os ids voltam iguais");
+  assert.deepEqual(Object.keys(volta.freeDesign.devices.mobile.nodes), [titulo], "nenhuma entrada velha no Áudio e no Botão principal novos");
+
+  // Um design com uma entrada perdida no id que volta (gravada antes): o elemento novo tambem nasce sem ela.
+  const perdida = { ...sem.freeDesign, devices: { mobile: { nodes: { ...sem.freeDesign.devices.mobile.nodes, [audioId]: { hidden: true } } } } };
+  const deNovo = editor.withSyncedDesign({ ...sem, freeDesign: perdida }, { audio: AUDIO });
+  assert.equal(audioId in deNovo.freeDesign.devices.mobile.nodes, false);
+  // Sem nada no celular, `devices` sai.
+  const so = editor.withSyncedDesign(popupDraft({ audio: AUDIO, design: null, freeDesign: { ...free, devices: { mobile: { nodes: { [audioId]: { hidden: true } } } } } }), { audio: null });
+  assert.equal("devices" in so.freeDesign, false);
+});
+
+test("D9 no Livre com o Celular: o que se clica precisa estar visível nos dois aparelhos", async () => {
+  const popupEditor = await import("../src/components/admin/v2/communication/popup-editor-model.ts");
+  const free = editor.applyFreeStarterPatch({ audio: null, cta: CTA }, "blank").freeDesign;
+  const semBotao = editor.withSyncedDesign(popupDraft({ design: null, freeDesign: free }), { cta: null }).freeDesign;
+  const link = { action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, id: "link1", label: "Ver aulas", type: "button" };
+  const comLink = { ...semBotao, children: [...semBotao.children.slice(0, -1), link, semBotao.children.at(-1)] };
+  const linkSoNoComputador = { ...comLink, devices: { mobile: { nodes: { link1: { hidden: true } } } } };
+  const repetir = { everyMinutes: null, maxPerDay: 1, maxTotal: null, mode: "repeat", stopOn: "click" };
+  const rascunho = (extra) => {
+    const draft = popupDraft({ design: null, ...extra });
+    return { ...draft, popup: { ...draft.popup, frequency: repetir } };
+  };
+
+  // O "Abrir um link" escondido so no celular nao conta: o celular nunca pararia.
+  assert.equal(errorsOf(rascunho({ cta: null, freeDesign: linkSoNoComputador }))["popup.frequency.stopOn"], schemas.POPUP_NO_BUTTON_STOP_MESSAGE);
+  assert.equal(schemas.POPUP_NO_BUTTON_STOP_MESSAGE, "Este pop-up não tem botão: escolha quando ele para de aparecer.");
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, freeDesign: linkSoNoComputador }), true);
+  assert.equal(popupEditor.repeatStartOf({ cta: null, freeDesign: linkSoNoComputador }).stopOn, "never");
+
+  // Visivel nos dois: passa.
+  assert.equal(errorsOf(rascunho({ cta: null, freeDesign: comLink }))["popup.frequency.stopOn"], undefined);
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, freeDesign: comLink }), false);
+  const outroNoCelular = { ...comLink, devices: { mobile: { nodes: { link1: { textStyle: { size: 18 } } } } } };
+  assert.equal(popupEditor.clickStopDisabled({ cta: null, freeDesign: outroNoCelular }), false, "outro valor do celular nao esconde");
+
+  // O Botao principal escondido so no celular: sem outro clique visivel no celular, recusa do mesmo jeito.
+  const ctaId = free.children.find((node) => node.type === "button" && node.action.kind === "cta").id;
+  const ctaSoNoComputador = { ...free, devices: { mobile: { nodes: { [ctaId]: { hidden: true } } } } };
+  assert.equal(errorsOf(rascunho({ freeDesign: ctaSoNoComputador }))["popup.frequency.stopOn"], schemas.POPUP_NO_BUTTON_STOP_MESSAGE);
+  assert.equal(popupEditor.clickStopDisabled({ cta: CTA, freeDesign: ctaSoNoComputador }), true);
+  // ... com o "Abrir um link" visivel no celular, passa; e o Botao principal visivel nos dois, como sempre.
+  const ctaEscondidoComLink = { ...ctaSoNoComputador, children: [...free.children.slice(0, -1), link, free.children.at(-1)] };
+  assert.equal(errorsOf(rascunho({ freeDesign: ctaEscondidoComLink }))["popup.frequency.stopOn"], undefined);
+  assert.equal(popupEditor.clickStopDisabled({ cta: CTA, freeDesign: ctaEscondidoComLink }), false);
+  assert.equal(errorsOf(rascunho({ freeDesign: free }))["popup.frequency.stopOn"], undefined);
+  assert.equal(popupEditor.clickStopDisabled({ cta: CTA, freeDesign: free }), false);
+});
+
 test("sincronia: no Personalizado, tirar o botao tira o bloco do botao; gravar o audio poe o bloco Áudio antes do botao", () => {
   const design = editor.applyStarter({ audio: null, cta: CTA }, "media_top_fade", null).design;
   const draft = popupDraft({ design });

@@ -13,22 +13,26 @@ import {
   canonicalPopupFreeDesign,
   findFreeNode,
   freeNodeCount,
+  freeMobileNodeOf,
   freeNodeIdOfKey,
   nextFreeId,
   uploadedFontIdsOfFree,
   updateFreeNode,
   walkFreeNodes,
+  withFreeMobileNodes,
+  withoutFreeMobilePlace,
   type FreeAbsolutePlace,
   type FreeBoxNode,
   type FreeButtonNode,
   type FreeFlowPlace,
   type FreeId,
+  type FreeMobileNode,
   type FreeNode,
   type FreeNodeType,
   type PopupFreeDesign
 } from "../../../../../server/communications/popup-free-model";
 import { POPUP_FREE_PASTE_MESSAGES, parseFreeDesignPaste, type FreePasteContext, type FreePasteResult } from "../../../../../server/communications/popup-free-paste";
-import { freeHeadingText, resolveFreeArtboard } from "../../../../../server/communications/popup-free-render";
+import { freeHeadingText, resolveFreeArtboard, resolveFreeForDevice } from "../../../../../server/communications/popup-free-render";
 import { POPUP_FREE_MESSAGES, freeErrorKeys, popupFreeContentProblems, popupFreeDesignSchema } from "../../../../../server/communications/popup-free-schema";
 import { FREE_ELEMENT_ID_PREFIX, FREE_STARTER_CTA, newFreeNode, type FreeElementKind } from "../../../../../server/communications/popup-free-starters";
 import { FREE_NODE_TYPE_LABELS, freeNodeDisplayName, type FreeHint, type FreeMeasuredRects } from "../../../../../server/communications/popup-free-checks";
@@ -75,7 +79,11 @@ export const FREE_EDITOR_COPY = {
     upward: "Movido para cima.",
     layerForward: "Trazido para frente.",
     layerBackward: "Enviado para trás.",
-    aligned: "Alinhado no pop-up."
+    aligned: "Alinhado no pop-up.",
+    /** Ao trocar o "Ver como" (docs/27 §13.8): com Celular, o desenho e a aba Celular mudam so o celular. */
+    editingDesktop: "Editando o Computador.",
+    editingMobile: "Editando o Celular.",
+    mobileReset: "Tudo deste elemento voltou ao do computador."
   },
   bar: {
     done: "Concluir",
@@ -122,7 +130,7 @@ export const FREE_EDITOR_COPY = {
     renameSave: "Salvar nome",
     select: (label: string) => `Selecionar ${label}`,
     show: "Mostrar",
-    tags: { free: "Solta", hidden: "Escondida", locked: "Travada" },
+    tags: { free: "Solta", hidden: "Escondida", locked: "Travada", mobile: "Celular" },
     unlock: "Destravar",
     warning: "Tem algo para revisar",
     duplicate: "Duplicar"
@@ -137,6 +145,7 @@ export const FREE_EDITOR_COPY = {
     empty: "Tudo certo por aqui.",
     errors: "Para corrigir antes de salvar",
     hints: "Dicas",
+    mobile: "Ajustar no Celular",
     raise: "Aumentar a altura",
     sendFont: "Enviar fonte…",
     size: (percent: number) => `Tamanho do design: ${percent} % do máximo.`,
@@ -632,9 +641,15 @@ export function freeDuplicateProblem(design: PopupFreeDesign, id: FreeId): strin
   return freeAddProblem(design, [cloneWithIds(node, (prefix) => prefix, null)]);
 }
 
+/** Os ids do elemento e de tudo dentro dele (caixas), na ordem do DOM. */
+function subtreeIds(node: FreeNode): FreeId[] {
+  return node.type === "box" ? [node.id, ...node.children.flatMap(subtreeIds)] : [node.id];
+}
+
 /**
  * Duplica logo depois do original (ids novos em tudo). O Botão principal duplicado vira um botao "Abrir um link"
  * com o mesmo texto e destino (so se ainda nao ha um). Um solto duplicado anda 16 px para baixo e para a direita.
+ * Os valores do celular vao junto para os ids novos (o solto anda 16 px no celular tambem, quando tem X/Y proprios).
  */
 export function duplicateFreeNode(design: PopupFreeDesign, id: FreeId, cta: NoticeDraft["cta"]): { design: PopupFreeDesign; id: FreeId } | { reason: string } {
   const problem = freeDuplicateProblem(design, id);
@@ -661,8 +676,25 @@ export function duplicateFreeNode(design: PopupFreeDesign, id: FreeId, cta: Noti
   }
 
   const next = insertNode(design, found.parent?.id ?? null, found.index + 1, copy);
+  const copies = subtreeIds(copy);
+  const entries: Record<FreeId, FreeMobileNode> = {};
 
-  return { design: next, id: copy.id };
+  subtreeIds(found.node).forEach((oldId, index) => {
+    let entry = freeMobileNodeOf(design, oldId);
+
+    if (entry && index === 0 && entry.place?.mode === "free" && (entry.place.x !== undefined || entry.place.y !== undefined)) {
+      const place = entry.place;
+      const moved = freePlaceNumbers({ x: place.x === undefined ? undefined : place.x + 16, y: place.y === undefined ? undefined : place.y + 16 });
+
+      entry = { ...entry, place: { ...place, ...moved } };
+    }
+
+    if (entry) {
+      entries[copies[index]] = entry;
+    }
+  });
+
+  return { design: withFreeMobileNodes(next, entries), id: copy.id };
 }
 
 /** Por que nao da para excluir (Links e Áudio ficam sempre). */
@@ -698,7 +730,10 @@ export function removeFreeNode(design: PopupFreeDesign, id: FreeId): { ctaRemove
     return { reason: M.design };
   }
 
-  return { ctaRemoved: contains(detached.node, isCta), design: detached.design };
+  // O que o elemento (e o que estava dentro dele) mudava no celular sai junto.
+  const entries = Object.fromEntries(subtreeIds(detached.node).map((nodeId) => [nodeId, undefined]));
+
+  return { ctaRemoved: contains(detached.node, isCta), design: withFreeMobileNodes(detached.design, entries) };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -766,7 +801,7 @@ export function freeBoxTargets(design: PopupFreeDesign, id: FreeId): { id: FreeI
   return targets;
 }
 
-/** Coloca no fim da caixa. Um solto vira sequencia sozinho (`becameFlow`). */
+/** Coloca no fim da caixa. Um solto vira sequencia sozinho (`becameFlow`) e perde a posicao solta do celular. */
 export function moveFreeNodeIntoBox(design: PopupFreeDesign, id: FreeId, boxId: FreeId): { becameFlow: boolean; design: PopupFreeDesign } | null {
   if (!freeBoxTargets(design, id).some((target) => target.id === boxId)) {
     return null;
@@ -785,7 +820,9 @@ export function moveFreeNodeIntoBox(design: PopupFreeDesign, id: FreeId, boxId: 
     return null;
   }
 
-  return { becameFlow, design: insertNode(detached.design, boxId, box.node.children.length, flowPlaceOf(detached.node)) };
+  const moved = insertNode(detached.design, boxId, box.node.children.length, flowPlaceOf(detached.node));
+
+  return { becameFlow, design: becameFlow ? withoutFreeMobilePlace(moved, id) : moved };
 }
 
 /** Tira da caixa: entra logo depois dela, na caixa de fora (ou na prancheta). */
@@ -878,8 +915,89 @@ export function shiftFreeNodeLayer(design: PopupFreeDesign, id: FreeId, delta: n
  * Posicao solta: setas, arrastar, alinhar, soltar, seguir a sequencia
  * ---------------------------------------------------------------------------------------------- */
 
-/** Setas: so solto e nao travado; devolve o mesmo design quando nao mexe. */
-export function nudgeFreeNode(design: PopupFreeDesign, id: FreeId, dx: number, dy: number): PopupFreeDesign {
+/** O aparelho que o "Ver como" mostra: com Celular, o desenho, as setas e o alinhar mudam so o celular. */
+export type FreeDevice = "desktop" | "mobile";
+
+/**
+ * O "Ver como" depois de ir a uma chave (um erro ou uma dica do Revisar, o "Ajustar no Celular", o erro que abre o
+ * editor): uma chave do celular ("devices.mobile.nodes..." ou "devices.mobile.artboard...", com ou sem
+ * "freeDesign.") liga o Celular, porque a aba Celular e o No celular editam o que o Celular mostra; as outras mantem
+ * o aparelho de agora.
+ */
+export function freeDeviceForFocusKey(key: string, device: FreeDevice): FreeDevice {
+  return /^(?:freeDesign\.)?devices\.mobile(?:\.|$)/.test(key) ? "mobile" : device;
+}
+
+/** A posicao solta de um elemento no celular: a do computador com a propria do celular por cima (null = nao e solto). */
+export function freeMobileFreePlace(design: PopupFreeDesign, id: FreeId): FreeAbsolutePlace | null {
+  const node = locate(design, id)?.node;
+
+  if (node?.place?.mode !== "free") {
+    return null;
+  }
+
+  const own = freeMobileNodeOf(design, id)?.place;
+
+  return own?.mode === "free" ? { ...node.place, ...freePlaceNumbers(own) } : node.place;
+}
+
+const RECT_KEYS = ["h", "w", "x", "y"] as const;
+
+/**
+ * Grava X/Y/largura/altura de um solto NO CELULAR (devices.mobile.nodes.<id>.place, criando a entrada): por cima do
+ * que o celular ja tinha, e o que ficou igual ao computador sai (volta a ser "Igual ao computador"). Devolve o mesmo
+ * design quando nada muda.
+ */
+export function setFreeMobileRect(design: PopupFreeDesign, id: FreeId, rect: Partial<FreeRect>): PopupFreeDesign {
+  const node = locate(design, id)?.node;
+
+  if (node?.place?.mode !== "free") {
+    return design;
+  }
+
+  const desktop = node.place;
+  const entry = freeMobileNodeOf(design, id);
+  const before = entry?.place?.mode === "free" ? entry.place : { mode: "free" as const };
+  const next: Record<string, number | string> = { ...before, ...freePlaceNumbers(rect), mode: "free" };
+
+  for (const key of RECT_KEYS) {
+    if (next[key] === undefined || next[key] === desktop[key]) {
+      delete next[key];
+    }
+  }
+
+  if (RECT_KEYS.every((key) => next[key] === (before as Record<string, unknown>)[key])) {
+    return design;
+  }
+
+  const { place: unusedPlace, ...rest } = entry ?? {};
+
+  void unusedPlace;
+
+  const place = Object.keys(next).length > 1 ? (next as FreeMobileNode["place"]) : undefined;
+
+  return withFreeMobileNodes(design, { [id]: place ? { ...rest, place } : rest });
+}
+
+/** A chave de juntar passos das setas: o celular e o computador juntam a parte (cada um volta num Ctrl + Z). */
+export function freeArrowCoalesceKey(id: FreeId, device: FreeDevice): string {
+  return `${id}:${device === "mobile" ? "mobile.place" : "place"}`;
+}
+
+/** Setas: so solto e nao travado; devolve o mesmo design quando nao mexe. Com o Celular, muda so o celular. */
+export function nudgeFreeNode(design: PopupFreeDesign, id: FreeId, dx: number, dy: number, device: FreeDevice = "desktop"): PopupFreeDesign {
+  if (device === "mobile") {
+    const place = freeMobileFreePlace(design, id);
+
+    if (!place || locate(design, id)?.node.locked) {
+      return design;
+    }
+
+    const next = nudgeFreePlace(place, dx, dy);
+
+    return next.x === place.x && next.y === place.y ? design : setFreeMobileRect(design, id, { x: next.x, y: next.y });
+  }
+
   return updateFreeNode(design, id, (node) => {
     if (node.locked || node.place?.mode !== "free") {
       return node;
@@ -891,8 +1009,12 @@ export function nudgeFreeNode(design: PopupFreeDesign, id: FreeId, dx: number, d
   });
 }
 
-/** Grava X/Y/largura/altura de um solto (fim de um arrastar, redimensionar ou alinhar). */
-export function setFreeNodeRect(design: PopupFreeDesign, id: FreeId, rect: Partial<FreeRect>): PopupFreeDesign {
+/** Grava X/Y/largura/altura de um solto (fim de um arrastar, redimensionar ou alinhar). Com o Celular, so no celular. */
+export function setFreeNodeRect(design: PopupFreeDesign, id: FreeId, rect: Partial<FreeRect>, device: FreeDevice = "desktop"): PopupFreeDesign {
+  if (device === "mobile") {
+    return setFreeMobileRect(design, id, rect);
+  }
+
   return updateFreeNode(design, id, (node) => {
     if (node.place?.mode !== "free") {
       return node;
@@ -909,8 +1031,11 @@ export function setFreeNodeRect(design: PopupFreeDesign, id: FreeId, rect: Parti
   });
 }
 
-/** Alinhar no pop-up (comando `align` do painel): a conta com o retangulo medido. */
-export function alignFreeNode(design: PopupFreeDesign, id: FreeId, edge: FreeAlignEdge, rects: FreeMeasuredRects): PopupFreeDesign {
+/**
+ * Alinhar no pop-up (comando `align` do painel): a conta com o retangulo medido (no aparelho do "Ver como"). Com o
+ * Celular, parte da posicao do celular e grava so no celular.
+ */
+export function alignFreeNode(design: PopupFreeDesign, id: FreeId, edge: FreeAlignEdge, rects: FreeMeasuredRects, device: FreeDevice = "desktop"): PopupFreeDesign {
   const found = locate(design, id);
   const artboard = rects["@artboard"];
 
@@ -918,16 +1043,17 @@ export function alignFreeNode(design: PopupFreeDesign, id: FreeId, edge: FreeAli
     return design;
   }
 
-  const place = found.node.place;
+  const place = device === "mobile" ? (freeMobileFreePlace(design, id) ?? found.node.place) : found.node.place;
   const measured = rects[id];
   const rect: FreeRect = { h: place.h ?? measured?.h ?? 0, w: place.w, x: place.x, y: place.y };
 
-  return setFreeNodeRect(design, id, alignFreeRect(rect, edge, artboard));
+  return setFreeNodeRect(design, id, alignFreeRect(rect, edge, artboard), device);
 }
 
 /**
  * "Soltar": vira solto no mesmo lugar (pelo retangulo medido) e vai para a prancheta, logo depois da caixa de fora
- * onde estava (a ordem das Camadas fica perto da de antes).
+ * onde estava (a ordem das Camadas fica perto da de antes). A posicao do celular (na sequencia) sai: no celular ele
+ * fica solto no mesmo lugar do computador.
  */
 export function freeNodeToFree(design: PopupFreeDesign, id: FreeId, rects: FreeMeasuredRects): PopupFreeDesign | null {
   const found = locate(design, id);
@@ -949,12 +1075,12 @@ export function freeNodeToFree(design: PopupFreeDesign, id: FreeId, rects: FreeM
   const detached = detach(design, id) as NonNullable<ReturnType<typeof detach>>;
   const node = { ...detached.node, place } as FreeNode;
 
-  return insertNode(detached.design, null, found.parent ? rootIndex + 1 : found.index, node);
+  return withoutFreeMobilePlace(insertNode(detached.design, null, found.parent ? rootIndex + 1 : found.index, node), id);
 }
 
 /**
  * "Seguir a sequencia": volta para a prancheta, na posicao da sequencia logo abaixo do topo dele (pela ordem dos
- * retangulos medidos).
+ * retangulos medidos). A posicao solta do celular sai junto.
  */
 export function freeNodeToSequence(design: PopupFreeDesign, id: FreeId, rects: FreeMeasuredRects): PopupFreeDesign | null {
   const found = locate(design, id);
@@ -971,7 +1097,7 @@ export function freeNodeToSequence(design: PopupFreeDesign, id: FreeId, rects: F
     .map(({ index, node }) => ({ index, rect: rects[node.id] }));
   const index = freeSequenceIndexFor(top, flow, detached.design.children.length);
 
-  return insertNode(detached.design, null, index, flowPlaceOf(detached.node));
+  return withoutFreeMobilePlace(insertNode(detached.design, null, index, flowPlaceOf(detached.node)), id);
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -1040,6 +1166,8 @@ export type FreeLayerRow = {
   inBox: boolean;
   label: string;
   locked: boolean;
+  /** Tem valores proprios do celular (a etiqueta "Celular"). */
+  mobile: boolean;
   parentId: FreeId | null;
   selectLabel: string;
   siblings: number;
@@ -1061,6 +1189,7 @@ export function freeLayerRows(design: PopupFreeDesign, cta: NoticeDraft["cta"], 
       index: info.index,
       label: freeLayerLabel(node, cta),
       locked: Boolean(node.locked),
+      mobile: Boolean(Object.keys(freeMobileNodeOf(design, node.id) ?? {}).length),
       parentId: info.parent?.id ?? null,
       selectLabel: layerSelectLabel(node, cta, info.parent),
       siblings: info.parent ? info.parent.children.length : design.children.length,
@@ -1287,8 +1416,8 @@ export function freeNodeIdForKey(design: PopupFreeDesign, key: string): FreeId |
 }
 
 export type FreeReviewItem = {
-  /** "raise" = o botao Aumentar a altura; "font" = Enviar fonte… */
-  action: "font" | "raise" | null;
+  /** "raise" = o botao Aumentar a altura; "font" = Enviar fonte…; "mobile" = Ajustar no Celular (a dica "texto no celular"). */
+  action: "font" | "mobile" | "raise" | null;
   key: string;
   kind: FreeHint["kind"] | "error";
   message: string;
@@ -1322,7 +1451,7 @@ export function freeReviewItems(
       const nodeId = hint.nodeId && locate(design, hint.nodeId) ? hint.nodeId : null;
 
       return {
-        action: hint.kind === "cut" ? ("raise" as const) : hint.kind === "font-device" ? ("font" as const) : null,
+        action: hint.kind === "cut" ? ("raise" as const) : hint.kind === "font-device" ? ("font" as const) : hint.kind === "phone-text" && nodeId ? ("mobile" as const) : null,
         key: hint.key,
         kind: hint.kind,
         message: hint.message,
@@ -1354,8 +1483,12 @@ export function freeFlaggedNodeIds(design: PopupFreeDesign, errors: Readonly<Rec
   return flagged;
 }
 
-/** "Aumentar a altura": a Altura mínima da prancheta vai ate o fim do elemento cortado (retangulo medido). */
-export function raiseFreeArtboardTo(design: PopupFreeDesign, id: FreeId, rects: FreeMeasuredRects): PopupFreeDesign {
+/**
+ * "Aumentar a altura": a Altura mínima da prancheta vai ate o fim do elemento cortado (retangulo medido, no aparelho
+ * do "Ver como"). Com o Celular, compara com a prancheta do celular (a do computador com a do celular por cima) e
+ * grava so a Altura mínima do celular (devices.mobile.artboard.minHeight); o computador fica como estava.
+ */
+export function raiseFreeArtboardTo(design: PopupFreeDesign, id: FreeId, rects: FreeMeasuredRects, device: FreeDevice = "desktop"): PopupFreeDesign {
   const rect = rects[id];
 
   if (!rect) {
@@ -1365,8 +1498,14 @@ export function raiseFreeArtboardTo(design: PopupFreeDesign, id: FreeId, rects: 
   const bottom = Math.ceil(rect.y + rect.h);
   const minHeight = Math.max(L.minHeight.min, Math.min(L.minHeight.max, bottom));
 
-  if (resolveFreeArtboard(design).minHeight >= minHeight) {
+  if (resolveFreeArtboard(resolveFreeForDevice(design, device)).minHeight >= minHeight) {
     return design;
+  }
+
+  if (device === "mobile") {
+    const mobile = design.devices?.mobile ?? {};
+
+    return { ...design, devices: { mobile: { ...mobile, artboard: { ...mobile.artboard, minHeight } } } };
   }
 
   return { ...design, artboard: { ...design.artboard, minHeight } };

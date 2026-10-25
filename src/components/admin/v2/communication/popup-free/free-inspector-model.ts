@@ -12,12 +12,16 @@ import {
   FREE_ARTBOARD_WIDTH_PRESETS,
   FREE_DESIGN_LIMITS,
   findFreeNode,
+  freeDefaultFlowWidth,
+  freeMobileNodeOf,
   freeNodeIdOfKey,
+  isTextBearing,
   nextFreeId,
   rescaleFreeDesign,
   updateFreeNode,
   usedFreeAssetIds,
   walkFreeNodes,
+  withFreeMobileNodes,
   type FreeAsset,
   type FreeBorder,
   type FreeArtboard,
@@ -30,6 +34,7 @@ import {
   type FreeFillPaint,
   type FreeId,
   type FreeLine,
+  type FreeMobileNode,
   type FreeNode,
   type FreeNodeType,
   type FreeShadow,
@@ -40,7 +45,8 @@ import {
   type FreeTextStyle,
   type PopupFreeDesign
 } from "../../../../../server/communications/popup-free-model";
-import { freeTextDefaultsOf, type FreeResolvedTextStyle } from "../../../../../server/communications/popup-free-render";
+import { freeTextDefaultsOf, freeTextStyleOf, resolveFreeArtboard, type FreeResolvedTextStyle } from "../../../../../server/communications/popup-free-render";
+import type { FreeMeasuredRects } from "../../../../../server/communications/popup-free-checks";
 import { POPUP_FREE_MESSAGES } from "../../../../../server/communications/popup-free-schema";
 import { HEX_COLOR_PATTERN, POPUP_BUILTIN_FONTS, type HexColor, type PopupFontOption, type PopupFontRef, type PopupFontWeight, type PopupVideoMimeType } from "../../../../../server/communications/popup-design-model";
 import { rangeMessage, weightAfterFontChange, weightOptionsFor } from "../popup-design/popup-design-editor-model";
@@ -63,7 +69,17 @@ export const FREE_INSPECTOR_COPY = {
     popupHint: "Nada selecionado: aqui fica o pop-up inteiro.",
     remove: "Excluir"
   },
-  tabs: { advanced: "Avançado", content: "Conteúdo", label: "Partes do painel do elemento", style: "Estilo" },
+  tabs: { advanced: "Avançado", content: "Conteúdo", label: "Partes do painel do elemento", mobile: "Celular", style: "Estilo" },
+  /** A aba Celular (docs/27 §13.8, PR L3): so os campos que tem versao do celular, cada um com "Igual ao computador". */
+  mobile: {
+    groups: { box: "Respiro e cantos", content: "Conteúdo", place: "Posição", show: "Mostrar", text: "Texto" },
+    hidden: "Esconder no celular",
+    note: "O que não mudar aqui encolhe como no computador (texto nunca abaixo de 12 px).",
+    popupTitle: "No celular",
+    reset: "Voltar tudo ao do computador",
+    same: "Igual ao computador",
+    sameLabel: (field: string) => `${field}: igual ao computador`
+  },
   busy: "Espere o arquivo terminar de enviar.",
   imageFailed: "Não foi possível enviar a imagem. Tente de novo.",
   text: {
@@ -497,10 +513,25 @@ export function freeRangeMessage(bounds: { max: number; min: number }): string {
  * Abas do painel
  * ---------------------------------------------------------------------------------------------- */
 
-export type FreeInspectorTab = "advanced" | "content" | "popup" | "style";
+export type FreeInspectorTab = "advanced" | "content" | "mobile" | "popup" | "style";
 
-/** A aba escolhida fica ao trocar de elemento do mesmo tipo; outro tipo volta para Conteúdo. */
+/**
+ * O "Ver como" depois de trocar de aba no painel do elemento: entrar na aba Celular liga o Celular (o que se ve e o
+ * que se edita); sair dela, ou trocar entre as outras, mantem o aparelho de agora (a equipe volta pelo "Ver como").
+ */
+export function freeDeviceAfterTabChange(nextTab: FreeInspectorTab, currentTab: FreeInspectorTab, device: "desktop" | "mobile"): "desktop" | "mobile" {
+  return nextTab === "mobile" && currentTab !== "mobile" ? "mobile" : device;
+}
+
+/**
+ * A aba escolhida fica ao trocar de elemento do mesmo tipo; outro tipo volta para Conteúdo. A aba Celular fica com
+ * qualquer elemento (todo tipo tem algo que muda no celular: esconder, posição, respiro e cantos).
+ */
 export function freeTabAfterSelection(current: Exclude<FreeInspectorTab, "popup">, previousType: FreeNodeType | null, nextType: FreeNodeType | null): Exclude<FreeInspectorTab, "popup"> {
+  if (current === "mobile" && nextType !== null) {
+    return "mobile";
+  }
+
   return previousType !== null && previousType === nextType ? current : "content";
 }
 
@@ -1863,8 +1894,9 @@ function firstNodeOf(design: PopupFreeDesign, match: (node: FreeNode) => boolean
 /**
  * Para onde uma chave leva no painel (spec §9.6): a aba e o id do campo (e o elemento, que o painel seleciona se
  * ainda nao estiver). Aceita as chaves dos erros e das dicas, com ou sem "freeDesign.", mais "cta.label",
- * "cta.href" (o Botão principal) e "audio" (o elemento Áudio). null = a chave nao tem campo no painel ("design",
- * "size" ou um elemento que nao existe mais).
+ * "cta.href" (o Botão principal), "audio" (o elemento Áudio) e as do celular ("devices.mobile.nodes.<id>..." levam a
+ * aba Celular; "devices.mobile.artboard..." ao grupo "No celular" do Pop-up). null = a chave nao tem campo no painel
+ * ("design", "size" ou um elemento que nao existe mais).
  */
 export function freeInspectorTargetOf(design: PopupFreeDesign, key: string): FreeInspectorTarget | null {
   const clean = key === "freeDesign" ? "design" : key.startsWith("freeDesign.") ? key.slice("freeDesign.".length) : key;
@@ -1899,6 +1931,9 @@ export function freeInspectorTargetOf(design: PopupFreeDesign, key: string): Fre
 
       return audio ? { fieldId: freeFieldId(audio.id, "audio"), nodeId: audio.id, tab: "content" } : null;
     }
+    case "devices":
+      // Os valores do celular: a aba Celular do elemento, ou o grupo "No celular" do painel Pop-up.
+      return mobileTarget(design, rest);
     default:
       return null;
   }
@@ -2224,4 +2259,331 @@ export function compactFree<T extends Record<string, unknown>>(value: T): T | un
   const out = Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Celular (docs/27 §9.10 e §13.8, PR L3): a aba Celular e o grupo "No celular" do painel Pop-up
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Cada campo que tem versao do celular, pelo caminho dentro da entrada do elemento em devices.mobile.nodes. */
+export type FreeMobileFieldKey =
+  | "box.padding"
+  | "box.radius"
+  | "gap"
+  | "hidden"
+  | "layout.align"
+  | "layout.dir"
+  | "layout.gap"
+  | "layout.justify"
+  | "layout.wrap"
+  | "place.align"
+  | "place.h"
+  | "place.height"
+  | "place.margin"
+  | "place.w"
+  | "place.width"
+  | "place.x"
+  | "place.y"
+  | "size"
+  | "textStyle.align"
+  | "textStyle.letterSpacing"
+  | "textStyle.lineHeight"
+  | "textStyle.size";
+
+export type FreeMobileGroup = keyof typeof FREE_INSPECTOR_COPY.mobile.groups;
+export type FreeMobileField = { group: FreeMobileGroup; key: FreeMobileFieldKey; label: string };
+export type FreeMobileArtboardKey = "gap" | "minHeight" | "padding";
+
+/** O pedaco do id do campo na aba Celular (`livre-<id>-celular-<pedaco>`; o campo do valor ganha "-valor"). */
+const MOBILE_FIELD_SLUGS: Record<FreeMobileFieldKey, string> = {
+  "box.padding": "respiro",
+  "box.radius": "cantos",
+  gap: "espaco-links",
+  hidden: "esconder",
+  "layout.align": "alinhar",
+  "layout.dir": "direcao",
+  "layout.gap": "espaco",
+  "layout.justify": "distribuir",
+  "layout.wrap": "quebrar",
+  "place.align": "alinhar-caixa",
+  "place.h": "altura",
+  "place.height": "altura",
+  "place.margin": "margem",
+  "place.w": "largura",
+  "place.width": "largura",
+  "place.x": "x",
+  "place.y": "y",
+  size: "tamanho",
+  "textStyle.align": "alinhamento",
+  "textStyle.letterSpacing": "espaco-letras",
+  "textStyle.lineHeight": "altura-linha",
+  "textStyle.size": "tamanho-texto"
+};
+
+const MOBILE_ARTBOARD_SLUGS: Record<FreeMobileArtboardKey, string> = { gap: "espaco", minHeight: "altura", padding: "respiro" };
+
+/** O id do campo do celular no painel ("livre-titulo-celular-tamanho-texto"; a prancheta: "livre-popup-celular-respiro"). */
+export function freeMobileFieldId(nodeId: FreeId | null, key: FreeMobileFieldKey | FreeMobileArtboardKey): string {
+  const slug = nodeId === null ? MOBILE_ARTBOARD_SLUGS[key as FreeMobileArtboardKey] : MOBILE_FIELD_SLUGS[key as FreeMobileFieldKey];
+
+  return freeFieldId(nodeId, `celular-${slug}`);
+}
+
+const MOBILE_TEXT_TYPES: readonly FreeNodeType[] = ["badge", "button", "heading", "links", "text"];
+
+/**
+ * Os campos da aba Celular de um elemento, na ordem da tela: Mostrar (todos), Posição (solto: X, Y, Largura e a
+ * Altura quando o computador tem uma, o elemento nao tem texto ou o celular ja tem uma propria, como a das alcas de
+ * cima e de baixo no Ver como Celular; na sequência: Largura, Altura, Alinhar nesta caixa e Margem), Texto (Título,
+ * Texto, Selo, Botão e Links: Tamanho, Altura da linha, Espaço entre letras, Alinhamento), Conteúdo (Espaço e Ícone:
+ * o tamanho; Links: o espaço entre eles; Caixa: a sequência dela) e Respiro e cantos. Cores, textos, pinturas,
+ * sombras, camada e girar nao aparecem: sao os mesmos nos dois. `design` traz a entrada do celular do elemento.
+ */
+export function freeMobileFieldsOf(node: FreeNode, design?: Pick<PopupFreeDesign, "devices">): FreeMobileField[] {
+  const A = FREE_INSPECTOR_COPY.advanced;
+  const S = FREE_INSPECTOR_COPY.style;
+  const B = FREE_INSPECTOR_COPY.box;
+  const fields: FreeMobileField[] = [{ group: "show", key: "hidden", label: FREE_INSPECTOR_COPY.mobile.hidden }];
+
+  if (node.place?.mode === "free") {
+    fields.push({ group: "place", key: "place.x", label: A.x }, { group: "place", key: "place.y", label: A.y }, { group: "place", key: "place.w", label: A.width });
+
+    if (node.place.h !== undefined || !isTextBearing(node.type) || (design !== undefined && readPath(freeMobileNodeOf(design, node.id), "place.h") !== undefined)) {
+      fields.push({ group: "place", key: "place.h", label: A.height });
+    }
+  } else {
+    fields.push(
+      { group: "place", key: "place.width", label: A.width },
+      { group: "place", key: "place.height", label: A.height },
+      { group: "place", key: "place.align", label: A.flowAlign },
+      { group: "place", key: "place.margin", label: A.margin }
+    );
+  }
+
+  if (MOBILE_TEXT_TYPES.includes(node.type)) {
+    fields.push(
+      { group: "text", key: "textStyle.size", label: S.size },
+      { group: "text", key: "textStyle.lineHeight", label: S.lineHeight },
+      { group: "text", key: "textStyle.letterSpacing", label: S.letterSpacing },
+      { group: "text", key: "textStyle.align", label: S.align }
+    );
+  }
+
+  if (node.type === "spacer" || node.type === "icon") {
+    fields.push({ group: "content", key: "size", label: node.type === "icon" ? FREE_INSPECTOR_COPY.icon.size : FREE_INSPECTOR_COPY.spacer.size });
+  }
+
+  if (node.type === "links") {
+    fields.push({ group: "content", key: "gap", label: FREE_INSPECTOR_COPY.links.gap });
+  }
+
+  if (node.type === "box") {
+    fields.push(
+      { group: "content", key: "layout.dir", label: B.dir },
+      { group: "content", key: "layout.gap", label: B.gap },
+      { group: "content", key: "layout.align", label: B.align },
+      { group: "content", key: "layout.justify", label: B.justify },
+      { group: "content", key: "layout.wrap", label: B.wrap }
+    );
+  }
+
+  fields.push({ group: "box", key: "box.padding", label: A.padding }, { group: "box", key: "box.radius", label: FREE_INSPECTOR_COPY.radius.title });
+
+  return fields;
+}
+
+function readPath(value: unknown, key: string): unknown {
+  return key.split(".").reduce<unknown>((current, part) => (current && typeof current === "object" ? (current as Record<string, unknown>)[part] : undefined), value);
+}
+
+/** O alinhamento que o elemento tem na sequencia quando nao escolhe (o da caixa de fora ou o da prancheta). */
+function inheritedFlowAlign(design: PopupFreeDesign, id: FreeId): "center" | "end" | "start" | "stretch" {
+  const found = findFreeNode(design, id);
+
+  if (found?.parent) {
+    return found.parent.layout?.align ?? "stretch";
+  }
+
+  return resolveFreeArtboard(design).align;
+}
+
+/**
+ * O valor do computador de um campo do celular (com o padrao preenchido): o ponto de partida quando a equipe desliga
+ * "Igual ao computador". As alturas automaticas partem do retangulo medido.
+ */
+export function freeMobileDesktopValue(design: PopupFreeDesign, node: FreeNode, key: FreeMobileFieldKey, rects: FreeMeasuredRects = {}): unknown {
+  const measured = rects[node.id];
+  const free = node.place?.mode === "free" ? node.place : null;
+  const flow = node.place?.mode === "flow" ? node.place : null;
+  const layout = node.type === "box" ? (node.layout ?? {}) : {};
+
+  switch (key) {
+    case "hidden":
+      return node.hidden === true;
+    case "place.x":
+      return free?.x ?? 0;
+    case "place.y":
+      return free?.y ?? 0;
+    case "place.w":
+      return free?.w ?? L.w.min;
+    case "place.h":
+      return free?.h ?? clampFree(measured?.h ?? 40, L.h);
+    case "place.width":
+      return flow?.width ?? freeDefaultFlowWidth(node.type);
+    case "place.height":
+      return flow?.height ?? clampFree(measured?.h ?? 80, L.flowHeight);
+    case "place.align":
+      return flow?.align ?? inheritedFlowAlign(design, node.id);
+    case "place.margin":
+      return flow?.margin ?? 0;
+    case "textStyle.size":
+      return freeTextStyleOf(node).size;
+    case "textStyle.lineHeight":
+      return freeTextStyleOf(node).lineHeight;
+    case "textStyle.letterSpacing":
+      return freeTextStyleOf(node).letterSpacing;
+    case "textStyle.align":
+      // O botao sem alinhamento escolhido e desenhado no centro (freeButtonLayoutCss), nao no padrao do texto.
+      return node.type === "button" ? (node.textStyle?.align ?? "center") : freeTextStyleOf(node).align;
+    case "box.padding":
+      return node.box?.padding ?? 0;
+    case "box.radius":
+      return node.box?.radius ?? 0;
+    case "size":
+      return node.type === "spacer" ? (node.size ?? 16) : node.type === "icon" ? (node.size ?? 24) : 0;
+    case "gap":
+      return node.type === "links" ? (node.gap ?? 8) : 0;
+    case "layout.dir":
+      return layout.dir ?? "column";
+    case "layout.gap":
+      return layout.gap ?? 0;
+    case "layout.align":
+      return layout.align ?? "stretch";
+    case "layout.justify":
+      return layout.justify ?? "start";
+    case "layout.wrap":
+      return layout.wrap === true;
+  }
+}
+
+/**
+ * Um campo do celular na tela: `own` = o celular tem o valor proprio ("Igual ao computador" desligada); `value` = o
+ * que o celular usa (o proprio ou o do computador).
+ */
+export function freeMobileFieldValue(design: PopupFreeDesign, node: FreeNode, key: FreeMobileFieldKey, rects: FreeMeasuredRects = {}): { own: boolean; value: unknown } {
+  const own = readPath(freeMobileNodeOf(design, node.id), key);
+
+  return own === undefined ? { own: false, value: freeMobileDesktopValue(design, node, key, rects) } : { own: true, value: own };
+}
+
+/** O elemento tem algo proprio no celular (a etiqueta "Celular" no desenho e nas Camadas). */
+export function freeHasMobileValues(design: Pick<PopupFreeDesign, "devices">, id: FreeId): boolean {
+  const entry = freeMobileNodeOf(design, id);
+
+  return Boolean(entry && Object.keys(entry).length > 0);
+}
+
+/**
+ * Muda um campo do celular de um elemento: um valor grava (a posicao com o MESMO modo do computador), `undefined` volta
+ * a ser "Igual ao computador" (tira o campo; a parte vazia sai e a entrada vazia sai do mapa). Um valor igual ao do
+ * computador fica enquanto o editor esta aberto (a chave continua desligada); a forma canonica tira ao salvar.
+ */
+export function withFreeMobileField(design: PopupFreeDesign, id: FreeId, key: FreeMobileFieldKey, value: unknown): PopupFreeDesign {
+  const found = findFreeNode(design, id);
+
+  if (!found) {
+    return design;
+  }
+
+  const entry: Record<string, unknown> = { ...(freeMobileNodeOf(design, id) ?? {}) };
+  const [head, leaf] = key.split(".") as [string, string | undefined];
+
+  if (leaf === undefined) {
+    if (value === undefined) {
+      delete entry[head];
+    } else {
+      entry[head] = value;
+    }
+  } else {
+    const current = entry[head] && typeof entry[head] === "object" ? (entry[head] as Record<string, unknown>) : {};
+    const { mode: unusedMode, ...inner } = { ...current, [leaf]: value } as Record<string, unknown>;
+    const kept = Object.fromEntries(Object.entries(inner).filter(([, item]) => item !== undefined));
+
+    void unusedMode;
+
+    if (Object.keys(kept).length === 0) {
+      delete entry[head];
+    } else {
+      entry[head] = head === "place" ? { ...kept, mode: found.node.place?.mode === "free" ? "free" : "flow" } : kept;
+    }
+  }
+
+  return withFreeMobileNodes(design, { [id]: Object.keys(entry).length > 0 ? (entry as FreeMobileNode) : undefined });
+}
+
+/** "Voltar tudo ao do computador": a entrada do elemento sai (tudo volta a encolher como no computador). */
+export function withoutFreeMobileValues(design: PopupFreeDesign, id: FreeId): PopupFreeDesign {
+  return withFreeMobileNodes(design, { [id]: undefined });
+}
+
+/** Os campos do grupo "No celular" do painel Pop-up: Respiro interno, Espaço entre os elementos e Altura mínima. */
+export const FREE_MOBILE_ARTBOARD_FIELDS: readonly { key: FreeMobileArtboardKey; label: string }[] = [
+  { key: "padding", label: FREE_INSPECTOR_COPY.popup.padding },
+  { key: "gap", label: FREE_INSPECTOR_COPY.popup.gap },
+  { key: "minHeight", label: FREE_INSPECTOR_COPY.popup.minHeightPx }
+];
+
+export function freeMobileArtboardValue(design: PopupFreeDesign, key: FreeMobileArtboardKey): { own: boolean; value: FreeSides | number } {
+  const own = design.devices?.mobile?.artboard?.[key];
+
+  return own === undefined ? { own: false, value: resolveFreeArtboard(design)[key] } : { own: true, value: own };
+}
+
+/** Muda um campo da prancheta no celular (`undefined` = igual ao computador); sem nada no celular, `devices` sai. */
+export function withFreeMobileArtboardField(design: PopupFreeDesign, key: FreeMobileArtboardKey, value: FreeSides | number | undefined): PopupFreeDesign {
+  const mobile = design.devices?.mobile ?? {};
+  const artboard = patchObject<NonNullable<typeof mobile.artboard>>(mobile.artboard, { [key]: value });
+  const nodes = mobile.nodes && Object.keys(mobile.nodes).length > 0 ? mobile.nodes : undefined;
+  const { devices: unused, ...rest } = design;
+
+  void unused;
+
+  if (!artboard && !nodes) {
+    return rest;
+  }
+
+  return { ...rest, devices: { mobile: { ...(artboard ? { artboard } : {}), ...(nodes ? { nodes } : {}) } } };
+}
+
+/** Para onde leva uma chave do celular ("devices.mobile.nodes.<id>.<caminho>" ou "devices.mobile.artboard.<campo>"). */
+function mobileTarget(design: PopupFreeDesign, rest: readonly string[]): FreeInspectorTarget | null {
+  const [device, part, ...path] = rest;
+
+  if (device !== "mobile") {
+    return null;
+  }
+
+  if (part === "artboard") {
+    const field = FREE_MOBILE_ARTBOARD_FIELDS.find((item) => item.key === path[0])?.key ?? "padding";
+
+    return { fieldId: freeMobileFieldId(null, field), nodeId: null, tab: "popup" };
+  }
+
+  const [id, head, leaf] = path;
+  const found = part === "nodes" && id ? findFreeNode(design, id) : null;
+
+  if (!found) {
+    return null;
+  }
+
+  const fields = freeMobileFieldsOf(found.node, design);
+  const wanted = head && leaf && leaf !== "mode" ? `${head}.${leaf}` : head;
+  const field = fields.find((item) => item.key === wanted) ?? fields.find((item) => head !== undefined && item.key.startsWith(`${head}.`)) ?? fields[0];
+
+  return { fieldId: freeMobileFieldId(found.node.id, field.key), nodeId: found.node.id, tab: "mobile" };
+}
+
+/** A chave do tamanho do texto no celular: o "Ajustar no Celular" da dica "texto no celular" abre a aba nele. */
+export function freeMobileTextSizeKey(id: FreeId): string {
+  return `devices.mobile.nodes.${id}.textStyle.size`;
 }

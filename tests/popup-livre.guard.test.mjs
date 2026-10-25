@@ -123,7 +123,7 @@ const STUDENT_ENTRIES = ["member-popup.tsx", "member-popup-dialog.tsx", "member-
 test("cartão Livre, member-popup e diálogo sem dangerouslySetInnerHTML, innerHTML, cssText, <style> nem style em texto", () => {
   assert.deepEqual(
     FREE_FILES.map((url) => url.pathname.split("/").pop()).sort(),
-    ["popup-free-card.tsx", "popup-free-icons.tsx", "popup-free-load.ts", "popup-free-media.tsx", "popup-free-nodes.tsx", "popup-free-styles.ts"],
+    ["popup-free-card.tsx", "popup-free-device.ts", "popup-free-icons.tsx", "popup-free-load.ts", "popup-free-media.tsx", "popup-free-nodes.tsx", "popup-free-styles.ts"],
     "os arquivos do cartao Livre (spec §3.1)"
   );
 
@@ -182,6 +182,12 @@ test("member-popup e o diálogo só chegam ao cartão Livre por import() (popup-
   // A janela fica leve: nem popup-free-render.ts entra nela (a aria do Livre vem do pedaco ja baixado).
   const dialogFiles = staticGraph(new URL("member-popup-dialog.tsx", MEMBER_NOTIFICATIONS)).files;
   assert.equal(dialogFiles.some((file) => file.endsWith("popup-free-render.ts")), false, "popup-free-render.ts so no pedaco do cartao Livre");
+  // Do Livre, a janela so leva a porta do pedaco e o aparelho da tela (minusculo, sem imports), que ouve junto com o cartao.
+  assert.deepEqual(
+    dialogFiles.filter((file) => file.includes("popup-free")).map((file) => file.split("/").pop()).sort(),
+    ["popup-free-device.ts", "popup-free-load.ts"]
+  );
+  assert.deepEqual(importsOf(read(new URL("popup-free-device.ts", FREE_DIR))), { dynamics: [], statics: [] }, "o aparelho da tela nao importa nada");
   const hostFiles = staticGraph(new URL("member-popup-host.tsx", MEMBER_NOTIFICATIONS)).files;
   assert.equal(hostFiles.some((file) => file.includes("popup-free")), false, "o host (JS inicial) chega ao Livre so pela janela, por import()");
 

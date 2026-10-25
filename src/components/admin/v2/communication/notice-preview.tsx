@@ -52,7 +52,7 @@ import {
 // quando cabe, um embaixo do outro na coluna estreita), os dois pelo MemberPopupCard (que desenha o
 // PopupDesignCard do aluno) com as fontes enviadas (`fonts`: a biblioteca no editor, as do design no relatorio).
 // Livre (docs/27): igual, pelo PopupFreeCard (o pedaco proprio do MemberPopupCard), com o computador do tamanho da
-// largura escolhida.
+// largura escolhida. Cada tela passa o seu aparelho (`device`): a de 375 px desenha os valores do celular (§2.1).
 // O computador tem 600 px: o cartao G (520 px) cabe no tamanho real.
 // Modelos (docs/28 §1.7): a escolha Computador | Celular (PreviewDeviceChoice) mora aqui, a mesma no editor do aviso e
 // na pagina do modelo de Design, e some quando a previa ja mostra os dois (previewHasDeviceChoice).
@@ -272,7 +272,7 @@ export function NoticePreview({ anchorExpiresAt, branding, className, device, dr
           <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" />
           <div className="relative w-full">
             <div className="flex justify-center">
-              <MemberPopupCard popup={popup} preview />
+              <MemberPopupCard device={target} popup={popup} preview />
             </div>
           </div>
         </div>
@@ -300,7 +300,7 @@ export function NoticePreview({ anchorExpiresAt, branding, className, device, dr
         <div className="relative grid place-items-center p-4" style={{ minHeight: STAGES[device].minHeight }}>
           <div aria-hidden="true" className="absolute inset-0 bg-black/70 backdrop-blur-[2px]" />
           <div className="relative">
-            <MemberPopupCard popup={draftToPopupItem({ ...draft, allowSnooze: draft.allowSnooze ?? true }, { imageUrl })} preview />
+            <MemberPopupCard device={device} popup={draftToPopupItem({ ...draft, allowSnooze: draft.allowSnooze ?? true }, { imageUrl })} preview />
           </div>
         </div>
       </PreviewStage>

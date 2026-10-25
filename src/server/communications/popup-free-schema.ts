@@ -68,6 +68,7 @@ export const POPUP_FREE_MESSAGES = {
   lineEmpty: "Escreva algo nesta linha.",
   linkButtons: "Use um botão “Abrir um link” só.",
   links: "Falta o elemento dos links (Lembrar depois e Não mostrar de novo).",
+  mobilePlace: "No celular, o elemento fica como no computador: solto continua solto e na sequência continua na sequência.",
   linksDuplicate: "O design só pode ter um elemento dos links.",
   nodeType: "Escolha o tipo do elemento.",
   nodes: `Use até ${L.nodes} elementos.`,
@@ -165,6 +166,7 @@ const box = strict({
   shadows: shadows.optional()
 });
 const alignSchema = z.enum(["center", "end", "start", "stretch"], { error: "Escolha o alinhamento." });
+const flowWidth = z.union([z.literal("fill"), z.literal("hug"), intIn(L.flowWidth)], { error: `Use de ${L.flowWidth.min} a ${L.flowWidth.max}.` });
 const place = z.discriminatedUnion(
   "mode",
   [
@@ -173,7 +175,7 @@ const place = z.discriminatedUnion(
       height: intIn(L.flowHeight).optional(),
       margin: sidesOf(L.margin).optional(),
       mode: z.literal("flow"),
-      width: z.union([z.literal("fill"), z.literal("hug"), intIn(L.flowWidth)], { error: `Use de ${L.flowWidth.min} a ${L.flowWidth.max}.` }).optional(),
+      width: flowWidth.optional(),
       z: intIn(L.z).optional()
     }),
     strict({
@@ -228,19 +230,20 @@ const buttonAction = z.discriminatedUnion(
   { error: M.buttonAction }
 );
 
+const boxLayout = strict({
+  align: alignSchema.optional(),
+  dir: z.enum(["column", "row"], { error: "Escolha a direção." }).optional(),
+  gap: intIn(L.gap).optional(),
+  justify: z.enum(["around", "between", "center", "end", "start"], { error: "Escolha como distribuir." }).optional(),
+  wrap: bool.optional()
+});
+
 const boxNode = strict({
   ...common,
   get children() {
     return z.array(freeNodeSchema, { error: M.design }).max(L.childrenPerBox, M.childrenPerBox);
   },
-  layout: strict({
-      align: alignSchema.optional(),
-      dir: z.enum(["column", "row"], { error: "Escolha a direção." }).optional(),
-      gap: intIn(L.gap).optional(),
-      justify: z.enum(["around", "between", "center", "end", "start"], { error: "Escolha como distribuir." }).optional(),
-      wrap: bool.optional()
-    })
-    .optional(),
+  layout: boxLayout.optional(),
   type: z.literal("box")
 });
 
@@ -293,6 +296,35 @@ const asset = z.discriminatedUnion(
   { error: M.design }
 );
 
+/*
+ * Celular (docs/27 §9.10): por elemento, so os campos que tem versao do celular, com os limites do computador. A
+ * posicao tem o modo do computador (conferido nas regras entre partes) e nunca camada nem girar; `size` com o limite
+ * do Espaço (o do Ícone e o tipo de cada campo sao conferidos nas regras entre partes, que sabem o tipo).
+ */
+const mobilePlace = z.discriminatedUnion(
+  "mode",
+  [
+    strict({ align: alignSchema.optional(), height: intIn(L.flowHeight).optional(), margin: sidesOf(L.margin).optional(), mode: z.literal("flow"), width: flowWidth.optional() }),
+    strict({ h: intIn(L.h).optional(), mode: z.literal("free"), w: intIn(L.w).optional(), x: intIn(L.x).optional(), y: intIn(L.y).optional() })
+  ],
+  { error: M.place }
+);
+const mobileNode = strict({
+  box: strict({ padding: sidesOf(L.padding).optional(), radius: radius.optional() }).optional(),
+  gap: intIn(L.gap).optional(),
+  hidden: bool.optional(),
+  layout: boxLayout.optional(),
+  place: mobilePlace.optional(),
+  size: intIn(L.spacer).optional(),
+  textStyle: textStyle.pick({ align: true, letterSpacing: true, lineHeight: true, size: true }).optional()
+});
+const devices = strict({
+  mobile: strict({
+    artboard: strict({ gap: intIn(L.gap).optional(), minHeight: intIn(L.minHeight).optional(), padding: sidesOf(L.padding).optional() }).optional(),
+    nodes: z.record(id, mobileNode, { error: M.design }).optional()
+  }).optional()
+});
+
 const designObject = strict(
   {
     artboard: strict({
@@ -319,6 +351,7 @@ const designObject = strict(
         size: z.union([z.literal(28), z.literal(36), z.literal(44)], { error: "Escolha o tamanho do X." }).optional()
       })
       .optional(),
+    devices: devices.optional(),
     // Derivado (a forma canonica recalcula); so confere o formato.
     fonts: z.array(z.uuid({ error: M.font }), { error: M.font }).max(L.nodes, M.font).optional(),
     mode: z.literal("free", { error: M.design }),
@@ -340,6 +373,7 @@ function textLength(value: string) {
 function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.RefinementCtx) {
   const issue = (message: string, path: Path) => context.addIssue({ code: "custom", message, path });
   const nodeIds = new Set<FreeId>();
+  const byId = new Map<FreeId, FreeNode>();
   const assets = design.assets ?? [];
   const assetKinds = new Map<FreeId, FreeAsset["kind"]>();
   const counts = { audio: 0, buttons: 0, cta: 0, effects: 0, free: 0, headings: 0, icons: 0, imageNodes: 0, linkButtons: 0, links: 0, nodes: 0, text: 0, videos: 0 };
@@ -399,6 +433,7 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
       }
 
       nodeIds.add(node.id);
+      byId.set(node.id, node);
 
       if (node.place?.mode === "free") {
         if (depth > 1) {
@@ -507,6 +542,8 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
     issue(M.links, ["children"]);
   }
 
+  addMobileIssues(design, byId, issue);
+
   // Arquivos: capa do video e uma imagem do design; contagem pelos arquivos usados (a forma canonica tira os outros).
   const used = usedFreeAssetIds(design);
   let images = 0;
@@ -540,6 +577,61 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
 
   if (jsonbBytesUpperBound(canonicalPopupFreeDesign(design)) > L.jsonbBytes) {
     issue(M.size, ["size"]);
+  }
+}
+
+const MOBILE_TEXT_TYPES = new Set<FreeNode["type"]>(["badge", "button", "heading", "links", "text"]);
+
+/**
+ * Celular: ate 32 entradas; a posicao no modo do computador (sem `place` = na sequencia); `textStyle` so em
+ * elemento com texto, `size` so no Espaço (0 a 400) e no Ícone (8 a 160), `gap` so nos Links e `layout` so na Caixa.
+ * Ids que nao existem passam e a forma canonica tira (um colar com um elemento a menos nao vira erro). Chaves pelo
+ * id ("devices.mobile.nodes.titulo.place.x"), sem indice.
+ */
+function addMobileIssues(design: PopupFreeDesignInput, byId: ReadonlyMap<FreeId, FreeNode>, issue: (message: string, path: Path) => void) {
+  const nodes = design.devices?.mobile?.nodes ?? {};
+  const entries = Object.entries(nodes);
+
+  if (entries.length > L.nodes) {
+    issue(M.nodes, ["devices", "mobile", "nodes"]);
+  }
+
+  for (const [nodeId, entry] of entries) {
+    const node = byId.get(nodeId);
+
+    if (!node) {
+      continue;
+    }
+
+    const at: Path = ["devices", "mobile", "nodes", nodeId];
+
+    if (entry.place && entry.place.mode !== (node.place?.mode ?? "flow")) {
+      issue(M.mobilePlace, [...at, "place", "mode"]);
+    }
+
+    if (entry.textStyle && !MOBILE_TEXT_TYPES.has(node.type)) {
+      issue(M.design, [...at, "textStyle"]);
+    }
+
+    if (entry.size !== undefined) {
+      if (node.type === "icon") {
+        const checked = intIn(L.iconSize).safeParse(entry.size);
+
+        if (!checked.success) {
+          issue(checked.error.issues[0]?.message ?? M.range, [...at, "size"]);
+        }
+      } else if (node.type !== "spacer") {
+        issue(M.design, [...at, "size"]);
+      }
+    }
+
+    if (entry.gap !== undefined && node.type !== "links") {
+      issue(M.design, [...at, "gap"]);
+    }
+
+    if (entry.layout && node.type !== "box") {
+      issue(M.design, [...at, "layout"]);
+    }
   }
 }
 

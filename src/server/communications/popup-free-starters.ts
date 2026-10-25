@@ -25,6 +25,7 @@ import {
   freeCloseVisibilityProblem,
   freeNodeCount,
   nextFreeId,
+  withFreeMobileNodes,
   type FreeAbsolutePlace,
   type FreeAsset,
   type FreeBox,
@@ -163,6 +164,21 @@ function withoutType(nodes: readonly FreeNode[], match: (node: FreeNode) => bool
   return nodes.filter((node) => !match(node)).map((node) => (node.type === "box" ? { ...node, children: withoutType(node.children, match) } : node));
 }
 
+/** Os ids dos elementos do tipo (dentro das caixas tambem). */
+function idsOfType(nodes: readonly FreeNode[], match: (node: FreeNode) => boolean, into: FreeId[] = []): FreeId[] {
+  for (const node of nodes) {
+    if (match(node)) {
+      into.push(node.id);
+    }
+
+    if (node.type === "box") {
+      idsOfType(node.children, match, into);
+    }
+  }
+
+  return into;
+}
+
 /** Posicao na prancheta: antes do primeiro botao; sem botao, antes dos Links; sem nenhum, no fim. */
 function insertBeforeButtons(nodes: readonly FreeNode[], node: FreeNode, includeButtons: boolean): FreeNode[] {
   const firstButton = includeButtons ? nodes.findIndex((item) => item.type === "button") : -1;
@@ -178,26 +194,42 @@ const isCta = (node: FreeNode) => node.type === "button" && node.action.kind ===
 /**
  * Deixa o design coerente com o conteudo do aviso: com audio, o Áudio existe (antes do primeiro botao da
  * prancheta, se faltava); sem audio, sai. Com botao, o Botão principal existe (antes dos Links, se faltava); sem
- * botao, sai. Devolve o mesmo objeto quando nada muda.
+ * botao, sai. O que sai ou entra leva junto a entrada do celular (devices.mobile.nodes). Devolve o mesmo objeto
+ * quando nada muda.
  */
 export function syncFreeDesignWithContent(design: PopupFreeDesign, content: { hasAudio: boolean; hasCta: boolean }): PopupFreeDesign {
   let children = design.children;
   const hasAudioNode = containsType(children, isAudio);
   const hasCtaNode = containsType(children, isCta);
+  // Ids que saem ou entram: a entrada do celular de cada um sai junto (o id volta igual, "audio" ou "principal", e
+  // uma entrada velha grudaria no elemento novo).
+  const touched: FreeId[] = [];
 
   if (!content.hasAudio && hasAudioNode) {
+    touched.push(...idsOfType(children, isAudio));
     children = withoutType(children, isAudio);
   } else if (content.hasAudio && !hasAudioNode && freeNodeCount({ children }) < FREE_DESIGN_LIMITS.nodes) {
-    children = insertBeforeButtons(children, newFreeNode("audio", nextFreeId({ ...design, children }, "audio")), true);
+    const id = nextFreeId({ ...design, children }, "audio");
+
+    touched.push(id);
+    children = insertBeforeButtons(children, newFreeNode("audio", id), true);
   }
 
   if (!content.hasCta && hasCtaNode) {
+    touched.push(...idsOfType(children, isCta));
     children = withoutType(children, isCta);
   } else if (content.hasCta && !hasCtaNode && freeNodeCount({ children }) < FREE_DESIGN_LIMITS.nodes) {
-    children = insertBeforeButtons(children, newFreeNode("cta", nextFreeId({ ...design, children }, "principal")), false);
+    const id = nextFreeId({ ...design, children }, "principal");
+
+    touched.push(id);
+    children = insertBeforeButtons(children, newFreeNode("cta", id), false);
   }
 
-  return children === design.children ? design : { ...design, children };
+  if (children === design.children) {
+    return design;
+  }
+
+  return withFreeMobileNodes({ ...design, children }, Object.fromEntries(touched.map((id) => [id, undefined])));
 }
 
 /* ------------------------------------------------------------------------------------------------

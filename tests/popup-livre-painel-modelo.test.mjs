@@ -18,6 +18,8 @@ const popupEditor = await import("../src/components/admin/v2/communication/popup
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { FreeInspectorContent } = await import("../src/components/admin/v2/communication/popup-free/free-inspector-content.tsx");
+const { FreeInspectorMobile } = await import("../src/components/admin/v2/communication/popup-free/free-inspector-mobile.tsx");
+const { FreeArtboardSettings } = await import("../src/components/admin/v2/communication/popup-free/free-artboard-settings.tsx");
 
 const C = panel.FREE_INSPECTOR_COPY;
 const M = schema.POPUP_FREE_MESSAGES;
@@ -817,6 +819,7 @@ const UI_FILES = [
   "free-inspector-content.tsx",
   "free-inspector-style.tsx",
   "free-inspector-advanced.tsx",
+  "free-inspector-mobile.tsx",
   "free-artboard-settings.tsx",
   "free-fields.tsx",
   "free-assets.ts"
@@ -848,6 +851,259 @@ test("Links › Conteúdo: a chave do Lembrar depois no aviso; na página do mod
 
   // Sem a chave (o aviso comum e o modo modelo de Pop-up nao passam nada), o padrao e a chave.
   assert.match(render(undefined), /id="livre-links-lembrar"/);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Aba Celular (docs/27 §9.10 e §13.8, PR L3)
+ * ---------------------------------------------------------------------------------------------- */
+
+const SELO = { id: "selo", label: "Novidade", place: { mode: "free", w: 116, x: 300, y: 16 }, type: "badge" };
+const TITULO = { id: "titulo", lines: [[{ text: "Aula nova" }]], textStyle: { size: 40 }, type: "heading" };
+const FORMA = { box: { fill: [{ color: "#ffffff26", kind: "solid" }] }, id: "forma", place: { h: 100, mode: "free", w: 100, x: 40, y: 40 }, type: "shape" };
+
+test("aba Celular: só os campos que têm versão do celular, por tipo (nunca cor, camada ou girar)", () => {
+  const keys = (node) => panel.freeMobileFieldsOf(node).map((field) => field.key);
+
+  assert.deepEqual(keys(SELO), ["hidden", "place.x", "place.y", "place.w", "textStyle.size", "textStyle.lineHeight", "textStyle.letterSpacing", "textStyle.align", "box.padding", "box.radius"]);
+  assert.deepEqual(keys(TITULO), ["hidden", "place.width", "place.height", "place.align", "place.margin", "textStyle.size", "textStyle.lineHeight", "textStyle.letterSpacing", "textStyle.align", "box.padding", "box.radius"]);
+  assert.deepEqual(keys(FORMA), ["hidden", "place.x", "place.y", "place.w", "place.h", "box.padding", "box.radius"], "sem texto, a altura aparece");
+  assert.deepEqual(keys({ id: "espaco", type: "spacer" }).filter((key) => !key.startsWith("place.")), ["hidden", "size", "box.padding", "box.radius"]);
+  assert.ok(keys({ icon: "star", id: "icone", type: "icon" }).includes("size"));
+  assert.ok(keys(LINKS).includes("gap") && keys(LINKS).includes("textStyle.size"));
+  assert.deepEqual(keys({ children: [], id: "caixa", type: "box" }).filter((key) => key.startsWith("layout.")), ["layout.dir", "layout.gap", "layout.align", "layout.justify", "layout.wrap"]);
+
+  for (const node of [SELO, TITULO, FORMA, LINKS, { children: [], id: "caixa", type: "box" }]) {
+    for (const key of keys(node)) {
+      assert.equal(/color|paint|fill|shadow|z$|rotate|font|weight/i.test(key), false, `${node.type}: ${key}`);
+    }
+  }
+
+  // Os rotulos sao os dos outros paineis (o mesmo nome do mesmo campo).
+  const labels = Object.fromEntries(panel.freeMobileFieldsOf(TITULO).map((field) => [field.key, field.label]));
+  assert.equal(labels["textStyle.size"], C.style.size);
+  assert.equal(labels["place.margin"], C.advanced.margin);
+  assert.equal(labels.hidden, "Esconder no celular");
+});
+
+test("aba Celular: Igual ao computador ligada mostra o do computador; desligada grava o próprio, começando dele", () => {
+  const base = design([SELO, TITULO, FORMA, LINKS]);
+  const node = (value, id) => model.findFreeNode(value, id).node;
+
+  // Ligada (padrao): sem valor proprio, o celular usa o do computador (com o padrao do tipo preenchido).
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "titulo"), "textStyle.size"), { own: false, value: 40 });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "titulo"), "textStyle.align"), { own: false, value: render.freeTextStyleOf(TITULO).align });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "selo"), "place.x"), { own: false, value: 300 });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "titulo"), "place.width"), { own: false, value: "fill" });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "titulo"), "place.height", { titulo: { h: 52.4, w: 392, x: 24, y: 24 } }), { own: false, value: 52 });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "forma"), "hidden"), { own: false, value: false });
+
+  // Desligar: o valor proprio comeca do computador (a chave fica desligada enquanto o editor esta aberto).
+  const off = panel.withFreeMobileField(base, "titulo", "textStyle.size", panel.freeMobileDesktopValue(base, node(base, "titulo"), "textStyle.size"));
+  assert.deepEqual(panel.freeMobileFieldValue(off, node(off, "titulo"), "textStyle.size"), { own: true, value: 40 });
+  assert.ok(schema.popupFreeDesignSchema.safeParse(off).success);
+  assert.equal(model.canonicalPopupFreeDesign(off).devices, undefined, "igual ao computador: a forma canônica tira ao salvar");
+
+  // Mudar o valor: so o celular muda; o computador fica.
+  const smaller = panel.withFreeMobileField(off, "titulo", "textStyle.size", 28);
+  assert.equal(node(smaller, "titulo").textStyle.size, 40);
+  assert.deepEqual(model.canonicalPopupFreeDesign(smaller).devices, { mobile: { nodes: { titulo: { textStyle: { size: 28 } } } } });
+  assert.equal(model.resolveFreeForDevice(smaller, "mobile").children[1].textStyle.size, 28);
+
+  // A posicao entra com o modo do computador: na sequencia continua na sequencia; solto continua solto.
+  const flow = panel.withFreeMobileField(smaller, "titulo", "place.margin", [8, 0]);
+  assert.deepEqual(model.freeMobileNodeOf(flow, "titulo").place, { margin: [8, 0], mode: "flow" });
+  const free = panel.withFreeMobileField(flow, "selo", "place.x", 24);
+  assert.deepEqual(model.freeMobileNodeOf(free, "selo"), { place: { mode: "free", x: 24 } });
+  assert.ok(schema.popupFreeDesignSchema.safeParse(free).success);
+
+  // Esconder so no celular (o computador continua mostrando).
+  const hidden = panel.withFreeMobileField(free, "forma", "hidden", true);
+  assert.equal(node(hidden, "forma").hidden, undefined);
+  assert.equal(model.resolveFreeForDevice(hidden, "mobile").children[2].hidden, true);
+  assert.equal(model.canonicalPopupFreeDesign(hidden).devices.mobile.nodes.forma.hidden, true);
+
+  // Ligar de novo: o campo sai; a parte vazia e a entrada vazia saem junto.
+  const back = panel.withFreeMobileField(hidden, "selo", "place.x", undefined);
+  assert.equal(model.freeMobileNodeOf(back, "selo"), undefined);
+  const onlySize = panel.withFreeMobileField(panel.withFreeMobileField(back, "titulo", "place.margin", undefined), "titulo", "textStyle.size", undefined);
+  assert.equal(model.freeMobileNodeOf(onlySize, "titulo"), undefined);
+  assert.equal(panel.freeHasMobileValues(onlySize, "forma"), true);
+  assert.equal(panel.freeHasMobileValues(onlySize, "titulo"), false);
+  assert.equal(panel.withFreeMobileField(base, "sumiu", "hidden", true), base, "elemento que nao existe: nada muda");
+});
+
+test("aba Celular: Voltar tudo ao do computador e o grupo No celular do Pop-up", () => {
+  const base = design([SELO, TITULO, LINKS], {
+    artboard: { padding: 32 },
+    devices: { mobile: { artboard: { gap: 8 }, nodes: { selo: { place: { mode: "free", x: 24 }, textStyle: { size: 14 } }, titulo: { textStyle: { size: 28 } } } } }
+  });
+
+  const reset = panel.withoutFreeMobileValues(base, "selo");
+  assert.equal(model.freeMobileNodeOf(reset, "selo"), undefined);
+  assert.deepEqual(model.freeMobileNodeOf(reset, "titulo"), { textStyle: { size: 28 } }, "os outros elementos ficam");
+  assert.equal(panel.withoutFreeMobileValues(panel.withoutFreeMobileValues(reset, "titulo"), "titulo").devices.mobile.artboard.gap, 8);
+
+  // A prancheta no celular: Respiro interno, Espaço entre os elementos e Altura mínima.
+  assert.deepEqual(panel.FREE_MOBILE_ARTBOARD_FIELDS.map((field) => field.key), ["padding", "gap", "minHeight"]);
+  assert.deepEqual(panel.freeMobileArtboardValue(base, "padding"), { own: false, value: 32 });
+  assert.deepEqual(panel.freeMobileArtboardValue(base, "gap"), { own: true, value: 8 });
+  assert.deepEqual(panel.freeMobileArtboardValue(base, "minHeight"), { own: false, value: 0 });
+  const padded = panel.withFreeMobileArtboardField(base, "padding", 16);
+  assert.deepEqual(padded.devices.mobile.artboard, { gap: 8, padding: 16 });
+  assert.equal(padded.artboard.padding, 32, "o computador fica");
+  assert.equal(model.resolveFreeForDevice(padded, "mobile").artboard.padding, 16);
+  assert.ok(schema.popupFreeDesignSchema.safeParse(padded).success);
+
+  // Tudo igual de novo: devices sai do design.
+  const empty = panel.withFreeMobileArtboardField(panel.withFreeMobileArtboardField(panel.withoutFreeMobileValues(reset, "titulo"), "gap", undefined), "padding", undefined);
+  assert.equal("devices" in empty, false);
+});
+
+test("aba Celular: a chave de erro do celular leva à aba Celular e ao campo; a da prancheta, ao No celular", () => {
+  const value = design([SELO, TITULO, FORMA, LINKS]);
+  const target = (key) => panel.freeInspectorTargetOf(value, key);
+
+  assert.deepEqual(target("freeDesign.devices.mobile.nodes.titulo.textStyle.size"), { fieldId: "livre-titulo-celular-tamanho-texto", nodeId: "titulo", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.selo.place.x"), { fieldId: "livre-selo-celular-x", nodeId: "selo", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.selo.place.mode"), { fieldId: "livre-selo-celular-x", nodeId: "selo", tab: "mobile" }, "o modo: o primeiro campo da posição");
+  assert.deepEqual(target("devices.mobile.nodes.titulo.place.margin"), { fieldId: "livre-titulo-celular-margem", nodeId: "titulo", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.forma.box.radius"), { fieldId: "livre-forma-celular-cantos", nodeId: "forma", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.forma.hidden"), { fieldId: "livre-forma-celular-esconder", nodeId: "forma", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.forma.textStyle"), { fieldId: "livre-forma-celular-esconder", nodeId: "forma", tab: "mobile" }, "campo de outro tipo: a aba Celular do elemento");
+  assert.deepEqual(target("devices.mobile.nodes.titulo"), { fieldId: "livre-titulo-celular-esconder", nodeId: "titulo", tab: "mobile" });
+  assert.deepEqual(target("freeDesign.devices.mobile.artboard.padding"), { fieldId: "livre-popup-celular-respiro", nodeId: null, tab: "popup" });
+  assert.deepEqual(target("devices.mobile.artboard.minHeight"), { fieldId: "livre-popup-celular-altura", nodeId: null, tab: "popup" });
+  assert.equal(target("devices.mobile.nodes.sumiu.place.x"), null);
+  assert.equal(target("devices.mobile.nodes"), null);
+  // "Ajustar no Celular" (dica "texto no celular") pede o tamanho do texto do celular.
+  assert.deepEqual(panel.freeFocusTargetOf(value, { key: panel.freeMobileTextSizeKey("titulo") }), { fieldId: "livre-titulo-celular-tamanho-texto", nodeId: "titulo", tab: "mobile" });
+  // O elemento do erro do celular (o aviso nas Camadas e o nome no Revisar), pelo id.
+  assert.equal(model.freeNodeIdOfKey("devices.mobile.nodes.selo.place.x"), "selo");
+
+  // A aba Celular fica com qualquer elemento; sem elemento, volta ao Conteúdo.
+  assert.equal(panel.freeTabAfterSelection("mobile", "heading", "image"), "mobile");
+  assert.equal(panel.freeTabAfterSelection("mobile", "heading", "heading"), "mobile");
+  assert.equal(panel.freeTabAfterSelection("mobile", "heading", null), "content");
+});
+
+test("aba Celular: a altura própria do celular de um texto solto sem altura no computador aparece em Altura (e sai com Igual ao computador)", async () => {
+  const editorModel = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
+  const solto = { id: "titulo", lines: [[{ text: "Aula nova" }]], place: { mode: "free", w: 300, x: 20, y: 20 }, type: "heading" };
+  const base = design([solto, LINKS]);
+  const keys = (value) => panel.freeMobileFieldsOf(model.findFreeNode(value, "titulo").node, value).map((field) => field.key);
+
+  // Sem altura no computador e sem altura no celular: o texto cresce sozinho, sem o campo Altura.
+  assert.equal(keys(base).includes("place.h"), false);
+
+  // As alcas de cima e de baixo no Ver como Celular gravam a altura so no celular: o campo Altura aparece.
+  const alto = editorModel.setFreeNodeRect(base, "titulo", { h: 90, w: 300, x: 20, y: 20 }, "mobile");
+  assert.deepEqual(model.freeMobileNodeOf(alto, "titulo"), { place: { h: 90, mode: "free" } });
+  assert.equal(model.findFreeNode(alto, "titulo").node.place.h, undefined, "o computador fica sem altura");
+  assert.deepEqual(keys(alto), ["hidden", "place.x", "place.y", "place.w", "place.h", "textStyle.size", "textStyle.lineHeight", "textStyle.letterSpacing", "textStyle.align", "box.padding", "box.radius"]);
+  assert.deepEqual(panel.freeMobileFieldValue(alto, model.findFreeNode(alto, "titulo").node, "place.h"), { own: true, value: 90 });
+  // O Revisar com a chave da altura do celular cai no campo Altura (e nao no primeiro da posicao).
+  assert.deepEqual(panel.freeInspectorTargetOf(alto, "devices.mobile.nodes.titulo.place.h"), { fieldId: "livre-titulo-celular-altura", nodeId: "titulo", tab: "mobile" });
+
+  // "Igual ao computador" de novo: a altura sai do celular e o campo some.
+  const igual = panel.withFreeMobileField(alto, "titulo", "place.h", undefined);
+  assert.equal(model.freeMobileNodeOf(igual, "titulo"), undefined);
+  assert.equal(keys(igual).includes("place.h"), false);
+});
+
+test("aba Celular: o alinhamento do botão sem escolha é o centro desenhado, e o Esquerda do celular fica ao salvar", async () => {
+  const styles = await import("../src/components/member/notifications/popup-free/popup-free-styles.ts");
+  const botao = { action: { kind: "close" }, id: "botao", label: "Fechar", type: "button" };
+  const base = design([botao, LINKS]);
+  const node = model.findFreeNode(base, "botao").node;
+
+  // O computador desenha o botao sem alinhamento escolhido no centro: e o valor do computador da aba Celular.
+  assert.equal(styles.freeButtonLayoutCss(node).justifyContent, "center");
+  assert.equal(panel.freeMobileDesktopValue(base, node, "textStyle.align"), "center");
+  assert.deepEqual(panel.freeMobileFieldValue(base, node, "textStyle.align"), { own: false, value: "center" });
+
+  // Esquerda so no celular: a forma canonica guarda (nao e igual ao computador) e o celular desenha no inicio.
+  const esquerda = design([botao, LINKS], { devices: { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } } });
+  assert.deepEqual(esquerda.devices, { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } });
+  assert.ok(schema.popupFreeDesignSchema.safeParse(esquerda).success);
+  const noCelular = model.findFreeNode(render.resolveFreeForDevice(esquerda, "mobile"), "botao").node;
+  assert.equal(styles.freeButtonLayoutCss(noCelular).justifyContent, "flex-start");
+  assert.equal(styles.freeButtonLayoutCss(model.findFreeNode(esquerda, "botao").node).justifyContent, "center", "o computador continua no centro");
+
+  // Centro no celular e igual ao desenhado no computador: sai ao salvar. Com Direita no computador, o Esquerda fica.
+  assert.equal(design([botao, LINKS], { devices: { mobile: { nodes: { botao: { textStyle: { align: "center" } } } } } }).devices, undefined);
+  const direita = design([{ ...botao, textStyle: { align: "right" } }, LINKS], { devices: { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } } });
+  assert.deepEqual(direita.devices, { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } });
+  assert.equal(panel.freeMobileDesktopValue(direita, model.findFreeNode(direita, "botao").node, "textStyle.align"), "right");
+});
+
+test("aba Celular: entrar nela liga o Ver como Celular; sair dela mantém o aparelho", () => {
+  assert.equal(panel.freeDeviceAfterTabChange("mobile", "content", "desktop"), "mobile");
+  assert.equal(panel.freeDeviceAfterTabChange("mobile", "advanced", "mobile"), "mobile");
+  assert.equal(panel.freeDeviceAfterTabChange("content", "mobile", "mobile"), "mobile", "sair da aba Celular nao volta ao Computador");
+  assert.equal(panel.freeDeviceAfterTabChange("style", "content", "desktop"), "desktop");
+  assert.equal(panel.freeDeviceAfterTabChange("advanced", "style", "mobile"), "mobile");
+  assert.equal(panel.freeDeviceAfterTabChange("mobile", "mobile", "desktop"), "desktop", "ja estava na aba: o Ver como escolhido depois fica");
+
+  // O painel do elemento usa a mesma regra.
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-inspector.tsx", import.meta.url), "utf8");
+  assert.match(source, /const nextDevice = freeDeviceAfterTabChange\(value as ElementTab, tab, device\);/);
+});
+
+test("painel Pop-up desenhado: o grupo No celular com Igual ao computador em cada campo", () => {
+  function draw(value, errors = {}) {
+    return renderToStaticMarkup(createElement(FreeArtboardSettings, { design: value, disabled: false, errors, fonts: [], hints: [], latest: () => value, onBusyChange() {}, onChange() {}, onFontsChange() {}, rects: {} }));
+  }
+
+  const same = draw(design([LINKS]));
+  assert.ok(same.includes(">No celular<"));
+  assert.deepEqual(same.match(/aria-label="[^"]*: igual ao computador"/g), [
+    'aria-label="Respiro interno: igual ao computador"',
+    'aria-label="Espaço entre os elementos: igual ao computador"',
+    'aria-label="Altura mínima em px: igual ao computador"'
+  ]);
+  assert.equal((same.match(/aria-checked="true" aria-label="[^"]*: igual ao computador"/g) ?? []).length, 3);
+  assert.match(same, /id="livre-popup-celular-respiro"/);
+
+  const own = draw(design([LINKS], { devices: { mobile: { artboard: { padding: 12 } } } }), { "devices.mobile.artboard.padding": "Use de 0 a 200." });
+  assert.match(own, /aria-checked="false" aria-label="Respiro interno: igual ao computador"/);
+  assert.ok(own.includes("Use de 0 a 200."));
+});
+
+test("aba Celular desenhada: a frase, Voltar tudo, uma chave com nome por campo e o valor próprio", () => {
+  function draw(value, id, errors = {}) {
+    const content = { allowSnooze: true, audio: null, cta: null, onAllowSnoozeChange() {}, onCtaChange() {}, products: [], productsLoaded: true, snoozeMinutes: 1_440, title: "Aula nova" };
+    const props = { content, design: value, disabled: false, errors, fonts: [], hints: [], latest: () => value, node: model.findFreeNode(value, id).node, onBusyChange() {}, onChange() {}, onCtaChange() {}, onFontsChange() {}, onReset() {}, rects: {} };
+
+    return renderToStaticMarkup(createElement(FreeInspectorMobile, props));
+  }
+
+  const same = draw(design([TITULO, LINKS]), "titulo");
+  assert.ok(same.includes("O que não mudar aqui encolhe como no computador (texto nunca abaixo de 12 px)."));
+  assert.match(same, /<button[^>]*disabled=""[^>]*data-free-mobile-reset=""|<button[^>]*data-free-mobile-reset=""[^>]*disabled=""/, "sem nada no celular, Voltar tudo fica desligado");
+  assert.ok(same.includes("Voltar tudo ao do computador"));
+  assert.match(same, /aria-checked="true" aria-label="Tamanho: igual ao computador"/);
+  assert.match(same, /aria-label="Esconder no celular: igual ao computador"/);
+  assert.match(same, /id="livre-titulo-celular-tamanho-texto"/);
+  assert.equal((same.match(/data-free-mobile-field="own"/g) ?? []).length, 0);
+  for (const word of ["Mostrar", "Posição", "Texto", "Respiro e cantos"]) {
+    assert.ok(same.includes(`>${word}<`), word);
+  }
+
+  const own = draw(design([TITULO, LINKS], { devices: { mobile: { nodes: { titulo: { textStyle: { size: 28 } } } } } }), "titulo", { "devices.mobile.nodes.titulo.textStyle.size": "Use de 10 a 160." });
+  assert.match(own, /aria-checked="false" aria-label="Tamanho: igual ao computador"/);
+  assert.equal((own.match(/data-free-mobile-field="own"/g) ?? []).length, 1);
+  assert.match(own, /value="28"/);
+  assert.ok(own.includes("Use de 10 a 160."), "o erro do campo do celular aparece no campo");
+  assert.doesNotMatch(own, /<button[^>]*disabled=""[^>]*data-free-mobile-reset=""|<button[^>]*data-free-mobile-reset=""[^>]*disabled=""/);
+
+  // O erro do celular que nao e de um campo da tela (o modo trocado, colado de fora) aparece no topo da aba; o de outro
+  // elemento (mesmo com o id comecando igual) nao.
+  const mode = draw(design([TITULO, { ...TITULO, id: "titulo2" }, LINKS]), "titulo", {
+    "devices.mobile.nodes.titulo.place.mode": M.mobilePlace,
+    "devices.mobile.nodes.titulo2.textStyle.size": "Use de 10 a 160."
+  });
+  assert.ok(mode.includes(M.mobilePlace));
+  assert.equal(mode.includes("Use de 10 a 160."), false);
 });
 
 test("vocabulário das frases do painel", () => {
@@ -890,6 +1146,14 @@ test("vocabulário das frases do painel", () => {
   assert.equal(C.popup.widthNote, "No celular, o pop-up inteiro encolhe junto, igual.");
   assert.equal(C.popup.closeNote, "O X fica sempre por cima e sempre funciona.");
   assert.equal(panel.freeRangeMessage({ max: 160, min: 10 }), "Use de 10 a 160.");
+  // Aba Celular e o grupo "No celular" (docs/27 §13.8).
+  assert.equal(C.tabs.mobile, "Celular");
+  assert.equal(C.mobile.same, "Igual ao computador");
+  assert.equal(C.mobile.sameLabel("Tamanho"), "Tamanho: igual ao computador");
+  assert.equal(C.mobile.reset, "Voltar tudo ao do computador");
+  assert.equal(C.mobile.note, "O que não mudar aqui encolhe como no computador (texto nunca abaixo de 12 px).");
+  assert.equal(C.mobile.popupTitle, "No celular");
+  assert.equal(C.mobile.hidden, "Esconder no celular");
 
   // As telas do painel: o texto que aparece direto no JSX e nos aria-label escritos à mão também.
   for (const url of UI_FILES) {

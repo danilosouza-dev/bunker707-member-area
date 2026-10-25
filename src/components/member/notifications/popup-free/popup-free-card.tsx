@@ -1,20 +1,18 @@
 "use client";
 
 import { X } from "lucide-react";
-import type { MouseEvent, RefCallback } from "react";
+import { useMemo, useSyncExternalStore, type MouseEvent, type RefCallback } from "react";
 import type { AccessPreviewMode } from "@/lib/access-preview";
 import { cn } from "@/lib/utils";
 import type { PopupItem } from "@/server/communications/notification-model";
 import type { PopupFontFace } from "@/server/communications/popup-design-model";
 import type { FreeId, PopupFreeDesign } from "@/server/communications/popup-free-model";
-import { freeStorageOrigin } from "@/server/communications/popup-free-render";
-
-// O nome e a descricao do dialogo do Livre (popup-free-render.ts): a janela le daqui, do pedaco ja baixado.
-export { popupFreeDialogAria } from "@/server/communications/popup-free-render";
+import { freeStorageOrigin, popupFreeDialogAria as dialogAriaOfDesign, resolveFreeForDevice } from "@/server/communications/popup-free-render";
 import type { NotificationLink } from "../notifications-model";
 import { usePopupMotion } from "../popup-design/popup-design-media";
 import { usePopupFontFaces } from "../popup-design/popup-font-loader";
 import { FreeNodes, freeRenderContextOf } from "./popup-free-nodes";
+import { freeDeviceOfWindow, freeDeviceSnapshot, freeServerDevice, subscribeFreeDevice, type FreeDevice } from "./popup-free-device";
 import { FREE_FOCUS_CLASS, FREE_TOUCH_CLASS, freeArtboardCss, freeCloseCss, freeOuterCss } from "./popup-free-styles";
 
 // Pop-up Livre do aluno (docs/27; spec §3): a prancheta montada do zero pela equipe (elementos na sequencia e
@@ -24,14 +22,19 @@ import { FREE_FOCUS_CLASS, FREE_TOUCH_CLASS, freeArtboardCss, freeCloseCss, free
 // proprio: popup-free-load.ts) e na previa do editor (`preview`, `editorNodeRef`, `dragPreview`).
 //
 // No celular o cartao inteiro encolhe na mesma proporcao (cqw do elemento de fora), com texto nunca abaixo de
-// 12 px. O aluno nao mede nada na v1 (spec §2.10): `device` so existe no editor, que ja passa o design por
-// resolveFreeForDevice.
+// 12 px. Valores do celular (docs/27 §1 e §9.10): o cartao desenha resolveFreeForDevice(design, aparelho). As
+// previas do admin passam `device` (a de 375 px = "mobile"); o aluno nao passa e o aparelho sai da largura da tela
+// (FREE_MOBILE_QUERY de popup-free-device.ts, ate 767 px), lida antes de desenhar (useSyncExternalStore, como o
+// usePopupMotion: o cartao do aluno so desenha no navegador, depois do /show, entao ja vem certo no primeiro
+// desenho; no servidor, computador). Mudou a largura com o pop-up aberto (girar o celular): troca na hora (a janela
+// ouve o mesmo aparelho para o nome do dialogo). Sem valores do celular, o computador e o mesmo objeto do design e o
+// HTML e o de antes.
 
 export type PopupFreeCardProps = {
   accessPreviewMode?: AccessPreviewMode;
   bodyId?: string;
   design: PopupFreeDesign;
-  /** Só o editor: aparelho da prévia (o editor passa o design por resolveFreeForDevice). Sem = "desktop"; o aluno nunca passa (§2.10). */
+  /** Só as prévias do admin: o aparelho desenhado (a de 375 px = "mobile"). O aluno nunca passa: sem, vale a largura da tela (FREE_MOBILE_QUERY). */
   device?: "desktop" | "mobile";
   /** Só o editor, durante um arrastar: deslocamento provisório (px da prancheta) de um elemento solto, desenhado com `translate` sem mudar o design (§4.4). */
   dragPreview?: { dx: number; dy: number; dh?: number; dw?: number; id: FreeId } | null;
@@ -53,6 +56,22 @@ export type PopupFreeCardProps = {
   storageOrigin?: string | null;
   titleId?: string;
 };
+
+export { FREE_MOBILE_QUERY, freeDeviceOfWindow, freeServerDevice, subscribeFreeDevice } from "./popup-free-device";
+
+/**
+ * O nome e a descricao do dialogo do Livre (popup-free-render.ts) pelo design do aparelho: um titulo ou um texto
+ * escondido so no celular nao da nome nem descricao ali. A janela le daqui, do pedaco ja baixado, e passa o
+ * aparelho que ela mesma ouve (popup-free-device.ts: troca junto com o cartao ao cruzar os 767 px); sem `device`,
+ * a tela de agora (no servidor, o computador).
+ */
+export function popupFreeDialogAria(
+  popup: Pick<PopupItem, "body" | "freeDesign" | "title">,
+  ids: { bodyId: string; titleId: string },
+  device: FreeDevice = typeof window === "undefined" ? freeServerDevice() : freeDeviceOfWindow(window)
+) {
+  return dialogAriaOfDesign(popup.freeDesign ? { ...popup, freeDesign: resolveFreeForDevice(popup.freeDesign, device) } : popup, ids);
+}
 
 /** A origem do nosso Supabase, conferida uma vez (a mesma variavel do Supabase no navegador). */
 const STORAGE_ORIGIN = freeStorageOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
@@ -111,6 +130,9 @@ export function PopupFreeCard({
   storageOrigin,
   titleId
 }: PopupFreeCardProps) {
+  // O hook continua sendo chamado sempre (regra dos hooks); a previa do admin decide pelo `device` que passa.
+  const screenDevice = useSyncExternalStore(subscribeFreeDevice, freeDeviceSnapshot, freeServerDevice);
+  const drawn = useMemo(() => resolveFreeForDevice(design, device ?? screenDevice), [design, device, screenDevice]);
   const faces = fonts ?? popup.fonts ?? NO_FACES;
   const fontsReady = usePopupFontFaces(faces);
   // O hook continua sendo chamado sempre (regra dos hooks); `still` so troca o resultado na previa.
@@ -120,7 +142,7 @@ export function PopupFreeCard({
   const ctx = freeRenderContextOf({
     accessPreviewMode,
     bodyId,
-    design,
+    design: drawn,
     dragPreview,
     faces,
     motion,
@@ -135,13 +157,13 @@ export function PopupFreeCard({
     refFor: (id) => stableNodeRef(editorNodeRef, id),
     titleId
   });
-  const close = freeCloseCss(design);
+  const close = freeCloseCss(drawn);
   const closeClassName = cn(CLOSE_CLASS, nudgeClose && "motion-safe:scale-[1.12]");
 
   return (
-    <div data-fonts-ready={fontsReady ? "" : undefined} data-free-device={device} data-popup-free="" style={freeOuterCss(design)}>
-      <div data-free-artboard="" style={freeArtboardCss(design, ctx.style)}>
-        <FreeNodes ctx={ctx} nodes={design.children} parentDir="column" />
+    <div data-fonts-ready={fontsReady ? "" : undefined} data-free-device={device} data-popup-free="" style={freeOuterCss(drawn)}>
+      <div data-free-artboard="" style={freeArtboardCss(drawn, ctx.style)}>
+        <FreeNodes ctx={ctx} nodes={drawn.children} parentDir="column" />
       </div>
       {preview ? (
         <span aria-hidden="true" className={closeClassName} data-free-close="" style={close.button}>

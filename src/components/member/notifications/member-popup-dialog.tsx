@@ -1,13 +1,14 @@
 "use client";
 
 import { Dialog } from "@base-ui/react/dialog";
-import { useEffect, useId, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { announceOverlay } from "@/lib/overlay-event";
 import type { PopupItem } from "@/server/communications/notification-model";
 import type { PopupCloseVia } from "@/server/communications/popup-display-model";
 import { MemberPopupCard } from "./member-popup";
 import { useEscapeToClose } from "./notifications-client";
 import { popupDialogAria } from "./popup-design/popup-design-styles";
+import { freeDeviceSnapshot, freeServerDevice, subscribeFreeDevice, type FreeDevice } from "./popup-free/popup-free-device";
 import { loadedPopupFreeCard } from "./popup-free/popup-free-load";
 import { closeViaOf } from "./popup-host-model";
 
@@ -25,17 +26,22 @@ import { closeViaOf } from "./popup-host-model";
 // segundo botao usa as saidas de sempre: Fechar = o X, Lembrar depois = o link, link = o clique do botao. O
 // video do design pausa quando a janela comeca a fechar (`playing`).
 // Design Livre (docs/27): o nome e o texto do primeiro titulo visivel do design (ou o titulo do aviso) e a
-// descricao o primeiro texto visivel (popupFreeDialogAria, de popup-free-render.ts, lido do pedaco do cartao Livre,
-// que o host ja baixou antes de abrir: popup-free-render.ts nao entra no pedaco da janela). Exportada aqui a porta
-// do pedaco, para o host baixar o cartao Livre so pela janela (o pedaco do cartao nao repete o que a janela ja tem).
+// descricao o primeiro texto visivel do aparelho da tela (popupFreeDialogAria, lido do pedaco do cartao Livre,
+// que o host ja baixou antes de abrir: popup-free-render.ts nao entra no pedaco da janela). A janela ouve o mesmo
+// aparelho do cartao (popup-free-device.ts, minusculo): girar o celular com o pop-up aberto troca o nome e a
+// descricao junto com o desenho. Exportada aqui a porta do pedaco, para o host baixar o cartao Livre so pela janela
+// (o pedaco do cartao nao repete o que a janela ja tem).
 
 export type PopupOutcome = "clicked" | "closed" | "dismissed" | "snoozed";
 
 export { loadPopupFreeCard } from "./popup-free/popup-free-load";
 
-/** Nome e descricao do dialogo do Livre, do pedaco do cartao ja baixado; sem ele, o titulo do aviso (o do design). */
-const freeDialogAria = (popup: PopupItem, ids: { bodyId: string; titleId: string }) =>
-  loadedPopupFreeCard()?.popupFreeDialogAria(popup, ids) ?? { "aria-label": popup.title };
+/** Nome e descricao do dialogo do Livre no aparelho, do pedaco do cartao ja baixado; sem ele, o titulo do aviso. */
+export const freeDialogAria = (popup: PopupItem, ids: { bodyId: string; titleId: string }, device: FreeDevice) =>
+  loadedPopupFreeCard()?.popupFreeDialogAria(popup, ids, device) ?? { "aria-label": popup.title };
+
+/** Fora do Livre a janela nao ouve a largura da tela (o Padrão e o Personalizado nao mudam por aparelho). */
+const noDeviceChange = () => () => undefined;
 
 /** Quanto tempo o X pulsa depois de um toque fora em "Só no X". */
 const NUDGE_MS = 300;
@@ -57,7 +63,9 @@ export function MemberPopupDialog({
   const titleId = useId();
   const bodyId = useId();
   const xOnly = popup.close === "x_only";
-  const aria = popup.freeDesign ? freeDialogAria(popup, { bodyId, titleId }) : popupDialogAria(popup, { bodyId, titleId });
+  // O mesmo aparelho do cartao Livre (ate 767 px = celular), ouvido so quando o pop-up e Livre; no servidor, computador.
+  const device = useSyncExternalStore(popup.freeDesign ? subscribeFreeDevice : noDeviceChange, popup.freeDesign ? freeDeviceSnapshot : freeServerDevice, freeServerDevice);
+  const aria = popup.freeDesign ? freeDialogAria(popup, { bodyId, titleId }, device) : popupDialogAria(popup, { bodyId, titleId });
   const [nudgeClose, setNudgeClose] = useState(false);
   const nudgeTimerRef = useRef<number | null>(null);
 
