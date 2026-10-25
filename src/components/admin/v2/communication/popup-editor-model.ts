@@ -25,9 +25,11 @@ import {
   type PopupTrigger
 } from "../../../../server/communications/popup-display-model";
 import { popupDesignLinkButton } from "../../../../server/communications/popup-design-model";
+import { walkFreeNodes } from "../../../../server/communications/popup-free-model";
 import { freeHasClickTarget } from "../../../../server/communications/popup-free-render";
 import { describeMinutes } from "../../../../server/communications/popup-sentences";
 import type { NoticeDraft } from "../../../../server/communications/schemas";
+import { isSafeHeroCtaHref } from "../../../../server/member-area/home-hero-links";
 
 /* ------------------------------------------------------------------------------------------------
  * Textos dos dois cards (docs/25 §2.3 e §2.4)
@@ -152,6 +154,8 @@ export const POPUP_EDITOR_COPY = {
     stopNoButton: "Este pop-up não tem botão. Ligue “Levar o aluno a algum lugar” ou escolha outra opção.",
     /** Design Personalizado ou Livre (docs/26, docs/27): o botao mora no card Design, sem a chave "Levar o aluno a algum lugar". */
     stopNoButtonDesign: "Este pop-up não tem botão. Acrescente o Botão principal no Design ou escolha outra opção.",
+    /** Livre com o botao que conta o clique escondido no computador ou no celular (D9 por aparelho, docs/27 L46). */
+    stopHiddenButtonDesign: "O botão que conta o clique está escondido no computador ou no celular. Mostre o botão nos dois aparelhos no Design ou escolha outra opção.",
     title: "Quantas vezes e como fecha",
     totalDescription: "“Lembrar depois” não gasta vez.",
     totalField: "Vezes no total",
@@ -516,6 +520,27 @@ export const POPUP_REPEAT_DEFAULTS = { everyMinutes: 1_440, maxPerDay: 1, maxTot
  */
 export function clickStopDisabled(draft: Pick<NoticeDraft, "cta"> & Partial<Pick<NoticeDraft, "design" | "freeDesign">>) {
   return !popupDesignLinkButton(draft.design) && !freeHasClickTarget(draft.freeDesign, draft.cta !== null);
+}
+
+/**
+ * O "Quando o aluno clica no botão" esta desligado, mas o Livre tem o botao que contaria o clique (o Botao principal
+ * ou um "Abrir um link" com destino seguro), escondido no computador ou no celular: a frase pede para mostrar o botao
+ * nos dois aparelhos, e nao para acrescentar um.
+ */
+export function clickStopHiddenOnDevice(draft: Pick<NoticeDraft, "cta"> & Partial<Pick<NoticeDraft, "design" | "freeDesign">>) {
+  if (!draft.freeDesign || !clickStopDisabled(draft)) {
+    return false;
+  }
+
+  let found = false;
+
+  walkFreeNodes(draft.freeDesign.children, (node) => {
+    if (node.type === "button" && ((node.action.kind === "cta" && draft.cta !== null) || (node.action.kind === "link" && isSafeHeroCtaHref(node.action.href)))) {
+      found = true;
+    }
+  });
+
+  return found;
 }
 
 /**

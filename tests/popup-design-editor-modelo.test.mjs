@@ -298,6 +298,15 @@ test("D9 no Livre com o Celular: o que se clica precisa estar visível nos dois 
   assert.equal(schemas.POPUP_NO_BUTTON_STOP_MESSAGE, "Este pop-up não tem botão: escolha quando ele para de aparecer.");
   assert.equal(popupEditor.clickStopDisabled({ cta: null, freeDesign: linkSoNoComputador }), true);
   assert.equal(popupEditor.repeatStartOf({ cta: null, freeDesign: linkSoNoComputador }).stopOn, "never");
+  // A frase do card nao diz "não tem botão" quando o botao existe e so esta escondido num aparelho.
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: null, freeDesign: linkSoNoComputador }), true);
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: null, freeDesign: semBotao }), false, "sem botao nenhum: a frase de sempre");
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: null, freeDesign: comLink }), false, "visivel nos dois: nada a dizer");
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: null, freeDesign: null }), false, "Padrão: a frase de sempre");
+  assert.equal(
+    popupEditor.POPUP_EDITOR_COPY.frequency.stopHiddenButtonDesign,
+    "O botão que conta o clique está escondido no computador ou no celular. Mostre o botão nos dois aparelhos no Design ou escolha outra opção."
+  );
 
   // Visivel nos dois: passa.
   assert.equal(errorsOf(rascunho({ cta: null, freeDesign: comLink }))["popup.frequency.stopOn"], undefined);
@@ -310,6 +319,7 @@ test("D9 no Livre com o Celular: o que se clica precisa estar visível nos dois 
   const ctaSoNoComputador = { ...free, devices: { mobile: { nodes: { [ctaId]: { hidden: true } } } } };
   assert.equal(errorsOf(rascunho({ freeDesign: ctaSoNoComputador }))["popup.frequency.stopOn"], schemas.POPUP_NO_BUTTON_STOP_MESSAGE);
   assert.equal(popupEditor.clickStopDisabled({ cta: CTA, freeDesign: ctaSoNoComputador }), true);
+  assert.equal(popupEditor.clickStopHiddenOnDevice({ cta: CTA, freeDesign: ctaSoNoComputador }), true, "o Botão principal escondido no celular: mostrar nos dois");
   // ... com o "Abrir um link" visivel no celular, passa; e o Botao principal visivel nos dois, como sempre.
   const ctaEscondidoComLink = { ...ctaSoNoComputador, children: [...free.children.slice(0, -1), link, free.children.at(-1)] };
   assert.equal(errorsOf(rascunho({ freeDesign: ctaEscondidoComLink }))["popup.frequency.stopOn"], undefined);
