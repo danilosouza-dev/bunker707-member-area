@@ -639,7 +639,7 @@ O admin ganha sensação de aplicativo dentro do Next: `app/admin/layout.tsx` co
 | `@supabase/supabase-js` / `@supabase/ssr` | 2.117.3 / 0.12.7 | 2026-10-07 / 2026-09-08 | guia oficial usa `proxy.ts` + `getClaims()` |
 | `@tanstack/react-table` | 9.2.8 | 2026-10-08 | v9 com `useTable` + `tableFeatures` (tree-shaking) |
 | `react-hook-form` / `zod` / `@hookform/resolvers` | 7.89.0 / 4.6.5 / 5.9.1 | 2026-09-26 / 2026-09-13 / 2026-08-17 | o mesmo schema valida Server Action e rota |
-| `@atlaskit/pragmatic-drag-and-drop` | 4.0.0 | 2026-09-24 | `@dnd-kit/core` sem release desde 12/2024 |
+| `@atlaskit/pragmatic-drag-and-drop` | 4.0.0 | 2026-09-24 | `@dnd-kit/core` sem release desde 12/2024. O editor Livre do pop-up não usa: tem o gesto por ponteiro próprio (`free-pointer-drag.ts`, `docs/27` L28), por causa do zoom do palco, da captura só depois do limiar, do carregador dos testes do Node (que não resolve o `@atlaskit`) e dos testes sem `DataTransfer` |
 | `recharts` | 3.10.1 (via shadcn `chart`, `next/dynamic`) | 2026-07-25 | hoje 841 KB entram no first load do `/admin` |
 | `nuqs` | 2.10.2 | 2026 | filtros na URL |
 | `cmdk` (via shadcn Command) | 1.1.1 | 2025-03 | Cmd+K |
