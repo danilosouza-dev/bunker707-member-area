@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { PopupFreeCard } from "@/components/member/notifications/popup-free/popup-free-card";
 import type { PopupItem } from "@/server/communications/notification-model";
 import type { PopupFontFace } from "@/server/communications/popup-design-model";
-import { findFreeNode, walkFreeNodes, type FreeId, type PopupFreeDesign } from "@/server/communications/popup-free-model";
+import { findFreeNode, freeMobileNodeOf, walkFreeNodes, type FreeId, type PopupFreeDesign } from "@/server/communications/popup-free-model";
 import type { FreeMeasuredRects } from "@/server/communications/popup-free-checks";
 import {
   FREE_PHONE_FRAME_PX,
@@ -44,7 +44,9 @@ import { FREE_EDITOR_COPY, FREE_HANDLE_LABELS, freeLayerLabel, freeNodeOf, isFre
 // ponteiro = largura medida da prancheta / W. Camada de selecao por cima (sem receber clique, menos as alcas e a
 // barrinha): contorno do elemento sob o mouse, contorno de 2 px do selecionado com a etiqueta do nome, 8 alcas nos
 // soltos, guias de alinhamento e a barrinha dos elementos da sequencia. Durante o arrastar o design nao muda: o
-// cartao desenha so aquele elemento deslocado (dragPreview) e o design muda uma vez, no fim.
+// cartao desenha so aquele elemento deslocado (dragPreview) e o design muda uma vez, no fim. Com "Ver como: Celular"
+// o editor entrega o design do celular (resolveFreeForDevice) e grava o fim do gesto em devices.mobile; o
+// selecionado com valores proprios do celular ganha a etiqueta "Celular" ao lado do nome.
 
 const copy = FREE_EDITOR_COPY;
 
@@ -492,6 +494,7 @@ export function FreeCanvas({
 
   if (selectedNode && selectedRect) {
     const label = freeLayerLabel(selectedNode, popup.cta ? { href: popup.cta.href, label: popup.cta.label, target: popup.cta.target } : null);
+    const mobileTag = Object.keys(freeMobileNodeOf(design, selectedNode.id) ?? {}).length > 0;
 
     overlay = (
       <div
@@ -502,10 +505,15 @@ export function FreeCanvas({
         <div className="absolute inset-0" style={{ outline: `${2 * layoutPerScreen}px solid var(--focus-ring)`, outlineOffset: 0 }} />
         <span
           aria-hidden="true"
-          className="absolute left-0 rounded-sm bg-[var(--focus-ring)] px-1.5 text-[11px] leading-[18px] font-medium whitespace-nowrap text-[#0f0f10]"
+          className="absolute left-0 flex items-center gap-1 whitespace-nowrap"
           style={{ bottom: "100%", marginBottom: 4 * layoutPerScreen, transform: `scale(${layoutPerScreen})`, transformOrigin: "bottom left" }}
         >
-          {label}
+          <span className="rounded-sm bg-[var(--focus-ring)] px-1.5 text-[11px] leading-[18px] font-medium text-[#0f0f10]">{label}</span>
+          {mobileTag ? (
+            <span className="rounded-sm border border-[var(--border-strong)] bg-[var(--surface-3)] px-1.5 text-[12px] leading-4 font-medium text-[var(--text-primary)]" data-free-selection-mobile="">
+              {copy.layers.tags.mobile}
+            </span>
+          ) : null}
         </span>
         {movable
           ? FREE_RESIZE_HANDLES.map((handle) => (

@@ -49,6 +49,7 @@ import {
   applyFreeFontAtKey,
   duplicateFreeNode,
   freeAddedAnnouncement,
+  freeArrowCoalesceKey,
   freeCtaForNewButton,
   freeDuplicateProblem,
   freeEditorErrorKeys,
@@ -56,6 +57,7 @@ import {
   freeFlaggedNodeIds,
   freeFocusAfterAdd,
   freeKnownAssets,
+  freeMobileFreePlace,
   freeNodeIdForKey,
   freeNodeOf,
   freeNodeToFree,
@@ -82,6 +84,7 @@ import {
   setFreeNodeRect,
   shiftFreeNodeLayer,
   type FreeCatalogKind,
+  type FreeDevice,
   type FreeReviewItem
 } from "./free-editor-model";
 import {
@@ -99,6 +102,7 @@ import {
   type FreeRecovery
 } from "./free-editor-recovery";
 import { FreeInspector, type FreeEditorCommand, type FreeFocusRequest } from "./free-inspector";
+import { freeMobileTextSizeKey, withoutFreeMobileValues } from "./free-inspector-model";
 import { FreeLayersPanel, type FreeLayerCommand } from "./free-layers-panel";
 import { FreeReviewPanel } from "./free-review-panel";
 import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } from "./free-templates-panel";
@@ -111,6 +115,10 @@ import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } fro
 // elemento (pacote I) ou o Revisar a direita. O Esc nao fecha (serve para "selecionar a caixa de fora"): fecha so em
 // Concluir. Mudanca nao salva no servidor liga o beforeunload e uma copia de recuperacao no navegador (1 s depois
 // da ultima mudanca, apagada ao salvar). Avisos falados numa regiao aria-live.
+//
+// Celular (docs/27 §13.8, PR L3): com "Ver como: Celular" o palco desenha resolveFreeForDevice(design, "mobile") e
+// o arrastar, as alcas, as setas e o "Alinhar no pop-up" gravam em devices.mobile (um passo por gesto, como antes);
+// a aba Celular do painel e o grupo "No celular" do Pop-up mudam so o celular; entrar na aba liga o Celular.
 
 const copy = FREE_EDITOR_COPY;
 /** Espera depois da ultima tecla antes de mandar o design ao rascunho do aviso. */
@@ -318,6 +326,11 @@ function splitSaveErrors(design: PopupFreeDesign, errors: Readonly<Record<string
   return { design: freeEditorErrorKeys(design, inside), outside };
 }
 
+/** Uma chave de erro ou de foco de um campo do celular ("devices.mobile...", com ou sem "freeDesign."). */
+function isMobileKey(key: string): boolean {
+  return /^(?:freeDesign\.)?devices\.mobile(?:\.|$)/.test(key);
+}
+
 function nextTick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -356,7 +369,8 @@ function FreeEditorSession({
   // D29: a pergunta antes do primeiro salvar de um modelo com uma parte que nao abriu.
   const [confirmingSave, setConfirmingSave] = useState(false);
   const [rightPanel, setRightPanel] = useState<"inspector" | "review">(initialFocus?.kind === "review" ? "review" : "inspector");
-  const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
+  // Um erro de um campo do celular abre o editor ja no Celular (o painel abre a aba Celular).
+  const [device, setDevice] = useState<FreeDevice>(() => (initialFocus?.kind === "error" && isMobileKey(initialFocus.key) ? "mobile" : "desktop"));
   const [zoom, setZoom] = useState<"100" | "fit">("fit");
   const [rects, setRects] = useState<FreeMeasuredRects>({});
   const [focusRequest, setFocusRequest] = useState<FreeFocusRequest | null>(() =>
@@ -462,6 +476,21 @@ function FreeEditorSession({
 
   // Fechar (ou desmontar por outro caminho) manda o que faltou.
   useEffect(() => () => flush(), [flush]);
+
+  /** Troca o "Ver como" e diz em voz alta o que passa a ser editado. */
+  const deviceRef = useRef(device);
+  const changeDevice = useCallback(
+    (next: FreeDevice) => {
+      if (deviceRef.current === next) {
+        return;
+      }
+
+      deviceRef.current = next;
+      setDevice(next);
+      announce(next === "mobile" ? copy.announce.editingMobile : copy.announce.editingDesktop);
+    },
+    [announce]
+  );
 
   function undo() {
     const current = historyRef.current;
@@ -888,8 +917,20 @@ function FreeEditorSession({
       return;
     }
 
+    if (command.kind === "mobileReset") {
+      const next = withoutFreeMobileValues(historyRef.current.present.design, command.id);
+
+      if (next !== historyRef.current.present.design) {
+        commitDesign(next);
+        announce(copy.announce.mobileReset);
+      }
+
+      return;
+    }
+
     if (command.kind === "align") {
-      const next = alignFreeNode(historyRef.current.present.design, command.id, command.edge, rects);
+      // Com "Ver como: Celular", alinha a posicao do celular (o retangulo medido e o do celular).
+      const next = alignFreeNode(historyRef.current.present.design, command.id, command.edge, rects, device);
 
       if (next !== historyRef.current.present.design) {
         commitDesign(next);
@@ -924,8 +965,13 @@ function FreeEditorSession({
     announce(freeAddedAnnouncement(kind));
   }
 
+  /** Fim de um arrastar ou de uma alca: um passo no historico, no aparelho do "Ver como". */
   function onCommitRect(id: FreeId, rect: Partial<FreeRect>) {
-    commitDesign(setFreeNodeRect(historyRef.current.present.design, id, rect));
+    const next = setFreeNodeRect(historyRef.current.present.design, id, rect, device);
+
+    if (next !== historyRef.current.present.design) {
+      commitDesign(next);
+    }
   }
 
   function onEditText(id: FreeId) {
@@ -949,6 +995,23 @@ function FreeEditorSession({
     setSelectedId(item.nodeId);
     setRightPanel("inspector");
     setFocusRequest({ key: item.key });
+
+    // Um erro de um campo do celular leva a aba Celular, que liga o "Ver como: Celular".
+    if (isMobileKey(item.key)) {
+      changeDevice("mobile");
+    }
+  }
+
+  /** "Ajustar no Celular" (dica "texto no celular"): a aba Celular do elemento, no tamanho do texto. */
+  function adjustOnMobile(item: FreeReviewItem) {
+    if (!item.nodeId) {
+      return;
+    }
+
+    setSelectedId(item.nodeId);
+    setRightPanel("inspector");
+    setFocusRequest({ key: freeMobileTextSizeKey(item.nodeId) });
+    changeDevice("mobile");
   }
 
   function raise(item: FreeReviewItem) {
@@ -1184,13 +1247,14 @@ function FreeEditorSession({
       const step = event.shiftKey ? 10 : 1;
       const dx = key === "ArrowLeft" ? -step : key === "ArrowRight" ? step : 0;
       const dy = key === "ArrowUp" ? -step : key === "ArrowDown" ? step : 0;
-      const next = nudgeFreeNode(historyRef.current.present.design, activeId, dx, dy);
+      // Com "Ver como: Celular", as setas mudam so a posicao do celular (e juntam passos a parte).
+      const next = nudgeFreeNode(historyRef.current.present.design, activeId, dx, dy, device);
 
       if (next === historyRef.current.present.design) {
         return;
       }
 
-      commitDesign(next, { coalesceKey: `${activeId}:place` });
+      commitDesign(next, { coalesceKey: freeArrowCoalesceKey(activeId, device) });
 
       if (positionTimer.current !== null) {
         window.clearTimeout(positionTimer.current);
@@ -1201,7 +1265,8 @@ function FreeEditorSession({
       positionTimer.current = window.setTimeout(() => {
         positionTimer.current = null;
 
-        const place = freeNodeOf(historyRef.current.present.design, id)?.place;
+        const present = historyRef.current.present.design;
+        const place = device === "mobile" ? freeMobileFreePlace(present, id) : freeNodeOf(present, id)?.place;
 
         if (place?.mode === "free") {
           announce(copy.announce.position(place.x, place.y));
@@ -1310,7 +1375,7 @@ function FreeEditorSession({
         <div className="flex shrink-0 items-center gap-3">
           <Segmented
             label={copy.bar.viewAs}
-            onChange={(value) => setDevice(value)}
+            onChange={(value) => changeDevice(value)}
             options={[
               { icon: <Monitor aria-hidden="true" className="size-4" />, label: copy.devices.desktop, value: "desktop" },
               { icon: <Smartphone aria-hidden="true" className="size-4" />, label: copy.devices.mobile, value: "mobile" }
@@ -1484,7 +1549,7 @@ function FreeEditorSession({
         <div className="flex min-h-0 min-w-0 flex-col" data-free-zone="middle">
           <FreeCanvas
             apiRef={canvasApi}
-            description={freeSelectionDescription(design, activeId, rects)}
+            description={freeSelectionDescription(stageDesign, activeId, rects)}
             design={stageDesign}
             device={device}
             disabled={disabled}
@@ -1513,6 +1578,7 @@ function FreeEditorSession({
               onBack={() => setRightPanel("inspector")}
               onFontUploaded={fontUploaded}
               onGoTo={goToItem}
+              onMobile={adjustOnMobile}
               onRaise={raise}
               sizePercent={sizePercent}
             />
@@ -1530,6 +1596,7 @@ function FreeEditorSession({
               onChange={(next, options) => commitDesign(next, options)}
               onCommand={onInspectorCommand}
               onCtaChange={(next, options) => commit({ cta: next, design: historyRef.current.present.design }, options)}
+              onDeviceChange={changeDevice}
               onFocusHandled={() => setFocusRequest(null)}
               onFontsChange={onFontsChange}
               rects={rects}

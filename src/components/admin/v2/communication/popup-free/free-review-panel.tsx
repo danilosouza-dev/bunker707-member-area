@@ -12,7 +12,7 @@ import { FREE_EDITOR_COPY, type FreeReviewItem } from "./free-editor-model";
 // problema); "Para corrigir antes de salvar" (zod no navegador, regras com o conteudo do aviso e os erros do ultimo
 // salvar) e "Dicas" (nao impedem salvar). Clicar num item seleciona o elemento e pede ao painel da direita o foco
 // no campo (focusRequest; o mapa chave -> aba/campo e do painel). "Aumentar a altura" e "Enviar fonte…" resolvem
-// ali mesmo.
+// ali mesmo; "Ajustar no Celular" (a dica "texto no celular", docs/27 §13.8) abre a aba Celular do elemento.
 
 const copy = FREE_EDITOR_COPY.review;
 
@@ -23,15 +23,18 @@ export type FreeReviewPanelProps = {
   onBack: () => void;
   onFontUploaded: (font: PopupFontOption, item: FreeReviewItem) => void;
   onGoTo: (item: FreeReviewItem) => void;
+  /** "Ajustar no Celular": a aba Celular do elemento, no tamanho do texto (liga o "Ver como: Celular"). */
+  onMobile: (item: FreeReviewItem) => void;
   onRaise: (item: FreeReviewItem) => void;
   sizePercent: number;
 };
 
-function ItemList({ disabled, items, onFont, onGoTo, onRaise, tone }: {
+function ItemList({ disabled, items, onFont, onGoTo, onMobile, onRaise, tone }: {
   disabled: boolean;
   items: readonly FreeReviewItem[];
   onFont: (item: FreeReviewItem) => void;
   onGoTo: (item: FreeReviewItem) => void;
+  onMobile: (item: FreeReviewItem) => void;
   onRaise: (item: FreeReviewItem) => void;
   tone: "error" | "hint";
 }) {
@@ -58,6 +61,11 @@ function ItemList({ disabled, items, onFont, onGoTo, onRaise, tone }: {
               {copy.raise}
             </Button>
           ) : null}
+          {item.action === "mobile" ? (
+            <Button className="self-start" data-free-review-mobile="" onClick={() => onMobile(item)} size="sm" type="button" variant="outline">
+              {copy.mobile}
+            </Button>
+          ) : null}
           {item.action === "font" ? (
             <Button className="self-start" disabled={disabled} onClick={() => onFont(item)} size="sm" type="button" variant="outline">
               {copy.sendFont}
@@ -69,7 +77,7 @@ function ItemList({ disabled, items, onFont, onGoTo, onRaise, tone }: {
   );
 }
 
-export function FreeReviewPanel({ disabled, errors, hints, onBack, onFontUploaded, onGoTo, onRaise, sizePercent }: FreeReviewPanelProps) {
+export function FreeReviewPanel({ disabled, errors, hints, onBack, onFontUploaded, onGoTo, onMobile, onRaise, sizePercent }: FreeReviewPanelProps) {
   const [fontFor, setFontFor] = useState<FreeReviewItem | null>(null);
 
   return (
@@ -102,13 +110,13 @@ export function FreeReviewPanel({ disabled, errors, hints, onBack, onFontUploade
         {errors.length > 0 ? (
           <section className="flex flex-col gap-2">
             <h3 className="text-[12px] leading-4 font-semibold tracking-wide text-[var(--text-tertiary)] uppercase">{copy.errors}</h3>
-            <ItemList disabled={disabled} items={errors} onFont={setFontFor} onGoTo={onGoTo} onRaise={onRaise} tone="error" />
+            <ItemList disabled={disabled} items={errors} onFont={setFontFor} onGoTo={onGoTo} onMobile={onMobile} onRaise={onRaise} tone="error" />
           </section>
         ) : null}
         {hints.length > 0 ? (
           <section className="flex flex-col gap-2">
             <h3 className="text-[12px] leading-4 font-semibold tracking-wide text-[var(--text-tertiary)] uppercase">{copy.hints}</h3>
-            <ItemList disabled={disabled} items={hints} onFont={setFontFor} onGoTo={onGoTo} onRaise={onRaise} tone="hint" />
+            <ItemList disabled={disabled} items={hints} onFont={setFontFor} onGoTo={onGoTo} onMobile={onMobile} onRaise={onRaise} tone="hint" />
           </section>
         ) : null}
       </div>
