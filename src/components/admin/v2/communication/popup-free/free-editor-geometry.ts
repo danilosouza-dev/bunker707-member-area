@@ -633,6 +633,8 @@ export type FreeZoomStep = (typeof FREE_ZOOM_STEPS)[number];
 export type FreeZoom = "fit" | FreeZoomStep;
 /** Quanto a roda (com Ctrl ou ⌘) precisa somar, em px, para um passo de zoom. */
 export const FREE_ZOOM_WHEEL_PX = 50;
+/** Quanto vale, em px, cada linha da roda no modo linhas (deltaMode 1). */
+const FREE_ZOOM_WHEEL_LINE_PX = 16;
 
 /**
  * A escala do palco: 'fit' devolve a do "Ajustar a tela" (freeFitZoom); um passo devolve passo / 100. O '100' em
@@ -666,12 +668,19 @@ export function freeZoomNext(scale: number, direction: 1 | -1): FreeZoomStep | n
 
 /**
  * A roda com Ctrl (ou ⌘): soma o movimento em px (linhas valem 16 px; paginas, a altura da pagina) e da um passo a
- * cada 50 px, no maximo um por movimento. O resto fica para o proximo, ate um passo (uma pagina inteira nao deixa
- * passos guardados). Virar de sentido zera o somado. Para cima (deltaY negativo) aproxima: direction 1.
+ * cada 50 px, no maximo um por movimento. Em linhas e em paginas, cada entalhe da roda (1 linha ou mais, ou 1 pagina
+ * ou mais) vale pelo menos um passo: as 3 linhas do Firefox (48 px) nao ficam sem zoom no primeiro entalhe. Fracao de
+ * linha (roda de alta resolucao) soma como px. O resto fica para o proximo, ate um passo (uma pagina inteira nao
+ * deixa passos guardados). Virar de sentido zera o somado. Para cima (deltaY negativo) aproxima: direction 1.
  */
 export function freeZoomWheel(acc: number, wheel: { deltaMode: number; deltaY: number }, pageHeight: number): { acc: number; direction: -1 | 0 | 1 } {
   const page = Number.isFinite(pageHeight) && pageHeight > 0 ? pageHeight : FREE_ZOOM_WHEEL_PX;
-  const delta = wheel.deltaY * (wheel.deltaMode === 1 ? 16 : wheel.deltaMode === 2 ? page : 1);
+  const lines = wheel.deltaMode === 1;
+  const pages = wheel.deltaMode === 2;
+  const moved = wheel.deltaY * (lines ? FREE_ZOOM_WHEEL_LINE_PX : pages ? page : 1);
+  // Os "x >= 1" tambem barram o NaN.
+  const notch = (lines || pages) && Math.abs(wheel.deltaY) >= 1;
+  const delta = notch ? Math.sign(moved) * Math.max(Math.abs(moved), FREE_ZOOM_WHEEL_PX) : moved;
   const before = Number.isFinite(acc) ? acc : 0;
 
   if (!Number.isFinite(delta) || delta === 0) {

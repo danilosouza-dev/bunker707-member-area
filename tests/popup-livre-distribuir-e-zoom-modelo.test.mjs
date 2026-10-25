@@ -409,9 +409,9 @@ test("a roda com Ctrl: um passo a cada 50 px, em px, linhas e páginas, no máxi
   // Para baixo afasta.
   assert.deepEqual(geometry.freeZoomWheel(0, { deltaMode: 0, deltaY: 60 }, 800), { acc: 10, direction: -1 });
 
-  // Linhas valem 16 px: 4 linhas = 64 px.
+  // Linhas valem 16 px: 4 linhas = 64 px. Um entalhe de 3 linhas (48 px) vale um passo inteiro (o teste abaixo).
   assert.deepEqual(geometry.freeZoomWheel(0, { deltaMode: 1, deltaY: -4 }, 800), { acc: -14, direction: 1 });
-  assert.deepEqual(geometry.freeZoomWheel(0, { deltaMode: 1, deltaY: 3 }, 800), { acc: 48, direction: 0 });
+  assert.deepEqual(geometry.freeZoomWheel(0, { deltaMode: 1, deltaY: 3 }, 800), { acc: 0, direction: -1 });
 
   // Uma pagina inteira: um passo so, e o resto guardado ate um passo.
   const page = geometry.freeZoomWheel(0, { deltaMode: 2, deltaY: 1 }, 800);
@@ -419,6 +419,52 @@ test("a roda com Ctrl: um passo a cada 50 px, em px, linhas e páginas, no máxi
   // Mesmo uma roda de 500 px: um passo por movimento.
   assert.equal(geometry.freeZoomWheel(0, { deltaMode: 0, deltaY: -500 }, 800).direction, 1);
   assert.equal(geometry.freeZoomWheel(0, { deltaMode: 0, deltaY: -500 }, 800).acc, -50);
+});
+
+test("a roda com Ctrl em linhas e em páginas: cada entalhe dá um passo, desde o primeiro", () => {
+  // O Firefox manda 3 linhas por entalhe (48 px): antes, o primeiro entalhe nao dava zoom.
+  for (const [deltaY, direction] of [[3, -1], [-3, 1]]) {
+    let state = { acc: 0, direction: 0 };
+    const directions = [];
+
+    for (let index = 0; index < 4; index += 1) {
+      state = geometry.freeZoomWheel(state.acc, { deltaMode: 1, deltaY }, 800);
+      directions.push(state.direction);
+      assert.ok(Object.is(state.acc, 0), `${deltaY} linhas: nada guardado, sem -0`);
+    }
+
+    assert.deepEqual(directions, [direction, direction, direction, direction], `${deltaY} linhas: um passo por entalhe`);
+  }
+
+  // Uma linha por entalhe (ajuste do sistema) tambem da um passo.
+  assert.deepEqual(geometry.freeZoomWheel(0, { deltaMode: 1, deltaY: 1 }, 800), { acc: 0, direction: -1 });
+  // Mais que um passo num entalhe: um passo so, e o resto guardado ate um passo, como em px.
+  assert.deepEqual(geometry.freeZoomWheel(0, { deltaMode: 1, deltaY: 5 }, 800), { acc: 30, direction: -1 });
+  assert.equal(geometry.freeZoomWheel(30, { deltaMode: 1, deltaY: 5 }, 800).direction, -1);
+  // Virar de sentido continua zerando o somado: 40 px para cima guardados e um entalhe para baixo dao um passo para baixo.
+  assert.deepEqual(geometry.freeZoomWheel(-40, { deltaMode: 1, deltaY: 3 }, 800), { acc: 0, direction: -1 });
+
+  // Em paginas, mesmo com a pagina sem medida ou mais baixa que um passo: um entalhe, um passo.
+  assert.deepEqual(geometry.freeZoomWheel(0, { deltaMode: 2, deltaY: 1 }, 30), { acc: 0, direction: -1 });
+  assert.deepEqual(geometry.freeZoomWheel(0, { deltaMode: 2, deltaY: -1 }, 0), { acc: 0, direction: 1 });
+
+  // Fracao de linha (roda de alta resolucao) soma como px: 0,5 linha = 8 px, um passo a cada 7.
+  let soft = { acc: 0, direction: 0 };
+  const softDirections = [];
+
+  for (let index = 0; index < 7; index += 1) {
+    soft = geometry.freeZoomWheel(soft.acc, { deltaMode: 1, deltaY: -0.5 }, 800);
+    softDirections.push(soft.direction);
+  }
+
+  assert.deepEqual(softDirections, [0, 0, 0, 0, 0, 0, 1]);
+  assert.equal(soft.acc, -6);
+
+  // Em px, nada muda: 48 px somam e nao dao passo.
+  assert.deepEqual(geometry.freeZoomWheel(0, { deltaMode: 0, deltaY: 48 }, 800), { acc: 48, direction: 0 });
+  // Sem medida: nada.
+  assert.deepEqual(geometry.freeZoomWheel(-20, { deltaMode: 1, deltaY: Number.NaN }, 800), { acc: -20, direction: 0 });
+  assert.deepEqual(geometry.freeZoomWheel(-20, { deltaMode: 1, deltaY: Number.POSITIVE_INFINITY }, 800), { acc: -20, direction: 0 });
 });
 
 test("a roda com Ctrl: virar de sentido zera o somado; movimento nulo não muda nada", () => {
