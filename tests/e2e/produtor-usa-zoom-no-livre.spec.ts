@@ -141,9 +141,13 @@ test("o zoom em passos: botões, menu, Ctrl + = e −, Ctrl + roda, a moldura a 
   });
 
   await test.step("Ctrl + roda com o mouse parado: 200 % e o mesmo ponto da prancheta fica sob o ponteiro", async () => {
-    // O meio da Forma (dentro da vista, com rolagem para os dois lados).
+    // O meio da Forma, levada para a vista pelas Camadas (a 150 % a area rola para os dois lados).
+    await botaoDaCamada(editor, "forma").click();
     const ponteiro = centroDe(await caixaParada(noPalco(editor, "forma")));
+    const quadro = await caixaParada(area);
     const naPrancheta = await daPrancheta(editor, ponteiro);
+
+    expect(ponteiro.x > quadro.x && ponteiro.x < quadro.x + quadro.width && ponteiro.y > quadro.y && ponteiro.y < Math.min(quadro.y + quadro.height, TELA.height), "o ponteiro fica sobre a area de desenho").toBe(true);
 
     await page.mouse.move(ponteiro.x, ponteiro.y);
     await page.keyboard.down("Control");
