@@ -9,6 +9,10 @@ import test from "node:test";
 // Shift, Alt, Control e Meta), o click engolido depois (sai no primeiro click, no proximo pointerdown ou em 350 ms),
 // o pointerId filtrado, os pointerTypes de cada chamada, a funcao que desliga o gesto (e deixa o bloqueador) e que
 // nenhum ouvinte sobra na janela. Tudo pelo Node, sem janela de verdade: o arquivo nao toca na janela ao carregar.
+// L4b (docs/27 L39 e L44, decisao 5 do produtor e critica C10): o toque so quando a chamada pede, o Alt e o Shift no
+// onMove, freeAutoScrollStep e a rolagem sozinha (um requestAnimationFrame falso e uma area falsa que rola): so
+// depois do limiar, so armada depois de o ponto estar dentro da area e fora da faixa, o onMove so quando rolou e o
+// laco que para em todo fim de gesto.
 
 assert.equal(typeof globalThis.window, "undefined", "o Node nao tem janela");
 assert.equal(typeof globalThis.document, "undefined", "o Node nao tem documento");
@@ -19,12 +23,40 @@ function captura(options) {
   return typeof options === "boolean" ? options : Boolean(options?.capture);
 }
 
-/** Janela falsa: os ouvintes ficam numa lista (tipo + captura, como o navegador identifica) e o relogio anda a mao. */
+/**
+ * Janela falsa: os ouvintes ficam numa lista (tipo + captura, como o navegador identifica), o relogio anda a mao e os
+ * quadros (requestAnimationFrame) so rodam quando o teste chama quadro().
+ */
 class JanelaFalsa extends EventTarget {
   agora = 0;
   ouvintes = [];
+  quadros = new Map();
   relogios = new Map();
   #proximo = 1;
+
+  requestAnimationFrame(fn) {
+    const id = this.#proximo;
+
+    this.#proximo += 1;
+    this.quadros.set(id, fn);
+
+    return id;
+  }
+
+  cancelAnimationFrame(id) {
+    this.quadros.delete(id);
+  }
+
+  /** Roda os quadros pedidos ate agora (os pedidos dentro deles ficam para o proximo). */
+  quadro() {
+    const pedidos = [...this.quadros.values()];
+
+    this.quadros.clear();
+
+    for (const fn of pedidos) {
+      fn(this.agora);
+    }
+  }
 
   addEventListener(type, listener, options) {
     const capture = captura(options);
@@ -86,6 +118,26 @@ function alvoFalso(janela) {
   return alvo;
 }
 
+/**
+ * A area que rola sozinha (a area de desenho, a lista das Camadas): caixa parada na tela (padrao 50..450 x 50..350,
+ * com a faixa de 32 px dentro da borda) e rolagem limitada de 0 ao maximo, como o navegador faz. Anota cada scrollBy.
+ */
+function areaFalsa({ caixa = { bottom: 350, left: 50, right: 450, top: 50 }, maximo = { x: 600, y: 600 }, rolagem = { x: 100, y: 100 } } = {}) {
+  const area = {
+    rolagens: [],
+    scrollLeft: rolagem.x,
+    scrollTop: rolagem.y,
+    getBoundingClientRect: () => ({ ...caixa, height: caixa.bottom - caixa.top, width: caixa.right - caixa.left, x: caixa.left, y: caixa.top }),
+    scrollBy(dx, dy) {
+      area.rolagens.push([dx, dy]);
+      area.scrollLeft = Math.min(maximo.x, Math.max(0, area.scrollLeft + dx));
+      area.scrollTop = Math.min(maximo.y, Math.max(0, area.scrollTop + dy));
+    }
+  };
+
+  return area;
+}
+
 /** Comeca um gesto (mouse, botao 0, ponteiro 1 em 100,100, limiar 4) e anota o que cada handler recebe. */
 function montar({ comeco = {}, handlers = {} } = {}) {
   const janela = new JanelaFalsa();
@@ -132,6 +184,30 @@ function arrastando(opcoes) {
   return montado;
 }
 
+/**
+ * Comeca um gesto com a rolagem sozinha ligada numa area falsa. O onMove anota o ponto e as teclas em `movimentos`;
+ * `pedidas` conta quantas vezes a area foi lida (so nos quadros).
+ */
+function rolando({ area = areaFalsa(), comeco = {}, onMove } = {}) {
+  const movimentos = [];
+  const lida = { pedidas: 0 };
+  const montado = montar({
+    comeco,
+    handlers: {
+      autoScroll: () => {
+        lida.pedidas += 1;
+
+        return area;
+      },
+      onMove: onMove ?? ((ponto, teclas) => movimentos.push([ponto, teclas]))
+    }
+  });
+
+  return { ...montado, area, lida, movimentos };
+}
+
+const SEM_TECLAS = { altKey: false, shiftKey: false };
+
 const DO_GESTO = ["blur", "dragstart (captura)", "keydown (captura)", "pointercancel (captura)", "pointermove (captura)", "pointerup (captura)"];
 const DO_BLOQUEADOR = ["click (captura)", "pointerdown (captura)"];
 /** Cancelado com o botao ainda apertado: o bloqueador espera o botao solto (pointerup, pointercancel ou buttons 0). */
@@ -150,7 +226,7 @@ test("ponteiro: toque, botão 2, ponteiro que não é o principal e caneta sem p
     assert.deepEqual(chamadas, [], JSON.stringify(comeco));
   }
 
-  // O toque nunca entra, nem pedindo mouse e caneta.
+  // Sem pedir o toque, ele nao entra, nem pedindo mouse e caneta (o teste seguinte pede).
   assert.equal(montar({ comeco: { pointerType: "touch" }, handlers: { pointerTypes: pointer.FREE_POINTER_MOUSE_AND_PEN } }).janela.ouvintes.length, 0);
   // So a caneta: o mouse fica de fora.
   assert.equal(montar({ handlers: { pointerTypes: ["pen"] } }).janela.ouvintes.length, 0);
@@ -171,6 +247,48 @@ test("ponteiro: toque, botão 2, ponteiro que não é o principal e caneta sem p
   );
   assert.equal(typeof nada, "function");
   nada();
+});
+
+test("ponteiro: o toque só entra quando a chamada pede (o solto e as alças do desenho); o padrão continua só o mouse", () => {
+  assert.deepEqual(pointer.FREE_POINTER_MOUSE_PEN_AND_TOUCH, ["mouse", "pen", "touch"]);
+  // As listas de antes nao mudaram: as Camadas e o Elementos (padrao) seguem so com o mouse, a sequencia e o Fundo
+  // com mouse e caneta.
+  assert.deepEqual(pointer.FREE_POINTER_MOUSE, ["mouse"]);
+  assert.deepEqual(pointer.FREE_POINTER_MOUSE_AND_PEN, ["mouse", "pen"]);
+
+  for (const pointerTypes of [undefined, pointer.FREE_POINTER_MOUSE, pointer.FREE_POINTER_MOUSE_AND_PEN]) {
+    const { chamadas, janela } = montar({ comeco: { pointerType: "touch" }, handlers: pointerTypes ? { pointerTypes } : {} });
+
+    assert.equal(janela.ouvintes.length, 0, `toque com ${JSON.stringify(pointerTypes ?? "o padrao")}`);
+    ponteiro(janela, "pointermove", 160, 100);
+    ponteiro(janela, "pointerup", 160, 100);
+    assert.deepEqual(chamadas, []);
+  }
+
+  // Pedido (o solto e as alcas do desenho): o dedo arrasta como o mouse, com o mesmo limiar, e solta uma vez.
+  const dedo = montar({ comeco: { pointerType: "touch" }, handlers: { pointerTypes: pointer.FREE_POINTER_MOUSE_PEN_AND_TOUCH } });
+  assert.deepEqual(dedo.janela.tipos(), DO_GESTO);
+  ponteiro(dedo.janela, "pointermove", 103, 100);
+  assert.deepEqual(dedo.chamadas, [], "antes do limiar, um toque e so um toque");
+  // Um segundo dedo (outro pointerId) no meio nao mexe no gesto.
+  ponteiro(dedo.janela, "pointermove", 300, 300, { pointerId: 2 });
+  ponteiro(dedo.janela, "pointerup", 300, 300, { pointerId: 2 });
+  ponteiro(dedo.janela, "pointermove", 100, 110);
+  ponteiro(dedo.janela, "pointerup", 100, 112);
+  assert.deepEqual(dedo.chamadas, [["start", [1]], ["move", { x: 100, y: 110 }], ["drop", { x: 100, y: 112 }]]);
+  assert.deepEqual(dedo.janela.tipos(), DO_BLOQUEADOR, "o bloqueador do click vale para o toque tambem");
+
+  // O mouse e a caneta continuam na mesma lista; o segundo dedo que pousa sozinho (isPrimary false) nao comeca nada.
+  for (const pointerType of ["mouse", "pen"]) {
+    const outro = montar({ comeco: { pointerType }, handlers: { pointerTypes: pointer.FREE_POINTER_MOUSE_PEN_AND_TOUCH } });
+
+    ponteiro(outro.janela, "pointermove", 110, 100);
+    assert.equal(outro.chamadas[0][0], "start", pointerType);
+  }
+
+  assert.equal(montar({ comeco: { isPrimary: false, pointerType: "touch" }, handlers: { pointerTypes: pointer.FREE_POINTER_MOUSE_PEN_AND_TOUCH } }).janela.ouvintes.length, 0);
+  // So o toque: o mouse fica de fora.
+  assert.equal(montar({ handlers: { pointerTypes: ["touch"] } }).janela.ouvintes.length, 0);
 });
 
 test("ponteiro: antes do limiar é clique; 3 px e o pointerup não chamam nada, nada é capturado e o click passa", () => {
@@ -506,6 +624,255 @@ test("ponteiro: a função devolvida desliga o gesto sem chamar handler; o bloqu
   assert.deepEqual(esc.chamadas.slice(2), [["cancel"]]);
 });
 
+test("ponteiro: o onMove recebe o Alt e o Shift de cada pointermove (sem guias e a proporção nas alças)", () => {
+  const movimentos = [];
+  const { chamadas, janela } = montar({ handlers: { onMove: (ponto, teclas) => movimentos.push([ponto, teclas]) } });
+
+  // Antes do limiar nada e chamado, com tecla ou sem.
+  ponteiro(janela, "pointermove", 102, 100, { altKey: true });
+  assert.deepEqual(movimentos, []);
+
+  ponteiro(janela, "pointermove", 110, 100, { altKey: true, shiftKey: false });
+  ponteiro(janela, "pointermove", 120, 100, { altKey: false, shiftKey: true });
+  ponteiro(janela, "pointermove", 130, 100, { altKey: true, shiftKey: true });
+  // Sem os campos (um evento sem teclas): as duas falsas, sempre booleanas.
+  ponteiro(janela, "pointermove", 140, 100);
+  assert.deepEqual(movimentos, [
+    [{ x: 110, y: 100 }, { altKey: true, shiftKey: false }],
+    [{ x: 120, y: 100 }, { altKey: false, shiftKey: true }],
+    [{ x: 130, y: 100 }, { altKey: true, shiftKey: true }],
+    [{ x: 140, y: 100 }, SEM_TECLAS]
+  ]);
+
+  // O onDrop continua so com o ponto; o Shift e o Alt sozinhos passam (nao sao engolidos) durante o gesto.
+  assert.equal(tecla(janela, "Shift", { shiftKey: true }).defaultPrevented, false);
+  ponteiro(janela, "pointerup", 150, 100, { shiftKey: true });
+  assert.deepEqual(chamadas, [["start", [1]], ["drop", { x: 150, y: 100 }]]);
+});
+
+test("freeAutoScrollStep: só com o ponto dentro da área e a até 32 px da borda, de 1 a 20 px por quadro; fora da área e no meio, nada", () => {
+  assert.equal(pointer.FREE_AUTO_SCROLL_EDGE_PX, 32);
+  assert.equal(pointer.FREE_AUTO_SCROLL_MAX_PX, 20);
+
+  const area = { bottom: 300, left: 0, right: 400, top: 0 };
+  const passo = (x, y, opcoes) => pointer.freeAutoScrollStep(area, { x, y }, opcoes);
+
+  // No meio e no fim exato da faixa (32 px da borda): nada, sem -0.
+  assert.deepEqual(passo(200, 150), { dx: 0, dy: 0 });
+  assert.deepEqual(passo(32, 150), { dx: 0, dy: 0 });
+  assert.deepEqual(passo(368, 268), { dx: 0, dy: 0 });
+
+  // Colado em cada borda: o teto de 20, para fora (esquerda e cima negativos).
+  assert.deepEqual(passo(0, 150), { dx: -20, dy: 0 });
+  assert.deepEqual(passo(400, 150), { dx: 20, dy: 0 });
+  assert.deepEqual(passo(200, 0), { dx: 0, dy: -20 });
+  assert.deepEqual(passo(200, 300), { dx: 0, dy: 20 });
+  // No canto, os dois eixos.
+  assert.deepEqual(passo(0, 0), { dx: -20, dy: -20 });
+  assert.deepEqual(passo(395, 296), { dx: 17, dy: 18 });
+
+  // A velocidade cresce de 1 (no fim da faixa) a 20 (na borda), inteira e sem pular para tras.
+  assert.deepEqual(passo(16, 150), { dx: -10, dy: 0 });
+  assert.deepEqual(passo(31, 150), { dx: -1, dy: 0 });
+  assert.deepEqual(passo(31.9, 150), { dx: -1, dy: 0 }, "dentro da faixa e sempre pelo menos 1");
+  let antes = Infinity;
+
+  for (let distancia = 0; distancia < 32; distancia += 0.5) {
+    const velocidade = -passo(distancia, 150).dx;
+
+    assert.ok(Number.isInteger(velocidade) && velocidade >= 1 && velocidade <= 20, `${distancia}: ${velocidade}`);
+    assert.ok(velocidade <= antes, `${distancia}: nao cresce para dentro`);
+    antes = velocidade;
+  }
+
+  // Fora da area: nada, mesmo na altura da faixa de outra borda.
+  for (const [x, y] of [[-1, 150], [401, 150], [200, -1], [200, 301], [-5, -5], [-1, 5], [405, 295], [Number.NaN, 150], [200, Number.NaN]]) {
+    assert.deepEqual(passo(x, y), { dx: 0, dy: 0 }, `${x},${y}`);
+  }
+
+  // As opcoes: outra faixa e outro teto; zero desliga.
+  assert.deepEqual(passo(0, 150, { edge: 10, max: 5 }), { dx: -5, dy: 0 });
+  assert.deepEqual(passo(5, 150, { edge: 10, max: 5 }), { dx: -3, dy: 0 });
+  assert.deepEqual(passo(10, 150, { edge: 10, max: 5 }), { dx: 0, dy: 0 });
+  assert.deepEqual(passo(0, 150, { max: 0 }), { dx: 0, dy: 0 });
+  assert.deepEqual(passo(0, 150, { edge: 0 }), { dx: 0, dy: 0 });
+
+  // Area mais estreita que duas faixas: os dois lados se descontam (no meio, nada; perto de um lado, para ele).
+  const estreita = { bottom: 300, left: 0, right: 40, top: 0 };
+  assert.deepEqual(pointer.freeAutoScrollStep(estreita, { x: 20, y: 150 }), { dx: 0, dy: 0 });
+  assert.deepEqual(pointer.freeAutoScrollStep(estreita, { x: 10, y: 150 }), { dx: -13, dy: 0 });
+
+  // Um DOMRect (com width, height, x e y a mais) serve.
+  assert.deepEqual(pointer.freeAutoScrollStep({ ...area, height: 300, width: 400, x: 0, y: 0 }, { x: 0, y: 150 }), { dx: -20, dy: 0 });
+});
+
+test("ponteiro: a rolagem sozinha só liga depois do limiar; rola e refaz o onMove com o último ponto e as últimas teclas só quando a área rolou", () => {
+  const { area, chamadas, janela, lida, movimentos } = rolando();
+
+  // Antes do limiar: nenhum quadro pedido e a area nem e lida.
+  ponteiro(janela, "pointermove", 102, 100);
+  assert.equal(janela.quadros.size, 0);
+  assert.equal(lida.pedidas, 0);
+
+  // O limiar: um quadro pedido (um so laco).
+  ponteiro(janela, "pointermove", 110, 100);
+  assert.equal(janela.quadros.size, 1);
+  assert.deepEqual(movimentos, [[{ x: 110, y: 100 }, SEM_TECLAS]]);
+  ponteiro(janela, "pointermove", 112, 100);
+  assert.equal(janela.quadros.size, 1, "um pointermove nao pede outro laco");
+
+  // Dentro da area e fora da faixa: arma, sem rolar; o laco segue.
+  janela.quadro();
+  assert.equal(lida.pedidas, 1);
+  assert.deepEqual(area.rolagens, []);
+  assert.equal(janela.quadros.size, 1);
+
+  // Na faixa da esquerda (10 px da borda), com Shift: cada quadro rola 14 px e refaz o onMove com o mesmo ponto.
+  ponteiro(janela, "pointermove", 60, 100, { shiftKey: true });
+  movimentos.length = 0;
+  janela.quadro();
+  janela.quadro();
+  assert.deepEqual(area.rolagens, [[-14, 0], [-14, 0]], "scrollBy com numeros, sem suavizar");
+  assert.equal(area.scrollLeft, 72);
+  assert.deepEqual(movimentos, [
+    [{ x: 60, y: 100 }, { altKey: false, shiftKey: true }],
+    [{ x: 60, y: 100 }, { altKey: false, shiftKey: true }]
+  ]);
+
+  // Parado no meio: nada rola e nenhum onMove a cada quadro.
+  ponteiro(janela, "pointermove", 250, 200);
+  movimentos.length = 0;
+  janela.quadro();
+  janela.quadro();
+  assert.equal(area.rolagens.length, 2);
+  assert.deepEqual(movimentos, []);
+
+  // Colado na borda com a area quase no comeco: rola o que falta (um onMove) e, no fim da rolagem, nada mais chama.
+  area.scrollLeft = 5;
+  ponteiro(janela, "pointermove", 50, 200);
+  movimentos.length = 0;
+  janela.quadro();
+  assert.equal(area.scrollLeft, 0);
+  assert.deepEqual(movimentos, [[{ x: 50, y: 200 }, SEM_TECLAS]]);
+  janela.quadro();
+  janela.quadro();
+  assert.deepEqual(area.rolagens.slice(2), [[-20, 0], [-20, 0], [-20, 0]], "tenta rolar");
+  assert.equal(movimentos.length, 1, "sem rolar de fato, nenhum onMove");
+
+  // Na faixa de baixo (8 px da borda): para baixo, no outro eixo.
+  ponteiro(janela, "pointermove", 250, 342);
+  janela.quadro();
+  assert.deepEqual(area.rolagens.at(-1), [0, 15]);
+  assert.equal(area.scrollTop, 115);
+
+  ponteiro(janela, "pointerup", 250, 342);
+  assert.deepEqual(chamadas, [["start", [1]], ["drop", { x: 250, y: 342 }]]);
+  assert.equal(janela.quadros.size, 0, "soltar para o laco");
+
+  // Sem area (autoScroll devolve null): o laco segue sem rolar nem quebrar.
+  const semArea = montar({ handlers: { autoScroll: () => null } });
+  ponteiro(semArea.janela, "pointermove", 110, 100);
+  semArea.janela.quadro();
+  semArea.janela.quadro();
+  assert.equal(semArea.janela.quadros.size, 1);
+  assert.deepEqual(semArea.chamadas, [["start", [1]], ["move", { x: 110, y: 100 }]]);
+
+  // Sem a opcao: nenhum quadro (as Camadas, o Fundo e o Elementos do L4a nao mudam).
+  const semOpcao = arrastando();
+  assert.equal(semOpcao.janela.quadros.size, 0);
+});
+
+test("ponteiro: a rolagem sozinha só se arma depois de o ponto estar dentro da área e fora da faixa uma vez no gesto (C10)", () => {
+  // Pegar uma linha que ja esta na faixa (a primeira das Camadas, 10 px da borda de cima): nao rola.
+  const linha = rolando({ comeco: { clientX: 200, clientY: 60 } });
+  ponteiro(linha.janela, "pointermove", 200, 65);
+  assert.equal(linha.janela.quadros.size, 1);
+  linha.janela.quadro();
+  linha.janela.quadro();
+  ponteiro(linha.janela, "pointermove", 200, 52);
+  linha.janela.quadro();
+  assert.deepEqual(linha.area.rolagens, [], "comecar dentro da faixa nao rola");
+  // Saiu da faixa para o meio e voltou: rola.
+  ponteiro(linha.janela, "pointermove", 200, 150);
+  linha.janela.quadro();
+  assert.deepEqual(linha.area.rolagens, []);
+  ponteiro(linha.janela, "pointermove", 200, 60);
+  linha.janela.quadro();
+  assert.deepEqual(linha.area.rolagens, [[0, -14]]);
+
+  // Vindo de fora (o painel Elementos a esquerda da area de desenho), entrando pela faixa: nao rola.
+  const painel = rolando({ comeco: { clientX: 20, clientY: 200 } });
+  ponteiro(painel.janela, "pointermove", 30, 200);
+  painel.janela.quadro();
+  ponteiro(painel.janela, "pointermove", 55, 200);
+  painel.janela.quadro();
+  painel.janela.quadro();
+  assert.deepEqual(painel.area.rolagens, [], "entrar pela faixa nao rola");
+  assert.equal(painel.area.scrollLeft, 100);
+  // Dentro e fora da faixa uma vez: armada; dai em diante vale ate o fim do gesto, mesmo saindo da area e voltando.
+  ponteiro(painel.janela, "pointermove", 120, 200);
+  painel.janela.quadro();
+  ponteiro(painel.janela, "pointermove", 55, 200);
+  painel.janela.quadro();
+  assert.deepEqual(painel.area.rolagens, [[-17, 0]]);
+  ponteiro(painel.janela, "pointermove", 20, 200);
+  painel.janela.quadro();
+  assert.equal(painel.area.rolagens.length, 1, "fora da area, nada");
+  ponteiro(painel.janela, "pointermove", 55, 200);
+  painel.janela.quadro();
+  assert.deepEqual(painel.area.rolagens, [[-17, 0], [-17, 0]], "de volta a faixa, rola sem precisar passar pelo meio de novo");
+  ponteiro(painel.janela, "pointerup", 55, 200);
+
+  // Cada gesto comeca desarmado.
+  const deNovo = rolando({ area: painel.area, comeco: { clientX: 55, clientY: 200 } });
+  ponteiro(deNovo.janela, "pointermove", 55, 210);
+  deNovo.janela.quadro();
+  deNovo.janela.quadro();
+  assert.equal(painel.area.rolagens.length, 2, "o gesto novo nao herda a arma do anterior");
+});
+
+test("ponteiro: o laço da rolagem para no pointerup, no pointercancel, no Esc, no blur, com o botão solto fora da janela e na função devolvida", () => {
+  for (const [nome, fim] of [
+    ["pointerup", (montado) => ponteiro(montado.janela, "pointerup", 60, 100)],
+    ["pointercancel", (montado) => ponteiro(montado.janela, "pointercancel", 60, 100)],
+    ["Esc", (montado) => tecla(montado.janela, "Escape")],
+    ["blur da janela", (montado) => disparar(montado.janela, "blur")],
+    ["buttons 0", (montado) => ponteiro(montado.janela, "pointermove", 60, 100, { buttons: 0 })],
+    ["funcao devolvida", (montado) => montado.dispose()]
+  ]) {
+    const montado = rolando();
+
+    ponteiro(montado.janela, "pointermove", 110, 100);
+    montado.janela.quadro();
+    // Na faixa: o proximo quadro rolaria.
+    ponteiro(montado.janela, "pointermove", 60, 100);
+    assert.equal(montado.janela.quadros.size, 1, nome);
+    fim(montado);
+    assert.equal(montado.janela.quadros.size, 0, `${nome}: o quadro pedido sai`);
+    montado.janela.quadro();
+    assert.deepEqual(montado.area.rolagens, [], `${nome}: nada rola depois`);
+    assert.equal(montado.movimentos.length, 2, `${nome}: nenhum onMove depois`);
+  }
+
+  // O onMove da rolagem que desliga o gesto (quem chamou desmontou): nenhum quadro novo.
+  let desligar = null;
+  const desmonta = rolando({
+    onMove: () => {
+      if (desmonta.area.rolagens.length > 0) {
+        desligar();
+      }
+    }
+  });
+  desligar = desmonta.dispose;
+  ponteiro(desmonta.janela, "pointermove", 110, 100);
+  desmonta.janela.quadro();
+  ponteiro(desmonta.janela, "pointermove", 60, 100);
+  desmonta.janela.quadro();
+  assert.equal(desmonta.area.rolagens.length, 1);
+  assert.equal(desmonta.janela.quadros.size, 0);
+  assert.equal(desmonta.janela.ouvintes.length, 0);
+});
+
 test("free-pointer-drag.ts carrega no Node sem janela, não toca na janela ao carregar e não monta HTML nem CSS em texto", () => {
   // A regra de tests/popup-livre-editor-modelo.test.mjs (spec §6) vale para o ajudante.
   const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-pointer-drag.ts", import.meta.url), "utf8");
@@ -516,4 +883,8 @@ test("free-pointer-drag.ts carrega no Node sem janela, não toca na janela ao ca
   assert.match(source, /ownerDocument\?\.defaultView/);
   assert.equal(/\b(?:window|document|globalThis|self)\s*[.?[]/.test(source), false);
   assert.equal(/^import\s/m.test(source), false, "sem imports: carrega sozinho no Node");
+  // L4b: o quadro da rolagem sozinha vem da janela do gesto e e desligado nela; a rolagem nunca suaviza.
+  assert.match(source, /win\.requestAnimationFrame\(/);
+  assert.match(source, /win\.cancelAnimationFrame\(/);
+  assert.equal(/behavior\s*:\s*["']smooth/.test(source), false);
 });
