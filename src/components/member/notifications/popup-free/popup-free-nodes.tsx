@@ -56,7 +56,8 @@ export type FreeRenderContext = {
   firstTextId: FreeId | null;
   motion: FreeMotion;
   onClose?: () => void;
-  onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink) => void;
+  /** O 3º argumento diz qual botão foi: "cta" (o Botão principal) ou `link:<id>` (um "Abrir um link"). */
+  onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink, button?: string) => void;
   onDismiss?: () => void;
   onSnooze?: () => void;
   playing: boolean;
@@ -78,7 +79,7 @@ export function freeRenderContextOf(input: {
   faces: readonly PopupFontFace[];
   motion: FreeMotion;
   onClose?: () => void;
-  onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink) => void;
+  onCta?: (event: MouseEvent<HTMLAnchorElement>, link: NotificationLink, button?: string) => void;
   onDismiss?: () => void;
   onSnooze?: () => void;
   origin: string | null;
@@ -212,7 +213,7 @@ function ButtonView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderC
         data-free-button={kind}
         data-free-id={node.id}
         href={link.href}
-        onClick={(event) => ctx.onCta?.(event, link)}
+        onClick={(event) => ctx.onCta?.(event, link, kind === "cta" ? "cta" : `link:${node.id}`)}
         ref={ref}
         style={style}
         {...(link.newTab ? { rel: "noopener noreferrer", target: "_blank" } : {})}
