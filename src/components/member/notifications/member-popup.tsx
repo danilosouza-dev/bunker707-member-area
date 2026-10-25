@@ -34,7 +34,7 @@ import { loadPopupFreeCard } from "./popup-free/popup-free-load";
 // Modelos (docs/28): `still` (so com `preview`) deixa o video do Personalizado e do Livre sempre na capa, para as
 // miniaturas da lista e de "Meus modelos" nunca montarem <video>.
 //
-// Design Livre (docs/27): com `popup.freeDesign`, o PopupFreeCard, num pedaco proprio (popup-free-load.ts, por
+// Design Livre (docs/27): com `popup.freeDesign`, o PopupFreeCard (com o `device` das previas), num pedaco proprio (popup-free-load.ts, por
 // React.lazy + Suspense sem nada no lugar): o cartao Livre e os 24 icones nunca entram no pedaco da janela do
 // Padrão/Personalizado. O host ja baixou esse pedaco antes de abrir; enquanto nao chega, nada e desenhado.
 // (React.lazy e nao next/dynamic: o mesmo pedaco e o mesmo "nada ate carregar", e o cartao continua carregavel
@@ -44,6 +44,11 @@ export type MemberPopupCardProps = {
   accessPreviewMode?: AccessPreviewMode;
   /** id do texto (aria-describedby do dialogo). */
   bodyId?: string;
+  /**
+   * So as previas do admin, so no Livre (docs/27 §2.1): o aparelho desenhado (a de 375 px = "mobile"). O aluno nunca
+   * passa: o cartao Livre decide pela largura da tela. O Padrão e o Personalizado nao usam.
+   */
+  device?: "desktop" | "mobile";
   /** "Só no X": o toque fora faz o X pulsar por 300 ms (nada sob prefers-reduced-motion). */
   nudgeClose?: boolean;
   onClose?: () => void;
@@ -108,7 +113,7 @@ function PopupCta({
   );
 }
 
-export function MemberPopupCard({ playing, still, ...props }: MemberPopupCardProps) {
+export function MemberPopupCard({ device, playing, still, ...props }: MemberPopupCardProps) {
   const { design, fonts, freeDesign } = props.popup;
   // `still` so vale na previa (o cartao do aluno nunca recebe; sem previa, e ignorado).
   const stillPreview = props.preview === true && still === true ? { still: true } : {};
@@ -116,7 +121,7 @@ export function MemberPopupCard({ playing, still, ...props }: MemberPopupCardPro
   if (freeDesign) {
     return (
       <Suspense fallback={null}>
-        <PopupFreeCard {...props} {...stillPreview} design={freeDesign} fonts={fonts} playing={playing} />
+        <PopupFreeCard {...props} {...stillPreview} design={freeDesign} device={device} fonts={fonts} playing={playing} />
       </Suspense>
     );
   }

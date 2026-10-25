@@ -25,7 +25,7 @@ import { closeViaOf } from "./popup-host-model";
 // segundo botao usa as saidas de sempre: Fechar = o X, Lembrar depois = o link, link = o clique do botao. O
 // video do design pausa quando a janela comeca a fechar (`playing`).
 // Design Livre (docs/27): o nome e o texto do primeiro titulo visivel do design (ou o titulo do aviso) e a
-// descricao o primeiro texto visivel (popupFreeDialogAria, de popup-free-render.ts, lido do pedaco do cartao Livre,
+// descricao o primeiro texto visivel do aparelho da tela (popupFreeDialogAria, lido do pedaco do cartao Livre,
 // que o host ja baixou antes de abrir: popup-free-render.ts nao entra no pedaco da janela). Exportada aqui a porta
 // do pedaco, para o host baixar o cartao Livre so pela janela (o pedaco do cartao nao repete o que a janela ja tem).
 

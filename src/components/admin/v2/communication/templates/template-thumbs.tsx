@@ -15,7 +15,7 @@ import type { TemplateThumb } from "@/server/communications/template-queries";
 // Livre (60×84 no Personalizado, 120×160 no Livre).
 // - Personalizado: as barras coloridas do modelo pronto (StarterThumb), montadas do design salvo; nada baixado (o
 //   fundo com imagem vira a cor de apoio).
-// - Livre: o proprio cartao do aluno em previa (MemberPopupCard), encolhido, montado so quando aparece na tela
+// - Livre: o proprio cartao do aluno em previa (MemberPopupCard, no computador), encolhido, montado so quando aparece na tela
 //   (IntersectionObserver); antes disso, um retangulo do mesmo tamanho. Nunca monta <video>: `still` deixa o video na
 //   capa (nada do video e baixado), entao 20 linhas na lista ou 50 no seletor nao fazem pedidos de video.
 // - Notificacao: o icone do modelo num circulo (ou o sino); Pop-up Padrão: o icone do pop-up.
@@ -168,7 +168,7 @@ export function FreeDesignThumb({ design, fonts, label, size }: { design: PopupF
           style={{ containerType: "inline-size", transform: `translate(-50%, -50%) scale(${scale})`, width: stage }}
         >
           <span className="flex justify-center py-4">
-            <MemberPopupCard playing={false} popup={popup} preview still />
+            <MemberPopupCard device="desktop" playing={false} popup={popup} preview still />
           </span>
         </span>
       ) : null}

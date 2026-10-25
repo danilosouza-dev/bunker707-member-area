@@ -99,7 +99,8 @@ const schema = await import("../src/server/communications/popup-free-schema.ts")
 const styles = await import("../src/components/member/notifications/popup-free/popup-free-styles.ts");
 const personalizado = await import("../src/components/member/notifications/popup-design/popup-design-styles.ts");
 const hostModel = await import("../src/components/member/notifications/popup-host-model.ts");
-const { PopupFreeCard } = await import("../src/components/member/notifications/popup-free/popup-free-card.tsx");
+const cardModule = await import("../src/components/member/notifications/popup-free/popup-free-card.tsx");
+const { PopupFreeCard } = cardModule;
 const { FreeNodeView, freeRenderContextOf } = await import("../src/components/member/notifications/popup-free/popup-free-nodes.tsx");
 const { loadPopupFreeCard } = await import("../src/components/member/notifications/popup-free/popup-free-load.ts");
 const { MemberPopupCard } = await import("../src/components/member/notifications/member-popup.tsx");
@@ -637,11 +638,12 @@ test("o primeiro texto descreve o diálogo", async () => {
   assert.match(markup, /<p data-free-id="texto2" style=/, "so o primeiro leva o id da descricao");
   assert.equal(render.popupFreeDialogAria(popupOf(design), { bodyId: "b", titleId: "t" })["aria-describedby"], "b");
   // O dialogo escolhe a aria do Livre so quando ha freeDesign (o Personalizado continua com a dele), lida do pedaco
-  // do cartao Livre ja baixado (que reexporta a popupFreeDialogAria de popup-free-render.ts).
+  // do cartao Livre ja baixado (a popupFreeDialogAria de popup-free-render.ts pelo design do aparelho da tela).
   const dialogSource = readFileSync(new URL("src/components/member/notifications/member-popup-dialog.tsx", root), "utf8");
   assert.match(dialogSource, /popup\.freeDesign \? freeDialogAria\(popup, \{ bodyId, titleId \}\) : popupDialogAria\(popup, \{ bodyId, titleId \}\)/);
   assert.match(dialogSource, /loadedPopupFreeCard\(\)\?\.popupFreeDialogAria\(popup, ids\) \?\? \{ "aria-label": popup\.title \}/);
-  assert.equal((await loadPopupFreeCard()).popupFreeDialogAria, render.popupFreeDialogAria, "a mesma funcao de popup-free-render.ts");
+  const chunkAria = (await loadPopupFreeCard()).popupFreeDialogAria;
+  assert.deepEqual(chunkAria(popupOf(design), { bodyId: "b", titleId: "t" }), render.popupFreeDialogAria(popupOf(design), { bodyId: "b", titleId: "t" }), "sem valores do celular, a mesma de popup-free-render.ts");
 });
 
 test("vídeo só com movimento; menos movimento e Save-Data mostram o pôster, e sem pôster só o fundo", () => {
@@ -897,6 +899,162 @@ test("o editor recebe o elemento de cada um pelo editorNodeRef e o aparelho marc
 });
 
 /* ------------------------------------------------------------------------------------------------
+ * Celular: os valores proprios (devices.mobile) no cartao (docs/27 §1 e §9.10)
+ * ---------------------------------------------------------------------------------------------- */
+
+const FILL = [{ color: "#ffffff", kind: "solid" }];
+
+/** Titulo de 40 px, uma Forma solta, um Véu solto escondido so no celular e o celular com valores proprios. */
+function withMobile() {
+  const design = parsed({
+    children: [
+      { id: "titulo", lines: [[{ text: "Aula nova" }]], textStyle: { size: 40 }, type: "heading" },
+      { box: { fill: FILL }, id: "forma", place: { h: 60, mode: "free", w: 200, x: 24, y: 120 }, type: "shape" },
+      { box: { fill: FILL }, id: "veu", place: { h: 40, mode: "free", w: 100, x: 0, y: 0 }, type: "shape" },
+      { id: "links", type: "links" }
+    ],
+    devices: {
+      mobile: {
+        artboard: { padding: 16 },
+        nodes: { forma: { place: { mode: "free", w: 300, x: 8, y: 40 } }, titulo: { textStyle: { size: 24 } }, veu: { hidden: true } }
+      }
+    }
+  });
+
+  assert.ok(design.devices?.mobile, "o schema guarda os valores do celular");
+
+  return design;
+}
+
+/** O atributo style do primeiro elemento com o atributo dado. */
+function styleOfAttr(markup, attr) {
+  const match = new RegExp(`<[a-z0-9]+[^>]*${attr}[^>]*>`).exec(markup);
+
+  assert.ok(match, `${attr} desenhado`);
+
+  return /style="([^"]*)"/.exec(match[0])?.[1] ?? "";
+}
+
+/** Troca o window global so durante `run` (o Node nao tem window: o cartao le o servidor). */
+function withWindow(win, run) {
+  const had = "window" in globalThis;
+  const previous = globalThis.window;
+  globalThis.window = win;
+
+  try {
+    return run();
+  } finally {
+    if (had) {
+      globalThis.window = previous;
+    } else {
+      delete globalThis.window;
+    }
+  }
+}
+
+test("Celular: device=\"mobile\" desenha posição, largura e fonte do celular em cqw, e o escondido só no celular some", () => {
+  const design = withMobile();
+
+  for (const markup of [card(design, { device: "mobile" }), card(design, { device: "mobile", preview: true })]) {
+    const forma = styleOfId(markup, "forma");
+    for (const part of [`left:${len(8)}`, `top:${len(40)}`, `width:${len(300)}`, `height:${len(60)}`]) {
+      assert.ok(forma.includes(part), `${part} em ${forma}`);
+    }
+    assert.ok(styleOfId(markup, "titulo").includes(`font-size:${render.freeFontSize(24, W)}`), "a fonte do celular, com o piso de 12 px por cima");
+    assert.ok(styleOfAttr(markup, "data-free-artboard").includes(`padding:${len(16)}`), "o respiro da prancheta do celular");
+    assert.doesNotMatch(markup, /data-free-id="veu"/, "escondido no celular: nao desenhado");
+    assert.match(markup, /data-free-device="mobile"/);
+  }
+
+  // O design que entrou nao muda (o cartao desenha uma copia juntada).
+  assert.equal(design.children.find((node) => node.id === "forma").place.x, 24);
+});
+
+test("Celular: sem device, no servidor e com device=\"desktop\" valem os valores do computador", () => {
+  const design = withMobile();
+  const student = card(design);
+  const forma = styleOfId(student, "forma");
+
+  for (const part of [`left:${len(24)}`, `top:${len(120)}`, `width:${len(200)}`]) {
+    assert.ok(forma.includes(part), `${part} em ${forma}`);
+  }
+  assert.ok(styleOfId(student, "titulo").includes(`font-size:${render.freeFontSize(40, W)}`));
+  assert.ok(styleOfAttr(student, "data-free-artboard").includes(`padding:${len(24)}`), "o respiro do computador");
+  assert.match(student, /data-free-id="veu"/, "no computador o Véu aparece");
+  assert.doesNotMatch(student, /data-free-device/, "o aluno nunca passa aparelho");
+
+  // O computador explicito desenha o mesmo (so a marca do aparelho a mais); os valores do celular nao vazam.
+  assert.equal(card(design, { device: "desktop" }).replace(' data-free-device="desktop"', ""), student);
+  assert.equal(card({ ...design, devices: undefined }), student, "o mesmo HTML sem devices");
+
+  // O servidor (e o Node aqui, sem window) le o computador, mesmo com uma tela de celular por perto.
+  assert.equal(cardModule.freeServerDevice(), "desktop");
+  assert.equal(withWindow({ matchMedia: () => ({ addEventListener() {}, matches: true, removeEventListener() {} }) }, () => card(design)), student, "renderToStaticMarkup usa o servidor");
+});
+
+test("Celular: a tela de até 767 px é o celular (matchMedia), e a troca de largura avisa o cartão", () => {
+  const queries = [];
+  const windowOf = (matches) => ({
+    matchMedia(query) {
+      queries.push(query);
+      return { matches };
+    }
+  });
+
+  assert.equal(cardModule.FREE_MOBILE_QUERY, "(max-width: 767px)");
+  assert.equal(cardModule.freeDeviceOfWindow(windowOf(true)), "mobile");
+  assert.equal(cardModule.freeDeviceOfWindow(windowOf(false)), "desktop");
+  assert.equal(cardModule.freeDeviceOfWindow({}), "desktop", "sem matchMedia: computador");
+  assert.deepEqual(queries, ["(max-width: 767px)", "(max-width: 767px)"]);
+
+  const listeners = [];
+  const removed = [];
+  const fake = {
+    matchMedia: () => ({
+      addEventListener: (type, listener) => listeners.push([type, listener]),
+      matches: true,
+      removeEventListener: (type, listener) => removed.push([type, listener])
+    })
+  };
+
+  withWindow(fake, () => {
+    const onChange = () => undefined;
+    const unsubscribe = cardModule.subscribeFreeDevice(onChange);
+    assert.deepEqual(listeners, [["change", onChange]], "ouve a troca da largura");
+    unsubscribe();
+    assert.deepEqual(removed, [["change", onChange]], "e para de ouvir ao fechar");
+  });
+
+  // O cartao le a tela pelo useSyncExternalStore (servidor = computador), como o usePopupMotion.
+  const code = readFileSync(new URL("src/components/member/notifications/popup-free/popup-free-card.tsx", root), "utf8");
+  assert.match(code, /useSyncExternalStore\(subscribeFreeDevice, deviceSnapshot, freeServerDevice\)/);
+  assert.match(code, /resolveFreeForDevice\(design, device \?\? screenDevice\)/, "o aparelho passado vence a tela");
+});
+
+test("Celular: o nome e a descrição do diálogo seguem o aparelho da tela (título e texto escondidos só no celular)", () => {
+  const ids = { bodyId: "b", titleId: "t" };
+  const design = parsed({
+    children: [
+      { id: "titulo", lines: [[{ text: "Só no computador" }]], type: "heading" },
+      { id: "texto", lines: [[{ text: "Descrição" }]], type: "text" },
+      { id: "links", type: "links" }
+    ],
+    devices: { mobile: { nodes: { texto: { hidden: true }, titulo: { hidden: true } } } }
+  });
+  const popup = popupOf(design, { title: "Nome do pop-up" });
+  const desktop = { "aria-describedby": "b", "aria-labelledby": "t" };
+
+  assert.deepEqual(cardModule.popupFreeDialogAria(popup, ids), desktop, "sem window (servidor): o computador");
+  assert.deepEqual(
+    withWindow({ matchMedia: () => ({ matches: true }) }, () => cardModule.popupFreeDialogAria(popup, ids)),
+    { "aria-describedby": undefined, "aria-label": "Nome do pop-up" },
+    "no celular: sem o titulo e sem o texto"
+  );
+  assert.deepEqual(withWindow({ matchMedia: () => ({ matches: false }) }, () => cardModule.popupFreeDialogAria(popup, ids)), desktop);
+  assert.doesNotMatch(card(design, { device: "mobile" }), /<h2|id="b"/, "o cartao do celular sem o titulo e sem o texto");
+});
+
+/* ------------------------------------------------------------------------------------------------
  * Padrão e Personalizado iguais; pedaco proprio do Livre
  * ---------------------------------------------------------------------------------------------- */
 
@@ -936,6 +1094,32 @@ test("HTML do Padrão e do Personalizado igual ao de antes do Livre", () => {
   assert.equal((now.custom.match(/<!-- caso:/g) ?? []).length, 9, "os 3 modelos do Personalizado, normal, previa e sem links");
 });
 
+// Os mesmos casos que geraram tests/fixtures/popup-livre/antes-celular-livre.html no commit-base 55a8cc0 (antes de o
+// cartao desenhar os valores do celular): os modelos para comecar e o modelo com video, no aluno e na previa.
+async function livreBeforeCases() {
+  const starters = await import("../src/server/communications/popup-free-starters.ts");
+  const cases = [];
+
+  for (const { id } of starters.FREE_DESIGN_STARTERS) {
+    const { cta, design } = starters.applyFreeStarter(id, { audio: null, cta: CTA });
+    cases.push([`livre ${id}`, card(design, { popup: { cta } })]);
+    cases.push([`livre ${id} previa`, card(design, { popup: { cta }, preview: true })]);
+  }
+
+  cases.push(["livre video no topo", card(starter())]);
+  cases.push(["livre video no topo previa sem adiar", card(starter(), { popup: { canSnooze: false }, preview: true })]);
+
+  return cases.map(([name, markup]) => `<!-- caso: ${name} -->\n${markup}\n`).join("");
+}
+
+test("HTML do Livre no computador igual ao de antes do Celular (design sem devices)", async () => {
+  const before = readFileSync(new URL("fixtures/popup-livre/antes-celular-livre.html", import.meta.url), "utf8");
+  const now = await livreBeforeCases();
+
+  assert.equal(now, before, "o cartao Livre do computador mudou");
+  assert.equal((now.match(/<!-- caso:/g) ?? []).length, 10, "os 4 modelos para comecar (aluno e previa) e o modelo com video");
+});
+
 test("o Livre vai para o pedaço próprio: nada até o código chegar e o plano pede o pedaço antes do show", async () => {
   const design = starter();
   const popup = popupOf(design);
@@ -970,4 +1154,47 @@ test("o Livre vai para o pedaço próprio: nada até o código chegar e o plano 
   assert.match(show, /const freeCard = needsFreeCard\(armed\) \? loadPopupFreeCard\(\) : null;/, "o plano marcou: baixa junto com a janela");
   assert.ok(show.indexOf("await freeCard;") > 0 && show.indexOf("await freeCard;") < show.indexOf("postPopupShow("), "sem o codigo, nada abre e nada conta: o pedaco vem antes do POST /show");
   assert.match(hostSource, /if \(answer\.popup\.freeDesign && !needsFreeCard\(armed\)\) \{\s+try \{\s+await loadPopupFreeCard\(\);/, "Livre que o plano nao marcou: espera o pedaco antes de abrir");
+});
+
+// Depois do teste do pedaco proprio: este baixa o pedaco do cartao Livre (o React.lazy guarda o que chegou).
+test("Celular: as prévias do admin passam o aparelho (a de 375 px desenha o celular; miniaturas no computador)", async () => {
+  await loadPopupFreeCard();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const design = withMobile();
+  const popup = popupOf(design);
+
+  // O MemberPopupCard leva o aparelho so ao cartao Livre.
+  const mobile = html(createElement(MemberPopupCard, { device: "mobile", popup }));
+  assert.match(mobile, /data-free-device="mobile"/);
+  assert.ok(styleOfId(mobile, "forma").includes(`left:${len(8)}`));
+  assert.doesNotMatch(mobile, /data-free-id="veu"/);
+  const desktop = html(createElement(MemberPopupCard, { popup }));
+  assert.ok(styleOfId(desktop, "forma").includes(`left:${len(24)}`), "sem aparelho: o computador");
+  assert.doesNotMatch(desktop, /data-free-device/);
+
+  // A previa do aviso: a tela de 375 px com o celular e a do computador com o computador.
+  const { NoticePreview } = await import("../src/components/admin/v2/communication/notice-preview.tsx");
+  const schemas = await import("../src/server/communications/schemas.ts");
+  const preview = html(
+    createElement(NoticePreview, {
+      branding: { logoUrl: null, name: "Escola" },
+      device: "desktop",
+      draft: { ...schemas.emptyNoticeDraft("popup"), cta: CTA, freeDesign: design, title: "Pop-up" },
+      now: 0
+    })
+  );
+  const [celular, computador] = preview.split('aria-label="Prévia do pop-up no computador"');
+  assert.match(celular, /aria-label="Prévia do pop-up no celular"/);
+  assert.match(celular, /data-free-device="mobile"/);
+  assert.ok(styleOfId(celular, "forma").includes(`left:${len(8)}`), "375 px: a Forma do celular");
+  assert.doesNotMatch(celular, /data-free-id="veu"/);
+  assert.match(computador, /data-free-device="desktop"/);
+  assert.ok(styleOfId(computador, "forma").includes(`left:${len(24)}`), "computador: a Forma do computador");
+  assert.match(computador, /data-free-id="veu"/);
+
+  // As miniaturas (modelos, Meus modelos e os modelos para comecar) desenham o computador.
+  for (const file of ["templates/template-thumbs.tsx", "popup-design/popup-design-field.tsx"]) {
+    const code = readFileSync(new URL(`src/components/admin/v2/communication/${file}`, root), "utf8");
+    assert.match(code, /<MemberPopupCard device="desktop" playing=\{false\} popup=\{popup\} preview/, file);
+  }
 });
