@@ -129,7 +129,8 @@ import { FreeTemplatesPanel, useDesignTemplatesLoad, type FreeTemplateItem } fro
 // Arrastar do L4a (docs/27 §13.9): Camadas, desenho e o ⋯ levam a moveTo (freeMoveProblem e moveFreeNodeTo, um
 // passo sem juntar, nada no mesmo lugar); o painel Elementos mostra o lugar pelo previewDrop do desenho e acrescenta
 // no soltar pelo mesmo caminho do clique. A ordem e uma so: com o Celular, toda mudanca de ordem termina a frase com
-// "A ordem muda também no computador." (orderPhrase).
+// "A ordem muda também no computador." (orderPhrase); Soltar e Seguir a sequencia terminam com ela sempre, mesmo sem
+// mudar a ordem, porque o modo e um so nos dois aparelhos.
 
 const copy = FREE_EDITOR_COPY;
 /** Espera depois da ultima tecla antes de mandar o design ao rascunho do aviso. */
@@ -904,7 +905,8 @@ function FreeEditorSession({
         const next = freeNodeToFree(present.design, id, rects);
 
         if (next) {
-          // O Soltar tambem muda o lugar em children (dos dois aparelhos).
+          // O Soltar muda o modo nos dois aparelhos (e, de dentro de uma caixa, o lugar em children): com o Celular, a
+          // frase do computador sai sempre, mesmo com a ordem igual (docs/27 §13.9).
           commitDesign(next);
           announce(orderPhrase(copy.announce.toFree));
         }
@@ -915,7 +917,8 @@ function FreeEditorSession({
         const next = freeNodeToSequence(present.design, id, rects);
 
         if (next) {
-          // O lugar sai dos retangulos do aparelho que se ve, mas a ordem e uma so.
+          // O lugar sai dos retangulos do aparelho que se ve, mas a ordem e uma so. Como no Soltar, a frase do computador
+          // sai sempre com o Celular (o modo e um so), mesmo quando o indice fica igual.
           commitDesign(next);
           announce(orderPhrase(copy.announce.toSequence));
         }
