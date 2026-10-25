@@ -919,6 +919,50 @@ test("salvar de dentro do editor: no pop-up no ar, o botão e a frase do editor 
   assert.equal(C.save.saved, "Rascunho salvo.");
 });
 
+test("Aumentar a altura no Ver como Celular: grava a Altura mínima do celular, comparando com a prancheta do celular", () => {
+  const forma = { id: "forma", place: { h: 100, mode: "free", w: 100, x: 0, y: 140 }, type: "shape" };
+  const value = design([forma, LINKS], { artboard: { minHeight: 300 }, devices: { mobile: { artboard: { minHeight: 200 } } } });
+  const rects = { forma: { h: 100, w: 100, x: 0, y: 140 } };
+
+  // Celular: a do celular (200) vai ate o fim medido (240); o computador fica com 300.
+  const raised = editor.raiseFreeArtboardTo(value, "forma", rects, "mobile");
+  assert.equal(raised.devices.mobile.artboard.minHeight, 240);
+  assert.equal(raised.artboard.minHeight, 300, "o computador fica como estava");
+  assert.ok(schema.popupFreeDesignSchema.safeParse(raised).success);
+
+  // A comparacao e com a prancheta do celular: a do computador (300) ja passaria, a do celular nao.
+  assert.equal(editor.raiseFreeArtboardTo(value, "forma", rects, "desktop"), value, "no computador 300 ja cabe: nada muda");
+  const semCelular = design([forma, LINKS], { artboard: { minHeight: 100 } });
+  const doCelular = editor.raiseFreeArtboardTo(semCelular, "forma", rects, "mobile");
+  assert.deepEqual(doCelular.devices, { mobile: { artboard: { minHeight: 240 } } }, "sem valor do celular, cria o do celular");
+  assert.equal(doCelular.artboard.minHeight, 100);
+  assert.equal(editor.raiseFreeArtboardTo(raised, "forma", rects, "mobile"), raised, "ja cabe no celular: nada muda");
+
+  // Computador: como antes (sem aparelho, o computador).
+  assert.equal(editor.raiseFreeArtboardTo(semCelular, "forma", rects).artboard.minHeight, 240);
+  assert.equal(editor.raiseFreeArtboardTo(semCelular, "forma", rects).devices, undefined);
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+  assert.match(source, /raiseFreeArtboardTo\(historyRef\.current\.present\.design, item\.nodeId, rects, deviceRef\.current\)/);
+});
+
+test("Revisar e Ajustar no Celular: uma chave do celular liga o Ver como Celular; as outras mantêm o aparelho", () => {
+  assert.equal(editor.freeDeviceForFocusKey("devices.mobile.nodes.titulo.textStyle.size", "desktop"), "mobile");
+  assert.equal(editor.freeDeviceForFocusKey("freeDesign.devices.mobile.nodes.selo.place.x", "desktop"), "mobile");
+  assert.equal(editor.freeDeviceForFocusKey("devices.mobile.artboard.padding", "desktop"), "mobile");
+  assert.equal(editor.freeDeviceForFocusKey("freeDesign.devices.mobile.artboard.minHeight", "desktop"), "mobile");
+  assert.equal(editor.freeDeviceForFocusKey(inspector.freeMobileTextSizeKey("titulo"), "desktop"), "mobile", "o Ajustar no Celular");
+  assert.equal(editor.freeDeviceForFocusKey("nodes.titulo.textStyle.size", "desktop"), "desktop");
+  assert.equal(editor.freeDeviceForFocusKey("nodes.titulo.textStyle.size", "mobile"), "mobile", "um erro do computador nao desliga o Celular");
+  assert.equal(editor.freeDeviceForFocusKey("freeDesign.artboard.padding", "desktop"), "desktop");
+  assert.equal(editor.freeDeviceForFocusKey("devices.mobileX", "desktop"), "desktop");
+
+  // O editor usa a mesma regra ao abrir, no Revisar e no Ajustar no Celular.
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+  assert.match(source, /initialFocus\?\.kind === "error" \? freeDeviceForFocusKey\(initialFocus\.key, "desktop"\) : "desktop"/);
+  assert.match(source, /changeDevice\(freeDeviceForFocusKey\(item\.key, deviceRef\.current\)\);/);
+  assert.match(source, /const key = freeMobileTextSizeKey\(item\.nodeId\);[\s\S]{0,200}changeDevice\(freeDeviceForFocusKey\(key, deviceRef\.current\)\);/);
+});
+
 test("vocabulário das frases do editor", () => {
   const texts = [];
   const collect = (value) => {

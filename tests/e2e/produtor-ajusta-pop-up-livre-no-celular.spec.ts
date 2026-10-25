@@ -3,8 +3,8 @@ import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
 import { contaDeTeste, expect, test, zerarComunicacao } from "./fixtures";
 
 // Livre: valores proprios do celular (docs/27 §9.10 e §13.8, PR L3; docs/18 §3.1). Num rascunho com um design
-// Livre (Selo solto, Título na sequência, Forma solta e os Links), o produtor liga "Ver como: Celular" (o editor diz
-// "Editando o Celular."), arrasta o Selo no desenho (so o celular muda: o X do computador fica), abre a aba Celular
+// Livre (Selo solto, Título na sequência, Forma solta e os Links), o produtor seleciona a Forma com o Computador
+// ligado e abre a aba Celular, que liga "Ver como: Celular" (o editor diz "Editando o Celular."), arrasta o Selo no desenho (so o celular muda: o X do computador fica), abre a aba Celular
 // do Título e desliga "Igual ao computador" do Tamanho para 24 px, esconde a Forma so no celular, salva o rascunho
 // com o editor aberto, recarrega (as etiquetas "Celular" nas Camadas, a Forma some so no Celular) e publica. O
 // gravado: devices.mobile com o lugar do Selo, o tamanho do Título e a Forma escondida; o computador como estava.
@@ -164,9 +164,22 @@ test("ajusta o Livre só no celular: arrasta o Selo, muda o Título e esconde a 
   const prancheta = editor.locator("[data-free-canvas-card] [data-free-artboard]");
   let xNoCelular = 0;
 
-  await test.step("Ver como: Celular diz o que passa a ser editado", async () => {
-    await editor.getByRole("button", { exact: true, name: "Celular" }).click();
-    await expect(editor.getByRole("button", { exact: true, name: "Celular" })).toHaveAttribute("aria-pressed", "true");
+  await test.step("a aba Celular liga o Ver como: Celular e o editor diz o que passa a ser editado", async () => {
+    const verCelular = editor.getByRole("button", { exact: true, name: "Celular" });
+    const abaCelular = editor.getByRole("tab", { exact: true, name: "Celular" });
+
+    // Com o Computador ligado, a Forma selecionada e a aba Celular aberta: o Celular liga sozinho.
+    await expect(editor.getByRole("button", { exact: true, name: "Computador" })).toHaveAttribute("aria-pressed", "true");
+    await expect(verCelular).toHaveAttribute("aria-pressed", "false");
+    await camada(editor, "Forma").click();
+    await expect(async () => {
+      if ((await abaCelular.getAttribute("aria-selected")) !== "true") {
+        await abaCelular.click();
+      }
+
+      expect(await abaCelular.getAttribute("aria-selected")).toBe("true");
+    }).toPass();
+    await expect(verCelular).toHaveAttribute("aria-pressed", "true");
     await expect(falado).toHaveText("Editando o Celular.");
     await expect(prancheta).toHaveJSProperty("offsetWidth", 343);
   });

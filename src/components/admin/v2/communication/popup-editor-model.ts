@@ -25,7 +25,7 @@ import {
   type PopupTrigger
 } from "../../../../server/communications/popup-display-model";
 import { popupDesignLinkButton } from "../../../../server/communications/popup-design-model";
-import { freeLinkButton } from "../../../../server/communications/popup-free-render";
+import { freeHasClickTarget } from "../../../../server/communications/popup-free-render";
 import { describeMinutes } from "../../../../server/communications/popup-sentences";
 import type { NoticeDraft } from "../../../../server/communications/schemas";
 
@@ -510,10 +510,12 @@ export const POPUP_REPEAT_DEFAULTS = { everyMinutes: 1_440, maxPerDay: 1, maxTot
 /**
  * "Quando o aluno clica no botão" sem nada para clicar nunca pararia: desligada sem `cta`, a nao ser que o design
  * Personalizado tenha um segundo botao com link (docs/26 D9: o link conta como o clique, como no schema) ou o Livre
- * tenha o botao "Abrir um link" visivel (docs/27; no maximo um, entao o clique contado e sempre de um botao so).
+ * tenha o botao "Abrir um link" visivel (docs/27; no maximo um, entao o clique contado e sempre de um botao so). No
+ * Livre vale o que se ve nos dois aparelhos (freeHasClickTarget, a mesma regra do schema): o "Abrir um link"
+ * escondido so no celular nao conta, e o Botao principal escondido so no celular pede o "Abrir um link" ali.
  */
 export function clickStopDisabled(draft: Pick<NoticeDraft, "cta"> & Partial<Pick<NoticeDraft, "design" | "freeDesign">>) {
-  return draft.cta === null && !popupDesignLinkButton(draft.design) && !freeLinkButton(draft.freeDesign);
+  return !popupDesignLinkButton(draft.design) && !freeHasClickTarget(draft.freeDesign, draft.cta !== null);
 }
 
 /**

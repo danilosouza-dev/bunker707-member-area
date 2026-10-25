@@ -12,6 +12,7 @@ import type { NotificationLink } from "../notifications-model";
 import { usePopupMotion } from "../popup-design/popup-design-media";
 import { usePopupFontFaces } from "../popup-design/popup-font-loader";
 import { FreeNodes, freeRenderContextOf } from "./popup-free-nodes";
+import { freeDeviceOfWindow, freeDeviceSnapshot, freeServerDevice, subscribeFreeDevice, type FreeDevice } from "./popup-free-device";
 import { FREE_FOCUS_CLASS, FREE_TOUCH_CLASS, freeArtboardCss, freeCloseCss, freeOuterCss } from "./popup-free-styles";
 
 // Pop-up Livre do aluno (docs/27; spec §3): a prancheta montada do zero pela equipe (elementos na sequencia e
@@ -23,10 +24,11 @@ import { FREE_FOCUS_CLASS, FREE_TOUCH_CLASS, freeArtboardCss, freeCloseCss, free
 // No celular o cartao inteiro encolhe na mesma proporcao (cqw do elemento de fora), com texto nunca abaixo de
 // 12 px. Valores do celular (docs/27 §1 e §9.10): o cartao desenha resolveFreeForDevice(design, aparelho). As
 // previas do admin passam `device` (a de 375 px = "mobile"); o aluno nao passa e o aparelho sai da largura da tela
-// (FREE_MOBILE_QUERY, ate 767 px), lida antes de desenhar (useSyncExternalStore, como o usePopupMotion: o cartao do
-// aluno so desenha no navegador, depois do /show, entao ja vem certo no primeiro desenho; no servidor, computador).
-// Mudou a largura com o pop-up aberto (girar o celular): troca na hora. Sem valores do celular, o computador e o
-// mesmo objeto do design e o HTML e o de antes.
+// (FREE_MOBILE_QUERY de popup-free-device.ts, ate 767 px), lida antes de desenhar (useSyncExternalStore, como o
+// usePopupMotion: o cartao do aluno so desenha no navegador, depois do /show, entao ja vem certo no primeiro
+// desenho; no servidor, computador). Mudou a largura com o pop-up aberto (girar o celular): troca na hora (a janela
+// ouve o mesmo aparelho para o nome do dialogo). Sem valores do celular, o computador e o mesmo objeto do design e o
+// HTML e o de antes.
 
 export type PopupFreeCardProps = {
   accessPreviewMode?: AccessPreviewMode;
@@ -55,38 +57,19 @@ export type PopupFreeCardProps = {
   titleId?: string;
 };
 
-/** Quando o aluno ve os valores do celular (docs/27 §1): tela de ate 767 px, a mesma regra em todo lugar. */
-export const FREE_MOBILE_QUERY = "(max-width: 767px)";
-
-type FreeDevice = "desktop" | "mobile";
-type MediaWindow = { matchMedia?: (query: string) => { matches: boolean } };
-
-/** O aparelho pela largura da tela; sem matchMedia, o computador. */
-export function freeDeviceOfWindow(win: MediaWindow): FreeDevice {
-  return typeof win.matchMedia === "function" && win.matchMedia(FREE_MOBILE_QUERY).matches ? "mobile" : "desktop";
-}
-
-/** Avisa quando a tela cruza os 767 px (girar o celular, redimensionar a janela). */
-export function subscribeFreeDevice(onChange: () => void) {
-  const query = typeof window.matchMedia === "function" ? window.matchMedia(FREE_MOBILE_QUERY) : null;
-
-  query?.addEventListener?.("change", onChange);
-
-  return () => query?.removeEventListener?.("change", onChange);
-}
-
-const deviceSnapshot = (): FreeDevice => freeDeviceOfWindow(window);
-
-/** No servidor (previa do admin desenhada antes do navegador): o computador. */
-export const freeServerDevice = (): FreeDevice => "desktop";
+export { FREE_MOBILE_QUERY, freeDeviceOfWindow, freeServerDevice, subscribeFreeDevice } from "./popup-free-device";
 
 /**
- * O nome e a descricao do dialogo do Livre (popup-free-render.ts) pelo design do aparelho da tela: um titulo ou um
- * texto escondido so no celular nao da nome nem descricao ali. A janela le daqui, do pedaco ja baixado.
+ * O nome e a descricao do dialogo do Livre (popup-free-render.ts) pelo design do aparelho: um titulo ou um texto
+ * escondido so no celular nao da nome nem descricao ali. A janela le daqui, do pedaco ja baixado, e passa o
+ * aparelho que ela mesma ouve (popup-free-device.ts: troca junto com o cartao ao cruzar os 767 px); sem `device`,
+ * a tela de agora (no servidor, o computador).
  */
-export function popupFreeDialogAria(popup: Pick<PopupItem, "body" | "freeDesign" | "title">, ids: { bodyId: string; titleId: string }) {
-  const device = typeof window === "undefined" ? freeServerDevice() : freeDeviceOfWindow(window);
-
+export function popupFreeDialogAria(
+  popup: Pick<PopupItem, "body" | "freeDesign" | "title">,
+  ids: { bodyId: string; titleId: string },
+  device: FreeDevice = typeof window === "undefined" ? freeServerDevice() : freeDeviceOfWindow(window)
+) {
   return dialogAriaOfDesign(popup.freeDesign ? { ...popup, freeDesign: resolveFreeForDevice(popup.freeDesign, device) } : popup, ids);
 }
 
@@ -148,7 +131,7 @@ export function PopupFreeCard({
   titleId
 }: PopupFreeCardProps) {
   // O hook continua sendo chamado sempre (regra dos hooks); a previa do admin decide pelo `device` que passa.
-  const screenDevice = useSyncExternalStore(subscribeFreeDevice, deviceSnapshot, freeServerDevice);
+  const screenDevice = useSyncExternalStore(subscribeFreeDevice, freeDeviceSnapshot, freeServerDevice);
   const drawn = useMemo(() => resolveFreeForDevice(design, device ?? screenDevice), [design, device, screenDevice]);
   const faces = fonts ?? popup.fonts ?? NO_FACES;
   const fontsReady = usePopupFontFaces(faces);

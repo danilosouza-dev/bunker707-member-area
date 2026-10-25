@@ -32,7 +32,7 @@ import {
   type PopupFreeDesign
 } from "../../../../../server/communications/popup-free-model";
 import { POPUP_FREE_PASTE_MESSAGES, parseFreeDesignPaste, type FreePasteContext, type FreePasteResult } from "../../../../../server/communications/popup-free-paste";
-import { freeHeadingText, resolveFreeArtboard } from "../../../../../server/communications/popup-free-render";
+import { freeHeadingText, resolveFreeArtboard, resolveFreeForDevice } from "../../../../../server/communications/popup-free-render";
 import { POPUP_FREE_MESSAGES, freeErrorKeys, popupFreeContentProblems, popupFreeDesignSchema } from "../../../../../server/communications/popup-free-schema";
 import { FREE_ELEMENT_ID_PREFIX, FREE_STARTER_CTA, newFreeNode, type FreeElementKind } from "../../../../../server/communications/popup-free-starters";
 import { FREE_NODE_TYPE_LABELS, freeNodeDisplayName, type FreeHint, type FreeMeasuredRects } from "../../../../../server/communications/popup-free-checks";
@@ -918,6 +918,16 @@ export function shiftFreeNodeLayer(design: PopupFreeDesign, id: FreeId, delta: n
 /** O aparelho que o "Ver como" mostra: com Celular, o desenho, as setas e o alinhar mudam so o celular. */
 export type FreeDevice = "desktop" | "mobile";
 
+/**
+ * O "Ver como" depois de ir a uma chave (um erro ou uma dica do Revisar, o "Ajustar no Celular", o erro que abre o
+ * editor): uma chave do celular ("devices.mobile.nodes..." ou "devices.mobile.artboard...", com ou sem
+ * "freeDesign.") liga o Celular, porque a aba Celular e o No celular editam o que o Celular mostra; as outras mantem
+ * o aparelho de agora.
+ */
+export function freeDeviceForFocusKey(key: string, device: FreeDevice): FreeDevice {
+  return /^(?:freeDesign\.)?devices\.mobile(?:\.|$)/.test(key) ? "mobile" : device;
+}
+
 /** A posicao solta de um elemento no celular: a do computador com a propria do celular por cima (null = nao e solto). */
 export function freeMobileFreePlace(design: PopupFreeDesign, id: FreeId): FreeAbsolutePlace | null {
   const node = locate(design, id)?.node;
@@ -1473,8 +1483,12 @@ export function freeFlaggedNodeIds(design: PopupFreeDesign, errors: Readonly<Rec
   return flagged;
 }
 
-/** "Aumentar a altura": a Altura mínima da prancheta vai ate o fim do elemento cortado (retangulo medido). */
-export function raiseFreeArtboardTo(design: PopupFreeDesign, id: FreeId, rects: FreeMeasuredRects): PopupFreeDesign {
+/**
+ * "Aumentar a altura": a Altura mínima da prancheta vai ate o fim do elemento cortado (retangulo medido, no aparelho
+ * do "Ver como"). Com o Celular, compara com a prancheta do celular (a do computador com a do celular por cima) e
+ * grava so a Altura mínima do celular (devices.mobile.artboard.minHeight); o computador fica como estava.
+ */
+export function raiseFreeArtboardTo(design: PopupFreeDesign, id: FreeId, rects: FreeMeasuredRects, device: FreeDevice = "desktop"): PopupFreeDesign {
   const rect = rects[id];
 
   if (!rect) {
@@ -1484,8 +1498,14 @@ export function raiseFreeArtboardTo(design: PopupFreeDesign, id: FreeId, rects: 
   const bottom = Math.ceil(rect.y + rect.h);
   const minHeight = Math.max(L.minHeight.min, Math.min(L.minHeight.max, bottom));
 
-  if (resolveFreeArtboard(design).minHeight >= minHeight) {
+  if (resolveFreeArtboard(resolveFreeForDevice(design, device)).minHeight >= minHeight) {
     return design;
+  }
+
+  if (device === "mobile") {
+    const mobile = design.devices?.mobile ?? {};
+
+    return { ...design, devices: { mobile: { ...mobile, artboard: { ...mobile.artboard, minHeight } } } };
   }
 
   return { ...design, artboard: { ...design.artboard, minHeight } };

@@ -1124,7 +1124,8 @@ function canonicalMobileNode(entry: FreeMobileNode, node: FreeNode): FreeMobileN
     textStyle:
       text && ownText
         ? nonEmpty({
-            align: unlessSame(ownText.align, text.align),
+            // O botao sem alinhamento escolhido e desenhado no centro (freeButtonLayoutCss), nao no padrao do texto.
+            align: unlessSame(ownText.align, node.type === "button" ? (node.textStyle?.align ?? "center") : text.align),
             letterSpacing: unlessSame(ownText.letterSpacing === undefined ? undefined : round2(ownText.letterSpacing), text.letterSpacing),
             lineHeight: unlessSame(ownText.lineHeight === undefined ? undefined : round2(ownText.lineHeight), text.lineHeight),
             size: unlessSame(ownText.size === undefined ? undefined : int(ownText.size), text.size)

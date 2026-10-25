@@ -279,6 +279,31 @@ export function freeLinkButton(design: Pick<PopupFreeDesign, "children"> | null 
   );
 }
 
+const isCtaButton = (node: FreeNode): node is FreeButtonNode => node.type === "button" && node.action.kind === "cta";
+
+/**
+ * D9 com o Celular (docs/27 §2.1): "Quando o aluno clica no botão" so vale com algo para clicar nos dois aparelhos.
+ * O botao "Abrir um link" conta so quando visivel no computador e no celular (devices.mobile pode esconder). O Botao
+ * principal (`hasCta`, o aviso tem botao) conta como sempre, a nao ser que o celular o esconda (visivel no
+ * computador, escondido no celular): ai o celular precisa do "Abrir um link" visivel. Sem Livre, so o `hasCta`.
+ */
+export function freeHasClickTarget(design: PopupFreeDesign | null | undefined, hasCta: boolean): boolean {
+  if (!design) {
+    return hasCta;
+  }
+
+  const mobile = resolveFreeForDevice(design, "mobile");
+  const mobileLink = freeLinkButton(mobile) !== null;
+
+  if (!hasCta) {
+    return mobileLink && freeLinkButton(design) !== null;
+  }
+
+  const ctaHiddenOnMobile = mobile !== design && findVisible(design.children, isCtaButton) !== null && findVisible(mobile.children, isCtaButton) === null;
+
+  return !ctaHiddenOnMobile || mobileLink;
+}
+
 /** Ha um botao "Lembrar depois" visivel (entao os Links nao repetem o "Lembrar depois"). */
 export function freeHasSnoozeButton(design: Pick<PopupFreeDesign, "children">): boolean {
   return someVisible(design.children, (node) => node.type === "button" && node.action.kind === "snooze");

@@ -93,7 +93,7 @@ export function FreeMobileFieldShell({ children, disabled, fieldId, label, onSam
 }
 
 export function FreeInspectorMobile({ design, disabled, errors, hints, node, onChange, onReset, rects }: FreeSectionProps & { onReset: (id: FreeId) => void }) {
-  const fields = freeMobileFieldsOf(node);
+  const fields = freeMobileFieldsOf(node, design);
   const hasOwn = freeHasMobileValues(design, node.id);
   // Os erros do celular deste elemento que nao sao de um campo da tela (o modo da posicao, um campo de outro tipo): no topo.
   const entry = `devices.mobile.nodes.${node.id}`;

@@ -57,6 +57,7 @@ import {
   freeFlaggedNodeIds,
   freeFocusAfterAdd,
   freeKnownAssets,
+  freeDeviceForFocusKey,
   freeMobileFreePlace,
   freeNodeIdForKey,
   freeNodeOf,
@@ -326,11 +327,6 @@ function splitSaveErrors(design: PopupFreeDesign, errors: Readonly<Record<string
   return { design: freeEditorErrorKeys(design, inside), outside };
 }
 
-/** Uma chave de erro ou de foco de um campo do celular ("devices.mobile...", com ou sem "freeDesign."). */
-function isMobileKey(key: string): boolean {
-  return /^(?:freeDesign\.)?devices\.mobile(?:\.|$)/.test(key);
-}
-
 function nextTick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -370,7 +366,7 @@ function FreeEditorSession({
   const [confirmingSave, setConfirmingSave] = useState(false);
   const [rightPanel, setRightPanel] = useState<"inspector" | "review">(initialFocus?.kind === "review" ? "review" : "inspector");
   // Um erro de um campo do celular abre o editor ja no Celular (o painel abre a aba Celular).
-  const [device, setDevice] = useState<FreeDevice>(() => (initialFocus?.kind === "error" && isMobileKey(initialFocus.key) ? "mobile" : "desktop"));
+  const [device, setDevice] = useState<FreeDevice>(() => (initialFocus?.kind === "error" ? freeDeviceForFocusKey(initialFocus.key, "desktop") : "desktop"));
   const [zoom, setZoom] = useState<"100" | "fit">("fit");
   const [rects, setRects] = useState<FreeMeasuredRects>({});
   const [focusRequest, setFocusRequest] = useState<FreeFocusRequest | null>(() =>
@@ -997,9 +993,7 @@ function FreeEditorSession({
     setFocusRequest({ key: item.key });
 
     // Um erro de um campo do celular leva a aba Celular, que liga o "Ver como: Celular".
-    if (isMobileKey(item.key)) {
-      changeDevice("mobile");
-    }
+    changeDevice(freeDeviceForFocusKey(item.key, deviceRef.current));
   }
 
   /** "Ajustar no Celular" (dica "texto no celular"): a aba Celular do elemento, no tamanho do texto. */
@@ -1008,10 +1002,12 @@ function FreeEditorSession({
       return;
     }
 
+    const key = freeMobileTextSizeKey(item.nodeId);
+
     setSelectedId(item.nodeId);
     setRightPanel("inspector");
-    setFocusRequest({ key: freeMobileTextSizeKey(item.nodeId) });
-    changeDevice("mobile");
+    setFocusRequest({ key });
+    changeDevice(freeDeviceForFocusKey(key, deviceRef.current));
   }
 
   function raise(item: FreeReviewItem) {
@@ -1019,7 +1015,8 @@ function FreeEditorSession({
       return;
     }
 
-    const next = raiseFreeArtboardTo(historyRef.current.present.design, item.nodeId, rects);
+    // Com o Celular, a altura minima do celular (os retangulos medidos sao os do celular).
+    const next = raiseFreeArtboardTo(historyRef.current.present.design, item.nodeId, rects, deviceRef.current);
 
     if (next !== historyRef.current.present.design) {
       commitDesign(next);

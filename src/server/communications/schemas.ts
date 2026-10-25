@@ -53,7 +53,7 @@ import { CTA_DISPLAYS, type CtaDisplay } from "./notification-model";
 import { popupDesignLinkButton, type PopupDesign } from "./popup-design-model";
 import { popupDesignContentProblems, popupDesignSchema } from "./popup-design-schema";
 import type { PopupFreeDesign } from "./popup-free-model";
-import { freeLinkButton } from "./popup-free-render";
+import { freeHasClickTarget } from "./popup-free-render";
 import { POPUP_FREE_MESSAGES, popupFreeContentProblems, popupFreeDesignSchema } from "./popup-free-schema";
 import {
   canonicalPopupSettings,
@@ -625,14 +625,14 @@ const noticeDraftObjectSchema = z
     addNoticeContentIssues(draft, draft.kind, context);
 
     // v3b-1: "Quando o aluno clica no botão" sem botao nunca pararia (tambem quando o botao sai depois). No
-    // design (docs/26), o segundo botao com link tambem conta como o clique.
+    // design (docs/26), o segundo botao com link tambem conta como o clique. No Livre (docs/27 §2.1), o que se
+    // clica precisa estar visivel nos dois aparelhos (freeHasClickTarget: o celular pode esconder).
     if (
       draft.kind === "popup" &&
       draft.popup?.frequency.mode === "repeat" &&
       draft.popup.frequency.stopOn === "click" &&
-      !draft.cta &&
       !popupDesignLinkButton(draft.design) &&
-      !freeLinkButton(draft.freeDesign)
+      !freeHasClickTarget(draft.freeDesign, Boolean(draft.cta))
     ) {
       context.addIssue({ code: "custom", message: POPUP_NO_BUTTON_STOP_MESSAGE, path: ["popup", "frequency", "stopOn"] });
     }

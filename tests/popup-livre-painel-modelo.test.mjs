@@ -986,6 +986,69 @@ test("aba Celular: a chave de erro do celular leva à aba Celular e ao campo; a 
   assert.equal(panel.freeTabAfterSelection("mobile", "heading", null), "content");
 });
 
+test("aba Celular: a altura própria do celular de um texto solto sem altura no computador aparece em Altura (e sai com Igual ao computador)", async () => {
+  const editorModel = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
+  const solto = { id: "titulo", lines: [[{ text: "Aula nova" }]], place: { mode: "free", w: 300, x: 20, y: 20 }, type: "heading" };
+  const base = design([solto, LINKS]);
+  const keys = (value) => panel.freeMobileFieldsOf(model.findFreeNode(value, "titulo").node, value).map((field) => field.key);
+
+  // Sem altura no computador e sem altura no celular: o texto cresce sozinho, sem o campo Altura.
+  assert.equal(keys(base).includes("place.h"), false);
+
+  // As alcas de cima e de baixo no Ver como Celular gravam a altura so no celular: o campo Altura aparece.
+  const alto = editorModel.setFreeNodeRect(base, "titulo", { h: 90, w: 300, x: 20, y: 20 }, "mobile");
+  assert.deepEqual(model.freeMobileNodeOf(alto, "titulo"), { place: { h: 90, mode: "free" } });
+  assert.equal(model.findFreeNode(alto, "titulo").node.place.h, undefined, "o computador fica sem altura");
+  assert.deepEqual(keys(alto), ["hidden", "place.x", "place.y", "place.w", "place.h", "textStyle.size", "textStyle.lineHeight", "textStyle.letterSpacing", "textStyle.align", "box.padding", "box.radius"]);
+  assert.deepEqual(panel.freeMobileFieldValue(alto, model.findFreeNode(alto, "titulo").node, "place.h"), { own: true, value: 90 });
+  // O Revisar com a chave da altura do celular cai no campo Altura (e nao no primeiro da posicao).
+  assert.deepEqual(panel.freeInspectorTargetOf(alto, "devices.mobile.nodes.titulo.place.h"), { fieldId: "livre-titulo-celular-altura", nodeId: "titulo", tab: "mobile" });
+
+  // "Igual ao computador" de novo: a altura sai do celular e o campo some.
+  const igual = panel.withFreeMobileField(alto, "titulo", "place.h", undefined);
+  assert.equal(model.freeMobileNodeOf(igual, "titulo"), undefined);
+  assert.equal(keys(igual).includes("place.h"), false);
+});
+
+test("aba Celular: o alinhamento do botão sem escolha é o centro desenhado, e o Esquerda do celular fica ao salvar", async () => {
+  const styles = await import("../src/components/member/notifications/popup-free/popup-free-styles.ts");
+  const botao = { action: { kind: "close" }, id: "botao", label: "Fechar", type: "button" };
+  const base = design([botao, LINKS]);
+  const node = model.findFreeNode(base, "botao").node;
+
+  // O computador desenha o botao sem alinhamento escolhido no centro: e o valor do computador da aba Celular.
+  assert.equal(styles.freeButtonLayoutCss(node).justifyContent, "center");
+  assert.equal(panel.freeMobileDesktopValue(base, node, "textStyle.align"), "center");
+  assert.deepEqual(panel.freeMobileFieldValue(base, node, "textStyle.align"), { own: false, value: "center" });
+
+  // Esquerda so no celular: a forma canonica guarda (nao e igual ao computador) e o celular desenha no inicio.
+  const esquerda = design([botao, LINKS], { devices: { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } } });
+  assert.deepEqual(esquerda.devices, { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } });
+  assert.ok(schema.popupFreeDesignSchema.safeParse(esquerda).success);
+  const noCelular = model.findFreeNode(render.resolveFreeForDevice(esquerda, "mobile"), "botao").node;
+  assert.equal(styles.freeButtonLayoutCss(noCelular).justifyContent, "flex-start");
+  assert.equal(styles.freeButtonLayoutCss(model.findFreeNode(esquerda, "botao").node).justifyContent, "center", "o computador continua no centro");
+
+  // Centro no celular e igual ao desenhado no computador: sai ao salvar. Com Direita no computador, o Esquerda fica.
+  assert.equal(design([botao, LINKS], { devices: { mobile: { nodes: { botao: { textStyle: { align: "center" } } } } } }).devices, undefined);
+  const direita = design([{ ...botao, textStyle: { align: "right" } }, LINKS], { devices: { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } } });
+  assert.deepEqual(direita.devices, { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } });
+  assert.equal(panel.freeMobileDesktopValue(direita, model.findFreeNode(direita, "botao").node, "textStyle.align"), "right");
+});
+
+test("aba Celular: entrar nela liga o Ver como Celular; sair dela mantém o aparelho", () => {
+  assert.equal(panel.freeDeviceAfterTabChange("mobile", "content", "desktop"), "mobile");
+  assert.equal(panel.freeDeviceAfterTabChange("mobile", "advanced", "mobile"), "mobile");
+  assert.equal(panel.freeDeviceAfterTabChange("content", "mobile", "mobile"), "mobile", "sair da aba Celular nao volta ao Computador");
+  assert.equal(panel.freeDeviceAfterTabChange("style", "content", "desktop"), "desktop");
+  assert.equal(panel.freeDeviceAfterTabChange("advanced", "style", "mobile"), "mobile");
+  assert.equal(panel.freeDeviceAfterTabChange("mobile", "mobile", "desktop"), "desktop", "ja estava na aba: o Ver como escolhido depois fica");
+
+  // O painel do elemento usa a mesma regra.
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-inspector.tsx", import.meta.url), "utf8");
+  assert.match(source, /const nextDevice = freeDeviceAfterTabChange\(value as ElementTab, tab, device\);/);
+});
+
 test("painel Pop-up desenhado: o grupo No celular com Igual ao computador em cada campo", () => {
   function draw(value, errors = {}) {
     return renderToStaticMarkup(createElement(FreeArtboardSettings, { design: value, disabled: false, errors, fonts: [], hints: [], latest: () => value, onBusyChange() {}, onChange() {}, onFontsChange() {}, rects: {} }));

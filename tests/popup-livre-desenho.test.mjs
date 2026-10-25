@@ -640,8 +640,8 @@ test("o primeiro texto descreve o diálogo", async () => {
   // O dialogo escolhe a aria do Livre so quando ha freeDesign (o Personalizado continua com a dele), lida do pedaco
   // do cartao Livre ja baixado (a popupFreeDialogAria de popup-free-render.ts pelo design do aparelho da tela).
   const dialogSource = readFileSync(new URL("src/components/member/notifications/member-popup-dialog.tsx", root), "utf8");
-  assert.match(dialogSource, /popup\.freeDesign \? freeDialogAria\(popup, \{ bodyId, titleId \}\) : popupDialogAria\(popup, \{ bodyId, titleId \}\)/);
-  assert.match(dialogSource, /loadedPopupFreeCard\(\)\?\.popupFreeDialogAria\(popup, ids\) \?\? \{ "aria-label": popup\.title \}/);
+  assert.match(dialogSource, /popup\.freeDesign \? freeDialogAria\(popup, \{ bodyId, titleId \}, device\) : popupDialogAria\(popup, \{ bodyId, titleId \}\)/);
+  assert.match(dialogSource, /loadedPopupFreeCard\(\)\?\.popupFreeDialogAria\(popup, ids, device\) \?\? \{ "aria-label": popup\.title \}/);
   const chunkAria = (await loadPopupFreeCard()).popupFreeDialogAria;
   assert.deepEqual(chunkAria(popupOf(design), { bodyId: "b", titleId: "t" }), render.popupFreeDialogAria(popupOf(design), { bodyId: "b", titleId: "t" }), "sem valores do celular, a mesma de popup-free-render.ts");
 });
@@ -1027,7 +1027,7 @@ test("Celular: a tela de até 767 px é o celular (matchMedia), e a troca de lar
 
   // O cartao le a tela pelo useSyncExternalStore (servidor = computador), como o usePopupMotion.
   const code = readFileSync(new URL("src/components/member/notifications/popup-free/popup-free-card.tsx", root), "utf8");
-  assert.match(code, /useSyncExternalStore\(subscribeFreeDevice, deviceSnapshot, freeServerDevice\)/);
+  assert.match(code, /useSyncExternalStore\(subscribeFreeDevice, freeDeviceSnapshot, freeServerDevice\)/);
   assert.match(code, /resolveFreeForDevice\(design, device \?\? screenDevice\)/, "o aparelho passado vence a tela");
 });
 
@@ -1052,6 +1052,79 @@ test("Celular: o nome e a descrição do diálogo seguem o aparelho da tela (tí
   );
   assert.deepEqual(withWindow({ matchMedia: () => ({ matches: false }) }, () => cardModule.popupFreeDialogAria(popup, ids)), desktop);
   assert.doesNotMatch(card(design, { device: "mobile" }), /<h2|id="b"/, "o cartao do celular sem o titulo e sem o texto");
+});
+
+test("Celular: a janela ouve o mesmo aparelho do cartão; cruzar os 767 px com o pop-up aberto troca o nome do diálogo", async () => {
+  const deviceModule = await import("../src/components/member/notifications/popup-free/popup-free-device.ts");
+  const dialog = await import("../src/components/member/notifications/member-popup-dialog.tsx");
+  await loadPopupFreeCard();
+  const ids = { bodyId: "b", titleId: "t" };
+  // O unico titulo some no celular: la, o nome passa a ser o titulo do aviso (sem apontar para um <h2> que nao existe).
+  const design = parsed({
+    children: [
+      { id: "titulo", lines: [[{ text: "Só no computador" }]], type: "heading" },
+      { id: "texto", lines: [[{ text: "Descrição" }]], type: "text" },
+      { id: "links", type: "links" }
+    ],
+    devices: { mobile: { nodes: { titulo: { hidden: true } } } }
+  });
+  const popup = popupOf(design, { title: "Nome do pop-up" });
+  const listeners = new Set();
+  const query = {
+    addEventListener: (type, listener) => type === "change" && listeners.add(listener),
+    matches: false,
+    removeEventListener: (type, listener) => type === "change" && listeners.delete(listener)
+  };
+  const fake = {
+    matchMedia(text) {
+      assert.equal(text, "(max-width: 767px)");
+      return query;
+    }
+  };
+
+  withWindow(fake, () => {
+    let changes = 0;
+    const unsubscribe = deviceModule.subscribeFreeDevice(() => {
+      changes += 1;
+    });
+
+    assert.equal(deviceModule.freeDeviceSnapshot(), "desktop");
+    assert.deepEqual(dialog.freeDialogAria(popup, ids, deviceModule.freeDeviceSnapshot()), { "aria-describedby": "b", "aria-labelledby": "t" });
+
+    // A tela vira celular com o pop-up aberto: a troca avisa, e a janela le o celular no proximo desenho.
+    query.matches = true;
+    for (const listener of [...listeners]) {
+      listener({ matches: true });
+    }
+
+    assert.equal(changes, 1, "a troca de largura avisa quem ouve");
+    assert.equal(deviceModule.freeDeviceSnapshot(), "mobile");
+    assert.deepEqual(dialog.freeDialogAria(popup, ids, deviceModule.freeDeviceSnapshot()), { "aria-describedby": "b", "aria-label": "Nome do pop-up" });
+    assert.doesNotMatch(card(design, { device: "mobile" }), /<h2/, "e o cartao do celular nao desenha o titulo");
+
+    // De volta ao computador: o nome volta ao titulo do design.
+    query.matches = false;
+    for (const listener of [...listeners]) {
+      listener({ matches: false });
+    }
+
+    assert.deepEqual(dialog.freeDialogAria(popup, ids, deviceModule.freeDeviceSnapshot()), { "aria-describedby": "b", "aria-labelledby": "t" });
+    unsubscribe();
+    assert.equal(listeners.size, 0, "ao fechar, para de ouvir");
+  });
+
+  // A janela ouve o mesmo aparelho do cartao (o mesmo modulo minusculo), so no Livre; no servidor, o computador.
+  assert.equal(cardModule.subscribeFreeDevice, deviceModule.subscribeFreeDevice);
+  assert.equal(cardModule.FREE_MOBILE_QUERY, deviceModule.FREE_MOBILE_QUERY);
+  const dialogSource = readFileSync(new URL("src/components/member/notifications/member-popup-dialog.tsx", root), "utf8");
+  assert.match(
+    dialogSource,
+    /useSyncExternalStore\(popup\.freeDesign \? subscribeFreeDevice : noDeviceChange, popup\.freeDesign \? freeDeviceSnapshot : freeServerDevice, freeServerDevice\)/
+  );
+  assert.match(dialogSource, /from "\.\/popup-free\/popup-free-device"/);
+  assert.doesNotMatch(dialogSource, /from "\.\/popup-free\/popup-free-card"/, "a janela nao puxa o cartao Livre");
+  const deviceSource = readFileSync(new URL("src/components/member/notifications/popup-free/popup-free-device.ts", root), "utf8");
+  assert.doesNotMatch(deviceSource, /^import /m, "o modulo do aparelho nao importa nada");
 });
 
 /* ------------------------------------------------------------------------------------------------

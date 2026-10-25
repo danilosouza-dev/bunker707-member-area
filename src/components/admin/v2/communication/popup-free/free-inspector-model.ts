@@ -516,6 +516,14 @@ export function freeRangeMessage(bounds: { max: number; min: number }): string {
 export type FreeInspectorTab = "advanced" | "content" | "mobile" | "popup" | "style";
 
 /**
+ * O "Ver como" depois de trocar de aba no painel do elemento: entrar na aba Celular liga o Celular (o que se ve e o
+ * que se edita); sair dela, ou trocar entre as outras, mantem o aparelho de agora (a equipe volta pelo "Ver como").
+ */
+export function freeDeviceAfterTabChange(nextTab: FreeInspectorTab, currentTab: FreeInspectorTab, device: "desktop" | "mobile"): "desktop" | "mobile" {
+  return nextTab === "mobile" && currentTab !== "mobile" ? "mobile" : device;
+}
+
+/**
  * A aba escolhida fica ao trocar de elemento do mesmo tipo; outro tipo volta para Conteúdo. A aba Celular fica com
  * qualquer elemento (todo tipo tem algo que muda no celular: esconder, posição, respiro e cantos).
  */
@@ -2325,12 +2333,13 @@ const MOBILE_TEXT_TYPES: readonly FreeNodeType[] = ["badge", "button", "heading"
 
 /**
  * Os campos da aba Celular de um elemento, na ordem da tela: Mostrar (todos), Posição (solto: X, Y, Largura e a
- * Altura quando o computador tem uma ou o elemento nao tem texto; na sequência: Largura, Altura, Alinhar nesta caixa
- * e Margem), Texto (Título, Texto, Selo, Botão e Links: Tamanho, Altura da linha, Espaço entre letras, Alinhamento),
- * Conteúdo (Espaço e Ícone: o tamanho; Links: o espaço entre eles; Caixa: a sequência dela) e Respiro e cantos.
- * Cores, textos, pinturas, sombras, camada e girar nao aparecem: sao os mesmos nos dois.
+ * Altura quando o computador tem uma, o elemento nao tem texto ou o celular ja tem uma propria, como a das alcas de
+ * cima e de baixo no Ver como Celular; na sequência: Largura, Altura, Alinhar nesta caixa e Margem), Texto (Título,
+ * Texto, Selo, Botão e Links: Tamanho, Altura da linha, Espaço entre letras, Alinhamento), Conteúdo (Espaço e Ícone:
+ * o tamanho; Links: o espaço entre eles; Caixa: a sequência dela) e Respiro e cantos. Cores, textos, pinturas,
+ * sombras, camada e girar nao aparecem: sao os mesmos nos dois. `design` traz a entrada do celular do elemento.
  */
-export function freeMobileFieldsOf(node: FreeNode): FreeMobileField[] {
+export function freeMobileFieldsOf(node: FreeNode, design?: Pick<PopupFreeDesign, "devices">): FreeMobileField[] {
   const A = FREE_INSPECTOR_COPY.advanced;
   const S = FREE_INSPECTOR_COPY.style;
   const B = FREE_INSPECTOR_COPY.box;
@@ -2339,7 +2348,7 @@ export function freeMobileFieldsOf(node: FreeNode): FreeMobileField[] {
   if (node.place?.mode === "free") {
     fields.push({ group: "place", key: "place.x", label: A.x }, { group: "place", key: "place.y", label: A.y }, { group: "place", key: "place.w", label: A.width });
 
-    if (node.place.h !== undefined || !isTextBearing(node.type)) {
+    if (node.place.h !== undefined || !isTextBearing(node.type) || (design !== undefined && readPath(freeMobileNodeOf(design, node.id), "place.h") !== undefined)) {
       fields.push({ group: "place", key: "place.h", label: A.height });
     }
   } else {
@@ -2434,7 +2443,8 @@ export function freeMobileDesktopValue(design: PopupFreeDesign, node: FreeNode, 
     case "textStyle.letterSpacing":
       return freeTextStyleOf(node).letterSpacing;
     case "textStyle.align":
-      return freeTextStyleOf(node).align;
+      // O botao sem alinhamento escolhido e desenhado no centro (freeButtonLayoutCss), nao no padrao do texto.
+      return node.type === "button" ? (node.textStyle?.align ?? "center") : freeTextStyleOf(node).align;
     case "box.padding":
       return node.box?.padding ?? 0;
     case "box.radius":
@@ -2566,7 +2576,7 @@ function mobileTarget(design: PopupFreeDesign, rest: readonly string[]): FreeIns
     return null;
   }
 
-  const fields = freeMobileFieldsOf(found.node);
+  const fields = freeMobileFieldsOf(found.node, design);
   const wanted = head && leaf && leaf !== "mode" ? `${head}.${leaf}` : head;
   const field = fields.find((item) => item.key === wanted) ?? fields.find((item) => head !== undefined && item.key.startsWith(`${head}.`)) ?? fields[0];
 

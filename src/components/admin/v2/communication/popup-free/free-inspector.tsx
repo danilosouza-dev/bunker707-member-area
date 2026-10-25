@@ -17,7 +17,7 @@ import { focusFreeField, freeSmallButton, useLatest } from "./free-fields";
 import { FreeInspectorAdvanced } from "./free-inspector-advanced";
 import { FreeInspectorContent, type FreeSectionProps } from "./free-inspector-content";
 import { FreeInspectorMobile } from "./free-inspector-mobile";
-import { FREE_INSPECTOR_COPY, freeFocusTargetOf, freeTabAfterSelection, type FreeAlignEdge, type FreeInspectorTab, type FreeInspectorTarget } from "./free-inspector-model";
+import { FREE_INSPECTOR_COPY, freeDeviceAfterTabChange, freeFocusTargetOf, freeTabAfterSelection, type FreeAlignEdge, type FreeInspectorTab, type FreeInspectorTarget } from "./free-inspector-model";
 import { FreeInspectorStyle } from "./free-inspector-style";
 
 // Editor Livre do pop-up (docs/27; spec §4.6, §4.7 e §9.6), pacote I: o painel da direita. Com um elemento
@@ -228,8 +228,10 @@ export function FreeInspector(props: FreeInspectorProps) {
         className="flex min-h-0 flex-1 flex-col"
         onValueChange={(value) => {
           // Entrar na aba Celular liga o "Ver como: Celular" (o que se ve e o que se edita).
-          if (value === "mobile" && tab !== "mobile" && device !== "mobile") {
-            onDeviceChange?.("mobile");
+          const nextDevice = freeDeviceAfterTabChange(value as ElementTab, tab, device);
+
+          if (nextDevice !== device) {
+            onDeviceChange?.(nextDevice);
           }
 
           setTab(value as ElementTab);

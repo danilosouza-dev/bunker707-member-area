@@ -881,3 +881,20 @@ test("dica texto no celular: mede o design do celular (com os valores próprios)
   // A chave do celular leva ao elemento no editor.
   assert.equal(editor.freeNodeIdForKey(wide(), "devices.mobile.nodes.texto.textStyle.size"), "texto");
 });
+
+test("as partes do §9 que viram instruções: a lista do §13.1 e a abertura do §9 são as mesmas do script", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const script = readFileSync(new URL("../scripts/livre-instrucoes-ia.mjs", import.meta.url), "utf8");
+  const sections = JSON.parse(/const SECTIONS = (\[[^\]]*\]);/.exec(script)[1]);
+  const numbers = (text) => [...text.matchAll(/9\.\d+/g)].map((match) => match[0]);
+
+  // §13.1: "as partes 9.2, 9.3, ... e 9.10 (sem a 9.1 e a 9.7 ...)".
+  const listed = /e as partes ((?:9\.\d+(?:, | e ))+9\.\d+) \(sem a 9\.1 e a 9\.7/.exec(doc);
+  assert.ok(listed, "a lista do §13.1");
+  assert.deepEqual(numbers(listed[1]), sections, "a lista do §13.1 e a do script");
+
+  // §9: "As partes 9.2 a 9.6, 9.8, 9.9 e 9.10 viram as instruções para a IA".
+  const intro = /As partes 9\.2 a 9\.6, ((?:9\.\d+(?:, | e ))*9\.\d+) viram as instruções para a IA/.exec(doc);
+  assert.ok(intro, "a abertura do §9");
+  assert.deepEqual(["9.2", "9.3", "9.4", "9.5", "9.6", ...numbers(intro[1])], sections, "a abertura do §9 e o script");
+});
