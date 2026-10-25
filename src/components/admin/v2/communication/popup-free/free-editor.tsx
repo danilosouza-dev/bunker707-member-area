@@ -1447,6 +1447,11 @@ function FreeEditorSession({
     canvasApi.current?.previewDrop?.(client, freeNewNodeDropSpec(historyRef.current.present.design, kind));
   }
 
+  /** A area de desenho que rola sozinha quando um botao do Elementos chega perto da borda dela. */
+  function canvasViewport() {
+    return canvasApi.current?.viewport() ?? null;
+  }
+
   /** Fim do arrastar do painel: soltou na prancheta visivel, acrescenta ali; fora ou cancelado, nada. */
   function onElementDragEnd(kind: FreeCatalogKind, client: FreePoint | null) {
     const api = canvasApi.current;
@@ -2209,7 +2214,7 @@ function FreeEditorSession({
             ))}
           </Tabs.List>
           <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="elements">
-            <FreeElementsPanel design={design} disabled={disabled} onAdd={(kind) => add(kind)} onDragEnd={onElementDragEnd} onDragMove={onElementDragMove} />
+            <FreeElementsPanel autoScrollTarget={canvasViewport} design={design} disabled={disabled} onAdd={(kind) => add(kind)} onDragEnd={onElementDragEnd} onDragMove={onElementDragMove} />
           </Tabs.Panel>
           <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="layers">
             <FreeLayersPanel
@@ -2402,7 +2407,7 @@ function ShortcutsPopover({ onOpenChange, open }: { onOpenChange: (open: boolean
       >
         <Keyboard aria-hidden="true" className="size-4" />
         <span className="sr-only xl:not-sr-only">{copy.bar.shortcuts}</span>
-        <kbd aria-hidden="true" className="rounded border border-[var(--border-subtle)] px-1 text-[11px] leading-4 text-[var(--text-tertiary)]">
+        <kbd aria-hidden="true" className="rounded border border-[var(--border-subtle)] px-1 text-[12px] leading-4 text-[var(--text-tertiary)]">
           ?
         </kbd>
       </Popover.Trigger>

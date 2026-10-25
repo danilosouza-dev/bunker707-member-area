@@ -13,7 +13,9 @@ import "./support/transpile-tsx.mjs";
 //   igual ao ultimo dela), um commit por ramo de runMany e de onManyCommand, as teclas da linha com selection, o painel
 //   de um elemento montado e escondido enquanto ha varios (a aba fica), o caminho do Elementos e o ramo move iguais, e
 //   nada de HTML em texto nos arquivos novos do L4b; o zoom: FreeZoomControl no lugar do Segmented de antes, o
-//   Ctrl + = so depois do `if (typing) return`, a frase do Ajustar com a escala nova e o copy.bar.zoom100 fora.
+//   Ctrl + = so depois do `if (typing) return`, a frase do Ajustar com a escala nova e o copy.bar.zoom100 fora; o
+//   painel Elementos com a area de desenho como alvo da rolagem sozinha (C15: onDragEnd e onDragMove lado a lado); a
+//   kbd do Atalhos com 12 px e nenhum texto do editor abaixo disso.
 
 const editorUrl = new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url);
 const source = readFileSync(editorUrl, "utf8");
@@ -344,4 +346,23 @@ test("o Ctrl + = só depois do `if (typing) return`; a frase do Ajustar à tela 
   const fit = bodyOf("function zoomToFit(");
   assert.ok(fit.indexOf("fitSpeech.current = true;") < fit.indexOf('api.zoomTo("fit")'), "pedida antes do zoomTo (o onScaleChange pode vir no mesmo clique)");
   assert.match(fit, /window\.requestAnimationFrame\(\(\) =>\s+window\.requestAnimationFrame\(\(\) => \{\s+if \(fitSpeech\.current\) \{\s+fitSpeech\.current = false;\s+announce\(copy\.bar\.zoomFitSpoken\(Math\.round\(shownScaleRef\.current \* 100\)\)\);/);
+});
+
+test("o Elementos rola a área de desenho perto da borda; onDragEnd e onDragMove continuam lado a lado (C15)", () => {
+  const panel = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-elements-panel.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /<FreeElementsPanel autoScrollTarget=\{canvasViewport\} design=\{design\} disabled=\{disabled\} onAdd=\{\(kind\) => add\(kind\)\} onDragEnd=\{onElementDragEnd\} onDragMove=\{onElementDragMove\} \/>/);
+  assert.match(bodyOf("function canvasViewport("), /return canvasApi\.current\?\.viewport\(\) \?\? null;/);
+
+  // O alvo de agora, lido a cada quadro do laco; sem alvo, sem laco. O gesto continua so do mouse.
+  assert.match(panel, /autoScrollTarget\?: \(\) => Element \| null;/);
+  assert.match(panel, /latestRef\.current = \{ autoScrollTarget, design, disabled, onDragEnd, onDragMove \};/);
+  assert.match(panel, /autoScroll: latestRef\.current\.autoScrollTarget \? \(\) => latestRef\.current\.autoScrollTarget\?\.\(\) \?\? null : undefined,/);
+  assert.equal(/pointerTypes/.test(panel), false, "so o mouse (o padrao do followFreePointer)");
+});
+
+test("a kbd do Atalhos tem 12 px e nenhum texto do editor fica abaixo disso", () => {
+  assert.match(source, /<kbd aria-hidden="true" className="[^"]*text-\[12px\][^"]*">/);
+  // text-xs e 12 px (0,75 rem); abaixo disso so por valor fixo.
+  assert.equal(/text-\[(?:[1-9]|1[01])px\]|text-\[0\.(?:[0-6]\d*|7[0-4]\d*)rem\]/.test(source), false);
 });
