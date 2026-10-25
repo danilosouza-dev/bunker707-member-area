@@ -8,8 +8,9 @@ import "./support/admin-action-stubs.mjs";
 // com a caixa de fora cheia, a frase de depois de soltar, o lugar de soltar nas Camadas (freeLayerDropAt e
 // freeLayerDropTarget, com todo vao alcancavel), os lugares do desenho (freeFlowContainers) e o lugar de soltar no
 // desenho (freeFlowDropAt, inclusive o mesmo vao que nao grava), o ponto da tela em px da prancheta, o Celular com a
-// ordem uma so, o elemento novo que entra onde foi solto e as guardas de fonte do editor e do desenho. Tudo carregado
-// direto pelo Node.
+// ordem uma so, o elemento novo que entra onde foi solto e as guardas de fonte do editor e do desenho. No L4b, a Forma
+// e a Caixa soltas que entram numa caixa guardam o tamanho e a camada abaixo de 0 vira 0. Tudo carregado direto pelo
+// Node.
 
 const editor = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
 const geometry = await import("../src/components/admin/v2/communication/popup-free/free-editor-geometry.ts");
@@ -169,6 +170,48 @@ test("solto: entra numa caixa e vira sequência; reordenado na prancheta continu
   assert.ok(valid(reordered.design));
 });
 
+test("Forma e Caixa soltas que entram numa caixa guardam a largura e a altura; camada abaixo de 0 vira 0 (L4b)", () => {
+  // docs/27 L48: a Forma e uma div vazia e sumia na sequencia; a caixa nao isola as camadas (so a prancheta isola),
+  // entao quem entra com camada negativa ficaria atras do fundo dela.
+  const fill = [{ color: "#ffffff26", kind: "solid" }];
+  const loose = design(
+    [
+      { box: { fill: [{ kind: "linear", stops: [{ at: 0, color: "#16181c00" }, { at: 100, color: "#16181c" }] }] }, id: "degrade", name: "Degradê", place: { h: 200, mode: "free", w: 440, x: 0, y: 0, z: -1 }, type: "shape" },
+      { box: { fill, radius: 16 }, id: "forma", place: { h: 80, mode: "free", rotate: 30, w: 120, x: 160, y: 60, z: 2 }, type: "shape" },
+      { children: [], id: "solta", place: { h: 90, mode: "free", w: 300, x: 20, y: 200 }, type: "box" },
+      { ...TITLE, place: { mode: "free", w: 200, x: 40, y: 30, z: -3 } },
+      { ...BADGE, place: { mode: "free", w: 80, x: 0, y: 300, z: -1 } },
+      { box: { fill: [{ color: "#ff000080", kind: "solid" }] }, children: [spacer("e1")], id: "caixa", type: "box" },
+      LINKS
+    ],
+    { devices: { mobile: { nodes: { forma: { hidden: true, place: { h: 40, mode: "free", w: 60, x: 5 } }, titulo: { place: { mode: "free", w: 150 } } } } } }
+  );
+
+  // Pelas Camadas (o vao da caixa) e pelo ⋯ Colocar dentro: o mesmo caminho.
+  const shape = editor.moveFreeNodeTo(loose, "forma", { index: 1, parentId: "caixa" });
+  assert.equal(shape.becameFlow, true);
+  assert.deepEqual(find(shape.design, "forma").node.place, { height: 80, mode: "flow", width: 120, z: 2 }, "o giro sai, o tamanho e a camada ficam");
+  assert.deepEqual(shape.design.devices.mobile.nodes.forma, { hidden: true, place: { height: 40, mode: "flow", width: 60 } }, "o tamanho proprio do celular fica");
+  assert.deepEqual(editor.moveFreeNodeIntoBox(loose, "forma", "caixa").design, shape.design, "o ⋯ Colocar dentro faz o mesmo");
+  assert.ok(valid(shape.design));
+  assert.deepEqual(model.canonicalPopupFreeDesign(shape.design), shape.design, "ja na forma canonica");
+
+  const gradient = editor.moveFreeNodeTo(loose, "degrade", { index: 0, parentId: "caixa" });
+  assert.deepEqual(find(gradient.design, "degrade").node.place, { height: 200, mode: "flow" }, "z -1 vira 0 (o padrao, fora) e a largura da prancheta vira fill");
+  assert.ok(valid(gradient.design));
+
+  const box = editor.moveFreeNodeIntoBox(loose, "solta", "caixa");
+  assert.deepEqual(find(box.design, "solta").node.place, { height: 90, mode: "flow", width: 300 });
+  assert.ok(valid(box.design));
+
+  // Todo tipo: o Titulo e o Selo com camada negativa entram com 0; o Titulo perde so a posicao do celular.
+  const title = editor.moveFreeNodeTo(loose, "titulo", { index: 0, parentId: "caixa" });
+  assert.equal(find(title.design, "titulo").node.place, undefined);
+  assert.equal(title.design.devices.mobile.nodes.titulo, undefined, "fora a Forma e a Caixa, o tamanho do celular sai com a posicao");
+  assert.equal(find(editor.moveFreeNodeIntoBox(loose, "selo", "caixa").design, "selo").node.place, undefined);
+  assert.ok(valid(title.design));
+});
+
 test("paridade com o Subir e o Colocar dentro: travado, escondido, Links e Áudio se movem", () => {
   const base = design([{ ...TITLE, locked: true }, { ...TEXT, hidden: true }, { children: [], id: "caixa", type: "box" }, LINKS, AUDIO]);
 
@@ -258,7 +301,7 @@ test("frases do mover: a posição entre os irmãos, onde e o final da sequênci
   assert.equal(`${C.drag.moved(1, 5)} ${C.drag.alsoDesktop}`, "Movido. Posição 1 de 5, no pop-up. A ordem muda também no computador.");
 });
 
-test("textos do arrastar palavra por palavra, os Atalhos ainda com 12 linhas e o vocabulário", () => {
+test("textos do arrastar palavra por palavra, os Atalhos com 17 linhas (a do Esc no lugar de antes) e o vocabulário", () => {
   assert.equal(C.drag.moved(3, 3, "dentro de Caixa em coluna"), "Movido. Posição 3 de 3, dentro de Caixa em coluna.");
   assert.equal(C.drag.moved(1, 2), "Movido. Posição 1 de 2, no pop-up.");
   assert.equal(C.drag.inArtboard, "no pop-up");
@@ -267,7 +310,8 @@ test("textos do arrastar palavra por palavra, os Atalhos ainda com 12 linhas e o
   assert.equal(C.drag.intoItself, "Uma caixa não entra dentro dela mesma.");
   assert.equal(C.toolbar.drag, "Arraste para mudar o lugar");
   assert.equal(C.elements.hint, "Clique para acrescentar ou arraste até o lugar no desenho.");
-  assert.equal(C.shortcuts.length, 12);
+  // L4b: as cinco linhas novas entram no fim; a do Esc continua a 8a.
+  assert.equal(C.shortcuts.length, 17);
   assert.equal(C.shortcuts[7], "Esc: selecionar a caixa de fora (ou nada); arrastando, cancela");
   assert.equal(C.shortcuts.filter((line) => line.startsWith("Esc:")).length, 1);
 

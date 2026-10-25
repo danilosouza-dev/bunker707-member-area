@@ -7,7 +7,9 @@ import "./support/admin-action-stubs.mjs";
 // do palco, dos Elementos e das Camadas. Onde um elemento novo entra, duplicar, excluir, subir/descer e as caixas,
 // soltar e seguir a sequencia sem mexer no que se ve, as setas, redimensionar (com Shift e girado), alinhar no
 // pop-up, as guias, a escala do zoom e do celular, o arrastar que so muda o design no fim, o historico, a copia de
-// recuperacao, o teclado das Camadas e o vocabulario. Tudo carregado direto pelo Node.
+// recuperacao, o teclado das Camadas e o vocabulario. No L4b: Shift + ↑/↓ e Ctrl + Enter nas Camadas, os Atalhos
+// novos, as frases do zoom em passos, a Forma e a Caixa que levam o tamanho para a sequencia (tambem no celular) e o
+// alinhar pela caixa que se ve. Tudo carregado direto pelo Node.
 
 const editor = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
 const geometry = await import("../src/components/admin/v2/communication/popup-free/free-editor-geometry.ts");
@@ -246,6 +248,84 @@ test("soltar e seguir a sequência mantêm o lugar na tela", () => {
   assert.equal(editor.freeNodeToSequence(base, "titulo", rects), null, "quem ja segue a sequencia fica");
 });
 
+test("seguir a sequência: a Forma e a Caixa guardam a largura e a altura, o Degradê vira fill e fica atrás (L4b)", () => {
+  // docs/27 L48: a Forma e uma div vazia e so tem altura na sequencia com place.height; sem isso ela sumia.
+  const fill = [{ color: "#ffffff26", kind: "solid" }];
+  const base = design([
+    { box: { fill: [{ kind: "linear", stops: [{ at: 0, color: "#16181c00" }, { at: 100, color: "#16181c" }] }] }, id: "degrade", name: "Degradê", place: { h: 200, mode: "free", w: 440, x: 0, y: 0, z: -1 }, type: "shape" },
+    TITLE,
+    { box: { fill, radius: 16 }, id: "forma", place: { h: 80, mode: "free", rotate: 15, w: 120, x: 160, y: 60 }, type: "shape" },
+    { box: { fill }, id: "alta", place: { h: 2000, mode: "free", w: 100, x: 0, y: 300 }, type: "shape" },
+    { children: [], id: "caixa", layout: { gap: 8 }, place: { h: 90, mode: "free", w: 300, x: 20, y: 200 }, type: "box" },
+    { children: [], id: "solta", place: { mode: "free", w: 300, x: 20, y: 320 }, type: "box" },
+    { ...TEXT, place: { mode: "free", w: 200, x: 10, y: 400, z: 3 } },
+    LINKS
+  ]);
+  const rects = { "@artboard": { h: 500, w: 440, x: 0, y: 0 }, links: { h: 20, w: 392, x: 24, y: 470 }, titulo: { h: 44, w: 392, x: 24, y: 24 } };
+  const placeAfter = (id) => {
+    const result = editor.freeNodeToSequence(base, id, rects);
+
+    assert.ok(schema.popupFreeDesignSchema.safeParse(result).success, `${id}: o design vale no schema`);
+    assert.deepEqual(model.canonicalPopupFreeDesign(result), result, `${id}: ja na forma canonica`);
+
+    return find(result, id).node.place;
+  };
+
+  assert.deepEqual(placeAfter("forma"), { height: 80, mode: "flow", width: 120 }, "o giro e a posicao saem");
+  assert.deepEqual(placeAfter("degrade"), { height: 200, mode: "flow", z: -1 }, "com a largura da prancheta vira fill (o padrao) e a camada fica");
+  assert.deepEqual(placeAfter("alta"), { height: 1600, mode: "flow", width: 100 }, "a altura fica dentro do limite da sequencia");
+  assert.deepEqual(placeAfter("caixa"), { height: 90, mode: "flow", width: 300 }, "na Caixa, a altura minima");
+  assert.deepEqual(placeAfter("solta"), { mode: "flow", width: 300 }, "a Caixa sem altura fixa continua crescendo com o conteudo");
+  assert.deepEqual(placeAfter("texto"), { mode: "flow", z: 3 }, "os outros tipos ficam so com a camada, como antes");
+
+  // A largura da prancheta conta: numa prancheta de 360, a Forma de 400 vira fill.
+  const narrow = design([{ box: { fill }, id: "forma", place: { h: 40, mode: "free", w: 400, x: 0, y: 0 }, type: "shape" }, LINKS], { artboard: { width: 360 } });
+  assert.deepEqual(find(editor.freeNodeToSequence(narrow, "forma", rects), "forma").node.place, { height: 40, mode: "flow" });
+});
+
+test("seguir a sequência no celular: a Forma e a Caixa com tamanho próprio no celular ficam com ele (L4b)", () => {
+  // C9: sem isso, a Forma passaria a ter no celular o tamanho do computador no proprio gesto.
+  const fill = [{ color: "#ffffff26", kind: "solid" }];
+  const base = design(
+    [
+      { box: { fill }, id: "forma", place: { h: 80, mode: "free", w: 120, x: 160, y: 60 }, type: "shape" },
+      { box: { fill }, id: "larga", place: { h: 80, mode: "free", w: 120, x: 0, y: 160 }, type: "shape" },
+      { box: { fill }, id: "parada", place: { h: 80, mode: "free", w: 120, x: 0, y: 260 }, type: "shape" },
+      { children: [], id: "caixa", place: { mode: "free", w: 300, x: 20, y: 360 }, type: "box" },
+      { ...TITLE, place: { mode: "free", w: 200, x: 10, y: 10 } },
+      LINKS
+    ],
+    {
+      devices: {
+        mobile: {
+          nodes: {
+            caixa: { place: { h: 64, mode: "free" } },
+            forma: { hidden: true, place: { mode: "free", w: 60, x: 5 } },
+            larga: { place: { h: 50, mode: "free", w: 440 } },
+            parada: { place: { mode: "free", x: 8, y: 12 } },
+            titulo: { place: { mode: "free", w: 150 } }
+          }
+        }
+      }
+    }
+  );
+  const rects = { "@artboard": { h: 500, w: 440, x: 0, y: 0 }, links: { h: 20, w: 392, x: 24, y: 470 } };
+  const mobileAfter = (id) => {
+    const result = editor.freeNodeToSequence(base, id, rects);
+
+    assert.ok(schema.popupFreeDesignSchema.safeParse(result).success, `${id}: o design vale no schema`);
+    assert.deepEqual(model.canonicalPopupFreeDesign(result).devices, result.devices, `${id}: o celular ja na forma canonica`);
+
+    return result.devices?.mobile?.nodes?.[id];
+  };
+
+  assert.deepEqual(mobileAfter("forma"), { hidden: true, place: { mode: "flow", width: 60 } }, "a largura do celular fica; a altura igual ao computador sai");
+  assert.deepEqual(mobileAfter("larga"), { place: { height: 50, mode: "flow", width: "fill" } }, "no celular, a largura da prancheta vira fill");
+  assert.equal(mobileAfter("parada"), undefined, "so X e Y no celular: a posicao solta sai inteira");
+  assert.deepEqual(mobileAfter("caixa"), { place: { height: 64, mode: "flow" } }, "a Caixa com altura so no celular");
+  assert.equal(mobileAfter("titulo"), undefined, "os outros tipos perdem a posicao do celular, como antes");
+});
+
 test("setas movem 1 e 10 px e não mexem em travados", () => {
   const base = design([{ ...TITLE, place: { mode: "free", w: 200, x: 10, y: 10 } }, { ...TEXT, locked: true, place: { mode: "free", w: 200, x: 0, y: 100 } }, LINKS]);
   const one = editor.nudgeFreeNode(base, "titulo", 1, 0);
@@ -301,6 +381,39 @@ test("alinhar no pop-up: esquerda, centro, direita, em cima, no meio e embaixo p
   assert.equal(placeAfter("center").y, 47, "alinhar ao centro nao mexe no Y");
   assert.equal(editor.alignFreeNode(base, "titulo", "left", { ...rects, titulo: { h: 10, w: 100, x: 1, y: 1 } }), base, "travado nao alinha");
   assert.deepEqual(geometry.alignFreeRect({ h: 10, w: 20, x: 5, y: 5 }, "middle", { h: 100, w: 200 }), { y: 45 });
+});
+
+test("alinhar no pop-up pela caixa que se vê: um girado encosta a borda que aparece (L4b)", () => {
+  // docs/27 L41: um Selo de 100 x 20 girado 90° aparece com 20 x 100, 40 px para dentro de cada lado do retangulo.
+  const selo = { id: "selo", label: "Novo", type: "badge" };
+  const base = design([{ ...selo, place: { mode: "free", rotate: 90, w: 100, x: 50, y: 60 } }, LINKS]);
+  const rects = { "@artboard": { h: 300, w: 440, x: 0, y: 0 }, selo: { h: 20, w: 100, x: 50, y: 60 } };
+  const placeAfter = (value, edge, device) => find(editor.alignFreeNode(value, "selo", edge, rects, device), "selo").node.place;
+  const seenLeft = (place) => geometry.freeVisualRect(geometry.freeRectOfPlace(place, 20), place.rotate).x;
+
+  assert.equal(placeAfter(base, "left").x, -40);
+  assert.equal(seenLeft(placeAfter(base, "left")), 0, "a borda que se ve fica em x 0");
+  assert.equal(placeAfter(base, "right").x, 380);
+  assert.equal(placeAfter(base, "center").x, 170, "o centro e o mesmo com ou sem giro");
+  assert.equal(placeAfter(base, "top").y, 40);
+  assert.equal(placeAfter(base, "bottom").y, 240);
+  assert.equal(placeAfter(base, "middle").y, 140);
+  assert.equal(placeAfter(base, "left").y, 60, "alinhar a esquerda nao mexe no Y");
+  assert.equal(placeAfter(base, "top").x, 50, "alinhar em cima nao mexe no X");
+
+  // 180° aparece igual ao sem giro; 45° pela caixa em volta (arredondado no fim).
+  const upsideDown = design([{ ...selo, place: { mode: "free", rotate: 180, w: 100, x: 50, y: 60 } }, LINKS]);
+  assert.equal(placeAfter(upsideDown, "left").x, 0);
+  const tilted = design([{ ...selo, place: { mode: "free", rotate: 45, w: 100, x: 50, y: 60 } }, LINKS]);
+  assert.equal(placeAfter(tilted, "left").x, -8);
+
+  // Com o Celular: parte da posicao do celular, o giro e o do computador e so o celular muda.
+  const phone = design([{ ...selo, place: { mode: "free", rotate: 90, w: 100, x: 50, y: 60 } }, LINKS], { devices: { mobile: { nodes: { selo: { place: { mode: "free", x: 10 } } } } } });
+  const aligned = editor.alignFreeNode(phone, "selo", "right", rects, "mobile");
+  assert.deepEqual(find(aligned, "selo").node.place, { mode: "free", rotate: 90, w: 100, x: 50, y: 60 });
+  assert.deepEqual(aligned.devices.mobile.nodes.selo, { place: { mode: "free", x: 380 } });
+  const left = editor.alignFreeNode(base, "selo", "left", rects);
+  assert.equal(editor.alignFreeNode(left, "selo", "left", rects), left, "ja alinhado: o mesmo design, sem passo");
 });
 
 test("guias grudam nas bordas e no centro da prancheta e dos outros soltos; Alt desliga", () => {
@@ -756,6 +869,19 @@ test("Camadas: setas na linha, E esconde, T trava", () => {
   assert.deepEqual(editor.freeLayerKeyAction(key("T", { shiftKey: true }), at), { kind: "toggleLocked" });
   assert.deepEqual(editor.freeLayerKeyAction(key("Enter"), at), { kind: "select" });
   assert.equal(editor.freeLayerKeyAction(key("Enter"), { ...at, button: 1 }), null, "nos outros botoes o Enter aperta o proprio botao");
+  // Escolher varios (L4b, docs/27 L36): Shift + ↑/↓ vai a linha vizinha e pega o intervalo; Ctrl/⌘ + Enter poe ou tira.
+  assert.deepEqual(editor.freeLayerKeyAction(key("ArrowDown", { shiftKey: true }), at), { index: 3, kind: "extend" });
+  assert.deepEqual(editor.freeLayerKeyAction(key("ArrowUp", { shiftKey: true }), at), { index: 1, kind: "extend" });
+  assert.deepEqual(editor.freeLayerKeyAction(key("ArrowDown", { shiftKey: true }), { ...at, row: 4 }), { index: 4, kind: "extend" }, "limitado a lista");
+  assert.deepEqual(editor.freeLayerKeyAction(key("ArrowUp", { shiftKey: true }), { ...at, row: 0 }), { index: 0, kind: "extend" });
+  assert.deepEqual(editor.freeLayerKeyAction(key("ArrowDown", { altKey: true, shiftKey: true }), at), { kind: "moveDown" }, "com Alt continua descendo o elemento");
+  assert.equal(editor.freeLayerKeyAction(key("ArrowDown", { ctrlKey: true, shiftKey: true }), at), null);
+  assert.equal(editor.freeLayerKeyAction(key("ArrowUp", { metaKey: true, shiftKey: true }), at), null);
+  assert.deepEqual(editor.freeLayerKeyAction(key("Enter", { ctrlKey: true }), at), { kind: "toggleSelect" });
+  assert.deepEqual(editor.freeLayerKeyAction(key("Enter", { metaKey: true }), at), { kind: "toggleSelect" });
+  assert.equal(editor.freeLayerKeyAction(key("Enter", { ctrlKey: true }), { ...at, button: 1 }), null, "nos outros botoes, nada");
+  assert.equal(editor.freeLayerKeyAction(key("Enter", { altKey: true, ctrlKey: true }), at), null);
+  assert.deepEqual(editor.freeLayerKeyAction(key("t", { shiftKey: true }), at), { kind: "toggleLocked" }, "Shift + T continua travando");
   assert.deepEqual(editor.freeLayerKeyAction(key("F10", { shiftKey: true }), at), { kind: "menu" });
   assert.deepEqual(editor.freeLayerKeyAction(key("ContextMenu"), at), { kind: "menu" });
   assert.deepEqual(editor.freeLayerKeyAction(key("Delete"), at), { kind: "remove" });
@@ -998,8 +1124,38 @@ test("vocabulário das frases do editor", () => {
   assert.equal(C.bar.doneLabel, "Concluir e voltar ao aviso");
   assert.equal(C.save.waitUpload, "Espere o arquivo terminar de enviar.");
   assert.equal(C.recovery.message("14:05"), "Há um design deste pop-up que não foi salvo (14:05).");
-  assert.equal(C.shortcuts.length, 12);
+  assert.equal(C.shortcuts.length, 17);
+  // L4b (docs/27 L49): as cinco linhas novas no fim, palavra por palavra; as de antes ficam onde estavam.
+  assert.deepEqual(C.shortcuts.slice(12), [
+    "Shift + clique: pôr ou tirar da seleção (ou Ctrl, ou ⌘)",
+    "Ctrl + A: escolher todos do mesmo nível",
+    "Alt + clique: escolher o elemento de baixo",
+    "Ctrl + = / Ctrl + −: mais e menos zoom (ou Ctrl + roda)",
+    "Nas Camadas: Ctrl + clique ou Ctrl + Enter põe ou tira; Shift + clique ou Shift + ↑ / ↓ pega o intervalo"
+  ]);
+  assert.equal(C.shortcuts[10], "Alt ao mover: sem guias", "Alt + arrastar continua com o elemento de cima e sem guias");
+  assert.equal(C.shortcuts[11], "Nas Camadas: E esconde, T trava, Shift + F10 abre o menu");
+  assert.equal(/ [-–—] /.test(C.shortcuts.join("\n")), false, "sem hifen como separador (o − do zoom e o sinal de menos)");
   assert.equal(C.announce.removed, "Elemento excluído. Ctrl + Z desfaz.");
+});
+
+test("zoom em passos (L4b): as frases da barra, das pontas e as faladas, palavra por palavra", () => {
+  assert.equal(C.bar.zoomOut, "Diminuir o zoom");
+  assert.equal(C.bar.zoomIn, "Aumentar o zoom");
+  assert.equal(C.bar.zoomOutTitle, "Diminuir o zoom (Ctrl + −)");
+  assert.equal(C.bar.zoomInTitle, "Aumentar o zoom (Ctrl + =)");
+  assert.equal(C.bar.zoomFit, "Ajustar à tela");
+  assert.deepEqual(geometry.FREE_ZOOM_STEPS.map((step) => C.bar.zoomStep(step)), ["50 %", "75 %", "100 %", "150 %", "200 %"]);
+  assert.equal(C.bar.zoomFitShown(62), "Ajustar à tela (62 %)");
+  assert.equal(C.bar.zoomMenu(C.bar.zoomFitShown(62)), "Zoom: Ajustar à tela (62 %)");
+  assert.equal(C.bar.zoomMenu(C.bar.zoomStep(150)), "Zoom: 150 %");
+  assert.equal(C.bar.zoomMin, "O zoom já está no menor.");
+  assert.equal(C.bar.zoomMax, "O zoom já está no maior.");
+  assert.equal(C.bar.zoomSpoken(150), "Zoom 150 %.");
+  assert.equal(C.bar.zoomFitSpoken(62), "Zoom: ajustar à tela (62 %).");
+
+  const texts = [C.bar.zoomOut, C.bar.zoomIn, C.bar.zoomOutTitle, C.bar.zoomInTitle, C.bar.zoomMenu(C.bar.zoomFitShown(62)), C.bar.zoomMin, C.bar.zoomMax, C.bar.zoomSpoken(150), C.bar.zoomFitSpoken(62)];
+  assert.equal(/ [-–—] /.test(texts.join("\n")), false, "sem hifen como separador");
 });
 
 test("o editor Livre não monta HTML nem CSS em texto (dangerouslySetInnerHTML, innerHTML, cssText, <style>)", () => {
