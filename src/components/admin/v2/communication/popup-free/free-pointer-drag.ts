@@ -54,6 +54,9 @@ export const FREE_AUTO_SCROLL_EDGE_PX = 32;
 /** O mais rapido que a rolagem sozinha anda, colado na borda (px por quadro). */
 export const FREE_AUTO_SCROLL_MAX_PX = 20;
 
+/** Quantos pontos do gesto, no maximo, esperam o proximo quadro para armar a rolagem sozinha (sem quadro, nao cresce). */
+const FREE_AUTO_SCROLL_TRAIL_MAX = 64;
+
 /** Quanto tempo o click que vem depois de um gesto comecado fica engolido, a contar do botao solto. */
 export const FREE_POINTER_CLICK_GUARD_MS = 350;
 
@@ -193,6 +196,9 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
   let armedY = false;
   let lastPoint: FreePoint = origin;
   let lastKeys: FreePointerKeys = { altKey: false, shiftKey: false };
+  // Os pontos do gesto desde o ultimo quadro (o do pointerdown entra no primeiro): a arma (C10) olha todos, e nao so o
+  // ultimo. Um movimento rapido ate a borda, entre dois quadros, nao deixa o eixo desarmado. A area so e lida no quadro.
+  let trail: FreePoint[] = handlers.autoScroll ? [origin] : [];
 
   const ours = (event: PointerEvent) => event.pointerId === pointerId;
   const pointOf = (event: PointerEvent): FreePoint => ({ x: event.clientX, y: event.clientY });
@@ -234,6 +240,14 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
 
     lastPoint = pointOf(event);
     lastKeys = keysOf(event);
+
+    if (handlers.autoScroll && !(armedX && armedY)) {
+      trail.push(lastPoint);
+
+      if (trail.length > FREE_AUTO_SCROLL_TRAIL_MAX) {
+        trail = trail.slice(-FREE_AUTO_SCROLL_TRAIL_MAX);
+      }
+    }
     handlers.onMove(lastPoint, lastKeys);
   }
 
@@ -259,11 +273,17 @@ export function followFreePointer(start: FreePointerStart, handlers: FreePointer
 
     if (area) {
       const box = area.getBoundingClientRect();
-      const arms = freeAutoScrollArms(box, lastPoint, FREE_AUTO_SCROLL_EDGE_PX);
 
-      // Armado, o eixo vale ate o fim do gesto. No quadro que o arma, o ponto esta fora das faixas dele: ali nao rola.
-      armedX = armedX || arms.x;
-      armedY = armedY || arms.y;
+      // Armado, o eixo vale ate o fim do gesto. No quadro que o arma so com o ultimo ponto, ele esta fora das faixas
+      // daquele eixo: ali nao rola.
+      for (const point of [...trail, lastPoint]) {
+        const arms = freeAutoScrollArms(box, point, FREE_AUTO_SCROLL_EDGE_PX);
+
+        armedX = armedX || arms.x;
+        armedY = armedY || arms.y;
+      }
+
+      trail = [];
 
       const step = freeAutoScrollStep(box, lastPoint);
       // So nos eixos armados: o desarmado fica parado mesmo com o ponto na faixa dele.

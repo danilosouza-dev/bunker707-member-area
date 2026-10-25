@@ -831,6 +831,25 @@ test("ponteiro: a rolagem sozinha só se arma depois de o ponto estar dentro da 
   assert.equal(painel.area.rolagens.length, 2, "o gesto novo nao herda a arma do anterior");
 });
 
+test("ponteiro: um movimento rápido até a borda, entre dois quadros, arma pelo ponto do pointerdown e pelos de antes, e rola (C10)", () => {
+  // A Forma pega no meio da area (100,200) e levada de uma vez ate a faixa da direita (10 px da borda), antes do
+  // primeiro quadro: o ponto do pointerdown estava dentro da area e fora das faixas, entao o x se arma e rola.
+  const rapida = rolando({ comeco: { clientX: 100, clientY: 200 } });
+  ponteiro(rapida.janela, "pointermove", 110, 200);
+  ponteiro(rapida.janela, "pointermove", 440, 200);
+  assert.equal(rapida.lida.pedidas, 0, "a area so e lida no quadro");
+  rapida.janela.quadro();
+  assert.deepEqual(rapida.area.rolagens, [[14, 0]]);
+  assert.equal(rapida.lida.pedidas, 1);
+
+  // Comecar dentro da faixa e ir direto para a mesma faixa continua sem rolar (o que a C10 evita).
+  const naFaixa = rolando({ comeco: { clientX: 440, clientY: 200 } });
+  ponteiro(naFaixa.janela, "pointermove", 445, 200);
+  naFaixa.janela.quadro();
+  naFaixa.janela.quadro();
+  assert.deepEqual(naFaixa.area.rolagens, [], "sem nenhum ponto fora da faixa do x, o x nao se arma");
+});
+
 test("ponteiro: cada eixo da rolagem sozinha se arma sozinho; pegar uma linha das Camadas pelo ícone e descer em linha reta rola a lista (C10)", () => {
   // A lista das Camadas (260 x 400 px, rolada 100 px): a linha pega pelo icone, a 20 px da borda esquerda (dentro da
   // faixa), e arrastada reto para baixo ate a faixa de baixo. O y se arma no meio da lista; o x continua desarmado.
