@@ -18,18 +18,18 @@ import {
   prancheta
 } from "./popup-livre-editor-fixtures";
 
-// Livre: arrastar os elementos da sequencia no desenho (docs/27 §13.9, L4a; docs/18 §3.1). Num rascunho com
-// [Título, Texto, Caixa em coluna com fundo e respiro de 16 [Selo, Botão principal], uma caixa cheia (20 linhas),
-// Links] e a Caixa em linha so no celular (o Botão principal semeado com o botao do aviso, para o Revisar nao pedir
-// nada), o produtor arrasta pelo proprio elemento. Com os Links em Renomear nas Camadas, o Título desce um lugar na
-// coluna: o nome fica (a foto do arrastar vem depois do limiar, entao o blur do campo nao cancela o gesto), e Ctrl + Z
-// e Ctrl + Shift + Z sao um passo. O Texto entra no fim da Caixa e sai dela pela faixa da borda de baixo, a Caixa vai
-// para o topo pela alca da barrinha, o Título em cima da caixa cheia mostra o motivo e o Esc cancela, e soltar fora
-// da prancheta nao muda nada. Com "Ver como: Celular" (a Caixa em linha), o Selo vai para a direita do Botão: a
-// etiqueta e a frase dizem que a ordem muda tambem no computador, e o Computador ve a mesma ordem. Salvar rascunho
-// grava a ordem nova em children, e devices fica como foi semeado. Funciona no WebKit: o mouse sempre dentro da
-// janela, a prancheta e os elementos parados antes de medir, o indicador antes de soltar e a frase falada antes do
-// passo seguinte.
+// Livre: arrastar os elementos da sequencia no desenho (docs/27 §13.9, L4a; docs/18 §3.1). Num rascunho com [Título,
+// Texto, Caixa em coluna com fundo e respiro de 16 [Selo, Botão principal], uma caixa cheia (20 linhas), Links] e a
+// Caixa em linha so no celular (o Botão principal semeado com o botao do aviso, para o Revisar nao pedir nada), o
+// produtor arrasta pelo proprio elemento. Com os Links em Renomear nas Camadas, o Título desce um lugar na coluna: o
+// nome fica (a foto do arrastar vem depois do limiar, entao o blur do campo nao cancela o gesto), e Ctrl + Z e Ctrl +
+// Shift + Z sao um passo. O Texto entra no fim da Caixa (o foco fica no palco) e sai dela pela faixa da borda de baixo,
+// a Caixa vai para o topo pela alca da barrinha, o Título em cima da caixa cheia mostra o motivo e o Esc cancela (o
+// foco fica no palco), e soltar fora da prancheta nao muda nada. Com "Ver como: Celular" (a Caixa em linha), o Selo vai
+// para a direita do Botão: a etiqueta e a frase dizem que a ordem muda tambem no computador, e o Computador ve a mesma
+// ordem. Salvar rascunho grava a ordem nova em children, e devices fica como foi semeado. Funciona no WebKit: o mouse
+// sempre dentro da janela, a prancheta e os elementos parados antes de medir, o indicador antes de soltar e a frase
+// falada antes do passo seguinte.
 
 const TITULO = "Pop-up E2E: o produtor arrasta no desenho do Livre";
 /** A caixa cheia: 20 linhas (o limite de uma caixa), baixas para a prancheta caber na tela. */
@@ -157,6 +157,9 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
     await expect(falado(editor)).toHaveText("Movido. Posição 3 de 3, dentro de Caixa em coluna.");
     expect(await ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "cheia", "links"]);
     expect(await filhosNoPalco(editor, "caixa")).toEqual(["selo", "botao", "texto"]);
+    // O soltar no desenho nao mexe no foco: ele fica no palco (o foco ja estava nele, do Ctrl + Z de cima, e o
+    // mousedown no Texto foca o palco, o primeiro com tabIndex, nos dois navegadores).
+    await expect(editor.locator("[data-free-stage]")).toBeFocused();
   });
 
   await test.step("o Texto sai da Caixa pela faixa da borda de baixo e fica logo depois dela", async () => {
@@ -197,10 +200,13 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
     await expect(barrinha).toBeVisible();
   });
 
-  await test.step("em cima da caixa cheia aparece o motivo; o Esc cancela e nada muda", async () => {
+  await test.step("em cima da caixa cheia aparece o motivo; o Esc cancela, nada muda e o foco fica no palco", async () => {
     const titulo = await caixaParada(noPalco(editor, "titulo"));
     const cheia = await caixaParada(noPalco(editor, "cheia"));
     const antes = await ordem(editor);
+    // O foco antes do gesto, no palco, vem pelo teclado (nao depende de onde o clique de cima o deixou).
+    await editor.locator("[data-free-stage]").focus();
+    await expect(editor.locator("[data-free-stage]")).toBeFocused();
 
     await arrastar(page, centroDe(titulo), { x: cheia.x + cheia.width / 2, y: cheia.y + cheia.height / 3 }, {
       antesDeSoltar: async () => {
@@ -212,9 +218,10 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
     });
 
     expect(await ordem(editor)).toEqual(antes);
-    // O Esc ficou com o arrastar: a selecao nao subiu para a caixa de fora.
+    // O Esc ficou com o arrastar: a selecao nao subiu para a caixa de fora, e o foco continua no palco.
     await expect(editor.locator("[data-free-selection]")).toHaveAttribute("data-free-selection", "titulo");
     expect(await filhosNoPalco(editor, "cheia")).toHaveLength(20);
+    await expect(editor.locator("[data-free-stage]")).toBeFocused();
   });
 
   await test.step("soltar na área escura fora da prancheta não muda nada", async () => {

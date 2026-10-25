@@ -195,6 +195,15 @@ export function falado(editor: Locator) {
   return editor.locator("[data-free-live]");
 }
 
+/**
+ * O foco esta nesta area (nela ou dentro dela). Para conferir o foco depois de um gesto do mouse nos dois navegadores:
+ * o mousedown num botao foca o botao no Chromium; no WebKit, o primeiro de fora que recebe foco pelo clique (o painel
+ * com tabIndex). Os dois ficam dentro da mesma area, e nunca no body.
+ */
+export async function focoDentro(area: Locator) {
+  return area.evaluate((element) => element.contains(document.activeElement));
+}
+
 /** As linhas das Camadas na ordem da lista, com o id da caixa de fora (null na prancheta). */
 export async function linhasDasCamadas(editor: Locator): Promise<{ id: string; pai: string | null }[]> {
   return editor.locator("[data-free-layer-row]").evaluateAll((rows) =>

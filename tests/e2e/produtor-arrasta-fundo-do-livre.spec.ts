@@ -10,6 +10,7 @@ import {
   camada,
   centroDe,
   designDoRascunhoLivre,
+  focoDentro,
   gravarRascunhoLivre,
   lerDesignDoAviso,
   linhasDasCamadas,
@@ -22,11 +23,11 @@ import {
 // arrasta a ficha da Camada 3 para cima da 1 na faixa "Ordem" do Estilo: o azul fica por cima, e o Ctrl + Z volta só
 // a ordem (a cor nova fica; outro Ctrl + Z volta a cor). Pelo teclado, Alt + ↑ na ficha leva a camada para cima com o
 // foco junto e a frase falada, sem mexer no Selo nas Camadas; Subir num cartão leva o foco ao Subir do lugar novo; o
-// Esc no meio do arrastar não muda nada e não chega ao editor. Na prancheta (painel Pop-up), "+ Camada de fundo" cria
-// a terceira camada e o foco vai para a ficha dela (o botão desliga); arrastar a ficha 2 para cima muda o fundo num
-// passo só; soltar longe da faixa não muda nada nem deixa passo vazio. Com "Ver como: Celular", o palco desenha a
-// mesma ordem, e "Salvar rascunho" grava a ordem do Selo e o fundo da prancheta, sem nada próprio do celular. O botão
-// semeado é o Botão principal (o rascunho grava o botão do aviso, e o Revisar não pede nada).
+// Esc no meio do arrastar não muda nada, não chega ao editor e deixa o foco no Estilo. Na prancheta (painel Pop-up),
+// "+ Camada de fundo" cria a terceira camada e o foco vai para a ficha dela (o botão desliga); arrastar a ficha 2 para
+// cima muda o fundo num passo só; soltar longe da faixa não muda nada nem deixa passo vazio. Com "Ver como: Celular",
+// o palco desenha a mesma ordem, e "Salvar rascunho" grava a ordem do Selo e o fundo da prancheta, sem nada próprio do
+// celular. O botão semeado é o Botão principal (o rascunho grava o botão do aviso, e o Revisar não pede nada).
 // Funciona no WebKit: só mouse e teclado, o mouse sempre dentro da janela, a prancheta e a caixa parada antes de
 // medir, o indicador esperado antes de soltar e o foco conferido com toBeFocused (no WebKit o clique não dá foco a
 // botão).
@@ -156,10 +157,13 @@ test("arrasta as camadas de fundo no Estilo e na prancheta: um passo, o foco jun
     await expect(corDoSelo(2)).toHaveValue(VERMELHO);
   });
 
-  await test.step("Esc no meio do arrastar: nada muda e o Selo continua selecionado (o Esc não chega ao editor)", async () => {
+  await test.step("Esc no meio do arrastar: nada muda, o Selo continua selecionado e o foco fica no Estilo", async () => {
     await faixa.scrollIntoViewIfNeeded();
     const origem = centroDe(await caixaParada(ficha("livre-selo-fundo", 0)));
     const alvo = await caixaParada(ficha("livre-selo-fundo", 2));
+    // O foco antes do gesto vem pelo teclado (no WebKit o clique não dá foco a botão).
+    await ficha("livre-selo-fundo", 0).focus();
+    await expect(ficha("livre-selo-fundo", 0)).toBeFocused();
 
     await page.mouse.move(origem.x, origem.y);
     await page.mouse.down();
@@ -171,6 +175,9 @@ test("arrasta as camadas de fundo no Estilo e na prancheta: um passo, o foco jun
     await expect(corDoSelo(0)).toHaveValue(AZUL);
     await expect(corDoSelo(2)).toHaveValue(VERMELHO);
     await expect(editor.locator('[data-free-inspector="selo"]')).toBeVisible();
+    // O Esc não mexe no foco: ele fica no painel Estilo (na ficha, no Chromium; no WebKit, no primeiro de fora da
+    // ficha que recebe foco pelo clique, dentro do painel), nunca no body.
+    expect(await focoDentro(editor.getByRole("tabpanel", { exact: true, name: "Estilo" }))).toBe(true);
   });
 
   await test.step("prancheta: + Camada cria a terceira (o foco vai para a ficha dela) e arrastar a ficha 2 para cima é um passo", async () => {

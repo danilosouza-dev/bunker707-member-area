@@ -10,6 +10,7 @@ import {
   centroDe,
   daPrancheta,
   falado,
+  focoDentro,
   gravarRascunhoLivre,
   lerDesignDoAviso,
   noPalco,
@@ -20,12 +21,12 @@ import {
 
 // Arrastar do painel Elementos para o desenho do Livre (docs/27 §13.9, L4a; docs/18 §3.1): num pop-up Livre em
 // rascunho, o produtor ve a dica de 12 px no topo do painel, arrasta o Texto ate o vao entre o Titulo e a Caixa (a
-// linha de onde entra e a ficha com o nome aparecem antes de soltar; o Texto entra em segundo, selecionado e com o
-// foco na area de texto, num passo so do Ctrl + Z), arrasta outro Texto ate entre os dois Icones da Caixa em linha
-// (entra dentro dela, pelo x), arrasta a Forma ate um ponto (o centro fica onde soltou: X e Y do Avançado), solta
-// fora da prancheta e no proprio painel (nada entra), aperta Esc no meio (nada entra e a selecao fica), clica no
-// Selo logo depois (entra um so) e salva o rascunho: o gravado tem tudo isso, sem nenhum elemento a mais.
-// Semeado com um Fechar ("Agora não") e sem o Botão principal: o aviso fica sem botao e o Revisar nao pede nada.
+// linha de onde entra e a ficha com o nome aparecem antes de soltar; o Texto entra em segundo, selecionado e com o foco
+// na area de texto, num passo so do Ctrl + Z), arrasta outro Texto ate entre os dois Icones da Caixa em linha (entra
+// dentro dela, pelo x), arrasta a Forma ate um ponto (o centro fica onde soltou: X e Y do Avançado), solta fora da
+// prancheta e no proprio painel (nada entra), aperta Esc no meio (nada entra, a selecao fica e o foco continua no
+// painel), clica no Selo logo depois (entra um so) e salva o rascunho: o gravado tem tudo isso, sem nenhum elemento a
+// mais. Semeado com um Fechar ("Agora não") e sem o Botão principal: o aviso fica sem botao e o Revisar nao pede nada.
 // So mouse e teclado, com o mouse sempre dentro da janela (WebKit).
 
 const TITULO = "Pop-up E2E: arrastar do painel Elementos";
@@ -241,8 +242,11 @@ test("arrasta elementos do painel para o desenho do Livre: entra onde soltou, um
     await expect(ficha).toHaveCount(0);
     expect(await desenhados(editor)).toBe(antes);
 
-    // Esc no meio: o lugar some, a ficha some, nada entra e o Esc nao sobe para a caixa de fora.
+    // Esc no meio: o lugar some, a ficha some, nada entra e o Esc nao sobe para a caixa de fora. O foco antes do
+    // gesto vem pelo teclado (no WebKit o clique nao da foco a botao).
     const sobre = { x: Math.round(pop.x + pop.width / 2), y: Math.round(pop.y + Math.min(60, pop.height / 2)) };
+    await botao(editor, "text").focus();
+    await expect(botao(editor, "text")).toBeFocused();
     await page.mouse.move(de.x, de.y);
     await page.mouse.down();
     await page.mouse.move(sobre.x, sobre.y, { steps: 10 });
@@ -254,6 +258,9 @@ test("arrasta elementos do painel para o desenho do Livre: entra onde soltou, um
     await page.mouse.up();
     expect(await desenhados(editor)).toBe(antes);
     expect(await selecionado(editor)).toBe(selecaoAntes);
+    // O Esc nao mexe no foco: ele fica no painel Elementos (no botao do Texto, no Chromium; no WebKit, no primeiro de
+    // fora do botao que recebe foco pelo clique, dentro do painel), nunca no body nem no desenho.
+    expect(await focoDentro(editor.getByRole("tabpanel", { exact: true, name: "Elementos" }))).toBe(true);
   });
 
   await test.step("um clique no Selo logo depois acrescenta um só", async () => {

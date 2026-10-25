@@ -11,6 +11,7 @@ import {
   centroDe,
   designDoRascunhoLivre,
   falado,
+  focoDentro,
   gravarRascunhoLivre,
   lerDesignDoAviso,
   linhasDasCamadas,
@@ -22,13 +23,13 @@ import {
 // clique que treme 6 px dentro da linha do Texto seleciona o Texto, como o clique parado. O produtor arrasta o Texto
 // para o meio da linha da Caixa (entra no fim dela, um passo so no Ctrl + Z), o Selo para o quarto de cima do Título
 // (sai da caixa e fica primeiro), a Caixa para a linha do Botão de dentro dela (a recusa aparece, nada muda e nao ha
-// passo vazio), aperta Esc no meio de um arrastar (nada muda e a selecao fica), solta abaixo da ultima linha (o fim
-// do pop-up) e arrasta a propria linha 6 px (nada aparece e a linha fica selecionada). Com uma linha em Renomear,
-// arrastar outra linha ainda move (a foto do design e tirada depois do limiar). Com "Ver como: Celular", a etiqueta
-// diz que a ordem muda tambem no computador. Pelo teclado, Shift + F10 › Tirar da caixa e › Colocar dentro da caixa
-// deixam o foco na linha movida. Salvar grava a ordem nova. Funciona no WebKit: o mouse sempre dentro da janela, a
-// prancheta e as linhas paradas antes de medir, o indicador antes de soltar, a frase falada antes do passo seguinte e
-// o foco conferido com toBeFocused (no WebKit o clique nao da foco a botao).
+// passo vazio), aperta Esc no meio de um arrastar (nada muda, a selecao fica e o foco continua nas Camadas), solta
+// abaixo da ultima linha (o fim do pop-up) e arrasta a propria linha 6 px (nada aparece e a linha fica selecionada).
+// Com uma linha em Renomear, arrastar outra linha ainda move (a foto do design e tirada depois do limiar). Com "Ver
+// como: Celular", a etiqueta diz que a ordem muda tambem no computador. Pelo teclado, Shift + F10 › Tirar da caixa e ›
+// Colocar dentro da caixa deixam o foco na linha movida. Salvar grava a ordem nova. Funciona no WebKit: o mouse sempre
+// dentro da janela, a prancheta e as linhas paradas antes de medir, o indicador antes de soltar, a frase falada antes
+// do passo seguinte e o foco conferido com toBeFocused (no WebKit o clique nao da foco a botao).
 
 const TITULO = "Pop-up E2E: o produtor arrasta nas Camadas do Livre";
 const CHILDREN: FreeNode[] = [
@@ -171,10 +172,13 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     await expect.poll(() => ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links"]);
   });
 
-  await test.step("Esc no meio de um arrastar: nada muda e a selecao continua (o Esc nao sobe para a caixa de fora)", async () => {
+  await test.step("Esc no meio de um arrastar: nada muda, a selecao continua e o foco fica nas Camadas", async () => {
     expect(await selecionado(editor)).toBe("selo");
     const de = await pegar(editor, "texto");
     const para = await naLinha(editor, "botao", 0.125);
+    // O foco antes do gesto vem pelo teclado, na linha selecionada (no WebKit o clique nao da foco a botao).
+    await botaoDaCamada(editor, "selo").focus();
+    await expect(botaoDaCamada(editor, "selo")).toBeFocused();
 
     await page.mouse.move(de.x, de.y);
     await page.mouse.down();
@@ -186,6 +190,9 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     await expect(editor.locator("[data-free-layer-dragging]")).toHaveCount(0);
     expect(await ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links"]);
     expect(await selecionado(editor)).toBe("selo");
+    // O Esc nao mexe no foco: ele fica nas Camadas (na linha do Texto, no Chromium; no WebKit, no primeiro de fora do
+    // botao que recebe foco pelo clique, dentro do painel), nunca no body.
+    expect(await focoDentro(editor.getByRole("tabpanel", { exact: true, name: "Camadas" }))).toBe(true);
   });
 
   await test.step("soltar abaixo da ultima linha leva ao fim do pop-up", async () => {
