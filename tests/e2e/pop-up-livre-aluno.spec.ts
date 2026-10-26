@@ -11,11 +11,11 @@ import { designVideoNoTopo, prepararMidiaDoLivre, publicarPopUpLivre, type Midia
 // <video> e so a capa; no celular (375 px) o cartao tem 343 px, sem rolagem para o lado, e tudo encolhe na mesma
 // proporcao (conferido so no que fica acima de qualquer texto, numa amostra com a fonte enviada e textos de 16 px
 // ou mais); o Tab segue as Camadas e o X vem por ultimo; os links sublinham ao passar o mouse e o anel de foco fica
-// por cima da sombra propria do botao (L6a); uma forma por cima do botao nao impede o clique (e o clique conta); o
-// Esc fecha; "Não mostrar de novo" some com dismiss false; Padrão e Personalizado continuam
-// iguais; com valores proprios do celular (docs/27 §1 e §9.10), a 375 px as caixas seguem o celular e a Forma escondida
-// no celular some, e a 1440 px vale o computador. Com E2E_SHOTS_DIR, guarda as fotos de 1440 e 375 px nessa pasta
-// (conferencia visual).
+// por cima da sombra propria do botao, cujo aperto anima o translate (L6a); uma forma por cima do botao nao impede
+// o clique (e o clique conta); o Esc fecha; "Não mostrar de novo" some com dismiss false; Padrão e Personalizado
+// continuam iguais; com valores proprios do celular (docs/27 §1 e §9.10), a 375 px as caixas seguem o celular e a
+// Forma escondida no celular some, e a 1440 px vale o computador. Com E2E_SHOTS_DIR, guarda as fotos de 1440 e 375
+// px nessa pasta (conferencia visual).
 
 const TITULO = "Pop-up E2E: Livre com vídeo";
 const NOME = /experimente grátis nova aula ao vivo/i;
@@ -140,7 +140,7 @@ test.describe("computador (1440 px)", () => {
     expect((await eventosDoPopUp(id)).at(-1)?.metadata).toMatchObject({ via: "esc" });
   });
 
-  test("os links sublinham ao passar o mouse e o anel de foco fica por cima da sombra do botão", async ({ page }) => {
+  test("os links sublinham ao passar o mouse; no botão com sombra, o anel de foco fica por cima e o aperto anima", async ({ page }) => {
     await reabrirPopUpParaAluna(TITULO);
     const popUp = await abrirPopUp(page);
     const naoMostrar = popUp.getByRole("button", { exact: true, name: "Não mostrar de novo" });
@@ -163,6 +163,8 @@ test.describe("computador (1440 px)", () => {
 
     expect(await sombra()).not.toMatch(ANEL);
     expect(await sombra()).not.toBe("none");
+    // O aperto de 1 px muda a propriedade translate (Tailwind 4): e ela que a transicao lista.
+    expect(await botao.evaluate((element) => getComputedStyle(element).transitionProperty)).toBe("filter, translate");
     await page.keyboard.press("Tab");
     await expect(botao).toBeFocused();
     await expect.poll(sombra).toMatch(ANEL);

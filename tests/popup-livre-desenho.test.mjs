@@ -812,6 +812,29 @@ test("botões, links e o X levam as classes de foco visível; o anel vence a som
   assert.match(markup, /<button class="[^"]*" data-free-button="close" data-free-id="fechar"[^>]*type="button">/);
 });
 
+test("o aperto de 1 px dos botões anima: a transição lista translate, a propriedade que o active:translate-y-px muda", () => {
+  const design = parsed({
+    children: [
+      { action: { kind: "cta" }, id: "botao", type: "button" },
+      { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" },
+      { action: { href: "https://exemplo.com.br/oferta", kind: "link", target: "new_tab" }, id: "link", label: "Ver página", type: "button" },
+      { id: "links", type: "links" }
+    ]
+  });
+  const classes = [...card(design).matchAll(/<(?:a|button) class="([^"]*)" data-free-button="/g)].map((match) => match[1]);
+
+  assert.equal(classes.length, 3, "principal, Fechar e o link");
+
+  for (const className of classes) {
+    // No Tailwind 4 o translate-y-px muda a propriedade `translate` (nao `transform`): com transform na lista, o
+    // aperto pulava sem animar.
+    assert.match(className, /(^| )active:translate-y-px( |$)/);
+    assert.match(className, /(^| )transition-\[filter,translate\]( |$)/);
+    assert.doesNotMatch(className, /transform/);
+    assert.match(className, /(^| )motion-reduce:transition-none( |$)/, "com menos movimento, sem transicao");
+  }
+});
+
 test("sizes da imagem pela largura do elemento", () => {
   const design = starter();
 
@@ -1349,8 +1372,9 @@ test("HTML do Padrão e do Personalizado igual ao de antes do Livre", () => {
 
 // Os mesmos casos que geraram tests/fixtures/popup-livre/antes-celular-livre.html no commit-base 55a8cc0 (antes de o
 // cartao desenhar os valores do celular): os modelos para comecar e o modelo com video, no aluno e na previa. Gerada
-// de novo no L6a (docs/27 §8), so com os consertos do cartao: os Links sem text-decoration-line:none em linha e o
-// anel de foco pelo box-shadow inteiro com !important (FREE_FOCUS_CLASS).
+// de novo no L6a (docs/27 §8), so com os consertos do cartao: os Links sem text-decoration-line:none em linha, o
+// anel de foco pelo box-shadow inteiro com !important (FREE_FOCUS_CLASS) e o aperto dos botoes com a transicao do
+// translate no lugar da do transform (FREE_PRESS_CLASS).
 async function livreBeforeCases() {
   const starters = await import("../src/server/communications/popup-free-starters.ts");
   const cases = [];
