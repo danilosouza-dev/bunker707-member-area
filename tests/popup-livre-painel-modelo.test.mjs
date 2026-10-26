@@ -1145,6 +1145,319 @@ test("imagem: conta de reduzir até 1.600 px e as qualidades até caber", () => 
 });
 
 /* ------------------------------------------------------------------------------------------------
+ * Contorno e marca-texto (L6b): a chave Contorno, o "Só o contorno" e o Outro estilo na seleção
+ * ---------------------------------------------------------------------------------------------- */
+
+const CONTORNO_PRETO = { color: "#000000", width: 2 };
+const CONTORNO_BRANCO = { color: "#ffffff", width: 2 };
+
+/** Um elemento do Estilo pelo id (TextStyleSection e BoxSections nao usam ganchos: sao abertos aqui na mao). */
+function elementById(element, id) {
+  if (!element || typeof element !== "object") {
+    return null;
+  }
+
+  if (Array.isArray(element)) {
+    for (const child of element) {
+      const found = elementById(child, id);
+
+      if (found) {
+        return found;
+      }
+    }
+
+    return null;
+  }
+
+  if (element.props?.id === id) {
+    return element;
+  }
+
+  if (typeof element.type === "function" && (element.type.name === "TextStyleSection" || element.type.name === "BoxSections")) {
+    return elementById(element.type(element.props), id);
+  }
+
+  return elementById(element.props?.children, id);
+}
+
+function styleProps(value, id, calls = []) {
+  return {
+    design: value,
+    disabled: false,
+    errors: {},
+    fonts: [],
+    hints: [],
+    latest: () => value,
+    node: model.findFreeNode(value, id).node,
+    onBusyChange() {},
+    onChange: (next, field) => calls.push({ field, next }),
+    onCtaChange() {},
+    onFontsChange() {},
+    rects: {}
+  };
+}
+
+test("L6b: a chave Contorno liga o preto de 2 px e desliga num passo; desligar a letra vazada devolve a cor dela", () => {
+  assert.deepEqual(panel.FREE_STROKE_DEFAULT, CONTORNO_PRETO);
+  assert.deepEqual(panel.freeStrokeSwitchPatch(HEADING_BASE, true), { stroke: CONTORNO_PRETO });
+  assert.deepEqual(panel.freeStrokeSwitchPatch({ ...HEADING_BASE, stroke: CONTORNO_BRANCO }, false), { stroke: undefined });
+  // A letra vazada sem contorno sumiria: desligar o Contorno devolve a mesma cor sem transparência.
+  const vazado = { ...HEADING_BASE, paint: { color: "#e5ff1f00", kind: "solid" }, stroke: CONTORNO_BRANCO };
+  assert.equal(panel.freeIsOutlineOnly(vazado), true);
+  assert.deepEqual(panel.freeStrokeSwitchPatch(vazado, false), { paint: { color: "#e5ff1f", kind: "solid" }, stroke: undefined });
+
+  // No painel: a chave manda o design novo sem chave de campo (um passo); a espessura e a cor juntam pela chave do campo.
+  const start = design([TITULO, LINKS]);
+  const calls = [];
+  const tree = FreeInspectorStyle(styleProps(start, "titulo", calls));
+  elementById(tree, "livre-titulo-contorno-ligado").props.onCheckedChange(true);
+  assert.equal(calls[0].field, undefined, "ligar: um passo próprio");
+  assert.deepEqual(model.findFreeNode(calls[0].next, "titulo").node.textStyle, { size: 40, stroke: CONTORNO_PRETO });
+
+  const on = calls[0].next;
+  const onTree = FreeInspectorStyle(styleProps(on, "titulo", calls));
+  elementById(onTree, "livre-titulo-contorno-espessura").props.onChange(4);
+  elementById(onTree, "livre-titulo-contorno-cor").props.onChange("#e50914");
+  assert.deepEqual([calls[1].field, calls[2].field], ["textStyle.stroke", "textStyle.stroke"]);
+  assert.deepEqual(model.findFreeNode(calls[1].next, "titulo").node.textStyle.stroke, { color: "#000000", width: 4 });
+  assert.deepEqual(model.findFreeNode(calls[2].next, "titulo").node.textStyle.stroke, { color: "#e50914", width: 2 });
+  elementById(onTree, "livre-titulo-contorno-ligado").props.onCheckedChange(false);
+  assert.equal(calls[3].field, undefined, "desligar: um passo próprio");
+  assert.deepEqual(model.findFreeNode(calls[3].next, "titulo").node.textStyle, { size: 40 });
+
+  // Ligar e desligar são dois passos (Ctrl + Z volta um de cada vez); a espessura seguida vira um passo só.
+  const entry = (value) => ({ cta: null, design: value });
+  let steps = history.pushFreeHistory(history.createFreeHistory(entry(start)), entry(on), { coalesceKey: null, now: 1_000 });
+  steps = history.pushFreeHistory(steps, entry(calls[1].next), { coalesceKey: "titulo:textStyle.stroke", now: 1_100 });
+  steps = history.pushFreeHistory(steps, entry(panel.withFreeTextStyle(calls[1].next, "titulo", { stroke: { color: "#000000", width: 5 } })), { coalesceKey: "titulo:textStyle.stroke", now: 1_300 });
+  steps = history.pushFreeHistory(steps, entry(calls[3].next), { coalesceKey: null, now: 1_400 });
+  assert.equal(steps.past.length, 3);
+  assert.equal(model.findFreeNode(history.undoFreeHistory(steps).present.design, "titulo").node.textStyle.stroke.width, 5);
+  assert.equal(history.undoFreeHistory(history.undoFreeHistory(history.undoFreeHistory(steps))).present.design, start);
+});
+
+test("L6b: Só o contorno (texto vazado) só no Título e no Texto; ligar e desligar é um passo", () => {
+  // Ligado: a cor de agora com alfa 00 e o contorno na cor da letra (2 px, o que o Revisar conta).
+  assert.deepEqual(panel.freeOutlineOnlyPatch(HEADING_BASE, true), { paint: { color: "#ffffff00", kind: "solid" }, stroke: CONTORNO_BRANCO });
+  // Com degradê, a primeira cor; com contorno, o dele, com pelo menos 2 px.
+  const degrade = { kind: "linear", stops: [{ at: 0, color: "#E5FF1F" }, { at: 100, color: "#ff3d9a" }] };
+  assert.deepEqual(panel.freeOutlineOnlyPatch({ paint: degrade }, true), { paint: { color: "#e5ff1f00", kind: "solid" }, stroke: { color: "#e5ff1f", width: 2 } });
+  assert.deepEqual(panel.freeOutlineOnlyPatch({ paint: VERDE, stroke: { color: "#111111", width: 1 } }, true).stroke, { color: "#111111", width: 2 });
+  assert.deepEqual(panel.freeOutlineOnlyPatch({ paint: VERDE, stroke: { color: "#111111", width: 6 } }, true).stroke, { color: "#111111", width: 6 });
+  // Desligado: a mesma cor sem transparência; o contorno continua.
+  assert.deepEqual(panel.freeOutlineOnlyPatch({ paint: { color: "#ffffff00", kind: "solid" }, stroke: CONTORNO_BRANCO }, false), { paint: { color: "#ffffff", kind: "solid" } });
+  assert.equal(panel.freeIsOutlineOnly({ paint: { color: "#ffffff00", kind: "solid" } }), false, "sem contorno não é vazado");
+  assert.equal(panel.freeIsOutlineOnly({ paint: { color: "#ffffff80", kind: "solid" }, stroke: CONTORNO_BRANCO }), false);
+
+  const start = design([TITULO, { action: { kind: "close" }, icon: { name: "arrow-right" }, id: "fechar", label: "Agora não", type: "button" }, { icon: "sparkles", id: "selo", label: "Novidade", type: "badge" }, LINKS]);
+  const calls = [];
+  const button = elementById(FreeInspectorStyle(styleProps(start, "titulo", calls)), "livre-titulo-so-contorno");
+  assert.equal(button.props["aria-pressed"], false);
+  button.props.onClick();
+  assert.equal(calls[0].field, undefined, "um passo próprio");
+  const vazado = calls[0].next;
+  assert.deepEqual(model.findFreeNode(vazado, "titulo").node.textStyle, { paint: { color: "#ffffff00", kind: "solid" }, size: 40, stroke: CONTORNO_BRANCO });
+  assert.ok(schema.parsePopupFreeDesign(vazado), "o vazado vale no schema");
+
+  const pressed = elementById(FreeInspectorStyle(styleProps(vazado, "titulo", calls)), "livre-titulo-so-contorno");
+  assert.equal(pressed.props["aria-pressed"], true);
+  pressed.props.onClick();
+  assert.equal(calls[1].field, undefined);
+  assert.deepEqual(
+    model.findFreeNode(model.canonicalPopupFreeDesign(calls[1].next), "titulo").node.textStyle,
+    { size: 40, stroke: CONTORNO_BRANCO },
+    "a letra volta ao branco (o padrão sai na forma canônica)"
+  );
+
+  // Selo, Botão e Links: a chave Contorno, sem o atalho (o ícone usa a cor da letra e sumiria; os Links o aluno lê).
+  for (const id of ["fechar", "selo", "links"]) {
+    const tree = FreeInspectorStyle(styleProps(start, id));
+    assert.ok(elementById(tree, `livre-${id}-contorno-ligado`), id);
+    assert.equal(elementById(tree, `livre-${id}-so-contorno`), null, id);
+  }
+
+  // Desenhado: a chave, os campos com o contorno ligado e o atalho com aria-pressed.
+  const html = renderToStaticMarkup(createElement(FreeInspectorStyle, styleProps(vazado, "titulo")));
+  assert.match(html, /id="livre-titulo-contorno"/);
+  assert.ok(html.includes(">Contorno<"));
+  assert.ok(html.includes(">Espessura<"));
+  assert.ok(html.includes(">Cor do contorno<"));
+  // Apertado: aria-pressed e a marca de ligado (o ícone, fora do leitor de tela).
+  assert.match(html, /<button[^>]*aria-pressed="true"[^>]*id="livre-titulo-so-contorno"[^>]*><svg[^>]*aria-hidden="true"[\s\S]*?<\/svg>Só o contorno \(texto vazado\)<\/button>/);
+  assert.match(html, /id="livre-titulo-contorno-espessura"/);
+  const off = renderToStaticMarkup(createElement(FreeInspectorStyle, styleProps(start, "titulo")));
+  assert.equal(off.includes("livre-titulo-contorno-espessura"), false, "desligado, sem os campos");
+  assert.equal(renderToStaticMarkup(createElement(FreeInspectorStyle, styleProps(start, "selo"))).includes("Só o contorno"), false);
+});
+
+test("L6b: Outro estilo na seleção com contorno e marca-texto: a parte guarda o que muda, as fichas dizem o quê", () => {
+  const lines = [[{ text: "Semana de " }, { text: "revisão" }]];
+  const range = { end: 17, line: 0, start: 10 };
+
+  // Contorno na parte (o elemento sem contorno): fica; desligar volta ao elemento.
+  const stroked = panel.applyFreeSpanStyle(lines, [range], panel.freeStrokeSwitchPatch(HEADING_BASE, true), HEADING_BASE);
+  assert.deepEqual(stroked, [[{ text: "Semana de " }, { style: { stroke: CONTORNO_PRETO }, text: "revisão" }]]);
+  assert.deepEqual(panel.applyFreeSpanStyle(stroked, [range], { stroke: undefined }, HEADING_BASE), [[{ text: "Semana de revisão" }]]);
+  // Com o mesmo contorno do elemento, a parte não guarda nada (a forma canônica faz o mesmo); outro contorno troca.
+  const comContorno = { ...HEADING_BASE, stroke: CONTORNO_PRETO };
+  assert.deepEqual(panel.applyFreeSpanStyle(lines, [range], { stroke: { color: "#000000", width: 2 } }, comContorno), [[{ text: "Semana de revisão" }]]);
+  assert.deepEqual(panel.applyFreeSpanStyle(lines, [range], { stroke: { color: "#ffffff", width: 3 } }, comContorno)[0][1].style, { stroke: { color: "#ffffff", width: 3 } });
+  assert.equal(panel.effectiveFreeSpanStyle({ stroke: { color: "#FFFFFF", width: 2 } }, { ...HEADING_BASE, stroke: CONTORNO_BRANCO }), undefined, "maiúsculas e minúsculas na cor são a mesma");
+  // O popover mostra o contorno do elemento na parte (a chave fica ligada e presa, com a frase).
+  assert.deepEqual(panel.freeRangeStyle(lines, range, comContorno).stroke, CONTORNO_PRETO);
+
+  // Marca-texto: a cor de partida e os padrões fora do design; vizinhas com o mesmo marca-texto juntam.
+  assert.equal(panel.FREE_MARK_DEFAULT_COLOR, "#e50914");
+  const marked = panel.applyFreeSpanStyle(lines, [range], { mark: { color: panel.FREE_MARK_DEFAULT_COLOR } }, HEADING_BASE);
+  assert.deepEqual(marked[0][1], { style: { mark: { color: "#e50914" } }, text: "revisão" });
+  assert.deepEqual(panel.freeRangeStyle(marked, range, HEADING_BASE).mark, { color: "#e50914" });
+  const both = panel.applyFreeSpanStyle(marked, [{ end: 10, line: 0, start: 7 }], { mark: { color: "#e50914" } }, HEADING_BASE);
+  assert.deepEqual(both, [[{ text: "Semana " }, { style: { mark: { color: "#e50914" } }, text: "de revisão" }]]);
+  // Voltar ao estilo do elemento tira os dois.
+  const full = panel.applyFreeSpanStyle(marked, [range], { stroke: CONTORNO_BRANCO }, HEADING_BASE);
+  assert.deepEqual(full[0][1].style, { mark: { color: "#e50914" }, stroke: CONTORNO_BRANCO });
+  assert.deepEqual(panel.applyFreeSpanStyle(full, [range], null, HEADING_BASE), [[{ text: "Semana de revisão" }]]);
+
+  // As fichas: “contorno” e “marca-texto”.
+  assert.equal(panel.describeFreeSpanStyle({ stroke: CONTORNO_PRETO }), "contorno");
+  assert.equal(panel.describeFreeSpanStyle({ mark: { color: "#e5ff1f" } }), "marca-texto");
+  assert.equal(panel.describeFreeSpanStyle({ mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" }, stroke: CONTORNO_BRANCO }), "preto, contorno, marca-texto");
+  assert.deepEqual(panel.freeStyledParts(full, HEADING_BASE).map((part) => part.label), ["“revisão” · contorno, marca-texto"]);
+
+  // O que o painel monta já é a forma canônica (nada muda ao salvar).
+  const value = design([{ id: "titulo", lines: full, type: "heading" }, LINKS]);
+  assert.deepEqual(model.findFreeNode(value, "titulo").node.lines, full);
+  assert.ok(schema.parsePopupFreeDesign(value));
+
+  // O painel liga cada chave com um onApply (um passo das partes) e o contorno do elemento prende a chave da parte.
+  const fields = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+  assert.match(fields, /onCheckedChange=\{\(on\) => onApply\(freeStrokeSwitchPatch\(style, on\)\)\}/);
+  assert.match(fields, /disabled=\{disabled \|\| base\.stroke !== undefined \|\| strokeReason !== null\}/);
+  assert.match(fields, /onCheckedChange=\{\(on\) => onApply\(\{ mark: on \? \{ color: FREE_MARK_DEFAULT_COLOR \} : undefined \}\)\}/);
+  for (const label of ["C.span.stroke", "C.span.strokeWidth", "C.span.strokeColor", "C.span.mark", "C.span.markColor", "C.span.markPaddingY", "C.span.markPaddingX", "C.span.markRadius"]) {
+    assert.ok(fields.includes(`label={${label}}`), label);
+  }
+});
+
+test("L6b: com a letra em degradê, a chave Contorno e o Só o contorno ficam parados, com o motivo; o contorno ligado ainda desliga", () => {
+  const degrade = { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] };
+  const circular = { kind: "radial", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }], x: 50, y: 50 };
+
+  assert.equal(C.style.strokeGradient, schema.POPUP_FREE_MESSAGES.strokeGradient, "a mesma frase do schema");
+  assert.equal(C.style.strokeOnlyGradient, "No degradê, escolha uma cor sólida antes.");
+
+  for (const paint of [degrade, circular]) {
+    assert.equal(panel.freeStrokeDisabledReason({ paint }), C.style.strokeGradient);
+    assert.equal(panel.freeOutlineOnlyDisabledReason({ paint }), C.style.strokeOnlyGradient);
+    // Com o contorno já ligado (um design colado), a chave fica livre para desligar.
+    assert.equal(panel.freeStrokeDisabledReason({ paint, stroke: CONTORNO_PRETO }), null);
+  }
+
+  assert.equal(panel.freeStrokeDisabledReason({ paint: VERDE }), null);
+  assert.equal(panel.freeStrokeDisabledReason({}), null, "sem pintura própria, a cor de partida é sólida");
+  assert.equal(panel.freeOutlineOnlyDisabledReason({ paint: VERDE }), null);
+  assert.equal(panel.freeOutlineOnlyDisabledReason({ paint: { color: "#ffffff00", kind: "solid" } }), null);
+
+  // No painel: a chave e o botão parados, com o motivo ligado a eles.
+  const emDegrade = design([{ ...TITULO, textStyle: { paint: degrade, size: 40 } }, LINKS]);
+  const calls = [];
+  const tree = FreeInspectorStyle(styleProps(emDegrade, "titulo", calls));
+  const chave = elementById(tree, "livre-titulo-contorno-ligado");
+  const botao = elementById(tree, "livre-titulo-so-contorno");
+
+  assert.equal(chave.props.disabled, true);
+  assert.equal(chave.props.description, C.style.strokeGradient);
+  assert.equal(botao.props.disabled, true);
+  assert.equal(botao.props["aria-describedby"], "livre-titulo-so-contorno-motivo");
+  assert.equal(elementById(tree, "livre-titulo-so-contorno-motivo").props.children, C.style.strokeOnlyGradient);
+
+  // Com cor sólida, os dois ficam livres e sem motivo.
+  const solida = FreeInspectorStyle(styleProps(design([TITULO, LINKS]), "titulo"));
+
+  assert.equal(elementById(solida, "livre-titulo-contorno-ligado").props.disabled, false);
+  assert.equal(elementById(solida, "livre-titulo-contorno-ligado").props.description, undefined);
+  assert.equal(elementById(solida, "livre-titulo-so-contorno").props.disabled, false);
+  assert.equal(elementById(solida, "livre-titulo-so-contorno-motivo"), null);
+
+  // O degradê com o contorno já ligado (colado ou pela troca da cor): a chave desliga num passo e o erro do schema
+  // aparece no grupo do contorno (o da espessura fica no campo dela, sem repetir).
+  const invalido = design([{ ...TITULO, textStyle: { paint: degrade, size: 40, stroke: CONTORNO_PRETO } }, LINKS]);
+  const errors = { "nodes.titulo.textStyle.stroke": schema.POPUP_FREE_MESSAGES.strokeGradient };
+  const comErro = FreeInspectorStyle({ ...styleProps(invalido, "titulo", calls), errors });
+
+  assert.equal(elementById(comErro, "livre-titulo-contorno-ligado").props.disabled, false);
+  assert.equal(elementById(comErro, "livre-titulo-contorno-erro").props.message, schema.POPUP_FREE_MESSAGES.strokeGradient);
+  elementById(comErro, "livre-titulo-contorno-ligado").props.onCheckedChange(false);
+  assert.equal(calls.at(-1).field, undefined, "um passo próprio");
+  assert.deepEqual(model.findFreeNode(calls.at(-1).next, "titulo").node.textStyle, { paint: degrade, size: 40 });
+  assert.ok(schema.parsePopupFreeDesign(calls.at(-1).next), "sem o contorno, vale de novo");
+
+  const daEspessura = FreeInspectorStyle({ ...styleProps(invalido, "titulo"), errors: { "nodes.titulo.textStyle.stroke.width": "Use de 1 a 8." } });
+
+  assert.equal(elementById(daEspessura, "livre-titulo-contorno-erro").props.message, undefined);
+  assert.equal(elementById(daEspessura, "livre-titulo-contorno-espessura").props.error, "Use de 1 a 8.");
+
+  // Na parte: a chave fica parada com o motivo quando a pintura que vale ali (da parte ou do elemento) é degradê.
+  const fields = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+
+  assert.match(fields, /const strokeReason = freeStrokeDisabledReason\(style\);/);
+  assert.match(fields, /description=\{base\.stroke \? C\.span\.strokeFromElement : \(strokeReason \?\? undefined\)\}/);
+  assert.equal(panel.freeStrokeDisabledReason(panel.freeRangeStyle([[{ text: "Semana" }]], { end: 3, line: 0, start: 0 }, { ...HEADING_BASE, paint: degrade })), C.style.strokeGradient);
+  assert.equal(
+    panel.freeStrokeDisabledReason(panel.freeRangeStyle([[{ style: { paint: VERDE }, text: "Semana" }]], { end: 3, line: 0, start: 0 }, { ...HEADING_BASE, paint: degrade })),
+    null,
+    "a parte sólida no elemento em degradê liga o contorno"
+  );
+});
+
+test("L6b: respiro e cantos do marca-texto: os padrões saem e [n, n] vira n, como na forma canônica", () => {
+  const mark = { color: "#e5ff1f" };
+
+  assert.deepEqual(panel.freeMarkPadding(mark), [2, 6]);
+  assert.deepEqual(panel.freeMarkPadding({ ...mark, padding: 4 }), [4, 4]);
+  assert.deepEqual(panel.freeMarkPadding({ ...mark, padding: [0, 8] }), [0, 8]);
+  assert.equal(panel.freeMarkRadius(mark), 4);
+  assert.equal(panel.freeMarkRadius({ ...mark, radius: 0 }), 0);
+
+  assert.deepEqual(panel.withFreeMarkPadding(mark, 0, 0), { ...mark, padding: [0, 6] });
+  assert.deepEqual(panel.withFreeMarkPadding(mark, 1, 2), { ...mark, padding: 2 }, "[2, 2] vira 2");
+  assert.deepEqual(panel.withFreeMarkPadding({ ...mark, padding: [0, 6] }, 0, 2), mark, "de volta ao [2, 6], o respiro sai");
+  assert.deepEqual(panel.withFreeMarkRadius(mark, 12), { ...mark, radius: 12 });
+  assert.deepEqual(panel.withFreeMarkRadius({ ...mark, radius: 12 }, 4), mark, "de volta ao 4, os cantos saem");
+
+  // O mesmo que a forma canônica guardaria.
+  for (const value of [panel.withFreeMarkPadding(mark, 0, 0), panel.withFreeMarkPadding(mark, 1, 2), panel.withFreeMarkRadius(mark, 12)]) {
+    const lines = [[{ text: "Oi " }, { style: { mark: value }, text: "você" }]];
+    assert.deepEqual(model.findFreeNode(design([{ id: "texto", lines, type: "text" }, LINKS]), "texto").node.lines, lines);
+  }
+});
+
+test("L6b: as chaves de erro do contorno e do marca-texto levam ao campo certo (crítica C12)", () => {
+  const value = design([
+    { id: "titulo", lines: [[{ text: "Semana" }], [{ text: "de " }, { style: { mark: { color: "#e5ff1f" } }, text: "revisão" }]], textStyle: { stroke: CONTORNO_BRANCO }, type: "heading" },
+    { id: "selo", label: "Novidade", textStyle: { stroke: CONTORNO_PRETO }, type: "badge" },
+    LINKS
+  ]);
+  const target = (key) => panel.freeInspectorTargetOf(value, key);
+
+  // O contorno do elemento: Estilo, no campo (nunca a Fonte).
+  assert.deepEqual(target("freeDesign.nodes.titulo.textStyle.stroke.width"), { fieldId: "livre-titulo-contorno-espessura", nodeId: "titulo", tab: "style" });
+  assert.deepEqual(target("nodes.titulo.textStyle.stroke.color"), { fieldId: "livre-titulo-contorno-cor", nodeId: "titulo", tab: "style" });
+  assert.deepEqual(target("nodes.selo.textStyle.stroke"), { fieldId: "livre-selo-contorno", nodeId: "selo", tab: "style" });
+  // O contorno e o marca-texto da parte: a área de texto (onde fica o Outro estilo na seleção).
+  assert.deepEqual(target("nodes.titulo.lines.1.1.style.mark.padding"), { fieldId: "livre-titulo-texto", nodeId: "titulo", tab: "content" });
+  assert.deepEqual(target("nodes.titulo.lines.1.1.style.stroke.width"), { fieldId: "livre-titulo-texto", nodeId: "titulo", tab: "content" });
+  assert.deepEqual(target("nodes.titulo.lines.1.1.style.mark"), { fieldId: "livre-titulo-texto", nodeId: "titulo", tab: "content" });
+
+  // Os campos existem no Estilo com esses ids, e o erro aparece no campo.
+  const html = renderToStaticMarkup(createElement(FreeInspectorStyle, { ...styleProps(value, "titulo"), errors: { "freeDesign.nodes.titulo.textStyle.stroke.width": "Use de 1 a 8." } }));
+  for (const id of ["livre-titulo-contorno", "livre-titulo-contorno-espessura", "livre-titulo-contorno-cor"]) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+  assert.ok(html.includes("Use de 1 a 8."));
+});
+
+/* ------------------------------------------------------------------------------------------------
  * Vocabulario
  * ---------------------------------------------------------------------------------------------- */
 
@@ -1539,6 +1852,16 @@ test("vocabulário das frases do painel", () => {
   assert.equal(C.mobile.note, "O que não mudar aqui encolhe como no computador (texto nunca abaixo de 12 px).");
   assert.equal(C.mobile.popupTitle, "No celular");
   assert.equal(C.mobile.hidden, "Esconder no celular");
+
+  // Contorno e marca-texto (L6b): as frases do plano, sem o nome do campo do JSON nas frases.
+  assert.deepEqual([C.style.stroke, C.style.strokeWidth, C.style.strokeColor, C.style.strokeOnly], ["Contorno", "Espessura", "Cor do contorno", "Só o contorno (texto vazado)"]);
+  assert.deepEqual(
+    [C.span.stroke, C.span.mark, C.span.markColor, C.span.markPaddingY, C.span.markPaddingX, C.span.markRadius],
+    ["Contorno", "Marca-texto", "Cor do marca-texto", "Respiro em cima e embaixo", "Respiro dos lados", "Cantos do marca-texto"]
+  );
+  for (const text of [...collectStrings(C.style), ...collectStrings(C.span)]) {
+    assert.doesNotMatch(text, /\b(?:stroke|mark|outline|highlight)\b/i, text);
+  }
 
   // As telas do painel: o texto que aparece direto no JSX e nos aria-label escritos à mão também.
   for (const url of UI_FILES) {

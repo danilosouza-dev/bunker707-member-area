@@ -14,7 +14,9 @@ import { ESCOLA_DE_TESTE, limparComunicacao, seedEscolaDeTeste, usuarioDeTeste }
 // L4b: ate 3 "Abrir um link" (salvar, ler, o aluno recebe os 3, o maior cabe no check, o 4o botao e 400), o D9 por
 // aparelho (um link so no computador e outro so no celular salvam; o Livre gravado antes com o Botao principal
 // escondido no computador abre, publica e e aprovado com "Só quando o pop-up terminar") e a Forma com largura e
-// altura na sequencia, no computador e no celular.
+// altura na sequencia, no computador e no celular. L6b: o contorno das letras e o marca-texto salvos e lidos na forma
+// canonica (o jsonb igual ao salvar de novo, a aluna recebe os dois), as recusas no campo (o marca-texto no estilo do
+// elemento, os limites e o contorno no celular) e o maior Livre com os dois em todas as partes no check de 32 KB.
 
 const db = createLocalAdminClient();
 const contas = await seedEscolaDeTeste(db);
@@ -810,4 +812,194 @@ test("L4b: a Forma com largura e altura na sequência, no computador e no celula
   assert.deepEqual(detalhe.draft.freeDesign, gravado, "o editor abre igual");
   ok(await salvar(popup({ design: null, freeDesign: detalhe.draft.freeDesign }), salvo.id));
   assert.deepEqual((await linha(salvo.id)).popup_design, gravado, "salvar de novo nao muda nada");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * L6b: contorno das letras e marca-texto (docs/27 §9.3 e §13.11.2; version 1, sem migracao)
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * O Livre de teste (sem imagem) com o contorno no Título inteiro e o marca-texto em partes do Título e do Texto,
+ * escrito fora da forma canonica: cores em maiusculas, uma parte com o contorno igual ao do elemento, o respiro
+ * [2, 6] e os cantos 4 de partida escritos, duas vizinhas com o mesmo marca-texto e o respiro [4, 4].
+ */
+function livreComContornoEMarcaTexto() {
+  const base = livre({ image: false });
+  const escuro = { color: "#111111", kind: "solid" };
+
+  return {
+    ...base,
+    children: base.children.map((node) => {
+      if (node.id === "titulo") {
+        return {
+          ...node,
+          lines: [
+            [
+              { text: "Aula " },
+              { style: { stroke: { color: "#FFFFFF", width: 2 } }, text: "nova " },
+              { style: { mark: { color: "#E5FF1F", padding: [2, 6], radius: 4 }, paint: escuro }, text: "no" },
+              { style: { mark: { color: "#e5ff1f" }, paint: escuro }, text: " ar" }
+            ]
+          ],
+          textStyle: { ...node.textStyle, stroke: { color: "#FFFFFF", width: 2 } }
+        };
+      }
+
+      if (node.id === "texto") {
+        return {
+          ...node,
+          lines: [[{ text: "Assista " }, { style: { mark: { color: "#FFFFFF26", padding: [4, 4], radius: 2 }, stroke: { color: "#000000", width: 1 } }, text: "hoje" }, { text: " e coloque em prática." }]]
+        };
+      }
+
+      return node;
+    })
+  };
+}
+
+/** Os elementos do design pelo id. */
+function porId(design) {
+  return Object.fromEntries(design.children.map((node) => [node.id, node]));
+}
+
+test("L6b: o contorno e o marca-texto são salvos e lidos na forma canônica; salvar de novo não muda o jsonb e a aluna recebe os dois", async () => {
+  const enviado = livreComContornoEMarcaTexto();
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: enviado })));
+  const gravado = (await linha(salvo.id)).popup_design;
+  const { texto, titulo } = porId(gravado);
+
+  assert.deepEqual(gravado, model.canonicalPopupFreeDesign(enviado));
+  assert.equal(gravado.version, 1, "sem versao nova");
+  assert.equal("devices" in gravado, false, "nada no celular");
+  // O tamanho e o peso do Titulo de teste sao os padroes e saem; o contorno do elemento fica, em minusculas.
+  assert.deepEqual(titulo.textStyle, { stroke: { color: "#ffffff", width: 2 } });
+  // A parte com o contorno igual ao do elemento perde o estilo e junta com a vizinha; o respiro [2, 6] e os cantos 4
+  // de partida saem; as duas partes com o mesmo marca-texto viram uma.
+  assert.deepEqual(titulo.lines, [[{ text: "Aula nova " }, { style: { mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } }, text: "no ar" }]]);
+  // O respiro [4, 4] vira 4; o contorno da parte fica (o Texto nao tem contorno).
+  assert.deepEqual(texto.lines, [
+    [{ text: "Assista " }, { style: { mark: { color: "#ffffff26", padding: 4, radius: 2 }, stroke: { color: "#000000", width: 1 } }, text: "hoje" }, { text: " e coloque em prática." }]
+  ]);
+
+  const comoTexto = async () => unwrap(await db.from("campaigns").select("popup_design::text").eq("id", salvo.id).single(), "Lendo o design como texto").popup_design;
+  const antes = await comoTexto();
+
+  actAs(produtor);
+  const detalhe = await getNoticeDetail(salvo.id, { permissions: TODAS });
+
+  assert.deepEqual(detalhe.draft.freeDesign, gravado, "o editor abre com o contorno e o marca-texto");
+
+  const deNovo = ok(await salvar(popup({ design: null, freeDesign: detalhe.draft.freeDesign }), salvo.id));
+
+  assert.equal(await comoTexto(), antes, "salvar de novo o que o editor leu nao muda o jsonb");
+
+  actAs(produtor);
+  ok(await actions.publishNotice({ expectedUpdatedAt: deNovo.updatedAt, id: salvo.id }));
+
+  const doLivre = (await mostrar(aluna, salvo.id)).body.data.popup;
+  const doAluno = porId(doLivre.freeDesign);
+
+  assert.deepEqual(doLivre.freeDesign, model.freeDesignForStudent(gravado));
+  assert.deepEqual(doAluno.titulo.textStyle, titulo.textStyle, "a aluna recebe o contorno do Titulo");
+  assert.deepEqual(doAluno.titulo.lines, titulo.lines, "e o marca-texto das partes");
+  assert.deepEqual(doAluno.texto.lines, texto.lines);
+});
+
+test("L6b: o marca-texto no estilo do elemento, um respiro ou uma espessura fora do limite e o contorno no celular são 400 no campo, e nada é gravado", async () => {
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: livreComContornoEMarcaTexto() })));
+  const gravado = (await linha(salvo.id)).popup_design;
+  const noTitulo = (troca) => {
+    const value = livreComContornoEMarcaTexto();
+
+    return { ...value, children: value.children.map((node) => (node.id === "titulo" ? troca(node) : node)) };
+  };
+  const casos = [
+    // O marca-texto so existe na parte: no estilo do elemento, a chave nao existe.
+    [noTitulo((node) => ({ ...node, textStyle: { ...node.textStyle, mark: { color: "#e5ff1f" } } })), "freeDesign.children.0.textStyle", POPUP_FREE_MESSAGES.design, "freeDesign.nodes.titulo.textStyle"],
+    [
+      noTitulo((node) => ({ ...node, lines: [node.lines[0].map((span, index) => (index === 2 ? { ...span, style: { ...span.style, mark: { color: "#e5ff1f", padding: [2, 25] } } } : span))] })),
+      "freeDesign.children.0.lines.0.2.style.mark.padding.1",
+      "Use de 0 a 24.",
+      "freeDesign.nodes.titulo.lines.0.2.style.mark.padding.1"
+    ],
+    [noTitulo((node) => ({ ...node, textStyle: { ...node.textStyle, stroke: { color: "#ffffff", width: 9 } } })), "freeDesign.children.0.textStyle.stroke.width", "Use de 1 a 8.", "freeDesign.nodes.titulo.textStyle.stroke.width"],
+    // O contorno nunca com a letra em degradê: o contorno cobre a cor (a chave é a do contorno do elemento).
+    [
+      noTitulo((node) => ({ ...node, textStyle: { ...node.textStyle, paint: { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] } } })),
+      "freeDesign.children.0.textStyle.stroke",
+      POPUP_FREE_MESSAGES.strokeGradient,
+      "freeDesign.nodes.titulo.textStyle.stroke"
+    ],
+    // Cor e pintura nunca por aparelho (L27): o contorno nao tem versao do celular.
+    [
+      { ...livreComContornoEMarcaTexto(), devices: { mobile: { nodes: { titulo: { textStyle: { stroke: { color: "#000000", width: 1 } } } } } } },
+      "freeDesign.devices.mobile.nodes.titulo.textStyle",
+      POPUP_FREE_MESSAGES.design,
+      "freeDesign.devices.mobile.nodes.titulo.textStyle"
+    ]
+  ];
+
+  for (const [freeDesign, campo, frase, doEditor] of casos) {
+    const recusado = await salvar(popup({ design: null, freeDesign }), salvo.id);
+
+    assert.equal(recusado.ok, false, campo);
+    assert.equal(recusado.status, 400, campo);
+    assert.deepEqual(recusado.fieldErrors[`draft.${campo}`], [frase], campo);
+    // O editor troca a posicao pela chave do id e chega ate o campo (docs/27 §9.7).
+    assert.equal(freeErrorKey(freeDesign, campo), doEditor);
+  }
+
+  assert.deepEqual((await linha(salvo.id)).popup_design, gravado, "nada muda");
+});
+
+test("L6b: o maior Livre com contorno e marca-texto em todas as partes passa no check de 32 KB do banco", async () => {
+  // Estilos alternados, para as vizinhas nunca juntarem: cada parte guarda o marca-texto inteiro e o contorno.
+  const estilos = [
+    { mark: { color: "#e5ff1f80", padding: [3, 7], radius: 5 }, paint: { color: "#111111", kind: "solid" }, stroke: { color: "#ffffff", width: 2 } },
+    { mark: { color: "#7c3aed80", padding: [4, 8], radius: 6 }, paint: { color: "#fafafa", kind: "solid" }, stroke: { color: "#000000", width: 3 } }
+  ];
+  /** As partes em Textos de ate 12 linhas de 6 partes (os limites do Texto), cada um com o contorno do elemento. */
+  const textos = (count) => {
+    const partes = Array.from({ length: count }, (_, index) => ({ style: estilos[index % 2], text: "ab" }));
+    const nodes = [];
+
+    for (let start = 0; start < partes.length; start += 72) {
+      const daqui = partes.slice(start, start + 72);
+      const lines = Array.from({ length: Math.ceil(daqui.length / 6) }, (_, line) => daqui.slice(line * 6, line * 6 + 6));
+
+      nodes.push({ id: `texto${nodes.length}`, lines, textStyle: { stroke: { color: "#ffffff", width: 1 } }, type: "text" });
+    }
+
+    return nodes;
+  };
+  const build = (count, letters) => ({
+    children: [
+      ...textos(count),
+      { id: "resto", lines: [[{ text: "a".repeat(Math.max(1, letters)) }]], type: "text" },
+      { action: { kind: "cta" }, id: "botao", type: "button" },
+      { id: "links", type: "links" }
+    ],
+    mode: "free",
+    version: 1
+  });
+  const size = (value) => model.jsonbBytesUpperBound(model.canonicalPopupFreeDesign(value));
+  let count = 1;
+
+  while (count < 300 && size(build(count + 1, 1)) <= 30_000) {
+    count += 1;
+  }
+
+  const maior = build(count, Math.min(600, 30_000 - size(build(count, 1)) + 1));
+  const partes = model.canonicalPopupFreeDesign(maior).children.flatMap((node) => (node.type === "text" && node.id !== "resto" ? node.lines.flat() : []));
+
+  assert.ok(size(maior) > 29_000 && size(maior) <= 30_000, `estimativa ${size(maior)} com ${count} partes`);
+  assert.equal(partes.length, count, "nenhuma parte juntou");
+  assert.ok(
+    partes.every((parte) => parte.style?.mark && parte.style.stroke),
+    "toda parte guarda o marca-texto e o contorno"
+  );
+
+  const salvo = ok(await salvar(popup({ design: null, freeDesign: maior })));
+
+  assert.deepEqual((await linha(salvo.id)).popup_design, model.canonicalPopupFreeDesign(maior), "o banco aceitou, sem migracao");
 });

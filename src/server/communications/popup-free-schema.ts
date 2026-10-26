@@ -24,6 +24,7 @@ import {
   type FreeFillPaint,
   type FreeId,
   type FreeNode,
+  type FreeTextPaint,
   type PopupFreeDesign,
   type PopupFreeDesignInput
 } from "./popup-free-model";
@@ -67,6 +68,7 @@ export const POPUP_FREE_MESSAGES = {
   label: "Escreva o texto.",
   lineEmpty: "Escreva algo nesta linha.",
   links: "Falta o elemento dos links (Lembrar depois e Não mostrar de novo).",
+  mark: "Escolha a cor do marca-texto.",
   mobilePlace: "No celular, o elemento fica como no computador: solto continua solto e na sequência continua na sequência.",
   linksDuplicate: "O design só pode ter um elemento dos links.",
   nodeType: "Escolha o tipo do elemento.",
@@ -79,6 +81,8 @@ export const POPUP_FREE_MESSAGES = {
   snooze: POPUP_DESIGN_MESSAGES.snoozeButtonOff,
   spanEmpty: "Escreva o texto desta parte.",
   stops: "Use de 2 a 5 cores no degradê.",
+  stroke: "Escolha a cor e a espessura do contorno.",
+  strokeGradient: "Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.",
   textTotal: "Os textos passaram de 1.200 letras. Encurte um pouco.",
   tooManyFonts: POPUP_DESIGN_MESSAGES.tooManyFonts,
   video: "Envie o vídeo de novo.",
@@ -190,6 +194,22 @@ const place = z.discriminatedUnion(
   { error: M.place }
 );
 
+/** Contorno das letras (L6b): no elemento e na parte, nunca no celular. */
+const textStroke = strict({ color: hex, width: intIn(L.textStroke) }, M.stroke);
+/** Marca-texto (L6b): so na parte do Titulo e do Texto; respiro em um numero ou [vertical, horizontal]. */
+const mark = strict(
+  {
+    color: hex,
+    padding: z
+      .union([intIn(L.markPadding), pairOf(intIn(L.markPadding), `Use de ${L.markPadding.min} a ${L.markPadding.max}.`)], {
+        error: `Use de ${L.markPadding.min} a ${L.markPadding.max}.`
+      })
+      .optional(),
+    radius: intIn(L.markRadius).optional()
+  },
+  M.mark
+);
+
 const textStyle = strict({
   align: z.enum(["center", "left", "right"], { error: "Escolha o alinhamento." }).optional(),
   decoration: z.enum(["line-through", "underline"], { error: "Escolha a linha no texto." }).optional(),
@@ -200,11 +220,16 @@ const textStyle = strict({
   paint: textPaint.optional(),
   shadow: strict({ blur: intIn(L.shadowBlur), color: hex, x: intIn(L.shadowOffset), y: intIn(L.shadowOffset) }).optional(),
   size: intIn(L.fontSize).optional(),
+  stroke: textStroke.optional(),
   uppercase: bool.optional(),
   weight: weightSchema.optional()
 });
+// pick e extend de um objeto estrito continuam estritos no zod 4 (chave a mais na parte da a frase do design).
 const span = strict({
-  style: textStyle.pick({ decoration: true, font: true, italic: true, letterSpacing: true, paint: true, size: true, uppercase: true, weight: true }).optional(),
+  style: textStyle
+    .pick({ decoration: true, font: true, italic: true, letterSpacing: true, paint: true, size: true, stroke: true, uppercase: true, weight: true })
+    .extend({ mark: mark.optional() })
+    .optional(),
   text: z.string({ error: M.spanEmpty }).min(1, M.spanEmpty).max(L.spanText, `Use até ${L.spanText} letras.`)
 });
 const line = z.array(span, { error: M.spanEmpty }).min(1, M.spanEmpty).max(L.spansPerLine, `Use até ${L.spansPerLine} partes por linha.`);
@@ -415,6 +440,30 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
     }
   };
 
+  // O contorno nunca com a letra em degrade (L6b): o degrade e um fundo recortado pelas letras, e o contorno, pintado
+  // por cima dele, cobre a cor (com 8 px a letra fica toda da cor do contorno). Vale no elemento e na parte, pela
+  // pintura dela ou pela do elemento; a chave e a do contorno (ou a da cor da parte, quando o contorno vem do elemento).
+  const checkStroke = (node: FreeNode, at: Path) => {
+    if (node.type !== "badge" && node.type !== "button" && node.type !== "heading" && node.type !== "links" && node.type !== "text") {
+      return;
+    }
+
+    const own = node.textStyle;
+    const gradient = (paint: FreeTextPaint | undefined) => paint !== undefined && paint.kind !== "solid";
+
+    if (own?.stroke && gradient(own.paint)) {
+      issue(M.strokeGradient, [...at, "textStyle", "stroke"]);
+    } else if (node.type === "heading" || node.type === "text") {
+      node.lines.forEach((spans, lineIndex) =>
+        spans.forEach((item, spanIndex) => {
+          if ((item.style?.stroke ?? own?.stroke) && gradient(item.style?.paint ?? own?.paint)) {
+            issue(M.strokeGradient, [...at, "lines", lineIndex, spanIndex, "style", item.style?.stroke ? "stroke" : "paint"]);
+          }
+        })
+      );
+    }
+  };
+
   checkFill(design.artboard?.fill, ["artboard", "fill"]);
 
   const walk = (nodes: readonly FreeNode[], depth: number, path: Path) => {
@@ -449,6 +498,7 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
       }
 
       checkFill(node.box?.fill, [...at, "box", "fill"]);
+      checkStroke(node, at);
 
       switch (node.type) {
         case "heading":

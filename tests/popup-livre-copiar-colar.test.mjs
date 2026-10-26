@@ -937,3 +937,117 @@ test("as partes do §9 que viram instruções: a lista do §13.1 e a abertura do
   assert.ok(intro, "a abertura do §9");
   assert.deepEqual(["9.2", "9.3", "9.4", "9.5", "9.6", ...numbers(intro[1])], sections, "a abertura do §9 e o script");
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * L6b: contorno e marca-texto no copiar e colar e nas instruções para a IA
+ * ---------------------------------------------------------------------------------------------- */
+
+test("L6b: copiar e colar devolve o mesmo design com contorno e marca-texto; colado fora da forma, sai canônico", () => {
+  const value = design([
+    {
+      id: "titulo",
+      lines: [
+        [{ style: { paint: { color: "#ffffff00", kind: "solid" }, stroke: { color: "#ffffff", width: 2 } }, text: "Semana" }],
+        [{ text: "de " }, { style: { mark: { color: "#e5ff1f", padding: [0, 4], radius: 2 }, paint: { color: "#111111", kind: "solid" } }, text: "revisão" }]
+      ],
+      name: "Título grande",
+      textStyle: { size: 40, stroke: { color: "#000000", width: 1 } },
+      type: "heading"
+    },
+    { action: { kind: "cta" }, id: "botao", textStyle: { stroke: { color: "#111111", width: 1 } }, type: "button" }
+  ]);
+  const text = paste.freeDesignClipboardText(value);
+
+  assert.match(text, /"stroke": \{/);
+  assert.match(text, /"mark": \{/);
+
+  const result = paste.parseFreeDesignPaste(text, context());
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.design, value, "o mesmo design");
+  assert.deepEqual(result.notes, []);
+  assert.equal(paste.freeDesignClipboardText(result.design), text, "copiar de novo da o mesmo texto");
+
+  // A IA escreve com os padroes e as cores em maiusculas: o colado sai canonico.
+  const loose = {
+    children: [
+      {
+        id: "titulo",
+        lines: [[{ text: "de " }, { style: { mark: { color: "#E5FF1F", padding: [2, 6], radius: 4 }, stroke: { color: "#FFFFFF", width: 2 } }, text: "revisão" }]],
+        textStyle: { stroke: { color: "#FFFFFF", width: 2 } },
+        type: "heading"
+      },
+      { id: "links", type: "links" }
+    ],
+    mode: "free",
+    version: 1
+  };
+  const pasted = paste.parseFreeDesignPaste(`\`\`\`json\n${JSON.stringify(loose)}\n\`\`\``, context({ content: { audio: null, cta: null } }));
+
+  assert.equal(pasted.ok, true, JSON.stringify(pasted));
+  assert.deepEqual(pasted.design.children[0], {
+    id: "titulo",
+    lines: [[{ text: "de " }, { style: { mark: { color: "#e5ff1f" } }, text: "revisão" }]],
+    textStyle: { stroke: { color: "#ffffff", width: 2 } },
+    type: "heading"
+  }, "sem o respiro e os cantos padrao e sem o contorno igual ao do elemento");
+
+  // Erro no contorno ou no marca-texto: a frase diz o elemento; no celular, nao existe.
+  const broken = paste.parseFreeDesignPaste(
+    JSON.stringify({
+      children: [
+        { id: "titulo", lines: [[{ style: { mark: { color: "#e5ff1f", radius: 30 } }, text: "Oi" }]], name: "Título grande", textStyle: { stroke: { color: "#ffffff", width: 9 } }, type: "heading" },
+        { id: "links", type: "links" }
+      ],
+      devices: { mobile: { nodes: { titulo: { textStyle: { stroke: { color: "#ffffff", width: 1 } } } } } },
+      mode: "free",
+      version: 1
+    }),
+    context({ content: { audio: null, cta: null } })
+  );
+
+  assert.equal(broken.ok, false);
+  assert.equal(broken.errors[0], P.invalid);
+  assert.ok(broken.errors.includes("“Título grande”: Use de 1 a 8."), JSON.stringify(broken.errors));
+  assert.ok(broken.errors.includes("“Título grande”: Use de 0 a 24."), JSON.stringify(broken.errors));
+  assert.ok(broken.errors.includes(`“Título grande”, no celular: ${schema.POPUP_FREE_MESSAGES.design}`), JSON.stringify(broken.errors));
+
+  for (const message of [schema.POPUP_FREE_MESSAGES.stroke, schema.POPUP_FREE_MESSAGES.mark]) {
+    assert.equal(PROIBIDAS.test(message), false, message);
+    assert.doesNotMatch(message, /\b(?:stroke|mark)\b/i, "na frase, contorno e marca-texto");
+  }
+});
+
+test("L6b: as instruções para a IA trazem o contorno e o marca-texto, o guia de moderação e o exemplo, sem código", async () => {
+  // O arquivo gerado (o teste das instrucoes acima confere que ele e o do docs/27 §9).
+  const { FREE_AI_INSTRUCTIONS } = await import("../src/components/admin/v2/communication/popup-free/free-ai-instructions.ts");
+
+  // O contrato (9.3), os padroes (9.4), os limites (9.5), o celular (9.10) e o guia (9.8).
+  assert.ok(FREE_AI_INSTRUCTIONS.includes('`stroke` (o contorno das letras: `{ "color", "width": 1 a 8 }`'), "o contorno no textStyle");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("Texto vazado (só o contorno, a letra transparente): `paint` sólida com alfa `00`"), "o texto vazado sem chave propria");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("`style` da parte aceita `font`, `size`, `weight`, `italic`, `uppercase`, `decoration`, `letterSpacing`, `paint`, `stroke` e `mark`"), "a parte");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("só existe na parte do Título e do Texto, nunca no `textStyle`"), "o marca-texto so na parte");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes('`{ "color", "padding": 0 a 24 ou [vertical, horizontal], "radius": 0 a 24 }`'), "o formato do marca-texto");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("| marca-texto `padding` / `radius` | `[2, 6]` / 4 |"), "os padroes do marca-texto");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("| Contorno / marca-texto | espessura de 1 a 8 / respiro e cantos de 0 a 24 |"), "os limites");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("fontes, contorno, marca-texto, camada (`z`) e girar (`rotate`) são os mesmos no computador e no celular"), "nada disso no celular");
+  assert.match(FREE_AI_INSTRUCTIONS, /\n10\. Contorno e marca-texto com moderação\. [^\n]*só em palavras grandes do Título, nunca no texto que o aluno precisa ler para entender o aviso, no Selo ou nos botões\.\n/, "o guia");
+  assert.ok(FREE_AI_INSTRUCTIONS.indexOf("**Contorno e marca-texto**") > FREE_AI_INSTRUCTIONS.indexOf("### 9.9 "), "o exemplo na 9.9");
+  assert.ok(FREE_AI_INSTRUCTIONS.indexOf("**Contorno e marca-texto**") < FREE_AI_INSTRUCTIONS.indexOf("### 9.10 "), "antes da 9.10");
+
+  // So o contrato: nada do codigo, do banco nem o nome das entregas (o L6b fica no docs, fora das instrucoes).
+  assert.doesNotMatch(FREE_AI_INSTRUCTIONS, /\bL6[a-g]\b/);
+  assert.doesNotMatch(FREE_AI_INSTRUCTIONS, /FREE_MARK_DEFAULTS|canonicalSpanStyle|rescaleFreeDesign|servidor/);
+
+  // O exemplo cola de volta e o vazado tem contorno de 2 (o guia pede 2 ou mais).
+  const example = [...FREE_AI_INSTRUCTIONS.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => match[1]).find((block) => block.includes('"mark"'));
+  const result = paste.parseFreeDesignPaste(example, context());
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.design, JSON.parse(example), "na forma canonica");
+
+  const vazados = model.findFreeNode(result.design, "titulo").node.lines.flat().filter((span) => span.style?.paint?.color?.endsWith("00"));
+
+  assert.equal(vazados.length, 1);
+  assert.ok(vazados[0].style.stroke.width >= 2);
+});

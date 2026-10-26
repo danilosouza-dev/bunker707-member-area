@@ -16,6 +16,9 @@ import "./support/resolve-extensionless-ts.mjs";
 //   cima, o player do Audio clicavel dentro de uma caixa, foco visivel, `sizes`, links, quadriculado da previa,
 //   video so com movimento, previa do arrastar sem mudar o design (de um elemento ou de varios juntos);
 // - ate 3 "Abrir um link", cada um com o seu destino, e o botao clicado no 3o argumento do onCta ("cta" ou "link:<id>");
+// - contorno (cqw com piso de 1 px, pintado antes da cor) no elemento e na parte, o texto vazado com o icone e o
+//   sublinhado dos links na cor do contorno, o marca-texto (respiro e cantos em cqw, um fundo por linha) e o span de
+//   dentro so com marca-texto e degrade (L6b);
 // - o HTML do Padrão e do Personalizado igual ao de antes do Livre (tests/fixtures/popup-livre/antes-*.html,
 //   gerados no commit-base e555188, antes de qualquer mudanca do Livre);
 // - o plano marcando o Livre faz o host pedir o pedaco do cartao antes do POST /show.
@@ -544,18 +547,19 @@ test("texto em degradê por parte com background-clip e cor de seleção", () =>
     ]
   });
   const element = render.freeTextStyleOf(design.children[0]);
-  const plain = styles.freeSpanCss(undefined, element, { faces: [], width: W });
-  const gradient = styles.freeSpanCss({ paint }, element, { faces: [], width: W });
+  const plain = styles.freeSpanParts(undefined, element, { faces: [], width: W });
+  const gradient = styles.freeSpanParts({ paint }, element, { faces: [], width: W });
 
-  assert.deepEqual(plain, { gradient: false, style: undefined }, "parte sem estilo herda do elemento");
-  assert.equal(gradient.gradient, true);
-  assert.equal(gradient.style.backgroundImage, "linear-gradient(90deg, #c084fc 0%, #22d3ee 100%)");
-  assert.equal(gradient.style.backgroundClip, "text");
-  assert.equal(gradient.style.WebkitBackgroundClip, "text");
-  assert.equal(gradient.style.color, "transparent");
-  assert.equal(gradient.style.WebkitTextFillColor, "transparent");
-  assert.equal(gradient.style.WebkitBoxDecorationBreak, "clone", "o degrade acompanha cada linha quebrada");
-  assert.equal(styles.freeSpanCss({ paint: { color: "#e5ff1f", kind: "solid" } }, element, { faces: [], width: W }).style.color, "#e5ff1f");
+  assert.deepEqual(plain, { inner: undefined, outer: undefined, select: false }, "parte sem estilo herda do elemento");
+  assert.equal(gradient.select, true);
+  assert.equal(gradient.inner, undefined, "sem marca-texto, um span só");
+  assert.equal(gradient.outer.backgroundImage, "linear-gradient(90deg, #c084fc 0%, #22d3ee 100%)");
+  assert.equal(gradient.outer.backgroundClip, "text");
+  assert.equal(gradient.outer.WebkitBackgroundClip, "text");
+  assert.equal(gradient.outer.color, "transparent");
+  assert.equal(gradient.outer.WebkitTextFillColor, "transparent");
+  assert.equal(gradient.outer.WebkitBoxDecorationBreak, "clone", "o degrade acompanha cada linha quebrada");
+  assert.deepEqual(styles.freeSpanParts({ paint: { color: "#e5ff1f", kind: "solid" } }, element, { faces: [], width: W }), { inner: undefined, outer: { color: "#e5ff1f" }, select: false });
 
   const markup = card(design);
   // So a parte em degrade leva a classe da selecao; o elemento em degrade passa o degrade para cada parte.
@@ -638,6 +642,220 @@ test("links sublinham ao passar o mouse: sem linha escolhida nada de linha em li
   assert.match(gradientUnderline, /text-decoration-line:underline/);
   assert.match(gradientUnderline, /text-decoration-color:#c084fc/, "a linha escolhida em degradê também aparece");
   assert.doesNotMatch(linkStyle(markup, "dismiss"), /text-decoration-color/, "cor sólida: a linha já usa a cor do texto");
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Contorno e marca-texto (L6b)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O texto como expressao regular literal (parenteses, pontos e colchetes do CSS valem como letras). */
+const literal = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const SELECTION = styles.FREE_GRADIENT_SELECTION_CLASS;
+const GRADIENT_PAINT = { angle: 90, kind: "linear", stops: [{ at: 0, color: "#c084fc" }, { at: 100, color: "#22d3ee" }] };
+/** O texto recortado pelo degradê de GRADIENT_PAINT, como sai no style (freeTextPaintCss). */
+const GRADIENT_TEXT_CSS =
+  "background-clip:text;background-image:linear-gradient(90deg, #c084fc 0%, #22d3ee 100%);box-decoration-break:clone;color:transparent;-webkit-background-clip:text;-webkit-box-decoration-break:clone;-webkit-text-fill-color:transparent";
+/** O contorno como sai no style: a espessura em cqw da prancheta com o piso de 1 px, pintado antes da cor. */
+const strokeCss = (px, color) => `paint-order:stroke fill;-webkit-text-stroke:max(1px, ${len(px)}) ${color}`;
+/** O marca-texto como sai no style: fundo, cantos, um fundo por linha e respiro, em cqw da prancheta. */
+const markCss = (color, padding = [2, 6], radius = 4) =>
+  `background-color:${color};border-radius:${len(radius)};box-decoration-break:clone;padding:${padding.map((side) => len(side)).join(" ")};-webkit-box-decoration-break:clone`;
+
+test("contorno: espessura em cqw nunca abaixo de 1 px e pintado antes da cor, no elemento e na parte; com contorno a seleção aparece", () => {
+  assert.equal(styles.freeTextStrokeCss(undefined, W), undefined, "sem contorno, nada");
+  assert.deepEqual(styles.freeTextStrokeCss({ color: "#e5ff1f", width: 2 }, W), { paintOrder: "stroke fill", WebkitTextStroke: `max(1px, ${len(2)}) #e5ff1f` });
+  assert.equal(styles.freeTextStrokeCss({ color: "#000000", width: 8 }, 720).WebkitTextStroke, `max(1px, ${len(8, 720)}) #000000`, "em cqw da prancheta");
+
+  const thin = { color: "#000000", width: 1 };
+  const design = parsed({
+    children: [
+      { id: "titulo", lines: [[{ text: "Semana " }, { style: { stroke: { color: "#ff4fa3", width: 4 } }, text: "de revisão" }]], textStyle: { stroke: { color: "#e5ff1f", width: 2 } }, type: "heading" },
+      { id: "texto", lines: [[{ text: "Sem contorno " }, { style: { stroke: { color: "#ffffff", width: 1 } }, text: "só aqui" }]], type: "text" },
+      { icon: "gift", id: "selo", label: "Novo", textStyle: { stroke: thin }, type: "badge" },
+      { action: { kind: "cta" }, id: "botao", textStyle: { stroke: thin }, type: "button" },
+      { id: "links", textStyle: { stroke: thin }, type: "links" }
+    ]
+  });
+  const markup = card(design);
+
+  assert.ok(styleOfId(markup, "titulo").endsWith(strokeCss(2, "#e5ff1f")), "no elemento (as partes herdam)");
+
+  for (const id of ["selo", "botao"]) {
+    assert.ok(styleOfId(markup, id).includes(strokeCss(1, "#000000")), `no ${id}`);
+  }
+
+  for (const name of ["snooze", "dismiss"]) {
+    assert.match(markup, new RegExp(`data-free-link="${name}" style="[^"]*${literal(strokeCss(1, "#000000"))}`), `no link ${name}`);
+  }
+
+  // A parte troca o contorno do elemento. Com contorno (da parte ou do elemento) a parte leva a classe da selecao:
+  // o texto vazado selecionado sumiria.
+  assert.ok(markup.includes(`<span class="${SELECTION}">Semana </span><span class="${SELECTION}" style="${strokeCss(4, "#ff4fa3")}">de revisão</span>`));
+  assert.ok(
+    markup.includes(`<span>Sem contorno </span><span class="${SELECTION}" style="${strokeCss(1, "#ffffff")}">só aqui</span>`),
+    "sem contorno no elemento, só a parte com contorno leva a classe"
+  );
+  assert.deepEqual(styles.freeSpanParts({ stroke: { color: "#ffffff", width: 1 } }, render.freeTextStyleOf(design.children[1]), { faces: [], width: W }), {
+    inner: undefined,
+    outer: { paintOrder: "stroke fill", WebkitTextStroke: `max(1px, ${len(1)}) #ffffff` },
+    select: true
+  });
+  assert.equal(styles.freeSpanParts(undefined, render.freeTextStyleOf(design.children[0]), { faces: [], width: W }).select, true, "a parte sem estilo num título com contorno");
+  assert.ok(styleOfId(card(design, { device: "mobile" }), "titulo").endsWith(strokeCss(2, "#e5ff1f")), "no celular, o mesmo contorno em cqw: encolhe junto");
+});
+
+test("texto vazado (Só o contorno): a letra fica transparente e o ícone do Selo e do Botão e o sublinhado dos Links ficam na cor do contorno (C22)", () => {
+  const hollow = { paint: { color: "#ffffff00", kind: "solid" }, stroke: { color: "#e5ff1f", width: 2 } };
+
+  assert.equal(render.freeHollowColor(hollow), "#e5ff1f");
+  assert.equal(render.freeHollowColor({ paint: hollow.paint }), undefined, "sem contorno, a letra transparente é só a cor escolhida");
+  assert.equal(render.freeHollowColor({ ...hollow, paint: { color: "#ff0000", kind: "solid" } }), undefined, "#ff0000 é vermelho de 6 dígitos, não alfa 00");
+  assert.equal(render.freeHollowColor({ ...hollow, paint: { color: "#ffffff80", kind: "solid" } }), undefined, "a letra meio transparente continua com a cor dela");
+  assert.equal(render.freeHollowColor({ ...hollow, paint: GRADIENT_PAINT }), undefined, "no degradê vale a primeira parada (freeTextCss)");
+
+  const design = parsed({
+    children: [
+      { icon: "gift", id: "selo", label: "Novo", textStyle: hollow, type: "badge" },
+      { action: { kind: "cta" }, icon: { name: "arrow-right" }, id: "botao", textStyle: hollow, type: "button" },
+      { icon: "star", id: "cheio", label: "Cheio", textStyle: { stroke: hollow.stroke }, type: "badge" },
+      { id: "links", textStyle: hollow, type: "links" }
+    ]
+  });
+  const markup = card(design);
+  /** O style do desenho do ícone (o FreeIcon usa currentColor) dentro do elemento `id`. */
+  const iconStyle = (id) => /<svg[^>]*style="([^"]*)"/.exec(nodeHtml(design, id))?.[1];
+
+  for (const id of ["selo", "botao"]) {
+    assert.match(styleOfId(markup, id), /(^|;)color:#ffffff00;/, `${id}: a letra continua transparente`);
+    assert.ok(styleOfId(markup, id).includes(strokeCss(2, "#e5ff1f")), `${id}: com o contorno`);
+    assert.equal(iconStyle(id), "flex-shrink:0;height:1.15em;width:1.15em;color:#e5ff1f", `${id}: o ícone na cor do contorno, não some com a letra`);
+  }
+
+  assert.equal(iconStyle("cheio"), "flex-shrink:0;height:1.15em;width:1.15em", "com a letra de cor, o ícone acompanha a letra como antes");
+
+  for (const name of ["snooze", "dismiss"]) {
+    assert.match(markup, new RegExp(`data-free-link="${name}" style="[^"]*;text-decoration-color:#e5ff1f"`), `${name}: o sublinhado ao passar o mouse aparece`);
+  }
+});
+
+test("marca-texto: fundo, respiro e cantos em cqw, um fundo por linha; com degradê, o span de fora leva a fonte e o marca-texto e o de dentro só a pintura", () => {
+  assert.deepEqual(
+    styles.freeMarkCss({ color: "#e5ff1f" }, W),
+    { backgroundColor: "#e5ff1f", borderRadius: len(4), boxDecorationBreak: "clone", padding: `${len(2)} ${len(6)}`, WebkitBoxDecorationBreak: "clone" },
+    "sem respiro nem cantos: [2, 6] e 4"
+  );
+
+  const zero = styles.freeMarkCss({ color: "#ffffff26", padding: 0, radius: 0 }, W);
+
+  assert.equal(zero.padding, "0px");
+  assert.equal(zero.borderRadius, "0px");
+  assert.equal(styles.freeMarkCss({ color: "#000000", padding: 24, radius: 24 }, W).padding, len(24), "um número só vale para os quatro lados");
+  assert.equal(styles.freeMarkCss({ color: "#000000", padding: [4, 10], radius: 12 }, 720).padding, `${len(4, 720)} ${len(10, 720)}`, "em cqw da prancheta");
+
+  const design = parsed({
+    children: [
+      {
+        id: "titulo",
+        lines: [
+          [{ text: "de " }, { style: { mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } }, text: "revisão" }],
+          [{ style: { decoration: "underline", mark: { color: "#000000", padding: [4, 10], radius: 12 }, paint: GRADIENT_PAINT, size: 48 }, text: "ao vivo" }]
+        ],
+        type: "heading"
+      },
+      { id: "texto", lines: [[{ text: "Tudo " }, { style: { mark: { color: "#ffffff26" } }, text: "em destaque" }]], textStyle: { paint: GRADIENT_PAINT }, type: "text" },
+      { id: "links", type: "links" }
+    ]
+  });
+  const solid = `<span style="color:#111111;${markCss("#e5ff1f")}"><span style="position:relative">revisão</span></span>`;
+  const markup = card(design);
+
+  assert.ok(markup.includes(solid), "cor sólida: o de fora com a cor e o marca-texto, o de dentro com as letras");
+  assert.ok(card(design, { preview: true }).includes(solid), "na prévia do editor, o mesmo desenho");
+  assert.ok(
+    markup.includes(
+      `<span class="${SELECTION}" style="font-size:${render.freeFontSize(48, W)};text-decoration-line:underline;text-decoration-color:#c084fc;${markCss("#000000", [4, 10], 12)}"><span style="${GRADIENT_TEXT_CSS};position:relative">ao vivo</span></span>`
+    ),
+    "degradê da parte: o de fora com o tamanho, a linha e o marca-texto (a caixa do tamanho da letra); o de dentro só a pintura"
+  );
+  assert.ok(
+    markup.includes(
+      `<span class="${SELECTION}" style="${GRADIENT_TEXT_CSS};position:relative">Tudo </span><span class="${SELECTION}" style="${markCss("#ffffff26")}"><span style="${GRADIENT_TEXT_CSS};position:relative">em destaque</span></span>`
+    ),
+    "degradê do elemento: só a parte com marca-texto se divide"
+  );
+
+  const parts = styles.freeSpanParts({ mark: { color: "#ffffff26" } }, render.freeTextStyleOf(design.children[1]), { faces: [], width: W }, true);
+
+  assert.deepEqual(parts.inner, { ...styles.freeTextPaintCss(GRADIENT_PAINT), position: "relative" });
+  assert.equal(parts.outer.backgroundClip, undefined, "o fundo do span de fora é o marca-texto, nunca o recorte das letras");
+  assert.equal(parts.select, true);
+});
+
+test("marca-texto: as letras de todo o elemento ficam acima dos fundos (o marca-texto de baixo não cobre o pé das letras de cima)", () => {
+  const ctx = { faces: [], width: W };
+  const element = render.freeTextStyleOf({ id: "t", type: "heading" });
+
+  // Sem marca-texto no elemento: o desenho de antes (nenhuma posição nova).
+  assert.equal(styles.freeSpanParts(undefined, element, ctx).outer, undefined);
+  assert.deepEqual(styles.freeSpanParts({ paint: { color: "#e5ff1f", kind: "solid" } }, element, ctx).outer, { color: "#e5ff1f" });
+  // Com marca-texto em alguma parte (`lift`): a parte sem marca-texto ganha a posição no próprio span.
+  assert.deepEqual(styles.freeSpanParts(undefined, element, ctx, true), { inner: undefined, outer: { position: "relative" }, select: false });
+  assert.deepEqual(styles.freeSpanParts({ paint: GRADIENT_PAINT }, element, ctx, true).outer, { ...styles.freeTextPaintCss(GRADIENT_PAINT), position: "relative" });
+
+  // A parte com marca-texto: o fundo no de fora, sem posição (pintado com o texto em linha), e as letras no de dentro,
+  // com posição (pintadas depois de todos os fundos).
+  const marked = styles.freeSpanParts({ mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } }, element, ctx, true);
+
+  assert.deepEqual(marked.inner, { position: "relative" });
+  assert.equal(marked.outer.position, undefined);
+  assert.equal(marked.outer.backgroundColor, "#e5ff1f");
+  assert.equal(marked.outer.color, "#111111", "a cor sólida fica no de fora e o de dentro herda");
+
+  const design = parsed({
+    children: [
+      { id: "titulo", lines: [[{ text: "Aprenda prática hoje" }], [{ style: { mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } }, text: "Semana gratuita" }]], textStyle: { lineHeight: 0.95, size: 40 }, type: "heading" },
+      { id: "texto", lines: [[{ text: "Sem " }, { style: { paint: { color: "#e5ff1f", kind: "solid" } }, text: "marca-texto" }]], type: "text" },
+      { id: "links", type: "links" }
+    ]
+  });
+  const markup = card(design);
+
+  assert.ok(
+    markup.includes(
+      `<span style="display:block"><span style="position:relative">Aprenda prática hoje</span></span> <span style="display:block"><span style="color:#111111;${markCss("#e5ff1f")}"><span style="position:relative">Semana gratuita</span></span></span>`
+    ),
+    "a linha de cima sobe junto com as letras do marca-texto"
+  );
+  assert.ok(markup.includes(`<span>Sem </span><span style="color:#e5ff1f">marca-texto</span>`), "o Texto sem marca-texto continua como antes");
+  assert.doesNotMatch(nodeHtml(design, "texto"), /<span[^>]*position:relative/, "nenhum span com posição sem marca-texto no elemento");
+  assert.ok(card(design, { device: "mobile" }).includes(`<span style="position:relative">Aprenda prática hoje</span>`), "no celular, o mesmo");
+});
+
+test("a linha própria de uma parte em degradê usa a primeira parada; com cor sólida fica como antes (pendência do L6a)", () => {
+  const unordered = { angle: 90, kind: "linear", stops: [{ at: 100, color: "#22d3ee" }, { at: 0, color: "#c084fc" }] };
+  const element = render.freeTextStyleOf({ id: "t", type: "text" });
+  const ctx = { faces: [], width: W };
+  const own = styles.freeSpanParts({ decoration: "underline", paint: unordered }, element, ctx).outer;
+
+  assert.equal(own.color, "transparent");
+  assert.equal(own.textDecorationLine, "underline");
+  assert.equal(own.textDecorationColor, "#c084fc", "a primeira parada (a de menor posição), a mesma cor dos ícones");
+
+  const inherited = styles.freeSpanParts({ decoration: "line-through" }, { ...element, paint: unordered }, ctx).outer;
+
+  assert.equal(inherited.backgroundClip, "text", "a parte sem pintura própria herda o degradê do elemento");
+  assert.equal(inherited.textDecorationColor, "#c084fc");
+  assert.deepEqual(
+    styles.freeSpanParts({ decoration: "underline", paint: { color: "#a1a1aa", kind: "solid" } }, element, ctx).outer,
+    { color: "#a1a1aa", textDecorationLine: "underline" },
+    "cor sólida: a linha já usa a cor da letra (o HTML de antes)"
+  );
+
+  const design = parsed({
+    children: [{ id: "texto", lines: [[{ text: "Preço " }, { style: { decoration: "line-through", paint: GRADIENT_PAINT }, text: "R$ 997" }]], type: "text" }, { id: "links", type: "links" }]
+  });
+
+  assert.ok(card(design).includes(`<span class="${SELECTION}" style="${GRADIENT_TEXT_CSS};text-decoration-line:line-through;text-decoration-color:#c084fc">R$ 997</span>`));
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -1397,6 +1615,14 @@ test("HTML do Livre no computador igual ao de antes do Celular (design sem devic
 
   assert.equal(now, before, "o cartao Livre do computador mudou");
   assert.equal((now.match(/<!-- caso:/g) ?? []).length, 10, "os 4 modelos para comecar (aluno e previa) e o modelo com video");
+});
+
+test("sem contorno nem marca-texto (L6b), o HTML do Livre é o de antes: nenhum contorno e nenhum span de dentro", async () => {
+  const now = await livreBeforeCases();
+
+  assert.doesNotMatch(now, /text-stroke|paint-order/, "sem contorno, nenhuma propriedade nova");
+  assert.doesNotMatch(now, /<span[^>]*><span style="background-clip:text/, "o degradê de uma parte continua num span só");
+  assert.match(now, /style="background-clip:text;[^"]*">/, "a amostra tem partes em degradê");
 });
 
 test("o Livre vai para o pedaço próprio: nada até o código chegar e o plano pede o pedaço antes do show", async () => {

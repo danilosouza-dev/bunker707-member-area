@@ -1016,6 +1016,133 @@ test("dicas: contraste, texto pequeno, texto no celular, ordem de leitura, texto
   assert.deepEqual(checks.popupFreeHints(valid(design([{ hidden: true, id: "t", lines: [[{ text: "Oi" }]], textStyle: { size: 10 }, type: "text" }]))).filter((hint) => hint.nodeId === "t"), []);
 });
 
+/* L6b: o contraste com o contorno e com o marca-texto (docs/27 §9.8; críticas C2 e C22) */
+
+const LETRA_VAZADA = { color: "#ffffff00", kind: "solid" };
+const contrastKeys = (value, input) => checks.popupFreeHints(valid(value), input).filter((hint) => hint.kind === "contrast").map((hint) => hint.key);
+
+test("L6b, Revisar: o texto vazado com contorno de 2 ou mais não acusa contraste; com 1, só a cor conta e acusa", () => {
+  const titulo = (stroke) => ({ id: "titulo", lines: [[{ text: "Semana" }]], textStyle: { paint: LETRA_VAZADA, size: 40, stroke }, type: "heading" });
+
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#ffffff", width: 2 })])), [], "contorno branco de 2 no fundo escuro: lê bem");
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#ffffff", width: 8 })])), []);
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#ffffff", width: 1 })])), ["nodes.titulo.textStyle.paint"], "com 1 px, só a cor (transparente) conta");
+  // O contorno de 2 também precisa contrastar: escuro no fundo escuro acusa.
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#202020", width: 2 })])), ["nodes.titulo.textStyle.paint"]);
+
+  // Em cada cor do fundo vale o melhor entre a letra e o contorno: letra branca com contorno preto lê no degradê do
+  // preto ao branco; sem o contorno (ou com 1 px), o lado branco acusa.
+  const degrade = { artboard: { fill: [{ kind: "linear", stops: [{ at: 0, color: "#000000" }, { at: 100, color: "#ffffff" }] }] } };
+  const branco = (stroke) => ({ id: "texto", lines: [[{ text: "Leia" }]], textStyle: stroke ? { stroke } : undefined, type: "text" });
+  // Os Links brancos, sem contorno, acusam no lado branco; aqui so o Texto importa.
+  const doTexto = (value) => contrastKeys(value).filter((key) => key.startsWith("nodes.texto."));
+
+  assert.deepEqual(doTexto(design([branco({ color: "#000000", width: 2 })], degrade)), []);
+  assert.deepEqual(doTexto(design([branco({ color: "#000000", width: 1 })], degrade)), ["nodes.texto.textStyle.paint"]);
+  assert.deepEqual(doTexto(design([branco(null)], degrade)), ["nodes.texto.textStyle.paint"]);
+});
+
+test("L6b, Revisar: a parte vazada se lê pelo contorno dela ou do elemento; trocar o contorno por um ruim acusa na parte", () => {
+  const linhas = (style) => [[{ text: "Semana " }, { style, text: "de revisão" }]];
+  const titulo = (style, textStyle = { size: 40 }) => ({ id: "titulo", lines: linhas(style), textStyle, type: "heading" });
+
+  // A parte vazada com contorno próprio de 2: lê. Com 1: a cor da parte acusa, na chave da cor dela.
+  assert.deepEqual(contrastKeys(design([titulo({ paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } })])), []);
+  assert.deepEqual(contrastKeys(design([titulo({ paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 1 } })])), ["nodes.titulo.lines.0.1.style.paint"]);
+  // Sem contorno próprio, o do elemento vale para a parte (a parte não tira o contorno).
+  assert.deepEqual(contrastKeys(design([titulo({ paint: LETRA_VAZADA }, { size: 40, stroke: { color: "#ffffff", width: 3 } })])), []);
+
+  // Elemento vazado que lê pelo contorno; a parte só troca o contorno: por um de 1 px acusa na chave do contorno dela,
+  // por outro bom não acusa.
+  const vazado = { paint: LETRA_VAZADA, size: 40, stroke: { color: "#ffffff", width: 3 } };
+  assert.deepEqual(contrastKeys(design([titulo({ stroke: { color: "#ffffff", width: 1 } }, vazado)])), ["nodes.titulo.lines.0.1.style.stroke"]);
+  assert.deepEqual(contrastKeys(design([titulo({ stroke: { color: "#e5ff1f", width: 2 } }, vazado)])), []);
+  // Com o elemento já acusando, a parte que só troca o contorno não repete a dica.
+  const ruim = { paint: { color: "#202020", kind: "solid" }, size: 40 };
+  assert.deepEqual(contrastKeys(design([titulo({ stroke: { color: "#303030", width: 1 } }, ruim)])), ["nodes.titulo.textStyle.paint"]);
+});
+
+test("L6b, Revisar: a parte com marca-texto é medida contra ele, mesmo sem cor própria", () => {
+  const texto = (style, extra = {}) => ({ id: "texto", lines: [[{ text: "As aulas voltam com " }, { style, text: "exercícios novos" }]], type: "text", ...extra });
+
+  // Marca-texto claro sob o texto branco do elemento: acusa na chave do marca-texto.
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f" } })])), ["nodes.texto.lines.0.1.style.mark"]);
+  // Com uma letra escura, lê sobre ele (a mesma letra escura sem marca-texto acusaria contra o fundo escuro).
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } })])), []);
+  assert.deepEqual(contrastKeys(design([texto({ paint: { color: "#111111", kind: "solid" } })])), ["nodes.texto.lines.0.1.style.paint"]);
+  // A cor de partida da chave Marca-texto (o vermelho da marca) lê com o texto branco.
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e50914" } })])), []);
+
+  // Marca-texto transparente: composto sobre o fundo de fora (o escuro da prancheta).
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#ffffff26" } }, { textStyle: { paint: { color: "#d4d4d8", kind: "solid" } } })])), []);
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#ffffffcc" } })])), ["nodes.texto.lines.0.1.style.mark"]);
+
+  // Sobre uma imagem: o marca-texto sem transparência ainda dá para medir; o transparente, não.
+  const sobreImagem = { artboard: { fill: [{ asset: "img", kind: "image" }] }, assets: [imageAsset("img")] };
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f" } })], sobreImagem)), ["nodes.texto.lines.0.1.style.mark"]);
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1fff" }, paint: { color: "#111111", kind: "solid" } })], sobreImagem)), []);
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f80" } })], sobreImagem)), []);
+});
+
+test("L6b, Revisar: com todas as letras sobre marca-texto, a cor do elemento não é medida contra o fundo de fora", () => {
+  const escura = { paint: { color: "#111111", kind: "solid" }, size: 32 };
+  const amarelo = { mark: { color: "#e5ff1f" } };
+  const titulo = (lines) => ({ id: "t", lines, textStyle: escura, type: "heading" });
+
+  // A letra escura do elemento só aparece sobre o amarelo: nada acusa (antes, 1,0:1 em textStyle.paint).
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana de revisão" }]])])), []);
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana" }], [{ style: amarelo, text: "de revisão" }]])])), [], "em todas as linhas");
+  // Um espaço sem marca-texto entre duas partes marcadas não tem letra para medir.
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana" }, { text: " " }, { style: { mark: { color: "#ffffff" } }, text: "de revisão" }]])])), []);
+  // Uma parte com cor própria também não usa a cor do elemento.
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana " }, { style: { paint: { color: "#ffffff", kind: "solid" } }, text: "de revisão" }]])])), []);
+
+  // Uma parte com a cor do elemento fora do marca-texto: acusa no elemento, como antes.
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana " }, { text: "de revisão" }]])])), ["nodes.t.textStyle.paint"]);
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana" }], [{ style: { stroke: { color: "#202020", width: 1 } }, text: "de revisão" }]])])), ["nodes.t.textStyle.paint"], "a parte que só troca o contorno usa a cor do elemento");
+  // O marca-texto que não se lê continua acusando na parte.
+  assert.deepEqual(contrastKeys(design([{ ...titulo([[{ style: { mark: { color: "#202020" } }, text: "Semana" }]]) }])), ["nodes.t.lines.0.0.style.mark"]);
+});
+
+test("L6b, Revisar: o ícone do Selo e do Botão é medido pela cor que o cartão usa (no vazado, a do contorno); a dica só quando ele some", () => {
+  const vermelho = { fill: [{ color: "#e50914", kind: "solid" }], padding: [4, 10] };
+  const selo = (extra) => ({ box: vermelho, id: "selo", label: "Novidade", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } }, type: "badge", ...extra });
+  const botao = (extra) => ({ action: { kind: "close" }, box: vermelho, id: "fechar", label: "Agora não", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } }, type: "button", ...extra });
+  const dicas = (value) => checks.popupFreeHints(valid(value)).filter((hint) => hint.kind === "contrast");
+
+  // Vazado: o cartão desenha o ícone na cor do contorno (freeHollowColor), que se lê no vermelho. Nada acusa.
+  assert.equal(render.freeHollowColor(render.freeTextStyleOf(selo({}))), "#ffffff");
+  assert.deepEqual(dicas(design([selo({ icon: "sparkles" }), botao({ icon: { name: "arrow-right" } })])), []);
+
+  // A letra de cor que só se lê pelo contorno: o ícone usa a cor da letra (vermelha no vermelho) e some.
+  const letraNoFundo = { paint: { color: "#e50914", kind: "solid" }, stroke: { color: "#ffffff", width: 2 } };
+
+  for (const [node, id] of [
+    [selo({ icon: "sparkles", textStyle: letraNoFundo }), "selo"],
+    [botao({ icon: { name: "arrow-right" }, textStyle: letraNoFundo }), "fechar"]
+  ]) {
+    assert.equal(render.freeHollowColor(render.freeTextStyleOf(node)), undefined, `${id}: não é vazado`);
+    assert.deepEqual(dicas(design([node])), [{ key: `nodes.${id}.textStyle.paint`, kind: "contrast", message: checks.POPUP_FREE_HINT_MESSAGES.iconHidden, nodeId: id }], id);
+  }
+
+  // Sem ícone, a mesma letra lê pelo contorno; com a letra de cor que se lê, o ícone também.
+  assert.deepEqual(dicas(design([selo({ textStyle: letraNoFundo }), botao({ textStyle: letraNoFundo })])), []);
+  assert.deepEqual(dicas(design([selo({ icon: "sparkles", textStyle: { stroke: { color: "#000000", width: 2 } } })])), []);
+  // A letra vazada que já acusa (contorno de 1 px) fica com a dica de contraste de sempre, sem a do ícone.
+  const fino = dicas(design([selo({ icon: "sparkles", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 1 } } })]));
+  assert.equal(fino.length, 1);
+  assert.ok(fino[0].message.startsWith("Contraste baixo ("));
+});
+
+test("L6b, Revisar: o exemplo Contorno e marca-texto do docs/27 §9.9 não acende dica de contraste", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const section = doc.slice(doc.indexOf("## 9. Contrato do JSON"), doc.indexOf("## 10."));
+  const block = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => match[1]).find((item) => item.includes('"mark"'));
+
+  assert.ok(block, "o exemplo com marca-texto está no §9.9");
+  assert.deepEqual(checks.popupFreeHints(valid(JSON.parse(block)), { content: { ctaLabel: "Saiba mais" } }), [], "nem contraste, nem texto no celular");
+});
+
 test("vocabulário das frases, dos modelos e das dicas", () => {
   const forbidden = /\b(campanha|público|audiência|evento|oferta|gatilho|trigger|sessão|impressão|home|automação|lembrete|layout|template|fluxo)/i;
   const texts = [
@@ -1408,4 +1535,343 @@ test("Celular: o exemplo do docs/27 §9.10 vale e o celular muda só o que ele d
   assert.equal(render.freeTextStyleOf(model.findFreeNode(mobile, "titulo").node).size, 32);
   assert.equal(render.freeTextStyleOf(model.findFreeNode(value, "titulo").node).size, 40, "o computador continua com 40");
   assert.equal(render.resolveFreeArtboard(mobile).padding, 16);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * L6b: contorno das letras e marca-texto (docs/27 §9.3; version 1, sem migração, nada no celular)
+ * ---------------------------------------------------------------------------------------------- */
+
+const BRANCO = "#ffffff";
+const VAZADO = { color: "#ffffff00", kind: "solid" };
+const contorno = (width = 2, color = BRANCO) => ({ color, width });
+/** Um Título com uma parte que leva o `style` dado (a do meio de três). */
+const tituloComParte = (style, textStyle) => ({
+  id: "titulo",
+  lines: [[{ text: "Semana " }, { style, text: "de revisão" }, { text: "!" }]],
+  ...(textStyle ? { textStyle } : {}),
+  type: "heading"
+});
+
+test("L6b: contorno em Título, Texto, Selo, Botão e Links e na parte; marca-texto só na parte, aceitos nos limites", () => {
+  for (const width of [1, 8]) {
+    valid(
+      design([
+        { ...heading("titulo"), textStyle: { stroke: contorno(width) } },
+        { ...text("texto"), textStyle: { paint: VAZADO, stroke: contorno(width, "#E5FF1F") } },
+        { id: "selo", label: "Novo", textStyle: { stroke: contorno(width) }, type: "badge" },
+        { action: { kind: "close" }, id: "fechar", label: "Agora não", textStyle: { stroke: contorno(width) }, type: "button" }
+      ])
+    );
+  }
+
+  const links = valid({ children: [{ id: "links", textStyle: { stroke: contorno(1, "#000000") }, type: "links" }], mode: "free", version: 1 });
+
+  assert.deepEqual(links.children[0].textStyle, { stroke: { color: "#000000", width: 1 } });
+
+  for (const mark of [
+    { color: "#e5ff1f" },
+    { color: "#e5ff1f", padding: 0, radius: 0 },
+    { color: "#e5ff1f", padding: 24, radius: 24 },
+    { color: "#e5ff1f", padding: [0, 24] },
+    { color: "#e5ff1f80", padding: [24, 0] }
+  ]) {
+    valid(design([tituloComParte({ mark, stroke: contorno(8) }), { ...text("texto"), lines: [[{ style: { mark }, text: "Texto" }]] }]));
+  }
+});
+
+test("L6b: contorno e marca-texto fora do limite ou fora do lugar dão a frase do campo", () => {
+  const at = "children.0.lines.0.1.style";
+
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: contorno(0) } }]), "children.0.textStyle.stroke.width", "Use de 1 a 8.");
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: contorno(9) } }]), "children.0.textStyle.stroke.width", "Use de 1 a 8.");
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: contorno(2.5) } }]), "children.0.textStyle.stroke.width", "Use de 1 a 8.");
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: { width: 2 } } }]), "children.0.textStyle.stroke.color", M.color);
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: contorno(2, "white") } }]), "children.0.textStyle.stroke.color", M.color);
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: true } }]), "children.0.textStyle.stroke", M.stroke);
+  hasIssue(design([tituloComParte({ stroke: contorno(9) })]), `${at}.stroke.width`, "Use de 1 a 8.");
+
+  hasIssue(design([tituloComParte({ mark: "amarelo" })]), `${at}.mark`, M.mark);
+  hasIssue(design([tituloComParte({ mark: {} })]), `${at}.mark.color`, M.color);
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", padding: 25 } })]), `${at}.mark.padding`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", padding: -1 } })]), `${at}.mark.padding`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", padding: [2, 25] } })]), `${at}.mark.padding.1`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", padding: [1, 2, 3, 4] } })]), `${at}.mark.padding`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", radius: 25 } })]), `${at}.mark.radius`, "Use de 0 a 24.");
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", radius: 1.5 } })]), `${at}.mark.radius`, "Use de 0 a 24.");
+
+  // O marca-texto existe so na parte: no estilo do elemento (de qualquer tipo) a chave nao existe.
+  for (const node of [
+    { ...heading("t"), textStyle: { mark: { color: "#e5ff1f" } } },
+    { ...text("t"), textStyle: { mark: { color: "#e5ff1f" } } },
+    { id: "t", label: "Novo", textStyle: { mark: { color: "#e5ff1f" } }, type: "badge" }
+  ]) {
+    hasIssue(design([node]), "children.0.textStyle", M.design);
+  }
+
+  hasIssue({ children: [{ id: "links", textStyle: { mark: { color: "#e5ff1f" } }, type: "links" }], mode: "free", version: 1 }, "children.0.textStyle", M.design);
+});
+
+test("L6b: o contorno nunca vai com a letra em degradê (no elemento ou na parte, pela pintura dela ou herdada)", () => {
+  const degrade = { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] };
+  const circular = { kind: "radial", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }], x: 50, y: 50 };
+  const solida = { color: "#111111", kind: "solid" };
+  const at = "children.0.lines.0.1.style";
+  const recusado = (value, path) => {
+    hasIssue(value, path, M.strokeGradient);
+    assert.equal(issues(value).length, 1, `uma frase só: ${JSON.stringify(issues(value))}`);
+  };
+
+  assert.equal(M.strokeGradient, "Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.");
+
+  // No elemento: o degradê (linear ou circular) com contorno, em todo tipo com texto; a chave é a do contorno.
+  for (const paint of [degrade, circular]) {
+    recusado(design([{ ...heading("t"), textStyle: { paint, stroke: contorno(8, "#000000") } }]), "children.0.textStyle.stroke");
+  }
+
+  recusado(design([{ ...text("t"), textStyle: { paint: degrade, stroke: contorno(1) } }]), "children.0.textStyle.stroke");
+  recusado(design([{ id: "t", label: "Novo", textStyle: { paint: degrade, stroke: contorno() }, type: "badge" }]), "children.0.textStyle.stroke");
+  recusado(design([{ action: { kind: "close" }, id: "t", label: "Fechar", textStyle: { paint: degrade, stroke: contorno() }, type: "button" }]), "children.0.textStyle.stroke");
+  recusado({ children: [{ id: "links", textStyle: { paint: degrade, stroke: contorno() }, type: "links" }], mode: "free", version: 1 }, "children.0.textStyle.stroke");
+
+  // Na parte: o contorno dela sobre o degradê do elemento, ou sobre o degradê dela, recusa na chave do contorno; o
+  // degradê dela sob o contorno do elemento recusa na chave da cor (a parte não tem contorno próprio).
+  recusado(design([tituloComParte({ stroke: contorno() }, { paint: degrade })]), `${at}.stroke`);
+  recusado(design([tituloComParte({ paint: degrade, stroke: contorno() })]), `${at}.stroke`);
+  recusado(design([tituloComParte({ paint: circular }, { stroke: contorno() })]), `${at}.paint`);
+  recusado(design([{ ...text("t"), lines: [[{ text: "a " }, { style: { mark: { color: "#e5ff1f" }, paint: degrade, stroke: contorno(1) }, text: "b" }]] }]), "children.0.lines.0.1.style.stroke");
+
+  // Vale: o degradê sem contorno, o contorno com cor sólida (inclusive a parte sólida com contorno no elemento em
+  // degradê sem contorno, e a parte sólida sob o contorno do elemento) e o texto vazado.
+  valid(design([{ ...heading("t"), textStyle: { paint: degrade } }, tituloComParte({ paint: degrade, mark: { color: "#111111" } })].map((node, index) => ({ ...node, id: `t${index}` }))));
+  valid(design([tituloComParte({ paint: solida, stroke: contorno() }, { paint: degrade })]));
+  valid(design([tituloComParte({ paint: solida }, { paint: { color: "#ffffff", kind: "solid" }, stroke: contorno() })]));
+  valid(design([tituloComParte({ paint: VAZADO, stroke: contorno() }, { paint: degrade })]));
+
+  // A chave sai pelo id do elemento, até o campo do contorno (Estilo) ou da cor da parte (a área de texto).
+  const value = valid(design([heading("titulo")]));
+
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.0.textStyle.stroke"), "freeDesign.nodes.titulo.textStyle.stroke");
+  assert.equal(schema.freeErrorKey(value, `freeDesign.${at}.paint`), "freeDesign.nodes.titulo.lines.0.1.style.paint");
+});
+
+test("L6b: chave a mais no contorno, no marca-texto e no estilo da parte é recusada; nada disso no celular", () => {
+  const at = "children.0.lines.0.1.style";
+
+  hasIssue(design([{ ...heading("t"), textStyle: { stroke: { ...contorno(), blur: 2 } } }]), "children.0.textStyle.stroke", M.design);
+  hasIssue(design([tituloComParte({ stroke: { ...contorno(), style: "dashed" } })]), `${at}.stroke`, M.design);
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f", opacity: 50 } })]), `${at}.mark`, M.design);
+  // O estilo da parte e o do elemento escolhido a dedo (pick) mais o marca-texto (extend): continua estrito.
+  hasIssue(design([tituloComParte({ mark: { color: "#e5ff1f" }, shadow: { blur: 0, color: "#000000", x: 0, y: 1 } })]), at, M.design);
+  hasIssue(design([tituloComParte({ align: "center", stroke: contorno() })]), at, M.design);
+
+  // Celular (L27): cor e pintura nunca por aparelho. O contorno e o marca-texto nao tem versao do celular.
+  const mobile = (entry) => design([heading("titulo")], { devices: { mobile: { nodes: { titulo: entry } } } });
+
+  hasIssue(mobile({ textStyle: { stroke: contorno() } }), "devices.mobile.nodes.titulo.textStyle", M.design);
+  hasIssue(mobile({ textStyle: { mark: { color: "#e5ff1f" } } }), "devices.mobile.nodes.titulo.textStyle", M.design);
+  hasIssue(mobile({ mark: { color: "#e5ff1f" } }), "devices.mobile.nodes.titulo", M.design);
+  hasIssue(mobile({ stroke: contorno() }), "devices.mobile.nodes.titulo", M.design);
+});
+
+test("L6b: as chaves de erro do contorno e do marca-texto saem pelo id do elemento, até o campo", () => {
+  const value = valid(design([heading("titulo"), { children: [{ ...text("texto"), lines: [[{ text: "a" }], [{ text: "b " }, { style: { mark: { color: "#e5ff1f" } }, text: "c" }]] }], id: "caixa", type: "box" }]));
+
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.0.textStyle.stroke.width"), "freeDesign.nodes.titulo.textStyle.stroke.width");
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.1.children.0.lines.1.1.style.mark.padding"), "freeDesign.nodes.texto.lines.1.1.style.mark.padding");
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.1.children.0.lines.1.1.style.stroke.color"), "freeDesign.nodes.texto.lines.1.1.style.stroke.color");
+  assert.equal(model.freeNodeIdOfKey("freeDesign.nodes.texto.lines.1.1.style.mark.padding"), "texto");
+  assert.equal(model.freeNodeIdOfKey("nodes.titulo.textStyle.stroke.width"), "titulo");
+
+  // O caminho que o zod devolve chega inteiro (ate o campo) para virar a chave do editor.
+  const broken = parse(design([{ children: [{ ...text("texto"), lines: [[{ style: { mark: { color: "#e5ff1f", radius: 30 } }, text: "c" }]] }], id: "caixa", type: "box" }]));
+  const shape = design([{ children: [text("texto")], id: "caixa", type: "box" }]);
+  const keys = broken.error.issues.map((issue) => schema.freeErrorKey(shape, ["freeDesign", ...issue.path].join(".")));
+
+  assert.deepEqual(keys, ["freeDesign.nodes.texto.lines.0.0.style.mark.radius"]);
+});
+
+test("L6b: a forma canônica do contorno e do marca-texto, campo a campo, com os padrões omitidos", () => {
+  // Elemento: a cor em minusculas, a espessura inteira; o contorno fica (o padrao e nao ter contorno).
+  const elemento = valid(design([{ ...heading("titulo"), textStyle: { paint: { color: "#FFFFFF00", kind: "solid" }, size: 40, stroke: { color: "#E5FF1F", width: 3 } } }]));
+
+  assert.deepEqual(elemento.children[0].textStyle, { paint: VAZADO, size: 40, stroke: { color: "#e5ff1f", width: 3 } });
+
+  for (const type of ["badge", "button", "links"]) {
+    const node = type === "badge" ? { id: "x", label: "Novo", type } : type === "button" ? { action: { kind: "close" }, id: "x", label: "Fechar", type } : { id: "links", type };
+    const value = model.canonicalPopupFreeDesign({ children: [{ ...node, textStyle: { stroke: { color: "#ABCDEF", width: 2 } } }], mode: "free", version: 1 });
+
+    assert.deepEqual(value.children[0].textStyle, { stroke: { color: "#abcdef", width: 2 } }, type);
+  }
+
+  // Parte: o contorno igual ao do elemento sai; um diferente (ou sem contorno no elemento) fica.
+  const base = { stroke: contorno(2) };
+  const igual = valid(design([tituloComParte({ stroke: { color: "#FFFFFF", width: 2 } }, base)]));
+
+  assert.deepEqual(igual.children[0].lines, [[{ text: "Semana de revisão!" }]], "a parte igual ao elemento some e as vizinhas se juntam");
+  assert.deepEqual(valid(design([tituloComParte({ stroke: contorno(4) }, base)])).children[0].lines[0][1].style, { stroke: { color: BRANCO, width: 4 } });
+  assert.deepEqual(valid(design([tituloComParte({ stroke: contorno(1, "#000000") }, base)])).children[0].lines[0][1].style, { stroke: { color: "#000000", width: 1 } });
+  assert.deepEqual(valid(design([tituloComParte({ stroke: contorno(2) })])).children[0].lines[0][1].style, { stroke: { color: BRANCO, width: 2 } }, "sem contorno no elemento, o da parte fica");
+
+  // Marca-texto: tira o respiro [2, 6] e os cantos 4; o respiro [n, n] vira n; a cor em minusculas.
+  const markOf = (mark) => valid(design([tituloComParte({ mark })])).children[0].lines[0][1].style.mark;
+
+  assert.deepEqual(model.FREE_MARK_DEFAULTS, { padding: [2, 6], radius: 4 });
+  assert.equal(model.FREE_MARK_DEFAULTS, render.FREE_MARK_DEFAULTS, "mora em popup-free-render.ts (o cartao usa); o modelo reexporta");
+  assert.deepEqual(markOf({ color: "#E5FF1F", padding: [2, 6], radius: 4 }), { color: "#e5ff1f" });
+  assert.deepEqual(markOf({ color: "#e5ff1f", padding: [3, 3] }), { color: "#e5ff1f", padding: 3 });
+  assert.deepEqual(markOf({ color: "#e5ff1f", padding: 2 }), { color: "#e5ff1f", padding: 2 }, "2 nos quatro lados nao e o padrao");
+  assert.deepEqual(markOf({ color: "#e5ff1f", padding: [0, 4], radius: 0 }), { color: "#e5ff1f", padding: [0, 4], radius: 0 });
+  assert.deepEqual(markOf({ color: "#e5ff1f", padding: [6, 2], radius: 12 }), { color: "#e5ff1f", padding: [6, 2], radius: 12 });
+  assert.deepEqual(Object.keys(markOf({ radius: 8, padding: 1, color: "#e5ff1f" })), ["color", "padding", "radius"], "chaves em ordem alfabetica");
+
+  // Partes vizinhas com o mesmo marca-texto (pelo JSON canonico) viram uma; com outro, nao.
+  const juntas = valid(design([{ ...heading("titulo"), lines: [[{ style: { mark: { color: "#E5FF1F", padding: [2, 6] } }, text: "de " }, { style: { mark: { color: "#e5ff1f", radius: 4 } }, text: "revisão" }]] }]));
+
+  assert.deepEqual(juntas.children[0].lines[0], [{ style: { mark: { color: "#e5ff1f" } }, text: "de revisão" }]);
+
+  const separadas = valid(design([{ ...heading("titulo"), lines: [[{ style: { mark: { color: "#e5ff1f" } }, text: "de " }, { style: { mark: { color: "#e5ff1f", radius: 0 } }, text: "revisão" }]] }]));
+
+  assert.equal(separadas.children[0].lines[0].length, 2);
+
+  // Ida e volta campo a campo: tudo junto, idempotente, sem tirar nada que nao seja padrao.
+  const completo = valid(
+    design([
+      tituloComParte({ mark: { color: "#e5ff1f", padding: [1, 9], radius: 7 }, paint: { color: "#111111", kind: "solid" }, stroke: contorno(5, "#000000") }, { stroke: contorno(2) }),
+      { ...text("texto"), lines: [[{ text: "a " }, { style: { mark: { color: "#ff3d9a33" } }, text: "b" }]] }
+    ])
+  );
+
+  assert.deepEqual(completo.children[0].lines[0][1], {
+    style: { mark: { color: "#e5ff1f", padding: [1, 9], radius: 7 }, paint: { color: "#111111", kind: "solid" }, stroke: { color: "#000000", width: 5 } },
+    text: "de revisão"
+  });
+  assert.deepEqual(completo.children[0].textStyle, { stroke: { color: BRANCO, width: 2 } });
+  assert.deepEqual(completo.children[1].lines[0][1].style, { mark: { color: "#ff3d9a33" } });
+  assert.deepEqual(model.canonicalPopupFreeDesign(completo), completo, "idempotente");
+  assert.deepEqual(valid(JSON.parse(JSON.stringify(completo))), completo, "o banco devolve o mesmo design");
+  assert.ok(model.jsonbBytesUpperBound(completo) > model.jsonbBytesUpperBound(valid(design([heading("titulo"), text("texto")]))), "a estimativa do tamanho conta as chaves novas");
+});
+
+test("L6b: rescaleFreeDesign escala a espessura do contorno e o respiro e os cantos do marca-texto (com os padrões)", () => {
+  const value = valid(
+    design([
+      tituloComParte({ mark: { color: "#e5ff1f" }, stroke: contorno(8, "#000000") }, { stroke: contorno(3) }),
+      { ...text("texto"), lines: [[{ style: { mark: { color: "#e5ff1f", padding: [4, 20], radius: 20 } }, text: "b" }, { style: { mark: { color: "#ff3d9a", padding: 10 } }, text: "c" }]] },
+      { id: "selo", label: "Novo", textStyle: { stroke: contorno(1) }, type: "badge" }
+    ])
+  );
+  const big = model.rescaleFreeDesign(value, 660);
+  const [titulo, texto, selo] = big.children;
+
+  assert.deepEqual(titulo.textStyle.stroke, { color: BRANCO, width: 5 }, "3 vezes 1,5 = 4,5, arredondado para 5");
+  assert.deepEqual(titulo.lines[0][1].style.stroke, { color: "#000000", width: 8 }, "dentro do limite (12 vira 8)");
+  assert.deepEqual(titulo.lines[0][1].style.mark, { color: "#e5ff1f", padding: [3, 9], radius: 6 }, "os padroes [2, 6] e 4 escalam junto");
+  assert.deepEqual(texto.lines[0][0].style.mark, { color: "#e5ff1f", padding: [6, 24], radius: 24 }, "30 vira 24");
+  assert.deepEqual(texto.lines[0][1].style.mark, { color: "#ff3d9a", padding: 15, radius: 6 }, "os cantos 4 que nao estavam no JSON tambem");
+  assert.deepEqual(selo.textStyle.stroke, { color: BRANCO, width: 2 });
+  valid(big);
+
+  const small = model.rescaleFreeDesign(value, 280);
+  const [tituloP, textoP, seloP] = small.children;
+
+  assert.deepEqual(tituloP.textStyle.stroke, { color: BRANCO, width: 2 });
+  assert.deepEqual(tituloP.lines[0][1].style.stroke, { color: "#000000", width: 5 });
+  assert.deepEqual(tituloP.lines[0][1].style.mark, { color: "#e5ff1f", padding: [1, 4], radius: 3 });
+  assert.deepEqual(textoP.lines[0][0].style.mark, { color: "#e5ff1f", padding: [3, 13], radius: 13 });
+  assert.deepEqual(seloP.textStyle.stroke, { color: BRANCO, width: 1 }, "nunca abaixo de 1");
+  valid(small);
+
+  assert.deepEqual(model.rescaleFreeDesign(value, 440), value, "a mesma largura nao muda nada (os padroes preenchidos saem de novo)");
+});
+
+test("L6b: o JSON Schema tem o contorno e o marca-texto, estritos e com os limites", () => {
+  const jsonSchema = jsonSchemaModule.popupFreeJsonSchema();
+  const resolve = (node) => (node && typeof node.$ref === "string" ? resolve(jsonSchema.$defs[node.$ref.replace("#/$defs/", "")]) : node);
+  const objects = [];
+  const collect = (node) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    if (node.type === "object" && node.properties) {
+      objects.push(node);
+    }
+
+    for (const value of Object.values(node)) {
+      collect(value);
+    }
+  };
+
+  collect(jsonSchema);
+
+  const withStroke = objects.filter((object) => object.properties.stroke && resolve(object.properties.stroke).properties?.width);
+  const withMark = objects.filter((object) => object.properties.mark);
+
+  assert.equal(withStroke.length, 2, "o estilo do texto e o da parte");
+  assert.equal(withMark.length, 1, "so o estilo da parte");
+  assert.ok(withMark[0].properties.stroke, "a parte tem contorno e marca-texto");
+  assert.equal(withMark[0].additionalProperties, false, "o estilo da parte continua estrito");
+
+  for (const object of withStroke) {
+    const stroke = resolve(object.properties.stroke);
+
+    assert.deepEqual([...stroke.required].sort(), ["color", "width"]);
+    assert.equal(stroke.additionalProperties, false);
+    assert.equal(stroke.properties.width.minimum, 1);
+    assert.equal(stroke.properties.width.maximum, 8);
+    assert.equal(stroke.properties.width.type, "integer");
+  }
+
+  const mark = resolve(withMark[0].properties.mark);
+
+  assert.deepEqual(mark.required, ["color"]);
+  assert.equal(mark.additionalProperties, false);
+  assert.deepEqual(mark.properties.radius, { maximum: 24, minimum: 0, type: "integer" });
+  assert.deepEqual(
+    mark.properties.padding.anyOf.map((option) => option.type),
+    ["integer", "array"],
+    "um numero ou [vertical, horizontal]"
+  );
+  assert.equal(mark.properties.padding.anyOf[1].minItems, 2);
+  assert.equal(mark.properties.padding.anyOf[1].maxItems, 2);
+
+  // O estilo de texto do elemento (o que tem sombra) nao tem marca-texto; o do celular nao tem nem contorno.
+  const elementStyle = objects.filter((object) => object.properties.shadow && object.properties.stroke);
+
+  assert.equal(elementStyle.length, 1);
+  assert.equal(elementStyle[0].properties.mark, undefined);
+
+  const mobileStyle = objects.filter((object) => Object.keys(object.properties).sort().join() === "align,letterSpacing,lineHeight,size");
+
+  assert.equal(mobileStyle.length, 1, "o estilo de texto do celular");
+  assert.equal(mobileStyle[0].additionalProperties, false);
+});
+
+test("L6b: um design sem contorno e sem marca-texto sai igual (forma canônica e reescala sem chave nova)", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const section = doc.slice(doc.indexOf("## 9. Contrato do JSON"), doc.indexOf("## 10."));
+  const blocks = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]));
+  const effects = /"(?:stroke|mark)":\{"color"/;
+  const semEfeitos = blocks.filter((block) => !effects.test(JSON.stringify(block)));
+  const comEfeitos = blocks.filter((block) => effects.test(JSON.stringify(block)));
+  const nenhumaChave = (value, label) => assert.doesNotMatch(JSON.stringify(value), effects, label);
+
+  assert.equal(comEfeitos.length, 1, "o exemplo do contorno e do marca-texto, na 9.9");
+  assert.equal(JSON.stringify(valid(comEfeitos[0])), JSON.stringify(comEfeitos[0]), "o exemplo ja esta na forma canonica (byte a byte)");
+
+  for (const { id } of starters.FREE_DESIGN_STARTERS) {
+    const value = starters.freeStarterDesign(id);
+    const written = semEfeitos.find((block) => JSON.stringify(block) === JSON.stringify(value));
+
+    assert.ok(written, `o modelo ${id} continua no docs/27 §9.9 byte a byte, como antes do L6b`);
+    assert.equal(JSON.stringify(valid(written)), JSON.stringify(written), `${id}: a forma canonica nao muda`);
+
+    for (const width of Object.values(model.FREE_ARTBOARD_WIDTH_PRESETS)) {
+      nenhumaChave(model.rescaleFreeDesign(value, width), `${id} em ${width}: a reescala nao cria contorno nem marca-texto`);
+    }
+  }
+
+  for (const block of semEfeitos) {
+    nenhumaChave(valid(block), "a forma canonica nao cria contorno nem marca-texto");
+  }
 });

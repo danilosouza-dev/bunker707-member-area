@@ -3,8 +3,8 @@
 // (applyFreeTextEdit, splitFreeSpanAtSelection, applyFreeSpanStyle e as fichas das partes), as camadas de fundo
 // (com a faixa Ordem do L4a: o lugar de soltar, o foco que segue a camada e a imagem que acha a sua camada),
 // as paradas do degradê, os lados, as sombras com os atalhos, a largura do pop-up com a reescala, os pesos de cada
-// fonte, a conta da imagem (lado ate 1.600 px e as qualidades ate caber) e o mapa chave -> aba/campo
-// (freeInspectorTargetOf).
+// fonte, a conta da imagem (lado ate 1.600 px e as qualidades ate caber), o contorno e o marca-texto (L6b, com o
+// atalho "Só o contorno") e o mapa chave -> aba/campo (freeInspectorTargetOf).
 //
 // Modulo puro, imports relativos (tests/popup-livre-painel-modelo.test.mjs carrega direto pelo Node). Tudo aqui e
 // texto do produtor em portugues, sem palavra fora do vocabulario (testado).
@@ -12,6 +12,7 @@
 import {
   FREE_ARTBOARD_WIDTH_PRESETS,
   FREE_DESIGN_LIMITS,
+  FREE_MARK_DEFAULTS,
   findFreeNode,
   freeDefaultFlowWidth,
   freeMobileNodeOf,
@@ -35,6 +36,7 @@ import {
   type FreeFillPaint,
   type FreeId,
   type FreeLine,
+  type FreeMark,
   type FreeMobileNode,
   type FreeNode,
   type FreeNodeType,
@@ -43,6 +45,7 @@ import {
   type FreeSpan,
   type FreeSpanStyle,
   type FreeTextPaint,
+  type FreeTextStroke,
   type FreeTextStyle,
   type PopupFreeDesign
 } from "../../../../../server/communications/popup-free-model";
@@ -99,9 +102,20 @@ export const FREE_INSPECTOR_COPY = {
     font: "Fonte",
     italic: "Itálico",
     letterSpacing: "Espaço entre letras",
+    /** Marca-texto (L6b): o fundo atrás das letras da parte, um por linha. */
+    mark: "Marca-texto",
+    markColor: "Cor do marca-texto",
+    markPaddingX: "Respiro dos lados",
+    markPaddingY: "Respiro em cima e embaixo",
+    markRadius: "Cantos do marca-texto",
     paint: "Cor do texto",
     reset: "Voltar ao estilo do elemento",
     size: "Tamanho",
+    /** Contorno da parte (L6b): põe ou troca o do elemento, mas não tira. */
+    stroke: "Contorno",
+    strokeColor: "Cor do contorno",
+    strokeFromElement: "Vem do elemento inteiro: aqui a parte troca a cor e a espessura.",
+    strokeWidth: "Espessura",
     title: "Estilo da parte",
     uppercase: "Maiúsculas",
     weight: "Peso"
@@ -191,6 +205,14 @@ export const FREE_INSPECTOR_COPY = {
     shadowX: "Horizontal",
     shadowY: "Vertical",
     size: "Tamanho",
+    /** Contorno das letras (L6b), no molde da Sombra do texto. */
+    stroke: "Contorno",
+    strokeColor: "Cor do contorno",
+    /** Com a letra em degradê, a chave Contorno e o "Só o contorno" ficam desligados (o schema recusa os dois juntos). */
+    strokeGradient: "Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.",
+    strokeOnly: "Só o contorno (texto vazado)",
+    strokeOnlyGradient: "No degradê, escolha uma cor sólida antes.",
+    strokeWidth: "Espessura",
     uppercase: "Maiúsculas",
     weight: "Peso"
   },
@@ -624,8 +646,15 @@ export function effectiveFreeSpanStyle(style: FreeSpanStyle | undefined, base: F
   if (style.size !== undefined && (!base || style.size !== base.size)) out.size = style.size;
   if (style.uppercase !== undefined && style.uppercase !== (base?.uppercase === true)) out.uppercase = style.uppercase;
   if (style.weight !== undefined && (!base || style.weight !== base.weight)) out.weight = style.weight;
+  // Contorno (L6b): o igual ao do elemento sai (a parte poe ou troca, mas nao tira). O marca-texto so existe na parte.
+  if (style.stroke && !sameStroke(style.stroke, base?.stroke)) out.stroke = style.stroke;
+  if (style.mark) out.mark = style.mark;
 
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sameStroke(left: FreeTextStroke, right: FreeTextStroke | undefined) {
+  return right !== undefined && left.width === right.width && left.color.toLowerCase() === right.color.toLowerCase();
 }
 
 function spanOf(text: string, style: FreeSpanStyle | undefined): FreeSpan {
@@ -992,8 +1021,11 @@ export function applyFreeSpanStyle(lines: readonly FreeLine[], targets: readonly
   return normalizeFreeLines(styled, base);
 }
 
+/** O estilo que o popover da parte mostra: o do elemento com o da parte por cima (o marca-texto so a parte tem). */
+export type FreeRangeStyle = FreeResolvedTextStyle & Pick<FreeSpanStyle, "mark">;
+
 /** O estilo que o trecho mostra no popover: o do elemento com o da primeira parte do trecho por cima. */
-export function freeRangeStyle(lines: readonly FreeLine[], target: FreeTextRange, base: FreeResolvedTextStyle): FreeResolvedTextStyle {
+export function freeRangeStyle(lines: readonly FreeLine[], target: FreeTextRange, base: FreeResolvedTextStyle): FreeRangeStyle {
   const line = lines[target.line] ?? [];
   let offset = 0;
 
@@ -1001,7 +1033,7 @@ export function freeRangeStyle(lines: readonly FreeLine[], target: FreeTextRange
     const to = offset + span.text.length;
 
     if (to > target.start || (span.text.length === 0 && offset === target.start)) {
-      return { ...base, ...(span.style ? Object.fromEntries(Object.entries(span.style).filter(([, value]) => value !== undefined)) : {}) } as FreeResolvedTextStyle;
+      return { ...base, ...(span.style ? Object.fromEntries(Object.entries(span.style).filter(([, value]) => value !== undefined)) : {}) } as FreeRangeStyle;
     }
 
     offset = to;
@@ -1110,6 +1142,14 @@ export function describeFreeSpanStyle(style: FreeSpanStyle, library: readonly Pi
 
   if (style.letterSpacing !== undefined) {
     words.push("espaço entre letras");
+  }
+
+  if (style.stroke) {
+    words.push("contorno");
+  }
+
+  if (style.mark) {
+    words.push("marca-texto");
   }
 
   return words.length > 0 ? words.join(", ") : "estilo do elemento";
@@ -1246,6 +1286,109 @@ export function freeTextPaintOfKind(kind: FreeTextPaintKind, current: FreeTextPa
   if (kind === "linear") return { kind: "linear", stops };
 
   return { kind: "radial", stops, x: 50, y: 50 };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Contorno e marca-texto (L6b)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O contorno que a chave Contorno liga: preto de 2 px (com 2 ou mais, o contorno conta no contraste do Revisar). */
+export const FREE_STROKE_DEFAULT: Readonly<FreeTextStroke> = { color: "#000000", width: 2 };
+
+/** A cor do marca-texto que a chave liga: o vermelho da marca, que se lê com o texto branco de partida. */
+export const FREE_MARK_DEFAULT_COLOR: HexColor = "#e50914";
+
+/** O que a chave Contorno e o "Só o contorno" mudam (vale para o elemento e para a parte). */
+export type FreeStrokePatch = { paint?: FreeTextPaint; stroke?: FreeTextStroke | undefined };
+
+/** Texto vazado: a letra sólida com alfa 00 e um contorno (sem chave própria no design). */
+export function freeIsOutlineOnly(style: Pick<FreeTextStyle, "paint" | "stroke">): boolean {
+  const color = style.paint?.kind === "solid" ? style.paint.color : null;
+
+  return style.stroke !== undefined && color !== null && color.length === 9 && color.slice(7) === "00";
+}
+
+/**
+ * "Só o contorno (texto vazado)": ligado, a letra fica com a cor de agora em alfa 00 e o contorno fica (o de agora,
+ * com espessura de pelo menos 2, ou um da cor da letra); desligado, a letra volta a mesma cor sem transparência e o
+ * contorno continua. Um passo só no histórico.
+ */
+export function freeOutlineOnlyPatch(style: Pick<FreeTextStyle, "paint" | "stroke">, on: boolean): FreeStrokePatch {
+  const color = opaque((style.paint ? freePaintBaseColor(style.paint) : null) ?? "#ffffff");
+
+  if (!on) {
+    return { paint: { color, kind: "solid" } };
+  }
+
+  return {
+    paint: { color: `${color}00`, kind: "solid" },
+    stroke: style.stroke ? { ...style.stroke, width: Math.max(FREE_STROKE_DEFAULT.width, style.stroke.width) } : { color, width: FREE_STROKE_DEFAULT.width }
+  };
+}
+
+/**
+ * A chave Contorno: ligada, o contorno padrão; desligada, sem contorno, e a letra vazada volta a ter cor (sem o
+ * contorno ela sumiria). Um passo só no histórico.
+ */
+export function freeStrokeSwitchPatch(style: Pick<FreeTextStyle, "paint" | "stroke">, on: boolean): FreeStrokePatch {
+  if (on) {
+    return { stroke: { ...FREE_STROKE_DEFAULT } };
+  }
+
+  return freeIsOutlineOnly(style) ? { ...freeOutlineOnlyPatch(style, false), stroke: undefined } : { stroke: undefined };
+}
+
+/**
+ * Por que a chave Contorno fica desligada (no elemento e na parte, pela pintura que vale ali): com a letra em
+ * degradê, o contorno cobre a cor e o schema recusa. Com o contorno já ligado, a chave continua livre para
+ * desligar. null = livre.
+ */
+export function freeStrokeDisabledReason(style: Pick<FreeTextStyle, "paint" | "stroke">): string | null {
+  return style.stroke === undefined && style.paint !== undefined && style.paint.kind !== "solid" ? FREE_INSPECTOR_COPY.style.strokeGradient : null;
+}
+
+/**
+ * Por que o "Só o contorno" fica desligado: no degradê ele trocaria o degradê por uma cor sólida, e soltar o botão
+ * devolveria só a primeira cor. null = livre.
+ */
+export function freeOutlineOnlyDisabledReason(style: Pick<FreeTextStyle, "paint">): string | null {
+  return style.paint !== undefined && style.paint.kind !== "solid" ? FREE_INSPECTOR_COPY.style.strokeOnlyGradient : null;
+}
+
+/** O respiro do marca-texto como [em cima e embaixo, dos lados] (sem escolha: [2, 6]). */
+export function freeMarkPadding(mark: FreeMark): [number, number] {
+  const padding = mark.padding ?? FREE_MARK_DEFAULTS.padding;
+
+  return typeof padding === "number" ? [padding, padding] : [padding[0], padding[1]];
+}
+
+/** Os cantos do marca-texto (sem escolha: 4). */
+export function freeMarkRadius(mark: FreeMark): number {
+  return mark.radius ?? FREE_MARK_DEFAULTS.radius;
+}
+
+/** Troca um lado do respiro (0 = em cima e embaixo, 1 = dos lados): o padrão [2, 6] sai e [n, n] vira n. */
+export function withFreeMarkPadding(mark: FreeMark, side: 0 | 1, value: number): FreeMark {
+  const padding = freeMarkPadding(mark);
+  const { padding: unused, ...rest } = mark;
+
+  void unused;
+  padding[side] = value;
+
+  if (padding[0] === FREE_MARK_DEFAULTS.padding[0] && padding[1] === FREE_MARK_DEFAULTS.padding[1]) {
+    return rest;
+  }
+
+  return { ...rest, padding: padding[0] === padding[1] ? padding[0] : padding };
+}
+
+/** Troca os cantos do marca-texto: o padrão 4 sai. */
+export function withFreeMarkRadius(mark: FreeMark, radius: number): FreeMark {
+  const { radius: unused, ...rest } = mark;
+
+  void unused;
+
+  return radius === FREE_MARK_DEFAULTS.radius ? rest : { ...rest, radius };
 }
 
 /** Troca o tipo de uma camada de fundo mantendo as cores (Imagem precisa de um arquivo). */
@@ -1854,9 +1997,13 @@ const TEXT_STYLE_FIELDS: Record<string, string> = {
   paint: "cor-texto",
   shadow: "sombra-texto",
   size: "tamanho-texto",
+  stroke: "contorno",
   uppercase: "maiusculas",
   weight: "peso"
 };
+
+/** Os campos do Contorno (L6b): a espessura e a cor; o resto, o grupo (a chave liga e desliga). */
+const STROKE_FIELDS: Record<string, string> = { color: "contorno-cor", width: "contorno-espessura" };
 
 const BOX_STYLE_FIELDS: Record<string, string> = {
   backdropBlur: "desfoque-fundo",
@@ -1905,7 +2052,7 @@ function nodeTarget(node: FreeNode, rest: string[]): FreeInspectorTarget {
   const content = (field: string): FreeInspectorTarget => ({ fieldId: freeFieldId(id, field), nodeId: id, tab: "content" });
   const style = (field: string): FreeInspectorTarget => ({ fieldId: freeFieldId(id, field), nodeId: id, tab: "style" });
   const advanced = (field: string): FreeInspectorTarget => ({ fieldId: freeFieldId(id, field), nodeId: id, tab: "advanced" });
-  const [head, second] = rest;
+  const [head, second, third] = rest;
 
   switch (head) {
     case undefined:
@@ -1943,7 +2090,7 @@ function nodeTarget(node: FreeNode, rest: string[]): FreeInspectorTarget {
     case "gap":
       return content("espaco");
     case "textStyle":
-      return style(TEXT_STYLE_FIELDS[second ?? "font"] ?? "fonte");
+      return second === "stroke" ? style(STROKE_FIELDS[third ?? ""] ?? "contorno") : style(TEXT_STYLE_FIELDS[second ?? "font"] ?? "fonte");
     case "box":
       return second === "padding" ? advanced("respiro") : style(BOX_STYLE_FIELDS[second ?? "fill"] ?? "fundo");
     case "place": {
