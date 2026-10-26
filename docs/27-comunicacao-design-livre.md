@@ -410,7 +410,7 @@ Elementos (`type`):
 
 | Onde | Campos |
 |---|---|
-| `button` | `fill` (o fundo: uma pintura `solid`, `linear` ou `radial`, nunca `image`), `color` (a cor do texto), `borderColor` (a cor da borda; só aparece quando o botão tem `box.border`) |
+| `button` | `fill` (o fundo: uma pintura `solid`, `linear` ou `radial`, nunca `image`), `color` (a cor do texto), `borderColor` (a cor da borda; só aparece quando o botão tem `box.border` com `width` de 1 ou mais) |
 | `links` | `color` (a cor dos links) |
 
 Sem `hover`, o botão clareia um pouco quando o mouse passa. A cor do texto ao passar o mouse (`color`) só vai com a letra de cor sólida: no texto em degradê (`textStyle.paint` `linear` ou `radial`) ela não apareceria e é recusada; o fundo e a cor da borda valem com qualquer letra. Na tela de toque, sem mouse, as cores ao passar o mouse não aparecem.

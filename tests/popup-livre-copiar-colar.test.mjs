@@ -1161,7 +1161,7 @@ test("L6c: as instruções para a IA trazem as cores ao passar o mouse, o guia e
   // O contrato (9.3), os padrões (9.4), as regras (9.6), o celular (9.10) e o guia (9.8).
   assert.ok(FREE_AI_INSTRUCTIONS.includes("`hover` (as cores ao passar o mouse; o aluno que chega ao botão ou ao link pelo teclado vê as mesmas) só existe no Botão e nos Links"), "a chave");
   assert.ok(
-    FREE_AI_INSTRUCTIONS.includes("| `button` | `fill` (o fundo: uma pintura `solid`, `linear` ou `radial`, nunca `image`), `color` (a cor do texto), `borderColor` (a cor da borda; só aparece quando o botão tem `box.border`) |"),
+    FREE_AI_INSTRUCTIONS.includes("| `button` | `fill` (o fundo: uma pintura `solid`, `linear` ou `radial`, nunca `image`), `color` (a cor do texto), `borderColor` (a cor da borda; só aparece quando o botão tem `box.border` com `width` de 1 ou mais) |"),
     "o Botão"
   );
   assert.ok(FREE_AI_INSTRUCTIONS.includes("| `links` | `color` (a cor dos links) |"), "os Links");
