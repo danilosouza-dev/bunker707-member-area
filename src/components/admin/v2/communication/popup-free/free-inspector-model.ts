@@ -4,7 +4,8 @@
 // (com a faixa Ordem do L4a: o lugar de soltar, o foco que segue a camada e a imagem que acha a sua camada),
 // as paradas do degradê, os lados, as sombras com os atalhos, a largura do pop-up com a reescala, os pesos de cada
 // fonte, a conta da imagem (lado ate 1.600 px e as qualidades ate caber), o contorno e o marca-texto (L6b, com o
-// atalho "Só o contorno") e o mapa chave -> aba/campo (freeInspectorTargetOf).
+// atalho "Só o contorno"), as cores ao passar o mouse (L6c, withFreeHover) e o mapa chave -> aba/campo
+// (freeInspectorTargetOf).
 //
 // Modulo puro, imports relativos (tests/popup-livre-painel-modelo.test.mjs carrega direto pelo Node). Tudo aqui e
 // texto do produtor em portugues, sem palavra fora do vocabulario (testado).
@@ -28,6 +29,8 @@ import {
   type FreeBorder,
   type FreeArtboard,
   type FreeBox,
+  type FreeButtonHover,
+  type FreeButtonNode,
   type FreeClose,
   type FreeIconName,
   type FreeImageAsset,
@@ -36,6 +39,7 @@ import {
   type FreeFillPaint,
   type FreeId,
   type FreeLine,
+  type FreeLinksNode,
   type FreeMark,
   type FreeMobileNode,
   type FreeNode,
@@ -215,6 +219,30 @@ export const FREE_INSPECTOR_COPY = {
     strokeWidth: "Espessura",
     uppercase: "Maiúsculas",
     weight: "Peso"
+  },
+  /**
+   * Ao passar o mouse (L6c), no Estilo do Botão (Fundo, Cor do texto, Cor da borda) e dos Links (Cor). Cada campo sem
+   * escolha mostra a cor de sempre como ponto de partida; "Voltar ao padrão" tira a escolha. A chave "Ver com o mouse
+   * em cima" só muda o palco do editor (não salva e fica fora do histórico).
+   */
+  hover: {
+    borderColor: "Cor da borda",
+    /** Sem borda, a cor da borda não aparece (o campo fica parado enquanto não tem cor própria). */
+    borderNone: "Escolha uma borda em Borda para mudar a cor dela.",
+    buttonDefault: "Sem cores próprias, o botão clareia um pouco quando o mouse passa.",
+    color: "Cor do texto",
+    /** Com a letra em degradê, a cor do texto ao passar o mouse não aparece (o schema recusa). */
+    colorGradient: "Com o texto em degradê, a cor ao passar o mouse não muda o texto.",
+    fill: "Fundo",
+    linksColor: "Cor",
+    note: "Vale também quando o aluno chega pelo teclado. No celular não tem mouse.",
+    preview: "Ver com o mouse em cima",
+    previewEmpty: "Escolha uma cor acima para ver aqui.",
+    previewNote: "Só para você ver aqui. Não muda o pop-up.",
+    reset: "Voltar ao padrão",
+    /** O nome falado de cada "Voltar ao padrão" (o texto na tela é o mesmo nos três). */
+    resetLabel: (field: string) => `${field}: voltar ao padrão`,
+    title: "Ao passar o mouse"
   },
   fill: {
     add: "Camada de fundo",
@@ -1391,6 +1419,118 @@ export function withFreeMarkRadius(mark: FreeMark, radius: number): FreeMark {
   return radius === FREE_MARK_DEFAULTS.radius ? rest : { ...rest, radius };
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * Cores ao passar o mouse (L6c)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O Botão e os Links: os únicos elementos com cores ao passar o mouse (os que recebem clique). */
+export type FreeHoverNode = FreeButtonNode | FreeLinksNode;
+
+/** O que muda ao passar o mouse; uma chave com `undefined` volta ao padrão. */
+export type FreeHoverPatch = FreePatch<FreeButtonHover>;
+
+/** Os campos do "Ao passar o mouse" no Estilo (`livre-<id>-<campo>`): a seção, cada cor e a chave da prévia. */
+export const FREE_HOVER_FIELDS = {
+  borderColor: "passar-mouse-borda",
+  color: "passar-mouse-cor",
+  fill: "passar-mouse-fundo",
+  group: "passar-mouse",
+  preview: "passar-mouse-ver"
+} as const;
+
+/** As cores que cada tipo aceita: os Links só mudam a cor (sem fundo e sem borda ao passar o mouse). */
+const HOVER_KEYS: Record<FreeHoverNode["type"], readonly (keyof FreeButtonHover)[]> = { button: ["borderColor", "color", "fill"], links: ["color"] };
+
+export function isFreeHoverNode(node: FreeNode | null | undefined): node is FreeHoverNode {
+  return node?.type === "button" || node?.type === "links";
+}
+
+/** O elemento tem alguma cor própria ao passar o mouse (sem nenhuma, o botão só clareia e os Links sublinham). */
+export function freeHasHover(node: FreeNode | null | undefined): boolean {
+  return isFreeHoverNode(node) && node.hover !== undefined && Object.values(node.hover).some((value) => value !== undefined);
+}
+
+/**
+ * Muda as cores ao passar o mouse do Botão ou dos Links, no molde de withFreeTextStyle: `undefined` volta ao padrão e
+ * o objeto vazio sai (como na forma canônica). Os Links ignoram o fundo e a cor da borda; os outros tipos não mudam.
+ */
+export function withFreeHover(design: PopupFreeDesign, id: FreeId, patch: FreeHoverPatch): PopupFreeDesign {
+  return updateFreeNode(design, id, (node) => {
+    if (!isFreeHoverNode(node)) {
+      return node;
+    }
+
+    const keys: readonly string[] = HOVER_KEYS[node.type];
+    const allowed = Object.fromEntries(Object.entries(patch).filter(([key]) => keys.includes(key))) as FreeHoverPatch;
+
+    if (Object.keys(allowed).length === 0) {
+      return node;
+    }
+
+    const hover = patchObject<FreeButtonHover>(node.hover, allowed);
+    const { hover: unused, ...rest } = node;
+
+    void unused;
+
+    return (hover ? { ...rest, hover } : rest) as FreeNode;
+  });
+}
+
+/**
+ * O que cada campo do "Ao passar o mouse" mostra: a cor própria ou, sem ela, a de sempre como ponto de partida (nada
+ * disso vai para o design até mudar). O fundo: a camada de cor ou degradê mais de cima, ou branco; a letra: a cor dela
+ * (a primeira do degradê), sem o alfa 00 do texto vazado, que ao passar o mouse pode ganhar cor; a borda: a dela, ou
+ * branco.
+ */
+export function freeHoverFieldValues(node: FreeHoverNode): { borderColor: HexColor; color: HexColor; fill: FreeTextPaint } {
+  const hover: FreeButtonHover = node.hover ?? {};
+  const letter = freePaintBaseColor(freeTextStyleOf(node).paint) ?? "#ffffff";
+  const top = node.box?.fill?.find((layer): layer is FreeTextPaint => layer.kind === "solid" || layer.kind === "linear" || layer.kind === "radial");
+
+  return {
+    borderColor: hover.borderColor ?? node.box?.border?.color ?? "#ffffff",
+    color: hover.color ?? (letter.length === 9 && letter.slice(7) === "00" ? opaque(letter) : letter),
+    fill: hover.fill ?? top ?? { color: "#ffffff", kind: "solid" }
+  };
+}
+
+/**
+ * Por que a Cor do texto ao passar o mouse (a Cor, nos Links) fica parada: com a letra em degradê ela não apareceria e
+ * o schema recusa. Com a cor já escolhida (colada, ou de antes de a letra virar degradê), o campo fica livre para
+ * mudar e para voltar ao padrão, e o erro do schema aparece nele. null = livre.
+ */
+export function freeHoverColorDisabledReason(node: FreeHoverNode): string | null {
+  return node.hover?.color === undefined && freeTextStyleOf(node).paint.kind !== "solid" ? FREE_INSPECTOR_COPY.hover.colorGradient : null;
+}
+
+/**
+ * A nota da Cor da borda ao passar o mouse: sem borda, ela não aparece. O campo fica parado enquanto não tem cor
+ * própria; com cor (a borda tirada depois), fica livre para voltar ao padrão, com a nota. null = o botão tem borda.
+ */
+export function freeHoverBorderNote(node: FreeHoverNode): string | null {
+  return node.type === "button" && !node.box?.border ? FREE_INSPECTOR_COPY.hover.borderNone : null;
+}
+
+/** Por que a chave "Ver com o mouse em cima" fica parada: sem cor própria, o palco não tem o que mostrar. null = livre. */
+export function freeHoverPreviewDisabledReason(node: FreeNode): string | null {
+  return freeHasHover(node) ? null : FREE_INSPECTOR_COPY.hover.previewEmpty;
+}
+
+/**
+ * A chave "Ver com o mouse em cima" (não salva, fora do histórico) depois de uma mudança no editor: continua ligada só
+ * com o mesmo elemento escolhido sozinho, com alguma cor própria e com o painel do elemento aberto. Volta ao normal ao
+ * trocar de elemento, com vários escolhidos, no Revisar e quando a última cor volta ao padrão (ou sai pelo Ctrl + Z).
+ * null = desligada.
+ */
+export function freeHoverPreviewAfter(previewId: FreeId | null, now: { activeId: FreeId | null; hasHover: boolean; many: boolean; panel: "inspector" | "review" }): FreeId | null {
+  return previewId !== null && previewId === now.activeId && now.hasHover && !now.many && now.panel === "inspector" ? previewId : null;
+}
+
+/** A chave (de erro ou de dica) é do "Ao passar o mouse" de um elemento: `nodes.<id>.hover...`, com ou sem "freeDesign.". */
+export function freeIsHoverKey(key: string): boolean {
+  return /^(?:freeDesign\.)?nodes\.[^.]+\.hover(?:\.|$)/.test(key);
+}
+
 /** Troca o tipo de uma camada de fundo mantendo as cores (Imagem precisa de um arquivo). */
 export function freeFillPaintOfKind(kind: FreeFillPaintKind, current: FreeFillPaint, imageAsset: FreeId | null): FreeFillPaint | null {
   if (kind === current.kind) {
@@ -2091,6 +2231,22 @@ function nodeTarget(node: FreeNode, rest: string[]): FreeInspectorTarget {
       return content("espaco");
     case "textStyle":
       return second === "stroke" ? style(STROKE_FIELDS[third ?? ""] ?? "contorno") : style(TEXT_STYLE_FIELDS[second ?? "font"] ?? "fonte");
+    case "hover":
+      // As cores ao passar o mouse (L6c, crítica C12): cada uma no campo dela no Estilo (nunca o Conteúdo); a chave
+      // do objeto inteiro, e nos Links o que não é a cor, na seção.
+      if (!isFreeHoverNode(node)) {
+        return content(freeFirstContentField(node));
+      }
+
+      return style(
+        second === "color"
+          ? FREE_HOVER_FIELDS.color
+          : node.type === "button" && second === "fill"
+            ? FREE_HOVER_FIELDS.fill
+            : node.type === "button" && second === "borderColor"
+              ? FREE_HOVER_FIELDS.borderColor
+              : FREE_HOVER_FIELDS.group
+      );
     case "box":
       return second === "padding" ? advanced("respiro") : style(BOX_STYLE_FIELDS[second ?? "fill"] ?? "fundo");
     case "place": {
