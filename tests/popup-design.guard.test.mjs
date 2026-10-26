@@ -357,8 +357,11 @@ test("a guarda da escala lê aspas duplas e simples, template literals e os argu
   // Comentarios nao contam (nem com a classe errada escrita nele); uma escala sem transicao tambem nao (nao anima).
   assert.deepEqual(scaleProblemsOf(`// "${wrong} ${cresce}"\n/* '${wrong} ${open}' */\nconst x = 1;`), []);
   assert.deepEqual(scaleProblemsOf(`const classe = cn("duration-150", "${cresce}");`), []);
-  // Um .ts com tipo generico le como .ts (sem JSX), e o texto continua contando.
-  assert.equal(scaleProblemsOf(`const lista = new Set<string>(["${wrong} ${cresce}"]);`, "modelo.ts").length, 1);
+  // Um .ts le como .ts (sem JSX): a afirmacao de tipo `<string>` e o generico de arrow `<T>` so valem em TS; lidos como
+  // TSX, viram erro de sintaxe que o parser recupera em silencio e o texto some. Com o nome .tsx, a amostra nao conta.
+  const soEmTs = `const pega = <T>(valor: T) => valor;\nconst classe = <string>"${wrong} ${cresce}";`;
+  assert.equal(scaleProblemsOf(soEmTs, "modelo.ts").length, 1);
+  assert.equal(scaleProblemsOf(soEmTs, "modelo.tsx").length, 0);
 });
 
 test("a escala anima em todo o src/: o painel do sino, o icone de retomar de Minhas compras e tres menus do admin listam scale", async () => {
@@ -417,7 +420,7 @@ test("a escala anima em todo o src/: o painel do sino, o icone de retomar de Min
   for (const [path, scaleClass, transition] of places) {
     assert.ok(files.includes(new URL(path, root).href), `${path} entra na conta de src/`);
 
-    const classes = classLiteralsOf(await readFile(new URL(path, root), "utf8")).filter((text) => text.split(/\s+/).includes(scaleClass));
+    const classes = classLiteralsOf(await readFile(new URL(path, root), "utf8"), path).filter((text) => text.split(/\s+/).includes(scaleClass));
 
     assert.equal(classes.length, 1, `${path}: uma classe com ${scaleClass}`);
 
