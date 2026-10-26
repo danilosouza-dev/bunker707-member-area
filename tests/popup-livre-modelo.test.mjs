@@ -1016,6 +1016,105 @@ test("dicas: contraste, texto pequeno, texto no celular, ordem de leitura, texto
   assert.deepEqual(checks.popupFreeHints(valid(design([{ hidden: true, id: "t", lines: [[{ text: "Oi" }]], textStyle: { size: 10 }, type: "text" }]))).filter((hint) => hint.nodeId === "t"), []);
 });
 
+/* L6b: o contraste com o contorno e com o marca-texto (docs/27 §9.8; críticas C2 e C22) */
+
+const LETRA_VAZADA = { color: "#ffffff00", kind: "solid" };
+const contrastKeys = (value, input) => checks.popupFreeHints(valid(value), input).filter((hint) => hint.kind === "contrast").map((hint) => hint.key);
+
+test("L6b, Revisar: o texto vazado com contorno de 2 ou mais não acusa contraste; com 1, só a cor conta e acusa", () => {
+  const titulo = (stroke) => ({ id: "titulo", lines: [[{ text: "Semana" }]], textStyle: { paint: LETRA_VAZADA, size: 40, stroke }, type: "heading" });
+
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#ffffff", width: 2 })])), [], "contorno branco de 2 no fundo escuro: lê bem");
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#ffffff", width: 8 })])), []);
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#ffffff", width: 1 })])), ["nodes.titulo.textStyle.paint"], "com 1 px, só a cor (transparente) conta");
+  // O contorno de 2 também precisa contrastar: escuro no fundo escuro acusa.
+  assert.deepEqual(contrastKeys(design([titulo({ color: "#202020", width: 2 })])), ["nodes.titulo.textStyle.paint"]);
+
+  // Em cada cor do fundo vale o melhor entre a letra e o contorno: letra branca com contorno preto lê no degradê do
+  // preto ao branco; sem o contorno (ou com 1 px), o lado branco acusa.
+  const degrade = { artboard: { fill: [{ kind: "linear", stops: [{ at: 0, color: "#000000" }, { at: 100, color: "#ffffff" }] }] } };
+  const branco = (stroke) => ({ id: "texto", lines: [[{ text: "Leia" }]], textStyle: stroke ? { stroke } : undefined, type: "text" });
+  // Os Links brancos, sem contorno, acusam no lado branco; aqui so o Texto importa.
+  const doTexto = (value) => contrastKeys(value).filter((key) => key.startsWith("nodes.texto."));
+
+  assert.deepEqual(doTexto(design([branco({ color: "#000000", width: 2 })], degrade)), []);
+  assert.deepEqual(doTexto(design([branco({ color: "#000000", width: 1 })], degrade)), ["nodes.texto.textStyle.paint"]);
+  assert.deepEqual(doTexto(design([branco(null)], degrade)), ["nodes.texto.textStyle.paint"]);
+});
+
+test("L6b, Revisar: a parte vazada se lê pelo contorno dela ou do elemento; trocar o contorno por um ruim acusa na parte", () => {
+  const linhas = (style) => [[{ text: "Semana " }, { style, text: "de revisão" }]];
+  const titulo = (style, textStyle = { size: 40 }) => ({ id: "titulo", lines: linhas(style), textStyle, type: "heading" });
+
+  // A parte vazada com contorno próprio de 2: lê. Com 1: a cor da parte acusa, na chave da cor dela.
+  assert.deepEqual(contrastKeys(design([titulo({ paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } })])), []);
+  assert.deepEqual(contrastKeys(design([titulo({ paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 1 } })])), ["nodes.titulo.lines.0.1.style.paint"]);
+  // Sem contorno próprio, o do elemento vale para a parte (a parte não tira o contorno).
+  assert.deepEqual(contrastKeys(design([titulo({ paint: LETRA_VAZADA }, { size: 40, stroke: { color: "#ffffff", width: 3 } })])), []);
+
+  // Elemento vazado que lê pelo contorno; a parte só troca o contorno: por um de 1 px acusa na chave do contorno dela,
+  // por outro bom não acusa.
+  const vazado = { paint: LETRA_VAZADA, size: 40, stroke: { color: "#ffffff", width: 3 } };
+  assert.deepEqual(contrastKeys(design([titulo({ stroke: { color: "#ffffff", width: 1 } }, vazado)])), ["nodes.titulo.lines.0.1.style.stroke"]);
+  assert.deepEqual(contrastKeys(design([titulo({ stroke: { color: "#e5ff1f", width: 2 } }, vazado)])), []);
+  // Com o elemento já acusando, a parte que só troca o contorno não repete a dica.
+  const ruim = { paint: { color: "#202020", kind: "solid" }, size: 40 };
+  assert.deepEqual(contrastKeys(design([titulo({ stroke: { color: "#303030", width: 1 } }, ruim)])), ["nodes.titulo.textStyle.paint"]);
+});
+
+test("L6b, Revisar: a parte com marca-texto é medida contra ele, mesmo sem cor própria", () => {
+  const texto = (style, extra = {}) => ({ id: "texto", lines: [[{ text: "As aulas voltam com " }, { style, text: "exercícios novos" }]], type: "text", ...extra });
+
+  // Marca-texto claro sob o texto branco do elemento: acusa na chave do marca-texto.
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f" } })])), ["nodes.texto.lines.0.1.style.mark"]);
+  // Com uma letra escura, lê sobre ele (a mesma letra escura sem marca-texto acusaria contra o fundo escuro).
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } })])), []);
+  assert.deepEqual(contrastKeys(design([texto({ paint: { color: "#111111", kind: "solid" } })])), ["nodes.texto.lines.0.1.style.paint"]);
+  // A cor de partida da chave Marca-texto (o vermelho da marca) lê com o texto branco.
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e50914" } })])), []);
+
+  // Marca-texto transparente: composto sobre o fundo de fora (o escuro da prancheta).
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#ffffff26" } }, { textStyle: { paint: { color: "#d4d4d8", kind: "solid" } } })])), []);
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#ffffffcc" } })])), ["nodes.texto.lines.0.1.style.mark"]);
+
+  // Sobre uma imagem: o marca-texto sem transparência ainda dá para medir; o transparente, não.
+  const sobreImagem = { artboard: { fill: [{ asset: "img", kind: "image" }] }, assets: [imageAsset("img")] };
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f" } })], sobreImagem)), ["nodes.texto.lines.0.1.style.mark"]);
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1fff" }, paint: { color: "#111111", kind: "solid" } })], sobreImagem)), []);
+  assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f80" } })], sobreImagem)), []);
+});
+
+test("L6b, Revisar: o ícone do Selo e do Botão usa a cor da letra; com a letra vazada, a dica diz que ele some", () => {
+  const vermelho = { fill: [{ color: "#e50914", kind: "solid" }], padding: [4, 10] };
+  const selo = (extra) => ({ box: vermelho, id: "selo", label: "Novidade", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } }, type: "badge", ...extra });
+  const botao = (extra) => ({ action: { kind: "close" }, box: vermelho, id: "fechar", label: "Agora não", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } }, type: "button", ...extra });
+  const dicas = (value) => checks.popupFreeHints(valid(value)).filter((hint) => hint.kind === "contrast");
+
+  for (const [node, id] of [
+    [selo({ icon: "sparkles" }), "selo"],
+    [botao({ icon: { name: "arrow-right" } }), "fechar"]
+  ]) {
+    assert.deepEqual(dicas(design([node])), [{ key: `nodes.${id}.textStyle.paint`, kind: "contrast", message: checks.POPUP_FREE_HINT_MESSAGES.iconHidden, nodeId: id }], id);
+  }
+
+  // Sem ícone, a letra vazada lê pelo contorno; com a letra de cor, o ícone aparece.
+  assert.deepEqual(dicas(design([selo({}), botao({})])), []);
+  assert.deepEqual(dicas(design([selo({ icon: "sparkles", textStyle: { stroke: { color: "#000000", width: 2 } } })])), []);
+  // A letra vazada que já acusa (contorno de 1 px) fica com a dica de contraste de sempre, sem repetir a do ícone.
+  const fino = dicas(design([selo({ icon: "sparkles", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 1 } } })]));
+  assert.equal(fino.length, 1);
+  assert.ok(fino[0].message.startsWith("Contraste baixo ("));
+});
+
+test("L6b, Revisar: o exemplo Contorno e marca-texto do docs/27 §9.9 não acende dica de contraste", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const section = doc.slice(doc.indexOf("## 9. Contrato do JSON"), doc.indexOf("## 10."));
+  const block = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => match[1]).find((item) => item.includes('"mark"'));
+
+  assert.ok(block, "o exemplo com marca-texto está no §9.9");
+  assert.deepEqual(checks.popupFreeHints(valid(JSON.parse(block)), { content: { ctaLabel: "Saiba mais" } }), [], "nem contraste, nem texto no celular");
+});
+
 test("vocabulário das frases, dos modelos e das dicas", () => {
   const forbidden = /\b(campanha|público|audiência|evento|oferta|gatilho|trigger|sessão|impressão|home|automação|lembrete|layout|template|fluxo)/i;
   const texts = [
