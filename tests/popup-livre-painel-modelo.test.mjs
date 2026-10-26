@@ -1328,6 +1328,15 @@ test("L6b: Outro estilo na seleção com contorno e marca-texto: a parte guarda 
   const value = design([{ id: "titulo", lines: full, type: "heading" }, LINKS]);
   assert.deepEqual(model.findFreeNode(value, "titulo").node.lines, full);
   assert.ok(schema.parsePopupFreeDesign(value));
+
+  // O painel liga cada chave com um onApply (um passo das partes) e o contorno do elemento prende a chave da parte.
+  const fields = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+  assert.match(fields, /onCheckedChange=\{\(on\) => onApply\(freeStrokeSwitchPatch\(style, on\)\)\}/);
+  assert.match(fields, /disabled=\{disabled \|\| base\.stroke !== undefined\}/);
+  assert.match(fields, /onCheckedChange=\{\(on\) => onApply\(\{ mark: on \? \{ color: FREE_MARK_DEFAULT_COLOR \} : undefined \}\)\}/);
+  for (const label of ["C.span.stroke", "C.span.strokeWidth", "C.span.strokeColor", "C.span.mark", "C.span.markColor", "C.span.markPaddingY", "C.span.markPaddingX", "C.span.markRadius"]) {
+    assert.ok(fields.includes(`label={${label}}`), label);
+  }
 });
 
 test("L6b: respiro e cantos do marca-texto: os padrões saem e [n, n] vira n, como na forma canônica", () => {

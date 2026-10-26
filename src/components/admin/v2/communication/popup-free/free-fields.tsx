@@ -40,6 +40,7 @@ import {
   FREE_ICON_LABELS,
   FREE_INSPECTOR_COPY,
   FREE_LINE_STYLE_OPTIONS,
+  FREE_MARK_DEFAULT_COLOR,
   FREE_RADIAL_EXTENT_OPTIONS,
   FREE_RADIAL_SHAPE_OPTIONS,
   FREE_SPAN_PAINT_OPTIONS,
@@ -58,6 +59,8 @@ import {
   freeGlowShadow,
   freeImageAssets,
   freeLinesText,
+  freeMarkPadding,
+  freeMarkRadius,
   freeRadiusFour,
   freeRadiusFromFour,
   freeRangeHasOwnStyle,
@@ -67,6 +70,7 @@ import {
   freeSidesFromFour,
   freeSidesUniform,
   freeStopsPreview,
+  freeStrokeSwitchPatch,
   freeStyledParts,
   freeTextAreaChange,
   freeTextPaintOfKind,
@@ -80,6 +84,8 @@ import {
   setFreeStop,
   splitFreeSpanAtSelection,
   withFreeFillLayerAsset,
+  withFreeMarkPadding,
+  withFreeMarkRadius,
   type FreeFillPaintKind,
   type FreeFour,
   type FreeSpanStylePatch,
@@ -91,9 +97,9 @@ import { FREE_POINTER_MOUSE_AND_PEN, followFreePointer } from "./free-pointer-dr
 // unidade (NumberField do Base UI: arrastar no rotulo, setas e Shift = 10, a frase do limite), lados e cantos,
 // borda, sombras com os atalhos, paradas do degradê, pintura do texto, camadas de fundo (com a faixa Ordem do L4a:
 // arrastar a ficha ou Alt e as setas, docs/27 §13.9), grade de icones, escolher/enviar imagem, a fonte (o seletor e
-// o envio do Personalizado, sem mudar nada neles) e a area de texto com "Outro estilo na seleção" e as fichas das
-// partes. Tudo so com valores validados; nenhum texto do design em estilo (a faixa do degradê e as amostras das
-// camadas usam so cores hex e posicoes inteiras).
+// o envio do Personalizado, sem mudar nada neles) e a area de texto com "Outro estilo na seleção" (com o contorno e
+// o marca-texto da parte, L6b) e as fichas das partes. Tudo so com valores validados; nenhum texto do design em
+// estilo (a faixa do degradê e as amostras das camadas usam so cores hex e posicoes inteiras).
 
 const L = FREE_DESIGN_LIMITS;
 const C = FREE_INSPECTOR_COPY;
@@ -1469,7 +1475,10 @@ export function FreeFontField({
 /** O popover aberto: os trechos (por linha) que recebem o estilo; fica ao lado da area de texto. */
 type SpanEditing = { targets: FreeTextRange[] };
 
-/** O popover de estilo de uma parte: Cor do texto, Peso, Itálico, Tamanho, Fonte, Maiúsculas, Linha, Espaço. */
+/**
+ * O popover de estilo de uma parte: Cor do texto, Peso, Itálico, Tamanho, Fonte, Maiúsculas, Linha, Espaço, Contorno
+ * e Marca-texto (L6b). Cada mudança é um `onApply` (um passo; os números juntam pela chave das partes).
+ */
 function SpanStylePanel({
   base,
   disabled,
@@ -1493,6 +1502,9 @@ function SpanStylePanel({
 }) {
   const style = freeRangeStyle(lines, targets[0], base);
   const own = freeRangeHasOwnStyle(lines, targets, base);
+  const stroke = style.stroke;
+  const mark = style.mark;
+  const markPadding = mark ? freeMarkPadding(mark) : null;
 
   return (
     <div className="flex w-[300px] max-w-[calc(100vw-32px)] flex-col gap-4 p-4">
@@ -1527,6 +1539,64 @@ function SpanStylePanel({
         unit="em"
         value={style.letterSpacing}
       />
+      <div className="flex min-w-0 flex-col gap-3">
+        {/* A parte poe ou troca o contorno do elemento, mas nao tira: com contorno no elemento, a chave fica ligada. */}
+        <AdminSwitch
+          checked={stroke !== undefined}
+          description={base.stroke ? C.span.strokeFromElement : undefined}
+          disabled={disabled || base.stroke !== undefined}
+          id={`${id}-contorno`}
+          label={C.span.stroke}
+          onCheckedChange={(on) => onApply(freeStrokeSwitchPatch(style, on))}
+        />
+        {stroke ? (
+          <div className="flex min-w-0 flex-col gap-3 border-l-2 border-[var(--border-subtle)] pl-4">
+            <FreeNumberField bounds={L.textStroke} disabled={disabled} id={`${id}-contorno-espessura`} label={C.span.strokeWidth} onChange={(width) => onApply({ stroke: { ...stroke, width } })} unit={C.units.px} value={stroke.width} />
+            <ColorField disabled={disabled} id={`${id}-contorno-cor`} label={C.span.strokeColor} onChange={(color) => onApply({ stroke: { ...stroke, color } })} value={stroke.color} />
+          </div>
+        ) : null}
+      </div>
+      <div className="flex min-w-0 flex-col gap-3">
+        <AdminSwitch
+          checked={mark !== undefined}
+          disabled={disabled}
+          id={`${id}-marca-texto`}
+          label={C.span.mark}
+          onCheckedChange={(on) => onApply({ mark: on ? { color: FREE_MARK_DEFAULT_COLOR } : undefined })}
+        />
+        {mark && markPadding ? (
+          <div className="flex min-w-0 flex-col gap-3 border-l-2 border-[var(--border-subtle)] pl-4">
+            <ColorField disabled={disabled} id={`${id}-marca-texto-cor`} label={C.span.markColor} onChange={(color) => onApply({ mark: { ...mark, color } })} value={mark.color} />
+            <FreeNumberField
+              bounds={L.markPadding}
+              disabled={disabled}
+              id={`${id}-marca-texto-respiro-y`}
+              label={C.span.markPaddingY}
+              onChange={(value) => onApply({ mark: withFreeMarkPadding(mark, 0, value) })}
+              unit={C.units.px}
+              value={markPadding[0]}
+            />
+            <FreeNumberField
+              bounds={L.markPadding}
+              disabled={disabled}
+              id={`${id}-marca-texto-respiro-x`}
+              label={C.span.markPaddingX}
+              onChange={(value) => onApply({ mark: withFreeMarkPadding(mark, 1, value) })}
+              unit={C.units.px}
+              value={markPadding[1]}
+            />
+            <FreeNumberField
+              bounds={L.markRadius}
+              disabled={disabled}
+              id={`${id}-marca-texto-cantos`}
+              label={C.span.markRadius}
+              onChange={(radius) => onApply({ mark: withFreeMarkRadius(mark, radius) })}
+              unit={C.units.px}
+              value={freeMarkRadius(mark)}
+            />
+          </div>
+        ) : null}
+      </div>
       <div className="flex min-w-0 flex-wrap gap-2">
         <Button className={freeSmallButton} disabled={disabled || !own} onClick={() => onApply(null)} type="button" variant="secondary">
           {C.span.reset}
