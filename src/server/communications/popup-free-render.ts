@@ -75,6 +75,9 @@ export function freeTextDefaultsOf(type: FreeNode["type"]): Readonly<FreeResolve
   return type === "badge" || type === "button" || type === "heading" || type === "links" ? FREE_TEXT_DEFAULTS[type] : FREE_TEXT_DEFAULTS.text;
 }
 
+/** O marca-texto de uma parte sem respiro nem cantos escolhidos (L6b): 2 px em cima e embaixo, 6 dos lados, cantos 4. */
+export const FREE_MARK_DEFAULTS: Readonly<{ padding: readonly [number, number]; radius: number }> = { padding: [2, 6], radius: 4 };
+
 /* ------------------------------------------------------------------------------------------------
  * Escala: px da prancheta em cqw do proprio cartao (encolhe junto no celular)
  * ---------------------------------------------------------------------------------------------- */

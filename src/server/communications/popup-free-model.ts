@@ -26,6 +26,7 @@ import {
 import {
   FREE_ARTBOARD_DEFAULTS,
   FREE_CLOSE_DEFAULTS,
+  FREE_MARK_DEFAULTS,
   FREE_MIN_FONT_PX,
   FREE_MIN_TOUCH_PX,
   freeFirstText,
@@ -39,6 +40,8 @@ import {
 } from "./popup-free-render";
 
 export { FREE_MIN_FONT_PX, FREE_MIN_TOUCH_PX };
+/** Respiro [2, 6] e cantos 4 do marca-texto sem valor proprio; moram em popup-free-render.ts (o cartao usa). */
+export { FREE_MARK_DEFAULTS };
 /** O design do aparelho (o celular com os valores proprios por cima); mora em popup-free-render.ts (o cartao usa). */
 export { resolveFreeForDevice };
 
@@ -126,6 +129,16 @@ export type FreePlace = FreeAbsolutePlace | FreeFlowPlace;
 
 /* Texto ----------------------------------------------------------------------------------------- */
 
+/** Contorno das letras (L6b): cor e espessura em px da prancheta (1 a 8; no desenho nunca abaixo de 1 px real). */
+export type FreeTextStroke = { color: HexColor; width: number };
+
+/**
+ * Marca-texto de uma parte do Titulo ou do Texto (L6b): o fundo atras das letras, um por linha quando a parte quebra.
+ * Respiro (`padding`: um numero ou [vertical, horizontal]) e cantos (`radius`) de 0 a 24 px da prancheta; sem eles,
+ * FREE_MARK_DEFAULTS. Nunca no estilo do elemento inteiro.
+ */
+export type FreeMark = { color: HexColor; padding?: number | [number, number]; radius?: number };
+
 export type FreeTextStyle = {
   /** Nos Links: alinha a linha dos links (vira o `justifyContent` dela). */
   align?: "center" | "left" | "right";
@@ -141,11 +154,16 @@ export type FreeTextStyle = {
   shadow?: { blur: number; color: HexColor; x: number; y: number };
   /** px (10 a 160). */
   size?: number;
+  /** Contorno das letras; texto vazado = `paint` solida com alfa 00 e contorno. A parte poe ou troca, mas nao tira. */
+  stroke?: FreeTextStroke;
   uppercase?: boolean;
   weight?: PopupFontWeight;
 };
 
-export type FreeSpanStyle = Pick<FreeTextStyle, "decoration" | "font" | "italic" | "letterSpacing" | "paint" | "size" | "uppercase" | "weight">;
+/** O que uma parte muda no estilo do elemento; `mark` (marca-texto) so existe na parte. */
+export type FreeSpanStyle = Pick<FreeTextStyle, "decoration" | "font" | "italic" | "letterSpacing" | "paint" | "size" | "stroke" | "uppercase" | "weight"> & {
+  mark?: FreeMark;
+};
 /** Uma parte do texto com estilo proprio (o texto nao e aparado: o espaco entre partes conta). */
 export type FreeSpan = { style?: FreeSpanStyle; text: string };
 /** Uma linha = partes lado a lado. */
@@ -337,6 +355,8 @@ export const FREE_DESIGN_LIMITS = {
   letterSpacing: { max: 1, min: -0.2 },
   lineHeight: { max: 2.5, min: 0.7 },
   margin: { max: 400, min: -400 },
+  markPadding: { max: 24, min: 0 }, // respiro do marca-texto (L6b)
+  markRadius: { max: 24, min: 0 }, // cantos do marca-texto (L6b)
   minHeight: { max: 1600, min: 0 },
   name: 40,
   nodes: 32,
@@ -354,6 +374,7 @@ export const FREE_DESIGN_LIMITS = {
   spansPerLine: 6,
   stops: { max: 5, min: 2 },
   textLines: 12,
+  textStroke: { max: 8, min: 1 }, // espessura do contorno das letras (L6b)
   textTotal: 1200,
   uploadedFonts: 4,
   videos: 1,
@@ -795,6 +816,22 @@ function canonicalTextPaint(paint: FreeTextPaint): FreeTextPaint {
   return canonicalPaint(paint);
 }
 
+function canonicalStroke(stroke: FreeTextStroke): FreeTextStroke {
+  return { color: lower(stroke.color), width: int(stroke.width) };
+}
+
+/** Marca-texto sem o respiro [2, 6] e os cantos 4 padrao; o respiro [n, n] vira n. */
+function canonicalMark(mark: FreeMark): FreeMark {
+  const padding = mark.padding === undefined ? undefined : (canonicalSides(mark.padding) as number | [number, number]);
+  const radius = mark.radius === undefined ? undefined : int(mark.radius);
+
+  return sorted({
+    color: lower(mark.color),
+    padding: padding === undefined || same(padding, FREE_MARK_DEFAULTS.padding) ? undefined : padding,
+    radius: radius === undefined || radius === FREE_MARK_DEFAULTS.radius ? undefined : radius
+  } satisfies FreeMark);
+}
+
 /** Estilo de texto do elemento sem o que e igual ao padrao do tipo. */
 function canonicalTextStyle(style: FreeTextStyle | undefined, type: FreeNodeType): FreeTextStyle | undefined {
   if (!style) {
@@ -817,6 +854,7 @@ function canonicalTextStyle(style: FreeTextStyle | undefined, type: FreeNodeType
     paint: paint === undefined || same(paint, defaults.paint) ? undefined : paint,
     shadow: style.shadow ? sorted({ blur: int(style.shadow.blur), color: lower(style.shadow.color), x: int(style.shadow.x), y: int(style.shadow.y) }) : undefined,
     size: size === undefined || size === defaults.size ? undefined : size,
+    stroke: style.stroke ? canonicalStroke(style.stroke) : undefined,
     uppercase: style.uppercase ? true : undefined,
     weight: style.weight === undefined || style.weight === defaults.weight ? undefined : style.weight
   } satisfies FreeTextStyle);
@@ -836,12 +874,16 @@ function resolvedElementStyle(style: FreeTextStyle | undefined, type: FreeNodeTy
     letterSpacing: own.letterSpacing === undefined ? defaults.letterSpacing : round2(own.letterSpacing),
     paint: own.paint ? canonicalTextPaint(own.paint) : defaults.paint,
     size: own.size === undefined ? defaults.size : int(own.size),
+    stroke: own.stroke ? canonicalStroke(own.stroke) : undefined,
     uppercase: own.uppercase === true,
     weight: own.weight ?? defaults.weight
   };
 }
 
-/** Estilo da parte sem o que ja e igual ao estilo do elemento (a parte so guarda o que muda). */
+/**
+ * Estilo da parte sem o que ja e igual ao estilo do elemento (a parte so guarda o que muda). O contorno igual ao do
+ * elemento sai; o marca-texto, que so a parte tem, sai sem os padroes.
+ */
 function canonicalSpanStyle(style: FreeSpanStyle | undefined, base: ReturnType<typeof resolvedElementStyle>): FreeSpanStyle | undefined {
   if (!style) {
     return undefined;
@@ -851,13 +893,16 @@ function canonicalSpanStyle(style: FreeSpanStyle | undefined, base: ReturnType<t
   const paint = style.paint ? canonicalTextPaint(style.paint) : undefined;
   const letterSpacing = style.letterSpacing === undefined ? undefined : round2(style.letterSpacing);
   const size = style.size === undefined ? undefined : int(style.size);
+  const stroke = style.stroke ? canonicalStroke(style.stroke) : undefined;
   const value = sorted({
     decoration: style.decoration === undefined || style.decoration === base.decoration ? undefined : style.decoration,
     font: font === undefined || same(font, base.font) ? undefined : font,
     italic: style.italic === undefined || style.italic === base.italic ? undefined : style.italic,
     letterSpacing: letterSpacing === undefined || letterSpacing === base.letterSpacing ? undefined : letterSpacing,
+    mark: style.mark ? canonicalMark(style.mark) : undefined,
     paint: paint === undefined || same(paint, base.paint) ? undefined : paint,
     size: size === undefined || size === base.size ? undefined : size,
+    stroke: stroke === undefined || same(stroke, base.stroke) ? undefined : stroke,
     uppercase: style.uppercase === undefined || style.uppercase === base.uppercase ? undefined : style.uppercase,
     weight: style.weight === undefined || style.weight === base.weight ? undefined : style.weight
   } satisfies FreeSpanStyle);
@@ -1267,8 +1312,9 @@ function clamp(value: number, bounds: { max: number; min: number }) {
 
 /**
  * Troca a largura e multiplica por nova/antiga: X, Y, largura, altura, respiros, margens, espacos, cantos,
- * sombras, desfoques, fontes, icones, linha e espaco (inteiros, dentro dos limites), e os mesmos valores do
- * celular (devices.mobile). Borda fica em px.
+ * sombras, desfoques, fontes, contorno das letras, respiro e cantos do marca-texto (com os padroes preenchidos antes),
+ * icones, linha e espaco (inteiros, dentro dos limites), e os mesmos valores do celular (devices.mobile). Borda fica
+ * em px.
  */
 export function rescaleFreeDesign(design: PopupFreeDesign, width: number): PopupFreeDesign {
   const current = resolveFreeArtboard(design).width;
@@ -1311,6 +1357,23 @@ export function rescaleFreeDesign(design: PopupFreeDesign, width: number): Popup
 
     if (shadow) {
       (next as FreeTextStyle).shadow = { ...shadow, blur: scale(shadow.blur, L.shadowBlur), x: scale(shadow.x, L.shadowOffset), y: scale(shadow.y, L.shadowOffset) };
+    }
+
+    if (style.stroke) {
+      next.stroke = { ...style.stroke, width: scale(style.stroke.width, L.textStroke) };
+    }
+
+    const mark = (style as FreeSpanStyle).mark;
+
+    if (mark) {
+      // Os padroes entram antes de escalar (o respiro [2, 6] e os cantos 4 crescem e encolhem com o resto).
+      const padding = mark.padding ?? FREE_MARK_DEFAULTS.padding;
+
+      (next as FreeSpanStyle).mark = {
+        ...mark,
+        padding: typeof padding === "number" ? scale(padding, L.markPadding) : [scale(padding[0], L.markPadding), scale(padding[1], L.markPadding)],
+        radius: scale(mark.radius ?? FREE_MARK_DEFAULTS.radius, L.markRadius)
+      };
     }
 
     return next;
