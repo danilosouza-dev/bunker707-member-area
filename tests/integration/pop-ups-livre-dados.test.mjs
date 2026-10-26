@@ -923,6 +923,13 @@ test("L6b: o marca-texto no estilo do elemento, um respiro ou uma espessura fora
       "freeDesign.nodes.titulo.lines.0.2.style.mark.padding.1"
     ],
     [noTitulo((node) => ({ ...node, textStyle: { ...node.textStyle, stroke: { color: "#ffffff", width: 9 } } })), "freeDesign.children.0.textStyle.stroke.width", "Use de 1 a 8.", "freeDesign.nodes.titulo.textStyle.stroke.width"],
+    // O contorno nunca com a letra em degradê: o contorno cobre a cor (a chave é a do contorno do elemento).
+    [
+      noTitulo((node) => ({ ...node, textStyle: { ...node.textStyle, paint: { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] } } })),
+      "freeDesign.children.0.textStyle.stroke",
+      POPUP_FREE_MESSAGES.strokeGradient,
+      "freeDesign.nodes.titulo.textStyle.stroke"
+    ],
     // Cor e pintura nunca por aparelho (L27): o contorno nao tem versao do celular.
     [
       { ...livreComContornoEMarcaTexto(), devices: { mobile: { nodes: { titulo: { textStyle: { stroke: { color: "#000000", width: 1 } } } } } } },

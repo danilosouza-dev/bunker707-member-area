@@ -1583,6 +1583,49 @@ test("L6b: contorno e marca-texto fora do limite ou fora do lugar dão a frase d
   hasIssue({ children: [{ id: "links", textStyle: { mark: { color: "#e5ff1f" } }, type: "links" }], mode: "free", version: 1 }, "children.0.textStyle", M.design);
 });
 
+test("L6b: o contorno nunca vai com a letra em degradê (no elemento ou na parte, pela pintura dela ou herdada)", () => {
+  const degrade = { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] };
+  const circular = { kind: "radial", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }], x: 50, y: 50 };
+  const solida = { color: "#111111", kind: "solid" };
+  const at = "children.0.lines.0.1.style";
+  const recusado = (value, path) => {
+    hasIssue(value, path, M.strokeGradient);
+    assert.equal(issues(value).length, 1, `uma frase só: ${JSON.stringify(issues(value))}`);
+  };
+
+  assert.equal(M.strokeGradient, "Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.");
+
+  // No elemento: o degradê (linear ou circular) com contorno, em todo tipo com texto; a chave é a do contorno.
+  for (const paint of [degrade, circular]) {
+    recusado(design([{ ...heading("t"), textStyle: { paint, stroke: contorno(8, "#000000") } }]), "children.0.textStyle.stroke");
+  }
+
+  recusado(design([{ ...text("t"), textStyle: { paint: degrade, stroke: contorno(1) } }]), "children.0.textStyle.stroke");
+  recusado(design([{ id: "t", label: "Novo", textStyle: { paint: degrade, stroke: contorno() }, type: "badge" }]), "children.0.textStyle.stroke");
+  recusado(design([{ action: { kind: "close" }, id: "t", label: "Fechar", textStyle: { paint: degrade, stroke: contorno() }, type: "button" }]), "children.0.textStyle.stroke");
+  recusado({ children: [{ id: "links", textStyle: { paint: degrade, stroke: contorno() }, type: "links" }], mode: "free", version: 1 }, "children.0.textStyle.stroke");
+
+  // Na parte: o contorno dela sobre o degradê do elemento, ou sobre o degradê dela, recusa na chave do contorno; o
+  // degradê dela sob o contorno do elemento recusa na chave da cor (a parte não tem contorno próprio).
+  recusado(design([tituloComParte({ stroke: contorno() }, { paint: degrade })]), `${at}.stroke`);
+  recusado(design([tituloComParte({ paint: degrade, stroke: contorno() })]), `${at}.stroke`);
+  recusado(design([tituloComParte({ paint: circular }, { stroke: contorno() })]), `${at}.paint`);
+  recusado(design([{ ...text("t"), lines: [[{ text: "a " }, { style: { mark: { color: "#e5ff1f" }, paint: degrade, stroke: contorno(1) }, text: "b" }]] }]), "children.0.lines.0.1.style.stroke");
+
+  // Vale: o degradê sem contorno, o contorno com cor sólida (inclusive a parte sólida com contorno no elemento em
+  // degradê sem contorno, e a parte sólida sob o contorno do elemento) e o texto vazado.
+  valid(design([{ ...heading("t"), textStyle: { paint: degrade } }, tituloComParte({ paint: degrade, mark: { color: "#111111" } })].map((node, index) => ({ ...node, id: `t${index}` }))));
+  valid(design([tituloComParte({ paint: solida, stroke: contorno() }, { paint: degrade })]));
+  valid(design([tituloComParte({ paint: solida }, { paint: { color: "#ffffff", kind: "solid" }, stroke: contorno() })]));
+  valid(design([tituloComParte({ paint: VAZADO, stroke: contorno() }, { paint: degrade })]));
+
+  // A chave sai pelo id do elemento, até o campo do contorno (Estilo) ou da cor da parte (a área de texto).
+  const value = valid(design([heading("titulo")]));
+
+  assert.equal(schema.freeErrorKey(value, "freeDesign.children.0.textStyle.stroke"), "freeDesign.nodes.titulo.textStyle.stroke");
+  assert.equal(schema.freeErrorKey(value, `freeDesign.${at}.paint`), "freeDesign.nodes.titulo.lines.0.1.style.paint");
+});
+
 test("L6b: chave a mais no contorno, no marca-texto e no estilo da parte é recusada; nada disso no celular", () => {
   const at = "children.0.lines.0.1.style";
 

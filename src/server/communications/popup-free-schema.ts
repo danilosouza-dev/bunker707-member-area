@@ -24,6 +24,7 @@ import {
   type FreeFillPaint,
   type FreeId,
   type FreeNode,
+  type FreeTextPaint,
   type PopupFreeDesign,
   type PopupFreeDesignInput
 } from "./popup-free-model";
@@ -81,6 +82,7 @@ export const POPUP_FREE_MESSAGES = {
   spanEmpty: "Escreva o texto desta parte.",
   stops: "Use de 2 a 5 cores no degradê.",
   stroke: "Escolha a cor e a espessura do contorno.",
+  strokeGradient: "Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.",
   textTotal: "Os textos passaram de 1.200 letras. Encurte um pouco.",
   tooManyFonts: POPUP_DESIGN_MESSAGES.tooManyFonts,
   video: "Envie o vídeo de novo.",
@@ -438,6 +440,30 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
     }
   };
 
+  // O contorno nunca com a letra em degrade (L6b): o degrade e um fundo recortado pelas letras, e o contorno, pintado
+  // por cima dele, cobre a cor (com 8 px a letra fica toda da cor do contorno). Vale no elemento e na parte, pela
+  // pintura dela ou pela do elemento; a chave e a do contorno (ou a da cor da parte, quando o contorno vem do elemento).
+  const checkStroke = (node: FreeNode, at: Path) => {
+    if (node.type !== "badge" && node.type !== "button" && node.type !== "heading" && node.type !== "links" && node.type !== "text") {
+      return;
+    }
+
+    const own = node.textStyle;
+    const gradient = (paint: FreeTextPaint | undefined) => paint !== undefined && paint.kind !== "solid";
+
+    if (own?.stroke && gradient(own.paint)) {
+      issue(M.strokeGradient, [...at, "textStyle", "stroke"]);
+    } else if (node.type === "heading" || node.type === "text") {
+      node.lines.forEach((spans, lineIndex) =>
+        spans.forEach((item, spanIndex) => {
+          if ((item.style?.stroke ?? own?.stroke) && gradient(item.style?.paint ?? own?.paint)) {
+            issue(M.strokeGradient, [...at, "lines", lineIndex, spanIndex, "style", item.style?.stroke ? "stroke" : "paint"]);
+          }
+        })
+      );
+    }
+  };
+
   checkFill(design.artboard?.fill, ["artboard", "fill"]);
 
   const walk = (nodes: readonly FreeNode[], depth: number, path: Path) => {
@@ -472,6 +498,7 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
       }
 
       checkFill(node.box?.fill, [...at, "box", "fill"]);
+      checkStroke(node, at);
 
       switch (node.type) {
         case "heading":
