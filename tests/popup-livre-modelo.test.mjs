@@ -2178,3 +2178,45 @@ test("L6c: o JSON Schema tem as cores ao passar o mouse, estritas e só no Botã
   assert.equal(mobileNode.length, 1, "o elemento do celular");
   assert.equal(mobileNode[0].additionalProperties, false);
 });
+
+test("L6c: um design sem cores ao passar o mouse sai igual (os 4 modelos no §9.9 byte a byte; forma canônica e reescala sem chave nova)", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const section = doc.slice(doc.indexOf("## 9. Contrato do JSON"), doc.indexOf("## 10."));
+  const blocks = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]));
+  const effect = /"hover":\{/;
+  const semCores = blocks.filter((block) => !effect.test(JSON.stringify(block)));
+  const comCores = blocks.filter((block) => effect.test(JSON.stringify(block)));
+  const nenhumaChave = (value, label) => assert.doesNotMatch(JSON.stringify(value), effect, label);
+
+  assert.equal(comCores.length, 1, "o exemplo das cores ao passar o mouse, na 9.9");
+
+  const exemplo = comCores[0];
+
+  assert.equal(JSON.stringify(valid(exemplo)), JSON.stringify(exemplo), "o exemplo já está na forma canônica (byte a byte)");
+  assert.deepEqual(
+    hoversOf(exemplo).map(([id, hover]) => [id, Object.keys(hover)]),
+    [
+      ["botao", ["fill"]],
+      ["agoranao", ["borderColor", "color", "fill"]],
+      ["links", ["color"]]
+    ],
+    "mostra o fundo em degradê, as três cores num botão de borda e a cor dos Links"
+  );
+  assert.deepEqual(checks.popupFreeHints(valid(exemplo), { content: { ctaLabel: "Saiba mais" } }), [], "nem contraste, nem texto no celular");
+
+  for (const { id } of starters.FREE_DESIGN_STARTERS) {
+    const value = starters.freeStarterDesign(id);
+    const written = semCores.find((block) => JSON.stringify(block) === JSON.stringify(value));
+
+    assert.ok(written, `o modelo ${id} continua no docs/27 §9.9 byte a byte, como antes do L6c`);
+    assert.equal(JSON.stringify(valid(written)), JSON.stringify(written), `${id}: a forma canônica não muda`);
+
+    for (const width of Object.values(model.FREE_ARTBOARD_WIDTH_PRESETS)) {
+      nenhumaChave(model.rescaleFreeDesign(value, width), `${id} em ${width}: a reescala não cria cores ao passar o mouse`);
+    }
+  }
+
+  for (const block of semCores) {
+    nenhumaChave(valid(block), "a forma canônica não cria cores ao passar o mouse");
+  }
+});

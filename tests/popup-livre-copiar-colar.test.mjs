@@ -1153,3 +1153,40 @@ test("L6c: copiar e colar devolve o mesmo design com as cores ao passar o mouse;
     assert.doesNotMatch(message, /\bhover\b/i, "na frase, ao passar o mouse");
   }
 });
+
+test("L6c: as instruções para a IA trazem as cores ao passar o mouse, o guia e o exemplo, sem código", async () => {
+  // O arquivo gerado (o teste das instruções acima confere que ele é o do docs/27 §9).
+  const { FREE_AI_INSTRUCTIONS } = await import("../src/components/admin/v2/communication/popup-free/free-ai-instructions.ts");
+
+  // O contrato (9.3), os padrões (9.4), as regras (9.6), o celular (9.10) e o guia (9.8).
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("`hover` (as cores ao passar o mouse; o aluno que chega ao botão ou ao link pelo teclado vê as mesmas) só existe no Botão e nos Links"), "a chave");
+  assert.ok(
+    FREE_AI_INSTRUCTIONS.includes("| `button` | `fill` (o fundo: uma pintura `solid`, `linear` ou `radial`, nunca `image`), `color` (a cor do texto), `borderColor` (a cor da borda; só aparece quando o botão tem `box.border`) |"),
+    "o Botão"
+  );
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("| `links` | `color` (a cor dos links) |"), "os Links");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("`textStyle`; `hover` (as cores ao passar o mouse, veja abaixo da tabela) |"), "na linha do Botão");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("`textStyle`, `hover` (a cor ao passar o mouse, veja abaixo da tabela);"), "na linha dos Links");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("| cores ao passar o mouse (`hover`) | sem cores próprias (o botão clareia um pouco); `{}` sai |"), "o padrão");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes(`a cor do texto ao passar o mouse só com a letra de cor sólida (\`${schema.POPUP_FREE_MESSAGES.hoverGradient}\`)`), "a regra do texto em degradê, com a frase");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("- As cores ao passar o mouse (`hover`) também não têm versão do celular: um `hover` dentro de `devices.mobile.nodes` é recusado."), "nada disso no celular");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("fontes, contorno, marca-texto, camada (`z`) e girar (`rotate`) são os mesmos no computador e no celular"), "a regra do L6b continua");
+  assert.match(FREE_AI_INSTRUCTIONS, /\n11\. Cores ao passar o mouse \(`hover`\) só no Botão e nos Links, [^\n]*a cor da borda só no botão que tem borda\. Sem `hover`, o botão já clareia um pouco sozinho\.\n/, "o guia");
+  assert.ok(FREE_AI_INSTRUCTIONS.indexOf("**Cores ao passar o mouse**") > FREE_AI_INSTRUCTIONS.indexOf("**Contorno e marca-texto**"), "o exemplo depois do do contorno");
+  assert.ok(FREE_AI_INSTRUCTIONS.indexOf("**Cores ao passar o mouse**") < FREE_AI_INSTRUCTIONS.indexOf("### 9.10 "), "antes da 9.10");
+
+  // Só o contrato: nada do código, do cartão, do banco nem o nome das entregas (o L6c fica no docs, fora das instruções).
+  assert.doesNotMatch(FREE_AI_INSTRUCTIONS, /\bL6[a-g]\b/);
+  assert.doesNotMatch(FREE_AI_INSTRUCTIONS, /servidor|data-free|important|canonicalHover|FreeButtonHover|FreeLinksHover|hoverGradient|focus-visible/);
+
+  // O exemplo cola de volta igual e mostra as três formas: o fundo em degradê, o botão de borda e os Links.
+  const example = [...FREE_AI_INSTRUCTIONS.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => match[1]).find((block) => block.includes('"hover"'));
+  const result = paste.parseFreeDesignPaste(example, context());
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.design, JSON.parse(example), "na forma canônica");
+  assert.equal(model.findFreeNode(result.design, "botao").node.hover.fill.kind, "linear");
+  assert.deepEqual(Object.keys(model.findFreeNode(result.design, "agoranao").node.hover), ["borderColor", "color", "fill"]);
+  assert.ok(model.findFreeNode(result.design, "agoranao").node.box.border, "a cor da borda só no botão que tem borda");
+  assert.deepEqual(model.findFreeNode(result.design, "links").node.hover, { color: "#ffffff" });
+});
