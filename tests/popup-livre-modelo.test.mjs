@@ -2220,3 +2220,84 @@ test("L6c: um design sem cores ao passar o mouse sai igual (os 4 modelos no §9.
     nenhumaChave(valid(block), "a forma canônica não cria cores ao passar o mouse");
   }
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * L6c, Revisar: o contraste ao passar o mouse
+ * ---------------------------------------------------------------------------------------------- */
+
+/** As dicas de contraste como [chave, frase] (a frase do passar o mouse começa por "Ao passar o mouse,"). */
+const contrastHints = (value, input) =>
+  checks
+    .popupFreeHints(valid(value), input)
+    .filter((hint) => hint.kind === "contrast")
+    .map((hint) => [hint.key, hint.message]);
+const AO_PASSAR = /^Ao passar o mouse, contraste baixo \(\d+,\d:1\)\. Para ler bem, use pelo menos (4,5|3,0):1\.$/;
+
+test("L6c, Revisar: a cor ao passar o mouse contra o fundo ao passar o mouse, na chave da cor, com a frase de sempre começando por “Ao passar o mouse,”", () => {
+  assert.equal(checks.POPUP_FREE_HINT_MESSAGES.hoverContrast(1, 4.5), "Ao passar o mouse, contraste baixo (1,0:1). Para ler bem, use pelo menos 4,5:1.");
+
+  // O fundo branco ao passar o mouse sob a letra branca de sempre: acusa na cor ao passar o mouse (o campo que conserta).
+  const branco = contrastHints(design([botaoHover({ fill: solida("#ffffff") })]));
+  assert.deepEqual(branco.map(([key]) => key), ["nodes.botao.hover.color"]);
+  assert.match(branco[0][1], AO_PASSAR);
+  assert.equal(checks.popupFreeHints(valid(design([botaoHover({ fill: solida("#ffffff") })])))[0].nodeId, "botao");
+  // Com a letra escura ao passar o mouse, lê.
+  assert.deepEqual(contrastHints(design([botaoHover({ color: "#111111", fill: solida("#ffffff") })])), []);
+  // Só a letra muda: a cor escura no fundo escuro de sempre (a prancheta) acusa; nos Links também.
+  assert.deepEqual(contrastHints(design([botaoHover({ color: "#202020" })])).map(([key]) => key), ["nodes.botao.hover.color"]);
+  assert.deepEqual(contrastHints(linksHover({ color: "#202020" })).map(([key]) => key), ["nodes.links.hover.color"]);
+  assert.deepEqual(contrastHints(linksHover({ color: "#e5ff1f" })), []);
+  // A cor da borda não muda a letra nem o fundo: nada a medir.
+  assert.deepEqual(contrastHints(design([botaoHover({ borderColor: "#16181c" }, { box: BORDA_FINA })])), []);
+  // O contorno de 2 ou mais conta também ao passar o mouse: a letra branca com contorno preto lê no fundo branco.
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#ffffff") }, { textStyle: { stroke: contorno(2, "#000000") } })])), []);
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#ffffff") }, { textStyle: { stroke: contorno(1, "#000000") } })])).map(([key]) => key), ["nodes.botao.hover.color"]);
+});
+
+test("L6c, Revisar: cada estado tem a sua dica; a cor igual à de sempre, sem fundo, não repete a dica", () => {
+  const escura = { paint: solida("#2a2a2a") };
+
+  // A letra de sempre não lê e ao passar o mouse lê: só a dica de sempre (no campo de sempre).
+  assert.deepEqual(contrastHints(design([botaoHover({ color: "#ffffff" }, { textStyle: escura })])).map(([key]) => key), ["nodes.botao.textStyle.paint"]);
+  // A mesma cor ao passar o mouse (em maiúsculas ou não) e sem fundo: nada muda, nada a mais.
+  assert.deepEqual(contrastHints(design([botaoHover({ color: "#2A2A2A" }, { textStyle: escura })])).map(([key]) => key), ["nodes.botao.textStyle.paint"]);
+  assert.deepEqual(contrastHints(linksHover({ color: "#A1A1AA" }, { textStyle: { paint: solida("#a1a1aa") } })), []);
+  // As duas não leem: uma dica em cada campo.
+  assert.deepEqual(
+    contrastHints(design([botaoHover({ color: "#303030" }, { textStyle: escura })])).map(([key]) => key),
+    ["nodes.botao.textStyle.paint", "nodes.botao.hover.color"]
+  );
+});
+
+test("L6c, Revisar: o fundo ao passar o mouse troca o fundo do Botão inteiro e fica por cima do que está atrás dele", () => {
+  // O botão branco com letra escura lê; ao passar o mouse o fundo vira transparente (o branco sai, não fica embaixo) e a
+  // letra escura cai na prancheta escura: acusa.
+  const claro = { box: { fill: [solida("#ffffff")], padding: [12, 24] }, textStyle: { paint: solida("#111111") } };
+  assert.deepEqual(contrastHints(design([botaoHover({}, claro)])), []);
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#ffffff00") }, claro)])).map(([key]) => key), ["nodes.botao.hover.color"]);
+
+  // O fundo transparente ao passar o mouse dentro de uma caixa branca: ele fica sobre a caixa (não sobre a prancheta).
+  const caixa = (hover) => design([{ box: { fill: [solida("#ffffff")] }, children: [botaoHover(hover, { box: { fill: [solida("#111111")] } })], id: "caixa", type: "box" }]);
+  assert.deepEqual(contrastHints(caixa({})), [], "a letra branca no botão escuro lê");
+  assert.deepEqual(contrastHints(caixa({ fill: solida("#00000014") })).map(([key]) => key), ["nodes.botao.hover.color"], "8 % de preto sobre o branco: a letra branca some");
+  assert.deepEqual(contrastHints(caixa({ fill: solida("#000000cc") })), []);
+
+  // Um degradê ao passar o mouse é medido pela pior cor dele.
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: { kind: "linear", stops: [{ at: 0, color: "#111111" }, { at: 100, color: "#f5f5f5" }] } })])).map(([key]) => key), ["nodes.botao.hover.color"]);
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: ESCURECE })])), []);
+});
+
+test("L6c, Revisar: com a letra em degradê a dica vai para o fundo ao passar o mouse; sobre imagem ou vídeo, nada é medido", () => {
+  // A letra clara em degradê no fundo branco ao passar o mouse: a cor ao passar o mouse não vale nela, então a chave é a
+  // do fundo (o campo que conserta e que não fica parado).
+  const clara = { textStyle: { paint: { kind: "linear", stops: [{ at: 0, color: "#ffffff" }, { at: 100, color: "#eeeeee" }] } } };
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#ffffff") }, clara)])).map(([key]) => key), ["nodes.botao.hover.fill"]);
+  assert.deepEqual(contrastHints(design([botaoHover({ fill: solida("#111111") }, clara)])), []);
+
+  // Sobre uma imagem (pelas medidas do palco), o contraste não é medido, como o de sempre.
+  const foto = { alt: "", asset: "foto", id: "foto", place: { h: 200, mode: "free", w: 440, x: 0, y: 0 }, type: "image" };
+  const sobre = design([foto, botaoHover({ fill: solida("#ffffff") }, { place: { h: 48, mode: "free", w: 200, x: 20, y: 20 } })], { assets: [imageAsset("foto")] });
+  const rects = { botao: { h: 48, w: 200, x: 20, y: 20 }, foto: { h: 200, w: 440, x: 0, y: 0 } };
+  assert.deepEqual(contrastHints(sobre, { rects }), []);
+  assert.deepEqual(contrastHints(sobre).map(([key]) => key), ["nodes.botao.hover.color"], "sem as medidas do palco, mede");
+});
