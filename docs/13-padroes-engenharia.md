@@ -46,6 +46,8 @@ npm run verify
 
 Esse comando cobre lint, typecheck, testes automatizados e build e termina com a regua do pedaco do cartao Livre (`npm run livre:medir`, `scripts/livre-medir-cartao.mjs`): depois do build, ela mede o que o aluno baixa a mais quando o pop-up e Livre e falha acima de 12 KB (12.288 B gzip). O teto e as cotas de cada entrega estao no `docs/27` §7; uma PR que mexe no cartao Livre escreve la o antes e o depois, medidos na mesma pasta.
 
+O Tailwind 4 do build le todo arquivo fora do `.gitignore`, inclusive `tests/` e `docs/`, e gera uma regra no CSS global (que vai para todo aluno) para cada classe que acha escrita, ate num comentario. Em teste, doc ou comentario, classe de exemplo so as que o codigo de `src/` ja usa; senao, nomeie a constante ou monte o texto aos pedacos. A guarda `tests/tailwind-regras-de-exemplo.guard.test.mjs` falha quando uma classe vira regra sem estar no codigo (`docs/27` §13.11.1).
+
 Alteracoes em acesso, persistencia ou navegacao devem incluir teste de regressao que prove a invariante afetada. Para mudancas perceptiveis no browser, o gate de codigo nao substitui uma validacao autenticada da rota, do console e da requisicao real.
 
 Como escrever esses testes, onde cada um fica, como rodar e a rotina de PR estao em `docs/18-padrao-de-testes.md`. Em resumo:
