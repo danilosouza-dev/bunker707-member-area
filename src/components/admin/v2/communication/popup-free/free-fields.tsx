@@ -1478,7 +1478,8 @@ type SpanEditing = { targets: FreeTextRange[] };
 
 /**
  * O popover de estilo de uma parte: Cor do texto, Peso, Itálico, Tamanho, Fonte, Maiúsculas, Linha, Espaço, Contorno
- * e Marca-texto (L6b). Cada mudança é um `onApply` (um passo; os números juntam pela chave das partes).
+ * e Marca-texto (L6b). Cada mudança é um `onApply` com a chave das partes: as seguidas em menos de 700 ms juntam num
+ * passo só (os números e também as chaves Contorno e Marca-texto; FREE_HISTORY_COALESCE_MS).
  */
 function SpanStylePanel({
   base,
