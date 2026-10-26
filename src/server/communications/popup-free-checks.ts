@@ -1,7 +1,8 @@
 // Design Livre do pop-up (docs/27): as dicas do painel Revisar (nao impedem salvar) e o medidor de tamanho.
 // Puras: recebem o design e, quando precisam de geometria, os retangulos medidos no palco do editor (px da
 // prancheta, mais a prancheta inteira em "@artboard"). Sem retangulos, as dicas de geometria nao aparecem.
-// O contraste conta o contorno de 2 px ou mais e mede a parte com marca-texto contra ele (L6b).
+// O contraste conta o contorno de 2 px ou mais e mede a parte com marca-texto contra ele (L6b), e mede o Botão e os
+// Links ao passar o mouse com as cores de lá (L6c).
 // So o editor usa (o cartao do aluno nunca importa este arquivo).
 
 import { contrastHintMessage, contrastRatio, isLargeText, type HexColor, type PopupFontRef } from "./popup-design-model";
@@ -53,6 +54,12 @@ export const POPUP_FREE_HINT_MESSAGES = {
   cover: (name: string, button: string) => `“${name}” está por cima do “${button}” e pode atrapalhar o clique.`,
   cut: (name: string) => `“${name}” está cortado no fim do pop-up.`,
   fontDevice: "Esta fonte muda de aparelho para aparelho. Para ficar igual para todos, envie a fonte.",
+  /** O contraste do Botão e dos Links ao passar o mouse (L6c): a frase de sempre, começando por “Ao passar o mouse,”. */
+  hoverContrast: (ratio: number, required: number) => {
+    const message = contrastHintMessage(ratio, required);
+
+    return `Ao passar o mouse, ${message.charAt(0).toLowerCase()}${message.slice(1)}`;
+  },
   /** O ícone do Selo e do Botão desenha com a cor da letra; o contorno não chega nele (L6b, crítica C22). */
   iconHidden: "O ícone usa a cor da letra, não a do contorno, e fica difícil de ver. Use uma cor que apareça ou tire o ícone.",
   noPoster: "Sem capa: quem prefere menos movimento não vê o vídeo.",
@@ -280,13 +287,18 @@ export function popupFreeHints(design: PopupFreeDesign, input: { content?: FreeP
     const prefix = `nodes.${node.id}`;
 
     // Contraste: contra o proprio fundo (selo, botao), as caixas de fora e a prancheta; imagem ou video atras = nao mede.
-    const chain = [node.box?.fill ?? [], ...ancestors, artboard.fill].filter((fill) => fill.length > 0);
-    const closest = chain[0];
-    const backgrounds = closest ? fillColors(closest) : null;
+    const behind = [...ancestors, artboard.fill];
     const behindMedia = rects?.[node.id] ? media.some((item) => rects[item.node.id] && overlapArea(rects[item.node.id], rects[node.id]) > 0) : false;
+    /** Os fundos para medir com estas camadas (a mais perto primeiro); null = imagem, video ou nada medido atras. */
+    const backdropsOf = (layers: readonly (readonly FreeFillPaint[])[]): Backdrop[] | null => {
+      const chain = layers.filter((fill) => fill.length > 0);
+      const closest = chain[0];
+      const backgrounds = closest ? fillColors(closest) : null;
+      const base = chain.slice(1).map(fillBase).find((color): color is HexColor => Boolean(color)) ?? "#000000";
 
-    const base = chain.slice(1).map(fillBase).find((color): color is HexColor => Boolean(color)) ?? "#000000";
-    const outside: Backdrop[] | null = backgrounds && backgrounds.length > 0 && !behindMedia ? backgrounds.map((color) => ({ color, under: base })) : null;
+      return backgrounds && backgrounds.length > 0 && !behindMedia ? backgrounds.map((color) => ({ color, under: base })) : null;
+    };
+    const outside = backdropsOf([node.box?.fill ?? [], ...behind]);
     const measure = (paint: FreeTextPaint, stroke: FreeTextStroke | undefined, size: number, weight: number, backdrops: readonly Backdrop[]) => {
       const colors = paintColors(paint);
 
@@ -304,6 +316,29 @@ export function popupFreeHints(design: PopupFreeDesign, input: { content?: FreeP
     const element = outside && usesOutside ? measure(style.paint, style.stroke, style.size, style.weight, outside) : null;
 
     report(element, `${prefix}.textStyle.paint`);
+
+    // Ao passar o mouse (L6c): a cor do texto de lá (so com a letra de cor solida, como no cartao) ou a de sempre,
+    // contra o fundo de lá (o do Botão troca o fundo inteiro dele) ou o de sempre. So quando algo muda a letra ou o
+    // fundo; a chave e a da cor ao passar o mouse (no Botão com a letra em degradê, onde ela nao vale, a do fundo).
+    if ((node.type === "button" || node.type === "links") && node.hover) {
+      const hoverFill = node.type === "button" ? node.hover.fill : undefined;
+      const hoverColor = node.hover.color !== undefined && style.paint.kind === "solid" ? node.hover.color : undefined;
+      const changesLetter = hoverColor !== undefined && style.paint.kind === "solid" && hoverColor.toLowerCase() !== style.paint.color.toLowerCase();
+
+      if (hoverFill || changesLetter) {
+        const backdrops = hoverFill ? backdropsOf([[hoverFill], ...behind]) : outside;
+        const result = backdrops ? measure(hoverColor ? { color: hoverColor, kind: "solid" } : style.paint, style.stroke, style.size, style.weight, backdrops) : null;
+
+        if (result && result.ratio < result.required) {
+          add({
+            key: `${prefix}.hover.${style.paint.kind === "solid" ? "color" : "fill"}`,
+            kind: "contrast",
+            message: POPUP_FREE_HINT_MESSAGES.hoverContrast(result.ratio, result.required),
+            nodeId: node.id
+          });
+        }
+      }
+    }
 
     // O icone do Selo e do Botao desenha com a cor da letra (no texto vazado, com a do contorno, como no cartao): a
     // letra que so se le pelo contorno deixa o icone sem contraste.

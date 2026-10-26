@@ -15,6 +15,7 @@ const panel = await import("../src/components/admin/v2/communication/popup-free/
 const model = await import("../src/server/communications/popup-free-model.ts");
 const render = await import("../src/server/communications/popup-free-render.ts");
 const schema = await import("../src/server/communications/popup-free-schema.ts");
+const checks = await import("../src/server/communications/popup-free-checks.ts");
 const popupEditor = await import("../src/components/admin/v2/communication/popup-editor-model.ts");
 const { createElement } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
@@ -1151,7 +1152,7 @@ test("imagem: conta de reduzir até 1.600 px e as qualidades até caber", () => 
 const CONTORNO_PRETO = { color: "#000000", width: 2 };
 const CONTORNO_BRANCO = { color: "#ffffff", width: 2 };
 
-/** Um elemento do Estilo pelo id (TextStyleSection e BoxSections nao usam ganchos: sao abertos aqui na mao). */
+/** Um elemento do Estilo pelo id (TextStyleSection, BoxSections, HoverSection e HoverReset nao usam ganchos: sao abertos aqui na mao). */
 function elementById(element, id) {
   if (!element || typeof element !== "object") {
     return null;
@@ -1173,7 +1174,7 @@ function elementById(element, id) {
     return element;
   }
 
-  if (typeof element.type === "function" && (element.type.name === "TextStyleSection" || element.type.name === "BoxSections")) {
+  if (typeof element.type === "function" && ["TextStyleSection", "BoxSections", "HoverSection", "HoverReset"].includes(element.type.name)) {
     return elementById(element.type(element.props), id);
   }
 
@@ -1455,6 +1456,350 @@ test("L6b: as chaves de erro do contorno e do marca-texto levam ao campo certo (
     assert.match(html, new RegExp(`id="${id}"`), id);
   }
   assert.ok(html.includes("Use de 1 a 8."));
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Cores ao passar o mouse (L6c): o "Ao passar o mouse" do Estilo, "Voltar ao padrão" e "Ver com o mouse em cima"
+ * ---------------------------------------------------------------------------------------------- */
+
+const VERMELHO_BOTAO = { fill: [{ color: "#e50914", kind: "solid" }], padding: [12, 24], radius: 999 };
+const BORDA_BRANCA = { border: { color: "#ffffff40", width: 1 } };
+const DEGRADE_LETRA = { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] };
+const ESCURECE_FUNDO = { angle: 90, kind: "linear", stops: [{ at: 0, color: "#e50914" }, { at: 100, color: "#b20710" }] };
+/** Um botão Fechar ("Agora não") com `extra` por cima. */
+const fecharCom = (extra = {}) => ({ action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button", ...extra });
+
+/** As props do Estilo com a chave "Ver com o mouse em cima" (as mudanças em `calls`, a chave em `previews`). */
+function hoverProps(value, id, calls = [], previews = [], extra = {}) {
+  return { ...styleProps(value, id, calls), onHoverPreviewChange: (on) => previews.push(on), ...extra };
+}
+
+test("L6c: withFreeHover muda as cores do Botão e a dos Links; voltar ao padrão tira a chave e o objeto vazio sai", () => {
+  const start = design([fecharCom({ box: { ...VERMELHO_BOTAO, ...BORDA_BRANCA } }), TITULO, LINKS]);
+
+  // Cada cor no Botão, uma de cada vez, juntas no mesmo objeto (o que o painel monta já é a forma canônica).
+  let value = panel.withFreeHover(start, "fechar", { fill: ESCURECE_FUNDO });
+  value = panel.withFreeHover(value, "fechar", { color: "#111111" });
+  value = panel.withFreeHover(value, "fechar", { borderColor: "#ffffff" });
+  assert.deepEqual(model.findFreeNode(value, "fechar").node.hover, { borderColor: "#ffffff", color: "#111111", fill: ESCURECE_FUNDO });
+  assert.deepEqual(model.canonicalPopupFreeDesign(value), value, "nada muda ao salvar");
+  assert.ok(schema.parsePopupFreeDesign(value), "vale no schema");
+
+  // Voltar ao padrão: uma de cada vez; a última leva o objeto junto (sem `hover: {}`).
+  const semFundo = panel.withFreeHover(value, "fechar", { fill: undefined });
+  assert.deepEqual(model.findFreeNode(semFundo, "fechar").node.hover, { borderColor: "#ffffff", color: "#111111" });
+  const vazio = panel.withFreeHover(panel.withFreeHover(semFundo, "fechar", { borderColor: undefined }), "fechar", { color: undefined });
+  assert.equal("hover" in model.findFreeNode(vazio, "fechar").node, false);
+  assert.deepEqual(vazio, start);
+
+  // Os Links só mudam a cor: o fundo e a borda ao passar o mouse não existem neles (o pedido só deles não muda nada).
+  const links = panel.withFreeHover(start, "links", { borderColor: "#ffffff", color: "#e5ff1f", fill: ESCURECE_FUNDO });
+  assert.deepEqual(model.findFreeNode(links, "links").node.hover, { color: "#e5ff1f" });
+  assert.ok(schema.parsePopupFreeDesign(links));
+  assert.equal(panel.withFreeHover(start, "links", { fill: ESCURECE_FUNDO }), start, "só o fundo nos Links: nada muda");
+
+  // Os outros tipos não têm cores ao passar o mouse.
+  assert.equal(panel.withFreeHover(start, "titulo", { color: "#111111" }), start);
+  assert.equal(panel.isFreeHoverNode(model.findFreeNode(start, "titulo").node), false);
+  assert.equal(panel.isFreeHoverNode(model.findFreeNode(start, "links").node), true);
+  assert.equal(panel.freeHasHover(model.findFreeNode(start, "fechar").node), false);
+  assert.equal(panel.freeHasHover(model.findFreeNode(links, "links").node), true);
+  assert.equal(panel.freeHasHover({ ...fecharCom(), hover: {} }), false, "o objeto vazio não conta");
+});
+
+test("L6c: cada campo sem escolha mostra a cor de sempre como ponto de partida, sem gravar nada", () => {
+  const values = (node) => panel.freeHoverFieldValues(node);
+
+  // O Botão vermelho de borda: o fundo é a camada de cima de cor ou degradê, a letra é a dele, a borda a dela.
+  assert.deepEqual(values(fecharCom({ box: { ...VERMELHO_BOTAO, ...BORDA_BRANCA }, textStyle: { paint: { color: "#111111", kind: "solid" } } })), {
+    borderColor: "#ffffff40",
+    color: "#111111",
+    fill: { color: "#e50914", kind: "solid" }
+  });
+  // Sem fundo nem borda: branco. A letra padrão do Botão é branca.
+  assert.deepEqual(values(fecharCom()), { borderColor: "#ffffff", color: "#ffffff", fill: { color: "#ffffff", kind: "solid" } });
+  // A imagem no fundo não serve de ponto de partida: vale a primeira camada de cor ou degradê embaixo dela.
+  assert.deepEqual(values(fecharCom({ box: { fill: [{ asset: "img", kind: "image" }, { ...ESCURECE_FUNDO }] } })).fill, ESCURECE_FUNDO);
+  // O texto vazado (alfa 00) parte da mesma cor sem a transparência; outro alfa fica; o degradê, da primeira cor.
+  assert.equal(values(fecharCom({ textStyle: { paint: { color: "#e5ff1f00", kind: "solid" }, stroke: CONTORNO_BRANCO } })).color, "#e5ff1f");
+  assert.equal(values(fecharCom({ textStyle: { paint: { color: "#e5ff1f80", kind: "solid" } } })).color, "#e5ff1f80");
+  assert.equal(values(fecharCom({ textStyle: { paint: DEGRADE_LETRA } })).color, "#ff3b3b");
+  // Com a cor própria, ela.
+  assert.deepEqual(values(fecharCom({ hover: { borderColor: "#000000", color: "#222222", fill: ESCURECE_FUNDO } })), { borderColor: "#000000", color: "#222222", fill: ESCURECE_FUNDO });
+  assert.equal(values({ hover: { color: "#e5ff1f" }, id: "links", type: "links" }).color, "#e5ff1f");
+});
+
+test("L6c: no Estilo do Botão, Fundo, Cor do texto e Cor da borda juntam passos pela chave de cada uma; Voltar ao padrão é um passo próprio", () => {
+  const start = design([fecharCom({ box: { ...VERMELHO_BOTAO, ...BORDA_BRANCA } }), LINKS]);
+  const calls = [];
+  const tree = FreeInspectorStyle(hoverProps(start, "fechar", calls));
+
+  // A seção e os campos, nos ids do mapa de chaves; sem cor própria, nenhum Voltar ao padrão e a frase do brilho.
+  for (const field of ["passar-mouse", "passar-mouse-fundo", "passar-mouse-cor", "passar-mouse-borda", "passar-mouse-ver"]) {
+    assert.ok(elementById(tree, `livre-fechar-${field}`), field);
+  }
+  for (const field of ["passar-mouse-fundo", "passar-mouse-cor", "passar-mouse-borda"]) {
+    assert.equal(elementById(tree, `livre-fechar-${field}-padrao`), null, `${field}: sem cor própria, sem Voltar ao padrão`);
+  }
+  const html = renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(start, "fechar")));
+  assert.ok(html.includes(">Ao passar o mouse<"));
+  assert.ok(html.includes(C.hover.note));
+  assert.ok(html.includes(C.hover.buttonDefault));
+  assert.ok(html.includes(">Cor do texto<") && html.includes(">Cor da borda<") && html.includes(">Fundo<"));
+  assert.ok(html.indexOf(">Efeitos<") < html.indexOf(">Ao passar o mouse<"), "a última seção do Estilo");
+
+  // Cada campo grava pela chave dele (Ctrl + Z junta as mudanças seguidas do mesmo campo).
+  elementById(tree, "livre-fechar-passar-mouse-fundo").props.onChange(ESCURECE_FUNDO);
+  elementById(tree, "livre-fechar-passar-mouse-cor").props.onChange("#111111");
+  elementById(tree, "livre-fechar-passar-mouse-borda").props.onChange("#ffffff");
+  assert.deepEqual(
+    calls.map((call) => call.field),
+    ["hover.fill", "hover.color", "hover.borderColor"]
+  );
+  assert.deepEqual(model.findFreeNode(calls[0].next, "fechar").node.hover, { fill: ESCURECE_FUNDO });
+  assert.deepEqual(model.findFreeNode(calls[1].next, "fechar").node.hover, { color: "#111111" });
+  assert.deepEqual(model.findFreeNode(calls[2].next, "fechar").node.hover, { borderColor: "#ffffff" });
+
+  // Com as três cores: um Voltar ao padrão em cada campo, com o nome falado de cada um; a frase do brilho sai.
+  const full = panel.withFreeHover(start, "fechar", { borderColor: "#ffffff", color: "#111111", fill: ESCURECE_FUNDO });
+  const fullCalls = [];
+  const fullTree = FreeInspectorStyle(hoverProps(full, "fechar", fullCalls));
+  const labels = { "passar-mouse-borda": "Cor da borda", "passar-mouse-cor": "Cor do texto", "passar-mouse-fundo": "Fundo" };
+
+  for (const [field, label] of Object.entries(labels)) {
+    const reset = elementById(fullTree, `livre-fechar-${field}-padrao`);
+    assert.equal(reset.props["aria-label"], `${label}: voltar ao padrão`);
+    assert.equal(reset.props.disabled, false);
+  }
+  assert.equal(renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(full, "fechar"))).includes(C.hover.buttonDefault), false);
+
+  elementById(fullTree, "livre-fechar-passar-mouse-fundo-padrao").props.onClick();
+  assert.equal(fullCalls[0].field, undefined, "Voltar ao padrão: um passo próprio");
+  assert.deepEqual(model.findFreeNode(fullCalls[0].next, "fechar").node.hover, { borderColor: "#ffffff", color: "#111111" });
+  elementById(fullTree, "livre-fechar-passar-mouse-cor-padrao").props.onClick();
+  elementById(fullTree, "livre-fechar-passar-mouse-borda-padrao").props.onClick();
+  assert.deepEqual(model.findFreeNode(fullCalls[1].next, "fechar").node.hover, { borderColor: "#ffffff", fill: ESCURECE_FUNDO });
+  assert.deepEqual(model.findFreeNode(fullCalls[2].next, "fechar").node.hover, { color: "#111111", fill: ESCURECE_FUNDO });
+
+  // No histórico: as cores seguidas do mesmo campo são um passo; o Voltar ao padrão é outro (Ctrl + Z volta um de cada vez).
+  const entry = (value) => ({ cta: null, design: value });
+  const escura = panel.withFreeHover(start, "fechar", { color: "#111111" });
+  const comFundo = panel.withFreeHover(escura, "fechar", { fill: ESCURECE_FUNDO });
+  let steps = history.createFreeHistory(entry(start));
+  steps = history.pushFreeHistory(steps, entry(panel.withFreeHover(start, "fechar", { color: "#222222" })), { coalesceKey: "fechar:hover.color", now: 1_000 });
+  steps = history.pushFreeHistory(steps, entry(escura), { coalesceKey: "fechar:hover.color", now: 1_200 });
+  steps = history.pushFreeHistory(steps, entry(comFundo), { coalesceKey: "fechar:hover.fill", now: 1_400 });
+  steps = history.pushFreeHistory(steps, entry(panel.withFreeHover(comFundo, "fechar", { fill: undefined })), { coalesceKey: null, now: 1_600 });
+  assert.equal(steps.past.length, 3);
+  assert.deepEqual(model.findFreeNode(history.undoFreeHistory(steps).present.design, "fechar").node.hover, { color: "#111111", fill: ESCURECE_FUNDO });
+  assert.deepEqual(model.findFreeNode(history.undoFreeHistory(history.undoFreeHistory(steps)).present.design, "fechar").node.hover, { color: "#111111" });
+  assert.equal(history.undoFreeHistory(history.undoFreeHistory(history.undoFreeHistory(steps))).present.design, start);
+});
+
+test("L6c: nos Links, só a Cor; o Selo, o Título e os outros tipos não têm a seção", () => {
+  const start = design([TITULO, { icon: "sparkles", id: "selo", label: "Novidade", type: "badge" }, { id: "forma", type: "shape" }, LINKS]);
+  const calls = [];
+  const tree = FreeInspectorStyle(hoverProps(start, "links", calls));
+
+  assert.ok(elementById(tree, "livre-links-passar-mouse"));
+  assert.equal(elementById(tree, "livre-links-passar-mouse-fundo"), null);
+  assert.equal(elementById(tree, "livre-links-passar-mouse-borda"), null);
+  const color = elementById(tree, "livre-links-passar-mouse-cor");
+  assert.equal(color.props.label, "Cor");
+  color.props.onChange("#e5ff1f");
+  assert.equal(calls[0].field, "hover.color");
+  assert.deepEqual(model.findFreeNode(calls[0].next, "links").node.hover, { color: "#e5ff1f" });
+
+  const html = renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(start, "links")));
+  assert.ok(html.includes(">Ao passar o mouse<"));
+  assert.equal(html.includes(C.hover.buttonDefault), false, "a frase do brilho é só do Botão");
+
+  for (const id of ["titulo", "selo", "forma"]) {
+    assert.equal(elementById(FreeInspectorStyle(hoverProps(start, id)), `livre-${id}-passar-mouse`), null, id);
+    assert.equal(renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(start, id))).includes("Ao passar o mouse"), false, id);
+  }
+});
+
+test("L6c: Cor do texto parada com a letra em degradê e Cor da borda parada sem borda, com o motivo; com a cor própria, ficam livres para voltar ao padrão", () => {
+  assert.equal(C.hover.colorGradient, "Com o texto em degradê, a cor ao passar o mouse não muda o texto.");
+  assert.ok(schema.POPUP_FREE_MESSAGES.hoverGradient.startsWith(C.hover.colorGradient), "a mesma frase do schema, que ainda diz o que fazer");
+  assert.equal(C.hover.borderNone, "Escolha uma borda em Borda para mudar a cor dela.");
+
+  // Letra em degradê (linear ou circular), no Botão e nos Links: a cor parada com o motivo; o fundo continua livre.
+  for (const paint of [DEGRADE_LETRA, { ...DEGRADE_LETRA, kind: "radial", x: 50, y: 50 }]) {
+    const value = design([fecharCom({ box: BORDA_BRANCA, textStyle: { paint } }), { ...LINKS, textStyle: { paint } }]);
+
+    for (const id of ["fechar", "links"]) {
+      const node = model.findFreeNode(value, id).node;
+      assert.equal(panel.freeHoverColorDisabledReason(node), C.hover.colorGradient, id);
+      const tree = FreeInspectorStyle(hoverProps(value, id));
+      assert.equal(elementById(tree, `livre-${id}-passar-mouse-cor`).props.disabled, true, id);
+      assert.ok(renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(value, id))).includes(C.hover.colorGradient), id);
+    }
+
+    assert.equal(elementById(FreeInspectorStyle(hoverProps(value, "fechar")), "livre-fechar-passar-mouse-fundo").props.disabled, false);
+  }
+
+  assert.equal(panel.freeHoverColorDisabledReason(fecharCom()), null, "a letra padrão é sólida");
+  assert.equal(panel.freeHoverColorDisabledReason(fecharCom({ textStyle: { paint: { color: "#ffffff00", kind: "solid" }, stroke: CONTORNO_BRANCO } })), null, "a vazada ganha cor");
+
+  // A cor já escolhida com a letra em degradê (colada, ou a letra virou degradê depois): o campo fica livre, com o erro
+  // do schema nele, e o Voltar ao padrão tira a cor num passo (o design volta a valer).
+  const invalido = design([fecharCom({ hover: { color: "#111111" }, textStyle: { paint: DEGRADE_LETRA } }), LINKS]);
+  assert.equal(panel.freeHoverColorDisabledReason(model.findFreeNode(invalido, "fechar").node), null);
+  assert.equal(schema.parsePopupFreeDesign(invalido), null, "o schema recusa");
+  const errors = { "freeDesign.nodes.fechar.hover.color": schema.POPUP_FREE_MESSAGES.hoverGradient };
+  const calls = [];
+  const comErro = FreeInspectorStyle({ ...hoverProps(invalido, "fechar", calls), errors });
+  const campo = elementById(comErro, "livre-fechar-passar-mouse-cor");
+  assert.equal(campo.props.disabled, false);
+  assert.equal(campo.props.error, schema.POPUP_FREE_MESSAGES.hoverGradient);
+  assert.equal(elementById(comErro, "livre-fechar-passar-mouse-erro").props.message, undefined, "o erro fica no campo, sem repetir na seção");
+  elementById(comErro, "livre-fechar-passar-mouse-cor-padrao").props.onClick();
+  assert.equal(calls[0].field, undefined);
+  assert.ok(schema.parsePopupFreeDesign(calls[0].next), "sem a cor, vale de novo");
+
+  // Sem borda: a Cor da borda parada com o motivo; com borda, livre e sem a nota.
+  const semBorda = design([fecharCom(), LINKS]);
+  assert.equal(panel.freeHoverBorderNote(model.findFreeNode(semBorda, "fechar").node), C.hover.borderNone);
+  assert.equal(elementById(FreeInspectorStyle(hoverProps(semBorda, "fechar")), "livre-fechar-passar-mouse-borda").props.disabled, true);
+  assert.ok(renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(semBorda, "fechar"))).includes(C.hover.borderNone));
+  const comBorda = design([fecharCom({ box: BORDA_BRANCA }), LINKS]);
+  assert.equal(panel.freeHoverBorderNote(model.findFreeNode(comBorda, "fechar").node), null);
+  assert.equal(elementById(FreeInspectorStyle(hoverProps(comBorda, "fechar")), "livre-fechar-passar-mouse-borda").props.disabled, false);
+  assert.equal(renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(comBorda, "fechar"))).includes(C.hover.borderNone), false);
+  // A cor da borda escolhida e a borda tirada depois: o campo fica livre (para voltar ao padrão), com a nota.
+  const borda = design([fecharCom({ hover: { borderColor: "#ffffff" } }), LINKS]);
+  const bordaTree = FreeInspectorStyle(hoverProps(borda, "fechar"));
+  assert.equal(elementById(bordaTree, "livre-fechar-passar-mouse-borda").props.disabled, false);
+  assert.ok(elementById(bordaTree, "livre-fechar-passar-mouse-borda-padrao"));
+  assert.ok(renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(borda, "fechar"))).includes(C.hover.borderNone));
+  assert.equal(panel.freeHoverBorderNote({ hover: { color: "#ffffff" }, id: "links", type: "links" }), null, "os Links não têm borda ao passar o mouse");
+
+  // O editor parado (salvando) para tudo, inclusive o Voltar ao padrão.
+  const parado = FreeInspectorStyle({ ...hoverProps(borda, "fechar"), disabled: true });
+  assert.equal(elementById(parado, "livre-fechar-passar-mouse-borda").props.disabled, true);
+  assert.equal(elementById(parado, "livre-fechar-passar-mouse-borda-padrao").props.disabled, true);
+});
+
+test("L6c: a chave Ver com o mouse em cima liga e desliga o palco, sem mudar o design; parada sem cor própria", () => {
+  assert.equal(C.hover.preview, "Ver com o mouse em cima");
+  assert.equal(C.hover.previewNote, "Só para você ver aqui. Não muda o pop-up.");
+
+  const comCor = design([fecharCom({ hover: { fill: ESCURECE_FUNDO } }), LINKS]);
+  const calls = [];
+  const previews = [];
+  const off = elementById(FreeInspectorStyle(hoverProps(comCor, "fechar", calls, previews)), "livre-fechar-passar-mouse-ver");
+
+  assert.equal(off.props.checked, false);
+  assert.equal(off.props.disabled, false);
+  assert.equal(off.props.description, C.hover.previewNote);
+  assert.equal(off.props.label, C.hover.preview);
+  off.props.onCheckedChange(true);
+  assert.deepEqual(previews, [true]);
+  assert.deepEqual(calls, [], "não muda o design nem o histórico");
+
+  const on = elementById(FreeInspectorStyle(hoverProps(comCor, "fechar", calls, previews, { hoverPreview: true })), "livre-fechar-passar-mouse-ver");
+  assert.equal(on.props.checked, true);
+  on.props.onCheckedChange(false);
+  assert.deepEqual(previews, [true, false]);
+  assert.deepEqual(calls, []);
+
+  // Sem cor própria, o palco não teria o que mostrar: a chave fica parada, com o motivo, e nunca aparece ligada.
+  const semCor = design([fecharCom(), LINKS]);
+  const parada = elementById(FreeInspectorStyle(hoverProps(semCor, "fechar", [], [], { hoverPreview: true })), "livre-fechar-passar-mouse-ver");
+  assert.equal(parada.props.disabled, true);
+  assert.equal(parada.props.checked, false);
+  assert.equal(parada.props.description, C.hover.previewEmpty);
+  assert.equal(panel.freeHoverPreviewDisabledReason(model.findFreeNode(semCor, "fechar").node), C.hover.previewEmpty);
+  assert.equal(panel.freeHoverPreviewDisabledReason(model.findFreeNode(comCor, "fechar").node), null);
+
+  // A chave continua ligada só com o mesmo elemento sozinho, com cor própria e com o painel do elemento aberto: volta ao
+  // normal ao trocar de elemento, com vários, no Revisar e quando a última cor volta ao padrão (ou sai pelo Ctrl + Z).
+  const now = { activeId: "fechar", hasHover: true, many: false, panel: "inspector" };
+  assert.equal(panel.freeHoverPreviewAfter("fechar", now), "fechar");
+  assert.equal(panel.freeHoverPreviewAfter(null, now), null);
+  assert.equal(panel.freeHoverPreviewAfter("fechar", { ...now, activeId: "links" }), null, "outro elemento");
+  assert.equal(panel.freeHoverPreviewAfter("fechar", { ...now, activeId: null }), null, "nada escolhido (ou o elemento saiu)");
+  assert.equal(panel.freeHoverPreviewAfter("fechar", { ...now, many: true }), null, "vários escolhidos");
+  assert.equal(panel.freeHoverPreviewAfter("fechar", { ...now, panel: "review" }), null, "no Revisar");
+  assert.equal(panel.freeHoverPreviewAfter("fechar", { ...now, hasHover: false }), null, "sem cor própria");
+
+  // O painel liga a chave pelo id do elemento e o editor leva ao palco, que passa ao cartão (o atributo do aluno).
+  const inspector = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-inspector.tsx", import.meta.url), "utf8");
+  const editor = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-editor.tsx", import.meta.url), "utf8");
+  const canvas = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-canvas.tsx", import.meta.url), "utf8");
+  assert.match(inspector, /hoverPreview: hoverPreviewId === node\.id,/);
+  assert.match(inspector, /onHoverPreviewChange: \(on\) => onHoverPreviewChange\?\.\(on \? node\.id : null\)/);
+  assert.match(editor, /freeHoverPreviewAfter\(hoverPreviewId, \{ activeId, hasHover: freeHasHover\(selectedNode\), many, panel: rightPanel \}\)/);
+  assert.match(editor, /hoverPreviewId=\{hoverPreviewId\}\s+onBusyChange=/);
+  assert.match(editor, /onHoverPreviewChange=\{setHoverPreviewId\}/);
+  assert.match(editor, /hoverPreviewId=\{hoverPreviewId\}\s+onCommitMoves=/);
+  assert.match(canvas, /<PopupFreeCard[\s\S]*?\{\.\.\.\(hoverPreviewId \? \{ hoverPreviewId \} : \{\}\)\}[\s\S]*?preview\s*\/>/);
+});
+
+test("L6c: as chaves de erro e de dica das cores ao passar o mouse levam ao campo certo no Estilo (crítica C12)", () => {
+  const value = design([
+    { children: [fecharCom({ box: BORDA_BRANCA, hover: { borderColor: "#ffffff", color: "#111111", fill: ESCURECE_FUNDO } })], id: "caixa", type: "box" },
+    { action: { kind: "cta" }, id: "botao", type: "button" },
+    TITULO,
+    { ...LINKS, hover: { color: "#e5ff1f" } }
+  ]);
+  const target = (key) => panel.freeInspectorTargetOf(value, key);
+  const style = (id, field) => ({ fieldId: `livre-${id}-${field}`, nodeId: id, tab: "style" });
+
+  // Cada cor no campo dela (nunca o Conteúdo), com ou sem "freeDesign." e dentro da caixa.
+  assert.deepEqual(target("freeDesign.nodes.fechar.hover.color"), style("fechar", "passar-mouse-cor"));
+  assert.deepEqual(target("nodes.fechar.hover.fill.stops"), style("fechar", "passar-mouse-fundo"));
+  assert.deepEqual(target("nodes.fechar.hover.fill.angle"), style("fechar", "passar-mouse-fundo"));
+  assert.deepEqual(target("nodes.fechar.hover.borderColor"), style("fechar", "passar-mouse-borda"));
+  assert.deepEqual(target("nodes.botao.hover.fill"), style("botao", "passar-mouse-fundo"));
+  assert.deepEqual(target("nodes.links.hover.color"), style("links", "passar-mouse-cor"));
+  // O objeto inteiro (a frase do formato) e, nos Links, o que não é a cor: a seção.
+  assert.deepEqual(target("nodes.fechar.hover"), style("fechar", "passar-mouse"));
+  assert.deepEqual(target("nodes.links.hover"), style("links", "passar-mouse"));
+  assert.deepEqual(target("nodes.links.hover.fill"), style("links", "passar-mouse"));
+  // Fora do Botão e dos Links não há seção: o primeiro campo do Conteúdo, como antes.
+  assert.deepEqual(target("nodes.titulo.hover"), { fieldId: "livre-titulo-texto", nodeId: "titulo", tab: "content" });
+  assert.deepEqual(panel.freeFocusTargetOf(value, { key: "nodes.fechar.hover.color" }), style("fechar", "passar-mouse-cor"));
+
+  // A dica do Revisar sai na chave da cor ao passar o mouse e leva ao mesmo campo.
+  const comDica = design([fecharCom({ hover: { fill: { color: "#ffffff", kind: "solid" } } }), LINKS]);
+  const dica = checks.popupFreeHints(comDica).find((hint) => panel.freeIsHoverKey(hint.key));
+  assert.equal(dica.key, "nodes.fechar.hover.color");
+  assert.deepEqual(panel.freeInspectorTargetOf(comDica, dica.key), style("fechar", "passar-mouse-cor"));
+
+  // Os campos existem no Estilo com esses ids, e o erro aparece no campo.
+  const html = renderToStaticMarkup(createElement(FreeInspectorStyle, { ...styleProps(value, "fechar"), errors: { "freeDesign.nodes.fechar.hover.fill.stops": "Use de 2 a 5 cores." } }));
+  for (const id of ["livre-fechar-passar-mouse", "livre-fechar-passar-mouse-fundo", "livre-fechar-passar-mouse-cor", "livre-fechar-passar-mouse-borda"]) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+  assert.ok(html.includes("Use de 2 a 5 cores."));
+  // O erro do objeto inteiro aparece na seção.
+  const objeto = FreeInspectorStyle({ ...styleProps(value, "fechar"), errors: { "nodes.fechar.hover": schema.POPUP_FREE_MESSAGES.hover } });
+  assert.equal(elementById(objeto, "livre-fechar-passar-mouse-erro").props.message, schema.POPUP_FREE_MESSAGES.hover);
+
+  assert.equal(panel.freeIsHoverKey("nodes.fechar.hover"), true);
+  assert.equal(panel.freeIsHoverKey("freeDesign.nodes.fechar.hover.fill.stops"), true);
+  assert.equal(panel.freeIsHoverKey("nodes.fechar.textStyle.paint"), false);
+  assert.equal(panel.freeIsHoverKey("nodes.hover.textStyle.paint"), false, "um elemento com o id hover");
+  assert.equal(panel.freeIsHoverKey("nodes.fechar.hovered"), false);
+});
+
+test("L6c: a dica de contraste ao passar o mouse fica na seção dela; a de sempre, embaixo da Cor do texto", () => {
+  const value = design([fecharCom({ box: VERMELHO_BOTAO, hover: { fill: { color: "#ffffff", kind: "solid" } } }), LINKS]);
+  const hints = [
+    { key: "nodes.fechar.textStyle.paint", kind: "contrast", message: "Contraste de sempre.", nodeId: "fechar" },
+    { key: "nodes.fechar.hover.color", kind: "contrast", message: "Ao passar o mouse, contraste baixo.", nodeId: "fechar" }
+  ];
+  const html = renderToStaticMarkup(createElement(FreeInspectorStyle, { ...hoverProps(value, "fechar"), hints }));
+  const at = html.indexOf('id="livre-fechar-passar-mouse"');
+  const before = html.slice(0, at);
+  const section = html.slice(at);
+
+  assert.ok(at > 0);
+  assert.ok(before.includes("Contraste de sempre.") && !before.includes("Ao passar o mouse, contraste baixo."));
+  assert.ok(section.includes("Ao passar o mouse, contraste baixo.") && !section.includes("Contraste de sempre."));
 });
 
 /* ------------------------------------------------------------------------------------------------
@@ -1861,6 +2206,18 @@ test("vocabulário das frases do painel", () => {
   );
   for (const text of [...collectStrings(C.style), ...collectStrings(C.span)]) {
     assert.doesNotMatch(text, /\b(?:stroke|mark|outline|highlight)\b/i, text);
+  }
+
+  // Cores ao passar o mouse (L6c): as frases do plano, sem o nome do campo do JSON.
+  assert.deepEqual(
+    [C.hover.title, C.hover.fill, C.hover.color, C.hover.borderColor, C.hover.linksColor, C.hover.reset],
+    ["Ao passar o mouse", "Fundo", "Cor do texto", "Cor da borda", "Cor", "Voltar ao padrão"]
+  );
+  assert.equal(C.hover.note, "Vale também quando o aluno chega pelo teclado. No celular não tem mouse.");
+  assert.equal(C.hover.buttonDefault, "Sem cores próprias, o botão clareia um pouco quando o mouse passa.");
+  assert.equal(C.hover.resetLabel("Fundo"), "Fundo: voltar ao padrão");
+  for (const text of collectStrings(C.hover)) {
+    assert.doesNotMatch(text, /\b(?:hover|fill|border|color|preview)\b/i, text);
   }
 
   // As telas do painel: o texto que aparece direto no JSX e nos aria-label escritos à mão também.

@@ -49,6 +49,11 @@ export type FreeInspectorProps = {
   focusRequest: FreeFocusRequest | null;
   fonts: readonly PopupFontOption[];
   hints: readonly FreeHint[];
+  /**
+   * O elemento com a chave "Ver com o mouse em cima" ligada (L6c; o editor guarda, fora do historico, e desliga ao
+   * trocar de elemento). null = nenhum.
+   */
+  hoverPreviewId?: FreeId | null;
   onBusyChange: (reason: string | null) => void;
   onChange: (next: PopupFreeDesign, options?: { coalesceKey?: string }) => void;
   /** Texto e destino do Botão principal: entram no histórico { design, cta } com a coalesceKey. */
@@ -58,6 +63,8 @@ export type FreeInspectorProps = {
   onDeviceChange?: (device: "desktop" | "mobile") => void;
   onFocusHandled: () => void;
   onFontsChange: (fonts: PopupFontOption[]) => void;
+  /** A chave "Ver com o mouse em cima" (L6c): o id do elemento ao ligar, null ao desligar. */
+  onHoverPreviewChange?: (id: FreeId | null) => void;
   /** Retângulos medidos (px da prancheta), para o que o painel mostra (ex.: altura automática). */
   rects: FreeMeasuredRects;
   selectedId: FreeId | null;
@@ -74,7 +81,27 @@ const tabClass = cn(
 );
 
 export function FreeInspector(props: FreeInspectorProps) {
-  const { content, design, device, disabled, errors, focusRequest, fonts, hints, onBusyChange, onChange, onCommand, onCtaChange, onDeviceChange, onFocusHandled, onFontsChange, rects, selectedId } = props;
+  const {
+    content,
+    design,
+    device,
+    disabled,
+    errors,
+    focusRequest,
+    fonts,
+    hints,
+    hoverPreviewId = null,
+    onBusyChange,
+    onChange,
+    onCommand,
+    onCtaChange,
+    onDeviceChange,
+    onFocusHandled,
+    onFontsChange,
+    onHoverPreviewChange,
+    rects,
+    selectedId
+  } = props;
   const found = selectedId ? findFreeNode(design, selectedId) : null;
   const node = found?.node ?? null;
   const [tab, setTab] = useState<ElementTab>("content");
@@ -179,12 +206,14 @@ export function FreeInspector(props: FreeInspectorProps) {
     errors,
     fonts,
     hints,
+    hoverPreview: hoverPreviewId === node.id,
     latest,
     node,
     onBusyChange,
     onChange: change,
     onCtaChange,
     onFontsChange,
+    onHoverPreviewChange: (on) => onHoverPreviewChange?.(on ? node.id : null),
     rects
   };
   const typeLabel = freeNodeTypeLabel(node);
