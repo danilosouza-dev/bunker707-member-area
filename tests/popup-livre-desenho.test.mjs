@@ -598,6 +598,48 @@ test("links alinham pela textStyle.align", () => {
   assert.equal(styles.freeLinksRowCss({ gap: 20, id: "l", type: "links" }, render.freeTextStyleOf({ id: "l", type: "links" }), { width: W }).columnGap, len(20));
 });
 
+test("links sublinham ao passar o mouse: sem linha escolhida nada de linha em linha; com linha escolhida ela fica; em degradê a linha usa a primeira parada", () => {
+  /** O atributo style do link `name` ("snooze" ou "dismiss"), conferindo que ele foi desenhado. */
+  const linkStyle = (markup, name, tag = "button") => {
+    const match = new RegExp(`<${tag} [^>]*data-free-link="${name}"[^>]*>`).exec(markup);
+
+    assert.ok(match, `link ${name} desenhado como <${tag}>`);
+
+    return /style="([^"]*)"/.exec(match[0])?.[1] ?? "";
+  };
+  const plain = parsed({ children: [{ id: "links", type: "links" }] });
+  const markup = card(plain);
+
+  for (const name of ["snooze", "dismiss"]) {
+    assert.match(markup, new RegExp(`<button class="[^"]*hover:underline[^"]*" data-free-link="${name}"`));
+    // O estilo em linha venceria a classe: com text-decoration-line:none o link nunca sublinhava.
+    assert.doesNotMatch(linkStyle(markup, name), /text-decoration/, "sem linha escolhida, nada de linha em linha: a classe hover:underline vale");
+  }
+
+  assert.doesNotMatch(linkStyle(card(plain, { preview: true }), "dismiss", "span"), /text-decoration/, "na previa, o mesmo estilo");
+
+  for (const decoration of ["underline", "line-through"]) {
+    const chosen = parsed({ children: [{ id: "links", textStyle: { decoration }, type: "links" }] });
+
+    assert.match(linkStyle(card(chosen), "dismiss"), new RegExp(`text-decoration-line:${decoration}`), `com a linha escolhida (${decoration}), ela fica sempre`);
+  }
+
+  // C21: em degradê a letra é transparente e a linha (do passar o mouse ou escolhida) usaria a cor dela, invisível.
+  const paint = { angle: 90, kind: "linear", stops: [{ at: 100, color: "#22d3ee" }, { at: 0, color: "#c084fc" }] };
+  const gradient = linkStyle(card(parsed({ children: [{ id: "links", textStyle: { paint }, type: "links" }] })), "dismiss");
+
+  assert.match(gradient, /(^|;)color:transparent(;|$)/);
+  assert.match(gradient, /background-clip:text/);
+  assert.match(gradient, /(^|;)text-decoration-color:#c084fc(;|$)/, "a primeira parada (a de menor posição), a mesma cor dos ícones");
+  assert.doesNotMatch(gradient, /text-decoration-line/);
+
+  const gradientUnderline = linkStyle(card(parsed({ children: [{ id: "links", textStyle: { decoration: "underline", paint }, type: "links" }] })), "snooze");
+
+  assert.match(gradientUnderline, /text-decoration-line:underline/);
+  assert.match(gradientUnderline, /text-decoration-color:#c084fc/, "a linha escolhida em degradê também aparece");
+  assert.doesNotMatch(linkStyle(markup, "dismiss"), /text-decoration-color/, "cor sólida: a linha já usa a cor do texto");
+});
+
 /* ------------------------------------------------------------------------------------------------
  * Nome do dialogo, descricao, ordem e clique
  * ---------------------------------------------------------------------------------------------- */
@@ -737,10 +779,10 @@ test("o player do Áudio dentro de uma Caixa recebe clique", () => {
   assert.doesNotMatch(card(design), /data-free-id="audio"/, "sem audio no aviso, o elemento nao aparece");
 });
 
-test("botões, links e o X levam as classes de foco visível", () => {
+test("botões, links e o X levam as classes de foco visível; o anel vence a sombra própria do botão", () => {
   const design = parsed({
     children: [
-      { action: { kind: "cta" }, id: "botao", type: "button" },
+      { action: { kind: "cta" }, box: { shadows: [{ blur: 0, color: "#9db300", spread: 0, x: 0, y: 3 }] }, id: "botao", type: "button" },
       { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" },
       { action: { href: "https://exemplo.com.br/oferta", kind: "link", target: "new_tab" }, id: "link", label: "Ver página", type: "button" },
       { id: "links", type: "links" }
@@ -755,12 +797,42 @@ test("botões, links e o X levam as classes de foco visível", () => {
     assert.match(className, /focus-visible:outline-2/);
     assert.match(className, /focus-visible:outline-offset-\[-2px\]/, "por dentro: a prancheta corta o que passa dela");
     assert.match(className, /focus-visible:outline-white/);
+    // A sombra propria do botao vai no estilo em linha, que vencia o anel montado pelas variaveis --tw-* (o anel
+    // sumia): agora o anel e o box-shadow inteiro com !important e toma o lugar da sombra no foco por teclado.
+    // (Sem classes de exemplo nos comentarios: o Tailwind le os testes e geraria regras para elas.)
+    assert.match(className, /(^| )focus-visible:\[box-shadow:inset_0_0_0_4px_#000000b3\]!( |$)/, "o anel com !important");
+    assert.doesNotMatch(className, /focus-visible:shadow-/, "nada pelo --tw-shadow, que o estilo em linha vence");
     assert.match(className, /before:min-h-11 before:min-w-11/, "44 px de toque");
   }
+
+  assert.match(styleOfId(markup, "botao"), /box-shadow:0px 0\.6818cqw 0px 0px #9db300/, "a sombra propria fica no estilo em linha");
 
   assert.match(markup, /<a class="[^"]*hover:brightness-110[^"]*" data-free-button="link" data-free-id="link" href="https:\/\/exemplo\.com\.br\/oferta"[^>]*rel="noopener noreferrer" target="_blank">[\s\S]*?<span class="sr-only"> \(abre em nova aba\)<\/span><\/a>/);
   assert.match(markup, /<a class="[^"]*" data-free-button="cta" data-free-id="botao" href="\/minhas-compras"/);
   assert.match(markup, /<button class="[^"]*" data-free-button="close" data-free-id="fechar"[^>]*type="button">/);
+});
+
+test("o aperto de 1 px dos botões anima: a transição lista translate, a propriedade que o active:translate-y-px muda", () => {
+  const design = parsed({
+    children: [
+      { action: { kind: "cta" }, id: "botao", type: "button" },
+      { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" },
+      { action: { href: "https://exemplo.com.br/oferta", kind: "link", target: "new_tab" }, id: "link", label: "Ver página", type: "button" },
+      { id: "links", type: "links" }
+    ]
+  });
+  const classes = [...card(design).matchAll(/<(?:a|button) class="([^"]*)" data-free-button="/g)].map((match) => match[1]);
+
+  assert.equal(classes.length, 3, "principal, Fechar e o link");
+
+  for (const className of classes) {
+    // No Tailwind 4 o translate-y-px muda a propriedade `translate` (nao `transform`): com transform na lista, o
+    // aperto pulava sem animar.
+    assert.match(className, /(^| )active:translate-y-px( |$)/);
+    assert.match(className, /(^| )transition-\[filter,translate\]( |$)/);
+    assert.doesNotMatch(className, /transform/);
+    assert.match(className, /(^| )motion-reduce:transition-none( |$)/, "com menos movimento, sem transicao");
+  }
 });
 
 test("sizes da imagem pela largura do elemento", () => {
@@ -1299,7 +1371,10 @@ test("HTML do Padrão e do Personalizado igual ao de antes do Livre", () => {
 });
 
 // Os mesmos casos que geraram tests/fixtures/popup-livre/antes-celular-livre.html no commit-base 55a8cc0 (antes de o
-// cartao desenhar os valores do celular): os modelos para comecar e o modelo com video, no aluno e na previa.
+// cartao desenhar os valores do celular): os modelos para comecar e o modelo com video, no aluno e na previa. Gerada
+// de novo no L6a (docs/27 §8), so com os consertos do cartao: os Links sem text-decoration-line:none em linha, o
+// anel de foco pelo box-shadow inteiro com !important (FREE_FOCUS_CLASS) e o aperto dos botoes com a transicao do
+// translate no lugar da do transform (FREE_PRESS_CLASS).
 async function livreBeforeCases() {
   const starters = await import("../src/server/communications/popup-free-starters.ts");
   const cases = [];

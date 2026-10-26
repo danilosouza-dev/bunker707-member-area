@@ -247,7 +247,17 @@ function LinksView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderCo
   }
 
   const text = freeTextStyleOf(node);
-  const linkStyle: CSSProperties = { ...FREE_LINK_RESET_CSS, ...freeTextCss(text, ctx.style), ...labelPaintCss(text), textAlign: "center" };
+  const textCss = freeTextCss(text, ctx.style);
+  // Sem linha escolhida, nenhuma linha em linha: o estilo em linha venceria o hover:underline de LINK_CLASS. Em
+  // degrade a letra e transparente, entao a linha (escolhida ou ao passar o mouse) usa a primeira parada (icones).
+  const linkStyle: CSSProperties = {
+    ...FREE_LINK_RESET_CSS,
+    ...textCss,
+    textDecorationLine: text.decoration,
+    ...labelPaintCss(text),
+    textAlign: "center",
+    textDecorationColor: text.paint.kind === "solid" ? undefined : textCss.color
+  };
   const preview = ctx.style.preview;
   const link = (label: string, onClick: (() => void) | undefined, name: string) =>
     preview ? (
