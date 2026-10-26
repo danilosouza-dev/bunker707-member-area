@@ -1,7 +1,7 @@
 import type { Browser, Locator, Page } from "@playwright/test";
 import { popupStarterDesign } from "../../src/server/communications/popup-design-model";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
-import { bloquearRedeExterna, estadoDoPopUpDaAluna, eventosDoPopUp, expect, idDoAviso, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
+import { bloquearRedeExterna, estadoDoPopUpDaAluna, eventosDoPopUp, expect, idDoAviso, janelaParada, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
 import { publicarPopUpComDesign } from "./popup-design-fixtures";
 import { designVideoNoTopo, prepararMidiaDoLivre, publicarPopUpLivre, type MidiaDoLivre } from "./popup-livre-fixtures";
 
@@ -10,11 +10,12 @@ import { designVideoNoTopo, prepararMidiaDoLivre, publicarPopUpLivre, type Midia
 // (selecionavel); o selo fica por cima da parte do video que some; o <video> toca mudo; com menos movimento nenhum
 // <video> e so a capa; no celular (375 px) o cartao tem 343 px, sem rolagem para o lado, e tudo encolhe na mesma
 // proporcao (conferido so no que fica acima de qualquer texto, numa amostra com a fonte enviada e textos de 16 px
-// ou mais); o Tab segue as Camadas e o X vem por ultimo; uma forma por cima do botao nao impede o clique (e o
-// clique conta); o Esc fecha; "Não mostrar de novo" some com dismiss false; Padrão e Personalizado continuam
-// iguais; com valores proprios do celular (docs/27 §1 e §9.10), a 375 px as caixas seguem o celular e a Forma escondida
-// no celular some, e a 1440 px vale o computador. Com E2E_SHOTS_DIR, guarda as fotos de 1440 e 375 px nessa pasta
-// (conferencia visual).
+// ou mais); o Tab segue as Camadas e o X vem por ultimo; os links sublinham ao passar o mouse e o anel de foco fica
+// por cima da sombra propria do botao, cujo aperto anima o translate (L6a); uma forma por cima do botao nao impede
+// o clique (e o clique conta); o Esc fecha; "Não mostrar de novo" some com dismiss false; Padrão e Personalizado
+// continuam iguais; com valores proprios do celular (docs/27 §1 e §9.10), a 375 px as caixas seguem o celular e a
+// Forma escondida no celular some, e a 1440 px vale o computador. Com E2E_SHOTS_DIR, guarda as fotos de 1440 e 375
+// px nessa pasta (conferencia visual).
 
 const TITULO = "Pop-up E2E: Livre com vídeo";
 const NOME = /experimente grátis nova aula ao vivo/i;
@@ -38,6 +39,8 @@ async function abrirPopUp(page: Page, nome: RegExp | string = NOME) {
   const popUp = page.getByRole("dialog", { name: nome });
   await expect(popUp).toBeVisible();
   await expect(popUp.locator("[data-popup-free]")).toBeVisible();
+  // As medidas e os cliques por coordenada so depois de a janela parar de crescer.
+  await janelaParada(popUp);
   return popUp;
 }
 
@@ -137,6 +140,39 @@ test.describe("computador (1440 px)", () => {
     const id = await idDoAviso(TITULO);
     await expect.poll(async () => (await eventosDoPopUp(id)).map((evento) => evento.event_type).at(-1)).toBe("message_closed");
     expect((await eventosDoPopUp(id)).at(-1)?.metadata).toMatchObject({ via: "esc" });
+  });
+
+  test("os links sublinham ao passar o mouse; no botão com sombra, o anel de foco fica por cima e o aperto anima", async ({ page }) => {
+    await reabrirPopUpParaAluna(TITULO);
+    const popUp = await abrirPopUp(page);
+    const naoMostrar = popUp.getByRole("button", { exact: true, name: "Não mostrar de novo" });
+    const linha = () => naoMostrar.evaluate((element) => getComputedStyle(element).textDecorationLine);
+
+    // Parado, sem linha; com o mouse em cima, sublinhado (nada de linha no estilo em linha: a classe hover:underline
+    // vale). O mouse comeca dentro da janela, longe dos links (WebKit).
+    await page.mouse.move(8, 8);
+    expect(await linha()).toBe("none");
+    await naoMostrar.hover();
+    await expect.poll(linha).toBe("underline");
+    await page.mouse.move(8, 8);
+    await expect.poll(linha).toBe("none");
+
+    // O botao principal do modelo tem sombra propria (no estilo em linha). No Tab, o box-shadow calculado e so o
+    // anel escuro de 4 px por dentro (o !important da classe de foco vence o estilo em linha).
+    const botao = popUp.getByRole("link", { name: "Saiba mais" });
+    const sombra = () => botao.evaluate((element) => getComputedStyle(element).boxShadow);
+    const ANEL = /^(?:inset )?rgba\(0, 0, 0, 0\.7\d*\) 0px 0px 0px 4px(?: inset)?$/;
+
+    expect(await sombra()).not.toMatch(ANEL);
+    expect(await sombra()).not.toBe("none");
+    // O aperto de 1 px muda a propriedade translate (Tailwind 4): e ela que a transicao lista.
+    expect(await botao.evaluate((element) => getComputedStyle(element).transitionProperty)).toBe("filter, translate");
+    await page.keyboard.press("Tab");
+    await expect(botao).toBeFocused();
+    await expect.poll(sombra).toMatch(ANEL);
+
+    await popUp.getByRole("button", { exact: true, name: "Fechar" }).click();
+    await expect(popUp).toHaveCount(0);
   });
 
   test("o botão principal conta o clique e leva ao destino", async ({ page }) => {

@@ -812,8 +812,14 @@ export function freeCloseCss(design: Pick<PopupFreeDesign, "close">): { button: 
 export const FREE_TOUCH_CLASS =
   "relative before:absolute before:left-1/2 before:top-1/2 before:size-full before:min-h-11 before:min-w-11 before:-translate-x-1/2 before:-translate-y-1/2 before:content-['']";
 
-/** Foco visivel por dentro (a prancheta corta o que passa dela): contorno branco + anel escuro. */
-export const FREE_FOCUS_CLASS = "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white focus-visible:shadow-[inset_0_0_0_4px_#000000b3]";
+/**
+ * Foco visivel por dentro (a prancheta corta o que passa dela): contorno branco + anel escuro. O anel e o box-shadow
+ * inteiro com !important: a sombra propria do botao vem no estilo em linha e venceria; no foco, ele toma o lugar dela.
+ */
+export const FREE_FOCUS_CLASS = "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white focus-visible:[box-shadow:inset_0_0_0_4px_#000000b3]!";
 
-/** Passar o mouse e apertar nos botoes (sem animacao com menos movimento). */
-export const FREE_PRESS_CLASS = "transition-[filter,transform] hover:brightness-110 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0";
+/**
+ * Passar o mouse e apertar nos botoes (sem animacao com menos movimento). No Tailwind 4 o deslocamento de 1 px do
+ * aperto muda a propriedade `translate` (nao `transform`): e ela que a transicao lista.
+ */
+export const FREE_PRESS_CLASS = "transition-[filter,translate] hover:brightness-110 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0";

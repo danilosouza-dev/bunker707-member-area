@@ -44,7 +44,9 @@ Antes de abrir ou mesclar PR:
 npm run verify
 ```
 
-Esse comando cobre lint, typecheck, testes automatizados e build.
+Esse comando cobre lint, typecheck, testes automatizados e build e termina com a regua do pedaco do cartao Livre (`npm run livre:medir`, `scripts/livre-medir-cartao.mjs`): depois do build, ela mede o que o aluno baixa a mais quando o pop-up e Livre e falha acima de 12 KB (12.288 B gzip). O teto e as cotas de cada entrega estao no `docs/27` §7; uma PR que mexe no cartao Livre escreve la o antes e o depois, medidos na mesma pasta.
+
+O Tailwind 4 do build le todo arquivo fora do `.gitignore`, inclusive `tests/` e `docs/`, e gera uma regra no CSS global (que vai para todo aluno) para cada classe que acha escrita, ate num comentario. Em teste, doc ou comentario, classe de exemplo so as que o codigo de `src/` ja usa; senao, nomeie a constante ou monte o texto aos pedacos. A guarda `tests/tailwind-regras-de-exemplo.guard.test.mjs` falha quando uma classe vira regra sem estar no codigo (`docs/27` §13.11.1).
 
 Alteracoes em acesso, persistencia ou navegacao devem incluir teste de regressao que prove a invariante afetada. Para mudancas perceptiveis no browser, o gate de codigo nao substitui uma validacao autenticada da rota, do console e da requisicao real.
 
@@ -56,7 +58,7 @@ Como escrever esses testes, onde cada um fica, como rodar e a rotina de PR estao
 - teste que so confere texto do codigo-fonte por expressao regular nao conta como teste de regressao de comportamento; so entra como guarda de regra de arquitetura, em `*.guard.test.mjs`;
 - sem teste, so com justificativa escrita na PR e pendencia anotada no mapa de cobertura do docs/18.
 
-O CI roda dois jobs em toda PR e push para `dev` e `main`: Verify (`npm run verify`) e Integracao e ponta a ponta (Supabase local em Docker, migracoes do zero, escola de teste, `npm run test:integration` e `npm run test:e2e`). `npm run verify:full` roda tudo isso localmente. Os testes com banco so rodam contra o Supabase local, nunca contra o projeto compartilhado.
+O CI roda dois jobs em toda PR e push para `dev` e `main`: Verify (`npm run verify`, com a regua do cartao Livre no fim) e Integracao e ponta a ponta (Supabase local em Docker, migracoes do zero, escola de teste, `npm run test:integration` e `npm run test:e2e`). `npm run verify:full` roda tudo isso localmente. Os testes com banco so rodam contra o Supabase local, nunca contra o projeto compartilhado.
 
 ## Organizacao de produto
 

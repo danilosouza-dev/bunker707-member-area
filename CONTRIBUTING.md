@@ -57,7 +57,7 @@ O comando padrao de verificacao e:
 npm run verify
 ```
 
-Ele executa lint, typecheck, testes unitarios e build. O CI roda esse comando e, em paralelo, a integracao e a ponta a ponta com o Supabase local; os dois jobs precisam estar verdes para a PR entrar. Para iterar mais rapido durante o desenvolvimento:
+Ele executa lint, typecheck, testes unitarios e build e termina com a regua do pedaco do cartao Livre (`npm run livre:medir`): falha se o que o aluno baixa para abrir um pop-up Livre passar de 12.288 B gzip (`docs/27` §7). O CI roda esse comando e, em paralelo, a integracao e a ponta a ponta com o Supabase local; os dois jobs precisam estar verdes para a PR entrar. Para iterar mais rapido durante o desenvolvimento:
 
 ```bash
 npm run lint
@@ -81,6 +81,7 @@ npm test                    # unitarios (tests/*.test.mjs), sem banco; e o que r
 npm run db:start            # Supabase local em Docker: migracoes do zero, .env.test.local e escola de teste
 npm run test:integration    # tests/integration/, contra o banco local
 npm run test:e2e            # tests/e2e/, Playwright em Chromium e WebKit (uma vez: npx playwright install chromium webkit)
+npm run livre:medir         # depois de npm run build: o pedaco do cartao Livre, a janela e o JS inicial do Inicio (docs/27 §7)
 npm run verify:full         # verify + integracao + ponta a ponta (o que o CI faz)
 npm run db:stop
 ```
