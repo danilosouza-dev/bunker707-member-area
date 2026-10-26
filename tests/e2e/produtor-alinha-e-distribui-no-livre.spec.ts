@@ -139,7 +139,8 @@ test("alinha e distribui várias Formas, alinha o girado, Alt + clique na pilha 
     await expect.poll(() => escolhidos(editor)).toEqual(["f1"]);
     await botaoDaCamada(editor, "ft").click({ modifiers: ["Shift"] });
     await expect(frase).toHaveText("5 elementos escolhidos.");
-    await expect.poll(() => escolhidos(editor)).toEqual(["f1", "f2", "f3", "f4", "ft"]);
+    // O intervalo na ordem das Camadas (L64: de cima para baixo, a Travada acima da Forma 4), o clicado no fim.
+    await expect.poll(() => escolhidos(editor)).toEqual(["f4", "f3", "f2", "f1", "ft"]);
     await expect(varios.getByRole("heading", { exact: true, name: "5 elementos selecionados" })).toBeVisible();
   });
 

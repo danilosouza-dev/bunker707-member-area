@@ -333,7 +333,7 @@ export const FREE_INSPECTOR_COPY = {
     height: "Altura",
     hide: "Esconder do pop-up",
     layer: "Camada",
-    layerNote: "Quem vem depois nas Camadas fica por cima; aqui você muda isso.",
+    layerNote: "Quem está mais acima nas Camadas fica por cima; aqui você muda isso.",
     lock: "Travar no editor",
     margin: "Margem",
     marginHint: "Use negativo para passar por cima do elemento vizinho.",

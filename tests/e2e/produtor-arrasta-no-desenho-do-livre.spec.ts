@@ -73,7 +73,10 @@ test.beforeAll(async () => {
 
 test.afterAll(zerarComunicacao);
 
-/** A ordem das Camadas sem as 20 linhas da caixa cheia: "id" na prancheta e "caixa/id" dentro de uma caixa. */
+/**
+ * A ordem das Camadas como se ve (L64: de cima para baixo, o da frente primeiro; a ordem de children ao contrario em
+ * todo nivel), sem as 20 linhas da caixa cheia: "id" na prancheta e "caixa/id" dentro de uma caixa.
+ */
 async function ordem(editor: Locator) {
   return (await linhasDasCamadas(editor)).filter((linha) => !linha.id.startsWith("risco")).map((linha) => (linha.pai ? `${linha.pai}/${linha.id}` : linha.id));
 }
@@ -97,7 +100,7 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
   const barrinha = editor.getByRole("toolbar", { name: "Ações do elemento" });
 
   await expect(prancheta(editor)).toBeVisible();
-  expect(await ordem(editor)).toEqual(["titulo", "texto", "caixa", "caixa/selo", "caixa/botao", "cheia", "links"]);
+  expect(await ordem(editor)).toEqual(["links", "cheia", "caixa", "caixa/botao", "caixa/selo", "texto", "titulo"]);
 
   await test.step("com os Links em Renomear, o Título desce um lugar na coluna; Ctrl + Z e Ctrl + Shift + Z: um passo", async () => {
     // O blur do campo grava o nome depois do pointerdown no desenho: a foto do arrastar so vem depois do limiar e
@@ -127,17 +130,17 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
     await expect(linha).toHaveCount(0);
     await expect(campo).toHaveCount(0);
     await expect(botaoDaCamada(editor, "links")).toContainText("Rodapé");
-    expect(await ordem(editor)).toEqual(["texto", "titulo", "caixa", "caixa/selo", "caixa/botao", "cheia", "links"]);
+    expect(await ordem(editor)).toEqual(["links", "cheia", "caixa", "caixa/botao", "caixa/selo", "titulo", "texto"]);
     await expect(editor.locator("[data-free-selection]")).toHaveAttribute("data-free-selection", "titulo");
 
     // O foco no palco (o Ctrl + Z do editor ignora campo de digitar): um arrastar e um passo so.
     await editor.locator("[data-free-stage]").focus();
     await page.keyboard.press("Control+z");
     await expect(falado(editor)).toHaveText("Desfeito.");
-    expect(await ordem(editor)).toEqual(["titulo", "texto", "caixa", "caixa/selo", "caixa/botao", "cheia", "links"]);
+    expect(await ordem(editor)).toEqual(["links", "cheia", "caixa", "caixa/botao", "caixa/selo", "texto", "titulo"]);
     await page.keyboard.press("Control+Shift+z");
     await expect(falado(editor)).toHaveText("Refeito.");
-    expect(await ordem(editor)).toEqual(["texto", "titulo", "caixa", "caixa/selo", "caixa/botao", "cheia", "links"]);
+    expect(await ordem(editor)).toEqual(["links", "cheia", "caixa", "caixa/botao", "caixa/selo", "titulo", "texto"]);
   });
 
   await test.step("o Texto entra no fim da Caixa (abaixo do Botão, longe da faixa da borda)", async () => {
@@ -156,7 +159,7 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
     });
 
     await expect(falado(editor)).toHaveText("Movido. Posição 3 de 3, dentro de Caixa em coluna.");
-    expect(await ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "cheia", "links"]);
+    expect(await ordem(editor)).toEqual(["links", "cheia", "caixa", "caixa/texto", "caixa/botao", "caixa/selo", "titulo"]);
     expect(await filhosNoPalco(editor, "caixa")).toEqual(["selo", "botao", "texto"]);
     // O soltar no desenho nao mexe no foco: ele fica no palco (o foco ja estava nele, do Ctrl + Z de cima, e o
     // mousedown no Texto foca o palco, o primeiro com tabIndex, nos dois navegadores).
@@ -179,7 +182,7 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
     });
 
     await expect(falado(editor)).toHaveText("Movido. Posição 3 de 5, no pop-up.");
-    expect(await ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "texto", "cheia", "links"]);
+    expect(await ordem(editor)).toEqual(["links", "cheia", "texto", "caixa", "caixa/botao", "caixa/selo", "titulo"]);
     expect(await filhosNoPalco(editor, "caixa")).toEqual(["selo", "botao"]);
     // Nada do gesto fica para tras: sem linha nem lugar de antes, e a barrinha do Texto volta.
     await expect(editor.locator("[data-free-selection]")).toHaveAttribute("data-free-selection", "texto");
@@ -205,7 +208,7 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
     });
 
     await expect(falado(editor)).toHaveText("Movido. Posição 1 de 5, no pop-up.");
-    expect(await ordem(editor)).toEqual(["caixa", "caixa/selo", "caixa/botao", "titulo", "texto", "cheia", "links"]);
+    expect(await ordem(editor)).toEqual(["links", "cheia", "texto", "titulo", "caixa", "caixa/botao", "caixa/selo"]);
     await expect(barrinha).toBeVisible();
   });
 
@@ -267,7 +270,7 @@ test("arrasta os elementos da sequência no desenho: coluna, dentro e fora da ca
     });
 
     await expect(falado(editor)).toHaveText("Movido. Posição 2 de 2, dentro de Caixa em coluna. A ordem muda também no computador.");
-    expect(await ordem(editor)).toEqual(["caixa", "caixa/botao", "caixa/selo", "titulo", "texto", "cheia", "links"]);
+    expect(await ordem(editor)).toEqual(["links", "cheia", "texto", "titulo", "caixa", "caixa/selo", "caixa/botao"]);
     expect(await filhosNoPalco(editor, "caixa")).toEqual(["botao", "selo"]);
 
     // No Computador, a mesma ordem (a Caixa volta a ser coluna).

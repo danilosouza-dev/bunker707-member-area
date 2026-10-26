@@ -29,7 +29,7 @@ export const adminDelayedReveal =
  * Usados pelo Periodo e pelo Produto da barra superior, pelo menu Criar do Hoje e pela busca.
  */
 export const adminMenuPopup =
-  "min-w-[208px] max-w-[calc(100vw-32px)] origin-[var(--transform-origin)] rounded-lg border border-[var(--border-strong)] bg-[var(--surface-3)] p-1 text-[var(--text-primary)] shadow-[0_14px_36px_rgba(0,0,0,0.55)] outline-none transition-[opacity,transform] duration-100 ease-[var(--ease-admin)] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 motion-reduce:transition-none";
+  "min-w-[208px] max-w-[calc(100vw-32px)] origin-[var(--transform-origin)] rounded-lg border border-[var(--border-strong)] bg-[var(--surface-3)] p-1 text-[var(--text-primary)] shadow-[0_14px_36px_rgba(0,0,0,0.55)] outline-none transition-[opacity,scale] duration-100 ease-[var(--ease-admin)] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 motion-reduce:transition-none";
 
 export const adminMenuItem =
   "flex min-h-[34px] w-full cursor-default items-center gap-2 rounded-[6px] px-2.5 py-1.5 text-left text-sm leading-5 text-[var(--text-primary)] outline-none select-none data-disabled:cursor-not-allowed data-disabled:text-[var(--text-tertiary)] data-highlighted:bg-[var(--press-overlay)]";

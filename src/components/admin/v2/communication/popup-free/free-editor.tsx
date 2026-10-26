@@ -43,6 +43,7 @@ import {
 } from "./free-editor-history";
 import {
   FREE_EDITOR_COPY,
+  FREE_LAYERS_ZONE_SELECTOR,
   addFreeElement,
   alignFreeNode,
   applyFreeTemplateDesign,
@@ -61,6 +62,7 @@ import {
   freeMobileFreePlace,
   freeMoveAnnouncement,
   freeMoveProblem,
+  freeMoveWhere,
   freeNewNodeDropSpec,
   freeNodeIdForKey,
   freeNodeOf,
@@ -77,9 +79,9 @@ import {
   freeStageDesign,
   freeToFreeProblem,
   isFreeDesignErrorKey,
-  moveFreeNodeInList,
   moveFreeNodeIntoBox,
   moveFreeNodeOutOfBox,
+  moveFreeNodeStep,
   moveFreeNodeTo,
   nudgeFreeNode,
   raiseFreeArtboardTo,
@@ -152,6 +154,13 @@ import { FreeZoomControl } from "./free-zoom-control";
 // no soltar pelo mesmo caminho do clique. A ordem e uma so: com o Celular, toda mudanca de ordem termina a frase com
 // "A ordem muda também no computador." (orderPhrase); Soltar e Seguir a sequencia terminam com ela sempre, mesmo sem
 // mudar a ordem, porque o modo e um so nos dois aparelhos.
+// Camadas como no Figma (docs/27 L64 e L66): a lista mostra a ordem em que o desenho pinta (o de cima esta na
+// frente; sem camadas, children ao contrario). Vindo das Camadas, o Subir e o Descer (Alt + ↑/↓ e o ⋯) andam na lista
+// que se ve (moveFreeNodeStep "layers": Subir = mais para a frente, com a camada do vizinho quando precisa) e a frase
+// do mover conta a posicao de cima para baixo na lista (order "list"); vindo do desenho (a barrinha, Alt + ↑/↓ num
+// elemento da sequencia e o arrastar da sequencia), como a sequencia se ve, como antes. O Alt + ↑/↓ fora de uma
+// linha (freeMoveWhere): com o foco no painel das Camadas (a aba ou o vazio da lista) e num solto, como a lista; so um
+// elemento da sequencia fora das Camadas anda como a sequencia.
 //
 // Varios escolhidos (L4b, docs/27 §13.10): a selecao e uma lista na ordem da escolha (o ultimo e o principal), fora do
 // historico e da copia de recuperacao. O desenho, as Camadas e o painel Varios recebem a MESMA lista, viva e
@@ -1129,9 +1138,10 @@ function FreeEditorSession({
 
   /**
    * Leva um elemento a um vao (Camadas, desenho): confere no design de agora, grava um passo sem juntar com o anterior,
-   * seleciona e fala a posicao. O mesmo lugar ou um lugar invalido nao gravam nada.
+   * seleciona e fala a posicao (nas Camadas, `order` "list": contada de cima para baixo na lista, L64). O mesmo lugar
+   * ou um lugar invalido nao gravam nada.
    */
-  function moveTo(id: FreeId, target: FreeMoveTarget) {
+  function moveTo(id: FreeId, target: FreeMoveTarget, order: "list" | "reading" = "reading") {
     if (disabled) {
       return;
     }
@@ -1155,10 +1165,14 @@ function FreeEditorSession({
 
     commitDesign(result.design);
     select(id);
-    announce(orderPhrase(freeMoveAnnouncement(result.design, id, present.cta, { becameFlow: result.becameFlow })));
+    announce(orderPhrase(freeMoveAnnouncement(result.design, id, present.cta, { becameFlow: result.becameFlow, order })));
   }
 
-  function runCommand(kind: CommandKind, id: FreeId) {
+  /**
+   * Um comando de um elemento. `where`: de onde vem o Subir e o Descer (L64): "layers" anda na lista que se ve (Subir =
+   * mais para a frente); "canvas" (o padrao: a barrinha, o palco, o painel), na sequencia como se ve.
+   */
+  function runCommand(kind: CommandKind, id: FreeId, where: "canvas" | "layers" = "canvas") {
     const present = historyRef.current.present;
     const node = freeNodeOf(present.design, id);
 
@@ -1200,7 +1214,7 @@ function FreeEditorSession({
       }
       case "moveUp":
       case "moveDown": {
-        const next = moveFreeNodeInList(present.design, id, kind === "moveUp" ? -1 : 1);
+        const next = moveFreeNodeStep(present.design, id, kind, where);
 
         if (next) {
           commitDesign(next);
@@ -1418,7 +1432,7 @@ function FreeEditorSession({
     }
 
     if (command.kind === "move") {
-      moveTo(command.id, command.target);
+      moveTo(command.id, command.target, "list");
 
       return;
     }
@@ -1442,7 +1456,8 @@ function FreeEditorSession({
       return;
     }
 
-    runCommand(command.kind, command.id);
+    // Das Camadas, o Subir e o Descer andam na lista que se ve (L64).
+    runCommand(command.kind, command.id, "layers");
   }
 
   function onInspectorCommand(command: FreeEditorCommand) {
@@ -1920,7 +1935,10 @@ function FreeEditorSession({
 
     if (event.altKey && !mod && (key === "ArrowUp" || key === "ArrowDown")) {
       event.preventDefault();
-      runCommand(key === "ArrowUp" ? "moveUp" : "moveDown", activeId);
+      // Do painel das Camadas (a aba ou o vazio da lista) e num solto, como a lista; na sequencia, como ela se ve.
+      const where = freeMoveWhere({ free: selectedNode.place?.mode === "free", inLayers: Boolean(target.closest(FREE_LAYERS_ZONE_SELECTOR)) });
+
+      runCommand(key === "ArrowUp" ? "moveUp" : "moveDown", activeId, where);
 
       return;
     }
@@ -2293,7 +2311,7 @@ function FreeEditorSession({
           <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="elements">
             <FreeElementsPanel autoScrollTarget={canvasViewport} design={design} disabled={disabled} onAdd={(kind) => add(kind)} onDragEnd={onElementDragEnd} onDragMove={onElementDragMove} />
           </Tabs.Panel>
-          <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" tabIndex={-1} value="layers">
+          <Tabs.Panel className="min-h-0 flex-1 overflow-y-auto outline-none" data-free-layers-zone="" tabIndex={-1} value="layers">
             <FreeLayersPanel
               cta={cta}
               design={design}

@@ -2284,7 +2284,8 @@ test("vocabulário das frases do painel", () => {
   assert.equal(panel.freeLinksSnoozeDescription(false, 1_440), C.links.snoozeOff);
   assert.equal("snoozeNote" in C.links, false, "a nota fixa de antes saiu: a chave esta no painel");
   assert.equal(C.advanced.freeHint, "Solta: você escolhe o lugar. Só fora de caixas.");
-  assert.equal(C.advanced.layerNote, "Quem vem depois nas Camadas fica por cima; aqui você muda isso.");
+  // L64: nas Camadas, o que esta em cima esta na frente (como no Figma e no Photoshop).
+  assert.equal(C.advanced.layerNote, "Quem está mais acima nas Camadas fica por cima; aqui você muda isso.");
   assert.equal(C.popup.widthNote, "No celular, o pop-up inteiro encolhe junto, igual.");
   assert.equal(C.popup.closeNote, "O X fica sempre por cima e sempre funciona.");
   assert.equal(panel.freeRangeMessage({ max: 160, min: 10 }), "Use de 10 a 160.");

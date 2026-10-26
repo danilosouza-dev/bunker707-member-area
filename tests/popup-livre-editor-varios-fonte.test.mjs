@@ -123,9 +123,11 @@ test("Shift ou Ctrl + clique põe ou tira, com a frase de quantos; só ele limpa
 test("o intervalo das Camadas vai da âncora até a linha entre irmãos; sem âncora ou com pais diferentes, só acrescenta", () => {
   const range = freeEditorSelect(DESIGN, { anchor: "a", ids: ["a"] }, { id: "c", kind: "range" });
 
-  assert.deepEqual(range, { anchor: "a", ids: ["a", "b", "c"], phrase: S.chosen(3) }, "a ancora fica para o proximo Shift");
+  // Nas Camadas (L64), de cima para baixo: Links, Caixa, Texto, Selo, trava, c, b, a, Título. O intervalo vem na ordem
+  // da lista, com o clicado no fim (o principal).
+  assert.deepEqual(range, { anchor: "a", ids: ["b", "a", "c"], phrase: S.chosen(3) }, "a ancora fica para o proximo Shift");
 
-  // Shift + ↑ depois: o intervalo troca a selecao, a partir da mesma ancora.
+  // Shift + ↓ depois (o Título e a linha de baixo da Forma a): o intervalo troca a selecao, a partir da mesma ancora.
   assert.deepEqual(freeEditorSelect(DESIGN, range, { id: "titulo", kind: "range" }).ids, ["a", "titulo"], "termina na linha (o principal)");
 
   // Pais diferentes (o Selo esta na Caixa): so acrescenta, e a ancora passa a ser ele.
@@ -294,7 +296,7 @@ test("cada ramo de runMany e de onManyCommand grava um passo só; as teclas da l
 
   const layer = bodyOf("function onLayerCommand(");
   assert.match(layer, /if \(command\.selection && many && liveIds\.includes\(command\.id\) && isManyKind\(command\.kind\)\) \{\s+runMany\(command\.kind\);/);
-  assert.match(layer, /runCommand\(command\.kind, command\.id\);/, "sem selection (o olho, o cadeado e o ⋯), so a linha");
+  assert.match(layer, /runCommand\(command\.kind, command\.id, "layers"\);/, "sem selection (o olho, o cadeado e o ⋯), so a linha, com o Subir e o Descer na lista (L64)");
 });
 
 test("o teclado com vários: Ctrl + D, Delete, [ ] e as setas do grupo num passo; Alt + ↑/↓ pede um elemento só", () => {
@@ -355,9 +357,9 @@ test("desfazer e refazer passam a seleção viva pela troca de painel (C11); com
   assert.match(keep, /changeSelection\(result\.ids, result\.anchor\);/);
 });
 
-test("o Elementos acrescenta pelo principal e o ramo move das Camadas continua igual", () => {
+test("o Elementos acrescenta pelo principal e o ramo move das Camadas fala a posição na lista (L64)", () => {
   assert.match(source, /addFreeElement\(present\.design, kind, \{ at, center, selectedId: activeId \}\)/);
-  assert.match(source, /if \(command\.kind === "move"\) \{\s*moveTo\(command\.id, command\.target\);/);
+  assert.match(source, /if \(command\.kind === "move"\) \{\s*moveTo\(command\.id, command\.target, "list"\);/);
 });
 
 test("os arquivos novos do L4b não montam HTML nem CSS em texto", () => {
