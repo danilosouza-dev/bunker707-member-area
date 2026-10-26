@@ -1734,6 +1734,35 @@ test("L6c: a nota do brilho, a chave e a Cor da borda seguem o cartão: só cont
     assert.equal(panel.freeHasHover(node), true, nome);
     assert.equal(panel.freeHoverPreviewDisabledReason(node, "desktop"), null, nome);
   }
+
+  // Combinação por combinação, o editor diz o mesmo que o cartão (a regra mora nos dois, sem o editor importar o
+  // módulo do cartão): os dois tipos, a letra (sólida, vazada, em degradê), a borda (sem, de 0 px, de 1 px) e cada
+  // conjunto das três cores, inclusive o objeto vazio e sem a chave.
+  const CORES = { borderColor: "#000000", color: "#111111", fill: ESCURECE_FUNDO };
+  const letras = [undefined, { paint: { color: "#ffffff00", kind: "solid" }, stroke: CONTORNO_BRANCO }, { paint: DEGRADE_LETRA }];
+  const bordas = [undefined, { color: "#ffffff", width: 0 }, { color: "#ffffff", width: 1 }];
+  const conjuntos = [null, ...[0, 1, 2, 3, 4, 5, 6, 7].map((bits) => Object.keys(CORES).filter((_, index) => bits & (1 << index)))];
+  let combinacoes = 0;
+
+  for (const base of [fecharCom(), LINKS]) {
+    for (const letra of letras) {
+      for (const borda of bordas) {
+        for (const conjunto of conjuntos) {
+          const node = {
+            ...base,
+            ...(borda ? { box: { border: borda } } : {}),
+            ...(conjunto ? { hover: Object.fromEntries(conjunto.map((key) => [key, CORES[key]])) } : {}),
+            ...(letra ? { textStyle: letra } : {})
+          };
+
+          assert.equal(panel.freeHasHover(node), cartao(node) !== null, JSON.stringify(node));
+          combinacoes += 1;
+        }
+      }
+    }
+  }
+
+  assert.equal(combinacoes, 2 * 3 * 3 * 9);
 });
 
 test("L6c: a chave Ver com o mouse em cima liga e desliga o palco, sem mudar o design; parada sem cor própria", () => {

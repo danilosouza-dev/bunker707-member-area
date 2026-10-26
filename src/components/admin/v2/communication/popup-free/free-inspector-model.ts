@@ -59,7 +59,6 @@ import { POPUP_FREE_MESSAGES } from "../../../../../server/communications/popup-
 import { HEX_COLOR_PATTERN, POPUP_BUILTIN_FONTS, type HexColor, type PopupFontOption, type PopupFontRef, type PopupFontWeight, type PopupVideoMimeType } from "../../../../../server/communications/popup-design-model";
 import { rangeMessage, weightAfterFontChange, weightOptionsFor } from "../popup-design/popup-design-editor-model";
 import { POPUP_EDITOR_COPY, snoozeSwitchDescription } from "../popup-editor-model";
-import { freeHoverAttrs } from "../../../../member/notifications/popup-free/popup-free-styles";
 
 const L = FREE_DESIGN_LIMITS;
 const M = POPUP_FREE_MESSAGES;
@@ -1449,13 +1448,26 @@ export function isFreeHoverNode(node: FreeNode | null | undefined): node is Free
 }
 
 /**
- * O elemento tem alguma cor própria ao passar o mouse que aparece no cartão do aluno: a mesma regra dele
- * (freeHoverAttrs), para a nota do brilho, a chave "Ver com o mouse em cima" e o palco nunca discordarem do aluno. A
- * cor do texto com a letra em degradê e a da borda sem borda (ou de 0 px) não aparecem: sem nenhuma que apareça, o
- * botão só clareia e os Links sublinham.
+ * O elemento tem alguma cor própria ao passar o mouse que aparece no cartão do aluno, pela mesma regra do
+ * freeHoverAttrs do cartão (o teste confere os dois lado a lado, combinação por combinação): a cor do texto só com a
+ * letra de cor sólida, a da borda só no Botão com borda de 1 px ou mais e o fundo só no Botão. Assim a nota do brilho,
+ * a chave "Ver com o mouse em cima" e o palco nunca discordam do aluno; sem nenhuma que apareça, o botão só clareia e
+ * os Links sublinham. Não importa o módulo do cartão: o editor importando popup-free-styles.ts muda como o Turbopack
+ * divide o pedaço do cartão do aluno (+206 B na régua, docs/27 §7).
  */
 export function freeHasHover(node: FreeNode | null | undefined): boolean {
-  return isFreeHoverNode(node) && freeHoverAttrs(node, freeTextStyleOf(node), false).attrs["data-free-hover"] !== undefined;
+  if (!isFreeHoverNode(node) || !node.hover) {
+    return false;
+  }
+
+  const hover: FreeButtonHover = node.hover;
+  const button = node.type === "button";
+
+  return (
+    (hover.color !== undefined && freeTextStyleOf(node).paint.kind === "solid") ||
+    (button && hover.fill !== undefined) ||
+    (button && hover.borderColor !== undefined && !!node.box?.border?.width)
+  );
 }
 
 /**
