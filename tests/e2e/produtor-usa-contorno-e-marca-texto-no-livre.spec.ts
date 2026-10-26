@@ -74,18 +74,29 @@ type ParteDesenhada = {
 };
 
 /**
- * As partes desenhadas de um Título (os spans sem filhos, na ordem), com o que o navegador calcula: o fundo, a
- * quebra entre linhas (o WebKit so conhece o nome com o prefixo), o respiro dos lados, os cantos, a espessura e a
- * cor do contorno e o paint-order, mais a largura do cartao (o container das medidas em cqw).
+ * As partes desenhadas de um Título (os spans sem filhos, na ordem), com o que o navegador calcula no span da parte
+ * (o filho da linha: com marca-texto, as letras ficam num span de dentro, acima dos fundos, e o fundo no de fora): o
+ * fundo, a quebra entre linhas (o WebKit so conhece o nome com o prefixo), o respiro dos lados, os cantos, a
+ * espessura e a cor do contorno e o paint-order, mais a largura do cartao (o container das medidas em cqw).
  */
 async function partesDoTitulo(titulo: Locator): Promise<ParteDesenhada[]> {
   return titulo.evaluate((element) => {
     const largura = (element.closest("[data-popup-free]") as HTMLElement | null)?.clientWidth ?? 0;
+    /** O span da parte: sobe ate o filho do span da linha (o filho direto do Titulo). */
+    const parteDe = (span: HTMLElement) => {
+      let parte = span;
+
+      while (parte.parentElement && parte.parentElement.parentElement !== element) {
+        parte = parte.parentElement;
+      }
+
+      return parte;
+    };
 
     return [...element.querySelectorAll("span")]
       .filter((span) => span.childElementCount === 0)
       .map((span) => {
-        const css = getComputedStyle(span);
+        const css = getComputedStyle(parteDe(span));
 
         return {
           cantos: Number.parseFloat(css.borderTopLeftRadius) || 0,
