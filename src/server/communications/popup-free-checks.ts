@@ -291,7 +291,11 @@ export function popupFreeHints(design: PopupFreeDesign, input: { content?: FreeP
         add({ key, kind: "contrast", message: contrastHintMessage(result.ratio, result.required), nodeId: node.id });
       }
     };
-    const element = outside ? measure(style.paint, style.stroke, style.size, style.weight, outside) : null;
+    // A cor do elemento so e medida contra o fundo de fora quando alguma letra a usa ali: no Titulo e no Texto, uma
+    // parte (com letra) sem cor propria e sem marca-texto. Com todas as letras sobre marca-texto, quem mede e a parte.
+    const usesOutside =
+      (node.type !== "heading" && node.type !== "text") || node.lines.some((line) => line.some((span) => span.text.trim() !== "" && !span.style?.paint && !span.style?.mark));
+    const element = outside && usesOutside ? measure(style.paint, style.stroke, style.size, style.weight, outside) : null;
 
     report(element, `${prefix}.textStyle.paint`);
 

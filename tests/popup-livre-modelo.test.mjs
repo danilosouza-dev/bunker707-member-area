@@ -1084,6 +1084,26 @@ test("L6b, Revisar: a parte com marca-texto é medida contra ele, mesmo sem cor 
   assert.deepEqual(contrastKeys(design([texto({ mark: { color: "#e5ff1f80" } })], sobreImagem)), []);
 });
 
+test("L6b, Revisar: com todas as letras sobre marca-texto, a cor do elemento não é medida contra o fundo de fora", () => {
+  const escura = { paint: { color: "#111111", kind: "solid" }, size: 32 };
+  const amarelo = { mark: { color: "#e5ff1f" } };
+  const titulo = (lines) => ({ id: "t", lines, textStyle: escura, type: "heading" });
+
+  // A letra escura do elemento só aparece sobre o amarelo: nada acusa (antes, 1,0:1 em textStyle.paint).
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana de revisão" }]])])), []);
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana" }], [{ style: amarelo, text: "de revisão" }]])])), [], "em todas as linhas");
+  // Um espaço sem marca-texto entre duas partes marcadas não tem letra para medir.
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana" }, { text: " " }, { style: { mark: { color: "#ffffff" } }, text: "de revisão" }]])])), []);
+  // Uma parte com cor própria também não usa a cor do elemento.
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana " }, { style: { paint: { color: "#ffffff", kind: "solid" } }, text: "de revisão" }]])])), []);
+
+  // Uma parte com a cor do elemento fora do marca-texto: acusa no elemento, como antes.
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana " }, { text: "de revisão" }]])])), ["nodes.t.textStyle.paint"]);
+  assert.deepEqual(contrastKeys(design([titulo([[{ style: amarelo, text: "Semana" }], [{ style: { stroke: { color: "#202020", width: 1 } }, text: "de revisão" }]])])), ["nodes.t.textStyle.paint"], "a parte que só troca o contorno usa a cor do elemento");
+  // O marca-texto que não se lê continua acusando na parte.
+  assert.deepEqual(contrastKeys(design([{ ...titulo([[{ style: { mark: { color: "#202020" } }, text: "Semana" }]]) }])), ["nodes.t.lines.0.0.style.mark"]);
+});
+
 test("L6b, Revisar: o ícone do Selo e do Botão usa a cor da letra; com a letra vazada, a dica diz que ele some", () => {
   const vermelho = { fill: [{ color: "#e50914", kind: "solid" }], padding: [4, 10] };
   const selo = (extra) => ({ box: vermelho, id: "selo", label: "Novidade", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } }, type: "badge", ...extra });
