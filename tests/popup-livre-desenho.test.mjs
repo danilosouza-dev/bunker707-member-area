@@ -1041,6 +1041,18 @@ test("cores ao passar o mouse (L6c): na prévia, o span leva os mesmos atributos
   assert.doesNotMatch(preview("semborda", "semborda"), /data-free-hover/);
 });
 
+test("cores ao passar o mouse (L6c): o cartão leva hoverPreviewId do palco ao desenho só na prévia", () => {
+  const design = hoverDesign();
+  const on = (markup) => (markup.match(/<[a-z]+ [^>]*data-free-hover-on=""[^>]*>/g) ?? []).map((opening) => attrOf(opening, "data-free-id") ?? attrOf(opening, "data-free-link"));
+
+  // O palco do editor passa a prop ao cartao ("Ver com o mouse em cima"): so o elemento escolhido mostra as cores.
+  assert.deepEqual(on(card(design, { hoverPreviewId: "botao", preview: true })), ["botao"]);
+  assert.deepEqual(on(card(design, { hoverPreviewId: "links", preview: true })), ["snooze", "dismiss"]);
+  assert.deepEqual(on(card(design, { hoverPreviewId: null, preview: true })), []);
+  // O aluno nunca: mesmo com a prop, sem `preview` nada fica ligado.
+  assert.deepEqual(on(card(design, { hoverPreviewId: "botao" })), []);
+});
+
 test("sem cores ao passar o mouse (L6c), o HTML do Livre é o de antes: nenhum atributo nem variável nova e o brilho de sempre", async () => {
   const now = await livreBeforeCases();
 

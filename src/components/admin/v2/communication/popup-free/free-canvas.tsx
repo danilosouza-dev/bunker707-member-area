@@ -1601,13 +1601,13 @@ export function FreeCanvas({
                 ref={wrapRef}
               >
                 <PopupFreeCard
-                  // So o editor (L6c): o cartao poe `data-free-hover-on` no elemento com "Ver com o mouse em cima" ligado.
-                  {...(hoverPreviewId ? { hoverPreviewId } : {})}
                   design={design}
                   device={device}
                   dragPreview={preview}
                   editorNodeRef={editorNodeRef}
                   fonts={fonts}
+                  // So o editor (L6c): o cartao poe `data-free-hover-on` no elemento com "Ver com o mouse em cima" ligado.
+                  hoverPreviewId={hoverPreviewId}
                   playing={false}
                   popup={popup}
                   preview

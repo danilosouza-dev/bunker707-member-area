@@ -1735,7 +1735,7 @@ test("L6c: a chave Ver com o mouse em cima liga e desliga o palco, sem mudar o d
   assert.match(editor, /hoverPreviewId=\{hoverPreviewId\}\s+onBusyChange=/);
   assert.match(editor, /onHoverPreviewChange=\{setHoverPreviewId\}/);
   assert.match(editor, /hoverPreviewId=\{hoverPreviewId\}\s+onCommitMoves=/);
-  assert.match(canvas, /<PopupFreeCard[\s\S]*?\{\.\.\.\(hoverPreviewId \? \{ hoverPreviewId \} : \{\}\)\}[\s\S]*?preview\s*\/>/);
+  assert.match(canvas, /<PopupFreeCard[\s\S]*?\shoverPreviewId=\{hoverPreviewId\}[\s\S]*?preview\s*\/>/);
 });
 
 test("L6c: as chaves de erro e de dica das cores ao passar o mouse levam ao campo certo no Estilo (crítica C12)", () => {
