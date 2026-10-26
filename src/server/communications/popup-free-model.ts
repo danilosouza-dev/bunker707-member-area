@@ -199,8 +199,18 @@ export type FreeButtonAction =
   | { kind: "cta" }
   | { href: string; kind: "link"; target: "new_tab" | "same_tab" }
   | { kind: "snooze" };
+/**
+ * Cores do Botao ao passar o mouse e no foco pelo teclado (L6c): o fundo (cor ou degrade, nunca imagem), a cor do texto
+ * (so com a letra de cor solida) e a cor da borda (so aparece com `box.border`). Sem nenhuma, o botao clareia um pouco.
+ * Nunca no celular (devices.mobile).
+ */
+export type FreeButtonHover = { borderColor?: HexColor; color?: HexColor; fill?: FreeTextPaint };
+/** Cor dos Links ao passar o mouse e no foco pelo teclado (L6c); so com a letra de cor solida. */
+export type FreeLinksHover = { color?: HexColor };
 export type FreeButtonNode = FreeNodeCommon & {
   action: FreeButtonAction;
+  /** Cores ao passar o mouse (L6c); `{}` sai na forma canonica. */
+  hover?: FreeButtonHover;
   icon?: { name: FreeIconName; side?: "end" | "start" };
   /** Obrigatorio fora do cta; no cta nao existe (o texto e o do aviso). */
   label?: string;
@@ -218,7 +228,7 @@ export type FreeShapeNode = FreeNodeCommon & { shape?: "ellipse" | "rect"; type:
 /** O player do audio do aviso (entra e sai com o audio). */
 export type FreeAudioNode = FreeNodeCommon & { type: "audio" };
 /** "Lembrar depois" (quando o aluno pode adiar e nao ha botao Lembrar depois) e "Não mostrar de novo" (se dismiss). */
-export type FreeLinksNode = FreeNodeCommon & { dismiss?: boolean; gap?: number; textStyle?: FreeTextStyle; type: "links" };
+export type FreeLinksNode = FreeNodeCommon & { dismiss?: boolean; gap?: number; hover?: FreeLinksHover; textStyle?: FreeTextStyle; type: "links" };
 export type FreeBoxLayout = {
   align?: "center" | "end" | "start" | "stretch";
   dir?: "column" | "row";
@@ -929,6 +939,21 @@ function canonicalLine(line: FreeLine, base: ReturnType<typeof resolvedElementSt
   return out;
 }
 
+/** Cores ao passar o mouse (L6c): cores em minusculas, a pintura canonica; o objeto vazio sai. */
+function canonicalHover<T extends FreeButtonHover>(hover: T | undefined): T | undefined {
+  if (!hover) {
+    return undefined;
+  }
+
+  const value = sorted({
+    borderColor: hover.borderColor === undefined ? undefined : lower(hover.borderColor),
+    color: hover.color === undefined ? undefined : lower(hover.color),
+    fill: hover.fill ? canonicalTextPaint(hover.fill) : undefined
+  } satisfies FreeButtonHover);
+
+  return Object.keys(value).length > 0 ? (value as T) : undefined;
+}
+
 function canonicalName(name: string | undefined): string | undefined {
   const trimmed = name?.trim();
 
@@ -964,6 +989,7 @@ function canonicalNode(node: FreeNode): FreeNode {
       return sorted({
         ...common,
         action,
+        hover: canonicalHover(node.hover),
         icon: node.icon ? sorted({ name: node.icon.name, side: node.icon.side === "end" ? undefined : node.icon.side }) : undefined,
         label: node.action.kind === "cta" ? undefined : node.label?.trim(),
         textStyle: canonicalTextStyle(node.textStyle, "button"),
@@ -1019,6 +1045,7 @@ function canonicalNode(node: FreeNode): FreeNode {
         ...common,
         dismiss: node.dismiss === false ? false : undefined,
         gap: gap === 8 ? undefined : gap,
+        hover: canonicalHover<FreeLinksHover>(node.hover),
         textStyle: canonicalTextStyle(node.textStyle, "links"),
         type: "links"
       } satisfies FreeLinksNode);
@@ -1314,7 +1341,7 @@ function clamp(value: number, bounds: { max: number; min: number }) {
  * Troca a largura e multiplica por nova/antiga: X, Y, largura, altura, respiros, margens, espacos, cantos,
  * sombras, desfoques, fontes, contorno das letras, respiro e cantos do marca-texto (com os padroes preenchidos antes),
  * icones, linha e espaco (inteiros, dentro dos limites), e os mesmos valores do celular (devices.mobile). Borda fica
- * em px.
+ * em px; as cores ao passar o mouse (`hover`, L6c) nao tem medida e ficam como estao.
  */
 export function rescaleFreeDesign(design: PopupFreeDesign, width: number): PopupFreeDesign {
   const current = resolveFreeArtboard(design).width;
