@@ -213,8 +213,9 @@ test("a janela do pop-up anima a escala: a classe com scale-95 lista scale na tr
 
   // Toda classe da pasta src/components/member/notifications (a janela, os cartoes do Padrão, do Personalizado e do
   // Livre) que escala e tem transicao lista scale. O X junta o pulso (motion-safe:scale-[1.12]) e a transicao em
-  // textos separados do cn(), por isso fica fora desta conta (a dele ja lista scale). O menu do sino e os menus do
-  // admin, fora desta pasta, tem o mesmo defeito e ficam para uma PR de correcao a parte (docs/27 §10).
+  // textos separados do cn(), por isso fica fora desta conta (a dele ja lista scale). O menu do sino, o icone do
+  // botao de retomar de Minhas compras e tres menus do admin, fora desta pasta, tem o mesmo defeito e ficam para uma
+  // PR de correcao a parte (docs/27 §10).
   const files = await sourceFiles("src/components/member/notifications/");
   const problems = [];
 
