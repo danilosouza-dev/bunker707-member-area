@@ -826,8 +826,8 @@ test("o aperto de 1 px dos botões anima: a transição lista translate, a propr
   assert.equal(classes.length, 3, "principal, Fechar e o link");
 
   for (const className of classes) {
-    // No Tailwind 4 o translate-y-px muda a propriedade `translate` (nao `transform`): com transform na lista, o
-    // aperto pulava sem animar.
+    // No Tailwind 4 o deslocamento de 1 px muda a propriedade `translate` (nao `transform`): com transform na
+    // lista, o aperto pulava sem animar.
     assert.match(className, /(^| )active:translate-y-px( |$)/);
     assert.match(className, /(^| )transition-\[filter,translate\]( |$)/);
     assert.doesNotMatch(className, /transform/);

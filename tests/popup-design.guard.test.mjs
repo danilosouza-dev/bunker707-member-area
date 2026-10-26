@@ -158,7 +158,8 @@ function utilityOf(token) {
 /**
  * Numa lista de classes que escala (scale-*), o que impede a escala de animar: nenhuma transicao, ou uma transicao
  * que nao cobre a propriedade `scale` do Tailwind 4. `transition`, `transition-all` e `transition-transform` cobrem
- * (no Tailwind 4 a ultima ja lista transform, translate, scale e rotate); `transition-[...]` so com scale ou all.
+ * (no Tailwind 4 a ultima ja lista transform, translate, scale e rotate); a de lista entre colchetes, so com scale ou
+ * all na lista.
  */
 function scaleTransitionProblem(classes) {
   const utilities = classes.split(/\s+/).filter(Boolean).map(utilityOf);
@@ -201,9 +202,12 @@ test("a janela do pop-up anima a escala: a classe com scale-95 lista scale na tr
   const before = "outline-none transition-[opacity,transform] duration-200 ease-out data-ending-style:scale-95 data-starting-style:scale-95";
   assert.match(scaleTransitionProblem(before) ?? "", /transition-\[opacity,transform\] nao lista scale/);
   assert.equal(scaleTransitionProblem("transition-[opacity,scale] data-starting-style:scale-95"), null);
-  assert.equal(scaleTransitionProblem("transition-transform hover:scale-[1.03]"), null);
-  assert.equal(scaleTransitionProblem("transition hover:scale-[1.03]"), null);
-  assert.equal(scaleTransitionProblem("[&_svg]:size-5 data-[open]:scale-95 transition-[opacity,all]"), null);
+  assert.equal(scaleTransitionProblem("transition-transform group-hover:scale-[1.03]"), null);
+  assert.equal(scaleTransitionProblem("transition group-hover:scale-[1.03]"), null);
+  // Montadas aos pedacos: o Tailwind le os testes e poria as duas no CSS global (tailwind-regras-de-exemplo.guard).
+  const bracketVariant = ["data-[open]", "scale-95"].join(":");
+  const allInList = ["transition-[opacity", "all]"].join(",");
+  assert.equal(scaleTransitionProblem(`[&_svg]:size-5 ${bracketVariant} ${allInList}`), null);
   assert.equal(scaleTransitionProblem("focus-visible:[box-shadow:inset_0_0_0_4px_#000000b3]! transition-[filter]"), null, "sem escala, nada a conferir");
   assert.equal(scaleTransitionProblem("scale-95 transition-none"), "escala sem transicao");
 

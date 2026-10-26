@@ -819,7 +819,7 @@ export const FREE_TOUCH_CLASS =
 export const FREE_FOCUS_CLASS = "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white focus-visible:[box-shadow:inset_0_0_0_4px_#000000b3]!";
 
 /**
- * Passar o mouse e apertar nos botoes (sem animacao com menos movimento). No Tailwind 4 o translate-y-px muda a
- * propriedade `translate` (nao `transform`): e ela que a transicao lista.
+ * Passar o mouse e apertar nos botoes (sem animacao com menos movimento). No Tailwind 4 o deslocamento de 1 px do
+ * aperto muda a propriedade `translate` (nao `transform`): e ela que a transicao lista.
  */
 export const FREE_PRESS_CLASS = "transition-[filter,translate] hover:brightness-110 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0";
