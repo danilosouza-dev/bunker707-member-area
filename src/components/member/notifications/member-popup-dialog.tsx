@@ -1,7 +1,7 @@
 "use client";
 
 import { Dialog } from "@base-ui/react/dialog";
-import { useEffect, useId, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent } from "react";
 import { announceOverlay } from "@/lib/overlay-event";
 import type { PopupItem } from "@/server/communications/notification-model";
 import type { PopupCloseVia } from "@/server/communications/popup-display-model";
@@ -26,7 +26,7 @@ import { closeViaOf } from "./popup-host-model";
 // movimento, nada anima (motion-reduce:transition-none). A guarda esta em popup-design.guard.test.mjs.
 // O Base UI so marca o data-starting-style (e so anima a entrada) quando o Root ja montado passa de fechado para
 // aberto. O host monta a janela ja aberta (showing e open juntos), e assim ela aparecia de uma vez. Por isso o
-// Root nasce fechado e abre no quadro seguinte (`entered`); o resto da janela segue o `open` do host.
+// Root nasce fechado e abre no commit seguinte, antes de pintar (`entered`); o resto da janela segue o `open` do host.
 //
 // Design do pop-up (docs/26): no "Personalizado", o nome do dialogo e o texto do titulo do design (o <h2>,
 // aria-labelledby); sem bloco Título, o titulo do aviso (aria-label). A descricao e o primeiro bloco Texto. O
@@ -77,15 +77,14 @@ export function MemberPopupDialog({
   const device = useSyncExternalStore(popup.freeDesign ? subscribeFreeDevice : noDeviceChange, popup.freeDesign ? freeDeviceSnapshot : freeServerDevice, freeServerDevice);
   const aria = popup.freeDesign ? freeDialogAria(popup, { bodyId, titleId }, device) : popupDialogAria(popup, { bodyId, titleId });
   const [nudgeClose, setNudgeClose] = useState(false);
-  // O Root nasce fechado e abre no quadro seguinte: so assim o Base UI anima a entrada. O host so abre com a aba
-  // visivel, entao o quadro sempre chega.
+  // O Root nasce fechado e abre no commit seguinte, ainda antes de pintar (efeito de layout): so assim o Base UI
+  // anima a entrada, e a janela entra no DOM na mesma tarefa em que o host abre (sem esperar um quadro).
   const [entered, setEntered] = useState(false);
   const nudgeTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => setEntered(true));
-
-    return () => window.cancelAnimationFrame(frame);
+  useLayoutEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- o segundo desenho e o ponto: o Root fechado e depois aberto, antes de pintar
+    setEntered(true);
   }, []);
 
   useEffect(

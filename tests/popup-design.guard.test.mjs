@@ -247,9 +247,11 @@ test("a janela do pop-up anima a escala: a classe com scale-95 lista scale na tr
   assert.equal(scaleTransitionProblem(windowClasses[0]), null);
 
   // A entrada so anima se o Root ja montado passar de fechado para aberto (o Base UI so marca o data-starting-style
-  // nessa virada). O host monta a janela ja aberta: o Root nasce fechado e abre no quadro seguinte.
+  // nessa virada). O host monta a janela ja aberta: o Root nasce fechado e abre no commit seguinte, antes de pintar
+  // (efeito de layout, sem esperar um quadro).
   assert.match(dialog, /const \[entered, setEntered\] = useState\(false\);/);
-  assert.match(dialog, /const frame = window\.requestAnimationFrame\(\(\) => setEntered\(true\)\);\s+return \(\) => window\.cancelAnimationFrame\(frame\);/);
+  assert.match(dialog, /useLayoutEffect\(\(\) => \{\s+\/\/ eslint-disable-next-line react-hooks\/set-state-in-effect -- [^\n]+\n\s+setEntered\(true\);\s+\}, \[\]\);/);
+  assert.doesNotMatch(dialog, /requestAnimationFrame/, "a janela nao espera um quadro para abrir");
   assert.match(dialog, /<Dialog\.Root[\s\S]*?\n\s+open=\{open && entered\}\n\s+>/);
   assert.doesNotMatch(dialog, /\n\s+open=\{open\}\n/, "o Root nunca recebe o open do host direto");
 });
