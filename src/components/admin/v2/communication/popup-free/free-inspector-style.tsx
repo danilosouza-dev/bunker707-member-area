@@ -2,6 +2,8 @@
 
 import { FREE_DESIGN_LIMITS, type FreeNode, type FreeTextStyle } from "@/server/communications/popup-free-model";
 import { freeTextStyleOf } from "@/server/communications/popup-free-render";
+import { Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { AdminSwitch } from "../../settings/kit";
 import { ColorField, PillField } from "../popup-design/design-controls";
 import { WeightPicker } from "../popup-design/font-picker";
@@ -16,7 +18,8 @@ import {
   FreeRadiusField,
   FreeSection,
   FreeShadowsField,
-  FreeTextPaintField
+  FreeTextPaintField,
+  freeSmallButton
 } from "./free-fields";
 import {
   FREE_DECORATION_OPTIONS,
@@ -28,6 +31,9 @@ import {
   freeFieldId,
   freeFillBaseColor,
   freeHintsOf,
+  freeIsOutlineOnly,
+  freeOutlineOnlyPatch,
+  freeStrokeSwitchPatch,
   withFreeBox,
   withFreeFadeEnd,
   withFreeFadeStart,
@@ -37,14 +43,19 @@ import {
 } from "./free-inspector-model";
 
 // Editor Livre do pop-up (docs/27; spec §4.6 "Estilo"), pacote I: Texto (fonte, tamanho, peso, itálico, altura da
-// linha, espaço entre letras, maiúsculas, linha no texto, alinhamento, cor do texto com degradê e a sombra do
-// texto, com a dica de contraste embaixo da cor), Fundo (camadas), Borda, Cantos, Sombras e Efeitos (opacidade,
-// desfoque, desfoque do que esta atras, cortar e esmaecer).
+// linha, espaço entre letras, maiúsculas, linha no texto, alinhamento, cor do texto com degradê, o contorno com o
+// "Só o contorno" do L6b e a sombra do texto, com a dica de contraste embaixo da cor), Fundo (camadas), Borda,
+// Cantos, Sombras e Efeitos (opacidade, desfoque, desfoque do que esta atras, cortar e esmaecer).
 
 const L = FREE_DESIGN_LIMITS;
 const C = FREE_INSPECTOR_COPY;
 
 const TEXT_TYPES = new Set<FreeNode["type"]>(["badge", "button", "heading", "links", "text"]);
+/**
+ * "Só o contorno" so no Título e no Texto (docs/27 §9.8): o ícone do Selo e do Botão usa a cor da letra e sumiria
+ * com ela, e os Links o aluno precisa ler.
+ */
+const OUTLINE_ONLY_TYPES = new Set<FreeNode["type"]>(["heading", "text"]);
 
 export function FreeInspectorStyle(props: FreeSectionProps) {
   const { node } = props;
@@ -63,6 +74,8 @@ function TextStyleSection({ design, disabled, errors, fonts, hints, node, onChan
   const error = (field: string) => freeErrorAt(errors, `nodes.${node.id}.textStyle.${field}`);
   const set = (patch: FreePatch<FreeTextStyle>, field?: string) => onChange(withFreeTextStyle(design, node.id, patch), field ? `textStyle.${field}` : undefined);
   const shadow = style.shadow;
+  const stroke = style.stroke;
+  const outlineOnly = freeIsOutlineOnly(style);
 
   return (
     <FreeSection title={C.style.text}>
@@ -120,6 +133,39 @@ function TextStyleSection({ design, disabled, errors, fonts, hints, node, onChan
       <div className="flex min-w-0 flex-col gap-2">
         <FreeTextPaintField disabled={disabled} error={error("paint")} id={id("cor-texto")} onChange={(paint) => set({ paint }, "paint")} value={style.paint} />
         <FreeHints hints={freeHintsOf(hints, node.id, ["contrast"])} />
+      </div>
+      <div className="flex min-w-0 flex-col gap-3" id={id("contorno")} tabIndex={-1}>
+        <AdminSwitch
+          checked={stroke !== undefined}
+          disabled={disabled}
+          id={`${id("contorno")}-ligado`}
+          label={C.style.stroke}
+          // Desligar com a letra vazada devolve a cor dela no mesmo passo (sem o contorno ela sumiria).
+          onCheckedChange={(on) => set(freeStrokeSwitchPatch(style, on))}
+        />
+        {stroke ? (
+          <div className="flex min-w-0 flex-col gap-3 border-l-2 border-[var(--border-subtle)] pl-4">
+            <FreeNumberField
+              bounds={L.textStroke}
+              disabled={disabled}
+              error={error("stroke.width")}
+              id={id("contorno-espessura")}
+              label={C.style.strokeWidth}
+              onChange={(width) => set({ stroke: { ...stroke, width } }, "stroke")}
+              unit={C.units.px}
+              value={stroke.width}
+            />
+            <ColorField disabled={disabled} error={error("stroke.color")} id={id("contorno-cor")} label={C.style.strokeColor} onChange={(color) => set({ stroke: { ...stroke, color } }, "stroke")} value={stroke.color} />
+          </div>
+        ) : null}
+        {OUTLINE_ONLY_TYPES.has(node.type) ? (
+          <div>
+            <Button aria-pressed={outlineOnly} className={freeSmallButton} disabled={disabled} id={id("so-contorno")} onClick={() => set(freeOutlineOnlyPatch(style, !outlineOnly))} type="button" variant="secondary">
+              {outlineOnly ? <Check aria-hidden="true" className="size-4" /> : null}
+              {C.style.strokeOnly}
+            </Button>
+          </div>
+        ) : null}
       </div>
       <div className="flex min-w-0 flex-col gap-3" id={id("sombra-texto")} tabIndex={-1}>
         <AdminSwitch
