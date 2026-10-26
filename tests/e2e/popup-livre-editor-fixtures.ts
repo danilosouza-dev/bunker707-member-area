@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import type { FreeArtboard, FreeDevices, FreeNode, PopupFreeDesign } from "../../src/server/communications/popup-free-model";
+import { NOTICE_LIMITS } from "../../src/server/communications/campaign-model";
 import { popupFreeContentProblems, popupFreeDesignSchema } from "../../src/server/communications/popup-free-schema";
 import { applyFreeStarter } from "../../src/server/communications/popup-free-starters";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
@@ -78,6 +79,12 @@ export function designDoRascunhoLivre(children: FreeNode[], extra: ExtraDoRascun
  * Botão principal; senao ficam null. Devolve o id. Desfaca com zerarComunicacao.
  */
 export async function gravarRascunhoLivre(titulo: string, children: FreeNode[], extra: ExtraDoRascunhoLivre = {}): Promise<string> {
+  // O banco aceita qualquer nome, mas o editor recusa o salvar acima do limite ("Há campos para revisar fora do editor:
+  // Nome do pop-up."): o nome comprido falha aqui, com o motivo, e nao no meio do teste.
+  if (titulo.length > NOTICE_LIMITS.popup.title) {
+    throw new Error(`O nome do pop-up de teste tem ${titulo.length} letras; o limite é ${NOTICE_LIMITS.popup.title}.`);
+  }
+
   const { botao, design } = designDoRascunhoLivre(children, extra);
   const db = createLocalAdminClient();
   const produtor = await contaDeTeste("produtor");

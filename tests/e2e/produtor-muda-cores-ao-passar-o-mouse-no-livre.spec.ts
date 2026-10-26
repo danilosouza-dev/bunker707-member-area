@@ -32,7 +32,7 @@ import {
 // a dica de corte. Funciona no WebKit: o foco posto antes de cada tecla, o mouse sempre dentro da janela, as medidas
 // depois de o palco parar e as esperas pela tela antes de ler o banco.
 
-const TITULO = "Pop-up E2E: o produtor muda as cores ao passar o mouse no Livre";
+const TITULO = "Pop-up E2E: cores ao passar o mouse no Livre";
 /** O botao do aviso que entra com o Botão principal do design (gravarRascunhoLivre so grava com o principal). */
 const BOTAO = { href: "/minhas-compras", label: "Quero ver", target: "same_tab" } as const;
 const VERMELHO = { hex: "#e50914", rgb: "rgb(229, 9, 20)" } as const;
@@ -45,7 +45,7 @@ const CHILDREN: FreeNode[] = [
   { action: { kind: "cta" }, box: { fill: [{ color: VERMELHO.hex, kind: "solid" }], padding: [12, 24], radius: 999 }, id: "botao", type: "button" },
   { id: "links", type: "links" }
 ];
-const TITULO_SOLTO = "Pop-up E2E: o Botão solto com cores ao passar o mouse no palco do Livre";
+const TITULO_SOLTO = "Pop-up E2E: Botão solto com cores no palco do Livre";
 /** Um Título de três linhas (a prancheta alta), o Botão principal solto perto do topo, com cores ao passar o mouse, e os Links. */
 const CHILDREN_SOLTO: FreeNode[] = [
   { id: "titulo", lines: [[{ text: "Aula nova no ar" }], [{ text: "com cores" }], [{ text: "ao passar o mouse" }]], type: "heading" },
