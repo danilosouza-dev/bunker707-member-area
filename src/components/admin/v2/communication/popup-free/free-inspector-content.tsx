@@ -58,10 +58,17 @@ const C = FREE_INSPECTOR_COPY;
 export type FreeSectionProps = {
   content: FreeEditorContent;
   design: PopupFreeDesign;
+  /** O aparelho do "Ver como" (L6c: com Celular, a chave "Ver com o mouse em cima" fica parada). Padrao: computador. */
+  device?: "desktop" | "mobile";
   disabled: boolean;
   errors: Readonly<Record<string, string>>;
   fonts: readonly PopupFontOption[];
   hints: readonly FreeHint[];
+  /**
+   * So o Estilo do Botao e dos Links (L6c): a chave "Ver com o mouse em cima" ligada para este elemento. O palco mostra
+   * as cores ao passar o mouse; nao salva e fica fora do historico (o editor guarda e desliga ao trocar de elemento).
+   */
+  hoverPreview?: boolean;
   /** O design mais novo (um envio termina depois e nao pode desfazer o que mudou no meio). */
   latest: () => PopupFreeDesign;
   node: FreeNode;
@@ -70,6 +77,8 @@ export type FreeSectionProps = {
   onChange: (next: PopupFreeDesign, field?: string) => void;
   onCtaChange: (cta: NoticeDraft["cta"], options?: { coalesceKey?: string }) => void;
   onFontsChange: (fonts: PopupFontOption[]) => void;
+  /** Liga ou desliga a chave "Ver com o mouse em cima" deste elemento (L6c). */
+  onHoverPreviewChange?: (on: boolean) => void;
   rects: FreeMeasuredRects;
 };
 

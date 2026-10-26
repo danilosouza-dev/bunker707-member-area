@@ -49,6 +49,11 @@ export type FreeInspectorProps = {
   focusRequest: FreeFocusRequest | null;
   fonts: readonly PopupFontOption[];
   hints: readonly FreeHint[];
+  /**
+   * O elemento com a chave "Ver com o mouse em cima" ligada (L6c; o editor guarda, fora do historico, e desliga ao
+   * trocar de elemento). null = nenhum.
+   */
+  hoverPreviewId?: FreeId | null;
   onBusyChange: (reason: string | null) => void;
   onChange: (next: PopupFreeDesign, options?: { coalesceKey?: string }) => void;
   /** Texto e destino do Botão principal: entram no histórico { design, cta } com a coalesceKey. */
@@ -58,6 +63,8 @@ export type FreeInspectorProps = {
   onDeviceChange?: (device: "desktop" | "mobile") => void;
   onFocusHandled: () => void;
   onFontsChange: (fonts: PopupFontOption[]) => void;
+  /** A chave "Ver com o mouse em cima" (L6c): o id do elemento ao ligar, null ao desligar. */
+  onHoverPreviewChange?: (id: FreeId | null) => void;
   /** Retângulos medidos (px da prancheta), para o que o painel mostra (ex.: altura automática). */
   rects: FreeMeasuredRects;
   selectedId: FreeId | null;
@@ -74,7 +81,27 @@ const tabClass = cn(
 );
 
 export function FreeInspector(props: FreeInspectorProps) {
-  const { content, design, device, disabled, errors, focusRequest, fonts, hints, onBusyChange, onChange, onCommand, onCtaChange, onDeviceChange, onFocusHandled, onFontsChange, rects, selectedId } = props;
+  const {
+    content,
+    design,
+    device,
+    disabled,
+    errors,
+    focusRequest,
+    fonts,
+    hints,
+    hoverPreviewId = null,
+    onBusyChange,
+    onChange,
+    onCommand,
+    onCtaChange,
+    onDeviceChange,
+    onFocusHandled,
+    onFontsChange,
+    onHoverPreviewChange,
+    rects,
+    selectedId
+  } = props;
   const found = selectedId ? findFreeNode(design, selectedId) : null;
   const node = found?.node ?? null;
   const [tab, setTab] = useState<ElementTab>("content");
@@ -85,6 +112,7 @@ export function FreeInspector(props: FreeInspectorProps) {
   const latest = useCallback(() => designRef.current, [designRef]);
   const onFocusHandledRef = useLatest(onFocusHandled);
   const onCommandRef = useLatest(onCommand);
+  const onHoverPreviewChangeRef = useLatest(onHoverPreviewChange);
 
   // Pedido de foco novo: descobre o elemento, a aba e o campo (estado deste painel, decidido no render).
   if (focusRequest !== seenRequest) {
@@ -138,6 +166,14 @@ export function FreeInspector(props: FreeInspectorProps) {
     return () => window.cancelAnimationFrame(frame);
   }, [onCommandRef, onFocusHandledRef, pending, selectedId, tab]);
 
+  // "Ver com o mouse em cima" (L6c) so existe no Estilo: em outra aba (por clique, pelo foco de um erro ou pela aba
+  // Celular) a chave some e o palco volta ao normal.
+  useEffect(() => {
+    if (tab !== "style" && hoverPreviewId !== null) {
+      onHoverPreviewChangeRef.current?.(null);
+    }
+  }, [hoverPreviewId, onHoverPreviewChangeRef, tab]);
+
   const change = useCallback(
     (next: PopupFreeDesign, field?: string) => {
       onChange(next, field ? { coalesceKey: `${selectedId ?? "@popup"}:${field}` } : undefined);
@@ -175,16 +211,19 @@ export function FreeInspector(props: FreeInspectorProps) {
   const sectionProps: FreeSectionProps = {
     content,
     design,
+    device,
     disabled,
     errors,
     fonts,
     hints,
+    hoverPreview: hoverPreviewId === node.id,
     latest,
     node,
     onBusyChange,
     onChange: change,
     onCtaChange,
     onFontsChange,
+    onHoverPreviewChange: (on) => onHoverPreviewChange?.(on ? node.id : null),
     rects
   };
   const typeLabel = freeNodeTypeLabel(node);
