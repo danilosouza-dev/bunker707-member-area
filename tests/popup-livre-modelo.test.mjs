@@ -1676,3 +1676,32 @@ test("L6b: o JSON Schema tem o contorno e o marca-texto, estritos e com os limit
   assert.equal(mobileStyle.length, 1, "o estilo de texto do celular");
   assert.equal(mobileStyle[0].additionalProperties, false);
 });
+
+test("L6b: um design sem contorno e sem marca-texto sai igual (forma canônica e reescala sem chave nova)", () => {
+  const doc = readFileSync(new URL("../docs/27-comunicacao-design-livre.md", import.meta.url), "utf8");
+  const section = doc.slice(doc.indexOf("## 9. Contrato do JSON"), doc.indexOf("## 10."));
+  const blocks = [...section.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => JSON.parse(match[1]));
+  const effects = /"(?:stroke|mark)":\{"color"/;
+  const semEfeitos = blocks.filter((block) => !effects.test(JSON.stringify(block)));
+  const comEfeitos = blocks.filter((block) => effects.test(JSON.stringify(block)));
+  const nenhumaChave = (value, label) => assert.doesNotMatch(JSON.stringify(value), effects, label);
+
+  assert.equal(comEfeitos.length, 1, "o exemplo do contorno e do marca-texto, na 9.9");
+  assert.equal(JSON.stringify(valid(comEfeitos[0])), JSON.stringify(comEfeitos[0]), "o exemplo ja esta na forma canonica (byte a byte)");
+
+  for (const { id } of starters.FREE_DESIGN_STARTERS) {
+    const value = starters.freeStarterDesign(id);
+    const written = semEfeitos.find((block) => JSON.stringify(block) === JSON.stringify(value));
+
+    assert.ok(written, `o modelo ${id} continua no docs/27 §9.9 byte a byte, como antes do L6b`);
+    assert.equal(JSON.stringify(valid(written)), JSON.stringify(written), `${id}: a forma canonica nao muda`);
+
+    for (const width of Object.values(model.FREE_ARTBOARD_WIDTH_PRESETS)) {
+      nenhumaChave(model.rescaleFreeDesign(value, width), `${id} em ${width}: a reescala nao cria contorno nem marca-texto`);
+    }
+  }
+
+  for (const block of semEfeitos) {
+    nenhumaChave(valid(block), "a forma canonica nao cria contorno nem marca-texto");
+  }
+});

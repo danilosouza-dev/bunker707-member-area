@@ -257,7 +257,7 @@ As partes 9.2 a 9.6, 9.8, 9.9 e 9.10 viram as instruções para a IA (§13.1), q
 - Validação estrita no navegador do editor, na Server Action ao salvar e na leitura do banco: chave a mais é recusada em qualquer nível (inclusive `url` num arquivo e qualquer chave dentro de `devices` fora da §9.10).
 - Livre inválido no banco (só com edição direta ou depois de voltar um deploy): **não aparece para o aluno** (sai da lista no ar com o log `[comunicacao] design livre invalido <id do aviso>`, nunca o conteúdo) e abre como Padrão no editor do aviso.
 - O que se grava é sempre a **forma canônica** (`canonicalPopupFreeDesign`): sem o que é igual ao padrão (§9.4), cores em minúsculas, px e ângulos inteiros, altura da linha, espaço entre letras e traço do ícone com 2 casas, paradas do degradê ordenadas por `at`, lados no formato mais curto (`[a, a, a, a]` → `a`; `[v, h, v, h]` → `[v, h]`), nome aparado (vazio sai), partes vizinhas com o mesmo estilo juntas (sem passar de 600 letras), arquivos que nenhum elemento usa fora de `assets`, `assets` e `fonts` sempre presentes (`fonts` recalculado) e chaves em ordem alfabética.
-- `version` do Livre só muda quando um documento velho deixar de valer. Campos novos (como `devices`, desde o PR L3, ou uma pintura nova) entram sem mudar a versão. **Voltar o deploy** para uma imagem de antes do L3: designs salvos com `devices` ficam inválidos para o código antigo (somem para o aluno com o log acima e abrem como Padrão no editor) até a imagem nova voltar; com o código antigo no ar ninguém salva valores de Celular (`docs/20` §9, espelho do R1 do `docs/29`).
+- `version` do Livre só muda quando um documento velho deixar de valer. Campos novos (como `devices`, desde o PR L3, o contorno `stroke` e o marca-texto `mark`, desde o L6b, ou uma pintura nova) entram sem mudar a versão; uma imagem de antes do campo novo recusa, do mesmo jeito descrito a seguir, os designs que o usam. **Voltar o deploy** para uma imagem de antes do L3: designs salvos com `devices` ficam inválidos para o código antigo (somem para o aluno com o log acima e abrem como Padrão no editor) até a imagem nova voltar; com o código antigo no ar ninguém salva valores de Celular (`docs/20` §9, espelho do R1 do `docs/29`).
 - Toda medida está em **px da prancheta** na largura escolhida (`artboard.width`, 280 a 720). No celular o pop-up inteiro encolhe na mesma proporção (unidades `cqw` do próprio cartão), com duas proteções: texto nunca abaixo de 12 px e área de toque de 44 px nos botões, nos links e no X (invisível, não muda o desenho). Os valores próprios do celular (`devices.mobile`, §9.10) entram por cima do computador antes de encolher.
 - Arquivos: o design guarda **só o caminho** no nosso Storage. O endereço é montado na hora pelo cartão e pelo editor (`freeAssetUrl`): a origem conferida do nosso Supabase + o caminho público do bucket + um caminho que casou com o padrão do tipo.
 
@@ -321,9 +321,13 @@ Pinturas (`fill`, e as três primeiras também em `textStyle.paint`):
 
 Lados (`padding`, `margin`): um número, `[vertical, horizontal]` ou `[cima, direita, baixo, esquerda]`. Cores: `#RRGGBB` ou `#RRGGBBAA`.
 
-`textStyle` (Título, Texto, Selo, Botão, Links): `font` (`{ "kind": "builtin", "key": "inter" | "exo2" | "system" | "condensed" | "serif" | "mono" }` ou `{ "kind": "uploaded", "id": "<uuid da biblioteca>" }`), `size` (10 a 160), `weight` (100 a 900, de 100 em 100), `italic`, `lineHeight` (0,7 a 2,5), `letterSpacing` (−0,2 a 1 em), `uppercase`, `decoration` (`underline` · `line-through`), `align` (`left` · `center` · `right`; nos Links alinha a linha dos links), `paint` (sólida, linear ou circular), `shadow` (`x`, `y`, `blur`, `color`).
+`textStyle` (Título, Texto, Selo, Botão, Links): `font` (`{ "kind": "builtin", "key": "inter" | "exo2" | "system" | "condensed" | "serif" | "mono" }` ou `{ "kind": "uploaded", "id": "<uuid da biblioteca>" }`), `size` (10 a 160), `weight` (100 a 900, de 100 em 100), `italic`, `lineHeight` (0,7 a 2,5), `letterSpacing` (−0,2 a 1 em), `uppercase`, `decoration` (`underline` · `line-through`), `align` (`left` · `center` · `right`; nos Links alinha a linha dos links), `paint` (sólida, linear ou circular), `shadow` (`x`, `y`, `blur`, `color`), `stroke` (o contorno das letras: `{ "color", "width": 1 a 8 }`; encolhe junto no celular, sem ficar abaixo de 1 px).
 
-Texto do Título e do Texto: `lines` = linhas; cada linha = partes `{ "text": "...", "style": { ... } }` lado a lado. O texto da parte não é aparado (o espaço entre partes conta). `style` da parte aceita `font`, `size`, `weight`, `italic`, `uppercase`, `decoration`, `letterSpacing` e `paint`; o resto vem do elemento.
+Texto vazado (só o contorno, a letra transparente): `paint` sólida com alfa `00` (por exemplo `#ffffff00`) e `stroke`. Não tem chave própria.
+
+Texto do Título e do Texto: `lines` = linhas; cada linha = partes `{ "text": "...", "style": { ... } }` lado a lado. O texto da parte não é aparado (o espaço entre partes conta). `style` da parte aceita `font`, `size`, `weight`, `italic`, `uppercase`, `decoration`, `letterSpacing`, `paint`, `stroke` e `mark`; o resto vem do elemento. A parte põe ou troca o contorno do elemento, mas não tira: com `stroke` no `textStyle`, todas as partes têm contorno.
+
+`mark` (o marca-texto: um fundo atrás das letras da parte, um por linha quando a parte quebra) só existe na parte do Título e do Texto, nunca no `textStyle`: `{ "color", "padding": 0 a 24 ou [vertical, horizontal], "radius": 0 a 24 }` (respiro e cantos em px). A cor da letra continua a do `paint` (da parte ou do elemento): escolha uma que se leia sobre o marca-texto.
 
 Elementos (`type`):
 
@@ -376,6 +380,8 @@ Por dentro (só o editor e o servidor escrevem; fica fora das instruções para 
 | caixa `layout` | `dir` `column`, `gap` 0, `align` `stretch`, `justify` `start`, `wrap` false |
 | links `dismiss` / `gap` | `true` / 8 |
 | botão `icon.side` | `end` |
+| contorno (`stroke`) | sem contorno; na parte, o igual ao do elemento sai |
+| marca-texto `padding` / `radius` | `[2, 6]` / 4 |
 
 ### 9.5 Limites
 
@@ -396,9 +402,10 @@ Por dentro (só o editor e o servidor escrevem; fica fora das instruções para 
 | Links / Áudio | exatamente 1 / no máximo 1 (existe se e só se o aviso tem áudio) |
 | Elementos com desfoque | até 4 |
 | Camadas de fundo / paradas / sombras | até 3 / 2 a 5 / até 2 |
+| Contorno / marca-texto | espessura de 1 a 8 / respiro e cantos de 0 a 24 |
 | Fontes enviadas | até 4 |
 | Imagem enviada | WebP, 16 a 1.600 px de cada lado, até 420.000 bytes |
-| Tamanho | até 30.000 bytes na conta do editor, que pesa mais que o texto do JSON: fique abaixo de uns 12.000 caracteres de JSON sem espaços (cada modelo da 9.9 tem menos de 2.500)<!-- ia:fora -->; a conta é a estimativa do jsonb (`jsonbBytesUpperBound` da forma canônica) e o check do banco mede o jsonb sem compressão e para em 32.768<!-- /ia:fora --> |
+| Tamanho | até 30.000 bytes na conta do editor, que pesa mais que o texto do JSON: fique abaixo de uns 12.000 caracteres de JSON sem espaços (cada exemplo da 9.9 tem menos de 2.500)<!-- ia:fora -->; a conta é a estimativa do jsonb (`jsonbBytesUpperBound` da forma canônica) e o check do banco mede o jsonb sem compressão e para em 32.768<!-- /ia:fora --> |
 
 ### 9.6 Regras entre partes e com o conteúdo do aviso
 
@@ -412,7 +419,7 @@ No rascunho do aviso, `freeDesign` fica ao lado de `design` (o Personalizado): n
 
 ### 9.7 Chaves de erro
 
-O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`, `freeDesign.close.<campo>`, `freeDesign.assets.<id do arquivo>`, `freeDesign.fonts`, `freeDesign.size`, `freeDesign.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.nodes.botao.action.href` ou `freeDesign.nodes.titulo.lines.0.1.text`) e, no celular, `freeDesign.devices.mobile.artboard.<campo>` e `freeDesign.devices.mobile.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.devices.mobile.nodes.selo.place.x`; já vêm pelo id, sem índice). Os índices que o zod devolve (`freeDesign.children.3.children.0...`) viram ids por `freeErrorKey`/`freeErrorKeys`, estáveis se a ordem mudar; `freeNodeIdOfKey` acha o elemento nos dois formatos.
+O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`, `freeDesign.close.<campo>`, `freeDesign.assets.<id do arquivo>`, `freeDesign.fonts`, `freeDesign.size`, `freeDesign.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.nodes.botao.action.href` ou `freeDesign.nodes.titulo.lines.0.1.text`) e, no celular, `freeDesign.devices.mobile.artboard.<campo>` e `freeDesign.devices.mobile.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.devices.mobile.nodes.selo.place.x`; já vêm pelo id, sem índice). Os índices que o zod devolve (`freeDesign.children.3.children.0...`) viram ids por `freeErrorKey`/`freeErrorKeys`, estáveis se a ordem mudar; `freeNodeIdOfKey` acha o elemento nos dois formatos. O contorno e o marca-texto (L6b) seguem o mesmo caminho: `freeDesign.nodes.titulo.textStyle.stroke.width` (o contorno do elemento) e `freeDesign.nodes.titulo.lines.1.1.style.mark.padding` (o marca-texto de uma parte).
 
 ### 9.8 Guia curto para a IA
 
@@ -425,12 +432,13 @@ O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`,
 7. O X precisa contrastar com o fundo dele; cores com alfa só onde fizer sentido.
 8. Fique bem abaixo do tamanho máximo: menos elementos e menos partes de texto.
 9. Só escreva `devices.mobile` quando pedirem algo só para o celular (veja 9.10 Celular), e só com o que muda; sem esse pedido, deixe `devices` de fora: o celular encolhe o desenho do computador sozinho.
+10. Contorno e marca-texto com moderação. O marca-texto vai em poucas palavras de destaque (uma ou duas por linha), com uma cor de letra que se leia sobre ele. O texto vazado (a letra com alfa `00`, como `#ffffff00`, e `stroke` com `width` 2 ou mais) só em palavras grandes do Título, nunca no texto que o aluno precisa ler para entender o aviso, no Selo ou nos botões.
 
 <!-- ia:fora -->
 `popupFreeJsonSchema()` (em `popup-free-json-schema.ts`, um módulo que nenhuma tela importa, §7) gera o JSON Schema da entrada (`z.toJSONSchema` com `io: "input"`; o elemento recursivo sai em `$defs`/`$ref`).
 <!-- /ia:fora -->
 
-### 9.9 Exemplos: os 4 modelos para começar
+### 9.9 Exemplos: os 4 modelos para começar e os efeitos
 
 Forma canônica (padrões omitidos). O Vídeo e a Imagem dos modelos começam sem arquivo (`"asset": null`): o editor preenche o Vídeo com o vídeo do Personalizado guardado ou pede o envio; a Imagem recortada a equipe envia.
 
@@ -786,6 +794,42 @@ Forma canônica (padrões omitidos). O Vídeo e a Imagem dos modelos começam se
 }
 ```
 
+**Contorno e marca-texto** (não é um modelo para começar: mostra as duas chaves; o título com uma palavra só no contorno e outra com marca-texto, e uma parte do texto com marca-texto claro, de respiro e cantos próprios):
+
+```json
+{
+  "assets": [],
+  "children": [
+    {
+      "id": "titulo",
+      "lines": [
+        [{ "style": { "paint": { "color": "#ffffff00", "kind": "solid" }, "stroke": { "color": "#ffffff", "width": 2 } }, "text": "Semana" }],
+        [{ "text": "de " }, { "style": { "mark": { "color": "#e5ff1f" }, "paint": { "color": "#111111", "kind": "solid" } }, "text": "revisão" }]
+      ],
+      "textStyle": { "size": 40, "uppercase": true },
+      "type": "heading"
+    },
+    {
+      "id": "texto",
+      "lines": [[{ "text": "As aulas do módulo 3 voltam com " }, { "style": { "mark": { "color": "#ffffff26", "padding": [0, 4], "radius": 2 } }, "text": "exercícios novos" }, { "text": "." }]],
+      "textStyle": { "paint": { "color": "#d4d4d8", "kind": "solid" } },
+      "type": "text"
+    },
+    {
+      "action": { "kind": "cta" },
+      "box": { "fill": [{ "color": "#e5ff1f", "kind": "solid" }], "padding": [12, 24], "radius": 999 },
+      "id": "botao",
+      "textStyle": { "paint": { "color": "#111111", "kind": "solid" } },
+      "type": "button"
+    },
+    { "id": "links", "type": "links" }
+  ],
+  "fonts": [],
+  "mode": "free",
+  "version": 1
+}
+```
+
 ### 9.10 Celular
 
 Na tela do aluno com até 767 px de largura (o celular; as prévias do editor de 375 px também), o pop-up usa o desenho do computador encolhido na mesma proporção, com o texto nunca abaixo de 12 px. Quando algo precisa ser diferente só no celular (um título menor, um selo em outro lugar, uma imagem escondida), a raiz ganha `devices.mobile` só com o que muda. Medidas em px da prancheta, como no computador: o encolher e o piso de 12 px continuam valendo por cima. `version` continua `1`.
@@ -807,7 +851,7 @@ Na tela do aluno com até 767 px de largura (o celular; as prévias do editor de
 
 Regras:
 
-- Cores, textos, pinturas, fundos, bordas, sombras, fontes, camada (`z`) e girar (`rotate`) são os mesmos no computador e no celular: não têm versão do celular.
+- Cores, textos, pinturas, fundos, bordas, sombras, fontes, contorno, marca-texto, camada (`z`) e girar (`rotate`) são os mesmos no computador e no celular: não têm versão do celular (o contorno e o respiro do marca-texto encolhem junto com o resto).
 - Cada parte entra campo a campo por cima da do computador: `{ "place": { "mode": "free", "x": 24 } }` muda só o X; o Y, a largura, a altura, a camada e o girar continuam os do computador. `size`, `gap` e `hidden` trocam o valor inteiro.
 - Um elemento solto continua solto no celular e um da sequência continua na sequência: um `place` com outro `mode` é recusado (`No celular, o elemento fica como no computador: solto continua solto e na sequência continua na sequência.`). Campo fora desta lista (ou de outro tipo, como `size` num Título) é recusado.
 - Um id que não existe, um objeto vazio e um valor igual ao do computador saem sozinhos (a forma canônica); sem nada que mude, `devices` sai.
