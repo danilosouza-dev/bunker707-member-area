@@ -13,7 +13,9 @@ import "./support/resolve-extensionless-ts.mjs";
 // - communication_fonts com RLS e sem politica (so service_role); buckets e formatos iguais aos do app;
 // - o desenho do aluno e o editor nunca usam dangerouslySetInnerHTML nem CSS em texto; o desenho do aluno nao
 //   puxa o zod (o pedaco da janela do pop-up continua leve);
-// - a CSP deixa baixar fonte so da origem do nosso Supabase.
+// - a CSP deixa baixar fonte so da origem do nosso Supabase;
+// - a janela do pop-up anima a escala de verdade: no Tailwind 4 a escala e a propriedade `scale`, entao a classe que
+//   usa scale-95 lista `scale` na transicao (`transform` nao cobre) e, com menos movimento, nao tem transicao.
 
 const root = new URL("../", import.meta.url);
 const migrations = new URL("supabase/migrations/", root);
@@ -131,6 +133,113 @@ test("o desenho do aluno nao puxa o zod: so o modelo sem zod (o pedaco da janela
 
     assert.doesNotMatch(source, /from "zod"|popup-design-schema|communications\/schemas"/, file);
   }
+});
+
+/** A utilidade do Tailwind sem as variantes: `data-ending-style:scale-95` -> `scale-95` (o `:` dentro de [] fica). */
+function utilityOf(token) {
+  let depth = 0;
+  let start = 0;
+
+  for (let index = 0; index < token.length; index += 1) {
+    const char = token[index];
+
+    if (char === "[" || char === "(") {
+      depth += 1;
+    } else if (char === "]" || char === ")") {
+      depth -= 1;
+    } else if (char === ":" && depth === 0) {
+      start = index + 1;
+    }
+  }
+
+  return token.slice(start).replace(/^!|!$/g, "");
+}
+
+/**
+ * Numa lista de classes que escala (scale-*), o que impede a escala de animar: nenhuma transicao, ou uma transicao
+ * que nao cobre a propriedade `scale` do Tailwind 4. `transition`, `transition-all` e `transition-transform` cobrem
+ * (no Tailwind 4 a ultima ja lista transform, translate, scale e rotate); `transition-[...]` so com scale ou all.
+ */
+function scaleTransitionProblem(classes) {
+  const utilities = classes.split(/\s+/).filter(Boolean).map(utilityOf);
+
+  if (!utilities.some((utility) => /^-?scale-/.test(utility))) {
+    return null;
+  }
+
+  const transitions = utilities.filter((utility) => /^transition(?:$|-)/.test(utility) && !/^transition-(?:none|discrete|normal)$/.test(utility));
+
+  if (transitions.length === 0) {
+    return "escala sem transicao";
+  }
+
+  const covers = (utility) => {
+    if (utility === "transition" || utility === "transition-all" || utility === "transition-transform") {
+      return true;
+    }
+
+    const list = /^transition-\[(.+)\]$/.exec(utility)?.[1].split(",").map((name) => name.trim());
+
+    return Boolean(list?.includes("scale") || list?.includes("all"));
+  };
+
+  const missing = transitions.filter((utility) => !covers(utility));
+
+  return missing.length > 0 ? `${missing.join(" ")} nao lista scale (no Tailwind 4 a escala e a propriedade scale, nao transform)` : null;
+}
+
+/** Os textos entre aspas duplas de uma linha de codigo (as classes do JSX e do cn()); comentarios ficam de fora. */
+function classLiteralsOf(source) {
+  return source
+    .split("\n")
+    .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/.test(line))
+    .flatMap((line) => [...line.matchAll(/"((?:[^"\\\n]|\\.)*)"/g)].map((match) => match[1]));
+}
+
+test("a janela do pop-up anima a escala: a classe com scale-95 lista scale na transicao; menos movimento, sem transicao", async () => {
+  // A guarda pega o defeito antigo (a escala pulava sem animar) e aceita as formas que animam.
+  const before = "outline-none transition-[opacity,transform] duration-200 ease-out data-ending-style:scale-95 data-starting-style:scale-95";
+  assert.match(scaleTransitionProblem(before) ?? "", /transition-\[opacity,transform\] nao lista scale/);
+  assert.equal(scaleTransitionProblem("transition-[opacity,scale] data-starting-style:scale-95"), null);
+  assert.equal(scaleTransitionProblem("transition-transform hover:scale-[1.03]"), null);
+  assert.equal(scaleTransitionProblem("transition hover:scale-[1.03]"), null);
+  assert.equal(scaleTransitionProblem("[&_svg]:size-5 data-[open]:scale-95 transition-[opacity,all]"), null);
+  assert.equal(scaleTransitionProblem("focus-visible:[box-shadow:inset_0_0_0_4px_#000000b3]! transition-[filter]"), null, "sem escala, nada a conferir");
+  assert.equal(scaleTransitionProblem("scale-95 transition-none"), "escala sem transicao");
+
+  // Toda classe da pasta src/components/member/notifications (a janela, os cartoes do Padrão, do Personalizado e do
+  // Livre) que escala e tem transicao lista scale. O X junta o pulso (motion-safe:scale-[1.12]) e a transicao em
+  // textos separados do cn(), por isso fica fora desta conta (a dele ja lista scale). O menu do sino e os menus do
+  // admin, fora desta pasta, tem o mesmo defeito e ficam para uma PR de correcao a parte (docs/27 §10).
+  const files = await sourceFiles("src/components/member/notifications/");
+  const problems = [];
+
+  assert.ok(files.length >= 10, "os arquivos do pop-up existem");
+
+  for (const file of files) {
+    for (const classes of classLiteralsOf(await readFile(new URL(file), "utf8"))) {
+      const utilities = classes.split(/\s+/).map(utilityOf);
+      const problem = utilities.some((utility) => /^transition(?:$|-)/.test(utility)) ? scaleTransitionProblem(classes) : null;
+
+      if (problem) {
+        problems.push(`${file.replace(root.href, "")}: ${problem}`);
+      }
+    }
+  }
+
+  assert.deepEqual(problems, []);
+
+  // A janela (Dialog.Popup, data-member-popup): fade e escala de 95 % ao abrir e ao fechar, e nada com menos movimento.
+  const dialog = await readFile(new URL("src/components/member/notifications/member-popup-dialog.tsx", root), "utf8");
+  const windowClasses = classLiteralsOf(dialog).filter((classes) => /(?:^|\s)data-starting-style:scale-95(?:\s|$)/.test(classes));
+
+  assert.equal(windowClasses.length, 1, "uma classe da janela com scale-95");
+  const windowUtilities = windowClasses[0].split(/\s+/);
+
+  assert.ok(windowUtilities.includes("transition-[opacity,scale]"), windowClasses[0]);
+  assert.ok(windowUtilities.includes("data-ending-style:scale-95"), "fecha encolhendo");
+  assert.ok(windowUtilities.includes("motion-reduce:transition-none"), "com menos movimento, sem transicao");
+  assert.equal(scaleTransitionProblem(windowClasses[0]), null);
 });
 
 test("CSP: fonte so do proprio app, data: e a origem do nosso Supabase (nada do Google na hora)", async () => {
