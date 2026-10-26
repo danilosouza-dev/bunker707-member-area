@@ -740,6 +740,18 @@ test("texto vazado (Só o contorno): a letra fica transparente e o ícone do Sel
   for (const name of ["snooze", "dismiss"]) {
     assert.match(markup, new RegExp(`data-free-link="${name}" style="[^"]*;text-decoration-color:#e5ff1f"`), `${name}: o sublinhado ao passar o mouse aparece`);
   }
+
+  // Com a cor ao passar o mouse (L6c), a linha continua em linha na cor do contorno e o link ganha a lista e a
+  // variável: é a regra fixa do globals.css (a cor da linha com !important, no teste do CSS gerado) que leva o
+  // sublinhado para a cor nova junto com a letra.
+  const comCor = card(parsed({ children: [{ hover: { color: "#00ff00" }, id: "links", textStyle: hollow, type: "links" }] }));
+
+  for (const name of ["snooze", "dismiss"]) {
+    const opening = openingTag(comCor, `data-free-link="${name}"`, "button");
+
+    assert.equal(attrOf(opening, "data-free-hover"), "color", name);
+    assert.match(attrOf(opening, "style"), /;text-decoration-color:#e5ff1f;--free-hover-color:#00ff00$/, name);
+  }
 });
 
 test("marca-texto: fundo, respiro e cantos em cqw, um fundo por linha; com degradê, o span de fora leva a fonte e o marca-texto e o de dentro só a pintura", () => {
@@ -1138,7 +1150,16 @@ test("o CSS gerado tem o bloco Livre (L6c): fora de @layer, !important, o passar
     assert.match(rule.at[0], HOVER_MEDIA);
   }
 
-  assert.deepEqual(find("[data-free-hover~=color]:hover").css, { color: "var(--free-hover-color)!important" });
+  // A cor leva junto a da linha: nos Links vazados a linha vem em linha na cor do contorno (freeHollowColor), e sem o
+  // !important dela o sublinhado ao passar o mouse ficaria na cor do contorno, com a letra na cor nova. O compilador
+  // acrescenta a forma -webkit- para os Safari mais antigos.
+  const COLOR = {
+    "-webkit-text-decoration-color": "var(--free-hover-color)!important",
+    color: "var(--free-hover-color)!important",
+    "text-decoration-color": "var(--free-hover-color)!important"
+  };
+
+  assert.deepEqual(find("[data-free-hover~=color]:hover").css, COLOR);
   assert.deepEqual(find("[data-free-hover~=border]:hover").css, { "border-color": "var(--free-hover-border)!important" });
   checkFill(find("[data-free-hover~=fill]:hover").css);
 
@@ -1146,7 +1167,7 @@ test("o CSS gerado tem o bloco Livre (L6c): fora de @layer, !important, o passar
   const focus = (name) => find(`[data-free-hover~=${name}]:is(:focus-visible,[data-free-hover-on])`);
 
   assert.deepEqual([focus("color").at, focus("border").at, focus("fill").at], [[], [], []]);
-  assert.deepEqual(focus("color").css, { color: "var(--free-hover-color)!important" });
+  assert.deepEqual(focus("color").css, COLOR);
   assert.deepEqual(focus("border").css, { "border-color": "var(--free-hover-border)!important" });
   checkFill(focus("fill").css);
 
