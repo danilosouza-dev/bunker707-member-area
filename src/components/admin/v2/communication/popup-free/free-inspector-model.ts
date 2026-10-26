@@ -208,7 +208,10 @@ export const FREE_INSPECTOR_COPY = {
     /** Contorno das letras (L6b), no molde da Sombra do texto. */
     stroke: "Contorno",
     strokeColor: "Cor do contorno",
+    /** Com a letra em degradê, a chave Contorno e o "Só o contorno" ficam desligados (o schema recusa os dois juntos). */
+    strokeGradient: "Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.",
     strokeOnly: "Só o contorno (texto vazado)",
+    strokeOnlyGradient: "No degradê, escolha uma cor sólida antes.",
     strokeWidth: "Espessura",
     uppercase: "Maiúsculas",
     weight: "Peso"
@@ -1333,6 +1336,23 @@ export function freeStrokeSwitchPatch(style: Pick<FreeTextStyle, "paint" | "stro
   }
 
   return freeIsOutlineOnly(style) ? { ...freeOutlineOnlyPatch(style, false), stroke: undefined } : { stroke: undefined };
+}
+
+/**
+ * Por que a chave Contorno fica desligada (no elemento e na parte, pela pintura que vale ali): com a letra em
+ * degradê, o contorno cobre a cor e o schema recusa. Com o contorno já ligado, a chave continua livre para
+ * desligar. null = livre.
+ */
+export function freeStrokeDisabledReason(style: Pick<FreeTextStyle, "paint" | "stroke">): string | null {
+  return style.stroke === undefined && style.paint !== undefined && style.paint.kind !== "solid" ? FREE_INSPECTOR_COPY.style.strokeGradient : null;
+}
+
+/**
+ * Por que o "Só o contorno" fica desligado: no degradê ele trocaria o degradê por uma cor sólida, e soltar o botão
+ * devolveria só a primeira cor. null = livre.
+ */
+export function freeOutlineOnlyDisabledReason(style: Pick<FreeTextStyle, "paint">): string | null {
+  return style.paint !== undefined && style.paint.kind !== "solid" ? FREE_INSPECTOR_COPY.style.strokeOnlyGradient : null;
 }
 
 /** O respiro do marca-texto como [em cima e embaixo, dos lados] (sem escolha: [2, 6]). */

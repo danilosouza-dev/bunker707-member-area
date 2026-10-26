@@ -1332,11 +1332,82 @@ test("L6b: Outro estilo na seleção com contorno e marca-texto: a parte guarda 
   // O painel liga cada chave com um onApply (um passo das partes) e o contorno do elemento prende a chave da parte.
   const fields = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
   assert.match(fields, /onCheckedChange=\{\(on\) => onApply\(freeStrokeSwitchPatch\(style, on\)\)\}/);
-  assert.match(fields, /disabled=\{disabled \|\| base\.stroke !== undefined\}/);
+  assert.match(fields, /disabled=\{disabled \|\| base\.stroke !== undefined \|\| strokeReason !== null\}/);
   assert.match(fields, /onCheckedChange=\{\(on\) => onApply\(\{ mark: on \? \{ color: FREE_MARK_DEFAULT_COLOR \} : undefined \}\)\}/);
   for (const label of ["C.span.stroke", "C.span.strokeWidth", "C.span.strokeColor", "C.span.mark", "C.span.markColor", "C.span.markPaddingY", "C.span.markPaddingX", "C.span.markRadius"]) {
     assert.ok(fields.includes(`label={${label}}`), label);
   }
+});
+
+test("L6b: com a letra em degradê, a chave Contorno e o Só o contorno ficam parados, com o motivo; o contorno ligado ainda desliga", () => {
+  const degrade = { kind: "linear", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }] };
+  const circular = { kind: "radial", stops: [{ at: 0, color: "#ff3b3b" }, { at: 100, color: "#ffd400" }], x: 50, y: 50 };
+
+  assert.equal(C.style.strokeGradient, schema.POPUP_FREE_MESSAGES.strokeGradient, "a mesma frase do schema");
+  assert.equal(C.style.strokeOnlyGradient, "No degradê, escolha uma cor sólida antes.");
+
+  for (const paint of [degrade, circular]) {
+    assert.equal(panel.freeStrokeDisabledReason({ paint }), C.style.strokeGradient);
+    assert.equal(panel.freeOutlineOnlyDisabledReason({ paint }), C.style.strokeOnlyGradient);
+    // Com o contorno já ligado (um design colado), a chave fica livre para desligar.
+    assert.equal(panel.freeStrokeDisabledReason({ paint, stroke: CONTORNO_PRETO }), null);
+  }
+
+  assert.equal(panel.freeStrokeDisabledReason({ paint: VERDE }), null);
+  assert.equal(panel.freeStrokeDisabledReason({}), null, "sem pintura própria, a cor de partida é sólida");
+  assert.equal(panel.freeOutlineOnlyDisabledReason({ paint: VERDE }), null);
+  assert.equal(panel.freeOutlineOnlyDisabledReason({ paint: { color: "#ffffff00", kind: "solid" } }), null);
+
+  // No painel: a chave e o botão parados, com o motivo ligado a eles.
+  const emDegrade = design([{ ...TITULO, textStyle: { paint: degrade, size: 40 } }, LINKS]);
+  const calls = [];
+  const tree = FreeInspectorStyle(styleProps(emDegrade, "titulo", calls));
+  const chave = elementById(tree, "livre-titulo-contorno-ligado");
+  const botao = elementById(tree, "livre-titulo-so-contorno");
+
+  assert.equal(chave.props.disabled, true);
+  assert.equal(chave.props.description, C.style.strokeGradient);
+  assert.equal(botao.props.disabled, true);
+  assert.equal(botao.props["aria-describedby"], "livre-titulo-so-contorno-motivo");
+  assert.equal(elementById(tree, "livre-titulo-so-contorno-motivo").props.children, C.style.strokeOnlyGradient);
+
+  // Com cor sólida, os dois ficam livres e sem motivo.
+  const solida = FreeInspectorStyle(styleProps(design([TITULO, LINKS]), "titulo"));
+
+  assert.equal(elementById(solida, "livre-titulo-contorno-ligado").props.disabled, false);
+  assert.equal(elementById(solida, "livre-titulo-contorno-ligado").props.description, undefined);
+  assert.equal(elementById(solida, "livre-titulo-so-contorno").props.disabled, false);
+  assert.equal(elementById(solida, "livre-titulo-so-contorno-motivo"), null);
+
+  // O degradê com o contorno já ligado (colado ou pela troca da cor): a chave desliga num passo e o erro do schema
+  // aparece no grupo do contorno (o da espessura fica no campo dela, sem repetir).
+  const invalido = design([{ ...TITULO, textStyle: { paint: degrade, size: 40, stroke: CONTORNO_PRETO } }, LINKS]);
+  const errors = { "nodes.titulo.textStyle.stroke": schema.POPUP_FREE_MESSAGES.strokeGradient };
+  const comErro = FreeInspectorStyle({ ...styleProps(invalido, "titulo", calls), errors });
+
+  assert.equal(elementById(comErro, "livre-titulo-contorno-ligado").props.disabled, false);
+  assert.equal(elementById(comErro, "livre-titulo-contorno-erro").props.message, schema.POPUP_FREE_MESSAGES.strokeGradient);
+  elementById(comErro, "livre-titulo-contorno-ligado").props.onCheckedChange(false);
+  assert.equal(calls.at(-1).field, undefined, "um passo próprio");
+  assert.deepEqual(model.findFreeNode(calls.at(-1).next, "titulo").node.textStyle, { paint: degrade, size: 40 });
+  assert.ok(schema.parsePopupFreeDesign(calls.at(-1).next), "sem o contorno, vale de novo");
+
+  const daEspessura = FreeInspectorStyle({ ...styleProps(invalido, "titulo"), errors: { "nodes.titulo.textStyle.stroke.width": "Use de 1 a 8." } });
+
+  assert.equal(elementById(daEspessura, "livre-titulo-contorno-erro").props.message, undefined);
+  assert.equal(elementById(daEspessura, "livre-titulo-contorno-espessura").props.error, "Use de 1 a 8.");
+
+  // Na parte: a chave fica parada com o motivo quando a pintura que vale ali (da parte ou do elemento) é degradê.
+  const fields = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+
+  assert.match(fields, /const strokeReason = freeStrokeDisabledReason\(style\);/);
+  assert.match(fields, /description=\{base\.stroke \? C\.span\.strokeFromElement : \(strokeReason \?\? undefined\)\}/);
+  assert.equal(panel.freeStrokeDisabledReason(panel.freeRangeStyle([[{ text: "Semana" }]], { end: 3, line: 0, start: 0 }, { ...HEADING_BASE, paint: degrade })), C.style.strokeGradient);
+  assert.equal(
+    panel.freeStrokeDisabledReason(panel.freeRangeStyle([[{ style: { paint: VERDE }, text: "Semana" }]], { end: 3, line: 0, start: 0 }, { ...HEADING_BASE, paint: degrade })),
+    null,
+    "a parte sólida no elemento em degradê liga o contorno"
+  );
 });
 
 test("L6b: respiro e cantos do marca-texto: os padrões saem e [n, n] vira n, como na forma canônica", () => {

@@ -70,6 +70,7 @@ import {
   freeSidesFromFour,
   freeSidesUniform,
   freeStopsPreview,
+  freeStrokeDisabledReason,
   freeStrokeSwitchPatch,
   freeStyledParts,
   freeTextAreaChange,
@@ -1503,6 +1504,8 @@ function SpanStylePanel({
   const style = freeRangeStyle(lines, targets[0], base);
   const own = freeRangeHasOwnStyle(lines, targets, base);
   const stroke = style.stroke;
+  // A parte em degradê (dela ou do elemento) não liga o contorno: ele cobriria a cor (o schema recusa).
+  const strokeReason = freeStrokeDisabledReason(style);
   const mark = style.mark;
   const markPadding = mark ? freeMarkPadding(mark) : null;
 
@@ -1543,8 +1546,8 @@ function SpanStylePanel({
         {/* A parte poe ou troca o contorno do elemento, mas nao tira: com contorno no elemento, a chave fica ligada. */}
         <AdminSwitch
           checked={stroke !== undefined}
-          description={base.stroke ? C.span.strokeFromElement : undefined}
-          disabled={disabled || base.stroke !== undefined}
+          description={base.stroke ? C.span.strokeFromElement : (strokeReason ?? undefined)}
+          disabled={disabled || base.stroke !== undefined || strokeReason !== null}
           id={`${id}-contorno`}
           label={C.span.stroke}
           onCheckedChange={(on) => onApply(freeStrokeSwitchPatch(style, on))}

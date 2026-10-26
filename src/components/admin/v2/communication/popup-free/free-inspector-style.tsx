@@ -4,6 +4,7 @@ import { FREE_DESIGN_LIMITS, type FreeNode, type FreeTextStyle } from "@/server/
 import { freeTextStyleOf } from "@/server/communications/popup-free-render";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { AdminSwitch } from "../../settings/kit";
 import { ColorField, PillField } from "../popup-design/design-controls";
 import { WeightPicker } from "../popup-design/font-picker";
@@ -18,6 +19,8 @@ import {
   FreeRadiusField,
   FreeSection,
   FreeShadowsField,
+  FreeFieldError,
+  FreeNote,
   FreeTextPaintField,
   freeSmallButton
 } from "./free-fields";
@@ -32,7 +35,9 @@ import {
   freeFillBaseColor,
   freeHintsOf,
   freeIsOutlineOnly,
+  freeOutlineOnlyDisabledReason,
   freeOutlineOnlyPatch,
+  freeStrokeDisabledReason,
   freeStrokeSwitchPatch,
   withFreeBox,
   withFreeFadeEnd,
@@ -76,6 +81,11 @@ function TextStyleSection({ design, disabled, errors, fonts, hints, node, onChan
   const shadow = style.shadow;
   const stroke = style.stroke;
   const outlineOnly = freeIsOutlineOnly(style);
+  // Com a letra em degradê, o contorno cobre a cor: a chave só desliga e o "Só o contorno" fica parado, com o motivo.
+  const strokeReason = freeStrokeDisabledReason(style);
+  const outlineReason = freeOutlineOnlyDisabledReason(style);
+  // O erro do contorno inteiro (com o degradê); o da espessura e o da cor ficam nos campos deles.
+  const strokeError = error("stroke.width") || error("stroke.color") ? undefined : error("stroke");
 
   return (
     <FreeSection title={C.style.text}>
@@ -137,12 +147,14 @@ function TextStyleSection({ design, disabled, errors, fonts, hints, node, onChan
       <div className="flex min-w-0 flex-col gap-3" id={id("contorno")} tabIndex={-1}>
         <AdminSwitch
           checked={stroke !== undefined}
-          disabled={disabled}
+          description={strokeReason ?? undefined}
+          disabled={disabled || strokeReason !== null}
           id={`${id("contorno")}-ligado`}
           label={C.style.stroke}
           // Desligar com a letra vazada devolve a cor dela no mesmo passo (sem o contorno ela sumiria).
           onCheckedChange={(on) => set(freeStrokeSwitchPatch(style, on))}
         />
+        <FreeFieldError id={`${id("contorno")}-erro`} message={strokeError} />
         {stroke ? (
           <div className="flex min-w-0 flex-col gap-3 border-l-2 border-[var(--border-subtle)] pl-4">
             <FreeNumberField
@@ -159,11 +171,21 @@ function TextStyleSection({ design, disabled, errors, fonts, hints, node, onChan
           </div>
         ) : null}
         {OUTLINE_ONLY_TYPES.has(node.type) ? (
-          <div>
-            <Button aria-pressed={outlineOnly} className={freeSmallButton} disabled={disabled} id={id("so-contorno")} onClick={() => set(freeOutlineOnlyPatch(style, !outlineOnly))} type="button" variant="secondary">
+          <div className="flex min-w-0 flex-col gap-2">
+            <Button
+              aria-describedby={outlineReason ? `${id("so-contorno")}-motivo` : undefined}
+              aria-pressed={outlineOnly}
+              className={cn(freeSmallButton, "self-start")}
+              disabled={disabled || outlineReason !== null}
+              id={id("so-contorno")}
+              onClick={() => set(freeOutlineOnlyPatch(style, !outlineOnly))}
+              type="button"
+              variant="secondary"
+            >
               {outlineOnly ? <Check aria-hidden="true" className="size-4" /> : null}
               {C.style.strokeOnly}
             </Button>
+            {outlineReason ? <FreeNote id={`${id("so-contorno")}-motivo`}>{outlineReason}</FreeNote> : null}
           </div>
         ) : null}
       </div>
