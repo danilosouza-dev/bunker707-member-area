@@ -2,6 +2,9 @@
 // JSON) e a leitura do que a equipe cola (o mesmo zod e a mesma forma canonica do salvar). Modulo puro, imports
 // relativos (os testes carregam pelo Node); so o editor Livre usa (o cartao do aluno nunca importa este arquivo).
 //
+// Celular (PR L3): `devices` passa pelo mesmo zod; ids que nao existem no design colado saem na forma canonica, e o
+// erro de um valor do celular diz o elemento ("“Título”, no celular: ...").
+//
 // Arquivos: o design colado so fica com os arquivos que este pop-up ja conhece (mesmo tipo e mesmo caminho); os
 // outros (de outro pop-up ou inventados por uma IA) saem, e a Imagem ou o Vídeo que os usava fica vazio para a
 // equipe enviar de novo. Assim nenhum caminho de outro aviso entra no salvar: a conferencia do salvar so ve se o
@@ -24,6 +27,7 @@ export const POPUP_FREE_PASTE_MESSAGES = {
       ? "1 arquivo não é deste pop-up e ficou de fora: envie de novo onde o elemento ficou vazio."
       : `${count} arquivos não são deste pop-up e ficaram de fora: envie de novo onde os elementos ficaram vazios.`,
   invalid: "O design colado tem algo que não vale:",
+  mobile: (label: string, message: string) => `“${label}”, no celular: ${message}`,
   more: (count: number) => `E mais ${count}.`,
   notFree: "Isso não é um design Livre. Copie pelo botão “Copiar o design” ou peça à IA o JSON com \"mode\": \"free\".",
   notJson: "Não deu para ler o texto colado. Copie o design inteiro, do primeiro { ao último }.",
@@ -180,6 +184,28 @@ function keepLibraryFonts(raw: Json, fontIds: readonly string[]): number {
   return missing.size;
 }
 
+/** O nome na lista de Camadas (ou o id) de um elemento do design colado. */
+function labelOf(node: Json): string | null {
+  const name = typeof node.name === "string" && node.name.trim() ? node.name.trim() : null;
+
+  return name ?? (typeof node.id === "string" ? node.id : null);
+}
+
+/** O elemento de um valor do celular ("devices.mobile.nodes.<id>...") no design colado, ou null. */
+function mobileLabelAt(raw: Json, path: readonly PropertyKey[]): string | null {
+  if (path[0] !== "devices" || path[1] !== "mobile" || path[2] !== "nodes" || typeof path[3] !== "string") {
+    return null;
+  }
+
+  let found: Json | null = null;
+
+  eachNode(raw.children, (node) => {
+    found ??= node.id === path[3] ? node : null;
+  });
+
+  return found ? labelOf(found) : null;
+}
+
 /** O nome do elemento de um caminho do zod ("children.3.children.0.lines...") no design colado, ou null. */
 function nodeLabelAt(raw: Json, path: readonly PropertyKey[]): string | null {
   let list: unknown = raw.children;
@@ -198,13 +224,7 @@ function nodeLabelAt(raw: Json, path: readonly PropertyKey[]): string | null {
     index += 2;
   }
 
-  if (!found) {
-    return null;
-  }
-
-  const name = typeof found.name === "string" && found.name.trim() ? found.name.trim() : null;
-
-  return name ?? (typeof found.id === "string" ? found.id : null);
+  return found ? labelOf(found) : null;
 }
 
 /**
@@ -247,7 +267,8 @@ export function parseFreeDesignPaste(text: string, context: FreePasteContext): F
 
     for (const issue of parsed.error.issues) {
       const label = nodeLabelAt(raw, issue.path);
-      const line = label ? `“${label}”: ${issue.message}` : issue.message;
+      const mobile = label ? null : mobileLabelAt(raw, issue.path);
+      const line = label ? `“${label}”: ${issue.message}` : mobile ? M.mobile(mobile, issue.message) : issue.message;
 
       if (!lines.includes(line)) {
         lines.push(line);

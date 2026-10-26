@@ -400,6 +400,8 @@ export function DesignTemplateEditor({ now, options, template }: DesignTemplateE
             errorFor={errorFor}
             fonts={popupFonts}
             freeEditor={{
+              // O modelo de Design nao guarda o "Lembrar depois" (docs/28 §1.7): a chave de Links › Conteúdo vira a nota.
+              allowSnoozeEditable: false,
               recoveryKey: freeTemplateRecoveryKey(template.id),
               saveConfirm: readPending
                 ? { cancelLabel: copy.confirmRead.cancel, confirmLabel: copy.confirmRead.confirm, description: copy.confirmRead.description, title: copy.confirmRead.title }

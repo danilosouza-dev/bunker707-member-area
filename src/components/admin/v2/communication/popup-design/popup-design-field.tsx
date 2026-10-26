@@ -58,6 +58,7 @@ import {
   type PopupDesignMode,
   type RememberedDesigns
 } from "./popup-design-editor-model";
+import { popupSettingsOfDraft } from "../popup-editor-model";
 import type { FreeDesignEditorProps } from "../popup-free/free-editor";
 
 // Cartao "Design" do editor do pop-up (docs/26; spec §7): Padrão | Personalizado | Livre, modelos para comecar e,
@@ -67,7 +68,7 @@ import type { FreeDesignEditorProps } from "../popup-free/free-editor";
 // Padrão; nunca os dois); trocar de modo guarda o design do modo que saiu em memoria e voltar devolve, sem perguntar.
 // A notificacao do sino nunca tem design (o editor nem mostra).
 //
-// Livre (docs/27; spec §4.1): modelos com miniatura (o proprio PopupFreeCard em previa), o resumo do design montado
+// Livre (docs/27; spec §4.1): modelos com miniatura (o proprio PopupFreeCard em previa, no computador), o resumo do design montado
 // e o botao "Abrir editor Livre", que baixa o editor de tela cheia (next/dynamic, so ao abrir) e so abre em telas a
 // partir de 1.024 px. O editor trabalha numa copia e manda o design ao rascunho; "Salvar rascunho" dentro dele chama
 // `onSaveDraft` (o editor do aviso nao troca de endereco enquanto ele esta aberto, spec §4.13).
@@ -193,6 +194,8 @@ export type PopupDesignFieldProps = {
    * Modelos quando os modelos estao ligados). `saveConfirm`: a pergunta de D29 antes do primeiro salvar.
    */
   freeEditor?: {
+    /** false na pagina do modelo de Design: a chave "Permitir “Lembrar depois”" de Links › Conteúdo vira uma nota. */
+    allowSnoozeEditable?: boolean;
     recoveryKey: string;
     saveConfirm?: FreeDesignEditorProps["saveConfirm"];
     saveLabel: string;
@@ -237,7 +240,7 @@ function FreeThumb({ design, fonts, label }: { design: PopupFreeDesign; fonts?: 
       >
         <span className="flex justify-center py-4">
           {/* O mesmo cartao da previa (o pedaco do cartao Livre e baixado so quando aparece). */}
-          <MemberPopupCard playing={false} popup={popup} preview />
+          <MemberPopupCard device="desktop" playing={false} popup={popup} preview />
         </span>
       </span>
     </span>
@@ -1045,13 +1048,17 @@ export function PopupDesignField({
         <FreeDesignEditor
           content={{
             allowSnooze: draft.allowSnooze,
+            allowSnoozeEditable: freeEditorSetup?.allowSnoozeEditable ?? true,
             audio: draft.audio,
             cta: draft.cta,
             ctaOptional: freeEditorSetup !== null,
             hideCtaDestination,
+            // A mesma regra do card "Quantas vezes e como fecha" (campaigns.allow_snooze), pelo mesmo caminho do cta.
+            onAllowSnoozeChange: (allowSnooze) => onChange({ allowSnooze }),
             onCtaChange: (cta) => onChange({ cta }),
             products,
             productsLoaded,
+            snoozeMinutes: popupSettingsOfDraft(draft).snoozeMinutes,
             title: draft.title
           }}
           disabled={disabled}

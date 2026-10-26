@@ -8,6 +8,10 @@
 // version: 1, ... }); a leitura passa pelo roteador (popup-design-router.ts). Toda medida esta em px da
 // prancheta na largura escolhida (artboard.width, 280 a 720); o cartao desenha em cqw (encolhe junto no
 // celular). Os arquivos guardam so o caminho no nosso Storage: o endereco e montado na hora (freeAssetUrl).
+//
+// Celular (PR L3, docs/27 §9.10): `devices.mobile` guarda so o que muda no celular (prancheta e, por id, posicao no
+// mesmo modo, texto, respiro, cantos, tamanho, espaco, sequencia da caixa e escondido); a forma canonica tira o que
+// e igual ao computador e o design do aparelho sai de resolveFreeForDevice (popup-free-render.ts, reexportado aqui).
 
 import type { NoticeDraft } from "./schemas";
 import type { PopupCta, PopupItem } from "./notification-model";
@@ -28,11 +32,15 @@ import {
   freeHeadingText,
   freeFirstHeading,
   freeTextDefaultsOf,
+  freeTextStyleOf,
   resolveFreeArtboard,
-  resolveFreeClose
+  resolveFreeClose,
+  resolveFreeForDevice
 } from "./popup-free-render";
 
 export { FREE_MIN_FONT_PX, FREE_MIN_TOUCH_PX };
+/** O design do aparelho (o celular com os valores proprios por cima); mora em popup-free-render.ts (o cartao usa). */
+export { resolveFreeForDevice };
 
 export const FREE_DESIGN_MODE = "free" as const;
 export const FREE_DESIGN_VERSION = 1 as const;
@@ -241,6 +249,37 @@ export type FreeArtboard = {
 /** O X: sempre existe, sempre por cima, 44 px de toque, sempre visivel (regra 11). Padroes em FREE_CLOSE_DEFAULTS. */
 export type FreeClose = { background: HexColor; border?: FreeBorder; color: HexColor; inset: number; side: "left" | "right"; size: 28 | 36 | 44 };
 
+/* Celular (PR L3): valores proprios por elemento ------------------------------------------------- */
+
+/**
+ * Posicao no celular: o MESMO modo do computador (solto continua solto; na sequencia continua na sequencia), so os
+ * campos que mudam. Camada (`z`) e girar (`rotate`) sao os mesmos nos dois.
+ */
+export type FreeMobileFlowPlace = Omit<FreeFlowPlace, "z">;
+export type FreeMobileFreePlace = Partial<Omit<FreeAbsolutePlace, "mode" | "rotate" | "z">> & { mode: "free" };
+export type FreeMobilePlace = FreeMobileFlowPlace | FreeMobileFreePlace;
+
+/**
+ * O que um elemento muda no celular (px da prancheta, como no computador; o encolher e o piso de 12 px valem por
+ * cima). Cores, textos, pinturas, sombras, camada e girar sao os mesmos nos dois. `size` so no Espaço e no Ícone,
+ * `gap` so nos Links, `layout` so na Caixa, `textStyle` so nos elementos com texto.
+ */
+export type FreeMobileNode = {
+  box?: Pick<FreeBox, "padding" | "radius">;
+  gap?: number;
+  /** So no celular: esconde (true) ou mostra (false) o que no computador aparece (ou nao). */
+  hidden?: boolean;
+  layout?: FreeBoxLayout;
+  place?: FreeMobilePlace;
+  size?: number;
+  textStyle?: Pick<FreeTextStyle, "align" | "letterSpacing" | "lineHeight" | "size">;
+};
+
+export type FreeMobileArtboard = Partial<Pick<FreeArtboard, "gap" | "minHeight" | "padding">>;
+
+/** `devices.mobile` (largura da tela ate 767 px): so o que muda; a forma canonica tira o que e igual ao computador. */
+export type FreeDevices = { mobile?: { artboard?: FreeMobileArtboard; nodes?: Record<FreeId, FreeMobileNode> } };
+
 /** Forma canonica (gravada, lida e desenhada). */
 export type PopupFreeDesign = {
   artboard?: Partial<FreeArtboard>;
@@ -248,6 +287,8 @@ export type PopupFreeDesign = {
   assets: FreeAsset[];
   children: FreeNode[];
   close?: Partial<FreeClose>;
+  /** Valores proprios do celular (docs/27 §9.10); sem = o celular encolhe o computador. */
+  devices?: FreeDevices;
   /** Ids das fontes enviadas usadas (derivado, ordenado; a forma canonica recalcula). Sempre presente. */
   fonts: string[];
   mode: typeof FREE_DESIGN_MODE;
@@ -270,7 +311,7 @@ export const FREE_DESIGN_LIMITS = {
   blur: { max: 80, min: 0 },
   borderWidth: { max: 8, min: 0 },
   boxDepth: 2, // caixas: na prancheta (1) e dentro de uma caixa (2); folhas ate 3
-  buttons: 3, // alem do principal
+  buttons: 3, // alem do principal: Fechar, Lembrar depois ou Abrir um link, em qualquer mistura (L4b)
   childrenPerBox: 20,
   closeInset: { max: 24, min: 8 },
   dividerThickness: { max: 8, min: 1 },
@@ -295,7 +336,6 @@ export const FREE_DESIGN_LIMITS = {
   label: 40,
   letterSpacing: { max: 1, min: -0.2 },
   lineHeight: { max: 2.5, min: 0.7 },
-  linkButtons: 1, // botoes "Abrir um link" (dentro dos 3)
   margin: { max: 400, min: -400 },
   minHeight: { max: 1600, min: 0 },
   name: 40,
@@ -484,18 +524,85 @@ export function freeDefaultFlowWidth(type: FreeNodeType): "fill" | "hug" {
   return type === "badge" || type === "button" || type === "icon" ? "hug" : "fill";
 }
 
-/** v1: devolve o proprio design (o layout proprio do celular e do PR L3, em `devices.mobile`). */
-export function resolveFreeForDevice(design: PopupFreeDesign, device: "desktop" | "mobile"): PopupFreeDesign {
-  void device;
-
-  return design;
-}
-
-/** "nodes.botao.action.href" (ou "freeDesign.nodes.botao...") -> "botao"; outras chaves -> null. */
+/**
+ * "nodes.botao.action.href" (ou "freeDesign.nodes.botao...", "devices.mobile.nodes.botao.place.x",
+ * "freeDesign.devices.mobile.nodes.botao") -> "botao"; outras chaves -> null.
+ */
 export function freeNodeIdOfKey(key: string): FreeId | null {
-  const match = /^(?:freeDesign\.)?nodes\.([^.]+)(?:\.|$)/.exec(key);
+  const match = /^(?:freeDesign\.)?(?:devices\.mobile\.)?nodes\.([^.]+)(?:\.|$)/.exec(key);
 
   return match && FREE_ID_PATTERN.test(match[1]) ? match[1] : null;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Celular: a entrada de um elemento em devices.mobile.nodes
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O que o elemento muda no celular (undefined = igual ao computador). */
+export function freeMobileNodeOf(design: Pick<PopupFreeDesign, "devices">, id: FreeId): FreeMobileNode | undefined {
+  const nodes = design.devices?.mobile?.nodes;
+
+  return nodes && Object.prototype.hasOwnProperty.call(nodes, id) ? nodes[id] : undefined;
+}
+
+/** O design com `devices.mobile` trocado; sem nada no celular, `devices` sai. */
+function withMobile(design: PopupFreeDesign, mobile: NonNullable<FreeDevices["mobile"]>): PopupFreeDesign {
+  const { devices: unusedDevices, ...rest } = design;
+  const nodes = mobile.nodes && Object.keys(mobile.nodes).length > 0 ? mobile.nodes : undefined;
+  const artboard = mobile.artboard && Object.keys(mobile.artboard).length > 0 ? mobile.artboard : undefined;
+
+  void unusedDevices;
+
+  if (!nodes && !artboard) {
+    return rest;
+  }
+
+  return { ...rest, devices: { mobile: { ...(artboard ? { artboard } : {}), ...(nodes ? { nodes } : {}) } } };
+}
+
+/**
+ * Troca as entradas do celular de alguns elementos (`undefined` ou um objeto vazio tira a entrada). Devolve o mesmo
+ * design quando nada muda.
+ */
+export function withFreeMobileNodes(design: PopupFreeDesign, entries: Readonly<Record<FreeId, FreeMobileNode | undefined>>): PopupFreeDesign {
+  const current = design.devices?.mobile?.nodes ?? {};
+  const nodes: Record<FreeId, FreeMobileNode> = { ...current };
+  let changed = false;
+
+  for (const [id, entry] of Object.entries(entries)) {
+    const had = Object.prototype.hasOwnProperty.call(current, id);
+
+    if (!entry || Object.keys(entry).length === 0) {
+      if (had) {
+        delete nodes[id];
+        changed = true;
+      }
+
+      continue;
+    }
+
+    if (!had || current[id] !== entry) {
+      nodes[id] = entry;
+      changed = true;
+    }
+  }
+
+  return changed ? withMobile(design, { ...design.devices?.mobile, nodes }) : design;
+}
+
+/** Tira a posicao do celular de um elemento (ele trocou de modo: solto <-> sequencia). */
+export function withoutFreeMobilePlace(design: PopupFreeDesign, id: FreeId): PopupFreeDesign {
+  const entry = freeMobileNodeOf(design, id);
+
+  if (!entry?.place) {
+    return design;
+  }
+
+  const { place: unusedPlace, ...rest } = entry;
+
+  void unusedPlace;
+
+  return withFreeMobileNodes(design, { [id]: rest });
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -940,6 +1047,132 @@ function canonicalClose(close: Partial<FreeClose> | undefined): Partial<FreeClos
   return Object.keys(value).length > 0 ? value : undefined;
 }
 
+/* Celular: so o que muda em relacao ao computador ------------------------------------------------ */
+
+/** Um valor do celular: undefined quando e igual ao do computador (`desktop` ja com o padrao preenchido). */
+function unlessSame<T>(value: T | undefined, desktop: T): T | undefined {
+  return value === undefined || same(value, desktop) ? undefined : value;
+}
+
+/** Objeto sem as chaves indefinidas, ou undefined quando fica vazio. */
+function nonEmpty<T extends Record<string, unknown>>(value: T): T | undefined {
+  const out = sorted(value);
+
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function canonicalMobilePlace(place: FreeMobilePlace, node: FreeNode): FreeMobilePlace | undefined {
+  const desktop = node.place;
+
+  if (place.mode !== (desktop?.mode ?? "flow")) {
+    return undefined;
+  }
+
+  if (place.mode === "free" && desktop?.mode === "free") {
+    const pick = (value: number | undefined, base: number | undefined) => (value === undefined || int(value) === base ? undefined : int(value));
+    const value = sorted({ h: pick(place.h, desktop.h), mode: "free", w: pick(place.w, desktop.w), x: pick(place.x, desktop.x), y: pick(place.y, desktop.y) } satisfies FreeMobileFreePlace);
+
+    return Object.keys(value).length > 1 ? value : undefined;
+  }
+
+  if (place.mode !== "flow") {
+    return undefined;
+  }
+
+  const flow = desktop?.mode === "flow" ? desktop : undefined;
+  const width = typeof place.width === "number" ? int(place.width) : place.width;
+  const value = sorted({
+    align: place.align === undefined || place.align === flow?.align ? undefined : place.align,
+    height: place.height === undefined || int(place.height) === flow?.height ? undefined : int(place.height),
+    margin: unlessSame(place.margin === undefined ? undefined : canonicalSides(place.margin), canonicalSides(flow?.margin ?? 0)),
+    mode: "flow",
+    width: unlessSame(width, flow?.width ?? freeDefaultFlowWidth(node.type))
+  } satisfies FreeMobileFlowPlace);
+
+  return Object.keys(value).length > 1 ? value : undefined;
+}
+
+function canonicalMobileNode(entry: FreeMobileNode, node: FreeNode): FreeMobileNode | undefined {
+  const text = isTextBearing(node.type) && node.type !== "box" ? freeTextStyleOf(node) : null;
+  const ownText = entry.textStyle;
+  const layout = node.type === "box" ? node.layout ?? {} : null;
+  const ownLayout = entry.layout;
+  const sizeDefault = node.type === "spacer" ? (node.size ?? 16) : node.type === "icon" ? (node.size ?? 24) : null;
+
+  return nonEmpty({
+    box: entry.box
+      ? nonEmpty({
+          padding: unlessSame(entry.box.padding === undefined ? undefined : canonicalSides(entry.box.padding), canonicalSides(node.box?.padding ?? 0)),
+          radius: unlessSame(entry.box.radius === undefined ? undefined : canonicalRadius(entry.box.radius), canonicalRadius(node.box?.radius ?? 0))
+        })
+      : undefined,
+    gap: node.type === "links" && entry.gap !== undefined ? unlessSame(int(entry.gap), node.gap ?? 8) : undefined,
+    hidden: entry.hidden === undefined || entry.hidden === Boolean(node.hidden) ? undefined : entry.hidden,
+    layout:
+      layout && ownLayout
+        ? nonEmpty({
+            align: unlessSame(ownLayout.align, layout.align ?? "stretch"),
+            dir: unlessSame(ownLayout.dir, layout.dir ?? "column"),
+            gap: unlessSame(ownLayout.gap === undefined ? undefined : int(ownLayout.gap), layout.gap ?? 0),
+            justify: unlessSame(ownLayout.justify, layout.justify ?? "start"),
+            wrap: unlessSame(ownLayout.wrap, layout.wrap ?? false)
+          } satisfies FreeBoxLayout)
+        : undefined,
+    place: entry.place ? canonicalMobilePlace(entry.place, node) : undefined,
+    size: sizeDefault !== null && entry.size !== undefined ? unlessSame(int(entry.size), sizeDefault) : undefined,
+    textStyle:
+      text && ownText
+        ? nonEmpty({
+            // O botao sem alinhamento escolhido e desenhado no centro (freeButtonLayoutCss), nao no padrao do texto.
+            align: unlessSame(ownText.align, node.type === "button" ? (node.textStyle?.align ?? "center") : text.align),
+            letterSpacing: unlessSame(ownText.letterSpacing === undefined ? undefined : round2(ownText.letterSpacing), text.letterSpacing),
+            lineHeight: unlessSame(ownText.lineHeight === undefined ? undefined : round2(ownText.lineHeight), text.lineHeight),
+            size: unlessSame(ownText.size === undefined ? undefined : int(ownText.size), text.size)
+          })
+        : undefined
+  } satisfies FreeMobileNode);
+}
+
+/**
+ * `devices` na forma canonica (com os elementos e a prancheta ja canonicos): so ids que existem, sem o que e igual
+ * ao computador, sem objetos vazios e sem `devices` quando nada muda no celular.
+ */
+function canonicalDevices(devices: FreeDevices | undefined, children: readonly FreeNode[], artboard: Partial<FreeArtboard> | undefined): FreeDevices | undefined {
+  const mobile = devices?.mobile;
+
+  if (!mobile) {
+    return undefined;
+  }
+
+  const byId = new Map<FreeId, FreeNode>();
+
+  walkFreeNodes(children, (node) => byId.set(node.id, node));
+
+  const nodes: Record<FreeId, FreeMobileNode> = {};
+
+  for (const id of Object.keys(mobile.nodes ?? {}).sort()) {
+    const node = byId.get(id);
+    const entry = node ? canonicalMobileNode((mobile.nodes as Record<FreeId, FreeMobileNode>)[id], node) : undefined;
+
+    if (entry) {
+      nodes[id] = entry;
+    }
+  }
+
+  const board = resolveFreeArtboard({ artboard });
+  const own = mobile.artboard;
+  const mobileArtboard = own
+    ? nonEmpty({
+        gap: unlessSame(own.gap === undefined ? undefined : int(own.gap), board.gap),
+        minHeight: unlessSame(own.minHeight === undefined ? undefined : int(own.minHeight), board.minHeight),
+        padding: unlessSame(own.padding === undefined ? undefined : canonicalSides(own.padding), canonicalSides(board.padding))
+      } satisfies FreeMobileArtboard)
+    : undefined;
+  const value = nonEmpty({ artboard: mobileArtboard, nodes: Object.keys(nodes).length > 0 ? nodes : undefined });
+
+  return value ? { mobile: value } : undefined;
+}
+
 /** Ids dos arquivos usados por elementos e pinturas (o poster de um video usado conta). */
 export function usedFreeAssetIds(design: Pick<PopupFreeDesign, "artboard" | "children"> & { assets?: readonly FreeAsset[] }): Set<FreeId> {
   const used = new Set<FreeId>();
@@ -979,7 +1212,8 @@ function canonicalAsset(asset: FreeAsset): FreeAsset {
  * Forma canonica (gravada, lida e comparada para "mudancas nao salvas"): sem o que e igual ao padrao, cores
  * minusculas, px e angulos inteiros, altura da linha/espaco entre letras/traco com 2 casas, paradas ordenadas,
  * lados no formato mais curto, nome aparado, partes vizinhas iguais juntas, arquivos sem uso fora, `assets` e
- * `fonts` sempre presentes (`fonts` recalculado) e chaves em ordem alfabetica.
+ * `fonts` sempre presentes (`fonts` recalculado), `devices` so com o que muda no celular (sem `devices` quando
+ * nada muda) e chaves em ordem alfabetica.
  */
 export function canonicalPopupFreeDesign(design: PopupFreeDesignInput): PopupFreeDesign {
   const children = design.children.map(canonicalNode);
@@ -992,6 +1226,7 @@ export function canonicalPopupFreeDesign(design: PopupFreeDesignInput): PopupFre
     assets,
     children,
     close: canonicalClose(design.close),
+    devices: canonicalDevices(design.devices, children, artboard),
     fonts: uploadedFontIdsOfFree({ children }),
     mode: FREE_DESIGN_MODE,
     version: FREE_DESIGN_VERSION
@@ -1032,7 +1267,8 @@ function clamp(value: number, bounds: { max: number; min: number }) {
 
 /**
  * Troca a largura e multiplica por nova/antiga: X, Y, largura, altura, respiros, margens, espacos, cantos,
- * sombras, desfoques, fontes, icones, linha e espaco (inteiros, dentro dos limites). Borda fica em px.
+ * sombras, desfoques, fontes, icones, linha e espaco (inteiros, dentro dos limites), e os mesmos valores do
+ * celular (devices.mobile). Borda fica em px.
  */
 export function rescaleFreeDesign(design: PopupFreeDesign, width: number): PopupFreeDesign {
   const current = resolveFreeArtboard(design).width;
@@ -1148,6 +1384,45 @@ export function rescaleFreeDesign(design: PopupFreeDesign, width: number): Popup
     }
   };
 
+  /** Os valores do celular escalam junto (o que nao tem valor proprio segue o computador, que ja escala). */
+  const types = new Map<FreeId, FreeNodeType>();
+
+  walkFreeNodes(design.children, (node) => types.set(node.id, node.type));
+
+  const defined = <K extends string, V>(key: K, value: V | undefined, map: (value: V) => V) => (value === undefined ? {} : ({ [key]: map(value) } as Record<K, V>));
+  const scaleMobilePlace = (place: FreeMobilePlace): FreeMobilePlace =>
+    place.mode === "free"
+      ? { ...place, ...defined("h", place.h, (v) => scale(v, L.h)), ...defined("w", place.w, (v) => scale(v, L.w)), ...defined("x", place.x, (v) => scale(v, L.x)), ...defined("y", place.y, (v) => scale(v, L.y)) }
+      : {
+          ...place,
+          ...defined("height", place.height, (v) => scale(v, L.flowHeight)),
+          ...defined("margin", place.margin, (v) => scaleSides(v, L.margin)),
+          ...(typeof place.width === "number" ? { width: scale(place.width, L.flowWidth) } : {})
+        };
+  const scaleMobileNode = (entry: FreeMobileNode, type: FreeNodeType | undefined): FreeMobileNode => ({
+    ...entry,
+    ...defined("box", entry.box, (box) => ({ ...box, ...defined("padding", box.padding, (v) => scaleSides(v, L.padding)), ...defined("radius", box.radius, (v) => scaleRadius(v, L.radius)) })),
+    ...defined("gap", entry.gap, (v) => scale(v, L.gap)),
+    ...defined("layout", entry.layout, (layout) => ({ ...layout, ...defined("gap", layout.gap, (v) => scale(v, L.gap)) })),
+    ...defined("place", entry.place, scaleMobilePlace),
+    ...defined("size", entry.size, (v) => scale(v, type === "icon" ? L.iconSize : L.spacer)),
+    ...defined("textStyle", entry.textStyle, (style) => ({ ...style, ...defined("size", style.size, (v) => scale(v, L.fontSize)) }))
+  });
+  const mobile = design.devices?.mobile;
+  const devices: FreeDevices | undefined = mobile
+    ? {
+        mobile: {
+          ...defined("artboard", mobile.artboard, (board) => ({
+            ...board,
+            ...defined("gap", board.gap, (v) => scale(v, L.gap)),
+            ...defined("minHeight", board.minHeight, (v) => scale(v, L.minHeight)),
+            ...defined("padding", board.padding, (v) => scaleSides(v, L.padding))
+          })),
+          ...defined("nodes", mobile.nodes, (nodes) => Object.fromEntries(Object.entries(nodes).map(([id, entry]) => [id, scaleMobileNode(entry, types.get(id))])))
+        }
+      }
+    : undefined;
+
   const artboard = resolveFreeArtboard(design);
   const nextArtboard: Partial<FreeArtboard> = {
     ...design.artboard,
@@ -1159,7 +1434,7 @@ export function rescaleFreeDesign(design: PopupFreeDesign, width: number): Popup
     width: target
   };
 
-  return canonicalPopupFreeDesign({ ...design, artboard: nextArtboard, children: design.children.map(scaleNode) });
+  return canonicalPopupFreeDesign({ ...design, artboard: nextArtboard, children: design.children.map(scaleNode), devices });
 }
 
 function withoutEditorKeys(node: FreeNode): FreeNode {

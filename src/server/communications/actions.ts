@@ -139,7 +139,7 @@ import { parsePopupDesign, popupDesignContentProblems } from "./popup-design-sch
 import { parseStoredPopupDesign, popupDesignKindOf, storedPopupDesignFontIds } from "./popup-design-router";
 import type { PopupFreeDesign } from "./popup-free-model";
 import { POPUP_FREE_MESSAGES, popupFreeContentProblems } from "./popup-free-schema";
-import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, noticeDraftOfRow, type NoticeSenderOption } from "./queries";
+import { followUpContentOf, loadAudienceNames, loadNoticeFlow, loadNoticeSenders, noticeDraftOfRow, noticeStopOnToPublish, type NoticeSenderOption } from "./queries";
 import { notifySendersOnBehalf } from "./sender-notices";
 import { TEMPLATE_LIMITS } from "./template-model";
 import { fetchTemplatesByIds, type TemplateRow } from "./template-store";
@@ -629,7 +629,9 @@ function stableJson(value: unknown): string {
 
 /**
  * Regras do rascunho e as que so valem ao publicar (data no futuro); erro vira 400 com o campo. v3b-1: o
- * rascunho da linha como o editor abre (noticeDraftOfRow: o "Até o aluno clicar" antigo sem botao nao e recusado).
+ * rascunho da linha como o editor abre (noticeDraftOfRow: o "Até o aluno clicar" antigo sem botao nao e recusado;
+ * L4b, o Livre sem nada que conta como clique num dos aparelhos abre com "Só quando o pop-up terminar", e publicar e
+ * aprovar gravam essa regra na linha por noticeStopOnToPublish).
  */
 function assertPublishable(row: CampaignRow, now: number) {
   const parsed = noticeDraftSchema.safeParse(noticeDraftOfRow(row));
@@ -700,7 +702,8 @@ async function goLive(input: {
     return { audienceCount: input.count, id: row.id, recipients: result.recipients, situation: result.status, updatedAt: latest.updated_at };
   }
 
-  const active = await updateCampaign(db, row.id, { ...common, sent_at: row.sent_at ?? nowIso, status: "active" }, guard);
+  // L4b (D9): a regra de parar que o editor e o relatorio mostram e a que o aluno recebe (noticeStopOnToPublish).
+  const active = await updateCampaign(db, row.id, { ...common, ...noticeStopOnToPublish(row), sent_at: row.sent_at ?? nowIso, status: "active" }, guard);
 
   try {
     await refreshPopupDeliveries({ campaign: active, db, loaded: input.loaded, now });
@@ -1352,7 +1355,15 @@ export async function publishNotice(input: NoticeIdInput): Promise<ActionResult<
       const pending = await updateCampaign(
         db,
         row.id,
-        { audience_count: count, audience_counted_at: nowIso, requested_at: nowIso, requested_by: user.id, status: "pending_approval", updated_by: user.id },
+        {
+          ...noticeStopOnToPublish(row),
+          audience_count: count,
+          audience_counted_at: nowIso,
+          requested_at: nowIso,
+          requested_by: user.id,
+          status: "pending_approval",
+          updated_by: user.id
+        },
         { expectedStatuses: ["draft"], expectedUpdatedAt: row.updated_at }
       );
 

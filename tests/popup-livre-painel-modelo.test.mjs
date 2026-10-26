@@ -2,17 +2,27 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import "./support/resolve-extensionless-ts.mjs";
+import "./support/transpile-tsx.mjs";
 
 // Editor Livre do pop-up (docs/27; spec §4.6, §4.7, §7.1 e §9.6; docs/18 §1.1), pacote I: as pecas puras do painel
 // da direita. A area de texto (Enter, limite de linhas), "Outro estilo na seleção" (antes / selecao / depois, com
 // acentos, emoji e letras combinadas), editar o texto mantendo o estilo das partes, "Voltar ao estilo do elemento",
 // as paradas do degradê, as camadas de fundo, os lados, as sombras com os atalhos, o mapa chave -> aba/campo, o
-// "Abrir um link" so um, a largura com a reescala, os pesos de cada fonte, a conta da imagem e o vocabulario.
+// "Abrir um link" que nunca desliga (ate 3, L4b), a largura com a reescala, os pesos de cada fonte, a conta da
+// imagem e o vocabulario.
 
 const panel = await import("../src/components/admin/v2/communication/popup-free/free-inspector-model.ts");
 const model = await import("../src/server/communications/popup-free-model.ts");
 const render = await import("../src/server/communications/popup-free-render.ts");
 const schema = await import("../src/server/communications/popup-free-schema.ts");
+const popupEditor = await import("../src/components/admin/v2/communication/popup-editor-model.ts");
+const { createElement } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
+const { FreeInspectorContent } = await import("../src/components/admin/v2/communication/popup-free/free-inspector-content.tsx");
+const { FreeInspectorMobile } = await import("../src/components/admin/v2/communication/popup-free/free-inspector-mobile.tsx");
+const { FreeArtboardSettings } = await import("../src/components/admin/v2/communication/popup-free/free-artboard-settings.tsx");
+const { FreeInspectorStyle } = await import("../src/components/admin/v2/communication/popup-free/free-inspector-style.tsx");
+const history = await import("../src/components/admin/v2/communication/popup-free/free-editor-history.ts");
 
 const C = panel.FREE_INSPECTOR_COPY;
 const M = schema.POPUP_FREE_MESSAGES;
@@ -541,6 +551,326 @@ test("camadas de fundo: até 3, subir e descer", () => {
   assert.equal(panel.freeFillBaseColor([{ asset: "img1", kind: "image" }]), null);
 });
 
+/* ------------------------------------------------------------------------------------------------
+ * Faixa Ordem do Fundo (docs/27 §13.9, L4a): arrastar a ficha ou Alt e as setas
+ * ---------------------------------------------------------------------------------------------- */
+
+const VERMELHO = { color: "#ff0000", kind: "solid" };
+const VERDE_FUNDO = { color: "#00ff00", kind: "solid" };
+const AZUL = { color: "#0000ff", kind: "solid" };
+const LARANJA = { color: "#ffaa00", kind: "solid" };
+const TRES = [VERMELHO, VERDE_FUNDO, AZUL];
+const SELO_COM_FUNDO = { box: { fill: TRES }, id: "selo", label: "Novidade", type: "badge" };
+const TITULO_FUNDO = { id: "titulo", lines: [[{ text: "Aula nova" }]], textStyle: { size: 40 }, type: "heading" };
+
+test("camadas de fundo de um lugar a outro: a posição final, sem perder nem duplicar camada", () => {
+  assert.deepEqual(panel.moveFreeFillLayerTo(TRES, 0, 2), [VERDE_FUNDO, AZUL, VERMELHO]);
+  assert.deepEqual(panel.moveFreeFillLayerTo(TRES, 2, 0), [AZUL, VERMELHO, VERDE_FUNDO]);
+  assert.deepEqual(panel.moveFreeFillLayerTo(TRES, 1, 0), [VERDE_FUNDO, VERMELHO, AZUL]);
+
+  // O mesmo lugar e fora da lista: null (nada muda e não há passo vazio).
+  assert.equal(panel.moveFreeFillLayerTo(TRES, 1, 1), null);
+  assert.equal(panel.moveFreeFillLayerTo(TRES, -1, 0), null);
+  assert.equal(panel.moveFreeFillLayerTo(TRES, 0, 3), null);
+  assert.equal(panel.moveFreeFillLayerTo(TRES, 0.5, 1), null);
+  assert.equal(panel.moveFreeFillLayerTo([], 0, 0), null);
+  assert.deepEqual(TRES, [VERMELHO, VERDE_FUNDO, AZUL], "a lista de antes não muda");
+
+  // Todas as idas: a camada levada fica no lugar pedido, com as mesmas referências (nenhuma se perde ou se repete), e o
+  // design continua valendo num Selo e na prancheta (com cores escuras: a camada de baixo da prancheta é a base do X, e
+  // o X precisa contrastar com ela em qualquer ordem).
+  const ESCURAS = [{ color: "#550000", kind: "solid" }, { color: "#005500", kind: "solid" }, { color: "#000055", kind: "solid" }];
+  const base = design([SELO_COM_FUNDO, LINKS], { artboard: { fill: ESCURAS } });
+
+  for (let from = 0; from < 3; from += 1) {
+    for (let to = 0; to < 3; to += 1) {
+      const moved = panel.moveFreeFillLayerTo(TRES, from, to);
+
+      if (from === to) {
+        assert.equal(moved, null);
+        continue;
+      }
+
+      assert.equal(moved.length, 3);
+      assert.equal(moved[to], TRES[from]);
+      assert.equal(new Set(moved).size, 3);
+      assert.ok(TRES.every((layer) => moved.includes(layer)));
+      assert.ok(schema.parsePopupFreeDesign(panel.withFreeArtboard(base, { fill: panel.moveFreeFillLayerTo(ESCURAS, from, to) })), `prancheta ${from} -> ${to}`);
+      assert.ok(schema.parsePopupFreeDesign(panel.withFreeBox(base, "selo", { fill: moved })), `selo ${from} -> ${to}`);
+    }
+  }
+
+  // O lugar de soltar pelos meios das fichas de hoje (px de tela), sem contar o da ficha arrastada.
+  const mids = [10, 50, 90];
+  assert.equal(panel.freeFillDropIndex(2, 5, mids), 0);
+  assert.equal(panel.freeFillDropIndex(2, 30, mids), 1);
+  assert.equal(panel.freeFillDropIndex(2, 70, mids), 2, "entre a ficha de cima e a própria: o mesmo lugar");
+  assert.equal(panel.freeFillDropIndex(0, 95, mids), 2);
+  assert.equal(panel.freeFillDropIndex(0, 60, mids), 1);
+  assert.equal(panel.freeFillDropIndex(0, 20, mids), 0);
+  assert.equal(panel.freeFillDropIndex(1, -40, mids), 0);
+  assert.equal(panel.freeFillDropIndex(1, 400, mids), 2);
+
+  // Longe da faixa (mais de 32 px): sem lugar, soltar ali não muda nada.
+  const area = { bottom: 100, left: 0, right: 200, top: 0 };
+  assert.equal(panel.FREE_FILL_DROP_SLACK_PX, 32);
+  assert.equal(panel.freeFillDropAt(2, { x: 100, y: 5 }, area, mids), 0);
+  assert.equal(panel.freeFillDropAt(2, { x: -31, y: 50 }, area, mids), 1);
+  assert.equal(panel.freeFillDropAt(0, { x: 100, y: 131 }, area, mids), 2);
+  assert.equal(panel.freeFillDropAt(2, { x: -33, y: 50 }, area, mids), null);
+  assert.equal(panel.freeFillDropAt(0, { x: 100, y: 133 }, area, mids), null);
+  assert.equal(panel.freeFillDropAt(0, { x: 233, y: 50 }, area, mids), null);
+  assert.equal(panel.freeFillDropAt(1, { x: 100, y: -33 }, area, mids), null);
+
+  // O soltar só grava com o fundo igual ao do começo, camada por camada (a prancheta sem fundo próprio desenha uma
+  // cópia nova da lista padrão a cada vez: a cópia vale).
+  assert.deepEqual(panel.freeFillReorder(TRES, TRES, 2, 0), [AZUL, VERMELHO, VERDE_FUNDO]);
+  assert.deepEqual(panel.freeFillReorder(TRES, [...TRES], 2, 0), [AZUL, VERMELHO, VERDE_FUNDO]);
+  assert.equal(panel.freeFillReorder(TRES, [LARANJA, VERDE_FUNDO, AZUL], 2, 0), null, "uma camada mudou durante o gesto");
+  assert.equal(panel.freeFillReorder(TRES, [VERMELHO, VERDE_FUNDO], 1, 0), null, "uma camada saiu durante o gesto");
+  assert.equal(panel.freeFillReorder(TRES, undefined, 1, 0), null);
+  assert.equal(panel.freeFillReorder(TRES, TRES, 1, 1), null, "o mesmo lugar");
+
+  // A amostra da ficha: só cores hex validadas; a imagem não tem amostra.
+  assert.equal(panel.freeFillSwatch(VERMELHO), "linear-gradient(90deg, #ff0000 0%, #ff0000 100%)");
+  assert.equal(panel.freeFillSwatch({ kind: "linear", stops: [{ at: 0, color: "#00000000" }, { at: 100, color: "#16181c" }] }), "linear-gradient(90deg, #00000000 0%, #16181c 100%)");
+  assert.equal(panel.freeFillSwatch({ asset: "img1", kind: "image" }), null);
+  assert.equal(panel.freeFillSwatch({ color: "red; background: url(x)", kind: "solid" }), null);
+});
+
+test("camadas de fundo: o foco segue a camada (Subir, Descer, a faixa, Tirar e + Camada)", () => {
+  // Subir: a camada foi para cima; no topo, o Subir dela desliga e o foco vai para o Descer.
+  assert.deepEqual(panel.freeFillFocusAfter("up", 2, 3, 0), { button: "subir", index: 1 });
+  assert.deepEqual(panel.freeFillFocusAfter("up", 1, 3, 0), { button: "descer", index: 0 });
+  // Descer: no fim, o Descer dela desliga e o foco vai para o Subir.
+  assert.deepEqual(panel.freeFillFocusAfter("down", 0, 3, 0), { button: "descer", index: 1 });
+  assert.deepEqual(panel.freeFillFocusAfter("down", 1, 3, 0), { button: "subir", index: 2 });
+  // A faixa (arrastar ou Alt e as setas): a ficha no lugar novo.
+  assert.deepEqual(panel.freeFillFocusAfter("order", 2, 3, 0), { button: "ordem", index: 2 });
+  // Tirar: o Tirar que ficou no lugar (ou o de cima); sem o que tirar, o + Camada.
+  assert.deepEqual(panel.freeFillFocusAfter("remove", 2, 2, 0), { button: "tirar", index: 1 });
+  assert.deepEqual(panel.freeFillFocusAfter("remove", 0, 2, 0), { button: "tirar", index: 0 });
+  assert.deepEqual(panel.freeFillFocusAfter("remove", 1, 1, 1), { button: "acrescentar", index: 0 }, "a prancheta guarda uma camada: o Tirar desliga");
+  assert.deepEqual(panel.freeFillFocusAfter("remove", 0, 0, 0), { button: "acrescentar", index: 0 });
+  // + Camada (a nova entra em cima): o foco fica nele enquanto ele continua ligado; a terceira camada desliga o botão,
+  // e o foco vai para a ficha da camada nova (no WebKit ele cairia no vazio).
+  assert.deepEqual(panel.freeFillFocusAfter("add", 0, 1, 0), { button: "acrescentar", index: 0 });
+  assert.deepEqual(panel.freeFillFocusAfter("add", 0, 2, 1), { button: "acrescentar", index: 0 });
+  assert.deepEqual(panel.freeFillFocusAfter("add", 0, model.FREE_DESIGN_LIMITS.fills, 0), { button: "ordem", index: 0 });
+
+  // Os ids da tela.
+  assert.equal(panel.freeFillFocusId("livre-selo-fundo", { button: "subir", index: 1 }), "livre-selo-fundo-1-subir");
+  assert.equal(panel.freeFillFocusId("livre-popup-fundo", { button: "ordem", index: 0 }), "livre-popup-fundo-0-ordem");
+  assert.equal(panel.freeFillFocusId("livre-popup-fundo", { button: "acrescentar", index: 0 }), "livre-popup-fundo-acrescentar");
+
+  // As frases da faixa, palavra por palavra.
+  assert.equal(C.fill.order, "Ordem");
+  assert.equal(C.fill.orderLabel, "Ordem das camadas de fundo");
+  assert.equal(C.fill.handle(C.fill.layer(0, "Cor")), "Mover Camada 1: Cor. Arraste ou use Alt e as setas.");
+  assert.equal(C.fill.moved(C.fill.layer(2, "Imagem")), "Camada de fundo movida. Agora é a Camada 3: Imagem.");
+
+  // Na tela: cada mudança estrutural pede o foco, e ele é resolvido depois de a lista nova aparecer.
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+  for (const call of ['commitStep(moveFreeFillLayer(fill, index, -1), "up", index)', 'commitStep(moveFreeFillLayer(fill, index, 1), "down", index)', 'commitStep(removeFreeFillLayer(fill, index, min), "remove", index)', 'commitStep(addFreeFillLayer(fill, layer), "add", 0)', 'commitStep(next, "order", to)']) {
+    assert.ok(source.includes(call), call);
+  }
+  assert.match(source, /freeFillFocusId\(id, freeFillFocusAfter\(focusAfter\.action, focusAfter\.index, fill\.length, min\)\)/);
+});
+
+test("camadas de fundo: a imagem que sobe acha a sua camada pela referência, e o cartão que espera fica parado", () => {
+  const PATH = "communications/free/eeeeeeeeeeeeeeeeeeeeeeee.webp";
+  const imagem = { asset: "img", kind: "image" };
+  const antes = [VERMELHO, imagem];
+
+  // "+ Camada" durante o envio: a imagem passou a ser a terceira, e o arquivo vai para ela (pelo índice da hora do
+  // envio iria para a Cor).
+  const deslocada = panel.addFreeFillLayer(antes, VERDE_FUNDO);
+  assert.deepEqual(panel.withFreeFillLayerAsset(deslocada, imagem, "img2"), [VERDE_FUNDO, VERMELHO, { asset: "img2", kind: "image" }]);
+  // Desfazer um arrastar feito antes do envio: a lista velha tem a mesma camada.
+  assert.deepEqual(panel.withFreeFillLayerAsset([imagem, VERMELHO], imagem, "img2"), [{ asset: "img2", kind: "image" }, VERMELHO]);
+  // Tirada (ou trocada) durante o envio: nada muda.
+  assert.deepEqual(panel.withFreeFillLayerAsset([VERMELHO], imagem, "img2"), [VERMELHO]);
+  assert.deepEqual(panel.withFreeFillLayerAsset([VERMELHO, { ...imagem }], imagem, "img2"), [VERMELHO, { ...imagem }]);
+
+  // Pelo design inteiro (o caminho do envio): o arquivo novo entra na camada certa e o design vale. A camada que pediu é
+  // a do design desenhado (a mesma referência que o design mais novo guarda).
+  const start = design([{ box: { fill: deslocada }, id: "forma", type: "shape" }, LINKS], {
+    assets: [{ height: 10, id: "img", kind: "image", path: "communications/free/ffffffffffffffffffffffff.webp", width: 10 }]
+  });
+  const pediu = model.findFreeNode(start, "forma").node.box.fill[2];
+  const placed = panel.withFreeFillImage(start, "forma", { height: 100, path: PATH, width: 100 }, (assetId, current) => panel.withFreeFillLayerAsset(current, pediu, assetId));
+  const fill = model.findFreeNode(placed, "forma").node.box.fill;
+  assert.deepEqual(fill.slice(0, 2), [VERDE_FUNDO, VERMELHO]);
+  assert.equal(fill[2].kind, "image");
+  assert.equal(placed.assets.find((asset) => asset.id === fill[2].asset)?.path, PATH);
+  assert.equal(placed.assets.length, 1, "o arquivo antigo, sem uso, sai");
+  assert.ok(schema.parsePopupFreeDesign(placed));
+
+  // Na tela: enquanto uma imagem desta lista sobe, a faixa, Subir, Descer, Tirar, "+ Camada" e o tipo da camada nova
+  // ficam desligados; o cartão que espera a imagem também (Tipo, Como preenche e ponto de foco).
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+  assert.match(source, /const off = Boolean\(disabled\) \|\| busy;/);
+  assert.equal((source.match(/disabled=\{off \|\| full\}/g) ?? []).length, 2, "+ Camada e o tipo da camada nova");
+  assert.match(source, /disabled=\{off\}\n\s+id=\{`\$\{id\}-\$\{index\}-ordem`\}/);
+  assert.match(source, /const cardOff = Boolean\(disabled\) \|\| sending === paint;/);
+  assert.equal((source.match(/disabled=\{cardOff\}/g) ?? []).length, 3, "Tipo, Como preenche e ponto de foco");
+  assert.ok(source.includes("onPick={(image) => onImageLayer((assetId, current) => withFreeFillLayerAsset(current, paint, assetId), image)}"));
+});
+
+test("camadas de fundo: a imagem que termina de subir depois de a camada sumir (Ctrl + Z no envio) não grava passo e o Refazer fica", () => {
+  const PATH = "communications/free/eeeeeeeeeeeeeeeeeeeeeeee.webp";
+  const ENVIADA = { height: 100, path: PATH, width: 100 };
+  const IMG = { height: 100, id: "img", kind: "image", path: "communications/free/ffffffffffffffffffffffff.webp", width: 100 };
+  const imagem = { asset: "img", kind: "image" };
+
+  // Sem a camada (ou com o mesmo arquivo), a própria lista volta, sem cópia.
+  const sem = [VERMELHO];
+  assert.equal(panel.withFreeFillLayerAsset(sem, imagem, "img2"), sem);
+  const com = [imagem, VERMELHO];
+  assert.equal(panel.withFreeFillLayerAsset(com, imagem, "img"), com);
+
+  // Um passo põe a camada de imagem na Forma; o envio de um arquivo novo começa para ela e um Ctrl + Z no meio a tira.
+  // O arquivo de antes fica em uso no Fundo (a forma canônica tira o que ninguém usa).
+  const FUNDO = { box: { fill: [imagem] }, id: "fundo", type: "shape" };
+  const base = design([FUNDO, { box: { fill: [VERMELHO] }, id: "forma", type: "shape" }, LINKS], { assets: [IMG] });
+  assert.equal(base.assets.length, 1);
+  const withImage = panel.withFreeBox(base, "forma", { fill: [imagem, VERMELHO] });
+  const pediu = model.findFreeNode(withImage, "forma").node.box.fill[0];
+  let h = history.pushFreeHistory(history.createFreeHistory({ cta: null, design: base }), { cta: null, design: withImage }, { now: 1_000 });
+  h = history.undoFreeHistory(h);
+  assert.deepEqual([h.past.length, h.future.length], [0, 1]);
+
+  // O envio termina pelo caminho do onPick: o design volta o mesmo (nem o arquivo entra) e o histórico não muda.
+  const latest = h.present.design;
+  const next = panel.withFreeFillImage(latest, "forma", ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediu, assetId));
+  assert.equal(next, latest);
+  const after = history.pushFreeHistory(h, { cta: null, design: next }, { now: 5_000 });
+  assert.equal(after, h);
+  assert.deepEqual([after.past.length, after.future.length], [0, 1], "o Refazer do passo desfeito continua");
+  assert.equal(history.redoFreeHistory(after).present.design, withImage);
+
+  // Na prancheta, o mesmo: sem a camada, o design volta o mesmo (com e sem fundo próprio).
+  const boardImage = panel.withFreeArtboard(base, { fill: [imagem, VERMELHO] });
+  const pediuNaPrancheta = boardImage.artboard.fill[0];
+  assert.equal(panel.withFreeFillImage(base, null, ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediuNaPrancheta, assetId)), base);
+  const semFundo = design([FUNDO, LINKS], { assets: [IMG] });
+  assert.equal(semFundo.artboard?.fill, undefined);
+  assert.equal(panel.withFreeFillImage(semFundo, null, ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediuNaPrancheta, assetId)), semFundo);
+
+  // "+ Camada" de imagem que chega com a lista já cheia (um Refazer no meio do envio): nada muda.
+  const cheia = design([FUNDO, { box: { fill: [VERMELHO, VERDE_FUNDO, AZUL] }, id: "forma", type: "shape" }, LINKS], { assets: [IMG] });
+  assert.equal(panel.withFreeFillImage(cheia, "forma", ENVIADA, (assetId, current) => panel.addFreeFillLayer(current, { asset: assetId, kind: "image" })), cheia);
+
+  // Com a camada no lugar, o arquivo novo entra nela (um passo, como antes).
+  const placed = panel.withFreeFillImage(withImage, "forma", ENVIADA, (assetId, current) => panel.withFreeFillLayerAsset(current, pediu, assetId));
+  assert.notEqual(placed, withImage);
+  assert.equal(placed.assets.find((asset) => asset.id === model.findFreeNode(placed, "forma").node.box.fill[0].asset)?.path, PATH);
+  assert.equal(placed.assets.length, 2);
+  assert.ok(schema.parsePopupFreeDesign(placed));
+});
+
+test("camadas de fundo: mudar a ordem é um passo próprio, montado pelo design mais novo; a cor continua juntando", () => {
+  const base = design([TITULO_FUNDO, { ...SELO_COM_FUNDO, place: { mode: "free", w: 116, x: 300, y: 16 } }, LINKS], {
+    devices: { mobile: { nodes: { selo: { place: { mode: "free", x: 120, y: 30 } } } } }
+  });
+  const entry = (value) => ({ cta: null, design: value });
+
+  // A cor (chave "selo:box.fill") e, 300 ms depois, a ordem sem chave: dois passos; desfazer volta só a ordem.
+  const colored = panel.withFreeBox(base, "selo", { fill: [LARANJA, VERDE_FUNDO, AZUL] });
+  const reordered = panel.withFreeBox(colored, "selo", { fill: panel.moveFreeFillLayerTo([LARANJA, VERDE_FUNDO, AZUL], 2, 0) });
+  let steps = history.pushFreeHistory(history.createFreeHistory(entry(base)), entry(colored), { coalesceKey: "selo:box.fill", now: 1_000 });
+  steps = history.pushFreeHistory(steps, entry(reordered), { now: 1_300 });
+  assert.equal(steps.past.length, 2);
+  const undone = history.undoFreeHistory(steps);
+  assert.equal(undone.present.design, colored, "desfazer volta só a ordem; a cor nova fica");
+  assert.equal(history.undoFreeHistory(undone).present.design, base);
+  // Com a chave de antes, a ordem juntava com a cor num passo só.
+  const merged = history.pushFreeHistory(
+    history.pushFreeHistory(history.createFreeHistory(entry(base)), entry(colored), { coalesceKey: "selo:box.fill", now: 1_000 }),
+    entry(reordered),
+    { coalesceKey: "selo:box.fill", now: 1_300 }
+  );
+  assert.equal(merged.past.length, 1);
+
+  // A ordem é uma só: o celular não muda e desenha a mesma ordem.
+  assert.deepEqual(reordered.devices, base.devices);
+  assert.deepEqual(model.findFreeNode(render.resolveFreeForDevice(reordered, "mobile"), "selo").node.box.fill, [AZUL, LARANJA, VERDE_FUNDO]);
+
+  // O Estilo: a ordem (step) vai sem chave e montada pelo design mais novo (latest): uma mudança em outro elemento
+  // durante o arrastar continua lá. A cor vai com a chave e pelo design desenhado.
+  const forma = { box: { fill: TRES }, id: "forma", place: { h: 100, mode: "free", w: 100, x: 40, y: 40 }, type: "shape" };
+  const drawn = design([TITULO_FUNDO, forma, LINKS]);
+  const newer = panel.withFreeTextStyle(drawn, "titulo", { size: 44 });
+  const calls = [];
+  const props = {
+    design: drawn,
+    disabled: false,
+    errors: {},
+    fonts: [],
+    hints: [],
+    latest: () => newer,
+    node: model.findFreeNode(drawn, "forma").node,
+    onBusyChange() {},
+    onChange: (next, field) => calls.push({ field, next }),
+    onCtaChange() {},
+    onFontsChange() {},
+    rects: {}
+  };
+  const field = fillFieldOf(FreeInspectorStyle(props));
+  assert.ok(field, "o Estilo tem o campo do Fundo");
+  assert.equal(field.props.id, "livre-forma-fundo");
+
+  field.props.onChange(panel.moveFreeFillLayerTo(TRES, 2, 0), { step: true });
+  assert.equal(calls[0].field, undefined, "sem chave: um passo próprio");
+  assert.equal(model.findFreeNode(calls[0].next, "titulo").node.textStyle.size, 44, "a mudança do outro elemento continua lá");
+  assert.deepEqual(model.findFreeNode(calls[0].next, "forma").node.box.fill, [AZUL, VERMELHO, VERDE_FUNDO]);
+
+  field.props.onChange([LARANJA, VERDE_FUNDO, AZUL]);
+  assert.equal(calls[1].field, "box.fill", "a cor junta pela chave do campo");
+  assert.equal(model.findFreeNode(calls[1].next, "titulo").node.textStyle.size, 40);
+
+  // A prancheta faz o mesmo (conferido no fonte: o componente usa estado).
+  const artboard = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-artboard-settings.tsx", import.meta.url), "utf8");
+  assert.match(artboard, /onChange\(withFreeArtboard\(options\?\.step \? latest\(\) : design, \{ fill:/);
+  assert.match(artboard, /options\?\.step \? undefined : "artboard\.fill"\)/);
+  const style = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-inspector-style.tsx", import.meta.url), "utf8");
+  assert.match(style, /options\?\.step \? onChange\(withFreeBox\(latest\(\), node\.id, \{ fill \}\)\) : set\(\{ fill \}, "fill"\)/);
+  // O campo manda { step: true } só nas mudanças estruturais; a cor, o tipo e os números vão sem.
+  const fields = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-fields.tsx", import.meta.url), "utf8");
+  assert.equal((fields.match(/commit\(next, \{ step: true \}\)/g) ?? []).length, 1);
+  assert.match(fields, /function commitStep\([^)]*\) \{\n\s+commit\(next, \{ step: true \}\);/);
+  assert.match(fields, /function update\(index: number, paint: FreeFillPaint\) \{\n\s+commit\(fill\.map\(\(layer, position\) => \(position === index \? paint : layer\)\)\);/);
+});
+
+/** O FreeFillLayersField do Estilo (BoxSections nao usa ganchos: e desenhado aqui na mao). */
+function fillFieldOf(element) {
+  if (!element || typeof element !== "object") {
+    return null;
+  }
+
+  if (Array.isArray(element)) {
+    for (const child of element) {
+      const found = fillFieldOf(child);
+
+      if (found) {
+        return found;
+      }
+    }
+
+    return null;
+  }
+
+  if (typeof element.type === "function" && element.type.name === "FreeFillLayersField") {
+    return element;
+  }
+
+  if (typeof element.type === "function" && element.type.name === "BoxSections") {
+    return fillFieldOf(element.type(element.props));
+  }
+
+  return fillFieldOf(element.props?.children);
+}
+
 test("lados: todos iguais e cada lado", () => {
   assert.deepEqual(panel.freeSidesFour(undefined), [0, 0, 0, 0]);
   assert.deepEqual(panel.freeSidesFour(12), [12, 12, 12, 12]);
@@ -678,21 +1008,46 @@ test("chave de erro leva à aba e ao campo, e o pedido de envio põe o foco em E
   assert.equal(panel.freeTabAfterSelection("advanced", null, "heading"), "content");
 });
 
-test("Abrir um link desliga quando outro botão já abre um link", () => {
+test("Abrir um link nunca desliga: com outro botão já em link, a pílula do Fechar continua ligada (L4b, até 3)", () => {
   const value = design([
+    { action: { kind: "cta" }, id: "principal", type: "button" },
     { action: { href: "https://exemplo.com", kind: "link", target: "new_tab" }, id: "link", label: "Ver", type: "button" },
+    { action: { href: "/minhas-compras", kind: "link", target: "same_tab" }, id: "link2", label: "Compras", type: "button" },
     { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" },
     LINKS
   ]);
 
-  // O outro botão não pode virar link; o próprio botão de link pode continuar.
-  assert.equal(panel.freeLinkActionDisabledReason(value, "fechar"), "Use um botão “Abrir um link” só.");
-  assert.equal(panel.freeLinkActionDisabledReason(value, "link"), null);
-  assert.equal(M.linkButtons, "Use um botão “Abrir um link” só.");
+  // O limite de um link so saiu do painel e do schema.
+  assert.equal("freeLinkActionDisabledReason" in panel, false);
+  assert.equal("linkButtons" in M, false);
 
-  // Sem link nenhum, pode.
-  const free = design([{ action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" }, LINKS]);
-  assert.equal(panel.freeLinkActionDisabledReason(free, "fechar"), null);
+  // O Conteudo do Fechar desenhado de verdade: as 3 opcoes ligadas, sem o motivo embaixo.
+  const content = { allowSnooze: true, allowSnoozeEditable: true, audio: null, cta: null, onAllowSnoozeChange() {}, onCtaChange() {}, products: [], productsLoaded: true, snoozeMinutes: 1_440, title: "Aula nova" };
+  const html = renderToStaticMarkup(
+    createElement(FreeInspectorContent, {
+      content,
+      design: value,
+      disabled: false,
+      errors: {},
+      fonts: [],
+      hints: [],
+      latest: () => value,
+      node: model.findFreeNode(value, "fechar").node,
+      onBusyChange() {},
+      onChange() {},
+      onCtaChange() {},
+      onFontsChange() {},
+      rects: {}
+    })
+  );
+  const radios = [...html.matchAll(/<input[^>]*name="livre-fechar-acao"[^>]*>/g)].map(([tag]) => tag);
+
+  assert.equal(radios.length, 3, html);
+  assert.ok(radios.some((tag) => tag.includes('value="link"')), "a opcao Abrir um link esta la");
+  assert.equal(radios.some((tag) => /\sdisabled=""/.test(tag)), false, "nenhuma opcao desligada");
+  assert.doesNotMatch(html, /id="livre-fechar-acao-motivo"/, "sem frase de motivo");
+  assert.doesNotMatch(html, /aria-describedby="livre-fechar-acao-motivo"/);
+  assert.equal(html.includes("Abrir um link” só"), false);
 
   // Trocar o que o botão faz: link começa sem destino, na mesma aba; o texto fica.
   const button = { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" };
@@ -812,10 +1167,329 @@ const UI_FILES = [
   "free-inspector-content.tsx",
   "free-inspector-style.tsx",
   "free-inspector-advanced.tsx",
+  "free-inspector-mobile.tsx",
   "free-artboard-settings.tsx",
   "free-fields.tsx",
   "free-assets.ts"
 ].map((name) => new URL(`../src/components/admin/v2/communication/popup-free/${name}`, import.meta.url));
+
+test("Links › Conteúdo: a chave do Lembrar depois no aviso; na página do modelo de Design, só a nota (o modelo não guarda a regra)", () => {
+  // docs/27 §13.7 e docs/28 §1.7: `allowSnoozeEditable` false vem da pagina do modelo de Design pelo card Design.
+  const base = design([{ id: "titulo", lines: [[{ text: "Aula nova" }]], type: "heading" }, LINKS]);
+
+  function render(allowSnoozeEditable) {
+    const content = { allowSnooze: true, allowSnoozeEditable, audio: null, cta: null, onAllowSnoozeChange() {}, onCtaChange() {}, products: [], productsLoaded: true, snoozeMinutes: 1_440, title: "Aula nova" };
+    const props = { content, design: base, disabled: false, errors: {}, fonts: [], hints: [], latest: () => base, node: model.findFreeNode(base, "links").node, onBusyChange() {}, onChange() {}, onCtaChange() {}, onFontsChange() {}, rects: {} };
+
+    return renderToStaticMarkup(createElement(FreeInspectorContent, props));
+  }
+
+  const aviso = render(true);
+  assert.match(aviso, /id="livre-links-lembrar"/, "no aviso, a chave esta la");
+  assert.match(aviso, /Permitir “Lembrar depois”/);
+  assert.match(aviso, /Volta em 1 dia, até 2 vezes\./);
+  assert.equal(aviso.includes(C.links.snoozeFixed), false);
+
+  const modelo = render(false);
+  assert.doesNotMatch(modelo, /id="[^"]*-lembrar"/, "na pagina do modelo de Design nao ha a chave");
+  assert.equal(modelo.includes("Permitir “Lembrar depois”"), false);
+  assert.ok(modelo.includes(C.links.snoozeFixed), "no lugar, a nota");
+  assert.match(modelo, /id="livre-links-nao-mostrar"/, "a chave do Não mostrar de novo continua");
+  assert.equal(C.links.snoozeFixed, "“Lembrar depois” é regra do pop-up, não do modelo de design: define-se no aviso.");
+
+  // Sem a chave (o aviso comum e o modo modelo de Pop-up nao passam nada), o padrao e a chave.
+  assert.match(render(undefined), /id="livre-links-lembrar"/);
+});
+
+/* ------------------------------------------------------------------------------------------------
+ * Aba Celular (docs/27 §9.10 e §13.8, PR L3)
+ * ---------------------------------------------------------------------------------------------- */
+
+const SELO = { id: "selo", label: "Novidade", place: { mode: "free", w: 116, x: 300, y: 16 }, type: "badge" };
+const TITULO = { id: "titulo", lines: [[{ text: "Aula nova" }]], textStyle: { size: 40 }, type: "heading" };
+const FORMA = { box: { fill: [{ color: "#ffffff26", kind: "solid" }] }, id: "forma", place: { h: 100, mode: "free", w: 100, x: 40, y: 40 }, type: "shape" };
+
+test("aba Celular: só os campos que têm versão do celular, por tipo (nunca cor, camada ou girar)", () => {
+  const keys = (node) => panel.freeMobileFieldsOf(node).map((field) => field.key);
+
+  assert.deepEqual(keys(SELO), ["hidden", "place.x", "place.y", "place.w", "textStyle.size", "textStyle.lineHeight", "textStyle.letterSpacing", "textStyle.align", "box.padding", "box.radius"]);
+  assert.deepEqual(keys(TITULO), ["hidden", "place.width", "place.height", "place.align", "place.margin", "textStyle.size", "textStyle.lineHeight", "textStyle.letterSpacing", "textStyle.align", "box.padding", "box.radius"]);
+  assert.deepEqual(keys(FORMA), ["hidden", "place.x", "place.y", "place.w", "place.h", "box.padding", "box.radius"], "sem texto, a altura aparece");
+  assert.deepEqual(keys({ id: "espaco", type: "spacer" }).filter((key) => !key.startsWith("place.")), ["hidden", "size", "box.padding", "box.radius"]);
+  assert.ok(keys({ icon: "star", id: "icone", type: "icon" }).includes("size"));
+  assert.ok(keys(LINKS).includes("gap") && keys(LINKS).includes("textStyle.size"));
+  assert.deepEqual(keys({ children: [], id: "caixa", type: "box" }).filter((key) => key.startsWith("layout.")), ["layout.dir", "layout.gap", "layout.align", "layout.justify", "layout.wrap"]);
+
+  for (const node of [SELO, TITULO, FORMA, LINKS, { children: [], id: "caixa", type: "box" }]) {
+    for (const key of keys(node)) {
+      assert.equal(/color|paint|fill|shadow|z$|rotate|font|weight/i.test(key), false, `${node.type}: ${key}`);
+    }
+  }
+
+  // Os rotulos sao os dos outros paineis (o mesmo nome do mesmo campo).
+  const labels = Object.fromEntries(panel.freeMobileFieldsOf(TITULO).map((field) => [field.key, field.label]));
+  assert.equal(labels["textStyle.size"], C.style.size);
+  assert.equal(labels["place.margin"], C.advanced.margin);
+  assert.equal(labels.hidden, "Esconder no celular");
+});
+
+test("aba Celular: Igual ao computador ligada mostra o do computador; desligada grava o próprio, começando dele", () => {
+  const base = design([SELO, TITULO, FORMA, LINKS]);
+  const node = (value, id) => model.findFreeNode(value, id).node;
+
+  // Ligada (padrao): sem valor proprio, o celular usa o do computador (com o padrao do tipo preenchido).
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "titulo"), "textStyle.size"), { own: false, value: 40 });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "titulo"), "textStyle.align"), { own: false, value: render.freeTextStyleOf(TITULO).align });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "selo"), "place.x"), { own: false, value: 300 });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "titulo"), "place.width"), { own: false, value: "fill" });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "titulo"), "place.height", { titulo: { h: 52.4, w: 392, x: 24, y: 24 } }), { own: false, value: 52 });
+  assert.deepEqual(panel.freeMobileFieldValue(base, node(base, "forma"), "hidden"), { own: false, value: false });
+
+  // Desligar: o valor proprio comeca do computador (a chave fica desligada enquanto o editor esta aberto).
+  const off = panel.withFreeMobileField(base, "titulo", "textStyle.size", panel.freeMobileDesktopValue(base, node(base, "titulo"), "textStyle.size"));
+  assert.deepEqual(panel.freeMobileFieldValue(off, node(off, "titulo"), "textStyle.size"), { own: true, value: 40 });
+  assert.ok(schema.popupFreeDesignSchema.safeParse(off).success);
+  assert.equal(model.canonicalPopupFreeDesign(off).devices, undefined, "igual ao computador: a forma canônica tira ao salvar");
+
+  // Mudar o valor: so o celular muda; o computador fica.
+  const smaller = panel.withFreeMobileField(off, "titulo", "textStyle.size", 28);
+  assert.equal(node(smaller, "titulo").textStyle.size, 40);
+  assert.deepEqual(model.canonicalPopupFreeDesign(smaller).devices, { mobile: { nodes: { titulo: { textStyle: { size: 28 } } } } });
+  assert.equal(model.resolveFreeForDevice(smaller, "mobile").children[1].textStyle.size, 28);
+
+  // A posicao entra com o modo do computador: na sequencia continua na sequencia; solto continua solto.
+  const flow = panel.withFreeMobileField(smaller, "titulo", "place.margin", [8, 0]);
+  assert.deepEqual(model.freeMobileNodeOf(flow, "titulo").place, { margin: [8, 0], mode: "flow" });
+  const free = panel.withFreeMobileField(flow, "selo", "place.x", 24);
+  assert.deepEqual(model.freeMobileNodeOf(free, "selo"), { place: { mode: "free", x: 24 } });
+  assert.ok(schema.popupFreeDesignSchema.safeParse(free).success);
+
+  // Esconder so no celular (o computador continua mostrando).
+  const hidden = panel.withFreeMobileField(free, "forma", "hidden", true);
+  assert.equal(node(hidden, "forma").hidden, undefined);
+  assert.equal(model.resolveFreeForDevice(hidden, "mobile").children[2].hidden, true);
+  assert.equal(model.canonicalPopupFreeDesign(hidden).devices.mobile.nodes.forma.hidden, true);
+
+  // Ligar de novo: o campo sai; a parte vazia e a entrada vazia saem junto.
+  const back = panel.withFreeMobileField(hidden, "selo", "place.x", undefined);
+  assert.equal(model.freeMobileNodeOf(back, "selo"), undefined);
+  const onlySize = panel.withFreeMobileField(panel.withFreeMobileField(back, "titulo", "place.margin", undefined), "titulo", "textStyle.size", undefined);
+  assert.equal(model.freeMobileNodeOf(onlySize, "titulo"), undefined);
+  assert.equal(panel.freeHasMobileValues(onlySize, "forma"), true);
+  assert.equal(panel.freeHasMobileValues(onlySize, "titulo"), false);
+  assert.equal(panel.withFreeMobileField(base, "sumiu", "hidden", true), base, "elemento que nao existe: nada muda");
+});
+
+test("aba Celular: Voltar tudo ao do computador e o grupo No celular do Pop-up", () => {
+  const base = design([SELO, TITULO, LINKS], {
+    artboard: { padding: 32 },
+    devices: { mobile: { artboard: { gap: 8 }, nodes: { selo: { place: { mode: "free", x: 24 }, textStyle: { size: 14 } }, titulo: { textStyle: { size: 28 } } } } }
+  });
+
+  const reset = panel.withoutFreeMobileValues(base, "selo");
+  assert.equal(model.freeMobileNodeOf(reset, "selo"), undefined);
+  assert.deepEqual(model.freeMobileNodeOf(reset, "titulo"), { textStyle: { size: 28 } }, "os outros elementos ficam");
+  assert.equal(panel.withoutFreeMobileValues(panel.withoutFreeMobileValues(reset, "titulo"), "titulo").devices.mobile.artboard.gap, 8);
+
+  // A prancheta no celular: Respiro interno, Espaço entre os elementos e Altura mínima.
+  assert.deepEqual(panel.FREE_MOBILE_ARTBOARD_FIELDS.map((field) => field.key), ["padding", "gap", "minHeight"]);
+  assert.deepEqual(panel.freeMobileArtboardValue(base, "padding"), { own: false, value: 32 });
+  assert.deepEqual(panel.freeMobileArtboardValue(base, "gap"), { own: true, value: 8 });
+  assert.deepEqual(panel.freeMobileArtboardValue(base, "minHeight"), { own: false, value: 0 });
+  const padded = panel.withFreeMobileArtboardField(base, "padding", 16);
+  assert.deepEqual(padded.devices.mobile.artboard, { gap: 8, padding: 16 });
+  assert.equal(padded.artboard.padding, 32, "o computador fica");
+  assert.equal(model.resolveFreeForDevice(padded, "mobile").artboard.padding, 16);
+  assert.ok(schema.popupFreeDesignSchema.safeParse(padded).success);
+
+  // Tudo igual de novo: devices sai do design.
+  const empty = panel.withFreeMobileArtboardField(panel.withFreeMobileArtboardField(panel.withoutFreeMobileValues(reset, "titulo"), "gap", undefined), "padding", undefined);
+  assert.equal("devices" in empty, false);
+});
+
+test("aba Celular: a chave de erro do celular leva à aba Celular e ao campo; a da prancheta, ao No celular", () => {
+  const value = design([SELO, TITULO, FORMA, LINKS]);
+  const target = (key) => panel.freeInspectorTargetOf(value, key);
+
+  assert.deepEqual(target("freeDesign.devices.mobile.nodes.titulo.textStyle.size"), { fieldId: "livre-titulo-celular-tamanho-texto", nodeId: "titulo", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.selo.place.x"), { fieldId: "livre-selo-celular-x", nodeId: "selo", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.selo.place.mode"), { fieldId: "livre-selo-celular-x", nodeId: "selo", tab: "mobile" }, "o modo: o primeiro campo da posição");
+  assert.deepEqual(target("devices.mobile.nodes.titulo.place.margin"), { fieldId: "livre-titulo-celular-margem", nodeId: "titulo", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.forma.box.radius"), { fieldId: "livre-forma-celular-cantos", nodeId: "forma", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.forma.hidden"), { fieldId: "livre-forma-celular-esconder", nodeId: "forma", tab: "mobile" });
+  assert.deepEqual(target("devices.mobile.nodes.forma.textStyle"), { fieldId: "livre-forma-celular-esconder", nodeId: "forma", tab: "mobile" }, "campo de outro tipo: a aba Celular do elemento");
+  assert.deepEqual(target("devices.mobile.nodes.titulo"), { fieldId: "livre-titulo-celular-esconder", nodeId: "titulo", tab: "mobile" });
+  assert.deepEqual(target("freeDesign.devices.mobile.artboard.padding"), { fieldId: "livre-popup-celular-respiro", nodeId: null, tab: "popup" });
+  assert.deepEqual(target("devices.mobile.artboard.minHeight"), { fieldId: "livre-popup-celular-altura", nodeId: null, tab: "popup" });
+  assert.equal(target("devices.mobile.nodes.sumiu.place.x"), null);
+  assert.equal(target("devices.mobile.nodes"), null);
+  // "Ajustar no Celular" (dica "texto no celular") pede o tamanho do texto do celular.
+  assert.deepEqual(panel.freeFocusTargetOf(value, { key: panel.freeMobileTextSizeKey("titulo") }), { fieldId: "livre-titulo-celular-tamanho-texto", nodeId: "titulo", tab: "mobile" });
+  // O elemento do erro do celular (o aviso nas Camadas e o nome no Revisar), pelo id.
+  assert.equal(model.freeNodeIdOfKey("devices.mobile.nodes.selo.place.x"), "selo");
+
+  // A aba Celular fica com qualquer elemento; sem elemento, volta ao Conteúdo.
+  assert.equal(panel.freeTabAfterSelection("mobile", "heading", "image"), "mobile");
+  assert.equal(panel.freeTabAfterSelection("mobile", "heading", "heading"), "mobile");
+  assert.equal(panel.freeTabAfterSelection("mobile", "heading", null), "content");
+});
+
+test("aba Celular: a altura própria do celular de um texto solto sem altura no computador aparece em Altura (e sai com Igual ao computador)", async () => {
+  const editorModel = await import("../src/components/admin/v2/communication/popup-free/free-editor-model.ts");
+  const solto = { id: "titulo", lines: [[{ text: "Aula nova" }]], place: { mode: "free", w: 300, x: 20, y: 20 }, type: "heading" };
+  const base = design([solto, LINKS]);
+  const keys = (value) => panel.freeMobileFieldsOf(model.findFreeNode(value, "titulo").node, value).map((field) => field.key);
+
+  // Sem altura no computador e sem altura no celular: o texto cresce sozinho, sem o campo Altura.
+  assert.equal(keys(base).includes("place.h"), false);
+
+  // As alcas de cima e de baixo no Ver como Celular gravam a altura so no celular: o campo Altura aparece.
+  const alto = editorModel.setFreeNodeRect(base, "titulo", { h: 90, w: 300, x: 20, y: 20 }, "mobile");
+  assert.deepEqual(model.freeMobileNodeOf(alto, "titulo"), { place: { h: 90, mode: "free" } });
+  assert.equal(model.findFreeNode(alto, "titulo").node.place.h, undefined, "o computador fica sem altura");
+  assert.deepEqual(keys(alto), ["hidden", "place.x", "place.y", "place.w", "place.h", "textStyle.size", "textStyle.lineHeight", "textStyle.letterSpacing", "textStyle.align", "box.padding", "box.radius"]);
+  assert.deepEqual(panel.freeMobileFieldValue(alto, model.findFreeNode(alto, "titulo").node, "place.h"), { own: true, value: 90 });
+  // O Revisar com a chave da altura do celular cai no campo Altura (e nao no primeiro da posicao).
+  assert.deepEqual(panel.freeInspectorTargetOf(alto, "devices.mobile.nodes.titulo.place.h"), { fieldId: "livre-titulo-celular-altura", nodeId: "titulo", tab: "mobile" });
+
+  // "Igual ao computador" de novo: a altura sai do celular e o campo some.
+  const igual = panel.withFreeMobileField(alto, "titulo", "place.h", undefined);
+  assert.equal(model.freeMobileNodeOf(igual, "titulo"), undefined);
+  assert.equal(keys(igual).includes("place.h"), false);
+});
+
+test("aba Celular: o alinhamento do botão sem escolha é o centro desenhado, e o Esquerda do celular fica ao salvar", async () => {
+  const styles = await import("../src/components/member/notifications/popup-free/popup-free-styles.ts");
+  const botao = { action: { kind: "close" }, id: "botao", label: "Fechar", type: "button" };
+  const base = design([botao, LINKS]);
+  const node = model.findFreeNode(base, "botao").node;
+
+  // O computador desenha o botao sem alinhamento escolhido no centro: e o valor do computador da aba Celular.
+  assert.equal(styles.freeButtonLayoutCss(node).justifyContent, "center");
+  assert.equal(panel.freeMobileDesktopValue(base, node, "textStyle.align"), "center");
+  assert.deepEqual(panel.freeMobileFieldValue(base, node, "textStyle.align"), { own: false, value: "center" });
+
+  // Esquerda so no celular: a forma canonica guarda (nao e igual ao computador) e o celular desenha no inicio.
+  const esquerda = design([botao, LINKS], { devices: { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } } });
+  assert.deepEqual(esquerda.devices, { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } });
+  assert.ok(schema.popupFreeDesignSchema.safeParse(esquerda).success);
+  const noCelular = model.findFreeNode(render.resolveFreeForDevice(esquerda, "mobile"), "botao").node;
+  assert.equal(styles.freeButtonLayoutCss(noCelular).justifyContent, "flex-start");
+  assert.equal(styles.freeButtonLayoutCss(model.findFreeNode(esquerda, "botao").node).justifyContent, "center", "o computador continua no centro");
+
+  // Centro no celular e igual ao desenhado no computador: sai ao salvar. Com Direita no computador, o Esquerda fica.
+  assert.equal(design([botao, LINKS], { devices: { mobile: { nodes: { botao: { textStyle: { align: "center" } } } } } }).devices, undefined);
+  const direita = design([{ ...botao, textStyle: { align: "right" } }, LINKS], { devices: { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } } });
+  assert.deepEqual(direita.devices, { mobile: { nodes: { botao: { textStyle: { align: "left" } } } } });
+  assert.equal(panel.freeMobileDesktopValue(direita, model.findFreeNode(direita, "botao").node, "textStyle.align"), "right");
+});
+
+test("aba Celular: entrar nela liga o Ver como Celular; sair dela mantém o aparelho", () => {
+  assert.equal(panel.freeDeviceAfterTabChange("mobile", "content", "desktop"), "mobile");
+  assert.equal(panel.freeDeviceAfterTabChange("mobile", "advanced", "mobile"), "mobile");
+  assert.equal(panel.freeDeviceAfterTabChange("content", "mobile", "mobile"), "mobile", "sair da aba Celular nao volta ao Computador");
+  assert.equal(panel.freeDeviceAfterTabChange("style", "content", "desktop"), "desktop");
+  assert.equal(panel.freeDeviceAfterTabChange("advanced", "style", "mobile"), "mobile");
+  assert.equal(panel.freeDeviceAfterTabChange("mobile", "mobile", "desktop"), "desktop", "ja estava na aba: o Ver como escolhido depois fica");
+
+  // O painel do elemento usa a mesma regra.
+  const source = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-inspector.tsx", import.meta.url), "utf8");
+  assert.match(source, /const nextDevice = freeDeviceAfterTabChange\(value as ElementTab, tab, device\);/);
+});
+
+test("painel Pop-up desenhado: o grupo No celular com Igual ao computador em cada campo", () => {
+  function draw(value, errors = {}) {
+    return renderToStaticMarkup(createElement(FreeArtboardSettings, { design: value, disabled: false, errors, fonts: [], hints: [], latest: () => value, onBusyChange() {}, onChange() {}, onFontsChange() {}, rects: {} }));
+  }
+
+  const same = draw(design([LINKS]));
+  assert.ok(same.includes(">No celular<"));
+  assert.deepEqual(same.match(/aria-label="[^"]*: igual ao computador"/g), [
+    'aria-label="Respiro interno: igual ao computador"',
+    'aria-label="Espaço entre os elementos: igual ao computador"',
+    'aria-label="Altura mínima em px: igual ao computador"'
+  ]);
+  assert.equal((same.match(/aria-checked="true" aria-label="[^"]*: igual ao computador"/g) ?? []).length, 3);
+  assert.match(same, /id="livre-popup-celular-respiro"/);
+
+  const own = draw(design([LINKS], { devices: { mobile: { artboard: { padding: 12 } } } }), { "devices.mobile.artboard.padding": "Use de 0 a 200." });
+  assert.match(own, /aria-checked="false" aria-label="Respiro interno: igual ao computador"/);
+  assert.ok(own.includes("Use de 0 a 200."));
+});
+
+test("Fundo desenhado: a faixa Ordem só com 2 ou 3 camadas, com fichas que se arrastam e os ids do foco", () => {
+  function draw(value) {
+    return renderToStaticMarkup(createElement(FreeArtboardSettings, { design: value, disabled: false, errors: {}, fonts: [], hints: [], latest: () => value, onBusyChange() {}, onChange() {}, onFontsChange() {}, rects: {} }));
+  }
+
+  // Uma camada (o padrão da prancheta): sem faixa.
+  const one = draw(design([LINKS]));
+  assert.equal(one.includes("data-free-fill-grip"), false);
+  assert.equal(one.includes("Ordem das camadas de fundo"), false);
+  assert.match(one, /id="livre-popup-fundo-acrescentar"/);
+
+  const two = draw(design([LINKS], { artboard: { fill: [VERMELHO, AZUL] } }));
+  assert.match(two, /<ol aria-label="Ordem das camadas de fundo"/);
+  assert.ok(two.includes(">Ordem<"));
+  assert.equal((two.match(/data-free-fill-grip="/g) ?? []).length, 2);
+  assert.deepEqual(two.match(/aria-label="Mover [^"]+"/g), [
+    'aria-label="Mover Camada 1: Cor. Arraste ou use Alt e as setas."',
+    'aria-label="Mover Camada 2: Cor. Arraste ou use Alt e as setas."'
+  ]);
+  assert.equal((two.match(/aria-keyshortcuts="Alt\+ArrowUp Alt\+ArrowDown"/g) ?? []).length, 2);
+  for (const fieldId of ["livre-popup-fundo-0-ordem", "livre-popup-fundo-0-subir", "livre-popup-fundo-0-descer", "livre-popup-fundo-0-tirar", "livre-popup-fundo-1-ordem", "livre-popup-fundo-acrescentar"]) {
+    assert.match(two, new RegExp(`id="${fieldId}"`), fieldId);
+  }
+  // A ficha tem touch-action: none (a caneta arrasta sem rolar o painel) e a amostra da cor.
+  assert.match(two, /<button[^>]*class="[^"]*touch-none[^"]*select-none[^"]*"[^>]*data-free-fill-grip="0"/);
+  assert.ok(two.includes("background-image:linear-gradient(90deg, #ff0000 0%, #ff0000 100%)"));
+  // Subir na de cima e Descer na de baixo desligados; a região que fala a mudança já está montada.
+  assert.match(two, /<button[^>]*disabled=""[^>]*id="livre-popup-fundo-0-subir"|<button[^>]*id="livre-popup-fundo-0-subir"[^>]*disabled=""/);
+  assert.match(two, /<button[^>]*disabled=""[^>]*id="livre-popup-fundo-1-descer"|<button[^>]*id="livre-popup-fundo-1-descer"[^>]*disabled=""/);
+  assert.match(two, /<div aria-live="polite" class="sr-only" data-free-fill-status="" role="status">/);
+
+  // Três camadas: o + Camada desliga (o foco vai para a ficha da nova; ver freeFillFocusAfter).
+  const three = draw(design([LINKS], { artboard: { fill: TRES } }));
+  assert.equal((three.match(/data-free-fill-grip="/g) ?? []).length, 3);
+  assert.match(three, /<button[^>]*disabled=""[^>]*id="livre-popup-fundo-acrescentar"|<button[^>]*id="livre-popup-fundo-acrescentar"[^>]*disabled=""/);
+});
+
+test("aba Celular desenhada: a frase, Voltar tudo, uma chave com nome por campo e o valor próprio", () => {
+  function draw(value, id, errors = {}) {
+    const content = { allowSnooze: true, audio: null, cta: null, onAllowSnoozeChange() {}, onCtaChange() {}, products: [], productsLoaded: true, snoozeMinutes: 1_440, title: "Aula nova" };
+    const props = { content, design: value, disabled: false, errors, fonts: [], hints: [], latest: () => value, node: model.findFreeNode(value, id).node, onBusyChange() {}, onChange() {}, onCtaChange() {}, onFontsChange() {}, onReset() {}, rects: {} };
+
+    return renderToStaticMarkup(createElement(FreeInspectorMobile, props));
+  }
+
+  const same = draw(design([TITULO, LINKS]), "titulo");
+  assert.ok(same.includes("O que não mudar aqui encolhe como no computador (texto nunca abaixo de 12 px)."));
+  assert.match(same, /<button[^>]*disabled=""[^>]*data-free-mobile-reset=""|<button[^>]*data-free-mobile-reset=""[^>]*disabled=""/, "sem nada no celular, Voltar tudo fica desligado");
+  assert.ok(same.includes("Voltar tudo ao do computador"));
+  assert.match(same, /aria-checked="true" aria-label="Tamanho: igual ao computador"/);
+  assert.match(same, /aria-label="Esconder no celular: igual ao computador"/);
+  assert.match(same, /id="livre-titulo-celular-tamanho-texto"/);
+  assert.equal((same.match(/data-free-mobile-field="own"/g) ?? []).length, 0);
+  for (const word of ["Mostrar", "Posição", "Texto", "Respiro e cantos"]) {
+    assert.ok(same.includes(`>${word}<`), word);
+  }
+
+  const own = draw(design([TITULO, LINKS], { devices: { mobile: { nodes: { titulo: { textStyle: { size: 28 } } } } } }), "titulo", { "devices.mobile.nodes.titulo.textStyle.size": "Use de 10 a 160." });
+  assert.match(own, /aria-checked="false" aria-label="Tamanho: igual ao computador"/);
+  assert.equal((own.match(/data-free-mobile-field="own"/g) ?? []).length, 1);
+  assert.match(own, /value="28"/);
+  assert.ok(own.includes("Use de 10 a 160."), "o erro do campo do celular aparece no campo");
+  assert.doesNotMatch(own, /<button[^>]*disabled=""[^>]*data-free-mobile-reset=""|<button[^>]*data-free-mobile-reset=""[^>]*disabled=""/);
+
+  // O erro do celular que nao e de um campo da tela (o modo trocado, colado de fora) aparece no topo da aba; o de outro
+  // elemento (mesmo com o id comecando igual) nao.
+  const mode = draw(design([TITULO, { ...TITULO, id: "titulo2" }, LINKS]), "titulo", {
+    "devices.mobile.nodes.titulo.place.mode": M.mobilePlace,
+    "devices.mobile.nodes.titulo2.textStyle.size": "Use de 10 a 160."
+  });
+  assert.ok(mode.includes(M.mobilePlace));
+  assert.equal(mode.includes("Use de 10 a 160."), false);
+});
 
 test("vocabulário das frases do painel", () => {
   const strings = [
@@ -842,12 +1516,29 @@ test("vocabulário das frases do painel", () => {
   assert.equal(C.text.parts, "Partes com estilo próprio");
   assert.equal(C.image.hint, "JPG, PNG ou WebP. O editor deixa leve sozinho; transparência funciona.");
   assert.equal(C.video.hint, "MP4 (H.264) ou WEBM, até 15 MB. Toca sem som, em repetição. Quem prefere menos movimento vê só a capa.");
-  assert.equal(C.links.snoozeNote, "“Lembrar depois” aparece sozinho quando o pop-up deixa adiar.");
+  // Links › Conteúdo (docs/27 §13.7): a chave do "Lembrar depois" e a MESMA do card "Quantas vezes e como fecha".
+  assert.equal(C.links.snooze, "Permitir “Lembrar depois”");
+  assert.equal(C.links.snooze, popupEditor.POPUP_EDITOR_COPY.frequency.snoozeLabel, "o mesmo nome do card");
+  assert.equal(C.links.dismiss, "Mostrar “Não mostrar de novo”");
+  assert.equal(C.links.snoozeOff, "Sem “Lembrar depois”, o pop-up volta só pela regra de “Quantas vezes”.");
+  assert.equal(panel.freeLinksSnoozeDescription(true, 1_440), "Volta em 1 dia, até 2 vezes.");
+  assert.equal(panel.freeLinksSnoozeDescription(true, 1_440), popupEditor.snoozeSwitchDescription(1_440), "ligada, a mesma frase do card");
+  assert.equal(panel.freeLinksSnoozeDescription(true, 90), "Volta em 90 minutos, até 2 vezes.");
+  assert.equal(panel.freeLinksSnoozeDescription(false, 1_440), C.links.snoozeOff);
+  assert.equal("snoozeNote" in C.links, false, "a nota fixa de antes saiu: a chave esta no painel");
   assert.equal(C.advanced.freeHint, "Solta: você escolhe o lugar. Só fora de caixas.");
   assert.equal(C.advanced.layerNote, "Quem vem depois nas Camadas fica por cima; aqui você muda isso.");
   assert.equal(C.popup.widthNote, "No celular, o pop-up inteiro encolhe junto, igual.");
   assert.equal(C.popup.closeNote, "O X fica sempre por cima e sempre funciona.");
   assert.equal(panel.freeRangeMessage({ max: 160, min: 10 }), "Use de 10 a 160.");
+  // Aba Celular e o grupo "No celular" (docs/27 §13.8).
+  assert.equal(C.tabs.mobile, "Celular");
+  assert.equal(C.mobile.same, "Igual ao computador");
+  assert.equal(C.mobile.sameLabel("Tamanho"), "Tamanho: igual ao computador");
+  assert.equal(C.mobile.reset, "Voltar tudo ao do computador");
+  assert.equal(C.mobile.note, "O que não mudar aqui encolhe como no computador (texto nunca abaixo de 12 px).");
+  assert.equal(C.mobile.popupTitle, "No celular");
+  assert.equal(C.mobile.hidden, "Esconder no celular");
 
   // As telas do painel: o texto que aparece direto no JSX e nos aria-label escritos à mão também.
   for (const url of UI_FILES) {

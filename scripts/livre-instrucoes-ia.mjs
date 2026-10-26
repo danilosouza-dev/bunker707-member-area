@@ -18,8 +18,11 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 export const LIVRE_DOC_PATH = `${root}docs/27-comunicacao-design-livre.md`;
 export const LIVRE_INSTRUCTIONS_PATH = `${root}src/components/admin/v2/communication/popup-free/free-ai-instructions.ts`;
 
-/** As partes do §9 que a IA precisa (sem 9.1, que e onde o banco guarda, e 9.7, as chaves de erro do editor). */
-const SECTIONS = ["9.2", "9.3", "9.4", "9.5", "9.6", "9.8", "9.9"];
+/**
+ * As partes do §9 que a IA precisa (sem 9.1, que e onde o banco guarda, e 9.7, as chaves de erro do editor); a 9.10
+ * (Celular, PR L3) vai no fim, como no docs.
+ */
+const SECTIONS = ["9.2", "9.3", "9.4", "9.5", "9.6", "9.8", "9.9", "9.10"];
 
 /** Trecho do docs so para quem mantem o codigo (o marcador pode ficar no meio da linha ou em linhas proprias). */
 const INTERNAL = /<!-- ia:fora -->[\s\S]*?<!-- \/ia:fora -->/g;

@@ -4,14 +4,14 @@ import { AlertCircle, AlertTriangle } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { HEX_COLOR_PATTERN, POPUP_DESIGN_LIMITS, type HexColor, type PopupBorder, type PopupPaint } from "@/server/communications/popup-design-model";
+import { HEX_COLOR_PATTERN, POPUP_DESIGN_LIMITS, alphaPercentOf, withAlphaPercent, type HexColor, type PopupBorder, type PopupPaint } from "@/server/communications/popup-design-model";
 import { PillGroup, adminInputClass, type PillOption } from "../../form";
 import { AdminSwitch } from "../../settings/kit";
 import { adminTransition } from "../../styles";
-import { PAINT_KIND_OPTIONS, POPUP_DESIGN_COPY, clampNumber, paintOfKind, parseBoundedNumber, rangeMessage, type PaintKind } from "./popup-design-editor-model";
+import { OPACITY_BOUNDS, PAINT_KIND_OPTIONS, POPUP_DESIGN_COPY, clampNumber, opacityAfterBlur, paintOfKind, parseBoundedNumber, rangeMessage, type PaintKind } from "./popup-design-editor-model";
 
 // Pecas pequenas do card "Design" (docs/26): secao com titulo, numero com limite, cor (#RRGGBB ou #RRGGBBAA com o
-// seletor do navegador), pintura (cor ou degrade), borda, cantos com "Pílula", lista e a dica de contraste. Mesmo
+// seletor do navegador e a opacidade em %), pintura (cor ou degrade), borda, cantos com "Pílula", lista e a dica de contraste. Mesmo
 // visual dos campos do admin (form.tsx, kit.tsx): label acima, 40 px, erro embaixo com icone, pilulas.
 
 export const fieldLabelClass = "text-[13px] leading-5 font-medium text-[var(--text-primary)]";
@@ -213,11 +213,13 @@ type ColorFieldProps = {
 };
 
 /**
- * Cor: o texto (#RRGGBB ou #RRGGBBAA, o fim e a transparencia) e o seletor do navegador ao lado (so #RRGGBB: a
- * transparencia que ja estava no texto continua). So cor valida vai para o design.
+ * Cor: o texto (#RRGGBB ou #RRGGBBAA, o fim e a transparencia), o seletor do navegador ao lado (so #RRGGBB: a
+ * transparencia que ja estava no texto continua) e a opacidade em % (0 a 100; 100 grava os 6 digitos, nunca "ff").
+ * So cor valida vai para o design; a opacidade so dentro do limite (fora dele, ao sair do campo, encosta no limite).
  */
 export function ColorField({ disabled, error, id, label, labelHidden = false, onChange, value }: ColorFieldProps) {
   const [text, setText] = useState(value);
+  const [opacityText, setOpacityText] = useState(() => String(alphaPercentOf(value)));
   const [synced, setSynced] = useState(value);
   const invalid = !HEX_COLOR_PATTERN.test(text.trim());
   const message = error ?? (invalid ? POPUP_DESIGN_COPY.color.invalid : null);
@@ -226,16 +228,23 @@ export function ColorField({ disabled, error, id, label, labelHidden = false, on
   if (value !== synced) {
     setSynced(value);
     setText(value);
+    setOpacityText(String(alphaPercentOf(value)));
   }
 
-  function commit(next: string) {
+  /** A cor digitada ou escolhida; `typedOpacity` e o que esta escrito no numero quando a mudanca veio dele. */
+  function commit(next: string, typedOpacity?: string) {
     const clean = next.trim().toLowerCase();
     setText(next);
 
     if (HEX_COLOR_PATTERN.test(clean)) {
       setSynced(clean);
+      setOpacityText(typedOpacity ?? String(alphaPercentOf(clean)));
       onChange(clean);
     }
+  }
+
+  function commitOpacity(percent: number, typed: string) {
+    commit(withAlphaPercent(value, percent), typed);
   }
 
   return (
@@ -243,7 +252,7 @@ export function ColorField({ disabled, error, id, label, labelHidden = false, on
       <label className={labelHidden ? "sr-only" : fieldLabelClass} htmlFor={id}>
         {label}
       </label>
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="relative grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg border border-[var(--border-strong)] bg-[repeating-conic-gradient(#3f3f46_0%_25%,#18181b_0%_50%)] bg-[length:12px_12px]">
           <span aria-hidden="true" className="absolute inset-0" style={{ backgroundColor: HEX_COLOR_PATTERN.test(value) ? value : undefined }} />
           <input
@@ -259,7 +268,7 @@ export function ColorField({ disabled, error, id, label, labelHidden = false, on
           aria-describedby={message ? `${id}-error` : undefined}
           aria-invalid={message ? true : undefined}
           autoComplete="off"
-          className={cn(adminInputClass, "w-32 font-mono uppercase tabular-nums")}
+          className={cn(adminInputClass, "w-28 font-mono uppercase tabular-nums")}
           disabled={disabled}
           id={id}
           maxLength={9}
@@ -273,6 +282,43 @@ export function ColorField({ disabled, error, id, label, labelHidden = false, on
           spellCheck={false}
           value={text}
         />
+        <span className="flex shrink-0 items-center gap-1">
+          <input
+            aria-describedby={message ? `${id}-error` : undefined}
+            aria-invalid={message ? true : undefined}
+            aria-label={`${label}: ${POPUP_DESIGN_COPY.color.opacity}`}
+            className={cn(adminInputClass, "w-[4.5rem] tabular-nums")}
+            disabled={disabled}
+            id={`${id}-opacidade`}
+            inputMode="numeric"
+            max={OPACITY_BOUNDS.max}
+            min={OPACITY_BOUNDS.min}
+            onBlur={() => {
+              // So uma cor diferente vai para o design (no Livre, cada mudanca e um passo do historico).
+              const next = opacityAfterBlur(opacityText, value);
+
+              if (next.changed) {
+                commit(next.hex, next.text);
+              } else {
+                setOpacityText(next.text);
+              }
+            }}
+            onChange={(event) => {
+              const next = parseBoundedNumber(event.target.value, OPACITY_BOUNDS);
+              setOpacityText(event.target.value);
+
+              if (next !== null) {
+                commitOpacity(next, event.target.value);
+              }
+            }}
+            step={1}
+            type="number"
+            value={opacityText}
+          />
+          <span aria-hidden="true" className="text-sm leading-5 text-[var(--text-secondary)]">
+            %
+          </span>
+        </span>
       </div>
       <InlineError id={`${id}-error`} message={message} />
     </div>

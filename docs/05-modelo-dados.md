@@ -1119,7 +1119,7 @@ Exemplos de event_type:
 - notification_audio_started;
 - notification_audio_completed;
 - message_impressed;
-- message_clicked;
+- message_clicked (num pop-up Livre, desde o L4b, `metadata.button` diz qual botao: `cta` ou `link:<id do botao no design>`, conferido contra o design no servidor; so ids, sem texto; o relatorio do pop-up ainda nao separa por botao, `docs/27` §13.10 e `docs/29` §2.6);
 - message_closed;
 - message_dismissed;
 - message_snoozed;

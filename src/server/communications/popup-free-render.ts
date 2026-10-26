@@ -90,6 +90,45 @@ export function freeFontSize(px: number, width: number): string {
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Aparelho: o celular com os valores proprios (devices.mobile) por cima do computador
+ * ---------------------------------------------------------------------------------------------- */
+
+type Loose = Record<string, unknown>;
+
+const isPlain = (value: unknown): value is Loose => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * O design do aparelho. "desktop" (ou sem valores do celular) devolve o MESMO objeto; "mobile" junta, por elemento,
+ * cada parte do celular por cima da do computador (`place`, `textStyle`, `box` e `layout` campo a campo; `size`,
+ * `gap` e `hidden` trocam) e a prancheta (respiro, espaco, altura minima). Pequeno de proposito: e o cartao do aluno.
+ */
+export function resolveFreeForDevice(design: PopupFreeDesign, device: "desktop" | "mobile"): PopupFreeDesign {
+  const mobile = device === "mobile" ? design.devices?.mobile : undefined;
+
+  if (!mobile) {
+    return design;
+  }
+
+  const own = (mobile.nodes ?? {}) as Record<string, Loose | undefined>;
+  const merge = (node: FreeNode): FreeNode => {
+    const next: Loose = { ...node };
+    const values = Object.prototype.hasOwnProperty.call(own, node.id) ? own[node.id] : undefined;
+
+    for (const [key, value] of Object.entries(values ?? {})) {
+      next[key] = isPlain(value) && isPlain(next[key]) ? { ...next[key], ...value } : value;
+    }
+
+    if (node.type === "box") {
+      next.children = node.children.map(merge);
+    }
+
+    return next as FreeNode;
+  };
+
+  return { ...design, artboard: { ...design.artboard, ...mobile.artboard }, children: design.children.map(merge) };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Leituras do design
  * ---------------------------------------------------------------------------------------------- */
 
@@ -228,7 +267,7 @@ export function freeAccessibleName(design: Pick<PopupFreeDesign, "children">, ti
   return text ? { label: text, labelledBy: true } : { label: title.trim(), labelledBy: false };
 }
 
-/** O botao "Abrir um link" visivel (no maximo um; o clique nele conta como o clique do pop-up). */
+/** O primeiro botao "Abrir um link" visivel com destino seguro (ate 3; o clique em cada um conta como o do pop-up). */
 export function freeLinkButton(design: Pick<PopupFreeDesign, "children"> | null | undefined): FreeButtonNode | null {
   if (!design) {
     return null;
@@ -238,6 +277,41 @@ export function freeLinkButton(design: Pick<PopupFreeDesign, "children"> | null 
     design.children,
     (node): node is FreeButtonNode => node.type === "button" && node.action.kind === "link" && isSafeHeroCtaHref(node.action.href)
   );
+}
+
+/**
+ * O botao que conta como o clique do pop-up: o Botao principal (quando o aviso tem botao) ou um "Abrir um link" com
+ * destino seguro.
+ */
+const countsAsClick = (hasCta: boolean) => (node: FreeNode) =>
+  node.type === "button" && ((node.action.kind === "cta" && hasCta) || (node.action.kind === "link" && isSafeHeroCtaHref(node.action.href)));
+
+const isCtaButton = (node: FreeNode) => node.type === "button" && node.action.kind === "cta";
+
+/** Algum elemento casa, escondido ou nao (inclusive dentro de caixas). */
+function anyNode(nodes: readonly FreeNode[], match: (node: FreeNode) => boolean): boolean {
+  return nodes.some((node) => match(node) || (node.type === "box" && anyNode(node.children, match)));
+}
+
+/**
+ * D9 por aparelho (docs/27 §2.1, L46): "Quando o aluno clica no botão" so vale com algo para clicar visivel no
+ * computador E no celular (devices.mobile pode esconder ou mostrar). Conta o Botao principal (com `hasCta`, o aviso
+ * tem botao) ou qualquer um dos ate 3 "Abrir um link" com destino seguro; os botoes podem ser outros em cada
+ * aparelho. O Botao principal escondido no computador (ou nos dois) deixa de contar ali. Com `hasCta` e sem o
+ * Botao principal no design, vale (o erro "Falta o botão principal no design." ja aparece). Sem Livre, so o `hasCta`.
+ */
+export function freeHasClickTarget(design: PopupFreeDesign | null | undefined, hasCta: boolean): boolean {
+  if (!design) {
+    return hasCta;
+  }
+
+  if (hasCta && !anyNode(design.children, isCtaButton)) {
+    return true;
+  }
+
+  const counts = countsAsClick(hasCta);
+
+  return someVisible(design.children, counts) && someVisible(resolveFreeForDevice(design, "mobile").children, counts);
 }
 
 /** Ha um botao "Lembrar depois" visivel (entao os Links nao repetem o "Lembrar depois"). */

@@ -36,7 +36,8 @@ export type FreeAdvancedCommand =
   | { id: FreeId; kind: "backward" | "forward" | "toFree" | "toSequence" }
   | { edge: FreeAlignEdge; id: FreeId; kind: "align" };
 
-const ALIGN_ICONS: Record<FreeAlignEdge, typeof AlignStartVertical> = {
+/** O icone de cada lado do alinhar: o mesmo aqui (um elemento) e no painel Varios (entre si e no pop-up). */
+export const ALIGN_ICONS: Record<FreeAlignEdge, typeof AlignStartVertical> = {
   bottom: AlignEndHorizontal,
   center: AlignCenterVertical,
   left: AlignStartVertical,

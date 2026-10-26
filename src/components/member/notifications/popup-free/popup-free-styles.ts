@@ -60,8 +60,11 @@ export type FreeStyleContext = {
 /** Direcao da caixa de quem e filho (a prancheta e uma coluna). */
 export type FreeParentDir = "column" | "row";
 
-/** O deslocamento provisorio de um arrastar no editor (px da prancheta), so no elemento solto `id`. */
-export type FreeDragPreview = { dh?: number; dw?: number; dx: number; dy: number; id: FreeId };
+/**
+ * O deslocamento provisorio de um arrastar no editor (px da prancheta). O translate vale para o elemento solto `id`
+ * e, quando a equipe arrasta varios juntos, para cada solto de `ids`; dw e dh (as alcas) so para o `id`.
+ */
+export type FreeDragPreview = { dh?: number; dw?: number; dx: number; dy: number; id: FreeId; ids?: readonly FreeId[] };
 
 export function freeStyleContext(design: PopupFreeDesign, input: { faces?: Faces; origin: string | null; preview?: boolean }): FreeStyleContext {
   return {
@@ -355,9 +358,11 @@ export function freePlaceCss(node: FreeNode, ctx: Pick<FreeStyleContext, "assets
   const isMedia = node.type === "image" || node.type === "video";
 
   if (place?.mode === "free") {
-    const dragging = drag && drag.id === node.id ? drag : null;
-    const w = Math.max(4, place.w + (dragging?.dw ?? 0));
-    const h = place.h === undefined ? undefined : Math.max(4, place.h + (dragging?.dh ?? 0));
+    // Arrastando varios juntos, todos de `ids` andam; o tamanho (alcas) muda so no `id`.
+    const dragging = drag && (drag.id === node.id || drag.ids?.includes(node.id)) ? drag : null;
+    const resizing = dragging && dragging.id === node.id ? dragging : null;
+    const w = Math.max(4, place.w + (resizing?.dw ?? 0));
+    const h = place.h === undefined ? undefined : Math.max(4, place.h + (resizing?.dh ?? 0));
     const css: CSSProperties = {
       left: freeLength(place.x, width),
       margin: 0,

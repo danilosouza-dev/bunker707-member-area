@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { FreeHint, FreeMeasuredRects } from "@/server/communications/popup-free-checks";
-import { FREE_DESIGN_LIMITS, type PopupFreeDesign } from "@/server/communications/popup-free-model";
+import { FREE_DESIGN_LIMITS, type FreeSides, type PopupFreeDesign } from "@/server/communications/popup-free-model";
 import { FREE_ARTBOARD_DEFAULTS, resolveFreeArtboard, resolveFreeClose } from "@/server/communications/popup-free-render";
 import type { PopupFontOption } from "@/server/communications/popup-design-model";
 import { AdminSwitch } from "../../settings/kit";
@@ -10,6 +10,7 @@ import { ColorField, PillField } from "../popup-design/design-controls";
 import { FontUploadDialog } from "../popup-design/font-upload-dialog";
 import { FontsSection } from "../popup-design/fonts-section";
 import { FreeBorderField, FreeFillLayersField, FreeGroup, FreeHints, FreeNote, FreeNumberField, FreeRadiusField, FreeSection, FreeShadowsField, FreeSidesField } from "./free-fields";
+import { FreeMobileFieldShell } from "./free-inspector-mobile";
 import {
   FREE_ARTBOARD_ALIGN_OPTIONS,
   FREE_ARTBOARD_JUSTIFY_OPTIONS,
@@ -25,18 +26,23 @@ import {
   freeFieldId,
   freeFillBaseColor,
   freeHintsOf,
+  freeMobileArtboardValue,
+  freeMobileFieldId,
   freeWidthChoice,
   freeWidthOfChoice,
   withFreeArtboard,
   withFreeArtboardWidth,
   withFreeClose,
-  withFreeFillImage
+  withFreeFillImage,
+  withFreeMobileArtboardField,
+  type FreeMobileArtboardKey
 } from "./free-inspector-model";
 
 // Editor Livre do pop-up (docs/27; spec §4.7), pacote I: o painel "Pop-up" (nada selecionado). Largura no
 // computador (P, M, G, GG ou Outra) com "Ajustar os elementos à nova largura" (reescala tudo na mesma proporcao),
 // Altura minima, Fundo, Borda, Cantos, Sombra (Sem, Suave, Forte, Personalizada), Respiro interno, Elementos na
-// sequencia, o botao de fechar (X, com o erro do X invisivel embaixo da cor) e as Fontes do Personalizado.
+// sequencia, o grupo "No celular" (respiro, espaco e altura minima so do celular, cada um com "Igual ao computador";
+// docs/27 §13.8), o botao de fechar (X, com o erro do X invisivel embaixo da cor) e as Fontes do Personalizado.
 
 const L = FREE_DESIGN_LIMITS;
 const C = FREE_INSPECTOR_COPY;
@@ -133,7 +139,11 @@ export function FreeArtboardSettings({ design, disabled, errors, fonts, hints, l
           id={id("fundo")}
           min={1}
           onBusyChange={onBusyChange}
-          onChange={(fill) => onChange(withFreeArtboard(design, { fill: fill && fill.length > 0 ? fill : [...FREE_ARTBOARD_DEFAULTS.fill] }), "artboard.fill")}
+          // Mudar a ordem, Tirar e "+ Camada" (step): um passo proprio, sem chave, montado pelo design mais novo. A cor e
+          // os numeros juntam pela chave "artboard.fill".
+          onChange={(fill, options) =>
+            onChange(withFreeArtboard(options?.step ? latest() : design, { fill: fill && fill.length > 0 ? fill : [...FREE_ARTBOARD_DEFAULTS.fill] }), options?.step ? undefined : "artboard.fill")
+          }
           onImageLayer={(build, image) => onChange(withFreeFillImage(latest(), null, image, build))}
           value={artboard.fill}
         />
@@ -204,6 +214,12 @@ export function FreeArtboardSettings({ design, disabled, errors, fonts, hints, l
         <PillField disabled={disabled} label={C.popup.justify} name={id("na-altura")} onChange={(justify) => onChange(withFreeArtboard(design, { justify }))} options={FREE_ARTBOARD_JUSTIFY_OPTIONS} value={artboard.justify} />
       </FreeSection>
 
+      <FreeSection description={C.mobile.note} title={C.mobile.popupTitle}>
+        {(["padding", "gap", "minHeight"] as const).map((key) => (
+          <MobileArtboardField design={design} disabled={disabled} error={freeErrorAt(errors, `devices.mobile.artboard.${key}`)} field={key} key={key} onChange={onChange} />
+        ))}
+      </FreeSection>
+
       <FreeSection description={C.popup.closeNote} title={C.popup.closeTitle}>
         <ColorField disabled={disabled} error={closeError("color")} id={id("x-cor")} label={C.popup.closeColor} onChange={(color) => onChange(withFreeClose(design, { color }), "close.color")} value={close.color} />
         <ColorField disabled={disabled} error={closeError("background")} id={id("x-fundo")} label={C.popup.closeBackground} onChange={(background) => onChange(withFreeClose(design, { background }), "close.background")} value={close.background} />
@@ -248,5 +264,53 @@ export function FreeArtboardSettings({ design, disabled, errors, fonts, hints, l
       </div>
       <FontUploadDialog onOpenChange={setUploading} onUploaded={(font) => onFontsChange([...fonts.filter((item) => item.id !== font.id), font])} open={uploading} />
     </div>
+  );
+}
+
+/** Um campo do grupo "No celular": a chave "Igual ao computador" e o valor (comeca do computador ao desligar). */
+function MobileArtboardField({
+  design,
+  disabled,
+  error,
+  field,
+  onChange
+}: {
+  design: PopupFreeDesign;
+  disabled: boolean;
+  error?: string;
+  field: FreeMobileArtboardKey;
+  onChange: (next: PopupFreeDesign, field?: string) => void;
+}) {
+  const fieldId = freeMobileFieldId(null, field);
+  const valueId = `${fieldId}-valor`;
+  const { own, value } = freeMobileArtboardValue(design, field);
+  const label = field === "padding" ? C.popup.padding : field === "gap" ? C.popup.gap : C.popup.minHeightPx;
+  const set = (next: number | FreeSides) => onChange(withFreeMobileArtboardField(design, field, next), `mobile.artboard.${field}`);
+  const off = disabled || !own;
+
+  return (
+    <FreeMobileFieldShell
+      disabled={disabled}
+      fieldId={fieldId}
+      label={label}
+      onSameChange={(same) => onChange(withFreeMobileArtboardField(design, field, same ? undefined : resolveFreeArtboard(design)[field]))}
+      own={own}
+    >
+      {field === "padding" ? (
+        <FreeSidesField bounds={L.padding} disabled={off} error={error} id={valueId} label={label} onChange={set} value={value as FreeSides} />
+      ) : (
+        <FreeNumberField
+          bounds={field === "gap" ? L.gap : L.minHeight}
+          disabled={off}
+          error={error}
+          hint={field === "minHeight" ? C.popup.minHeightHint : undefined}
+          id={valueId}
+          label={label}
+          onChange={set}
+          unit={C.units.px}
+          value={value as number}
+        />
+      )}
+    </FreeMobileFieldShell>
   );
 }

@@ -1044,6 +1044,8 @@ export type DesignDoPopUpNoBanco = {
     blocks: Record<string, unknown>[];
     /** Fundo do cartao: cor, degradê ou a imagem (com `url`, `position`, `dim` e a cor de apoio). */
     card: { background: { kind: string; url?: string } & Record<string, unknown> };
+    /** O X: a cor (com o alfa que a opacidade grava) e o fundo. */
+    close: { background: string; color: string };
     fonts: string[];
     /** Os links do rodape: a cor e se o "Não mostrar de novo" aparece. */
     links: { color: string; showDismiss: boolean };

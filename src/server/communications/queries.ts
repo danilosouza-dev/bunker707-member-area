@@ -61,6 +61,7 @@ import { noticeIconOfColumns, normalizeSchoolIcon, SCHOOL_NAME_FALLBACK_TEAM, ty
 import { popupSettingsOfRow, type PopupTrigger } from "./popup-display-model";
 import type { PopupFontFace, PopupFontOption } from "./popup-design-model";
 import { listPopupFontLibrary, loadPopupFontFaces } from "./popup-fonts";
+import { freeHasClickTarget } from "./popup-free-render";
 import { buildPopupReport, popupReportProductIds, readPopupReportRows, type PopupReportView } from "./popup-report-model";
 import { describePopupPlacementShort } from "./popup-sentences";
 import { emptyNoticeDraft, type NoticeDraft } from "./schemas";
@@ -563,16 +564,47 @@ function popupProductIds(row: CampaignRow) {
  * clicar" gravado antes da migracao 202610220003 (popup_frequency nulo) num pop-up sem botao nunca parou por
  * clique, porque ninguem clica; abre como "Só quando o pop-up terminar", o mesmo para o aluno, em vez de uma
  * recusa no campo "Para de aparecer" que ninguem escolheu.
+ *
+ * L4b (D9 por aparelho, docs/27 §2.1): um Livre gravado antes com "Quando o aluno clica no botão" sem nada que
+ * conta como o clique num dos aparelhos (o caso que a regra antiga deixava passar: o Botao principal escondido no
+ * computador, ou nos dois, sem um "Abrir um link" visivel ali) abre do mesmo jeito, "Só quando o pop-up
+ * terminar": publicar e aprovar um rascunho ou pedido assim nao dao 400 num campo que a equipe nao mudou, e o
+ * editor mostra a regra que vale ao salvar (para quem estava no computador ele ja nunca parava).
  */
 export function noticeDraftOfRow(row: CampaignRow): NoticeDraft {
   const draft = rowToDraft(row);
   const frequency = draft.popup?.frequency;
 
-  if (row.kind !== "popup" || row.popup_frequency !== null || draft.cta || !draft.popup || frequency?.mode !== "repeat" || frequency.stopOn !== "click") {
+  if (row.kind !== "popup" || !draft.popup || frequency?.mode !== "repeat" || frequency.stopOn !== "click") {
+    return draft;
+  }
+
+  const legacyWithoutButton = row.popup_frequency === null && !draft.cta;
+  const freeWithoutTarget = Boolean(draft.cta) && Boolean(draft.freeDesign) && !freeHasClickTarget(draft.freeDesign, true);
+
+  if (!legacyWithoutButton && !freeWithoutTarget) {
     return draft;
   }
 
   return { ...draft, popup: { ...draft.popup, frequency: { ...frequency, stopOn: "never" } } };
+}
+
+/**
+ * L4b (D9 por aparelho, docs/27 §2.1): o que publicar e aprovar regravam junto com a situacao. Quando o
+ * noticeDraftOfRow abre um Livre gravado com "Quando o aluno clica no botão" como "Só quando o pop-up terminar"
+ * (o Botao principal escondido no computador e visivel no celular, por exemplo), a coluna popup_stop_on passa a
+ * dizer o mesmo no update que poe o aviso no ar ou pede aprovacao: o aluno recebe a regra que a equipe viu no editor
+ * e no relatorio, e nao para de ver o pop-up ao clicar no celular. O caso antigo (popup_frequency nulo) nao muda:
+ * sem botao no aviso, ninguem clica, e o check da tabela pede popup_stop_on nulo ali.
+ */
+export function noticeStopOnToPublish(row: CampaignRow): { popup_stop_on?: "never" } {
+  if (row.kind !== "popup" || row.popup_frequency !== "repeat" || row.popup_stop_on !== "click") {
+    return {};
+  }
+
+  const frequency = noticeDraftOfRow(row).popup?.frequency;
+
+  return frequency?.mode === "repeat" && frequency.stopOn === "never" ? { popup_stop_on: "never" } : {};
 }
 
 /** Um aviso para o editor ou o relatorio; null se nao existe (ou foi excluido). */

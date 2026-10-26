@@ -25,6 +25,7 @@ import {
   freeCloseVisibilityProblem,
   freeNodeCount,
   nextFreeId,
+  withFreeMobileNodes,
   type FreeAbsolutePlace,
   type FreeAsset,
   type FreeBox,
@@ -78,12 +79,23 @@ export const FREE_STARTER_CTA = { href: "", label: "Saiba mais", target: "same_t
 export type FreeNewNodeContext = {
   /** O design onde o elemento entra (a cor do fundo do Degradê, a largura da prancheta). */
   design?: Pick<PopupFreeDesign, "artboard">;
-  /** O centro do que se ve no palco (px da prancheta), para a Forma solta; sem = o centro da prancheta. */
+  /**
+   * Um centro em px da prancheta: o da Forma solta (o que se ve no palco ou onde foi solta; sem = o centro da
+   * prancheta) e a altura do Degradê arrastado do painel (o meio na altura do ponto; sem = no topo). O x e o y que
+   * saem dele ficam nos limites de um solto (FREE_DESIGN_LIMITS.x e .y).
+   */
   center?: { x: number; y: number };
 };
 
 function clearOf(color: string) {
   return `${color.slice(0, 7)}00`;
+}
+
+/** Um x ou um y de solto dentro do limite do design (o ponto pode estar no fundo de uma prancheta de mais de 2400 px). */
+function placeAxis(value: number, axis: "x" | "y") {
+  const limit = FREE_DESIGN_LIMITS[axis];
+
+  return Math.min(limit.max, Math.max(limit.min, Math.round(value)));
 }
 
 /** O elemento novo de cada tipo, com os valores iniciais (o painel Elementos acrescenta este). */
@@ -119,7 +131,7 @@ export function newFreeNode(kind: FreeElementKind | FreeNodeType, id: FreeId, co
       return {
         box: { fill: [{ color: "#ffffff26", kind: "solid" }], radius: 16 },
         id,
-        place: { h: 120, mode: "free", w: 120, x: Math.round(center.x - 60), y: Math.round(center.y - 60) },
+        place: { h: 120, mode: "free", w: 120, x: placeAxis(center.x - 60, "x"), y: placeAxis(center.y - 60, "y") },
         type: "shape"
       };
     }
@@ -131,7 +143,7 @@ export function newFreeNode(kind: FreeElementKind | FreeNodeType, id: FreeId, co
         box: { fill: [{ kind: "linear", stops: [{ at: 0, color: clearOf(color) }, { at: 100, color: color.slice(0, 7) }] }] },
         id,
         name: "Degradê",
-        place: { h: 200, mode: "free", w: artboard.width, x: 0, y: 0, z: -1 },
+        place: { h: 200, mode: "free", w: artboard.width, x: 0, y: context.center ? placeAxis(Math.max(0, context.center.y - 100), "y") : 0, z: -1 },
         type: "shape"
       };
     }
@@ -163,6 +175,21 @@ function withoutType(nodes: readonly FreeNode[], match: (node: FreeNode) => bool
   return nodes.filter((node) => !match(node)).map((node) => (node.type === "box" ? { ...node, children: withoutType(node.children, match) } : node));
 }
 
+/** Os ids dos elementos do tipo (dentro das caixas tambem). */
+function idsOfType(nodes: readonly FreeNode[], match: (node: FreeNode) => boolean, into: FreeId[] = []): FreeId[] {
+  for (const node of nodes) {
+    if (match(node)) {
+      into.push(node.id);
+    }
+
+    if (node.type === "box") {
+      idsOfType(node.children, match, into);
+    }
+  }
+
+  return into;
+}
+
 /** Posicao na prancheta: antes do primeiro botao; sem botao, antes dos Links; sem nenhum, no fim. */
 function insertBeforeButtons(nodes: readonly FreeNode[], node: FreeNode, includeButtons: boolean): FreeNode[] {
   const firstButton = includeButtons ? nodes.findIndex((item) => item.type === "button") : -1;
@@ -178,26 +205,42 @@ const isCta = (node: FreeNode) => node.type === "button" && node.action.kind ===
 /**
  * Deixa o design coerente com o conteudo do aviso: com audio, o Áudio existe (antes do primeiro botao da
  * prancheta, se faltava); sem audio, sai. Com botao, o Botão principal existe (antes dos Links, se faltava); sem
- * botao, sai. Devolve o mesmo objeto quando nada muda.
+ * botao, sai. O que sai ou entra leva junto a entrada do celular (devices.mobile.nodes). Devolve o mesmo objeto
+ * quando nada muda.
  */
 export function syncFreeDesignWithContent(design: PopupFreeDesign, content: { hasAudio: boolean; hasCta: boolean }): PopupFreeDesign {
   let children = design.children;
   const hasAudioNode = containsType(children, isAudio);
   const hasCtaNode = containsType(children, isCta);
+  // Ids que saem ou entram: a entrada do celular de cada um sai junto (o id volta igual, "audio" ou "principal", e
+  // uma entrada velha grudaria no elemento novo).
+  const touched: FreeId[] = [];
 
   if (!content.hasAudio && hasAudioNode) {
+    touched.push(...idsOfType(children, isAudio));
     children = withoutType(children, isAudio);
   } else if (content.hasAudio && !hasAudioNode && freeNodeCount({ children }) < FREE_DESIGN_LIMITS.nodes) {
-    children = insertBeforeButtons(children, newFreeNode("audio", nextFreeId({ ...design, children }, "audio")), true);
+    const id = nextFreeId({ ...design, children }, "audio");
+
+    touched.push(id);
+    children = insertBeforeButtons(children, newFreeNode("audio", id), true);
   }
 
   if (!content.hasCta && hasCtaNode) {
+    touched.push(...idsOfType(children, isCta));
     children = withoutType(children, isCta);
   } else if (content.hasCta && !hasCtaNode && freeNodeCount({ children }) < FREE_DESIGN_LIMITS.nodes) {
-    children = insertBeforeButtons(children, newFreeNode("cta", nextFreeId({ ...design, children }, "principal")), false);
+    const id = nextFreeId({ ...design, children }, "principal");
+
+    touched.push(id);
+    children = insertBeforeButtons(children, newFreeNode("cta", id), false);
   }
 
-  return children === design.children ? design : { ...design, children };
+  if (children === design.children) {
+    return design;
+  }
+
+  return withFreeMobileNodes({ ...design, children }, Object.fromEntries(touched.map((id) => [id, undefined])));
 }
 
 /* ------------------------------------------------------------------------------------------------
