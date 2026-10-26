@@ -1,7 +1,7 @@
 import type { Browser, Locator, Page } from "@playwright/test";
 import { popupStarterDesign } from "../../src/server/communications/popup-design-model";
 import { createLocalAdminClient, unwrap } from "../support/local-db.mjs";
-import { bloquearRedeExterna, estadoDoPopUpDaAluna, eventosDoPopUp, expect, idDoAviso, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
+import { bloquearRedeExterna, estadoDoPopUpDaAluna, eventosDoPopUp, expect, idDoAviso, janelaParada, reabrirPopUpParaAluna, test, zerarComunicacao } from "./fixtures";
 import { publicarPopUpComDesign } from "./popup-design-fixtures";
 import { designVideoNoTopo, prepararMidiaDoLivre, publicarPopUpLivre, type MidiaDoLivre } from "./popup-livre-fixtures";
 
@@ -39,6 +39,8 @@ async function abrirPopUp(page: Page, nome: RegExp | string = NOME) {
   const popUp = page.getByRole("dialog", { name: nome });
   await expect(popUp).toBeVisible();
   await expect(popUp.locator("[data-popup-free]")).toBeVisible();
+  // As medidas e os cliques por coordenada so depois de a janela parar de crescer.
+  await janelaParada(popUp);
   return popUp;
 }
 

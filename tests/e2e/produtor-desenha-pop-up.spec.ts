@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { pngQuadrado } from "../support/imagem-de-teste.mjs";
-import { designDoPopUpNoBanco, estadoDoPopUpDaAluna, eventosDoPopUp, expect, reabrirPopUpParaAluna, test, zerarComunicacao, type DesignDoPopUpNoBanco } from "./fixtures";
+import { designDoPopUpNoBanco, estadoDoPopUpDaAluna, eventosDoPopUp, expect, janelaParada, reabrirPopUpParaAluna, test, zerarComunicacao, type DesignDoPopUpNoBanco } from "./fixtures";
 
 // "Design do pop-up" de ponta a ponta (docs/26 §8; docs/18 §3.1): o produtor abre um pop-up novo, escolhe
 // Personalizado e o modelo "Mídia no topo com degradê", envia o video de teste (um quadro dele vira a capa) e a
@@ -285,6 +285,8 @@ test.describe("aluna", () => {
     await page.goto("/");
     const popUp = page.getByRole("dialog", { name: NOME_NO_DIALOGO });
     await expect(popUp).toBeVisible();
+    // As medidas so depois de a janela parar de crescer.
+    await janelaParada(popUp);
     return popUp;
   }
 
