@@ -484,7 +484,7 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
 
   checkFill(design.artboard?.fill, ["artboard", "fill"]);
 
-  const walk =(nodes: readonly FreeNode[], depth: number, path: Path) => {
+  const walk = (nodes: readonly FreeNode[], depth: number, path: Path) => {
     nodes.forEach((node, index) => {
       const at: Path = [...path, index];
 
