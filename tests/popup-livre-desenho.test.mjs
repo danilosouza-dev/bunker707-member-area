@@ -707,11 +707,11 @@ test("contorno: espessura em cqw nunca abaixo de 1 px e pintado antes da cor, no
 test("texto vazado (Só o contorno): a letra fica transparente e o ícone do Selo e do Botão e o sublinhado dos Links ficam na cor do contorno (C22)", () => {
   const hollow = { paint: { color: "#ffffff00", kind: "solid" }, stroke: { color: "#e5ff1f", width: 2 } };
 
-  assert.equal(styles.freeHollowColor(hollow), "#e5ff1f");
-  assert.equal(styles.freeHollowColor({ paint: hollow.paint }), undefined, "sem contorno, a letra transparente é só a cor escolhida");
-  assert.equal(styles.freeHollowColor({ ...hollow, paint: { color: "#ff0000", kind: "solid" } }), undefined, "#ff0000 é vermelho de 6 dígitos, não alfa 00");
-  assert.equal(styles.freeHollowColor({ ...hollow, paint: { color: "#ffffff80", kind: "solid" } }), undefined, "a letra meio transparente continua com a cor dela");
-  assert.equal(styles.freeHollowColor({ ...hollow, paint: GRADIENT_PAINT }), undefined, "no degradê vale a primeira parada (freeTextCss)");
+  assert.equal(render.freeHollowColor(hollow), "#e5ff1f");
+  assert.equal(render.freeHollowColor({ paint: hollow.paint }), undefined, "sem contorno, a letra transparente é só a cor escolhida");
+  assert.equal(render.freeHollowColor({ ...hollow, paint: { color: "#ff0000", kind: "solid" } }), undefined, "#ff0000 é vermelho de 6 dígitos, não alfa 00");
+  assert.equal(render.freeHollowColor({ ...hollow, paint: { color: "#ffffff80", kind: "solid" } }), undefined, "a letra meio transparente continua com a cor dela");
+  assert.equal(render.freeHollowColor({ ...hollow, paint: GRADIENT_PAINT }), undefined, "no degradê vale a primeira parada (freeTextCss)");
 
   const design = parsed({
     children: [

@@ -1104,23 +1104,31 @@ test("L6b, Revisar: com todas as letras sobre marca-texto, a cor do elemento nã
   assert.deepEqual(contrastKeys(design([{ ...titulo([[{ style: { mark: { color: "#202020" } }, text: "Semana" }]]) }])), ["nodes.t.lines.0.0.style.mark"]);
 });
 
-test("L6b, Revisar: o ícone do Selo e do Botão usa a cor da letra; com a letra vazada, a dica diz que ele some", () => {
+test("L6b, Revisar: o ícone do Selo e do Botão é medido pela cor que o cartão usa (no vazado, a do contorno); a dica só quando ele some", () => {
   const vermelho = { fill: [{ color: "#e50914", kind: "solid" }], padding: [4, 10] };
   const selo = (extra) => ({ box: vermelho, id: "selo", label: "Novidade", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } }, type: "badge", ...extra });
   const botao = (extra) => ({ action: { kind: "close" }, box: vermelho, id: "fechar", label: "Agora não", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 2 } }, type: "button", ...extra });
   const dicas = (value) => checks.popupFreeHints(valid(value)).filter((hint) => hint.kind === "contrast");
 
+  // Vazado: o cartão desenha o ícone na cor do contorno (freeHollowColor), que se lê no vermelho. Nada acusa.
+  assert.equal(render.freeHollowColor(render.freeTextStyleOf(selo({}))), "#ffffff");
+  assert.deepEqual(dicas(design([selo({ icon: "sparkles" }), botao({ icon: { name: "arrow-right" } })])), []);
+
+  // A letra de cor que só se lê pelo contorno: o ícone usa a cor da letra (vermelha no vermelho) e some.
+  const letraNoFundo = { paint: { color: "#e50914", kind: "solid" }, stroke: { color: "#ffffff", width: 2 } };
+
   for (const [node, id] of [
-    [selo({ icon: "sparkles" }), "selo"],
-    [botao({ icon: { name: "arrow-right" } }), "fechar"]
+    [selo({ icon: "sparkles", textStyle: letraNoFundo }), "selo"],
+    [botao({ icon: { name: "arrow-right" }, textStyle: letraNoFundo }), "fechar"]
   ]) {
+    assert.equal(render.freeHollowColor(render.freeTextStyleOf(node)), undefined, `${id}: não é vazado`);
     assert.deepEqual(dicas(design([node])), [{ key: `nodes.${id}.textStyle.paint`, kind: "contrast", message: checks.POPUP_FREE_HINT_MESSAGES.iconHidden, nodeId: id }], id);
   }
 
-  // Sem ícone, a letra vazada lê pelo contorno; com a letra de cor, o ícone aparece.
-  assert.deepEqual(dicas(design([selo({}), botao({})])), []);
+  // Sem ícone, a mesma letra lê pelo contorno; com a letra de cor que se lê, o ícone também.
+  assert.deepEqual(dicas(design([selo({ textStyle: letraNoFundo }), botao({ textStyle: letraNoFundo })])), []);
   assert.deepEqual(dicas(design([selo({ icon: "sparkles", textStyle: { stroke: { color: "#000000", width: 2 } } })])), []);
-  // A letra vazada que já acusa (contorno de 1 px) fica com a dica de contraste de sempre, sem repetir a do ícone.
+  // A letra vazada que já acusa (contorno de 1 px) fica com a dica de contraste de sempre, sem a do ícone.
   const fino = dicas(design([selo({ icon: "sparkles", textStyle: { paint: LETRA_VAZADA, stroke: { color: "#ffffff", width: 1 } } })]));
   assert.equal(fino.length, 1);
   assert.ok(fino[0].message.startsWith("Contraste baixo ("));

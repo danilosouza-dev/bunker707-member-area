@@ -13,7 +13,8 @@ import {
   scaledLength,
   scaledLengthWithFloor,
   STORAGE_SAFE_HOSTNAME,
-  storagePublicPath
+  storagePublicPath,
+  type HexColor
 } from "./popup-design-model";
 import type {
   FreeArtboard,
@@ -73,6 +74,16 @@ export const FREE_TEXT_DEFAULTS: Readonly<Record<"badge" | "button" | "heading" 
 /** Os padroes de texto do tipo (os tipos sem texto proprio ficam com os do Texto). */
 export function freeTextDefaultsOf(type: FreeNode["type"]): Readonly<FreeResolvedTextStyle> {
   return type === "badge" || type === "button" || type === "heading" || type === "links" ? FREE_TEXT_DEFAULTS[type] : FREE_TEXT_DEFAULTS.text;
+}
+
+/**
+ * Texto vazado (a letra solida com alfa 00 e contorno, o "So o contorno" do editor): a cor do contorno, para quem
+ * desenha com `currentColor` e sumiria junto com a letra (o icone do selo e do botao, a linha dos links ao passar o
+ * mouse). undefined em qualquer outro texto (o HTML de antes nao muda). O cartao desenha com ela e o Revisar mede o
+ * icone com ela (L6b), entao os dois nunca discordam.
+ */
+export function freeHollowColor({ paint, stroke }: Pick<FreeResolvedTextStyle, "paint" | "stroke">): HexColor | undefined {
+  return stroke && paint.kind === "solid" && /^#.{6}00$/.test(paint.color) ? stroke.color : undefined;
 }
 
 /** O marca-texto de uma parte sem respiro nem cantos escolhidos (L6b): 2 px em cima e embaixo, 6 dos lados, cantos 4. */

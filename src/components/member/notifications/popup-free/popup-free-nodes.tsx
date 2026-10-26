@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import type { PopupItem } from "@/server/communications/notification-model";
 import type { FreeButtonNode, FreeId, FreeLine, FreeNode, PopupFreeDesign } from "@/server/communications/popup-free-model";
 import type { PopupFontFace } from "@/server/communications/popup-design-model";
-import { freeFirstHeading, freeFirstText, freeHasSnoozeButton, freeTextStyleOf, type FreeResolvedTextStyle } from "@/server/communications/popup-free-render";
+import { freeFirstHeading, freeFirstText, freeHasSnoozeButton, freeHollowColor, freeTextStyleOf, type FreeResolvedTextStyle } from "@/server/communications/popup-free-render";
 import { NoticeAudioPlayer } from "../notice-audio-player";
 import { resolveNotificationLink, type NotificationLink } from "../notifications-model";
 import { primaryButtonTarget } from "../popup-design/popup-design-styles";
@@ -27,7 +27,6 @@ import {
   freeBoxLayoutCss,
   freeButtonLayoutCss,
   freeDividerCss,
-  freeHollowColor,
   freeIconCss,
   freeLinksRowCss,
   freePlaceCss,

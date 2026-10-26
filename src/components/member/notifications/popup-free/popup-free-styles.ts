@@ -486,15 +486,6 @@ function paintBaseColor(paint: FreeTextPaint): HexColor {
 }
 
 /**
- * Texto vazado (a letra solida com alfa 00 e contorno, o "So o contorno" do editor): a cor do contorno, para quem
- * desenha com `currentColor` e sumiria junto com a letra (o icone do selo e do botao, a linha dos links ao passar o
- * mouse). undefined em qualquer outro texto (o HTML de antes nao muda).
- */
-export function freeHollowColor({ paint, stroke }: Pick<FreeResolvedTextStyle, "paint" | "stroke">): HexColor | undefined {
-  return stroke && paint.kind === "solid" && /^#.{6}00$/.test(paint.color) ? stroke.color : undefined;
-}
-
-/**
  * Contorno das letras: a espessura em cqw (encolhe junto no celular) e nunca abaixo de 1 px real, pintado antes da
  * cor (`paint-order`), entao a letra fina nao some. Sem contorno, nada entra no HTML.
  */

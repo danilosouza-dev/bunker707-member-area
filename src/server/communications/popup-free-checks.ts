@@ -26,6 +26,7 @@ import {
   FREE_MIN_FONT_PX,
   freeHasSnoozeButton,
   freeHeadingText,
+  freeHollowColor,
   freeTextStyleOf,
   resolveFreeArtboard,
   resolveFreeForDevice,
@@ -213,9 +214,14 @@ function markBackdrops(mark: FreeMark, outside: readonly Backdrop[] | null): Bac
   return outside ? outside.map((back) => ({ color: mark.color, under: flatten(back.color, back.under) })) : null;
 }
 
-/** A cor que o icone do Selo e do Botao usa: a da letra (degrade = a primeira parada), como no cartao. */
-function iconColor(paint: FreeTextPaint): HexColor {
-  return paint.kind === "solid" ? paint.color : ([...paint.stops].sort((a, b) => a.at - b.at)[0]?.color ?? "#ffffff");
+/**
+ * A cor que o icone do Selo e do Botao usa, pela mesma regra do cartao: no texto vazado, a do contorno
+ * (freeHollowColor); senao a da letra (degrade = a primeira parada).
+ */
+function iconColor(style: Pick<FreeResolvedTextStyle, "paint" | "stroke">): HexColor {
+  const { paint } = style;
+
+  return freeHollowColor(style) ?? (paint.kind === "solid" ? paint.color : ([...paint.stops].sort((a, b) => a.at - b.at)[0]?.color ?? "#ffffff"));
 }
 
 function overlapArea(left: Rect, right: Rect) {
@@ -299,8 +305,9 @@ export function popupFreeHints(design: PopupFreeDesign, input: { content?: FreeP
 
     report(element, `${prefix}.textStyle.paint`);
 
-    // O icone do Selo e do Botao desenha com a cor da letra, nunca com o contorno: com a letra vazada ele some.
-    if (outside && element && element.ratio >= element.required && (node.type === "badge" || node.type === "button") && node.icon && letterRatio([iconColor(style.paint)], undefined, outside) < 3) {
+    // O icone do Selo e do Botao desenha com a cor da letra (no texto vazado, com a do contorno, como no cartao): a
+    // letra que so se le pelo contorno deixa o icone sem contraste.
+    if (outside && element && element.ratio >= element.required && (node.type === "badge" || node.type === "button") && node.icon && letterRatio([iconColor(style)], undefined, outside) < 3) {
       add({ key: `${prefix}.textStyle.paint`, kind: "contrast", message: POPUP_FREE_HINT_MESSAGES.iconHidden, nodeId: node.id });
     }
 
