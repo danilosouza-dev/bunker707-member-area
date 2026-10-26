@@ -59,6 +59,7 @@ import { POPUP_FREE_MESSAGES } from "../../../../../server/communications/popup-
 import { HEX_COLOR_PATTERN, POPUP_BUILTIN_FONTS, type HexColor, type PopupFontOption, type PopupFontRef, type PopupFontWeight, type PopupVideoMimeType } from "../../../../../server/communications/popup-design-model";
 import { rangeMessage, weightAfterFontChange, weightOptionsFor } from "../popup-design/popup-design-editor-model";
 import { POPUP_EDITOR_COPY, snoozeSwitchDescription } from "../popup-editor-model";
+import { freeHoverAttrs } from "../../../../member/notifications/popup-free/popup-free-styles";
 
 const L = FREE_DESIGN_LIMITS;
 const M = POPUP_FREE_MESSAGES;
@@ -1447,9 +1448,14 @@ export function isFreeHoverNode(node: FreeNode | null | undefined): node is Free
   return node?.type === "button" || node?.type === "links";
 }
 
-/** O elemento tem alguma cor própria ao passar o mouse (sem nenhuma, o botão só clareia e os Links sublinham). */
+/**
+ * O elemento tem alguma cor própria ao passar o mouse que aparece no cartão do aluno: a mesma regra dele
+ * (freeHoverAttrs), para a nota do brilho, a chave "Ver com o mouse em cima" e o palco nunca discordarem do aluno. A
+ * cor do texto com a letra em degradê e a da borda sem borda (ou de 0 px) não aparecem: sem nenhuma que apareça, o
+ * botão só clareia e os Links sublinham.
+ */
 export function freeHasHover(node: FreeNode | null | undefined): boolean {
-  return isFreeHoverNode(node) && node.hover !== undefined && Object.values(node.hover).some((value) => value !== undefined);
+  return isFreeHoverNode(node) && freeHoverAttrs(node, freeTextStyleOf(node), false).attrs["data-free-hover"] !== undefined;
 }
 
 /**
@@ -1506,11 +1512,12 @@ export function freeHoverColorDisabledReason(node: FreeHoverNode): string | null
 }
 
 /**
- * A nota da Cor da borda ao passar o mouse: sem borda, ela não aparece. O campo fica parado enquanto não tem cor
- * própria; com cor (a borda tirada depois), fica livre para voltar ao padrão, com a nota. null = o botão tem borda.
+ * A nota da Cor da borda ao passar o mouse: sem borda (ou com a de 0 px, que o cartão não desenha), ela não aparece.
+ * O campo fica parado enquanto não tem cor própria; com cor (a borda tirada depois), fica livre para voltar ao padrão,
+ * com a nota. null = o botão tem borda de 1 px ou mais.
  */
 export function freeHoverBorderNote(node: FreeHoverNode): string | null {
-  return node.type === "button" && !node.box?.border ? FREE_INSPECTOR_COPY.hover.borderNone : null;
+  return node.type === "button" && !node.box?.border?.width ? FREE_INSPECTOR_COPY.hover.borderNone : null;
 }
 
 /**

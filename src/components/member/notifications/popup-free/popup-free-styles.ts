@@ -671,7 +671,8 @@ export type FreeHoverAttrs = { attrs: { "data-free-hover"?: string; "data-free-h
  * Botao, um degrade de freeGradientCss, nunca imagem); cada um com a sua variavel --free-hover-*. As regras do
  * globals.css usam !important (o estilo em linha venceria), entao uma variavel que falta apagaria a cor: por isso so
  * os nomes presentes. `on` (so a previa do editor, "Ver com o mouse em cima") poe `data-free-hover-on`. Sem nada,
- * objetos vazios: o HTML e o de antes do L6c.
+ * objetos vazios: o HTML e o de antes do L6c. O editor usa a mesma funcao (freeHasHover) para a nota do brilho e a
+ * chave "Ver com o mouse em cima": o que nao aparece aqui tambem nao conta la.
  */
 export function freeHoverAttrs(node: Extract<FreeNode, { type: "button" | "links" }>, text: FreeResolvedTextStyle, on: boolean): FreeHoverAttrs {
   const hover: FreeButtonHover = node.hover ?? {};

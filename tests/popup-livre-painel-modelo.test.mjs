@@ -14,6 +14,7 @@ import "./support/transpile-tsx.mjs";
 const panel = await import("../src/components/admin/v2/communication/popup-free/free-inspector-model.ts");
 const model = await import("../src/server/communications/popup-free-model.ts");
 const render = await import("../src/server/communications/popup-free-render.ts");
+const styles = await import("../src/components/member/notifications/popup-free/popup-free-styles.ts");
 const schema = await import("../src/server/communications/popup-free-schema.ts");
 const checks = await import("../src/server/communications/popup-free-checks.ts");
 const popupEditor = await import("../src/components/admin/v2/communication/popup-editor-model.ts");
@@ -1680,6 +1681,59 @@ test("L6c: Cor do texto parada com a letra em degradê e Cor da borda parada sem
   const parado = FreeInspectorStyle({ ...hoverProps(borda, "fechar"), disabled: true });
   assert.equal(elementById(parado, "livre-fechar-passar-mouse-borda").props.disabled, true);
   assert.equal(elementById(parado, "livre-fechar-passar-mouse-borda-padrao").props.disabled, true);
+});
+
+test("L6c: a nota do brilho, a chave e a Cor da borda seguem o cartão: só conta a cor que aparece", () => {
+  /** O que o cartão do aluno põe em data-free-hover (null = nada muda e o botão clareia, como sem cores). */
+  const cartao = (node) => styles.freeHoverAttrs(node, render.freeTextStyleOf(node), false).attrs["data-free-hover"] ?? null;
+
+  // Só a Cor da borda sem borda (a borda tirada depois) ou com borda de 0 px (colada), e só a Cor com a letra em
+  // degradê (colada; o schema recusa ao salvar, mas o editor mostra): no cartão nada muda e o botão continua clareando.
+  // O editor diz o mesmo: a frase do brilho aparece e a chave fica parada, com o motivo.
+  const semBorda = design([fecharCom({ box: VERMELHO_BOTAO, hover: { borderColor: "#ffffff" } }), LINKS]);
+  const bordaZero = design([fecharCom({ box: { ...VERMELHO_BOTAO, border: { color: "#ffffff", width: 0 } }, hover: { borderColor: "#000000" } }), LINKS]);
+  const degrade = design([fecharCom({ box: VERMELHO_BOTAO, hover: { color: "#111111" }, textStyle: { paint: DEGRADE_LETRA } }), LINKS]);
+  const linksDegrade = design([fecharCom(), { ...LINKS, hover: { color: "#111111" }, textStyle: { paint: DEGRADE_LETRA } }]);
+
+  for (const [nome, value, id] of [
+    ["sem borda", semBorda, "fechar"],
+    ["borda de 0 px", bordaZero, "fechar"],
+    ["letra em degradê", degrade, "fechar"],
+    ["Links em degradê", linksDegrade, "links"]
+  ]) {
+    const node = model.findFreeNode(value, id).node;
+    const chave = elementById(FreeInspectorStyle(hoverProps(value, id, [], [], { hoverPreview: true })), `livre-${id}-passar-mouse-ver`);
+
+    assert.equal(cartao(node), null, `${nome}: o cartão não muda nada`);
+    assert.equal(panel.freeHasHover(node), false, nome);
+    assert.equal(panel.freeHoverPreviewDisabledReason(node, "desktop"), C.hover.previewEmpty, nome);
+    assert.equal(chave.props.disabled, true, nome);
+    assert.equal(chave.props.checked, false, nome);
+    assert.equal(panel.freeHoverPreviewAfter(id, { activeId: id, device: "desktop", hasHover: panel.freeHasHover(node), many: false, panel: "inspector" }), null, nome);
+
+    if (id === "fechar") {
+      assert.ok(renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(value, id))).includes(C.hover.buttonDefault), `${nome}: o botão clareia, e a frase diz`);
+    }
+  }
+
+  // A borda de 0 px é como sem borda: a Cor da borda ganha a nota (e fica livre só para voltar ao padrão).
+  assert.equal(panel.freeHoverBorderNote(model.findFreeNode(bordaZero, "fechar").node), C.hover.borderNone);
+  assert.ok(renderToStaticMarkup(createElement(FreeInspectorStyle, hoverProps(bordaZero, "fechar"))).includes(C.hover.borderNone));
+  assert.equal(panel.freeHoverBorderNote(fecharCom({ box: { border: { color: "#ffffff", width: 0 } } })), C.hover.borderNone);
+  assert.equal(elementById(FreeInspectorStyle(hoverProps(design([fecharCom({ box: { border: { color: "#ffffff", width: 0 } } }), LINKS]), "fechar")), "livre-fechar-passar-mouse-borda").props.disabled, true);
+
+  // O que aparece conta nos dois lados: a borda de 1 px, a letra de cor sólida (também a vazada), o fundo (também com
+  // a letra em degradê) e a cor dos Links.
+  for (const [nome, node] of [
+    ["borda de 1 px", fecharCom({ box: { ...VERMELHO_BOTAO, ...BORDA_BRANCA }, hover: { borderColor: "#000000" } })],
+    ["letra vazada", fecharCom({ hover: { color: "#111111" }, textStyle: { paint: { color: "#ffffff00", kind: "solid" }, stroke: CONTORNO_BRANCO } })],
+    ["fundo com a letra em degradê", fecharCom({ hover: { fill: ESCURECE_FUNDO }, textStyle: { paint: DEGRADE_LETRA } })],
+    ["Links", { ...LINKS, hover: { color: "#e5ff1f" } }]
+  ]) {
+    assert.notEqual(cartao(node), null, nome);
+    assert.equal(panel.freeHasHover(node), true, nome);
+    assert.equal(panel.freeHoverPreviewDisabledReason(node, "desktop"), null, nome);
+  }
 });
 
 test("L6c: a chave Ver com o mouse em cima liga e desliga o palco, sem mudar o design; parada sem cor própria", () => {
