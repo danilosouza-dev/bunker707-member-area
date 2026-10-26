@@ -20,19 +20,25 @@ import {
   type Ponto
 } from "./popup-livre-editor-fixtures";
 
-// Livre: arrastar nas Camadas (docs/27 §13.9, L4a; docs/18 §3.1). Num rascunho com [Título, Texto, Caixa em coluna
-// [Selo, Botão principal], Links] (o Botão principal semeado com o botao do aviso, para o Revisar nao pedir nada), um
-// clique que treme 6 px dentro da linha do Texto seleciona o Texto, como o clique parado. O produtor arrasta o Texto
-// para o meio da linha da Caixa (a mao fechada; um toque de outro ponteiro no meio nao para o gesto; entra no fim dela,
-// um passo so no Ctrl + Z), o Selo para o quarto de cima do Título (sai da caixa e fica primeiro), a Caixa para a linha
-// do Botão de dentro dela (a recusa aparece com o cursor de proibido, nada muda e nao ha passo vazio), aperta Esc no
-// meio de um arrastar (nada muda, a selecao fica e o foco continua nas Camadas), solta abaixo da ultima linha (o fim
-// do pop-up) e arrasta a propria linha 6 px (nada aparece e a linha fica selecionada).
-// Com uma linha em Renomear, arrastar outra linha ainda move (a foto do design e tirada depois do limiar). Com "Ver
-// como: Celular", a etiqueta diz que a ordem muda tambem no computador. Pelo teclado, Shift + F10 › Tirar da caixa e ›
-// Colocar dentro da caixa deixam o foco na linha movida. Salvar grava a ordem nova. Funciona no WebKit: o mouse sempre
-// dentro da janela, a prancheta e as linhas paradas antes de medir, o indicador antes de soltar, a frase falada antes
-// do passo seguinte e o foco conferido com toBeFocused (no WebKit o clique nao da foco a botao).
+// Livre: arrastar nas Camadas (docs/27 §13.9, L4a; docs/18 §3.1), com a lista como no Figma (L64: o que esta em cima
+// esta na frente; a lista e children ao contrario em todo nivel). Num rascunho com [Título, Texto, Caixa em coluna
+// [Selo, Botão principal], Links] (o Botão principal semeado com o botao do aviso, para o Revisar nao pedir nada), as
+// Camadas mostram Links, Caixa, Botão, Selo, Texto e Título, de cima para baixo. Um clique que treme 6 px dentro da
+// linha do Texto seleciona o Texto, como o clique parado. O produtor arrasta o Texto para o meio da linha da Caixa (a
+// mao fechada; um toque de outro ponteiro no meio nao para o gesto; entra dentro dela, embaixo de tudo, atras dos
+// filhos; um passo so no Ctrl + Z), o Selo para o quarto de cima dos Links (sai da caixa e fica na frente de tudo, a
+// primeira linha), a Caixa para a linha do Botão de dentro dela (a recusa aparece com o cursor de proibido, nada muda
+// e nao ha passo vazio), aperta Esc no meio de um arrastar (nada muda, a selecao fica e o foco continua nas Camadas),
+// solta os Links abaixo da ultima linha (o fundo do pop-up: a ultima linha) e arrasta a propria linha 6 px (nada
+// aparece e a linha fica selecionada). Com uma linha em Renomear, arrastar outra linha ainda move (a foto do design e
+// tirada depois do limiar). Com "Ver como: Celular", a etiqueta diz que a ordem muda tambem no computador. Pelo
+// teclado, Shift + F10 › Tirar da caixa (logo acima da caixa) e › Colocar dentro da caixa (a linha de cima dela)
+// deixam o foco na linha movida; na linha de cima da caixa, o ⋯ Subir fica desligado, o Descer leva para baixo e o Alt
+// + ↑ traz de volta. Salvar grava a ordem nova em children. Com a camada (L66), a lista e a ordem do desenho: o
+// Degradê novo fica na ultima linha e atras do Título (o elementFromPoint do meio do Título da o Título), e dois ] o
+// levam a primeira linha e para cima do Título. Funciona no WebKit: o mouse sempre dentro da janela, a prancheta e as
+// linhas paradas antes de medir, o indicador antes de soltar, a frase falada antes do passo seguinte e o foco
+// conferido com toBeFocused (no WebKit o clique nao da foco a botao).
 
 const TITULO = "Pop-up E2E: o produtor arrasta nas Camadas do Livre";
 const CHILDREN: FreeNode[] = [
@@ -63,7 +69,7 @@ test.beforeAll(async () => {
 
 test.afterAll(zerarComunicacao);
 
-/** A ordem das Camadas: "id" na prancheta e "caixa/id" dentro de uma caixa. */
+/** A ordem das Camadas como se ve, de cima para baixo (L64): "id" na prancheta e "caixa/id" dentro de uma caixa. */
 async function ordem(editor: Locator) {
   return (await linhasDasCamadas(editor)).map((linha) => (linha.pai ? `${linha.pai}/${linha.id}` : linha.id));
 }
@@ -108,14 +114,15 @@ async function irAoItem(page: Page, nome: string) {
   await expect(item).toBeFocused();
 }
 
-test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Celular e o ⋯ pelo teclado", async ({ page }) => {
+test("arrasta nas Camadas como no Figma: entra e sai de caixa, recusa, Esc, o fundo e a frente, Celular e o ⋯ pelo teclado", async ({ page }) => {
   test.setTimeout(180_000);
   const editor = await abrirEditorLivre(page, avisoId);
   const frase = falado(editor);
   const indicador = editor.locator("[data-free-layer-drop], [data-free-layer-drop-inside], [data-free-layer-drop-hint], [data-free-layer-drop-both]");
 
   await expect(editor.getByRole("tab", { exact: true, name: "Camadas" })).toHaveAttribute("aria-selected", "true");
-  expect(await ordem(editor)).toEqual(["titulo", "texto", "caixa", "caixa/selo", "caixa/botao", "links"]);
+  // children e [Título, Texto, Caixa [Selo, Botão], Links]: nas Camadas, o ultimo (o da frente) fica em cima.
+  expect(await ordem(editor)).toEqual(["links", "caixa", "caixa/botao", "caixa/selo", "texto", "titulo"]);
 
   await test.step("um clique que treme 6 px dentro da linha do Texto seleciona o Texto, como o clique parado", async () => {
     await expect(editor.locator("[data-free-selection]")).toHaveCount(0);
@@ -132,11 +139,11 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     await expect(editor.locator("[data-free-layer-dragging]")).toHaveCount(0);
     await expect(botaoDaCamada(editor, "texto")).toHaveAttribute("aria-current", "true");
     expect(await selecionado(editor)).toBe("texto");
-    expect(await ordem(editor)).toEqual(["titulo", "texto", "caixa", "caixa/selo", "caixa/botao", "links"]);
+    expect(await ordem(editor)).toEqual(["links", "caixa", "caixa/botao", "caixa/selo", "texto", "titulo"]);
     expect(await frase.textContent()).toBe(antes);
   });
 
-  await test.step("o Texto no meio da linha da Caixa entra no fim dela, selecionado e com o foco na linha", async () => {
+  await test.step("o Texto no meio da linha da Caixa entra dentro dela, embaixo de tudo (atras dos filhos), selecionado e com o foco na linha", async () => {
     await arrastar(page, await pegar(editor, "texto"), await naLinha(editor, "caixa", 0.5), {
       antesDeSoltar: async () => {
         await expect(editor.locator("[data-free-layer-drop-inside]")).toBeVisible();
@@ -147,8 +154,9 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
         await expect(editor.locator("[data-free-layer-drop-inside]")).toBeVisible();
       }
     });
-    await expect.poll(() => ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links"]);
+    await expect.poll(() => ordem(editor)).toEqual(["links", "caixa", "caixa/botao", "caixa/selo", "caixa/texto", "titulo"]);
     await expect(editor.locator("[data-free-layer-dragging]")).toHaveCount(0);
+    // A posicao conta de cima para baixo na lista: o Texto e a ultima linha da Caixa.
     await expect(frase).toContainText("Movido. Posição 3 de 3, dentro de Caixa em coluna.");
     await expect(botaoDaCamada(editor, "texto")).toBeFocused();
     expect(await selecionado(editor)).toBe("texto");
@@ -157,16 +165,16 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
 
   await test.step("Ctrl + Z volta e Ctrl + Shift + Z refaz: o arrastar e um passo so", async () => {
     await noPalco(page, editor, "Control+z");
-    await expect.poll(() => ordem(editor)).toEqual(["titulo", "texto", "caixa", "caixa/selo", "caixa/botao", "links"]);
+    await expect.poll(() => ordem(editor)).toEqual(["links", "caixa", "caixa/botao", "caixa/selo", "texto", "titulo"]);
     await noPalco(page, editor, "Control+Shift+z");
-    await expect.poll(() => ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links"]);
+    await expect.poll(() => ordem(editor)).toEqual(["links", "caixa", "caixa/botao", "caixa/selo", "caixa/texto", "titulo"]);
   });
 
-  await test.step("o Selo no quarto de cima do Título sai da caixa e fica primeiro no pop-up", async () => {
-    await arrastar(page, await pegar(editor, "selo"), await naLinha(editor, "titulo", 0.125), {
+  await test.step("o Selo no quarto de cima dos Links sai da caixa e fica na frente de tudo (a primeira linha)", async () => {
+    await arrastar(page, await pegar(editor, "selo"), await naLinha(editor, "links", 0.125), {
       antesDeSoltar: () => expect(editor.locator("[data-free-layer-drop]")).toBeVisible()
     });
-    await expect.poll(() => ordem(editor)).toEqual(["selo", "titulo", "caixa", "caixa/botao", "caixa/texto", "links"]);
+    await expect.poll(() => ordem(editor)).toEqual(["selo", "links", "caixa", "caixa/botao", "caixa/texto", "titulo"]);
     await expect(frase).toContainText("Movido. Posição 1 de 4, no pop-up.");
     await expect(botaoDaCamada(editor, "selo")).toBeFocused();
   });
@@ -179,11 +187,11 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
       }
     });
     await expect(frase).toContainText("Uma caixa não entra dentro dela mesma.");
-    expect(await ordem(editor)).toEqual(["selo", "titulo", "caixa", "caixa/botao", "caixa/texto", "links"]);
+    expect(await ordem(editor)).toEqual(["selo", "links", "caixa", "caixa/botao", "caixa/texto", "titulo"]);
     await expect(indicador).toHaveCount(0);
     // O proximo Ctrl + Z desfaz o passo do Selo: a recusa nao gravou nada.
     await noPalco(page, editor, "Control+z");
-    await expect.poll(() => ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links"]);
+    await expect.poll(() => ordem(editor)).toEqual(["links", "caixa", "caixa/botao", "caixa/selo", "caixa/texto", "titulo"]);
   });
 
   await test.step("Esc no meio de um arrastar: nada muda, a selecao continua e o foco fica nas Camadas", async () => {
@@ -202,18 +210,18 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     await expect(indicador).toHaveCount(0);
     await page.mouse.up();
     await expect(editor.locator("[data-free-layer-dragging]")).toHaveCount(0);
-    expect(await ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links"]);
+    expect(await ordem(editor)).toEqual(["links", "caixa", "caixa/botao", "caixa/selo", "caixa/texto", "titulo"]);
     expect(await selecionado(editor)).toBe("selo");
     // O Esc nao mexe no foco: ele fica nas Camadas (na linha do Texto, no Chromium; no WebKit, no primeiro de fora do
     // botao que recebe foco pelo clique, dentro do painel), nunca no body.
     expect(await focoDentro(editor.getByRole("tabpanel", { exact: true, name: "Camadas" }))).toBe(true);
   });
 
-  await test.step("soltar abaixo da ultima linha leva ao fim do pop-up", async () => {
-    await arrastar(page, await pegar(editor, "titulo"), await naLinha(editor, "links", 2), {
+  await test.step("soltar os Links abaixo da ultima linha leva ao fundo do pop-up (atras de tudo, a ultima linha)", async () => {
+    await arrastar(page, await pegar(editor, "links"), await naLinha(editor, "titulo", 2), {
       antesDeSoltar: () => expect(editor.locator("[data-free-layer-drop]")).toBeVisible()
     });
-    await expect.poll(() => ordem(editor)).toEqual(["caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links", "titulo"]);
+    await expect.poll(() => ordem(editor)).toEqual(["caixa", "caixa/botao", "caixa/selo", "caixa/texto", "titulo", "links"]);
     await expect(frase).toContainText("Movido. Posição 3 de 3, no pop-up.");
   });
 
@@ -229,9 +237,9 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     await expect(indicador).toHaveCount(0);
     await page.mouse.up();
     await expect(editor.locator("[data-free-layer-dragging]")).toHaveCount(0);
-    expect(await ordem(editor)).toEqual(["caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links", "titulo"]);
+    expect(await ordem(editor)).toEqual(["caixa", "caixa/botao", "caixa/selo", "caixa/texto", "titulo", "links"]);
     expect(await frase.textContent()).toBe(antes);
-    // Soltar no mesmo lugar e o clique que tremeu: a Caixa fica selecionada (antes, o Título movido no passo de cima).
+    // Soltar no mesmo lugar e o clique que tremeu: a Caixa fica selecionada (antes, os Links movidos no passo de cima).
     await expect(botaoDaCamada(editor, "caixa")).toHaveAttribute("aria-current", "true");
     expect(await selecionado(editor)).toBe("caixa");
   });
@@ -242,10 +250,11 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     const campo = editor.getByRole("textbox", { exact: true, name: "Nome na lista de camadas" });
     await expect(campo).toBeFocused();
     await page.keyboard.type("Rodapé");
+    // O Título no quarto de cima da Caixa: fica na frente dela, a primeira linha.
     await arrastar(page, await pegar(editor, "titulo"), await naLinha(editor, "caixa", 0.125), {
       antesDeSoltar: () => expect(editor.locator("[data-free-layer-drop]")).toBeVisible()
     });
-    await expect.poll(() => ordem(editor)).toEqual(["titulo", "caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links"]);
+    await expect.poll(() => ordem(editor)).toEqual(["titulo", "caixa", "caixa/botao", "caixa/selo", "caixa/texto", "links"]);
     await expect(botaoDaCamada(editor, "links")).toContainText("Rodapé");
     await expect(campo).toHaveCount(0);
   });
@@ -256,10 +265,11 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
 
     await celular.click();
     await expect(celular).toHaveAttribute("aria-pressed", "true");
+    // O Título, a primeira linha, abaixo da ultima: o fundo do pop-up.
     await arrastar(page, await pegar(editor, "titulo"), await naLinha(editor, "links", 2), {
       antesDeSoltar: () => expect(editor.locator("[data-free-layer-drop-both]")).toHaveText("Muda também no computador")
     });
-    await expect.poll(() => ordem(editor)).toEqual(["caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links", "titulo"]);
+    await expect.poll(() => ordem(editor)).toEqual(["caixa", "caixa/botao", "caixa/selo", "caixa/texto", "links", "titulo"]);
     await expect(frase).toContainText("Movido. Posição 3 de 3, no pop-up. A ordem muda também no computador.");
     await computador.click();
     await expect(computador).toHaveAttribute("aria-pressed", "true");
@@ -273,7 +283,8 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     await page.keyboard.press("Shift+F10");
     await irAoItem(page, "Tirar da caixa");
     await page.keyboard.press("Enter");
-    await expect.poll(() => ordem(editor)).toEqual(["caixa", "caixa/selo", "caixa/botao", "texto", "links", "titulo"]);
+    // Logo depois da caixa em children: logo acima dela na lista.
+    await expect.poll(() => ordem(editor)).toEqual(["texto", "caixa", "caixa/botao", "caixa/selo", "links", "titulo"]);
     await expect(frase).toContainText("Tirado da caixa.");
     await expect(page.getByRole("menuitem")).toHaveCount(0);
     await expect(botaoDaCamada(editor, "texto")).toBeFocused();
@@ -283,9 +294,29 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     await page.keyboard.press("ArrowRight");
     await expect(page.getByRole("menuitem", { exact: true, name: "Caixa em coluna" })).toBeFocused();
     await page.keyboard.press("Enter");
-    await expect.poll(() => ordem(editor)).toEqual(["caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links", "titulo"]);
+    // No fim de children da caixa: a linha de cima dela.
+    await expect.poll(() => ordem(editor)).toEqual(["caixa", "caixa/texto", "caixa/botao", "caixa/selo", "links", "titulo"]);
     await expect(frase).toContainText("Colocado dentro da caixa.");
     await expect(page.getByRole("menuitem")).toHaveCount(0);
+    await expect(botaoDaCamada(editor, "texto")).toBeFocused();
+  });
+
+  await test.step("na linha de cima da Caixa, o ⋯ Subir fica desligado, o Descer leva o Texto para baixo e o Alt + ↑ traz de volta", async () => {
+    const texto = botaoDaCamada(editor, "texto");
+
+    await expect(texto).toBeFocused();
+    await page.keyboard.press("Shift+F10");
+    await expect(page.getByRole("menuitem", { exact: true, name: "Subir" })).toHaveAttribute("aria-disabled", "true");
+    await irAoItem(page, "Descer");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => ordem(editor)).toEqual(["caixa", "caixa/botao", "caixa/texto", "caixa/selo", "links", "titulo"]);
+    await expect(frase).toContainText("Movido para baixo.");
+    await expect(page.getByRole("menuitem")).toHaveCount(0);
+    await expect(botaoDaCamada(editor, "texto")).toBeFocused();
+
+    await page.keyboard.press("Alt+ArrowUp");
+    await expect.poll(() => ordem(editor)).toEqual(["caixa", "caixa/texto", "caixa/botao", "caixa/selo", "links", "titulo"]);
+    await expect(frase).toContainText("Movido para cima.");
     await expect(botaoDaCamada(editor, "texto")).toBeFocused();
   });
 
@@ -295,9 +326,42 @@ test("arrasta nas Camadas: entra e sai de caixa, recusa, Esc, fim do pop-up, Cel
     const gravado = await lerDesignDoAviso(avisoId);
     const ids = (nodes: readonly FreeNode[] = []): string[] => nodes.flatMap((node) => (node.type === "box" ? [node.id, ...ids(node.children).map((id) => `${node.id}/${id}`)] : [node.id]));
 
-    expect(ids(gravado?.children)).toEqual(["caixa", "caixa/selo", "caixa/botao", "caixa/texto", "links", "titulo"]);
+    // children na ordem de leitura: a lista das Camadas de baixo para cima.
+    expect(ids(gravado?.children)).toEqual(["titulo", "links", "caixa", "caixa/selo", "caixa/botao", "caixa/texto"]);
     expect(gravado?.children.find((node) => node.id === "links")?.name).toBe("Rodapé");
     // A ordem e uma so: arrastar com o Celular nao grava nada proprio do celular.
     expect(gravado?.devices).toEqual(designDoRascunhoLivre(CHILDREN).design.devices);
+  });
+
+  await test.step("a camada (L66): o Degradê novo fica na última linha e atrás do Título no desenho; dois ] o levam à primeira linha e à frente", async () => {
+    /** Quem o navegador mostra por cima no meio do Título (o elementFromPoint de verdade, com as camadas). */
+    const porCimaDoTitulo = async () => {
+      const ponto = centroDe(await caixaParada(editor.locator('[data-free-canvas-card] [data-free-id="titulo"]').first()));
+
+      return page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-free-id]")?.getAttribute("data-free-id") ?? "", ponto);
+    };
+    /** Entre o Título e o Degradê, quem esta mais acima nas Camadas. */
+    const deCimaNaLista = async (degrade: string) => (await ordem(editor)).find((id) => id === "titulo" || id === degrade);
+
+    await editor.getByRole("tab", { exact: true, name: "Elementos" }).click();
+    await editor.locator('[data-free-element="gradient"]').click();
+    await expect(frase).toContainText("Degradê adicionado.");
+    const degrade = (await selecionado(editor)) ?? "";
+
+    expect(degrade).not.toBe("");
+    await editor.getByRole("tab", { exact: true, name: "Camadas" }).click();
+    // Pintado atras de tudo (camada -1): a ultima linha, e o Título continua por cima dele no desenho.
+    await expect.poll(async () => (await ordem(editor)).at(-1)).toBe(degrade);
+    await expect.poll(porCimaDoTitulo).toBe("titulo");
+    expect(await deCimaNaLista(degrade)).toBe("titulo");
+
+    // Dois ] (camada 1): a primeira linha, e no desenho ele cobre o Título. A linha de cima e a que se ve por cima.
+    await editor.locator("[data-free-stage]").focus();
+    await page.keyboard.press("]");
+    await expect(frase).toContainText("Trazido para frente.");
+    await page.keyboard.press("]");
+    await expect.poll(async () => (await ordem(editor))[0]).toBe(degrade);
+    await expect.poll(porCimaDoTitulo).toBe(degrade);
+    expect(await deCimaNaLista(degrade)).toBe(degrade);
   });
 });

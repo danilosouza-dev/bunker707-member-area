@@ -1,10 +1,10 @@
 // Editor Livre do pop-up, L4b (docs/27 §13.10): a selecao de varios, pura e testavel. Quem esta escolhido (so ids
 // vivos, sem repetidos, nunca uma caixa junto com algo dentro dela), por ou tirar, o intervalo das Camadas, o
-// Ctrl + A, o Esc ao pai comum, a pilha do Alt + clique, e os comandos de varios, cada um num design novo so (o editor
-// grava um passo por comando): mover junto (com o limite comum do grupo), alinhar entre si e no pop-up (cada um), os
-// espacos iguais, duplicar (Links, Áudio e o que tem Vídeo ficam de fora), excluir (Links e Áudio ficam), esconder,
-// travar e a camada. Mais as frases de varios (FREE_SELECTION_COPY) e o motivo de cada botao desligado do painel
-// Varios (freeManyReasons).
+// Ctrl + A, o Esc ao pai comum, a pilha do Alt + clique, o clique fora da prancheta que desmarca (L65), e os comandos
+// de varios, cada um num design novo so (o editor grava um passo por comando): mover junto (com o limite comum do
+// grupo), alinhar entre si e no pop-up (cada um), os espacos iguais, duplicar (Links, Áudio e o que tem Vídeo ficam
+// de fora), excluir (Links e Áudio ficam), esconder, travar e a camada. Mais as frases de varios (FREE_SELECTION_COPY)
+// e o motivo de cada botao desligado do painel Varios (freeManyReasons).
 //
 // A selecao fica fora do design, do historico e da copia de recuperacao: nada aqui grava a selecao, so x e y que ja
 // existem (em place ou em devices.mobile, como as setas de um elemento).
@@ -19,6 +19,7 @@ import {
   duplicateFreeNode,
   freeArrowCoalesceKey,
   freeDuplicateProblem,
+  freeLayerOrderOf,
   freeMobileFreePlace,
   freeNodeTypeLabel,
   freeParentId,
@@ -29,7 +30,17 @@ import {
   shiftFreeNodeLayer,
   type FreeDevice
 } from "./free-editor-model";
-import { freeAlignDelta, freeBoundsOf, freeDistributeDeltas, freeGroupDelta, freeRectOfPlace, freeVisualRect, type FreeAlignEdge, type FreeRect } from "./free-editor-geometry";
+import {
+  FREE_DRAG_START_PX,
+  freeAlignDelta,
+  freeBoundsOf,
+  freeDistributeDeltas,
+  freeGroupDelta,
+  freeRectOfPlace,
+  freeVisualRect,
+  type FreeAlignEdge,
+  type FreeRect
+} from "./free-editor-geometry";
 
 /* ------------------------------------------------------------------------------------------------
  * Frases de varios (palavra por palavra do plano do L4b)
@@ -156,7 +167,7 @@ function isInside(design: Pick<PopupFreeDesign, "children">, ancestor: FreeId, i
   return Boolean(box && box.type === "box" && box.id !== id && contains(box, (item) => item.id === id));
 }
 
-/** Os ids na ordem do documento (a das Camadas, de cima para baixo). */
+/** Os ids na ordem do documento (a de leitura; nas Camadas, de baixo para cima desde o L64). */
 function documentOrder(design: Pick<PopupFreeDesign, "children">, ids: readonly FreeId[]): FreeId[] {
   const wanted = new Set(ids);
   const out: FreeId[] = [];
@@ -209,9 +220,10 @@ export function freeToggleInSelection(design: Pick<PopupFreeDesign, "children">,
 }
 
 /**
- * Shift + clique e Shift + ↑/↓ nas Camadas: os irmaos do mesmo pai entre a ancora e `id`, na ordem de children,
- * terminando em `id` (o principal). Sem ancora, ancora que nao existe mais ou com pais diferentes, null (quem chama
- * poe ou tira so `id`).
+ * Shift + clique e Shift + ↑/↓ nas Camadas: os irmaos do mesmo pai entre a ancora e `id`, no intervalo que se ve, na
+ * ordem da lista (de cima para baixo, o da frente primeiro: a ordem do desenho, freeLayerOrderOf, L64 e L66),
+ * terminando em `id` (o principal). Sem ancora, ancora que nao existe mais ou com pais diferentes, null (quem chama poe
+ * ou tira so `id`).
  */
 export function freeSelectionRange(design: Pick<PopupFreeDesign, "children">, anchor: FreeId | null, id: FreeId): FreeId[] | null {
   const to = findFreeNode(design, id);
@@ -222,9 +234,10 @@ export function freeSelectionRange(design: Pick<PopupFreeDesign, "children">, an
   }
 
   const siblings = to.parent ? to.parent.children : design.children;
-  const start = Math.min(from.index, to.index);
-  const end = Math.max(from.index, to.index);
-  const between = siblings.slice(start, end + 1).map((node) => node.id);
+  const order = freeLayerOrderOf(siblings);
+  const a = order.indexOf(from.index);
+  const b = order.indexOf(to.index);
+  const between = order.slice(Math.min(a, b), Math.max(a, b) + 1).map((index) => siblings[index].id);
 
   return [...between.filter((item) => item !== id), id];
 }
@@ -257,6 +270,53 @@ export function freeSelectionEscape(design: Pick<PopupFreeDesign, "children">, i
   const parents = new Set(chosen.map((id) => freeParentId(design, id)));
 
   return parents.size === 1 ? [...parents][0] : null;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Clique fora da prancheta (L65)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O pointerdown na area de desenho fora do cartao, guardado ate o click: o ponto (px de tela) e as teclas. */
+export type FreeOutsidePress = { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; x: number; y: number };
+
+/**
+ * O pointerdown na area de desenho (L65, docs/27 §2.2): conta so fora do cartao (a area escura em volta do pop-up, o
+ * respiro do palco e a moldura do celular), com o botao principal do ponteiro principal, sem gesto em andamento e fora
+ * da barra de rolagem da area. O cartao (com as alcas e a barrinha, que ficam dentro dele) tem as regras dele. Os
+ * paineis, a barra de cima e o zoom ficam fora da area: nem chegam aqui. Devolve o que o click vai conferir, ou null.
+ */
+export function freeOutsidePress(input: {
+  busy: boolean;
+  button: number;
+  ctrlKey: boolean;
+  inCard: boolean;
+  isPrimary: boolean;
+  metaKey: boolean;
+  onScrollbar: boolean;
+  shiftKey: boolean;
+  x: number;
+  y: number;
+}): FreeOutsidePress | null {
+  if (input.button !== 0 || !input.isPrimary || input.busy || input.inCard || input.onScrollbar) {
+    return null;
+  }
+
+  return { ctrlKey: input.ctrlKey, metaKey: input.metaKey, shiftKey: input.shiftKey, x: input.x, y: input.y };
+}
+
+/**
+ * O click depois desse pointerdown desmarca tudo (a mesma acao do clique no vazio da prancheta: o painel volta a
+ * Pop-up), como no Figma, quando ha algo escolhido (`selected`, quantos), o ponteiro andou menos que o limiar do
+ * arrastar do solto (o arrastar que comeca fora nao faz nada) e sem Shift, Ctrl ou ⌘ (como no vazio do cartao: com
+ * essas teclas, nada muda). Sem nada escolhido nao ha o que desmarcar: o painel da direita fica como esta (o Revisar
+ * aberto continua aberto).
+ */
+export function freeOutsideClickClears(press: FreeOutsidePress | null, click: { x: number; y: number }, selected: number): boolean {
+  if (!press || selected === 0 || press.shiftKey || press.ctrlKey || press.metaKey) {
+    return false;
+  }
+
+  return Math.hypot(click.x - press.x, click.y - press.y) < FREE_DRAG_START_PX;
 }
 
 /** O nome do escolhido nas frases: o nome dado, ou o tipo ("Forma", "Botão principal", "Caixa em linha"). */
@@ -504,7 +564,7 @@ export function alignFreeNodes(
 /**
  * Espacos iguais (3 ou mais soltos): o primeiro e o ultimo no eixo ficam parados e os do meio andam ate os espacos
  * ficarem iguais (ate 1 px de diferenca), pela caixa que se ve e no aparelho do "Ver como". No empate do meio, vale a
- * ordem das Camadas. Mesmo formato do alinhar.
+ * ordem de leitura (a de children). Mesmo formato do alinhar.
  */
 export function distributeFreeNodes(design: PopupFreeDesign, ids: readonly FreeId[], axis: "x" | "y", rects: FreeMeasuredRects, device: FreeDevice): FreeManyMoveResult {
   const reason = moveReason(design, ids, rects, 3, C.reasons.distribute);

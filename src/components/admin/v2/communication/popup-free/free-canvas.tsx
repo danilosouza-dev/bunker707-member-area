@@ -62,7 +62,16 @@ import {
   type FreeZoomStep
 } from "./free-editor-geometry";
 import { FREE_EDITOR_COPY, FREE_HANDLE_LABELS, freeFlowContainers, freeFlowDraggable, freeLayerLabel, freeMoveProblem, freeNodeOf, isFreeMovable } from "./free-editor-model";
-import { FREE_SELECTION_COPY, freeMovableIds, freeNextInStack, freeSelectionLive, freeStackFromPoint } from "./free-editor-selection";
+import {
+  FREE_SELECTION_COPY,
+  freeMovableIds,
+  freeNextInStack,
+  freeOutsideClickClears,
+  freeOutsidePress,
+  freeSelectionLive,
+  freeStackFromPoint,
+  type FreeOutsidePress
+} from "./free-editor-selection";
 import { FREE_POINTER_MOUSE_AND_PEN, FREE_POINTER_MOUSE_PEN_AND_TOUCH, followFreePointer, type FreePointerKeys } from "./free-pointer-drag";
 
 // Area de desenho do editor Livre (spec §4.4): o MESMO PopupFreeCard do aluno, em previa, dentro de um palco com
@@ -102,6 +111,10 @@ import { FREE_POINTER_MOUSE_AND_PEN, FREE_POINTER_MOUSE_PEN_AND_TOUCH, followFre
 //   Ctrl ou ⌘ so sobre a area (ouvinte nao passivo), o ponto sob o ponteiro (ou o meio da vista) mantido por uma
 //   ancora guardada so por eles (C12), a escala mostrada em onScaleChange. A moldura (w-max) nao corta a esquerda do
 //   palco, e reveal rola o minimo para mostrar os escolhidos.
+// L65 (docs/27 §2.2): o click na area de desenho fora do cartao (a area escura em volta do pop-up, o respiro do palco
+// e a moldura do celular) desmarca tudo, como o clique no vazio da prancheta. O pointerdown e lido na captura da area
+// (freeOutsidePress: fora do cartao, sem gesto, fora da barra de rolagem) e o click confere o limiar de 3 px e as teclas
+// (freeOutsideClickClears: com Shift, Ctrl ou ⌘, nada muda). O arrastar que comeca fora nao faz nada.
 
 const copy = FREE_EDITOR_COPY;
 
@@ -421,6 +434,8 @@ export function FreeCanvas({
   const dragLast = useRef<{ client: FreePoint; keys: FreePointerKeys } | null>(null);
   // O click que nao passou do limiar: o grupo mantido ou a pilha do Alt, com o principal de antes do pointerdown.
   const clickRef = useRef<{ origin: FreePoint; plan: FreeCanvasClick } | null>(null);
+  // L65: o pointerdown fora do cartao (a area escura em volta do pop-up), que o click confere antes de desmarcar.
+  const outsideRef = useRef<FreeOutsidePress | null>(null);
   // A ancora do zoom (C12): guardada so por zoomBy e zoomTo (a roda chama zoomBy), aplicada e limpa na escala pedida.
   const zoomAnchor = useRef<{ client: FreePoint; origin: FreePoint; scale: number; to: number } | null>(null);
   const designRef = useRef(design);
@@ -1316,6 +1331,46 @@ export function FreeCanvas({
     }
   }
 
+  /**
+   * L65 (docs/27 §2.2): o pointerdown na area de desenho, lido na fase de captura (as alcas e a barrinha param o
+   * pointerdown no cartao; aqui ele chega antes). Fora do cartao, guarda o ponto e as teclas para o click; dentro do
+   * cartao, na barra de rolagem da area ou com um gesto em andamento, limpa (o click que vier nao desmarca).
+   */
+  function onViewportPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const view = event.currentTarget;
+    const target = event.target as Element;
+    const box = view.getBoundingClientRect();
+
+    outsideRef.current = freeOutsidePress({
+      busy: Boolean(sessionRef.current || flowRef.current),
+      button: event.button,
+      ctrlKey: event.ctrlKey,
+      inCard: !view.contains(target) || Boolean(target.closest("[data-free-canvas-card]")),
+      isPrimary: event.isPrimary,
+      metaKey: event.metaKey,
+      // A barra de rolagem fica fora de clientWidth e clientHeight (o pointerdown nela tambem chega a area).
+      onScrollbar: event.clientX - box.left - view.clientLeft >= view.clientWidth || event.clientY - box.top - view.clientTop >= view.clientHeight,
+      shiftKey: event.shiftKey,
+      x: event.clientX,
+      y: event.clientY
+    });
+  }
+
+  /**
+   * O click na area de desenho: depois de um pointerdown fora do cartao, sem arrastar e sem tecla, desmarca tudo. Sem
+   * nada escolhido, nada muda (o Revisar aberto continua aberto).
+   */
+  function onViewportClick(event: ReactMouseEvent<HTMLDivElement>) {
+    const press = outsideRef.current;
+
+    outsideRef.current = null;
+
+    // A mesma acao do clique no vazio da prancheta: nada escolhido, e o painel da direita volta a Pop-up.
+    if (freeOutsideClickClears(press, { x: event.clientX, y: event.clientY }, liveIds.length)) {
+      onSelect(null);
+    }
+  }
+
   /* --------------------------------------------------------------------------------------------
    * Camada de selecao
    * ------------------------------------------------------------------------------------------ */
@@ -1557,6 +1612,9 @@ export function FreeCanvas({
     <div
       className="relative min-h-0 min-w-0 flex-1 overflow-auto bg-[#0a0a0b] [background-image:radial-gradient(rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:16px_16px]"
       data-free-zone="canvas"
+      // L65: clicar fora do cartao, na area escura em volta do pop-up, desmarca tudo (como no Figma).
+      onClick={onViewportClick}
+      onPointerDownCapture={onViewportPointerDown}
       ref={viewportRef}
     >
       {/* A moldura cresce com o palco (w-max) e nunca fica menor que a area (min-w-full): com zoom alto o palco nao

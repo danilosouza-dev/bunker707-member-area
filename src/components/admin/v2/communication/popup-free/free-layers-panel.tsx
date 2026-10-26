@@ -64,15 +64,20 @@ import {
 import { FREE_SELECTION_COPY } from "./free-editor-selection";
 import { followFreePointer } from "./free-pointer-drag";
 
-// Camadas do editor Livre (spec §4.5): a lista em arvore na ordem do DOM (de cima para baixo = ordem de leitura),
-// em <ul>/<li> aninhados (nao role="tree": as linhas tem botoes dentro). Foco itinerante: um so botao de selecao
-// com tabIndex 0 por vez; Esconder, Travar e ⋯ de cada linha ficam com tabIndex -1 e sao alcancados por → / ←
-// dentro da linha (com 32 linhas, o Tab passa pela lista uma vez so). Teclado: ↑/↓, →/←, Enter, Alt + ↑/↓, E, T,
-// Shift + F10 (ou a tecla de menu), Delete, Ctrl + D, F2 (freeLayerKeyAction, testado).
+// Camadas do editor Livre (spec §4.5): a lista em arvore como no Figma e no Photoshop (docs/27 L64 e L66): o que esta
+// em cima esta na frente. Em cada nivel, a ordem em que o desenho pinta, de cima para baixo (freeLayerRows: a camada
+// maior e, na mesma camada, o ultimo de children em cima; sem camadas, children ao contrario; a caixa vem antes dos
+// filhos dela). A ordem de leitura e de Tab do aluno continua a de children (sem camadas, aqui de baixo para cima).
+// Em <ul>/<li> aninhados (nao role="tree": as linhas tem botoes dentro). Foco itinerante: um so botao de selecao com
+// tabIndex 0 por vez; Esconder, Travar e ⋯ de cada linha ficam com tabIndex -1 e sao alcancados por → / ← dentro da
+// linha (com 32 linhas, o Tab passa pela lista uma vez so). Teclado: ↑/↓,
+// →/←, Enter, Alt + ↑/↓, E, T, Shift + F10 (ou a tecla de menu), Delete, Ctrl + D, F2 (freeLayerKeyAction, testado).
+// ↑/↓ andam pela lista que se ve; Alt + ↑/↓ e o ⋯ Subir e Descer movem na lista que se ve (Subir = mais para a
+// frente; o editor faz a conta em children e na camada com moveFreeNodeStep).
 // Arrastar (L4a, docs/27 §13.9): so com o mouse, pelo botao de selecionar da linha, a partir de 4 px
-// (followFreePointer; antes disso e um clique). O lugar sai das linhas medidas (freeLayerDropAt: antes, depois, dentro
-// de uma caixa no fim, abaixo da ultima = fim do pop-up), nunca da posicao horizontal; fora do painel das Camadas nao
-// ha lugar. A foto do design e tirada quando o arrastar comeca (um Renomear que termina no pointerdown ja entra nela) e
+// (followFreePointer; antes disso e um clique). O lugar sai das linhas medidas (freeLayerDropAt: acima = na frente,
+// abaixo = atras, dentro de uma caixa = atras dos filhos dela, abaixo da ultima = o fundo do pop-up; o lugar em
+// children sai de freeLayerDropTarget), nunca da posicao horizontal; fora do painel das Camadas nao ha lugar. A foto do design e tirada quando o arrastar comeca (um Renomear que termina no pointerdown ja entra nela) e
 // o lugar e recalculado com o ponto do soltar e quando a lista rola. A propria linha e o mesmo lugar (nada aparece), e
 // soltar no mesmo lugar seleciona a linha, como o clique que tremeu; um lugar recusado mostra o motivo e o cursor de
 // proibido. Soltar leva a run({ kind: "move" }): um passo, o elemento selecionado e o foco na linha. Com "Ver como:
@@ -217,7 +222,7 @@ type LayerDropAt = { problem: string | null; target: FreeMoveTarget | null; view
 /** Altura reservada para a etiqueta do indicador (uma linha de 12 px com a borda). */
 const DROP_LABEL_PX = 22;
 
-/** As linhas das Camadas medidas agora, na ordem do DOM (a div de cada linha, sem os filhos de uma caixa). */
+/** As linhas das Camadas medidas agora, de cima para baixo (a div de cada linha, sem os filhos de uma caixa). */
 function measureLayerLines(list: HTMLElement): MeasuredLine[] {
   return Array.from(list.querySelectorAll<HTMLElement>("[data-free-layer-line]"), (element) => {
     const rect = element.getBoundingClientRect();
@@ -393,7 +398,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
       return { problem: "", target: null, view: null };
     }
 
-    const target = freeLayerDropTarget(gesture.design, over);
+    const target = freeLayerDropTarget(gesture.design, over, gesture.id);
 
     if (!target) {
       return null;
@@ -413,7 +418,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
     const both = !reason && latest.current.device === "mobile";
     const label = (below: number, above: number) => (below + DROP_LABEL_PX <= wrap.height ? below : Math.max(0, above - DROP_LABEL_PX));
 
-    if (!("end" in over) && over.edge === "inside") {
+    if (!("bottom" in over) && over.edge === "inside") {
       const box = lineOf(over.id);
       const top = box.top - wrap.top;
 
@@ -427,7 +432,7 @@ export function FreeLayersPanel({ cta, design, device = "desktop", disabled, fla
     }
 
     // O vao entre duas linhas tem 2 px: a linha do indicador fica no meio dele.
-    const y = ("end" in over ? last.top + last.height + 1 : over.edge === "before" ? lineOf(over.id).top - 1 : lineOf(over.id).top + lineOf(over.id).height + 1) - wrap.top;
+    const y = ("bottom" in over ? last.top + last.height + 1 : over.edge === "above" ? lineOf(over.id).top - 1 : lineOf(over.id).top + lineOf(over.id).height + 1) - wrap.top;
     const parentDepth = target.parentId === null ? 0 : (latest.current.rows.find((row) => row.id === target.parentId)?.depth ?? 0);
     const left = first.left - wrap.left + 4 + parentDepth * 14;
     const right = first.left - wrap.left + first.width;

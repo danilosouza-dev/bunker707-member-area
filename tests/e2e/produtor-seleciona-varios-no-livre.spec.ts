@@ -16,6 +16,7 @@ import {
   gravarRascunhoLivre,
   lerDesignDoAviso,
   linhasDasCamadas,
+  menuDoZoom,
   noPalco
 } from "./popup-livre-editor-fixtures";
 
@@ -24,12 +25,17 @@ import {
 // clique (o clique na terceira passa pela travada): três contornos, a caixa do grupo com "3 elementos" e o painel
 // Vários. As setas no palco movem as três juntas (a frase "Seleção em X, Y." e um Ctrl + Z volta tudo), arrastar uma
 // leva as três num passo, o Esc no meio de outro arrastar nao muda nada, e o clique sem arrastar num escolhido deixa so
-// ele. Ctrl + D duplica as três (as copias ficam escolhidas), Delete exclui as copias e Ctrl + Z volta. Nas Camadas:
-// Shift + ↓ pega o intervalo, Ctrl + clique e Ctrl + Enter poem e tiram, e T na linha escolhida trava as três (com
-// aria-current so no principal e "Na seleção" nas outras). Com "Ver como: Celular", as setas no grupo mudam so o
-// celular. Salvar rascunho grava o computador como foi semeado e devices.mobile com o lugar novo. Funciona no WebKit:
-// o mouse sempre dentro da janela, o palco e o alvo parados antes de cada clique com tecla (cliqueCom), a caixa
-// parada antes de medir e o foco posto pelo teclado antes de cada tecla (no WebKit o clique nao da foco a botao).
+// ele. Ctrl + D duplica as três (as copias ficam escolhidas), Delete exclui as copias e Ctrl + Z volta. Nas Camadas
+// (L64: como no Figma, de cima para baixo Links, Caixa, Selo, Travada, Forma C, Forma B, Forma A e Título): Shift + ↓
+// a partir da Forma C pega o intervalo na ordem da lista, Ctrl + clique e Ctrl + Enter poem e tiram, e T na linha
+// escolhida trava as três (com aria-current so no principal e "Na seleção" nas outras). Com "Ver como: Celular", as
+// setas no grupo mudam so o celular. Salvar rascunho grava o computador como foi semeado e devices.mobile com o lugar
+// novo. Desde o L65 (docs/27 §2.2), clicar fora da prancheta, na area escura em volta do pop-up, desmarca tudo e o
+// painel volta a Pop-up (com Alt tambem); os paineis, a barra de cima, o zoom e as alcas nao desmarcam, com Shift ou
+// Ctrl nada muda, o arrastar que comeca fora nao faz nada e o Esc continua indo a caixa de fora (sem caixa de fora,
+// desmarca); sem nada escolhido, o clique fora com o Revisar aberto nao o fecha. Funciona no WebKit: o mouse sempre
+// dentro da janela, o palco e o alvo parados antes de cada clique com tecla (cliqueCom), a caixa parada antes de medir
+// e o foco posto pelo teclado antes de cada tecla (no WebKit o clique nao da foco a botao).
 
 const TITULO = "Pop-up E2E: o produtor escolhe vários no Livre";
 const COR = { fill: [{ color: "#38bdf8", kind: "solid" as const }], radius: 8 };
@@ -205,32 +211,35 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
   });
 
   await test.step("nas Camadas: Shift + ↓ pega o intervalo, Ctrl + clique e Ctrl + Enter põem e tiram, e T trava as três", async () => {
-    await botaoDaCamada(editor, "fa").click();
-    await expect.poll(() => escolhidos(editor)).toEqual(["fa"]);
+    // Nas Camadas (L64), o da frente em cima: a Forma C vem acima da B, e a B acima da A.
+    expect((await linhasDasCamadas(editor)).map((linhaDaCamada) => linhaDaCamada.id)).toEqual(["links", "caixa", "selo", "ft", "fc", "fb", "fa", "titulo"]);
+    await botaoDaCamada(editor, "fc").click();
+    await expect.poll(() => escolhidos(editor)).toEqual(["fc"]);
 
-    // Shift + ↓ com o foco na linha: a linha de baixo entra e o intervalo cresce desde a ancora (a Forma A).
-    await botaoDaCamada(editor, "fa").focus();
+    // Shift + ↓ com o foco na linha: a linha de baixo entra e o intervalo cresce desde a ancora (a Forma C), na ordem
+    // da lista, com a linha do foco no fim (o principal).
+    await botaoDaCamada(editor, "fc").focus();
     await page.keyboard.press("Shift+ArrowDown");
     await expect(frase).toHaveText("2 elementos escolhidos.");
     await expect(botaoDaCamada(editor, "fb")).toBeFocused();
     await page.keyboard.press("Shift+ArrowDown");
     await expect(frase).toHaveText("3 elementos escolhidos.");
-    await expect(botaoDaCamada(editor, "fc")).toBeFocused();
-    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect(botaoDaCamada(editor, "fa")).toBeFocused();
+    await expect.poll(() => escolhidos(editor)).toEqual(["fc", "fb", "fa"]);
 
     // Ctrl + clique poe o Título; Ctrl + Enter na linha dele o tira.
     await botaoDaCamada(editor, "titulo").click({ modifiers: ["Control"] });
     await expect(frase).toHaveText("Título entrou na seleção. 4 elementos.");
-    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc", "titulo"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fc", "fb", "fa", "titulo"]);
     await botaoDaCamada(editor, "titulo").focus();
     await page.keyboard.press("Control+Enter");
     await expect(frase).toHaveText("Título saiu da seleção. 3 elementos.");
-    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fc", "fb", "fa"]);
 
     // aria-current so no principal (o ultimo escolhido); "Na seleção" nas outras linhas escolhidas.
-    await expect(botaoDaCamada(editor, "fc")).toHaveAttribute("aria-current", "true");
+    await expect(botaoDaCamada(editor, "fa")).toHaveAttribute("aria-current", "true");
 
-    for (const id of ["fa", "fb"]) {
+    for (const id of ["fc", "fb"]) {
       await expect(botaoDaCamada(editor, id)).not.toHaveAttribute("aria-current", "true");
       await expect(editor.locator(`[data-free-layer-row="${id}"] [id^="free-layer-tags-"]`)).toContainText("Na seleção");
     }
@@ -238,7 +247,7 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
     await expect(editor.locator('[data-free-layer-row="titulo"] [id^="free-layer-tags-"]')).toHaveCount(0);
 
     // T na linha escolhida trava as tres (a frase diz quantas); T de novo destrava.
-    await botaoDaCamada(editor, "fc").focus();
+    await botaoDaCamada(editor, "fa").focus();
     await page.keyboard.press("t");
     await expect(frase).toHaveText("3 elementos travados.");
 
@@ -258,7 +267,7 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
   await test.step("Ver como Celular: as setas no grupo mudam só o celular", async () => {
     await editor.getByRole("button", { exact: true, name: "Celular" }).click();
     await expect(frase).toHaveText("Editando o Celular.");
-    await expect.poll(() => escolhidos(editor)).toEqual(["fa", "fb", "fc"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fc", "fb", "fa"]);
     await expect(varios.getByText("Com Ver como: Celular, alinhar e distribuir mudam só o celular.", { exact: true })).toBeVisible();
 
     await noPalcoTecla(page, editor, "ArrowDown");
@@ -289,5 +298,83 @@ test("escolhe várias Formas no desenho e nas Camadas: move junto, arrasta, dupl
     expect(porId.ft?.locked).toBe(true);
     expect(porId.ft?.place).toEqual({ h: 40, mode: "free", w: 40, x: 290, y: 230 });
     expect(gravado?.devices?.mobile?.nodes?.ft).toBeUndefined();
+  });
+
+  await test.step("clicar fora da prancheta desmarca (o painel volta a Pop-up); painéis, barra de cima, zoom e alças não; arrastar de fora não muda nada", async () => {
+    const area = editor.locator('[data-free-zone="canvas"]');
+    const popup = editor.locator('[data-free-inspector="popup"]');
+    /** Um ponto da area escura em volta do pop-up: 8 px para dentro da borda esquerda da area, na altura do meio. */
+    const fora = async () => {
+      const caixa = await caixaParada(area);
+
+      return { x: caixa.x + 8, y: caixa.y + caixa.height / 2 };
+    };
+
+    await expect.poll(() => escolhidos(editor)).toEqual(["fc", "fb", "fa"]);
+
+    // Os paineis, a barra de cima e o zoom ficam fora da area de desenho: nao desmarcam.
+    await cliqueCom(page, varios.getByRole("heading", { exact: true, name: "3 elementos selecionados" }));
+    await cliqueCom(page, editor.locator('[data-free-tab="layers"]'));
+    await cliqueCom(page, editor.locator("header").getByText("Editor Livre", { exact: true }));
+    await cliqueCom(page, editor.locator('[data-free-zoom="in"]'));
+    await expect(frase).toHaveText(/^Zoom \d+ %\.$/);
+    await menuDoZoom(editor).click();
+    await page.getByRole("menuitemradio", { exact: true, name: "Ajustar à tela" }).click();
+    await expect(page.getByRole("menuitemradio")).toHaveCount(0);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fc", "fb", "fa"]);
+    await expect(varios).toBeVisible();
+
+    // Com Shift ou Ctrl, o clique fora nao muda nada (como no vazio da prancheta).
+    await cliqueCom(page, await fora(), ["Shift"]);
+    await cliqueCom(page, await fora(), ["Control"]);
+    await expect.poll(() => escolhidos(editor)).toEqual(["fc", "fb", "fa"]);
+
+    // O clique fora sem tecla desmarca tudo: o painel volta a Pop-up e o palco diz que nada esta escolhido.
+    await cliqueCom(page, await fora());
+    await expect.poll(() => escolhidos(editor)).toEqual([]);
+    await expect(varios).toHaveCount(0);
+    await expect(popup.getByText("Nada selecionado: aqui fica o pop-up inteiro.", { exact: true })).toBeVisible();
+    expect(await descricaoDoPalco(editor)).toBe("Nada selecionado.");
+
+    // O Alt nao conta: com Alt, o clique fora desmarca do mesmo jeito.
+    await cliqueCom(page, noPalco(editor, "fb"));
+    await expect.poll(() => escolhidos(editor)).toEqual(["fb"]);
+    await cliqueCom(page, await fora(), ["Alt"]);
+    await expect.poll(() => escolhidos(editor)).toEqual([]);
+
+    // As alcas ficam no desenho: o clique numa delas, sem arrastar, nao desmarca nem muda o lugar.
+    await cliqueCom(page, noPalco(editor, "fa"));
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa"]);
+    await cliqueCom(page, editor.locator('[data-free-handle="se"]'));
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa"]);
+    expect(await lugares(editor)).toEqual(antes);
+
+    // O arrastar que comeca fora nao faz nada: nem na area escura, nem quando passa por cima de outra Forma.
+    const de = await fora();
+
+    await arrastar(page, de, { x: de.x + 60, y: de.y + 40 });
+    await arrastar(page, de, centroDe(await caixaParada(noPalco(editor, "fb"))));
+    await expect.poll(() => escolhidos(editor)).toEqual(["fa"]);
+    expect(await lugares(editor)).toEqual(antes);
+
+    // O Esc continua indo a caixa de fora e, sem caixa de fora, desmarca.
+    await cliqueCom(page, noPalco(editor, "selo"));
+    await expect.poll(() => escolhidos(editor)).toEqual(["selo"]);
+    await noPalcoTecla(page, editor, "Escape");
+    await expect.poll(() => escolhidos(editor)).toEqual(["caixa"]);
+    await page.keyboard.press("Escape");
+    await expect.poll(() => escolhidos(editor)).toEqual([]);
+    await expect(popup).toBeVisible();
+
+    // Sem nada escolhido nao ha o que desmarcar: com o Revisar aberto, o clique fora nao o fecha (o painel nao volta a
+    // Pop-up).
+    const revisar = editor.getByRole("heading", { exact: true, name: "Revisar" });
+
+    await cliqueCom(page, editor.locator("[data-free-review-toggle]"));
+    await expect(revisar).toBeVisible();
+    await cliqueCom(page, await fora());
+    await expect(revisar).toBeVisible();
+    await expect(popup).toHaveCount(0);
+    await expect.poll(() => escolhidos(editor)).toEqual([]);
   });
 });
