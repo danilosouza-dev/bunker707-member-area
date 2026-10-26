@@ -2,8 +2,8 @@
 // design ja validado (cores #RRGGBB/#RRGGBBAA, numeros com limite, escolhas de lista) e da origem conferida do
 // nosso Supabase. Nenhum texto do produtor entra em CSS: as unicas strings montadas sao degrades, sombras,
 // mascaras, o contorno das letras (max(1px, cqw) e a cor), rotate(), translate() (so a previa do arrastar no editor),
-// `sizes` e url(); o url() sai so de freeImageLayerUrl, com o endereco de freeAssetUrl (origem conferida + bucket +
-// caminho do padrao).
+// `sizes`, as variaveis --free-hover-* (uma cor ou um degrade de freeGradientCss, L6c) e url(); o url() sai so de
+// freeImageLayerUrl, com o endereco de freeAssetUrl (origem conferida + bucket + caminho do padrao).
 //
 // Modulo puro, sem React em tempo de execucao e com imports relativos: tests/popup-livre-desenho.test.mjs carrega
 // direto pelo Node. Importa so popup-free-render.ts e popup-design-model.ts (nunca popup-free-model.ts em tempo
@@ -21,6 +21,7 @@ import type {
   FreeBorder,
   FreeBox,
   FreeBoxLayout,
+  FreeButtonHover,
   FreeColorStop,
   FreeFade,
   FreeFillPaint,
@@ -658,6 +659,40 @@ export function freeLinksRowCss(node: Extract<FreeNode, { type: "links" }>, styl
 export const FREE_LINK_RESET_CSS: CSSProperties = { backgroundColor: "transparent", border: 0, cursor: "pointer", padding: 0 };
 
 /* ------------------------------------------------------------------------------------------------
+ * Cores ao passar o mouse e no foco pelo teclado (L6c): so no Botao e nos Links
+ * ---------------------------------------------------------------------------------------------- */
+
+/** O que vai no elemento: os atributos que as regras fixas do globals.css leem e as variaveis com as cores. */
+export type FreeHoverAttrs = { attrs: { "data-free-hover"?: string; "data-free-hover-on"?: "" }; vars: CSSProperties };
+
+/**
+ * As cores ao passar o mouse de um Botao ou dos Links. `data-free-hover` lista so o que existe e aparece: `color` (so
+ * com a letra de cor solida; em degrade a letra e transparente), `border` (so no Botao com borda) e `fill` (so no
+ * Botao, um degrade de freeGradientCss, nunca imagem); cada um com a sua variavel --free-hover-*. As regras do
+ * globals.css usam !important (o estilo em linha venceria), entao uma variavel que falta apagaria a cor: por isso so
+ * os nomes presentes. `on` (so a previa do editor, "Ver com o mouse em cima") poe `data-free-hover-on`. Sem nada,
+ * objetos vazios: o HTML e o de antes do L6c.
+ */
+export function freeHoverAttrs(node: Extract<FreeNode, { type: "button" | "links" }>, text: FreeResolvedTextStyle, on: boolean): FreeHoverAttrs {
+  const hover: FreeButtonHover = node.hover ?? {};
+  const button = node.type === "button";
+  const list: string[] = [];
+  const vars: Record<string, string> = {};
+  const add = (name: string, value: string | false | undefined) => {
+    if (value) {
+      list.push(name);
+      vars[`--free-hover-${name}`] = value;
+    }
+  };
+
+  add("color", text.paint.kind === "solid" && hover.color);
+  add("border", button && !!node.box?.border?.width && hover.borderColor);
+  add("fill", button && !!hover.fill && freeGradientCss(hover.fill));
+
+  return list.length > 0 ? { attrs: { "data-free-hover": list.join(" "), "data-free-hover-on": on ? "" : undefined }, vars } : { attrs: {}, vars };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Caixa (flex), icone, linha, espaco
  * ---------------------------------------------------------------------------------------------- */
 
@@ -872,3 +907,9 @@ export const FREE_FOCUS_CLASS = "focus-visible:outline-2 focus-visible:outline-o
  * aperto muda a propriedade `translate` (nao `transform`): e ela que a transicao lista.
  */
 export const FREE_PRESS_CLASS = "transition-[filter,translate] hover:brightness-110 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0";
+
+/**
+ * O aperto do botao com cores proprias ao passar o mouse (freeHoverAttrs, L6c): sem o brilho, que mudaria as cores
+ * escolhidas. A transicao (cor, borda e o aperto, nenhuma com menos movimento) vem da regra fixa do globals.css.
+ */
+export const FREE_PRESS_HOVER_CLASS = "active:translate-y-px motion-reduce:active:translate-y-0";

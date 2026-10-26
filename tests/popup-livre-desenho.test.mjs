@@ -19,6 +19,10 @@ import "./support/resolve-extensionless-ts.mjs";
 // - contorno (cqw com piso de 1 px, pintado antes da cor) no elemento e na parte, o texto vazado com o icone e o
 //   sublinhado dos links na cor do contorno, o marca-texto (respiro e cantos em cqw, um fundo por linha) e o span de
 //   dentro so com marca-texto e degrade (L6b);
+// - as cores ao passar o mouse no Botao e nos Links (L6c): data-free-hover so com o que existe e aparece, as
+//   variaveis --free-hover-*, o botao sem o brilho, o span da previa com os mesmos atributos e o data-free-hover-on,
+//   e o bloco fixo do globals.css compilado como no build (fora de @layer, !important, o passar o mouse so com
+//   mouse, o foco com as mesmas cores, o fundo sem ladrilhos e nada com menos movimento);
 // - o HTML do Padrão e do Personalizado igual ao de antes do Livre (tests/fixtures/popup-livre/antes-*.html,
 //   gerados no commit-base e555188, antes de qualquer mudanca do Livre);
 // - o plano marcando o Livre faz o host pedir o pedaco do cartao antes do POST /show.
@@ -859,8 +863,297 @@ test("a linha própria de uma parte em degradê usa a primeira parada; com cor s
 });
 
 /* ------------------------------------------------------------------------------------------------
- * Nome do dialogo, descricao, ordem e clique
+ * Cores ao passar o mouse e no foco pelo teclado (L6c)
  * ---------------------------------------------------------------------------------------------- */
+
+const HOVER_FILL = { angle: 90, kind: "linear", stops: [{ at: 0, color: "#f2ff8a" }, { at: 100, color: "#d9f500" }] };
+
+/** O Botao principal com as tres cores e borda, o Fechar sem borda, um link com letra em degrade, um link so com a cor da borda (sem borda) e os Links. */
+function hoverDesign() {
+  return parsed({
+    children: [
+      {
+        action: { kind: "cta" },
+        box: { border: { color: "#ffffff", width: 2 }, fill: [{ color: "#e5ff1f", kind: "solid" }] },
+        hover: { borderColor: "#111111", color: "#222222", fill: HOVER_FILL },
+        id: "botao",
+        textStyle: { paint: { color: "#111111", kind: "solid" } },
+        type: "button"
+      },
+      { action: { kind: "close" }, hover: { borderColor: "#ffffff", color: "#e5ff1f" }, id: "fechar", label: "Agora não", type: "button" },
+      {
+        action: { href: "/minhas-compras", kind: "link", target: "same_tab" },
+        hover: { fill: { color: "#333333", kind: "solid" } },
+        id: "degrade",
+        label: "Ver compras",
+        textStyle: { paint: GRADIENT_PAINT },
+        type: "button"
+      },
+      { action: { href: "https://exemplo.com.br/aula", kind: "link", target: "new_tab" }, hover: { borderColor: "#ffffff" }, id: "semborda", label: "Ver aula", type: "button" },
+      { hover: { color: "#e5ff1f" }, id: "links", type: "links" }
+    ]
+  });
+}
+
+/** A abertura da tag que casa com `attribute` (o nome e o valor ja como expressao regular), conferindo que foi desenhada. */
+function openingTag(markup, attribute, tag = "[a-z]+") {
+  const match = new RegExp(`<${tag} [^>]*${attribute}[^>]*>`).exec(markup);
+
+  assert.ok(match, `${attribute} desenhado`);
+
+  return match[0];
+}
+
+const attrOf = (opening, name) => new RegExp(` ${name}="([^"]*)"`).exec(opening)?.[1];
+const classOf = (opening) => attrOf(opening, "class") ?? "";
+const varOf = (opening, name) => new RegExp(`(?:^|;)--free-hover-${name}:([^;"]*)`).exec(attrOf(opening, "style") ?? "")?.[1];
+
+test("cores ao passar o mouse (L6c): data-free-hover lista só o que existe e aparece, cada um com a sua variável", () => {
+  const markup = card(hoverDesign());
+  const botao = openingTag(markup, 'data-free-id="botao"');
+
+  assert.equal(attrOf(botao, "data-free-hover"), "color border fill");
+  assert.equal(varOf(botao, "color"), "#222222");
+  assert.equal(varOf(botao, "border"), "#111111");
+  assert.equal(varOf(botao, "fill"), "linear-gradient(90deg, #f2ff8a 0%, #d9f500 100%)", "o fundo pelo mesmo freeGradientCss das camadas");
+  assert.match(attrOf(botao, "style"), /(^|;)background-image:linear-gradient\(#e5ff1f, #e5ff1f\)(;|$)/, "o fundo de sempre continua no estilo em linha");
+  assert.equal(attrOf(botao, "data-free-hover-on"), undefined, "no aluno, nunca o estado da prévia");
+
+  // Sem borda, a cor da borda nao aparece: fica de fora da lista e da variavel.
+  const fechar = openingTag(markup, 'data-free-id="fechar"');
+
+  assert.equal(attrOf(fechar, "data-free-hover"), "color");
+  assert.equal(varOf(fechar, "border"), undefined);
+
+  // Letra em degrade: a letra e transparente e a cor nao apareceria. So o fundo.
+  const degrade = openingTag(markup, 'data-free-id="degrade"');
+
+  assert.equal(attrOf(degrade, "data-free-hover"), "fill");
+  assert.equal(varOf(degrade, "fill"), "linear-gradient(#333333, #333333)");
+  assert.equal(varOf(degrade, "color"), undefined);
+
+  // So a cor da borda num botao sem borda: nada aparece, entao o botao fica como hoje (o brilho de 110 %).
+  const semBorda = openingTag(markup, 'data-free-id="semborda"');
+
+  assert.equal(attrOf(semBorda, "data-free-hover"), undefined);
+  assert.doesNotMatch(attrOf(semBorda, "style"), /--free-hover/);
+  assert.equal(classOf(semBorda), classOf(openingTag(card(parsed({ children: [{ action: { kind: "close" }, id: "x", label: "Fechar", type: "button" }, { id: "links", type: "links" }] })), 'data-free-id="x"')));
+
+  // Os Links: a cor em cada link (so o link sob o mouse muda), nunca na linha inteira.
+  for (const name of ["snooze", "dismiss"]) {
+    const link = openingTag(markup, `data-free-link="${name}"`, "button");
+
+    assert.equal(attrOf(link, "data-free-hover"), "color");
+    assert.equal(varOf(link, "color"), "#e5ff1f");
+    assert.match(classOf(link), /(^| )hover:underline( |$)/, "o sublinhado ao passar o mouse continua");
+  }
+
+  assert.equal(attrOf(openingTag(markup, 'data-free-id="links"', "div"), "data-free-hover"), undefined);
+  assert.doesNotMatch(attrOf(openingTag(markup, 'data-free-id="links"', "div"), "style"), /--free-hover/);
+});
+
+test("cores ao passar o mouse (L6c): o botão perde o brilho e mantém o aperto, o anel de foco e a área de toque", () => {
+  const markup = card(hoverDesign());
+  const plain = classOf(openingTag(card(parsed({ children: [{ action: { kind: "cta" }, id: "x", type: "button" }, { id: "links", type: "links" }] })), 'data-free-id="x"'));
+
+  assert.match(plain, /(^| )hover:brightness-110( |$)/, "sem cores proprias, o brilho de sempre");
+
+  for (const id of ["botao", "fechar", "degrade"]) {
+    const className = classOf(openingTag(markup, `data-free-id="${id}"`));
+
+    assert.doesNotMatch(className, /brightness/, `${id}: o brilho mudaria as cores escolhidas`);
+    assert.doesNotMatch(className, /(^| )transition/, `${id}: a transicao vem da regra fixa do globals.css`);
+    assert.match(className, /(^| )active:translate-y-px( |$)/);
+    assert.match(className, /(^| )motion-reduce:active:translate-y-0( |$)/);
+    // O resto e o de sempre: o anel de foco do L6a, os 44 px de toque e o texto que nao se seleciona.
+    const pressOnly = styles.FREE_PRESS_CLASS.split(" ").filter((name) => !styles.FREE_PRESS_HOVER_CLASS.split(" ").includes(name));
+
+    assert.deepEqual(
+      className.split(" ").sort(),
+      plain
+        .split(" ")
+        .filter((name) => !pressOnly.includes(name))
+        .sort(),
+      `${id}: só sai o que é do brilho e da transição`
+    );
+    assert.ok(className.includes("focus-visible:[box-shadow:inset_0_0_0_4px_#000000b3]!"), `${id}: o anel de foco do L6a`);
+  }
+});
+
+test("cores ao passar o mouse (L6c): freeHoverAttrs não confia no design (sem o schema) e monta só cores e degradês", () => {
+  const button = (hover, extra = {}) => ({ action: { kind: "cta" }, hover, id: "b", type: "button", ...extra });
+  const attrs = (node, on = false) => styles.freeHoverAttrs(node, render.freeTextStyleOf(node), on);
+  const radial = { kind: "radial", stops: [{ at: 0, color: "#ffffff" }, { at: 100, color: "#000000" }], x: 30, y: 40 };
+
+  assert.deepEqual(attrs({ action: { kind: "cta" }, id: "b", type: "button" }), { attrs: {}, vars: {} }, "sem hover, nada");
+  assert.deepEqual(attrs(button({})), { attrs: {}, vars: {} }, "o objeto vazio, nada");
+  assert.deepEqual(attrs(button({}), true), { attrs: {}, vars: {} }, "sem cores, nem o estado da prévia");
+  assert.deepEqual(attrs(button({ color: "#ffffff" }, { textStyle: { paint: GRADIENT_PAINT } })), { attrs: {}, vars: {} }, "a cor com a letra em degradê nunca entra");
+  assert.deepEqual(attrs(button({ borderColor: "#ffffff" }, { box: { border: { color: "#000000", width: 0 } } })), { attrs: {}, vars: {} }, "borda de 0 px não aparece");
+  assert.deepEqual(attrs(button({ fill: radial })), {
+    attrs: { "data-free-hover": "fill", "data-free-hover-on": undefined },
+    vars: { "--free-hover-fill": styles.freeGradientCss(radial) }
+  });
+  assert.equal(attrs(button({ fill: radial })).vars["--free-hover-fill"], "radial-gradient(ellipse farthest-corner at 30% 40%, #ffffff 0%, #000000 100%)");
+  assert.deepEqual(attrs(button({ color: "#ffffff" }), true).attrs, { "data-free-hover": "color", "data-free-hover-on": "" }, "a prévia liga o estado");
+  // Os Links nunca tem fundo nem borda ao passar o mouse (o schema recusa; o cartao tambem nao desenha).
+  assert.deepEqual(attrs({ box: { border: { color: "#000000", width: 1 } }, hover: { borderColor: "#ffffff", color: "#ffffff", fill: radial }, id: "l", type: "links" }), {
+    attrs: { "data-free-hover": "color", "data-free-hover-on": undefined },
+    vars: { "--free-hover-color": "#ffffff" }
+  });
+
+  // As variaveis so levam uma cor validada ou um degrade montado dela: nada de url(, aspas ou ponto e virgula.
+  const all = attrs(button({ borderColor: "#00000080", color: "#ffffffcc", fill: HOVER_FILL }, { box: { border: { color: "#000000", width: 1 } } }));
+
+  assert.equal(all.attrs["data-free-hover"], "color border fill");
+
+  for (const value of Object.values(all.vars)) {
+    assert.match(value, /^(?:#[0-9a-f]{6}(?:[0-9a-f]{2})?|(?:linear|radial)-gradient\([a-z0-9#%., -]+\))$/);
+  }
+});
+
+test("cores ao passar o mouse (L6c): na prévia, o span leva os mesmos atributos e data-free-hover-on só no elemento escolhido", () => {
+  const design = hoverDesign();
+  const preview = (id, hoverPreviewId) => nodeHtml(design, id, { hoverPreviewId, preview: true });
+  const botao = openingTag(preview("botao", "botao"), 'data-free-button="cta"', "span");
+
+  // O palco do editor reage ao mouse como o aluno: o span da previa tem a lista e as variaveis.
+  assert.equal(attrOf(botao, "data-free-hover"), "color border fill");
+  assert.equal(varOf(botao, "fill"), "linear-gradient(90deg, #f2ff8a 0%, #d9f500 100%)");
+  assert.equal(attrOf(botao, "data-free-hover-on"), "", "Ver com o mouse em cima");
+  assert.equal(attrOf(openingTag(preview("botao", "fechar"), 'data-free-button="cta"', "span"), "data-free-hover-on"), undefined, "outro elemento escolhido");
+  assert.equal(attrOf(openingTag(preview("botao", null), 'data-free-button="cta"', "span"), "data-free-hover-on"), undefined, "nenhum escolhido");
+  assert.equal(attrOf(openingTag(preview("botao", null), 'data-free-button="cta"', "span"), "data-free-hover"), "color border fill");
+
+  for (const name of ["snooze", "dismiss"]) {
+    const link = openingTag(preview("links", "links"), `data-free-link="${name}"`, "span");
+
+    assert.equal(attrOf(link, "data-free-hover"), "color");
+    assert.equal(attrOf(link, "data-free-hover-on"), "");
+  }
+
+  // No aluno o estado da previa nunca entra, mesmo se alguem passar o id.
+  const student = openingTag(nodeHtml(design, "botao", { hoverPreviewId: "botao" }), 'data-free-button="cta"', "a");
+
+  assert.equal(attrOf(student, "data-free-hover"), "color border fill");
+  assert.equal(attrOf(student, "data-free-hover-on"), undefined);
+  // Sem cores proprias, o elemento escolhido nao ganha nada.
+  assert.doesNotMatch(preview("semborda", "semborda"), /data-free-hover/);
+});
+
+test("sem cores ao passar o mouse (L6c), o HTML do Livre é o de antes: nenhum atributo nem variável nova e o brilho de sempre", async () => {
+  const now = await livreBeforeCases();
+
+  assert.doesNotMatch(now, /data-free-hover|--free-hover/);
+  assert.ok((now.match(/hover:brightness-110/g) ?? []).length >= 4, "os botões do aluno com o brilho de 110 %");
+});
+
+/** As regras de um CSS minificado, cada uma com as @ de fora (sem os comentarios). */
+function cssRules(css) {
+  const rules = [];
+  const open = [];
+  let start = 0;
+
+  for (let index = 0; index < css.length; index += 1) {
+    const char = css[index];
+
+    if (char === "/" && css[index + 1] === "*") {
+      index = css.indexOf("*/", index + 2) + 1;
+      start = index + 1;
+    } else if (char === '"' || char === "'") {
+      index = css.indexOf(char, index + 1);
+    } else if (char === "{") {
+      if (open.length > 0) {
+        open.at(-1).parent = true;
+      }
+
+      open.push({ body: index + 1, parent: false, prelude: css.slice(start, index).split(";").pop().trim() });
+      start = index + 1;
+    } else if (char === "}") {
+      const block = open.pop();
+
+      if (!block.parent) {
+        rules.push({ at: open.map((outer) => outer.prelude), body: css.slice(block.body, index), selector: block.prelude });
+      }
+
+      start = index + 1;
+    }
+  }
+
+  return rules;
+}
+
+test("o CSS gerado tem o bloco Livre (L6c): fora de @layer, !important, o passar o mouse só com mouse, o foco com as mesmas cores e o fundo sem ladrilhos", async () => {
+  // O globals.css pelo mesmo compilador e o mesmo minificador do @tailwindcss/postcss do build.
+  const fromPlugin = createRequire(require.resolve("@tailwindcss/postcss"));
+  const { compile, optimize } = fromPlugin("@tailwindcss/node");
+  const cssFile = fileURLToPath(new URL("src/app/globals.css", root));
+  const compiler = await compile(readFileSync(cssFile, "utf8"), { base: fileURLToPath(new URL("src/app/", root)), onDependency() {} });
+  const { code } = optimize(compiler.build([]), { minify: true });
+  const rules = cssRules(code).filter((rule) => rule.selector.includes("data-free-hover"));
+  const declarations = (rule) => Object.fromEntries(rule.body.split(";").filter(Boolean).map((part) => [part.slice(0, part.indexOf(":")), part.slice(part.indexOf(":") + 1)]));
+  const find = (selector) => {
+    const found = rules.filter((rule) => rule.selector === selector);
+
+    assert.equal(found.length, 1, `uma regra ${selector}`);
+
+    return { at: found[0].at, css: declarations(found[0]) };
+  };
+  const HOVER_MEDIA = /^@media \(hover: ?hover\)$/;
+  const FILL = {
+    "background-image": "var(--free-hover-fill)!important",
+    "background-position": /^50%(?: 50%)?!important$/,
+    "background-repeat": "no-repeat!important",
+    "background-size": "100% 100%!important"
+  };
+  const checkFill = (css) => {
+    // C6: a primeira camada do botao pode ser uma imagem que se repete; o degrade nunca herda os ladrilhos dela.
+    assert.deepEqual(Object.keys(css).sort(), Object.keys(FILL));
+
+    for (const [property, value] of Object.entries(FILL)) {
+      assert.ok(typeof value === "string" ? css[property] === value : value.test(css[property]), `${property}: ${css[property]}`);
+    }
+  };
+
+  assert.equal(rules.length, 8, rules.map((rule) => rule.selector).join(" | "));
+  assert.deepEqual(rules.flatMap((rule) => rule.at).filter((at) => at.startsWith("@layer")), [], "fora de @layer: vence os utilitários");
+
+  // Passar o mouse: so dentro de @media (hover: hover), entao no toque nada fica preso.
+  for (const name of ["color", "border", "fill"]) {
+    const rule = find(`[data-free-hover~=${name}]:hover`);
+
+    assert.equal(rule.at.length, 1);
+    assert.match(rule.at[0], HOVER_MEDIA);
+  }
+
+  assert.deepEqual(find("[data-free-hover~=color]:hover").css, { color: "var(--free-hover-color)!important" });
+  assert.deepEqual(find("[data-free-hover~=border]:hover").css, { "border-color": "var(--free-hover-border)!important" });
+  checkFill(find("[data-free-hover~=fill]:hover").css);
+
+  // O foco pelo teclado e a previa do editor mostram as mesmas cores, sem depender do mouse.
+  const focus = (name) => find(`[data-free-hover~=${name}]:is(:focus-visible,[data-free-hover-on])`);
+
+  assert.deepEqual([focus("color").at, focus("border").at, focus("fill").at], [[], [], []]);
+  assert.deepEqual(focus("color").css, { color: "var(--free-hover-color)!important" });
+  assert.deepEqual(focus("border").css, { "border-color": "var(--free-hover-border)!important" });
+  checkFill(focus("fill").css);
+
+  // Cor, borda e o aperto em 150 ms; nada com menos movimento.
+  const transition = rules.filter((rule) => rule.selector === "[data-free-hover]");
+
+  assert.equal(transition.length, 2);
+  assert.deepEqual(transition[0].at, []);
+  assert.match(declarations(transition[0]).transition, /^color (?:\.15s|150ms),border-color (?:\.15s|150ms),translate (?:\.15s|150ms)$/);
+  assert.deepEqual(transition[1].at, ["@media (prefers-reduced-motion:reduce)"]);
+  assert.deepEqual(declarations(transition[1]), { transition: "none" });
+
+  // O anel de foco do L6a (sombra e contorno) continua por cima: o bloco nunca mexe neles. E so as variaveis do
+  // cartao, numeros e palavras fixas: nenhum url(.
+  for (const rule of rules) {
+    assert.doesNotMatch(rule.body, /box-shadow|outline|url\(/, rule.selector);
+    assert.doesNotMatch(rule.body.replace(/var\(--free-hover-(?:color|border|fill)\)/g, ""), /var\(/, rule.selector);
+  }
+});
 
 test("o primeiro título é o h2 e dá nome ao diálogo; sem título vale o nome do pop-up", () => {
   const ids = { bodyId: "b", titleId: "t" };
