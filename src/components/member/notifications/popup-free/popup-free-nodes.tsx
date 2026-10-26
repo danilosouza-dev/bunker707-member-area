@@ -27,11 +27,12 @@ import {
   freeBoxLayoutCss,
   freeButtonLayoutCss,
   freeDividerCss,
+  freeHollowColor,
   freeIconCss,
   freeLinksRowCss,
   freePlaceCss,
   freePointerEvents,
-  freeSpanCss,
+  freeSpanParts,
   freeStyleContext,
   freeTextCss,
   freeTextPaintCss,
@@ -117,13 +118,14 @@ export function freeRenderContextOf(input: {
 const ACTION_CLASS = cn(FREE_TOUCH_CLASS, FREE_FOCUS_CLASS, FREE_PRESS_CLASS, "select-none");
 const LINK_CLASS = cn(FREE_TOUCH_CLASS, FREE_FOCUS_CLASS, "rounded-sm underline-offset-4 hover:underline");
 
+/** As partes de uma linha: um span cada; com marca-texto e degrade, o de dentro leva so a pintura (freeSpanParts). */
 function FreeSpans({ ctx, line, text }: { ctx: FreeRenderContext; line: FreeLine; text: FreeResolvedTextStyle }) {
   return line.map((span, index) => {
-    const { gradient, style } = freeSpanCss(span.style, text, ctx.style);
+    const { inner, outer, select } = freeSpanParts(span.style, text, ctx.style);
 
     return (
-      <span className={gradient ? FREE_GRADIENT_SELECTION_CLASS : undefined} key={index} style={style}>
-        {span.text}
+      <span className={select ? FREE_GRADIENT_SELECTION_CLASS : undefined} key={index} style={outer}>
+        {inner ? <span style={inner}>{span.text}</span> : span.text}
       </span>
     );
   });
@@ -181,7 +183,8 @@ function ButtonView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderC
 
   const text = freeTextStyleOf(node);
   const style: CSSProperties = { ...base, ...freeTextCss(text, ctx.style), ...freeButtonLayoutCss(node) };
-  const icon = node.icon ? <FreeIcon name={node.icon.name} style={FREE_INLINE_ICON_CSS} /> : null;
+  // O icone desenha com currentColor: no texto vazado ("So o contorno"), na cor do contorno (freeHollowColor).
+  const icon = node.icon ? <FreeIcon name={node.icon.name} style={{ ...FREE_INLINE_ICON_CSS, color: freeHollowColor(text) }} /> : null;
   const side = node.icon?.side ?? "end";
   const { behavior, label } = resolved;
   const newTab = behavior.kind === "link" && behavior.link.newTab;
@@ -249,14 +252,15 @@ function LinksView({ base, ctx, node }: { base: CSSProperties; ctx: FreeRenderCo
   const text = freeTextStyleOf(node);
   const textCss = freeTextCss(text, ctx.style);
   // Sem linha escolhida, nenhuma linha em linha: o estilo em linha venceria o hover:underline de LINK_CLASS. Em
-  // degrade a letra e transparente, entao a linha (escolhida ou ao passar o mouse) usa a primeira parada (icones).
+  // degrade a letra e transparente, entao a linha (escolhida ou ao passar o mouse) usa a primeira parada (icones); no
+  // texto vazado, a cor do contorno.
   const linkStyle: CSSProperties = {
     ...FREE_LINK_RESET_CSS,
     ...textCss,
     textDecorationLine: text.decoration,
     ...labelPaintCss(text),
     textAlign: "center",
-    textDecorationColor: text.paint.kind === "solid" ? undefined : textCss.color
+    textDecorationColor: text.paint.kind === "solid" ? freeHollowColor(text) : textCss.color
   };
   const preview = ctx.style.preview;
   const link = (label: string, onClick: (() => void) | undefined, name: string) =>
@@ -330,7 +334,7 @@ export function FreeNodeView({ ctx, node, parentDir }: { ctx: FreeRenderContext;
 
       return (
         <span data-free-id={node.id} ref={ref} style={{ ...base, ...freeTextCss(text, s), ...FREE_BADGE_CSS }}>
-          {node.icon ? <FreeIcon name={node.icon} style={FREE_INLINE_ICON_CSS} /> : null}
+          {node.icon ? <FreeIcon name={node.icon} style={{ ...FREE_INLINE_ICON_CSS, color: freeHollowColor(text) }} /> : null}
           <span style={labelPaintCss(text)}>{node.label}</span>
         </span>
       );

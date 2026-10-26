@@ -1,8 +1,9 @@
 // Estilos do pop-up Livre (docs/27; spec §3.2): TODOS os objetos de estilo do cartao Livre, montados so a partir do
 // design ja validado (cores #RRGGBB/#RRGGBBAA, numeros com limite, escolhas de lista) e da origem conferida do
 // nosso Supabase. Nenhum texto do produtor entra em CSS: as unicas strings montadas sao degrades, sombras,
-// mascaras, rotate(), translate() (so a previa do arrastar no editor), `sizes` e url(); o url() sai so de
-// freeImageLayerUrl, com o endereco de freeAssetUrl (origem conferida + bucket + caminho do padrao).
+// mascaras, o contorno das letras (max(1px, cqw) e a cor), rotate(), translate() (so a previa do arrastar no editor),
+// `sizes` e url(); o url() sai so de freeImageLayerUrl, com o endereco de freeAssetUrl (origem conferida + bucket +
+// caminho do padrao).
 //
 // Modulo puro, sem React em tempo de execucao e com imports relativos: tests/popup-livre-desenho.test.mjs carrega
 // direto pelo Node. Importa so popup-free-render.ts e popup-design-model.ts (nunca popup-free-model.ts em tempo
@@ -25,15 +26,18 @@ import type {
   FreeFillPaint,
   FreeId,
   FreeImageAsset,
+  FreeMark,
   FreeNode,
   FreeShadow,
   FreeSides,
   FreeSpanStyle,
   FreeTextPaint,
+  FreeTextStroke,
   PopupFreeDesign
 } from "../../../../server/communications/popup-free-model";
 import {
   FREE_ARTBOARD_DEFAULTS,
+  FREE_MARK_DEFAULTS,
   freeArtboardMinHeight,
   freeAssetUrl,
   freeFontSize,
@@ -96,7 +100,7 @@ function num(value: number): string {
   return String(Math.round(value * 100) / 100);
 }
 
-function sidesCss(sides: FreeSides, width: number): string {
+function sidesCss(sides: FreeSides | readonly number[], width: number): string {
   if (typeof sides === "number") {
     return freeLength(sides, width);
   }
@@ -482,9 +486,40 @@ function paintBaseColor(paint: FreeTextPaint): HexColor {
 }
 
 /**
+ * Texto vazado (a letra solida com alfa 00 e contorno, o "So o contorno" do editor): a cor do contorno, para quem
+ * desenha com `currentColor` e sumiria junto com a letra (o icone do selo e do botao, a linha dos links ao passar o
+ * mouse). undefined em qualquer outro texto (o HTML de antes nao muda).
+ */
+export function freeHollowColor({ paint, stroke }: Pick<FreeResolvedTextStyle, "paint" | "stroke">): HexColor | undefined {
+  return stroke && paint.kind === "solid" && /^#.{6}00$/.test(paint.color) ? stroke.color : undefined;
+}
+
+/**
+ * Contorno das letras: a espessura em cqw (encolhe junto no celular) e nunca abaixo de 1 px real, pintado antes da
+ * cor (`paint-order`), entao a letra fina nao some. Sem contorno, nada entra no HTML.
+ */
+export function freeTextStrokeCss(stroke: FreeTextStroke | undefined, width: number): Pick<CSSProperties, "paintOrder" | "WebkitTextStroke"> | undefined {
+  return stroke && { paintOrder: "stroke fill", WebkitTextStroke: `max(1px, ${freeLength(stroke.width, width)}) ${stroke.color}` };
+}
+
+/**
+ * Marca-texto de uma parte: o fundo atras das letras, com respiro e cantos em cqw (sem escolha, FREE_MARK_DEFAULTS)
+ * e um fundo por linha quando a parte quebra (`box-decoration-break: clone`, tambem com o prefixo do Safari).
+ */
+export function freeMarkCss(mark: FreeMark, width: number): CSSProperties {
+  return {
+    backgroundColor: mark.color,
+    borderRadius: freeLength(mark.radius ?? FREE_MARK_DEFAULTS.radius, width),
+    boxDecorationBreak: "clone",
+    padding: sidesCss(mark.padding ?? FREE_MARK_DEFAULTS.padding, width),
+    WebkitBoxDecorationBreak: "clone"
+  };
+}
+
+/**
  * Tipografia do elemento (fonte pronta ou enviada, tamanho com piso de 12 px, peso, italico, altura da linha,
- * letras, maiusculas, linha no texto, alinhamento, sombra). A pintura em degrade vai nas partes (freeSpanCss); o
- * elemento fica com a primeira cor (icones).
+ * letras, maiusculas, linha no texto, alinhamento, sombra, contorno). A pintura em degrade vai nas partes
+ * (freeSpanParts); o elemento fica com a primeira cor (icones).
  */
 export function freeTextCss(style: FreeResolvedTextStyle, ctx: Pick<FreeStyleContext, "faces" | "width">): CSSProperties {
   const css: CSSProperties = {
@@ -508,22 +543,29 @@ export function freeTextCss(style: FreeResolvedTextStyle, ctx: Pick<FreeStyleCon
     css.textShadow = `${freeLength(x, ctx.width)} ${freeLength(y, ctx.width)} ${freeLength(blur, ctx.width)} ${color}`;
   }
 
-  return css;
+  return Object.assign(css, freeTextStrokeCss(style.stroke, ctx.width));
 }
 
 /**
- * Uma parte do texto: o que ela muda (cor ou degrade, fonte, tamanho, peso, italico, letras, maiusculas, linha).
- * Degrade (da parte ou do elemento) = background-clip: text no proprio span, com `gradient` true para a classe da
- * cor de selecao (o texto transparente ficaria invisivel quando selecionado).
+ * Uma parte do texto: o que ela muda (cor ou degrade, fonte, tamanho, peso, italico, letras, maiusculas, linha,
+ * contorno, marca-texto).
+ * - `outer`: o span da parte. Sem marca-texto e o estilo de antes do L6b (o HTML nao muda); degrade (da parte ou do
+ *   elemento) = background-clip: text no proprio span.
+ * - `inner`: so com marca-texto E degrade, que disputariam o fundo do span: o de fora leva a fonte e o marca-texto
+ *   (a caixa do tamanho da letra) e o de dentro so a pintura recortada pelas letras.
+ * - A linha propria da parte em degrade usa a primeira parada (a letra transparente apagaria a linha; a linha do
+ *   elemento inteiro ja vem do <h2>/<p>, que tem a primeira cor).
+ * - `select`: a classe da cor de selecao com degrade ou contorno (o texto transparente ou vazado sumiria selecionado).
  */
-export function freeSpanCss(
+export function freeSpanParts(
   span: FreeSpanStyle | undefined,
   element: FreeResolvedTextStyle,
   ctx: Pick<FreeStyleContext, "faces" | "width">
-): { gradient: boolean; style: CSSProperties | undefined } {
+): { inner: CSSProperties | undefined; outer: CSSProperties | undefined; select: boolean } {
   const paint = span?.paint ?? element.paint;
   const gradient = paint.kind !== "solid";
-  const css: CSSProperties = gradient ? freeTextPaintCss(paint) : span?.paint ? { color: paint.color } : {};
+  const inner = gradient && span?.mark ? freeTextPaintCss(paint) : undefined;
+  const css: CSSProperties = inner ? {} : gradient ? freeTextPaintCss(paint) : span?.paint ? { color: paint.color } : {};
 
   if (span) {
     if (span.font) {
@@ -553,13 +595,19 @@ export function freeSpanCss(
 
     if (span.decoration !== undefined) {
       css.textDecorationLine = span.decoration;
+
+      if (gradient) {
+        css.textDecorationColor = paintBaseColor(paint);
+      }
     }
+
+    Object.assign(css, freeTextStrokeCss(span.stroke, ctx.width), span.mark && freeMarkCss(span.mark, ctx.width));
   }
 
-  return { gradient, style: Object.keys(css).length > 0 ? css : undefined };
+  return { inner, outer: Object.keys(css).length > 0 ? css : undefined, select: gradient || !!(span?.stroke ?? element.stroke) };
 }
 
-/** Classe estatica das partes em degrade: a selecao aparece (fundo claro, letra escura). */
+/** Classe estatica das partes em degrade ou com contorno: a selecao aparece (fundo claro, letra escura). */
 export const FREE_GRADIENT_SELECTION_CLASS = "selection:bg-white/80 selection:text-black selection:[-webkit-text-fill-color:#000]";
 
 /** Uma linha do titulo: um span em bloco (as partes ficam lado a lado dentro dele). */
