@@ -1711,13 +1711,25 @@ test("L6c: a chave Ver com o mouse em cima liga e desliga o palco, sem mudar o d
   assert.equal(parada.props.disabled, true);
   assert.equal(parada.props.checked, false);
   assert.equal(parada.props.description, C.hover.previewEmpty);
-  assert.equal(panel.freeHoverPreviewDisabledReason(model.findFreeNode(semCor, "fechar").node), C.hover.previewEmpty);
-  assert.equal(panel.freeHoverPreviewDisabledReason(model.findFreeNode(comCor, "fechar").node), null);
+  assert.equal(panel.freeHoverPreviewDisabledReason(model.findFreeNode(semCor, "fechar").node, "desktop"), C.hover.previewEmpty);
+  assert.equal(panel.freeHoverPreviewDisabledReason(model.findFreeNode(comCor, "fechar").node, "desktop"), null);
 
-  // A chave continua ligada só com o mesmo elemento sozinho, com cor própria e com o painel do elemento aberto: volta ao
-  // normal ao trocar de elemento, com vários, no Revisar e quando a última cor volta ao padrão (ou sai pelo Ctrl + Z).
-  const now = { activeId: "fechar", hasHover: true, many: false, panel: "inspector" };
+  // Com Ver como: Celular, o palco desenha o celular, onde não tem mouse: a chave fica parada, com o motivo, e nunca
+  // aparece ligada (o aluno no celular nunca vê as cores ao passar o mouse).
+  assert.equal(C.hover.previewMobile, "No celular não tem mouse. Para ver aqui, use Ver como: Computador.");
+  assert.equal(panel.freeHoverPreviewDisabledReason(model.findFreeNode(comCor, "fechar").node, "mobile"), C.hover.previewMobile);
+  assert.equal(panel.freeHoverPreviewDisabledReason(model.findFreeNode(semCor, "fechar").node, "mobile"), C.hover.previewEmpty, "sem cor, o motivo de sempre");
+  const noCelular = elementById(FreeInspectorStyle(hoverProps(comCor, "fechar", [], [], { device: "mobile", hoverPreview: true })), "livre-fechar-passar-mouse-ver");
+  assert.equal(noCelular.props.disabled, true);
+  assert.equal(noCelular.props.checked, false);
+  assert.equal(noCelular.props.description, C.hover.previewMobile);
+
+  // A chave continua ligada só com o mesmo elemento sozinho, com cor própria, com o painel do elemento aberto e com Ver
+  // como: Computador: volta ao normal ao trocar de elemento, com vários, no Revisar, no Celular e quando a última cor
+  // volta ao padrão (ou sai pelo Ctrl + Z). Sair do Estilo também desliga (o painel, logo abaixo).
+  const now = { activeId: "fechar", device: "desktop", hasHover: true, many: false, panel: "inspector" };
   assert.equal(panel.freeHoverPreviewAfter("fechar", now), "fechar");
+  assert.equal(panel.freeHoverPreviewAfter("fechar", { ...now, device: "mobile" }), null, "Ver como: Celular");
   assert.equal(panel.freeHoverPreviewAfter(null, now), null);
   assert.equal(panel.freeHoverPreviewAfter("fechar", { ...now, activeId: "links" }), null, "outro elemento");
   assert.equal(panel.freeHoverPreviewAfter("fechar", { ...now, activeId: null }), null, "nada escolhido (ou o elemento saiu)");
@@ -1731,7 +1743,11 @@ test("L6c: a chave Ver com o mouse em cima liga e desliga o palco, sem mudar o d
   const canvas = readFileSync(new URL("../src/components/admin/v2/communication/popup-free/free-canvas.tsx", import.meta.url), "utf8");
   assert.match(inspector, /hoverPreview: hoverPreviewId === node\.id,/);
   assert.match(inspector, /onHoverPreviewChange: \(on\) => onHoverPreviewChange\?\.\(on \? node\.id : null\)/);
-  assert.match(editor, /freeHoverPreviewAfter\(hoverPreviewId, \{ activeId, hasHover: freeHasHover\(selectedNode\), many, panel: rightPanel \}\)/);
+  assert.match(inspector, /const sectionProps: FreeSectionProps = \{[^}]*\sdevice,/, "o Estilo sabe o aparelho do Ver como");
+  // Em outra aba a chave some: o painel desliga a prévia ao sair do Estilo (por clique, pelo foco de um erro ou pela
+  // aba Celular).
+  assert.match(inspector, /useEffect\(\(\) => \{\s+if \(tab !== "style" && hoverPreviewId !== null\) \{\s+onHoverPreviewChangeRef\.current\?\.\(null\);\s+\}\s+\}, \[hoverPreviewId, onHoverPreviewChangeRef, tab\]\);/);
+  assert.match(editor, /freeHoverPreviewAfter\(hoverPreviewId, \{ activeId, device, hasHover: freeHasHover\(selectedNode\), many, panel: rightPanel \}\)/);
   assert.match(editor, /hoverPreviewId=\{hoverPreviewId\}\s+onBusyChange=/);
   assert.match(editor, /onHoverPreviewChange=\{setHoverPreviewId\}/);
   assert.match(editor, /hoverPreviewId=\{hoverPreviewId\}\s+onCommitMoves=/);

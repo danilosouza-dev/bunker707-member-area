@@ -350,10 +350,10 @@ function HoverReset({ disabled, fieldId, label, onReset }: { disabled: boolean; 
  * campo sem escolha mostra a cor de sempre e só grava ao mudar (as chaves do histórico `<id>:hover.fill`,
  * `<id>:hover.color` e `<id>:hover.borderColor` juntam os passos seguidos); "Voltar ao padrão" tira a escolha num
  * passo próprio. A Cor do texto fica parada com a letra em degradê, e a Cor da borda, sem borda. Os erros e a dica de
- * contraste do Revisar ficam no campo de cada um. A chave "Ver com o mouse em cima" só muda o palco do editor. Sem
- * ganchos: os testes abrem a função na mão.
+ * contraste do Revisar ficam no campo de cada um. A chave "Ver com o mouse em cima" só muda o palco do editor e fica
+ * parada com "Ver como: Celular" (lá não tem mouse). Sem ganchos: os testes abrem a função na mão.
  */
-function HoverSection({ design, disabled, errors, hints, hoverPreview = false, node, onChange, onHoverPreviewChange }: FreeSectionProps & { node: FreeHoverNode }) {
+function HoverSection({ design, device = "desktop", disabled, errors, hints, hoverPreview = false, node, onChange, onHoverPreviewChange }: FreeSectionProps & { node: FreeHoverNode }) {
   const F = FREE_HOVER_FIELDS;
   const id = (field: string) => freeFieldId(node.id, field);
   const sectionId = id(F.group);
@@ -369,7 +369,7 @@ function HoverSection({ design, disabled, errors, hints, hoverPreview = false, n
   const colorLabel = button ? C.hover.color : C.hover.linksColor;
   const colorReason = freeHoverColorDisabledReason(node);
   const borderNote = freeHoverBorderNote(node);
-  const previewReason = freeHoverPreviewDisabledReason(node);
+  const previewReason = freeHoverPreviewDisabledReason(node, device);
   // O erro do objeto inteiro; os de cada cor ficam nos campos delas.
   const sectionError = error("fill") || error("color") || error("borderColor") ? undefined : error();
 

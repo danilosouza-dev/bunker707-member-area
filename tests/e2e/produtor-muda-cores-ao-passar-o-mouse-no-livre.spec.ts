@@ -23,7 +23,8 @@ import {
 // cores próprias clareia, deixa a Cor da borda parada (sem borda) e a chave "Ver com o mouse em cima" parada até haver
 // uma cor. O Fundo (um vermelho escuro) e a Cor do texto (um amarelo claro) gravam um passo cada; com a chave ligada
 // pelo Espaço, o palco mostra as duas cores sem o mouse. Ctrl + Z volta só a Cor do texto (a chave continua ligada,
-// o Fundo fica) e Ctrl + Shift + Z refaz. Ao escolher os Links, a chave volta a Normal; nos Links só existe a Cor
+// o Fundo fica) e Ctrl + Shift + Z refaz. Sair do Estilo desliga a chave, e com Ver como: Celular ela fica parada (no
+// celular não tem mouse). Ao escolher os Links, a chave volta a Normal; nos Links só existe a Cor
 // (sem Fundo nem borda). Com a chave desligada, o mouse no palco mostra as cores como o aluno vê. Salvar rascunho
 // grava as cores na forma canônica (sem a cor da borda nem nada no celular), lidas do banco. No segundo teste, um
 // Botão solto com cores ao passar o mouse, arrastado até perto do fim da prancheta: no palco ele não anima (é o span da
@@ -152,6 +153,41 @@ test("cores ao passar o mouse no Estilo: a seção, Ver com o mouse em cima, um 
     await expect(falado(editor)).toHaveText("Refeito.");
     await expect(corDoTexto).toHaveValue(AMARELO_CLARO.hex);
     await expect.poll(async () => (await coresDe(botaoNoPalco)).letra).toBe(AMARELO_CLARO.rgb);
+  });
+
+  await test.step("sair do Estilo desliga a chave; com Ver como: Celular ela fica parada, com o motivo", async () => {
+    const verComputador = editor.getByRole("button", { exact: true, name: "Computador" });
+    const verCelular = editor.getByRole("button", { exact: true, name: "Celular" });
+
+    // Na aba Conteúdo a chave não aparece: o palco volta ao normal, e o Estilo de novo mostra a chave desligada.
+    await expect(verComOMouse).toHaveAttribute("aria-checked", "true");
+    await editor.getByRole("tab", { exact: true, name: "Conteúdo" }).click();
+    await expect(botaoNoPalco).not.toHaveAttribute("data-free-hover-on", "");
+    await editor.getByRole("tab", { exact: true, name: "Estilo" }).click();
+    await secao.scrollIntoViewIfNeeded();
+    await expect(verComOMouse).toHaveAttribute("aria-checked", "false");
+    await expect.poll(async () => (await coresDe(botaoNoPalco)).letra).toBe(BRANCO);
+
+    // Ligada de novo, o Ver como: Celular desliga: no celular não tem mouse, e a chave fica parada até o Computador.
+    await verComOMouse.focus();
+    await page.keyboard.press("Space");
+    await expect(botaoNoPalco).toHaveAttribute("data-free-hover-on", "");
+    await verCelular.click();
+    await expect(verCelular).toHaveAttribute("aria-pressed", "true");
+    await expect(botaoNoPalco).not.toHaveAttribute("data-free-hover-on", "");
+    await expect(verComOMouse).toBeDisabled();
+    await expect(verComOMouse).toHaveAttribute("aria-checked", "false");
+    await expect(secao.getByText("No celular não tem mouse. Para ver aqui, use Ver como: Computador.")).toBeVisible();
+    await verComputador.click();
+    await expect(verComputador).toHaveAttribute("aria-pressed", "true");
+    await expect(verComOMouse).toBeEnabled();
+    await expect(verComOMouse).toHaveAttribute("aria-checked", "false");
+    await expect(botaoNoPalco).not.toHaveAttribute("data-free-hover-on", "");
+
+    // Ligada outra vez para o passo seguinte (escolher outro elemento também desliga).
+    await verComOMouse.focus();
+    await page.keyboard.press("Space");
+    await expect(botaoNoPalco).toHaveAttribute("data-free-hover-on", "");
   });
 
   await test.step("ao escolher os Links, a chave volta a Normal; nos Links só existe a Cor", async () => {

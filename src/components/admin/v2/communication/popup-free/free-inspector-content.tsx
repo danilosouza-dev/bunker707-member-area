@@ -58,6 +58,8 @@ const C = FREE_INSPECTOR_COPY;
 export type FreeSectionProps = {
   content: FreeEditorContent;
   design: PopupFreeDesign;
+  /** O aparelho do "Ver como" (L6c: com Celular, a chave "Ver com o mouse em cima" fica parada). Padrao: computador. */
+  device?: "desktop" | "mobile";
   disabled: boolean;
   errors: Readonly<Record<string, string>>;
   fonts: readonly PopupFontOption[];

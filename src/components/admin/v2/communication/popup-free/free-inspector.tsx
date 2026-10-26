@@ -112,6 +112,7 @@ export function FreeInspector(props: FreeInspectorProps) {
   const latest = useCallback(() => designRef.current, [designRef]);
   const onFocusHandledRef = useLatest(onFocusHandled);
   const onCommandRef = useLatest(onCommand);
+  const onHoverPreviewChangeRef = useLatest(onHoverPreviewChange);
 
   // Pedido de foco novo: descobre o elemento, a aba e o campo (estado deste painel, decidido no render).
   if (focusRequest !== seenRequest) {
@@ -165,6 +166,14 @@ export function FreeInspector(props: FreeInspectorProps) {
     return () => window.cancelAnimationFrame(frame);
   }, [onCommandRef, onFocusHandledRef, pending, selectedId, tab]);
 
+  // "Ver com o mouse em cima" (L6c) so existe no Estilo: em outra aba (por clique, pelo foco de um erro ou pela aba
+  // Celular) a chave some e o palco volta ao normal.
+  useEffect(() => {
+    if (tab !== "style" && hoverPreviewId !== null) {
+      onHoverPreviewChangeRef.current?.(null);
+    }
+  }, [hoverPreviewId, onHoverPreviewChangeRef, tab]);
+
   const change = useCallback(
     (next: PopupFreeDesign, field?: string) => {
       onChange(next, field ? { coalesceKey: `${selectedId ?? "@popup"}:${field}` } : undefined);
@@ -202,6 +211,7 @@ export function FreeInspector(props: FreeInspectorProps) {
   const sectionProps: FreeSectionProps = {
     content,
     design,
+    device,
     disabled,
     errors,
     fonts,

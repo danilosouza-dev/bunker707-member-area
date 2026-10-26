@@ -238,6 +238,8 @@ export const FREE_INSPECTOR_COPY = {
     note: "Vale também quando o aluno chega pelo teclado. No celular não tem mouse.",
     preview: "Ver com o mouse em cima",
     previewEmpty: "Escolha uma cor acima para ver aqui.",
+    /** Com "Ver como: Celular", o palco desenha o celular, onde o aluno nunca vê as cores ao passar o mouse. */
+    previewMobile: "No celular não tem mouse. Para ver aqui, use Ver como: Computador.",
     previewNote: "Só para você ver aqui. Não muda o pop-up.",
     reset: "Voltar ao padrão",
     /** O nome falado de cada "Voltar ao padrão" (o texto na tela é o mesmo nos três). */
@@ -1511,19 +1513,26 @@ export function freeHoverBorderNote(node: FreeHoverNode): string | null {
   return node.type === "button" && !node.box?.border ? FREE_INSPECTOR_COPY.hover.borderNone : null;
 }
 
-/** Por que a chave "Ver com o mouse em cima" fica parada: sem cor própria, o palco não tem o que mostrar. null = livre. */
-export function freeHoverPreviewDisabledReason(node: FreeNode): string | null {
-  return freeHasHover(node) ? null : FREE_INSPECTOR_COPY.hover.previewEmpty;
+/**
+ * Por que a chave "Ver com o mouse em cima" fica parada: sem cor própria, o palco não tem o que mostrar; com "Ver como:
+ * Celular", o palco desenha o celular, onde não tem mouse. null = livre.
+ */
+export function freeHoverPreviewDisabledReason(node: FreeNode, device: "desktop" | "mobile"): string | null {
+  return !freeHasHover(node) ? FREE_INSPECTOR_COPY.hover.previewEmpty : device === "mobile" ? FREE_INSPECTOR_COPY.hover.previewMobile : null;
 }
 
 /**
  * A chave "Ver com o mouse em cima" (não salva, fora do histórico) depois de uma mudança no editor: continua ligada só
- * com o mesmo elemento escolhido sozinho, com alguma cor própria e com o painel do elemento aberto. Volta ao normal ao
- * trocar de elemento, com vários escolhidos, no Revisar e quando a última cor volta ao padrão (ou sai pelo Ctrl + Z).
+ * com o mesmo elemento escolhido sozinho, com alguma cor própria, com o painel do elemento aberto e com "Ver como:
+ * Computador". Volta ao normal ao trocar de elemento, com vários escolhidos, no Revisar, no Celular (lá não tem mouse)
+ * e quando a última cor volta ao padrão (ou sai pelo Ctrl + Z). Sair da aba Estilo também desliga (o painel avisa).
  * null = desligada.
  */
-export function freeHoverPreviewAfter(previewId: FreeId | null, now: { activeId: FreeId | null; hasHover: boolean; many: boolean; panel: "inspector" | "review" }): FreeId | null {
-  return previewId !== null && previewId === now.activeId && now.hasHover && !now.many && now.panel === "inspector" ? previewId : null;
+export function freeHoverPreviewAfter(
+  previewId: FreeId | null,
+  now: { activeId: FreeId | null; device: "desktop" | "mobile"; hasHover: boolean; many: boolean; panel: "inspector" | "review" }
+): FreeId | null {
+  return previewId !== null && previewId === now.activeId && now.device === "desktop" && now.hasHover && !now.many && now.panel === "inspector" ? previewId : null;
 }
 
 /** A chave (de erro ou de dica) é do "Ao passar o mouse" de um elemento: `nodes.<id>.hover...`, com ou sem "freeDesign.". */

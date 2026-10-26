@@ -1001,10 +1001,11 @@ function FreeEditorSession({
   const inspectorId = many ? heldInspectorId : activeId;
 
   // "Ver com o mouse em cima" (L6c): o palco mostra as cores ao passar o mouse do elemento escolhido. Nao salva e fica
-  // fora do historico; volta ao normal ao trocar de elemento, com varios escolhidos, no Revisar (o painel some) e sem
-  // cor propria (freeHoverPreviewAfter).
+  // fora do historico; volta ao normal ao trocar de elemento, com varios escolhidos, no Revisar (o painel some), com
+  // "Ver como: Celular" (la nao tem mouse) e sem cor propria (freeHoverPreviewAfter); fora da aba Estilo, o painel
+  // desliga.
   const [hoverPreviewId, setHoverPreviewId] = useState<FreeId | null>(null);
-  const keptHoverPreviewId = freeHoverPreviewAfter(hoverPreviewId, { activeId, hasHover: freeHasHover(selectedNode), many, panel: rightPanel });
+  const keptHoverPreviewId = freeHoverPreviewAfter(hoverPreviewId, { activeId, device, hasHover: freeHasHover(selectedNode), many, panel: rightPanel });
 
   if (keptHoverPreviewId !== hoverPreviewId) {
     setHoverPreviewId(keptHoverPreviewId);
