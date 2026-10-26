@@ -2,7 +2,20 @@ import type { Locator } from "@playwright/test";
 import { FREE_HISTORY_COALESCE_MS } from "../../src/components/admin/v2/communication/popup-free/free-editor-history";
 import type { FreeNode } from "../../src/server/communications/popup-free-model";
 import { expect, test, zerarComunicacao } from "./fixtures";
-import { SESSAO_DO_PRODUTOR, TELA_DO_EDITOR, abrirEditorLivre, botaoDaCamada, falado, gravarRascunhoLivre, lerDesignDoAviso, noPalco } from "./popup-livre-editor-fixtures";
+import {
+  SESSAO_DO_PRODUTOR,
+  TELA_DO_EDITOR,
+  abrirEditorLivre,
+  arrastar,
+  botaoDaCamada,
+  caixaParada,
+  centroDe,
+  falado,
+  gravarRascunhoLivre,
+  lerDesignDoAviso,
+  noPalco,
+  prancheta
+} from "./popup-livre-editor-fixtures";
 
 // Livre: as cores ao passar o mouse no Estilo do Botão e dos Links (docs/27 §13.11.3, L6c; docs/18 §3.1). Num rascunho
 // com [Título, Botão principal vermelho sem borda, Links] (o Botão principal semeado com o botao do aviso BOTAO), o
@@ -12,8 +25,11 @@ import { SESSAO_DO_PRODUTOR, TELA_DO_EDITOR, abrirEditorLivre, botaoDaCamada, fa
 // pelo Espaço, o palco mostra as duas cores sem o mouse. Ctrl + Z volta só a Cor do texto (a chave continua ligada,
 // o Fundo fica) e Ctrl + Shift + Z refaz. Ao escolher os Links, a chave volta a Normal; nos Links só existe a Cor
 // (sem Fundo nem borda). Com a chave desligada, o mouse no palco mostra as cores como o aluno vê. Salvar rascunho
-// grava as cores na forma canônica (sem a cor da borda nem nada no celular), lidas do banco. Funciona no WebKit: o
-// foco posto antes de cada tecla, o mouse sempre dentro da janela e as esperas pela tela antes de ler o banco.
+// grava as cores na forma canônica (sem a cor da borda nem nada no celular), lidas do banco. No segundo teste, um
+// Botão solto com cores ao passar o mouse, arrastado até perto do fim da prancheta: no palco ele não anima (é o span da
+// prévia; a transição é só do aluno), fica onde foi solto desde o primeiro quadro e o Revisar mede onde ele ficou, sem
+// a dica de corte. Funciona no WebKit: o foco posto antes de cada tecla, o mouse sempre dentro da janela, as medidas
+// depois de o palco parar e as esperas pela tela antes de ler o banco.
 
 const TITULO = "Pop-up E2E: o produtor muda as cores ao passar o mouse no Livre";
 /** O botao do aviso que entra com o Botão principal do design (gravarRascunhoLivre so grava com o principal). */
@@ -28,15 +44,34 @@ const CHILDREN: FreeNode[] = [
   { action: { kind: "cta" }, box: { fill: [{ color: VERMELHO.hex, kind: "solid" }], padding: [12, 24], radius: 999 }, id: "botao", type: "button" },
   { id: "links", type: "links" }
 ];
+const TITULO_SOLTO = "Pop-up E2E: o Botão solto com cores ao passar o mouse no palco do Livre";
+/** Um Título de três linhas (a prancheta alta), o Botão principal solto perto do topo, com cores ao passar o mouse, e os Links. */
+const CHILDREN_SOLTO: FreeNode[] = [
+  { id: "titulo", lines: [[{ text: "Aula nova no ar" }], [{ text: "com cores" }], [{ text: "ao passar o mouse" }]], type: "heading" },
+  {
+    action: { kind: "cta" },
+    box: { fill: [{ color: VERMELHO.hex, kind: "solid" }], padding: [12, 24], radius: 999 },
+    hover: { color: "#111111", fill: { color: "#ffffff", kind: "solid" } },
+    id: "botao",
+    place: { mode: "free", w: 160, x: 40, y: 20 },
+    type: "button"
+  },
+  { id: "links", type: "links" }
+];
+
+/** A caixa do Botão no palco em cada quadro depois de soltar (gravada pela página, em px de tela). */
+type QuadrosDoBotao = { quadrosDoBotao?: { x: number; y: number }[] };
 
 test.describe.configure({ mode: "serial" });
 test.use({ storageState: SESSAO_DO_PRODUTOR, viewport: TELA_DO_EDITOR });
 
 let avisoId = "";
+let avisoSoltoId = "";
 
 test.beforeAll(async () => {
   await zerarComunicacao();
   avisoId = await gravarRascunhoLivre(TITULO, CHILDREN, { botao: { ...BOTAO } });
+  avisoSoltoId = await gravarRascunhoLivre(TITULO_SOLTO, CHILDREN_SOLTO, { botao: { ...BOTAO } });
 });
 
 test.afterAll(zerarComunicacao);
@@ -167,5 +202,80 @@ test("cores ao passar o mouse no Estilo: a seção, Ver com o mouse em cima, um 
     expect(botao?.type === "button" ? botao.hover : null).toEqual({ color: AMARELO_CLARO.hex, fill: { color: VERMELHO_ESCURO.hex, kind: "solid" } });
     expect(links?.type === "links" ? links.hover : null).toEqual({ color: LIMAO });
     expect(gravado?.devices).toBeUndefined();
+  });
+});
+
+test("no palco, o Botão solto com cores ao passar o mouse fica onde foi solto e o Revisar mede onde ele ficou", async ({ page }) => {
+  test.setTimeout(120_000);
+  const editor = await abrirEditorLivre(page, avisoSoltoId);
+  const botaoNoPalco = noPalco(editor, "botao");
+
+  await test.step("no palco, o Botão é o span da prévia, com as cores ao passar o mouse e sem transição", async () => {
+    await botaoDaCamada(editor, "botao").click();
+    await expect(editor.locator("[data-free-selection]")).toHaveAttribute("data-free-selection", "botao");
+    await expect(botaoNoPalco).toHaveAttribute("data-free-hover", "color fill");
+    // A transição de 150 ms é só do <a> e do <button> do aluno: o arrastar move o span por translate.
+    expect(await botaoNoPalco.evaluate((element) => [element.tagName, getComputedStyle(element).transitionDuration])).toEqual(["SPAN", "0s"]);
+  });
+
+  await test.step("arrastado até perto do fim da prancheta, o botão fica onde foi solto desde o primeiro quadro", async () => {
+    const caixa = await caixaParada(botaoNoPalco);
+    const folha = await caixaParada(prancheta(editor));
+    const de = centroDe(caixa);
+    // O fim do botão a 24 px de tela do fim da prancheta, dentro dela.
+    const para = { x: de.x, y: de.y + (folha.y + folha.height - 24) - (caixa.y + caixa.height) };
+
+    await arrastar(page, de, para, {
+      antesDeSoltar: () =>
+        page.evaluate(() => {
+          const pagina = window as Window & QuadrosDoBotao;
+          const quadros: { x: number; y: number }[] = [];
+
+          pagina.quadrosDoBotao = quadros;
+          window.addEventListener(
+            "pointerup",
+            () => {
+              const quadro = () => {
+                const rect = document.querySelector("[data-free-canvas-card] [data-free-id='botao']")?.getBoundingClientRect();
+
+                if (rect) {
+                  quadros.push({ x: rect.x, y: rect.y });
+                }
+
+                if (quadros.length < 12) {
+                  requestAnimationFrame(quadro);
+                }
+              };
+
+              requestAnimationFrame(quadro);
+            },
+            { capture: true, once: true }
+          );
+        })
+    });
+
+    const fim = await caixaParada(botaoNoPalco);
+    const quadros = await page.evaluate(() => (window as Window & QuadrosDoBotao).quadrosDoBotao ?? []);
+    const folhaDepois = await caixaParada(prancheta(editor));
+    const selecao = await caixaParada(editor.locator("[data-free-selection]"));
+
+    expect(quadros.length).toBeGreaterThan(0);
+
+    // Sem a transição, nenhum quadro mostra o botão escorregando do lugar do arrastar para o novo.
+    for (const quadro of quadros) {
+      expect(Math.abs(quadro.x - fim.x), `x de um quadro: ${quadro.x} contra ${fim.x}`).toBeLessThanOrEqual(1.5);
+      expect(Math.abs(quadro.y - fim.y), `y de um quadro: ${quadro.y} contra ${fim.y}`).toBeLessThanOrEqual(1.5);
+    }
+
+    expect(fim.y + fim.height).toBeLessThan(folhaDepois.y + folhaDepois.height);
+    // A seleção (do retângulo medido) por cima do botão desenhado.
+    expect(Math.abs(selecao.y - fim.y)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(selecao.x - fim.x)).toBeLessThanOrEqual(1.5);
+  });
+
+  await test.step("o Revisar mede o botão onde ele ficou: nenhuma dica de corte", async () => {
+    await editor.locator("[data-free-review-toggle]").click();
+    await expect(editor.locator("[data-free-review-back]")).toBeVisible();
+    await expect(editor.getByText(/está cortado no fim do pop-up/)).toHaveCount(0);
   });
 });

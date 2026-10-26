@@ -1512,9 +1512,11 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
  * foco pelo teclado mostra as mesmas cores, e o anel de foco do cartao continua por cima (nada aqui mexe na sombra
  * nem no contorno). O fundo fixa tamanho, lugar e repeticao: a primeira camada do botao pode ser uma imagem que se
  * repete, e o degrade herdaria os ladrilhos dela. data-free-hover-on: a previa do editor ("Ver com o mouse em cima").
- * Cor, borda e o aperto mudam em 150 ms (sem animacao com menos movimento); o fundo troca na hora.
+ * Cor, borda e o aperto mudam em 150 ms (sem animacao com menos movimento); o fundo troca na hora. A transicao so no
+ * <a> e no <button> do aluno: na previa do editor o Botao e os Links sao <span>, e o arrastar move o span por
+ * translate (com a transicao, o botao ficaria para tras do ponteiro e o palco mediria no meio do caminho).
  */
-[data-free-hover] {
+:is(a, button)[data-free-hover] {
   transition:
     color 150ms,
     border-color 150ms,
@@ -1522,7 +1524,7 @@ html[data-vt-module-focus]::view-transition-old(module-lesson-panel):only-child 
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-free-hover] {
+  :is(a, button)[data-free-hover] {
     transition: none;
   }
 }

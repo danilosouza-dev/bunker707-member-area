@@ -1150,10 +1150,30 @@ test("o CSS gerado tem o bloco Livre (L6c): fora de @layer, !important, o passar
   assert.deepEqual(focus("border").css, { "border-color": "var(--free-hover-border)!important" });
   checkFill(focus("fill").css);
 
-  // Cor, borda e o aperto em 150 ms; nada com menos movimento.
-  const transition = rules.filter((rule) => rule.selector === "[data-free-hover]");
+  // Cor, borda e o aperto em 150 ms so nos controles do aluno (o <a> e o <button>); nada com menos movimento. Na previa
+  // do editor o Botao e os Links sao <span>, e o arrastar move o span por `translate` (freePlaceCss): com a transicao,
+  // o botao ficaria para tras do ponteiro, saltaria ao soltar e o palco mediria no meio do caminho (a dica de corte
+  // do Revisar sem corte nenhum).
+  const transition = rules.filter((rule) => "transition" in declarations(rule));
+  /** Se o seletor de uma regra vale para um elemento com esta etiqueta (`:is(a,button)[x]`, `a[x]` ou sem etiqueta). */
+  const valeParaEtiqueta = (selector, tag) => {
+    const is = /^:is\(([a-z,]+)\)/.exec(selector);
+    const type = /^([a-z]+)/.exec(selector);
+
+    return is ? is[1].split(",").includes(tag) : type ? type[1] === tag : true;
+  };
 
   assert.equal(transition.length, 2);
+
+  for (const rule of transition) {
+    assert.deepEqual(
+      ["a", "button", "span"].map((tag) => valeParaEtiqueta(rule.selector, tag)),
+      [true, true, false],
+      `${rule.selector}: so o <a> e o <button> do aluno, nunca o <span> da previa`
+    );
+  }
+
+  assert.equal(transition[1].selector, transition[0].selector, "menos movimento com o mesmo peso de seletor");
   assert.deepEqual(transition[0].at, []);
   assert.match(declarations(transition[0]).transition, /^color (?:\.15s|150ms),border-color (?:\.15s|150ms),translate (?:\.15s|150ms)$/);
   assert.deepEqual(transition[1].at, ["@media (prefers-reduced-motion:reduce)"]);
