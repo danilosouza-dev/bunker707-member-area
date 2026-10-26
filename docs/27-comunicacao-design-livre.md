@@ -292,7 +292,7 @@ As partes 9.2 a 9.6, 9.8, 9.9 e 9.10 viram as instruções para a IA (§13.1), q
 - Validação estrita no navegador do editor, na Server Action ao salvar e na leitura do banco: chave a mais é recusada em qualquer nível (inclusive `url` num arquivo e qualquer chave dentro de `devices` fora da §9.10).
 - Livre inválido no banco (só com edição direta ou depois de voltar um deploy): **não aparece para o aluno** (sai da lista no ar com o log `[comunicacao] design livre invalido <id do aviso>`, nunca o conteúdo) e abre como Padrão no editor do aviso.
 - O que se grava é sempre a **forma canônica** (`canonicalPopupFreeDesign`): sem o que é igual ao padrão (§9.4), cores em minúsculas, px e ângulos inteiros, altura da linha, espaço entre letras e traço do ícone com 2 casas, paradas do degradê ordenadas por `at`, lados no formato mais curto (`[a, a, a, a]` → `a`; `[v, h, v, h]` → `[v, h]`), nome aparado (vazio sai), partes vizinhas com o mesmo estilo juntas (sem passar de 600 letras), arquivos que nenhum elemento usa fora de `assets`, `assets` e `fonts` sempre presentes (`fonts` recalculado) e chaves em ordem alfabética.
-- `version` do Livre só muda quando um documento velho deixar de valer. Campos novos (como `devices`, desde o PR L3, o contorno `stroke` e o marca-texto `mark`, desde o L6b, ou uma pintura nova) entram sem mudar a versão; uma imagem de antes do campo novo recusa, do mesmo jeito descrito a seguir, os designs que o usam. **Voltar o deploy** para uma imagem de antes do L3: designs salvos com `devices` ficam inválidos para o código antigo (somem para o aluno com o log acima e abrem como Padrão no editor) até a imagem nova voltar; com o código antigo no ar ninguém salva valores de Celular (`docs/20` §9, espelho do R1 do `docs/29`).
+- `version` do Livre só muda quando um documento velho deixar de valer. Campos novos (como `devices`, desde o PR L3, o contorno `stroke` e o marca-texto `mark`, desde o L6b, as cores ao passar o mouse `hover` no Botão e nos Links, desde o L6c, ou uma pintura nova) entram sem mudar a versão; uma imagem de antes do campo novo recusa, do mesmo jeito descrito a seguir, os designs que o usam. **Voltar o deploy** para uma imagem de antes do L3: designs salvos com `devices` ficam inválidos para o código antigo (somem para o aluno com o log acima e abrem como Padrão no editor) até a imagem nova voltar; com o código antigo no ar ninguém salva valores de Celular (`docs/20` §9, espelho do R1 do `docs/29`).
 - Toda medida está em **px da prancheta** na largura escolhida (`artboard.width`, 280 a 720). No celular o pop-up inteiro encolhe na mesma proporção (unidades `cqw` do próprio cartão), com duas proteções: texto nunca abaixo de 12 px e área de toque de 44 px nos botões, nos links e no X (invisível, não muda o desenho). Os valores próprios do celular (`devices.mobile`, §9.10) entram por cima do computador antes de encolher.
 - Arquivos: o design guarda **só o caminho** no nosso Storage. O endereço é montado na hora pelo cartão e pelo editor (`freeAssetUrl`): a origem conferida do nosso Supabase + o caminho público do bucket + um caminho que casou com o padrão do tipo.
 
@@ -373,7 +373,7 @@ Elementos (`type`):
 | `heading` (Título) | `lines` (1 a 4), `textStyle`; o primeiro visível é o `<h2>` e o nome do diálogo |
 | `text` (Texto) | `lines` (1 a 12), `textStyle`; o primeiro visível descreve o diálogo |
 | `badge` (Selo) | `label` (1 a 40), `icon`, `textStyle` |
-| `button` (Botão) | `action`: `{ "kind": "cta" }` (o botão principal: texto e destino no `cta` do aviso, sem `label`), `{ "kind": "close" }`, `{ "kind": "snooze" }` (Lembrar depois) ou `{ "kind": "link", "href": "...", "target": "same_tab" | "new_tab" }` (Abrir um link: até 3, cada um com o seu destino; o clique em qualquer um conta como o clique do pop-up); `label` (1 a 40, obrigatório fora do `cta`); `icon` (`{ "name", "side": "end" | "start" }`); `textStyle` |
+| `button` (Botão) | `action`: `{ "kind": "cta" }` (o botão principal: texto e destino no `cta` do aviso, sem `label`), `{ "kind": "close" }`, `{ "kind": "snooze" }` (Lembrar depois) ou `{ "kind": "link", "href": "...", "target": "same_tab" | "new_tab" }` (Abrir um link: até 3, cada um com o seu destino; o clique em qualquer um conta como o clique do pop-up); `label` (1 a 40, obrigatório fora do `cta`); `icon` (`{ "name", "side": "end" | "start" }`); `textStyle`; `hover` (as cores ao passar o mouse, veja abaixo da tabela) |
 | `image` (Imagem) | `asset` (id de uma imagem de `assets`, ou `null`: sem arquivo, a equipe envia no editor antes de publicar), `alt` (até 160; vazio = decorativa), `fit` (`cover` · `contain`), `focus` |
 | `video` (Vídeo) | `asset` (id do vídeo de `assets`, ou `null`: sem arquivo, a equipe envia no editor antes de publicar), `fit`, `focus`; toca sem som, em repetição; com menos movimento ou economia de dados, só a capa |
 | `icon` (Ícone) | `icon` (um dos 24 nomes abaixo), `size` (8 a 160), `stroke` (1 a 3), `color` |
@@ -381,8 +381,17 @@ Elementos (`type`):
 | `spacer` (Espaço) | `size` (0 a 400) |
 | `shape` (Forma e Degradê) | `shape` (`rect` · `ellipse`); o resto é `box` |
 | `audio` (Áudio) | nenhum: o player do áudio do aviso |
-| `links` (Links) | `dismiss` (mostra "Não mostrar de novo"; padrão `true`), `gap` (0 a 96), `textStyle`; "Lembrar depois" aparece sozinho quando o aluno pode adiar e não há botão Lembrar depois |
+| `links` (Links) | `dismiss` (mostra "Não mostrar de novo"; padrão `true`), `gap` (0 a 96), `textStyle`, `hover` (a cor ao passar o mouse, veja abaixo da tabela); "Lembrar depois" aparece sozinho quando o aluno pode adiar e não há botão Lembrar depois |
 | `box` (Caixa) | `children` (0 a 20), `layout`: `dir` (`column` · `row`), `gap` (0 a 96), `align` (`stretch` · `start` · `center` · `end`), `justify` (`start` · `center` · `end` · `between` · `around`), `wrap` |
+
+`hover` (as cores ao passar o mouse; o aluno que chega ao botão ou ao link pelo teclado vê as mesmas) só existe no Botão e nos Links, cada campo opcional:
+
+| Onde | Campos |
+|---|---|
+| `button` | `fill` (o fundo: uma pintura `solid`, `linear` ou `radial`, nunca `image`), `color` (a cor do texto), `borderColor` (a cor da borda; só aparece quando o botão tem `box.border`) |
+| `links` | `color` (a cor dos links) |
+
+Sem `hover`, o botão clareia um pouco quando o mouse passa. A cor do texto ao passar o mouse (`color`) só vai com a letra de cor sólida: no texto em degradê (`textStyle.paint` `linear` ou `radial`) ela não apareceria e é recusada; o fundo e a cor da borda valem com qualquer letra. Na tela de toque, sem mouse, as cores ao passar o mouse não aparecem.
 
 Ícones: `arrow-right`, `bell`, `book-open`, `calendar`, `check`, `chevron-right`, `circle-check`, `clock`, `crown`, `flame`, `gem`, `gift`, `graduation-cap`, `heart`, `lock-open`, `megaphone`, `percent`, `play`, `rocket`, `sparkles`, `star`, `tag`, `trophy`, `zap`.
 
@@ -419,6 +428,7 @@ Por dentro (só o editor e o servidor escrevem; fica fora das instruções para 
 | botão `icon.side` | `end` |
 | contorno (`stroke`) | sem contorno; na parte, o igual ao do elemento sai |
 | marca-texto `padding` / `radius` | `[2, 6]` / 4 |
+| cores ao passar o mouse (`hover`) | sem cores próprias (o botão clareia um pouco); `{}` sai |
 
 ### 9.5 Limites
 
@@ -446,7 +456,7 @@ Por dentro (só o editor e o servidor escrevem; fica fora das instruções para 
 
 ### 9.6 Regras entre partes e com o conteúdo do aviso
 
-Sempre (o schema confere ao colar e ao salvar): ids únicos; profundidade e contagens de 9.5 Limites; solto só na prancheta; `label` obrigatório fora do `cta` e proibido no `cta`; todo `asset` de elemento ou pintura existe em `assets` com o tipo certo; a capa do vídeo é uma imagem de `assets`;<!-- ia:fora --> o caminho casa com o padrão do bucket e o vídeo tem a extensão do tipo;<!-- /ia:fora --> o link do botão segue a regra do botão principal (página da área, produto ou https); cada linha tem pelo menos uma letra que não é espaço; até 4 fontes enviadas; o tamanho; o contorno só com a letra de cor sólida (no elemento, ou na parte pela pintura dela ou pela do elemento: `Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.`); e o **X sempre visível**: o alfa da cor do ícone do X é pelo menos `cc` e o contraste entre o ícone e o fundo do X (o fundo composto sobre a cor de base da prancheta, a camada de baixo do `fill`; com alfa, sobre preto) é pelo menos 3:1.
+Sempre (o schema confere ao colar e ao salvar): ids únicos; profundidade e contagens de 9.5 Limites; solto só na prancheta; `label` obrigatório fora do `cta` e proibido no `cta`; todo `asset` de elemento ou pintura existe em `assets` com o tipo certo; a capa do vídeo é uma imagem de `assets`;<!-- ia:fora --> o caminho casa com o padrão do bucket e o vídeo tem a extensão do tipo;<!-- /ia:fora --> o link do botão segue a regra do botão principal (página da área, produto ou https); cada linha tem pelo menos uma letra que não é espaço; até 4 fontes enviadas; o tamanho; o contorno só com a letra de cor sólida (no elemento, ou na parte pela pintura dela ou pela do elemento: `Com o texto em degradê, o contorno cobre a cor. Use uma cor sólida.`); `hover` só no Botão e nos Links (o fundo do botão só de cor ou degradê), e a cor do texto ao passar o mouse só com a letra de cor sólida (`Com o texto em degradê, a cor ao passar o mouse não muda o texto. Tire esta cor ou use uma cor sólida no texto.`); e o **X sempre visível**: o alfa da cor do ícone do X é pelo menos `cc` e o contraste entre o ícone e o fundo do X (o fundo composto sobre a cor de base da prancheta, a camada de baixo do `fill`; com alfa, sobre preto) é pelo menos 3:1.
 
 Com o conteúdo do aviso (no salvar e no publicar): aviso com botão pede o botão principal (`Falta o botão principal no design.`); botão principal sem botão no aviso (`Escreva o texto do botão e escolha para onde ele leva.` em `cta.label`); aviso com áudio pede o Áudio (`Falta o elemento Áudio no design.`); Áudio sem áudio no aviso (`Envie o áudio ou tire o elemento Áudio.` em `audio`); botão Lembrar depois com o adiar desligado; Imagem e Vídeo sem arquivo. "Quantas vezes → Quando o aluno clica no botão" vale quando o computador e o celular têm, cada um, um botão visível que conta como o clique: o botão principal (com o `cta`) ou qualquer "Abrir um link" com destino que vale; os botões podem ser outros em cada aparelho, e o escondido num aparelho não conta nele (o botão principal escondido no computador também não; veja 9.10 Celular). Sem isso: `Este pop-up não tem botão: escolha quando ele para de aparecer.`
 
@@ -456,7 +466,7 @@ No rascunho do aviso, `freeDesign` fica ao lado de `design` (o Personalizado): n
 
 ### 9.7 Chaves de erro
 
-O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`, `freeDesign.close.<campo>`, `freeDesign.assets.<id do arquivo>`, `freeDesign.fonts`, `freeDesign.size`, `freeDesign.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.nodes.botao.action.href` ou `freeDesign.nodes.titulo.lines.0.1.text`) e, no celular, `freeDesign.devices.mobile.artboard.<campo>` e `freeDesign.devices.mobile.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.devices.mobile.nodes.selo.place.x`; já vêm pelo id, sem índice). Os índices que o zod devolve (`freeDesign.children.3.children.0...`) viram ids por `freeErrorKey`/`freeErrorKeys`, estáveis se a ordem mudar; `freeNodeIdOfKey` acha o elemento nos dois formatos. O contorno e o marca-texto (L6b) seguem o mesmo caminho: `freeDesign.nodes.titulo.textStyle.stroke.width` (o contorno do elemento) e `freeDesign.nodes.titulo.lines.1.1.style.mark.padding` (o marca-texto de uma parte).
+O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`, `freeDesign.close.<campo>`, `freeDesign.assets.<id do arquivo>`, `freeDesign.fonts`, `freeDesign.size`, `freeDesign.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.nodes.botao.action.href` ou `freeDesign.nodes.titulo.lines.0.1.text`) e, no celular, `freeDesign.devices.mobile.artboard.<campo>` e `freeDesign.devices.mobile.nodes.<id do elemento>[.<caminho do campo>]` (por exemplo `freeDesign.devices.mobile.nodes.selo.place.x`; já vêm pelo id, sem índice). Os índices que o zod devolve (`freeDesign.children.3.children.0...`) viram ids por `freeErrorKey`/`freeErrorKeys`, estáveis se a ordem mudar; `freeNodeIdOfKey` acha o elemento nos dois formatos. O contorno e o marca-texto (L6b) seguem o mesmo caminho: `freeDesign.nodes.titulo.textStyle.stroke.width` (o contorno do elemento) e `freeDesign.nodes.titulo.lines.1.1.style.mark.padding` (o marca-texto de uma parte). As cores ao passar o mouse (L6c) também: `freeDesign.nodes.botao.hover.color` (a cor do texto, inclusive a recusada com o texto em degradê), `freeDesign.nodes.botao.hover.fill.stops` (o fundo) e `freeDesign.nodes.links.hover.color`; o `hover` num elemento que não é Botão nem Links dá a frase do design na chave do elemento (`freeDesign.nodes.<id>`), e dentro de `devices`, na do elemento no celular (`freeDesign.devices.mobile.nodes.<id>`).
 
 ### 9.8 Guia curto para a IA
 
@@ -470,6 +480,7 @@ O editor recebe: `freeDesign` (o design inteiro), `freeDesign.artboard.<campo>`,
 8. Fique bem abaixo do tamanho máximo: menos elementos e menos partes de texto.
 9. Só escreva `devices.mobile` quando pedirem algo só para o celular (veja 9.10 Celular), e só com o que muda; sem esse pedido, deixe `devices` de fora: o celular encolhe o desenho do computador sozinho.
 10. Contorno e marca-texto com moderação. O contorno só com a letra de cor sólida, nunca em degradê. O marca-texto vai em poucas palavras de destaque (uma ou duas por linha), com uma cor de letra que se leia sobre ele. O texto vazado (a letra com alfa `00`, como `#ffffff00`, e `stroke` com `width` 2 ou mais) só em palavras grandes do Título, nunca no texto que o aluno precisa ler para entender o aviso, no Selo ou nos botões.
+11. Cores ao passar o mouse (`hover`) só no Botão e nos Links, e só quando pedirem ou quando ajudarem: no botão, um fundo um pouco mais claro ou mais escuro que o de sempre, com o texto ainda fácil de ler; nos links, uma cor de destaque. A cor do texto ao passar o mouse só com a letra de cor sólida, e a cor da borda só no botão que tem borda. Sem `hover`, o botão já clareia um pouco sozinho.
 
 <!-- ia:fora -->
 `popupFreeJsonSchema()` (em `popup-free-json-schema.ts`, um módulo que nenhuma tela importa, §7) gera o JSON Schema da entrada (`z.toJSONSchema` com `io: "input"`; o elemento recursivo sai em `$defs`/`$ref`).
@@ -867,6 +878,49 @@ Forma canônica (padrões omitidos). O Vídeo e a Imagem dos modelos começam se
 }
 ```
 
+**Cores ao passar o mouse** (não é um modelo para começar: mostra a chave `hover`; o botão principal escurece num degradê, o "Agora não" de borda fina fica branco com o texto escuro e os links ficam brancos):
+
+```json
+{
+  "assets": [],
+  "children": [
+    { "id": "titulo", "lines": [[{ "text": "Aula ao vivo hoje às 20h" }]], "type": "heading" },
+    {
+      "id": "texto",
+      "lines": [[{ "text": "Traga suas dúvidas sobre o módulo 3." }]],
+      "textStyle": { "paint": { "color": "#d4d4d8", "kind": "solid" } },
+      "type": "text"
+    },
+    {
+      "children": [
+        {
+          "action": { "kind": "cta" },
+          "box": { "fill": [{ "color": "#e50914", "kind": "solid" }], "padding": [12, 24], "radius": 999 },
+          "hover": { "fill": { "angle": 90, "kind": "linear", "stops": [{ "at": 0, "color": "#e50914" }, { "at": 100, "color": "#b20710" }] } },
+          "id": "botao",
+          "type": "button"
+        },
+        {
+          "action": { "kind": "close" },
+          "box": { "border": { "color": "#ffffff40", "width": 1 }, "padding": [11, 20], "radius": 999 },
+          "hover": { "borderColor": "#ffffff", "color": "#111111", "fill": { "color": "#ffffff", "kind": "solid" } },
+          "id": "agoranao",
+          "label": "Agora não",
+          "type": "button"
+        }
+      ],
+      "id": "acoes",
+      "layout": { "dir": "row", "gap": 8, "wrap": true },
+      "type": "box"
+    },
+    { "hover": { "color": "#ffffff" }, "id": "links", "textStyle": { "paint": { "color": "#a1a1aa", "kind": "solid" } }, "type": "links" }
+  ],
+  "fonts": [],
+  "mode": "free",
+  "version": 1
+}
+```
+
 ### 9.10 Celular
 
 Na tela do aluno com até 767 px de largura (o celular; as prévias do editor de 375 px também), o pop-up usa o desenho do computador encolhido na mesma proporção, com o texto nunca abaixo de 12 px. Quando algo precisa ser diferente só no celular (um título menor, um selo em outro lugar, uma imagem escondida), a raiz ganha `devices.mobile` só com o que muda. Medidas em px da prancheta, como no computador: o encolher e o piso de 12 px continuam valendo por cima. `version` continua `1`.
@@ -889,6 +943,7 @@ Na tela do aluno com até 767 px de largura (o celular; as prévias do editor de
 Regras:
 
 - Cores, textos, pinturas, fundos, bordas, sombras, fontes, contorno, marca-texto, camada (`z`) e girar (`rotate`) são os mesmos no computador e no celular: não têm versão do celular (o contorno e o respiro do marca-texto encolhem junto com o resto).
+- As cores ao passar o mouse (`hover`) também não têm versão do celular: um `hover` dentro de `devices.mobile.nodes` é recusado. Valem iguais em toda tela com mouse e no teclado; na tela de toque não aparecem.
 - Cada parte entra campo a campo por cima da do computador: `{ "place": { "mode": "free", "x": 24 } }` muda só o X; o Y, a largura, a altura, a camada e o girar continuam os do computador. `size`, `gap` e `hidden` trocam o valor inteiro.
 - Um elemento solto continua solto no celular e um da sequência continua na sequência: um `place` com outro `mode` é recusado (`No celular, o elemento fica como no computador: solto continua solto e na sequência continua na sequência.`). Campo fora desta lista (ou de outro tipo, como `size` num Título) é recusado.
 - Um id que não existe, um objeto vazio e um valor igual ao do computador saem sozinhos (a forma canônica); sem nada que mude, `devices` sai.

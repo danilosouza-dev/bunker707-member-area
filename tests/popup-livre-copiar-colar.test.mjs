@@ -1051,3 +1051,142 @@ test("L6b: as instruções para a IA trazem o contorno e o marca-texto, o guia d
   assert.equal(vazados.length, 1);
   assert.ok(vazados[0].style.stroke.width >= 2);
 });
+
+/* ------------------------------------------------------------------------------------------------
+ * L6c: cores ao passar o mouse no copiar e colar e nas instruções para a IA
+ * ---------------------------------------------------------------------------------------------- */
+
+const ESCURECE = { angle: 90, kind: "linear", stops: [{ at: 0, color: "#e50914" }, { at: 100, color: "#b20710" }] };
+
+test("L6c: copiar e colar devolve o mesmo design com as cores ao passar o mouse; colado fora da forma, sai canônico", () => {
+  const value = valid({
+    children: [
+      { id: "titulo", lines: [[{ text: "Aula ao vivo hoje" }]], type: "heading" },
+      { action: { kind: "cta" }, box: { fill: [{ color: "#e50914", kind: "solid" }], radius: 999 }, hover: { fill: ESCURECE }, id: "botao", type: "button" },
+      {
+        action: { kind: "close" },
+        box: { border: { color: "#ffffff40", width: 1 } },
+        hover: { borderColor: "#ffffff", color: "#111111", fill: { color: "#ffffff", kind: "solid" } },
+        id: "agoranao",
+        label: "Agora não",
+        name: "Botão de sair",
+        type: "button"
+      },
+      { hover: { color: "#ffffff" }, id: "links", textStyle: { paint: { color: "#a1a1aa", kind: "solid" } }, type: "links" }
+    ],
+    mode: "free",
+    version: 1
+  });
+  const text = paste.freeDesignClipboardText(value);
+
+  assert.equal(text.match(/"hover": \{/g)?.length, 3);
+
+  const result = paste.parseFreeDesignPaste(text, context());
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.design, value, "o mesmo design");
+  assert.deepEqual(result.notes, []);
+  assert.equal(paste.freeDesignClipboardText(result.design), text, "copiar de novo dá o mesmo texto");
+
+  // A IA escreve com as cores em maiúsculas, o ângulo padrão, as paradas fora de ordem e um hover vazio: sai canônico.
+  const loose = {
+    children: [
+      { action: { kind: "cta" }, hover: { color: "#FFFFFF", fill: { angle: 180, kind: "linear", stops: [{ at: 100, color: "#B20710" }, { at: 0, color: "#E50914" }] } }, id: "botao", type: "button" },
+      { hover: {}, id: "links", type: "links" }
+    ],
+    mode: "free",
+    version: 1
+  };
+  const pasted = paste.parseFreeDesignPaste(`\`\`\`json\n${JSON.stringify(loose)}\n\`\`\``, context());
+
+  assert.equal(pasted.ok, true, JSON.stringify(pasted));
+  assert.deepEqual(pasted.design.children, [
+    { action: { kind: "cta" }, hover: { color: "#ffffff", fill: { kind: "linear", stops: [{ at: 0, color: "#e50914" }, { at: 100, color: "#b20710" }] } }, id: "botao", type: "button" },
+    { id: "links", type: "links" }
+  ], "cores em minúsculas, sem o ângulo padrão e sem o objeto vazio");
+
+  // Erros: a frase diz o elemento; o texto em degradê recusa a cor do texto; fora do Botão e dos Links e no celular, não existe.
+  const gradient = paste.parseFreeDesignPaste(
+    JSON.stringify({
+      children: [
+        { action: { kind: "cta" }, hover: { color: "#ffffff" }, id: "botao", name: "Botão grande", textStyle: { paint: ESCURECE }, type: "button" },
+        { id: "links", type: "links" }
+      ],
+      mode: "free",
+      version: 1
+    }),
+    context()
+  );
+
+  assert.equal(gradient.ok, false);
+  assert.deepEqual(gradient.errors, [P.invalid, `“Botão grande”: ${schema.POPUP_FREE_MESSAGES.hoverGradient}`]);
+
+  const broken = paste.parseFreeDesignPaste(
+    JSON.stringify({
+      children: [
+        { hover: { color: "#ffffff" }, id: "titulo", lines: [[{ text: "Oi" }]], name: "Título grande", type: "heading" },
+        { action: { kind: "cta" }, hover: { fill: { asset: "capa", kind: "image" } }, id: "botao", name: "Botão grande", type: "button" },
+        { hover: { fill: { color: "#000000", kind: "solid" } }, id: "links", type: "links" }
+      ],
+      devices: { mobile: { nodes: { botao: { hover: { color: "#000000" } } } } },
+      mode: "free",
+      version: 1
+    }),
+    context()
+  );
+
+  assert.equal(broken.ok, false);
+  assert.equal(broken.errors[0], P.invalid);
+
+  for (const line of [
+    `“Título grande”: ${schema.POPUP_FREE_MESSAGES.design}`,
+    `“Botão grande”: ${schema.POPUP_FREE_MESSAGES.paint}`,
+    `“links”: ${schema.POPUP_FREE_MESSAGES.design}`,
+    `“Botão grande”, no celular: ${schema.POPUP_FREE_MESSAGES.design}`
+  ]) {
+    assert.ok(broken.errors.includes(line), `${line}: ${JSON.stringify(broken.errors)}`);
+  }
+
+  // As frases novas em português simples: nada de "hover" nem das palavras proibidas.
+  for (const message of [schema.POPUP_FREE_MESSAGES.hover, schema.POPUP_FREE_MESSAGES.hoverGradient]) {
+    assert.equal(PROIBIDAS.test(message), false, message);
+    assert.doesNotMatch(message, /\bhover\b/i, "na frase, ao passar o mouse");
+  }
+});
+
+test("L6c: as instruções para a IA trazem as cores ao passar o mouse, o guia e o exemplo, sem código", async () => {
+  // O arquivo gerado (o teste das instruções acima confere que ele é o do docs/27 §9).
+  const { FREE_AI_INSTRUCTIONS } = await import("../src/components/admin/v2/communication/popup-free/free-ai-instructions.ts");
+
+  // O contrato (9.3), os padrões (9.4), as regras (9.6), o celular (9.10) e o guia (9.8).
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("`hover` (as cores ao passar o mouse; o aluno que chega ao botão ou ao link pelo teclado vê as mesmas) só existe no Botão e nos Links"), "a chave");
+  assert.ok(
+    FREE_AI_INSTRUCTIONS.includes("| `button` | `fill` (o fundo: uma pintura `solid`, `linear` ou `radial`, nunca `image`), `color` (a cor do texto), `borderColor` (a cor da borda; só aparece quando o botão tem `box.border`) |"),
+    "o Botão"
+  );
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("| `links` | `color` (a cor dos links) |"), "os Links");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("`textStyle`; `hover` (as cores ao passar o mouse, veja abaixo da tabela) |"), "na linha do Botão");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("`textStyle`, `hover` (a cor ao passar o mouse, veja abaixo da tabela);"), "na linha dos Links");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("| cores ao passar o mouse (`hover`) | sem cores próprias (o botão clareia um pouco); `{}` sai |"), "o padrão");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes(`a cor do texto ao passar o mouse só com a letra de cor sólida (\`${schema.POPUP_FREE_MESSAGES.hoverGradient}\`)`), "a regra do texto em degradê, com a frase");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("- As cores ao passar o mouse (`hover`) também não têm versão do celular: um `hover` dentro de `devices.mobile.nodes` é recusado."), "nada disso no celular");
+  assert.ok(FREE_AI_INSTRUCTIONS.includes("fontes, contorno, marca-texto, camada (`z`) e girar (`rotate`) são os mesmos no computador e no celular"), "a regra do L6b continua");
+  assert.match(FREE_AI_INSTRUCTIONS, /\n11\. Cores ao passar o mouse \(`hover`\) só no Botão e nos Links, [^\n]*a cor da borda só no botão que tem borda\. Sem `hover`, o botão já clareia um pouco sozinho\.\n/, "o guia");
+  assert.ok(FREE_AI_INSTRUCTIONS.indexOf("**Cores ao passar o mouse**") > FREE_AI_INSTRUCTIONS.indexOf("**Contorno e marca-texto**"), "o exemplo depois do do contorno");
+  assert.ok(FREE_AI_INSTRUCTIONS.indexOf("**Cores ao passar o mouse**") < FREE_AI_INSTRUCTIONS.indexOf("### 9.10 "), "antes da 9.10");
+
+  // Só o contrato: nada do código, do cartão, do banco nem o nome das entregas (o L6c fica no docs, fora das instruções).
+  assert.doesNotMatch(FREE_AI_INSTRUCTIONS, /\bL6[a-g]\b/);
+  assert.doesNotMatch(FREE_AI_INSTRUCTIONS, /servidor|data-free|important|canonicalHover|FreeButtonHover|FreeLinksHover|hoverGradient|focus-visible/);
+
+  // O exemplo cola de volta igual e mostra as três formas: o fundo em degradê, o botão de borda e os Links.
+  const example = [...FREE_AI_INSTRUCTIONS.matchAll(/```json\n([\s\S]*?)```/g)].map((match) => match[1]).find((block) => block.includes('"hover"'));
+  const result = paste.parseFreeDesignPaste(example, context());
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.design, JSON.parse(example), "na forma canônica");
+  assert.equal(model.findFreeNode(result.design, "botao").node.hover.fill.kind, "linear");
+  assert.deepEqual(Object.keys(model.findFreeNode(result.design, "agoranao").node.hover), ["borderColor", "color", "fill"]);
+  assert.ok(model.findFreeNode(result.design, "agoranao").node.box.border, "a cor da borda só no botão que tem borda");
+  assert.deepEqual(model.findFreeNode(result.design, "links").node.hover, { color: "#ffffff" });
+});

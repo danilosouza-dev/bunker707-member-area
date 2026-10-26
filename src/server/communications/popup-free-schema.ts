@@ -55,6 +55,8 @@ export const POPUP_FREE_MESSAGES = {
   freeNodes: `Use até ${L.freeNodes} elementos soltos.`,
   freeOnlyRoot: "Só elementos fora de caixas podem ficar soltos.",
   headings: `Use até ${L.headings} títulos.`,
+  hover: "Escolha as cores ao passar o mouse.",
+  hoverGradient: "Com o texto em degradê, a cor ao passar o mouse não muda o texto. Tire esta cor ou use uma cor sólida no texto.",
   href: "Escolha para onde o botão leva.",
   icon: "Escolha um ícone da lista.",
   icons: `Use até ${L.icons} ícones.`,
@@ -233,6 +235,12 @@ const span = strict({
   text: z.string({ error: M.spanEmpty }).min(1, M.spanEmpty).max(L.spanText, `Use até ${L.spanText} letras.`)
 });
 const line = z.array(span, { error: M.spanEmpty }).min(1, M.spanEmpty).max(L.spansPerLine, `Use até ${L.spansPerLine} partes por linha.`);
+/**
+ * Cores ao passar o mouse e no foco pelo teclado (L6c): so no Botao (o fundo de cor ou degrade, nunca imagem; a cor do
+ * texto; a cor da borda) e nos Links (a cor). Nunca no celular: o objeto do celular e estrito e nao tem a chave.
+ */
+const buttonHover = strict({ borderColor: hex.optional(), color: hex.optional(), fill: textPaint.optional() }, M.hover);
+const linksHover = strict({ color: hex.optional() }, M.hover);
 const icon = z.enum(FREE_ICON_NAMES, { error: M.icon });
 const common = {
   box: box.optional(),
@@ -280,6 +288,7 @@ export const freeNodeSchema: z.ZodType<FreeNode> = z.discriminatedUnion(
     strict({
       ...common,
       action: buttonAction,
+      hover: buttonHover.optional(),
       icon: strict({ name: icon, side: z.enum(["end", "start"], { error: "Escolha o lado do ícone." }).optional() }).optional(),
       label: label.optional(),
       textStyle: textStyle.optional(),
@@ -299,7 +308,7 @@ export const freeNodeSchema: z.ZodType<FreeNode> = z.discriminatedUnion(
     strict({ ...common, size: intIn(L.spacer).optional(), type: z.literal("spacer") }),
     strict({ ...common, shape: z.enum(["ellipse", "rect"], { error: "Escolha o formato." }).optional(), type: z.literal("shape") }),
     strict({ ...common, type: z.literal("audio") }),
-    strict({ ...common, dismiss: bool.optional(), gap: intIn(L.gap).optional(), textStyle: textStyle.optional(), type: z.literal("links") }),
+    strict({ ...common, dismiss: bool.optional(), gap: intIn(L.gap).optional(), hover: linksHover.optional(), textStyle: textStyle.optional(), type: z.literal("links") }),
     boxNode
   ],
   { error: M.nodeType }
@@ -464,9 +473,18 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
     }
   };
 
+  // A cor do texto ao passar o mouse so com a letra de cor solida (L6c): no Botao e nos Links em degrade, a letra e um
+  // fundo recortado pelas letras e a cor nao aparece nela. A chave e a da cor ao passar o mouse; o fundo e a cor da
+  // borda continuam valendo com o texto em degrade.
+  const checkHover = (node: FreeNode, at: Path) => {
+    if ((node.type === "button" || node.type === "links") && node.hover?.color !== undefined && node.textStyle?.paint && node.textStyle.paint.kind !== "solid") {
+      issue(M.hoverGradient, [...at, "hover", "color"]);
+    }
+  };
+
   checkFill(design.artboard?.fill, ["artboard", "fill"]);
 
-  const walk = (nodes: readonly FreeNode[], depth: number, path: Path) => {
+  const walk =(nodes: readonly FreeNode[], depth: number, path: Path) => {
     nodes.forEach((node, index) => {
       const at: Path = [...path, index];
 
@@ -499,6 +517,7 @@ function addFreeDesignIssues(design: PopupFreeDesignInput, context: z.Refinement
 
       checkFill(node.box?.fill, [...at, "box", "fill"]);
       checkStroke(node, at);
+      checkHover(node, at);
 
       switch (node.type) {
         case "heading":
