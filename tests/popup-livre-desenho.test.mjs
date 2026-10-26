@@ -766,27 +766,69 @@ test("marca-texto: fundo, respiro e cantos em cqw, um fundo por linha; com degra
       { id: "links", type: "links" }
     ]
   });
-  const solid = `<span style="color:#111111;${markCss("#e5ff1f")}">revisão</span>`;
+  const solid = `<span style="color:#111111;${markCss("#e5ff1f")}"><span style="position:relative">revisão</span></span>`;
   const markup = card(design);
 
-  assert.ok(markup.includes(solid), "cor sólida: um span só, com a cor e o marca-texto");
+  assert.ok(markup.includes(solid), "cor sólida: o de fora com a cor e o marca-texto, o de dentro com as letras");
   assert.ok(card(design, { preview: true }).includes(solid), "na prévia do editor, o mesmo desenho");
   assert.ok(
     markup.includes(
-      `<span class="${SELECTION}" style="font-size:${render.freeFontSize(48, W)};text-decoration-line:underline;text-decoration-color:#c084fc;${markCss("#000000", [4, 10], 12)}"><span style="${GRADIENT_TEXT_CSS}">ao vivo</span></span>`
+      `<span class="${SELECTION}" style="font-size:${render.freeFontSize(48, W)};text-decoration-line:underline;text-decoration-color:#c084fc;${markCss("#000000", [4, 10], 12)}"><span style="${GRADIENT_TEXT_CSS};position:relative">ao vivo</span></span>`
     ),
     "degradê da parte: o de fora com o tamanho, a linha e o marca-texto (a caixa do tamanho da letra); o de dentro só a pintura"
   );
   assert.ok(
-    markup.includes(`<span class="${SELECTION}" style="${GRADIENT_TEXT_CSS}">Tudo </span><span class="${SELECTION}" style="${markCss("#ffffff26")}"><span style="${GRADIENT_TEXT_CSS}">em destaque</span></span>`),
+    markup.includes(
+      `<span class="${SELECTION}" style="${GRADIENT_TEXT_CSS};position:relative">Tudo </span><span class="${SELECTION}" style="${markCss("#ffffff26")}"><span style="${GRADIENT_TEXT_CSS};position:relative">em destaque</span></span>`
+    ),
     "degradê do elemento: só a parte com marca-texto se divide"
   );
 
-  const parts = styles.freeSpanParts({ mark: { color: "#ffffff26" } }, render.freeTextStyleOf(design.children[1]), { faces: [], width: W });
+  const parts = styles.freeSpanParts({ mark: { color: "#ffffff26" } }, render.freeTextStyleOf(design.children[1]), { faces: [], width: W }, true);
 
-  assert.deepEqual(parts.inner, styles.freeTextPaintCss(GRADIENT_PAINT));
+  assert.deepEqual(parts.inner, { ...styles.freeTextPaintCss(GRADIENT_PAINT), position: "relative" });
   assert.equal(parts.outer.backgroundClip, undefined, "o fundo do span de fora é o marca-texto, nunca o recorte das letras");
   assert.equal(parts.select, true);
+});
+
+test("marca-texto: as letras de todo o elemento ficam acima dos fundos (o marca-texto de baixo não cobre o pé das letras de cima)", () => {
+  const ctx = { faces: [], width: W };
+  const element = render.freeTextStyleOf({ id: "t", type: "heading" });
+
+  // Sem marca-texto no elemento: o desenho de antes (nenhuma posição nova).
+  assert.equal(styles.freeSpanParts(undefined, element, ctx).outer, undefined);
+  assert.deepEqual(styles.freeSpanParts({ paint: { color: "#e5ff1f", kind: "solid" } }, element, ctx).outer, { color: "#e5ff1f" });
+  // Com marca-texto em alguma parte (`lift`): a parte sem marca-texto ganha a posição no próprio span.
+  assert.deepEqual(styles.freeSpanParts(undefined, element, ctx, true), { inner: undefined, outer: { position: "relative" }, select: false });
+  assert.deepEqual(styles.freeSpanParts({ paint: GRADIENT_PAINT }, element, ctx, true).outer, { ...styles.freeTextPaintCss(GRADIENT_PAINT), position: "relative" });
+
+  // A parte com marca-texto: o fundo no de fora, sem posição (pintado com o texto em linha), e as letras no de dentro,
+  // com posição (pintadas depois de todos os fundos).
+  const marked = styles.freeSpanParts({ mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } }, element, ctx, true);
+
+  assert.deepEqual(marked.inner, { position: "relative" });
+  assert.equal(marked.outer.position, undefined);
+  assert.equal(marked.outer.backgroundColor, "#e5ff1f");
+  assert.equal(marked.outer.color, "#111111", "a cor sólida fica no de fora e o de dentro herda");
+
+  const design = parsed({
+    children: [
+      { id: "titulo", lines: [[{ text: "Aprenda prática hoje" }], [{ style: { mark: { color: "#e5ff1f" }, paint: { color: "#111111", kind: "solid" } }, text: "Semana gratuita" }]], textStyle: { lineHeight: 0.95, size: 40 }, type: "heading" },
+      { id: "texto", lines: [[{ text: "Sem " }, { style: { paint: { color: "#e5ff1f", kind: "solid" } }, text: "marca-texto" }]], type: "text" },
+      { id: "links", type: "links" }
+    ]
+  });
+  const markup = card(design);
+
+  assert.ok(
+    markup.includes(
+      `<span style="display:block"><span style="position:relative">Aprenda prática hoje</span></span> <span style="display:block"><span style="color:#111111;${markCss("#e5ff1f")}"><span style="position:relative">Semana gratuita</span></span></span>`
+    ),
+    "a linha de cima sobe junto com as letras do marca-texto"
+  );
+  assert.ok(markup.includes(`<span>Sem </span><span style="color:#e5ff1f">marca-texto</span>`), "o Texto sem marca-texto continua como antes");
+  assert.doesNotMatch(nodeHtml(design, "texto"), /<span[^>]*position:relative/, "nenhum span com posição sem marca-texto no elemento");
+  assert.ok(card(design, { device: "mobile" }).includes(`<span style="position:relative">Aprenda prática hoje</span>`), "no celular, o mesmo");
 });
 
 test("a linha própria de uma parte em degradê usa a primeira parada; com cor sólida fica como antes (pendência do L6a)", () => {

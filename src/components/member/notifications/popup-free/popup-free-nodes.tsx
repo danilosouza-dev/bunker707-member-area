@@ -117,10 +117,16 @@ export function freeRenderContextOf(input: {
 const ACTION_CLASS = cn(FREE_TOUCH_CLASS, FREE_FOCUS_CLASS, FREE_PRESS_CLASS, "select-none");
 const LINK_CLASS = cn(FREE_TOUCH_CLASS, FREE_FOCUS_CLASS, "rounded-sm underline-offset-4 hover:underline");
 
-/** As partes de uma linha: um span cada; com marca-texto e degrade, o de dentro leva so a pintura (freeSpanParts). */
-function FreeSpans({ ctx, line, text }: { ctx: FreeRenderContext; line: FreeLine; text: FreeResolvedTextStyle }) {
+/** Alguma parte do Titulo ou do Texto tem marca-texto: as letras sobem acima dos fundos (`lift` de freeSpanParts). */
+const hasMark = (lines: readonly FreeLine[]) => lines.some((line) => line.some((span) => span.style?.mark));
+
+/**
+ * As partes de uma linha: um span cada; com marca-texto, o de dentro leva as letras (com o degrade, se houver) e,
+ * com `lift`, todas as letras ficam acima dos fundos do marca-texto (freeSpanParts).
+ */
+function FreeSpans({ ctx, lift, line, text }: { ctx: FreeRenderContext; lift: boolean; line: FreeLine; text: FreeResolvedTextStyle }) {
   return line.map((span, index) => {
-    const { inner, outer, select } = freeSpanParts(span.style, text, ctx.style);
+    const { inner, outer, select } = freeSpanParts(span.style, text, ctx.style, lift);
 
     return (
       <span className={select ? FREE_GRADIENT_SELECTION_CLASS : undefined} key={index} style={outer}>
@@ -306,7 +312,7 @@ export function FreeNodeView({ ctx, node, parentDir }: { ctx: FreeRenderContext;
             <Fragment key={index}>
               {index > 0 ? " " : null}
               <span style={FREE_HEADING_LINE_CSS}>
-                <FreeSpans ctx={ctx} line={line} text={text} />
+                <FreeSpans ctx={ctx} lift={hasMark(node.lines)} line={line} text={text} />
               </span>
             </Fragment>
           ))}
@@ -322,7 +328,7 @@ export function FreeNodeView({ ctx, node, parentDir }: { ctx: FreeRenderContext;
           {node.lines.map((line, index) => (
             <Fragment key={index}>
               {index > 0 ? <br /> : null}
-              <FreeSpans ctx={ctx} line={line} text={text} />
+              <FreeSpans ctx={ctx} lift={hasMark(node.lines)} line={line} text={text} />
             </Fragment>
           ))}
         </p>

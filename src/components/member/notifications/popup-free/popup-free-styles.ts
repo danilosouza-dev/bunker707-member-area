@@ -540,10 +540,14 @@ export function freeTextCss(style: FreeResolvedTextStyle, ctx: Pick<FreeStyleCon
 /**
  * Uma parte do texto: o que ela muda (cor ou degrade, fonte, tamanho, peso, italico, letras, maiusculas, linha,
  * contorno, marca-texto).
- * - `outer`: o span da parte. Sem marca-texto e o estilo de antes do L6b (o HTML nao muda); degrade (da parte ou do
- *   elemento) = background-clip: text no proprio span.
- * - `inner`: so com marca-texto E degrade, que disputariam o fundo do span: o de fora leva a fonte e o marca-texto
- *   (a caixa do tamanho da letra) e o de dentro so a pintura recortada pelas letras.
+ * - `outer`: o span da parte. Sem marca-texto no elemento e o estilo de antes do L6b (o HTML nao muda); degrade (da
+ *   parte ou do elemento) = background-clip: text no proprio span.
+ * - `inner`: so com marca-texto. O de fora leva a fonte e o marca-texto (a caixa do tamanho da letra) e o de dentro
+ *   as letras, com o degrade (que disputaria o fundo do span).
+ * - `lift` (o elemento tem marca-texto em alguma parte; o cartao sempre passa com marca-texto): as letras de toda
+ *   parte ficam num span com `position: relative` (o de dentro, na parte com marca-texto), pintado depois de todos
+ *   os fundos em linha do elemento, entao o marca-texto de uma linha de baixo nunca cobre o pe das letras de cima
+ *   (p, j, g). O fundo do marca-texto fica no span de fora, sem posicao.
  * - A linha propria da parte em degrade usa a primeira parada (a letra transparente apagaria a linha; a linha do
  *   elemento inteiro ja vem do <h2>/<p>, que tem a primeira cor).
  * - `select`: a classe da cor de selecao com degrade ou contorno (o texto transparente ou vazado sumiria selecionado).
@@ -551,12 +555,14 @@ export function freeTextCss(style: FreeResolvedTextStyle, ctx: Pick<FreeStyleCon
 export function freeSpanParts(
   span: FreeSpanStyle | undefined,
   element: FreeResolvedTextStyle,
-  ctx: Pick<FreeStyleContext, "faces" | "width">
+  ctx: Pick<FreeStyleContext, "faces" | "width">,
+  lift = false
 ): { inner: CSSProperties | undefined; outer: CSSProperties | undefined; select: boolean } {
   const paint = span?.paint ?? element.paint;
   const gradient = paint.kind !== "solid";
-  const inner = gradient && span?.mark ? freeTextPaintCss(paint) : undefined;
-  const css: CSSProperties = inner ? {} : gradient ? freeTextPaintCss(paint) : span?.paint ? { color: paint.color } : {};
+  const mark = span?.mark;
+  const inner: CSSProperties | undefined = mark && (gradient ? freeTextPaintCss(paint) : {});
+  const css: CSSProperties = gradient ? (mark ? {} : freeTextPaintCss(paint)) : span?.paint ? { color: paint.color } : {};
 
   if (span) {
     if (span.font) {
@@ -592,7 +598,11 @@ export function freeSpanParts(
       }
     }
 
-    Object.assign(css, freeTextStrokeCss(span.stroke, ctx.width), span.mark && freeMarkCss(span.mark, ctx.width));
+    Object.assign(css, freeTextStrokeCss(span.stroke, ctx.width), mark && freeMarkCss(mark, ctx.width));
+  }
+
+  if (lift) {
+    (inner ?? css).position = "relative";
   }
 
   return { inner, outer: Object.keys(css).length > 0 ? css : undefined, select: gradient || !!(span?.stroke ?? element.stroke) };
