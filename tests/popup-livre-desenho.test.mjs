@@ -779,10 +779,10 @@ test("o player do Áudio dentro de uma Caixa recebe clique", () => {
   assert.doesNotMatch(card(design), /data-free-id="audio"/, "sem audio no aviso, o elemento nao aparece");
 });
 
-test("botões, links e o X levam as classes de foco visível", () => {
+test("botões, links e o X levam as classes de foco visível; o anel vence a sombra própria do botão", () => {
   const design = parsed({
     children: [
-      { action: { kind: "cta" }, id: "botao", type: "button" },
+      { action: { kind: "cta" }, box: { shadows: [{ blur: 0, color: "#9db300", spread: 0, x: 0, y: 3 }] }, id: "botao", type: "button" },
       { action: { kind: "close" }, id: "fechar", label: "Agora não", type: "button" },
       { action: { href: "https://exemplo.com.br/oferta", kind: "link", target: "new_tab" }, id: "link", label: "Ver página", type: "button" },
       { id: "links", type: "links" }
@@ -797,8 +797,15 @@ test("botões, links e o X levam as classes de foco visível", () => {
     assert.match(className, /focus-visible:outline-2/);
     assert.match(className, /focus-visible:outline-offset-\[-2px\]/, "por dentro: a prancheta corta o que passa dela");
     assert.match(className, /focus-visible:outline-white/);
+    // A sombra propria do botao vai no estilo em linha, que vencia o anel montado pelas variaveis --tw-* (o anel
+    // sumia): agora o anel e o box-shadow inteiro com !important e toma o lugar da sombra no foco por teclado.
+    // (Sem classes de exemplo nos comentarios: o Tailwind le os testes e geraria regras para elas.)
+    assert.match(className, /(^| )focus-visible:\[box-shadow:inset_0_0_0_4px_#000000b3\]!( |$)/, "o anel com !important");
+    assert.doesNotMatch(className, /focus-visible:shadow-/, "nada pelo --tw-shadow, que o estilo em linha vence");
     assert.match(className, /before:min-h-11 before:min-w-11/, "44 px de toque");
   }
+
+  assert.match(styleOfId(markup, "botao"), /box-shadow:0px 0\.6818cqw 0px 0px #9db300/, "a sombra propria fica no estilo em linha");
 
   assert.match(markup, /<a class="[^"]*hover:brightness-110[^"]*" data-free-button="link" data-free-id="link" href="https:\/\/exemplo\.com\.br\/oferta"[^>]*rel="noopener noreferrer" target="_blank">[\s\S]*?<span class="sr-only"> \(abre em nova aba\)<\/span><\/a>/);
   assert.match(markup, /<a class="[^"]*" data-free-button="cta" data-free-id="botao" href="\/minhas-compras"/);
@@ -1342,7 +1349,8 @@ test("HTML do Padrão e do Personalizado igual ao de antes do Livre", () => {
 
 // Os mesmos casos que geraram tests/fixtures/popup-livre/antes-celular-livre.html no commit-base 55a8cc0 (antes de o
 // cartao desenhar os valores do celular): os modelos para comecar e o modelo com video, no aluno e na previa. Gerada
-// de novo no L6a (docs/27 §8), so com os consertos do cartao: os Links sem text-decoration-line:none em linha.
+// de novo no L6a (docs/27 §8), so com os consertos do cartao: os Links sem text-decoration-line:none em linha e o
+// anel de foco pelo box-shadow inteiro com !important (FREE_FOCUS_CLASS).
 async function livreBeforeCases() {
   const starters = await import("../src/server/communications/popup-free-starters.ts");
   const cases = [];
